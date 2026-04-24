@@ -1,0 +1,10 @@
+.release_venv/
+build/
+dist/
+__pycache__/
+PythonModule/__pycache__/
+*.pyc
+.settings/
+output/
+favorites/
+workflow_templates/

@@ -1,0 +1,21 @@
+# GPR_GUI development/test environment (Day1-Day2 hardening)
+# Install: python3 -m pip install -r requirements-dev.txt
+
+# Core numerical stack
+numpy>=1.24,<3
+pandas>=2.0,<3
+scipy>=1.10,<2
+matplotlib>=3.7,<4
+h5py>=3.10,<4
+PyWavelets>=1.5,<2
+
+# GUI runtime (project currently uses PyQt6)
+PyQt6>=6.6,<7
+PyQt6-Fluent-Widgets[full]>=1.8,<2
+
+# Optional themes (legacy fallback)
+qt-material>=2.14
+qdarkstyle>=3.2
+
+# Test/dev
+pytest>=8.0,<9
