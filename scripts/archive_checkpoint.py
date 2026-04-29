@@ -14,8 +14,8 @@ import re
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_VAULT_PATH = Path(r"D:\ClawX-Data\Obsidian\uav_gpr")
-DEFAULT_NOTE_DIR = Path("01-项目/版本归档")
-DEFAULT_INDEX_NOTE = Path("01-项目/版本归档索引.md")
+DEFAULT_NOTE_DIR = Path("40-归档与历史/版本快照")
+DEFAULT_INDEX_NOTE = Path("40-归档与历史/版本归档索引.md")
 
 
 def _run_git(args: list[str]) -> str:

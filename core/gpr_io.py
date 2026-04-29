@@ -14,6 +14,7 @@ Date: 2026-03-31
 
 from __future__ import annotations
 
+import importlib
 import os
 import re
 import sys
@@ -170,13 +171,19 @@ def auto_load_data(path: str, **kwargs) -> Dict[str, Any]:
 
 
 def extract_airborne_csv_payload(
-    raw_data: np.ndarray, header_info: dict[str, Any] | None
+    raw_data: np.ndarray,
+    header_info: dict[str, Any] | None,
+    *,
+    trace_timestamps_s: np.ndarray | None = None,
+    rtk_path: str | Path | None = None,
+    imu_path: str | Path | None = None,
 ) -> tuple[np.ndarray, dict[str, np.ndarray] | None, dict[str, Any] | None]:
     """Extract amplitude matrix and per-trace airborne metadata from imported CSV.
 
     Supported primary airborne format:
     - first 4 lines header
     - then rows of: longitude, latitude, ground elevation, amplitude, flight height
+    - optional sixth column: explicit trace timestamp in seconds
     - rows are stacked trace-by-trace, each trace containing `samples` rows
     """
     arr = np.asarray(raw_data)
@@ -203,8 +210,16 @@ def extract_airborne_csv_payload(
                 metadata = _extract_trace_metadata_from_stacked_rows(
                     use_rows, samples, traces
                 )
+                if trace_timestamps_s is None and "trace_timestamp_s" in metadata:
+                    trace_timestamps_s = metadata["trace_timestamp_s"]
                 if header_info and "total_time_ns" in header_info:
                     metadata["time_window_ns"] = float(header_info["total_time_ns"])
+                metadata = _integrate_optional_airborne_sidecars(
+                    metadata,
+                    trace_timestamps_s=trace_timestamps_s,
+                    rtk_path=rtk_path,
+                    imu_path=imu_path,
+                )
                 if updated_header is None:
                     updated_header = {}
                 updated_header.update(_build_airborne_header_summary(metadata))
@@ -222,6 +237,28 @@ def extract_airborne_csv_payload(
 
     data = arr.astype(np.float32, copy=False)
     return data, metadata, updated_header
+
+
+def _integrate_optional_airborne_sidecars(
+    metadata: dict[str, np.ndarray] | None,
+    *,
+    trace_timestamps_s: np.ndarray | None,
+    rtk_path: str | Path | None,
+    imu_path: str | Path | None,
+) -> dict[str, np.ndarray] | None:
+    """Optionally merge parsed RTK/IMU sidecars into airborne trace metadata."""
+    if rtk_path is None and imu_path is None:
+        return metadata
+    if metadata is None:
+        raise ValueError("optional sidecar integration requires airborne trace metadata")
+
+    integration_module = importlib.import_module("core.sidecar_integration")
+    return integration_module.load_and_integrate_optional_sidecars(
+        metadata,
+        trace_timestamps_s=trace_timestamps_s,
+        rtk_path=rtk_path,
+        imu_path=imu_path,
+    )
 
 
 def subset_trace_metadata(
@@ -269,7 +306,7 @@ def _extract_trace_metadata_from_stacked_rows(
     ground_elevation_m = trace_rows[:, 2].astype(np.float32, copy=False)
     flight_height_m = trace_rows[:, 4].astype(np.float32, copy=False)
     distance_m = compute_trace_distance_m(longitude, latitude)
-    return {
+    metadata = {
         "trace_index": np.arange(traces, dtype=np.int32),
         "longitude": longitude.astype(np.float64, copy=False),
         "latitude": latitude.astype(np.float64, copy=False),
@@ -277,6 +314,9 @@ def _extract_trace_metadata_from_stacked_rows(
         "flight_height_m": flight_height_m,
         "trace_distance_m": distance_m,
     }
+    if rows.shape[1] >= 6:
+        metadata["trace_timestamp_s"] = trace_rows[:, 5].astype(np.float64, copy=False)
+    return metadata
 
 
 def _build_airborne_header_summary(metadata: dict[str, np.ndarray]) -> dict[str, Any]:

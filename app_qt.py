@@ -141,6 +141,7 @@ from core.gpr_io import (
 )
 from core.processing_engine import (
     merge_result_header_info,
+    merge_result_trace_metadata,
     prepare_runtime_params,
     run_processing_method,
 )
@@ -276,6 +277,7 @@ class ProcessingWorker(QObject):
         current_header_info = merge_result_header_info(
             self.header_info, None, current_data.shape
         )
+        current_trace_metadata = merge_result_trace_metadata(self.trace_metadata, None)
         current_display_data = None
         current_display_header_info = None
         current_display_trace_metadata = None
@@ -309,7 +311,7 @@ class ProcessingWorker(QObject):
                         task_input,
                         method_key,
                         header_info=current_header_info,
-                        trace_metadata=self.trace_metadata,
+                        trace_metadata=current_trace_metadata,
                         base_params=params,
                         cancel_checker=self.is_cancel_requested,
                     )
@@ -330,7 +332,7 @@ class ProcessingWorker(QObject):
                     method_key,
                     params,
                     current_header_info,
-                    self.trace_metadata,
+                    current_trace_metadata,
                     task_input.shape,
                 )
 
@@ -355,10 +357,14 @@ class ProcessingWorker(QObject):
                 resolved_header_info = merge_result_header_info(
                     current_header_info, result_meta, newdata.shape
                 )
+                resolved_trace_metadata = merge_result_trace_metadata(
+                    current_trace_metadata, result_meta
+                )
 
                 if self.execution_mode != "independent":
                     current_data = newdata
                     current_header_info = resolved_header_info
+                    current_trace_metadata = resolved_trace_metadata
                     current_display_data = (
                         np.array(display_data, copy=False)
                         if display_data is not None
@@ -395,6 +401,7 @@ class ProcessingWorker(QObject):
                         "outputs": outputs,
                         "final_data": current_data,
                         "final_header_info": current_header_info,
+                        "final_trace_metadata": current_trace_metadata,
                         "final_display_data": current_display_data,
                         "final_display_header_info": current_display_header_info,
                         "final_display_trace_metadata": current_display_trace_metadata,
@@ -408,6 +415,7 @@ class ProcessingWorker(QObject):
                         "outputs": outputs,
                         "final_data": current_data,
                         "final_header_info": current_header_info,
+                        "final_trace_metadata": current_trace_metadata,
                         "final_display_data": current_display_data,
                         "final_display_header_info": current_display_header_info,
                         "final_display_trace_metadata": current_display_trace_metadata,
@@ -420,6 +428,7 @@ class ProcessingWorker(QObject):
                     "outputs": outputs,
                     "final_data": current_data,
                     "final_header_info": current_header_info,
+                    "final_trace_metadata": current_trace_metadata,
                     "final_display_data": current_display_data,
                     "final_display_header_info": current_display_header_info,
                     "final_display_trace_metadata": current_display_trace_metadata,
@@ -660,6 +669,7 @@ class GPRGuiQt(QMainWindow):
         self._last_run_summary = None
         self._runtime_warnings = []
         self._sidecar_files = {"rtk": None, "imu": None, "altimeter": None}
+        self._trace_timestamps_s = None
         self._quality_thresholds = load_quality_dashboard_thresholds()
         self._ui_busy = False
         self._display_data_override = None
@@ -846,7 +856,7 @@ class GPRGuiQt(QMainWindow):
         # 绘图区域
         self.fig = Figure(figsize=(9.5, 6.4), dpi=100)
         self._main_ax = self.fig.add_subplot(111)
-        self._main_ax.set_title("B-扫")
+        self._main_ax.set_title("B-scan")
         self._main_ax.set_xlabel("距离（道索引）")
         self._main_ax.set_ylabel("时间（采样索引）")
         self.canvas = FigureCanvas(self.fig)
@@ -1297,6 +1307,18 @@ class GPRGuiQt(QMainWindow):
         self.page_advanced.slider_compare_var.stateChanged.connect(self._refresh_plot)
         self.page_advanced.btn_apply_crop.clicked.connect(self._refresh_plot)
         self.page_advanced.btn_reset_crop.clicked.connect(self._reset_crop)
+        self.page_advanced.rtk_sidecar_button.clicked.connect(
+            lambda: self._pick_sidecar_file("rtk")
+        )
+        self.page_advanced.rtk_sidecar_clear_button.clicked.connect(
+            lambda: self._clear_sidecar_file("rtk")
+        )
+        self.page_advanced.imu_sidecar_button.clicked.connect(
+            lambda: self._pick_sidecar_file("imu")
+        )
+        self.page_advanced.imu_sidecar_clear_button.clicked.connect(
+            lambda: self._clear_sidecar_file("imu")
+        )
         self.page_auto_tune.btn_auto_tune.clicked.connect(
             self.start_auto_tune_current_method
         )
@@ -1399,6 +1421,7 @@ class GPRGuiQt(QMainWindow):
     def _on_shared_data_changed(self, payload: dict):
         """共享数据状态变化后，同步相关视图。"""
         reason = (payload or {}).get("reason")
+        self._store_trace_timestamps_from_metadata(self.trace_metadata)
         self._normalize_selected_trace_index()
         self._sync_history_action_state()
         self._refresh_compare_snapshots_from_state(
@@ -1834,8 +1857,10 @@ class GPRGuiQt(QMainWindow):
             )
             result = execution["result_data"]
             result_header_info = execution["result_header_info"]
+            result_trace_metadata = execution["result_trace_metadata"]
             preview_data = execution["preview_data"]
             preview_header_info = execution["preview_header_info"]
+            preview_trace_metadata = execution["preview_trace_metadata"]
             runtime_warnings = execution["meta"].get("runtime_warnings", []) or []
 
             # 计算耗时
@@ -1849,8 +1874,10 @@ class GPRGuiQt(QMainWindow):
                 preview_data,
                 f"预览: {method_name}",
                 header_info=preview_header_info,
+                trace_metadata=preview_trace_metadata,
                 commit_data=result,
                 commit_header_info=result_header_info,
+                commit_trace_metadata=result_trace_metadata,
             )
 
             for warning in runtime_warnings:
@@ -1899,6 +1926,9 @@ class GPRGuiQt(QMainWindow):
         result_header_info = merge_result_header_info(
             input_header_info, result_meta, result.shape
         )
+        result_trace_metadata = merge_result_trace_metadata(
+            input_trace_metadata, result_meta
+        )
 
         display_data = result_meta.get("display_data")
         if display_data is not None:
@@ -1908,15 +1938,24 @@ class GPRGuiQt(QMainWindow):
                 {"header_info_updates": result_meta.get("display_header_info_updates")},
                 preview_data.shape,
             )
+            display_trace_metadata = result_meta.get("display_trace_metadata")
+            preview_trace_metadata = (
+                display_trace_metadata
+                if display_trace_metadata is not None
+                else result_trace_metadata
+            )
         else:
             preview_data = result
             preview_header_info = result_header_info
+            preview_trace_metadata = result_trace_metadata
 
         return {
             "result_data": result,
             "result_header_info": result_header_info,
+            "result_trace_metadata": result_trace_metadata,
             "preview_data": preview_data,
             "preview_header_info": preview_header_info,
+            "preview_trace_metadata": preview_trace_metadata,
             "meta": result_meta,
         }
 
@@ -1924,12 +1963,21 @@ class GPRGuiQt(QMainWindow):
         """工作台保存结果"""
         preview_data = getattr(self.page_workbench, "preview_data", None)
         preview_header_info = getattr(self.page_workbench, "preview_header_info", None)
+        preview_trace_metadata = getattr(
+            self.page_workbench, "preview_trace_metadata", None
+        )
         preview_commit_data = getattr(self.page_workbench, "preview_commit_data", None)
         preview_commit_header_info = getattr(
             self.page_workbench, "preview_commit_header_info", None
         )
+        preview_commit_trace_metadata = getattr(
+            self.page_workbench, "preview_commit_trace_metadata", None
+        )
         current_result_header_info = getattr(
             self.page_workbench, "current_result_header_info", None
+        )
+        current_result_trace_metadata = getattr(
+            self.page_workbench, "current_result_trace_metadata", None
         )
         committed = (
             np.array(preview_commit_data, copy=True)
@@ -1962,6 +2010,13 @@ class GPRGuiQt(QMainWindow):
                     else preview_header_info
                     if preview_data is not None
                     else current_result_header_info
+                ),
+                trace_metadata=(
+                    preview_commit_trace_metadata
+                    if preview_commit_data is not None
+                    else preview_trace_metadata
+                    if preview_data is not None
+                    else current_result_trace_metadata
                 ),
             )
             self._mark_data_changed()
@@ -3148,7 +3203,10 @@ class GPRGuiQt(QMainWindow):
         )
         if not path:
             return
-        self._load_with_progress("加载 CSV 文件", self._load_single_csv, path)
+        sidecar_kwargs = self._build_sidecar_loader_kwargs(path)
+        self._load_with_progress(
+            "加载 CSV 文件", self._load_single_csv, path, **sidecar_kwargs
+        )
 
     def import_ascans_folder(self):
         """导入 A-scan 文件夹"""
@@ -3195,7 +3253,7 @@ class GPRGuiQt(QMainWindow):
             logger.warning("Auto load last data failed: %s", e)
             self._log(f"自动加载上次数据失败: {e}")
 
-    def _load_with_progress(self, title, loader_func, *args):
+    def _load_with_progress(self, title, loader_func, *args, **loader_kwargs):
         """使用进度条对话框加载数据"""
         dialog = LoadingProgressDialog(self, title)
 
@@ -3203,7 +3261,9 @@ class GPRGuiQt(QMainWindow):
         def wrapped_loader(*args, progress_callback=None, **kwargs):
             # 修改原始加载函数，支持进度回调
             if loader_func == self._load_single_csv:
-                return self._load_single_csv_with_progress(args[0], progress_callback)
+                return self._load_single_csv_with_progress(
+                    args[0], progress_callback, **loader_kwargs
+                )
             elif loader_func == self._load_ascans_folder:
                 return self._load_ascans_folder_with_progress(
                     args[0], progress_callback
@@ -3214,7 +3274,15 @@ class GPRGuiQt(QMainWindow):
         dialog.start_loading(wrapped_loader, *args)
         dialog.exec()
 
-    def _load_single_csv_with_progress(self, path, progress_callback=None):
+    def _load_single_csv_with_progress(
+        self,
+        path,
+        progress_callback=None,
+        *,
+        trace_timestamps_s=None,
+        rtk_path=None,
+        imu_path=None,
+    ):
         """带进度回调的CSV加载"""
         try:
             if progress_callback:
@@ -3257,9 +3325,27 @@ class GPRGuiQt(QMainWindow):
             if progress_callback:
                 progress_callback(90, "正在处理数据...")
 
-            data, trace_metadata, header_info = extract_airborne_csv_payload(
-                raw_data, header_info
+            sidecar_kwargs = {}
+            if trace_timestamps_s is not None:
+                sidecar_kwargs["trace_timestamps_s"] = trace_timestamps_s
+            if rtk_path is not None:
+                sidecar_kwargs["rtk_path"] = rtk_path
+            if imu_path is not None:
+                sidecar_kwargs["imu_path"] = imu_path
+
+            payload_extractor = getattr(
+                self, "_extract_airborne_payload_with_optional_sidecars", None
             )
+            if payload_extractor is None:
+                data, trace_metadata, header_info = extract_airborne_csv_payload(
+                    raw_data, header_info, **sidecar_kwargs
+                )
+            else:
+                data, trace_metadata, header_info = payload_extractor(
+                    raw_data,
+                    header_info,
+                    sidecar_kwargs,
+                )
 
             data = np.asarray(data, dtype=np.float32)
 
@@ -3557,7 +3643,14 @@ class GPRGuiQt(QMainWindow):
         finally:
             self._set_busy(False, text="就绪")
 
-    def _load_single_csv(self, path: str):
+    def _load_single_csv(
+        self,
+        path: str,
+        *,
+        trace_timestamps_s=None,
+        rtk_path=None,
+        imu_path=None,
+    ):
         """加载单个CSV矩阵文件"""
 
         try:
@@ -3612,9 +3705,27 @@ class GPRGuiQt(QMainWindow):
             if raw_data.size == 0:
                 raise ValueError("CSV 未读取到有效数据（空文件或分隔符不匹配）")
 
-            data, trace_metadata, header_info = extract_airborne_csv_payload(
-                raw_data, header_info
+            sidecar_kwargs = {}
+            if trace_timestamps_s is not None:
+                sidecar_kwargs["trace_timestamps_s"] = trace_timestamps_s
+            if rtk_path is not None:
+                sidecar_kwargs["rtk_path"] = rtk_path
+            if imu_path is not None:
+                sidecar_kwargs["imu_path"] = imu_path
+
+            payload_extractor = getattr(
+                self, "_extract_airborne_payload_with_optional_sidecars", None
             )
+            if payload_extractor is None:
+                data, trace_metadata, header_info = extract_airborne_csv_payload(
+                    raw_data, header_info, **sidecar_kwargs
+                )
+            else:
+                data, trace_metadata, header_info = payload_extractor(
+                    raw_data,
+                    header_info,
+                    sidecar_kwargs,
+                )
 
             try:
                 data = np.asarray(data, dtype=np.float32)
@@ -4170,12 +4281,177 @@ class GPRGuiQt(QMainWindow):
         self._log("诊断信息已复制到剪贴板")
 
     def _pick_sidecar_file(self, kind: str):
-        """预留接口：当前版本暂未接入 sidecar 文件处理链。"""
-        QMessageBox.information(
+        """选择可选 RTK/IMU sidecar 文件；取消选择时保留原状态。"""
+        if kind not in {"rtk", "imu"}:
+            raise ValueError(f"不支持的 sidecar 类型: {kind}")
+
+        label = "RTK" if kind == "rtk" else "IMU"
+        current_path = self._sidecar_files.get(kind)
+        initial_dir = os.path.dirname(current_path) if current_path else BASE_DIR
+        path, _ = QFileDialog.getOpenFileName(
             self,
-            "功能预留中",
-            "当前版本暂未接入 RTK / IMU / 高度计 sidecar 文件处理链，相关入口已默认隐藏。",
+            f"选择 {label} sidecar 文件",
+            initial_dir,
+            "CSV Files (*.csv);;All Files (*)",
         )
+        if not path:
+            return
+        self._set_sidecar_file(kind, path)
+
+    def _set_sidecar_file(self, kind: str, path=None) -> None:
+        """更新单个 sidecar 路径，并同步高级设置页标签。"""
+        if kind not in {"rtk", "imu"}:
+            raise ValueError(f"不支持的 sidecar 类型: {kind}")
+
+        normalized = str(path) if path else None
+        self._sidecar_files[kind] = normalized
+        label_widget = getattr(self.page_advanced, f"{kind}_sidecar_label", None)
+        if label_widget is not None:
+            label_widget.setText(os.path.basename(normalized) if normalized else "未选择")
+            label_widget.setToolTip(normalized or "未选择")
+        display = os.path.basename(normalized) if normalized else "未选择"
+        self._log(f"{kind.upper()} sidecar：{display}")
+
+    def _clear_sidecar_file(self, kind: str) -> None:
+        """仅清除指定 RTK/IMU sidecar 选择。"""
+        self._set_sidecar_file(kind, None)
+
+    def _warn_sidecar_ignored(self, kind: str, reason: str) -> None:
+        """提示用户已忽略可选 sidecar，同时保持 CSV 正常加载。"""
+        message = f"已忽略可选 {kind} 辅助文件，CSV 将按普通数据继续加载。\n原因：{reason}"
+        self._log(message.replace("\n", " "))
+        if hasattr(self, "status_label"):
+            self.status_label.setText(f"已忽略可选 {kind} 辅助文件")
+        QMessageBox.warning(self, "可选辅助文件已忽略", message)
+
+    def _store_trace_timestamps_from_metadata(self, trace_metadata) -> None:
+        """从既有每道元数据同步 trace 时间戳缓存；不在 GUI 层推导。"""
+        timestamps = None
+        if isinstance(trace_metadata, dict):
+            timestamps = trace_metadata.get("trace_timestamp_s")
+        if timestamps is None:
+            self._trace_timestamps_s = None
+            return
+        self._trace_timestamps_s = np.asarray(timestamps, dtype=np.float64).copy()
+
+    def _get_trace_timestamps_for_sidecars(self):
+        """仅返回当前会话已存在的 trace 时间戳，不在 GUI 层推导。"""
+        self._store_trace_timestamps_from_metadata(self.trace_metadata)
+        return getattr(self, "_trace_timestamps_s", None)
+
+    def _read_explicit_trace_timestamps_from_csv(self, path: str):
+        """从主 CSV 第 6 列读取显式 trace 时间戳；不根据采样参数推导。"""
+        try:
+            header_info = detect_csv_header(path)
+            if not header_info:
+                return None
+            samples = int(header_info["a_scan_length"])
+            traces = int(header_info["num_traces"])
+            required_rows = samples * traces
+            skip_lines = _detect_skiprows(path)
+            timestamp_col = pd.read_csv(
+                path,
+                header=None,
+                skiprows=skip_lines,
+                usecols=[5],
+                nrows=required_rows,
+                na_filter=False,
+                low_memory=False,
+            ).iloc[:, 0]
+        except (OSError, ValueError, KeyError, IndexError, pd.errors.ParserError):
+            return None
+
+        values = pd.to_numeric(timestamp_col, errors="coerce").to_numpy(dtype=np.float64)
+        if values.size < required_rows:
+            return None
+        trace_timestamps_s = values.reshape((traces, samples))[:, 0]
+        if not np.isfinite(trace_timestamps_s).all():
+            return None
+        return trace_timestamps_s.copy()
+
+    def _is_current_data_path(self, path: str) -> bool:
+        """Return True only when `path` is the already loaded data source."""
+        current_path = getattr(self, "data_path", None)
+        if not current_path:
+            return False
+        try:
+            return os.path.abspath(str(current_path)) == os.path.abspath(str(path))
+        except (OSError, TypeError, ValueError):
+            return False
+
+    def _build_sidecar_loader_kwargs(self, path: str) -> dict:
+        """根据当前选择构造 CSV 加载 sidecar kwargs。"""
+        rtk_path = self._sidecar_files.get("rtk")
+        imu_path = self._sidecar_files.get("imu")
+        if not rtk_path and not imu_path:
+            return {}
+
+        trace_timestamps_s = self._read_explicit_trace_timestamps_from_csv(path)
+        if trace_timestamps_s is None and self._is_current_data_path(path):
+            trace_timestamps_s = self._get_trace_timestamps_for_sidecars()
+        if trace_timestamps_s is None:
+            self._warn_sidecar_ignored(
+                "RTK/IMU",
+                "缺少可用于对齐的 trace_timestamps_s；本次不会接入辅助文件。",
+            )
+            return {}
+
+        kwargs = {"trace_timestamps_s": trace_timestamps_s}
+        if rtk_path:
+            kwargs["rtk_path"] = rtk_path
+        if imu_path:
+            kwargs["imu_path"] = imu_path
+        return kwargs
+
+    def _extract_airborne_payload_with_optional_sidecars(
+        self, raw_data: np.ndarray, header_info, sidecar_kwargs: dict
+    ):
+        """提取 CSV payload；可选 sidecar 出错时警告后回退为普通 CSV。"""
+        try:
+            return extract_airborne_csv_payload(
+                raw_data, header_info, **sidecar_kwargs
+            )
+        except ValueError as exc:
+            if not sidecar_kwargs or not self._is_optional_sidecar_error(exc):
+                raise
+            self._warn_sidecar_ignored(
+                self._describe_selected_sidecars(sidecar_kwargs), str(exc)
+            )
+            return extract_airborne_csv_payload(raw_data, header_info)
+
+    def _describe_selected_sidecars(self, sidecar_kwargs: dict) -> str:
+        """返回用于告警文案的已选 sidecar 类型。"""
+        selected = []
+        if sidecar_kwargs.get("rtk_path"):
+            selected.append("RTK")
+        if sidecar_kwargs.get("imu_path"):
+            selected.append("IMU")
+        return "/".join(selected) or "RTK/IMU"
+
+    def _is_optional_sidecar_error(self, exc: ValueError) -> bool:
+        """判断 ValueError 是否来自可选 sidecar 解析/对齐链。"""
+        text = str(exc).lower()
+        markers = (
+            "sidecar",
+            "trace_timestamps_s",
+            "rtk",
+            "imu",
+            "timestamp_s",
+            "roll_deg",
+            "pitch_deg",
+            "yaw_deg",
+            "parser",
+            "parse",
+            "optional sidecar integration",
+            "unsupported sidecar",
+        )
+        if any(marker in text for marker in markers):
+            return True
+        if ("longitude" in text or "latitude" in text) and (
+            "sidecar" in text or "rtk" in text or "timestamp" in text
+        ):
+            return True
+        return False
 
     def export_quality_snapshot(self):
         """导出质量快照"""
@@ -4350,7 +4626,12 @@ class GPRGuiQt(QMainWindow):
             else (self.header_info or {})
         )
         title = str(header.get("display_title") or "").strip() if header else ""
-        return title or "B-扫"
+        base_title = title or "B-扫"
+
+        current_label = str(getattr(self.shared_data, "current_label", "") or "").strip()
+        if current_label and current_label != "原始数据" and current_label not in base_title:
+            return f"{base_title} - 当前处理：{current_label}"
+        return base_title
 
     def _resolve_method_params(self, method_key: str):
         """解析方法参数"""
@@ -5757,6 +6038,7 @@ class GPRGuiQt(QMainWindow):
             )
         final_data = result.get("final_data")
         final_header_info = result.get("final_header_info")
+        final_trace_metadata = result.get("final_trace_metadata")
         final_display_data = result.get("final_display_data")
         final_display_header_info = result.get("final_display_header_info")
         final_display_trace_metadata = result.get("final_display_trace_metadata")
@@ -5789,6 +6071,7 @@ class GPRGuiQt(QMainWindow):
                 source=run_type or "worker",
                 label=snap_label,
                 header_info=final_header_info,
+                trace_metadata=final_trace_metadata,
             )
             self._mark_data_changed()
             if final_display_data is not None:

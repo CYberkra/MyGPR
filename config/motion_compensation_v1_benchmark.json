@@ -1,0 +1,13 @@
+{
+  "version": "1.0",
+  "description": "Motion compensation V1 benchmark preset - deterministic five-stage UAV-GPR motion correction",
+  "jobs": [
+    {
+      "id": "motion_compensation_v1_benchmark",
+      "benchmark_sample": "motion_compensation_v1",
+      "seed": 42,
+      "recommended_profile": "motion_compensation_v1"
+    }
+  ],
+  "output_dir": "output/motion_compensation_v1_benchmark"
+}

@@ -142,32 +142,45 @@ class SharedDataState(QObject):
 
     def build_result_history(self) -> list[tuple[str, np.ndarray]]:
         """构建正式结果时间线，供主界面和工作台统一展示。"""
-        history_items: list[tuple[str, np.ndarray]] = []
+        return [
+            (str(entry["label"]), np.array(entry["data"], copy=True))
+            for entry in self.build_result_history_entries()
+        ]
+
+    def build_result_history_entries(self) -> list[dict[str, Any]]:
+        """Build formal result history entries with matching metadata snapshots."""
+        history_items: list[dict[str, Any]] = []
         if self.original_data is None:
             return history_items
 
-        _append_unique_history_item(
+        _append_unique_history_entry(
             history_items,
             self.original_label or "原始数据",
             self.original_data,
+            trace_metadata=self.original_trace_metadata,
+            header_info=self.original_header_info,
         )
 
         for state in self.history:
             data = state.get("data")
             if data is None:
                 continue
-            _append_unique_history_item(
+            _append_unique_history_entry(
                 history_items,
                 state.get("label") or f"历史结果{len(history_items)}",
                 data,
+                trace_metadata=state.get("trace_metadata"),
+                header_info=state.get("header_info"),
             )
 
         if self.current_data is not None:
-            _append_unique_history_item(
+            _append_unique_history_entry(
                 history_items,
                 self.current_label
                 or (self.original_label if not self.history else "当前结果"),
                 self.current_data,
+                trace_metadata=self.current_trace_metadata,
+                header_info=self.header_info,
             )
 
         return history_items
@@ -268,3 +281,23 @@ def _append_unique_history_item(
         items[-1] = (label, candidate)
         return
     items.append((label, candidate))
+
+
+def _append_unique_history_entry(
+    items: list[dict[str, Any]],
+    label: str,
+    data: np.ndarray,
+    *,
+    trace_metadata: dict[str, np.ndarray] | None,
+    header_info: dict[str, Any] | None,
+) -> None:
+    candidate = {
+        "label": label,
+        "data": np.array(data, copy=True),
+        "trace_metadata": _clone_trace_metadata(trace_metadata),
+        "header_info": _clone_header_info(header_info),
+    }
+    if items and np.array_equal(items[-1]["data"], candidate["data"]):
+        items[-1] = candidate
+        return
+    items.append(candidate)

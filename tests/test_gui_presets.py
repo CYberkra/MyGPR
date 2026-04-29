@@ -11,7 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import numpy as np
 import app_qt
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QApplication, QGroupBox
+from PyQt6.QtWidgets import QApplication, QGroupBox, QScrollArea, QStackedWidget
 
 from app_qt import GPRGuiQt
 from core.methods_registry import (
@@ -24,6 +24,7 @@ from core.preset_profiles import (
     GUI_PRESETS_V1,
     RECOMMENDED_RUN_PROFILES,
 )
+from core.workflow_template_manager import WorkflowTemplateManager
 from core.workflow_data import QUICK_PRESETS
 from ui.gui_method_browser import MethodBrowserTree
 
@@ -49,15 +50,31 @@ def _get_app() -> QApplication:
 
 
 def _top_level_group_titles(page) -> list[str]:
-    outer_layout = page.layout()
-    scroll = outer_layout.itemAt(0).widget()
-    content = scroll.widget()
-    content_layout = content.layout()
+    if isinstance(page, QGroupBox):
+        return [page.title()] if not page.isHidden() else []
+
+    if hasattr(page, "page_mode") and hasattr(page, "stack") and isinstance(page.stack, QStackedWidget):
+        titles = []
+        for page_index in range(page.stack.count()):
+            titles.extend(_top_level_group_titles(page.stack.widget(page_index)))
+        return titles
+
+    if isinstance(page, QScrollArea):
+        content = page.widget()
+        content_layout = content.layout()
+    else:
+        content_layout = page.layout()
+
     titles = []
     for index in range(content_layout.count()):
         widget = content_layout.itemAt(index).widget()
-        if isinstance(widget, QGroupBox) and not widget.isHidden():
-            titles.append(widget.title())
+        if widget is None:
+            continue
+        if isinstance(widget, QGroupBox):
+            if not widget.isHidden():
+                titles.append(widget.title())
+        elif isinstance(widget, QScrollArea):
+            titles.extend(_top_level_group_titles(widget))
     return titles
 
 
@@ -97,7 +114,7 @@ def test_startup_preset_matches_registry_contract():
             preset["ui"]["display_downsample"]
         )
         assert win._method_param_overrides == preset["method_params"]
-        assert win.page_advanced.sidecar_box.isVisible() is False
+        assert win.page_advanced.sidecar_box.isHidden() is False
     finally:
         win.close()
         app.processEvents()
@@ -138,6 +155,21 @@ def test_apply_selected_preset_reuses_current_selected_preset_key():
     finally:
         win.close()
         app.processEvents()
+
+
+def test_motion_compensation_v1_preset_order_matches_plan_order():
+    expected_order = [
+        "trajectory_smoothing",
+        "motion_compensation_speed",
+        "motion_compensation_attitude",
+        "motion_compensation_height",
+        "motion_compensation_vibration",
+    ]
+
+    assert [
+        item["method_id"] for item in QUICK_PRESETS["motion_compensation_v1"]["methods"]
+    ] == expected_order
+    assert RECOMMENDED_RUN_PROFILES["motion_compensation_v1"]["order"] == expected_order
 
 
 def test_auto_tune_defaults_live_in_auto_tune_page():
@@ -226,29 +258,27 @@ def test_phase2_tabs_expose_prioritized_group_hierarchy_and_bridge():
     win = GPRGuiQt()
     try:
         assert _top_level_group_titles(win.page_advanced) == [
-            "主图与对比",
+            "显示模式",
+            "核心显示",
             "聚焦裁剪",
-            "读图交互",
+            "ROI 状态",
             "增强与对比辅助",
-            "预览性能（低频）",
+            "预览性能",
+            "可选 RTK/IMU 辅助文件",
         ]
-        assert win.page_advanced.sidecar_box.isHidden() is True
+        assert win.page_advanced.sidecar_box.isHidden() is False
 
         assert _top_level_group_titles(win.page_auto_tune) == [
-            "实验路径选择",
-            "快速实验",
-            "结果概况与推荐",
+            "实验流程",
         ]
         assert win.page_auto_tune.btn_open_workbench.text() == "进入工作台深度实验"
 
         assert _top_level_group_titles(win.page_quality) == [
+            "查看顺序",
+            "导出与诊断",
             "质量摘要",
-            "航空质量图表",
-            "航迹图",
-            "航空异常明细",
+            "图表查看",
             "运行记录",
-            "日志与诊断",
-            "报告与快照导出",
         ]
     finally:
         win.close()
@@ -895,16 +925,36 @@ def test_public_method_order_follows_processing_chain():
     assert positions == sorted(positions)
 
 
-def test_hankel_svd_defaults_are_more_conservative():
+def test_hankel_svd_defaults_use_auto_or_preview_safe_overrides(tmp_path):
     params = PROCESSING_METHODS["hankel_svd"]["params"]
     defaults = {item["name"]: item.get("default") for item in params}
+    labels = {item["name"]: item.get("label", "") for item in params}
+    manager = WorkflowTemplateManager(config_dir=str(tmp_path / "workflow_templates"))
+    high_focus_template = next(
+        item for item in manager.get_preset_templates() if item["name"] == "高聚焦"
+    )
+    high_focus_hankel = next(
+        item for item in high_focus_template["methods"] if item["method_id"] == "hankel_svd"
+    )
 
-    assert defaults["window_length"] == 80
-    assert defaults["rank"] == 5
-    assert GUI_PRESETS_V1["quick_preview"]["method_params"]["hankel_svd"]["rank"] == 4
+    assert defaults["window_length"] == 0
+    assert defaults["rank"] == 0
+    assert "bounded/literature" in labels["window_length"]
+    assert "bounded/literature" in labels["rank"]
+    assert GUI_PRESETS_V1["quick_preview"]["method_params"]["hankel_svd"] == {
+        "window_length": 32,
+        "rank": 0,
+    }
     assert "hankel_svd" not in GUI_PRESETS_V1["denoise_first"]["method_params"]
-    assert "hankel_svd" in GUI_PRESETS_V1["detail_first"]["method_params"]
-    assert GUI_PRESETS_V1["detail_first"]["method_params"]["hankel_svd"]["rank"] == 8
+    assert GUI_PRESETS_V1["detail_first"]["method_params"]["hankel_svd"] == {
+        "window_length": 0,
+        "rank": 0,
+    }
+    assert RECOMMENDED_RUN_PROFILES["hankel_denoise"]["method_params"]["hankel_svd"] == {
+        "window_length": 0,
+        "rank": 0,
+    }
+    assert high_focus_hankel["params"] == {"window_length": 0, "rank": 0}
 
 
 def test_svd_denoising_defaults_match_current_gpr_recommendation():
@@ -922,14 +972,14 @@ def test_svd_denoising_defaults_match_current_gpr_recommendation():
     assert wavelet_defaults["rank_end"] == 20
 
 
-def test_recommended_profiles_prefer_svd_and_wavelet_denoising():
+def test_recommended_profiles_prefer_svd_and_hankel_denoising():
     robust_order = RECOMMENDED_RUN_PROFILES["robust_imaging"]["order"]
     high_focus_order = RECOMMENDED_RUN_PROFILES["high_focus"]["order"]
 
     assert "svd_subspace" in robust_order
     assert "hankel_svd" not in robust_order
-    assert "wavelet_svd" in high_focus_order
-    assert "hankel_svd" not in high_focus_order
+    assert "hankel_svd" in high_focus_order
+    assert "wavelet_svd" not in high_focus_order
 
     assert GUI_PRESETS_V1["denoise_first"]["method_params"]["svd_subspace"] == {
         "rank_start": 1,
@@ -1114,8 +1164,8 @@ def test_workflow_quick_presets_align_with_current_denoising_preference():
 
     assert "svd_subspace" in robust_methods
     assert "hankel_svd" not in robust_methods
-    assert "wavelet_svd" in high_focus_methods
-    assert "hankel_svd" not in high_focus_methods
+    assert "hankel_svd" in high_focus_methods
+    assert "wavelet_svd" not in high_focus_methods
 
 
 def test_quality_page_exposes_report_and_snapshot_actions():

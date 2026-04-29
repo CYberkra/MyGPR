@@ -33,6 +33,7 @@ from core.workflow_data import WorkflowMethod
 from core.workflow_executor import WorkflowExecutor, ExecutionError
 from core.processing_engine import (
     merge_result_header_info,
+    merge_result_trace_metadata,
     prepare_runtime_params,
     run_processing_method,
 )
@@ -92,6 +93,9 @@ class PreviewWorker(QObject):
             resolved_header_info = merge_result_header_info(
                 self.request.get("header_info"), meta, result.shape
             )
+            resolved_trace_metadata = merge_result_trace_metadata(
+                self.request.get("trace_metadata"), meta
+            )
             self.finished.emit(
                 {
                     "seq": self.request["seq"],
@@ -99,6 +103,7 @@ class PreviewWorker(QObject):
                     "data": result,
                     "meta": meta,
                     "header_info": resolved_header_info,
+                    "trace_metadata": resolved_trace_metadata,
                     "title": self.request["title"],
                     "elapsed_ms": elapsed_ms,
                     "announce": self.request.get("announce", False),
@@ -139,18 +144,24 @@ class WorkbenchPage(QWidget):
         self.raw_data = None  # 原始数据
         self.current_result = None  # 当前处理结果
         self.raw_header_info = None
+        self.raw_trace_metadata = None
         self.current_result_header_info = None
+        self.current_result_trace_metadata = None
         self.has_processed_result = False  # 当前结果是否来自处理步骤
         self.all_results = []  # 结果历史 (name, data)
+        self.all_result_entries = []  # 结果历史及其配套 header/trace metadata
         self.preview_data = None  # 参数变化时的临时预览结果
         self.preview_header_info = None
+        self.preview_trace_metadata = None
         self.preview_commit_data = None
         self.preview_commit_header_info = None
+        self.preview_commit_trace_metadata = None
         self.preview_title = "预览"
         self.preview_source_data = None
         self.preview_source_title = "预览前"
         self.selected_history_index = 0
         self._syncing_compare_combo = False
+        self._syncing_view_combo = False
         self._slider_compare_ratio = 0.5
         self._slider_dragging = False
         self._preview_thread = None
@@ -203,7 +214,7 @@ class WorkbenchPage(QWidget):
 
         # 中间参数区
         self.param_editor = ParamEditorPanel()
-        self.param_editor.parent_window = self
+        setattr(self.param_editor, "parent_window", self)
         self.param_editor.setMinimumWidth(280)
         self.param_editor.setMaximumWidth(360)
         self.param_editor.run_requested.connect(self._run_current_method)
@@ -236,7 +247,7 @@ class WorkbenchPage(QWidget):
 
         self.mode_group = QButtonGroup(self)
 
-        self.radio_original = QRadioButton("原图")
+        self.radio_original = QRadioButton("单图")
         self.radio_original.setChecked(True)
         self.mode_group.addButton(self.radio_original, 0)
         self.radio_original.toggled.connect(self._refresh_preview)
@@ -274,6 +285,19 @@ class WorkbenchPage(QWidget):
         self.radio_wiggle.toggled.connect(self._refresh_preview)
         first_row_layout.addWidget(self.radio_wiggle)
 
+        view_label = QLabel("查看:")
+        view_label.setProperty("class", "titleSmall")
+        first_row_layout.addWidget(view_label)
+
+        from qfluentwidgets import ComboBox
+
+        self.view_combo = ComboBox()
+        self.view_combo.setFixedHeight(24)
+        self.view_combo.setFixedWidth(190)
+        self.view_combo.addItem("原始数据")
+        self.view_combo.currentIndexChanged.connect(self._on_view_selection_changed)
+        first_row_layout.addWidget(self.view_combo)
+
         self.preview_group = QButtonGroup(self)
 
         self.preview_before_radio = QRadioButton("预览前")
@@ -289,17 +313,20 @@ class WorkbenchPage(QWidget):
         self.preview_after_radio.toggled.connect(self._refresh_preview)
         first_row_layout.addWidget(self.preview_after_radio)
 
-        # 添加滑动对比选择下拉框
-        from qfluentwidgets import ComboBox
+        # 添加对比基准选择下拉框
+        self.compare_label = QLabel("基准:")
+        self.compare_label.setProperty("class", "titleSmall")
+        self.compare_label.setVisible(False)
+        first_row_layout.addWidget(self.compare_label)
 
         self.compare_combo = ComboBox()
         self.compare_combo.setFixedHeight(24)
-        self.compare_combo.setFixedWidth(150)
-        self.compare_combo.addItem("原始数据", 0)
+        self.compare_combo.setFixedWidth(170)
+        self.compare_combo.addItem("原始数据")
         self.compare_combo.currentIndexChanged.connect(
             self._on_compare_selection_changed
         )
-        self.compare_combo.setVisible(False)  # 默认隐藏，只在滑动对比模式显示
+        self.compare_combo.setVisible(False)  # 默认隐藏，只在对比/滑动对比模式显示
         first_row_layout.addWidget(self.compare_combo)
 
         first_row_layout.addStretch()
@@ -536,7 +563,8 @@ class WorkbenchPage(QWidget):
 
         # 自动滚动到底部
         scrollbar = self.log_text.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
+        if scrollbar is not None:
+            scrollbar.setValue(scrollbar.maximum())
 
     # ========== 事件处理 ==========
 
@@ -700,7 +728,11 @@ class WorkbenchPage(QWidget):
             if current_data is None:
                 current_data = self.raw_data
             result = executor.execute_all(current_data, workflow_methods)
-            self.update_current_result(result, header_info=executor.current_header_info)
+            self.update_current_result(
+                result,
+                header_info=executor.current_header_info,
+                trace_metadata=executor.current_trace_metadata,
+            )
             self._log("流程执行完成")
         except ExecutionError as e:
             self._log(f"流程执行失败: {e}", "ERROR")
@@ -772,9 +804,12 @@ class WorkbenchPage(QWidget):
             self.raw_data = None
             self.current_result = None
             self.raw_header_info = None
+            self.raw_trace_metadata = None
             self.current_result_header_info = None
+            self.current_result_trace_metadata = None
             self.has_processed_result = False
             self.all_results = []
+            self.all_result_entries = []
             self.selected_history_index = 0
             self._clear_preview_data()
             self._slider_compare_ratio = 0.5
@@ -788,13 +823,17 @@ class WorkbenchPage(QWidget):
 
         self.raw_data = np.array(original_data, copy=True)
         self.raw_header_info = getattr(self.data_state, "original_header_info", None)
+        self.raw_trace_metadata = getattr(
+            self.data_state, "original_trace_metadata", None
+        )
         self.current_result = np.array(current_data, copy=True)
         self.current_result_header_info = self.data_state.header_info
+        self.current_result_trace_metadata = self.data_state.current_trace_metadata
         self.has_processed_result = not np.array_equal(
             self.current_result, self.raw_data
         )
 
-        self.all_results = self.data_state.build_result_history()
+        self._rebuild_result_history_cache()
 
         self.selected_history_index = max(0, len(self.all_results) - 1)
         self.data_status_label.setText(
@@ -810,6 +849,34 @@ class WorkbenchPage(QWidget):
             self.param_editor.set_input_source("raw")
         self._update_action_buttons()
         self._refresh_preview()
+
+    def _rebuild_result_history_cache(self) -> None:
+        """Rebuild formal result history with data and matching metadata."""
+        if self.data_state is not None:
+            self.all_result_entries = self.data_state.build_result_history_entries()
+        elif self.raw_data is not None:
+            self.all_result_entries = [
+                {
+                    "label": "原始数据",
+                    "data": np.array(self.raw_data, copy=True),
+                    "header_info": self.raw_header_info,
+                    "trace_metadata": self.raw_trace_metadata,
+                }
+            ]
+        else:
+            self.all_result_entries = []
+
+        self.all_results = [
+            (str(entry["label"]), np.array(entry["data"], copy=True))
+            for entry in self.all_result_entries
+        ]
+
+    def _selected_history_entry(self):
+        """Return the selected formal history entry, including metadata."""
+        entries = getattr(self, "all_result_entries", [])
+        if 0 <= self.selected_history_index < len(entries):
+            return entries[self.selected_history_index]
+        return None
 
     def _update_workflow_list(self):
         """更新流程模板列表"""
@@ -874,8 +941,10 @@ class WorkbenchPage(QWidget):
         """清除临时预览结果。"""
         self.preview_data = None
         self.preview_header_info = None
+        self.preview_trace_metadata = None
         self.preview_commit_data = None
         self.preview_commit_header_info = None
+        self.preview_commit_trace_metadata = None
         self.preview_title = "预览"
         self.preview_source_data = None
         self.preview_source_title = "预览前"
@@ -902,16 +971,20 @@ class WorkbenchPage(QWidget):
         data: np.ndarray,
         title: str = "预览",
         header_info: dict | None = None,
+        trace_metadata: dict | None = None,
         commit_data: np.ndarray | None = None,
         commit_header_info: dict | None = None,
+        commit_trace_metadata: dict | None = None,
     ):
         """设置当前预览结果，不修改正式结果历史。"""
         self.preview_data = np.array(data, copy=True)
         self.preview_header_info = header_info
+        self.preview_trace_metadata = trace_metadata
         self.preview_commit_data = (
             np.array(commit_data, copy=True) if commit_data is not None else None
         )
         self.preview_commit_header_info = commit_header_info
+        self.preview_commit_trace_metadata = commit_trace_metadata
         self.preview_title = title
         self.radio_result.setChecked(True)
         self._refresh_preview()
@@ -1032,6 +1105,7 @@ class WorkbenchPage(QWidget):
             result,
             payload.get("title", "预览"),
             header_info=payload.get("header_info"),
+            trace_metadata=payload.get("trace_metadata"),
         )
         if payload.get("announce"):
             elapsed = payload.get("elapsed_ms", 0.0)
@@ -1120,6 +1194,100 @@ class WorkbenchPage(QWidget):
             else self.current_result_header_info
         )
 
+    def _build_view_entries(self) -> list[dict]:
+        """Build selectable single-view entries for raw/current/history/preview data."""
+        entries: list[dict] = []
+
+        if self.all_result_entries:
+            for idx, entry in enumerate(self.all_result_entries):
+                data = entry.get("data")
+                if data is None:
+                    continue
+                label = str(entry.get("label") or f"步骤{idx}")
+                if idx == 0 and label == "原始数据":
+                    display_label = "原始数据"
+                elif idx == len(self.all_result_entries) - 1:
+                    display_label = f"当前结果: {label}"
+                else:
+                    display_label = f"步骤{idx}: {label}"
+                entries.append(
+                    {
+                        "label": display_label,
+                        "data": data,
+                        "header_info": entry.get("header_info"),
+                        "trace_metadata": entry.get("trace_metadata"),
+                    }
+                )
+        elif self.raw_data is not None:
+            entries.append(
+                {
+                    "label": "原始数据",
+                    "data": self.raw_data,
+                    "header_info": self.raw_header_info,
+                    "trace_metadata": self.raw_trace_metadata,
+                }
+            )
+
+        if self.preview_source_data is not None:
+            entries.append(
+                {
+                    "label": self.preview_source_title or "预览前",
+                    "data": self.preview_source_data,
+                    "header_info": self.current_result_header_info,
+                    "trace_metadata": self.current_result_trace_metadata,
+                }
+            )
+
+        if self.preview_data is not None:
+            entries.append(
+                {
+                    "label": self.preview_title or "预览后",
+                    "data": self.preview_data,
+                    "header_info": self.preview_header_info,
+                    "trace_metadata": self.preview_trace_metadata,
+                }
+            )
+
+        return entries
+
+    def _update_view_combo(self) -> None:
+        """Refresh the single-view selector without triggering redraw loops."""
+        if not hasattr(self, "view_combo") or self.view_combo is None:
+            return
+
+        entries = self._build_view_entries()
+        previous_text = self.view_combo.currentText() if self.view_combo.count() else ""
+        self._syncing_view_combo = True
+        old_block = self.view_combo.blockSignals(True)
+        try:
+            self.view_combo.clear()
+            for entry in entries:
+                self.view_combo.addItem(str(entry.get("label") or "未命名结果"))
+
+            if not entries:
+                return
+
+            target_index = len(entries) - 1 if self.has_processed_result else 0
+            labels = [str(entry.get("label") or "") for entry in entries]
+            if previous_text in labels:
+                target_index = labels.index(previous_text)
+            self.view_combo.setCurrentIndex(target_index)
+        finally:
+            self.view_combo.blockSignals(old_block)
+            self._syncing_view_combo = False
+
+    def _get_selected_view_entry(self):
+        """Return the data entry currently selected by the single-view selector."""
+        entries = self._build_view_entries()
+        if not entries:
+            return None
+        if not hasattr(self, "view_combo") or self.view_combo is None:
+            return entries[-1]
+        index = self.view_combo.currentIndex()
+        if index < 0 or index >= len(entries):
+            index = len(entries) - 1 if self.has_processed_result else 0
+        return entries[index]
+
     def resolve_input_header_info(self, source: str):
         """根据输入源解析对应头信息。"""
         if source == "raw":
@@ -1127,6 +1295,9 @@ class WorkbenchPage(QWidget):
                 self.data_state.header_info if self.data_state is not None else None
             )
         if source == "history":
+            entry = self._selected_history_entry()
+            if entry is not None:
+                return entry.get("header_info")
             return self.current_result_header_info
         return self.current_result_header_info or (
             self.data_state.header_info if self.data_state is not None else None
@@ -1137,17 +1308,23 @@ class WorkbenchPage(QWidget):
         if self.data_state is None:
             return None
         if source == "raw":
-            return self.data_state.original_trace_metadata
-        return self.data_state.current_trace_metadata
+            return self.raw_trace_metadata or self.data_state.original_trace_metadata
+        if source == "history":
+            entry = self._selected_history_entry()
+            if entry is not None:
+                return entry.get("trace_metadata")
+        return (
+            self.current_result_trace_metadata or self.data_state.current_trace_metadata
+        )
 
     def resolve_input_data(self, source: str):
         """根据输入源解析当前要处理的数据。"""
         if source == "raw":
             return self.raw_data, "原始数据"
         if source == "history":
-            if 0 <= self.selected_history_index < len(self.all_results):
-                name, data = self.all_results[self.selected_history_index]
-                return data, f"历史结果: {name}"
+            entry = self._selected_history_entry()
+            if entry is not None:
+                return entry.get("data"), f"历史结果: {entry.get('label')}"
             return self.current_result, "当前结果（历史回退）"
         if self.current_result is not None:
             return self.current_result, "当前结果"
@@ -1259,8 +1436,14 @@ class WorkbenchPage(QWidget):
         """对比选择改变"""
         if getattr(self, "_syncing_compare_combo", False):
             return
-        if self.radio_slider.isChecked():
+        if self.radio_compare.isChecked() or self.radio_slider.isChecked():
             self._refresh_preview()
+
+    def _on_view_selection_changed(self, index):
+        """单图/目标结果选择改变。"""
+        if getattr(self, "_syncing_view_combo", False):
+            return
+        self._refresh_preview()
 
     def _on_canvas_press(self, event):
         """开始拖动滑动对比分割线。"""
@@ -1285,7 +1468,12 @@ class WorkbenchPage(QWidget):
 
     def _update_slider_ratio_from_event(self, event):
         """根据鼠标事件更新滑动对比位置。"""
-        effective_result = self._get_effective_result_data()
+        target_entry = self._get_selected_view_entry()
+        effective_result = (
+            self.preview_data
+            if self.preview_data is not None
+            else (target_entry.get("data") if target_entry is not None else None)
+        )
         compare_data = self._get_compare_data()
         if effective_result is None or compare_data is None:
             return
@@ -1318,13 +1506,8 @@ class WorkbenchPage(QWidget):
         try:
             self.compare_combo.clear()
 
-            # 添加原始数据
-            if self.raw_data is not None:
-                self.compare_combo.addItem("原始数据")
-
-            # 添加历史结果，跳过第 0 项“原始数据”以免重复
-            for i, (name, _) in enumerate(self.all_results[1:], start=1):
-                self.compare_combo.addItem(name)
+            for entry in self._build_view_entries():
+                self.compare_combo.addItem(str(entry.get("label") or "未命名结果"))
 
             # 恢复之前的选择；如果无效则默认原始数据
             target_index = 0
@@ -1349,17 +1532,21 @@ class WorkbenchPage(QWidget):
             if index < 0:
                 return self.raw_data
 
-            if index == 0:
-                # 返回原始数据
-                return self.raw_data
-            elif 0 < index < len(self.all_results):
-                # 返回历史结果
-                return self.all_results[index][1]
-            else:
-                return self.raw_data
+            entries = self._build_view_entries()
+            if 0 <= index < len(entries):
+                return entries[index].get("data")
+            return self.raw_data
         except Exception as e:
             logger.warning("Failed to resolve compare data: %s", e)
             return self.raw_data
+
+    def _get_compare_label(self) -> str:
+        """Return the label selected as comparison baseline."""
+        if hasattr(self, "compare_combo") and self.compare_combo is not None:
+            label = self.compare_combo.currentText()
+            if label:
+                return label
+        return "原始数据"
 
     # ========== 数据更新接口 ==========
 
@@ -1373,18 +1560,22 @@ class WorkbenchPage(QWidget):
             if self.data_state is not None
             else None
         )
+        self.raw_trace_metadata = (
+            self.data_state.original_trace_metadata
+            if self.data_state is not None
+            else None
+        )
         self.current_result_header_info = (
             self.data_state.header_info if self.data_state is not None else None
+        )
+        self.current_result_trace_metadata = (
+            self.data_state.current_trace_metadata if self.data_state is not None else None
         )
         self.has_processed_result = False
         self.selected_history_index = 0
         self._slider_compare_ratio = 0.5
         self._clear_preview_data()
-        self.all_results = (
-            self.data_state.build_result_history()
-            if self.data_state is not None
-            else [("原始数据", self.raw_data.copy())]
-        )
+        self._rebuild_result_history_cache()
         self.param_editor.set_input_source("raw")
 
         # 更新状态
@@ -1404,6 +1595,7 @@ class WorkbenchPage(QWidget):
         data: np.ndarray,
         result_name: str | None = None,
         header_info: dict | None = None,
+        trace_metadata: dict | None = None,
     ):
         """更新当前处理结果预览，不直接修改正式共享状态。"""
         self._invalidate_preview_requests()
@@ -1423,6 +1615,7 @@ class WorkbenchPage(QWidget):
             result_data,
             result_name or "流程结果预览",
             header_info=header_info,
+            trace_metadata=trace_metadata,
         )
         self._log(f"结果已更新为预览，待确认保存: {result_name or '流程结果预览'}")
 
@@ -1475,12 +1668,17 @@ class WorkbenchPage(QWidget):
                 and (self.has_processed_result or self.preview_data is not None)
             )
 
-            # 控制滑动对比下拉框的显示
+            # 控制单图/对比选择下拉框的显示
             mode = self.mode_group.checkedId()
             use_wiggle = self.radio_wiggle.isChecked() and mode in {0, 1}
+            if hasattr(self, "view_combo"):
+                self.view_combo.setVisible(mode in {0, 1, 2, 3})
+                self._update_view_combo()
+            if hasattr(self, "compare_label"):
+                self.compare_label.setVisible(mode in {2, 3})
             if hasattr(self, "compare_combo"):
-                self.compare_combo.setVisible(mode == 3)
-                if mode == 3:
+                self.compare_combo.setVisible(mode in {2, 3})
+                if mode in {2, 3}:
                     self._update_compare_combo()
 
             if not has_data:
@@ -1508,9 +1706,20 @@ class WorkbenchPage(QWidget):
                 )
                 self.preview_info.setText("未加载数据")
             else:
+                raw_data = self.raw_data
+                assert raw_data is not None
                 # 有数据时，根据模式显示
-                if mode == 0:  # 原图
-                    self._plot_data(self.raw_data, "原始数据", wiggle=use_wiggle)
+                if mode == 0:  # 单图
+                    entry = self._get_selected_view_entry()
+                    if entry is not None:
+                        self._plot_data(
+                            entry["data"],
+                            str(entry.get("label") or "单图"),
+                            wiggle=use_wiggle,
+                            header_info=entry.get("header_info"),
+                        )
+                    else:
+                        self._plot_data(raw_data, "原始数据", wiggle=use_wiggle)
                 elif mode == 1:  # 结果
                     if self.preview_data is not None:
                         if (
@@ -1529,10 +1738,19 @@ class WorkbenchPage(QWidget):
                                 wiggle=use_wiggle,
                             )
                     elif has_result:
-                        self._plot_data(effective_result, "处理结果", wiggle=use_wiggle)
+                        assert effective_result is not None
+                        current_label = str(
+                            getattr(self.data_state, "current_label", "") or ""
+                        ).strip()
+                        result_title = (
+                            f"处理结果 - {current_label}"
+                            if current_label and current_label != "原始数据"
+                            else "处理结果"
+                        )
+                        self._plot_data(effective_result, result_title, wiggle=use_wiggle)
                     else:
                         self._plot_data(
-                            self.raw_data,
+                            raw_data,
                             "原始数据 (未处理)",
                             wiggle=use_wiggle,
                         )
@@ -1540,12 +1758,12 @@ class WorkbenchPage(QWidget):
                     if has_result:
                         self._plot_comparison()
                     else:
-                        self._plot_data(self.raw_data, "原始数据 (无结果可对比)")
+                        self._plot_data(raw_data, "原始数据 (无结果可对比)")
                 elif mode == 3:  # 滑动对比
                     if has_result:
                         self._plot_slider_comparison()
                     else:
-                        self._plot_data(self.raw_data, "原始数据 (无结果可对比)")
+                        self._plot_data(raw_data, "原始数据 (无结果可对比)")
 
             # 更新指标
             self._update_metrics()
@@ -1555,9 +1773,9 @@ class WorkbenchPage(QWidget):
             self._log(f"预览刷新失败: {e}", "ERROR")
             logger.exception("Workbench preview refresh failed")
 
-    def _build_plot_axes(self, data: np.ndarray):
+    def _build_plot_axes(self, data: np.ndarray, header_info: dict | None = None):
         """根据头信息构建坐标轴。"""
-        header = self._get_effective_header_info() or {}
+        header = header_info or self._get_effective_header_info() or {}
         trace_interval = float(header.get("trace_interval_m", 0.0) or 0.0)
         if trace_interval > 0:
             x_axis = np.arange(data.shape[1], dtype=float) * trace_interval
@@ -1593,23 +1811,29 @@ class WorkbenchPage(QWidget):
 
         return header, x_axis, y_axis, x_label, y_label
 
-    def _plot_data(self, data: np.ndarray, title: str, wiggle: bool = False):
+    def _plot_data(
+        self,
+        data: np.ndarray,
+        title: str,
+        wiggle: bool = False,
+        header_info: dict | None = None,
+    ):
         """绘制单个数据。"""
         if wiggle:
-            self._plot_wiggle_data(data, title)
+            self._plot_wiggle_data(data, title, header_info=header_info)
             return
 
         self.ax.clear()
-        header, x_axis, y_axis, x_label, y_label = self._build_plot_axes(data)
+        header, x_axis, y_axis, x_label, y_label = self._build_plot_axes(data, header_info)
         extent = None
         if x_axis.size > 0 and y_axis.size > 0:
             x_max = float(x_axis[-1]) if x_axis.size > 1 else 1.0
             if header.get("is_elevation"):
-                extent = [0.0, x_max, float(y_axis[-1]), float(y_axis[0])]
+                extent = (0.0, x_max, float(y_axis[-1]), float(y_axis[0]))
             elif header.get("is_depth"):
-                extent = [0.0, x_max, float(y_axis[-1]), float(y_axis[0])]
+                extent = (0.0, x_max, float(y_axis[-1]), float(y_axis[0]))
             elif y_label == "时间 (ns)":
-                extent = [0.0, x_max, float(y_axis[-1]), float(y_axis[0])]
+                extent = (0.0, x_max, float(y_axis[-1]), float(y_axis[0]))
         im = self.ax.imshow(
             data,
             aspect="auto",
@@ -1633,7 +1857,12 @@ class WorkbenchPage(QWidget):
             f"{data.shape[0]}×{data.shape[1]} | [{data.min():.3f}, {data.max():.3f}]"
         )
 
-    def _plot_wiggle_data(self, data: np.ndarray, title: str):
+    def _plot_wiggle_data(
+        self,
+        data: np.ndarray,
+        title: str,
+        header_info: dict | None = None,
+    ):
         """绘制摆动图。"""
         self.ax.clear()
         self.ax.set_axis_on()
@@ -1652,7 +1881,7 @@ class WorkbenchPage(QWidget):
             self.preview_info.setText("摆动图不可用")
             return
 
-        _, x_axis, y_axis, x_label, y_label = self._build_plot_axes(data)
+        _, x_axis, y_axis, x_label, y_label = self._build_plot_axes(data, header_info)
 
         n_samples, n_traces = data.shape
         max_traces = 80
@@ -1681,7 +1910,7 @@ class WorkbenchPage(QWidget):
                 y_axis,
                 x_axis[trace_idx],
                 wiggle,
-                where=wiggle >= x_axis[trace_idx],
+                where=(wiggle >= x_axis[trace_idx]).tolist(),
                 color=fill_color,
                 alpha=0.25,
                 interpolate=True,
@@ -1708,8 +1937,20 @@ class WorkbenchPage(QWidget):
     def _plot_comparison(self):
         """绘制差异图 - 显示处理前后的差异"""
         try:
-            result_data = self._get_effective_result_data()
-            if self.raw_data is None or result_data is None:
+            target_entry = self._get_selected_view_entry()
+            result_data = (
+                self.preview_data
+                if self.preview_data is not None
+                else (target_entry.get("data") if target_entry is not None else None)
+            )
+            compare_data = self._get_compare_data()
+            compare_label = self._get_compare_label()
+            result_label = (
+                self.preview_title
+                if self.preview_data is not None
+                else str(target_entry.get("label") if target_entry else "当前结果")
+            )
+            if compare_data is None or result_data is None:
                 placeholder_secondary = "#b7bcc6" if self.theme_manager.get_current_theme() == "dark" else "#888"
                 self.ax.text(
                     0.5,
@@ -1725,13 +1966,13 @@ class WorkbenchPage(QWidget):
                 return
 
             # 检查形状是否匹配
-            if self.raw_data.shape != result_data.shape:
+            if compare_data.shape != result_data.shape:
                 self.ax.clear()
                 placeholder_secondary = "#b7bcc6" if self.theme_manager.get_current_theme() == "dark" else "#888"
                 self.ax.text(
                     0.5,
                     0.5,
-                    f"数据形状不匹配\n原始: {self.raw_data.shape}\n结果: {result_data.shape}",
+                    f"数据形状不匹配\n基准: {compare_data.shape}\n目标: {result_data.shape}",
                     ha="center",
                     va="center",
                     fontsize=12,
@@ -1743,8 +1984,8 @@ class WorkbenchPage(QWidget):
 
             self.ax.clear()
 
-            # 计算差异：当前结果 - 原始数据
-            diff = result_data - self.raw_data
+            # 计算差异：目标图像 - 基准图像
+            diff = result_data - compare_data
 
             # 绘制差异图
             im = self.ax.imshow(
@@ -1754,7 +1995,7 @@ class WorkbenchPage(QWidget):
                 interpolation="bilinear",
             )
 
-            self.ax.set_title("差异图 (结果 - 原始)", fontsize=10)
+            self.ax.set_title(f"差异图 ({result_label} - {compare_label})", fontsize=10)
             self.ax.set_xlabel("距离", fontsize=8)
             self.ax.set_ylabel("时间", fontsize=8)
 
@@ -1767,7 +2008,9 @@ class WorkbenchPage(QWidget):
                 logger.warning("Workbench comparison colorbar failed: %s", e)
 
             # 更新预览信息
-            self.preview_info.setText(f"差异范围: [{diff.min():.3f}, {diff.max():.3f}]")
+            self.preview_info.setText(
+                f"基准: {compare_label} | 目标: {result_label} | 差异范围: [{diff.min():.3f}, {diff.max():.3f}]"
+            )
 
         except Exception as e:
             self.ax.clear()
@@ -1791,7 +2034,12 @@ class WorkbenchPage(QWidget):
             self.preview_info.setText("未加载数据")
             return
 
-        effective_result = self._get_effective_result_data()
+        target_entry = self._get_selected_view_entry()
+        effective_result = (
+            self.preview_data
+            if self.preview_data is not None
+            else (target_entry.get("data") if target_entry is not None else None)
+        )
         if effective_result is None:
             self._plot_data(self.raw_data, "原始数据 (无结果)")
             return
@@ -1840,10 +2088,12 @@ class WorkbenchPage(QWidget):
         except Exception as e:
             logger.warning("Workbench slider colorbar creation failed: %s", e)
 
-        left_name = "原始数据"
-        if hasattr(self, "compare_combo") and self.compare_combo is not None:
-            left_name = self.compare_combo.currentText() or left_name
-        right_name = self.preview_title if self.preview_data is not None else "当前结果"
+        left_name = self._get_compare_label()
+        right_name = (
+            self.preview_title
+            if self.preview_data is not None
+            else str(target_entry.get("label") if target_entry else "当前结果")
+        )
 
         is_dark = self.theme_manager.get_current_theme() == "dark"
         divider_color = "#d9e6ff" if is_dark else "#ffffff"
@@ -1924,8 +2174,10 @@ class WorkbenchPage(QWidget):
         # focus_ratio: 越大越好 (>0.5 good, <0.2 bad)
         focus_cls = tm.get_metric_color_class(focus_ratio, (0.5, 0.2))
         self.focus_ratio_label.setProperty("class", focus_cls)
-        self.focus_ratio_label.style().unpolish(self.focus_ratio_label)
-        self.focus_ratio_label.style().polish(self.focus_ratio_label)
+        focus_style = self.focus_ratio_label.style()
+        if focus_style is not None:
+            focus_style.unpolish(self.focus_ratio_label)
+            focus_style.polish(self.focus_ratio_label)
 
         # hot_pixels: 越小越好 (<100 good, >500 bad) → 反向判断
         if hot_pixels < 100:
@@ -1935,11 +2187,15 @@ class WorkbenchPage(QWidget):
         else:
             hot_cls = "metricWarning"
         self.hot_pixels_label.setProperty("class", hot_cls)
-        self.hot_pixels_label.style().unpolish(self.hot_pixels_label)
-        self.hot_pixels_label.style().polish(self.hot_pixels_label)
+        hot_style = self.hot_pixels_label.style()
+        if hot_style is not None:
+            hot_style.unpolish(self.hot_pixels_label)
+            hot_style.polish(self.hot_pixels_label)
 
         # snr: 越大越好 (>10 good, <5 bad)
         snr_cls = tm.get_metric_color_class(snr, (10.0, 5.0))
         self.snr_label.setProperty("class", snr_cls)
-        self.snr_label.style().unpolish(self.snr_label)
-        self.snr_label.style().polish(self.snr_label)
+        snr_style = self.snr_label.style()
+        if snr_style is not None:
+            snr_style.unpolish(self.snr_label)
+            snr_style.polish(self.snr_label)

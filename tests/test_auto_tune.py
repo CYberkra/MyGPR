@@ -201,7 +201,7 @@ def test_public_denoise_scope_is_frozen_to_current_public_methods():
     assert public_denoise_methods == EXPECTED_PUBLIC_DENOISE_METHODS
 
 
-def test_auto_tune_hankel_svd_returns_rank_and_window_candidate():
+def test_auto_tune_hankel_svd_uses_small_bounded_candidate_set():
     raw = _build_test_profile(traces=96)
     result = auto_tune_method(
         raw,
@@ -213,7 +213,19 @@ def test_auto_tune_hankel_svd_returns_rank_and_window_candidate():
     assert result["family"] == "denoise"
     assert result["best_params"]["window_length"] >= 0
     assert result["best_params"]["rank"] >= 0
-    assert len(result["coarse_trials"]) >= 1
+    assert len(result["coarse_trials"]) == 4
+    assert result["fine_trials"] == []
+    assert result["execution_stats"]["coarse_trial_count"] == 4
+    assert result["execution_stats"]["fine_trial_count"] == 0
+    observed = {
+        (
+            int(trial["params"]["window_length"]),
+            int(trial["params"]["rank"]),
+        )
+        for trial in result["coarse_trials"]
+    }
+    assert observed == {(0, 0), (48, 0), (0, 4), (48, 4)}
+    assert all("recovery_mode" not in trial["params"] for trial in result["all_trials"])
 
 
 def test_auto_tune_wavelet_2d_returns_threshold_candidate():

@@ -60,7 +60,14 @@ except ModuleNotFoundError as e:
 from PythonModule.dewow import method_dewow
 from PythonModule.set_zero_time import method_set_zero_time
 from PythonModule.motion_compensation_height import method_motion_compensation_height
+from PythonModule.motion_compensation_speed import method_motion_compensation_speed  # type: ignore[import]
 from PythonModule.trajectory_smoothing import method_trajectory_smoothing
+from PythonModule.motion_compensation_attitude import (  # type: ignore[import]
+    method_motion_compensation_attitude,
+)
+from PythonModule.motion_compensation_vibration import (  # type: ignore[import]
+    method_motion_compensation_vibration,
+)
 
 
 # ============ 方法注册表 ============
@@ -281,26 +288,34 @@ PROCESSING_METHODS = {
         "params": [
             {
                 "name": "window_length",
-                "label": "Window length (0=auto)",
+                "label": "Window length (0=auto bounded/literature, >0=fixed)",
                 "type": "int",
-                "default": 80,
+                "default": 0,
                 "min": 0,
                 "max": 2000,
             },
             {
                 "name": "rank",
-                "label": "Rank kept (0=auto)",
+                "label": "Rank kept (0=auto bounded/literature, >0=fixed)",
                 "type": "int",
-                "default": 5,
+                "default": 0,
                 "min": 0,
                 "max": 100,
+            },
+            {
+                "name": "aggressiveness",
+                "label": "去噪激进程度 (0.1=保守, 2.0=激进)",
+                "type": "float",
+                "default": 0.5,
+                "min": 0.1,
+                "max": 2.0,
             },
         ],
         "auto_tune_enabled": True,
         "auto_tune_family": "denoise",
         "auto_tune_candidates": {
-            "window_length": [0, 32, 48, 64, 80],
-            "rank": [0, 2, 4, 6, 8],
+            "window_length": [0, 24, 32, 48, 64],
+            "rank": [0, 1, 2, 3, 4, 5],
         },
     },
     "svd_subspace": {
@@ -541,7 +556,7 @@ PROCESSING_METHODS = {
             },
             {
                 "name": "wave_speed_m_per_ns",
-                "label": "波速 (m/ns)",
+                "label": "传播速度假设 (m/ns)",
                 "type": "float",
                 "default": 0.1,
                 "min": 0.01,
@@ -555,6 +570,26 @@ PROCESSING_METHODS = {
             "compensate_amplitude": [True, False],
             "compensate_time_shift": [True, False],
             "wave_speed_m_per_ns": [0.05, 0.1, 0.15],
+        },
+    },
+    "motion_compensation_speed": {
+        "name": "速度误差补偿",
+        "type": "local",
+        "func": method_motion_compensation_speed,
+        "params": [
+            {
+                "name": "spacing_m",
+                "label": "目标道间距 (m)",
+                "type": "float",
+                "default": 0.0,
+                "min": 0.0,
+                "max": 100.0,
+            },
+        ],
+        "auto_tune_enabled": True,
+        "auto_tune_family": "motion_comp",
+        "auto_tune_candidates": {
+            "spacing_m": [0.0],
         },
     },
     "trajectory_smoothing": {
@@ -592,6 +627,109 @@ PROCESSING_METHODS = {
             "method": ["savgol"],
             "window_length": [11, 21, 31, 51],
             "polyorder": [2, 3],
+        },
+    },
+    "motion_compensation_attitude": {
+        "name": "姿态/APC足迹修正",
+        "type": "local",
+        "func": method_motion_compensation_attitude,
+        "params": [
+            {
+                "name": "apc_offset_x_m",
+                "label": "APC X偏移 (m)",
+                "type": "float",
+                "default": 0.0,
+                "min": -10.0,
+                "max": 10.0,
+            },
+            {
+                "name": "apc_offset_y_m",
+                "label": "APC Y偏移 (m)",
+                "type": "float",
+                "default": 0.0,
+                "min": -10.0,
+                "max": 10.0,
+            },
+            {
+                "name": "apc_offset_z_m",
+                "label": "APC Z偏移 (m)",
+                "type": "float",
+                "default": 0.0,
+                "min": -10.0,
+                "max": 10.0,
+            },
+            {
+                "name": "max_abs_tilt_deg",
+                "label": "最大允许倾角 (°)",
+                "type": "float",
+                "default": 20.0,
+                "min": 1.0,
+                "max": 90.0,
+            },
+        ],
+        "auto_tune_enabled": True,
+        "auto_tune_family": "motion_comp",
+        "auto_tune_candidates": {
+            "apc_offset_x_m": [0.0],
+            "apc_offset_y_m": [0.0],
+            "apc_offset_z_m": [0.0],
+            "max_abs_tilt_deg": [15.0, 20.0, 30.0],
+        },
+    },
+    "motion_compensation_vibration": {
+        "name": "振动/背景条带抑制",
+        "type": "local",
+        "func": method_motion_compensation_vibration,
+        "params": [
+            {
+                "name": "smooth_window",
+                "label": "平滑窗口",
+                "type": "int",
+                "default": 9,
+                "min": 1,
+                "max": 101,
+            },
+            {
+                "name": "preserve_row_percentile",
+                "label": "保护行百分位",
+                "type": "float",
+                "default": 94.0,
+                "min": 50.0,
+                "max": 99.9,
+            },
+            {
+                "name": "preserve_mix",
+                "label": "保护混合系数",
+                "type": "float",
+                "default": 0.35,
+                "min": 0.0,
+                "max": 1.0,
+            },
+            {
+                "name": "background_mix",
+                "label": "背景混合系数",
+                "type": "float",
+                "default": 0.02,
+                "min": 0.0,
+                "max": 1.0,
+            },
+            {
+                "name": "max_restore_gain",
+                "label": "最大恢复增益",
+                "type": "float",
+                "default": 1.25,
+                "min": 1.0,
+                "max": 5.0,
+            },
+        ],
+        "auto_tune_enabled": True,
+        "auto_tune_family": "motion_comp",
+        "auto_tune_candidates": {
+            "smooth_window": [5, 9, 15],
+            "preserve_row_percentile": [90.0, 94.0, 98.0],
+            "preserve_mix": [0.2, 0.35, 0.5],
+            "background_mix": [0.0, 0.02, 0.05],
+            "max_restore_gain": [1.1, 1.25, 1.5],
         },
     },
     "stolt_migration": {
@@ -961,16 +1099,34 @@ METHOD_METADATA = {
         "display_name": "互相关背景抑制（CCBS）",
     },
     "motion_compensation_height": {
-        "category": "preprocessing",
+        "category": "motion_compensation",
         "maturity": "experimental",
         "visibility": "public",
         "display_name": "飞行高度归一化",
     },
+    "motion_compensation_speed": {
+        "category": "motion_compensation",
+        "maturity": "experimental",
+        "visibility": "public",
+        "display_name": "速度误差补偿",
+    },
     "trajectory_smoothing": {
-        "category": "preprocessing",
+        "category": "motion_compensation",
         "maturity": "experimental",
         "visibility": "public",
         "display_name": "轨迹平滑",
+    },
+    "motion_compensation_attitude": {
+        "category": "motion_compensation",
+        "maturity": "experimental",
+        "visibility": "public",
+        "display_name": "姿态/APC足迹修正",
+    },
+    "motion_compensation_vibration": {
+        "category": "motion_compensation",
+        "maturity": "experimental",
+        "visibility": "public",
+        "display_name": "振动/背景条带抑制",
     },
     "stolt_migration": {
         "category": "migration",
@@ -1033,6 +1189,11 @@ PREFERRED_METHOD_ORDER = [
     "wavelet_2d",
     "wavelet_svd",
     "running_average_2D",
+    "motion_compensation_height",
+    "motion_compensation_speed",
+    "trajectory_smoothing",
+    "motion_compensation_attitude",
+    "motion_compensation_vibration",
     "stolt_migration",
     "kirchhoff_migration",
     "time_to_depth",
@@ -1054,6 +1215,11 @@ METHOD_TAGS = {
     "kirchhoff_migration": "实验",
     "sliding_avg": "实验",
     "running_average_2D": "备选",
+    "motion_compensation_height": "实验",
+    "motion_compensation_speed": "实验",
+    "trajectory_smoothing": "实验",
+    "motion_compensation_attitude": "实验",
+    "motion_compensation_vibration": "实验",
 }
 
 METHOD_CATEGORY_LABELS = {
@@ -1066,6 +1232,7 @@ METHOD_CATEGORY_LABELS = {
     "gain": "增益",
     "migration": "迁移成像",
     "depth_conversion": "时间深度转换",
+    "motion_compensation": "运动补偿",
     "experimental": "实验功能",
 }
 
@@ -1086,7 +1253,10 @@ AUTO_TUNE_STAGE_BY_METHOD = {
     "wavelet_2d": "denoise",
     "wavelet_svd": "denoise",
     "motion_compensation_height": "motion_comp",
+    "motion_compensation_speed": "motion_comp",
     "trajectory_smoothing": "motion_comp",
+    "motion_compensation_attitude": "motion_comp",
+    "motion_compensation_vibration": "motion_comp",
 }
 
 for _method_key, _stage in AUTO_TUNE_STAGE_BY_METHOD.items():

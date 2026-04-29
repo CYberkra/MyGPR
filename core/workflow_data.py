@@ -55,6 +55,19 @@ METHOD_CATEGORIES = {
         "description": "几何校正和深度转换",
         "methods": ["stolt_migration", "kirchhoff_migration", "time_to_depth"],
     },
+    "motion_compensation": {
+        "id": "motion_compensation",
+        "name": "运动补偿",
+        "icon": "🚁",
+        "description": "无人机GPR运动误差校正",
+        "methods": [
+            "trajectory_smoothing",
+            "motion_compensation_speed",
+            "motion_compensation_attitude",
+            "motion_compensation_height",
+            "motion_compensation_vibration",
+        ],
+    },
 }
 
 
@@ -157,21 +170,67 @@ QUICK_PRESETS = {
             },
             {
                 "category": "denoising",
-                "method_id": "wavelet_svd",
+                "method_id": "hankel_svd",
                 "enabled": True,
-                "params": {
-                    "wavelet": "db4",
-                    "levels": 2,
-                    "threshold": 0.05,
-                    "rank_start": 1,
-                    "rank_end": 20,
-                },
+                "params": {"window_length": 0, "rank": 0},
             },
             {
                 "category": "migration",
                 "method_id": "stolt_migration",
                 "enabled": True,
                 "params": {"dx": 0.05, "dt": 0.1, "v": 0.1},
+            },
+        ],
+    },
+    "motion_compensation_v1": {
+        "name": "运动补偿 V1",
+        "description": "无人机GPR五维运动误差校正流程（确定性V1阶段）",
+        "methods": [
+            {
+                "category": "motion_compensation",
+                "method_id": "trajectory_smoothing",
+                "enabled": True,
+                "params": {"method": "savgol", "window_length": 21, "polyorder": 3},
+            },
+            {
+                "category": "motion_compensation",
+                "method_id": "motion_compensation_speed",
+                "enabled": True,
+                "params": {"spacing_m": 0.0},
+            },
+            {
+                "category": "motion_compensation",
+                "method_id": "motion_compensation_attitude",
+                "enabled": True,
+                "params": {
+                    "apc_offset_x_m": 0.0,
+                    "apc_offset_y_m": 0.0,
+                    "apc_offset_z_m": 0.0,
+                    "max_abs_tilt_deg": 20.0,
+                },
+            },
+            {
+                "category": "motion_compensation",
+                "method_id": "motion_compensation_height",
+                "enabled": True,
+                "params": {
+                    "reference_height_mode": "mean",
+                    "compensate_amplitude": True,
+                    "compensate_time_shift": True,
+                    "wave_speed_m_per_ns": 0.1,
+                },
+            },
+            {
+                "category": "motion_compensation",
+                "method_id": "motion_compensation_vibration",
+                "enabled": True,
+                "params": {
+                    "smooth_window": 9,
+                    "preserve_row_percentile": 94.0,
+                    "preserve_mix": 0.35,
+                    "background_mix": 0.02,
+                    "max_restore_gain": 1.25,
+                },
             },
         ],
     },

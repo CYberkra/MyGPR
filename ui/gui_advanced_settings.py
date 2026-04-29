@@ -445,6 +445,52 @@ class AdvancedSettingsPage(QWidget):
         )
 
         layout.addWidget(perf_box)
+
+        # 可选 RTK/IMU 辅助文件：仅保存用户手动选择的路径，不影响普通 CSV 导入。
+        self.sidecar_box = QGroupBox("可选 RTK/IMU 辅助文件")
+        sidecar_layout = QVBoxLayout(self.sidecar_box)
+        sidecar_layout.setSpacing(10)
+
+        sidecar_hint = QLabel(
+            "没有 RTK/IMU 数据时可保持未选择；普通 CSV 导入和处理流程不受影响。"
+        )
+        sidecar_hint.setWordWrap(True)
+        sidecar_hint.setProperty("class", "hintText")
+        sidecar_layout.addWidget(sidecar_hint)
+
+        rtk_row = QWidget()
+        rtk_layout = QHBoxLayout(rtk_row)
+        rtk_layout.setContentsMargins(0, 0, 0, 0)
+        rtk_layout.setSpacing(8)
+        rtk_layout.addWidget(QLabel("RTK"))
+        self.rtk_sidecar_label = QLabel("未选择")
+        self.rtk_sidecar_label.setProperty("class", "hintText")
+        self.rtk_sidecar_button = PushButton("选择 RTK")
+        self.rtk_sidecar_button.setToolTip("选择可选 RTK CSV 辅助文件")
+        self.rtk_sidecar_clear_button = PushButton("清除")
+        self.rtk_sidecar_clear_button.setToolTip("清除当前 RTK 辅助文件选择")
+        rtk_layout.addWidget(self.rtk_sidecar_label, stretch=1)
+        rtk_layout.addWidget(self.rtk_sidecar_button)
+        rtk_layout.addWidget(self.rtk_sidecar_clear_button)
+        sidecar_layout.addWidget(rtk_row)
+
+        imu_row = QWidget()
+        imu_layout = QHBoxLayout(imu_row)
+        imu_layout.setContentsMargins(0, 0, 0, 0)
+        imu_layout.setSpacing(8)
+        imu_layout.addWidget(QLabel("IMU"))
+        self.imu_sidecar_label = QLabel("未选择")
+        self.imu_sidecar_label.setProperty("class", "hintText")
+        self.imu_sidecar_button = PushButton("选择 IMU")
+        self.imu_sidecar_button.setToolTip("选择可选 IMU CSV 辅助文件")
+        self.imu_sidecar_clear_button = PushButton("清除")
+        self.imu_sidecar_clear_button.setToolTip("清除当前 IMU 辅助文件选择")
+        imu_layout.addWidget(self.imu_sidecar_label, stretch=1)
+        imu_layout.addWidget(self.imu_sidecar_button)
+        imu_layout.addWidget(self.imu_sidecar_clear_button)
+        sidecar_layout.addWidget(imu_row)
+
+        layout.addWidget(self.sidecar_box)
         layout.addStretch(1)
 
         scroll.setWidget(content)

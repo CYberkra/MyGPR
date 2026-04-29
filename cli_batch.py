@@ -38,7 +38,15 @@ if BASE_DIR not in sys.path:
 if MODULE_DIR not in sys.path:
     sys.path.insert(0, MODULE_DIR)
 
-from core.gpr_io import savecsv, save_image
+from core.benchmark_registry import list_benchmark_sample_ids
+from core.evidence_export import export_motion_compensation_benchmark
+from core.gpr_io import extract_airborne_csv_payload, savecsv, save_image
+from core.processing_engine import (
+    merge_result_header_info,
+    merge_result_trace_metadata,
+    prepare_runtime_params,
+    run_processing_method,
+)
 from core.preset_profiles import GUI_PRESETS_V1, RECOMMENDED_RUN_PROFILES
 
 # 使用统一的方法注册表
@@ -108,27 +116,42 @@ def _detect_skip_lines(path: str, max_scan: int = 10) -> int:
     return skip_lines
 
 
-def load_gpr_csv(path: str) -> Tuple[np.ndarray, Optional[Dict[str, float]]]:
+def load_gpr_csv(
+    path: str,
+    *,
+    trace_timestamps_s: Any = None,
+    rtk_path: str | None = None,
+    imu_path: str | None = None,
+) -> Tuple[
+    np.ndarray,
+    Optional[Dict[str, Any]],
+    Optional[Dict[str, np.ndarray]],
+]:
     header_info = detect_csv_header(path)
     skip_lines = _detect_skip_lines(path)
 
     df = pd.read_csv(path, header=None, skiprows=skip_lines)
     raw_data = df.values
+    trace_metadata = None
 
     if header_info:
-        samples = int(header_info["a_scan_length"])
-        traces = int(header_info["num_traces"])
-        if raw_data.shape[1] <= 10 and raw_data.shape[0] >= samples * traces:
-            col_idx = 3 if raw_data.shape[1] > 3 else raw_data.shape[1] - 1
-            signal_1d = raw_data[:, col_idx]
-            data = signal_1d[: traces * samples].reshape((traces, samples)).T
-        elif raw_data.shape[0] == traces and raw_data.shape[1] >= samples:
-            data = raw_data[:, :samples].T
-        elif raw_data.shape[0] >= samples and raw_data.shape[1] >= traces:
-            data = raw_data[:samples, :traces]
-        else:
-            data = raw_data
+        sidecar_kwargs: Dict[str, Any] = {}
+        if trace_timestamps_s is not None:
+            sidecar_kwargs["trace_timestamps_s"] = np.asarray(
+                trace_timestamps_s, dtype=np.float64
+            )
+        if rtk_path is not None:
+            sidecar_kwargs["rtk_path"] = rtk_path
+        if imu_path is not None:
+            sidecar_kwargs["imu_path"] = imu_path
+        data, trace_metadata, header_info = extract_airborne_csv_payload(
+            raw_data,
+            header_info,
+            **sidecar_kwargs,
+        )
     else:
+        if rtk_path is not None or imu_path is not None:
+            raise ValueError("RTK/IMU sidecars require an airborne CSV header")
         data = raw_data
 
     if np.isnan(data).any():
@@ -137,7 +160,7 @@ def load_gpr_csv(path: str) -> Tuple[np.ndarray, Optional[Dict[str, float]]]:
     if data.ndim == 1:
         data = data.reshape(-1, 1)
 
-    return np.asarray(data, dtype=float), header_info
+    return np.asarray(data, dtype=float), header_info, trace_metadata
 
 
 # 本地方法注册（用于兼容旧的本地方法调用）
@@ -249,6 +272,47 @@ def load_config(config_path: str) -> Dict[str, Any]:
     return cfg
 
 
+def _safe_relpath(path: str, repo_root: str) -> str:
+    """Return a repo-relative path when possible, else keep absolute Windows-safe path."""
+    abs_path = os.path.abspath(path)
+    abs_root = os.path.abspath(repo_root)
+    if os.path.splitdrive(abs_path)[0].lower() != os.path.splitdrive(abs_root)[0].lower():
+        return abs_path
+    return os.path.relpath(abs_path, abs_root)
+
+
+def _resolve_repo_path(path: str, repo_root: str) -> str:
+    """Resolve a config path relative to the repo root."""
+    return path if os.path.isabs(path) else os.path.join(repo_root, path)
+
+
+def _build_sidecar_loader_kwargs(job: Dict[str, Any], repo_root: str) -> Dict[str, Any]:
+    """Build optional RTK/IMU sidecar loader kwargs from a CLI job."""
+    kwargs: Dict[str, Any] = {}
+    if job.get("trace_timestamps_s") is not None:
+        kwargs["trace_timestamps_s"] = np.asarray(
+            job["trace_timestamps_s"], dtype=np.float64
+        )
+    for field in ("rtk_path", "imu_path"):
+        value = job.get(field)
+        if value:
+            kwargs[field] = _resolve_repo_path(str(value), repo_root)
+    return kwargs
+
+
+def _validate_trace_timestamps(value: Any) -> str | None:
+    """Return an error message when trace_timestamps_s is not a finite 1D array."""
+    try:
+        arr = np.asarray(value, dtype=np.float64)
+    except (TypeError, ValueError):
+        return "trace_timestamps_s must be a numeric 1D list"
+    if arr.ndim != 1 or arr.size == 0:
+        return "trace_timestamps_s must be a non-empty 1D list"
+    if not np.isfinite(arr).all():
+        return "trace_timestamps_s must contain only finite numbers"
+    return None
+
+
 def validate_config(cfg: Dict[str, Any], repo_root: str) -> ValidationResult:
     errors: List[str] = []
     warnings: List[str] = []
@@ -261,16 +325,30 @@ def validate_config(cfg: Dict[str, Any], repo_root: str) -> ValidationResult:
     for i, job in enumerate(jobs):
         jid = job.get("id", f"job#{i}")
         input_path = job.get("input")
-        if not input_path:
+        benchmark_sample = job.get("benchmark_sample")
+        if not input_path and not benchmark_sample:
             errors.append(f"[{jid}] missing input")
             continue
-        abs_input = (
-            input_path
-            if os.path.isabs(input_path)
-            else os.path.join(repo_root, input_path)
-        )
-        if not os.path.exists(abs_input):
-            errors.append(f"[{jid}] input not found: {input_path}")
+        if input_path:
+            abs_input = _resolve_repo_path(str(input_path), repo_root)
+            if not os.path.exists(abs_input):
+                errors.append(f"[{jid}] input not found: {input_path}")
+            for sidecar_field in ("rtk_path", "imu_path"):
+                sidecar_path = job.get(sidecar_field)
+                if sidecar_path:
+                    abs_sidecar = _resolve_repo_path(str(sidecar_path), repo_root)
+                    if not os.path.exists(abs_sidecar):
+                        errors.append(
+                            f"[{jid}] {sidecar_field} not found: {sidecar_path}"
+                        )
+            if job.get("trace_timestamps_s") is not None:
+                timestamp_error = _validate_trace_timestamps(
+                    job.get("trace_timestamps_s")
+                )
+                if timestamp_error:
+                    errors.append(f"[{jid}] {timestamp_error}")
+        if benchmark_sample and benchmark_sample not in list_benchmark_sample_ids():
+            errors.append(f"[{jid}] unknown benchmark_sample: {benchmark_sample}")
 
         try:
             methods = _resolve_job_methods(job)
@@ -399,17 +477,62 @@ def _run_core_method(
 
 
 def run_job(job: Dict[str, Any], repo_root: str, output_dir: str) -> Dict[str, Any]:
+    benchmark_sample = job.get("benchmark_sample")
+    if benchmark_sample:
+        if benchmark_sample != "motion_compensation_v1":
+            raise ValueError(f"unsupported benchmark_sample: {benchmark_sample}")
+        if str(job.get("recommended_profile") or "") != "motion_compensation_v1":
+            raise ValueError(
+                "motion benchmark job requires recommended_profile=motion_compensation_v1"
+            )
+
+        summary = export_motion_compensation_benchmark(
+            output_dir,
+            sample_id=str(benchmark_sample),
+            profile_key="motion_compensation_v1",
+            seed=int(job.get("seed", 42)),
+            save_images=True,
+        )
+        header_info = summary.get("header_info") or {}
+        return {
+            "job_id": job.get("id") or str(benchmark_sample),
+            "benchmark_sample": str(benchmark_sample),
+            "recommended_profile": job.get("recommended_profile"),
+            "status": "ok",
+            "steps": summary["steps"],
+            "final_shape": [
+                int(header_info.get("a_scan_length", 0)),
+                int(header_info.get("num_traces", 0)),
+            ],
+            "before_png": _safe_relpath(summary["artifacts"]["before_png"], repo_root),
+            "after_png": _safe_relpath(summary["artifacts"]["after_png"], repo_root),
+            "difference_png": _safe_relpath(
+                summary["artifacts"]["difference_png"], repo_root
+            ),
+            "motion_metrics_json": _safe_relpath(
+                summary["artifacts"]["motion_metrics_json"], repo_root
+            ),
+            "corrected_trace_metadata_csv": _safe_relpath(
+                summary["artifacts"]["corrected_trace_metadata_csv"], repo_root
+            ),
+            "summary_json": _safe_relpath(summary["summary_json"], repo_root),
+            "objective_checks": summary["objective_checks"],
+        }
+
     jid = job.get("id") or os.path.splitext(os.path.basename(job["input"]))[0]
     input_path = job["input"]
-    abs_input = (
-        input_path if os.path.isabs(input_path) else os.path.join(repo_root, input_path)
-    )
+    abs_input = _resolve_repo_path(str(input_path), repo_root)
 
     job_out_dir = os.path.join(output_dir, jid)
     os.makedirs(job_out_dir, exist_ok=True)
 
-    data, _header = load_gpr_csv(abs_input)
+    data, header_info, trace_metadata = load_gpr_csv(
+        abs_input,
+        **_build_sidecar_loader_kwargs(job, repo_root),
+    )
     current = data
+    current_header_info = merge_result_header_info(header_info, None, current.shape)
+    current_trace_metadata = trace_metadata
     steps_summary: List[Dict[str, Any]] = []
 
     methods = _resolve_job_methods(job)
@@ -422,13 +545,32 @@ def run_job(job: Dict[str, Any], repo_root: str, output_dir: str) -> Dict[str, A
             new_data = _run_core_method(
                 key, meta["func"], meta["module"], current, params, job_out_dir
             )
+            current_header_info = merge_result_header_info(
+                current_header_info,
+                None,
+                np.asarray(new_data).shape,
+            )
         else:
-            # 使用本地方法
-            local_func = meta.get("func") or LOCAL_METHODS.get(key)
-            if local_func is None:
-                raise ValueError(f"Local method not found: {key}")
-            result = local_func(current, **params)
-            new_data = result[0] if isinstance(result, tuple) else result
+            new_data, result_meta = run_processing_method(
+                current,
+                key,
+                prepare_runtime_params(
+                    key,
+                    params,
+                    current_header_info,
+                    current_trace_metadata,
+                    current.shape,
+                ),
+            )
+            current_header_info = merge_result_header_info(
+                current_header_info,
+                result_meta,
+                np.asarray(new_data).shape,
+            )
+            current_trace_metadata = merge_result_trace_metadata(
+                current_trace_metadata,
+                result_meta,
+            )
 
         step_csv = os.path.join(job_out_dir, f"{idx:02d}_{key}.csv")
         step_png = os.path.join(job_out_dir, f"{idx:02d}_{key}.png")

@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Any, Iterable
 
 import numpy as np
 from scipy.ndimage import uniform_filter1d
@@ -115,10 +115,14 @@ def extract_roi_and_context(
     arr = _as_clean_2d(data)
     n_samples, n_traces = arr.shape
     bounds = dict(roi_bounds or auto_roi_bounds(arr))
-    t0 = max(0, min(int(bounds.get("time_start_idx", 0)), n_samples - 1))
-    t1 = max(t0 + 1, min(int(bounds.get("time_end_idx", n_samples)), n_samples))
-    d0 = max(0, min(int(bounds.get("dist_start_idx", 0)), n_traces - 1))
-    d1 = max(d0 + 1, min(int(bounds.get("dist_end_idx", n_traces)), n_traces))
+    time_start = bounds.get("time_start_idx", 0)
+    time_end = bounds.get("time_end_idx", n_samples)
+    dist_start = bounds.get("dist_start_idx", 0)
+    dist_end = bounds.get("dist_end_idx", n_traces)
+    t0 = max(0, min(int(0 if time_start is None else time_start), n_samples - 1))
+    t1 = max(t0 + 1, min(int(n_samples if time_end is None else time_end), n_samples))
+    d0 = max(0, min(int(0 if dist_start is None else dist_start), n_traces - 1))
+    d1 = max(d0 + 1, min(int(n_traces if dist_end is None else dist_end), n_traces))
 
     pad_t = max(2, int(round((t1 - t0) * padding_ratio)))
     pad_d = max(2, int(round((d1 - d0) * padding_ratio)))
@@ -153,14 +157,15 @@ def estimate_lateral_correlation_length(
     n_traces = arr.shape[1]
     if n_traces <= 2:
         return 1
-    max_lag = min(n_traces - 1, max_lag or max(6, n_traces // 6))
+    max_lag_value = max(6, n_traces // 6) if max_lag is None else int(max_lag)
+    resolved_max_lag = min(n_traces - 1, max_lag_value)
     centered = arr - np.mean(arr, axis=0, keepdims=True)
     std = np.std(centered, axis=0, keepdims=True)
     std = np.where(std > EPS, std, 1.0)
     normalized = centered / std
 
     corrs = []
-    for lag in range(1, max_lag + 1):
+    for lag in range(1, resolved_max_lag + 1):
         left = normalized[:, :-lag]
         right = normalized[:, lag:]
         corr = float(np.mean(left * right))
@@ -488,3 +493,190 @@ def compute_benchmark_metrics(
         )
 
     return {key: float(value) for key, value in metrics.items()}
+
+
+def _metadata_array(metadata: dict[str, object], key: str) -> np.ndarray:
+    """Fetch a 1D numeric metadata array with validation."""
+    if key not in metadata:
+        raise KeyError(f"缺少 trace_metadata['{key}']")
+    values = np.asarray(metadata[key], dtype=np.float64).reshape(-1)
+    if values.size == 0:
+        raise ValueError(f"trace_metadata['{key}'] 不能为空")
+    return np.nan_to_num(values, nan=0.0, posinf=0.0, neginf=0.0)
+
+
+def _resolve_row_range(
+    row_range: tuple[int, int] | list[int] | None,
+    total_rows: int,
+) -> tuple[int, int]:
+    """Clamp an optional row window to valid array bounds."""
+    if row_range is None:
+        return 0, total_rows
+    start = max(0, min(int(row_range[0]), total_rows - 1))
+    stop = max(start + 1, min(int(row_range[1]), total_rows))
+    return start, stop
+
+
+def detect_ridge_indices(
+    data: np.ndarray,
+    row_range: tuple[int, int] | list[int] | None = None,
+) -> np.ndarray:
+    """Return the strongest absolute-amplitude row index per trace."""
+    arr = _as_clean_2d(data)
+    start, stop = _resolve_row_range(row_range, arr.shape[0])
+    return start + np.argmax(np.abs(arr[start:stop, :]), axis=0)
+
+
+def ridge_error_metrics(
+    data: np.ndarray,
+    ground_truth_ridge_idx: np.ndarray,
+    row_range: tuple[int, int] | list[int] | None = None,
+) -> dict[str, Any]:
+    """Compare detected reflector ridge indices against ground truth."""
+    detected = detect_ridge_indices(data, row_range=row_range).astype(np.float64)
+    truth = np.asarray(ground_truth_ridge_idx, dtype=np.float64).reshape(-1)
+    n = min(detected.size, truth.size)
+    if n == 0:
+        raise ValueError("reflector ridge ground truth不能为空")
+    residual = detected[:n] - truth[:n]
+    return {
+        "detected_ridge_idx": detected[:n].astype(np.int32),
+        "ridge_residual_samples": residual,
+        "raw_ridge_mae_samples": float(np.mean(np.abs(residual))),
+        "raw_ridge_rmse_samples": float(np.sqrt(np.mean(residual**2))),
+        "raw_ridge_max_abs_samples": float(np.max(np.abs(residual))),
+    }
+
+
+def trace_spacing_std(trace_metadata: dict[str, object], key: str = "trace_distance_m") -> float:
+    """Std of inter-trace spacing from cumulative distance metadata."""
+    distance = _metadata_array(trace_metadata, key)
+    if distance.size <= 1:
+        return 0.0
+    return float(np.std(np.diff(distance)))
+
+
+def path_rmse(
+    trace_metadata: dict[str, object],
+    ground_truth_trace_metadata: dict[str, object],
+) -> float:
+    """RMSE between observed and ground-truth antenna path."""
+    obs_x = _metadata_array(trace_metadata, "local_x_m")
+    obs_y = _metadata_array(trace_metadata, "local_y_m")
+    ref_x = _metadata_array(ground_truth_trace_metadata, "local_x_m")
+    ref_y = _metadata_array(ground_truth_trace_metadata, "local_y_m")
+    n = min(obs_x.size, obs_y.size, ref_x.size, ref_y.size)
+    if n == 0:
+        raise ValueError("路径元数据不能为空")
+    dx = obs_x[:n] - ref_x[:n]
+    dy = obs_y[:n] - ref_y[:n]
+    return float(np.sqrt(np.mean(dx**2 + dy**2)))
+
+
+def footprint_rmse(
+    trace_metadata: dict[str, object],
+    ground_truth_trace_metadata: dict[str, object],
+) -> float:
+    """RMSE between observed and ground-truth footprint coordinates."""
+    obs_x = _metadata_array(trace_metadata, "footprint_x_m")
+    obs_y = _metadata_array(trace_metadata, "footprint_y_m")
+    ref_x = _metadata_array(ground_truth_trace_metadata, "footprint_x_m")
+    ref_y = _metadata_array(ground_truth_trace_metadata, "footprint_y_m")
+    n = min(obs_x.size, obs_y.size, ref_x.size, ref_y.size)
+    if n == 0:
+        raise ValueError("footprint 元数据不能为空")
+    dx = obs_x[:n] - ref_x[:n]
+    dy = obs_y[:n] - ref_y[:n]
+    return float(np.sqrt(np.mean(dx**2 + dy**2)))
+
+
+def periodic_banding_ratio(
+    data: np.ndarray,
+    trace_band: tuple[float, float] = (0.05, 0.18),
+    row_range: tuple[int, int] | list[int] | None = None,
+) -> float:
+    """Ratio of lateral spectral energy inside a periodic striping band."""
+    arr = _as_clean_2d(data)
+    start, stop = _resolve_row_range(row_range, arr.shape[0])
+    window = arr[start:stop, :]
+    if window.shape[1] <= 2:
+        return 0.0
+    centered = window - np.mean(window, axis=1, keepdims=True)
+    spec = np.abs(np.fft.rfft(centered, axis=1)) ** 2
+    if spec.shape[1] <= 1:
+        return 0.0
+    freqs = np.fft.rfftfreq(window.shape[1], d=1.0)
+    low = max(0.0, float(trace_band[0]))
+    high = min(float(freqs[-1]), float(trace_band[1]))
+    if high <= low:
+        high = min(float(freqs[-1]), low + 0.04)
+    band_mask = (freqs >= low) & (freqs <= high)
+    band_mask[0] = False
+    total = float(np.sum(spec[:, 1:]))
+    if total <= EPS:
+        return 0.0
+    return float(np.sum(spec[:, band_mask]) / total)
+
+
+def target_preservation_ratio(
+    data: np.ndarray,
+    reference_data: np.ndarray,
+    row_range: tuple[int, int] | list[int],
+) -> float:
+    """Energy ratio inside the target zone relative to a clean reference sample."""
+    arr = _as_clean_2d(data)
+    ref = _as_clean_2d(reference_data)
+    n_rows = min(arr.shape[0], ref.shape[0])
+    n_cols = min(arr.shape[1], ref.shape[1])
+    start, stop = _resolve_row_range(row_range, n_rows)
+    window = arr[start:stop, :n_cols]
+    ref_window = ref[start:stop, :n_cols]
+    denom = float(np.sum(ref_window**2))
+    if denom <= EPS:
+        return 0.0
+    return float(np.sum(window**2) / denom)
+
+
+def compute_motion_quality_metrics(
+    data: np.ndarray,
+    trace_metadata: dict[str, object],
+    ground_truth_trace_metadata: dict[str, object],
+    *,
+    ground_truth_data: np.ndarray | None = None,
+    ridge_row_range: tuple[int, int] | list[int] | None = None,
+    target_row_range: tuple[int, int] | list[int] | None = None,
+    banding_trace_band: tuple[float, float] = (0.05, 0.18),
+    banding_row_range: tuple[int, int] | list[int] | None = None,
+) -> dict[str, float]:
+    """Compute scalar benchmark metrics for raw or corrected motion-compensation data."""
+    ground_truth_ridge_idx = np.asarray(
+        ground_truth_trace_metadata["reflector_ridge_idx"],
+        dtype=np.float64,
+    )
+    ridge = ridge_error_metrics(
+        data,
+        ground_truth_ridge_idx,
+        row_range=ridge_row_range,
+    )
+    metrics = {
+        "raw_ridge_mae_samples": float(ridge["raw_ridge_mae_samples"]),
+        "raw_ridge_rmse_samples": float(ridge["raw_ridge_rmse_samples"]),
+        "raw_ridge_max_abs_samples": float(ridge["raw_ridge_max_abs_samples"]),
+        "trace_spacing_std_m": float(trace_spacing_std(trace_metadata)),
+        "path_rmse_m": float(path_rmse(trace_metadata, ground_truth_trace_metadata)),
+        "footprint_rmse_m": float(
+            footprint_rmse(trace_metadata, ground_truth_trace_metadata)
+        ),
+        "periodic_banding_ratio": float(
+            periodic_banding_ratio(
+                data,
+                trace_band=banding_trace_band,
+                row_range=banding_row_range,
+            )
+        ),
+    }
+    if ground_truth_data is not None and target_row_range is not None:
+        metrics["target_preservation_ratio"] = float(
+            target_preservation_ratio(data, ground_truth_data, row_range=target_row_range)
+        )
+    return metrics

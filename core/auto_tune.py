@@ -432,6 +432,14 @@ def _build_candidate_trials(
             budget=stage_budget,
         )
     if family == "denoise":
+        if method_key == "hankel_svd":
+            return _build_hankel_svd_trials(
+                data,
+                config,
+                base_params,
+                stage=stage,
+                budget=stage_budget,
+            )
         if method_key == "svd_subspace":
             rank_start_default = config.get("rank_start", [1])
             if isinstance(rank_start_default, list):
@@ -983,6 +991,9 @@ def _refine_candidate_trials(
     plan = _get_search_plan(context.search_mode)
     refined: list[dict[str, Any]] = []
     n_samples, n_traces = int(data.shape[0]), int(data.shape[1])
+
+    if method_key == "hankel_svd":
+        return []
 
     for seed_rank, trial in enumerate(seed_trials, start=1):
         params = trial.get("params", {})
@@ -1689,6 +1700,83 @@ def _build_subspace_rank_end_candidates(
         int(value)
         for value in _trim_numeric_candidates(values, budget=budget, center=base_rank)
     ]
+
+
+def _build_hankel_svd_trials(
+    data: np.ndarray,
+    config: dict[str, Any],
+    base_params: dict[str, Any],
+    stage: str,
+    budget: int,
+) -> list[dict[str, Any]]:
+    """Build a tiny bounded Hankel candidate set around internal auto modes."""
+    if stage != "coarse":
+        return []
+
+    n_samples = int(data.shape[0])
+    fixed_window = _resolve_hankel_fixed_window(
+        n_samples,
+        base_params.get("window_length"),
+        config.get("window_length", []),
+    )
+    fixed_rank = _resolve_hankel_fixed_rank(
+        n_samples,
+        base_params.get("rank"),
+        config.get("rank", []),
+    )
+    candidates = _dedupe_candidates(
+        [
+            {"window_length": 0, "rank": 0},
+            {"window_length": int(fixed_window), "rank": 0},
+            {"window_length": 0, "rank": int(fixed_rank)},
+            {"window_length": int(fixed_window), "rank": int(fixed_rank)},
+        ]
+    )
+    return candidates[: max(1, min(int(budget), 4))]
+
+
+def _resolve_hankel_fixed_window(
+    n_samples: int,
+    requested_value: Any,
+    configured_values: Any,
+) -> int:
+    """Resolve a safe fixed Hankel window without the broad external grid."""
+    upper = max(1, int(n_samples) - 1)
+    fallback = max(1, min(upper, max(8, int(round(max(int(n_samples), 1) * 0.25)))))
+    preferred_values: list[Any] = [requested_value]
+    if isinstance(configured_values, list):
+        preferred_values.extend(configured_values)
+    else:
+        preferred_values.append(configured_values)
+    for value in preferred_values:
+        if value is None:
+            continue
+        current = int(value)
+        if current > 0:
+            return max(1, min(current, upper))
+    return fallback
+
+
+def _resolve_hankel_fixed_rank(
+    n_samples: int,
+    requested_value: Any,
+    configured_values: Any,
+) -> int:
+    """Resolve a safe fixed Hankel rank while reserving zero for internal auto-select."""
+    upper = max(1, min(10, int(n_samples) - 1))
+    fallback = max(1, min(upper, 5))
+    preferred_values: list[Any] = [requested_value]
+    if isinstance(configured_values, list):
+        preferred_values.extend(configured_values)
+    else:
+        preferred_values.append(configured_values)
+    for value in preferred_values:
+        if value is None:
+            continue
+        current = int(value)
+        if current > 0:
+            return max(1, min(current, upper))
+    return fallback
 
 
 def _build_sec_gain_candidates(

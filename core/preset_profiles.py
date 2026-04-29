@@ -103,7 +103,7 @@ GUI_PRESETS_V1 = {
             "dewow": {"window": 21},
             "fk_filter": {"angle_low": 16, "angle_high": 45, "taper_width": 3},
             "sec_gain": {"gain_min": 1.0, "gain_max": 3.2, "power": 1.0},
-            "hankel_svd": {"window_length": 48, "rank": 4},
+            "hankel_svd": {"window_length": 32, "rank": 0},
         },
     },
     "denoise_first": {
@@ -143,7 +143,7 @@ GUI_PRESETS_V1 = {
             "dewow": {"window": 31},
             "fk_filter": {"angle_low": 8, "angle_high": 62, "taper_width": 2},
             "sec_gain": {"gain_min": 1.0, "gain_max": 5.0, "power": 1.05},
-            "hankel_svd": {"window_length": 72, "rank": 8},
+            "hankel_svd": {"window_length": 0, "rank": 0},
         },
     },
     "stolt_speed_first": {
@@ -234,7 +234,7 @@ RECOMMENDED_RUN_PROFILES = {
             "subtracting_average_2D",
             "fk_filter",
             "sec_gain",
-            "wavelet_svd",
+            "hankel_svd",
             "stolt_migration",
         ],
     },
@@ -242,7 +242,7 @@ RECOMMENDED_RUN_PROFILES = {
         "label": "Hankel-SVD 去噪",
         "preset_key": "denoise_first",
         "method_params": {
-            "hankel_svd": {"window_length": 48, "rank": 4},
+            "hankel_svd": {"window_length": 0, "rank": 0},
         },
         "order": [
             "set_zero_time",
@@ -266,6 +266,44 @@ RECOMMENDED_RUN_PROFILES = {
             "fk_filter",
             "sec_gain",
             "wavelet_2d",
+        ],
+    },
+    "motion_compensation_v1": {
+        "label": "运动补偿 V1",
+        "preset_key": "raw_fidelity",
+        "method_params": {
+            "trajectory_smoothing": {
+                "method": "savgol",
+                "window_length": 21,
+                "polyorder": 3,
+            },
+            "motion_compensation_speed": {"spacing_m": 0.0},
+            "motion_compensation_attitude": {
+                "apc_offset_x_m": 0.0,
+                "apc_offset_y_m": 0.0,
+                "apc_offset_z_m": 0.0,
+                "max_abs_tilt_deg": 20.0,
+            },
+            "motion_compensation_height": {
+                "reference_height_mode": "mean",
+                "compensate_amplitude": True,
+                "compensate_time_shift": True,
+                "wave_speed_m_per_ns": 0.1,
+            },
+            "motion_compensation_vibration": {
+                "smooth_window": 9,
+                "preserve_row_percentile": 94.0,
+                "preserve_mix": 0.35,
+                "background_mix": 0.02,
+                "max_restore_gain": 1.25,
+            },
+        },
+        "order": [
+            "trajectory_smoothing",
+            "motion_compensation_speed",
+            "motion_compensation_attitude",
+            "motion_compensation_height",
+            "motion_compensation_vibration",
         ],
     },
 }

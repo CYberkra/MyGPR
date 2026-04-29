@@ -10,7 +10,10 @@ from core.workflow_data import WorkflowMethod
 from core.methods_registry import PROCESSING_METHODS
 from core.processing_engine import (
     ProcessingEngineError,
+    clone_header_info,
+    clone_trace_metadata,
     merge_result_header_info,
+    merge_result_trace_metadata,
     prepare_runtime_params,
     run_processing_method,
 )
@@ -40,8 +43,8 @@ class WorkflowExecutor(QObject):
         super().__init__()
         self.history = []  # 执行历史
         self.current_data = None
-        self.current_header_info = header_info or {}
-        self.current_trace_metadata = trace_metadata or {}
+        self.current_header_info = clone_header_info(header_info)
+        self.current_trace_metadata = clone_trace_metadata(trace_metadata)
         self.is_running = False
         self._cancel_requested = False
 
@@ -76,6 +79,9 @@ class WorkflowExecutor(QObject):
             )
             self.current_header_info = merge_result_header_info(
                 self.current_header_info, meta, result.shape
+            )
+            self.current_trace_metadata = merge_result_trace_metadata(
+                self.current_trace_metadata, meta
             )
             return result, meta
         except ProcessingEngineError as e:

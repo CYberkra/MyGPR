@@ -1,12 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""UAV-GPR 轨迹平滑模块
+"""UAV-GPR 轨迹平滑模块（V1 横向几何修正）
 
 对经纬度轨迹进行平滑滤波，消除 GPS 高频噪声，不改变 B-scan 振幅数据。
 支持 Savitzky-Golay 滤波和滑动平均滤波。
+
+V1 行为：
+- 不原地修改传入的 trace_metadata
+- 返回 trace_metadata_updates，包含平滑后的 local_x_m / local_y_m /
+  trace_distance_m 以及位移指标
+- 保留原始 lon/lat 到 longitude_raw / latitude_raw
 """
 
+from __future__ import annotations
+
 import numpy as np
+
+from core.trace_metadata_utils import derive_local_xy_m  # type: ignore[import]
 
 
 def _ensure_odd_window(window: int, max_window: int) -> int:
@@ -41,7 +51,10 @@ def _savgol_smooth_1d(arr: np.ndarray, window_length: int, polyorder: int) -> np
     n = arr.size
     if n <= window_length or window_length < polyorder + 2:
         return arr.copy()
-    smoothed = savgol_filter(arr.astype(np.float64), window_length, polyorder)
+    smoothed = np.asarray(
+        savgol_filter(arr.astype(np.float64), window_length, polyorder),
+        dtype=np.float64,
+    )
     half = window_length // 2
     smoothed[:half] = arr[:half]
     smoothed[-half:] = arr[-half:]
@@ -56,7 +69,7 @@ def method_trajectory_smoothing(
     trace_metadata: dict | None = None,
     **kwargs,
 ) -> tuple[np.ndarray, dict]:
-    """轨迹平滑处理。
+    """轨迹平滑处理（V1 横向几何修正）。
 
     Args:
         data: 输入 B-scan 数据，形状 (samples, traces)
@@ -67,10 +80,11 @@ def method_trajectory_smoothing(
         **kwargs: 兼容其他参数
 
     Returns:
-        (data, meta) — 振幅数据原样返回，meta 记录平滑参数
+        (data_copy, meta) — 振幅数据拷贝返回；meta 包含平滑参数、
+        位移指标以及 trace_metadata_updates（非原地修改）。
     """
     arr = np.asarray(data, dtype=np.float32)
-    meta = {"method": "trajectory_smoothing"}
+    meta: dict[str, object] = {"method": "trajectory_smoothing"}
 
     if trace_metadata is None or "longitude" not in trace_metadata or "latitude" not in trace_metadata:
         meta["skipped"] = True
@@ -79,21 +93,54 @@ def method_trajectory_smoothing(
 
     longitude = np.asarray(trace_metadata["longitude"], dtype=np.float64)
     latitude = np.asarray(trace_metadata["latitude"], dtype=np.float64)
-    n = min(longitude.size, latitude.size, arr.shape[1])
 
-    if n == 0:
+    if longitude.ndim != 1 or latitude.ndim != 1:
+        meta["skipped"] = True
+        meta["reason"] = "longitude/latitude 必须为一维数组"
+        return arr.copy(), meta
+
+    trace_count = int(arr.shape[1])
+    if longitude.size != latitude.size:
+        meta["skipped"] = True
+        meta["reason"] = (
+            f"longitude/latitude 长度不一致：longitude={longitude.size}, latitude={latitude.size}"
+        )
+        meta["metadata_length_mismatch"] = True
+        return arr.copy(), meta
+
+    if longitude.size == 0:
         meta["skipped"] = True
         meta["reason"] = "轨迹数据为空"
         return arr.copy(), meta
 
-    longitude = longitude[:n]
-    latitude = latitude[:n]
+    if longitude.size != trace_count:
+        meta["skipped"] = True
+        meta["reason"] = (
+            f"轨迹元数据长度与道数不一致：metadata={longitude.size}, traces={trace_count}"
+        )
+        meta["metadata_length_mismatch"] = True
+        meta["metadata_trace_count"] = int(longitude.size)
+        meta["data_trace_count"] = trace_count
+        return arr.copy(), meta
 
-    # 备份原始值
-    if "longitude_raw" not in trace_metadata:
-        trace_metadata["longitude_raw"] = longitude.copy()
-    if "latitude_raw" not in trace_metadata:
-        trace_metadata["latitude_raw"] = latitude.copy()
+    n = trace_count
+
+    if n < 3:
+        meta["skipped"] = True
+        meta["reason"] = "轨迹数据过短（少于3道）"
+        return arr.copy(), meta
+
+    # 保留原始 lon/lat（若输入已含 _raw 则继承，否则以当前输入为准）
+    longitude_raw = (
+        np.asarray(trace_metadata["longitude_raw"], dtype=np.float64).copy()
+        if "longitude_raw" in trace_metadata
+        else longitude.copy()
+    )
+    latitude_raw = (
+        np.asarray(trace_metadata["latitude_raw"], dtype=np.float64).copy()
+        if "latitude_raw" in trace_metadata
+        else latitude.copy()
+    )
 
     # 自动限制窗口大小（不超过总道数的 1/5，且至少为 3）
     max_window = max(3, int(n // 5) | 1)  # 确保奇数
@@ -115,16 +162,41 @@ def method_trajectory_smoothing(
         meta["reason"] = f"不支持的平滑方法: {method}"
         return arr.copy(), meta
 
-    # 更新 metadata
-    trace_metadata["longitude"] = lon_smooth.astype(np.float64, copy=False)
-    trace_metadata["latitude"] = lat_smooth.astype(np.float64, copy=False)
+    # 使用统一原点的局部切平面 XY（米）
+    lon0 = float(longitude[0])
+    lat0 = float(latitude[0])
+    local_x_raw, local_y_raw = derive_local_xy_m(
+        longitude, latitude, origin_longitude=lon0, origin_latitude=lat0
+    )
+    local_x_smooth, local_y_smooth = derive_local_xy_m(
+        lon_smooth, lat_smooth, origin_longitude=lon0, origin_latitude=lat0
+    )
 
-    # 计算平滑前后偏移量
-    dx = lon_smooth - longitude
-    dy = lat_smooth - latitude
-    displacements_m = np.sqrt(dx ** 2 + dy ** 2) * 111320.0  # 粗略换算为米（纬度方向）
+    # 沿平滑路径的累积距离
+    dx_dist = np.diff(local_x_smooth)
+    dy_dist = np.diff(local_y_smooth)
+    trace_distance_m = np.concatenate(
+        ([0.0], np.cumsum(np.sqrt(dx_dist ** 2 + dy_dist ** 2)))
+    ).astype(np.float64)
+
+    # 计算平滑前后偏移量（米）
+    dx = local_x_smooth - local_x_raw
+    dy = local_y_smooth - local_y_raw
+    displacements_m = np.sqrt(dx ** 2 + dy ** 2)
     meta["max_displacement_m"] = float(np.max(displacements_m))
     meta["mean_displacement_m"] = float(np.mean(displacements_m))
     meta["smoothed_traces"] = int(n)
+
+    # 构造非原地修改的 updates
+    trace_metadata_updates = {
+        "longitude_raw": longitude_raw,
+        "latitude_raw": latitude_raw,
+        "longitude": lon_smooth.astype(np.float64, copy=False),
+        "latitude": lat_smooth.astype(np.float64, copy=False),
+        "local_x_m": local_x_smooth.astype(np.float64, copy=False),
+        "local_y_m": local_y_smooth.astype(np.float64, copy=False),
+        "trace_distance_m": trace_distance_m,
+    }
+    meta["trace_metadata_updates"] = trace_metadata_updates
 
     return arr.copy(), meta

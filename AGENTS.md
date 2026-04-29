@@ -166,7 +166,7 @@ pytest
 - When a change also creates reusable processing guidance, warning semantics, or workflow rules, mirror the stable conclusion into the Obsidian vault instead of relying on chat history.
 - Do not assume conversational context is durable; if a rule should survive future sessions, write it into code, tests, docs, `AGENTS.md`, or the linked Obsidian notes.
 - Prefer `python scripts/archive_checkpoint.py --summary ...` when a stable checkpoint should also be written into the Obsidian vault.
-- The default archive target is `D:\ClawX-Data\Obsidian\uav_gpr\01-项目\版本归档\`, and the script should also refresh `01-项目/版本归档索引.md`.
+- The default archive target is `D:\ClawX-Data\Obsidian\uav_gpr\40-归档与历史\版本快照\`, and the script should also refresh `40-归档与历史/版本归档索引.md`.
 - Act proactively: when a version, rule, or conclusion changes in a way that future sessions will likely need, create or update the corresponding Obsidian note without waiting for an extra user reminder.
 - Typical triggers for proactive Obsidian updates include:
   - important pushed versions

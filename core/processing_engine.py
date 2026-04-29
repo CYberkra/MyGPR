@@ -67,20 +67,19 @@ def prepare_runtime_params(
         if total_time_ns and float(total_time_ns) > 0:
             runtime_params["time_step_s"] = float(total_time_ns) * 1e-9 / samples
 
+    needs_motion_runtime = _requires_motion_runtime_context(method_id)
+
+    if needs_motion_runtime or method_id == "kirchhoff_migration":
+        _inject_runtime_metadata_context(
+            runtime_params,
+            header_info=header_info,
+            trace_metadata=trace_metadata,
+            samples=samples,
+        )
+
     if method_id == "kirchhoff_migration":
         traces = max(1, int(data_shape[1]))
         info = header_info or {}
-        if "header_info" not in runtime_params and info:
-            runtime_params["header_info"] = clone_header_info(info)
-        if "trace_metadata" not in runtime_params and trace_metadata:
-            runtime_params["trace_metadata"] = clone_trace_metadata(trace_metadata)
-        if "time_window_ns" not in runtime_params:
-            total_time_ns = info.get("total_time_ns")
-            runtime_params["time_window_ns"] = (
-                float(total_time_ns)
-                if total_time_ns and float(total_time_ns) > 0
-                else float(samples)
-            )
         if "length_m" not in runtime_params:
             if (
                 info.get("track_length_m") is not None
@@ -114,6 +113,23 @@ def merge_result_header_info(
     return merged
 
 
+def merge_result_trace_metadata(
+    trace_metadata: dict[str, np.ndarray] | None,
+    result_meta: dict[str, Any] | None,
+) -> dict[str, np.ndarray]:
+    """Merge method-returned trace metadata into runtime trace metadata."""
+    trace_metadata_out = (result_meta or {}).get("trace_metadata_out")
+    if isinstance(trace_metadata_out, dict):
+        return clone_trace_metadata(trace_metadata_out)
+
+    merged = clone_trace_metadata(trace_metadata)
+    updates = (result_meta or {}).get("trace_metadata_updates")
+    if isinstance(updates, dict):
+        for key, value in updates.items():
+            merged[key] = np.array(value, copy=True)
+    return merged
+
+
 def clone_header_info(header_info: dict[str, Any] | None) -> dict[str, Any]:
     """Clone header info while preserving ndarray values."""
     if not header_info:
@@ -133,6 +149,35 @@ def clone_trace_metadata(
     if not trace_metadata:
         return {}
     return {key: np.array(value, copy=True) for key, value in trace_metadata.items()}
+
+
+def _requires_motion_runtime_context(method_id: str) -> bool:
+    """Whether a method should receive motion runtime metadata context."""
+    method_info = PROCESSING_METHODS.get(method_id, {})
+    stage = method_info.get("auto_tune_stage") or method_info.get("auto_tune_family")
+    return str(stage or "") == "motion_comp"
+
+
+def _inject_runtime_metadata_context(
+    runtime_params: dict[str, Any],
+    *,
+    header_info: dict[str, Any] | None,
+    trace_metadata: dict[str, np.ndarray] | None,
+    samples: int,
+) -> None:
+    """Inject cloned runtime metadata for methods that need motion context."""
+    info = header_info or {}
+    if "header_info" not in runtime_params and info:
+        runtime_params["header_info"] = clone_header_info(info)
+    if "trace_metadata" not in runtime_params and trace_metadata:
+        runtime_params["trace_metadata"] = clone_trace_metadata(trace_metadata)
+    if "time_window_ns" not in runtime_params:
+        total_time_ns = info.get("total_time_ns")
+        runtime_params["time_window_ns"] = (
+            float(total_time_ns)
+            if total_time_ns and float(total_time_ns) > 0
+            else float(samples)
+        )
 
 
 def _normalize_result(

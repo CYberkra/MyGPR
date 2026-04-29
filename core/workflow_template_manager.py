@@ -299,7 +299,7 @@ class WorkflowTemplateManager:
                     },
                     {
                         "method_id": "hankel_svd",
-                        "params": {"window_length": 80, "rank": 2},
+                        "params": {"window_length": 0, "rank": 0},
                     },
                     {"method_id": "stolt_migration", "params": {"dx": 0.05, "dt": 0.1}},
                 ],

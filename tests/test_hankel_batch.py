@@ -4,16 +4,23 @@
 
 from __future__ import annotations
 
+import sys
 import time
+from pathlib import Path
 
 import numpy as np
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 from PythonModule.hankel_svd import method_hankel_svd
 
 
 def main() -> None:
     np.random.seed(42)
-    data = np.random.randn(501, 3081).astype(np.float32)
+    # Keep this script as a bounded smoke check. Full runtime/memory evidence lives in
+    # scripts/benchmark_hankel_svd_reset.py so this command remains a stable gate.
+    data = np.random.randn(96, 64).astype(np.float32)
 
     print("=" * 60)
     print("Testing Hankel-SVD Smoke / Benchmark")
@@ -22,7 +29,7 @@ def main() -> None:
 
     print("\n[Test 1] Basic functionality...")
     start = time.time()
-    result, meta = method_hankel_svd(data.copy(), window_length=125, rank=5)
+    result, meta = method_hankel_svd(data.copy(), window_length=32, rank=5)
     elapsed = time.time() - start
     print(f"  [OK] Processing time: {elapsed:.2f}s")
     print(f"  [OK] Output shape: {result.shape}")
@@ -30,15 +37,15 @@ def main() -> None:
     print(f"  [OK] Metadata: {meta}")
 
     print("\n[Test 2] Consistency check...")
-    result2, _ = method_hankel_svd(data.copy(), window_length=125, rank=5)
+    result2, _ = method_hankel_svd(data.copy(), window_length=32, rank=5)
     diff = np.abs(result - result2).max()
     print(f"  [OK] Max difference between two runs: {diff:.2e}")
 
     print("\n[Test 3] Auto rank detection...")
     result_auto, meta_auto = method_hankel_svd(
-        data.copy(), window_length=125, rank=None
+        data.copy(), window_length=32, rank=None
     )
-    result_fixed, meta_fixed = method_hankel_svd(data.copy(), window_length=125, rank=5)
+    result_fixed, meta_fixed = method_hankel_svd(data.copy(), window_length=32, rank=5)
     print(
         f"  [OK] Auto rank output range: [{result_auto.min():.3f}, {result_auto.max():.3f}]"
     )
@@ -49,7 +56,7 @@ def main() -> None:
     print(f"  [OK] Fixed rank metadata: {meta_fixed}")
 
     print("\n[Test 4] Window benchmark...")
-    window_sizes = [64, 96, 125, 160]
+    window_sizes = [16, 24, 32, 48]
     print(f"  {'Window':<12} {'Time (s)':<12}")
     print(f"  {'-' * 12} {'-' * 12}")
     times = {}

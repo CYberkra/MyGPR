@@ -104,8 +104,8 @@ python scripts/archive_checkpoint.py \
 ```
 
 默认会写入：
-- `D:\ClawX-Data\Obsidian\uav_gpr\01-项目\版本归档\`
-- 并自动更新 `01-项目/版本归档索引.md`
+- `D:\ClawX-Data\Obsidian\uav_gpr\40-归档与历史\版本快照\`
+- 并自动更新 `40-归档与历史/版本归档索引.md`
 
 ## Preflight（发布前自动检查）
 在发布前可运行一键 preflight，覆盖版本号校验、依赖检查、关键路径冒烟（启动/导入/处理/导出）以及质量门禁快速版。
