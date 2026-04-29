@@ -157,6 +157,21 @@ class AdvancedSettingsPage(QWidget):
 
         layout.addWidget(mode_box)
 
+        self.single_select_box = QGroupBox("单图查看")
+        single_select_layout = QVBoxLayout(self.single_select_box)
+        single_select_layout.setSpacing(8)
+
+        single_row = QWidget()
+        single_row_l = QHBoxLayout(single_row)
+        single_row_l.setContentsMargins(0, 0, 0, 0)
+        single_row_l.setSpacing(6)
+        single_row_l.addWidget(QLabel("图像"))
+        self.single_view_combo = QComboBox()
+        self.single_view_combo.setToolTip("选择单图模式要查看的原始数据、步骤结果或当前结果")
+        single_row_l.addWidget(self.single_view_combo)
+        single_select_layout.addWidget(single_row)
+        layout.addWidget(self.single_select_box)
+
         self.compare_select_box = QGroupBox("对比选择")
         compare_select_layout = QVBoxLayout(self.compare_select_box)
         compare_select_layout.setSpacing(8)
@@ -534,6 +549,7 @@ class AdvancedSettingsPage(QWidget):
         show_compare_select = bool(
             self.compare_var.isChecked() or self.slider_compare_var.isChecked()
         )
+        self.single_select_box.setVisible(not show_compare_select)
         self.compare_select_box.setVisible(show_compare_select)
 
     def get_view_style(self) -> str:

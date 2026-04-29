@@ -272,6 +272,40 @@ def test_workbench_compare_combo_uses_same_step_entries():
         app.processEvents()
 
 
+def test_main_single_view_combo_selects_formal_snapshot():
+    app = _get_app()
+    win = GPRGuiQt()
+    try:
+        raw = np.arange(20, dtype=np.float32).reshape(4, 5)
+        step_one = raw + 1
+        step_two = raw + 2
+
+        win.shared_data.load_data(raw, path="demo.csv", source="test")
+        win.shared_data.apply_current_data(step_one, push_history=True, label="dewow")
+        win.shared_data.apply_current_data(step_two, push_history=True, label="hankel_svd")
+        app.processEvents()
+
+        combo_labels = [
+            win.page_advanced.single_view_combo.itemText(index)
+            for index in range(win.page_advanced.single_view_combo.count())
+        ]
+        assert combo_labels == ["原始", "dewow", "当前"]
+        assert win.page_advanced.single_view_combo.currentText() == "当前"
+
+        win.page_advanced.single_view_combo.setCurrentText("dewow")
+        selected_data, _, _ = win._get_active_plot_payload(win.data)
+        assert selected_data is not None
+        assert np.array_equal(selected_data, step_one)
+
+        win.page_advanced.mode_compare.setChecked(True)
+        compare_data, _, _ = win._get_active_plot_payload(win.data)
+        assert compare_data is not None
+        assert np.array_equal(compare_data, step_two)
+    finally:
+        win.close()
+        app.processEvents()
+
+
 def test_compare_snapshots_clear_transient_results_after_formal_update():
     app = _get_app()
     win = GPRGuiQt()

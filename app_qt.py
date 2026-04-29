@@ -1297,6 +1297,9 @@ class GPRGuiQt(QMainWindow):
         self.page_advanced.view_style_combo.currentIndexChanged.connect(
             self._refresh_plot
         )
+        self.page_advanced.single_view_combo.currentIndexChanged.connect(
+            self._refresh_plot
+        )
         self.page_advanced.compare_left_combo.currentIndexChanged.connect(
             self._refresh_plot
         )
@@ -4612,11 +4615,37 @@ class GPRGuiQt(QMainWindow):
                 self._display_header_info_override or self.header_info,
                 self._display_trace_metadata_override,
             )
+        if self._is_single_view_mode():
+            snapshot = self._get_selected_single_view_snapshot()
+            if snapshot is not None and snapshot.get("data") is not None:
+                return (
+                    np.array(snapshot["data"], copy=False),
+                    snapshot.get("header_info") or self.header_info,
+                    snapshot.get("trace_metadata"),
+                )
         return (
             fallback_data if fallback_data is not None else self.data,
             self.header_info,
             self.trace_metadata,
         )
+
+    def _is_single_view_mode(self) -> bool:
+        """主图是否处于单图模式。"""
+        return not bool(
+            self.page_advanced.compare_var.isChecked()
+            or self.page_advanced.diff_var.isChecked()
+            or self.page_advanced.slider_compare_var.isChecked()
+        )
+
+    def _get_selected_single_view_snapshot(self):
+        """返回单图下拉框当前选择的正式/临时快照。"""
+        combo = getattr(self.page_advanced, "single_view_combo", None)
+        if combo is None:
+            return None
+        label = combo.currentText()
+        if not label:
+            return None
+        return next((s for s in self.compare_snapshots if s["label"] == label), None)
 
     def _get_single_plot_title(self, header_info_override: dict | None = None) -> str:
         """获取单图模式下的标题。"""
@@ -4627,6 +4656,12 @@ class GPRGuiQt(QMainWindow):
         )
         title = str(header.get("display_title") or "").strip() if header else ""
         base_title = title or "B-扫"
+
+        if self._is_single_view_mode():
+            selected = getattr(self.page_advanced, "single_view_combo", None)
+            selected_label = selected.currentText() if selected is not None else ""
+            if selected_label and selected_label not in base_title:
+                return f"{base_title} - 查看：{selected_label}"
 
         current_label = str(getattr(self.shared_data, "current_label", "") or "").strip()
         if current_label and current_label != "原始数据" and current_label not in base_title:
@@ -4823,6 +4858,8 @@ class GPRGuiQt(QMainWindow):
             sig["right"] = self.page_advanced.compare_right_combo.currentText()
             sig["diff"] = self.page_advanced.diff_var.isChecked()
             sig["slider_ratio"] = round(float(self._main_slider_compare_ratio), 4)
+        else:
+            sig["single"] = self.page_advanced.single_view_combo.currentText()
         return tuple(sorted(sig.items()))
 
     def _prepare_view_data(
@@ -5734,14 +5771,21 @@ class GPRGuiQt(QMainWindow):
     def _update_compare_combo_items(self):
         """更新对比下拉框选项"""
         self._compare_syncing = True
+        current_single = self.page_advanced.single_view_combo.currentText()
         current_left = self.page_advanced.compare_left_combo.currentText()
         current_right = self.page_advanced.compare_right_combo.currentText()
+        self.page_advanced.single_view_combo.clear()
         self.page_advanced.compare_left_combo.clear()
         self.page_advanced.compare_right_combo.clear()
         labels = [s["label"] for s in self.compare_snapshots]
+        self.page_advanced.single_view_combo.addItems(labels)
         self.page_advanced.compare_left_combo.addItems(labels)
         self.page_advanced.compare_right_combo.addItems(labels)
         # 保持用户选择（如果仍有效）
+        if current_single in labels:
+            self.page_advanced.single_view_combo.setCurrentText(current_single)
+        elif labels:
+            self.page_advanced.single_view_combo.setCurrentIndex(len(labels) - 1)
         if current_left in labels:
             self.page_advanced.compare_left_combo.setCurrentText(current_left)
         if current_right in labels:
