@@ -67,13 +67,6 @@ def _read_matrix_csv_fast(path: str) -> np.ndarray:
         return arr
 
 
-def _downsample_axis_linear(n: int, max_n: int):
-    """线性降采样索引"""
-    if max_n <= 0 or n <= max_n:
-        return slice(None)
-    return np.linspace(0, n - 1, max_n, dtype=int)
-
-
 def _to_float32_2d(data: np.ndarray) -> np.ndarray:
     """转换为float32二维数组"""
     arr = np.asarray(data, dtype=np.float32)

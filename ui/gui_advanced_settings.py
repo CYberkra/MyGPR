@@ -39,7 +39,7 @@ class AdvancedSettingsPage(QWidget):
         outer_layout.addWidget(title)
 
         page_hint = QLabel(
-            "本页集中控制主图显示、双图对比、聚焦裁剪与预览性能，不改变正式处理结果。"
+            "本页集中控制主图显示、双图对比、聚焦裁剪与显示增强。"
         )
         page_hint.setWordWrap(True)
         page_hint.setProperty("class", "hintText")
@@ -51,7 +51,7 @@ class AdvancedSettingsPage(QWidget):
         flow_layout.setContentsMargins(10, 14, 10, 10)
         flow_layout.setSpacing(8)
 
-        flow_hint = QLabel("推荐顺序：先确定显示模式，再设置聚焦范围，最后按需切到摆动图、滑动对比或增强性能选项。")
+        flow_hint = QLabel("推荐顺序：先确定显示模式，再设置聚焦范围，最后按需切到摆动图、滑动对比或显示增强。")
         flow_hint.setWordWrap(True)
         flow_hint.setProperty("class", "hintText")
         flow_layout.addWidget(flow_hint)
@@ -410,56 +410,6 @@ class AdvancedSettingsPage(QWidget):
         enhance_layout.addWidget(self.demean_var)
 
         layout.addWidget(enhance_box)
-
-        # 性能
-        perf_box = QGroupBox("预览性能")
-        perf_layout = QVBoxLayout(perf_box)
-        perf_layout.setSpacing(10)
-
-        perf_hint = QLabel("只有在大文件预览变慢或主图卡顿时，再调整这些选项。")
-        perf_hint.setWordWrap(True)
-        perf_hint.setProperty("class", "hintText")
-        perf_layout.addWidget(perf_hint)
-
-        self.fast_preview_var = QCheckBox("启用快速预览导入")
-        self.fast_preview_var.setToolTip("导入时先做降采样/截断，加快大文件加载速度")
-        perf_layout.addWidget(self.fast_preview_var)
-
-        preview_hint = QLabel(
-            "快速预览导入不会保留全分辨率数据。做最终处理前，请关闭此选项后重新导入原始数据。"
-        )
-        preview_hint.setWordWrap(True)
-        preview_hint.setProperty("class", "hintText")
-        perf_layout.addWidget(preview_hint)
-
-        self.max_samples_edit = QLineEdit("512")
-        self.max_samples_edit.setToolTip("快速预览导入时的最大采样点数")
-        perf_layout.addLayout(
-            self._single_row("最大采样点", self.max_samples_edit)
-        )
-        self.max_traces_edit = QLineEdit("200")
-        self.max_traces_edit.setToolTip("快速预览导入时的最大道数")
-        perf_layout.addLayout(
-            self._single_row("最大道数", self.max_traces_edit)
-        )
-
-        self.display_downsample_var = QCheckBox("启用显示降采样")
-        self.display_downsample_var.setChecked(False)
-        self.display_downsample_var.setToolTip("显示时降采样，提高绘图响应速度")
-        perf_layout.addWidget(self.display_downsample_var)
-
-        self.display_max_samples_edit = QLineEdit("800")
-        self.display_max_samples_edit.setToolTip("主图显示时的最大采样点数")
-        perf_layout.addLayout(
-            self._single_row("显示最大采样点", self.display_max_samples_edit)
-        )
-        self.display_max_traces_edit = QLineEdit("400")
-        self.display_max_traces_edit.setToolTip("主图显示时的最大道数")
-        perf_layout.addLayout(
-            self._single_row("显示最大道数", self.display_max_traces_edit)
-        )
-
-        layout.addWidget(perf_box)
 
         # 可选 RTK/IMU 辅助文件：仅保存用户手动选择的路径，不影响普通 CSV 导入。
         self.sidecar_box = QGroupBox("可选 RTK/IMU 辅助文件")
