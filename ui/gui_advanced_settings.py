@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
+    QGridLayout,
     QLabel,
     QComboBox,
     QGroupBox,
@@ -16,6 +17,7 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QFrame,
     QStackedWidget,
+    QSizePolicy,
 )
 from qfluentwidgets import PushButton, FluentIcon, SegmentedWidget
 
@@ -129,31 +131,31 @@ class AdvancedSettingsPage(QWidget):
         layout.setSpacing(16)
 
         mode_box = QGroupBox("显示模式")
-        mode_layout = QVBoxLayout(mode_box)
-        mode_layout.setSpacing(10)
+        mode_layout = QGridLayout(mode_box)
+        mode_layout.setHorizontalSpacing(10)
+        mode_layout.setVerticalSpacing(8)
 
         self.display_mode_group = QButtonGroup(self)
 
-        self.mode_single = QRadioButton("单图")
+        self.mode_single = self._make_mode_radio("单图", "显示当前处理结果的单图")
         self.mode_single.setChecked(True)
-        self.mode_single.setToolTip("显示当前处理结果的单图")
         self.display_mode_group.addButton(self.mode_single, 0)
-        mode_layout.addWidget(self.mode_single)
+        mode_layout.addWidget(self.mode_single, 0, 0)
 
-        self.mode_compare = QRadioButton("双视图对比")
-        self.mode_compare.setToolTip("并排显示两个处理阶段的图像")
+        self.mode_compare = self._make_mode_radio("双视图对比", "并排显示两个处理阶段的图像")
         self.display_mode_group.addButton(self.mode_compare, 1)
-        mode_layout.addWidget(self.mode_compare)
+        mode_layout.addWidget(self.mode_compare, 0, 1)
 
-        self.mode_diff = QRadioButton("差异图")
-        self.mode_diff.setToolTip("显示两图差值")
+        self.mode_diff = self._make_mode_radio("差异图", "显示两图差值")
         self.display_mode_group.addButton(self.mode_diff, 2)
-        mode_layout.addWidget(self.mode_diff)
+        mode_layout.addWidget(self.mode_diff, 1, 0)
 
-        self.mode_slider = QRadioButton("滑动对比")
-        self.mode_slider.setToolTip("用拖动分隔线的方式查看两份结果")
+        self.mode_slider = self._make_mode_radio("滑动对比", "用拖动分隔线的方式查看两份结果")
         self.display_mode_group.addButton(self.mode_slider, 3)
-        mode_layout.addWidget(self.mode_slider)
+        mode_layout.addWidget(self.mode_slider, 1, 1)
+
+        mode_layout.setColumnStretch(0, 1)
+        mode_layout.setColumnStretch(1, 1)
 
         layout.addWidget(mode_box)
 
@@ -202,6 +204,13 @@ class AdvancedSettingsPage(QWidget):
 
         scroll.setWidget(content)
         return scroll
+
+    @staticmethod
+    def _make_mode_radio(text: str, tooltip: str) -> QRadioButton:
+        radio = QRadioButton(text)
+        radio.setToolTip(tooltip)
+        radio.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        return radio
 
     def _build_core_page(self):
         """构建核心显示页面。"""
