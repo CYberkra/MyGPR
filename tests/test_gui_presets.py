@@ -104,15 +104,12 @@ def test_startup_preset_matches_registry_contract():
         preset = GUI_PRESETS_V1[DEFAULT_STARTUP_PRESET_KEY]
         assert win._selected_preset_key == DEFAULT_STARTUP_PRESET_KEY
         assert not hasattr(win.page_advanced, "preset_combo")
-        assert win.page_advanced.fast_preview_var.isChecked() is bool(
-            preset["ui"]["fast_preview"]
-        )
-        assert win.page_advanced.max_samples_edit.text() == str(
-            preset["ui"]["max_samples"]
-        )
-        assert win.page_advanced.display_downsample_var.isChecked() is bool(
-            preset["ui"]["display_downsample"]
-        )
+        assert not hasattr(win.page_advanced, "fast_preview_var")
+        assert not hasattr(win.page_advanced, "max_samples_edit")
+        assert not hasattr(win.page_advanced, "max_traces_edit")
+        assert not hasattr(win.page_advanced, "display_downsample_var")
+        assert not hasattr(win.page_advanced, "display_max_samples_edit")
+        assert not hasattr(win.page_advanced, "display_max_traces_edit")
         assert win._method_param_overrides == preset["method_params"]
         assert win.page_advanced.sidecar_box.isHidden() is False
     finally:
@@ -259,11 +256,11 @@ def test_phase2_tabs_expose_prioritized_group_hierarchy_and_bridge():
     try:
         assert _top_level_group_titles(win.page_advanced) == [
             "显示模式",
+            "单图查看",
             "核心显示",
             "聚焦裁剪",
             "ROI 状态",
             "增强与对比辅助",
-            "预览性能",
             "可选 RTK/IMU 辅助文件",
         ]
         assert win.page_advanced.sidecar_box.isHidden() is False
@@ -941,10 +938,7 @@ def test_hankel_svd_defaults_use_auto_or_preview_safe_overrides(tmp_path):
     assert defaults["rank"] == 0
     assert "bounded/literature" in labels["window_length"]
     assert "bounded/literature" in labels["rank"]
-    assert GUI_PRESETS_V1["quick_preview"]["method_params"]["hankel_svd"] == {
-        "window_length": 32,
-        "rank": 0,
-    }
+    assert "quick_preview" not in GUI_PRESETS_V1
     assert "hankel_svd" not in GUI_PRESETS_V1["denoise_first"]["method_params"]
     assert GUI_PRESETS_V1["detail_first"]["method_params"]["hankel_svd"] == {
         "window_length": 0,

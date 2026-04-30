@@ -8,7 +8,7 @@ PyQt6 GUI (`app_qt.py`) to load CSV/文件夹数据, display B-scan, and apply p
 - Method list (original + researched)
 - Per-method parameter inputs (window width, time, rank, etc.)
 - 多页面（Tab）结构：**日常处理 / 调参与实验 / 显示与对比 / 质量与导出**
-- 一键推荐处理链：**快速预览 / 稳健成像 / 高聚焦**
+- 一键推荐处理链：**稳健成像 / 高聚焦**
 - 运行后质量看板：`focus_ratio`, `hot_pixels`, `spikiness`, `time_ms`
 - 一键导出质量快照（CSV+JSON）
 

@@ -23,7 +23,7 @@ class _BoolFlag:
 
 class _DummyLoaderHost:
     def __init__(self) -> None:
-        self.page_advanced = SimpleNamespace(fast_preview_var=_BoolFlag(False))
+        self.page_advanced = SimpleNamespace()
 
 
 def test_load_single_csv_with_progress_forwards_optional_sidecar_kwargs(monkeypatch):

@@ -258,14 +258,6 @@ class WorkflowTemplateManager:
         """获取预设模板"""
         return [
             {
-                "name": "快速预览",
-                "description": "最简流程，快速查看数据",
-                "methods": [
-                    {"method_id": "dewow", "params": {"window": 41}},
-                    {"method_id": "subtracting_average_2D", "params": {}},
-                ],
-            },
-            {
                 "name": "稳健成像",
                 "description": "标准GPR数据处理流程",
                 "methods": [
