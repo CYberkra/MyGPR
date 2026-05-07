@@ -184,9 +184,16 @@ python scripts\gprmax_benchmark\generate_cylinder_single_v1.py --raw-out-path E:
 - `truth_false_positive_ratio`：目标外强异常相对目标强异常的比例，越低越好。
 - `truth_score`：综合真值评分，已参与 gprMax 报告中的人工/自动判定。
 
+2026-05-08 继续扩展了多场景报告：
+
+- `crack_air_filled_v1`：空气裂缝弱结构，目标是检验窄线状弱反射和裂缝边缘绕射是否被过度平滑。
+- `no_target_background_v1`：无目标均匀背景，目标是检验自动选参是否会凭空制造强局部异常。
+
+无目标场景的 truth metrics 不再把全图当作目标，而是以 `targets=[]` 进入背景-only 评分：`truth_target_count=0`，目标保留字段保持中性，`truth_false_positive_ratio` 和 `truth_background_energy_reduction` 主导 `truth_score`。这个场景是后续评分函数的假异常回归样例。
+
 后续建议：
 
 1. 将真实 `.out` 转换结果与当前 deterministic fallback 放在同一 scenario 契约下比较。
 2. 在 `truth_score` 基础上继续细化 apex 显著性和双曲线臂连续性指标。
-3. 新增 `cylinder_double_depth_v1`，验证浅部强目标不会让自动选参误删深部弱目标。
-4. 新增 `layered_soil_interface_v1` 和 `crack_air_filled_v1`，覆盖层位和裂缝结构。
+3. 对 `crack_air_filled_v1` 增加裂缝边缘连续性指标。
+4. 对 `no_target_background_v1` 增加局部假异常数量统计，而不只是高分位强度比例。

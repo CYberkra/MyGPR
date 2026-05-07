@@ -36,7 +36,12 @@ def compute_ground_truth_metrics(
 
     ref_target_rois = _target_rois(ground_truth, ref.shape)
     if not ref_target_rois:
-        ref_target_rois = [ref_analysis_roi]
+        return _compute_no_target_metrics(
+            ref,
+            proc,
+            ref_analysis_roi=ref_analysis_roi,
+            proc_analysis_roi=proc_analysis_roi,
+        )
     proc_target_rois = [
         _shift_roi(roi, row_shift, col_shift) for roi in ref_target_rois
     ]
@@ -97,6 +102,39 @@ def compute_ground_truth_metrics(
         "truth_target_contrast_after": float(target_contrast_after),
         "truth_score": float(truth_score),
         "truth_target_count": float(len(ref_target_rois)),
+    }
+
+
+def _compute_no_target_metrics(
+    reference: np.ndarray,
+    processed: np.ndarray,
+    *,
+    ref_analysis_roi: dict[str, int],
+    proc_analysis_roi: dict[str, int],
+) -> dict[str, float]:
+    ref_mask = _mask_from_rois(reference.shape, [ref_analysis_roi])
+    proc_mask = _mask_from_rois(processed.shape, [proc_analysis_roi])
+    ref_energy = _masked_mean_square(reference, ref_mask)
+    proc_energy = _masked_mean_square(processed, proc_mask)
+    background_reduction = relative_reduction(ref_energy, proc_energy)
+    false_positive_ratio = _safe_ratio(
+        _masked_percentile_abs(processed, proc_mask, 99.0),
+        _masked_percentile_abs(reference, ref_mask, 99.0),
+    )
+    truth_score = _no_target_truth_score(
+        background_reduction=background_reduction,
+        false_positive_ratio=false_positive_ratio,
+    )
+    return {
+        "truth_target_energy_preservation": 1.0,
+        "truth_target_saliency_before": 0.0,
+        "truth_target_saliency_after": 0.0,
+        "truth_target_saliency_gain": 1.0,
+        "truth_background_energy_reduction": float(background_reduction),
+        "truth_false_positive_ratio": float(false_positive_ratio),
+        "truth_target_contrast_after": 0.0,
+        "truth_score": float(truth_score),
+        "truth_target_count": 0.0,
     }
 
 
@@ -250,6 +288,25 @@ def _truth_score(
         + 1.2 * background_term
         + 0.8 * contrast_term
         - 1.0 * false_positive_penalty
+    )
+
+
+def _no_target_truth_score(
+    *,
+    background_reduction: float,
+    false_positive_ratio: float,
+) -> float:
+    background_term = float(np.clip(background_reduction, -1.0, 1.0))
+    false_positive_penalty = float(np.clip(false_positive_ratio - 1.0, 0.0, 8.0))
+    calm_background_bonus = ratio_fidelity(
+        max(float(false_positive_ratio), EPS),
+        target=0.25,
+        tol=1.0,
+    )
+    return float(
+        1.8 * background_term
+        + 1.0 * calm_background_bonus
+        - 1.4 * false_positive_penalty
     )
 
 

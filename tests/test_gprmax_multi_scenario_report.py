@@ -23,6 +23,8 @@ def test_multi_scenario_definitions_cover_simple_validation_cases():
         "cylinder_single_v1",
         "cylinder_double_v1",
         "layered_interface_v1",
+        "crack_air_filled_v1",
+        "no_target_background_v1",
     } <= set(scenarios)
 
     for scenario_id, definition in scenarios.items():
@@ -32,7 +34,49 @@ def test_multi_scenario_definitions_cover_simple_validation_cases():
         assert definition.structure_notes
         assert "#title:" in definition.model_in_text
         assert "#time_window:" in definition.model_in_text
-        assert definition.targets
+        if scenario_id == "no_target_background_v1":
+            assert definition.targets == []
+        else:
+            assert definition.targets
+
+
+def test_new_scenario_ground_truth_contracts_are_explicit():
+    scenarios = build_scenario_definitions()
+    crack = scenarios["crack_air_filled_v1"]
+    crack_truth = report.build_ground_truth(
+        crack,
+        {
+            "sample_count": 128,
+            "trace_count": 36,
+            "total_time_ns": 12.0,
+        },
+    )
+    assert crack_truth["targets"][0]["type"] == "air_crack"
+    assert crack_truth["targets"][0]["expected_features"] == [
+        "narrow_vertical_reflector",
+        "weak_diffraction_edges",
+    ]
+    crack_roi = crack_truth["targets"][0]["roi"]
+    assert 0 <= crack_roi["time_start_idx"] < crack_roi["time_end_idx"] <= 128
+    assert 0 <= crack_roi["dist_start_idx"] < crack_roi["dist_end_idx"] <= 36
+
+    no_target = scenarios["no_target_background_v1"]
+    no_target_truth = report.build_ground_truth(
+        no_target,
+        {
+            "sample_count": 128,
+            "trace_count": 36,
+            "total_time_ns": 12.0,
+        },
+    )
+    assert no_target_truth["targets"] == []
+    assert no_target_truth["analysis_roi"] == {
+        "time_start_idx": 0,
+        "time_end_idx": 128,
+        "dist_start_idx": 0,
+        "dist_end_idx": 36,
+    }
+    assert no_target_truth["metrics_hint"]["false_positive_penalty"] > 0.0
 
 
 def test_build_gprmax_command_exposes_parallel_flags(tmp_path: Path):

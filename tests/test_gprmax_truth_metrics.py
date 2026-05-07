@@ -100,3 +100,33 @@ def test_truth_metrics_shift_processed_target_roi_with_zero_time_roi_change():
     assert metrics["truth_target_energy_preservation"] > 0.75
     assert metrics["truth_target_saliency_gain"] > 1.0
     assert metrics["truth_background_energy_reduction"] > 0.5
+
+
+def test_truth_metrics_score_no_target_scene_as_false_positive_guard():
+    raw = np.full((64, 32), 0.4, dtype=np.float32)
+    suppressed = raw * 0.2
+    false_anomaly = raw * 0.2
+    false_anomaly[28:36, 14:19] = 5.0
+    ground_truth = {
+        "schema": "mygpr_gprmax_ground_truth_v1",
+        "scenario_id": "no_target_demo",
+        "analysis_roi": {
+            "time_start_idx": 8,
+            "time_end_idx": 56,
+            "dist_start_idx": 4,
+            "dist_end_idx": 28,
+        },
+        "targets": [],
+    }
+
+    suppressed_metrics = compute_ground_truth_metrics(raw, suppressed, ground_truth)
+    false_metrics = compute_ground_truth_metrics(raw, false_anomaly, ground_truth)
+
+    assert suppressed_metrics["truth_target_count"] == 0.0
+    assert false_metrics["truth_target_count"] == 0.0
+    assert suppressed_metrics["truth_score"] > false_metrics["truth_score"]
+    assert (
+        suppressed_metrics["truth_false_positive_ratio"]
+        < false_metrics["truth_false_positive_ratio"]
+    )
+    assert suppressed_metrics["truth_background_energy_reduction"] > 0.5

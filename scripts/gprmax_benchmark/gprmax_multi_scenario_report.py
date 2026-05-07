@@ -116,6 +116,8 @@ def build_scenario_definitions() -> dict[str, ScenarioDefinition]:
         "cylinder_single_v1": _single_cylinder_scenario(),
         "cylinder_double_v1": _double_cylinder_scenario(),
         "layered_interface_v1": _layered_interface_scenario(),
+        "crack_air_filled_v1": _crack_air_filled_scenario(),
+        "no_target_background_v1": _no_target_background_scenario(),
     }
 
 
@@ -499,6 +501,8 @@ def build_ground_truth(
             roi_target = _target_ground_truth(definition, target, samples, traces, total_time_ns)
         elif target_type == "layer_interface":
             roi_target = _layer_ground_truth(definition, target, samples, traces, total_time_ns)
+        elif target_type == "air_crack":
+            roi_target = _crack_ground_truth(definition, target, samples, traces, total_time_ns)
         else:
             continue
         targets.append(roi_target)
@@ -952,6 +956,23 @@ def save_structure_preview(definition: ScenarioDefinition, out_path: Path) -> No
             y = float(target["interface_y_m"])
             ax.axhline(y, color="#1864ab", linewidth=1.4)
             ax.text(domain_x * 0.02, y + 0.006, target["target_id"], fontsize=8, color="#1864ab")
+        elif target.get("type") == "air_crack":
+            x0 = float(target["x0_m"])
+            x1 = float(target["x1_m"])
+            y0 = float(target["y0_m"])
+            y1 = float(target["y1_m"])
+            ax.add_patch(
+                plt.Rectangle(
+                    (x0, y0),
+                    max(0.001, x1 - x0),
+                    max(0.001, y1 - y0),
+                    facecolor="#ffffff",
+                    edgecolor="#7c2d12",
+                    linewidth=1.2,
+                    hatch="//",
+                )
+            )
+            ax.text((x0 + x1) / 2.0, y1 + 0.006, target["target_id"], ha="center", fontsize=7)
     ax.scatter([definition.source_start_m[0]], [definition.source_start_m[1]], marker="^", color="#c92a2a", label="Tx start")
     ax.scatter([definition.receiver_start_m[0]], [definition.receiver_start_m[1]], marker="v", color="#1864ab", label="Rx start")
     ax.set_xlim(0, domain_x)
@@ -1094,6 +1115,73 @@ def _layered_interface_scenario() -> ScenarioDefinition:
     )
 
 
+def _crack_air_filled_scenario() -> ScenarioDefinition:
+    materials = [
+        {"name": "silty_sand", "relative_permittivity": 6.0, "conductivity_s_per_m": 0.002},
+        {"name": "air_crack", "relative_permittivity": 1.0, "conductivity_s_per_m": 0.0},
+    ]
+    targets = [
+        {
+            "target_id": "air_crack_01",
+            "type": "air_crack",
+            "x0_m": 0.118,
+            "x1_m": 0.124,
+            "y0_m": 0.064,
+            "y1_m": 0.132,
+            "relative_permittivity": 6.0,
+        }
+    ]
+    return ScenarioDefinition(
+        scenario_id="crack_air_filled_v1",
+        label="空气裂缝弱结构",
+        description="均匀粉砂土中的窄空气裂缝，主要验证自动选参不会把窄弱反射和边缘绕射过度平滑。",
+        structure_notes=[
+            "背景介质为相对介电常数 6 的粉砂土。",
+            "裂缝为 x=0.118-0.124 m、y=0.064-0.132 m 的低介电常数窄空腔。",
+            "真实结构是窄线状弱反射和裂缝边缘绕射，不应被去噪或背景抑制完全抹掉。",
+        ],
+        model_in_text=_model_text(
+            "crack_air_filled_v1",
+            materials=[
+                "#material: 6 0.002 1 0 silty_sand",
+                "#material: 1 0 1 0 air_crack",
+            ],
+            bodies=[
+                "#box: 0 0 0 0.240 0.165 0.002 silty_sand",
+                "#box: 0.118 0.064 0 0.124 0.132 0.002 air_crack",
+            ],
+        ),
+        materials=materials,
+        targets=targets,
+        layers=[],
+    )
+
+
+def _no_target_background_scenario() -> ScenarioDefinition:
+    materials = [
+        {"name": "silty_sand", "relative_permittivity": 6.0, "conductivity_s_per_m": 0.002},
+    ]
+    return ScenarioDefinition(
+        scenario_id="no_target_background_v1",
+        label="无目标均匀背景",
+        description="无地下异常体的均匀粉砂土背景，主要验证自动选参不会凭空制造强局部异常。",
+        structure_notes=[
+            "场景中只有均匀粉砂土背景，没有金属体、裂缝或层状界面目标。",
+            "理想处理结果应降低背景和低频漂移，同时避免在目标外区域制造强假异常。",
+        ],
+        model_in_text=_model_text(
+            "no_target_background_v1",
+            materials=["#material: 6 0.002 1 0 silty_sand"],
+            bodies=[
+                "#box: 0 0 0 0.240 0.165 0.002 silty_sand",
+            ],
+        ),
+        materials=materials,
+        targets=[],
+        layers=[],
+    )
+
+
 def _model_text(
     title: str,
     *,
@@ -1181,6 +1269,56 @@ def _layer_ground_truth(
         "roi": roi,
         "must_preserve": True,
         "expected_features": ["continuous_horizontal_reflector"],
+    }
+
+
+def _crack_ground_truth(
+    definition: ScenarioDefinition,
+    target: dict[str, Any],
+    samples: int,
+    traces: int,
+    total_time_ns: float,
+) -> dict[str, Any]:
+    eps = float(target.get("relative_permittivity") or 6.0)
+    x0 = float(target["x0_m"])
+    x1 = float(target["x1_m"])
+    y0 = float(target["y0_m"])
+    y1 = float(target["y1_m"])
+    x_center = (x0 + x1) / 2.0
+    trace_center = _target_trace_index(definition, x_center, traces)
+    trace_half_width = max(3, min(8, traces // 8))
+
+    velocity = LIGHT_SPEED_M_PER_NS / np.sqrt(max(eps, 1.0))
+    top_depth = max(0.0, definition.ground_top_y_m - max(y0, y1))
+    bottom_depth = max(0.0, definition.ground_top_y_m - min(y0, y1))
+    top_sample = _time_to_sample(2.0 * top_depth / velocity, total_time_ns, samples)
+    bottom_sample = _time_to_sample(2.0 * bottom_depth / velocity, total_time_ns, samples)
+    pad = max(6, samples // 60)
+    t0 = max(0, min(top_sample, bottom_sample) - pad)
+    t1 = min(samples, max(top_sample, bottom_sample) + pad + 1)
+    roi = {
+        "time_start_idx": int(t0),
+        "time_end_idx": int(max(t0 + 1, t1)),
+        "dist_start_idx": max(0, int(trace_center - trace_half_width)),
+        "dist_end_idx": min(traces, int(trace_center + trace_half_width + 1)),
+    }
+    return {
+        "target_id": target["target_id"],
+        "type": "air_crack",
+        "source_geometry": "air_filled_box",
+        "x0_m": x0,
+        "x1_m": x1,
+        "y0_m": y0,
+        "y1_m": y1,
+        "center_trace_idx": int(trace_center),
+        "top_sample_idx": int(top_sample),
+        "bottom_sample_idx": int(bottom_sample),
+        "roi": roi,
+        "must_preserve": True,
+        "expected_features": [
+            "narrow_vertical_reflector",
+            "weak_diffraction_edges",
+        ],
     }
 
 
@@ -1479,8 +1617,12 @@ def _build_step_analysis(
 
 def _structure_label(ground_truth: dict[str, Any]) -> str:
     target_types = {str(item.get("type")) for item in ground_truth.get("targets", [])}
+    if not target_types:
+        return "无目标背景区域"
     if "layer_interface" in target_types:
         return "水平层状反射界面"
+    if "air_crack" in target_types:
+        return "空气裂缝弱结构"
     if "hyperbola" in target_types:
         return "双曲线目标"
     return "真实正演结构"
