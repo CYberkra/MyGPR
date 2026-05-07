@@ -1,0 +1,35 @@
+{
+  "schema": "mygpr_gprmax_ground_truth_v1",
+  "scenario_id": "cylinder_single_v1",
+  "targets": [
+    {
+      "target_id": "metal_cylinder_01",
+      "type": "hyperbola",
+      "source_geometry": "metal_cylinder",
+      "apex_trace_idx": 40,
+      "apex_sample_idx": 79,
+      "apex_time_ns": 6.463636363636364,
+      "roi": {
+        "time_start_idx": 49,
+        "time_end_idx": 149,
+        "dist_start_idx": 16,
+        "dist_end_idx": 65
+      },
+      "must_preserve": true,
+      "expected_features": [
+        "hyperbola_apex",
+        "left_hyperbola_arm",
+        "right_hyperbola_arm"
+      ]
+    }
+  ],
+  "known_background": {
+    "horizontal_layers": [],
+    "air_ground_interface": null
+  },
+  "metrics_hint": {
+    "target_roi_weight": 1.0,
+    "background_roi_weight": 0.5,
+    "false_positive_penalty": 0.7
+  }
+}

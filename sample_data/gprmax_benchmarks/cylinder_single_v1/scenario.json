@@ -1,0 +1,74 @@
+{
+  "schema": "mygpr_gprmax_scenario_v1",
+  "scenario_id": "cylinder_single_v1",
+  "description": "Single metal cylinder in dielectric half-space for auto-tune validation.",
+  "source": {
+    "kind": "synthetic_reference",
+    "path": null
+  },
+  "simulation": {
+    "sample_count": 220,
+    "trace_count": 81,
+    "time_step_s": 8.181818181818183e-11,
+    "total_time_ns": 18.0,
+    "trace_step_m": 0.002
+  },
+  "domain_m": [
+    0.24,
+    0.21,
+    0.002
+  ],
+  "dx_dy_dz_m": [
+    0.002,
+    0.002,
+    0.002
+  ],
+  "materials": [
+    {
+      "name": "half_space",
+      "relative_permittivity": 6.0,
+      "conductivity_s_per_m": 0.0,
+      "relative_permeability": 1.0,
+      "magnetic_loss": 0.0
+    },
+    {
+      "name": "metal_cylinder",
+      "material": "pec"
+    }
+  ],
+  "antenna": {
+    "waveform": "ricker",
+    "center_frequency_hz": 1500000000.0,
+    "source": "hertzian_dipole_z",
+    "source_position_m": [
+      0.04,
+      0.17,
+      0.0
+    ],
+    "receiver_position_m": [
+      0.08,
+      0.17,
+      0.0
+    ],
+    "source_step_m": [
+      0.002,
+      0.0,
+      0.0
+    ],
+    "receiver_step_m": [
+      0.002,
+      0.0,
+      0.0
+    ]
+  },
+  "target": {
+    "target_id": "metal_cylinder_01",
+    "type": "metal_cylinder",
+    "center_m": [
+      0.12,
+      0.08,
+      0.0
+    ],
+    "radius_m": 0.01
+  }
+}
