@@ -21,6 +21,7 @@ import os
 import re
 import sys
 import traceback
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -122,6 +123,7 @@ def load_gpr_csv(
     trace_timestamps_s: Any = None,
     rtk_path: str | None = None,
     imu_path: str | None = None,
+    altimeter_path: str | None = None,
 ) -> Tuple[
     np.ndarray,
     Optional[Dict[str, Any]],
@@ -144,14 +146,16 @@ def load_gpr_csv(
             sidecar_kwargs["rtk_path"] = rtk_path
         if imu_path is not None:
             sidecar_kwargs["imu_path"] = imu_path
+        if altimeter_path is not None:
+            sidecar_kwargs["altimeter_path"] = altimeter_path
         data, trace_metadata, header_info = extract_airborne_csv_payload(
             raw_data,
             header_info,
             **sidecar_kwargs,
         )
     else:
-        if rtk_path is not None or imu_path is not None:
-            raise ValueError("RTK/IMU sidecars require an airborne CSV header")
+        if rtk_path is not None or imu_path is not None or altimeter_path is not None:
+            raise ValueError("RTK/IMU/altimeter sidecars require an airborne CSV header")
         data = raw_data
 
     if np.isnan(data).any():
@@ -293,7 +297,7 @@ def _build_sidecar_loader_kwargs(job: Dict[str, Any], repo_root: str) -> Dict[st
         kwargs["trace_timestamps_s"] = np.asarray(
             job["trace_timestamps_s"], dtype=np.float64
         )
-    for field in ("rtk_path", "imu_path"):
+    for field in ("rtk_path", "imu_path", "altimeter_path"):
         value = job.get(field)
         if value:
             kwargs[field] = _resolve_repo_path(str(value), repo_root)
@@ -333,7 +337,7 @@ def validate_config(cfg: Dict[str, Any], repo_root: str) -> ValidationResult:
             abs_input = _resolve_repo_path(str(input_path), repo_root)
             if not os.path.exists(abs_input):
                 errors.append(f"[{jid}] input not found: {input_path}")
-            for sidecar_field in ("rtk_path", "imu_path"):
+            for sidecar_field in ("rtk_path", "imu_path", "altimeter_path"):
                 sidecar_path = job.get(sidecar_field)
                 if sidecar_path:
                     abs_sidecar = _resolve_repo_path(str(sidecar_path), repo_root)
@@ -651,8 +655,7 @@ def run_batch(cfg: Dict[str, Any], config_path: str, repo_root: str) -> int:
         "total": ok_count + fail_count,
     }
 
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    summary_path = os.path.join(output_dir, f"summary_{ts}.json")
+    summary_path = _build_summary_path(output_dir)
     with open(summary_path, "w", encoding="utf-8") as f:
         json.dump(summary, f, ensure_ascii=False, indent=2)
 
@@ -661,6 +664,13 @@ def run_batch(cfg: Dict[str, Any], config_path: str, repo_root: str) -> int:
     print(f"summary_file: {os.path.relpath(summary_path, repo_root)}")
 
     return 0 if fail_count == 0 else 2
+
+
+def _build_summary_path(output_dir: str) -> str:
+    """Build a collision-resistant summary path for repeated batch runs."""
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    suffix = uuid.uuid4().hex[:8]
+    return os.path.join(output_dir, f"summary_{ts}_{suffix}.json")
 
 
 def cmd_validate(args) -> int:
@@ -698,7 +708,7 @@ def cmd_resume(args) -> int:
     print("resume: phase-1 placeholder (not implemented yet).")
     if args.summary:
         print(f"summary hint: {args.summary}")
-    return 0
+    return 2
 
 
 def build_parser() -> argparse.ArgumentParser:

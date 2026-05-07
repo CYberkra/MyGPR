@@ -68,6 +68,7 @@ from PythonModule.motion_compensation_attitude import (  # type: ignore[import]
 from PythonModule.motion_compensation_vibration import (  # type: ignore[import]
     method_motion_compensation_vibration,
 )
+from PythonModule.motion_compensation_v2 import method_motion_compensation_v2
 
 
 # ============ 方法注册表 ============
@@ -732,6 +733,111 @@ PROCESSING_METHODS = {
             "max_restore_gain": [1.1, 1.25, 1.5],
         },
     },
+    "motion_compensation_v2": {
+        "name": "UAV 运动补偿 V2",
+        "type": "local",
+        "func": method_motion_compensation_v2,
+        "params": [
+            {
+                "name": "height_reference_mode",
+                "label": "参考高度",
+                "type": "choice",
+                "choices": ["mean", "min", "manual"],
+                "default": "mean",
+            },
+            {
+                "name": "manual_height_m",
+                "label": "手动参考高度 (m)",
+                "type": "float",
+                "default": 1.5,
+                "min": 0.01,
+                "max": 200.0,
+            },
+            {
+                "name": "height_source",
+                "label": "高度来源",
+                "type": "choice",
+                "choices": ["auto", "height_agl_m", "flight_height_m"],
+                "default": "auto",
+            },
+            {
+                "name": "compensate_time_shift",
+                "label": "高度时移校正",
+                "type": "bool",
+                "default": True,
+            },
+            {
+                "name": "compensate_amplitude",
+                "label": "高度振幅归一",
+                "type": "bool",
+                "default": True,
+            },
+            {
+                "name": "max_shift_samples",
+                "label": "最大时移样点",
+                "type": "float",
+                "default": 20.0,
+                "min": 0.0,
+                "max": 500.0,
+            },
+            {
+                "name": "max_amplitude_scale",
+                "label": "最大振幅倍率",
+                "type": "float",
+                "default": 2.0,
+                "min": 1.0,
+                "max": 20.0,
+            },
+            {
+                "name": "resample_spacing_m",
+                "label": "等距重采样间距 (m)",
+                "type": "float",
+                "default": 0.0,
+                "min": 0.0,
+                "max": 10.0,
+            },
+            {
+                "name": "apc_offset_x_m",
+                "label": "APC X偏移 (m)",
+                "type": "float",
+                "default": 0.0,
+                "min": -5.0,
+                "max": 5.0,
+            },
+            {
+                "name": "apc_offset_y_m",
+                "label": "APC Y偏移 (m)",
+                "type": "float",
+                "default": 0.0,
+                "min": -5.0,
+                "max": 5.0,
+            },
+            {
+                "name": "apc_offset_z_m",
+                "label": "APC Z偏移 (m)",
+                "type": "float",
+                "default": 0.0,
+                "min": -5.0,
+                "max": 5.0,
+            },
+            {
+                "name": "max_abs_tilt_deg",
+                "label": "最大姿态角 (deg)",
+                "type": "float",
+                "default": 20.0,
+                "min": 0.1,
+                "max": 89.0,
+            },
+        ],
+        "auto_tune_enabled": True,
+        "auto_tune_family": "motion_comp",
+        "auto_tune_candidates": {
+            "height_reference_mode": ["mean", "min"],
+            "compensate_amplitude": [True, False],
+            "max_amplitude_scale": [1.5, 2.0, 3.0],
+            "resample_spacing_m": [0.0],
+        },
+    },
     "stolt_migration": {
         "name": "Stolt/ω-k 迁移（增强版）",
         "type": "local",
@@ -1128,6 +1234,12 @@ METHOD_METADATA = {
         "visibility": "public",
         "display_name": "振动/背景条带抑制",
     },
+    "motion_compensation_v2": {
+        "category": "motion_compensation",
+        "maturity": "experimental",
+        "visibility": "public",
+        "display_name": "UAV 运动补偿 V2",
+    },
     "stolt_migration": {
         "category": "migration",
         "maturity": "experimental",
@@ -1194,6 +1306,7 @@ PREFERRED_METHOD_ORDER = [
     "trajectory_smoothing",
     "motion_compensation_attitude",
     "motion_compensation_vibration",
+    "motion_compensation_v2",
     "stolt_migration",
     "kirchhoff_migration",
     "time_to_depth",
@@ -1220,6 +1333,7 @@ METHOD_TAGS = {
     "trajectory_smoothing": "实验",
     "motion_compensation_attitude": "实验",
     "motion_compensation_vibration": "实验",
+    "motion_compensation_v2": "推荐",
 }
 
 METHOD_CATEGORY_LABELS = {
@@ -1257,6 +1371,7 @@ AUTO_TUNE_STAGE_BY_METHOD = {
     "trajectory_smoothing": "motion_comp",
     "motion_compensation_attitude": "motion_comp",
     "motion_compensation_vibration": "motion_comp",
+    "motion_compensation_v2": "motion_comp",
 }
 
 for _method_key, _stage in AUTO_TUNE_STAGE_BY_METHOD.items():

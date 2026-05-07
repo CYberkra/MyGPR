@@ -225,6 +225,24 @@ RECOMMENDED_RUN_PROFILES = {
             "svd_subspace",
         ],
     },
+    "uav_gpr_experience_baseline_v1": {
+        "label": "UAV-GPR 经验参数 baseline",
+        "preset_key": "denoise_first",
+        "method_params": {
+            "set_zero_time": {"new_zero_time": 5.0},
+            "dewow": {"window": 61},
+            "subtracting_average_2D": {"ntraces": 51},
+            "sec_gain": {"gain_min": 1.0, "gain_max": 4.2, "power": 1.2},
+            "svd_subspace": {"rank_start": 1, "rank_end": 20},
+        },
+        "order": [
+            "set_zero_time",
+            "dewow",
+            "subtracting_average_2D",
+            "sec_gain",
+            "svd_subspace",
+        ],
+    },
     "high_focus": {
         "label": "高聚焦",
         "preset_key": "stolt_focus_first",
@@ -268,6 +286,27 @@ RECOMMENDED_RUN_PROFILES = {
             "wavelet_2d",
         ],
     },
+    "wavelet_svd_denoise": {
+        "label": "Wavelet-SVD 去噪",
+        "preset_key": "denoise_first",
+        "method_params": {
+            "wavelet_svd": {
+                "wavelet": "db4",
+                "levels": 2,
+                "threshold": 0.05,
+                "rank_start": 1,
+                "rank_end": 20,
+            },
+        },
+        "order": [
+            "set_zero_time",
+            "dewow",
+            "subtracting_average_2D",
+            "fk_filter",
+            "sec_gain",
+            "wavelet_svd",
+        ],
+    },
     "motion_compensation_v1": {
         "label": "运动补偿 V1",
         "preset_key": "raw_fidelity",
@@ -305,6 +344,26 @@ RECOMMENDED_RUN_PROFILES = {
             "motion_compensation_height",
             "motion_compensation_vibration",
         ],
+    },
+    "motion_compensation_v2": {
+        "label": "UAV 运动补偿 V2",
+        "preset_key": "raw_fidelity",
+        "method_params": {
+            "motion_compensation_v2": {
+                "height_reference_mode": "mean",
+                "height_source": "auto",
+                "compensate_time_shift": True,
+                "compensate_amplitude": True,
+                "max_shift_samples": 20.0,
+                "max_amplitude_scale": 2.0,
+                "resample_spacing_m": 0.0,
+                "apc_offset_x_m": 0.0,
+                "apc_offset_y_m": 0.0,
+                "apc_offset_z_m": 0.0,
+                "max_abs_tilt_deg": 20.0,
+            },
+        },
+        "order": ["motion_compensation_v2"],
     },
 }
 

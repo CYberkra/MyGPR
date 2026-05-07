@@ -1,0 +1,12 @@
+{
+  "version": "1.0",
+  "description": "Minimal CLI batch example using the bundled airborne CSV sample.",
+  "jobs": [
+    {
+      "id": "cli_batch_mvp",
+      "input": "sample_data/gui_sidecar_all_data_main.csv",
+      "recommended_profile": "quick_preview"
+    }
+  ],
+  "output_dir": "output/cli_batch_mvp"
+}

@@ -1,0 +1,17 @@
+{
+  "schema": "uav_gpr_motion_v2_synthetic_package",
+  "samples": 96,
+  "traces": 24,
+  "total_time_ns": 120.0,
+  "trace_interval_m": 0.55,
+  "air_wave_speed_m_per_ns": 0.299792458,
+  "reference_height_m": 1.5751847584469882,
+  "max_abs_time_shift_samples": 1.0760047645839894,
+  "files": {
+    "main_csv": "main.csv",
+    "rtk_csv": "rtk.csv",
+    "imu_csv": "imu.csv",
+    "altimeter_csv": "altimeter.csv",
+    "package_config": "batch_motion_v2.json"
+  }
+}

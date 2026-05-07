@@ -55,12 +55,22 @@ def test_integrate_optional_sidecars_with_rtk_and_imu_payloads_adds_motion_ready
         "pitch_deg": np.array([0.0, 0.5, 1.0, 1.5], dtype=np.float32),
         "yaw_deg": np.array([180.0, 181.0, 182.0, 183.0], dtype=np.float32),
     }
+    altimeter_payload = {
+        "source_kind": "altimeter",
+        "timestamp_s": np.array([9.5, 10.5, 11.5, 12.5], dtype=np.float64),
+        "height_agl_m": np.array([1.0, 1.1, 1.2, 1.3], dtype=np.float32),
+        "height_source": np.array(["nar15", "nar15", "nar15", "nar15"], dtype="<U8"),
+        "snr": np.array([18.0, 20.0, 16.0, 22.0], dtype=np.float32),
+        "target_count": np.array([1, 1, 1, 1], dtype=np.int32),
+        "valid": np.array([1, 1, 1, 1], dtype=np.int32),
+    }
 
     integrated = integrate_optional_sidecars(
         trace_metadata,
         trace_timestamps_s=trace_timestamps_s,
         rtk_payload=rtk_payload,
         imu_payload=imu_payload,
+        altimeter_payload=altimeter_payload,
     )
 
     assert np.array_equal(integrated["trace_index"], trace_metadata["trace_index"])
@@ -72,3 +82,6 @@ def test_integrate_optional_sidecars_with_rtk_and_imu_payloads_adds_motion_ready
     assert np.allclose(integrated["roll_deg"], np.array([0.5, 1.5, 2.5], dtype=np.float32))
     assert np.allclose(integrated["pitch_deg"], np.array([0.25, 0.75, 1.25], dtype=np.float32))
     assert np.allclose(integrated["yaw_deg"], np.array([180.5, 181.5, 182.5], dtype=np.float32))
+    assert np.allclose(integrated["height_agl_m"], np.array([1.05, 1.15, 1.25], dtype=np.float32))
+    assert set(integrated["height_source"].tolist()) == {"nar15"}
+    assert np.all(integrated["height_confidence"] > 0.0)

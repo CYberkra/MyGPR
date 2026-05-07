@@ -10,6 +10,7 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib import font_manager
 import re
 
 
@@ -30,6 +31,26 @@ _HEADER_KEYS = [
     "Number of Traces",
     "Trace interval",
 ]
+
+
+def _configure_cjk_font() -> None:
+    """Use an installed CJK-capable font when saving Chinese-titled figures."""
+    preferred = [
+        "Microsoft YaHei",
+        "SimHei",
+        "Noto Sans CJK SC",
+        "Source Han Sans SC",
+        "Arial Unicode MS",
+    ]
+    available = {font.name for font in font_manager.fontManager.ttflist}
+    for family in preferred:
+        if family in available:
+            matplotlib.rcParams["font.sans-serif"] = [family, "DejaVu Sans"]
+            break
+    matplotlib.rcParams["axes.unicode_minus"] = False
+
+
+_configure_cjk_font()
 
 
 def _parse_header_lines(lines):

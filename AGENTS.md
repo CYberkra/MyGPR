@@ -1,6 +1,6 @@
 # AGENTS.md - GPR GUI
 
-Guidance for agentic coding tools working in `GPR_GUI_main_2026-04-10/`.
+Guidance for agentic coding tools working in `MyGPR/`.
 All commands below assume this directory is the working directory.
 
 ## Scope
@@ -26,7 +26,7 @@ All commands below assume this directory is the working directory.
 python -m pip install -r requirements-dev.txt
 ```
 
-Python 3.8+ is required. The repo currently uses PyQt6, NumPy, Pandas, SciPy,
+Python 3.10+ is required. The repo currently uses PyQt6, NumPy, Pandas, SciPy,
 Matplotlib, and PyQt6-Fluent-Widgets.
 
 ## Build / Run / Test

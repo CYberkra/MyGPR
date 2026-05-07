@@ -31,6 +31,13 @@ def run_processing_method(
         raise ProcessingEngineError(f"未知方法: {method_id}")
 
     input_data = _ensure_2d_array(data)
+    runtime_warnings = _build_input_sanitized_warnings(method_id, input_data)
+    if runtime_warnings:
+        finite = np.isfinite(input_data)
+        fill_value = float(np.mean(input_data[finite])) if finite.any() else 0.0
+        input_data = np.nan_to_num(
+            input_data, nan=fill_value, posinf=fill_value, neginf=fill_value
+        )
     runtime_params = {
         k: v for k, v in (params or {}).items() if not str(k).startswith("_")
     }
@@ -40,9 +47,11 @@ def run_processing_method(
     func = method_info.get("func")
     if callable(func):
         result = func(np.array(input_data, copy=True), **runtime_params)
-        return _normalize_result(method_id, result)
+        return _normalize_result(method_id, result, warnings=runtime_warnings)
 
-    return _run_legacy_adapter(method_id, input_data, runtime_params)
+    return _run_legacy_adapter(
+        method_id, input_data, runtime_params, warnings=runtime_warnings
+    )
 
 
 def prepare_runtime_params(
@@ -215,6 +224,25 @@ def _normalize_result(
     return output.astype(np.float32, copy=False), meta
 
 
+def _build_input_sanitized_warnings(
+    method_id: str, input_data: np.ndarray
+) -> list[dict[str, Any]]:
+    """Build warnings for non-finite input before a method can hide them."""
+    if np.isfinite(input_data).all():
+        return []
+    finite = np.isfinite(input_data)
+    fill_value = float(np.mean(input_data[finite])) if finite.any() else 0.0
+    return [
+        build_runtime_warning(
+            "data_sanitized",
+            "输入数据包含 NaN/Inf，已使用均值填充后再处理。",
+            method_id=method_id,
+            fill_value=fill_value,
+            stage="input",
+        )
+    ]
+
+
 def _ensure_2d_array(data: Any) -> np.ndarray:
     arr = np.asarray(data, dtype=np.float64)
     if arr.ndim == 1:
@@ -227,27 +255,48 @@ def _ensure_2d_array(data: Any) -> np.ndarray:
 
 
 def _run_legacy_adapter(
-    method_id: str, data: np.ndarray, params: Dict[str, Any]
+    method_id: str,
+    data: np.ndarray,
+    params: Dict[str, Any],
+    warnings: list[dict[str, Any]] | None = None,
 ) -> Tuple[np.ndarray, Dict[str, Any]]:
     if method_id == "compensatingGain":
-        return _normalize_result(method_id, _apply_compensating_gain(data, **params))
+        return _normalize_result(
+            method_id, _apply_compensating_gain(data, **params), warnings=warnings
+        )
     if method_id == "agcGain":
-        output, warnings = _apply_agc_gain(data, **params)
-        return _normalize_result(method_id, output, warnings=warnings)
+        output, method_warnings = _apply_agc_gain(data, **params)
+        return _normalize_result(
+            method_id,
+            output,
+            warnings=merge_runtime_warnings(warnings, method_warnings),
+        )
     if method_id == "subtracting_average_2D":
-        output, warnings = _apply_subtracting_average_2d(data, **params)
-        return _normalize_result(method_id, output, warnings=warnings)
+        output, method_warnings = _apply_subtracting_average_2d(data, **params)
+        return _normalize_result(
+            method_id,
+            output,
+            warnings=merge_runtime_warnings(warnings, method_warnings),
+        )
     if method_id == "running_average_2D":
-        output, warnings = _apply_running_average_2d(data, **params)
-        return _normalize_result(method_id, output, warnings=warnings)
+        output, method_warnings = _apply_running_average_2d(data, **params)
+        return _normalize_result(
+            method_id,
+            output,
+            warnings=merge_runtime_warnings(warnings, method_warnings),
+        )
     if method_id == "dewow":
         from PythonModule.dewow import method_dewow
 
-        return _normalize_result(method_id, method_dewow(data, **params))
+        return _normalize_result(
+            method_id, method_dewow(data, **params), warnings=warnings
+        )
     if method_id == "set_zero_time":
         from PythonModule.set_zero_time import method_set_zero_time
 
-        return _normalize_result(method_id, method_set_zero_time(data, **params))
+        return _normalize_result(
+            method_id, method_set_zero_time(data, **params), warnings=warnings
+        )
 
     raise ProcessingEngineError(f"未实现的处理方法: {method_id}")
 

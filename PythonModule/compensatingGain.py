@@ -104,7 +104,7 @@ def compensatingGain(
 
 
 def GainPreview(
-    infilename=r"F:\dradar\signal_processing_code\data_output\cpp_call_python_function/EXAMPLE1_DZT_IMAGEDATA.csv",
+    infilename="",
     length_trace=60,
     Start_position=0,
     end_position=10.3125,

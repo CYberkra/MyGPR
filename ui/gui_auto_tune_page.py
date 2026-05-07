@@ -32,6 +32,7 @@ class AutoTunePage(QWidget):
         self._supports_auto_tune = False
         self._last_result = None
         self._last_stage_compare_result = None
+        self._last_comparison_result = None
         self.setup_ui()
 
     def setup_ui(self):
@@ -207,12 +208,15 @@ class AutoTunePage(QWidget):
         self.btn_compare_stage = PushButton(FluentIcon.FILTER, "同阶段实验比较")
         self.btn_compare_stage.setToolTip("比较当前 stage 内多个可用方法，推荐更合适的方法")
         self.btn_compare_stage.setEnabled(False)
+        self.btn_compare_manual_auto = PushButton(FluentIcon.VIEW, "人工/自动对比")
+        self.btn_compare_manual_auto.setToolTip("用经验/当前参数 baseline 与自动选参结果生成科研对比")
         self.btn_view_auto_tune = PushButton(FluentIcon.VIEW, "查看实验结果")
         self.btn_view_auto_tune.setEnabled(False)
         self.btn_view_auto_tune.setToolTip("查看候选参数、阶段比较与推荐理由")
 
         primary_layout.addWidget(self.btn_auto_tune)
         primary_layout.addWidget(self.btn_compare_stage)
+        primary_layout.addWidget(self.btn_compare_manual_auto)
         primary_layout.addWidget(self.btn_view_auto_tune)
         primary_layout.addStretch(1)
         action_layout.addWidget(primary_row)
@@ -329,6 +333,7 @@ class AutoTunePage(QWidget):
         self.result_segmented = SegmentedWidget(self)
         self.result_segmented.addItem("auto", "自动选参结果")
         self.result_segmented.addItem("stage", "阶段比较结果")
+        self.result_segmented.addItem("comparison", "人工/自动对比")
         detail_layout.addWidget(self.result_segmented)
 
         self.result_stack = QStackedWidget(self)
@@ -364,6 +369,34 @@ class AutoTunePage(QWidget):
         stage_layout.addWidget(self.stage_compare_summary)
         self.result_stack.addWidget(stage_panel)
 
+        comparison_panel = QWidget()
+        comparison_layout = QVBoxLayout(comparison_panel)
+        comparison_layout.setContentsMargins(0, 0, 0, 0)
+        comparison_layout.setSpacing(8)
+        comparison_panel_hint = QLabel("显示人工 baseline 与自动选参的参数、评分差异和图像对比入口。")
+        comparison_panel_hint.setWordWrap(True)
+        comparison_panel_hint.setProperty("class", "hintText")
+        comparison_layout.addWidget(comparison_panel_hint)
+        self.comparison_summary = QTextEdit()
+        self.comparison_summary.setReadOnly(True)
+        self.comparison_summary.setMaximumHeight(260)
+        self.comparison_summary.setPlaceholderText("人工/自动对比结果会显示在这里：pipeline、参数差异、评分差异和结论。")
+        comparison_layout.addWidget(self.comparison_summary)
+
+        comparison_action_row = QWidget()
+        comparison_action_layout = QHBoxLayout(comparison_action_row)
+        comparison_action_layout.setContentsMargins(0, 0, 0, 0)
+        comparison_action_layout.setSpacing(8)
+        self.btn_export_comparison = PushButton(FluentIcon.SAVE, "导出对比证据")
+        self.btn_export_comparison.setEnabled(False)
+        self.btn_export_comparison.setToolTip(
+            "导出 summary JSON、manual/auto/side-by-side PNG、params/metrics CSV"
+        )
+        comparison_action_layout.addWidget(self.btn_export_comparison)
+        comparison_action_layout.addStretch(1)
+        comparison_layout.addWidget(comparison_action_row)
+        self.result_stack.addWidget(comparison_panel)
+
         self.result_segmented.setCurrentItem("auto")
         self.result_stack.setCurrentIndex(0)
         self.result_segmented.currentItemChanged.connect(self._on_result_segment_changed)
@@ -377,7 +410,7 @@ class AutoTunePage(QWidget):
         self.stack.setCurrentIndex(mapping.get(route_key, 0))
 
     def _on_result_segment_changed(self, route_key: str):
-        mapping = {"auto": 0, "stage": 1}
+        mapping = {"auto": 0, "stage": 1, "comparison": 2}
         self.result_stack.setCurrentIndex(mapping.get(route_key, 0))
 
     def get_auto_tune_roi_mode(self) -> str:
@@ -430,6 +463,135 @@ class AutoTunePage(QWidget):
             self._format_stage_compare_summary(result)
         )
         self.btn_apply_stage_choice.setEnabled(True)
+
+    def show_comparison_running(self, roi_label: str, search_mode: str):
+        """显示人工/自动对比运行中状态。"""
+        self._last_comparison_result = None
+        self.btn_export_comparison.setEnabled(False)
+        self._set_result_overview(
+            state="对比中",
+            stats=f"ROI={roi_label} | 搜索={search_mode}",
+            risk="正在以同一输入、同一 ROI 运行人工 baseline 与自动选参分支。",
+        )
+        self.result_segmented.setCurrentItem("comparison")
+        self.comparison_summary.setPlainText(
+            f"正在生成人工/自动对比...\nROI 来源: {roi_label}\n搜索模式: {search_mode}"
+        )
+
+    def show_comparison_result(self, summary: dict):
+        """显示人工 baseline vs 自动选参对比结果摘要。"""
+        self._last_comparison_result = dict(summary or {})
+        self.btn_export_comparison.setEnabled(True)
+        verdict = str(summary.get("verdict") or "tie")
+        verdict_label = {
+            "auto_better": "自动选参更优",
+            "manual_better": "人工 baseline 更优",
+            "tie": "差异不明显",
+        }.get(verdict, verdict)
+        delta_score = float(
+            (summary.get("metric_delta") or {}).get("comparison_score", 0.0)
+        )
+        manual_score = float(
+            ((summary.get("manual") or {}).get("metrics") or {}).get(
+                "comparison_score", 0.0
+            )
+        )
+        auto_score = float(
+            ((summary.get("automatic") or {}).get("metrics") or {}).get(
+                "comparison_score", 0.0
+            )
+        )
+        warning_count = len((summary.get("manual") or {}).get("warnings", []) or []) + len(
+            (summary.get("automatic") or {}).get("warnings", []) or []
+        )
+        self._set_result_overview(
+            state="对比完成",
+            recommended=verdict_label,
+            confidence=f"Δscore={delta_score:.4f}",
+            stats=f"人工 {manual_score:.4f} | 自动 {auto_score:.4f}",
+            risk=(
+                f"存在 {warning_count} 条运行提示，导出前建议核查。"
+                if warning_count
+                else "已生成同尺度图像快照，可在主图对比区查看。"
+            ),
+        )
+        self.result_segmented.setCurrentItem("comparison")
+        self.comparison_summary.setPlainText(self._format_comparison_summary(summary))
+
+    def show_comparison_error(self, error_msg: str):
+        """显示人工/自动对比失败状态。"""
+        self._last_comparison_result = None
+        self.btn_export_comparison.setEnabled(False)
+        self._set_result_overview(state="对比失败", risk="当前没有可用对比结果。")
+        self.result_segmented.setCurrentItem("comparison")
+        self.comparison_summary.setPlainText(f"人工/自动对比失败:\n{error_msg}")
+
+    def _format_comparison_summary(self, summary: dict) -> str:
+        """格式化人工/自动对比摘要。"""
+        lines = []
+        verdict = str(summary.get("verdict") or "tie")
+        verdict_label = {
+            "auto_better": "自动选参更优",
+            "manual_better": "人工 baseline 更优",
+            "tie": "差异不明显",
+        }.get(verdict, verdict)
+        lines.append(f"结论: {verdict_label}")
+        roi_info = summary.get("roi_info", {}) or {}
+        lines.append(f"ROI: {roi_info.get('label', roi_info.get('source', '--'))}")
+        lines.append(f"Baseline profile: {summary.get('baseline_profile_key', '--')}")
+
+        manual = summary.get("manual", {}) or {}
+        automatic = summary.get("automatic", {}) or {}
+        lines.append("")
+        lines.append(
+            "评分: 人工 {manual:.4f} | 自动 {auto:.4f} | Δ {delta:.4f}".format(
+                manual=float((manual.get("metrics") or {}).get("comparison_score", 0.0)),
+                auto=float(
+                    (automatic.get("metrics") or {}).get("comparison_score", 0.0)
+                ),
+                delta=float(
+                    (summary.get("metric_delta") or {}).get("comparison_score", 0.0)
+                ),
+            )
+        )
+        pipeline = manual.get("pipeline") or automatic.get("pipeline") or []
+        if pipeline:
+            lines.append("Pipeline: " + " -> ".join(str(item) for item in pipeline))
+
+        lines.append("")
+        lines.append("人工 baseline 参数:")
+        manual_params = manual.get("params_by_method", {}) or {}
+        for method_key in pipeline:
+            lines.append(
+                f"- {method_key}: {json.dumps(manual_params.get(method_key, {}), ensure_ascii=False)}"
+            )
+
+        lines.append("")
+        lines.append("自动选参参数:")
+        auto_params = automatic.get("params_by_method", {}) or {}
+        for method_key in pipeline:
+            lines.append(
+                f"- {method_key}: {json.dumps(auto_params.get(method_key, {}), ensure_ascii=False)}"
+            )
+
+        auto_tune_results = automatic.get("auto_tune_results", {}) or {}
+        if auto_tune_results:
+            lines.append("")
+            lines.append("自动推荐理由:")
+            for method_key in pipeline:
+                item = auto_tune_results.get(method_key)
+                if not item:
+                    continue
+                reason = item.get("best_reason") or "--"
+                lines.append(f"- {method_key}: {reason}")
+
+        warnings = (manual.get("warnings") or []) + (automatic.get("warnings") or [])
+        if warnings:
+            lines.append("")
+            lines.append("运行提示:")
+            for warning in warnings[:8]:
+                lines.append(f"- {warning}")
+        return "\n".join(lines)
 
     def _format_stage_compare_summary(self, result: dict) -> str:
         """格式化同阶段方法比较结果。"""
@@ -487,6 +649,9 @@ class AutoTunePage(QWidget):
         self.set_auto_tune_result_available(False)
         self.set_auto_tune_method_key(method_key)
         self.set_stage_compare_result(None)
+        self._last_comparison_result = None
+        self.comparison_summary.clear()
+        self.btn_export_comparison.setEnabled(False)
         if not method_key:
             self._set_result_overview(state="未分析")
             self.set_auto_tune_summary(

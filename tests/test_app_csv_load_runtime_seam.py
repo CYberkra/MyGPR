@@ -58,6 +58,7 @@ def test_load_single_csv_with_progress_forwards_optional_sidecar_kwargs(monkeypa
         trace_timestamps_s=trace_timestamps_s,
         rtk_path="rtk.csv",
         imu_path="imu.csv",
+        altimeter_path="altimeter.csv",
     )
 
     assert result["data"].shape == (3, 4)
@@ -66,6 +67,7 @@ def test_load_single_csv_with_progress_forwards_optional_sidecar_kwargs(monkeypa
     assert np.array_equal(cast(np.ndarray, forwarded["trace_timestamps_s"]), trace_timestamps_s)
     assert forwarded["rtk_path"] == "rtk.csv"
     assert forwarded["imu_path"] == "imu.csv"
+    assert forwarded["altimeter_path"] == "altimeter.csv"
 
 
 def test_load_single_csv_with_progress_preserves_legacy_call_shape(monkeypatch):

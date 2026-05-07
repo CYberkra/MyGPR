@@ -7,6 +7,7 @@ Created on Thur Nov 9 15:50:15 2023
 """
 
 import struct
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -119,11 +120,14 @@ def running_average_2D(
 
 def main():
     # 指定包含DZT文件的文件夹路径，替换为你的DZT文件路径
-    infilename = "F:\dradar\signal_processing_code\data_output\my_data\save_the_csv/Subtracting_averageFILE____032.csv"
+    base_dir = Path(__file__).resolve().parents[1]
+    demo_dir = base_dir / "output" / "legacy_examples"
+    demo_dir.mkdir(parents=True, exist_ok=True)
+    infilename = str(base_dir / "sample_data" / "gui_sidecar_all_data_main.csv")
     # 输出的文件路径
-    outfilename = "F:\dradar\signal_processing_code\data_output\my_data\save_the_csv/running_averageFILE____032.csv"
+    outfilename = str(demo_dir / "running_averageFILE____032.csv")
     # 输出图像的路径
-    outimagename = "F:\dradar\signal_processing_code\data_output\my_data\save_the_csv/running_averageFILE____032.png"
+    outimagename = str(demo_dir / "running_averageFILE____032.png")
     # 输入指定的头信息内容
     length_trace = 48 - 5.7
     Start_position = 0
@@ -151,9 +155,7 @@ def main():
 
     if loc_data["error_sign"] == 0:
         # 处理后图像显示
-        newdata = readcsv(
-            "F:\dradar\signal_processing_code\data_output\my_data\save_the_csv/running_averageFILE____032.csv"
-        )
+        newdata = readcsv(outfilename)
         show_image(
             newdata, time_range=(twtt[0], twtt[-1]), distance_range=(x[0], x[-1])
         )

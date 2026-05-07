@@ -66,6 +66,7 @@ METHOD_CATEGORIES = {
             "motion_compensation_attitude",
             "motion_compensation_height",
             "motion_compensation_vibration",
+            "motion_compensation_v2",
         ],
     },
 }
@@ -230,6 +231,30 @@ QUICK_PRESETS = {
                     "preserve_mix": 0.35,
                     "background_mix": 0.02,
                     "max_restore_gain": 1.25,
+                },
+            },
+        ],
+    },
+    "motion_compensation_v2": {
+        "name": "运动补偿 V2",
+        "description": "统一的 UAV-GPR RTK/IMU/高度计运动补偿流程",
+        "methods": [
+            {
+                "category": "motion_compensation",
+                "method_id": "motion_compensation_v2",
+                "enabled": True,
+                "params": {
+                    "height_reference_mode": "mean",
+                    "height_source": "auto",
+                    "compensate_time_shift": True,
+                    "compensate_amplitude": True,
+                    "max_shift_samples": 20.0,
+                    "max_amplitude_scale": 2.0,
+                    "resample_spacing_m": 0.0,
+                    "apc_offset_x_m": 0.0,
+                    "apc_offset_y_m": 0.0,
+                    "apc_offset_z_m": 0.0,
+                    "max_abs_tilt_deg": 20.0,
                 },
             },
         ],

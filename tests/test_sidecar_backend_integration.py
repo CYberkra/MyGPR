@@ -39,7 +39,7 @@ def test_load_and_integrate_optional_sidecars_without_files_keeps_legacy_metadat
         assert np.array_equal(integrated[key], values)
 
 
-def test_load_and_integrate_optional_sidecars_parses_rtk_and_imu_files(tmp_path: Path):
+def test_load_and_integrate_optional_sidecars_parses_rtk_imu_and_altimeter_files(tmp_path: Path):
     module = importlib.import_module("core.sidecar_integration")
     load_and_integrate_optional_sidecars = module.load_and_integrate_optional_sidecars
 
@@ -70,12 +70,22 @@ def test_load_and_integrate_optional_sidecars_parses_rtk_and_imu_files(tmp_path:
             {"timestamp": 11.0, "roll": 1.0, "pitch": 0.5, "yaw": 181.0},
         ],
     )
+    altimeter_path = tmp_path / "altimeter.csv"
+    _write_csv(
+        altimeter_path,
+        [
+            {"timestamp": 12.0, "distance_m": 1.4, "source": "nar15", "snr": 20.0, "targets": 1, "valid": 1},
+            {"timestamp": 10.0, "distance_m": 1.2, "source": "nar15", "snr": 18.0, "targets": 1, "valid": 1},
+            {"timestamp": 11.0, "distance_m": 1.3, "source": "nar15", "snr": 19.0, "targets": 1, "valid": 1},
+        ],
+    )
 
     integrated = load_and_integrate_optional_sidecars(
         trace_metadata,
         trace_timestamps_s=trace_timestamps_s,
         rtk_path=rtk_path,
         imu_path=imu_path,
+        altimeter_path=altimeter_path,
     )
 
     assert np.array_equal(integrated["trace_timestamp_s"], trace_timestamps_s)
@@ -85,6 +95,9 @@ def test_load_and_integrate_optional_sidecars_parses_rtk_and_imu_files(tmp_path:
     assert np.allclose(integrated["roll_deg"], np.array([0.0, 1.0, 2.0], dtype=np.float32))
     assert np.allclose(integrated["pitch_deg"], np.array([0.0, 0.5, 1.0], dtype=np.float32))
     assert np.allclose(integrated["yaw_deg"], np.array([180.0, 181.0, 182.0], dtype=np.float32))
+    assert np.allclose(integrated["height_agl_m"], np.array([1.2, 1.3, 1.4], dtype=np.float32))
+    assert set(integrated["height_source"].tolist()) == {"nar15"}
+    assert np.all(integrated["height_confidence"] > 0.0)
 
 
 def test_load_and_integrate_optional_sidecars_requires_timestamps_when_files_are_provided(tmp_path: Path):

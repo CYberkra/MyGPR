@@ -16,12 +16,13 @@ def load_and_integrate_optional_sidecars(
     trace_timestamps_s: np.ndarray | None = None,
     rtk_path: str | Path | None = None,
     imu_path: str | Path | None = None,
+    altimeter_path: str | Path | None = None,
 ) -> dict[str, np.ndarray]:
-    """Parse optional RTK/IMU sidecar files and merge them into trace metadata."""
+    """Parse optional RTK/IMU/altimeter sidecars and merge them into trace metadata."""
     parser_module = importlib.import_module("core.sidecar_parsers")
     metadata_module = importlib.import_module("core.trace_metadata_utils")
 
-    if rtk_path is None and imu_path is None:
+    if rtk_path is None and imu_path is None and altimeter_path is None:
         return metadata_module.integrate_optional_sidecars(trace_metadata)
 
     if trace_timestamps_s is None:
@@ -33,10 +34,16 @@ def load_and_integrate_optional_sidecars(
     imu_payload = (
         parser_module.parse_sidecar_csv(imu_path, kind="imu") if imu_path is not None else None
     )
+    altimeter_payload = (
+        parser_module.parse_sidecar_csv(altimeter_path, kind="altimeter")
+        if altimeter_path is not None
+        else None
+    )
 
     return metadata_module.integrate_optional_sidecars(
         trace_metadata,
         trace_timestamps_s=trace_timestamps_s,
         rtk_payload=rtk_payload,
         imu_payload=imu_payload,
+        altimeter_payload=altimeter_payload,
     )

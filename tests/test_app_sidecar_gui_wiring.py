@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""GUI-level optional RTK/IMU sidecar wiring tests."""
+"""GUI-level optional RTK/IMU/altimeter sidecar wiring tests."""
 
 from __future__ import annotations
 
@@ -53,20 +53,22 @@ def test_sidecar_controls_exist_and_start_empty() -> None:
         assert "未选择" in page.rtk_sidecar_label.text()
         assert page.imu_sidecar_button is not None
         assert page.imu_sidecar_clear_button is not None
+        assert page.altimeter_sidecar_button is not None
+        assert page.altimeter_sidecar_clear_button is not None
         assert "未选择" in page.imu_sidecar_label.text()
     finally:
         _close_window(app, win)
 
 
-def test_altimeter_is_not_exposed_in_gui_slice() -> None:
+def test_altimeter_is_exposed_in_gui_slice() -> None:
     app = _get_app()
     win = GPRGuiQt()
     try:
         page = win.page_advanced
 
-        assert not hasattr(page, "altimeter_sidecar_button")
-        assert not hasattr(page, "altimeter_sidecar_clear_button")
-        assert not hasattr(page, "altimeter_sidecar_label")
+        assert hasattr(page, "altimeter_sidecar_button")
+        assert hasattr(page, "altimeter_sidecar_clear_button")
+        assert hasattr(page, "altimeter_sidecar_label")
     finally:
         _close_window(app, win)
 
@@ -116,15 +118,19 @@ def test_clear_sidecar_resets_only_target_kind(tmp_path: Path) -> None:
     try:
         rtk_path = str(tmp_path / "rtk.csv")
         imu_path = str(tmp_path / "imu.csv")
+        altimeter_path = str(tmp_path / "altimeter.csv")
         win._set_sidecar_file("rtk", rtk_path)
         win._set_sidecar_file("imu", imu_path)
+        win._set_sidecar_file("altimeter", altimeter_path)
 
         win._clear_sidecar_file("rtk")
 
         assert win._sidecar_files["rtk"] is None
         assert win._sidecar_files["imu"] == imu_path
+        assert win._sidecar_files["altimeter"] == altimeter_path
         assert "未选择" in win.page_advanced.rtk_sidecar_label.text()
         assert "imu.csv" in win.page_advanced.imu_sidecar_label.text()
+        assert "altimeter.csv" in win.page_advanced.altimeter_sidecar_label.text()
     finally:
         _close_window(app, win)
 
@@ -211,7 +217,7 @@ def test_import_csv_with_sidecar_but_no_timestamps_warns_and_uses_legacy_kwargs(
 
         assert captured["loader_kwargs"] == {}
         assert len(captured["warnings"]) == 1
-        assert captured["warnings"][0][0] == "RTK/IMU"
+        assert captured["warnings"][0][0] == "RTK"
     finally:
         _close_window(app, win)
 
@@ -361,7 +367,7 @@ def test_import_csv_with_sidecars_does_not_reuse_timestamps_from_different_sourc
 
         assert captured["loader_kwargs"] == {}
         assert len(captured["warnings"]) == 1
-        assert captured["warnings"][0][0] == "RTK/IMU"
+        assert captured["warnings"][0][0] == "RTK"
     finally:
         _close_window(app, win)
 

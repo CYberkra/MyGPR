@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -75,6 +76,17 @@ def _write_motion_sidecars(tmp_path: Path) -> tuple[Path, Path]:
     return rtk_path, imu_path
 
 
+def _write_altimeter_sidecar(tmp_path: Path) -> Path:
+    altimeter_path = tmp_path / "altimeter.csv"
+    altimeter_path.write_text(
+        "timestamp_s,height_agl_m,height_source,snr,target_count,valid\n"
+        "0.0,1.20,nar15,18.0,1,1\n"
+        "0.7,1.40,nar15,20.0,1,1\n",
+        encoding="utf-8",
+    )
+    return altimeter_path
+
+
 def test_resolve_job_methods_uses_recommended_profile_defaults():
     methods = cli_batch._resolve_job_methods(
         {
@@ -105,6 +117,35 @@ def test_validate_config_accepts_recommended_profile_job(tmp_path: Path):
 
     assert result.ok is True
     assert result.errors == []
+
+
+def test_bundled_cli_batch_mvp_example_validates():
+    config_path = Path(cli_batch.BASE_DIR) / "config" / "cli_batch_mvp_example.json"
+    cfg = cli_batch.load_config(str(config_path))
+
+    result = cli_batch.validate_config(cfg, repo_root=str(Path(cli_batch.BASE_DIR)))
+
+    assert result.ok is True
+    assert result.errors == []
+
+
+def test_summary_paths_are_unique_within_same_second(tmp_path: Path):
+    first = cli_batch._build_summary_path(str(tmp_path))
+    second = cli_batch._build_summary_path(str(tmp_path))
+
+    assert first != second
+    assert Path(first).parent == tmp_path
+    assert Path(first).name.startswith("summary_")
+    assert Path(first).suffix == ".json"
+
+
+def test_resume_placeholder_returns_nonzero(capsys):
+    result = cli_batch.cmd_resume(SimpleNamespace(summary="summary.json"))
+
+    captured = capsys.readouterr()
+    assert result == 2
+    assert "not implemented" in captured.out
+    assert "summary.json" in captured.out
 
 
 def test_validate_config_rejects_unknown_recommended_profile(tmp_path: Path):
@@ -172,6 +213,21 @@ def test_run_job_uses_runtime_metadata_merge_for_motion_local_methods(tmp_path: 
     assert result["final_shape"] == result["steps"][1]["shape"]
 
 
+def test_run_job_expands_motion_compensation_v2_profile(tmp_path: Path):
+    input_csv = _write_airborne_csv(tmp_path / "airborne.csv")
+    job = {
+        "id": "motion-v2-runtime",
+        "input": str(input_csv),
+        "recommended_profile": "motion_compensation_v2",
+    }
+
+    result = cli_batch.run_job(job, repo_root=str(tmp_path), output_dir=str(tmp_path / "out"))
+
+    assert result["status"] == "ok"
+    assert [step["key"] for step in result["steps"]] == ["motion_compensation_v2"]
+    assert result["final_shape"] == [4, 8]
+
+
 def test_run_job_forwards_rtk_imu_sidecars_into_motion_runtime(monkeypatch, tmp_path: Path):
     input_csv = _write_airborne_csv(tmp_path / "airborne.csv")
     rtk_path, imu_path = _write_motion_sidecars(tmp_path)
@@ -212,5 +268,66 @@ def test_run_job_forwards_rtk_imu_sidecars_into_motion_runtime(monkeypatch, tmp_
 
     assert result["status"] == "ok"
     assert np.array_equal(seen["trace_timestamp_s"], trace_timestamps_s)
+    assert seen["roll_deg"].shape == (8,)
+    assert seen["local_x_m"].shape == (8,)
+
+
+def test_run_job_forwards_rtk_imu_altimeter_sidecars_into_motion_runtime(
+    monkeypatch, tmp_path: Path
+):
+    input_csv = _write_airborne_csv(tmp_path / "airborne.csv")
+    rtk_path, imu_path = _write_motion_sidecars(tmp_path)
+    altimeter_path = _write_altimeter_sidecar(tmp_path)
+    trace_timestamps_s = np.linspace(0.0, 0.7, 8, dtype=np.float64)
+    seen: dict[str, np.ndarray] = {}
+
+    def assert_sidecar_metadata(data, trace_metadata=None, **kwargs):
+        assert trace_metadata is not None
+        seen["height_agl_m"] = np.asarray(trace_metadata["height_agl_m"], dtype=np.float32)
+        seen["height_confidence"] = np.asarray(
+            trace_metadata["height_confidence"], dtype=np.float32
+        )
+        seen["height_source"] = np.asarray(trace_metadata["height_source"])
+        seen["roll_deg"] = np.asarray(trace_metadata["roll_deg"], dtype=np.float32)
+        seen["local_x_m"] = np.asarray(trace_metadata["local_x_m"], dtype=np.float32)
+        seen["trace_timestamp_s"] = np.asarray(
+            trace_metadata["trace_timestamp_s"], dtype=np.float64
+        )
+        return data, {"method": "test_cli_altimeter_runtime"}
+
+    monkeypatch.setitem(
+        cli_batch.PROCESSING_METHODS,
+        "test_cli_altimeter_runtime",
+        {
+            "name": "test_cli_altimeter_runtime",
+            "type": "local",
+            "func": assert_sidecar_metadata,
+            "params": [],
+            "auto_tune_family": "motion_comp",
+        },
+    )
+
+    job = {
+        "id": "motion-sidecar-runtime",
+        "input": str(input_csv),
+        "trace_timestamps_s": trace_timestamps_s.tolist(),
+        "rtk_path": str(rtk_path),
+        "imu_path": str(imu_path),
+        "altimeter_path": str(altimeter_path),
+        "methods": [{"key": "test_cli_altimeter_runtime"}],
+    }
+
+    validation = cli_batch.validate_config({"jobs": [job]}, repo_root=str(tmp_path))
+    assert validation.ok is True
+
+    result = cli_batch.run_job(job, repo_root=str(tmp_path), output_dir=str(tmp_path / "out"))
+
+    assert result["status"] == "ok"
+    assert np.array_equal(seen["trace_timestamp_s"], trace_timestamps_s)
+    assert seen["height_agl_m"].shape == (8,)
+    assert seen["height_agl_m"][0] == np.float32(1.2)
+    assert seen["height_agl_m"][-1] == np.float32(1.4)
+    assert np.all(seen["height_confidence"] > 0.0)
+    assert set(seen["height_source"].tolist()) == {"nar15"}
     assert seen["roll_deg"].shape == (8,)
     assert seen["local_x_m"].shape == (8,)

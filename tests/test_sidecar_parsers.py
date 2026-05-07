@@ -98,6 +98,43 @@ def test_parse_sidecar_csv_normalizes_imu_fields_and_preserves_attitude_columns(
     assert np.allclose(parsed["yaw_deg"], np.array([179.0, 180.0, 181.0], dtype=np.float32))
 
 
+def test_parse_sidecar_csv_normalizes_altimeter_distance_alias(tmp_path: Path):
+    module = importlib.import_module("core.sidecar_parsers")
+    parse_sidecar_csv = module.parse_sidecar_csv
+
+    csv_path = tmp_path / "altimeter.csv"
+    _write_csv(
+        csv_path,
+        [
+            {
+                "timestamp": 2.0,
+                "distance_m": 1.4,
+                "source": "nar15",
+                "snr": 18.0,
+                "targets": 1,
+                "valid": 1,
+            },
+            {
+                "timestamp": 1.0,
+                "distance_m": 1.2,
+                "source": "nar15",
+                "snr": 16.0,
+                "targets": 1,
+                "valid": 1,
+            },
+        ],
+    )
+
+    parsed = parse_sidecar_csv(csv_path, kind="altimeter")
+
+    assert parsed["source_kind"] == "altimeter"
+    assert np.array_equal(parsed["timestamp_s"], np.array([1.0, 2.0], dtype=np.float64))
+    assert np.allclose(parsed["height_agl_m"], np.array([1.2, 1.4], dtype=np.float32))
+    assert parsed["height_source"].tolist() == ["nar15", "nar15"]
+    assert np.allclose(parsed["snr"], np.array([16.0, 18.0], dtype=np.float32))
+    assert np.array_equal(parsed["target_count"], np.array([1, 1], dtype=np.int32))
+
+
 def test_parse_sidecar_csv_rejects_missing_timestamp_column(tmp_path: Path):
     module = importlib.import_module("core.sidecar_parsers")
     parse_sidecar_csv = module.parse_sidecar_csv

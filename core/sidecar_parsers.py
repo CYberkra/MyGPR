@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Minimal normalized RTK/IMU CSV sidecar parsers for motion Phase 1."""
+"""Minimal normalized RTK/IMU/altimeter CSV sidecar parsers."""
 
 from __future__ import annotations
 
@@ -19,8 +19,11 @@ def _load_sidecar_schema() -> dict[str, Any]:
         "RTK_OPTIONAL_FIELDS": module.RTK_OPTIONAL_FIELDS,
         "IMU_REQUIRED_FIELDS": module.IMU_REQUIRED_FIELDS,
         "IMU_OPTIONAL_FIELDS": module.IMU_OPTIONAL_FIELDS,
+        "ALTIMETER_REQUIRED_FIELDS": module.ALTIMETER_REQUIRED_FIELDS,
+        "ALTIMETER_OPTIONAL_FIELDS": module.ALTIMETER_OPTIONAL_FIELDS,
         "RTK_COLUMN_ALIASES": module.RTK_COLUMN_ALIASES,
         "IMU_COLUMN_ALIASES": module.IMU_COLUMN_ALIASES,
+        "ALTIMETER_COLUMN_ALIASES": module.ALTIMETER_COLUMN_ALIASES,
     }
 
 
@@ -76,6 +79,18 @@ def _optional_int_array(rows: list[dict[str, str]], column: str | None) -> np.nd
     if column is None:
         return None
     return _coerce_int_array(rows, column)
+
+
+def _optional_string_array(
+    rows: list[dict[str, str]], column: str | None
+) -> np.ndarray | None:
+    if column is None:
+        return None
+    values = []
+    for row in rows:
+        raw = row.get(column, "")
+        values.append(str(raw) if raw not in (None, "") else "")
+    return np.asarray(values, dtype="<U32")
 
 
 def _required_column_name(resolved: dict[str, str | None], field: str) -> str:
@@ -150,6 +165,40 @@ def _parse_imu_rows(rows: list[dict[str, str]]) -> dict[str, Any]:
     return _sort_by_timestamp(payload)
 
 
+def _parse_altimeter_rows(rows: list[dict[str, str]]) -> dict[str, Any]:
+    schema = _load_sidecar_schema()
+    resolved = {
+        field: _resolve_column(
+            rows,
+            schema["ALTIMETER_COLUMN_ALIASES"][field],
+            required=field in schema["ALTIMETER_REQUIRED_FIELDS"],
+        )
+        for field in schema["ALTIMETER_REQUIRED_FIELDS"]
+        + schema["ALTIMETER_OPTIONAL_FIELDS"]
+    }
+    payload: dict[str, Any] = {
+        "source_kind": "altimeter",
+        "timestamp_s": _coerce_float_array(
+            rows, _required_column_name(resolved, "timestamp_s")
+        ),
+        "height_agl_m": _coerce_float_array(
+            rows, _required_column_name(resolved, "height_agl_m")
+        ).astype(np.float32),
+    }
+    height_source = _optional_string_array(rows, resolved["height_source"])
+    if height_source is not None:
+        payload["height_source"] = height_source
+    for field in ("snr",):
+        value = _optional_float_array(rows, resolved[field])
+        if value is not None:
+            payload[field] = value
+    for field in ("target_count", "valid"):
+        value = _optional_int_array(rows, resolved[field])
+        if value is not None:
+            payload[field] = value
+    return _sort_by_timestamp(payload)
+
+
 def parse_sidecar_csv(path: str | Path, *, kind: str) -> dict[str, Any]:
     """Parse a small RTK/IMU CSV into a normalized phase-1 schema."""
     rows = _read_csv_rows(path)
@@ -157,4 +206,6 @@ def parse_sidecar_csv(path: str | Path, *, kind: str) -> dict[str, Any]:
         return _parse_rtk_rows(rows)
     if kind == "imu":
         return _parse_imu_rows(rows)
+    if kind == "altimeter":
+        return _parse_altimeter_rows(rows)
     raise ValueError(f"Unsupported sidecar kind: {kind}")

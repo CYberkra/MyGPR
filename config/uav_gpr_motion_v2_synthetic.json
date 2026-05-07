@@ -1,0 +1,15 @@
+{
+  "version": "1.0",
+  "description": "Synthetic UAV-GPR motion V2 acceptance package.",
+  "jobs": [
+    {
+      "id": "uav_gpr_motion_v2_synthetic",
+      "input": "sample_data/uav_gpr_motion_v2/main.csv",
+      "rtk_path": "sample_data/uav_gpr_motion_v2/rtk.csv",
+      "imu_path": "sample_data/uav_gpr_motion_v2/imu.csv",
+      "altimeter_path": "sample_data/uav_gpr_motion_v2/altimeter.csv",
+      "recommended_profile": "motion_compensation_v2"
+    }
+  ],
+  "output_dir": "output/uav_gpr_motion_v2_synthetic"
+}

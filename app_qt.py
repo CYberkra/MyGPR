@@ -155,6 +155,10 @@ from core.auto_tune import (
     auto_tune_method,
     AutoTuneCancelled,
 )
+from core.auto_tune_comparison import (
+    run_auto_tune_comparison,
+    to_summary_dict,
+)
 from core.shared_data_state import SharedDataState
 from PythonModule.kirchhoff_migration import load_cagpr_kir_parameter_file
 from qfluentwidgets import FluentIcon
@@ -558,6 +562,68 @@ class AutoTuneStageWorker(QObject):
             self.error.emit(str(e))
 
 
+class AutoTuneComparisonWorker(QObject):
+    """后台人工 baseline vs 自动选参科研对比工作线程。"""
+
+    finished = pyqtSignal(object)
+    error = pyqtSignal(str)
+    progress = pyqtSignal(int, int, str)
+
+    def __init__(
+        self,
+        data: np.ndarray,
+        manual_params_by_method: dict[str, dict[str, object]],
+        header_info: dict | None = None,
+        trace_metadata: dict | None = None,
+        baseline_profile_key: str = "uav_gpr_experience_baseline_v1",
+        roi_spec: dict | None = None,
+        search_mode: str = "standard",
+    ):
+        super().__init__()
+        self.data = np.array(data, copy=True)
+        self.manual_params_by_method = {
+            str(key): dict(value or {})
+            for key, value in (manual_params_by_method or {}).items()
+        }
+        self.header_info = header_info or {}
+        self.trace_metadata = trace_metadata or {}
+        self.baseline_profile_key = str(baseline_profile_key)
+        self.roi_spec = dict(roi_spec or {})
+        self.search_mode = str(search_mode or "standard")
+        self._cancel_requested = False
+
+    def request_cancel(self):
+        self._cancel_requested = True
+
+    def is_cancel_requested(self) -> bool:
+        return bool(self._cancel_requested)
+
+    def run(self):
+        try:
+            result = run_auto_tune_comparison(
+                self.data,
+                header_info=self.header_info,
+                trace_metadata=self.trace_metadata,
+                manual_params_by_method=self.manual_params_by_method,
+                baseline_profile_key=self.baseline_profile_key,
+                roi_spec=self.roi_spec,
+                search_mode=self.search_mode,
+                progress_callback=lambda current, total, message: self.progress.emit(
+                    int(current), int(total), str(message)
+                ),
+                cancel_checker=self.is_cancel_requested,
+            )
+            if self.is_cancel_requested():
+                self.finished.emit({"cancelled": True})
+                return
+            self.finished.emit(result)
+        except Exception as e:
+            if self.is_cancel_requested():
+                self.finished.emit({"cancelled": True})
+                return
+            self.error.emit(str(e))
+
+
 class GPRGuiQt(QMainWindow):
     """GPR GUI主窗口"""
 
@@ -633,11 +699,14 @@ class GPRGuiQt(QMainWindow):
         self._auto_tune_worker = None
         self._auto_tune_stage_thread = None
         self._auto_tune_stage_worker = None
+        self._auto_tune_comparison_thread = None
+        self._auto_tune_comparison_worker = None
         self._pending_apply_after_auto_tune = False
         self._current_run_context = None
         self._cancel_in_flight = False
         self._last_auto_tune_result = None
         self._last_auto_tune_group_result = None
+        self._last_auto_tune_comparison_result = None
 
         # 缓存和状态
         self._plot_timer = QTimer(self)
@@ -1322,11 +1391,23 @@ class GPRGuiQt(QMainWindow):
         self.page_advanced.imu_sidecar_clear_button.clicked.connect(
             lambda: self._clear_sidecar_file("imu")
         )
+        self.page_advanced.altimeter_sidecar_button.clicked.connect(
+            lambda: self._pick_sidecar_file("altimeter")
+        )
+        self.page_advanced.altimeter_sidecar_clear_button.clicked.connect(
+            lambda: self._clear_sidecar_file("altimeter")
+        )
         self.page_auto_tune.btn_auto_tune.clicked.connect(
             self.start_auto_tune_current_method
         )
         self.page_auto_tune.btn_compare_stage.clicked.connect(
             self.start_auto_select_current_stage
+        )
+        self.page_auto_tune.btn_compare_manual_auto.clicked.connect(
+            self.start_auto_tune_comparison
+        )
+        self.page_auto_tune.btn_export_comparison.clicked.connect(
+            self.export_auto_tune_comparison_artifacts
         )
         self.page_auto_tune.btn_view_auto_tune.clicked.connect(
             self.show_auto_tune_details
@@ -2110,6 +2191,7 @@ class GPRGuiQt(QMainWindow):
             self.page_advanced.btn_reset_crop,
             self.page_auto_tune.btn_auto_tune,
             self.page_auto_tune.btn_compare_stage,
+            self.page_auto_tune.btn_compare_manual_auto,
             self.page_auto_tune.btn_view_auto_tune,
             self.page_auto_tune.btn_apply_stage_choice,
             self.page_basic.method_combo,
@@ -2137,6 +2219,10 @@ class GPRGuiQt(QMainWindow):
                 self._progress_bar.setFormat(text)
             if self._progress_panel is not None:
                 self._progress_panel.setVisible(False)
+        if hasattr(self, "page_auto_tune") and self.page_auto_tune is not None:
+            self.page_auto_tune.btn_export_comparison.setEnabled(
+                (not busy) and (self._last_auto_tune_comparison_result is not None)
+            )
         self._sync_history_action_state()
         QApplication.processEvents()
 
@@ -2214,6 +2300,7 @@ class GPRGuiQt(QMainWindow):
         self.page_basic.set_auto_tune_result_available(False)
         self.page_basic.set_apply_source_hint("当前未生成自动调参结果。")
         self._last_auto_tune_group_result = None
+        self._last_auto_tune_comparison_result = None
         if hasattr(self, "page_auto_tune") and self.page_auto_tune is not None:
             self.page_auto_tune.reset_for_method(current_key, message=message)
 
@@ -2300,6 +2387,7 @@ class GPRGuiQt(QMainWindow):
             or self._worker is not None
             or self._auto_tune_worker is not None
             or self._auto_tune_stage_worker is not None
+            or self._auto_tune_comparison_worker is not None
         ):
             self._pending_apply_after_auto_tune = False
             QMessageBox.information(self, "自动选参", "当前已有任务在运行，请稍候。")
@@ -2380,6 +2468,7 @@ class GPRGuiQt(QMainWindow):
             or self._worker is not None
             or self._auto_tune_worker is not None
             or self._auto_tune_stage_worker is not None
+            or self._auto_tune_comparison_worker is not None
         ):
             QMessageBox.information(self, "同阶段比较", "当前已有任务在运行，请稍候。")
             return False
@@ -2434,6 +2523,100 @@ class GPRGuiQt(QMainWindow):
             self._cleanup_auto_tune_stage_worker
         )
         self._auto_tune_stage_thread.start()
+        return True
+
+    def _build_manual_baseline_params_for_comparison(self) -> dict[str, dict]:
+        """构建科研对比的人工 baseline 参数快照。"""
+        params_map = {
+            str(key): dict(value or {})
+            for key, value in (self._method_param_overrides or {}).items()
+        }
+        current_method_key = self.page_basic.get_current_method_key()
+        if not current_method_key:
+            return params_map
+
+        try:
+            visible_params = self.page_basic.get_current_params()
+        except ValueError:
+            raise
+        resolved_params = self._resolve_method_params(current_method_key)
+        changed = any(
+            resolved_params.get(key) != value for key, value in visible_params.items()
+        )
+        if changed or current_method_key in params_map:
+            resolved_params.update(visible_params)
+            params_map[current_method_key] = dict(resolved_params)
+            self._method_param_overrides[current_method_key] = dict(resolved_params)
+            self.page_basic.set_method_overrides(current_method_key, resolved_params)
+        return params_map
+
+    def start_auto_tune_comparison(self):
+        """运行人工 baseline vs 自动选参科研对比。"""
+        if (
+            self._ui_busy
+            or self._worker is not None
+            or self._auto_tune_worker is not None
+            or self._auto_tune_stage_worker is not None
+            or self._auto_tune_comparison_worker is not None
+        ):
+            QMessageBox.information(self, "人工/自动对比", "当前已有任务在运行，请稍候。")
+            return False
+        if self.data is None or self.data_path is None:
+            QMessageBox.warning(self, "人工/自动对比", "请先导入数据。")
+            return False
+
+        try:
+            manual_params_by_method = self._build_manual_baseline_params_for_comparison()
+        except ValueError as e:
+            QMessageBox.warning(self, "人工/自动对比", str(e))
+            return False
+
+        roi_mode = self.page_auto_tune.get_auto_tune_roi_mode()
+        search_mode = self.page_auto_tune.get_auto_tune_search_mode()
+        roi_spec = self._build_auto_tune_roi_spec(roi_mode)
+        baseline_profile_key = "uav_gpr_experience_baseline_v1"
+
+        self._last_auto_tune_comparison_result = None
+        self.page_auto_tune.show_comparison_running(
+            roi_spec.get("label", roi_spec.get("source", "全图")),
+            search_mode,
+        )
+        self._set_busy(True, text="人工/自动对比")
+        self._cancel_in_flight = False
+
+        self._auto_tune_comparison_thread = QThread(self)
+        self._auto_tune_comparison_worker = AutoTuneComparisonWorker(
+            self.data,
+            manual_params_by_method,
+            header_info=self.header_info,
+            trace_metadata=self.trace_metadata,
+            baseline_profile_key=baseline_profile_key,
+            roi_spec=roi_spec,
+            search_mode=search_mode,
+        )
+        self._auto_tune_comparison_worker.moveToThread(
+            self._auto_tune_comparison_thread
+        )
+        self._auto_tune_comparison_thread.started.connect(
+            self._auto_tune_comparison_worker.run
+        )
+        self._auto_tune_comparison_worker.progress.connect(self._on_auto_tune_progress)
+        self._auto_tune_comparison_worker.finished.connect(
+            self._on_auto_comparison_finished
+        )
+        self._auto_tune_comparison_worker.error.connect(
+            self._on_auto_comparison_error
+        )
+        self._auto_tune_comparison_worker.finished.connect(
+            self._auto_tune_comparison_thread.quit
+        )
+        self._auto_tune_comparison_worker.error.connect(
+            self._auto_tune_comparison_thread.quit
+        )
+        self._auto_tune_comparison_thread.finished.connect(
+            self._cleanup_auto_tune_comparison_worker
+        )
+        self._auto_tune_comparison_thread.start()
         return True
 
     def _on_auto_tune_progress(self, current: int, total: int, message: str):
@@ -2523,6 +2706,69 @@ class GPRGuiQt(QMainWindow):
         self._log(f"同阶段比较失败: {error_msg}")
         QMessageBox.warning(self, "同阶段比较失败", error_msg)
 
+    def _on_auto_comparison_finished(self, result):
+        """人工 baseline vs 自动选参对比完成。"""
+        cancelled = isinstance(result, dict) and bool(result.get("cancelled"))
+        self._set_busy(
+            False, text="人工/自动对比完成" if not cancelled else "人工/自动对比已取消"
+        )
+        if cancelled:
+            self.page_auto_tune.show_cancelled()
+            return
+
+        self._last_auto_tune_comparison_result = result
+        summary = to_summary_dict(result)
+        self.page_auto_tune.show_comparison_result(summary)
+        self._set_auto_tune_comparison_snapshots(result)
+        self._log(
+            "人工/自动对比完成: verdict={verdict} | Δscore={delta:.4f}".format(
+                verdict=summary.get("verdict"),
+                delta=float(
+                    (summary.get("metric_delta") or {}).get(
+                        "comparison_score", 0.0
+                    )
+                ),
+            )
+        )
+
+    def _on_auto_comparison_error(self, error_msg: str):
+        """人工/自动对比失败。"""
+        self._set_busy(False, text="人工/自动对比失败")
+        self.page_auto_tune.show_comparison_error(error_msg)
+        self._log(f"人工/自动对比失败: {error_msg}")
+        QMessageBox.warning(self, "人工/自动对比失败", error_msg)
+
+    def _set_auto_tune_comparison_snapshots(self, result):
+        """把人工/自动结果推入现有 B-scan 对比快照。"""
+        manual_header = (result.manual.metadata or {}).get("header_info")
+        manual_trace = (result.manual.metadata or {}).get("trace_metadata")
+        auto_header = (result.automatic.metadata or {}).get("header_info")
+        auto_trace = (result.automatic.metadata or {}).get("trace_metadata")
+        self._set_compare_snapshots(
+            [
+                {
+                    "label": "人工 baseline",
+                    "data": result.manual.result,
+                    "header_info": manual_header,
+                    "trace_metadata": manual_trace,
+                },
+                {
+                    "label": "自动选参",
+                    "data": result.automatic.result,
+                    "header_info": auto_header,
+                    "trace_metadata": auto_trace,
+                },
+            ]
+        )
+        labels = [snap["label"] for snap in self.compare_snapshots]
+        manual_label = next((label for label in labels if label.startswith("人工 baseline")), "")
+        auto_label = next((label for label in labels if label.startswith("自动选参")), "")
+        if manual_label and auto_label:
+            self.page_advanced.compare_var.setChecked(True)
+            self.page_advanced.compare_left_combo.setCurrentText(manual_label)
+            self.page_advanced.compare_right_combo.setCurrentText(auto_label)
+        self.plot_data(self.data)
+
     def _cleanup_auto_tune_worker(self):
         """清理自动选参线程。"""
         if self._auto_tune_thread:
@@ -2541,6 +2787,16 @@ class GPRGuiQt(QMainWindow):
             self._auto_tune_stage_thread.wait(5000)
             self._auto_tune_stage_thread = None
         self._auto_tune_stage_worker = None
+        self._cancel_in_flight = False
+        self.page_basic.btn_cancel.setEnabled(False)
+
+    def _cleanup_auto_tune_comparison_worker(self):
+        """清理人工/自动对比线程。"""
+        if self._auto_tune_comparison_thread:
+            self._auto_tune_comparison_thread.quit()
+            self._auto_tune_comparison_thread.wait(5000)
+            self._auto_tune_comparison_thread = None
+        self._auto_tune_comparison_worker = None
         self._cancel_in_flight = False
         self.page_basic.btn_cancel.setEnabled(False)
 
@@ -3285,6 +3541,7 @@ class GPRGuiQt(QMainWindow):
         trace_timestamps_s=None,
         rtk_path=None,
         imu_path=None,
+        altimeter_path=None,
     ):
         """带进度回调的CSV加载"""
         try:
@@ -3335,6 +3592,8 @@ class GPRGuiQt(QMainWindow):
                 sidecar_kwargs["rtk_path"] = rtk_path
             if imu_path is not None:
                 sidecar_kwargs["imu_path"] = imu_path
+            if altimeter_path is not None:
+                sidecar_kwargs["altimeter_path"] = altimeter_path
 
             payload_extractor = getattr(
                 self, "_extract_airborne_payload_with_optional_sidecars", None
@@ -3653,6 +3912,7 @@ class GPRGuiQt(QMainWindow):
         trace_timestamps_s=None,
         rtk_path=None,
         imu_path=None,
+        altimeter_path=None,
     ):
         """加载单个CSV矩阵文件"""
 
@@ -3715,6 +3975,8 @@ class GPRGuiQt(QMainWindow):
                 sidecar_kwargs["rtk_path"] = rtk_path
             if imu_path is not None:
                 sidecar_kwargs["imu_path"] = imu_path
+            if altimeter_path is not None:
+                sidecar_kwargs["altimeter_path"] = altimeter_path
 
             payload_extractor = getattr(
                 self, "_extract_airborne_payload_with_optional_sidecars", None
@@ -4063,7 +4325,7 @@ class GPRGuiQt(QMainWindow):
             QMessageBox.warning(self, "无数据", "请先导入数据。")
             return
         out_dir = self._default_output_dir()
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         report_path = os.path.join(out_dir, f"report_{ts}.md")
         image_path = os.path.join(out_dir, f"report_{ts}.png")
 
@@ -4251,6 +4513,260 @@ class GPRGuiQt(QMainWindow):
             f.write(text)
         self._log(f"记录已导出：{path}")
 
+    def export_auto_tune_comparison_artifacts(self):
+        """导出人工 baseline vs 自动选参对比证据。"""
+        result = self._last_auto_tune_comparison_result
+        if result is None:
+            QMessageBox.information(
+                self, "无对比结果", "请先运行一次“人工/自动对比”再导出。"
+            )
+            return
+
+        out_dir = self._default_output_dir()
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        base_name = f"auto_tune_comparison_{ts}"
+        summary_path = os.path.join(out_dir, f"{base_name}_summary.json")
+        manual_png_path = os.path.join(out_dir, f"{base_name}_manual.png")
+        auto_png_path = os.path.join(out_dir, f"{base_name}_auto.png")
+        side_png_path = os.path.join(out_dir, f"{base_name}_side_by_side.png")
+        params_csv_path = os.path.join(out_dir, f"{base_name}_params.csv")
+        metrics_csv_path = os.path.join(out_dir, f"{base_name}_metrics.csv")
+
+        summary = to_summary_dict(result)
+        with open(summary_path, "w", encoding="utf-8") as f:
+            json.dump(summary, f, ensure_ascii=False, indent=2)
+
+        manual_arr = np.asarray(result.manual.result, dtype=np.float32)
+        auto_arr = np.asarray(result.automatic.result, dtype=np.float32)
+        max_abs = max(
+            float(np.nanmax(np.abs(manual_arr))) if manual_arr.size else 0.0,
+            float(np.nanmax(np.abs(auto_arr))) if auto_arr.size else 0.0,
+            1.0e-6,
+        )
+        vmin, vmax = -max_abs, max_abs
+        cmap = self._get_colormap()
+
+        self._save_comparison_single_image(
+            manual_arr,
+            manual_png_path,
+            "人工 baseline",
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+        )
+        self._save_comparison_single_image(
+            auto_arr,
+            auto_png_path,
+            "自动选参",
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+        )
+        self._save_comparison_side_by_side_image(
+            manual_arr,
+            auto_arr,
+            side_png_path,
+            left_title="人工 baseline",
+            right_title="自动选参",
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+        )
+
+        params_rows = self._build_comparison_params_rows(summary)
+        self._write_csv_rows(
+            params_csv_path,
+            params_rows,
+            fieldnames=[
+                "candidate",
+                "method_key",
+                "param_key",
+                "param_value",
+            ],
+        )
+
+        metrics_rows = self._build_comparison_metrics_rows(summary)
+        self._write_csv_rows(
+            metrics_csv_path,
+            metrics_rows,
+            fieldnames=[
+                "metric",
+                "manual_value",
+                "auto_value",
+                "delta",
+            ],
+        )
+
+        try:
+            summary_disp = os.path.relpath(summary_path, BASE_DIR)
+            manual_disp = os.path.relpath(manual_png_path, BASE_DIR)
+            auto_disp = os.path.relpath(auto_png_path, BASE_DIR)
+            side_disp = os.path.relpath(side_png_path, BASE_DIR)
+            params_disp = os.path.relpath(params_csv_path, BASE_DIR)
+            metrics_disp = os.path.relpath(metrics_csv_path, BASE_DIR)
+        except ValueError:
+            summary_disp = summary_path
+            manual_disp = manual_png_path
+            auto_disp = auto_png_path
+            side_disp = side_png_path
+            params_disp = params_csv_path
+            metrics_disp = metrics_csv_path
+
+        self._log(
+            "对比证据已导出: "
+            + "; ".join(
+                [
+                    summary_disp,
+                    manual_disp,
+                    auto_disp,
+                    side_disp,
+                    params_disp,
+                    metrics_disp,
+                ]
+            )
+        )
+        self.status_label.setText("人工/自动对比证据导出完成")
+        QMessageBox.information(
+            self,
+            "导出成功",
+            "已导出:\n"
+            + "\n".join(
+                [
+                    summary_path,
+                    manual_png_path,
+                    auto_png_path,
+                    side_png_path,
+                    params_csv_path,
+                    metrics_csv_path,
+                ]
+            ),
+        )
+
+    def _save_comparison_single_image(
+        self,
+        data: np.ndarray,
+        out_path: str,
+        title: str,
+        *,
+        cmap: str,
+        vmin: float,
+        vmax: float,
+    ) -> None:
+        """导出单张对比 B-scan 图。"""
+        fig, ax = plt.subplots(1, 1, figsize=(6.2, 4.2), dpi=150)
+        ax.imshow(
+            np.asarray(data, dtype=np.float32),
+            cmap=cmap,
+            aspect="auto",
+            origin="upper",
+            vmin=vmin,
+            vmax=vmax,
+        )
+        ax.set_title(title)
+        ax.set_xlabel("Trace")
+        ax.set_ylabel("Sample")
+        fig.tight_layout()
+        fig.savefig(out_path)
+        plt.close(fig)
+
+    def _save_comparison_side_by_side_image(
+        self,
+        manual_data: np.ndarray,
+        auto_data: np.ndarray,
+        out_path: str,
+        *,
+        left_title: str,
+        right_title: str,
+        cmap: str,
+        vmin: float,
+        vmax: float,
+    ) -> None:
+        """导出人工/自动并排对比图。"""
+        fig, axs = plt.subplots(1, 2, figsize=(11.2, 4.2), dpi=150)
+        for ax, arr, title in [
+            (axs[0], manual_data, left_title),
+            (axs[1], auto_data, right_title),
+        ]:
+            ax.imshow(
+                np.asarray(arr, dtype=np.float32),
+                cmap=cmap,
+                aspect="auto",
+                origin="upper",
+                vmin=vmin,
+                vmax=vmax,
+            )
+            ax.set_title(title)
+            ax.set_xlabel("Trace")
+            ax.set_ylabel("Sample")
+        fig.tight_layout()
+        fig.savefig(out_path)
+        plt.close(fig)
+
+    def _build_comparison_params_rows(self, summary: dict) -> list[dict[str, object]]:
+        """构造参数 CSV 行。"""
+        rows: list[dict[str, object]] = []
+        for candidate_key, candidate_label in [
+            ("manual", "manual"),
+            ("automatic", "automatic"),
+        ]:
+            params_by_method = (
+                (summary.get(candidate_key) or {}).get("params_by_method", {}) or {}
+            )
+            for method_key, params in params_by_method.items():
+                param_dict = params or {}
+                if not param_dict:
+                    rows.append(
+                        {
+                            "candidate": candidate_label,
+                            "method_key": str(method_key),
+                            "param_key": "",
+                            "param_value": "",
+                        }
+                    )
+                    continue
+                for param_key, param_value in param_dict.items():
+                    rows.append(
+                        {
+                            "candidate": candidate_label,
+                            "method_key": str(method_key),
+                            "param_key": str(param_key),
+                            "param_value": json.dumps(
+                                param_value, ensure_ascii=False
+                            )
+                            if isinstance(param_value, (dict, list))
+                            else str(param_value),
+                        }
+                    )
+        return rows
+
+    def _build_comparison_metrics_rows(self, summary: dict) -> list[dict[str, object]]:
+        """构造指标 CSV 行。"""
+        manual_metrics = ((summary.get("manual") or {}).get("metrics") or {})
+        auto_metrics = ((summary.get("automatic") or {}).get("metrics") or {})
+        metric_delta = summary.get("metric_delta") or {}
+        keys = sorted(set(manual_metrics) | set(auto_metrics))
+        rows: list[dict[str, object]] = []
+        for key in keys:
+            rows.append(
+                {
+                    "metric": str(key),
+                    "manual_value": manual_metrics.get(key),
+                    "auto_value": auto_metrics.get(key),
+                    "delta": metric_delta.get(key),
+                }
+            )
+        return rows
+
+    def _write_csv_rows(
+        self, path: str, rows: list[dict[str, object]], fieldnames: list[str]
+    ) -> None:
+        """写入 CSV，空行集时仅写 header。"""
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            if rows:
+                writer.writerows(rows)
+
     def open_log_directory(self):
         """打开日志目录。"""
         log_dir = get_logs_dir()
@@ -4284,11 +4800,12 @@ class GPRGuiQt(QMainWindow):
         self._log("诊断信息已复制到剪贴板")
 
     def _pick_sidecar_file(self, kind: str):
-        """选择可选 RTK/IMU sidecar 文件；取消选择时保留原状态。"""
-        if kind not in {"rtk", "imu"}:
+        """选择可选 RTK/IMU/高度计 sidecar 文件；取消选择时保留原状态。"""
+        if kind not in {"rtk", "imu", "altimeter"}:
             raise ValueError(f"不支持的 sidecar 类型: {kind}")
 
-        label = "RTK" if kind == "rtk" else "IMU"
+        labels = {"rtk": "RTK", "imu": "IMU", "altimeter": "高度计"}
+        label = labels[kind]
         current_path = self._sidecar_files.get(kind)
         initial_dir = os.path.dirname(current_path) if current_path else BASE_DIR
         path, _ = QFileDialog.getOpenFileName(
@@ -4303,7 +4820,7 @@ class GPRGuiQt(QMainWindow):
 
     def _set_sidecar_file(self, kind: str, path=None) -> None:
         """更新单个 sidecar 路径，并同步高级设置页标签。"""
-        if kind not in {"rtk", "imu"}:
+        if kind not in {"rtk", "imu", "altimeter"}:
             raise ValueError(f"不支持的 sidecar 类型: {kind}")
 
         normalized = str(path) if path else None
@@ -4316,7 +4833,7 @@ class GPRGuiQt(QMainWindow):
         self._log(f"{kind.upper()} sidecar：{display}")
 
     def _clear_sidecar_file(self, kind: str) -> None:
-        """仅清除指定 RTK/IMU sidecar 选择。"""
+        """仅清除指定 RTK/IMU/高度计 sidecar 选择。"""
         self._set_sidecar_file(kind, None)
 
     def _warn_sidecar_ignored(self, kind: str, reason: str) -> None:
@@ -4386,15 +4903,23 @@ class GPRGuiQt(QMainWindow):
         """根据当前选择构造 CSV 加载 sidecar kwargs。"""
         rtk_path = self._sidecar_files.get("rtk")
         imu_path = self._sidecar_files.get("imu")
-        if not rtk_path and not imu_path:
+        altimeter_path = self._sidecar_files.get("altimeter")
+        if not rtk_path and not imu_path and not altimeter_path:
             return {}
 
         trace_timestamps_s = self._read_explicit_trace_timestamps_from_csv(path)
         if trace_timestamps_s is None and self._is_current_data_path(path):
             trace_timestamps_s = self._get_trace_timestamps_for_sidecars()
         if trace_timestamps_s is None:
+            selected_sidecars = self._describe_selected_sidecars(
+                {
+                    "rtk_path": rtk_path,
+                    "imu_path": imu_path,
+                    "altimeter_path": altimeter_path,
+                }
+            )
             self._warn_sidecar_ignored(
-                "RTK/IMU",
+                selected_sidecars,
                 "缺少可用于对齐的 trace_timestamps_s；本次不会接入辅助文件。",
             )
             return {}
@@ -4404,6 +4929,8 @@ class GPRGuiQt(QMainWindow):
             kwargs["rtk_path"] = rtk_path
         if imu_path:
             kwargs["imu_path"] = imu_path
+        if altimeter_path:
+            kwargs["altimeter_path"] = altimeter_path
         return kwargs
 
     def _extract_airborne_payload_with_optional_sidecars(
@@ -4429,7 +4956,9 @@ class GPRGuiQt(QMainWindow):
             selected.append("RTK")
         if sidecar_kwargs.get("imu_path"):
             selected.append("IMU")
-        return "/".join(selected) or "RTK/IMU"
+        if sidecar_kwargs.get("altimeter_path"):
+            selected.append("高度计")
+        return "/".join(selected) or "RTK/IMU/高度计"
 
     def _is_optional_sidecar_error(self, exc: ValueError) -> bool:
         """判断 ValueError 是否来自可选 sidecar 解析/对齐链。"""
@@ -4439,6 +4968,11 @@ class GPRGuiQt(QMainWindow):
             "trace_timestamps_s",
             "rtk",
             "imu",
+            "altimeter",
+            "height_agl_m",
+            "height_source",
+            "distance_m",
+            "target_count",
             "timestamp_s",
             "roll_deg",
             "pitch_deg",
@@ -4464,7 +4998,7 @@ class GPRGuiQt(QMainWindow):
             )
             return
 
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         out_dir = self._default_output_dir()
         base_name = f"quality_snapshot_{ts}"
         json_path = os.path.join(out_dir, f"{base_name}.json")
@@ -4791,6 +5325,10 @@ class GPRGuiQt(QMainWindow):
                 self._auto_tune_stage_worker is None
                 or self._auto_tune_stage_thread is None
             )
+            and (
+                self._auto_tune_comparison_worker is None
+                or self._auto_tune_comparison_thread is None
+            )
         ):
             self.status_label.setText("当前无可取消任务")
             return
@@ -4805,6 +5343,8 @@ class GPRGuiQt(QMainWindow):
                 self._auto_tune_worker.request_cancel()
             if self._auto_tune_stage_worker is not None:
                 self._auto_tune_stage_worker.request_cancel()
+            if self._auto_tune_comparison_worker is not None:
+                self._auto_tune_comparison_worker.request_cancel()
             self.page_basic.btn_cancel.setEnabled(False)
             self.status_label.setText("正在取消...（等待当前步骤安全退出）")
             self._log("收到取消请求：将于当前步骤完成后停止")
@@ -5977,7 +6517,7 @@ class GPRGuiQt(QMainWindow):
             if self.original_data is None or self.data is None:
                 return None
             out_dir = self._default_output_dir()
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             out_path = os.path.join(out_dir, f"pipeline_compare_{ts}.png")
 
             raw = np.asarray(self.original_data)

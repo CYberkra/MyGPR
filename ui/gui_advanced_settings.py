@@ -461,13 +461,13 @@ class AdvancedSettingsPage(QWidget):
 
         layout.addWidget(perf_box)
 
-        # 可选 RTK/IMU 辅助文件：仅保存用户手动选择的路径，不影响普通 CSV 导入。
-        self.sidecar_box = QGroupBox("可选 RTK/IMU 辅助文件")
+        # 可选 RTK/IMU/高度计辅助文件：仅保存用户手动选择的路径，不影响普通 CSV 导入。
+        self.sidecar_box = QGroupBox("可选 RTK/IMU/高度计 辅助文件")
         sidecar_layout = QVBoxLayout(self.sidecar_box)
         sidecar_layout.setSpacing(10)
 
         sidecar_hint = QLabel(
-            "没有 RTK/IMU 数据时可保持未选择；普通 CSV 导入和处理流程不受影响。"
+            "没有 RTK/IMU/高度计数据时可保持未选择；普通 CSV 导入和处理流程不受影响。"
         )
         sidecar_hint.setWordWrap(True)
         sidecar_hint.setProperty("class", "hintText")
@@ -504,6 +504,22 @@ class AdvancedSettingsPage(QWidget):
         imu_layout.addWidget(self.imu_sidecar_button)
         imu_layout.addWidget(self.imu_sidecar_clear_button)
         sidecar_layout.addWidget(imu_row)
+
+        altimeter_row = QWidget()
+        altimeter_layout = QHBoxLayout(altimeter_row)
+        altimeter_layout.setContentsMargins(0, 0, 0, 0)
+        altimeter_layout.setSpacing(8)
+        altimeter_layout.addWidget(QLabel("高度计"))
+        self.altimeter_sidecar_label = QLabel("未选择")
+        self.altimeter_sidecar_label.setProperty("class", "hintText")
+        self.altimeter_sidecar_button = PushButton("选择高度计")
+        self.altimeter_sidecar_button.setToolTip("选择可选高度计 CSV 辅助文件")
+        self.altimeter_sidecar_clear_button = PushButton("清除")
+        self.altimeter_sidecar_clear_button.setToolTip("清除当前高度计辅助文件选择")
+        altimeter_layout.addWidget(self.altimeter_sidecar_label, stretch=1)
+        altimeter_layout.addWidget(self.altimeter_sidecar_button)
+        altimeter_layout.addWidget(self.altimeter_sidecar_clear_button)
+        sidecar_layout.addWidget(altimeter_row)
 
         layout.addWidget(self.sidecar_box)
         layout.addStretch(1)

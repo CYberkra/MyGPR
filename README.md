@@ -1,125 +1,150 @@
-# GPR GUI
+# MyGPR
 
-PyQt6 GUI (`app_qt.py`) to load CSV/文件夹数据, display B-scan, and apply processing methods from `PythonModule/` (SVD background, F-K filter, Hankel SVD, sliding average, etc.).
+MyGPR is a PyQt6 desktop application for UAV/GPR B-scan data inspection,
+processing, auto-tuning, sidecar metadata integration, and deterministic
+benchmark evidence export.
 
-## Features
-- 导入 CSV 矩阵文件 或 A-scan 文件夹（自动选择格式）
-- Display B-scan (matplotlib)
-- Method list (original + researched)
-- Per-method parameter inputs (window width, time, rank, etc.)
-- 多页面（Tab）结构：**日常处理 / 调参与实验 / 显示与对比 / 质量与导出**
-- 一键推荐处理链：**快速预览 / 稳健成像 / 高聚焦**
-- 运行后质量看板：`focus_ratio`, `hot_pixels`, `spikiness`, `time_ms`
-- 一键导出质量快照（CSV+JSON）
+## Runtime
 
-## Requirements
-- Python 3.8+
-- numpy, pandas, matplotlib, scipy
-- PyQt6
-- PyQt6-Fluent-Widgets[full]
+- Python 3.10+
+- PyQt6 and PyQt6-Fluent-Widgets
+- NumPy, Pandas, SciPy, Matplotlib, h5py, PyWavelets
 
-Install deps:
+Install development dependencies:
+
 ```bash
-pip install -r requirements-dev.txt
+python -m pip install -r requirements-dev.txt
 ```
 
-## Run
+## Main Entry Points
+
+Run the GUI:
+
 ```bash
 python app_qt.py
 ```
 
-Or double-click `启动GPR.bat` on Windows.
+Windows shortcut:
 
-## Sample data
-- Example B-scan CSV: `sample_data/sample_bscan.csv`
-2) Click **Import CSV** and select `sample_data/sample_bscan.csv`
-3) Select a method and set parameters
-4) Click **Apply Selected Method** to see output
-
-## CLI Batch MVP（Phase-1）
-已提供最小可运行 CLI 批处理主链路（不含报告引擎），入口：`cli_batch.py`。
-
-### 1) 配置校验
 ```bash
-python cli_batch.py validate --config config/cli_batch_mvp_example.json
+启动GPR.bat
 ```
 
-### 2) 运行批处理
+Run CLI batch validation and processing:
+
 ```bash
+python cli_batch.py validate --config config/cli_batch_mvp_example.json
 python cli_batch.py run --config config/cli_batch_mvp_example.json
 ```
 
-### 3) resume 接口（占位）
-```bash
-python cli_batch.py resume --summary output/cli_batch_mvp/summary_xxx.json
-```
-
-说明：
-- 支持 `run / validate` 主命令；`resume` 先保留稳定接口（phase-2 再增强）
-- 优先复用既有处理链语义：core 方法调用参数与 GUI 保持一致
-- 输出目录由配置 `output_dir` 控制，默认示例写入 `output/cli_batch_mvp/`
-- 每次 `run` 会生成 `summary_*.json` 记录每个 job/step 的状态与产物路径
-
-示例配置：`config/cli_batch_mvp_example.json`
-
-## Template Report Engine v1（Phase-2 最小闭环）
-已提供基于模板的报告引擎 v1：
-- 报告数据模型与字段约定：`docs/report-engine-v1.md`
-- 单模板渲染器：`report_engine_v1.py`（HTML）
-- 渲染入口：`scripts/render_report_v1.py`
-- 标准化输入样例：`config/report_input_v1_example.json`
-- 最小单测：`tests/test_report_engine_v1.py`
-- 冒烟脚本：`scripts/smoke_report_v1.sh`
-
-从 CLI summary 生成报告：
-```bash
-python scripts/render_report_v1.py \
-  --summary output/cli_batch_mvp/summary_20260315_132054.json \
-  --output output/reports/report_v1_from_summary.html
-```
-
-## Repo layout
-- `app_qt.py` — main GUI (Qt, default entry)
-- `app.py` — legacy compatibility entry (deprecated for new usage)
-- `app_enhanced.py` — legacy prototype entry (deprecated)
-- `archive/legacy_snapshots/` — archived historical GUI snapshots (`gpr_gui_kir_fixed_v5/v6/v8.py`)
-- `read_file_data.py` — minimal CSV IO helpers
-- `output/` — generated results
-- `docs/release-rollout.md` — 发布计划与灰度/回滚流程（RC → Canary → Stable）
-
-## Docs
-- 发布流程文档：`docs/release-rollout.md`
-- 结构审视改造清单：`docs/structure-review-checklist-2026-04-10.md`
-
-## Archive Automation
-阶段性稳定版本可以用脚本自动归档到 Obsidian：
+Run deterministic motion-compensation benchmark evidence export:
 
 ```bash
-python scripts/archive_checkpoint.py \
-  --summary "当前 GUI 版本已验证可用" \
-  --changes "完成 auto-tune round2 升级" \
-  --changes "调整应用方法菜单与调参与实验标签页" \
-  --risks "调参与实验页文案还可继续收敛" \
-  --next-steps "如确认稳定，建议 commit + tag + push"
+python cli_batch.py validate --config config/motion_compensation_v1_benchmark.json
+python cli_batch.py run --config config/motion_compensation_v1_benchmark.json
 ```
 
-默认会写入：
-- `D:\ClawX-Data\Obsidian\uav_gpr\40-归档与历史\版本快照\`
-- 并自动更新 `40-归档与历史/版本归档索引.md`
+`cli_batch.py resume` is intentionally not implemented yet and exits non-zero.
 
-## Preflight（发布前自动检查）
-在发布前可运行一键 preflight，覆盖版本号校验、依赖检查、关键路径冒烟（启动/导入/处理/导出）以及质量门禁快速版。
+## Repository Map
+
+- `app_qt.py` - main PyQt6 GUI entry point.
+- `cli_batch.py` - batch processing and benchmark CLI.
+- `core/` - shared runtime logic, I/O, method registry, processing engine,
+  presets, sidecar integration, metrics, and evidence export.
+- `ui/` - Qt pages, dialogs, workbench widgets, parameter editors, and logs.
+- `PythonModule/` - ndarray algorithms plus legacy CSV wrapper compatibility.
+- `tests/` - pytest unit and integration coverage.
+- `scripts/preflight_check.py` - syntax plus GUI/runtime smoke gate.
+- `config/` - runnable CLI and benchmark configs.
+- `sample_data/` - bundled sidecar and benchmark-compatible sample data.
+- `output/` - generated artifacts, ignored by git.
+
+## Sample Data
+
+Current bundled examples:
+
+- `sample_data/gui_sidecar_all_data_main.csv` - airborne CSV with explicit
+  trace timestamps.
+- `sample_data/gui_sidecar_all_data_rtk.csv` - RTK sidecar.
+- `sample_data/gui_sidecar_all_data_imu.csv` - IMU sidecar.
+- `sample_data/gui_sidecar_all_data_README.md` - GUI sidecar verification notes.
+- `sample_data/motion_compensation_v1/README.md` - deterministic motion
+  benchmark semantics and expected artifacts.
+
+## Processing Surface
+
+The method registry and processing engine are the coordination points:
+
+- `core/methods_registry.py` defines public methods, metadata, category labels,
+  parameter schemas, and auto-tune stages.
+- `core/processing_engine.py` runs ndarray methods and preserves runtime
+  metadata/warnings.
+- `core/preset_profiles.py` defines GUI presets and recommended CLI profiles.
+
+Motion-compensation V1 currently uses this deterministic sequence:
+
+```text
+trajectory_smoothing
+motion_compensation_speed
+motion_compensation_attitude
+motion_compensation_height
+motion_compensation_vibration
+```
+
+## UAV-GPR Research Specs
+
+- `docs/uav_gpr_standard_processing_flow.md` - recommended UAV measured-data
+  processing flow and literature-backed ordering.
+- `docs/auto_tune_research_comparison_design.md` - manual baseline vs
+  auto-tuned comparison page contract for research evidence.
+- `docs/motion_compensation_v2_design.md` - RTK/IMU/altimeter motion
+  compensation rebuild plan.
+
+## Verification
+
+Focused smoke:
 
 ```bash
 python scripts/preflight_check.py
 ```
 
-常用参数：
-- `--allow-dev-version`：允许未写入 RELEASE_VERSION/VERSION 时以 `dev-*` 继续（默认会判失败）
-- `--strict-semver`：将非 semver 版本号判为失败（默认仅告警）
-- `--sample <path>`：指定冒烟测试样例 CSV
-- `--method-key <name>`：指定处理方法（默认 `dewow`）
+Full test suite:
 
-输出报告：
-- `output/preflight_report.json`
-- `output/preflight_report.md`
+```bash
+python -m pytest -q
+```
+
+Useful targeted checks:
+
+```bash
+python -m pytest tests/test_cli_batch_profiles.py -q
+python -m pytest tests/test_runtime_warnings.py -q
+python -m pytest tests/test_motion_compensation_pipeline_e2e.py -q
+```
+
+Fast syntax check for edited Python files:
+
+```bash
+python -m py_compile app_qt.py cli_batch.py core/processing_engine.py
+```
+
+## Packaging
+
+```bash
+build_exe.bat
+pyinstaller gpr_gui.spec --clean --noconfirm
+```
+
+Run `python scripts/preflight_check.py` before packaging.
+
+## Archiving Stable Checkpoints
+
+For stable, user-meaningful checkpoints, prefer a descriptive commit and,
+when the conclusion should survive future sessions, archive it with:
+
+```bash
+python scripts/archive_checkpoint.py --summary "checkpoint summary"
+```
+
+The default vault target is configured in `scripts/archive_checkpoint.py`.

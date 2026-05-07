@@ -1,6 +1,5 @@
 """Test for CCBS (Cross-Correlation-Based Background Subtraction) filter"""
 
-import sys
 import time
 import numpy as np
 
@@ -11,8 +10,6 @@ try:
 except ImportError:
     HAS_PYTEST = False
     pytest = None
-
-sys.path.insert(0, r"D:\ClawX-Data\code\GPR_GUI_main_2026-03-23")
 
 from PythonModule.ccbs_filter import apply_ccbs_filter, method_ccbs
 

@@ -177,6 +177,7 @@ def extract_airborne_csv_payload(
     trace_timestamps_s: np.ndarray | None = None,
     rtk_path: str | Path | None = None,
     imu_path: str | Path | None = None,
+    altimeter_path: str | Path | None = None,
 ) -> tuple[np.ndarray, dict[str, np.ndarray] | None, dict[str, Any] | None]:
     """Extract amplitude matrix and per-trace airborne metadata from imported CSV.
 
@@ -219,6 +220,7 @@ def extract_airborne_csv_payload(
                     trace_timestamps_s=trace_timestamps_s,
                     rtk_path=rtk_path,
                     imu_path=imu_path,
+                    altimeter_path=altimeter_path,
                 )
                 if updated_header is None:
                     updated_header = {}
@@ -245,9 +247,10 @@ def _integrate_optional_airborne_sidecars(
     trace_timestamps_s: np.ndarray | None,
     rtk_path: str | Path | None,
     imu_path: str | Path | None,
+    altimeter_path: str | Path | None,
 ) -> dict[str, np.ndarray] | None:
-    """Optionally merge parsed RTK/IMU sidecars into airborne trace metadata."""
-    if rtk_path is None and imu_path is None:
+    """Optionally merge parsed RTK/IMU/altimeter sidecars into airborne trace metadata."""
+    if rtk_path is None and imu_path is None and altimeter_path is None:
         return metadata
     if metadata is None:
         raise ValueError("optional sidecar integration requires airborne trace metadata")
@@ -258,6 +261,7 @@ def _integrate_optional_airborne_sidecars(
         trace_timestamps_s=trace_timestamps_s,
         rtk_path=rtk_path,
         imu_path=imu_path,
+        altimeter_path=altimeter_path,
     )
 
 
@@ -323,6 +327,7 @@ def _build_airborne_header_summary(metadata: dict[str, np.ndarray]) -> dict[str,
     distance = np.asarray(metadata.get("trace_distance_m", []), dtype=np.float64)
     ground = np.asarray(metadata.get("ground_elevation_m", []), dtype=np.float64)
     flight = np.asarray(metadata.get("flight_height_m", []), dtype=np.float64)
+    height_agl = np.asarray(metadata.get("height_agl_m", []), dtype=np.float64)
 
     if distance.size > 1:
         trace_steps = np.diff(distance)
@@ -342,6 +347,8 @@ def _build_airborne_header_summary(metadata: dict[str, np.ndarray]) -> dict[str,
         "ground_elevation_max_m": float(np.max(ground)) if ground.size else 0.0,
         "flight_height_min_m": float(np.min(flight)) if flight.size else 0.0,
         "flight_height_max_m": float(np.max(flight)) if flight.size else 0.0,
+        "height_agl_min_m": float(np.min(height_agl)) if height_agl.size else 0.0,
+        "height_agl_max_m": float(np.max(height_agl)) if height_agl.size else 0.0,
         "has_airborne_metadata": True,
     }
 

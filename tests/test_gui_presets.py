@@ -179,6 +179,8 @@ def test_auto_tune_defaults_live_in_auto_tune_page():
         assert win.page_auto_tune.get_auto_tune_roi_mode() == "prefer_crop"
         assert win.page_auto_tune.get_auto_tune_search_mode() == "standard"
         assert win.page_auto_tune.btn_auto_tune.isEnabled() is True
+        assert win.page_auto_tune.btn_compare_manual_auto.text() == "人工/自动对比"
+        assert win.page_auto_tune.btn_export_comparison.isEnabled() is False
         assert win.page_advanced.roi_status_label.text() == "手动 ROI: 未设置"
         assert win.page_advanced.btn_clear_manual_roi.isEnabled() is False
         assert win.page_basic.action_apply_manual.text() == "使用当前参数（默认）"
@@ -248,6 +250,40 @@ def test_auto_tune_page_handles_state_transitions():
         assert "自动选参失败:" in win.page_auto_tune.auto_tune_summary.toPlainText()
         assert win.page_auto_tune.result_state_label.text() == "失败"
         assert win.page_auto_tune.btn_view_auto_tune.isEnabled() is False
+
+        win.page_auto_tune.show_comparison_running("全图", "fast")
+        assert win.page_auto_tune.result_state_label.text() == "对比中"
+        assert "正在生成人工/自动对比" in win.page_auto_tune.comparison_summary.toPlainText()
+        assert win.page_auto_tune.btn_export_comparison.isEnabled() is False
+
+        comparison_summary = {
+            "verdict": "auto_better",
+            "baseline_profile_key": "uav_gpr_experience_baseline_v1",
+            "roi_info": {"label": "全图"},
+            "metric_delta": {"comparison_score": 0.35},
+            "manual": {
+                "pipeline": ["dewow"],
+                "params_by_method": {"dewow": {"window": 1}},
+                "metrics": {"comparison_score": 1.0},
+                "warnings": [],
+            },
+            "automatic": {
+                "pipeline": ["dewow"],
+                "params_by_method": {"dewow": {"window": 32}},
+                "metrics": {"comparison_score": 1.35},
+                "warnings": [],
+                "auto_tune_results": {
+                    "dewow": {"best_reason": "基线改善更稳。"}
+                },
+            },
+        }
+        win.page_auto_tune.show_comparison_result(comparison_summary)
+        comparison_text = win.page_auto_tune.comparison_summary.toPlainText()
+        assert "结论: 自动选参更优" in comparison_text
+        assert "dewow" in comparison_text
+        assert win.page_auto_tune.result_state_label.text() == "对比完成"
+        assert win.page_auto_tune.recommended_profile_label.text() == "自动选参更优"
+        assert win.page_auto_tune.btn_export_comparison.isEnabled() is True
     finally:
         win.close()
         app.processEvents()
@@ -259,14 +295,16 @@ def test_phase2_tabs_expose_prioritized_group_hierarchy_and_bridge():
     try:
         assert _top_level_group_titles(win.page_advanced) == [
             "显示模式",
+            "单图查看",
             "核心显示",
             "聚焦裁剪",
             "ROI 状态",
             "增强与对比辅助",
             "预览性能",
-            "可选 RTK/IMU 辅助文件",
+            "可选 RTK/IMU/高度计 辅助文件",
         ]
         assert win.page_advanced.sidecar_box.isHidden() is False
+        assert win.page_advanced.altimeter_sidecar_button.text() == "选择高度计"
 
         assert _top_level_group_titles(win.page_auto_tune) == [
             "实验流程",

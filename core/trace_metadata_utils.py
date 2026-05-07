@@ -83,6 +83,56 @@ def _normalize_timestamped_payload(
     return timestamp_s[order], {key: value[order] for key, value in normalized.items()}
 
 
+def _nearest_indices(source_timestamps_s: np.ndarray, target_timestamps_s: np.ndarray) -> np.ndarray:
+    """Return nearest source indices for each target timestamp."""
+    insert = np.searchsorted(source_timestamps_s, target_timestamps_s, side="left")
+    right = np.clip(insert, 0, source_timestamps_s.size - 1)
+    left = np.clip(insert - 1, 0, source_timestamps_s.size - 1)
+    choose_left = (
+        np.abs(target_timestamps_s - source_timestamps_s[left])
+        <= np.abs(source_timestamps_s[right] - target_timestamps_s)
+    )
+    return np.where(choose_left, left, right)
+
+
+def _normalize_altimeter_payload(
+    payload: dict[str, np.ndarray],
+) -> tuple[np.ndarray, dict[str, np.ndarray]]:
+    timestamp_s, fields = _normalize_timestamped_payload(
+        payload,
+        required_fields=("height_agl_m",),
+    )
+    for key in ("snr", "target_count", "valid"):
+        if key not in payload:
+            continue
+        values = _as_1d_array(payload[key], np.float64)
+        if values.size != timestamp_s.size:
+            raise ValueError(f"sidecar field '{key}' length mismatch")
+        order = np.argsort(_as_1d_array(payload["timestamp_s"], np.float64), kind="stable")
+        fields[key] = values[order]
+    if "height_source" in payload:
+        values = _as_1d_array(payload["height_source"], str)
+        if values.size != timestamp_s.size:
+            raise ValueError("sidecar field 'height_source' length mismatch")
+        order = np.argsort(_as_1d_array(payload["timestamp_s"], np.float64), kind="stable")
+        fields["height_source"] = values[order]
+    return timestamp_s, fields
+
+
+def _build_altimeter_confidence(fields: dict[str, np.ndarray], size: int) -> np.ndarray:
+    confidence = np.ones(size, dtype=np.float64)
+    if "snr" in fields:
+        snr = np.asarray(fields["snr"], dtype=np.float64)
+        confidence *= np.clip(snr / 20.0, 0.05, 1.0)
+    if "target_count" in fields:
+        target_count = np.asarray(fields["target_count"], dtype=np.float64)
+        confidence *= np.where(target_count > 0, 1.0, 0.25)
+    if "valid" in fields:
+        valid = np.asarray(fields["valid"], dtype=np.float64)
+        confidence *= np.where(valid > 0, 1.0, 0.0)
+    return np.clip(confidence, 0.0, 1.0).astype(np.float32)
+
+
 def derive_local_xy_m(
     longitude: np.ndarray,
     latitude: np.ndarray,
@@ -235,11 +285,12 @@ def integrate_optional_sidecars(
     trace_timestamps_s: np.ndarray | None = None,
     rtk_payload: dict[str, np.ndarray] | None = None,
     imu_payload: dict[str, np.ndarray] | None = None,
+    altimeter_payload: dict[str, np.ndarray] | None = None,
 ) -> dict[str, np.ndarray]:
     """Merge normalized RTK/IMU payloads into per-trace metadata when provided."""
     _trace_count(trace_metadata)
 
-    if rtk_payload is None and imu_payload is None:
+    if rtk_payload is None and imu_payload is None and altimeter_payload is None:
         return {key: np.asarray(values).copy() for key, values in trace_metadata.items()}
 
     if trace_timestamps_s is None:
@@ -264,5 +315,31 @@ def integrate_optional_sidecars(
         )
         for field, values in imu_fields.items():
             enriched[field] = np.interp(timestamps, imu_timestamps, values).astype(np.float32)
+
+    if altimeter_payload is not None:
+        altimeter_timestamps, altimeter_fields = _normalize_altimeter_payload(
+            altimeter_payload
+        )
+        height_agl_m = np.interp(
+            timestamps,
+            altimeter_timestamps,
+            altimeter_fields["height_agl_m"],
+        ).astype(np.float32)
+        enriched["height_agl_m"] = height_agl_m
+        enriched["height_confidence"] = _build_altimeter_confidence(
+            {
+                key: np.interp(timestamps, altimeter_timestamps, value)
+                for key, value in altimeter_fields.items()
+                if key in {"snr", "target_count", "valid"}
+            },
+            timestamps.size,
+        )
+        if "height_source" in altimeter_fields:
+            nearest = _nearest_indices(altimeter_timestamps, timestamps)
+            source = np.asarray(altimeter_fields["height_source"])[nearest]
+            source = np.where(source == "", "altimeter", source)
+            enriched["height_source"] = source.astype("<U32")
+        else:
+            enriched["height_source"] = np.full(timestamps.size, "altimeter", dtype="<U32")
 
     return enriched
