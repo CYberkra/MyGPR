@@ -159,6 +159,9 @@ from core.auto_tune_comparison import (
     run_auto_tune_comparison,
     to_summary_dict,
 )
+from core.auto_tune_comparison_export import (
+    export_auto_tune_comparison_artifacts as export_auto_tune_comparison_bundle,
+)
 from core.shared_data_state import SharedDataState
 from PythonModule.kirchhoff_migration import load_cagpr_kir_parameter_file
 from qfluentwidgets import FluentIcon
@@ -4525,247 +4528,47 @@ class GPRGuiQt(QMainWindow):
         out_dir = self._default_output_dir()
         ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         base_name = f"auto_tune_comparison_{ts}"
-        summary_path = os.path.join(out_dir, f"{base_name}_summary.json")
-        manual_png_path = os.path.join(out_dir, f"{base_name}_manual.png")
-        auto_png_path = os.path.join(out_dir, f"{base_name}_auto.png")
-        side_png_path = os.path.join(out_dir, f"{base_name}_side_by_side.png")
-        params_csv_path = os.path.join(out_dir, f"{base_name}_params.csv")
-        metrics_csv_path = os.path.join(out_dir, f"{base_name}_metrics.csv")
-
-        summary = to_summary_dict(result)
-        with open(summary_path, "w", encoding="utf-8") as f:
-            json.dump(summary, f, ensure_ascii=False, indent=2)
-
-        manual_arr = np.asarray(result.manual.result, dtype=np.float32)
-        auto_arr = np.asarray(result.automatic.result, dtype=np.float32)
-        max_abs = max(
-            float(np.nanmax(np.abs(manual_arr))) if manual_arr.size else 0.0,
-            float(np.nanmax(np.abs(auto_arr))) if auto_arr.size else 0.0,
-            1.0e-6,
-        )
-        vmin, vmax = -max_abs, max_abs
-        cmap = self._get_colormap()
-
-        self._save_comparison_single_image(
-            manual_arr,
-            manual_png_path,
-            "人工 baseline",
-            cmap=cmap,
-            vmin=vmin,
-            vmax=vmax,
-        )
-        self._save_comparison_single_image(
-            auto_arr,
-            auto_png_path,
-            "自动选参",
-            cmap=cmap,
-            vmin=vmin,
-            vmax=vmax,
-        )
-        self._save_comparison_side_by_side_image(
-            manual_arr,
-            auto_arr,
-            side_png_path,
-            left_title="人工 baseline",
-            right_title="自动选参",
-            cmap=cmap,
-            vmin=vmin,
-            vmax=vmax,
-        )
-
-        params_rows = self._build_comparison_params_rows(summary)
-        self._write_csv_rows(
-            params_csv_path,
-            params_rows,
-            fieldnames=[
-                "candidate",
-                "method_key",
-                "param_key",
-                "param_value",
+        bundle = export_auto_tune_comparison_bundle(
+            result,
+            out_dir=out_dir,
+            bundle_name=base_name,
+            input_ref=self.data_path,
+            notes=[
+                "同一输入、同一 ROI、同一锁定色标下导出的人工 baseline 与自动选参对比证据。",
+                "GPRMAX 正演数据和真实外业数据可复用该导出格式做后续验证。",
             ],
+            cmap=self._get_colormap(),
         )
+        artifacts = dict(bundle.get("artifacts") or {})
+        artifact_order = [
+            "summary_json",
+            "manual_png",
+            "auto_png",
+            "side_by_side_png",
+            "params_csv",
+            "metrics_csv",
+            "report_md",
+        ]
 
-        metrics_rows = self._build_comparison_metrics_rows(summary)
-        self._write_csv_rows(
-            metrics_csv_path,
-            metrics_rows,
-            fieldnames=[
-                "metric",
-                "manual_value",
-                "auto_value",
-                "delta",
-            ],
-        )
-
+        display_paths = []
         try:
-            summary_disp = os.path.relpath(summary_path, BASE_DIR)
-            manual_disp = os.path.relpath(manual_png_path, BASE_DIR)
-            auto_disp = os.path.relpath(auto_png_path, BASE_DIR)
-            side_disp = os.path.relpath(side_png_path, BASE_DIR)
-            params_disp = os.path.relpath(params_csv_path, BASE_DIR)
-            metrics_disp = os.path.relpath(metrics_csv_path, BASE_DIR)
+            display_paths = [
+                os.path.relpath(str(artifacts[key]), BASE_DIR)
+                for key in artifact_order
+                if key in artifacts
+            ]
         except ValueError:
-            summary_disp = summary_path
-            manual_disp = manual_png_path
-            auto_disp = auto_png_path
-            side_disp = side_png_path
-            params_disp = params_csv_path
-            metrics_disp = metrics_csv_path
+            display_paths = [
+                str(artifacts[key]) for key in artifact_order if key in artifacts
+            ]
 
-        self._log(
-            "对比证据已导出: "
-            + "; ".join(
-                [
-                    summary_disp,
-                    manual_disp,
-                    auto_disp,
-                    side_disp,
-                    params_disp,
-                    metrics_disp,
-                ]
-            )
-        )
+        self._log("对比证据已导出: " + "; ".join(display_paths))
         self.status_label.setText("人工/自动对比证据导出完成")
         QMessageBox.information(
             self,
             "导出成功",
-            "已导出:\n"
-            + "\n".join(
-                [
-                    summary_path,
-                    manual_png_path,
-                    auto_png_path,
-                    side_png_path,
-                    params_csv_path,
-                    metrics_csv_path,
-                ]
-            ),
+            "已导出:\n" + "\n".join(str(artifacts[key]) for key in artifact_order if key in artifacts),
         )
-
-    def _save_comparison_single_image(
-        self,
-        data: np.ndarray,
-        out_path: str,
-        title: str,
-        *,
-        cmap: str,
-        vmin: float,
-        vmax: float,
-    ) -> None:
-        """导出单张对比 B-scan 图。"""
-        fig, ax = plt.subplots(1, 1, figsize=(6.2, 4.2), dpi=150)
-        ax.imshow(
-            np.asarray(data, dtype=np.float32),
-            cmap=cmap,
-            aspect="auto",
-            origin="upper",
-            vmin=vmin,
-            vmax=vmax,
-        )
-        ax.set_title(title)
-        ax.set_xlabel("Trace")
-        ax.set_ylabel("Sample")
-        fig.tight_layout()
-        fig.savefig(out_path)
-        plt.close(fig)
-
-    def _save_comparison_side_by_side_image(
-        self,
-        manual_data: np.ndarray,
-        auto_data: np.ndarray,
-        out_path: str,
-        *,
-        left_title: str,
-        right_title: str,
-        cmap: str,
-        vmin: float,
-        vmax: float,
-    ) -> None:
-        """导出人工/自动并排对比图。"""
-        fig, axs = plt.subplots(1, 2, figsize=(11.2, 4.2), dpi=150)
-        for ax, arr, title in [
-            (axs[0], manual_data, left_title),
-            (axs[1], auto_data, right_title),
-        ]:
-            ax.imshow(
-                np.asarray(arr, dtype=np.float32),
-                cmap=cmap,
-                aspect="auto",
-                origin="upper",
-                vmin=vmin,
-                vmax=vmax,
-            )
-            ax.set_title(title)
-            ax.set_xlabel("Trace")
-            ax.set_ylabel("Sample")
-        fig.tight_layout()
-        fig.savefig(out_path)
-        plt.close(fig)
-
-    def _build_comparison_params_rows(self, summary: dict) -> list[dict[str, object]]:
-        """构造参数 CSV 行。"""
-        rows: list[dict[str, object]] = []
-        for candidate_key, candidate_label in [
-            ("manual", "manual"),
-            ("automatic", "automatic"),
-        ]:
-            params_by_method = (
-                (summary.get(candidate_key) or {}).get("params_by_method", {}) or {}
-            )
-            for method_key, params in params_by_method.items():
-                param_dict = params or {}
-                if not param_dict:
-                    rows.append(
-                        {
-                            "candidate": candidate_label,
-                            "method_key": str(method_key),
-                            "param_key": "",
-                            "param_value": "",
-                        }
-                    )
-                    continue
-                for param_key, param_value in param_dict.items():
-                    rows.append(
-                        {
-                            "candidate": candidate_label,
-                            "method_key": str(method_key),
-                            "param_key": str(param_key),
-                            "param_value": json.dumps(
-                                param_value, ensure_ascii=False
-                            )
-                            if isinstance(param_value, (dict, list))
-                            else str(param_value),
-                        }
-                    )
-        return rows
-
-    def _build_comparison_metrics_rows(self, summary: dict) -> list[dict[str, object]]:
-        """构造指标 CSV 行。"""
-        manual_metrics = ((summary.get("manual") or {}).get("metrics") or {})
-        auto_metrics = ((summary.get("automatic") or {}).get("metrics") or {})
-        metric_delta = summary.get("metric_delta") or {}
-        keys = sorted(set(manual_metrics) | set(auto_metrics))
-        rows: list[dict[str, object]] = []
-        for key in keys:
-            rows.append(
-                {
-                    "metric": str(key),
-                    "manual_value": manual_metrics.get(key),
-                    "auto_value": auto_metrics.get(key),
-                    "delta": metric_delta.get(key),
-                }
-            )
-        return rows
-
-    def _write_csv_rows(
-        self, path: str, rows: list[dict[str, object]], fieldnames: list[str]
-    ) -> None:
-        """写入 CSV，空行集时仅写 header。"""
-        with open(path, "w", encoding="utf-8", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
-            if rows:
-                writer.writerows(rows)
 
     def open_log_directory(self):
         """打开日志目录。"""

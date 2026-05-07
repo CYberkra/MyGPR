@@ -163,7 +163,19 @@ run_auto_tune_comparison(
 - `to_summary_dict(...)`
 - `uav_gpr_experience_baseline_v1` 经验参数 baseline profile
 
-当前实现先覆盖后端运行、评分、JSON-safe 摘要，以及 GUI 内的人工/自动对比按钮、结果摘要和 B-scan 快照对比；PNG/PDF/CSV 证据导出留给下一阶段接入。
+当前实现先覆盖后端运行、评分、JSON-safe 摘要，以及 GUI 内的人工/自动对比按钮、结果摘要和 B-scan 快照对比。
+
+证据导出已下沉到 `core/auto_tune_comparison_export.py`，GUI 不再自己拼 PNG/CSV。统一导出内容包括：
+
+- `comparison_summary.json`
+- `manual_bscan.png`
+- `auto_bscan.png`
+- `side_by_side.png`
+- `params_table.csv`
+- `metrics_table.csv`
+- `comparison_report.md`
+
+所有图像默认锁定同一色标范围，避免自动结果仅因为显示对比度更强而显得更好。
 
 ## 和现有代码的连接点
 
@@ -172,7 +184,7 @@ run_auto_tune_comparison(
 - `core.preset_profiles.RECOMMENDED_RUN_PROFILES`：补充 `uav_gpr_standard` 与 `uav_gpr_experience_baseline_v1`。
 - `ui.gui_auto_tune_page.AutoTunePage`：新增“人工/自动对比”动作和结果面板。
 - `app_qt.py`：提供当前日常处理页参数快照，作为 manual baseline。
-- `core.evidence_export` 或新 `core.comparison_export`：统一导出 JSON、PNG、CSV。
+- `core.auto_tune_comparison_export`：统一导出 JSON、PNG、CSV、Markdown 报告。
 
 ## 实现顺序
 
@@ -181,7 +193,22 @@ run_auto_tune_comparison(
 3. 在 CLI 或脚本中加一个最小 smoke，用 sample_data 生成对比报告。
 4. 在 `AutoTunePage` 增加按钮和结果表。（已完成）
 5. 接入左右 B-scan/滑块对比。（已通过现有 compare snapshots 完成）
-6. 再扩展完整标准流程逐 stage 自动选参。
+6. 导出完整科研证据包。（已完成）
+7. 用 GPRMAX 正演构建带 ground truth 的 benchmark 数据集，验证自动选参是否真正保留目标双曲线、裂缝、层状界面等结构。
+8. 再扩展完整标准流程逐 stage 自动选参。
+
+## GPRMAX 正演验证决策
+
+组会已决策：真实外业数据很难可靠判断哪些双曲线、裂缝或结构必须被保留，因此需要使用 GPRMAX 正演数据来验证和改进自动选参。GPRMAX 数据不是替代真实外业数据，而是提供可控 ground truth：
+
+- 场景中有哪些目标、边界、双曲线 apex、层状界面是已知的。
+- 自动选参是否保留这些目标，而不是仅让图像更干净。
+- 哪些候选参数会过度平滑、削弱目标能量或误删弱反射。
+- 不同噪声、含水率、埋深、介电常数和飞行高度扰动下，评分函数是否稳定。
+
+优先级：GPRMAX benchmark 是当前导出闭环完成后的下一条主线，早于继续细调自动选参权重。原因是没有 ground truth 时，继续调权重容易只优化视觉观感。
+
+本机已有 `E:\gprMax\gprMax-v.3.1.7`，其中包含 `user_models/cylinder_Bscan_2D.in`、`crack_model_generator.py`、`landslide_model_generator.py`、`gprmax_test/landslide_model.in` 等可参考材料。但该目录混有原版 gprMax、venv、GUI 试验、硬编码输出路径和缺少 MyGPR 可读 ground-truth manifest 的旧实验文件。结论是：参考旧模型思路，不把旧目录直接作为 MyGPR benchmark 依赖；应在 MyGPR 中重新定义干净的 scenario schema、输出目录、ground-truth manifest 和导入测试。
 
 ## 评价指标原则
 
