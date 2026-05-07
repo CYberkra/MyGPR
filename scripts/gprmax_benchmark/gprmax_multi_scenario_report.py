@@ -27,6 +27,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from core.auto_tune import auto_tune_method  # noqa: E402
+from core.gprmax_truth_metrics import compute_ground_truth_metrics  # noqa: E402
 from core.gpr_io import read_gprmax_out  # noqa: E402
 from core.methods_registry import PROCESSING_METHODS  # noqa: E402
 from core.preset_profiles import GUI_PRESETS_V1, RECOMMENDED_RUN_PROFILES  # noqa: E402
@@ -676,6 +677,7 @@ def run_stepwise_comparison(
             manual_output_roi,
             auto_input_roi,
             auto_output_roi,
+            ground_truth,
         )
         analysis = _build_step_analysis(
             method_key=method_key,
@@ -722,6 +724,7 @@ def run_stepwise_comparison(
         roi_spec["bounds"],
         manual_roi,
         auto_roi,
+        ground_truth,
     )
     return {
         "pipeline": pipeline,
@@ -1290,9 +1293,22 @@ def _final_metric_summary(
     raw_roi: dict[str, int],
     manual_roi: dict[str, int],
     auto_roi: dict[str, int],
+    ground_truth: dict[str, Any],
 ) -> dict[str, Any]:
-    manual_metrics = _branch_metrics(raw, manual_final, raw_roi, manual_roi)
-    auto_metrics = _branch_metrics(raw, auto_final, raw_roi, auto_roi)
+    manual_metrics = _branch_metrics(
+        raw,
+        manual_final,
+        raw_roi,
+        manual_roi,
+        ground_truth,
+    )
+    auto_metrics = _branch_metrics(
+        raw,
+        auto_final,
+        raw_roi,
+        auto_roi,
+        ground_truth,
+    )
     manual_score = _comparison_score(manual_metrics)
     auto_score = _comparison_score(auto_metrics)
     manual_metrics["comparison_score"] = float(manual_score)
@@ -1318,18 +1334,21 @@ def _step_metric_summary(
     manual_output_roi: dict[str, int],
     auto_input_roi: dict[str, int],
     auto_output_roi: dict[str, int],
+    ground_truth: dict[str, Any],
 ) -> dict[str, Any]:
     manual_metrics = _branch_metrics(
         manual_input,
         manual_output,
         manual_input_roi,
         manual_output_roi,
+        ground_truth,
     )
     auto_metrics = _branch_metrics(
         auto_input,
         auto_output,
         auto_input_roi,
         auto_output_roi,
+        ground_truth,
     )
     manual_metrics["comparison_score"] = _comparison_score(manual_metrics)
     auto_metrics["comparison_score"] = _comparison_score(auto_metrics)
@@ -1350,9 +1369,21 @@ def _branch_metrics(
     after: np.ndarray,
     before_roi: dict[str, int],
     after_roi: dict[str, int],
+    ground_truth: dict[str, Any] | None = None,
 ) -> dict[str, float]:
     before_data, after_data = _slice_pair_rois(before, after, before_roi, after_roi)
-    return compute_benchmark_metrics(before_data, after_data)
+    metrics = compute_benchmark_metrics(before_data, after_data)
+    if ground_truth:
+        metrics.update(
+            compute_ground_truth_metrics(
+                before,
+                after,
+                ground_truth,
+                reference_roi=before_roi,
+                processed_roi=after_roi,
+            )
+        )
+    return metrics
 
 
 def _slice_pair_rois(
@@ -1431,6 +1462,10 @@ def _build_step_analysis(
 
     metric = (
         f"{method_name} 的自动-人工 score 差值为 {_fmt_metric(score_delta)}；"
+        f"真值评分差值 {_fmt_metric(delta.get('truth_score'))}，"
+        f"目标能量保留差值 {_fmt_metric(delta.get('truth_target_energy_preservation'))}，"
+        f"目标外背景抑制差值 {_fmt_metric(delta.get('truth_background_energy_reduction'))}，"
+        f"假异常比例差值 {_fmt_metric(delta.get('truth_false_positive_ratio'))}；"
         f"低频能量降低差值 {_fmt_metric(delta.get('low_freq_energy_reduction'))}，"
         f"水平相干降低差值 {_fmt_metric(delta.get('horizontal_coherence_reduction'))}，"
         f"目标频带保真差值 {_fmt_metric(delta.get('target_band_energy_ratio'))}，"
@@ -1474,6 +1509,7 @@ def _comparison_score(metrics: dict[str, float]) -> float:
         + 4.0 * float(metrics["hot_pixel_ratio_after"])
         + 0.08 * float(metrics["kurtosis_or_spikiness_after"])
     )
+    truth_score = float(metrics.get("truth_score", 0.0))
     return float(
         1.2 * float(metrics["baseline_bias_reduction"])
         + 1.4 * float(metrics["low_freq_energy_reduction"])
@@ -1482,6 +1518,7 @@ def _comparison_score(metrics: dict[str, float]) -> float:
         + 2.0 * saliency_fidelity
         + 1.4 * edge_fidelity
         + 0.4 * np.log1p(deep_gain)
+        + 1.4 * truth_score
         - target_loss_penalty
         - artifact_penalty
     )
@@ -1621,6 +1658,10 @@ def _render_scenario_section(record: dict[str, Any]) -> str:
         <div><span>人工选参 score</span><strong>{_fmt_metric(metrics.get("manual", {}).get("comparison_score"))}</strong></div>
         <div><span>自动选参 score</span><strong>{_fmt_metric(metrics.get("auto", {}).get("comparison_score"))}</strong></div>
         <div><span>score 差值</span><strong>{_fmt_metric(delta.get("comparison_score"))}</strong></div>
+        <div><span>真值评分差值</span><strong>{_fmt_metric(delta.get("truth_score"))}</strong></div>
+        <div><span>目标能量保留差值</span><strong>{_fmt_metric(delta.get("truth_target_energy_preservation"))}</strong></div>
+        <div><span>目标外背景抑制差值</span><strong>{_fmt_metric(delta.get("truth_background_energy_reduction"))}</strong></div>
+        <div><span>假异常比例差值</span><strong>{_fmt_metric(delta.get("truth_false_positive_ratio"))}</strong></div>
         <div><span>低频能量降低差值</span><strong>{_fmt_metric(delta.get("low_freq_energy_reduction"))}</strong></div>
         <div><span>目标频带保真差值</span><strong>{_fmt_metric(delta.get("target_band_energy_ratio"))}</strong></div>
         <div><span>边缘保真差值</span><strong>{_fmt_metric(delta.get("edge_preservation"))}</strong></div>
@@ -1650,7 +1691,7 @@ def _render_overall_summary(payload: dict[str, Any]) -> str:
       <h2>总体结论</h2>
       <p>{_esc(conclusion)}</p>
       <table class="params-table">
-        <thead><tr><th>场景</th><th>判定</th><th>人工 score</th><th>自动 score</th><th>score 差值</th></tr></thead>
+        <thead><tr><th>场景</th><th>判定</th><th>人工 score</th><th>自动 score</th><th>score 差值</th><th>真值评分差值</th><th>目标能量保留差值</th></tr></thead>
         <tbody>
           {rows}
         </tbody>
@@ -1676,6 +1717,8 @@ def _render_overall_row(record: dict[str, Any]) -> str:
               <td>{_fmt_metric(metrics.get("manual", {}).get("comparison_score"))}</td>
               <td>{_fmt_metric(metrics.get("auto", {}).get("comparison_score"))}</td>
               <td>{_fmt_metric(delta.get("comparison_score"))}</td>
+              <td>{_fmt_metric(delta.get("truth_score"))}</td>
+              <td>{_fmt_metric(delta.get("truth_target_energy_preservation"))}</td>
             </tr>
 """
 

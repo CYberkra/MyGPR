@@ -125,8 +125,12 @@ def test_zero_time_align_policy_uses_auto_params_for_both_branches(monkeypatch):
     assert step["manual_original_params"] == {"new_zero_time": 5.0}
     assert step["manual_params"] == {"new_zero_time": 0.0}
     assert step["auto_params"] == {"new_zero_time": 0.0}
+    assert "truth_score" in step["metrics"]["manual"]
+    assert "truth_target_energy_preservation" in step["metrics"]["auto"]
+    assert "truth_score" in comparison["metrics"]["delta_auto_minus_manual"]
     assert step["policy_notes"]
     assert "不判定人工/自动优劣" in step["analysis"]["visual"]
+    assert "真值评分差值" in step["analysis"]["metrics"]
     assert comparison["zero_time_policy"] == "align_auto"
 
 
@@ -162,6 +166,10 @@ def test_render_html_report_contains_required_research_sections(tmp_path: Path):
                             "low_freq_energy_reduction": 0.1,
                             "target_band_energy_ratio": 0.05,
                             "edge_preservation": 0.03,
+                            "truth_score": 0.25,
+                            "truth_target_energy_preservation": 0.12,
+                            "truth_background_energy_reduction": 0.18,
+                            "truth_false_positive_ratio": -0.04,
                         },
                     },
                 },
@@ -200,3 +208,7 @@ def test_render_html_report_contains_required_research_sections(tmp_path: Path):
     assert "gprMax 运行设置" in html_text
     assert "视觉评价" in html_text
     assert "指标评价" in html_text
+    assert "真值评分差值" in html_text
+    assert "目标能量保留差值" in html_text
+    assert "目标外背景抑制差值" in html_text
+    assert "假异常比例差值" in html_text

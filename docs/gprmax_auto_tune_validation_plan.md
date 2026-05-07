@@ -176,7 +176,17 @@ python scripts\gprmax_benchmark\generate_cylinder_single_v1.py --raw-out-path E:
 
 ## 下一步实施建议
 
+2026-05-08 已新增 `core/gprmax_truth_metrics.py`，并接入 `scripts/gprmax_benchmark/gprmax_multi_scenario_report.py`。当前 HTML 报告的逐步骤和最终汇总已包含：
+
+- `truth_target_energy_preservation`：真实目标 ROI 能量保留。
+- `truth_target_saliency_gain`：目标相对背景显著性变化。
+- `truth_background_energy_reduction`：目标外背景能量降低。
+- `truth_false_positive_ratio`：目标外强异常相对目标强异常的比例，越低越好。
+- `truth_score`：综合真值评分，已参与 gprMax 报告中的人工/自动判定。
+
+后续建议：
+
 1. 将真实 `.out` 转换结果与当前 deterministic fallback 放在同一 scenario 契约下比较。
-2. 为 `cylinder_single_v1` 增加 ground-truth aware 指标：apex 显著性、双曲线臂连续性、目标 ROI 能量保留、目标外假异常惩罚。
+2. 在 `truth_score` 基础上继续细化 apex 显著性和双曲线臂连续性指标。
 3. 新增 `cylinder_double_depth_v1`，验证浅部强目标不会让自动选参误删深部弱目标。
 4. 新增 `layered_soil_interface_v1` 和 `crack_air_filled_v1`，覆盖层位和裂缝结构。
