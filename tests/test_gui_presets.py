@@ -282,6 +282,17 @@ def test_phase2_tabs_expose_prioritized_group_hierarchy_and_bridge():
         app.processEvents()
 
 
+def test_main_mode_does_not_show_persistent_workbench_button():
+    app = _get_app()
+    win = GPRGuiQt()
+    try:
+        button = getattr(win, "btn_return_workbench", None)
+        assert button is None or button.isHidden()
+    finally:
+        win.close()
+        app.processEvents()
+
+
 def test_auto_tune_workbench_bridge_switches_to_workbench_mode():
     app = _get_app()
     win = GPRGuiQt()

@@ -776,14 +776,6 @@ class GPRGuiQt(QMainWindow):
         self.control_tabs.tabBar().setElideMode(Qt.TextElideMode.ElideRight)
         left_layout.addWidget(self.control_tabs)
 
-        # 返回工作台按钮
-        from qfluentwidgets import PushButton
-
-        self.btn_return_workbench = PushButton("返回工作台")
-        self.btn_return_workbench.clicked.connect(self.switch_to_workbench_mode)
-        self.btn_return_workbench.setProperty("class", "successBtn")
-        left_shell_layout.addWidget(self.btn_return_workbench)
-
         self._content_stack.addWidget(self._main_content_widget)
 
         # ===== 原有页面（保留作为日常处理界面）=====

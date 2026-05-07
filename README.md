@@ -1,5 +1,7 @@
 # GPR GUI
 
+用户手册：[`docs/user_manual.md`](docs/user_manual.md)
+
 PyQt6 GUI (`app_qt.py`) to load CSV/文件夹数据, display B-scan, and apply processing methods from `PythonModule/` (SVD background, F-K filter, Hankel SVD, sliding average, etc.).
 
 ## Features
