@@ -6,6 +6,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
+
+from scripts.gprmax_benchmark import gprmax_multi_scenario_report as report
 from scripts.gprmax_benchmark.gprmax_multi_scenario_report import (
     build_gprmax_command,
     build_scenario_definitions,
@@ -63,12 +66,77 @@ def test_build_gprmax_command_omits_parallel_flags_by_default(tmp_path: Path):
     assert "--geometry-fixed" not in command
 
 
+def test_report_pipeline_uses_agc_gain_instead_of_sec_gain():
+    pipeline = report._resolve_pipeline("uav_gpr_experience_baseline_v1")
+
+    assert "agcGain" in pipeline
+    assert "sec_gain" not in pipeline
+    assert pipeline == [
+        "set_zero_time",
+        "dewow",
+        "subtracting_average_2D",
+        "agcGain",
+        "svd_subspace",
+    ]
+
+
+def test_zero_time_align_policy_uses_auto_params_for_both_branches(monkeypatch):
+    def fake_pipeline(profile_key: str):
+        return ["set_zero_time"]
+
+    def fake_manual_params(pipeline, profile_key):
+        return {"set_zero_time": {"new_zero_time": 5.0}}
+
+    def fake_auto_tune(*args, **kwargs):
+        return {
+            "method_key": "set_zero_time",
+            "method_name": "零时矫正",
+            "recommended_params": {"new_zero_time": 0.0},
+            "best_params": {"new_zero_time": 0.0},
+            "best_score": 1.0,
+            "best_reason": "测试自动零时",
+        }
+
+    monkeypatch.setattr(report, "_resolve_pipeline", fake_pipeline)
+    monkeypatch.setattr(report, "_resolve_manual_params", fake_manual_params)
+    monkeypatch.setattr(report, "auto_tune_method", fake_auto_tune)
+
+    data = np.arange(40, dtype=np.float32).reshape(10, 4)
+    comparison = report.run_stepwise_comparison(
+        data,
+        header_info={"total_time_ns": 10.0},
+        trace_metadata={},
+        ground_truth={
+            "scenario_id": "demo",
+            "analysis_roi": {
+                "time_start_idx": 2,
+                "time_end_idx": 8,
+                "dist_start_idx": 0,
+                "dist_end_idx": 4,
+            },
+            "targets": [{"type": "hyperbola"}],
+        },
+        baseline_profile_key="uav_gpr_experience_baseline_v1",
+        search_mode="fast",
+        zero_time_policy="align_auto",
+    )
+
+    step = comparison["steps"][0]
+    assert step["manual_original_params"] == {"new_zero_time": 5.0}
+    assert step["manual_params"] == {"new_zero_time": 0.0}
+    assert step["auto_params"] == {"new_zero_time": 0.0}
+    assert step["policy_notes"]
+    assert "不判定人工/自动优劣" in step["analysis"]["visual"]
+    assert comparison["zero_time_policy"] == "align_auto"
+
+
 def test_render_html_report_contains_required_research_sections(tmp_path: Path):
     payload = {
         "gprmax_root": "E:/gprMax/gprMax-v.3.1.7",
         "python_executable": "E:/gprMax/gprMax-v.3.1.7/.venv/Scripts/python.exe",
         "baseline_profile_key": "uav_gpr_experience_baseline_v1",
         "search_mode": "fast",
+        "zero_time_policy": "align_auto",
         "run_settings": {
             "runs": 36,
             "geometry_fixed": True,
@@ -104,6 +172,10 @@ def test_render_html_report_contains_required_research_sections(tmp_path: Path):
                         "manual_params": {"window": 61},
                         "auto_params": {"window": 31},
                         "auto_tune_summary": {"best_reason": "评分最高"},
+                        "analysis": {
+                            "visual": "自动选参在视觉上保留目标。",
+                            "metrics": "score 差值为 0.2。",
+                        },
                         "manual_warnings": [],
                         "auto_warnings": [],
                         "images": {
@@ -126,3 +198,5 @@ def test_render_html_report_contains_required_research_sections(tmp_path: Path):
     assert "自动选参" in html_text
     assert "逐步骤 BScan 对比" in html_text
     assert "gprMax 运行设置" in html_text
+    assert "视觉评价" in html_text
+    assert "指标评价" in html_text

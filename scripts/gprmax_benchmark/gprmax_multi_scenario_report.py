@@ -48,6 +48,20 @@ DEFAULT_GPRMAX_ROOT = Path(r"E:\gprMax\gprMax-v.3.1.7")
 DEFAULT_OUTPUT_ROOT = ROOT / "output" / "gprmax_multi_scenario_reports"
 DEFAULT_PROFILE_KEY = "uav_gpr_experience_baseline_v1"
 DEFAULT_RUNS = 36
+REPORT_PIPELINE_ORDER = [
+    "set_zero_time",
+    "dewow",
+    "subtracting_average_2D",
+    "agcGain",
+    "svd_subspace",
+]
+REPORT_MANUAL_PARAM_OVERRIDES = {
+    "agcGain": {"window": 31},
+}
+ZERO_TIME_ALIGN_NOTE = (
+    "本报告将人工分支零时参数对齐自动结果，避免经验 5.0ns "
+    "在小域正演数据中切掉有效结构。"
+)
 
 DOMAIN_M = (0.240, 0.210, 0.002)
 DX_M = 0.002
@@ -210,6 +224,7 @@ def run_multi_scenario_report(
     python_override: str | None = None,
     search_mode: str = "fast",
     baseline_profile_key: str = DEFAULT_PROFILE_KEY,
+    zero_time_policy: str = "align_auto",
     extra_args: list[str] | None = None,
 ) -> dict[str, Any]:
     """Run all requested scenarios and write the HTML report."""
@@ -260,13 +275,13 @@ def run_multi_scenario_report(
             ground_truth=package["ground_truth"],
             baseline_profile_key=baseline_profile_key,
             search_mode=search_mode,
+            zero_time_policy=zero_time_policy,
         )
         image_records = save_step_images(
             scenario_id=scenario_id,
             steps=comparison["steps"],
             assets_dir=assets_dir,
             report_dir=report_dir,
-            roi=package["ground_truth"].get("analysis_roi"),
         )
         structure_rel = _relpath(package["structure_preview_path"], report_dir)
         scenario_records.append(
@@ -299,6 +314,7 @@ def run_multi_scenario_report(
         "generated_at": timestamp,
         "baseline_profile_key": baseline_profile_key,
         "search_mode": search_mode,
+        "zero_time_policy": zero_time_policy,
         "gprmax_root": str(gprmax_root),
         "python_executable": str(python_exe),
         "run_settings": {
@@ -514,8 +530,11 @@ def run_stepwise_comparison(
     ground_truth: dict[str, Any],
     baseline_profile_key: str,
     search_mode: str,
+    zero_time_policy: str = "align_auto",
 ) -> dict[str, Any]:
     """Run manual baseline and auto-tuned branches while preserving step arrays."""
+    if zero_time_policy not in {"align_auto", "manual", "skip"}:
+        raise ValueError(f"Unsupported zero_time_policy: {zero_time_policy}")
     arr = np.asarray(data, dtype=np.float32)
     pipeline = _resolve_pipeline(baseline_profile_key)
     manual_params_by_method = _resolve_manual_params(pipeline, baseline_profile_key)
@@ -535,67 +554,136 @@ def run_stepwise_comparison(
     auto_params_by_method: dict[str, dict[str, Any]] = {}
     auto_tune_results: dict[str, dict[str, Any]] = {}
     steps: list[dict[str, Any]] = []
+    manual_roi = dict(roi_spec["bounds"])
+    auto_roi = dict(roi_spec["bounds"])
 
     for method_key in pipeline:
         method_info = PROCESSING_METHODS[method_key]
         method_name = str(method_info.get("name") or method_key)
         manual_input = np.array(manual_current, copy=True)
         auto_input = np.array(auto_current, copy=True)
+        manual_input_roi = dict(manual_roi)
+        auto_input_roi = dict(auto_roi)
 
         manual_params = dict(manual_params_by_method.get(method_key, {}))
-        manual_runtime_params = prepare_runtime_params(
-            method_key,
-            manual_params,
-            manual_header,
-            manual_trace_metadata,
-            manual_current.shape,
-        )
-        manual_current, manual_meta = run_processing_method(
-            manual_current,
-            method_key,
-            manual_runtime_params,
-        )
-        manual_header = merge_result_header_info(manual_header, manual_meta, manual_current.shape)
-        manual_trace_metadata = merge_result_trace_metadata(manual_trace_metadata, manual_meta)
-
+        manual_original_params = dict(manual_params)
         auto_params = dict(manual_params_by_method.get(method_key, {}))
         tune_summary: dict[str, Any] = {}
         auto_warnings: list[str] = []
-        if method_info.get("auto_tune_enabled"):
-            try:
-                tune_result = auto_tune_method(
-                    auto_current,
-                    method_key,
-                    header_info=auto_header,
-                    trace_metadata=auto_trace_metadata,
-                    base_params=auto_params,
-                    roi_spec=roi_spec,
-                    search_mode=search_mode,
-                )
-                recommended = dict(
-                    tune_result.get("recommended_params")
-                    or tune_result.get("best_params")
-                    or {}
-                )
-                auto_params.update(recommended)
-                tune_summary = _compact_auto_tune_result(tune_result)
-            except Exception as exc:
-                auto_warnings.append(f"auto_tune_failed: {exc}")
-                tune_summary = {"error": str(exc)}
-        auto_runtime_params = prepare_runtime_params(
+        policy_notes: list[str] = []
+        skip_step = method_key == "set_zero_time" and zero_time_policy == "skip"
+
+        if skip_step:
+            manual_meta = {
+                "method_id": method_key,
+                "skipped": True,
+                "reason": "zero_time_policy=skip",
+            }
+            auto_meta = dict(manual_meta)
+            policy_notes.append("本报告按 zero_time_policy=skip 跳过零时矫正。")
+        else:
+            if method_info.get("auto_tune_enabled"):
+                try:
+                    tune_result = auto_tune_method(
+                        auto_current,
+                        method_key,
+                        header_info=auto_header,
+                        trace_metadata=auto_trace_metadata,
+                        base_params=auto_params,
+                        roi_spec=roi_spec,
+                        search_mode=search_mode,
+                    )
+                    recommended = dict(
+                        tune_result.get("recommended_params")
+                        or tune_result.get("best_params")
+                        or {}
+                    )
+                    auto_params.update(recommended)
+                    tune_summary = _compact_auto_tune_result(tune_result)
+                except Exception as exc:
+                    auto_warnings.append(f"auto_tune_failed: {exc}")
+                    tune_summary = {"error": str(exc)}
+
+            if method_key == "set_zero_time" and zero_time_policy == "align_auto":
+                if "new_zero_time" in auto_params:
+                    manual_params = dict(auto_params)
+                    policy_notes.append(ZERO_TIME_ALIGN_NOTE)
+                else:
+                    manual_params = {"new_zero_time": 0.0}
+                    auto_params = {"new_zero_time": 0.0}
+                    policy_notes.append(
+                        "自动零时选参失败，本报告将两分支零时参数设为 0.0ns，"
+                        "避免经验 5.0ns 切掉有效结构。"
+                    )
+            manual_params_by_method[method_key] = dict(manual_params)
+
+            manual_runtime_params = prepare_runtime_params(
+                method_key,
+                manual_params,
+                manual_header,
+                manual_trace_metadata,
+                manual_current.shape,
+            )
+            manual_current, manual_meta = run_processing_method(
+                manual_current,
+                method_key,
+                manual_runtime_params,
+            )
+            manual_header = merge_result_header_info(
+                manual_header, manual_meta, manual_current.shape
+            )
+            manual_trace_metadata = merge_result_trace_metadata(
+                manual_trace_metadata, manual_meta
+            )
+
+            auto_runtime_params = prepare_runtime_params(
+                method_key,
+                auto_params,
+                auto_header,
+                auto_trace_metadata,
+                auto_current.shape,
+            )
+            auto_current, auto_meta = run_processing_method(
+                auto_current,
+                method_key,
+                auto_runtime_params,
+            )
+            auto_header = merge_result_header_info(
+                auto_header, auto_meta, auto_current.shape
+            )
+            auto_trace_metadata = merge_result_trace_metadata(
+                auto_trace_metadata, auto_meta
+            )
+
+        manual_output_roi = _roi_after_method(
+            manual_input_roi,
             method_key,
-            auto_params,
-            auto_header,
-            auto_trace_metadata,
+            manual_meta,
+            manual_current.shape,
+        )
+        auto_output_roi = _roi_after_method(
+            auto_input_roi,
+            method_key,
+            auto_meta,
             auto_current.shape,
         )
-        auto_current, auto_meta = run_processing_method(
+        step_metrics = _step_metric_summary(
+            manual_input,
+            manual_current,
+            auto_input,
             auto_current,
-            method_key,
-            auto_runtime_params,
+            manual_input_roi,
+            manual_output_roi,
+            auto_input_roi,
+            auto_output_roi,
         )
-        auto_header = merge_result_header_info(auto_header, auto_meta, auto_current.shape)
-        auto_trace_metadata = merge_result_trace_metadata(auto_trace_metadata, auto_meta)
+        analysis = _build_step_analysis(
+            method_key=method_key,
+            method_name=method_name,
+            metrics=step_metrics,
+            ground_truth=ground_truth,
+            policy_notes=policy_notes,
+        )
 
         auto_params_by_method[method_key] = dict(auto_params)
         auto_tune_results[method_key] = tune_summary
@@ -610,14 +698,31 @@ def run_stepwise_comparison(
                 "manual_output": np.array(manual_current, copy=True),
                 "auto_output": np.array(auto_current, copy=True),
                 "manual_params": dict(manual_params),
+                "manual_original_params": manual_original_params,
                 "auto_params": dict(auto_params),
                 "auto_tune_summary": tune_summary,
                 "manual_warnings": _extract_warning_messages(manual_meta),
                 "auto_warnings": auto_warnings,
+                "policy_notes": policy_notes,
+                "manual_input_roi": manual_input_roi,
+                "auto_input_roi": auto_input_roi,
+                "manual_output_roi": manual_output_roi,
+                "auto_output_roi": auto_output_roi,
+                "metrics": step_metrics,
+                "analysis": analysis,
             }
         )
+        manual_roi = dict(manual_output_roi)
+        auto_roi = dict(auto_output_roi)
 
-    metric_summary = _final_metric_summary(arr, manual_current, auto_current, roi_spec["bounds"])
+    metric_summary = _final_metric_summary(
+        arr,
+        manual_current,
+        auto_current,
+        roi_spec["bounds"],
+        manual_roi,
+        auto_roi,
+    )
     return {
         "pipeline": pipeline,
         "manual_params_by_method": manual_params_by_method,
@@ -627,6 +732,9 @@ def run_stepwise_comparison(
         "auto_final": auto_current,
         "steps": steps,
         "roi_spec": roi_spec,
+        "final_manual_roi": manual_roi,
+        "final_auto_roi": auto_roi,
+        "zero_time_policy": zero_time_policy,
         "metrics": metric_summary,
         "verdict": _comparison_verdict(metric_summary),
     }
@@ -638,7 +746,6 @@ def save_step_images(
     steps: list[dict[str, Any]],
     assets_dir: Path,
     report_dir: Path,
-    roi: dict[str, int] | None,
 ) -> list[dict[str, Any]]:
     """Render BScan images for every processing step."""
     records: list[dict[str, Any]] = []
@@ -657,19 +764,47 @@ def save_step_images(
             "manual_output": assets_dir / f"{prefix}_manual_after.png",
             "auto_output": assets_dir / f"{prefix}_auto_after.png",
         }
-        save_bscan_image(step["manual_input"], image_paths["manual_input"], "manual before", vlim, roi)
-        save_bscan_image(step["auto_input"], image_paths["auto_input"], "auto before", vlim, roi)
-        save_bscan_image(step["manual_output"], image_paths["manual_output"], "manual after", vlim, roi)
-        save_bscan_image(step["auto_output"], image_paths["auto_output"], "auto after", vlim, roi)
+        save_bscan_image(
+            step["manual_input"],
+            image_paths["manual_input"],
+            "manual before",
+            vlim,
+            step.get("manual_input_roi"),
+        )
+        save_bscan_image(
+            step["auto_input"],
+            image_paths["auto_input"],
+            "auto before",
+            vlim,
+            step.get("auto_input_roi"),
+        )
+        save_bscan_image(
+            step["manual_output"],
+            image_paths["manual_output"],
+            "manual after",
+            vlim,
+            step.get("manual_output_roi"),
+        )
+        save_bscan_image(
+            step["auto_output"],
+            image_paths["auto_output"],
+            "auto after",
+            vlim,
+            step.get("auto_output_roi"),
+        )
         records.append(
             {
                 "method_key": step["method_key"],
                 "method_name": step["method_name"],
                 "manual_params": _json_safe(step["manual_params"]),
+                "manual_original_params": _json_safe(step.get("manual_original_params", {})),
                 "auto_params": _json_safe(step["auto_params"]),
                 "auto_tune_summary": _json_safe(step["auto_tune_summary"]),
                 "manual_warnings": list(step["manual_warnings"]),
                 "auto_warnings": list(step["auto_warnings"]),
+                "policy_notes": list(step.get("policy_notes", [])),
+                "metrics": _json_safe(step.get("metrics", {})),
+                "analysis": _json_safe(step.get("analysis", {})),
                 "images": {
                     key: _relpath(path, report_dir) for key, path in image_paths.items()
                 },
@@ -721,7 +856,7 @@ def render_html_report(report_dir: Path, payload: dict[str, Any]) -> Path:
 
     <section>
       <h2>参数策略</h2>
-      <p>人工选参使用 <code>{_esc(payload.get("baseline_profile_key"))}</code> 的经验 baseline；自动选参以同一组参数为 base，在每个支持 auto-tune 的算法步骤前根据当前 BScan 和 ground-truth ROI 重新评分并选择参数。搜索模式为 <code>{_esc(payload.get("search_mode"))}</code>。</p>
+      <p>人工选参使用 <code>{_esc(payload.get("baseline_profile_key"))}</code> 的经验 baseline，并按本报告策略将增益步骤替换为 AGC。自动选参以同一组参数为 base，在每个支持 auto-tune 的算法步骤前根据当前 BScan 和 ground-truth ROI 重新评分并选择参数。搜索模式为 <code>{_esc(payload.get("search_mode"))}</code>，零时策略为 <code>{_esc(payload.get("zero_time_policy"))}</code>。</p>
     </section>
 
     {overall_summary}
@@ -1120,7 +1255,11 @@ def _resolve_pipeline(baseline_profile_key: str) -> list[str]:
     profile = RECOMMENDED_RUN_PROFILES.get(baseline_profile_key)
     if not profile:
         raise ValueError(f"Unknown baseline profile: {baseline_profile_key}")
-    pipeline = [str(method_key) for method_key in profile.get("order", [])]
+    profile_order = [str(method_key) for method_key in profile.get("order", [])]
+    if baseline_profile_key == DEFAULT_PROFILE_KEY:
+        pipeline = list(REPORT_PIPELINE_ORDER)
+    else:
+        pipeline = ["agcGain" if item == "sec_gain" else item for item in profile_order]
     missing = [method_key for method_key in pipeline if method_key not in PROCESSING_METHODS]
     if missing:
         raise ValueError(f"Unknown processing method(s): {', '.join(missing)}")
@@ -1139,6 +1278,8 @@ def _resolve_manual_params(
             defaults[str(method_key)] = dict(params)
     for method_key, params in profile.get("method_params", {}).items():
         defaults[str(method_key)] = dict(params)
+    for method_key, params in REPORT_MANUAL_PARAM_OVERRIDES.items():
+        defaults[str(method_key)] = dict(params)
     return {method_key: dict(defaults.get(method_key, {})) for method_key in pipeline}
 
 
@@ -1146,13 +1287,12 @@ def _final_metric_summary(
     raw: np.ndarray,
     manual_final: np.ndarray,
     auto_final: np.ndarray,
-    roi: dict[str, int],
+    raw_roi: dict[str, int],
+    manual_roi: dict[str, int],
+    auto_roi: dict[str, int],
 ) -> dict[str, Any]:
-    raw_roi = _slice_roi(raw, roi)
-    manual_roi = _slice_roi(manual_final, roi)
-    auto_roi = _slice_roi(auto_final, roi)
-    manual_metrics = compute_benchmark_metrics(raw_roi, manual_roi)
-    auto_metrics = compute_benchmark_metrics(raw_roi, auto_roi)
+    manual_metrics = _branch_metrics(raw, manual_final, raw_roi, manual_roi)
+    auto_metrics = _branch_metrics(raw, auto_final, raw_roi, auto_roi)
     manual_score = _comparison_score(manual_metrics)
     auto_score = _comparison_score(auto_metrics)
     manual_metrics["comparison_score"] = float(manual_score)
@@ -1167,6 +1307,156 @@ def _final_metric_summary(
         "auto": {key: float(value) for key, value in auto_metrics.items()},
         "delta_auto_minus_manual": delta,
     }
+
+
+def _step_metric_summary(
+    manual_input: np.ndarray,
+    manual_output: np.ndarray,
+    auto_input: np.ndarray,
+    auto_output: np.ndarray,
+    manual_input_roi: dict[str, int],
+    manual_output_roi: dict[str, int],
+    auto_input_roi: dict[str, int],
+    auto_output_roi: dict[str, int],
+) -> dict[str, Any]:
+    manual_metrics = _branch_metrics(
+        manual_input,
+        manual_output,
+        manual_input_roi,
+        manual_output_roi,
+    )
+    auto_metrics = _branch_metrics(
+        auto_input,
+        auto_output,
+        auto_input_roi,
+        auto_output_roi,
+    )
+    manual_metrics["comparison_score"] = _comparison_score(manual_metrics)
+    auto_metrics["comparison_score"] = _comparison_score(auto_metrics)
+    delta = {
+        key: float(auto_metrics[key] - manual_metrics[key])
+        for key in sorted(set(manual_metrics) & set(auto_metrics))
+        if np.isfinite(manual_metrics[key]) and np.isfinite(auto_metrics[key])
+    }
+    return {
+        "manual": {key: float(value) for key, value in manual_metrics.items()},
+        "auto": {key: float(value) for key, value in auto_metrics.items()},
+        "delta_auto_minus_manual": delta,
+    }
+
+
+def _branch_metrics(
+    before: np.ndarray,
+    after: np.ndarray,
+    before_roi: dict[str, int],
+    after_roi: dict[str, int],
+) -> dict[str, float]:
+    before_data, after_data = _slice_pair_rois(before, after, before_roi, after_roi)
+    return compute_benchmark_metrics(before_data, after_data)
+
+
+def _slice_pair_rois(
+    before: np.ndarray,
+    after: np.ndarray,
+    before_roi: dict[str, int],
+    after_roi: dict[str, int],
+) -> tuple[np.ndarray, np.ndarray]:
+    before_slice = _slice_roi(before, before_roi)
+    after_slice = _slice_roi(after, after_roi)
+    rows = max(1, min(before_slice.shape[0], after_slice.shape[0]))
+    cols = max(1, min(before_slice.shape[1], after_slice.shape[1]))
+    return before_slice[:rows, :cols], after_slice[:rows, :cols]
+
+
+def _roi_after_method(
+    roi: dict[str, int],
+    method_key: str,
+    meta: dict[str, Any],
+    shape: tuple[int, int],
+) -> dict[str, int]:
+    if method_key != "set_zero_time":
+        return _clamp_roi(roi, shape)
+    shift = int(meta.get("shift_samples") or 0)
+    shifted = {
+        "time_start_idx": int(roi.get("time_start_idx", 0)) - shift,
+        "time_end_idx": int(roi.get("time_end_idx", shape[0])) - shift,
+        "dist_start_idx": int(roi.get("dist_start_idx", 0)),
+        "dist_end_idx": int(roi.get("dist_end_idx", shape[1])),
+    }
+    return _clamp_roi(shifted, shape)
+
+
+def _clamp_roi(roi: dict[str, int], shape: tuple[int, int]) -> dict[str, int]:
+    samples, traces = int(shape[0]), int(shape[1])
+    t0 = max(0, min(int(roi.get("time_start_idx", 0)), max(samples - 1, 0)))
+    t1 = max(t0 + 1, min(int(roi.get("time_end_idx", samples)), samples))
+    d0 = max(0, min(int(roi.get("dist_start_idx", 0)), max(traces - 1, 0)))
+    d1 = max(d0 + 1, min(int(roi.get("dist_end_idx", traces)), traces))
+    return {
+        "time_start_idx": int(t0),
+        "time_end_idx": int(t1),
+        "dist_start_idx": int(d0),
+        "dist_end_idx": int(d1),
+    }
+
+
+def _build_step_analysis(
+    *,
+    method_key: str,
+    method_name: str,
+    metrics: dict[str, Any],
+    ground_truth: dict[str, Any],
+    policy_notes: list[str],
+) -> dict[str, str]:
+    delta = metrics.get("delta_auto_minus_manual", {})
+    manual = metrics.get("manual", {})
+    auto = metrics.get("auto", {})
+    structure_label = _structure_label(ground_truth)
+    score_delta = float(delta.get("comparison_score", 0.0))
+    visual_winner = _winner_label(score_delta)
+    scale_note = ""
+    if any(abs(float(value)) >= 1000.0 for value in delta.values() if _is_number(value)):
+        scale_note = " 其中极端比值通常表示该 ROI 的参考能量接近 0，需要结合图像判断。"
+
+    if method_key == "set_zero_time" and policy_notes:
+        visual = (
+            f"{' '.join(policy_notes)} 因此本步视觉上不判定人工/自动优劣，"
+            f"重点检查 {structure_label} 是否仍落在有效时窗内，并为后续步骤提供公平输入。"
+        )
+    else:
+        visual = (
+            f"基于真实结构 ROI，{visual_winner}。视觉关注点是 {structure_label} "
+            f"的连续性/边缘是否保留，以及背景或深部噪声是否被过度增强。"
+        )
+
+    metric = (
+        f"{method_name} 的自动-人工 score 差值为 {_fmt_metric(score_delta)}；"
+        f"低频能量降低差值 {_fmt_metric(delta.get('low_freq_energy_reduction'))}，"
+        f"水平相干降低差值 {_fmt_metric(delta.get('horizontal_coherence_reduction'))}，"
+        f"目标频带保真差值 {_fmt_metric(delta.get('target_band_energy_ratio'))}，"
+        f"边缘保真差值 {_fmt_metric(delta.get('edge_preservation'))}。"
+        f"人工 score={_fmt_metric(manual.get('comparison_score'))}，"
+        f"自动 score={_fmt_metric(auto.get('comparison_score'))}。"
+        f"{scale_note}"
+    )
+    return {"visual": visual, "metrics": metric}
+
+
+def _structure_label(ground_truth: dict[str, Any]) -> str:
+    target_types = {str(item.get("type")) for item in ground_truth.get("targets", [])}
+    if "layer_interface" in target_types:
+        return "水平层状反射界面"
+    if "hyperbola" in target_types:
+        return "双曲线目标"
+    return "真实正演结构"
+
+
+def _winner_label(score_delta: float) -> str:
+    if score_delta > 0.02:
+        return "自动选参结果在综合指标上优于人工参数"
+    if score_delta < -0.02:
+        return "人工参数在综合指标上优于自动选参"
+    return "两者综合指标接近"
 
 
 def _comparison_score(metrics: dict[str, float]) -> float:
@@ -1235,6 +1525,9 @@ def _comparison_without_arrays(comparison: dict[str, Any]) -> dict[str, Any]:
         "auto_params_by_method": _json_safe(comparison["auto_params_by_method"]),
         "auto_tune_results": _json_safe(comparison["auto_tune_results"]),
         "roi_spec": _json_safe(comparison["roi_spec"]),
+        "final_manual_roi": _json_safe(comparison.get("final_manual_roi", {})),
+        "final_auto_roi": _json_safe(comparison.get("final_auto_roi", {})),
+        "zero_time_policy": comparison.get("zero_time_policy"),
         "metrics": _json_safe(comparison["metrics"]),
         "verdict": comparison["verdict"],
         "steps": [
@@ -1242,9 +1535,15 @@ def _comparison_without_arrays(comparison: dict[str, Any]) -> dict[str, Any]:
                 "method_key": step["method_key"],
                 "method_name": step["method_name"],
                 "manual_params": _json_safe(step["manual_params"]),
+                "manual_original_params": _json_safe(
+                    step.get("manual_original_params", {})
+                ),
                 "auto_params": _json_safe(step["auto_params"]),
                 "manual_warnings": list(step["manual_warnings"]),
                 "auto_warnings": list(step["auto_warnings"]),
+                "policy_notes": list(step.get("policy_notes", [])),
+                "metrics": _json_safe(step.get("metrics", {})),
+                "analysis": _json_safe(step.get("analysis", {})),
                 "auto_tune_summary": _json_safe(step["auto_tune_summary"]),
             }
             for step in comparison["steps"]
@@ -1385,10 +1684,15 @@ def _render_step_panel(step: dict[str, Any]) -> str:
     images = step.get("images", {})
     params_table = _render_params_table(step)
     warnings = _render_warnings(step)
+    analysis = step.get("analysis") or {}
     return f"""
       <article class="step-card">
         <h4>{_esc(step.get("method_name"))} <code>{_esc(step.get("method_key"))}</code></h4>
         {params_table}
+        <div class="analysis-grid">
+          <div><strong>视觉评价</strong><p>{_esc(analysis.get("visual") or "暂无")}</p></div>
+          <div><strong>指标评价</strong><p>{_esc(analysis.get("metrics") or "暂无")}</p></div>
+        </div>
         {warnings}
         <div class="image-grid">
           <figure><img src="{_esc(images.get("manual_input"))}" alt="manual before"><figcaption>人工分支运行前</figcaption></figure>
@@ -1402,14 +1706,22 @@ def _render_step_panel(step: dict[str, Any]) -> str:
 
 def _render_params_table(step: dict[str, Any]) -> str:
     manual = json.dumps(step.get("manual_params", {}), ensure_ascii=False, sort_keys=True)
+    manual_original = json.dumps(
+        step.get("manual_original_params", {}),
+        ensure_ascii=False,
+        sort_keys=True,
+    )
     auto = json.dumps(step.get("auto_params", {}), ensure_ascii=False, sort_keys=True)
     tune = step.get("auto_tune_summary") or {}
     reason = tune.get("best_reason") or tune.get("recommended_profile") or tune.get("error") or ""
+    manual_note = "经验 baseline 或日常页面同步参数"
+    if step.get("manual_original_params") != step.get("manual_params"):
+        manual_note = f"本步实际参数已按报告策略修正；原人工参数为 {manual_original}"
     return f"""
         <table class="params-table">
           <thead><tr><th>分支</th><th>参数</th><th>说明</th></tr></thead>
           <tbody>
-            <tr><td>人工选参</td><td><code>{_esc(manual)}</code></td><td>经验 baseline 或日常页面同步参数</td></tr>
+            <tr><td>人工选参</td><td><code>{_esc(manual)}</code></td><td>{_esc(manual_note)}</td></tr>
             <tr><td>自动选参</td><td><code>{_esc(auto)}</code></td><td>{_esc(reason)}</td></tr>
           </tbody>
         </table>
@@ -1564,6 +1876,22 @@ code {
   grid-template-columns: repeat(2, minmax(260px, 1fr));
   gap: 12px;
 }
+.analysis-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+.analysis-grid div {
+  padding: 10px 12px;
+  background: #f8f9fb;
+  border: 1px solid #e4e7ec;
+  border-radius: 6px;
+}
+.analysis-grid p {
+  margin: 6px 0 0;
+  font-size: 14px;
+}
 figure {
   margin: 0;
 }
@@ -1594,7 +1922,7 @@ figcaption {
   main {
     padding: 18px 12px 36px;
   }
-  .structure-grid, .image-grid {
+  .structure-grid, .image-grid, .analysis-grid {
     grid-template-columns: 1fr;
   }
   .scenario-heading {
@@ -1611,7 +1939,17 @@ def _fmt_metric(value: Any) -> str:
         return "n/a"
     if not np.isfinite(number):
         return "n/a"
+    if abs(number) >= 1000.0:
+        return f"{number:.3e}"
     return f"{number:.4f}"
+
+
+def _is_number(value: Any) -> bool:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return False
+    return bool(np.isfinite(number))
 
 
 def _relpath(path: Path | str, base: Path) -> str:
@@ -1675,6 +2013,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--baseline-profile", default=DEFAULT_PROFILE_KEY)
     parser.add_argument(
+        "--zero-time-policy",
+        choices=["align_auto", "manual", "skip"],
+        default="align_auto",
+        help=(
+            "Zero-time handling for the report. align_auto copies auto-tuned "
+            "zero-time into the manual branch for a fair downstream comparison."
+        ),
+    )
+    parser.add_argument(
         "--extra-arg",
         action="append",
         default=[],
@@ -1696,6 +2043,7 @@ def main(argv: list[str] | None = None) -> int:
         python_override=args.python_exe,
         search_mode=str(args.search_mode),
         baseline_profile_key=str(args.baseline_profile),
+        zero_time_policy=str(args.zero_time_policy),
         extra_args=list(args.extra_arg or []),
     )
     print(f"HTML report: {payload['html_report']}")
