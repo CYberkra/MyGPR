@@ -16,6 +16,10 @@ from typing import Any, Callable
 
 import numpy as np
 
+from core.auto_tune_constraints import (
+    ParameterConstraintResult,
+    constrain_auto_tune_params,
+)
 from core.methods_registry import PROCESSING_METHODS, get_auto_tune_stage
 from core.processing_engine import (
     clone_header_info,
@@ -49,6 +53,7 @@ from core.quality_metrics import (
     target_band_energy_ratio,
     weighted_score_parts,
 )
+from core.runtime_warnings import merge_runtime_warnings
 
 
 class AutoTuneError(RuntimeError):
@@ -223,6 +228,13 @@ def auto_tune_method(
     best_params = _public_params(best_trial["params"])
     selection_margin, selection_confidence = _selection_stability(valid_trials)
     failed_trials = [trial for trial in scored_trials if not trial.get("valid", True)]
+    constraint_warnings = merge_runtime_warnings(
+        *[trial.get("constraint_warnings", []) for trial in scored_trials]
+    )
+    best_constraint_warnings = list(best_trial.get("constraint_warnings", []) or [])
+    constraint_adjustment_count = sum(
+        1 for trial in scored_trials if trial.get("constraint_adjusted")
+    )
     return {
         "method_key": method_key,
         "method_name": method_info.get("name", method_key),
@@ -250,6 +262,8 @@ def auto_tune_method(
         "selection_margin": float(selection_margin),
         "selection_confidence": float(selection_confidence),
         "failed_trials": failed_trials,
+        "constraint_warnings": constraint_warnings,
+        "best_constraint_warnings": best_constraint_warnings,
         "search_plan": dict(plan),
         "execution_stats": {
             "coarse_trial_count": int(len(scored_coarse)),
@@ -260,6 +274,7 @@ def auto_tune_method(
             "cache_hit_count": int(
                 sum(1 for trial in scored_trials if trial.get("cached"))
             ),
+            "constraint_adjustment_count": int(constraint_adjustment_count),
         },
     }
 
@@ -700,17 +715,25 @@ def _evaluate_trial_candidates(
         if progress_callback is not None:
             progress_callback(idx - 1, total, f"{stage_message} {idx}/{total}")
 
-        signature = _trial_signature(trial_params)
+        constraint_result = constrain_auto_tune_params(
+            method_key,
+            dict(trial_params),
+            data.shape,
+            header_info,
+        )
+        effective_trial_params = dict(constraint_result.effective_params)
+        signature = _trial_signature(effective_trial_params)
         cached = evaluated_cache.get(signature) if evaluated_cache else None
         if cached is not None:
             record = dict(cached)
             record["stage"] = stage
             record["cached"] = True
+            _attach_constraint_metadata(record, constraint_result)
             results.append(record)
             continue
 
         runtime_params = dict(base_params)
-        runtime_params.update(trial_params)
+        runtime_params.update(effective_trial_params)
         try:
             prepared_params = prepare_runtime_params(
                 method_key,
@@ -719,21 +742,31 @@ def _evaluate_trial_candidates(
                 clone_trace_metadata(trace_metadata),
                 data.shape,
             )
-            result, _ = run_processing_method(
+            result, result_meta = run_processing_method(
                 data,
                 method_key,
                 prepared_params,
                 cancel_checker=cancel_checker,
             )
+            method_runtime_warnings = []
+            if isinstance(result_meta, dict):
+                method_runtime_warnings = list(
+                    result_meta.get("runtime_warnings", []) or []
+                )
             record = _score_trial_with_context(
                 context,
                 family,
                 score_func,
                 before_arr,
                 np.asarray(result, dtype=np.float32),
-                dict(trial_params),
+                effective_trial_params,
                 dict(header_info or {}),
                 stage=stage,
+            )
+            _attach_constraint_metadata(
+                record,
+                constraint_result,
+                method_runtime_warnings=method_runtime_warnings,
             )
             record["cached"] = False
             record["valid"] = bool(np.isfinite(record.get("score", 0.0)))
@@ -742,7 +775,13 @@ def _evaluate_trial_candidates(
         except AutoTuneCancelled:
             raise
         except Exception as exc:
-            record = _build_trial_failure_record(context, trial_params, stage, exc)
+            record = _build_trial_failure_record(
+                context,
+                effective_trial_params,
+                stage,
+                exc,
+            )
+            _attach_constraint_metadata(record, constraint_result)
 
         if evaluated_cache is not None:
             evaluated_cache[signature] = dict(record)
@@ -2081,6 +2120,28 @@ def _build_trial_failure_record(
         "error_type": type(exc).__name__,
         "cached": False,
     }
+
+
+def _attach_constraint_metadata(
+    record: dict[str, Any],
+    constraint_result: ParameterConstraintResult,
+    *,
+    method_runtime_warnings: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Attach requested/effective params and warnings to one trial record."""
+    constraint_warnings = list(constraint_result.warnings or [])
+    if method_runtime_warnings is None:
+        method_runtime_warnings = list(record.get("method_runtime_warnings", []) or [])
+    record["requested_params"] = _public_params(constraint_result.requested_params)
+    record["effective_params"] = _public_params(constraint_result.effective_params)
+    record["constraint_warnings"] = constraint_warnings
+    record["constraint_adjusted"] = bool(constraint_result.adjusted)
+    record["method_runtime_warnings"] = list(method_runtime_warnings or [])
+    record["runtime_warnings"] = merge_runtime_warnings(
+        constraint_warnings,
+        method_runtime_warnings,
+    )
+    return record
 
 
 def _summarize_failed_trials(trials: list[dict[str, Any]], method_key: str) -> str:
