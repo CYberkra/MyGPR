@@ -161,13 +161,17 @@ _QSS_TEMPLATE = """
 
 /* ========== Global ========== */
 QWidget {{
-    background-color: {bg_page};
+    background: transparent;
     color: {text_primary};
     font-family: {font_stack};
     font-size: 12px;
 }}
 
-QMainWindow {{
+QMainWindow, QDialog, QWidget:window {{
+    background-color: {bg_page};
+}}
+
+QScrollArea, QScrollArea > QWidget > QWidget {{
     background-color: {bg_page};
 }}
 
@@ -384,10 +388,30 @@ QFormLayout QLabel {{
     font-weight: 500;
 }}
 
-QCheckBox {{ color: {text_primary}; spacing: 6px; }}
-QCheckBox:disabled {{ color: {text_disabled}; }}
+QCheckBox {{
+    color: {text_primary};
+    spacing: 6px;
+    padding: 2px 0;
+}}
 
-QRadioButton {{ spacing: 6px; color: {text_primary}; }}
+QRadioButton {{
+    color: {text_primary};
+    spacing: 8px;
+    padding: 2px 0;
+}}
+
+QCheckBox:hover, QRadioButton:hover {{
+    color: {accent};
+}}
+
+QRadioButton:checked {{
+    color: {accent};
+    font-weight: 700;
+}}
+
+QCheckBox:disabled, QRadioButton:disabled {{
+    color: {text_disabled};
+}}
 
 /* ========== Tab widget ========== */
 QTabWidget::pane {{

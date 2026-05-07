@@ -73,46 +73,15 @@ GUI_PRESETS_V1 = {
     "raw_fidelity": {
         "label": "原始保真（默认）",
         "ui": {
-            "fast_preview": False,
-            "max_samples": 1024,
-            "max_traces": 512,
-            "display_downsample": False,
-            "display_max_samples": 1200,
-            "display_max_traces": 800,
             "normalize": False,
             "demean": False,
             "percentile": False,
         },
         "method_params": {},
     },
-    "quick_preview": {
-        "label": "快速预览（速度优先）",
-        "ui": {
-            "fast_preview": True,
-            "max_samples": 256,
-            "max_traces": 120,
-            "display_downsample": True,
-            "display_max_samples": 500,
-            "display_max_traces": 260,
-            "normalize": False,
-            "demean": False,
-            "percentile": False,
-        },
-        "method_params": {
-            "set_zero_time": {"new_zero_time": 4.0},
-            "dewow": {"window": 21},
-            "fk_filter": {"angle_low": 16, "angle_high": 45, "taper_width": 3},
-            "sec_gain": {"gain_min": 1.0, "gain_max": 3.2, "power": 1.0},
-            "hankel_svd": {"window_length": 32, "rank": 0},
-        },
-    },
     "denoise_first": {
         "label": "降噪优先（稳健）",
         "ui": {
-            "fast_preview": False,
-            "display_downsample": True,
-            "display_max_samples": 900,
-            "display_max_traces": 420,
             "normalize": True,
             "demean": True,
             "percentile": True,
@@ -130,8 +99,6 @@ GUI_PRESETS_V1 = {
     "detail_first": {
         "label": "保细节（细节优先）",
         "ui": {
-            "fast_preview": False,
-            "display_downsample": False,
             "normalize": False,
             "demean": True,
             "percentile": True,
@@ -149,12 +116,6 @@ GUI_PRESETS_V1 = {
     "stolt_speed_first": {
         "label": "Stolt 速度优先",
         "ui": {
-            "fast_preview": True,
-            "max_samples": 384,
-            "max_traces": 180,
-            "display_downsample": True,
-            "display_max_samples": 640,
-            "display_max_traces": 320,
             "normalize": False,
             "demean": False,
             "percentile": False,
@@ -166,10 +127,6 @@ GUI_PRESETS_V1 = {
     "stolt_balanced": {
         "label": "Stolt 平衡档",
         "ui": {
-            "fast_preview": False,
-            "display_downsample": True,
-            "display_max_samples": 760,
-            "display_max_traces": 360,
             "normalize": True,
             "demean": True,
             "percentile": True,
@@ -183,8 +140,6 @@ GUI_PRESETS_V1 = {
     "stolt_focus_first": {
         "label": "Stolt 聚焦优先",
         "ui": {
-            "fast_preview": False,
-            "display_downsample": False,
             "normalize": True,
             "demean": True,
             "percentile": True,
@@ -208,11 +163,6 @@ DEFAULT_STARTUP_PRESET_KEY = "raw_fidelity"
 BASIC_PARAM_LIMIT = 4
 
 RECOMMENDED_RUN_PROFILES = {
-    "quick_preview": {
-        "label": "快速预览",
-        "preset_key": "quick_preview",
-        "order": ["set_zero_time", "dewow", "subtracting_average_2D"],
-    },
     "robust_imaging": {
         "label": "稳健成像",
         "preset_key": "denoise_first",
@@ -674,16 +624,6 @@ WORKFLOW_STAGES = {
 
 
 WORKFLOW_PRESETS = {
-    "quick_preview": {
-        "label": "快速预览",
-        "description": "最快速的处理流程，适合初步查看",
-        "stages": {
-            "stage1": {"set_zero_time": True, "dewow": True},
-            "stage2": {"subtracting_average_2D": True},
-            "stage3": {},
-            "stage4": {},
-        },
-    },
     "robust_imaging": {
         "label": "稳健成像",
         "description": "标准四阶段流程，平衡速度与质量",
