@@ -137,6 +137,27 @@ python scripts\gprmax_benchmark\generate_cylinder_single_v1.py
 python -m pytest tests\test_gprmax_benchmark_package.py -q
 ```
 
+可选真实 gprMax smoke（使用本机 `E:\gprMax\gprMax-v.3.1.7`）：
+
+```powershell
+python scripts\gprmax_benchmark\run_gprmax_cylinder_single_v1_smoke.py --gprmax-root E:\gprMax\gprMax-v.3.1.7 --runs 1 --geometry-only
+python scripts\gprmax_benchmark\run_gprmax_cylinder_single_v1_smoke.py --gprmax-root E:\gprMax\gprMax-v.3.1.7 --runs 3
+```
+
+真实 smoke 脚本会：
+
+- 优先使用 `E:\gprMax\gprMax-v.3.1.7\.venv\Scripts\python.exe` 运行 `python -m gprMax`
+- 在 `output/gprmax_smoke/cylinder_single_v1/<timestamp>/` 保存 `.out` 与 `smoke_summary.json`
+- 自动调用 `generate_cylinder_single_v1.py --raw-out-path ...` 生成 `converted_package/`
+
+2026-05-07 已验证一组成功记录：
+
+- run dir: `output/gprmax_smoke/cylinder_single_v1/20260507_213716_867341/`
+- command: `python -m gprMax ...\cylinder_single_v1.in -n 3`
+- returncode: `0`
+- raw outputs: `cylinder_single_v11.out`, `cylinder_single_v12.out`, `cylinder_single_v13.out`
+- converted package: `.../converted_package/`
+
 当前 bundled B-scan 是 deterministic fallback，作用是先固定 MyGPR 的 scenario、ground truth、CSV 读取、自动选参对比和证据导出契约。它不是完整电磁正演结果。后续若传入真实 gprMax `.out`：
 
 ```powershell
@@ -155,8 +176,7 @@ python scripts\gprmax_benchmark\generate_cylinder_single_v1.py --raw-out-path E:
 
 ## 下一步实施建议
 
-1. 等本机 gprMax 环境确认后，增加可选 smoke 脚本真正运行 `model.in` 正演。
-2. 将真实 `.out` 转换结果与当前 deterministic fallback 放在同一 scenario 契约下比较。
-3. 为 `cylinder_single_v1` 增加 ground-truth aware 指标：apex 显著性、双曲线臂连续性、目标 ROI 能量保留、目标外假异常惩罚。
-4. 新增 `cylinder_double_depth_v1`，验证浅部强目标不会让自动选参误删深部弱目标。
-5. 新增 `layered_soil_interface_v1` 和 `crack_air_filled_v1`，覆盖层位和裂缝结构。
+1. 将真实 `.out` 转换结果与当前 deterministic fallback 放在同一 scenario 契约下比较。
+2. 为 `cylinder_single_v1` 增加 ground-truth aware 指标：apex 显著性、双曲线臂连续性、目标 ROI 能量保留、目标外假异常惩罚。
+3. 新增 `cylinder_double_depth_v1`，验证浅部强目标不会让自动选参误删深部弱目标。
+4. 新增 `layered_soil_interface_v1` 和 `crack_air_filled_v1`，覆盖层位和裂缝结构。
