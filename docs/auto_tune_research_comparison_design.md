@@ -177,6 +177,48 @@ run_auto_tune_comparison(
 
 所有图像默认锁定同一色标范围，避免自动结果仅因为显示对比度更强而显得更好。
 
+## 流程级自动选参后端
+
+2026-05-08 已新增 `core/auto_tune_pipeline.py`。它是后续科研论证和论文/专利证据链的首选后端，职责不是替代单方法自动选参，而是把“整条处理流程”按当前状态逐步运行并评分。
+
+核心入口：
+
+```python
+run_auto_tune_pipeline(
+    data,
+    header_info=None,
+    trace_metadata=None,
+    pipeline=None,
+    manual_params_by_method=None,
+    baseline_profile_key=None,
+    roi_spec=None,
+    ground_truth=None,
+    search_mode="standard",
+    rollback_on_reject=True,
+)
+```
+
+该后端与 `core.auto_tune_comparison.run_auto_tune_comparison(...)` 的分工：
+
+- `run_auto_tune_comparison(...)`：适合简单人工/自动最终结果对比，输出最终 B-scan、参数表和指标。
+- `run_auto_tune_pipeline(...)`：适合完整流程论证，保存每个算法步骤的 `manual_before`、`manual_after`、`auto_before`、`auto_after`，并记录每一步的参数、指标、risk flags、推荐结论和是否回退。
+
+当前流程级契约：
+
+- 每一步自动选参都基于自动分支“当前已处理状态”，而不是原始数据或孤立单步数据。
+- 每一步同时运行人工 baseline 和自动候选，并计算 `pipeline_score` 与 `metric_delta`。
+- 若提供 gprMax `ground_truth`，会合并 `truth_target_energy_preservation`、`truth_background_energy_reduction`、`truth_false_positive_ratio`、`truth_score` 等真值指标。
+- 若自动候选损伤真值目标、制造无目标假异常、综合分低于人工、置信度过低、多个候选近似最优、参数被强制约束或疑似过曝，会写入风险标记。
+- 当 `rollback_on_reject=True` 且某一步结论为 `keep_manual`，自动流程后续状态会回退到该步人工结果，但 step record 仍保留被拒绝的自动候选图像和参数，便于报告解释。
+- `to_summary_dict(...)` 输出 JSON-safe 摘要，不携带原始 B-scan 数组；HTML/报告若需要逐步图像，应直接读取 `AutoTunePipelineRun.steps` 中的数组。
+
+后续 GUI/报告接入建议：
+
+1. 科研 HTML 报告应改为优先消费 `AutoTunePipelineRun.steps`，这样每一步都能展示运行前、人工后、自动后的 B-scan。
+2. GUI 的“自动选参比人工更好”结论应显示为 `overall_recommendation`，并同时列出 `risk_flags`，避免绝对化表达。
+3. gprMax 多场景报告应把 `ground_truth` 传入新后端，使正演真值直接参与流程级评分和回退。
+4. 旧比较后端继续保留，作为轻量导出和兼容入口。
+
 ## 和现有代码的连接点
 
 - `core.auto_tune.auto_tune_method`：继续作为单方法选参入口。
@@ -185,6 +227,7 @@ run_auto_tune_comparison(
 - `ui.gui_auto_tune_page.AutoTunePage`：新增“人工/自动对比”动作和结果面板。
 - `app_qt.py`：提供当前日常处理页参数快照，作为 manual baseline。
 - `core.auto_tune_comparison_export`：统一导出 JSON、PNG、CSV、Markdown 报告。
+- `core.auto_tune_pipeline`：完整流程逐步选参、truth-aware 评分、风险提示和回退建议。
 
 ## 实现顺序
 
