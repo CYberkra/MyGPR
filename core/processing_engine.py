@@ -69,7 +69,7 @@ def prepare_runtime_params(
     runtime_params = dict(params or {})
     samples = max(1, int(data_shape[0]))
 
-    if method_id == "set_zero_time" and "time_step_s" not in runtime_params:
+    if method_id in {"set_zero_time", "agcGain"} and "time_step_s" not in runtime_params:
         total_time_ns = None
         if header_info:
             total_time_ns = header_info.get("total_time_ns")
@@ -309,6 +309,13 @@ def _apply_compensating_gain(
     return data * gain_curve[:, np.newaxis]
 
 
+AGC_EPS = 1.0e-8
+AGC_RMS_FLOOR_RATIO = 0.06
+AGC_RMS_FLOOR_QUANTILE = 0.35
+AGC_LOW_ENERGY_WARNING_FRACTION = 0.05
+AGC_MIN_WINDOW_NS = 0.5
+
+
 def _apply_agc_gain(
     data: np.ndarray, window: int = 11, **kwargs
 ) -> tuple[np.ndarray, list[dict[str, Any]]]:
@@ -316,7 +323,6 @@ def _apply_agc_gain(
 
     requested_window = int(window)
     window = max(1, min(requested_window, data.shape[0]))
-    eps = 1e-8
     warnings = []
     if window != requested_window:
         warnings.append(
@@ -329,8 +335,26 @@ def _apply_agc_gain(
                 effective=window,
             )
         )
+    time_step_s = kwargs.get("time_step_s")
+    if time_step_s is not None:
+        try:
+            window_ns = float(time_step_s) * 1.0e9 * float(window)
+        except (TypeError, ValueError):
+            window_ns = None
+        if window_ns is not None and 0.0 < window_ns < AGC_MIN_WINDOW_NS:
+            warnings.append(
+                build_runtime_warning(
+                    "agc_window_too_short",
+                    "AGC 窗口时间宽度过短，可能放大波形周期和低能量噪声。",
+                    method_id="agcGain",
+                    parameter="window",
+                    effective=window,
+                    window_ns=window_ns,
+                    recommended_min_window_ns=AGC_MIN_WINDOW_NS,
+                )
+            )
     if window >= data.shape[0]:
-        energy = np.maximum(np.linalg.norm(data, axis=0, keepdims=True), eps)
+        energy = np.maximum(np.linalg.norm(data, axis=0, keepdims=True), AGC_EPS)
         warnings.append(
             build_runtime_warning(
                 "global_gain_fallback",
@@ -340,13 +364,46 @@ def _apply_agc_gain(
             )
         )
     else:
-        energy = np.sqrt(
-            np.maximum(
-                uniform_filter1d(data**2, size=window, axis=0, mode="nearest"),
-                eps**2,
-            )
+        local_rms = np.sqrt(
+            np.maximum(uniform_filter1d(data**2, size=window, axis=0, mode="nearest"), 0.0)
         )
+        energy_floor = _agc_energy_floor(data, local_rms)
+        floor_mask = local_rms < energy_floor
+        floor_fraction = float(np.mean(floor_mask)) if floor_mask.size else 0.0
+        if floor_fraction >= AGC_LOW_ENERGY_WARNING_FRACTION:
+            warnings.append(
+                build_runtime_warning(
+                    "agc_low_energy_gain_guard",
+                    "AGC 检测到低能量区域，已限制局部增益以减少噪声/空白区伪影。",
+                    method_id="agcGain",
+                    parameter="window",
+                    effective=window,
+                    low_energy_fraction=floor_fraction,
+                    energy_floor=float(energy_floor),
+                    max_gain=float(1.0 / max(energy_floor, AGC_EPS)),
+                )
+            )
+        energy = np.maximum(local_rms, energy_floor)
     return np.divide(data, energy), warnings
+
+
+def _agc_energy_floor(data: np.ndarray, local_rms: np.ndarray) -> float:
+    arr = np.asarray(data, dtype=np.float64)
+    rms = np.asarray(local_rms, dtype=np.float64)
+    finite_rms = rms[np.isfinite(rms) & (rms > 0.0)]
+    global_rms = float(np.sqrt(np.mean(arr**2))) if arr.size else 0.0
+    robust_rms = (
+        float(np.quantile(finite_rms, AGC_RMS_FLOOR_QUANTILE))
+        if finite_rms.size
+        else global_rms
+    )
+    return float(
+        max(
+            AGC_EPS,
+            global_rms * AGC_RMS_FLOOR_RATIO,
+            robust_rms * AGC_RMS_FLOOR_RATIO,
+        )
+    )
 
 
 def _apply_subtracting_average_2d(

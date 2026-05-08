@@ -69,7 +69,7 @@ def constrain_auto_tune_params(
             effective,
             warnings,
             parameter="window",
-            minimum=1,
+            minimum=_safe_agc_window_min(n_samples, header_info or {}),
             maximum=n_samples,
             reason="sample_window_limit",
         )
@@ -191,6 +191,22 @@ def _safe_zero_time_max_ns(n_samples: int, header_info: dict[str, Any]) -> float
         total = 48.0
     max_shift_samples = max(0, min(int(n_samples) - 1, int(round(n_samples * 0.35))))
     return float(max_shift_samples) * total / max(1, int(n_samples))
+
+
+def _safe_agc_window_min(n_samples: int, header_info: dict[str, Any]) -> int:
+    samples = max(1, int(n_samples))
+    min_by_fraction = int(round(samples * 0.02))
+    min_by_time = 0
+    total_time_ns = header_info.get("total_time_ns") if header_info else None
+    try:
+        total = float(total_time_ns)
+    except Exception:
+        total = 0.0
+    if total > 0.0:
+        time_step_ns = total / samples
+        min_by_time = int(round(0.5 / max(time_step_ns, 1.0e-9)))
+    minimum = max(3, min_by_fraction, min_by_time)
+    return max(1, min(samples, minimum))
 
 
 def _wavelet_level_limit(n_samples: int, n_traces: int) -> int:

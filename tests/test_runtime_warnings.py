@@ -20,6 +20,25 @@ def test_agc_gain_emits_clamp_and_fallback_warning():
     assert "global_gain_fallback" in codes
 
 
+def test_agc_gain_limits_low_energy_noise_amplification():
+    data = np.zeros((160, 12), dtype=np.float32)
+    wave = np.sin(np.linspace(0.0, np.pi * 4.0, 20, dtype=np.float32))
+    data[20:40, :] = wave[:, None]
+    data[120:, ::2] = 1.0e-3
+    data[120:, 1::2] = -1.0e-3
+
+    result, meta = run_processing_method(data, "agcGain", {"window": 5})
+
+    signal_rms = float(np.sqrt(np.mean(result[20:40, :] ** 2)))
+    tail_rms = float(np.sqrt(np.mean(result[120:, :] ** 2)))
+    warnings = meta.get("runtime_warnings", [])
+    codes = {item.get("code") for item in warnings}
+
+    assert result.shape == data.shape
+    assert tail_rms < signal_rms * 0.2
+    assert "agc_low_energy_gain_guard" in codes
+
+
 def test_running_average_preserves_shape_and_emits_warning_when_window_too_large():
     data = np.arange(60, dtype=np.float32).reshape(10, 6)
     result, meta = run_processing_method(data, "running_average_2D", {"ntraces": 999})

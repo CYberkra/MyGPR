@@ -84,3 +84,38 @@ def test_auto_tune_constrains_zero_time_to_safe_search_window():
         and trial.get("constraint_warnings")
         for trial in result["all_trials"]
     )
+
+
+def test_auto_tune_constrains_agc_window_to_time_aware_minimum():
+    raw = _small_profile(samples=200, traces=24)
+
+    result = auto_tune_method(
+        raw,
+        "agcGain",
+        candidate_params=[{"window": 7}],
+        header_info={"total_time_ns": 1.0},
+        search_mode="fast",
+    )
+
+    assert result["best_params"]["window"] >= 100
+    assert result["execution_stats"]["constraint_adjustment_count"] >= 1
+    assert any(
+        trial.get("requested_params", {}).get("window") == 7
+        and trial.get("effective_params", {}).get("window") >= 100
+        and trial.get("constraint_warnings")
+        for trial in result["all_trials"]
+    )
+
+
+def test_auto_tune_agc_generated_candidates_respect_time_aware_minimum():
+    raw = _small_profile(samples=200, traces=24)
+
+    result = auto_tune_method(
+        raw,
+        "agcGain",
+        header_info={"total_time_ns": 1.0},
+        search_mode="fast",
+    )
+
+    windows = [trial["params"]["window"] for trial in result["all_trials"]]
+    assert min(windows) >= 100

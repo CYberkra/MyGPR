@@ -1313,6 +1313,7 @@ def _refine_candidate_trials(
                 )
         elif family == "gain" and method_key == "agcGain" and "window" in params:
             center = int(params["window"])
+            min_window = _agc_window_min(n_samples, header_info)
             values = _sanitize_int_candidates(
                 [
                     int(round(center * 0.80)),
@@ -1322,7 +1323,7 @@ def _refine_candidate_trials(
                     int(round(center * 1.25)),
                 ],
                 n_samples,
-                minimum=3,
+                minimum=min_window,
                 upper=n_samples,
             )
             values = _trim_numeric_candidates(
@@ -1489,6 +1490,22 @@ def _resolve_time_step_ns(n_samples: int, header_info: dict[str, Any]) -> float:
     if total_time_ns and float(total_time_ns) > 0:
         return float(total_time_ns) / max(1, int(n_samples))
     return 48.0 / max(1, int(n_samples))
+
+
+def _agc_window_min(n_samples: int, header_info: dict[str, Any]) -> int:
+    samples = max(1, int(n_samples))
+    min_by_fraction = int(round(samples * 0.02))
+    min_by_time = 0
+    total_time_ns = header_info.get("total_time_ns") if header_info else None
+    try:
+        total = float(total_time_ns)
+    except Exception:
+        total = 0.0
+    if total > 0.0:
+        time_step_ns = total / samples
+        min_by_time = int(round(0.5 / max(time_step_ns, 1.0e-9)))
+    minimum = max(3, min_by_fraction, min_by_time)
+    return max(1, min(samples, minimum))
 
 
 def _sanitize_int_candidates(
@@ -1881,6 +1898,8 @@ def _build_agc_windows(
     base_window = int(
         round(n_samples * np.clip(0.035 + 0.015 * attenuation_ratio, 0.03, 0.18))
     )
+    min_window = _agc_window_min(n_samples, context.header_info)
+    base_window = max(min_window, base_window)
     values = [
         int(round(base_window * scale))
         for scale in (
@@ -1892,7 +1911,7 @@ def _build_agc_windows(
     values = _sanitize_int_candidates(
         list(config.get("window", [])) + values,
         n_samples,
-        minimum=3,
+        minimum=min_window,
         upper=n_samples,
     )
     return [
@@ -2418,6 +2437,14 @@ def _score_gain(
     params: dict[str, Any],
     header_info: dict[str, Any],
 ) -> TrialScore:
+    window = int(params.get("window", 0) or 0)
+    sample_count = int(header_info.get("a_scan_length") or before.shape[0])
+    recommended_min_window = _agc_window_min(sample_count, header_info)
+    short_window_ratio = (
+        max(0.0, recommended_min_window / max(float(window), 1.0) - 1.0)
+        if window > 0
+        else 0.0
+    )
     rms_cv = depth_rms_cv(after)
     deep_before = deep_zone_contrast(before)
     deep_after = deep_zone_contrast(after)
@@ -2433,6 +2460,7 @@ def _score_gain(
         "clipping": clip * 10.0,
         "hot_pixels": hot * 6.0,
         "shallow_blowup": max(0.0, shallow_blow - 2.3) * 1.0,
+        "short_window": short_window_ratio * 2.5,
     }
     score = -2.0 * rms_cv + 2.6 * deep_gain_effective - sum(penalties.values())
     metrics = {
@@ -2443,10 +2471,14 @@ def _score_gain(
         "clipping_ratio": float(clip),
         "hot_pixel_ratio": float(hot),
         "shallow_blow_ratio": float(shallow_blow_raw),
+        "window": float(window),
+        "recommended_min_window": float(recommended_min_window),
+        "short_window_ratio": float(short_window_ratio),
     }
     reason = (
         f"深部对比提升={deep_gain_raw:.3f}，有效提升={deep_gain_effective:.3f}，"
-        f"深浅均衡CV={rms_cv:.4f}，过曝比={clip:.4f}。"
+        f"深浅均衡CV={rms_cv:.4f}，过曝比={clip:.4f}，"
+        f"窗口下限={recommended_min_window}。"
     )
     return TrialScore(
         score=float(score), metrics=metrics, penalties=penalties, reason=reason

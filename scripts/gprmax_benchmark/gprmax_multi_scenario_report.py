@@ -62,7 +62,7 @@ REPORT_PIPELINE_ORDER = [
     "svd_subspace",
 ]
 REPORT_MANUAL_PARAM_OVERRIDES = {
-    "agcGain": {"window": 31},
+    "agcGain": {"window": 121},
 }
 ZERO_TIME_ALIGN_NOTE = (
     "本报告将人工分支零时参数对齐自动结果，避免经验 5.0ns "
