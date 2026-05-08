@@ -10,11 +10,9 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[
-        # 样式文件
-        ('assets/styles.qss', 'assets'),
-        ('assets/styles_unified.qss', 'assets'),
-        ('assets/styles_workbench.qss', 'assets'),
-        ('assets/styles_dark.qss', 'assets'),
+        # 主题扩展文件
+        ('assets/styles_extra_light.qss', 'assets'),
+        ('assets/styles_extra_dark.qss', 'assets'),
         # 配置文件
         ('assets/theme_config.json', 'assets'),
         # 启动脚本
@@ -72,7 +70,6 @@ a = Analysis(
         'ui.gui_advanced_settings',
         'ui.gui_quality_log',
         'ui.gui_method_browser',
-        'ui.gui_method_card',
         'ui.gui_param_editor',
         'ui.gui_workbench',
         'ui.gui_base',
