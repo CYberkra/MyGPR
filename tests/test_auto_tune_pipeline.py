@@ -171,3 +171,27 @@ def test_pipeline_locked_params_apply_to_both_branches_without_auto_tune(monkeyp
     assert result.steps[0].manual_params == {"window": 5}
     assert result.steps[0].auto_params == {"window": 5}
     assert result.steps[0].auto_tune_result is None
+
+
+def test_pipeline_equal_locked_low_truth_output_is_review_not_auto_degraded(monkeypatch):
+    raw = _build_pipeline_profile(samples=72, traces=18)
+
+    def fail_auto_tune(*args, **kwargs):
+        raise AssertionError("locked methods must not auto-tune")
+
+    monkeypatch.setattr(auto_tune_pipeline, "auto_tune_method", fail_auto_tune)
+    result = run_auto_tune_pipeline(
+        raw,
+        pipeline=["subtracting_average_2D"],
+        manual_params_by_method={"subtracting_average_2D": {"ntraces": 15}},
+        locked_params_by_method={"subtracting_average_2D": {"ntraces": 1}},
+        roi_spec=_manual_roi(),
+        ground_truth=_truth_manifest(),
+        search_mode="fast",
+    )
+
+    step = result.steps[0]
+    assert step.recommendation == "review"
+    assert "target_truth_degraded" not in step.risk_flags
+    assert "low_truth_target_preservation" in step.risk_flags
+    assert step.rolled_back_to_manual is False

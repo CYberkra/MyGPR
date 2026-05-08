@@ -756,8 +756,10 @@ def _assess_step_risk(
         auto_preserve = float(auto_metrics.get("truth_target_energy_preservation", 1.0))
         manual_truth_score = float(manual_metrics.get("truth_score", 0.0))
         auto_truth_score = float(auto_metrics.get("truth_score", 0.0))
-        if auto_preserve < manual_preserve - 0.08 or auto_preserve < 0.55:
+        if auto_preserve < manual_preserve - 0.08:
             flags.append("target_truth_degraded")
+        elif auto_preserve < 0.55:
+            flags.append("low_truth_target_preservation")
         if auto_truth_score < manual_truth_score - 0.05:
             flags.append("target_truth_degraded")
     elif truth_count == 0.0:
@@ -789,6 +791,7 @@ def _assess_step_risk(
         "low_selection_confidence",
         "multiple_near_optima",
         "constraint_adjusted",
+        "low_truth_target_preservation",
     }
     if any(flag in severe for flag in flags):
         return flags, "keep_manual", _risk_reason(flags, score_delta)
