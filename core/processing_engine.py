@@ -38,9 +38,7 @@ def run_processing_method(
         input_data = np.nan_to_num(
             input_data, nan=fill_value, posinf=fill_value, neginf=fill_value
         )
-    runtime_params = {
-        k: v for k, v in (params or {}).items() if not str(k).startswith("_")
-    }
+    runtime_params = _filter_runtime_params(method_id, params or {})
     if cancel_checker is not None:
         runtime_params.setdefault("cancel_checker", cancel_checker)
 
@@ -100,6 +98,19 @@ def prepare_runtime_params(
                     info.get("trace_interval_m", 0.0)
                 ) * max(traces - 1, 1)
 
+    return runtime_params
+
+
+def _filter_runtime_params(method_id: str, params: dict[str, Any]) -> dict[str, Any]:
+    """Drop hidden runtime flags unless the method explicitly supports them."""
+    runtime_params: dict[str, Any] = {}
+    for key, value in params.items():
+        key_text = str(key)
+        if key_text.startswith("_"):
+            if method_id == "agcGain" and key_text == "_low_energy_guard":
+                runtime_params[key_text] = value
+            continue
+        runtime_params[key] = value
     return runtime_params
 
 
@@ -317,7 +328,10 @@ AGC_MIN_WINDOW_NS = 0.5
 
 
 def _apply_agc_gain(
-    data: np.ndarray, window: int = 11, **kwargs
+    data: np.ndarray,
+    window: int = 11,
+    _low_energy_guard: bool = False,
+    **kwargs,
 ) -> tuple[np.ndarray, list[dict[str, Any]]]:
     from scipy.ndimage import uniform_filter1d
 
@@ -335,8 +349,9 @@ def _apply_agc_gain(
                 effective=window,
             )
         )
+    use_low_energy_guard = bool(_low_energy_guard)
     time_step_s = kwargs.get("time_step_s")
-    if time_step_s is not None:
+    if use_low_energy_guard and time_step_s is not None:
         try:
             window_ns = float(time_step_s) * 1.0e9 * float(window)
         except (TypeError, ValueError):
@@ -365,25 +380,31 @@ def _apply_agc_gain(
         )
     else:
         local_rms = np.sqrt(
-            np.maximum(uniform_filter1d(data**2, size=window, axis=0, mode="nearest"), 0.0)
-        )
-        energy_floor = _agc_energy_floor(data, local_rms)
-        floor_mask = local_rms < energy_floor
-        floor_fraction = float(np.mean(floor_mask)) if floor_mask.size else 0.0
-        if floor_fraction >= AGC_LOW_ENERGY_WARNING_FRACTION:
-            warnings.append(
-                build_runtime_warning(
-                    "agc_low_energy_gain_guard",
-                    "AGC 检测到低能量区域，已限制局部增益以减少噪声/空白区伪影。",
-                    method_id="agcGain",
-                    parameter="window",
-                    effective=window,
-                    low_energy_fraction=floor_fraction,
-                    energy_floor=float(energy_floor),
-                    max_gain=float(1.0 / max(energy_floor, AGC_EPS)),
-                )
+            np.maximum(
+                uniform_filter1d(data**2, size=window, axis=0, mode="nearest"),
+                AGC_EPS**2,
             )
-        energy = np.maximum(local_rms, energy_floor)
+        )
+        if use_low_energy_guard:
+            energy_floor = _agc_energy_floor(data, local_rms)
+            floor_mask = local_rms < energy_floor
+            floor_fraction = float(np.mean(floor_mask)) if floor_mask.size else 0.0
+            if floor_fraction >= AGC_LOW_ENERGY_WARNING_FRACTION:
+                warnings.append(
+                    build_runtime_warning(
+                        "agc_low_energy_gain_guard",
+                        "AGC 检测到低能量区域，已限制局部增益以减少噪声/空白区伪影。",
+                        method_id="agcGain",
+                        parameter="window",
+                        effective=window,
+                        low_energy_fraction=floor_fraction,
+                        energy_floor=float(energy_floor),
+                        max_gain=float(1.0 / max(energy_floor, AGC_EPS)),
+                    )
+                )
+            energy = np.maximum(local_rms, energy_floor)
+        else:
+            energy = local_rms
     return np.divide(data, energy), warnings
 
 
