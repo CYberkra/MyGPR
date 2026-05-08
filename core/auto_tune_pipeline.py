@@ -119,6 +119,7 @@ def run_auto_tune_pipeline(
     trace_metadata: dict[str, np.ndarray] | None = None,
     pipeline: list[str] | None = None,
     manual_params_by_method: dict[str, dict[str, Any]] | None = None,
+    locked_params_by_method: dict[str, dict[str, Any]] | None = None,
     baseline_profile_key: str | None = None,
     roi_spec: dict[str, Any] | None = None,
     ground_truth: dict[str, Any] | None = None,
@@ -147,6 +148,12 @@ def run_auto_tune_pipeline(
         profile_key,
         manual_params_by_method or {},
     )
+    locked_params = {
+        str(key): dict(value) for key, value in (locked_params_by_method or {}).items()
+    }
+    for method_key, params in locked_params.items():
+        if method_key in pipeline_order:
+            manual_params[method_key] = dict(params)
 
     manual_state = _BranchState(
         current=np.array(arr, dtype=np.float32, copy=True),
@@ -178,6 +185,7 @@ def run_auto_tune_pipeline(
             auto_state=auto_state,
             manual_roi=manual_roi,
             auto_roi=auto_roi,
+            locked_params_by_method=locked_params,
             ground_truth=ground_truth,
             search_mode=search_mode,
             rollback_on_reject=rollback_on_reject,
@@ -282,6 +290,7 @@ def _run_pipeline_step(
     auto_state: _BranchState,
     manual_roi: dict[str, int],
     auto_roi: dict[str, int],
+    locked_params_by_method: dict[str, dict[str, Any]],
     ground_truth: dict[str, Any] | None,
     search_mode: str,
     rollback_on_reject: bool,
@@ -300,6 +309,7 @@ def _run_pipeline_step(
         auto_state=auto_state,
         base_params=manual_params,
         roi_bounds=auto_roi_before,
+        locked_params_by_method=locked_params_by_method,
         search_mode=search_mode,
         cancel_checker=cancel_checker,
     )
@@ -433,9 +443,13 @@ def _resolve_auto_params(
     auto_state: _BranchState,
     base_params: dict[str, Any],
     roi_bounds: dict[str, int],
+    locked_params_by_method: dict[str, dict[str, Any]],
     search_mode: str,
     cancel_checker: CancelChecker | None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    if method_key in locked_params_by_method:
+        return dict(locked_params_by_method[method_key]), None
+
     method_info = PROCESSING_METHODS[method_key]
     if not method_info.get("auto_tune_enabled"):
         return dict(base_params), None

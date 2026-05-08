@@ -149,3 +149,25 @@ def test_pipeline_summary_is_json_safe_and_excludes_arrays():
     assert "auto_after" not in summary["steps"][0]
     assert isinstance(summary["automatic"]["params_by_method"]["dewow"]["window"], int)
     assert summary["overall_recommendation"] == result.overall_recommendation
+
+
+def test_pipeline_locked_params_apply_to_both_branches_without_auto_tune(monkeypatch):
+    raw = _build_pipeline_profile(samples=72, traces=18)
+
+    def fail_auto_tune(*args, **kwargs):
+        raise AssertionError("locked methods must not auto-tune")
+
+    monkeypatch.setattr(auto_tune_pipeline, "auto_tune_method", fail_auto_tune)
+    result = run_auto_tune_pipeline(
+        raw,
+        pipeline=["dewow"],
+        manual_params_by_method={"dewow": {"window": 1}},
+        locked_params_by_method={"dewow": {"window": 5}},
+        search_mode="fast",
+    )
+
+    assert result.manual.params_by_method["dewow"] == {"window": 5}
+    assert result.automatic.params_by_method["dewow"] == {"window": 5}
+    assert result.steps[0].manual_params == {"window": 5}
+    assert result.steps[0].auto_params == {"window": 5}
+    assert result.steps[0].auto_tune_result is None

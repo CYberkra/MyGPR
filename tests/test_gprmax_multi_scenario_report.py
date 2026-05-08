@@ -176,6 +176,61 @@ def test_zero_time_align_policy_uses_auto_params_for_both_branches(monkeypatch):
     assert "不判定人工/自动优劣" in step["analysis"]["visual"]
     assert "真值评分差值" in step["analysis"]["metrics"]
     assert comparison["zero_time_policy"] == "align_auto"
+    assert comparison["backend"] == "core.auto_tune_pipeline"
+    assert comparison["overall_recommendation"] in {"adopt_auto", "review", "keep_manual"}
+    assert "recommendation" in step
+    assert "risk_flags" in step
+    assert "rolled_back_to_manual" in step
+
+
+def test_stepwise_comparison_exposes_pipeline_backend_decisions():
+    data = np.zeros((64, 20), dtype=np.float32)
+    data[24:34, 8:13] = 1.0
+    ground_truth = {
+        "scenario_id": "backend_decision_demo",
+        "analysis_roi": {
+            "time_start_idx": 16,
+            "time_end_idx": 46,
+            "dist_start_idx": 4,
+            "dist_end_idx": 16,
+        },
+        "targets": [
+            {
+                "target_id": "target_01",
+                "type": "hyperbola",
+                "must_preserve": True,
+                "roi": {
+                    "time_start_idx": 22,
+                    "time_end_idx": 36,
+                    "dist_start_idx": 7,
+                    "dist_end_idx": 14,
+                },
+            }
+        ],
+    }
+
+    comparison = report.run_stepwise_comparison(
+        data,
+        header_info={"total_time_ns": 12.0},
+        trace_metadata={},
+        ground_truth=ground_truth,
+        baseline_profile_key="uav_gpr_experience_baseline_v1",
+        search_mode="fast",
+        zero_time_policy="skip",
+    )
+
+    assert comparison["backend"] == "core.auto_tune_pipeline"
+    assert "set_zero_time" not in comparison["pipeline"]
+    assert comparison["overall_recommendation"] in {"adopt_auto", "review", "keep_manual"}
+    assert isinstance(comparison["risk_flags"], list)
+    assert "pipeline_score" in comparison["metrics"]["delta_auto_minus_manual"]
+    assert "comparison_score" in comparison["metrics"]["delta_auto_minus_manual"]
+
+    first_step = comparison["steps"][0]
+    assert "recommendation" in first_step
+    assert "risk_flags" in first_step
+    assert "rolled_back_to_manual" in first_step
+    assert "pipeline_score" in first_step["metrics"]["delta_auto_minus_manual"]
 
 
 def test_render_html_report_contains_required_research_sections(tmp_path: Path):
@@ -202,6 +257,8 @@ def test_render_html_report_contains_required_research_sections(tmp_path: Path):
                 "gprmax": {"command": ["python", "-m", "gprMax", "model.in"]},
                 "comparison": {
                     "verdict": "auto_better",
+                    "overall_recommendation": "adopt_auto",
+                    "risk_flags": [],
                     "metrics": {
                         "manual": {"comparison_score": 1.0},
                         "auto": {"comparison_score": 1.2},
@@ -230,6 +287,10 @@ def test_render_html_report_contains_required_research_sections(tmp_path: Path):
                         },
                         "manual_warnings": [],
                         "auto_warnings": [],
+                        "recommendation": "review",
+                        "risk_flags": ["near_tie"],
+                        "rolled_back_to_manual": False,
+                        "reason": "risk=near_tie; auto pipeline score delta=0.0100",
                         "images": {
                             "manual_input": "assets/manual_before.png",
                             "auto_input": "assets/auto_before.png",
@@ -252,6 +313,9 @@ def test_render_html_report_contains_required_research_sections(tmp_path: Path):
     assert "gprMax 运行设置" in html_text
     assert "视觉评价" in html_text
     assert "指标评价" in html_text
+    assert "后端建议" in html_text
+    assert "风险标记" in html_text
+    assert "是否回退人工结果" in html_text
     assert "真值评分差值" in html_text
     assert "目标能量保留差值" in html_text
     assert "目标外背景抑制差值" in html_text

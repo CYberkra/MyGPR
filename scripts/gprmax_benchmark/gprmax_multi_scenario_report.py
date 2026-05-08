@@ -27,6 +27,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from core.auto_tune import auto_tune_method  # noqa: E402
+from core.auto_tune_pipeline import (  # noqa: E402
+    AutoTunePipelineRun,
+    PipelineStepRecord,
+    run_auto_tune_pipeline,
+)
 from core.gprmax_truth_metrics import compute_ground_truth_metrics  # noqa: E402
 from core.gpr_io import read_gprmax_out  # noqa: E402
 from core.methods_registry import PROCESSING_METHODS  # noqa: E402
@@ -537,214 +542,254 @@ def run_stepwise_comparison(
     search_mode: str,
     zero_time_policy: str = "align_auto",
 ) -> dict[str, Any]:
-    """Run manual baseline and auto-tuned branches while preserving step arrays."""
+    """Run report comparison through the shared pipeline auto-tune backend."""
     if zero_time_policy not in {"align_auto", "manual", "skip"}:
         raise ValueError(f"Unsupported zero_time_policy: {zero_time_policy}")
     arr = np.asarray(data, dtype=np.float32)
     pipeline = _resolve_pipeline(baseline_profile_key)
     manual_params_by_method = _resolve_manual_params(pipeline, baseline_profile_key)
+    manual_original_params_by_method = {
+        method_key: dict(params)
+        for method_key, params in manual_params_by_method.items()
+    }
     roi_spec = {
         "mode": "manual",
         "bounds": ground_truth.get("analysis_roi") or _full_roi(*arr.shape),
         "label": f"{ground_truth.get('scenario_id', 'scenario')} ground-truth ROI",
     }
 
-    manual_current = np.array(arr, copy=True)
-    auto_current = np.array(arr, copy=True)
-    manual_header = clone_header_info(header_info)
-    auto_header = clone_header_info(header_info)
-    manual_trace_metadata = clone_trace_metadata(trace_metadata)
-    auto_trace_metadata = clone_trace_metadata(trace_metadata)
+    locked_params_by_method: dict[str, dict[str, Any]] = {}
+    locked_tune_summaries: dict[str, dict[str, Any]] = {}
+    policy_notes_by_method: dict[str, list[str]] = {}
 
-    auto_params_by_method: dict[str, dict[str, Any]] = {}
-    auto_tune_results: dict[str, dict[str, Any]] = {}
-    steps: list[dict[str, Any]] = []
-    manual_roi = dict(roi_spec["bounds"])
-    auto_roi = dict(roi_spec["bounds"])
-
-    for method_key in pipeline:
-        method_info = PROCESSING_METHODS[method_key]
-        method_name = str(method_info.get("name") or method_key)
-        manual_input = np.array(manual_current, copy=True)
-        auto_input = np.array(auto_current, copy=True)
-        manual_input_roi = dict(manual_roi)
-        auto_input_roi = dict(auto_roi)
-
-        manual_params = dict(manual_params_by_method.get(method_key, {}))
-        manual_original_params = dict(manual_params)
-        auto_params = dict(manual_params_by_method.get(method_key, {}))
-        tune_summary: dict[str, Any] = {}
-        auto_warnings: list[str] = []
-        policy_notes: list[str] = []
-        skip_step = method_key == "set_zero_time" and zero_time_policy == "skip"
-
-        if skip_step:
-            manual_meta = {
-                "method_id": method_key,
-                "skipped": True,
-                "reason": "zero_time_policy=skip",
-            }
-            auto_meta = dict(manual_meta)
-            policy_notes.append("本报告按 zero_time_policy=skip 跳过零时矫正。")
-        else:
-            if method_info.get("auto_tune_enabled"):
-                try:
-                    tune_result = auto_tune_method(
-                        auto_current,
-                        method_key,
-                        header_info=auto_header,
-                        trace_metadata=auto_trace_metadata,
-                        base_params=auto_params,
-                        roi_spec=roi_spec,
-                        search_mode=search_mode,
-                    )
-                    recommended = dict(
-                        tune_result.get("recommended_params")
-                        or tune_result.get("best_params")
-                        or {}
-                    )
-                    auto_params.update(recommended)
-                    tune_summary = _compact_auto_tune_result(tune_result)
-                except Exception as exc:
-                    auto_warnings.append(f"auto_tune_failed: {exc}")
-                    tune_summary = {"error": str(exc)}
-
-            if method_key == "set_zero_time" and zero_time_policy == "align_auto":
-                if "new_zero_time" in auto_params:
-                    manual_params = dict(auto_params)
-                    policy_notes.append(ZERO_TIME_ALIGN_NOTE)
-                else:
-                    manual_params = {"new_zero_time": 0.0}
-                    auto_params = {"new_zero_time": 0.0}
-                    policy_notes.append(
-                        "自动零时选参失败，本报告将两分支零时参数设为 0.0ns，"
-                        "避免经验 5.0ns 切掉有效结构。"
-                    )
-            manual_params_by_method[method_key] = dict(manual_params)
-
-            manual_runtime_params = prepare_runtime_params(
-                method_key,
-                manual_params,
-                manual_header,
-                manual_trace_metadata,
-                manual_current.shape,
-            )
-            manual_current, manual_meta = run_processing_method(
-                manual_current,
-                method_key,
-                manual_runtime_params,
-            )
-            manual_header = merge_result_header_info(
-                manual_header, manual_meta, manual_current.shape
-            )
-            manual_trace_metadata = merge_result_trace_metadata(
-                manual_trace_metadata, manual_meta
-            )
-
-            auto_runtime_params = prepare_runtime_params(
-                method_key,
-                auto_params,
-                auto_header,
-                auto_trace_metadata,
-                auto_current.shape,
-            )
-            auto_current, auto_meta = run_processing_method(
-                auto_current,
-                method_key,
-                auto_runtime_params,
-            )
-            auto_header = merge_result_header_info(
-                auto_header, auto_meta, auto_current.shape
-            )
-            auto_trace_metadata = merge_result_trace_metadata(
-                auto_trace_metadata, auto_meta
-            )
-
-        manual_output_roi = _roi_after_method(
-            manual_input_roi,
-            method_key,
-            manual_meta,
-            manual_current.shape,
+    if zero_time_policy == "skip" and "set_zero_time" in pipeline:
+        pipeline = [method_key for method_key in pipeline if method_key != "set_zero_time"]
+        manual_params_by_method.pop("set_zero_time", None)
+        policy_notes_by_method["set_zero_time"] = [
+            "本报告按 zero_time_policy=skip 跳过零时矫正。"
+        ]
+    elif zero_time_policy == "align_auto" and "set_zero_time" in pipeline:
+        zero_params, tune_summary, policy_notes = _derive_aligned_zero_time_params(
+            arr,
+            header_info=header_info,
+            trace_metadata=trace_metadata,
+            roi_spec=roi_spec,
+            search_mode=search_mode,
+            base_params=manual_params_by_method.get("set_zero_time", {}),
         )
-        auto_output_roi = _roi_after_method(
-            auto_input_roi,
-            method_key,
-            auto_meta,
-            auto_current.shape,
-        )
-        step_metrics = _step_metric_summary(
-            manual_input,
-            manual_current,
-            auto_input,
-            auto_current,
-            manual_input_roi,
-            manual_output_roi,
-            auto_input_roi,
-            auto_output_roi,
-            ground_truth,
-        )
-        analysis = _build_step_analysis(
-            method_key=method_key,
-            method_name=method_name,
-            metrics=step_metrics,
-            ground_truth=ground_truth,
-            policy_notes=policy_notes,
-        )
+        manual_params_by_method["set_zero_time"] = dict(zero_params)
+        locked_params_by_method["set_zero_time"] = dict(zero_params)
+        locked_tune_summaries["set_zero_time"] = tune_summary
+        policy_notes_by_method["set_zero_time"] = policy_notes
 
-        auto_params_by_method[method_key] = dict(auto_params)
-        auto_tune_results[method_key] = tune_summary
-        auto_warnings.extend(_extract_warning_messages(auto_meta))
-
-        steps.append(
-            {
-                "method_key": method_key,
-                "method_name": method_name,
-                "manual_input": manual_input,
-                "auto_input": auto_input,
-                "manual_output": np.array(manual_current, copy=True),
-                "auto_output": np.array(auto_current, copy=True),
-                "manual_params": dict(manual_params),
-                "manual_original_params": manual_original_params,
-                "auto_params": dict(auto_params),
-                "auto_tune_summary": tune_summary,
-                "manual_warnings": _extract_warning_messages(manual_meta),
-                "auto_warnings": auto_warnings,
-                "policy_notes": policy_notes,
-                "manual_input_roi": manual_input_roi,
-                "auto_input_roi": auto_input_roi,
-                "manual_output_roi": manual_output_roi,
-                "auto_output_roi": auto_output_roi,
-                "metrics": step_metrics,
-                "analysis": analysis,
-            }
-        )
-        manual_roi = dict(manual_output_roi)
-        auto_roi = dict(auto_output_roi)
-
-    metric_summary = _final_metric_summary(
+    pipeline_result = run_auto_tune_pipeline(
         arr,
-        manual_current,
-        auto_current,
-        roi_spec["bounds"],
-        manual_roi,
-        auto_roi,
-        ground_truth,
+        header_info=header_info,
+        trace_metadata=trace_metadata,
+        pipeline=pipeline,
+        manual_params_by_method=manual_params_by_method,
+        locked_params_by_method=locked_params_by_method,
+        baseline_profile_key=baseline_profile_key,
+        roi_spec=roi_spec,
+        ground_truth=ground_truth,
+        search_mode=search_mode,
+        rollback_on_reject=True,
+    )
+    return _pipeline_run_to_report_dict(
+        pipeline_result,
+        zero_time_policy=zero_time_policy,
+        manual_original_params_by_method=manual_original_params_by_method,
+        policy_notes_by_method=policy_notes_by_method,
+        locked_tune_summaries=locked_tune_summaries,
+        ground_truth=ground_truth,
+    )
+
+
+def _derive_aligned_zero_time_params(
+    data: np.ndarray,
+    *,
+    header_info: dict[str, Any] | None,
+    trace_metadata: dict[str, np.ndarray] | None,
+    roi_spec: dict[str, Any],
+    search_mode: str,
+    base_params: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+    """Auto-tune zero-time once, then lock both report branches to it."""
+    try:
+        tune_result = auto_tune_method(
+            data,
+            "set_zero_time",
+            header_info=header_info,
+            trace_metadata=trace_metadata,
+            base_params=base_params,
+            roi_spec=roi_spec,
+            search_mode=search_mode,
+        )
+        recommended = dict(
+            tune_result.get("recommended_params")
+            or tune_result.get("best_params")
+            or {}
+        )
+        if "new_zero_time" not in recommended:
+            recommended = {"new_zero_time": 0.0}
+        return recommended, _compact_auto_tune_result(tune_result), [ZERO_TIME_ALIGN_NOTE]
+    except Exception as exc:
+        return (
+            {"new_zero_time": 0.0},
+            {"error": str(exc), "recommended_params": {"new_zero_time": 0.0}},
+            [
+                "自动零时选参失败，本报告将两分支零时参数设为 0.0ns，"
+                "避免经验 5.0ns 切掉有效结构。"
+            ],
+        )
+
+
+def _pipeline_run_to_report_dict(
+    result: AutoTunePipelineRun,
+    *,
+    zero_time_policy: str,
+    manual_original_params_by_method: dict[str, dict[str, Any]],
+    policy_notes_by_method: dict[str, list[str]],
+    locked_tune_summaries: dict[str, dict[str, Any]],
+    ground_truth: dict[str, Any],
+) -> dict[str, Any]:
+    """Adapt the shared backend result to the existing report schema."""
+    steps = [
+        _pipeline_step_to_report_dict(
+            step,
+            manual_original_params_by_method=manual_original_params_by_method,
+            policy_notes=policy_notes_by_method.get(step.method_key, []),
+            locked_tune_summary=locked_tune_summaries.get(step.method_key, {}),
+            ground_truth=ground_truth,
+        )
+        for step in result.steps
+    ]
+    metrics = _metric_summary_with_compat(
+        result.manual.metrics,
+        result.automatic.metrics,
+        result.metric_delta,
+    )
+    auto_tune_results = dict(result.automatic.auto_tune_results)
+    for method_key, summary in locked_tune_summaries.items():
+        auto_tune_results.setdefault(method_key, summary)
+    final_manual_roi = (
+        dict(result.steps[-1].manual_roi_after)
+        if result.steps
+        else dict(result.roi_info.get("bounds", {}))
+    )
+    final_auto_roi = (
+        dict(result.steps[-1].auto_roi_after)
+        if result.steps
+        else dict(result.roi_info.get("bounds", {}))
     )
     return {
-        "pipeline": pipeline,
-        "manual_params_by_method": manual_params_by_method,
-        "auto_params_by_method": auto_params_by_method,
+        "backend": "core.auto_tune_pipeline",
+        "pipeline": list(result.pipeline),
+        "manual_params_by_method": result.manual.params_by_method,
+        "auto_params_by_method": result.automatic.params_by_method,
         "auto_tune_results": auto_tune_results,
-        "manual_final": manual_current,
-        "auto_final": auto_current,
+        "manual_final": result.manual.result,
+        "auto_final": result.automatic.result,
         "steps": steps,
-        "roi_spec": roi_spec,
-        "final_manual_roi": manual_roi,
-        "final_auto_roi": auto_roi,
+        "roi_spec": result.roi_info,
+        "final_manual_roi": final_manual_roi,
+        "final_auto_roi": final_auto_roi,
         "zero_time_policy": zero_time_policy,
-        "metrics": metric_summary,
-        "verdict": _comparison_verdict(metric_summary),
+        "metrics": metrics,
+        "verdict": _pipeline_verdict(result.overall_recommendation, metrics),
+        "overall_recommendation": result.overall_recommendation,
+        "risk_flags": list(result.risk_flags),
     }
+
+
+def _pipeline_step_to_report_dict(
+    step: PipelineStepRecord,
+    *,
+    manual_original_params_by_method: dict[str, dict[str, Any]],
+    policy_notes: list[str],
+    locked_tune_summary: dict[str, Any],
+    ground_truth: dict[str, Any],
+) -> dict[str, Any]:
+    metrics = _metric_summary_with_compat(
+        step.manual_metrics,
+        step.auto_metrics,
+        step.metric_delta,
+    )
+    notes = list(policy_notes)
+    if step.rolled_back_to_manual:
+        notes.append("本步自动候选触发 keep_manual，后续流程回退到人工结果。")
+    analysis = _build_step_analysis(
+        method_key=step.method_key,
+        method_name=step.method_name,
+        metrics=metrics,
+        ground_truth=ground_truth,
+        policy_notes=notes,
+        recommendation=step.recommendation,
+        risk_flags=step.risk_flags,
+    )
+    tune_summary = dict(step.auto_tune_result or locked_tune_summary or {})
+    return {
+        "method_key": step.method_key,
+        "method_name": step.method_name,
+        "manual_input": step.manual_before,
+        "auto_input": step.auto_before,
+        "manual_output": step.manual_after,
+        "auto_output": step.auto_after,
+        "manual_params": dict(step.manual_params),
+        "manual_original_params": dict(
+            manual_original_params_by_method.get(step.method_key, step.manual_params)
+        ),
+        "auto_params": dict(step.auto_params),
+        "auto_tune_summary": tune_summary,
+        "manual_warnings": list(step.warnings.get("manual", [])),
+        "auto_warnings": list(step.warnings.get("automatic", [])),
+        "policy_notes": notes,
+        "manual_input_roi": dict(step.manual_roi_before),
+        "auto_input_roi": dict(step.auto_roi_before),
+        "manual_output_roi": dict(step.manual_roi_after),
+        "auto_output_roi": dict(step.auto_roi_after),
+        "metrics": metrics,
+        "analysis": analysis,
+        "recommendation": step.recommendation,
+        "risk_flags": list(step.risk_flags),
+        "rolled_back_to_manual": bool(step.rolled_back_to_manual),
+        "reason": step.reason,
+    }
+
+
+def _metric_summary_with_compat(
+    manual_metrics: dict[str, float],
+    auto_metrics: dict[str, float],
+    metric_delta: dict[str, float],
+) -> dict[str, Any]:
+    manual = _metrics_with_comparison_alias(manual_metrics)
+    auto = _metrics_with_comparison_alias(auto_metrics)
+    delta = _metrics_with_comparison_alias(metric_delta)
+    return {
+        "manual": {key: float(value) for key, value in manual.items()},
+        "auto": {key: float(value) for key, value in auto.items()},
+        "delta_auto_minus_manual": {
+            key: float(value) for key, value in delta.items()
+        },
+    }
+
+
+def _metrics_with_comparison_alias(metrics: dict[str, float]) -> dict[str, float]:
+    resolved = {key: float(value) for key, value in metrics.items()}
+    if "pipeline_score" in resolved and "comparison_score" not in resolved:
+        resolved["comparison_score"] = float(resolved["pipeline_score"])
+    return resolved
+
+
+def _pipeline_verdict(
+    overall_recommendation: str,
+    metric_summary: dict[str, Any],
+) -> str:
+    if overall_recommendation == "adopt_auto":
+        return "auto_better"
+    if overall_recommendation == "keep_manual":
+        return "manual_better"
+    return _comparison_verdict(metric_summary)
 
 
 def save_step_images(
@@ -812,6 +857,10 @@ def save_step_images(
                 "policy_notes": list(step.get("policy_notes", [])),
                 "metrics": _json_safe(step.get("metrics", {})),
                 "analysis": _json_safe(step.get("analysis", {})),
+                "recommendation": step.get("recommendation"),
+                "risk_flags": list(step.get("risk_flags", [])),
+                "rolled_back_to_manual": bool(step.get("rolled_back_to_manual", False)),
+                "reason": step.get("reason", ""),
                 "images": {
                     key: _relpath(path, report_dir) for key, path in image_paths.items()
                 },
@@ -1576,6 +1625,8 @@ def _build_step_analysis(
     metrics: dict[str, Any],
     ground_truth: dict[str, Any],
     policy_notes: list[str],
+    recommendation: str | None = None,
+    risk_flags: list[str] | None = None,
 ) -> dict[str, str]:
     delta = metrics.get("delta_auto_minus_manual", {})
     manual = metrics.get("manual", {})
@@ -1597,6 +1648,9 @@ def _build_step_analysis(
             f"基于真实结构 ROI，{visual_winner}。视觉关注点是 {structure_label} "
             f"的连续性/边缘是否保留，以及背景或深部噪声是否被过度增强。"
         )
+    if recommendation:
+        risk_text = "、".join(risk_flags or []) or "无"
+        visual += f" 后端建议为 {recommendation}，风险标记：{risk_text}。"
 
     metric = (
         f"{method_name} 的自动-人工 score 差值为 {_fmt_metric(score_delta)}；"
@@ -1699,6 +1753,7 @@ def _locked_vlim(arrays: list[np.ndarray]) -> float:
 
 def _comparison_without_arrays(comparison: dict[str, Any]) -> dict[str, Any]:
     return {
+        "backend": comparison.get("backend"),
         "pipeline": list(comparison["pipeline"]),
         "manual_params_by_method": _json_safe(comparison["manual_params_by_method"]),
         "auto_params_by_method": _json_safe(comparison["auto_params_by_method"]),
@@ -1709,6 +1764,8 @@ def _comparison_without_arrays(comparison: dict[str, Any]) -> dict[str, Any]:
         "zero_time_policy": comparison.get("zero_time_policy"),
         "metrics": _json_safe(comparison["metrics"]),
         "verdict": comparison["verdict"],
+        "overall_recommendation": comparison.get("overall_recommendation"),
+        "risk_flags": list(comparison.get("risk_flags", [])),
         "steps": [
             {
                 "method_key": step["method_key"],
@@ -1724,6 +1781,10 @@ def _comparison_without_arrays(comparison: dict[str, Any]) -> dict[str, Any]:
                 "metrics": _json_safe(step.get("metrics", {})),
                 "analysis": _json_safe(step.get("analysis", {})),
                 "auto_tune_summary": _json_safe(step["auto_tune_summary"]),
+                "recommendation": step.get("recommendation"),
+                "risk_flags": list(step.get("risk_flags", [])),
+                "rolled_back_to_manual": bool(step.get("rolled_back_to_manual", False)),
+                "reason": step.get("reason", ""),
             }
             for step in comparison["steps"]
         ],
@@ -1764,6 +1825,8 @@ def _render_scenario_section(record: dict[str, Any]) -> str:
     metrics = comparison.get("metrics", {})
     delta = metrics.get("delta_auto_minus_manual", {})
     verdict = comparison.get("verdict")
+    recommendation = comparison.get("overall_recommendation") or verdict
+    risk_flags = ", ".join(comparison.get("risk_flags") or []) or "无"
     verdict_label = {
         "auto_better": "自动选参更优",
         "manual_better": "人工 baseline 更优",
@@ -1797,6 +1860,8 @@ def _render_scenario_section(record: dict[str, Any]) -> str:
 
       <h3>最终指标摘要</h3>
       <div class="metric-grid">
+        <div><span>后端建议</span><strong>{_esc(recommendation)}</strong></div>
+        <div><span>全流程风险标记</span><strong>{_esc(risk_flags)}</strong></div>
         <div><span>人工选参 score</span><strong>{_fmt_metric(metrics.get("manual", {}).get("comparison_score"))}</strong></div>
         <div><span>自动选参 score</span><strong>{_fmt_metric(metrics.get("auto", {}).get("comparison_score"))}</strong></div>
         <div><span>score 差值</span><strong>{_fmt_metric(delta.get("comparison_score"))}</strong></div>
@@ -1869,11 +1934,13 @@ def _render_step_panel(step: dict[str, Any]) -> str:
     images = step.get("images", {})
     params_table = _render_params_table(step)
     warnings = _render_warnings(step)
+    decision = _render_step_decision(step)
     analysis = step.get("analysis") or {}
     return f"""
       <article class="step-card">
         <h4>{_esc(step.get("method_name"))} <code>{_esc(step.get("method_key"))}</code></h4>
         {params_table}
+        {decision}
         <div class="analysis-grid">
           <div><strong>视觉评价</strong><p>{_esc(analysis.get("visual") or "暂无")}</p></div>
           <div><strong>指标评价</strong><p>{_esc(analysis.get("metrics") or "暂无")}</p></div>
@@ -1886,6 +1953,21 @@ def _render_step_panel(step: dict[str, Any]) -> str:
           <figure><img src="{_esc(images.get("auto_output"))}" alt="auto output"><figcaption>自动选参后</figcaption></figure>
         </div>
       </article>
+"""
+
+
+def _render_step_decision(step: dict[str, Any]) -> str:
+    recommendation = step.get("recommendation") or "n/a"
+    risk_flags = ", ".join(step.get("risk_flags") or []) or "无"
+    rolled_back = "是" if step.get("rolled_back_to_manual") else "否"
+    reason = step.get("reason") or ""
+    return f"""
+        <div class="decision-grid">
+          <div><span>后端建议</span><strong>{_esc(recommendation)}</strong></div>
+          <div><span>风险标记</span><strong>{_esc(risk_flags)}</strong></div>
+          <div><span>是否回退人工结果</span><strong>{_esc(rolled_back)}</strong></div>
+          <div><span>判定依据</span><strong>{_esc(reason)}</strong></div>
+        </div>
 """
 
 
@@ -1988,22 +2070,25 @@ pre {
 code {
   font-family: Consolas, "Liberation Mono", monospace;
 }
-.kv-grid, .metric-grid {
+.kv-grid, .metric-grid, .decision-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 10px;
 }
-.kv-grid div, .metric-grid div {
+.kv-grid div, .metric-grid div, .decision-grid div {
   padding: 12px;
   background: #f8f9fb;
   border: 1px solid #e4e7ec;
   border-radius: 6px;
 }
-.kv-grid span, .metric-grid span {
+.kv-grid span, .metric-grid span, .decision-grid span {
   display: block;
   margin-bottom: 5px;
   color: #667085;
   font-size: 13px;
+}
+.decision-grid {
+  margin: 10px 0 12px;
 }
 .scenario-heading {
   display: flex;
