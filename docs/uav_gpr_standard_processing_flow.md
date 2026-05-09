@@ -44,7 +44,8 @@
 ### 3. 低频漂移与轻量频带控制
 
 - Dewow / 低频漂移抑制：去除低频 wow 或 DC bias。
-- 必要时做温和 band-pass 或低通/高通，用于稳定后续拾取；避免过早强滤波导致目标形态失真。
+- 必要时做温和 `frequency_filter_1d` band-pass / low-pass / high-pass / notch，用于稳定后续拾取和压制有效频带外噪声；避免过早强滤波导致目标形态失真。
+- `frequency_filter_1d` 必须使用采样率或 `total_time_ns` 推导 Nyquist 频率；缺少时间窗信息时应跳过并给出 warning，不能凭空猜截止频率。
 
 ### 4. UAV 几何/运动补偿
 
@@ -94,6 +95,12 @@
 
 这是 MyGPR 的默认研究链。
 
+### 高质量 UAV-GPR 默认链
+
+`set_zero_time -> dewow -> frequency_filter_1d -> motion_compensation_v2 -> subtracting_average_2D/SVD/CCBS -> F-K -> wavelet_svd/Hankel-SVD -> SEC -> optional migration/depth -> export`
+
+这是当前 MyGPR 推动的最高质量 GUI/CLI 默认方向。它不使用快速预览、显示降采样或速度优先档；`AGC` 只作为备选显示增强，不作为默认科研幅值链路。迁移和深度转换只有在 trace 等距、时零可信、速度模型明确时才进入正式结果。
+
 ### UAV-SAR / 轨迹成像
 
 `QC/sidecar alignment -> positioning/pose processing -> time-zero/window -> background -> height correction -> second background/SVD -> antenna-position calculation -> SAR back-projection or trajectory-aware migration -> export`
@@ -105,7 +112,8 @@
 - 父项目已有 RTK 模块、HWT905 九轴姿态计、NAR15 高度计。
 - 父项目连续采集线程当前已能按道保存 `flight_height_m`、`height_source`、`height_timestamp_s` 到 metadata JSON。
 - MyGPR 已有 RTK/IMU sidecar 解析、trace metadata 对齐、`motion_compensation_height/speed/attitude/vibration` 等 V1 实验模块。
-- 当前缺口是：V1 模块分散、物理语义不统一、RTK/IMU/高度计没有形成一个单一可信的 `motion_compensation_v2` 运行契约。
+- MyGPR 已补入 `frequency_filter_1d`，用于真正的一维频带控制，与 `fk_filter` 的频率-波数方向性滤波区分使用。
+- 当前缺口是：`motion_compensation_v2` 仍需更多真实 UAV 数据验证，速度/介电常数估计、air-ground horizon 拾取、轨迹感知迁移/SAR back-projection 仍是后续高质量主线工作。
 
 ## 权威依据
 

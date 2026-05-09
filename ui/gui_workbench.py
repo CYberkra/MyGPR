@@ -667,9 +667,10 @@ class WorkbenchPage(QWidget):
             self._on_import_data()
         elif action_id == "_data_info":
             self._show_data_info()
-        elif action_id.startswith("_robust_"):
+        elif action_id in {"_robust_imaging", "_high_quality_uav_gpr"}:
             profile_map = {
                 "_robust_imaging": "robust_imaging",
+                "_high_quality_uav_gpr": "high_quality_uav_gpr",
             }
             profile_key = profile_map.get(action_id)
             if (

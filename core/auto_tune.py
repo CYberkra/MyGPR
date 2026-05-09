@@ -446,6 +446,15 @@ def _build_candidate_trials(
             stage=stage,
             budget=stage_budget,
         )
+    if family == "frequency":
+        return _build_frequency_filter_trials(
+            data,
+            header_info,
+            base_params,
+            config,
+            stage=stage,
+            budget=stage_budget,
+        )
     if family == "denoise":
         if method_key == "hankel_svd":
             return _build_hankel_svd_trials(
@@ -861,7 +870,7 @@ def _score_trial_with_context(
         roi_used = True
         score_region_source = context.roi_source
     elif (
-        family in {"fk", "denoise", "impulse"}
+        family in {"fk", "frequency", "denoise", "impulse"}
         and context.roi_source != "full"
         and context.roi_bounds is not None
         and context.context_bounds is not None
@@ -1716,6 +1725,115 @@ def _build_fk_filter_trials(
     )
 
 
+def _build_frequency_filter_trials(
+    data: np.ndarray,
+    header_info: dict[str, Any],
+    base_params: dict[str, Any],
+    config: dict[str, Any],
+    stage: str,
+    budget: int | None = None,
+) -> list[dict[str, Any]]:
+    filter_types = list(config.get("filter_type", [])) or [
+        str(base_params.get("filter_type", "bandpass"))
+    ]
+    nyquist_mhz = _resolve_nyquist_mhz(data.shape[0], header_info)
+    if nyquist_mhz is None or nyquist_mhz <= 0.0:
+        high_values = list(config.get("high_freq_mhz", [])) or [
+            float(base_params.get("high_freq_mhz", 800.0))
+        ]
+    else:
+        ratios = list(config.get("high_freq_ratio", [])) or [0.75, 0.85, 0.95]
+        high_values = [
+            max(0.0, min(float(nyquist_mhz), float(nyquist_mhz) * float(ratio)))
+            for ratio in ratios
+        ]
+        high_values.extend(config.get("high_freq_mhz", []))
+
+    low_default = float(base_params.get("low_freq_mhz", 10.0))
+    high_default = float(
+        base_params.get("high_freq_mhz", high_values[0] if high_values else 800.0)
+    )
+    taper_default = float(base_params.get("taper_ratio", 0.08))
+
+    if stage == "coarse":
+        low_values = _trim_numeric_candidates(
+            _sanitize_float_candidates(
+                list(config.get("low_freq_mhz", []))
+                + [low_default, low_default * 0.5, low_default * 1.5],
+                minimum=0.0,
+            ),
+            budget=max(2, min(4, int(budget or 6))),
+            center=low_default,
+        )
+        high_values = _trim_numeric_candidates(
+            _sanitize_float_candidates(high_values + [high_default], minimum=0.0),
+            budget=max(2, min(4, int(budget or 6))),
+            center=high_default,
+        )
+        taper_values = _trim_numeric_candidates(
+            _sanitize_float_candidates(
+                list(config.get("taper_ratio", []))
+                + [taper_default, taper_default * 0.5, taper_default * 1.5],
+                minimum=0.0,
+            ),
+            budget=max(1, min(3, int(budget or 6))),
+            center=taper_default,
+        )
+    else:
+        low_values = [low_default]
+        high_values = [high_default]
+        taper_values = [taper_default]
+
+    trials = []
+    for filter_type, low_freq_mhz, high_freq_mhz, taper_ratio in itertools.product(
+        filter_types, low_values, high_values, taper_values
+    ):
+        if str(filter_type) == "bandpass" and float(high_freq_mhz) <= float(low_freq_mhz):
+            continue
+        trials.append(
+            {
+                "filter_type": str(filter_type),
+                "low_freq_mhz": float(low_freq_mhz),
+                "high_freq_mhz": float(high_freq_mhz),
+                "taper_ratio": float(taper_ratio),
+            }
+        )
+
+    return _trim_trial_candidates(
+        trials,
+        budget=budget,
+        center_params={
+            "low_freq_mhz": low_default,
+            "high_freq_mhz": high_default,
+            "taper_ratio": taper_default,
+        },
+    )
+
+
+def _resolve_nyquist_mhz(n_samples: int, header_info: dict[str, Any]) -> float | None:
+    try:
+        sample_rate_hz = float(header_info.get("sample_rate_hz"))
+    except Exception:
+        sample_rate_hz = 0.0
+    if sample_rate_hz > 0.0:
+        return float(sample_rate_hz / 2.0e6)
+
+    try:
+        time_step_s = float(header_info.get("time_step_s"))
+    except Exception:
+        time_step_s = 0.0
+    if time_step_s > 0.0:
+        return float(1.0 / time_step_s / 2.0e6)
+
+    try:
+        total_time_ns = float(header_info.get("total_time_ns"))
+    except Exception:
+        total_time_ns = 0.0
+    if total_time_ns > 0.0:
+        return float(max(1, int(n_samples)) / (total_time_ns * 1.0e-9) / 2.0e6)
+    return None
+
+
 def _build_subspace_rank_end_candidates(
     data: np.ndarray,
     context: AutoTuneContext,
@@ -2431,6 +2549,66 @@ def _score_fk_filter(
     )
 
 
+def _score_frequency_filter(
+    before: np.ndarray,
+    after: np.ndarray,
+    params: dict[str, Any],
+    header_info: dict[str, Any],
+) -> TrialScore:
+    low_freq_before = low_freq_energy_ratio(before)
+    low_freq_after = low_freq_energy_ratio(after)
+    low_freq_drop = relative_reduction(low_freq_before, low_freq_after)
+    hot_drop = relative_reduction(hot_pixel_ratio(before), hot_pixel_ratio(after))
+    saliency_ratio = local_saliency_preservation(before, after)
+    saliency_fidelity = ratio_fidelity(saliency_ratio, target=1.0, tol=0.18)
+    edge_ratio = edge_preservation(before, after)
+    edge_fidelity = ratio_fidelity(edge_ratio, target=1.0, tol=0.18)
+    band_ratio_raw = target_band_energy_ratio(before, after)
+    band_fidelity = ratio_fidelity(band_ratio_raw, target=1.0, tol=0.22)
+    peak_ratio_raw = _safe_ratio(
+        float(np.percentile(np.abs(after), 99.0)),
+        float(np.percentile(np.abs(before), 99.0)),
+    )
+    peak_fidelity = ratio_fidelity(peak_ratio_raw, target=1.0, tol=0.28)
+    penalties = {
+        "low_freq_regression": max(0.0, -low_freq_drop) * 2.0,
+        "saliency_distortion": max(0.0, 0.72 - saliency_fidelity) * 2.4,
+        "edge_distortion": max(0.0, 0.72 - edge_fidelity) * 2.2,
+        "band_distortion": max(0.0, 0.70 - band_fidelity) * 2.8,
+        "peak_distortion": max(0.0, 0.68 - peak_fidelity) * 1.8,
+    }
+    score = (
+        1.7 * max(0.0, low_freq_drop)
+        + 0.8 * max(0.0, hot_drop)
+        + 1.5 * saliency_fidelity
+        + 1.2 * edge_fidelity
+        + 1.8 * band_fidelity
+        + 0.4 * peak_fidelity
+        - sum(penalties.values())
+    )
+    metrics = {
+        "low_freq_energy_ratio_before": float(low_freq_before),
+        "low_freq_energy_ratio_after": float(low_freq_after),
+        "low_freq_drop": float(low_freq_drop),
+        "hot_pixel_drop": float(hot_drop),
+        "local_saliency_preservation": float(saliency_ratio),
+        "local_saliency_fidelity": float(saliency_fidelity),
+        "edge_preservation": float(edge_ratio),
+        "edge_fidelity": float(edge_fidelity),
+        "target_band_energy_ratio": float(band_ratio_raw),
+        "target_band_fidelity": float(band_fidelity),
+        "peak_ratio": float(peak_ratio_raw),
+        "peak_fidelity": float(peak_fidelity),
+    }
+    reason = (
+        f"低频残留改善={low_freq_drop:.3f}，目标频带保真={band_fidelity:.3f}，"
+        f"显著结构保真={saliency_fidelity:.3f}，边缘保真={edge_fidelity:.3f}。"
+    )
+    return TrialScore(
+        score=float(score), metrics=metrics, penalties=penalties, reason=reason
+    )
+
+
 def _score_gain(
     before: np.ndarray,
     after: np.ndarray,
@@ -2671,6 +2849,7 @@ _SCORE_FUNCTIONS: dict[
     "drift": _score_drift,
     "background": _score_background,
     "fk": _score_fk_filter,
+    "frequency": _score_frequency_filter,
     "denoise": _score_denoise,
     "gain": _score_gain,
     "impulse": _score_impulse,

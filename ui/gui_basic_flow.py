@@ -315,7 +315,7 @@ class BasicFlowPage(QWidget):
         self.btn_quick.setProperty("class", "basicGhostBtn")
         self.btn_quick.setMinimumHeight(34)
         self.btn_quick.setToolTip(
-            "自动执行默认流程：零时矫正 → 低频漂移抑制 → 背景抑制 → AGC增益 → 尖锐杂波抑制；参数来源跟随“应用方法”的当前选项"
+            "自动执行默认高质量流程：零时矫正 → 低频漂移抑制 → 频域滤波 → UAV运动补偿 → 背景/F-K → 去噪 → SEC增益；参数来源跟随“应用方法”的当前选项"
         )
 
         self.btn_cancel = PushButton(FluentIcon.CLOSE, "取消处理")

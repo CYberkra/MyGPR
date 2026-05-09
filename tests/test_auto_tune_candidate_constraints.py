@@ -119,3 +119,30 @@ def test_auto_tune_agc_generated_candidates_respect_time_aware_minimum():
 
     windows = [trial["params"]["window"] for trial in result["all_trials"]]
     assert min(windows) >= 100
+
+
+def test_auto_tune_constrains_frequency_filter_to_nyquist_and_valid_band():
+    raw = _small_profile(samples=128, traces=24)
+
+    result = auto_tune_method(
+        raw,
+        "frequency_filter_1d",
+        candidate_params=[
+            {
+                "filter_type": "bandpass",
+                "low_freq_mhz": 900.0,
+                "high_freq_mhz": 1200.0,
+                "taper_ratio": 0.8,
+            }
+        ],
+        header_info={"total_time_ns": 128.0},
+        search_mode="fast",
+    )
+
+    best = result["best_params"]
+    assert best["high_freq_mhz"] <= 500.0
+    assert best["low_freq_mhz"] < best["high_freq_mhz"]
+    assert best["taper_ratio"] <= 0.5
+    assert result["execution_stats"]["constraint_adjustment_count"] >= 1
+    assert result["all_trials"][0]["requested_params"]["high_freq_mhz"] == 1200.0
+    assert result["all_trials"][0]["effective_params"]["high_freq_mhz"] <= 500.0

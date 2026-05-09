@@ -151,6 +151,29 @@ def test_auto_tune_fk_filter_returns_angle_band_candidate():
     assert len(result["fine_trials"]) >= 1
 
 
+def test_auto_tune_frequency_filter_returns_valid_band_candidate():
+    raw = _build_test_profile(samples=128, traces=48)
+    result = auto_tune_method(
+        raw,
+        "frequency_filter_1d",
+        base_params={
+            "filter_type": "bandpass",
+            "low_freq_mhz": 10.0,
+            "high_freq_mhz": 250.0,
+            "taper_ratio": 0.08,
+        },
+        header_info={"total_time_ns": 128.0},
+        search_mode="fast",
+    )
+
+    assert result["family"] == "frequency"
+    assert result["best_params"]["filter_type"] == "bandpass"
+    assert 0.0 <= result["best_params"]["low_freq_mhz"]
+    assert result["best_params"]["low_freq_mhz"] < result["best_params"]["high_freq_mhz"]
+    assert result["best_params"]["high_freq_mhz"] <= 500.0
+    assert len(result["coarse_trials"]) >= 1
+
+
 def test_auto_tune_svd_subspace_returns_rank_interval_candidate():
     raw = _build_test_profile(traces=96)
     result = auto_tune_method(
@@ -403,6 +426,7 @@ def test_auto_tune_raises_when_all_candidates_fail():
 def test_auto_tune_stage_metadata_is_available_for_comparable_methods():
     assert get_auto_tune_stage("subtracting_average_2D") == "background"
     assert get_auto_tune_stage("fk_filter") == "background"
+    assert get_auto_tune_stage("frequency_filter_1d") == "frequency"
     assert get_auto_tune_stage("hankel_svd") == "denoise"
     assert get_auto_tune_stage("svd_subspace") == "denoise"
     assert get_auto_tune_stage("wavelet_2d") == "denoise"
