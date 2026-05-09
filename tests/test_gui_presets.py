@@ -936,6 +936,7 @@ def test_public_method_order_follows_processing_chain():
         "svd_bg",
         "ccbs",
         "sliding_avg",
+        "frequency_filter_1d",
         "fk_filter",
         "sec_gain",
         "compensatingGain",
@@ -1007,7 +1008,7 @@ def test_recommended_profiles_prefer_svd_and_hankel_denoising():
     }
 
 
-def test_run_default_pipeline_uses_new_five_step_order_and_current_source_mode(
+def test_run_default_pipeline_uses_high_quality_order_and_current_source_mode(
     monkeypatch,
 ):
     app = _get_app()
@@ -1037,9 +1038,12 @@ def test_run_default_pipeline_uses_new_five_step_order_and_current_source_mode(
         assert [task["method_key"] for task in captured["tasks"]] == [
             "set_zero_time",
             "dewow",
+            "frequency_filter_1d",
+            "motion_compensation_v2",
             "subtracting_average_2D",
-            "agcGain",
-            "running_average_2D",
+            "fk_filter",
+            "wavelet_svd",
+            "sec_gain",
         ]
         assert {task["param_source_mode"] for task in captured["tasks"]} == {
             "auto_tune"
@@ -1068,7 +1072,11 @@ def test_run_default_pipeline_manual_mode_uses_visible_and_saved_params(monkeypa
             "get_current_params",
             lambda: {"window": 77},
         )
-        win._method_param_overrides["agcGain"] = {"window": 13}
+        win._method_param_overrides["sec_gain"] = {
+            "gain_min": 1.0,
+            "gain_max": 3.0,
+            "power": 1.0,
+        }
 
         def fake_start_processing_worker(tasks, run_type="single", **kwargs):
             captured["tasks"] = tasks
@@ -1086,7 +1094,9 @@ def test_run_default_pipeline_manual_mode_uses_visible_and_saved_params(monkeypa
 
         by_key = {task["method_key"]: task for task in captured["tasks"]}
         assert by_key["dewow"]["params"]["window"] == 77
-        assert by_key["agcGain"]["params"]["window"] == 13
+        assert by_key["frequency_filter_1d"]["params"]["filter_type"] == "bandpass"
+        assert by_key["motion_compensation_v2"]["params"]["height_source"] == "auto"
+        assert by_key["sec_gain"]["params"]["gain_max"] == 4.5
     finally:
         win.close()
         app.processEvents()
@@ -1174,6 +1184,14 @@ def test_workflow_presets_align_with_current_denoising_preference():
 
     assert "svd_subspace" in robust_methods
     assert "hankel_svd" not in robust_methods
+
+    high_quality_methods = [
+        item["method_id"] for item in QUICK_PRESETS["high_quality_uav_gpr"]["methods"]
+    ]
+    assert high_quality_methods == RECOMMENDED_RUN_PROFILES["high_quality_uav_gpr"]["order"]
+    assert "frequency_filter_1d" in high_quality_methods
+    assert "motion_compensation_v2" in high_quality_methods
+    assert "agcGain" not in high_quality_methods
 
 
 def test_quality_page_exposes_report_and_snapshot_actions():

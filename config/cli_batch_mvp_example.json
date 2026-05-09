@@ -5,7 +5,7 @@
     {
       "id": "cli_batch_mvp",
       "input": "sample_data/gui_sidecar_all_data_main.csv",
-      "recommended_profile": "robust_imaging"
+      "recommended_profile": "high_quality_uav_gpr"
     }
   ],
   "output_dir": "output/cli_batch_mvp"

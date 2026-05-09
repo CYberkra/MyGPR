@@ -1032,7 +1032,7 @@ class GPRGuiQt(QMainWindow):
         empty_steps.setProperty("class", "emptySteps")
         empty_steps.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        empty_hint = QLabel('建议先用"稳健成像"或"一键默认流程"，再按需微调参数。')
+        empty_hint = QLabel('建议先用"高质量 UAV-GPR"或"默认流程"，再按需微调参数。')
         empty_hint.setProperty("class", "emptyHint")
         empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty_hint.setWordWrap(True)
@@ -4150,14 +4150,22 @@ class GPRGuiQt(QMainWindow):
             self.page_basic.set_method_overrides(current_method_key, merged_params)
 
         source_mode = self.page_basic.get_apply_source_mode()
-        self._log("运行默认流程v3：zero-time → dewow → 背景抑制 → AGC → 尖锐杂波抑制")
-        order = [
-            "set_zero_time",
-            "dewow",
-            "subtracting_average_2D",
-            "agcGain",
-            "running_average_2D",
-        ]
+        profile_key = "high_quality_uav_gpr"
+        profile = RECOMMENDED_RUN_PROFILES.get(profile_key, {})
+        preset_key = profile.get("preset_key")
+        if preset_key:
+            self._apply_preset_by_key(preset_key)
+        self._apply_preset_method_params(profile.get("method_params"))
+        if current_method_key:
+            merged_params = self._resolve_method_params(current_method_key)
+            merged_params.update(visible_params)
+            self._method_param_overrides[current_method_key] = dict(merged_params)
+            self.page_basic.set_method_overrides(current_method_key, merged_params)
+
+        self._log(
+            "运行默认高质量流程：zero-time → dewow → 频域滤波 → UAV运动补偿 → 背景/F-K → 去噪 → SEC"
+        )
+        order = list(profile.get("order", []))
         current_idx = self.page_basic.method_combo.currentIndex()
         tasks = []
         out_dir = self._default_output_dir()
@@ -4186,6 +4194,7 @@ class GPRGuiQt(QMainWindow):
         preset_key = profile.get("preset_key")
         if preset_key:
             self._apply_preset_by_key(preset_key)
+        self._apply_preset_method_params(profile.get("method_params"))
 
         out_dir = self._default_output_dir()
         current_idx = self.page_basic.method_combo.currentIndex()

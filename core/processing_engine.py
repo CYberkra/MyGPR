@@ -67,12 +67,18 @@ def prepare_runtime_params(
     runtime_params = dict(params or {})
     samples = max(1, int(data_shape[0]))
 
-    if method_id in {"set_zero_time", "agcGain"} and "time_step_s" not in runtime_params:
+    if (
+        method_id in {"set_zero_time", "agcGain", "frequency_filter_1d"}
+        and "time_step_s" not in runtime_params
+    ):
         total_time_ns = None
         if header_info:
             total_time_ns = header_info.get("total_time_ns")
         if total_time_ns and float(total_time_ns) > 0:
-            runtime_params["time_step_s"] = float(total_time_ns) * 1e-9 / samples
+            time_step_s = float(total_time_ns) * 1e-9 / samples
+            runtime_params["time_step_s"] = time_step_s
+            if method_id == "frequency_filter_1d":
+                runtime_params.setdefault("sample_rate_hz", 1.0 / time_step_s)
 
     needs_motion_runtime = _requires_motion_runtime_context(method_id)
 

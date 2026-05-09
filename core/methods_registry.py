@@ -14,6 +14,7 @@ import numpy as np
 
 from PythonModule.svd_background import method_svd_background
 from PythonModule.fk_filter import method_fk_filter
+from PythonModule.frequency_filter_1d import method_frequency_filter_1d
 from PythonModule.hankel_svd import method_hankel_svd
 from PythonModule.kirchhoff_migration import method_kirchhoff_migration
 from PythonModule.stolt_migration import method_stolt_migration
@@ -280,6 +281,76 @@ PROCESSING_METHODS = {
             "angle_low": [6, 8, 10, 12, 15, 18],
             "angle_high": [40, 48, 55, 62, 70, 78],
             "taper_width": [0, 2, 4, 6, 8],
+        },
+    },
+    "frequency_filter_1d": {
+        "name": "1D frequency filter",
+        "type": "local",
+        "func": method_frequency_filter_1d,
+        "params": [
+            {
+                "name": "filter_type",
+                "label": "滤波类型",
+                "type": "choice",
+                "choices": ["bandpass", "lowpass", "highpass", "notch"],
+                "default": "bandpass",
+            },
+            {
+                "name": "low_freq_mhz",
+                "label": "低截止频率 (MHz)",
+                "type": "float",
+                "default": 10.0,
+                "min": 0.0,
+                "max": 5000.0,
+            },
+            {
+                "name": "high_freq_mhz",
+                "label": "高截止频率 (MHz)",
+                "type": "float",
+                "default": 800.0,
+                "min": 0.0,
+                "max": 5000.0,
+            },
+            {
+                "name": "notch_freq_mhz",
+                "label": "陷波中心频率 (MHz)",
+                "type": "float",
+                "default": 50.0,
+                "min": 0.0,
+                "max": 5000.0,
+            },
+            {
+                "name": "notch_width_mhz",
+                "label": "陷波宽度 (MHz)",
+                "type": "float",
+                "default": 5.0,
+                "min": 0.0,
+                "max": 1000.0,
+            },
+            {
+                "name": "notch_depth",
+                "label": "陷波深度",
+                "type": "float",
+                "default": 1.0,
+                "min": 0.0,
+                "max": 1.0,
+            },
+            {
+                "name": "taper_ratio",
+                "label": "过渡带比例",
+                "type": "float",
+                "default": 0.08,
+                "min": 0.0,
+                "max": 0.5,
+            },
+        ],
+        "auto_tune_enabled": True,
+        "auto_tune_family": "frequency",
+        "auto_tune_candidates": {
+            "filter_type": ["bandpass"],
+            "low_freq_mhz": [5.0, 10.0, 20.0, 40.0],
+            "high_freq_ratio": [0.65, 0.75, 0.85, 0.95],
+            "taper_ratio": [0.04, 0.08, 0.12],
         },
     },
     "hankel_svd": {
@@ -1162,6 +1233,12 @@ METHOD_METADATA = {
         "visibility": "public",
         "display_name": "F-K 锥形滤波",
     },
+    "frequency_filter_1d": {
+        "category": "filtering",
+        "maturity": "stable",
+        "visibility": "public",
+        "display_name": "一维频域滤波",
+    },
     "hankel_svd": {
         "category": "denoising",
         "maturity": "stable",
@@ -1292,6 +1369,7 @@ PREFERRED_METHOD_ORDER = [
     "svd_bg",
     "ccbs",
     "sliding_avg",
+    "frequency_filter_1d",
     "fk_filter",
     "sec_gain",
     "compensatingGain",
@@ -1320,6 +1398,7 @@ METHOD_TAGS = {
     "set_zero_time": "推荐",
     "svd_bg": "备选",
     "fk_filter": "实验",
+    "frequency_filter_1d": "推荐",
     "hankel_svd": "实验",
     "svd_subspace": "实验",
     "wavelet_2d": "实验",
@@ -1357,6 +1436,7 @@ AUTO_TUNE_STAGE_BY_METHOD = {
     "median_background_2D": "background",
     "svd_bg": "background",
     "fk_filter": "background",
+    "frequency_filter_1d": "frequency",
     "ccbs": "background",
     "sec_gain": "gain",
     "compensatingGain": "gain",

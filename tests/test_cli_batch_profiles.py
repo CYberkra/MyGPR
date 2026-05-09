@@ -228,6 +228,24 @@ def test_run_job_expands_motion_compensation_v2_profile(tmp_path: Path):
     assert result["final_shape"] == [4, 8]
 
 
+def test_run_job_expands_high_quality_uav_gpr_profile(tmp_path: Path):
+    input_csv = _write_airborne_csv(tmp_path / "airborne.csv")
+    job = {
+        "id": "high-quality-uav",
+        "input": str(input_csv),
+        "recommended_profile": "high_quality_uav_gpr",
+    }
+
+    result = cli_batch.run_job(job, repo_root=str(tmp_path), output_dir=str(tmp_path / "out"))
+
+    assert result["status"] == "ok"
+    assert [step["key"] for step in result["steps"]] == RECOMMENDED_RUN_PROFILES[
+        "high_quality_uav_gpr"
+    ]["order"]
+    assert result["final_shape"][0] == 4
+    assert "agcGain" not in [step["key"] for step in result["steps"]]
+
+
 def test_run_job_forwards_rtk_imu_sidecars_into_motion_runtime(monkeypatch, tmp_path: Path):
     input_csv = _write_airborne_csv(tmp_path / "airborne.csv")
     rtk_path, imu_path = _write_motion_sidecars(tmp_path)

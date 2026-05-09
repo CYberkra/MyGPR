@@ -42,6 +42,7 @@ METHOD_TREE_DATA = {
         "icon": "",
         "name": "流程/模板",
         "children": [
+            {"id": "_high_quality_uav_gpr", "name": "高质量 UAV-GPR"},
             {"id": "_robust_imaging", "name": "稳健成像"},
         ],
     },
@@ -58,7 +59,7 @@ class MethodBrowserTree(QWidget):
 
     # 信号：方法被选中 (method_id)
     method_selected = pyqtSignal(str)
-    # 信号：特殊操作 (_import_csv, _data_info, _robust_imaging, etc.)
+    # 信号：特殊操作 (_import_csv, _data_info, _high_quality_uav_gpr, etc.)
     action_triggered = pyqtSignal(str)
     # 信号：模板执行 (template_name)
     template_execute_requested = pyqtSignal(str)
@@ -279,6 +280,7 @@ class MethodBrowserTree(QWidget):
 
         # 添加预设流程
         preset_workflows = [
+            {"id": "_high_quality_uav_gpr", "name": "高质量 UAV-GPR"},
             {"id": "_robust_imaging", "name": "稳健成像"},
         ]
 

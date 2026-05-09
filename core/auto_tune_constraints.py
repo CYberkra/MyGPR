@@ -129,6 +129,14 @@ def constrain_auto_tune_params(
             maximum=max(1, min(10, n_samples - 1)),
             reason="rank_limit",
         )
+    elif method_key == "frequency_filter_1d":
+        _clamp_frequency_filter_params(
+            method_key,
+            effective,
+            warnings,
+            n_samples=n_samples,
+            header_info=header_info or {},
+        )
     elif method_key == "trajectory_smoothing":
         _clamp_int_param(
             method_key,
@@ -212,6 +220,34 @@ def _safe_agc_window_min(n_samples: int, header_info: dict[str, Any]) -> int:
 def _wavelet_level_limit(n_samples: int, n_traces: int) -> int:
     smallest_dim = max(2, min(int(n_samples), int(n_traces)))
     return max(1, min(8, int(floor(log2(smallest_dim)))))
+
+
+def _nyquist_mhz(n_samples: int, header_info: dict[str, Any]) -> float | None:
+    sample_rate_hz = header_info.get("sample_rate_hz")
+    try:
+        sample_rate = float(sample_rate_hz)
+    except Exception:
+        sample_rate = 0.0
+    if sample_rate > 0.0:
+        return float(sample_rate / 2.0e6)
+
+    time_step_s = header_info.get("time_step_s")
+    try:
+        step_s = float(time_step_s)
+    except Exception:
+        step_s = 0.0
+    if step_s > 0.0:
+        return float(1.0 / step_s / 2.0e6)
+
+    total_time_ns = header_info.get("total_time_ns")
+    try:
+        total_ns = float(total_time_ns)
+    except Exception:
+        total_ns = 0.0
+    if total_ns > 0.0:
+        sample_rate = max(1, int(n_samples)) / (total_ns * 1.0e-9)
+        return float(sample_rate / 2.0e6)
+    return None
 
 
 def _as_int(value: Any) -> int | None:
@@ -381,6 +417,101 @@ def _clamp_polyorder(
         )
     else:
         params["polyorder"] = int(effective)
+
+
+def _clamp_frequency_filter_params(
+    method_key: str,
+    params: dict[str, Any],
+    warnings: list[dict[str, Any]],
+    *,
+    n_samples: int,
+    header_info: dict[str, Any],
+) -> None:
+    nyquist = _nyquist_mhz(n_samples, header_info)
+    if nyquist is None or nyquist <= 0.0:
+        return
+
+    filter_type = str(params.get("filter_type", "bandpass") or "bandpass").lower()
+    if filter_type in {"bandpass", "highpass"}:
+        _clamp_float_param(
+            method_key,
+            params,
+            warnings,
+            parameter="low_freq_mhz",
+            minimum=0.0,
+            maximum=nyquist,
+            reason="frequency_nyquist_limit",
+            unit="MHz",
+        )
+    if filter_type in {"bandpass", "lowpass"}:
+        _clamp_float_param(
+            method_key,
+            params,
+            warnings,
+            parameter="high_freq_mhz",
+            minimum=0.0,
+            maximum=nyquist,
+            reason="frequency_nyquist_limit",
+            unit="MHz",
+        )
+    if filter_type == "bandpass":
+        low = _as_float(params.get("low_freq_mhz")) or 0.0
+        high = _as_float(params.get("high_freq_mhz")) or 0.0
+        if high <= low:
+            effective_low = max(0.0, high * 0.15)
+            requested = low
+            params["low_freq_mhz"] = float(effective_low)
+            warnings.append(
+                _build_constraint_warning(
+                    method_key,
+                    "low_freq_mhz",
+                    requested=requested,
+                    effective=effective_low,
+                    minimum=0.0,
+                    maximum=max(0.0, high),
+                    reason="frequency_band_order",
+                    unit="MHz",
+                )
+            )
+    if filter_type == "notch":
+        _clamp_float_param(
+            method_key,
+            params,
+            warnings,
+            parameter="notch_freq_mhz",
+            minimum=0.0,
+            maximum=nyquist,
+            reason="frequency_nyquist_limit",
+            unit="MHz",
+        )
+        _clamp_float_param(
+            method_key,
+            params,
+            warnings,
+            parameter="notch_width_mhz",
+            minimum=0.0,
+            maximum=nyquist,
+            reason="frequency_nyquist_limit",
+            unit="MHz",
+        )
+    _clamp_float_param(
+        method_key,
+        params,
+        warnings,
+        parameter="taper_ratio",
+        minimum=0.0,
+        maximum=0.5,
+        reason="ratio_limit",
+    )
+    _clamp_float_param(
+        method_key,
+        params,
+        warnings,
+        parameter="notch_depth",
+        minimum=0.0,
+        maximum=1.0,
+        reason="ratio_limit",
+    )
 
 
 def _build_constraint_warning(

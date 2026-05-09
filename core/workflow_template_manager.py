@@ -258,6 +258,54 @@ class WorkflowTemplateManager:
         """获取预设模板"""
         return [
             {
+                "name": "高质量 UAV-GPR",
+                "description": "面向无人机实测数据的完整高质量处理链",
+                "methods": [
+                    {"method_id": "set_zero_time", "params": {"new_zero_time": 5.0}},
+                    {"method_id": "dewow", "params": {"window": 61}},
+                    {
+                        "method_id": "frequency_filter_1d",
+                        "params": {
+                            "filter_type": "bandpass",
+                            "low_freq_mhz": 10.0,
+                            "high_freq_mhz": 800.0,
+                            "taper_ratio": 0.08,
+                        },
+                    },
+                    {
+                        "method_id": "motion_compensation_v2",
+                        "params": {
+                            "height_reference_mode": "mean",
+                            "height_source": "auto",
+                            "compensate_time_shift": True,
+                            "compensate_amplitude": True,
+                            "max_shift_samples": 20.0,
+                            "max_amplitude_scale": 2.0,
+                            "resample_spacing_m": 0.0,
+                        },
+                    },
+                    {"method_id": "subtracting_average_2D", "params": {"ntraces": 51}},
+                    {
+                        "method_id": "fk_filter",
+                        "params": {"angle_low": 12, "angle_high": 55, "taper_width": 4},
+                    },
+                    {
+                        "method_id": "wavelet_svd",
+                        "params": {
+                            "wavelet": "db4",
+                            "levels": 2,
+                            "threshold": 0.05,
+                            "rank_start": 1,
+                            "rank_end": 20,
+                        },
+                    },
+                    {
+                        "method_id": "sec_gain",
+                        "params": {"gain_min": 1.0, "gain_max": 4.5, "power": 1.1},
+                    },
+                ],
+            },
+            {
                 "name": "稳健成像",
                 "description": "标准GPR数据处理流程",
                 "methods": [
