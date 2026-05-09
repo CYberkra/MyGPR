@@ -72,27 +72,9 @@ METHOD_CATEGORIES = {
 }
 
 
-# ============ 快速预设定义 ============
+# ============ 标准预设定义 ============
 
 QUICK_PRESETS = {
-    "quick_preview": {
-        "name": "快速预览",
-        "description": "最简流程，快速查看数据",
-        "methods": [
-            {
-                "category": "preprocessing",
-                "method_id": "dewow",
-                "enabled": True,
-                "params": {"window": 41},
-            },
-            {
-                "category": "background_removal",
-                "method_id": "subtracting_average_2D",
-                "enabled": True,
-                "params": {},
-            },
-        ],
-    },
     "robust_imaging": {
         "name": "稳健成像",
         "description": "标准GPR数据处理流程",
@@ -132,54 +114,6 @@ QUICK_PRESETS = {
                 "method_id": "svd_subspace",
                 "enabled": True,
                 "params": {"rank_start": 1, "rank_end": 20},
-            },
-        ],
-    },
-    "high_focus": {
-        "name": "高聚焦",
-        "description": "完整流程，包含迁移",
-        "methods": [
-            {
-                "category": "preprocessing",
-                "method_id": "set_zero_time",
-                "enabled": True,
-                "params": {"new_zero_time": 5.0},
-            },
-            {
-                "category": "preprocessing",
-                "method_id": "dewow",
-                "enabled": True,
-                "params": {"window": 41},
-            },
-            {
-                "category": "background_removal",
-                "method_id": "fk_filter",
-                "enabled": True,
-                "params": {"angle_low": 12, "angle_high": 55, "taper_width": 4},
-            },
-            {
-                "category": "background_removal",
-                "method_id": "svd_bg",
-                "enabled": True,
-                "params": {"rank": 1},
-            },
-            {
-                "category": "gain",
-                "method_id": "sec_gain",
-                "enabled": True,
-                "params": {"gain_min": 1.0, "gain_max": 4.5, "power": 1.1},
-            },
-            {
-                "category": "denoising",
-                "method_id": "hankel_svd",
-                "enabled": True,
-                "params": {"window_length": 0, "rank": 0},
-            },
-            {
-                "category": "migration",
-                "method_id": "stolt_migration",
-                "enabled": True,
-                "params": {"dx": 0.05, "dt": 0.1, "v": 0.1},
             },
         ],
     },

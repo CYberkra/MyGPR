@@ -667,15 +667,9 @@ class WorkbenchPage(QWidget):
             self._on_import_data()
         elif action_id == "_data_info":
             self._show_data_info()
-        elif (
-            action_id.startswith("_quick_")
-            or action_id.startswith("_robust_")
-            or action_id.startswith("_high_")
-        ):
+        elif action_id.startswith("_robust_"):
             profile_map = {
-                "_quick_preview": "quick_preview",
                 "_robust_imaging": "robust_imaging",
-                "_high_focus": "high_focus",
             }
             profile_key = profile_map.get(action_id)
             if (

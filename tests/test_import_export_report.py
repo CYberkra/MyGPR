@@ -20,24 +20,19 @@ def _get_app() -> QApplication:
     return QApplication.instance() or QApplication([])
 
 
-def test_csv_import_records_preview_and_sanitize_warnings(tmp_path: Path):
+def test_csv_import_records_sanitize_warnings(tmp_path: Path):
     app = _get_app()
     win = GPRGuiQt()
     try:
         csv_path = tmp_path / "demo.csv"
         arr = np.linspace(0, 1, 200 * 40, dtype=np.float32).reshape(200, 40)
-        # 放在快速预览降采样后仍会保留的采样/道索引上
         arr[5, 9] = np.nan
         arr[10, 12] = np.inf
         np.savetxt(csv_path, arr, delimiter=",", fmt="%s")
 
-        win.page_advanced.fast_preview_var.setChecked(True)
-        win.page_advanced.max_samples_edit.setText("40")
-        win.page_advanced.max_traces_edit.setText("12")
         win._load_single_csv(str(csv_path))
 
         codes = {warning.get("code") for warning in win._runtime_warnings}
-        assert "preview_downsampled" in codes
         assert "data_sanitized" in codes
     finally:
         win.close()
@@ -53,9 +48,9 @@ def test_report_and_quality_snapshot_include_runtime_warnings(tmp_path: Path):
         win._append_runtime_warnings(
             [
                 {
-                    "code": "preview_downsampled",
+                    "code": "data_sanitized",
                     "level": "warning",
-                    "message": "当前为快速预览导入，已对数据降采样。",
+                    "message": "导入 CSV 数据包含 NaN/Inf，已使用均值填充。",
                     "details": {"source": "csv_import"},
                 }
             ],
@@ -86,7 +81,7 @@ def test_report_and_quality_snapshot_include_runtime_warnings(tmp_path: Path):
         report_path = next(tmp_path.glob("report_*.md"))
         report_text = report_path.read_text(encoding="utf-8")
         assert "Runtime warnings" in report_text
-        assert "preview_downsampled" in report_text
+        assert "data_sanitized" in report_text
 
         original_information = QMessageBox.information
         QMessageBox.information = lambda *args, **kwargs: QMessageBox.StandardButton.Ok
@@ -97,7 +92,7 @@ def test_report_and_quality_snapshot_include_runtime_warnings(tmp_path: Path):
         json_path = next(tmp_path.glob("quality_snapshot_*.json"))
         payload = json.loads(json_path.read_text(encoding="utf-8"))
         assert payload["runtime_warnings"]
-        assert payload["runtime_warnings"][0]["code"] == "preview_downsampled"
+        assert payload["runtime_warnings"][0]["code"] == "data_sanitized"
     finally:
         win.close()
         app.processEvents()

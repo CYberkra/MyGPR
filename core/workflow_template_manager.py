@@ -258,14 +258,6 @@ class WorkflowTemplateManager:
         """获取预设模板"""
         return [
             {
-                "name": "快速预览",
-                "description": "最简流程，快速查看数据",
-                "methods": [
-                    {"method_id": "dewow", "params": {"window": 41}},
-                    {"method_id": "subtracting_average_2D", "params": {}},
-                ],
-            },
-            {
                 "name": "稳健成像",
                 "description": "标准GPR数据处理流程",
                 "methods": [
@@ -280,28 +272,6 @@ class WorkflowTemplateManager:
                         "method_id": "sec_gain",
                         "params": {"gain_min": 1.0, "gain_max": 4.5},
                     },
-                ],
-            },
-            {
-                "name": "高聚焦",
-                "description": "完整流程，包含迁移",
-                "methods": [
-                    {"method_id": "set_zero_time", "params": {"new_zero_time": 5.0}},
-                    {"method_id": "dewow", "params": {"window": 41}},
-                    {
-                        "method_id": "fk_filter",
-                        "params": {"angle_low": 12, "angle_high": 55},
-                    },
-                    {"method_id": "svd_bg", "params": {"rank": 1}},
-                    {
-                        "method_id": "sec_gain",
-                        "params": {"gain_min": 1.0, "gain_max": 4.5},
-                    },
-                    {
-                        "method_id": "hankel_svd",
-                        "params": {"window_length": 0, "rank": 0},
-                    },
-                    {"method_id": "stolt_migration", "params": {"dx": 0.05, "dt": 0.1}},
                 ],
             },
         ]

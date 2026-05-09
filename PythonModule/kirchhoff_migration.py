@@ -2004,7 +2004,6 @@ def _build_kirchhoff_display_header_updates(
             "display_title": "Kirchhoff Migration profile",
             "display_xlabel": "水平距离 (m)",
             "display_colorbar_label": "信号幅度",
-            "display_skip_downsample": True,
             "display_skip_preprocess": True,
             "display_bad_color": "white",
         }

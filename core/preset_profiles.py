@@ -12,24 +12,6 @@ from core.methods_registry import PROCESSING_METHODS
 # ============ 预设配置 ============
 
 STOLT_MIGRATION_PRESETS = {
-    "speed_first": {
-        "label": "Stolt 速度优先",
-        "params": {
-            "dx": 0.05,
-            "dt": 0.10,
-            "v": 0.10,
-            "pad_x": 0,
-            "pad_t": 1,
-            "stolt_jacobian_power": 0.02,
-            "stolt_obliquity_power": 0.02,
-            "stolt_mask_softness": 0.015,
-            "stolt_kz_smooth": 1,
-            "stolt_depth_gain": 0.0,
-            "stolt_depth_gain_power": 1.0,
-            "stolt_clip_percentile": 99.8,
-        },
-        "note": "更少补零与平滑，优先吞吐与交互速度。",
-    },
     "balanced": {
         "label": "Stolt 平衡档",
         "params": {
@@ -73,46 +55,15 @@ GUI_PRESETS_V1 = {
     "raw_fidelity": {
         "label": "原始保真（默认）",
         "ui": {
-            "fast_preview": False,
-            "max_samples": 1024,
-            "max_traces": 512,
-            "display_downsample": False,
-            "display_max_samples": 1200,
-            "display_max_traces": 800,
             "normalize": False,
             "demean": False,
             "percentile": False,
         },
         "method_params": {},
     },
-    "quick_preview": {
-        "label": "快速预览（速度优先）",
-        "ui": {
-            "fast_preview": True,
-            "max_samples": 256,
-            "max_traces": 120,
-            "display_downsample": True,
-            "display_max_samples": 500,
-            "display_max_traces": 260,
-            "normalize": False,
-            "demean": False,
-            "percentile": False,
-        },
-        "method_params": {
-            "set_zero_time": {"new_zero_time": 4.0},
-            "dewow": {"window": 21},
-            "fk_filter": {"angle_low": 16, "angle_high": 45, "taper_width": 3},
-            "sec_gain": {"gain_min": 1.0, "gain_max": 3.2, "power": 1.0},
-            "hankel_svd": {"window_length": 32, "rank": 0},
-        },
-    },
     "denoise_first": {
         "label": "降噪优先（稳健）",
         "ui": {
-            "fast_preview": False,
-            "display_downsample": True,
-            "display_max_samples": 900,
-            "display_max_traces": 420,
             "normalize": True,
             "demean": True,
             "percentile": True,
@@ -130,8 +81,6 @@ GUI_PRESETS_V1 = {
     "detail_first": {
         "label": "保细节（细节优先）",
         "ui": {
-            "fast_preview": False,
-            "display_downsample": False,
             "normalize": False,
             "demean": True,
             "percentile": True,
@@ -146,30 +95,9 @@ GUI_PRESETS_V1 = {
             "hankel_svd": {"window_length": 0, "rank": 0},
         },
     },
-    "stolt_speed_first": {
-        "label": "Stolt 速度优先",
-        "ui": {
-            "fast_preview": True,
-            "max_samples": 384,
-            "max_traces": 180,
-            "display_downsample": True,
-            "display_max_samples": 640,
-            "display_max_traces": 320,
-            "normalize": False,
-            "demean": False,
-            "percentile": False,
-        },
-        "method_params": {
-            "stolt_migration": dict(STOLT_MIGRATION_PRESETS["speed_first"]["params"]),
-        },
-    },
     "stolt_balanced": {
         "label": "Stolt 平衡档",
         "ui": {
-            "fast_preview": False,
-            "display_downsample": True,
-            "display_max_samples": 760,
-            "display_max_traces": 360,
             "normalize": True,
             "demean": True,
             "percentile": True,
@@ -183,8 +111,6 @@ GUI_PRESETS_V1 = {
     "stolt_focus_first": {
         "label": "Stolt 聚焦优先",
         "ui": {
-            "fast_preview": False,
-            "display_downsample": False,
             "normalize": True,
             "demean": True,
             "percentile": True,
@@ -208,11 +134,6 @@ DEFAULT_STARTUP_PRESET_KEY = "raw_fidelity"
 BASIC_PARAM_LIMIT = 4
 
 RECOMMENDED_RUN_PROFILES = {
-    "quick_preview": {
-        "label": "快速预览",
-        "preset_key": "quick_preview",
-        "order": ["set_zero_time", "dewow", "subtracting_average_2D"],
-    },
     "robust_imaging": {
         "label": "稳健成像",
         "preset_key": "denoise_first",
@@ -241,19 +162,6 @@ RECOMMENDED_RUN_PROFILES = {
             "subtracting_average_2D",
             "sec_gain",
             "svd_subspace",
-        ],
-    },
-    "high_focus": {
-        "label": "高聚焦",
-        "preset_key": "stolt_focus_first",
-        "order": [
-            "set_zero_time",
-            "dewow",
-            "subtracting_average_2D",
-            "fk_filter",
-            "sec_gain",
-            "hankel_svd",
-            "stolt_migration",
         ],
     },
     "hankel_denoise": {
@@ -489,7 +397,6 @@ def choose_adaptive_stolt_preset(data: np.ndarray):
     bw = stats["eff_bw_ratio"]
     dr = stats["dynamic_range_db"]
 
-    speed_score = 0
     focus_score = 0
     reason_tokens = []
 
@@ -497,7 +404,6 @@ def choose_adaptive_stolt_preset(data: np.ndarray):
         focus_score += 2
         reason_tokens.append(f"SNR偏低({snr:.1f}dB)")
     elif snr > 17.0:
-        speed_score += 1
         reason_tokens.append(f"SNR较高({snr:.1f}dB)")
     else:
         reason_tokens.append(f"SNR中等({snr:.1f}dB)")
@@ -506,7 +412,6 @@ def choose_adaptive_stolt_preset(data: np.ndarray):
         focus_score += 2
         reason_tokens.append(f"尖峰度高({spike:.2f})")
     elif spike < 3.0:
-        speed_score += 1
         reason_tokens.append(f"尖峰度低({spike:.2f})")
     else:
         reason_tokens.append(f"尖峰度中等({spike:.2f})")
@@ -515,7 +420,6 @@ def choose_adaptive_stolt_preset(data: np.ndarray):
         focus_score += 1
         reason_tokens.append(f"有效带宽较宽({bw:.2f})")
     elif bw < 0.38:
-        speed_score += 1
         reason_tokens.append(f"有效带宽较窄({bw:.2f})")
     else:
         reason_tokens.append(f"有效带宽中等({bw:.2f})")
@@ -524,16 +428,12 @@ def choose_adaptive_stolt_preset(data: np.ndarray):
         focus_score += 1
         reason_tokens.append(f"动态范围较大({dr:.1f}dB)")
     elif dr < 16.0:
-        speed_score += 1
         reason_tokens.append(f"动态范围较小({dr:.1f}dB)")
     else:
         reason_tokens.append(f"动态范围中等({dr:.1f}dB)")
 
-    diff = focus_score - speed_score
-    if diff >= 2:
+    if focus_score >= 2:
         chosen = "focus_first"
-    elif diff <= -2:
-        chosen = "speed_first"
     else:
         chosen = "balanced"
 
@@ -733,16 +633,6 @@ WORKFLOW_STAGES = {
 
 
 WORKFLOW_PRESETS = {
-    "quick_preview": {
-        "label": "快速预览",
-        "description": "最快速的处理流程，适合初步查看",
-        "stages": {
-            "stage1": {"set_zero_time": True, "dewow": True},
-            "stage2": {"subtracting_average_2D": True},
-            "stage3": {},
-            "stage4": {},
-        },
-    },
     "robust_imaging": {
         "label": "稳健成像",
         "description": "标准四阶段流程，平衡速度与质量",
@@ -751,16 +641,6 @@ WORKFLOW_PRESETS = {
             "stage2": {"fk_filter": True, "subtracting_average_2D": True},
             "stage3": {"sec_gain": True},
             "stage4": {},
-        },
-    },
-    "high_focus": {
-        "label": "高聚焦",
-        "description": "完整流程包含迁移，质量最优",
-        "stages": {
-            "stage1": {"set_zero_time": True, "dewow": True},
-            "stage2": {"fk_filter": True, "svd_bg": True},
-            "stage3": {"sec_gain": True, "hankel_svd": True},
-            "stage4": {"stolt_migration": True, "time_to_depth": True},
         },
     },
     "custom": {
