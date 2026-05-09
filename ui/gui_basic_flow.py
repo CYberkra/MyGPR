@@ -497,7 +497,7 @@ class BasicFlowPage(QWidget):
             for preset_key, preset in STOLT_MIGRATION_PRESETS.items():
                 self.stolt_preset_combo.addItem(preset["label"], preset_key)
             self.stolt_preset_combo.setToolTip(
-                "选择Stolt迁移的预设配置：速度优先/平衡/聚焦优先"
+                "选择Stolt迁移的预设配置：平衡或聚焦优先"
             )
 
             self.stolt_auto_adapt_var = QCheckBox("应用时自适应")

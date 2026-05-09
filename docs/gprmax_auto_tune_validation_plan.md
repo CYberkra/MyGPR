@@ -118,11 +118,82 @@ GPRMAX 数据接入后，自动选参评分应增加 ground-truth aware 指标�
 - 哪些目标被削弱或存在风险。
 - 评分改善来自目标保留、背景抑制还是显示增益。
 
+## 已落地的最小样例
+
+已新增 `cylinder_single_v1` 最小 benchmark 包：
+
+- 生成脚本：`scripts/gprmax_benchmark/generate_cylinder_single_v1.py`
+- 样例目录：`sample_data/gprmax_benchmarks/cylinder_single_v1/`
+- 场景文件：`scenario.json`
+- gprMax 输入：`model.in`
+- ground truth：`ground_truth.json`
+- MyGPR 输入：`mygpr_bscan.csv`
+- 预览图：`preview.png`
+
+可执行命令：
+
+```powershell
+python scripts\gprmax_benchmark\generate_cylinder_single_v1.py
+python -m pytest tests\test_gprmax_benchmark_package.py -q
+```
+
+可选真实 gprMax smoke（使用本机 `E:\gprMax\gprMax-v.3.1.7`）：
+
+```powershell
+python scripts\gprmax_benchmark\run_gprmax_cylinder_single_v1_smoke.py --gprmax-root E:\gprMax\gprMax-v.3.1.7 --runs 1 --geometry-only
+python scripts\gprmax_benchmark\run_gprmax_cylinder_single_v1_smoke.py --gprmax-root E:\gprMax\gprMax-v.3.1.7 --runs 3
+```
+
+真实 smoke 脚本会：
+
+- 优先使用 `E:\gprMax\gprMax-v.3.1.7\.venv\Scripts\python.exe` 运行 `python -m gprMax`
+- 在 `output/gprmax_smoke/cylinder_single_v1/<timestamp>/` 保存 `.out` 与 `smoke_summary.json`
+- 自动调用 `generate_cylinder_single_v1.py --raw-out-path ...` 生成 `converted_package/`
+
+2026-05-07 已验证一组成功记录：
+
+- run dir: `output/gprmax_smoke/cylinder_single_v1/20260507_213716_867341/`
+- command: `python -m gprMax ...\cylinder_single_v1.in -n 3`
+- returncode: `0`
+- raw outputs: `cylinder_single_v11.out`, `cylinder_single_v12.out`, `cylinder_single_v13.out`
+- converted package: `.../converted_package/`
+
+当前 bundled B-scan 是 deterministic fallback，作用是先固定 MyGPR 的 scenario、ground truth、CSV 读取、自动选参对比和证据导出契约。它不是完整电磁正演结果。后续若传入真实 gprMax `.out`：
+
+```powershell
+python scripts\gprmax_benchmark\generate_cylinder_single_v1.py --raw-out-path E:\gprMax\gprMax-v.3.1.7\user_models\cylinder_Bscan_2D1.out
+```
+
+脚本会通过 `core.gpr_io.read_gprmax_out` 将同目录的多道 `.out` 按数字顺序合并为 `mygpr_bscan.csv`，并保留同一套 `scenario.json` / `ground_truth.json` 契约。
+
+`ground_truth.json` 当前固定了：
+
+- 目标：`metal_cylinder_01`
+- 类型：`hyperbola`
+- apex：trace 40, sample 79, time 约 6.46 ns
+- ROI：sample `[49, 149)`, trace `[16, 65)`
+- 必须保留结构：apex、左臂、右臂
+
 ## 下一步实施建议
 
-1. 在 MyGPR 中新增 `scripts/gprmax_benchmark/`，不要直接改 `E:\gprMax\gprMax-v.3.1.7`。
-2. 先实现 `cylinder_single_v1` 的 scenario JSON、`.in` 生成和 `ground_truth.json`。
-3. 复用现有 `core.gpr_io.read_gprmax_out` 读取 `.out`，导出 MyGPR B-scan CSV。
-4. 增加 pytest：无需运行 gprMax，只用小型 HDF5 `.out` fixture 验证 merge/order/ground truth schema。
-5. 等本机 gprMax 环境确认后，再增加可选 smoke 脚本真正运行正演。
-6. 将 GPRMAX benchmark 接入 `core.auto_tune_comparison_export`，每个 scenario 导出同一套 comparison evidence bundle。
+2026-05-08 已新增 `core/gprmax_truth_metrics.py`，并接入 `scripts/gprmax_benchmark/gprmax_multi_scenario_report.py`。当前 HTML 报告的逐步骤和最终汇总已包含：
+
+- `truth_target_energy_preservation`：真实目标 ROI 能量保留。
+- `truth_target_saliency_gain`：目标相对背景显著性变化。
+- `truth_background_energy_reduction`：目标外背景能量降低。
+- `truth_false_positive_ratio`：目标外强异常相对目标强异常的比例，越低越好。
+- `truth_score`：综合真值评分，已参与 gprMax 报告中的人工/自动判定。
+
+2026-05-08 继续扩展了多场景报告：
+
+- `crack_air_filled_v1`：空气裂缝弱结构，目标是检验窄线状弱反射和裂缝边缘绕射是否被过度平滑。
+- `no_target_background_v1`：无目标均匀背景，目标是检验自动选参是否会凭空制造强局部异常。
+
+无目标场景的 truth metrics 不再把全图当作目标，而是以 `targets=[]` 进入背景-only 评分：`truth_target_count=0`，目标保留字段保持中性，`truth_false_positive_ratio` 和 `truth_background_energy_reduction` 主导 `truth_score`。这个场景是后续评分函数的假异常回归样例。
+
+后续建议：
+
+1. 将真实 `.out` 转换结果与当前 deterministic fallback 放在同一 scenario 契约下比较。
+2. 在 `truth_score` 基础上继续细化 apex 显著性和双曲线臂连续性指标。
+3. 对 `crack_air_filled_v1` 增加裂缝边缘连续性指标。
+4. 对 `no_target_background_v1` 增加局部假异常数量统计，而不只是高分位强度比例。

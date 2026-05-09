@@ -137,7 +137,6 @@ from core.preset_profiles import (
 from core.gpr_io import (
     extract_airborne_csv_payload,
     read_ascans_folder,
-    subset_trace_metadata,
 )
 from core.processing_engine import (
     merge_result_header_info,
@@ -1435,7 +1434,6 @@ class GPRGuiQt(QMainWindow):
             self.page_advanced.normalize_var,
             self.page_advanced.demean_var,
             self.page_advanced.crop_enable_var,
-            self.page_advanced.display_downsample_var,
         ]:
             cb.stateChanged.connect(self._refresh_plot)
 
@@ -3017,8 +3015,6 @@ class GPRGuiQt(QMainWindow):
             return
 
         checkbox_fields = {
-            "fast_preview": self.page_advanced.fast_preview_var,
-            "display_downsample": self.page_advanced.display_downsample_var,
             "normalize": self.page_advanced.normalize_var,
             "demean": self.page_advanced.demean_var,
             "percentile": self.page_advanced.percentile_var,
@@ -3032,10 +3028,6 @@ class GPRGuiQt(QMainWindow):
                     widget.blockSignals(old_block)
 
         text_fields = {
-            "max_samples": self.page_advanced.max_samples_edit,
-            "max_traces": self.page_advanced.max_traces_edit,
-            "display_max_samples": self.page_advanced.display_max_samples_edit,
-            "display_max_traces": self.page_advanced.display_max_traces_edit,
             "p_low": self.page_advanced.p_low_edit,
             "p_high": self.page_advanced.p_high_edit,
         }
@@ -3619,16 +3611,6 @@ class GPRGuiQt(QMainWindow):
                 fill = float(np.mean(data[finite_mask])) if finite_mask.any() else 0.0
                 data = np.nan_to_num(data, nan=fill, posinf=fill, neginf=fill)
 
-            if self.page_advanced.fast_preview_var.isChecked():
-                data, _, trace_indices = self._downsample_data(
-                    data, return_indices=True
-                )
-                trace_metadata = subset_trace_metadata(trace_metadata, trace_indices)
-                if header_info:
-                    header_info = dict(header_info)
-                    header_info["a_scan_length"] = int(data.shape[0])
-                    header_info["num_traces"] = int(data.shape[1])
-
             if progress_callback:
                 progress_callback(100, "加载完成！")
 
@@ -3648,22 +3630,13 @@ class GPRGuiQt(QMainWindow):
             if progress_callback:
                 progress_callback(10, "正在扫描文件夹...")
 
-            max_files = 0
-            if (
-                hasattr(self, "page_advanced")
-                and self.page_advanced.fast_preview_var.isChecked()
-            ):
-                max_files = self._parse_int_edit(
-                    self.page_advanced.max_traces_edit, default=200
-                )
-
             def _progress(current, total, msg):
                 if progress_callback:
                     percent = int(10 + (current / max(total, 1)) * 80)
                     progress_callback(percent, msg)
 
             result = read_ascans_folder(
-                folder, max_files=max_files, progress_cb=_progress
+                folder, max_files=0, progress_cb=_progress
             )
 
             if progress_callback:
@@ -3820,18 +3793,13 @@ class GPRGuiQt(QMainWindow):
         QApplication.processEvents()
         try:
             import_warnings = []
-            max_files = 0
-            if self.page_advanced.fast_preview_var.isChecked():
-                max_files = self._parse_int_edit(
-                    self.page_advanced.max_traces_edit, default=200
-                )
 
             def _progress(current, total, msg):
                 self.status_label.setText(f"{msg} ({current}/{total})")
                 QApplication.processEvents()
 
             result = read_ascans_folder(
-                folder, max_files=max_files, progress_cb=_progress
+                folder, max_files=0, progress_cb=_progress
             )
             data = result["data"]
             samples = result["samples_per_trace"]
@@ -3880,21 +3848,8 @@ class GPRGuiQt(QMainWindow):
             self._set_quality_metrics(None)
 
             self._log(f"已加载文件夹 A-scan: {traces} 道 x {samples} 采样点")
-            if max_files > 0:
-                self._log(
-                    f"快速预览已启用：仅导入前 {max_files} 道用于预览；如需全量处理请关闭快速预览。"
-                )
-                import_warnings.append(
-                    build_runtime_warning(
-                        "preview_downsampled",
-                        "当前为快速预览导入，仅载入了部分道数据。",
-                        max_traces=max_files,
-                        path=folder,
-                    )
-                )
             self.status_label.setText(
                 f"{os.path.basename(folder)} | 采样:{samples} 道数:{traces}"
-                + (" | 快速预览" if max_files > 0 else "")
             )
 
             self._update_empty_state_and_brief()
@@ -3925,48 +3880,14 @@ class GPRGuiQt(QMainWindow):
             header_info = detect_csv_header(path)
             skip_lines = _detect_skiprows(path)
 
-            if self.page_advanced.fast_preview_var.isChecked():
-                max_samples = self._parse_int_edit(
-                    self.page_advanced.max_samples_edit, default=0
-                )
-                max_traces = self._parse_int_edit(
-                    self.page_advanced.max_traces_edit, default=0
-                )
-
-                target_rows = max_samples if max_samples > 0 else 200000
-                if header_info:
-                    samples = int(header_info["a_scan_length"])
-                    traces = int(header_info["num_traces"])
-                    required_rows = samples * traces
-                    target_rows = max(target_rows, required_rows)
-                    if max_samples > 0 and max_traces > 0:
-                        target_rows = max(target_rows, max_samples * max_traces)
-
-                rows = []
-                count = 0
-                for chunk in pd.read_csv(
-                    path,
-                    header=None,
-                    skiprows=skip_lines,
-                    chunksize=200000,
-                    na_filter=False,
-                    low_memory=False,
-                ):
-                    rows.append(chunk)
-                    count += len(chunk)
-                    if count >= target_rows:
-                        break
-                df = pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
-                raw_data = df.values
-            else:
-                df = pd.read_csv(
-                    path,
-                    header=None,
-                    skiprows=skip_lines,
-                    na_filter=False,
-                    low_memory=False,
-                )
-                raw_data = df.values
+            df = pd.read_csv(
+                path,
+                header=None,
+                skiprows=skip_lines,
+                na_filter=False,
+                low_memory=False,
+            )
+            raw_data = df.values
 
             if raw_data.size == 0:
                 raise ValueError("CSV 未读取到有效数据（空文件或分隔符不匹配）")
@@ -4003,26 +3924,6 @@ class GPRGuiQt(QMainWindow):
             if data.size == 0:
                 raise ValueError("CSV 数据矩阵为空")
 
-            if self.page_advanced.fast_preview_var.isChecked():
-                data, _, trace_indices = self._downsample_data(
-                    data, return_indices=True
-                )
-                trace_metadata = subset_trace_metadata(trace_metadata, trace_indices)
-                if header_info:
-                    header_info = dict(header_info)
-                    header_info["a_scan_length"] = int(data.shape[0])
-                    header_info["num_traces"] = int(data.shape[1])
-                self._log("快速预览：数据已降采样，后续处理/导出将基于当前降采样结果。")
-                import_warnings.append(
-                    build_runtime_warning(
-                        "preview_downsampled",
-                        "当前为快速预览导入，已对数据降采样。",
-                        max_samples=data.shape[0],
-                        max_traces=data.shape[1],
-                        path=path,
-                    )
-                )
-
             if not np.isfinite(data).all():
                 finite_mask = np.isfinite(data)
                 if finite_mask.any():
@@ -4057,28 +3958,12 @@ class GPRGuiQt(QMainWindow):
             self._set_quality_metrics(None)
 
             self._log(f"已加载 CSV： {path}  shape={data.shape}")
-            if self.page_advanced.fast_preview_var.isChecked():
-                self._log(
-                    "提示：当前为快速预览模式。如需全分辨率处理，请关闭快速预览后重新导入。"
-                )
             if header_info:
                 self.status_label.setText(
                     f"{os.path.basename(path)} | 采样:{header_info['a_scan_length']} 道数:{header_info['num_traces']}"
-                    + (
-                        " | 快速预览"
-                        if self.page_advanced.fast_preview_var.isChecked()
-                        else ""
-                    )
                 )
             else:
-                self.status_label.setText(
-                    os.path.basename(path)
-                    + (
-                        " | 快速预览"
-                        if self.page_advanced.fast_preview_var.isChecked()
-                        else ""
-                    )
-                )
+                self.status_label.setText(os.path.basename(path))
 
             if header_info:
                 self._log(
@@ -4423,9 +4308,6 @@ class GPRGuiQt(QMainWindow):
             )
         lines.append(f"- Normalize: {self.page_advanced.normalize_var.isChecked()}")
         lines.append(f"- Demean: {self.page_advanced.demean_var.isChecked()}")
-        lines.append(
-            f"- Display downsample: {self.page_advanced.display_downsample_var.isChecked()} (max_samples={self.page_advanced.display_max_samples_edit.text()}, max_traces={self.page_advanced.display_max_traces_edit.text()})"
-        )
         if bounds:
             lines.append(
                 f"- Crop: time {bounds['time_start']}~{bounds['time_end']} ; distance {bounds['dist_start']}~{bounds['dist_end']}"
@@ -4447,9 +4329,6 @@ class GPRGuiQt(QMainWindow):
         lines.append("## Runtime State")
         lines.append(
             f"- Data shape: {self.data.shape if self.data is not None else '--'}"
-        )
-        lines.append(
-            f"- Fast preview import: {self.page_advanced.fast_preview_var.isChecked()}"
         )
         airborne_lines = self._build_airborne_metadata_summary()
         if airborne_lines:
@@ -5164,7 +5043,6 @@ class GPRGuiQt(QMainWindow):
             return None
         header = plot_header_info or {}
         skip_preprocess = bool(header.get("display_skip_preprocess"))
-        skip_downsample = bool(header.get("display_skip_downsample"))
         slider_compare = bool(
             hasattr(self.page_advanced, "slider_compare_var")
             and self.page_advanced.slider_compare_var.isChecked()
@@ -5192,9 +5070,6 @@ class GPRGuiQt(QMainWindow):
             if skip_preprocess
             else self.page_advanced.demean_var.isChecked(),
             "crop": self.page_advanced.crop_enable_var.isChecked(),
-            "downsample": False
-            if skip_downsample
-            else self.page_advanced.display_downsample_var.isChecked(),
         }
         if self.page_advanced.compare_var.isChecked() or slider_compare:
             sig["left"] = self.page_advanced.compare_left_combo.currentText()
@@ -5211,7 +5086,7 @@ class GPRGuiQt(QMainWindow):
         header_info_override: dict | None = None,
         trace_metadata_override: dict | None = None,
     ):
-        """准备用于显示的数据（裁剪→降采样→预处理，减少内存分配）"""
+        """准备用于显示的数据（裁剪→预处理，保留全分辨率数据）"""
         start_ts = time.perf_counter()
         header = (
             header_info_override
@@ -5236,21 +5111,6 @@ class GPRGuiQt(QMainWindow):
             time_axis = time_axis[t0:t1]
             trace_axis = trace_axis[d0:d1]
             trace_indices = trace_indices[d0:d1]
-        if self.page_advanced.display_downsample_var.isChecked() and not header.get(
-            "display_skip_downsample"
-        ):
-            max_samples = self._parse_int_edit(
-                self.page_advanced.display_max_samples_edit, default=800
-            )
-            max_traces = self._parse_int_edit(
-                self.page_advanced.display_max_traces_edit, default=400
-            )
-            display_data, sample_idx, trace_idx = self._downsample_for_display(
-                display_data, max_samples, max_traces, return_indices=True
-            )
-            time_axis = time_axis[sample_idx]
-            trace_axis = trace_axis[trace_idx]
-            trace_indices = trace_indices[trace_idx]
         display_data = self._apply_preprocess(
             display_data, header_info_override=header_info_override
         )
@@ -5487,36 +5347,6 @@ class GPRGuiQt(QMainWindow):
             return float(text)
         except Exception:
             return default
-
-    def _downsample_for_display(
-        self,
-        data: np.ndarray,
-        max_samples: int,
-        max_traces: int,
-        return_indices: bool = False,
-    ) -> np.ndarray:
-        """为显示降采样数据"""
-        n_samples, n_traces = data.shape[0], data.shape[1]
-        ds_samples = max(1, n_samples // max_samples) if n_samples > max_samples else 1
-        ds_traces = max(1, n_traces // max_traces) if n_traces > max_traces else 1
-        sampled = data[::ds_samples, ::ds_traces]
-        if return_indices:
-            sample_idx = np.arange(0, n_samples, ds_samples, dtype=int)
-            trace_idx = np.arange(0, n_traces, ds_traces, dtype=int)
-            return sampled, sample_idx, trace_idx
-        return sampled
-
-    def _downsample_data(self, data: np.ndarray, return_indices: bool = False):
-        """降采样数据（用于快速预览）"""
-        max_samples = self._parse_int_edit(
-            self.page_advanced.max_samples_edit, default=512
-        )
-        max_traces = self._parse_int_edit(
-            self.page_advanced.max_traces_edit, default=200
-        )
-        return self._downsample_for_display(
-            data, max_samples, max_traces, return_indices=return_indices
-        )
 
     def _resolve_plot_extent_and_labels(
         self,

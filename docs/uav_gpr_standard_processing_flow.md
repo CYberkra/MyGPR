@@ -88,12 +88,6 @@
 
 ## MyGPR 默认 profile 建议
 
-### 快速预览
-
-`set_zero_time -> dewow -> motion_compensation_v2(light) -> background -> display_gain`
-
-用于现场快速确认数据是否可用，不作为最终科研图。
-
 ### 稳健科研 B-scan
 
 `QC/sidecar alignment -> set_zero_time -> dewow -> motion_compensation_v2 -> background/SVD/CCBS -> bandpass/F-K -> denoise -> SEC/AGC display gain -> optional migration -> export`

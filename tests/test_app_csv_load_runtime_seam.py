@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from typing import Any, cast
 
 import numpy as np
@@ -13,17 +12,9 @@ import pandas as pd
 import app_qt
 
 
-class _BoolFlag:
-    def __init__(self, value: bool):
-        self._value = value
-
-    def isChecked(self) -> bool:
-        return self._value
-
-
 class _DummyLoaderHost:
     def __init__(self) -> None:
-        self.page_advanced = SimpleNamespace(fast_preview_var=_BoolFlag(False))
+        self.page_advanced = object()
 
 
 def test_load_single_csv_with_progress_forwards_optional_sidecar_kwargs(monkeypatch):

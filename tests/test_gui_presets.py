@@ -24,7 +24,6 @@ from core.preset_profiles import (
     GUI_PRESETS_V1,
     RECOMMENDED_RUN_PROFILES,
 )
-from core.workflow_template_manager import WorkflowTemplateManager
 from core.workflow_data import QUICK_PRESETS
 from ui.gui_method_browser import MethodBrowserTree
 
@@ -104,15 +103,7 @@ def test_startup_preset_matches_registry_contract():
         preset = GUI_PRESETS_V1[DEFAULT_STARTUP_PRESET_KEY]
         assert win._selected_preset_key == DEFAULT_STARTUP_PRESET_KEY
         assert not hasattr(win.page_advanced, "preset_combo")
-        assert win.page_advanced.fast_preview_var.isChecked() is bool(
-            preset["ui"]["fast_preview"]
-        )
-        assert win.page_advanced.max_samples_edit.text() == str(
-            preset["ui"]["max_samples"]
-        )
-        assert win.page_advanced.display_downsample_var.isChecked() is bool(
-            preset["ui"]["display_downsample"]
-        )
+        assert not hasattr(win.page_advanced, "fast" + "_preview_var")
         assert win._method_param_overrides == preset["method_params"]
         assert win.page_advanced.sidecar_box.isHidden() is False
     finally:
@@ -300,7 +291,6 @@ def test_phase2_tabs_expose_prioritized_group_hierarchy_and_bridge():
             "聚焦裁剪",
             "ROI 状态",
             "增强与对比辅助",
-            "预览性能",
             "可选 RTK/IMU/高度计 辅助文件",
         ]
         assert win.page_advanced.sidecar_box.isHidden() is False
@@ -963,26 +953,15 @@ def test_public_method_order_follows_processing_chain():
     assert positions == sorted(positions)
 
 
-def test_hankel_svd_defaults_use_auto_or_preview_safe_overrides(tmp_path):
+def test_hankel_svd_defaults_use_full_quality_overrides():
     params = PROCESSING_METHODS["hankel_svd"]["params"]
     defaults = {item["name"]: item.get("default") for item in params}
     labels = {item["name"]: item.get("label", "") for item in params}
-    manager = WorkflowTemplateManager(config_dir=str(tmp_path / "workflow_templates"))
-    high_focus_template = next(
-        item for item in manager.get_preset_templates() if item["name"] == "高聚焦"
-    )
-    high_focus_hankel = next(
-        item for item in high_focus_template["methods"] if item["method_id"] == "hankel_svd"
-    )
 
     assert defaults["window_length"] == 0
     assert defaults["rank"] == 0
     assert "bounded/literature" in labels["window_length"]
     assert "bounded/literature" in labels["rank"]
-    assert GUI_PRESETS_V1["quick_preview"]["method_params"]["hankel_svd"] == {
-        "window_length": 32,
-        "rank": 0,
-    }
     assert "hankel_svd" not in GUI_PRESETS_V1["denoise_first"]["method_params"]
     assert GUI_PRESETS_V1["detail_first"]["method_params"]["hankel_svd"] == {
         "window_length": 0,
@@ -992,7 +971,6 @@ def test_hankel_svd_defaults_use_auto_or_preview_safe_overrides(tmp_path):
         "window_length": 0,
         "rank": 0,
     }
-    assert high_focus_hankel["params"] == {"window_length": 0, "rank": 0}
 
 
 def test_svd_denoising_defaults_match_current_gpr_recommendation():
@@ -1012,12 +990,9 @@ def test_svd_denoising_defaults_match_current_gpr_recommendation():
 
 def test_recommended_profiles_prefer_svd_and_hankel_denoising():
     robust_order = RECOMMENDED_RUN_PROFILES["robust_imaging"]["order"]
-    high_focus_order = RECOMMENDED_RUN_PROFILES["high_focus"]["order"]
 
     assert "svd_subspace" in robust_order
     assert "hankel_svd" not in robust_order
-    assert "hankel_svd" in high_focus_order
-    assert "wavelet_svd" not in high_focus_order
 
     assert GUI_PRESETS_V1["denoise_first"]["method_params"]["svd_subspace"] == {
         "rank_start": 1,
@@ -1192,18 +1167,13 @@ def test_processing_worker_uses_auto_tuned_params_per_step(monkeypatch):
     assert len(captured["outputs"]) == 2
 
 
-def test_workflow_quick_presets_align_with_current_denoising_preference():
+def test_workflow_presets_align_with_current_denoising_preference():
     robust_methods = [
         item["method_id"] for item in QUICK_PRESETS["robust_imaging"]["methods"]
-    ]
-    high_focus_methods = [
-        item["method_id"] for item in QUICK_PRESETS["high_focus"]["methods"]
     ]
 
     assert "svd_subspace" in robust_methods
     assert "hankel_svd" not in robust_methods
-    assert "hankel_svd" in high_focus_methods
-    assert "wavelet_svd" not in high_focus_methods
 
 
 def test_quality_page_exposes_report_and_snapshot_actions():

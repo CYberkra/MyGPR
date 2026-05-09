@@ -736,14 +736,30 @@ class AutoTunePage(QWidget):
             stats.get("failed_trial_count", len(result.get("failed_trials", [])))
         )
         cache_hits = int(stats.get("cache_hit_count", 0))
-        return f"总候选 {total} | 有效 {valid} | 失败 {failed} | 缓存命中 {cache_hits}"
+        adjusted = int(stats.get("constraint_adjustment_count", 0))
+        parts = [
+            f"总候选 {total}",
+            f"有效 {valid}",
+            f"失败 {failed}",
+            f"缓存命中 {cache_hits}",
+        ]
+        if adjusted:
+            parts.append(f"参数约束 {adjusted}")
+        return " | ".join(parts)
 
     def _build_risk_hint(self, result: dict) -> str:
         recommended_key = str(result.get("recommended_profile", "balanced"))
         confidence = float(result.get("selection_confidence", 0.0))
         failed = len(result.get("failed_trials", []))
+        adjusted = int(
+            (result.get("execution_stats", {}) or {}).get(
+                "constraint_adjustment_count", 0
+            )
+        )
         if failed > 0:
             return "存在失败候选，建议查看候选评分明细，确认推荐结果是否稳定。"
+        if adjusted > 0:
+            return "部分候选参数已按当前数据尺度限制，建议核查 requested/effective 参数差异。"
         if recommended_key == "aggressive":
             return "当前推荐偏增强，建议重点核查过处理、过曝或结构损伤风险。"
         if confidence < 0.45:
@@ -770,6 +786,16 @@ class AutoTunePage(QWidget):
         lines.append(
             f"总分最高: {float(result.get('best_score', 0.0)):.4f} | 参数 {json.dumps(result.get('best_params', {}), ensure_ascii=False)}"
         )
+        best_constraint_warnings = result.get("best_constraint_warnings", []) or []
+        if best_constraint_warnings:
+            warning = best_constraint_warnings[0]
+            details = warning.get("details", {}) or {}
+            parameter = details.get("parameter", "--")
+            requested = details.get("requested", "--")
+            effective = details.get("effective", "--")
+            lines.append(
+                f"参数约束: 推荐候选 {parameter} requested={requested} -> effective={effective}"
+            )
         profiles = result.get("profiles", {}) or {}
         for key in ["conservative", "balanced", "aggressive"]:
             profile = profiles.get(key)
