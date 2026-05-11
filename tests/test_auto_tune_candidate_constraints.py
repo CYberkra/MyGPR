@@ -121,6 +121,23 @@ def test_auto_tune_agc_generated_candidates_respect_time_aware_minimum():
     assert min(windows) >= 100
 
 
+def test_auto_tune_agc_generated_candidates_keep_low_energy_guard():
+    raw = _small_profile(samples=200, traces=24)
+
+    result = auto_tune_method(
+        raw,
+        "agcGain",
+        header_info={"total_time_ns": 700.0},
+        search_mode="fast",
+    )
+
+    assert result["best_params"]["_low_energy_guard"] is True
+    assert all(
+        trial["params"].get("_low_energy_guard") is True
+        for trial in result["all_trials"]
+    )
+
+
 def test_auto_tune_constrains_frequency_filter_to_nyquist_and_valid_band():
     raw = _small_profile(samples=128, traces=24)
 
@@ -146,3 +163,45 @@ def test_auto_tune_constrains_frequency_filter_to_nyquist_and_valid_band():
     assert result["execution_stats"]["constraint_adjustment_count"] >= 1
     assert result["all_trials"][0]["requested_params"]["high_freq_mhz"] == 1200.0
     assert result["all_trials"][0]["effective_params"]["high_freq_mhz"] <= 500.0
+
+
+def test_auto_tune_frequency_filter_uses_field_sfcw_band_from_context():
+    raw = _small_profile(samples=501, traces=24)
+
+    result = auto_tune_method(
+        raw,
+        "frequency_filter_1d",
+        header_info={
+            "data_context": "uav_gpr_sfcw_field",
+            "frequency_filter_band_mhz": [20.0, 170.0],
+            "total_time_ns": 700.0,
+        },
+        search_mode="fast",
+    )
+
+    requested = [trial["requested_params"] for trial in result["all_trials"]]
+    assert any(
+        params["low_freq_mhz"] == 20.0 and params["high_freq_mhz"] == 170.0
+        for params in requested
+    )
+
+
+def test_auto_tune_frequency_filter_gprmax_impulse_does_not_use_field_band():
+    raw = _small_profile(samples=256, traces=24)
+
+    result = auto_tune_method(
+        raw,
+        "frequency_filter_1d",
+        header_info={
+            "data_context": "gprmax_impulse",
+            "time_step_s": 2.0e-11,
+        },
+        search_mode="fast",
+    )
+
+    requested = [trial["requested_params"] for trial in result["all_trials"]]
+    assert not any(
+        params["low_freq_mhz"] == 20.0 and params["high_freq_mhz"] == 170.0
+        for params in requested
+    )
+    assert max(params["high_freq_mhz"] for params in requested) > 1000.0

@@ -64,6 +64,9 @@ def test_extract_airborne_csv_payload_stacked_format_returns_trace_metadata():
     assert updated_header is not None
     assert updated_header["source"] == "airborne_csv"
     assert updated_header["has_airborne_metadata"] is True
+    assert updated_header["data_context"] == "uav_gpr_sfcw_field"
+    assert updated_header["frequency_filter_band_mhz"] == [20.0, 170.0]
+    assert updated_header["default_processing_profile"] == "high_quality_uav_gpr"
     assert float(updated_header["trace_interval_m"]) > 0.0
 
 

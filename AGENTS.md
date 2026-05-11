@@ -19,7 +19,37 @@ All commands below assume this directory is the working directory.
 - `scripts/preflight_check.py` - syntax and runtime smoke checks.
 - `tests/` - pytest tests and benchmark scripts.
 - `assets/`, `config/`, `sample_data/`, `output/` - static assets, configs, samples, generated output.
+- `docs/` - durable project knowledge and implementation plans that should be committed.
+- `docs/artifacts/` - small curated evidence attachments that justify a durable document.
 - `build_exe.bat` and `gpr_gui.spec` - packaging.
+
+## Documentation / Artifact Policy
+- Commit durable Markdown documentation under `docs/` and project handoff rules in `AGENTS.md`.
+- Keep generated reports, screenshots, CSV exports, HTML bundles, and replay ZIPs under `output/`; `output/` is intentionally ignored by Git.
+- If an output artifact is important enough for future development, first summarize the conclusion in `docs/` or the Obsidian vault.
+- Only copy selected, small, reusable evidence into `docs/artifacts/` when the artifact is needed to understand a committed document. Do not bulk-copy full report folders from `output/`.
+- Large raw data, full gprMax runs, build products, and one-off GUI screenshots should remain outside Git unless the user explicitly asks to version a specific file.
+
+## Primary Field Data Contract
+- MyGPR's primary real field data is UAV-GPR SFCW CSV from the project radar, not a generic already-reshaped B-scan CSV.
+- Current and expected field CSVs follow the `Line9origin(36).csv` style:
+  - radar mode: UAV-GPR SFCW
+  - sweep range: 20 MHz to 170 MHz
+  - frequency/sample count: 501 points per trace
+  - header fields include `Number of Samples`, `Time windows (ns)`, `Number of Traces`, and `Trace interval (m)`
+  - numeric rows are stacked trace-by-trace, typically columns: longitude, latitude, ground elevation, amplitude, and flight height
+- Always use `core.gpr_io.extract_airborne_csv_payload(raw_data, header_info)` for this format before processing. The raw stacked matrix must not be treated as a normal B-scan.
+- For the known Line9 file, `501 * 2378 = 1191378` raw numeric rows should reshape to a `(501, 2378)` B-scan.
+- Frequency-domain processing on these real SFCW datasets should respect the instrument band, usually 20-170 MHz, unless a file or acquisition note explicitly says otherwise.
+- The default filtering step for real UAV-GPR SFCW data is `frequency_filter_1d` with the acquisition band; `fk_filter` is optional/experimental and should not be enabled by default for Line9-style field data because it can introduce cross-hatch directional artifacts.
+- The default `agcGain` principle is the GPRPy-style L2-window AGC. Manual fixed-parameter AGC keeps that principle without hidden guards; real-data reports and auto-tune should prefer `agcGain` with `_low_energy_guard=True` to reduce low-energy/deep-noise amplification.
+- If synchronized RTK/IMU/altimeter sidecars are absent, skip motion compensation rather than fabricating sensor inputs. Still preserve parsed longitude, latitude, ground elevation, and flight height as trace metadata.
+
+## Data Context Defaults
+- Use `core.data_context` as the routing layer for dataset-specific defaults. Do not infer defaults independently in GUI, CLI, report scripts, or auto-tune code.
+- `uav_gpr_sfcw_field` means the real project UAV-GPR SFCW CSV contract above. Its default profile is `high_quality_uav_gpr`, and `frequency_filter_1d` defaults to 20-170 MHz.
+- `gprmax_impulse` / `gprmax` means external gprMax `.out` input. `read_gprmax_out()` should read the matching `.in` file when available, attach `header_info["data_context"]`, and expose trace spacing metadata from `#rx_steps` / `#src_steps`.
+- gprMax impulse data must not inherit the field-data 20-170 MHz fixed passband. Its default profile is `gprmax_impulse_validation`; fixed frequency filtering is manual or auto-tune/model-driven only.
 
 ## Setup
 ```bash
@@ -159,6 +189,16 @@ pytest
 
 ## Version Archive
 - Treat git history as the primary version memory for this repo.
+- Use `python scripts/git_checkpoint.py` for automated stable checkpoints once a user-visible work unit is verified.
+- Default checkpoint policy:
+  - ordinary stable fixes/features use `--mode normal` and create a commit only;
+  - important rollback points use `--mode important`, which creates a tag and writes an Obsidian version archive through `scripts/archive_checkpoint.py`;
+  - no checkpoint pushes to a remote unless the user explicitly asks.
+- `scripts/git_checkpoint.py` must be called with explicit `--files` pathspecs. It must not auto-stage unrelated dirty files, and it should abort if pre-existing staged changes are present.
+- Good normal example:
+  - `python scripts/git_checkpoint.py --summary "feat: add data-context aware defaults" --files core/data_context.py core/gpr_io.py tests/test_data_context.py --verify "pytest tests/test_data_context.py -q" --verify "python scripts/preflight_check.py"`
+- Good important example:
+  - `python scripts/git_checkpoint.py --summary "feat: stabilize auto-tune evidence workflow" --files core/auto_tune.py tests/test_auto_tune.py AGENTS.md --verify "pytest tests/test_auto_tune.py -q" --verify "python scripts/preflight_check.py" --mode important --topic auto-tune-evidence-workflow`
 - When a change batch reaches a stable, user-meaningful checkpoint, prefer:
   - a descriptive commit message focused on why the change exists
   - a tag for especially important rollback points

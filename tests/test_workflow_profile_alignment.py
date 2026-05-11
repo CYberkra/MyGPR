@@ -29,8 +29,8 @@ def test_high_quality_workflow_stage_grouping_matches_run_order():
         "frequency_filter_1d",
         "motion_compensation_v2",
         "subtracting_average_2D",
-        "fk_filter",
     ]
+    assert "fk_filter" not in flattened
     assert (
         WORKFLOW_PRESETS["high_quality_uav_gpr"]["stages"]["stage2"][
             "motion_compensation_v2"

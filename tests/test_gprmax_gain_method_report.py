@@ -18,6 +18,7 @@ def test_gain_method_set_includes_physical_and_visual_gain_families():
     assert "compensatingGain" in report.GAIN_METHODS
     assert report.GAIN_METHOD_NOTES["sec_gain"]["best_for"]
     assert report.GAIN_METHOD_NOTES["agcGain"]["risks"]
+    assert report.MANUAL_GAIN_PARAMS["agcGain"]["_low_energy_guard"] is True
 
 
 def test_gain_selection_score_prefers_sec_when_metrics_are_otherwise_equal():

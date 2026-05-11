@@ -42,6 +42,7 @@ if MODULE_DIR not in sys.path:
 from core.benchmark_registry import list_benchmark_sample_ids
 from core.evidence_export import export_motion_compensation_benchmark
 from core.gpr_io import extract_airborne_csv_payload, savecsv, save_image
+from core.data_context import recommended_profile_for_header
 from core.processing_engine import (
     merge_result_header_info,
     merge_result_trace_metadata,
@@ -259,7 +260,10 @@ def _resolve_recommended_profile_methods(profile_key: str) -> List[Dict[str, Any
     return methods
 
 
-def _resolve_job_methods(job: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _resolve_job_methods(
+    job: Dict[str, Any],
+    header_info: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, Any]]:
     methods = job.get("methods")
     recommended_profile = job.get("recommended_profile")
 
@@ -270,7 +274,10 @@ def _resolve_job_methods(job: Dict[str, Any]) -> List[Dict[str, Any]]:
             raise ValueError("methods must be a non-empty list")
         return methods
     if recommended_profile:
-        return _resolve_recommended_profile_methods(str(recommended_profile))
+        profile_key = str(recommended_profile)
+        if profile_key.lower() in {"auto", "default"}:
+            profile_key = recommended_profile_for_header(header_info)
+        return _resolve_recommended_profile_methods(profile_key)
     raise ValueError("methods must be non-empty list or recommended_profile must be set")
 
 
@@ -543,7 +550,13 @@ def run_job(job: Dict[str, Any], repo_root: str, output_dir: str) -> Dict[str, A
     current_trace_metadata = trace_metadata
     steps_summary: List[Dict[str, Any]] = []
 
-    methods = _resolve_job_methods(job)
+    methods = _resolve_job_methods(job, current_header_info)
+    requested_profile = str(job.get("recommended_profile") or "")
+    resolved_profile = (
+        recommended_profile_for_header(current_header_info)
+        if requested_profile.lower() in {"auto", "default"}
+        else job.get("recommended_profile")
+    )
     for idx, step in enumerate(methods):
         key = step["key"]
         meta = PROCESSING_METHODS[key]
@@ -605,16 +618,16 @@ def run_job(job: Dict[str, Any], repo_root: str, output_dir: str) -> Dict[str, A
     result = {
         "job_id": jid,
         "input": input_path,
-        "recommended_profile": job.get("recommended_profile"),
+        "recommended_profile": resolved_profile,
         "status": "ok",
         "steps": steps_summary,
         "final_csv": os.path.relpath(final_csv, repo_root),
         "final_png": os.path.relpath(final_png, repo_root),
         "final_shape": list(current.shape),
     }
-    if job.get("recommended_profile"):
+    if resolved_profile:
         result["profile_workflow"] = build_profile_workflow_summary(
-            str(job["recommended_profile"])
+            str(resolved_profile)
         )
     return result
 

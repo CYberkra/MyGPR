@@ -139,6 +139,7 @@ from core.gpr_io import (
     extract_airborne_csv_payload,
     read_ascans_folder,
 )
+from core.data_context import recommended_profile_for_header
 from core.processing_engine import (
     merge_result_header_info,
     merge_result_trace_metadata,
@@ -161,6 +162,9 @@ from core.auto_tune_comparison import (
 )
 from core.auto_tune_comparison_export import (
     export_auto_tune_comparison_artifacts as export_auto_tune_comparison_bundle,
+)
+from core.evidence_export import (
+    export_replay_evidence_bundle as export_replay_evidence_zip,
 )
 from core.shared_data_state import SharedDataState
 from PythonModule.kirchhoff_migration import load_cagpr_kir_parameter_file
@@ -1445,6 +1449,9 @@ class GPRGuiQt(QMainWindow):
         self.page_quality.btn_export_quality_snapshot.clicked.connect(
             self.export_quality_snapshot
         )
+        self.page_quality.btn_export_replay_evidence.clicked.connect(
+            self.export_replay_evidence_bundle
+        )
         self.page_quality.btn_record_clear.clicked.connect(
             self.page_quality.record.clear
         )
@@ -2199,6 +2206,7 @@ class GPRGuiQt(QMainWindow):
             self.page_basic.method_combo,
             self.page_quality.btn_generate_report,
             self.page_quality.btn_export_quality_snapshot,
+            self.page_quality.btn_export_replay_evidence,
         ]
         for w in controls:
             w.setEnabled(not busy)
@@ -3781,9 +3789,11 @@ class GPRGuiQt(QMainWindow):
             traces = result["num_traces"]
             time_step_s = result.get("time_step_s")
             total_time_ns = result.get("total_time_ns")
+            header_info = dict(result.get("header_info") or {})
+            trace_metadata = result.get("trace_metadata")
 
             # 尝试从同目录的 .in 文件读取 src_steps，得到正确的道间距
-            trace_interval_m = 0.1  # 默认值
+            trace_interval_m = float(header_info.get("trace_interval_m") or 0.1)
             try:
                 folder = os.path.dirname(path)
                 in_files = [f for f in os.listdir(folder) if f.endswith(".in")]
@@ -3798,19 +3808,26 @@ class GPRGuiQt(QMainWindow):
                 logger.debug("Failed to read src_steps from gprMax .in file: %s", e)
 
             # 构建头信息
-            header_info = {
-                "a_scan_length": samples,
-                "total_time_ns": total_time_ns if total_time_ns else 0.0,
-                "num_traces": traces,
-                "trace_interval_m": trace_interval_m,
-                "source": "gprmax_out",
-                "out_path": path,
-            }
+            header_info.update(
+                {
+                    "a_scan_length": samples,
+                    "total_time_ns": total_time_ns if total_time_ns else 0.0,
+                    "num_traces": traces,
+                    "trace_interval_m": trace_interval_m,
+                    "source": "gprmax_out",
+                    "out_path": path,
+                }
+            )
 
             if progress_callback:
                 progress_callback(100, "加载完成！")
 
-            return {"data": data, "header_info": header_info, "path": path}
+            return {
+                "data": data,
+                "header_info": header_info,
+                "trace_metadata": trace_metadata,
+                "path": path,
+            }
 
         except Exception as e:
             raise ValueError(f"gprMax .out 加载失败: {e}")
@@ -4236,7 +4253,7 @@ class GPRGuiQt(QMainWindow):
             self.page_basic.set_method_overrides(current_method_key, merged_params)
 
         source_mode = self.page_basic.get_apply_source_mode()
-        profile_key = "high_quality_uav_gpr"
+        profile_key = recommended_profile_for_header(self.header_info)
         profile = RECOMMENDED_RUN_PROFILES.get(profile_key, {})
         preset_key = profile.get("preset_key")
         if preset_key:
@@ -4249,7 +4266,8 @@ class GPRGuiQt(QMainWindow):
             self.page_basic.set_method_overrides(current_method_key, merged_params)
 
         self._log(
-            "运行默认高质量流程：zero-time → dewow → 频域滤波 → UAV运动补偿 → 背景/F-K → 去噪 → SEC"
+            f"运行默认高质量流程（{profile.get('label', profile_key)}）："
+            + " → ".join(profile.get("order", []))
         )
         order = list(profile.get("order", []))
         current_idx = self.page_basic.method_combo.currentIndex()
@@ -4792,6 +4810,74 @@ class GPRGuiQt(QMainWindow):
         ):
             return True
         return False
+
+    def export_replay_evidence_bundle(self):
+        """手动导出处理历史回放证据包。"""
+        package = self.shared_data.get_replay_evidence_package()
+        if not package:
+            QMessageBox.information(
+                self, "无可导出证据", "请先导入数据并至少完成一次处理或查看。"
+            )
+            return
+
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        default_path = os.path.join(
+            self._default_output_dir(),
+            f"replay_evidence_{ts}.zip",
+        )
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "导出证据",
+            default_path,
+            "ZIP 证据包 (*.zip);;所有文件 (*)",
+        )
+        if not path:
+            return
+
+        selected_method_key = None
+        selected_method_label = None
+        try:
+            selected_method_key = self.page_basic.get_current_method_key()
+            selected_method_label = self.page_basic.method_combo.currentText()
+        except Exception:
+            pass
+
+        export_package = dict(package)
+        export_package["app_context"] = {
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "version": self.version_text,
+            "data_path": self.data_path,
+            "preset_key": self._selected_preset_key,
+            "sidecar_files": dict(self._sidecar_files),
+            "selected_method": {
+                "key": selected_method_key,
+                "label": selected_method_label,
+            },
+            "last_run_summary": dict(self._last_run_summary or {}),
+            "quality_metrics": dict(self._last_quality_metrics or {}),
+            "method_param_overrides": dict(self._method_param_overrides),
+            "runtime_warnings": list(self._runtime_warnings),
+        }
+
+        try:
+            result = export_replay_evidence_zip(
+                export_package,
+                path,
+                bundle_name=f"replay_evidence_{ts}",
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "导出失败", f"证据包导出失败：\n{exc}")
+            logger.exception("Failed to export replay evidence bundle")
+            return
+
+        zip_path = str(result.get("zip_path") or path)
+        try:
+            zip_disp = os.path.relpath(zip_path, BASE_DIR)
+        except ValueError:
+            zip_disp = zip_path
+        self._log(f"处理历史回放证据已导出: {zip_disp}")
+        self.status_label.setText("处理历史回放证据导出完成")
+        QMessageBox.information(self, "导出成功", f"已导出:\n{zip_path}")
 
     def export_quality_snapshot(self):
         """导出质量快照"""

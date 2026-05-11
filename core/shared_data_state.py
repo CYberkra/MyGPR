@@ -23,6 +23,7 @@ class SharedDataState(QObject):
         self.original_trace_metadata: dict[str, np.ndarray] | None = None
         self.original_header_info: dict[str, Any] | None = None
         self.history: list[dict[str, Any]] = []
+        self.replay_package: dict[str, Any] | None = None
         self.data_path: str | None = None
         self.header_info: dict[str, Any] | None = None
         self.original_label = "原始数据"
@@ -50,6 +51,7 @@ class SharedDataState(QObject):
         self.original_label = "原始数据"
         self.current_label = "原始数据"
         self.revision += 1
+        self._refresh_replay_package()
         self.changed.emit(
             {"reason": "loaded", "source": source, "revision": self.revision}
         )
@@ -66,6 +68,7 @@ class SharedDataState(QObject):
             }
         )
         self._trim_history()
+        self._refresh_replay_package()
 
     def can_undo(self) -> bool:
         return bool(self.history)
@@ -104,6 +107,7 @@ class SharedDataState(QObject):
             ):
                 self.current_trace_metadata = None
         self.revision += 1
+        self._refresh_replay_package()
         self.changed.emit(
             {
                 "reason": "current_updated",
@@ -122,6 +126,7 @@ class SharedDataState(QObject):
         self.header_info = _clone_header_info(state.get("header_info"))
         self.current_label = state.get("label") or "当前结果"
         self.revision += 1
+        self._refresh_replay_package()
         self.changed.emit({"reason": "undo", "revision": self.revision})
         return True
 
@@ -137,6 +142,7 @@ class SharedDataState(QObject):
         self.header_info = _clone_header_info(self.original_header_info)
         self.current_label = self.original_label
         self.revision += 1
+        self._refresh_replay_package()
         self.changed.emit({"reason": "reset", "revision": self.revision})
         return True
 
@@ -246,12 +252,93 @@ class SharedDataState(QObject):
         if trace_metadata is not None:
             self.current_trace_metadata = _clone_trace_metadata(trace_metadata)
         if emit:
+            self._refresh_replay_package()
             self.changed.emit({"reason": "metadata", "revision": self.revision})
+        else:
+            self._refresh_replay_package()
 
     def _trim_history(self) -> None:
         overflow = len(self.history) - int(self.max_history)
         if overflow > 0:
             del self.history[:overflow]
+
+    def build_replay_evidence_package(self) -> dict[str, Any]:
+        """Build an in-memory replay evidence package without touching disk."""
+        snapshots = self.build_result_history_entries()
+        package: dict[str, Any] = {
+            "package_type": "mygpr_replay_evidence",
+            "schema_version": 1,
+            "storage": "memory_only_until_user_export",
+            "revision": int(self.revision),
+            "data_path": self.data_path,
+            "original_label": self.original_label,
+            "current_label": self.current_label,
+            "history_count": int(len(self.history)),
+            "snapshot_count": int(len(snapshots)),
+            "has_original": bool(self.original_data is not None),
+            "has_current": bool(self.current_data is not None),
+            "original": _build_snapshot_payload(
+                self.original_label,
+                self.original_data,
+                self.original_header_info,
+                self.original_trace_metadata,
+            ),
+            "current": _build_snapshot_payload(
+                self.current_label,
+                self.current_data,
+                self.header_info,
+                self.current_trace_metadata,
+            ),
+            "history_entries": [],
+            "snapshots": [],
+        }
+        if self.original_data is not None:
+            package["history_entries"] = [
+                _build_snapshot_payload(
+                    entry.get("label") or "历史结果",
+                    entry.get("data"),
+                    entry.get("header_info"),
+                    entry.get("trace_metadata"),
+                )
+                for entry in self.history
+                if entry.get("data") is not None
+            ]
+        package["snapshots"] = [
+            _build_snapshot_payload(
+                entry.get("label") or "历史结果",
+                entry.get("data"),
+                entry.get("header_info"),
+                entry.get("trace_metadata"),
+                index=idx,
+                role=_snapshot_role(idx, len(snapshots)),
+            )
+            for idx, entry in enumerate(snapshots)
+            if entry.get("data") is not None
+        ]
+        package["summary"] = {
+            "history_labels": [
+                str(entry.get("label") or "历史结果") for entry in package["history_entries"]
+            ],
+            "snapshot_labels": [
+                str(entry.get("label") or "历史结果") for entry in package["snapshots"]
+            ],
+            "original_stats": _summarize_array(self.original_data),
+            "current_stats": _summarize_array(self.current_data),
+        }
+        return package
+
+    def get_replay_evidence_package(self) -> dict[str, Any] | None:
+        """Return the latest in-memory replay evidence package."""
+        if self.replay_package is None:
+            self._refresh_replay_package()
+        return self.replay_package
+
+    def _refresh_replay_package(self) -> None:
+        """Refresh the in-memory replay evidence package."""
+        if self.original_data is None or self.current_data is None:
+            self.replay_package = None
+            return
+        self.replay_package = self.build_replay_evidence_package()
 
 
 def _clone_trace_metadata(
@@ -301,3 +388,103 @@ def _append_unique_history_entry(
         items[-1] = candidate
         return
     items.append(candidate)
+
+
+def _build_snapshot_payload(
+    label: str,
+    data: np.ndarray | None,
+    header_info: dict[str, Any] | None,
+    trace_metadata: dict[str, np.ndarray] | None,
+    *,
+    index: int | None = None,
+    role: str | None = None,
+) -> dict[str, Any]:
+    arr = None if data is None else np.array(data, copy=True)
+    payload: dict[str, Any] = {
+        "label": str(label),
+        "data": arr,
+        "header_info": _clone_header_info(header_info),
+        "trace_metadata": _clone_trace_metadata(trace_metadata),
+    }
+    if index is not None:
+        payload["index"] = int(index)
+    if role is not None:
+        payload["role"] = role
+    payload["summary"] = _summarize_array(arr)
+    payload["header_summary"] = _summarize_header_info(header_info)
+    payload["trace_metadata_summary"] = _summarize_trace_metadata(trace_metadata)
+    return payload
+
+
+def _snapshot_role(index: int, total: int) -> str:
+    if index == 0:
+        return "original"
+    if index == total - 1:
+        return "current"
+    return "history"
+
+
+def _summarize_array(data: np.ndarray | None) -> dict[str, Any]:
+    if data is None:
+        return {"present": False}
+
+    arr = np.asarray(data)
+    finite = arr[np.isfinite(arr)]
+    if finite.size:
+        min_value = float(np.min(finite))
+        max_value = float(np.max(finite))
+        mean_value = float(np.mean(finite))
+        std_value = float(np.std(finite))
+    else:
+        min_value = max_value = mean_value = std_value = float("nan")
+    return {
+        "present": True,
+        "shape": [int(dim) for dim in arr.shape],
+        "dtype": str(arr.dtype),
+        "finite_ratio": float(finite.size / arr.size) if arr.size else 0.0,
+        "min": min_value,
+        "max": max_value,
+        "mean": mean_value,
+        "std": std_value,
+    }
+
+
+def _summarize_header_info(header_info: dict[str, Any] | None) -> dict[str, Any]:
+    if not header_info:
+        return {}
+    summary: dict[str, Any] = {}
+    for key, value in header_info.items():
+        if isinstance(value, np.ndarray):
+            summary[str(key)] = {
+                "kind": "ndarray",
+                "shape": [int(dim) for dim in value.shape],
+                "dtype": str(value.dtype),
+            }
+        elif isinstance(value, (np.floating, np.integer)):
+            summary[str(key)] = value.item()
+        elif isinstance(value, (str, bool, int, float)) or value is None:
+            summary[str(key)] = value
+        else:
+            summary[str(key)] = str(value)
+    return summary
+
+
+def _summarize_trace_metadata(
+    metadata: dict[str, np.ndarray] | None,
+) -> dict[str, Any]:
+    if not metadata:
+        return {"field_count": 0, "fields": []}
+    fields: list[str] = []
+    field_shapes: dict[str, list[int]] = {}
+    field_dtypes: dict[str, str] = {}
+    for key, value in metadata.items():
+        arr = np.asarray(value)
+        fields.append(str(key))
+        field_shapes[str(key)] = [int(dim) for dim in arr.shape]
+        field_dtypes[str(key)] = str(arr.dtype)
+    return {
+        "field_count": len(fields),
+        "fields": sorted(fields),
+        "field_shapes": field_shapes,
+        "field_dtypes": field_dtypes,
+    }

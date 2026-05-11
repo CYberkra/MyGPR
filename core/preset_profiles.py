@@ -156,8 +156,8 @@ RECOMMENDED_RUN_PROFILES = {
             "dewow": {"window": 61},
             "frequency_filter_1d": {
                 "filter_type": "bandpass",
-                "low_freq_mhz": 10.0,
-                "high_freq_mhz": 800.0,
+                "low_freq_mhz": 20.0,
+                "high_freq_mhz": 170.0,
                 "taper_ratio": 0.08,
             },
             "motion_compensation_v2": {
@@ -174,7 +174,6 @@ RECOMMENDED_RUN_PROFILES = {
                 "max_abs_tilt_deg": 20.0,
             },
             "subtracting_average_2D": {"ntraces": 51},
-            "fk_filter": {"angle_low": 12, "angle_high": 55, "taper_width": 4},
             "wavelet_svd": {
                 "wavelet": "db4",
                 "levels": 2,
@@ -190,9 +189,32 @@ RECOMMENDED_RUN_PROFILES = {
             "frequency_filter_1d",
             "motion_compensation_v2",
             "subtracting_average_2D",
-            "fk_filter",
             "wavelet_svd",
             "sec_gain",
+        ],
+    },
+    "gprmax_impulse_validation": {
+        "label": "gprMax impulse 仿真验证",
+        "preset_key": "raw_fidelity",
+        "method_params": {
+            "set_zero_time": {"new_zero_time": 5.0},
+            "dewow": {"window": 61},
+            "subtracting_average_2D": {"ntraces": 31},
+            "agcGain": {"window": 61},
+            "wavelet_svd": {
+                "wavelet": "db4",
+                "levels": 2,
+                "threshold": 0.05,
+                "rank_start": 1,
+                "rank_end": 20,
+            },
+        },
+        "order": [
+            "set_zero_time",
+            "dewow",
+            "subtracting_average_2D",
+            "agcGain",
+            "wavelet_svd",
         ],
     },
     "uav_gpr_experience_baseline_v1": {
@@ -708,9 +730,18 @@ WORKFLOW_PRESETS = {
                 "frequency_filter_1d": True,
                 "motion_compensation_v2": True,
                 "subtracting_average_2D": True,
-                "fk_filter": True,
             },
             "stage3": {"wavelet_svd": True, "sec_gain": True},
+            "stage4": {},
+        },
+    },
+    "gprmax_impulse_validation": {
+        "label": "gprMax impulse 仿真验证",
+        "description": "面向外部 gprMax impulse B-scan 的默认链路，不套用实测 SFCW 20-170MHz 固定频带。",
+        "stages": {
+            "stage1": {"set_zero_time": True, "dewow": True},
+            "stage2": {"subtracting_average_2D": True},
+            "stage3": {"agcGain": True, "wavelet_svd": True},
             "stage4": {},
         },
     },

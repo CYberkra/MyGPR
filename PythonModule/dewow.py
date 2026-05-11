@@ -17,48 +17,11 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: F401
 
+from core.gprpy_compat import apply_gprpy_dewow
+
 
 def _apply_dewow_exact(data: np.ndarray, window: int) -> np.ndarray:
-    arr = np.asarray(data, dtype=np.float64)
-    if arr.ndim != 2:
-        raise ValueError(f"输入数据必须是2维数组，当前: {arr.ndim}维")
-    ny, nx = arr.shape
-    if ny == 0 or nx == 0:
-        raise ValueError(f"输入数据为空: shape={arr.shape}")
-
-    window = int(round(float(window)))
-    upper = max(1, ny // 2)
-    window = max(1, min(window, upper))
-
-    if window == 1:
-        # 与当前实现一致：窗口为 1 时，移动平均等于自身，输出全 0
-        return np.zeros_like(arr, dtype=np.float32)
-
-    csum = np.cumsum(arr, axis=0, dtype=np.float64)
-    csum = np.vstack([np.zeros((1, nx), dtype=np.float64), csum])
-
-    moving_valid = (csum[window:] - csum[:-window]) / float(window)
-
-    pad_left = window // 2
-    pad_right = ny - moving_valid.shape[0] - pad_left
-
-    if moving_valid.shape[0] <= 0:
-        moving_same = np.zeros_like(arr, dtype=np.float64)
-    else:
-        left = (
-            np.repeat(moving_valid[:1, :], pad_left, axis=0)
-            if pad_left > 0
-            else np.empty((0, nx), dtype=np.float64)
-        )
-        right = (
-            np.repeat(moving_valid[-1:, :], pad_right, axis=0)
-            if pad_right > 0
-            else np.empty((0, nx), dtype=np.float64)
-        )
-        moving_same = np.vstack([left, moving_valid, right])
-
-    result = arr - moving_same
-    return result.astype(np.float32, copy=False)
+    return apply_gprpy_dewow(data, window)
 
 
 def dewow(
@@ -114,10 +77,7 @@ def dewow(
 def method_dewow(data, window=23, **kwargs):
     """去直流（DeWOW）- GUI / auto-tune ndarray 接口。"""
     result = _apply_dewow_exact(data, int(window))
-    effective_window = max(
-        1, min(int(round(float(window))), max(1, result.shape[0] // 2))
-    )
-    return result, {"method": "dewow", "window": int(effective_window)}
+    return result, {"method": "dewow", "window": int(round(float(window)))}
 
 
 if __name__ == "__main__":

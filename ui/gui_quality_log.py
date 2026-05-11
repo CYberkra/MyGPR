@@ -110,6 +110,12 @@ class QualityLogPage(QWidget):
         self.btn_export_quality_snapshot.setToolTip(
             "导出当前质量指标、阈值与航空质控摘要"
         )
+        self.btn_export_replay_evidence = PushButton(
+            FluentIcon.SAVE, "导出证据"
+        )
+        self.btn_export_replay_evidence.setToolTip(
+            "手动导出当前处理历史和回放证据包"
+        )
         self.btn_open_log_dir = PushButton(FluentIcon.FOLDER, "打开日志目录")
         self.btn_open_log_dir.setToolTip("打开日志和输出目录")
         self.btn_copy_diagnostics = PushButton(FluentIcon.COPY, "复制诊断信息")
@@ -121,6 +127,7 @@ class QualityLogPage(QWidget):
         action_row_top_layout.setSpacing(8)
         action_row_top_layout.addWidget(self.btn_generate_report)
         action_row_top_layout.addWidget(self.btn_export_quality_snapshot)
+        action_row_top_layout.addWidget(self.btn_export_replay_evidence)
         action_row_top_layout.addStretch(1)
         action_layout.addWidget(action_row_top)
 

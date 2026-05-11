@@ -140,8 +140,8 @@ QUICK_PRESETS = {
                 "enabled": True,
                 "params": {
                     "filter_type": "bandpass",
-                    "low_freq_mhz": 10.0,
-                    "high_freq_mhz": 800.0,
+                    "low_freq_mhz": 20.0,
+                    "high_freq_mhz": 170.0,
                     "taper_ratio": 0.08,
                 },
             },
@@ -168,12 +168,6 @@ QUICK_PRESETS = {
                 "method_id": "subtracting_average_2D",
                 "enabled": True,
                 "params": {"ntraces": 51},
-            },
-            {
-                "category": "background_removal",
-                "method_id": "fk_filter",
-                "enabled": True,
-                "params": {"angle_low": 12, "angle_high": 55, "taper_width": 4},
             },
             {
                 "category": "denoising",

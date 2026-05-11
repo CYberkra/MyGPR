@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional, Tuple
 import numpy as np
 
 from core.methods_registry import PROCESSING_METHODS
+from core.gprpy_compat import apply_gprpy_agc_gain, apply_gprpy_rem_mean_trace
 from core.runtime_warnings import build_runtime_warning, merge_runtime_warnings
 
 
@@ -285,14 +286,26 @@ def _run_legacy_adapter(
         output, method_warnings = _apply_agc_gain(data, **params)
         return _normalize_result(
             method_id,
-            output,
+            (
+                output,
+                {
+                    "window": int(params.get("window", 11)),
+                    "method": "agcGain",
+                },
+            ),
             warnings=merge_runtime_warnings(warnings, method_warnings),
         )
     if method_id == "subtracting_average_2D":
         output, method_warnings = _apply_subtracting_average_2d(data, **params)
         return _normalize_result(
             method_id,
-            output,
+            (
+                output,
+                {
+                    "ntraces": int(params.get("ntraces", 501)),
+                    "method": "subtracting_average_2D",
+                },
+            ),
             warnings=merge_runtime_warnings(warnings, method_warnings),
         )
     if method_id == "running_average_2D":
@@ -339,12 +352,10 @@ def _apply_agc_gain(
     _low_energy_guard: bool = False,
     **kwargs,
 ) -> tuple[np.ndarray, list[dict[str, Any]]]:
-    from scipy.ndimage import uniform_filter1d
-
     requested_window = int(window)
-    window = max(1, min(requested_window, data.shape[0]))
+    window = max(1, requested_window)
     warnings = []
-    if window != requested_window:
+    if requested_window < 1 or requested_window > data.shape[0]:
         warnings.append(
             build_runtime_warning(
                 "parameter_clamped",
@@ -352,7 +363,7 @@ def _apply_agc_gain(
                 method_id="agcGain",
                 parameter="window",
                 requested=requested_window,
-                effective=window,
+                effective=max(1, min(requested_window, data.shape[0])),
             )
         )
     use_low_energy_guard = bool(_low_energy_guard)
@@ -374,7 +385,7 @@ def _apply_agc_gain(
                     recommended_min_window_ns=AGC_MIN_WINDOW_NS,
                 )
             )
-    if window >= data.shape[0]:
+    if window > data.shape[0]:
         energy = np.maximum(np.linalg.norm(data, axis=0, keepdims=True), AGC_EPS)
         warnings.append(
             build_runtime_warning(
@@ -385,15 +396,10 @@ def _apply_agc_gain(
             )
         )
     else:
-        local_rms = np.sqrt(
-            np.maximum(
-                uniform_filter1d(data**2, size=window, axis=0, mode="nearest"),
-                AGC_EPS**2,
-            )
-        )
         if use_low_energy_guard:
-            energy_floor = _agc_energy_floor(data, local_rms)
-            floor_mask = local_rms < energy_floor
+            local_energy = _gprpy_local_window_energy(data, window)
+            energy_floor = _agc_energy_floor(data, local_energy)
+            floor_mask = local_energy < energy_floor
             floor_fraction = float(np.mean(floor_mask)) if floor_mask.size else 0.0
             if floor_fraction >= AGC_LOW_ENERGY_WARNING_FRACTION:
                 warnings.append(
@@ -408,9 +414,9 @@ def _apply_agc_gain(
                         max_gain=float(1.0 / max(energy_floor, AGC_EPS)),
                     )
                 )
-            energy = np.maximum(local_rms, energy_floor)
+            energy = np.maximum(local_energy, energy_floor)
         else:
-            energy = local_rms
+            return apply_gprpy_agc_gain(data, window), warnings
     return np.divide(data, energy), warnings
 
 
@@ -436,8 +442,6 @@ def _agc_energy_floor(data: np.ndarray, local_rms: np.ndarray) -> float:
 def _apply_subtracting_average_2d(
     data: np.ndarray, ntraces: int = 501, **kwargs
 ) -> tuple[np.ndarray, list[dict[str, Any]]]:
-    from scipy.ndimage import uniform_filter1d
-
     requested_ntraces = int(ntraces)
     ntraces = max(1, requested_ntraces)
     warnings = []
@@ -453,9 +457,8 @@ def _apply_subtracting_average_2d(
                 effective=data.shape[1],
             )
         )
-    else:
-        background = uniform_filter1d(data, size=ntraces, axis=1, mode="nearest")
-    return data - background, warnings
+        return data - background, warnings
+    return apply_gprpy_rem_mean_trace(data, ntraces), warnings
 
 
 def _apply_running_average_2d(
@@ -490,3 +493,28 @@ def _apply_running_average_2d(
         )
         ntraces = data.shape[1]
     return uniform_filter1d(data, size=ntraces, axis=1, mode="nearest"), warnings
+
+
+def _gprpy_local_window_energy(data: np.ndarray, window: int) -> np.ndarray:
+    """Return the GPRPy-style L2 norm over each moving window."""
+    arr = np.asarray(data, dtype=np.float64)
+    totsamps = arr.shape[0]
+    halfwid = int(np.ceil(window / 2.0))
+    energy = np.zeros(arr.shape, dtype=np.float64)
+    energy[0 : halfwid + 1, :] = np.maximum(
+        np.linalg.norm(arr[0 : halfwid + 1, :], axis=0, keepdims=True).repeat(
+            halfwid + 1, axis=0
+        ),
+        AGC_EPS,
+    )
+    for smp in range(halfwid, totsamps - halfwid + 1):
+        winstart = int(smp - halfwid)
+        winend = int(smp + halfwid)
+        energy[smp, :] = np.maximum(
+            np.linalg.norm(arr[winstart : winend + 1, :], axis=0), AGC_EPS
+        )
+    energy[totsamps - halfwid : totsamps + 1, :] = np.maximum(
+        np.linalg.norm(arr[totsamps - halfwid : totsamps + 1, :], axis=0),
+        AGC_EPS,
+    )
+    return energy

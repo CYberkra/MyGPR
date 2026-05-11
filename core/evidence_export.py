@@ -6,6 +6,10 @@ from __future__ import annotations
 
 import csv
 import json
+import re
+import tempfile
+import zipfile
+from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -45,7 +49,7 @@ STANDARD_CHAIN_SPECS: dict[str, dict[str, Any]] = {
             ("set_zero_time", {"new_zero_time": 5.0}),
             ("dewow", {"window": 41}),
             ("subtracting_average_2D", {"ntraces": 501}),
-            ("agcGain", {"window": 11}),
+            ("agcGain", {"window": 11, "_low_energy_guard": True}),
             ("running_average_2D", {"ntraces": 9}),
         ],
     },
@@ -123,6 +127,225 @@ def _save_comparison(
     axes[1].set_ylabel("Sample")
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
+
+
+def _safe_replay_name(value: str | None, fallback: str = "replay_evidence") -> str:
+    text = (value or "").strip() or fallback
+    text = re.sub(r"[^\w\u4e00-\u9fff.-]+", "_", text, flags=re.UNICODE)
+    return text.strip("._") or fallback
+
+
+def _compact_replay_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Return a JSON summary without raw arrays for exported package manifests."""
+    return {
+        "index": int(snapshot.get("index", 0)),
+        "role": str(snapshot.get("role") or ""),
+        "label": str(snapshot.get("label") or "历史结果"),
+        "summary": _to_jsonable(snapshot.get("summary") or {}),
+        "header_summary": _to_jsonable(snapshot.get("header_summary") or {}),
+        "trace_metadata_summary": _to_jsonable(
+            snapshot.get("trace_metadata_summary") or {}
+        ),
+    }
+
+
+def _compact_replay_package(package: dict[str, Any]) -> dict[str, Any]:
+    snapshots = [
+        _compact_replay_snapshot(snapshot)
+        for snapshot in package.get("snapshots", [])
+        if isinstance(snapshot, dict)
+    ]
+    return {
+        "package_type": package.get("package_type", "mygpr_replay_evidence"),
+        "schema_version": int(package.get("schema_version", 1)),
+        "storage": package.get("storage", "memory_only_until_user_export"),
+        "exported_at": datetime.now().isoformat(timespec="seconds"),
+        "revision": int(package.get("revision", 0)),
+        "data_path": package.get("data_path"),
+        "original_label": package.get("original_label"),
+        "current_label": package.get("current_label"),
+        "history_count": int(package.get("history_count", 0)),
+        "snapshot_count": len(snapshots),
+        "summary": _to_jsonable(package.get("summary") or {}),
+        "snapshots": snapshots,
+        "app_context": _to_jsonable(package.get("app_context") or {}),
+    }
+
+
+def _build_replay_report_markdown(summary: dict[str, Any]) -> str:
+    lines = [
+        "# MyGPR 处理历史回放证据包",
+        "",
+        f"- 导出时间: {summary.get('exported_at')}",
+        f"- 数据来源: {summary.get('data_path') or '未记录'}",
+        f"- 状态版本: {summary.get('revision')}",
+        f"- 快照数量: {summary.get('snapshot_count')}",
+        f"- 保存策略: {summary.get('storage')}",
+        "",
+        "## 快照列表",
+        "",
+    ]
+    for snapshot in summary.get("snapshots", []):
+        index = snapshot.get("index")
+        role = snapshot.get("role") or "history"
+        label = snapshot.get("label") or "历史结果"
+        data_summary = snapshot.get("summary") or {}
+        shape = data_summary.get("shape") or []
+        finite_ratio = data_summary.get("finite_ratio")
+        finite_text = (
+            f"{float(finite_ratio):.3f}" if isinstance(finite_ratio, (int, float)) else "未知"
+        )
+        lines.append(
+            f"- {index:02d} | {role} | {label} | shape={shape} | finite={finite_text}"
+        )
+    lines.extend(
+        [
+            "",
+            "## 包内文件",
+            "",
+            "- `summary.json`: 证据包索引、快照摘要、应用上下文。",
+            "- `report.md`: 当前说明文件。",
+            "- `data/*.npy`: 每个处理阶段的 B-scan 数组。",
+            "- `metadata/*`: 每个阶段的头信息和可用的 trace metadata。",
+            "- `snapshots/*.png`: 每个处理阶段的可视化图像。",
+        ]
+    )
+    return "\n".join(lines) + "\n"
+
+
+def _write_trace_metadata_npz(metadata: Any, out_path: Path) -> bool:
+    if not isinstance(metadata, dict) or not metadata:
+        return False
+    arrays = {
+        str(key): np.asarray(value)
+        for key, value in metadata.items()
+        if np.asarray(value).size > 0
+    }
+    if not arrays:
+        return False
+    np.savez_compressed(out_path, **arrays)
+    return True
+
+
+def export_replay_evidence_bundle(
+    package: dict[str, Any],
+    out_path: str | Path,
+    *,
+    bundle_name: str | None = None,
+    save_images: bool = True,
+) -> dict[str, Any]:
+    """Export an in-memory replay package to one ZIP file.
+
+    No artifacts are persisted until this function is called by an explicit
+    user export action. Temporary staging files are removed after zipping.
+    """
+    snapshots = [
+        snapshot
+        for snapshot in package.get("snapshots", [])
+        if isinstance(snapshot, dict) and snapshot.get("data") is not None
+    ]
+    if not snapshots:
+        raise ValueError("replay evidence package has no snapshots to export")
+
+    zip_path = Path(out_path)
+    if zip_path.suffix.lower() != ".zip":
+        zip_path = zip_path.with_suffix(".zip")
+    zip_path.parent.mkdir(parents=True, exist_ok=True)
+    safe_bundle_name = _safe_replay_name(bundle_name or zip_path.stem)
+
+    with tempfile.TemporaryDirectory(prefix=f"{safe_bundle_name}_") as tmp:
+        root = Path(tmp)
+        data_dir = root / "data"
+        metadata_dir = root / "metadata"
+        snapshots_dir = root / "snapshots"
+        data_dir.mkdir()
+        metadata_dir.mkdir()
+        snapshots_dir.mkdir()
+
+        summary = _compact_replay_package(package)
+        artifacts: list[dict[str, Any]] = []
+
+        for idx, snapshot in enumerate(snapshots):
+            label = str(snapshot.get("label") or f"snapshot_{idx}")
+            role = str(snapshot.get("role") or "history")
+            file_stem = f"{idx:02d}-{role}-{_safe_replay_name(label, 'snapshot')}"
+            arr = np.asarray(snapshot["data"])
+
+            data_rel = Path("data") / f"{file_stem}.npy"
+            np.save(root / data_rel, arr)
+
+            header_rel = Path("metadata") / f"{file_stem}-header.json"
+            (root / header_rel).write_text(
+                json.dumps(
+                    _to_jsonable(snapshot.get("header_info") or {}),
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+
+            metadata_rel: Path | None = None
+            if _write_trace_metadata_npz(
+                snapshot.get("trace_metadata"),
+                metadata_dir / f"{file_stem}-trace_metadata.npz",
+            ):
+                metadata_rel = Path("metadata") / f"{file_stem}-trace_metadata.npz"
+
+            image_rel: Path | None = None
+            if save_images and arr.ndim == 2:
+                image_rel = Path("snapshots") / f"{file_stem}.png"
+                time_range, distance_range = _time_distance_ranges(
+                    snapshot.get("header_info"), arr
+                )
+                save_image(
+                    arr,
+                    str(root / image_rel),
+                    title=f"{idx:02d} {label}",
+                    time_range=time_range,
+                    distance_range=distance_range,
+                )
+
+            artifacts.append(
+                {
+                    "index": idx,
+                    "label": label,
+                    "role": role,
+                    "data_npy": str(data_rel).replace("\\", "/"),
+                    "header_json": str(header_rel).replace("\\", "/"),
+                    "trace_metadata_npz": (
+                        str(metadata_rel).replace("\\", "/")
+                        if metadata_rel is not None
+                        else None
+                    ),
+                    "image_png": (
+                        str(image_rel).replace("\\", "/")
+                        if image_rel is not None
+                        else None
+                    ),
+                }
+            )
+
+        summary["artifacts"] = artifacts
+        (root / "summary.json").write_text(
+            json.dumps(_to_jsonable(summary), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        (root / "report.md").write_text(
+            _build_replay_report_markdown(summary),
+            encoding="utf-8",
+        )
+
+        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for file_path in sorted(path for path in root.rglob("*") if path.is_file()):
+                zf.write(file_path, file_path.relative_to(root).as_posix())
+
+    return {
+        "zip_path": str(zip_path.resolve()),
+        "bundle_name": safe_bundle_name,
+        "snapshot_count": len(snapshots),
+        "artifact_count": len(artifacts) + 2,
+        "summary": summary,
+    }
 
 
 def _default_params_for(method_key: str) -> dict[str, Any]:

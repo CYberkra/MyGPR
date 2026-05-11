@@ -5,8 +5,8 @@
 from __future__ import annotations
 
 import numpy as np
-from scipy.ndimage import uniform_filter1d
 
+from core.gprpy_compat import apply_gprpy_agc_gain
 from core.processing_engine import run_processing_method
 
 
@@ -21,16 +21,13 @@ def test_agc_gain_emits_clamp_and_fallback_warning():
     assert "global_gain_fallback" in codes
 
 
-def test_agc_gain_default_matches_legacy_local_rms_formula():
+def test_agc_gain_default_matches_gprpy_window_norm():
     rng = np.random.default_rng(42)
     data = rng.normal(0.0, 1.0, size=(40, 6)).astype(np.float32)
 
     result, meta = run_processing_method(data, "agcGain", {"window": 5})
 
-    expected_energy = np.sqrt(
-        np.maximum(uniform_filter1d(data**2, size=5, axis=0, mode="nearest"), 1.0e-16)
-    )
-    expected = data / expected_energy
+    expected = apply_gprpy_agc_gain(data, 5)
     warnings = meta.get("runtime_warnings", [])
     codes = {item.get("code") for item in warnings}
 

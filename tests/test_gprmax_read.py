@@ -40,3 +40,36 @@ def test_read_gprmax_out_merges_trace_files_in_numeric_order(tmp_path: Path):
     assert result["samples_per_trace"] == 3
     assert result["time_step_s"] == 1e-10
     assert result["total_time_ns"] == 0.3
+
+
+def test_read_gprmax_out_attaches_impulse_context_from_matching_in(tmp_path: Path):
+    data = np.arange(12, dtype=np.float32).reshape(4, 3)
+    _write_gprmax_out(tmp_path / "air_test_merged.out", data, dt=2e-10)
+    (tmp_path / "air_test.in").write_text(
+        "\n".join(
+            [
+                "#title: air_test",
+                "#domain: 1.000 0.500 0.010",
+                "#dx_dy_dz: 0.010 0.010 0.010",
+                "#time_window: 8.000e-10",
+                "#waveform: impulse 1 1.0 my_impulse",
+                "#hertzian_dipole: z 0.100 0.200 0.100 my_impulse",
+                "#rx: 0.100 0.300 0.100",
+                "#src_steps: 0.050 0.000 0.000",
+                "#rx_steps: 0.050 0.000 0.000",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = read_gprmax_out(str(tmp_path / "air_test_merged.out"))
+
+    header = result["header_info"]
+    assert header["source"] == "gprmax_out"
+    assert header["data_context"] == "gprmax_impulse"
+    assert header["frequency_filter_policy"] == "model_or_auto_tune_only"
+    assert "frequency_filter_band_mhz" not in header
+    assert header["default_processing_profile"] == "gprmax_impulse_validation"
+    assert header["trace_interval_m"] == 0.05
+    assert result["trace_metadata"] is not None
+    assert np.allclose(result["trace_metadata"]["trace_distance_m"], [0.0, 0.05, 0.1])

@@ -34,6 +34,12 @@ except ImportError:
 
 # 直接导入 read_file_data 模块
 from read_file_data import readcsv, savecsv, save_image, show_image
+from core.data_context import (
+    DATA_CONTEXT_GPRMAX,
+    DATA_CONTEXT_GPRMAX_IMPULSE,
+    DATA_CONTEXT_UAV_GPR_SFCW_FIELD,
+    apply_data_context_defaults,
+)
 
 
 def read_gprmax_in(in_path: str) -> Dict[str, Any]:
@@ -225,6 +231,11 @@ def extract_airborne_csv_payload(
                 if updated_header is None:
                     updated_header = {}
                 updated_header.update(_build_airborne_header_summary(metadata))
+                updated_header = apply_data_context_defaults(
+                    updated_header,
+                    trace_metadata=metadata,
+                    context=DATA_CONTEXT_UAV_GPR_SFCW_FIELD,
+                )
                 return data, metadata, updated_header
 
             return data, metadata, updated_header
@@ -392,6 +403,105 @@ def _build_airborne_header_summary(metadata: dict[str, np.ndarray]) -> dict[str,
     }
 
 
+def _find_gprmax_input_for_output(out_path: Path) -> Path | None:
+    """Find the most likely .in file that produced a gprMax .out file."""
+    candidates = [
+        out_path.with_suffix(".in"),
+        out_path.with_name(out_path.stem.replace("_merged", "") + ".in"),
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    in_files = sorted(out_path.parent.glob("*.in"))
+    return in_files[0] if in_files else None
+
+
+def _safe_attr_list(value: Any) -> list[float] | None:
+    try:
+        return [float(v) for v in value]
+    except Exception:
+        return None
+
+
+def _build_gprmax_trace_metadata(
+    traces: int,
+    gprmax_config: dict[str, Any] | None,
+) -> dict[str, np.ndarray] | None:
+    """Create deterministic per-trace distance metadata from gprMax step commands."""
+    if traces <= 0:
+        return None
+    step = None
+    if gprmax_config:
+        src_steps = gprmax_config.get("src_steps")
+        rx_steps = gprmax_config.get("rx_steps")
+        for steps in (rx_steps, src_steps):
+            if steps and len(steps) >= 1:
+                try:
+                    candidate = float(steps[0])
+                except Exception:
+                    candidate = 0.0
+                if candidate > 0.0:
+                    step = candidate
+                    break
+    if step is None:
+        return None
+    return {
+        "trace_index": np.arange(traces, dtype=np.int32),
+        "trace_distance_m": (np.arange(traces, dtype=np.float32) * np.float32(step)),
+    }
+
+
+def _build_gprmax_header_info(
+    *,
+    out_path: Path,
+    samples: int,
+    traces: int,
+    time_step_s: float | None,
+    total_time_ns: float | None,
+    attrs: dict[str, Any],
+    gprmax_config: dict[str, Any] | None,
+) -> dict[str, Any]:
+    trace_interval_m = 0.0
+    if gprmax_config:
+        for steps in (gprmax_config.get("rx_steps"), gprmax_config.get("src_steps")):
+            if steps and len(steps) >= 1:
+                try:
+                    trace_interval_m = float(steps[0])
+                except Exception:
+                    trace_interval_m = 0.0
+                if trace_interval_m > 0.0:
+                    break
+
+    header = {
+        "a_scan_length": int(samples),
+        "num_traces": int(traces),
+        "total_time_ns": float(total_time_ns or 0.0),
+        "time_step_s": time_step_s,
+        "trace_interval_m": trace_interval_m,
+        "source": "gprmax_out",
+        "source_format": "gprmax_out",
+        "out_path": str(out_path),
+    }
+    if "Iterations" in attrs:
+        header["gprmax_iterations"] = int(attrs["Iterations"])
+    if "dt" in attrs:
+        header["gprmax_dt_s"] = float(attrs["dt"])
+    if "nx_ny_nz" in attrs:
+        nx_ny_nz = _safe_attr_list(attrs.get("nx_ny_nz"))
+        if nx_ny_nz is not None:
+            header["gprmax_nx_ny_nz"] = nx_ny_nz
+
+    context = DATA_CONTEXT_GPRMAX
+    if gprmax_config and "impulse" in str(gprmax_config.get("waveform") or "").lower():
+        context = DATA_CONTEXT_GPRMAX_IMPULSE
+    return apply_data_context_defaults(
+        header,
+        gprmax_config=gprmax_config,
+        source_path=out_path,
+        context=context,
+    )
+
+
 _ASCAN_NUM_RE = re.compile(r"(\d+)(?=\.csv$)", re.IGNORECASE)
 
 
@@ -557,6 +667,14 @@ def read_gprmax_out(out_path: str) -> dict:
     if not out_path.exists():
         raise FileNotFoundError(f"gprMax .out file not found: {out_path}")
 
+    gprmax_config = None
+    in_path = _find_gprmax_input_for_output(out_path)
+    if in_path is not None:
+        try:
+            gprmax_config = read_gprmax_in(str(in_path))
+        except Exception:
+            gprmax_config = None
+
     with h5py.File(out_path, "r") as f:
         # 读取属性
         attrs = dict(f.attrs)
@@ -590,6 +708,7 @@ def read_gprmax_out(out_path: str) -> dict:
                 first_attrs = dict(f0.attrs)
                 iterations = first_attrs.get("Iterations", iterations)
                 dt = first_attrs.get("dt", dt)
+                attrs = first_attrs
                 data0 = f0["rxs"]["rx1"]["Ez"][:]
 
             # 合并所有文件
@@ -614,12 +733,26 @@ def read_gprmax_out(out_path: str) -> dict:
     if data.ndim == 2 and data.shape[1] > 1:
         time_step_s = float(dt) if dt else None
         total_time_ns = time_step_s * samples * 1e9 if time_step_s else None
+        header_info = _build_gprmax_header_info(
+            out_path=out_path,
+            samples=data.shape[0],
+            traces=data.shape[1],
+            time_step_s=time_step_s,
+            total_time_ns=total_time_ns,
+            attrs=attrs,
+            gprmax_config=gprmax_config,
+        )
+        trace_metadata = _build_gprmax_trace_metadata(data.shape[1], gprmax_config)
         return {
             "data": data.astype(np.float32),
             "num_traces": data.shape[1],
             "samples_per_trace": data.shape[0],
             "time_step_s": time_step_s,
             "total_time_ns": total_time_ns,
+            "header_info": header_info,
+            "trace_metadata": trace_metadata,
+            "gprmax_config": gprmax_config,
+            "in_path": str(in_path) if in_path else None,
         }
 
     # 尝试读取道数信息
@@ -657,13 +790,28 @@ def read_gprmax_out(out_path: str) -> dict:
     # 计算时间参数
     time_step_s = float(dt) if dt else None
     total_time_ns = time_step_s * samples * 1e9 if time_step_s else None
+    traces = data.shape[1] if data.ndim == 2 else 1
+    header_info = _build_gprmax_header_info(
+        out_path=out_path,
+        samples=data.shape[0],
+        traces=traces,
+        time_step_s=time_step_s,
+        total_time_ns=total_time_ns,
+        attrs=attrs,
+        gprmax_config=gprmax_config,
+    )
+    trace_metadata = _build_gprmax_trace_metadata(traces, gprmax_config)
 
     return {
         "data": data.astype(np.float32),
-        "num_traces": data.shape[1] if data.ndim == 2 else 1,
+        "num_traces": traces,
         "samples_per_trace": data.shape[0],
         "time_step_s": time_step_s,
         "total_time_ns": total_time_ns,
+        "header_info": header_info,
+        "trace_metadata": trace_metadata,
+        "gprmax_config": gprmax_config,
+        "in_path": str(in_path) if in_path else None,
     }
 
 

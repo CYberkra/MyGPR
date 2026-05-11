@@ -267,8 +267,8 @@ class WorkflowTemplateManager:
                         "method_id": "frequency_filter_1d",
                         "params": {
                             "filter_type": "bandpass",
-                            "low_freq_mhz": 10.0,
-                            "high_freq_mhz": 800.0,
+                            "low_freq_mhz": 20.0,
+                            "high_freq_mhz": 170.0,
                             "taper_ratio": 0.08,
                         },
                     },
@@ -285,10 +285,6 @@ class WorkflowTemplateManager:
                         },
                     },
                     {"method_id": "subtracting_average_2D", "params": {"ntraces": 51}},
-                    {
-                        "method_id": "fk_filter",
-                        "params": {"angle_low": 12, "angle_high": 55, "taper_width": 4},
-                    },
                     {
                         "method_id": "wavelet_svd",
                         "params": {

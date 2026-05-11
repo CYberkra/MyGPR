@@ -1058,7 +1058,6 @@ def test_run_default_pipeline_uses_high_quality_order_and_current_source_mode(
             "frequency_filter_1d",
             "motion_compensation_v2",
             "subtracting_average_2D",
-            "fk_filter",
             "wavelet_svd",
             "sec_gain",
         ]
@@ -1207,6 +1206,7 @@ def test_workflow_presets_align_with_current_denoising_preference():
     ]
     assert high_quality_methods == RECOMMENDED_RUN_PROFILES["high_quality_uav_gpr"]["order"]
     assert "frequency_filter_1d" in high_quality_methods
+    assert "fk_filter" not in high_quality_methods
     assert "motion_compensation_v2" in high_quality_methods
     assert "agcGain" not in high_quality_methods
 

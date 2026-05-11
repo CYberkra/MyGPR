@@ -20,6 +20,7 @@ from core.auto_tune_constraints import (
     ParameterConstraintResult,
     constrain_auto_tune_params,
 )
+from core.data_context import frequency_band_from_context
 from core.methods_registry import PROCESSING_METHODS, get_auto_tune_stage
 from core.processing_engine import (
     clone_header_info,
@@ -580,7 +581,18 @@ def _build_candidate_trials(
             values = _build_agc_windows(
                 data.shape[0], context, config, stage=stage, budget=stage_budget
             )
-            return [{"window": value} for value in values]
+            guard_values = config.get("_low_energy_guard", [True])
+            if not isinstance(guard_values, list):
+                guard_values = [guard_values]
+            trials = []
+            for value, guard in itertools.product(values, guard_values):
+                trials.append(
+                    {
+                        "window": int(value),
+                        "_low_energy_guard": bool(guard),
+                    }
+                )
+            return _dedupe_candidates(trials)
         if method_key == "compensatingGain":
             gain_min_values, gain_max_values = _build_compensating_gain_candidates(
                 context, config, stage=stage, budget=stage_budget
@@ -1102,8 +1114,15 @@ def _refine_candidate_trials(
             values = _trim_numeric_candidates(
                 values, budget=plan["fine_budget"], center=center
             )
+            low_energy_guard = bool(params.get("_low_energy_guard", True))
             for value in values:
-                refined.append({"window": int(value), "_seed_rank": seed_rank})
+                refined.append(
+                    {
+                        "window": int(value),
+                        "_low_energy_guard": low_energy_guard,
+                        "_seed_rank": seed_rank,
+                    }
+                )
         elif family == "background" and method_key == "svd_bg" and "rank" in params:
             center = int(params["rank"])
             values = _sanitize_int_candidates(
@@ -1357,8 +1376,15 @@ def _refine_candidate_trials(
             values = _trim_numeric_candidates(
                 values, budget=plan["fine_budget"], center=center
             )
+            low_energy_guard = bool(params.get("_low_energy_guard", True))
             for value in values:
-                refined.append({"window": int(value), "_seed_rank": seed_rank})
+                refined.append(
+                    {
+                        "window": int(value),
+                        "_low_energy_guard": low_energy_guard,
+                        "_seed_rank": seed_rank,
+                    }
+                )
         elif family == "gain" and method_key == "compensatingGain":
             center_min = float(params.get("gain_min", 1.0))
             center_max = float(params.get("gain_max", 5.0))
@@ -1755,6 +1781,7 @@ def _build_frequency_filter_trials(
     filter_types = list(config.get("filter_type", [])) or [
         str(base_params.get("filter_type", "bandpass"))
     ]
+    context_band = frequency_band_from_context(header_info)
     nyquist_mhz = _resolve_nyquist_mhz(data.shape[0], header_info)
     if nyquist_mhz is None or nyquist_mhz <= 0.0:
         high_values = list(config.get("high_freq_mhz", [])) or [
@@ -1768,24 +1795,36 @@ def _build_frequency_filter_trials(
         ]
         high_values.extend(config.get("high_freq_mhz", []))
 
-    low_default = float(base_params.get("low_freq_mhz", 10.0))
-    high_default = float(
-        base_params.get("high_freq_mhz", high_values[0] if high_values else 800.0)
+    has_explicit_band = (
+        "low_freq_mhz" in base_params or "high_freq_mhz" in base_params
     )
+    if context_band is not None and not has_explicit_band:
+        low_default, high_default = context_band
+    else:
+        low_default = float(base_params.get("low_freq_mhz", 10.0))
+        high_default = float(
+            base_params.get("high_freq_mhz", high_values[0] if high_values else 800.0)
+        )
     taper_default = float(base_params.get("taper_ratio", 0.08))
 
     if stage == "coarse":
         low_values = _trim_numeric_candidates(
             _sanitize_float_candidates(
                 list(config.get("low_freq_mhz", []))
-                + [low_default, low_default * 0.5, low_default * 1.5],
+                + [low_default, low_default * 0.5, low_default * 1.5]
+                + ([context_band[0]] if context_band is not None else []),
                 minimum=0.0,
             ),
             budget=max(2, min(4, int(budget or 6))),
             center=low_default,
         )
         high_values = _trim_numeric_candidates(
-            _sanitize_float_candidates(high_values + [high_default], minimum=0.0),
+            _sanitize_float_candidates(
+                high_values
+                + [high_default]
+                + ([context_band[1]] if context_band is not None else []),
+                minimum=0.0,
+            ),
             budget=max(2, min(4, int(budget or 6))),
             center=high_default,
         )
@@ -3067,8 +3106,15 @@ _SCORE_FUNCTIONS: dict[
 }
 
 
+_PUBLIC_RUNTIME_PARAMS = {"_low_energy_guard"}
+
+
 def _public_params(params: dict[str, Any]) -> dict[str, Any]:
-    return {k: v for k, v in params.items() if not str(k).startswith("_")}
+    return {
+        k: v
+        for k, v in params.items()
+        if not str(k).startswith("_") or str(k) in _PUBLIC_RUNTIME_PARAMS
+    }
 
 
 def _penalty_sum(trial: dict[str, Any]) -> float:

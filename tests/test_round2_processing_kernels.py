@@ -7,6 +7,11 @@ from __future__ import annotations
 import numpy as np
 import pywt
 
+from core.gprpy_compat import (
+    apply_gprpy_agc_gain,
+    apply_gprpy_dewow,
+    apply_gprpy_rem_mean_trace,
+)
 from PythonModule.dewow import method_dewow
 from PythonModule.hankel_svd import method_hankel_svd
 from PythonModule.rpca_background import method_rpca_background
@@ -17,15 +22,32 @@ from PythonModule.wavelet_svd import method_wavelet_svd
 from PythonModule.wnnm_placeholder import method_wnnm_placeholder
 
 
-def test_method_dewow_window_one_returns_zero_like_current_behavior():
+def test_method_dewow_window_one_matches_gprpy_baseline():
     raw = np.arange(24, dtype=np.float32).reshape(6, 4)
 
     result, meta = method_dewow(raw, window=1)
+    expected = apply_gprpy_dewow(raw, 1)
 
     assert result.shape == raw.shape
     assert result.dtype == np.float32
-    assert np.allclose(result, 0.0)
+    assert np.allclose(result, expected)
     assert meta["window"] == 1
+
+
+def test_gprpy_baseline_helpers_match_processing_engine_kernels():
+    rng = np.random.default_rng(42)
+    raw = rng.normal(size=(10, 6)).astype(np.float32)
+
+    dewow_expected = apply_gprpy_dewow(raw, 5)
+    mean_trace_expected = apply_gprpy_rem_mean_trace(raw, 3)
+    agc_expected = apply_gprpy_agc_gain(raw, 5)
+
+    assert dewow_expected.shape == raw.shape
+    assert mean_trace_expected.shape == raw.shape
+    assert agc_expected.shape == raw.shape
+    assert np.isfinite(dewow_expected).all()
+    assert np.isfinite(mean_trace_expected).all()
+    assert np.isfinite(agc_expected).all()
 
 
 def test_method_set_zero_time_shifts_up_and_zero_fills_tail():

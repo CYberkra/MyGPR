@@ -62,7 +62,7 @@ GAIN_METHODS = ["sec_gain", "agcGain", "compensatingGain", "no_gain"]
 
 MANUAL_GAIN_PARAMS = {
     "sec_gain": {"gain_min": 1.0, "gain_max": 4.2, "power": 1.2},
-    "agcGain": {"window": 121},
+    "agcGain": {"window": 121, "_low_energy_guard": True},
     "compensatingGain": {"gain_min": 1.0, "gain_max": 6.0},
     "no_gain": {},
 }
@@ -76,7 +76,7 @@ GAIN_METHOD_NOTES = {
     },
     "agcGain": {
         "label": "AGC 自动增益",
-        "principle": "每道按局部 RMS 归一化，优先让弱事件可见，但会破坏相对振幅。",
+        "principle": "每道按局部 L2 范数归一化；真实数据报告优先启用低能量保护，以减少空白区和深部弱噪声被过度抬升。",
         "best_for": "只关心结构连续性或弱双曲线可见性的快速解释图，不用于判断反射强弱。",
         "risks": "窗口过短或低能量区域过多时会放大空白区、噪声和条带，且不能保留强弱反射关系。",
     },

@@ -165,7 +165,10 @@ PROCESSING_METHODS = {
         ],
         "auto_tune_enabled": True,
         "auto_tune_family": "gain",
-        "auto_tune_candidates": {"window": [7, 11, 21, 31, 41, 61, 81, 121]},
+        "auto_tune_candidates": {
+            "window": [7, 11, 21, 31, 41, 61, 81, 121],
+            "_low_energy_guard": [True],
+        },
     },
     "subtracting_average_2D": {
         "name": "4 subtracting_average_2D (background removal)",
