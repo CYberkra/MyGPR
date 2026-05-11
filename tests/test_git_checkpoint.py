@@ -139,11 +139,17 @@ def test_important_mode_tags_and_archives_after_commit(monkeypatch, tmp_path: Pa
     repo = _init_repo(tmp_path)
     (repo / "tracked.txt").write_text("important\n", encoding="utf-8")
     archive_calls: list[tuple[str, str, Path]] = []
+    meeting_calls: list[dict[str, object]] = []
 
-    def fake_archive(*, repo_root: Path, summary: str, topic: str) -> None:
+    def fake_archive(*, repo_root: Path, summary: str, topic: str) -> str:
         archive_calls.append((summary, topic, repo_root))
+        return str(repo_root / "vault" / "40-归档与历史" / "版本快照" / "demo.md")
+
+    def fake_meeting(**kwargs) -> None:
+        meeting_calls.append(kwargs)
 
     monkeypatch.setattr(git_checkpoint, "_run_archive_checkpoint", fake_archive)
+    monkeypatch.setattr(git_checkpoint, "_run_meeting_progress_note", fake_meeting)
 
     code = git_checkpoint.main(
         [
@@ -155,6 +161,10 @@ def test_important_mode_tags_and_archives_after_commit(monkeypatch, tmp_path: Pa
             "important",
             "--topic",
             "important checkpoint",
+            "--meeting-progress",
+            "完成重要检查点",
+            "--meeting-next",
+            "继续验证自动记录",
         ],
         repo_root=repo,
     )
@@ -165,6 +175,40 @@ def test_important_mode_tags_and_archives_after_commit(monkeypatch, tmp_path: Pa
     assert tags[0].startswith("v")
     assert tags[0].endswith("-important-checkpoint")
     assert archive_calls == [("feat: important checkpoint", "important checkpoint", repo)]
+    assert len(meeting_calls) == 1
+    assert meeting_calls[0]["summary"] == "feat: important checkpoint"
+    assert meeting_calls[0]["tag"] == tags[0]
+    assert meeting_calls[0]["progress"] == ["完成重要检查点"]
+    assert meeting_calls[0]["next_steps"] == ["继续验证自动记录"]
+    assert str(meeting_calls[0]["archive_note"]).endswith("demo.md")
+
+
+def test_normal_mode_does_not_write_meeting_progress(monkeypatch, tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    (repo / "tracked.txt").write_text("normal\n", encoding="utf-8")
+    meeting_calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        git_checkpoint,
+        "_run_meeting_progress_note",
+        lambda **kwargs: meeting_calls.append(kwargs),
+    )
+
+    code = git_checkpoint.main(
+        [
+            "--summary",
+            "feat: normal checkpoint",
+            "--files",
+            "tracked.txt",
+            "--meeting-progress",
+            "不会写入组会记录",
+        ],
+        repo_root=repo,
+    )
+
+    assert code == 0
+    assert _git(repo, "log", "-1", "--pretty=%s") == "feat: normal checkpoint"
+    assert meeting_calls == []
 
 
 def test_preexisting_staged_changes_are_rejected(tmp_path: Path):

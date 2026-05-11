@@ -113,7 +113,7 @@ def _run_archive_checkpoint(
     repo_root: Path,
     summary: str,
     topic: str,
-) -> None:
+) -> str:
     script = repo_root / "scripts" / "archive_checkpoint.py"
     print(f"[archive] {script}")
     result = subprocess.run(
@@ -126,11 +126,77 @@ def _run_archive_checkpoint(
             topic,
         ],
         cwd=repo_root,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
     )
+    if result.stdout:
+        print(result.stdout.rstrip())
+    if result.stderr:
+        print(result.stderr.rstrip(), file=sys.stderr)
     if result.returncode != 0:
         raise GitCheckpointError(
             f"archive checkpoint failed with exit code {result.returncode}"
+        )
+    for line in (result.stdout or "").splitlines():
+        if line.startswith("Archived note:"):
+            return line.split(":", 1)[1].strip()
+    return ""
+
+
+def _run_meeting_progress_note(
+    *,
+    repo_root: Path,
+    summary: str,
+    progress: Sequence[str],
+    results: Sequence[str],
+    risks: Sequence[str],
+    next_steps: Sequence[str],
+    commit: str,
+    tag: str,
+    archive_note: str,
+) -> None:
+    script = repo_root / "scripts" / "meeting_progress_note.py"
+    command = [
+        sys.executable,
+        str(script),
+        "--summary",
+        summary,
+        "--commit",
+        commit,
+    ]
+    if tag:
+        command.extend(["--tag", tag])
+    if archive_note:
+        command.extend(["--archive-note", archive_note])
+    for item in progress:
+        command.extend(["--progress", item])
+    for item in results:
+        command.extend(["--result", item])
+    for item in risks:
+        command.extend(["--risk", item])
+    for item in next_steps:
+        command.extend(["--next-step", item])
+
+    print(f"[meeting] {script}")
+    result = subprocess.run(
+        command,
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if result.stdout:
+        print(result.stdout.rstrip())
+    if result.stderr:
+        print(result.stderr.rstrip(), file=sys.stderr)
+    if result.returncode != 0:
+        raise GitCheckpointError(
+            f"meeting progress note failed with exit code {result.returncode}"
         )
 
 
@@ -168,6 +234,30 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Print planned actions without running verification, staging, or committing.",
     )
+    parser.add_argument(
+        "--meeting-progress",
+        action="append",
+        default=[],
+        help="Important-mode meeting note progress bullet. Can be repeated.",
+    )
+    parser.add_argument(
+        "--meeting-result",
+        action="append",
+        default=[],
+        help="Important-mode meeting note displayable-result bullet. Can be repeated.",
+    )
+    parser.add_argument(
+        "--meeting-risk",
+        action="append",
+        default=[],
+        help="Important-mode meeting note risk bullet. Can be repeated.",
+    )
+    parser.add_argument(
+        "--meeting-next",
+        action="append",
+        default=[],
+        help="Important-mode meeting note next-step bullet. Can be repeated.",
+    )
     return parser.parse_args(argv)
 
 
@@ -194,6 +284,7 @@ def create_checkpoint(args: argparse.Namespace, *, repo_root: Path = REPO_ROOT) 
             tag = _unique_tag_name(topic, repo_root=repo_root)
             print(f"[dry-run] would tag: {tag}")
             print("[dry-run] would archive to Obsidian")
+            print("[dry-run] would append meeting progress note")
         return 0
 
     _ensure_no_preexisting_staged_changes(repo_root)
@@ -220,7 +311,21 @@ def create_checkpoint(args: argparse.Namespace, *, repo_root: Path = REPO_ROOT) 
         tag = _unique_tag_name(topic, repo_root=repo_root)
         _run_git(["tag", tag], repo_root=repo_root, capture=False)
         print(f"[git] tagged: {tag}")
-        _run_archive_checkpoint(repo_root=repo_root, summary=summary, topic=topic)
+        archive_note = _run_archive_checkpoint(
+            repo_root=repo_root, summary=summary, topic=topic
+        )
+        commit = _run_git(["rev-parse", "--short", "HEAD"], repo_root=repo_root)
+        _run_meeting_progress_note(
+            repo_root=repo_root,
+            summary=summary,
+            progress=list(args.meeting_progress or []),
+            results=list(args.meeting_result or []),
+            risks=list(args.meeting_risk or []),
+            next_steps=list(args.meeting_next or []),
+            commit=commit,
+            tag=tag,
+            archive_note=archive_note,
+        )
 
     return 0
 

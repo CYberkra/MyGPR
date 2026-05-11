@@ -192,13 +192,15 @@ pytest
 - Use `python scripts/git_checkpoint.py` for automated stable checkpoints once a user-visible work unit is verified.
 - Default checkpoint policy:
   - ordinary stable fixes/features use `--mode normal` and create a commit only;
-  - important rollback points use `--mode important`, which creates a tag and writes an Obsidian version archive through `scripts/archive_checkpoint.py`;
+  - important rollback points use `--mode important`, which creates a tag, writes an Obsidian version archive through `scripts/archive_checkpoint.py`, and appends a concise meeting-progress note through `scripts/meeting_progress_note.py`;
   - no checkpoint pushes to a remote unless the user explicitly asks.
 - `scripts/git_checkpoint.py` must be called with explicit `--files` pathspecs. It must not auto-stage unrelated dirty files, and it should abort if pre-existing staged changes are present.
+- Meeting progress notes live at `D:\ClawX-Data\Obsidian\uav_gpr\10-项目\组会进展\组会进展记录.md`. Use `--meeting-progress`, `--meeting-result`, `--meeting-risk`, and `--meeting-next` on important checkpoints when concise group-meeting recall points are known.
+- If the user says `组会结束` or `记录组会进展`, call `python scripts/meeting_progress_note.py --summary ...` and fill it from the current chat/Git context. Keep entries short and readable for quick review.
 - Good normal example:
   - `python scripts/git_checkpoint.py --summary "feat: add data-context aware defaults" --files core/data_context.py core/gpr_io.py tests/test_data_context.py --verify "pytest tests/test_data_context.py -q" --verify "python scripts/preflight_check.py"`
 - Good important example:
-  - `python scripts/git_checkpoint.py --summary "feat: stabilize auto-tune evidence workflow" --files core/auto_tune.py tests/test_auto_tune.py AGENTS.md --verify "pytest tests/test_auto_tune.py -q" --verify "python scripts/preflight_check.py" --mode important --topic auto-tune-evidence-workflow`
+  - `python scripts/git_checkpoint.py --summary "feat: stabilize auto-tune evidence workflow" --files core/auto_tune.py tests/test_auto_tune.py AGENTS.md --verify "pytest tests/test_auto_tune.py -q" --verify "python scripts/preflight_check.py" --mode important --topic auto-tune-evidence-workflow --meeting-progress "完成自动选参证据链稳定检查点" --meeting-next "继续补充真实数据验证"`
 - When a change batch reaches a stable, user-meaningful checkpoint, prefer:
   - a descriptive commit message focused on why the change exists
   - a tag for especially important rollback points
