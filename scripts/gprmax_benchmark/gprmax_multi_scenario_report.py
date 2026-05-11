@@ -1783,6 +1783,7 @@ def _airborne_scenario_definitions() -> dict[str, ScenarioDefinition]:
     scenarios = [
         _airborne_single_cylinder_scenario(),
         _airborne_hyperbola_demo_scenario(),
+        _airborne_rough_soil_hyperbola_scenario(),
         _airborne_double_cylinder_scenario(),
         _airborne_layered_interface_scenario(),
         _airborne_air_crack_scenario(),
@@ -1900,6 +1901,69 @@ def _airborne_hyperbola_demo_scenario() -> ScenarioDefinition:
             "#cylinder: 0.370 0.185 0 0.370 0.185 0.002 0.010 pec",
         ],
         antenna_height_m=0.080,
+    )
+
+
+def _airborne_rough_soil_hyperbola_scenario() -> ScenarioDefinition:
+    materials = [
+        {"name": "dry_silty_sand", "relative_permittivity": 6.0, "conductivity_s_per_m": 0.002},
+        {"name": "weak_wet_patch", "relative_permittivity": 8.0, "conductivity_s_per_m": 0.006},
+        {"name": "weak_air_patch", "relative_permittivity": 1.5, "conductivity_s_per_m": 0.0},
+        {"name": "metal_cylinder", "material": "pec"},
+    ]
+    targets = [
+        {
+            "target_id": "airborne_rough_soil_metal_cylinder",
+            "type": "metal_cylinder",
+            "center_m": [0.370, 0.175, 0.0],
+            "radius_m": 0.012,
+            "relative_permittivity": 6.0,
+        }
+    ]
+    clutter_bodies = [
+        "#box: 0.118 0.080 0 0.172 0.126 0.002 weak_wet_patch",
+        "#box: 0.498 0.165 0 0.562 0.214 0.002 weak_air_patch",
+        "#cylinder: 0.245 0.108 0 0.245 0.108 0.002 0.010 weak_wet_patch",
+        "#cylinder: 0.585 0.092 0 0.585 0.092 0.002 0.012 weak_wet_patch",
+    ]
+    return _airborne_definition(
+        scenario_id="airborne_rough_soil_hyperbola_v1",
+        label="UAV-GPR 粗糙非均匀土中双曲线",
+        description=(
+            "参考 gprMax heterogeneous_soil 与官方圆柱 B-scan 思路，构建粗糙地表、弱非均匀背景和中心金属目标。"
+        ),
+        structure_notes=[
+            "地表由 18 个分段 box 形成确定性起伏，避免直接套用官方 z 向 roughness 到本项目 y 向 2D 模型。",
+            "地下加入弱介电/弱空腔夹杂体作为背景杂波，但真值目标只标注中心 PEC 圆柱。",
+            "该场景用于检验标准处理链在粗糙地表和非均匀背景下是否仍能保留目标双曲线。",
+        ],
+        materials=materials,
+        targets=targets,
+        layers=[
+            {
+                "kind": "segmented_rough_surface",
+                "name": "deterministic_rough_air_ground_interface",
+                "base_y_m": AIRBORNE_GROUND_TOP_Y_M,
+                "amplitude_m": 0.010,
+                "segment_count": 18,
+                "material": "dry_silty_sand",
+            },
+            {
+                "kind": "background_clutter",
+                "name": "weak_dielectric_air_and_wet_patches",
+                "notes": "These bodies are nuisance clutter, not target truth.",
+            },
+        ],
+        model_materials=[
+            "#material: 6 0.002 1 0 dry_silty_sand",
+            "#material: 8 0.006 1 0 weak_wet_patch",
+            "#material: 1.5 0 1 0 weak_air_patch",
+        ],
+        bodies=[
+            *_airborne_segmented_ground_boxes("dry_silty_sand"),
+            *clutter_bodies,
+            "#cylinder: 0.370 0.175 0 0.370 0.175 0.002 0.012 pec",
+        ],
     )
 
 
@@ -2132,6 +2196,26 @@ def _airborne_definition(
 
 def _airborne_ground_box(material: str) -> str:
     return f"#box: 0 0 0 0.720 {AIRBORNE_GROUND_TOP_Y_M:.3f} 0.002 {material}"
+
+
+def _airborne_segmented_ground_boxes(
+    material: str,
+    *,
+    segment_count: int = 18,
+    base_y_m: float = AIRBORNE_GROUND_TOP_Y_M,
+    amplitude_m: float = 0.010,
+) -> list[str]:
+    """Return deterministic stepped boxes that approximate a rough air-ground interface."""
+    boxes: list[str] = []
+    segment_width = AIRBORNE_DOMAIN_M[0] / float(segment_count)
+    for idx in range(segment_count):
+        x0 = idx * segment_width
+        x1 = AIRBORNE_DOMAIN_M[0] if idx == segment_count - 1 else (idx + 1) * segment_width
+        phase = (2.0 * np.pi * idx) / float(segment_count)
+        top_y = base_y_m + amplitude_m * (0.65 * np.sin(phase) + 0.35 * np.sin(2.7 * phase + 0.4))
+        top_y = float(np.clip(top_y, base_y_m - amplitude_m, base_y_m + amplitude_m))
+        boxes.append(f"#box: {x0:.3f} 0 0 {x1:.3f} {top_y:.3f} 0.002 {material}")
+    return boxes
 
 
 def _single_cylinder_scenario() -> ScenarioDefinition:

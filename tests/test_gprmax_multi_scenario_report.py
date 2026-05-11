@@ -26,6 +26,7 @@ def test_default_scenario_definitions_cover_airborne_uav_gpr_cases():
     assert {
         "airborne_single_cylinder_v1",
         "airborne_hyperbola_demo_v1",
+        "airborne_rough_soil_hyperbola_v1",
         "airborne_double_cylinder_v1",
         "airborne_layered_interface_v1",
         "airborne_air_crack_v1",
@@ -111,6 +112,29 @@ def test_hyperbola_demo_centers_target_within_default_airborne_aperture():
     assert "#cylinder: 0.370 0.185 0 0.370 0.185 0.002 0.010 pec" in (
         scenario.model_in_text
     )
+
+
+def test_rough_soil_hyperbola_uses_deterministic_y_axis_roughness():
+    scenario = build_scenario_definitions()["airborne_rough_soil_hyperbola_v1"]
+    model_lines = scenario.model_in_text.splitlines()
+    ground_boxes = [
+        line
+        for line in model_lines
+        if line.startswith("#box:") and line.endswith("dry_silty_sand")
+    ]
+
+    assert scenario.targets[0]["target_id"] == "airborne_rough_soil_metal_cylinder"
+    assert scenario.targets[0]["radius_m"] == pytest.approx(0.012)
+    assert len(ground_boxes) == 18
+    assert "#fractal_box:" not in scenario.model_in_text
+    assert "#add_surface_roughness:" not in scenario.model_in_text
+    assert "#material: 8 0.006 1 0 weak_wet_patch" in scenario.model_in_text
+    assert "#material: 1.5 0 1 0 weak_air_patch" in scenario.model_in_text
+    assert "#cylinder: 0.370 0.175 0 0.370 0.175 0.002 0.012 pec" in (
+        scenario.model_in_text
+    )
+    assert scenario.layers[0]["kind"] == "segmented_rough_surface"
+    assert scenario.layers[0]["segment_count"] == 18
 
 
 def test_airborne_gprmax_inputs_distinguish_fixed_and_height_varying_geometry(tmp_path: Path):
