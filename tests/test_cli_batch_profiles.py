@@ -244,6 +244,19 @@ def test_run_job_expands_high_quality_uav_gpr_profile(tmp_path: Path):
     ]["order"]
     assert result["final_shape"][0] == 4
     assert "agcGain" not in [step["key"] for step in result["steps"]]
+    workflow = result["profile_workflow"]
+    stage2 = next(
+        stage for stage in workflow["stages"] if stage["stage_key"] == "stage2"
+    )
+    assert workflow["profile_key"] == "high_quality_uav_gpr"
+    assert stage2["method_keys"][:2] == [
+        "frequency_filter_1d",
+        "motion_compensation_v2",
+    ]
+    assert any(
+        warning["method_key"] == "motion_compensation_v2"
+        for warning in workflow["sensor_dependency_warnings"]
+    )
 
 
 def test_run_job_forwards_rtk_imu_sidecars_into_motion_runtime(monkeypatch, tmp_path: Path):

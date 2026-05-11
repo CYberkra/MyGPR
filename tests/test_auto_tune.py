@@ -125,6 +125,29 @@ def test_auto_tune_background_scans_more_candidates():
     assert any(trial["stage"] == "fine" for trial in result["all_trials"])
 
 
+def test_auto_tune_parameter_domain_tracks_data_limited_windows():
+    raw = _build_test_profile(traces=36)
+    result = auto_tune_method(
+        raw,
+        "subtracting_average_2D",
+        candidate_params=[{"ntraces": 501}],
+        search_mode="fast",
+    )
+
+    domain = result["parameter_domain"]
+    ntraces_domain = domain["parameters"]["ntraces"]
+
+    assert domain["data_shape"] == [raw.shape[0], raw.shape[1]]
+    assert domain["trial_counts"]["constraint_adjusted"] >= 1
+    assert ntraces_domain["effective"]["max"] <= raw.shape[1]
+    assert ntraces_domain["constraint_adjusted_trial_count"] >= 1
+    assert domain["notes"]
+    assert result["risk_flags"]
+    assert result["selection_recommendation"] in {"adopt_auto", "review"}
+    assert result["risk_level"] in {"low", "medium", "high"}
+    assert result["best_params"]["ntraces"] <= raw.shape[1]
+
+
 def test_auto_tune_fk_filter_returns_angle_band_candidate():
     raw = _build_test_profile(traces=96)
     result = auto_tune_method(
@@ -212,6 +235,7 @@ def test_auto_tune_wavelet_svd_returns_threshold_and_rank_candidate():
     assert result["best_params"]["threshold"] > 0.0
     assert result["best_params"]["rank_end"] >= result["best_params"]["rank_start"]
     assert len(result["coarse_trials"]) >= 1
+    assert "risk_flags" in result
 
 
 def test_public_denoise_scope_is_frozen_to_current_public_methods():

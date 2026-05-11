@@ -48,7 +48,11 @@ from core.processing_engine import (
     prepare_runtime_params,
     run_processing_method,
 )
-from core.preset_profiles import GUI_PRESETS_V1, RECOMMENDED_RUN_PROFILES
+from core.preset_profiles import (
+    GUI_PRESETS_V1,
+    RECOMMENDED_RUN_PROFILES,
+    build_profile_workflow_summary,
+)
 
 # 使用统一的方法注册表
 from core.methods_registry import (
@@ -598,7 +602,7 @@ def run_job(job: Dict[str, Any], repo_root: str, output_dir: str) -> Dict[str, A
     savecsv(current, final_csv)
     save_image(np.nan_to_num(current), final_png, title=f"{jid}:final", cmap="gray")
 
-    return {
+    result = {
         "job_id": jid,
         "input": input_path,
         "recommended_profile": job.get("recommended_profile"),
@@ -608,6 +612,11 @@ def run_job(job: Dict[str, Any], repo_root: str, output_dir: str) -> Dict[str, A
         "final_png": os.path.relpath(final_png, repo_root),
         "final_shape": list(current.shape),
     }
+    if job.get("recommended_profile"):
+        result["profile_workflow"] = build_profile_workflow_summary(
+            str(job["recommended_profile"])
+        )
+    return result
 
 
 def run_batch(cfg: Dict[str, Any], config_path: str, repo_root: str) -> int:

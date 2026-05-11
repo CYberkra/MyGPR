@@ -130,7 +130,14 @@ def _parse_rtk_rows(rows: list[dict[str, str]]) -> dict[str, Any]:
         "longitude": _coerce_float_array(rows, _required_column_name(resolved, "longitude")),
         "latitude": _coerce_float_array(rows, _required_column_name(resolved, "latitude")),
     }
-    for field in ("ground_elevation_m", "flight_height_m", "hdop"):
+    for field in (
+        "ground_elevation_m",
+        "flight_height_m",
+        "local_x_m",
+        "local_y_m",
+        "local_z_m",
+        "hdop",
+    ):
         value = _optional_float_array(rows, resolved[field])
         if value is not None:
             payload[field] = value

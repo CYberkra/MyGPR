@@ -7,6 +7,7 @@ from __future__ import annotations
 import csv
 
 import numpy as np
+import pytest
 
 from core.gpr_io import (
     compute_trace_distance_m,
@@ -201,6 +202,51 @@ def test_extract_airborne_csv_payload_with_optional_sidecars_enriches_metadata(t
     assert np.allclose(metadata["roll_deg"], np.array([0.5, 1.5], dtype=np.float32))
     assert np.allclose(metadata["pitch_deg"], np.array([0.25, 0.75], dtype=np.float32))
     assert np.allclose(metadata["yaw_deg"], np.array([180.5, 181.5], dtype=np.float32))
+
+
+def test_extract_airborne_csv_payload_marks_out_of_range_sidecar_alignment_as_extrapolated(tmp_path):
+    header_info = {
+        "a_scan_length": 3,
+        "num_traces": 2,
+        "total_time_ns": 120.0,
+        "trace_interval_m": 0.5,
+    }
+    raw = np.array(
+        [
+            [100.0, 30.0, 10.0, 1.0, 5.0],
+            [100.0, 30.0, 10.0, 2.0, 5.0],
+            [100.0, 30.0, 10.0, 3.0, 5.0],
+            [100.001, 30.0, 11.0, 4.0, 6.0],
+            [100.001, 30.0, 11.0, 5.0, 6.0],
+            [100.001, 30.0, 11.0, 6.0, 6.0],
+        ],
+        dtype=np.float64,
+    )
+    trace_timestamps_s = np.array([10.0, 11.0], dtype=np.float64)
+
+    rtk_path = tmp_path / "rtk.csv"
+    _write_csv(
+        rtk_path,
+        [
+            {"gps_time": 9.5, "lon": 100.0, "lat": 30.0, "elevation_m": 10.0, "height_m": 5.0},
+            {"gps_time": 10.0, "lon": 100.0, "lat": 30.0, "elevation_m": 10.0, "height_m": 5.0},
+        ],
+    )
+
+    data, metadata, updated_header = extract_airborne_csv_payload(
+        raw,
+        header_info,
+        trace_timestamps_s=trace_timestamps_s,
+        rtk_path=rtk_path,
+    )
+
+    assert data.shape == (3, 2)
+    assert metadata is not None
+    assert set(metadata["alignment_status"].tolist()) == {"aligned", "extrapolated"}
+    assert metadata["alignment_status"].tolist() == ["aligned", "extrapolated"]
+    assert updated_header is not None
+    assert updated_header["alignment_extrapolated_trace_count"] == 1
+    assert updated_header["alignment_extrapolated_fraction"] == pytest.approx(0.5)
 
 
 def test_extract_airborne_csv_payload_requires_trace_timestamps_when_sidecars_are_provided(tmp_path):

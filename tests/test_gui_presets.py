@@ -225,16 +225,25 @@ def test_auto_tune_page_handles_state_transitions():
                 }
             },
             "roi_info": {"label": "自动 ROI"},
+            "risk_flags": ["constraint_adjusted"],
+            "risk_level": "medium",
+            "risk_reason": "部分候选参数被按数据尺度收缩。",
+            "selection_recommendation": "review",
+            "parameter_domain": {
+                "notes": ["部分候选参数被按数据尺度收缩，实际搜索域小于原始候选列表。"]
+            },
         }
         win.page_auto_tune.show_result(result)
         result_text = win.page_auto_tune.auto_tune_summary.toPlainText()
         assert "方法: 低频漂移矫正（Dewow）" in result_text
         assert "推荐调试档: 平衡档" in result_text
         assert "稳定性:" in result_text
+        assert "风险标记:" in result_text
+        assert "参数域提示:" in result_text
         assert win.page_auto_tune.result_state_label.text() == "结果可用"
         assert win.page_auto_tune.recommended_profile_label.text() == "平衡档"
         assert "总候选 2" in win.page_auto_tune.execution_stats_label.text()
-        assert "失败候选" in win.page_auto_tune.risk_hint_label.text()
+        assert "风险标记" in win.page_auto_tune.risk_hint_label.text()
         assert win.page_auto_tune.btn_view_auto_tune.isEnabled() is True
 
         win.page_auto_tune.show_error("demo error")
@@ -264,7 +273,14 @@ def test_auto_tune_page_handles_state_transitions():
                 "metrics": {"comparison_score": 1.35},
                 "warnings": [],
                 "auto_tune_results": {
-                    "dewow": {"best_reason": "基线改善更稳。"}
+                    "dewow": {
+                        "best_reason": "基线改善更稳。",
+                        "risk_flags": ["constraint_adjusted"],
+                        "selection_recommendation": "review",
+                        "parameter_domain": {
+                            "notes": ["部分候选参数被按数据尺度收缩，实际搜索域小于原始候选列表。"]
+                        },
+                    }
                 },
             },
         }
@@ -272,6 +288,7 @@ def test_auto_tune_page_handles_state_transitions():
         comparison_text = win.page_auto_tune.comparison_summary.toPlainText()
         assert "结论: 自动选参更优" in comparison_text
         assert "dewow" in comparison_text
+        assert "参数域" in comparison_text
         assert win.page_auto_tune.result_state_label.text() == "对比完成"
         assert win.page_auto_tune.recommended_profile_label.text() == "自动选参更优"
         assert win.page_auto_tune.btn_export_comparison.isEnabled() is True

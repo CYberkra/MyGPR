@@ -8,9 +8,10 @@ import argparse
 import html
 import json
 import os
+import re
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -53,17 +54,16 @@ from core.quality_metrics import (  # noqa: E402
 DEFAULT_GPRMAX_ROOT = Path(r"E:\gprMax\gprMax-v.3.1.7")
 DEFAULT_OUTPUT_ROOT = ROOT / "output" / "gprmax_multi_scenario_reports"
 DEFAULT_PROFILE_KEY = "uav_gpr_experience_baseline_v1"
-DEFAULT_RUNS = 36
+DEFAULT_RUNS = 96
+DEFAULT_SCENARIO_FAMILY = "airborne"
 REPORT_PIPELINE_ORDER = [
     "set_zero_time",
     "dewow",
     "subtracting_average_2D",
-    "agcGain",
+    "sec_gain",
     "svd_subspace",
 ]
-REPORT_MANUAL_PARAM_OVERRIDES = {
-    "agcGain": {"window": 121},
-}
+REPORT_MANUAL_PARAM_OVERRIDES: dict[str, dict[str, Any]] = {}
 ZERO_TIME_ALIGN_NOTE = (
     "本报告将人工分支零时参数对齐自动结果，避免经验 5.0ns "
     "在小域正演数据中切掉有效结构。"
@@ -78,6 +78,138 @@ SOURCE_START_M = (0.035, GROUND_TOP_Y_M, 0.0)
 RECEIVER_START_M = (0.075, GROUND_TOP_Y_M, 0.0)
 SOURCE_RECEIVER_OFFSET_M = RECEIVER_START_M[0] - SOURCE_START_M[0]
 LIGHT_SPEED_M_PER_NS = 0.299792458
+
+AIRBORNE_DOMAIN_M = (0.720, 0.560, 0.002)
+AIRBORNE_DX_M = 0.002
+AIRBORNE_TOTAL_TIME_NS = 18.0
+AIRBORNE_TRACE_STEP_M = 0.004
+AIRBORNE_GROUND_TOP_Y_M = 0.300
+AIRBORNE_ANTENNA_HEIGHT_M = 0.120
+AIRBORNE_SOURCE_START_X_M = 0.140
+AIRBORNE_SOURCE_RECEIVER_OFFSET_M = 0.080
+AIRBORNE_DEFAULT_RUNS = 96
+AIRBORNE_PML_MARGIN_CELLS = 15
+AIRBORNE_SAFE_MARGIN_M = 0.060
+AIRBORNE_TOP_FREE_SPACE_M = 0.080
+
+
+@dataclass(frozen=True)
+class AirborneGeometry:
+    """Shared air-launched 2D TMz geometry for UAV-GPR gprMax scenes."""
+
+    domain_m: tuple[float, float, float] = AIRBORNE_DOMAIN_M
+    dx_m: float = AIRBORNE_DX_M
+    total_time_ns: float = AIRBORNE_TOTAL_TIME_NS
+    ground_top_y_m: float = AIRBORNE_GROUND_TOP_Y_M
+    antenna_height_m: float = AIRBORNE_ANTENNA_HEIGHT_M
+    source_start_x_m: float = AIRBORNE_SOURCE_START_X_M
+    source_receiver_offset_m: float = AIRBORNE_SOURCE_RECEIVER_OFFSET_M
+    trace_step_m: float = AIRBORNE_TRACE_STEP_M
+    default_runs: int = AIRBORNE_DEFAULT_RUNS
+    pml_margin_cells: int = AIRBORNE_PML_MARGIN_CELLS
+    safe_margin_m: float = AIRBORNE_SAFE_MARGIN_M
+    top_free_space_m: float = AIRBORNE_TOP_FREE_SPACE_M
+
+    @property
+    def source_start_m(self) -> tuple[float, float, float]:
+        return (
+            float(self.source_start_x_m),
+            float(self.ground_top_y_m + self.antenna_height_m),
+            0.0,
+        )
+
+    @property
+    def receiver_start_m(self) -> tuple[float, float, float]:
+        return (
+            float(self.source_start_x_m + self.source_receiver_offset_m),
+            float(self.ground_top_y_m + self.antenna_height_m),
+            0.0,
+        )
+
+    @property
+    def air_layer_thickness_m(self) -> float:
+        return float(self.domain_m[1] - self.ground_top_y_m)
+
+    @property
+    def top_clearance_m(self) -> float:
+        return float(self.domain_m[1] - self.source_start_m[1])
+
+    @property
+    def top_clearance_cells(self) -> int:
+        return int(round(self.top_clearance_m / self.dx_m))
+
+    def height_profile(self, runs: int, *, variable: bool = False) -> list[float]:
+        """Return per-trace antenna heights in metres above the ground surface."""
+        count = max(1, int(runs))
+        if not variable:
+            return [float(self.antenna_height_m)] * count
+        if count == 1:
+            return [float(self.antenna_height_m)]
+        idx = np.arange(count, dtype=np.float64)
+        profile = self.antenna_height_m + 0.035 * np.sin(
+            2.0 * np.pi * idx / float(count - 1)
+        )
+        return [float(value) for value in profile]
+
+    def trace_positions(
+        self,
+        runs: int,
+        *,
+        variable_height: bool = False,
+    ) -> list[dict[str, tuple[float, float, float] | float]]:
+        """Return Tx/Rx coordinates and antenna height for each trace."""
+        positions: list[dict[str, tuple[float, float, float] | float]] = []
+        heights = self.height_profile(runs, variable=variable_height)
+        for idx, height_m in enumerate(heights):
+            source_x = self.source_start_x_m + idx * self.trace_step_m
+            receiver_x = source_x + self.source_receiver_offset_m
+            y = self.ground_top_y_m + height_m
+            positions.append(
+                {
+                    "height_m": float(height_m),
+                    "source": (float(source_x), float(y), 0.0),
+                    "receiver": (float(receiver_x), float(y), 0.0),
+                }
+            )
+        return positions
+
+    def validate(
+        self,
+        *,
+        runs: int,
+        targets: list[dict[str, Any]] | None = None,
+    ) -> list[str]:
+        """Validate gprMax geometry safety margins and return warnings."""
+        warnings: list[str] = []
+        if abs(float(self.domain_m[2]) - float(self.dx_m)) > 1.0e-12:
+            warnings.append("domain_z_not_equal_dx")
+        if self.top_clearance_cells < 20:
+            warnings.append("source_top_clearance_less_than_20_cells")
+        positions = self.trace_positions(runs)
+        min_x = min(
+            min(float(pos["source"][0]), float(pos["receiver"][0]))  # type: ignore[index]
+            for pos in positions
+        )
+        max_x = max(
+            max(float(pos["source"][0]), float(pos["receiver"][0]))  # type: ignore[index]
+            for pos in positions
+        )
+        if min_x < self.safe_margin_m:
+            warnings.append("source_receiver_left_margin_too_small")
+        if self.domain_m[0] - max_x < self.safe_margin_m:
+            warnings.append("source_receiver_right_margin_too_small")
+        for target in targets or []:
+            for x, y in _target_boundary_points(target):
+                if x < self.safe_margin_m or self.domain_m[0] - x < self.safe_margin_m:
+                    warnings.append("target_horizontal_margin_too_small")
+                if y < self.safe_margin_m:
+                    warnings.append("target_bottom_margin_too_small")
+                if y > self.ground_top_y_m:
+                    warnings.append("target_above_ground_surface")
+        return sorted(set(warnings))
+
+
+AIRBORNE_GEOMETRY = AirborneGeometry()
 
 
 @dataclass(frozen=True)
@@ -100,6 +232,16 @@ class ScenarioDefinition:
     receiver_start_m: tuple[float, float, float] = RECEIVER_START_M
     ground_top_y_m: float = GROUND_TOP_Y_M
     default_runs: int = DEFAULT_RUNS
+    scenario_family: str = "legacy_surface_coupled"
+    geometry_model: str = "legacy_surface_coupled_2d_tmz_v1"
+    antenna_height_m: float | None = None
+    air_layer_thickness_m: float | None = None
+    pml_margin_cells: int = AIRBORNE_PML_MARGIN_CELLS
+    is_uav_gpr_evidence: bool = False
+    uses_per_trace_inputs: bool = False
+    uses_scripted_inputs: bool = False
+    height_variation: bool = False
+    geometry_warnings: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -108,22 +250,34 @@ class GprMaxRunResult:
 
     scenario_dir: Path
     model_input: Path
+    model_inputs: list[Path]
     command: list[str]
+    commands: list[list[str]]
     out_files: list[Path]
     stdout_path: Path
     stderr_path: Path
     returncode: int
+    synthetic_sidecars: dict[str, Path] = field(default_factory=dict)
 
 
-def build_scenario_definitions() -> dict[str, ScenarioDefinition]:
-    """Return the simple scenes used by the research report."""
-    return {
-        "cylinder_single_v1": _single_cylinder_scenario(),
-        "cylinder_double_v1": _double_cylinder_scenario(),
-        "layered_interface_v1": _layered_interface_scenario(),
-        "crack_air_filled_v1": _crack_air_filled_scenario(),
-        "no_target_background_v1": _no_target_background_scenario(),
-    }
+def build_scenario_definitions(
+    scenario_family: str = DEFAULT_SCENARIO_FAMILY,
+) -> dict[str, ScenarioDefinition]:
+    """Return gprMax scenes by family.
+
+    The default family is the air-launched UAV-GPR geometry. The old surface
+    coupled scenes remain available for regression smoke checks only.
+    """
+    family = str(scenario_family or DEFAULT_SCENARIO_FAMILY).lower()
+    airborne = _airborne_scenario_definitions()
+    legacy = _legacy_surface_coupled_scenario_definitions()
+    if family == "airborne":
+        return airborne
+    if family == "legacy":
+        return legacy
+    if family == "all":
+        return {**airborne, **legacy}
+    raise ValueError(f"Unsupported scenario family: {scenario_family}")
 
 
 def build_gprmax_command(
@@ -141,7 +295,7 @@ def build_gprmax_command(
         str(python_exe),
         "-m",
         "gprMax",
-        str(model_input),
+        str(Path(model_input).resolve()),
         "-n",
         str(int(runs)),
     ]
@@ -179,6 +333,7 @@ def probe_acceleration_support(python_exe: Path) -> dict[str, Any]:
         "import importlib.util,json;"
         "print(json.dumps({"
         "'mpi4py': importlib.util.find_spec('mpi4py') is not None,"
+        "'pycuda': importlib.util.find_spec('pycuda') is not None,"
         "'cupy': importlib.util.find_spec('cupy') is not None"
         "}))"
     )
@@ -214,7 +369,11 @@ def find_out_files(run_dir: Path, scenario_id: str) -> list[Path]:
     found: list[tuple[int, Path]] = []
     for path in Path(run_dir).glob(f"{scenario_id}*.out"):
         suffix = path.stem[len(scenario_id) :]
-        number = int(suffix) if suffix.isdigit() else 0
+        if suffix.isdigit():
+            number = int(suffix)
+        else:
+            matches = re.findall(r"\d+", suffix)
+            number = int(matches[-1]) if matches else 0
         found.append((number, path))
     found.sort(key=lambda item: item[0])
     return [path for _, path in found]
@@ -225,6 +384,7 @@ def run_multi_scenario_report(
     gprmax_root: Path,
     output_root: Path = DEFAULT_OUTPUT_ROOT,
     scenario_ids: list[str] | None = None,
+    scenario_family: str = DEFAULT_SCENARIO_FAMILY,
     runs: int = DEFAULT_RUNS,
     geometry_fixed: bool = True,
     mpi: int | None = None,
@@ -236,7 +396,7 @@ def run_multi_scenario_report(
     extra_args: list[str] | None = None,
 ) -> dict[str, Any]:
     """Run all requested scenarios and write the HTML report."""
-    scenarios = build_scenario_definitions()
+    scenarios = build_scenario_definitions(scenario_family=scenario_family)
     selected_ids = list(scenario_ids or scenarios.keys())
     unknown = [scenario_id for scenario_id in selected_ids if scenario_id not in scenarios]
     if unknown:
@@ -304,12 +464,18 @@ def run_multi_scenario_report(
                 "structure_preview": structure_rel,
                 "shape": list(package["bscan"].shape),
                 "simulation": package["scenario"]["simulation"],
+                "geometry_model": package["scenario"].get("geometry_model"),
+                "scenario_family": package["scenario"].get("scenario_family"),
+                "is_uav_gpr_evidence": package["scenario"].get("is_uav_gpr_evidence"),
                 "ground_truth": package["ground_truth"],
                 "gprmax": {
                     "command": gprmax_run.command,
+                    "commands": gprmax_run.commands,
+                    "command_count": len(gprmax_run.commands),
                     "stdout": _relpath(gprmax_run.stdout_path, report_dir),
                     "stderr": _relpath(gprmax_run.stderr_path, report_dir),
                     "returncode": int(gprmax_run.returncode),
+                    "model_inputs": [_relpath(path, report_dir) for path in gprmax_run.model_inputs],
                     "out_files": [_relpath(path, report_dir) for path in gprmax_run.out_files],
                 },
                 "comparison": _comparison_without_arrays(comparison),
@@ -321,6 +487,7 @@ def run_multi_scenario_report(
         "schema": "mygpr_gprmax_multi_scenario_report_v1",
         "generated_at": timestamp,
         "baseline_profile_key": baseline_profile_key,
+        "scenario_family": scenario_family,
         "search_mode": search_mode,
         "zero_time_policy": zero_time_policy,
         "gprmax_root": str(gprmax_root),
@@ -363,31 +530,67 @@ def run_gprmax_scenario(
     extra_args: list[str] | None,
 ) -> GprMaxRunResult:
     """Write the model file and run gprMax for one scene."""
-    model_input = scenario_dir / f"{definition.scenario_id}.in"
-    model_input.write_text(definition.model_in_text, encoding="utf-8")
-    command = build_gprmax_command(
-        python_exe,
-        model_input,
-        runs=runs,
-        geometry_fixed=geometry_fixed,
-        mpi=mpi,
-        gpu=gpu,
-        extra_args=extra_args,
-    )
-    completed = subprocess.run(
-        command,
-        cwd=str(gprmax_root),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
+    model_inputs = write_gprmax_inputs(definition, scenario_dir, runs=runs)
+    sidecars = write_synthetic_sidecars(definition, scenario_dir, runs=runs)
+    commands: list[list[str]] = []
+    stdout_chunks: list[str] = []
+    stderr_chunks: list[str] = []
+    returncode = 0
+
+    if definition.uses_per_trace_inputs:
+        for model_input in model_inputs:
+            command = build_gprmax_command(
+                python_exe,
+                model_input,
+                runs=1,
+                geometry_fixed=geometry_fixed,
+                mpi=mpi,
+                gpu=gpu,
+                extra_args=extra_args,
+            )
+            commands.append(command)
+            completed = subprocess.run(
+                command,
+                cwd=str(gprmax_root),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            stdout_chunks.append(f"$ {' '.join(command)}\n{completed.stdout}")
+            stderr_chunks.append(f"$ {' '.join(command)}\n{completed.stderr}")
+            returncode = int(completed.returncode)
+            if completed.returncode != 0:
+                break
+    else:
+        command = build_gprmax_command(
+            python_exe,
+            model_inputs[0],
+            runs=runs,
+            geometry_fixed=geometry_fixed,
+            mpi=mpi,
+            gpu=gpu,
+            extra_args=extra_args,
+        )
+        commands.append(command)
+        completed = subprocess.run(
+            command,
+            cwd=str(gprmax_root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        stdout_chunks.append(completed.stdout)
+        stderr_chunks.append(completed.stderr)
+        returncode = int(completed.returncode)
+
     stdout_path = scenario_dir / "gprmax_stdout.txt"
     stderr_path = scenario_dir / "gprmax_stderr.txt"
-    stdout_path.write_text(completed.stdout, encoding="utf-8")
-    stderr_path.write_text(completed.stderr, encoding="utf-8")
+    stdout_path.write_text("\n\n".join(stdout_chunks), encoding="utf-8")
+    stderr_path.write_text("\n\n".join(stderr_chunks), encoding="utf-8")
     out_files = find_out_files(scenario_dir, definition.scenario_id)
-    if completed.returncode != 0:
+    if returncode != 0:
         raise RuntimeError(
             f"gprMax failed for {definition.scenario_id}; see {stderr_path}"
         )
@@ -395,13 +598,177 @@ def run_gprmax_scenario(
         raise RuntimeError(f"gprMax produced no .out files for {definition.scenario_id}")
     return GprMaxRunResult(
         scenario_dir=scenario_dir,
-        model_input=model_input,
-        command=command,
+        model_input=model_inputs[0],
+        model_inputs=model_inputs,
+        command=commands[0],
+        commands=commands,
         out_files=out_files,
         stdout_path=stdout_path,
         stderr_path=stderr_path,
-        returncode=int(completed.returncode),
+        returncode=int(returncode),
+        synthetic_sidecars=sidecars,
     )
+
+
+def write_gprmax_inputs(
+    definition: ScenarioDefinition,
+    scenario_dir: Path,
+    *,
+    runs: int,
+) -> list[Path]:
+    """Write one fixed-height input or per-trace inputs for variable-height scenes."""
+    scenario_dir.mkdir(parents=True, exist_ok=True)
+    if definition.uses_scripted_inputs:
+        model_input = scenario_dir / f"{definition.scenario_id}.in"
+        model_input.write_text(
+            _airborne_scripted_height_model_text(definition),
+            encoding="utf-8",
+        )
+        return [model_input]
+    if not definition.uses_per_trace_inputs:
+        model_input = scenario_dir / f"{definition.scenario_id}.in"
+        model_input.write_text(definition.model_in_text, encoding="utf-8")
+        return [model_input]
+
+    positions = AIRBORNE_GEOMETRY.trace_positions(
+        runs,
+        variable_height=definition.height_variation,
+    )
+    model_inputs: list[Path] = []
+    for trace_idx, position in enumerate(positions):
+        model_input = scenario_dir / f"{definition.scenario_id}_trace{trace_idx:03d}.in"
+        text = _airborne_model_text(
+            f"{definition.scenario_id}_trace{trace_idx:03d}",
+            materials=_model_material_lines(definition),
+            bodies=_model_body_lines(definition),
+            use_steps=False,
+            source_m=position["source"],  # type: ignore[arg-type]
+            receiver_m=position["receiver"],  # type: ignore[arg-type]
+        )
+        model_input.write_text(text, encoding="utf-8")
+        model_inputs.append(model_input)
+    return model_inputs
+
+
+def write_synthetic_sidecars(
+    definition: ScenarioDefinition,
+    scenario_dir: Path,
+    *,
+    runs: int,
+) -> dict[str, Path]:
+    """Write synthetic RTK/IMU/altimeter sidecars for airborne scenarios."""
+    if definition.scenario_family != "airborne":
+        return {}
+    metadata = build_synthetic_trace_metadata(definition, trace_count=runs)
+    timestamps = np.asarray(metadata["trace_timestamp_s"], dtype=np.float64)
+    sidecars = {
+        "trace_timestamps": scenario_dir / "trace_timestamps.csv",
+        "rtk": scenario_dir / "rtk.csv",
+        "imu": scenario_dir / "imu.csv",
+        "altimeter": scenario_dir / "altimeter.csv",
+    }
+    _write_csv_rows(
+        sidecars["trace_timestamps"],
+        ["trace_idx", "timestamp_s"],
+        [
+            [idx, f"{timestamps[idx]:.6f}"]
+            for idx in range(timestamps.size)
+        ],
+    )
+    _write_csv_rows(
+        sidecars["rtk"],
+        [
+            "timestamp_s",
+            "local_x_m",
+            "local_y_m",
+            "local_z_m",
+            "latitude_deg",
+            "longitude_deg",
+            "altitude_m",
+        ],
+        [
+            [
+                f"{timestamps[idx]:.6f}",
+                f"{float(metadata['local_x_m'][idx]):.6f}",
+                f"{float(metadata['local_y_m'][idx]):.6f}",
+                f"{float(metadata['local_z_m'][idx]):.6f}",
+                f"{float(metadata['latitude_deg'][idx]):.9f}",
+                f"{float(metadata['longitude_deg'][idx]):.9f}",
+                f"{float(metadata['altitude_m'][idx]):.6f}",
+            ]
+            for idx in range(timestamps.size)
+        ],
+    )
+    _write_csv_rows(
+        sidecars["imu"],
+        ["timestamp_s", "roll_deg", "pitch_deg", "yaw_deg"],
+        [
+            [
+                f"{timestamps[idx]:.6f}",
+                f"{float(metadata['roll_deg'][idx]):.6f}",
+                f"{float(metadata['pitch_deg'][idx]):.6f}",
+                f"{float(metadata['yaw_deg'][idx]):.6f}",
+            ]
+            for idx in range(timestamps.size)
+        ],
+    )
+    _write_csv_rows(
+        sidecars["altimeter"],
+        ["timestamp_s", "flight_height_m"],
+        [
+            [
+                f"{timestamps[idx]:.6f}",
+                f"{float(metadata['flight_height_m'][idx]):.6f}",
+            ]
+            for idx in range(timestamps.size)
+        ],
+    )
+    return sidecars
+
+
+def build_synthetic_trace_metadata(
+    definition: ScenarioDefinition,
+    *,
+    trace_count: int,
+) -> dict[str, np.ndarray]:
+    """Return deterministic airborne sidecar-like metadata for each trace."""
+    if definition.scenario_family != "airborne":
+        return {}
+    geometry = AIRBORNE_GEOMETRY
+    positions = geometry.trace_positions(
+        trace_count,
+        variable_height=definition.height_variation,
+    )
+    timestamps = np.arange(trace_count, dtype=np.float64) * 0.10
+    source_x = np.asarray([float(pos["source"][0]) for pos in positions], dtype=np.float32)  # type: ignore[index]
+    receiver_x = np.asarray([float(pos["receiver"][0]) for pos in positions], dtype=np.float32)  # type: ignore[index]
+    height = np.asarray([float(pos["height_m"]) for pos in positions], dtype=np.float32)
+    midpoint_x = (source_x + receiver_x) / 2.0
+    latitude0 = 30.000000
+    longitude0 = 104.000000
+    return {
+        "trace_timestamp_s": timestamps.astype(np.float64),
+        "local_x_m": midpoint_x.astype(np.float32),
+        "local_y_m": np.zeros(trace_count, dtype=np.float32),
+        "local_z_m": (geometry.ground_top_y_m + height).astype(np.float32),
+        "flight_height_m": height.astype(np.float32),
+        "altitude_m": (100.0 + height).astype(np.float32),
+        "latitude_deg": (latitude0 + midpoint_x * 1.0e-5).astype(np.float64),
+        "longitude_deg": (longitude0 + midpoint_x * 1.0e-5).astype(np.float64),
+        "roll_deg": (
+            1.2 * np.sin(np.linspace(0.0, 2.0 * np.pi, trace_count))
+        ).astype(np.float32),
+        "pitch_deg": (
+            0.8 * np.cos(np.linspace(0.0, 2.0 * np.pi, trace_count))
+        ).astype(np.float32),
+        "yaw_deg": np.zeros(trace_count, dtype=np.float32),
+    }
+
+
+def _write_csv_rows(path: Path, headers: list[str], rows: list[list[Any]]) -> None:
+    lines = [",".join(headers)]
+    lines.extend(",".join(str(item) for item in row) for row in rows)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def convert_gprmax_run(
@@ -427,22 +794,51 @@ def convert_gprmax_run(
         "time_step_s": float(time_step_s) if time_step_s is not None else None,
         "total_time_ns": float(total_time_ns),
         "trace_step_m": float(definition.trace_step_m),
-        "source_receiver_offset_m": float(SOURCE_RECEIVER_OFFSET_M),
+        "source_receiver_offset_m": float(
+            definition.receiver_start_m[0] - definition.source_start_m[0]
+        ),
     }
+    trace_metadata = build_synthetic_trace_metadata(
+        definition,
+        trace_count=int(bscan.shape[1]),
+    )
     ground_truth = build_ground_truth(definition, simulation)
     scenario = {
         "schema": "mygpr_gprmax_multiscenario_scenario_v1",
         "scenario_id": definition.scenario_id,
         "label": definition.label,
         "description": definition.description,
+        "scenario_family": definition.scenario_family,
+        "geometry_model": definition.geometry_model,
+        "is_uav_gpr_evidence": bool(definition.is_uav_gpr_evidence),
         "source": {
             "kind": "gprmax_out",
             "model_input": str(run_result.model_input),
+            "model_inputs": [str(path) for path in run_result.model_inputs],
             "first_out": str(run_result.out_files[0]),
         },
         "simulation": simulation,
         "domain_m": list(definition.domain_m),
         "dx_dy_dz_m": [definition.dx_m, definition.dx_m, definition.dx_m],
+        "ground_top_y_m": float(definition.ground_top_y_m),
+        "air_layer_thickness_m": (
+            float(definition.air_layer_thickness_m)
+            if definition.air_layer_thickness_m is not None
+            else None
+        ),
+        "antenna_height_m": (
+            float(definition.antenna_height_m)
+            if definition.antenna_height_m is not None
+            else None
+        ),
+        "antenna_height_profile_m": _json_safe(
+            trace_metadata.get("flight_height_m", np.asarray([], dtype=np.float32))
+        ),
+        "pml_margin_cells": int(definition.pml_margin_cells),
+        "geometry_warnings": list(definition.geometry_warnings),
+        "synthetic_sidecars": {
+            key: str(path) for key, path in run_result.synthetic_sidecars.items()
+        },
         "materials": definition.materials,
         "layers": definition.layers,
         "targets": definition.targets,
@@ -485,7 +881,7 @@ def convert_gprmax_run(
             "trace_interval_m": float(definition.trace_step_m),
             "track_length_m": float(definition.trace_step_m) * max(int(bscan.shape[1]) - 1, 1),
         },
-        "trace_metadata": {},
+        "trace_metadata": trace_metadata,
     }
 
 
@@ -513,17 +909,33 @@ def build_ground_truth(
         targets.append(roi_target)
         rois.append(dict(roi_target["roi"]))
 
-    analysis_roi = _union_rois(rois, samples, traces) if rois else _full_roi(samples, traces)
+    wavefield_rois = _build_wavefield_rois(
+        definition,
+        simulation,
+        target_rois=rois,
+    )
+    analysis_roi = _union_rois(rois, samples, traces) if rois else _default_background_roi(
+        wavefield_rois,
+        samples,
+        traces,
+    )
     return {
         "schema": "mygpr_gprmax_multiscenario_ground_truth_v1",
         "scenario_id": definition.scenario_id,
+        "geometry_model": definition.geometry_model,
         "structure_notes": list(definition.structure_notes),
         "targets": targets,
+        "wavefield_rois": wavefield_rois,
         "analysis_roi": analysis_roi,
         "known_background": {
             "air_ground_interface_y_m": float(definition.ground_top_y_m),
             "layers": definition.layers,
         },
+        "risk_checks": [
+            "direct_air_wave_misread_as_target",
+            "air_ground_reflection_over_enhanced",
+            "zero_time_breaks_direct_surface_target_order",
+        ],
         "metrics_hint": {
             "target_roi_weight": 1.0,
             "background_roi_weight": 0.5,
@@ -892,7 +1304,7 @@ def render_html_report(report_dir: Path, payload: dict[str, Any]) -> Path:
     <section class="hero">
       <p class="eyebrow">MyGPR / gprMax validation</p>
       <h1>自动选参与人工经验参数对比报告</h1>
-      <p>本报告使用 gprMax 正演数据构造已知真实结构，以逐步骤图像、参数和指标对比验证 MyGPR 自动选参相对经验 baseline 的表现。</p>
+      <p>本报告使用 gprMax 正演数据构造已知真实结构，以逐步骤图像、参数和指标对比验证 MyGPR 自动选参相对经验 baseline 的表现。Airborne 场景显式记录天线离地高度；高度变化场景逐道生成输入文件和 sidecar。</p>
     </section>
 
     <section>
@@ -901,6 +1313,7 @@ def render_html_report(report_dir: Path, payload: dict[str, Any]) -> Path:
         <div><span>gprMax 根目录</span><strong>{_esc(payload.get("gprmax_root"))}</strong></div>
         <div><span>Python</span><strong>{_esc(payload.get("python_executable"))}</strong></div>
         <div><span>每场景 A-scan 道数</span><strong>{_esc(run_settings.get("runs"))}</strong></div>
+        <div><span>场景族</span><strong>{_esc(payload.get("scenario_family") or "airborne")}</strong></div>
         <div><span>geometry-fixed</span><strong>{_esc(run_settings.get("geometry_fixed"))}</strong></div>
         <div><span>MPI 参数</span><strong>{_esc(run_settings.get("mpi") or "未启用")}</strong></div>
         <div><span>GPU 参数</span><strong>{_esc(", ".join(run_settings.get("gpu") or []) or "未启用")}</strong></div>
@@ -912,7 +1325,7 @@ def render_html_report(report_dir: Path, payload: dict[str, Any]) -> Path:
 
     <section>
       <h2>参数策略</h2>
-      <p>人工选参使用 <code>{_esc(payload.get("baseline_profile_key"))}</code> 的经验 baseline，并按本报告策略将增益步骤替换为 AGC。自动选参以同一组参数为 base，在每个支持 auto-tune 的算法步骤前根据当前 BScan 和 ground-truth ROI 重新评分并选择参数。搜索模式为 <code>{_esc(payload.get("search_mode"))}</code>，零时策略为 <code>{_esc(payload.get("zero_time_policy"))}</code>。</p>
+      <p>人工选参使用 <code>{_esc(payload.get("baseline_profile_key"))}</code> 的经验 baseline。本标准流程报告使用 SEC/energy-decay 作为默认解释增益；若目标是比较 AGC、SEC、TGC 或无增益，应运行增益方法报告。自动选参以同一组参数为 base，在每个支持 auto-tune 的算法步骤前根据当前 BScan 和 ground-truth ROI 重新评分并选择参数。搜索模式为 <code>{_esc(payload.get("search_mode"))}</code>，零时策略为 <code>{_esc(payload.get("zero_time_policy"))}</code>。</p>
     </section>
 
     {overall_summary}
@@ -962,6 +1375,30 @@ def save_structure_preview(definition: ScenarioDefinition, out_path: Path) -> No
     ax.add_patch(
         plt.Rectangle((0, 0), domain_x, domain_y, facecolor="#f8f9fa", edgecolor="#333333")
     )
+    if definition.geometry_model.startswith("airborne"):
+        ax.add_patch(
+            plt.Rectangle(
+                (0, definition.ground_top_y_m),
+                domain_x,
+                max(0.0, domain_y - definition.ground_top_y_m),
+                facecolor="#eef6ff",
+                edgecolor="#91a7ff",
+                alpha=0.55,
+            )
+        )
+        ax.axhline(
+            definition.ground_top_y_m,
+            color="#7c5c28",
+            linewidth=1.4,
+            linestyle="-",
+        )
+        ax.text(
+            domain_x * 0.015,
+            definition.ground_top_y_m + 0.012,
+            "air-ground surface",
+            fontsize=7,
+            color="#5c3d0c",
+        )
     ax.add_patch(
         plt.Rectangle(
             (0, 0),
@@ -1022,8 +1459,30 @@ def save_structure_preview(definition: ScenarioDefinition, out_path: Path) -> No
                 )
             )
             ax.text((x0 + x1) / 2.0, y1 + 0.006, target["target_id"], ha="center", fontsize=7)
-    ax.scatter([definition.source_start_m[0]], [definition.source_start_m[1]], marker="^", color="#c92a2a", label="Tx start")
-    ax.scatter([definition.receiver_start_m[0]], [definition.receiver_start_m[1]], marker="v", color="#1864ab", label="Rx start")
+    if definition.geometry_model.startswith("airborne"):
+        positions = AIRBORNE_GEOMETRY.trace_positions(
+            definition.default_runs,
+            variable_height=definition.height_variation,
+        )
+        tx_x = [float(pos["source"][0]) for pos in positions]  # type: ignore[index]
+        tx_y = [float(pos["source"][1]) for pos in positions]  # type: ignore[index]
+        rx_x = [float(pos["receiver"][0]) for pos in positions]  # type: ignore[index]
+        rx_y = [float(pos["receiver"][1]) for pos in positions]  # type: ignore[index]
+        ax.plot(tx_x, tx_y, color="#c92a2a", linewidth=1.2, label="Tx flight path")
+        ax.plot(rx_x, rx_y, color="#1864ab", linewidth=1.2, label="Rx flight path")
+        ax.scatter([tx_x[0]], [tx_y[0]], marker="^", color="#c92a2a")
+        ax.scatter([rx_x[0]], [rx_y[0]], marker="v", color="#1864ab")
+        if definition.height_variation:
+            ax.text(
+                domain_x * 0.56,
+                max(tx_y) + 0.008,
+                "height variation",
+                fontsize=7,
+                color="#364fc7",
+            )
+    else:
+        ax.scatter([definition.source_start_m[0]], [definition.source_start_m[1]], marker="^", color="#c92a2a", label="Tx start")
+        ax.scatter([definition.receiver_start_m[0]], [definition.receiver_start_m[1]], marker="v", color="#1864ab", label="Rx start")
     ax.set_xlim(0, domain_x)
     ax.set_ylim(0, domain_y)
     ax.set_xlabel("x (m)")
@@ -1033,6 +1492,319 @@ def save_structure_preview(definition: ScenarioDefinition, out_path: Path) -> No
     fig.tight_layout()
     fig.savefig(out_path)
     plt.close(fig)
+
+
+def _airborne_scenario_definitions() -> dict[str, ScenarioDefinition]:
+    """Build the default air-launched UAV-GPR validation scene family."""
+    scenarios = [
+        _airborne_single_cylinder_scenario(),
+        _airborne_double_cylinder_scenario(),
+        _airborne_layered_interface_scenario(),
+        _airborne_air_crack_scenario(),
+        _airborne_no_target_background_scenario(),
+        _airborne_height_variation_cylinder_scenario(),
+    ]
+    return {scenario.scenario_id: scenario for scenario in scenarios}
+
+
+def _legacy_surface_coupled_scenario_definitions() -> dict[str, ScenarioDefinition]:
+    """Build old near-ground scenes retained only as regression smoke benchmarks."""
+    mapping = {
+        "legacy_surface_coupled_single_cylinder_v1": _single_cylinder_scenario(),
+        "legacy_surface_coupled_double_cylinder_v1": _double_cylinder_scenario(),
+        "legacy_surface_coupled_layered_interface_v1": _layered_interface_scenario(),
+        "legacy_surface_coupled_air_crack_v1": _crack_air_filled_scenario(),
+        "legacy_surface_coupled_no_target_background_v1": _no_target_background_scenario(),
+    }
+    result: dict[str, ScenarioDefinition] = {}
+    for scenario_id, definition in mapping.items():
+        result[scenario_id] = replace(
+            definition,
+            scenario_id=scenario_id,
+            label=f"旧贴地场景 / {definition.label}",
+            description=(
+                f"{definition.description} 该场景为非 UAV-GPR、source/receiver 位于地表附近的 "
+                "legacy toy benchmark，不作为 UAV-GPR 论文级证据。"
+            ),
+            structure_notes=[
+                "Legacy surface-coupled geometry: Tx/Rx near the air-ground interface.",
+                "Use only as smoke/regression benchmark, not as UAV-GPR evidence.",
+                *definition.structure_notes,
+            ],
+            model_in_text=definition.model_in_text.replace(
+                f"MyGPR {definition.scenario_id}",
+                f"MyGPR {scenario_id}",
+            ),
+            default_runs=36,
+            scenario_family="legacy_surface_coupled",
+            geometry_model="legacy_surface_coupled_2d_tmz_v1",
+            is_uav_gpr_evidence=False,
+        )
+    return result
+
+
+def _airborne_single_cylinder_scenario() -> ScenarioDefinition:
+    materials = [
+        {"name": "dry_silty_sand", "relative_permittivity": 6.0, "conductivity_s_per_m": 0.002},
+        {"name": "metal_cylinder", "material": "pec"},
+    ]
+    targets = [
+        {
+            "target_id": "airborne_metal_cylinder_01",
+            "type": "metal_cylinder",
+            "center_m": [0.360, 0.175, 0.0],
+            "radius_m": 0.020,
+            "relative_permittivity": 6.0,
+        }
+    ]
+    return _airborne_definition(
+        scenario_id="airborne_single_cylinder_v1",
+        label="UAV-GPR 单金属圆柱",
+        description=(
+            "离地 Tx/Rx、空气层、地表强反射和单个地下 PEC 圆柱；"
+            "用于验证自动选参能否在直达波/地表反射之后保留目标双曲线。"
+        ),
+        structure_notes=[
+            "Tx/Rx 位于空气层，天线离地 0.12 m，收发距 0.08 m。",
+            "地表位于 y=0.30 m，地下为相对介电常数 6 的弱导电粉砂土。",
+            "目标为 x=0.360 m、y=0.175 m、半径 0.020 m 的金属圆柱。",
+        ],
+        materials=materials,
+        targets=targets,
+        layers=[],
+        model_materials=["#material: 6 0.002 1 0 dry_silty_sand"],
+        bodies=[
+            _airborne_ground_box("dry_silty_sand"),
+            "#cylinder: 0.360 0.175 0 0.360 0.175 0.002 0.020 pec",
+        ],
+    )
+
+
+def _airborne_double_cylinder_scenario() -> ScenarioDefinition:
+    materials = [
+        {"name": "dry_silty_sand", "relative_permittivity": 6.0, "conductivity_s_per_m": 0.002},
+        {"name": "metal_cylinder", "material": "pec"},
+    ]
+    targets = [
+        {
+            "target_id": "airborne_shallow_metal_cylinder",
+            "type": "metal_cylinder",
+            "center_m": [0.305, 0.205, 0.0],
+            "radius_m": 0.016,
+            "relative_permittivity": 6.0,
+        },
+        {
+            "target_id": "airborne_deep_metal_cylinder",
+            "type": "metal_cylinder",
+            "center_m": [0.455, 0.135, 0.0],
+            "radius_m": 0.014,
+            "relative_permittivity": 6.0,
+        },
+    ]
+    return _airborne_definition(
+        scenario_id="airborne_double_cylinder_v1",
+        label="UAV-GPR 双深度圆柱",
+        description="两个不同深度的 PEC 圆柱，考察增益与去噪是否同时保护浅层强目标和深层弱目标。",
+        structure_notes=[
+            "浅层目标位于 x=0.305 m、y=0.205 m；深层目标位于 x=0.455 m、y=0.135 m。",
+            "两目标均满足距 PML 安全边界大于 0.06 m。",
+            "目标回波应出现在直达波和地表反射之后。",
+        ],
+        materials=materials,
+        targets=targets,
+        layers=[],
+        model_materials=["#material: 6 0.002 1 0 dry_silty_sand"],
+        bodies=[
+            _airborne_ground_box("dry_silty_sand"),
+            "#cylinder: 0.305 0.205 0 0.305 0.205 0.002 0.016 pec",
+            "#cylinder: 0.455 0.135 0 0.455 0.135 0.002 0.014 pec",
+        ],
+    )
+
+
+def _airborne_layered_interface_scenario() -> ScenarioDefinition:
+    materials = [
+        {"name": "dry_sand", "relative_permittivity": 4.5, "conductivity_s_per_m": 0.001},
+        {"name": "wet_sand", "relative_permittivity": 10.0, "conductivity_s_per_m": 0.012},
+    ]
+    layers = [
+        {
+            "kind": "box",
+            "name": "wet_sand_lower_layer",
+            "material": "wet_sand",
+            "y0_m": 0.000,
+            "y1_m": 0.145,
+            "color": "#9bbf8f",
+        }
+    ]
+    targets = [
+        {
+            "target_id": "airborne_dry_wet_interface",
+            "type": "layer_interface",
+            "interface_y_m": 0.145,
+            "relative_permittivity": 4.5,
+        }
+    ]
+    return _airborne_definition(
+        scenario_id="airborne_layered_interface_v1",
+        label="UAV-GPR 干湿分层界面",
+        description="空气发射下的水平干湿界面，验证背景抑制和增益不会把真实连续层状反射抹掉。",
+        structure_notes=[
+            "地表以下上层为低电导干砂，下层为较高介电常数湿砂。",
+            "真实结构为 y=0.145 m 的连续水平界面，而不是点状双曲线。",
+            "地表强反射和层状界面反射在时序上必须可区分。",
+        ],
+        materials=materials,
+        targets=targets,
+        layers=layers,
+        model_materials=[
+            "#material: 4.5 0.001 1 0 dry_sand",
+            "#material: 10 0.012 1 0 wet_sand",
+        ],
+        bodies=[
+            _airborne_ground_box("dry_sand"),
+            "#box: 0 0 0 0.720 0.145 0.002 wet_sand",
+        ],
+    )
+
+
+def _airborne_air_crack_scenario() -> ScenarioDefinition:
+    materials = [
+        {"name": "dry_silty_sand", "relative_permittivity": 6.0, "conductivity_s_per_m": 0.002},
+        {"name": "air_crack", "relative_permittivity": 1.0, "conductivity_s_per_m": 0.0},
+    ]
+    targets = [
+        {
+            "target_id": "airborne_air_crack_01",
+            "type": "air_crack",
+            "x0_m": 0.392,
+            "x1_m": 0.408,
+            "y0_m": 0.115,
+            "y1_m": 0.235,
+            "relative_permittivity": 6.0,
+        }
+    ]
+    return _airborne_definition(
+        scenario_id="airborne_air_crack_v1",
+        label="UAV-GPR 空气裂缝弱结构",
+        description="窄空气裂缝弱反射场景，验证自动选参不会把窄线状反射和边缘绕射过度平滑。",
+        structure_notes=[
+            "裂缝为 x=0.392-0.408 m、y=0.115-0.235 m 的低介电常数空腔。",
+            "该场景对去噪和背景抑制更敏感，过强参数会损伤边缘绕射。",
+            "AGC 类增益可能让裂缝更醒目，但也更容易放大空气波后的背景。",
+        ],
+        materials=materials,
+        targets=targets,
+        layers=[],
+        model_materials=[
+            "#material: 6 0.002 1 0 dry_silty_sand",
+            "#material: 1 0 1 0 air_crack",
+        ],
+        bodies=[
+            _airborne_ground_box("dry_silty_sand"),
+            "#box: 0.392 0.115 0 0.408 0.235 0.002 air_crack",
+        ],
+    )
+
+
+def _airborne_no_target_background_scenario() -> ScenarioDefinition:
+    materials = [
+        {"name": "dry_silty_sand", "relative_permittivity": 6.0, "conductivity_s_per_m": 0.002},
+    ]
+    return _airborne_definition(
+        scenario_id="airborne_no_target_background_v1",
+        label="UAV-GPR 无目标背景",
+        description="只有空气层、地表和均匀地下介质，用于验证自动选参与增益不会制造假异常。",
+        structure_notes=[
+            "不存在地下异常体，真值只包含直达波、地表反射、背景区和晚时窗噪声区。",
+            "理想处理应控制地表反射后的背景和深部噪声，不能凭空产生局部强异常。",
+        ],
+        materials=materials,
+        targets=[],
+        layers=[],
+        model_materials=["#material: 6 0.002 1 0 dry_silty_sand"],
+        bodies=[_airborne_ground_box("dry_silty_sand")],
+    )
+
+
+def _airborne_height_variation_cylinder_scenario() -> ScenarioDefinition:
+    base = _airborne_single_cylinder_scenario()
+    return replace(
+        base,
+        scenario_id="airborne_height_variation_cylinder_v1",
+        label="UAV-GPR 高度变化圆柱",
+        description=(
+            "逐道改变天线离地高度的单圆柱场景，用于运动补偿和高度 sidecar 链路验证；"
+            "该场景不使用 #src_steps/#rx_steps。"
+        ),
+        structure_notes=[
+            "天线高度曲线为 h_i=0.12+0.035*sin(2*pi*i/(runs-1)) m。",
+            "使用 gprMax 官方 Python scripting 和 current_model_run 在单个 .in 内逐道定义 Tx/Rx 高度，配套生成 RTK/IMU/高度计 sidecar。",
+            *base.structure_notes,
+        ],
+        model_in_text=_airborne_model_text(
+            "airborne_height_variation_cylinder_v1",
+            materials=["#material: 6 0.002 1 0 dry_silty_sand"],
+            bodies=[
+                _airborne_ground_box("dry_silty_sand"),
+                "#cylinder: 0.360 0.175 0 0.360 0.175 0.002 0.020 pec",
+            ],
+            use_steps=False,
+        ),
+        uses_per_trace_inputs=False,
+        uses_scripted_inputs=True,
+        height_variation=True,
+    )
+
+
+def _airborne_definition(
+    *,
+    scenario_id: str,
+    label: str,
+    description: str,
+    structure_notes: list[str],
+    materials: list[dict[str, Any]],
+    targets: list[dict[str, Any]],
+    layers: list[dict[str, Any]],
+    model_materials: list[str],
+    bodies: list[str],
+) -> ScenarioDefinition:
+    geometry = AIRBORNE_GEOMETRY
+    warnings = geometry.validate(runs=geometry.default_runs, targets=targets)
+    return ScenarioDefinition(
+        scenario_id=scenario_id,
+        label=label,
+        description=description,
+        structure_notes=structure_notes,
+        model_in_text=_airborne_model_text(
+            scenario_id,
+            materials=model_materials,
+            bodies=bodies,
+            use_steps=True,
+        ),
+        materials=materials,
+        targets=targets,
+        layers=layers,
+        domain_m=geometry.domain_m,
+        dx_m=geometry.dx_m,
+        total_time_ns=geometry.total_time_ns,
+        trace_step_m=geometry.trace_step_m,
+        source_start_m=geometry.source_start_m,
+        receiver_start_m=geometry.receiver_start_m,
+        ground_top_y_m=geometry.ground_top_y_m,
+        default_runs=geometry.default_runs,
+        scenario_family="airborne",
+        geometry_model="airborne_2d_tmz_v1",
+        antenna_height_m=geometry.antenna_height_m,
+        air_layer_thickness_m=geometry.air_layer_thickness_m,
+        pml_margin_cells=geometry.pml_margin_cells,
+        is_uav_gpr_evidence=True,
+        geometry_warnings=warnings,
+    )
+
+
+def _airborne_ground_box(material: str) -> str:
+    return f"#box: 0 0 0 0.720 {AIRBORNE_GROUND_TOP_Y_M:.3f} 0.002 {material}"
 
 
 def _single_cylinder_scenario() -> ScenarioDefinition:
@@ -1242,6 +2014,7 @@ def _model_text(
         f"#domain: {DOMAIN_M[0]:.3f} {DOMAIN_M[1]:.3f} {DOMAIN_M[2]:.3f}",
         f"#dx_dy_dz: {DX_M:.3f} {DX_M:.3f} {DX_M:.3f}",
         f"#time_window: {TOTAL_TIME_NS * 1e-9:.9g}",
+        f"#geometry_view: 0 0 0 {DOMAIN_M[0]:.3f} {DOMAIN_M[1]:.3f} {DOMAIN_M[2]:.3f} {DX_M:.3f} {DX_M:.3f} {DX_M:.3f} {title}_geometry n",
         "",
         *materials,
         "",
@@ -1255,6 +2028,119 @@ def _model_text(
         "",
     ]
     return "\n".join(lines)
+
+
+def _airborne_model_text(
+    title: str,
+    *,
+    materials: list[str],
+    bodies: list[str],
+    use_steps: bool,
+    source_m: tuple[float, float, float] | None = None,
+    receiver_m: tuple[float, float, float] | None = None,
+) -> str:
+    geometry = AIRBORNE_GEOMETRY
+    source = source_m or geometry.source_start_m
+    receiver = receiver_m or geometry.receiver_start_m
+    lines = [
+        f"#title: MyGPR {title}",
+        f"#domain: {geometry.domain_m[0]:.3f} {geometry.domain_m[1]:.3f} {geometry.domain_m[2]:.3f}",
+        f"#dx_dy_dz: {geometry.dx_m:.3f} {geometry.dx_m:.3f} {geometry.dx_m:.3f}",
+        f"#time_window: {geometry.total_time_ns * 1e-9:.9g}",
+        f"#geometry_view: 0 0 0 {geometry.domain_m[0]:.3f} {geometry.domain_m[1]:.3f} {geometry.domain_m[2]:.3f} {geometry.dx_m:.3f} {geometry.dx_m:.3f} {geometry.dx_m:.3f} {title}_geometry n",
+        "",
+        *materials,
+        "",
+        "#waveform: ricker 1 1.5e9 my_ricker",
+        f"#hertzian_dipole: z {source[0]:.3f} {source[1]:.3f} {source[2]:.3f} my_ricker",
+        f"#rx: {receiver[0]:.3f} {receiver[1]:.3f} {receiver[2]:.3f}",
+    ]
+    if use_steps:
+        lines.extend(
+            [
+                f"#src_steps: {geometry.trace_step_m:.3f} 0 0",
+                f"#rx_steps: {geometry.trace_step_m:.3f} 0 0",
+            ]
+        )
+    lines.extend(["", *bodies, ""])
+    return "\n".join(lines)
+
+
+def _airborne_scripted_height_model_text(definition: ScenarioDefinition) -> str:
+    """Build one gprMax input whose Python block moves Tx/Rx height per run."""
+    geometry = AIRBORNE_GEOMETRY
+    lines = [
+        f"#title: MyGPR {definition.scenario_id}",
+        f"#domain: {geometry.domain_m[0]:.3f} {geometry.domain_m[1]:.3f} {geometry.domain_m[2]:.3f}",
+        f"#dx_dy_dz: {geometry.dx_m:.3f} {geometry.dx_m:.3f} {geometry.dx_m:.3f}",
+        f"#time_window: {geometry.total_time_ns * 1e-9:.9g}",
+        f"#geometry_view: 0 0 0 {geometry.domain_m[0]:.3f} {geometry.domain_m[1]:.3f} {geometry.domain_m[2]:.3f} {geometry.dx_m:.3f} {geometry.dx_m:.3f} {geometry.dx_m:.3f} {definition.scenario_id}_geometry n",
+        "",
+        *_model_material_lines(definition),
+        "",
+        "#waveform: ricker 1 1.5e9 my_ricker",
+        "#python:",
+        "from math import pi, sin",
+        "from gprMax.input_cmd_funcs import hertzian_dipole, rx",
+        "run_idx = current_model_run - 1",
+        "denom = max(number_model_runs - 1, 1)",
+        f"height_m = {geometry.antenna_height_m:.12g} + 0.035 * sin(2.0 * pi * run_idx / denom)",
+        f"source_x = {geometry.source_start_x_m:.12g} + run_idx * {geometry.trace_step_m:.12g}",
+        f"receiver_x = source_x + {geometry.source_receiver_offset_m:.12g}",
+        f"antenna_y = {geometry.ground_top_y_m:.12g} + height_m",
+        "hertzian_dipole('z', source_x, antenna_y, 0.0, 'my_ricker')",
+        "rx(receiver_x, antenna_y, 0.0)",
+        "#end_python:",
+        "",
+        *_model_body_lines(definition),
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def _model_material_lines(definition: ScenarioDefinition) -> list[str]:
+    return [
+        line
+        for line in definition.model_in_text.splitlines()
+        if line.strip().startswith("#material:")
+    ]
+
+
+def _model_body_lines(definition: ScenarioDefinition) -> list[str]:
+    prefixes = ("#box:", "#cylinder:", "#sphere:", "#triangle:", "#plate:")
+    return [
+        line
+        for line in definition.model_in_text.splitlines()
+        if line.strip().startswith(prefixes)
+    ]
+
+
+def _target_boundary_points(target: dict[str, Any]) -> list[tuple[float, float]]:
+    target_type = str(target.get("type") or "")
+    if target_type == "metal_cylinder":
+        center = target.get("center_m") or [0.0, 0.0, 0.0]
+        radius = float(target.get("radius_m") or 0.0)
+        x = float(center[0])
+        y = float(center[1])
+        return [
+            (x - radius, y),
+            (x + radius, y),
+            (x, y - radius),
+            (x, y + radius),
+        ]
+    if target_type == "air_crack":
+        x0 = float(target.get("x0_m", 0.0))
+        x1 = float(target.get("x1_m", x0))
+        y0 = float(target.get("y0_m", 0.0))
+        y1 = float(target.get("y1_m", y0))
+        return [(x0, y0), (x0, y1), (x1, y0), (x1, y1)]
+    if target_type == "layer_interface":
+        y = float(target.get("interface_y_m", 0.0))
+        return [
+            (AIRBORNE_SAFE_MARGIN_M, y),
+            (AIRBORNE_DOMAIN_M[0] - AIRBORNE_SAFE_MARGIN_M, y),
+        ]
+    return []
 
 
 def _target_ground_truth(
@@ -1298,9 +2184,14 @@ def _layer_ground_truth(
 ) -> dict[str, Any]:
     eps = float(target.get("relative_permittivity") or 4.5)
     interface_y = float(target["interface_y_m"])
-    velocity = LIGHT_SPEED_M_PER_NS / np.sqrt(max(eps, 1.0))
     depth = max(0.0, definition.ground_top_y_m - interface_y)
-    apex_time_ns = 2.0 * depth / velocity
+    if definition.geometry_model.startswith("airborne"):
+        apex_time_ns = _air_ground_reflection_time_ns(definition) + (
+            2.0 * depth / (LIGHT_SPEED_M_PER_NS / np.sqrt(max(eps, 1.0)))
+        )
+    else:
+        velocity = LIGHT_SPEED_M_PER_NS / np.sqrt(max(eps, 1.0))
+        apex_time_ns = 2.0 * depth / velocity
     sample = _time_to_sample(apex_time_ns, total_time_ns, samples)
     pad = max(12, samples // 80)
     roi = {
@@ -1337,11 +2228,12 @@ def _crack_ground_truth(
     trace_center = _target_trace_index(definition, x_center, traces)
     trace_half_width = max(3, min(8, traces // 8))
 
-    velocity = LIGHT_SPEED_M_PER_NS / np.sqrt(max(eps, 1.0))
     top_depth = max(0.0, definition.ground_top_y_m - max(y0, y1))
     bottom_depth = max(0.0, definition.ground_top_y_m - min(y0, y1))
-    top_sample = _time_to_sample(2.0 * top_depth / velocity, total_time_ns, samples)
-    bottom_sample = _time_to_sample(2.0 * bottom_depth / velocity, total_time_ns, samples)
+    velocity = LIGHT_SPEED_M_PER_NS / np.sqrt(max(eps, 1.0))
+    air_time = _air_ground_reflection_time_ns(definition) if definition.geometry_model.startswith("airborne") else 0.0
+    top_sample = _time_to_sample(air_time + 2.0 * top_depth / velocity, total_time_ns, samples)
+    bottom_sample = _time_to_sample(air_time + 2.0 * bottom_depth / velocity, total_time_ns, samples)
     pad = max(6, samples // 60)
     t0 = max(0, min(top_sample, bottom_sample) - pad)
     t1 = min(samples, max(top_sample, bottom_sample) + pad + 1)
@@ -1393,10 +2285,79 @@ def _two_way_target_time_ns(
     rx_y = definition.receiver_start_m[1]
     target_x = float(center[0])
     target_y = float(center[1])
+    if definition.geometry_model.startswith("airborne"):
+        return _airborne_two_way_time_ns(
+            definition,
+            tx_x=tx_x,
+            tx_y=tx_y,
+            rx_x=rx_x,
+            rx_y=rx_y,
+            target_x=target_x,
+            target_y=target_y,
+            eps=eps,
+        )
     dist_tx = float(np.hypot(tx_x - target_x, tx_y - target_y))
     dist_rx = float(np.hypot(rx_x - target_x, rx_y - target_y))
     velocity = LIGHT_SPEED_M_PER_NS / np.sqrt(max(eps, 1.0))
     return (dist_tx + dist_rx) / velocity
+
+
+def _airborne_two_way_time_ns(
+    definition: ScenarioDefinition,
+    *,
+    tx_x: float,
+    tx_y: float,
+    rx_x: float,
+    rx_y: float,
+    target_x: float,
+    target_y: float,
+    eps: float,
+) -> float:
+    return _airborne_one_way_time_ns(
+        definition,
+        antenna_x=tx_x,
+        antenna_y=tx_y,
+        target_x=target_x,
+        target_y=target_y,
+        eps=eps,
+    ) + _airborne_one_way_time_ns(
+        definition,
+        antenna_x=rx_x,
+        antenna_y=rx_y,
+        target_x=target_x,
+        target_y=target_y,
+        eps=eps,
+    )
+
+
+def _airborne_one_way_time_ns(
+    definition: ScenarioDefinition,
+    *,
+    antenna_x: float,
+    antenna_y: float,
+    target_x: float,
+    target_y: float,
+    eps: float,
+) -> float:
+    depth = max(0.0, definition.ground_top_y_m - target_y)
+    air_height = max(0.0, antenna_y - definition.ground_top_y_m)
+    total_vertical = max(air_height + depth, 1.0e-9)
+    distance = float(np.hypot(antenna_x - target_x, antenna_y - target_y))
+    air_len = distance * air_height / total_vertical
+    soil_len = distance * depth / total_vertical
+    soil_velocity = LIGHT_SPEED_M_PER_NS / np.sqrt(max(eps, 1.0))
+    return air_len / LIGHT_SPEED_M_PER_NS + soil_len / soil_velocity
+
+
+def _direct_air_wave_time_ns(definition: ScenarioDefinition) -> float:
+    offset = abs(float(definition.receiver_start_m[0] - definition.source_start_m[0]))
+    return offset / LIGHT_SPEED_M_PER_NS
+
+
+def _air_ground_reflection_time_ns(definition: ScenarioDefinition) -> float:
+    height = max(0.0, float(definition.source_start_m[1] - definition.ground_top_y_m))
+    half_offset = abs(float(definition.receiver_start_m[0] - definition.source_start_m[0])) / 2.0
+    return 2.0 * float(np.hypot(half_offset, height)) / LIGHT_SPEED_M_PER_NS
 
 
 def _time_to_sample(time_ns: float, total_time_ns: float, samples: int) -> int:
@@ -1421,6 +2382,141 @@ def _target_roi(
         "dist_start_idx": max(0, int(apex_trace - half_width)),
         "dist_end_idx": min(traces, int(apex_trace + half_width + 1)),
     }
+
+
+def _build_wavefield_rois(
+    definition: ScenarioDefinition,
+    simulation: dict[str, Any],
+    *,
+    target_rois: list[dict[str, int]],
+) -> dict[str, dict[str, Any]]:
+    samples = int(simulation["sample_count"])
+    traces = int(simulation["trace_count"])
+    total_time_ns = float(simulation["total_time_ns"])
+    direct_sample = _time_to_sample(
+        _direct_air_wave_time_ns(definition),
+        total_time_ns,
+        samples,
+    )
+    surface_sample = _time_to_sample(
+        _air_ground_reflection_time_ns(definition),
+        total_time_ns,
+        samples,
+    )
+    direct_roi = _horizontal_wave_roi(samples, traces, direct_sample, pad=max(3, samples // 180))
+    surface_roi = _asymmetric_horizontal_wave_roi(
+        samples,
+        traces,
+        surface_sample,
+        before=max(8, samples // 120),
+        after=max(24, samples // 12),
+    )
+    rois: dict[str, dict[str, Any]] = {
+        "direct_air_wave": {
+            "label": "Tx-Rx 直达空气波",
+            "time_ns": float(_direct_air_wave_time_ns(definition)),
+            "roi": direct_roi,
+            "risk": "不应被误增强或误判为地下目标。",
+        },
+        "air_ground_reflection": {
+            "label": "空气-地表强反射",
+            "time_ns": float(_air_ground_reflection_time_ns(definition)),
+            "roi": surface_roi,
+            "risk": "增益和零时校正不能破坏其与地下目标的时序关系。",
+        },
+        "background": {
+            "label": "地表反射后的目标外背景",
+            "roi": _background_roi(samples, traces, surface_roi, target_rois),
+            "risk": "AGC/强增益可能把该区域放大为假异常。",
+        },
+        "late_noise": {
+            "label": "晚时窗深部噪声区",
+            "roi": {
+                "time_start_idx": max(0, int(samples * 0.78)),
+                "time_end_idx": samples,
+                "dist_start_idx": 0,
+                "dist_end_idx": traces,
+            },
+            "risk": "深部补偿过强时该区域会过曝。",
+        },
+    }
+    if target_rois:
+        target_union = _union_rois(target_rois, samples, traces)
+        target_start = max(
+            target_union["time_start_idx"],
+            surface_roi["time_end_idx"] + 1,
+        )
+        target_union = {
+            **target_union,
+            "time_start_idx": min(target_start, max(target_union["time_end_idx"] - 1, 0)),
+        }
+        rois["subsurface_target"] = {
+            "label": "地下目标/真实结构",
+            "roi": _clamp_roi(target_union, (samples, traces)),
+            "risk": "自动选参应保留该 ROI 内的真实结构能量和边缘。",
+        }
+    return rois
+
+
+def _horizontal_wave_roi(
+    samples: int,
+    traces: int,
+    sample: int,
+    *,
+    pad: int,
+) -> dict[str, int]:
+    return {
+        "time_start_idx": max(0, int(sample - pad)),
+        "time_end_idx": min(samples, int(sample + pad + 1)),
+        "dist_start_idx": 0,
+        "dist_end_idx": traces,
+    }
+
+
+def _asymmetric_horizontal_wave_roi(
+    samples: int,
+    traces: int,
+    sample: int,
+    *,
+    before: int,
+    after: int,
+) -> dict[str, int]:
+    return {
+        "time_start_idx": max(0, int(sample - before)),
+        "time_end_idx": min(samples, int(sample + after + 1)),
+        "dist_start_idx": 0,
+        "dist_end_idx": traces,
+    }
+
+
+def _background_roi(
+    samples: int,
+    traces: int,
+    surface_roi: dict[str, int],
+    target_rois: list[dict[str, int]],
+) -> dict[str, int]:
+    start = min(samples - 1, int(surface_roi["time_end_idx"]) + max(6, samples // 80))
+    end = max(start + 1, int(samples * 0.72))
+    if target_rois:
+        target_union = _union_rois(target_rois, samples, traces)
+        end = max(start + 1, min(end, int(target_union["time_start_idx"])))
+    return {
+        "time_start_idx": max(0, start),
+        "time_end_idx": min(samples, end),
+        "dist_start_idx": 0,
+        "dist_end_idx": traces,
+    }
+
+
+def _default_background_roi(
+    wavefield_rois: dict[str, dict[str, Any]],
+    samples: int,
+    traces: int,
+) -> dict[str, int]:
+    background = wavefield_rois.get("background", {}).get("roi")
+    if isinstance(background, dict):
+        return _clamp_roi(background, (samples, traces))
+    return _full_roi(samples, traces)
 
 
 def _union_rois(rois: list[dict[str, int]], samples: int, traces: int) -> dict[str, int]:
@@ -1449,7 +2545,7 @@ def _resolve_pipeline(baseline_profile_key: str) -> list[str]:
     if baseline_profile_key == DEFAULT_PROFILE_KEY:
         pipeline = list(REPORT_PIPELINE_ORDER)
     else:
-        pipeline = ["agcGain" if item == "sec_gain" else item for item in profile_order]
+        pipeline = list(profile_order)
     missing = [method_key for method_key in pipeline if method_key not in PROCESSING_METHODS]
     if missing:
         raise ValueError(f"Unknown processing method(s): {', '.join(missing)}")
@@ -1802,6 +2898,11 @@ def _compact_auto_tune_result(result: dict[str, Any]) -> dict[str, Any]:
         "best_score": _json_safe(result.get("best_score")),
         "best_reason": result.get("best_reason"),
         "roi_info": _json_safe(result.get("roi_info", {})),
+        "parameter_domain": _json_safe(result.get("parameter_domain", {})),
+        "risk_flags": _json_safe(result.get("risk_flags", [])),
+        "risk_level": _json_safe(result.get("risk_level")),
+        "risk_reason": result.get("risk_reason"),
+        "selection_recommendation": result.get("selection_recommendation"),
         "execution_stats": _json_safe(result.get("execution_stats", {})),
     }
 
@@ -1835,6 +2936,14 @@ def _render_scenario_section(record: dict[str, Any]) -> str:
     notes = "".join(f"<li>{_esc(note)}</li>" for note in record.get("structure_notes", []))
     step_panels = "\n".join(_render_step_panel(step) for step in record.get("images", []))
     command = " ".join(str(part) for part in record.get("gprmax", {}).get("command", []))
+    wavefield_checks = _render_wavefield_checks(record)
+    legacy_warning = ""
+    if record.get("is_uav_gpr_evidence") is False:
+        legacy_warning = (
+            "<div class=\"warnings\"><strong>非 UAV-GPR 论文证据</strong>"
+            "<p>该 legacy 场景的 Tx/Rx 位于地表附近，只能用于回归 smoke benchmark，"
+            "不能支撑航空探地雷达自动选参结论。</p></div>"
+        )
     return f"""
     <section class="scenario">
       <div class="scenario-heading">
@@ -1845,15 +2954,18 @@ def _render_scenario_section(record: dict[str, Any]) -> str:
         <span class="verdict">{_esc(verdict_label)}</span>
       </div>
       <p>{_esc(record.get("description"))}</p>
+      {legacy_warning}
 
       <h3>真实地质结构</h3>
       <div class="structure-grid">
         <img src="{_esc(record.get("structure_preview"))}" alt="{_esc(record.get("label"))} true structure">
         <div>
           <ul>{notes}</ul>
-          <p class="note">Ground truth ROI 来自正演结构的已知几何位置，用于评价目标保真与背景抑制，不依赖人工从真实数据中猜测双曲线位置。</p>
+          <p class="note">几何模型：<code>{_esc(record.get("geometry_model"))}</code>。Airborne 场景显式包含空气层、天线离地高度、Tx/Rx 航迹、直达波、地表反射和地下结构；Ground truth ROI 来自正演结构的已知几何位置。</p>
         </div>
       </div>
+
+      {wavefield_checks}
 
       <h3>gprMax 命令</h3>
       <pre>{_esc(command)}</pre>
@@ -1877,6 +2989,47 @@ def _render_scenario_section(record: dict[str, Any]) -> str:
       <h3>逐步骤 BScan 对比</h3>
       {step_panels}
     </section>
+"""
+
+
+def _render_wavefield_checks(record: dict[str, Any]) -> str:
+    ground_truth = record.get("ground_truth") or {}
+    rois = ground_truth.get("wavefield_rois") or {}
+    if not isinstance(rois, dict) or not rois:
+        return ""
+    label_map = {
+        "direct_air_wave": "直达波",
+        "air_ground_reflection": "地表反射",
+        "subsurface_target": "地下目标",
+        "background": "背景区",
+        "late_noise": "深部噪声",
+    }
+    rows = []
+    for key in [
+        "direct_air_wave",
+        "air_ground_reflection",
+        "subsurface_target",
+        "background",
+        "late_noise",
+    ]:
+        item = rois.get(key)
+        if not isinstance(item, dict):
+            continue
+        roi = item.get("roi") or {}
+        rows.append(
+            f"<tr><td>{_esc(label_map.get(key, key))}</td>"
+            f"<td><code>{_esc(json.dumps(roi, ensure_ascii=False, sort_keys=True))}</code></td>"
+            f"<td>{_esc(item.get('risk') or '')}</td></tr>"
+        )
+    if not rows:
+        return ""
+    return f"""
+      <h3>波场特征检查</h3>
+      <p class="note">检查顺序应为直达波 &lt; 地表反射 &lt; 地下目标。自动选参和增益不能把直达波/地表反射误增强为地下异常，也不能让零时校正破坏三者时序。</p>
+      <table class="params-table">
+        <thead><tr><th>波场特征</th><th>ROI</th><th>风险检查</th></tr></thead>
+        <tbody>{''.join(rows)}</tbody>
+      </table>
 """
 
 
@@ -1981,17 +3134,28 @@ def _render_params_table(step: dict[str, Any]) -> str:
     auto = json.dumps(step.get("auto_params", {}), ensure_ascii=False, sort_keys=True)
     tune = step.get("auto_tune_summary") or {}
     reason = tune.get("best_reason") or tune.get("recommended_profile") or tune.get("error") or ""
+    risk_flags = ", ".join(tune.get("risk_flags") or []) or "无"
+    recommendation = tune.get("selection_recommendation") or "review"
     manual_note = "经验 baseline 或日常页面同步参数"
     if step.get("manual_original_params") != step.get("manual_params"):
         manual_note = f"本步实际参数已按报告策略修正；原人工参数为 {manual_original}"
+    domain = tune.get("parameter_domain") or {}
+    domain_notes = list(domain.get("notes") or [])
+    domain_note_html = ""
+    if domain_notes:
+        domain_note_html = (
+            f"<p class=\"note\"><strong>参数域提示：</strong>{_esc('；'.join(domain_notes[:3]))}</p>"
+        )
     return f"""
         <table class="params-table">
           <thead><tr><th>分支</th><th>参数</th><th>说明</th></tr></thead>
-          <tbody>
+        <tbody>
             <tr><td>人工选参</td><td><code>{_esc(manual)}</code></td><td>{_esc(manual_note)}</td></tr>
             <tr><td>自动选参</td><td><code>{_esc(auto)}</code></td><td>{_esc(reason)}</td></tr>
-          </tbody>
+        </tbody>
         </table>
+        <p class="note"><strong>风险标记：</strong>{_esc(risk_flags)}，<strong>建议动作：</strong>{_esc(recommendation)}</p>
+        {domain_note_html}
 """
 
 
@@ -2262,6 +3426,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=[],
         help="Scenario id to run; can be repeated. Default: all scenarios.",
     )
+    parser.add_argument(
+        "--scenario-family",
+        choices=["airborne", "legacy", "all"],
+        default=DEFAULT_SCENARIO_FAMILY,
+        help="Scenario family to expose. Default: airborne UAV-GPR scenes.",
+    )
     parser.add_argument("--runs", type=int, default=DEFAULT_RUNS)
     parser.add_argument(
         "--geometry-fixed",
@@ -2306,6 +3476,7 @@ def main(argv: list[str] | None = None) -> int:
         gprmax_root=Path(args.gprmax_root),
         output_root=Path(args.output_root),
         scenario_ids=list(args.scenario or []) or None,
+        scenario_family=str(args.scenario_family),
         runs=int(args.runs),
         geometry_fixed=bool(args.geometry_fixed),
         mpi=args.mpi,

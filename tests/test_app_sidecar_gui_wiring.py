@@ -73,6 +73,33 @@ def test_altimeter_is_exposed_in_gui_slice() -> None:
         _close_window(app, win)
 
 
+def test_airborne_qc_metrics_include_alignment_and_height_confidence() -> None:
+    app = _get_app()
+    win = GPRGuiQt()
+    try:
+        win.header_info = {"has_airborne_metadata": True, "track_length_m": 12.0}
+        win.trace_metadata = {
+            "trace_distance_m": np.array([0.0, 1.0, 2.2, 3.4], dtype=np.float64),
+            "flight_height_m": np.array([5.0, 5.3, 5.6, 5.9], dtype=np.float64),
+            "alignment_status": np.array(
+                ["aligned", "extrapolated", "aligned", "aligned"], dtype="<U16"
+            ),
+            "height_confidence": np.array([1.0, 0.4, 0.9, 0.8], dtype=np.float32),
+        }
+
+        qc = win._compute_airborne_qc_metrics()
+
+        assert qc is not None
+        assert qc["alignment_extrapolated_traces"] == 1
+        assert qc["height_confidence_low_traces"] == 1
+        assert qc["alignment_extrapolated_indices"] == [1]
+        assert qc["height_confidence_low_indices"] == [1]
+        assert "alignment_extrapolated=1" in qc["alerts"]
+        assert "height_confidence_low=1" in qc["alerts"]
+    finally:
+        _close_window(app, win)
+
+
 def test_pick_sidecar_updates_state_and_label(monkeypatch, tmp_path: Path) -> None:
     app = _get_app()
     win = GPRGuiQt()

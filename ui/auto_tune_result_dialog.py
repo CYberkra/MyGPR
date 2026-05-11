@@ -118,8 +118,10 @@ class AutoTuneResultDialog(QDialog):
         failed_trials = len(self.result.get("failed_trials", []))
         execution_stats = self.result.get("execution_stats", {}) or {}
         cache_hits = int(execution_stats.get("cache_hit_count", 0))
+        risk_flags = ", ".join(self.result.get("risk_flags", []) or []) or "无"
+        recommendation = self.result.get("selection_recommendation", "review")
         return (
-            f"方法: {method_name} | 类型: {family} | ROI: {roi_label} | 候选数: {trials} | 失败候选: {failed_trials} | 缓存命中: {cache_hits} | 推荐档: {recommended} | 稳定性: {confidence:.2f} (margin={margin:.3f}) | 最优得分: {best_score:.4f} | "
+            f"方法: {method_name} | 类型: {family} | ROI: {roi_label} | 候选数: {trials} | 失败候选: {failed_trials} | 缓存命中: {cache_hits} | 推荐档: {recommended} | 稳定性: {confidence:.2f} (margin={margin:.3f}) | 风险: {risk_flags} | 建议: {recommendation} | 最优得分: {best_score:.4f} | "
             f"最优参数: {json.dumps(best_params, ensure_ascii=False)}"
         )
 
@@ -135,6 +137,19 @@ class AutoTuneResultDialog(QDialog):
             lines.append(
                 f"粗筛/细化: {len(self.result.get('coarse_trials', []))} / {len(self.result.get('fine_trials', []))}"
             )
+        risk_flags = list(self.result.get("risk_flags") or [])
+        if risk_flags:
+            lines.append("")
+            lines.append("风险标记:")
+            lines.extend(f"- {item}" for item in risk_flags)
+        risk_reason = self.result.get("risk_reason")
+        if risk_reason:
+            lines.append("")
+            lines.append(f"风险说明: {risk_reason}")
+        recommendation = self.result.get("selection_recommendation")
+        if recommendation:
+            lines.append("")
+            lines.append(f"建议动作: {recommendation}")
         execution_stats = self.result.get("execution_stats", {}) or {}
         if execution_stats:
             lines.append("")

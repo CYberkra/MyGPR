@@ -26,6 +26,12 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from core.auto_tune import auto_tune_method  # noqa: E402
+from core.gain_selection import (  # noqa: E402
+    choose_gain_candidate,
+    gain_risk_flags,
+    gain_score_terms,
+    score_gain_candidate,
+)
 from core.gprmax_truth_metrics import compute_ground_truth_metrics  # noqa: E402
 from core.methods_registry import PROCESSING_METHODS  # noqa: E402
 from core.preset_profiles import RECOMMENDED_RUN_PROFILES  # noqa: E402
@@ -47,6 +53,7 @@ from scripts.gprmax_benchmark import gprmax_multi_scenario_report as base_report
 
 
 DEFAULT_SOURCE_ROOT = ROOT / "output" / "gprmax_full_effect_reports"
+DEFAULT_MULTI_SCENARIO_SOURCE_ROOT = ROOT / "output" / "gprmax_multi_scenario_reports"
 DEFAULT_OUTPUT_ROOT = ROOT / "output" / "gprmax_gain_method_reports"
 DEFAULT_BASELINE_PROFILE = "uav_gpr_experience_baseline_v1"
 PRE_GAIN_METHODS = ["set_zero_time", "dewow", "subtracting_average_2D"]
@@ -119,7 +126,7 @@ RESEARCH_SOURCES = [
         "note": "GPR 振幅随频率和距离衰减；理论上应估计反衰减函数，但介质参数未知时只能做近似补偿。",
     },
     {
-        "title": "Remote Sensing 2026, drone-mounted GPR signal factors",
+        "title": "Sensors 2026, environmental and crop factors affecting drone-mounted GPR",
         "url": "https://www.mdpi.com/1424-8220/26/6/1873",
         "note": "飞行高度、地形、植被/含水率会影响空载 GPR 的振幅、时延和质量，应进入自动增益选择的风险项。",
     },
@@ -269,9 +276,12 @@ def resolve_source_report(source_report: Path | None) -> Path:
             raise FileNotFoundError(f"source report summary not found: {path / 'summary.json'}")
         return path
 
+    search_roots = [DEFAULT_MULTI_SCENARIO_SOURCE_ROOT, DEFAULT_SOURCE_ROOT]
     candidates = [
         path.parent
-        for path in DEFAULT_SOURCE_ROOT.rglob("summary.json")
+        for root in search_roots
+        if root.exists()
+        for path in root.rglob("summary.json")
         if "scenarios" in str(path)
         or (path.parent / "scenarios").exists()
     ]
@@ -444,12 +454,10 @@ def evaluate_gain_method(
 def choose_gain_choice(variants: list[dict[str, Any]]) -> dict[str, Any]:
     """Choose the best gain method/parameter branch for the scenario."""
     candidates: list[dict[str, Any]] = []
-    target_count = 0.0
     for variant in variants:
         for branch_key in ["manual", "auto"]:
             branch = variant.get(branch_key, {})
             metrics = branch.get("final_metrics", {}) or {}
-            target_count = max(target_count, float(metrics.get("target_count", 0.0)))
             candidates.append(
                 {
                     "method_key": variant["method_key"],
@@ -458,14 +466,12 @@ def choose_gain_choice(variants: list[dict[str, Any]]) -> dict[str, Any]:
                     "score": float(branch.get("selection_score", -1.0e9)),
                     "params": _json_safe(branch.get("params", {})),
                     "reason": branch.get("selection_reason", ""),
+                    "metrics": metrics,
+                    "risk_flags": branch.get("selection_risk_flags", []),
+                    "score_terms": branch.get("selection_score_terms", {}),
                 }
             )
-    if target_count > 0.0:
-        gain_candidates = [item for item in candidates if item["method_key"] != "no_gain"]
-        if gain_candidates:
-            candidates = gain_candidates
-    best = max(candidates, key=lambda item: float(item["score"]))
-    return _json_safe(best)
+    return _json_safe(choose_gain_candidate(candidates).to_dict())
 
 
 def _strip_variant_arrays(variants: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -555,6 +561,8 @@ def run_gain_branch(
         method_key=method_key,
     )
     selection_score = gain_method_selection_score(final_metrics, method_key)
+    selection_score_terms = gain_score_terms(final_metrics, method_key)
+    selection_risk_flags = gain_risk_flags(final_metrics, method_key)
     return {
         "branch": branch_label,
         "params": _json_safe(params),
@@ -563,6 +571,8 @@ def run_gain_branch(
         "gain_metrics": _json_safe(gain_metrics),
         "final_metrics": _json_safe(final_metrics),
         "selection_score": float(selection_score),
+        "selection_score_terms": _json_safe(selection_score_terms),
+        "selection_risk_flags": list(selection_risk_flags),
         "selection_reason": _selection_reason(final_metrics, method_key, selection_score),
         "visual_analysis": _visual_gain_analysis(final_metrics, method_key),
         "metric_analysis": _metric_gain_analysis(final_metrics, method_key),
@@ -612,62 +622,7 @@ def compute_gain_metrics(
 
 def gain_method_selection_score(metrics: dict[str, float], method_key: str) -> float:
     """Score a gain result using truth ROI, artifact risk, and literature priors."""
-    target_count = float(metrics.get("target_count", 0.0))
-    truth = float(metrics.get("truth_score", 0.0))
-    target_energy = float(metrics.get("truth_target_energy_preservation", 1.0))
-    target_band = float(metrics.get("target_band_energy_ratio", 1.0))
-    edge = float(metrics.get("edge_preservation", 1.0))
-    saliency_gain = float(metrics.get("truth_target_saliency_gain", 1.0))
-    contrast = float(metrics.get("truth_target_contrast_after", 0.0))
-    false_positive = float(metrics.get("truth_false_positive_ratio", 1.0))
-    background_reduction = float(metrics.get("truth_background_energy_reduction", 0.0))
-    lateral = float(metrics.get("lateral_profile_corr", 0.0))
-    amp_preserve = float(metrics.get("relative_amplitude_preservation_score", 0.0))
-    depth_balance = float(metrics.get("depth_balance_score", 0.0))
-    clip = float(metrics.get("clipping_ratio_after", 0.0))
-    hot = float(metrics.get("hot_pixel_ratio_after", 0.0))
-
-    method_prior = {
-        "sec_gain": 0.18,
-        "compensatingGain": 0.08,
-        "agcGain": -0.10,
-        "no_gain": 0.04 if target_count <= 0 else -0.12,
-    }.get(method_key, 0.0)
-
-    if target_count <= 0:
-        return float(
-            1.4 * truth
-            + 1.1 * np.clip(background_reduction, -1.0, 1.0)
-            + 0.5 * amp_preserve
-            - 1.6 * max(0.0, false_positive - 1.0)
-            - 8.0 * clip
-            - 5.0 * hot
-            + method_prior
-        )
-
-    saliency_term = float(np.clip(np.log1p(max(0.0, saliency_gain)) / np.log(4.0), 0.0, 1.6))
-    contrast_term = float(np.clip(np.log1p(max(0.0, contrast)) / np.log(6.0), 0.0, 1.4))
-    false_positive_penalty = max(0.0, false_positive - 0.85)
-    background_penalty = max(0.0, -background_reduction)
-    target_vanish_penalty = (
-        5.0 * max(0.0, 0.35 - target_energy)
-        + 3.5 * max(0.0, 0.35 - target_band)
-        + 2.5 * max(0.0, 0.35 - edge)
-        + 1.4 * max(0.0, 0.90 - saliency_gain)
-    )
-    return float(
-        1.25 * truth
-        + 0.85 * saliency_term
-        + 0.45 * contrast_term
-        + 0.55 * amp_preserve
-        + 0.35 * depth_balance
-        - 1.25 * false_positive_penalty
-        - 0.40 * background_penalty
-        - target_vanish_penalty
-        - 8.0 * clip
-        - 5.0 * hot
-        + method_prior
-    )
+    return score_gain_candidate(metrics, method_key)
 
 
 def save_gain_report_images(
@@ -680,22 +635,21 @@ def save_gain_report_images(
 ) -> list[dict[str, Any]]:
     """Render gain-stage and final-stage images for each variant."""
     pre_path = assets_dir / f"{scenario_id}_pre_gain.png"
-    all_outputs = [pre_gain.data]
+    pre_vlim = base_report._locked_vlim([pre_gain.data])
+    base_report.save_bscan_image(pre_gain.data, pre_path, "before gain", pre_vlim, pre_gain.roi)
+
+    image_records: list[dict[str, Any]] = []
     for variant in variants:
-        all_outputs.extend(
+        method_key = variant["method_key"]
+        variant_vlim = base_report._locked_vlim(
             [
+                pre_gain.data,
                 variant["manual"]["gain_output"],
                 variant["auto"]["gain_output"],
                 variant["manual"]["final_output"],
                 variant["auto"]["final_output"],
             ]
         )
-    vlim = base_report._locked_vlim(all_outputs)
-    base_report.save_bscan_image(pre_gain.data, pre_path, "before gain", vlim, pre_gain.roi)
-
-    image_records: list[dict[str, Any]] = []
-    for variant in variants:
-        method_key = variant["method_key"]
         prefix = f"{scenario_id}_{method_key}"
         paths = {
             "manual_gain": assets_dir / f"{prefix}_manual_gain.png",
@@ -707,28 +661,28 @@ def save_gain_report_images(
             variant["manual"]["gain_output"],
             paths["manual_gain"],
             f"{method_key} manual gain",
-            vlim,
+            variant_vlim,
             pre_gain.roi,
         )
         base_report.save_bscan_image(
             variant["auto"]["gain_output"],
             paths["auto_gain"],
             f"{method_key} auto gain",
-            vlim,
+            variant_vlim,
             pre_gain.roi,
         )
         base_report.save_bscan_image(
             variant["manual"]["final_output"],
             paths["manual_final"],
             f"{method_key} manual final",
-            vlim,
+            variant_vlim,
             variant["manual"]["final_roi"],
         )
         base_report.save_bscan_image(
             variant["auto"]["final_output"],
             paths["auto_final"],
             f"{method_key} auto final",
-            vlim,
+            variant_vlim,
             variant["auto"]["final_roi"],
         )
         image_records.append(
@@ -811,7 +765,7 @@ def _render_selection_section(payload: dict[str, Any]) -> str:
       <h2>自动选择方法</h2>
       <p>{_esc(rule.get("summary"))}</p>
       <ul>{items}</ul>
-      <p class="note">对 gprMax，评分使用真实结构 ROI；对未来真实 UAV 数据，应把真实 ROI 替换为结构候选 ROI、背景 ROI、深部噪声 ROI，并把分数差距小的结果标记为需要人工复核。</p>
+      <p class="note">对 gprMax，评分使用真实结构 ROI；对未来真实 UAV 数据，应把真实 ROI 替换为结构候选 ROI、背景 ROI、深部噪声 ROI，并把分数差距小的结果标记为需要人工复核。当前选择器来自 <code>core.gain_selection</code>，可复用于 GUI、CLI 和报告。</p>
     </section>
 """
 
@@ -822,7 +776,7 @@ def _render_overall_summary(payload: dict[str, Any]) -> str:
     <section>
       <h2>总体结果</h2>
       <table class="params-table">
-        <thead><tr><th>场景</th><th>自动推荐增益</th><th>score</th><th>推荐参数</th><th>理由</th></tr></thead>
+        <thead><tr><th>场景</th><th>自动推荐增益</th><th>score</th><th>置信度</th><th>选择风险</th><th>推荐参数</th><th>理由</th></tr></thead>
         <tbody>{rows}</tbody>
       </table>
     </section>
@@ -831,11 +785,14 @@ def _render_overall_summary(payload: dict[str, Any]) -> str:
 
 def _render_overall_row(record: dict[str, Any]) -> str:
     best = record.get("best_gain_choice", {})
+    risks = ", ".join(best.get("risk_flags") or []) or "无"
     return f"""
           <tr>
             <td>{_esc(record.get("label"))} <code>{_esc(record.get("scenario_id"))}</code></td>
             <td>{_esc(best.get("method_label"))} <code>{_esc(best.get("method_key"))}</code> / {_esc(best.get("branch"))}</td>
             <td>{_fmt(best.get("score"))}</td>
+            <td>{_fmt(best.get("confidence"))}</td>
+            <td>{_esc(risks)}</td>
             <td><code>{_esc(json.dumps(best.get("params", {}), ensure_ascii=False))}</code></td>
             <td>{_esc(best.get("reason"))}</td>
           </tr>
@@ -884,6 +841,17 @@ def _render_gain_variant(record: dict[str, Any], variant: dict[str, Any]) -> str
     manual = variant.get("manual", {})
     auto = variant.get("auto", {})
     auto_summary = variant.get("auto_tune_summary", {})
+    domain = auto_summary.get("parameter_domain") or {}
+    domain_notes = list(domain.get("notes") or [])
+    domain_note_html = ""
+    if domain_notes:
+        domain_note_html = (
+            f"<p><strong>参数域提示：</strong>{_esc('；'.join(domain_notes[:3]))}</p>"
+        )
+    risk_flags = ", ".join(auto_summary.get("risk_flags") or []) or "无"
+    recommendation = auto_summary.get("selection_recommendation") or "review"
+    manual_risks = ", ".join(manual.get("selection_risk_flags") or []) or "无"
+    auto_risks = ", ".join(auto.get("selection_risk_flags") or []) or "无"
     return f"""
       <article class="step-card">
         <h3>{_esc(variant.get("method_label"))} <code>{_esc(variant.get("method_key"))}</code></h3>
@@ -894,8 +862,16 @@ def _render_gain_variant(record: dict[str, Any], variant: dict[str, Any]) -> str
           <div><span>自动参数</span><strong><code>{_esc(json.dumps(auto.get("params", {}), ensure_ascii=False))}</code></strong></div>
         </div>
         <p><strong>自动选参说明：</strong>{_esc(auto_summary.get("best_reason") or auto_summary.get("error") or "无")}</p>
+        <p><strong>风险标记：</strong>{_esc(risk_flags)}，<strong>建议动作：</strong>{_esc(recommendation)}</p>
+        <p><strong>选择风险：</strong>人工分支 {_esc(manual_risks)}；自动分支 {_esc(auto_risks)}</p>
+        {domain_note_html}
         <p><strong>视觉评价：</strong>{_esc(auto.get("visual_analysis"))}</p>
         <p><strong>指标评价：</strong>{_esc(auto.get("metric_analysis"))}</p>
+        <h4>评分项</h4>
+        <div class="two-col">
+          <div>{_render_score_terms_table("人工分支", manual.get("selection_score_terms", {}))}</div>
+          <div>{_render_score_terms_table("自动分支", auto.get("selection_score_terms", {}))}</div>
+        </div>
         <div class="image-grid five">
           <figure><img src="{_esc(images.get("pre_gain"))}" alt="before gain"><figcaption>增益前</figcaption></figure>
           <figure><img src="{_esc(images.get("manual_gain"))}" alt="manual gain"><figcaption>人工增益后</figcaption></figure>
@@ -905,6 +881,21 @@ def _render_gain_variant(record: dict[str, Any], variant: dict[str, Any]) -> str
         </div>
         {_render_metrics_table(auto.get("final_metrics", {}))}
       </article>
+"""
+
+
+def _render_score_terms_table(title: str, terms: dict[str, Any]) -> str:
+    rows = "\n".join(
+        f"<tr><td><code>{_esc(key)}</code></td><td>{_fmt(value)}</td></tr>"
+        for key, value in terms.items()
+    )
+    if not rows:
+        rows = "<tr><td colspan=\"2\">-</td></tr>"
+    return f"""
+        <table class="params-table small">
+          <caption>{_esc(title)}</caption>
+          <tbody>{rows}</tbody>
+        </table>
 """
 
 
@@ -1122,7 +1113,7 @@ def _selection_rule_summary() -> dict[str, Any]:
 
 
 def _render_or_copy_structure(package: ScenarioPackage, out_path: Path) -> None:
-    scenario_defs = base_report.build_scenario_definitions()
+    scenario_defs = base_report.build_scenario_definitions("all")
     definition = scenario_defs.get(package.scenario_id)
     if definition is not None:
         base_report.save_structure_preview(definition, out_path)
@@ -1235,6 +1226,16 @@ def _html_css() -> str:
 .params-table.small td:first-child {
   width: 45%;
 }
+.two-col {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+.params-table caption {
+  text-align: left;
+  font-weight: 700;
+  margin: 6px 0;
+}
 """
 
 
@@ -1245,7 +1246,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--source-report",
         default=None,
-        help="Existing gprMax report directory or summary.json. Defaults to latest full-effect report.",
+        help=(
+            "Existing gprMax report directory or summary.json. Defaults to the "
+            "latest multi-scenario report, falling back to full-effect reports."
+        ),
     )
     parser.add_argument(
         "--output-root",

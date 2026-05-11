@@ -120,6 +120,52 @@ def test_v2_nonpositive_height_skips_height_correction():
     assert "trace_metadata_updates" not in meta
 
 
+def test_v2_flags_extrapolated_alignment_and_low_height_confidence():
+    data = np.zeros((16, 4), dtype=np.float32)
+    metadata = _base_metadata(4)
+    metadata["alignment_status"] = np.array(
+        ["aligned", "extrapolated", "aligned", "aligned"], dtype="<U16"
+    )
+    metadata["height_confidence"] = np.array([1.0, 0.4, 0.9, 0.8], dtype=np.float32)
+
+    _, meta = method_motion_compensation_v2(
+        data,
+        trace_metadata=metadata,
+        compensate_time_shift=False,
+        compensate_amplitude=False,
+    )
+
+    warning_codes = {item["code"] for item in meta.get("runtime_warnings", [])}
+    assert "sidecar_extrapolated" in meta["quality_flags"]
+    assert "low_height_confidence" in meta["quality_flags"]
+    assert "sidecar_extrapolated" in warning_codes
+    assert "low_height_confidence" in warning_codes
+    assert meta["input_quality"]["alignment_extrapolated_traces"] == 1
+    assert meta["input_quality"]["height_confidence_low_traces"] == 1
+
+
+def test_v2_warns_when_height_time_shift_is_clamped():
+    data = np.zeros((64, 4), dtype=np.float32)
+    metadata = _base_metadata(4)
+    metadata["height_agl_m"] = np.array([0.5, 1.0, 1.5, 2.0], dtype=np.float64)
+
+    _, meta = method_motion_compensation_v2(
+        data,
+        trace_metadata=metadata,
+        time_window_ns=10.0,
+        compensate_time_shift=True,
+        compensate_amplitude=False,
+        max_shift_samples=0.5,
+    )
+
+    warning_codes = {item["code"] for item in meta.get("runtime_warnings", [])}
+    assert meta["time_shift_clamped"] is True
+    assert "time_shift_clamped" in meta["quality_flags"]
+    assert "time_shift_clamped" in warning_codes
+    assert meta["raw_time_shift_samples_min"] < -0.5
+    assert meta["raw_time_shift_samples_max"] > 0.5
+
+
 def test_v2_resamples_data_and_metadata_to_uniform_trace_spacing():
     source_distance = np.array([0.0, 0.4, 1.1, 2.0], dtype=np.float64)
     data = np.vstack(

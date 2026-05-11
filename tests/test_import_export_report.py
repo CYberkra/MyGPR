@@ -98,6 +98,65 @@ def test_report_and_quality_snapshot_include_runtime_warnings(tmp_path: Path):
         app.processEvents()
 
 
+def test_report_and_quality_snapshot_include_profile_workflow_summary(
+    monkeypatch, tmp_path: Path
+):
+    app = _get_app()
+    win = GPRGuiQt()
+    try:
+        raw = np.arange(120, dtype=np.float32).reshape(10, 12)
+        win.shared_data.load_data(raw, path="demo.csv", source="test")
+        win._last_quality_metrics = {
+            "focus_ratio": 0.3,
+            "hot_pixels": 0,
+            "spikiness": 1.1,
+            "time_ms": 3.0,
+        }
+        win._set_last_run_summary(
+            "recommended",
+            "高质量 UAV-GPR",
+            [
+                {
+                    "method_key": "motion_compensation_v2",
+                    "method_name": "UAV运动补偿V2",
+                    "params": {"height_source": "auto"},
+                    "elapsed_ms": 5.0,
+                }
+            ],
+            profile_key="high_quality_uav_gpr",
+        )
+        win._default_output_dir = lambda: str(tmp_path)  # type: ignore[method-assign]
+
+        win.generate_report()
+
+        report_path = next(tmp_path.glob("report_*.md"))
+        report_text = report_path.read_text(encoding="utf-8")
+        assert "Workflow stages" in report_text
+        assert "motion_compensation_v2" in report_text
+        assert "Sensor dependencies" in report_text
+        assert "height_agl_m" in report_text
+
+        monkeypatch.setattr(
+            QMessageBox,
+            "information",
+            lambda *args, **kwargs: QMessageBox.StandardButton.Ok,
+        )
+        win.export_quality_snapshot()
+
+        json_path = next(tmp_path.glob("quality_snapshot_*.json"))
+        payload = json.loads(json_path.read_text(encoding="utf-8"))
+        workflow = payload["last_run_summary"]["workflow_summary"]
+        assert workflow["profile_key"] == "high_quality_uav_gpr"
+        assert workflow["unassigned_methods"] == []
+        assert any(
+            warning["method_key"] == "motion_compensation_v2"
+            for warning in workflow["sensor_dependency_warnings"]
+        )
+    finally:
+        win.close()
+        app.processEvents()
+
+
 def test_report_includes_crop_bounds_when_crop_enabled(tmp_path: Path):
     app = _get_app()
     win = GPRGuiQt()

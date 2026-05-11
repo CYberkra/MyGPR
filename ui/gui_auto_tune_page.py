@@ -584,6 +584,10 @@ class AutoTunePage(QWidget):
                     continue
                 reason = item.get("best_reason") or "--"
                 lines.append(f"- {method_key}: {reason}")
+                domain = item.get("parameter_domain") or {}
+                notes = list(domain.get("notes") or [])
+                if notes:
+                    lines.append("  参数域: " + "；".join(notes[:3]))
 
         warnings = (manual.get("warnings") or []) + (automatic.get("warnings") or [])
         if warnings:
@@ -756,10 +760,24 @@ class AutoTunePage(QWidget):
                 "constraint_adjustment_count", 0
             )
         )
+        risk_flags = list(result.get("risk_flags") or [])
+        risk_reason = str(result.get("risk_reason") or "")
+        recommendation = str(result.get("selection_recommendation") or "")
+        parameter_domain = result.get("parameter_domain", {}) or {}
+        domain_notes = list(parameter_domain.get("notes") or [])
+        if risk_flags:
+            detail = "；".join(risk_flags[:4])
+            if risk_reason:
+                return f"自动选参存在风险标记: {detail}。{risk_reason}"
+            return f"自动选参存在风险标记: {detail}。建议结合参数域与候选明细复核。"
         if failed > 0:
             return "存在失败候选，建议查看候选评分明细，确认推荐结果是否稳定。"
         if adjusted > 0:
             return "部分候选参数已按当前数据尺度限制，建议核查 requested/effective 参数差异。"
+        if domain_notes:
+            return "；".join(domain_notes[:2])
+        if recommendation == "adopt_auto" and confidence >= 0.75:
+            return "当前推荐已通过稳定性与域约束检查，可优先采用。"
         if recommended_key == "aggressive":
             return "当前推荐偏增强，建议重点核查过处理、过曝或结构损伤风险。"
         if confidence < 0.45:
@@ -782,6 +800,12 @@ class AutoTunePage(QWidget):
         recommended_label = self._format_recommended_profile(result)
         lines.append(f"推荐调试档: {recommended_label}")
         lines.append(f"稳定性: {self._format_selection_confidence(result)}")
+        risk_flags = list(result.get("risk_flags") or [])
+        if risk_flags:
+            lines.append("风险标记: " + ", ".join(risk_flags))
+        selection_recommendation = result.get("selection_recommendation")
+        if selection_recommendation:
+            lines.append(f"建议动作: {selection_recommendation}")
         lines.append(f"候选统计: {self._format_execution_stats(result)}")
         lines.append(
             f"总分最高: {float(result.get('best_score', 0.0)):.4f} | 参数 {json.dumps(result.get('best_params', {}), ensure_ascii=False)}"
@@ -796,6 +820,14 @@ class AutoTunePage(QWidget):
             lines.append(
                 f"参数约束: 推荐候选 {parameter} requested={requested} -> effective={effective}"
             )
+        parameter_domain = result.get("parameter_domain", {}) or {}
+        domain_notes = list(parameter_domain.get("notes") or [])
+        if domain_notes:
+            lines.append("参数域提示:")
+            for note in domain_notes[:3]:
+                lines.append(f"  - {note}")
+        if parameter_domain.get("risk_reason"):
+            lines.append(f"风险说明: {parameter_domain.get('risk_reason')}")
         profiles = result.get("profiles", {}) or {}
         for key in ["conservative", "balanced", "aggressive"]:
             profile = profiles.get(key)

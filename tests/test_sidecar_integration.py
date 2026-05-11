@@ -85,3 +85,34 @@ def test_integrate_optional_sidecars_with_rtk_and_imu_payloads_adds_motion_ready
     assert np.allclose(integrated["height_agl_m"], np.array([1.05, 1.15, 1.25], dtype=np.float32))
     assert set(integrated["height_source"].tolist()) == {"nar15"}
     assert np.all(integrated["height_confidence"] > 0.0)
+
+
+def test_integrate_optional_sidecars_prefers_explicit_rtk_local_xy():
+    module = importlib.import_module("core.trace_metadata_utils")
+    integrate_optional_sidecars = module.integrate_optional_sidecars
+
+    trace_metadata = {
+        "trace_index": np.array([0, 1, 2], dtype=np.int32),
+        "trace_distance_m": np.zeros(3, dtype=np.float32),
+    }
+    trace_timestamps_s = np.array([0.0, 0.5, 1.0], dtype=np.float64)
+    rtk_payload = {
+        "source_kind": "rtk",
+        "timestamp_s": np.array([0.0, 1.0], dtype=np.float64),
+        "longitude": np.array([104.0, 104.0], dtype=np.float64),
+        "latitude": np.array([30.0, 30.0], dtype=np.float64),
+        "local_x_m": np.array([0.0, 2.0], dtype=np.float32),
+        "local_y_m": np.array([0.0, 0.0], dtype=np.float32),
+        "local_z_m": np.array([0.4, 0.5], dtype=np.float32),
+    }
+
+    integrated = integrate_optional_sidecars(
+        trace_metadata,
+        trace_timestamps_s=trace_timestamps_s,
+        rtk_payload=rtk_payload,
+    )
+
+    assert np.allclose(integrated["local_x_m"], np.array([0.0, 1.0, 2.0]))
+    assert np.allclose(integrated["local_y_m"], np.zeros(3))
+    assert np.allclose(integrated["local_z_m"], np.array([0.4, 0.45, 0.5]))
+    assert np.allclose(integrated["trace_distance_m"], np.array([0.0, 1.0, 2.0]))

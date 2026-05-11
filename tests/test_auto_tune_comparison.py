@@ -98,3 +98,5 @@ def test_comparison_summary_is_json_safe_and_excludes_arrays():
     assert summary["metric_delta"]["comparison_score"] == result.metric_delta[
         "comparison_score"
     ]
+    assert "parameter_domain" in summary["automatic"]["auto_tune_results"]["dewow"]
+    assert "risk_flags" in summary["automatic"]["auto_tune_results"]["dewow"]

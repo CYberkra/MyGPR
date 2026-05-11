@@ -1,128 +1,128 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""UAV-GPR processing flow research note."""
+# UAV-GPR 标准处理流程（MyGPR 2026-05-10 最终基线）
 
-# UAV-GPR 标准处理流程（MyGPR 2026-05-07 版）
+本文档固定 MyGPR 面向 UAV-GPR 的默认数据处理流程。这里的 UAV-GPR 指无人机平台搭载 GPR，并可接入 RTK、IMU、NAR15/激光/毫米波高度计等导航与姿态传感器的数据处理场景。
 
-本文档用于固定 MyGPR 面向“无人机实测 CSV + RTK/IMU/高度计”的默认处理流程。结论不是把地面 GPR 流程照搬到 UAV，而是把 UAV 的几何误差、姿态误差和高度变化作为前置约束纳入流程。
+结论：MyGPR 不应照搬地面 GPR 的普通“零时、去漂移、背景、增益、去噪、迁移”链路。UAV 场景的核心难点是飞行轨迹不均匀、离地高度变化、姿态变化、传感器同步误差和空气-地表强界面，因此最终流程必须把“导航/轨迹/高度/姿态”作为前置几何基准，而不是把运动补偿当成一个普通滤波按钮。
 
-## 结论
+## 一句话流程
 
-你原计划的流程“运动补偿、零时校正、低频漂移抑制、背景抑制、增益、去噪、成像/迁移”方向基本正确，但顺序需要拆分和修正：
+`数据导入/QC -> RTK/IMU/高度计同步与轨迹建模 -> 零时/坏道/DC 等基础校正 -> dewow/温和频带控制 -> UAV 几何与运动补偿 -> 背景/杂波抑制 -> 保真去噪 -> 解释增益/显示增益 -> 迁移或轨迹感知成像 -> 可复现实验导出`
 
-1. “运动补偿”不能只放在最前面作为一个黑盒。它应拆成两层：先做传感器对齐/轨迹建模，再在时零和必要的轻量预处理后做高度/姿态/轨迹补偿。
-2. “零时校正”应早于严格的高度时移和深度解释。文献和商业流程都强调 time-zero 对深度轴正确性是基础。
-3. “增益”不应默认早于主要降噪/背景抑制。增益会放大后期噪声，应区分“物理归一化/高度能量校正”和“显示或传播衰减补偿增益”。
-4. UAV 场景中，RTK 高程不能直接等同于离地高度；离地高度应优先来自高度计、雷达 air-ground interface 拾取，或二者融合。
-5. UAV 轨迹通常不是理想匀速直线采样，后续迁移/成像必须知道真实 trace 坐标，或先重采样到均匀沿线距离。
+## 最终默认流程
 
-## 推荐默认流程
+### 0. 数据导入与原始快照
 
-### 0. 数据载入与不可变原始数据
+- 输入主 B-scan CSV、雷达头信息、RTK sidecar、IMU sidecar、NAR15/高度计 sidecar。
+- 原始数据必须不可变保存，不允许在 raw array 上原地修改。
+- 建立基础元数据：样点数、道数、时间窗、采样间隔、雷达中心频率、天线间距、采集时间、输入文件 hash。
+- 建立每道 `trace_metadata`：trace index、timestamp、初始 distance、传感器插值状态、质量标记。
 
-- 输入：无人机实测主 CSV、可选 RTK CSV、IMU CSV、NAR15/高度计 sidecar。
-- 保留原始数据快照，不在原数组上原地修改。
-- 建立 `header_info`：样点数、道数、时窗 ns、采样间隔、雷达配置。
-- 建立 `trace_metadata`：每道 timestamp、trace_index、初始 trace_distance_m。
+### 1. 采集质量控制与传感器同步
 
-### 1. 采集质量控制与传感器对齐
+这一阶段是 UAV-GPR 与普通地面 GPR 最大的分界。它主要处理元数据和轨迹，不应大幅修改雷达幅值。
 
-- 校验主 CSV 道数、样点数、非有限值、重复/缺失道。
-- RTK/IMU/高度计统一到秒级时间轴，并插值到每条 trace 的时间戳。
-- RTK 经纬度投影到本地 ENU/XY；保留 RTK fix、卫星数、HDOP 等质量字段。
-- IMU roll/pitch/yaw 与可选 gyro/accel 对齐到每道。
-- 高度字段统一为 `flight_height_m`，语义必须是 AGL（above ground level），不能把 RTK altitude 自动当 AGL。
-- 输出：对齐后的 `trace_metadata` 与质量告警。
+- 检查主数据：空道、坏道、重复道、非有限值、饱和道、异常能量道、静止采样段。
+- 将 RTK、IMU、高度计统一到同一时间轴，按 trace timestamp 插值到每一道。
+- RTK 经纬高转换到本地 ENU/XY 坐标；保留 fix quality、卫星数、HDOP、差分状态等质量字段。
+- IMU roll/pitch/yaw、角速度、加速度插值到每一道。
+- 高度字段统一为 AGL（above ground level）。RTK altitude 不能自动等同为离地高度；优先使用 NAR15/激光高度计、地表界面拾取，或二者融合。
+- 计算天线相位中心 APC：用 RTK 天线、IMU、GPR 天线之间的 lever arm 加上姿态旋转，得到每道 GPR 天线实际位置。
+- 生成质量 mask：RTK 弱、IMU 跳变、姿态超限、高度离群、时间不同步、道距过大、静止/转弯过采样。
 
-### 2. 原始信号校正
+### 2. 雷达基础校正
 
-- 坏道/异常道检测：缺失、饱和、热像素、极端能量、明显采集失败。
-- DC shift / 基线偏置检查。
-- time-zero correction：基于阈值、峰值、first-break 或校准值，将每道零时对齐。
-- 对 UAV 数据，若需要从雷达图中拾取 air-ground interface，应在保留界面反射的轻量预处理版本上做，不要先用强背景消除抹掉它。
+这一阶段修正“雷达记录本身”的基础问题，是后续几何补偿和深度解释的前提。
 
-### 3. 低频漂移与轻量频带控制
+- 删除或标记坏道、空道、静止道；必要时保留被剔除 trace 的 provenance。
+- DC shift / baseline offset 校正。
+- time-zero correction：基于校准值、阈值、峰值、first-break 或 air-ground interface，把系统延迟和无效早期时间移除。
+- time window / range gate：只裁掉明确无效或超出研究目标的时间段，避免过大零时参数直接切掉有效数据。
+- 对 UAV 下视数据，air-ground interface 的拾取应在“轻量预处理版本”上做，不能先用强背景消除把地表界面抹掉。
 
-- Dewow / 低频漂移抑制：去除低频 wow 或 DC bias。
-- 必要时做温和 `frequency_filter_1d` band-pass / low-pass / high-pass / notch，用于稳定后续拾取和压制有效频带外噪声；避免过早强滤波导致目标形态失真。
-- `frequency_filter_1d` 必须使用采样率或 `total_time_ns` 推导 Nyquist 频率；缺少时间窗信息时应跳过并给出 warning，不能凭空猜截止频率。
+### 3. 低频漂移与温和频带控制
 
-### 4. UAV 几何/运动补偿
+- Dewow / 低频漂移抑制，用于消除 wow、基线扭曲和低频拖尾。
+- 可选 `frequency_filter_1d`：band-pass / low-pass / high-pass / notch。截止频率必须由采样率、时间窗和天线频带约束，不能凭经验写死。
+- 此阶段只能做温和稳定化，不应使用会明显改变目标形态的强滤波。
 
-这一阶段是 MyGPR 后续重点，建议称为 `motion_compensation_v2`，不要继续把高度、速度、姿态分散成彼此独立的最终算法。
+### 4. UAV 几何与运动补偿
 
-- 轨迹补偿：由 RTK/ENU 与 trace timestamp 构造每道真实位置，识别不均匀采样和速度突变。
-- 姿态/APC 补偿：用 roll/pitch/yaw 和天线相位中心 lever arm 计算天线实际位置/足迹。
-- 高度补偿：用高度计或 radar-picked ground interface 做 AGL 对齐，修正 air-path time shift。
-- 道距重采样：当后续算法假设等距 B-scan 时，重采样到均匀 `trace_distance_m`；同时保留原始坐标和重采样 provenance。
-- 质量输出：标记缺传感器、时间不同步、RTK fix 差、高度离群、姿态超限、重采样大间隙。
+这是 MyGPR 的核心 UAV-GPR 专用阶段，建议统一落到 `motion_compensation_v2` 及其后续版本，而不是分散成互不知情的高度、速度、姿态小算法。
 
-### 5. 背景/杂波抑制
+- 轨迹补偿：基于 RTK/ENU 与 timestamp 计算每道真实位置、速度、航向、道距，识别非均匀采样和转弯过采样。
+- 姿态/APC 补偿：用 roll/pitch/yaw 与 lever arm 计算 GPR 天线相位中心位置，而不是直接把 RTK 天线位置当作雷达位置。
+- 高度补偿：用 AGL 高度或雷达地表界面估计修正空气段 travel-time，使 air-ground interface 在合理基准上对齐。
+- 高度幅值归一化：只补偿由离地高度变化造成的空气传播和耦合差异；它属于几何/物理校正，不等同于后面的显示增益。
+- 道距重采样：当后续 B-scan、F-K、传统 migration 假设等距采样时，重采样到均匀 `trace_distance_m`；同时保留原始坐标和重采样来源。
+- 输出 warning：缺传感器、时间错位、RTK 质量差、高度缺失、姿态超限、重采样间隙过大、可疑过补偿。
 
-- 平均/中值背景扣除、SVD 背景、CCBS、F-K 等方法在运动补偿后更可靠，因为水平条纹和 air-ground interface 已尽可能对齐。
-- 对 UAV 数据建议支持“两次背景”策略：
-  - 初次温和背景：用于提升高度拾取或稳定 air-ground interface。
-  - 几何补偿后二次背景：用于正式抑制天线耦合、空气-地面强界面和水平杂波。
+### 5. 背景与杂波抑制
 
-### 6. 去噪与目标保持
+正式背景抑制应放在几何/高度对齐之后，因为 UAV 高度变化会让 air-ground interface 和水平杂波上下漂移，过早强背景会造成错误扣除。
 
-- Hankel-SVD、Wavelet、Wavelet-SVD、SVD-subspace、滑动/中值类去噪。
-- 去噪必须有保真约束：不能只追求图像干净，还要保留局部异常、双曲线 apex、层位边界和 first-break 稳定性。
-- 自动选参评分应显式惩罚过度平滑、目标能量丢失和局部显著性下降。
+- 常规方法：平均/中值背景扣除、滑动背景、SVD 背景、CCBS。
+- 方向性杂波：F-K / 2D FFT，用于压制斜向空气波、平台振动纹理或规则干扰。
+- 推荐两阶段策略：
+  - 轻量背景：可在高度拾取前使用，只为增强界面可拾取性。
+  - 正式背景：运动补偿后执行，用于抑制天线耦合、地表强界面、水平条纹和重复背景。
+
+### 6. 去噪与结构保真
+
+- 可选方法：Hankel-SVD、Wavelet、Wavelet-SVD、SVD-subspace、局部中值/均值类滤波。
+- 目标不是“越干净越好”，而是提升 SNR 同时保留双曲线 apex、层位连续性、裂缝/空洞边缘、局部异常体反射和弱深部目标。
+- 自动选参评分必须惩罚过度平滑、有效反射能量丢失、异常体边缘扩散和深部噪声过曝。
 
 ### 7. 增益
 
-- 高度振幅归一化属于运动补偿阶段的物理/工程校正。
-- 显示增益、SEC、AGC、power/exponential gain 应在主要杂波/噪声处理之后使用。
-- 需要输出“用于解释/导出”的数据和“用于显示”的增益数据，避免把显示增强误认为物理幅度改善。
+增益分为“解释/导出用增益”和“显示增强用增益”，二者必须在软件中区分。
 
-### 8. 成像、迁移与深度转换
+- 默认解释链：优先 SEC、energy-decay、power/exponential 这类随时间/深度变化但相对可解释的增益。
+- AGC：适合快速查看弱反射、报告截图和视觉增强，但会破坏相对幅值信息，不应作为默认科研幅值链的唯一结果。
+- 增益应在主要背景抑制和去噪之后执行，否则会放大本该先压制的噪声、地表强界面和平台干扰。
+- 对比报告中可以并列输出 SEC、AGC、无增益/常数增益结果，但默认导出的解释数据应保留增益方法和参数标记。
 
-- 若只做 2D B-scan 解释：可使用 Stolt/Kirchhoff migration，但必须满足等距 trace、合理速度模型、时零正确。
-- 若使用 UAV 真实非直线轨迹：优先规划 SAR back-projection / beamforming 或能吃任意轨迹坐标的成像方法。
-- time-to-depth 需要速度模型；空气段用近似光速，地下段用介质速度或介电常数模型，不能沿用 V1 的 `0.1 m/ns` 作为通用 air-path 常数。
+### 8. 迁移、成像与深度转换
 
-### 9. 科研证据导出
+- 普通 2D B-scan 解释：只有在 trace 等距、time-zero 可信、速度模型明确时，才使用 Stolt/Kirchhoff/F-K migration。
+- UAV 真实非直线轨迹：优先使用能处理任意轨迹坐标的 SAR back-projection / delay-and-sum / beamforming，或先做严格轨迹重采样后再迁移。
+- 深度转换必须使用介质速度或相对介电常数模型。空气段近似光速，地下段不能沿用固定经验速度作为所有场景默认值。
+- 成像输出应记录速度模型、介电常数、轨迹来源、APC 参数、是否等距重采样。
 
-- 每次处理链应导出：输入数据 hash、流程版本、每步参数、传感器质量摘要、warnings、ROI、评分、输出 B-scan 图。
-- 自动选参与人工 baseline 对比必须绑定同一输入、同一 ROI、同一显示尺度和同一导出配置。
+### 9. 导出与科研证据链
 
-## MyGPR 默认 profile 建议
+- 每步导出 before/after B-scan、参数、评分、warning、ROI、输入 hash、流程版本。
+- 自动选参与人工 baseline 对比必须使用同一输入、同一 ROI、同一显示尺度、同一真值区域定义。
+- 对 gprMax 正演数据，必须记录真实结构、目标区、背景区、噪声区，并输出 manual vs auto 的结构保持、背景抑制、深部补偿、目标显著性指标。
+- gprMax 论文级验证默认使用 `airborne_*` 场景族，不再使用贴地 toy 场景作为 UAV-GPR 证据。每个 airborne 场景必须显式记录空气层、天线离地高度、Tx/Rx 航迹、直达波、air-ground 反射、地下目标/背景 ROI 和晚时窗噪声 ROI。
+- `airborne_height_variation_cylinder_v1` 必须逐道定义 Tx/Rx 高度，并同步输出 `trace_timestamps.csv`、`rtk.csv`、`imu.csv`、`altimeter.csv`，用于后续运动补偿验证。该场景不能用 `#src_steps/#rx_steps` 伪装非线性高度变化；当前默认用 gprMax `#python` + `current_model_run` 在单个 `.in` 中逐道定义高度，便于使用 `-n`、`-restart` 和未来 MPI task farm。
 
-### 稳健科研 B-scan
+## MyGPR 默认实现链
 
-`QC/sidecar alignment -> set_zero_time -> dewow -> motion_compensation_v2 -> background/SVD/CCBS -> bandpass/F-K -> denoise -> SEC/AGC display gain -> optional migration -> export`
+当前 MyGPR 的“高质量 UAV-GPR”默认链应对齐为：
 
-这是 MyGPR 的默认研究链。
+`set_zero_time -> dewow -> frequency_filter_1d -> motion_compensation_v2 -> subtracting_average_2D / SVD / CCBS -> fk_filter -> wavelet_svd / Hankel-SVD -> sec_gain -> optional migration / trajectory-aware imaging -> export`
 
-### 高质量 UAV-GPR 默认链
+说明：
 
-`set_zero_time -> dewow -> frequency_filter_1d -> motion_compensation_v2 -> subtracting_average_2D/SVD/CCBS -> F-K -> wavelet_svd/Hankel-SVD -> SEC -> optional migration/depth -> export`
+- `motion_compensation_v2` 之前允许做 time-zero、dewow、温和频带控制，因为这些步骤稳定波形和零时，不会破坏轨迹语义。
+- 强背景抑制、强去噪、增益都应在 `motion_compensation_v2` 之后。
+- 当只有 CSV、没有 RTK/IMU/高度计时，流程仍保持同一顺序，但 `motion_compensation_v2` 应降级为 warning + no-op、地表界面估计，或仅做可解释的高度/道距补偿。
+- AGC 作为显示增强或报告对比项保留；SEC/energy-decay 类方法作为默认解释增益方向。
 
-这是当前 MyGPR 推动的最高质量 GUI/CLI 默认方向。它不使用快速预览、显示降采样或速度优先档；`AGC` 只作为备选显示增强，不作为默认科研幅值链路。迁移和深度转换只有在 trace 等距、时零可信、速度模型明确时才进入正式结果。
+MyGPR 默认解释链使用 SEC/energy-decay 风格增益，AGC 保留为显示增强和对比分支。针对 gprMax 验证和未来真实 UAV 数据，增益族选择应通过 `core.gain_selection` 在 SEC、AGC、线性/手动 TGC、无增益之间评分，评分依据包括目标保持、背景抑制、假异常、过曝、热点和相对幅值保真，而不是固定相信某一种增益永远更好。
 
-### UAV-SAR / 轨迹成像
+## 为什么这就是最终基线
 
-`QC/sidecar alignment -> positioning/pose processing -> time-zero/window -> background -> height correction -> second background/SVD -> antenna-position calculation -> SAR back-projection or trajectory-aware migration -> export`
+- Geolitix 将 set time zero、remove idle/empty traces、trace shifting、resample traces equidistantly 固定在处理列表顶部，因为这些步骤影响 positioning；它还明确提到 drone GPR 的高度变化应通过 horizon/height flatten 处理，而不是简单 time-zero。
+- UAV-GPR 综述指出 UAV 飞行轨迹常表现为非直线、变速、离地高度变化，导致非均匀测点和散焦；标准 migration 对直线等距轨迹有假设，而 back-projection 可以处理任意轨迹和非均匀间距。
+- UAV UWB-GPR/SAR 实测系统的处理链将定位数据处理、time-zero/window、background、height correction、second background、APC 计算、SAR processing 串联起来；这支持我们把传感器同步/轨迹建模放在雷达增强处理之前。
+- 传统 GPR 处理资料也支持 time-zero、DC、dewow、频带控制、增益、空间/F-K/背景、迁移等步骤，但这些资料不处理 UAV 的姿态、高度和轨迹问题，因此只能作为信号处理子链参考。
 
-该链是后续高级成像目标，不应被当前 V1 的普通 B-scan 迁移替代。
+## 参考依据
 
-## 当前 MyGPR/父项目现状
-
-- 父项目已有 RTK 模块、HWT905 九轴姿态计、NAR15 高度计。
-- 父项目连续采集线程当前已能按道保存 `flight_height_m`、`height_source`、`height_timestamp_s` 到 metadata JSON。
-- MyGPR 已有 RTK/IMU sidecar 解析、trace metadata 对齐、`motion_compensation_height/speed/attitude/vibration` 等 V1 实验模块。
-- MyGPR 已补入 `frequency_filter_1d`，用于真正的一维频带控制，与 `fk_filter` 的频率-波数方向性滤波区分使用。
-- 当前缺口是：`motion_compensation_v2` 仍需更多真实 UAV 数据验证，速度/介电常数估计、air-ground horizon 拾取、轨迹感知迁移/SAR back-projection 仍是后续高质量主线工作。
-
-## 权威依据
-
-- RGPR 基础教程列出常见 GPR 处理步骤：first break/time-zero、DC shift、time-zero correction、dewow、frequency filter、gain、spatial/f-k/background 等，并强调处理历史应可追踪以支持可复现研究：<https://emanuelhuber.github.io/RGPR/02_RGPR_tutorial_basic-GPR-data-processing/>
-- ERDC/CRREL 2022 自动化 GPR 后处理报告将标准化流程概括为 static data removal、time-zero correction、distance normalization、data filtering、stacking，并以 GSSI 软件对照验证：<https://erdc-library.erdc.dren.mil/items/c95bac4f-900c-4218-a7b7-3e5b7b25c38b>
-- Geolitix GPR processing 文档强调 time-zero 对深度正确性必需，air-launched/drone GPR 的高度变化不是简单 time-zero，应做 horizon/height flatten；同时说明 background、dewow、gain、migration 的用途：<https://docs.geolitix.com/layers/gpr-processing.html>
-- Alani 等 2019 road GPR signal-processing review 给出典型流程：raw signal correction、time-zero、elevation correction、energy normalization、dewow、ringing/background、gain、band-pass、migration/depth conversion，并提醒 gain 通常应在若干去噪步骤之后使用：<https://www.mdpi.com/2076-3263/9/2/96>
-- Garcia-Fernandez 等 2019 UAV UWB-GPR 系统论文说明 UAV-GPR 需要高精度 RTK、IMU、laser rangefinder，并在处理链中进行定位数据处理、time-zero/window、background、height correction、second background、SAR processing：<https://www.mdpi.com/2072-4292/11/20/2357>
-- Noviello 等 2020 小型 UAV 雷达成像论文指出准确 UAV 定位能避免 defocusing 和 localization errors，轨迹质量取决于机载导航传感器和地面辅助系统：<https://www.mdpi.com/2072-4292/12/20/3463>
-- Garcia-Fernandez 等 2022 UAV-GPR-SAR 改进研究指出 height information、antenna tilt、SVD clutter filtering 都会影响聚焦和检测；RTK height 不应直接视为离地高度：<https://www.sciencedirect.com/science/article/pii/S0924271622001113>
-- Catapano 等 2022 down-looking UAV-GPR overview 总结 UAV-GPR 面临非均匀轨迹、平台动态、运动补偿、RTK/PPK/IMU/LIDAR 高度等问题，并指出标准迁移算法常假设直线等距轨迹，UAV 场景常需 MoCo 或 SAR back-projection：<https://www.mdpi.com/2072-4292/14/14/3245>
-- Bähnemann 等 2021 airborne GPSAR landmine 论文强调 airborne GPR 图像质量依赖精确 motion estimation，并使用 dual RTK GNSS + IMU 融合获得高频位置/姿态：<https://arxiv.org/abs/2106.10108>
+- Geolitix GPR Processing：<https://docs.geolitix.com/layers/gpr-processing.html>
+- Geolitix GPS Positioning：<https://docs.geolitix.com/layers/gpr-position-gps.html>
+- RGPR Basic GPR data processing：<https://emanuelhuber.github.io/RGPR/02_RGPR_tutorial_basic-GPR-data-processing/>
+- ERDC/CRREL TR-22-18 自动化 GPR 后处理：<https://erdc-library.erdc.dren.mil/items/c95bac4f-900c-4218-a7b7-3e5b7b25c38b>
+- Garcia-Fernandez 等，UWB-GPR on Board a UAV for Landmine and IED Detection：<https://www.mdpi.com/2072-4292/11/20/2357>
+- Noviello/Catapano 等，An Overview on Down-Looking UAV-Based GPR Systems：<https://www.mdpi.com/2072-4292/14/14/3245>

@@ -75,6 +75,45 @@ def test_parse_sidecar_csv_normalizes_rtk_fields_and_sorts_by_timestamp(tmp_path
     assert np.allclose(parsed["hdop"], np.array([0.9, 0.8, 0.7], dtype=np.float32))
 
 
+def test_parse_sidecar_csv_accepts_gprmax_rtk_columns_and_local_xyz(tmp_path: Path):
+    module = importlib.import_module("core.sidecar_parsers")
+    parse_sidecar_csv = module.parse_sidecar_csv
+
+    csv_path = tmp_path / "gprmax_rtk.csv"
+    _write_csv(
+        csv_path,
+        [
+            {
+                "timestamp_s": 1.0,
+                "local_x_m": 0.2,
+                "local_y_m": 0.1,
+                "local_z_m": 0.42,
+                "latitude_deg": 30.0,
+                "longitude_deg": 104.0,
+                "altitude_m": 100.42,
+            },
+            {
+                "timestamp_s": 0.0,
+                "local_x_m": 0.0,
+                "local_y_m": 0.0,
+                "local_z_m": 0.40,
+                "latitude_deg": 30.0,
+                "longitude_deg": 104.0,
+                "altitude_m": 100.40,
+            },
+        ],
+    )
+
+    parsed = parse_sidecar_csv(csv_path, kind="rtk")
+
+    assert np.array_equal(parsed["timestamp_s"], np.array([0.0, 1.0], dtype=np.float64))
+    assert np.allclose(parsed["longitude"], np.array([104.0, 104.0]))
+    assert np.allclose(parsed["latitude"], np.array([30.0, 30.0]))
+    assert np.allclose(parsed["local_x_m"], np.array([0.0, 0.2], dtype=np.float32))
+    assert np.allclose(parsed["local_y_m"], np.array([0.0, 0.1], dtype=np.float32))
+    assert np.allclose(parsed["local_z_m"], np.array([0.40, 0.42], dtype=np.float32))
+
+
 def test_parse_sidecar_csv_normalizes_imu_fields_and_preserves_attitude_columns(tmp_path: Path):
     module = importlib.import_module("core.sidecar_parsers")
     parse_sidecar_csv = module.parse_sidecar_csv

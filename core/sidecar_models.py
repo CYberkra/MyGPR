@@ -8,6 +8,9 @@ RTK_REQUIRED_FIELDS = ("timestamp_s", "longitude", "latitude")
 RTK_OPTIONAL_FIELDS = (
     "ground_elevation_m",
     "flight_height_m",
+    "local_x_m",
+    "local_y_m",
+    "local_z_m",
     "rtk_fix_type",
     "satellites",
     "hdop",
@@ -21,10 +24,13 @@ ALTIMETER_OPTIONAL_FIELDS = ("height_source", "snr", "target_count", "valid")
 
 RTK_COLUMN_ALIASES = {
     "timestamp_s": ("timestamp_s", "timestamp", "gps_time", "time_s"),
-    "longitude": ("longitude", "lon", "lng"),
-    "latitude": ("latitude", "lat"),
+    "longitude": ("longitude", "longitude_deg", "lon", "lng"),
+    "latitude": ("latitude", "latitude_deg", "lat"),
     "ground_elevation_m": ("ground_elevation_m", "elevation_m", "altitude_m"),
     "flight_height_m": ("flight_height_m", "height_m", "agl_m"),
+    "local_x_m": ("local_x_m", "x_m", "east_m"),
+    "local_y_m": ("local_y_m", "y_m", "north_m"),
+    "local_z_m": ("local_z_m", "z_m", "up_m"),
     "rtk_fix_type": ("rtk_fix_type", "fix", "fix_type"),
     "satellites": ("satellites", "sat", "num_satellites"),
     "hdop": ("hdop", "dop"),

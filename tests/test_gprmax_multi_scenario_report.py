@@ -10,22 +10,27 @@ import numpy as np
 
 from scripts.gprmax_benchmark import gprmax_multi_scenario_report as report
 from scripts.gprmax_benchmark.gprmax_multi_scenario_report import (
+    AIRBORNE_GEOMETRY,
     build_gprmax_command,
     build_scenario_definitions,
+    find_out_files,
     render_html_report,
+    write_gprmax_inputs,
 )
 
 
-def test_multi_scenario_definitions_cover_simple_validation_cases():
+def test_default_scenario_definitions_cover_airborne_uav_gpr_cases():
     scenarios = build_scenario_definitions()
 
     assert {
-        "cylinder_single_v1",
-        "cylinder_double_v1",
-        "layered_interface_v1",
-        "crack_air_filled_v1",
-        "no_target_background_v1",
+        "airborne_single_cylinder_v1",
+        "airborne_double_cylinder_v1",
+        "airborne_layered_interface_v1",
+        "airborne_air_crack_v1",
+        "airborne_no_target_background_v1",
+        "airborne_height_variation_cylinder_v1",
     } <= set(scenarios)
+    assert "legacy_surface_coupled_single_cylinder_v1" not in scenarios
 
     for scenario_id, definition in scenarios.items():
         assert definition.scenario_id == scenario_id
@@ -34,15 +39,95 @@ def test_multi_scenario_definitions_cover_simple_validation_cases():
         assert definition.structure_notes
         assert "#title:" in definition.model_in_text
         assert "#time_window:" in definition.model_in_text
-        if scenario_id == "no_target_background_v1":
+        assert "#geometry_view:" in definition.model_in_text
+        assert definition.geometry_model == "airborne_2d_tmz_v1"
+        assert definition.is_uav_gpr_evidence is True
+        assert definition.source_start_m[1] > definition.ground_top_y_m
+        assert definition.receiver_start_m[1] > definition.ground_top_y_m
+        if scenario_id == "airborne_no_target_background_v1":
             assert definition.targets == []
         else:
             assert definition.targets
 
 
+def test_legacy_scenarios_are_explicitly_named_and_not_default():
+    legacy = build_scenario_definitions("legacy")
+    all_scenarios = build_scenario_definitions("all")
+
+    assert "legacy_surface_coupled_single_cylinder_v1" in legacy
+    assert "airborne_single_cylinder_v1" in all_scenarios
+    assert "legacy_surface_coupled_single_cylinder_v1" in all_scenarios
+    assert legacy["legacy_surface_coupled_single_cylinder_v1"].is_uav_gpr_evidence is False
+    assert "非 UAV-GPR" in legacy["legacy_surface_coupled_single_cylinder_v1"].description
+
+
+def test_airborne_geometry_satisfies_gprmax_safety_margins():
+    scenarios = build_scenario_definitions()
+
+    assert AIRBORNE_GEOMETRY.domain_m[2] == AIRBORNE_GEOMETRY.dx_m
+    assert AIRBORNE_GEOMETRY.top_clearance_cells >= 20
+
+    for definition in scenarios.values():
+        assert not definition.geometry_warnings
+        assert definition.domain_m[2] == definition.dx_m
+        positions = AIRBORNE_GEOMETRY.trace_positions(definition.default_runs)
+        min_x = min(
+            min(float(pos["source"][0]), float(pos["receiver"][0]))  # type: ignore[index]
+            for pos in positions
+        )
+        max_x = max(
+            max(float(pos["source"][0]), float(pos["receiver"][0]))  # type: ignore[index]
+            for pos in positions
+        )
+        assert min_x >= 0.06
+        assert definition.domain_m[0] - max_x >= 0.06
+
+
+def test_airborne_gprmax_inputs_distinguish_fixed_and_height_varying_geometry(tmp_path: Path):
+    scenarios = build_scenario_definitions()
+
+    fixed = scenarios["airborne_single_cylinder_v1"]
+    fixed_inputs = write_gprmax_inputs(fixed, tmp_path / "fixed", runs=4)
+    fixed_text = fixed_inputs[0].read_text(encoding="utf-8")
+    assert len(fixed_inputs) == 1
+    assert "#src_steps:" in fixed_text
+    assert "#rx_steps:" in fixed_text
+    assert "#geometry_view:" in fixed_text
+
+    variable = scenarios["airborne_height_variation_cylinder_v1"]
+    variable_dir = tmp_path / "variable"
+    variable_dir.mkdir()
+    variable_inputs = write_gprmax_inputs(variable, variable_dir, runs=4)
+    assert len(variable_inputs) == 1
+    text = variable_inputs[0].read_text(encoding="utf-8")
+    assert "#src_steps:" not in text
+    assert "#rx_steps:" not in text
+    assert "#geometry_view:" in text
+    assert "#python:" in text
+    assert "current_model_run" in text
+    assert "height_m = 0.12 + 0.035 * sin" in text
+    assert "hertzian_dipole('z', source_x, antenna_y, 0.0, 'my_ricker')" in text
+    assert "rx(receiver_x, antenna_y, 0.0)" in text
+
+
+def test_airborne_synthetic_sidecars_are_generated_for_motion_compensation(tmp_path: Path):
+    scenario = build_scenario_definitions()["airborne_height_variation_cylinder_v1"]
+    sidecars = report.write_synthetic_sidecars(scenario, tmp_path, runs=6)
+
+    assert {"trace_timestamps", "rtk", "imu", "altimeter"} <= set(sidecars)
+    for path in sidecars.values():
+        assert path.exists()
+        assert len(path.read_text(encoding="utf-8").splitlines()) == 7
+
+    metadata = report.build_synthetic_trace_metadata(scenario, trace_count=6)
+    assert "flight_height_m" in metadata
+    assert len(set(np.round(metadata["flight_height_m"], 5))) > 1
+    assert metadata["trace_timestamp_s"].shape == (6,)
+
+
 def test_new_scenario_ground_truth_contracts_are_explicit():
     scenarios = build_scenario_definitions()
-    crack = scenarios["crack_air_filled_v1"]
+    crack = scenarios["airborne_air_crack_v1"]
     crack_truth = report.build_ground_truth(
         crack,
         {
@@ -59,8 +144,19 @@ def test_new_scenario_ground_truth_contracts_are_explicit():
     crack_roi = crack_truth["targets"][0]["roi"]
     assert 0 <= crack_roi["time_start_idx"] < crack_roi["time_end_idx"] <= 128
     assert 0 <= crack_roi["dist_start_idx"] < crack_roi["dist_end_idx"] <= 36
+    assert {
+        "direct_air_wave",
+        "air_ground_reflection",
+        "subsurface_target",
+        "background",
+        "late_noise",
+    } <= set(crack_truth["wavefield_rois"])
+    direct = crack_truth["wavefield_rois"]["direct_air_wave"]["roi"]
+    surface = crack_truth["wavefield_rois"]["air_ground_reflection"]["roi"]
+    target = crack_truth["wavefield_rois"]["subsurface_target"]["roi"]
+    assert direct["time_start_idx"] < surface["time_start_idx"] < target["time_start_idx"]
 
-    no_target = scenarios["no_target_background_v1"]
+    no_target = scenarios["airborne_no_target_background_v1"]
     no_target_truth = report.build_ground_truth(
         no_target,
         {
@@ -70,12 +166,10 @@ def test_new_scenario_ground_truth_contracts_are_explicit():
         },
     )
     assert no_target_truth["targets"] == []
-    assert no_target_truth["analysis_roi"] == {
-        "time_start_idx": 0,
-        "time_end_idx": 128,
-        "dist_start_idx": 0,
-        "dist_end_idx": 36,
-    }
+    assert "subsurface_target" not in no_target_truth["wavefield_rois"]
+    assert {"direct_air_wave", "air_ground_reflection", "background", "late_noise"} <= set(
+        no_target_truth["wavefield_rois"]
+    )
     assert no_target_truth["metrics_hint"]["false_positive_penalty"] > 0.0
 
 
@@ -110,16 +204,45 @@ def test_build_gprmax_command_omits_parallel_flags_by_default(tmp_path: Path):
     assert "--geometry-fixed" not in command
 
 
-def test_report_pipeline_uses_agc_gain_instead_of_sec_gain():
+def test_build_gprmax_command_resolves_model_input_to_absolute_path(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    command = build_gprmax_command(
+        tmp_path / "python.exe",
+        Path("relative_model.in"),
+        runs=1,
+    )
+
+    assert Path(command[3]).is_absolute()
+    assert command[3].endswith("relative_model.in")
+
+
+def test_find_out_files_orders_per_trace_height_variation_outputs(tmp_path: Path):
+    for name in [
+        "airborne_height_variation_cylinder_v1_trace010.out",
+        "airborne_height_variation_cylinder_v1_trace002.out",
+        "airborne_height_variation_cylinder_v1_trace001.out",
+    ]:
+        (tmp_path / name).write_text("", encoding="utf-8")
+
+    ordered = find_out_files(tmp_path, "airborne_height_variation_cylinder_v1")
+
+    assert [path.name for path in ordered] == [
+        "airborne_height_variation_cylinder_v1_trace001.out",
+        "airborne_height_variation_cylinder_v1_trace002.out",
+        "airborne_height_variation_cylinder_v1_trace010.out",
+    ]
+
+
+def test_standard_report_pipeline_uses_sec_gain_as_interpretation_default():
     pipeline = report._resolve_pipeline("uav_gpr_experience_baseline_v1")
 
-    assert "agcGain" in pipeline
-    assert "sec_gain" not in pipeline
+    assert "sec_gain" in pipeline
+    assert "agcGain" not in pipeline
     assert pipeline == [
         "set_zero_time",
         "dewow",
         "subtracting_average_2D",
-        "agcGain",
+        "sec_gain",
         "svd_subspace",
     ]
 
@@ -254,6 +377,39 @@ def test_render_html_report_contains_required_research_sections(tmp_path: Path):
                 "description": "用于验证 HTML 合同。",
                 "structure_notes": ["真实结构说明"],
                 "structure_preview": "assets/structure.png",
+                "geometry_model": "airborne_2d_tmz_v1",
+                "is_uav_gpr_evidence": True,
+                "ground_truth": {
+                    "wavefield_rois": {
+                        "direct_air_wave": {
+                            "roi": {
+                                "time_start_idx": 2,
+                                "time_end_idx": 6,
+                                "dist_start_idx": 0,
+                                "dist_end_idx": 12,
+                            },
+                            "risk": "直达波风险",
+                        },
+                        "air_ground_reflection": {
+                            "roi": {
+                                "time_start_idx": 8,
+                                "time_end_idx": 12,
+                                "dist_start_idx": 0,
+                                "dist_end_idx": 12,
+                            },
+                            "risk": "地表反射风险",
+                        },
+                        "subsurface_target": {
+                            "roi": {
+                                "time_start_idx": 16,
+                                "time_end_idx": 28,
+                                "dist_start_idx": 3,
+                                "dist_end_idx": 8,
+                            },
+                            "risk": "目标风险",
+                        },
+                    }
+                },
                 "gprmax": {"command": ["python", "-m", "gprMax", "model.in"]},
                 "comparison": {
                     "verdict": "auto_better",
@@ -280,7 +436,16 @@ def test_render_html_report_contains_required_research_sections(tmp_path: Path):
                         "method_name": "低频漂移抑制",
                         "manual_params": {"window": 61},
                         "auto_params": {"window": 31},
-                        "auto_tune_summary": {"best_reason": "评分最高"},
+                        "auto_tune_summary": {
+                            "best_reason": "评分最高",
+                            "risk_flags": ["constraint_adjusted"],
+                            "selection_recommendation": "review",
+                            "parameter_domain": {
+                                "notes": [
+                                    "部分候选参数被按数据尺度收缩，实际搜索域小于原始候选列表。",
+                                ]
+                            },
+                        },
                         "analysis": {
                             "visual": "自动选参在视觉上保留目标。",
                             "metrics": "score 差值为 0.2。",
@@ -315,8 +480,15 @@ def test_render_html_report_contains_required_research_sections(tmp_path: Path):
     assert "指标评价" in html_text
     assert "后端建议" in html_text
     assert "风险标记" in html_text
+    assert "建议动作" in html_text
+    assert "参数域提示" in html_text
     assert "是否回退人工结果" in html_text
     assert "真值评分差值" in html_text
     assert "目标能量保留差值" in html_text
     assert "目标外背景抑制差值" in html_text
     assert "假异常比例差值" in html_text
+    assert "波场特征检查" in html_text
+    assert "直达波" in html_text
+    assert "地表反射" in html_text
+    assert "天线离地高度" in html_text
+    assert "高度变化" in html_text

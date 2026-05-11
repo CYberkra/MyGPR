@@ -151,6 +151,25 @@ def test_pipeline_summary_is_json_safe_and_excludes_arrays():
     assert summary["overall_recommendation"] == result.overall_recommendation
 
 
+def test_pipeline_summary_carries_parameter_domain_notes():
+    raw = _build_pipeline_profile()
+    result = run_auto_tune_pipeline(
+        raw,
+        pipeline=["dewow"],
+        manual_params_by_method={"dewow": {"window": 1}},
+        search_mode="fast",
+    )
+
+    summary = to_summary_dict(result)
+
+    assert "parameter_domain" in summary["steps"][0]["auto_tune_result"]
+    assert isinstance(
+        summary["steps"][0]["auto_tune_result"]["parameter_domain"]["notes"],
+        list,
+    )
+    assert "risk_flags" in summary["steps"][0]["auto_tune_result"]
+
+
 def test_pipeline_locked_params_apply_to_both_branches_without_auto_tune(monkeypatch):
     raw = _build_pipeline_profile(samples=72, traces=18)
 

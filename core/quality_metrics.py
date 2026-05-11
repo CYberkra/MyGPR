@@ -219,7 +219,7 @@ def weighted_score_parts(
 
 
 def _band_mask(n_samples: int, band: tuple[float, float]) -> np.ndarray:
-    freqs = np.fft.rfftfreq(max(n_samples, 2), d=1.0)
+    freqs = np.fft.rfftfreq(max(n_samples, 1), d=1.0)
     nyquist = max(float(freqs[-1]), EPS)
     low = max(0.0, float(band[0])) * nyquist
     high = min(1.0, float(band[1])) * nyquist

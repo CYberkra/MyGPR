@@ -328,6 +328,9 @@ def _build_airborne_header_summary(metadata: dict[str, np.ndarray]) -> dict[str,
     ground = np.asarray(metadata.get("ground_elevation_m", []), dtype=np.float64)
     flight = np.asarray(metadata.get("flight_height_m", []), dtype=np.float64)
     height_agl = np.asarray(metadata.get("height_agl_m", []), dtype=np.float64)
+    timestamps = np.asarray(metadata.get("trace_timestamp_s", []), dtype=np.float64)
+    height_confidence = np.asarray(metadata.get("height_confidence", []), dtype=np.float64)
+    alignment_status = np.asarray(metadata.get("alignment_status", []), dtype="<U16")
 
     if distance.size > 1:
         trace_steps = np.diff(distance)
@@ -336,6 +339,33 @@ def _build_airborne_header_summary(metadata: dict[str, np.ndarray]) -> dict[str,
         max_interval = float(np.max(trace_steps)) if trace_steps.size else 0.0
     else:
         mean_interval = min_interval = max_interval = 0.0
+
+    if timestamps.size:
+        timestamp_min = float(np.min(timestamps))
+        timestamp_max = float(np.max(timestamps))
+    else:
+        timestamp_min = timestamp_max = None
+
+    confidence_valid = height_confidence[np.isfinite(height_confidence)]
+    if confidence_valid.size:
+        confidence_min = float(np.min(confidence_valid))
+        confidence_mean = float(np.mean(confidence_valid))
+        confidence_max = float(np.max(confidence_valid))
+        confidence_low_count = int(np.count_nonzero(confidence_valid < 0.5))
+    else:
+        confidence_min = confidence_mean = confidence_max = None
+        confidence_low_count = None
+
+    if alignment_status.size:
+        alignment_extrapolated_count = int(np.count_nonzero(alignment_status == "extrapolated"))
+        alignment_resampled_count = int(np.count_nonzero(alignment_status == "resampled"))
+        alignment_extrapolated_fraction = (
+            float(alignment_extrapolated_count) / float(alignment_status.size)
+        )
+    else:
+        alignment_extrapolated_count = None
+        alignment_resampled_count = None
+        alignment_extrapolated_fraction = None
 
     return {
         "source": "airborne_csv",
@@ -349,6 +379,15 @@ def _build_airborne_header_summary(metadata: dict[str, np.ndarray]) -> dict[str,
         "flight_height_max_m": float(np.max(flight)) if flight.size else 0.0,
         "height_agl_min_m": float(np.min(height_agl)) if height_agl.size else 0.0,
         "height_agl_max_m": float(np.max(height_agl)) if height_agl.size else 0.0,
+        "trace_timestamp_min_s": timestamp_min,
+        "trace_timestamp_max_s": timestamp_max,
+        "height_confidence_min": confidence_min,
+        "height_confidence_mean": confidence_mean,
+        "height_confidence_max": confidence_max,
+        "height_confidence_low_count": confidence_low_count,
+        "alignment_extrapolated_trace_count": alignment_extrapolated_count,
+        "alignment_extrapolated_fraction": alignment_extrapolated_fraction,
+        "alignment_resampled_trace_count": alignment_resampled_count,
         "has_airborne_metadata": True,
     }
 

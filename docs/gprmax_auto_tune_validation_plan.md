@@ -81,6 +81,47 @@ GPRMAX 应排在真实数据之前，因为它可以先回答“目标是否被�
 
 ## 第一批场景
 
+2026-05-10 更新：下面这一批原始 `cylinder_*` / `crack_*` 场景已经降级为贴地/近地 legacy smoke benchmark，不能再作为 UAV-GPR 自动选参论文级证据。MyGPR 的默认 gprMax 报告入口现在使用 `airborne` 场景族：
+
+1. `airborne_single_cylinder_v1`
+   - 离地 Tx/Rx、空气层、air-ground 强反射、单个地下金属圆柱。
+   - 目标：验证直达波、地表反射之后的双曲线目标能否被保留。
+
+2. `airborne_double_cylinder_v1`
+   - 两个不同埋深的金属圆柱。
+   - 目标：验证浅层强目标和深层弱目标能否同时保留。
+
+3. `airborne_layered_interface_v1`
+   - 空气发射下的干湿分层界面。
+   - 目标：验证背景抑制、去噪和增益不会抹掉真实连续层状反射。
+
+4. `airborne_air_crack_v1`
+   - 窄空气裂缝弱结构。
+   - 目标：验证窄线状反射和边缘绕射不会被过度平滑。
+
+5. `airborne_no_target_background_v1`
+   - 只有空气层、地表和均匀地下介质。
+   - 目标：验证自动选参和增益不会凭空制造地下假异常。
+
+6. `airborne_height_variation_cylinder_v1`
+   - 使用 gprMax 官方 Python scripting 在单个 `.in` 中按 `current_model_run` 逐道定义 Tx/Rx 高度，天线高度按 `0.12 + 0.035 * sin(2*pi*i/(runs-1))` 变化。
+   - 目标：为高度 sidecar、RTK/IMU/高度计同步和运动补偿链路提供可控验证数据。
+
+默认命令：
+
+```powershell
+python scripts\gprmax_benchmark\gprmax_multi_scenario_report.py --scenario-family airborne --geometry-fixed
+python scripts\gprmax_benchmark\gprmax_gain_method_report.py --source-report output\gprmax_multi_scenario_reports\<timestamp>
+```
+
+`ground_truth.json` 现在除目标 ROI 外，还必须包含 `wavefield_rois`：`direct_air_wave`、`air_ground_reflection`、`background`、`late_noise`，有地下目标时还包含 `subsurface_target`。其时间顺序必须满足直达波早于地表反射，地表反射早于地下目标。
+
+高度变化场景不允许用固定 `#src_steps/#rx_steps` 伪装非线性高度变化；允许两种等价表达：逐 trace `.in`，或当前默认的 `#python` + `current_model_run` 脚本化逐道定义。后者保留同一物理高度曲线，但能用 `-n`、`-restart` 和未来 MPI task farm，显著减少进程启动开销。
+
+旧场景保留在 `--scenario-family legacy` 下，命名为 `legacy_surface_coupled_*`。它们只用于回归和 smoke 测试，不再用于“UAV-GPR 自动选参优越性”的结论。
+
+### Legacy 记录
+
 1. `cylinder_single_v1`
    - 单个金属圆柱体。
    - 目标：验证双曲线 apex、左右臂和目标能量保留。

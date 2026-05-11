@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 
 from core.methods_registry import PROCESSING_METHODS
@@ -544,12 +546,12 @@ WORKFLOW_STAGES = {
                 "tooltip": "沿时间轴做零相位带通/高通/低通/陷波滤波，用于压制有效频带外噪声。",
                 "params": PROCESSING_METHODS["frequency_filter_1d"]["params"],
             },
-            "fk_filter": {
-                "name": "F-K锥形滤波",
+            "motion_compensation_v2": {
+                "name": "UAV运动补偿V2",
                 "available": True,
-                "default_enabled": False,
-                "tooltip": "在频率-波数域进行锥形滤波，去除特定角度的干扰。",
-                "params": PROCESSING_METHODS["fk_filter"]["params"],
+                "default_enabled": True,
+                "tooltip": "融合高度、RTK/IMU与等距重采样元数据，补偿无人机高度和姿态导致的道间畸变。",
+                "params": PROCESSING_METHODS["motion_compensation_v2"]["params"],
             },
             "subtracting_average_2D": {
                 "name": "平均道减法",
@@ -557,6 +559,13 @@ WORKFLOW_STAGES = {
                 "default_enabled": True,
                 "tooltip": "基础背景去除方法，减去水平方向上极其强烈的'横条纹'。",
                 "params": PROCESSING_METHODS["subtracting_average_2D"]["params"],
+            },
+            "fk_filter": {
+                "name": "F-K锥形滤波",
+                "available": True,
+                "default_enabled": False,
+                "tooltip": "在频率-波数域进行锥形滤波，去除特定角度的干扰。",
+                "params": PROCESSING_METHODS["fk_filter"]["params"],
             },
             "median_background_2D": {
                 "name": "中位数背景抑制",
@@ -697,6 +706,7 @@ WORKFLOW_PRESETS = {
             "stage1": {"set_zero_time": True, "dewow": True},
             "stage2": {
                 "frequency_filter_1d": True,
+                "motion_compensation_v2": True,
                 "subtracting_average_2D": True,
                 "fk_filter": True,
             },
@@ -713,3 +723,93 @@ WORKFLOW_PRESETS = {
 
 
 WORKFLOW_STAGE_ORDER = ["import", "stage1", "stage2", "stage3", "stage4"]
+
+
+_PROFILE_SENSOR_DEPENDENCY_WARNINGS: dict[str, dict[str, Any]] = {
+    "motion_compensation_v2": {
+        "code": "motion_compensation_v2_sensor_dependency",
+        "method_key": "motion_compensation_v2",
+        "message": (
+            "motion_compensation_v2 依赖 trace_metadata；缺少 AGL 高度时会跳过"
+            "高度/时移/振幅补偿并记录运行告警。"
+        ),
+        "required_any": ["height_agl_m", "flight_height_m"],
+        "optional": [
+            "local_x_m",
+            "local_y_m",
+            "roll_deg",
+            "pitch_deg",
+            "yaw_deg",
+            "trace_distance_m",
+        ],
+    },
+}
+
+
+def build_profile_workflow_summary(profile_key: str) -> dict[str, Any]:
+    """Build report-friendly stage and dependency metadata for a run profile."""
+    profile = RECOMMENDED_RUN_PROFILES.get(profile_key)
+    if profile is None:
+        raise KeyError(f"未知推荐流程: {profile_key}")
+
+    workflow = WORKFLOW_PRESETS.get(profile_key, {})
+    stage_config = workflow.get("stages", {}) if isinstance(workflow, dict) else {}
+    ordered_methods = [str(method_key) for method_key in profile.get("order", [])]
+
+    method_to_stage: dict[str, str] = {}
+    for stage_key in WORKFLOW_STAGE_ORDER:
+        methods = stage_config.get(stage_key, {})
+        if not isinstance(methods, dict):
+            continue
+        for method_key, enabled in methods.items():
+            if enabled:
+                method_to_stage[str(method_key)] = stage_key
+
+    stages: list[dict[str, Any]] = []
+    for stage_key in WORKFLOW_STAGE_ORDER:
+        if stage_key == "import":
+            continue
+        stage_methods = [
+            method_key
+            for method_key in ordered_methods
+            if method_to_stage.get(method_key) == stage_key
+        ]
+        if not stage_methods:
+            continue
+        stage_meta = WORKFLOW_STAGES.get(stage_key, {})
+        stages.append(
+            {
+                "stage_key": stage_key,
+                "stage_label": stage_meta.get("label", stage_key),
+                "method_keys": stage_methods,
+                "methods": [
+                    {
+                        "method_key": method_key,
+                        "method_name": PROCESSING_METHODS.get(method_key, {}).get(
+                            "name", method_key
+                        ),
+                    }
+                    for method_key in stage_methods
+                ],
+            }
+        )
+
+    sensor_dependency_warnings = [
+        dict(_PROFILE_SENSOR_DEPENDENCY_WARNINGS[method_key])
+        for method_key in ordered_methods
+        if method_key in _PROFILE_SENSOR_DEPENDENCY_WARNINGS
+    ]
+
+    return {
+        "profile_key": profile_key,
+        "label": profile.get("label", profile_key),
+        "preset_key": profile.get("preset_key"),
+        "ordered_methods": ordered_methods,
+        "stages": stages,
+        "unassigned_methods": [
+            method_key
+            for method_key in ordered_methods
+            if method_key not in method_to_stage
+        ],
+        "sensor_dependency_warnings": sensor_dependency_warnings,
+    }

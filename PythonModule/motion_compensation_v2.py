@@ -361,6 +361,13 @@ def method_motion_compensation_v2(
                 "trace_metadata is missing; motion compensation V2 returned a data copy.",
             )
         )
+        meta["input_quality"] = {
+            "trace_count": int(trace_count),
+            "height_source_requested": str(height_source),
+            "height_source_used": None,
+            "alignment_status_available": False,
+            "height_confidence_available": False,
+        }
         meta["quality_flags"] = quality_flags
         meta["runtime_warnings"] = warnings
         return corrected, meta
@@ -395,6 +402,56 @@ def method_motion_compensation_v2(
                     "AGL height contains non-finite or non-positive values; height correction skipped.",
                 )
             )
+
+    alignment_status = np.asarray(metadata.get("alignment_status", []), dtype="<U16")
+    height_confidence = _numeric_field_or_none(metadata, "height_confidence", trace_count)
+    input_quality: dict[str, Any] = {
+        "trace_count": int(trace_count),
+        "height_source_requested": str(height_source),
+        "height_source_used": str(height_source_used) if height_source_used else None,
+        "alignment_status_available": bool(alignment_status.size),
+        "height_confidence_available": height_confidence is not None,
+    }
+
+    if alignment_status.size:
+        alignment_extrapolated = int(np.count_nonzero(alignment_status == "extrapolated"))
+        alignment_resampled = int(np.count_nonzero(alignment_status == "resampled"))
+        input_quality["alignment_extrapolated_traces"] = alignment_extrapolated
+        input_quality["alignment_resampled_traces"] = alignment_resampled
+        if alignment_extrapolated > 0:
+            quality_flags.append("sidecar_extrapolated")
+            warnings.append(
+                _warning(
+                    "sidecar_extrapolated",
+                    "Some sidecar traces were extrapolated outside the available timestamp coverage.",
+                    extrapolated_trace_count=alignment_extrapolated,
+                    total_trace_count=trace_count,
+                )
+            )
+
+    if height_confidence is not None:
+        confidence_valid = height_confidence[np.isfinite(height_confidence)]
+        if confidence_valid.size:
+            low_count = int(np.count_nonzero(confidence_valid < 0.5))
+            input_quality["height_confidence_min"] = float(np.min(confidence_valid))
+            input_quality["height_confidence_mean"] = float(np.mean(confidence_valid))
+            input_quality["height_confidence_low_traces"] = low_count
+            if low_count > 0:
+                quality_flags.append("low_height_confidence")
+                warnings.append(
+                    _warning(
+                        "low_height_confidence",
+                        "Height confidence is low for part of the line; motion compensation should be reviewed.",
+                        low_confidence_trace_count=low_count,
+                        total_trace_count=trace_count,
+                    )
+                )
+        else:
+            input_quality["height_confidence_min"] = None
+            input_quality["height_confidence_mean"] = None
+            input_quality["height_confidence_low_traces"] = 0
+
+    meta["input_quality"] = input_quality
 
     if valid_height and air_wave_speed_m_per_ns > 0.0:
         h_ref = _compute_reference_height(
@@ -462,6 +519,21 @@ def method_motion_compensation_v2(
                 if max_shift_samples is not None and float(max_shift_samples) > 0.0:
                     clamp = float(max_shift_samples)
                     time_shift_samples = np.clip(time_shift_samples, -clamp, clamp)
+                clamped_mask = ~np.isclose(raw_shift_samples, time_shift_samples)
+                time_shift_clamped = bool(np.any(clamped_mask))
+                if time_shift_clamped:
+                    quality_flags.append("time_shift_clamped")
+                    warnings.append(
+                        _warning(
+                            "time_shift_clamped",
+                            "Height time-shift correction exceeded max_shift_samples and was clamped.",
+                            clamped_trace_count=int(np.count_nonzero(clamped_mask)),
+                            total_trace_count=trace_count,
+                            max_shift_samples=float(max_shift_samples),
+                            raw_shift_samples_min=float(np.min(raw_shift_samples)),
+                            raw_shift_samples_max=float(np.max(raw_shift_samples)),
+                        )
+                    )
                 corrected = _apply_time_shift(corrected, time_shift_samples)
                 updates["time_shift_ns"] = time_shift_ns.astype(np.float32)
                 updates["time_shift_samples"] = time_shift_samples.astype(np.float32)
@@ -469,9 +541,9 @@ def method_motion_compensation_v2(
                 meta["sample_interval_ns"] = float(dt_ns)
                 meta["time_shift_ns"] = time_shift_ns.astype(np.float32)
                 meta["time_shift_samples"] = time_shift_samples.astype(np.float32)
-                meta["time_shift_clamped"] = not np.allclose(
-                    raw_shift_samples, time_shift_samples
-                )
+                meta["raw_time_shift_samples_min"] = float(np.min(raw_shift_samples))
+                meta["raw_time_shift_samples_max"] = float(np.max(raw_shift_samples))
+                meta["time_shift_clamped"] = time_shift_clamped
                 meta["time_shift_correction_applied"] = True
 
         meta["height_correction_applied"] = bool(

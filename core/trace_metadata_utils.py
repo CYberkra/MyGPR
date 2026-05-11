@@ -95,6 +95,49 @@ def _nearest_indices(source_timestamps_s: np.ndarray, target_timestamps_s: np.nd
     return np.where(choose_left, left, right)
 
 
+def _timestamp_coverage_mask(
+    source_timestamps_s: np.ndarray,
+    target_timestamps_s: np.ndarray,
+    *,
+    tolerance_s: float = 1.0e-9,
+) -> np.ndarray:
+    """Return True where target timestamps stay within source coverage."""
+    source = _as_1d_array(source_timestamps_s, np.float64)
+    target = _as_1d_array(target_timestamps_s, np.float64)
+    if source.size == 0:
+        raise ValueError("source_timestamps_s must contain at least one timestamp")
+    start = float(np.min(source))
+    end = float(np.max(source))
+    tol = max(float(tolerance_s), 0.0)
+    return (target >= start - tol) & (target <= end + tol)
+
+
+def _ordered_optional_field(
+    payload: dict[str, np.ndarray],
+    key: str,
+    order: np.ndarray,
+    expected_size: int,
+    dtype: np.dtype | type,
+) -> np.ndarray | None:
+    if key not in payload:
+        return None
+    values = _as_1d_array(payload[key], dtype)
+    if values.size != expected_size:
+        raise ValueError(f"sidecar field '{key}' length mismatch")
+    return values[order]
+
+
+def _xy_trace_distance_m(local_x_m: np.ndarray, local_y_m: np.ndarray) -> np.ndarray:
+    x = _as_1d_array(local_x_m, np.float64)
+    y = _as_1d_array(local_y_m, np.float64)
+    if x.size != y.size:
+        raise ValueError("local_x_m and local_y_m must have the same length")
+    if x.size == 0:
+        return np.array([], dtype=np.float32)
+    step = np.sqrt(np.diff(x) ** 2 + np.diff(y) ** 2)
+    return np.concatenate(([0.0], np.cumsum(step))).astype(np.float32)
+
+
 def _normalize_altimeter_payload(
     payload: dict[str, np.ndarray],
 ) -> tuple[np.ndarray, dict[str, np.ndarray]]:
@@ -265,9 +308,23 @@ def align_sidecar_records(
         raise ValueError("trace_timestamps_s length must match trace_metadata")
 
     sidecar_t, sidecar_lon, sidecar_lat = _normalize_sidecar_records(sidecar_records)
+    raw_sidecar_t = _as_1d_array(sidecar_records["timestamp_s"], np.float64)
+    sidecar_order = np.argsort(raw_sidecar_t, kind="stable")
     aligned_lon = np.interp(timestamps, sidecar_t, sidecar_lon)
     aligned_lat = np.interp(timestamps, sidecar_t, sidecar_lat)
-    local_x_m, local_y_m = derive_local_xy_m(aligned_lon, aligned_lat)
+    sidecar_local_x = _ordered_optional_field(
+        sidecar_records, "local_x_m", sidecar_order, sidecar_t.size, np.float64
+    )
+    sidecar_local_y = _ordered_optional_field(
+        sidecar_records, "local_y_m", sidecar_order, sidecar_t.size, np.float64
+    )
+    explicit_local_xy = sidecar_local_x is not None and sidecar_local_y is not None
+    if explicit_local_xy:
+        local_x_m = np.interp(timestamps, sidecar_t, sidecar_local_x).astype(np.float32)
+        local_y_m = np.interp(timestamps, sidecar_t, sidecar_local_y).astype(np.float32)
+    else:
+        local_x_m, local_y_m = derive_local_xy_m(aligned_lon, aligned_lat)
+    coverage_mask = _timestamp_coverage_mask(sidecar_t, timestamps)
 
     enriched = {
         key: np.asarray(values).copy() for key, values in trace_metadata.items()
@@ -275,7 +332,18 @@ def align_sidecar_records(
     enriched["trace_timestamp_s"] = timestamps.copy()
     enriched["local_x_m"] = local_x_m
     enriched["local_y_m"] = local_y_m
-    enriched["alignment_status"] = np.full(trace_count, "aligned", dtype="<U16")
+    if explicit_local_xy or "trace_distance_m" not in enriched:
+        enriched["trace_distance_m"] = _xy_trace_distance_m(local_x_m, local_y_m)
+    sidecar_local_z = _ordered_optional_field(
+        sidecar_records, "local_z_m", sidecar_order, sidecar_t.size, np.float64
+    )
+    if sidecar_local_z is not None:
+        enriched["local_z_m"] = np.interp(
+            timestamps, sidecar_t, sidecar_local_z
+        ).astype(np.float32)
+    enriched["alignment_status"] = np.where(
+        coverage_mask, "aligned", "extrapolated"
+    ).astype("<U16")
     return enriched
 
 
@@ -298,12 +366,19 @@ def integrate_optional_sidecars(
 
     timestamps = _as_1d_array(trace_timestamps_s, np.float64)
     enriched = {key: np.asarray(values).copy() for key, values in trace_metadata.items()}
+    alignment_status = np.full(timestamps.size, "aligned", dtype="<U16")
 
     if rtk_payload is not None:
         enriched = align_sidecar_records(
             enriched,
             rtk_payload,
             trace_timestamps_s=timestamps,
+        )
+        rtk_timestamps, _, _ = _normalize_sidecar_records(rtk_payload)
+        alignment_status = np.where(
+            _timestamp_coverage_mask(rtk_timestamps, timestamps),
+            alignment_status,
+            "extrapolated",
         )
     else:
         enriched["trace_timestamp_s"] = timestamps.copy()
@@ -313,12 +388,22 @@ def integrate_optional_sidecars(
             imu_payload,
             required_fields=("roll_deg", "pitch_deg", "yaw_deg"),
         )
+        alignment_status = np.where(
+            _timestamp_coverage_mask(imu_timestamps, timestamps),
+            alignment_status,
+            "extrapolated",
+        )
         for field, values in imu_fields.items():
             enriched[field] = np.interp(timestamps, imu_timestamps, values).astype(np.float32)
 
     if altimeter_payload is not None:
         altimeter_timestamps, altimeter_fields = _normalize_altimeter_payload(
             altimeter_payload
+        )
+        alignment_status = np.where(
+            _timestamp_coverage_mask(altimeter_timestamps, timestamps),
+            alignment_status,
+            "extrapolated",
         )
         height_agl_m = np.interp(
             timestamps,
@@ -341,5 +426,8 @@ def integrate_optional_sidecars(
             enriched["height_source"] = source.astype("<U32")
         else:
             enriched["height_source"] = np.full(timestamps.size, "altimeter", dtype="<U32")
+
+    if rtk_payload is not None or imu_payload is not None or altimeter_payload is not None:
+        enriched["alignment_status"] = alignment_status
 
     return enriched

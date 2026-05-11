@@ -499,6 +499,11 @@ def _compact_auto_tune_result(result: dict[str, Any]) -> dict[str, Any]:
         "best_score": _json_safe(result.get("best_score")),
         "best_reason": result.get("best_reason"),
         "roi_info": _json_safe(result.get("roi_info", {})),
+        "parameter_domain": _json_safe(result.get("parameter_domain", {})),
+        "risk_flags": _json_safe(result.get("risk_flags", [])),
+        "risk_level": _json_safe(result.get("risk_level")),
+        "risk_reason": result.get("risk_reason"),
+        "selection_recommendation": result.get("selection_recommendation"),
         "execution_stats": _json_safe(result.get("execution_stats", {})),
     }
 

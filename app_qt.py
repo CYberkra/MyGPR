@@ -132,6 +132,7 @@ from core.preset_profiles import (
     GUI_PRESETS_V1,
     DEFAULT_STARTUP_PRESET_KEY,
     RECOMMENDED_RUN_PROFILES,
+    build_profile_workflow_summary,
     compute_quality_metrics,
 )
 from core.gpr_io import (
@@ -3151,6 +3152,33 @@ class GPRGuiQt(QMainWindow):
                     float(info.get("flight_height_max_m", 0.0)),
                 )
             )
+        if info.get("trace_timestamp_min_s") is not None:
+            lines.append(
+                "轨迹时间戳: {:.3f} ~ {:.3f} s".format(
+                    float(info.get("trace_timestamp_min_s", 0.0)),
+                    float(info.get("trace_timestamp_max_s", 0.0)),
+                )
+            )
+        if info.get("alignment_extrapolated_trace_count") is not None:
+            total_traces = int(info.get("num_traces", 0) or 0)
+            extrapolated = int(info.get("alignment_extrapolated_trace_count", 0) or 0)
+            if total_traces > 0:
+                lines.append(
+                    "辅助文件对齐: {:.1%} 道在覆盖范围内".format(
+                        max(0.0, 1.0 - float(info.get("alignment_extrapolated_fraction", 0.0)))
+                    )
+                )
+            else:
+                lines.append(
+                    f"辅助文件对齐: 外推 {extrapolated} 道"
+                )
+        if info.get("height_confidence_mean") is not None:
+            lines.append(
+                "高度置信度: 均值 {:.2f}, 最小 {:.2f}".format(
+                    float(info.get("height_confidence_mean", 0.0)),
+                    float(info.get("height_confidence_min", 0.0)),
+                )
+            )
         if info.get("trace_interval_min_m") is not None:
             lines.append(
                 "道间距: {:.3f} ~ {:.3f} m (均值 {:.3f} m)".format(
@@ -3252,6 +3280,10 @@ class GPRGuiQt(QMainWindow):
             f"道间距离群点: {qc['spacing_outliers']}",
             f"飞行高度离群点: {qc['height_outliers']}",
         ]
+        if qc.get("alignment_status_available"):
+            lines.append(f"辅助文件外推道数: {qc['alignment_extrapolated_traces']}")
+        if qc.get("height_confidence_available"):
+            lines.append(f"低置信度高度计道数: {qc['height_confidence_low_traces']}")
         alerts = qc.get("alerts") or []
         lines.append("异常状态: " + (", ".join(alerts) if alerts else "正常"))
         return "\n".join(lines)
@@ -3350,6 +3382,7 @@ class GPRGuiQt(QMainWindow):
         longitude = np.asarray(meta.get("longitude", []), dtype=np.float64)
         latitude = np.asarray(meta.get("latitude", []), dtype=np.float64)
         flight = np.asarray(meta.get("flight_height_m", []), dtype=np.float64)
+        height_confidence = np.asarray(meta.get("height_confidence", []), dtype=np.float64)
         spacing = (
             np.diff(distance) if distance.size > 1 else np.array([], dtype=np.float64)
         )
@@ -3400,6 +3433,40 @@ class GPRGuiQt(QMainWindow):
                     }
                 )
 
+        for idx in qc.get("alignment_extrapolated_indices", []):
+            if 0 <= idx < distance.size:
+                lon = float(longitude[idx]) if longitude.size > idx else None
+                lat = float(latitude[idx]) if latitude.size > idx else None
+                details.append(
+                    {
+                        "type": "sidecar_alignment",
+                        "index": int(idx),
+                        "distance_m": float(distance[idx])
+                        if distance.size > idx
+                        else None,
+                        "value": None,
+                        "longitude": lon,
+                        "latitude": lat,
+                    }
+                )
+
+        for idx in qc.get("height_confidence_low_indices", []):
+            if 0 <= idx < height_confidence.size:
+                lon = float(longitude[idx]) if longitude.size > idx else None
+                lat = float(latitude[idx]) if latitude.size > idx else None
+                details.append(
+                    {
+                        "type": "height_confidence",
+                        "index": int(idx),
+                        "distance_m": float(distance[idx])
+                        if distance.size > idx
+                        else None,
+                        "value": float(height_confidence[idx]),
+                        "longitude": lon,
+                        "latitude": lat,
+                    }
+                )
+
         return details
 
     def _build_airborne_anomaly_text(self) -> str:
@@ -3415,6 +3482,25 @@ class GPRGuiQt(QMainWindow):
                     "道间距异常 | idx={} | 距离={:.2f} m | 间距={:.3f} m | lon={:.7f} | lat={:.7f}".format(
                         item["index"],
                         item["distance_m"],
+                        item["value"],
+                        item["longitude"] if item["longitude"] is not None else 0.0,
+                        item["latitude"] if item["latitude"] is not None else 0.0,
+                    )
+                )
+            elif item["type"] == "sidecar_alignment":
+                lines.append(
+                    "辅助文件外推 | idx={} | 距离={:.2f} m | lon={:.7f} | lat={:.7f}".format(
+                        item["index"],
+                        item["distance_m"] if item["distance_m"] is not None else 0.0,
+                        item["longitude"] if item["longitude"] is not None else 0.0,
+                        item["latitude"] if item["latitude"] is not None else 0.0,
+                    )
+                )
+            elif item["type"] == "height_confidence":
+                lines.append(
+                    "高度置信度低 | idx={} | 距离={:.2f} m | 值={:.2f} | lon={:.7f} | lat={:.7f}".format(
+                        item["index"],
+                        item["distance_m"] if item["distance_m"] is not None else 0.0,
                         item["value"],
                         item["longitude"] if item["longitude"] is not None else 0.0,
                         item["latitude"] if item["latitude"] is not None else 0.0,
@@ -4275,6 +4361,32 @@ class GPRGuiQt(QMainWindow):
                 lines.append(f"- Preset: {last_run['preset_key']}")
             if last_run.get("profile_key"):
                 lines.append(f"- Profile: {last_run['profile_key']}")
+            workflow_summary = last_run.get("workflow_summary") or {}
+            if workflow_summary:
+                lines.append("- Workflow stages:")
+                for stage in workflow_summary.get("stages", []):
+                    stage_label = stage.get("stage_label") or stage.get(
+                        "stage_key", "stage"
+                    )
+                    method_keys = ", ".join(stage.get("method_keys", []))
+                    lines.append(f"  - {stage_label}: {method_keys}")
+                sensor_warnings = workflow_summary.get(
+                    "sensor_dependency_warnings", []
+                )
+                if sensor_warnings:
+                    lines.append("- Sensor dependencies:")
+                    for warning in sensor_warnings:
+                        required_any = ", ".join(warning.get("required_any", []))
+                        required_text = (
+                            f" required_any={required_any}" if required_any else ""
+                        )
+                        lines.append(
+                            "  - [{method_key}] {message}{required_text}".format(
+                                method_key=warning.get("method_key", "method"),
+                                message=warning.get("message", ""),
+                                required_text=required_text,
+                            )
+                        )
             steps = last_run.get("steps", [])
             if steps:
                 lines.append("- Steps:")
@@ -4720,6 +4832,7 @@ class GPRGuiQt(QMainWindow):
             "metrics": dict(self._last_quality_metrics),
             "thresholds": dict(self._quality_thresholds),
             "alerts": alerts,
+            "last_run_summary": dict(self._last_run_summary or {}),
             "method_param_overrides": dict(self._method_param_overrides),
             "runtime_warnings": list(self._runtime_warnings),
         }
@@ -6065,6 +6178,8 @@ class GPRGuiQt(QMainWindow):
 
         distance = np.asarray(meta.get("trace_distance_m", []), dtype=np.float64)
         flight = np.asarray(meta.get("flight_height_m", []), dtype=np.float64)
+        alignment_status = np.asarray(meta.get("alignment_status", []), dtype="<U16")
+        height_confidence = np.asarray(meta.get("height_confidence", []), dtype=np.float64)
         spacing = (
             np.diff(distance) if distance.size > 1 else np.array([], dtype=np.float64)
         )
@@ -6072,6 +6187,24 @@ class GPRGuiQt(QMainWindow):
         spacing_std = float(np.std(spacing)) if spacing.size else 0.0
         spacing_cv = spacing_std / spacing_mean if spacing_mean > 1e-9 else 0.0
         flight_span = float(np.max(flight) - np.min(flight)) if flight.size else 0.0
+        alignment_extrapolated_traces = int(
+            np.count_nonzero(alignment_status == "extrapolated")
+        )
+        alignment_resampled_traces = int(np.count_nonzero(alignment_status == "resampled"))
+        confidence_valid = height_confidence[np.isfinite(height_confidence)]
+        height_confidence_min = (
+            float(np.min(confidence_valid)) if confidence_valid.size else None
+        )
+        height_confidence_mean = (
+            float(np.mean(confidence_valid)) if confidence_valid.size else None
+        )
+        height_confidence_low_traces = int(np.count_nonzero(confidence_valid < 0.5))
+        alignment_extrapolated_indices = np.flatnonzero(
+            alignment_status == "extrapolated"
+        ).tolist()
+        height_confidence_low_indices = np.flatnonzero(
+            np.isfinite(height_confidence) & (height_confidence < 0.5)
+        ).tolist()
         spacing_outliers = (
             int(np.sum(np.abs(spacing - spacing_mean) > max(spacing_std * 2.5, 0.5)))
             if spacing.size
@@ -6109,6 +6242,10 @@ class GPRGuiQt(QMainWindow):
             alerts.append(f"spacing_outliers={spacing_outliers}")
         if flight_outliers > 0:
             alerts.append(f"height_outliers={flight_outliers}")
+        if alignment_extrapolated_traces > 0:
+            alerts.append(f"alignment_extrapolated={alignment_extrapolated_traces}")
+        if height_confidence_low_traces > 0:
+            alerts.append(f"height_confidence_low={height_confidence_low_traces}")
         return {
             "track_length_m": float(header.get("track_length_m", 0.0)),
             "trace_spacing_cv": float(spacing_cv),
@@ -6117,6 +6254,15 @@ class GPRGuiQt(QMainWindow):
             "height_outliers": flight_outliers,
             "spacing_outlier_indices": spacing_outlier_indices,
             "height_outlier_indices": flight_outlier_indices,
+            "alignment_extrapolated_traces": alignment_extrapolated_traces,
+            "alignment_resampled_traces": alignment_resampled_traces,
+            "alignment_extrapolated_indices": alignment_extrapolated_indices,
+            "height_confidence_min": height_confidence_min,
+            "height_confidence_mean": height_confidence_mean,
+            "height_confidence_low_traces": height_confidence_low_traces,
+            "height_confidence_low_indices": height_confidence_low_indices,
+            "alignment_status_available": bool(alignment_status.size),
+            "height_confidence_available": bool(confidence_valid.size),
             "alerts": alerts,
         }
 
@@ -6131,6 +6277,12 @@ class GPRGuiQt(QMainWindow):
         warnings: list | None = None,
     ):
         """记录最近一次真实执行摘要，供报告和诊断使用。"""
+        workflow_summary = None
+        if profile_key:
+            try:
+                workflow_summary = build_profile_workflow_summary(str(profile_key))
+            except KeyError:
+                workflow_summary = None
         self._last_run_summary = {
             "run_type": run_type,
             "label": label,
@@ -6141,6 +6293,8 @@ class GPRGuiQt(QMainWindow):
             "warnings": warnings or [],
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
+        if workflow_summary:
+            self._last_run_summary["workflow_summary"] = workflow_summary
 
     def _is_metric_alert(self, metric: str, value: float) -> bool:
         """检查指标是否超出阈值"""
