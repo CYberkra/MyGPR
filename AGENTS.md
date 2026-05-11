@@ -112,6 +112,20 @@ pytest
 - Keep changes consistent with the surrounding file instead of introducing a new toolchain.
 - If you add a new check, prefer a small repo script over a one-off custom workflow.
 
+## Debugging / Feedback Loop First
+- For bugs, failing tests, abnormal B-scan images, inconsistent parameters, report mismatches, or performance regressions, build a fast pass/fail feedback loop before proposing or applying a fix.
+- Preferred MyGPR feedback loops, in order:
+  1. Smallest focused `pytest` regression that reaches the real failing path.
+  2. CLI reproduction through `cli_batch.py validate` or `cli_batch.py run`.
+  3. Fixed dataset reproduction with `Line9origin(36).csv`-style field data or a gprMax `airborne_*` scenario.
+  4. Export/report reproduction through HTML reports, evidence bundles, or `VTK + CSV + JSON` georeference output.
+  5. GUI screenshot/manual reproduction only when no automated seam exists yet.
+- For intermittent bugs, improve the reproduction rate instead of guessing: loop the trigger, freeze inputs, seed randomness, narrow the fixture, and isolate filesystem/network state.
+- After a feedback loop exists, state 3-5 falsifiable hypotheses and test one variable at a time. Do not stack multiple speculative fixes.
+- Temporary diagnostics must use a unique `[DEBUG-...]` prefix and must be removed before completion; run `rg "\[DEBUG-"` when cleanup is relevant.
+- Before claiming a fix, re-run the original feedback loop as well as any new regression test. If no valid test seam exists, document that as an architecture risk rather than claiming full verification.
+- This project-level rule complements the global `systematic-debugging` skill: keep root-cause tracing, but first turn the symptom into an executable signal.
+
 ## Code Style
 - Every Python file should start with:
   - `#!/usr/bin/env python3`
