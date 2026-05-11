@@ -166,6 +166,72 @@ def test_v2_warns_when_height_time_shift_is_clamped():
     assert meta["raw_time_shift_samples_max"] > 0.5
 
 
+def test_v2_uses_time_window_shift_limit_when_sample_limit_is_auto():
+    data = np.zeros((64, 4), dtype=np.float32)
+    metadata = _base_metadata(4)
+    metadata["height_agl_m"] = np.array([0.5, 1.0, 1.5, 2.0], dtype=np.float64)
+
+    _, meta = method_motion_compensation_v2(
+        data,
+        trace_metadata=metadata,
+        time_window_ns=10.0,
+        compensate_time_shift=True,
+        compensate_amplitude=False,
+        max_shift_samples=0.0,
+        max_shift_ns=0.5,
+    )
+
+    expected_limit = 0.5 / (10.0 / 63.0)
+    assert meta["max_shift_samples_effective"] == pytest.approx(expected_limit)
+    assert meta["max_shift_limit_source"] == "max_shift_ns"
+    assert meta["time_shift_clamped"] is True
+    assert np.max(np.abs(meta["time_shift_samples"])) <= expected_limit + 1.0e-6
+
+
+def test_v2_flags_timestamp_distance_gap_and_speed_outlier():
+    data = np.zeros((32, 6), dtype=np.float32)
+    metadata = _base_metadata(6)
+    metadata["trace_timestamp_s"] = np.array([0.0, 0.1, 0.2, 0.3, 2.0, 2.1])
+    metadata["trace_distance_m"] = np.array([0.0, 0.1, 0.2, 0.3, 5.0, 5.1])
+    metadata["local_x_m"] = metadata["trace_distance_m"].copy()
+
+    _, meta = method_motion_compensation_v2(
+        data,
+        trace_metadata=metadata,
+        compensate_time_shift=False,
+        compensate_amplitude=False,
+    )
+
+    warning_codes = {item["code"] for item in meta.get("runtime_warnings", [])}
+    assert "trace_timestamp_gap" in meta["quality_flags"]
+    assert "trace_distance_gap" in meta["quality_flags"]
+    assert "trace_speed_outlier" in meta["quality_flags"]
+    assert "trace_timestamp_gap" in warning_codes
+    assert "trace_distance_gap" in warning_codes
+    assert "trace_speed_outlier" in warning_codes
+    assert meta["input_quality"]["trace_timestamp_gap_ratio"] > 3.0
+    assert meta["input_quality"]["trace_distance_gap_ratio"] > 3.0
+    assert meta["input_quality"]["trace_speed_max_mps"] > meta["input_quality"]["trace_speed_median_mps"]
+
+
+def test_v2_flags_nonmonotonic_trace_timestamps():
+    data = np.zeros((16, 4), dtype=np.float32)
+    metadata = _base_metadata(4)
+    metadata["trace_timestamp_s"] = np.array([0.0, 0.2, 0.1, 0.3])
+
+    _, meta = method_motion_compensation_v2(
+        data,
+        trace_metadata=metadata,
+        compensate_time_shift=False,
+        compensate_amplitude=False,
+    )
+
+    warning_codes = {item["code"] for item in meta.get("runtime_warnings", [])}
+    assert "trace_timestamp_nonmonotonic" in meta["quality_flags"]
+    assert "trace_timestamp_nonmonotonic" in warning_codes
+    assert meta["input_quality"]["trace_timestamp_nonpositive_steps"] == 1
+
+
 def test_v2_resamples_data_and_metadata_to_uniform_trace_spacing():
     source_distance = np.array([0.0, 0.4, 1.1, 2.0], dtype=np.float64)
     data = np.vstack(

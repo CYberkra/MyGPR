@@ -108,6 +108,8 @@
 - `motion_compensation_v2` 之前允许做 time-zero、dewow、温和频带控制，因为这些步骤稳定波形和零时，不会破坏轨迹语义。
 - 强背景抑制、强去噪、增益都应在 `motion_compensation_v2` 之后。
 - 当只有 CSV、没有 RTK/IMU/高度计时，流程仍保持同一顺序，但 `motion_compensation_v2` 应降级为 warning + no-op、地表界面估计，或仅做可解释的高度/道距补偿。
+- `motion_compensation_v2` 的默认高度时移限幅应使用物理时间窗 `max_shift_ns` 自动换算为样点数，避免同一固定 sample 阈值在真实 SFCW 数据和高采样率 gprMax 数据中含义完全不同。
+- 运动补偿输出必须保留时间戳 gap、道距 gap、速度异常、低高度置信度、外推对齐等风险提示，供 GUI 质量页、证据包和论文报告复核。
 - AGC 作为显示增强或报告对比项保留；SEC/energy-decay 类方法作为默认解释增益方向。
 
 MyGPR 默认解释链使用 SEC/energy-decay 风格增益，AGC 保留为显示增强和对比分支。针对 gprMax 验证和未来真实 UAV 数据，增益族选择应通过 `core.gain_selection` 在 SEC、AGC、线性/手动 TGC、无增益之间评分，评分依据包括目标保持、背景抑制、假异常、过曝、热点和相对幅值保真，而不是固定相信某一种增益永远更好。

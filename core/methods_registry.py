@@ -848,11 +848,19 @@ PROCESSING_METHODS = {
             },
             {
                 "name": "max_shift_samples",
-                "label": "最大时移样点",
+                "label": "最大时移样点 (0=按时间窗)",
+                "type": "float",
+                "default": 0.0,
+                "min": 0.0,
+                "max": 500.0,
+            },
+            {
+                "name": "max_shift_ns",
+                "label": "最大时移时间 (ns)",
                 "type": "float",
                 "default": 20.0,
                 "min": 0.0,
-                "max": 500.0,
+                "max": 200.0,
             },
             {
                 "name": "max_amplitude_scale",

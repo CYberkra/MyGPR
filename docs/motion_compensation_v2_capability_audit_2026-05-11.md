@@ -62,10 +62,14 @@ time_shift_ns = 2 * (height_m - reference_height_m) / c0
 - `raw_time_shift_samples_max`
 - `time_shift_clamped`
 
-若超过 `max_shift_samples`，现在会输出：
+若超过当前有效限幅，V2 会输出：
 
 - `quality_flags: ["time_shift_clamped"]`
 - `runtime_warnings: [{"code": "time_shift_clamped", ...}]`
+- `max_shift_samples_effective`
+- `max_shift_limit_source`
+
+2026-05-11 后续增强：默认 profile 不再使用固定 `max_shift_samples=20`。现在默认使用 `max_shift_samples=0` + `max_shift_ns=20`，由采样间隔换算有效样点限幅，并再受数据长度比例上限保护。用户仍可显式设置 `max_shift_samples > 0` 来施加样点级硬限。
 
 ### 3. 高度振幅归一化
 
@@ -154,7 +158,7 @@ scenarios/airborne_height_variation_cylinder_v1
 }
 ```
 
-这说明 V2 能正确读取合成 RTK/IMU/高度计 sidecar，并且确实对 B-scan 做了高度时移和振幅归一化；同时也暴露出默认 `max_shift_samples=20` 对该高采样率 gprMax 场景会发生截断。
+这说明 V2 能正确读取合成 RTK/IMU/高度计 sidecar，并且确实对 B-scan 做了高度时移和振幅归一化。早期固定 `max_shift_samples=20` 对该高采样率 gprMax 场景会发生不合理截断；当前默认策略已改为 `max_shift_ns=20` 的数据自适应限幅。
 
 ## 当前不足
 
@@ -190,22 +194,26 @@ scenarios/airborne_height_variation_cylinder_v1
 - HDOP
 - 轨迹跳变速度
 
-### P2：重采样 gap 风险不足
+### 已增强：时间戳/轨迹 gap 风险提示
 
-等距重采样目前能同步 B-scan 和 metadata，但还没有对大间隙、断航迹、异常速度输出专门 warning。
+V2 现在会在 `input_quality` 和 `runtime_warnings` 中报告：
 
-### P2：默认 `max_shift_samples` 需要数据自适应
+- `trace_timestamp_nonmonotonic`
+- `trace_timestamp_gap`
+- `trace_distance_nonmonotonic`
+- `trace_distance_gap`
+- `trace_speed_outlier`
 
-固定样点数阈值不够物理稳定。高采样率数据中，厘米级高度变化也可能对应几十个 sample。后续更合理的是：
+这些 warning 用于提示时间同步、断航迹、空间插值或重采样风险，避免把大间隙悄悄插值成连续测线。
 
-- 增加 `max_shift_ns` 或 `max_height_delta_m`。
-- 根据 `total_time_ns / sample_count` 自动换算安全样点阈值。
-- 在自动选参报告中展示 clamp 比例。
+### 已增强：默认时移限幅数据自适应
+
+固定样点数阈值不够物理稳定。高采样率数据中，厘米级高度变化也可能对应几十个 sample。当前已新增 `max_shift_ns`，并根据 `total_time_ns / sample_count` 自动换算样点上限；后续报告中仍应展示 clamp 比例。
 
 ## 建议下一步
 
 1. 新建 `motion_compensation_v2_benchmark_report.py`。
 2. 用 `airborne_height_variation_cylinder_v1` 生成补偿前后 HTML 报告。
 3. 加入 air-ground reflection 平直度、目标 ROI 保真度、时移曲线、振幅倍率曲线。
-4. 把 `max_shift_samples` 从固定经验值升级为数据自适应策略。
+4. 在报告中展示有效时移限幅、clamp 比例、时间戳 gap 和轨迹 speed outlier。
 5. 设计 V3 外参配置：RTK/IMU/APC lever arm + mount angle。

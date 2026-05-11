@@ -159,6 +159,196 @@ def _compute_trace_distance(local_x_m: np.ndarray, local_y_m: np.ndarray) -> np.
     return np.concatenate(([0.0], np.cumsum(step))).astype(np.float64)
 
 
+def _append_quality_warning(
+    warnings: list[dict[str, Any]],
+    quality_flags: list[str],
+    code: str,
+    message: str,
+    **details: Any,
+) -> None:
+    quality_flags.append(code)
+    warnings.append(_warning(code, message, **details))
+
+
+def _gap_stats(values: np.ndarray) -> tuple[float, float, float] | None:
+    positive = values[np.isfinite(values) & (values > 0.0)]
+    if positive.size < 3:
+        return None
+    median = float(np.median(positive))
+    maximum = float(np.max(positive))
+    if median <= 0.0:
+        return None
+    return median, maximum, maximum / median
+
+
+def _analyze_trace_quality(
+    metadata: dict[str, np.ndarray],
+    trace_count: int,
+    input_quality: dict[str, Any],
+    warnings: list[dict[str, Any]],
+    quality_flags: list[str],
+) -> None:
+    timestamps = _numeric_field_or_none(metadata, "trace_timestamp_s", trace_count)
+    distance = _numeric_field_or_none(metadata, "trace_distance_m", trace_count)
+    input_quality["trace_timestamp_available"] = timestamps is not None
+    input_quality["trace_distance_available"] = distance is not None
+
+    timestamp_steps: np.ndarray | None = None
+    distance_steps: np.ndarray | None = None
+
+    if timestamps is not None:
+        if not np.isfinite(timestamps).all():
+            invalid_count = int(np.count_nonzero(~np.isfinite(timestamps)))
+            input_quality["trace_timestamp_invalid_count"] = invalid_count
+            _append_quality_warning(
+                warnings,
+                quality_flags,
+                "invalid_trace_timestamp_s",
+                "trace_timestamp_s contains non-finite values; sidecar timing quality is unreliable.",
+                invalid_trace_count=invalid_count,
+                total_trace_count=trace_count,
+            )
+        else:
+            input_quality["trace_timestamp_min_s"] = float(np.min(timestamps))
+            input_quality["trace_timestamp_max_s"] = float(np.max(timestamps))
+            timestamp_steps = np.diff(timestamps)
+            nonpositive = int(np.count_nonzero(timestamp_steps <= 0.0))
+            input_quality["trace_timestamp_nonpositive_steps"] = nonpositive
+            if nonpositive:
+                _append_quality_warning(
+                    warnings,
+                    quality_flags,
+                    "trace_timestamp_nonmonotonic",
+                    "trace_timestamp_s is not strictly increasing; sidecar interpolation should be reviewed.",
+                    nonpositive_step_count=nonpositive,
+                    total_step_count=max(trace_count - 1, 0),
+                )
+            stats = _gap_stats(timestamp_steps)
+            if stats is not None:
+                median, maximum, ratio = stats
+                input_quality["trace_timestamp_step_median_s"] = median
+                input_quality["trace_timestamp_step_max_s"] = maximum
+                input_quality["trace_timestamp_gap_ratio"] = ratio
+                if ratio > 3.0:
+                    _append_quality_warning(
+                        warnings,
+                        quality_flags,
+                        "trace_timestamp_gap",
+                        "trace timestamps contain a large sampling gap; motion compensation may bridge a flight interruption.",
+                        median_step_s=median,
+                        max_step_s=maximum,
+                        gap_ratio=ratio,
+                    )
+
+    if distance is not None:
+        if not np.isfinite(distance).all():
+            invalid_count = int(np.count_nonzero(~np.isfinite(distance)))
+            input_quality["trace_distance_invalid_count"] = invalid_count
+            _append_quality_warning(
+                warnings,
+                quality_flags,
+                "invalid_trace_distance_m",
+                "trace_distance_m contains non-finite values; trajectory quality is unreliable.",
+                invalid_trace_count=invalid_count,
+                total_trace_count=trace_count,
+            )
+        else:
+            input_quality["trace_distance_start_m"] = float(distance[0])
+            input_quality["trace_distance_end_m"] = float(distance[-1])
+            distance_steps = np.diff(distance)
+            negative = int(np.count_nonzero(distance_steps < 0.0))
+            input_quality["trace_distance_negative_steps"] = negative
+            if negative:
+                _append_quality_warning(
+                    warnings,
+                    quality_flags,
+                    "trace_distance_nonmonotonic",
+                    "trace_distance_m is not monotonic; equal-distance resampling and speed estimates should be reviewed.",
+                    negative_step_count=negative,
+                    total_step_count=max(trace_count - 1, 0),
+                )
+            stats = _gap_stats(distance_steps)
+            if stats is not None:
+                median, maximum, ratio = stats
+                input_quality["trace_distance_step_median_m"] = median
+                input_quality["trace_distance_step_max_m"] = maximum
+                input_quality["trace_distance_gap_ratio"] = ratio
+                if ratio > 3.0:
+                    _append_quality_warning(
+                        warnings,
+                        quality_flags,
+                        "trace_distance_gap",
+                        "trace_distance_m contains a large spatial gap; resampling may smear across a flight break.",
+                        median_step_m=median,
+                        max_step_m=maximum,
+                        gap_ratio=ratio,
+                    )
+
+    if timestamp_steps is not None and distance_steps is not None:
+        mask = (
+            np.isfinite(timestamp_steps)
+            & np.isfinite(distance_steps)
+            & (timestamp_steps > 0.0)
+            & (distance_steps >= 0.0)
+        )
+        if np.count_nonzero(mask) >= 3:
+            speed_mps = distance_steps[mask] / timestamp_steps[mask]
+            stats = _gap_stats(speed_mps)
+            if stats is not None:
+                median, maximum, ratio = stats
+                input_quality["trace_speed_median_mps"] = median
+                input_quality["trace_speed_max_mps"] = maximum
+                input_quality["trace_speed_outlier_ratio"] = ratio
+                if ratio > 2.5:
+                    _append_quality_warning(
+                        warnings,
+                        quality_flags,
+                        "trace_speed_outlier",
+                        "Trace spacing and timestamps imply a large speed outlier; trajectory synchronization should be reviewed.",
+                        median_speed_mps=median,
+                        max_speed_mps=maximum,
+                        speed_ratio=ratio,
+                    )
+
+
+def _resolve_shift_sample_limit(
+    *,
+    max_shift_samples: float | None,
+    max_shift_ns: float | None,
+    sample_interval_ns: float,
+    sample_count: int,
+) -> tuple[float | None, str | None, dict[str, float]]:
+    candidates: list[tuple[str, float]] = []
+    try:
+        sample_limit = float(max_shift_samples) if max_shift_samples is not None else 0.0
+    except (TypeError, ValueError):
+        sample_limit = 0.0
+    if sample_limit > 0.0 and np.isfinite(sample_limit):
+        candidates.append(("max_shift_samples", sample_limit))
+
+    try:
+        ns_limit = float(max_shift_ns) if max_shift_ns is not None else 0.0
+    except (TypeError, ValueError):
+        ns_limit = 0.0
+    if ns_limit > 0.0 and np.isfinite(ns_limit) and sample_interval_ns > 0.0:
+        candidates.append(("max_shift_ns", ns_limit / sample_interval_ns))
+
+    if not candidates:
+        return None, None, {}
+
+    requested_limit = min(value for _, value in candidates)
+    source = "+".join(name for name, _ in candidates)
+    data_cap = max(1.0, min(float(sample_count - 1), float(sample_count) * 0.35))
+    effective = min(requested_limit, data_cap)
+    if effective < requested_limit:
+        source = f"{source}+data_fraction_cap"
+    details = {
+        "requested_shift_limit_samples": float(requested_limit),
+        "data_fraction_cap_samples": float(data_cap),
+    }
+    return float(effective), source, details
+
+
 def _rotate_xy(
     x_body_m: np.ndarray,
     y_body_m: np.ndarray,
@@ -307,7 +497,8 @@ def method_motion_compensation_v2(
     height_source: str = "auto",
     compensate_time_shift: bool = True,
     compensate_amplitude: bool = True,
-    max_shift_samples: float | None = None,
+    max_shift_samples: float | None = 0.0,
+    max_shift_ns: float = 20.0,
     max_amplitude_scale: float = 2.0,
     resample_spacing_m: float = 0.0,
     interpolation_mode: str = "linear",
@@ -341,6 +532,10 @@ def method_motion_compensation_v2(
         "source_traces": int(trace_count),
         "air_wave_speed_m_per_ns": float(air_wave_speed_m_per_ns),
         "height_reference_mode": str(height_reference_mode),
+        "max_shift_samples_requested": (
+            float(max_shift_samples) if max_shift_samples is not None else None
+        ),
+        "max_shift_ns_requested": float(max_shift_ns),
         "height_correction_applied": False,
         "time_shift_correction_applied": False,
         "amplitude_correction_applied": False,
@@ -412,6 +607,13 @@ def method_motion_compensation_v2(
         "alignment_status_available": bool(alignment_status.size),
         "height_confidence_available": height_confidence is not None,
     }
+    _analyze_trace_quality(
+        metadata,
+        trace_count,
+        input_quality,
+        warnings,
+        quality_flags,
+    )
 
     if alignment_status.size:
         alignment_extrapolated = int(np.count_nonzero(alignment_status == "extrapolated"))
@@ -516,9 +718,17 @@ def method_motion_compensation_v2(
                 time_shift_ns = 2.0 * (height_m - h_ref) / float(air_wave_speed_m_per_ns)
                 time_shift_samples = time_shift_ns / dt_ns
                 raw_shift_samples = time_shift_samples.copy()
-                if max_shift_samples is not None and float(max_shift_samples) > 0.0:
-                    clamp = float(max_shift_samples)
+                clamp, clamp_source, clamp_details = _resolve_shift_sample_limit(
+                    max_shift_samples=max_shift_samples,
+                    max_shift_ns=max_shift_ns,
+                    sample_interval_ns=dt_ns,
+                    sample_count=samples,
+                )
+                if clamp is not None:
                     time_shift_samples = np.clip(time_shift_samples, -clamp, clamp)
+                    meta["max_shift_samples_effective"] = float(clamp)
+                    meta["max_shift_limit_source"] = str(clamp_source)
+                    meta.update(clamp_details)
                 clamped_mask = ~np.isclose(raw_shift_samples, time_shift_samples)
                 time_shift_clamped = bool(np.any(clamped_mask))
                 if time_shift_clamped:
@@ -529,7 +739,8 @@ def method_motion_compensation_v2(
                             "Height time-shift correction exceeded max_shift_samples and was clamped.",
                             clamped_trace_count=int(np.count_nonzero(clamped_mask)),
                             total_trace_count=trace_count,
-                            max_shift_samples=float(max_shift_samples),
+                            max_shift_samples_effective=float(clamp or 0.0),
+                            max_shift_limit_source=str(clamp_source),
                             raw_shift_samples_min=float(np.min(raw_shift_samples)),
                             raw_shift_samples_max=float(np.max(raw_shift_samples)),
                         )
