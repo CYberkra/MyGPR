@@ -216,6 +216,60 @@ def test_build_gprmax_command_resolves_model_input_to_absolute_path(tmp_path: Pa
     assert command[3].endswith("relative_model.in")
 
 
+def test_convert_gprmax_run_resamples_to_real_field_ascan_length(tmp_path: Path, monkeypatch):
+    raw = np.linspace(0.0, 1.0, 1000, dtype=np.float32)[:, None]
+    raw = np.hstack([raw, raw * 2.0, raw * 3.0])
+
+    def fake_read_gprmax_out(path: str):
+        return {
+            "data": raw,
+            "time_step_s": 1.0e-11,
+            "total_time_ns": 10.0,
+        }
+
+    monkeypatch.setattr(report, "read_gprmax_out", fake_read_gprmax_out)
+    scenario = build_scenario_definitions()["airborne_no_target_background_v1"]
+    out_file = tmp_path / f"{scenario.scenario_id}001.out"
+    out_file.write_text("", encoding="utf-8")
+    run_result = report.GprMaxRunResult(
+        scenario_dir=tmp_path,
+        model_input=tmp_path / f"{scenario.scenario_id}.in",
+        model_inputs=[tmp_path / f"{scenario.scenario_id}.in"],
+        command=["python", "-m", "gprMax"],
+        commands=[["python", "-m", "gprMax"]],
+        out_files=[out_file],
+        stdout_path=tmp_path / "stdout.txt",
+        stderr_path=tmp_path / "stderr.txt",
+        returncode=0,
+    )
+
+    package = report.convert_gprmax_run(
+        scenario,
+        run_result,
+        runs=3,
+        ascan_samples=501,
+    )
+
+    assert package["bscan"].shape == (501, 3)
+    assert package["scenario"]["simulation"]["sample_count"] == 501
+    assert package["scenario"]["simulation"]["raw_sample_count"] == 1000
+    assert package["scenario"]["simulation"]["target_ascan_sample_count"] == 501
+    assert package["scenario"]["simulation"]["resampled_from_raw"] is True
+    assert package["header_info"]["a_scan_length"] == 501
+    assert package["header_info"]["raw_a_scan_length"] == 1000
+    assert package["ground_truth"]["wavefield_rois"]["air_ground_reflection"]["roi"][
+        "time_end_idx"
+    ] <= 501
+
+
+def test_ascan_sample_argument_defaults_to_real_field_length():
+    args = report._parse_args([])
+
+    assert args.ascan_samples == 501
+    assert report._parse_args(["--ascan-samples", "701"]).ascan_samples == 701
+    assert report._parse_args(["--ascan-samples", "0"]).ascan_samples == 0
+
+
 def test_find_out_files_orders_per_trace_height_variation_outputs(tmp_path: Path):
     for name in [
         "airborne_height_variation_cylinder_v1_trace010.out",

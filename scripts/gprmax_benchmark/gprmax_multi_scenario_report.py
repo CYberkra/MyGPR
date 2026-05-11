@@ -9,6 +9,7 @@ import html
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field, replace
@@ -56,6 +57,8 @@ DEFAULT_OUTPUT_ROOT = ROOT / "output" / "gprmax_multi_scenario_reports"
 DEFAULT_PROFILE_KEY = "uav_gpr_experience_baseline_v1"
 DEFAULT_RUNS = 96
 DEFAULT_SCENARIO_FAMILY = "airborne"
+DEFAULT_ASCAN_SAMPLE_COUNT = 501
+RECOMMENDED_ASCAN_SAMPLE_COUNTS = (501, 701)
 REPORT_PIPELINE_ORDER = [
     "set_zero_time",
     "dewow",
@@ -345,6 +348,7 @@ def resolve_gprmax_python(
 
 def probe_acceleration_support(python_exe: Path) -> dict[str, Any]:
     """Check whether the gprMax Python environment has MPI/GPU packages."""
+    nvcc_path = shutil.which("nvcc")
     probe = (
         "import importlib.util,json;"
         "print(json.dumps({"
@@ -363,19 +367,35 @@ def probe_acceleration_support(python_exe: Path) -> dict[str, Any]:
             timeout=30,
         )
     except Exception as exc:  # pragma: no cover - defensive environment probe
-        return {"mpi4py": False, "cupy": False, "probe_error": str(exc)}
+        return {
+            "mpi4py": False,
+            "pycuda": False,
+            "cupy": False,
+            "nvcc": bool(nvcc_path),
+            "nvcc_path": nvcc_path,
+            "probe_error": str(exc),
+        }
     if completed.returncode != 0:
         return {
             "mpi4py": False,
+            "pycuda": False,
             "cupy": False,
+            "nvcc": bool(nvcc_path),
+            "nvcc_path": nvcc_path,
             "probe_error": completed.stderr[-1000:],
         }
     try:
-        return json.loads(completed.stdout.strip().splitlines()[-1])
+        result = json.loads(completed.stdout.strip().splitlines()[-1])
+        result["nvcc"] = bool(nvcc_path)
+        result["nvcc_path"] = nvcc_path
+        return result
     except (IndexError, json.JSONDecodeError):
         return {
             "mpi4py": False,
+            "pycuda": False,
             "cupy": False,
+            "nvcc": bool(nvcc_path),
+            "nvcc_path": nvcc_path,
             "probe_error": completed.stdout[-1000:],
         }
 
@@ -409,6 +429,7 @@ def run_multi_scenario_report(
     search_mode: str = "fast",
     baseline_profile_key: str = DEFAULT_PROFILE_KEY,
     zero_time_policy: str = "align_auto",
+    ascan_samples: int | None = DEFAULT_ASCAN_SAMPLE_COUNT,
     extra_args: list[str] | None = None,
 ) -> dict[str, Any]:
     """Run all requested scenarios and write the HTML report."""
@@ -451,6 +472,7 @@ def run_multi_scenario_report(
             definition,
             gprmax_run,
             runs=runs,
+            ascan_samples=ascan_samples,
         )
         comparison = run_stepwise_comparison(
             package["bscan"],
@@ -510,6 +532,8 @@ def run_multi_scenario_report(
         "python_executable": str(python_exe),
         "run_settings": {
             "runs": int(runs),
+            "ascan_samples": int(ascan_samples) if ascan_samples else None,
+            "recommended_ascan_samples": list(RECOMMENDED_ASCAN_SAMPLE_COUNTS),
             "geometry_fixed": bool(geometry_fixed),
             "mpi": int(mpi) if mpi is not None else None,
             "gpu": list(gpu or []),
@@ -787,27 +811,75 @@ def _write_csv_rows(path: Path, headers: list[str], rows: list[list[Any]]) -> No
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _normalize_ascan_sample_count(ascan_samples: int | None) -> int | None:
+    """Return a valid target A-scan sample count, or None to keep raw gprMax output."""
+    if ascan_samples is None:
+        return None
+    value = int(ascan_samples)
+    if value <= 0:
+        return None
+    if value < 16:
+        raise ValueError("ascan_samples must be >= 16, or <= 0 to keep raw gprMax samples")
+    return value
+
+
+def _resample_bscan_samples(data: np.ndarray, target_samples: int | None) -> np.ndarray:
+    """Resample B-scan rows to match real UAV-GPR A-scan sample counts."""
+    arr = np.asarray(data, dtype=np.float32)
+    if arr.ndim != 2:
+        raise ValueError("gprMax B-scan data must be a 2D array")
+    if target_samples is None or int(target_samples) == int(arr.shape[0]):
+        return arr.astype(np.float32, copy=True)
+    if arr.shape[0] <= 1:
+        return np.repeat(arr.astype(np.float32, copy=True), int(target_samples), axis=0)
+
+    source_axis = np.linspace(0.0, 1.0, int(arr.shape[0]), dtype=np.float64)
+    target_axis = np.linspace(0.0, 1.0, int(target_samples), dtype=np.float64)
+    resampled = np.empty((int(target_samples), int(arr.shape[1])), dtype=np.float32)
+    for col_idx in range(int(arr.shape[1])):
+        resampled[:, col_idx] = np.interp(
+            target_axis,
+            source_axis,
+            arr[:, col_idx].astype(np.float64),
+        ).astype(np.float32)
+    return resampled
+
+
 def convert_gprmax_run(
     definition: ScenarioDefinition,
     run_result: GprMaxRunResult,
     *,
     runs: int,
+    ascan_samples: int | None = DEFAULT_ASCAN_SAMPLE_COUNT,
 ) -> dict[str, Any]:
     """Convert gprMax `.out` files into MyGPR package artifacts."""
     load_result = read_gprmax_out(str(run_result.out_files[0]))
-    bscan = np.asarray(load_result["data"], dtype=np.float32)
+    raw_bscan = np.asarray(load_result["data"], dtype=np.float32)
     time_step_s = load_result.get("time_step_s")
     total_time_ns = load_result.get("total_time_ns")
     if total_time_ns is None and time_step_s is not None:
-        total_time_ns = float(time_step_s) * int(bscan.shape[0]) * 1e9
+        total_time_ns = float(time_step_s) * int(raw_bscan.shape[0]) * 1e9
     if total_time_ns is None:
         total_time_ns = float(definition.total_time_ns)
+    target_ascan_samples = _normalize_ascan_sample_count(ascan_samples)
+    bscan = _resample_bscan_samples(raw_bscan, target_ascan_samples)
+    output_time_step_s = (
+        float(total_time_ns) * 1.0e-9 / max(int(bscan.shape[0]) - 1, 1)
+        if int(bscan.shape[0]) > 1
+        else float(time_step_s or 0.0)
+    )
 
     simulation = {
         "sample_count": int(bscan.shape[0]),
+        "raw_sample_count": int(raw_bscan.shape[0]),
+        "target_ascan_sample_count": (
+            int(target_ascan_samples) if target_ascan_samples is not None else None
+        ),
+        "resampled_from_raw": bool(int(bscan.shape[0]) != int(raw_bscan.shape[0])),
         "trace_count": int(bscan.shape[1]),
         "requested_runs": int(runs),
-        "time_step_s": float(time_step_s) if time_step_s is not None else None,
+        "time_step_s": float(output_time_step_s) if output_time_step_s > 0.0 else None,
+        "raw_time_step_s": float(time_step_s) if time_step_s is not None else None,
         "total_time_ns": float(total_time_ns),
         "trace_step_m": float(definition.trace_step_m),
         "source_receiver_offset_m": float(
@@ -892,6 +964,11 @@ def convert_gprmax_run(
         "structure_preview_path": structure_preview_path,
         "header_info": {
             "a_scan_length": int(bscan.shape[0]),
+            "raw_a_scan_length": int(raw_bscan.shape[0]),
+            "target_ascan_sample_count": (
+                int(target_ascan_samples) if target_ascan_samples is not None else None
+            ),
+            "resampled_from_raw": bool(int(bscan.shape[0]) != int(raw_bscan.shape[0])),
             "num_traces": int(bscan.shape[1]),
             "total_time_ns": float(total_time_ns),
             "trace_interval_m": float(definition.trace_step_m),
@@ -1329,14 +1406,17 @@ def render_html_report(report_dir: Path, payload: dict[str, Any]) -> Path:
         <div><span>gprMax 根目录</span><strong>{_esc(payload.get("gprmax_root"))}</strong></div>
         <div><span>Python</span><strong>{_esc(payload.get("python_executable"))}</strong></div>
         <div><span>每场景 A-scan 道数</span><strong>{_esc(run_settings.get("runs"))}</strong></div>
+        <div><span>处理用每道采样点</span><strong>{_esc(run_settings.get("ascan_samples") or "保留 gprMax 原始点数")}</strong></div>
         <div><span>场景族</span><strong>{_esc(payload.get("scenario_family") or "airborne")}</strong></div>
         <div><span>geometry-fixed</span><strong>{_esc(run_settings.get("geometry_fixed"))}</strong></div>
         <div><span>MPI 参数</span><strong>{_esc(run_settings.get("mpi") or "未启用")}</strong></div>
         <div><span>GPU 参数</span><strong>{_esc(", ".join(run_settings.get("gpu") or []) or "未启用")}</strong></div>
         <div><span>mpi4py 可用</span><strong>{_esc(support.get("mpi4py"))}</strong></div>
+        <div><span>PyCUDA 可用</span><strong>{_esc(support.get("pycuda"))}</strong></div>
+        <div><span>nvcc 可用</span><strong>{_esc(support.get("nvcc"))}</strong></div>
         <div><span>CuPy 可用</span><strong>{_esc(support.get("cupy"))}</strong></div>
       </div>
-      <p class="note">本机环境探测只用于决定是否建议启用 MPI/GPU。当前脚本会暴露 <code>-mpi</code> 和 <code>-gpu</code>，但只有在相应依赖可用且用户显式传参时才加入命令。</p>
+      <p class="note">本机环境探测只用于决定是否建议启用 MPI/GPU。当前脚本会暴露 <code>-mpi</code> 和 <code>-gpu</code>，但只有在相应依赖可用且用户显式传参时才加入命令。gprMax 原始 FDTD 输出会保留在 <code>.out</code> 中；报告默认将 BScan 重采样到真实 UAV-GPR 常见的 501/701 点 A-scan 长度后再进入 MyGPR 流程。</p>
     </section>
 
     <section>
@@ -2939,6 +3019,7 @@ def _extract_warning_messages(meta: dict[str, Any]) -> list[str]:
 
 def _render_scenario_section(record: dict[str, Any]) -> str:
     comparison = record.get("comparison", {})
+    simulation = record.get("simulation") or {}
     metrics = comparison.get("metrics", {})
     delta = metrics.get("delta_auto_minus_manual", {})
     verdict = comparison.get("verdict")
@@ -2990,6 +3071,8 @@ def _render_scenario_section(record: dict[str, Any]) -> str:
       <div class="metric-grid">
         <div><span>后端建议</span><strong>{_esc(recommendation)}</strong></div>
         <div><span>全流程风险标记</span><strong>{_esc(risk_flags)}</strong></div>
+        <div><span>处理 BScan 尺寸</span><strong>{_esc(f"{simulation.get('sample_count')} x {simulation.get('trace_count')}")}</strong></div>
+        <div><span>gprMax 原始点数</span><strong>{_esc(simulation.get("raw_sample_count") or simulation.get("sample_count"))}</strong></div>
         <div><span>人工选参 score</span><strong>{_fmt_metric(metrics.get("manual", {}).get("comparison_score"))}</strong></div>
         <div><span>自动选参 score</span><strong>{_fmt_metric(metrics.get("auto", {}).get("comparison_score"))}</strong></div>
         <div><span>score 差值</span><strong>{_fmt_metric(delta.get("comparison_score"))}</strong></div>
@@ -3450,6 +3533,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--runs", type=int, default=DEFAULT_RUNS)
     parser.add_argument(
+        "--ascan-samples",
+        type=int,
+        default=DEFAULT_ASCAN_SAMPLE_COUNT,
+        help=(
+            "Target A-scan sample count used by MyGPR processing/reporting. "
+            "Use 501 or 701 to match current UAV-GPR field data; use 0 to keep raw gprMax samples."
+        ),
+    )
+    parser.add_argument(
         "--geometry-fixed",
         action="store_true",
         help="Pass --geometry-fixed to gprMax.",
@@ -3501,6 +3593,7 @@ def main(argv: list[str] | None = None) -> int:
         search_mode=str(args.search_mode),
         baseline_profile_key=str(args.baseline_profile),
         zero_time_policy=str(args.zero_time_policy),
+        ascan_samples=int(args.ascan_samples),
         extra_args=list(args.extra_arg or []),
     )
     print(f"HTML report: {payload['html_report']}")
