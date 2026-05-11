@@ -12,6 +12,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
@@ -330,6 +331,154 @@ def build_gprmax_command(
     return command
 
 
+def _which(executable: str, env: dict[str, str] | None = None) -> str | None:
+    """Resolve an executable using an optional subprocess environment."""
+    if env is None:
+        return shutil.which(executable)
+    path_values: list[str] = []
+    for key in ("Path", "PATH", "path"):
+        value = env.get(key)
+        if value:
+            path_values.append(value)
+    for key, value in env.items():
+        if key.lower() == "path" and value and value not in path_values:
+            path_values.append(value)
+    for path_value in path_values:
+        found = shutil.which(executable, path=path_value)
+        if found:
+            return found
+    return None
+
+
+def find_windows_vcvars64(explicit_path: str | None = None) -> Path | None:
+    """Find Visual Studio's vcvars64.bat for CUDA host compilation on Windows."""
+    candidates: list[Path] = []
+    for raw in [
+        explicit_path,
+        os.environ.get("MYGPR_CUDA_VCVARS64"),
+        os.environ.get("GPRMAX_CUDA_VCVARS64"),
+    ]:
+        if raw:
+            candidates.append(Path(raw))
+
+    if os.name == "nt":
+        vswhere = (
+            Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"))
+            / "Microsoft Visual Studio"
+            / "Installer"
+            / "vswhere.exe"
+        )
+        if vswhere.exists():
+            try:
+                completed = subprocess.run(
+                    [
+                        str(vswhere),
+                        "-latest",
+                        "-products",
+                        "*",
+                        "-requires",
+                        "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+                        "-find",
+                        r"VC\Auxiliary\Build\vcvars64.bat",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=20,
+                )
+                candidates.extend(
+                    Path(line.strip())
+                    for line in completed.stdout.splitlines()
+                    if line.strip()
+                )
+            except Exception:
+                pass
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _load_vcvars_env(vcvars_path: Path) -> dict[str, str]:
+    """Return the environment produced by calling vcvars64.bat."""
+    wrapper_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            suffix=".cmd",
+            delete=False,
+            encoding="mbcs",
+        ) as wrapper:
+            wrapper_path = Path(wrapper.name)
+            wrapper.write("@echo off\n")
+            wrapper.write(f'call "{vcvars_path}" >nul\n')
+            wrapper.write("if errorlevel 1 exit /b %errorlevel%\n")
+            wrapper.write("set\n")
+        completed = subprocess.run(
+            ["cmd", "/d", "/c", str(wrapper_path)],
+            capture_output=True,
+            text=True,
+            encoding="mbcs",
+            errors="replace",
+            timeout=60,
+        )
+    finally:
+        if wrapper_path is not None:
+            try:
+                wrapper_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+    if completed.returncode != 0:
+        raise RuntimeError(
+            "Failed to initialize Visual Studio build environment: "
+            f"{completed.stderr[-1000:]}"
+        )
+    env = dict(os.environ)
+    for line in completed.stdout.splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        if key:
+            env[key] = value
+    return env
+
+
+def resolve_gprmax_runtime_env(
+    *,
+    gpu: list[str] | None = None,
+    cuda_vcvars: str | None = None,
+) -> tuple[dict[str, str] | None, dict[str, Any]]:
+    """Resolve optional subprocess environment required by gprMax GPU runs."""
+    info: dict[str, Any] = {
+        "cuda_vcvars64_path": None,
+        "cuda_vcvars_loaded": False,
+        "cl_available": bool(_which("cl.exe")),
+        "cl_path": _which("cl.exe"),
+    }
+    if not gpu or os.name != "nt":
+        return None, info
+    if _which("cl.exe"):
+        return None, info
+
+    vcvars = find_windows_vcvars64(cuda_vcvars)
+    if vcvars is None:
+        info["cuda_vcvars_error"] = "vcvars64.bat not found"
+        return None, info
+
+    env = _load_vcvars_env(vcvars)
+    info.update(
+        {
+            "cuda_vcvars64_path": str(vcvars),
+            "cuda_vcvars_loaded": True,
+            "cl_available": bool(_which("cl.exe", env=env)),
+            "cl_path": _which("cl.exe", env=env),
+        }
+    )
+    return env, info
+
+
 def resolve_gprmax_python(
     gprmax_root: Path,
     python_override: str | None = None,
@@ -346,9 +495,13 @@ def resolve_gprmax_python(
     return Path(sys.executable)
 
 
-def probe_acceleration_support(python_exe: Path) -> dict[str, Any]:
+def probe_acceleration_support(
+    python_exe: Path,
+    env: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """Check whether the gprMax Python environment has MPI/GPU packages."""
-    nvcc_path = shutil.which("nvcc")
+    nvcc_path = _which("nvcc", env=env)
+    cl_path = _which("cl.exe", env=env)
     probe = (
         "import importlib.util,json;"
         "print(json.dumps({"
@@ -364,6 +517,7 @@ def probe_acceleration_support(python_exe: Path) -> dict[str, Any]:
             text=True,
             encoding="utf-8",
             errors="replace",
+            env=env,
             timeout=30,
         )
     except Exception as exc:  # pragma: no cover - defensive environment probe
@@ -373,6 +527,8 @@ def probe_acceleration_support(python_exe: Path) -> dict[str, Any]:
             "cupy": False,
             "nvcc": bool(nvcc_path),
             "nvcc_path": nvcc_path,
+            "cl": bool(cl_path),
+            "cl_path": cl_path,
             "probe_error": str(exc),
         }
     if completed.returncode != 0:
@@ -382,12 +538,16 @@ def probe_acceleration_support(python_exe: Path) -> dict[str, Any]:
             "cupy": False,
             "nvcc": bool(nvcc_path),
             "nvcc_path": nvcc_path,
+            "cl": bool(cl_path),
+            "cl_path": cl_path,
             "probe_error": completed.stderr[-1000:],
         }
     try:
         result = json.loads(completed.stdout.strip().splitlines()[-1])
         result["nvcc"] = bool(nvcc_path)
         result["nvcc_path"] = nvcc_path
+        result["cl"] = bool(cl_path)
+        result["cl_path"] = cl_path
         return result
     except (IndexError, json.JSONDecodeError):
         return {
@@ -396,6 +556,8 @@ def probe_acceleration_support(python_exe: Path) -> dict[str, Any]:
             "cupy": False,
             "nvcc": bool(nvcc_path),
             "nvcc_path": nvcc_path,
+            "cl": bool(cl_path),
+            "cl_path": cl_path,
             "probe_error": completed.stdout[-1000:],
         }
 
@@ -430,6 +592,7 @@ def run_multi_scenario_report(
     baseline_profile_key: str = DEFAULT_PROFILE_KEY,
     zero_time_policy: str = "align_auto",
     ascan_samples: int | None = DEFAULT_ASCAN_SAMPLE_COUNT,
+    cuda_vcvars: str | None = None,
     extra_args: list[str] | None = None,
 ) -> dict[str, Any]:
     """Run all requested scenarios and write the HTML report."""
@@ -450,7 +613,12 @@ def run_multi_scenario_report(
     if not gprmax_root.exists():
         raise FileNotFoundError(f"gprMax root not found: {gprmax_root}")
     python_exe = resolve_gprmax_python(gprmax_root, python_override=python_override)
-    acceleration = probe_acceleration_support(python_exe)
+    runtime_env, runtime_env_info = resolve_gprmax_runtime_env(
+        gpu=gpu,
+        cuda_vcvars=cuda_vcvars,
+    )
+    acceleration = probe_acceleration_support(python_exe, env=runtime_env)
+    acceleration.update(runtime_env_info)
 
     scenario_records: list[dict[str, Any]] = []
     for scenario_id in selected_ids:
@@ -466,6 +634,7 @@ def run_multi_scenario_report(
             geometry_fixed=geometry_fixed,
             mpi=mpi,
             gpu=gpu,
+            env=runtime_env,
             extra_args=extra_args,
         )
         package = convert_gprmax_run(
@@ -537,6 +706,7 @@ def run_multi_scenario_report(
             "geometry_fixed": bool(geometry_fixed),
             "mpi": int(mpi) if mpi is not None else None,
             "gpu": list(gpu or []),
+            "cuda_vcvars": str(cuda_vcvars) if cuda_vcvars else None,
             "extra_args": list(extra_args or []),
         },
         "acceleration_support": acceleration,
@@ -567,7 +737,8 @@ def run_gprmax_scenario(
     geometry_fixed: bool,
     mpi: int | None,
     gpu: list[str] | None,
-    extra_args: list[str] | None,
+    env: dict[str, str] | None = None,
+    extra_args: list[str] | None = None,
 ) -> GprMaxRunResult:
     """Write the model file and run gprMax for one scene."""
     model_inputs = write_gprmax_inputs(definition, scenario_dir, runs=runs)
@@ -596,6 +767,7 @@ def run_gprmax_scenario(
                 text=True,
                 encoding="utf-8",
                 errors="replace",
+                env=env,
             )
             stdout_chunks.append(f"$ {' '.join(command)}\n{completed.stdout}")
             stderr_chunks.append(f"$ {' '.join(command)}\n{completed.stderr}")
@@ -620,6 +792,7 @@ def run_gprmax_scenario(
             text=True,
             encoding="utf-8",
             errors="replace",
+            env=env,
         )
         stdout_chunks.append(completed.stdout)
         stderr_chunks.append(completed.stderr)
@@ -1414,6 +1587,8 @@ def render_html_report(report_dir: Path, payload: dict[str, Any]) -> Path:
         <div><span>mpi4py 可用</span><strong>{_esc(support.get("mpi4py"))}</strong></div>
         <div><span>PyCUDA 可用</span><strong>{_esc(support.get("pycuda"))}</strong></div>
         <div><span>nvcc 可用</span><strong>{_esc(support.get("nvcc"))}</strong></div>
+        <div><span>cl.exe 可用</span><strong>{_esc(support.get("cl"))}</strong></div>
+        <div><span>vcvars64 自动加载</span><strong>{_esc(support.get("cuda_vcvars_loaded"))}</strong></div>
         <div><span>CuPy 可用</span><strong>{_esc(support.get("cupy"))}</strong></div>
       </div>
       <p class="note">本机环境探测只用于决定是否建议启用 MPI/GPU。当前脚本会暴露 <code>-mpi</code> 和 <code>-gpu</code>，但只有在相应依赖可用且用户显式传参时才加入命令。gprMax 原始 FDTD 输出会保留在 <code>.out</code> 中；报告默认将 BScan 重采样到真实 UAV-GPR 常见的 501/701 点 A-scan 长度后再进入 MyGPR 流程。</p>
@@ -3553,6 +3728,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=[],
         help="Optional gprMax -gpu device ids, for example --gpu 0.",
     )
+    parser.add_argument(
+        "--cuda-vcvars",
+        default=None,
+        help=(
+            "Optional path to Visual Studio vcvars64.bat. On Windows GPU runs, "
+            "the script auto-loads this environment when cl.exe is not already on PATH."
+        ),
+    )
     parser.add_argument("--python-exe", default=None)
     parser.add_argument(
         "--search-mode",
@@ -3594,6 +3777,7 @@ def main(argv: list[str] | None = None) -> int:
         baseline_profile_key=str(args.baseline_profile),
         zero_time_policy=str(args.zero_time_policy),
         ascan_samples=int(args.ascan_samples),
+        cuda_vcvars=args.cuda_vcvars,
         extra_args=list(args.extra_arg or []),
     )
     print(f"HTML report: {payload['html_report']}")

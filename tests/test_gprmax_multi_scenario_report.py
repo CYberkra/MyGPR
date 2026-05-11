@@ -216,6 +216,46 @@ def test_build_gprmax_command_resolves_model_input_to_absolute_path(tmp_path: Pa
     assert command[3].endswith("relative_model.in")
 
 
+def test_find_windows_vcvars64_accepts_explicit_path(tmp_path: Path):
+    vcvars = tmp_path / "vcvars64.bat"
+    vcvars.write_text("@echo off\n", encoding="utf-8")
+
+    assert report.find_windows_vcvars64(str(vcvars)) == vcvars
+
+
+def test_which_accepts_windows_path_key(tmp_path: Path):
+    tool = tmp_path / "fake_tool.exe"
+    tool.write_text("", encoding="utf-8")
+
+    assert report._which("fake_tool.exe", env={"Path": str(tmp_path)}) == str(tool)
+
+
+def test_resolve_gprmax_runtime_env_loads_vcvars_for_windows_gpu(monkeypatch, tmp_path: Path):
+    vcvars = tmp_path / "vcvars64.bat"
+    vcvars.write_text("@echo off\n", encoding="utf-8")
+    loaded_env = {"Path": "with-cl"}
+
+    def fake_which(executable: str, env=None):
+        if executable == "cl.exe" and env is loaded_env:
+            return r"C:\VS\cl.exe"
+        if executable == "cl.exe":
+            return None
+        return None
+
+    monkeypatch.setattr(report.os, "name", "nt")
+    monkeypatch.setattr(report, "_which", fake_which)
+    monkeypatch.setattr(report, "find_windows_vcvars64", lambda explicit_path=None: vcvars)
+    monkeypatch.setattr(report, "_load_vcvars_env", lambda path: loaded_env)
+
+    env, info = report.resolve_gprmax_runtime_env(gpu=["0"])
+
+    assert env is loaded_env
+    assert info["cuda_vcvars_loaded"] is True
+    assert info["cuda_vcvars64_path"] == str(vcvars)
+    assert info["cl_available"] is True
+    assert info["cl_path"] == r"C:\VS\cl.exe"
+
+
 def test_convert_gprmax_run_resamples_to_real_field_ascan_length(tmp_path: Path, monkeypatch):
     raw = np.linspace(0.0, 1.0, 1000, dtype=np.float32)[:, None]
     raw = np.hstack([raw, raw * 2.0, raw * 3.0])
@@ -268,6 +308,9 @@ def test_ascan_sample_argument_defaults_to_real_field_length():
     assert args.ascan_samples == 501
     assert report._parse_args(["--ascan-samples", "701"]).ascan_samples == 701
     assert report._parse_args(["--ascan-samples", "0"]).ascan_samples == 0
+    assert report._parse_args(["--cuda-vcvars", "C:/VS/vcvars64.bat"]).cuda_vcvars == (
+        "C:/VS/vcvars64.bat"
+    )
 
 
 def test_find_out_files_orders_per_trace_height_variation_outputs(tmp_path: Path):

@@ -67,8 +67,25 @@ Current workstation check on 2026-05-11:
 - `pycuda`: available in `E:\gprMax\gprMax-v.3.1.7\.venv`
 - `nvcc`: found at `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\bin\nvcc.exe`
 - `mpi4py`: not available, so MPI task farm is not ready
-- `--gpu 0` still fails during PyCUDA `nvcc --preprocess` for the MyGPR airborne smoke,
-  so CPU remains the trusted baseline until the CUDA compiler/toolchain issue is fixed.
+- root cause found: ordinary PowerShell/Codex sessions did not load Visual Studio's
+  C++ build environment, so `nvcc` could not find `cl.exe`
+- `vcvars64.bat` is available at `E:\sisual stdio 2022\VC\Auxiliary\Build\vcvars64.bat`
+- the report script now auto-loads `vcvars64.bat` for Windows `--gpu` runs when `cl.exe`
+  is not already on `PATH`
+- `--gpu 0` has been verified on the MyGPR airborne smoke after this environment fix
+
+If auto-detection ever fails, pass the Visual Studio environment script explicitly:
+
+```powershell
+python scripts\gprmax_benchmark\gprmax_multi_scenario_report.py `
+  --gprmax-root E:\gprMax\gprMax-v.3.1.7 `
+  --scenario airborne_no_target_background_v1 `
+  --runs 1 `
+  --ascan-samples 501 `
+  --geometry-fixed `
+  --gpu 0 `
+  --cuda-vcvars "E:\sisual stdio 2022\VC\Auxiliary\Build\vcvars64.bat"
+```
 
 Official references:
 
