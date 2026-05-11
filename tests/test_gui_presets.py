@@ -1217,6 +1217,8 @@ def test_quality_page_exposes_report_and_snapshot_actions():
     try:
         assert win.page_quality.btn_generate_report.text() == "生成报告"
         assert win.page_quality.btn_export_quality_snapshot.text() == "导出质量快照"
+        assert win.page_quality.btn_export_georeference_3d.text() == "导出3D地理参考"
+        assert win.page_quality.visual_stack.count() == 3
         assert win.page_quality.btn_generate_report.toolTip()
         assert win.page_quality.btn_export_quality_snapshot.toolTip()
     finally:

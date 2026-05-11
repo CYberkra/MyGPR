@@ -166,6 +166,10 @@ from core.auto_tune_comparison_export import (
 from core.evidence_export import (
     export_replay_evidence_bundle as export_replay_evidence_zip,
 )
+from core.uav_georeference_3d import (
+    build_airborne_georeference_3d_payload,
+    export_airborne_georeference_3d_bundle,
+)
 from core.shared_data_state import SharedDataState
 from PythonModule.kirchhoff_migration import load_cagpr_kir_parameter_file
 from qfluentwidgets import FluentIcon
@@ -1452,6 +1456,9 @@ class GPRGuiQt(QMainWindow):
         self.page_quality.btn_export_replay_evidence.clicked.connect(
             self.export_replay_evidence_bundle
         )
+        self.page_quality.btn_export_georeference_3d.clicked.connect(
+            self.export_airborne_georeference_3d_bundle
+        )
         self.page_quality.btn_record_clear.clicked.connect(
             self.page_quality.record.clear
         )
@@ -1580,6 +1587,9 @@ class GPRGuiQt(QMainWindow):
         if hasattr(self, "page_quality") and self.page_quality is not None:
             self.page_quality.set_airborne_trajectory_visualization(
                 self._build_airborne_trajectory_plot_payload()
+            )
+            self.page_quality.set_airborne_georeference_3d_visualization(
+                self._build_airborne_georeference_3d_plot_payload()
             )
         if self.data is not None:
             self.plot_data(self.data)
@@ -2207,6 +2217,7 @@ class GPRGuiQt(QMainWindow):
             self.page_quality.btn_generate_report,
             self.page_quality.btn_export_quality_snapshot,
             self.page_quality.btn_export_replay_evidence,
+            self.page_quality.btn_export_georeference_3d,
         ]
         for w in controls:
             w.setEnabled(not busy)
@@ -3124,6 +3135,9 @@ class GPRGuiQt(QMainWindow):
             self.page_quality.set_airborne_trajectory_visualization(
                 self._build_airborne_trajectory_plot_payload()
             )
+            self.page_quality.set_airborne_georeference_3d_visualization(
+                self._build_airborne_georeference_3d_plot_payload()
+            )
             self.page_quality.set_airborne_anomaly_details(
                 self._build_airborne_anomaly_text()
             )
@@ -3378,6 +3392,21 @@ class GPRGuiQt(QMainWindow):
         if flight_height.size >= n:
             payload["flight_height_m"] = flight_height[finite_mask].tolist()
         return payload
+
+    def _build_airborne_georeference_3d_plot_payload(self) -> dict | None:
+        """构建三维地理参考预览所需数据。"""
+        if self.data is None:
+            return None
+        try:
+            return build_airborne_georeference_3d_payload(
+                self.data,
+                self.header_info,
+                self.trace_metadata,
+                selected_trace_index=self._selected_trace_index,
+            )
+        except Exception as exc:
+            logger.warning("Failed to build airborne 3D georeference payload: %s", exc)
+            return None
 
     def _build_airborne_anomaly_details(self) -> list[dict]:
         """构建航空异常明细行。"""
@@ -4879,6 +4908,55 @@ class GPRGuiQt(QMainWindow):
         self.status_label.setText("处理历史回放证据导出完成")
         QMessageBox.information(self, "导出成功", f"已导出:\n{zip_path}")
 
+    def export_airborne_georeference_3d_bundle(self):
+        """导出三维地理参考预览文件。"""
+        payload = self._build_airborne_georeference_3d_plot_payload()
+        if not payload:
+            QMessageBox.information(
+                self, "无可导出三维预览", "请先导入航空数据并确认已有轨迹/高度元数据。"
+            )
+            return
+
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        default_path = os.path.join(
+            self._default_output_dir(),
+            f"uav_georeference_3d_{ts}.vtk",
+        )
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "导出3D地理参考",
+            default_path,
+            "VTK PolyData (*.vtk);;所有文件 (*)",
+        )
+        if not path:
+            return
+
+        try:
+            result = export_airborne_georeference_3d_bundle(payload, path)
+        except Exception as exc:
+            QMessageBox.critical(self, "导出失败", f"3D 地理参考导出失败：\n{exc}")
+            logger.exception("Failed to export airborne georeference 3D bundle")
+            return
+
+        vtk_path = str(result.get("vtk_path") or path)
+        csv_path = str(result.get("csv_path") or Path(path).with_suffix(".csv"))
+        json_path = str(result.get("json_path") or Path(path).with_suffix(".json"))
+        try:
+            vtk_disp = os.path.relpath(vtk_path, BASE_DIR)
+            csv_disp = os.path.relpath(csv_path, BASE_DIR)
+            json_disp = os.path.relpath(json_path, BASE_DIR)
+        except ValueError:
+            vtk_disp = vtk_path
+            csv_disp = csv_path
+            json_disp = json_path
+        self._log(f"3D 地理参考已导出: {vtk_disp}; {csv_disp}; {json_disp}")
+        self.status_label.setText("3D 地理参考导出完成")
+        QMessageBox.information(
+            self,
+            "导出成功",
+            f"已导出:\n{vtk_path}\n{csv_path}\n{json_path}",
+        )
+
     def export_quality_snapshot(self):
         """导出质量快照"""
         if not self._last_quality_metrics:
@@ -6241,6 +6319,9 @@ class GPRGuiQt(QMainWindow):
                 self.page_quality.set_airborne_trajectory_visualization(
                     self._build_airborne_trajectory_plot_payload()
                 )
+                self.page_quality.set_airborne_georeference_3d_visualization(
+                    self._build_airborne_georeference_3d_plot_payload()
+                )
                 self.page_quality.set_airborne_anomaly_details(
                     self._build_airborne_anomaly_text()
                 )
@@ -6253,6 +6334,7 @@ class GPRGuiQt(QMainWindow):
                 self.page_quality.set_airborne_qc_summary("")
                 self.page_quality.set_airborne_qc_visualization(None)
                 self.page_quality.set_airborne_trajectory_visualization(None)
+                self.page_quality.set_airborne_georeference_3d_visualization(None)
                 self.page_quality.set_airborne_anomaly_details("")
 
     def _compute_airborne_qc_metrics(self) -> dict | None:

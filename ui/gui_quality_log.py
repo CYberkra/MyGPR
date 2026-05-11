@@ -19,6 +19,7 @@ from qfluentwidgets import PushButton, FluentIcon, SegmentedWidget
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
+from matplotlib import colormaps, colors
 
 from core.theme_manager import get_theme_manager
 
@@ -116,6 +117,12 @@ class QualityLogPage(QWidget):
         self.btn_export_replay_evidence.setToolTip(
             "手动导出当前处理历史和回放证据包"
         )
+        self.btn_export_georeference_3d = PushButton(
+            FluentIcon.SAVE_AS, "导出3D地理参考"
+        )
+        self.btn_export_georeference_3d.setToolTip(
+            "导出当前轨迹与剖面带的三维地理参考文件（VTK / CSV / JSON）"
+        )
         self.btn_open_log_dir = PushButton(FluentIcon.FOLDER, "打开日志目录")
         self.btn_open_log_dir.setToolTip("打开日志和输出目录")
         self.btn_copy_diagnostics = PushButton(FluentIcon.COPY, "复制诊断信息")
@@ -128,6 +135,7 @@ class QualityLogPage(QWidget):
         action_row_top_layout.addWidget(self.btn_generate_report)
         action_row_top_layout.addWidget(self.btn_export_quality_snapshot)
         action_row_top_layout.addWidget(self.btn_export_replay_evidence)
+        action_row_top_layout.addWidget(self.btn_export_georeference_3d)
         action_row_top_layout.addStretch(1)
         action_layout.addWidget(action_row_top)
 
@@ -228,6 +236,7 @@ class QualityLogPage(QWidget):
         self.visual_segmented = SegmentedWidget(self)
         self.visual_segmented.addItem("qc_chart", "质量图表")
         self.visual_segmented.addItem("trajectory", "航迹图")
+        self.visual_segmented.addItem("georef3d", "三维预览")
         visual_layout.addWidget(self.visual_segmented)
 
         self.visual_stack = QStackedWidget(self)
@@ -265,6 +274,22 @@ class QualityLogPage(QWidget):
         )
         trajectory_panel_layout.addWidget(self.trajectory_canvas)
         self.visual_stack.addWidget(trajectory_panel)
+
+        georef3d_panel = QWidget()
+        georef3d_panel_layout = QVBoxLayout(georef3d_panel)
+        georef3d_panel_layout.setContentsMargins(0, 0, 0, 0)
+        georef3d_panel_layout.setSpacing(8)
+        georef3d_hint = QLabel(
+            "三维预览展示航迹与剖面带的空间关系，导出时会同步保存 VTK、CSV 和 JSON。"
+        )
+        georef3d_hint.setWordWrap(True)
+        georef3d_hint.setProperty("class", "hintText")
+        georef3d_panel_layout.addWidget(georef3d_hint)
+        self.georef3d_fig = Figure(figsize=(6.2, 4.8), dpi=100)
+        self.georef3d_canvas = FigureCanvas(self.georef3d_fig)
+        self.georef3d_ax = self.georef3d_fig.add_subplot(111, projection="3d")
+        georef3d_panel_layout.addWidget(self.georef3d_canvas)
+        self.visual_stack.addWidget(georef3d_panel)
 
         self.visual_segmented.setCurrentItem("qc_chart")
         self.visual_stack.setCurrentIndex(0)
@@ -310,6 +335,7 @@ class QualityLogPage(QWidget):
 
         self.set_airborne_qc_visualization(None)
         self.set_airborne_trajectory_visualization(None)
+        self.set_airborne_georeference_3d_visualization(None)
 
     def _wrap_text_panel(self, title: str, hint: str, text_edit: QTextEdit) -> QWidget:
         """包装摘要文本面板。"""
@@ -343,8 +369,35 @@ class QualityLogPage(QWidget):
         mapping = {
             "qc_chart": 0,
             "trajectory": 1,
+            "georef3d": 2,
         }
         self.visual_stack.setCurrentIndex(mapping.get(route_key, 0))
+
+    def _style_3d_axes(self, ax):
+        """统一三维图表主题。"""
+        palette = self._get_plot_palette()
+        ax.set_facecolor(palette["ax_face"])
+        ax.tick_params(colors=palette["text"])
+        ax.xaxis.label.set_color(palette["text"])
+        ax.yaxis.label.set_color(palette["text"])
+        ax.zaxis.label.set_color(palette["text"])
+        ax.title.set_color(palette["text"])
+        try:
+            ax.xaxis.pane.set_facecolor(palette["ax_face"])
+            ax.yaxis.pane.set_facecolor(palette["ax_face"])
+            ax.zaxis.pane.set_facecolor(palette["ax_face"])
+            ax.xaxis.pane.set_edgecolor(palette["spine"])
+            ax.yaxis.pane.set_edgecolor(palette["spine"])
+            ax.zaxis.pane.set_edgecolor(palette["spine"])
+        except Exception:
+            pass
+        try:
+            ax.xaxis._axinfo["grid"]["color"] = palette["grid"]
+            ax.yaxis._axinfo["grid"]["color"] = palette["grid"]
+            ax.zaxis._axinfo["grid"]["color"] = palette["grid"]
+        except Exception:
+            pass
+        return palette
 
     def _get_plot_palette(self) -> dict:
         """获取当前主题下的图表配色。"""
@@ -671,6 +724,184 @@ class QualityLogPage(QWidget):
         self._style_figure(self.trajectory_fig, [ax, ax_h])
         self.trajectory_fig.tight_layout()
         self.trajectory_canvas.draw_idle()
+
+    def set_airborne_georeference_3d_visualization(self, payload: dict | None):
+        """绘制三维地理参考预览。"""
+        self.georef3d_fig.clear()
+        self.georef3d_ax = self.georef3d_fig.add_subplot(111, projection="3d")
+        ax = self.georef3d_ax
+        palette = self._get_plot_palette()
+        self.georef3d_fig.patch.set_facecolor(palette["fig_face"])
+
+        if not payload:
+            ax.set_title("三维地理参考预览")
+            ax.text2D(
+                0.5,
+                0.5,
+                "暂无三维地理参考数据",
+                transform=ax.transAxes,
+                ha="center",
+                va="center",
+                color=palette["hint"],
+            )
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.set_zticks([])
+            self._style_3d_axes(ax)
+            self.georef3d_fig.subplots_adjust(left=0.05, right=0.98, bottom=0.05, top=0.92)
+            self.georef3d_canvas.draw_idle()
+            return
+
+        preview = payload.get("preview") or {}
+        x_m = np.asarray(payload.get("local_x_m", []), dtype=np.float64)
+        y_m = np.asarray(payload.get("local_y_m", []), dtype=np.float64)
+        airborne_z_m = np.asarray(payload.get("airborne_z_m", []), dtype=np.float64)
+        ground_elevation_m = payload.get("ground_elevation_m")
+        selected_trace_index = payload.get("selected_trace_index")
+
+        curtain_x = np.asarray(preview.get("curtain_x_m", []), dtype=np.float64)
+        curtain_y = np.asarray(preview.get("curtain_y_m", []), dtype=np.float64)
+        curtain_z = np.asarray(preview.get("curtain_z_m", []), dtype=np.float64)
+        amplitude = np.asarray(preview.get("amplitude", []), dtype=np.float64)
+        preview_trace_indices = np.asarray(preview.get("trace_indices", []), dtype=np.int32)
+        preview_sample_indices = np.asarray(preview.get("sample_indices", []), dtype=np.int32)
+        if (
+            curtain_x.size == 0
+            or curtain_y.size == 0
+            or curtain_z.size == 0
+            or curtain_x.shape != curtain_y.shape
+            or curtain_x.shape != curtain_z.shape
+        ):
+            self.set_airborne_georeference_3d_visualization(None)
+            return
+
+        finite_amp = amplitude[np.isfinite(amplitude)]
+        amp_min = float(preview.get("amplitude_min", float(np.min(finite_amp)) if finite_amp.size else 0.0))
+        amp_max = float(preview.get("amplitude_max", float(np.max(finite_amp)) if finite_amp.size else 1.0))
+        if not np.isfinite(amp_min) or not np.isfinite(amp_max) or amp_min == amp_max:
+            amp_min, amp_max = 0.0, 1.0
+        norm = colors.Normalize(vmin=amp_min, vmax=amp_max)
+        cmap = colormaps.get_cmap("gray")
+
+        ax.plot_surface(
+            curtain_x,
+            curtain_y,
+            curtain_z,
+            color=palette["line_primary"],
+            alpha=0.18,
+            linewidth=0,
+            shade=False,
+        )
+        if amplitude.size:
+            flat_colors = cmap(norm(amplitude))
+            ax.scatter(
+                curtain_x.reshape(-1),
+                curtain_y.reshape(-1),
+                curtain_z.reshape(-1),
+                c=flat_colors.reshape(-1, 4),
+                s=2,
+                linewidths=0,
+                alpha=0.85,
+            )
+
+        if x_m.size and y_m.size and airborne_z_m.size:
+            ax.plot(
+                x_m,
+                y_m,
+                airborne_z_m,
+                color=palette["line_success"],
+                linewidth=1.5,
+                label="航迹",
+            )
+            ax.scatter(
+                [x_m[0]],
+                [y_m[0]],
+                [airborne_z_m[0]],
+                color=palette["line_success"],
+                s=36,
+                label="起点",
+            )
+            ax.scatter(
+                [x_m[-1]],
+                [y_m[-1]],
+                [airborne_z_m[-1]],
+                color=palette["line_error"],
+                s=36,
+                label="终点",
+            )
+            if ground_elevation_m is not None:
+                ground = np.asarray(ground_elevation_m, dtype=np.float64)
+                if ground.size == x_m.size:
+                    ax.plot(
+                        x_m,
+                        y_m,
+                        ground,
+                        color=palette["line_warning"],
+                        linewidth=1.1,
+                        linestyle="--",
+                        label="地表",
+                    )
+        if (
+            selected_trace_index is not None
+            and preview_trace_indices.size
+            and x_m.size
+            and airborne_z_m.size
+        ):
+            match = np.where(preview_trace_indices == int(selected_trace_index))[0]
+            if match.size:
+                idx = int(match[0])
+                ax.scatter(
+                    [x_m[idx]],
+                    [y_m[idx]],
+                    [airborne_z_m[idx]],
+                    color=palette["line_emphasis"],
+                    s=72,
+                    marker="x",
+                    linewidths=2.0,
+                    label="当前选中",
+                )
+
+        ax.set_title("三维地理参考预览")
+        ax.set_xlabel(payload.get("x_axis_label") or "局部 X (m)")
+        ax.set_ylabel(payload.get("y_axis_label") or "局部 Y (m)")
+        ax.set_zlabel(payload.get("z_axis_label") or "等效高度/深度 (m)")
+
+        if x_m.size and y_m.size:
+            pad_x = max(float(np.nanmax(x_m) - np.nanmin(x_m)) * 0.08, 1e-6)
+            pad_y = max(float(np.nanmax(y_m) - np.nanmin(y_m)) * 0.08, 1e-6)
+            ax.set_xlim(float(np.nanmin(x_m) - pad_x), float(np.nanmax(x_m) + pad_x))
+            ax.set_ylim(float(np.nanmin(y_m) - pad_y), float(np.nanmax(y_m) + pad_y))
+        if airborne_z_m.size:
+            z_min = float(np.nanmin(curtain_z))
+            z_max = float(np.nanmax(np.concatenate([curtain_z.reshape(-1), airborne_z_m])))
+            z_pad = max((z_max - z_min) * 0.08, 1e-6)
+            ax.set_zlim(z_min - z_pad, z_max + z_pad)
+
+        ax.view_init(elev=24, azim=-58)
+        handles, labels = ax.get_legend_handles_labels()
+        if handles:
+            ax.legend(loc="upper left")
+        if preview_sample_indices.size and preview_trace_indices.size:
+            ax.text2D(
+                0.02,
+                0.02,
+                f"预览网格: {preview_trace_indices.size}x{preview_sample_indices.size}",
+                transform=ax.transAxes,
+                color=palette["hint"],
+            )
+        quality_flags = payload.get("quality_flags") or []
+        if quality_flags:
+            ax.text2D(
+                0.02,
+                0.08,
+                " | ".join(str(item) for item in quality_flags[:4]),
+                transform=ax.transAxes,
+                color=palette["hint"],
+            )
+
+        self._style_3d_axes(ax)
+        self.georef3d_fig.subplots_adjust(left=0.05, right=0.98, bottom=0.05, top=0.92)
+        self.georef3d_canvas.draw_idle()
 
     def _on_trajectory_click(self, event):
         """根据点击位置选中最近的航迹点。"""

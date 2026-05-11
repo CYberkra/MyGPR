@@ -95,6 +95,7 @@
 - 对 gprMax 正演数据，必须记录真实结构、目标区、背景区、噪声区，并输出 manual vs auto 的结构保持、背景抑制、深部补偿、目标显著性指标。
 - gprMax 论文级验证默认使用 `airborne_*` 场景族，不再使用贴地 toy 场景作为 UAV-GPR 证据。每个 airborne 场景必须显式记录空气层、天线离地高度、Tx/Rx 航迹、直达波、air-ground 反射、地下目标/背景 ROI 和晚时窗噪声 ROI。
 - `airborne_height_variation_cylinder_v1` 必须逐道定义 Tx/Rx 高度，并同步输出 `trace_timestamps.csv`、`rtk.csv`、`imu.csv`、`altimeter.csv`，用于后续运动补偿验证。该场景不能用 `#src_steps/#rx_steps` 伪装非线性高度变化；当前默认用 gprMax `#python` + `current_model_run` 在单个 `.in` 中逐道定义高度，便于使用 `-n`、`-restart` 和未来 MPI task farm。
+- MyGPR 的质量页现在增加了三维地理参考预览，按“航迹 + 剖面带”输出 `VTK + CSV + JSON`，用于把轨迹、飞行高度和剖面空间关系一起保留下来；这不是完整体素重建，但足以作为 UAV-GPR 的地理参考证据和导出备份。
 
 ## MyGPR 默认实现链
 
