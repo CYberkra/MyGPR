@@ -233,18 +233,26 @@ def test_find_out_files_orders_per_trace_height_variation_outputs(tmp_path: Path
     ]
 
 
-def test_standard_report_pipeline_uses_sec_gain_as_interpretation_default():
+def test_standard_report_pipeline_covers_non_motion_uavgpr_flow():
     pipeline = report._resolve_pipeline("uav_gpr_experience_baseline_v1")
 
     assert "sec_gain" in pipeline
     assert "agcGain" not in pipeline
+    assert "motion_compensation_v2" not in pipeline
     assert pipeline == [
         "set_zero_time",
         "dewow",
+        "frequency_filter_1d",
         "subtracting_average_2D",
         "sec_gain",
-        "svd_subspace",
+        "wavelet_svd",
     ]
+    manual_params = report._resolve_manual_params(
+        pipeline,
+        "uav_gpr_experience_baseline_v1",
+    )
+    assert manual_params["frequency_filter_1d"]["high_freq_mhz"] == 3000.0
+    assert manual_params["wavelet_svd"]["rank_end"] == 20
 
 
 def test_zero_time_align_policy_uses_auto_params_for_both_branches(monkeypatch):

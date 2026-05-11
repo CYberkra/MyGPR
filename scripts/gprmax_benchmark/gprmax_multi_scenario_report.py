@@ -59,11 +59,27 @@ DEFAULT_SCENARIO_FAMILY = "airborne"
 REPORT_PIPELINE_ORDER = [
     "set_zero_time",
     "dewow",
+    "frequency_filter_1d",
     "subtracting_average_2D",
     "sec_gain",
-    "svd_subspace",
+    "wavelet_svd",
 ]
-REPORT_MANUAL_PARAM_OVERRIDES: dict[str, dict[str, Any]] = {}
+REPORT_MANUAL_PARAM_OVERRIDES: dict[str, dict[str, Any]] = {
+    "frequency_filter_1d": {
+        "filter_type": "bandpass",
+        "low_freq_mhz": 10.0,
+        "high_freq_mhz": 3000.0,
+        "taper_ratio": 0.08,
+    },
+    "wavelet_svd": {
+        "wavelet": "db4",
+        "levels": 2,
+        "threshold": 0.05,
+        "threshold_strategy": "mad_universal",
+        "rank_start": 1,
+        "rank_end": 20,
+    },
+}
 ZERO_TIME_ALIGN_NOTE = (
     "本报告将人工分支零时参数对齐自动结果，避免经验 5.0ns "
     "在小域正演数据中切掉有效结构。"
