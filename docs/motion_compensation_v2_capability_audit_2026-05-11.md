@@ -162,15 +162,18 @@ scenarios/airborne_height_variation_cylinder_v1
 
 ## 当前不足
 
-### P1：缺少论文级运动补偿验证报告
+### 已补入口：运动补偿 benchmark 报告脚本
 
-当前只有单元测试和一次实际调用检查，还缺少专门报告：
+已新增 `scripts/gprmax_benchmark/motion_compensation_v2_benchmark_report.py`，用于生成补偿前后 HTML benchmark 报告。当前报告入口包含：
 
-- 补偿前后 air-ground reflection 平直度。
-- 目标 apex 时序稳定性。
-- 目标 ROI 保真度。
-- 背景/噪声变化。
-- 时移、振幅倍率、姿态足迹曲线可视化。
+- 补偿前后 B-scan。
+- 补偿差异图。
+- AGL 高度曲线。
+- 高度时移样点曲线。
+- 轨迹累计距离曲线。
+- `input_quality`、`quality_flags`、`runtime_warnings`。
+
+它既可以读取已有 gprMax scenario 目录中的 `mygpr_bscan.csv` 与 sidecars，也可以用 synthetic airborne height-variation 样本做快速 smoke。后续论文级报告仍需继续加入 air-ground reflection 平直度、目标 apex 稳定性、目标 ROI 保真度和背景/噪声变化指标。
 
 ### P1：姿态/APC 仍是简化模型
 
@@ -212,8 +215,7 @@ V2 现在会在 `input_quality` 和 `runtime_warnings` 中报告：
 
 ## 建议下一步
 
-1. 新建 `motion_compensation_v2_benchmark_report.py`。
-2. 用 `airborne_height_variation_cylinder_v1` 生成补偿前后 HTML 报告。
-3. 加入 air-ground reflection 平直度、目标 ROI 保真度、时移曲线、振幅倍率曲线。
-4. 在报告中展示有效时移限幅、clamp 比例、时间戳 gap 和轨迹 speed outlier。
-5. 设计 V3 外参配置：RTK/IMU/APC lever arm + mount angle。
+1. 用 `airborne_height_variation_cylinder_v1` 的真实 gprMax 输出目录运行 `motion_compensation_v2_benchmark_report.py`。
+2. 加入 air-ground reflection 平直度、目标 ROI 保真度、目标 apex 稳定性和背景/噪声变化指标。
+3. 在报告中展示有效时移限幅、clamp 比例、时间戳 gap 和轨迹 speed outlier。
+4. 设计 V3 外参配置：RTK/IMU/APC lever arm + mount angle。
