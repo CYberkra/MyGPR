@@ -7,6 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from scripts.gprmax_benchmark import gprmax_multi_scenario_report as report
 from scripts.gprmax_benchmark.gprmax_multi_scenario_report import (
@@ -24,6 +25,7 @@ def test_default_scenario_definitions_cover_airborne_uav_gpr_cases():
 
     assert {
         "airborne_single_cylinder_v1",
+        "airborne_hyperbola_demo_v1",
         "airborne_double_cylinder_v1",
         "airborne_layered_interface_v1",
         "airborne_air_crack_v1",
@@ -81,6 +83,34 @@ def test_airborne_geometry_satisfies_gprmax_safety_margins():
         )
         assert min_x >= 0.06
         assert definition.domain_m[0] - max_x >= 0.06
+
+
+def test_hyperbola_demo_centers_target_within_default_airborne_aperture():
+    scenario = build_scenario_definitions()["airborne_hyperbola_demo_v1"]
+    target = scenario.targets[0]
+    positions = AIRBORNE_GEOMETRY.trace_positions(scenario.default_runs)
+    midpoints = np.asarray(
+        [
+            (float(pos["source"][0]) + float(pos["receiver"][0])) / 2.0  # type: ignore[index]
+            for pos in positions
+        ],
+        dtype=np.float64,
+    )
+    target_x = float(target["center_m"][0])
+
+    assert abs(target_x - float(midpoints.mean())) <= AIRBORNE_GEOMETRY.trace_step_m
+    assert target_x - float(midpoints.min()) >= 0.18
+    assert float(midpoints.max()) - target_x >= 0.18
+    assert float(target["center_m"][1]) <= scenario.ground_top_y_m - 0.08
+    assert scenario.antenna_height_m == pytest.approx(0.08)
+    assert scenario.source_start_m[1] == pytest.approx(
+        scenario.ground_top_y_m + scenario.antenna_height_m
+    )
+    assert scenario.targets[0]["radius_m"] == pytest.approx(0.01)
+    assert "#material: 3 0.0002 1 0 very_dry_sand" in scenario.model_in_text
+    assert "#cylinder: 0.370 0.185 0 0.370 0.185 0.002 0.010 pec" in (
+        scenario.model_in_text
+    )
 
 
 def test_airborne_gprmax_inputs_distinguish_fixed_and_height_varying_geometry(tmp_path: Path):

@@ -831,6 +831,7 @@ def write_gprmax_inputs(
 ) -> list[Path]:
     """Write one fixed-height input or per-trace inputs for variable-height scenes."""
     scenario_dir.mkdir(parents=True, exist_ok=True)
+    geometry = _airborne_geometry_for_definition(definition)
     if definition.uses_scripted_inputs:
         model_input = scenario_dir / f"{definition.scenario_id}.in"
         model_input.write_text(
@@ -843,7 +844,7 @@ def write_gprmax_inputs(
         model_input.write_text(definition.model_in_text, encoding="utf-8")
         return [model_input]
 
-    positions = AIRBORNE_GEOMETRY.trace_positions(
+    positions = geometry.trace_positions(
         runs,
         variable_height=definition.height_variation,
     )
@@ -855,6 +856,7 @@ def write_gprmax_inputs(
             materials=_model_material_lines(definition),
             bodies=_model_body_lines(definition),
             use_steps=False,
+            geometry=geometry,
             source_m=position["source"],  # type: ignore[arg-type]
             receiver_m=position["receiver"],  # type: ignore[arg-type]
         )
@@ -939,6 +941,17 @@ def write_synthetic_sidecars(
     return sidecars
 
 
+def _airborne_geometry_for_definition(definition: ScenarioDefinition) -> AirborneGeometry:
+    """Resolve the per-scenario airborne geometry used for inputs and metadata."""
+    if definition.scenario_family != "airborne":
+        return AIRBORNE_GEOMETRY
+    if definition.antenna_height_m is None:
+        return AIRBORNE_GEOMETRY
+    if abs(float(definition.antenna_height_m) - float(AIRBORNE_GEOMETRY.antenna_height_m)) <= 1.0e-12:
+        return AIRBORNE_GEOMETRY
+    return replace(AIRBORNE_GEOMETRY, antenna_height_m=float(definition.antenna_height_m))
+
+
 def build_synthetic_trace_metadata(
     definition: ScenarioDefinition,
     *,
@@ -947,7 +960,7 @@ def build_synthetic_trace_metadata(
     """Return deterministic airborne sidecar-like metadata for each trace."""
     if definition.scenario_family != "airborne":
         return {}
-    geometry = AIRBORNE_GEOMETRY
+    geometry = _airborne_geometry_for_definition(definition)
     positions = geometry.trace_positions(
         trace_count,
         variable_height=definition.height_variation,
@@ -1769,6 +1782,7 @@ def _airborne_scenario_definitions() -> dict[str, ScenarioDefinition]:
     """Build the default air-launched UAV-GPR validation scene family."""
     scenarios = [
         _airborne_single_cylinder_scenario(),
+        _airborne_hyperbola_demo_scenario(),
         _airborne_double_cylinder_scenario(),
         _airborne_layered_interface_scenario(),
         _airborne_air_crack_scenario(),
@@ -1848,6 +1862,44 @@ def _airborne_single_cylinder_scenario() -> ScenarioDefinition:
             _airborne_ground_box("dry_silty_sand"),
             "#cylinder: 0.360 0.175 0 0.360 0.175 0.002 0.020 pec",
         ],
+    )
+
+
+def _airborne_hyperbola_demo_scenario() -> ScenarioDefinition:
+    materials = [
+        {"name": "very_dry_sand", "relative_permittivity": 3.0, "conductivity_s_per_m": 0.0002},
+        {"name": "metal_cylinder", "material": "pec"},
+    ]
+    targets = [
+        {
+            "target_id": "airborne_centered_hyperbola_cylinder",
+            "type": "metal_cylinder",
+            "center_m": [0.370, 0.185, 0.0],
+            "radius_m": 0.010,
+            "relative_permittivity": 3.0,
+        }
+    ]
+    return _airborne_definition(
+        scenario_id="airborne_hyperbola_demo_v1",
+        label="UAV-GPR 完整双曲线演示",
+        description=(
+            "居中单个小型 PEC 圆柱演示场景，目标是让 96 道标准孔径内能看到较完整的双曲线两翼。"
+        ),
+        structure_notes=[
+            "目标位于 x=0.370 m，接近 96 道 Tx/Rx 中点孔径中心。",
+            "目标位于 y=0.185 m，仍位于地表下方且与地表反射保持可分辨时间间隔。",
+            "目标采用 1 cm 半径 PEC 圆柱，尽量接近点目标，以增强双曲线边缘可见性。",
+            "介质采用极干低损耗砂土，削弱地表反射支配性，便于展示完整双曲线形态。",
+        ],
+        materials=materials,
+        targets=targets,
+        layers=[],
+        model_materials=["#material: 3 0.0002 1 0 very_dry_sand"],
+        bodies=[
+            _airborne_ground_box("very_dry_sand"),
+            "#cylinder: 0.370 0.185 0 0.370 0.185 0.002 0.010 pec",
+        ],
+        antenna_height_m=0.080,
     )
 
 
@@ -2039,8 +2091,11 @@ def _airborne_definition(
     layers: list[dict[str, Any]],
     model_materials: list[str],
     bodies: list[str],
+    antenna_height_m: float | None = None,
 ) -> ScenarioDefinition:
     geometry = AIRBORNE_GEOMETRY
+    if antenna_height_m is not None:
+        geometry = replace(geometry, antenna_height_m=float(antenna_height_m))
     warnings = geometry.validate(runs=geometry.default_runs, targets=targets)
     return ScenarioDefinition(
         scenario_id=scenario_id,
@@ -2052,6 +2107,7 @@ def _airborne_definition(
             materials=model_materials,
             bodies=bodies,
             use_steps=True,
+            geometry=geometry,
         ),
         materials=materials,
         targets=targets,
@@ -2307,10 +2363,11 @@ def _airborne_model_text(
     materials: list[str],
     bodies: list[str],
     use_steps: bool,
+    geometry: AirborneGeometry | None = None,
     source_m: tuple[float, float, float] | None = None,
     receiver_m: tuple[float, float, float] | None = None,
 ) -> str:
-    geometry = AIRBORNE_GEOMETRY
+    geometry = geometry or AIRBORNE_GEOMETRY
     source = source_m or geometry.source_start_m
     receiver = receiver_m or geometry.receiver_start_m
     lines = [
