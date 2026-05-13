@@ -25,7 +25,7 @@
 - [x] Register the method in preprocessing so the normal page can use it.
 - [x] Add kernel and GUI/order regression tests.
 - [x] Verify with focused pytest and `python scripts/preflight_check.py`.
-- [ ] Create a normal Git checkpoint.
+- [x] Create a normal Git checkpoint.
 
 ### Task 2: Trace QC
 
@@ -38,6 +38,7 @@
 - [x] Add no-op-by-default trace quality controls for empty-trace and high-energy trace detection.
 - [x] Return trace metadata updates describing removed/muted trace indices.
 - [x] Keep destructive deletion opt-in; default mode should mute or mark, not remove.
+- [x] Create a normal Git checkpoint.
 
 ### Task 3: Equidistant Trace Resampling
 
@@ -49,3 +50,4 @@
 - [x] Reuse existing trace-distance metadata helpers.
 - [x] Add explicit method wrapping distance-axis resampling for GUI/CLI workflows.
 - [x] Preserve sidecar metadata through resampling.
+- [x] Create a normal Git checkpoint.
