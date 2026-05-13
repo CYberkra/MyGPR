@@ -210,6 +210,7 @@ pytest
   - no checkpoint pushes to a remote unless the user explicitly asks.
 - `scripts/git_checkpoint.py` must be called with explicit `--files` pathspecs. It must not auto-stage unrelated dirty files, and it should abort if pre-existing staged changes are present.
 - Meeting progress notes live at `D:\ClawX-Data\Obsidian\uav_gpr\10-项目\组会进展\组会进展记录.md`. Use `--meeting-progress`, `--meeting-result`, `--meeting-risk`, and `--meeting-next` on important checkpoints when concise group-meeting recall points are known.
+- Meeting progress recording is event-driven by default. Prefer writing notes immediately after meaningful progress, important checkpoints, durable conclusions, or changed risks. Do not create daily scheduled summary notes by default, because empty or low-signal daily entries make the vault harder to review. Only add a timed daily/weekly summary if the user explicitly asks for that separate automation.
 - If the user says `组会结束` or `记录组会进展`, call `python scripts/meeting_progress_note.py --summary ...` and fill it from the current chat/Git context. Keep entries short and readable for quick review.
 - Good normal example:
   - `python scripts/git_checkpoint.py --summary "feat: add data-context aware defaults" --files core/data_context.py core/gpr_io.py tests/test_data_context.py --verify "pytest tests/test_data_context.py -q" --verify "python scripts/preflight_check.py"`
