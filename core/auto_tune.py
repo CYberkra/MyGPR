@@ -604,6 +604,30 @@ def _build_candidate_trials(
                 if gain_max > gain_min:
                     trials.append({"gain_min": gain_min, "gain_max": gain_max})
             return _dedupe_candidates(trials)
+        if method_key == "energy_decay_gain":
+            strengths = config.get("strength", [0.5, 0.8, 1.0, 1.2])
+            if not isinstance(strengths, list):
+                strengths = [strengths]
+            smoothing_values = config.get("smoothing_samples", [15, 31, 61, 101])
+            if not isinstance(smoothing_values, list):
+                smoothing_values = [smoothing_values]
+            max_gain_values = config.get("max_gain", [4.0, 6.0, 8.0, 12.0])
+            if not isinstance(max_gain_values, list):
+                max_gain_values = [max_gain_values]
+            trials = []
+            for strength, smoothing, max_gain in itertools.product(
+                strengths,
+                smoothing_values,
+                max_gain_values,
+            ):
+                trials.append(
+                    {
+                        "strength": float(strength),
+                        "smoothing_samples": int(smoothing),
+                        "max_gain": float(max_gain),
+                    }
+                )
+            return _dedupe_candidates(trials)
     if family == "impulse":
         values = _build_impulse_windows(
             data.shape[1], context, config, stage=stage, budget=stage_budget

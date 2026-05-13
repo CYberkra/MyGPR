@@ -96,6 +96,23 @@ def test_auto_tune_sec_gain_returns_gain_parameters():
     assert result["profiles"]["aggressive"]["params"]
 
 
+def test_auto_tune_energy_decay_gain_returns_gain_parameters():
+    raw = _build_test_profile()
+    result = auto_tune_method(
+        raw,
+        "energy_decay_gain",
+        base_params={"strength": 1.0, "smoothing_samples": 31, "max_gain": 8.0},
+        search_mode="fast",
+    )
+
+    assert result["family"] == "gain"
+    assert "strength" in result["best_params"]
+    assert "smoothing_samples" in result["best_params"]
+    assert "max_gain" in result["best_params"]
+    assert len(result["all_trials"]) >= 4
+    assert np.isfinite(result["best_score"])
+
+
 def test_auto_tune_background_scans_more_candidates():
     raw = _build_test_profile(traces=256)
     result = auto_tune_method(
