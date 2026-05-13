@@ -18,6 +18,7 @@ from PythonModule.frequency_filter_1d import method_frequency_filter_1d
 from PythonModule.hankel_svd import method_hankel_svd
 from PythonModule.kirchhoff_migration import method_kirchhoff_migration
 from PythonModule.stolt_migration import method_stolt_migration
+from PythonModule.time_cut import method_time_cut
 from PythonModule.time_to_depth import method_time_to_depth
 from PythonModule.sec_gain import method_sec_gain
 from PythonModule.sliding_average import method_sliding_average
@@ -147,6 +148,37 @@ PROCESSING_METHODS = {
             "backup_samples": [2, 4, 6, 8],
             "search_ratio": 0.35,
         },
+    },
+    "time_cut": {
+        "name": "2.1 time_cut (time/depth window crop)",
+        "type": "local",
+        "module": "time_cut",
+        "func": method_time_cut,
+        "params": [
+            {
+                "name": "mode",
+                "label": "Mode",
+                "type": "str",
+                "default": "remove_below",
+                "tooltip": "remove_below、remove_above 或 keep_range",
+            },
+            {
+                "name": "time_start_ns",
+                "label": "Time start (ns)",
+                "type": "float",
+                "default": 0.0,
+                "min": 0.0,
+                "max": 100000.0,
+            },
+            {
+                "name": "time_end_ns",
+                "label": "Time end (ns, 0=all)",
+                "type": "float",
+                "default": 0.0,
+                "min": 0.0,
+                "max": 100000.0,
+            },
+        ],
     },
     "agcGain": {
         "name": "3 agcGain (AGC correction)",
@@ -1244,6 +1276,12 @@ METHOD_METADATA = {
         "visibility": "public",
         "display_name": "零时矫正",
     },
+    "time_cut": {
+        "category": "time_correction",
+        "maturity": "stable",
+        "visibility": "public",
+        "display_name": "时间窗裁剪",
+    },
     "agcGain": {
         "category": "gain",
         "maturity": "stable",
@@ -1410,6 +1448,7 @@ METHOD_DISPLAY_NAMES = {
 
 PREFERRED_METHOD_ORDER = [
     "set_zero_time",
+    "time_cut",
     "dewow",
     "subtracting_average_2D",
     "median_background_2D",
@@ -1443,6 +1482,7 @@ METHOD_TAGS = {
     "agcGain": "备选",
     "dewow": "推荐",
     "set_zero_time": "推荐",
+    "time_cut": "备选",
     "svd_bg": "备选",
     "fk_filter": "实验",
     "frequency_filter_1d": "推荐",
@@ -1478,6 +1518,7 @@ METHOD_CATEGORY_LABELS = {
 
 AUTO_TUNE_STAGE_BY_METHOD = {
     "set_zero_time": "zero_time",
+    "time_cut": "preprocess",
     "dewow": "drift",
     "subtracting_average_2D": "background",
     "median_background_2D": "background",

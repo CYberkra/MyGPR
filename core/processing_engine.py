@@ -76,6 +76,7 @@ def prepare_runtime_params(
         method_id
         in {
             "set_zero_time",
+            "time_cut",
             "agcGain",
             "frequency_filter_1d",
             "subtracting_average_2D",

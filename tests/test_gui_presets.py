@@ -24,7 +24,7 @@ from core.preset_profiles import (
     GUI_PRESETS_V1,
     RECOMMENDED_RUN_PROFILES,
 )
-from core.workflow_data import QUICK_PRESETS
+from core.workflow_data import METHOD_CATEGORIES, QUICK_PRESETS
 from ui.gui_method_browser import MethodBrowserTree
 
 
@@ -964,10 +964,28 @@ def test_basic_flow_background_params_show_time_range_controls():
         app.processEvents()
 
 
+def test_time_cut_is_public_preprocessing_method_with_common_params():
+    app = _get_app()
+    win = GPRGuiQt()
+    try:
+        win.page_basic.set_method_by_key("time_cut")
+
+        assert "time_cut" in get_public_method_keys()
+        assert "time_cut" in METHOD_CATEGORIES["preprocessing"]["methods"]
+        assert "mode" in win.page_basic.param_vars
+        assert "time_start_ns" in win.page_basic.param_vars
+        assert "time_end_ns" in win.page_basic.param_vars
+        assert PROCESSING_METHODS["time_cut"]["category"] == "time_correction"
+    finally:
+        win.close()
+        app.processEvents()
+
+
 def test_public_method_order_follows_processing_chain():
     keys = get_public_method_keys()
     expected_sequence = [
         "set_zero_time",
+        "time_cut",
         "dewow",
         "subtracting_average_2D",
         "median_background_2D",

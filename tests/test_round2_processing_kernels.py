@@ -12,11 +12,13 @@ from core.gprpy_compat import (
     apply_gprpy_dewow,
     apply_gprpy_rem_mean_trace,
 )
+from core.processing_engine import prepare_runtime_params, run_processing_method
 from PythonModule.dewow import method_dewow
 from PythonModule.hankel_svd import method_hankel_svd
 from PythonModule.rpca_background import method_rpca_background
 from PythonModule.sec_gain import method_sec_gain
 from PythonModule.set_zero_time import method_set_zero_time
+from PythonModule.time_cut import method_time_cut
 from PythonModule.wavelet_2d import method_wavelet_2d
 from PythonModule.wavelet_svd import method_wavelet_svd
 from PythonModule.wnnm_placeholder import method_wnnm_placeholder
@@ -61,6 +63,57 @@ def test_method_set_zero_time_shifts_up_and_zero_fills_tail():
     assert meta["shift_samples"] == 2
     assert meta["new_zero_time"] == 20.0
     assert meta["time_step_s"] == 10e-9
+
+
+def test_method_time_cut_removes_below_selected_time():
+    raw = np.arange(40, dtype=np.float32).reshape(10, 4)
+
+    result, meta = method_time_cut(
+        raw,
+        mode="remove_below",
+        time_end_ns=40.0,
+        time_window_ns=100.0,
+    )
+
+    assert np.array_equal(result, raw[:4, :])
+    assert meta["time_start_idx"] == 0
+    assert meta["time_end_idx"] == 4
+    assert meta["output_samples"] == 4
+    assert meta["header_info_updates"]["total_time_ns"] == 40.0
+
+
+def test_method_time_cut_keeps_middle_range():
+    raw = np.arange(40, dtype=np.float32).reshape(10, 4)
+
+    result, meta = method_time_cut(
+        raw,
+        mode="keep_range",
+        time_start_ns=20.0,
+        time_end_ns=60.0,
+        time_window_ns=100.0,
+    )
+
+    assert np.array_equal(result, raw[2:6, :])
+    assert meta["time_start_idx"] == 2
+    assert meta["time_end_idx"] == 6
+    assert meta["header_info_updates"]["time_cut_offset_ns"] == 20.0
+
+
+def test_time_cut_runtime_params_use_header_total_time_ns():
+    raw = np.arange(40, dtype=np.float32).reshape(10, 4)
+    params = prepare_runtime_params(
+        "time_cut",
+        {"mode": "remove_below", "time_end_ns": 40.0},
+        {"total_time_ns": 100.0},
+        None,
+        raw.shape,
+    )
+
+    result, meta = run_processing_method(raw, "time_cut", params)
+
+    assert np.array_equal(result, raw[:4, :])
+    assert meta["time_end_idx"] == 4
+    assert meta["header_info_updates"]["total_time_ns"] == 40.0
 
 
 def test_method_sec_gain_returns_metadata_dict_and_curve():
