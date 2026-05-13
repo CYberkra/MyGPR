@@ -37,7 +37,7 @@
 - [x] Add `constant`, `peak`, and `rms` scaling modes.
 - [x] Keep constant scale explicit and normalization guarded by epsilon.
 - [x] Register as a public gain method.
-- [ ] Verify and create a normal Git checkpoint.
+- [x] Verify and create a normal Git checkpoint.
 
 ### Task 3: Hilbert Envelope
 
@@ -48,7 +48,7 @@
 - Test: `tests/test_round2_processing_kernels.py`
 - Test: `tests/test_gui_presets.py`
 
-- [ ] Compute trace-wise analytic signal envelope along the sample axis.
-- [ ] Support optional normalization and log compression for display/report use.
-- [ ] Register as a public attribute-analysis method instead of denoising, so denoise auto-tune contracts stay stable.
-- [ ] Verify and create a normal Git checkpoint.
+- [x] Compute trace-wise analytic signal envelope along the sample axis.
+- [x] Support optional normalization and log compression for display/report use.
+- [x] Register as a public attribute-analysis method instead of denoising, so denoise auto-tune contracts stay stable.
+- [x] Verify and create a normal Git checkpoint.

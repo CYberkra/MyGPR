@@ -61,6 +61,13 @@ METHOD_CATEGORIES = {
         "description": "结构化去噪和信号提纯",
         "methods": ["hankel_svd", "svd_subspace", "wavelet_2d", "wavelet_svd"],
     },
+    "attribute_analysis": {
+        "id": "attribute_analysis",
+        "name": "属性分析",
+        "icon": "〰",
+        "description": "包络、瞬时属性和解释辅助",
+        "methods": ["hilbert_envelope"],
+    },
     "migration": {
         "id": "migration",
         "name": "迁移与标定",

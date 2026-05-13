@@ -16,6 +16,7 @@ from PythonModule.svd_background import method_svd_background
 from PythonModule.fk_filter import method_fk_filter
 from PythonModule.frequency_filter_1d import method_frequency_filter_1d
 from PythonModule.hankel_svd import method_hankel_svd
+from PythonModule.hilbert_envelope import method_hilbert_envelope
 from PythonModule.kirchhoff_migration import method_kirchhoff_migration
 from PythonModule.stolt_migration import method_stolt_migration
 from PythonModule.time_cut import method_time_cut
@@ -722,6 +723,25 @@ PROCESSING_METHODS = {
             "rank_start": [1, 2],
             "rank_end": [8, 12, 16, 20, 24],
         },
+    },
+    "hilbert_envelope": {
+        "name": "Hilbert envelope",
+        "type": "local",
+        "func": method_hilbert_envelope,
+        "params": [
+            {
+                "name": "normalize",
+                "label": "Normalize",
+                "type": "bool",
+                "default": False,
+            },
+            {
+                "name": "log_compress",
+                "label": "Log compress",
+                "type": "bool",
+                "default": False,
+            },
+        ],
     },
     "rpca_background": {
         "name": "RPCA背景抑制",
@@ -1499,6 +1519,12 @@ METHOD_METADATA = {
         "visibility": "public",
         "display_name": "Wavelet-SVD 复合去噪",
     },
+    "hilbert_envelope": {
+        "category": "attribute_analysis",
+        "maturity": "stable",
+        "visibility": "public",
+        "display_name": "Hilbert 包络",
+    },
     "rpca_background": {
         "category": "background_suppression",
         "maturity": "experimental",
@@ -1619,6 +1645,7 @@ PREFERRED_METHOD_ORDER = [
     "svd_subspace",
     "wavelet_2d",
     "wavelet_svd",
+    "hilbert_envelope",
     "running_average_2D",
     "motion_compensation_height",
     "motion_compensation_speed",
@@ -1649,6 +1676,7 @@ METHOD_TAGS = {
     "svd_subspace": "实验",
     "wavelet_2d": "实验",
     "wavelet_svd": "实验",
+    "hilbert_envelope": "推荐",
     "stolt_migration": "实验",
     "kirchhoff_migration": "实验",
     "sliding_avg": "实验",
@@ -1673,6 +1701,7 @@ METHOD_CATEGORY_LABELS = {
     "depth_conversion": "时间深度转换",
     "motion_compensation": "运动补偿",
     "quality_control": "质量控制",
+    "attribute_analysis": "属性分析",
     "experimental": "实验功能",
 }
 

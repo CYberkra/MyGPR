@@ -22,6 +22,7 @@ from PythonModule.amplitude_scale import method_amplitude_scale
 from PythonModule.equidistant_trace_resample import method_equidistant_trace_resample
 from PythonModule.energy_decay_gain import method_energy_decay_gain
 from PythonModule.hankel_svd import method_hankel_svd
+from PythonModule.hilbert_envelope import method_hilbert_envelope
 from PythonModule.rpca_background import method_rpca_background
 from PythonModule.sec_gain import method_sec_gain
 from PythonModule.set_zero_time import method_set_zero_time
@@ -300,6 +301,31 @@ def test_method_amplitude_scale_peak_and_rms_normalization():
     assert np.isclose(np.sqrt(np.mean(rms_result.astype(np.float64) ** 2)), 1.0)
     assert peak_meta["effective_scale"] == 0.25
     assert rms_meta["mode"] == "rms"
+
+
+def test_method_hilbert_envelope_returns_trace_envelope():
+    samples = 128
+    t = np.linspace(0.0, 2.0 * np.pi, samples, endpoint=False, dtype=np.float64)
+    raw = np.column_stack([np.cos(t), 2.0 * np.cos(t)]).astype(np.float32)
+
+    result, meta = method_hilbert_envelope(raw)
+
+    assert result.shape == raw.shape
+    assert result.dtype == np.float32
+    assert np.allclose(result[:, 0], 1.0, atol=1e-5)
+    assert np.allclose(result[:, 1], 2.0, atol=1e-5)
+    assert meta["method"] == "hilbert_envelope"
+
+
+def test_method_hilbert_envelope_normalize_and_log_compress():
+    raw = np.array([[1.0, 2.0], [-1.0, -2.0]], dtype=np.float32)
+
+    result, meta = method_hilbert_envelope(raw, normalize=True, log_compress=True)
+
+    assert np.isfinite(result).all()
+    assert float(np.max(result)) <= float(np.log1p(1.0) + 1e-6)
+    assert meta["normalize"] is True
+    assert meta["log_compress"] is True
 
 
 def test_method_hankel_svd_keeps_contract_and_ignores_legacy_batch_kwarg():

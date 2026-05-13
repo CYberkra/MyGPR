@@ -1051,6 +1051,22 @@ def test_amplitude_scale_is_public_gain_method_with_common_params():
         app.processEvents()
 
 
+def test_hilbert_envelope_is_public_attribute_analysis_method():
+    app = _get_app()
+    win = GPRGuiQt()
+    try:
+        win.page_basic.set_method_by_key("hilbert_envelope")
+
+        assert "hilbert_envelope" in get_public_method_keys()
+        assert "hilbert_envelope" in METHOD_CATEGORIES["attribute_analysis"]["methods"]
+        assert get_method_category_label("hilbert_envelope") == "属性分析"
+        assert "normalize" in win.page_basic.param_vars
+        assert "log_compress" in win.page_basic.param_vars
+    finally:
+        win.close()
+        app.processEvents()
+
+
 def test_public_method_order_follows_processing_chain():
     keys = get_public_method_keys()
     expected_sequence = [
@@ -1074,6 +1090,7 @@ def test_public_method_order_follows_processing_chain():
         "hankel_svd",
         "svd_subspace",
         "wavelet_svd",
+        "hilbert_envelope",
         "running_average_2D",
         "stolt_migration",
         "kirchhoff_migration",
