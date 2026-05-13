@@ -943,6 +943,27 @@ def test_basic_flow_method_combo_shows_category_prefix():
         app.processEvents()
 
 
+def test_basic_flow_background_params_show_time_range_controls():
+    app = _get_app()
+    win = GPRGuiQt()
+    try:
+        win.page_basic.set_method_by_key("subtracting_average_2D")
+
+        assert "ntraces" in win.page_basic.param_vars
+        assert "time_start_ns" in win.page_basic.param_vars
+        assert "time_end_ns" in win.page_basic.param_vars
+
+        start_edit, start_meta = win.page_basic.param_vars["time_start_ns"]
+        end_edit, end_meta = win.page_basic.param_vars["time_end_ns"]
+        assert start_meta["label"] == "Time start (ns)"
+        assert end_meta["label"] == "Time end (ns, 0=all)"
+        assert start_edit.text() == "0.0"
+        assert end_edit.text() == "0.0"
+    finally:
+        win.close()
+        app.processEvents()
+
+
 def test_public_method_order_follows_processing_chain():
     keys = get_public_method_keys()
     expected_sequence = [

@@ -9,6 +9,10 @@ from typing import Any, Dict, Optional, Tuple
 import numpy as np
 
 from core.methods_registry import PROCESSING_METHODS
+from core.background_time_range import (
+    apply_time_range_to_result,
+    resolve_time_range_selection,
+)
 from core.gprpy_compat import apply_gprpy_agc_gain, apply_gprpy_rem_mean_trace
 from core.runtime_warnings import build_runtime_warning, merge_runtime_warnings
 
@@ -69,7 +73,14 @@ def prepare_runtime_params(
     samples = max(1, int(data_shape[0]))
 
     if (
-        method_id in {"set_zero_time", "agcGain", "frequency_filter_1d"}
+        method_id
+        in {
+            "set_zero_time",
+            "agcGain",
+            "frequency_filter_1d",
+            "subtracting_average_2D",
+            "median_background_2D",
+        }
         and "time_step_s" not in runtime_params
     ):
         total_time_ns = None
@@ -80,6 +91,20 @@ def prepare_runtime_params(
             runtime_params["time_step_s"] = time_step_s
             if method_id == "frequency_filter_1d":
                 runtime_params.setdefault("sample_rate_hz", 1.0 / time_step_s)
+            if method_id in {"subtracting_average_2D", "median_background_2D"}:
+                runtime_params.setdefault("time_window_ns", float(total_time_ns))
+
+    if (
+        method_id in {"subtracting_average_2D", "median_background_2D"}
+        and "time_window_ns" not in runtime_params
+        and "time_step_s" in runtime_params
+    ):
+        try:
+            runtime_params["time_window_ns"] = (
+                float(runtime_params["time_step_s"]) * 1.0e9 * samples
+            )
+        except (TypeError, ValueError):
+            pass
 
     needs_motion_runtime = _requires_motion_runtime_context(method_id)
 
@@ -297,12 +322,23 @@ def _run_legacy_adapter(
         )
     if method_id == "subtracting_average_2D":
         output, method_warnings = _apply_subtracting_average_2d(data, **params)
+        selection = resolve_time_range_selection(
+            data.shape,
+            time_start_idx=params.get("time_start_idx"),
+            time_end_idx=params.get("time_end_idx"),
+            time_start_ns=params.get("time_start_ns"),
+            time_end_ns=params.get("time_end_ns"),
+            time_window_ns=params.get("time_window_ns"),
+        )
         return _normalize_result(
             method_id,
             (
                 output,
                 {
                     "ntraces": int(params.get("ntraces", 501)),
+                    "time_start_idx": int(selection.start_idx),
+                    "time_end_idx": int(selection.end_idx),
+                    "time_range_source": selection.source,
                     "method": "subtracting_average_2D",
                 },
             ),
@@ -440,13 +476,22 @@ def _agc_energy_floor(data: np.ndarray, local_rms: np.ndarray) -> float:
 
 
 def _apply_subtracting_average_2d(
-    data: np.ndarray, ntraces: int = 501, **kwargs
+    data: np.ndarray,
+    ntraces: int = 501,
+    time_start_idx: Any = None,
+    time_end_idx: Any = None,
+    time_start_ns: Any = None,
+    time_end_ns: Any = None,
+    time_window_ns: Any = None,
+    edge_taper_samples: int = 0,
+    **kwargs,
 ) -> tuple[np.ndarray, list[dict[str, Any]]]:
     requested_ntraces = int(ntraces)
     ntraces = max(1, requested_ntraces)
     warnings = []
     if ntraces >= data.shape[1]:
         background = np.mean(data, axis=1, keepdims=True)
+        full_result = data - background
         warnings.append(
             build_runtime_warning(
                 "global_background_fallback",
@@ -457,8 +502,24 @@ def _apply_subtracting_average_2d(
                 effective=data.shape[1],
             )
         )
-        return data - background, warnings
-    return apply_gprpy_rem_mean_trace(data, ntraces), warnings
+    else:
+        full_result = apply_gprpy_rem_mean_trace(data, ntraces)
+
+    selection = resolve_time_range_selection(
+        data.shape,
+        time_start_idx=time_start_idx,
+        time_end_idx=time_end_idx,
+        time_start_ns=time_start_ns,
+        time_end_ns=time_end_ns,
+        time_window_ns=time_window_ns,
+    )
+    result = apply_time_range_to_result(
+        data,
+        full_result,
+        selection,
+        edge_taper_samples=edge_taper_samples,
+    )
+    return result, warnings
 
 
 def _apply_running_average_2d(
