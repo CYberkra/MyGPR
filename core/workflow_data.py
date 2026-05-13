@@ -46,7 +46,12 @@ METHOD_CATEGORIES = {
         "name": "增益补偿",
         "icon": "📈",
         "description": "能量恢复和深度补偿",
-        "methods": ["compensatingGain", "agcGain", "sec_gain"],
+        "methods": [
+            "compensatingGain",
+            "agcGain",
+            "sec_gain",
+            "energy_decay_gain",
+        ],
     },
     "denoising": {
         "id": "denoising",

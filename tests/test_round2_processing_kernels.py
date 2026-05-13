@@ -19,6 +19,7 @@ from core.processing_engine import (
 )
 from PythonModule.dewow import method_dewow
 from PythonModule.equidistant_trace_resample import method_equidistant_trace_resample
+from PythonModule.energy_decay_gain import method_energy_decay_gain
 from PythonModule.hankel_svd import method_hankel_svd
 from PythonModule.rpca_background import method_rpca_background
 from PythonModule.sec_gain import method_sec_gain
@@ -241,6 +242,41 @@ def test_method_sec_gain_returns_metadata_dict_and_curve():
     assert meta["power"] == 1.0
     assert meta["gain_curve"].shape == (4,)
     assert np.allclose(result[:, 0], meta["gain_curve"])
+
+
+def test_method_energy_decay_gain_amplifies_late_low_energy_rows():
+    row_scale = np.linspace(1.0, 0.1, 12, dtype=np.float32)
+    raw = np.repeat(row_scale[:, np.newaxis], 6, axis=1)
+
+    result, meta = method_energy_decay_gain(
+        raw,
+        strength=1.0,
+        smoothing_samples=1,
+        max_gain=10.0,
+    )
+
+    assert result.shape == raw.shape
+    assert result.dtype == np.float32
+    assert meta["method"] == "energy_decay_gain"
+    assert meta["gain_curve"].shape == (12,)
+    assert float(meta["gain_curve"][-1]) > float(meta["gain_curve"][0])
+    assert float(result[-1, 0]) > float(raw[-1, 0])
+
+
+def test_method_energy_decay_gain_uses_robust_trace_statistic():
+    raw = np.ones((8, 5), dtype=np.float32)
+    raw[4, 0] = 1000.0
+
+    result, meta = method_energy_decay_gain(
+        raw,
+        strength=1.0,
+        smoothing_samples=1,
+        max_gain=10.0,
+    )
+
+    assert np.isfinite(result).all()
+    assert float(meta["decay_curve"][4]) == 1.0
+    assert float(meta["gain_curve"][4]) <= 1.1
 
 
 def test_method_hankel_svd_keeps_contract_and_ignores_legacy_batch_kwarg():

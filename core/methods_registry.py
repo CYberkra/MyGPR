@@ -62,6 +62,7 @@ except ModuleNotFoundError as e:
 
 from PythonModule.dewow import method_dewow
 from PythonModule.equidistant_trace_resample import method_equidistant_trace_resample
+from PythonModule.energy_decay_gain import method_energy_decay_gain
 from PythonModule.set_zero_time import method_set_zero_time
 from PythonModule.motion_compensation_height import method_motion_compensation_height
 from PythonModule.motion_compensation_speed import method_motion_compensation_speed  # type: ignore[import]
@@ -257,6 +258,44 @@ PROCESSING_METHODS = {
         "auto_tune_candidates": {
             "window": [7, 11, 21, 31, 41, 61, 81, 121],
             "_low_energy_guard": [True],
+        },
+    },
+    "energy_decay_gain": {
+        "name": "Energy decay gain",
+        "type": "local",
+        "func": method_energy_decay_gain,
+        "params": [
+            {
+                "name": "strength",
+                "label": "Strength",
+                "type": "float",
+                "default": 1.0,
+                "min": 0.0,
+                "max": 3.0,
+            },
+            {
+                "name": "smoothing_samples",
+                "label": "Smoothing samples",
+                "type": "int",
+                "default": 31,
+                "min": 1,
+                "max": 2001,
+            },
+            {
+                "name": "max_gain",
+                "label": "Max gain",
+                "type": "float",
+                "default": 8.0,
+                "min": 1.0,
+                "max": 100.0,
+            },
+        ],
+        "auto_tune_enabled": True,
+        "auto_tune_family": "gain",
+        "auto_tune_candidates": {
+            "strength": [0.5, 0.8, 1.0, 1.2],
+            "smoothing_samples": [15, 31, 61, 101],
+            "max_gain": [4.0, 6.0, 8.0, 12.0],
         },
     },
     "subtracting_average_2D": {
@@ -1357,6 +1396,12 @@ METHOD_METADATA = {
         "visibility": "public",
         "display_name": "自动增益控制（AGC）",
     },
+    "energy_decay_gain": {
+        "category": "gain",
+        "maturity": "stable",
+        "visibility": "public",
+        "display_name": "能量衰减增益",
+    },
     "subtracting_average_2D": {
         "category": "background_suppression",
         "maturity": "stable",
@@ -1529,6 +1574,7 @@ PREFERRED_METHOD_ORDER = [
     "frequency_filter_1d",
     "fk_filter",
     "sec_gain",
+    "energy_decay_gain",
     "compensatingGain",
     "agcGain",
     "hankel_svd",
@@ -1556,6 +1602,7 @@ METHOD_TAGS = {
     "time_cut": "备选",
     "trace_qc": "备选",
     "equidistant_trace_resample": "备选",
+    "energy_decay_gain": "推荐",
     "svd_bg": "备选",
     "fk_filter": "实验",
     "frequency_filter_1d": "推荐",
@@ -1603,6 +1650,7 @@ AUTO_TUNE_STAGE_BY_METHOD = {
     "frequency_filter_1d": "frequency",
     "ccbs": "background",
     "sec_gain": "gain",
+    "energy_decay_gain": "gain",
     "compensatingGain": "gain",
     "agcGain": "gain",
     "running_average_2D": "impulse",

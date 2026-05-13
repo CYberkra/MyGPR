@@ -1017,6 +1017,23 @@ def test_equidistant_trace_resample_is_public_quality_control_method():
         app.processEvents()
 
 
+def test_energy_decay_gain_is_public_gain_method_with_common_params():
+    app = _get_app()
+    win = GPRGuiQt()
+    try:
+        win.page_basic.set_method_by_key("energy_decay_gain")
+
+        assert "energy_decay_gain" in get_public_method_keys()
+        assert "energy_decay_gain" in METHOD_CATEGORIES["gain"]["methods"]
+        assert get_method_category_label("energy_decay_gain") == "增益"
+        assert "strength" in win.page_basic.param_vars
+        assert "smoothing_samples" in win.page_basic.param_vars
+        assert "max_gain" in win.page_basic.param_vars
+    finally:
+        win.close()
+        app.processEvents()
+
+
 def test_public_method_order_follows_processing_chain():
     keys = get_public_method_keys()
     expected_sequence = [
@@ -1033,6 +1050,7 @@ def test_public_method_order_follows_processing_chain():
         "frequency_filter_1d",
         "fk_filter",
         "sec_gain",
+        "energy_decay_gain",
         "compensatingGain",
         "agcGain",
         "hankel_svd",
