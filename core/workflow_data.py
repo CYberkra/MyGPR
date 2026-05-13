@@ -19,7 +19,13 @@ METHOD_CATEGORIES = {
         "name": "预处理",
         "icon": "🔧",
         "description": "数据准备和基础校正",
-        "methods": ["set_zero_time", "time_cut", "trace_qc", "dewow"],
+        "methods": [
+            "set_zero_time",
+            "time_cut",
+            "trace_qc",
+            "equidistant_trace_resample",
+            "dewow",
+        ],
     },
     "background_removal": {
         "id": "background_removal",

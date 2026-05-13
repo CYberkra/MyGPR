@@ -46,6 +46,6 @@
 - Modify: `core/trace_metadata_utils.py`
 - Test: `tests/test_trace_metadata_utils.py`
 
-- [ ] Reuse existing trace-distance metadata helpers.
-- [ ] Add explicit method wrapping distance-axis resampling for GUI/CLI workflows.
-- [ ] Preserve sidecar metadata through resampling.
+- [x] Reuse existing trace-distance metadata helpers.
+- [x] Add explicit method wrapping distance-axis resampling for GUI/CLI workflows.
+- [x] Preserve sidecar metadata through resampling.

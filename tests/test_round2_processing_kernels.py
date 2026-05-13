@@ -18,6 +18,7 @@ from core.processing_engine import (
     run_processing_method,
 )
 from PythonModule.dewow import method_dewow
+from PythonModule.equidistant_trace_resample import method_equidistant_trace_resample
 from PythonModule.hankel_svd import method_hankel_svd
 from PythonModule.rpca_background import method_rpca_background
 from PythonModule.sec_gain import method_sec_gain
@@ -174,6 +175,56 @@ def test_trace_qc_remove_filters_runtime_trace_metadata():
 
     assert result.shape == (4, 3)
     assert merged["trace_index"].tolist() == [1, 2, 3]
+
+
+def test_equidistant_trace_resample_resamples_data_and_metadata():
+    raw = np.vstack(
+        [
+            np.array([0.0, 2.0, 4.0], dtype=np.float32),
+            np.array([10.0, 20.0, 40.0], dtype=np.float32),
+        ]
+    )
+    trace_metadata = {
+        "trace_index": np.array([0, 1, 2], dtype=np.int32),
+        "trace_distance_m": np.array([0.0, 2.0, 4.0], dtype=np.float32),
+        "local_x_m": np.array([0.0, 2.0, 4.0], dtype=np.float32),
+    }
+
+    result, meta = method_equidistant_trace_resample(
+        raw,
+        spacing_m=1.0,
+        trace_metadata=trace_metadata,
+    )
+
+    assert result.shape == (2, 5)
+    assert np.allclose(result[0], [0.0, 1.0, 2.0, 3.0, 4.0])
+    assert np.allclose(result[1], [10.0, 15.0, 20.0, 30.0, 40.0])
+    assert np.allclose(
+        meta["trace_metadata_out"]["trace_distance_m"],
+        [0.0, 1.0, 2.0, 3.0, 4.0],
+    )
+    assert meta["trace_metadata_out"]["trace_index"].tolist() == [0, 1, 2, 3, 4]
+
+
+def test_equidistant_trace_resample_runtime_metadata_roundtrip():
+    raw = np.ones((3, 3), dtype=np.float32)
+    trace_metadata = {
+        "trace_index": np.array([0, 1, 2], dtype=np.int32),
+        "trace_distance_m": np.array([0.0, 1.5, 3.0], dtype=np.float32),
+    }
+    params = prepare_runtime_params(
+        "equidistant_trace_resample",
+        {"spacing_m": 1.0},
+        None,
+        trace_metadata,
+        raw.shape,
+    )
+
+    result, meta = run_processing_method(raw, "equidistant_trace_resample", params)
+    merged = merge_result_trace_metadata(trace_metadata, meta)
+
+    assert result.shape == (3, 4)
+    assert np.allclose(merged["trace_distance_m"], [0.0, 1.0, 2.0, 3.0])
 
 
 def test_method_sec_gain_returns_metadata_dict_and_curve():

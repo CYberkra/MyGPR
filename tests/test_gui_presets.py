@@ -999,12 +999,31 @@ def test_trace_qc_is_public_quality_control_method_with_common_params():
         app.processEvents()
 
 
+def test_equidistant_trace_resample_is_public_quality_control_method():
+    app = _get_app()
+    win = GPRGuiQt()
+    try:
+        win.page_basic.set_method_by_key("equidistant_trace_resample")
+
+        assert "equidistant_trace_resample" in get_public_method_keys()
+        assert (
+            "equidistant_trace_resample"
+            in METHOD_CATEGORIES["preprocessing"]["methods"]
+        )
+        assert get_method_category_label("equidistant_trace_resample") == "质量控制"
+        assert "spacing_m" in win.page_basic.param_vars
+    finally:
+        win.close()
+        app.processEvents()
+
+
 def test_public_method_order_follows_processing_chain():
     keys = get_public_method_keys()
     expected_sequence = [
         "set_zero_time",
         "time_cut",
         "trace_qc",
+        "equidistant_trace_resample",
         "dewow",
         "subtracting_average_2D",
         "median_background_2D",

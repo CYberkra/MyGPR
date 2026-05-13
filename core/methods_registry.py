@@ -61,6 +61,7 @@ except ModuleNotFoundError as e:
 
 
 from PythonModule.dewow import method_dewow
+from PythonModule.equidistant_trace_resample import method_equidistant_trace_resample
 from PythonModule.set_zero_time import method_set_zero_time
 from PythonModule.motion_compensation_height import method_motion_compensation_height
 from PythonModule.motion_compensation_speed import method_motion_compensation_speed  # type: ignore[import]
@@ -216,6 +217,23 @@ PROCESSING_METHODS = {
                 "type": "str",
                 "default": "",
                 "tooltip": "可填 3,8-12 这类 0-based 道号；留空则只用阈值检测。",
+            },
+        ],
+    },
+    "equidistant_trace_resample": {
+        "name": "2.3 equidistant_trace_resample (uniform trace spacing)",
+        "type": "local",
+        "module": "equidistant_trace_resample",
+        "func": method_equidistant_trace_resample,
+        "params": [
+            {
+                "name": "spacing_m",
+                "label": "Spacing (m, 0=median)",
+                "type": "float",
+                "default": 0.0,
+                "min": 0.0,
+                "max": 100000.0,
+                "tooltip": "目标道间距；0 表示使用当前 trace_distance_m 的中位间距。",
             },
         ],
     },
@@ -1327,6 +1345,12 @@ METHOD_METADATA = {
         "visibility": "public",
         "display_name": "坏道质量控制",
     },
+    "equidistant_trace_resample": {
+        "category": "quality_control",
+        "maturity": "stable",
+        "visibility": "public",
+        "display_name": "等距道重采样",
+    },
     "agcGain": {
         "category": "gain",
         "maturity": "stable",
@@ -1495,6 +1519,7 @@ PREFERRED_METHOD_ORDER = [
     "set_zero_time",
     "time_cut",
     "trace_qc",
+    "equidistant_trace_resample",
     "dewow",
     "subtracting_average_2D",
     "median_background_2D",
@@ -1530,6 +1555,7 @@ METHOD_TAGS = {
     "set_zero_time": "推荐",
     "time_cut": "备选",
     "trace_qc": "备选",
+    "equidistant_trace_resample": "备选",
     "svd_bg": "备选",
     "fk_filter": "实验",
     "frequency_filter_1d": "推荐",
@@ -1568,6 +1594,7 @@ AUTO_TUNE_STAGE_BY_METHOD = {
     "set_zero_time": "zero_time",
     "time_cut": "preprocess",
     "trace_qc": "preprocess",
+    "equidistant_trace_resample": "preprocess",
     "dewow": "drift",
     "subtracting_average_2D": "background",
     "median_background_2D": "background",
