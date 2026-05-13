@@ -121,7 +121,7 @@ class AutoTunePage(QWidget):
         layout.setSpacing(12)
 
         method_box = QGroupBox("当前方法与实验边界")
-        method_box.setToolTip("先确认当前方法是否支持自动选参，再决定是在本页快速实验还是进入工作台")
+        method_box.setToolTip("先确认当前方法是否支持自动选参，再决定是在本页快速实验还是进入工作流")
         method_layout = QVBoxLayout(method_box)
         method_layout.setContentsMargins(10, 14, 10, 10)
         method_layout.setSpacing(8)
@@ -131,7 +131,7 @@ class AutoTunePage(QWidget):
         method_layout.addWidget(self.auto_tune_method_label)
 
         method_hint = QLabel(
-            "本页适合做单方法自动选参和同阶段快速比较。需要跨方法串联、手工反复试验或长期保留实验链路时，再进入工作台。"
+            "本页适合做单方法自动选参和同阶段快速比较。需要跨方法串联、手工反复试验或长期保留实验链路时，再进入工作流设置。"
         )
         method_hint.setWordWrap(True)
         method_hint.setProperty("class", "hintText")
@@ -239,14 +239,14 @@ class AutoTunePage(QWidget):
         action_layout.addWidget(adopt_box)
         layout.addWidget(action_box)
 
-        bridge_box = QGroupBox("深度实验入口")
-        bridge_box.setToolTip("帮助区分本页快速实验与 Workbench 深度实验的使用边界")
+        bridge_box = QGroupBox("工作流设置入口")
+        bridge_box.setToolTip("帮助区分本页快速实验与可保存工作流的使用边界")
         bridge_layout = QVBoxLayout(bridge_box)
         bridge_layout.setContentsMargins(10, 14, 10, 10)
         bridge_layout.setSpacing(8)
 
         bridge_hint = QLabel(
-            "当你需要手工串联多步方法、反复试错或长期保留实验链路时，跳到工作台继续。"
+            "当你需要手工串联多步方法、反复试错或长期保留实验链路时，跳到工作流页继续。"
         )
         bridge_hint.setWordWrap(True)
         bridge_hint.setProperty("class", "hintText")
@@ -256,9 +256,9 @@ class AutoTunePage(QWidget):
         bridge_row_layout = QHBoxLayout(bridge_row)
         bridge_row_layout.setContentsMargins(0, 0, 0, 0)
         bridge_row_layout.setSpacing(8)
-        self.btn_open_workbench = PushButton(FluentIcon.APPLICATION, "进入工作台深度实验")
-        self.btn_open_workbench.setToolTip("需要跨方法组合、手工调参与长链路实验时，跳转到工作台继续")
-        bridge_row_layout.addWidget(self.btn_open_workbench)
+        self.btn_open_workflow = PushButton(FluentIcon.APPLICATION, "进入工作流设置")
+        self.btn_open_workflow.setToolTip("需要跨方法组合、手工调参与长链路实验时，跳转到工作流页继续")
+        bridge_row_layout.addWidget(self.btn_open_workflow)
         bridge_row_layout.addStretch(1)
         bridge_layout.addWidget(bridge_row)
         layout.addWidget(bridge_box)

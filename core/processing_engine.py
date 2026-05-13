@@ -113,6 +113,8 @@ def prepare_runtime_params(
         "kirchhoff_migration",
         "trace_qc",
         "equidistant_trace_resample",
+        "manual_velocity_model",
+        "geometry_depth_context",
     }:
         _inject_runtime_metadata_context(
             runtime_params,

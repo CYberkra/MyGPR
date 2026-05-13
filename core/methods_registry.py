@@ -76,6 +76,9 @@ from PythonModule.motion_compensation_vibration import (  # type: ignore[import]
 )
 from PythonModule.motion_compensation_v2 import method_motion_compensation_v2
 from PythonModule.amplitude_scale import method_amplitude_scale
+from PythonModule.dc_shift import method_dc_shift
+from PythonModule.geometry_depth_context import method_geometry_depth_context
+from PythonModule.manual_velocity_model import method_manual_velocity_model
 
 
 # ============ 方法注册表 ============
@@ -222,6 +225,32 @@ PROCESSING_METHODS = {
                 "tooltip": "可填 3,8-12 这类 0-based 道号；留空则只用阈值检测。",
             },
         ],
+    },
+    "dc_shift": {
+        "name": "2.25 dc_shift (DC offset removal)",
+        "type": "local",
+        "module": "dc_shift",
+        "func": method_dc_shift,
+        "params": [
+            {
+                "name": "estimator",
+                "label": "Estimator",
+                "type": "str",
+                "default": "mean",
+                "choices": ["mean", "median"],
+                "tooltip": "mean 适合常规 DC 去偏；median 对局部尖峰更稳健。",
+            },
+            {
+                "name": "scope",
+                "label": "Scope",
+                "type": "str",
+                "default": "per_trace",
+                "choices": ["per_trace", "global"],
+                "tooltip": "per_trace 按每道去偏；global 只移除整幅数据的统一偏置。",
+            },
+        ],
+        "auto_tune_enabled": False,
+        "auto_tune_family": "preprocess",
     },
     "equidistant_trace_resample": {
         "name": "2.3 equidistant_trace_resample (uniform trace spacing)",
@@ -1378,6 +1407,82 @@ PROCESSING_METHODS = {
             "power": [0.5, 0.8, 1.0, 1.2, 1.5, 1.8, 2.2],
         },
     },
+    "manual_velocity_model": {
+        "name": "手动速度模型",
+        "type": "local",
+        "module": "manual_velocity_model",
+        "func": method_manual_velocity_model,
+        "params": [
+            {
+                "name": "mode",
+                "label": "输入模式",
+                "type": "str",
+                "default": "velocity",
+                "choices": ["velocity", "dielectric"],
+                "tooltip": "velocity 使用常速度；dielectric 用介电常数换算速度。",
+            },
+            {
+                "name": "velocity_m_per_ns",
+                "label": "速度 (m/ns)",
+                "type": "float",
+                "default": 0.10,
+                "min": 0.01,
+                "max": 0.299792458,
+            },
+            {
+                "name": "epsilon_r",
+                "label": "相对介电常数",
+                "type": "float",
+                "default": 9.0,
+                "min": 1.01,
+                "max": 81.0,
+            },
+            {
+                "name": "uncertainty_fraction",
+                "label": "速度不确定度",
+                "type": "float",
+                "default": 0.10,
+                "min": 0.0,
+                "max": 1.0,
+            },
+        ],
+        "auto_tune_enabled": False,
+        "auto_tune_family": "velocity_model",
+    },
+    "geometry_depth_context": {
+        "name": "几何-深度上下文检查",
+        "type": "local",
+        "module": "geometry_depth_context",
+        "func": method_geometry_depth_context,
+        "params": [
+            {
+                "name": "require_velocity_model",
+                "label": "要求速度模型",
+                "type": "bool",
+                "default": True,
+            },
+            {
+                "name": "require_trace_spacing",
+                "label": "要求道距",
+                "type": "bool",
+                "default": True,
+            },
+            {
+                "name": "require_time_window",
+                "label": "要求时间窗",
+                "type": "bool",
+                "default": True,
+            },
+            {
+                "name": "require_agl",
+                "label": "要求 AGL 高度",
+                "type": "bool",
+                "default": False,
+            },
+        ],
+        "auto_tune_enabled": False,
+        "auto_tune_family": "geometry_depth",
+    },
     "sliding_avg": {
         "name": "Sliding-average background removal",
         "type": "local",
@@ -1434,6 +1539,12 @@ METHOD_METADATA = {
         "maturity": "stable",
         "visibility": "public",
         "display_name": "坏道质量控制",
+    },
+    "dc_shift": {
+        "category": "drift_correction",
+        "maturity": "stable",
+        "visibility": "public",
+        "display_name": "DC 去偏",
     },
     "equidistant_trace_resample": {
         "category": "quality_control",
@@ -1597,6 +1708,18 @@ METHOD_METADATA = {
         "visibility": "public",
         "display_name": "时间-深度转换",
     },
+    "manual_velocity_model": {
+        "category": "velocity_model",
+        "maturity": "stable",
+        "visibility": "public",
+        "display_name": "手动速度模型",
+    },
+    "geometry_depth_context": {
+        "category": "geometry_depth",
+        "maturity": "experimental",
+        "visibility": "public",
+        "display_name": "几何-深度上下文检查",
+    },
     "sec_gain": {
         "category": "gain",
         "maturity": "stable",
@@ -1627,6 +1750,7 @@ PREFERRED_METHOD_ORDER = [
     "set_zero_time",
     "time_cut",
     "trace_qc",
+    "dc_shift",
     "equidistant_trace_resample",
     "dewow",
     "subtracting_average_2D",
@@ -1653,6 +1777,8 @@ PREFERRED_METHOD_ORDER = [
     "motion_compensation_attitude",
     "motion_compensation_vibration",
     "motion_compensation_v2",
+    "manual_velocity_model",
+    "geometry_depth_context",
     "stolt_migration",
     "kirchhoff_migration",
     "time_to_depth",
@@ -1666,6 +1792,7 @@ METHOD_TAGS = {
     "set_zero_time": "推荐",
     "time_cut": "备选",
     "trace_qc": "备选",
+    "dc_shift": "推荐",
     "equidistant_trace_resample": "备选",
     "energy_decay_gain": "推荐",
     "amplitude_scale": "备选",
@@ -1687,6 +1814,8 @@ METHOD_TAGS = {
     "motion_compensation_attitude": "实验",
     "motion_compensation_vibration": "实验",
     "motion_compensation_v2": "推荐",
+    "manual_velocity_model": "推荐",
+    "geometry_depth_context": "推荐",
 }
 
 METHOD_CATEGORY_LABELS = {
@@ -1701,6 +1830,8 @@ METHOD_CATEGORY_LABELS = {
     "depth_conversion": "时间深度转换",
     "motion_compensation": "运动补偿",
     "quality_control": "质量控制",
+    "velocity_model": "速度模型",
+    "geometry_depth": "几何-深度校正",
     "attribute_analysis": "属性分析",
     "experimental": "实验功能",
 }
@@ -1709,6 +1840,7 @@ AUTO_TUNE_STAGE_BY_METHOD = {
     "set_zero_time": "zero_time",
     "time_cut": "preprocess",
     "trace_qc": "preprocess",
+    "dc_shift": "preprocess",
     "equidistant_trace_resample": "preprocess",
     "dewow": "drift",
     "subtracting_average_2D": "background",
@@ -1733,6 +1865,8 @@ AUTO_TUNE_STAGE_BY_METHOD = {
     "motion_compensation_attitude": "motion_comp",
     "motion_compensation_vibration": "motion_comp",
     "motion_compensation_v2": "motion_comp",
+    "manual_velocity_model": "velocity_model",
+    "geometry_depth_context": "geometry_depth",
 }
 
 for _method_key, _stage in AUTO_TUNE_STAGE_BY_METHOD.items():

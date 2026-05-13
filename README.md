@@ -52,7 +52,7 @@ python cli_batch.py run --config config/motion_compensation_v1_benchmark.json
 - `cli_batch.py` - batch processing and benchmark CLI.
 - `core/` - shared runtime logic, I/O, method registry, processing engine,
   presets, sidecar integration, metrics, and evidence export.
-- `ui/` - Qt pages, dialogs, workbench widgets, parameter editors, and logs.
+- `ui/` - Qt pages, dialogs, workflow widgets, parameter editors, and logs.
 - `PythonModule/` - ndarray algorithms plus legacy CSV wrapper compatibility.
 - `tests/` - pytest unit and integration coverage.
 - `scripts/preflight_check.py` - syntax plus GUI/runtime smoke gate.

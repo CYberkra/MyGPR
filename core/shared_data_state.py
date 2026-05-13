@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Shared application data state for main GUI and workbench."""
+"""Shared application data state for main GUI and workflow views."""
 
 from __future__ import annotations
 
@@ -147,7 +147,7 @@ class SharedDataState(QObject):
         return True
 
     def build_result_history(self) -> list[tuple[str, np.ndarray]]:
-        """构建正式结果时间线，供主界面和工作台统一展示。"""
+        """构建正式结果时间线，供主界面和工作流统一展示。"""
         return [
             (str(entry["label"]), np.array(entry["data"], copy=True))
             for entry in self.build_result_history_entries()

@@ -14,7 +14,7 @@ All commands below assume this directory is the working directory.
 
 ## Repo Map
 - `core/` - app data, I/O, registry, engine, shared state, and workflow helpers.
-- `ui/` - Qt pages, dialogs, and workbench widgets.
+- `ui/` - Qt pages, dialogs, and workflow widgets.
 - `PythonModule/` - algorithm implementations and compatibility wrappers.
 - `scripts/preflight_check.py` - syntax and runtime smoke checks.
 - `tests/` - pytest tests and benchmark scripts.
@@ -176,7 +176,7 @@ pytest
 - Use worker threads, signals, or timers for long-running processing.
 - Update shared data through `core/shared_data_state.py` instead of ad hoc globals.
 - When adding a method, update `core/methods_registry.py`, any parameter UI, and relevant smoke tests together.
-- Keep the main window, workbench, and batch pages aligned on shared behavior.
+- Keep the main window, workflow page, and batch pages aligned on shared behavior.
 
 ## Processing Methods
 - Put new algorithms in `PythonModule/`.

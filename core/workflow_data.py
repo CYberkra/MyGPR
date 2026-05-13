@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""智能处理流程工作台 - 数据结构和配置管理
+"""智能处理工作流 - 数据结构和配置管理
 
 定义方法分类、流程配置结构和配置管理器
 """
@@ -23,6 +23,7 @@ METHOD_CATEGORIES = {
             "set_zero_time",
             "time_cut",
             "trace_qc",
+            "dc_shift",
             "equidistant_trace_resample",
             "dewow",
         ],
@@ -47,10 +48,10 @@ METHOD_CATEGORIES = {
         "icon": "📈",
         "description": "能量恢复和深度补偿",
         "methods": [
-            "compensatingGain",
-            "agcGain",
             "sec_gain",
             "energy_decay_gain",
+            "compensatingGain",
+            "agcGain",
             "amplitude_scale",
         ],
     },
@@ -73,7 +74,13 @@ METHOD_CATEGORIES = {
         "name": "迁移与标定",
         "icon": "🎯",
         "description": "几何校正和深度转换",
-        "methods": ["stolt_migration", "kirchhoff_migration", "time_to_depth"],
+        "methods": [
+            "manual_velocity_model",
+            "geometry_depth_context",
+            "stolt_migration",
+            "kirchhoff_migration",
+            "time_to_depth",
+        ],
     },
     "motion_compensation": {
         "id": "motion_compensation",
@@ -143,18 +150,28 @@ QUICK_PRESETS = {
         "methods": [
             {
                 "category": "preprocessing",
+                "stage_id": "zero_time",
                 "method_id": "set_zero_time",
                 "enabled": True,
                 "params": {"new_zero_time": 5.0},
             },
             {
                 "category": "preprocessing",
+                "stage_id": "trace_correction",
+                "method_id": "dc_shift",
+                "enabled": True,
+                "params": {"estimator": "mean", "scope": "per_trace"},
+            },
+            {
+                "category": "preprocessing",
+                "stage_id": "trace_correction",
                 "method_id": "dewow",
                 "enabled": True,
                 "params": {"window": 61},
             },
             {
                 "category": "background_removal",
+                "stage_id": "trace_correction",
                 "method_id": "frequency_filter_1d",
                 "enabled": True,
                 "params": {
@@ -166,6 +183,7 @@ QUICK_PRESETS = {
             },
             {
                 "category": "motion_compensation",
+                "stage_id": "motion_compensation",
                 "method_id": "motion_compensation_v2",
                 "enabled": True,
                 "params": {
@@ -185,12 +203,14 @@ QUICK_PRESETS = {
             },
             {
                 "category": "background_removal",
+                "stage_id": "background_clutter",
                 "method_id": "subtracting_average_2D",
                 "enabled": True,
                 "params": {"ntraces": 51},
             },
             {
                 "category": "denoising",
+                "stage_id": "spatial_denoise",
                 "method_id": "wavelet_svd",
                 "enabled": True,
                 "params": {
@@ -202,10 +222,43 @@ QUICK_PRESETS = {
                 },
             },
             {
+                "category": "migration",
+                "stage_id": "velocity_model",
+                "method_id": "manual_velocity_model",
+                "enabled": True,
+                "params": {
+                    "mode": "velocity",
+                    "velocity_m_per_ns": 0.10,
+                    "epsilon_r": 9.0,
+                    "uncertainty_fraction": 0.10,
+                },
+            },
+            {
+                "category": "migration",
+                "stage_id": "geometry_depth",
+                "method_id": "geometry_depth_context",
+                "enabled": True,
+                "params": {
+                    "require_velocity_model": True,
+                    "require_trace_spacing": True,
+                    "require_time_window": True,
+                    "require_agl": False,
+                },
+            },
+            {
                 "category": "gain",
+                "stage_id": "gain",
                 "method_id": "sec_gain",
                 "enabled": True,
                 "params": {"gain_min": 1.0, "gain_max": 4.5, "power": 1.1},
+            },
+            {
+                "category": "migration",
+                "stage_id": "migration",
+                "method_id": "kirchhoff_migration",
+                "enabled": False,
+                "hidden": True,
+                "params": {},
             },
         ],
     },
@@ -289,6 +342,104 @@ QUICK_PRESETS = {
 }
 
 
+# ============ UAV-GPR 实时工作流阶段定义 ============
+
+WORKFLOW_STAGE_DEFINITIONS = [
+    {
+        "id": "zero_time",
+        "label": "零时校正",
+        "default_method": "set_zero_time",
+        "candidate_methods": ["set_zero_time"],
+        "warning": "",
+    },
+    {
+        "id": "trace_correction",
+        "label": "基础迹线域校正",
+        "default_method": "dewow",
+        "candidate_methods": [
+            "dc_shift",
+            "dewow",
+            "frequency_filter_1d",
+            "trace_qc",
+        ],
+        "warning": "",
+    },
+    {
+        "id": "motion_compensation",
+        "label": "UAV-GPR 采集几何校正与运动补偿",
+        "default_method": "motion_compensation_v2",
+        "candidate_methods": ["motion_compensation_v2"],
+        "warning": "缺少 RTK/IMU/AGL 侧车数据时应跳过或仅记录风险。",
+    },
+    {
+        "id": "background_clutter",
+        "label": "背景与杂波抑制",
+        "default_method": "subtracting_average_2D",
+        "candidate_methods": [
+            "subtracting_average_2D",
+            "median_background_2D",
+            "svd_bg",
+            "fk_filter",
+            "ccbs",
+        ],
+        "warning": "F-K / 方向性滤波属于可选空间滤波，需检查是否损伤目标倾角。",
+    },
+    {
+        "id": "spatial_denoise",
+        "label": "可选空间滤波与去噪增强",
+        "default_method": "wavelet_svd",
+        "candidate_methods": [
+            "wavelet_svd",
+            "wavelet_2d",
+            "svd_subspace",
+            "hankel_svd",
+        ],
+        "warning": "",
+    },
+    {
+        "id": "velocity_model",
+        "label": "速度模型建立",
+        "default_method": "manual_velocity_model",
+        "candidate_methods": ["manual_velocity_model"],
+        "warning": "第一版仅支持手动常速度 / 介电常数。",
+    },
+    {
+        "id": "geometry_depth",
+        "label": "几何-深度校正",
+        "default_method": "geometry_depth_context",
+        "candidate_methods": ["geometry_depth_context"],
+        "warning": "第一版做上下文校验和参数传递，不伪造成熟地形校正。",
+    },
+    {
+        "id": "gain",
+        "label": "增益补偿",
+        "default_method": "sec_gain",
+        "candidate_methods": [
+            "sec_gain",
+            "energy_decay_gain",
+            "compensatingGain",
+            "agcGain",
+        ],
+        "warning": "AGC 偏显示增强，非严格保幅；论文定量分析需谨慎使用。",
+    },
+    {
+        "id": "migration",
+        "label": "成像 / 迁移",
+        "default_method": "kirchhoff_migration",
+        "candidate_methods": [
+            "kirchhoff_migration",
+            "stolt_migration",
+            "time_to_depth",
+        ],
+        "warning": "迁移为重计算步骤，实时模式下等待参数稳定后运行。",
+    },
+]
+
+WORKFLOW_STAGE_BY_ID = {
+    stage["id"]: stage for stage in WORKFLOW_STAGE_DEFINITIONS
+}
+
+
 # ============ 流程配置结构 ============
 
 
@@ -302,30 +453,42 @@ class WorkflowMethod:
         enabled: bool = True,
         order: int = 0,
         params: Optional[Dict[str, Any]] = None,
+        stage_id: str = "",
+        hidden: bool = False,
+        status: str = "pending",
     ):
         self.category = category
+        self.stage_id = stage_id
         self.method_id = method_id
         self.enabled = enabled
         self.order = order
         self.params = params or {}
+        self.hidden = hidden
+        self.status = status
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "category": self.category,
+            "stage_id": self.stage_id,
             "method_id": self.method_id,
             "enabled": self.enabled,
             "order": self.order,
             "params": self.params,
+            "hidden": self.hidden,
+            "status": self.status,
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "WorkflowMethod":
         return cls(
-            category=data["category"],
+            category=data.get("category", ""),
+            stage_id=data.get("stage_id", ""),
             method_id=data["method_id"],
             enabled=data.get("enabled", True),
             order=data.get("order", 0),
             params=data.get("params", {}),
+            hidden=data.get("hidden", False),
+            status=data.get("status", "pending"),
         )
 
 
@@ -337,10 +500,18 @@ class WorkflowConfig:
         name: str = "未命名流程",
         methods: Optional[List[WorkflowMethod]] = None,
         version: str = "1.0",
+        template_type: str = "user",
+        realtime_enabled: bool | None = None,
     ):
         self.version = version
         self.name = name
         self.methods = methods or []
+        self.template_type = template_type
+        self.realtime_enabled = (
+            bool(realtime_enabled)
+            if realtime_enabled is not None
+            else template_type == "user"
+        )
         self.created_at = datetime.now().isoformat()
         self.last_modified = datetime.now().isoformat()
 
@@ -348,6 +519,8 @@ class WorkflowConfig:
         return {
             "version": self.version,
             "name": self.name,
+            "template_type": self.template_type,
+            "realtime_enabled": self.realtime_enabled,
             "methods": [m.to_dict() for m in self.methods],
             "created_at": self.created_at,
             "last_modified": self.last_modified,
@@ -358,6 +531,8 @@ class WorkflowConfig:
         config = cls(
             name=data.get("name", "未命名流程"),
             version=data.get("version", "1.0"),
+            template_type=data.get("template_type", "user"),
+            realtime_enabled=data.get("realtime_enabled"),
         )
         config.methods = [WorkflowMethod.from_dict(m) for m in data.get("methods", [])]
         config.created_at = data.get("created_at", datetime.now().isoformat())
@@ -366,15 +541,20 @@ class WorkflowConfig:
 
     def get_enabled_methods(self) -> List[WorkflowMethod]:
         """获取启用的方法列表（按顺序排序）"""
-        enabled = [m for m in self.methods if m.enabled]
+        enabled = [m for m in self.methods if m.enabled and not m.hidden]
         return sorted(enabled, key=lambda x: x.order)
 
     def add_method(
-        self, category: str, method_id: str, params: Optional[Dict] = None
+        self,
+        category: str,
+        method_id: str,
+        params: Optional[Dict] = None,
+        stage_id: str = "",
     ) -> WorkflowMethod:
         """添加新方法"""
         method = WorkflowMethod(
             category=category,
+            stage_id=stage_id,
             method_id=method_id,
             order=len(self.methods),
             params=params or {},
@@ -412,14 +592,18 @@ class WorkflowConfig:
         for i, method_data in enumerate(preset["methods"]):
             method = WorkflowMethod(
                 category=method_data["category"],
+                stage_id=method_data.get("stage_id", ""),
                 method_id=method_data["method_id"],
                 enabled=method_data.get("enabled", True),
+                hidden=method_data.get("hidden", False),
                 order=i,
                 params=method_data.get("params", {}),
             )
             self.methods.append(method)
 
         self.name = preset["name"]
+        self.template_type = "system"
+        self.realtime_enabled = False
         self.last_modified = datetime.now().isoformat()
         return True
 
@@ -427,6 +611,24 @@ class WorkflowConfig:
         """清空所有方法"""
         self.methods = []
         self.last_modified = datetime.now().isoformat()
+
+
+def build_default_workflow_config(
+    preset_key: str = "high_quality_uav_gpr",
+    *,
+    template_type: str = "system",
+) -> WorkflowConfig:
+    """Build a workflow config from a built-in preset."""
+    config = WorkflowConfig(
+        name=QUICK_PRESETS.get(preset_key, {}).get("name", "高质量 UAV-GPR"),
+        template_type=template_type,
+        realtime_enabled=template_type == "user",
+    )
+    if not config.apply_preset(preset_key):
+        config.apply_preset("high_quality_uav_gpr")
+    config.template_type = template_type
+    config.realtime_enabled = template_type == "user"
+    return config
 
 
 # ============ 配置管理器 ============

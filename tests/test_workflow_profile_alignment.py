@@ -22,6 +22,9 @@ def test_high_quality_workflow_stage_grouping_matches_run_order():
     stage2 = next(
         stage for stage in summary["stages"] if stage["stage_key"] == "stage2"
     )
+    stage4 = next(
+        stage for stage in summary["stages"] if stage["stage_key"] == "stage4"
+    )
 
     assert flattened == RECOMMENDED_RUN_PROFILES["high_quality_uav_gpr"]["order"]
     assert summary["unassigned_methods"] == []
@@ -30,10 +33,21 @@ def test_high_quality_workflow_stage_grouping_matches_run_order():
         "motion_compensation_v2",
         "subtracting_average_2D",
     ]
+    assert stage4["method_keys"] == [
+        "manual_velocity_model",
+        "geometry_depth_context",
+        "sec_gain",
+    ]
     assert "fk_filter" not in flattened
     assert (
         WORKFLOW_PRESETS["high_quality_uav_gpr"]["stages"]["stage2"][
             "motion_compensation_v2"
+        ]
+        is True
+    )
+    assert (
+        WORKFLOW_PRESETS["high_quality_uav_gpr"]["stages"]["stage4"][
+            "geometry_depth_context"
         ]
         is True
     )

@@ -179,9 +179,7 @@ from ui.gui_basic_flow import BasicFlowPage
 from ui.gui_auto_tune_page import AutoTunePage
 from ui.gui_advanced_settings import AdvancedSettingsPage
 from ui.gui_quality_log import QualityLogPage
-
-# 导入新的工作台页面
-from ui.gui_workbench import WorkbenchPage
+from ui.gui_workflow_page import WorkflowPage
 from ui.loading_dialog import LoadingProgressDialog
 from ui.auto_tune_result_dialog import AutoTuneResultDialog
 
@@ -715,6 +713,10 @@ class GPRGuiQt(QMainWindow):
         self._pending_apply_after_auto_tune = False
         self._current_run_context = None
         self._cancel_in_flight = False
+        self._pending_workflow_run = None
+        self._last_workflow_result = None
+        self._last_workflow_realtime = False
+        self._workflow_preview_base_state = None
         self._last_auto_tune_result = None
         self._last_auto_tune_group_result = None
         self._last_auto_tune_comparison_result = None
@@ -856,14 +858,6 @@ class GPRGuiQt(QMainWindow):
         self.control_tabs.tabBar().setElideMode(Qt.TextElideMode.ElideRight)
         left_layout.addWidget(self.control_tabs)
 
-        # 返回工作台按钮
-        from qfluentwidgets import PushButton
-
-        self.btn_return_workbench = PushButton("返回工作台")
-        self.btn_return_workbench.clicked.connect(self.switch_to_workbench_mode)
-        self.btn_return_workbench.setProperty("class", "successBtn")
-        left_shell_layout.addWidget(self.btn_return_workbench)
-
         self._content_stack.addWidget(self._main_content_widget)
 
         # ===== 原有页面（保留作为日常处理界面）=====
@@ -874,14 +868,21 @@ class GPRGuiQt(QMainWindow):
         )
         self.control_tabs.setTabToolTip(idx_basic, "日常连续处理操作")
 
-        # 页面2: 调参与实验
+        # 页面2: 工作流
+        self.page_workflow = WorkflowPage(self)
+        idx_workflow = self.control_tabs.addTab(
+            self.page_workflow, FluentIcon.APPLICATION.icon(), "工作流"
+        )
+        self.control_tabs.setTabToolTip(idx_workflow, "可重排、可隐藏、可实时预览的标准处理链")
+
+        # 页面3: 调参与实验
         self.page_auto_tune = AutoTunePage(self)
         idx_auto_tune = self.control_tabs.addTab(
             self.page_auto_tune, FluentIcon.SETTING.icon(), "调参与实验"
         )
         self.control_tabs.setTabToolTip(idx_auto_tune, "自动选参、候选评估与方法实验")
 
-        # 页面3: 显示与对比
+        # 页面4: 显示与对比
         self.page_advanced = AdvancedSettingsPage(self)
         idx_advanced = self.control_tabs.addTab(
             self.page_advanced, FluentIcon.VIEW.icon(), "显示与对比"
@@ -890,7 +891,7 @@ class GPRGuiQt(QMainWindow):
             idx_advanced, "主图显示、双图对比、裁剪与预览设置"
         )
 
-        # 页面4: 质量
+        # 页面5: 质量
         self.page_quality = QualityLogPage(self)
         self.page_quality.set_trace_selected_callback(
             self._on_trajectory_trace_selected
@@ -899,11 +900,6 @@ class GPRGuiQt(QMainWindow):
             self.page_quality, FluentIcon.PIE_SINGLE.icon(), "质量与导出"
         )
         self.control_tabs.setTabToolTip(idx_quality, "质量摘要、航迹图、日志与导出入口")
-
-        # ===== 工作台（总控中心 - 独立页面）=====
-        self.page_workbench = WorkbenchPage(self, self.shared_data)
-        # 添加到 _content_stack，作为最后一个页面
-        self._content_stack.addWidget(self.page_workbench)
 
         # 默认显示主内容区（日常处理界面）
         self._content_stack.setCurrentWidget(self._main_content_widget)
@@ -1030,7 +1026,7 @@ class GPRGuiQt(QMainWindow):
         empty_badge = QLabel("ONBOARDING")
         empty_badge.setProperty("class", "emptyBadge")
 
-        empty_title = QLabel("欢迎来到 GPR 成像工作台")
+        empty_title = QLabel("欢迎来到 MyGPR 处理界面")
         empty_title.setProperty("class", "emptyTitle")
 
         empty_tip = QLabel("从一份 CSV 开始，30 秒看到首张 B-扫图像。")
@@ -1350,12 +1346,6 @@ class GPRGuiQt(QMainWindow):
 
     def _connect_signals(self):
         """连接信号和槽"""
-        # ===== 工作台信号连接 =====
-        self.page_workbench.data_import_requested.connect(self.load_csv)
-        self.page_workbench.save_result_requested.connect(
-            self._on_workbench_save_result
-        )
-
         # 基础流程页面 - 日常处理界面
         self.page_basic.btn_import.clicked.connect(self.import_csv_file)
         self.page_basic.action_import_csv.triggered.connect(self.import_csv_file)
@@ -1371,6 +1361,12 @@ class GPRGuiQt(QMainWindow):
         self.page_basic.btn_undo.clicked.connect(self.undo_last)
         self.page_basic.btn_reset.clicked.connect(self.reset_original)
         self.page_basic.method_combo.currentIndexChanged.connect(self._on_method_change)
+
+        # 工作流页面
+        self.page_workflow.workflow_run_requested.connect(self.run_workflow_methods)
+        self.page_workflow.save_live_result_requested.connect(
+            self.save_workflow_live_result
+        )
 
         # 显示与对比页面
         self.page_advanced.cmap_combo.currentIndexChanged.connect(self._refresh_plot)
@@ -1426,8 +1422,8 @@ class GPRGuiQt(QMainWindow):
         self.page_auto_tune.btn_apply_stage_choice.clicked.connect(
             self.apply_stage_compare_choice
         )
-        self.page_auto_tune.btn_open_workbench.clicked.connect(
-            self.switch_to_workbench_mode
+        self.page_auto_tune.btn_open_workflow.clicked.connect(
+            self.switch_to_workflow_tab
         )
         self.page_advanced.btn_clear_manual_roi.clicked.connect(self._clear_manual_roi)
 
@@ -1476,6 +1472,7 @@ class GPRGuiQt(QMainWindow):
         Args:
             tab_key: 可选，指定要切换到的标签页，可选值：
                 'basic' - 日常处理页
+                'workflow' - 工作流页
                 'auto_tune' - 调参与实验页
                 'advanced' - 显示与对比页
                 'quality' - 质量与导出页
@@ -1487,6 +1484,9 @@ class GPRGuiQt(QMainWindow):
             if tab_key == "basic" and self.page_basic is not None:
                 self.control_tabs.setCurrentWidget(self.page_basic)
                 self.status_label.setText("日常处理界面")
+            elif tab_key == "workflow" and self.page_workflow is not None:
+                self.control_tabs.setCurrentWidget(self.page_workflow)
+                self.status_label.setText("工作流")
             elif tab_key == "auto_tune" and self.page_auto_tune is not None:
                 self.control_tabs.setCurrentWidget(self.page_auto_tune)
                 self.status_label.setText("调参与实验")
@@ -1504,19 +1504,16 @@ class GPRGuiQt(QMainWindow):
 
             tab_name = {
                 "basic": "日常处理",
+                "workflow": "工作流",
                 "auto_tune": "调参与实验",
                 "advanced": "显示与对比",
                 "quality": "质量与导出",
             }.get(tab_key, "日常处理")
             self._log(f"切换到: {tab_name}")
 
-    def switch_to_workbench_mode(self):
-        """切换到工作台总控页"""
-        if self._content_stack is not None and self.page_workbench is not None:
-            self._content_stack.setCurrentWidget(self.page_workbench)
-            self._sync_workbench_with_main_data()
-            self.status_label.setText("工作台总控页")
-            self._log("切换到工作台总控页")
+    def switch_to_workflow_tab(self):
+        """切换到工作流设置页。"""
+        self.switch_to_main_mode("workflow")
 
     def _on_shared_data_changed(self, payload: dict):
         """共享数据状态变化后，同步相关视图。"""
@@ -1527,8 +1524,9 @@ class GPRGuiQt(QMainWindow):
         self._refresh_compare_snapshots_from_state(
             clear_transient=reason in {"loaded", "current_updated", "undo", "reset"}
         )
-        if hasattr(self, "page_workbench") and self.page_workbench is not None:
-            self.page_workbench.sync_from_shared_state(payload)
+        if hasattr(self, "page_workflow") and self.page_workflow is not None:
+            shape = tuple(self.data.shape) if self.data is not None else None
+            self.page_workflow.set_data_shape(shape)
         self._update_empty_state_and_brief()
         if reason == "loaded":
             self._manual_roi_values = None
@@ -1888,10 +1886,6 @@ class GPRGuiQt(QMainWindow):
         self.plot_data(fallback_data)
         self._capture_main_view_limits_from_axes()
 
-    def _sync_workbench_with_main_data(self):
-        """兼容旧调用：实际由共享数据状态统一驱动。"""
-        self._on_shared_data_changed({"reason": "manual_sync"})
-
     def resizeEvent(self, event):
         """窗口尺寸变化时，调整左右区域的相对占比，避免控制区在窄窗口下异常拥挤。
         只在旧界面模式下调整尺寸。"""
@@ -1909,103 +1903,6 @@ class GPRGuiQt(QMainWindow):
         target_left = max(320, min(520, int(total * 0.30)))
         target_right = max(640, total - target_left)
         self._main_splitter.setSizes([target_right, target_left])
-
-    def _on_workbench_run_method(self, method_id: str, params: dict, source: str):
-        """工作台运行单方法"""
-        if self.data is None:
-            self.page_workbench._log("未加载数据", "ERROR")
-            return
-
-        # 获取输入数据
-        input_data, source_text = self.page_workbench.resolve_input_data(source)
-        input_header_info = self.page_workbench.resolve_input_header_info(source)
-        input_trace_metadata = self.page_workbench.resolve_input_trace_metadata(source)
-
-        if input_data is None:
-            input_data = self.data
-            source_text = "原始数据（fallback）"
-            input_header_info = self.header_info
-            input_trace_metadata = self.trace_metadata
-
-        # 记录开始时间
-        start_time = time.time()
-
-        # 获取方法信息
-        method_info = PROCESSING_METHODS.get(method_id)
-        if not method_info:
-            self.page_workbench._log(f"未知方法: {method_id}", "ERROR")
-            return
-
-        method_name = method_info.get("name", method_id)
-
-        # 禁用按钮，显示运行状态
-        self.page_workbench.param_editor.set_buttons_for_running()
-
-        # 记录详细信息到日志
-        param_str = ", ".join([f"{k}={v}" for k, v in params.items()])
-        self.page_workbench._log(f"{'=' * 40}")
-        self.page_workbench._log(f"方法: {method_name}")
-        self.page_workbench._log(f"输入源: {source_text} ({input_data.shape})")
-        self.page_workbench._log(f"参数: {param_str}")
-        self.page_workbench._log(f"正在执行...")
-
-        try:
-            # 执行方法
-            execution = self._apply_single_method(
-                input_data,
-                method_id,
-                params,
-                header_info=input_header_info,
-                trace_metadata=input_trace_metadata,
-            )
-            result = execution["result_data"]
-            result_header_info = execution["result_header_info"]
-            result_trace_metadata = execution["result_trace_metadata"]
-            preview_data = execution["preview_data"]
-            preview_header_info = execution["preview_header_info"]
-            preview_trace_metadata = execution["preview_trace_metadata"]
-            runtime_warnings = execution["meta"].get("runtime_warnings", []) or []
-
-            # 计算耗时
-            elapsed = (time.time() - start_time) * 1000  # ms
-
-            # 自动切换到结果视图
-            self.page_workbench.radio_result.setChecked(True)
-
-            # 更新工作台预览（不直接提交为正式结果）
-            self.page_workbench.set_preview_result(
-                preview_data,
-                f"预览: {method_name}",
-                header_info=preview_header_info,
-                trace_metadata=preview_trace_metadata,
-                commit_data=result,
-                commit_header_info=result_header_info,
-                commit_trace_metadata=result_trace_metadata,
-            )
-
-            for warning in runtime_warnings:
-                self.page_workbench._log(
-                    f"运行告警: {format_runtime_warning_text(warning)}", "WARN"
-                )
-
-            # 记录成功日志
-            self.page_workbench._log(f"预览完成！耗时 {elapsed:.1f}ms")
-            self.page_workbench._log(
-                f"预览: {result.shape} | 范围 [{result.min():.3f}, {result.max():.3f}]"
-            )
-            self.page_workbench._log(f"{'=' * 40}")
-
-        except Exception as e:
-            import traceback
-
-            error_msg = str(e)
-            traceback_str = traceback.format_exc()
-            self.page_workbench._log(f"执行失败: {error_msg}", "ERROR")
-            logger.error("Workbench method failed (%s):\n%s", method_id, traceback_str)
-
-        finally:
-            # 恢复按钮状态
-            self.page_workbench._update_action_buttons()
 
     def _apply_single_method(
         self,
@@ -2061,96 +1958,6 @@ class GPRGuiQt(QMainWindow):
             "preview_trace_metadata": preview_trace_metadata,
             "meta": result_meta,
         }
-
-    def _on_workbench_save_result(self):
-        """工作台保存结果"""
-        preview_data = getattr(self.page_workbench, "preview_data", None)
-        preview_header_info = getattr(self.page_workbench, "preview_header_info", None)
-        preview_trace_metadata = getattr(
-            self.page_workbench, "preview_trace_metadata", None
-        )
-        preview_commit_data = getattr(self.page_workbench, "preview_commit_data", None)
-        preview_commit_header_info = getattr(
-            self.page_workbench, "preview_commit_header_info", None
-        )
-        preview_commit_trace_metadata = getattr(
-            self.page_workbench, "preview_commit_trace_metadata", None
-        )
-        current_result_header_info = getattr(
-            self.page_workbench, "current_result_header_info", None
-        )
-        current_result_trace_metadata = getattr(
-            self.page_workbench, "current_result_trace_metadata", None
-        )
-        committed = (
-            np.array(preview_commit_data, copy=True)
-            if preview_commit_data is not None
-            else np.array(preview_data, copy=True)
-            if preview_data is not None
-            else (
-                np.array(self.page_workbench.current_result, copy=True)
-                if self.page_workbench.current_result is not None
-                else None
-            )
-        )
-
-        if committed is not None:
-            method_id = self.page_workbench.param_editor.current_method_id
-            method_info = PROCESSING_METHODS.get(method_id, {}) if method_id else {}
-            method_name = method_info.get("name", method_id or "工作台结果")
-            label = method_name
-            if preview_data is not None:
-                label = f"{method_name}_{datetime.now().strftime('%H:%M:%S')}"
-
-            self.shared_data.apply_current_data(
-                committed,
-                push_history=True,
-                source="workbench_commit",
-                label=label,
-                header_info=(
-                    preview_commit_header_info
-                    if preview_commit_data is not None
-                    else preview_header_info
-                    if preview_data is not None
-                    else current_result_header_info
-                ),
-                trace_metadata=(
-                    preview_commit_trace_metadata
-                    if preview_commit_data is not None
-                    else preview_trace_metadata
-                    if preview_data is not None
-                    else current_result_trace_metadata
-                ),
-            )
-            self._mark_data_changed()
-            self._update_current_compare_snapshot()
-            self._update_empty_state_and_brief()
-            self.plot_data(self.data)
-            try:
-                params = self.page_workbench.param_editor.get_current_params()
-            except Exception:
-                params = {}
-            self._set_last_run_summary(
-                run_type="workbench_commit",
-                label=method_name,
-                steps=[
-                    {
-                        "method_key": method_id or "workbench",
-                        "method_name": method_name,
-                        "params": params,
-                    }
-                ],
-                notes=["结果由工作台预览提交为正式结果"],
-            )
-            if preview_data is not None:
-                self.page_workbench._log(f"✓ 结果已保存: {label}")
-                self.page_workbench._log(f"  形状: {committed.shape}")
-                self.page_workbench._log(
-                    f"  范围: [{committed.min():.3f}, {committed.max():.3f}]"
-                )
-            self._log("工作台结果已应用到当前数据")
-        else:
-            self._log("没有可保存的结果")
 
     def _apply_style(self):
         """应用样式表 - 使用主题管理器"""
@@ -4346,6 +4153,133 @@ class GPRGuiQt(QMainWindow):
             preset_key=preset_key,
             profile_key=profile_key,
         )
+
+    def run_workflow_methods(self, methods: object, realtime: bool = False):
+        """运行工作流页传入的步骤列表。"""
+        if self.data is None:
+            QMessageBox.warning(self, "无数据", "请先导入数据。")
+            return
+        if self._worker is not None or self._worker_thread is not None:
+            if realtime:
+                self._pending_workflow_run = (methods, realtime)
+                if self._worker is not None:
+                    self._worker.request_cancel()
+                self.status_label.setText("正在取消旧的实时工作流...")
+                return
+            QMessageBox.information(self, "处理中", "请等待当前处理完成或先取消。")
+            return
+
+        workflow_methods = [
+            item
+            for item in list(methods or [])
+            if getattr(item, "enabled", True)
+            and not getattr(item, "hidden", False)
+            and getattr(item, "method_id", "") in PROCESSING_METHODS
+        ]
+        if not workflow_methods:
+            QMessageBox.information(self, "无步骤", "当前工作流没有可运行的启用步骤。")
+            return
+
+        tasks = []
+        out_dir = self._default_output_dir()
+        for method in workflow_methods:
+            method_key = str(method.method_id)
+            method_info = PROCESSING_METHODS[method_key]
+            tasks.append(
+                {
+                    "method_key": method_key,
+                    "method": method_info,
+                    "params": dict(getattr(method, "params", {}) or {}),
+                    "out_dir": out_dir,
+                    "param_source_mode": "manual",
+                    "stage_id": getattr(method, "stage_id", ""),
+                }
+            )
+
+        run_type = "workflow_realtime" if realtime else "workflow"
+        base_state = None
+        if realtime:
+            if self._workflow_preview_base_state is None:
+                self._workflow_preview_base_state = {
+                    "data": np.array(self.data, copy=True),
+                    "header_info": merge_result_header_info(self.header_info, None),
+                    "trace_metadata": merge_result_trace_metadata(
+                        self.trace_metadata, None
+                    ),
+                    "label": self.shared_data.current_label,
+                }
+            base_state = self._workflow_preview_base_state
+            self.page_workflow.set_running("实时工作流计算中")
+        else:
+            self._workflow_preview_base_state = None
+            self._push_history()
+            self.page_workflow.set_running("工作流运行中")
+
+        self._log(
+            ("实时预览工作流：" if realtime else "运行工作流：")
+            + " → ".join(task["method_key"] for task in tasks)
+        )
+        self._start_processing_worker(
+            tasks,
+            run_type=run_type,
+            run_label="工作流实时结果" if realtime else "工作流结果",
+            base_data=base_state.get("data") if base_state else None,
+            header_info=base_state.get("header_info") if base_state else None,
+            trace_metadata=base_state.get("trace_metadata") if base_state else None,
+        )
+
+    def save_workflow_live_result(self):
+        """将工作流实时结果提交为正式历史结果。"""
+        result = self._last_workflow_result
+        if not result or result.get("final_data") is None:
+            QMessageBox.information(self, "无结果", "暂无可保存的工作流实时结果。")
+            return
+
+        final_data = result["final_data"]
+        final_header_info = result.get("final_header_info")
+        final_trace_metadata = result.get("final_trace_metadata")
+        label = "工作流实时结果" if self._last_workflow_realtime else "工作流结果"
+
+        base_state = self._workflow_preview_base_state
+        if base_state is not None:
+            self.shared_data.current_data = np.array(base_state["data"], copy=True)
+            self.shared_data.header_info = merge_result_header_info(
+                base_state.get("header_info"), None
+            )
+            self.shared_data.current_trace_metadata = merge_result_trace_metadata(
+                base_state.get("trace_metadata"), None
+            )
+            self.shared_data.current_label = base_state.get("label") or "当前结果"
+
+        self.shared_data.apply_current_data(
+            final_data,
+            push_history=True,
+            source="workflow_commit",
+            label=label,
+            header_info=final_header_info,
+            trace_metadata=final_trace_metadata,
+        )
+        self._workflow_preview_base_state = None
+        self._mark_data_changed()
+        self._refresh_compare_snapshots_from_state()
+        self._update_empty_state_and_brief()
+        self.plot_data(self.data)
+        self._set_last_run_summary(
+            run_type="workflow_commit",
+            label=label,
+            steps=[
+                {
+                    "method_key": item.get("method_key"),
+                    "method_name": item.get("method_name"),
+                    "params": item.get("params", {}),
+                    "elapsed_ms": item.get("elapsed_ms"),
+                }
+                for item in result.get("outputs", [])
+            ],
+            notes=["工作流实时预览结果已保存为正式结果"],
+        )
+        self.page_workflow.set_running("工作流结果已保存")
+        self._log("工作流结果已保存到正式历史")
 
     # ============ 报告和导出 ============
 
@@ -6544,6 +6478,9 @@ class GPRGuiQt(QMainWindow):
         preset_key: str = None,
         profile_key: str = None,
         execution_mode: str = "sequential",
+        base_data: np.ndarray | None = None,
+        header_info: dict | None = None,
+        trace_metadata: dict | None = None,
     ):
         """启动后台处理工作线程"""
         self._current_run_context = {
@@ -6558,12 +6495,12 @@ class GPRGuiQt(QMainWindow):
 
         self._worker_thread = QThread(self)
         self._worker = ProcessingWorker(
-            self.data,
+            self.data if base_data is None else base_data,
             tasks,
             self.data_path,
             execution_mode=execution_mode,
-            header_info=self.header_info,
-            trace_metadata=self.trace_metadata,
+            header_info=self.header_info if header_info is None else header_info,
+            trace_metadata=self.trace_metadata if trace_metadata is None else trace_metadata,
         )
         self._worker.moveToThread(self._worker_thread)
 
@@ -6593,10 +6530,13 @@ class GPRGuiQt(QMainWindow):
         cancelled = result.get("cancelled", False)
         ctx = self._current_run_context or {}
         run_type = ctx.get("run_type", "")
+        is_workflow_run = run_type in {"workflow", "workflow_realtime"}
 
         if cancelled:
             self._log("处理已取消。")
             self.status_label.setText("已取消")
+            if is_workflow_run and hasattr(self, "page_workflow"):
+                self.page_workflow.set_running("工作流已取消")
         elif final_data is not None:
             is_kirchhoff = (
                 len(outputs) == 1
@@ -6696,6 +6636,14 @@ class GPRGuiQt(QMainWindow):
                 profile_key=ctx.get("profile_key"),
                 warnings=list(self._runtime_warnings),
             )
+            if is_workflow_run:
+                self._last_workflow_result = result
+                self._last_workflow_realtime = run_type == "workflow_realtime"
+                if hasattr(self, "page_workflow") and self.page_workflow is not None:
+                    self.page_workflow.set_run_result(
+                        outputs,
+                        realtime=self._last_workflow_realtime,
+                    )
 
         self._cleanup_worker()
 
@@ -6709,6 +6657,9 @@ class GPRGuiQt(QMainWindow):
         hint = self._build_error_hint(error_msg)
         self._log(f"处理错误: {error_msg}")
         self._log(f"处理建议: {hint}")
+        ctx = self._current_run_context or {}
+        if ctx.get("run_type") in {"workflow", "workflow_realtime"}:
+            self.page_workflow.set_run_error(error_msg)
         QMessageBox.critical(self, "处理错误", f"{error_msg}\n\n{hint}")
         self._cleanup_worker()
 
@@ -6733,6 +6684,10 @@ class GPRGuiQt(QMainWindow):
             self._worker_thread = None
         self._worker = None
         self._cancel_in_flight = False
+        pending = self._pending_workflow_run
+        self._pending_workflow_run = None
+        if pending is not None:
+            QTimer.singleShot(0, lambda: self.run_workflow_methods(*pending))
         self.page_basic.btn_cancel.setEnabled(False)
         if self._progress_bar is not None:
             self._progress_bar.setRange(0, 100)

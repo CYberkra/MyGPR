@@ -21,9 +21,9 @@ sys.path.insert(0, str(ROOT))
 def check_syntax() -> None:
     targets = [
         ROOT / "app_qt.py",
-        ROOT / "ui" / "gui_workbench.py",
-        ROOT / "ui" / "gui_param_editor.py",
+        ROOT / "ui" / "gui_workflow_page.py",
         ROOT / "core" / "workflow_executor.py",
+        ROOT / "core" / "workflow_data.py",
         ROOT / "core" / "processing_engine.py",
         ROOT / "core" / "shared_data_state.py",
         ROOT / "core" / "app_paths.py",
@@ -38,6 +38,7 @@ def check_runtime_flows() -> None:
     from PyQt6.QtWidgets import QApplication
 
     from app_qt import GPRGuiQt
+    from core.workflow_data import WorkflowMethod
 
     app = QApplication.instance() or QApplication([])
     win = GPRGuiQt()
@@ -45,20 +46,21 @@ def check_runtime_flows() -> None:
         data = np.tile(np.linspace(0, 10, 80, dtype=np.float32)[:, None], (1, 16))
         win.shared_data.load_data(data, path="demo.csv", source="preflight")
 
-        # Workbench apply should compute and commit the latest method result.
-        wb = win.page_workbench
-        wb.select_method("dewow")
-        wb.param_editor.param_widgets["window"].setValue(5)
-        wb._run_current_method()
+        # Workflow apply should compute and commit the latest method result.
+        method = WorkflowMethod(
+            category="preprocessing",
+            stage_id="trace_correction",
+            method_id="dewow",
+            params={"window": 5},
+        )
+        win.run_workflow_methods([method], realtime=False)
         deadline = time.time() + 5
-        while (
-            wb._preview_running or wb._pending_preview_request is not None
-        ) and time.time() < deadline:
+        while (win._worker is not None or win._worker_thread is not None) and time.time() < deadline:
             app.processEvents()
             time.sleep(0.01)
-        assert wb.preview_data is None, "Applied result should not leave stale preview data"
+        assert win._worker is None, "Workflow worker should finish"
         assert not np.array_equal(win.data, win.original_data), (
-            "Applied result should update shared current data"
+            "Workflow result should update shared current data"
         )
 
         win.undo_last()

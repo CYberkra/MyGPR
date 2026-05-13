@@ -10,7 +10,6 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
 import app_qt
-from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication, QGroupBox, QScrollArea, QStackedWidget
 
 from app_qt import GPRGuiQt
@@ -24,8 +23,7 @@ from core.preset_profiles import (
     GUI_PRESETS_V1,
     RECOMMENDED_RUN_PROFILES,
 )
-from core.workflow_data import METHOD_CATEGORIES, QUICK_PRESETS
-from ui.gui_method_browser import MethodBrowserTree
+from core.workflow_data import METHOD_CATEGORIES, QUICK_PRESETS, WORKFLOW_STAGE_BY_ID
 
 
 class _DummyCanvasEvent:
@@ -316,7 +314,7 @@ def test_phase2_tabs_expose_prioritized_group_hierarchy_and_bridge():
         assert _top_level_group_titles(win.page_auto_tune) == [
             "实验流程",
         ]
-        assert win.page_auto_tune.btn_open_workbench.text() == "进入工作台深度实验"
+        assert win.page_auto_tune.btn_open_workflow.text() == "进入工作流设置"
 
         assert _top_level_group_titles(win.page_quality) == [
             "查看顺序",
@@ -330,14 +328,15 @@ def test_phase2_tabs_expose_prioritized_group_hierarchy_and_bridge():
         app.processEvents()
 
 
-def test_auto_tune_workbench_bridge_switches_to_workbench_mode():
+def test_auto_tune_workflow_bridge_switches_to_workflow_tab():
     app = _get_app()
     win = GPRGuiQt()
     try:
         assert win._content_stack.currentWidget() is win._main_content_widget
-        win.page_auto_tune.btn_open_workbench.click()
+        win.page_auto_tune.btn_open_workflow.click()
         app.processEvents()
-        assert win._content_stack.currentWidget() is win.page_workbench
+        assert win._content_stack.currentWidget() is win._main_content_widget
+        assert win.control_tabs.currentWidget() is win.page_workflow
     finally:
         win.close()
         app.processEvents()
@@ -871,31 +870,41 @@ def test_apply_single_method_separates_preview_and_commit_payload(monkeypatch):
         app.processEvents()
 
 
-def test_workbench_commit_prefers_preview_commit_payload(monkeypatch):
+def test_workflow_save_live_result_prefers_final_payload(monkeypatch):
     app = _get_app()
     win = GPRGuiQt()
     try:
         raw = np.arange(16, dtype=np.float32).reshape(4, 4)
-        preview = np.arange(6, dtype=np.float32).reshape(2, 3)
         committed = raw + 100.0
 
         win.shared_data.load_data(raw, path="demo.csv", source="test")
-        win.page_workbench.set_preview_result(
-            preview,
-            title="预览: demo",
-            header_info={"total_time_ns": 12.0},
-            commit_data=committed,
-            commit_header_info={"total_time_ns": 24.0},
-        )
+        win._last_workflow_result = {
+            "outputs": [
+                {
+                    "method_key": "dewow",
+                    "method_name": "低频漂移矫正（Dewow）",
+                    "params": {"window": 23},
+                }
+            ],
+            "final_data": committed,
+            "final_header_info": {"total_time_ns": 24.0},
+            "final_trace_metadata": {},
+        }
+        win._last_workflow_realtime = True
+        win._workflow_preview_base_state = {
+            "data": raw,
+            "header_info": {"total_time_ns": 12.0},
+            "trace_metadata": {},
+            "label": "原始数据",
+        }
 
         monkeypatch.setattr(win, "_mark_data_changed", lambda: None)
-        monkeypatch.setattr(win, "_update_current_compare_snapshot", lambda: None)
         monkeypatch.setattr(win, "_update_empty_state_and_brief", lambda: None)
         monkeypatch.setattr(win, "plot_data", lambda *_args, **_kwargs: None)
         monkeypatch.setattr(win, "_set_last_run_summary", lambda *args, **kwargs: None)
         monkeypatch.setattr(win, "_log", lambda *_args, **_kwargs: None)
 
-        win._on_workbench_save_result()
+        win.save_workflow_live_result()
 
         assert np.array_equal(win.shared_data.current_data, committed)
         assert win.shared_data.header_info["total_time_ns"] == 24.0
@@ -910,24 +919,25 @@ def test_placeholder_methods_are_hidden_from_public_lists():
     assert "wnnm_placeholder" not in public_keys
 
 
-def test_method_browser_processing_section_matches_public_registry():
+def test_workflow_page_candidates_match_public_registry_for_supported_stages():
     app = _get_app()
-    browser = MethodBrowserTree()
+    win = GPRGuiQt()
     try:
-        processing_ids = []
-        for i in range(browser.tree.topLevelItemCount()):
-            top = browser.tree.topLevelItem(i)
-            if top.data(0, Qt.ItemDataRole.UserRole) == "cat:processing":
-                for j in range(top.childCount()):
-                    group = top.child(j)
-                    for k in range(group.childCount()):
-                        processing_ids.append(
-                            group.child(k).data(0, Qt.ItemDataRole.UserRole)
-                        )
-        assert set(processing_ids) == set(get_public_method_keys())
-        assert len(processing_ids) == len(get_public_method_keys())
+        public_keys = set(get_public_method_keys())
+        workflow_candidates = set()
+        for method in win.page_workflow.config.methods:
+            workflow_candidates.update(
+                WORKFLOW_STAGE_BY_ID.get(method.stage_id, {}).get(
+                    "candidate_methods", []
+                )
+            )
+
+        assert "agcGain" in workflow_candidates
+        assert "dc_shift" in workflow_candidates
+        assert "manual_velocity_model" in workflow_candidates
+        assert workflow_candidates <= public_keys
     finally:
-        browser.close()
+        win.close()
         app.processEvents()
 
 
@@ -1184,11 +1194,14 @@ def test_run_default_pipeline_uses_high_quality_order_and_current_source_mode(
         assert captured["run_type"] == "pipeline"
         assert [task["method_key"] for task in captured["tasks"]] == [
             "set_zero_time",
+            "dc_shift",
             "dewow",
             "frequency_filter_1d",
             "motion_compensation_v2",
             "subtracting_average_2D",
             "wavelet_svd",
+            "manual_velocity_model",
+            "geometry_depth_context",
             "sec_gain",
         ]
         assert {task["param_source_mode"] for task in captured["tasks"]} == {
@@ -1333,6 +1346,7 @@ def test_workflow_presets_align_with_current_denoising_preference():
 
     high_quality_methods = [
         item["method_id"] for item in QUICK_PRESETS["high_quality_uav_gpr"]["methods"]
+        if item.get("enabled", True) and not item.get("hidden", False)
     ]
     assert high_quality_methods == RECOMMENDED_RUN_PROFILES["high_quality_uav_gpr"]["order"]
     assert "frequency_filter_1d" in high_quality_methods

@@ -42,6 +42,7 @@ class WorkflowExecutor(QObject):
     ):
         super().__init__()
         self.history = []  # 执行历史
+        self.step_records = []
         self.current_data = None
         self.current_header_info = clone_header_info(header_info)
         self.current_trace_metadata = clone_trace_metadata(trace_metadata)
@@ -64,6 +65,7 @@ class WorkflowExecutor(QObject):
         params = method.params or {}
 
         try:
+            input_shape = tuple(int(v) for v in data.shape)
             runtime_params = prepare_runtime_params(
                 method_id,
                 params,
@@ -77,6 +79,9 @@ class WorkflowExecutor(QObject):
                 runtime_params,
                 cancel_checker=lambda: self._cancel_requested,
             )
+            meta["input_shape"] = input_shape
+            meta["output_shape"] = tuple(int(v) for v in result.shape)
+            meta["params"] = dict(runtime_params)
             self.current_header_info = merge_result_header_info(
                 self.current_header_info, meta, result.shape
             )
@@ -106,8 +111,11 @@ class WorkflowExecutor(QObject):
             self.current_header_info, None, self.current_data.shape
         )
         self.history = [data.copy()]  # 保存原始数据
+        self.step_records = []
 
-        enabled_methods = [m for m in methods if m.enabled]
+        enabled_methods = [
+            m for m in methods if m.enabled and not getattr(m, "hidden", False)
+        ]
         total = len(enabled_methods)
 
         try:
@@ -125,9 +133,21 @@ class WorkflowExecutor(QObject):
 
                 # 执行方法
                 try:
-                    result, _ = self.execute_single(self.current_data, method)
+                    input_shape = tuple(int(v) for v in self.current_data.shape)
+                    result, meta = self.execute_single(self.current_data, method)
                     self.current_data = result
                     self.history.append(result.copy())
+                    self.step_records.append(
+                        {
+                            "method_id": method.method_id,
+                            "method_name": method_name,
+                            "stage_id": getattr(method, "stage_id", ""),
+                            "input_shape": input_shape,
+                            "output_shape": tuple(int(v) for v in result.shape),
+                            "params": meta.get("params", dict(method.params or {})),
+                            "runtime_warnings": meta.get("runtime_warnings", []),
+                        }
+                    )
 
                     # 发送完成信号
                     self.step_finished.emit(method_name, result)
@@ -164,5 +184,6 @@ class WorkflowExecutor(QObject):
         """重置到原始数据"""
         self.current_data = original_data.copy()
         self.history = [original_data.copy()]
+        self.step_records = []
         self.is_running = False
         self._cancel_requested = False

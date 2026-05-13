@@ -367,7 +367,7 @@ class BasicFlowPage(QWidget):
         action_layout.addWidget(row_third)
 
         self.basic_save_hint = QLabel(
-            "结果图可在图像工具栏点击 保存 按钮保存；处理后的数据会自动同步到工作台。"
+            "结果图可在图像工具栏点击 保存 按钮保存；长链路参数可在“工作流”页统一调整。"
         )
         self.basic_save_hint.setWordWrap(True)
         self.basic_save_hint.setProperty("class", "hintText")

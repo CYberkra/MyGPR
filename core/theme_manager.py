@@ -75,11 +75,6 @@ TOKENS = {
         "tooltip_bg": "#1e293b",
         "tooltip_text": "#f8fafc",
         "tooltip_border": "#334155",
-        "workbench_panel_bg": "#ffffff",
-        "workbench_panel_border": "#d9e3ef",
-        "workbench_toolbar_bg": "#f6f9fd",
-        "workbench_toolbar_border": "#dbe4ef",
-        "workbench_tree_bg": "#fcfdff",
         "source_raw": "#1976d2",
         "source_current": "#2e7d32",
         "source_history": "#ef6c00",
@@ -140,11 +135,6 @@ TOKENS = {
         "tooltip_bg": "#1e293b",
         "tooltip_text": "#f8fafc",
         "tooltip_border": "#334155",
-        "workbench_panel_bg": "#212328",
-        "workbench_panel_border": "#353941",
-        "workbench_toolbar_bg": "#24272d",
-        "workbench_toolbar_border": "#434852",
-        "workbench_tree_bg": "#23252a",
         "source_raw": "#5aa9ff",
         "source_current": "#65c466",
         "source_history": "#ffb454",
@@ -592,31 +582,12 @@ QTreeWidget::branch {{
     width: 16px;
 }}
 
-/* ========== Workbench Specific ========== */
-QWidget#workbenchPreviewToolbar,
-QLabel#workbenchLogStatus,
-QTextEdit#workbenchLogText,
-QLineEdit#workbenchSearchBox,
-QTreeWidget#workbenchMethodTree {{
-    background-color: {workbench_tree_bg};
-    color: {text_primary};
-    border: 1px solid {workbench_toolbar_border};
-    border-radius: {radius_sm};
-}}
-
-QWidget#workbenchMethodPanel,
-QWidget#workbenchParamPanel,
-QWidget#workbenchPreviewPanel {{
-    background-color: {workbench_panel_bg};
-    border: 1px solid {workbench_panel_border};
-    border-radius: {radius_xl};
-}}
-
+/* ========== Workflow / Basic Processing ========== */
 QGroupBox#basicActionCard,
 QGroupBox#basicStatusCard,
 QGroupBox#basicMethodCard {{
     background-color: {bg_card};
-    border: 1px solid {workbench_panel_border};
+    border: 1px solid {border_subtle};
     border-radius: {radius_xl};
     margin-top: 14px;
     padding-top: 22px;
@@ -639,78 +610,11 @@ QGroupBox#basicMethodCard PrimaryPushButton {{
     border-radius: {radius_sm};
 }}
 
-QGroupBox#workbenchSourceCard,
-QGroupBox#workbenchFavoritesCard {{
-    background-color: {bg_subtle};
-    border: 1px solid {workbench_panel_border};
-    border-radius: {radius_lg};
-    margin-top: 12px;
-    padding-top: 22px;
-}}
-
-QGroupBox#workbenchSourceCard::title,
-QGroupBox#workbenchFavoritesCard::title {{
-    left: 12px;
-    padding: 0 8px;
-    color: {text_secondary};
-}}
-
-QWidget#workbenchTopBar {{
-    background-color: transparent;
-}}
-
-QWidget#workbenchPreviewToolbar {{
-    border-color: {workbench_toolbar_border};
-    background-color: {workbench_toolbar_bg};
-}}
-
-QTreeWidget#workbenchMethodTree::item {{
-    height: 30px;
-    padding: 4px 10px;
-    border-radius: {radius_xs};
-}}
-
-QTreeWidget#workbenchMethodTree::item:selected {{
-    background-color: {tree_selected_bg};
-    color: {tree_selected_text};
-    border-left: 3px solid {accent};
-}}
-
-QTreeWidget#workbenchMethodTree::item:has-children {{
-    color: {text_secondary};
-    font-weight: 700;
-}}
-
-QTreeWidget#workbenchMethodTree::item:hover {{
-    background-color: {tree_hover_bg};
-}}
-
-QLineEdit#workbenchSearchBox {{
-    padding-left: 12px;
-    font-size: 13px;
-}}
-
-QLabel#workbenchLogStatus {{
-    background-color: {workbench_toolbar_bg};
-    border-color: {workbench_toolbar_border};
-    padding: 8px 10px;
-}}
-
-QTextEdit#workbenchLogText {{
-    border-radius: {radius_sm};
-}}
-
 QTextEdit#basicInfoLog {{
     background-color: {bg_subtle};
-    border: 1px solid {workbench_panel_border};
+    border: 1px solid {border_subtle};
     border-radius: {radius_sm};
     padding: 8px;
-}}
-
-QWidget#workbenchTopBar PushButton {{
-    min-height: 34px;
-    border-radius: {radius_sm};
-    padding: 6px 14px;
 }}
 
 QGroupBox#basicActionCard PrimaryPushButton[class="basicHeroBtn"] {{
