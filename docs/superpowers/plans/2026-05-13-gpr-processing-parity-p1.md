@@ -35,9 +35,9 @@
 - Modify: `core/workflow_data.py`
 - Test: `tests/test_trace_qc.py`
 
-- [ ] Add no-op-by-default trace quality controls for empty-trace and high-energy trace detection.
-- [ ] Return trace metadata updates describing removed/muted trace indices.
-- [ ] Keep destructive deletion opt-in; default mode should mute or mark, not remove.
+- [x] Add no-op-by-default trace quality controls for empty-trace and high-energy trace detection.
+- [x] Return trace metadata updates describing removed/muted trace indices.
+- [x] Keep destructive deletion opt-in; default mode should mute or mark, not remove.
 
 ### Task 3: Equidistant Trace Resampling
 

@@ -981,11 +981,30 @@ def test_time_cut_is_public_preprocessing_method_with_common_params():
         app.processEvents()
 
 
+def test_trace_qc_is_public_quality_control_method_with_common_params():
+    app = _get_app()
+    win = GPRGuiQt()
+    try:
+        win.page_basic.set_method_by_key("trace_qc")
+
+        assert "trace_qc" in get_public_method_keys()
+        assert "trace_qc" in METHOD_CATEGORIES["preprocessing"]["methods"]
+        assert get_method_category_label("trace_qc") == "质量控制"
+        assert "mode" in win.page_basic.param_vars
+        assert "empty_rms_threshold" in win.page_basic.param_vars
+        assert "spike_zscore" in win.page_basic.param_vars
+        assert "manual_trace_indices" in win.page_basic.param_vars
+    finally:
+        win.close()
+        app.processEvents()
+
+
 def test_public_method_order_follows_processing_chain():
     keys = get_public_method_keys()
     expected_sequence = [
         "set_zero_time",
         "time_cut",
+        "trace_qc",
         "dewow",
         "subtracting_average_2D",
         "median_background_2D",

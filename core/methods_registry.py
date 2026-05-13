@@ -20,6 +20,7 @@ from PythonModule.kirchhoff_migration import method_kirchhoff_migration
 from PythonModule.stolt_migration import method_stolt_migration
 from PythonModule.time_cut import method_time_cut
 from PythonModule.time_to_depth import method_time_to_depth
+from PythonModule.trace_qc import method_trace_qc
 from PythonModule.sec_gain import method_sec_gain
 from PythonModule.sliding_average import method_sliding_average
 from PythonModule.rpca_placeholder import method_rpca_placeholder
@@ -177,6 +178,44 @@ PROCESSING_METHODS = {
                 "default": 0.0,
                 "min": 0.0,
                 "max": 100000.0,
+            },
+        ],
+    },
+    "trace_qc": {
+        "name": "2.2 trace_qc (bad trace quality control)",
+        "type": "local",
+        "module": "trace_qc",
+        "func": method_trace_qc,
+        "params": [
+            {
+                "name": "mode",
+                "label": "Mode",
+                "type": "str",
+                "default": "mark",
+                "tooltip": "mark 只标记，mute 静音坏道，remove 删除坏道。",
+            },
+            {
+                "name": "empty_rms_threshold",
+                "label": "Empty RMS threshold",
+                "type": "float",
+                "default": 0.0,
+                "min": 0.0,
+                "max": 1000000.0,
+            },
+            {
+                "name": "spike_zscore",
+                "label": "Spike z-score",
+                "type": "float",
+                "default": 0.0,
+                "min": 0.0,
+                "max": 1000.0,
+            },
+            {
+                "name": "manual_trace_indices",
+                "label": "Manual trace indices",
+                "type": "str",
+                "default": "",
+                "tooltip": "可填 3,8-12 这类 0-based 道号；留空则只用阈值检测。",
             },
         ],
     },
@@ -1282,6 +1321,12 @@ METHOD_METADATA = {
         "visibility": "public",
         "display_name": "时间窗裁剪",
     },
+    "trace_qc": {
+        "category": "quality_control",
+        "maturity": "stable",
+        "visibility": "public",
+        "display_name": "坏道质量控制",
+    },
     "agcGain": {
         "category": "gain",
         "maturity": "stable",
@@ -1449,6 +1494,7 @@ METHOD_DISPLAY_NAMES = {
 PREFERRED_METHOD_ORDER = [
     "set_zero_time",
     "time_cut",
+    "trace_qc",
     "dewow",
     "subtracting_average_2D",
     "median_background_2D",
@@ -1483,6 +1529,7 @@ METHOD_TAGS = {
     "dewow": "推荐",
     "set_zero_time": "推荐",
     "time_cut": "备选",
+    "trace_qc": "备选",
     "svd_bg": "备选",
     "fk_filter": "实验",
     "frequency_filter_1d": "推荐",
@@ -1513,12 +1560,14 @@ METHOD_CATEGORY_LABELS = {
     "migration": "迁移成像",
     "depth_conversion": "时间深度转换",
     "motion_compensation": "运动补偿",
+    "quality_control": "质量控制",
     "experimental": "实验功能",
 }
 
 AUTO_TUNE_STAGE_BY_METHOD = {
     "set_zero_time": "zero_time",
     "time_cut": "preprocess",
+    "trace_qc": "preprocess",
     "dewow": "drift",
     "subtracting_average_2D": "background",
     "median_background_2D": "background",

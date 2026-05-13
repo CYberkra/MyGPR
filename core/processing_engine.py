@@ -109,7 +109,7 @@ def prepare_runtime_params(
 
     needs_motion_runtime = _requires_motion_runtime_context(method_id)
 
-    if needs_motion_runtime or method_id == "kirchhoff_migration":
+    if needs_motion_runtime or method_id in {"kirchhoff_migration", "trace_qc"}:
         _inject_runtime_metadata_context(
             runtime_params,
             header_info=header_info,

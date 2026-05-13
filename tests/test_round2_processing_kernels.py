@@ -12,13 +12,18 @@ from core.gprpy_compat import (
     apply_gprpy_dewow,
     apply_gprpy_rem_mean_trace,
 )
-from core.processing_engine import prepare_runtime_params, run_processing_method
+from core.processing_engine import (
+    merge_result_trace_metadata,
+    prepare_runtime_params,
+    run_processing_method,
+)
 from PythonModule.dewow import method_dewow
 from PythonModule.hankel_svd import method_hankel_svd
 from PythonModule.rpca_background import method_rpca_background
 from PythonModule.sec_gain import method_sec_gain
 from PythonModule.set_zero_time import method_set_zero_time
 from PythonModule.time_cut import method_time_cut
+from PythonModule.trace_qc import method_trace_qc
 from PythonModule.wavelet_2d import method_wavelet_2d
 from PythonModule.wavelet_svd import method_wavelet_svd
 from PythonModule.wnnm_placeholder import method_wnnm_placeholder
@@ -114,6 +119,61 @@ def test_time_cut_runtime_params_use_header_total_time_ns():
     assert np.array_equal(result, raw[:4, :])
     assert meta["time_end_idx"] == 4
     assert meta["header_info_updates"]["total_time_ns"] == 40.0
+
+
+def test_trace_qc_default_marks_without_changing_data():
+    raw = np.ones((6, 5), dtype=np.float32)
+    raw[:, 2] = 0.0
+
+    result, meta = method_trace_qc(raw, empty_rms_threshold=0.1)
+
+    assert np.array_equal(result, raw)
+    assert meta["mode"] == "mark"
+    assert meta["bad_trace_indices"].tolist() == [2]
+    assert meta["trace_metadata_updates"]["trace_qc_bad_mask"].tolist() == [
+        0,
+        0,
+        1,
+        0,
+        0,
+    ]
+
+
+def test_trace_qc_mute_and_remove_modes():
+    raw = np.ones((4, 5), dtype=np.float32)
+    raw[:, 3] = 100.0
+
+    muted, muted_meta = method_trace_qc(raw, mode="mute", spike_zscore=2.0)
+    assert np.allclose(muted[:, 3], 0.0)
+    assert muted_meta["bad_trace_indices"].tolist() == [3]
+
+    removed, removed_meta = method_trace_qc(
+        raw,
+        mode="remove",
+        manual_trace_indices="1,3",
+        trace_metadata={"trace_index": np.arange(5, dtype=np.int32)},
+    )
+    assert removed.shape == (4, 3)
+    assert removed_meta["bad_trace_indices"].tolist() == [1, 3]
+    assert removed_meta["trace_metadata_out"]["trace_index"].tolist() == [0, 2, 4]
+
+
+def test_trace_qc_remove_filters_runtime_trace_metadata():
+    raw = np.ones((4, 5), dtype=np.float32)
+    trace_metadata = {"trace_index": np.arange(5, dtype=np.int32)}
+    params = prepare_runtime_params(
+        "trace_qc",
+        {"mode": "remove", "manual_trace_indices": "0,4"},
+        None,
+        trace_metadata,
+        raw.shape,
+    )
+
+    result, meta = run_processing_method(raw, "trace_qc", params)
+    merged = merge_result_trace_metadata(trace_metadata, meta)
+
+    assert result.shape == (4, 3)
+    assert merged["trace_index"].tolist() == [1, 2, 3]
 
 
 def test_method_sec_gain_returns_metadata_dict_and_curve():
