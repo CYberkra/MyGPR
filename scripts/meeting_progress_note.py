@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Sequence
@@ -12,6 +13,18 @@ from typing import Sequence
 
 DEFAULT_VAULT_PATH = Path(r"D:\ClawX-Data\Obsidian\uav_gpr")
 DEFAULT_NOTE_PATH = Path("10-项目/组会进展/组会进展记录.md")
+DATE_ONLY_HEADING_RE = re.compile(r"^##\s+\d{4}-\d{2}-\d{2}\s*$")
+LEGACY_CHILD_HEADING_RE = re.compile(
+    r"^##\s+(本次主要进展|可展示成果|当前风险|当前问题/风险|下一步|关联)\s*$"
+)
+LEGACY_CHILD_HEADINGS = {
+    "本次主要进展": "本次主要进展",
+    "可展示成果": "可展示成果",
+    "当前风险": "当前问题/风险",
+    "当前问题/风险": "当前问题/风险",
+    "下一步": "下一步",
+    "关联": "关联",
+}
 
 
 def _clean_items(items: Sequence[str] | None) -> list[str]:
@@ -34,6 +47,35 @@ def _obsidian_link_for_vault_path(path_text: str, vault_path: Path) -> str:
     except Exception:
         return path_text
     return "[[" + str(rel).replace("\\", "/").removesuffix(".md") + "]]"
+
+
+def normalize_meeting_progress_note(content: str) -> str:
+    """Normalize legacy meeting note headings so date headings collapse sections."""
+    lines = content.splitlines()
+    normalized: list[str] = []
+    awaiting_date_body = False
+
+    for line in lines:
+        stripped = line.strip()
+        if DATE_ONLY_HEADING_RE.match(stripped):
+            awaiting_date_body = True
+            normalized.append(line)
+            continue
+
+        if awaiting_date_body and stripped:
+            if stripped.startswith("- "):
+                if normalized and normalized[-1].strip():
+                    normalized.append("")
+                normalized.append("### 本次主要进展")
+            awaiting_date_body = False
+
+        child_match = LEGACY_CHILD_HEADING_RE.match(stripped)
+        if child_match:
+            normalized.append(f"### {LEGACY_CHILD_HEADINGS[child_match.group(1)]}")
+        else:
+            normalized.append(line)
+
+    return "\n".join(normalized).rstrip() + "\n"
 
 
 def build_note_entry(
@@ -139,7 +181,7 @@ def append_meeting_progress_note(
 
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists():
-        existing = target.read_text(encoding="utf-8")
+        existing = normalize_meeting_progress_note(target.read_text(encoding="utf-8"))
         content = existing.rstrip() + "\n\n" + entry
     else:
         content = _initial_note_content().rstrip() + "\n\n" + entry
