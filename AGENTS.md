@@ -126,6 +126,12 @@ pytest
 - Before claiming a fix, re-run the original feedback loop as well as any new regression test. If no valid test seam exists, document that as an architecture risk rather than claiming full verification.
 - This project-level rule complements the global `systematic-debugging` skill: keep root-cause tracing, but first turn the symptom into an executable signal.
 
+## Project Skills
+- Use `$mygpr-processing-validation` for MyGPR algorithm, parameter, B-scan, auto-tune, gprMax, real CSV, report, or GUI/CLI processing validation work.
+- Use `$uavgpr-research-review` for UAV-GPR/GPR literature, software, patent, manual, workflow, and method comparison research that affects MyGPR decisions.
+- Use `$mygpr-checkpoint-progress` when closing verified MyGPR work with git checkpoints, Obsidian version archives, or concise group-meeting progress notes.
+- These local skills live under `C:\Users\17844\.codex\skills\` and are project workflow helpers; keep project-specific durable rules in `AGENTS.md` and Obsidian as the source of truth.
+
 ## Code Style
 - Every Python file should start with:
   - `#!/usr/bin/env python3`
