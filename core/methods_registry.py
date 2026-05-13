@@ -74,6 +74,7 @@ from PythonModule.motion_compensation_vibration import (  # type: ignore[import]
     method_motion_compensation_vibration,
 )
 from PythonModule.motion_compensation_v2 import method_motion_compensation_v2
+from PythonModule.amplitude_scale import method_amplitude_scale
 
 
 # ============ 方法注册表 ============
@@ -297,6 +298,36 @@ PROCESSING_METHODS = {
             "smoothing_samples": [15, 31, 61, 101],
             "max_gain": [4.0, 6.0, 8.0, 12.0],
         },
+    },
+    "amplitude_scale": {
+        "name": "Amplitude scale / normalization",
+        "type": "local",
+        "func": method_amplitude_scale,
+        "params": [
+            {
+                "name": "mode",
+                "label": "Mode",
+                "type": "str",
+                "default": "constant",
+                "tooltip": "constant、peak 或 rms",
+            },
+            {
+                "name": "scale",
+                "label": "Scale",
+                "type": "float",
+                "default": 1.0,
+                "min": -100000.0,
+                "max": 100000.0,
+            },
+            {
+                "name": "target",
+                "label": "Target amplitude",
+                "type": "float",
+                "default": 1.0,
+                "min": 0.0,
+                "max": 100000.0,
+            },
+        ],
     },
     "subtracting_average_2D": {
         "name": "4 subtracting_average_2D (background removal)",
@@ -1402,6 +1433,12 @@ METHOD_METADATA = {
         "visibility": "public",
         "display_name": "能量衰减增益",
     },
+    "amplitude_scale": {
+        "category": "gain",
+        "maturity": "stable",
+        "visibility": "public",
+        "display_name": "幅值缩放/归一化",
+    },
     "subtracting_average_2D": {
         "category": "background_suppression",
         "maturity": "stable",
@@ -1575,6 +1612,7 @@ PREFERRED_METHOD_ORDER = [
     "fk_filter",
     "sec_gain",
     "energy_decay_gain",
+    "amplitude_scale",
     "compensatingGain",
     "agcGain",
     "hankel_svd",
@@ -1603,6 +1641,7 @@ METHOD_TAGS = {
     "trace_qc": "备选",
     "equidistant_trace_resample": "备选",
     "energy_decay_gain": "推荐",
+    "amplitude_scale": "备选",
     "svd_bg": "备选",
     "fk_filter": "实验",
     "frequency_filter_1d": "推荐",
@@ -1651,6 +1690,7 @@ AUTO_TUNE_STAGE_BY_METHOD = {
     "ccbs": "background",
     "sec_gain": "gain",
     "energy_decay_gain": "gain",
+    "amplitude_scale": "gain",
     "compensatingGain": "gain",
     "agcGain": "gain",
     "running_average_2D": "impulse",

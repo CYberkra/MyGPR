@@ -23,7 +23,7 @@
 - [x] Smooth and clip the gain curve with `smoothing_samples`, `strength`, `min_gain`, and `max_gain`.
 - [x] Register as a public gain method.
 - [x] Add deterministic kernel and GUI tests.
-- [ ] Verify and create a normal Git checkpoint.
+- [x] Verify and create a normal Git checkpoint.
 
 ### Task 2: Constant Scale and Normalization
 
@@ -34,9 +34,9 @@
 - Test: `tests/test_round2_processing_kernels.py`
 - Test: `tests/test_gui_presets.py`
 
-- [ ] Add `constant`, `peak`, and `rms` scaling modes.
-- [ ] Keep constant scale explicit and normalization guarded by epsilon.
-- [ ] Register as a public gain method.
+- [x] Add `constant`, `peak`, and `rms` scaling modes.
+- [x] Keep constant scale explicit and normalization guarded by epsilon.
+- [x] Register as a public gain method.
 - [ ] Verify and create a normal Git checkpoint.
 
 ### Task 3: Hilbert Envelope

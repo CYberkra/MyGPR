@@ -18,6 +18,7 @@ from core.processing_engine import (
     run_processing_method,
 )
 from PythonModule.dewow import method_dewow
+from PythonModule.amplitude_scale import method_amplitude_scale
 from PythonModule.equidistant_trace_resample import method_equidistant_trace_resample
 from PythonModule.energy_decay_gain import method_energy_decay_gain
 from PythonModule.hankel_svd import method_hankel_svd
@@ -277,6 +278,28 @@ def test_method_energy_decay_gain_uses_robust_trace_statistic():
     assert np.isfinite(result).all()
     assert float(meta["decay_curve"][4]) == 1.0
     assert float(meta["gain_curve"][4]) <= 1.1
+
+
+def test_method_amplitude_scale_constant_mode():
+    raw = np.array([[1.0, -2.0], [3.0, -4.0]], dtype=np.float32)
+
+    result, meta = method_amplitude_scale(raw, mode="constant", scale=2.5)
+
+    assert np.allclose(result, raw * 2.5)
+    assert meta["mode"] == "constant"
+    assert meta["effective_scale"] == 2.5
+
+
+def test_method_amplitude_scale_peak_and_rms_normalization():
+    raw = np.array([[3.0, 4.0], [0.0, 0.0]], dtype=np.float32)
+
+    peak_result, peak_meta = method_amplitude_scale(raw, mode="peak", target=1.0)
+    rms_result, rms_meta = method_amplitude_scale(raw, mode="rms", target=1.0)
+
+    assert np.isclose(np.max(np.abs(peak_result)), 1.0)
+    assert np.isclose(np.sqrt(np.mean(rms_result.astype(np.float64) ** 2)), 1.0)
+    assert peak_meta["effective_scale"] == 0.25
+    assert rms_meta["mode"] == "rms"
 
 
 def test_method_hankel_svd_keeps_contract_and_ignores_legacy_batch_kwarg():

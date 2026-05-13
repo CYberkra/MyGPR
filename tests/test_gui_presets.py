@@ -1034,6 +1034,23 @@ def test_energy_decay_gain_is_public_gain_method_with_common_params():
         app.processEvents()
 
 
+def test_amplitude_scale_is_public_gain_method_with_common_params():
+    app = _get_app()
+    win = GPRGuiQt()
+    try:
+        win.page_basic.set_method_by_key("amplitude_scale")
+
+        assert "amplitude_scale" in get_public_method_keys()
+        assert "amplitude_scale" in METHOD_CATEGORIES["gain"]["methods"]
+        assert get_method_category_label("amplitude_scale") == "增益"
+        assert "mode" in win.page_basic.param_vars
+        assert "scale" in win.page_basic.param_vars
+        assert "target" in win.page_basic.param_vars
+    finally:
+        win.close()
+        app.processEvents()
+
+
 def test_public_method_order_follows_processing_chain():
     keys = get_public_method_keys()
     expected_sequence = [
@@ -1051,6 +1068,7 @@ def test_public_method_order_follows_processing_chain():
         "fk_filter",
         "sec_gain",
         "energy_decay_gain",
+        "amplitude_scale",
         "compensatingGain",
         "agcGain",
         "hankel_svd",

@@ -51,6 +51,7 @@ METHOD_CATEGORIES = {
             "agcGain",
             "sec_gain",
             "energy_decay_gain",
+            "amplitude_scale",
         ],
     },
     "denoising": {
