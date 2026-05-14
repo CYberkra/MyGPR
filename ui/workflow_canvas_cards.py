@@ -7,7 +7,7 @@ from __future__ import annotations
 from typing import Callable
 
 from PyQt6.QtCore import QEvent, QPoint, QPointF, QSignalBlocker, QTimer, Qt, pyqtSignal
-from PyQt6.QtGui import QPainterPath, QPen
+from PyQt6.QtGui import QBrush, QColor, QPainterPath, QPen
 from PyQt6.QtWidgets import (
     QAbstractButton,
     QAbstractSpinBox,
@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QFrame,
+    QGraphicsEllipseItem,
     QGraphicsPathItem,
     QGraphicsProxyWidget,
     QGraphicsScene,
@@ -472,10 +473,10 @@ class WorkflowNodeCard(QFrame):
                     spin.setValue(int(round(value)))
             finally:
                 del blocker
-            self._on_param_changed()
 
         spin.valueChanged.connect(sync_slider)
         slider.valueChanged.connect(sync_spin)
+        slider.sliderReleased.connect(self._on_param_changed)
 
         layout.addWidget(spin)
         layout.addWidget(slider)
@@ -533,21 +534,51 @@ class WorkflowNodeCard(QFrame):
         return control, control.text
 
 
+class WorkflowPortItem(QGraphicsEllipseItem):
+    """Lightweight graphics port used as the real edge endpoint."""
+
+    def __init__(self, kind: str, parent=None):
+        super().__init__(-5.0, -5.0, 10.0, 10.0, parent)
+        self.kind = str(kind)
+        color = QColor("#3278ff") if self.kind == "input" else QColor("#7d4cff")
+        self.setBrush(QBrush(color))
+        self.setPen(QPen(QColor("#ffffff"), 1.5))
+        self.setZValue(20)
+        self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+
+    def scene_anchor(self) -> QPointF:
+        return self.sceneBoundingRect().center()
+
+
 class WorkflowNodeProxy(QGraphicsProxyWidget):
     """Movable graphics proxy that notifies the scene when positions change."""
 
     def __init__(self, row: int, parent=None):
         super().__init__(parent)
         self.row = int(row)
+        self.input_port = WorkflowPortItem("input", self)
+        self.output_port = WorkflowPortItem("output", self)
         self.setFlags(
             QGraphicsProxyWidget.GraphicsItemFlag.ItemIsMovable
             | QGraphicsProxyWidget.GraphicsItemFlag.ItemIsSelectable
             | QGraphicsProxyWidget.GraphicsItemFlag.ItemSendsGeometryChanges
         )
 
+    def setWidget(self, widget):  # noqa: N802 - Qt override
+        super().setWidget(widget)
+        self.update_port_positions()
+
+    def update_port_positions(self) -> None:
+        rect = self.boundingRect()
+        if not rect.isValid():
+            return
+        self.input_port.setPos(rect.left(), rect.center().y())
+        self.output_port.setPos(rect.right(), rect.center().y())
+
     def itemChange(self, change, value):  # noqa: N802 - Qt override
         result = super().itemChange(change, value)
         if change == QGraphicsProxyWidget.GraphicsItemChange.ItemPositionHasChanged:
+            self.update_port_positions()
             scene = self.scene()
             if isinstance(scene, WorkflowCanvasScene):
                 scene.update_edges()
@@ -563,15 +594,23 @@ class WorkflowCanvasScene(QGraphicsScene):
         self.edges: list[QGraphicsPathItem] = []
 
     def update_edges(self) -> None:
-        for edge in self.edges:
+        target_count = max(0, len(self.proxies) - 1)
+        while len(self.edges) > target_count:
+            edge = self.edges.pop()
             self.removeItem(edge)
-        self.edges.clear()
-        pen = QPen(Qt.GlobalColor.darkGray, 2)
-        for left, right in zip(self.proxies, self.proxies[1:]):
-            a = left.sceneBoundingRect()
-            b = right.sceneBoundingRect()
-            start = QPointF(a.right(), a.center().y())
-            end = QPointF(b.left(), b.center().y())
+        while len(self.edges) < target_count:
+            edge = QGraphicsPathItem()
+            edge.setPen(QPen(QColor("#7b8794"), 2))
+            edge.setZValue(-10)
+            self.addItem(edge)
+            self.edges.append(edge)
+
+        for proxy in self.proxies:
+            proxy.update_port_positions()
+
+        for edge, (left, right) in zip(self.edges, zip(self.proxies, self.proxies[1:])):
+            start = left.output_port.scene_anchor()
+            end = right.input_port.scene_anchor()
             dx = max(80.0, (end.x() - start.x()) * 0.45)
             path = QPainterPath(start)
             path.cubicTo(
@@ -579,11 +618,7 @@ class WorkflowCanvasScene(QGraphicsScene):
                 QPointF(end.x() - dx, end.y()),
                 end,
             )
-            edge = QGraphicsPathItem(path)
-            edge.setPen(pen)
-            edge.setZValue(-10)
-            self.addItem(edge)
-            self.edges.append(edge)
+            edge.setPath(path)
 
 
 class WorkflowCanvasView(QGraphicsView):

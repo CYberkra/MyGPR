@@ -12,7 +12,7 @@ import numpy as np
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import QEvent, QPointF
-from PyQt6.QtWidgets import QApplication, QAbstractSpinBox, QComboBox, QLineEdit, QSlider
+from PyQt6.QtWidgets import QApplication, QAbstractSpinBox, QCheckBox, QComboBox, QLineEdit, QSlider
 
 from core.app_paths import get_workflow_templates_dir
 from core.workflow_data import WorkflowConfigManager, build_default_workflow_config
@@ -236,6 +236,41 @@ def test_workflow_canvas_preview_node_updates_from_output_data():
         app.processEvents()
 
 
+def test_workflow_canvas_node_ports_and_edges_follow_proxy_moves():
+    app = _get_app()
+    canvas = WorkflowCanvasView()
+    try:
+        config = build_default_workflow_config("high_quality_uav_gpr")
+        canvas.set_methods(config.methods)
+        app.processEvents()
+
+        algorithm_proxies = [proxy for proxy in canvas._scene.proxies if proxy.row >= 0]
+        assert algorithm_proxies
+        assert all(proxy.input_port is not None for proxy in algorithm_proxies)
+        assert all(proxy.output_port is not None for proxy in algorithm_proxies)
+        assert len(canvas._scene.edges) == max(0, len(canvas._scene.proxies) - 1)
+
+        first_edge = canvas._scene.edges[0]
+        first_path = first_edge.path()
+        first_start = first_path.elementAt(0)
+        expected_start = canvas._scene.proxies[0].output_port.scene_anchor()
+        assert first_start.x == expected_start.x()
+        assert first_start.y == expected_start.y()
+
+        edge_count = len(canvas._scene.edges)
+        edge_ids = [id(edge) for edge in canvas._scene.edges]
+        old_path = first_edge.path()
+        canvas._scene.proxies[0].setPos(canvas._scene.proxies[0].pos() + QPointF(24, 16))
+        app.processEvents()
+
+        assert len(canvas._scene.edges) == edge_count
+        assert [id(edge) for edge in canvas._scene.edges] == edge_ids
+        assert first_edge.path() != old_path
+    finally:
+        canvas.close()
+        app.processEvents()
+
+
 def test_workflow_canvas_update_node_defers_scene_rebuild():
     app = _get_app()
     canvas = WorkflowCanvasView()
@@ -332,6 +367,64 @@ def test_workflow_node_card_numeric_params_expose_slider():
         assert card.findChild(QSlider) is not None
     finally:
         card.close()
+        app.processEvents()
+
+
+def test_canvas_card_toggle_hidden_does_not_rebuild_synchronously_and_skips_step():
+    app = _get_app()
+    page = WorkflowPage()
+    emitted: list[tuple[list, bool]] = []
+    page.workflow_run_requested.connect(lambda methods, realtime: emitted.append((methods, realtime)))
+    try:
+        page.realtime_check.setChecked(False)
+        page.step_list.setCurrentRow(0)
+        app.processEvents()
+
+        proxy = page.workflow_canvas._scene.proxies[0]
+        card = proxy.widget()
+        assert isinstance(card, WorkflowNodeCard)
+        enabled_check = next(
+            child for child in card.findChildren(QCheckBox) if child.text() == "启用"
+        )
+
+        enabled_check.setChecked(False)
+        app.processEvents()
+
+        assert page.config.methods[0].enabled is False
+        assert "停用" in page.step_list.item(0).text()
+
+        proxy = page.workflow_canvas._scene.proxies[0]
+        card = proxy.widget()
+        assert isinstance(card, WorkflowNodeCard)
+        enabled_check = next(
+            child for child in card.findChildren(QCheckBox) if child.text() == "启用"
+        )
+        enabled_check.setChecked(True)
+        app.processEvents()
+
+        assert page.config.methods[0].enabled is True
+
+        proxy = page.workflow_canvas._scene.proxies[0]
+        card = proxy.widget()
+        assert isinstance(card, WorkflowNodeCard)
+        hidden_check = next(
+            child for child in card.findChildren(QCheckBox) if child.text() == "隐藏"
+        )
+        hidden_check.setChecked(True)
+        app.processEvents()
+
+        assert page.config.methods[0].hidden is True
+        assert "隐藏" in page.step_list.item(0).text()
+        assert page.workflow_canvas._scene.proxies
+
+        page.step_list.setCurrentRow(0)
+        page.request_run_from_current()
+        app.processEvents()
+
+        assert emitted
+        assert all(method.method_id != page.config.methods[0].method_id for method in emitted[-1][0])
+    finally:
+        page.close()
         app.processEvents()
 
 

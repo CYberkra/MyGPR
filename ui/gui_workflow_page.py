@@ -620,8 +620,8 @@ class WorkflowPage(QWidget):
         if row >= 0 and method is not None:
             method.order = row
             self.step_list.item(row).setText(self._format_step_text(method))
-            self._sync_order_from_list()
             self.workflow_canvas.update_node(row)
+            self._update_step_buttons()
 
     def _on_order_changed(self) -> None:
         self._sync_order_from_list()
