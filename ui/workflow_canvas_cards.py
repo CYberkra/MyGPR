@@ -53,22 +53,45 @@ MAX_NODE_HEIGHT = 720
 
 
 class ParamRowWidget(QWidget):
-    """Vertical parameter block used inside workflow nodes."""
+    """Compact parameter block used inside workflow nodes."""
 
     def __init__(self, label: str, control: QWidget, tooltip: str = "", parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
+
         name = QLabel(label)
         name.setObjectName("paramName")
-        name.setWordWrap(True)
-        layout.addWidget(name)
-        layout.addWidget(control)
+        name.setWordWrap(False)
+        name.setMinimumWidth(90)
+
+        top_row = QHBoxLayout()
+        top_row.setContentsMargins(0, 0, 0, 0)
+        top_row.setSpacing(8)
+        top_row.addWidget(name, 1)
+
+        spin = control.findChild(QAbstractSpinBox)
+        slider = control.findChild(QSlider)
+        if spin is not None and slider is not None:
+            spin.setParent(self)
+            slider.setParent(self)
+            top_row.addWidget(spin, 0)
+            layout.addLayout(top_row)
+            layout.addWidget(slider)
+            control.deleteLater()
+        else:
+            top_row.addWidget(control, 0)
+            layout.addLayout(top_row)
+
         if tooltip:
             self.setToolTip(tooltip)
             name.setToolTip(tooltip)
             control.setToolTip(tooltip)
+            if spin is not None:
+                spin.setToolTip(tooltip)
+            if slider is not None:
+                slider.setToolTip(tooltip)
 
 
 class WorkflowNodeCard(QFrame):
@@ -349,6 +372,7 @@ class WorkflowNodeCard(QFrame):
         is_float: bool,
     ) -> tuple[QWidget, Callable[[], object]]:
         container = QWidget()
+        container.setProperty("workflowNumericParam", True)
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(5)
@@ -406,7 +430,7 @@ class WorkflowNodeCard(QFrame):
         value = self.method.params.get(name, meta.get("default", ""))
 
         if param_type == "bool":
-            control = QCheckBox(str(meta.get("label", name)))
+            control = QCheckBox()
             control.setChecked(bool(value))
             control.toggled.connect(self._on_param_changed)
             return control, control.isChecked
@@ -424,6 +448,10 @@ class WorkflowNodeCard(QFrame):
 
         if param_type == "int":
             control = QSpinBox()
+            control.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+            control.setAlignment(Qt.AlignmentFlag.AlignRight)
+            control.setMinimumWidth(96)
+            control.setMaximumWidth(140)
             min_v = int(meta.get("min", -1000000))
             max_v = int(meta.get("max", 1000000))
             control.setRange(min_v, max_v)
@@ -435,6 +463,10 @@ class WorkflowNodeCard(QFrame):
 
         if param_type == "float":
             control = QDoubleSpinBox()
+            control.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+            control.setAlignment(Qt.AlignmentFlag.AlignRight)
+            control.setMinimumWidth(96)
+            control.setMaximumWidth(140)
             min_v = float(meta.get("min", -1.0e9))
             max_v = float(meta.get("max", 1.0e9))
             control.setRange(min_v, max_v)

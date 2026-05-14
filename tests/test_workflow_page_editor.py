@@ -12,10 +12,10 @@ import numpy as np
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import QEvent, QPointF
-from PyQt6.QtWidgets import QApplication, QAbstractSpinBox, QComboBox, QLineEdit, QSlider, QToolButton
+from PyQt6.QtWidgets import QApplication, QAbstractSpinBox, QCheckBox, QComboBox, QLineEdit, QSlider, QToolButton
 
 from core.app_paths import get_workflow_templates_dir
-from core.workflow_data import WorkflowConfigManager, build_default_workflow_config
+from core.workflow_data import WorkflowConfigManager, WorkflowMethod, build_default_workflow_config
 from ui.workflow_canvas_cards import WorkflowNodeCard, WorkflowNodeProxy
 from ui.workflow_canvas_cards import WorkflowCanvasView
 from ui.workflow_canvas_preview import BscanPreviewCard, _downsample_for_preview
@@ -407,8 +407,31 @@ def test_workflow_node_card_numeric_params_expose_slider():
 
     card = WorkflowNodeCard(0, method)
     try:
-        assert card.findChild(QAbstractSpinBox) is not None
-        assert card.findChild(QSlider) is not None
+        spin = card.findChild(QAbstractSpinBox)
+        slider = card.findChild(QSlider)
+        assert spin is not None
+        assert slider is not None
+        assert spin.buttonSymbols() == QAbstractSpinBox.ButtonSymbols.NoButtons
+        assert bool(spin.property("workflowWheelGuard"))
+        assert bool(slider.property("workflowWheelGuard"))
+    finally:
+        card.close()
+        app.processEvents()
+
+
+def test_workflow_node_card_bool_param_does_not_duplicate_label_text():
+    app = _get_app()
+    method = WorkflowMethod(
+        category="denoise",
+        stage_id="denoise",
+        method_id="hilbert_envelope",
+        params={"normalize": True, "log_compress": False},
+    )
+    card = WorkflowNodeCard(0, method)
+    try:
+        checkbox = card.findChild(QCheckBox)
+        assert checkbox is not None
+        assert checkbox.text() == ""
     finally:
         card.close()
         app.processEvents()
