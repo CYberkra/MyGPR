@@ -12,6 +12,7 @@ from core.processing_engine import (
     run_processing_method,
 )
 from core.workflow_data import build_default_workflow_config
+from core.workflow_data import WorkflowConfig, WorkflowMethod
 
 
 def test_dc_shift_mean_and_median_keep_shape_and_remove_offsets():
@@ -113,3 +114,43 @@ def test_default_workflow_contains_gain_candidates_and_hidden_migration():
     assert "sec_gain" in enabled_ids
     assert migration.hidden is True
     assert migration.method_id not in enabled_ids
+
+
+def test_workflow_config_roundtrip_preserves_realtime_stage_and_hidden_flags():
+    config = WorkflowConfig(
+        name="实时实验模板",
+        template_type="user",
+        realtime_enabled=True,
+        methods=[
+            WorkflowMethod(
+                category="preprocessing",
+                stage_id="trace_correction",
+                method_id="dc_shift",
+                enabled=True,
+                order=0,
+                params={"estimator": "median", "scope": "per_trace"},
+            ),
+            WorkflowMethod(
+                category="migration",
+                stage_id="migration",
+                method_id="kirchhoff_migration",
+                enabled=True,
+                hidden=True,
+                order=1,
+                params={"velocity": 0.1},
+            ),
+        ],
+    )
+
+    restored = WorkflowConfig.from_dict(config.to_dict())
+
+    assert restored.name == "实时实验模板"
+    assert restored.template_type == "user"
+    assert restored.realtime_enabled is True
+    assert restored.methods[0].stage_id == "trace_correction"
+    assert restored.methods[0].params["estimator"] == "median"
+    assert restored.methods[1].stage_id == "migration"
+    assert restored.methods[1].hidden is True
+    assert [method.method_id for method in restored.get_enabled_methods()] == [
+        "dc_shift"
+    ]
