@@ -8,3 +8,4 @@ PythonModule/__pycache__/
 output/
 favorites/
 workflow_templates/
+.chatgpt_inbox/
