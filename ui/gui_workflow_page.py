@@ -45,6 +45,7 @@ from core.workflow_data import (
     build_default_workflow_config,
     get_config_manager,
 )
+from core.workflow_validation import validate_workflow_config
 from ui.workflow_canvas_cards import WorkflowCanvasView
 
 
@@ -416,13 +417,21 @@ class WorkflowPage(QWidget):
             self._add_canvas_node(str(method_id), QPointF(120, 120))
 
     def _validate_workflow_ui(self) -> None:
-        methods = self.get_enabled_methods()
-        if methods:
-            self.status_label.setText(f"Validate: {len(methods)} 个启用步骤")
-            self._log(f"Validate: 当前工作流可运行步骤 {len(methods)} 个")
-        else:
-            self.status_label.setText("Validate: 没有启用步骤")
-            self._log("Validate: 当前工作流没有启用步骤")
+        report = validate_workflow_config(self.config, execution_mode="order")
+        text = report.to_text()
+
+        self.status_label.setText(report.summary())
+        self._log(text)
+
+        if hasattr(self, "qc_label") and self.qc_label is not None:
+            lines = [
+                "QC / Validation",
+                f"errors: {len(report.errors)}",
+                f"warnings: {len(report.warnings)}",
+                f"info: {len(report.infos)}",
+            ]
+            lines.extend(f"- {issue.code}" for issue in report.issues[:6])
+            self.qc_label.setText("\n".join(lines))
 
     def _on_canvas_links_changed(self, links: object) -> None:
         self.config.canvas_links = list(links) if isinstance(links, list) else []
