@@ -12,7 +12,7 @@ import numpy as np
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import QEvent, QPointF
-from PyQt6.QtWidgets import QApplication, QAbstractSpinBox, QCheckBox, QComboBox, QLineEdit, QSlider
+from PyQt6.QtWidgets import QApplication, QAbstractSpinBox, QComboBox, QLineEdit, QSlider, QToolButton
 
 from core.app_paths import get_workflow_templates_dir
 from core.workflow_data import WorkflowConfigManager, build_default_workflow_config
@@ -121,15 +121,14 @@ def test_compact_vertical_layout_uses_short_actions_and_step_labels():
     app = _get_app()
     page = WorkflowPage()
     try:
-        assert page.btn_run_all.text() == "全链"
-        assert page.btn_run_from_current.text() == "后续"
-        assert page.btn_run_selected.text() == "当前"
-        assert page.btn_save_live.text() == "保存"
-        assert page.btn_new_template.text() == "新"
-        assert page.btn_duplicate_template.text() == "副本"
-        assert page.btn_save_template.text() == "存模"
-        assert page.btn_restore_default.text() == "默认"
-        assert page.btn_add_step.text() == "添加"
+        assert page.btn_run_all.text() == "Run All"
+        assert page.btn_run_from_current.text() == "Run From"
+        assert page.btn_run_selected.text() == "Run Selected"
+        assert page.btn_save_live.text() == "Save"
+        assert page.btn_validate.text() == "Validate"
+        assert page.template_menu_button.text() == "模板 ▾"
+        assert page.palette_panel.title() == "节点库"
+        assert page.inspector_box.title() == "Inspector"
         assert page.detail_box.title() == "选中步骤参数"
         assert page.detail_box.isHidden()
         assert page.step_list.isHidden()
@@ -175,7 +174,7 @@ def test_workflow_canvas_node_selection_and_actions_sync_hidden_list():
         app.processEvents()
 
 
-def test_workflow_canvas_zoom_lod_switches_card_compact_mode():
+def test_workflow_canvas_zoom_lod_switches_to_mini_nodes_without_rebuilding_widgets():
     app = _get_app()
     canvas = WorkflowCanvasView()
     try:
@@ -189,19 +188,23 @@ def test_workflow_canvas_zoom_lod_switches_card_compact_mode():
             if isinstance(proxy.widget(), WorkflowNodeCard)
         ]
         assert cards
-        assert not any(card.compact for card in cards)
+        proxies = [proxy for proxy in canvas._scene.proxies if proxy.row >= 0]
+        assert not any(proxy.mini_item.isVisible() for proxy in proxies)
+        assert all(proxy.widget().isVisible() for proxy in proxies)
 
         canvas.resetTransform()
         canvas.scale(0.5, 0.5)
         canvas._apply_zoom_lod(force=True)
         app.processEvents()
-        assert all(card.compact for card in cards)
+        assert all(proxy.mini_item.isVisible() for proxy in proxies)
+        assert not any(proxy.widget().isVisible() for proxy in proxies)
 
         canvas.resetTransform()
         canvas.scale(1.0, 1.0)
         canvas._apply_zoom_lod(force=True)
         app.processEvents()
-        assert not any(card.compact for card in cards)
+        assert not any(proxy.mini_item.isVisible() for proxy in proxies)
+        assert all(proxy.widget().isVisible() for proxy in proxies)
     finally:
         canvas.close()
         app.processEvents()
@@ -230,7 +233,7 @@ def test_workflow_canvas_preview_node_updates_from_output_data():
         canvas.scale(0.5, 0.5)
         canvas._apply_zoom_lod(force=True)
         app.processEvents()
-        assert preview_cards[0].compact is True
+        assert preview_cards[0].isVisible() is True
     finally:
         canvas.close()
         app.processEvents()
@@ -266,6 +269,52 @@ def test_workflow_canvas_node_ports_and_edges_follow_proxy_moves():
         assert len(canvas._scene.edges) == edge_count
         assert [id(edge) for edge in canvas._scene.edges] == edge_ids
         assert first_edge.path() != old_path
+    finally:
+        canvas.close()
+        app.processEvents()
+
+
+def test_workflow_canvas_output_drag_to_input_creates_replaceable_link():
+    app = _get_app()
+    canvas = WorkflowCanvasView()
+    try:
+        config = build_default_workflow_config("high_quality_uav_gpr")
+        canvas.set_methods(config.methods[:3])
+        app.processEvents()
+
+        first = canvas._scene.proxies[0]
+        second = canvas._scene.proxies[1]
+        third = canvas._scene.proxies[2]
+        original_link_count = len(canvas.current_links())
+
+        canvas._drag_source_port = first.output_port
+        canvas._finish_temp_edge(third.input_port)
+        app.processEvents()
+
+        links = canvas.current_links()
+        assert len(links) == original_link_count
+        assert any(link.from_node == first.node_id and link.to_node == third.node_id for link in links)
+        assert not any(link.to_node == third.node_id and link.from_node == second.node_id for link in links)
+    finally:
+        canvas.close()
+        app.processEvents()
+
+
+def test_workflow_canvas_edge_delete_removes_link_and_edge_item():
+    app = _get_app()
+    canvas = WorkflowCanvasView()
+    try:
+        config = build_default_workflow_config("high_quality_uav_gpr")
+        canvas.set_methods(config.methods[:3])
+        app.processEvents()
+
+        edge = canvas._scene.edges[0]
+        link_key = canvas._scene.link_key(edge.link)
+        canvas._scene.remove_edge(edge)
+        app.processEvents()
+
+        assert all(canvas._scene.link_key(link) != link_key for link in canvas.current_links())
+        assert all(canvas._scene.link_key(item.link) != link_key for item in canvas._scene.edges)
     finally:
         canvas.close()
         app.processEvents()
@@ -331,12 +380,6 @@ def test_workflow_node_card_swallows_wheel_on_embedded_editors():
         assert card.eventFilter(editor, editor_wheel_event) is True
         assert editor_wheel_event.isAccepted()
 
-        combo = card.findChild(QComboBox)
-        assert combo is not None
-        combo_wheel_event = QEvent(QEvent.Type.Wheel)
-        assert card.eventFilter(combo, combo_wheel_event) is True
-        assert combo_wheel_event.isAccepted()
-
         slider = card.findChild(QSlider)
         assert slider is not None
         slider_wheel_event = QEvent(QEvent.Type.Wheel)
@@ -370,7 +413,7 @@ def test_workflow_node_card_numeric_params_expose_slider():
         app.processEvents()
 
 
-def test_canvas_card_toggle_hidden_does_not_rebuild_synchronously_and_skips_step():
+def test_node_context_menu_actions_and_eye_toggle_skip_hidden_step():
     app = _get_app()
     page = WorkflowPage()
     emitted: list[tuple[list, bool]] = []
@@ -383,39 +426,23 @@ def test_canvas_card_toggle_hidden_does_not_rebuild_synchronously_and_skips_step
         proxy = page.workflow_canvas._scene.proxies[0]
         card = proxy.widget()
         assert isinstance(card, WorkflowNodeCard)
-        enabled_check = next(
-            child for child in card.findChildren(QCheckBox) if child.text() == "启用"
-        )
+        menu = page.workflow_canvas._build_node_context_menu(proxy)
+        action_texts = [action.text() for action in menu.actions() if action.text()]
+        assert "运行此节点" in action_texts
+        assert "从此节点运行" in action_texts
+        assert "复制节点" in action_texts
+        assert "删除节点" in action_texts
+        assert "添加预览节点" in action_texts
 
-        enabled_check.setChecked(False)
-        app.processEvents()
-
-        assert page.config.methods[0].enabled is False
-        assert "停用" in page.step_list.item(0).text()
-
-        proxy = page.workflow_canvas._scene.proxies[0]
-        card = proxy.widget()
-        assert isinstance(card, WorkflowNodeCard)
-        enabled_check = next(
-            child for child in card.findChildren(QCheckBox) if child.text() == "启用"
-        )
-        enabled_check.setChecked(True)
-        app.processEvents()
-
-        assert page.config.methods[0].enabled is True
-
-        proxy = page.workflow_canvas._scene.proxies[0]
-        card = proxy.widget()
-        assert isinstance(card, WorkflowNodeCard)
-        hidden_check = next(
-            child for child in card.findChildren(QCheckBox) if child.text() == "隐藏"
-        )
-        hidden_check.setChecked(True)
+        eye = card.findChild(QToolButton, "eyeButton")
+        assert eye is not None
+        eye.click()
         app.processEvents()
 
         assert page.config.methods[0].hidden is True
         assert "隐藏" in page.step_list.item(0).text()
         assert page.workflow_canvas._scene.proxies
+        assert page.workflow_canvas._scene.proxies[0].opacity() < 0.6
 
         page.step_list.setCurrentRow(0)
         page.request_run_from_current()
@@ -423,6 +450,29 @@ def test_canvas_card_toggle_hidden_does_not_rebuild_synchronously_and_skips_step
 
         assert emitted
         assert all(method.method_id != page.config.methods[0].method_id for method in emitted[-1][0])
+    finally:
+        page.close()
+        app.processEvents()
+
+
+def test_canvas_context_menu_exposes_add_node_groups_and_palette_adds_node():
+    app = _get_app()
+    page = WorkflowPage()
+    try:
+        menu = page.workflow_canvas._build_canvas_context_menu(QPointF(20, 20))
+        action_texts = [action.text() for action in menu.actions() if action.text()]
+        assert "添加节点" in action_texts
+        assert "适配全部节点" in action_texts
+        assert page.palette_list.count() > 0
+
+        initial = len(page.config.methods)
+        for row in range(page.palette_list.count()):
+            item = page.palette_list.item(row)
+            if item.data(0x0100) is not None:  # Qt.UserRole numeric value
+                page._on_palette_item_double_clicked(item)
+                break
+        app.processEvents()
+        assert len(page.config.methods) == initial + 1
     finally:
         page.close()
         app.processEvents()
@@ -445,17 +495,34 @@ def test_workflow_canvas_view_drag_hit_testing_keeps_controls_interactive():
         noninteractive_pos = proxy.mapToScene(QPointF(8, 8))
         assert canvas._is_interactive_card_target(proxy, noninteractive_pos) is False
 
-        combo = card.findChild(QComboBox)
-        assert combo is not None
-        combo_center = combo.geometry().center()
-        interactive_pos = proxy.mapToScene(QPointF(combo_center))
-        assert canvas._is_interactive_card_target(proxy, interactive_pos) is True
-
         slider = card.findChild(QSlider)
         assert slider is not None
         slider_center = slider.mapTo(card, slider.rect().center())
         slider_pos = proxy.mapToScene(QPointF(slider_center))
         assert canvas._is_interactive_card_target(proxy, slider_pos) is True
+    finally:
+        canvas.close()
+        app.processEvents()
+
+
+def test_workflow_canvas_resize_handle_changes_node_size_and_ports():
+    app = _get_app()
+    canvas = WorkflowCanvasView()
+    try:
+        config = build_default_workflow_config("high_quality_uav_gpr")
+        canvas.set_methods(config.methods)
+        app.processEvents()
+
+        proxy = canvas._scene.proxies[0]
+        old_width = proxy.widget().width()
+        old_output = proxy.output_port.scene_anchor()
+
+        proxy.apply_size(old_width + 70, proxy.widget().height() + 20)
+        proxy.update_port_positions()
+        canvas._scene.update_edges()
+
+        assert proxy.widget().width() > old_width
+        assert proxy.output_port.scene_anchor() != old_output
     finally:
         canvas.close()
         app.processEvents()

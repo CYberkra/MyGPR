@@ -148,6 +148,10 @@ def test_workflow_config_roundtrip_preserves_realtime_stage_and_hidden_flags():
     assert restored.template_type == "user"
     assert restored.realtime_enabled is True
     assert restored.methods[0].stage_id == "trace_correction"
+    assert restored.methods[0].node_id
+    assert restored.canvas_links
+    assert restored.canvas_links[0].from_node == restored.methods[0].node_id
+    assert restored.canvas_links[0].to_node == restored.methods[1].node_id
     assert restored.methods[0].params["estimator"] == "median"
     assert restored.methods[1].stage_id == "migration"
     assert restored.methods[1].hidden is True

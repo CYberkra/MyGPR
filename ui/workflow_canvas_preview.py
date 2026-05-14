@@ -14,7 +14,6 @@ from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QPushButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
@@ -149,15 +148,20 @@ class BscanPreviewCard(QFrame):
             QFrame#bscanPreviewCard {
                 background: #fffdf7;
                 border: 1px solid #e0c36a;
-                border-radius: 12px;
-            }
-            QFrame#bscanPreviewCard[compact="true"] {
-                background: #fff8df;
-                border: 1px solid #d9a400;
+                border-radius: 10px;
             }
             QLabel#previewTitle {
                 font-weight: 800;
                 color: #5b4300;
+            }
+            QLabel#previewChip {
+                background: #fff1b8;
+                color: #765500;
+                border: 1px solid #e0c36a;
+                border-radius: 8px;
+                padding: 2px 7px;
+                font-size: 12px;
+                font-weight: 700;
             }
             QLabel#previewMeta {
                 color: #6b5a2a;
@@ -223,9 +227,15 @@ class BscanPreviewCard(QFrame):
         root.setContentsMargins(10, 8, 10, 10)
         root.setSpacing(7)
 
+        title_row = QHBoxLayout()
+        title_row.setSpacing(6)
         title = QLabel("B-scan Preview")
         title.setObjectName("previewTitle")
-        root.addWidget(title)
+        title_row.addWidget(title, 1)
+        chip = QLabel("PREVIEW")
+        chip.setObjectName("previewChip")
+        title_row.addWidget(chip)
+        root.addLayout(title_row)
 
         shape = self.data_shape
         shape_text = "--" if shape is None else f"{shape[1]} traces × {shape[0]} samples"
@@ -233,12 +243,6 @@ class BscanPreviewCard(QFrame):
         self.source_label.setObjectName("previewMeta")
         self.source_label.setWordWrap(True)
         root.addWidget(self.source_label)
-
-        if self.compact:
-            hint = QLabel("双击打开大图" if shape is not None else "等待工作流运行结果")
-            hint.setObjectName("previewMeta")
-            root.addWidget(hint)
-            return
 
         self.thumbnail_label = QLabel()
         self.thumbnail_label.setObjectName("previewImage")
@@ -251,11 +255,6 @@ class BscanPreviewCard(QFrame):
             self.thumbnail_label.setPixmap(pixmap)
         root.addWidget(self.thumbnail_label)
 
-        action_row = QHBoxLayout()
-        action_row.setSpacing(6)
-        open_button = QPushButton("大图")
-        open_button.setEnabled(shape is not None)
-        open_button.clicked.connect(self.open_large_view)
-        action_row.addWidget(open_button)
-        action_row.addStretch(1)
-        root.addLayout(action_row)
+        hint = QLabel("double click to open large" if shape is not None else "等待工作流运行结果")
+        hint.setObjectName("previewMeta")
+        root.addWidget(hint)

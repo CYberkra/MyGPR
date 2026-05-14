@@ -7,7 +7,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Callable
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QPointF, Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -22,11 +22,13 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QMessageBox,
     QScrollArea,
     QSlider,
     QSpinBox,
     QTextEdit,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -89,104 +91,82 @@ class WorkflowPage(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        header = QFrame()
-        header.setObjectName("workflowHeader")
-        header_layout = QVBoxLayout(header)
-        header_layout.setContentsMargins(10, 10, 10, 8)
-        header_layout.setSpacing(6)
-        title = QLabel("工作流")
+        studio_bar = QFrame()
+        studio_bar.setObjectName("workflowStudioBar")
+        studio_layout = QHBoxLayout(studio_bar)
+        studio_layout.setContentsMargins(10, 8, 10, 8)
+        studio_layout.setSpacing(8)
+
+        title = QLabel("MyGPR Workflow Studio")
         title.setProperty("class", "sectionTitle")
-        subtitle = QLabel("按 UAV-GPR 标准链路组织处理步骤；拖动步骤、切换算法或调整参数后可实时刷新预览。")
-        subtitle.setWordWrap(True)
-        subtitle.setProperty("class", "hintText")
-        header_layout.addWidget(title)
-        header_layout.addWidget(subtitle)
-        outer.addWidget(header)
+        studio_layout.addWidget(title)
 
-        # Split template controls and run controls so the left panel stays usable
-        # on narrower screens.
-        toolbar = QWidget()
-        toolbar_layout = QVBoxLayout(toolbar)
-        toolbar_layout.setContentsMargins(10, 0, 10, 8)
-        toolbar_layout.setSpacing(6)
-
-        template_row = QWidget()
-        template_layout = QHBoxLayout(template_row)
-        template_layout.setContentsMargins(0, 0, 0, 0)
-        template_layout.setSpacing(8)
+        studio_layout.addWidget(QLabel("Template"))
         self.template_combo = QComboBox()
         self.template_combo.setToolTip("选择内置或已保存的工作流模板")
-        self.template_combo.setMinimumWidth(160)
+        self.template_combo.setMinimumWidth(180)
         self._reload_template_combo()
-        template_layout.addWidget(QLabel("模板"))
-        template_layout.addWidget(self.template_combo, 1)
+        studio_layout.addWidget(self.template_combo, 1)
 
-        self.realtime_check = QCheckBox("实时预览")
-        self.realtime_check.setToolTip("参数或顺序变化后自动计算当前工作流实时结果")
-        template_layout.addWidget(self.realtime_check)
-        toolbar_layout.addWidget(template_row)
-
-        run_row = QWidget()
-        run_layout = QHBoxLayout(run_row)
-        run_layout.setContentsMargins(0, 0, 0, 0)
-        run_layout.setSpacing(6)
-        self.btn_run_all = PushButton(FluentIcon.PLAY_SOLID, "全链")
+        self.btn_run_all = PushButton(FluentIcon.PLAY_SOLID, "Run All")
         self.btn_run_all.setToolTip("按当前步骤顺序运行工作流")
-        self.btn_run_from_current = PushButton("后续")
+        self.btn_run_from_current = PushButton("Run From")
         self.btn_run_from_current.setToolTip("从选中步骤开始运行到工作流末尾")
-        self.btn_run_selected = PushButton("当前")
+        self.btn_run_selected = PushButton("Run Selected")
         self.btn_run_selected.setToolTip("只运行选中的单个步骤，便于逐步验证")
-        self.btn_save_live = PushButton(FluentIcon.SAVE, "保存")
+        self.btn_validate = PushButton("Validate")
+        self.btn_save_live = PushButton(FluentIcon.SAVE, "Save")
         self.btn_save_live.setToolTip("将实时预览或最近一次工作流结果写入正式历史")
         self.btn_save_live.setEnabled(False)
-
-        template_action_row = QWidget()
-        template_action_layout = QHBoxLayout(template_action_row)
-        template_action_layout.setContentsMargins(0, 0, 0, 0)
-        template_action_layout.setSpacing(6)
-
-        self.btn_new_template = PushButton(FluentIcon.ADD, "新")
-        self.btn_new_template.setToolTip("从内置高质量 UAV-GPR 模板创建一个用户模板")
-        self.btn_duplicate_template = PushButton(FluentIcon.COPY, "副本")
-        self.btn_save_template = PushButton(FluentIcon.SAVE, "存模")
-        self.btn_import_template = PushButton(FluentIcon.FOLDER, "导入")
-        self.btn_export_template = PushButton(FluentIcon.SAVE_AS, "导出")
-        self.btn_restore_default = PushButton(FluentIcon.SYNC, "默认")
 
         for btn in [
             self.btn_run_all,
             self.btn_run_from_current,
             self.btn_run_selected,
+            self.btn_validate,
             self.btn_save_live,
         ]:
             btn.setMinimumWidth(0)
-            run_layout.addWidget(btn)
-        run_layout.addStretch(1)
-        toolbar_layout.addWidget(run_row)
+            studio_layout.addWidget(btn)
 
-        for btn in [
-            self.btn_new_template,
-            self.btn_duplicate_template,
-            self.btn_save_template,
-            self.btn_import_template,
-            self.btn_export_template,
-            self.btn_restore_default,
-        ]:
-            btn.setMinimumWidth(0)
-            template_action_layout.addWidget(btn)
-        template_action_layout.addStretch(1)
-        toolbar_layout.addWidget(template_action_row)
-        outer.addWidget(toolbar)
+        self.realtime_check = QCheckBox("Realtime")
+        self.realtime_check.setToolTip("参数或顺序变化后自动计算当前工作流实时结果")
+        self.safe_check = QCheckBox("Safe")
+        self.safe_check.setChecked(True)
+        self.zoom_label = QLabel("Zoom 100%")
+        self.btn_fit_canvas = PushButton("Fit")
+        self.btn_auto_layout = PushButton("Auto Layout")
+        self.btn_reset_zoom = PushButton("100%")
+        for widget in [self.realtime_check, self.safe_check, self.zoom_label, self.btn_fit_canvas, self.btn_auto_layout, self.btn_reset_zoom]:
+            studio_layout.addWidget(widget)
 
-        body_scroll = QScrollArea()
-        body_scroll.setWidgetResizable(True)
-        body_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        body = QWidget()
-        body_layout = QVBoxLayout(body)
-        body_layout.setContentsMargins(10, 0, 10, 10)
-        body_layout.setSpacing(10)
-        body_scroll.setWidget(body)
-        outer.addWidget(body_scroll, 1)
+        self.template_menu_button = QToolButton()
+        self.template_menu_button.setText("模板 ▾")
+        self.template_menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        template_menu = QMenu(self.template_menu_button)
+        self.template_menu_button.setMenu(template_menu)
+        studio_layout.addWidget(self.template_menu_button)
+        outer.addWidget(studio_bar)
+
+        self.btn_new_template = PushButton(FluentIcon.ADD, "新建模板")
+        self.btn_new_template.setToolTip("从内置高质量 UAV-GPR 模板创建一个用户模板")
+        self.btn_duplicate_template = PushButton(FluentIcon.COPY, "复制模板")
+        self.btn_save_template = PushButton(FluentIcon.SAVE, "保存模板")
+        self.btn_import_template = PushButton(FluentIcon.FOLDER, "导入")
+        self.btn_export_template = PushButton(FluentIcon.SAVE_AS, "导出")
+        self.btn_restore_default = PushButton(FluentIcon.SYNC, "恢复默认")
+        template_menu.addAction("新建模板", self.new_user_template)
+        template_menu.addAction("复制模板", self.duplicate_current_template)
+        template_menu.addAction("保存模板", self.save_current_template)
+        template_menu.addAction("导入模板", self.import_template)
+        template_menu.addAction("导出模板", self.export_template)
+        template_menu.addAction("恢复默认", self.restore_default_template)
+
+        workspace = QWidget()
+        workspace_layout = QHBoxLayout(workspace)
+        workspace_layout.setContentsMargins(10, 8, 10, 10)
+        workspace_layout.setSpacing(10)
+        outer.addWidget(workspace, 1)
 
         self.step_list = WorkflowStepList()
         self.step_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
@@ -196,30 +176,35 @@ class WorkflowPage(QWidget):
         self.step_list.setMinimumHeight(260)
         self.step_list.setToolTip("拖拽调整处理顺序；隐藏的步骤不会执行")
 
-        step_panel = QWidget()
-        self.step_panel = step_panel
-        step_panel_layout = QVBoxLayout(step_panel)
+        self.palette_panel = QGroupBox("节点库")
+        palette_layout = QVBoxLayout(self.palette_panel)
+        palette_layout.setContentsMargins(8, 14, 8, 8)
+        palette_layout.setSpacing(6)
+        self.palette_search = QLineEdit()
+        self.palette_search.setPlaceholderText("搜索节点")
+        self.palette_list = QListWidget()
+        self.palette_list.setMinimumWidth(190)
+        self.palette_list.setMaximumWidth(240)
+        palette_layout.addWidget(self.palette_search)
+        palette_layout.addWidget(self.palette_list, 1)
+        workspace_layout.addWidget(self.palette_panel)
+
+        self.step_panel = QWidget()
+        step_panel_layout = QVBoxLayout(self.step_panel)
         step_panel_layout.setContentsMargins(0, 0, 0, 0)
-        step_panel_layout.setSpacing(8)
+        step_panel_layout.setSpacing(0)
         self.step_list.hide()
         self.workflow_canvas = WorkflowCanvasView()
-        self.workflow_canvas.setToolTip("Ctrl+滚轮缩放；中键拖动画布；点击卡片选择步骤。")
+        self.workflow_canvas.setToolTip("空白左键拖动画布；节点拖动移动；端口拖动连线；Ctrl+滚轮缩放。")
         step_panel_layout.addWidget(self.workflow_canvas, 1)
-        step_action_row = QWidget()
-        step_action_layout = QHBoxLayout(step_action_row)
-        step_action_layout.setContentsMargins(0, 0, 0, 0)
-        step_action_layout.setSpacing(6)
+        workspace_layout.addWidget(self.step_panel, 1)
+
         self.btn_add_step = PushButton("添加")
         self.btn_duplicate_step = PushButton("复制")
         self.btn_remove_step = PushButton("删除")
         self.btn_add_step.setToolTip("在当前步骤后插入同阶段默认步骤")
         self.btn_duplicate_step.setToolTip("复制当前步骤及其参数")
         self.btn_remove_step.setToolTip("删除当前步骤")
-        for btn in [self.btn_add_step, self.btn_duplicate_step, self.btn_remove_step]:
-            step_action_layout.addWidget(btn)
-        step_action_layout.addStretch(1)
-        step_panel_layout.addWidget(step_action_row)
-        body_layout.addWidget(self._wrap_group("流程步骤 / 当前参数", step_panel))
 
         self.detail_box = QGroupBox("当前步骤")
         detail_layout = QVBoxLayout(self.detail_box)
@@ -263,20 +248,23 @@ class WorkflowPage(QWidget):
         self.detail_box.hide()
         self.detail_box.setToolTip("选中步骤的常用参数已经集成在画布节点卡片中。")
 
-        self.log_box = QGroupBox("预览与质量提示")
-        log_layout = QVBoxLayout(self.log_box)
-        log_layout.setContentsMargins(10, 14, 10, 10)
-        log_layout.setSpacing(8)
+        self.inspector_box = QGroupBox("Inspector")
+        inspector_layout = QVBoxLayout(self.inspector_box)
+        inspector_layout.setContentsMargins(8, 14, 8, 8)
+        inspector_layout.setSpacing(6)
+        self.inspector_label = QLabel("未选择节点")
+        self.inspector_label.setWordWrap(True)
         self.status_label = QLabel("未运行")
         self.status_label.setProperty("class", "hintText")
         self.workflow_log = QTextEdit()
         self.workflow_log.setReadOnly(True)
-        self.workflow_log.setMinimumHeight(160)
+        self.workflow_log.setMinimumWidth(230)
         self.workflow_log.setPlaceholderText("工作流运行状态、风险提示和最近步骤日志")
-        log_layout.addWidget(self.status_label)
-        log_layout.addWidget(self.workflow_log, 1)
-        body_layout.addWidget(self.log_box)
-        body_layout.addStretch(1)
+        inspector_layout.addWidget(self.inspector_label)
+        inspector_layout.addWidget(self.status_label)
+        inspector_layout.addWidget(self.workflow_log, 1)
+        workspace_layout.addWidget(self.inspector_box)
+        self.log_box = self.inspector_box
 
         self._debounce_timer = QTimer(self)
         self._debounce_timer.setSingleShot(True)
@@ -291,6 +279,9 @@ class WorkflowPage(QWidget):
         self.workflow_canvas.run_from_node_requested.connect(self._run_from_canvas_node)
         self.workflow_canvas.duplicate_node_requested.connect(self._duplicate_canvas_node)
         self.workflow_canvas.remove_node_requested.connect(self._remove_canvas_node)
+        self.workflow_canvas.add_node_requested.connect(self._add_canvas_node)
+        self.workflow_canvas.links_changed.connect(self._on_canvas_links_changed)
+        self.workflow_canvas.layout_changed.connect(self._on_canvas_layout_changed)
         self.method_combo.currentIndexChanged.connect(self._on_method_changed)
         self.enabled_check.stateChanged.connect(self._on_step_flags_changed)
         self.hidden_check.stateChanged.connect(self._on_step_flags_changed)
@@ -299,6 +290,7 @@ class WorkflowPage(QWidget):
         self.btn_run_all.clicked.connect(self.request_manual_run)
         self.btn_run_from_current.clicked.connect(self.request_run_from_current)
         self.btn_run_selected.clicked.connect(self.request_selected_run)
+        self.btn_validate.clicked.connect(self._validate_workflow_ui)
         self.btn_save_live.clicked.connect(self.save_live_result_requested)
         self.btn_new_template.clicked.connect(self.new_user_template)
         self.btn_duplicate_template.clicked.connect(self.duplicate_current_template)
@@ -309,6 +301,106 @@ class WorkflowPage(QWidget):
         self.btn_add_step.clicked.connect(self.add_step_after_current)
         self.btn_duplicate_step.clicked.connect(self.duplicate_current_step)
         self.btn_remove_step.clicked.connect(self.remove_current_step)
+        self.btn_fit_canvas.clicked.connect(self.workflow_canvas.fit_nodes)
+        self.btn_auto_layout.clicked.connect(self.workflow_canvas.auto_layout)
+        self.btn_reset_zoom.clicked.connect(self.workflow_canvas.reset_zoom)
+        self.palette_search.textChanged.connect(self._populate_palette)
+        self.palette_list.itemDoubleClicked.connect(self._on_palette_item_double_clicked)
+        self._populate_palette()
+
+    def _populate_palette(self) -> None:
+        if not hasattr(self, "palette_list"):
+            return
+        query = self.palette_search.text().strip().lower() if hasattr(self, "palette_search") else ""
+        self.palette_list.clear()
+        for category_key, category in METHOD_CATEGORIES.items():
+            methods = [
+                method_id
+                for method_id in category.get("methods", [])
+                if method_id in PROCESSING_METHODS
+                and (
+                    not query
+                    or query in method_id.lower()
+                    or query in get_method_display_name(method_id).lower()
+                    or query in str(category.get("name", "")).lower()
+                )
+            ]
+            if not methods:
+                continue
+            header = QListWidgetItem(str(category.get("name", category_key)))
+            header.setFlags(Qt.ItemFlag.NoItemFlags)
+            self.palette_list.addItem(header)
+            for method_id in methods:
+                item = QListWidgetItem(f"  {get_method_display_name(method_id)}")
+                item.setData(Qt.ItemDataRole.UserRole, method_id)
+                self.palette_list.addItem(item)
+
+    def _on_palette_item_double_clicked(self, item: QListWidgetItem) -> None:
+        method_id = item.data(Qt.ItemDataRole.UserRole)
+        if method_id:
+            self._add_canvas_node(str(method_id), QPointF(120, 120))
+
+    def _validate_workflow_ui(self) -> None:
+        methods = self.get_enabled_methods()
+        if methods:
+            self.status_label.setText(f"Validate: {len(methods)} 个启用步骤")
+            self._log(f"Validate: 当前工作流可运行步骤 {len(methods)} 个")
+        else:
+            self.status_label.setText("Validate: 没有启用步骤")
+            self._log("Validate: 当前工作流没有启用步骤")
+
+    def _on_canvas_links_changed(self, links: object) -> None:
+        self.config.canvas_links = list(links) if isinstance(links, list) else []
+        self._on_step_selected(self.step_list.currentRow())
+
+    def _on_canvas_layout_changed(self, layout: object) -> None:
+        if isinstance(layout, dict):
+            self.config.canvas_layout = layout
+
+    def _add_canvas_node(self, method_id: str, scene_pos: QPointF) -> None:
+        if method_id not in PROCESSING_METHODS:
+            return
+        metadata = PROCESSING_METHODS.get(method_id, {})
+        category = str(metadata.get("category") or "custom")
+        method = WorkflowMethod(
+            category=category,
+            stage_id=self._stage_for_method(method_id, category),
+            method_id=method_id,
+            enabled=True,
+            hidden=False,
+            order=self.step_list.count(),
+            params=self._default_params_for(method_id),
+        )
+        self._sync_order_from_list(rebuild_canvas=False)
+        self.config.methods.append(method)
+        method.order = len(self.config.methods) - 1
+        self.config.canvas_layout.setdefault("nodes", {})[method.node_id] = {
+            "x": float(scene_pos.x()),
+            "y": float(scene_pos.y()),
+            "width": 300,
+            "height": 180,
+            "collapsed": False,
+        }
+        self.config.canvas_links = self.workflow_canvas.current_links()
+        if len(self.config.methods) >= 2:
+            previous = self.config.methods[-2]
+            self.config.canvas_links.append(
+                self._make_link(previous.node_id, method.node_id)
+            )
+        self._render_steps()
+        self.step_list.setCurrentRow(len(self.config.methods) - 1)
+        self._queue_realtime_run()
+
+    def _make_link(self, from_node: str, to_node: str):
+        from core.workflow_data import WorkflowLink
+
+        return WorkflowLink(from_node, to_node)
+
+    def _stage_for_method(self, method_id: str, category: str) -> str:
+        for stage in WORKFLOW_STAGE_DEFINITIONS:
+            if method_id in stage.get("candidate_methods", []):
+                return str(stage.get("id", ""))
+        return self._category_for_stage("", method_id) if category == "custom" else ""
 
     def _wrap_group(self, title: str, widget: QWidget) -> QGroupBox:
         box = QGroupBox(title)
@@ -345,6 +437,7 @@ class WorkflowPage(QWidget):
         self._log(f"已加载模板: {self.config.name}")
 
     def _render_steps(self) -> None:
+        self.config.ensure_canvas_links()
         self.step_list.blockSignals(True)
         self.step_list.clear()
         for index, method in enumerate(sorted(self.config.methods, key=lambda item: item.order)):
@@ -353,7 +446,11 @@ class WorkflowPage(QWidget):
             item.setData(Qt.ItemDataRole.UserRole, method)
             self.step_list.addItem(item)
         self.step_list.blockSignals(False)
-        self.workflow_canvas.set_methods(self.config.methods)
+        self.workflow_canvas.set_workflow(
+            self.config.methods,
+            self.config.canvas_links,
+            self.config.canvas_layout,
+        )
         self.workflow_canvas.set_selected_row(self.step_list.currentRow())
         self._update_step_buttons()
 
@@ -393,6 +490,7 @@ class WorkflowPage(QWidget):
         self.workflow_canvas.set_selected_row(int(row))
         self._update_step_buttons()
         if method is None:
+            self.inspector_label.setText("未选择节点")
             return
         self._suppress_change = True
         try:
@@ -405,6 +503,23 @@ class WorkflowPage(QWidget):
             self.hidden_check.setChecked(bool(method.hidden))
             self._render_method_combo(method)
             self._render_params(method)
+            state = "HIDE" if method.hidden else ("OFF" if not method.enabled else "ON")
+            inbound = [
+                link.from_node
+                for link in self.config.canvas_links
+                if link.to_node == method.node_id
+            ]
+            outbound = [
+                link.to_node
+                for link in self.config.canvas_links
+                if link.from_node == method.node_id
+            ]
+            self.inspector_label.setText(
+                f"当前选择\n{stage_label}\n{get_method_display_name(method.method_id)}\n"
+                f"method_id: {method.method_id}\nstate: {state}\n"
+                f"input from: {', '.join(inbound) if inbound else '--'}\n"
+                f"output to: {', '.join(outbound) if outbound else '--'}"
+            )
         finally:
             self._suppress_change = False
 
@@ -627,7 +742,7 @@ class WorkflowPage(QWidget):
         self._sync_order_from_list()
         self._queue_realtime_run()
 
-    def _sync_order_from_list(self) -> None:
+    def _sync_order_from_list(self, *, rebuild_canvas: bool = True) -> None:
         methods = []
         for row in range(self.step_list.count()):
             method = self.step_list.item(row).data(Qt.ItemDataRole.UserRole)
@@ -636,8 +751,14 @@ class WorkflowPage(QWidget):
                 methods.append(method)
                 self.step_list.item(row).setText(self._format_step_text(method))
         self.config.methods = methods
-        self.workflow_canvas.set_methods(self.config.methods)
-        self.workflow_canvas.set_selected_row(self.step_list.currentRow())
+        if rebuild_canvas:
+            self.config.ensure_canvas_links()
+            self.workflow_canvas.set_workflow(
+                self.config.methods,
+                self.config.canvas_links,
+                self.config.canvas_layout,
+            )
+            self.workflow_canvas.set_selected_row(self.step_list.currentRow())
         self._update_step_buttons()
 
     def _on_realtime_changed(self) -> None:
@@ -698,7 +819,7 @@ class WorkflowPage(QWidget):
         if row < 0:
             QMessageBox.information(self, "无步骤", "请先选择一个起始步骤。")
             return
-        self._sync_order_from_list()
+        self._sync_order_from_list(rebuild_canvas=False)
         methods = [
             deepcopy(method)
             for method in self.config.methods[row:]
@@ -731,7 +852,7 @@ class WorkflowPage(QWidget):
         self._log(log_text)
 
     def get_enabled_methods(self) -> list[WorkflowMethod]:
-        self._sync_order_from_list()
+        self._sync_order_from_list(rebuild_canvas=False)
         return [deepcopy(method) for method in self.config.get_enabled_methods()]
 
     def _select_step_row(self, row: int) -> None:
@@ -897,7 +1018,9 @@ class WorkflowPage(QWidget):
         if method is None:
             QMessageBox.information(self, "无步骤", "请先选择要复制的步骤。")
             return
-        new_step = WorkflowMethod.from_dict(method.to_dict())
+        payload = method.to_dict()
+        payload["node_id"] = ""
+        new_step = WorkflowMethod.from_dict(payload)
         new_step.status = "pending"
         self._insert_step(new_step, row + 1)
         self._log(f"已复制步骤: {get_method_display_name(new_step.method_id)}")
@@ -909,8 +1032,17 @@ class WorkflowPage(QWidget):
             return
         method = self._selected_method()
         label = get_method_display_name(method.method_id) if method else "步骤"
+        removed_node_id = method.node_id if method else ""
         self.step_list.takeItem(row)
-        self._sync_order_from_list()
+        self._sync_order_from_list(rebuild_canvas=False)
+        if removed_node_id:
+            self.config.canvas_links = [
+                link
+                for link in self.config.canvas_links
+                if link.from_node != removed_node_id and link.to_node != removed_node_id
+            ]
+            self.config.canvas_layout.setdefault("nodes", {}).pop(removed_node_id, None)
+        self._render_steps()
         if self.step_list.count() > 0:
             self.step_list.setCurrentRow(min(row, self.step_list.count() - 1))
         self._queue_realtime_run()
@@ -924,6 +1056,18 @@ class WorkflowPage(QWidget):
         for index, item in enumerate(methods):
             item.order = index
         self.config.methods = methods
+        if len(methods) > 1:
+            left = methods[max(0, row - 1)]
+            right = methods[min(len(methods) - 1, row + 1)]
+            self.config.canvas_links = [
+                link
+                for link in self.config.canvas_links
+                if not (link.from_node == left.node_id and link.to_node == right.node_id)
+            ]
+            if row > 0:
+                self.config.canvas_links.append(self._make_link(left.node_id, method.node_id))
+            if row + 1 < len(methods):
+                self.config.canvas_links.append(self._make_link(method.node_id, right.node_id))
         self._render_steps()
         self.step_list.setCurrentRow(row)
         self.workflow_canvas.set_selected_row(row)

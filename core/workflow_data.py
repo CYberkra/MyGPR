@@ -7,6 +7,7 @@
 
 import json
 import os
+import uuid
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 
@@ -458,6 +459,7 @@ class WorkflowMethod:
         stage_id: str = "",
         hidden: bool = False,
         status: str = "pending",
+        node_id: str = "",
     ):
         self.category = category
         self.stage_id = stage_id
@@ -467,6 +469,7 @@ class WorkflowMethod:
         self.params = params or {}
         self.hidden = hidden
         self.status = status
+        self.node_id = node_id or _make_node_id(method_id, order)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -478,6 +481,7 @@ class WorkflowMethod:
             "params": self.params,
             "hidden": self.hidden,
             "status": self.status,
+            "node_id": self.node_id,
         }
 
     @classmethod
@@ -491,6 +495,44 @@ class WorkflowMethod:
             params=data.get("params", {}),
             hidden=data.get("hidden", False),
             status=data.get("status", "pending"),
+            node_id=data.get("node_id", ""),
+        )
+
+
+class WorkflowLink:
+    """Canvas-level connection between two workflow node ports."""
+
+    def __init__(
+        self,
+        from_node: str,
+        to_node: str,
+        from_port: str = "output",
+        to_port: str = "input",
+        kind: str = "data",
+    ):
+        self.from_node = str(from_node)
+        self.from_port = str(from_port)
+        self.to_node = str(to_node)
+        self.to_port = str(to_port)
+        self.kind = str(kind)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "from_node": self.from_node,
+            "from_port": self.from_port,
+            "to_node": self.to_node,
+            "to_port": self.to_port,
+            "kind": self.kind,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "WorkflowLink":
+        return cls(
+            from_node=data.get("from_node", ""),
+            from_port=data.get("from_port", "output"),
+            to_node=data.get("to_node", ""),
+            to_port=data.get("to_port", "input"),
+            kind=data.get("kind", "data"),
         )
 
 
@@ -504,10 +546,13 @@ class WorkflowConfig:
         version: str = "1.0",
         template_type: str = "user",
         realtime_enabled: bool | None = None,
+        canvas_links: Optional[List[WorkflowLink]] = None,
+        canvas_layout: Optional[Dict[str, Any]] = None,
     ):
         self.version = version
         self.name = name
         self.methods = methods or []
+        ensure_workflow_method_ids(self.methods)
         self.template_type = template_type
         self.realtime_enabled = (
             bool(realtime_enabled)
@@ -516,6 +561,9 @@ class WorkflowConfig:
         )
         self.created_at = datetime.now().isoformat()
         self.last_modified = datetime.now().isoformat()
+        self.canvas_links = canvas_links or []
+        self.canvas_layout = canvas_layout or {"nodes": {}}
+        self.ensure_canvas_links()
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -524,6 +572,8 @@ class WorkflowConfig:
             "template_type": self.template_type,
             "realtime_enabled": self.realtime_enabled,
             "methods": [m.to_dict() for m in self.methods],
+            "canvas_links": [link.to_dict() for link in self.canvas_links],
+            "canvas_layout": self.canvas_layout,
             "created_at": self.created_at,
             "last_modified": self.last_modified,
         }
@@ -537,9 +587,26 @@ class WorkflowConfig:
             realtime_enabled=data.get("realtime_enabled"),
         )
         config.methods = [WorkflowMethod.from_dict(m) for m in data.get("methods", [])]
+        ensure_workflow_method_ids(config.methods)
+        config.canvas_links = [
+            WorkflowLink.from_dict(link) for link in data.get("canvas_links", [])
+        ]
+        config.canvas_layout = data.get("canvas_layout", {"nodes": {}})
+        config.ensure_canvas_links()
         config.created_at = data.get("created_at", datetime.now().isoformat())
         config.last_modified = data.get("last_modified", datetime.now().isoformat())
         return config
+
+    def ensure_canvas_links(self) -> None:
+        """Create default order links when older templates do not store links."""
+        ensure_workflow_method_ids(self.methods)
+        if self.canvas_links:
+            return
+        sorted_methods = sorted(self.methods, key=lambda item: item.order)
+        self.canvas_links = [
+            WorkflowLink(left.node_id, right.node_id)
+            for left, right in zip(sorted_methods, sorted_methods[1:])
+        ]
 
     def get_enabled_methods(self) -> List[WorkflowMethod]:
         """获取启用的方法列表（按顺序排序）"""
@@ -562,16 +629,28 @@ class WorkflowConfig:
             params=params or {},
         )
         self.methods.append(method)
+        ensure_workflow_method_ids(self.methods)
+        self.ensure_canvas_links()
         self.last_modified = datetime.now().isoformat()
         return method
 
     def remove_method(self, index: int):
         """删除方法"""
         if 0 <= index < len(self.methods):
+            removed_node_id = self.methods[index].node_id
             del self.methods[index]
             # 重新排序
             for i, m in enumerate(self.methods):
                 m.order = i
+            self.canvas_links = [
+                link
+                for link in self.canvas_links
+                if link.from_node != removed_node_id
+                and link.to_node != removed_node_id
+            ]
+            nodes = self.canvas_layout.setdefault("nodes", {})
+            if isinstance(nodes, dict):
+                nodes.pop(removed_node_id, None)
             self.last_modified = datetime.now().isoformat()
 
     def move_method(self, from_index: int, to_index: int):
@@ -600,19 +679,39 @@ class WorkflowConfig:
                 hidden=method_data.get("hidden", False),
                 order=i,
                 params=method_data.get("params", {}),
+                node_id=method_data.get("node_id", ""),
             )
             self.methods.append(method)
 
         self.name = preset["name"]
         self.template_type = "system"
         self.realtime_enabled = False
+        self.canvas_links = []
+        self.canvas_layout = {"nodes": {}}
+        self.ensure_canvas_links()
         self.last_modified = datetime.now().isoformat()
         return True
 
     def clear(self):
         """清空所有方法"""
         self.methods = []
+        self.canvas_links = []
+        self.canvas_layout = {"nodes": {}}
         self.last_modified = datetime.now().isoformat()
+
+
+def _make_node_id(method_id: str, order: int) -> str:
+    clean_method = "".join(ch if ch.isalnum() else "_" for ch in str(method_id))[:32]
+    return f"node_{int(order):03d}_{clean_method}_{uuid.uuid4().hex[:8]}"
+
+
+def ensure_workflow_method_ids(methods: List[WorkflowMethod]) -> None:
+    """Ensure every workflow method has a stable canvas node id."""
+    seen: set[str] = set()
+    for index, method in enumerate(methods):
+        if not getattr(method, "node_id", "") or method.node_id in seen:
+            method.node_id = _make_node_id(method.method_id, index)
+        seen.add(method.node_id)
 
 
 def build_default_workflow_config(
