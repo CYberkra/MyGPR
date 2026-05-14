@@ -8,9 +8,11 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import numpy as np
 from PyQt6.QtWidgets import QApplication, QSlider
 
 from app_qt import GPRGuiQt
+from core.workflow_data import WorkflowMethod
 
 
 def _get_app() -> QApplication:
@@ -86,6 +88,49 @@ def test_workflow_numeric_params_render_slider_and_spinbox_pair():
         assert "window" in win.page_workflow._param_controls
         sliders = win.page_workflow.param_host.findChildren(QSlider)
         assert sliders, "integer window parameter should render a slider"
+    finally:
+        win.close()
+        app.processEvents()
+
+
+def test_workflow_realtime_run_keeps_formal_history_until_saved(monkeypatch):
+    app = _get_app()
+    win = GPRGuiQt()
+    try:
+        raw = np.arange(24, dtype=np.float32).reshape(6, 4)
+        win.shared_data.load_data(
+            raw,
+            path="demo.csv",
+            header_info={"total_time_ns": 60.0},
+            source="test",
+        )
+        app.processEvents()
+
+        captured = {}
+
+        def fake_start_processing_worker(tasks, run_type="single", **kwargs):
+            captured["tasks"] = tasks
+            captured["run_type"] = run_type
+            captured["kwargs"] = kwargs
+
+        monkeypatch.setattr(win, "_start_processing_worker", fake_start_processing_worker)
+        monkeypatch.setattr(win, "_log", lambda *_args, **_kwargs: None)
+
+        method = WorkflowMethod(
+            category="preprocessing",
+            stage_id="trace_correction",
+            method_id="dc_shift",
+            params={"estimator": "mean", "scope": "per_trace"},
+        )
+        win.run_workflow_methods([method], realtime=True)
+
+        assert captured["run_type"] == "workflow_realtime"
+        assert captured["tasks"][0]["method_key"] == "dc_shift"
+        assert np.array_equal(captured["kwargs"]["base_data"], raw)
+        assert captured["kwargs"]["header_info"]["total_time_ns"] == 60.0
+        assert win.shared_data.history == []
+        assert win._workflow_preview_base_state is not None
+        assert np.array_equal(win.shared_data.current_data, raw)
     finally:
         win.close()
         app.processEvents()
