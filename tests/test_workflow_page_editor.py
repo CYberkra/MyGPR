@@ -12,7 +12,7 @@ import numpy as np
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import QEvent, QPointF
-from PyQt6.QtWidgets import QApplication, QAbstractSpinBox, QComboBox, QLineEdit
+from PyQt6.QtWidgets import QApplication, QAbstractSpinBox, QComboBox, QLineEdit, QSlider
 
 from core.app_paths import get_workflow_templates_dir
 from core.workflow_data import WorkflowConfigManager, build_default_workflow_config
@@ -301,6 +301,35 @@ def test_workflow_node_card_swallows_wheel_on_embedded_editors():
         combo_wheel_event = QEvent(QEvent.Type.Wheel)
         assert card.eventFilter(combo, combo_wheel_event) is True
         assert combo_wheel_event.isAccepted()
+
+        slider = card.findChild(QSlider)
+        assert slider is not None
+        slider_wheel_event = QEvent(QEvent.Type.Wheel)
+        assert card.eventFilter(slider, slider_wheel_event) is True
+        assert slider_wheel_event.isAccepted()
+    finally:
+        card.close()
+        app.processEvents()
+
+
+def test_workflow_node_card_numeric_params_expose_slider():
+    app = _get_app()
+    config = build_default_workflow_config("high_quality_uav_gpr")
+    method = None
+    for candidate in config.methods:
+        probe = WorkflowNodeCard(0, candidate)
+        try:
+            if probe.findChild(QAbstractSpinBox) is not None:
+                method = candidate
+                break
+        finally:
+            probe.close()
+    assert method is not None
+
+    card = WorkflowNodeCard(0, method)
+    try:
+        assert card.findChild(QAbstractSpinBox) is not None
+        assert card.findChild(QSlider) is not None
     finally:
         card.close()
         app.processEvents()
@@ -328,6 +357,12 @@ def test_workflow_canvas_view_drag_hit_testing_keeps_controls_interactive():
         combo_center = combo.geometry().center()
         interactive_pos = proxy.mapToScene(QPointF(combo_center))
         assert canvas._is_interactive_card_target(proxy, interactive_pos) is True
+
+        slider = card.findChild(QSlider)
+        assert slider is not None
+        slider_center = slider.mapTo(card, slider.rect().center())
+        slider_pos = proxy.mapToScene(QPointF(slider_center))
+        assert canvas._is_interactive_card_target(proxy, slider_pos) is True
     finally:
         canvas.close()
         app.processEvents()

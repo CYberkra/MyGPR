@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from PyQt6.QtCore import QEvent, QPoint, QPointF, QTimer, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QPoint, QPointF, QSignalBlocker, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QPainterPath, QPen
 from PyQt6.QtWidgets import (
     QAbstractButton,
@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QSlider,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -54,21 +55,21 @@ class WorkflowNodeCard(QFrame):
         self._param_getters: dict[str, Callable[[], object]] = {}
         self.setObjectName("workflowNodeCard")
         self.setFrameShape(QFrame.Shape.StyledPanel)
-        self.setMinimumWidth(270)
-        self.setMaximumWidth(320)
+        self.setMinimumWidth(300)
+        self.setMaximumWidth(360)
         self.setStyleSheet(
             """
             QFrame#workflowNodeCard {
                 background: #ffffff;
-                border: 1px solid #d8e3f2;
-                border-radius: 12px;
+                border: 1px solid #d7e2f0;
+                border-radius: 14px;
             }
             QFrame#workflowNodeCard[current="true"] {
                 border: 2px solid #3278ff;
-                background: #f6f9ff;
+                background: #f7faff;
             }
             QLabel#nodeTitle {
-                font-weight: 700;
+                font-weight: 800;
                 color: #1f2d3d;
             }
             QLabel#nodeSubtitle {
@@ -76,6 +77,42 @@ class WorkflowNodeCard(QFrame):
             }
             QLabel#nodeWarning {
                 color: #a66a00;
+                font-size: 12px;
+            }
+            QLabel#nodePortIn {
+                color: #3278ff;
+                font-size: 12px;
+                font-weight: 700;
+            }
+            QLabel#nodePortOut {
+                color: #7d4cff;
+                font-size: 12px;
+                font-weight: 700;
+            }
+            QLabel#nodeStatusChip {
+                background: #eef4ff;
+                color: #2457b8;
+                border: 1px solid #cdddf8;
+                border-radius: 8px;
+                padding: 2px 7px;
+                font-size: 12px;
+                font-weight: 700;
+            }
+            QLabel#nodeSectionLabel {
+                color: #5f6f83;
+                font-size: 12px;
+                font-weight: 700;
+            }
+            QSlider::groove:horizontal {
+                height: 4px;
+                background: #dbe5f2;
+                border-radius: 2px;
+            }
+            QSlider::handle:horizontal {
+                width: 12px;
+                margin: -5px 0;
+                border-radius: 6px;
+                background: #3278ff;
             }
             QFrame#workflowNodeCard[compact="true"] {
                 background: #f9fbff;
@@ -131,12 +168,23 @@ class WorkflowNodeCard(QFrame):
                 QWidget().setLayout(old_layout)
 
             root = QVBoxLayout(self)
-            root.setContentsMargins(10, 8, 10, 10)
-            root.setSpacing(7)
+            root.setContentsMargins(9, 7, 9, 9)
+            root.setSpacing(6)
 
             if self.compact:
                 self._build_compact(root)
                 return
+
+            port_row = QHBoxLayout()
+            port_row.setSpacing(4)
+            input_port = QLabel("● 数据输入")
+            input_port.setObjectName("nodePortIn")
+            output_port = QLabel("数据输出 ●")
+            output_port.setObjectName("nodePortOut")
+            port_row.addWidget(input_port)
+            port_row.addStretch(1)
+            port_row.addWidget(output_port)
+            root.addLayout(port_row)
 
             title_row = QHBoxLayout()
             title_row.setSpacing(8)
@@ -145,20 +193,20 @@ class WorkflowNodeCard(QFrame):
             title.setWordWrap(True)
             title_row.addWidget(title, 1)
 
+            status_chip = QLabel(self._status_chip_text())
+            status_chip.setObjectName("nodeStatusChip")
+            title_row.addWidget(status_chip)
+
             self.enabled_check = QCheckBox("启用")
             self.enabled_check.setChecked(bool(self.method.enabled))
             self.enabled_check.toggled.connect(self._on_enabled_toggled)
             title_row.addWidget(self.enabled_check)
             root.addLayout(title_row)
 
-            subtitle = QLabel(get_method_display_name(self.method.method_id))
-            subtitle.setObjectName("nodeSubtitle")
-            subtitle.setWordWrap(True)
-            root.addWidget(subtitle)
+            algorithm_label = QLabel("算法")
+            algorithm_label.setObjectName("nodeSectionLabel")
+            root.addWidget(algorithm_label)
 
-            method_row = QHBoxLayout()
-            method_row.setSpacing(6)
-            method_row.addWidget(QLabel("算法"))
             self.method_combo = QComboBox()
             for key in self._candidate_methods():
                 if key in PROCESSING_METHODS:
@@ -167,13 +215,16 @@ class WorkflowNodeCard(QFrame):
             self.method_combo.setCurrentIndex(max(idx, 0))
             self.method_combo.currentIndexChanged.connect(self._on_method_changed)
             self._install_wheel_guard(self.method_combo)
-            method_row.addWidget(self.method_combo, 1)
+            root.addWidget(self.method_combo)
 
+            utility_row = QHBoxLayout()
+            utility_row.setSpacing(6)
             self.hidden_check = QCheckBox("隐藏")
             self.hidden_check.setChecked(bool(self.method.hidden))
             self.hidden_check.toggled.connect(self._on_hidden_toggled)
-            method_row.addWidget(self.hidden_check)
-            root.addLayout(method_row)
+            utility_row.addWidget(self.hidden_check)
+            utility_row.addStretch(1)
+            root.addLayout(utility_row)
 
             warning = self._stage_warning()
             if warning:
@@ -183,8 +234,12 @@ class WorkflowNodeCard(QFrame):
                 root.addWidget(warning_label)
 
             param_metas = PROCESSING_METHODS.get(self.method.method_id, {}).get("params", [])
-            max_params = len(param_metas) if self.expanded else min(3, len(param_metas))
+            max_params = len(param_metas) if self.expanded else min(2, len(param_metas))
             if max_params:
+                param_label = QLabel("参数")
+                param_label.setObjectName("nodeSectionLabel")
+                root.addWidget(param_label)
+
                 param_grid = QGridLayout()
                 param_grid.setContentsMargins(0, 0, 0, 0)
                 param_grid.setHorizontalSpacing(6)
@@ -204,17 +259,25 @@ class WorkflowNodeCard(QFrame):
                     self._param_getters[name] = getter
                 root.addLayout(param_grid)
             else:
-                root.addWidget(QLabel("(无参数)"))
+                empty_label = QLabel("(无参数)")
+                empty_label.setObjectName("nodeSubtitle")
+                root.addWidget(empty_label)
 
             button_row = QHBoxLayout()
             button_row.setSpacing(6)
-            if len(param_metas) > 3:
+            for text, signal in [
+                ("运行", self.run_current_requested),
+                ("后续", self.run_from_requested),
+            ]:
+                button = QPushButton(text)
+                button.setMinimumWidth(0)
+                button.clicked.connect(lambda _=False, sig=signal: sig.emit(self.row))
+                button_row.addWidget(button)
+            if len(param_metas) > 2:
                 self.more_button = QPushButton("收起" if self.expanded else "更多")
                 self.more_button.clicked.connect(self._toggle_expanded)
                 button_row.addWidget(self.more_button)
             for text, signal in [
-                ("运行", self.run_current_requested),
-                ("后续", self.run_from_requested),
                 ("复制", self.duplicate_requested),
                 ("删除", self.remove_requested),
             ]:
@@ -256,6 +319,13 @@ class WorkflowNodeCard(QFrame):
         hint.setWordWrap(True)
         root.addWidget(hint)
 
+    def _status_chip_text(self) -> str:
+        if self.method.hidden:
+            return "HIDE"
+        if not self.method.enabled:
+            return "OFF"
+        return "ON"
+
     def _status_text(self) -> str:
         if self.method.hidden:
             return "状态: 隐藏"
@@ -265,7 +335,7 @@ class WorkflowNodeCard(QFrame):
 
     def _install_wheel_guard(self, control: QWidget) -> None:
         """Swallow wheel events on embedded editors inside the graphics proxy."""
-        guarded_types = (QAbstractSpinBox, QComboBox)
+        guarded_types = (QAbstractSpinBox, QComboBox, QSlider)
         targets: list[QWidget] = []
         if isinstance(control, guarded_types):
             targets.append(control)
@@ -353,6 +423,64 @@ class WorkflowNodeCard(QFrame):
             self.method.params[name] = getter()
         self.changed.emit(self.row)
 
+    def _wrap_numeric_control(
+        self,
+        spin: QSpinBox | QDoubleSpinBox,
+        *,
+        is_float: bool,
+    ) -> tuple[QWidget, Callable[[], object]]:
+        """Pair a numeric editor with a compact slider strip."""
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(3)
+
+        slider = QSlider(Qt.Orientation.Horizontal)
+        slider.setObjectName("nodeParamSlider")
+        min_v = float(spin.minimum())
+        max_v = float(spin.maximum())
+        span = max_v - min_v
+
+        def slider_from_value(value: float) -> int:
+            if span <= 0:
+                return 0
+            ratio = max(0.0, min(1.0, (float(value) - min_v) / span))
+            return int(round(ratio * 1000))
+
+        def value_from_slider(position: int) -> float:
+            if span <= 0:
+                return min_v
+            return min_v + (float(position) / 1000.0) * span
+
+        slider.setRange(0, 1000)
+        slider.setValue(slider_from_value(float(spin.value())))
+
+        def sync_slider(value) -> None:
+            blocker = QSignalBlocker(slider)
+            try:
+                slider.setValue(slider_from_value(float(value)))
+            finally:
+                del blocker
+
+        def sync_spin(position: int) -> None:
+            value = value_from_slider(position)
+            blocker = QSignalBlocker(spin)
+            try:
+                if is_float:
+                    spin.setValue(float(value))
+                else:
+                    spin.setValue(int(round(value)))
+            finally:
+                del blocker
+            self._on_param_changed()
+
+        spin.valueChanged.connect(sync_slider)
+        slider.valueChanged.connect(sync_spin)
+
+        layout.addWidget(spin)
+        layout.addWidget(slider)
+        return container, spin.value
+
     def _create_param_control(self, meta: dict) -> tuple[QWidget, Callable[[], object]]:
         name = str(meta.get("name", ""))
         param_type = str(meta.get("type", "str"))
@@ -385,7 +513,7 @@ class WorkflowNodeCard(QFrame):
             except Exception:
                 control.setValue(int(meta.get("default", min_v)))
             control.valueChanged.connect(self._on_param_changed)
-            return control, control.value
+            return self._wrap_numeric_control(control, is_float=False)
 
         if param_type == "float":
             control = QDoubleSpinBox()
@@ -398,7 +526,7 @@ class WorkflowNodeCard(QFrame):
             except Exception:
                 control.setValue(float(meta.get("default", min_v)))
             control.valueChanged.connect(self._on_param_changed)
-            return control, control.value
+            return self._wrap_numeric_control(control, is_float=True)
 
         control = QLineEdit(str(value))
         control.textEdited.connect(self._on_param_changed)
@@ -566,6 +694,7 @@ class WorkflowCanvasView(QGraphicsView):
                 QAbstractSpinBox,
                 QComboBox,
                 QLineEdit,
+                QSlider,
             ),
         )
 
@@ -712,7 +841,7 @@ class WorkflowCanvasView(QGraphicsView):
         self._preview_proxy = None
 
         x0, y0 = 40, 60
-        x_step, y_step = 335, 255
+        x_step, y_step = 395, 255
         max_per_row = 3
         for row, method in enumerate(self._methods):
             card = WorkflowNodeCard(row, method)
