@@ -124,6 +124,8 @@ def test_compact_vertical_layout_uses_short_actions_and_step_labels():
         assert page.btn_save_template.text() == "存模"
         assert page.btn_restore_default.text() == "默认"
         assert page.btn_add_step.text() == "添加"
+        assert page.detail_box.title() == "选中步骤参数"
+        assert page.detail_box.parentWidget() is page.step_panel
 
         _select_method(page, "frequency_filter_1d")
         app.processEvents()

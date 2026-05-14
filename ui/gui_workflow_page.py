@@ -196,6 +196,7 @@ class WorkflowPage(QWidget):
         self.step_list.setToolTip("拖拽调整处理顺序；隐藏的步骤不会执行")
 
         step_panel = QWidget()
+        self.step_panel = step_panel
         step_panel_layout = QVBoxLayout(step_panel)
         step_panel_layout.setContentsMargins(0, 0, 0, 0)
         step_panel_layout.setSpacing(8)
@@ -214,7 +215,7 @@ class WorkflowPage(QWidget):
             step_action_layout.addWidget(btn)
         step_action_layout.addStretch(1)
         step_panel_layout.addWidget(step_action_row)
-        body_layout.addWidget(self._wrap_group("流程步骤", step_panel))
+        body_layout.addWidget(self._wrap_group("流程步骤 / 当前参数", step_panel))
 
         self.detail_box = QGroupBox("当前步骤")
         detail_layout = QVBoxLayout(self.detail_box)
@@ -249,12 +250,13 @@ class WorkflowPage(QWidget):
         self.param_layout.setVerticalSpacing(8)
         self.param_scroll.setWidget(self.param_host)
         self.param_scroll.setMinimumHeight(170)
+        self.detail_box.setTitle("选中步骤参数")
 
         detail_layout.addWidget(self.stage_label)
         detail_layout.addWidget(self.stage_warning)
         detail_layout.addWidget(method_row)
         detail_layout.addWidget(self.param_scroll, 1)
-        body_layout.addWidget(self.detail_box)
+        step_panel_layout.insertWidget(1, self.detail_box)
 
         self.log_box = QGroupBox("预览与质量提示")
         log_layout = QVBoxLayout(self.log_box)
