@@ -388,89 +388,11 @@ class WorkflowNodeProxy(QGraphicsProxyWidget):
     def __init__(self, row: int, parent=None):
         super().__init__(parent)
         self.row = int(row)
-        self._dragging = False
-        self._drag_scene_offset = QPointF()
-        self._drag_filter_widgets: list[QWidget] = []
         self.setFlags(
             QGraphicsProxyWidget.GraphicsItemFlag.ItemIsMovable
             | QGraphicsProxyWidget.GraphicsItemFlag.ItemIsSelectable
             | QGraphicsProxyWidget.GraphicsItemFlag.ItemSendsGeometryChanges
         )
-
-    def setWidget(self, widget):  # noqa: N802 - Qt override
-        result = super().setWidget(widget)
-        self._install_drag_event_filters(widget)
-        return result
-
-    def _install_drag_event_filters(self, widget: QWidget | None) -> None:
-        self._drag_filter_widgets.clear()
-        if widget is None:
-            return
-        widget.installEventFilter(self)
-        self._drag_filter_widgets.append(widget)
-        for child in widget.findChildren(QWidget):
-            if not self._is_interactive_widget(child):
-                child.installEventFilter(self)
-                self._drag_filter_widgets.append(child)
-
-    def _is_interactive_widget(self, widget: QWidget) -> bool:
-        return isinstance(
-            widget,
-            (
-                QAbstractButton,
-                QAbstractSpinBox,
-                QComboBox,
-                QLineEdit,
-            ),
-        )
-
-    def _event_scene_pos(self, event) -> QPointF:
-        scene = self.scene()
-        if scene is None or not scene.views():
-            return QPointF(self.pos())
-
-        view = scene.views()[0]
-        if hasattr(event, "globalPosition"):
-            global_pos = event.globalPosition().toPoint()
-        else:
-            global_pos = event.globalPos()
-        viewport_pos = view.viewport().mapFromGlobal(global_pos)
-        return view.mapToScene(viewport_pos)
-
-    def eventFilter(self, watched, event):  # noqa: N802 - Qt override
-        if isinstance(watched, QWidget) and self._is_interactive_widget(watched):
-            return False
-
-        event_type = event.type()
-        if event_type == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
-            self._dragging = True
-            scene_pos = self._event_scene_pos(event)
-            self._drag_scene_offset = scene_pos - self.pos()
-            card = self.widget()
-            if isinstance(card, WorkflowNodeCard):
-                card.selected.emit(self.row)
-            event.accept()
-            return True
-
-        if (
-            event_type == QEvent.Type.MouseMove
-            and self._dragging
-            and event.buttons() & Qt.MouseButton.LeftButton
-        ):
-            scene_pos = self._event_scene_pos(event)
-            self.setPos(scene_pos - self._drag_scene_offset)
-            scene = self.scene()
-            if isinstance(scene, WorkflowCanvasScene):
-                scene.update_edges()
-            event.accept()
-            return True
-
-        if event_type == QEvent.Type.MouseButtonRelease and event.button() == Qt.MouseButton.LeftButton:
-            self._dragging = False
-            event.accept()
-            return True
-
-        return super().eventFilter(watched, event)
 
     def itemChange(self, change, value):  # noqa: N802 - Qt override
         result = super().itemChange(change, value)
@@ -531,6 +453,8 @@ class WorkflowCanvasView(QGraphicsView):
         self._current_row = -1
         self._panning = False
         self._last_pan_pos = QPoint()
+        self._drag_proxy: WorkflowNodeProxy | None = None
+        self._drag_scene_offset = QPointF()
         self._compact_cards = False
         self._compact_threshold = 0.62
         self._normal_threshold = 0.78
@@ -566,6 +490,77 @@ class WorkflowCanvasView(QGraphicsView):
             card = proxy.widget()
             if isinstance(card, WorkflowNodeCard):
                 card.set_current(card.row == self._current_row)
+
+    def _event_view_pos(self, event) -> QPoint:
+        if hasattr(event, "position"):
+            return event.position().toPoint()
+        return event.pos()
+
+    def _proxy_at_view_pos(self, view_pos: QPoint) -> WorkflowNodeProxy | None:
+        item = self.itemAt(view_pos)
+        while item is not None and not isinstance(item, WorkflowNodeProxy):
+            item = item.parentItem()
+        return item if isinstance(item, WorkflowNodeProxy) else None
+
+    def _is_interactive_widget(self, widget: QWidget) -> bool:
+        return isinstance(
+            widget,
+            (
+                QAbstractButton,
+                QAbstractSpinBox,
+                QComboBox,
+                QLineEdit,
+            ),
+        )
+
+    def _is_interactive_card_target(self, proxy: WorkflowNodeProxy, scene_pos: QPointF) -> bool:
+        card = proxy.widget()
+        if not isinstance(card, QWidget):
+            return False
+
+        local_pos = proxy.mapFromScene(scene_pos)
+        child = card.childAt(int(local_pos.x()), int(local_pos.y()))
+        while child is not None and child is not card:
+            if self._is_interactive_widget(child):
+                return True
+            child = child.parentWidget()
+        return False
+
+    def viewportEvent(self, event):  # noqa: N802 - Qt override
+        event_type = event.type()
+
+        if event_type == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+            view_pos = self._event_view_pos(event)
+            scene_pos = self.mapToScene(view_pos)
+            proxy = self._proxy_at_view_pos(view_pos)
+            if proxy is not None and not self._is_interactive_card_target(proxy, scene_pos):
+                self._drag_proxy = proxy
+                self._drag_scene_offset = scene_pos - proxy.pos()
+                card = proxy.widget()
+                if isinstance(card, WorkflowNodeCard):
+                    card.selected.emit(proxy.row)
+                self.setCursor(Qt.CursorShape.ClosedHandCursor)
+                event.accept()
+                return True
+
+        if (
+            event_type == QEvent.Type.MouseMove
+            and self._drag_proxy is not None
+            and event.buttons() & Qt.MouseButton.LeftButton
+        ):
+            scene_pos = self.mapToScene(self._event_view_pos(event))
+            self._drag_proxy.setPos(scene_pos - self._drag_scene_offset)
+            self._scene.update_edges()
+            event.accept()
+            return True
+
+        if event_type == QEvent.Type.MouseButtonRelease and self._drag_proxy is not None:
+            self._drag_proxy = None
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            event.accept()
+            return True
+
+        return super().viewportEvent(event)
 
     def wheelEvent(self, event):  # noqa: N802 - Qt override
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:

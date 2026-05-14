@@ -9,7 +9,8 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtWidgets import QApplication, QComboBox, QLineEdit, QPushButton
+from PyQt6.QtCore import QPointF
+from PyQt6.QtWidgets import QApplication, QComboBox
 
 from core.app_paths import get_workflow_templates_dir
 from core.workflow_data import WorkflowConfigManager, build_default_workflow_config
@@ -203,26 +204,30 @@ def test_workflow_canvas_zoom_lod_switches_card_compact_mode():
         app.processEvents()
 
 
-def test_workflow_node_proxy_installs_drag_filters_only_on_noninteractive_widgets():
+def test_workflow_canvas_view_drag_hit_testing_keeps_controls_interactive():
     app = _get_app()
-    method = build_default_workflow_config("high_quality_uav_gpr").methods[0]
-    proxy = WorkflowNodeProxy(0)
-    card = WorkflowNodeCard(0, method)
+    canvas = WorkflowCanvasView()
     try:
-        proxy.setWidget(card)
+        config = build_default_workflow_config("high_quality_uav_gpr")
+        canvas.set_methods(config.methods)
         app.processEvents()
 
-        assert not proxy._is_interactive_widget(card)
-        assert card in proxy._drag_filter_widgets
-        assert hasattr(proxy, "_drag_scene_offset")
-        assert not hasattr(proxy, "_last_drag_global_pos")
+        proxy = canvas._scene.proxies[0]
+        assert isinstance(proxy, WorkflowNodeProxy)
 
-        for child in card.findChildren(QPushButton) + card.findChildren(QLineEdit) + card.findChildren(QComboBox):
-            assert proxy._is_interactive_widget(child)
-            assert child not in proxy._drag_filter_widgets
+        card = proxy.widget()
+        assert isinstance(card, WorkflowNodeCard)
+
+        noninteractive_pos = proxy.mapToScene(QPointF(8, 8))
+        assert canvas._is_interactive_card_target(proxy, noninteractive_pos) is False
+
+        combo = card.findChild(QComboBox)
+        assert combo is not None
+        combo_center = combo.geometry().center()
+        interactive_pos = proxy.mapToScene(QPointF(combo_center))
+        assert canvas._is_interactive_card_target(proxy, interactive_pos) is True
     finally:
-        proxy.setWidget(None)
-        card.close()
+        canvas.close()
         app.processEvents()
 
 
