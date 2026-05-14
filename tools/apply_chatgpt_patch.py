@@ -8,10 +8,12 @@ import argparse
 import re
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+REPORT_DIR = REPO_ROOT / ".chatgpt_inbox" / "_reports"
 
 
 def _run(command: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -47,6 +49,132 @@ def _changed_files() -> list[str]:
     return [line.strip() for line in output.splitlines() if line.strip()]
 
 
+def _current_head() -> str:
+    return _git_output(["rev-parse", "HEAD"]).strip()
+
+
+def _current_branch() -> str:
+    return _git_output(["branch", "--show-current"]).strip()
+
+
+def _origin_blob_url(head: str, path: str) -> str:
+    remote = _git_output(["config", "--get", "remote.origin.url"]).strip()
+    if remote.endswith(".git"):
+        remote = remote[:-4]
+    if remote.startswith("git@github.com:"):
+        remote = "https://github.com/" + remote[len("git@github.com:") :]
+    return f"{remote}/blob/{head}/{path.replace('\\', '/')}"
+
+
+def _parse_touched_files(patch_text: str) -> list[str]:
+    files: list[str] = []
+    for match in re.finditer(r"^diff --git a/(.*?) b/(.*?)$", patch_text, re.MULTILINE):
+        path = match.group(2).strip()
+        if path and path != "/dev/null":
+            files.append(path)
+    return sorted(dict.fromkeys(files))
+
+
+def _extract_base_commit(patch_text: str) -> str | None:
+    patterns = [
+        r"(?im)^\s*(?:#\s*)?base[-_ ]commit\s*[:=]\s*([0-9a-f]{7,40})\s*$",
+        r"(?im)^\s*(?:#\s*)?base[-_ ]head\s*[:=]\s*([0-9a-f]{7,40})\s*$",
+        r"(?im)^\s*(?:#\s*)?latest[-_ ]commit\s*[:=]\s*([0-9a-f]{7,40})\s*$",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, patch_text)
+        if match:
+            return match.group(1).lower()
+    return None
+
+
+def _write_failure_report(
+    patch_file: Path,
+    *,
+    reason: str,
+    command_output: str,
+) -> Path:
+    REPORT_DIR.mkdir(parents=True, exist_ok=True)
+    patch_text = patch_file.read_text(encoding="utf-8", errors="replace")
+    touched = _parse_touched_files(patch_text)
+    head = _current_head()
+    branch = _current_branch()
+    base = _extract_base_commit(patch_text)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    report = REPORT_DIR / f"{timestamp}_{patch_file.stem}_failure.md"
+
+    lines = [
+        "# ChatGPT Patch Failure Report",
+        "",
+        f"- patch: `{patch_file.name}`",
+        f"- branch: `{branch}`",
+        f"- current_head: `{head}`",
+        f"- declared_base_commit: `{base or 'MISSING'}`",
+        f"- reason: {reason}",
+        "",
+        "## Touched Files",
+    ]
+    if touched:
+        for path in touched:
+            lines.append(f"- `{path}`")
+            lines.append(f"  - current: {_origin_blob_url(head, path)}")
+    else:
+        lines.append("- No `diff --git` file entries were parsed.")
+
+    lines.extend(
+        [
+            "",
+            "## What To Send Back To Web GPT",
+            "",
+            "Regenerate the patch from the exact current branch state below. Do not reuse older snippets.",
+            "",
+            "```text",
+            f"branch: {branch}",
+            f"base commit: {head}",
+            "Patch requirements:",
+            "1. Fetch the current file contents from the links above before editing.",
+            "2. Put `Base-Commit: <hash>` as the first line of the patch or patch message.",
+            "3. Generate a unified diff against that exact base commit.",
+            "4. Do not invent fake git index hashes such as aaaaaaa/c0ffee0; omit index lines if unknown.",
+            "```",
+            "",
+            "## Command Output",
+            "",
+            "```text",
+            command_output.strip() or "(no output)",
+            "```",
+            "",
+        ]
+    )
+    report.write_text("\n".join(lines), encoding="utf-8")
+    print(f"[apply] wrote failure report: {report}", flush=True)
+    return report
+
+
+def _validate_declared_base(patch_file: Path, *, allow_missing_base: bool) -> None:
+    patch_text = patch_file.read_text(encoding="utf-8", errors="replace")
+    declared = _extract_base_commit(patch_text)
+    head = _current_head().lower()
+    if not declared:
+        if not allow_missing_base:
+            report = _write_failure_report(
+                patch_file,
+                reason="missing Base-Commit header",
+                command_output="Patch did not declare Base-Commit.",
+            )
+            raise RuntimeError(f"patch missing Base-Commit header; see {report}")
+        print("[apply] warning: patch does not declare Base-Commit", flush=True)
+        return
+
+    if not head.startswith(declared.lower()) and not declared.lower().startswith(head):
+        report = _write_failure_report(
+            patch_file,
+            reason="declared base commit does not match current HEAD",
+            command_output=f"declared={declared}\ncurrent={head}",
+        )
+        raise RuntimeError(f"patch base commit mismatch; see {report}")
+
+
 def _apply_patch_file(patch_file: Path) -> None:
     """Apply patch, falling back to git's 3-way merge for shifted context."""
     check_result = _run(["git", "apply", "--check", str(patch_file)], check=False)
@@ -57,9 +185,14 @@ def _apply_patch_file(patch_file: Path) -> None:
     print("[apply] direct git apply failed; trying git apply --3way", flush=True)
     three_way_result = _run(["git", "apply", "--3way", str(patch_file)], check=False)
     if three_way_result.returncode != 0:
+        report = _write_failure_report(
+            patch_file,
+            reason="git apply and git apply --3way both failed",
+            command_output=(check_result.stdout or "") + "\n" + (three_way_result.stdout or ""),
+        )
         raise RuntimeError(
             "patch could not be applied directly or with --3way; "
-            "it is likely based on stale file content"
+            f"it is likely based on stale file content; see {report}"
         )
 
     unresolved = _git_output(["diff", "--name-only", "--diff-filter=U"])
@@ -109,6 +242,7 @@ def apply_patch(args: argparse.Namespace) -> int:
     _run(["git", "pull", "--ff-only"])
     _ensure_clean()
 
+    _validate_declared_base(patch_file, allow_missing_base=args.allow_missing_base)
     _apply_patch_file(patch_file)
 
     changed = _changed_files()
@@ -135,6 +269,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--patch-file", required=True)
     parser.add_argument("--summary", default="")
     parser.add_argument("--mygpr-smoke", action="store_true")
+    parser.add_argument(
+        "--allow-missing-base",
+        action="store_true",
+        help="Allow legacy patches without a Base-Commit header.",
+    )
     push_group = parser.add_mutually_exclusive_group()
     push_group.add_argument("--push", action="store_true")
     push_group.add_argument("--no-push", action="store_true")

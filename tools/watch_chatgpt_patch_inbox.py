@@ -71,6 +71,8 @@ def _process_patch(patch: Path, args: argparse.Namespace, log_path: Path) -> boo
     ]
     if args.mygpr_smoke:
         command.append("--mygpr-smoke")
+    if args.allow_missing_base:
+        command.append("--allow-missing-base")
     command.append("--push" if args.push else "--no-push")
 
     result = subprocess.run(
@@ -129,6 +131,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--poll-interval", type=float, default=2.0)
     parser.add_argument("--mygpr-smoke", action="store_true")
     parser.add_argument("--push", action="store_true")
+    parser.add_argument(
+        "--allow-missing-base",
+        action="store_true",
+        help="Allow legacy patches without a Base-Commit header.",
+    )
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args(argv)
     args.inbox = args.inbox.expanduser().resolve()
