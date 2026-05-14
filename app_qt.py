@@ -180,7 +180,6 @@ from ui.gui_auto_tune_page import AutoTunePage
 from ui.gui_advanced_settings import AdvancedSettingsPage
 from ui.gui_quality_log import QualityLogPage
 from ui.gui_workflow_page import WorkflowPage
-from ui.gui_workflow_ribbon import WorkflowRibbon
 from ui.loading_dialog import LoadingProgressDialog
 from ui.auto_tune_result_dialog import AutoTuneResultDialog
 
@@ -789,7 +788,6 @@ class GPRGuiQt(QMainWindow):
         self._runtime_panel_stack = None
         self._runtime_panel_buttons = {}
         self._active_runtime_panel = None
-        self.workflow_ribbon = None
 
         self._setup_ui()
         self._apply_style()
@@ -930,11 +928,6 @@ class GPRGuiQt(QMainWindow):
         self.version_label.setProperty("class", "topInfoMeta")
         status_layout.addWidget(self.version_label)
         right_layout.addWidget(status_bar)
-
-        # Compact processing-chain overview above the B-scan.  The detailed
-        # parameter editor remains in the left Workflow tab.
-        self.workflow_ribbon = WorkflowRibbon(self)
-        right_layout.addWidget(self.workflow_ribbon)
 
         # 绘图区域
         self.fig = Figure(figsize=(9.5, 6.4), dpi=100)
@@ -1374,29 +1367,6 @@ class GPRGuiQt(QMainWindow):
         self.page_workflow.save_live_result_requested.connect(
             self.save_workflow_live_result
         )
-        self._connect_workflow_ribbon()
-
-    def _connect_workflow_ribbon(self):
-        """Connect the main-view workflow ribbon with the detailed workflow page."""
-        if self.workflow_ribbon is None or not hasattr(self, "page_workflow"):
-            return
-
-        self.workflow_ribbon.run_all_requested.connect(self.page_workflow.request_manual_run)
-        self.workflow_ribbon.run_selected_requested.connect(self.page_workflow.request_selected_run)
-        self.workflow_ribbon.run_from_current_requested.connect(
-            self.page_workflow.request_run_from_current
-        )
-        self.workflow_ribbon.save_requested.connect(self.page_workflow.save_live_result_requested)
-        self.workflow_ribbon.step_selected.connect(self.page_workflow.select_step)
-        self.workflow_ribbon.realtime_toggled.connect(self.page_workflow.realtime_check.setChecked)
-
-        self.page_workflow.step_selection_changed.connect(self.workflow_ribbon.set_current_step)
-        self.page_workflow.workflow_config_changed.connect(self.workflow_ribbon.set_config)
-        self.page_workflow.realtime_check.toggled.connect(self.workflow_ribbon.set_realtime_checked)
-
-        self.workflow_ribbon.set_config(self.page_workflow.config)
-        self.workflow_ribbon.set_current_step(self.page_workflow.current_step_index())
-        self.workflow_ribbon.set_realtime_checked(self.page_workflow.realtime_check.isChecked())
 
         # 显示与对比页面
         self.page_advanced.cmap_combo.currentIndexChanged.connect(self._refresh_plot)
@@ -4309,8 +4279,6 @@ class GPRGuiQt(QMainWindow):
             notes=["工作流实时预览结果已保存为正式结果"],
         )
         self.page_workflow.set_running("工作流结果已保存")
-        if self.workflow_ribbon is not None:
-            self.workflow_ribbon.set_save_enabled(False)
         self._log("工作流结果已保存到正式历史")
 
     # ============ 报告和导出 ============
@@ -6676,8 +6644,6 @@ class GPRGuiQt(QMainWindow):
                         outputs,
                         realtime=self._last_workflow_realtime,
                     )
-                if self.workflow_ribbon is not None:
-                    self.workflow_ribbon.set_save_enabled(True)
 
         self._cleanup_worker()
 
