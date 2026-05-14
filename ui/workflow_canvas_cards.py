@@ -46,6 +46,7 @@ class WorkflowNodeCard(QFrame):
         self.row = int(row)
         self.method = method
         self.expanded = False
+        self.compact = False
         self._suppress = False
         self._param_getters: dict[str, Callable[[], object]] = {}
         self.setObjectName("workflowNodeCard")
@@ -73,6 +74,23 @@ class WorkflowNodeCard(QFrame):
             QLabel#nodeWarning {
                 color: #a66a00;
             }
+            QFrame#workflowNodeCard[compact="true"] {
+                background: #f9fbff;
+                border: 1px solid #8fb3ff;
+            }
+            QLabel#nodeCompactTitle {
+                font-weight: 800;
+                font-size: 15px;
+                color: #0b4fd8;
+            }
+            QLabel#nodeCompactSubtitle {
+                font-size: 13px;
+                color: #1f2d3d;
+            }
+            QLabel#nodeCompactMeta {
+                font-size: 12px;
+                color: #52647a;
+            }
             """
         )
         self._build()
@@ -83,6 +101,16 @@ class WorkflowNodeCard(QFrame):
 
     def set_current(self, current: bool) -> None:
         self.setProperty("current", bool(current))
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+    def set_compact(self, compact: bool) -> None:
+        compact = bool(compact)
+        if self.compact == compact:
+            return
+        self.compact = compact
+        self.setProperty("compact", compact)
+        self._build()
         self.style().unpolish(self)
         self.style().polish(self)
 
@@ -102,6 +130,10 @@ class WorkflowNodeCard(QFrame):
             root = QVBoxLayout(self)
             root.setContentsMargins(10, 8, 10, 10)
             root.setSpacing(7)
+
+            if self.compact:
+                self._build_compact(root)
+                return
 
             title_row = QHBoxLayout()
             title_row.setSpacing(8)
@@ -188,6 +220,57 @@ class WorkflowNodeCard(QFrame):
             root.addLayout(button_row)
         finally:
             self._suppress = False
+
+    def _build_compact(self, root: QVBoxLayout) -> None:
+        self.setMinimumWidth(210)
+        self.setMaximumWidth(240)
+
+        title = QLabel(f"{self.row + 1:02d}. {self._stage_label()}")
+        title.setObjectName("nodeCompactTitle")
+        title.setWordWrap(True)
+        root.addWidget(title)
+
+        subtitle = QLabel(self._short_text(get_method_display_name(self.method.method_id), 22))
+        subtitle.setObjectName("nodeCompactSubtitle")
+        subtitle.setWordWrap(True)
+        root.addWidget(subtitle)
+
+        meta = QLabel(self._status_text())
+        meta.setObjectName("nodeCompactMeta")
+        root.addWidget(meta)
+
+        summary = self._param_summary(max_items=2)
+        if summary:
+            params = QLabel(summary)
+            params.setObjectName("nodeCompactMeta")
+            params.setWordWrap(True)
+            root.addWidget(params)
+
+        hint = QLabel("Ctrl+滚轮放大后可编辑参数")
+        hint.setObjectName("nodeCompactMeta")
+        hint.setWordWrap(True)
+        root.addWidget(hint)
+
+    def _status_text(self) -> str:
+        if self.method.hidden:
+            return "状态: 隐藏"
+        if not self.method.enabled:
+            return "状态: 停用"
+        return "状态: 启用"
+
+    def _param_summary(self, max_items: int = 3) -> str:
+        if not self.method.params:
+            return ""
+        tokens: list[str] = []
+        for key, value in list(self.method.params.items())[:max_items]:
+            tokens.append(f"{key}={self._short_text(str(value), 16)}")
+        if len(self.method.params) > max_items:
+            tokens.append("...")
+        return " · ".join(tokens)
+
+    @staticmethod
+    def _short_text(text: str, limit: int) -> str:
+        return text if len(text) <= limit else text[: max(1, limit - 1)] + "…"
 
     def _candidate_methods(self) -> list[str]:
         stage = WORKFLOW_STAGE_BY_ID.get(self.method.stage_id, {})
@@ -368,6 +451,9 @@ class WorkflowCanvasView(QGraphicsView):
         self._current_row = -1
         self._panning = False
         self._last_pan_pos = QPoint()
+        self._compact_cards = False
+        self._compact_threshold = 0.62
+        self._normal_threshold = 0.78
         self.setRenderHints(self.renderHints())
         self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
@@ -404,7 +490,11 @@ class WorkflowCanvasView(QGraphicsView):
     def wheelEvent(self, event):  # noqa: N802 - Qt override
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             factor = 1.15 if event.angleDelta().y() > 0 else 1 / 1.15
-            self.scale(factor, factor)
+            current_scale = self.transform().m11()
+            next_scale = max(0.32, min(2.8, current_scale * factor))
+            self.resetTransform()
+            self.scale(next_scale, next_scale)
+            self._apply_zoom_lod()
             event.accept()
             return
         super().wheelEvent(event)
@@ -440,6 +530,26 @@ class WorkflowCanvasView(QGraphicsView):
         rect = self._scene.itemsBoundingRect().adjusted(-80, -80, 80, 80)
         if rect.isValid():
             self.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
+            self._apply_zoom_lod(force=True)
+
+    def _apply_zoom_lod(self, force: bool = False) -> None:
+        scale = self.transform().m11()
+        if scale < self._compact_threshold:
+            compact = True
+        elif scale > self._normal_threshold:
+            compact = False
+        else:
+            compact = self._compact_cards
+
+        if not force and compact == self._compact_cards:
+            return
+
+        self._compact_cards = compact
+        for proxy in self._scene.proxies:
+            card = proxy.widget()
+            if isinstance(card, WorkflowNodeCard):
+                card.set_compact(compact)
+        self._scene.update_edges()
 
     def _rebuild(self) -> None:
         self._scene.clear()
@@ -468,6 +578,7 @@ class WorkflowCanvasView(QGraphicsView):
 
         self._scene.update_edges()
         self.set_selected_row(self._current_row)
+        self._apply_zoom_lod(force=True)
         self._scene.setSceneRect(self._scene.itemsBoundingRect().adjusted(-200, -160, 400, 260))
 
     def _on_node_selected(self, row: int) -> None:

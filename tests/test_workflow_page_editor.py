@@ -12,7 +12,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PyQt6.QtWidgets import QApplication, QComboBox
 
 from core.app_paths import get_workflow_templates_dir
-from core.workflow_data import WorkflowConfigManager
+from core.workflow_data import WorkflowConfigManager, build_default_workflow_config
+from ui.workflow_canvas_cards import WorkflowNodeCard
 from ui.workflow_canvas_cards import WorkflowCanvasView
 from ui.gui_workflow_page import WorkflowPage
 
@@ -167,6 +168,38 @@ def test_workflow_canvas_node_selection_and_actions_sync_hidden_list():
         assert emitted[-1][0][0].method_id == page.config.methods[0].method_id
     finally:
         page.close()
+        app.processEvents()
+
+
+def test_workflow_canvas_zoom_lod_switches_card_compact_mode():
+    app = _get_app()
+    canvas = WorkflowCanvasView()
+    try:
+        config = build_default_workflow_config("high_quality_uav_gpr")
+        canvas.set_methods(config.methods)
+        app.processEvents()
+
+        cards = [
+            proxy.widget()
+            for proxy in canvas._scene.proxies
+            if isinstance(proxy.widget(), WorkflowNodeCard)
+        ]
+        assert cards
+        assert not any(card.compact for card in cards)
+
+        canvas.resetTransform()
+        canvas.scale(0.5, 0.5)
+        canvas._apply_zoom_lod(force=True)
+        app.processEvents()
+        assert all(card.compact for card in cards)
+
+        canvas.resetTransform()
+        canvas.scale(1.0, 1.0)
+        canvas._apply_zoom_lod(force=True)
+        app.processEvents()
+        assert not any(card.compact for card in cards)
+    finally:
+        canvas.close()
         app.processEvents()
 
 
