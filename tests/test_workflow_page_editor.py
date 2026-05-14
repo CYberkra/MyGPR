@@ -119,7 +119,9 @@ def test_compact_vertical_layout_uses_short_actions_and_step_labels():
         assert page.btn_run_from_current.text() == "后续"
         assert page.btn_run_selected.text() == "当前"
         assert page.btn_save_live.text() == "保存"
-        assert page.btn_save_template.text() == "存模板"
+        assert page.btn_new_template.text() == "新"
+        assert page.btn_duplicate_template.text() == "副本"
+        assert page.btn_save_template.text() == "存模"
         assert page.btn_restore_default.text() == "默认"
         assert page.btn_add_step.text() == "添加"
 

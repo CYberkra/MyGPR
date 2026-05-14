@@ -144,10 +144,10 @@ class WorkflowPage(QWidget):
         template_action_layout.setContentsMargins(0, 0, 0, 0)
         template_action_layout.setSpacing(6)
 
-        self.btn_new_template = PushButton(FluentIcon.ADD, "新建")
+        self.btn_new_template = PushButton(FluentIcon.ADD, "新")
         self.btn_new_template.setToolTip("从内置高质量 UAV-GPR 模板创建一个用户模板")
-        self.btn_duplicate_template = PushButton(FluentIcon.COPY, "复制")
-        self.btn_save_template = PushButton(FluentIcon.SAVE, "存模板")
+        self.btn_duplicate_template = PushButton(FluentIcon.COPY, "副本")
+        self.btn_save_template = PushButton(FluentIcon.SAVE, "存模")
         self.btn_import_template = PushButton(FluentIcon.FOLDER, "导入")
         self.btn_export_template = PushButton(FluentIcon.SAVE_AS, "导出")
         self.btn_restore_default = PushButton(FluentIcon.SYNC, "默认")
