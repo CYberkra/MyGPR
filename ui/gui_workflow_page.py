@@ -16,7 +16,6 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QFrame,
-    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -35,6 +34,7 @@ from qfluentwidgets import FluentIcon, PushButton
 
 from core.methods_registry import PROCESSING_METHODS, get_method_display_name
 from core.workflow_data import (
+    METHOD_CATEGORIES,
     QUICK_PRESETS,
     WORKFLOW_STAGE_BY_ID,
     WORKFLOW_STAGE_DEFINITIONS,
@@ -125,26 +125,32 @@ class WorkflowPage(QWidget):
         template_layout.addWidget(self.realtime_check)
         toolbar_layout.addWidget(template_row)
 
-        action_row = QWidget()
-        action_layout = QHBoxLayout(action_row)
-        action_layout.setContentsMargins(0, 0, 0, 0)
-        action_layout.setSpacing(6)
-        self.btn_run_all = PushButton(FluentIcon.PLAY_SOLID, "运行全部")
+        run_row = QWidget()
+        run_layout = QHBoxLayout(run_row)
+        run_layout.setContentsMargins(0, 0, 0, 0)
+        run_layout.setSpacing(6)
+        self.btn_run_all = PushButton(FluentIcon.PLAY_SOLID, "全链")
         self.btn_run_all.setToolTip("按当前步骤顺序运行工作流")
-        self.btn_run_from_current = PushButton("从当前运行")
+        self.btn_run_from_current = PushButton("后续")
         self.btn_run_from_current.setToolTip("从选中步骤开始运行到工作流末尾")
-        self.btn_run_selected = PushButton("运行当前")
+        self.btn_run_selected = PushButton("当前")
         self.btn_run_selected.setToolTip("只运行选中的单个步骤，便于逐步验证")
-        self.btn_save_live = PushButton(FluentIcon.SAVE, "保存结果")
+        self.btn_save_live = PushButton(FluentIcon.SAVE, "保存")
         self.btn_save_live.setToolTip("将实时预览或最近一次工作流结果写入正式历史")
         self.btn_save_live.setEnabled(False)
+
+        template_action_row = QWidget()
+        template_action_layout = QHBoxLayout(template_action_row)
+        template_action_layout.setContentsMargins(0, 0, 0, 0)
+        template_action_layout.setSpacing(6)
+
         self.btn_new_template = PushButton(FluentIcon.ADD, "新建")
         self.btn_new_template.setToolTip("从内置高质量 UAV-GPR 模板创建一个用户模板")
         self.btn_duplicate_template = PushButton(FluentIcon.COPY, "复制")
-        self.btn_save_template = PushButton(FluentIcon.SAVE, "保存模板")
+        self.btn_save_template = PushButton(FluentIcon.SAVE, "存模板")
         self.btn_import_template = PushButton(FluentIcon.FOLDER, "导入")
         self.btn_export_template = PushButton(FluentIcon.SAVE_AS, "导出")
-        self.btn_restore_default = PushButton(FluentIcon.SYNC, "恢复默认")
+        self.btn_restore_default = PushButton(FluentIcon.SYNC, "默认")
 
         for btn in [
             self.btn_run_all,
@@ -152,8 +158,11 @@ class WorkflowPage(QWidget):
             self.btn_run_selected,
             self.btn_save_live,
         ]:
-            action_layout.addWidget(btn)
-        action_layout.addStretch(1)
+            btn.setMinimumWidth(0)
+            run_layout.addWidget(btn)
+        run_layout.addStretch(1)
+        toolbar_layout.addWidget(run_row)
+
         for btn in [
             self.btn_new_template,
             self.btn_duplicate_template,
@@ -162,22 +171,28 @@ class WorkflowPage(QWidget):
             self.btn_export_template,
             self.btn_restore_default,
         ]:
-            action_layout.addWidget(btn)
-        toolbar_layout.addWidget(action_row)
+            btn.setMinimumWidth(0)
+            template_action_layout.addWidget(btn)
+        template_action_layout.addStretch(1)
+        toolbar_layout.addWidget(template_action_row)
         outer.addWidget(toolbar)
 
+        body_scroll = QScrollArea()
+        body_scroll.setWidgetResizable(True)
+        body_scroll.setFrameShape(QFrame.Shape.NoFrame)
         body = QWidget()
-        body_layout = QGridLayout(body)
+        body_layout = QVBoxLayout(body)
         body_layout.setContentsMargins(10, 0, 10, 10)
-        body_layout.setHorizontalSpacing(10)
-        body_layout.setVerticalSpacing(8)
-        outer.addWidget(body, 1)
+        body_layout.setSpacing(10)
+        body_scroll.setWidget(body)
+        outer.addWidget(body_scroll, 1)
 
         self.step_list = WorkflowStepList()
         self.step_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
         self.step_list.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.step_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.step_list.setMinimumWidth(280)
+        self.step_list.setMinimumWidth(0)
+        self.step_list.setMinimumHeight(260)
         self.step_list.setToolTip("拖拽调整处理顺序；隐藏的步骤不会执行")
 
         step_panel = QWidget()
@@ -189,9 +204,9 @@ class WorkflowPage(QWidget):
         step_action_layout = QHBoxLayout(step_action_row)
         step_action_layout.setContentsMargins(0, 0, 0, 0)
         step_action_layout.setSpacing(6)
-        self.btn_add_step = PushButton("添加步骤")
-        self.btn_duplicate_step = PushButton("复制步骤")
-        self.btn_remove_step = PushButton("删除步骤")
+        self.btn_add_step = PushButton("添加")
+        self.btn_duplicate_step = PushButton("复制")
+        self.btn_remove_step = PushButton("删除")
         self.btn_add_step.setToolTip("在当前步骤后插入同阶段默认步骤")
         self.btn_duplicate_step.setToolTip("复制当前步骤及其参数")
         self.btn_remove_step.setToolTip("删除当前步骤")
@@ -199,7 +214,7 @@ class WorkflowPage(QWidget):
             step_action_layout.addWidget(btn)
         step_action_layout.addStretch(1)
         step_panel_layout.addWidget(step_action_row)
-        body_layout.addWidget(self._wrap_group("流程步骤", step_panel), 0, 0, 2, 1)
+        body_layout.addWidget(self._wrap_group("流程步骤", step_panel))
 
         self.detail_box = QGroupBox("当前步骤")
         detail_layout = QVBoxLayout(self.detail_box)
@@ -233,12 +248,13 @@ class WorkflowPage(QWidget):
         self.param_layout.setHorizontalSpacing(10)
         self.param_layout.setVerticalSpacing(8)
         self.param_scroll.setWidget(self.param_host)
+        self.param_scroll.setMinimumHeight(170)
 
         detail_layout.addWidget(self.stage_label)
         detail_layout.addWidget(self.stage_warning)
         detail_layout.addWidget(method_row)
         detail_layout.addWidget(self.param_scroll, 1)
-        body_layout.addWidget(self.detail_box, 0, 1, 1, 1)
+        body_layout.addWidget(self.detail_box)
 
         self.log_box = QGroupBox("预览与质量提示")
         log_layout = QVBoxLayout(self.log_box)
@@ -252,12 +268,8 @@ class WorkflowPage(QWidget):
         self.workflow_log.setPlaceholderText("工作流运行状态、风险提示和最近步骤日志")
         log_layout.addWidget(self.status_label)
         log_layout.addWidget(self.workflow_log, 1)
-        body_layout.addWidget(self.log_box, 1, 1, 1, 1)
-
-        body_layout.setColumnStretch(0, 0)
-        body_layout.setColumnStretch(1, 1)
-        body_layout.setRowStretch(0, 2)
-        body_layout.setRowStretch(1, 1)
+        body_layout.addWidget(self.log_box)
+        body_layout.addStretch(1)
 
         self._debounce_timer = QTimer(self)
         self._debounce_timer.setSingleShot(True)
@@ -332,7 +344,8 @@ class WorkflowPage(QWidget):
 
     def _format_step_text(self, method: WorkflowMethod) -> str:
         stage = WORKFLOW_STAGE_BY_ID.get(method.stage_id, {})
-        stage_label = stage.get("label") or method.category or "未分组"
+        category = METHOD_CATEGORIES.get(method.category, {})
+        stage_label = stage.get("label") or category.get("name") or method.category or "未分组"
         method_name = get_method_display_name(method.method_id)
         if method.hidden:
             state = "隐藏"
@@ -340,8 +353,7 @@ class WorkflowPage(QWidget):
             state = "停用"
         else:
             state = "启用"
-        summary = self._param_summary(method)
-        return f"{method.order + 1:02d}. {stage_label}\n{method_name} | {state}{summary}"
+        return f"{method.order + 1:02d}. {stage_label}\n{method_name} | {state}"
 
     def _param_summary(self, method: WorkflowMethod) -> str:
         if not method.params:
@@ -369,7 +381,9 @@ class WorkflowPage(QWidget):
         self._suppress_change = True
         try:
             stage = WORKFLOW_STAGE_BY_ID.get(method.stage_id, {})
-            self.stage_label.setText(stage.get("label") or method.category or "--")
+            category = METHOD_CATEGORIES.get(method.category, {})
+            stage_label = stage.get("label") or category.get("name") or method.category or "--"
+            self.stage_label.setText(stage_label)
             self.stage_warning.setText(stage.get("warning", ""))
             self.enabled_check.setChecked(bool(method.enabled))
             self.hidden_check.setChecked(bool(method.hidden))

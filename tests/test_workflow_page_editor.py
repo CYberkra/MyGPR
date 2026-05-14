@@ -111,6 +111,30 @@ def test_step_editor_add_duplicate_remove_and_run_scopes():
         app.processEvents()
 
 
+def test_compact_vertical_layout_uses_short_actions_and_step_labels():
+    app = _get_app()
+    page = WorkflowPage()
+    try:
+        assert page.btn_run_all.text() == "全链"
+        assert page.btn_run_from_current.text() == "后续"
+        assert page.btn_run_selected.text() == "当前"
+        assert page.btn_save_live.text() == "保存"
+        assert page.btn_save_template.text() == "存模板"
+        assert page.btn_restore_default.text() == "默认"
+        assert page.btn_add_step.text() == "添加"
+
+        _select_method(page, "frequency_filter_1d")
+        app.processEvents()
+        label = page.step_list.currentItem().text()
+
+        assert "基础迹线域校正" in label
+        assert "一维频域滤波" in label
+        assert "filter_type=" not in label
+    finally:
+        page.close()
+        app.processEvents()
+
+
 def test_workflow_config_manager_uses_user_writable_template_dir(monkeypatch, tmp_path):
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
 
