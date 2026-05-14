@@ -8,6 +8,8 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
+from core.methods_registry import PROCESSING_METHODS
+
 
 PREVIEW_NODE_ID = "__workflow_preview__"
 
@@ -98,6 +100,7 @@ def validate_workflow_config(
     *,
     preview_node_id: str = PREVIEW_NODE_ID,
     execution_mode: str = "order",
+    sidecar_status: dict[str, bool] | None = None,
 ) -> WorkflowValidationReport:
     """Validate a WorkflowConfig-like object.
 
@@ -258,6 +261,35 @@ def validate_workflow_config(
             ),
         )
 
+    # Check sidecar requirements
+    if sidecar_status is not None:
+        rtk_loaded = sidecar_status.get("rtk", False)
+        imu_loaded = sidecar_status.get("imu", False)
+        agl_loaded = sidecar_status.get("agl", False)
+        
+        for method in methods:
+            if method.hidden or not method.enabled:
+                continue
+            method_key = method.method_id
+            if method_key not in PROCESSING_METHODS:
+                continue
+            meta = PROCESSING_METHODS[method_key]
+            missing_requirements = []
+            if meta.get("requires_rtk") and not rtk_loaded:
+                missing_requirements.append("RTK")
+            if meta.get("requires_imu") and not imu_loaded:
+                missing_requirements.append("IMU")
+            if meta.get("requires_agl") and not agl_loaded:
+                missing_requirements.append("AGL")
+            if missing_requirements:
+                req_str = "、".join(missing_requirements)
+                report.add(
+                    "warning",
+                    "missing_sidecar",
+                    f"节点缺少所需的辅助数据：{req_str}",
+                    node_id=method.node_id,
+                )
+    
     if not report.issues:
         report.add("info", "ok", "Workflow graph looks consistent.")
 

@@ -4,6 +4,7 @@
 
 import json
 
+from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -24,6 +25,8 @@ from core.methods_registry import PROCESSING_METHODS, get_method_display_name
 
 class AutoTunePage(QWidget):
     """调参与实验页面。"""
+    
+    apply_best_params_to_node = pyqtSignal(str, dict, dict, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -33,6 +36,8 @@ class AutoTunePage(QWidget):
         self._last_result = None
         self._last_stage_compare_result = None
         self._last_comparison_result = None
+        self._current_workflow_node_id = None  # 记录当前是哪个工作流节点打开的调参
+        self._current_workflow_stage_id = None
         self.setup_ui()
 
     def setup_ui(self):
@@ -236,6 +241,11 @@ class AutoTunePage(QWidget):
         self.btn_apply_stage_choice.setEnabled(False)
         self.btn_apply_stage_choice.setToolTip("将同阶段实验比较推荐的方法和参数写回日常处理")
         adopt_layout.addWidget(self.btn_apply_stage_choice)
+        
+        self.btn_apply_to_workflow_node = PushButton(FluentIcon.ACCEPT, "应用到工作流节点")
+        self.btn_apply_to_workflow_node.setEnabled(False)
+        self.btn_apply_to_workflow_node.setToolTip("将自动选参的最佳参数应用回当前打开的工作流节点")
+        adopt_layout.addWidget(self.btn_apply_to_workflow_node)
         action_layout.addWidget(adopt_box)
         layout.addWidget(action_box)
 
@@ -400,6 +410,11 @@ class AutoTunePage(QWidget):
         self.result_segmented.setCurrentItem("auto")
         self.result_stack.setCurrentIndex(0)
         self.result_segmented.currentItemChanged.connect(self._on_result_segment_changed)
+        
+        # 连接应用到工作流节点的按钮
+        self.btn_apply_to_workflow_node.clicked.connect(
+            self._apply_best_params_to_workflow_node
+        )
 
         layout.addWidget(detail_segmented_box)
         layout.addStretch(1)
@@ -629,6 +644,9 @@ class AutoTunePage(QWidget):
     def set_auto_tune_result_available(self, available: bool):
         """设置候选结果入口状态。"""
         self.btn_view_auto_tune.setEnabled(bool(available))
+        # 只有当有结果并且当前是为工作流节点打开的调参时，才启用应用按钮
+        can_apply = bool(available and self._current_workflow_node_id is not None)
+        self.btn_apply_to_workflow_node.setEnabled(can_apply)
         if not available:
             self._last_result = None
 
@@ -648,6 +666,42 @@ class AutoTunePage(QWidget):
         self._supports_auto_tune = enabled
         self.btn_auto_tune.setEnabled(enabled)
 
+    def set_for_workflow_node(
+        self,
+        *,
+        method_key: str,
+        node_id: str,
+        stage_id: str,
+        current_params: dict,
+        message: str | None = None,
+    ):
+        """为工作流中的节点设置调参页面状态。"""
+        self._current_workflow_node_id = node_id
+        self._current_workflow_stage_id = stage_id
+        self.reset_for_method(method_key, message)
+    
+    def _apply_best_params_to_workflow_node(self):
+        """应用最佳参数到工作流节点。"""
+        if self._last_result is None or self._current_workflow_node_id is None:
+            return
+        recommended_key = self._last_result.get("recommended_profile", "balanced")
+        profiles = self._last_result.get("profiles", {}) or {}
+        profile = profiles.get(recommended_key) or self._last_result.get("best_params", {})
+        best_params = (
+            (profile or {}).get("params") or self._last_result.get("best_params") or {}
+        )
+        best_reason = (
+            (profile or {}).get("reason")
+            or self._last_result.get("selection_recommendation")
+            or ""
+        )
+        self.apply_best_params_to_node.emit(
+            self._current_workflow_node_id,
+            best_params,
+            self._last_result,
+            best_reason,
+        )
+    
     def reset_for_method(self, method_key: str | None, message: str | None = None):
         """切换方法后，重置当前 auto-tune 页面状态。"""
         self.set_auto_tune_result_available(False)

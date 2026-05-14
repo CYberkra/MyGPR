@@ -103,6 +103,7 @@ class BscanPreviewCard(QFrame):
         super().__init__(parent)
         self._data: Any = None
         self._label = "Workflow Output"
+        self._is_stale = False
         self.compact = False
         self.source_label: QLabel | None = None
         self.thumbnail_label: QLabel | None = None
@@ -149,9 +150,10 @@ class BscanPreviewCard(QFrame):
             return None
         return int(array.shape[0]), int(array.shape[1])
 
-    def set_preview_data(self, data: Any, label: str = "Workflow Output") -> None:
+    def set_preview_data(self, data: Any, label: str = "Workflow Output", is_stale: bool = False) -> None:
         self._data = data
         self._label = label or "Workflow Output"
+        self._is_stale = bool(is_stale)
         try:
             self._build()
         except Exception:
@@ -204,6 +206,10 @@ class BscanPreviewCard(QFrame):
 
         shape = self.data_shape
         shape_text = "--" if shape is None else f"{shape[1]} traces × {shape[0]} samples"
+        if self._is_stale:
+            stale_label = QLabel("⚠️ 上次结果 · 运行失败")
+            stale_label.setStyleSheet("color: #dc2626; font-weight: 700; font-size: 12px;")
+            root.addWidget(stale_label)
         self.source_label = QLabel(f"{self._label} · {shape_text}")
         self.source_label.setObjectName("previewMeta")
         self.source_label.setWordWrap(True)

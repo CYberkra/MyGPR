@@ -1473,6 +1473,11 @@ class GPRGuiQt(QMainWindow):
         self.page_auto_tune.btn_open_workflow.clicked.connect(
             self.switch_to_workflow_tab
         )
+        # 连接工作流节点参数应用的信号
+        if hasattr(self.page_auto_tune, "apply_best_params_to_node"):
+            self.page_auto_tune.apply_best_params_to_node.connect(
+                self._apply_best_params_to_workflow_node
+            )
         self.page_advanced.btn_clear_manual_roi.clicked.connect(self._clear_manual_roi)
 
         # 显示选项
@@ -1527,7 +1532,18 @@ class GPRGuiQt(QMainWindow):
 
     def open_tuning_lab(self, method=None) -> None:
         """Open AutoTune as a Studio dialog instead of a permanent outer tab."""
-        if method is not None and hasattr(self.page_auto_tune, "method_label"):
+        from core.workflow_data import WorkflowMethod
+        if isinstance(method, WorkflowMethod):
+            # 来自工作流节点的方法对象
+            if hasattr(self.page_auto_tune, "set_for_workflow_node"):
+                self.page_auto_tune.set_for_workflow_node(
+                    method_key=method.method_id,
+                    node_id=method.node_id,
+                    stage_id=method.stage_id,
+                    current_params=method.params or {},
+                    message="支持自动选参：先完成参数实验，再点击应用到工作流节点。",
+                )
+        elif method is not None and hasattr(self.page_auto_tune, "method_label"):
             try:
                 self.page_auto_tune.method_label.setText(
                     f"当前节点: {getattr(method, 'method_id', method)}"
@@ -1536,6 +1552,18 @@ class GPRGuiQt(QMainWindow):
                 pass
         self._show_studio_dialog("_tuning_lab_dialog", "MyGPR Tuning Lab", self.page_auto_tune)
         self._log("打开 Tuning Lab")
+    
+    def _apply_best_params_to_workflow_node(
+        self, node_id: str, params: dict, result: dict, reason: str
+    ):
+        """将最佳参数应用到工作流节点。"""
+        if hasattr(self, "page_workflow") and self.page_workflow is not None:
+            if hasattr(self.page_workflow, "apply_best_params_to_node"):
+                self.page_workflow.apply_best_params_to_node(
+                    node_id, params, result, reason
+                )
+        else:
+            self._log("无法应用参数到工作流节点：未找到工作流页面")
 
     def open_preview_settings(self) -> None:
         """Open legacy display controls as Preview Viewer settings."""

@@ -133,6 +133,21 @@ class WorkflowNodeCard(QFrame):
                 border: 1px dashed #9aa8ba;
                 background: #fafbfc;
             }
+            QFrame#workflowNodeCard[status="success"] {
+                border: 1px solid #36d399;
+            }
+            QFrame#workflowNodeCard[status="running"] {
+                border: 2px solid #3278ff;
+                background: #f0f7ff;
+            }
+            QFrame#workflowNodeCard[status="failed"] {
+                border: 2px solid #ef4444;
+                background: #fff1f1;
+            }
+            QFrame#workflowNodeCard[status="skipped"] {
+                border: 1px solid #d1d5db;
+                background: #f9fafb;
+            }
             QLabel#nodeTitle {
                 font-weight: 800;
                 color: #1f2d3d;
@@ -145,6 +160,11 @@ class WorkflowNodeCard(QFrame):
             QLabel#nodeWarning {
                 color: #a66a00;
                 font-size: 12px;
+            }
+            QLabel#nodeError {
+                color: #dc2626;
+                font-size: 11px;
+                word-wrap: break-word;
             }
             QLabel#nodeStatusChip {
                 border-radius: 8px;
@@ -166,6 +186,30 @@ class WorkflowNodeCard(QFrame):
                 background: #fff4de;
                 color: #9a6100;
                 border: 1px solid #f2ce8c;
+            }
+            QLabel#nodeStatusChip[state="success"] {
+                background: #ecfdf5;
+                color: #047857;
+                border: 1px solid #6ee7b7;
+            }
+            QLabel#nodeStatusChip[state="running"] {
+                background: #dbeafe;
+                color: #1d4ed8;
+                border: 1px solid #60a5fa;
+            }
+            QLabel#nodeStatusChip[state="failed"] {
+                background: #fef2f2;
+                color: #dc2626;
+                border: 1px solid #fca5a5;
+            }
+            QLabel#nodeStatusChip[state="skipped"] {
+                background: #f3f4f6;
+                color: #6b7280;
+                border: 1px solid #d1d5db;
+            }
+            QLabel#nodeMetaInfo {
+                color: #6b7280;
+                font-size: 11px;
             }
             QLabel#paramName {
                 color: #64748b;
@@ -258,13 +302,43 @@ class WorkflowNodeCard(QFrame):
             if self.method.method_id == "raw_input":
                 shape = self.method.params.get("shape", "--")
                 file_name = self.method.params.get("file", "--")
-                input_label = QLabel(f"shape: {shape}\nfile: {file_name}")
+                raw_status = self.method.params.get("raw", "missing")
+                rtk_status = self.method.params.get("rtk", "missing")
+                imu_status = self.method.params.get("imu", "missing")
+                agl_status = self.method.params.get("agl", "missing")
+                status_text = f"Raw: {raw_status} | RTK: {rtk_status} | IMU: {imu_status} | AGL: {agl_status}"
+                input_label = QLabel(f"shape: {shape}\nfile: {file_name}\n{status_text}")
                 input_label.setObjectName("nodeSubtitle")
                 input_label.setWordWrap(True)
                 root.addWidget(input_label)
                 root.addStretch(1)
                 self._refresh_state_properties()
                 return
+
+            # Show meta info (input/output shape, elapsed) if available
+            meta_lines = []
+            input_shape = getattr(self.method, "input_shape", None)
+            output_shape = getattr(self.method, "output_shape", None)
+            elapsed_ms = getattr(self.method, "elapsed_ms", 0)
+            if input_shape:
+                meta_lines.append(f"in: {input_shape}")
+            if output_shape:
+                meta_lines.append(f"out: {output_shape}")
+            if elapsed_ms > 0:
+                meta_lines.append(f"time: {elapsed_ms:.1f}ms")
+            if meta_lines:
+                meta_label = QLabel(" | ".join(meta_lines))
+                meta_label.setObjectName("nodeMetaInfo")
+                root.addWidget(meta_label)
+
+            # Show error message if failed
+            error_msg = getattr(self.method, "error_message", "")
+            if error_msg:
+                error_label = QLabel(f"⚠️ {error_msg}")
+                error_label.setObjectName("nodeError")
+                error_label.setWordWrap(True)
+                error_label.setMinimumWidth(200)
+                root.addWidget(error_label)
 
             warning = self._stage_warning()
             if warning:
@@ -294,7 +368,7 @@ class WorkflowNodeCard(QFrame):
 
             if len(param_metas) > 2:
                 more_button = QToolButton()
-                more_button.setText("收起参数" if self.expanded else f"更多参数 ({len(param_metas) - 2})")
+                more_button.setText("收起" if self.expanded else f"更多({len(param_metas) - 2})")
                 more_button.clicked.connect(self._toggle_expanded)
                 root.addWidget(more_button)
 
@@ -308,6 +382,10 @@ class WorkflowNodeCard(QFrame):
             return "hide"
         if not self.method.enabled:
             return "off"
+        # Check for run status first
+        status = getattr(self.method, "status", "pending")
+        if status in ["success", "running", "failed", "skipped"]:
+            return status
         return "on"
 
     def _status_chip_text(self) -> str:
@@ -315,10 +393,23 @@ class WorkflowNodeCard(QFrame):
             return "HIDE"
         if not self.method.enabled:
             return "OFF"
-        return "ON"
+        status = getattr(self.method, "status", "pending")
+        status_map = {
+            "pending": "PEND",
+            "running": "RUN",
+            "success": "OK",
+            "failed": "FAIL",
+            "skipped": "SKIP",
+        }
+        return status_map.get(status, "ON")
 
     def _refresh_state_properties(self) -> None:
         self.setProperty("hiddenState", bool(self.method.hidden))
+        status = getattr(self.method, "status", "pending")
+        if status in ["success", "running", "failed", "skipped"]:
+            self.setProperty("status", status)
+        else:
+            self.setProperty("status", "")
         self.style().unpolish(self)
         self.style().polish(self)
 
@@ -354,7 +445,13 @@ class WorkflowNodeCard(QFrame):
         return str(stage.get("label") or category.get("name") or self.method.category or "未分组")
 
     def _stage_warning(self) -> str:
-        return str(WORKFLOW_STAGE_BY_ID.get(self.method.stage_id, {}).get("warning", ""))
+        stage_warn = str(WORKFLOW_STAGE_BY_ID.get(self.method.stage_id, {}).get("warning", ""))
+        # Check sidecar requirements
+        if self.method.method_id in PROCESSING_METHODS:
+            meta = PROCESSING_METHODS[self.method.method_id]
+            missing_reqs = []
+            # TODO: 获取项目数据是全局状态怎么获取？暂时先不检查具体值，至少能显示 warning
+        return stage_warn
 
     def _toggle_expanded(self) -> None:
         self.toggle_expanded()
@@ -867,6 +964,10 @@ class WorkflowCanvasView(QGraphicsView):
         self._temp_edge: QGraphicsPathItem | None = None
         self._preview_data = None
         self._preview_label = "Workflow Output"
+        self._last_preview_source_node = None
+        self._last_preview_shape = None
+        self._last_preview_is_stale = False
+        self._last_run_success = False
         self._preview_proxy: WorkflowNodeProxy | None = None
         self._rebuild_pending = False
         self._compact_cards = False
@@ -937,13 +1038,23 @@ class WorkflowCanvasView(QGraphicsView):
         self._rebuild_pending = False
         self._rebuild()
 
-    def set_preview_data(self, data, label: str = "Workflow Output") -> None:
-        self._preview_data = data
-        self._preview_label = label or "Workflow Output"
+    def set_preview_data(self, data, label: str = "Workflow Output", source_node=None, success: bool = True) -> None:
+        self._last_run_success = bool(success)
+        if success:
+            self._preview_data = data
+            self._preview_label = label or "Workflow Output"
+            self._last_preview_source_node = source_node
+            self._last_preview_is_stale = False
+            if data is not None and hasattr(data, "shape"):
+                self._last_preview_shape = data.shape
+            else:
+                self._last_preview_shape = None
+        else:
+            self._last_preview_is_stale = True
         card = self._preview_card()
         if card is not None:
             try:
-                card.set_preview_data(self._preview_data, self._preview_label)
+                card.set_preview_data(self._preview_data, self._preview_label, is_stale=self._last_preview_is_stale)
                 self._scene.update_edges()
             except RuntimeError:
                 self._preview_proxy = None
@@ -1501,7 +1612,7 @@ class WorkflowCanvasView(QGraphicsView):
             self._scene.proxy_by_id[proxy.node_id] = proxy
 
         preview_card = BscanPreviewCard()
-        preview_card.set_preview_data(self._preview_data, self._preview_label)
+        preview_card.set_preview_data(self._preview_data, self._preview_label, is_stale=self._last_preview_is_stale)
         preview_card.large_view_requested.connect(self.preview_large_requested)
         preview_method = WorkflowMethod("preview", "bscan_preview", enabled=True, order=len(self._methods), node_id=PREVIEW_NODE_ID)
         preview_proxy = WorkflowNodeProxy(-1, preview_method)

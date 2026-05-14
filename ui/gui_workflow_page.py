@@ -8,7 +8,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable
 
-from PyQt6.QtCore import QPointF, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QPointF, Qt, QTimer, pyqtSignal, QSettings
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -97,6 +97,7 @@ class WorkflowPage(QWidget):
         self._last_run_methods: list[WorkflowMethod] = []
         self._live_result_available = False
         self._setup_ui()
+        self._restore_workspace_state()
         self.load_config(self.config)
 
     def _setup_ui(self) -> None:
@@ -374,7 +375,7 @@ class WorkflowPage(QWidget):
         self.qc_label = QLabel("QC\n数据尺寸：--\n告警：--\n元数据：--")
         self.qc_label.setWordWrap(True)
         self.qc_label.setProperty("class", "hintText")
-        self.export_label = QLabel("Export\nEvidence Package: 通过 Export 节点或底部 Evidence 抽屉导出")
+        self.export_label = QLabel("Export\n保存：将最新结果写入历史\n证据：导出 Evidence Package\n导出：报告 / 快照 / 数据")
         self.export_label.setWordWrap(True)
         self.export_label.setProperty("class", "hintText")
         self.status_label = QLabel("未运行")
@@ -451,6 +452,7 @@ class WorkflowPage(QWidget):
         self.btn_reset_zoom.clicked.connect(self.workflow_canvas.reset_zoom)
         self.palette_search.textChanged.connect(self._populate_palette)
         self.palette_list.itemDoubleClicked.connect(self._on_palette_item_double_clicked)
+        self.workspace_splitter.splitterMoved.connect(self._save_workspace_state)
         self._populate_palette()
 
     def _populate_palette(self) -> None:
@@ -491,6 +493,7 @@ class WorkflowPage(QWidget):
             sizes = self.workspace_splitter.sizes()
             if sizes and sizes[0] <= 8:
                 self.workspace_splitter.setSizes([260, max(640, sizes[1] if len(sizes) > 1 else 720), sizes[2] if len(sizes) > 2 else 300])
+        self._save_workspace_state()
 
     def _toggle_inspector_panel(self, checked: bool) -> None:
         self.inspector_box.setVisible(bool(checked))
@@ -498,6 +501,30 @@ class WorkflowPage(QWidget):
             sizes = self.workspace_splitter.sizes()
             if sizes and len(sizes) > 2 and sizes[2] <= 8:
                 self.workspace_splitter.setSizes([sizes[0] if sizes else 260, max(640, sizes[1] if len(sizes) > 1 else 720), 300])
+        self._save_workspace_state()
+        
+    def _save_workspace_state(self) -> None:
+        settings = QSettings("MyGPR", "WorkflowStudio")
+        sizes = self.workspace_splitter.sizes()
+        settings.setValue("workspace_sizes", sizes)
+        settings.setValue("project_panel_visible", self.left_sidebar.isVisible())
+        settings.setValue("inspector_panel_visible", self.inspector_box.isVisible())
+        settings.sync()
+        
+    def _restore_workspace_state(self) -> None:
+        settings = QSettings("MyGPR", "WorkflowStudio")
+        if settings.contains("workspace_sizes"):
+            sizes = settings.value("workspace_sizes")
+            if sizes and len(sizes) >= 3:
+                self.workspace_splitter.setSizes([int(s) for s in sizes])
+        if settings.contains("project_panel_visible"):
+            visible = settings.value("project_panel_visible", True, type=bool)
+            self.btn_toggle_project.setChecked(visible)
+            self.left_sidebar.setVisible(visible)
+        if settings.contains("inspector_panel_visible"):
+            visible = settings.value("inspector_panel_visible", True, type=bool)
+            self.btn_toggle_inspector.setChecked(visible)
+            self.inspector_box.setVisible(visible)
 
     def _validate_workflow_ui(self) -> None:
         report = validate_workflow_config(self.config, execution_mode="order")
@@ -1048,6 +1075,34 @@ class WorkflowPage(QWidget):
         if not methods:
             self.status_label.setText("没有启用的步骤")
             return
+        # Run pre-validation
+        sidecar_status = {
+            "rtk": bool(self._sidecar_files.get("rtk")),
+            "imu": bool(self._sidecar_files.get("imu")),
+            "agl": bool(self._sidecar_files.get("altimeter")),
+        }
+        report = validate_workflow_config(self.config, sidecar_status=sidecar_status)
+        self.validation_report_requested.emit(report.to_text())
+        if report.errors:
+            # Show error dialog and abort
+            error_text = "\n".join(
+                f"- {issue.code}: {issue.message}"
+                for issue in report.errors
+            )
+            reply = QMessageBox.question(
+                self,
+                "工作流验证失败",
+                f"运行前发现以下错误，是否继续运行？\n\n{error_text}",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.No:
+                return
+        elif report.warnings:
+            # Just log warnings and continue
+            self._log("运行前发现警告：")
+            for issue in report.warnings:
+                self._log(f"  [{issue.code}] {issue.message}")
         self._last_run_methods = [deepcopy(method) for method in methods]
         self.workflow_run_requested.emit(self._last_run_methods, realtime)
         self.status_label.setText(status)
@@ -1134,6 +1189,10 @@ class WorkflowPage(QWidget):
             "file": self._current_file or "--",
             "shape": shape_text,
             "metadata": self._metadata_status,
+            "raw": "loaded" if self._current_file else "missing",
+            "rtk": "loaded" if self._sidecar_files.get("rtk") else "missing",
+            "imu": "loaded" if self._sidecar_files.get("imu") else "missing",
+            "agl": "loaded" if self._sidecar_files.get("altimeter") else "missing",
         }
         existing = next(
             (method for method in self.config.methods if method.method_id == "raw_input"),
@@ -1220,12 +1279,63 @@ class WorkflowPage(QWidget):
     def set_running(self, message: str) -> None:
         self.status_label.setText(message)
 
+    def apply_best_params_to_node(
+        self, node_id: str, params: dict, result: dict, reason: str
+    ):
+        """将最佳参数应用到指定的工作流节点。"""
+        # 查找匹配的方法
+        target_method = None
+        for method in self.config.methods:
+            if method.node_id == node_id:
+                target_method = method
+                break
+        if target_method is None:
+            self._log(f"无法找到节点 {node_id} 来应用参数")
+            return
+        # 更新方法的参数
+        target_method.params = dict(params)
+        self._log(f"已将最佳参数应用到节点 {target_method.method_id} ({node_id})")
+        if reason:
+            self._log(f"推荐原因：{reason}")
+        # 标记配置已更改
+        self._config_changed = True
+        # 重新渲染工作流
+        self._render_steps()
+        self.workflow_canvas.set_config(self.config, self._method_meta)
+        # 如果启用了实时预览，触发运行
+        if self.realtime_enabled:
+            self._emit_run_from_current(force_run=True)
+        self.status_label.setText(f"已更新 {target_method.method_id} 的参数")
+    
     def set_run_result(self, outputs: list[dict[str, Any]], realtime: bool) -> None:
         self._live_result_available = True
         self.btn_save_live.setEnabled(True)
         label = "实时预览完成" if realtime else "工作流运行完成"
         self.status_label.setText(label)
         self._log(f"{label}: {len(outputs)} 步")
+        
+        # Update each method's run status
+        output_by_key = {}
+        for output in outputs:
+            method_key = output.get("method_key") or output.get("method_name")
+            if method_key:
+                output_by_key[method_key] = output
+        
+        for method in self.config.methods:
+            if method.hidden or not method.enabled:
+                method.status = "skipped"
+                continue
+            # Find matching output
+            output = output_by_key.get(method.method_id)
+            if output:
+                method.status = "success"
+                method.elapsed_ms = output.get("elapsed_ms", 0.0)
+                method.error_message = ""
+                method.output_shape = output.get("data").shape if output.get("data") is not None else None
+                # We don't have input_shape tracking right now, but output_shape is available
+            else:
+                method.status = "skipped"
+        
         if outputs:
             final_output = outputs[-1]
             final_name = (
@@ -1236,6 +1346,7 @@ class WorkflowPage(QWidget):
             self.workflow_canvas.set_preview_data(
                 final_output.get("data"),
                 label=f"{final_name} · {label}",
+                success=True,
             )
         for index, output in enumerate(outputs, start=1):
             name = output.get("method_name") or output.get("method_key") or f"step-{index}"
@@ -1244,6 +1355,17 @@ class WorkflowPage(QWidget):
 
     def set_run_error(self, error_message: str) -> None:
         self.status_label.setText("运行失败")
+        # Mark all enabled methods as pending/failed - we don't know which one failed
+        for method in self.config.methods:
+            if method.enabled and not method.hidden:
+                # If we didn't get an output, mark as failed or pending
+                method.status = "failed"
+                method.error_message = "运行中断"
+        self.workflow_canvas.set_preview_data(
+            None,
+            label="运行失败",
+            success=False,
+        )
         self._log(f"运行失败: {error_message}")
 
     def _log(self, text: str) -> None:

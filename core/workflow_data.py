@@ -460,6 +460,10 @@ class WorkflowMethod:
         hidden: bool = False,
         status: str = "pending",
         node_id: str = "",
+        input_shape: Optional[tuple] = None,
+        output_shape: Optional[tuple] = None,
+        error_message: str = "",
+        elapsed_ms: float = 0.0,
     ):
         self.category = category
         self.stage_id = stage_id
@@ -470,6 +474,10 @@ class WorkflowMethod:
         self.hidden = hidden
         self.status = status
         self.node_id = node_id or _make_node_id(method_id, order)
+        self.input_shape = input_shape
+        self.output_shape = output_shape
+        self.error_message = error_message
+        self.elapsed_ms = elapsed_ms
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -482,6 +490,10 @@ class WorkflowMethod:
             "hidden": self.hidden,
             "status": self.status,
             "node_id": self.node_id,
+            "input_shape": self.input_shape,
+            "output_shape": self.output_shape,
+            "error_message": self.error_message,
+            "elapsed_ms": self.elapsed_ms,
         }
 
     @classmethod
@@ -496,6 +508,10 @@ class WorkflowMethod:
             hidden=data.get("hidden", False),
             status=data.get("status", "pending"),
             node_id=data.get("node_id", ""),
+            input_shape=data.get("input_shape"),
+            output_shape=data.get("output_shape"),
+            error_message=data.get("error_message", ""),
+            elapsed_ms=data.get("elapsed_ms", 0.0),
         )
 
 

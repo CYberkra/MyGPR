@@ -13,14 +13,17 @@ matplotlib.use("QtAgg")
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QBuffer, QByteArray
+from PyQt6.QtGui import QGuiApplication, QImage, QPixmap
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
     QDoubleSpinBox,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QVBoxLayout,
 )
@@ -68,6 +71,7 @@ class BscanViewerDialog(QDialog):
         self._raw = coerce_bscan_array(data)
         self._view = downsample_for_view(self._raw) if self._raw is not None else None
         self._image = None
+        self._colorbar = None
         self._title = title or "B-scan Preview"
         self.setWindowTitle(self._title)
         self.resize(1120, 780)
@@ -113,6 +117,11 @@ class BscanViewerDialog(QDialog):
             self.percentile_high,
         ]:
             header.addWidget(widget)
+        header.addStretch()
+        self.btn_save = QPushButton("保存截图")
+        self.btn_copy = QPushButton("复制图像")
+        for widget in [self.btn_save, self.btn_copy]:
+            header.addWidget(widget)
         layout.addLayout(header)
 
         self.info_label = QLabel("")
@@ -137,6 +146,8 @@ class BscanViewerDialog(QDialog):
         self.percentile_low.valueChanged.connect(lambda _=None: self.redraw())
         self.percentile_high.valueChanged.connect(lambda _=None: self.redraw())
         self.canvas.mpl_connect("motion_notify_event", self._on_motion)
+        self.btn_save.clicked.connect(self._save_screenshot)
+        self.btn_copy.clicked.connect(self._copy_image)
 
         self.redraw()
 
@@ -146,6 +157,13 @@ class BscanViewerDialog(QDialog):
 
     def redraw(self) -> None:
         self.axes.clear()
+        # Remove old colorbar if present
+        if self._colorbar is not None:
+            try:
+                self._colorbar.remove()
+            except Exception:
+                pass
+            self._colorbar = None
         if self._view is None:
             self.info_label.setText("数据尺寸：--")
             self.axes.text(
@@ -191,6 +209,8 @@ class BscanViewerDialog(QDialog):
             vmax=vmax,
             interpolation="nearest",
         )
+        # Add colorbar
+        self._colorbar = self.figure.colorbar(self._image, ax=self.axes)
         self.axes.set_xlabel("轨迹")
         self.axes.set_ylabel("采样 / 时间索引")
         rows, cols = self._view.shape
@@ -201,6 +221,46 @@ class BscanViewerDialog(QDialog):
         )
         self.fit_to_data(redraw_canvas=False)
         self.canvas.draw_idle()
+
+    def _save_screenshot(self) -> None:
+        if self._view is None:
+            QMessageBox.information(self, "无数据", "没有可保存的 B-scan 数据")
+            return
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "保存截图",
+            "",
+            "PNG 图像 (*.png);;JPEG 图像 (*.jpg);;所有文件 (*.*)"
+        )
+        if not file_path:
+            return
+        # Save the figure
+        try:
+            self.figure.savefig(file_path, dpi=150, bbox_inches="tight")
+        except Exception as e:
+            QMessageBox.warning(self, "保存失败", f"保存截图时出错：{str(e)}")
+        else:
+            QMessageBox.information(self, "保存成功", f"截图已保存至：{file_path}")
+
+    def _copy_image(self) -> None:
+        if self._view is None:
+            QMessageBox.information(self, "无数据", "没有可复制的 B-scan 数据")
+            return
+        # Save figure to QPixmap
+        try:
+            buffer = QBuffer()
+            buffer.open(QBuffer.OpenModeFlag.ReadWrite)
+            self.figure.savefig(buffer, format="png", dpi=150, bbox_inches="tight")
+            buffer.seek(0)
+            pixmap = QPixmap()
+            pixmap.loadFromData(buffer.data(), "png")
+            clipboard = QGuiApplication.clipboard()
+            clipboard.setPixmap(pixmap)
+            buffer.close()
+        except Exception as e:
+            QMessageBox.warning(self, "复制失败", f"复制图像时出错：{str(e)}")
+        else:
+            QMessageBox.information(self, "复制成功", "图像已复制到剪贴板")
 
     def fit_to_data(self, *, redraw_canvas: bool = True) -> None:
         if self._view is None:
