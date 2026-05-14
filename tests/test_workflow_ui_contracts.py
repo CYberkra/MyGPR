@@ -32,9 +32,9 @@ def test_workflow_workspace_exposes_default_uavgpr_chain_and_agc_warning():
     try:
         assert win.control_tabs is None
         assert win.page_workflow.objectName() == "workflowStudioPage"
-        assert win.page_workflow.project_panel.title() == "Project / Data"
-        assert win.page_workflow.palette_panel.title() == "Node Library"
-        assert win.page_workflow.inspector_box.title() == "Inspector"
+        assert win.page_workflow.project_panel.title() == "项目 / 数据"
+        assert win.page_workflow.palette_panel.title() == "节点库"
+        assert win.page_workflow.inspector_box.title() == "属性 / 检查"
 
         default_methods = [method.method_id for method in win.page_workflow.config.methods]
         assert default_methods[:4] == [

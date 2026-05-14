@@ -494,9 +494,11 @@ class WorkflowPortItem(QGraphicsEllipseItem):
         self.setPen(QPen(QColor("#ffffff"), 1.4))
         self.setZValue(30)
         self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton | Qt.MouseButton.RightButton)
+        self.setAcceptHoverEvents(True)
         self.label_item = QGraphicsSimpleTextItem(self.label, owner)
         self.label_item.setBrush(QBrush(QColor("#64748b")))
         self.label_item.setZValue(29)
+        self.label_item.hide()
 
     def scene_anchor(self) -> QPointF:
         return self.sceneBoundingRect().center()
@@ -506,6 +508,14 @@ class WorkflowPortItem(QGraphicsEllipseItem):
             self.label_item.setPos(self.pos().x() - 2.0, self.pos().y() - 24.0)
         else:
             self.label_item.setPos(self.pos().x() - 24.0, self.pos().y() + 6.0)
+
+    def hoverEnterEvent(self, event):  # noqa: N802 - Qt override
+        self.label_item.show()
+        super().hoverEnterEvent(event)
+
+    def hoverLeaveEvent(self, event):  # noqa: N802 - Qt override
+        self.label_item.hide()
+        super().hoverLeaveEvent(event)
 
 
 class MiniNodeItem(QGraphicsRectItem):
@@ -1015,9 +1025,9 @@ class WorkflowCanvasView(QGraphicsView):
         if proxy.row >= 0:
             menu.addAction("运行此节点", lambda row=proxy.row: self.run_node_requested.emit(row))
             menu.addAction("从此节点运行", lambda row=proxy.row: self.run_from_node_requested.emit(row))
-            menu.addAction("Open Tuning Lab", lambda row=proxy.row: self.tuning_lab_requested.emit(row))
-            menu.addAction("Apply Best Params", lambda row=proxy.row: self.apply_best_params_requested.emit(row))
-            menu.addAction("Benchmark This Node", lambda row=proxy.row: self.benchmark_node_requested.emit(row))
+            menu.addAction("打开调参", lambda row=proxy.row: self.tuning_lab_requested.emit(row))
+            menu.addAction("应用最佳参数", lambda row=proxy.row: self.apply_best_params_requested.emit(row))
+            menu.addAction("评估此节点", lambda row=proxy.row: self.benchmark_node_requested.emit(row))
             menu.addSeparator()
             enabled_text = "停用" if proxy.method.enabled else "启用"
             menu.addAction(enabled_text, lambda p=proxy: self._toggle_proxy_enabled(p))
@@ -1035,10 +1045,10 @@ class WorkflowCanvasView(QGraphicsView):
             )
             menu.addAction("适配到此节点", lambda p=proxy: self.fit_proxy(p))
         else:
-            menu.addAction("Open Large Viewer", self.preview_large_requested.emit)
-            menu.addAction("Add Before / After Compare", self.preview_compare_requested.emit)
-            menu.addAction("Save Snapshot", self.preview_snapshot_requested.emit)
-            menu.addAction("Preview Settings", self.preview_settings_requested.emit)
+            menu.addAction("打开大图", self.preview_large_requested.emit)
+            menu.addAction("添加前后对比", self.preview_compare_requested.emit)
+            menu.addAction("保存快照", self.preview_snapshot_requested.emit)
+            menu.addAction("预览设置", self.preview_settings_requested.emit)
             menu.addAction("适配到此节点", lambda p=proxy: self.fit_proxy(p))
         return menu
 

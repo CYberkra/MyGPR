@@ -41,8 +41,6 @@ from PyQt6.QtWidgets import (
     QWidget,
     QHBoxLayout,
     QVBoxLayout,
-    QSplitter,
-    QTabWidget,
     QLabel,
     QGroupBox,
     QFrame,
@@ -808,23 +806,16 @@ class GPRGuiQt(QMainWindow):
         root_layout.setContentsMargins(12, 10, 12, 10)
         root_layout.setSpacing(10)
 
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setObjectName("mainSplitter")
-        self._main_splitter = splitter
-        root_layout.addWidget(splitter)
-
         # Studio 主工作区。旧 control_tabs 不再作为常驻入口；旧页面保留为
         # 后台可复用面板/弹窗来源，避免导入、自动选参和导出逻辑断开。
-        right_panel = QWidget()
-        self._right_panel = right_panel
-        right_layout = QVBoxLayout(right_panel)
+        main_studio_panel = QWidget()
+        self._right_panel = main_studio_panel
+        self._main_splitter = None
+        root_layout.addWidget(main_studio_panel, 1)
+        right_layout = QVBoxLayout(main_studio_panel)
         right_layout.setContentsMargins(4, 4, 4, 4)
         right_layout.setSpacing(8)
 
-        splitter.addWidget(right_panel)
-        splitter.setChildrenCollapsible(False)
-        splitter.setHandleWidth(6)
-        splitter.setStretchFactor(0, 1)
         self._left_shell = None
         self._left_panel = None
         self._left_scroll = None
@@ -1322,7 +1313,7 @@ class GPRGuiQt(QMainWindow):
 
     def _connect_signals(self):
         """连接信号和槽"""
-        # Project / Data 后台面板：保留旧导入和单步处理信号，入口迁入 Studio。
+        # 项目 / 数据后台面板：保留旧导入和单步处理信号，入口迁入 Studio。
         self.page_basic.btn_import.clicked.connect(self.import_csv_file)
         self.page_basic.action_import_csv.triggered.connect(self.import_csv_file)
         self.page_basic.action_import_folder.triggered.connect(
@@ -1507,7 +1498,7 @@ class GPRGuiQt(QMainWindow):
                 self.status_label.setText("工作流主画布")
 
             tab_name = {
-                "basic": "Project / Data",
+                "basic": "项目 / 数据",
                 "workflow": "工作流主画布",
                 "auto_tune": "Tuning Lab",
                 "advanced": "Preview Settings",
@@ -1897,22 +1888,8 @@ class GPRGuiQt(QMainWindow):
         self._capture_main_view_limits_from_axes()
 
     def resizeEvent(self, event):
-        """窗口尺寸变化时，调整左右区域的相对占比，避免控制区在窄窗口下异常拥挤。
-        只在旧界面模式下调整尺寸。"""
+        """窗口尺寸变化时刷新 Qt 默认布局。"""
         super().resizeEvent(event)
-
-        # 只在旧界面模式下调整
-        if (
-            self._main_splitter is None
-            or self._content_stack is None
-            or self._content_stack.currentWidget() != self._main_content_widget
-        ):
-            return
-
-        total = max(1, self._main_splitter.size().width())
-        target_left = max(320, min(520, int(total * 0.30)))
-        target_right = max(640, total - target_left)
-        self._main_splitter.setSizes([target_right, target_left])
 
     def _apply_single_method(
         self,

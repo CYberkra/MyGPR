@@ -40,9 +40,10 @@ def test_main_window_uses_workflow_studio_without_legacy_control_tabs():
         assert win.page_quality.isHidden()
         assert hasattr(win, "page_workflow")
         assert win.page_workflow.objectName() == "workflowStudioPage"
-        assert win.page_workflow.project_panel.title() == "Project / Data"
-        assert win.page_workflow.palette_panel.title() == "Node Library"
-        assert win.page_workflow.inspector_box.title() == "Inspector"
+        assert win._main_splitter is None
+        assert win.page_workflow.project_panel.title() == "项目 / 数据"
+        assert win.page_workflow.palette_panel.title() == "节点库"
+        assert win.page_workflow.inspector_box.title() == "属性 / 检查"
         old_page_attr = "page_" + "work" + "bench"
         assert not hasattr(win, old_page_attr)
     finally:

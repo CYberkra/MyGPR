@@ -18,7 +18,7 @@ from core.app_paths import get_workflow_templates_dir
 from core.workflow_data import WorkflowConfigManager, WorkflowMethod, build_default_workflow_config
 from ui.workflow_canvas_cards import WorkflowNodeCard, WorkflowNodeProxy
 from ui.workflow_canvas_cards import WorkflowCanvasView
-from ui.workflow_canvas_preview import BscanPreviewCard, _downsample_for_preview
+from ui.workflow_canvas_preview import BscanPreviewCard, BscanPreviewDialog, _downsample_for_preview
 from ui.gui_workflow_page import WorkflowPage
 
 
@@ -121,15 +121,19 @@ def test_compact_vertical_layout_uses_short_actions_and_step_labels():
     app = _get_app()
     page = WorkflowPage()
     try:
-        assert page.btn_run_all.text() == "Run All"
-        assert page.btn_run_from_current.text() == "Run From"
-        assert page.btn_run_selected.text() == "Run Selected"
-        assert page.btn_save_live.text() == "Save"
-        assert page.btn_validate.text() == "Validate"
+        assert page.btn_run_all.text() == "全链"
+        assert page.btn_run_from_current.text() == "后续"
+        assert page.btn_run_selected.text() == "选中"
+        assert page.btn_save_live.text() == "保存"
+        assert page.btn_validate.text() == "验证"
+        assert page.btn_open_tuning_lab.text() == "调参"
+        assert page.realtime_check.text() == "实时"
+        assert page.safe_check.text() == "安全"
+        assert page.zoom_label.text() == "缩放 100%"
         assert page.template_menu_button.text() == "模板 ▾"
-        assert page.project_panel.title() == "Project / Data"
-        assert page.palette_panel.title() == "Node Library"
-        assert page.inspector_box.title() == "Inspector"
+        assert page.project_panel.title() == "项目 / 数据"
+        assert page.palette_panel.title() == "节点库"
+        assert page.inspector_box.title() == "属性 / 检查"
         assert page.detail_box.title() == "选中步骤参数"
         assert page.detail_box.isHidden()
         assert page.step_list.isHidden()
@@ -454,9 +458,9 @@ def test_node_context_menu_actions_and_eye_toggle_skip_hidden_step():
         action_texts = [action.text() for action in menu.actions() if action.text()]
         assert "运行此节点" in action_texts
         assert "从此节点运行" in action_texts
-        assert "Open Tuning Lab" in action_texts
-        assert "Apply Best Params" in action_texts
-        assert "Benchmark This Node" in action_texts
+        assert "打开调参" in action_texts
+        assert "应用最佳参数" in action_texts
+        assert "评估此节点" in action_texts
         assert "复制节点" in action_texts
         assert "删除节点" in action_texts
         assert "添加预览节点" in action_texts
@@ -490,9 +494,9 @@ def test_workflow_project_panel_updates_data_state_and_import_signals():
     page.import_raw_requested.connect(lambda: imports.append("raw"))
     page.import_sidecar_requested.connect(sidecars.append)
     try:
-        assert page.project_panel.title() == "Project / Data"
-        assert page.palette_panel.title() == "Node Library"
-        assert page.inspector_box.title() == "Inspector"
+        assert page.project_panel.title() == "项目 / 数据"
+        assert page.palette_panel.title() == "节点库"
+        assert page.inspector_box.title() == "属性 / 检查"
 
         page.set_project_data_state(
             file_path=r"C:\data\line.csv",
@@ -543,6 +547,7 @@ def test_canvas_context_menu_exposes_add_node_groups_and_palette_adds_node():
         assert page.palette_list.count() > 0
 
         initial = len(page.config.methods)
+        initial_links = len(page.config.canvas_links)
         for row in range(page.palette_list.count()):
             item = page.palette_list.item(row)
             if item.data(0x0100) is not None:  # Qt.UserRole numeric value
@@ -550,8 +555,39 @@ def test_canvas_context_menu_exposes_add_node_groups_and_palette_adds_node():
                 break
         app.processEvents()
         assert len(page.config.methods) == initial + 1
+        assert len(page.config.canvas_links) == initial_links
     finally:
         page.close()
+        app.processEvents()
+
+
+def test_workflow_port_labels_are_hidden_until_hover():
+    app = _get_app()
+    canvas = WorkflowCanvasView()
+    try:
+        config = build_default_workflow_config("high_quality_uav_gpr")
+        canvas.set_methods(config.methods)
+        app.processEvents()
+
+        proxy = canvas._scene.proxies[0]
+        assert proxy.input_port.label_item.isVisible() is False
+        assert proxy.output_port.label_item.isVisible() is False
+    finally:
+        canvas.close()
+        app.processEvents()
+
+
+def test_bscan_preview_dialog_exposes_safe_zoom_controls():
+    app = _get_app()
+    dialog = BscanPreviewDialog(np.random.default_rng(0).normal(size=(128, 256)), "test")
+    try:
+        app.processEvents()
+        assert dialog.btn_fit.text() == "适配"
+        assert dialog.btn_100.text() == "100%"
+        assert dialog.image_label.pixmap() is not None
+        assert dialog.status_label.text().startswith("shape:")
+    finally:
+        dialog.close()
         app.processEvents()
 
 

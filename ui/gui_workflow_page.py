@@ -102,31 +102,38 @@ class WorkflowPage(QWidget):
 
         studio_bar = QFrame()
         studio_bar.setObjectName("workflowStudioBar")
-        studio_layout = QHBoxLayout(studio_bar)
-        studio_layout.setContentsMargins(10, 8, 10, 8)
-        studio_layout.setSpacing(8)
+        studio_outer = QVBoxLayout(studio_bar)
+        studio_outer.setContentsMargins(10, 8, 10, 8)
+        studio_outer.setSpacing(6)
+        primary_row = QHBoxLayout()
+        primary_row.setSpacing(8)
+        secondary_row = QHBoxLayout()
+        secondary_row.setSpacing(8)
+        studio_outer.addLayout(primary_row)
+        studio_outer.addLayout(secondary_row)
 
-        title = QLabel("MyGPR Workflow Studio")
+        title = QLabel("MyGPR 工作流")
         title.setProperty("class", "sectionTitle")
-        studio_layout.addWidget(title)
+        primary_row.addWidget(title)
 
-        studio_layout.addWidget(QLabel("Template"))
+        primary_row.addWidget(QLabel("模板"))
         self.template_combo = QComboBox()
         self.template_combo.setToolTip("选择内置或已保存的工作流模板")
-        self.template_combo.setMinimumWidth(180)
+        self.template_combo.setMinimumWidth(220)
+        self.template_combo.setMaximumWidth(340)
         self._reload_template_combo()
-        studio_layout.addWidget(self.template_combo, 1)
+        primary_row.addWidget(self.template_combo, 1)
 
-        self.btn_run_all = PushButton(FluentIcon.PLAY_SOLID, "Run All")
-        self.btn_run_all.setToolTip("按当前步骤顺序运行工作流")
-        self.btn_run_from_current = PushButton("Run From")
-        self.btn_run_from_current.setToolTip("从选中步骤开始运行到工作流末尾")
-        self.btn_run_selected = PushButton("Run Selected")
-        self.btn_run_selected.setToolTip("只运行选中的单个步骤，便于逐步验证")
-        self.btn_validate = PushButton("Validate")
-        self.btn_open_tuning_lab = PushButton("Tuning Lab")
+        self.btn_run_all = PushButton(FluentIcon.PLAY_SOLID, "全链")
+        self.btn_run_all.setToolTip("按当前步骤顺序运行全链")
+        self.btn_run_from_current = PushButton("后续")
+        self.btn_run_from_current.setToolTip("从选中步骤运行到末尾")
+        self.btn_run_selected = PushButton("选中")
+        self.btn_run_selected.setToolTip("只运行选中的单个步骤")
+        self.btn_validate = PushButton("验证")
+        self.btn_open_tuning_lab = PushButton("调参")
         self.btn_open_tuning_lab.setToolTip("打开选中节点的自动选参与实验室")
-        self.btn_save_live = PushButton(FluentIcon.SAVE, "Save")
+        self.btn_save_live = PushButton(FluentIcon.SAVE, "保存")
         self.btn_save_live.setToolTip("将实时预览或最近一次工作流结果写入正式历史")
         self.btn_save_live.setEnabled(False)
 
@@ -135,29 +142,37 @@ class WorkflowPage(QWidget):
             self.btn_run_from_current,
             self.btn_run_selected,
             self.btn_validate,
-            self.btn_open_tuning_lab,
             self.btn_save_live,
         ]:
-            btn.setMinimumWidth(0)
-            studio_layout.addWidget(btn)
+            btn.setMinimumWidth(64)
+            btn.setMaximumWidth(88)
+            primary_row.addWidget(btn)
 
-        self.realtime_check = QCheckBox("Realtime")
+        self.btn_open_tuning_lab.setMinimumWidth(64)
+        self.btn_open_tuning_lab.setMaximumWidth(88)
+        secondary_row.addWidget(self.btn_open_tuning_lab)
+        secondary_row.addStretch(1)
+
+        self.realtime_check = QCheckBox("实时")
         self.realtime_check.setToolTip("参数或顺序变化后自动计算当前工作流实时结果")
-        self.safe_check = QCheckBox("Safe")
+        self.safe_check = QCheckBox("安全")
         self.safe_check.setChecked(True)
-        self.zoom_label = QLabel("Zoom 100%")
-        self.btn_fit_canvas = PushButton("Fit")
-        self.btn_auto_layout = PushButton("Auto Layout")
+        self.zoom_label = QLabel("缩放 100%")
+        self.btn_fit_canvas = PushButton("适配")
+        self.btn_auto_layout = PushButton("自动布局")
         self.btn_reset_zoom = PushButton("100%")
+        self.btn_fit_canvas.setMaximumWidth(88)
+        self.btn_auto_layout.setMaximumWidth(110)
+        self.btn_reset_zoom.setMaximumWidth(76)
         for widget in [self.realtime_check, self.safe_check, self.zoom_label, self.btn_fit_canvas, self.btn_auto_layout, self.btn_reset_zoom]:
-            studio_layout.addWidget(widget)
+            secondary_row.addWidget(widget)
 
         self.template_menu_button = QToolButton()
         self.template_menu_button.setText("模板 ▾")
         self.template_menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         template_menu = QMenu(self.template_menu_button)
         self.template_menu_button.setMenu(template_menu)
-        studio_layout.addWidget(self.template_menu_button)
+        secondary_row.addWidget(self.template_menu_button)
         outer.addWidget(studio_bar)
 
         self.btn_new_template = PushButton(FluentIcon.ADD, "新建模板")
@@ -189,11 +204,15 @@ class WorkflowPage(QWidget):
         self.step_list.setToolTip("拖拽调整处理顺序；隐藏的步骤不会执行")
 
         left_sidebar = QWidget()
+        self.left_sidebar = left_sidebar
+        left_sidebar.setMinimumWidth(220)
+        left_sidebar.setMaximumWidth(320)
+        left_sidebar.setMinimumHeight(0)
         left_sidebar_layout = QVBoxLayout(left_sidebar)
         left_sidebar_layout.setContentsMargins(0, 0, 0, 0)
         left_sidebar_layout.setSpacing(8)
 
-        self.project_panel = QGroupBox("Project / Data")
+        self.project_panel = QGroupBox("项目 / 数据")
         project_layout = QVBoxLayout(self.project_panel)
         project_layout.setContentsMargins(8, 14, 8, 8)
         project_layout.setSpacing(6)
@@ -201,7 +220,7 @@ class WorkflowPage(QWidget):
         import_layout = QHBoxLayout(import_row)
         import_layout.setContentsMargins(0, 0, 0, 0)
         import_layout.setSpacing(5)
-        self.btn_import_raw = PushButton("Import Raw")
+        self.btn_import_raw = PushButton("导入")
         self.btn_import_rtk = PushButton("RTK")
         self.btn_import_imu = PushButton("IMU")
         self.btn_import_agl = PushButton("AGL")
@@ -214,9 +233,9 @@ class WorkflowPage(QWidget):
             btn.setMinimumWidth(0)
             import_layout.addWidget(btn)
         project_layout.addWidget(import_row)
-        self.project_file_label = QLabel("current file: --")
-        self.project_shape_label = QLabel("shape: --")
-        self.project_metadata_label = QLabel("metadata: 未加载")
+        self.project_file_label = QLabel("当前文件：--")
+        self.project_shape_label = QLabel("数据尺寸：--")
+        self.project_metadata_label = QLabel("元数据：未加载")
         for label in [
             self.project_file_label,
             self.project_shape_label,
@@ -225,12 +244,12 @@ class WorkflowPage(QWidget):
             label.setWordWrap(True)
             label.setProperty("class", "hintText")
             project_layout.addWidget(label)
-        self.btn_create_raw_input = PushButton("Create / Update Raw Input")
+        self.btn_create_raw_input = PushButton("创建 / 更新输入节点")
         self.btn_create_raw_input.setToolTip("在画布中创建或更新原始数据输入节点占位")
         project_layout.addWidget(self.btn_create_raw_input)
         left_sidebar_layout.addWidget(self.project_panel)
 
-        self.palette_panel = QGroupBox("Node Library")
+        self.palette_panel = QGroupBox("节点库")
         palette_layout = QVBoxLayout(self.palette_panel)
         palette_layout.setContentsMargins(8, 14, 8, 8)
         palette_layout.setSpacing(6)
@@ -242,7 +261,7 @@ class WorkflowPage(QWidget):
         palette_layout.addWidget(self.palette_search)
         palette_layout.addWidget(self.palette_list, 1)
         left_sidebar_layout.addWidget(self.palette_panel, 1)
-        workspace_layout.addWidget(left_sidebar)
+        workspace_layout.addWidget(left_sidebar, 0)
 
         self.step_panel = QWidget()
         step_panel_layout = QVBoxLayout(self.step_panel)
@@ -303,13 +322,15 @@ class WorkflowPage(QWidget):
         self.detail_box.hide()
         self.detail_box.setToolTip("选中步骤的常用参数已经集成在画布节点卡片中。")
 
-        self.inspector_box = QGroupBox("Inspector")
+        self.inspector_box = QGroupBox("属性 / 检查")
+        self.inspector_box.setMinimumWidth(260)
+        self.inspector_box.setMaximumWidth(360)
         inspector_layout = QVBoxLayout(self.inspector_box)
         inspector_layout.setContentsMargins(8, 14, 8, 8)
         inspector_layout.setSpacing(6)
         self.inspector_label = QLabel("未选择节点")
         self.inspector_label.setWordWrap(True)
-        self.qc_label = QLabel("QC\nshape: --\nwarnings: --\nmetadata: --")
+        self.qc_label = QLabel("QC\n数据尺寸：--\n告警：--\n元数据：--")
         self.qc_label.setWordWrap(True)
         self.qc_label.setProperty("class", "hintText")
         self.export_label = QLabel("Export\nEvidence Package: 通过 Export 节点或底部 Evidence 抽屉导出")
@@ -326,7 +347,7 @@ class WorkflowPage(QWidget):
         inspector_layout.addWidget(self.export_label)
         inspector_layout.addWidget(self.status_label)
         inspector_layout.addWidget(self.workflow_log, 1)
-        workspace_layout.addWidget(self.inspector_box)
+        workspace_layout.addWidget(self.inspector_box, 0)
         self.log_box = self.inspector_box
 
         self._debounce_timer = QTimer(self)
@@ -466,11 +487,6 @@ class WorkflowPage(QWidget):
             "collapsed": False,
         }
         self.config.canvas_links = self.workflow_canvas.current_links()
-        if len(self.config.methods) >= 2:
-            previous = self.config.methods[-2]
-            self.config.canvas_links.append(
-                self._make_link(previous.node_id, method.node_id)
-            )
         self._render_steps()
         self.step_list.setCurrentRow(len(self.config.methods) - 1)
         self._queue_realtime_run()
@@ -569,6 +585,22 @@ class WorkflowPage(QWidget):
         method = item.data(Qt.ItemDataRole.UserRole)
         return method if isinstance(method, WorkflowMethod) else None
 
+    def _node_display_label(self, node_id: str) -> str:
+        for index, method in enumerate(self.config.methods):
+            if method.node_id == node_id:
+                stage = WORKFLOW_STAGE_BY_ID.get(method.stage_id, {})
+                category = METHOD_CATEGORIES.get(method.category, {})
+                stage_label = (
+                    stage.get("label")
+                    or category.get("name")
+                    or method.category
+                    or "节点"
+                )
+                return f"{index + 1:02d} {stage_label}"
+        if node_id == "__workflow_preview__":
+            return "B-scan Preview"
+        return "--"
+
     def _on_step_selected(self, row: int) -> None:
         method = self._selected_method()
         self.workflow_canvas.set_selected_row(int(row))
@@ -587,22 +619,24 @@ class WorkflowPage(QWidget):
             self.hidden_check.setChecked(bool(method.hidden))
             self._render_method_combo(method)
             self._render_params(method)
-            state = "HIDE" if method.hidden else ("OFF" if not method.enabled else "ON")
+            state = "隐藏" if method.hidden else ("停用" if not method.enabled else "启用")
             inbound = [
-                link.from_node
+                self._node_display_label(link.from_node)
                 for link in self.config.canvas_links
                 if link.to_node == method.node_id
             ]
             outbound = [
-                link.to_node
+                self._node_display_label(link.to_node)
                 for link in self.config.canvas_links
                 if link.from_node == method.node_id
             ]
             self.inspector_label.setText(
-                f"当前选择\n{stage_label}\n{get_method_display_name(method.method_id)}\n"
-                f"method_id: {method.method_id}\nstate: {state}\n"
-                f"input from: {', '.join(inbound) if inbound else '--'}\n"
-                f"output to: {', '.join(outbound) if outbound else '--'}"
+                f"当前节点\n{method.order + 1:02d} {stage_label}\n"
+                f"算法：{get_method_display_name(method.method_id)}\n"
+                f"状态：{state}\n\n"
+                f"输入：{', '.join(inbound) if inbound else '--'}\n"
+                f"输出：{', '.join(outbound) if outbound else '--'}\n\n"
+                f"高级信息\nmethod_id: {method.method_id}"
             )
         finally:
             self._suppress_change = False
@@ -976,7 +1010,7 @@ class WorkflowPage(QWidget):
             QMessageBox.information(self, "无节点", "请先选择一个工作流节点。")
             return
         self.tuning_lab_requested.emit(deepcopy(method))
-        self._log(f"Tuning Lab: {get_method_display_name(method.method_id)}")
+        self._log(f"调参: {get_method_display_name(method.method_id)}")
 
     def _request_apply_best_params_for_row(self, row: int) -> None:
         self._select_step_row(row)
@@ -984,7 +1018,7 @@ class WorkflowPage(QWidget):
         if method is None:
             return
         self.tuning_lab_requested.emit(deepcopy(method))
-        self._log(f"Apply Best Params: 已打开 {get_method_display_name(method.method_id)} 调参入口")
+        self._log(f"应用最佳参数: 已打开 {get_method_display_name(method.method_id)} 调参入口")
 
     def _request_benchmark_for_row(self, row: int) -> None:
         self._select_step_row(row)
@@ -992,7 +1026,7 @@ class WorkflowPage(QWidget):
         if method is None:
             return
         self.tuning_lab_requested.emit(deepcopy(method))
-        self._log(f"Benchmark This Node: {get_method_display_name(method.method_id)}")
+        self._log(f"评估此节点: {get_method_display_name(method.method_id)}")
 
     def _request_preview_compare(self) -> None:
         self.preview_large_requested.emit()
@@ -1003,8 +1037,8 @@ class WorkflowPage(QWidget):
         self._log("Preview: 快照导出请使用 Evidence / Export 入口")
 
     def _create_or_update_raw_input_node(self) -> None:
-        self._log("Raw Input 节点：当前版本使用 Project / Data 状态作为画布输入源。")
-        self.status_label.setText("Project / Data 已作为 Raw Input")
+        self._log("输入节点：当前版本使用项目 / 数据状态作为画布输入源。")
+        self.status_label.setText("项目 / 数据已作为输入源")
 
     def set_project_data_state(
         self,
@@ -1025,11 +1059,11 @@ class WorkflowPage(QWidget):
             if self._data_shape
             else "--"
         )
-        self.project_file_label.setText(f"current file: {file_text}")
-        self.project_shape_label.setText(f"shape: {shape_text}")
-        self.project_metadata_label.setText(f"metadata: {self._metadata_status}")
+        self.project_file_label.setText(f"当前文件：{file_text}")
+        self.project_shape_label.setText(f"数据尺寸：{shape_text}")
+        self.project_metadata_label.setText(f"元数据：{self._metadata_status}")
         self.qc_label.setText(
-            f"QC\nshape: {shape_text}\nwarnings: --\nmetadata: {self._metadata_status}"
+            f"QC\n数据尺寸：{shape_text}\n告警：--\n元数据：{self._metadata_status}"
         )
 
     def set_data_shape(self, shape: tuple[int, int] | None) -> None:
