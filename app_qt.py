@@ -1549,13 +1549,25 @@ class GPRGuiQt(QMainWindow):
     def open_bscan_viewer(self, data=None, label="B-scan Preview") -> None:
         """Open B-scan Viewer as a top-level independent window.
 
+        Uses NonModal so the user can still interact with the main window
+        while the viewer is open. The dialog reference is kept in
+        _bscan_viewers to prevent premature garbage collection.
+
         Args:
             data: B-scan numpy array to display, or None for empty state.
             label: Window title string.
         """
+        if not hasattr(self, "_bscan_viewers"):
+            self._bscan_viewers: list = []
         dialog = BscanViewerDialog(data, title=label, parent=self)
-        dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
+        dialog.setWindowModality(Qt.WindowModality.NonModal)
+        dialog.destroyed.connect(
+            lambda _=None, d=dialog: self._bscan_viewers.remove(d) if d in self._bscan_viewers else None
+        )
+        self._bscan_viewers.append(dialog)
         dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
         self._log(f"打开 B-scan 大图窗口: {label}")
 
     def switch_to_legacy_mode(self):
