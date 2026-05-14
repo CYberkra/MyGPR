@@ -102,26 +102,44 @@ class WorkflowPage(QWidget):
         header_layout.addWidget(subtitle)
         outer.addWidget(header)
 
+        # Split template controls and run controls so the left panel stays usable
+        # on narrower screens.
         toolbar = QWidget()
-        toolbar_layout = QHBoxLayout(toolbar)
+        toolbar_layout = QVBoxLayout(toolbar)
         toolbar_layout.setContentsMargins(10, 0, 10, 8)
-        toolbar_layout.setSpacing(8)
+        toolbar_layout.setSpacing(6)
+
+        template_row = QWidget()
+        template_layout = QHBoxLayout(template_row)
+        template_layout.setContentsMargins(0, 0, 0, 0)
+        template_layout.setSpacing(8)
         self.template_combo = QComboBox()
         self.template_combo.setToolTip("选择内置或已保存的工作流模板")
+        self.template_combo.setMinimumWidth(160)
         self._reload_template_combo()
-        toolbar_layout.addWidget(QLabel("模板"))
-        toolbar_layout.addWidget(self.template_combo, 1)
+        template_layout.addWidget(QLabel("模板"))
+        template_layout.addWidget(self.template_combo, 1)
 
         self.realtime_check = QCheckBox("实时预览")
         self.realtime_check.setToolTip("参数或顺序变化后自动计算当前工作流实时结果")
-        toolbar_layout.addWidget(self.realtime_check)
+        template_layout.addWidget(self.realtime_check)
+        toolbar_layout.addWidget(template_row)
 
+        action_row = QWidget()
+        action_layout = QHBoxLayout(action_row)
+        action_layout.setContentsMargins(0, 0, 0, 0)
+        action_layout.setSpacing(6)
         self.btn_run_all = PushButton(FluentIcon.PLAY_SOLID, "运行全部")
         self.btn_run_all.setToolTip("按当前步骤顺序运行工作流")
+        self.btn_run_from_current = PushButton("从当前运行")
+        self.btn_run_from_current.setToolTip("从选中步骤开始运行到工作流末尾")
+        self.btn_run_selected = PushButton("运行当前")
+        self.btn_run_selected.setToolTip("只运行选中的单个步骤，便于逐步验证")
         self.btn_save_live = PushButton(FluentIcon.SAVE, "保存结果")
         self.btn_save_live.setToolTip("将实时预览或最近一次工作流结果写入正式历史")
         self.btn_save_live.setEnabled(False)
         self.btn_new_template = PushButton(FluentIcon.ADD, "新建")
+        self.btn_new_template.setToolTip("从内置高质量 UAV-GPR 模板创建一个用户模板")
         self.btn_duplicate_template = PushButton(FluentIcon.COPY, "复制")
         self.btn_save_template = PushButton(FluentIcon.SAVE, "保存模板")
         self.btn_import_template = PushButton(FluentIcon.FOLDER, "导入")
@@ -130,7 +148,13 @@ class WorkflowPage(QWidget):
 
         for btn in [
             self.btn_run_all,
+            self.btn_run_from_current,
+            self.btn_run_selected,
             self.btn_save_live,
+        ]:
+            action_layout.addWidget(btn)
+        action_layout.addStretch(1)
+        for btn in [
             self.btn_new_template,
             self.btn_duplicate_template,
             self.btn_save_template,
@@ -138,7 +162,8 @@ class WorkflowPage(QWidget):
             self.btn_export_template,
             self.btn_restore_default,
         ]:
-            toolbar_layout.addWidget(btn)
+            action_layout.addWidget(btn)
+        toolbar_layout.addWidget(action_row)
         outer.addWidget(toolbar)
 
         body = QWidget()
@@ -154,7 +179,27 @@ class WorkflowPage(QWidget):
         self.step_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.step_list.setMinimumWidth(280)
         self.step_list.setToolTip("拖拽调整处理顺序；隐藏的步骤不会执行")
-        body_layout.addWidget(self._wrap_group("流程步骤", self.step_list), 0, 0, 2, 1)
+
+        step_panel = QWidget()
+        step_panel_layout = QVBoxLayout(step_panel)
+        step_panel_layout.setContentsMargins(0, 0, 0, 0)
+        step_panel_layout.setSpacing(8)
+        step_panel_layout.addWidget(self.step_list, 1)
+        step_action_row = QWidget()
+        step_action_layout = QHBoxLayout(step_action_row)
+        step_action_layout.setContentsMargins(0, 0, 0, 0)
+        step_action_layout.setSpacing(6)
+        self.btn_add_step = PushButton("添加步骤")
+        self.btn_duplicate_step = PushButton("复制步骤")
+        self.btn_remove_step = PushButton("删除步骤")
+        self.btn_add_step.setToolTip("在当前步骤后插入同阶段默认步骤")
+        self.btn_duplicate_step.setToolTip("复制当前步骤及其参数")
+        self.btn_remove_step.setToolTip("删除当前步骤")
+        for btn in [self.btn_add_step, self.btn_duplicate_step, self.btn_remove_step]:
+            step_action_layout.addWidget(btn)
+        step_action_layout.addStretch(1)
+        step_panel_layout.addWidget(step_action_row)
+        body_layout.addWidget(self._wrap_group("流程步骤", step_panel), 0, 0, 2, 1)
 
         self.detail_box = QGroupBox("当前步骤")
         detail_layout = QVBoxLayout(self.detail_box)
@@ -227,6 +272,8 @@ class WorkflowPage(QWidget):
         self.realtime_check.stateChanged.connect(self._on_realtime_changed)
         self.template_combo.currentIndexChanged.connect(self._on_template_changed)
         self.btn_run_all.clicked.connect(self.request_manual_run)
+        self.btn_run_from_current.clicked.connect(self.request_run_from_current)
+        self.btn_run_selected.clicked.connect(self.request_selected_run)
         self.btn_save_live.clicked.connect(self.save_live_result_requested)
         self.btn_new_template.clicked.connect(self.new_user_template)
         self.btn_duplicate_template.clicked.connect(self.duplicate_current_template)
@@ -234,6 +281,9 @@ class WorkflowPage(QWidget):
         self.btn_import_template.clicked.connect(self.import_template)
         self.btn_export_template.clicked.connect(self.export_template)
         self.btn_restore_default.clicked.connect(self.restore_default_template)
+        self.btn_add_step.clicked.connect(self.add_step_after_current)
+        self.btn_duplicate_step.clicked.connect(self.duplicate_current_step)
+        self.btn_remove_step.clicked.connect(self.remove_current_step)
 
     def _wrap_group(self, title: str, widget: QWidget) -> QGroupBox:
         box = QGroupBox(title)
@@ -278,6 +328,7 @@ class WorkflowPage(QWidget):
             item.setData(Qt.ItemDataRole.UserRole, method)
             self.step_list.addItem(item)
         self.step_list.blockSignals(False)
+        self._update_step_buttons()
 
     def _format_step_text(self, method: WorkflowMethod) -> str:
         stage = WORKFLOW_STAGE_BY_ID.get(method.stage_id, {})
@@ -312,6 +363,7 @@ class WorkflowPage(QWidget):
 
     def _on_step_selected(self, row: int) -> None:
         method = self._selected_method()
+        self._update_step_buttons()
         if method is None:
             return
         self._suppress_change = True
@@ -372,7 +424,7 @@ class WorkflowPage(QWidget):
             checkbox.stateChanged.connect(self._on_param_changed)
             return checkbox, checkbox.isChecked
 
-        if param_type == "str" and meta.get("choices"):
+        if param_type in {"str", "choice"} and meta.get("choices"):
             combo = QComboBox()
             for choice in meta.get("choices", []):
                 combo.addItem(str(choice), choice)
@@ -538,6 +590,7 @@ class WorkflowPage(QWidget):
         if row >= 0 and method is not None:
             method.order = row
             self.step_list.item(row).setText(self._format_step_text(method))
+            self._sync_order_from_list()
 
     def _on_order_changed(self) -> None:
         self._sync_order_from_list()
@@ -552,6 +605,7 @@ class WorkflowPage(QWidget):
                 methods.append(method)
                 self.step_list.item(row).setText(self._format_step_text(method))
         self.config.methods = methods
+        self._update_step_buttons()
 
     def _on_realtime_changed(self) -> None:
         self.config.realtime_enabled = bool(self.realtime_check.isChecked())
@@ -572,23 +626,76 @@ class WorkflowPage(QWidget):
 
     def _emit_realtime_run(self) -> None:
         methods = self.get_enabled_methods()
-        if not methods:
-            self.status_label.setText("没有启用的步骤")
-            return
-        self._last_run_methods = [deepcopy(method) for method in methods]
-        self.workflow_run_requested.emit(self._last_run_methods, True)
-        self.status_label.setText("实时预览计算中")
-        self._log("实时预览请求已发出")
+        self._emit_run(
+            methods,
+            realtime=True,
+            status="实时预览计算中",
+            log_text="实时预览请求已发出",
+        )
 
     def request_manual_run(self) -> None:
         methods = self.get_enabled_methods()
         if not methods:
             QMessageBox.information(self, "无步骤", "当前工作流没有启用的步骤。")
             return
+        self._emit_run(
+            methods,
+            realtime=False,
+            status="工作流运行中",
+            log_text="手动运行工作流",
+        )
+
+    def request_selected_run(self) -> None:
+        method = self._selected_method()
+        if method is None:
+            QMessageBox.information(self, "无步骤", "请先选择一个步骤。")
+            return
+        if method.hidden or not method.enabled:
+            QMessageBox.information(self, "步骤未启用", "当前步骤被停用或隐藏，不会运行。")
+            return
+        self._emit_run(
+            [deepcopy(method)],
+            realtime=False,
+            status="当前步骤运行中",
+            log_text=f"运行当前步骤: {get_method_display_name(method.method_id)}",
+        )
+
+    def request_run_from_current(self) -> None:
+        row = self.step_list.currentRow()
+        if row < 0:
+            QMessageBox.information(self, "无步骤", "请先选择一个起始步骤。")
+            return
+        self._sync_order_from_list()
+        methods = [
+            deepcopy(method)
+            for method in self.config.methods[row:]
+            if method.enabled and not method.hidden
+        ]
+        if not methods:
+            QMessageBox.information(self, "无步骤", "从当前步骤到末尾没有启用的步骤。")
+            return
+        self._emit_run(
+            methods,
+            realtime=False,
+            status="从当前步骤运行中",
+            log_text=f"从第 {row + 1} 步运行，共 {len(methods)} 步",
+        )
+
+    def _emit_run(
+        self,
+        methods: list[WorkflowMethod],
+        *,
+        realtime: bool,
+        status: str,
+        log_text: str,
+    ) -> None:
+        if not methods:
+            self.status_label.setText("没有启用的步骤")
+            return
         self._last_run_methods = [deepcopy(method) for method in methods]
-        self.workflow_run_requested.emit(self._last_run_methods, False)
-        self.status_label.setText("工作流运行中")
-        self._log("手动运行工作流")
+        self.workflow_run_requested.emit(self._last_run_methods, realtime)
+        self.status_label.setText(status)
+        self._log(log_text)
 
     def get_enabled_methods(self) -> list[WorkflowMethod]:
         self._sync_order_from_list()
@@ -699,6 +806,100 @@ class WorkflowPage(QWidget):
 
     def restore_default_template(self) -> None:
         self.load_config(build_default_workflow_config("high_quality_uav_gpr"))
+
+    def add_step_after_current(self) -> None:
+        row = self.step_list.currentRow()
+        selected = self._selected_method()
+        if selected is not None:
+            stage_id = selected.stage_id
+            category = selected.category
+        else:
+            first_stage = WORKFLOW_STAGE_DEFINITIONS[0] if WORKFLOW_STAGE_DEFINITIONS else {}
+            stage_id = str(first_stage.get("id", ""))
+            category = "preprocessing"
+        new_step = self._make_default_step(stage_id=stage_id, category=category)
+        self._insert_step(new_step, row + 1 if row >= 0 else self.step_list.count())
+        self._log(f"已添加步骤: {get_method_display_name(new_step.method_id)}")
+
+    def duplicate_current_step(self) -> None:
+        row = self.step_list.currentRow()
+        method = self._selected_method()
+        if method is None:
+            QMessageBox.information(self, "无步骤", "请先选择要复制的步骤。")
+            return
+        new_step = WorkflowMethod.from_dict(method.to_dict())
+        new_step.status = "pending"
+        self._insert_step(new_step, row + 1)
+        self._log(f"已复制步骤: {get_method_display_name(new_step.method_id)}")
+
+    def remove_current_step(self) -> None:
+        row = self.step_list.currentRow()
+        if row < 0 or row >= self.step_list.count():
+            QMessageBox.information(self, "无步骤", "请先选择要删除的步骤。")
+            return
+        method = self._selected_method()
+        label = get_method_display_name(method.method_id) if method else "步骤"
+        self.step_list.takeItem(row)
+        self._sync_order_from_list()
+        if self.step_list.count() > 0:
+            self.step_list.setCurrentRow(min(row, self.step_list.count() - 1))
+        self._queue_realtime_run()
+        self._log(f"已删除步骤: {label}")
+
+    def _insert_step(self, method: WorkflowMethod, row: int) -> None:
+        row = max(0, min(row, self.step_list.count()))
+        self._sync_order_from_list()
+        methods = list(self.config.methods)
+        methods.insert(row, method)
+        for index, item in enumerate(methods):
+            item.order = index
+        self.config.methods = methods
+        self._render_steps()
+        self.step_list.setCurrentRow(row)
+        self._queue_realtime_run()
+
+    def _make_default_step(self, stage_id: str = "", category: str = "") -> WorkflowMethod:
+        stage = WORKFLOW_STAGE_BY_ID.get(stage_id, {})
+        method_id = str(stage.get("default_method") or "dewow")
+        if method_id not in PROCESSING_METHODS:
+            method_id = next(iter(PROCESSING_METHODS.keys()))
+        return WorkflowMethod(
+            category=category or self._category_for_stage(stage_id, method_id),
+            stage_id=stage_id,
+            method_id=method_id,
+            enabled=True,
+            hidden=False,
+            order=self.step_list.count(),
+            params=self._default_params_for(method_id),
+        )
+
+    def _category_for_stage(self, stage_id: str, method_id: str) -> str:
+        method_category = PROCESSING_METHODS.get(method_id, {}).get("category")
+        if method_category:
+            return str(method_category)
+        if stage_id in {"zero_time", "trace_correction"}:
+            return "preprocessing"
+        if stage_id == "motion_compensation":
+            return "motion_compensation"
+        if stage_id in {"background_clutter", "spatial_denoise"}:
+            return "background_removal"
+        if stage_id == "gain":
+            return "gain"
+        if stage_id in {"velocity_model", "geometry_depth", "migration"}:
+            return "migration"
+        return "custom"
+
+    def _update_step_buttons(self) -> None:
+        has_selection = self._selected_method() is not None
+        for attr in (
+            "btn_duplicate_step",
+            "btn_remove_step",
+            "btn_run_selected",
+            "btn_run_from_current",
+        ):
+            button = getattr(self, attr, None)
+            if button is not None:
+                button.setEnabled(has_selection)
 
     def _default_params_for(self, method_id: str) -> dict[str, Any]:
         params = {}

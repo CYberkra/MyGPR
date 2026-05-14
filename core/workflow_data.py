@@ -10,6 +10,8 @@ import os
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 
+from core.app_paths import get_workflow_templates_dir
+
 
 # ============ 方法分类定义 ============
 
@@ -639,9 +641,8 @@ class WorkflowConfigManager:
 
     def __init__(self, config_dir: Optional[str] = None):
         if config_dir is None:
-            # 默认保存在项目目录下的 workflows/ 文件夹
-            base_dir = os.path.dirname(os.path.abspath(__file__))
-            config_dir = os.path.join(base_dir, "workflows")
+            # Store user workflow templates in a writable app-data directory.
+            config_dir = os.path.join(get_workflow_templates_dir(), "workflow_configs")
 
         self.config_dir = config_dir
         os.makedirs(config_dir, exist_ok=True)
