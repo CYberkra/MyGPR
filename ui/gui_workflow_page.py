@@ -67,6 +67,8 @@ class WorkflowPage(QWidget):
 
     workflow_run_requested = pyqtSignal(object, bool)
     save_live_result_requested = pyqtSignal()
+    step_selection_changed = pyqtSignal(int)
+    workflow_config_changed = pyqtSignal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -330,6 +332,7 @@ class WorkflowPage(QWidget):
         if self.step_list.count() > 0:
             self.step_list.setCurrentRow(0)
         self._log(f"已加载模板: {self.config.name}")
+        self.workflow_config_changed.emit(self.config)
 
     def _render_steps(self) -> None:
         self.step_list.blockSignals(True)
@@ -375,6 +378,7 @@ class WorkflowPage(QWidget):
 
     def _on_step_selected(self, row: int) -> None:
         method = self._selected_method()
+        self.step_selection_changed.emit(int(row))
         self._update_step_buttons()
         if method is None:
             return
@@ -620,6 +624,7 @@ class WorkflowPage(QWidget):
                 self.step_list.item(row).setText(self._format_step_text(method))
         self.config.methods = methods
         self._update_step_buttons()
+        self.workflow_config_changed.emit(self.config)
 
     def _on_realtime_changed(self) -> None:
         self.config.realtime_enabled = bool(self.realtime_check.isChecked())
@@ -714,6 +719,14 @@ class WorkflowPage(QWidget):
     def get_enabled_methods(self) -> list[WorkflowMethod]:
         self._sync_order_from_list()
         return [deepcopy(method) for method in self.config.get_enabled_methods()]
+
+    def current_step_index(self) -> int:
+        return int(self.step_list.currentRow())
+
+    def select_step(self, row: int) -> None:
+        row = int(row)
+        if 0 <= row < self.step_list.count():
+            self.step_list.setCurrentRow(row)
 
     def set_data_shape(self, shape: tuple[int, int] | None) -> None:
         self._data_shape = shape

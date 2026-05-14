@@ -58,6 +58,33 @@ def test_workflow_tab_exposes_default_uavgpr_chain_and_agc_warning():
         app.processEvents()
 
 
+def test_workflow_ribbon_above_plot_syncs_with_workflow_page():
+    app = _get_app()
+    win = GPRGuiQt()
+    try:
+        assert hasattr(win, "workflow_ribbon")
+        assert win.workflow_ribbon is not None
+        assert win.workflow_ribbon.template_label.text()
+        assert win.workflow_ribbon._step_buttons
+
+        gain_row = _row_for_method(win, "sec_gain")
+        win.workflow_ribbon.step_selected.emit(gain_row)
+        app.processEvents()
+
+        assert win.page_workflow.current_step_index() == gain_row
+        assert win.workflow_ribbon._current_step == gain_row
+
+        zero_row = _row_for_method(win, "set_zero_time")
+        win.page_workflow.select_step(zero_row)
+        app.processEvents()
+
+        assert win.workflow_ribbon._current_step == zero_row
+        assert "当前" in win.workflow_ribbon.template_label.text()
+    finally:
+        win.close()
+        app.processEvents()
+
+
 def test_workflow_hidden_steps_are_excluded_from_runtime_methods():
     app = _get_app()
     win = GPRGuiQt()
