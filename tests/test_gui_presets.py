@@ -336,7 +336,7 @@ def test_auto_tune_workflow_bridge_focuses_workflow_workspace():
         win.page_auto_tune.btn_open_workflow.click()
         app.processEvents()
         assert win._content_stack.currentWidget() is win._main_content_widget
-        assert win.control_tabs.currentWidget() is win.page_basic
+        assert win.control_tabs is None
         assert win.status_label.text() == "工作流主画布"
         assert win.page_workflow.objectName() == "workflowStudioPage"
     finally:
@@ -348,8 +348,11 @@ def test_runtime_drawer_prefers_global_log_and_demotes_perf_metrics():
     app = _get_app()
     win = GPRGuiQt()
     try:
-        assert win.btn_toggle_global_log.text() == "全局日志"
-        assert win.btn_toggle_quality.text() == "质量摘要"
+        assert win.btn_toggle_global_log.text() == "Logs"
+        assert win.btn_toggle_quality.text() == "QC / Warnings"
+        assert win.btn_toggle_validation.text() == "Validation"
+        assert win.btn_export_evidence.text() == "Evidence"
+        assert win.btn_export_package.text() == "Export"
 
         raw = np.arange(120, dtype=np.float32).reshape(10, 12) / 10.0
         win.shared_data.load_data(raw, path="demo.csv", source="test")

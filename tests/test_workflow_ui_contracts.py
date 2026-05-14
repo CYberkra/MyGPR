@@ -30,9 +30,11 @@ def test_workflow_workspace_exposes_default_uavgpr_chain_and_agc_warning():
     app = _get_app()
     win = GPRGuiQt()
     try:
-        labels = [win.control_tabs.tabText(i) for i in range(win.control_tabs.count())]
-        assert "工作流" not in labels
+        assert win.control_tabs is None
         assert win.page_workflow.objectName() == "workflowStudioPage"
+        assert win.page_workflow.project_panel.title() == "Project / Data"
+        assert win.page_workflow.palette_panel.title() == "Node Library"
+        assert win.page_workflow.inspector_box.title() == "Inspector"
 
         default_methods = [method.method_id for method in win.page_workflow.config.methods]
         assert default_methods[:4] == [
@@ -89,6 +91,28 @@ def test_workflow_numeric_params_render_slider_and_spinbox_pair():
         assert "window" in win.page_workflow._param_controls
         sliders = win.page_workflow.param_host.findChildren(QSlider)
         assert sliders, "integer window parameter should render a slider"
+    finally:
+        win.close()
+        app.processEvents()
+
+
+def test_project_data_panel_tracks_loaded_shared_data():
+    app = _get_app()
+    win = GPRGuiQt()
+    try:
+        raw = np.arange(24, dtype=np.float32).reshape(6, 4)
+        win.shared_data.load_data(
+            raw,
+            path=r"C:\data\demo.csv",
+            trace_metadata={"x": np.zeros(4, dtype=np.float32)},
+            source="test",
+        )
+        app.processEvents()
+
+        assert "demo.csv" in win.page_workflow.project_file_label.text()
+        assert "6 samples" in win.page_workflow.project_shape_label.text()
+        assert "已同步" in win.page_workflow.project_metadata_label.text()
+        assert "6 samples" in win.page_workflow.qc_label.text()
     finally:
         win.close()
         app.processEvents()

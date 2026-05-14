@@ -54,6 +54,7 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QProgressBar,
+    QDialog,
 )
 
 from core.app_paths import get_logs_dir, get_output_dir, get_settings_dir
@@ -812,99 +813,50 @@ class GPRGuiQt(QMainWindow):
         self._main_splitter = splitter
         root_layout.addWidget(splitter)
 
-        # 右侧面板（绘图区）
+        # Studio 主工作区。旧 control_tabs 不再作为常驻入口；旧页面保留为
+        # 后台可复用面板/弹窗来源，避免导入、自动选参和导出逻辑断开。
         right_panel = QWidget()
         self._right_panel = right_panel
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(4, 4, 4, 4)
         right_layout.setSpacing(8)
 
-        # 左侧面板（控制区）
-        left_shell = QWidget()
-        self._left_shell = left_shell
-        left_shell_layout = QVBoxLayout(left_shell)
-        left_shell_layout.setContentsMargins(0, 0, 0, 0)
-        left_shell_layout.setSpacing(8)
-
-        left_panel = QWidget()
-        self._left_panel = left_panel
-        left_panel.setMinimumWidth(320)
-        left_panel.setMaximumWidth(560)
-        left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(6, 6, 6, 6)
-        left_layout.setSpacing(8)
-
-        scroll = QScrollArea()
-        self._left_scroll = scroll
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setWidget(left_panel)
-        left_shell_layout.addWidget(scroll, 1)
-
         splitter.addWidget(right_panel)
-        splitter.addWidget(left_shell)
         splitter.setChildrenCollapsible(False)
         splitter.setHandleWidth(6)
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 2)
-        splitter.setSizes([940, 420])
-
-        # 创建多页控制面板
-        self.control_tabs = QTabWidget()
-        self.control_tabs.setDocumentMode(True)
-        self.control_tabs.setUsesScrollButtons(True)
-        self.control_tabs.setMovable(False)
-        self.control_tabs.tabBar().setElideMode(Qt.TextElideMode.ElideRight)
-        left_layout.addWidget(self.control_tabs)
+        splitter.setStretchFactor(0, 1)
+        self._left_shell = None
+        self._left_panel = None
+        self._left_scroll = None
+        self.control_tabs = None
 
         self._content_stack.addWidget(self._main_content_widget)
 
-        # ===== 原有页面（保留作为日常处理界面）=====
-        # 页面1: 日常处理
+        # ===== 旧页面保留为 Studio 的后台功能面板，不再挂到外层 Tab =====
         self.page_basic = BasicFlowPage(self)
-        idx_basic = self.control_tabs.addTab(
-            self.page_basic, FluentIcon.HOME.icon(), "日常处理"
-        )
-        self.control_tabs.setTabToolTip(idx_basic, "日常连续处理操作")
+        self.page_basic.hide()
 
         # 主工作区: 工作流画布
-        # 工作流不再作为左侧控制面板的一个标签页，而是成为中央主画布。
         self.page_workflow = WorkflowPage(self)
         self.page_workflow.setObjectName("workflowStudioPage")
         self.page_workflow.setToolTip(
             "主工作区：节点画布、卡片内参数和 B-scan Preview 都在这里完成。"
         )
 
-        # 页面2: 调参与实验
         self.page_auto_tune = AutoTunePage(self)
-        idx_auto_tune = self.control_tabs.addTab(
-            self.page_auto_tune, FluentIcon.SETTING.icon(), "调参与实验"
-        )
-        self.control_tabs.setTabToolTip(idx_auto_tune, "自动选参、候选评估与方法实验")
+        self.page_auto_tune.hide()
 
-        # 页面4: 显示与对比
         self.page_advanced = AdvancedSettingsPage(self)
-        idx_advanced = self.control_tabs.addTab(
-            self.page_advanced, FluentIcon.VIEW.icon(), "显示与对比"
-        )
-        self.control_tabs.setTabToolTip(
-            idx_advanced, "主图显示、双图对比、裁剪与预览设置"
-        )
+        self.page_advanced.hide()
 
-        # 页面5: 质量
         self.page_quality = QualityLogPage(self)
         self.page_quality.set_trace_selected_callback(
             self._on_trajectory_trace_selected
         )
-        idx_quality = self.control_tabs.addTab(
-            self.page_quality, FluentIcon.PIE_SINGLE.icon(), "质量与导出"
-        )
-        self.control_tabs.setTabToolTip(idx_quality, "质量摘要、航迹图、日志与导出入口")
+        self.page_quality.hide()
 
-        # 默认显示主内容区（日常处理界面）
+        # 默认显示 Studio 主工作台。
         self._content_stack.setCurrentWidget(self._main_content_widget)
-        self.control_tabs.setCurrentWidget(self.page_basic)
         self._relocate_basic_status_brief()
         self._reorder_basic_groups_for_flow()
 
@@ -1088,23 +1040,38 @@ class GPRGuiQt(QMainWindow):
         bar_layout.setContentsMargins(0, 0, 0, 0)
         bar_layout.setSpacing(6)
 
-        title = QLabel("运行信息")
+        title = QLabel("Runtime / Evidence")
         title.setProperty("class", "topInfoMeta")
         bar_layout.addWidget(title)
 
-        self.btn_toggle_global_log = QPushButton("全局日志")
+        self.btn_toggle_global_log = QPushButton("Logs")
         self.btn_toggle_global_log.setCheckable(True)
         self.btn_toggle_global_log.clicked.connect(
             lambda checked: self._show_runtime_panel("global_log" if checked else None)
         )
         bar_layout.addWidget(self.btn_toggle_global_log)
 
-        self.btn_toggle_quality = QPushButton("质量摘要")
+        self.btn_toggle_quality = QPushButton("QC / Warnings")
         self.btn_toggle_quality.setCheckable(True)
         self.btn_toggle_quality.clicked.connect(
             lambda checked: self._show_runtime_panel("quality" if checked else None)
         )
         bar_layout.addWidget(self.btn_toggle_quality)
+
+        self.btn_toggle_validation = QPushButton("Validation")
+        self.btn_toggle_validation.setCheckable(True)
+        self.btn_toggle_validation.clicked.connect(
+            lambda checked: self._show_runtime_panel("quality" if checked else None)
+        )
+        bar_layout.addWidget(self.btn_toggle_validation)
+
+        self.btn_export_evidence = QPushButton("Evidence")
+        self.btn_export_evidence.clicked.connect(self.export_replay_evidence_bundle)
+        bar_layout.addWidget(self.btn_export_evidence)
+
+        self.btn_export_package = QPushButton("Export")
+        self.btn_export_package.clicked.connect(self.generate_report)
+        bar_layout.addWidget(self.btn_export_package)
 
         btn_collapse = QPushButton("收起")
         btn_collapse.clicked.connect(lambda: self._show_runtime_panel(None))
@@ -1125,6 +1092,7 @@ class GPRGuiQt(QMainWindow):
         self._runtime_panel_buttons = {
             "global_log": self.btn_toggle_global_log,
             "quality": self.btn_toggle_quality,
+            "validation": self.btn_toggle_validation,
         }
         return bar, container
 
@@ -1354,7 +1322,7 @@ class GPRGuiQt(QMainWindow):
 
     def _connect_signals(self):
         """连接信号和槽"""
-        # 基础流程页面 - 日常处理界面
+        # Project / Data 后台面板：保留旧导入和单步处理信号，入口迁入 Studio。
         self.page_basic.btn_import.clicked.connect(self.import_csv_file)
         self.page_basic.action_import_csv.triggered.connect(self.import_csv_file)
         self.page_basic.action_import_folder.triggered.connect(
@@ -1375,8 +1343,16 @@ class GPRGuiQt(QMainWindow):
         self.page_workflow.save_live_result_requested.connect(
             self.save_workflow_live_result
         )
+        self.page_workflow.import_raw_requested.connect(self.import_csv_file)
+        self.page_workflow.import_sidecar_requested.connect(self._pick_sidecar_file)
+        self.page_workflow.tuning_lab_requested.connect(self.open_tuning_lab)
+        self.page_workflow.preview_settings_requested.connect(self.open_preview_settings)
+        self.page_workflow.preview_large_requested.connect(self.open_preview_settings)
+        self.page_workflow.export_evidence_requested.connect(
+            self.export_replay_evidence_bundle
+        )
 
-        # 显示与对比页面
+        # Preview Viewer 控制后台面板。
         self.page_advanced.cmap_combo.currentIndexChanged.connect(self._refresh_plot)
         self.page_advanced.view_style_combo.currentIndexChanged.connect(
             self._refresh_plot
@@ -1470,53 +1446,73 @@ class GPRGuiQt(QMainWindow):
         self.page_quality.btn_open_log_dir.clicked.connect(self.open_log_directory)
         self.page_quality.btn_copy_diagnostics.clicked.connect(self.copy_diagnostics)
 
+    def _show_studio_dialog(self, attr_name: str, title: str, page: QWidget) -> None:
+        dialog = getattr(self, attr_name, None)
+        if dialog is None:
+            dialog = QDialog(self)
+            dialog.setWindowTitle(title)
+            dialog.resize(980, 720)
+            layout = QVBoxLayout(dialog)
+            layout.setContentsMargins(8, 8, 8, 8)
+            layout.addWidget(page)
+            setattr(self, attr_name, dialog)
+        page.show()
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def open_tuning_lab(self, method=None) -> None:
+        """Open AutoTune as a Studio dialog instead of a permanent outer tab."""
+        if method is not None and hasattr(self.page_auto_tune, "method_label"):
+            try:
+                self.page_auto_tune.method_label.setText(
+                    f"当前节点: {getattr(method, 'method_id', method)}"
+                )
+            except Exception:
+                pass
+        self._show_studio_dialog("_tuning_lab_dialog", "MyGPR Tuning Lab", self.page_auto_tune)
+        self._log("打开 Tuning Lab")
+
+    def open_preview_settings(self) -> None:
+        """Open legacy display controls as Preview Viewer settings."""
+        self._show_studio_dialog(
+            "_preview_settings_dialog",
+            "MyGPR Preview Viewer Controls",
+            self.page_advanced,
+        )
+        self._log("打开 Preview Viewer Controls")
+
     def switch_to_legacy_mode(self):
-        """切换到日常处理界面"""
+        """聚焦到 Studio 主工作台。"""
         self.switch_to_main_mode("basic")
 
     def switch_to_main_mode(self, tab_key: str | None = None):
-        """切换到日常处理界面
+        """聚焦到 Studio 主工作台或打开对应 Studio 功能入口。
 
         Args:
-            tab_key: 可选，指定要切换到的标签页，可选值：
-                'basic' - 日常处理页
-                'workflow' - 工作流页
-                'auto_tune' - 调参与实验页
-                'advanced' - 显示与对比页
-                'quality' - 质量与导出页
+            tab_key: 可选，指定要打开的 Studio 功能入口。
         """
         if self._content_stack is not None and self._main_content_widget is not None:
             self._content_stack.setCurrentWidget(self._main_content_widget)
-
-            # 根据 tab_key 切换到指定标签页
-            if tab_key == "basic" and self.page_basic is not None:
-                self.control_tabs.setCurrentWidget(self.page_basic)
-                self.status_label.setText("日常处理界面")
-            elif tab_key == "workflow" and self.page_workflow is not None:
-                # 工作流画布已经常驻主工作区，不再切换到控制面板标签页。
-                self.status_label.setText("工作流主画布")
-            elif tab_key == "auto_tune" and self.page_auto_tune is not None:
-                self.control_tabs.setCurrentWidget(self.page_auto_tune)
-                self.status_label.setText("调参与实验")
+            if tab_key == "auto_tune" and self.page_auto_tune is not None:
+                self.open_tuning_lab()
+                self.status_label.setText("Tuning Lab")
             elif tab_key == "advanced" and self.page_advanced is not None:
-                self.control_tabs.setCurrentWidget(self.page_advanced)
-                self.status_label.setText("显示与对比")
+                self.open_preview_settings()
+                self.status_label.setText("Preview Settings")
             elif tab_key == "quality" and self.page_quality is not None:
-                self.control_tabs.setCurrentWidget(self.page_quality)
-                self.status_label.setText("质量与导出")
+                self._show_runtime_panel("quality")
+                self.status_label.setText("QC / Export")
             else:
-                # 默认切换到日常处理页
-                if self.page_basic is not None:
-                    self.control_tabs.setCurrentWidget(self.page_basic)
-                self.status_label.setText("日常处理界面")
+                self.status_label.setText("工作流主画布")
 
             tab_name = {
-                "basic": "日常处理",
+                "basic": "Project / Data",
                 "workflow": "工作流主画布",
-                "auto_tune": "调参与实验",
-                "advanced": "显示与对比",
-                "quality": "质量与导出",
-            }.get(tab_key, "日常处理")
+                "auto_tune": "Tuning Lab",
+                "advanced": "Preview Settings",
+                "quality": "QC / Export",
+            }.get(tab_key, "工作流主画布")
             self._log(f"切换到: {tab_name}")
 
     def switch_to_workflow_tab(self):
@@ -1535,6 +1531,12 @@ class GPRGuiQt(QMainWindow):
         if hasattr(self, "page_workflow") and self.page_workflow is not None:
             shape = tuple(self.data.shape) if self.data is not None else None
             self.page_workflow.set_data_shape(shape)
+            metadata_status = "已同步" if self.trace_metadata else "仅数据"
+            self.page_workflow.set_project_data_state(
+                file_path=self.data_path or "",
+                shape=shape,
+                metadata_status=metadata_status,
+            )
         self._update_empty_state_and_brief()
         if reason == "loaded":
             self._manual_roi_values = None
@@ -2642,7 +2644,7 @@ class GPRGuiQt(QMainWindow):
             QMessageBox.information(
                 self,
                 "自动选参结果不存在",
-                "请先到“调参与实验”页执行自动选参。",
+                "请先从节点右键或顶部 Tuning Lab 入口执行自动选参。",
             )
             return
 
@@ -2685,7 +2687,7 @@ class GPRGuiQt(QMainWindow):
         dialog.exec()
 
     def apply_stage_compare_choice(self):
-        """将同阶段比较推荐的方法和参数写回日常处理。"""
+        """将同阶段比较推荐的方法和参数写回当前处理入口。"""
         if not self._last_auto_tune_group_result:
             QMessageBox.information(self, "同阶段比较", "暂无可用的阶段比较结果。")
             return

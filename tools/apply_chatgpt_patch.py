@@ -63,7 +63,8 @@ def _origin_blob_url(head: str, path: str) -> str:
         remote = remote[:-4]
     if remote.startswith("git@github.com:"):
         remote = "https://github.com/" + remote[len("git@github.com:") :]
-    return f"{remote}/blob/{head}/{path.replace('\\', '/')}"
+    web_path = path.replace("\\", "/")
+    return f"{remote}/blob/{head}/{web_path}"
 
 
 def _parse_touched_files(patch_text: str) -> list[str]:

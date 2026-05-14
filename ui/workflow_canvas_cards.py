@@ -767,6 +767,13 @@ class WorkflowCanvasView(QGraphicsView):
     duplicate_node_requested = pyqtSignal(int)
     remove_node_requested = pyqtSignal(int)
     add_node_requested = pyqtSignal(str, QPointF)
+    tuning_lab_requested = pyqtSignal(int)
+    apply_best_params_requested = pyqtSignal(int)
+    benchmark_node_requested = pyqtSignal(int)
+    preview_large_requested = pyqtSignal()
+    preview_settings_requested = pyqtSignal()
+    preview_compare_requested = pyqtSignal()
+    preview_snapshot_requested = pyqtSignal()
     links_changed = pyqtSignal(object)
     layout_changed = pyqtSignal(object)
 
@@ -976,6 +983,9 @@ class WorkflowCanvasView(QGraphicsView):
         if proxy.row >= 0:
             menu.addAction("运行此节点", lambda row=proxy.row: self.run_node_requested.emit(row))
             menu.addAction("从此节点运行", lambda row=proxy.row: self.run_from_node_requested.emit(row))
+            menu.addAction("Open Tuning Lab", lambda row=proxy.row: self.tuning_lab_requested.emit(row))
+            menu.addAction("Apply Best Params", lambda row=proxy.row: self.apply_best_params_requested.emit(row))
+            menu.addAction("Benchmark This Node", lambda row=proxy.row: self.benchmark_node_requested.emit(row))
             menu.addSeparator()
             enabled_text = "停用" if proxy.method.enabled else "启用"
             menu.addAction(enabled_text, lambda p=proxy: self._toggle_proxy_enabled(p))
@@ -993,7 +1003,10 @@ class WorkflowCanvasView(QGraphicsView):
             )
             menu.addAction("适配到此节点", lambda p=proxy: self.fit_proxy(p))
         else:
-            menu.addAction("打开大图", lambda p=proxy: self._open_preview_proxy(p))
+            menu.addAction("Open Large Viewer", self.preview_large_requested.emit)
+            menu.addAction("Add Before / After Compare", self.preview_compare_requested.emit)
+            menu.addAction("Save Snapshot", self.preview_snapshot_requested.emit)
+            menu.addAction("Preview Settings", self.preview_settings_requested.emit)
             menu.addAction("适配到此节点", lambda p=proxy: self.fit_proxy(p))
         return menu
 

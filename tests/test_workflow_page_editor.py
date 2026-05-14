@@ -127,7 +127,8 @@ def test_compact_vertical_layout_uses_short_actions_and_step_labels():
         assert page.btn_save_live.text() == "Save"
         assert page.btn_validate.text() == "Validate"
         assert page.template_menu_button.text() == "模板 ▾"
-        assert page.palette_panel.title() == "节点库"
+        assert page.project_panel.title() == "Project / Data"
+        assert page.palette_panel.title() == "Node Library"
         assert page.inspector_box.title() == "Inspector"
         assert page.detail_box.title() == "选中步骤参数"
         assert page.detail_box.isHidden()
@@ -430,6 +431,9 @@ def test_node_context_menu_actions_and_eye_toggle_skip_hidden_step():
         action_texts = [action.text() for action in menu.actions() if action.text()]
         assert "运行此节点" in action_texts
         assert "从此节点运行" in action_texts
+        assert "Open Tuning Lab" in action_texts
+        assert "Apply Best Params" in action_texts
+        assert "Benchmark This Node" in action_texts
         assert "复制节点" in action_texts
         assert "删除节点" in action_texts
         assert "添加预览节点" in action_texts
@@ -450,6 +454,56 @@ def test_node_context_menu_actions_and_eye_toggle_skip_hidden_step():
 
         assert emitted
         assert all(method.method_id != page.config.methods[0].method_id for method in emitted[-1][0])
+    finally:
+        page.close()
+        app.processEvents()
+
+
+def test_workflow_project_panel_updates_data_state_and_import_signals():
+    app = _get_app()
+    page = WorkflowPage()
+    imports: list[str] = []
+    sidecars: list[str] = []
+    page.import_raw_requested.connect(lambda: imports.append("raw"))
+    page.import_sidecar_requested.connect(sidecars.append)
+    try:
+        assert page.project_panel.title() == "Project / Data"
+        assert page.palette_panel.title() == "Node Library"
+        assert page.inspector_box.title() == "Inspector"
+
+        page.set_project_data_state(
+            file_path=r"C:\data\line.csv",
+            shape=(501, 2378),
+            metadata_status="已同步",
+        )
+        assert "line.csv" in page.project_file_label.text()
+        assert "501 samples" in page.project_shape_label.text()
+        assert "已同步" in page.project_metadata_label.text()
+        assert "501 samples" in page.qc_label.text()
+
+        page.btn_import_raw.click()
+        page.btn_import_rtk.click()
+        page.btn_import_imu.click()
+        page.btn_import_agl.click()
+        app.processEvents()
+        assert imports == ["raw"]
+        assert sidecars == ["rtk", "imu", "altimeter"]
+    finally:
+        page.close()
+        app.processEvents()
+
+
+def test_tuning_lab_toolbar_emits_selected_workflow_method():
+    app = _get_app()
+    page = WorkflowPage()
+    emitted = []
+    page.tuning_lab_requested.connect(emitted.append)
+    try:
+        page.step_list.setCurrentRow(0)
+        page.btn_open_tuning_lab.click()
+        app.processEvents()
+        assert emitted
+        assert emitted[-1].method_id == page.config.methods[0].method_id
     finally:
         page.close()
         app.processEvents()

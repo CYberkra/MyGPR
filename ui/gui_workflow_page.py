@@ -70,6 +70,12 @@ class WorkflowPage(QWidget):
 
     workflow_run_requested = pyqtSignal(object, bool)
     save_live_result_requested = pyqtSignal()
+    import_raw_requested = pyqtSignal()
+    import_sidecar_requested = pyqtSignal(str)
+    tuning_lab_requested = pyqtSignal(object)
+    preview_settings_requested = pyqtSignal()
+    preview_large_requested = pyqtSignal()
+    export_evidence_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -79,6 +85,8 @@ class WorkflowPage(QWidget):
         self._param_getters: dict[str, Callable[[], Any]] = {}
         self._param_controls: dict[str, QWidget] = {}
         self._data_shape: tuple[int, int] | None = None
+        self._current_file: str = ""
+        self._metadata_status: str = "未加载"
         self._suppress_change = False
         self._slider_dragging = False
         self._last_run_methods: list[WorkflowMethod] = []
@@ -115,6 +123,8 @@ class WorkflowPage(QWidget):
         self.btn_run_selected = PushButton("Run Selected")
         self.btn_run_selected.setToolTip("只运行选中的单个步骤，便于逐步验证")
         self.btn_validate = PushButton("Validate")
+        self.btn_open_tuning_lab = PushButton("Tuning Lab")
+        self.btn_open_tuning_lab.setToolTip("打开选中节点的自动选参与实验室")
         self.btn_save_live = PushButton(FluentIcon.SAVE, "Save")
         self.btn_save_live.setToolTip("将实时预览或最近一次工作流结果写入正式历史")
         self.btn_save_live.setEnabled(False)
@@ -124,6 +134,7 @@ class WorkflowPage(QWidget):
             self.btn_run_from_current,
             self.btn_run_selected,
             self.btn_validate,
+            self.btn_open_tuning_lab,
             self.btn_save_live,
         ]:
             btn.setMinimumWidth(0)
@@ -176,7 +187,49 @@ class WorkflowPage(QWidget):
         self.step_list.setMinimumHeight(260)
         self.step_list.setToolTip("拖拽调整处理顺序；隐藏的步骤不会执行")
 
-        self.palette_panel = QGroupBox("节点库")
+        left_sidebar = QWidget()
+        left_sidebar_layout = QVBoxLayout(left_sidebar)
+        left_sidebar_layout.setContentsMargins(0, 0, 0, 0)
+        left_sidebar_layout.setSpacing(8)
+
+        self.project_panel = QGroupBox("Project / Data")
+        project_layout = QVBoxLayout(self.project_panel)
+        project_layout.setContentsMargins(8, 14, 8, 8)
+        project_layout.setSpacing(6)
+        import_row = QWidget()
+        import_layout = QHBoxLayout(import_row)
+        import_layout.setContentsMargins(0, 0, 0, 0)
+        import_layout.setSpacing(5)
+        self.btn_import_raw = PushButton("Import Raw")
+        self.btn_import_rtk = PushButton("RTK")
+        self.btn_import_imu = PushButton("IMU")
+        self.btn_import_agl = PushButton("AGL")
+        for btn in [
+            self.btn_import_raw,
+            self.btn_import_rtk,
+            self.btn_import_imu,
+            self.btn_import_agl,
+        ]:
+            btn.setMinimumWidth(0)
+            import_layout.addWidget(btn)
+        project_layout.addWidget(import_row)
+        self.project_file_label = QLabel("current file: --")
+        self.project_shape_label = QLabel("shape: --")
+        self.project_metadata_label = QLabel("metadata: 未加载")
+        for label in [
+            self.project_file_label,
+            self.project_shape_label,
+            self.project_metadata_label,
+        ]:
+            label.setWordWrap(True)
+            label.setProperty("class", "hintText")
+            project_layout.addWidget(label)
+        self.btn_create_raw_input = PushButton("Create / Update Raw Input")
+        self.btn_create_raw_input.setToolTip("在画布中创建或更新原始数据输入节点占位")
+        project_layout.addWidget(self.btn_create_raw_input)
+        left_sidebar_layout.addWidget(self.project_panel)
+
+        self.palette_panel = QGroupBox("Node Library")
         palette_layout = QVBoxLayout(self.palette_panel)
         palette_layout.setContentsMargins(8, 14, 8, 8)
         palette_layout.setSpacing(6)
@@ -187,7 +240,8 @@ class WorkflowPage(QWidget):
         self.palette_list.setMaximumWidth(240)
         palette_layout.addWidget(self.palette_search)
         palette_layout.addWidget(self.palette_list, 1)
-        workspace_layout.addWidget(self.palette_panel)
+        left_sidebar_layout.addWidget(self.palette_panel, 1)
+        workspace_layout.addWidget(left_sidebar)
 
         self.step_panel = QWidget()
         step_panel_layout = QVBoxLayout(self.step_panel)
@@ -254,6 +308,12 @@ class WorkflowPage(QWidget):
         inspector_layout.setSpacing(6)
         self.inspector_label = QLabel("未选择节点")
         self.inspector_label.setWordWrap(True)
+        self.qc_label = QLabel("QC\nshape: --\nwarnings: --\nmetadata: --")
+        self.qc_label.setWordWrap(True)
+        self.qc_label.setProperty("class", "hintText")
+        self.export_label = QLabel("Export\nEvidence Package: 通过 Export 节点或底部 Evidence 抽屉导出")
+        self.export_label.setWordWrap(True)
+        self.export_label.setProperty("class", "hintText")
         self.status_label = QLabel("未运行")
         self.status_label.setProperty("class", "hintText")
         self.workflow_log = QTextEdit()
@@ -261,6 +321,8 @@ class WorkflowPage(QWidget):
         self.workflow_log.setMinimumWidth(230)
         self.workflow_log.setPlaceholderText("工作流运行状态、风险提示和最近步骤日志")
         inspector_layout.addWidget(self.inspector_label)
+        inspector_layout.addWidget(self.qc_label)
+        inspector_layout.addWidget(self.export_label)
         inspector_layout.addWidget(self.status_label)
         inspector_layout.addWidget(self.workflow_log, 1)
         workspace_layout.addWidget(self.inspector_box)
@@ -280,6 +342,13 @@ class WorkflowPage(QWidget):
         self.workflow_canvas.duplicate_node_requested.connect(self._duplicate_canvas_node)
         self.workflow_canvas.remove_node_requested.connect(self._remove_canvas_node)
         self.workflow_canvas.add_node_requested.connect(self._add_canvas_node)
+        self.workflow_canvas.tuning_lab_requested.connect(self._request_tuning_lab_for_row)
+        self.workflow_canvas.apply_best_params_requested.connect(self._request_apply_best_params_for_row)
+        self.workflow_canvas.benchmark_node_requested.connect(self._request_benchmark_for_row)
+        self.workflow_canvas.preview_large_requested.connect(self.preview_large_requested.emit)
+        self.workflow_canvas.preview_settings_requested.connect(self.preview_settings_requested.emit)
+        self.workflow_canvas.preview_compare_requested.connect(self._request_preview_compare)
+        self.workflow_canvas.preview_snapshot_requested.connect(self._request_preview_snapshot)
         self.workflow_canvas.links_changed.connect(self._on_canvas_links_changed)
         self.workflow_canvas.layout_changed.connect(self._on_canvas_layout_changed)
         self.method_combo.currentIndexChanged.connect(self._on_method_changed)
@@ -291,7 +360,13 @@ class WorkflowPage(QWidget):
         self.btn_run_from_current.clicked.connect(self.request_run_from_current)
         self.btn_run_selected.clicked.connect(self.request_selected_run)
         self.btn_validate.clicked.connect(self._validate_workflow_ui)
+        self.btn_open_tuning_lab.clicked.connect(self.request_tuning_lab_for_current)
         self.btn_save_live.clicked.connect(self.save_live_result_requested)
+        self.btn_import_raw.clicked.connect(self.import_raw_requested)
+        self.btn_import_rtk.clicked.connect(lambda: self.import_sidecar_requested.emit("rtk"))
+        self.btn_import_imu.clicked.connect(lambda: self.import_sidecar_requested.emit("imu"))
+        self.btn_import_agl.clicked.connect(lambda: self.import_sidecar_requested.emit("altimeter"))
+        self.btn_create_raw_input.clicked.connect(self._create_or_update_raw_input_node)
         self.btn_new_template.clicked.connect(self.new_user_template)
         self.btn_duplicate_template.clicked.connect(self.duplicate_current_template)
         self.btn_save_template.clicked.connect(self.save_current_template)
@@ -881,8 +956,76 @@ class WorkflowPage(QWidget):
         self._select_step_row(row)
         self.remove_current_step()
 
+    def request_tuning_lab_for_current(self) -> None:
+        row = self.step_list.currentRow()
+        self._request_tuning_lab_for_row(row)
+
+    def _request_tuning_lab_for_row(self, row: int) -> None:
+        self._select_step_row(row)
+        method = self._selected_method()
+        if method is None:
+            QMessageBox.information(self, "无节点", "请先选择一个工作流节点。")
+            return
+        self.tuning_lab_requested.emit(deepcopy(method))
+        self._log(f"Tuning Lab: {get_method_display_name(method.method_id)}")
+
+    def _request_apply_best_params_for_row(self, row: int) -> None:
+        self._select_step_row(row)
+        method = self._selected_method()
+        if method is None:
+            return
+        self.tuning_lab_requested.emit(deepcopy(method))
+        self._log(f"Apply Best Params: 已打开 {get_method_display_name(method.method_id)} 调参入口")
+
+    def _request_benchmark_for_row(self, row: int) -> None:
+        self._select_step_row(row)
+        method = self._selected_method()
+        if method is None:
+            return
+        self.tuning_lab_requested.emit(deepcopy(method))
+        self._log(f"Benchmark This Node: {get_method_display_name(method.method_id)}")
+
+    def _request_preview_compare(self) -> None:
+        self.preview_large_requested.emit()
+        self._log("Preview: 打开大图/对比查看入口")
+
+    def _request_preview_snapshot(self) -> None:
+        self.export_evidence_requested.emit()
+        self._log("Preview: 快照导出请使用 Evidence / Export 入口")
+
+    def _create_or_update_raw_input_node(self) -> None:
+        self._log("Raw Input 节点：当前版本使用 Project / Data 状态作为画布输入源。")
+        self.status_label.setText("Project / Data 已作为 Raw Input")
+
+    def set_project_data_state(
+        self,
+        *,
+        file_path: str | None = None,
+        shape: tuple[int, int] | None = None,
+        metadata_status: str | None = None,
+    ) -> None:
+        if file_path is not None:
+            self._current_file = str(file_path)
+        if shape is not None:
+            self._data_shape = shape
+        if metadata_status is not None:
+            self._metadata_status = str(metadata_status)
+        file_text = self._current_file or "--"
+        shape_text = (
+            f"{self._data_shape[0]} samples × {self._data_shape[1]} traces"
+            if self._data_shape
+            else "--"
+        )
+        self.project_file_label.setText(f"current file: {file_text}")
+        self.project_shape_label.setText(f"shape: {shape_text}")
+        self.project_metadata_label.setText(f"metadata: {self._metadata_status}")
+        self.qc_label.setText(
+            f"QC\nshape: {shape_text}\nwarnings: --\nmetadata: {self._metadata_status}"
+        )
+
     def set_data_shape(self, shape: tuple[int, int] | None) -> None:
         self._data_shape = shape
+        self.set_project_data_state(shape=shape)
         method = self._selected_method()
         if method is not None:
             self._suppress_change = True

@@ -29,18 +29,20 @@ def _wait_for_worker(app: QApplication, win: GPRGuiQt, timeout: float = 10.0) ->
     raise AssertionError("Timed out waiting for processing worker to finish")
 
 
-def test_main_tabs_remove_batch_entry_but_keep_daily_processing_first():
+def test_main_window_uses_workflow_studio_without_legacy_control_tabs():
     app = _get_app()
     win = GPRGuiQt()
     try:
-        labels = [win.control_tabs.tabText(i) for i in range(win.control_tabs.count())]
-
-        assert labels == ["日常处理", "调参与实验", "显示与对比", "质量与导出"]
-        assert "批处理与报告" not in labels
-        assert "工作流" not in labels
-        assert win.control_tabs.currentWidget() is win.page_basic
+        assert win.control_tabs is None
+        assert win.page_basic.isHidden()
+        assert win.page_auto_tune.isHidden()
+        assert win.page_advanced.isHidden()
+        assert win.page_quality.isHidden()
         assert hasattr(win, "page_workflow")
         assert win.page_workflow.objectName() == "workflowStudioPage"
+        assert win.page_workflow.project_panel.title() == "Project / Data"
+        assert win.page_workflow.palette_panel.title() == "Node Library"
+        assert win.page_workflow.inspector_box.title() == "Inspector"
         old_page_attr = "page_" + "work" + "bench"
         assert not hasattr(win, old_page_attr)
     finally:
@@ -80,5 +82,27 @@ def test_daily_processing_flow_supports_apply_undo_and_reset():
     finally:
         if win._worker_thread is not None:
             _wait_for_worker(app, win)
+        win.close()
+        app.processEvents()
+
+
+def test_tuning_and_preview_controls_open_as_studio_dialogs():
+    app = _get_app()
+    win = GPRGuiQt()
+    try:
+        win.open_tuning_lab()
+        app.processEvents()
+        assert win._tuning_lab_dialog.isVisible()
+        assert win.page_auto_tune.parent() is win._tuning_lab_dialog
+
+        win.open_preview_settings()
+        app.processEvents()
+        assert win._preview_settings_dialog.isVisible()
+        assert win.page_advanced.parent() is win._preview_settings_dialog
+    finally:
+        if hasattr(win, "_tuning_lab_dialog"):
+            win._tuning_lab_dialog.close()
+        if hasattr(win, "_preview_settings_dialog"):
+            win._preview_settings_dialog.close()
         win.close()
         app.processEvents()
