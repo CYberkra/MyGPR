@@ -7,7 +7,7 @@ from __future__ import annotations
 from typing import Callable
 
 from PyQt6.QtCore import QEvent, QPoint, QPointF, QRectF, QSize, QSignalBlocker, QTimer, Qt, pyqtSignal
-from PyQt6.QtGui import QBrush, QColor, QKeyEvent, QPainter, QPainterPath, QPen
+from PyQt6.QtGui import QBrush, QColor, QFontMetrics, QKeyEvent, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import (
     QAbstractButton,
     QAbstractSpinBox,
@@ -61,10 +61,13 @@ class ParamRowWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
 
-        name = QLabel(label)
+        metrics = QFontMetrics(self.font())
+        short_label = metrics.elidedText(str(label), Qt.TextElideMode.ElideRight, 190)
+        name = QLabel(short_label)
         name.setObjectName("paramName")
         name.setWordWrap(False)
         name.setMinimumWidth(90)
+        name.setToolTip(str(label))
 
         top_row = QHBoxLayout()
         top_row.setContentsMargins(0, 0, 0, 0)
@@ -246,9 +249,22 @@ class WorkflowNodeCard(QFrame):
             root.addLayout(title_row)
 
             subtitle = QLabel(get_method_display_name(self.method.method_id))
+            if self.method.method_id == "raw_input":
+                subtitle.setText("Raw Input")
             subtitle.setObjectName("nodeSubtitle")
             subtitle.setWordWrap(True)
             root.addWidget(subtitle)
+
+            if self.method.method_id == "raw_input":
+                shape = self.method.params.get("shape", "--")
+                file_name = self.method.params.get("file", "--")
+                input_label = QLabel(f"shape: {shape}\nfile: {file_name}")
+                input_label.setObjectName("nodeSubtitle")
+                input_label.setWordWrap(True)
+                root.addWidget(input_label)
+                root.addStretch(1)
+                self._refresh_state_properties()
+                return
 
             warning = self._stage_warning()
             if warning:
@@ -572,6 +588,16 @@ class WorkflowResizeHandleItem(QGraphicsRectItem):
         self.setPen(QPen(QColor("#ffffff"), 1.0))
         self.setZValue(40)
         self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton)
+        self.setAcceptHoverEvents(True)
+        self.setOpacity(0.22)
+
+    def hoverEnterEvent(self, event):  # noqa: N802 - Qt override
+        self.setOpacity(0.95)
+        super().hoverEnterEvent(event)
+
+    def hoverLeaveEvent(self, event):  # noqa: N802 - Qt override
+        self.setOpacity(0.22)
+        super().hoverLeaveEvent(event)
 
 
 class WorkflowNodeProxy(QGraphicsProxyWidget):
@@ -929,6 +955,10 @@ class WorkflowCanvasView(QGraphicsView):
         card = self._preview_proxy.widget()
         return card if isinstance(card, BscanPreviewCard) else None
 
+    def viewport_scene_center(self) -> QPointF:
+        """Return the current viewport center in scene coordinates."""
+        return self.mapToScene(self.viewport().rect().center())
+
     def set_selected_row(self, row: int) -> None:
         self._current_row = int(row)
         for proxy in self._scene.proxies:
@@ -1045,7 +1075,7 @@ class WorkflowCanvasView(QGraphicsView):
             )
             menu.addAction("适配到此节点", lambda p=proxy: self.fit_proxy(p))
         else:
-            menu.addAction("打开大图", self.preview_large_requested.emit)
+            menu.addAction("打开大图", lambda p=proxy: self._open_preview_proxy(p))
             menu.addAction("添加前后对比", self.preview_compare_requested.emit)
             menu.addAction("保存快照", self.preview_snapshot_requested.emit)
             menu.addAction("预览设置", self.preview_settings_requested.emit)

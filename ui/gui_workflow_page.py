@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
 from typing import Any, Callable
 
 from PyQt6.QtCore import QPointF, Qt, QTimer, pyqtSignal
@@ -27,6 +28,7 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QSlider,
     QSpinBox,
+    QSplitter,
     QTextEdit,
     QToolButton,
     QVBoxLayout,
@@ -77,6 +79,7 @@ class WorkflowPage(QWidget):
     preview_settings_requested = pyqtSignal()
     preview_large_requested = pyqtSignal()
     export_evidence_requested = pyqtSignal()
+    validation_report_requested = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -88,6 +91,7 @@ class WorkflowPage(QWidget):
         self._data_shape: tuple[int, int] | None = None
         self._current_file: str = ""
         self._metadata_status: str = "未加载"
+        self._sidecar_files: dict[str, str | None] = {}
         self._suppress_change = False
         self._slider_dragging = False
         self._last_run_methods: list[WorkflowMethod] = []
@@ -148,15 +152,30 @@ class WorkflowPage(QWidget):
             btn.setMaximumWidth(88)
             primary_row.addWidget(btn)
 
-        self.btn_open_tuning_lab.setMinimumWidth(64)
-        self.btn_open_tuning_lab.setMaximumWidth(88)
-        secondary_row.addWidget(self.btn_open_tuning_lab)
+        self.btn_toggle_project = PushButton("项目")
+        self.btn_toggle_project.setToolTip("展开或收起左侧 Project / Data 与节点库")
+        self.btn_toggle_project.setCheckable(True)
+        self.btn_toggle_project.setChecked(True)
+        self.btn_toggle_inspector = PushButton("属性")
+        self.btn_toggle_inspector.setToolTip("展开或收起右侧 Inspector")
+        self.btn_toggle_inspector.setCheckable(True)
+        self.btn_toggle_inspector.setChecked(True)
+        for btn in [
+            self.btn_toggle_project,
+            self.btn_toggle_inspector,
+            self.btn_open_tuning_lab,
+        ]:
+            btn.setMinimumWidth(58)
+            btn.setMaximumWidth(88)
+            secondary_row.addWidget(btn)
         secondary_row.addStretch(1)
 
         self.realtime_check = QCheckBox("实时")
         self.realtime_check.setToolTip("参数或顺序变化后自动计算当前工作流实时结果")
         self.safe_check = QCheckBox("安全")
         self.safe_check.setChecked(True)
+        self.execution_mode_label = QLabel("执行：顺序")
+        self.execution_mode_label.setToolTip("当前执行语义仍以步骤顺序为准；画布连接用于可视化和验证提示")
         self.zoom_label = QLabel("缩放 100%")
         self.btn_fit_canvas = PushButton("适配")
         self.btn_auto_layout = PushButton("自动布局")
@@ -164,7 +183,15 @@ class WorkflowPage(QWidget):
         self.btn_fit_canvas.setMaximumWidth(88)
         self.btn_auto_layout.setMaximumWidth(110)
         self.btn_reset_zoom.setMaximumWidth(76)
-        for widget in [self.realtime_check, self.safe_check, self.zoom_label, self.btn_fit_canvas, self.btn_auto_layout, self.btn_reset_zoom]:
+        for widget in [
+            self.realtime_check,
+            self.safe_check,
+            self.execution_mode_label,
+            self.zoom_label,
+            self.btn_fit_canvas,
+            self.btn_auto_layout,
+            self.btn_reset_zoom,
+        ]:
             secondary_row.addWidget(widget)
 
         self.template_menu_button = QToolButton()
@@ -192,8 +219,13 @@ class WorkflowPage(QWidget):
         workspace = QWidget()
         workspace_layout = QHBoxLayout(workspace)
         workspace_layout.setContentsMargins(10, 8, 10, 10)
-        workspace_layout.setSpacing(10)
+        workspace_layout.setSpacing(0)
         outer.addWidget(workspace, 1)
+
+        self.workspace_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.workspace_splitter.setChildrenCollapsible(True)
+        self.workspace_splitter.setHandleWidth(8)
+        workspace_layout.addWidget(self.workspace_splitter, 1)
 
         self.step_list = WorkflowStepList()
         self.step_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
@@ -236,10 +268,18 @@ class WorkflowPage(QWidget):
         self.project_file_label = QLabel("当前文件：--")
         self.project_shape_label = QLabel("数据尺寸：--")
         self.project_metadata_label = QLabel("元数据：未加载")
+        self.raw_status_label = QLabel("Raw：missing")
+        self.rtk_status_label = QLabel("RTK：missing")
+        self.imu_status_label = QLabel("IMU：missing")
+        self.agl_status_label = QLabel("AGL：missing")
         for label in [
             self.project_file_label,
             self.project_shape_label,
             self.project_metadata_label,
+            self.raw_status_label,
+            self.rtk_status_label,
+            self.imu_status_label,
+            self.agl_status_label,
         ]:
             label.setWordWrap(True)
             label.setProperty("class", "hintText")
@@ -261,9 +301,10 @@ class WorkflowPage(QWidget):
         palette_layout.addWidget(self.palette_search)
         palette_layout.addWidget(self.palette_list, 1)
         left_sidebar_layout.addWidget(self.palette_panel, 1)
-        workspace_layout.addWidget(left_sidebar, 0)
+        self.workspace_splitter.addWidget(left_sidebar)
 
         self.step_panel = QWidget()
+        self.step_panel.setMinimumWidth(520)
         step_panel_layout = QVBoxLayout(self.step_panel)
         step_panel_layout.setContentsMargins(0, 0, 0, 0)
         step_panel_layout.setSpacing(0)
@@ -271,7 +312,7 @@ class WorkflowPage(QWidget):
         self.workflow_canvas = WorkflowCanvasView()
         self.workflow_canvas.setToolTip("空白左键拖动画布；节点拖动移动；端口拖动连线；Ctrl+滚轮缩放。")
         step_panel_layout.addWidget(self.workflow_canvas, 1)
-        workspace_layout.addWidget(self.step_panel, 1)
+        self.workspace_splitter.addWidget(self.step_panel)
 
         self.btn_add_step = PushButton("添加")
         self.btn_duplicate_step = PushButton("复制")
@@ -342,12 +383,17 @@ class WorkflowPage(QWidget):
         self.workflow_log.setReadOnly(True)
         self.workflow_log.setMinimumWidth(230)
         self.workflow_log.setPlaceholderText("工作流运行状态、风险提示和最近步骤日志")
+        self.workflow_log.hide()
         inspector_layout.addWidget(self.inspector_label)
         inspector_layout.addWidget(self.qc_label)
         inspector_layout.addWidget(self.export_label)
         inspector_layout.addWidget(self.status_label)
-        inspector_layout.addWidget(self.workflow_log, 1)
-        workspace_layout.addWidget(self.inspector_box, 0)
+        inspector_layout.addStretch(1)
+        self.workspace_splitter.addWidget(self.inspector_box)
+        self.workspace_splitter.setStretchFactor(0, 0)
+        self.workspace_splitter.setStretchFactor(1, 1)
+        self.workspace_splitter.setStretchFactor(2, 0)
+        self.workspace_splitter.setSizes([260, 720, 300])
         self.log_box = self.inspector_box
 
         self._debounce_timer = QTimer(self)
@@ -373,6 +419,8 @@ class WorkflowPage(QWidget):
         self.workflow_canvas.preview_snapshot_requested.connect(self._request_preview_snapshot)
         self.workflow_canvas.links_changed.connect(self._on_canvas_links_changed)
         self.workflow_canvas.layout_changed.connect(self._on_canvas_layout_changed)
+        self.btn_toggle_project.clicked.connect(self._toggle_project_panel)
+        self.btn_toggle_inspector.clicked.connect(self._toggle_inspector_panel)
         self.method_combo.currentIndexChanged.connect(self._on_method_changed)
         self.enabled_check.stateChanged.connect(self._on_step_flags_changed)
         self.hidden_check.stateChanged.connect(self._on_step_flags_changed)
@@ -435,11 +483,31 @@ class WorkflowPage(QWidget):
     def _on_palette_item_double_clicked(self, item: QListWidgetItem) -> None:
         method_id = item.data(Qt.ItemDataRole.UserRole)
         if method_id:
-            self._add_canvas_node(str(method_id), QPointF(120, 120))
+            self._add_canvas_node(str(method_id), self.workflow_canvas.viewport_scene_center())
+
+    def _toggle_project_panel(self, checked: bool) -> None:
+        self.left_sidebar.setVisible(bool(checked))
+        if checked:
+            sizes = self.workspace_splitter.sizes()
+            if sizes and sizes[0] <= 8:
+                self.workspace_splitter.setSizes([260, max(640, sizes[1] if len(sizes) > 1 else 720), sizes[2] if len(sizes) > 2 else 300])
+
+    def _toggle_inspector_panel(self, checked: bool) -> None:
+        self.inspector_box.setVisible(bool(checked))
+        if checked:
+            sizes = self.workspace_splitter.sizes()
+            if sizes and len(sizes) > 2 and sizes[2] <= 8:
+                self.workspace_splitter.setSizes([sizes[0] if sizes else 260, max(640, sizes[1] if len(sizes) > 1 else 720), 300])
 
     def _validate_workflow_ui(self) -> None:
         report = validate_workflow_config(self.config, execution_mode="order")
-        text = report.to_text()
+        mismatch_text = self._graph_order_mismatch_text()
+        text = (
+            "执行模式：顺序\n"
+            "提示：canvas links 当前用于可视化与一致性检查，尚未完全决定实际执行顺序。\n"
+            f"{mismatch_text}\n"
+            f"{report.to_text()}"
+        )
 
         self.status_label.setText(report.summary())
         self._log(text)
@@ -453,6 +521,21 @@ class WorkflowPage(QWidget):
             ]
             lines.extend(f"- {issue.code}" for issue in report.issues[:6])
             self.qc_label.setText("\n".join(lines))
+        self.validation_report_requested.emit(text)
+
+    def _graph_order_mismatch_text(self) -> str:
+        ordered = [method.node_id for method in sorted(self.config.methods, key=lambda item: item.order)]
+        expected = {(left, right) for left, right in zip(ordered, ordered[1:])}
+        actual = {
+            (link.from_node, link.to_node)
+            for link in self.config.canvas_links
+            if getattr(link, "kind", "data") == "data"
+        }
+        if actual == expected:
+            return "graph/order mismatch：无"
+        missing = len(expected - actual)
+        extra = len(actual - expected)
+        return f"graph/order mismatch：存在（缺少 {missing} 条顺序连接，额外 {extra} 条画布连接）"
 
     def _on_canvas_links_changed(self, links: object) -> None:
         self.config.canvas_links = list(links) if isinstance(links, list) else []
@@ -535,6 +618,7 @@ class WorkflowPage(QWidget):
         if self.step_list.count() > 0:
             self.step_list.setCurrentRow(0)
         self._log(f"已加载模板: {self.config.name}")
+        QTimer.singleShot(0, self.workflow_canvas.fit_nodes)
 
     def _render_steps(self) -> None:
         self.config.ensure_canvas_links()
@@ -1037,8 +1121,48 @@ class WorkflowPage(QWidget):
         self._log("Preview: 快照导出请使用 Evidence / Export 入口")
 
     def _create_or_update_raw_input_node(self) -> None:
-        self._log("输入节点：当前版本使用项目 / 数据状态作为画布输入源。")
-        self.status_label.setText("项目 / 数据已作为输入源")
+        shape_text = (
+            f"{self._data_shape[0]} samples × {self._data_shape[1]} traces"
+            if self._data_shape
+            else "--"
+        )
+        params = {
+            "file": self._current_file or "--",
+            "shape": shape_text,
+            "metadata": self._metadata_status,
+        }
+        existing = next(
+            (method for method in self.config.methods if method.method_id == "raw_input"),
+            None,
+        )
+        if existing is None:
+            existing = WorkflowMethod(
+                category="输入",
+                stage_id="raw_input",
+                method_id="raw_input",
+                enabled=False,
+                hidden=False,
+                order=0,
+                params=params,
+                node_id="node_raw_input",
+            )
+            self.config.methods.insert(0, existing)
+            self.config.canvas_layout.setdefault("nodes", {})[existing.node_id] = {
+                "x": 40.0,
+                "y": 50.0,
+                "width": 300,
+                "height": 170,
+                "collapsed": False,
+            }
+        else:
+            existing.params = params
+        for index, method in enumerate(self.config.methods):
+            method.order = index
+        self.config.canvas_links = self.workflow_canvas.current_links()
+        self._render_steps()
+        self.step_list.setCurrentRow(self.config.methods.index(existing))
+        self._log(f"输入节点已更新：{shape_text}")
+        self.status_label.setText("Raw Input 节点已更新")
 
     def set_project_data_state(
         self,
@@ -1046,6 +1170,7 @@ class WorkflowPage(QWidget):
         file_path: str | None = None,
         shape: tuple[int, int] | None = None,
         metadata_status: str | None = None,
+        sidecar_files: dict[str, str | None] | None = None,
     ) -> None:
         if file_path is not None:
             self._current_file = str(file_path)
@@ -1053,6 +1178,8 @@ class WorkflowPage(QWidget):
             self._data_shape = shape
         if metadata_status is not None:
             self._metadata_status = str(metadata_status)
+        if sidecar_files is not None:
+            self._sidecar_files = dict(sidecar_files)
         file_text = self._current_file or "--"
         shape_text = (
             f"{self._data_shape[0]} samples × {self._data_shape[1]} traces"
@@ -1062,9 +1189,18 @@ class WorkflowPage(QWidget):
         self.project_file_label.setText(f"当前文件：{file_text}")
         self.project_shape_label.setText(f"数据尺寸：{shape_text}")
         self.project_metadata_label.setText(f"元数据：{self._metadata_status}")
+        raw_name = Path(self._current_file).name if self._current_file else "missing"
+        self.raw_status_label.setText(f"Raw：{'loaded ' + raw_name if self._current_file else 'missing'}")
+        self.rtk_status_label.setText(self._sidecar_status_text("RTK", "rtk"))
+        self.imu_status_label.setText(self._sidecar_status_text("IMU", "imu"))
+        self.agl_status_label.setText(self._sidecar_status_text("AGL", "altimeter"))
         self.qc_label.setText(
             f"QC\n数据尺寸：{shape_text}\n告警：--\n元数据：{self._metadata_status}"
         )
+
+    def _sidecar_status_text(self, label: str, key: str) -> str:
+        path = self._sidecar_files.get(key)
+        return f"{label}：loaded {Path(path).name}" if path else f"{label}：missing"
 
     def set_data_shape(self, shape: tuple[int, int] | None) -> None:
         self._data_shape = shape

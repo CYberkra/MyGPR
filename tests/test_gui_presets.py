@@ -348,11 +348,11 @@ def test_runtime_drawer_prefers_global_log_and_demotes_perf_metrics():
     app = _get_app()
     win = GPRGuiQt()
     try:
-        assert win.btn_toggle_global_log.text() == "Logs"
-        assert win.btn_toggle_quality.text() == "QC / Warnings"
-        assert win.btn_toggle_validation.text() == "Validation"
-        assert win.btn_export_evidence.text() == "Evidence"
-        assert win.btn_export_package.text() == "Export"
+        assert win.btn_toggle_global_log.text() == "日志"
+        assert win.btn_toggle_quality.text() == "QC / 告警"
+        assert win.btn_toggle_validation.text() == "验证"
+        assert win.btn_export_evidence.text() == "证据"
+        assert win.btn_export_package.text() == "导出"
 
         raw = np.arange(120, dtype=np.float32).reshape(10, 12) / 10.0
         win.shared_data.load_data(raw, path="demo.csv", source="test")

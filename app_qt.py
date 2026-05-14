@@ -945,6 +945,8 @@ class GPRGuiQt(QMainWindow):
         self.quality_box = self._create_quality_box()
         self.quality_box.setChecked(True)
         self.quality_box.setCheckable(False)
+        self.validation_box = self._create_workflow_validation_box()
+        self.evidence_box = self._create_evidence_export_box()
         self._runtime_panel_bar, self._runtime_panel_container = (
             self._create_runtime_panel_drawer()
         )
@@ -1031,37 +1033,43 @@ class GPRGuiQt(QMainWindow):
         bar_layout.setContentsMargins(0, 0, 0, 0)
         bar_layout.setSpacing(6)
 
-        title = QLabel("Runtime / Evidence")
+        title = QLabel("运行 / 证据")
         title.setProperty("class", "topInfoMeta")
         bar_layout.addWidget(title)
 
-        self.btn_toggle_global_log = QPushButton("Logs")
+        self.btn_toggle_global_log = QPushButton("日志")
         self.btn_toggle_global_log.setCheckable(True)
         self.btn_toggle_global_log.clicked.connect(
             lambda checked: self._show_runtime_panel("global_log" if checked else None)
         )
         bar_layout.addWidget(self.btn_toggle_global_log)
 
-        self.btn_toggle_quality = QPushButton("QC / Warnings")
+        self.btn_toggle_quality = QPushButton("QC / 告警")
         self.btn_toggle_quality.setCheckable(True)
         self.btn_toggle_quality.clicked.connect(
             lambda checked: self._show_runtime_panel("quality" if checked else None)
         )
         bar_layout.addWidget(self.btn_toggle_quality)
 
-        self.btn_toggle_validation = QPushButton("Validation")
+        self.btn_toggle_validation = QPushButton("验证")
         self.btn_toggle_validation.setCheckable(True)
         self.btn_toggle_validation.clicked.connect(
-            lambda checked: self._show_runtime_panel("quality" if checked else None)
+            lambda checked: self._show_runtime_panel("validation" if checked else None)
         )
         bar_layout.addWidget(self.btn_toggle_validation)
 
-        self.btn_export_evidence = QPushButton("Evidence")
-        self.btn_export_evidence.clicked.connect(self.export_replay_evidence_bundle)
+        self.btn_export_evidence = QPushButton("证据")
+        self.btn_export_evidence.setCheckable(True)
+        self.btn_export_evidence.clicked.connect(
+            lambda checked: self._show_runtime_panel("evidence" if checked else None)
+        )
         bar_layout.addWidget(self.btn_export_evidence)
 
-        self.btn_export_package = QPushButton("Export")
-        self.btn_export_package.clicked.connect(self.generate_report)
+        self.btn_export_package = QPushButton("导出")
+        self.btn_export_package.setCheckable(True)
+        self.btn_export_package.clicked.connect(
+            lambda checked: self._show_runtime_panel("export" if checked else None)
+        )
         bar_layout.addWidget(self.btn_export_package)
 
         btn_collapse = QPushButton("收起")
@@ -1078,12 +1086,16 @@ class GPRGuiQt(QMainWindow):
 
         drawer_layout.addWidget(self.global_log_box)
         drawer_layout.addWidget(self.quality_box)
+        drawer_layout.addWidget(self.validation_box)
+        drawer_layout.addWidget(self.evidence_box)
 
         self._runtime_panel_stack = drawer_layout
         self._runtime_panel_buttons = {
             "global_log": self.btn_toggle_global_log,
             "quality": self.btn_toggle_quality,
             "validation": self.btn_toggle_validation,
+            "evidence": self.btn_export_evidence,
+            "export": self.btn_export_package,
         }
         return bar, container
 
@@ -1098,8 +1110,7 @@ class GPRGuiQt(QMainWindow):
             btn.setChecked(key == panel_key)
             btn.blockSignals(False)
 
-        has_data = self.data is not None
-        if not has_data or panel_key is None:
+        if panel_key is None:
             if self._runtime_panel_container is not None:
                 self._runtime_panel_container.setVisible(False)
             return
@@ -1108,7 +1119,14 @@ class GPRGuiQt(QMainWindow):
             self._runtime_panel_container is not None
             and self._runtime_panel_stack is not None
         ):
-            index = 0 if panel_key == "global_log" else 1
+            index_by_key = {
+                "global_log": 0,
+                "quality": 1,
+                "validation": 2,
+                "evidence": 3,
+                "export": 3,
+            }
+            index = index_by_key.get(panel_key, 0)
             self._runtime_panel_stack.setCurrentIndex(index)
             self._runtime_panel_container.setVisible(True)
 
@@ -1253,6 +1271,57 @@ class GPRGuiQt(QMainWindow):
 
         return box
 
+    def _create_workflow_validation_box(self):
+        """创建工作流验证面板。"""
+        box = QGroupBox("工作流验证")
+        box.setToolTip("显示 Workflow Studio 的配置、连接和执行语义检查结果")
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(6)
+        self.workflow_validation_view = QTextEdit()
+        self.workflow_validation_view.setReadOnly(True)
+        self.workflow_validation_view.setPlaceholderText("点击 Workflow Studio 顶部“验证”后显示结果")
+        self.workflow_validation_view.setMinimumHeight(130)
+        self.workflow_validation_view.setPlainText(
+            "执行模式：顺序\n"
+            "提示：canvas links 当前用于可视化与一致性检查，尚未完全决定实际执行顺序。"
+        )
+        layout.addWidget(self.workflow_validation_view)
+        return box
+
+    def _create_evidence_export_box(self):
+        """创建 Evidence / Export 面板。"""
+        box = QGroupBox("证据与导出")
+        box.setToolTip("集中放置证据包、报告和导出入口")
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(6)
+        hint = QLabel(
+            "Evidence Package 用于复现实验链路；报告导出用于当前 B-scan 和处理历史。"
+        )
+        hint.setWordWrap(True)
+        hint.setProperty("class", "hintText")
+        layout.addWidget(hint)
+        row = QWidget()
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(8)
+        btn_evidence = QPushButton("导出 Evidence Package")
+        btn_evidence.clicked.connect(self.export_replay_evidence_bundle)
+        btn_report = QPushButton("生成报告")
+        btn_report.clicked.connect(self.generate_report)
+        row_layout.addWidget(btn_evidence)
+        row_layout.addWidget(btn_report)
+        row_layout.addStretch(1)
+        layout.addWidget(row)
+        return box
+
+    def update_workflow_validation_panel(self, text: str) -> None:
+        """Update the bottom validation drawer from Workflow Studio."""
+        if hasattr(self, "workflow_validation_view"):
+            self.workflow_validation_view.setPlainText(str(text))
+        self._show_runtime_panel("validation")
+
     def _relocate_basic_status_brief(self):
         """兼容旧调用：当前版本不再隐藏状态区，仅保留重排逻辑。"""
         return
@@ -1339,6 +1408,9 @@ class GPRGuiQt(QMainWindow):
         self.page_workflow.tuning_lab_requested.connect(self.open_tuning_lab)
         self.page_workflow.preview_settings_requested.connect(self.open_preview_settings)
         self.page_workflow.preview_large_requested.connect(self.open_preview_settings)
+        self.page_workflow.validation_report_requested.connect(
+            self.update_workflow_validation_panel
+        )
         self.page_workflow.export_evidence_requested.connect(
             self.export_replay_evidence_bundle
         )
@@ -1527,6 +1599,7 @@ class GPRGuiQt(QMainWindow):
                 file_path=self.data_path or "",
                 shape=shape,
                 metadata_status=metadata_status,
+                sidecar_files=dict(self._sidecar_files),
             )
         self._update_empty_state_and_brief()
         if reason == "loaded":
@@ -3360,14 +3433,9 @@ class GPRGuiQt(QMainWindow):
 
     def _sync_runtime_panels_visibility(self):
         """同步运行时面板可见性"""
-        has_data = self.data is not None
         if self._runtime_panel_bar is not None:
-            self._runtime_panel_bar.setVisible(has_data)
-        if not has_data:
-            self._show_runtime_panel(None)
-            if self._runtime_panel_container is not None:
-                self._runtime_panel_container.setVisible(False)
-        elif self._active_runtime_panel is not None:
+            self._runtime_panel_bar.setVisible(True)
+        if self._active_runtime_panel is not None:
             self._show_runtime_panel(self._active_runtime_panel)
 
     # ============ 数据加载 ============
@@ -4611,6 +4679,10 @@ class GPRGuiQt(QMainWindow):
             label_widget.setToolTip(normalized or "未选择")
         display = os.path.basename(normalized) if normalized else "未选择"
         self._log(f"{kind.upper()} sidecar：{display}")
+        if hasattr(self, "page_workflow"):
+            self.page_workflow.set_project_data_state(
+                sidecar_files=dict(self._sidecar_files)
+            )
 
     def _clear_sidecar_file(self, kind: str) -> None:
         """仅清除指定 RTK/IMU/高度计 sidecar 选择。"""

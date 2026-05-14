@@ -12,13 +12,14 @@ import numpy as np
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import QEvent, QPointF
-from PyQt6.QtWidgets import QApplication, QAbstractSpinBox, QCheckBox, QComboBox, QLineEdit, QSlider, QToolButton
+from PyQt6.QtWidgets import QApplication, QAbstractSpinBox, QCheckBox, QComboBox, QLineEdit, QSlider, QSplitter, QToolButton
 
 from core.app_paths import get_workflow_templates_dir
 from core.workflow_data import WorkflowConfigManager, WorkflowMethod, build_default_workflow_config
+from ui.bscan_viewer_dialog import BscanViewerDialog
 from ui.workflow_canvas_cards import WorkflowNodeCard, WorkflowNodeProxy
 from ui.workflow_canvas_cards import WorkflowCanvasView
-from ui.workflow_canvas_preview import BscanPreviewCard, BscanPreviewDialog, _downsample_for_preview
+from ui.workflow_canvas_preview import BscanPreviewCard, _downsample_for_preview
 from ui.gui_workflow_page import WorkflowPage
 
 
@@ -126,9 +127,12 @@ def test_compact_vertical_layout_uses_short_actions_and_step_labels():
         assert page.btn_run_selected.text() == "选中"
         assert page.btn_save_live.text() == "保存"
         assert page.btn_validate.text() == "验证"
+        assert page.btn_toggle_project.text() == "项目"
+        assert page.btn_toggle_inspector.text() == "属性"
         assert page.btn_open_tuning_lab.text() == "调参"
         assert page.realtime_check.text() == "实时"
         assert page.safe_check.text() == "安全"
+        assert page.execution_mode_label.text() == "执行：顺序"
         assert page.zoom_label.text() == "缩放 100%"
         assert page.template_menu_button.text() == "模板 ▾"
         assert page.project_panel.title() == "项目 / 数据"
@@ -138,6 +142,7 @@ def test_compact_vertical_layout_uses_short_actions_and_step_labels():
         assert page.detail_box.isHidden()
         assert page.step_list.isHidden()
         assert isinstance(page.workflow_canvas, WorkflowCanvasView)
+        assert isinstance(page.workspace_splitter, QSplitter)
         assert page.workflow_canvas._scene.proxies
 
         _select_method(page, "frequency_filter_1d")
@@ -147,6 +152,38 @@ def test_compact_vertical_layout_uses_short_actions_and_step_labels():
         assert "基础迹线域校正" in label
         assert "一维频域滤波" in label
         assert "filter_type=" not in label
+    finally:
+        page.close()
+        app.processEvents()
+
+
+def test_workflow_workspace_splitter_collapses_side_panels():
+    app = _get_app()
+    page = WorkflowPage()
+    try:
+        page.resize(1280, 800)
+        page.show()
+        app.processEvents()
+        assert isinstance(page.workspace_splitter, QSplitter)
+        sizes = page.workspace_splitter.sizes()
+        assert len(sizes) == 3
+        assert sizes[0] > 0
+        assert sizes[1] > 500
+        assert sizes[2] > 0
+
+        page.btn_toggle_project.click()
+        app.processEvents()
+        assert page.left_sidebar.isVisible() is False
+        page.btn_toggle_project.click()
+        app.processEvents()
+        assert page.left_sidebar.isVisible() is True
+
+        page.btn_toggle_inspector.click()
+        app.processEvents()
+        assert page.inspector_box.isVisible() is False
+        page.btn_toggle_inspector.click()
+        app.processEvents()
+        assert page.inspector_box.isVisible() is True
     finally:
         page.close()
         app.processEvents()
@@ -561,6 +598,31 @@ def test_canvas_context_menu_exposes_add_node_groups_and_palette_adds_node():
         app.processEvents()
 
 
+def test_project_data_panel_creates_raw_input_node_with_shape():
+    app = _get_app()
+    page = WorkflowPage()
+    try:
+        page.set_project_data_state(
+            file_path=r"C:\data\line9.csv",
+            shape=(501, 2378),
+            metadata_status="已同步",
+            sidecar_files={"rtk": r"C:\data\rtk.csv", "imu": None, "altimeter": None},
+        )
+        page._create_or_update_raw_input_node()
+        app.processEvents()
+
+        assert "Raw：loaded line9.csv" in page.raw_status_label.text()
+        assert "RTK：loaded rtk.csv" in page.rtk_status_label.text()
+        assert "IMU：missing" in page.imu_status_label.text()
+        raw_nodes = [method for method in page.config.methods if method.method_id == "raw_input"]
+        assert len(raw_nodes) == 1
+        assert raw_nodes[0].enabled is False
+        assert raw_nodes[0].params["shape"] == "501 samples × 2378 traces"
+    finally:
+        page.close()
+        app.processEvents()
+
+
 def test_workflow_port_labels_are_hidden_until_hover():
     app = _get_app()
     canvas = WorkflowCanvasView()
@@ -577,17 +639,26 @@ def test_workflow_port_labels_are_hidden_until_hover():
         app.processEvents()
 
 
-def test_bscan_preview_dialog_exposes_safe_zoom_controls():
+def test_bscan_viewer_dialog_exposes_axes_controls_and_empty_state():
     app = _get_app()
-    dialog = BscanPreviewDialog(np.random.default_rng(0).normal(size=(128, 256)), "test")
+    dialog = BscanViewerDialog(np.random.default_rng(0).normal(size=(128, 256)), "test")
     try:
         app.processEvents()
         assert dialog.btn_fit.text() == "适配"
         assert dialog.btn_100.text() == "100%"
-        assert dialog.image_label.pixmap() is not None
-        assert dialog.status_label.text().startswith("shape:")
+        assert dialog.cmap_combo.count() >= 2
+        assert dialog.info_label.text().startswith("shape:")
     finally:
         dialog.close()
+        app.processEvents()
+
+    empty = BscanViewerDialog(None, "empty")
+    try:
+        app.processEvents()
+        assert empty.has_data is False
+        assert "shape: --" in empty.info_label.text()
+    finally:
+        empty.close()
         app.processEvents()
 
 

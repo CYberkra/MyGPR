@@ -21,6 +21,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from ui.bscan_viewer_dialog import BscanViewerDialog
+
 
 def _coerce_bscan_array(data: Any) -> np.ndarray | None:
     """Return a numeric 2-D array suitable for image preview.
@@ -286,10 +288,8 @@ class BscanPreviewCard(QFrame):
         event.accept()
 
     def open_large_view(self) -> None:
-        if self.data_shape is None:
-            return
         parent = self.window() if isinstance(self.window(), QWidget) else None
-        dialog = BscanPreviewDialog(self._data, title=self._label, parent=parent)
+        dialog = BscanViewerDialog(self._data, title=self._label, parent=parent)
         dialog.exec()
 
     def _build(self) -> None:
@@ -329,11 +329,11 @@ class BscanPreviewCard(QFrame):
         self.thumbnail_label.setMinimumHeight(150)
         pixmap = _array_to_pixmap(self._data, width=320, height=180)
         if pixmap is None:
-            self.thumbnail_label.setText("等待工作流运行结果")
+            self.thumbnail_label.setText("暂无预览，请先运行工作流")
         else:
             self.thumbnail_label.setPixmap(pixmap)
         root.addWidget(self.thumbnail_label)
 
-        hint = QLabel("double click to open large" if shape is not None else "等待工作流运行结果")
+        hint = QLabel("双击打开大图" if shape is not None else "暂无预览，请先运行工作流")
         hint.setObjectName("previewMeta")
         root.addWidget(hint)
