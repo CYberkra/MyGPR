@@ -838,7 +838,7 @@ class WorkflowCanvasView(QGraphicsView):
     tuning_lab_requested = pyqtSignal(int)
     apply_best_params_requested = pyqtSignal(int)
     benchmark_node_requested = pyqtSignal(int)
-    preview_large_requested = pyqtSignal()
+    preview_large_requested = pyqtSignal(object, str)
     preview_settings_requested = pyqtSignal()
     preview_compare_requested = pyqtSignal()
     preview_snapshot_requested = pyqtSignal()
@@ -1139,7 +1139,7 @@ class WorkflowCanvasView(QGraphicsView):
     def _open_preview_proxy(self, proxy: WorkflowNodeProxy) -> None:
         card = proxy.widget()
         if isinstance(card, BscanPreviewCard):
-            card.open_large_view()
+            self.preview_large_requested.emit(card._data, card._label)
 
     def viewportEvent(self, event):  # noqa: N802 - Qt override
         event_type = event.type()
@@ -1149,7 +1149,7 @@ class WorkflowCanvasView(QGraphicsView):
             if proxy is not None:
                 card = proxy.widget()
                 if isinstance(card, BscanPreviewCard):
-                    card.open_large_view()
+                    self.preview_large_requested.emit(card._data, card._label)
                     event.accept()
                     return True
 
@@ -1502,6 +1502,7 @@ class WorkflowCanvasView(QGraphicsView):
 
         preview_card = BscanPreviewCard()
         preview_card.set_preview_data(self._preview_data, self._preview_label)
+        preview_card.large_view_requested.connect(self.preview_large_requested)
         preview_method = WorkflowMethod("preview", "bscan_preview", enabled=True, order=len(self._methods), node_id=PREVIEW_NODE_ID)
         preview_proxy = WorkflowNodeProxy(-1, preview_method)
         preview_proxy.output_port.hide()

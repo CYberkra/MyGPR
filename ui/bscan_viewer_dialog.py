@@ -56,10 +56,15 @@ def downsample_for_view(
 
 
 class BscanViewerDialog(QDialog):
-    """Stable large-view dialog for B-scan preview nodes."""
+    """Stable large-view dialog for B-scan preview nodes.
+
+    This dialog is always a top-level window (not embedded in graphics proxy widgets).
+    """
 
     def __init__(self, data: Any, title: str = "B-scan Preview", parent=None):
         super().__init__(parent)
+        self.setWindowFlag(Qt.WindowType.Window, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self._raw = coerce_bscan_array(data)
         self._view = downsample_for_view(self._raw) if self._raw is not None else None
         self._image = None
@@ -142,7 +147,7 @@ class BscanViewerDialog(QDialog):
     def redraw(self) -> None:
         self.axes.clear()
         if self._view is None:
-            self.info_label.setText("shape: --")
+            self.info_label.setText("数据尺寸：--")
             self.axes.text(
                 0.5,
                 0.5,
@@ -186,13 +191,13 @@ class BscanViewerDialog(QDialog):
             vmax=vmax,
             interpolation="nearest",
         )
-        self.axes.set_xlabel("Trace")
-        self.axes.set_ylabel("Sample / Time index")
+        self.axes.set_xlabel("轨迹")
+        self.axes.set_ylabel("采样 / 时间索引")
         rows, cols = self._view.shape
         raw_rows, raw_cols = self._raw.shape if self._raw is not None else self._view.shape
         self.info_label.setText(
-            f"shape: {raw_cols} traces × {raw_rows} samples"
-            f"    display: {cols} × {rows}"
+            f"数据尺寸：{raw_cols} 轨迹 × {raw_rows} 采样"
+            f"    显示：{cols} × {rows}"
         )
         self.fit_to_data(redraw_canvas=False)
         self.canvas.draw_idle()
@@ -226,7 +231,7 @@ class BscanViewerDialog(QDialog):
 
     def _on_motion(self, event) -> None:
         if self._view is None or event.inaxes is not self.axes:
-            self.cursor_label.setText("cursor: --")
+            self.cursor_label.setText("光标：--")
             return
         col = int(round(event.xdata)) if event.xdata is not None else -1
         row = int(round(event.ydata)) if event.ydata is not None else -1
@@ -234,7 +239,7 @@ class BscanViewerDialog(QDialog):
         if 0 <= row < rows and 0 <= col < cols:
             value = self._view[row, col]
             self.cursor_label.setText(
-                f"cursor: trace={col}, time/sample={row}, amplitude={float(value):.6g}"
+                f"光标：轨迹={col}, 时间/采样={row}, 幅值={float(value):.6g}"
             )
         else:
-            self.cursor_label.setText("cursor: --")
+            self.cursor_label.setText("光标：--")

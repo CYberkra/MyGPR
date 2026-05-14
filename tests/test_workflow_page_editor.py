@@ -647,7 +647,7 @@ def test_bscan_viewer_dialog_exposes_axes_controls_and_empty_state():
         assert dialog.btn_fit.text() == "适配"
         assert dialog.btn_100.text() == "100%"
         assert dialog.cmap_combo.count() >= 2
-        assert dialog.info_label.text().startswith("shape:")
+        assert dialog.info_label.text().startswith("数据尺寸：")
     finally:
         dialog.close()
         app.processEvents()
@@ -656,7 +656,7 @@ def test_bscan_viewer_dialog_exposes_axes_controls_and_empty_state():
     try:
         app.processEvents()
         assert empty.has_data is False
-        assert "shape: --" in empty.info_label.text()
+        assert "数据尺寸：--" in empty.info_label.text()
     finally:
         empty.close()
         app.processEvents()

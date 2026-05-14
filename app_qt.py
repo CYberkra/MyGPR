@@ -181,6 +181,7 @@ from ui.gui_quality_log import QualityLogPage
 from ui.gui_workflow_page import WorkflowPage
 from ui.loading_dialog import LoadingProgressDialog
 from ui.auto_tune_result_dialog import AutoTuneResultDialog
+from ui.bscan_viewer_dialog import BscanViewerDialog
 
 
 def _sanitize_qss(qss: str) -> str:
@@ -1407,7 +1408,7 @@ class GPRGuiQt(QMainWindow):
         self.page_workflow.import_sidecar_requested.connect(self._pick_sidecar_file)
         self.page_workflow.tuning_lab_requested.connect(self.open_tuning_lab)
         self.page_workflow.preview_settings_requested.connect(self.open_preview_settings)
-        self.page_workflow.preview_large_requested.connect(self.open_preview_settings)
+        self.page_workflow.preview_large_requested.connect(self.open_bscan_viewer)
         self.page_workflow.validation_report_requested.connect(
             self.update_workflow_validation_panel
         )
@@ -1544,6 +1545,18 @@ class GPRGuiQt(QMainWindow):
             self.page_advanced,
         )
         self._log("打开 Preview Viewer Controls")
+
+    def open_bscan_viewer(self, data=None, label="B-scan Preview") -> None:
+        """Open B-scan Viewer as a top-level independent window.
+
+        Args:
+            data: B-scan numpy array to display, or None for empty state.
+            label: Window title string.
+        """
+        dialog = BscanViewerDialog(data, title=label, parent=self)
+        dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
+        dialog.show()
+        self._log(f"打开 B-scan 大图窗口: {label}")
 
     def switch_to_legacy_mode(self):
         """聚焦到 Studio 主工作台。"""

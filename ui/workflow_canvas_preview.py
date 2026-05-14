@@ -7,21 +7,16 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import (
-    QDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
-    QPushButton,
-    QScrollArea,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
-
-from ui.bscan_viewer_dialog import BscanViewerDialog
 
 
 def _coerce_bscan_array(data: Any) -> np.ndarray | None:
@@ -99,118 +94,10 @@ def _array_to_pixmap(data: Any, *, width: int, height: int) -> QPixmap | None:
     )
 
 
-class BscanPreviewDialog(QDialog):
-    """Large B-scan viewer opened from a workflow preview node."""
-
-    def __init__(self, data: Any, title: str = "B-scan Preview", parent=None):
-        super().__init__(parent)
-        self._data = data
-        self._title = title or "B-scan Preview"
-        self._zoom = 1.0
-        self._fit_mode = True
-        self._base_pixmap: QPixmap | None = None
-        self.setWindowTitle(self._title)
-        self.resize(1080, 760)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(8)
-
-        header_row = QHBoxLayout()
-        title_label = QLabel(self._title)
-        title_label.setProperty("class", "sectionTitle")
-        header_row.addWidget(title_label, 1)
-
-        self.btn_fit = QPushButton("适配")
-        self.btn_100 = QPushButton("100%")
-        self.btn_zoom_out = QPushButton("-")
-        self.btn_zoom_in = QPushButton("+")
-        for btn in [self.btn_fit, self.btn_100, self.btn_zoom_out, self.btn_zoom_in]:
-            btn.setMinimumWidth(54)
-            header_row.addWidget(btn)
-        layout.addLayout(header_row)
-
-        self.status_label = QLabel("")
-        self.status_label.setProperty("class", "hintText")
-        layout.addWidget(self.status_label)
-
-        self.scroll = QScrollArea()
-        self.scroll.setWidgetResizable(False)
-        self.image_label = QLabel()
-        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.image_label.setSizePolicy(
-            QSizePolicy.Policy.Ignored,
-            QSizePolicy.Policy.Ignored,
-        )
-        self.scroll.setWidget(self.image_label)
-        layout.addWidget(self.scroll, 1)
-
-        self.btn_fit.clicked.connect(self.fit_to_window)
-        self.btn_100.clicked.connect(self.show_100)
-        self.btn_zoom_out.clicked.connect(lambda: self.set_zoom(self._zoom / 1.25))
-        self.btn_zoom_in.clicked.connect(lambda: self.set_zoom(self._zoom * 1.25))
-
-        self._load_pixmap()
-        self.fit_to_window()
-
-    def _load_pixmap(self) -> None:
-        array = _coerce_bscan_array(self._data)
-        if array is None:
-            self.image_label.setText("没有可显示的 B-scan 数据")
-            self.status_label.setText("shape: --")
-            return
-
-        self.status_label.setText(
-            f"shape: {array.shape[1]} traces × {array.shape[0]} samples"
-        )
-        self._base_pixmap = _array_to_pixmap(array, width=1600, height=1200)
-        if self._base_pixmap is None:
-            self.image_label.setText("没有可显示的 B-scan 数据")
-
-    def resizeEvent(self, event):  # noqa: N802 - Qt override
-        super().resizeEvent(event)
-        if self._fit_mode:
-            self._apply_pixmap()
-
-    def fit_to_window(self) -> None:
-        self._fit_mode = True
-        self._apply_pixmap()
-
-    def show_100(self) -> None:
-        self._fit_mode = False
-        self._zoom = 1.0
-        self._apply_pixmap()
-
-    def set_zoom(self, zoom: float) -> None:
-        self._fit_mode = False
-        self._zoom = max(0.1, min(8.0, float(zoom)))
-        self._apply_pixmap()
-
-    def _apply_pixmap(self) -> None:
-        if self._base_pixmap is None or self._base_pixmap.isNull():
-            return
-        if self._fit_mode:
-            viewport = self.scroll.viewport().size()
-            target = self._base_pixmap.scaled(
-                max(1, viewport.width() - 8),
-                max(1, viewport.height() - 8),
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-            self._zoom = target.width() / max(1, self._base_pixmap.width())
-        else:
-            target = self._base_pixmap.scaled(
-                max(1, int(self._base_pixmap.width() * self._zoom)),
-                max(1, int(self._base_pixmap.height() * self._zoom)),
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-        self.image_label.setPixmap(target)
-        self.image_label.resize(target.size())
-
-
 class BscanPreviewCard(QFrame):
     """Canvas card that previews the latest B-scan output."""
+
+    large_view_requested = pyqtSignal(object, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -268,8 +155,6 @@ class BscanPreviewCard(QFrame):
         try:
             self._build()
         except Exception:
-            # Preview rendering must never take down the whole GUI. A later
-            # refresh can still recover when valid data is supplied.
             self._data = None
             self._build()
 
@@ -284,13 +169,14 @@ class BscanPreviewCard(QFrame):
         self.style().polish(self)
 
     def mouseDoubleClickEvent(self, event):  # noqa: N802 - Qt override
-        self.open_large_view()
+        self.request_large_view()
         event.accept()
 
+    def request_large_view(self) -> None:
+        self.large_view_requested.emit(self._data, self._label)
+
     def open_large_view(self) -> None:
-        parent = self.window() if isinstance(self.window(), QWidget) else None
-        dialog = BscanViewerDialog(self._data, title=self._label, parent=parent)
-        dialog.exec()
+        self.request_large_view()
 
     def _build(self) -> None:
         old_layout = self.layout()

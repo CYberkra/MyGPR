@@ -77,7 +77,7 @@ class WorkflowPage(QWidget):
     import_sidecar_requested = pyqtSignal(str)
     tuning_lab_requested = pyqtSignal(object)
     preview_settings_requested = pyqtSignal()
-    preview_large_requested = pyqtSignal()
+    preview_large_requested = pyqtSignal(object, str)
     export_evidence_requested = pyqtSignal()
     validation_report_requested = pyqtSignal(str)
 
@@ -1113,7 +1113,11 @@ class WorkflowPage(QWidget):
         self._log(f"评估此节点: {get_method_display_name(method.method_id)}")
 
     def _request_preview_compare(self) -> None:
-        self.preview_large_requested.emit()
+        if hasattr(self.workflow_canvas, "_preview_data"):
+            self.preview_large_requested.emit(
+                self.workflow_canvas._preview_data,
+                self.workflow_canvas._preview_label
+            )
         self._log("Preview: 打开大图/对比查看入口")
 
     def _request_preview_snapshot(self) -> None:
