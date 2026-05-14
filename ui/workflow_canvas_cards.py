@@ -166,6 +166,7 @@ class WorkflowNodeCard(QFrame):
             idx = self.method_combo.findData(self.method.method_id)
             self.method_combo.setCurrentIndex(max(idx, 0))
             self.method_combo.currentIndexChanged.connect(self._on_method_changed)
+            self._install_wheel_guard(self.method_combo)
             method_row.addWidget(self.method_combo, 1)
 
             self.hidden_check = QCheckBox("隐藏")
@@ -193,6 +194,7 @@ class WorkflowNodeCard(QFrame):
                     label = QLabel(str(meta.get("label", name)))
                     label.setWordWrap(True)
                     control, getter = self._create_param_control(meta)
+                    self._install_wheel_guard(control)
                     tooltip = str(meta.get("tooltip", ""))
                     if tooltip:
                         label.setToolTip(tooltip)
@@ -260,6 +262,26 @@ class WorkflowNodeCard(QFrame):
         if not self.method.enabled:
             return "状态: 停用"
         return "状态: 启用"
+
+    def _install_wheel_guard(self, control: QWidget) -> None:
+        """Swallow wheel events on embedded editors inside the graphics proxy."""
+        guarded_types = (QAbstractSpinBox, QComboBox)
+        targets: list[QWidget] = []
+        if isinstance(control, guarded_types):
+            targets.append(control)
+        targets.extend(control.findChildren(guarded_types))
+        for target in targets:
+            target.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+            for widget in [target, *target.findChildren(QWidget)]:
+                widget.setProperty("workflowWheelGuard", True)
+                widget.installEventFilter(self)
+
+    def eventFilter(self, watched, event):  # noqa: N802 - Qt override
+        if event.type() == QEvent.Type.Wheel and isinstance(watched, QWidget):
+            if bool(watched.property("workflowWheelGuard")):
+                event.accept()
+                return True
+        return super().eventFilter(watched, event)
 
     def _param_summary(self, max_items: int = 3) -> str:
         if not self.method.params:

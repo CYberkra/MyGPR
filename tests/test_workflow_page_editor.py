@@ -11,8 +11,8 @@ import numpy as np
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtCore import QPointF
-from PyQt6.QtWidgets import QApplication, QComboBox
+from PyQt6.QtCore import QEvent, QPointF
+from PyQt6.QtWidgets import QApplication, QAbstractSpinBox, QComboBox, QLineEdit
 
 from core.app_paths import get_workflow_templates_dir
 from core.workflow_data import WorkflowConfigManager, build_default_workflow_config
@@ -265,6 +265,45 @@ def test_workflow_bscan_preview_downsamples_large_arrays():
     assert preview.shape[0] <= 900
     assert preview.shape[1] <= 1400
     assert preview.dtype == raw.dtype
+
+
+def test_workflow_node_card_swallows_wheel_on_embedded_editors():
+    app = _get_app()
+    config = build_default_workflow_config("high_quality_uav_gpr")
+    method = None
+    for candidate in config.methods:
+        probe = WorkflowNodeCard(0, candidate)
+        try:
+            if probe.findChild(QAbstractSpinBox) is not None:
+                method = candidate
+                break
+        finally:
+            probe.close()
+    assert method is not None
+
+    card = WorkflowNodeCard(0, method)
+    try:
+        spin = card.findChild(QAbstractSpinBox)
+        assert spin is not None
+
+        wheel_event = QEvent(QEvent.Type.Wheel)
+        assert card.eventFilter(spin, wheel_event) is True
+        assert wheel_event.isAccepted()
+
+        editor = spin.findChild(QLineEdit)
+        assert editor is not None
+        editor_wheel_event = QEvent(QEvent.Type.Wheel)
+        assert card.eventFilter(editor, editor_wheel_event) is True
+        assert editor_wheel_event.isAccepted()
+
+        combo = card.findChild(QComboBox)
+        assert combo is not None
+        combo_wheel_event = QEvent(QEvent.Type.Wheel)
+        assert card.eventFilter(combo, combo_wheel_event) is True
+        assert combo_wheel_event.isAccepted()
+    finally:
+        card.close()
+        app.processEvents()
 
 
 def test_workflow_canvas_view_drag_hit_testing_keeps_controls_interactive():
