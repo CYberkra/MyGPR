@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import QApplication, QComboBox
 
 from core.app_paths import get_workflow_templates_dir
 from core.workflow_data import WorkflowConfigManager
+from ui.workflow_canvas_cards import WorkflowCanvasView
 from ui.gui_workflow_page import WorkflowPage
 
 
@@ -125,7 +126,10 @@ def test_compact_vertical_layout_uses_short_actions_and_step_labels():
         assert page.btn_restore_default.text() == "默认"
         assert page.btn_add_step.text() == "添加"
         assert page.detail_box.title() == "选中步骤参数"
-        assert page.detail_box.parentWidget() is page.step_panel
+        assert page.detail_box.isHidden()
+        assert page.step_list.isHidden()
+        assert isinstance(page.workflow_canvas, WorkflowCanvasView)
+        assert page.workflow_canvas._scene.proxies
 
         _select_method(page, "frequency_filter_1d")
         app.processEvents()
@@ -134,6 +138,33 @@ def test_compact_vertical_layout_uses_short_actions_and_step_labels():
         assert "基础迹线域校正" in label
         assert "一维频域滤波" in label
         assert "filter_type=" not in label
+    finally:
+        page.close()
+        app.processEvents()
+
+
+def test_workflow_canvas_node_selection_and_actions_sync_hidden_list():
+    app = _get_app()
+    page = WorkflowPage()
+    emitted: list[tuple[list, bool]] = []
+    page.workflow_run_requested.connect(lambda methods, realtime: emitted.append((methods, realtime)))
+    try:
+        target_row = _select_method(page, "sec_gain")
+        app.processEvents()
+
+        assert page.workflow_canvas._current_row == target_row
+        assert any(proxy.row == target_row for proxy in page.workflow_canvas._scene.proxies)
+
+        page.workflow_canvas.node_selected.emit(0)
+        app.processEvents()
+        assert page.step_list.currentRow() == 0
+
+        page.workflow_canvas.run_node_requested.emit(0)
+        app.processEvents()
+        assert emitted
+        assert emitted[-1][1] is False
+        assert len(emitted[-1][0]) == 1
+        assert emitted[-1][0][0].method_id == page.config.methods[0].method_id
     finally:
         page.close()
         app.processEvents()

@@ -43,6 +43,7 @@ from core.workflow_data import (
     build_default_workflow_config,
     get_config_manager,
 )
+from ui.workflow_canvas_cards import WorkflowCanvasView
 
 
 HEAVY_REALTIME_METHODS = {
@@ -200,7 +201,10 @@ class WorkflowPage(QWidget):
         step_panel_layout = QVBoxLayout(step_panel)
         step_panel_layout.setContentsMargins(0, 0, 0, 0)
         step_panel_layout.setSpacing(8)
-        step_panel_layout.addWidget(self.step_list, 1)
+        self.step_list.hide()
+        self.workflow_canvas = WorkflowCanvasView()
+        self.workflow_canvas.setToolTip("Ctrl+滚轮缩放；中键拖动画布；点击卡片选择步骤。")
+        step_panel_layout.addWidget(self.workflow_canvas, 1)
         step_action_row = QWidget()
         step_action_layout = QHBoxLayout(step_action_row)
         step_action_layout.setContentsMargins(0, 0, 0, 0)
@@ -256,7 +260,8 @@ class WorkflowPage(QWidget):
         detail_layout.addWidget(self.stage_warning)
         detail_layout.addWidget(method_row)
         detail_layout.addWidget(self.param_scroll, 1)
-        step_panel_layout.insertWidget(1, self.detail_box)
+        self.detail_box.hide()
+        self.detail_box.setToolTip("选中步骤的常用参数已经集成在画布节点卡片中。")
 
         self.log_box = QGroupBox("预览与质量提示")
         log_layout = QVBoxLayout(self.log_box)
@@ -280,6 +285,12 @@ class WorkflowPage(QWidget):
 
         self.step_list.currentRowChanged.connect(self._on_step_selected)
         self.step_list.order_changed.connect(self._on_order_changed)
+        self.workflow_canvas.node_selected.connect(self._select_step_row)
+        self.workflow_canvas.node_changed.connect(self._on_canvas_node_changed)
+        self.workflow_canvas.run_node_requested.connect(self._run_canvas_node)
+        self.workflow_canvas.run_from_node_requested.connect(self._run_from_canvas_node)
+        self.workflow_canvas.duplicate_node_requested.connect(self._duplicate_canvas_node)
+        self.workflow_canvas.remove_node_requested.connect(self._remove_canvas_node)
         self.method_combo.currentIndexChanged.connect(self._on_method_changed)
         self.enabled_check.stateChanged.connect(self._on_step_flags_changed)
         self.hidden_check.stateChanged.connect(self._on_step_flags_changed)
@@ -342,6 +353,8 @@ class WorkflowPage(QWidget):
             item.setData(Qt.ItemDataRole.UserRole, method)
             self.step_list.addItem(item)
         self.step_list.blockSignals(False)
+        self.workflow_canvas.set_methods(self.config.methods)
+        self.workflow_canvas.set_selected_row(self.step_list.currentRow())
         self._update_step_buttons()
 
     def _format_step_text(self, method: WorkflowMethod) -> str:
@@ -377,6 +390,7 @@ class WorkflowPage(QWidget):
 
     def _on_step_selected(self, row: int) -> None:
         method = self._selected_method()
+        self.workflow_canvas.set_selected_row(int(row))
         self._update_step_buttons()
         if method is None:
             return
@@ -607,6 +621,7 @@ class WorkflowPage(QWidget):
             method.order = row
             self.step_list.item(row).setText(self._format_step_text(method))
             self._sync_order_from_list()
+            self.workflow_canvas.update_node(row)
 
     def _on_order_changed(self) -> None:
         self._sync_order_from_list()
@@ -621,6 +636,8 @@ class WorkflowPage(QWidget):
                 methods.append(method)
                 self.step_list.item(row).setText(self._format_step_text(method))
         self.config.methods = methods
+        self.workflow_canvas.set_methods(self.config.methods)
+        self.workflow_canvas.set_selected_row(self.step_list.currentRow())
         self._update_step_buttons()
 
     def _on_realtime_changed(self) -> None:
@@ -716,6 +733,32 @@ class WorkflowPage(QWidget):
     def get_enabled_methods(self) -> list[WorkflowMethod]:
         self._sync_order_from_list()
         return [deepcopy(method) for method in self.config.get_enabled_methods()]
+
+    def _select_step_row(self, row: int) -> None:
+        row = int(row)
+        if 0 <= row < self.step_list.count():
+            self.step_list.setCurrentRow(row)
+
+    def _on_canvas_node_changed(self, row: int) -> None:
+        self._select_step_row(row)
+        self._refresh_selected_item()
+        self._queue_realtime_run()
+
+    def _run_canvas_node(self, row: int) -> None:
+        self._select_step_row(row)
+        self.request_selected_run()
+
+    def _run_from_canvas_node(self, row: int) -> None:
+        self._select_step_row(row)
+        self.request_run_from_current()
+
+    def _duplicate_canvas_node(self, row: int) -> None:
+        self._select_step_row(row)
+        self.duplicate_current_step()
+
+    def _remove_canvas_node(self, row: int) -> None:
+        self._select_step_row(row)
+        self.remove_current_step()
 
     def set_data_shape(self, shape: tuple[int, int] | None) -> None:
         self._data_shape = shape
@@ -872,6 +915,7 @@ class WorkflowPage(QWidget):
         self.config.methods = methods
         self._render_steps()
         self.step_list.setCurrentRow(row)
+        self.workflow_canvas.set_selected_row(row)
         self._queue_realtime_run()
 
     def _make_default_step(self, stage_id: str = "", category: str = "") -> WorkflowMethod:
