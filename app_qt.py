@@ -868,14 +868,15 @@ class GPRGuiQt(QMainWindow):
         )
         self.control_tabs.setTabToolTip(idx_basic, "日常连续处理操作")
 
-        # 页面2: 工作流
+        # 主工作区: 工作流画布
+        # 工作流不再作为左侧控制面板的一个标签页，而是成为中央主画布。
         self.page_workflow = WorkflowPage(self)
-        idx_workflow = self.control_tabs.addTab(
-            self.page_workflow, FluentIcon.APPLICATION.icon(), "工作流"
+        self.page_workflow.setObjectName("workflowStudioPage")
+        self.page_workflow.setToolTip(
+            "主工作区：节点画布、卡片内参数和 B-scan Preview 都在这里完成。"
         )
-        self.control_tabs.setTabToolTip(idx_workflow, "可重排、可隐藏、可实时预览的标准处理链")
 
-        # 页面3: 调参与实验
+        # 页面2: 调参与实验
         self.page_auto_tune = AutoTunePage(self)
         idx_auto_tune = self.control_tabs.addTab(
             self.page_auto_tune, FluentIcon.SETTING.icon(), "调参与实验"
@@ -929,6 +930,11 @@ class GPRGuiQt(QMainWindow):
         status_layout.addWidget(self.version_label)
         right_layout.addWidget(status_bar)
 
+        # 工作流 Studio 主画布：以后工作流是主界面，不再挤在控制标签页里。
+        right_layout.addWidget(self.page_workflow, 1)
+
+        # 旧 Matplotlib B-scan 画布暂时保留给历史绘图逻辑和大图/对比逻辑，
+        # 但不再常驻主界面；画布内的 B-scan Preview 节点承担日常预览职责。
         # 绘图区域
         self.fig = Figure(figsize=(9.5, 6.4), dpi=100)
         self._main_ax = self.fig.add_subplot(111)
@@ -977,6 +983,7 @@ class GPRGuiQt(QMainWindow):
         self._plot_coord_label = QLabel("坐标: --")
         self._plot_coord_label.setProperty("class", "hintText")
         plot_toolbar_layout.addWidget(self._plot_coord_label)
+        plot_toolbar_row.setVisible(False)
         right_layout.addWidget(plot_toolbar_row)
 
         # 空状态卡片
@@ -987,7 +994,8 @@ class GPRGuiQt(QMainWindow):
         self.empty_state_card = self._create_empty_state_card()
         plot_stack_layout.addWidget(self.empty_state_card)
         plot_stack_layout.addWidget(self.canvas)
-        right_layout.addWidget(self.plot_stack_host, 1)
+        self.plot_stack_host.setVisible(False)
+        right_layout.addWidget(self.plot_stack_host)
 
         # 运行信息抽屉：默认收起，避免长期压缩主绘图区。
         self.global_log_box = self._create_global_log_box()
@@ -1485,8 +1493,8 @@ class GPRGuiQt(QMainWindow):
                 self.control_tabs.setCurrentWidget(self.page_basic)
                 self.status_label.setText("日常处理界面")
             elif tab_key == "workflow" and self.page_workflow is not None:
-                self.control_tabs.setCurrentWidget(self.page_workflow)
-                self.status_label.setText("工作流")
+                # 工作流画布已经常驻主工作区，不再切换到控制面板标签页。
+                self.status_label.setText("工作流主画布")
             elif tab_key == "auto_tune" and self.page_auto_tune is not None:
                 self.control_tabs.setCurrentWidget(self.page_auto_tune)
                 self.status_label.setText("调参与实验")
@@ -1504,7 +1512,7 @@ class GPRGuiQt(QMainWindow):
 
             tab_name = {
                 "basic": "日常处理",
-                "workflow": "工作流",
+                "workflow": "工作流主画布",
                 "auto_tune": "调参与实验",
                 "advanced": "显示与对比",
                 "quality": "质量与导出",
@@ -1512,7 +1520,7 @@ class GPRGuiQt(QMainWindow):
             self._log(f"切换到: {tab_name}")
 
     def switch_to_workflow_tab(self):
-        """切换到工作流设置页。"""
+        """聚焦到中央工作流主画布。"""
         self.switch_to_main_mode("workflow")
 
     def _on_shared_data_changed(self, payload: dict):

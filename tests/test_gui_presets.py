@@ -328,7 +328,7 @@ def test_phase2_tabs_expose_prioritized_group_hierarchy_and_bridge():
         app.processEvents()
 
 
-def test_auto_tune_workflow_bridge_switches_to_workflow_tab():
+def test_auto_tune_workflow_bridge_focuses_workflow_workspace():
     app = _get_app()
     win = GPRGuiQt()
     try:
@@ -336,7 +336,9 @@ def test_auto_tune_workflow_bridge_switches_to_workflow_tab():
         win.page_auto_tune.btn_open_workflow.click()
         app.processEvents()
         assert win._content_stack.currentWidget() is win._main_content_widget
-        assert win.control_tabs.currentWidget() is win.page_workflow
+        assert win.control_tabs.currentWidget() is win.page_basic
+        assert win.status_label.text() == "工作流主画布"
+        assert win.page_workflow.objectName() == "workflowStudioPage"
     finally:
         win.close()
         app.processEvents()

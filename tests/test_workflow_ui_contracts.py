@@ -26,12 +26,13 @@ def _row_for_method(win: GPRGuiQt, method_id: str) -> int:
     raise AssertionError(f"workflow method not found: {method_id}")
 
 
-def test_workflow_tab_exposes_default_uavgpr_chain_and_agc_warning():
+def test_workflow_workspace_exposes_default_uavgpr_chain_and_agc_warning():
     app = _get_app()
     win = GPRGuiQt()
     try:
         labels = [win.control_tabs.tabText(i) for i in range(win.control_tabs.count())]
-        assert labels[1] == "工作流"
+        assert "工作流" not in labels
+        assert win.page_workflow.objectName() == "workflowStudioPage"
 
         default_methods = [method.method_id for method in win.page_workflow.config.methods]
         assert default_methods[:4] == [
