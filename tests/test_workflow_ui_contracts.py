@@ -135,3 +135,23 @@ def test_workflow_realtime_run_keeps_formal_history_until_saved(monkeypatch):
     finally:
         win.close()
         app.processEvents()
+
+
+def test_partial_header_info_status_falls_back_to_data_shape():
+    app = _get_app()
+    win = GPRGuiQt()
+    try:
+        raw = np.arange(24, dtype=np.float32).reshape(6, 4)
+        win.shared_data.load_data(
+            raw,
+            path="demo.csv",
+            header_info={"total_time_ns": 60.0},
+            source="test",
+        )
+        app.processEvents()
+
+        assert "采样:6" in win.status_label.text()
+        assert "道数:4" in win.status_label.text()
+    finally:
+        win.close()
+        app.processEvents()

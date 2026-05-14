@@ -3028,12 +3028,21 @@ class GPRGuiQt(QMainWindow):
 
     def _build_status_text(self) -> str:
         """构建顶部状态栏文本。"""
+        info = self.header_info or {}
+        data_shape = getattr(self.data, "shape", None)
+        samples = info.get("a_scan_length")
+        if samples is None and data_shape is not None and len(data_shape) >= 1:
+            samples = data_shape[0]
+        traces = info.get("num_traces")
+        if traces is None and data_shape is not None and len(data_shape) >= 2:
+            traces = data_shape[1]
         base = (
             f"{os.path.basename(self.data_path) if self.data_path else 'data'} | "
-            f"采样:{self.header_info['a_scan_length']} 道数:{self.header_info['num_traces']}"
+            f"采样:{samples if samples is not None else '--'} "
+            f"道数:{traces if traces is not None else '--'}"
         )
-        if self.header_info and self.header_info.get("has_airborne_metadata"):
-            base += f" | 距离:{float(self.header_info.get('track_length_m', 0.0)):.1f}m"
+        if info.get("has_airborne_metadata"):
+            base += f" | 距离:{float(info.get('track_length_m', 0.0)):.1f}m"
         return base
 
     def _build_data_brief_text(self) -> str:

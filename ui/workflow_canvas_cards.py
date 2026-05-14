@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from PyQt6.QtCore import QEvent, QPoint, QPointF, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QPoint, QPointF, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QPainterPath, QPen
 from PyQt6.QtWidgets import (
     QAbstractButton,
@@ -459,6 +459,7 @@ class WorkflowCanvasView(QGraphicsView):
         self._preview_data = None
         self._preview_label = "Workflow Output"
         self._preview_proxy: WorkflowNodeProxy | None = None
+        self._rebuild_pending = False
         self._compact_cards = False
         self._compact_threshold = 0.62
         self._normal_threshold = 0.78
@@ -486,16 +487,30 @@ class WorkflowCanvasView(QGraphicsView):
 
     def update_node(self, row: int) -> None:
         if 0 <= int(row) < len(self._methods):
-            self._rebuild()
+            self._schedule_rebuild()
+
+    def _schedule_rebuild(self) -> None:
+        if self._rebuild_pending:
+            return
+        self._rebuild_pending = True
+        QTimer.singleShot(0, self._run_scheduled_rebuild)
+
+    def _run_scheduled_rebuild(self) -> None:
+        self._rebuild_pending = False
+        self._rebuild()
 
     def set_preview_data(self, data, label: str = "Workflow Output") -> None:
         self._preview_data = data
         self._preview_label = label or "Workflow Output"
         card = self._preview_card()
         if card is not None:
-            card.set_preview_data(self._preview_data, self._preview_label)
-            card.set_compact(self._compact_cards)
-            self._scene.update_edges()
+            try:
+                card.set_preview_data(self._preview_data, self._preview_label)
+                card.set_compact(self._compact_cards)
+                self._scene.update_edges()
+            except RuntimeError:
+                self._preview_proxy = None
+                self._schedule_rebuild()
 
     def _preview_card(self) -> BscanPreviewCard | None:
         if self._preview_proxy is None:
@@ -582,18 +597,26 @@ class WorkflowCanvasView(QGraphicsView):
             and event.buttons() & Qt.MouseButton.LeftButton
         ):
             scene_pos = self.mapToScene(self._event_view_pos(event))
-            self._drag_proxy.setPos(scene_pos - self._drag_scene_offset)
-            self._scene.update_edges()
+            try:
+                self._drag_proxy.setPos(scene_pos - self._drag_scene_offset)
+                self._scene.update_edges()
+            except RuntimeError:
+                self._clear_drag_state()
             event.accept()
             return True
 
         if event_type == QEvent.Type.MouseButtonRelease and self._drag_proxy is not None:
-            self._drag_proxy = None
-            self.setCursor(Qt.CursorShape.ArrowCursor)
+            self._clear_drag_state()
             event.accept()
             return True
 
         return super().viewportEvent(event)
+
+    def _clear_drag_state(self) -> None:
+        self._drag_proxy = None
+        self._drag_scene_offset = QPointF()
+        if not self._panning:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
 
     def wheelEvent(self, event):  # noqa: N802 - Qt override
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
@@ -660,6 +683,7 @@ class WorkflowCanvasView(QGraphicsView):
         self._scene.update_edges()
 
     def _rebuild(self) -> None:
+        self._clear_drag_state()
         self._scene.clear()
         self._scene.proxies.clear()
         self._scene.edges.clear()

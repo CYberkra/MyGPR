@@ -236,6 +236,27 @@ def test_workflow_canvas_preview_node_updates_from_output_data():
         app.processEvents()
 
 
+def test_workflow_canvas_update_node_defers_scene_rebuild():
+    app = _get_app()
+    canvas = WorkflowCanvasView()
+    calls: list[str] = []
+    try:
+        config = build_default_workflow_config("high_quality_uav_gpr")
+        canvas.set_methods(config.methods)
+
+        canvas._rebuild = lambda: calls.append("rebuild")
+        canvas.update_node(0)
+
+        assert calls == []
+        assert canvas._rebuild_pending is True
+        app.processEvents()
+        assert calls == ["rebuild"]
+        assert canvas._rebuild_pending is False
+    finally:
+        canvas.close()
+        app.processEvents()
+
+
 def test_workflow_bscan_preview_downsamples_large_arrays():
     raw = np.arange(2_000 * 3_000, dtype=np.float32).reshape(2_000, 3_000)
 
