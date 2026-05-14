@@ -6,9 +6,11 @@ from __future__ import annotations
 
 from typing import Callable
 
-from PyQt6.QtCore import QPoint, QPointF, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QPoint, QPointF, Qt, pyqtSignal
 from PyQt6.QtGui import QPainterPath, QPen
 from PyQt6.QtWidgets import (
+    QAbstractButton,
+    QAbstractSpinBox,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -386,11 +388,90 @@ class WorkflowNodeProxy(QGraphicsProxyWidget):
     def __init__(self, row: int, parent=None):
         super().__init__(parent)
         self.row = int(row)
+        self._dragging = False
+        self._last_drag_global_pos = QPoint()
+        self._drag_filter_widgets: list[QWidget] = []
         self.setFlags(
             QGraphicsProxyWidget.GraphicsItemFlag.ItemIsMovable
             | QGraphicsProxyWidget.GraphicsItemFlag.ItemIsSelectable
             | QGraphicsProxyWidget.GraphicsItemFlag.ItemSendsGeometryChanges
         )
+
+    def setWidget(self, widget):  # noqa: N802 - Qt override
+        result = super().setWidget(widget)
+        self._install_drag_event_filters(widget)
+        return result
+
+    def _install_drag_event_filters(self, widget: QWidget | None) -> None:
+        self._drag_filter_widgets.clear()
+        if widget is None:
+            return
+        widget.installEventFilter(self)
+        self._drag_filter_widgets.append(widget)
+        for child in widget.findChildren(QWidget):
+            if not self._is_interactive_widget(child):
+                child.installEventFilter(self)
+                self._drag_filter_widgets.append(child)
+
+    def _is_interactive_widget(self, widget: QWidget) -> bool:
+        return isinstance(
+            widget,
+            (
+                QAbstractButton,
+                QAbstractSpinBox,
+                QComboBox,
+                QLineEdit,
+            ),
+        )
+
+    def _event_global_pos(self, event) -> QPoint:
+        if hasattr(event, "globalPosition"):
+            return event.globalPosition().toPoint()
+        return event.globalPos()
+
+    def _scene_scale(self) -> float:
+        scene = self.scene()
+        if scene is None or not scene.views():
+            return 1.0
+        scale = scene.views()[0].transform().m11()
+        return scale if abs(scale) > 1.0e-9 else 1.0
+
+    def eventFilter(self, watched, event):  # noqa: N802 - Qt override
+        if isinstance(watched, QWidget) and self._is_interactive_widget(watched):
+            return False
+
+        event_type = event.type()
+        if event_type == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+            self._dragging = True
+            self._last_drag_global_pos = self._event_global_pos(event)
+            card = self.widget()
+            if isinstance(card, WorkflowNodeCard):
+                card.selected.emit(self.row)
+            event.accept()
+            return True
+
+        if (
+            event_type == QEvent.Type.MouseMove
+            and self._dragging
+            and event.buttons() & Qt.MouseButton.LeftButton
+        ):
+            pos = self._event_global_pos(event)
+            delta = pos - self._last_drag_global_pos
+            self._last_drag_global_pos = pos
+            scale = self._scene_scale()
+            self.moveBy(delta.x() / scale, delta.y() / scale)
+            scene = self.scene()
+            if isinstance(scene, WorkflowCanvasScene):
+                scene.update_edges()
+            event.accept()
+            return True
+
+        if event_type == QEvent.Type.MouseButtonRelease and event.button() == Qt.MouseButton.LeftButton:
+            self._dragging = False
+            event.accept()
+            return True
+
+        return super().eventFilter(watched, event)
 
     def itemChange(self, change, value):  # noqa: N802 - Qt override
         result = super().itemChange(change, value)

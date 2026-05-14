@@ -9,11 +9,11 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtWidgets import QApplication, QComboBox
+from PyQt6.QtWidgets import QApplication, QComboBox, QLineEdit, QPushButton
 
 from core.app_paths import get_workflow_templates_dir
 from core.workflow_data import WorkflowConfigManager, build_default_workflow_config
-from ui.workflow_canvas_cards import WorkflowNodeCard
+from ui.workflow_canvas_cards import WorkflowNodeCard, WorkflowNodeProxy
 from ui.workflow_canvas_cards import WorkflowCanvasView
 from ui.gui_workflow_page import WorkflowPage
 
@@ -200,6 +200,27 @@ def test_workflow_canvas_zoom_lod_switches_card_compact_mode():
         assert not any(card.compact for card in cards)
     finally:
         canvas.close()
+        app.processEvents()
+
+
+def test_workflow_node_proxy_installs_drag_filters_only_on_noninteractive_widgets():
+    app = _get_app()
+    method = build_default_workflow_config("high_quality_uav_gpr").methods[0]
+    proxy = WorkflowNodeProxy(0)
+    card = WorkflowNodeCard(0, method)
+    try:
+        proxy.setWidget(card)
+        app.processEvents()
+
+        assert not proxy._is_interactive_widget(card)
+        assert card in proxy._drag_filter_widgets
+
+        for child in card.findChildren(QPushButton) + card.findChildren(QLineEdit) + card.findChildren(QComboBox):
+            assert proxy._is_interactive_widget(child)
+            assert child not in proxy._drag_filter_widgets
+    finally:
+        proxy.setWidget(None)
+        card.close()
         app.processEvents()
 
 
