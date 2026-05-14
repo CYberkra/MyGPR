@@ -389,7 +389,7 @@ class WorkflowNodeProxy(QGraphicsProxyWidget):
         super().__init__(parent)
         self.row = int(row)
         self._dragging = False
-        self._last_drag_global_pos = QPoint()
+        self._drag_scene_offset = QPointF()
         self._drag_filter_widgets: list[QWidget] = []
         self.setFlags(
             QGraphicsProxyWidget.GraphicsItemFlag.ItemIsMovable
@@ -424,17 +424,18 @@ class WorkflowNodeProxy(QGraphicsProxyWidget):
             ),
         )
 
-    def _event_global_pos(self, event) -> QPoint:
-        if hasattr(event, "globalPosition"):
-            return event.globalPosition().toPoint()
-        return event.globalPos()
-
-    def _scene_scale(self) -> float:
+    def _event_scene_pos(self, event) -> QPointF:
         scene = self.scene()
         if scene is None or not scene.views():
-            return 1.0
-        scale = scene.views()[0].transform().m11()
-        return scale if abs(scale) > 1.0e-9 else 1.0
+            return QPointF(self.pos())
+
+        view = scene.views()[0]
+        if hasattr(event, "globalPosition"):
+            global_pos = event.globalPosition().toPoint()
+        else:
+            global_pos = event.globalPos()
+        viewport_pos = view.viewport().mapFromGlobal(global_pos)
+        return view.mapToScene(viewport_pos)
 
     def eventFilter(self, watched, event):  # noqa: N802 - Qt override
         if isinstance(watched, QWidget) and self._is_interactive_widget(watched):
@@ -443,7 +444,8 @@ class WorkflowNodeProxy(QGraphicsProxyWidget):
         event_type = event.type()
         if event_type == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
             self._dragging = True
-            self._last_drag_global_pos = self._event_global_pos(event)
+            scene_pos = self._event_scene_pos(event)
+            self._drag_scene_offset = scene_pos - self.pos()
             card = self.widget()
             if isinstance(card, WorkflowNodeCard):
                 card.selected.emit(self.row)
@@ -455,11 +457,8 @@ class WorkflowNodeProxy(QGraphicsProxyWidget):
             and self._dragging
             and event.buttons() & Qt.MouseButton.LeftButton
         ):
-            pos = self._event_global_pos(event)
-            delta = pos - self._last_drag_global_pos
-            self._last_drag_global_pos = pos
-            scale = self._scene_scale()
-            self.moveBy(delta.x() / scale, delta.y() / scale)
+            scene_pos = self._event_scene_pos(event)
+            self.setPos(scene_pos - self._drag_scene_offset)
             scene = self.scene()
             if isinstance(scene, WorkflowCanvasScene):
                 scene.update_edges()

@@ -214,6 +214,8 @@ def test_workflow_node_proxy_installs_drag_filters_only_on_noninteractive_widget
 
         assert not proxy._is_interactive_widget(card)
         assert card in proxy._drag_filter_widgets
+        assert hasattr(proxy, "_drag_scene_offset")
+        assert not hasattr(proxy, "_last_drag_global_pos")
 
         for child in card.findChildren(QPushButton) + card.findChildren(QLineEdit) + card.findChildren(QComboBox):
             assert proxy._is_interactive_widget(child)
