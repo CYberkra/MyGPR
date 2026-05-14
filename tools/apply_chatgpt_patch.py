@@ -47,6 +47,26 @@ def _changed_files() -> list[str]:
     return [line.strip() for line in output.splitlines() if line.strip()]
 
 
+def _apply_patch_file(patch_file: Path) -> None:
+    """Apply patch, falling back to git's 3-way merge for shifted context."""
+    check_result = _run(["git", "apply", "--check", str(patch_file)], check=False)
+    if check_result.returncode == 0:
+        _run(["git", "apply", str(patch_file)])
+        return
+
+    print("[apply] direct git apply failed; trying git apply --3way", flush=True)
+    three_way_result = _run(["git", "apply", "--3way", str(patch_file)], check=False)
+    if three_way_result.returncode != 0:
+        raise RuntimeError(
+            "patch could not be applied directly or with --3way; "
+            "it is likely based on stale file content"
+        )
+
+    unresolved = _git_output(["diff", "--name-only", "--diff-filter=U"])
+    if unresolved.strip():
+        raise RuntimeError("patch produced unresolved conflicts\n" + unresolved)
+
+
 def _summary_from_patch(patch_file: Path) -> str:
     stem = patch_file.stem
     stem = re.sub(r"^\d+[_-]*", "", stem)
@@ -89,8 +109,7 @@ def apply_patch(args: argparse.Namespace) -> int:
     _run(["git", "pull", "--ff-only"])
     _ensure_clean()
 
-    _run(["git", "apply", "--check", str(patch_file)])
-    _run(["git", "apply", str(patch_file)])
+    _apply_patch_file(patch_file)
 
     changed = _changed_files()
     if not changed:

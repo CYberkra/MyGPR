@@ -22,46 +22,75 @@ from PyQt6.QtWidgets import (
 
 
 def _coerce_bscan_array(data: Any) -> np.ndarray | None:
-    """Return a finite 2-D array suitable for image preview."""
+    """Return a numeric 2-D array suitable for image preview.
+
+    Keep the original dtype here. Converting the full B-scan to float64 in the
+    GUI thread can allocate hundreds of MB for large surveys and may terminate
+    the process before Python can raise a normal exception.
+    """
     if data is None:
         return None
     try:
-        array = np.asarray(data, dtype=np.float64)
+        array = np.asarray(data)
     except Exception:
         return None
 
     array = np.squeeze(array)
     if array.ndim != 2 or array.size == 0:
         return None
+    if not np.issubdtype(array.dtype, np.number):
+        return None
     return array
 
 
+def _downsample_for_preview(
+    array: np.ndarray,
+    *,
+    max_rows: int = 900,
+    max_cols: int = 1400,
+) -> np.ndarray:
+    """Return a bounded view/copy for thumbnail and dialog rendering."""
+    rows, cols = array.shape
+    row_step = max(1, int(np.ceil(rows / max_rows)))
+    col_step = max(1, int(np.ceil(cols / max_cols)))
+    return array[::row_step, ::col_step]
+
+
 def _array_to_pixmap(data: Any, *, width: int, height: int) -> QPixmap | None:
-    """Convert a B-scan array to a grayscale QPixmap."""
+    """Convert a B-scan array to a grayscale QPixmap without full-size copies."""
     array = _coerce_bscan_array(data)
     if array is None:
         return None
 
-    finite = array[np.isfinite(array)]
+    preview = _downsample_for_preview(array)
+    try:
+        preview_float = np.asarray(preview, dtype=np.float32)
+    except Exception:
+        return None
+
+    finite = preview_float[np.isfinite(preview_float)]
     if finite.size == 0:
         return None
 
-    low, high = np.nanpercentile(finite, [1.0, 99.0])
+    try:
+        low, high = np.nanpercentile(finite, [1.0, 99.0])
+    except Exception:
+        return None
     if not np.isfinite(low) or not np.isfinite(high) or high <= low:
         low = float(np.nanmin(finite))
         high = float(np.nanmax(finite))
     if high <= low:
         high = low + 1.0
 
-    normalized = np.clip((array - low) / (high - low), 0.0, 1.0)
+    normalized = np.clip((preview_float - low) / (high - low), 0.0, 1.0)
     normalized = np.nan_to_num(normalized, nan=0.5, posinf=1.0, neginf=0.0)
     # GPR B-scans are usually easier to read with strong positive amplitudes dark.
     pixels = np.ascontiguousarray(np.round((1.0 - normalized) * 255.0).astype(np.uint8))
     img_h, img_w = pixels.shape
     image = QImage(pixels.data, img_w, img_h, img_w, QImage.Format.Format_Grayscale8).copy()
     return QPixmap.fromImage(image).scaled(
-        width,
-        height,
+        max(1, int(width)),
+        max(1, int(height)),
         Qt.AspectRatioMode.KeepAspectRatio,
         Qt.TransformationMode.SmoothTransformation,
     )
@@ -152,7 +181,13 @@ class BscanPreviewCard(QFrame):
     def set_preview_data(self, data: Any, label: str = "Workflow Output") -> None:
         self._data = data
         self._label = label or "Workflow Output"
-        self._build()
+        try:
+            self._build()
+        except Exception:
+            # Preview rendering must never take down the whole GUI. A later
+            # refresh can still recover when valid data is supplied.
+            self._data = None
+            self._build()
 
     def set_compact(self, compact: bool) -> None:
         compact = bool(compact)

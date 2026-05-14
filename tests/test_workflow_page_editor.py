@@ -18,7 +18,7 @@ from core.app_paths import get_workflow_templates_dir
 from core.workflow_data import WorkflowConfigManager, build_default_workflow_config
 from ui.workflow_canvas_cards import WorkflowNodeCard, WorkflowNodeProxy
 from ui.workflow_canvas_cards import WorkflowCanvasView
-from ui.workflow_canvas_preview import BscanPreviewCard
+from ui.workflow_canvas_preview import BscanPreviewCard, _downsample_for_preview
 from ui.gui_workflow_page import WorkflowPage
 
 
@@ -234,6 +234,16 @@ def test_workflow_canvas_preview_node_updates_from_output_data():
     finally:
         canvas.close()
         app.processEvents()
+
+
+def test_workflow_bscan_preview_downsamples_large_arrays():
+    raw = np.arange(2_000 * 3_000, dtype=np.float32).reshape(2_000, 3_000)
+
+    preview = _downsample_for_preview(raw, max_rows=900, max_cols=1400)
+
+    assert preview.shape[0] <= 900
+    assert preview.shape[1] <= 1400
+    assert preview.dtype == raw.dtype
 
 
 def test_workflow_canvas_view_drag_hit_testing_keeps_controls_interactive():
