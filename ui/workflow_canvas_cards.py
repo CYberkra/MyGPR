@@ -31,6 +31,7 @@ from PyQt6.QtWidgets import (
 
 from core.methods_registry import PROCESSING_METHODS, get_method_display_name
 from core.workflow_data import METHOD_CATEGORIES, WORKFLOW_STAGE_BY_ID, WorkflowMethod
+from ui.workflow_canvas_preview import BscanPreviewCard
 
 
 class WorkflowNodeCard(QFrame):
@@ -455,6 +456,9 @@ class WorkflowCanvasView(QGraphicsView):
         self._last_pan_pos = QPoint()
         self._drag_proxy: WorkflowNodeProxy | None = None
         self._drag_scene_offset = QPointF()
+        self._preview_data = None
+        self._preview_label = "Workflow Output"
+        self._preview_proxy: WorkflowNodeProxy | None = None
         self._compact_cards = False
         self._compact_threshold = 0.62
         self._normal_threshold = 0.78
@@ -483,6 +487,21 @@ class WorkflowCanvasView(QGraphicsView):
     def update_node(self, row: int) -> None:
         if 0 <= int(row) < len(self._methods):
             self._rebuild()
+
+    def set_preview_data(self, data, label: str = "Workflow Output") -> None:
+        self._preview_data = data
+        self._preview_label = label or "Workflow Output"
+        card = self._preview_card()
+        if card is not None:
+            card.set_preview_data(self._preview_data, self._preview_label)
+            card.set_compact(self._compact_cards)
+            self._scene.update_edges()
+
+    def _preview_card(self) -> BscanPreviewCard | None:
+        if self._preview_proxy is None:
+            return None
+        card = self._preview_proxy.widget()
+        return card if isinstance(card, BscanPreviewCard) else None
 
     def set_selected_row(self, row: int) -> None:
         self._current_row = int(row)
@@ -515,6 +534,10 @@ class WorkflowCanvasView(QGraphicsView):
 
     def _is_interactive_card_target(self, proxy: WorkflowNodeProxy, scene_pos: QPointF) -> bool:
         card = proxy.widget()
+        if isinstance(card, BscanPreviewCard):
+            local_pos = proxy.mapFromScene(scene_pos)
+            child = card.childAt(int(local_pos.x()), int(local_pos.y()))
+            return isinstance(child, QAbstractButton)
         if not isinstance(card, QWidget):
             return False
 
@@ -528,6 +551,16 @@ class WorkflowCanvasView(QGraphicsView):
 
     def viewportEvent(self, event):  # noqa: N802 - Qt override
         event_type = event.type()
+
+        if event_type == QEvent.Type.MouseButtonDblClick and event.button() == Qt.MouseButton.LeftButton:
+            view_pos = self._event_view_pos(event)
+            proxy = self._proxy_at_view_pos(view_pos)
+            if proxy is not None:
+                card = proxy.widget()
+                if isinstance(card, BscanPreviewCard):
+                    card.open_large_view()
+                    event.accept()
+                    return True
 
         if event_type == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
             view_pos = self._event_view_pos(event)
@@ -622,7 +655,7 @@ class WorkflowCanvasView(QGraphicsView):
         self._compact_cards = compact
         for proxy in self._scene.proxies:
             card = proxy.widget()
-            if isinstance(card, WorkflowNodeCard):
+            if isinstance(card, (WorkflowNodeCard, BscanPreviewCard)):
                 card.set_compact(compact)
         self._scene.update_edges()
 
@@ -630,6 +663,7 @@ class WorkflowCanvasView(QGraphicsView):
         self._scene.clear()
         self._scene.proxies.clear()
         self._scene.edges.clear()
+        self._preview_proxy = None
 
         x0, y0 = 40, 60
         x_step, y_step = 335, 255
@@ -650,6 +684,18 @@ class WorkflowCanvasView(QGraphicsView):
             proxy.setPos(x0 + col * x_step, y0 + lane * y_step)
             self._scene.addItem(proxy)
             self._scene.proxies.append(proxy)
+
+        preview_card = BscanPreviewCard()
+        preview_card.set_preview_data(self._preview_data, self._preview_label)
+        preview_proxy = WorkflowNodeProxy(-1)
+        preview_proxy.setWidget(preview_card)
+        preview_row = len(self._methods)
+        preview_lane = preview_row // max_per_row
+        preview_col = preview_row % max_per_row
+        preview_proxy.setPos(x0 + preview_col * x_step, y0 + preview_lane * y_step)
+        self._scene.addItem(preview_proxy)
+        self._scene.proxies.append(preview_proxy)
+        self._preview_proxy = preview_proxy
 
         self._scene.update_edges()
         self.set_selected_row(self._current_row)

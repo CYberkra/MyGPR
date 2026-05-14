@@ -779,6 +779,17 @@ class WorkflowPage(QWidget):
         label = "实时预览完成" if realtime else "工作流运行完成"
         self.status_label.setText(label)
         self._log(f"{label}: {len(outputs)} 步")
+        if outputs:
+            final_output = outputs[-1]
+            final_name = (
+                final_output.get("method_name")
+                or final_output.get("method_key")
+                or "Workflow Output"
+            )
+            self.workflow_canvas.set_preview_data(
+                final_output.get("data"),
+                label=f"{final_name} · {label}",
+            )
         for index, output in enumerate(outputs, start=1):
             name = output.get("method_name") or output.get("method_key") or f"step-{index}"
             shape = output.get("data").shape if output.get("data") is not None else "--"

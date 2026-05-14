@@ -7,6 +7,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import numpy as np
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import QPointF
@@ -16,6 +18,7 @@ from core.app_paths import get_workflow_templates_dir
 from core.workflow_data import WorkflowConfigManager, build_default_workflow_config
 from ui.workflow_canvas_cards import WorkflowNodeCard, WorkflowNodeProxy
 from ui.workflow_canvas_cards import WorkflowCanvasView
+from ui.workflow_canvas_preview import BscanPreviewCard
 from ui.gui_workflow_page import WorkflowPage
 
 
@@ -199,6 +202,35 @@ def test_workflow_canvas_zoom_lod_switches_card_compact_mode():
         canvas._apply_zoom_lod(force=True)
         app.processEvents()
         assert not any(card.compact for card in cards)
+    finally:
+        canvas.close()
+        app.processEvents()
+
+
+def test_workflow_canvas_preview_node_updates_from_output_data():
+    app = _get_app()
+    canvas = WorkflowCanvasView()
+    try:
+        config = build_default_workflow_config("high_quality_uav_gpr")
+        canvas.set_methods(config.methods)
+        canvas.set_preview_data(np.arange(64, dtype=float).reshape(8, 8), "Test B-scan")
+        app.processEvents()
+
+        preview_cards = [
+            proxy.widget()
+            for proxy in canvas._scene.proxies
+            if isinstance(proxy.widget(), BscanPreviewCard)
+        ]
+        assert len(preview_cards) == 1
+        assert preview_cards[0].data_shape == (8, 8)
+        assert preview_cards[0].source_label is not None
+        assert "Test B-scan" in preview_cards[0].source_label.text()
+
+        canvas.resetTransform()
+        canvas.scale(0.5, 0.5)
+        canvas._apply_zoom_lod(force=True)
+        app.processEvents()
+        assert preview_cards[0].compact is True
     finally:
         canvas.close()
         app.processEvents()
