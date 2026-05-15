@@ -719,6 +719,7 @@ class GPRGuiQt(QMainWindow):
         self._pending_workflow_run = None
         self._last_workflow_result = None
         self._last_workflow_realtime = False
+        self._last_workflow_run_mode = ""
         self._workflow_preview_base_state = None
         self._last_auto_tune_result = None
         self._last_auto_tune_group_result = None
@@ -4283,14 +4284,14 @@ class GPRGuiQt(QMainWindow):
             profile_key=profile_key,
         )
 
-    def run_workflow_methods(self, methods: object, realtime: bool = False):
+    def run_workflow_methods(self, methods: object, realtime: bool = False, run_mode: str = ""):
         """运行工作流页传入的步骤列表。"""
         if self.data is None:
             QMessageBox.warning(self, "无数据", "请先导入数据。")
             return
         if self._worker is not None or self._worker_thread is not None:
             if realtime:
-                self._pending_workflow_run = (methods, realtime)
+                self._pending_workflow_run = (methods, realtime, run_mode)
                 if self._worker is not None:
                     self._worker.request_cancel()
                 self.status_label.setText("正在取消旧的实时工作流...")
@@ -4328,6 +4329,7 @@ class GPRGuiQt(QMainWindow):
             )
 
         run_type = "workflow_realtime" if realtime else "workflow"
+        self._last_workflow_run_mode = run_mode
         base_state = None
         if realtime:
             if self._workflow_preview_base_state is None:
@@ -6778,6 +6780,7 @@ class GPRGuiQt(QMainWindow):
                     self.page_workflow.set_run_result(
                         outputs,
                         realtime=self._last_workflow_realtime,
+                        run_mode=self._last_workflow_run_mode,
                     )
 
         self._cleanup_worker()

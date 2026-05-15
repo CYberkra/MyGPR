@@ -47,7 +47,7 @@ from core.workflow_data import (
     build_default_workflow_config,
     get_config_manager,
 )
-from core.workflow_validation import validate_workflow_config
+from core.workflow_validation import to_text_with_suggestions, validate_workflow_config
 from ui.workflow_canvas_cards import WorkflowCanvasView
 
 
@@ -71,7 +71,7 @@ class WorkflowStepList(QListWidget):
 class WorkflowPage(QWidget):
     """Visual workflow editor for MyGPR's UAV-GPR processing chain."""
 
-    workflow_run_requested = pyqtSignal(object, bool)
+    workflow_run_requested = pyqtSignal(object, bool, str)
     save_live_result_requested = pyqtSignal()
     import_raw_requested = pyqtSignal()
     import_sidecar_requested = pyqtSignal(str)
@@ -549,16 +549,7 @@ class WorkflowPage(QWidget):
                 pass
 
     def _validate_workflow_ui(self) -> None:
-        sidecar_status = {
-            "rtk": bool(self._sidecar_files.get("rtk")),
-            "imu": bool(self._sidecar_files.get("imu")),
-            "agl": bool(self._sidecar_files.get("altimeter")),
-        }
-        report = validate_workflow_config(self.config, sidecar_status=sidecar_status, execution_mode="order")
-        mismatch_text = self._graph_order_mismatch_text()
-        from core.workflow_validation import to_text_with_suggestions
-        text = to_text_with_suggestions(report, sidecar_status=sidecar_status, execution_mode="order")
-        text = f"{mismatch_text}\n{text}"
+        report, text = self._build_validation_report_text()
 
         self.status_label.setText(report.summary())
         self._log(text)
@@ -573,6 +564,27 @@ class WorkflowPage(QWidget):
             lines.extend(f"- {issue.code}" for issue in report.issues[:6])
             self.qc_label.setText("\n".join(lines))
         self.validation_report_requested.emit(text)
+
+    def _current_sidecar_status(self) -> dict[str, bool]:
+        return {
+            "rtk": bool(self._sidecar_files.get("rtk")),
+            "imu": bool(self._sidecar_files.get("imu")),
+            "agl": bool(self._sidecar_files.get("altimeter")),
+        }
+
+    def _build_validation_report_text(self):
+        sidecar_status = self._current_sidecar_status()
+        report = validate_workflow_config(
+            self.config,
+            sidecar_status=sidecar_status,
+            execution_mode="order",
+        )
+        text = to_text_with_suggestions(
+            report,
+            sidecar_status=sidecar_status,
+            execution_mode="order",
+        )
+        return report, f"{self._graph_order_mismatch_text()}\n{text}"
 
     def _graph_order_mismatch_text(self) -> str:
         ordered = [method.node_id for method in sorted(self.config.methods, key=lambda item: item.order)]
@@ -1038,6 +1050,7 @@ class WorkflowPage(QWidget):
             realtime=True,
             status="实时预览计算中",
             log_text="实时预览请求已发出",
+            run_mode="Realtime",
         )
 
     def request_manual_run(self) -> None:
@@ -1103,6 +1116,26 @@ class WorkflowPage(QWidget):
         if not methods:
             self.status_label.setText("没有启用的步骤")
             return
+        report, report_text = self._build_validation_report_text()
+        self.validation_report_requested.emit(report_text)
+        if report.errors:
+            error_text = "\n".join(
+                f"- {issue.code}: {issue.message}"
+                for issue in report.errors
+            )
+            reply = QMessageBox.question(
+                self,
+                "工作流验证失败",
+                f"运行前发现以下错误，是否继续运行？\n\n{error_text}",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.No:
+                return
+        elif report.warnings:
+            self._log("运行前发现警告：")
+            for issue in report.warnings:
+                self._log(f"  [{issue.code}] {issue.message}")
         run_node_ids = {m.node_id for m in methods}
         for method in self.config.methods:
             if method.hidden or not method.enabled:
@@ -1112,7 +1145,11 @@ class WorkflowPage(QWidget):
             elif method.status == "success":
                 method.status = "success_stale"
         if methods:
-            methods[0].status = "running"
+            first_node_id = methods[0].node_id
+            for method in self.config.methods:
+                if method.node_id == first_node_id:
+                    method.status = "running"
+                    break
         self.workflow_canvas.refresh_all_nodes()
         self._last_run_methods = [deepcopy(method) for method in methods]
         self.workflow_run_requested.emit(self._last_run_methods, realtime, run_mode)

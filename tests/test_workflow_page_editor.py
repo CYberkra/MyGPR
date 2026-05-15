@@ -11,7 +11,7 @@ import numpy as np
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtCore import QEvent, QPointF
+from PyQt6.QtCore import QEvent, QPointF, QSettings
 from PyQt6.QtWidgets import QApplication, QAbstractSpinBox, QCheckBox, QComboBox, QLineEdit, QSlider, QSplitter, QToolButton
 
 from core.app_paths import get_workflow_templates_dir
@@ -159,6 +159,9 @@ def test_compact_vertical_layout_uses_short_actions_and_step_labels():
 
 def test_workflow_workspace_splitter_collapses_side_panels():
     app = _get_app()
+    settings = QSettings("MyGPR", "WorkflowStudio")
+    settings.clear()
+    settings.sync()
     page = WorkflowPage()
     try:
         page.resize(1280, 800)

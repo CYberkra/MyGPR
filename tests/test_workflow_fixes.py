@@ -524,6 +524,42 @@ class TestRunWorkflowMethodsRunMode:
         run_src = inspect.getsource(GPRGuiQt.run_workflow_methods)
         assert "_last_workflow_run_mode" in run_src, "run_workflow_methods 应该保存 run_mode 到 _last_workflow_run_mode"
 
+    def test_non_realtime_run_is_rejected_while_worker_busy(self, monkeypatch):
+        """非实时 Run All/Selected/From 在已有 worker 时不能叠启动新任务。"""
+        from app_qt import GPRGuiQt
+        from core.workflow_data import WorkflowMethod
+        import numpy as np
+        import sys
+        from PyQt6.QtWidgets import QApplication, QMessageBox
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        win = GPRGuiQt()
+        try:
+            win.shared_data.load_data(
+                np.arange(24, dtype=np.float32).reshape(6, 4),
+                path="demo.csv",
+                source="test",
+            )
+            win._worker = object()
+            started = []
+            monkeypatch.setattr(win, "_start_processing_worker", lambda *args, **kwargs: started.append((args, kwargs)))
+            monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: QMessageBox.StandardButton.Ok)
+
+            method = WorkflowMethod(
+                category="preprocessing",
+                stage_id="trace_correction",
+                method_id="dc_shift",
+                params={"estimator": "mean", "scope": "per_trace"},
+            )
+            win.run_workflow_methods([method], realtime=False, run_mode="Run All")
+
+            assert started == []
+            assert win._pending_workflow_run is None
+        finally:
+            win._worker = None
+            win.close()
+            app.processEvents()
+
 
 class TestValidateErrorUserCancel:
     """测试 _emit_run validate error 且用户取消时，不会改变节点状态"""
