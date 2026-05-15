@@ -397,6 +397,15 @@ class WorkflowNodeCard(QFrame):
                         widget.deleteLater()
                 QWidget().setLayout(old_layout)
 
+            # 初始化控件引用列表
+            self.param_rows: list[ParamRowWidget] = []
+            self.title_label: QLabel | None = None
+            self.subtitle_label: QLabel | None = None
+            self.meta_label: QLabel | None = None
+            self.more_button: QToolButton | None = None
+            self.warning_label: QLabel | None = None
+            self.error_label: QLabel | None = None
+
             root = QVBoxLayout(self)
             root.setContentsMargins(10, 8, 10, 10)
             root.setSpacing(5)
@@ -404,11 +413,11 @@ class WorkflowNodeCard(QFrame):
             title_row = QHBoxLayout()
             title_row.setSpacing(6)
             full_title = f"{self.row + 1:02d} {self._stage_label()}"
-            title = QLabel(_elided(full_title, 205, self))
-            title.setObjectName("nodeTitle")
-            title.setWordWrap(False)
-            title.setToolTip(full_title)
-            title_row.addWidget(title, 1)
+            self.title_label = QLabel(_elided(full_title, 205, self))
+            self.title_label.setObjectName("nodeTitle")
+            self.title_label.setWordWrap(False)
+            self.title_label.setToolTip(full_title)
+            title_row.addWidget(self.title_label, 1)
 
             status_chip = QLabel(self._status_chip_text())
             status_chip.setObjectName("nodeStatusChip")
@@ -440,13 +449,13 @@ class WorkflowNodeCard(QFrame):
             self._port_row.addWidget(self.output_port_label, 0)
             root.addLayout(self._port_row)
 
-            subtitle = QLabel(_elided(get_method_display_name(self.method.method_id), 245, self))
+            self.subtitle_label = QLabel(_elided(get_method_display_name(self.method.method_id), 245, self))
             if self.method.method_id == "raw_input":
-                subtitle.setText("Raw Input")
-            subtitle.setObjectName("nodeSubtitle")
-            subtitle.setWordWrap(False)
-            subtitle.setToolTip(get_method_display_name(self.method.method_id))
-            root.addWidget(subtitle)
+                self.subtitle_label.setText("Raw Input")
+            self.subtitle_label.setObjectName("nodeSubtitle")
+            self.subtitle_label.setWordWrap(False)
+            self.subtitle_label.setToolTip(get_method_display_name(self.method.method_id))
+            root.addWidget(self.subtitle_label)
 
             if self.method.method_id == "raw_input":
                 shape = self.method.params.get("shape", "--")
@@ -476,25 +485,25 @@ class WorkflowNodeCard(QFrame):
             if elapsed_ms > 0:
                 meta_lines.append(f"time: {elapsed_ms:.1f}ms")
             if meta_lines:
-                meta_label = QLabel(" | ".join(meta_lines))
-                meta_label.setObjectName("nodeMetaInfo")
-                root.addWidget(meta_label)
+                self.meta_label = QLabel(" | ".join(meta_lines))
+                self.meta_label.setObjectName("nodeMetaInfo")
+                root.addWidget(self.meta_label)
 
             # Show error message if failed
             error_msg = getattr(self.method, "error_message", "")
             if error_msg:
-                error_label = QLabel(f"⚠️ {error_msg}")
-                error_label.setObjectName("nodeError")
-                error_label.setWordWrap(True)
-                error_label.setMinimumWidth(200)
-                root.addWidget(error_label)
+                self.error_label = QLabel(f"⚠️ {error_msg}")
+                self.error_label.setObjectName("nodeError")
+                self.error_label.setWordWrap(True)
+                self.error_label.setMinimumWidth(200)
+                root.addWidget(self.error_label)
 
             warning = self._stage_warning()
             if warning:
-                warning_label = QLabel(warning)
-                warning_label.setObjectName("nodeWarning")
-                warning_label.setWordWrap(True)
-                root.addWidget(warning_label)
+                self.warning_label = QLabel(warning)
+                self.warning_label.setObjectName("nodeWarning")
+                self.warning_label.setWordWrap(True)
+                root.addWidget(self.warning_label)
 
             param_metas = PROCESSING_METHODS.get(self.method.method_id, {}).get("params", [])
             max_params = len(param_metas) if self.expanded else min(2, len(param_metas))
@@ -508,6 +517,7 @@ class WorkflowNodeCard(QFrame):
                     str(meta.get("tooltip", "")),
                 )
                 root.addWidget(row_widget)
+                self.param_rows.append(row_widget)
                 self._param_getters[name] = getter
 
             if not max_params:
@@ -516,12 +526,18 @@ class WorkflowNodeCard(QFrame):
                 root.addWidget(empty_label)
 
             if len(param_metas) > 2:
-                more_button = QToolButton()
-                more_button.setText("收起" if self.expanded else f"更多({len(param_metas) - 2})")
-                more_button.clicked.connect(self._toggle_expanded)
-                root.addWidget(more_button)
+                self.more_button = QToolButton()
+                self.more_button.setText("收起" if self.expanded else f"更多({len(param_metas) - 2})")
+                self.more_button.clicked.connect(self._toggle_expanded)
+                root.addWidget(self.more_button)
 
             root.addStretch(1)
+            
+            # 恢复 full 模式（默认）
+            self._lod_mode = 'full'
+            self._apply_full_mode()
+            
+            self._refresh_state_properties()
             self._refresh_state_properties()
         finally:
             self._suppress = False
@@ -544,77 +560,150 @@ class WorkflowNodeCard(QFrame):
         mode = mode if mode in {"full", "compact", "mini"} else "full"
         self._lod_mode = mode
         
-        # 根据模式调整显示
         if mode == "full":
             self.setMinimumSize(MIN_NODE_WIDTH, MIN_NODE_HEIGHT)
             self.setMaximumSize(MAX_NODE_WIDTH, MAX_NODE_HEIGHT)
-            # 显示所有内容（通过重建实现）
-            if hasattr(self, '_compact_widget'):
-                self._compact_widget.hide()
-            if hasattr(self, '_mini_widget'):
-                self._mini_widget.hide()
-            # 确保主布局可见
-            main_layout = self.layout()
-            if main_layout is not None:
-                for i in range(main_layout.count()):
-                    item = main_layout.itemAt(i)
-                    if item.widget():
-                        item.widget().show()
+            self._apply_full_mode()
         elif mode == "compact":
-            # 紧凑模式：显示标题、算法名、状态、端口摘要
-            self._show_compact_view()
+            self.setMinimumSize(200, 80)
+            self.setMaximumSize(260, 120)
+            self._apply_compact_mode()
         elif mode == "mini":
-            # 迷你模式：只显示编号/短名、状态、端口摘要
-            self._show_mini_view()
+            self.setMinimumSize(160, 60)
+            self.setMaximumSize(200, 80)
+            self._apply_mini_mode()
         
         self.updateGeometry()
 
-    def _show_compact_view(self) -> None:
-        """Show compact summary view without parameter controls."""
-        # 隐藏主布局中的参数控件，只保留基本信息
-        main_layout = self.layout()
-        if main_layout is None:
-            return
-            
-        # 找到并隐藏参数相关的控件
-        for i in range(main_layout.count()):
-            item = main_layout.itemAt(i)
-            widget = item.widget() if item else None
-            if widget is not None:
-                # 保留标题行、端口行、副标题
-                if widget.objectName() in ("nodeTitle", "portLabel", "nodeSubtitle"):
-                    widget.show()
-                elif isinstance(widget, ParamRowWidget):
-                    widget.hide()
-                elif widget.objectName() == "nodeMetaInfo":
-                    widget.show()
-                elif widget.objectName() in ("nodeError", "nodeWarning"):
-                    widget.show()
-                else:
-                    # 其他控件（如"更多"按钮）隐藏
-                    widget.hide()
+    def _apply_full_mode(self) -> None:
+        """Apply full LOD mode with normal fonts."""
+        from PyQt6.QtGui import QFont
+        
+        # 恢复所有控件可见性
+        if self.title_label:
+            self.title_label.show()
+            self.title_label.setStyleSheet("font-size: 13px; font-weight: bold;")
+        if self.status_chip:
+            self.status_chip.show()
+            self.status_chip.setStyleSheet("font-size: 11px;")
+        if self.eye_button:
+            self.eye_button.show()
+        if self.input_port_label:
+            self.input_port_label.show()
+            self.input_port_label.setStyleSheet("font-size: 12px;")
+        if self.output_port_label:
+            self.output_port_label.show()
+            self.output_port_label.setStyleSheet("font-size: 12px;")
+        if self.subtitle_label:
+            self.subtitle_label.show()
+            self.subtitle_label.setStyleSheet("font-size: 11px;")
+        if self.meta_label:
+            self.meta_label.show()
+            self.meta_label.setStyleSheet("font-size: 11px;")
+        if self.error_label:
+            self.error_label.show()
+        if self.warning_label:
+            self.warning_label.show()
+        if self.more_button:
+            self.more_button.show()
+        for row in self.param_rows:
+            row.show()
+        self._restore_layout()
 
-    def _show_mini_view(self) -> None:
-        """Show minimal summary view."""
-        main_layout = self.layout()
-        if main_layout is None:
-            return
-            
-        for i in range(main_layout.count()):
-            item = main_layout.itemAt(i)
-            widget = item.widget() if item else None
-            if widget is not None:
-                # 只保留最核心的信息
-                if widget.objectName() == "nodeTitle":
-                    widget.show()
-                elif widget.objectName() in ("portLabel", "nodeSubtitle", "nodeMetaInfo"):
-                    widget.hide()
-                elif isinstance(widget, ParamRowWidget):
-                    widget.hide()
-                elif widget.objectName() in ("nodeError", "nodeWarning"):
-                    widget.hide()
-                else:
-                    widget.hide()
+    def _apply_compact_mode(self) -> None:
+        """Apply compact LOD mode with larger fonts for readability."""
+        from PyQt6.QtGui import QFont
+        
+        # 隐藏参数行，更多按钮
+        for row in self.param_rows:
+            row.hide()
+        if self.more_button:
+            self.more_button.hide()
+        
+        # 增大标题字号
+        if self.title_label:
+            self.title_label.show()
+            self.title_label.setStyleSheet("font-size: 18px; font-weight: bold;")
+        # 增大状态 chip
+        if self.status_chip:
+            self.status_chip.show()
+            self.status_chip.setStyleSheet("font-size: 14px; font-weight: bold; padding: 2px 6px;")
+        if self.eye_button:
+            self.eye_button.show()
+        # 增大端口标签
+        if self.input_port_label:
+            self.input_port_label.show()
+            self.input_port_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+        if self.output_port_label:
+            self.output_port_label.show()
+            self.output_port_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+        # 增大副标题
+        if self.subtitle_label:
+            self.subtitle_label.show()
+            self.subtitle_label.setStyleSheet("font-size: 16px;")
+        # 显示 meta
+        if self.meta_label:
+            self.meta_label.show()
+            self.meta_label.setStyleSheet("font-size: 14px;")
+        if self.error_label:
+            self.error_label.show()
+        if self.warning_label:
+            self.warning_label.show()
+        
+        self._simplify_layout()
+
+    def _apply_mini_mode(self) -> None:
+        """Apply mini LOD mode with largest fonts."""
+        from PyQt6.QtGui import QFont
+        
+        # 只保留最核心信息
+        for row in self.param_rows:
+            row.hide()
+        if self.more_button:
+            self.more_button.hide()
+        if self.meta_label:
+            self.meta_label.hide()
+        if self.error_label:
+            self.error_label.hide()
+        if self.warning_label:
+            self.warning_label.hide()
+        
+        # 最大化标题字号
+        if self.title_label:
+            self.title_label.show()
+            self.title_label.setStyleSheet("font-size: 24px; font-weight: bold;")
+        # 最大化状态 chip
+        if self.status_chip:
+            self.status_chip.show()
+            self.status_chip.setStyleSheet("font-size: 18px; font-weight: bold; padding: 3px 8px;")
+        if self.eye_button:
+            self.eye_button.show()
+        # 最大化端口标签
+        if self.input_port_label:
+            self.input_port_label.show()
+            self.input_port_label.setStyleSheet("font-size: 20px; font-weight: bold;")
+        if self.output_port_label:
+            self.output_port_label.show()
+            self.output_port_label.setStyleSheet("font-size: 20px; font-weight: bold;")
+        # 隐藏副标题
+        if self.subtitle_label:
+            self.subtitle_label.hide()
+        
+        self._simplify_layout()
+
+    def _simplify_layout(self) -> None:
+        """Simplify layout margins and spacing for compact views."""
+        layout = self.layout()
+        if layout is not None:
+            layout.setContentsMargins(8, 6, 8, 6)
+            layout.setSpacing(3)
+
+    def _restore_layout(self) -> None:
+        """Restore full layout margins and spacing."""
+        layout = self.layout()
+        if layout is not None:
+            layout.setContentsMargins(10, 8, 10, 10)
+            layout.setSpacing(5)
 
     def _status_chip_state(self) -> str:
         if self.method.method_id == "raw_input":

@@ -1555,3 +1555,101 @@ class TestCompactMiniInteraction:
         proxy.set_lod_mode("mini")
         assert not proxy.compact_item.isVisible(), "mini 模式下 compact_item 应该隐藏"
         assert not proxy.mini_item.isVisible(), "mini 模式下 mini_item 应该隐藏"
+
+    def test_compact_font_size_larger_than_full(self):
+        """测试47: compact 模式下 title font size 大于 full 模式"""
+        import sys
+        from PyQt6.QtWidgets import QApplication
+        from ui.workflow_canvas_cards import WorkflowNodeProxy, WorkflowNodeCard
+        from core.workflow_data import WorkflowMethod
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        
+        method = WorkflowMethod(
+            method_id="dc_shift",
+            stage_id="gain_compensation",
+            category="gain_compensation",
+        )
+        proxy = WorkflowNodeProxy(0, method)
+        card = WorkflowNodeCard(0, method)
+        proxy.setWidget(card)
+        
+        # full 模式
+        proxy.set_lod_mode("full")
+        full_stylesheet = card.title_label.styleSheet() if card.title_label else ""
+        
+        # compact 模式
+        proxy.set_lod_mode("compact")
+        compact_stylesheet = card.title_label.styleSheet() if card.title_label else ""
+        
+        # compact 字号应该更大
+        full_size = int(full_stylesheet.split("font-size: ")[1].split("px")[0]) if "font-size:" in full_stylesheet else 13
+        compact_size = int(compact_stylesheet.split("font-size: ")[1].split("px")[0]) if "font-size:" in compact_stylesheet else 18
+        
+        assert compact_size > full_size, \
+            f"compact title size ({compact_size}) 应该大于 full ({full_size})"
+
+    def test_mini_font_size_larger_than_compact(self):
+        """测试48: mini 模式下 title font size 大于 compact 模式"""
+        import sys
+        from PyQt6.QtWidgets import QApplication
+        from ui.workflow_canvas_cards import WorkflowNodeProxy, WorkflowNodeCard
+        from core.workflow_data import WorkflowMethod
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        
+        method = WorkflowMethod(
+            method_id="dc_shift",
+            stage_id="gain_compensation",
+            category="gain_compensation",
+        )
+        proxy = WorkflowNodeProxy(0, method)
+        card = WorkflowNodeCard(0, method)
+        proxy.setWidget(card)
+        
+        # compact 模式
+        proxy.set_lod_mode("compact")
+        compact_stylesheet = card.title_label.styleSheet() if card.title_label else ""
+        
+        # mini 模式
+        proxy.set_lod_mode("mini")
+        mini_stylesheet = card.title_label.styleSheet() if card.title_label else ""
+        
+        # mini 字号应该更大
+        compact_size = int(compact_stylesheet.split("font-size: ")[1].split("px")[0]) if "font-size:" in compact_stylesheet else 18
+        mini_size = int(mini_stylesheet.split("font-size: ")[1].split("px")[0]) if "font-size:" in mini_stylesheet else 24
+        
+        assert mini_size > compact_size, \
+            f"mini title size ({mini_size}) 应该大于 compact ({compact_size})"
+
+    def test_preview_compact_font_size_larger_than_full(self):
+        """测试49: Preview compact 模式下 title font size 大于 full 模式"""
+        import sys
+        from PyQt6.QtWidgets import QApplication
+        from ui.workflow_canvas_preview import BscanPreviewCard
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        
+        preview_card = BscanPreviewCard()
+        
+        # full 模式
+        preview_card.set_lod_mode("full")
+        
+        # compact 模式
+        preview_card.set_lod_mode("compact")
+        
+        # 获取 title widget 的样式
+        main_layout = preview_card.layout()
+        title_widget = None
+        if main_layout:
+            for i in range(main_layout.count()):
+                item = main_layout.itemAt(i)
+                if item and item.widget() and item.widget().objectName() == "previewTitle":
+                    title_widget = item.widget()
+                    break
+        
+        if title_widget:
+            compact_stylesheet = title_widget.styleSheet()
+            compact_size = int(compact_stylesheet.split("font-size: ")[1].split("px")[0]) if "font-size:" in compact_stylesheet else 13
+            assert compact_size >= 18, \
+                f"Preview compact title size ({compact_size}) 应该 >= 18px"

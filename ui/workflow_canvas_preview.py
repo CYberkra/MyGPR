@@ -239,68 +239,80 @@ class BscanPreviewCard(QFrame):
         mode = mode if mode in {"full", "compact", "mini"} else "full"
         self._lod_mode = mode
         
-        # 根据模式调整显示
         if mode == "full":
             self.setMinimumWidth(300)
             self.setMaximumWidth(360)
-            # 显示所有内容
-            main_layout = self.layout()
-            if main_layout is not None:
-                for i in range(main_layout.count()):
-                    item = main_layout.itemAt(i)
-                    if item and item.widget():
-                        item.widget().show()
+            self._apply_full_mode()
         elif mode == "compact":
-            # 紧凑模式：缩小尺寸，隐藏缩略图
             self.setMinimumWidth(200)
-            self.setMaximumWidth(260)
-            self._show_compact_view()
+            self.setMaximumWidth(280)
+            self._apply_compact_mode()
         elif mode == "mini":
-            # 迷你模式：最小尺寸，只显示标题和状态
             self.setMinimumWidth(160)
-            self.setMaximumWidth(200)
-            self._show_mini_view()
+            self.setMaximumWidth(220)
+            self._apply_mini_mode()
         
         self.updateGeometry()
 
-    def _show_compact_view(self) -> None:
-        """Show compact summary view."""
+    def _apply_full_mode(self) -> None:
+        """Apply full LOD mode with normal fonts."""
         main_layout = self.layout()
-        if main_layout is None:
-            return
-        
-        # 隐藏缩略图和提示，保留标题、端口、形状信息
-        for i in range(main_layout.count()):
-            item = main_layout.itemAt(i)
-            widget = item.widget() if item else None
-            if widget is not None:
-                if widget.objectName() == "previewImage":
-                    widget.hide()
-                elif widget.objectName() == "previewMeta" and "双击" in widget.text():
-                    widget.hide()
-                else:
+        if main_layout is not None:
+            for i in range(main_layout.count()):
+                item = main_layout.itemAt(i)
+                if item and item.widget():
+                    widget = item.widget()
                     widget.show()
+                    widget.setStyleSheet("")
+        self._simplify_layout(restore=True)
 
-    def _show_mini_view(self) -> None:
-        """Show minimal summary view."""
+    def _apply_compact_mode(self) -> None:
+        """Apply compact LOD mode with larger fonts."""
         main_layout = self.layout()
-        if main_layout is None:
-            return
-        
-        # 只保留标题行和端口行
-        for i in range(main_layout.count()):
-            item = main_layout.itemAt(i)
-            widget = item.widget() if item else None
-            if widget is not None:
-                if widget.objectName() in ("previewTitle",):
-                    widget.show()
-                elif widget.objectName() == "previewMeta":
-                    widget.hide()
-                elif widget.objectName() == "previewImage":
-                    widget.hide()
-                else:
-                    # 布局项（如 port_row）保持
-                    pass
+        if main_layout is not None:
+            for i in range(main_layout.count()):
+                item = main_layout.itemAt(i)
+                if item and item.widget():
+                    widget = item.widget()
+                    if widget.objectName() == "previewImage":
+                        widget.hide()
+                    elif widget.objectName() == "previewMeta" and "双击" in widget.text():
+                        widget.hide()
+                    else:
+                        widget.show()
+                        if widget.objectName() == "previewTitle":
+                            widget.setStyleSheet("font-size: 18px; font-weight: bold;")
+                        elif widget.objectName() == "previewMeta":
+                            widget.setStyleSheet("font-size: 14px;")
+        self._simplify_layout(restore=False)
+
+    def _apply_mini_mode(self) -> None:
+        """Apply mini LOD mode with largest fonts."""
+        main_layout = self.layout()
+        if main_layout is not None:
+            for i in range(main_layout.count()):
+                item = main_layout.itemAt(i)
+                if item and item.widget():
+                    widget = item.widget()
+                    if widget.objectName() in ("previewTitle",):
+                        widget.show()
+                        widget.setStyleSheet("font-size: 24px; font-weight: bold;")
+                    elif widget.objectName() in ("previewMeta",):
+                        widget.hide()
+                    elif widget.objectName() == "previewImage":
+                        widget.hide()
+                    else:
+                        widget.show()
+        self._simplify_layout(restore=False)
+
+    def _simplify_layout(self, restore: bool = False) -> None:
+        """Simplify or restore layout margins."""
+        layout = self.layout()
+        if layout is not None:
+            if restore:
+                layout.setContentsMargins(10, 8, 10, 10)
+            else:
+                layout.setContentsMargins(8, 6, 8, 6)
 
     def mouseDoubleClickEvent(self, event):  # noqa: N802 - Qt override
         self.request_large_view()
