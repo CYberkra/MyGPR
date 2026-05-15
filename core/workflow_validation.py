@@ -214,7 +214,7 @@ def validate_workflow_config(
 
     for method in methods:
         node_id = str(getattr(method, "node_id", ""))
-        if not node_id or bool(getattr(method, "hidden", False)):
+        if not node_id or bool(getattr(method, "hidden", False)) or not bool(getattr(method, "enabled", True)):
             continue
 
         if not incoming.get(node_id) and not outgoing.get(node_id):

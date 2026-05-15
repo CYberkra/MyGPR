@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from typing import Any
+import io
 
 import matplotlib
 
@@ -13,7 +14,7 @@ matplotlib.use("QtAgg")
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-from PyQt6.QtCore import Qt, QBuffer, QByteArray
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QGuiApplication, QImage, QPixmap
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -246,17 +247,16 @@ class BscanViewerDialog(QDialog):
         if self._view is None:
             QMessageBox.information(self, "无数据", "没有可复制的 B-scan 数据")
             return
-        # Save figure to QPixmap
+        # Save figure to QPixmap via BytesIO
         try:
-            buffer = QBuffer()
-            buffer.open(QBuffer.OpenModeFlag.ReadWrite)
+            buffer = io.BytesIO()
             self.figure.savefig(buffer, format="png", dpi=150, bbox_inches="tight")
             buffer.seek(0)
+            data = buffer.getvalue()
             pixmap = QPixmap()
-            pixmap.loadFromData(buffer.data(), "png")
+            pixmap.loadFromData(data, "png")
             clipboard = QGuiApplication.clipboard()
             clipboard.setPixmap(pixmap)
-            buffer.close()
         except Exception as e:
             QMessageBox.warning(self, "复制失败", f"复制图像时出错：{str(e)}")
         else:

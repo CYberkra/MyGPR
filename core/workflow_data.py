@@ -614,15 +614,8 @@ class WorkflowConfig:
         return config
 
     def ensure_canvas_links(self) -> None:
-        """Create default order links when older templates do not store links."""
+        """Ensure method node IDs are valid; do NOT auto-create links if none exist."""
         ensure_workflow_method_ids(self.methods)
-        if self.canvas_links:
-            return
-        sorted_methods = sorted(self.methods, key=lambda item: item.order)
-        self.canvas_links = [
-            WorkflowLink(left.node_id, right.node_id)
-            for left, right in zip(sorted_methods, sorted_methods[1:])
-        ]
 
     def get_enabled_methods(self) -> List[WorkflowMethod]:
         """获取启用的方法列表（按顺序排序）"""

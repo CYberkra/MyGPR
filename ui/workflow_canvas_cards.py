@@ -378,6 +378,8 @@ class WorkflowNodeCard(QFrame):
             self._suppress = False
 
     def _status_chip_state(self) -> str:
+        if self.method.method_id == "raw_input":
+            return "on"
         if self.method.hidden:
             return "hide"
         if not self.method.enabled:
@@ -389,6 +391,8 @@ class WorkflowNodeCard(QFrame):
         return "on"
 
     def _status_chip_text(self) -> str:
+        if self.method.method_id == "raw_input":
+            return "SOURCE"
         if self.method.hidden:
             return "HIDE"
         if not self.method.enabled:

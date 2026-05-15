@@ -514,20 +514,42 @@ class WorkflowPage(QWidget):
     def _restore_workspace_state(self) -> None:
         settings = QSettings("MyGPR", "WorkflowStudio")
         if settings.contains("workspace_sizes"):
-            sizes = settings.value("workspace_sizes")
-            if sizes and len(sizes) >= 3:
-                self.workspace_splitter.setSizes([int(s) for s in sizes])
+            try:
+                sizes = settings.value("workspace_sizes")
+                if sizes is not None:
+                    parsed_sizes = []
+                    for s in sizes:
+                        try:
+                            parsed_sizes.append(int(s))
+                        except (ValueError, TypeError):
+                            parsed_sizes = []
+                            break
+                    if len(parsed_sizes) >= 3:
+                        self.workspace_splitter.setSizes(parsed_sizes)
+            except Exception:
+                pass
         if settings.contains("project_panel_visible"):
-            visible = settings.value("project_panel_visible", True, type=bool)
-            self.btn_toggle_project.setChecked(visible)
-            self.left_sidebar.setVisible(visible)
+            try:
+                visible = settings.value("project_panel_visible", True, type=bool)
+                self.btn_toggle_project.setChecked(visible)
+                self.left_sidebar.setVisible(visible)
+            except Exception:
+                pass
         if settings.contains("inspector_panel_visible"):
-            visible = settings.value("inspector_panel_visible", True, type=bool)
-            self.btn_toggle_inspector.setChecked(visible)
-            self.inspector_box.setVisible(visible)
+            try:
+                visible = settings.value("inspector_panel_visible", True, type=bool)
+                self.btn_toggle_inspector.setChecked(visible)
+                self.inspector_box.setVisible(visible)
+            except Exception:
+                pass
 
     def _validate_workflow_ui(self) -> None:
-        report = validate_workflow_config(self.config, execution_mode="order")
+        sidecar_status = {
+            "rtk": bool(self._sidecar_files.get("rtk")),
+            "imu": bool(self._sidecar_files.get("imu")),
+            "agl": bool(self._sidecar_files.get("altimeter")),
+        }
+        report = validate_workflow_config(self.config, sidecar_status=sidecar_status, execution_mode="order")
         mismatch_text = self._graph_order_mismatch_text()
         text = (
             "执行模式：顺序\n"
@@ -1301,10 +1323,8 @@ class WorkflowPage(QWidget):
         self._config_changed = True
         # 重新渲染工作流
         self._render_steps()
-        self.workflow_canvas.set_config(self.config, self._method_meta)
         # 如果启用了实时预览，触发运行
-        if self.realtime_enabled:
-            self._emit_run_from_current(force_run=True)
+        self._queue_realtime_run()
         self.status_label.setText(f"已更新 {target_method.method_id} 的参数")
     
     def set_run_result(self, outputs: list[dict[str, Any]], realtime: bool) -> None:
@@ -1314,25 +1334,33 @@ class WorkflowPage(QWidget):
         self.status_label.setText(label)
         self._log(f"{label}: {len(outputs)} 步")
         
-        # Update each method's run status
-        output_by_key = {}
+        # 优先用 node_id 映射 outputs
+        output_by_node_id = {}
         for output in outputs:
-            method_key = output.get("method_key") or output.get("method_name")
-            if method_key:
-                output_by_key[method_key] = output
+            node_id = output.get("node_id")
+            if node_id:
+                output_by_node_id[node_id] = output
         
+        # 然后按顺序处理 enabled 的 method，没有 node_id 时按顺序对应
+        enabled_methods = [m for m in self.config.methods if not m.hidden and m.enabled]
+        output_idx = 0
         for method in self.config.methods:
             if method.hidden or not method.enabled:
                 method.status = "skipped"
                 continue
-            # Find matching output
-            output = output_by_key.get(method.method_id)
+            # 优先匹配 node_id
+            output = output_by_node_id.get(method.node_id)
+            # 如果没有，按顺序匹配
+            if not output and output_idx < len(outputs):
+                output = outputs[output_idx]
+                output_idx += 1
+            # 更新状态
             if output:
                 method.status = "success"
                 method.elapsed_ms = output.get("elapsed_ms", 0.0)
                 method.error_message = ""
-                method.output_shape = output.get("data").shape if output.get("data") is not None else None
-                # We don't have input_shape tracking right now, but output_shape is available
+                data = output.get("data")
+                method.output_shape = data.shape if data is not None else None
             else:
                 method.status = "skipped"
         
@@ -1355,12 +1383,14 @@ class WorkflowPage(QWidget):
 
     def set_run_error(self, error_message: str) -> None:
         self.status_label.setText("运行失败")
-        # Mark all enabled methods as pending/failed - we don't know which one failed
+        # 禁用 Save live result，避免保存旧结果
+        self._live_result_available = False
+        self.btn_save_live.setEnabled(False)
+        # 不把所有 enabled 节点都标 failed，只标记未知失败状态
         for method in self.config.methods:
             if method.enabled and not method.hidden:
-                # If we didn't get an output, mark as failed or pending
-                method.status = "failed"
-                method.error_message = "运行中断"
+                method.status = "pending"
+                method.error_message = ""
         self.workflow_canvas.set_preview_data(
             None,
             label="运行失败",
