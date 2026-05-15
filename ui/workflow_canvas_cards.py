@@ -27,6 +27,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMenu,
+    QSizePolicy,
     QSlider,
     QSpinBox,
     QToolButton,
@@ -93,27 +94,37 @@ class ParamRowWidget(QWidget):
             QWidget#paramRow {
                 min-height: 28px;
             }
+            QLabel#paramName {
+                color: #4b5563;
+                font-size: 12px;
+                font-weight: 600;
+            }
             QAbstractSpinBox, QComboBox, QLineEdit, QToolButton#boolChip {
                 background: #f8fafc;
                 border: 1px solid #d8e3f2;
                 border-radius: 10px;
-                padding: 2px 8px;
+                padding: 3px 8px;
                 min-height: 22px;
+                max-height: 26px;
             }
             QAbstractSpinBox {
                 qproperty-alignment: AlignRight;
+            }
+            QToolButton#boolChip {
+                min-width: 40px;
+                max-width: 48px;
+                font-weight: 700;
+                font-size: 12px;
             }
             QToolButton#boolChip[checked="true"] {
                 background: #e8f2ff;
                 color: #2457b8;
                 border-color: #9ec5ff;
-                font-weight: 700;
             }
             QToolButton#boolChip[checked="false"] {
                 background: #f3f4f6;
                 color: #6b7280;
                 border-color: #d1d5db;
-                font-weight: 700;
             }
             """
         )
@@ -122,13 +133,14 @@ class ParamRowWidget(QWidget):
         name = QLabel(short_label)
         name.setObjectName("paramName")
         name.setWordWrap(False)
-        name.setMinimumWidth(92)
+        name.setMinimumWidth(80)
         name.setMaximumWidth(150)
+        name.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         name.setToolTip(str(label))
 
         top_row = QHBoxLayout()
         top_row.setContentsMargins(0, 0, 0, 0)
-        top_row.setSpacing(6)
+        top_row.setSpacing(8)
         top_row.addWidget(name, 1)
 
         spin = control.findChild(QAbstractSpinBox)
@@ -136,7 +148,9 @@ class ParamRowWidget(QWidget):
         if spin is not None and slider is not None:
             spin.setParent(self)
             slider.setParent(self)
-            spin.setMaximumWidth(96)
+            spin.setMinimumWidth(80)
+            spin.setMaximumWidth(120)
+            spin.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
             top_row.addWidget(spin, 0)
             layout.addLayout(top_row)
             layout.addWidget(slider)
@@ -144,6 +158,13 @@ class ParamRowWidget(QWidget):
             slider.hide()
             control.deleteLater()
         else:
+            if isinstance(control, QComboBox):
+                control.setMinimumWidth(80)
+                control.setMaximumWidth(140)
+            elif isinstance(control, QLineEdit):
+                control.setMinimumWidth(80)
+                control.setMaximumWidth(140)
+            control.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
             top_row.addWidget(control, 0)
             layout.addLayout(top_row)
 
@@ -404,20 +425,20 @@ class WorkflowNodeCard(QFrame):
             root.addLayout(title_row)
 
             in_label, out_label = self.port_labels()
-            self.input_port_label = QLabel(f"{in_label} ●")
+            self.input_port_label = QLabel(in_label)
             self.input_port_label.setObjectName("portLabel")
-            self.input_port_label.setToolTip(in_label)
-            self.output_port_label = QLabel(f"● {out_label}")
+            self.input_port_label.setToolTip(f"输入: {in_label}")
+            self.output_port_label = QLabel(out_label)
             self.output_port_label.setObjectName("portLabel")
             self.output_port_label.setAlignment(Qt.AlignmentFlag.AlignRight)
-            self.output_port_label.setToolTip(out_label)
-            port_row = QHBoxLayout()
-            port_row.setContentsMargins(0, 0, 0, 0)
-            port_row.setSpacing(6)
-            port_row.addWidget(self.input_port_label, 0)
-            port_row.addStretch(1)
-            port_row.addWidget(self.output_port_label, 0)
-            root.addLayout(port_row)
+            self.output_port_label.setToolTip(f"输出: {out_label}")
+            self._port_row = QHBoxLayout()
+            self._port_row.setContentsMargins(0, 4, 0, 4)
+            self._port_row.setSpacing(6)
+            self._port_row.addWidget(self.input_port_label, 0)
+            self._port_row.addStretch(1)
+            self._port_row.addWidget(self.output_port_label, 0)
+            root.addLayout(self._port_row)
 
             subtitle = QLabel(_elided(get_method_display_name(self.method.method_id), 245, self))
             if self.method.method_id == "raw_input":
@@ -506,6 +527,12 @@ class WorkflowNodeCard(QFrame):
             self._suppress = False
 
     def port_anchor_y(self) -> float:
+        if hasattr(self, '_port_row') and self._port_row is not None:
+            try:
+                geom = self._port_row.geometry()
+                return float(geom.center().y())
+            except Exception:
+                pass
         return NODE_PORT_ROW_Y
 
     def port_labels(self) -> tuple[str, str]:
@@ -821,12 +848,15 @@ class MiniNodeItem(QGraphicsRectItem):
         stage_label = str(stage.get("label") or method.category or "节点")
         method_name = get_method_display_name(method.method_id)
         status = "HIDE" if method.hidden else ("OFF" if not method.enabled else "ON")
+        in_label, out_label = workflow_port_labels(method)
         if self.proxy.row < 0:
             self.title_item.setText("B-scan Preview")
+            self.subtitle_item.setText(status)
+            self.status_item.setText(f"data → preview")
         else:
             self.title_item.setText(f"{self.proxy.row + 1:02d} {stage_label[:18]}")
-        self.subtitle_item.setText(method_name[:20])
-        self.status_item.setText(f"{status}   in ●──────● out")
+            self.subtitle_item.setText(method_name[:20])
+            self.status_item.setText(f"{status}   {in_label}→{out_label}")
         self.title_item.setPos(10, 8)
         self.subtitle_item.setPos(10, 32)
         self.status_item.setPos(10, 58)
@@ -868,11 +898,15 @@ class CompactNodeItem(QGraphicsRectItem):
         in_label, out_label = workflow_port_labels(method)
         status = "HIDE" if method.hidden else ("OFF" if not method.enabled else self.proxy.status_short())
         if self.proxy.row < 0:
+            output_shape = getattr(method, "output_shape", None)
+            shape_text = "--" if output_shape is None else f"{output_shape[1]}×{output_shape[0]}"
             self.title_item.setText(f"B-scan Preview   {status}")
+            self.method_item.setText(shape_text)
+            self.port_item.setText(f"data → preview")
         else:
             self.title_item.setText(f"{self.proxy.row + 1:02d} {stage_label[:16]}   {status}")
-        self.method_item.setText(method_name[:24])
-        self.port_item.setText(f"{in_label} -> {out_label}")
+            self.method_item.setText(method_name[:24])
+            self.port_item.setText(f"{in_label} → {out_label}")
         self.title_item.setPos(10, 10)
         self.method_item.setPos(10, 40)
         self.port_item.setPos(10, 70)

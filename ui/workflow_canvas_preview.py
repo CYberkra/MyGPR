@@ -294,16 +294,17 @@ class BscanPreviewCard(QFrame):
         root.addLayout(title_row)
 
         port_row = QHBoxLayout()
-        port_row.setContentsMargins(0, 0, 0, 0)
-        left_port = QLabel("data ●")
+        port_row.setContentsMargins(0, 4, 0, 4)
+        left_port = QLabel("data")
         left_port.setObjectName("previewPortLabel")
-        right_port = QLabel("● preview")
+        right_port = QLabel("preview")
         right_port.setObjectName("previewPortLabel")
         right_port.setAlignment(Qt.AlignmentFlag.AlignRight)
         port_row.addWidget(left_port)
         port_row.addStretch(1)
         port_row.addWidget(right_port)
         root.addLayout(port_row)
+        self._port_row = port_row
 
         shape = self.data_shape
         shape_text = "--" if shape is None else f"{shape[1]} traces × {shape[0]} samples"
@@ -329,4 +330,10 @@ class BscanPreviewCard(QFrame):
         root.addWidget(hint)
 
     def port_anchor_y(self) -> float:
+        if hasattr(self, '_port_row') and self._port_row is not None:
+            try:
+                geom = self._port_row.geometry()
+                return float(geom.center().y())
+            except Exception:
+                pass
         return PREVIEW_PORT_ROW_Y

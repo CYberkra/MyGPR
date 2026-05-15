@@ -922,3 +922,202 @@ class TestStartupLazyLoading:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestWorkflowNodeCardUI:
+    """测试工作流节点卡片的 UI 优化"""
+
+    def test_port_row_no_duplicate_dots(self):
+        """测试27: full 模式端口行只有端口名文字，不出现双圆点"""
+        import sys
+        from PyQt6.QtWidgets import QApplication
+        from ui.workflow_canvas_cards import WorkflowNodeCard
+        from core.workflow_data import WorkflowMethod
+
+        app = QApplication.instance() or QApplication(sys.argv)
+
+        method = WorkflowMethod(
+            method_id="dc_shift",
+            stage_id="gain_compensation",
+            category="gain_compensation",
+        )
+        method.order = 1
+        card = WorkflowNodeCard(0, method)
+
+        input_text = card.input_port_label.text()
+        output_text = card.output_port_label.text()
+
+        assert "●" not in input_text, f"输入端口不应有圆点，实际是 '{input_text}'"
+        assert "●" not in output_text, f"输出端口不应有圆点，实际是 '{output_text}'"
+
+    def test_port_labels_use_workflow_port_labels(self):
+        """测试28: port_labels 使用 workflow_port_labels 函数"""
+        import sys
+        from PyQt6.QtWidgets import QApplication
+        from ui.workflow_canvas_cards import WorkflowNodeCard, workflow_port_labels
+        from core.workflow_data import WorkflowMethod
+
+        app = QApplication.instance() or QApplication(sys.argv)
+
+        method = WorkflowMethod(
+            method_id="manual_velocity_model",
+            stage_id="velocity_model",
+            category="velocity_model",
+        )
+        method.order = 0
+        card = WorkflowNodeCard(0, method)
+
+        card_labels = card.port_labels()
+        expected_labels = workflow_port_labels(method)
+
+        assert card_labels == expected_labels, \
+            f"port_labels 应该返回 {expected_labels}，实际是 {card_labels}"
+
+    def test_preview_port_row_no_duplicate_dots(self):
+        """测试29: Preview 节点端口行没有双圆点"""
+        import sys
+        from PyQt6.QtWidgets import QApplication
+        from ui.workflow_canvas_preview import BscanPreviewCard
+
+        app = QApplication.instance() or QApplication(sys.argv)
+
+        card = BscanPreviewCard()
+
+        for i in range(card.layout().count()):
+            item = card.layout().itemAt(i)
+            if hasattr(item, 'layout') and item.layout() is not None:
+                for j in range(item.layout().count()):
+                    widget = item.layout().itemAt(j).widget()
+                    if isinstance(widget, object) and hasattr(widget, 'text'):
+                        text = str(getattr(widget, 'text', lambda: '')())
+                        if text:
+                            assert "●" not in text, f"Preview 端口不应有圆点，实际是 '{text}'"
+
+    def test_preview_compact_mode_shows_port_info(self):
+        """测试30: Preview compact 模式设置"""
+        import sys
+        from PyQt6.QtWidgets import QApplication
+        from ui.workflow_canvas_preview import BscanPreviewCard
+
+        app = QApplication.instance() or QApplication(sys.argv)
+
+        card = BscanPreviewCard()
+        card.set_preview_data([[1, 2], [3, 4]], label="Test", success=True)
+        card.set_compact(True)
+
+        assert card.compact is True
+
+    def test_compact_node_item_uses_port_labels(self):
+        """测试31: CompactNodeItem 使用 workflow_port_labels"""
+        import sys
+        from PyQt6.QtWidgets import QApplication
+        from ui.workflow_canvas_cards import CompactNodeItem, WorkflowNodeProxy
+        from core.workflow_data import WorkflowMethod
+
+        app = QApplication.instance() or QApplication(sys.argv)
+
+        method = WorkflowMethod(
+            method_id="dc_shift",
+            stage_id="gain_compensation",
+            category="gain_compensation",
+        )
+        method.order = 0
+
+        proxy = WorkflowNodeProxy(0, method, None)
+        compact_item = CompactNodeItem(proxy)
+        compact_item.refresh()
+
+        port_text = compact_item.port_item.text()
+        assert "->" not in port_text or "→" in port_text, \
+            f"Compact 节点端口应使用 Unicode 箭头，实际是 '{port_text}'"
+
+    def test_mini_node_item_uses_port_labels(self):
+        """测试32: MiniNodeItem 使用 workflow_port_labels"""
+        import sys
+        from PyQt6.QtWidgets import QApplication
+        from ui.workflow_canvas_cards import MiniNodeItem, WorkflowNodeProxy
+        from core.workflow_data import WorkflowMethod
+
+        app = QApplication.instance() or QApplication(sys.argv)
+
+        method = WorkflowMethod(
+            method_id="dc_shift",
+            stage_id="gain_compensation",
+            category="gain_compensation",
+        )
+        method.order = 0
+
+        proxy = WorkflowNodeProxy(0, method, None)
+        mini_item = MiniNodeItem(proxy)
+        mini_item.refresh()
+
+        status_text = mini_item.status_item.text()
+        assert "in ●──────● out" not in status_text, \
+            f"Mini 节点不应使用硬编码端口显示，实际是 '{status_text}'"
+
+    def test_mini_preview_node_shows_status_and_port(self):
+        """测试33: Mini Preview 节点显示状态和 data→preview"""
+        import sys
+        from PyQt6.QtWidgets import QApplication
+        from ui.workflow_canvas_cards import MiniNodeItem, WorkflowNodeProxy
+        from core.workflow_data import WorkflowMethod
+
+        app = QApplication.instance() or QApplication(sys.argv)
+
+        preview_method = WorkflowMethod(
+            method_id="bscan_preview",
+            stage_id="preview",
+            category="preview",
+        )
+
+        proxy = WorkflowNodeProxy(-1, preview_method, None)
+        mini_item = MiniNodeItem(proxy)
+        mini_item.refresh()
+
+        title_text = mini_item.title_item.text()
+        status_text = mini_item.status_item.text()
+
+        assert "B-scan Preview" in title_text, \
+            f"Mini Preview 标题应该是 'B-scan Preview'，实际是 '{title_text}'"
+        assert "data → preview" in status_text, \
+            f"Mini Preview 应该显示 'data → preview'，实际是 '{status_text}'"
+
+    def test_param_row_bool_chip_fixed_width(self):
+        """测试34: bool chip ON/OFF 宽度稳定"""
+        import sys
+        from PyQt6.QtWidgets import QApplication
+        from ui.workflow_canvas_cards import WorkflowNodeCard, ParamRowWidget
+        from core.workflow_data import WorkflowMethod
+        from PyQt6.QtWidgets import QToolButton
+
+        app = QApplication.instance() or QApplication(sys.argv)
+
+        method = WorkflowMethod(
+            method_id="dc_shift",
+            stage_id="gain_compensation",
+            category="gain_compensation",
+        )
+        method.order = 0
+        card = WorkflowNodeCard(0, method)
+
+        param_metas = [
+            {"name": "enabled", "type": "bool", "default": True, "label": "启用"},
+            {"name": "normalize", "type": "bool", "default": False, "label": "归一化"},
+        ]
+
+        width_on = None
+        width_off = None
+        for meta in param_metas:
+            control, getter = card._create_param_control(meta)
+            if isinstance(control, QToolButton):
+                if control.isChecked():
+                    width_on = control.width()
+                else:
+                    control.setChecked(True)
+                    width_on = control.width()
+                    control.setChecked(False)
+                    width_off = control.width()
+
+        if width_on is not None and width_off is not None:
+            assert abs(width_on - width_off) <= 5, \
+                f"ON/OFF 宽度应该相近，实际 ON={width_on}, OFF={width_off}"
