@@ -251,3 +251,89 @@ def test_workflow_page_inspector_sync_after_card_switch():
     assert page.method_combo.currentData() == "agcGain", f"Inspector应该同步到 agcGain，实际是 {page.method_combo.currentData()}"
     
     page.close()
+
+
+def test_algorithm_menu_action_trigger_switches_method():
+    """测试46: 触发 action.triggered 后，method_id 更新正确"""
+    app = QApplication.instance() or QApplication(sys.argv)
+    
+    method = WorkflowMethod(
+        method_id="sec_gain",
+        stage_id="gain",
+        category="gain",
+    )
+    method.order = 1
+    card = WorkflowNodeCard(0, method)
+    
+    menu = card._build_algorithm_menu()
+    
+    # 找到 agcGain action 并触发
+    for action in menu.actions():
+        if action.data() == "agcGain":
+            action.trigger()
+            break
+    
+    app.processEvents()
+    
+    assert method.method_id == "agcGain", f"method应该切换到 agcGain，实际是 {method.method_id}"
+
+
+def test_algorithm_menu_current_action_no_change():
+    """测试47: 触发当前算法的 action.triggered 不重建参数"""
+    app = QApplication.instance() or QApplication(sys.argv)
+    
+    method = WorkflowMethod(
+        method_id="sec_gain",
+        stage_id="gain",
+        category="gain",
+    )
+    method.order = 1
+    # 保存原始参数
+    original_params = dict(method.params)
+    card = WorkflowNodeCard(0, method)
+    
+    menu = card._build_algorithm_menu()
+    
+    # 找到当前算法 action 并触发
+    for action in menu.actions():
+        if action.data() == "sec_gain":
+            action.trigger()
+            break
+    
+    app.processEvents()
+    
+    # 验证 method_id 没变
+    assert method.method_id == "sec_gain", f"当前算法不应该改变，实际是 {method.method_id}"
+    # 验证参数没变
+    assert method.params == original_params, "当前算法点击不应该重建参数"
+
+
+def test_algorithm_switch_successive_clicks():
+    """测试48: 连续单击 SEC -> AGC -> SEC 每次都能成功切换"""
+    app = QApplication.instance() or QApplication(sys.argv)
+    
+    method = WorkflowMethod(
+        method_id="sec_gain",
+        stage_id="gain",
+        category="gain",
+    )
+    method.order = 1
+    card = WorkflowNodeCard(0, method)
+    
+    # 第一次切换到 AGC
+    menu = card._build_algorithm_menu()
+    for action in menu.actions():
+        if action.data() == "agcGain":
+            action.trigger()
+            break
+    app.processEvents()
+    assert method.method_id == "agcGain", "第一次切换应该成功"
+    
+    # 第二次切换回 SEC (需要重新 build card)
+    menu2 = card._build_algorithm_menu()
+    for action in menu2.actions():
+        if action.data() == "sec_gain":
+            action.trigger()
+            break
+    app.processEvents()
+    assert method.method_id == "sec_gain", "第二次切换应该成功"

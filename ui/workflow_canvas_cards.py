@@ -893,7 +893,15 @@ class WorkflowNodeCard(QFrame):
             and event.type() == QEvent.Type.MouseButtonPress
             and event.button() == Qt.MouseButton.LeftButton
         ):
-            # 只在点击算法行区域时打开菜单
+            # 如果点击位置在 algorithm_button 内，让按钮自己处理，避免双触发
+            pos = event.pos()
+            if (
+                self.algorithm_button is not None
+                and self.algorithm_button.geometry().contains(pos)
+            ):
+                return False
+            
+            # 只在点击算法行空白处时打开菜单
             self._show_algorithm_menu()
             event.accept()
             return True
@@ -943,14 +951,7 @@ class WorkflowNodeCard(QFrame):
             pos = self.algorithm_button.mapToGlobal(
                 self.algorithm_button.rect().bottomLeft()
             )
-            selected = menu.exec(pos)
-
-            if selected is None:
-                return
-
-            method_id = selected.data()
-            if method_id and str(method_id) != self.method.method_id:
-                self._switch_algorithm_from_card(str(method_id))
+            menu.exec(pos)
         except Exception as e:
             # Fallback: try with window parent or focus Inspector
             import sys
@@ -974,14 +975,7 @@ class WorkflowNodeCard(QFrame):
             pos = self.algorithm_button.mapToGlobal(
                 self.algorithm_button.rect().bottomLeft()
             )
-            selected = menu.exec(pos)
-
-            if selected is None:
-                return
-
-            method_id = selected.data()
-            if method_id and str(method_id) != self.method.method_id:
-                self._switch_algorithm_from_card(str(method_id))
+            menu.exec(pos)
         except Exception as e2:
             import sys
             print(f"[ERROR] Algorithm menu fallback also failed: {e2}", file=sys.stderr)
@@ -1008,10 +1002,18 @@ class WorkflowNodeCard(QFrame):
             action.setData(key)
             action.setCheckable(True)
             action.setChecked(key == self.method.method_id)
+            # 直接绑定 triggered 信号，避免依赖 menu.exec() 返回值
+            action.triggered.connect(
+                lambda checked=False, method_id=key: self._switch_algorithm_from_card(str(method_id))
+            )
         return menu
 
     def _switch_algorithm_from_card(self, method_id: str) -> None:
         """Switch to a new algorithm and rebuild the card."""
+        # 避免当前算法重复触发
+        if method_id == self.method.method_id:
+            return
+        
         if update_workflow_method_algorithm(self.method, method_id):
             self._build()
             self.changed.emit(self.row)
