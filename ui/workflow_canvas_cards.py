@@ -516,40 +516,52 @@ class WorkflowNodeCard(QFrame):
 
             candidates = self._candidate_methods()
             self.algorithm_row_widget = QWidget()
+            # 标记为交互区域，防止被当成卡片拖拽
+            self.algorithm_row_widget.setProperty("workflowInteractiveRegion", True)
+            self.algorithm_row_widget.setCursor(Qt.CursorShape.PointingHandCursor)
+            
             algorithm_layout = QHBoxLayout(self.algorithm_row_widget)
             algorithm_layout.setContentsMargins(0, 0, 0, 0)
             algorithm_layout.setSpacing(8)
             algorithm_label = QLabel("算法")
             algorithm_label.setObjectName("paramName")
+            algorithm_label.setCursor(Qt.CursorShape.PointingHandCursor)
             algorithm_layout.addWidget(algorithm_label)
+            
             if len(candidates) > 1:
                 self.algorithm_button = QToolButton()
                 self.algorithm_button.setObjectName("nodeAlgorithmButton")
                 current_display = get_method_display_name(self.method.method_id)
                 self.algorithm_button.setText(f"{_elided(current_display, 120, self)} ▾")
                 self.algorithm_button.setToolTip(f"{current_display}\n({self.method.method_id})")
-                self.algorithm_button.setMinimumWidth(150)
-                self.algorithm_button.setMinimumHeight(26)
+                self.algorithm_button.setMinimumWidth(170)
+                self.algorithm_button.setMinimumHeight(30)
+                self.algorithm_button.setFixedHeight(32)
+                self.algorithm_button.setCursor(Qt.CursorShape.PointingHandCursor)
                 self.algorithm_button.setStyleSheet("""
-                    QToolButton {
+                    QToolButton#nodeAlgorithmButton {
                         background: #f8fafc;
                         border: 1px solid #d8e3f2;
-                        border-radius: 10px;
-                        padding: 3px 8px;
+                        border-radius: 8px;
+                        padding: 4px 10px;
                         text-align: left;
                     }
-                    QToolButton:hover {
+                    QToolButton#nodeAlgorithmButton:hover {
                         background: #eef3fa;
                         border-color: #a8c4e8;
                     }
                 """)
                 self.algorithm_button.clicked.connect(self._show_algorithm_menu)
                 algorithm_layout.addWidget(self.algorithm_button, 1)
+                
+                # 安装事件过滤器，让 algorithm_row_widget 也能响应点击
+                self.algorithm_row_widget.installEventFilter(self)
             else:
                 readonly_method = QLabel(_elided(get_method_display_name(self.method.method_id), 170, self))
                 readonly_method.setObjectName("nodeSubtitle")
                 readonly_method.setToolTip(get_method_display_name(self.method.method_id))
                 algorithm_layout.addWidget(readonly_method, 1)
+                
             root.addWidget(self.algorithm_row_widget)
 
             self.subtitle_label = QLabel(_elided(get_method_display_name(self.method.method_id), 245, self))
@@ -875,6 +887,18 @@ class WorkflowNodeCard(QFrame):
                 widget.installEventFilter(self)
 
     def eventFilter(self, watched, event):  # noqa: N802 - Qt override
+        # 处理 algorithm_row_widget 的点击事件
+        if (
+            watched == self.algorithm_row_widget
+            and event.type() == QEvent.Type.MouseButtonPress
+            and event.button() == Qt.MouseButton.LeftButton
+        ):
+            # 只在点击算法行区域时打开菜单
+            self._show_algorithm_menu()
+            event.accept()
+            return True
+        
+        # 处理滚轮事件
         if event.type() == QEvent.Type.Wheel and isinstance(watched, QWidget):
             if bool(watched.property("workflowWheelGuard")):
                 event.accept()
@@ -928,14 +952,57 @@ class WorkflowNodeCard(QFrame):
             if method_id and str(method_id) != self.method.method_id:
                 self._switch_algorithm_from_card(str(method_id))
         except Exception as e:
-            # Fallback: if popup fails, use context menu or Inspector to switch
+            # Fallback: try with window parent or focus Inspector
             import sys
-            print(f"[WARN] Algorithm menu popup failed: {e}", file=sys.stderr)
-            # Still allow other ways to switch algorithms (right-click, Inspector)
+            print(f"[WARN] Algorithm menu popup failed: {e}, trying fallback", file=sys.stderr)
+            self._show_algorithm_menu_fallback()
+
+    def _show_algorithm_menu_fallback(self) -> None:
+        """Fallback method for showing algorithm menu when primary method fails."""
+        if self._suppress:
+            return
+            
+        try:
+            # Build menu with window as parent for more stable popup
+            window = self.window()
+            if not window:
+                return
+                
+            menu = self._build_algorithm_menu()
+            menu.setParent(window)
+            
+            pos = self.algorithm_button.mapToGlobal(
+                self.algorithm_button.rect().bottomLeft()
+            )
+            selected = menu.exec(pos)
+
+            if selected is None:
+                return
+
+            method_id = selected.data()
+            if method_id and str(method_id) != self.method.method_id:
+                self._switch_algorithm_from_card(str(method_id))
+        except Exception as e2:
+            import sys
+            print(f"[ERROR] Algorithm menu fallback also failed: {e2}", file=sys.stderr)
 
     def _build_algorithm_menu(self) -> QMenu:
         """Build and return a QMenu containing all candidate algorithms."""
         menu = QMenu(self)
+        # 增大菜单项，更容易点中
+        menu.setStyleSheet("""
+            QMenu {
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 7px 24px 7px 18px;
+                min-height: 26px;
+            }
+            QMenu::item:selected {
+                background: #e8f1ff;
+            }
+        """)
+        
         for key in self._candidate_methods():
             action = menu.addAction(get_method_display_name(key))
             action.setData(key)
@@ -1864,7 +1931,11 @@ class WorkflowCanvasView(QGraphicsView):
         local_pos = proxy.mapFromScene(scene_pos)
         child = card.childAt(int(local_pos.x()), int(local_pos.y()))
         while child is not None and child is not card:
+            # 检查是否是交互控件或者具有交互区域属性的组件
             if self._is_interactive_widget(child):
+                return True
+            # 检查是否具有 workflowInteractiveRegion 属性
+            if bool(child.property("workflowInteractiveRegion")):
                 return True
             child = child.parentWidget()
         return False

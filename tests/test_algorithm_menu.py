@@ -28,9 +28,25 @@ def test_gain_card_algorithm_menu_button():
     assert isinstance(card.algorithm_button, QToolButton), "算法选择器应该是 QToolButton"
     assert not hasattr(card, 'algorithm_combo') or card.algorithm_combo is None, "不应该是 QComboBox"
     
-    # 按钮应该有正确的样式
-    assert card.algorithm_button.minimumWidth() >= 150, "按钮最小宽度应该 >= 150"
-    assert card.algorithm_button.minimumHeight() >= 26, "按钮高度应该 >= 26"
+    # 按钮应该有正确的样式和尺寸
+    assert card.algorithm_button.minimumWidth() >= 160, "按钮最小宽度应该 >= 160"
+    assert card.algorithm_button.minimumHeight() >= 30, "按钮高度应该 >= 30"
+
+
+def test_algorithm_row_interactive_property():
+    """测试45: algorithm_row_widget 应该有 workflowInteractiveRegion 属性"""
+    app = QApplication.instance() or QApplication(sys.argv)
+    
+    method = WorkflowMethod(
+        method_id="sec_gain",
+        stage_id="gain",
+        category="gain",
+    )
+    method.order = 1
+    card = WorkflowNodeCard(0, method)
+    
+    assert hasattr(card, 'algorithm_row_widget'), "卡片应该有 algorithm_row_widget 属性"
+    assert card.algorithm_row_widget.property("workflowInteractiveRegion") is True, "algorithm_row_widget 应该设置了 workflowInteractiveRegion 属性为 True"
 
 
 def test_gain_node_has_algorithm_menu_button():
