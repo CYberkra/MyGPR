@@ -408,7 +408,9 @@ def test_gain_node_algorithm_switches_from_card_inspector_and_context_menu():
         button = gain_card.findChild(QToolButton, "nodeAlgorithmButton")
         # 注意：gain 阶段可能只有一个候选算法，此时按钮不存在
         if button is not None:
-            assert button.menu() is not None, "按钮应该有菜单"
+            # 新实现使用 _build_algorithm_menu() 而不是 button.setMenu()
+            menu = gain_card._build_algorithm_menu()
+            assert menu is not None, "应该能够构建算法菜单"
         assert method.node_id == original_node_id
         assert method.stage_id == original_stage_id
         assert method.order == original_order

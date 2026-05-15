@@ -523,21 +523,11 @@ class WorkflowNodeCard(QFrame):
             algorithm_label.setObjectName("paramName")
             algorithm_layout.addWidget(algorithm_label)
             if len(candidates) > 1:
-                self.algorithm_menu = QMenu(self.algorithm_row_widget)
-                for key in candidates:
-                    display_name = get_method_display_name(key)
-                    action = self.algorithm_menu.addAction(display_name)
-                    action.setData(key)
-                    action.setCheckable(True)
-                    if key == self.method.method_id:
-                        action.setChecked(True)
                 self.algorithm_button = QToolButton()
                 self.algorithm_button.setObjectName("nodeAlgorithmButton")
                 current_display = get_method_display_name(self.method.method_id)
                 self.algorithm_button.setText(f"{_elided(current_display, 120, self)} ▾")
                 self.algorithm_button.setToolTip(f"{current_display}\n({self.method.method_id})")
-                self.algorithm_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-                self.algorithm_button.setMenu(self.algorithm_menu)
                 self.algorithm_button.setMinimumWidth(150)
                 self.algorithm_button.setMinimumHeight(26)
                 self.algorithm_button.setStyleSheet("""
@@ -553,8 +543,7 @@ class WorkflowNodeCard(QFrame):
                         border-color: #a8c4e8;
                     }
                 """)
-                self.algorithm_menu.aboutToShow.connect(self._update_algorithm_menu_checked)
-                self.algorithm_menu.triggered.connect(self._on_algorithm_menu_triggered)
+                self.algorithm_button.clicked.connect(self._show_algorithm_menu)
                 algorithm_layout.addWidget(self.algorithm_button, 1)
             else:
                 readonly_method = QLabel(_elided(get_method_display_name(self.method.method_id), 170, self))
@@ -919,32 +908,40 @@ class WorkflowNodeCard(QFrame):
         self.method.hidden = not bool(self.method.hidden)
         self.changed.emit(self.row)
 
-    def _update_algorithm_menu_checked(self) -> None:
-        """Update checked state of algorithm menu before showing."""
-        if not hasattr(self, 'algorithm_menu'):
-            return
-        for action in self.algorithm_menu.actions():
-            method_id = action.data()
-            if method_id:
-                action.setChecked(str(method_id) == self.method.method_id)
-
-    def _on_algorithm_menu_triggered(self, action: QAction) -> None:
-        """Handle algorithm menu action triggered."""
+    def _show_algorithm_menu(self) -> None:
+        """Show algorithm selection menu using QMenu.exec() for reliable popup in QGraphicsProxyWidget."""
         if self._suppress:
             return
-        method_id = action.data()
-        if not method_id:
+
+        menu = self._build_algorithm_menu()
+
+        pos = self.algorithm_button.mapToGlobal(
+            self.algorithm_button.rect().bottomLeft()
+        )
+        selected = menu.exec(pos)
+
+        if selected is None:
             return
-        method_id = str(method_id)
-        if method_id == self.method.method_id:
-            return
+
+        method_id = selected.data()
+        if method_id and str(method_id) != self.method.method_id:
+            self._switch_algorithm_from_card(str(method_id))
+
+    def _build_algorithm_menu(self) -> QMenu:
+        """Build and return a QMenu containing all candidate algorithms."""
+        menu = QMenu(self)
+        for key in self._candidate_methods():
+            action = menu.addAction(get_method_display_name(key))
+            action.setData(key)
+            action.setCheckable(True)
+            action.setChecked(key == self.method.method_id)
+        return menu
+
+    def _switch_algorithm_from_card(self, method_id: str) -> None:
+        """Switch to a new algorithm and rebuild the card."""
         if update_workflow_method_algorithm(self.method, method_id):
             self._build()
             self.changed.emit(self.row)
-            current_display = get_method_display_name(self.method.method_id)
-            if hasattr(self, 'algorithm_button'):
-                self.algorithm_button.setText(f"{_elided(current_display, 120, self)} ▾")
-                self.algorithm_button.setToolTip(f"{current_display}\n({self.method.method_id})")
 
     def _on_algorithm_changed(self) -> None:
         """Legacy handler for algorithm combo - no longer used for new QToolButton+Menu."""
