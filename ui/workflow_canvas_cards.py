@@ -50,6 +50,32 @@ MIN_NODE_WIDTH = 280
 MIN_NODE_HEIGHT = 150
 MAX_NODE_WIDTH = 520
 MAX_NODE_HEIGHT = 720
+NODE_PORT_ROW_Y = 50.0
+
+
+def _elided(text: str, width: int, widget: QWidget) -> str:
+    metrics = QFontMetrics(widget.font())
+    return metrics.elidedText(str(text), Qt.TextElideMode.ElideRight, int(width))
+
+
+def workflow_port_labels(method: WorkflowMethod) -> tuple[str, str]:
+    """Return compact visual input/output labels for current first-pass ports."""
+    method_id = str(getattr(method, "method_id", ""))
+    stage_id = str(getattr(method, "stage_id", ""))
+    category = str(getattr(method, "category", ""))
+    if method_id == "raw_input":
+        return "source", "data"
+    if method_id == "bscan_preview":
+        return "data", "preview"
+    if method_id in {"manual_velocity_model"} or stage_id == "velocity_model":
+        return "data", "velocity"
+    if method_id in {"geometry_depth_context", "time_to_depth"} or stage_id == "geometry_depth":
+        return "data / velocity", "depth"
+    if method_id in {"kirchhoff_migration", "stolt_migration"} or category == "migration":
+        return "data / velocity", "image"
+    if category in {"export", "evidence"}:
+        return "data", "evidence"
+    return "data", "data"
 
 
 class ParamRowWidget(QWidget):
@@ -57,21 +83,52 @@ class ParamRowWidget(QWidget):
 
     def __init__(self, label: str, control: QWidget, tooltip: str = "", parent=None):
         super().__init__(parent)
+        self._slider: QSlider | None = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
+        layout.setSpacing(2)
+        self.setObjectName("paramRow")
+        self.setStyleSheet(
+            """
+            QWidget#paramRow {
+                min-height: 28px;
+            }
+            QAbstractSpinBox, QComboBox, QLineEdit, QToolButton#boolChip {
+                background: #f8fafc;
+                border: 1px solid #d8e3f2;
+                border-radius: 10px;
+                padding: 2px 8px;
+                min-height: 22px;
+            }
+            QAbstractSpinBox {
+                qproperty-alignment: AlignRight;
+            }
+            QToolButton#boolChip[checked="true"] {
+                background: #e8f2ff;
+                color: #2457b8;
+                border-color: #9ec5ff;
+                font-weight: 700;
+            }
+            QToolButton#boolChip[checked="false"] {
+                background: #f3f4f6;
+                color: #6b7280;
+                border-color: #d1d5db;
+                font-weight: 700;
+            }
+            """
+        )
 
-        metrics = QFontMetrics(self.font())
-        short_label = metrics.elidedText(str(label), Qt.TextElideMode.ElideRight, 190)
+        short_label = _elided(str(label), 142, self)
         name = QLabel(short_label)
         name.setObjectName("paramName")
         name.setWordWrap(False)
-        name.setMinimumWidth(90)
+        name.setMinimumWidth(92)
+        name.setMaximumWidth(150)
         name.setToolTip(str(label))
 
         top_row = QHBoxLayout()
         top_row.setContentsMargins(0, 0, 0, 0)
-        top_row.setSpacing(8)
+        top_row.setSpacing(6)
         top_row.addWidget(name, 1)
 
         spin = control.findChild(QAbstractSpinBox)
@@ -79,9 +136,12 @@ class ParamRowWidget(QWidget):
         if spin is not None and slider is not None:
             spin.setParent(self)
             slider.setParent(self)
+            spin.setMaximumWidth(96)
             top_row.addWidget(spin, 0)
             layout.addLayout(top_row)
             layout.addWidget(slider)
+            self._slider = slider
+            slider.hide()
             control.deleteLater()
         else:
             top_row.addWidget(control, 0)
@@ -95,6 +155,16 @@ class ParamRowWidget(QWidget):
                 spin.setToolTip(tooltip)
             if slider is not None:
                 slider.setToolTip(tooltip)
+
+    def enterEvent(self, event):  # noqa: N802 - Qt override
+        if self._slider is not None:
+            self._slider.show()
+        event.accept()
+
+    def leaveEvent(self, event):  # noqa: N802 - Qt override
+        if self._slider is not None:
+            self._slider.hide()
+        event.accept()
 
 
 class WorkflowNodeCard(QFrame):
@@ -123,7 +193,7 @@ class WorkflowNodeCard(QFrame):
             QFrame#workflowNodeCard {
                 background: #ffffff;
                 border: 1px solid #d7e2f0;
-                border-radius: 10px;
+                border-radius: 8px;
             }
             QFrame#workflowNodeCard[current="true"] {
                 border: 2px solid #3278ff;
@@ -160,6 +230,21 @@ class WorkflowNodeCard(QFrame):
                 font-weight: 800;
                 color: #1f2d3d;
                 font-size: 14px;
+            }
+            QLabel#portLabel {
+                color: #52647a;
+                font-size: 12px;
+                font-weight: 700;
+            }
+            QLabel#portDotIn {
+                color: #3278ff;
+                font-size: 15px;
+                font-weight: 900;
+            }
+            QLabel#portDotOut {
+                color: #7d4cff;
+                font-size: 15px;
+                font-weight: 900;
             }
             QLabel#nodeSubtitle {
                 color: #52647a;
@@ -246,14 +331,14 @@ class WorkflowNodeCard(QFrame):
                 padding: 0px;
             }
             QSlider::groove:horizontal {
-                height: 4px;
+                height: 3px;
                 background: #dbe5f2;
                 border-radius: 2px;
             }
             QSlider::handle:horizontal {
-                width: 12px;
-                margin: -5px 0;
-                border-radius: 6px;
+                width: 10px;
+                margin: -4px 0;
+                border-radius: 5px;
                 background: #3278ff;
             }
             """
@@ -292,19 +377,22 @@ class WorkflowNodeCard(QFrame):
                 QWidget().setLayout(old_layout)
 
             root = QVBoxLayout(self)
-            root.setContentsMargins(12, 10, 12, 12)
-            root.setSpacing(8)
+            root.setContentsMargins(10, 8, 10, 10)
+            root.setSpacing(5)
 
             title_row = QHBoxLayout()
-            title_row.setSpacing(8)
-            title = QLabel(f"{self.row + 1:02d} {self._stage_label()}")
+            title_row.setSpacing(6)
+            full_title = f"{self.row + 1:02d} {self._stage_label()}"
+            title = QLabel(_elided(full_title, 205, self))
             title.setObjectName("nodeTitle")
-            title.setWordWrap(True)
+            title.setWordWrap(False)
+            title.setToolTip(full_title)
             title_row.addWidget(title, 1)
 
             status_chip = QLabel(self._status_chip_text())
             status_chip.setObjectName("nodeStatusChip")
             status_chip.setProperty("state", self._status_chip_state())
+            self.status_chip = status_chip
             title_row.addWidget(status_chip)
 
             self.eye_button = QToolButton()
@@ -315,11 +403,28 @@ class WorkflowNodeCard(QFrame):
             title_row.addWidget(self.eye_button)
             root.addLayout(title_row)
 
-            subtitle = QLabel(get_method_display_name(self.method.method_id))
+            in_label, out_label = self.port_labels()
+            self.input_port_label = QLabel(f"{in_label} ●")
+            self.input_port_label.setObjectName("portLabel")
+            self.input_port_label.setToolTip(in_label)
+            self.output_port_label = QLabel(f"● {out_label}")
+            self.output_port_label.setObjectName("portLabel")
+            self.output_port_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+            self.output_port_label.setToolTip(out_label)
+            port_row = QHBoxLayout()
+            port_row.setContentsMargins(0, 0, 0, 0)
+            port_row.setSpacing(6)
+            port_row.addWidget(self.input_port_label, 0)
+            port_row.addStretch(1)
+            port_row.addWidget(self.output_port_label, 0)
+            root.addLayout(port_row)
+
+            subtitle = QLabel(_elided(get_method_display_name(self.method.method_id), 245, self))
             if self.method.method_id == "raw_input":
                 subtitle.setText("Raw Input")
             subtitle.setObjectName("nodeSubtitle")
-            subtitle.setWordWrap(True)
+            subtitle.setWordWrap(False)
+            subtitle.setToolTip(get_method_display_name(self.method.method_id))
             root.addWidget(subtitle)
 
             if self.method.method_id == "raw_input":
@@ -400,6 +505,12 @@ class WorkflowNodeCard(QFrame):
         finally:
             self._suppress = False
 
+    def port_anchor_y(self) -> float:
+        return NODE_PORT_ROW_Y
+
+    def port_labels(self) -> tuple[str, str]:
+        return workflow_port_labels(self.method)
+
     def _status_chip_state(self) -> str:
         if self.method.method_id == "raw_input":
             return "on"
@@ -444,6 +555,15 @@ class WorkflowNodeCard(QFrame):
             self.setProperty("status", "")
         self.style().unpolish(self)
         self.style().polish(self)
+
+    def refresh_status(self) -> None:
+        chip = getattr(self, "status_chip", None)
+        if isinstance(chip, QLabel):
+            chip.setText(self._status_chip_text())
+            chip.setProperty("state", self._status_chip_state())
+            chip.style().unpolish(chip)
+            chip.style().polish(chip)
+        self._refresh_state_properties()
 
     def _install_wheel_guard(self, control: QWidget) -> None:
         guarded_types = (QAbstractSpinBox, QComboBox, QSlider)
@@ -575,9 +695,21 @@ class WorkflowNodeCard(QFrame):
         value = self.method.params.get(name, meta.get("default", ""))
 
         if param_type == "bool":
-            control = QCheckBox()
+            control = QToolButton()
+            control.setObjectName("boolChip")
+            control.setCheckable(True)
             control.setChecked(bool(value))
-            control.toggled.connect(self._on_param_changed)
+            control.setText("ON" if control.isChecked() else "OFF")
+            control.setProperty("checked", "true" if control.isChecked() else "false")
+
+            def on_toggled(checked: bool) -> None:
+                control.setText("ON" if checked else "OFF")
+                control.setProperty("checked", "true" if checked else "false")
+                control.style().unpolish(control)
+                control.style().polish(control)
+                self._on_param_changed()
+
+            control.toggled.connect(on_toggled)
             return control, control.isChecked
 
         if param_type in {"str", "choice"} and meta.get("choices"):
@@ -689,7 +821,10 @@ class MiniNodeItem(QGraphicsRectItem):
         stage_label = str(stage.get("label") or method.category or "节点")
         method_name = get_method_display_name(method.method_id)
         status = "HIDE" if method.hidden else ("OFF" if not method.enabled else "ON")
-        self.title_item.setText(f"{self.proxy.row + 1:02d} {stage_label[:18]}")
+        if self.proxy.row < 0:
+            self.title_item.setText("B-scan Preview")
+        else:
+            self.title_item.setText(f"{self.proxy.row + 1:02d} {stage_label[:18]}")
         self.subtitle_item.setText(method_name[:20])
         self.status_item.setText(f"{status}   in ●──────● out")
         self.title_item.setPos(10, 8)
@@ -704,6 +839,53 @@ class MiniNodeItem(QGraphicsRectItem):
         else:
             self.setBrush(QBrush(QColor("#f9fbff")))
             pen = QPen(QColor("#8fb3ff"), 1.4)
+        self.setPen(pen)
+
+
+class CompactNodeItem(QGraphicsRectItem):
+    """Medium-detail node shown at workflow zoom between full and mini."""
+
+    def __init__(self, proxy: "WorkflowNodeProxy"):
+        super().__init__()
+        self.proxy = proxy
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
+        self.setZValue(6)
+        self.title_item = QGraphicsSimpleTextItem("", self)
+        self.method_item = QGraphicsSimpleTextItem("", self)
+        self.port_item = QGraphicsSimpleTextItem("", self)
+        for item in [self.title_item, self.method_item, self.port_item]:
+            item.setBrush(QBrush(QColor("#1f2d3d")))
+        self.hide()
+
+    def refresh(self) -> None:
+        rect = self.proxy.boundingRect()
+        self.setRect(QRectF(0, 0, max(240.0, min(300.0, rect.width())), 112.0))
+        self.setPos(self.proxy.pos())
+        method = self.proxy.method
+        stage = WORKFLOW_STAGE_BY_ID.get(method.stage_id, {})
+        stage_label = str(stage.get("label") or method.category or "节点")
+        method_name = get_method_display_name(method.method_id)
+        in_label, out_label = workflow_port_labels(method)
+        status = "HIDE" if method.hidden else ("OFF" if not method.enabled else self.proxy.status_short())
+        if self.proxy.row < 0:
+            self.title_item.setText(f"B-scan Preview   {status}")
+        else:
+            self.title_item.setText(f"{self.proxy.row + 1:02d} {stage_label[:16]}   {status}")
+        self.method_item.setText(method_name[:24])
+        self.port_item.setText(f"{in_label} -> {out_label}")
+        self.title_item.setPos(10, 10)
+        self.method_item.setPos(10, 40)
+        self.port_item.setPos(10, 70)
+        if method.hidden:
+            brush = QBrush(QColor("#f4f6f8"))
+            pen = QPen(QColor("#9aa8ba"), 1.2, Qt.PenStyle.DashLine)
+        elif not method.enabled:
+            brush = QBrush(QColor("#f1f3f6"))
+            pen = QPen(QColor("#b8c1cd"), 1.2)
+        else:
+            brush = QBrush(QColor("#f9fbff"))
+            pen = QPen(QColor("#8fb3ff"), 1.4)
+        self.setBrush(brush)
         self.setPen(pen)
 
 
@@ -739,6 +921,7 @@ class WorkflowNodeProxy(QGraphicsProxyWidget):
         self.node_id = method.node_id if row >= 0 else PREVIEW_NODE_ID
         self.input_port = WorkflowPortItem("input", self, "data")
         self.output_port = WorkflowPortItem("output", self, "data")
+        self.compact_item = CompactNodeItem(self)
         self.mini_item = MiniNodeItem(self)
         self.resize_handle = WorkflowResizeHandleItem(self)
         self.setFlags(
@@ -763,22 +946,33 @@ class WorkflowNodeProxy(QGraphicsProxyWidget):
             self.setOpacity(0.70)
         else:
             self.setOpacity(1.0)
+        self.compact_item.refresh()
         self.mini_item.refresh()
 
     def set_lod_compact(self, compact: bool) -> None:
+        self.set_lod_mode("compact" if compact else "full")
+
+    def status_short(self) -> str:
+        status = getattr(self.method, "status", "idle")
+        return {
+            "queued": "QUE",
+            "running": "RUN",
+            "success": "OK",
+            "success_stale": "OLD",
+            "failed": "FAIL",
+            "skipped": "SKIP",
+        }.get(status, "ON")
+
+    def set_lod_mode(self, mode: str) -> None:
         widget = self.widget()
-        if self.row < 0:
-            if widget is not None:
-                widget.setVisible(True)
-            self.mini_item.hide()
-            self.resize_handle.hide()
-            self.update_port_positions()
-            return
+        mode = mode if mode in {"full", "compact", "mini"} else "full"
         if widget is not None:
-            widget.setVisible(not compact)
-        self.resize_handle.setVisible(not compact and self.row >= 0)
+            widget.setVisible(mode == "full")
+        self.resize_handle.setVisible(mode == "full" and self.row >= 0)
+        self.compact_item.refresh()
         self.mini_item.refresh()
-        self.mini_item.setVisible(bool(compact) and self.row >= 0)
+        self.compact_item.setVisible(mode == "compact")
+        self.mini_item.setVisible(mode == "mini")
         self.update_port_positions()
 
     def apply_size(self, width: float, height: float) -> None:
@@ -795,11 +989,19 @@ class WorkflowNodeProxy(QGraphicsProxyWidget):
         rect = self.boundingRect()
         if not rect.isValid() or rect.width() <= 0:
             return
-        self.input_port.setPos(rect.left(), rect.center().y())
-        self.output_port.setPos(rect.right(), rect.center().y())
+        anchor_y = rect.center().y()
+        widget = self.widget()
+        if widget is not None and hasattr(widget, "port_anchor_y"):
+            try:
+                anchor_y = float(widget.port_anchor_y())
+            except Exception:
+                anchor_y = rect.center().y()
+        self.input_port.setPos(rect.left(), anchor_y)
+        self.output_port.setPos(rect.right(), anchor_y)
         self.input_port.set_label_pos()
         self.output_port.set_label_pos()
         self.resize_handle.setPos(rect.right() - 16.0, rect.bottom() - 16.0)
+        self.compact_item.refresh()
         self.mini_item.refresh()
 
     def itemChange(self, change, value):  # noqa: N802 - Qt override
@@ -807,6 +1009,7 @@ class WorkflowNodeProxy(QGraphicsProxyWidget):
         if change == QGraphicsProxyWidget.GraphicsItemChange.ItemPositionHasChanged:
             self.update_port_positions()
             self.mini_item.setPos(self.pos())
+            self.compact_item.setPos(self.pos())
             scene = self.scene()
             if isinstance(scene, WorkflowCanvasScene):
                 scene.update_edges()
@@ -1003,6 +1206,7 @@ class WorkflowCanvasView(QGraphicsView):
         self._preview_proxy: WorkflowNodeProxy | None = None
         self._rebuild_pending = False
         self._compact_cards = False
+        self._lod_state = "full"
         self._compact_threshold = 0.58
         self._normal_threshold = 0.74
         self.setRenderHints(self.renderHints())
@@ -1127,7 +1331,9 @@ class WorkflowCanvasView(QGraphicsView):
         for proxy in self._scene.proxies:
             card = proxy.widget()
             if isinstance(card, WorkflowNodeCard):
-                card._build()
+                card.refresh_status()
+                proxy.update_visual_state()
+        self._scene.update_edges()
 
     def _event_view_pos(self, event) -> QPoint:
         if hasattr(event, "position"):
@@ -1608,21 +1814,23 @@ class WorkflowCanvasView(QGraphicsView):
         self._scene.update_edges()
         self.layout_changed.emit(self._canvas_layout)
 
-    def _apply_zoom_lod(self, force: bool = False) -> None:
+    def _lod_mode(self) -> str:
         scale = self.transform().m11()
-        if scale < self._compact_threshold:
-            compact = True
-        elif scale > self._normal_threshold:
-            compact = False
-        else:
-            compact = self._compact_cards
+        if scale >= 0.85:
+            return "full"
+        if scale >= 0.50:
+            return "compact"
+        return "mini"
 
-        if not force and compact == self._compact_cards:
+    def _apply_zoom_lod(self, force: bool = False) -> None:
+        mode = self._lod_mode()
+        if not force and mode == self._lod_state:
             return
 
-        self._compact_cards = compact
+        self._lod_state = mode
+        self._compact_cards = mode != "full"
         for proxy in self._scene.proxies:
-            proxy.set_lod_compact(compact)
+            proxy.set_lod_mode(mode)
         self._scene.update_edges()
 
     def _rebuild(self) -> None:
@@ -1659,6 +1867,7 @@ class WorkflowCanvasView(QGraphicsView):
             if "width" in layout or "height" in layout:
                 proxy.apply_size(float(layout.get("width", MIN_NODE_WIDTH)), float(layout.get("height", MIN_NODE_HEIGHT)))
             self._scene.addItem(proxy)
+            self._scene.addItem(proxy.compact_item)
             self._scene.addItem(proxy.mini_item)
             self._scene.proxies.append(proxy)
             self._scene.proxy_by_id[proxy.node_id] = proxy
@@ -1679,6 +1888,7 @@ class WorkflowCanvasView(QGraphicsView):
             float(preview_layout.get("y", y0 + (preview_row // max_per_row) * y_step)),
         )
         self._scene.addItem(preview_proxy)
+        self._scene.addItem(preview_proxy.compact_item)
         self._scene.addItem(preview_proxy.mini_item)
         self._scene.proxies.append(preview_proxy)
         self._scene.proxy_by_id[PREVIEW_NODE_ID] = preview_proxy

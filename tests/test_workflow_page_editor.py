@@ -219,7 +219,7 @@ def test_workflow_canvas_node_selection_and_actions_sync_hidden_list():
         app.processEvents()
 
 
-def test_workflow_canvas_zoom_lod_switches_to_mini_nodes_without_rebuilding_widgets():
+def test_workflow_canvas_zoom_lod_switches_full_compact_mini_without_rebuilding_widgets():
     app = _get_app()
     canvas = WorkflowCanvasView()
     try:
@@ -235,12 +235,22 @@ def test_workflow_canvas_zoom_lod_switches_to_mini_nodes_without_rebuilding_widg
         assert cards
         proxies = [proxy for proxy in canvas._scene.proxies if proxy.row >= 0]
         assert not any(proxy.mini_item.isVisible() for proxy in proxies)
+        assert not any(proxy.compact_item.isVisible() for proxy in proxies)
         assert all(proxy.widget().isVisible() for proxy in proxies)
 
         canvas.resetTransform()
-        canvas.scale(0.5, 0.5)
+        canvas.scale(0.7, 0.7)
         canvas._apply_zoom_lod(force=True)
         app.processEvents()
+        assert all(proxy.compact_item.isVisible() for proxy in proxies)
+        assert not any(proxy.mini_item.isVisible() for proxy in proxies)
+        assert not any(proxy.widget().isVisible() for proxy in proxies)
+
+        canvas.resetTransform()
+        canvas.scale(0.45, 0.45)
+        canvas._apply_zoom_lod(force=True)
+        app.processEvents()
+        assert not any(proxy.compact_item.isVisible() for proxy in proxies)
         assert all(proxy.mini_item.isVisible() for proxy in proxies)
         assert not any(proxy.widget().isVisible() for proxy in proxies)
 
@@ -248,6 +258,7 @@ def test_workflow_canvas_zoom_lod_switches_to_mini_nodes_without_rebuilding_widg
         canvas.scale(1.0, 1.0)
         canvas._apply_zoom_lod(force=True)
         app.processEvents()
+        assert not any(proxy.compact_item.isVisible() for proxy in proxies)
         assert not any(proxy.mini_item.isVisible() for proxy in proxies)
         assert all(proxy.widget().isVisible() for proxy in proxies)
     finally:
@@ -275,10 +286,12 @@ def test_workflow_canvas_preview_node_updates_from_output_data():
         assert "Test B-scan" in preview_cards[0].source_label.text()
 
         canvas.resetTransform()
-        canvas.scale(0.5, 0.5)
+        canvas.scale(0.7, 0.7)
         canvas._apply_zoom_lod(force=True)
         app.processEvents()
-        assert preview_cards[0].isVisible() is True
+        preview_proxy = next(proxy for proxy in canvas._scene.proxies if isinstance(proxy.widget(), BscanPreviewCard))
+        assert preview_cards[0].isVisible() is False
+        assert preview_proxy.compact_item.isVisible() is True
     finally:
         canvas.close()
         app.processEvents()
@@ -296,6 +309,12 @@ def test_workflow_canvas_node_ports_and_edges_follow_proxy_moves():
         assert algorithm_proxies
         assert all(proxy.input_port is not None for proxy in algorithm_proxies)
         assert all(proxy.output_port is not None for proxy in algorithm_proxies)
+        first_card = algorithm_proxies[0].widget()
+        assert isinstance(first_card, WorkflowNodeCard)
+        assert first_card.input_port_label.isVisible()
+        assert first_card.output_port_label.isVisible()
+        assert algorithm_proxies[0].input_port.pos().y() == first_card.port_anchor_y()
+        assert algorithm_proxies[0].output_port.pos().y() == first_card.port_anchor_y()
         assert len(canvas._scene.edges) == max(0, len(canvas._scene.proxies) - 1)
 
         first_edge = canvas._scene.edges[0]
@@ -314,6 +333,78 @@ def test_workflow_canvas_node_ports_and_edges_follow_proxy_moves():
         assert len(canvas._scene.edges) == edge_count
         assert [id(edge) for edge in canvas._scene.edges] == edge_ids
         assert first_edge.path() != old_path
+    finally:
+        canvas.close()
+        app.processEvents()
+
+
+def test_workflow_card_port_type_mapping_and_preview_style_are_visible():
+    app = _get_app()
+    canvas = WorkflowCanvasView()
+    try:
+        config = build_default_workflow_config("high_quality_uav_gpr")
+        canvas.set_methods(config.methods)
+        app.processEvents()
+
+        cards = [proxy.widget() for proxy in canvas._scene.proxies if isinstance(proxy.widget(), WorkflowNodeCard)]
+        assert any("velocity" in card.output_port_label.text() for card in cards)
+        assert not all(card.output_port_label.text() == "● data" for card in cards)
+
+        preview_card = next(
+            proxy.widget()
+            for proxy in canvas._scene.proxies
+            if isinstance(proxy.widget(), BscanPreviewCard)
+        )
+        labels = preview_card.findChildren(type(preview_card.source_label))
+        assert any(label.text() == "data ●" for label in labels)
+        assert any(label.text() == "● preview" for label in labels)
+    finally:
+        canvas.close()
+        app.processEvents()
+
+
+def test_workflow_card_title_bool_and_slider_compact_contracts():
+    app = _get_app()
+    canvas = WorkflowCanvasView()
+    try:
+        config = build_default_workflow_config("high_quality_uav_gpr")
+        canvas.set_methods(config.methods)
+        app.processEvents()
+
+        motion_proxy = next(
+            proxy for proxy in canvas._scene.proxies
+            if getattr(proxy.method, "method_id", "") == "motion_compensation_v2"
+        )
+        motion_card = motion_proxy.widget()
+        assert isinstance(motion_card, WorkflowNodeCard)
+        motion_card.set_expanded(True)
+        app.processEvents()
+        title = motion_card.findChild(type(motion_card.input_port_label), "nodeTitle")
+        assert title is not None
+        assert title.wordWrap() is False
+        assert title.toolTip().startswith(f"{motion_proxy.row + 1:02d} ")
+
+        bool_chips = [
+            btn for btn in motion_card.findChildren(QToolButton)
+            if btn.objectName() == "boolChip"
+        ]
+        assert bool_chips
+        assert not motion_card.findChildren(QCheckBox)
+
+        dewow_proxy = next(
+            proxy for proxy in canvas._scene.proxies
+            if getattr(proxy.method, "method_id", "") == "dewow"
+        )
+        dewow_card = dewow_proxy.widget()
+        assert isinstance(dewow_card, WorkflowNodeCard)
+        slider = dewow_card.findChild(QSlider)
+        assert slider is not None
+        assert slider.isHidden()
+        row = slider.parentWidget()
+        row.enterEvent(QEvent(QEvent.Type.Enter))
+        assert slider.isVisible()
+        row.leaveEvent(QEvent(QEvent.Type.Leave))
+        assert slider.isHidden()
     finally:
         canvas.close()
         app.processEvents()
@@ -474,8 +565,13 @@ def test_workflow_node_card_bool_param_does_not_duplicate_label_text():
     card = WorkflowNodeCard(0, method)
     try:
         checkbox = card.findChild(QCheckBox)
-        assert checkbox is not None
-        assert checkbox.text() == ""
+        assert checkbox is None
+        bool_chips = [
+            btn for btn in card.findChildren(QToolButton)
+            if btn.objectName() == "boolChip"
+        ]
+        assert bool_chips
+        assert {btn.text() for btn in bool_chips} <= {"ON", "OFF"}
     finally:
         card.close()
         app.processEvents()
@@ -684,6 +780,7 @@ def test_workflow_canvas_view_drag_hit_testing_keeps_controls_interactive():
 
         slider = card.findChild(QSlider)
         assert slider is not None
+        slider.show()
         slider_center = slider.mapTo(card, slider.rect().center())
         slider_pos = proxy.mapToScene(QPointF(slider_center))
         assert canvas._is_interactive_card_target(proxy, slider_pos) is True

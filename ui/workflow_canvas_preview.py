@@ -19,6 +19,9 @@ from PyQt6.QtWidgets import (
 )
 
 
+PREVIEW_PORT_ROW_Y = 50.0
+
+
 def _coerce_bscan_array(data: Any) -> np.ndarray | None:
     """Return a numeric 2-D array suitable for image preview.
 
@@ -135,6 +138,11 @@ class BscanPreviewCard(QFrame):
             QLabel#previewTitle {
                 font-weight: 800;
                 color: #5b4300;
+            }
+            QLabel#previewPortLabel {
+                color: #6b5a2a;
+                font-size: 12px;
+                font-weight: 700;
             }
             QLabel#previewChipFresh {
                 background: #dcfce7;
@@ -259,7 +267,7 @@ class BscanPreviewCard(QFrame):
 
         root = QVBoxLayout(self)
         root.setContentsMargins(10, 8, 10, 10)
-        root.setSpacing(7)
+        root.setSpacing(5)
 
         title_row = QHBoxLayout()
         title_row.setSpacing(6)
@@ -268,22 +276,34 @@ class BscanPreviewCard(QFrame):
         title_row.addWidget(title, 1)
 
         if self._is_failed:
-            chip_text = "运行失败"
+            chip_text = "失败"
             chip_class = "previewChipFailed"
         elif self._is_stale:
-            chip_text = "上次结果"
+            chip_text = "上次"
             chip_class = "previewChipStale"
         elif self._has_data:
-            chip_text = "最新结果"
+            chip_text = "最新"
             chip_class = "previewChipFresh"
         else:
-            chip_text = "空"
+            chip_text = "暂无"
             chip_class = "previewChipEmpty"
 
         chip = QLabel(chip_text)
         chip.setObjectName(chip_class)
         title_row.addWidget(chip)
         root.addLayout(title_row)
+
+        port_row = QHBoxLayout()
+        port_row.setContentsMargins(0, 0, 0, 0)
+        left_port = QLabel("data ●")
+        left_port.setObjectName("previewPortLabel")
+        right_port = QLabel("● preview")
+        right_port.setObjectName("previewPortLabel")
+        right_port.setAlignment(Qt.AlignmentFlag.AlignRight)
+        port_row.addWidget(left_port)
+        port_row.addStretch(1)
+        port_row.addWidget(right_port)
+        root.addLayout(port_row)
 
         shape = self.data_shape
         shape_text = "--" if shape is None else f"{shape[1]} traces × {shape[0]} samples"
@@ -307,3 +327,6 @@ class BscanPreviewCard(QFrame):
         hint = QLabel("双击打开大图" if shape is not None else "暂无预览，请先运行工作流")
         hint.setObjectName("previewMeta")
         root.addWidget(hint)
+
+    def port_anchor_y(self) -> float:
+        return PREVIEW_PORT_ROW_Y
