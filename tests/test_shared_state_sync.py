@@ -25,6 +25,10 @@ def _get_app() -> QApplication:
     return QApplication([])
 
 
+def _advanced(win: GPRGuiQt):
+    return win._ensure_advanced_page()
+
+
 def test_shared_state_build_result_history_tracks_formal_labels():
     state = SharedDataState()
     raw = np.arange(12, dtype=np.float32).reshape(3, 4)
@@ -132,18 +136,18 @@ def test_main_single_view_combo_selects_formal_snapshot():
         app.processEvents()
 
         combo_labels = [
-            win.page_advanced.single_view_combo.itemText(index)
-            for index in range(win.page_advanced.single_view_combo.count())
+            _advanced(win).single_view_combo.itemText(index)
+            for index in range(_advanced(win).single_view_combo.count())
         ]
         assert combo_labels == ["原始", "dewow", "当前"]
-        assert win.page_advanced.single_view_combo.currentText() == "当前"
+        assert _advanced(win).single_view_combo.currentText() == "当前"
 
-        win.page_advanced.single_view_combo.setCurrentText("dewow")
+        _advanced(win).single_view_combo.setCurrentText("dewow")
         selected_data, _, _ = win._get_active_plot_payload(win.data)
         assert selected_data is not None
         assert np.array_equal(selected_data, step_one)
 
-        win.page_advanced.mode_compare.setChecked(True)
+        _advanced(win).mode_compare.setChecked(True)
         compare_data, _, _ = win._get_active_plot_payload(win.data)
         assert compare_data is not None
         assert np.array_equal(compare_data, step_two)

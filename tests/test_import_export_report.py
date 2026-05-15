@@ -20,6 +20,10 @@ def _get_app() -> QApplication:
     return QApplication.instance() or QApplication([])
 
 
+def _advanced(win: GPRGuiQt):
+    return win._ensure_advanced_page()
+
+
 def test_csv_import_records_sanitize_warnings(tmp_path: Path):
     app = _get_app()
     win = GPRGuiQt()
@@ -164,11 +168,11 @@ def test_report_includes_crop_bounds_when_crop_enabled(tmp_path: Path):
         raw = np.arange(400, dtype=np.float32).reshape(20, 20)
         win.shared_data.load_data(raw, path="demo.csv", source="test")
         win._default_output_dir = lambda: str(tmp_path)  # type: ignore[method-assign]
-        win.page_advanced.crop_enable_var.setChecked(True)
-        win.page_advanced.time_start_edit.setText("2")
-        win.page_advanced.time_end_edit.setText("10")
-        win.page_advanced.dist_start_edit.setText("3")
-        win.page_advanced.dist_end_edit.setText("12")
+        _advanced(win).crop_enable_var.setChecked(True)
+        _advanced(win).time_start_edit.setText("2")
+        _advanced(win).time_end_edit.setText("10")
+        _advanced(win).dist_start_edit.setText("3")
+        _advanced(win).dist_end_edit.setText("12")
 
         win.generate_report()
 

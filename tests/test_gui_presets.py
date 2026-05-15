@@ -46,6 +46,23 @@ def _get_app() -> QApplication:
     return QApplication.instance() or QApplication([])
 
 
+def _auto_tune(win: GPRGuiQt):
+    return win._ensure_auto_tune_page()
+
+
+def _advanced(win: GPRGuiQt):
+    return win._ensure_advanced_page()
+
+
+def _quality(win: GPRGuiQt):
+    return win._ensure_quality_page()
+
+
+def _canvas(win: GPRGuiQt):
+    win._ensure_legacy_plot_canvas()
+    return win.canvas
+
+
 def _top_level_group_titles(page) -> list[str]:
     if isinstance(page, QGroupBox):
         return [page.title()] if not page.isHidden() else []
@@ -100,10 +117,10 @@ def test_startup_preset_matches_registry_contract():
     try:
         preset = GUI_PRESETS_V1[DEFAULT_STARTUP_PRESET_KEY]
         assert win._selected_preset_key == DEFAULT_STARTUP_PRESET_KEY
-        assert not hasattr(win.page_advanced, "preset_combo")
-        assert not hasattr(win.page_advanced, "fast" + "_preview_var")
+        assert not hasattr(_advanced(win), "preset_combo")
+        assert not hasattr(_advanced(win), "fast" + "_preview_var")
         assert win._method_param_overrides == preset["method_params"]
-        assert win.page_advanced.sidecar_box.isHidden() is False
+        assert _advanced(win).sidecar_box.isHidden() is False
     finally:
         win.close()
         app.processEvents()
@@ -118,11 +135,11 @@ def test_apply_preset_updates_ui_and_method_overrides():
         win._apply_preset_by_key(preset_key)
 
         assert win._selected_preset_key == preset_key
-        assert win.page_advanced.normalize_var.isChecked() is bool(
+        assert _advanced(win).normalize_var.isChecked() is bool(
             preset["ui"]["normalize"]
         )
-        assert win.page_advanced.demean_var.isChecked() is bool(preset["ui"]["demean"])
-        assert win.page_advanced.p_low_edit.text() == str(preset["ui"]["p_low"])
+        assert _advanced(win).demean_var.isChecked() is bool(preset["ui"]["demean"])
+        assert _advanced(win).p_low_edit.text() == str(preset["ui"]["p_low"])
         assert win._method_param_overrides["dewow"] == preset["method_params"]["dewow"]
     finally:
         win.close()
@@ -165,13 +182,17 @@ def test_auto_tune_defaults_live_in_auto_tune_page():
     app = _get_app()
     win = GPRGuiQt()
     try:
-        assert win.page_auto_tune.get_auto_tune_roi_mode() == "prefer_crop"
-        assert win.page_auto_tune.get_auto_tune_search_mode() == "standard"
-        assert win.page_auto_tune.btn_auto_tune.isEnabled() is True
-        assert win.page_auto_tune.btn_compare_manual_auto.text() == "人工/自动对比"
-        assert win.page_auto_tune.btn_export_comparison.isEnabled() is False
-        assert win.page_advanced.roi_status_label.text() == "手动 ROI: 未设置"
-        assert win.page_advanced.btn_clear_manual_roi.isEnabled() is False
+        assert _auto_tune(win).get_auto_tune_roi_mode() == "prefer_crop"
+        assert _auto_tune(win).get_auto_tune_search_mode() == "standard"
+        current_key = win.page_basic.get_current_method_key()
+        expected_enabled = bool(
+            PROCESSING_METHODS.get(current_key, {}).get("auto_tune_enabled")
+        )
+        assert _auto_tune(win).btn_auto_tune.isEnabled() is expected_enabled
+        assert _auto_tune(win).btn_compare_manual_auto.text() == "人工/自动对比"
+        assert _auto_tune(win).btn_export_comparison.isEnabled() is False
+        assert _advanced(win).roi_status_label.text() == "手动 ROI: 未设置"
+        assert _advanced(win).btn_clear_manual_roi.isEnabled() is False
         assert win.page_basic.action_apply_manual.text() == "使用当前参数（默认）"
         assert win.page_basic.action_apply_auto_tuned.text() == "使用自动调参参数"
         assert win.page_basic.action_apply_auto_tuned.isEnabled() is True
@@ -184,16 +205,16 @@ def test_auto_tune_page_handles_state_transitions():
     app = _get_app()
     win = GPRGuiQt()
     try:
-        win.page_auto_tune.reset_for_method("dewow")
-        assert "支持自动选参" in win.page_auto_tune.auto_tune_summary.toPlainText()
-        assert win.page_auto_tune.result_state_label.text() == "等待分析"
+        _auto_tune(win).reset_for_method("dewow")
+        assert "支持自动选参" in _auto_tune(win).auto_tune_summary.toPlainText()
+        assert _auto_tune(win).result_state_label.text() == "等待分析"
 
-        win.page_auto_tune.show_running("当前裁剪区", "fast")
-        running_text = win.page_auto_tune.auto_tune_summary.toPlainText()
+        _auto_tune(win).show_running("当前裁剪区", "fast")
+        running_text = _auto_tune(win).auto_tune_summary.toPlainText()
         assert "ROI 来源: 当前裁剪区" in running_text
         assert "搜索模式: fast" in running_text
-        assert win.page_auto_tune.btn_view_auto_tune.isEnabled() is False
-        assert win.page_auto_tune.result_state_label.text() == "分析中"
+        assert _auto_tune(win).btn_view_auto_tune.isEnabled() is False
+        assert _auto_tune(win).result_state_label.text() == "分析中"
 
         result = {
             "method_key": "dewow",
@@ -231,28 +252,28 @@ def test_auto_tune_page_handles_state_transitions():
                 "notes": ["部分候选参数被按数据尺度收缩，实际搜索域小于原始候选列表。"]
             },
         }
-        win.page_auto_tune.show_result(result)
-        result_text = win.page_auto_tune.auto_tune_summary.toPlainText()
+        _auto_tune(win).show_result(result)
+        result_text = _auto_tune(win).auto_tune_summary.toPlainText()
         assert "方法: 低频漂移矫正（Dewow）" in result_text
         assert "推荐调试档: 平衡档" in result_text
         assert "稳定性:" in result_text
         assert "风险标记:" in result_text
         assert "参数域提示:" in result_text
-        assert win.page_auto_tune.result_state_label.text() == "结果可用"
-        assert win.page_auto_tune.recommended_profile_label.text() == "平衡档"
-        assert "总候选 2" in win.page_auto_tune.execution_stats_label.text()
-        assert "风险标记" in win.page_auto_tune.risk_hint_label.text()
-        assert win.page_auto_tune.btn_view_auto_tune.isEnabled() is True
+        assert _auto_tune(win).result_state_label.text() == "结果可用"
+        assert _auto_tune(win).recommended_profile_label.text() == "平衡档"
+        assert "总候选 2" in _auto_tune(win).execution_stats_label.text()
+        assert "风险标记" in _auto_tune(win).risk_hint_label.text()
+        assert _auto_tune(win).btn_view_auto_tune.isEnabled() is True
 
-        win.page_auto_tune.show_error("demo error")
-        assert "自动选参失败:" in win.page_auto_tune.auto_tune_summary.toPlainText()
-        assert win.page_auto_tune.result_state_label.text() == "失败"
-        assert win.page_auto_tune.btn_view_auto_tune.isEnabled() is False
+        _auto_tune(win).show_error("demo error")
+        assert "自动选参失败:" in _auto_tune(win).auto_tune_summary.toPlainText()
+        assert _auto_tune(win).result_state_label.text() == "失败"
+        assert _auto_tune(win).btn_view_auto_tune.isEnabled() is False
 
-        win.page_auto_tune.show_comparison_running("全图", "fast")
-        assert win.page_auto_tune.result_state_label.text() == "对比中"
-        assert "正在生成人工/自动对比" in win.page_auto_tune.comparison_summary.toPlainText()
-        assert win.page_auto_tune.btn_export_comparison.isEnabled() is False
+        _auto_tune(win).show_comparison_running("全图", "fast")
+        assert _auto_tune(win).result_state_label.text() == "对比中"
+        assert "正在生成人工/自动对比" in _auto_tune(win).comparison_summary.toPlainText()
+        assert _auto_tune(win).btn_export_comparison.isEnabled() is False
 
         comparison_summary = {
             "verdict": "auto_better",
@@ -282,14 +303,14 @@ def test_auto_tune_page_handles_state_transitions():
                 },
             },
         }
-        win.page_auto_tune.show_comparison_result(comparison_summary)
-        comparison_text = win.page_auto_tune.comparison_summary.toPlainText()
+        _auto_tune(win).show_comparison_result(comparison_summary)
+        comparison_text = _auto_tune(win).comparison_summary.toPlainText()
         assert "结论: 自动选参更优" in comparison_text
         assert "dewow" in comparison_text
         assert "参数域" in comparison_text
-        assert win.page_auto_tune.result_state_label.text() == "对比完成"
-        assert win.page_auto_tune.recommended_profile_label.text() == "自动选参更优"
-        assert win.page_auto_tune.btn_export_comparison.isEnabled() is True
+        assert _auto_tune(win).result_state_label.text() == "对比完成"
+        assert _auto_tune(win).recommended_profile_label.text() == "自动选参更优"
+        assert _auto_tune(win).btn_export_comparison.isEnabled() is True
     finally:
         win.close()
         app.processEvents()
@@ -299,7 +320,7 @@ def test_phase2_tabs_expose_prioritized_group_hierarchy_and_bridge():
     app = _get_app()
     win = GPRGuiQt()
     try:
-        assert _top_level_group_titles(win.page_advanced) == [
+        assert _top_level_group_titles(_advanced(win)) == [
             "显示模式",
             "单图查看",
             "核心显示",
@@ -308,15 +329,15 @@ def test_phase2_tabs_expose_prioritized_group_hierarchy_and_bridge():
             "增强与对比辅助",
             "可选 RTK/IMU/高度计 辅助文件",
         ]
-        assert win.page_advanced.sidecar_box.isHidden() is False
-        assert win.page_advanced.altimeter_sidecar_button.text() == "选择高度计"
+        assert _advanced(win).sidecar_box.isHidden() is False
+        assert _advanced(win).altimeter_sidecar_button.text() == "选择高度计"
 
-        assert _top_level_group_titles(win.page_auto_tune) == [
+        assert _top_level_group_titles(_auto_tune(win)) == [
             "实验流程",
         ]
-        assert win.page_auto_tune.btn_open_workflow.text() == "进入工作流设置"
+        assert _auto_tune(win).btn_open_workflow.text() == "进入工作流设置"
 
-        assert _top_level_group_titles(win.page_quality) == [
+        assert _top_level_group_titles(_quality(win)) == [
             "查看顺序",
             "导出与诊断",
             "质量摘要",
@@ -333,7 +354,7 @@ def test_auto_tune_workflow_bridge_focuses_workflow_workspace():
     win = GPRGuiQt()
     try:
         assert win._content_stack.currentWidget() is win._main_content_widget
-        win.page_auto_tune.btn_open_workflow.click()
+        _auto_tune(win).btn_open_workflow.click()
         app.processEvents()
         assert win._content_stack.currentWidget() is win._main_content_widget
         assert win.control_tabs is None
@@ -394,7 +415,7 @@ def test_plot_toolbar_home_restores_original_full_view():
             original_ylim[0] + (original_ylim[1] - original_ylim[0]) * 0.8,
         )
         win._capture_main_view_limits_from_axes()
-        win.canvas.draw_idle()
+        _canvas(win).draw_idle()
         app.processEvents()
 
         current_xlim = tuple(float(v) for v in ax.get_xlim())
@@ -447,7 +468,7 @@ def test_main_canvas_plain_drag_pans_like_grabbing_image(monkeypatch):
         win.plot_data(win.data)
         app.processEvents()
 
-        monkeypatch.setattr(win.canvas, "draw_idle", lambda: None)
+        monkeypatch.setattr(_canvas(win), "draw_idle", lambda: None)
 
         ax = win._main_plot_axes[0]
         original_xlim = tuple(float(v) for v in ax.get_xlim())
@@ -506,7 +527,7 @@ def test_manual_roi_can_be_set_by_shift_drag(monkeypatch):
         raw = np.arange(120, dtype=np.float32).reshape(10, 12) / 10.0
         win.shared_data.load_data(raw, path="demo.csv", source="test")
         monkeypatch.setattr(win, "plot_data", lambda *_args, **_kwargs: None)
-        monkeypatch.setattr(win.canvas, "draw_idle", lambda: None)
+        monkeypatch.setattr(_canvas(win), "draw_idle", lambda: None)
 
         ax = _DummyAxes()
         win._main_plot_axes = [ax]
@@ -582,7 +603,7 @@ def test_manual_roi_can_be_cleared_by_right_click(monkeypatch):
         win._on_main_canvas_press(right_click)
 
         assert win._manual_roi_values is None
-        assert win.page_advanced.roi_status_label.text() == "手动 ROI: 未设置"
+        assert _advanced(win).roi_status_label.text() == "手动 ROI: 未设置"
     finally:
         win.close()
         app.processEvents()
@@ -738,7 +759,7 @@ def test_stage_compare_result_summary_is_human_readable():
     app = _get_app()
     win = GPRGuiQt()
     try:
-        win.page_auto_tune.set_stage_compare_result(
+        _auto_tune(win).set_stage_compare_result(
             {
                 "stage": "background",
                 "best_method_key": "fk_filter",
@@ -764,12 +785,12 @@ def test_stage_compare_result_summary_is_human_readable():
             }
         )
 
-        assert "Stage：background" in win.page_auto_tune.stage_compare_label.text()
-        summary = win.page_auto_tune.stage_compare_summary.toPlainText()
+        assert "Stage：background" in _auto_tune(win).stage_compare_label.text()
+        summary = _auto_tune(win).stage_compare_summary.toPlainText()
         assert "推荐方法: F-K cone filter" in summary
         assert "比较结果:" in summary
         assert "平均背景抑制" in summary
-        assert win.page_auto_tune.btn_apply_stage_choice.isEnabled() is True
+        assert _auto_tune(win).btn_apply_stage_choice.isEnabled() is True
     finally:
         win.close()
         app.processEvents()
@@ -1364,12 +1385,12 @@ def test_quality_page_exposes_report_and_snapshot_actions():
     app = _get_app()
     win = GPRGuiQt()
     try:
-        assert win.page_quality.btn_generate_report.text() == "生成报告"
-        assert win.page_quality.btn_export_quality_snapshot.text() == "导出质量快照"
-        assert win.page_quality.btn_export_georeference_3d.text() == "导出3D地理参考"
-        assert win.page_quality.visual_stack.count() == 3
-        assert win.page_quality.btn_generate_report.toolTip()
-        assert win.page_quality.btn_export_quality_snapshot.toolTip()
+        assert _quality(win).btn_generate_report.text() == "生成报告"
+        assert _quality(win).btn_export_quality_snapshot.text() == "导出质量快照"
+        assert _quality(win).btn_export_georeference_3d.text() == "导出3D地理参考"
+        assert _quality(win).visual_stack.count() == 3
+        assert _quality(win).btn_generate_report.toolTip()
+        assert _quality(win).btn_export_quality_snapshot.toolTip()
     finally:
         win.close()
         app.processEvents()

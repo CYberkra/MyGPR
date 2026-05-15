@@ -59,6 +59,21 @@ if BASE_DIR not in sys.path:
 logger = logging.getLogger(__name__)
 
 
+class _LazyPandasProxy:
+    """Expose pandas as a monkeypatchable seam without importing it at startup."""
+
+    def _module(self):
+        import pandas as _pd
+
+        return _pd
+
+    def __getattr__(self, name: str):
+        return getattr(self._module(), name)
+
+
+pd = _LazyPandasProxy()
+
+
 def configure_logging() -> str:
     """统一配置应用日志。"""
     log_dir = get_logs_dir()
@@ -152,6 +167,17 @@ from ui.gui_basic_flow import BasicFlowPage
 from ui.gui_workflow_page import WorkflowPage
 from ui.loading_dialog import LoadingProgressDialog
 from ui.auto_tune_result_dialog import AutoTuneResultDialog
+
+
+def auto_tune_method(*args, **kwargs):
+    """Lazily dispatch to the heavy auto-tune implementation.
+
+    Kept as a module-level seam so ProcessingWorker and tests can monkeypatch
+    the auto-tune path without importing core.auto_tune during GUI startup.
+    """
+    from core.auto_tune import auto_tune_method as _auto_tune_method
+
+    return _auto_tune_method(*args, **kwargs)
 
 
 def _sanitize_qss(qss: str) -> str:
@@ -461,7 +487,7 @@ class AutoTuneWorker(QObject):
 
     def run(self):
         try:
-            from core.auto_tune import auto_tune_method, AutoTuneCancelled
+            from core.auto_tune import AutoTuneCancelled
             result = auto_tune_method(
                 self.data,
                 self.method_key,
@@ -1463,6 +1489,7 @@ class GPRGuiQt(QMainWindow):
             from ui.gui_auto_tune_page import AutoTunePage
             self.page_auto_tune = AutoTunePage(self)
             self._connect_auto_tune_page_signals()
+            self.page_auto_tune.reset_for_method(self.page_basic.get_current_method_key())
         return self.page_auto_tune
 
     def _ensure_advanced_page(self):
@@ -1470,6 +1497,15 @@ class GPRGuiQt(QMainWindow):
             from ui.gui_advanced_settings import AdvancedSettingsPage
             self.page_advanced = AdvancedSettingsPage(self)
             self._connect_advanced_page_signals()
+            if self._selected_preset_key:
+                preset = GUI_PRESETS_V1.get(self._selected_preset_key)
+                if preset:
+                    self._apply_preset_ui_values(
+                        preset.get("ui"), preset_key=self._selected_preset_key
+                    )
+            self._update_manual_roi_status()
+            self._update_compare_combo_items()
+            self._sync_sidecar_labels()
         return self.page_advanced
 
     def _ensure_quality_page(self):
@@ -2943,9 +2979,10 @@ class GPRGuiQt(QMainWindow):
             }
 
         crop_bounds = None
+        page_advanced = self._ensure_advanced_page()
         if (
             mode in {"prefer_crop", "crop"}
-            and self.page_advanced.crop_enable_var.isChecked()
+            and page_advanced.crop_enable_var.isChecked()
         ):
             try:
                 time_axis = self._build_time_axis(self.data.shape[0])
@@ -3703,8 +3740,6 @@ class GPRGuiQt(QMainWindow):
     ):
         """带进度回调的CSV加载"""
         try:
-            import pandas as pd
-
             if progress_callback:
                 progress_callback(10, "正在检测文件格式...")
 
@@ -4049,8 +4084,6 @@ class GPRGuiQt(QMainWindow):
         """加载单个CSV矩阵文件"""
 
         try:
-            import pandas as pd
-
             self._clear_runtime_warnings()
             import_warnings = []
             header_info = detect_csv_header(path)
@@ -4171,6 +4204,7 @@ class GPRGuiQt(QMainWindow):
     def plot_data(self, data: np.ndarray):
         """绘制数据"""
         self._ensure_legacy_plot_canvas()
+        self._ensure_advanced_page()
         start_ts = time.perf_counter()
         self._last_plot_signature = self._build_plot_signature()
         self._apply_main_plot_theme()
@@ -4530,6 +4564,8 @@ class GPRGuiQt(QMainWindow):
             QMessageBox.warning(self, "无数据", "请先导入数据。")
             return
         self._ensure_legacy_plot_canvas()
+        self._ensure_advanced_page()
+        self._ensure_quality_page()
         out_dir = self._default_output_dir()
         ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         report_path = os.path.join(out_dir, f"report_{ts}.md")
@@ -4852,16 +4888,24 @@ class GPRGuiQt(QMainWindow):
 
         normalized = str(path) if path else None
         self._sidecar_files[kind] = normalized
-        label_widget = getattr(self.page_advanced, f"{kind}_sidecar_label", None)
-        if label_widget is not None:
-            label_widget.setText(os.path.basename(normalized) if normalized else "未选择")
-            label_widget.setToolTip(normalized or "未选择")
+        self._sync_sidecar_labels()
         display = os.path.basename(normalized) if normalized else "未选择"
         self._log(f"{kind.upper()} sidecar：{display}")
         if hasattr(self, "page_workflow"):
             self.page_workflow.set_project_data_state(
                 sidecar_files=dict(self._sidecar_files)
             )
+
+    def _sync_sidecar_labels(self) -> None:
+        """Synchronize lazy Preview Settings sidecar labels with stored paths."""
+        if not getattr(self, "page_advanced", None):
+            return
+        for kind, path in self._sidecar_files.items():
+            label_widget = getattr(self.page_advanced, f"{kind}_sidecar_label", None)
+            if label_widget is None:
+                continue
+            label_widget.setText(os.path.basename(path) if path else "未选择")
+            label_widget.setToolTip(path or "未选择")
 
     def _clear_sidecar_file(self, kind: str) -> None:
         """仅清除指定 RTK/IMU/高度计 sidecar 选择。"""
@@ -4893,8 +4937,6 @@ class GPRGuiQt(QMainWindow):
     def _read_explicit_trace_timestamps_from_csv(self, path: str):
         """从主 CSV 第 6 列读取显式 trace 时间戳；不根据采样参数推导。"""
         try:
-            import pandas as pd
-
             header_info = detect_csv_header(path)
             if not header_info:
                 return None
@@ -5578,9 +5620,10 @@ class GPRGuiQt(QMainWindow):
             display_data.shape[1], trace_metadata_override, header_info_override
         )
         trace_indices = np.arange(display_data.shape[1], dtype=np.int32)
+        page_advanced = self._ensure_advanced_page()
         bounds = (
             self._get_crop_bounds(display_data, time_axis, trace_axis)
-            if self.page_advanced.crop_enable_var.isChecked()
+            if page_advanced.crop_enable_var.isChecked()
             else None
         )
         if bounds:

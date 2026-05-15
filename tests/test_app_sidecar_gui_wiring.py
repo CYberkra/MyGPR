@@ -29,6 +29,10 @@ def _close_window(app: QApplication, win: GPRGuiQt) -> None:
     app.processEvents()
 
 
+def _advanced(win: GPRGuiQt):
+    return win._ensure_advanced_page()
+
+
 def test_no_sidecar_selection_builds_empty_loader_kwargs() -> None:
     app = _get_app()
     win = GPRGuiQt()
@@ -46,7 +50,7 @@ def test_sidecar_controls_exist_and_start_empty() -> None:
     app = _get_app()
     win = GPRGuiQt()
     try:
-        page = win.page_advanced
+        page = _advanced(win)
 
         assert page.rtk_sidecar_button is not None
         assert page.rtk_sidecar_clear_button is not None
@@ -64,7 +68,7 @@ def test_altimeter_is_exposed_in_gui_slice() -> None:
     app = _get_app()
     win = GPRGuiQt()
     try:
-        page = win.page_advanced
+        page = _advanced(win)
 
         assert hasattr(page, "altimeter_sidecar_button")
         assert hasattr(page, "altimeter_sidecar_clear_button")
@@ -114,7 +118,7 @@ def test_pick_sidecar_updates_state_and_label(monkeypatch, tmp_path: Path) -> No
         win._pick_sidecar_file("rtk")
 
         assert win._sidecar_files["rtk"] == str(rtk_path)
-        assert "rtk.csv" in win.page_advanced.rtk_sidecar_label.text()
+        assert "rtk.csv" in _advanced(win).rtk_sidecar_label.text()
     finally:
         _close_window(app, win)
 
@@ -134,7 +138,7 @@ def test_pick_sidecar_cancel_preserves_existing_path(monkeypatch, tmp_path: Path
         win._pick_sidecar_file("rtk")
 
         assert win._sidecar_files["rtk"] == existing_path
-        assert "previous_rtk.csv" in win.page_advanced.rtk_sidecar_label.text()
+        assert "previous_rtk.csv" in _advanced(win).rtk_sidecar_label.text()
     finally:
         _close_window(app, win)
 
@@ -155,9 +159,9 @@ def test_clear_sidecar_resets_only_target_kind(tmp_path: Path) -> None:
         assert win._sidecar_files["rtk"] is None
         assert win._sidecar_files["imu"] == imu_path
         assert win._sidecar_files["altimeter"] == altimeter_path
-        assert "未选择" in win.page_advanced.rtk_sidecar_label.text()
-        assert "imu.csv" in win.page_advanced.imu_sidecar_label.text()
-        assert "altimeter.csv" in win.page_advanced.altimeter_sidecar_label.text()
+        assert "未选择" in _advanced(win).rtk_sidecar_label.text()
+        assert "imu.csv" in _advanced(win).imu_sidecar_label.text()
+        assert "altimeter.csv" in _advanced(win).altimeter_sidecar_label.text()
     finally:
         _close_window(app, win)
 

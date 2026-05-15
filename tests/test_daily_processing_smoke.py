@@ -35,9 +35,9 @@ def test_main_window_uses_workflow_studio_without_legacy_control_tabs():
     try:
         assert win.control_tabs is None
         assert win.page_basic.isHidden()
-        assert win.page_auto_tune.isHidden()
-        assert win.page_advanced.isHidden()
-        assert win.page_quality.isHidden()
+        assert win.page_auto_tune is None
+        assert win.page_advanced is None
+        assert win.page_quality is None
         assert hasattr(win, "page_workflow")
         assert win.page_workflow.objectName() == "workflowStudioPage"
         assert win._main_splitter is None
