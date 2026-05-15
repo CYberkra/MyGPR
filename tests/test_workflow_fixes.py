@@ -843,5 +843,82 @@ class TestRunHistoryMode:
             f"有 run_mode 时应该用 run_mode，实际是 '{record['mode']}'"
 
 
+class TestStartupLazyLoading:
+    """测试启动时懒加载功能."""
+    def test_startup_lazy_pages(self):
+        """测试启动时 page_auto_tune, page_advanced, page_quality 为 None."""
+        import sys
+        from PyQt6.QtWidgets import QApplication
+        from app_qt import GPRGuiQt
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        win = GPRGuiQt(version_text="test", enable_startup_profile=False)
+        assert win.page_auto_tune is None
+        assert win.page_advanced is None
+        assert win.page_quality is None
+
+    def test_lazy_create_auto_tune_page(self):
+        """测试调用 _ensure_auto_tune_page() 才创建 AutoTunePage."""
+        import sys
+        from PyQt6.QtWidgets import QApplication
+        from app_qt import GPRGuiQt
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        win = GPRGuiQt(version_text="test", enable_startup_profile=False)
+        assert win.page_auto_tune is None
+        page = win._ensure_auto_tune_page()
+        assert page is not None
+        assert win.page_auto_tune is not None
+
+    def test_lazy_legacy_plot_canvas(self):
+        """测试启动时 _legacy_plot_canvas_created 为 False，调用 _ensure_legacy_plot_canvas() 后创建."""
+        import sys
+        from PyQt6.QtWidgets import QApplication
+        from app_qt import GPRGuiQt
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        win = GPRGuiQt(version_text="test", enable_startup_profile=False)
+        assert hasattr(win, '_legacy_plot_canvas_created')
+        assert win._legacy_plot_canvas_created is False
+        assert win.fig is None
+        assert win.canvas is None
+        assert win._main_toolbar is None
+        win._ensure_legacy_plot_canvas()
+        assert win._legacy_plot_canvas_created is True
+        assert win.fig is not None
+        assert win.canvas is not None
+        assert win._main_toolbar is not None
+
+    def test_lazy_advanced_page_signals(self):
+        """测试 _ensure_advanced_page() 后信号连接正常."""
+        import sys
+        from PyQt6.QtWidgets import QApplication
+        from app_qt import GPRGuiQt
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        win = GPRGuiQt(version_text="test", enable_startup_profile=False)
+        assert win.page_advanced is None
+        _ = win._ensure_advanced_page()
+        assert win.page_advanced is not None
+
+    def test_startup_profile_no_bad_log(self, capsys):
+        """测试 MYGPR_STARTUP_PROFILE=1 时不输出错误的 'app import done' 日志."""
+        import sys
+        import os
+        import logging
+        from unittest.mock import patch
+        from PyQt6.QtWidgets import QApplication
+        from app_qt import GPRGuiQt, main
+
+        # 测试 GPRGuiQt.__init__ 时的日志
+        app = QApplication.instance() or QApplication(sys.argv)
+        logger = logging.getLogger(__name__)
+        with patch.object(logger, 'info') as mock_info:
+            win = GPRGuiQt(version_text="test", enable_startup_profile=True)
+        # 检查日志中没有 '[startup] app import done'
+        for call_args in mock_info.call_args_list:
+            if '[startup] app import done' in str(call_args):
+                assert False, "不应输出错误的 app import done 日志"
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

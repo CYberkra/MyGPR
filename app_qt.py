@@ -27,9 +27,6 @@ import numpy as np
 import matplotlib
 
 matplotlib.use("QtAgg")
-from matplotlib.figure import Figure
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 
 from PyQt6.QtCore import Qt, QObject, QThread, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
@@ -147,33 +144,11 @@ from core.runtime_warnings import (
     format_runtime_warning_text,
     merge_runtime_warnings,
 )
-from core.auto_tune import (
-    auto_select_method_group,
-    auto_tune_method,
-    AutoTuneCancelled,
-)
-from core.auto_tune_comparison import (
-    run_auto_tune_comparison,
-    to_summary_dict,
-)
-from core.auto_tune_comparison_export import (
-    export_auto_tune_comparison_artifacts as export_auto_tune_comparison_bundle,
-)
-from core.evidence_export import (
-    export_replay_evidence_bundle as export_replay_evidence_zip,
-)
-from core.uav_georeference_3d import (
-    build_airborne_georeference_3d_payload,
-    export_airborne_georeference_3d_bundle,
-)
 from core.shared_data_state import SharedDataState
 from qfluentwidgets import FluentIcon
 
 # 导入页面模块
 from ui.gui_basic_flow import BasicFlowPage
-from ui.gui_auto_tune_page import AutoTunePage
-from ui.gui_advanced_settings import AdvancedSettingsPage
-from ui.gui_quality_log import QualityLogPage
 from ui.gui_workflow_page import WorkflowPage
 from ui.loading_dialog import LoadingProgressDialog
 from ui.auto_tune_result_dialog import AutoTuneResultDialog
@@ -842,6 +817,8 @@ class GPRGuiQt(QMainWindow):
         self.page_basic = BasicFlowPage(self)
         self.page_basic.hide()
 
+        t2 = time.perf_counter()
+
         # 主工作区: 工作流画布
         self.page_workflow = WorkflowPage(self)
         self.page_workflow.setObjectName("workflowStudioPage")
@@ -849,12 +826,12 @@ class GPRGuiQt(QMainWindow):
             "主工作区：节点画布、卡片内参数和 B-scan Preview 都在这里完成。"
         )
 
-        t2 = time.perf_counter()
+        t3 = time.perf_counter()
 
         # 后台页面延迟初始化，用 None 占位，首次访问时通过 _ensure_*_page() 懒加载
-        self.page_auto_tune: AutoTunePage | None = None
-        self.page_advanced: AdvancedSettingsPage | None = None
-        self.page_quality: QualityLogPage | None = None
+        self.page_auto_tune = None
+        self.page_advanced = None
+        self.page_quality = None
 
         # 默认显示 Studio 主工作台。
         self._content_stack.setCurrentWidget(self._main_content_widget)
@@ -886,7 +863,7 @@ class GPRGuiQt(QMainWindow):
         # 工作流 Studio 主画布：以后工作流是主界面，不再挤在控制标签页里。
         right_layout.addWidget(self.page_workflow, 1)
 
-        t3 = time.perf_counter()
+        t4 = time.perf_counter()
 
         # 旧 Matplotlib B-scan 画布暂时保留给历史绘图逻辑和大图/对比逻辑，
         # 但不再常驻主界面；画布内的 B-scan Preview 节点承担日常预览职责。
@@ -898,16 +875,16 @@ class GPRGuiQt(QMainWindow):
         self._legacy_plot_canvas_created = False
         self._last_n_panels = 1
 
-        plot_toolbar_row = QWidget()
-        plot_toolbar_layout = QHBoxLayout(plot_toolbar_row)
-        plot_toolbar_layout.setContentsMargins(0, 0, 0, 0)
-        plot_toolbar_layout.setSpacing(8)
-        plot_toolbar_layout.addStretch(1)
+        self._plot_toolbar_row = QWidget()
+        self._plot_toolbar_layout = QHBoxLayout(self._plot_toolbar_row)
+        self._plot_toolbar_layout.setContentsMargins(0, 0, 0, 0)
+        self._plot_toolbar_layout.setSpacing(8)
+        self._plot_toolbar_layout.addStretch(1)
         self._plot_coord_label = QLabel("坐标: --")
         self._plot_coord_label.setProperty("class", "hintText")
-        plot_toolbar_layout.addWidget(self._plot_coord_label)
-        plot_toolbar_row.setVisible(False)
-        right_layout.addWidget(plot_toolbar_row)
+        self._plot_toolbar_layout.addWidget(self._plot_coord_label)
+        self._plot_toolbar_row.setVisible(False)
+        right_layout.addWidget(self._plot_toolbar_row)
 
         # 空状态卡片
         self.plot_stack_host = QWidget()
@@ -919,7 +896,7 @@ class GPRGuiQt(QMainWindow):
         self.plot_stack_host.setVisible(False)
         right_layout.addWidget(self.plot_stack_host)
 
-        t4 = time.perf_counter()
+        t5 = time.perf_counter()
 
         # 运行信息抽屉：默认收起，避免长期压缩主绘图区。
         self.global_log_box = self._create_global_log_box()
@@ -934,14 +911,14 @@ class GPRGuiQt(QMainWindow):
         right_layout.addWidget(self._runtime_panel_bar)
         right_layout.addWidget(self._runtime_panel_container)
 
-        t5 = time.perf_counter()
+        t6 = time.perf_counter()
 
         self._sync_runtime_panels_visibility()
 
         # 连接信号
         self._connect_signals()
 
-        t6 = time.perf_counter()
+        t7 = time.perf_counter()
 
         # 初始化
         self._apply_startup_preset_defaults()
@@ -954,11 +931,12 @@ class GPRGuiQt(QMainWindow):
         t_end = time.perf_counter()
 
         if self._enable_startup_profile:
-            logger.info("[startup] create WorkflowPage & BasicFlowPage: %.2fs", t2 - t1)
-            logger.info("[startup] create status & Workflow canvas: %.2fs", t3 - t2)
-            logger.info("[startup] create legacy plot host: %.2fs", t4 - t3)
-            logger.info("[startup] create runtime panels: %.2fs", t5 - t4)
-            logger.info("[startup] connect signals: %.2fs", t6 - t5)
+            logger.info("[startup] create BasicFlowPage: %.2fs", t2 - t1)
+            logger.info("[startup] create WorkflowPage: %.2fs", t3 - t2)
+            logger.info("[startup] create status & Workflow canvas: %.2fs", t4 - t3)
+            logger.info("[startup] create legacy plot host: %.2fs", t5 - t4)
+            logger.info("[startup] create runtime panels: %.2fs", t6 - t5)
+            logger.info("[startup] connect signals: %.2fs", t7 - t6)
             logger.info("[startup] _setup_ui total: %.2fs", t_end - t_start)
 
         self._log(f"版本: {self.version_text}")
@@ -1006,6 +984,12 @@ class GPRGuiQt(QMainWindow):
         self.canvas.mpl_connect("button_release_event", self._on_main_canvas_release)
         self.canvas.mpl_connect("scroll_event", self._on_main_canvas_scroll)
         self.canvas.mpl_connect("figure_leave_event", self._on_main_canvas_leave)
+
+        # 插入工具栏
+        if hasattr(self, '_plot_toolbar_layout') and self._plot_toolbar_layout is not None:
+            self._plot_toolbar_layout.insertWidget(0, self._main_toolbar)
+        if hasattr(self, '_plot_toolbar_row') and self._plot_toolbar_row is not None:
+            self._plot_toolbar_row.setVisible(True)
 
         if hasattr(self, 'plot_stack_host') and self.plot_stack_host is not None:
             plot_stack_layout = self.plot_stack_host.layout()
@@ -1471,20 +1455,23 @@ class GPRGuiQt(QMainWindow):
             self.append_workflow_runtime_log
         )
 
-    def _ensure_auto_tune_page(self) -> "AutoTunePage":
+    def _ensure_auto_tune_page(self):
         if self.page_auto_tune is None:
+            from ui.gui_auto_tune_page import AutoTunePage
             self.page_auto_tune = AutoTunePage(self)
             self._connect_auto_tune_page_signals()
         return self.page_auto_tune
 
-    def _ensure_advanced_page(self) -> "AdvancedSettingsPage":
+    def _ensure_advanced_page(self):
         if self.page_advanced is None:
+            from ui.gui_advanced_settings import AdvancedSettingsPage
             self.page_advanced = AdvancedSettingsPage(self)
             self._connect_advanced_page_signals()
         return self.page_advanced
 
-    def _ensure_quality_page(self) -> "QualityLogPage":
+    def _ensure_quality_page(self):
         if self.page_quality is None:
+            from ui.gui_quality_log import QualityLogPage
             self.page_quality = QualityLogPage(self)
             self.page_quality.set_trace_selected_callback(
                 self._on_trajectory_trace_selected
@@ -1559,6 +1546,28 @@ class GPRGuiQt(QMainWindow):
         self.page_advanced.altimeter_sidecar_clear_button.clicked.connect(
             lambda: self._clear_sidecar_file("altimeter")
         )
+        # 补全剩余显示选项的信号
+        for attr_name in [
+            'symmetric_var',
+            'chatgpt_style_var',
+            'compare_var',
+            'cmap_invert_var',
+            'show_cbar_var',
+            'show_grid_var',
+            'percentile_var',
+            'normalize_var',
+            'demean_var',
+            'crop_enable_var'
+        ]:
+            if hasattr(self.page_advanced, attr_name):
+                widget = getattr(self.page_advanced, attr_name)
+                if hasattr(widget, 'stateChanged'):
+                    widget.stateChanged.connect(self._refresh_plot)
+                elif hasattr(widget, 'clicked'):
+                    widget.clicked.connect(self._refresh_plot)
+        # compare_var toggled
+        if hasattr(self.page_advanced, 'compare_var') and hasattr(self.page_advanced.compare_var, 'toggled'):
+            self.page_advanced.compare_var.toggled.connect(self._on_compare_toggled)
     def _connect_quality_page_signals(self) -> None:
         if self.page_quality is None:
             return
@@ -6989,8 +6998,6 @@ def main():
     logger.info("GPR GUI version=%s", version_text)
 
     if enable_startup_profile:
-        t_import_done = t0
-        logger.info("[startup] app import done: %.2fs", t_import_done - t0)
         logger.info("[startup] configure_logging: %.2fs", t_configure_logging_done - t_configure_logging_start)
         logger.info("[startup] QApplication: %.2fs", t_app_create_done - t_app_create_start)
         logger.info("[startup] apply_theme: %.2fs", t_apply_theme_done - t_apply_theme_start)
