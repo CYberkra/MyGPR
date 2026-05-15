@@ -3,6 +3,7 @@
 """测试工作流修复：节点映射和链接初始化"""
 
 import pytest
+from PyQt6.QtWidgets import QMessageBox
 from core.workflow_data import (
     WorkflowConfig,
     WorkflowMethod,
@@ -418,6 +419,392 @@ class TestLogSignal:
 
         assert len(received) == 1, "应该接收到 1 条日志消息"
         assert received[0] == "Test message", f"消息应该是 'Test message'，实际是 '{received[0]}'"
+
+
+class TestWorkflowRunSignalThreeArgs:
+    """测试 workflow_run_requested 信号能发出三个参数"""
+
+    def test_signal_emits_three_args(self):
+        """测试14: workflow_run_requested 能发出 (object, bool, str) 三个参数"""
+        from ui.gui_workflow_page import WorkflowPage
+        import sys
+        from PyQt6.QtWidgets import QApplication
+
+        app = QApplication.instance() or QApplication(sys.argv)
+
+        page = WorkflowPage()
+
+        received = []
+        page.workflow_run_requested.connect(
+            lambda methods, realtime, run_mode: received.append((methods, realtime, run_mode))
+        )
+
+        config = build_default_workflow_config("high_quality_uav_gpr")
+        page.config = config
+
+        visible = [m for m in config.methods if not m.hidden and m.enabled]
+        from unittest.mock import patch
+        with patch("ui.gui_workflow_page.validate_workflow_config") as mock_validate:
+            from core.workflow_validation import WorkflowValidationReport
+            mock_validate.return_value = WorkflowValidationReport()
+            page._emit_run(
+                visible[:2],
+                realtime=False,
+                status="测试运行",
+                log_text="测试日志",
+                run_mode="Run All",
+            )
+
+        assert len(received) == 1, "应该接收到 1 次信号"
+        methods_arg, realtime_arg, run_mode_arg = received[0]
+        assert len(methods_arg) == 2, "methods 参数应该有 2 个元素"
+        assert realtime_arg is False, "realtime 应该是 False"
+        assert run_mode_arg == "Run All", f"run_mode 应该是 'Run All'，实际是 '{run_mode_arg}'"
+
+    def test_signal_emits_realtime_mode(self):
+        """测试15: 实时预览发出 Realtime run_mode"""
+        from ui.gui_workflow_page import WorkflowPage
+        import sys
+        from PyQt6.QtWidgets import QApplication
+
+        app = QApplication.instance() or QApplication(sys.argv)
+
+        page = WorkflowPage()
+
+        received = []
+        page.workflow_run_requested.connect(
+            lambda methods, realtime, run_mode: received.append((methods, realtime, run_mode))
+        )
+
+        config = build_default_workflow_config("high_quality_uav_gpr")
+        page.config = config
+
+        visible = [m for m in config.methods if not m.hidden and m.enabled]
+        from unittest.mock import patch
+        with patch("ui.gui_workflow_page.validate_workflow_config") as mock_validate:
+            from core.workflow_validation import WorkflowValidationReport
+            mock_validate.return_value = WorkflowValidationReport()
+            page._emit_run(
+                visible[:2],
+                realtime=True,
+                status="实时预览",
+                log_text="实时预览",
+                run_mode="Realtime",
+            )
+
+        assert len(received) == 1
+        _, realtime_arg, run_mode_arg = received[0]
+        assert realtime_arg is True, "realtime 应该是 True"
+        assert run_mode_arg == "Realtime", f"run_mode 应该是 'Realtime'，实际是 '{run_mode_arg}'"
+
+
+class TestRunWorkflowMethodsRunMode:
+    """测试 app_qt.run_workflow_methods 能接收 run_mode"""
+
+    def test_run_workflow_methods_signature_accepts_run_mode(self):
+        """测试16: run_workflow_methods 签名接受 run_mode 参数"""
+        import inspect
+        from app_qt import GPRGuiQt
+
+        sig = inspect.signature(GPRGuiQt.run_workflow_methods)
+        params = list(sig.parameters.keys())
+        assert "run_mode" in params, f"run_workflow_methods 应该有 run_mode 参数，实际参数: {params}"
+
+        run_mode_param = sig.parameters["run_mode"]
+        assert run_mode_param.default == "", f"run_mode 默认值应该是空字符串，实际是 {run_mode_param.default!r}"
+
+    def test_pending_workflow_run_preserves_run_mode(self):
+        """测试17: _pending_workflow_run 保存 run_mode"""
+        import inspect
+        from app_qt import GPRGuiQt
+
+        init_src = inspect.getsource(GPRGuiQt.__init__)
+        assert "_last_workflow_run_mode" in init_src, "_last_workflow_run_mode 应该在 __init__ 中初始化"
+
+        run_src = inspect.getsource(GPRGuiQt.run_workflow_methods)
+        assert "_last_workflow_run_mode" in run_src, "run_workflow_methods 应该保存 run_mode 到 _last_workflow_run_mode"
+
+
+class TestValidateErrorUserCancel:
+    """测试 _emit_run validate error 且用户取消时，不会改变节点状态"""
+
+    def test_validate_error_user_cancel_no_state_change(self):
+        """测试18: validate 有 error 且用户选择 No 时，节点状态不变"""
+        from ui.gui_workflow_page import WorkflowPage
+        import sys
+        from PyQt6.QtWidgets import QApplication
+        from unittest.mock import patch, MagicMock
+        from core.workflow_validation import WorkflowValidationReport, WorkflowValidationIssue
+
+        app = QApplication.instance() or QApplication(sys.argv)
+
+        page = WorkflowPage()
+        config = build_default_workflow_config("high_quality_uav_gpr")
+
+        for method in config.methods:
+            method.status = "idle"
+
+        page.config = config
+
+        original_statuses = {m.node_id: m.status for m in config.methods}
+
+        error_report = WorkflowValidationReport()
+        error_report.add("error", "test_error", "Test error message")
+
+        signal_received = []
+        page.workflow_run_requested.connect(
+            lambda *args: signal_received.append(args)
+        )
+
+        with patch("ui.gui_workflow_page.validate_workflow_config", return_value=error_report), \
+             patch("ui.gui_workflow_page.QMessageBox.question", return_value=QMessageBox.StandardButton.No):
+            page._emit_run(
+                [m for m in config.methods if not m.hidden and m.enabled][:2],
+                realtime=False,
+                status="运行中",
+                log_text="测试",
+                run_mode="Run All",
+            )
+
+        assert len(signal_received) == 0, "用户取消时不应该发出 workflow_run_requested 信号"
+
+        for method in config.methods:
+            assert method.status == original_statuses[method.node_id], \
+                f"节点 {method.node_id} 状态不应该改变，期望 {original_statuses[method.node_id]}，实际 {method.status}"
+
+    def test_validate_error_user_continue_does_emit(self):
+        """测试19: validate 有 error 但用户选择 Yes 时，继续运行"""
+        from ui.gui_workflow_page import WorkflowPage
+        import sys
+        from PyQt6.QtWidgets import QApplication
+        from unittest.mock import patch
+        from core.workflow_validation import WorkflowValidationReport
+
+        app = QApplication.instance() or QApplication(sys.argv)
+
+        page = WorkflowPage()
+        config = build_default_workflow_config("high_quality_uav_gpr")
+        page.config = config
+
+        error_report = WorkflowValidationReport()
+        error_report.add("error", "test_error", "Test error message")
+
+        signal_received = []
+        page.workflow_run_requested.connect(
+            lambda *args: signal_received.append(args)
+        )
+
+        with patch("ui.gui_workflow_page.validate_workflow_config", return_value=error_report), \
+             patch("ui.gui_workflow_page.QMessageBox.question", return_value=QMessageBox.StandardButton.Yes):
+            visible = [m for m in config.methods if not m.hidden and m.enabled]
+            page._emit_run(
+                visible[:2],
+                realtime=False,
+                status="运行中",
+                log_text="测试",
+                run_mode="Run All",
+            )
+
+        assert len(signal_received) == 1, "用户确认继续时应该发出信号"
+
+
+class TestEmitRunRealNodeStatus:
+    """测试 _emit_run 后真实 config 节点状态"""
+
+    def test_first_node_running_rest_queued(self):
+        """测试20: _emit_run 后真实 config 第一个运行节点是 running，其余本次节点是 queued"""
+        from ui.gui_workflow_page import WorkflowPage
+        import sys
+        from PyQt6.QtWidgets import QApplication
+        from unittest.mock import patch
+        from core.workflow_validation import WorkflowValidationReport
+
+        app = QApplication.instance() or QApplication(sys.argv)
+
+        page = WorkflowPage()
+        config = build_default_workflow_config("high_quality_uav_gpr")
+
+        for method in config.methods:
+            method.status = "idle"
+
+        page.config = config
+
+        visible = [m for m in config.methods if not m.hidden and m.enabled]
+        run_methods = visible[:3]
+
+        with patch("ui.gui_workflow_page.validate_workflow_config") as mock_validate:
+            mock_validate.return_value = WorkflowValidationReport()
+            page._emit_run(
+                run_methods,
+                realtime=False,
+                status="运行中",
+                log_text="测试",
+                run_mode="Run All",
+            )
+
+        run_node_ids = {m.node_id for m in run_methods}
+        first_node_id = run_methods[0].node_id
+
+        for method in config.methods:
+            if method.hidden or not method.enabled:
+                assert method.status == "skipped", \
+                    f"隐藏/停用节点 {method.node_id} 应该是 skipped，实际是 {method.status}"
+            elif method.node_id == first_node_id:
+                assert method.status == "running", \
+                    f"第一个运行节点 {method.node_id} 应该是 running，实际是 {method.status}"
+            elif method.node_id in run_node_ids:
+                assert method.status == "queued", \
+                    f"其余运行节点 {method.node_id} 应该是 queued，实际是 {method.status}"
+
+    def test_old_success_becomes_stale_when_not_in_run(self):
+        """测试21: _emit_run 后非本次运行的旧 success 节点变为 success_stale"""
+        from ui.gui_workflow_page import WorkflowPage
+        import sys
+        from PyQt6.QtWidgets import QApplication
+        from unittest.mock import patch
+        from core.workflow_validation import WorkflowValidationReport
+
+        app = QApplication.instance() or QApplication(sys.argv)
+
+        page = WorkflowPage()
+        config = build_default_workflow_config("high_quality_uav_gpr")
+
+        for method in config.methods:
+            method.status = "success"
+
+        page.config = config
+
+        visible = [m for m in config.methods if not m.hidden and m.enabled]
+        run_methods = [visible[1]]
+
+        with patch("ui.gui_workflow_page.validate_workflow_config") as mock_validate:
+            mock_validate.return_value = WorkflowValidationReport()
+            page._emit_run(
+                run_methods,
+                realtime=False,
+                status="运行中",
+                log_text="测试",
+                run_mode="Run Selected",
+            )
+
+        run_node_ids = {m.node_id for m in run_methods}
+
+        for method in config.methods:
+            if method.hidden or not method.enabled:
+                assert method.status == "skipped"
+            elif method.node_id in run_node_ids:
+                assert method.status in ("running", "queued")
+            else:
+                assert method.status == "success_stale", \
+                    f"非本次运行的旧 success 节点 {method.node_id} 应该是 success_stale，实际是 {method.status}"
+
+
+class TestRunHistoryMode:
+    """测试 Run History mode 正确性"""
+
+    def test_run_selected_history_mode(self):
+        """测试22: Run Selected 完成后 history mode 是 Run Selected"""
+        from ui.gui_workflow_page import WorkflowPage
+        import sys
+        from PyQt6.QtWidgets import QApplication
+
+        app = QApplication.instance() or QApplication(sys.argv)
+
+        page = WorkflowPage()
+        config = build_default_workflow_config("high_quality_uav_gpr")
+        page.config = config
+        page._run_history = []
+
+        selected_method = config.methods[1]
+        outputs = [{
+            "method_key": selected_method.method_id,
+            "node_id": selected_method.node_id,
+            "elapsed_ms": 100.0,
+            "data": None,
+        }]
+
+        record = page._create_run_record(outputs, realtime=False, run_mode="Run Selected")
+        assert record["mode"] == "Run Selected", \
+            f"mode 应该是 'Run Selected'，实际是 '{record['mode']}'"
+
+    def test_run_from_history_mode(self):
+        """测试23: Run From 完成后 history mode 是 Run From"""
+        from ui.gui_workflow_page import WorkflowPage
+        import sys
+        from PyQt6.QtWidgets import QApplication
+
+        app = QApplication.instance() or QApplication(sys.argv)
+
+        page = WorkflowPage()
+        config = build_default_workflow_config("high_quality_uav_gpr")
+        page.config = config
+        page._run_history = []
+
+        from_method = config.methods[2]
+        outputs = [{
+            "method_key": from_method.method_id,
+            "node_id": from_method.node_id,
+            "elapsed_ms": 150.0,
+            "data": None,
+        }]
+
+        record = page._create_run_record(outputs, realtime=False, run_mode="Run From")
+        assert record["mode"] == "Run From", \
+            f"mode 应该是 'Run From'，实际是 '{record['mode']}'"
+
+    def test_run_all_history_mode(self):
+        """测试24: Run All 完成后 history mode 是 Run All"""
+        from ui.gui_workflow_page import WorkflowPage
+        import sys
+        from PyQt6.QtWidgets import QApplication
+
+        app = QApplication.instance() or QApplication(sys.argv)
+
+        page = WorkflowPage()
+        config = build_default_workflow_config("high_quality_uav_gpr")
+        page.config = config
+        page._run_history = []
+
+        outputs = [{"method_key": "dc_shift", "elapsed_ms": 200.0, "data": None}]
+        record = page._create_run_record(outputs, realtime=False, run_mode="Run All")
+        assert record["mode"] == "Run All", \
+            f"mode 应该是 'Run All'，实际是 '{record['mode']}'"
+
+    def test_realtime_history_mode(self):
+        """测试25: Realtime 完成后 history mode 是 Realtime"""
+        from ui.gui_workflow_page import WorkflowPage
+        import sys
+        from PyQt6.QtWidgets import QApplication
+
+        app = QApplication.instance() or QApplication(sys.argv)
+
+        page = WorkflowPage()
+        config = build_default_workflow_config("high_quality_uav_gpr")
+        page.config = config
+        page._run_history = []
+
+        outputs = [{"method_key": "dc_shift", "elapsed_ms": 50.0, "data": None}]
+        record = page._create_run_record(outputs, realtime=True, run_mode="Realtime")
+        assert record["mode"] == "Realtime", \
+            f"mode 应该是 'Realtime'，实际是 '{record['mode']}'"
+
+    def test_run_mode_not_overridden_by_realtime_flag(self):
+        """测试26: 有 run_mode 时不被 realtime 标志覆盖"""
+        from ui.gui_workflow_page import WorkflowPage
+        import sys
+        from PyQt6.QtWidgets import QApplication
+
+        app = QApplication.instance() or QApplication(sys.argv)
+
+        page = WorkflowPage()
+        config = build_default_workflow_config("high_quality_uav_gpr")
+        page.config = config
+        page._run_history = []
+
+        outputs = [{"method_key": "dc_shift", "elapsed_ms": 50.0, "data": None}]
+        record = page._create_run_record(outputs, realtime=True, run_mode="Run Selected")
+        assert record["mode"] == "Run Selected", \
+            f"有 run_mode 时应该用 run_mode，实际是 '{record['mode']}'"
 
 
 if __name__ == "__main__":
