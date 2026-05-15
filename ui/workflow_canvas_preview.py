@@ -333,7 +333,8 @@ class BscanPreviewCard(QFrame):
         if hasattr(self, '_port_row') and self._port_row is not None:
             try:
                 geom = self._port_row.geometry()
-                return float(geom.center().y())
+                if geom.isValid() and geom.height() > 0:
+                    return float(geom.center().y())
             except Exception:
                 pass
         return PREVIEW_PORT_ROW_Y

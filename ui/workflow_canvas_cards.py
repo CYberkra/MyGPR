@@ -530,7 +530,8 @@ class WorkflowNodeCard(QFrame):
         if hasattr(self, '_port_row') and self._port_row is not None:
             try:
                 geom = self._port_row.geometry()
-                return float(geom.center().y())
+                if geom.isValid() and geom.height() > 0:
+                    return float(geom.center().y())
             except Exception:
                 pass
         return NODE_PORT_ROW_Y
@@ -847,7 +848,27 @@ class MiniNodeItem(QGraphicsRectItem):
         stage = WORKFLOW_STAGE_BY_ID.get(method.stage_id, {})
         stage_label = str(stage.get("label") or method.category or "节点")
         method_name = get_method_display_name(method.method_id)
-        status = "HIDE" if method.hidden else ("OFF" if not method.enabled else "ON")
+        
+        # 确定状态显示
+        if method.hidden:
+            status = "HIDE"
+        elif not method.enabled:
+            status = "OFF"
+        elif self.proxy.row < 0:
+            # Preview 节点的特殊状态显示
+            method_status = getattr(method, "status", "idle")
+            if method_status == "failed":
+                status = "失败"
+            elif method_status == "success_stale":
+                status = "上次"
+            elif method_status == "success":
+                status = "最新"
+            else:
+                status = "暂无"
+        else:
+            # 普通节点使用 status_short
+            status = self.proxy.status_short()
+        
         in_label, out_label = workflow_port_labels(method)
         if self.proxy.row < 0:
             self.title_item.setText("B-scan Preview")
@@ -896,7 +917,27 @@ class CompactNodeItem(QGraphicsRectItem):
         stage_label = str(stage.get("label") or method.category or "节点")
         method_name = get_method_display_name(method.method_id)
         in_label, out_label = workflow_port_labels(method)
-        status = "HIDE" if method.hidden else ("OFF" if not method.enabled else self.proxy.status_short())
+        
+        # 确定状态显示
+        if method.hidden:
+            status = "HIDE"
+        elif not method.enabled:
+            status = "OFF"
+        elif self.proxy.row < 0:
+            # Preview 节点的特殊状态显示
+            method_status = getattr(method, "status", "idle")
+            if method_status == "failed":
+                status = "失败"
+            elif method_status == "success_stale":
+                status = "上次"
+            elif method_status == "success":
+                status = "最新"
+            else:
+                status = "暂无"
+        else:
+            # 普通节点使用 status_short
+            status = self.proxy.status_short()
+        
         if self.proxy.row < 0:
             output_shape = getattr(method, "output_shape", None)
             shape_text = "--" if output_shape is None else f"{output_shape[1]}×{output_shape[0]}"
@@ -953,8 +994,9 @@ class WorkflowNodeProxy(QGraphicsProxyWidget):
         self.row = int(row)
         self.method = method
         self.node_id = method.node_id if row >= 0 else PREVIEW_NODE_ID
-        self.input_port = WorkflowPortItem("input", self, "data")
-        self.output_port = WorkflowPortItem("output", self, "data")
+        in_label, out_label = workflow_port_labels(method)
+        self.input_port = WorkflowPortItem("input", self, in_label)
+        self.output_port = WorkflowPortItem("output", self, out_label)
         self.compact_item = CompactNodeItem(self)
         self.mini_item = MiniNodeItem(self)
         self.resize_handle = WorkflowResizeHandleItem(self)
@@ -967,6 +1009,10 @@ class WorkflowNodeProxy(QGraphicsProxyWidget):
 
     def setWidget(self, widget):  # noqa: N802 - Qt override
         super().setWidget(widget)
+        # 确保 layout 被激活
+        if widget is not None:
+            widget.layout().activate()
+            widget.updateGeometry()
         self.update_visual_state()
         self.update_port_positions()
 
@@ -1910,6 +1956,21 @@ class WorkflowCanvasView(QGraphicsView):
         preview_card.set_preview_data(self._preview_data, self._preview_label, success=not self._last_preview_is_stale)
         preview_card.large_view_requested.connect(self.preview_large_requested)
         preview_method = WorkflowMethod("preview", "bscan_preview", enabled=True, order=len(self._methods), node_id=PREVIEW_NODE_ID)
+        
+        # 设置预览状态，用于 compact/mini 模式显示
+        if not self._last_run_success:
+            preview_method.status = "failed"
+        elif self._last_preview_is_stale:
+            preview_method.status = "success_stale"
+        elif self._preview_data is not None:
+            preview_method.status = "success"
+        else:
+            preview_method.status = "idle"
+        
+        # 设置预览形状
+        if self._last_preview_shape is not None:
+            preview_method.output_shape = self._last_preview_shape
+        
         preview_proxy = WorkflowNodeProxy(-1, preview_method)
         preview_proxy.output_port.hide()
         preview_proxy.output_port.label_item.hide()
