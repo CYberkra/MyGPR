@@ -844,15 +844,18 @@ class WorkflowPage(QWidget):
         expanded = bool(expanded)
         self.bottom_drawer_toggle.setChecked(expanded)
         self.bottom_drawer_stack.setVisible(expanded)
-        # 小/中/大三档高度
-        max_height = 42  # 收起高度
+        # 小/中/大/错误四档高度 - 符合需求
+        max_height = 42  # 默认收起高度
         if expanded:
+            # 安全处理 height_mode 参数
             if height_mode == "small":
                 max_height = 120  # 小
             elif height_mode == "large":
-                max_height = 280  # 大
-            else:
-                max_height = 180  # 中等（默认）
+                max_height = 250  # 大 (原280改为符合需求)
+            elif height_mode == "error":
+                max_height = 240  # 错误展开高度
+            else:  # medium 或其他
+                max_height = 160  # 普通展开高度（符合需求）
         self.bottom_drawer.setMaximumHeight(max_height)
         
     def _expand_drawer_for_error(self) -> None:

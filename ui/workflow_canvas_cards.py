@@ -913,19 +913,25 @@ class WorkflowNodeCard(QFrame):
         if self._suppress:
             return
 
-        menu = self._build_algorithm_menu()
+        try:
+            menu = self._build_algorithm_menu()
 
-        pos = self.algorithm_button.mapToGlobal(
-            self.algorithm_button.rect().bottomLeft()
-        )
-        selected = menu.exec(pos)
+            pos = self.algorithm_button.mapToGlobal(
+                self.algorithm_button.rect().bottomLeft()
+            )
+            selected = menu.exec(pos)
 
-        if selected is None:
-            return
+            if selected is None:
+                return
 
-        method_id = selected.data()
-        if method_id and str(method_id) != self.method.method_id:
-            self._switch_algorithm_from_card(str(method_id))
+            method_id = selected.data()
+            if method_id and str(method_id) != self.method.method_id:
+                self._switch_algorithm_from_card(str(method_id))
+        except Exception as e:
+            # Fallback: if popup fails, use context menu or Inspector to switch
+            import sys
+            print(f"[WARN] Algorithm menu popup failed: {e}", file=sys.stderr)
+            # Still allow other ways to switch algorithms (right-click, Inspector)
 
     def _build_algorithm_menu(self) -> QMenu:
         """Build and return a QMenu containing all candidate algorithms."""

@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import QApplication, QToolButton, QMenu
 from ui.workflow_canvas_cards import WorkflowNodeCard, candidate_methods_for_workflow_method
 from core.workflow_data import WorkflowMethod
 from core.methods_registry import get_method_display_name
+from ui.gui_workflow_page import WorkflowPage
 
 
 def test_gain_card_algorithm_menu_button():
@@ -193,3 +194,44 @@ def test_build_algorithm_menu_returns_proper_menu():
         if action.data() == "sec_gain":
             assert action.isChecked(), "当前算法应该被 checked"
             break
+
+
+def _select_method(page: WorkflowPage, method_id: str) -> int:
+    """辅助函数：选择指定的方法"""
+    for row, method in enumerate(page.config.methods):
+        if method.method_id == method_id:
+            page.step_list.setCurrentRow(row)
+            return row
+    raise AssertionError(f"method not found in workflow: {method_id}")
+
+
+def test_workflow_page_inspector_sync_after_card_switch():
+    """测试45: 从卡片切换算法后，Inspector的method_combo应该同步更新"""
+    app = QApplication.instance() or QApplication(sys.argv)
+    
+    # 创建 WorkflowPage
+    page = WorkflowPage()
+    
+    # 选择 gain 节点
+    gain_row = _select_method(page, "sec_gain")
+    app.processEvents()
+    
+    # 获取当前 method
+    method = page.config.methods[gain_row]
+    original_method_id = method.method_id
+    
+    # 找到对应的卡片
+    gain_proxy = next(proxy for proxy in page.workflow_canvas._scene.proxies if proxy.row == gain_row)
+    gain_card = gain_proxy.widget()
+    
+    # 从卡片切换到 agcGain
+    gain_card._switch_algorithm_from_card("agcGain")
+    app.processEvents()
+    
+    # 验证 method 已更新
+    assert method.method_id == "agcGain", f"method应该切换到 agcGain，实际是 {method.method_id}"
+    
+    # 验证 Inspector 的 method_combo 已同步
+    assert page.method_combo.currentData() == "agcGain", f"Inspector应该同步到 agcGain，实际是 {page.method_combo.currentData()}"
+    
+    page.close()
