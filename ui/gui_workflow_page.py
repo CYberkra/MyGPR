@@ -1341,28 +1341,34 @@ class WorkflowPage(QWidget):
             if node_id:
                 output_by_node_id[node_id] = output
         
-        # 然后按顺序处理 enabled 的 method，没有 node_id 时按顺序对应
-        enabled_methods = [m for m in self.config.methods if not m.hidden and m.enabled]
-        output_idx = 0
+        # 先处理有 node_id 的 output，更新对应节点状态
         for method in self.config.methods:
             if method.hidden or not method.enabled:
                 method.status = "skipped"
                 continue
-            # 优先匹配 node_id
             output = output_by_node_id.get(method.node_id)
-            # 如果没有，按顺序匹配
-            if not output and output_idx < len(outputs):
-                output = outputs[output_idx]
-                output_idx += 1
-            # 更新状态
             if output:
                 method.status = "success"
                 method.elapsed_ms = output.get("elapsed_ms", 0.0)
                 method.error_message = ""
                 data = output.get("data")
                 method.output_shape = data.shape if data is not None else None
-            else:
-                method.status = "skipped"
+        
+        # 对于没有 node_id 的 outputs，按顺序与 self._last_run_methods 匹配，并在 config.methods 中找到对应节点更新
+        outputs_without_node_id = [o for o in outputs if not o.get("node_id")]
+        if outputs_without_node_id and hasattr(self, "_last_run_methods") and self._last_run_methods:
+            last_run_node_ids = {m.node_id for m in self._last_run_methods if hasattr(m, "node_id")}
+            for last_run_method, output in zip(self._last_run_methods, outputs_without_node_id):
+                if hasattr(last_run_method, "node_id") and last_run_method.node_id not in output_by_node_id:
+                    # 在 config.methods 中找到对应的节点并更新
+                    for config_method in self.config.methods:
+                        if config_method.node_id == last_run_method.node_id:
+                            config_method.status = "success"
+                            config_method.elapsed_ms = output.get("elapsed_ms", 0.0)
+                            config_method.error_message = ""
+                            data = output.get("data")
+                            config_method.output_shape = data.shape if data is not None else None
+                            break
         
         if outputs:
             final_output = outputs[-1]

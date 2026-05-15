@@ -400,6 +400,9 @@ class ProcessingWorker(QObject):
                         "meta": compact_meta,
                         "runtime_warnings": compact_meta.get("runtime_warnings", []),
                         "header_info": resolved_header_info,
+                        "node_id": task.get("node_id", ""),
+                        "workflow_order": task.get("workflow_order", 0),
+                        "stage_id": task.get("stage_id", ""),
                     }
                 )
                 self.progress.emit(
@@ -4310,6 +4313,8 @@ class GPRGuiQt(QMainWindow):
                     "out_dir": out_dir,
                     "param_source_mode": "manual",
                     "stage_id": getattr(method, "stage_id", ""),
+                    "node_id": getattr(method, "node_id", ""),
+                    "workflow_order": getattr(method, "order", 0),
                 }
             )
 

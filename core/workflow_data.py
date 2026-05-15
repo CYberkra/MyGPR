@@ -564,6 +564,7 @@ class WorkflowConfig:
         realtime_enabled: bool | None = None,
         canvas_links: Optional[List[WorkflowLink]] = None,
         canvas_layout: Optional[Dict[str, Any]] = None,
+        _links_initialized: bool = False,
     ):
         self.version = version
         self.name = name
@@ -579,6 +580,7 @@ class WorkflowConfig:
         self.last_modified = datetime.now().isoformat()
         self.canvas_links = canvas_links or []
         self.canvas_layout = canvas_layout or {"nodes": {}}
+        self._links_initialized = _links_initialized
         self.ensure_canvas_links()
 
     def to_dict(self) -> Dict[str, Any]:
@@ -592,6 +594,7 @@ class WorkflowConfig:
             "canvas_layout": self.canvas_layout,
             "created_at": self.created_at,
             "last_modified": self.last_modified,
+            "_links_initialized": self._links_initialized,
         }
 
     @classmethod
@@ -608,14 +611,28 @@ class WorkflowConfig:
             WorkflowLink.from_dict(link) for link in data.get("canvas_links", [])
         ]
         config.canvas_layout = data.get("canvas_layout", {"nodes": {}})
+        # 从 data 中读取 _links_initialized；如果不存在，说明是旧模板
+        # 旧模板没有 canvas_links 时，需要生成默认链接
+        has_links_field = "canvas_links" in data
+        config._links_initialized = data.get("_links_initialized", False)
+        # 如果是旧模板（没有 _links_initialized 字段）且没有 canvas_links，则允许生成默认链接
+        if not config._links_initialized and not has_links_field:
+            config._links_initialized = False
         config.ensure_canvas_links()
         config.created_at = data.get("created_at", datetime.now().isoformat())
         config.last_modified = data.get("last_modified", datetime.now().isoformat())
         return config
 
     def ensure_canvas_links(self) -> None:
-        """Ensure method node IDs are valid; do NOT auto-create links if none exist."""
+        """Ensure method node IDs are valid; create default links only if not initialized yet."""
         ensure_workflow_method_ids(self.methods)
+        if not self._links_initialized and not self.canvas_links and self.methods:
+            sorted_methods = sorted(self.methods, key=lambda item: item.order)
+            self.canvas_links = [
+                WorkflowLink(left.node_id, right.node_id)
+                for left, right in zip(sorted_methods, sorted_methods[1:])
+            ]
+            self._links_initialized = True
 
     def get_enabled_methods(self) -> List[WorkflowMethod]:
         """获取启用的方法列表（按顺序排序）"""
