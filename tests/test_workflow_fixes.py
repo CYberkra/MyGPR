@@ -1617,13 +1617,123 @@ class TestCompactMiniInteraction:
         
         # mini 字号应该更大
         compact_size = int(compact_stylesheet.split("font-size: ")[1].split("px")[0]) if "font-size:" in compact_stylesheet else 18
-        mini_size = int(mini_stylesheet.split("font-size: ")[1].split("px")[0]) if "font-size:" in mini_stylesheet else 24
+        mini_size = int(mini_stylesheet.split("font-size: ")[1].split("px")[0]) if "font-size:" in mini_stylesheet else 20
         
         assert mini_size > compact_size, \
             f"mini title size ({mini_size}) 应该大于 compact ({compact_size})"
 
+    def test_compact_status_chip_font_size(self):
+        """测试50: compact 模式 status chip font size >= 14px"""
+        import sys
+        from PyQt6.QtWidgets import QApplication
+        from ui.workflow_canvas_cards import WorkflowNodeProxy, WorkflowNodeCard
+        from core.workflow_data import WorkflowMethod
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        
+        method = WorkflowMethod(
+            method_id="dc_shift",
+            stage_id="gain_compensation",
+            category="gain_compensation",
+        )
+        proxy = WorkflowNodeProxy(0, method)
+        card = WorkflowNodeCard(0, method)
+        proxy.setWidget(card)
+        
+        # compact 模式
+        proxy.set_lod_mode("compact")
+        
+        # 检查 status chip 字号
+        if card.status_chip:
+            stylesheet = card.status_chip.styleSheet()
+            size = int(stylesheet.split("font-size: ")[1].split("px")[0]) if "font-size:" in stylesheet else 11
+            assert size >= 14, \
+                f"compact status chip size ({size}) 应该 >= 14px"
+
+    def test_mini_status_chip_font_size(self):
+        """测试51: mini 模式 status chip font size >= 16px"""
+        import sys
+        from PyQt6.QtWidgets import QApplication
+        from ui.workflow_canvas_cards import WorkflowNodeProxy, WorkflowNodeCard
+        from core.workflow_data import WorkflowMethod
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        
+        method = WorkflowMethod(
+            method_id="dc_shift",
+            stage_id="gain_compensation",
+            category="gain_compensation",
+        )
+        proxy = WorkflowNodeProxy(0, method)
+        card = WorkflowNodeCard(0, method)
+        proxy.setWidget(card)
+        
+        # mini 模式
+        proxy.set_lod_mode("mini")
+        
+        # 检查 status chip 字号
+        if card.status_chip:
+            stylesheet = card.status_chip.styleSheet()
+            size = int(stylesheet.split("font-size: ")[1].split("px")[0]) if "font-size:" in stylesheet else 11
+            assert size >= 16, \
+                f"mini status chip size ({size}) 应该 >= 16px"
+
+    def test_mini_hides_param_rows(self):
+        """测试52: mini 模式不显示参数行"""
+        import sys
+        from PyQt6.QtWidgets import QApplication
+        from ui.workflow_canvas_cards import WorkflowNodeProxy, WorkflowNodeCard
+        from core.workflow_data import WorkflowMethod
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        
+        method = WorkflowMethod(
+            method_id="dc_shift",
+            stage_id="gain_compensation",
+            category="gain_compensation",
+        )
+        proxy = WorkflowNodeProxy(0, method)
+        card = WorkflowNodeCard(0, method)
+        proxy.setWidget(card)
+        
+        # mini 模式
+        proxy.set_lod_mode("mini")
+        
+        # 检查参数行隐藏
+        for row in card.param_rows:
+            assert not row.isVisible(), "mini 模式参数行应该隐藏"
+
+    def test_mini_hides_warning_meta(self):
+        """测试53: mini 模式不显示 warning/meta"""
+        import sys
+        from PyQt6.QtWidgets import QApplication
+        from ui.workflow_canvas_cards import WorkflowNodeProxy, WorkflowNodeCard
+        from core.workflow_data import WorkflowMethod
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        
+        method = WorkflowMethod(
+            method_id="dc_shift",
+            stage_id="gain_compensation",
+            category="gain_compensation",
+        )
+        proxy = WorkflowNodeProxy(0, method)
+        card = WorkflowNodeCard(0, method)
+        proxy.setWidget(card)
+        
+        # mini 模式
+        proxy.set_lod_mode("mini")
+        
+        # 检查 warning/meta 隐藏
+        if card.meta_label:
+            assert not card.meta_label.isVisible(), "mini 模式 meta 应该隐藏"
+        if card.warning_label:
+            assert not card.warning_label.isVisible(), "mini 模式 warning 应该隐藏"
+        if card.subtitle_label:
+            assert not card.subtitle_label.isVisible(), "mini 模式 subtitle 应该隐藏"
+
     def test_preview_compact_font_size_larger_than_full(self):
-        """测试49: Preview compact 模式下 title font size 大于 full 模式"""
+        """测试54: Preview compact 模式下 title font size 大于 full 模式"""
         import sys
         from PyQt6.QtWidgets import QApplication
         from ui.workflow_canvas_preview import BscanPreviewCard
@@ -1651,5 +1761,5 @@ class TestCompactMiniInteraction:
         if title_widget:
             compact_stylesheet = title_widget.styleSheet()
             compact_size = int(compact_stylesheet.split("font-size: ")[1].split("px")[0]) if "font-size:" in compact_stylesheet else 13
-            assert compact_size >= 18, \
-                f"Preview compact title size ({compact_size}) 应该 >= 18px"
+            assert compact_size >= 16, \
+                f"Preview compact title size ({compact_size}) 应该 >= 16px"

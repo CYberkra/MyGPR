@@ -281,7 +281,7 @@ class BscanPreviewCard(QFrame):
                     else:
                         widget.show()
                         if widget.objectName() == "previewTitle":
-                            widget.setStyleSheet("font-size: 18px; font-weight: bold;")
+                            widget.setStyleSheet("font-size: 16px; font-weight: bold;")
                         elif widget.objectName() == "previewMeta":
                             widget.setStyleSheet("font-size: 14px;")
         self._simplify_layout(restore=False)
@@ -296,7 +296,7 @@ class BscanPreviewCard(QFrame):
                     widget = item.widget()
                     if widget.objectName() in ("previewTitle",):
                         widget.show()
-                        widget.setStyleSheet("font-size: 24px; font-weight: bold;")
+                        widget.setStyleSheet("font-size: 20px; font-weight: bold;")
                     elif widget.objectName() in ("previewMeta",):
                         widget.hide()
                     elif widget.objectName() == "previewImage":

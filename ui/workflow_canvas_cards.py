@@ -614,41 +614,38 @@ class WorkflowNodeCard(QFrame):
         """Apply compact LOD mode with larger fonts for readability."""
         from PyQt6.QtGui import QFont
         
-        # 隐藏参数行，更多按钮
+        # 隐藏参数行，更多按钮，长错误
         for row in self.param_rows:
             row.hide()
         if self.more_button:
             self.more_button.hide()
+        if self.error_label:
+            self.error_label.hide()
         
-        # 增大标题字号
+        # 增大字号
         if self.title_label:
             self.title_label.show()
-            self.title_label.setStyleSheet("font-size: 18px; font-weight: bold;")
-        # 增大状态 chip
+            self.title_label.setStyleSheet("font-size: 16px; font-weight: bold;")
         if self.status_chip:
             self.status_chip.show()
             self.status_chip.setStyleSheet("font-size: 14px; font-weight: bold; padding: 2px 6px;")
         if self.eye_button:
             self.eye_button.show()
-        # 增大端口标签
         if self.input_port_label:
             self.input_port_label.show()
-            self.input_port_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+            self.input_port_label.setStyleSheet("font-size: 14px; font-weight: bold;")
         if self.output_port_label:
             self.output_port_label.show()
-            self.output_port_label.setStyleSheet("font-size: 16px; font-weight: bold;")
-        # 增大副标题
+            self.output_port_label.setStyleSheet("font-size: 14px; font-weight: bold;")
         if self.subtitle_label:
             self.subtitle_label.show()
-            self.subtitle_label.setStyleSheet("font-size: 16px;")
-        # 显示 meta
+            self.subtitle_label.setStyleSheet("font-size: 14px;")
         if self.meta_label:
             self.meta_label.show()
             self.meta_label.setStyleSheet("font-size: 14px;")
-        if self.error_label:
-            self.error_label.show()
         if self.warning_label:
             self.warning_label.show()
+            self.warning_label.setStyleSheet("font-size: 13px;")
         
         self._simplify_layout()
 
@@ -667,27 +664,25 @@ class WorkflowNodeCard(QFrame):
             self.error_label.hide()
         if self.warning_label:
             self.warning_label.hide()
-        
-        # 最大化标题字号
-        if self.title_label:
-            self.title_label.show()
-            self.title_label.setStyleSheet("font-size: 24px; font-weight: bold;")
-        # 最大化状态 chip
-        if self.status_chip:
-            self.status_chip.show()
-            self.status_chip.setStyleSheet("font-size: 18px; font-weight: bold; padding: 3px 8px;")
-        if self.eye_button:
-            self.eye_button.show()
-        # 最大化端口标签
-        if self.input_port_label:
-            self.input_port_label.show()
-            self.input_port_label.setStyleSheet("font-size: 20px; font-weight: bold;")
-        if self.output_port_label:
-            self.output_port_label.show()
-            self.output_port_label.setStyleSheet("font-size: 20px; font-weight: bold;")
-        # 隐藏副标题
         if self.subtitle_label:
             self.subtitle_label.hide()
+        
+        # 最大字号
+        if self.title_label:
+            self.title_label.show()
+            self.title_label.setStyleSheet("font-size: 20px; font-weight: bold;")
+        if self.status_chip:
+            self.status_chip.show()
+            self.status_chip.setStyleSheet("font-size: 16px; font-weight: bold; padding: 3px 8px;")
+        if self.eye_button:
+            self.eye_button.show()
+        # 只显示一个端口摘要（可选）
+        if self.input_port_label:
+            self.input_port_label.show()
+            self.input_port_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+        if self.output_port_label:
+            self.output_port_label.show()
+            self.output_port_label.setStyleSheet("font-size: 16px; font-weight: bold;")
         
         self._simplify_layout()
 
