@@ -460,15 +460,83 @@ class WorkflowPage(QWidget):
         palette_layout.addWidget(self.palette_list, 1)
         self.left_panel_stack.addWidget(self.palette_panel)
 
-        self.run_panel = self._make_text_panel("运行记录", "最近运行会显示在底部日志和此处摘要。")
+        # 运行历史面板
+        self.run_panel = QGroupBox("运行记录")
+        run_layout = QVBoxLayout(self.run_panel)
+        run_layout.setContentsMargins(8, 14, 8, 8)
+        run_layout.setSpacing(6)
+        self.left_run_history_list = QListWidget()
+        self.left_run_history_list.setAlternatingRowColors(True)
+        self.left_run_history_list.itemClicked.connect(self._on_history_item_clicked)
+        run_layout.addWidget(self.left_run_history_list, 1)
         self.left_panel_stack.addWidget(self.run_panel)
-        self.tuning_panel = self._make_action_panel("调参与实验", "选择节点后可打开自动选参和参数扫描。", self.request_tuning_lab_for_current)
+
+        # 调参与实验面板
+        self.tuning_panel = QGroupBox("调参与实验")
+        tuning_layout = QVBoxLayout(self.tuning_panel)
+        tuning_layout.setContentsMargins(8, 14, 8, 8)
+        tuning_layout.setSpacing(6)
+        self.tuning_node_info = QLabel("请先在画布中选择一个节点")
+        self.tuning_node_info.setWordWrap(True)
+        self.tuning_node_info.setProperty("class", "hintText")
+        self.btn_open_tuning = PushButton("打开自动选参")
+        self.btn_open_tuning.clicked.connect(self.request_tuning_lab_for_current)
+        self.btn_apply_best = PushButton("应用最佳参数")
+        self.btn_apply_best.clicked.connect(self._apply_best_params)
+        tuning_layout.addWidget(self.tuning_node_info)
+        tuning_layout.addWidget(self.btn_open_tuning)
+        tuning_layout.addWidget(self.btn_apply_best)
+        tuning_layout.addStretch(1)
         self.left_panel_stack.addWidget(self.tuning_panel)
-        self.validation_panel = self._make_text_panel("验证 / QC", "运行前会检查连接、sidecar、shape 和参数风险。")
+
+        # 验证/QC面板
+        self.validation_panel = QGroupBox("验证 / QC")
+        validation_layout = QVBoxLayout(self.validation_panel)
+        validation_layout.setContentsMargins(8, 14, 8, 8)
+        validation_layout.setSpacing(6)
+        self.validation_info_label = QLabel("点击\"运行验证\"检查工作流")
+        self.validation_info_label.setWordWrap(True)
+        self.validation_info_label.setProperty("class", "hintText")
+        self.sidecar_status_label = QLabel(self._current_sidecar_status_text())
+        self.sidecar_status_label.setWordWrap(True)
+        self.sidecar_status_label.setProperty("class", "hintText")
+        self.btn_run_validation = PushButton("运行验证")
+        self.btn_run_validation.clicked.connect(self._validate_workflow_ui)
+        validation_layout.addWidget(self.validation_info_label)
+        validation_layout.addWidget(self.sidecar_status_label)
+        validation_layout.addWidget(self.btn_run_validation)
+        validation_layout.addStretch(1)
         self.left_panel_stack.addWidget(self.validation_panel)
-        self.export_panel = self._make_action_panel("导出 / Evidence", "导出图像、数据、Evidence Package 或工作流快照。", self.export_evidence_requested.emit)
+
+        # 导出/Evidence面板
+        self.export_panel = QGroupBox("导出 / Evidence")
+        export_layout = QVBoxLayout(self.export_panel)
+        export_layout.setContentsMargins(8, 14, 8, 8)
+        export_layout.setSpacing(6)
+        self.btn_export_evidence = PushButton("导出 Evidence Package")
+        self.btn_export_evidence.clicked.connect(self.export_evidence_requested.emit)
+        self.btn_preview_snapshot = PushButton("预览快照")
+        self.btn_preview_snapshot.clicked.connect(self._request_preview_snapshot)
+        export_layout.addWidget(self.btn_export_evidence)
+        export_layout.addWidget(self.btn_preview_snapshot)
+        export_layout.addStretch(1)
         self.left_panel_stack.addWidget(self.export_panel)
-        self.settings_panel = self._make_text_panel("设置", "工作区显示、模板与快捷设置已收纳在顶部 ⋯ 菜单。")
+
+        # 设置面板
+        self.settings_panel = QGroupBox("设置")
+        settings_layout = QVBoxLayout(self.settings_panel)
+        settings_layout.setContentsMargins(8, 14, 8, 8)
+        settings_layout.setSpacing(6)
+        self.btn_fit_canvas_settings = PushButton("适配画布")
+        self.btn_auto_layout_settings = PushButton("自动布局")
+        self.btn_reset_zoom_settings = PushButton("重置缩放")
+        self.btn_preview_settings = PushButton("预览设置")
+        self.btn_preview_settings.clicked.connect(self.preview_settings_requested.emit)
+        settings_layout.addWidget(self.btn_fit_canvas_settings)
+        settings_layout.addWidget(self.btn_auto_layout_settings)
+        settings_layout.addWidget(self.btn_reset_zoom_settings)
+        settings_layout.addWidget(self.btn_preview_settings)
+        settings_layout.addStretch(1)
         self.left_panel_stack.addWidget(self.settings_panel)
 
         rail_items = [
@@ -697,7 +765,15 @@ class WorkflowPage(QWidget):
         self.palette_search.textChanged.connect(self._populate_palette)
         self.palette_list.node_double_clicked.connect(lambda method_id: self._add_canvas_node(method_id, self.workflow_canvas.viewport_scene_center()))
         self.workspace_splitter.splitterMoved.connect(self._save_workspace_state)
+        
+        # 连接左侧设置面板按钮
+        self.btn_fit_canvas_settings.clicked.connect(self.workflow_canvas.fit_nodes)
+        self.btn_auto_layout_settings.clicked.connect(self.workflow_canvas.auto_layout)
+        self.btn_reset_zoom_settings.clicked.connect(self.workflow_canvas.reset_zoom)
+        
         self._populate_palette()
+        # 初始化时更新一次调参面板信息
+        self._update_tuning_panel_info()
 
     def _make_text_panel(self, title: str, text: str) -> QGroupBox:
         panel = QGroupBox(title)
@@ -859,6 +935,25 @@ class WorkflowPage(QWidget):
             lines.extend(f"- {issue.code}" for issue in report.issues[:6])
             self.qc_label.setText("\n".join(lines))
             self.workflow_qc_view.setPlainText("\n".join(lines))
+        
+        # 更新左侧验证面板
+        if hasattr(self, "validation_info_label"):
+            summary_lines = [
+                "验证结果:",
+                f"✅ 通过: {len(report.infos)}",
+                f"⚠️ 警告: {len(report.warnings)}",
+                f"❌ 错误: {len(report.errors)}",
+            ]
+            if report.issues:
+                summary_lines.append("\n最近问题:")
+                for issue in report.issues[:3]:
+                    summary_lines.append(f"• {issue.code}")
+            self.validation_info_label.setText("\n".join(summary_lines))
+        
+        # 更新 sidecar 状态
+        if hasattr(self, "sidecar_status_label"):
+            self.sidecar_status_label.setText(self._current_sidecar_status_text())
+        
         self.validation_report_requested.emit(text)
 
     def _current_sidecar_status(self) -> dict[str, bool]:
@@ -1048,6 +1143,7 @@ class WorkflowPage(QWidget):
         method = self._selected_method()
         self.workflow_canvas.set_selected_row(int(row))
         self._update_step_buttons()
+        self._update_tuning_panel_info()
         if method is None:
             self.inspector_label.setText("未选择节点")
             return
@@ -1845,7 +1941,12 @@ class WorkflowPage(QWidget):
         return record
 
     def _update_history_list(self) -> None:
+        # 更新 inspector 中的历史列表
         self.run_history_list.clear()
+        # 更新左侧运行历史面板
+        if hasattr(self, 'left_run_history_list'):
+            self.left_run_history_list.clear()
+        
         for record in self._run_history[:20]:
             time = record.get("time", "--")
             mode = record.get("mode", "--")
@@ -1865,14 +1966,55 @@ class WorkflowPage(QWidget):
                     elapsed_str = f"{elapsed:.0f}ms"
                 text = f"#{record.get('index', '?')} {time} | {mode} | OK{success} FAIL{failed} SKIP{skipped} OLD{stale} | {elapsed_str} | {shape}"
 
-            item = QListWidgetItem(text)
+            # 添加到 inspector 列表
+            item1 = QListWidgetItem(text)
             if failed > 0 or record.get("mode") == "error":
-                item.setBackground(Qt.GlobalColor.red)
-                item.setForeground(Qt.GlobalColor.white)
-            self.run_history_list.addItem(item)
+                item1.setBackground(Qt.GlobalColor.red)
+                item1.setForeground(Qt.GlobalColor.white)
+            self.run_history_list.addItem(item1)
+            
+            # 同时添加到左侧面板列表
+            if hasattr(self, 'left_run_history_list'):
+                item2 = QListWidgetItem(text)
+                if failed > 0 or record.get("mode") == "error":
+                    item2.setBackground(Qt.GlobalColor.red)
+                    item2.setForeground(Qt.GlobalColor.white)
+                self.left_run_history_list.addItem(item2)
+
+    def _current_sidecar_status_text(self) -> str:
+        """生成当前 sidecar 文件状态的文本"""
+        sidecar_status = self._current_sidecar_status()
+        status_parts = []
+        for key, available in sidecar_status.items():
+            status = "✅ 可用" if available else "❌ 缺失"
+            label_map = {"rtk": "RTK 定位", "imu": "IMU 惯性", "altimeter": "AGL 高度"}
+            label = label_map.get(key, key.upper())
+            status_parts.append(f"{label}: {status}")
+        return "\n".join(status_parts)
+
+    def _update_tuning_panel_info(self) -> None:
+        """更新调参面板的信息"""
+        if not hasattr(self, 'tuning_node_info'):
+            return
+        
+        selected = self._selected_method()
+        if selected:
+            display_name = get_method_display_name(selected.method_id)
+            self.tuning_node_info.setText(f"当前选中节点: {display_name}")
+        else:
+            self.tuning_node_info.setText("请先在画布中选择一个节点")
+
+    def _apply_best_params(self) -> None:
+        """应用最佳参数（打开调参实验室）"""
+        self.request_tuning_lab_for_current()
 
     def _on_history_item_clicked(self, item: QListWidgetItem) -> None:
+        # 从两个列表中查找对应的记录
         row = self.run_history_list.row(item)
+        if row < 0 or row >= len(self._run_history):
+            if hasattr(self, 'left_run_history_list'):
+                row = self.left_run_history_list.row(item)
+        
         if 0 <= row < len(self._run_history):
             record = self._run_history[row]
             details = []
