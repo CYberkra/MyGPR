@@ -573,10 +573,6 @@ class WorkflowPage(QWidget):
         self.btn_duplicate_step.setToolTip("复制当前步骤及其参数")
         self.btn_remove_step.setToolTip("删除当前步骤")
 
-        self.detail_box = QGroupBox("当前步骤")
-        detail_layout = QVBoxLayout(self.detail_box)
-        detail_layout.setContentsMargins(10, 14, 10, 10)
-        detail_layout.setSpacing(8)
 
         self.stage_label = QLabel("--")
         self.stage_label.setProperty("class", "titleSmall")
@@ -606,14 +602,6 @@ class WorkflowPage(QWidget):
         self.param_layout.setVerticalSpacing(8)
         self.param_scroll.setWidget(self.param_host)
         self.param_scroll.setMinimumHeight(170)
-        self.detail_box.setTitle("选中步骤参数")
-
-        detail_layout.addWidget(self.stage_label)
-        detail_layout.addWidget(self.stage_warning)
-        detail_layout.addWidget(method_row)
-        detail_layout.addWidget(self.param_scroll, 1)
-        self.detail_box.hide()
-        self.detail_box.setToolTip("选中步骤的常用参数已经集成在画布节点卡片中。")
 
         self.inspector_box = QGroupBox("属性 / 检查")
         self.inspector_box.setMinimumWidth(280)
@@ -681,6 +669,15 @@ class WorkflowPage(QWidget):
             drawer_header.addWidget(btn)
             self.bottom_drawer_buttons[key] = btn
         drawer_header.addStretch(1)
+        # 添加清空和复制按钮
+        self.btn_clear_log = PushButton("清空")
+        self.btn_clear_log.setMaximumWidth(60)
+        self.btn_clear_log.clicked.connect(self._clear_current_drawer_content)
+        self.btn_copy_log = PushButton("复制")
+        self.btn_copy_log.setMaximumWidth(60)
+        self.btn_copy_log.clicked.connect(self._copy_current_drawer_content)
+        drawer_header.addWidget(self.btn_clear_log)
+        drawer_header.addWidget(self.btn_copy_log)
         drawer_layout.addLayout(drawer_header)
         self.bottom_drawer_stack = QStackedWidget()
         self.runtime_log_view = QTextEdit()
@@ -827,7 +824,28 @@ class WorkflowPage(QWidget):
         expanded = bool(expanded)
         self.bottom_drawer_toggle.setChecked(expanded)
         self.bottom_drawer_stack.setVisible(expanded)
-        self.bottom_drawer.setMaximumHeight(230 if expanded else 42)
+        # 默认展开高度 160，有错误时更高 230
+        max_height = 42
+        if expanded:
+            # 可以根据实际情况动态调整高度，这里使用简单的固定值
+            max_height = 180  # 默认中等高度
+        self.bottom_drawer.setMaximumHeight(max_height)
+    
+    def _clear_current_drawer_content(self) -> None:
+        """清空当前底部抽屉页面的内容"""
+        current_widget = self.bottom_drawer_stack.currentWidget()
+        if hasattr(current_widget, 'clear'):
+            current_widget.clear()
+    
+    def _copy_current_drawer_content(self) -> None:
+        """复制当前底部抽屉页面的内容到剪贴板"""
+        from PyQt6.QtWidgets import QApplication
+        current_widget = self.bottom_drawer_stack.currentWidget()
+        if hasattr(current_widget, 'toPlainText'):
+            text = current_widget.toPlainText()
+            clipboard = QApplication.clipboard()
+            if clipboard:
+                clipboard.setText(text)
 
     def _append_runtime_log(self, text: str) -> None:
         if not hasattr(self, "runtime_log_view"):
