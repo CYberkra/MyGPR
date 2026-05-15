@@ -53,48 +53,54 @@ MAX_NODE_HEIGHT = 720
 
 
 class ParamRowWidget(QWidget):
-    """Compact parameter block used inside workflow nodes."""
+    """Compact parameter row with label and control."""
 
     def __init__(self, label: str, control: QWidget, tooltip: str = "", parent=None):
         super().__init__(parent)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 3, 0, 3)
+        layout.setSpacing(8)
 
         metrics = QFontMetrics(self.font())
-        short_label = metrics.elidedText(str(label), Qt.TextElideMode.ElideRight, 190)
+        short_label = metrics.elidedText(str(label), Qt.TextElideMode.ElideRight, 120)
         name = QLabel(short_label)
         name.setObjectName("paramName")
         name.setWordWrap(False)
-        name.setMinimumWidth(90)
+        name.setMinimumWidth(80)
+        name.setMaximumWidth(140)
         name.setToolTip(str(label))
-
-        top_row = QHBoxLayout()
-        top_row.setContentsMargins(0, 0, 0, 0)
-        top_row.setSpacing(8)
-        top_row.addWidget(name, 1)
 
         spin = control.findChild(QAbstractSpinBox)
         slider = control.findChild(QSlider)
-        if spin is not None and slider is not None:
+
+        if isinstance(control, QCheckBox):
+            control.setText("")
+            control.setObjectName("paramBool")
+            layout.addWidget(name, 1)
+            layout.addWidget(control, 0)
+        elif spin is not None and slider is not None:
             spin.setParent(self)
             slider.setParent(self)
-            top_row.addWidget(spin, 0)
-            layout.addLayout(top_row)
+            slider.hide()
+            spin.setObjectName("paramNumeric")
+            layout.addWidget(name, 1)
+            layout.addWidget(spin, 0)
             layout.addWidget(slider)
             control.deleteLater()
         else:
-            top_row.addWidget(control, 0)
-            layout.addLayout(top_row)
+            if isinstance(control, QComboBox):
+                control.setObjectName("paramChoice")
+                control.setMinimumWidth(100)
+                control.setMaximumWidth(160)
+            elif isinstance(control, QLineEdit):
+                control.setObjectName("paramText")
+            layout.addWidget(name, 1)
+            layout.addWidget(control, 0)
 
         if tooltip:
             self.setToolTip(tooltip)
             name.setToolTip(tooltip)
             control.setToolTip(tooltip)
-            if spin is not None:
-                spin.setToolTip(tooltip)
-            if slider is not None:
-                slider.setToolTip(tooltip)
 
 
 class WorkflowNodeCard(QFrame):
@@ -235,26 +241,78 @@ class WorkflowNodeCard(QFrame):
                 font-size: 11px;
             }
             QLabel#paramName {
-                color: #64748b;
+                color: #4b5563;
                 font-size: 12px;
-                font-weight: 700;
+                font-weight: 600;
+            }
+            QLabel#nodeStatusDot {
+                width: 8px;
+                height: 8px;
+                border-radius: 4px;
+            }
+            QLabel#nodeStatusDot[state="success"] {
+                background: #22c55e;
+            }
+            QLabel#nodeStatusDot[state="running"] {
+                background: #3b82f6;
+            }
+            QLabel#nodeStatusDot[state="queued"] {
+                background: #93c5fd;
+            }
+            QLabel#nodeStatusDot[state="failed"] {
+                background: #ef4444;
+            }
+            QLabel#nodeStatusDot[state="idle"] {
+                background: #9ca3af;
             }
             QToolButton#eyeButton {
                 border: none;
-                color: #52647a;
-                font-size: 16px;
-                padding: 0px;
+                background: transparent;
+                color: #6b7280;
+                font-size: 14px;
+                padding: 2px;
+            }
+            QToolButton#eyeButton:hover {
+                color: #3b82f6;
             }
             QSlider::groove:horizontal {
                 height: 4px;
-                background: #dbe5f2;
+                background: #e5e7eb;
                 border-radius: 2px;
             }
             QSlider::handle:horizontal {
                 width: 12px;
-                margin: -5px 0;
+                margin: -4px 0;
                 border-radius: 6px;
-                background: #3278ff;
+                background: #3b82f6;
+            }
+            QSpinBox#paramNumeric, QDoubleSpinBox#paramNumeric {
+                border: 1px solid #e5e7eb;
+                border-radius: 6px;
+                padding: 4px 8px;
+                font-size: 12px;
+                background: #f9fafb;
+            }
+            QComboBox#paramChoice {
+                border: 1px solid #e5e7eb;
+                border-radius: 6px;
+                padding: 4px 8px;
+                font-size: 12px;
+                background: #ffffff;
+            }
+            QCheckBox#paramBool {
+                spacing: 0;
+            }
+            QCheckBox#paramBool::indicator {
+                width: 20px;
+                height: 20px;
+                border-radius: 6px;
+                border: 2px solid #d1d5db;
+                background: #ffffff;
+            }
+            QCheckBox#paramBool::indicator:checked {
+                background: #3b82f6;
+                border-color: #3b82f6;
             }
             """
         )
@@ -292,14 +350,22 @@ class WorkflowNodeCard(QFrame):
                 QWidget().setLayout(old_layout)
 
             root = QVBoxLayout(self)
-            root.setContentsMargins(12, 10, 12, 12)
-            root.setSpacing(8)
+            root.setContentsMargins(10, 8, 10, 8)
+            root.setSpacing(6)
 
             title_row = QHBoxLayout()
-            title_row.setSpacing(8)
+            title_row.setSpacing(6)
+            title_row.setContentsMargins(0, 0, 0, 0)
+
+            status_dot = QLabel()
+            status_dot.setObjectName("nodeStatusDot")
+            status_dot.setProperty("state", self._status_dot_state())
+            status_dot.setFixedSize(8, 8)
+            title_row.addWidget(status_dot)
+
             title = QLabel(f"{self.row + 1:02d} {self._stage_label()}")
             title.setObjectName("nodeTitle")
-            title.setWordWrap(True)
+            title.setWordWrap(False)
             title_row.addWidget(title, 1)
 
             status_chip = QLabel(self._status_chip_text())
@@ -400,6 +466,18 @@ class WorkflowNodeCard(QFrame):
         finally:
             self._suppress = False
 
+    def _status_dot_state(self) -> str:
+        if not self.method.enabled:
+            return "idle"
+        status = getattr(self.method, "status", "idle")
+        status_map = {
+            "success": "success",
+            "running": "running",
+            "queued": "queued",
+            "failed": "failed",
+        }
+        return status_map.get(status, "idle")
+
     def _status_chip_state(self) -> str:
         if self.method.method_id == "raw_input":
             return "on"
@@ -422,8 +500,8 @@ class WorkflowNodeCard(QFrame):
             return "OFF"
         status = getattr(self.method, "status", "idle")
         status_map = {
-            "idle": "IDLE",
-            "pending": "IDLE",
+            "idle": "ON",
+            "pending": "ON",
             "queued": "QUE",
             "running": "RUN",
             "success": "OK",
@@ -432,7 +510,7 @@ class WorkflowNodeCard(QFrame):
             "skipped": "SKIP",
             "cancelled": "CANC",
         }
-        return status_map.get(status, "IDLE")
+        return status_map.get(status, "ON")
 
     def _refresh_state_properties(self) -> None:
         self.setProperty("hiddenState", bool(self.method.hidden))
