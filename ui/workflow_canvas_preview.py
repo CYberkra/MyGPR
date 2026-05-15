@@ -112,6 +112,8 @@ class BscanPreviewCard(QFrame):
         self.compact = False
         self.source_label: QLabel | None = None
         self.thumbnail_label: QLabel | None = None
+        self.input_port_label: QLabel | None = None
+        self.output_port_label: QLabel | None = None
         self.setObjectName("bscanPreviewCard")
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setMinimumWidth(300)
@@ -264,6 +266,10 @@ class BscanPreviewCard(QFrame):
                     widget = item.widget()
                     widget.show()
                     widget.setStyleSheet("")
+        if self.input_port_label is not None:
+            self.input_port_label.show()
+        if self.output_port_label is not None:
+            self.output_port_label.show()
         self._simplify_layout(restore=True)
 
     def _apply_compact_mode(self) -> None:
@@ -284,6 +290,10 @@ class BscanPreviewCard(QFrame):
                             widget.setStyleSheet("font-size: 16px; font-weight: bold;")
                         elif widget.objectName() == "previewMeta":
                             widget.setStyleSheet("font-size: 14px;")
+        if self.input_port_label is not None:
+            self.input_port_label.show()
+        if self.output_port_label is not None:
+            self.output_port_label.show()
         self._simplify_layout(restore=False)
 
     def _apply_mini_mode(self) -> None:
@@ -303,6 +313,10 @@ class BscanPreviewCard(QFrame):
                         widget.hide()
                     else:
                         widget.show()
+        if self.input_port_label is not None:
+            self.input_port_label.hide()
+        if self.output_port_label is not None:
+            self.output_port_label.hide()
         self._simplify_layout(restore=False)
 
     def _simplify_layout(self, restore: bool = False) -> None:
@@ -375,14 +389,14 @@ class BscanPreviewCard(QFrame):
 
         port_row = QHBoxLayout()
         port_row.setContentsMargins(0, 4, 0, 4)
-        left_port = QLabel("data")
-        left_port.setObjectName("previewPortLabel")
-        right_port = QLabel("preview")
-        right_port.setObjectName("previewPortLabel")
-        right_port.setAlignment(Qt.AlignmentFlag.AlignRight)
-        port_row.addWidget(left_port)
+        self.input_port_label = QLabel("data")
+        self.input_port_label.setObjectName("previewPortLabel")
+        self.output_port_label = QLabel("preview")
+        self.output_port_label.setObjectName("previewPortLabel")
+        self.output_port_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        port_row.addWidget(self.input_port_label)
         port_row.addStretch(1)
-        port_row.addWidget(right_port)
+        port_row.addWidget(self.output_port_label)
         root.addLayout(port_row)
         self._port_row = port_row
 

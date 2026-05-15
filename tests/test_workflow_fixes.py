@@ -1055,8 +1055,8 @@ class TestWorkflowNodeCardUI:
         assert "in ●──────● out" not in status_text, \
             f"Mini 节点不应使用硬编码端口显示，实际是 '{status_text}'"
 
-    def test_mini_preview_node_shows_status_and_port(self):
-        """测试33: Mini Preview 节点显示状态和 data→preview"""
+    def test_mini_preview_node_shows_status_without_port_noise(self):
+        """测试33: Mini Preview 节点只显示状态，不重复 data→preview"""
         import sys
         from PyQt6.QtWidgets import QApplication
         from ui.workflow_canvas_cards import MiniNodeItem, WorkflowNodeProxy
@@ -1079,8 +1079,8 @@ class TestWorkflowNodeCardUI:
 
         assert "B-scan Preview" in title_text, \
             f"Mini Preview 标题应该是 'B-scan Preview'，实际是 '{title_text}'"
-        assert "data → preview" in status_text, \
-            f"Mini Preview 应该显示 'data → preview'，实际是 '{status_text}'"
+        assert "data → preview" not in status_text, \
+            f"Mini Preview 不应重复显示端口摘要，实际是 '{status_text}'"
 
     def test_param_row_bool_chip_fixed_width(self):
         """测试34: bool chip ON/OFF 宽度稳定"""

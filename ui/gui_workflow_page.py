@@ -26,9 +26,11 @@ from PyQt6.QtWidgets import (
     QMenu,
     QMessageBox,
     QScrollArea,
+    QSizePolicy,
     QSlider,
     QSpinBox,
     QSplitter,
+    QStackedWidget,
     QTextEdit,
     QToolButton,
     QVBoxLayout,
@@ -48,7 +50,11 @@ from core.workflow_data import (
     get_config_manager,
 )
 from core.workflow_validation import to_text_with_suggestions, validate_workflow_config
-from ui.workflow_canvas_cards import WorkflowCanvasView
+from ui.workflow_canvas_cards import (
+    WorkflowCanvasView,
+    candidate_methods_for_workflow_method,
+    update_workflow_method_algorithm,
+)
 
 
 HEAVY_REALTIME_METHODS = {
@@ -110,30 +116,40 @@ class WorkflowPage(QWidget):
 
         studio_bar = QFrame()
         studio_bar.setObjectName("workflowStudioBar")
-        studio_outer = QVBoxLayout(studio_bar)
-        studio_outer.setContentsMargins(10, 8, 10, 8)
-        studio_outer.setSpacing(6)
-        primary_row = QHBoxLayout()
-        primary_row.setSpacing(8)
-        secondary_row = QHBoxLayout()
-        secondary_row.setSpacing(8)
-        studio_outer.addLayout(primary_row)
-        studio_outer.addLayout(secondary_row)
+        studio_row = QHBoxLayout(studio_bar)
+        studio_row.setContentsMargins(10, 7, 10, 7)
+        studio_row.setSpacing(8)
 
         title = QLabel("MyGPR 工作流")
-        title.setProperty("class", "sectionTitle")
-        primary_row.addWidget(title)
+        title.setObjectName("workflowStudioTitle")
+        title.setMinimumWidth(96)
+        studio_row.addWidget(title)
 
-        primary_row.addWidget(QLabel("模板"))
+        template_label = QLabel("模板")
+        template_label.setObjectName("workflowTopHint")
+        studio_row.addWidget(template_label)
         self.template_combo = QComboBox()
         self.template_combo.setToolTip("选择内置或已保存的工作流模板")
-        self.template_combo.setMinimumWidth(220)
-        self.template_combo.setMaximumWidth(340)
+        self.template_combo.setMinimumWidth(170)
+        self.template_combo.setMaximumWidth(260)
         self._reload_template_combo()
-        primary_row.addWidget(self.template_combo, 1)
+        studio_row.addWidget(self.template_combo, 0)
 
-        self.btn_run_all = PushButton(FluentIcon.PLAY_SOLID, "全链")
-        self.btn_run_all.setToolTip("按当前步骤顺序运行全链")
+        self.btn_run_all = PushButton(FluentIcon.PLAY_SOLID, "运行")
+        self.btn_run_all.setObjectName("workflowRunButton")
+        self.btn_run_all.setToolTip("运行全部")
+        self.run_menu_button = QToolButton()
+        self.run_menu_button.setText("▾")
+        self.run_menu_button.setToolTip("选择运行模式")
+        self.run_menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.run_menu = QMenu(self.run_menu_button)
+        self.run_menu.addAction("运行全部", self.request_manual_run)
+        self.run_menu.addAction("从当前节点运行", self.request_run_from_current)
+        self.run_menu.addAction("只运行选中节点", self.request_selected_run)
+        self.run_menu.addAction("验证工作流", self._validate_workflow_ui)
+        self.stop_action = self.run_menu.addAction("停止 / 取消")
+        self.stop_action.setEnabled(False)
+        self.run_menu_button.setMenu(self.run_menu)
         self.btn_run_from_current = PushButton("后续")
         self.btn_run_from_current.setToolTip("从选中步骤运行到末尾")
         self.btn_run_selected = PushButton("选中")
@@ -145,17 +161,6 @@ class WorkflowPage(QWidget):
         self.btn_save_live.setToolTip("将实时预览或最近一次工作流结果写入正式历史")
         self.btn_save_live.setEnabled(False)
 
-        for btn in [
-            self.btn_run_all,
-            self.btn_run_from_current,
-            self.btn_run_selected,
-            self.btn_validate,
-            self.btn_save_live,
-        ]:
-            btn.setMinimumWidth(64)
-            btn.setMaximumWidth(88)
-            primary_row.addWidget(btn)
-
         self.btn_toggle_project = PushButton("项目")
         self.btn_toggle_project.setToolTip("展开或收起左侧 Project / Data 与节点库")
         self.btn_toggle_project.setCheckable(True)
@@ -164,15 +169,20 @@ class WorkflowPage(QWidget):
         self.btn_toggle_inspector.setToolTip("展开或收起右侧 Inspector")
         self.btn_toggle_inspector.setCheckable(True)
         self.btn_toggle_inspector.setChecked(True)
-        for btn in [
-            self.btn_toggle_project,
-            self.btn_toggle_inspector,
-            self.btn_open_tuning_lab,
-        ]:
-            btn.setMinimumWidth(58)
-            btn.setMaximumWidth(88)
-            secondary_row.addWidget(btn)
-        secondary_row.addStretch(1)
+        self.btn_run_from_current.hide()
+        self.btn_run_selected.hide()
+        self.btn_validate.hide()
+        self.btn_open_tuning_lab.hide()
+        self.btn_save_live.hide()
+        self.btn_toggle_project.hide()
+        self.btn_toggle_inspector.hide()
+
+        self.btn_run_all.setMinimumWidth(88)
+        self.btn_run_all.setMaximumWidth(118)
+        self.run_menu_button.setFixedWidth(30)
+        studio_row.addWidget(self.btn_run_all)
+        studio_row.addWidget(self.run_menu_button)
+        studio_row.addStretch(1)
 
         self.realtime_check = QCheckBox("实时")
         self.realtime_check.setToolTip("参数或顺序变化后自动计算当前工作流实时结果")
@@ -192,18 +202,19 @@ class WorkflowPage(QWidget):
             self.safe_check,
             self.execution_mode_label,
             self.zoom_label,
-            self.btn_fit_canvas,
-            self.btn_auto_layout,
-            self.btn_reset_zoom,
         ]:
-            secondary_row.addWidget(widget)
+            studio_row.addWidget(widget)
+        self.btn_fit_canvas.hide()
+        self.btn_auto_layout.hide()
+        self.btn_reset_zoom.hide()
 
         self.template_menu_button = QToolButton()
-        self.template_menu_button.setText("模板 ▾")
+        self.template_menu_button.setText("⋯")
+        self.template_menu_button.setToolTip("模板、视图和工作区设置")
         self.template_menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         template_menu = QMenu(self.template_menu_button)
         self.template_menu_button.setMenu(template_menu)
-        secondary_row.addWidget(self.template_menu_button)
+        studio_row.addWidget(self.template_menu_button)
         outer.addWidget(studio_bar)
 
         self.btn_new_template = PushButton(FluentIcon.ADD, "新建模板")
@@ -219,6 +230,14 @@ class WorkflowPage(QWidget):
         template_menu.addAction("导入模板", self.import_template)
         template_menu.addAction("导出模板", self.export_template)
         template_menu.addAction("恢复默认", self.restore_default_template)
+        template_menu.addSeparator()
+        template_menu.addAction("自动布局", lambda: self.workflow_canvas.auto_layout())
+        template_menu.addAction("适配画布", lambda: self.workflow_canvas.fit_nodes())
+        template_menu.addAction("重置缩放", lambda: self.workflow_canvas.reset_zoom())
+        template_menu.addSeparator()
+        template_menu.addAction("显示设置", self.preview_settings_requested.emit)
+        workspace_settings_action = template_menu.addAction("工作区设置")
+        workspace_settings_action.setEnabled(False)
 
         workspace = QWidget()
         workspace_layout = QHBoxLayout(workspace)
@@ -241,12 +260,41 @@ class WorkflowPage(QWidget):
 
         left_sidebar = QWidget()
         self.left_sidebar = left_sidebar
-        left_sidebar.setMinimumWidth(220)
-        left_sidebar.setMaximumWidth(320)
+        left_sidebar.setObjectName("workflowLeftDock")
+        left_sidebar.setMinimumWidth(52)
+        left_sidebar.setMaximumWidth(620)
         left_sidebar.setMinimumHeight(0)
-        left_sidebar_layout = QVBoxLayout(left_sidebar)
+        left_sidebar_layout = QHBoxLayout(left_sidebar)
         left_sidebar_layout.setContentsMargins(0, 0, 0, 0)
-        left_sidebar_layout.setSpacing(8)
+        left_sidebar_layout.setSpacing(6)
+
+        self.left_icon_rail = QFrame()
+        self.left_icon_rail.setObjectName("workflowIconRail")
+        self.left_icon_rail.setFixedWidth(52)
+        rail_layout = QVBoxLayout(self.left_icon_rail)
+        rail_layout.setContentsMargins(5, 6, 5, 6)
+        rail_layout.setSpacing(6)
+        self.rail_buttons: dict[str, QToolButton] = {}
+        self.left_panel_keys: list[str] = []
+
+        self.left_panel_stack = QStackedWidget()
+        self.left_panel_stack.setObjectName("workflowLeftPanelStack")
+        self.left_panel_stack.setMinimumWidth(340)
+        self.left_panel_stack.setMaximumWidth(560)
+        self.left_panel_stack.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        left_sidebar_layout.addWidget(self.left_icon_rail)
+        left_sidebar_layout.addWidget(self.left_panel_stack, 1)
+
+        def add_rail_button(key: str, text: str, tooltip: str, index: int) -> None:
+            button = QToolButton()
+            button.setText(text)
+            button.setToolTip(tooltip)
+            button.setCheckable(True)
+            button.setFixedSize(40, 40)
+            button.clicked.connect(lambda _checked=False, panel_key=key: self._toggle_left_panel(panel_key))
+            self.rail_buttons[key] = button
+            rail_layout.addWidget(button)
+            self.left_panel_keys.insert(index, key)
 
         self.project_panel = QGroupBox("项目 / 数据")
         project_layout = QVBoxLayout(self.project_panel)
@@ -291,7 +339,7 @@ class WorkflowPage(QWidget):
         self.btn_create_raw_input = PushButton("创建 / 更新输入节点")
         self.btn_create_raw_input.setToolTip("在画布中创建或更新原始数据输入节点占位")
         project_layout.addWidget(self.btn_create_raw_input)
-        left_sidebar_layout.addWidget(self.project_panel)
+        self.left_panel_stack.addWidget(self.project_panel)
 
         self.palette_panel = QGroupBox("节点库")
         palette_layout = QVBoxLayout(self.palette_panel)
@@ -300,11 +348,37 @@ class WorkflowPage(QWidget):
         self.palette_search = QLineEdit()
         self.palette_search.setPlaceholderText("搜索节点")
         self.palette_list = QListWidget()
-        self.palette_list.setMinimumWidth(190)
-        self.palette_list.setMaximumWidth(240)
+        self.palette_list.setMinimumWidth(320)
+        self.palette_list.setMaximumWidth(520)
         palette_layout.addWidget(self.palette_search)
         palette_layout.addWidget(self.palette_list, 1)
-        left_sidebar_layout.addWidget(self.palette_panel, 1)
+        self.left_panel_stack.addWidget(self.palette_panel)
+
+        self.run_panel = self._make_text_panel("运行记录", "最近运行会显示在底部日志和此处摘要。")
+        self.left_panel_stack.addWidget(self.run_panel)
+        self.tuning_panel = self._make_action_panel("调参与实验", "选择节点后可打开自动选参和参数扫描。", self.request_tuning_lab_for_current)
+        self.left_panel_stack.addWidget(self.tuning_panel)
+        self.validation_panel = self._make_text_panel("验证 / QC", "运行前会检查连接、sidecar、shape 和参数风险。")
+        self.left_panel_stack.addWidget(self.validation_panel)
+        self.export_panel = self._make_action_panel("导出 / Evidence", "导出图像、数据、Evidence Package 或工作流快照。", self.export_evidence_requested.emit)
+        self.left_panel_stack.addWidget(self.export_panel)
+        self.settings_panel = self._make_text_panel("设置", "工作区显示、模板与快捷设置已收纳在顶部 ⋯ 菜单。")
+        self.left_panel_stack.addWidget(self.settings_panel)
+
+        rail_items = [
+            ("project", "项", "项目 / 数据", 0),
+            ("nodes", "节", "节点库", 1),
+            ("runs", "运", "运行记录", 2),
+            ("tuning", "调", "调参与实验", 3),
+            ("validation", "验", "验证 / QC", 4),
+            ("export", "出", "导出 / Evidence", 5),
+            ("settings", "设", "设置", 6),
+        ]
+        for key, text, tooltip, index in rail_items:
+            add_rail_button(key, text, tooltip, index)
+        rail_layout.addStretch(1)
+        self.left_panel_stack.setCurrentIndex(1)
+        self.rail_buttons["nodes"].setChecked(True)
         self.workspace_splitter.addWidget(left_sidebar)
 
         self.step_panel = QWidget()
@@ -314,7 +388,7 @@ class WorkflowPage(QWidget):
         step_panel_layout.setSpacing(0)
         self.step_list.hide()
         self.workflow_canvas = WorkflowCanvasView()
-        self.workflow_canvas.setToolTip("空白左键拖动画布；节点拖动移动；端口拖动连线；Ctrl+滚轮缩放。")
+        self.workflow_canvas.setToolTip("空白左键拖动画布；滚轮缩放；节点拖动移动；端口拖动连线。")
         step_panel_layout.addWidget(self.workflow_canvas, 1)
         self.workspace_splitter.addWidget(self.step_panel)
 
@@ -368,8 +442,8 @@ class WorkflowPage(QWidget):
         self.detail_box.setToolTip("选中步骤的常用参数已经集成在画布节点卡片中。")
 
         self.inspector_box = QGroupBox("属性 / 检查")
-        self.inspector_box.setMinimumWidth(260)
-        self.inspector_box.setMaximumWidth(360)
+        self.inspector_box.setMinimumWidth(280)
+        self.inspector_box.setMaximumWidth(520)
         inspector_layout = QVBoxLayout(self.inspector_box)
         inspector_layout.setContentsMargins(8, 14, 8, 8)
         inspector_layout.setSpacing(6)
@@ -389,18 +463,76 @@ class WorkflowPage(QWidget):
         self.run_history_list.setToolTip("点击查看历史运行详情")
         self.run_history_list.itemClicked.connect(self._on_history_item_clicked)
         inspector_layout.addWidget(self.inspector_label)
+        inspector_layout.addWidget(self.stage_label)
+        inspector_layout.addWidget(self.stage_warning)
+        inspector_layout.addWidget(method_row)
+        inspector_layout.addWidget(self.param_scroll, 1)
         inspector_layout.addWidget(self.qc_label)
         inspector_layout.addWidget(self.export_label)
         inspector_layout.addWidget(self.status_label)
         inspector_layout.addWidget(QLabel("运行历史"))
         inspector_layout.addWidget(self.run_history_list)
-        inspector_layout.addStretch(1)
         self.workspace_splitter.addWidget(self.inspector_box)
         self.workspace_splitter.setStretchFactor(0, 0)
         self.workspace_splitter.setStretchFactor(1, 1)
         self.workspace_splitter.setStretchFactor(2, 0)
-        self.workspace_splitter.setSizes([260, 720, 300])
+        self.workspace_splitter.setSizes([420, 720, 300])
         self.log_box = self.inspector_box
+
+        self.bottom_drawer = QFrame()
+        self.bottom_drawer.setObjectName("workflowBottomDrawer")
+        drawer_layout = QVBoxLayout(self.bottom_drawer)
+        drawer_layout.setContentsMargins(10, 4, 10, 8)
+        drawer_layout.setSpacing(4)
+        drawer_header = QHBoxLayout()
+        drawer_header.setSpacing(6)
+        self.bottom_drawer_toggle = QToolButton()
+        self.bottom_drawer_toggle.setText("日志")
+        self.bottom_drawer_toggle.setCheckable(True)
+        self.bottom_drawer_toggle.setToolTip("展开或收起底部运行抽屉")
+        self.bottom_drawer_toggle.clicked.connect(lambda checked: self._set_bottom_drawer_expanded(bool(checked)))
+        drawer_header.addWidget(self.bottom_drawer_toggle)
+        self.bottom_drawer_buttons: dict[str, QToolButton] = {}
+        for key, text in [
+            ("logs", "日志"),
+            ("validation", "验证"),
+            ("qc", "QC / 告警"),
+            ("evidence", "Evidence"),
+            ("export", "导出"),
+        ]:
+            btn = QToolButton()
+            btn.setText(text)
+            btn.setCheckable(True)
+            btn.clicked.connect(lambda _checked=False, page_key=key: self._select_bottom_drawer_page(page_key, expand=True))
+            drawer_header.addWidget(btn)
+            self.bottom_drawer_buttons[key] = btn
+        drawer_header.addStretch(1)
+        drawer_layout.addLayout(drawer_header)
+        self.bottom_drawer_stack = QStackedWidget()
+        self.runtime_log_view = QTextEdit()
+        self.runtime_log_view.setReadOnly(True)
+        self.workflow_validation_view = QTextEdit()
+        self.workflow_validation_view.setReadOnly(True)
+        self.workflow_qc_view = QTextEdit("暂无 QC / 告警。")
+        self.workflow_qc_view.setReadOnly(True)
+        self.workflow_evidence_view = QTextEdit("Evidence 导出结果会显示在这里。")
+        self.workflow_evidence_view.setReadOnly(True)
+        self.workflow_export_view = QTextEdit("导出图像、数据和报告的结果会显示在这里。")
+        self.workflow_export_view.setReadOnly(True)
+        for widget in [
+            self.runtime_log_view,
+            self.workflow_validation_view,
+            self.workflow_qc_view,
+            self.workflow_evidence_view,
+            self.workflow_export_view,
+        ]:
+            widget.setMinimumHeight(120)
+            self.bottom_drawer_stack.addWidget(widget)
+        drawer_layout.addWidget(self.bottom_drawer_stack)
+        self.bottom_drawer_stack.hide()
+        self.bottom_drawer.setMaximumHeight(42)
+        self._select_bottom_drawer_page("logs", expand=False)
+        outer.addWidget(self.bottom_drawer)
 
         self._debounce_timer = QTimer(self)
         self._debounce_timer.setSingleShot(True)
@@ -425,6 +557,7 @@ class WorkflowPage(QWidget):
         self.workflow_canvas.preview_snapshot_requested.connect(self._request_preview_snapshot)
         self.workflow_canvas.links_changed.connect(self._on_canvas_links_changed)
         self.workflow_canvas.layout_changed.connect(self._on_canvas_layout_changed)
+        self.workflow_canvas.zoom_changed.connect(self._update_zoom_label)
         self.btn_toggle_project.clicked.connect(self._toggle_project_panel)
         self.btn_toggle_inspector.clicked.connect(self._toggle_inspector_panel)
         self.method_combo.currentIndexChanged.connect(self._on_method_changed)
@@ -460,6 +593,68 @@ class WorkflowPage(QWidget):
         self.workspace_splitter.splitterMoved.connect(self._save_workspace_state)
         self._populate_palette()
 
+    def _make_text_panel(self, title: str, text: str) -> QGroupBox:
+        panel = QGroupBox(title)
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(10, 14, 10, 10)
+        label = QLabel(text)
+        label.setWordWrap(True)
+        label.setProperty("class", "hintText")
+        layout.addWidget(label)
+        layout.addStretch(1)
+        return panel
+
+    def _make_action_panel(self, title: str, text: str, action: Callable[[], None]) -> QGroupBox:
+        panel = QGroupBox(title)
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(10, 14, 10, 10)
+        label = QLabel(text)
+        label.setWordWrap(True)
+        label.setProperty("class", "hintText")
+        button = PushButton(title)
+        button.clicked.connect(action)
+        layout.addWidget(label)
+        layout.addWidget(button)
+        layout.addStretch(1)
+        return panel
+
+    def _toggle_left_panel(self, key: str) -> None:
+        if key not in self.left_panel_keys:
+            return
+        index = self.left_panel_keys.index(key)
+        is_same_visible = self.left_panel_stack.isVisible() and self.left_panel_stack.currentIndex() == index
+        self.left_panel_stack.setVisible(not is_same_visible)
+        if not is_same_visible:
+            self.left_panel_stack.setCurrentIndex(index)
+        for panel_key, button in self.rail_buttons.items():
+            button.setChecked(panel_key == key and self.left_panel_stack.isVisible())
+        self.btn_toggle_project.setChecked(self.left_panel_stack.isVisible())
+        self._save_workspace_state()
+
+    def _select_bottom_drawer_page(self, key: str, *, expand: bool) -> None:
+        keys = ["logs", "validation", "qc", "evidence", "export"]
+        if key not in keys:
+            key = "logs"
+        self.bottom_drawer_stack.setCurrentIndex(keys.index(key))
+        for page_key, button in self.bottom_drawer_buttons.items():
+            button.setChecked(page_key == key)
+        if expand:
+            self._set_bottom_drawer_expanded(True)
+
+    def _set_bottom_drawer_expanded(self, expanded: bool) -> None:
+        expanded = bool(expanded)
+        self.bottom_drawer_toggle.setChecked(expanded)
+        self.bottom_drawer_stack.setVisible(expanded)
+        self.bottom_drawer.setMaximumHeight(230 if expanded else 42)
+
+    def _append_runtime_log(self, text: str) -> None:
+        if not hasattr(self, "runtime_log_view"):
+            return
+        self.runtime_log_view.append(str(text))
+
+    def _update_zoom_label(self, scale: float) -> None:
+        self.zoom_label.setText(f"缩放 {int(round(float(scale) * 100))}%")
+
     def _populate_palette(self) -> None:
         if not hasattr(self, "palette_list"):
             return
@@ -493,11 +688,16 @@ class WorkflowPage(QWidget):
             self._add_canvas_node(str(method_id), self.workflow_canvas.viewport_scene_center())
 
     def _toggle_project_panel(self, checked: bool) -> None:
-        self.left_sidebar.setVisible(bool(checked))
+        self.left_sidebar.setVisible(True)
+        self.left_panel_stack.setVisible(bool(checked))
+        if checked and self.left_panel_stack.currentIndex() < 0:
+            self.left_panel_stack.setCurrentIndex(0)
+        for key, button in self.rail_buttons.items():
+            button.setChecked(self.left_panel_stack.isVisible() and self.left_panel_keys[self.left_panel_stack.currentIndex()] == key)
         if checked:
             sizes = self.workspace_splitter.sizes()
             if sizes and sizes[0] <= 8:
-                self.workspace_splitter.setSizes([260, max(640, sizes[1] if len(sizes) > 1 else 720), sizes[2] if len(sizes) > 2 else 300])
+                self.workspace_splitter.setSizes([420, max(640, sizes[1] if len(sizes) > 1 else 720), sizes[2] if len(sizes) > 2 else 300])
         self._save_workspace_state()
 
     def _toggle_inspector_panel(self, checked: bool) -> None:
@@ -512,7 +712,8 @@ class WorkflowPage(QWidget):
         settings = QSettings("MyGPR", "WorkflowStudio")
         sizes = self.workspace_splitter.sizes()
         settings.setValue("workspace_sizes", sizes)
-        settings.setValue("project_panel_visible", self.left_sidebar.isVisible())
+        settings.setValue("project_panel_visible", self.left_panel_stack.isVisible())
+        settings.setValue("left_panel_index", self.left_panel_stack.currentIndex())
         settings.setValue("inspector_panel_visible", self.inspector_box.isVisible())
         settings.sync()
         
@@ -537,9 +738,21 @@ class WorkflowPage(QWidget):
             try:
                 visible = settings.value("project_panel_visible", True, type=bool)
                 self.btn_toggle_project.setChecked(visible)
-                self.left_sidebar.setVisible(visible)
+                self.left_sidebar.setVisible(True)
+                self.left_panel_stack.setVisible(visible)
             except Exception:
                 pass
+        if settings.contains("left_panel_index"):
+            try:
+                index = int(settings.value("left_panel_index", 1))
+                if 0 <= index < self.left_panel_stack.count():
+                    self.left_panel_stack.setCurrentIndex(index)
+            except Exception:
+                pass
+        if hasattr(self, "rail_buttons"):
+            current_key = self.left_panel_keys[self.left_panel_stack.currentIndex()]
+            for key, button in self.rail_buttons.items():
+                button.setChecked(self.left_panel_stack.isVisible() and key == current_key)
         if settings.contains("inspector_panel_visible"):
             try:
                 visible = settings.value("inspector_panel_visible", True, type=bool)
@@ -553,6 +766,8 @@ class WorkflowPage(QWidget):
 
         self.status_label.setText(report.summary())
         self._log(text)
+        self.workflow_validation_view.setPlainText(text)
+        self._select_bottom_drawer_page("validation", expand=bool(report.errors or report.warnings))
 
         if hasattr(self, "qc_label") and self.qc_label is not None:
             lines = [
@@ -563,6 +778,7 @@ class WorkflowPage(QWidget):
             ]
             lines.extend(f"- {issue.code}" for issue in report.issues[:6])
             self.qc_label.setText("\n".join(lines))
+            self.workflow_qc_view.setPlainText("\n".join(lines))
         self.validation_report_requested.emit(text)
 
     def _current_sidecar_status(self) -> dict[str, bool]:
@@ -789,10 +1005,7 @@ class WorkflowPage(QWidget):
             self._suppress_change = False
 
     def _render_method_combo(self, method: WorkflowMethod) -> None:
-        stage = WORKFLOW_STAGE_BY_ID.get(method.stage_id, {})
-        candidates = list(stage.get("candidate_methods") or [method.method_id])
-        if method.method_id not in candidates:
-            candidates.insert(0, method.method_id)
+        candidates = candidate_methods_for_workflow_method(method)
         self.method_combo.blockSignals(True)
         self.method_combo.clear()
         for key in candidates:
@@ -934,12 +1147,10 @@ class WorkflowPage(QWidget):
         new_key = self.method_combo.currentData()
         if not new_key or new_key == method.method_id:
             return
-        method.method_id = str(new_key)
-        category = PROCESSING_METHODS.get(method.method_id, {}).get("category")
-        if category:
-            method.category = str(category)
-        method.params = self._default_params_for(method.method_id)
+        update_workflow_method_algorithm(method, str(new_key))
+        self._render_method_combo(method)
         self._render_params(method)
+        self._on_step_selected(self.step_list.currentRow())
         self._refresh_selected_item()
         self._queue_realtime_run()
 
@@ -1118,7 +1329,9 @@ class WorkflowPage(QWidget):
             return
         report, report_text = self._build_validation_report_text()
         self.validation_report_requested.emit(report_text)
+        self.workflow_validation_view.setPlainText(report_text)
         if report.errors:
+            self._select_bottom_drawer_page("validation", expand=True)
             error_text = "\n".join(
                 f"- {issue.code}: {issue.message}"
                 for issue in report.errors
@@ -1133,6 +1346,7 @@ class WorkflowPage(QWidget):
             if reply == QMessageBox.StandardButton.No:
                 return
         elif report.warnings:
+            self._select_bottom_drawer_page("validation", expand=True)
             self._log("运行前发现警告：")
             for issue in report.warnings:
                 self._log(f"  [{issue.code}] {issue.message}")
@@ -1168,6 +1382,7 @@ class WorkflowPage(QWidget):
     def _on_canvas_node_changed(self, row: int) -> None:
         self._select_step_row(row)
         self._refresh_selected_item()
+        self._on_step_selected(row)
         self._queue_realtime_run()
 
     def _run_canvas_node(self, row: int) -> None:
@@ -1225,6 +1440,8 @@ class WorkflowPage(QWidget):
 
     def _request_preview_snapshot(self) -> None:
         self.export_evidence_requested.emit()
+        self.workflow_evidence_view.append("已请求 Evidence / 快照导出。")
+        self._select_bottom_drawer_page("evidence", expand=True)
         self._log("Preview: 快照导出请使用 Evidence / Export 入口")
 
     def _create_or_update_raw_input_node(self) -> None:
@@ -1308,6 +1525,20 @@ class WorkflowPage(QWidget):
         self.qc_label.setText(
             f"QC\n数据尺寸：{shape_text}\n告警：--\n元数据：{self._metadata_status}"
         )
+        if hasattr(self, "workflow_qc_view"):
+            self.workflow_qc_view.setPlainText(
+                "\n".join(
+                    [
+                        "Project / Data",
+                        f"Raw: {'loaded' if self._current_file else 'missing'}",
+                        self._sidecar_status_text("RTK", "rtk"),
+                        self._sidecar_status_text("IMU", "imu"),
+                        self._sidecar_status_text("AGL", "altimeter"),
+                        f"shape: {shape_text}",
+                        f"metadata: {self._metadata_status}",
+                    ]
+                )
+            )
 
     def _sidecar_status_text(self, label: str, key: str) -> str:
         path = self._sidecar_files.get(key)
@@ -1359,6 +1590,7 @@ class WorkflowPage(QWidget):
         label = "实时预览完成" if realtime else "工作流运行完成"
         self.status_label.setText(label)
         self._log(f"{label}: {len(outputs)} 步")
+        self._select_bottom_drawer_page("logs", expand=not realtime)
 
         output_by_node_id = {o.get("node_id"): o for o in outputs if o.get("node_id")}
         run_node_ids = set(output_by_node_id.keys())
@@ -1452,6 +1684,7 @@ class WorkflowPage(QWidget):
                 success=False,
             )
         self._log(f"运行失败: {error_message}")
+        self._select_bottom_drawer_page("logs", expand=True)
         if failed_node_id:
             self._log(f"失败节点: {failed_node_id}")
 
@@ -1472,6 +1705,7 @@ class WorkflowPage(QWidget):
         self._update_history_list()
 
     def _log(self, text: str) -> None:
+        self._append_runtime_log(str(text))
         self.log_message_requested.emit(str(text))
 
     def _create_run_record(self, outputs: list[dict[str, Any]], realtime: bool, run_mode: str = "") -> dict[str, Any]:

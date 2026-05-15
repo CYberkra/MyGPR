@@ -11,11 +11,12 @@ import numpy as np
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtCore import QEvent, QPointF, QSettings
+from PyQt6.QtCore import QEvent, QPoint, QPointF, QSettings, Qt
+from PyQt6.QtGui import QWheelEvent
 from PyQt6.QtWidgets import QApplication, QAbstractSpinBox, QCheckBox, QComboBox, QLineEdit, QSlider, QSplitter, QToolButton
 
 from core.app_paths import get_workflow_templates_dir
-from core.workflow_data import WorkflowConfigManager, WorkflowMethod, build_default_workflow_config
+from core.workflow_data import WORKFLOW_STAGE_BY_ID, WorkflowConfig, WorkflowConfigManager, WorkflowMethod, build_default_workflow_config
 from ui.bscan_viewer_dialog import BscanViewerDialog
 from ui.workflow_canvas_cards import WorkflowNodeCard, WorkflowNodeProxy
 from ui.workflow_canvas_cards import WorkflowCanvasView
@@ -58,8 +59,8 @@ def test_choice_params_render_as_combo_box():
 def test_step_editor_add_duplicate_remove_and_run_scopes():
     app = _get_app()
     page = WorkflowPage()
-    emitted: list[tuple[list, bool]] = []
-    page.workflow_run_requested.connect(lambda methods, realtime: emitted.append((methods, realtime)))
+    emitted: list[tuple[list, bool, str]] = []
+    page.workflow_run_requested.connect(lambda methods, realtime, mode: emitted.append((methods, realtime, mode)))
     try:
         page.realtime_check.setChecked(False)
         page.step_list.setCurrentRow(1)
@@ -96,8 +97,9 @@ def test_step_editor_add_duplicate_remove_and_run_scopes():
         app.processEvents()
 
         assert emitted
-        selected_methods, selected_realtime = emitted[-1]
+        selected_methods, selected_realtime, selected_mode = emitted[-1]
         assert selected_realtime is False
+        assert selected_mode == "Run Selected"
         assert len(selected_methods) == 1
         assert selected_methods[0].method_id == page.config.methods[1].method_id
 
@@ -110,8 +112,9 @@ def test_step_editor_add_duplicate_remove_and_run_scopes():
         page.request_run_from_current()
         app.processEvents()
 
-        tail_methods, tail_realtime = emitted[-1]
+        tail_methods, tail_realtime, tail_mode = emitted[-1]
         assert tail_realtime is False
+        assert tail_mode == "Run From"
         assert [method.method_id for method in tail_methods] == expected_tail
     finally:
         page.close()
@@ -122,7 +125,12 @@ def test_compact_vertical_layout_uses_short_actions_and_step_labels():
     app = _get_app()
     page = WorkflowPage()
     try:
-        assert page.btn_run_all.text() == "全链"
+        assert page.btn_run_all.text() == "运行"
+        run_menu_texts = [action.text() for action in page.run_menu.actions() if action.text()]
+        assert "运行全部" in run_menu_texts
+        assert "从当前节点运行" in run_menu_texts
+        assert "只运行选中节点" in run_menu_texts
+        assert "验证工作流" in run_menu_texts
         assert page.btn_run_from_current.text() == "后续"
         assert page.btn_run_selected.text() == "选中"
         assert page.btn_save_live.text() == "保存"
@@ -134,10 +142,13 @@ def test_compact_vertical_layout_uses_short_actions_and_step_labels():
         assert page.safe_check.text() == "安全"
         assert page.execution_mode_label.text() == "执行：顺序"
         assert page.zoom_label.text() == "缩放 100%"
-        assert page.template_menu_button.text() == "模板 ▾"
+        assert page.template_menu_button.text() == "⋯"
         assert page.project_panel.title() == "项目 / 数据"
         assert page.palette_panel.title() == "节点库"
         assert page.inspector_box.title() == "属性 / 检查"
+        assert hasattr(page, "left_icon_rail")
+        assert page.left_panel_stack.minimumWidth() >= 340
+        assert page.bottom_drawer_stack.isHidden()
         assert page.detail_box.title() == "选中步骤参数"
         assert page.detail_box.isHidden()
         assert page.step_list.isHidden()
@@ -176,10 +187,12 @@ def test_workflow_workspace_splitter_collapses_side_panels():
 
         page.btn_toggle_project.click()
         app.processEvents()
-        assert page.left_sidebar.isVisible() is False
+        assert page.left_sidebar.isVisible() is True
+        assert page.left_panel_stack.isVisible() is False
         page.btn_toggle_project.click()
         app.processEvents()
         assert page.left_sidebar.isVisible() is True
+        assert page.left_panel_stack.isVisible() is True
 
         page.btn_toggle_inspector.click()
         app.processEvents()
@@ -195,8 +208,8 @@ def test_workflow_workspace_splitter_collapses_side_panels():
 def test_workflow_canvas_node_selection_and_actions_sync_hidden_list():
     app = _get_app()
     page = WorkflowPage()
-    emitted: list[tuple[list, bool]] = []
-    page.workflow_run_requested.connect(lambda methods, realtime: emitted.append((methods, realtime)))
+    emitted: list[tuple[list, bool, str]] = []
+    page.workflow_run_requested.connect(lambda methods, realtime, mode: emitted.append((methods, realtime, mode)))
     try:
         target_row = _select_method(page, "sec_gain")
         app.processEvents()
@@ -212,6 +225,7 @@ def test_workflow_canvas_node_selection_and_actions_sync_hidden_list():
         app.processEvents()
         assert emitted
         assert emitted[-1][1] is False
+        assert emitted[-1][2] == "Run Selected"
         assert len(emitted[-1][0]) == 1
         assert emitted[-1][0][0].method_id == page.config.methods[0].method_id
     finally:
@@ -242,17 +256,22 @@ def test_workflow_canvas_zoom_lod_switches_full_compact_mini_without_rebuilding_
         canvas.scale(0.7, 0.7)
         canvas._apply_zoom_lod(force=True)
         app.processEvents()
-        assert all(proxy.compact_item.isVisible() for proxy in proxies)
+        assert not any(proxy.compact_item.isVisible() for proxy in proxies)
         assert not any(proxy.mini_item.isVisible() for proxy in proxies)
-        assert not any(proxy.widget().isVisible() for proxy in proxies)
+        assert all(proxy.widget().isVisible() for proxy in proxies)
+        assert all(proxy.widget().algorithm_row_widget.isHidden() for proxy in proxies)
+        assert all(proxy.widget().subtitle_label.isVisible() for proxy in proxies)
 
         canvas.resetTransform()
         canvas.scale(0.45, 0.45)
         canvas._apply_zoom_lod(force=True)
         app.processEvents()
         assert not any(proxy.compact_item.isVisible() for proxy in proxies)
-        assert all(proxy.mini_item.isVisible() for proxy in proxies)
-        assert not any(proxy.widget().isVisible() for proxy in proxies)
+        assert not any(proxy.mini_item.isVisible() for proxy in proxies)
+        assert all(proxy.widget().isVisible() for proxy in proxies)
+        assert all(proxy.widget().subtitle_label.isHidden() for proxy in proxies)
+        assert all(proxy.widget().input_port_label.isHidden() for proxy in proxies)
+        assert all(proxy.widget().output_port_label.isHidden() for proxy in proxies)
 
         canvas.resetTransform()
         canvas.scale(1.0, 1.0)
@@ -290,8 +309,10 @@ def test_workflow_canvas_preview_node_updates_from_output_data():
         canvas._apply_zoom_lod(force=True)
         app.processEvents()
         preview_proxy = next(proxy for proxy in canvas._scene.proxies if isinstance(proxy.widget(), BscanPreviewCard))
-        assert preview_cards[0].isVisible() is False
-        assert preview_proxy.compact_item.isVisible() is True
+        assert preview_cards[0].isVisible() is True
+        assert preview_proxy.compact_item.isVisible() is False
+        assert preview_cards[0].thumbnail_label is not None
+        assert preview_cards[0].thumbnail_label.isHidden()
     finally:
         canvas.close()
         app.processEvents()
@@ -356,10 +377,64 @@ def test_workflow_card_port_type_mapping_and_preview_style_are_visible():
             if isinstance(proxy.widget(), BscanPreviewCard)
         )
         labels = preview_card.findChildren(type(preview_card.source_label))
-        assert any(label.text() == "data ●" for label in labels)
-        assert any(label.text() == "● preview" for label in labels)
+        assert any(label.text() == "data" for label in labels)
+        assert any(label.text() == "preview" for label in labels)
     finally:
         canvas.close()
+        app.processEvents()
+
+
+def test_gain_node_algorithm_switches_from_card_inspector_and_context_menu():
+    app = _get_app()
+    page = WorkflowPage()
+    changed_rows: list[int] = []
+    page.workflow_canvas.node_changed.connect(changed_rows.append)
+    try:
+        gain_candidates = WORKFLOW_STAGE_BY_ID["gain"]["candidate_methods"]
+        assert {"sec_gain", "energy_decay_gain", "compensatingGain", "agcGain"} <= set(gain_candidates)
+
+        gain_row = _select_method(page, "sec_gain")
+        app.processEvents()
+        method = page.config.methods[gain_row]
+        original_node_id = method.node_id
+        original_stage_id = method.stage_id
+        original_order = method.order
+
+        gain_proxy = next(proxy for proxy in page.workflow_canvas._scene.proxies if proxy.row == gain_row)
+        gain_card = gain_proxy.widget()
+        assert isinstance(gain_card, WorkflowNodeCard)
+        combo = gain_card.findChild(QComboBox, "nodeAlgorithmCombo")
+        assert combo is not None
+        assert combo.findData("agcGain") >= 0
+
+        combo.setCurrentIndex(combo.findData("agcGain"))
+        app.processEvents()
+
+        assert method.method_id == "agcGain"
+        assert method.node_id == original_node_id
+        assert method.stage_id == original_stage_id
+        assert method.order == original_order
+        assert method.status == "idle"
+        assert page.method_combo.currentData() == "agcGain"
+        assert "window" in method.params
+
+        gain_proxy = next(proxy for proxy in page.workflow_canvas._scene.proxies if proxy.row == gain_row)
+        menu = page.workflow_canvas._build_node_context_menu(gain_proxy)
+        switch_menu = next((action.menu() for action in menu.actions() if action.text() == "切换算法"), None)
+        assert switch_menu is not None
+        sec_action = next(action for action in switch_menu.actions() if "SEC" in action.text())
+        sec_action.trigger()
+        app.processEvents()
+        assert method.method_id == "sec_gain"
+        assert method.node_id == original_node_id
+        assert changed_rows
+
+        restored = WorkflowConfig.from_dict(page.config.to_dict())
+        restored_gain = restored.methods[gain_row]
+        assert restored_gain.method_id == "sec_gain"
+        assert restored_gain.node_id == original_node_id
+    finally:
+        page.close()
         app.processEvents()
 
 
@@ -477,6 +552,37 @@ def test_workflow_canvas_update_node_defers_scene_rebuild():
         app.processEvents()
 
 
+def test_workflow_canvas_plain_wheel_zooms_without_ctrl_modifier():
+    app = _get_app()
+    canvas = WorkflowCanvasView()
+    try:
+        config = build_default_workflow_config("high_quality_uav_gpr")
+        canvas.set_methods(config.methods[:2])
+        app.processEvents()
+        before = canvas.transform().m11()
+        zooms: list[float] = []
+        canvas.zoom_changed.connect(zooms.append)
+
+        event = QWheelEvent(
+            QPointF(120, 120),
+            QPointF(120, 120),
+            QPoint(0, 0),
+            QPoint(0, 120),
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+            Qt.ScrollPhase.ScrollUpdate,
+            False,
+        )
+        canvas.wheelEvent(event)
+
+        assert event.isAccepted()
+        assert canvas.transform().m11() > before
+        assert zooms
+    finally:
+        canvas.close()
+        app.processEvents()
+
+
 def test_workflow_bscan_preview_downsamples_large_arrays():
     raw = np.arange(2_000 * 3_000, dtype=np.float32).reshape(2_000, 3_000)
 
@@ -580,8 +686,8 @@ def test_workflow_node_card_bool_param_does_not_duplicate_label_text():
 def test_node_context_menu_actions_and_eye_toggle_skip_hidden_step():
     app = _get_app()
     page = WorkflowPage()
-    emitted: list[tuple[list, bool]] = []
-    page.workflow_run_requested.connect(lambda methods, realtime: emitted.append((methods, realtime)))
+    emitted: list[tuple[list, bool, str]] = []
+    page.workflow_run_requested.connect(lambda methods, realtime, mode: emitted.append((methods, realtime, mode)))
     try:
         page.realtime_check.setChecked(False)
         page.step_list.setCurrentRow(0)

@@ -54,6 +54,59 @@ MAX_NODE_HEIGHT = 720
 NODE_PORT_ROW_Y = 50.0
 
 
+def default_params_for_method(method_id: str) -> dict[str, object]:
+    """Return registry defaults for a workflow method."""
+    params: dict[str, object] = {}
+    for meta in PROCESSING_METHODS.get(method_id, {}).get("params", []):
+        params[str(meta.get("name"))] = meta.get("default", "")
+    return params
+
+
+def candidate_methods_for_workflow_method(method: WorkflowMethod) -> list[str]:
+    """Return valid candidate algorithm ids for a workflow node."""
+    stage = WORKFLOW_STAGE_BY_ID.get(method.stage_id, {})
+    candidates = [
+        str(item)
+        for item in stage.get("candidate_methods", [])
+        if str(item) in PROCESSING_METHODS
+    ]
+    if not candidates:
+        candidates = [str(method.method_id)] if method.method_id in PROCESSING_METHODS else []
+        category = METHOD_CATEGORIES.get(method.category, {})
+        for key in category.get("methods", []):
+            if key in PROCESSING_METHODS and key not in candidates:
+                candidates.append(str(key))
+    if method.method_id in PROCESSING_METHODS and method.method_id not in candidates:
+        candidates.insert(0, str(method.method_id))
+    return candidates
+
+
+def update_workflow_method_algorithm(method: WorkflowMethod, method_id: str) -> bool:
+    """Switch a node to a new algorithm while preserving node identity/layout state."""
+    method_id = str(method_id)
+    if method_id == method.method_id or method_id not in PROCESSING_METHODS:
+        return False
+
+    old_params = dict(method.params or {})
+    new_params = default_params_for_method(method_id)
+    valid_names = set(new_params)
+    for name, value in old_params.items():
+        if name in valid_names:
+            new_params[name] = value
+
+    method.method_id = method_id
+    category = PROCESSING_METHODS.get(method_id, {}).get("category")
+    if category:
+        method.category = str(category)
+    method.params = new_params
+    method.status = "idle"
+    method.input_shape = None
+    method.output_shape = None
+    method.error_message = ""
+    method.elapsed_ms = 0.0
+    return True
+
+
 def _elided(text: str, width: int, widget: QWidget) -> str:
     metrics = QFontMetrics(widget.font())
     return metrics.elidedText(str(text), Qt.TextElideMode.ElideRight, int(width))
@@ -111,8 +164,8 @@ class ParamRowWidget(QWidget):
                 qproperty-alignment: AlignRight;
             }
             QToolButton#boolChip {
-                min-width: 40px;
-                max-width: 48px;
+                min-width: 68px;
+                max-width: 68px;
                 font-weight: 700;
                 font-size: 12px;
             }
@@ -186,6 +239,13 @@ class ParamRowWidget(QWidget):
         if self._slider is not None:
             self._slider.hide()
         event.accept()
+
+
+class BoolChipButton(QToolButton):
+    """ON/OFF chip with stable size hint independent of label text."""
+
+    def sizeHint(self):  # noqa: N802 - Qt override
+        return QSize(68, 26)
 
 
 class WorkflowNodeCard(QFrame):
@@ -405,6 +465,8 @@ class WorkflowNodeCard(QFrame):
             self.more_button: QToolButton | None = None
             self.warning_label: QLabel | None = None
             self.error_label: QLabel | None = None
+            self.algorithm_row_widget: QWidget | None = None
+            self.algorithm_combo: QComboBox | None = None
 
             root = QVBoxLayout(self)
             root.setContentsMargins(10, 8, 10, 10)
@@ -448,6 +510,31 @@ class WorkflowNodeCard(QFrame):
             self._port_row.addStretch(1)
             self._port_row.addWidget(self.output_port_label, 0)
             root.addLayout(self._port_row)
+
+            candidates = self._candidate_methods()
+            self.algorithm_row_widget = QWidget()
+            algorithm_layout = QHBoxLayout(self.algorithm_row_widget)
+            algorithm_layout.setContentsMargins(0, 0, 0, 0)
+            algorithm_layout.setSpacing(8)
+            algorithm_label = QLabel("算法")
+            algorithm_label.setObjectName("paramName")
+            algorithm_layout.addWidget(algorithm_label)
+            if len(candidates) > 1:
+                self.algorithm_combo = QComboBox()
+                self.algorithm_combo.setObjectName("nodeAlgorithmCombo")
+                for key in candidates:
+                    self.algorithm_combo.addItem(get_method_display_name(key), key)
+                current_index = self.algorithm_combo.findData(self.method.method_id)
+                self.algorithm_combo.setCurrentIndex(max(current_index, 0))
+                self.algorithm_combo.currentIndexChanged.connect(self._on_algorithm_changed)
+                self._install_wheel_guard(self.algorithm_combo)
+                algorithm_layout.addWidget(self.algorithm_combo, 1)
+            else:
+                readonly_method = QLabel(_elided(get_method_display_name(self.method.method_id), 170, self))
+                readonly_method.setObjectName("nodeSubtitle")
+                readonly_method.setToolTip(get_method_display_name(self.method.method_id))
+                algorithm_layout.addWidget(readonly_method, 1)
+            root.addWidget(self.algorithm_row_widget)
 
             self.subtitle_label = QLabel(_elided(get_method_display_name(self.method.method_id), 245, self))
             if self.method.method_id == "raw_input":
@@ -594,8 +681,10 @@ class WorkflowNodeCard(QFrame):
         if self.output_port_label:
             self.output_port_label.show()
             self.output_port_label.setStyleSheet("font-size: 12px;")
+        if self.algorithm_row_widget:
+            self.algorithm_row_widget.show()
         if self.subtitle_label:
-            self.subtitle_label.show()
+            self.subtitle_label.hide()
             self.subtitle_label.setStyleSheet("font-size: 11px;")
         if self.meta_label:
             self.meta_label.show()
@@ -637,6 +726,8 @@ class WorkflowNodeCard(QFrame):
         if self.output_port_label:
             self.output_port_label.show()
             self.output_port_label.setStyleSheet("font-size: 14px; font-weight: bold;")
+        if self.algorithm_row_widget:
+            self.algorithm_row_widget.hide()
         if self.subtitle_label:
             self.subtitle_label.show()
             self.subtitle_label.setStyleSheet("font-size: 14px;")
@@ -666,6 +757,8 @@ class WorkflowNodeCard(QFrame):
             self.warning_label.hide()
         if self.subtitle_label:
             self.subtitle_label.hide()
+        if self.algorithm_row_widget:
+            self.algorithm_row_widget.hide()
         
         # 最大字号
         if self.title_label:
@@ -676,12 +769,11 @@ class WorkflowNodeCard(QFrame):
             self.status_chip.setStyleSheet("font-size: 16px; font-weight: bold; padding: 3px 8px;")
         if self.eye_button:
             self.eye_button.show()
-        # 只显示一个端口摘要（可选）
         if self.input_port_label:
-            self.input_port_label.show()
+            self.input_port_label.hide()
             self.input_port_label.setStyleSheet("font-size: 16px; font-weight: bold;")
         if self.output_port_label:
-            self.output_port_label.show()
+            self.output_port_label.hide()
             self.output_port_label.setStyleSheet("font-size: 16px; font-weight: bold;")
         
         self._simplify_layout()
@@ -774,11 +866,7 @@ class WorkflowNodeCard(QFrame):
         return super().eventFilter(watched, event)
 
     def _candidate_methods(self) -> list[str]:
-        stage = WORKFLOW_STAGE_BY_ID.get(self.method.stage_id, {})
-        candidates = list(stage.get("candidate_methods") or [self.method.method_id])
-        if self.method.method_id not in candidates:
-            candidates.insert(0, self.method.method_id)
-        return candidates
+        return candidate_methods_for_workflow_method(self.method)
 
     def _stage_label(self) -> str:
         stage = WORKFLOW_STAGE_BY_ID.get(self.method.stage_id, {})
@@ -803,6 +891,14 @@ class WorkflowNodeCard(QFrame):
             return
         self.method.hidden = not bool(self.method.hidden)
         self.changed.emit(self.row)
+
+    def _on_algorithm_changed(self) -> None:
+        if self._suppress or self.algorithm_combo is None:
+            return
+        method_id = self.algorithm_combo.currentData()
+        if update_workflow_method_algorithm(self.method, str(method_id)):
+            self._build()
+            self.changed.emit(self.row)
 
     def set_method_enabled(self, enabled: bool) -> None:
         self.method.enabled = bool(enabled)
@@ -884,9 +980,10 @@ class WorkflowNodeCard(QFrame):
         value = self.method.params.get(name, meta.get("default", ""))
 
         if param_type == "bool":
-            control = QToolButton()
+            control = BoolChipButton()
             control.setObjectName("boolChip")
             control.setCheckable(True)
+            control.setFixedWidth(68)
             control.setChecked(bool(value))
             control.setText("ON" if control.isChecked() else "OFF")
             control.setProperty("checked", "true" if control.isChecked() else "false")
@@ -1035,11 +1132,11 @@ class MiniNodeItem(QGraphicsRectItem):
         if self.proxy.row < 0:
             self.title_item.setText("B-scan Preview")
             self.subtitle_item.setText(status)
-            self.status_item.setText(f"data → preview")
+            self.status_item.setText("")
         else:
             self.title_item.setText(f"{self.proxy.row + 1:02d} {stage_label[:18]}")
-            self.subtitle_item.setText(method_name[:20])
-            self.status_item.setText(f"{status}   {in_label}→{out_label}")
+            self.subtitle_item.setText(f"{method_name[:20]}   {status}")
+            self.status_item.setText("")
         self.title_item.setPos(10, 8)
         self.subtitle_item.setPos(10, 32)
         self.status_item.setPos(10, 58)
@@ -1425,6 +1522,7 @@ class WorkflowCanvasView(QGraphicsView):
     preview_snapshot_requested = pyqtSignal()
     links_changed = pyqtSignal(object)
     layout_changed = pyqtSignal(object)
+    zoom_changed = pyqtSignal(float)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1676,6 +1774,16 @@ class WorkflowCanvasView(QGraphicsView):
             menu.addAction("打开调参", lambda row=proxy.row: self.tuning_lab_requested.emit(row))
             menu.addAction("应用最佳参数", lambda row=proxy.row: self.apply_best_params_requested.emit(row))
             menu.addAction("评估此节点", lambda row=proxy.row: self.benchmark_node_requested.emit(row))
+            candidates = candidate_methods_for_workflow_method(proxy.method)
+            if len(candidates) > 1:
+                switch_menu = menu.addMenu("切换算法")
+                for key in candidates:
+                    action = switch_menu.addAction(get_method_display_name(key))
+                    action.setCheckable(True)
+                    action.setChecked(key == proxy.method.method_id)
+                    action.triggered.connect(
+                        lambda _checked=False, p=proxy, method_key=key: self._switch_proxy_algorithm(p, method_key)
+                    )
             menu.addSeparator()
             enabled_text = "停用" if proxy.method.enabled else "启用"
             menu.addAction(enabled_text, lambda p=proxy: self._toggle_proxy_enabled(p))
@@ -1749,6 +1857,10 @@ class WorkflowCanvasView(QGraphicsView):
     def _toggle_proxy_hidden(self, proxy: WorkflowNodeProxy) -> None:
         proxy.method.hidden = not bool(proxy.method.hidden)
         self.node_changed.emit(proxy.row)
+
+    def _switch_proxy_algorithm(self, proxy: WorkflowNodeProxy, method_id: str) -> None:
+        if update_workflow_method_algorithm(proxy.method, method_id):
+            self.node_changed.emit(proxy.row)
 
     def _ensure_preview_visible(self) -> None:
         if self._preview_proxy is not None:
@@ -1942,20 +2054,20 @@ class WorkflowCanvasView(QGraphicsView):
         self._drag_source_port = None
 
     def wheelEvent(self, event):  # noqa: N802 - Qt override
-        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
-            factor = 1.15 if event.angleDelta().y() > 0 else 1 / 1.15
-            current_scale = self.transform().m11()
-            next_scale = max(0.32, min(2.8, current_scale * factor))
-            self.resetTransform()
-            self.scale(next_scale, next_scale)
-            self._apply_zoom_lod()
-            event.accept()
-            return
         if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
             self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - event.angleDelta().y())
             event.accept()
             return
-        super().wheelEvent(event)
+        factor = 1.15 if event.angleDelta().y() > 0 else 1 / 1.15
+        self._set_zoom_scale(self.transform().m11() * factor)
+        event.accept()
+
+    def _set_zoom_scale(self, scale: float) -> None:
+        next_scale = max(0.32, min(2.8, float(scale)))
+        self.resetTransform()
+        self.scale(next_scale, next_scale)
+        self._apply_zoom_lod(force=True)
+        self.zoom_changed.emit(next_scale)
 
     def mousePressEvent(self, event):  # noqa: N802 - Qt override
         if event.button() == Qt.MouseButton.MiddleButton:
@@ -2034,16 +2146,19 @@ class WorkflowCanvasView(QGraphicsView):
         if rect.isValid():
             self.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
             self._apply_zoom_lod(force=True)
+            self.zoom_changed.emit(self.transform().m11())
 
     def fit_nodes(self) -> None:
         rect = self._scene.itemsBoundingRect().adjusted(-80, -80, 80, 80)
         if rect.isValid():
             self.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
             self._apply_zoom_lod(force=True)
+            self.zoom_changed.emit(self.transform().m11())
 
     def reset_zoom(self) -> None:
         self.resetTransform()
         self._apply_zoom_lod(force=True)
+        self.zoom_changed.emit(self.transform().m11())
 
     def auto_layout(self) -> None:
         x0, y0 = 60, 70
