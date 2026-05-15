@@ -23,16 +23,13 @@ from datetime import datetime
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 
 import matplotlib
 
 matplotlib.use("QtAgg")
-import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
-from matplotlib.patches import Rectangle
 
 from PyQt6.QtCore import Qt, QObject, QThread, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
@@ -170,7 +167,6 @@ from core.uav_georeference_3d import (
     export_airborne_georeference_3d_bundle,
 )
 from core.shared_data_state import SharedDataState
-from PythonModule.kirchhoff_migration import load_cagpr_kir_parameter_file
 from qfluentwidgets import FluentIcon
 
 # 导入页面模块
@@ -181,7 +177,6 @@ from ui.gui_quality_log import QualityLogPage
 from ui.gui_workflow_page import WorkflowPage
 from ui.loading_dialog import LoadingProgressDialog
 from ui.auto_tune_result_dialog import AutoTuneResultDialog
-from ui.bscan_viewer_dialog import BscanViewerDialog
 
 
 def _sanitize_qss(qss: str) -> str:
@@ -687,9 +682,11 @@ class GPRGuiQt(QMainWindow):
     def trace_metadata(self, value):
         self.shared_data.current_trace_metadata = value
 
-    def __init__(self, version_text: str = ""):
+    def __init__(self, version_text: str = "", enable_startup_profile: bool = False):
         super().__init__()
         self.version_text = version_text.strip() or "GPR_GUI"
+        self._enable_startup_profile = enable_startup_profile
+        self._init_start_time = time.perf_counter()
         self.setWindowTitle(self.version_text)
         self.resize(1280, 800)
         self.setMinimumSize(1120, 720)
@@ -793,12 +790,23 @@ class GPRGuiQt(QMainWindow):
         self._runtime_panel_buttons = {}
         self._active_runtime_panel = None
 
+        t1 = time.perf_counter()
         self._setup_ui()
+        t2 = time.perf_counter()
         self._apply_style()
+        t3 = time.perf_counter()
         self._sync_history_action_state()
+        t4 = time.perf_counter()
+
+        if self._enable_startup_profile:
+            logger.info("[startup] _setup_ui: %.2fs", t2 - t1)
+            logger.info("[startup] _apply_style: %.2fs", t3 - t2)
+            logger.info("[startup] GPRGuiQt __init__ total: %.2fs", t4 - self._init_start_time)
 
     def _setup_ui(self):
         """设置UI"""
+        t_start = time.perf_counter()
+
         central = QWidget()
         self.setCentralWidget(central)
 
@@ -828,6 +836,8 @@ class GPRGuiQt(QMainWindow):
 
         self._content_stack.addWidget(self._main_content_widget)
 
+        t1 = time.perf_counter()
+
         # ===== 旧页面保留为 Studio 的后台功能面板，不再挂到外层 Tab =====
         self.page_basic = BasicFlowPage(self)
         self.page_basic.hide()
@@ -839,17 +849,12 @@ class GPRGuiQt(QMainWindow):
             "主工作区：节点画布、卡片内参数和 B-scan Preview 都在这里完成。"
         )
 
-        self.page_auto_tune = AutoTunePage(self)
-        self.page_auto_tune.hide()
+        t2 = time.perf_counter()
 
-        self.page_advanced = AdvancedSettingsPage(self)
-        self.page_advanced.hide()
-
-        self.page_quality = QualityLogPage(self)
-        self.page_quality.set_trace_selected_callback(
-            self._on_trajectory_trace_selected
-        )
-        self.page_quality.hide()
+        # 后台页面延迟初始化，用 None 占位，首次访问时通过 _ensure_*_page() 懒加载
+        self.page_auto_tune: AutoTunePage | None = None
+        self.page_advanced: AdvancedSettingsPage | None = None
+        self.page_quality: QualityLogPage | None = None
 
         # 默认显示 Studio 主工作台。
         self._content_stack.setCurrentWidget(self._main_content_widget)
@@ -881,52 +886,22 @@ class GPRGuiQt(QMainWindow):
         # 工作流 Studio 主画布：以后工作流是主界面，不再挤在控制标签页里。
         right_layout.addWidget(self.page_workflow, 1)
 
+        t3 = time.perf_counter()
+
         # 旧 Matplotlib B-scan 画布暂时保留给历史绘图逻辑和大图/对比逻辑，
         # 但不再常驻主界面；画布内的 B-scan Preview 节点承担日常预览职责。
-        # 绘图区域
-        self.fig = Figure(figsize=(9.5, 6.4), dpi=100)
-        self._main_ax = self.fig.add_subplot(111)
-        self._main_ax.set_title("B-scan")
-        self._main_ax.set_xlabel("距离（道索引）")
-        self._main_ax.set_ylabel("时间（采样索引）")
-        self.canvas = FigureCanvas(self.fig)
-        self._main_toolbar = NavigationToolbar(self.canvas, self)
-        self._main_toolbar.setObjectName("mainPlotToolbar")
-        for action in self._main_toolbar.actions():
-            action_haystack = " ".join(
-                part
-                for part in [
-                    action.text() or "",
-                    action.toolTip() or "",
-                    action.statusTip() or "",
-                    action.iconText() or "",
-                ]
-                if part
-            ).lower()
-            if "home" in action_haystack or "reset original view" in action_haystack:
-                action.triggered.connect(
-                    lambda checked=False: QTimer.singleShot(
-                        0, self._reset_main_plot_view_to_default
-                    )
-                )
-            else:
-                action.triggered.connect(
-                    lambda checked=False: QTimer.singleShot(
-                        0, self._capture_main_view_limits_from_axes
-                    )
-                )
-        self.canvas.mpl_connect("button_press_event", self._on_main_canvas_press)
-        self.canvas.mpl_connect("motion_notify_event", self._on_main_canvas_motion)
-        self.canvas.mpl_connect("button_release_event", self._on_main_canvas_release)
-        self.canvas.mpl_connect("scroll_event", self._on_main_canvas_scroll)
-        self.canvas.mpl_connect("figure_leave_event", self._on_main_canvas_leave)
+        # 绘图区域：延后创建，首屏不需要时跳过。
+        self.fig = None
+        self._main_ax = None
+        self.canvas = None
+        self._main_toolbar = None
+        self._legacy_plot_canvas_created = False
         self._last_n_panels = 1
 
         plot_toolbar_row = QWidget()
         plot_toolbar_layout = QHBoxLayout(plot_toolbar_row)
         plot_toolbar_layout.setContentsMargins(0, 0, 0, 0)
         plot_toolbar_layout.setSpacing(8)
-        plot_toolbar_layout.addWidget(self._main_toolbar)
         plot_toolbar_layout.addStretch(1)
         self._plot_coord_label = QLabel("坐标: --")
         self._plot_coord_label.setProperty("class", "hintText")
@@ -941,9 +916,10 @@ class GPRGuiQt(QMainWindow):
 
         self.empty_state_card = self._create_empty_state_card()
         plot_stack_layout.addWidget(self.empty_state_card)
-        plot_stack_layout.addWidget(self.canvas)
         self.plot_stack_host.setVisible(False)
         right_layout.addWidget(self.plot_stack_host)
+
+        t4 = time.perf_counter()
 
         # 运行信息抽屉：默认收起，避免长期压缩主绘图区。
         self.global_log_box = self._create_global_log_box()
@@ -958,10 +934,14 @@ class GPRGuiQt(QMainWindow):
         right_layout.addWidget(self._runtime_panel_bar)
         right_layout.addWidget(self._runtime_panel_container)
 
+        t5 = time.perf_counter()
+
         self._sync_runtime_panels_visibility()
 
         # 连接信号
         self._connect_signals()
+
+        t6 = time.perf_counter()
 
         # 初始化
         self._apply_startup_preset_defaults()
@@ -970,8 +950,70 @@ class GPRGuiQt(QMainWindow):
         self._refresh_observability_panel()
         self._sync_runtime_panels_visibility()
         self._update_empty_state_and_brief()
+
+        t_end = time.perf_counter()
+
+        if self._enable_startup_profile:
+            logger.info("[startup] create WorkflowPage & BasicFlowPage: %.2fs", t2 - t1)
+            logger.info("[startup] create status & Workflow canvas: %.2fs", t3 - t2)
+            logger.info("[startup] create legacy plot host: %.2fs", t4 - t3)
+            logger.info("[startup] create runtime panels: %.2fs", t5 - t4)
+            logger.info("[startup] connect signals: %.2fs", t6 - t5)
+            logger.info("[startup] _setup_ui total: %.2fs", t_end - t_start)
+
         self._log(f"版本: {self.version_text}")
         self._log("欢迎使用。请导入数据开始处理。")
+
+    def _ensure_legacy_plot_canvas(self):
+        """延后创建旧 Matplotlib Figure/Canvas/toolbar，首屏不需要时跳过。"""
+        if hasattr(self, '_legacy_plot_canvas_created') and self._legacy_plot_canvas_created:
+            return
+        self._legacy_plot_canvas_created = True
+
+        from matplotlib.figure import Figure
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+        from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
+
+        self.fig = Figure(figsize=(9.5, 6.4), dpi=100)
+        self._main_ax = self.fig.add_subplot(111)
+        self._main_ax.set_title("B-scan")
+        self._main_ax.set_xlabel("距离（道索引）")
+        self._main_ax.set_ylabel("时间（采样索引）")
+        self.canvas = FigureCanvas(self.fig)
+        self._main_toolbar = NavigationToolbar(self.canvas, self)
+        self._main_toolbar.setObjectName("mainPlotToolbar")
+
+        for action in self._main_toolbar.actions():
+            action_haystack = " ".join(
+                part for part in [
+                    action.text() or "",
+                    action.toolTip() or "",
+                    action.statusTip() or "",
+                    action.iconText() or "",
+                ] if part
+            ).lower()
+            if "home" in action_haystack or "reset original view" in action_haystack:
+                action.triggered.connect(
+                    lambda checked=False: QTimer.singleShot(0, self._reset_main_plot_view_to_default)
+                )
+            else:
+                action.triggered.connect(
+                    lambda checked=False: QTimer.singleShot(0, self._capture_main_view_limits_from_axes)
+                )
+
+        self.canvas.mpl_connect("button_press_event", self._on_main_canvas_press)
+        self.canvas.mpl_connect("motion_notify_event", self._on_main_canvas_motion)
+        self.canvas.mpl_connect("button_release_event", self._on_main_canvas_release)
+        self.canvas.mpl_connect("scroll_event", self._on_main_canvas_scroll)
+        self.canvas.mpl_connect("figure_leave_event", self._on_main_canvas_leave)
+
+        if hasattr(self, 'plot_stack_host') and self.plot_stack_host is not None:
+            plot_stack_layout = self.plot_stack_host.layout()
+            if plot_stack_layout is not None and plot_stack_layout.count() > 1:
+                old_canvas = plot_stack_layout.widget(1)
+                if old_canvas is not None:
+                    plot_stack_layout.removeWidget(old_canvas)
+            plot_stack_layout.addWidget(self.canvas)
 
     def _create_empty_state_card(self):
         """创建空状态卡片"""
@@ -1429,7 +1471,59 @@ class GPRGuiQt(QMainWindow):
             self.append_workflow_runtime_log
         )
 
-        # Preview Viewer 控制后台面板。
+    def _ensure_auto_tune_page(self) -> "AutoTunePage":
+        if self.page_auto_tune is None:
+            self.page_auto_tune = AutoTunePage(self)
+            self._connect_auto_tune_page_signals()
+        return self.page_auto_tune
+
+    def _ensure_advanced_page(self) -> "AdvancedSettingsPage":
+        if self.page_advanced is None:
+            self.page_advanced = AdvancedSettingsPage(self)
+            self._connect_advanced_page_signals()
+        return self.page_advanced
+
+    def _ensure_quality_page(self) -> "QualityLogPage":
+        if self.page_quality is None:
+            self.page_quality = QualityLogPage(self)
+            self.page_quality.set_trace_selected_callback(
+                self._on_trajectory_trace_selected
+            )
+            self._connect_quality_page_signals()
+        return self.page_quality
+
+    def _connect_auto_tune_page_signals(self) -> None:
+        if self.page_auto_tune is None:
+            return
+        self.page_auto_tune.btn_auto_tune.clicked.connect(
+            self.start_auto_tune_current_method
+        )
+        self.page_auto_tune.btn_compare_stage.clicked.connect(
+            self.start_auto_select_current_stage
+        )
+        self.page_auto_tune.btn_compare_manual_auto.clicked.connect(
+            self.start_auto_tune_comparison
+        )
+        self.page_auto_tune.btn_export_comparison.clicked.connect(
+            self.export_auto_tune_comparison_artifacts
+        )
+        self.page_auto_tune.btn_view_auto_tune.clicked.connect(
+            self.show_auto_tune_details
+        )
+        self.page_auto_tune.btn_apply_stage_choice.clicked.connect(
+            self.apply_stage_compare_choice
+        )
+        self.page_auto_tune.btn_open_workflow.clicked.connect(
+            self.switch_to_workflow_tab
+        )
+        if hasattr(self.page_auto_tune, "apply_best_params_to_node"):
+            self.page_auto_tune.apply_best_params_to_node.connect(
+                self._apply_best_params_to_workflow_node
+            )
+
+    def _connect_advanced_page_signals(self) -> None:
+        if self.page_advanced is None:
+            return
         self.page_advanced.cmap_combo.currentIndexChanged.connect(self._refresh_plot)
         self.page_advanced.view_style_combo.currentIndexChanged.connect(
             self._refresh_plot
@@ -1465,52 +1559,9 @@ class GPRGuiQt(QMainWindow):
         self.page_advanced.altimeter_sidecar_clear_button.clicked.connect(
             lambda: self._clear_sidecar_file("altimeter")
         )
-        self.page_auto_tune.btn_auto_tune.clicked.connect(
-            self.start_auto_tune_current_method
-        )
-        self.page_auto_tune.btn_compare_stage.clicked.connect(
-            self.start_auto_select_current_stage
-        )
-        self.page_auto_tune.btn_compare_manual_auto.clicked.connect(
-            self.start_auto_tune_comparison
-        )
-        self.page_auto_tune.btn_export_comparison.clicked.connect(
-            self.export_auto_tune_comparison_artifacts
-        )
-        self.page_auto_tune.btn_view_auto_tune.clicked.connect(
-            self.show_auto_tune_details
-        )
-        self.page_auto_tune.btn_apply_stage_choice.clicked.connect(
-            self.apply_stage_compare_choice
-        )
-        self.page_auto_tune.btn_open_workflow.clicked.connect(
-            self.switch_to_workflow_tab
-        )
-        # 连接工作流节点参数应用的信号
-        if hasattr(self.page_auto_tune, "apply_best_params_to_node"):
-            self.page_auto_tune.apply_best_params_to_node.connect(
-                self._apply_best_params_to_workflow_node
-            )
-        self.page_advanced.btn_clear_manual_roi.clicked.connect(self._clear_manual_roi)
-
-        # 显示选项
-        for cb in [
-            self.page_advanced.symmetric_var,
-            self.page_advanced.chatgpt_style_var,
-            self.page_advanced.compare_var,
-            self.page_advanced.cmap_invert_var,
-            self.page_advanced.show_cbar_var,
-            self.page_advanced.show_grid_var,
-            self.page_advanced.percentile_var,
-            self.page_advanced.normalize_var,
-            self.page_advanced.demean_var,
-            self.page_advanced.crop_enable_var,
-        ]:
-            cb.stateChanged.connect(self._refresh_plot)
-
-        self.page_advanced.compare_var.toggled.connect(self._on_compare_toggled)
-
-        # 质量/日志页面
+    def _connect_quality_page_signals(self) -> None:
+        if self.page_quality is None:
+            return
         self.page_quality.btn_generate_report.clicked.connect(self.generate_report)
         self.page_quality.btn_export_quality_snapshot.clicked.connect(
             self.export_quality_snapshot
@@ -1546,24 +1597,24 @@ class GPRGuiQt(QMainWindow):
     def open_tuning_lab(self, method=None) -> None:
         """Open AutoTune as a Studio dialog instead of a permanent outer tab."""
         from core.workflow_data import WorkflowMethod
+        page = self._ensure_auto_tune_page()
         if isinstance(method, WorkflowMethod):
-            # 来自工作流节点的方法对象
-            if hasattr(self.page_auto_tune, "set_for_workflow_node"):
-                self.page_auto_tune.set_for_workflow_node(
+            if hasattr(page, "set_for_workflow_node"):
+                page.set_for_workflow_node(
                     method_key=method.method_id,
                     node_id=method.node_id,
                     stage_id=method.stage_id,
                     current_params=method.params or {},
                     message="支持自动选参：先完成参数实验，再点击应用到工作流节点。",
                 )
-        elif method is not None and hasattr(self.page_auto_tune, "method_label"):
+        elif method is not None and hasattr(page, "method_label"):
             try:
-                self.page_auto_tune.method_label.setText(
+                page.method_label.setText(
                     f"当前节点: {getattr(method, 'method_id', method)}"
                 )
             except Exception:
                 pass
-        self._show_studio_dialog("_tuning_lab_dialog", "MyGPR Tuning Lab", self.page_auto_tune)
+        self._show_studio_dialog("_tuning_lab_dialog", "MyGPR Tuning Lab", page)
         self._log("打开 Tuning Lab")
     
     def _apply_best_params_to_workflow_node(
@@ -1583,7 +1634,7 @@ class GPRGuiQt(QMainWindow):
         self._show_studio_dialog(
             "_preview_settings_dialog",
             "MyGPR Preview Viewer Controls",
-            self.page_advanced,
+            self._ensure_advanced_page(),
         )
         self._log("打开 Preview Viewer Controls")
 
@@ -1598,6 +1649,8 @@ class GPRGuiQt(QMainWindow):
             data: B-scan numpy array to display, or None for empty state.
             label: Window title string.
         """
+        from ui.bscan_viewer_dialog import BscanViewerDialog
+
         if not hasattr(self, "_bscan_viewers"):
             self._bscan_viewers: list = []
         dialog = BscanViewerDialog(data, title=label, parent=self)
@@ -1623,13 +1676,16 @@ class GPRGuiQt(QMainWindow):
         """
         if self._content_stack is not None and self._main_content_widget is not None:
             self._content_stack.setCurrentWidget(self._main_content_widget)
-            if tab_key == "auto_tune" and self.page_auto_tune is not None:
+            if tab_key == "auto_tune":
+                self._ensure_auto_tune_page()
                 self.open_tuning_lab()
                 self.status_label.setText("Tuning Lab")
-            elif tab_key == "advanced" and self.page_advanced is not None:
+            elif tab_key == "advanced":
+                self._ensure_advanced_page()
                 self.open_preview_settings()
                 self.status_label.setText("Preview Settings")
-            elif tab_key == "quality" and self.page_quality is not None:
+            elif tab_key == "quality":
+                self._ensure_quality_page()
                 self._show_runtime_panel("quality")
                 self.status_label.setText("QC / Export")
             else:
@@ -1865,6 +1921,8 @@ class GPRGuiQt(QMainWindow):
 
     def _is_main_slider_compare_active(self) -> bool:
         """主界面是否处于滑动对比模式。"""
+        if self.page_advanced is None:
+            return False
         return bool(
             hasattr(self.page_advanced, "slider_compare_var")
             and self.page_advanced.slider_compare_var.isChecked()
@@ -1976,6 +2034,8 @@ class GPRGuiQt(QMainWindow):
 
     def _draw_drag_roi_preview(self, start: dict, event):
         """绘制拖框中的临时 ROI。"""
+        from matplotlib.patches import Rectangle
+
         ax = start.get("axes")
         if ax is None or event.xdata is None or event.ydata is None:
             return
@@ -2133,27 +2193,38 @@ class GPRGuiQt(QMainWindow):
     def _set_busy(self, busy: bool, text: str = "处理中..."):
         """设置忙碌状态"""
         self._ui_busy = bool(busy)
-        controls = [
+        for w in [
             self.page_basic.btn_import,
             self.page_basic.btn_apply,
             self.page_basic.btn_quick,
             self.page_basic.btn_undo,
             self.page_basic.btn_reset,
-            self.page_advanced.btn_apply_crop,
-            self.page_advanced.btn_reset_crop,
-            self.page_auto_tune.btn_auto_tune,
-            self.page_auto_tune.btn_compare_stage,
-            self.page_auto_tune.btn_compare_manual_auto,
-            self.page_auto_tune.btn_view_auto_tune,
-            self.page_auto_tune.btn_apply_stage_choice,
             self.page_basic.method_combo,
-            self.page_quality.btn_generate_report,
-            self.page_quality.btn_export_quality_snapshot,
-            self.page_quality.btn_export_replay_evidence,
-            self.page_quality.btn_export_georeference_3d,
-        ]
-        for w in controls:
+        ]:
             w.setEnabled(not busy)
+        if self.page_advanced is not None:
+            for w in [
+                self.page_advanced.btn_apply_crop,
+                self.page_advanced.btn_reset_crop,
+            ]:
+                w.setEnabled(not busy)
+        if self.page_auto_tune is not None:
+            for w in [
+                self.page_auto_tune.btn_auto_tune,
+                self.page_auto_tune.btn_compare_stage,
+                self.page_auto_tune.btn_compare_manual_auto,
+                self.page_auto_tune.btn_view_auto_tune,
+                self.page_auto_tune.btn_apply_stage_choice,
+            ]:
+                w.setEnabled(not busy)
+        if self.page_quality is not None:
+            for w in [
+                self.page_quality.btn_generate_report,
+                self.page_quality.btn_export_quality_snapshot,
+                self.page_quality.btn_export_replay_evidence,
+                self.page_quality.btn_export_georeference_3d,
+            ]:
+                w.setEnabled(not busy)
         self.page_basic.btn_cancel.setEnabled(busy and (not self._cancel_in_flight))
         if busy:
             QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
@@ -2365,13 +2436,14 @@ class GPRGuiQt(QMainWindow):
             QMessageBox.warning(self, "自动选参", str(e))
             return False
 
-        roi_mode = self.page_auto_tune.get_auto_tune_roi_mode()
-        search_mode = self.page_auto_tune.get_auto_tune_search_mode()
+        page_auto = self._ensure_auto_tune_page()
+        roi_mode = page_auto.get_auto_tune_roi_mode()
+        search_mode = page_auto.get_auto_tune_search_mode()
         roi_spec = self._build_auto_tune_roi_spec(roi_mode)
 
         self._last_auto_tune_result = None
         self.page_basic.set_auto_tune_result_available(False)
-        self.page_auto_tune.show_running(
+        page_auto.show_running(
             roi_spec.get("label", roi_spec.get("source", "全图")),
             search_mode,
         )
@@ -2443,13 +2515,14 @@ class GPRGuiQt(QMainWindow):
         for key in method_keys:
             base_params_map[key] = self._resolve_method_params(key)
 
-        roi_mode = self.page_auto_tune.get_auto_tune_roi_mode()
-        search_mode = self.page_auto_tune.get_auto_tune_search_mode()
+        page_auto = self._ensure_auto_tune_page()
+        roi_mode = page_auto.get_auto_tune_roi_mode()
+        search_mode = page_auto.get_auto_tune_search_mode()
         roi_spec = self._build_auto_tune_roi_spec(roi_mode)
 
         self._last_auto_tune_group_result = None
-        self.page_auto_tune.set_stage_compare_result(None)
-        self.page_auto_tune.show_running(
+        page_auto.set_stage_compare_result(None)
+        page_auto.show_running(
             roi_spec.get("label", roi_spec.get("source", "全图")),
             f"{search_mode} | 同阶段比较",
         )
@@ -2525,13 +2598,14 @@ class GPRGuiQt(QMainWindow):
             QMessageBox.warning(self, "人工/自动对比", str(e))
             return False
 
-        roi_mode = self.page_auto_tune.get_auto_tune_roi_mode()
-        search_mode = self.page_auto_tune.get_auto_tune_search_mode()
+        page_auto = self._ensure_auto_tune_page()
+        roi_mode = page_auto.get_auto_tune_roi_mode()
+        search_mode = page_auto.get_auto_tune_search_mode()
         roi_spec = self._build_auto_tune_roi_spec(roi_mode)
         baseline_profile_key = "uav_gpr_experience_baseline_v1"
 
         self._last_auto_tune_comparison_result = None
-        self.page_auto_tune.show_comparison_running(
+        page_auto.show_comparison_running(
             roi_spec.get("label", roi_spec.get("source", "全图")),
             search_mode,
         )
@@ -2603,9 +2677,10 @@ class GPRGuiQt(QMainWindow):
         self._last_auto_tune_result = result
         self.page_basic.set_auto_tune_result_available(True, result.get("profiles", {}))
         self.page_basic.set_apply_source_hint(
-            "已生成自动调参结果，可在“应用方法”右侧切换默认应用来源。"
+            "已生成自动调参结果，可在'应用方法'右侧切换默认应用来源。"
         )
-        self.page_auto_tune.show_result(result)
+        if self.page_auto_tune is not None:
+            self.page_auto_tune.show_result(result)
         self._log(
             f"自动选参完成: {result.get('method_name', result.get('method_key'))} | 推荐参数 {result.get('recommended_params') or result.get('best_params')}"
         )
@@ -2620,7 +2695,8 @@ class GPRGuiQt(QMainWindow):
         self._set_busy(False, text="自动选参失败")
         self._pending_apply_after_auto_tune = False
         self.page_basic.set_apply_source_hint("自动分析失败，未执行方法。")
-        self.page_auto_tune.show_error(error_msg)
+        if self.page_auto_tune is not None:
+            self.page_auto_tune.show_error(error_msg)
         self._log(f"自动选参失败: {error_msg}")
         QMessageBox.warning(self, "自动选参失败", error_msg)
 
@@ -2630,15 +2706,18 @@ class GPRGuiQt(QMainWindow):
         self._set_busy(
             False, text="同阶段比较完成" if not cancelled else "同阶段比较已取消"
         )
+        page_auto = self.page_auto_tune
+        if page_auto is None:
+            return
         if cancelled:
-            self.page_auto_tune.show_cancelled()
+            page_auto.show_cancelled()
             return
 
         self._last_auto_tune_group_result = result
         best_auto = result.get("best_auto_tune_result") or {}
         if best_auto:
             self._last_auto_tune_result = best_auto
-            self.page_auto_tune.set_auto_tune_method_key(
+            page_auto.set_auto_tune_method_key(
                 result.get("best_method_key", best_auto.get("method_key"))
             )
             self.page_basic.set_auto_tune_result_available(
@@ -2647,8 +2726,8 @@ class GPRGuiQt(QMainWindow):
             self.page_basic.set_apply_source_hint(
                 "已生成同阶段比较推荐，可切换为自动调参推荐执行。"
             )
-        self.page_auto_tune.set_stage_compare_result(result)
-        self.page_auto_tune.show_result(best_auto)
+        page_auto.set_stage_compare_result(result)
+        page_auto.show_result(best_auto)
         self._log(
             f"同阶段比较完成: 推荐 {result.get('best_method_name', result.get('best_method_key'))} | outer score {float(result.get('outer_score', 0.0)):.4f}"
         )
@@ -2656,7 +2735,8 @@ class GPRGuiQt(QMainWindow):
     def _on_auto_stage_error(self, error_msg: str):
         """同阶段方法比较失败。"""
         self._set_busy(False, text="同阶段比较失败")
-        self.page_auto_tune.show_error(error_msg)
+        if self.page_auto_tune is not None:
+            self.page_auto_tune.show_error(error_msg)
         self._log(f"同阶段比较失败: {error_msg}")
         QMessageBox.warning(self, "同阶段比较失败", error_msg)
 
@@ -2666,13 +2746,16 @@ class GPRGuiQt(QMainWindow):
         self._set_busy(
             False, text="人工/自动对比完成" if not cancelled else "人工/自动对比已取消"
         )
+        page_auto = self.page_auto_tune
+        if page_auto is None:
+            return
         if cancelled:
-            self.page_auto_tune.show_cancelled()
+            page_auto.show_cancelled()
             return
 
         self._last_auto_tune_comparison_result = result
         summary = to_summary_dict(result)
-        self.page_auto_tune.show_comparison_result(summary)
+        page_auto.show_comparison_result(summary)
         self._set_auto_tune_comparison_snapshots(result)
         self._log(
             "人工/自动对比完成: verdict={verdict} | Δscore={delta:.4f}".format(
@@ -2688,7 +2771,8 @@ class GPRGuiQt(QMainWindow):
     def _on_auto_comparison_error(self, error_msg: str):
         """人工/自动对比失败。"""
         self._set_busy(False, text="人工/自动对比失败")
-        self.page_auto_tune.show_comparison_error(error_msg)
+        if self.page_auto_tune is not None:
+            self.page_auto_tune.show_comparison_error(error_msg)
         self._log(f"人工/自动对比失败: {error_msg}")
         QMessageBox.warning(self, "人工/自动对比失败", error_msg)
 
@@ -2899,6 +2983,8 @@ class GPRGuiQt(QMainWindow):
 
     def _on_compare_toggled(self, checked: bool):
         """对比模式切换"""
+        if self.page_advanced is None:
+            return
         slider_checked = bool(
             hasattr(self.page_advanced, "slider_compare_var")
             and self.page_advanced.slider_compare_var.isChecked()
@@ -2930,6 +3016,8 @@ class GPRGuiQt(QMainWindow):
 
     def _apply_main_plot_theme(self):
         """让主绘图区颜色跟随当前主题。"""
+        if self.fig is None:
+            return
         from core.theme_manager import get_theme_manager
 
         theme = get_theme_manager().get_current_theme()
@@ -3600,6 +3688,8 @@ class GPRGuiQt(QMainWindow):
     ):
         """带进度回调的CSV加载"""
         try:
+            import pandas as pd
+
             if progress_callback:
                 progress_callback(10, "正在检测文件格式...")
 
@@ -3944,6 +4034,8 @@ class GPRGuiQt(QMainWindow):
         """加载单个CSV矩阵文件"""
 
         try:
+            import pandas as pd
+
             self._clear_runtime_warnings()
             import_warnings = []
             header_info = detect_csv_header(path)
@@ -4063,6 +4155,7 @@ class GPRGuiQt(QMainWindow):
 
     def plot_data(self, data: np.ndarray):
         """绘制数据"""
+        self._ensure_legacy_plot_canvas()
         start_ts = time.perf_counter()
         self._last_plot_signature = self._build_plot_signature()
         self._apply_main_plot_theme()
@@ -4421,6 +4514,7 @@ class GPRGuiQt(QMainWindow):
         if self.data is None or self.data_path is None:
             QMessageBox.warning(self, "无数据", "请先导入数据。")
             return
+        self._ensure_legacy_plot_canvas()
         out_dir = self._default_output_dir()
         ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         report_path = os.path.join(out_dir, f"report_{ts}.md")
@@ -4783,6 +4877,8 @@ class GPRGuiQt(QMainWindow):
     def _read_explicit_trace_timestamps_from_csv(self, path: str):
         """从主 CSV 第 6 列读取显式 trace 时间戳；不根据采样参数推导。"""
         try:
+            import pandas as pd
+
             header_info = detect_csv_header(path)
             if not header_info:
                 return None
@@ -5140,19 +5236,20 @@ class GPRGuiQt(QMainWindow):
 
     def _get_colormap(self, header_info_override: dict | None = None):
         """获取当前色图"""
-        cmap = (self.page_advanced.cmap_combo.currentText() or "gray").strip()
+        cmap = (self.page_advanced.cmap_combo.currentText() or "gray").strip() if self.page_advanced else "gray"
         header = (
             header_info_override
             if header_info_override is not None
             else (self.header_info or {})
         )
+        invert = self.page_advanced.cmap_invert_var.isChecked() if self.page_advanced else False
         if (
             cmap == "gray"
             and header.get("display_hint") == "signed_migration"
-            and not self.page_advanced.cmap_invert_var.isChecked()
+            and not invert
         ):
             return "seismic"
-        if self.page_advanced.cmap_invert_var.isChecked():
+        if invert:
             if cmap.endswith("_r"):
                 cmap = cmap[:-2]
             else:
@@ -5204,6 +5301,8 @@ class GPRGuiQt(QMainWindow):
 
     def _is_single_view_mode(self) -> bool:
         """主图是否处于单图模式。"""
+        if self.page_advanced is None:
+            return True
         return not bool(
             self.page_advanced.compare_var.isChecked()
             or self.page_advanced.diff_var.isChecked()
@@ -5317,6 +5416,8 @@ class GPRGuiQt(QMainWindow):
 
     def import_tzt_as_migration_defaults(self):
         """导入 TZT 文件作为迁移默认值"""
+        from PythonModule.kirchhoff_migration import load_cagpr_kir_parameter_file
+
         path, _ = QFileDialog.getOpenFileName(
             self,
             "选择 Kirchhoff 参数文件",
@@ -5347,6 +5448,8 @@ class GPRGuiQt(QMainWindow):
 
     def _reset_crop(self):
         """重置裁剪设置"""
+        if self.page_advanced is None:
+            return
         self.page_advanced.crop_enable_var.setChecked(False)
         self.page_advanced.time_start_edit.setText("")
         self.page_advanced.time_end_edit.setText("")
@@ -5401,7 +5504,8 @@ class GPRGuiQt(QMainWindow):
         header = plot_header_info or {}
         skip_preprocess = bool(header.get("display_skip_preprocess"))
         slider_compare = bool(
-            hasattr(self.page_advanced, "slider_compare_var")
+            self.page_advanced is not None
+            and hasattr(self.page_advanced, "slider_compare_var")
             and self.page_advanced.slider_compare_var.isChecked()
         )
         sig = {
@@ -5411,30 +5515,30 @@ class GPRGuiQt(QMainWindow):
             "manual_roi": tuple(sorted((self._manual_roi_values or {}).items())),
             "view_limits": tuple(sorted((self._main_view_limits or {}).items())),
             "cmap": self._get_colormap(plot_header_info),
-            "view_style": self.page_advanced.get_view_style(),
-            "symmetric": self.page_advanced.symmetric_var.isChecked(),
-            "chatgpt_style": self.page_advanced.chatgpt_style_var.isChecked(),
-            "compare": self.page_advanced.compare_var.isChecked(),
+            "view_style": self.page_advanced.get_view_style() if self.page_advanced else "single",
+            "symmetric": self.page_advanced.symmetric_var.isChecked() if self.page_advanced else False,
+            "chatgpt_style": self.page_advanced.chatgpt_style_var.isChecked() if self.page_advanced else False,
+            "compare": self.page_advanced.compare_var.isChecked() if self.page_advanced else False,
             "slider_compare": slider_compare,
-            "cmap_invert": self.page_advanced.cmap_invert_var.isChecked(),
-            "show_cbar": self.page_advanced.show_cbar_var.isChecked(),
-            "show_grid": self.page_advanced.show_grid_var.isChecked(),
-            "percentile": self.page_advanced.percentile_var.isChecked(),
+            "cmap_invert": self.page_advanced.cmap_invert_var.isChecked() if self.page_advanced else False,
+            "show_cbar": self.page_advanced.show_cbar_var.isChecked() if self.page_advanced else False,
+            "show_grid": self.page_advanced.show_grid_var.isChecked() if self.page_advanced else False,
+            "percentile": self.page_advanced.percentile_var.isChecked() if self.page_advanced else False,
             "normalize": False
             if skip_preprocess
-            else self.page_advanced.normalize_var.isChecked(),
+            else (self.page_advanced.normalize_var.isChecked() if self.page_advanced else False),
             "demean": False
             if skip_preprocess
-            else self.page_advanced.demean_var.isChecked(),
-            "crop": self.page_advanced.crop_enable_var.isChecked(),
+            else (self.page_advanced.demean_var.isChecked() if self.page_advanced else False),
+            "crop": self.page_advanced.crop_enable_var.isChecked() if self.page_advanced else False,
         }
-        if self.page_advanced.compare_var.isChecked() or slider_compare:
-            sig["left"] = self.page_advanced.compare_left_combo.currentText()
-            sig["right"] = self.page_advanced.compare_right_combo.currentText()
-            sig["diff"] = self.page_advanced.diff_var.isChecked()
+        if (self.page_advanced and self.page_advanced.compare_var.isChecked()) or slider_compare:
+            sig["left"] = self.page_advanced.compare_left_combo.currentText() if self.page_advanced else ""
+            sig["right"] = self.page_advanced.compare_right_combo.currentText() if self.page_advanced else ""
+            sig["diff"] = self.page_advanced.diff_var.isChecked() if self.page_advanced else False
             sig["slider_ratio"] = round(float(self._main_slider_compare_ratio), 4)
         else:
-            sig["single"] = self.page_advanced.single_view_combo.currentText()
+            sig["single"] = self.page_advanced.single_view_combo.currentText() if self.page_advanced else ""
         return tuple(sorted(sig.items()))
 
     def _prepare_view_data(
@@ -5563,6 +5667,8 @@ class GPRGuiQt(QMainWindow):
         )
         if header.get("display_skip_preprocess"):
             return data
+        if self.page_advanced is None:
+            return data
         do_norm = self.page_advanced.normalize_var.isChecked()
         do_demean = self.page_advanced.demean_var.isChecked()
         if not do_norm and not do_demean:
@@ -5572,7 +5678,7 @@ class GPRGuiQt(QMainWindow):
             max_val = np.max(np.abs(result))
             if max_val > 0:
                 result /= max_val
-        if self.page_advanced.demean_var.isChecked():
+        if do_demean:
             result -= np.mean(result, axis=0, keepdims=True)
         return result
 
@@ -5615,6 +5721,8 @@ class GPRGuiQt(QMainWindow):
         self, data: np.ndarray, time_axis: np.ndarray, trace_axis: np.ndarray
     ):
         """获取裁剪边界"""
+        if self.page_advanced is None:
+            return None, None, None, None
         n_samples, n_traces = data.shape[0], data.shape[1]
         t_start = self._parse_float_edit(
             self.page_advanced.time_start_edit, default=None
@@ -5744,7 +5852,7 @@ class GPRGuiQt(QMainWindow):
         self, display_data: np.ndarray, header_info_override: dict | None = None
     ):
         """构建对比数据对（复用已处理的 display_data，避免重复 _prepare_view_data）"""
-        if not self.page_advanced.compare_var.isChecked():
+        if self.page_advanced is None or not self.page_advanced.compare_var.isChecked():
             return [(self._get_single_plot_title(header_info_override), display_data)]
         left_label = self.page_advanced.compare_left_combo.currentText()
         right_label = self.page_advanced.compare_right_combo.currentText()
@@ -5807,6 +5915,8 @@ class GPRGuiQt(QMainWindow):
 
     def _create_plot_axes(self, n_panels: int):
         """创建绘图坐标轴"""
+        if self.fig is None:
+            return []
         if n_panels == 1:
             return [self.fig.add_subplot(111)]
         return [self.fig.add_subplot(1, n_panels, i + 1) for i in range(n_panels)]
@@ -6073,6 +6183,8 @@ class GPRGuiQt(QMainWindow):
 
     def _draw_manual_roi_marker(self, axes, axis_info: dict):
         """在主图上绘制当前手动 ROI。"""
+        from matplotlib.patches import Rectangle
+
         if self._manual_roi_values is None or not axes:
             return
 
@@ -6300,6 +6412,8 @@ class GPRGuiQt(QMainWindow):
 
     def _update_compare_combo_items(self):
         """更新对比下拉框选项"""
+        if self.page_advanced is None:
+            return
         self._compare_syncing = True
         current_single = self.page_advanced.single_view_combo.currentText()
         current_left = self.page_advanced.compare_left_combo.currentText()
@@ -6549,6 +6663,8 @@ class GPRGuiQt(QMainWindow):
     def _save_pipeline_comparison(self, outputs: list) -> str | None:
         """导出默认/推荐流程对比图（Raw / 中间关键步 / Final）"""
         try:
+            import matplotlib.pyplot as plt
+
             if self.original_data is None or self.data is None:
                 return None
             out_dir = self._default_output_dir()
@@ -6846,19 +6962,56 @@ def apply_theme(app: QApplication):
 
 
 def main():
+    import os
+    enable_startup_profile = os.environ.get("MYGPR_STARTUP_PROFILE", "").strip() == "1"
+    t0 = time.perf_counter()
+
+    t_configure_logging_start = time.perf_counter()
     log_path = configure_logging()
+    t_configure_logging_done = time.perf_counter()
+
+    t_app_create_start = time.perf_counter()
     app = QApplication(sys.argv)
+    t_app_create_done = time.perf_counter()
+
+    t_apply_theme_start = time.perf_counter()
     theme_name = apply_theme(app)
+    t_apply_theme_done = time.perf_counter()
+
+    t_qt_font_start = time.perf_counter()
     qt_font_name = _configure_qt_cjk_font(app)
+    t_qt_font_done = time.perf_counter()
+
+    t_version_start = time.perf_counter()
     version_text = build_version_string("GPR_GUI")
+    t_version_done = time.perf_counter()
+
     logger.info("GPR GUI version=%s", version_text)
-    win = GPRGuiQt(version_text=version_text)
+
+    if enable_startup_profile:
+        t_import_done = t0
+        logger.info("[startup] app import done: %.2fs", t_import_done - t0)
+        logger.info("[startup] configure_logging: %.2fs", t_configure_logging_done - t_configure_logging_start)
+        logger.info("[startup] QApplication: %.2fs", t_app_create_done - t_app_create_start)
+        logger.info("[startup] apply_theme: %.2fs", t_apply_theme_done - t_apply_theme_start)
+        logger.info("[startup] _configure_qt_cjk_font: %.2fs", t_qt_font_done - t_qt_font_start)
+        logger.info("[startup] build_version_string: %.2fs", t_version_done - t_version_start)
+
+    t_gui_init_start = time.perf_counter()
+    win = GPRGuiQt(version_text=version_text, enable_startup_profile=enable_startup_profile)
+    t_gui_init_done = time.perf_counter()
+
     logger.info("Runtime log file: %s", log_path)
     win.statusBar().showMessage(
         f"Theme: {theme_name} | QtFont: {qt_font_name} | {version_text}"
     )
-    win.show()
 
+    t_before_show = time.perf_counter()
+    if enable_startup_profile:
+        logger.info("[startup] GPRGuiQt.__init__: %.2fs", t_gui_init_done - t_gui_init_start)
+        logger.info("[startup] before win.show: %.2fs", t_before_show - t0)
+
+    win.show()
     sys.exit(app.exec())
 
 
