@@ -80,6 +80,7 @@ class WorkflowPage(QWidget):
     preview_large_requested = pyqtSignal(object, str)
     export_evidence_requested = pyqtSignal()
     validation_report_requested = pyqtSignal(str)
+    log_message_requested = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1049,6 +1050,7 @@ class WorkflowPage(QWidget):
             realtime=False,
             status="工作流运行中",
             log_text="手动运行工作流",
+            run_mode="Run All",
         )
 
     def request_selected_run(self) -> None:
@@ -1064,6 +1066,7 @@ class WorkflowPage(QWidget):
             realtime=False,
             status="当前步骤运行中",
             log_text=f"运行当前步骤: {get_method_display_name(method.method_id)}",
+            run_mode="Run Selected",
         )
 
     def request_run_from_current(self) -> None:
@@ -1085,6 +1088,7 @@ class WorkflowPage(QWidget):
             realtime=False,
             status="从当前步骤运行中",
             log_text=f"从第 {row + 1} 步运行，共 {len(methods)} 步",
+            run_mode="Run From",
         )
 
     def _emit_run(
@@ -1094,40 +1098,24 @@ class WorkflowPage(QWidget):
         realtime: bool,
         status: str,
         log_text: str,
+        run_mode: str = "",
     ) -> None:
         if not methods:
             self.status_label.setText("没有启用的步骤")
             return
-        # Run pre-validation
-        sidecar_status = {
-            "rtk": bool(self._sidecar_files.get("rtk")),
-            "imu": bool(self._sidecar_files.get("imu")),
-            "agl": bool(self._sidecar_files.get("altimeter")),
-        }
-        report = validate_workflow_config(self.config, sidecar_status=sidecar_status)
-        self.validation_report_requested.emit(report.to_text())
-        if report.errors:
-            # Show error dialog and abort
-            error_text = "\n".join(
-                f"- {issue.code}: {issue.message}"
-                for issue in report.errors
-            )
-            reply = QMessageBox.question(
-                self,
-                "工作流验证失败",
-                f"运行前发现以下错误，是否继续运行？\n\n{error_text}",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if reply == QMessageBox.StandardButton.No:
-                return
-        elif report.warnings:
-            # Just log warnings and continue
-            self._log("运行前发现警告：")
-            for issue in report.warnings:
-                self._log(f"  [{issue.code}] {issue.message}")
+        run_node_ids = {m.node_id for m in methods}
+        for method in self.config.methods:
+            if method.hidden or not method.enabled:
+                method.status = "skipped"
+            elif method.node_id in run_node_ids:
+                method.status = "queued"
+            elif method.status == "success":
+                method.status = "success_stale"
+        if methods:
+            methods[0].status = "running"
+        self.workflow_canvas.refresh_all_nodes()
         self._last_run_methods = [deepcopy(method) for method in methods]
-        self.workflow_run_requested.emit(self._last_run_methods, realtime)
+        self.workflow_run_requested.emit(self._last_run_methods, realtime, run_mode)
         self.status_label.setText(status)
         self._log(log_text)
 
@@ -1328,14 +1316,15 @@ class WorkflowPage(QWidget):
         self._queue_realtime_run()
         self.status_label.setText(f"已更新 {target_method.method_id} 的参数")
     
-    def set_run_result(self, outputs: list[dict[str, Any]], realtime: bool) -> None:
+    def set_run_result(self, outputs: list[dict[str, Any]], realtime: bool, run_mode: str = "") -> None:
         self._live_result_available = True
         self.btn_save_live.setEnabled(True)
         label = "实时预览完成" if realtime else "工作流运行完成"
         self.status_label.setText(label)
         self._log(f"{label}: {len(outputs)} 步")
 
-        run_node_ids = {o.get("node_id") for o in outputs if o.get("node_id")}
+        output_by_node_id = {o.get("node_id"): o for o in outputs if o.get("node_id")}
+        run_node_ids = set(output_by_node_id.keys())
 
         for method in self.config.methods:
             if method.hidden or not method.enabled:
@@ -1343,21 +1332,32 @@ class WorkflowPage(QWidget):
                 continue
             if method.node_id in run_node_ids:
                 method.status = "success"
-                output = next((o for o in outputs if o.get("node_id") == method.node_id), None)
-                if output:
-                    method.elapsed_ms = output.get("elapsed_ms", 0.0)
-                    method.error_message = ""
-                    data = output.get("data")
-                    method.output_shape = data.shape if data is not None else None
+                output = output_by_node_id[method.node_id]
+                method.elapsed_ms = output.get("elapsed_ms", 0.0)
+                method.error_message = ""
+                data = output.get("data")
+                method.output_shape = data.shape if data is not None else None
             else:
-                if method.status == "success":
-                    method.status = "success_stale"
-                elif method.status == "running":
+                if method.status in ("queued", "running"):
                     method.status = "idle"
+                elif method.status == "success":
+                    method.status = "success_stale"
+
+        outputs_without_node_id = [o for o in outputs if not o.get("node_id")]
+        if outputs_without_node_id and hasattr(self, "_last_run_methods") and self._last_run_methods:
+            for last_run_method, output in zip(self._last_run_methods, outputs_without_node_id):
+                for config_method in self.config.methods:
+                    if config_method.node_id == last_run_method.node_id:
+                        config_method.status = "success"
+                        config_method.elapsed_ms = output.get("elapsed_ms", 0.0)
+                        config_method.error_message = ""
+                        data = output.get("data")
+                        config_method.output_shape = data.shape if data is not None else None
+                        break
 
         self.workflow_canvas.refresh_all_nodes()
 
-        run_record = self._create_run_record(outputs, realtime)
+        run_record = self._create_run_record(outputs, realtime, run_mode)
         self._run_history.insert(0, run_record)
         self._run_history_index = 0
         self._update_history_list()
@@ -1399,11 +1399,21 @@ class WorkflowPage(QWidget):
                 method.error_message = ""
 
         self.workflow_canvas.refresh_all_nodes()
-        self.workflow_canvas.set_preview_data(
-            None,
-            label="运行失败",
-            success=False,
-        )
+
+        old_preview_data = self.workflow_canvas.get_preview_data()
+        if old_preview_data is not None:
+            self.workflow_canvas.set_preview_data(
+                old_preview_data,
+                label="运行失败，显示上次结果",
+                success=True,
+            )
+            self.workflow_canvas.set_stale_preview()
+        else:
+            self.workflow_canvas.set_preview_data(
+                None,
+                label="运行失败",
+                success=False,
+            )
         self._log(f"运行失败: {error_message}")
         if failed_node_id:
             self._log(f"失败节点: {failed_node_id}")
@@ -1425,13 +1435,10 @@ class WorkflowPage(QWidget):
         self._update_history_list()
 
     def _log(self, text: str) -> None:
-        pass
+        self.log_message_requested.emit(str(text))
 
-    def _create_run_record(self, outputs: list[dict[str, Any]], realtime: bool) -> dict[str, Any]:
+    def _create_run_record(self, outputs: list[dict[str, Any]], realtime: bool, run_mode: str = "") -> dict[str, Any]:
         from datetime import datetime
-        success_count = len(outputs)
-        failed_count = 0
-        skipped_count = 0
         total_elapsed = sum(o.get("elapsed_ms", 0.0) for o in outputs)
         final_shape = "--"
         if outputs and outputs[-1].get("data") is not None:
@@ -1441,13 +1448,36 @@ class WorkflowPage(QWidget):
             except Exception:
                 pass
 
+        success_count = 0
+        failed_count = 0
+        skipped_count = 0
+        success_stale_count = 0
+        for method in self.config.methods:
+            s = getattr(method, "status", "idle")
+            if s == "success":
+                success_count += 1
+            elif s == "failed":
+                failed_count += 1
+            elif s == "skipped":
+                skipped_count += 1
+            elif s == "success_stale":
+                success_stale_count += 1
+
+        if run_mode:
+            mode = run_mode
+        elif realtime:
+            mode = "实时"
+        else:
+            mode = "Run All"
+
         record = {
             "index": len(self._run_history) + 1,
             "time": datetime.now().strftime("%H:%M:%S"),
-            "mode": "实时" if realtime else "Run All",
+            "mode": mode,
             "success_count": success_count,
             "failed_count": failed_count,
             "skipped_count": skipped_count,
+            "success_stale_count": success_stale_count,
             "elapsed_ms": total_elapsed,
             "final_shape": final_shape,
             "methods": [
@@ -1471,13 +1501,18 @@ class WorkflowPage(QWidget):
             success = record.get("success_count", 0)
             failed = record.get("failed_count", 0)
             skipped = record.get("skipped_count", 0)
+            stale = record.get("success_stale_count", 0)
             elapsed = record.get("elapsed_ms", 0.0)
             shape = record.get("final_shape", "--")
 
             if record.get("mode") == "error":
                 text = f"#{record.get('index', '?')} {time} | 失败 | {record.get('error_message', '')[:30]}"
             else:
-                text = f"#{record.get('index', '?')} {time} | {mode} | 成功{success} 失败{failed} 跳过{skipped} | {elapsed:.1f}s | {shape}"
+                if elapsed >= 1000:
+                    elapsed_str = f"{elapsed / 1000:.1f}s"
+                else:
+                    elapsed_str = f"{elapsed:.0f}ms"
+                text = f"#{record.get('index', '?')} {time} | {mode} | OK{success} FAIL{failed} SKIP{skipped} OLD{stale} | {elapsed_str} | {shape}"
 
             item = QListWidgetItem(text)
             if failed > 0 or record.get("mode") == "error":

@@ -1098,6 +1098,20 @@ class WorkflowCanvasView(QGraphicsView):
         card = self._preview_proxy.widget()
         return card if isinstance(card, BscanPreviewCard) else None
 
+    def get_preview_data(self):
+        """Return the current preview data."""
+        return self._preview_data
+
+    def set_stale_preview(self) -> None:
+        """Mark the current preview as stale."""
+        self._last_preview_is_stale = True
+        card = self._preview_card()
+        if card is not None:
+            try:
+                card.set_stale()
+            except Exception:
+                pass
+
     def viewport_scene_center(self) -> QPointF:
         """Return the current viewport center in scene coordinates."""
         return self.mapToScene(self.viewport().rect().center())

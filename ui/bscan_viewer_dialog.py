@@ -121,7 +121,7 @@ class BscanViewerDialog(QDialog):
         header.addStretch()
         self.btn_save = QPushButton("保存截图")
         self.btn_copy = QPushButton("复制图像")
-        self.btn_export = QPushButton("导出视图+参数")
+        self.btn_export = QPushButton("导出视图")
         for widget in [self.btn_save, self.btn_copy, self.btn_export]:
             header.addWidget(widget)
         layout.addLayout(header)

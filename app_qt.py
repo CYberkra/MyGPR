@@ -1326,6 +1326,12 @@ class GPRGuiQt(QMainWindow):
             self.workflow_validation_view.setPlainText(str(text))
         self._show_runtime_panel("validation")
 
+    def append_workflow_runtime_log(self, text: str) -> None:
+        """Append a message to the bottom Runtime Logs panel."""
+        if hasattr(self, "runtime_log_view"):
+            self.runtime_log_view.append(str(text))
+            self.runtime_log_view.ensureCursorVisible()
+
     def _relocate_basic_status_brief(self):
         """兼容旧调用：当前版本不再隐藏状态区，仅保留重排逻辑。"""
         return
@@ -1417,6 +1423,9 @@ class GPRGuiQt(QMainWindow):
         )
         self.page_workflow.export_evidence_requested.connect(
             self.export_replay_evidence_bundle
+        )
+        self.page_workflow.log_message_requested.connect(
+            self.append_workflow_runtime_log
         )
 
         # Preview Viewer 控制后台面板。
