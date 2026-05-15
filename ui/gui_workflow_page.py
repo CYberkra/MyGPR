@@ -484,6 +484,8 @@ class WorkflowPage(QWidget):
         self.btn_open_tuning = PushButton("打开自动选参")
         self.btn_open_tuning.clicked.connect(self.request_tuning_lab_for_current)
         self.btn_apply_best = PushButton("应用最佳参数")
+        self.btn_apply_best.setEnabled(False)
+        self.btn_apply_best.setToolTip("完成自动选参后可用")
         self.btn_apply_best.clicked.connect(self._apply_best_params)
         tuning_layout.addWidget(self.tuning_node_info)
         tuning_layout.addWidget(self.btn_open_tuning)
@@ -671,6 +673,22 @@ class WorkflowPage(QWidget):
             drawer_header.addWidget(btn)
             self.bottom_drawer_buttons[key] = btn
         drawer_header.addStretch(1)
+        # 添加高度控制按钮
+        self.btn_height_small = PushButton("小")
+        self.btn_height_small.setMaximumWidth(45)
+        self.btn_height_small.setToolTip("设置抽屉为小高度")
+        self.btn_height_small.clicked.connect(lambda: self._set_bottom_drawer_expanded(True, height_mode="small"))
+        self.btn_height_medium = PushButton("中")
+        self.btn_height_medium.setMaximumWidth(45)
+        self.btn_height_medium.setToolTip("设置抽屉为中等高度")
+        self.btn_height_medium.clicked.connect(lambda: self._set_bottom_drawer_expanded(True, height_mode="medium"))
+        self.btn_height_large = PushButton("大")
+        self.btn_height_large.setMaximumWidth(45)
+        self.btn_height_large.setToolTip("设置抽屉为大高度")
+        self.btn_height_large.clicked.connect(lambda: self._set_bottom_drawer_expanded(True, height_mode="large"))
+        drawer_header.addWidget(self.btn_height_small)
+        drawer_header.addWidget(self.btn_height_medium)
+        drawer_header.addWidget(self.btn_height_large)
         # 添加清空和复制按钮
         self.btn_clear_log = PushButton("清空")
         self.btn_clear_log.setMaximumWidth(60)
@@ -951,7 +969,14 @@ class WorkflowPage(QWidget):
         self.status_label.setText(report.summary())
         self._log(text)
         self.workflow_validation_view.setPlainText(text)
-        self._select_bottom_drawer_page("validation", expand=bool(report.errors or report.warnings))
+        # 有错误时使用 large 高度，警告时使用 medium
+        has_errors = bool(report.errors)
+        has_warnings = bool(report.warnings) and not has_errors
+        self._select_bottom_drawer_page("validation", expand=has_errors or has_warnings)
+        if has_errors:
+            self._set_bottom_drawer_expanded(True, height_mode="large")
+        # 同时切到左侧验证/QC面板，高亮验证图标
+        self._toggle_left_panel("validation")
 
         if hasattr(self, "qc_label") and self.qc_label is not None:
             lines = [
@@ -1889,6 +1914,8 @@ class WorkflowPage(QWidget):
             )
         self._log(f"运行失败: {error_message}")
         self._select_bottom_drawer_page("logs", expand=True)
+        # 有运行错误时使用 large 高度
+        self._set_bottom_drawer_expanded(True, height_mode="large")
         if failed_node_id:
             self._log(f"失败节点: {failed_node_id}")
 
