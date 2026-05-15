@@ -168,11 +168,13 @@ class CollapsibleNodeListWidget(QListWidget):
             # Add method items
             self._method_items[category_key] = []
             for method_id in methods:
-                item = QListWidgetItem(f"  {get_method_display_name(method_id)}")
+                display_name = get_method_display_name(method_id)
+                item = QListWidgetItem(f"  {display_name}")
                 item.setData(Qt.ItemDataRole.UserRole, method_id)
                 item.setData(Qt.ItemDataRole.UserRole + 1, None)
                 item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsDragEnabled)
                 item.setHidden(category_key in self._collapsed_categories)
+                item.setToolTip(f"{display_name}\n({method_id})")
                 self.addItem(item)
                 self._method_items[category_key].append(item)
 
@@ -818,18 +820,26 @@ class WorkflowPage(QWidget):
         for page_key, button in self.bottom_drawer_buttons.items():
             button.setChecked(page_key == key)
         if expand:
-            self._set_bottom_drawer_expanded(True)
+            self._set_bottom_drawer_expanded(True, height_mode="medium")
 
-    def _set_bottom_drawer_expanded(self, expanded: bool) -> None:
+    def _set_bottom_drawer_expanded(self, expanded: bool, *, height_mode: str = "medium") -> None:
         expanded = bool(expanded)
         self.bottom_drawer_toggle.setChecked(expanded)
         self.bottom_drawer_stack.setVisible(expanded)
-        # 默认展开高度 160，有错误时更高 230
-        max_height = 42
+        # 小/中/大三档高度
+        max_height = 42  # 收起高度
         if expanded:
-            # 可以根据实际情况动态调整高度，这里使用简单的固定值
-            max_height = 180  # 默认中等高度
+            if height_mode == "small":
+                max_height = 120  # 小
+            elif height_mode == "large":
+                max_height = 280  # 大
+            else:
+                max_height = 180  # 中等（默认）
         self.bottom_drawer.setMaximumHeight(max_height)
+        
+    def _expand_drawer_for_error(self) -> None:
+        """当有错误时，展开底部抽屉到较大高度"""
+        self._set_bottom_drawer_expanded(True, height_mode="large")
     
     def _clear_current_drawer_content(self) -> None:
         """清空当前底部抽屉页面的内容"""
