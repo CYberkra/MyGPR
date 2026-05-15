@@ -1634,8 +1634,14 @@ class WorkflowCanvasView(QGraphicsView):
             # 查找对应的 proxy
             proxy = self._scene.proxy_by_id.get(self._methods[row].node_id)
             if proxy is not None and isinstance(proxy, WorkflowNodeProxy):
-                # 保存当前 LOD 模式
-                current_lod_mode = proxy.widget()._lod_mode if hasattr(proxy.widget(), '_lod_mode') else 'full'
+                # 保存所有状态
+                old_widget = proxy.widget()
+                current_lod_mode = old_widget._lod_mode if hasattr(old_widget, '_lod_mode') else 'full'
+                old_width = old_widget.width() if old_widget is not None else None
+                old_height = old_widget.height() if old_widget is not None else None
+                old_pos = proxy.pos()
+                is_current = (proxy.row == self._current_row)
+                
                 # 创建新的卡片
                 card = WorkflowNodeCard(row, self._methods[row])
                 card.selected.connect(self._on_node_selected)
@@ -1644,21 +1650,32 @@ class WorkflowCanvasView(QGraphicsView):
                 card.run_from_requested.connect(self.run_from_node_requested)
                 card.duplicate_requested.connect(self.duplicate_node_requested)
                 card.remove_requested.connect(self.remove_node_requested)
-                # 应用保存的 LOD 模式
+                
+                # 应用保存的状态
                 card.set_lod_mode(current_lod_mode)
+                if old_width and old_height:
+                    card.setFixedSize(old_width, old_height)
+                
                 # 更新 proxy
-                old_widget = proxy.widget()
                 proxy.setWidget(card)
+                
                 # 清理旧的 widget
                 if old_widget is not None:
                     old_widget.deleteLater()
+                
+                # 恢复位置
+                proxy.setPos(old_pos)
+                
                 # 更新端口
                 in_label, out_label = workflow_port_labels(self._methods[row])
                 proxy.input_port.set_label(in_label)
                 proxy.output_port.set_label(out_label)
-                # 更新视觉状态
+                
+                # 更新视觉状态和选中态
                 proxy.update_visual_state()
                 proxy.update_port_positions()
+                card.set_current(is_current)
+                
                 # 更新边
                 self._scene.update_edges()
             else:
@@ -2112,7 +2129,7 @@ class WorkflowCanvasView(QGraphicsView):
             self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - event.angleDelta().y())
             event.accept()
             return
-        # 以鼠标位置为中心缩放
+        # 以鼠标位置为中心缩放 - 使用 scrollbar 补偿方式
         mouse_pos = event.position().toPoint() if hasattr(event, 'position') else event.pos()
         old_scene_pos = self.mapToScene(mouse_pos)
         # 计算缩放因子
@@ -2121,10 +2138,11 @@ class WorkflowCanvasView(QGraphicsView):
         new_scale = max(0.32, min(2.8, old_scale * factor))
         # 设置新缩放
         self._set_zoom_scale(new_scale)
-        # 计算并应用偏移，使鼠标下的点保持不变
-        new_scene_pos = self.mapToScene(mouse_pos)
-        delta = new_scene_pos - old_scene_pos
-        self.translate(delta.x(), delta.y())
+        # 计算并应用 scrollbar 偏移，使鼠标下的点保持不变
+        new_mouse_pos = self.mapFromScene(old_scene_pos)
+        scroll_delta = new_mouse_pos - mouse_pos
+        self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() + scroll_delta.x())
+        self.verticalScrollBar().setValue(self.verticalScrollBar().value() + scroll_delta.y())
         event.accept()
 
     def _set_zoom_scale(self, scale: float) -> None:
