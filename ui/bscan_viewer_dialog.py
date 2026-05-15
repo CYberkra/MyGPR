@@ -121,7 +121,8 @@ class BscanViewerDialog(QDialog):
         header.addStretch()
         self.btn_save = QPushButton("保存截图")
         self.btn_copy = QPushButton("复制图像")
-        for widget in [self.btn_save, self.btn_copy]:
+        self.btn_export = QPushButton("导出视图+参数")
+        for widget in [self.btn_save, self.btn_copy, self.btn_export]:
             header.addWidget(widget)
         layout.addLayout(header)
 
@@ -149,6 +150,7 @@ class BscanViewerDialog(QDialog):
         self.canvas.mpl_connect("motion_notify_event", self._on_motion)
         self.btn_save.clicked.connect(self._save_screenshot)
         self.btn_copy.clicked.connect(self._copy_image)
+        self.btn_export.clicked.connect(self._export_view_with_params)
 
         self.redraw()
 
@@ -303,3 +305,64 @@ class BscanViewerDialog(QDialog):
             )
         else:
             self.cursor_label.setText("光标：--")
+
+    def _export_view_with_params(self) -> None:
+        if self._view is None:
+            QMessageBox.information(self, "无数据", "没有可导出的 B-scan 数据")
+            return
+
+        export_dir = QFileDialog.getExistingDirectory(
+            self,
+            "选择导出文件夹",
+            "",
+            QFileDialog.Option.ShowDirsOnly,
+        )
+        if not export_dir:
+            return
+
+        import os
+        import json
+        from datetime import datetime
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        export_path = os.path.join(export_dir, f"bscan_export_{timestamp}")
+        try:
+            os.makedirs(export_path, exist_ok=True)
+        except Exception as e:
+            QMessageBox.warning(self, "导出失败", f"创建导出目录失败：{str(e)}")
+            return
+
+        preview_png = os.path.join(export_path, "preview.png")
+        try:
+            self.figure.savefig(preview_png, dpi=150, bbox_inches="tight")
+        except Exception as e:
+            QMessageBox.warning(self, "导出失败", f"保存预览图失败：{str(e)}")
+            return
+
+        params_lines = []
+        params_lines.append(f"Workflow: {self._title}")
+        params_lines.append(f"导出时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+        if self._raw is not None:
+            params_lines.append(f"原始尺寸: {self._raw.shape[1]} traces x {self._raw.shape[0]} samples")
+
+        display_rows, display_cols = self._view.shape
+        params_lines.append(f"显示尺寸: {display_cols} x {display_rows}")
+
+        params_lines.append(f"Colormap: {self.cmap_combo.currentText()}")
+        params_lines.append(f"Percentile: {self.percentile_low.value():.1f}% - {self.percentile_high.value():.1f}%")
+        params_lines.append(f"反相: {'是' if self.invert_check.isChecked() else '否'}")
+
+        params_txt = os.path.join(export_path, "params_summary.txt")
+        try:
+            with open(params_txt, "w", encoding="utf-8") as f:
+                f.write("\n".join(params_lines))
+        except Exception as e:
+            QMessageBox.warning(self, "导出失败", f"保存参数摘要失败：{str(e)}")
+            return
+
+        QMessageBox.information(
+            self,
+            "导出成功",
+            f"导出完成：\n{export_path}\n\n文件：\n- preview.png\n- params_summary.txt",
+        )

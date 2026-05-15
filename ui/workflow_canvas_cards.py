@@ -136,9 +136,17 @@ class WorkflowNodeCard(QFrame):
             QFrame#workflowNodeCard[status="success"] {
                 border: 1px solid #36d399;
             }
+            QFrame#workflowNodeCard[status="success_stale"] {
+                border: 1px dashed #9ca3af;
+                background: #f9fafb;
+            }
             QFrame#workflowNodeCard[status="running"] {
                 border: 2px solid #3278ff;
                 background: #f0f7ff;
+            }
+            QFrame#workflowNodeCard[status="queued"] {
+                border: 1px dashed #93c5fd;
+                background: #eff6ff;
             }
             QFrame#workflowNodeCard[status="failed"] {
                 border: 2px solid #ef4444;
@@ -206,6 +214,21 @@ class WorkflowNodeCard(QFrame):
                 background: #f3f4f6;
                 color: #6b7280;
                 border: 1px solid #d1d5db;
+            }
+            QLabel#nodeStatusChip[state="success_stale"] {
+                background: #f3f4f6;
+                color: #6b7280;
+                border: 1px dashed #9ca3af;
+            }
+            QLabel#nodeStatusChip[state="queued"] {
+                background: #dbeafe;
+                color: #1d4ed8;
+                border: 1px dashed #60a5fa;
+            }
+            QLabel#nodeStatusChip[state="idle"] {
+                background: #f0f2f5;
+                color: #697386;
+                border: 1px solid #d7dce4;
             }
             QLabel#nodeMetaInfo {
                 color: #6b7280;
@@ -384,11 +407,11 @@ class WorkflowNodeCard(QFrame):
             return "hide"
         if not self.method.enabled:
             return "off"
-        # Check for run status first
-        status = getattr(self.method, "status", "pending")
-        if status in ["success", "running", "failed", "skipped"]:
+        status = getattr(self.method, "status", "idle")
+        valid_states = ["idle", "queued", "running", "success", "success_stale", "failed", "skipped"]
+        if status in valid_states:
             return status
-        return "on"
+        return "idle"
 
     def _status_chip_text(self) -> str:
         if self.method.method_id == "raw_input":
@@ -397,20 +420,25 @@ class WorkflowNodeCard(QFrame):
             return "HIDE"
         if not self.method.enabled:
             return "OFF"
-        status = getattr(self.method, "status", "pending")
+        status = getattr(self.method, "status", "idle")
         status_map = {
-            "pending": "PEND",
+            "idle": "IDLE",
+            "pending": "IDLE",
+            "queued": "QUE",
             "running": "RUN",
             "success": "OK",
+            "success_stale": "OLD",
             "failed": "FAIL",
             "skipped": "SKIP",
+            "cancelled": "CANC",
         }
-        return status_map.get(status, "ON")
+        return status_map.get(status, "IDLE")
 
     def _refresh_state_properties(self) -> None:
         self.setProperty("hiddenState", bool(self.method.hidden))
-        status = getattr(self.method, "status", "pending")
-        if status in ["success", "running", "failed", "skipped"]:
+        status = getattr(self.method, "status", "idle")
+        valid_statuses = ["queued", "running", "success", "success_stale", "failed", "skipped"]
+        if status in valid_statuses:
             self.setProperty("status", status)
         else:
             self.setProperty("status", "")
@@ -1058,7 +1086,7 @@ class WorkflowCanvasView(QGraphicsView):
         card = self._preview_card()
         if card is not None:
             try:
-                card.set_preview_data(self._preview_data, self._preview_label, is_stale=self._last_preview_is_stale)
+                card.set_preview_data(self._preview_data, self._preview_label, success=not self._last_preview_is_stale)
                 self._scene.update_edges()
             except RuntimeError:
                 self._preview_proxy = None
@@ -1080,6 +1108,12 @@ class WorkflowCanvasView(QGraphicsView):
             card = proxy.widget()
             if isinstance(card, WorkflowNodeCard):
                 card.set_current(card.row == self._current_row)
+
+    def refresh_all_nodes(self) -> None:
+        for proxy in self._scene.proxies:
+            card = proxy.widget()
+            if isinstance(card, WorkflowNodeCard):
+                card._build()
 
     def _event_view_pos(self, event) -> QPoint:
         if hasattr(event, "position"):
@@ -1616,7 +1650,7 @@ class WorkflowCanvasView(QGraphicsView):
             self._scene.proxy_by_id[proxy.node_id] = proxy
 
         preview_card = BscanPreviewCard()
-        preview_card.set_preview_data(self._preview_data, self._preview_label, is_stale=self._last_preview_is_stale)
+        preview_card.set_preview_data(self._preview_data, self._preview_label, success=not self._last_preview_is_stale)
         preview_card.large_view_requested.connect(self.preview_large_requested)
         preview_method = WorkflowMethod("preview", "bscan_preview", enabled=True, order=len(self._methods), node_id=PREVIEW_NODE_ID)
         preview_proxy = WorkflowNodeProxy(-1, preview_method)

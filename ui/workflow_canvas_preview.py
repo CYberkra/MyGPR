@@ -104,6 +104,8 @@ class BscanPreviewCard(QFrame):
         self._data: Any = None
         self._label = "Workflow Output"
         self._is_stale = False
+        self._is_failed = False
+        self._has_data = False
         self.compact = False
         self.source_label: QLabel | None = None
         self.thumbnail_label: QLabel | None = None
@@ -118,14 +120,53 @@ class BscanPreviewCard(QFrame):
                 border: 1px solid #e0c36a;
                 border-radius: 10px;
             }
+            QFrame#bscanPreviewCard[status="failed"] {
+                border: 2px solid #ef4444;
+                background: #fff5f5;
+            }
+            QFrame#bscanPreviewCard[status="stale"] {
+                border: 1px dashed #9ca3af;
+                background: #f9fafb;
+            }
+            QFrame#bscanPreviewCard[status="fresh"] {
+                border: 1px solid #36d399;
+                background: #f0fdf4;
+            }
             QLabel#previewTitle {
                 font-weight: 800;
                 color: #5b4300;
             }
-            QLabel#previewChip {
-                background: #fff1b8;
-                color: #765500;
-                border: 1px solid #e0c36a;
+            QLabel#previewChipFresh {
+                background: #dcfce7;
+                color: #166534;
+                border: 1px solid #86efac;
+                border-radius: 8px;
+                padding: 2px 7px;
+                font-size: 12px;
+                font-weight: 700;
+            }
+            QLabel#previewChipStale {
+                background: #f3f4f6;
+                color: #6b7280;
+                border: 1px dashed #9ca3af;
+                border-radius: 8px;
+                padding: 2px 7px;
+                font-size: 12px;
+                font-weight: 700;
+            }
+            QLabel#previewChipFailed {
+                background: #fee2e2;
+                color: #dc2626;
+                border: 1px solid #fca5a5;
+                border-radius: 8px;
+                padding: 2px 7px;
+                font-size: 12px;
+                font-weight: 700;
+            }
+            QLabel#previewChipEmpty {
+                background: #f3f4f6;
+                color: #9ca3af;
+                border: 1px solid #d1d5db;
                 border-radius: 8px;
                 padding: 2px 7px;
                 font-size: 12px;
@@ -150,15 +191,30 @@ class BscanPreviewCard(QFrame):
             return None
         return int(array.shape[0]), int(array.shape[1])
 
-    def set_preview_data(self, data: Any, label: str = "Workflow Output", is_stale: bool = False) -> None:
+    def set_preview_data(self, data: Any, label: str = "Workflow Output", success: bool = True) -> None:
         self._data = data
         self._label = label or "Workflow Output"
-        self._is_stale = bool(is_stale)
+        self._has_data = data is not None
+        self._is_stale = False
+        self._is_failed = not success
         try:
             self._build()
         except Exception:
             self._data = None
+            self._has_data = False
             self._build()
+
+    def set_stale(self) -> None:
+        """Mark the preview as stale (result from previous run)."""
+        self._is_stale = True
+        self._is_failed = False
+        self._build()
+
+    def set_failed(self, message: str = "运行失败") -> None:
+        """Mark the preview as failed."""
+        self._is_failed = True
+        self._is_stale = False
+        self._build()
 
     def set_compact(self, compact: bool) -> None:
         compact = bool(compact)
@@ -190,6 +246,17 @@ class BscanPreviewCard(QFrame):
                     widget.deleteLater()
             QWidget().setLayout(old_layout)
 
+        if self._is_failed:
+            self.setProperty("status", "failed")
+        elif self._is_stale:
+            self.setProperty("status", "stale")
+        elif self._has_data:
+            self.setProperty("status", "fresh")
+        else:
+            self.setProperty("status", "")
+        self.style().unpolish(self)
+        self.style().polish(self)
+
         root = QVBoxLayout(self)
         root.setContentsMargins(10, 8, 10, 10)
         root.setSpacing(7)
@@ -199,17 +266,28 @@ class BscanPreviewCard(QFrame):
         title = QLabel("B-scan Preview")
         title.setObjectName("previewTitle")
         title_row.addWidget(title, 1)
-        chip = QLabel("PREVIEW")
-        chip.setObjectName("previewChip")
+
+        if self._is_failed:
+            chip_text = "运行失败"
+            chip_class = "previewChipFailed"
+        elif self._is_stale:
+            chip_text = "上次结果"
+            chip_class = "previewChipStale"
+        elif self._has_data:
+            chip_text = "最新结果"
+            chip_class = "previewChipFresh"
+        else:
+            chip_text = "空"
+            chip_class = "previewChipEmpty"
+
+        chip = QLabel(chip_text)
+        chip.setObjectName(chip_class)
         title_row.addWidget(chip)
         root.addLayout(title_row)
 
         shape = self.data_shape
         shape_text = "--" if shape is None else f"{shape[1]} traces × {shape[0]} samples"
-        if self._is_stale:
-            stale_label = QLabel("⚠️ 上次结果 · 运行失败")
-            stale_label.setStyleSheet("color: #dc2626; font-weight: 700; font-size: 12px;")
-            root.addWidget(stale_label)
+
         self.source_label = QLabel(f"{self._label} · {shape_text}")
         self.source_label.setObjectName("previewMeta")
         self.source_label.setWordWrap(True)

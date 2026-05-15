@@ -95,6 +95,82 @@ class WorkflowValidationReport:
         return "\n".join(lines)
 
 
+def _get_suggestion(issue: WorkflowValidationIssue, sidecar_status: dict[str, bool] | None = None) -> str:
+    """Generate user-friendly suggestion for a validation issue."""
+    code = issue.code
+
+    suggestions = {
+        "missing_sidecar": "导入对应的 sidecar 文件，或在当前工作流中停用相关节点。",
+        "graph_order_mismatch": "当前工作流仍按节点顺序执行。确认节点顺序后继续，或使用「自动布局」恢复线性链。",
+        "isolated_node": "检查节点连线是否正确，或将其连接到工作流中。",
+        "preview_without_input": "B-scan Preview 节点需要连接到最后一个处理节点。",
+        "cycle_detected": "检测到循环连接，请移除循环边。",
+        "duplicate_link": "移除重复的连线。",
+        "empty_link_endpoint": "检查连线两端是否正确连接到节点。",
+        "missing_from_node": "连线源节点不存在，删除此连线。",
+        "missing_to_node": "连线目标节点不存在，删除此连线。",
+        "self_link": "节点不能连接到自己，删除此连线。",
+        "multiple_data_inputs": "每个节点只能有一个数据输入，移除多余的连线。",
+        "unknown_link_kind": "忽略未知类型的连线，或将其删除。",
+        "empty_workflow": "工作流为空，请添加处理节点。",
+        "duplicate_or_missing_node_id": "工作流内部错误，请重新加载模板。",
+    }
+
+    base = suggestions.get(code, "请根据上述信息调整工作流。")
+
+    if code == "missing_sidecar" and sidecar_status:
+        req_map = {
+            "RTK": ("rtk", "RTK"),
+            "IMU": ("imu", "IMU"),
+            "AGL": ("agl", "高度计"),
+        }
+        req_str = issue.message.replace("节点缺少所需的辅助数据：", "").replace("、", ",")
+        for key, (status_key, label) in req_map.items():
+            if key in req_str:
+                if sidecar_status.get(status_key):
+                    base = f"已加载 {label} 数据，忽略此警告。"
+                else:
+                    base = f"导入 {label} sidecar 文件，或停用需要 {label} 的节点。"
+                break
+
+    return base
+
+
+def to_text_with_suggestions(
+    report: WorkflowValidationReport,
+    *,
+    sidecar_status: dict[str, bool] | None = None,
+    execution_mode: str = "order",
+) -> str:
+    """Generate validation report text with user-friendly suggestions."""
+    labels = {"error": "ERROR", "warning": "WARN", "info": "INFO"}
+    lines = [f"Validate: {len(report.errors)} errors, {len(report.warnings)} warnings, {len(report.infos)} info"]
+
+    if execution_mode == "order":
+        lines.append("执行模式：按节点顺序（画布连线仅供参考）")
+
+    if not report.issues:
+        lines.append("No workflow graph issues detected.")
+        return "\n".join(lines)
+
+    for issue in report.issues:
+        suffix = ""
+        if issue.node_id:
+            suffix += f" node={issue.node_id}"
+        if issue.link_key:
+            suffix += f" link={issue.link_key}"
+
+        suggestion = _get_suggestion(issue, sidecar_status)
+        lines.append(
+            f"[{labels.get(issue.severity, issue.severity.upper())}] "
+            f"{issue.code}: {issue.message}{suffix}"
+        )
+        if issue.severity in ("error", "warning"):
+            lines.append(f"  建议：{suggestion}")
+
+    return "\n".join(lines)
+
+
 def validate_workflow_config(
     config: Any,
     *,
@@ -261,12 +337,11 @@ def validate_workflow_config(
             ),
         )
 
-    # Check sidecar requirements
     if sidecar_status is not None:
         rtk_loaded = sidecar_status.get("rtk", False)
         imu_loaded = sidecar_status.get("imu", False)
         agl_loaded = sidecar_status.get("agl", False)
-        
+
         for method in methods:
             if method.hidden or not method.enabled:
                 continue
@@ -289,7 +364,7 @@ def validate_workflow_config(
                     f"节点缺少所需的辅助数据：{req_str}",
                     node_id=method.node_id,
                 )
-    
+
     if not report.issues:
         report.add("info", "ok", "Workflow graph looks consistent.")
 

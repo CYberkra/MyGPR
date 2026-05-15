@@ -137,8 +137,9 @@ def test_workflow_validation_updates_bottom_runtime_panel_and_hides_long_node_id
         app.processEvents()
         assert win._runtime_panel_container.isVisible()
         assert win._runtime_panel_stack.currentWidget() is win.validation_box
-        assert "执行模式：顺序" in win.workflow_validation_view.toPlainText()
-        assert "graph/order mismatch" in win.workflow_validation_view.toPlainText()
+        validation_text = win.workflow_validation_view.toPlainText()
+        assert "执行模式：按节点顺序" in validation_text
+        assert "graph/order mismatch" in validation_text
     finally:
         win.close()
         app.processEvents()

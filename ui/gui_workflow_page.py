@@ -96,6 +96,8 @@ class WorkflowPage(QWidget):
         self._slider_dragging = False
         self._last_run_methods: list[WorkflowMethod] = []
         self._live_result_available = False
+        self._run_history: list[dict[str, Any]] = []
+        self._run_history_index = 0
         self._setup_ui()
         self._restore_workspace_state()
         self.load_config(self.config)
@@ -380,15 +382,17 @@ class WorkflowPage(QWidget):
         self.export_label.setProperty("class", "hintText")
         self.status_label = QLabel("未运行")
         self.status_label.setProperty("class", "hintText")
-        self.workflow_log = QTextEdit()
-        self.workflow_log.setReadOnly(True)
-        self.workflow_log.setMinimumWidth(230)
-        self.workflow_log.setPlaceholderText("工作流运行状态、风险提示和最近步骤日志")
-        self.workflow_log.hide()
+        self.run_history_list = QListWidget()
+        self.run_history_list.setMaximumHeight(100)
+        self.run_history_list.setAlternatingRowColors(True)
+        self.run_history_list.setToolTip("点击查看历史运行详情")
+        self.run_history_list.itemClicked.connect(self._on_history_item_clicked)
         inspector_layout.addWidget(self.inspector_label)
         inspector_layout.addWidget(self.qc_label)
         inspector_layout.addWidget(self.export_label)
         inspector_layout.addWidget(self.status_label)
+        inspector_layout.addWidget(QLabel("运行历史"))
+        inspector_layout.addWidget(self.run_history_list)
         inspector_layout.addStretch(1)
         self.workspace_splitter.addWidget(self.inspector_box)
         self.workspace_splitter.setStretchFactor(0, 0)
@@ -551,12 +555,9 @@ class WorkflowPage(QWidget):
         }
         report = validate_workflow_config(self.config, sidecar_status=sidecar_status, execution_mode="order")
         mismatch_text = self._graph_order_mismatch_text()
-        text = (
-            "执行模式：顺序\n"
-            "提示：canvas links 当前用于可视化与一致性检查，尚未完全决定实际执行顺序。\n"
-            f"{mismatch_text}\n"
-            f"{report.to_text()}"
-        )
+        from core.workflow_validation import to_text_with_suggestions
+        text = to_text_with_suggestions(report, sidecar_status=sidecar_status, execution_mode="order")
+        text = f"{mismatch_text}\n{text}"
 
         self.status_label.setText(report.summary())
         self._log(text)
@@ -1333,43 +1334,34 @@ class WorkflowPage(QWidget):
         label = "实时预览完成" if realtime else "工作流运行完成"
         self.status_label.setText(label)
         self._log(f"{label}: {len(outputs)} 步")
-        
-        # 优先用 node_id 映射 outputs
-        output_by_node_id = {}
-        for output in outputs:
-            node_id = output.get("node_id")
-            if node_id:
-                output_by_node_id[node_id] = output
-        
-        # 先处理有 node_id 的 output，更新对应节点状态
+
+        run_node_ids = {o.get("node_id") for o in outputs if o.get("node_id")}
+
         for method in self.config.methods:
             if method.hidden or not method.enabled:
                 method.status = "skipped"
                 continue
-            output = output_by_node_id.get(method.node_id)
-            if output:
+            if method.node_id in run_node_ids:
                 method.status = "success"
-                method.elapsed_ms = output.get("elapsed_ms", 0.0)
-                method.error_message = ""
-                data = output.get("data")
-                method.output_shape = data.shape if data is not None else None
-        
-        # 对于没有 node_id 的 outputs，按顺序与 self._last_run_methods 匹配，并在 config.methods 中找到对应节点更新
-        outputs_without_node_id = [o for o in outputs if not o.get("node_id")]
-        if outputs_without_node_id and hasattr(self, "_last_run_methods") and self._last_run_methods:
-            last_run_node_ids = {m.node_id for m in self._last_run_methods if hasattr(m, "node_id")}
-            for last_run_method, output in zip(self._last_run_methods, outputs_without_node_id):
-                if hasattr(last_run_method, "node_id") and last_run_method.node_id not in output_by_node_id:
-                    # 在 config.methods 中找到对应的节点并更新
-                    for config_method in self.config.methods:
-                        if config_method.node_id == last_run_method.node_id:
-                            config_method.status = "success"
-                            config_method.elapsed_ms = output.get("elapsed_ms", 0.0)
-                            config_method.error_message = ""
-                            data = output.get("data")
-                            config_method.output_shape = data.shape if data is not None else None
-                            break
-        
+                output = next((o for o in outputs if o.get("node_id") == method.node_id), None)
+                if output:
+                    method.elapsed_ms = output.get("elapsed_ms", 0.0)
+                    method.error_message = ""
+                    data = output.get("data")
+                    method.output_shape = data.shape if data is not None else None
+            else:
+                if method.status == "success":
+                    method.status = "success_stale"
+                elif method.status == "running":
+                    method.status = "idle"
+
+        self.workflow_canvas.refresh_all_nodes()
+
+        run_record = self._create_run_record(outputs, realtime)
+        self._run_history.insert(0, run_record)
+        self._run_history_index = 0
+        self._update_history_list()
+
         if outputs:
             final_output = outputs[-1]
             final_name = (
@@ -1387,26 +1379,131 @@ class WorkflowPage(QWidget):
             shape = output.get("data").shape if output.get("data") is not None else "--"
             self._log(f"  [{index}] {name} -> {shape}")
 
-    def set_run_error(self, error_message: str) -> None:
+    def set_run_error(self, error_message: str, failed_node_id: str = "") -> None:
         self.status_label.setText("运行失败")
-        # 禁用 Save live result，避免保存旧结果
         self._live_result_available = False
         self.btn_save_live.setEnabled(False)
-        # 不把所有 enabled 节点都标 failed，只标记未知失败状态
+
         for method in self.config.methods:
-            if method.enabled and not method.hidden:
-                method.status = "pending"
+            if method.hidden or not method.enabled:
+                method.status = "skipped"
+                continue
+            if failed_node_id and method.node_id == failed_node_id:
+                method.status = "failed"
+                method.error_message = error_message[:200]
+            elif method.status == "success":
+                method.status = "success_stale"
+            elif method.status == "running":
+                method.status = "idle"
+            else:
                 method.error_message = ""
+
+        self.workflow_canvas.refresh_all_nodes()
         self.workflow_canvas.set_preview_data(
             None,
             label="运行失败",
             success=False,
         )
         self._log(f"运行失败: {error_message}")
+        if failed_node_id:
+            self._log(f"失败节点: {failed_node_id}")
+
+        error_record = {
+            "index": len(self._run_history) + 1,
+            "time": str(__import__("datetime").datetime.now().strftime("%H:%M:%S")),
+            "mode": "error",
+            "success_count": 0,
+            "failed_count": 1,
+            "skipped_count": 0,
+            "elapsed_ms": 0.0,
+            "final_shape": "--",
+            "methods": [{"node_id": failed_node_id, "method_id": "--", "status": "failed", "elapsed_ms": 0.0}],
+            "error_message": error_message,
+            "realtime": False,
+        }
+        self._run_history.insert(0, error_record)
+        self._update_history_list()
 
     def _log(self, text: str) -> None:
-        self.workflow_log.append(str(text))
-        self.workflow_log.ensureCursorVisible()
+        pass
+
+    def _create_run_record(self, outputs: list[dict[str, Any]], realtime: bool) -> dict[str, Any]:
+        from datetime import datetime
+        success_count = len(outputs)
+        failed_count = 0
+        skipped_count = 0
+        total_elapsed = sum(o.get("elapsed_ms", 0.0) for o in outputs)
+        final_shape = "--"
+        if outputs and outputs[-1].get("data") is not None:
+            try:
+                shape = outputs[-1]["data"].shape
+                final_shape = f"{shape[1]} x {shape[0]}"
+            except Exception:
+                pass
+
+        record = {
+            "index": len(self._run_history) + 1,
+            "time": datetime.now().strftime("%H:%M:%S"),
+            "mode": "实时" if realtime else "Run All",
+            "success_count": success_count,
+            "failed_count": failed_count,
+            "skipped_count": skipped_count,
+            "elapsed_ms": total_elapsed,
+            "final_shape": final_shape,
+            "methods": [
+                {
+                    "node_id": o.get("node_id", ""),
+                    "method_id": o.get("method_key", ""),
+                    "status": "success",
+                    "elapsed_ms": o.get("elapsed_ms", 0.0),
+                }
+                for o in outputs
+            ],
+            "realtime": realtime,
+        }
+        return record
+
+    def _update_history_list(self) -> None:
+        self.run_history_list.clear()
+        for record in self._run_history[:20]:
+            time = record.get("time", "--")
+            mode = record.get("mode", "--")
+            success = record.get("success_count", 0)
+            failed = record.get("failed_count", 0)
+            skipped = record.get("skipped_count", 0)
+            elapsed = record.get("elapsed_ms", 0.0)
+            shape = record.get("final_shape", "--")
+
+            if record.get("mode") == "error":
+                text = f"#{record.get('index', '?')} {time} | 失败 | {record.get('error_message', '')[:30]}"
+            else:
+                text = f"#{record.get('index', '?')} {time} | {mode} | 成功{success} 失败{failed} 跳过{skipped} | {elapsed:.1f}s | {shape}"
+
+            item = QListWidgetItem(text)
+            if failed > 0 or record.get("mode") == "error":
+                item.setBackground(Qt.GlobalColor.red)
+                item.setForeground(Qt.GlobalColor.white)
+            self.run_history_list.addItem(item)
+
+    def _on_history_item_clicked(self, item: QListWidgetItem) -> None:
+        row = self.run_history_list.row(item)
+        if 0 <= row < len(self._run_history):
+            record = self._run_history[row]
+            details = []
+            details.append(f"Run #{record.get('index', '?')} - {record.get('time', '--')} - {record.get('mode', '--')}")
+            details.append(f"成功: {record.get('success_count', 0)}, 失败: {record.get('failed_count', 0)}, 跳过: {record.get('skipped_count', 0)}")
+            details.append(f"总耗时: {record.get('elapsed_ms', 0.0):.1f} ms")
+            details.append(f"最终输出: {record.get('final_shape', '--')}")
+            details.append("---")
+            details.append("节点详情:")
+            for m in record.get("methods", []):
+                status = m.get("status", "?")
+                elapsed = m.get("elapsed_ms", 0.0)
+                details.append(f"  [{status}] {m.get('method_id', '?')} ({elapsed:.1f}ms)")
+            if record.get("error_message"):
+                details.append(f"错误: {record.get('error_message', '')}")
+
+            QMessageBox.information(self, "运行历史详情", "\n".join(details))
 
     def _on_slider_pressed(self) -> None:
         self._slider_dragging = True
