@@ -461,6 +461,7 @@ class AutoTuneWorker(QObject):
 
     def run(self):
         try:
+            from core.auto_tune import auto_tune_method, AutoTuneCancelled
             result = auto_tune_method(
                 self.data,
                 self.method_key,
@@ -523,6 +524,7 @@ class AutoTuneStageWorker(QObject):
 
     def run(self):
         try:
+            from core.auto_tune import auto_select_method_group, AutoTuneCancelled
             result = auto_select_method_group(
                 self.data,
                 self.method_keys,
@@ -582,6 +584,7 @@ class AutoTuneComparisonWorker(QObject):
 
     def run(self):
         try:
+            from core.auto_tune_comparison import run_auto_tune_comparison
             result = run_auto_tune_comparison(
                 self.data,
                 header_info=self.header_info,
@@ -2751,6 +2754,7 @@ class GPRGuiQt(QMainWindow):
 
     def _on_auto_comparison_finished(self, result):
         """人工 baseline vs 自动选参对比完成。"""
+        from core.auto_tune_comparison import to_summary_dict
         cancelled = isinstance(result, dict) and bool(result.get("cancelled"))
         self._set_busy(
             False, text="人工/自动对比完成" if not cancelled else "人工/自动对比已取消"
@@ -2811,9 +2815,10 @@ class GPRGuiQt(QMainWindow):
         manual_label = next((label for label in labels if label.startswith("人工 baseline")), "")
         auto_label = next((label for label in labels if label.startswith("自动选参")), "")
         if manual_label and auto_label:
-            self.page_advanced.compare_var.setChecked(True)
-            self.page_advanced.compare_left_combo.setCurrentText(manual_label)
-            self.page_advanced.compare_right_combo.setCurrentText(auto_label)
+            page_advanced = self._ensure_advanced_page()
+            page_advanced.compare_var.setChecked(True)
+            page_advanced.compare_left_combo.setCurrentText(manual_label)
+            page_advanced.compare_right_combo.setCurrentText(auto_label)
         self.plot_data(self.data)
 
     def _cleanup_auto_tune_worker(self):
@@ -3434,6 +3439,7 @@ class GPRGuiQt(QMainWindow):
 
     def _build_airborne_georeference_3d_plot_payload(self) -> dict | None:
         """构建三维地理参考预览所需数据。"""
+        from core.uav_georeference_3d import build_airborne_georeference_3d_payload
         if self.data is None:
             return None
         try:
@@ -4735,6 +4741,7 @@ class GPRGuiQt(QMainWindow):
 
     def export_auto_tune_comparison_artifacts(self):
         """导出人工 baseline vs 自动选参对比证据。"""
+        from core.auto_tune_comparison_export import export_auto_tune_comparison_artifacts as export_auto_tune_comparison_bundle
         result = self._last_auto_tune_comparison_result
         if result is None:
             QMessageBox.information(
@@ -5018,6 +5025,7 @@ class GPRGuiQt(QMainWindow):
 
     def export_replay_evidence_bundle(self):
         """手动导出处理历史回放证据包。"""
+        from core.evidence_export import export_replay_evidence_bundle as export_replay_evidence_zip
         package = self.shared_data.get_replay_evidence_package()
         if not package:
             QMessageBox.information(
@@ -5086,6 +5094,7 @@ class GPRGuiQt(QMainWindow):
 
     def export_airborne_georeference_3d_bundle(self):
         """导出三维地理参考预览文件。"""
+        from core.uav_georeference_3d import export_airborne_georeference_3d_bundle
         payload = self._build_airborne_georeference_3d_plot_payload()
         if not payload:
             QMessageBox.information(
