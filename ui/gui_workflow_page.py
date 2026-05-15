@@ -8,7 +8,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable
 
-from PyQt6.QtCore import QPointF, Qt, QTimer, pyqtSignal, QSettings
+from PyQt6.QtCore import QMimeData, QPoint, QPointF, Qt, QTimer, pyqtSignal, QSettings
+from PyQt6.QtGui import QDrag
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -72,6 +73,108 @@ class WorkflowStepList(QListWidget):
     def dropEvent(self, event):  # noqa: N802 - Qt override
         super().dropEvent(event)
         self.order_changed.emit()
+
+
+class CollapsibleNodeListWidget(QListWidget):
+    """Collapsible node library list widget with drag support."""
+
+    node_dragged = pyqtSignal(str)
+    node_double_clicked = pyqtSignal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._collapsed_categories: set[str] = set()
+        self._category_items: dict[str, QListWidgetItem] = {}
+        self._method_items: dict[str, list[QListWidgetItem]] = {}
+        self.setDragEnabled(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragOnly)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.itemDoubleClicked.connect(self._on_item_double_clicked)
+        self.itemClicked.connect(self._on_item_clicked)
+
+    def startDrag(self, supportedActions):  # noqa: N802
+        """Start drag event for selected node."""
+        item = self.currentItem()
+        if not item:
+            return
+        method_id = item.data(Qt.ItemDataRole.UserRole)
+        if not method_id:
+            return
+
+        drag = QDrag(self)
+        mime = QMimeData()
+        mime.setText(str(method_id))
+        drag.setMimeData(mime)
+        drag.exec(Qt.DropAction.CopyAction)
+
+    def set_category_collapsed(self, category_key: str, collapsed: bool):
+        """Set category collapsed state."""
+        if collapsed:
+            self._collapsed_categories.add(category_key)
+        else:
+            self._collapsed_categories.discard(category_key)
+        self._update_category_visibility(category_key)
+
+    def _update_category_visibility(self, category_key: str):
+        """Update visibility of items under a category."""
+        items = self._method_items.get(category_key, [])
+        is_collapsed = category_key in self._collapsed_categories
+        for item in items:
+            item.setHidden(is_collapsed)
+
+    def _on_item_clicked(self, item: QListWidgetItem):
+        """Handle item click to toggle category collapse."""
+        category_key = item.data(Qt.ItemDataRole.UserRole + 1)
+        if category_key:
+            new_state = category_key not in self._collapsed_categories
+            self.set_category_collapsed(category_key, new_state)
+
+    def _on_item_double_clicked(self, item: QListWidgetItem):
+        """Handle item double click for method nodes."""
+        method_id = item.data(Qt.ItemDataRole.UserRole)
+        if method_id:
+            self.node_double_clicked.emit(str(method_id))
+
+    def populate(self, query: str = ""):
+        """Populate the list with methods organized by category."""
+        self.clear()
+        self._category_items = {}
+        self._method_items = {}
+
+        for category_key, category in METHOD_CATEGORIES.items():
+            methods = [
+                method_id
+                for method_id in category.get("methods", [])
+                if method_id in PROCESSING_METHODS
+                and (
+                    not query
+                    or query in method_id.lower()
+                    or query in get_method_display_name(method_id).lower()
+                    or query in str(category.get("name", "")).lower()
+                )
+            ]
+            if not methods:
+                continue
+
+            # Add category header
+            category_name = str(category.get("name", category_key))
+            header_text = f"▼ {category_name}" if category_key not in self._collapsed_categories else f"▶ {category_name}"
+            header_item = QListWidgetItem(header_text)
+            header_item.setData(Qt.ItemDataRole.UserRole + 1, category_key)
+            header_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            self.addItem(header_item)
+            self._category_items[category_key] = header_item
+
+            # Add method items
+            self._method_items[category_key] = []
+            for method_id in methods:
+                item = QListWidgetItem(f"  {get_method_display_name(method_id)}")
+                item.setData(Qt.ItemDataRole.UserRole, method_id)
+                item.setData(Qt.ItemDataRole.UserRole + 1, None)
+                item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsDragEnabled)
+                item.setHidden(category_key in self._collapsed_categories)
+                self.addItem(item)
+                self._method_items[category_key].append(item)
 
 
 class WorkflowPage(QWidget):
@@ -175,7 +278,10 @@ class WorkflowPage(QWidget):
         self.btn_open_tuning_lab.hide()
         self.btn_save_live.hide()
         self.btn_toggle_project.hide()
-        self.btn_toggle_inspector.hide()
+        # 恢复 Inspector 切换按钮的显示
+        self.btn_toggle_inspector.setMinimumWidth(60)
+        self.btn_toggle_inspector.setMaximumWidth(80)
+        studio_row.addWidget(self.btn_toggle_inspector)
 
         self.btn_run_all.setMinimumWidth(88)
         self.btn_run_all.setMaximumWidth(118)
@@ -285,9 +391,9 @@ class WorkflowPage(QWidget):
         left_sidebar_layout.addWidget(self.left_icon_rail)
         left_sidebar_layout.addWidget(self.left_panel_stack, 1)
 
-        def add_rail_button(key: str, text: str, tooltip: str, index: int) -> None:
+        def add_rail_button(key: str, icon: FluentIcon, tooltip: str, index: int) -> None:
             button = QToolButton()
-            button.setText(text)
+            button.setIcon(icon.icon())
             button.setToolTip(tooltip)
             button.setCheckable(True)
             button.setFixedSize(40, 40)
@@ -347,7 +453,7 @@ class WorkflowPage(QWidget):
         palette_layout.setSpacing(6)
         self.palette_search = QLineEdit()
         self.palette_search.setPlaceholderText("搜索节点")
-        self.palette_list = QListWidget()
+        self.palette_list = CollapsibleNodeListWidget()
         self.palette_list.setMinimumWidth(320)
         self.palette_list.setMaximumWidth(520)
         palette_layout.addWidget(self.palette_search)
@@ -366,16 +472,16 @@ class WorkflowPage(QWidget):
         self.left_panel_stack.addWidget(self.settings_panel)
 
         rail_items = [
-            ("project", "项", "项目 / 数据", 0),
-            ("nodes", "节", "节点库", 1),
-            ("runs", "运", "运行记录", 2),
-            ("tuning", "调", "调参与实验", 3),
-            ("validation", "验", "验证 / QC", 4),
-            ("export", "出", "导出 / Evidence", 5),
-            ("settings", "设", "设置", 6),
+            ("project", FluentIcon.FOLDER, "项目 / 数据", 0),
+            ("nodes", FluentIcon.APPLICATION, "节点库", 1),
+            ("runs", FluentIcon.HISTORY, "运行记录", 2),
+            ("tuning", FluentIcon.EDIT, "调参与实验", 3),
+            ("validation", FluentIcon.COMPLETED, "验证 / QC", 4),
+            ("export", FluentIcon.SHARE, "导出 / Evidence", 5),
+            ("settings", FluentIcon.SETTING, "设置", 6),
         ]
-        for key, text, tooltip, index in rail_items:
-            add_rail_button(key, text, tooltip, index)
+        for key, icon, tooltip, index in rail_items:
+            add_rail_button(key, icon, tooltip, index)
         rail_layout.addStretch(1)
         self.left_panel_stack.setCurrentIndex(1)
         self.rail_buttons["nodes"].setChecked(True)
@@ -589,7 +695,7 @@ class WorkflowPage(QWidget):
         self.btn_auto_layout.clicked.connect(self.workflow_canvas.auto_layout)
         self.btn_reset_zoom.clicked.connect(self.workflow_canvas.reset_zoom)
         self.palette_search.textChanged.connect(self._populate_palette)
-        self.palette_list.itemDoubleClicked.connect(self._on_palette_item_double_clicked)
+        self.palette_list.node_double_clicked.connect(lambda method_id: self._add_canvas_node(method_id, self.workflow_canvas.viewport_scene_center()))
         self.workspace_splitter.splitterMoved.connect(self._save_workspace_state)
         self._populate_palette()
 
@@ -659,33 +765,7 @@ class WorkflowPage(QWidget):
         if not hasattr(self, "palette_list"):
             return
         query = self.palette_search.text().strip().lower() if hasattr(self, "palette_search") else ""
-        self.palette_list.clear()
-        for category_key, category in METHOD_CATEGORIES.items():
-            methods = [
-                method_id
-                for method_id in category.get("methods", [])
-                if method_id in PROCESSING_METHODS
-                and (
-                    not query
-                    or query in method_id.lower()
-                    or query in get_method_display_name(method_id).lower()
-                    or query in str(category.get("name", "")).lower()
-                )
-            ]
-            if not methods:
-                continue
-            header = QListWidgetItem(str(category.get("name", category_key)))
-            header.setFlags(Qt.ItemFlag.NoItemFlags)
-            self.palette_list.addItem(header)
-            for method_id in methods:
-                item = QListWidgetItem(f"  {get_method_display_name(method_id)}")
-                item.setData(Qt.ItemDataRole.UserRole, method_id)
-                self.palette_list.addItem(item)
-
-    def _on_palette_item_double_clicked(self, item: QListWidgetItem) -> None:
-        method_id = item.data(Qt.ItemDataRole.UserRole)
-        if method_id:
-            self._add_canvas_node(str(method_id), self.workflow_canvas.viewport_scene_center())
+        self.palette_list.populate(query)
 
     def _toggle_project_panel(self, checked: bool) -> None:
         self.left_sidebar.setVisible(True)

@@ -6,8 +6,8 @@ from __future__ import annotations
 
 from typing import Callable
 
-from PyQt6.QtCore import QEvent, QPoint, QPointF, QRectF, QSize, QSignalBlocker, QTimer, Qt, pyqtSignal
-from PyQt6.QtGui import QBrush, QColor, QFontMetrics, QKeyEvent, QPainter, QPainterPath, QPen
+from PyQt6.QtCore import QEvent, QMimeData, QPoint, QPointF, QRectF, QSize, QSignalBlocker, QTimer, Qt, pyqtSignal
+from PyQt6.QtGui import QBrush, QColor, QDragEnterEvent, QDragMoveEvent, QDropEvent, QFontMetrics, QKeyEvent, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import (
     QAbstractButton,
     QAbstractSpinBox,
@@ -1564,6 +1564,7 @@ class WorkflowCanvasView(QGraphicsView):
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setSceneRect(-600, -400, 5200, 2600)
         self.setMinimumHeight(520)
+        self.setAcceptDrops(True)
         self.setStyleSheet(
             """
             QGraphicsView {
@@ -1573,6 +1574,20 @@ class WorkflowCanvasView(QGraphicsView):
             }
             """
         )
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802 - Qt override
+        if event.mimeData().hasText():
+            event.acceptProposedAction()
+
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:  # noqa: N802 - Qt override
+        if event.mimeData().hasText():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802 - Qt override
+        method_id = event.mimeData().text()
+        scene_pos = self.mapToScene(event.pos())
+        self.add_node_requested.emit(method_id, scene_pos)
+        event.acceptProposedAction()
 
     def drawBackground(self, painter: QPainter, rect: QRectF) -> None:  # noqa: N802 - Qt override
         super().drawBackground(painter, rect)
