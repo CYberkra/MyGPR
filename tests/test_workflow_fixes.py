@@ -1418,3 +1418,140 @@ class TestCompactMiniInteraction:
         proxy.set_lod_mode("mini")
         assert proxy.input_port.isVisible(), "mini 模式下 input_port 应该仍然可见"
         assert proxy.output_port.isVisible(), "mini 模式下 output_port 应该仍然可见"
+
+    def test_child_items_parent_relationship(self):
+        """测试43: compact_item 和 mini_item 是 proxy 的 child"""
+        import sys
+        from PyQt6.QtWidgets import QApplication
+        from ui.workflow_canvas_cards import WorkflowNodeProxy
+        from core.workflow_data import WorkflowMethod
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        
+        method = WorkflowMethod(
+            method_id="dc_shift",
+            stage_id="gain_compensation",
+            category="gain_compensation",
+        )
+        proxy = WorkflowNodeProxy(0, method)
+        
+        # 验证 child item 关系
+        assert proxy.compact_item.parentItem() == proxy, \
+            "compact_item 应该是 proxy 的 child"
+        assert proxy.mini_item.parentItem() == proxy, \
+            "mini_item 应该是 proxy 的 child"
+        
+        # 验证 child item 位置在本地坐标 (0, 0)
+        assert proxy.compact_item.pos().x() == 0 and proxy.compact_item.pos().y() == 0, \
+            f"compact_item 位置应该是 (0, 0)，实际是 {proxy.compact_item.pos()}"
+        assert proxy.mini_item.pos().x() == 0 and proxy.mini_item.pos().y() == 0, \
+            f"mini_item 位置应该是 (0, 0)，实际是 {proxy.mini_item.pos()}"
+
+    def test_child_items_no_secondary_offset_on_proxy_move(self):
+        """测试44: proxy 移动后 child item 不出现二次偏移"""
+        import sys
+        from PyQt6.QtWidgets import QApplication
+        from PyQt6.QtCore import QPointF
+        from ui.workflow_canvas_cards import WorkflowNodeProxy
+        from core.workflow_data import WorkflowMethod
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        
+        method = WorkflowMethod(
+            method_id="dc_shift",
+            stage_id="gain_compensation",
+            category="gain_compensation",
+        )
+        proxy = WorkflowNodeProxy(0, method)
+        
+        # 初始位置
+        initial_proxy_pos = proxy.pos()
+        initial_compact_local = proxy.compact_item.pos()
+        initial_mini_local = proxy.mini_item.pos()
+        
+        # 移动 proxy
+        new_pos = QPointF(200, 300)
+        proxy.setPos(new_pos)
+        
+        # proxy 位置应该改变
+        assert proxy.pos() == new_pos, \
+            f"proxy 位置应该变成 {new_pos}，实际是 {proxy.pos()}"
+        
+        # child item 本地位置应该保持 (0, 0)，不受 proxy 移动影响
+        assert proxy.compact_item.pos() == initial_compact_local, \
+            f"compact_item 本地位置应该保持 {initial_compact_local}，实际是 {proxy.compact_item.pos()}"
+        assert proxy.mini_item.pos() == initial_mini_local, \
+            f"mini_item 本地位置应该保持 {initial_mini_local}，实际是 {proxy.mini_item.pos()}"
+
+    def test_lod_switch_preserves_proxy_scene_pos(self):
+        """测试45: LOD 切换不改变 proxy.scenePos()"""
+        import sys
+        from PyQt6.QtWidgets import QApplication
+        from ui.workflow_canvas_cards import WorkflowCanvasView
+        from core.workflow_data import WorkflowMethod
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        view = WorkflowCanvasView()
+        
+        # 添加一个测试节点
+        method = WorkflowMethod(
+            method_id="dc_shift",
+            stage_id="gain_compensation",
+            category="gain_compensation",
+        )
+        method.order = 0
+        view._methods = [method]
+        view._rebuild()
+        
+        proxy = view._scene.proxies[0]
+        
+        # 记录初始位置
+        initial_scene_pos = proxy.scenePos()
+        
+        # 切换到 compact 模式
+        proxy.set_lod_mode("compact")
+        assert proxy.scenePos() == initial_scene_pos, \
+            f"compact 模式后 proxy 位置应该保持 {initial_scene_pos}，实际是 {proxy.scenePos()}"
+        
+        # 切换到 mini 模式
+        proxy.set_lod_mode("mini")
+        assert proxy.scenePos() == initial_scene_pos, \
+            f"mini 模式后 proxy 位置应该保持 {initial_scene_pos}，实际是 {proxy.scenePos()}"
+        
+        # 切换回 full 模式
+        proxy.set_lod_mode("full")
+        assert proxy.scenePos() == initial_scene_pos, \
+            f"full 模式后 proxy 位置应该保持 {initial_scene_pos}，实际是 {proxy.scenePos()}"
+
+    def test_overlay_hidden_in_all_lod_modes(self):
+        """测试46: compact/mini 模式下 overlay 不显示，只用 widget 内部 LOD"""
+        import sys
+        from PyQt6.QtWidgets import QApplication
+        from ui.workflow_canvas_cards import WorkflowNodeProxy, WorkflowNodeCard
+        from core.workflow_data import WorkflowMethod
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        
+        method = WorkflowMethod(
+            method_id="dc_shift",
+            stage_id="gain_compensation",
+            category="gain_compensation",
+        )
+        proxy = WorkflowNodeProxy(0, method)
+        card = WorkflowNodeCard(0, method)
+        proxy.setWidget(card)
+        
+        # full 模式 - overlay 应该隐藏
+        proxy.set_lod_mode("full")
+        assert not proxy.compact_item.isVisible(), "full 模式下 compact_item 应该隐藏"
+        assert not proxy.mini_item.isVisible(), "full 模式下 mini_item 应该隐藏"
+        
+        # compact 模式 - overlay 应该隐藏，只用 widget 内部 LOD
+        proxy.set_lod_mode("compact")
+        assert not proxy.compact_item.isVisible(), "compact 模式下 compact_item 应该隐藏"
+        assert not proxy.mini_item.isVisible(), "compact 模式下 mini_item 应该隐藏"
+        
+        # mini 模式 - overlay 应该隐藏，只用 widget 内部 LOD
+        proxy.set_lod_mode("mini")
+        assert not proxy.compact_item.isVisible(), "mini 模式下 compact_item 应该隐藏"
+        assert not proxy.mini_item.isVisible(), "mini 模式下 mini_item 应该隐藏"

@@ -921,7 +921,7 @@ class MiniNodeItem(QGraphicsRectItem):
     def refresh(self) -> None:
         rect = self.proxy.boundingRect()
         self.setRect(QRectF(0, 0, max(220.0, min(260.0, rect.width())), 92.0))
-        self.setPos(self.proxy.pos())
+        # child item 使用本地坐标 (0,0)，自动跟随父 proxy
         method = self.proxy.method
         stage = WORKFLOW_STAGE_BY_ID.get(method.stage_id, {})
         stage_label = str(stage.get("label") or method.category or "节点")
@@ -990,7 +990,7 @@ class CompactNodeItem(QGraphicsRectItem):
     def refresh(self) -> None:
         rect = self.proxy.boundingRect()
         self.setRect(QRectF(0, 0, max(240.0, min(300.0, rect.width())), 112.0))
-        self.setPos(self.proxy.pos())
+        # child item 使用本地坐标 (0,0)，自动跟随父 proxy
         method = self.proxy.method
         stage = WORKFLOW_STAGE_BY_ID.get(method.stage_id, {})
         stage_label = str(stage.get("label") or method.category or "节点")
@@ -1123,7 +1123,7 @@ class WorkflowNodeProxy(QGraphicsProxyWidget):
         }.get(status, "ON")
 
     def set_lod_mode(self, mode: str) -> None:
-        """Set level-of-detail mode. Widget always stays visible for interaction."""
+        """Set level-of-detail mode. Uses widget internal LOD only (no overlay)."""
         widget = self.widget()
         mode = mode if mode in {"full", "compact", "mini"} else "full"
         
@@ -1134,22 +1134,9 @@ class WorkflowNodeProxy(QGraphicsProxyWidget):
         # resize handle 只在 full 模式下显示
         self.resize_handle.setVisible(mode == "full" and self.row >= 0)
         
-        # 更新 compact/mini item 作为视觉辅助（现在作为 proxy 的 child，不拦截事件）
-        self.compact_item.refresh()
-        self.mini_item.refresh()
-        
-        # compact/mini item 现在只是装饰性覆盖层，不拦截鼠标事件
-        if mode == "compact":
-            self.compact_item.setVisible(True)
-            self.mini_item.setVisible(False)
-            self.compact_item.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
-        elif mode == "mini":
-            self.compact_item.setVisible(False)
-            self.mini_item.setVisible(True)
-            self.mini_item.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
-        else:
-            self.compact_item.setVisible(False)
-            self.mini_item.setVisible(False)
+        # compact/mini overlay 不再显示，只依赖 widget 内部 LOD
+        self.compact_item.setVisible(False)
+        self.mini_item.setVisible(False)
         
         self.update_port_positions()
 
