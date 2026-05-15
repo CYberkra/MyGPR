@@ -1261,3 +1261,160 @@ def test_workflow_port_labels_used():
     assert preview_proxy.input_port.label == preview_in_label
     assert preview_proxy.output_port.label == preview_out_label
     assert preview_out_label == "preview", "预览节点输出应该是 preview"
+
+
+class TestCompactMiniInteraction:
+    """测试 compact/mini 模式下的交互功能"""
+
+    def test_compact_mode_proxy_clickable(self):
+        """测试38: compact 模式下点击可见卡面能返回对应 WorkflowNodeProxy"""
+        import sys
+        from PyQt6.QtWidgets import QApplication
+        from PyQt6.QtCore import QPoint, Qt
+        from ui.workflow_canvas_cards import WorkflowCanvasView, WorkflowNodeProxy
+        from core.workflow_data import WorkflowMethod
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        view = WorkflowCanvasView()
+        
+        # 添加一个测试节点
+        method = WorkflowMethod(
+            method_id="dc_shift",
+            stage_id="gain_compensation",
+            category="gain_compensation",
+        )
+        method.order = 0
+        view._methods = [method]
+        view._rebuild()
+        
+        # 获取 proxy 并切换到 compact 模式
+        proxy = view._scene.proxy_by_id.get(method.node_id)
+        assert proxy is not None
+        proxy.set_lod_compact(True)
+        
+        # 确保 compact_item 是 proxy 的 child
+        assert proxy.compact_item.parentItem() == proxy
+        
+        # 验证 compact_item 不拦截鼠标事件
+        assert proxy.compact_item.acceptedMouseButtons() == Qt.MouseButton.NoButton
+
+    def test_mini_mode_proxy_clickable(self):
+        """测试39: mini 模式下点击可见卡面能返回对应 WorkflowNodeProxy"""
+        import sys
+        from PyQt6.QtWidgets import QApplication
+        from PyQt6.QtCore import QPoint, Qt
+        from ui.workflow_canvas_cards import WorkflowCanvasView, WorkflowNodeProxy
+        from core.workflow_data import WorkflowMethod
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        view = WorkflowCanvasView()
+        
+        # 添加一个测试节点
+        method = WorkflowMethod(
+            method_id="dc_shift",
+            stage_id="gain_compensation",
+            category="gain_compensation",
+        )
+        method.order = 0
+        view._methods = [method]
+        view._rebuild()
+        
+        # 获取 proxy 并切换到 mini 模式
+        proxy = view._scene.proxy_by_id.get(method.node_id)
+        assert proxy is not None
+        proxy.set_lod_mode("mini")
+        
+        # 确保 mini_item 是 proxy 的 child
+        assert proxy.mini_item.parentItem() == proxy
+        
+        # 验证 mini_item 不拦截鼠标事件
+        assert proxy.mini_item.acceptedMouseButtons() == Qt.MouseButton.NoButton
+
+    def test_compact_mini_no_ignores_transformations(self):
+        """测试40: compact/mini node card 不使用 ItemIgnoresTransformations"""
+        import sys
+        from PyQt6.QtWidgets import QApplication
+        from PyQt6.QtWidgets import QGraphicsItem
+        from ui.workflow_canvas_cards import WorkflowNodeProxy, CompactNodeItem, MiniNodeItem
+        from core.workflow_data import WorkflowMethod
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        
+        method = WorkflowMethod(
+            method_id="dc_shift",
+            stage_id="gain_compensation",
+            category="gain_compensation",
+        )
+        proxy = WorkflowNodeProxy(0, method)
+        
+        # 验证 compact_item 没有 ItemIgnoresTransformations 标志
+        compact_flags = proxy.compact_item.flags()
+        assert not (compact_flags & QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations), \
+            "CompactNodeItem 不应该使用 ItemIgnoresTransformations"
+        
+        # 验证 mini_item 没有 ItemIgnoresTransformations 标志
+        mini_flags = proxy.mini_item.flags()
+        assert not (mini_flags & QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations), \
+            "MiniNodeItem 不应该使用 ItemIgnoresTransformations"
+
+    def test_widget_stays_visible_in_compact_mini(self):
+        """测试41: compact/mini 模式下 widget 仍然可见"""
+        import sys
+        from PyQt6.QtWidgets import QApplication
+        from ui.workflow_canvas_cards import WorkflowNodeProxy, WorkflowNodeCard
+        from core.workflow_data import WorkflowMethod
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        
+        method = WorkflowMethod(
+            method_id="dc_shift",
+            stage_id="gain_compensation",
+            category="gain_compensation",
+        )
+        proxy = WorkflowNodeProxy(0, method)
+        
+        card = WorkflowNodeCard(0, method)
+        proxy.setWidget(card)
+        
+        # full 模式
+        proxy.set_lod_mode("full")
+        assert proxy.widget().isVisible(), "full 模式下 widget 应该可见"
+        
+        # compact 模式
+        proxy.set_lod_mode("compact")
+        assert proxy.widget().isVisible(), "compact 模式下 widget 应该仍然可见"
+        
+        # mini 模式
+        proxy.set_lod_mode("mini")
+        assert proxy.widget().isVisible(), "mini 模式下 widget 应该仍然可见"
+
+    def test_ports_visible_in_compact_mini(self):
+        """测试42: compact/mini 模式下端口仍然可见"""
+        import sys
+        from PyQt6.QtWidgets import QApplication
+        from ui.workflow_canvas_cards import WorkflowNodeProxy
+        from core.workflow_data import WorkflowMethod
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        
+        method = WorkflowMethod(
+            method_id="dc_shift",
+            stage_id="gain_compensation",
+            category="gain_compensation",
+        )
+        proxy = WorkflowNodeProxy(0, method)
+        
+        # full 模式
+        proxy.set_lod_mode("full")
+        assert proxy.input_port.isVisible(), "full 模式下 input_port 应该可见"
+        assert proxy.output_port.isVisible(), "full 模式下 output_port 应该可见"
+        
+        # compact 模式
+        proxy.set_lod_mode("compact")
+        assert proxy.input_port.isVisible(), "compact 模式下 input_port 应该仍然可见"
+        assert proxy.output_port.isVisible(), "compact 模式下 output_port 应该仍然可见"
+        
+        # mini 模式
+        proxy.set_lod_mode("mini")
+        assert proxy.input_port.isVisible(), "mini 模式下 input_port 应该仍然可见"
+        assert proxy.output_port.isVisible(), "mini 模式下 output_port 应该仍然可见"

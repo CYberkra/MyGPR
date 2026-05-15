@@ -539,6 +539,83 @@ class WorkflowNodeCard(QFrame):
     def port_labels(self) -> tuple[str, str]:
         return workflow_port_labels(self.method)
 
+    def set_lod_mode(self, mode: str) -> None:
+        """Set level-of-detail display mode: full, compact, or mini."""
+        mode = mode if mode in {"full", "compact", "mini"} else "full"
+        self._lod_mode = mode
+        
+        # 根据模式调整显示
+        if mode == "full":
+            self.setMinimumSize(MIN_NODE_WIDTH, MIN_NODE_HEIGHT)
+            self.setMaximumSize(MAX_NODE_WIDTH, MAX_NODE_HEIGHT)
+            # 显示所有内容（通过重建实现）
+            if hasattr(self, '_compact_widget'):
+                self._compact_widget.hide()
+            if hasattr(self, '_mini_widget'):
+                self._mini_widget.hide()
+            # 确保主布局可见
+            main_layout = self.layout()
+            if main_layout is not None:
+                for i in range(main_layout.count()):
+                    item = main_layout.itemAt(i)
+                    if item.widget():
+                        item.widget().show()
+        elif mode == "compact":
+            # 紧凑模式：显示标题、算法名、状态、端口摘要
+            self._show_compact_view()
+        elif mode == "mini":
+            # 迷你模式：只显示编号/短名、状态、端口摘要
+            self._show_mini_view()
+        
+        self.updateGeometry()
+
+    def _show_compact_view(self) -> None:
+        """Show compact summary view without parameter controls."""
+        # 隐藏主布局中的参数控件，只保留基本信息
+        main_layout = self.layout()
+        if main_layout is None:
+            return
+            
+        # 找到并隐藏参数相关的控件
+        for i in range(main_layout.count()):
+            item = main_layout.itemAt(i)
+            widget = item.widget() if item else None
+            if widget is not None:
+                # 保留标题行、端口行、副标题
+                if widget.objectName() in ("nodeTitle", "portLabel", "nodeSubtitle"):
+                    widget.show()
+                elif isinstance(widget, ParamRowWidget):
+                    widget.hide()
+                elif widget.objectName() == "nodeMetaInfo":
+                    widget.show()
+                elif widget.objectName() in ("nodeError", "nodeWarning"):
+                    widget.show()
+                else:
+                    # 其他控件（如"更多"按钮）隐藏
+                    widget.hide()
+
+    def _show_mini_view(self) -> None:
+        """Show minimal summary view."""
+        main_layout = self.layout()
+        if main_layout is None:
+            return
+            
+        for i in range(main_layout.count()):
+            item = main_layout.itemAt(i)
+            widget = item.widget() if item else None
+            if widget is not None:
+                # 只保留最核心的信息
+                if widget.objectName() == "nodeTitle":
+                    widget.show()
+                elif widget.objectName() in ("portLabel", "nodeSubtitle", "nodeMetaInfo"):
+                    widget.hide()
+                elif isinstance(widget, ParamRowWidget):
+                    widget.hide()
+                elif widget.objectName() in ("nodeError", "nodeWarning"):
+                    widget.hide()
+                else:
+                    widget.hide()
+
     def _status_chip_state(self) -> str:
         if self.method.method_id == "raw_input":
             return "on"
@@ -824,15 +901,16 @@ class WorkflowPortItem(QGraphicsEllipseItem):
 
 
 class MiniNodeItem(QGraphicsRectItem):
-    """Low-detail node shown when the canvas is zoomed out."""
+    """Low-detail overlay shown when the canvas is zoomed out. Acts as visual summary only."""
 
     def __init__(self, proxy: "WorkflowNodeProxy"):
-        super().__init__()
+        super().__init__(proxy)  # 作为 proxy 的 child item
         self.proxy = proxy
         self.setBrush(QBrush(QColor("#f9fbff")))
         self.setPen(QPen(QColor("#8fb3ff"), 1.4))
-        self.setZValue(5)
-        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
+        self.setZValue(15)  # 在端口之下，但可见
+        # 不拦截鼠标事件，让事件穿透到父 proxy
+        self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
         self.title_item = QGraphicsSimpleTextItem("", self)
         self.subtitle_item = QGraphicsSimpleTextItem("", self)
         self.status_item = QGraphicsSimpleTextItem("", self)
@@ -894,13 +972,14 @@ class MiniNodeItem(QGraphicsRectItem):
 
 
 class CompactNodeItem(QGraphicsRectItem):
-    """Medium-detail node shown at workflow zoom between full and mini."""
+    """Medium-detail overlay shown at workflow zoom between full and mini. Acts as visual summary only."""
 
     def __init__(self, proxy: "WorkflowNodeProxy"):
-        super().__init__()
+        super().__init__(proxy)  # 作为 proxy 的 child item
         self.proxy = proxy
-        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
-        self.setZValue(6)
+        self.setZValue(15)  # 在端口之下，但可见
+        # 不拦截鼠标事件，让事件穿透到父 proxy
+        self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
         self.title_item = QGraphicsSimpleTextItem("", self)
         self.method_item = QGraphicsSimpleTextItem("", self)
         self.port_item = QGraphicsSimpleTextItem("", self)
@@ -1044,15 +1123,34 @@ class WorkflowNodeProxy(QGraphicsProxyWidget):
         }.get(status, "ON")
 
     def set_lod_mode(self, mode: str) -> None:
+        """Set level-of-detail mode. Widget always stays visible for interaction."""
         widget = self.widget()
         mode = mode if mode in {"full", "compact", "mini"} else "full"
-        if widget is not None:
-            widget.setVisible(mode == "full")
+        
+        # 始终显示 widget，让卡片内部处理 LOD
+        if widget is not None and hasattr(widget, "set_lod_mode"):
+            widget.set_lod_mode(mode)
+        
+        # resize handle 只在 full 模式下显示
         self.resize_handle.setVisible(mode == "full" and self.row >= 0)
+        
+        # 更新 compact/mini item 作为视觉辅助（现在作为 proxy 的 child，不拦截事件）
         self.compact_item.refresh()
         self.mini_item.refresh()
-        self.compact_item.setVisible(mode == "compact")
-        self.mini_item.setVisible(mode == "mini")
+        
+        # compact/mini item 现在只是装饰性覆盖层，不拦截鼠标事件
+        if mode == "compact":
+            self.compact_item.setVisible(True)
+            self.mini_item.setVisible(False)
+            self.compact_item.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        elif mode == "mini":
+            self.compact_item.setVisible(False)
+            self.mini_item.setVisible(True)
+            self.mini_item.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        else:
+            self.compact_item.setVisible(False)
+            self.mini_item.setVisible(False)
+        
         self.update_port_positions()
 
     def apply_size(self, width: float, height: float) -> None:
@@ -1088,8 +1186,8 @@ class WorkflowNodeProxy(QGraphicsProxyWidget):
         result = super().itemChange(change, value)
         if change == QGraphicsProxyWidget.GraphicsItemChange.ItemPositionHasChanged:
             self.update_port_positions()
-            self.mini_item.setPos(self.pos())
-            self.compact_item.setPos(self.pos())
+            # compact_item 和 mini_item 现在是 child item，会自动跟随父 item 的位置
+            # 不需要手动设置位置
             scene = self.scene()
             if isinstance(scene, WorkflowCanvasScene):
                 scene.update_edges()
@@ -1947,8 +2045,7 @@ class WorkflowCanvasView(QGraphicsView):
             if "width" in layout or "height" in layout:
                 proxy.apply_size(float(layout.get("width", MIN_NODE_WIDTH)), float(layout.get("height", MIN_NODE_HEIGHT)))
             self._scene.addItem(proxy)
-            self._scene.addItem(proxy.compact_item)
-            self._scene.addItem(proxy.mini_item)
+            # compact_item 和 mini_item 现在是 proxy 的 child item，不需要单独添加到 scene
             self._scene.proxies.append(proxy)
             self._scene.proxy_by_id[proxy.node_id] = proxy
 
@@ -1983,8 +2080,7 @@ class WorkflowCanvasView(QGraphicsView):
             float(preview_layout.get("y", y0 + (preview_row // max_per_row) * y_step)),
         )
         self._scene.addItem(preview_proxy)
-        self._scene.addItem(preview_proxy.compact_item)
-        self._scene.addItem(preview_proxy.mini_item)
+        # compact_item 和 mini_item 现在是 proxy 的 child item，不需要单独添加到 scene
         self._scene.proxies.append(preview_proxy)
         self._scene.proxy_by_id[PREVIEW_NODE_ID] = preview_proxy
         self._preview_proxy = preview_proxy

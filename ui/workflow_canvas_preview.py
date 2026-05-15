@@ -234,6 +234,74 @@ class BscanPreviewCard(QFrame):
         self.style().unpolish(self)
         self.style().polish(self)
 
+    def set_lod_mode(self, mode: str) -> None:
+        """Set level-of-detail display mode: full, compact, or mini."""
+        mode = mode if mode in {"full", "compact", "mini"} else "full"
+        self._lod_mode = mode
+        
+        # 根据模式调整显示
+        if mode == "full":
+            self.setMinimumWidth(300)
+            self.setMaximumWidth(360)
+            # 显示所有内容
+            main_layout = self.layout()
+            if main_layout is not None:
+                for i in range(main_layout.count()):
+                    item = main_layout.itemAt(i)
+                    if item and item.widget():
+                        item.widget().show()
+        elif mode == "compact":
+            # 紧凑模式：缩小尺寸，隐藏缩略图
+            self.setMinimumWidth(200)
+            self.setMaximumWidth(260)
+            self._show_compact_view()
+        elif mode == "mini":
+            # 迷你模式：最小尺寸，只显示标题和状态
+            self.setMinimumWidth(160)
+            self.setMaximumWidth(200)
+            self._show_mini_view()
+        
+        self.updateGeometry()
+
+    def _show_compact_view(self) -> None:
+        """Show compact summary view."""
+        main_layout = self.layout()
+        if main_layout is None:
+            return
+        
+        # 隐藏缩略图和提示，保留标题、端口、形状信息
+        for i in range(main_layout.count()):
+            item = main_layout.itemAt(i)
+            widget = item.widget() if item else None
+            if widget is not None:
+                if widget.objectName() == "previewImage":
+                    widget.hide()
+                elif widget.objectName() == "previewMeta" and "双击" in widget.text():
+                    widget.hide()
+                else:
+                    widget.show()
+
+    def _show_mini_view(self) -> None:
+        """Show minimal summary view."""
+        main_layout = self.layout()
+        if main_layout is None:
+            return
+        
+        # 只保留标题行和端口行
+        for i in range(main_layout.count()):
+            item = main_layout.itemAt(i)
+            widget = item.widget() if item else None
+            if widget is not None:
+                if widget.objectName() in ("previewTitle",):
+                    widget.show()
+                elif widget.objectName() == "previewMeta":
+                    widget.hide()
+                elif widget.objectName() == "previewImage":
+                    widget.hide()
+                else:
+                    # 布局项（如 port_row）保持
+                    pass
+
     def mouseDoubleClickEvent(self, event):  # noqa: N802 - Qt override
         self.request_large_view()
         event.accept()
