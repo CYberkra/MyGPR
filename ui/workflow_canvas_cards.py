@@ -516,46 +516,55 @@ class WorkflowNodeCard(QFrame):
 
             candidates = self._candidate_methods()
             self.algorithm_row_widget = QWidget()
-            # 标记为交互区域，防止被当成卡片拖拽
-            self.algorithm_row_widget.setProperty("workflowInteractiveRegion", True)
-            self.algorithm_row_widget.setCursor(Qt.CursorShape.PointingHandCursor)
+            # QComboBox 本身已经能被 _is_interactive_widget 识别，不需要 workflowInteractiveRegion
             
             algorithm_layout = QHBoxLayout(self.algorithm_row_widget)
             algorithm_layout.setContentsMargins(0, 0, 0, 0)
             algorithm_layout.setSpacing(8)
             algorithm_label = QLabel("算法")
             algorithm_label.setObjectName("paramName")
-            algorithm_label.setCursor(Qt.CursorShape.PointingHandCursor)
             algorithm_layout.addWidget(algorithm_label)
             
             if len(candidates) > 1:
-                self.algorithm_button = QToolButton()
-                self.algorithm_button.setObjectName("nodeAlgorithmButton")
-                current_display = get_method_display_name(self.method.method_id)
-                self.algorithm_button.setText(f"{_elided(current_display, 120, self)} ▾")
-                self.algorithm_button.setToolTip(f"{current_display}\n({self.method.method_id})")
-                self.algorithm_button.setMinimumWidth(170)
-                self.algorithm_button.setMinimumHeight(30)
-                self.algorithm_button.setFixedHeight(32)
-                self.algorithm_button.setCursor(Qt.CursorShape.PointingHandCursor)
-                self.algorithm_button.setStyleSheet("""
-                    QToolButton#nodeAlgorithmButton {
+                # 使用 QComboBox 替代 QToolButton + QMenu，保证稳定性
+                self.algorithm_combo = QComboBox()
+                self.algorithm_combo.setObjectName("nodeAlgorithmCombo")
+                self.algorithm_combo.setMinimumWidth(170)
+                self.algorithm_combo.setMinimumHeight(32)
+                self.algorithm_combo.setCursor(Qt.CursorShape.PointingHandCursor)
+                # 设置样式
+                self.algorithm_combo.setStyleSheet("""
+                    QComboBox {
                         background: #f8fafc;
                         border: 1px solid #d8e3f2;
                         border-radius: 8px;
                         padding: 4px 10px;
-                        text-align: left;
                     }
-                    QToolButton#nodeAlgorithmButton:hover {
+                    QComboBox:hover {
                         background: #eef3fa;
                         border-color: #a8c4e8;
                     }
+                    QComboBox::drop-down {
+                        border: none;
+                        width: 20px;
+                    }
+                    QComboBox::down-arrow {
+                        image: none;
+                        border-left: 4px solid transparent;
+                        border-right: 4px solid transparent;
+                        border-top: 5px solid #666;
+                        margin-right: 4px;
+                    }
                 """)
-                self.algorithm_button.clicked.connect(self._show_algorithm_menu)
-                algorithm_layout.addWidget(self.algorithm_button, 1)
-                
-                # 安装事件过滤器，让 algorithm_row_widget 也能响应点击
-                self.algorithm_row_widget.installEventFilter(self)
+                # 添加候选算法
+                for key in candidates:
+                    self.algorithm_combo.addItem(get_method_display_name(key), key)
+                # 设置当前项
+                index = self.algorithm_combo.findData(self.method.method_id)
+                if index >= 0:
+                    self.algorithm_combo.setCurrentIndex(index)
+                self.algorithm_combo.currentIndexChanged.connect(self._on_algorithm_combo_changed)
+                algorithm_layout.addWidget(self.algorithm_combo, 1)
             else:
                 readonly_method = QLabel(_elided(get_method_display_name(self.method.method_id), 170, self))
                 readonly_method.setObjectName("nodeSubtitle")
@@ -887,25 +896,6 @@ class WorkflowNodeCard(QFrame):
                 widget.installEventFilter(self)
 
     def eventFilter(self, watched, event):  # noqa: N802 - Qt override
-        # 处理 algorithm_row_widget 的点击事件
-        if (
-            watched == self.algorithm_row_widget
-            and event.type() == QEvent.Type.MouseButtonPress
-            and event.button() == Qt.MouseButton.LeftButton
-        ):
-            # 如果点击位置在 algorithm_button 内，让按钮自己处理，避免双触发
-            pos = event.pos()
-            if (
-                self.algorithm_button is not None
-                and self.algorithm_button.geometry().contains(pos)
-            ):
-                return False
-            
-            # 只在点击算法行空白处时打开菜单
-            self._show_algorithm_menu()
-            event.accept()
-            return True
-        
         # 处理滚轮事件
         if event.type() == QEvent.Type.Wheel and isinstance(watched, QWidget):
             if bool(watched.property("workflowWheelGuard")):
@@ -940,80 +930,14 @@ class WorkflowNodeCard(QFrame):
         self.method.hidden = not bool(self.method.hidden)
         self.changed.emit(self.row)
 
-    def _show_algorithm_menu(self) -> None:
-        """Show algorithm selection menu using QMenu.exec() for reliable popup in QGraphicsProxyWidget."""
+    def _on_algorithm_combo_changed(self, index: int) -> None:
+        """QComboBox 选择变化时切换算法，使用延迟避免重建自身。"""
         if self._suppress:
             return
-
-        try:
-            menu = self._build_algorithm_menu()
-
-            pos = self.algorithm_button.mapToGlobal(
-                self.algorithm_button.rect().bottomLeft()
-            )
-            menu.exec(pos)
-        except Exception as e:
-            # Fallback: try with window parent or focus Inspector
-            import sys
-            print(f"[WARN] Algorithm menu popup failed: {e}, trying fallback", file=sys.stderr)
-            self._show_algorithm_menu_fallback()
-
-    def _show_algorithm_menu_fallback(self) -> None:
-        """Fallback method for showing algorithm menu when primary method fails."""
-        if self._suppress:
+        method_id = self.algorithm_combo.itemData(index)
+        if not method_id or method_id == self.method.method_id:
             return
-            
-        try:
-            # Build menu with window as parent for more stable popup
-            window = self.window()
-            if not window:
-                return
-                
-            menu = self._build_algorithm_menu()
-            menu.setParent(window)
-            
-            pos = self.algorithm_button.mapToGlobal(
-                self.algorithm_button.rect().bottomLeft()
-            )
-            menu.exec(pos)
-        except Exception as e2:
-            import sys
-            print(f"[ERROR] Algorithm menu fallback also failed: {e2}", file=sys.stderr)
-
-    def _build_algorithm_menu(self) -> QMenu:
-        """Build and return a QMenu containing all candidate algorithms."""
-        menu = QMenu(self)
-        # 增大菜单项，更容易点中
-        menu.setStyleSheet("""
-            QMenu {
-                padding: 4px;
-            }
-            QMenu::item {
-                padding: 7px 24px 7px 18px;
-                min-height: 26px;
-            }
-            QMenu::item:selected {
-                background: #e8f1ff;
-            }
-        """)
-        
-        for key in self._candidate_methods():
-            action = menu.addAction(get_method_display_name(key))
-            action.setData(key)
-            action.setCheckable(True)
-            action.setChecked(key == self.method.method_id)
-            # 使用延迟调用避免在 QMenu.exec() 事件循环中重建 widget 导致崩溃
-            action.triggered.connect(
-                lambda checked=False, method_id=key: self._queue_algorithm_switch_from_card(str(method_id))
-            )
-        return menu
-
-    def _queue_algorithm_switch_from_card(self, method_id: str) -> None:
-        """延迟切换算法，避免在菜单事件循环中重建 widget 导致崩溃。"""
-        if method_id == self.method.method_id:
-            return
-        # 延迟 0ms 意味着在下一个事件循环中执行，确保菜单已关闭
-        QTimer.singleShot(0, lambda mid=method_id: self._switch_algorithm_from_card(mid))
+        QTimer.singleShot(0, lambda mid=str(method_id): self._switch_algorithm_from_card(mid))
 
     def _switch_algorithm_from_card(self, method_id: str) -> None:
         """Switch to a new algorithm and rebuild the card."""
@@ -1026,7 +950,7 @@ class WorkflowNodeCard(QFrame):
             self.changed.emit(self.row)
 
     def _on_algorithm_changed(self) -> None:
-        """Legacy handler for algorithm combo - no longer used for new QToolButton+Menu."""
+        """Legacy handler for algorithm combo - no longer used for new QComboBox."""
         pass
 
     def set_method_enabled(self, enabled: bool) -> None:
@@ -1940,11 +1864,8 @@ class WorkflowCanvasView(QGraphicsView):
         local_pos = proxy.mapFromScene(scene_pos)
         child = card.childAt(int(local_pos.x()), int(local_pos.y()))
         while child is not None and child is not card:
-            # 检查是否是交互控件或者具有交互区域属性的组件
+            # 检查是否是交互控件 (QComboBox 已被包含)
             if self._is_interactive_widget(child):
-                return True
-            # 检查是否具有 workflowInteractiveRegion 属性
-            if bool(child.property("workflowInteractiveRegion")):
                 return True
             child = child.parentWidget()
         return False
