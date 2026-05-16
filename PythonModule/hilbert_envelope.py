@@ -26,7 +26,7 @@ def method_hilbert_envelope(
         raise ValueError("输入数据为空")
 
     safe_eps = max(float(eps), 1.0e-12)
-    envelope = np.abs(hilbert(arr.astype(np.float64), axis=0))
+    envelope = np.abs(hilbert(arr, axis=0))
     peak_before_norm = float(np.max(envelope)) if envelope.size else 0.0
 
     if bool(normalize):
