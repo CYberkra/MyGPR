@@ -14,15 +14,14 @@ from __future__ import annotations
 
 import numpy as np
 
+from core.scalar_utils import to_float
+
 
 def _resolve_time_step_s(ny: int, time_step_s: float | None) -> float:
     if time_step_s is not None:
-        try:
-            value = float(time_step_s)
-            if value > 0:
-                return value
-        except Exception:
-            pass
+        value = to_float(time_step_s, default=0.0)
+        if value > 0:
+            return value
     return 48e-9 / max(1, int(ny))
 
 
@@ -44,7 +43,9 @@ def _apply_zero_time_shift(
     step_s = _resolve_time_step_s(ny, time_step_s)
     step_ns = step_s * 1e9
 
-    shift_samples = int(max(0.0, float(new_zero_time)) / max(step_ns, 1.0e-12))
+    shift_samples = int(
+        max(0.0, to_float(new_zero_time, default=0.0)) / max(step_ns, 1.0e-12)
+    )
     shift_samples = max(0, min(shift_samples, ny - 1))
 
     result = np.zeros((ny, nx), dtype=np.float32)
@@ -87,11 +88,15 @@ def set_zero_time(
 
     data = np.asarray(readcsv(infilename), dtype=np.float64)
     ny, nx = data.shape
-    twtt = np.linspace(0, float(length_trace), ny)
-    scans_per_meter = float(Scans_per_meter) if float(Scans_per_meter) > 0 else 1.0
+    length_trace_value = to_float(length_trace, default=48.0)
+    scans_per_meter_value = to_float(Scans_per_meter, default=50.0)
+    scans_per_meter = scans_per_meter_value if scans_per_meter_value > 0 else 1.0
+    start_position = to_float(Start_position, default=0.0)
+    new_zero_time = to_float(newZeroTime, default=5.7)
+    twtt = np.linspace(0, length_trace_value, ny)
     x = np.linspace(
-        float(Start_position),
-        float(Start_position) + nx / scans_per_meter,
+        start_position,
+        start_position + nx / scans_per_meter,
         nx,
     )
 
@@ -104,7 +109,7 @@ def set_zero_time(
             "error_feedback": "输入数据为空",
         }
 
-    if float(newZeroTime) >= float(twtt[-1]):
+    if new_zero_time >= float(twtt[-1]):
         return {
             "data": [],
             "x": x.tolist(),
@@ -113,10 +118,10 @@ def set_zero_time(
             "error_feedback": "The newZeroTime absolute value must <= The maximum value of the timeline",
         }
 
-    time_step_s = (float(length_trace) * 1e-9) / max(1, ny)
+    time_step_s = (length_trace_value * 1e-9) / max(1, ny)
     result, shift_samples, _ = _apply_zero_time_shift(
         data,
-        new_zero_time=float(newZeroTime),
+        new_zero_time=new_zero_time,
         time_step_s=time_step_s,
     )
 
@@ -127,7 +132,7 @@ def set_zero_time(
             result,
             outimagename,
             "Data[set_zero_time]",
-            time_range=(0, float(length_trace)),
+            time_range=(0, length_trace_value),
             distance_range=(float(x[0]), float(x[-1])) if len(x) else (0.0, 0.0),
         )
 
@@ -143,14 +148,15 @@ def set_zero_time(
 
 def method_set_zero_time(data, new_zero_time=5.0, time_step_s=None, **kwargs):
     """零时间校正 - GUI / auto-tune ndarray 接口。"""
+    zero_time_value = to_float(new_zero_time, default=5.0)
     result, shift_samples, step_s = _apply_zero_time_shift(
         data,
-        new_zero_time=float(new_zero_time),
+        new_zero_time=zero_time_value,
         time_step_s=time_step_s,
     )
     return result, {
         "method": "set_zero_time",
-        "new_zero_time": float(new_zero_time),
+        "new_zero_time": zero_time_value,
         "shift_samples": int(shift_samples),
         "time_step_s": float(step_s),
     }

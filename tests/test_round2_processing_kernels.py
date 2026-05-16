@@ -46,6 +46,22 @@ def test_method_dewow_window_one_matches_gprpy_baseline():
     assert meta["window"] == 1
 
 
+def test_dewow_and_zero_time_accept_numpy_scalar_parameters():
+    raw = np.arange(40, dtype=np.float32).reshape(10, 4)
+
+    dewow_result, dewow_meta = method_dewow(raw, window=np.array([3]))
+    zero_result, zero_meta = method_set_zero_time(
+        raw,
+        new_zero_time=np.array([20.0]),
+        time_step_s=np.array([10.0e-9]),
+    )
+
+    assert dewow_result.shape == raw.shape
+    assert dewow_meta["window"] == 3
+    assert np.array_equal(zero_result[:-2, :], raw[2:, :])
+    assert zero_meta["shift_samples"] == 2
+
+
 def test_gprpy_baseline_helpers_match_processing_engine_kernels():
     rng = np.random.default_rng(42)
     raw = rng.normal(size=(10, 6)).astype(np.float32)

@@ -18,6 +18,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: F401
 
 from core.gprpy_compat import apply_gprpy_dewow
+from core.scalar_utils import to_float, to_int
 
 
 def _apply_dewow_exact(data: np.ndarray, window: int) -> np.ndarray:
@@ -54,10 +55,11 @@ def dewow(
 
     ny, nx = raw.shape
     twtt = np.linspace(0, length_trace, ny)
-    scans_per_meter = float(Scans_per_meter) if float(Scans_per_meter) > 0 else 1.0
+    scans_per_meter_value = to_float(Scans_per_meter, default=50.0)
+    scans_per_meter = scans_per_meter_value if scans_per_meter_value > 0 else 1.0
     x = np.linspace(0, nx / scans_per_meter, nx)
 
-    result = _apply_dewow_exact(raw, int(window))
+    result = _apply_dewow_exact(raw, to_int(window, default=23))
     if outfilename:
         savecsv(result, outfilename)
     if outimagename:
@@ -76,8 +78,9 @@ def dewow(
 
 def method_dewow(data, window=23, **kwargs):
     """去直流（DeWOW）- GUI / auto-tune ndarray 接口。"""
-    result = _apply_dewow_exact(data, int(window))
-    return result, {"method": "dewow", "window": int(round(float(window)))}
+    window_value = to_int(window, default=23)
+    result = _apply_dewow_exact(data, window_value)
+    return result, {"method": "dewow", "window": window_value}
 
 
 if __name__ == "__main__":
