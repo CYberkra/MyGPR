@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from core.scalar_utils import to_int_or_none
 from core.trace_metadata_utils import derive_local_xy_m  # type: ignore[import]
 
 
@@ -124,6 +125,12 @@ def method_trajectory_smoothing(
         return arr.copy(), meta
 
     n = trace_count
+    window_value = to_int_or_none(window_length)
+    polyorder_value = to_int_or_none(polyorder)
+    if window_value is None:
+        raise ValueError("window_length must be numeric")
+    if polyorder_value is None:
+        raise ValueError("polyorder must be numeric")
 
     if n < 3:
         meta["skipped"] = True
@@ -146,14 +153,14 @@ def method_trajectory_smoothing(
     max_window = max(3, int(n // 5) | 1)  # 确保奇数
 
     if method == "savgol":
-        wl = _ensure_odd_window(window_length, max_window)
-        po = max(1, min(int(polyorder), wl - 2))
+        wl = _ensure_odd_window(window_value, max_window)
+        po = max(1, min(polyorder_value, wl - 2))
         lon_smooth = _savgol_smooth_1d(longitude, wl, po)
         lat_smooth = _savgol_smooth_1d(latitude, wl, po)
         meta["window_length"] = int(wl)
         meta["polyorder"] = int(po)
     elif method == "moving_average":
-        wl = _ensure_odd_window(window_length, max_window)
+        wl = _ensure_odd_window(window_value, max_window)
         lon_smooth = _moving_average_smooth_1d(longitude, wl)
         lat_smooth = _moving_average_smooth_1d(latitude, wl)
         meta["window_length"] = int(wl)

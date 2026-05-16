@@ -74,6 +74,28 @@ def test_trajectory_smoothing_returns_trace_metadata_updates():
     assert td[0] == pytest.approx(0.0)
 
 
+def test_trajectory_smoothing_accepts_numpy_scalar_window_params():
+    rng = np.random.default_rng(210)
+    data = rng.normal(size=(32, 9)).astype(np.float32)
+    trace_metadata = {
+        "trace_index": np.arange(9, dtype=np.int32),
+        "longitude": 116.3913 + 0.0001 * np.cumsum(rng.normal(size=9)).astype(np.float64),
+        "latitude": 39.9075 + 0.0001 * np.cumsum(rng.normal(size=9)).astype(np.float64),
+    }
+
+    _, meta = method_trajectory_smoothing(
+        data,
+        trace_metadata=trace_metadata,
+        method="savgol",
+        window_length=np.array([5]),
+        polyorder=np.array([2]),
+    )
+
+    assert meta.get("skipped") is not True
+    assert meta["window_length"] == 3
+    assert meta["polyorder"] == 1
+
+
 def test_trajectory_smoothing_preserves_existing_longitude_raw():
     """若输入已含 longitude_raw / latitude_raw，应继承而非覆盖。"""
     rng = np.random.default_rng(22)
