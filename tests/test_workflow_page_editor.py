@@ -402,15 +402,14 @@ def test_gain_node_algorithm_switches_from_card_inspector_and_context_menu():
         gain_proxy = next(proxy for proxy in page.workflow_canvas._scene.proxies if proxy.row == gain_row)
         gain_card = gain_proxy.widget()
         assert isinstance(gain_card, WorkflowNodeCard)
-        # 现在使用 QToolButton + Menu 而不是 QComboBox
+        # 现在使用 QToolButton，只发信号不弹菜单
         # 卡片算法按钮只在有多个候选算法时显示
         # 通过 Inspector 或右键菜单切换算法
         button = gain_card.findChild(QToolButton, "nodeAlgorithmButton")
         # 注意：gain 阶段可能只有一个候选算法，此时按钮不存在
         if button is not None:
-            # 新实现使用 _build_algorithm_menu() 而不是 button.setMenu()
-            menu = gain_card._build_algorithm_menu()
-            assert menu is not None, "应该能够构建算法菜单"
+            # 新实现通过信号请求画布层显示算法选择器
+            assert hasattr(gain_card, 'algorithm_selector_requested'), "卡片应该有 algorithm_selector_requested 信号"
         assert method.node_id == original_node_id
         assert method.stage_id == original_stage_id
         assert method.order == original_order

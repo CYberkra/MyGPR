@@ -26,6 +26,8 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMenu,
     QSizePolicy,
     QSlider,
@@ -258,6 +260,7 @@ class WorkflowNodeCard(QFrame):
     run_from_requested = pyqtSignal(int)
     duplicate_requested = pyqtSignal(int)
     remove_requested = pyqtSignal(int)
+    algorithm_selector_requested = pyqtSignal(int, QPoint)
 
     def __init__(self, row: int, method: WorkflowMethod, parent=None):
         super().__init__(parent)
@@ -516,7 +519,6 @@ class WorkflowNodeCard(QFrame):
 
             candidates = self._candidate_methods()
             self.algorithm_row_widget = QWidget()
-            # QComboBox 本身已经能被 _is_interactive_widget 识别，不需要 workflowInteractiveRegion
             
             algorithm_layout = QHBoxLayout(self.algorithm_row_widget)
             algorithm_layout.setContentsMargins(0, 0, 0, 0)
@@ -526,47 +528,32 @@ class WorkflowNodeCard(QFrame):
             algorithm_layout.addWidget(algorithm_label)
             
             if len(candidates) > 1:
-                # 使用 QComboBox 替代 QToolButton + QMenu，保证稳定性
-                self.algorithm_combo = QComboBox()
-                self.algorithm_combo.setObjectName("nodeAlgorithmCombo")
-                self.algorithm_combo.setMinimumWidth(170)
-                self.algorithm_combo.setMinimumHeight(32)
-                self.algorithm_combo.setCursor(Qt.CursorShape.PointingHandCursor)
-                # 设置样式
-                self.algorithm_combo.setStyleSheet("""
-                    QComboBox {
+                # 使用普通 QToolButton，只发信号，不弹原生菜单
+                self.algorithm_button = QToolButton()
+                self.algorithm_button.setObjectName("nodeAlgorithmButton")
+                current_display = get_method_display_name(self.method.method_id)
+                self.algorithm_button.setText(f"{_elided(current_display, 140, self)} ▾")
+                self.algorithm_button.setToolTip(f"{current_display}\n({self.method.method_id})")
+                self.algorithm_button.setMinimumWidth(160)
+                self.algorithm_button.setMinimumHeight(30)
+                self.algorithm_button.setCursor(Qt.CursorShape.PointingHandCursor)
+                self.algorithm_button.setStyleSheet("""
+                    QToolButton#nodeAlgorithmButton {
                         background: #f8fafc;
                         border: 1px solid #d8e3f2;
                         border-radius: 8px;
                         padding: 4px 10px;
+                        text-align: left;
                     }
-                    QComboBox:hover {
+                    QToolButton#nodeAlgorithmButton:hover {
                         background: #eef3fa;
                         border-color: #a8c4e8;
                     }
-                    QComboBox::drop-down {
-                        border: none;
-                        width: 20px;
-                    }
-                    QComboBox::down-arrow {
-                        image: none;
-                        border-left: 4px solid transparent;
-                        border-right: 4px solid transparent;
-                        border-top: 5px solid #666;
-                        margin-right: 4px;
-                    }
                 """)
-                # 添加候选算法
-                for key in candidates:
-                    self.algorithm_combo.addItem(get_method_display_name(key), key)
-                # 设置当前项
-                index = self.algorithm_combo.findData(self.method.method_id)
-                if index >= 0:
-                    self.algorithm_combo.setCurrentIndex(index)
-                self.algorithm_combo.currentIndexChanged.connect(self._on_algorithm_combo_changed)
-                algorithm_layout.addWidget(self.algorithm_combo, 1)
+                self.algorithm_button.clicked.connect(self._on_algorithm_button_clicked)
+                algorithm_layout.addWidget(self.algorithm_button, 1)
             else:
-                readonly_method = QLabel(_elided(get_method_display_name(self.method.method_id), 170, self))
+                readonly_method = QLabel(_elided(get_method_display_name(self.method.method_id), 160, self))
                 readonly_method.setObjectName("nodeSubtitle")
                 readonly_method.setToolTip(get_method_display_name(self.method.method_id))
                 algorithm_layout.addWidget(readonly_method, 1)
@@ -930,14 +917,14 @@ class WorkflowNodeCard(QFrame):
         self.method.hidden = not bool(self.method.hidden)
         self.changed.emit(self.row)
 
-    def _on_algorithm_combo_changed(self, index: int) -> None:
-        """QComboBox 选择变化时切换算法，使用延迟避免重建自身。"""
+    def _on_algorithm_button_clicked(self) -> None:
+        """点击算法按钮时发出信号，请求画布层显示算法选择器。"""
         if self._suppress:
             return
-        method_id = self.algorithm_combo.itemData(index)
-        if not method_id or method_id == self.method.method_id:
-            return
-        QTimer.singleShot(0, lambda mid=str(method_id): self._switch_algorithm_from_card(mid))
+        global_pos = self.algorithm_button.mapToGlobal(
+            self.algorithm_button.rect().bottomLeft()
+        )
+        self.algorithm_selector_requested.emit(self.row, global_pos)
 
     def _switch_algorithm_from_card(self, method_id: str) -> None:
         """Switch to a new algorithm and rebuild the card."""
@@ -950,7 +937,7 @@ class WorkflowNodeCard(QFrame):
             self.changed.emit(self.row)
 
     def _on_algorithm_changed(self) -> None:
-        """Legacy handler for algorithm combo - no longer used for new QComboBox."""
+        """Legacy handler - kept for compatibility."""
         pass
 
     def set_method_enabled(self, enabled: bool) -> None:
@@ -1581,6 +1568,7 @@ class WorkflowCanvasView(QGraphicsView):
     links_changed = pyqtSignal(object)
     layout_changed = pyqtSignal(object)
     zoom_changed = pyqtSignal(float)
+    algorithm_selector_requested = pyqtSignal(int, QPoint)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1614,6 +1602,8 @@ class WorkflowCanvasView(QGraphicsView):
         self._lod_state = "full"
         self._compact_threshold = 0.58
         self._normal_threshold = 0.74
+        self._algorithm_popup = None
+        self._algorithm_popup_row = -1
         self.setRenderHints(self.renderHints())
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
@@ -1703,6 +1693,7 @@ class WorkflowCanvasView(QGraphicsView):
                 card.run_from_requested.connect(self.run_from_node_requested)
                 card.duplicate_requested.connect(self.duplicate_node_requested)
                 card.remove_requested.connect(self.remove_node_requested)
+                card.algorithm_selector_requested.connect(self._on_algorithm_selector_requested)
                 
                 # 应用保存的状态
                 card.set_lod_mode(current_lod_mode)
@@ -1964,6 +1955,107 @@ class WorkflowCanvasView(QGraphicsView):
         menu.addAction("重排节点", self.auto_layout)
         menu.addAction("恢复 100% 缩放", self.reset_zoom)
         return menu
+
+    def _on_algorithm_selector_requested(self, row: int, global_pos: QPoint) -> None:
+        """收到卡片算法按钮点击信号后，在画布层弹出算法选择器。"""
+        if row < 0 or row >= len(self._methods):
+            return
+        
+        method = self._methods[row]
+        candidates = candidate_methods_for_workflow_method(method)
+        if len(candidates) <= 1:
+            return
+        
+        # 创建 popup 窗口
+        popup = QFrame(self.window(), Qt.WindowType.Popup)
+        popup.setObjectName("algorithmSelectorPopup")
+        popup.setStyleSheet("""
+            QFrame#algorithmSelectorPopup {
+                background: #ffffff;
+                border: 1px solid #d8e3f2;
+                border-radius: 8px;
+            }
+        """)
+        
+        # 创建列表
+        list_widget = QListWidget(popup)
+        list_widget.setObjectName("algorithmList")
+        list_widget.setStyleSheet("""
+            QListWidget {
+                border: none;
+                background: transparent;
+                outline: none;
+            }
+            QListWidget::item {
+                padding: 8px 12px;
+                min-height: 28px;
+                border-radius: 4px;
+            }
+            QListWidget::item:hover {
+                background: #e8f1ff;
+            }
+            QListWidget::item:selected {
+                background: #d0e5ff;
+            }
+        """)
+        
+        for key in candidates:
+            item = QListWidgetItem(get_method_display_name(key), list_widget)
+            item.setData(Qt.ItemDataRole.UserRole, key)
+            if key == method.method_id:
+                list_widget.setCurrentItem(item)
+        
+        # 设置 popup 大小
+        popup_layout = QVBoxLayout(popup)
+        popup_layout.setContentsMargins(4, 4, 4, 4)
+        popup_layout.addWidget(list_widget)
+        popup.setLayout(popup_layout)
+        
+        # 计算 popup 位置和大小
+        item_height = 44  # 预估每项高度
+        popup_height = min(len(candidates) * item_height + 8, 240)
+        popup_width = max(180, 200)
+        popup.setFixedSize(popup_width, popup_height)
+        
+        # 显示 popup
+        popup.move(global_pos)
+        popup.show()
+        
+        # 存储 popup 引用以便后续关闭
+        self._algorithm_popup = popup
+        self._algorithm_popup_row = row
+        
+        # 连接点击事件
+        def on_item_clicked(item):
+            method_id = item.data(Qt.ItemDataRole.UserRole)
+            popup.close()
+            self._apply_algorithm_from_popup(row, method_id)
+        
+        list_widget.itemClicked.connect(on_item_clicked)
+
+    def _apply_algorithm_from_popup(self, row: int, method_id: str) -> None:
+        """从 popup 选择算法后执行切换。"""
+        if row < 0 or row >= len(self._methods):
+            return
+        
+        method = self._methods[row]
+        if method_id == method.method_id:
+            return
+        
+        # 延迟执行，确保 popup 已关闭
+        QTimer.singleShot(0, lambda: self._do_switch_algorithm(row, method_id))
+
+    def _do_switch_algorithm(self, row: int, method_id: str) -> None:
+        """执行算法切换。"""
+        if row < 0 or row >= len(self._methods):
+            return
+        
+        method = self._methods[row]
+        if method_id == method.method_id:
+            return
+        
+        if update_workflow_method_algorithm(method, method_id):
+            self.node_changed.emit(row)
 
     def _card_expanded(self, proxy: WorkflowNodeProxy) -> bool:
         card = proxy.widget()
