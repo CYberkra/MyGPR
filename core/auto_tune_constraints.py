@@ -9,6 +9,7 @@ from math import floor, log2
 from typing import Any
 
 from core.runtime_warnings import build_runtime_warning
+from core.scalar_utils import to_float, to_float_or_none, to_int_or_none
 
 
 @dataclass
@@ -191,10 +192,7 @@ def _resolve_shape(data_shape: tuple[int, int]) -> tuple[int, int]:
 
 def _safe_zero_time_max_ns(n_samples: int, header_info: dict[str, Any]) -> float:
     total_time_ns = header_info.get("total_time_ns")
-    try:
-        total = float(total_time_ns)
-    except Exception:
-        total = 48.0
+    total = to_float(total_time_ns, default=48.0)
     if total <= 0:
         total = 48.0
     max_shift_samples = max(0, min(int(n_samples) - 1, int(round(n_samples * 0.35))))
@@ -206,10 +204,7 @@ def _safe_agc_window_min(n_samples: int, header_info: dict[str, Any]) -> int:
     min_by_fraction = int(round(samples * 0.02))
     min_by_time = 0
     total_time_ns = header_info.get("total_time_ns") if header_info else None
-    try:
-        total = float(total_time_ns)
-    except Exception:
-        total = 0.0
+    total = to_float(total_time_ns, default=0.0)
     if total > 0.0:
         time_step_ns = total / samples
         min_by_time = int(round(0.5 / max(time_step_ns, 1.0e-9)))
@@ -224,26 +219,17 @@ def _wavelet_level_limit(n_samples: int, n_traces: int) -> int:
 
 def _nyquist_mhz(n_samples: int, header_info: dict[str, Any]) -> float | None:
     sample_rate_hz = header_info.get("sample_rate_hz")
-    try:
-        sample_rate = float(sample_rate_hz)
-    except Exception:
-        sample_rate = 0.0
+    sample_rate = to_float(sample_rate_hz, default=0.0)
     if sample_rate > 0.0:
         return float(sample_rate / 2.0e6)
 
     time_step_s = header_info.get("time_step_s")
-    try:
-        step_s = float(time_step_s)
-    except Exception:
-        step_s = 0.0
+    step_s = to_float(time_step_s, default=0.0)
     if step_s > 0.0:
         return float(1.0 / step_s / 2.0e6)
 
     total_time_ns = header_info.get("total_time_ns")
-    try:
-        total_ns = float(total_time_ns)
-    except Exception:
-        total_ns = 0.0
+    total_ns = to_float(total_time_ns, default=0.0)
     if total_ns > 0.0:
         sample_rate = max(1, int(n_samples)) / (total_ns * 1.0e-9)
         return float(sample_rate / 2.0e6)
@@ -251,17 +237,11 @@ def _nyquist_mhz(n_samples: int, header_info: dict[str, Any]) -> float | None:
 
 
 def _as_int(value: Any) -> int | None:
-    try:
-        return int(round(float(value)))
-    except Exception:
-        return None
+    return to_int_or_none(value)
 
 
 def _as_float(value: Any) -> float | None:
-    try:
-        return float(value)
-    except Exception:
-        return None
+    return to_float_or_none(value)
 
 
 def _clamp_int_param(

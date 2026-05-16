@@ -7,6 +7,7 @@ from __future__ import annotations
 import numpy as np
 
 from core.auto_tune import auto_tune_method
+from core.auto_tune_constraints import constrain_auto_tune_params
 
 
 def _small_profile(samples: int = 96, traces: int = 36) -> np.ndarray:
@@ -136,6 +137,28 @@ def test_auto_tune_agc_generated_candidates_keep_low_energy_guard():
         trial["params"].get("_low_energy_guard") is True
         for trial in result["all_trials"]
     )
+
+
+def test_constraint_helpers_accept_array_scalars_without_silencing_invalid_values():
+    constrained = constrain_auto_tune_params(
+        "agcGain",
+        {"window": np.array([999])},
+        (100, 24),
+        header_info={"total_time_ns": np.array([100.0])},
+    )
+
+    assert constrained.effective_params["window"] == 100
+    assert constrained.warnings
+
+    invalid = constrain_auto_tune_params(
+        "agcGain",
+        {"window": "not-a-number"},
+        (100, 24),
+        header_info={"total_time_ns": np.array([100.0])},
+    )
+
+    assert invalid.effective_params["window"] == "not-a-number"
+    assert invalid.warnings == []
 
 
 def test_auto_tune_constrains_frequency_filter_to_nyquist_and_valid_band():

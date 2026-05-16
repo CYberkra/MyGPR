@@ -44,6 +44,19 @@ def to_optional_float(value: Any) -> float | None:
     return to_float(value, default=0.0)
 
 
+def to_float_or_none(value: Any) -> float | None:
+    """Convert to float, returning None for empty or invalid values."""
+    scalar = first_scalar(value)
+    if scalar is None:
+        return None
+    if isinstance(scalar, str) and scalar.strip() == "":
+        return None
+    try:
+        return float(scalar)
+    except (TypeError, ValueError):
+        return None
+
+
 def to_int(value: Any, *, default: int) -> int:
     """Convert a runtime parameter to int via float for GUI numeric strings."""
     scalar = first_scalar(value)
@@ -55,6 +68,14 @@ def to_int(value: Any, *, default: int) -> int:
         return int(float(scalar))
     except (TypeError, ValueError):
         return int(default)
+
+
+def to_int_or_none(value: Any) -> int | None:
+    """Convert to int via float, returning None for empty or invalid values."""
+    parsed = to_float_or_none(value)
+    if parsed is None:
+        return None
+    return int(round(parsed))
 
 
 def first_two_floats(value: Any) -> tuple[float, float] | None:

@@ -6,7 +6,14 @@ from __future__ import annotations
 
 import numpy as np
 
-from core.scalar_utils import first_scalar, first_two_floats, to_float, to_int
+from core.scalar_utils import (
+    first_scalar,
+    first_two_floats,
+    to_float,
+    to_float_or_none,
+    to_int,
+    to_int_or_none,
+)
 
 
 def test_scalar_helpers_accept_numpy_scalar_arrays():
@@ -19,6 +26,8 @@ def test_scalar_helpers_use_defaults_for_empty_or_invalid_values():
     assert first_scalar(np.array([], dtype=np.float64)) is None
     assert to_float(np.array([], dtype=np.float64), default=2.0) == 2.0
     assert to_int("", default=7) == 7
+    assert to_float_or_none("not-a-number") is None
+    assert to_int_or_none("not-a-number") is None
     assert first_two_floats([1.0]) is None
 
 
