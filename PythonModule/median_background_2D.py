@@ -34,7 +34,7 @@ def method_median_background_2d(
     """
     from scipy.ndimage import median_filter
 
-    arr = np.asarray(data, dtype=np.float64)
+    arr = np.asarray(data, dtype=np.float32)
     if arr.ndim != 2:
         raise ValueError(f"输入数据必须是2维数组，当前 shape={arr.shape}")
 
