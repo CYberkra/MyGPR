@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from core.scalar_utils import to_float, to_optional_float
+
 
 def _as_positive_scalar(value: object) -> float | None:
     """Return the first finite positive scalar from a runtime metadata value."""
@@ -68,12 +70,15 @@ def method_motion_compensation_height(
         raise ValueError("飞行高度归一化需要二维 B-scan 数据")
 
     samples, traces = arr.shape
+    manual_height_value = to_float(manual_height, default=0.0)
+    wave_speed_value = to_float(wave_speed_m_per_ns, default=0.1)
+    max_shift_value = to_optional_float(max_shift_samples)
     meta: dict[str, object] = {
         "method": "motion_compensation_height",
         "compensate_amplitude": bool(compensate_amplitude),
         "compensate_time_shift": bool(compensate_time_shift),
-        "wave_speed_m_per_ns": float(wave_speed_m_per_ns),
-        "max_shift_samples": max_shift_samples,
+        "wave_speed_m_per_ns": wave_speed_value,
+        "max_shift_samples": max_shift_value,
         "interpolation_mode": str(interpolation_mode),
     }
 
@@ -125,7 +130,7 @@ def method_motion_compensation_height(
     elif reference_height_mode == "min":
         h_ref = float(np.min(flight_height))
     elif reference_height_mode == "manual":
-        h_ref = float(manual_height)
+        h_ref = manual_height_value
     else:
         h_ref = float(np.mean(flight_height))
 
@@ -151,7 +156,7 @@ def method_motion_compensation_height(
         meta["amplitude_correction_applied"] = False
 
     # 5. 时移校正
-    if compensate_time_shift and wave_speed_m_per_ns > 0:
+    if compensate_time_shift and wave_speed_value > 0:
         if interpolation_mode != "linear":
             raise ValueError(
                 f"interpolation_mode '{interpolation_mode}' 不受支持；V1 仅支持 'linear'"
@@ -159,7 +164,7 @@ def method_motion_compensation_height(
 
         # 这里沿用当前 V1/benchmark 的传播速度常数，保持数值行为与既有
         # preset / benchmark / evidence 一致。
-        delta_t_ns = 2.0 * (flight_height - h_ref) / wave_speed_m_per_ns
+        delta_t_ns = 2.0 * (flight_height - h_ref) / wave_speed_value
         meta["time_shift_correction_applied"] = True
 
         # 按 Task 1 runtime contract 读取 time_window_ns
@@ -176,8 +181,8 @@ def method_motion_compensation_height(
             shifts_samples = delta_t_ns / dt_ns
 
             # 6. shift clamp
-            if max_shift_samples is not None and max_shift_samples > 0:
-                clamp = float(max_shift_samples)
+            if max_shift_value is not None and max_shift_value > 0:
+                clamp = max_shift_value
                 shifts_clamped = np.clip(shifts_samples, -clamp, clamp)
                 meta["max_shift_samples_applied"] = float(np.max(np.abs(shifts_clamped)))
                 meta["shift_clamped"] = not np.allclose(shifts_samples, shifts_clamped)

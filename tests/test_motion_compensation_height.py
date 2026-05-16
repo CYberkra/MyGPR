@@ -216,6 +216,29 @@ def test_height_compensation_accepts_scalar_array_time_window():
     assert meta["time_window_ns"] == pytest.approx(120.0)
 
 
+def test_height_compensation_accepts_numpy_scalar_runtime_parameters():
+    rng = np.random.default_rng(112)
+    data = rng.normal(size=(64, 12)).astype(np.float32)
+    trace_metadata = {
+        "flight_height_m": 1.5 + 0.1 * np.sin(np.linspace(0, np.pi, 12)),
+        "time_window_ns": np.array([120.0], dtype=np.float64),
+    }
+
+    _, meta = method_motion_compensation_height(
+        data,
+        trace_metadata=trace_metadata,
+        reference_height_mode="manual",
+        manual_height=np.array([1.5]),
+        wave_speed_m_per_ns=np.array([0.1]),
+        max_shift_samples=np.array([2.0]),
+    )
+
+    assert meta["reference_height_m"] == pytest.approx(1.5)
+    assert meta["wave_speed_m_per_ns"] == pytest.approx(0.1)
+    assert meta["max_shift_samples"] == pytest.approx(2.0)
+    assert meta["max_shift_samples_applied"] <= 2.0
+
+
 def test_height_compensation_empty_flight_height_array():
     """空的 flight_height_m 数组应安全跳过。"""
     rng = np.random.default_rng(12)
