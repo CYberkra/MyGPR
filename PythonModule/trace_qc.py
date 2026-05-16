@@ -8,6 +8,8 @@ from typing import Any
 
 import numpy as np
 
+from core.scalar_utils import to_float
+
 
 def method_trace_qc(
     data: np.ndarray,
@@ -37,11 +39,11 @@ def method_trace_qc(
     rms = np.sqrt(np.mean(arr * arr, axis=0, dtype=np.float64))
     bad_mask = np.zeros(arr.shape[1], dtype=bool)
 
-    empty_threshold = _safe_float(empty_rms_threshold, default=0.0)
+    empty_threshold = to_float(empty_rms_threshold, default=0.0)
     if empty_threshold > 0.0:
         bad_mask |= rms <= empty_threshold
 
-    zscore_threshold = _safe_float(spike_zscore, default=0.0)
+    zscore_threshold = to_float(spike_zscore, default=0.0)
     if zscore_threshold > 0.0 and arr.shape[1] >= 3:
         median = float(np.median(rms))
         mad = float(np.median(np.abs(rms - median)))
@@ -123,10 +125,3 @@ def _filter_trace_metadata(
         else:
             filtered[key] = np.array(arr, copy=True)
     return filtered
-
-
-def _safe_float(value: Any, *, default: float) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return float(default)

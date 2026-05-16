@@ -162,6 +162,22 @@ def test_trace_qc_default_marks_without_changing_data():
     ]
 
 
+def test_trace_qc_accepts_numpy_scalar_thresholds():
+    raw = np.ones((6, 4), dtype=np.float32)
+    raw[:, 1] = 0.0
+
+    result, meta = method_trace_qc(
+        raw,
+        empty_rms_threshold=np.array([0.1]),
+        spike_zscore=np.array([3.0]),
+    )
+
+    assert np.array_equal(result, raw)
+    assert meta["empty_rms_threshold"] == 0.1
+    assert meta["spike_zscore"] == 3.0
+    assert meta["bad_trace_indices"].tolist() == [1]
+
+
 def test_trace_qc_mute_and_remove_modes():
     raw = np.ones((4, 5), dtype=np.float32)
     raw[:, 3] = 100.0
