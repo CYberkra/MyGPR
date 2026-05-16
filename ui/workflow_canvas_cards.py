@@ -2448,6 +2448,7 @@ class WorkflowCanvasView(QGraphicsView):
             card.run_from_requested.connect(self.run_from_node_requested)
             card.duplicate_requested.connect(self.duplicate_node_requested)
             card.remove_requested.connect(self.remove_node_requested)
+            card.algorithm_selector_requested.connect(self._on_algorithm_selector_requested)
 
             proxy = WorkflowNodeProxy(row, method)
             proxy.setWidget(card)
