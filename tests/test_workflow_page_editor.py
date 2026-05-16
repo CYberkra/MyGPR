@@ -1069,12 +1069,13 @@ def test_workflow_algorithm_popup_updates_method_id():
         page.show()
         app.processEvents()
 
-        _select_method(page, "sec_gain")
+        selected_row = _select_method(page, "sec_gain")
         app.processEvents()
 
+        assert selected_row >= 0, "sec_gain 节点应该存在"
         canvas = page.workflow_canvas
-        proxies = [p for p in canvas._scene.proxies if p.row == 0]
-        assert proxies, "应该有 row=0 的节点"
+        proxies = [p for p in canvas._scene.proxies if p.row == selected_row]
+        assert proxies, f"应该有 row={selected_row} 的节点"
 
         first_proxy = proxies[0]
         original_method_id = first_proxy.method.method_id
@@ -1083,7 +1084,7 @@ def test_workflow_algorithm_popup_updates_method_id():
         if len(candidates) > 1 and original_method_id in candidates:
             new_method = next(m for m in candidates if m != original_method_id)
 
-            canvas._do_switch_algorithm(0, new_method)
+            canvas._do_switch_algorithm(selected_row, new_method)
             app.processEvents()
 
             assert first_proxy.method.method_id == new_method, f"应该切换到 {new_method}"

@@ -793,6 +793,7 @@ class GPRGuiQt(QMainWindow):
         self._runtime_panel_stack = None
         self._runtime_panel_buttons = {}
         self._active_runtime_panel = None
+        self._in_workflow_studio_mode = True
 
         t1 = time.perf_counter()
         self._setup_ui()
@@ -1712,8 +1713,9 @@ class GPRGuiQt(QMainWindow):
         dialog.activateWindow()
         self._log(f"打开 B-scan 大图窗口: {label}")
 
-    def _hide_legacy_panels(self):
-        """隐藏旧 matplotlib toolbar、runtime panel 和 plot stack。"""
+    def _show_workflow_studio_mode(self):
+        """切换到 Workflow Studio 模式，隐藏旧 matplotlib toolbar、runtime panel 和 plot stack。"""
+        self._in_workflow_studio_mode = True
         if hasattr(self, "_runtime_panel_bar") and self._runtime_panel_bar is not None:
             self._runtime_panel_bar.setVisible(False)
         if hasattr(self, "_runtime_panel_container") and self._runtime_panel_container is not None:
@@ -1723,8 +1725,19 @@ class GPRGuiQt(QMainWindow):
         if hasattr(self, "plot_stack_host") and self.plot_stack_host is not None:
             self.plot_stack_host.setVisible(False)
 
+    def _show_legacy_mode(self):
+        """切换到传统显示模式，恢复旧 matplotlib toolbar、runtime panel 和 plot stack。"""
+        self._in_workflow_studio_mode = False
+        if hasattr(self, "_plot_toolbar_row") and self._plot_toolbar_row is not None:
+            self._plot_toolbar_row.setVisible(True)
+        if hasattr(self, "plot_stack_host") and self.plot_stack_host is not None:
+            self.plot_stack_host.setVisible(True)
+        if hasattr(self, "_main_toolbar") and self._main_toolbar is not None:
+            self._main_toolbar.setVisible(True)
+
     def switch_to_legacy_mode(self):
         """聚焦到 Studio 主工作台。"""
+        self._show_legacy_mode()
         self.switch_to_main_mode("basic")
 
     def switch_to_main_mode(self, tab_key: str | None = None):
@@ -1758,8 +1771,8 @@ class GPRGuiQt(QMainWindow):
                 "quality": "QC / Export",
             }.get(tab_key, "工作流主画布")
             self._log(f"切换到: {tab_name}")
-            
-            self._hide_legacy_panels()
+
+            self._show_workflow_studio_mode()
 
     def switch_to_workflow_tab(self):
         """聚焦到中央工作流主画布。"""
@@ -3652,14 +3665,15 @@ class GPRGuiQt(QMainWindow):
 
     def _sync_runtime_panels_visibility(self):
         """同步运行时面板可见性"""
-        if self._runtime_panel_bar is not None:
-            self._runtime_panel_bar.setVisible(False)
-        if self._runtime_panel_container is not None:
-            self._runtime_panel_container.setVisible(False)
-        if hasattr(self, "_plot_toolbar_row") and self._plot_toolbar_row is not None:
-            self._plot_toolbar_row.setVisible(False)
-        if hasattr(self, "plot_stack_host") and self.plot_stack_host is not None:
-            self.plot_stack_host.setVisible(False)
+        if self._in_workflow_studio_mode:
+            if self._runtime_panel_bar is not None:
+                self._runtime_panel_bar.setVisible(False)
+            if self._runtime_panel_container is not None:
+                self._runtime_panel_container.setVisible(False)
+            if hasattr(self, "_plot_toolbar_row") and self._plot_toolbar_row is not None:
+                self._plot_toolbar_row.setVisible(False)
+            if hasattr(self, "plot_stack_host") and self.plot_stack_host is not None:
+                self.plot_stack_host.setVisible(False)
 
     # ============ 数据加载 ============
 

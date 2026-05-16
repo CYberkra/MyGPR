@@ -107,3 +107,62 @@ def test_tuning_and_preview_controls_open_as_studio_dialogs():
             win._preview_settings_dialog.close()
         win.close()
         app.processEvents()
+
+
+def test_workflow_studio_hides_legacy_panels():
+    """验证 Workflow Studio 模式下隐藏旧 matplotlib toolbar、runtime panel"""
+    app = _get_app()
+    win = GPRGuiQt()
+    try:
+        win.show()
+        app.processEvents()
+
+        assert win._in_workflow_studio_mode is True, "默认应在 Workflow Studio 模式"
+
+        if hasattr(win, "_plot_toolbar_row") and win._plot_toolbar_row is not None:
+            assert not win._plot_toolbar_row.isVisible(), "Workflow Studio 模式应隐藏旧 plot toolbar"
+
+        if hasattr(win, "plot_stack_host") and win.plot_stack_host is not None:
+            assert not win.plot_stack_host.isVisible(), "Workflow Studio 模式应隐藏旧 plot stack"
+
+        if hasattr(win, "_runtime_panel_bar") and win._runtime_panel_bar is not None:
+            assert not win._runtime_panel_bar.isVisible(), "Workflow Studio 模式应隐藏旧 runtime panel bar"
+
+        if hasattr(win, "_runtime_panel_container") and win._runtime_panel_container is not None:
+            assert not win._runtime_panel_container.isVisible(), "Workflow Studio 模式应隐藏旧 runtime panel container"
+
+        if hasattr(win, "_main_toolbar") and win._main_toolbar is not None:
+            assert not win._main_toolbar.isVisible(), "Workflow Studio 模式应隐藏旧 main toolbar"
+    finally:
+        win.close()
+        app.processEvents()
+
+
+def test_legacy_mode_restores_toolbar():
+    """验证切换到 legacy 模式后恢复旧 toolbar 和 plot stack"""
+    app = _get_app()
+    win = GPRGuiQt()
+    try:
+        win.show()
+        app.processEvents()
+
+        win._show_legacy_mode()
+        app.processEvents()
+
+        if hasattr(win, "_plot_toolbar_row") and win._plot_toolbar_row is not None:
+            assert win._plot_toolbar_row.isVisible(), "legacy 模式应恢复旧 plot toolbar"
+
+        if hasattr(win, "plot_stack_host") and win.plot_stack_host is not None:
+            assert win.plot_stack_host.isVisible(), "legacy 模式应恢复旧 plot stack"
+
+        if hasattr(win, "_main_toolbar") and win._main_toolbar is not None:
+            assert win._main_toolbar.isVisible(), "legacy 模式应恢复旧 main toolbar"
+
+        win._show_workflow_studio_mode()
+        app.processEvents()
+
+        if hasattr(win, "_plot_toolbar_row") and win._plot_toolbar_row is not None:
+            assert not win._plot_toolbar_row.isVisible(), "切回 Workflow Studio 应隐藏 plot toolbar"
+    finally:
+        win.close()
+        app.processEvents()
