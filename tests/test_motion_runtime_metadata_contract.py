@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from core.methods_registry import PROCESSING_METHODS
+from core.processing_engine import prepare_runtime_params
 from core.workflow_data import WorkflowMethod
 from core.workflow_executor import WorkflowExecutor
 
@@ -147,3 +148,42 @@ def test_non_motion_methods_do_not_mutate_trace_metadata(monkeypatch):
     assert "time_window_ns" not in observed_kwargs
     assert np.array_equal(trace_metadata["trace_distance_m"], source_distance)
     assert header_info["total_time_ns"] == pytest.approx(96.0)
+
+
+def test_prepare_runtime_params_accepts_numpy_scalar_header_values():
+    raw_shape = (10, 4)
+    header_info = {
+        "total_time_ns": np.array([100.0]),
+        "track_length_m": np.array([3.0]),
+        "trace_interval_m": np.array([0.5]),
+    }
+    trace_metadata = {
+        "trace_index": np.arange(4, dtype=np.int32),
+        "trace_distance_m": np.arange(4, dtype=np.float64),
+    }
+
+    time_cut_params = prepare_runtime_params(
+        "time_cut",
+        {},
+        header_info,
+        trace_metadata,
+        raw_shape,
+    )
+    motion_params = prepare_runtime_params(
+        "motion_compensation_v2",
+        {},
+        header_info,
+        trace_metadata,
+        raw_shape,
+    )
+    migration_params = prepare_runtime_params(
+        "kirchhoff_migration",
+        {},
+        header_info,
+        trace_metadata,
+        raw_shape,
+    )
+
+    assert time_cut_params["time_step_s"] == pytest.approx(10.0e-9)
+    assert motion_params["time_window_ns"] == pytest.approx(100.0)
+    assert migration_params["length_m"] == pytest.approx(3.0)

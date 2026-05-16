@@ -19,6 +19,7 @@ from core.gprpy_compat import (
     gprpy_local_window_l2_energy,
 )
 from core.runtime_warnings import build_runtime_warning, merge_runtime_warnings
+from core.scalar_utils import to_float
 
 
 class ProcessingEngineError(RuntimeError):
@@ -91,25 +92,23 @@ def prepare_runtime_params(
         total_time_ns = None
         if header_info:
             total_time_ns = header_info.get("total_time_ns")
-        if total_time_ns and float(total_time_ns) > 0:
-            time_step_s = float(total_time_ns) * 1e-9 / samples
+        total_time_value = to_float(total_time_ns, default=0.0)
+        if total_time_value > 0:
+            time_step_s = total_time_value * 1e-9 / samples
             runtime_params["time_step_s"] = time_step_s
             if method_id == "frequency_filter_1d":
                 runtime_params.setdefault("sample_rate_hz", 1.0 / time_step_s)
             if method_id in {"subtracting_average_2D", "median_background_2D"}:
-                runtime_params.setdefault("time_window_ns", float(total_time_ns))
+                runtime_params.setdefault("time_window_ns", total_time_value)
 
     if (
         method_id in {"subtracting_average_2D", "median_background_2D"}
         and "time_window_ns" not in runtime_params
         and "time_step_s" in runtime_params
     ):
-        try:
-            runtime_params["time_window_ns"] = (
-                float(runtime_params["time_step_s"]) * 1.0e9 * samples
-            )
-        except (TypeError, ValueError):
-            pass
+        time_step_s = to_float(runtime_params["time_step_s"], default=0.0)
+        if time_step_s > 0.0:
+            runtime_params["time_window_ns"] = time_step_s * 1.0e9 * samples
 
     needs_motion_runtime = _requires_motion_runtime_context(method_id)
 
@@ -129,14 +128,13 @@ def prepare_runtime_params(
         traces = max(1, int(data_shape[1]))
         info = header_info or {}
         if "length_m" not in runtime_params:
-            if (
-                info.get("track_length_m") is not None
-                and float(info.get("track_length_m", 0.0)) > 0
-            ):
-                runtime_params["length_m"] = float(info["track_length_m"])
+            track_length_m = to_float(info.get("track_length_m"), default=0.0)
+            if track_length_m > 0:
+                runtime_params["length_m"] = track_length_m
             elif info.get("trace_interval_m") is not None:
-                runtime_params["length_m"] = float(
-                    info.get("trace_interval_m", 0.0)
+                runtime_params["length_m"] = to_float(
+                    info.get("trace_interval_m"),
+                    default=0.0,
                 ) * max(traces - 1, 1)
 
     return runtime_params
@@ -234,10 +232,9 @@ def _inject_runtime_metadata_context(
         runtime_params["trace_metadata"] = clone_trace_metadata(trace_metadata)
     if "time_window_ns" not in runtime_params:
         total_time_ns = info.get("total_time_ns")
+        total_time_value = to_float(total_time_ns, default=0.0)
         runtime_params["time_window_ns"] = (
-            float(total_time_ns)
-            if total_time_ns and float(total_time_ns) > 0
-            else float(samples)
+            total_time_value if total_time_value > 0.0 else float(samples)
         )
 
 
