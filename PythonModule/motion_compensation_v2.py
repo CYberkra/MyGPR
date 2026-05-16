@@ -16,6 +16,7 @@ from typing import Any
 import numpy as np
 
 from core.runtime_warnings import build_runtime_warning
+from core.scalar_utils import to_float, to_optional_float
 from core.trace_metadata_utils import (
     build_uniform_trace_distance_m,
     resample_bscan_columns_linear,
@@ -74,31 +75,6 @@ def _warning(code: str, message: str, **details: Any) -> dict[str, Any]:
     )
 
 
-def _as_float(value: Any, *, default: float) -> float:
-    if value is None:
-        return float(default)
-    if isinstance(value, str) and value.strip() == "":
-        return float(default)
-    try:
-        arr = np.asarray(value)
-    except (TypeError, ValueError):
-        arr = None
-    try:
-        if arr is not None:
-            if arr.size == 0:
-                return float(default)
-            return float(arr.reshape(-1)[0])
-        return float(value)
-    except (TypeError, ValueError):
-        return float(default)
-
-
-def _as_optional_float(value: Any) -> float | None:
-    if value is None:
-        return None
-    return _as_float(value, default=0.0)
-
-
 def _compute_reference_height(
     height: np.ndarray,
     *,
@@ -110,7 +86,7 @@ def _compute_reference_height(
     if mode == "min":
         return float(np.min(height))
     if mode == "manual":
-        manual = _as_float(manual_height_m, default=0.0)
+        manual = to_float(manual_height_m, default=0.0)
         if manual > 0.0 and np.isfinite(manual):
             return manual
         warnings.append(
@@ -345,11 +321,11 @@ def _resolve_shift_sample_limit(
     sample_count: int,
 ) -> tuple[float | None, str | None, dict[str, float]]:
     candidates: list[tuple[str, float]] = []
-    sample_limit = _as_float(max_shift_samples, default=0.0)
+    sample_limit = to_float(max_shift_samples, default=0.0)
     if sample_limit > 0.0 and np.isfinite(sample_limit):
         candidates.append(("max_shift_samples", sample_limit))
 
-    ns_limit = _as_float(max_shift_ns, default=0.0)
+    ns_limit = to_float(max_shift_ns, default=0.0)
     if ns_limit > 0.0 and np.isfinite(ns_limit) and sample_interval_ns > 0.0:
         candidates.append(("max_shift_ns", ns_limit / sample_interval_ns))
 
@@ -542,19 +518,19 @@ def method_motion_compensation_v2(
     quality_flags: list[str] = []
     updates: dict[str, np.ndarray] = {}
     corrected = np.array(arr, copy=True)
-    manual_height_value = _as_float(manual_height_m, default=0.0)
-    max_shift_samples_value = _as_optional_float(max_shift_samples)
-    max_shift_ns_value = _as_float(max_shift_ns, default=0.0)
-    max_amplitude_scale_value = _as_float(max_amplitude_scale, default=2.0)
-    resample_spacing_value = _as_float(resample_spacing_m, default=0.0)
-    air_wave_speed_value = _as_float(
+    manual_height_value = to_float(manual_height_m, default=0.0)
+    max_shift_samples_value = to_optional_float(max_shift_samples)
+    max_shift_ns_value = to_float(max_shift_ns, default=0.0)
+    max_amplitude_scale_value = to_float(max_amplitude_scale, default=2.0)
+    resample_spacing_value = to_float(resample_spacing_m, default=0.0)
+    air_wave_speed_value = to_float(
         air_wave_speed_m_per_ns,
         default=AIR_WAVE_SPEED_M_PER_NS,
     )
-    apc_offset_x_value = _as_float(apc_offset_x_m, default=0.0)
-    apc_offset_y_value = _as_float(apc_offset_y_m, default=0.0)
-    apc_offset_z_value = _as_float(apc_offset_z_m, default=0.0)
-    max_abs_tilt_value = _as_float(max_abs_tilt_deg, default=20.0)
+    apc_offset_x_value = to_float(apc_offset_x_m, default=0.0)
+    apc_offset_y_value = to_float(apc_offset_y_m, default=0.0)
+    apc_offset_z_value = to_float(apc_offset_z_m, default=0.0)
+    max_abs_tilt_value = to_float(max_abs_tilt_deg, default=20.0)
 
     meta: dict[str, Any] = {
         "method": "motion_compensation_v2",
@@ -731,9 +707,9 @@ def method_motion_compensation_v2(
             if resolved_time_window_ns is None and header_info:
                 resolved_time_window_ns = header_info.get("total_time_ns")
             if resolved_time_window_ns is None and "time_window_ns" in metadata:
-                resolved_time_window_ns = _as_optional_float(metadata.get("time_window_ns"))
+                resolved_time_window_ns = to_optional_float(metadata.get("time_window_ns"))
 
-            resolved_time_window_value = _as_optional_float(resolved_time_window_ns)
+            resolved_time_window_value = to_optional_float(resolved_time_window_ns)
             if resolved_time_window_value is None or resolved_time_window_value <= 0.0:
                 quality_flags.append("missing_time_window_ns")
                 warnings.append(

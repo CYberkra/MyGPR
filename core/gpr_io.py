@@ -40,6 +40,7 @@ from core.data_context import (
     DATA_CONTEXT_UAV_GPR_SFCW_FIELD,
     apply_data_context_defaults,
 )
+from core.scalar_utils import to_float
 
 
 def read_gprmax_in(in_path: str) -> Dict[str, Any]:
@@ -220,7 +221,7 @@ def extract_airborne_csv_payload(
                 if trace_timestamps_s is None and "trace_timestamp_s" in metadata:
                     trace_timestamps_s = metadata["trace_timestamp_s"]
                 if header_info and "total_time_ns" in header_info:
-                    metadata["time_window_ns"] = _safe_float(
+                    metadata["time_window_ns"] = to_float(
                         header_info["total_time_ns"],
                         default=0.0,
                     )
@@ -470,25 +471,6 @@ def _safe_attr_list(value: Any) -> list[float] | None:
         return None
 
 
-def _safe_float(value: Any, *, default: float) -> float:
-    if value is None:
-        return float(default)
-    if isinstance(value, str) and value.strip() == "":
-        return float(default)
-    try:
-        arr = np.asarray(value)
-    except (TypeError, ValueError):
-        arr = None
-    try:
-        if arr is not None:
-            if arr.size == 0:
-                return float(default)
-            return float(arr.reshape(-1)[0])
-        return float(value)
-    except (TypeError, ValueError):
-        return float(default)
-
-
 def _build_gprmax_trace_metadata(
     traces: int,
     gprmax_config: dict[str, Any] | None,
@@ -541,7 +523,7 @@ def _build_gprmax_header_info(
     header = {
         "a_scan_length": int(samples),
         "num_traces": int(traces),
-        "total_time_ns": _safe_float(total_time_ns, default=0.0),
+        "total_time_ns": to_float(total_time_ns, default=0.0),
         "time_step_s": time_step_s,
         "trace_interval_m": trace_interval_m,
         "source": "gprmax_out",

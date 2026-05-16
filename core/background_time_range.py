@@ -10,6 +10,8 @@ from typing import Any
 
 import numpy as np
 
+from core.scalar_utils import first_scalar, to_float, to_int
+
 
 @dataclass(frozen=True)
 class TimeRangeSelection:
@@ -42,16 +44,16 @@ def resolve_time_range_selection(
     samples = max(1, int(data_shape[0]))
 
     if _has_value(time_start_idx) or _has_positive_value(time_end_idx):
-        start = _as_int(time_start_idx, default=0)
-        end = _as_int(time_end_idx, default=samples)
+        start = to_int(time_start_idx, default=0)
+        end = to_int(time_end_idx, default=samples)
         if end <= 0:
             end = samples
         return _clamp_selection(start, end, samples, source="samples")
 
     if _has_positive_value(time_start_ns) or _has_positive_value(time_end_ns):
-        start_ns = max(0.0, _as_float(time_start_ns, default=0.0))
-        end_ns = _as_float(time_end_ns, default=0.0)
-        total_ns = _as_float(time_window_ns, default=float(samples))
+        start_ns = max(0.0, to_float(time_start_ns, default=0.0))
+        end_ns = to_float(time_end_ns, default=0.0)
+        total_ns = to_float(time_window_ns, default=float(samples))
         if total_ns <= 0.0:
             total_ns = float(samples)
         scale = float(samples) / total_ns
@@ -112,7 +114,7 @@ def _clamp_selection(
 
 
 def _has_value(value: Any) -> bool:
-    scalar = _first_scalar(value)
+    scalar = first_scalar(value)
     if scalar is None:
         return False
     if isinstance(scalar, str):
@@ -121,38 +123,4 @@ def _has_value(value: Any) -> bool:
 
 
 def _has_positive_value(value: Any) -> bool:
-    return _as_float(value, default=0.0) > 0.0
-
-
-def _as_int(value: Any, *, default: int) -> int:
-    try:
-        scalar = _first_scalar(value)
-        if scalar is None:
-            return int(default)
-        return int(float(scalar))
-    except (TypeError, ValueError):
-        return int(default)
-
-
-def _as_float(value: Any, *, default: float) -> float:
-    try:
-        scalar = _first_scalar(value)
-        if scalar is None:
-            return float(default)
-        return float(scalar)
-    except (TypeError, ValueError):
-        return float(default)
-
-
-def _first_scalar(value: Any) -> Any:
-    if value is None:
-        return None
-    if isinstance(value, str):
-        return value
-    try:
-        arr = np.asarray(value)
-    except (TypeError, ValueError):
-        return value
-    if arr.size == 0:
-        return None
-    return arr.reshape(-1)[0]
+    return to_float(value, default=0.0) > 0.0

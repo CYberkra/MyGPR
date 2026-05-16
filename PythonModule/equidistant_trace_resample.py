@@ -8,6 +8,7 @@ from typing import Any
 
 import numpy as np
 
+from core.scalar_utils import to_float
 from core.trace_metadata_utils import (
     build_uniform_trace_distance_m,
     resample_bscan_columns_linear,
@@ -41,7 +42,7 @@ def method_equidistant_trace_resample(
     if np.any(np.diff(source_distance) < 0.0):
         raise ValueError("trace_distance_m 必须单调非递减")
 
-    requested_spacing = _as_float(spacing_m, default=0.0)
+    requested_spacing = to_float(spacing_m, default=0.0)
     target_distance = build_uniform_trace_distance_m(
         source_distance,
         spacing_m=requested_spacing if requested_spacing > 0.0 else None,
@@ -65,22 +66,3 @@ def method_equidistant_trace_resample(
         "output_traces": int(result.shape[1]),
         "trace_metadata_out": metadata_out,
     }
-
-
-def _as_float(value: Any, *, default: float) -> float:
-    if value is None:
-        return float(default)
-    if isinstance(value, str) and value.strip() == "":
-        return float(default)
-    try:
-        arr = np.asarray(value)
-    except (TypeError, ValueError):
-        arr = None
-    try:
-        if arr is not None:
-            if arr.size == 0:
-                return float(default)
-            return float(arr.reshape(-1)[0])
-        return float(value)
-    except (TypeError, ValueError):
-        return float(default)
