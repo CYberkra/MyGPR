@@ -7,6 +7,16 @@ from __future__ import annotations
 import numpy as np
 
 
+def _window_sums_axis0(arr: np.ndarray, starts: np.ndarray, ends: np.ndarray) -> np.ndarray:
+    padded = np.vstack([np.zeros((1, arr.shape[1]), dtype=np.float64), np.cumsum(arr, axis=0)])
+    return padded[ends, :] - padded[starts, :]
+
+
+def _window_sums_axis1(arr: np.ndarray, starts: np.ndarray, ends: np.ndarray) -> np.ndarray:
+    padded = np.hstack([np.zeros((arr.shape[0], 1), dtype=np.float64), np.cumsum(arr, axis=1)])
+    return padded[:, ends] - padded[:, starts]
+
+
 def apply_gprpy_dewow(data: np.ndarray, window: int) -> np.ndarray:
     """Mirror GPRPy toolbox dewow edge handling."""
     arr = np.asarray(data, dtype=np.float64)
@@ -27,11 +37,12 @@ def apply_gprpy_dewow(data: np.ndarray, window: int) -> np.ndarray:
     avg = np.mean(arr[0 : halfwid + 1, :], axis=0)
     result[0 : halfwid + 1, :] = arr[0 : halfwid + 1, :] - avg
 
-    for smp in range(halfwid, totsamps - halfwid + 1):
-        winstart = int(smp - halfwid)
-        winend = int(smp + halfwid)
-        avg = np.mean(arr[winstart : winend + 1, :], axis=0)
-        result[smp, :] = arr[smp, :] - avg
+    sample_idx = np.arange(halfwid, totsamps - halfwid, dtype=np.int32)
+    if sample_idx.size:
+        starts = sample_idx - halfwid
+        ends = sample_idx + halfwid + 1
+        avg = _window_sums_axis0(arr, starts, ends) / (2 * halfwid + 1)
+        result[sample_idx, :] = arr[sample_idx, :] - avg
 
     avg = np.mean(arr[totsamps - halfwid : totsamps + 1, :], axis=0)
     result[totsamps - halfwid : totsamps + 1, :] = (
@@ -61,11 +72,12 @@ def apply_gprpy_rem_mean_trace(data: np.ndarray, ntraces: int) -> np.ndarray:
     avg = np.mean(arr[:, 0 : halfwid + 1], axis=1, keepdims=True)
     result[:, 0 : halfwid + 1] = arr[:, 0 : halfwid + 1] - avg
 
-    for tr in range(halfwid, tottraces - halfwid + 1):
-        winstart = int(tr - halfwid)
-        winend = int(tr + halfwid)
-        avg = np.mean(arr[:, winstart : winend + 1], axis=1, keepdims=True)
-        result[:, tr : tr + 1] = arr[:, tr : tr + 1] - avg
+    trace_idx = np.arange(halfwid, tottraces - halfwid, dtype=np.int32)
+    if trace_idx.size:
+        starts = trace_idx - halfwid
+        ends = trace_idx + halfwid + 1
+        avg = _window_sums_axis1(arr, starts, ends) / (2 * halfwid + 1)
+        result[:, trace_idx] = arr[:, trace_idx] - avg
 
     avg = np.mean(arr[:, tottraces - halfwid : tottraces + 1], axis=1, keepdims=True)
     result[:, tottraces - halfwid : tottraces + 1] = (
@@ -96,11 +108,12 @@ def apply_gprpy_agc_gain(data: np.ndarray, window: int) -> np.ndarray:
     energy = np.maximum(np.linalg.norm(arr[0 : halfwid + 1, :], axis=0), eps)
     result[0 : halfwid + 1, :] = np.divide(arr[0 : halfwid + 1, :], energy)
 
-    for smp in range(halfwid, totsamps - halfwid + 1):
-        winstart = int(smp - halfwid)
-        winend = int(smp + halfwid)
-        energy = np.maximum(np.linalg.norm(arr[winstart : winend + 1, :], axis=0), eps)
-        result[smp, :] = np.divide(arr[smp, :], energy)
+    sample_idx = np.arange(halfwid, totsamps - halfwid, dtype=np.int32)
+    if sample_idx.size:
+        starts = sample_idx - halfwid
+        ends = sample_idx + halfwid + 1
+        energy = np.maximum(np.sqrt(_window_sums_axis0(arr * arr, starts, ends)), eps)
+        result[sample_idx, :] = np.divide(arr[sample_idx, :], energy)
 
     energy = np.maximum(np.linalg.norm(arr[totsamps - halfwid : totsamps + 1, :], axis=0), eps)
     result[totsamps - halfwid : totsamps + 1, :] = np.divide(
