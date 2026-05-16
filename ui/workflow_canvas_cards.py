@@ -50,11 +50,15 @@ from ui.workflow_canvas_preview import BscanPreviewCard
 
 
 PREVIEW_NODE_ID = "__workflow_preview__"
-MIN_NODE_WIDTH = 280
-MIN_NODE_HEIGHT = 150
-MAX_NODE_WIDTH = 520
-MAX_NODE_HEIGHT = 720
-NODE_PORT_ROW_Y = 50.0
+MIN_NODE_WIDTH = 270
+MIN_NODE_HEIGHT = 160
+MAX_NODE_WIDTH = 360
+MAX_NODE_HEIGHT = 420
+COMPACT_WIDTH = 220
+COMPACT_HEIGHT = 95
+MINI_WIDTH = 175
+MINI_HEIGHT = 65
+NODE_PORT_ROW_Y = 42.0
 
 
 def default_params_for_method(method_id: str) -> dict[str, object]:
@@ -278,10 +282,10 @@ class WorkflowNodeCard(QFrame):
             QFrame#workflowNodeCard {
                 background: #ffffff;
                 border: 1px solid #d7e2f0;
-                border-radius: 8px;
+                border-radius: 10px;
             }
             QFrame#workflowNodeCard[current="true"] {
-                border: 2px solid #3278ff;
+                border: 2px solid #3b82f6;
                 background: #f7faff;
             }
             QFrame#workflowNodeCard[hiddenState="true"] {
@@ -289,14 +293,14 @@ class WorkflowNodeCard(QFrame):
                 background: #fafbfc;
             }
             QFrame#workflowNodeCard[status="success"] {
-                border: 1px solid #36d399;
+                border: 1px solid #22c55e;
             }
             QFrame#workflowNodeCard[status="success_stale"] {
                 border: 1px dashed #9ca3af;
                 background: #f9fafb;
             }
             QFrame#workflowNodeCard[status="running"] {
-                border: 2px solid #3278ff;
+                border: 2px solid #3b82f6;
                 background: #f0f7ff;
             }
             QFrame#workflowNodeCard[status="queued"] {
@@ -312,31 +316,29 @@ class WorkflowNodeCard(QFrame):
                 background: #f9fafb;
             }
             QLabel#nodeTitle {
-                font-weight: 800;
-                color: #1f2d3d;
+                font-weight: 700;
+                color: #1e293b;
                 font-size: 14px;
             }
+            QLabel#nodeTitleBadge {
+                background: #3b82f6;
+                color: #ffffff;
+                border-radius: 4px;
+                padding: 1px 4px;
+                font-size: 10px;
+                font-weight: 700;
+            }
             QLabel#portLabel {
-                color: #52647a;
+                color: #64748b;
                 font-size: 12px;
                 font-weight: 700;
             }
-            QLabel#portDotIn {
-                color: #3278ff;
-                font-size: 15px;
-                font-weight: 900;
-            }
-            QLabel#portDotOut {
-                color: #7d4cff;
-                font-size: 15px;
-                font-weight: 900;
-            }
             QLabel#nodeSubtitle {
-                color: #52647a;
+                color: #64748b;
                 font-size: 13px;
             }
             QLabel#nodeWarning {
-                color: #a66a00;
+                color: #d97706;
                 font-size: 12px;
             }
             QLabel#nodeError {
@@ -401,7 +403,7 @@ class WorkflowNodeCard(QFrame):
                 border: 1px solid #d7dce4;
             }
             QLabel#nodeMetaInfo {
-                color: #6b7280;
+                color: #94a3b8;
                 font-size: 11px;
             }
             QLabel#paramName {
@@ -411,20 +413,23 @@ class WorkflowNodeCard(QFrame):
             }
             QToolButton#eyeButton {
                 border: none;
-                color: #52647a;
+                color: #64748b;
                 font-size: 16px;
                 padding: 0px;
             }
+            QToolButton#eyeButton:hover {
+                color: #3b82f6;
+            }
             QSlider::groove:horizontal {
                 height: 3px;
-                background: #dbe5f2;
+                background: #e2e8f0;
                 border-radius: 2px;
             }
             QSlider::handle:horizontal {
                 width: 10px;
                 margin: -4px 0;
                 border-radius: 5px;
-                background: #3278ff;
+                background: #3b82f6;
             }
             """
         )
@@ -676,12 +681,12 @@ class WorkflowNodeCard(QFrame):
             self.setMaximumSize(MAX_NODE_WIDTH, MAX_NODE_HEIGHT)
             self._apply_full_mode()
         elif mode == "compact":
-            self.setMinimumSize(200, 80)
-            self.setMaximumSize(260, 120)
+            self.setMinimumSize(COMPACT_WIDTH, COMPACT_HEIGHT)
+            self.setMaximumSize(COMPACT_WIDTH + 20, COMPACT_HEIGHT + 30)
             self._apply_compact_mode()
         elif mode == "mini":
-            self.setMinimumSize(160, 60)
-            self.setMaximumSize(200, 80)
+            self.setMinimumSize(MINI_WIDTH, MINI_HEIGHT)
+            self.setMaximumSize(MINI_WIDTH + 20, MINI_HEIGHT + 20)
             self._apply_mini_mode()
         
         self.updateGeometry()
@@ -701,10 +706,10 @@ class WorkflowNodeCard(QFrame):
             self.eye_button.show()
         if self.input_port_label:
             self.input_port_label.show()
-            self.input_port_label.setStyleSheet("font-size: 12px;")
+            self.input_port_label.setStyleSheet("font-size: 11px;")
         if self.output_port_label:
             self.output_port_label.show()
-            self.output_port_label.setStyleSheet("font-size: 12px;")
+            self.output_port_label.setStyleSheet("font-size: 11px;")
         if self.algorithm_row_widget:
             self.algorithm_row_widget.show()
         if self.subtitle_label:
@@ -735,32 +740,32 @@ class WorkflowNodeCard(QFrame):
         if self.error_label:
             self.error_label.hide()
         
-        # 增大字号
+        # 增大字号，确保可读性
         if self.title_label:
             self.title_label.show()
-            self.title_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+            self.title_label.setStyleSheet("font-size: 15px; font-weight: bold;")
         if self.status_chip:
             self.status_chip.show()
-            self.status_chip.setStyleSheet("font-size: 14px; font-weight: bold; padding: 2px 6px;")
+            self.status_chip.setStyleSheet("font-size: 12px; font-weight: bold; padding: 2px 6px;")
         if self.eye_button:
             self.eye_button.show()
         if self.input_port_label:
             self.input_port_label.show()
-            self.input_port_label.setStyleSheet("font-size: 14px; font-weight: bold;")
+            self.input_port_label.setStyleSheet("font-size: 13px; font-weight: bold;")
         if self.output_port_label:
             self.output_port_label.show()
-            self.output_port_label.setStyleSheet("font-size: 14px; font-weight: bold;")
+            self.output_port_label.setStyleSheet("font-size: 13px; font-weight: bold;")
         if self.algorithm_row_widget:
             self.algorithm_row_widget.hide()
         if self.subtitle_label:
             self.subtitle_label.show()
-            self.subtitle_label.setStyleSheet("font-size: 14px;")
+            self.subtitle_label.setStyleSheet("font-size: 13px;")
         if self.meta_label:
             self.meta_label.show()
-            self.meta_label.setStyleSheet("font-size: 14px;")
+            self.meta_label.setStyleSheet("font-size: 12px;")
         if self.warning_label:
             self.warning_label.show()
-            self.warning_label.setStyleSheet("font-size: 13px;")
+            self.warning_label.setStyleSheet("font-size: 12px;")
         
         self._simplify_layout()
 
@@ -1093,13 +1098,13 @@ class WorkflowPortItem(QGraphicsEllipseItem):
         self.port_name = str(port_name)
         self.owner = owner
         self.label = str(label)
-        self.setBrush(QBrush(QColor("#3278ff") if port_name == "input" else QColor("#7d4cff")))
+        self.setBrush(QBrush(QColor("#3b82f6") if port_name == "input" else QColor("#8b5cf6")))
         self.setPen(QPen(QColor("#ffffff"), 1.4))
         self.setZValue(30)
         self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton | Qt.MouseButton.RightButton)
         self.setAcceptHoverEvents(True)
         self.label_item = QGraphicsSimpleTextItem(self.label, owner)
-        self.label_item.setBrush(QBrush(QColor("#64748b")))
+        self.label_item.setBrush(QBrush(QColor("#94a3b8")))
         self.label_item.setZValue(29)
         self.label_item.hide()
 
@@ -1133,7 +1138,7 @@ class MiniNodeItem(QGraphicsRectItem):
         super().__init__(proxy)  # 作为 proxy 的 child item
         self.proxy = proxy
         self.setBrush(QBrush(QColor("#f9fbff")))
-        self.setPen(QPen(QColor("#8fb3ff"), 1.4))
+        self.setPen(QPen(QColor("#3b82f6"), 1.4))
         self.setZValue(15)  # 在端口之下，但可见
         # 不拦截鼠标事件，让事件穿透到父 proxy
         self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
@@ -1141,12 +1146,12 @@ class MiniNodeItem(QGraphicsRectItem):
         self.subtitle_item = QGraphicsSimpleTextItem("", self)
         self.status_item = QGraphicsSimpleTextItem("", self)
         for item in [self.title_item, self.subtitle_item, self.status_item]:
-            item.setBrush(QBrush(QColor("#1f2d3d")))
+            item.setBrush(QBrush(QColor("#1e293b")))
         self.hide()
 
     def refresh(self) -> None:
         rect = self.proxy.boundingRect()
-        self.setRect(QRectF(0, 0, max(220.0, min(260.0, rect.width())), 92.0))
+        self.setRect(QRectF(0, 0, max(float(MINI_WIDTH), min(float(MINI_WIDTH) + 20, rect.width())), float(MINI_HEIGHT)))
         # child item 使用本地坐标 (0,0)，自动跟随父 proxy
         method = self.proxy.method
         stage = WORKFLOW_STAGE_BY_ID.get(method.stage_id, {})
@@ -1173,18 +1178,17 @@ class MiniNodeItem(QGraphicsRectItem):
             # 普通节点使用 status_short
             status = self.proxy.status_short()
         
-        in_label, out_label = workflow_port_labels(method)
         if self.proxy.row < 0:
             self.title_item.setText("B-scan Preview")
             self.subtitle_item.setText(status)
             self.status_item.setText("")
         else:
             self.title_item.setText(f"{self.proxy.row + 1:02d} {stage_label[:18]}")
-            self.subtitle_item.setText(f"{method_name[:20]}   {status}")
+            self.subtitle_item.setText(f"{method_name[:20]} {status}")
             self.status_item.setText("")
         self.title_item.setPos(10, 8)
         self.subtitle_item.setPos(10, 32)
-        self.status_item.setPos(10, 58)
+        self.status_item.setPos(10, 56)
         if method.hidden:
             self.setBrush(QBrush(QColor("#f4f6f8")))
             pen = QPen(QColor("#9aa8ba"), 1.2, Qt.PenStyle.DashLine)
@@ -1193,7 +1197,7 @@ class MiniNodeItem(QGraphicsRectItem):
             pen = QPen(QColor("#b8c1cd"), 1.2)
         else:
             self.setBrush(QBrush(QColor("#f9fbff")))
-            pen = QPen(QColor("#8fb3ff"), 1.4)
+            pen = QPen(QColor("#3b82f6"), 1.4)
         self.setPen(pen)
 
 
@@ -1210,12 +1214,12 @@ class CompactNodeItem(QGraphicsRectItem):
         self.method_item = QGraphicsSimpleTextItem("", self)
         self.port_item = QGraphicsSimpleTextItem("", self)
         for item in [self.title_item, self.method_item, self.port_item]:
-            item.setBrush(QBrush(QColor("#1f2d3d")))
+            item.setBrush(QBrush(QColor("#1e293b")))
         self.hide()
 
     def refresh(self) -> None:
         rect = self.proxy.boundingRect()
-        self.setRect(QRectF(0, 0, max(240.0, min(300.0, rect.width())), 112.0))
+        self.setRect(QRectF(0, 0, max(float(COMPACT_WIDTH), min(float(COMPACT_WIDTH) + 20, rect.width())), float(COMPACT_HEIGHT)))
         # child item 使用本地坐标 (0,0)，自动跟随父 proxy
         method = self.proxy.method
         stage = WORKFLOW_STAGE_BY_ID.get(method.stage_id, {})
@@ -1246,11 +1250,11 @@ class CompactNodeItem(QGraphicsRectItem):
         if self.proxy.row < 0:
             output_shape = getattr(method, "output_shape", None)
             shape_text = "--" if output_shape is None else f"{output_shape[1]}×{output_shape[0]}"
-            self.title_item.setText(f"B-scan Preview   {status}")
+            self.title_item.setText(f"B-scan Preview {status}")
             self.method_item.setText(shape_text)
             self.port_item.setText(f"data → preview")
         else:
-            self.title_item.setText(f"{self.proxy.row + 1:02d} {stage_label[:16]}   {status}")
+            self.title_item.setText(f"{self.proxy.row + 1:02d} {stage_label[:16]} {status}")
             self.method_item.setText(method_name[:24])
             self.port_item.setText(f"{in_label} → {out_label}")
         self.title_item.setPos(10, 10)
@@ -1264,7 +1268,7 @@ class CompactNodeItem(QGraphicsRectItem):
             pen = QPen(QColor("#b8c1cd"), 1.2)
         else:
             brush = QBrush(QColor("#f9fbff"))
-            pen = QPen(QColor("#8fb3ff"), 1.4)
+            pen = QPen(QColor("#3b82f6"), 1.4)
         self.setBrush(brush)
         self.setPen(pen)
 

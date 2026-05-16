@@ -127,63 +127,65 @@ class BscanPreviewCard(QFrame):
             }
             QFrame#bscanPreviewCard[status="failed"] {
                 border: 2px solid #ef4444;
-                background: #fff5f5;
+                background: #fef2f2;
             }
             QFrame#bscanPreviewCard[status="stale"] {
-                border: 1px dashed #9ca3af;
-                background: #f9fafb;
+                border: 1px dashed #94a3b8;
+                background: #f8f9fa;
             }
             QFrame#bscanPreviewCard[status="fresh"] {
-                border: 1px solid #36d399;
+                border: 1px solid #22c55e;
                 background: #f0fdf4;
             }
             QLabel#previewTitle {
-                font-weight: 800;
+                font-weight: 700;
                 color: #5b4300;
+                font-size: 13px;
             }
             QLabel#previewPortLabel {
-                color: #6b5a2a;
-                font-size: 12px;
-                font-weight: 700;
+                color: #94a3b8;
+                font-size: 11px;
+                font-weight: 500;
             }
             QLabel#previewChipFresh {
                 background: #dcfce7;
-                color: #166534;
+                color: #15803d;
                 border: 1px solid #86efac;
-                border-radius: 8px;
-                padding: 2px 7px;
-                font-size: 12px;
+                border-radius: 6px;
+                padding: 2px 8px;
+                font-size: 11px;
                 font-weight: 700;
             }
             QLabel#previewChipStale {
-                background: #f3f4f6;
-                color: #6b7280;
-                border: 1px dashed #9ca3af;
-                border-radius: 8px;
-                padding: 2px 7px;
-                font-size: 12px;
+                background: #f1f5f9;
+                color: #64748b;
+                border: 1px dashed #cbd5e1;
+                border-radius: 6px;
+                padding: 2px 8px;
+                font-size: 11px;
                 font-weight: 700;
             }
             QLabel#previewChipFailed {
                 background: #fee2e2;
                 color: #dc2626;
                 border: 1px solid #fca5a5;
-                border-radius: 8px;
-                padding: 2px 7px;
-                font-size: 12px;
+                border-radius: 6px;
+                padding: 2px 8px;
+                font-size: 11px;
                 font-weight: 700;
             }
             QLabel#previewChipEmpty {
-                background: #f3f4f6;
-                color: #9ca3af;
-                border: 1px solid #d1d5db;
-                border-radius: 8px;
-                padding: 2px 7px;
-                font-size: 12px;
+                background: #f1f5f9;
+                color: #94a3b8;
+                border: 1px solid #cbd5e1;
+                border-radius: 6px;
+                padding: 2px 8px;
+                font-size: 11px;
                 font-weight: 700;
             }
             QLabel#previewMeta {
                 color: #6b5a2a;
+                font-size: 11px;
             }
             QLabel#previewImage {
                 background: #111111;
@@ -246,11 +248,11 @@ class BscanPreviewCard(QFrame):
             self.setMaximumWidth(360)
             self._apply_full_mode()
         elif mode == "compact":
-            self.setMinimumWidth(200)
-            self.setMaximumWidth(280)
+            self.setMinimumWidth(220)
+            self.setMaximumWidth(260)
             self._apply_compact_mode()
         elif mode == "mini":
-            self.setMinimumWidth(160)
+            self.setMinimumWidth(175)
             self.setMaximumWidth(220)
             self._apply_mini_mode()
         
@@ -268,8 +270,10 @@ class BscanPreviewCard(QFrame):
                     widget.setStyleSheet("")
         if self.input_port_label is not None:
             self.input_port_label.show()
+            self.input_port_label.setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: 500;")
         if self.output_port_label is not None:
             self.output_port_label.show()
+            self.output_port_label.setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: 500;")
         self._simplify_layout(restore=True)
 
     def _apply_compact_mode(self) -> None:
@@ -287,13 +291,15 @@ class BscanPreviewCard(QFrame):
                     else:
                         widget.show()
                         if widget.objectName() == "previewTitle":
-                            widget.setStyleSheet("font-size: 16px; font-weight: bold;")
+                            widget.setStyleSheet("font-size: 15px; font-weight: bold; color: #5b4300;")
                         elif widget.objectName() == "previewMeta":
-                            widget.setStyleSheet("font-size: 14px;")
+                            widget.setStyleSheet("font-size: 13px; color: #6b5a2a;")
         if self.input_port_label is not None:
             self.input_port_label.show()
+            self.input_port_label.setStyleSheet("color: #94a3b8; font-size: 12px; font-weight: 500;")
         if self.output_port_label is not None:
             self.output_port_label.show()
+            self.output_port_label.setStyleSheet("color: #94a3b8; font-size: 12px; font-weight: 500;")
         self._simplify_layout(restore=False)
 
     def _apply_mini_mode(self) -> None:
@@ -306,7 +312,7 @@ class BscanPreviewCard(QFrame):
                     widget = item.widget()
                     if widget.objectName() in ("previewTitle",):
                         widget.show()
-                        widget.setStyleSheet("font-size: 20px; font-weight: bold;")
+                        widget.setStyleSheet("font-size: 20px; font-weight: bold; color: #5b4300;")
                     elif widget.objectName() in ("previewMeta",):
                         widget.hide()
                     elif widget.objectName() == "previewImage":
