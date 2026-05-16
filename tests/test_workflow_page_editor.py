@@ -19,7 +19,7 @@ from core.app_paths import get_workflow_templates_dir
 from core.workflow_data import WORKFLOW_STAGE_BY_ID, WorkflowConfig, WorkflowConfigManager, WorkflowMethod, build_default_workflow_config
 from ui.bscan_viewer_dialog import BscanViewerDialog
 from ui.workflow_canvas_cards import WorkflowNodeCard, WorkflowNodeProxy
-from ui.workflow_canvas_cards import WorkflowCanvasView
+from ui.workflow_canvas_cards import WorkflowCanvasView, candidate_methods_for_workflow_method
 from ui.workflow_canvas_preview import BscanPreviewCard, _downsample_for_preview
 from ui.gui_workflow_page import WorkflowPage
 
@@ -252,17 +252,27 @@ def test_workflow_canvas_zoom_lod_switches_full_compact_mini_without_rebuilding_
         assert all(proxy.widget().isVisible() for proxy in proxies)
 
         canvas.resetTransform()
-        canvas.scale(0.7, 0.7)
+        canvas.scale(0.70, 0.70)
         canvas._apply_zoom_lod(force=True)
         app.processEvents()
         assert not any(proxy.compact_item.isVisible() for proxy in proxies)
         assert not any(proxy.mini_item.isVisible() for proxy in proxies)
         assert all(proxy.widget().isVisible() for proxy in proxies)
-        assert all(proxy.widget().algorithm_row_widget.isHidden() for proxy in proxies)
-        assert all(proxy.widget().subtitle_label.isVisible() for proxy in proxies)
+        assert all(proxy.widget().algorithm_row_widget.isVisible() for proxy in proxies), "70% 应是 full 模式，algorithm_row 应可见"
+        assert all(proxy.widget().subtitle_label.isHidden() for proxy in proxies), "full 模式下 subtitle 应隐藏"
 
         canvas.resetTransform()
-        canvas.scale(0.45, 0.45)
+        canvas.scale(0.59, 0.59)
+        canvas._apply_zoom_lod(force=True)
+        app.processEvents()
+        assert not any(proxy.compact_item.isVisible() for proxy in proxies)
+        assert not any(proxy.mini_item.isVisible() for proxy in proxies)
+        assert all(proxy.widget().isVisible() for proxy in proxies)
+        assert all(proxy.widget().algorithm_row_widget.isHidden() for proxy in proxies), "59% 应是 compact 模式，algorithm_row 应隐藏"
+        assert all(proxy.widget().subtitle_label.isVisible() for proxy in proxies), "compact 模式下 subtitle 应可见"
+
+        canvas.resetTransform()
+        canvas.scale(0.37, 0.37)
         canvas._apply_zoom_lod(force=True)
         app.processEvents()
         assert not any(proxy.compact_item.isVisible() for proxy in proxies)
@@ -279,6 +289,7 @@ def test_workflow_canvas_zoom_lod_switches_full_compact_mini_without_rebuilding_
         assert not any(proxy.compact_item.isVisible() for proxy in proxies)
         assert not any(proxy.mini_item.isVisible() for proxy in proxies)
         assert all(proxy.widget().isVisible() for proxy in proxies)
+        assert all(proxy.widget().algorithm_row_widget.isVisible() for proxy in proxies), "100% 应是 full 模式"
     finally:
         canvas.close()
         app.processEvents()
@@ -304,7 +315,7 @@ def test_workflow_canvas_preview_node_updates_from_output_data():
         assert "Test B-scan" in preview_cards[0].source_label.text()
 
         canvas.resetTransform()
-        canvas.scale(0.7, 0.7)
+        canvas.scale(0.59, 0.59)
         canvas._apply_zoom_lod(force=True)
         app.processEvents()
         preview_proxy = next(proxy for proxy in canvas._scene.proxies if isinstance(proxy.widget(), BscanPreviewCard))
@@ -939,3 +950,202 @@ def test_workflow_config_manager_uses_user_writable_template_dir(monkeypatch, tm
     assert config_dir.parent == expected_root
     assert config_dir.name == "workflow_configs"
     assert str(config_dir).startswith(str(tmp_path))
+
+
+def test_lod_mode_thresholds():
+    """测试 LOD 缩放阈值：60% full, 59% compact, 38% compact, 37% mini"""
+    app = _get_app()
+    canvas = WorkflowCanvasView()
+    try:
+        config = build_default_workflow_config("high_quality_uav_gpr")
+        canvas.set_methods(config.methods)
+        app.processEvents()
+
+        canvas.resetTransform()
+        canvas.scale(0.60, 0.60)
+        assert canvas._lod_mode() == "full", "60% 缩放应返回 full"
+
+        canvas.resetTransform()
+        canvas.scale(0.59, 0.59)
+        assert canvas._lod_mode() == "compact", "59% 缩放应返回 compact"
+
+        canvas.resetTransform()
+        canvas.scale(0.38, 0.38)
+        assert canvas._lod_mode() == "compact", "38% 缩放应返回 compact"
+
+        canvas.resetTransform()
+        canvas.scale(0.37, 0.37)
+        assert canvas._lod_mode() == "mini", "37% 缩放应返回 mini"
+
+        canvas.resetTransform()
+        canvas.scale(1.0, 1.0)
+        assert canvas._lod_mode() == "full", "100% 缩放应返回 full"
+    finally:
+        canvas.close()
+        app.processEvents()
+
+
+def test_workflow_bottom_drawer_single_layer():
+    """测试底部只有一套 bottom drawer，无双层面板"""
+    app = _get_app()
+    page = WorkflowPage()
+    try:
+        page.show()
+        app.processEvents()
+
+        assert hasattr(page, "bottom_drawer"), "应该有 bottom_drawer"
+        assert page.bottom_drawer is not None, "bottom_drawer 不应为 None"
+        assert hasattr(page, "bottom_drawer_buttons"), "应该有 bottom_drawer_buttons"
+        assert len(page.bottom_drawer_buttons) == 5, "应该有 5 个抽屉按钮"
+        assert "logs" in page.bottom_drawer_buttons
+        assert "validation" in page.bottom_drawer_buttons
+        assert "qc" in page.bottom_drawer_buttons
+        assert "evidence" in page.bottom_drawer_buttons
+        assert "export" in page.bottom_drawer_buttons
+
+        drawer_visible = page.bottom_drawer.isVisible()
+        stack_hidden = page.bottom_drawer_stack.isHidden()
+        assert drawer_visible, "bottom_drawer 应该可见"
+        assert stack_hidden, "bottom_drawer_stack 初始应隐藏（收起状态）"
+
+        page.bottom_drawer_toggle.click()
+        app.processEvents()
+        assert page.bottom_drawer_stack.isVisible(), "点击后 stack 应展开"
+
+        page._set_bottom_drawer_expanded(False)
+        app.processEvents()
+        assert page.bottom_drawer_stack.isHidden(), "收起后 stack 应隐藏"
+    finally:
+        page.close()
+        app.processEvents()
+
+
+def test_workflow_algorithm_button_creates_popup():
+    """测试算法按钮点击后弹出选择器"""
+    app = _get_app()
+    page = WorkflowPage()
+    try:
+        page.show()
+        app.processEvents()
+
+        selected_row = _select_method(page, "sec_gain")
+        app.processEvents()
+
+        assert selected_row >= 0, "sec_gain 节点应该存在"
+        sec_gain_method = page.config.methods[selected_row]
+        assert sec_gain_method.method_id == "sec_gain", f"选中的应该是 sec_gain，实际是 {sec_gain_method.method_id}"
+
+        candidates = candidate_methods_for_workflow_method(sec_gain_method)
+        assert len(candidates) > 1, "sec_gain 节点应该有多个候选算法"
+
+        canvas = page.workflow_canvas
+        proxies = [p for p in canvas._scene.proxies if p.row == selected_row]
+        assert proxies, f"应该有 row={selected_row} 的节点"
+
+        first_proxy = proxies[0]
+        card = first_proxy.widget()
+        assert isinstance(card, WorkflowNodeCard), "节点应该是 WorkflowNodeCard"
+
+        alg_button = card.algorithm_button
+        if alg_button is not None:
+            global_pos = alg_button.mapToGlobal(alg_button.rect().bottomLeft())
+
+            canvas._on_algorithm_selector_requested(first_proxy.row, global_pos)
+            app.processEvents()
+
+            popup = canvas._algorithm_popup
+            assert popup is not None, "应该创建算法选择器 popup"
+            assert popup.isVisible(), "popup 应该可见"
+    finally:
+        page.close()
+        app.processEvents()
+
+
+def test_workflow_algorithm_popup_updates_method_id():
+    """测试算法 popup 选择后 method_id 更新"""
+    app = _get_app()
+    page = WorkflowPage()
+    try:
+        page.show()
+        app.processEvents()
+
+        _select_method(page, "sec_gain")
+        app.processEvents()
+
+        canvas = page.workflow_canvas
+        proxies = [p for p in canvas._scene.proxies if p.row == 0]
+        assert proxies, "应该有 row=0 的节点"
+
+        first_proxy = proxies[0]
+        original_method_id = first_proxy.method.method_id
+
+        candidates = candidate_methods_for_workflow_method(first_proxy.method)
+        if len(candidates) > 1 and original_method_id in candidates:
+            new_method = next(m for m in candidates if m != original_method_id)
+
+            canvas._do_switch_algorithm(0, new_method)
+            app.processEvents()
+
+            assert first_proxy.method.method_id == new_method, f"应该切换到 {new_method}"
+    finally:
+        page.close()
+        app.processEvents()
+
+
+def test_workflow_algorithm_button_clicks_do_not_drag_node():
+    """测试算法按钮点击不会触发节点拖拽"""
+    app = _get_app()
+    canvas = WorkflowCanvasView()
+    try:
+        config = build_default_workflow_config("high_quality_uav_gpr")
+        canvas.set_methods(config.methods)
+        app.processEvents()
+
+        proxies = [p for p in canvas._scene.proxies if p.row >= 0]
+        assert proxies, "应该有非 preview 的节点"
+
+        first_proxy = proxies[0]
+        card = first_proxy.widget()
+        assert isinstance(card, WorkflowNodeCard), "节点应该是 WorkflowNodeCard"
+
+        original_pos = first_proxy.pos()
+
+        if card.algorithm_button is not None:
+            alg_button = card.algorithm_button
+
+            from PyQt6.QtCore import QPointF
+            local_center = alg_button.rect().center()
+            scene_pos = first_proxy.mapToScene(local_center)
+            view_pos = canvas.mapFromScene(scene_pos)
+
+            from PyQt6.QtGui import QMouseEvent
+            press_event = QMouseEvent(
+                QEvent.Type.MouseButtonPress,
+                view_pos,
+                canvas.viewport().mapToGlobal(view_pos),
+                Qt.MouseButton.LeftButton,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+            )
+            canvas.viewportEvent(press_event)
+
+            assert canvas._drag_proxy is None, "点击算法按钮后不应设置拖拽代理"
+
+            from PyQt6.QtGui import QMouseEvent
+            release_event = QMouseEvent(
+                QEvent.Type.MouseButtonRelease,
+                view_pos,
+                canvas.viewport().mapToGlobal(view_pos),
+                Qt.MouseButton.LeftButton,
+                Qt.MouseButton.NoButton,
+                Qt.KeyboardModifier.NoModifier,
+            )
+            canvas.viewportEvent(release_event)
+            app.processEvents()
+
+            current_pos = first_proxy.pos()
+            assert current_pos == original_pos, "算法按钮点击后节点位置不应改变"
+    finally:
+        canvas.close()
+        app.processEvents()
+

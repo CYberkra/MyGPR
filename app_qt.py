@@ -1712,6 +1712,17 @@ class GPRGuiQt(QMainWindow):
         dialog.activateWindow()
         self._log(f"打开 B-scan 大图窗口: {label}")
 
+    def _hide_legacy_panels(self):
+        """隐藏旧 matplotlib toolbar、runtime panel 和 plot stack。"""
+        if hasattr(self, "_runtime_panel_bar") and self._runtime_panel_bar is not None:
+            self._runtime_panel_bar.setVisible(False)
+        if hasattr(self, "_runtime_panel_container") and self._runtime_panel_container is not None:
+            self._runtime_panel_container.setVisible(False)
+        if hasattr(self, "_plot_toolbar_row") and self._plot_toolbar_row is not None:
+            self._plot_toolbar_row.setVisible(False)
+        if hasattr(self, "plot_stack_host") and self.plot_stack_host is not None:
+            self.plot_stack_host.setVisible(False)
+
     def switch_to_legacy_mode(self):
         """聚焦到 Studio 主工作台。"""
         self.switch_to_main_mode("basic")
@@ -1747,6 +1758,8 @@ class GPRGuiQt(QMainWindow):
                 "quality": "QC / Export",
             }.get(tab_key, "工作流主画布")
             self._log(f"切换到: {tab_name}")
+            
+            self._hide_legacy_panels()
 
     def switch_to_workflow_tab(self):
         """聚焦到中央工作流主画布。"""
@@ -3640,9 +3653,13 @@ class GPRGuiQt(QMainWindow):
     def _sync_runtime_panels_visibility(self):
         """同步运行时面板可见性"""
         if self._runtime_panel_bar is not None:
-            self._runtime_panel_bar.setVisible(True)
-        if self._active_runtime_panel is not None:
-            self._show_runtime_panel(self._active_runtime_panel)
+            self._runtime_panel_bar.setVisible(False)
+        if self._runtime_panel_container is not None:
+            self._runtime_panel_container.setVisible(False)
+        if hasattr(self, "_plot_toolbar_row") and self._plot_toolbar_row is not None:
+            self._plot_toolbar_row.setVisible(False)
+        if hasattr(self, "plot_stack_host") and self.plot_stack_host is not None:
+            self.plot_stack_host.setVisible(False)
 
     # ============ 数据加载 ============
 

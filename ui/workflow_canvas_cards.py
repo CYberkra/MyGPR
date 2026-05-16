@@ -1604,8 +1604,6 @@ class WorkflowCanvasView(QGraphicsView):
         self._rebuild_pending = False
         self._compact_cards = False
         self._lod_state = "full"
-        self._compact_threshold = 0.58
-        self._normal_threshold = 0.74
         self._algorithm_popup = None
         self._algorithm_popup_row = -1
         self.setRenderHints(self.renderHints())
@@ -2092,6 +2090,22 @@ class WorkflowCanvasView(QGraphicsView):
         if isinstance(card, BscanPreviewCard):
             self.preview_large_requested.emit(card._data, card._label)
 
+    def _is_algorithm_button_clicked(self, proxy: WorkflowNodeProxy, view_pos: QPoint, scene_pos: QPointF) -> bool:
+        """检测是否点击了算法按钮，如果是则触发算法选择器。"""
+        card = proxy.widget()
+        if not isinstance(card, WorkflowNodeCard):
+            return False
+        
+        local_pos = proxy.mapFromScene(scene_pos)
+        child = card.childAt(int(local_pos.x()), int(local_pos.y()))
+        while child is not None and child is not card:
+            if isinstance(child, QToolButton) and child.objectName() == "nodeAlgorithmButton":
+                global_pos = child.mapToGlobal(child.rect().bottomLeft())
+                self._on_algorithm_selector_requested(proxy.row, global_pos)
+                return True
+            child = child.parentWidget()
+        return False
+
     def viewportEvent(self, event):  # noqa: N802 - Qt override
         event_type = event.type()
 
@@ -2124,18 +2138,23 @@ class WorkflowCanvasView(QGraphicsView):
                 return True
 
             proxy = self._proxy_at_view_pos(view_pos)
-            if proxy is not None and not self._is_interactive_card_target(proxy, scene_pos):
-                if self._space_pressed:
-                    self._start_pan(view_pos, left=True)
+            if proxy is not None:
+                if self._is_algorithm_button_clicked(proxy, view_pos, scene_pos):
                     event.accept()
                     return True
-                self._drag_proxy = proxy
-                self._drag_scene_offset = scene_pos - proxy.pos()
-                if proxy.row >= 0:
-                    self.node_selected.emit(proxy.row)
-                self.setCursor(Qt.CursorShape.ClosedHandCursor)
-                event.accept()
-                return True
+
+                if not self._is_interactive_card_target(proxy, scene_pos):
+                    if self._space_pressed:
+                        self._start_pan(view_pos, left=True)
+                        event.accept()
+                        return True
+                    self._drag_proxy = proxy
+                    self._drag_scene_offset = scene_pos - proxy.pos()
+                    if proxy.row >= 0:
+                        self.node_selected.emit(proxy.row)
+                    self.setCursor(Qt.CursorShape.ClosedHandCursor)
+                    event.accept()
+                    return True
 
             if proxy is None and not (event.modifiers() & Qt.KeyboardModifier.ShiftModifier):
                 self._start_pan(view_pos, left=True)
@@ -2413,9 +2432,9 @@ class WorkflowCanvasView(QGraphicsView):
 
     def _lod_mode(self) -> str:
         scale = self.transform().m11()
-        if scale >= 0.85:
+        if scale >= 0.60:
             return "full"
-        if scale >= 0.50:
+        if scale >= 0.38:
             return "compact"
         return "mini"
 
