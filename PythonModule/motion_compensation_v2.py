@@ -74,6 +74,31 @@ def _warning(code: str, message: str, **details: Any) -> dict[str, Any]:
     )
 
 
+def _as_float(value: Any, *, default: float) -> float:
+    if value is None:
+        return float(default)
+    if isinstance(value, str) and value.strip() == "":
+        return float(default)
+    try:
+        arr = np.asarray(value)
+    except (TypeError, ValueError):
+        arr = None
+    try:
+        if arr is not None:
+            if arr.size == 0:
+                return float(default)
+            return float(arr.reshape(-1)[0])
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _as_optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    return _as_float(value, default=0.0)
+
+
 def _compute_reference_height(
     height: np.ndarray,
     *,
@@ -85,7 +110,7 @@ def _compute_reference_height(
     if mode == "min":
         return float(np.min(height))
     if mode == "manual":
-        manual = float(manual_height_m)
+        manual = _as_float(manual_height_m, default=0.0)
         if manual > 0.0 and np.isfinite(manual):
             return manual
         warnings.append(
@@ -320,17 +345,11 @@ def _resolve_shift_sample_limit(
     sample_count: int,
 ) -> tuple[float | None, str | None, dict[str, float]]:
     candidates: list[tuple[str, float]] = []
-    try:
-        sample_limit = float(max_shift_samples) if max_shift_samples is not None else 0.0
-    except (TypeError, ValueError):
-        sample_limit = 0.0
+    sample_limit = _as_float(max_shift_samples, default=0.0)
     if sample_limit > 0.0 and np.isfinite(sample_limit):
         candidates.append(("max_shift_samples", sample_limit))
 
-    try:
-        ns_limit = float(max_shift_ns) if max_shift_ns is not None else 0.0
-    except (TypeError, ValueError):
-        ns_limit = 0.0
+    ns_limit = _as_float(max_shift_ns, default=0.0)
     if ns_limit > 0.0 and np.isfinite(ns_limit) and sample_interval_ns > 0.0:
         candidates.append(("max_shift_ns", ns_limit / sample_interval_ns))
 
@@ -523,17 +542,28 @@ def method_motion_compensation_v2(
     quality_flags: list[str] = []
     updates: dict[str, np.ndarray] = {}
     corrected = np.array(arr, copy=True)
+    manual_height_value = _as_float(manual_height_m, default=0.0)
+    max_shift_samples_value = _as_optional_float(max_shift_samples)
+    max_shift_ns_value = _as_float(max_shift_ns, default=0.0)
+    max_amplitude_scale_value = _as_float(max_amplitude_scale, default=2.0)
+    resample_spacing_value = _as_float(resample_spacing_m, default=0.0)
+    air_wave_speed_value = _as_float(
+        air_wave_speed_m_per_ns,
+        default=AIR_WAVE_SPEED_M_PER_NS,
+    )
+    apc_offset_x_value = _as_float(apc_offset_x_m, default=0.0)
+    apc_offset_y_value = _as_float(apc_offset_y_m, default=0.0)
+    apc_offset_z_value = _as_float(apc_offset_z_m, default=0.0)
+    max_abs_tilt_value = _as_float(max_abs_tilt_deg, default=20.0)
 
     meta: dict[str, Any] = {
         "method": "motion_compensation_v2",
         "skipped": False,
         "source_traces": int(trace_count),
-        "air_wave_speed_m_per_ns": float(air_wave_speed_m_per_ns),
+        "air_wave_speed_m_per_ns": air_wave_speed_value,
         "height_reference_mode": str(height_reference_mode),
-        "max_shift_samples_requested": (
-            float(max_shift_samples) if max_shift_samples is not None else None
-        ),
-        "max_shift_ns_requested": float(max_shift_ns),
+        "max_shift_samples_requested": max_shift_samples_value,
+        "max_shift_ns_requested": max_shift_ns_value,
         "height_correction_applied": False,
         "time_shift_correction_applied": False,
         "amplitude_correction_applied": False,
@@ -653,11 +683,11 @@ def method_motion_compensation_v2(
 
     meta["input_quality"] = input_quality
 
-    if valid_height and air_wave_speed_m_per_ns > 0.0:
+    if valid_height and air_wave_speed_value > 0.0:
         h_ref = _compute_reference_height(
             height_m,
             mode=height_reference_mode,
-            manual_height_m=manual_height_m,
+            manual_height_m=manual_height_value,
             warnings=warnings,
         )
         if h_ref <= 0.0 or not np.isfinite(h_ref):
@@ -687,7 +717,7 @@ def method_motion_compensation_v2(
             )
 
         if compensate_amplitude:
-            max_scale = max(float(max_amplitude_scale), 1.0)
+            max_scale = max(max_amplitude_scale_value, 1.0)
             amp_scale = (height_m / h_ref) ** 2
             amp_scale = np.clip(amp_scale, 1.0 / max_scale, max_scale)
             corrected = corrected * amp_scale[np.newaxis, :].astype(np.float32)
@@ -703,7 +733,8 @@ def method_motion_compensation_v2(
             if resolved_time_window_ns is None and "time_window_ns" in metadata:
                 resolved_time_window_ns = np.asarray(metadata["time_window_ns"]).reshape(-1)[0]
 
-            if resolved_time_window_ns is None or float(resolved_time_window_ns) <= 0.0:
+            resolved_time_window_value = _as_optional_float(resolved_time_window_ns)
+            if resolved_time_window_value is None or resolved_time_window_value <= 0.0:
                 quality_flags.append("missing_time_window_ns")
                 warnings.append(
                     _warning(
@@ -712,13 +743,13 @@ def method_motion_compensation_v2(
                     )
                 )
             else:
-                dt_ns = float(resolved_time_window_ns) / max(samples - 1, 1)
-                time_shift_ns = 2.0 * (height_m - h_ref) / float(air_wave_speed_m_per_ns)
+                dt_ns = resolved_time_window_value / max(samples - 1, 1)
+                time_shift_ns = 2.0 * (height_m - h_ref) / air_wave_speed_value
                 time_shift_samples = time_shift_ns / dt_ns
                 raw_shift_samples = time_shift_samples.copy()
                 clamp, clamp_source, clamp_details = _resolve_shift_sample_limit(
-                    max_shift_samples=max_shift_samples,
-                    max_shift_ns=max_shift_ns,
+                    max_shift_samples=max_shift_samples_value,
+                    max_shift_ns=max_shift_ns_value,
                     sample_interval_ns=dt_ns,
                     sample_count=samples,
                 )
@@ -746,7 +777,7 @@ def method_motion_compensation_v2(
                 corrected = _apply_time_shift(corrected, time_shift_samples)
                 updates["time_shift_ns"] = time_shift_ns.astype(np.float32)
                 updates["time_shift_samples"] = time_shift_samples.astype(np.float32)
-                meta["time_window_ns"] = float(resolved_time_window_ns)
+                meta["time_window_ns"] = resolved_time_window_value
                 meta["sample_interval_ns"] = float(dt_ns)
                 meta["time_shift_ns"] = time_shift_ns.astype(np.float32)
                 meta["time_shift_samples"] = time_shift_samples.astype(np.float32)
@@ -767,16 +798,16 @@ def method_motion_compensation_v2(
         metadata,
         trace_count,
         height_m=height_m if valid_height else None,
-        apc_offset_x_m=apc_offset_x_m,
-        apc_offset_y_m=apc_offset_y_m,
-        apc_offset_z_m=apc_offset_z_m,
-        max_abs_tilt_deg=max_abs_tilt_deg,
+        apc_offset_x_m=apc_offset_x_value,
+        apc_offset_y_m=apc_offset_y_value,
+        apc_offset_z_m=apc_offset_z_value,
+        max_abs_tilt_deg=max_abs_tilt_value,
         quality_flags=quality_flags,
         warnings=warnings,
     )
     updates.update(attitude_updates)
 
-    if resample_spacing_m and float(resample_spacing_m) > 0.0:
+    if resample_spacing_value > 0.0:
         metadata_for_resampling = _metadata_for_output(metadata, updates, trace_count)
         source_distance = _numeric_field_or_none(
             metadata_for_resampling, "trace_distance_m", trace_count
@@ -800,7 +831,7 @@ def method_motion_compensation_v2(
         else:
             target_distance = build_uniform_trace_distance_m(
                 source_distance,
-                spacing_m=float(resample_spacing_m),
+                spacing_m=resample_spacing_value,
             )
             corrected = _resample_bscan_columns(corrected, source_distance, target_distance)
             trace_metadata_out = resample_trace_metadata(
@@ -809,7 +840,7 @@ def method_motion_compensation_v2(
             )
             meta["trace_metadata_out"] = trace_metadata_out
             meta["target_traces"] = int(target_distance.size)
-            meta["resample_spacing_m"] = float(resample_spacing_m)
+            meta["resample_spacing_m"] = resample_spacing_value
             meta["resampling_applied"] = True
 
     if not meta["resampling_applied"] and updates:

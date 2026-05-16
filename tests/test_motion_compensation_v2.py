@@ -287,6 +287,40 @@ def test_v2_resamples_data_and_metadata_to_uniform_trace_spacing():
     assert meta["resampling_applied"] is True
 
 
+def test_v2_accepts_numpy_scalar_runtime_parameters():
+    source_distance = np.array([0.0, 0.4, 1.1, 2.0], dtype=np.float64)
+    data = np.zeros((64, 4), dtype=np.float32)
+    metadata = _base_metadata(4)
+    metadata["trace_distance_m"] = source_distance.copy()
+    metadata["local_x_m"] = source_distance.copy()
+
+    corrected, meta = method_motion_compensation_v2(
+        data,
+        trace_metadata=metadata,
+        height_reference_mode="manual",
+        manual_height_m=np.array([1.5]),
+        time_window_ns=np.array([10.0]),
+        max_shift_samples=np.array([0.5]),
+        max_shift_ns=np.array([0.75]),
+        max_amplitude_scale=np.array([1.5]),
+        resample_spacing_m=np.array([0.5]),
+        air_wave_speed_m_per_ns=np.array([AIR_WAVE_SPEED_M_PER_NS]),
+        apc_offset_x_m=np.array([0.0]),
+        apc_offset_y_m=np.array([0.0]),
+        apc_offset_z_m=np.array([0.0]),
+        max_abs_tilt_deg=np.array([15.0]),
+    )
+
+    assert corrected.shape[1] == 5
+    assert meta["height_reference_m"] == pytest.approx(1.5)
+    assert meta["time_window_ns"] == pytest.approx(10.0)
+    assert meta["max_shift_samples_requested"] == pytest.approx(0.5)
+    assert meta["max_shift_ns_requested"] == pytest.approx(0.75)
+    assert meta["max_shift_samples_effective"] == pytest.approx(0.5)
+    assert meta["resample_spacing_m"] == pytest.approx(0.5)
+    assert meta["air_wave_speed_m_per_ns"] == pytest.approx(AIR_WAVE_SPEED_M_PER_NS)
+
+
 def test_v2_does_not_mutate_input_data_or_metadata():
     rng = np.random.default_rng(123)
     data = rng.normal(size=(32, 6)).astype(np.float32)
