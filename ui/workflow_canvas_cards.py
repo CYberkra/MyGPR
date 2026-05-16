@@ -1002,11 +1002,18 @@ class WorkflowNodeCard(QFrame):
             action.setData(key)
             action.setCheckable(True)
             action.setChecked(key == self.method.method_id)
-            # 直接绑定 triggered 信号，避免依赖 menu.exec() 返回值
+            # 使用延迟调用避免在 QMenu.exec() 事件循环中重建 widget 导致崩溃
             action.triggered.connect(
-                lambda checked=False, method_id=key: self._switch_algorithm_from_card(str(method_id))
+                lambda checked=False, method_id=key: self._queue_algorithm_switch_from_card(str(method_id))
             )
         return menu
+
+    def _queue_algorithm_switch_from_card(self, method_id: str) -> None:
+        """延迟切换算法，避免在菜单事件循环中重建 widget 导致崩溃。"""
+        if method_id == self.method.method_id:
+            return
+        # 延迟 0ms 意味着在下一个事件循环中执行，确保菜单已关闭
+        QTimer.singleShot(0, lambda mid=method_id: self._switch_algorithm_from_card(mid))
 
     def _switch_algorithm_from_card(self, method_id: str) -> None:
         """Switch to a new algorithm and rebuild the card."""

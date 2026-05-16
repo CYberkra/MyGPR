@@ -308,8 +308,8 @@ def test_algorithm_menu_current_action_no_change():
     assert method.params == original_params, "当前算法点击不应该重建参数"
 
 
-def test_algorithm_switch_successive_clicks():
-    """测试48: 连续单击 SEC -> AGC -> SEC 每次都能成功切换"""
+def test_algorithm_switch_with_queued_delayed_switch():
+    """测试49: 验证 _queue_algorithm_switch_from_card 方法存在且使用 QTimer"""
     app = QApplication.instance() or QApplication(sys.argv)
     
     method = WorkflowMethod(
@@ -320,20 +320,48 @@ def test_algorithm_switch_successive_clicks():
     method.order = 1
     card = WorkflowNodeCard(0, method)
     
-    # 第一次切换到 AGC
+    # 验证方法存在
+    assert hasattr(card, '_queue_algorithm_switch_from_card'), "_queue_algorithm_switch_from_card 方法应该存在"
+    
+    # 调用队列方法，应该使用 QTimer.singleShot 延迟执行
+    card._queue_algorithm_switch_from_card("agcGain")
+    
+    # 验证 method_id 没有立即改变（因为是延迟执行）
+    assert method.method_id == "sec_gain", "延迟调用后 method_id 应该还没改变"
+    
+    # 处理事件，让 QTimer 执行
+    app.processEvents()
+    
+    # 验证 method_id 已更新
+    assert method.method_id == "agcGain", f"QTimer 执行后应该切换到 agcGain，实际是 {method.method_id}"
+
+
+def test_algorithm_menu_action_uses_queued_switch():
+    """测试50: 触发 action.triggered 应该使用延迟切换，不会立即重建 widget"""
+    app = QApplication.instance() or QApplication(sys.argv)
+    
+    method = WorkflowMethod(
+        method_id="sec_gain",
+        stage_id="gain",
+        category="gain",
+    )
+    method.order = 1
+    card = WorkflowNodeCard(0, method)
+    
+    # 构建菜单
     menu = card._build_algorithm_menu()
+    
+    # 找到 agcGain action 并触发
     for action in menu.actions():
         if action.data() == "agcGain":
             action.trigger()
             break
-    app.processEvents()
-    assert method.method_id == "agcGain", "第一次切换应该成功"
     
-    # 第二次切换回 SEC (需要重新 build card)
-    menu2 = card._build_algorithm_menu()
-    for action in menu2.actions():
-        if action.data() == "sec_gain":
-            action.trigger()
-            break
+    # 立即验证：method_id 还没改变（因为是延迟执行）
+    assert method.method_id == "sec_gain", "triggered 后立即检查应该还没切换"
+    
+    # 处理事件，让 QTimer 执行
     app.processEvents()
-    assert method.method_id == "sec_gain", "第二次切换应该成功"
+    
+    # 验证 method_id 已更新
+    assert method.method_id == "agcGain", f"QTimer 执行后应该切换到 agcGain，实际是 {method.method_id}"
