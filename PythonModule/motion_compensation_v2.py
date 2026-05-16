@@ -18,6 +18,7 @@ import numpy as np
 from core.runtime_warnings import build_runtime_warning
 from core.trace_metadata_utils import (
     build_uniform_trace_distance_m,
+    resample_bscan_columns_linear,
     resample_trace_metadata,
 )
 
@@ -480,38 +481,11 @@ def _resample_bscan_columns(
     source_distance_m: np.ndarray,
     target_distance_m: np.ndarray,
 ) -> np.ndarray:
-    arr = np.asarray(data, dtype=np.float32)
-    source = np.asarray(source_distance_m, dtype=np.float64).reshape(-1)
-    target = np.asarray(target_distance_m, dtype=np.float64).reshape(-1)
-    if target.size == 0:
-        return np.empty((arr.shape[0], 0), dtype=np.float32)
-    if source.size <= 1:
-        return np.repeat(arr[:, :1], target.size, axis=1).astype(np.float32, copy=False)
-
-    insert_idx = np.searchsorted(source, target, side="right") - 1
-    left_idx = np.clip(insert_idx, 0, source.size - 2).astype(np.int32)
-    right_idx = left_idx + 1
-    denom = source[right_idx] - source[left_idx]
-    weight = np.divide(
-        target - source[left_idx],
-        denom,
-        out=np.zeros_like(target, dtype=np.float64),
-        where=np.abs(denom) > 1.0e-12,
+    return resample_bscan_columns_linear(
+        data,
+        source_distance_m,
+        target_distance_m,
     )
-
-    below = target <= source[0]
-    above = target >= source[-1]
-    left_idx[below] = 0
-    right_idx[below] = 0
-    left_idx[above] = source.size - 1
-    right_idx[above] = source.size - 1
-    weight[below | above] = 0.0
-
-    weight32 = weight.astype(np.float32)
-    return (
-        arr[:, left_idx] * (1.0 - weight32)[None, :]
-        + arr[:, right_idx] * weight32[None, :]
-    ).astype(np.float32, copy=False)
 
 
 def method_motion_compensation_v2(
