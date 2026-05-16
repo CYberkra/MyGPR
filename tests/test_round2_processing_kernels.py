@@ -109,6 +109,24 @@ def test_method_time_cut_keeps_middle_range():
     assert meta["header_info_updates"]["time_cut_offset_ns"] == 20.0
 
 
+def test_method_time_cut_accepts_numpy_scalar_time_params():
+    raw = np.arange(40, dtype=np.float32).reshape(10, 4)
+
+    result, meta = method_time_cut(
+        raw,
+        mode="keep_range",
+        time_start_ns=np.array([20.0]),
+        time_end_ns=np.array([60.0]),
+        time_window_ns=np.array([100.0]),
+    )
+
+    assert np.array_equal(result, raw[2:6, :])
+    assert meta["time_start_idx"] == 2
+    assert meta["time_end_idx"] == 6
+    assert meta["time_start_ns"] == 20.0
+    assert meta["time_end_ns"] == 60.0
+
+
 def test_time_cut_runtime_params_use_header_total_time_ns():
     raw = np.arange(40, dtype=np.float32).reshape(10, 4)
     params = prepare_runtime_params(

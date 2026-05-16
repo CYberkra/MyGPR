@@ -53,11 +53,13 @@ def method_time_cut(
         total_time_ns=total_ns,
         rounding="floor",
     )
+    time_start_value = _as_float(time_start_ns, default=0.0)
+    time_end_value = _as_float(time_end_ns, default=0.0)
     end_idx = (
         samples
-        if float(time_end_ns or 0.0) <= 0.0
+        if time_end_value <= 0.0
         else _time_to_index(
-            time_end_ns,
+            time_end_value,
             samples=samples,
             total_time_ns=total_ns,
             rounding="ceil",
@@ -80,8 +82,8 @@ def method_time_cut(
     return result, {
         "method": "time_cut",
         "mode": resolved_mode,
-        "time_start_ns": float(time_start_ns or 0.0),
-        "time_end_ns": float(time_end_ns or 0.0),
+        "time_start_ns": float(time_start_value),
+        "time_end_ns": float(time_end_value),
         "time_start_idx": int(cut_start),
         "time_end_idx": int(cut_end),
         "input_samples": int(samples),
@@ -103,13 +105,13 @@ def _resolve_total_time_ns(
     time_step_s: float | None,
 ) -> float:
     try:
-        total_ns = float(time_window_ns) if time_window_ns is not None else 0.0
+        total_ns = _as_float(time_window_ns, default=0.0)
     except (TypeError, ValueError):
         total_ns = 0.0
     if total_ns > 0.0:
         return total_ns
     try:
-        step_s = float(time_step_s) if time_step_s is not None else 0.0
+        step_s = _as_float(time_step_s, default=0.0)
     except (TypeError, ValueError):
         step_s = 0.0
     if step_s > 0.0:
@@ -125,10 +127,34 @@ def _time_to_index(
     rounding: str,
 ) -> int:
     try:
-        value = max(0.0, float(value_ns or 0.0))
+        value = max(0.0, _as_float(value_ns, default=0.0))
     except (TypeError, ValueError):
         value = 0.0
     ratio = value / max(total_time_ns, 1.0e-12)
     raw = ratio * float(samples)
     idx = floor(raw) if rounding == "floor" else ceil(raw)
     return max(0, min(int(idx), samples))
+
+
+def _as_float(value: Any, *, default: float) -> float:
+    scalar = _first_scalar(value)
+    if scalar is None:
+        return float(default)
+    try:
+        return float(scalar)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _first_scalar(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    try:
+        arr = np.asarray(value)
+    except (TypeError, ValueError):
+        return value
+    if arr.size == 0:
+        return None
+    return arr.reshape(-1)[0]
