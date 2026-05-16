@@ -90,3 +90,23 @@ def test_build_airborne_georeference_payload_falls_back_to_trace_distance():
     assert "fallback_trace_distance_axis" in payload["quality_flags"]
     assert "missing_ground_elevation" in payload["quality_flags"]
     assert payload["has_longitude_latitude"] is False
+
+
+def test_build_airborne_georeference_payload_handles_bad_numeric_metadata():
+    data = np.arange(30, dtype=np.float32).reshape(6, 5)
+    trace_metadata = {
+        "trace_distance_m": np.array(["bad", "values"], dtype=object),
+        "flight_height_m": np.array(["not-a-height"], dtype=object),
+    }
+
+    payload = build_airborne_georeference_3d_payload(
+        data,
+        {"total_time_ns": 60.0},
+        trace_metadata,
+    )
+
+    assert payload is not None
+    assert payload["trace_count"] == 5
+    assert np.isfinite(payload["trace_distance_m"]).all()
+    assert np.isfinite(payload["airborne_z_m"]).all()
+    assert np.allclose(payload["trace_distance_m"], 0.0)

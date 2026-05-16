@@ -71,9 +71,12 @@ def _safe_numeric(values: np.ndarray | None, target_len: int, fill_value: float 
     arr = _coerce_length(values, target_len)
     if arr is None:
         return np.full(target_len, fill_value, dtype=np.float64)
-    arr = np.asarray(arr, dtype=np.float64)
+    try:
+        arr = np.asarray(arr, dtype=np.float64)
+    except (TypeError, ValueError):
+        return np.full(target_len, fill_value, dtype=np.float64)
     if arr.size != target_len:
-        arr = np.resize(arr, target_len).astype(np.float64)
+        return np.full(target_len, fill_value, dtype=np.float64)
     return np.where(np.isfinite(arr), arr, fill_value).astype(np.float64)
 
 
