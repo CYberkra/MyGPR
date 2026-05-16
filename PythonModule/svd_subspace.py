@@ -12,8 +12,8 @@ def method_svd_subspace(
     data: np.ndarray,
     rank_start: int = 2,
     rank_end: int = 40,
-    **kwargs,
-):
+    **kwargs: object,
+) -> tuple[np.ndarray, dict[str, object]]:
     """Reconstruct data using a selected SVD singular-value subspace.
 
     Args:
@@ -40,7 +40,7 @@ def method_svd_subspace(
     rank_end = max(rank_start, int(rank_end))
     rank_end = min(rank_end, min_dim)
 
-    U, S, Vt = svd(arr, full_matrices=False)
+    U, S, Vt = svd(arr, full_matrices=False, check_finite=False)
     start_idx = rank_start - 1
     end_idx = rank_end
     reconstructed = (U[:, start_idx:end_idx] * S[start_idx:end_idx]) @ Vt[

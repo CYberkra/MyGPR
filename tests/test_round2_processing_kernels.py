@@ -26,6 +26,7 @@ from PythonModule.hilbert_envelope import method_hilbert_envelope
 from PythonModule.rpca_background import method_rpca_background
 from PythonModule.sec_gain import method_sec_gain
 from PythonModule.set_zero_time import method_set_zero_time
+from PythonModule.svd_background import method_svd_background
 from PythonModule.time_cut import method_time_cut
 from PythonModule.trace_qc import method_trace_qc
 from PythonModule.wavelet_2d import method_wavelet_2d
@@ -384,6 +385,23 @@ def test_method_rpca_background_treats_zero_mu_as_auto_init():
     _, meta = method_rpca_background(raw, lam=0.15, mu=0.0, max_iter=60, tol=1e-5)
 
     assert meta["mu"] > 1e-6
+
+
+def test_method_svd_background_removes_selected_low_rank_component():
+    rows, cols = 18, 10
+    background = np.linspace(0.0, 1.0, rows, dtype=np.float32)[:, None] @ np.ones(
+        (1, cols), dtype=np.float32
+    )
+    anomaly = np.zeros((rows, cols), dtype=np.float32)
+    anomaly[8, 4] = 2.0
+    raw = background + anomaly
+
+    result, estimated_background = method_svd_background(raw, rank=1)
+
+    assert result.shape == raw.shape
+    assert estimated_background.shape == raw.shape
+    assert np.linalg.norm(estimated_background) > 0.0
+    assert np.linalg.norm(result) < np.linalg.norm(raw)
 
 
 def test_method_wavelet_2d_keeps_contract_and_reduces_impulse_noise_energy():
