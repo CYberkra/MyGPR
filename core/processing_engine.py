@@ -296,14 +296,14 @@ def _build_input_sanitized_warnings(
 
 
 def _ensure_2d_array(data: Any) -> np.ndarray:
-    arr = np.asarray(data, dtype=np.float64)
+    arr = np.array(data, dtype=np.float64, copy=True)
     if arr.ndim == 1:
         arr = arr.reshape(-1, 1)
     if arr.ndim != 2:
         raise ProcessingEngineError(f"Must pass 2-d input. shape={arr.shape}")
     if arr.size == 0:
         raise ProcessingEngineError("输入数据为空")
-    return np.array(arr, copy=True)
+    return arr
 
 
 def _run_legacy_adapter(
