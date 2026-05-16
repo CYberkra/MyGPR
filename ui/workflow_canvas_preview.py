@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import numpy as np
@@ -19,6 +20,7 @@ from PyQt6.QtWidgets import (
 )
 
 
+logger = logging.getLogger(__name__)
 PREVIEW_PORT_ROW_Y = 50.0
 
 
@@ -34,6 +36,7 @@ def _coerce_bscan_array(data: Any) -> np.ndarray | None:
     try:
         array = np.asarray(data)
     except Exception:
+        logger.debug("Failed to coerce B-scan preview data to ndarray.", exc_info=True)
         return None
 
     array = np.squeeze(array)
@@ -67,6 +70,7 @@ def _array_to_pixmap(data: Any, *, width: int, height: int) -> QPixmap | None:
     try:
         preview_float = np.asarray(preview, dtype=np.float32)
     except Exception:
+        logger.debug("Failed to convert B-scan preview data to float32.", exc_info=True)
         return None
 
     finite = preview_float[np.isfinite(preview_float)]
@@ -76,6 +80,7 @@ def _array_to_pixmap(data: Any, *, width: int, height: int) -> QPixmap | None:
     try:
         low, high = np.nanpercentile(finite, [1.0, 99.0])
     except Exception:
+        logger.debug("Failed to compute B-scan preview percentile limits.", exc_info=True)
         return None
     if not np.isfinite(low) or not np.isfinite(high) or high <= low:
         low = float(np.nanmin(finite))
@@ -214,6 +219,7 @@ class BscanPreviewCard(QFrame):
         try:
             self._build()
         except Exception:
+            logger.warning("Failed to rebuild B-scan preview card; clearing preview data.", exc_info=True)
             self._data = None
             self._has_data = False
             self._build()
@@ -446,5 +452,5 @@ class BscanPreviewCard(QFrame):
                 if geom.isValid() and geom.height() > 0:
                     return float(geom.center().y())
             except Exception:
-                pass
+                logger.debug("Failed to resolve preview port row anchor.", exc_info=True)
         return PREVIEW_PORT_ROW_Y
