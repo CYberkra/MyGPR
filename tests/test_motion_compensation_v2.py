@@ -9,7 +9,10 @@ import copy
 import numpy as np
 import pytest
 
-from PythonModule.motion_compensation_v2 import method_motion_compensation_v2
+from PythonModule.motion_compensation_v2 import (
+    _resample_bscan_columns,
+    method_motion_compensation_v2,
+)
 
 
 AIR_WAVE_SPEED_M_PER_NS = 0.299792458
@@ -38,6 +41,28 @@ def _copy_metadata(metadata: dict[str, object]) -> dict[str, object]:
     for key, value in metadata.items():
         copied[key] = np.array(value, copy=True) if isinstance(value, np.ndarray) else copy.deepcopy(value)
     return copied
+
+
+def test_resample_bscan_columns_matches_numpy_interp_for_nonuniform_distance():
+    data = np.array(
+        [
+            [0.0, 1.0, 4.0, 9.0],
+            [2.0, 3.0, 5.0, 8.0],
+            [-1.0, 0.5, 1.5, 4.0],
+        ],
+        dtype=np.float32,
+    )
+    source_distance = np.array([0.0, 0.4, 1.5, 2.0], dtype=np.float64)
+    target_distance = np.array([0.0, 0.2, 0.8, 1.5, 1.8, 2.0], dtype=np.float64)
+    expected = np.vstack(
+        [np.interp(target_distance, source_distance, row) for row in data]
+    ).astype(np.float32)
+
+    result = _resample_bscan_columns(data, source_distance, target_distance)
+
+    assert result.dtype == np.float32
+    assert result.shape == (3, 6)
+    assert np.allclose(result, expected, rtol=1e-6, atol=1e-6)
 
 
 def test_v2_uses_agl_height_and_air_velocity_for_time_shift():
