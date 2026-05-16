@@ -18,7 +18,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: F401
 
 from core.gprpy_compat import apply_gprpy_dewow
-from core.scalar_utils import to_float, to_int
+from core.scalar_utils import to_float, to_int, to_int_or_none
 
 
 def _apply_dewow_exact(data: np.ndarray, window: int) -> np.ndarray:
@@ -78,7 +78,9 @@ def dewow(
 
 def method_dewow(data, window=23, **kwargs):
     """去直流（DeWOW）- GUI / auto-tune ndarray 接口。"""
-    window_value = to_int(window, default=23)
+    window_value = to_int_or_none(window)
+    if window_value is None:
+        raise ValueError("dewow window must be numeric")
     result = _apply_dewow_exact(data, window_value)
     return result, {"method": "dewow", "window": window_value}
 

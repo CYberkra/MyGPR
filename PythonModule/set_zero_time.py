@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from core.scalar_utils import to_float
+from core.scalar_utils import to_float, to_float_or_none
 
 
 def _resolve_time_step_s(ny: int, time_step_s: float | None) -> float:
@@ -43,9 +43,10 @@ def _apply_zero_time_shift(
     step_s = _resolve_time_step_s(ny, time_step_s)
     step_ns = step_s * 1e9
 
-    shift_samples = int(
-        max(0.0, to_float(new_zero_time, default=0.0)) / max(step_ns, 1.0e-12)
-    )
+    zero_time_value = to_float_or_none(new_zero_time)
+    if zero_time_value is None:
+        raise ValueError("new_zero_time must be numeric")
+    shift_samples = int(max(0.0, zero_time_value) / max(step_ns, 1.0e-12))
     shift_samples = max(0, min(shift_samples, ny - 1))
 
     result = np.zeros((ny, nx), dtype=np.float32)
@@ -92,7 +93,9 @@ def set_zero_time(
     scans_per_meter_value = to_float(Scans_per_meter, default=50.0)
     scans_per_meter = scans_per_meter_value if scans_per_meter_value > 0 else 1.0
     start_position = to_float(Start_position, default=0.0)
-    new_zero_time = to_float(newZeroTime, default=5.7)
+    new_zero_time = to_float_or_none(newZeroTime)
+    if new_zero_time is None:
+        new_zero_time = 5.7
     twtt = np.linspace(0, length_trace_value, ny)
     x = np.linspace(
         start_position,
@@ -148,7 +151,9 @@ def set_zero_time(
 
 def method_set_zero_time(data, new_zero_time=5.0, time_step_s=None, **kwargs):
     """零时间校正 - GUI / auto-tune ndarray 接口。"""
-    zero_time_value = to_float(new_zero_time, default=5.0)
+    zero_time_value = to_float_or_none(new_zero_time)
+    if zero_time_value is None:
+        raise ValueError("new_zero_time must be numeric")
     result, shift_samples, step_s = _apply_zero_time_shift(
         data,
         new_zero_time=zero_time_value,
