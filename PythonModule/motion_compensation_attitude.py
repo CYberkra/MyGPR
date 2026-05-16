@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from core.scalar_utils import to_float
+
 
 REQUIRED_FIELDS = ("roll_deg", "pitch_deg", "yaw_deg", "local_x_m", "local_y_m")
 
@@ -68,12 +70,16 @@ def method_motion_compensation_attitude(
 
     amplitude_out = np.array(arr, copy=True)
     trace_count = int(arr.shape[1])
+    apc_offset_x_value = to_float(apc_offset_x_m, default=0.0)
+    apc_offset_y_value = to_float(apc_offset_y_m, default=0.0)
+    apc_offset_z_value = to_float(apc_offset_z_m, default=0.0)
+    max_abs_tilt_value = to_float(max_abs_tilt_deg, default=20.0)
     meta: dict[str, object] = {
         "method": "motion_compensation_attitude",
-        "apc_offset_x_m": float(apc_offset_x_m),
-        "apc_offset_y_m": float(apc_offset_y_m),
-        "apc_offset_z_m": float(apc_offset_z_m),
-        "max_abs_tilt_deg": float(max_abs_tilt_deg),
+        "apc_offset_x_m": apc_offset_x_value,
+        "apc_offset_y_m": apc_offset_y_value,
+        "apc_offset_z_m": apc_offset_z_value,
+        "max_abs_tilt_deg": max_abs_tilt_value,
         "trace_count": trace_count,
         "provenance": {
             "geometry_model": "yaw_rotated_tilt_plus_apc_offset_v1",
@@ -82,7 +88,7 @@ def method_motion_compensation_attitude(
         },
     }
 
-    if max_abs_tilt_deg <= 0:
+    if max_abs_tilt_value <= 0:
         raise ValueError("max_abs_tilt_deg 必须为正数")
 
     if trace_metadata is None:
@@ -122,7 +128,7 @@ def method_motion_compensation_attitude(
             meta["reason"] = "trace_metadata['flight_height_m'] 包含零或负值，无法构造有效足迹几何"
             return amplitude_out, meta
 
-    tilt_limit_deg = float(max_abs_tilt_deg)
+    tilt_limit_deg = max_abs_tilt_value
     roll_used_deg = np.clip(roll_deg, -tilt_limit_deg, tilt_limit_deg)
     pitch_used_deg = np.clip(pitch_deg, -tilt_limit_deg, tilt_limit_deg)
     clamped_mask = (np.abs(roll_deg) > tilt_limit_deg) | (np.abs(pitch_deg) > tilt_limit_deg)
@@ -141,15 +147,15 @@ def method_motion_compensation_attitude(
     roll_used_rad = np.deg2rad(roll_used_deg)
     pitch_used_rad = np.deg2rad(pitch_used_deg)
 
-    apc_body_x = np.full(trace_count, float(apc_offset_x_m), dtype=np.float64)
-    apc_body_y = np.full(trace_count, float(apc_offset_y_m), dtype=np.float64)
+    apc_body_x = np.full(trace_count, apc_offset_x_value, dtype=np.float64)
+    apc_body_y = np.full(trace_count, apc_offset_y_value, dtype=np.float64)
     apc_local_x_m, apc_local_y_m = _apply_yaw_rotation(apc_body_x, apc_body_y, yaw_rad)
 
     if flight_height_m is None:
         projection_height_m = np.zeros(trace_count, dtype=np.float64)
         projection_height_source = "lever_arm_only"
     else:
-        projection_height_m = flight_height_m + float(apc_offset_z_m)
+        projection_height_m = flight_height_m + apc_offset_z_value
         if np.any(projection_height_m <= 0.0):
             meta["skipped"] = True
             meta["reason"] = "flight_height_m 与 apc_offset_z_m 组合后非正，无法构造有效投影高度"
