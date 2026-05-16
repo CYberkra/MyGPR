@@ -334,6 +334,37 @@ def test_method_energy_decay_gain_uses_robust_trace_statistic():
     assert float(meta["gain_curve"][4]) <= 1.1
 
 
+def test_gain_methods_accept_numpy_scalar_parameters():
+    raw = np.ones((8, 3), dtype=np.float32)
+
+    sec_result, sec_meta = method_sec_gain(
+        raw,
+        gain_min=np.array([1.0]),
+        gain_max=np.array([4.0]),
+        power=np.array([1.0]),
+    )
+    decay_result, decay_meta = method_energy_decay_gain(
+        raw,
+        strength=np.array([1.0]),
+        smoothing_samples=np.array([3]),
+        min_gain=np.array([0.5]),
+        max_gain=np.array([4.0]),
+        floor_ratio=np.array([0.05]),
+    )
+    scale_result, scale_meta = method_amplitude_scale(
+        raw,
+        mode="constant",
+        scale=np.array([2.0]),
+    )
+
+    assert sec_result.shape == raw.shape
+    assert sec_meta["gain_max"] == 4.0
+    assert decay_result.shape == raw.shape
+    assert decay_meta["smoothing_samples"] == 3
+    assert np.allclose(scale_result, raw * 2.0)
+    assert scale_meta["effective_scale"] == 2.0
+
+
 def test_method_amplitude_scale_constant_mode():
     raw = np.array([[1.0, -2.0], [3.0, -4.0]], dtype=np.float32)
 

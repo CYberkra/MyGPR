@@ -8,6 +8,8 @@ from typing import Any
 
 import numpy as np
 
+from core.scalar_utils import to_float, to_int
+
 
 def method_energy_decay_gain(
     data: np.ndarray,
@@ -30,11 +32,11 @@ def method_energy_decay_gain(
     if arr.size == 0:
         raise ValueError("输入数据为空")
 
-    resolved_strength = max(0.0, float(strength))
-    smooth_window = max(1, int(round(float(smoothing_samples))))
-    gain_min = max(0.0, float(min_gain))
-    gain_max = max(gain_min, float(max_gain))
-    floor = max(0.0, float(floor_ratio))
+    resolved_strength = max(0.0, to_float(strength, default=1.0))
+    smooth_window = max(1, to_int(smoothing_samples, default=31))
+    gain_min = max(0.0, to_float(min_gain, default=0.5))
+    gain_max = max(gain_min, to_float(max_gain, default=8.0))
+    floor = max(0.0, to_float(floor_ratio, default=0.05))
 
     decay = np.median(np.abs(arr), axis=1).astype(np.float64, copy=False)
     decay_smooth = _moving_average(decay, smooth_window)

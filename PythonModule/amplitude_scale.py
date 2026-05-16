@@ -8,6 +8,8 @@ from typing import Any
 
 import numpy as np
 
+from core.scalar_utils import to_float
+
 
 def method_amplitude_scale(
     data: np.ndarray,
@@ -26,11 +28,11 @@ def method_amplitude_scale(
         raise ValueError("输入数据为空")
 
     resolved_mode = str(mode or "constant").strip().lower()
-    target_value = float(target)
-    safe_eps = max(float(eps), 1.0e-12)
+    target_value = to_float(target, default=1.0)
+    safe_eps = max(to_float(eps, default=1.0e-8), 1.0e-12)
 
     if resolved_mode == "constant":
-        effective_scale = float(scale)
+        effective_scale = to_float(scale, default=1.0)
     elif resolved_mode == "peak":
         peak = float(np.max(np.abs(arr)))
         effective_scale = target_value / max(peak, safe_eps)
@@ -44,7 +46,7 @@ def method_amplitude_scale(
     return result.astype(np.float32, copy=False), {
         "method": "amplitude_scale",
         "mode": resolved_mode,
-        "scale": float(scale),
+        "scale": to_float(scale, default=1.0),
         "target": target_value,
         "effective_scale": float(effective_scale),
     }

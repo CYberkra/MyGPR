@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from core.scalar_utils import to_float
+
 
 def method_sec_gain(
     data: np.ndarray,
@@ -20,9 +22,9 @@ def method_sec_gain(
     if arr.size == 0:
         raise ValueError("输入数据为空")
 
-    gain_min = float(gain_min)
-    gain_max = float(gain_max)
-    power = max(float(power), 1.0e-6)
+    gain_min = to_float(gain_min, default=1.0)
+    gain_max = to_float(gain_max, default=6.0)
+    power = max(to_float(power, default=1.0), 1.0e-6)
 
     n_samples = int(arr.shape[0])
     t = np.linspace(0.0, 1.0, n_samples, dtype=np.float32) ** np.float32(power)
