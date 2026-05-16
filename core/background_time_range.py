@@ -71,8 +71,8 @@ def apply_time_range_to_result(
 ) -> np.ndarray:
     """Copy a processed result into the selected time range only."""
 
-    arr = np.asarray(original, dtype=np.float64)
-    proc = np.asarray(processed, dtype=np.float64)
+    arr = np.asarray(original, dtype=np.float32)
+    proc = np.asarray(processed, dtype=np.float32)
     if arr.shape != proc.shape:
         raise ValueError(f"处理前后数据 shape 不一致: {arr.shape} != {proc.shape}")
 
@@ -89,9 +89,9 @@ def apply_time_range_to_result(
         out[start:end, :] = proc[start:end, :]
         return out.astype(np.float32, copy=False)
 
-    weights = np.ones((window_len, 1), dtype=np.float64)
-    ramp_up = np.linspace(0.0, 1.0, taper + 2, dtype=np.float64)[1:-1]
-    ramp_down = np.linspace(1.0, 0.0, taper + 2, dtype=np.float64)[1:-1]
+    weights = np.ones((window_len, 1), dtype=np.float32)
+    ramp_up = np.linspace(0.0, 1.0, taper + 2, dtype=np.float32)[1:-1]
+    ramp_down = np.linspace(1.0, 0.0, taper + 2, dtype=np.float32)[1:-1]
     weights[:taper, 0] = ramp_up
     weights[-taper:, 0] = ramp_down
 
