@@ -12,6 +12,14 @@ All commands below assume this directory is the working directory.
 - Tests live in `tests/`; packaging and smoke checks live in `scripts/`.
 - Generated output and app data should stay out of source files.
 
+## 2026-05 Research Branch Strategy
+- `main` is the stable MyGPR research baseline. Do not make experimental commits directly on `main`.
+- Current research validation branch: `codex/research-gprmax-autotune`.
+- `codex/uavgpr-workflow-refactor` is a Workflow Studio / ComfyUI-style UI experiment branch and is not the current paper-validation mainline.
+- Current priority is research validation, not UI productization: gprMax output ingestion, AutoTune parameter selection, ground-truth metrics, and paper-ready evidence.
+- The gprMax repository is the data producer. MyGPR is the processing, validation, AutoTune, and evidence/report consumer.
+- Do not implement machine learning/deep learning in the current P0 path; first complete deterministic gprMax -> MyGPR truth-metrics -> AutoTune validation.
+
 ## Repo Map
 - `core/` - app data, I/O, registry, engine, shared state, and workflow helpers.
 - `ui/` - Qt pages, dialogs, and workbench widgets.
@@ -50,6 +58,8 @@ All commands below assume this directory is the working directory.
 - `uav_gpr_sfcw_field` means the real project UAV-GPR SFCW CSV contract above. Its default profile is `high_quality_uav_gpr`, and `frequency_filter_1d` defaults to 20-170 MHz.
 - `gprmax_impulse` / `gprmax` means external gprMax `.out` input. `read_gprmax_out()` should read the matching `.in` file when available, attach `header_info["data_context"]`, and expose trace spacing metadata from `#rx_steps` / `#src_steps`.
 - gprMax impulse data must not inherit the field-data 20-170 MHz fixed passband. Its default profile is `gprmax_impulse_validation`; fixed frequency filtering is manual or auto-tune/model-driven only.
+- External gprMax dataset folders should use `core.gprmax_dataset_contract.load_gprmax_dataset_contract()` when a manifest/ground-truth sidecar is available. The expected producer contract includes `*_manifest.json`, `primary_out_file`, optional `metadata_file`, and `ground_truth.yaml`.
+- gprMax producer-side `ground_truth.yaml` uses `gprmax_ground_truth_v1` with zero-based closed ROI intervals such as `sample_range: [s0, s1]` and `trace_range: [t0, t1]`. MyGPR converts these to Python slice-style open ends: `time_end_idx = s1 + 1`, `dist_end_idx = t1 + 1`.
 
 ## Setup
 ```bash
