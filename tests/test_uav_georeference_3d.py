@@ -67,6 +67,11 @@ def test_export_airborne_georeference_bundle_writes_vtk_csv_json(tmp_path: Path)
     assert Path(result["json_path"]).exists()
     assert result["summary"]["trace_count"] == 10
     assert result["summary"]["preview"]["shape"] == [20, 10]
+    vtk_lines = Path(result["vtk_path"]).read_text(encoding="utf-8").splitlines()
+    point_header = vtk_lines.index("POINTS 200 float")
+    assert vtk_lines[point_header + 1] == "0.000000 0.000000 3.000000"
+    lookup_header = vtk_lines.index("LOOKUP_TABLE default")
+    assert vtk_lines[lookup_header + 1] == "0.000000"
 
 
 def test_build_airborne_georeference_payload_falls_back_to_trace_distance():

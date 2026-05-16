@@ -375,19 +375,18 @@ def _write_vtk_structured_grid(
         f.write("DATASET STRUCTURED_GRID\n")
         f.write(f"DIMENSIONS {trace_count} {sample_count} 1\n")
         f.write(f"POINTS {trace_count * sample_count} float\n")
-        for row in range(sample_count):
-            for col in range(trace_count):
-                f.write(
-                    f"{float(curtain_x[row, col]):.6f} "
-                    f"{float(curtain_y[row, col]):.6f} "
-                    f"{float(curtain_z[row, col]):.6f}\n"
-                )
+        points = np.column_stack(
+            (
+                curtain_x.reshape(-1),
+                curtain_y.reshape(-1),
+                curtain_z.reshape(-1),
+            )
+        )
+        np.savetxt(f, points, fmt="%.6f %.6f %.6f")
         f.write(f"POINT_DATA {trace_count * sample_count}\n")
         f.write("SCALARS amplitude float 1\n")
         f.write("LOOKUP_TABLE default\n")
-        for row in range(sample_count):
-            for col in range(trace_count):
-                f.write(f"{float(amplitude[row, col]):.6f}\n")
+        np.savetxt(f, amplitude.reshape(-1), fmt="%.6f")
     return vtk_path
 
 
