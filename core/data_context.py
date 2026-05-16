@@ -53,7 +53,7 @@ def infer_data_context(
 
     try:
         samples = int(header.get("a_scan_length") or 0)
-    except Exception:
+    except (TypeError, ValueError):
         samples = 0
     if samples == 501 and source in {"airborne_csv", "csv", ""}:
         return DATA_CONTEXT_UAV_GPR_SFCW_FIELD
@@ -136,7 +136,7 @@ def frequency_band_from_context(
         try:
             low = float(band[0])
             high = float(band[1])
-        except Exception:
+        except (TypeError, ValueError, IndexError):
             return None
         if high > low >= 0.0:
             return low, high

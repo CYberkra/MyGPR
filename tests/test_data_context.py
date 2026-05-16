@@ -44,3 +44,11 @@ def test_gprmax_impulse_context_does_not_inherit_field_frequency_band():
     assert frequency_band_from_context(header) is None
     assert recommended_profile_for_header(header) == "gprmax_impulse_validation"
     assert header["frequency_filter_policy"] == "model_or_auto_tune_only"
+
+
+def test_data_context_invalid_numeric_fields_fall_back_cleanly():
+    header = {"source": "csv", "a_scan_length": object()}
+
+    assert infer_data_context(header) == "generic_bscan"
+    assert frequency_band_from_context({"frequency_filter_band_mhz": ["bad", 170.0]}) is None
+    assert frequency_band_from_context({"frequency_filter_band_mhz": [20.0]}) is None
