@@ -235,6 +235,53 @@ def build_uniform_trace_distance_m(
     return uniform.astype(np.float32)
 
 
+def resample_bscan_columns_linear(
+    data: np.ndarray,
+    source_distance_m: np.ndarray,
+    target_distance_m: np.ndarray,
+) -> np.ndarray:
+    """Resample B-scan columns along a trace-distance axis with linear interpolation."""
+    arr = np.asarray(data, dtype=np.float32)
+    if arr.ndim != 2:
+        raise ValueError("data must be a 2D B-scan matrix")
+
+    source_distance = _as_1d_array(source_distance_m, np.float64)
+    target_distance = _as_1d_array(target_distance_m, np.float64)
+    if source_distance.size != arr.shape[1]:
+        raise ValueError("source_distance_m length must match B-scan trace count")
+    if source_distance.size == 0:
+        raise ValueError("source_distance_m must contain at least one trace")
+    if np.any(np.diff(source_distance) < 0):
+        raise ValueError("source_distance_m must be monotonically non-decreasing")
+    if target_distance.size == 0:
+        return np.empty((arr.shape[0], 0), dtype=np.float32)
+
+    unique_distance, reverse_index = np.unique(
+        source_distance[::-1],
+        return_index=True,
+    )
+    source_indices = (source_distance.size - 1 - reverse_index).astype(np.int64)
+    source_values = arr[:, source_indices]
+    if unique_distance.size == 1:
+        return np.repeat(source_values[:, :1], target_distance.size, axis=1)
+
+    right_idx = np.searchsorted(unique_distance, target_distance, side="left")
+    right_idx = np.clip(right_idx, 1, unique_distance.size - 1)
+    left_idx = right_idx - 1
+
+    left_x = unique_distance[left_idx]
+    right_x = unique_distance[right_idx]
+    denom = np.where(right_x > left_x, right_x - left_x, 1.0)
+    weight = ((target_distance - left_x) / denom).astype(np.float32)
+    weight = np.where(target_distance <= unique_distance[0], 0.0, weight)
+    weight = np.where(target_distance >= unique_distance[-1], 1.0, weight)
+
+    return (
+        source_values[:, left_idx] * (1.0 - weight)[None, :]
+        + source_values[:, right_idx] * weight[None, :]
+    ).astype(np.float32, copy=False)
+
+
 def resample_trace_metadata(
     trace_metadata: dict[str, np.ndarray],
     *,

@@ -10,6 +10,7 @@ import numpy as np
 
 from core.trace_metadata_utils import (
     build_uniform_trace_distance_m,
+    resample_bscan_columns_linear,
     resample_trace_metadata,
 )
 
@@ -45,7 +46,7 @@ def method_equidistant_trace_resample(
         source_distance,
         spacing_m=requested_spacing if requested_spacing > 0.0 else None,
     )
-    result = _resample_bscan_columns(arr, source_distance, target_distance)
+    result = resample_bscan_columns_linear(arr, source_distance, target_distance)
     metadata_out = resample_trace_metadata(
         metadata,
         target_trace_distance_m=target_distance,
@@ -64,19 +65,3 @@ def method_equidistant_trace_resample(
         "output_traces": int(result.shape[1]),
         "trace_metadata_out": metadata_out,
     }
-
-
-def _resample_bscan_columns(
-    data: np.ndarray,
-    source_distance_m: np.ndarray,
-    target_distance_m: np.ndarray,
-) -> np.ndarray:
-    samples = int(data.shape[0])
-    output = np.empty((samples, target_distance_m.size), dtype=np.float32)
-    for row in range(samples):
-        output[row, :] = np.interp(
-            target_distance_m,
-            source_distance_m,
-            np.asarray(data[row, :], dtype=np.float64),
-        ).astype(np.float32)
-    return output

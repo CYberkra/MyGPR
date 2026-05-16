@@ -12,6 +12,7 @@ import numpy as np
 
 from core.trace_metadata_utils import (  # type: ignore[import]
     build_uniform_trace_distance_m,
+    resample_bscan_columns_linear,
     resample_trace_metadata,
 )
 
@@ -54,23 +55,6 @@ def _prepare_metadata_for_resampling(
 
     prepared["trace_distance_m"] = np.asarray(trace_distance_m, dtype=np.float32).copy()
     return prepared
-
-
-def _resample_bscan_columns(
-    data: np.ndarray,
-    source_distance_m: np.ndarray,
-    target_distance_m: np.ndarray,
-) -> np.ndarray:
-    """对 B-scan 的每个采样点沿道方向做线性插值。"""
-    samples = data.shape[0]
-    resampled = np.empty((samples, target_distance_m.size), dtype=np.float32)
-    for row in range(samples):
-        resampled[row, :] = np.interp(
-            target_distance_m,
-            source_distance_m,
-            data[row, :],
-        ).astype(np.float32)
-    return resampled
 
 
 def method_motion_compensation_speed(
@@ -142,7 +126,7 @@ def method_motion_compensation_speed(
         meta["reason"] = str(exc)
         return arr.copy(), meta
 
-    corrected = _resample_bscan_columns(
+    corrected = resample_bscan_columns_linear(
         arr,
         np.asarray(source_distance_m, dtype=np.float64),
         np.asarray(target_distance_m, dtype=np.float64),
