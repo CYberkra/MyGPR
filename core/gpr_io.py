@@ -416,6 +416,41 @@ def _find_gprmax_input_for_output(out_path: Path) -> Path | None:
     return in_files[0] if in_files else None
 
 
+def _gprmax_output_prefix(out_path: Path) -> str:
+    """Return the shared filename prefix for gprMax per-trace .out files."""
+    stem = out_path.stem
+    if stem.endswith("_merged"):
+        stem = stem[: -len("_merged")]
+    match = re.match(r"^(.*?)(\d+)$", stem)
+    return match.group(1) if match else stem
+
+
+def _gprmax_trace_index(path: Path, prefix: str) -> int | None:
+    """Return the per-trace numeric suffix for a related gprMax .out file."""
+    stem = path.stem
+    if "merged" in stem.lower() or not stem.startswith(prefix):
+        return None
+    suffix = stem[len(prefix) :]
+    if not suffix.isdigit():
+        return None
+    return int(suffix)
+
+
+def _related_gprmax_out_files(out_path: Path) -> list[Path]:
+    """List .out files that belong to the same gprMax B-scan run."""
+    prefix = _gprmax_output_prefix(out_path)
+    related: list[tuple[int, str, Path]] = []
+    for candidate in out_path.parent.glob("*.out"):
+        trace_index = _gprmax_trace_index(candidate, prefix)
+        if trace_index is not None:
+            related.append((trace_index, candidate.name, candidate))
+    if related:
+        return [item[2] for item in sorted(related, key=lambda item: (item[0], item[1]))]
+    if "merged" not in out_path.stem.lower():
+        return [out_path]
+    return []
+
+
 def _safe_attr_list(value: Any) -> list[float] | None:
     try:
         return [float(v) for v in value]
@@ -525,6 +560,31 @@ def _find_data_start(lines: list[str]) -> int:
     return len(lines)
 
 
+def _parse_ascan_amplitudes(
+    lines: list[str],
+    data_start: int,
+    *,
+    max_samples: int | None = None,
+) -> list[float]:
+    """Parse one A-scan amplitude column, skipping malformed rows."""
+    values: list[float] = []
+    for line in lines[data_start:]:
+        if max_samples is not None and len(values) >= max_samples:
+            break
+        parts = line.strip().split(",")
+        if len(parts) >= 2:
+            value_text = parts[1]
+        elif len(parts) == 1:
+            value_text = parts[0]
+        else:
+            continue
+        try:
+            values.append(float(value_text))
+        except ValueError:
+            continue
+    return values
+
+
 def read_ascans_folder(folder_path: str, max_files: int = 0, progress_cb=None) -> dict:
     """从文件夹加载多条 A-scan CSV，组装为 B-scan 矩阵
 
@@ -566,19 +626,7 @@ def read_ascans_folder(folder_path: str, max_files: int = 0, progress_cb=None) -
         raise ValueError(f"无法在 {csv_files[0]} 中找到数值数据")
 
     # 读取第一个文件的幅值（第二列；单列时取第一列）
-    first_data = []
-    for line in first_lines[data_start:]:
-        parts = line.strip().split(",")
-        if len(parts) >= 2:
-            try:
-                first_data.append(float(parts[1]))
-            except ValueError:
-                continue
-        elif len(parts) == 1:
-            try:
-                first_data.append(float(parts[0]))
-            except ValueError:
-                continue
+    first_data = _parse_ascan_amplitudes(first_lines, data_start)
 
     samples = len(first_data)
     if samples == 0:
@@ -607,21 +655,13 @@ def read_ascans_folder(folder_path: str, max_files: int = 0, progress_cb=None) -
         try:
             with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
                 lines = f.readlines()
-            row_idx = 0
-            for line in lines[data_start:]:
-                parts = line.strip().split(",")
-                if len(parts) >= 2 and row_idx < samples:
-                    try:
-                        matrix[row_idx, idx] = float(parts[1])
-                    except ValueError:
-                        pass
-                    row_idx += 1
-                elif len(parts) == 1 and row_idx < samples:
-                    try:
-                        matrix[row_idx, idx] = float(parts[0])
-                    except ValueError:
-                        pass
-                    row_idx += 1
+            values = _parse_ascan_amplitudes(
+                lines,
+                data_start,
+                max_samples=samples,
+            )
+            if values:
+                matrix[: len(values), idx] = values
         except OSError:
             pass
 
@@ -688,23 +728,14 @@ def read_gprmax_out(out_path: str) -> dict:
         else:
             # 文件可能为空（如合并失败的 merged.out）
             # 尝试降级到读取同目录的单独 .out 文件
-            folder = str(out_path.parent)
-            out_files = sorted(
-                [
-                    fn
-                    for fn in os.listdir(folder)
-                    if fn.endswith(".out") and "merged" not in fn
-                ],
-                key=lambda x: int("".join(filter(str.isdigit, x)) or 0),
-            )
+            out_files = _related_gprmax_out_files(out_path)
             if not out_files:
                 raise ValueError(
                     f"Cannot find 'rxs/rx1/Ez' in {out_path} and no other .out files found"
                 )
 
             # 读取第一个文件获取参数
-            first_path = os.path.join(folder, out_files[0])
-            with h5py.File(first_path, "r") as f0:
+            with h5py.File(out_files[0], "r") as f0:
                 first_attrs = dict(f0.attrs)
                 iterations = first_attrs.get("Iterations", iterations)
                 dt = first_attrs.get("dt", dt)
@@ -717,9 +748,8 @@ def read_gprmax_out(out_path: str) -> dict:
             matrix = np.zeros((samples, n_traces), dtype=np.float32)
             matrix[:, 0] = data0
 
-            for i, fname in enumerate(out_files[1:], 1):
-                fpath = os.path.join(folder, fname)
-                with h5py.File(fpath, "r") as fi:
+            for i, out_file in enumerate(out_files[1:], 1):
+                with h5py.File(out_file, "r") as fi:
                     matrix[:, i] = fi["rxs"]["rx1"]["Ez"][:]
             data = matrix
 
@@ -766,21 +796,15 @@ def read_gprmax_out(out_path: str) -> dict:
 
     # 如果数据是一维的，尝试查找同目录的其他 .out 文件
     if data.ndim == 1:
-        folder = out_path.parent
-        # 按文件名中的数字排序，而不是字符串排序
-        out_files = sorted(
-            [f for f in os.listdir(folder) if f.endswith(".out") and "merged" not in f],
-            key=lambda x: int("".join(filter(str.isdigit, x)) or 0),
-        )
+        out_files = _related_gprmax_out_files(out_path)
 
         if len(out_files) > 1:
             # 多个文件，需要合并
             n_traces = len(out_files)
             matrix = np.zeros((samples, n_traces), dtype=np.float32)
 
-            for i, fname in enumerate(out_files):
-                fpath = os.path.join(folder, fname)
-                with h5py.File(fpath, "r") as f:
+            for i, out_file in enumerate(out_files):
+                with h5py.File(out_file, "r") as f:
                     matrix[:, i] = f["rxs"]["rx1"]["Ez"][:]
             data = matrix
         else:

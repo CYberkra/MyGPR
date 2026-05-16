@@ -42,6 +42,52 @@ def test_read_gprmax_out_merges_trace_files_in_numeric_order(tmp_path: Path):
     assert result["total_time_ns"] == 0.3
 
 
+def test_read_gprmax_out_ignores_unrelated_trace_files(tmp_path: Path):
+    _write_gprmax_out(tmp_path / "pipe_model1.out", np.array([1.0, 2.0, 3.0]))
+    _write_gprmax_out(tmp_path / "pipe_model2.out", np.array([4.0, 5.0, 6.0]))
+    _write_gprmax_out(tmp_path / "other_model1.out", np.array([9.0, 9.0, 9.0]))
+
+    result = read_gprmax_out(str(tmp_path / "pipe_model1.out"))
+
+    assert result["data"].shape == (3, 2)
+    assert np.array_equal(
+        result["data"],
+        np.array(
+            [
+                [1.0, 4.0],
+                [2.0, 5.0],
+                [3.0, 6.0],
+            ],
+            dtype=np.float32,
+        ),
+    )
+
+
+def test_read_gprmax_empty_merged_out_falls_back_to_related_trace_files(tmp_path: Path):
+    with h5py.File(tmp_path / "pipe_model_merged.out", "w") as handle:
+        handle.attrs["Iterations"] = 3
+        handle.attrs["dt"] = 1e-10
+        handle.attrs["nx_ny_nz"] = [1, 1, 1]
+    _write_gprmax_out(tmp_path / "pipe_model1.out", np.array([1.0, 2.0, 3.0]))
+    _write_gprmax_out(tmp_path / "pipe_model2.out", np.array([4.0, 5.0, 6.0]))
+    _write_gprmax_out(tmp_path / "other_model1.out", np.array([9.0, 9.0, 9.0]))
+
+    result = read_gprmax_out(str(tmp_path / "pipe_model_merged.out"))
+
+    assert result["data"].shape == (3, 2)
+    assert np.array_equal(
+        result["data"],
+        np.array(
+            [
+                [1.0, 4.0],
+                [2.0, 5.0],
+                [3.0, 6.0],
+            ],
+            dtype=np.float32,
+        ),
+    )
+
+
 def test_read_gprmax_out_attaches_impulse_context_from_matching_in(tmp_path: Path):
     data = np.arange(12, dtype=np.float32).reshape(4, 3)
     _write_gprmax_out(tmp_path / "air_test_merged.out", data, dt=2e-10)
