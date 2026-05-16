@@ -63,6 +63,39 @@ def test_read_gprmax_out_ignores_unrelated_trace_files(tmp_path: Path):
     )
 
 
+def test_read_gprmax_out_matches_in_file_by_trace_prefix(tmp_path: Path):
+    _write_gprmax_out(tmp_path / "pipe_model1.out", np.array([1.0, 2.0, 3.0]))
+    _write_gprmax_out(tmp_path / "pipe_model2.out", np.array([4.0, 5.0, 6.0]))
+    (tmp_path / "aaa_other.in").write_text(
+        "\n".join(
+            [
+                "#title: other",
+                "#waveform: impulse 1 1.0 my_impulse",
+                "#src_steps: 0.200 0.000 0.000",
+                "#rx_steps: 0.200 0.000 0.000",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "pipe_model.in").write_text(
+        "\n".join(
+            [
+                "#title: pipe_model",
+                "#waveform: impulse 1 1.0 my_impulse",
+                "#src_steps: 0.070 0.000 0.000",
+                "#rx_steps: 0.070 0.000 0.000",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = read_gprmax_out(str(tmp_path / "pipe_model1.out"))
+
+    assert result["in_path"] == str(tmp_path / "pipe_model.in")
+    assert result["header_info"]["trace_interval_m"] == 0.07
+    assert np.allclose(result["trace_metadata"]["trace_distance_m"], [0.0, 0.07])
+
+
 def test_read_gprmax_empty_merged_out_falls_back_to_related_trace_files(tmp_path: Path):
     with h5py.File(tmp_path / "pipe_model_merged.out", "w") as handle:
         handle.attrs["Iterations"] = 3

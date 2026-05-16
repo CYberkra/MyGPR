@@ -405,11 +405,13 @@ def _build_airborne_header_summary(metadata: dict[str, np.ndarray]) -> dict[str,
 
 def _find_gprmax_input_for_output(out_path: Path) -> Path | None:
     """Find the most likely .in file that produced a gprMax .out file."""
+    trace_prefix = _gprmax_output_prefix(out_path)
     candidates = [
         out_path.with_suffix(".in"),
         out_path.with_name(out_path.stem.replace("_merged", "") + ".in"),
+        out_path.with_name(trace_prefix + ".in"),
     ]
-    for candidate in candidates:
+    for candidate in dict.fromkeys(candidates):
         if candidate.exists():
             return candidate
     in_files = sorted(out_path.parent.glob("*.in"))
