@@ -119,6 +119,50 @@ def test_adapt_gprmax_ground_truth_converts_closed_roi_to_slice_roi():
     }
 
 
+def test_adapt_gprmax_ground_truth_converts_wavefield_rois():
+    converted = adapt_gprmax_ground_truth(
+        {
+            "schema": "gprmax_ground_truth_v1",
+            "scenario_id": "airborne_demo",
+            "wavefield_rois": {
+                "direct_air_wave": {
+                    "sample_range": [2, 4],
+                    "trace_range": [0, 99],
+                    "time_ns": 0.7,
+                },
+                "air_ground_reflection": {
+                    "roi": {
+                        "sample_range": [10, 12],
+                        "trace_range": [1, 6],
+                    },
+                    "time_ns": 3.2,
+                },
+                "subsurface_target": {
+                    "sample_range": [20, 28],
+                    "trace_range": [3, 5],
+                },
+            },
+        },
+        data_shape=(24, 8),
+    )
+
+    rois = converted["wavefield_rois"]
+    assert rois["direct_air_wave"]["roi"] == {
+        "time_start_idx": 2,
+        "time_end_idx": 5,
+        "dist_start_idx": 0,
+        "dist_end_idx": 8,
+    }
+    assert rois["air_ground_reflection"]["time_ns"] == 3.2
+    assert rois["air_ground_reflection"]["roi"]["time_end_idx"] == 13
+    assert rois["subsurface_target"]["roi"] == {
+        "time_start_idx": 20,
+        "time_end_idx": 24,
+        "dist_start_idx": 3,
+        "dist_end_idx": 6,
+    }
+
+
 def test_load_gprmax_dataset_contract_reads_manifest_out_and_ground_truth(tmp_path: Path):
     manifest_path = _write_contract_files(tmp_path)
 
