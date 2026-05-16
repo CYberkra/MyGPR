@@ -87,6 +87,49 @@ def apply_gprpy_rem_mean_trace(data: np.ndarray, ntraces: int) -> np.ndarray:
     return result.astype(np.float32, copy=False)
 
 
+def gprpy_local_window_l2_energy(
+    data: np.ndarray,
+    window: int,
+    *,
+    eps: float = 1.0e-8,
+) -> np.ndarray:
+    """Return the GPRPy-style local L2 energy for every sample and trace."""
+    arr = np.asarray(data, dtype=np.float64)
+    if arr.ndim != 2:
+        raise ValueError(f"输入数据必须是2维数组，当前: {arr.ndim}维")
+    totsamps = arr.shape[0]
+    if totsamps == 0:
+        raise ValueError("输入数据为空")
+
+    window = int(window)
+    if window > totsamps:
+        energy = np.maximum(np.linalg.norm(arr, axis=0, keepdims=True), eps)
+        return np.repeat(energy, totsamps, axis=0)
+
+    halfwid = int(np.ceil(window / 2.0))
+    squared = arr * arr
+    energy = np.zeros(arr.shape, dtype=np.float64)
+
+    leading = np.maximum(np.linalg.norm(arr[0 : halfwid + 1, :], axis=0), eps)
+    energy[0 : halfwid + 1, :] = leading[np.newaxis, :]
+
+    sample_idx = np.arange(halfwid, totsamps - halfwid, dtype=np.int32)
+    if sample_idx.size:
+        starts = sample_idx - halfwid
+        ends = sample_idx + halfwid + 1
+        energy[sample_idx, :] = np.maximum(
+            np.sqrt(_window_sums_axis0(squared, starts, ends)),
+            eps,
+        )
+
+    trailing = np.maximum(
+        np.linalg.norm(arr[totsamps - halfwid : totsamps + 1, :], axis=0),
+        eps,
+    )
+    energy[totsamps - halfwid : totsamps + 1, :] = trailing[np.newaxis, :]
+    return energy
+
+
 def apply_gprpy_agc_gain(data: np.ndarray, window: int) -> np.ndarray:
     """Mirror GPRPy toolbox AGC normalization."""
     arr = np.asarray(data, dtype=np.float64)
@@ -98,27 +141,5 @@ def apply_gprpy_agc_gain(data: np.ndarray, window: int) -> np.ndarray:
 
     eps = 1e-8
     window = int(window)
-    if window > totsamps:
-        energy = np.maximum(np.linalg.norm(arr, axis=0), eps)
-        return np.divide(arr, energy).astype(np.float32, copy=False)
-
-    halfwid = int(np.ceil(window / 2.0))
-    result = np.zeros(arr.shape, dtype=np.float64)
-
-    energy = np.maximum(np.linalg.norm(arr[0 : halfwid + 1, :], axis=0), eps)
-    result[0 : halfwid + 1, :] = np.divide(arr[0 : halfwid + 1, :], energy)
-
-    sample_idx = np.arange(halfwid, totsamps - halfwid, dtype=np.int32)
-    if sample_idx.size:
-        starts = sample_idx - halfwid
-        ends = sample_idx + halfwid + 1
-        energy = np.maximum(np.sqrt(_window_sums_axis0(arr * arr, starts, ends)), eps)
-        result[sample_idx, :] = np.divide(arr[sample_idx, :], energy)
-
-    energy = np.maximum(np.linalg.norm(arr[totsamps - halfwid : totsamps + 1, :], axis=0), eps)
-    result[totsamps - halfwid : totsamps + 1, :] = np.divide(
-        arr[totsamps - halfwid : totsamps + 1, :],
-        energy,
-    )
-
-    return result.astype(np.float32, copy=False)
+    energy = gprpy_local_window_l2_energy(arr, window, eps=eps)
+    return np.divide(arr, energy).astype(np.float32, copy=False)

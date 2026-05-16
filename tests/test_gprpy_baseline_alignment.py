@@ -10,6 +10,7 @@ from core.gprpy_compat import (
     apply_gprpy_agc_gain,
     apply_gprpy_dewow,
     apply_gprpy_rem_mean_trace,
+    gprpy_local_window_l2_energy,
 )
 from core.processing_engine import run_processing_method
 
@@ -66,6 +67,34 @@ def _slow_gprpy_agc_gain(data: np.ndarray, window: int) -> np.ndarray:
     return result.astype(np.float32)
 
 
+def _slow_gprpy_local_window_l2_energy(data: np.ndarray, window: int) -> np.ndarray:
+    arr = np.asarray(data, dtype=np.float64)
+    totsamps = arr.shape[0]
+    eps = 1e-8
+    if window > totsamps:
+        return np.repeat(
+            np.maximum(np.linalg.norm(arr, axis=0, keepdims=True), eps),
+            totsamps,
+            axis=0,
+        )
+    halfwid = int(np.ceil(window / 2.0))
+    energy = np.zeros(arr.shape, dtype=np.float64)
+    energy[0 : halfwid + 1, :] = np.maximum(
+        np.linalg.norm(arr[0 : halfwid + 1, :], axis=0),
+        eps,
+    )
+    for smp in range(halfwid, totsamps - halfwid + 1):
+        energy[smp, :] = np.maximum(
+            np.linalg.norm(arr[smp - halfwid : smp + halfwid + 1, :], axis=0),
+            eps,
+        )
+    energy[totsamps - halfwid : totsamps + 1, :] = np.maximum(
+        np.linalg.norm(arr[totsamps - halfwid : totsamps + 1, :], axis=0),
+        eps,
+    )
+    return energy
+
+
 def test_gprpy_windowed_helpers_match_slow_edge_reference():
     rng = np.random.default_rng(77)
     raw = rng.normal(size=(11, 7)).astype(np.float32)
@@ -74,6 +103,10 @@ def test_gprpy_windowed_helpers_match_slow_edge_reference():
     assert np.allclose(
         apply_gprpy_rem_mean_trace(raw, 5),
         _slow_gprpy_rem_mean_trace(raw, 5),
+    )
+    assert np.allclose(
+        gprpy_local_window_l2_energy(raw, 5),
+        _slow_gprpy_local_window_l2_energy(raw, 5),
     )
     assert np.allclose(apply_gprpy_agc_gain(raw, 5), _slow_gprpy_agc_gain(raw, 5))
 

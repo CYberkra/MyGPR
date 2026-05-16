@@ -13,7 +13,11 @@ from core.background_time_range import (
     apply_time_range_to_result,
     resolve_time_range_selection,
 )
-from core.gprpy_compat import apply_gprpy_agc_gain, apply_gprpy_rem_mean_trace
+from core.gprpy_compat import (
+    apply_gprpy_agc_gain,
+    apply_gprpy_rem_mean_trace,
+    gprpy_local_window_l2_energy,
+)
 from core.runtime_warnings import build_runtime_warning, merge_runtime_warnings
 
 
@@ -563,24 +567,4 @@ def _apply_running_average_2d(
 
 def _gprpy_local_window_energy(data: np.ndarray, window: int) -> np.ndarray:
     """Return the GPRPy-style L2 norm over each moving window."""
-    arr = np.asarray(data, dtype=np.float64)
-    totsamps = arr.shape[0]
-    halfwid = int(np.ceil(window / 2.0))
-    energy = np.zeros(arr.shape, dtype=np.float64)
-    energy[0 : halfwid + 1, :] = np.maximum(
-        np.linalg.norm(arr[0 : halfwid + 1, :], axis=0, keepdims=True).repeat(
-            halfwid + 1, axis=0
-        ),
-        AGC_EPS,
-    )
-    for smp in range(halfwid, totsamps - halfwid + 1):
-        winstart = int(smp - halfwid)
-        winend = int(smp + halfwid)
-        energy[smp, :] = np.maximum(
-            np.linalg.norm(arr[winstart : winend + 1, :], axis=0), AGC_EPS
-        )
-    energy[totsamps - halfwid : totsamps + 1, :] = np.maximum(
-        np.linalg.norm(arr[totsamps - halfwid : totsamps + 1, :], axis=0),
-        AGC_EPS,
-    )
-    return energy
+    return gprpy_local_window_l2_energy(data, window, eps=AGC_EPS)
