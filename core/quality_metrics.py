@@ -243,26 +243,21 @@ def detect_first_break_indices(
     smooth_env = uniform_filter1d(abs_norm, size=5, axis=0, mode="nearest")
 
     threshold = float(np.clip(threshold, 1.0e-4, 0.95))
-    indices = np.zeros(n_traces, dtype=np.int32)
+    if method == "peak":
+        local = smooth_env[:search_end, :]
+        peak_val = np.max(local, axis=0)
+        gate = np.maximum(threshold * peak_val, peak_val * 0.25)
+    elif method == "first_break":
+        local = gradient_norm[:search_end, :]
+        gate = np.maximum(np.percentile(local, 92.0, axis=0), threshold)
+    else:
+        local = abs_norm[:search_end, :]
+        gate = np.maximum(threshold, np.percentile(local, 75.0, axis=0) * 0.25)
 
-    for trace_idx in range(n_traces):
-        if method == "peak":
-            local = smooth_env[:search_end, trace_idx]
-            peak_idx = int(np.argmax(local))
-            peak_val = float(local[peak_idx])
-            gate = max(threshold * peak_val, peak_val * 0.25)
-            candidates = np.flatnonzero(local >= gate)
-        elif method == "first_break":
-            local = gradient_norm[:search_end, trace_idx]
-            gate = max(float(np.percentile(local, 92.0)), threshold)
-            candidates = np.flatnonzero(local >= gate)
-        else:
-            local = abs_norm[:search_end, trace_idx]
-            gate = max(threshold, float(np.percentile(local, 75.0)) * 0.25)
-            candidates = np.flatnonzero(local >= gate)
-
-        indices[trace_idx] = int(candidates[0]) if candidates.size else 0
-
+    candidates = local >= gate[np.newaxis, :]
+    has_candidate = np.any(candidates, axis=0)
+    indices = np.argmax(candidates, axis=0).astype(np.int32)
+    indices[~has_candidate] = 0
     return indices
 
 

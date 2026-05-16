@@ -12,6 +12,7 @@ from core.quality_metrics import (
     baseline_bias,
     compute_benchmark_metrics,
     deep_zone_contrast,
+    detect_first_break_indices,
     horizontal_coherence,
     local_saliency_preservation,
     low_freq_energy_ratio,
@@ -20,6 +21,42 @@ from core.quality_metrics import (
     relative_reduction,
     target_band_energy_ratio,
 )
+
+
+def _slow_detect_first_break_indices(
+    data: np.ndarray,
+    method: str = "threshold",
+    threshold: float = 0.05,
+    search_ratio: float = 0.35,
+) -> np.ndarray:
+    from scipy.ndimage import uniform_filter1d
+    from core.quality_metrics import _normalized_abs
+
+    arr = np.asarray(data, dtype=np.float64)
+    n_samples, n_traces = arr.shape
+    search_end = max(4, min(n_samples, int(np.ceil(n_samples * float(search_ratio)))))
+    abs_norm = _normalized_abs(arr)
+    gradient_norm = _normalized_abs(np.diff(arr, axis=0, prepend=arr[[0], :]))
+    smooth_env = uniform_filter1d(abs_norm, size=5, axis=0, mode="nearest")
+    threshold = float(np.clip(threshold, 1.0e-4, 0.95))
+    indices = np.zeros(n_traces, dtype=np.int32)
+    for trace_idx in range(n_traces):
+        if method == "peak":
+            local = smooth_env[:search_end, trace_idx]
+            peak_idx = int(np.argmax(local))
+            peak_val = float(local[peak_idx])
+            gate = max(threshold * peak_val, peak_val * 0.25)
+            candidates = np.flatnonzero(local >= gate)
+        elif method == "first_break":
+            local = gradient_norm[:search_end, trace_idx]
+            gate = max(float(np.percentile(local, 92.0)), threshold)
+            candidates = np.flatnonzero(local >= gate)
+        else:
+            local = abs_norm[:search_end, trace_idx]
+            gate = max(threshold, float(np.percentile(local, 75.0)) * 0.25)
+            candidates = np.flatnonzero(local >= gate)
+        indices[trace_idx] = int(candidates[0]) if candidates.size else 0
+    return indices
 
 
 def _build_test_profile(samples: int = 128, traces: int = 32) -> np.ndarray:
@@ -37,6 +74,15 @@ def _build_test_profile(samples: int = 128, traces: int = 32) -> np.ndarray:
     data[58:61, :] += 0.55
     data[88:91, 10:22] += np.array([[0.15], [0.35], [0.18]])
     return data.astype(np.float32)
+
+
+def test_detect_first_break_indices_matches_slow_reference():
+    raw = _build_test_profile(samples=96, traces=12)
+
+    for method in ("threshold", "peak", "first_break"):
+        result = detect_first_break_indices(raw, method=method, threshold=0.08)
+        expected = _slow_detect_first_break_indices(raw, method=method, threshold=0.08)
+        assert np.array_equal(result, expected)
 
 
 def test_dewow_reduces_baseline_and_low_frequency_energy():
