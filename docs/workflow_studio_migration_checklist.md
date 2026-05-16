@@ -11,9 +11,9 @@
 | **参数化处理** | BasicFlowPage | ✅ 已迁移 | Completed | 完整的工作流节点卡片和参数编辑 |
 | **自动调参** | AutoTunePage | 🔄 部分迁移 | In Progress | Tuning Lab 对话框已实现，参数可写回工作流节点 |
 | **高级显示设置** | AdvancedSettingsPage | 🔄 部分迁移 | In Progress | 在 B-scan Viewer 中已实现，暂未完全整合到 Studio |
-| **QC/告警** | QualityLogPage | ❌ 未迁移 | Todo | 待整合到 Workflow Studio 的底部面板 |
-| **保存证据包** | QualityLogPage | ❌ 未迁移 | Todo | 待定义证据包导出入口 |
-| **导出报告** | QualityLogPage | ❌ 未迁移 | Todo | 待实现 |
+| **QC/告警** | QualityLogPage | 🔄 部分迁移 | In Progress | Bottom Runtime Drawer 已有验证/QC 容器，仍需补齐节点级指标 |
+| **保存证据包** | QualityLogPage | 🔄 部分迁移 | In Progress | Studio 已有 Evidence/Export 入口，仍需统一 evidence package 语义 |
+| **导出报告** | QualityLogPage | 🔄 部分迁移 | In Progress | 已有导出入口，报告模板和结果回写仍需完善 |
 | **导出图像/数据** | QualityLogPage | 🔄 部分迁移 | In Progress | B-scan Viewer 已有保存功能，完整导出功能待实现 |
 
 ---
@@ -38,10 +38,10 @@
 - ❌ **持久化设置**：Viewer 的设置暂未与全局设置整合
 
 ### 4. QualityLogPage 功能
-- ❌ **QC/告警面板**：待整合到 Workflow Studio 底部面板
-- ❌ **日志面板**：已在 Workflow Studio 中实现基础版本
-- ❌ **证据导出**：待定义在 Workflow Studio 中的入口
-- ❌ **报告生成**：待实现
+- 🔄 **QC/告警面板**：Bottom Runtime Drawer 已承接验证/QC 容器，下一步补齐节点级指标。
+- ✅ **日志面板**：Workflow Studio 已实现基础运行日志。
+- 🔄 **证据导出**：Studio 已有 Evidence/Export 入口，下一步统一 evidence package 结构。
+- 🔄 **报告生成**：保留为导出入口后续能力，暂不作为旧 Tab 常驻。
 
 ### 5. Matplotlib 主视图
 - ✅ **B-scan 显示**：独立的 BscanViewerDialog，独立于主界面
@@ -74,8 +74,8 @@
 
 ## 后续计划
 
-1. 首先确定 Save / Evidence / Export 的职责定义
-2. 实现 Splitter 和侧栏状态的持久化
-3. 完善节点卡片的视觉表现
-4. 优化画布视图的交互逻辑
-5. 整合剩余的 QC/证据导出功能
+1. 将 Evidence Package 的最小结构写成可测试契约。
+2. 继续把 `app_qt.py` 中的导入、运行、导出职责拆到 controller。
+3. 继续拆分 `workflow_canvas_cards.py` 的节点、端口、边和菜单。
+4. 补齐节点级 QC 指标并显示到 Inspector / Bottom Drawer。
+5. 保持 `pytest -q` 和 `scripts/preflight_check.py` 作为阶段合并门槛。

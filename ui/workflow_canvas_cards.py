@@ -39,6 +39,15 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QAction
 
 from core.methods_registry import PROCESSING_METHODS, get_method_display_name
+from core.workflow_registry import (
+    OUTPUT_EFFECT_EMPTY_MESSAGES,
+    OUTPUT_EFFECT_LABELS,
+    OUTPUT_EFFECT_TITLES,
+    candidate_methods_for_workflow_method,
+    default_params_for_method,
+    recommended_next_methods_for,
+    workflow_port_labels,
+)
 from core.workflow_data import (
     METHOD_CATEGORIES,
     WORKFLOW_STAGE_BY_ID,
@@ -60,68 +69,6 @@ COMPACT_HEIGHT = 95
 MINI_WIDTH = 175
 MINI_HEIGHT = 65
 NODE_PORT_ROW_Y = 42.0
-
-OUTPUT_EFFECT_LABELS = {
-    "bscan": "查看此步 B-scan",
-    "compare": "前后对比",
-    "qc": "QC 指标",
-    "spectrum": "频谱 / 能量分布",
-    "evidence": "导出此步结果",
-}
-
-OUTPUT_EFFECT_TITLES = {
-    "bscan": "B-scan Preview",
-    "compare": "Before / After",
-    "qc": "QC Metrics",
-    "spectrum": "Spectrum View",
-    "evidence": "Evidence Snapshot",
-}
-
-OUTPUT_EFFECT_EMPTY_MESSAGES = {
-    "bscan": "暂无预览，请先运行到来源节点",
-    "compare": "暂无对比，请先运行到来源节点",
-    "qc": "暂无 QC 指标，请先运行到来源节点",
-    "spectrum": "暂无频谱，请先运行到来源节点",
-    "evidence": "暂无 Evidence，请先运行到来源节点",
-}
-
-NEXT_METHOD_RECOMMENDATIONS = {
-    "zero_time": ["dewow", "frequency_filter_1d"],
-    "trace_correction": ["subtracting_average_2D", "frequency_filter_1d"],
-    "background_clutter": ["sec_gain", "wavelet_svd", "svd_subspace"],
-    "gain": ["svd_subspace", "wavelet_svd"],
-    "spatial_denoise": ["kirchhoff_migration", "stolt_migration", "time_to_depth"],
-    "velocity_model": ["geometry_depth_context"],
-    "geometry_depth": ["sec_gain", "kirchhoff_migration"],
-}
-
-
-def default_params_for_method(method_id: str) -> dict[str, object]:
-    """Return registry defaults for a workflow method."""
-    params: dict[str, object] = {}
-    for meta in PROCESSING_METHODS.get(method_id, {}).get("params", []):
-        params[str(meta.get("name"))] = meta.get("default", "")
-    return params
-
-
-def candidate_methods_for_workflow_method(method: WorkflowMethod) -> list[str]:
-    """Return valid candidate algorithm ids for a workflow node."""
-    stage = WORKFLOW_STAGE_BY_ID.get(method.stage_id, {})
-    candidates = [
-        str(item)
-        for item in stage.get("candidate_methods", [])
-        if str(item) in PROCESSING_METHODS
-    ]
-    if not candidates:
-        candidates = [str(method.method_id)] if method.method_id in PROCESSING_METHODS else []
-        category = METHOD_CATEGORIES.get(method.category, {})
-        for key in category.get("methods", []):
-            if key in PROCESSING_METHODS and key not in candidates:
-                candidates.append(str(key))
-    if method.method_id in PROCESSING_METHODS and method.method_id not in candidates:
-        candidates.insert(0, str(method.method_id))
-    return candidates
-
 
 def update_workflow_method_algorithm(method: WorkflowMethod, method_id: str) -> bool:
     """Switch a node to a new algorithm while preserving node identity/layout state."""
@@ -152,27 +99,6 @@ def update_workflow_method_algorithm(method: WorkflowMethod, method_id: str) -> 
 def _elided(text: str, width: int, widget: QWidget) -> str:
     metrics = QFontMetrics(widget.font())
     return metrics.elidedText(str(text), Qt.TextElideMode.ElideRight, int(width))
-
-
-def workflow_port_labels(method: WorkflowMethod) -> tuple[str, str]:
-    """Return compact visual input/output labels for current first-pass ports."""
-    method_id = str(getattr(method, "method_id", ""))
-    stage_id = str(getattr(method, "stage_id", ""))
-    category = str(getattr(method, "category", ""))
-    if method_id == "raw_input":
-        return "source", "data"
-    if method_id == "bscan_preview":
-        return "data", "preview"
-    if method_id in {"manual_velocity_model"} or stage_id == "velocity_model":
-        return "data", "velocity"
-    if method_id in {"geometry_depth_context", "time_to_depth"} or stage_id == "geometry_depth":
-        return "data / velocity", "depth"
-    if method_id in {"kirchhoff_migration", "stolt_migration"} or category == "migration":
-        return "data / velocity", "image"
-    if category in {"export", "evidence"}:
-        return "data", "evidence"
-    return "data", "data"
-
 
 class ParamRowWidget(QWidget):
     """Compact parameter block used inside workflow nodes."""
@@ -2403,21 +2329,7 @@ class WorkflowCanvasView(QGraphicsView):
         menu.exec(global_pos)
 
     def _recommended_next_methods(self, method: WorkflowMethod) -> list[str]:
-        stage_methods = NEXT_METHOD_RECOMMENDATIONS.get(method.stage_id, [])
-        if not stage_methods:
-            if method.method_id == "set_zero_time":
-                stage_methods = ["dewow", "frequency_filter_1d"]
-            elif method.method_id == "dewow":
-                stage_methods = ["subtracting_average_2D", "frequency_filter_1d"]
-            elif method.method_id == "subtracting_average_2D":
-                stage_methods = ["sec_gain", "wavelet_svd", "svd_subspace"]
-            elif method.method_id in {"sec_gain", "agcGain", "energy_decay_gain", "compensatingGain"}:
-                stage_methods = ["svd_subspace", "wavelet_svd"]
-        result: list[str] = []
-        for method_id in stage_methods:
-            if method_id in PROCESSING_METHODS and method_id != method.method_id and method_id not in result:
-                result.append(method_id)
-        return result
+        return recommended_next_methods_for(method)
 
     def _create_output_effect_node(
         self,
