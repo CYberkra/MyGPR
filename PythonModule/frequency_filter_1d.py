@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 
 from core.runtime_warnings import build_runtime_warning
+from core.scalar_utils import to_float
 
 
 def method_frequency_filter_1d(
@@ -69,12 +70,12 @@ def method_frequency_filter_1d(
     mask, effective = _build_filter_mask(
         freqs_hz,
         filter_key,
-        low_freq_mhz=float(low_freq_mhz),
-        high_freq_mhz=float(high_freq_mhz),
-        notch_freq_mhz=float(notch_freq_mhz),
-        notch_width_mhz=float(notch_width_mhz),
-        notch_depth=float(notch_depth),
-        taper_ratio=float(taper_ratio),
+        low_freq_mhz=to_float(low_freq_mhz, default=10.0),
+        high_freq_mhz=to_float(high_freq_mhz, default=800.0),
+        notch_freq_mhz=to_float(notch_freq_mhz, default=50.0),
+        notch_width_mhz=to_float(notch_width_mhz, default=5.0),
+        notch_depth=to_float(notch_depth, default=1.0),
+        taper_ratio=to_float(taper_ratio, default=0.08),
         nyquist_mhz=nyquist_mhz,
         warnings=warnings,
     )
@@ -110,21 +111,21 @@ def _resolve_sample_rate_hz(
         (sample_rate_mhz, 1.0e6),
     ):
         try:
-            numeric = float(value)
+            numeric = to_float(value, default=0.0)
         except (TypeError, ValueError):
             continue
         if numeric > 0.0:
             return numeric * multiplier
 
     try:
-        step_s = float(time_step_s)
+        step_s = to_float(time_step_s, default=0.0)
     except (TypeError, ValueError):
         step_s = 0.0
     if step_s > 0.0:
         return 1.0 / step_s
 
     try:
-        step_ns = float(sample_interval_ns)
+        step_ns = to_float(sample_interval_ns, default=0.0)
     except (TypeError, ValueError):
         step_ns = 0.0
     if step_ns > 0.0:
@@ -217,10 +218,7 @@ def _build_filter_mask(
 
 
 def _mhz_to_hz(value: float) -> float:
-    try:
-        numeric = float(value)
-    except (TypeError, ValueError):
-        numeric = 0.0
+    numeric = to_float(value, default=0.0)
     return numeric * 1.0e6
 
 

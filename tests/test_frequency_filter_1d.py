@@ -51,6 +51,23 @@ def test_bandpass_suppresses_out_of_band_tone_and_preserves_target_band():
     assert meta["effective_params"]["high_freq_mhz"] == 320.0
 
 
+def test_frequency_filter_accepts_numpy_scalar_parameters():
+    raw, sample_rate_hz = _tone_profile()
+
+    filtered, meta = method_frequency_filter_1d(
+        raw,
+        filter_type="bandpass",
+        low_freq_mhz=np.array([180.0]),
+        high_freq_mhz=np.array([320.0]),
+        taper_ratio=np.array([0.04]),
+        sample_rate_hz=np.array([sample_rate_hz]),
+    )
+
+    assert filtered.shape == raw.shape
+    assert meta["effective_params"]["low_freq_mhz"] == 180.0
+    assert meta["effective_params"]["high_freq_mhz"] == 320.0
+
+
 def test_notch_suppresses_center_frequency_without_shape_change():
     raw, sample_rate_hz = _tone_profile()
 
