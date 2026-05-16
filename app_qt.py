@@ -160,6 +160,7 @@ from core.runtime_warnings import (
     merge_runtime_warnings,
 )
 from core.shared_data_state import SharedDataState
+from core.workflow_runtime_contracts import WorkflowRunRequest, WorkflowRunResult
 from qfluentwidgets import FluentIcon
 
 # 导入页面模块
@@ -719,6 +720,7 @@ class GPRGuiQt(QMainWindow):
         self._cancel_in_flight = False
         self._pending_workflow_run = None
         self._last_workflow_result = None
+        self._last_workflow_result_contract = None
         self._last_workflow_realtime = False
         self._last_workflow_run_mode = ""
         self._workflow_preview_base_state = None
@@ -4459,12 +4461,13 @@ class GPRGuiQt(QMainWindow):
 
     def run_workflow_methods(self, methods: object, realtime: bool = False, run_mode: str = ""):
         """运行工作流页传入的步骤列表。"""
+        request = WorkflowRunRequest.from_signal_args(methods, realtime, run_mode)
         if self.data is None:
             QMessageBox.warning(self, "无数据", "请先导入数据。")
             return
         if self._worker is not None or self._worker_thread is not None:
-            if realtime:
-                self._pending_workflow_run = (methods, realtime, run_mode)
+            if request.realtime:
+                self._pending_workflow_run = request
                 if self._worker is not None:
                     self._worker.request_cancel()
                 self.status_label.setText("正在取消旧的实时工作流...")
@@ -4474,7 +4477,7 @@ class GPRGuiQt(QMainWindow):
 
         workflow_methods = [
             item
-            for item in list(methods or [])
+            for item in request.methods
             if getattr(item, "enabled", True)
             and not getattr(item, "hidden", False)
             and getattr(item, "method_id", "") in PROCESSING_METHODS
@@ -4501,10 +4504,10 @@ class GPRGuiQt(QMainWindow):
                 }
             )
 
-        run_type = "workflow_realtime" if realtime else "workflow"
-        self._last_workflow_run_mode = run_mode
+        run_type = "workflow_realtime" if request.realtime else "workflow"
+        self._last_workflow_run_mode = request.run_mode
         base_state = None
-        if realtime:
+        if request.realtime:
             if self._workflow_preview_base_state is None:
                 self._workflow_preview_base_state = {
                     "data": np.array(self.data, copy=True),
@@ -4522,7 +4525,7 @@ class GPRGuiQt(QMainWindow):
             self.page_workflow.set_running("工作流运行中")
 
         self._log(
-            ("实时预览工作流：" if realtime else "运行工作流：")
+            ("实时预览工作流：" if request.realtime else "运行工作流：")
             + " → ".join(task["method_key"] for task in tasks)
         )
         self._start_processing_worker(
@@ -6984,6 +6987,11 @@ class GPRGuiQt(QMainWindow):
             if is_workflow_run:
                 self._last_workflow_result = result
                 self._last_workflow_realtime = run_type == "workflow_realtime"
+                self._last_workflow_result_contract = WorkflowRunResult.from_worker_payload(
+                    result,
+                    realtime=self._last_workflow_realtime,
+                    run_mode=self._last_workflow_run_mode,
+                )
                 if hasattr(self, "page_workflow") and self.page_workflow is not None:
                     self.page_workflow.set_run_result(
                         outputs,
@@ -7033,7 +7041,10 @@ class GPRGuiQt(QMainWindow):
         pending = self._pending_workflow_run
         self._pending_workflow_run = None
         if pending is not None:
-            QTimer.singleShot(0, lambda: self.run_workflow_methods(*pending))
+            if isinstance(pending, WorkflowRunRequest):
+                QTimer.singleShot(0, lambda: self.run_workflow_methods(*pending.as_signal_args()))
+            else:
+                QTimer.singleShot(0, lambda: self.run_workflow_methods(*pending))
         self.page_basic.btn_cancel.setEnabled(False)
         if self._progress_bar is not None:
             self._progress_bar.setRange(0, 100)

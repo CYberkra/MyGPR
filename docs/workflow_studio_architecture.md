@@ -40,6 +40,14 @@ config.methods 按 order 排序运行
 
 不要在没有完整 DAG executor 测试前让连线直接决定处理顺序。
 
+运行请求与结果使用 `core.workflow_runtime_contracts` 表达：
+
+- `WorkflowRunRequest`: Studio 发起运行时的 methods、realtime、run_mode。
+- `WorkflowNodeOutput`: 单节点输出缓存，供 Preview / Evidence 使用。
+- `WorkflowRunResult`: worker payload 的结构化视图，保留最终数据和每步输出。
+
+旧 PyQt signal 仍保留 `(methods, realtime, run_mode)` 形态，内部进入主窗口后立即转换为 `WorkflowRunRequest`，避免后续继续扩散散参数。
+
 ## 旧页面迁移策略
 
 旧页面不要作为主入口长期存在，但也不要一次性删除：
