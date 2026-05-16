@@ -12,7 +12,6 @@ import subprocess
 from datetime import datetime
 
 import numpy as np
-import pandas as pd
 
 import matplotlib
 
@@ -41,6 +40,17 @@ if BASE_DIR not in sys.path:
 
 # ============ 核心函数缓存 ============
 _CORE_FUNC_CACHE = {}
+_PANDAS_MODULE = None
+
+
+def _pandas():
+    """Import pandas only when a CSV read actually needs it."""
+    global _PANDAS_MODULE
+    if _PANDAS_MODULE is None:
+        import pandas as pd
+
+        _PANDAS_MODULE = pd
+    return _PANDAS_MODULE
 
 
 def _get_core_func(module_name: str, func_name: str):
@@ -57,6 +67,7 @@ def _get_core_func(module_name: str, func_name: str):
 # ============ 数据工具 ============
 def _read_matrix_csv_fast(path: str) -> np.ndarray:
     """快速读取CSV矩阵"""
+    pd = _pandas()
     try:
         df = pd.read_csv(path, header=None, na_filter=False, low_memory=False)
         return df.values

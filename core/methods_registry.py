@@ -8,77 +8,83 @@
 - local 类型：PythonModule/ 下的numpy数组函数（svd_background, fk_filter 等）
 """
 
-from typing import Any
+from importlib import import_module
+from importlib.util import find_spec
+from typing import Any, Callable
 
 import numpy as np
 
-from PythonModule.svd_background import method_svd_background
-from PythonModule.fk_filter import method_fk_filter
-from PythonModule.frequency_filter_1d import method_frequency_filter_1d
-from PythonModule.hankel_svd import method_hankel_svd
-from PythonModule.hilbert_envelope import method_hilbert_envelope
-from PythonModule.kirchhoff_migration import method_kirchhoff_migration
-from PythonModule.stolt_migration import method_stolt_migration
-from PythonModule.time_cut import method_time_cut
-from PythonModule.time_to_depth import method_time_to_depth
-from PythonModule.trace_qc import method_trace_qc
-from PythonModule.sec_gain import method_sec_gain
-from PythonModule.sliding_average import method_sliding_average
-from PythonModule.rpca_placeholder import method_rpca_placeholder
-from PythonModule.rpca_background import method_rpca_background
-from PythonModule.wnnm_placeholder import method_wnnm_placeholder
-from PythonModule.ccbs_filter import method_ccbs
-from PythonModule.median_background_2D import method_median_background_2d
-from PythonModule.svd_subspace import method_svd_subspace
-
-_method_wavelet_2d: Any
-_method_wavelet_svd: Any
-
-try:
-    from PythonModule.wavelet_2d import method_wavelet_2d as _imported_method_wavelet_2d
-    from PythonModule.wavelet_svd import method_wavelet_svd as _imported_method_wavelet_svd
-
-    HAS_PYWAVELETS = True
-    _method_wavelet_2d = _imported_method_wavelet_2d
-    _method_wavelet_svd = _imported_method_wavelet_svd
-except ModuleNotFoundError as e:
-    if e.name != "pywt":
-        raise
-
-    HAS_PYWAVELETS = False
-
-    def _missing_wavelet_2d(*args, **kwargs):
-        raise ImportError(
-            "Wavelet 2D 去噪需要安装 PyWavelets。请执行: pip install PyWavelets"
-        )
-
-    def _missing_wavelet_svd(*args, **kwargs):
-        raise ImportError(
-            "Wavelet-SVD 需要安装 PyWavelets。请执行: pip install PyWavelets"
-        )
-
-    _method_wavelet_2d = _missing_wavelet_2d
-    _method_wavelet_svd = _missing_wavelet_svd
+_LAZY_METHOD_CACHE: dict[tuple[str, str], Callable[..., Any]] = {}
 
 
-from PythonModule.dewow import method_dewow
-from PythonModule.equidistant_trace_resample import method_equidistant_trace_resample
-from PythonModule.energy_decay_gain import method_energy_decay_gain
-from PythonModule.set_zero_time import method_set_zero_time
-from PythonModule.motion_compensation_height import method_motion_compensation_height
-from PythonModule.motion_compensation_speed import method_motion_compensation_speed  # type: ignore[import]
-from PythonModule.trajectory_smoothing import method_trajectory_smoothing
-from PythonModule.motion_compensation_attitude import (  # type: ignore[import]
-    method_motion_compensation_attitude,
+def _lazy_method(module_name: str, func_name: str) -> Callable[..., Any]:
+    """Return a callable that imports heavy processing modules on first use."""
+
+    def _call(*args, **kwargs):
+        key = (module_name, func_name)
+        func = _LAZY_METHOD_CACHE.get(key)
+        if func is None:
+            module = import_module(module_name)
+            func = getattr(module, func_name)
+            _LAZY_METHOD_CACHE[key] = func
+        return func(*args, **kwargs)
+
+    _call.__name__ = func_name
+    return _call
+
+
+def _missing_wavelet_2d(*args, **kwargs):
+    raise ImportError("Wavelet 2D 去噪需要安装 PyWavelets。请执行: pip install PyWavelets")
+
+
+def _missing_wavelet_svd(*args, **kwargs):
+    raise ImportError("Wavelet-SVD 需要安装 PyWavelets。请执行: pip install PyWavelets")
+
+
+HAS_PYWAVELETS = find_spec("pywt") is not None
+
+method_svd_background = _lazy_method("PythonModule.svd_background", "method_svd_background")
+method_fk_filter = _lazy_method("PythonModule.fk_filter", "method_fk_filter")
+method_frequency_filter_1d = _lazy_method("PythonModule.frequency_filter_1d", "method_frequency_filter_1d")
+method_hankel_svd = _lazy_method("PythonModule.hankel_svd", "method_hankel_svd")
+method_hilbert_envelope = _lazy_method("PythonModule.hilbert_envelope", "method_hilbert_envelope")
+method_kirchhoff_migration = _lazy_method("PythonModule.kirchhoff_migration", "method_kirchhoff_migration")
+method_stolt_migration = _lazy_method("PythonModule.stolt_migration", "method_stolt_migration")
+method_time_cut = _lazy_method("PythonModule.time_cut", "method_time_cut")
+method_time_to_depth = _lazy_method("PythonModule.time_to_depth", "method_time_to_depth")
+method_trace_qc = _lazy_method("PythonModule.trace_qc", "method_trace_qc")
+method_sec_gain = _lazy_method("PythonModule.sec_gain", "method_sec_gain")
+method_sliding_average = _lazy_method("PythonModule.sliding_average", "method_sliding_average")
+method_rpca_placeholder = _lazy_method("PythonModule.rpca_placeholder", "method_rpca_placeholder")
+method_rpca_background = _lazy_method("PythonModule.rpca_background", "method_rpca_background")
+method_wnnm_placeholder = _lazy_method("PythonModule.wnnm_placeholder", "method_wnnm_placeholder")
+method_ccbs = _lazy_method("PythonModule.ccbs_filter", "method_ccbs")
+method_median_background_2d = _lazy_method("PythonModule.median_background_2D", "method_median_background_2d")
+method_svd_subspace = _lazy_method("PythonModule.svd_subspace", "method_svd_subspace")
+_method_wavelet_2d = (
+    _lazy_method("PythonModule.wavelet_2d", "method_wavelet_2d")
+    if HAS_PYWAVELETS
+    else _missing_wavelet_2d
 )
-from PythonModule.motion_compensation_vibration import (  # type: ignore[import]
-    method_motion_compensation_vibration,
+_method_wavelet_svd = (
+    _lazy_method("PythonModule.wavelet_svd", "method_wavelet_svd")
+    if HAS_PYWAVELETS
+    else _missing_wavelet_svd
 )
-from PythonModule.motion_compensation_v2 import method_motion_compensation_v2
-from PythonModule.amplitude_scale import method_amplitude_scale
-from PythonModule.dc_shift import method_dc_shift
-from PythonModule.geometry_depth_context import method_geometry_depth_context
-from PythonModule.manual_velocity_model import method_manual_velocity_model
+method_dewow = _lazy_method("PythonModule.dewow", "method_dewow")
+method_equidistant_trace_resample = _lazy_method("PythonModule.equidistant_trace_resample", "method_equidistant_trace_resample")
+method_energy_decay_gain = _lazy_method("PythonModule.energy_decay_gain", "method_energy_decay_gain")
+method_set_zero_time = _lazy_method("PythonModule.set_zero_time", "method_set_zero_time")
+method_motion_compensation_height = _lazy_method("PythonModule.motion_compensation_height", "method_motion_compensation_height")
+method_motion_compensation_speed = _lazy_method("PythonModule.motion_compensation_speed", "method_motion_compensation_speed")
+method_trajectory_smoothing = _lazy_method("PythonModule.trajectory_smoothing", "method_trajectory_smoothing")
+method_motion_compensation_attitude = _lazy_method("PythonModule.motion_compensation_attitude", "method_motion_compensation_attitude")
+method_motion_compensation_vibration = _lazy_method("PythonModule.motion_compensation_vibration", "method_motion_compensation_vibration")
+method_motion_compensation_v2 = _lazy_method("PythonModule.motion_compensation_v2", "method_motion_compensation_v2")
+method_amplitude_scale = _lazy_method("PythonModule.amplitude_scale", "method_amplitude_scale")
+method_dc_shift = _lazy_method("PythonModule.dc_shift", "method_dc_shift")
+method_geometry_depth_context = _lazy_method("PythonModule.geometry_depth_context", "method_geometry_depth_context")
+method_manual_velocity_model = _lazy_method("PythonModule.manual_velocity_model", "method_manual_velocity_model")
 
 
 # ============ 方法注册表 ============

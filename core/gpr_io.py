@@ -15,6 +15,7 @@ Date: 2026-03-31
 from __future__ import annotations
 
 import importlib
+from importlib.util import find_spec
 import os
 import re
 import sys
@@ -23,23 +24,58 @@ from typing import Dict, Any, Optional, Tuple
 
 import numpy as np
 
-# Try to import h5py for gprMax .out support
-try:
-    import h5py
+HAS_H5PY = find_spec("h5py") is not None
+_H5PY_MODULE = None
 
-    HAS_H5PY = True
-except ImportError:
-    HAS_H5PY = False
-    print("Warning: h5py not available. gprMax .out loading disabled.")
 
-# 直接导入 read_file_data 模块
-from read_file_data import readcsv, savecsv, save_image, show_image
+def _h5py():
+    """Import h5py only when reading gprMax .out files."""
+    if not HAS_H5PY:
+        raise ImportError(
+            "h5py is required to read gprMax .out files. Install with: pip install h5py"
+        )
+    global _H5PY_MODULE
+    if _H5PY_MODULE is None:
+        import h5py
+
+        _H5PY_MODULE = h5py
+    return _H5PY_MODULE
+
 from core.data_context import (
     DATA_CONTEXT_GPRMAX,
     DATA_CONTEXT_GPRMAX_IMPULSE,
     DATA_CONTEXT_UAV_GPR_SFCW_FIELD,
     apply_data_context_defaults,
 )
+
+
+_READ_FILE_DATA_MODULE = None
+
+
+def _read_file_data_module():
+    """Import legacy CSV/image helpers only when they are used."""
+    global _READ_FILE_DATA_MODULE
+    if _READ_FILE_DATA_MODULE is None:
+        import read_file_data
+
+        _READ_FILE_DATA_MODULE = read_file_data
+    return _READ_FILE_DATA_MODULE
+
+
+def readcsv(*args, **kwargs):
+    return _read_file_data_module().readcsv(*args, **kwargs)
+
+
+def savecsv(*args, **kwargs):
+    return _read_file_data_module().savecsv(*args, **kwargs)
+
+
+def save_image(*args, **kwargs):
+    return _read_file_data_module().save_image(*args, **kwargs)
+
+
+def show_image(*args, **kwargs):
+    return _read_file_data_module().show_image(*args, **kwargs)
 
 
 def read_gprmax_in(in_path: str) -> Dict[str, Any]:
@@ -658,10 +694,7 @@ def read_gprmax_out(out_path: str) -> dict:
             "total_time_ns": float or None,
         }
     """
-    if not HAS_H5PY:
-        raise ImportError(
-            "h5py is required to read gprMax .out files. Install with: pip install h5py"
-        )
+    h5py = _h5py()
 
     out_path = Path(out_path)
     if not out_path.exists():
