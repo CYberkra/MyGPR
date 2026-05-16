@@ -18,8 +18,8 @@ def method_rpca_background(
     mu: float | None = None,
     max_iter: int = 120,
     tol: float = 1e-6,
-    **kwargs,
-):
+    **kwargs: object,
+) -> tuple[np.ndarray, dict[str, object]]:
     """Separate low-rank background and sparse reflections/clutter.
 
     Returns sparse foreground (`data - low_rank`) plus metadata for diagnostics.
@@ -67,7 +67,11 @@ def method_rpca_background(
 
     iteration = 0
     for iteration in range(1, max_iter + 1):
-        U, s, Vt = svd(arr - sparse + Y / mu_value, full_matrices=False)
+        U, s, Vt = svd(
+            arr - sparse + Y / mu_value,
+            full_matrices=False,
+            check_finite=False,
+        )
         s_thresh = np.maximum(s - 1.0 / mu_value, 0.0)
         rank = int(np.sum(s_thresh > 0.0))
         if rank > 0:
