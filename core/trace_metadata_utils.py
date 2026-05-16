@@ -8,6 +8,8 @@ from typing import Any
 
 import numpy as np
 
+from core.scalar_utils import to_float
+
 EARTH_RADIUS_M = 6378137.0
 
 
@@ -223,7 +225,7 @@ def build_uniform_trace_distance_m(
         positive = deltas[deltas > 0]
         spacing = float(np.median(positive)) if positive.size else 1.0
     else:
-        spacing = float(spacing_m)
+        spacing = to_float(spacing_m, default=0.0)
     if spacing <= 0:
         raise ValueError("spacing_m must be positive")
 

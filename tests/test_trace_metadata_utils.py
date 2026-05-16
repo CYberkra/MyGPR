@@ -61,6 +61,23 @@ def test_build_uniform_trace_distance_m_returns_equal_spacing_axis():
     )
 
 
+def test_build_uniform_trace_distance_m_accepts_numpy_scalar_spacing():
+    module = importlib.import_module("core.trace_metadata_utils")
+    build_uniform_trace_distance_m = module.build_uniform_trace_distance_m
+
+    trace_distance_m = np.array([0.0, 2.0, 4.0], dtype=np.float32)
+
+    uniform_distance = build_uniform_trace_distance_m(
+        trace_distance_m,
+        spacing_m=np.array([1.0]),
+    )
+
+    assert np.array_equal(
+        uniform_distance,
+        np.array([0.0, 1.0, 2.0, 3.0, 4.0], dtype=np.float32),
+    )
+
+
 def test_resample_bscan_columns_linear_matches_numpy_interp_per_row():
     module = importlib.import_module("core.trace_metadata_utils")
     resample_bscan_columns_linear = module.resample_bscan_columns_linear
