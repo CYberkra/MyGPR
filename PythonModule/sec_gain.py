@@ -7,8 +7,14 @@ from __future__ import annotations
 import numpy as np
 
 
-def method_sec_gain(data, gain_min=1.0, gain_max=6.0, power=1.0, **kwargs):
-    arr = np.asarray(data, dtype=np.float64)
+def method_sec_gain(
+    data: np.ndarray,
+    gain_min: float = 1.0,
+    gain_max: float = 6.0,
+    power: float = 1.0,
+    **kwargs: object,
+) -> tuple[np.ndarray, dict[str, object]]:
+    arr = np.asarray(data, dtype=np.float32)
     if arr.ndim != 2:
         raise ValueError(f"输入数据必须是2维数组，当前 shape={arr.shape}")
     if arr.size == 0:
@@ -19,8 +25,8 @@ def method_sec_gain(data, gain_min=1.0, gain_max=6.0, power=1.0, **kwargs):
     power = max(float(power), 1.0e-6)
 
     n_samples = int(arr.shape[0])
-    t = np.linspace(0.0, 1.0, n_samples, dtype=np.float64) ** power
-    gain_curve = gain_min + (gain_max - gain_min) * t
+    t = np.linspace(0.0, 1.0, n_samples, dtype=np.float32) ** np.float32(power)
+    gain_curve = (gain_min + (gain_max - gain_min) * t).astype(np.float32)
     result = arr * gain_curve[:, None]
 
     return result.astype(np.float32, copy=False), {
@@ -28,5 +34,5 @@ def method_sec_gain(data, gain_min=1.0, gain_max=6.0, power=1.0, **kwargs):
         "gain_min": gain_min,
         "gain_max": gain_max,
         "power": power,
-        "gain_curve": gain_curve.astype(np.float32, copy=False),
+        "gain_curve": gain_curve,
     }
