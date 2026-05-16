@@ -31,7 +31,7 @@ def _apply_zero_time_shift(
     new_zero_time: float = 5.0,
     time_step_s: float | None = None,
 ) -> tuple[np.ndarray, int, float]:
-    arr = np.asarray(data, dtype=np.float64)
+    arr = np.asarray(data, dtype=np.float32)
     if arr.ndim != 2:
         raise ValueError(
             f"输入数据必须是2维数组，当前维度: {arr.ndim}, shape: {arr.shape}"
@@ -47,7 +47,7 @@ def _apply_zero_time_shift(
     shift_samples = int(max(0.0, float(new_zero_time)) / max(step_ns, 1.0e-12))
     shift_samples = max(0, min(shift_samples, ny - 1))
 
-    result = np.zeros((ny, nx), dtype=np.float64)
+    result = np.zeros((ny, nx), dtype=np.float32)
     if shift_samples == 0:
         result[:] = arr
     else:
