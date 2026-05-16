@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import numpy as np
+
 from core.data_context import (
     apply_data_context_defaults,
     frequency_band_from_context,
@@ -44,3 +46,14 @@ def test_gprmax_impulse_context_does_not_inherit_field_frequency_band():
     assert frequency_band_from_context(header) is None
     assert recommended_profile_for_header(header) == "gprmax_impulse_validation"
     assert header["frequency_filter_policy"] == "model_or_auto_tune_only"
+
+
+def test_context_helpers_accept_numpy_header_scalars_and_bands():
+    header = {
+        "source": "airborne_csv",
+        "a_scan_length": np.array([501]),
+        "frequency_filter_band_mhz": np.array([20.0, 170.0]),
+    }
+
+    assert infer_data_context(header) == "uav_gpr_sfcw_field"
+    assert frequency_band_from_context(header) == (20.0, 170.0)

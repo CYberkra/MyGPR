@@ -7,6 +7,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 
 DATA_CONTEXT_UAV_GPR_SFCW_FIELD = "uav_gpr_sfcw_field"
 DATA_CONTEXT_GPRMAX_IMPULSE = "gprmax_impulse"
@@ -51,10 +53,7 @@ def infer_data_context(
     }.issubset(set(metadata.keys())):
         return DATA_CONTEXT_UAV_GPR_SFCW_FIELD
 
-    try:
-        samples = int(header.get("a_scan_length") or 0)
-    except Exception:
-        samples = 0
+    samples = _as_int(header.get("a_scan_length"), default=0)
     if samples == 501 and source in {"airborne_csv", "csv", ""}:
         return DATA_CONTEXT_UAV_GPR_SFCW_FIELD
 
@@ -132,14 +131,51 @@ def frequency_band_from_context(
     """Return a fixed passband only when the data context justifies it."""
     header = dict(header_info or {})
     band = header.get("frequency_filter_band_mhz")
-    if isinstance(band, (list, tuple)) and len(band) >= 2:
-        try:
-            low = float(band[0])
-            high = float(band[1])
-        except Exception:
-            return None
+    parsed_band = _first_two_floats(band)
+    if parsed_band is not None:
+        low, high = parsed_band
         if high > low >= 0.0:
             return low, high
     if infer_data_context(header) == DATA_CONTEXT_UAV_GPR_SFCW_FIELD:
         return FIELD_SFCW_BAND_MHZ
     return None
+
+
+def _as_int(value: Any, *, default: int) -> int:
+    scalar = _first_scalar(value)
+    if scalar is None:
+        return int(default)
+    try:
+        return int(float(scalar))
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def _first_scalar(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    try:
+        arr = np.asarray(value)
+    except (TypeError, ValueError):
+        return value
+    if arr.size == 0:
+        return None
+    return arr.reshape(-1)[0]
+
+
+def _first_two_floats(value: Any) -> tuple[float, float] | None:
+    if value is None:
+        return None
+    try:
+        arr = np.asarray(value, dtype=np.float64).reshape(-1)
+    except (TypeError, ValueError):
+        return None
+    if arr.size < 2:
+        return None
+    low = float(arr[0])
+    high = float(arr[1])
+    if not (np.isfinite(low) and np.isfinite(high)):
+        return None
+    return low, high
