@@ -112,7 +112,12 @@ def _clamp_selection(
 
 
 def _has_value(value: Any) -> bool:
-    return value not in (None, "")
+    scalar = _first_scalar(value)
+    if scalar is None:
+        return False
+    if isinstance(scalar, str):
+        return scalar.strip() != ""
+    return True
 
 
 def _has_positive_value(value: Any) -> bool:
@@ -121,13 +126,33 @@ def _has_positive_value(value: Any) -> bool:
 
 def _as_int(value: Any, *, default: int) -> int:
     try:
-        return int(float(value))
+        scalar = _first_scalar(value)
+        if scalar is None:
+            return int(default)
+        return int(float(scalar))
     except (TypeError, ValueError):
         return int(default)
 
 
 def _as_float(value: Any, *, default: float) -> float:
     try:
-        return float(value)
+        scalar = _first_scalar(value)
+        if scalar is None:
+            return float(default)
+        return float(scalar)
     except (TypeError, ValueError):
         return float(default)
+
+
+def _first_scalar(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    try:
+        arr = np.asarray(value)
+    except (TypeError, ValueError):
+        return value
+    if arr.size == 0:
+        return None
+    return arr.reshape(-1)[0]
