@@ -525,6 +525,103 @@ def test_workflow_canvas_output_drag_to_input_creates_replaceable_link():
         app.processEvents()
 
 
+def test_workflow_canvas_output_drop_blank_creates_source_bound_preview():
+    app = _get_app()
+    canvas = WorkflowCanvasView()
+    try:
+        config = build_default_workflow_config("mygpr_standard")
+        canvas.set_methods(config.methods[:2])
+        app.processEvents()
+
+        source = canvas._scene.proxies[0]
+        preview_id = canvas._create_output_effect_node(
+            source.output_port,
+            QPointF(620, 90),
+            "bscan",
+        )
+        app.processEvents()
+
+        specs = canvas._canvas_layout.get("preview_nodes", [])
+        assert preview_id
+        assert any(spec["node_id"] == preview_id for spec in specs)
+        assert any(
+            link.from_node == source.node_id
+            and link.to_node == preview_id
+            and link.kind == "preview"
+            for link in canvas.current_links()
+        )
+
+        preview_proxy = canvas._scene.proxy_by_id[preview_id]
+        preview_card = preview_proxy.widget()
+        assert isinstance(preview_card, BscanPreviewCard)
+        assert preview_card.data_shape is None
+        assert "运行到来源节点" in preview_card.thumbnail_label.text()
+
+        canvas.set_node_outputs([
+            {
+                "node_id": source.node_id,
+                "method_key": source.method.method_id,
+                "method_name": "零时校正",
+                "data": np.arange(64, dtype=float).reshape(8, 8),
+            }
+        ])
+        app.processEvents()
+
+        assert preview_card.data_shape == (8, 8)
+        assert preview_card.source_label is not None
+        assert "零时矫正" in preview_card.source_label.text()
+    finally:
+        canvas.close()
+        app.processEvents()
+
+
+def test_workflow_canvas_output_drop_recommends_gpr_next_methods():
+    app = _get_app()
+    canvas = WorkflowCanvasView()
+    try:
+        config = build_default_workflow_config("mygpr_standard")
+        canvas.set_methods(config.methods[:4])
+        app.processEvents()
+
+        zero_time = canvas._scene.proxies[0]
+        dewow = canvas._scene.proxies[1]
+        background = canvas._scene.proxies[2]
+        gain = canvas._scene.proxies[3]
+
+        assert "dewow" in canvas._recommended_next_methods(zero_time.method)
+        assert "subtracting_average_2D" in canvas._recommended_next_methods(dewow.method)
+        assert "sec_gain" in canvas._recommended_next_methods(background.method)
+        assert "svd_subspace" in canvas._recommended_next_methods(gain.method)
+    finally:
+        canvas.close()
+        app.processEvents()
+
+
+def test_workflow_page_add_connected_node_links_from_source_without_preview_pollution():
+    app = _get_app()
+    page = WorkflowPage()
+    try:
+        source_node_id = page.config.methods[0].node_id
+        initial_count = len(page.config.methods)
+
+        page._add_connected_canvas_node("dewow", QPointF(720, 120), source_node_id)
+        app.processEvents()
+
+        added = page.config.methods[-1]
+        assert len(page.config.methods) == initial_count + 1
+        assert added.method_id == "dewow"
+        assert any(
+            link.from_node == source_node_id
+            and link.to_node == added.node_id
+            and link.kind == "data"
+            for link in page.config.canvas_links
+        )
+        assert all(not link.to_node.startswith("__workflow_effect_preview__") for link in page.config.canvas_links if link.kind == "data")
+    finally:
+        page.close()
+        app.processEvents()
+
+
 def test_workflow_canvas_edge_delete_removes_link_and_edge_item():
     app = _get_app()
     canvas = WorkflowCanvasView()

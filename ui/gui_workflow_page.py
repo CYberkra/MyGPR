@@ -739,6 +739,7 @@ class WorkflowPage(QWidget):
         self.workflow_canvas.duplicate_node_requested.connect(self._duplicate_canvas_node)
         self.workflow_canvas.remove_node_requested.connect(self._remove_canvas_node)
         self.workflow_canvas.add_node_requested.connect(self._add_canvas_node)
+        self.workflow_canvas.add_connected_node_requested.connect(self._add_connected_canvas_node)
         self.workflow_canvas.tuning_lab_requested.connect(self._request_tuning_lab_for_row)
         self.workflow_canvas.apply_best_params_requested.connect(self._request_apply_best_params_for_row)
         self.workflow_canvas.benchmark_node_requested.connect(self._request_benchmark_for_row)
@@ -1056,8 +1057,43 @@ class WorkflowPage(QWidget):
             self.config.canvas_layout = layout
 
     def _add_canvas_node(self, method_id: str, scene_pos: QPointF) -> None:
-        if method_id not in PROCESSING_METHODS:
+        self._append_canvas_method(method_id, scene_pos)
+
+    def _add_connected_canvas_node(
+        self,
+        method_id: str,
+        scene_pos: QPointF,
+        source_node_id: str,
+    ) -> None:
+        method = self._append_canvas_method(method_id, scene_pos, queue_run=False)
+        if method is None:
             return
+        self.config.canvas_links = self.workflow_canvas.current_links()
+        self.config.canvas_links = [
+            link
+            for link in self.config.canvas_links
+            if not (
+                link.to_node == method.node_id
+                and getattr(link, "to_port", "input") == "input"
+                and getattr(link, "kind", "data") == "data"
+            )
+        ]
+        self.config.canvas_links.append(
+            self._make_link(str(source_node_id), method.node_id)
+        )
+        self._render_steps()
+        self.step_list.setCurrentRow(len(self.config.methods) - 1)
+        self._queue_realtime_run()
+
+    def _append_canvas_method(
+        self,
+        method_id: str,
+        scene_pos: QPointF,
+        *,
+        queue_run: bool = True,
+    ) -> WorkflowMethod | None:
+        if method_id not in PROCESSING_METHODS:
+            return None
         metadata = PROCESSING_METHODS.get(method_id, {})
         category = str(metadata.get("category") or "custom")
         method = WorkflowMethod(
@@ -1082,7 +1118,9 @@ class WorkflowPage(QWidget):
         self.config.canvas_links = self.workflow_canvas.current_links()
         self._render_steps()
         self.step_list.setCurrentRow(len(self.config.methods) - 1)
-        self._queue_realtime_run()
+        if queue_run:
+            self._queue_realtime_run()
+        return method
 
     def _make_link(self, from_node: str, to_node: str):
         from core.workflow_data import WorkflowLink
@@ -1824,7 +1862,9 @@ class WorkflowPage(QWidget):
         self._log(f"{label}: {len(outputs)} 步")
         self._select_bottom_drawer_page("logs", expand=not realtime)
 
+        normalized_outputs: list[dict[str, Any]] = []
         output_by_node_id = {o.get("node_id"): o for o in outputs if o.get("node_id")}
+        normalized_outputs.extend(dict(output) for output in outputs if output.get("node_id"))
         run_node_ids = set(output_by_node_id.keys())
 
         for method in self.config.methods:
@@ -1854,8 +1894,17 @@ class WorkflowPage(QWidget):
                         config_method.error_message = ""
                         data = output.get("data")
                         config_method.output_shape = data.shape if data is not None else None
+                        enriched_output = dict(output)
+                        enriched_output["node_id"] = config_method.node_id
+                        enriched_output.setdefault("method_key", config_method.method_id)
+                        enriched_output.setdefault(
+                            "method_name",
+                            get_method_display_name(config_method.method_id),
+                        )
+                        normalized_outputs.append(enriched_output)
                         break
 
+        self.workflow_canvas.set_node_outputs(normalized_outputs)
         self.workflow_canvas.refresh_all_nodes()
 
         run_record = self._create_run_record(outputs, realtime, run_mode)

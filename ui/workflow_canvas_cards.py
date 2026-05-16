@@ -50,6 +50,7 @@ from ui.workflow_canvas_preview import BscanPreviewCard
 
 
 PREVIEW_NODE_ID = "__workflow_preview__"
+PREVIEW_NODE_PREFIX = "__workflow_effect_preview__"
 MIN_NODE_WIDTH = 270
 MIN_NODE_HEIGHT = 160
 MAX_NODE_WIDTH = 360
@@ -59,6 +60,40 @@ COMPACT_HEIGHT = 95
 MINI_WIDTH = 175
 MINI_HEIGHT = 65
 NODE_PORT_ROW_Y = 42.0
+
+OUTPUT_EFFECT_LABELS = {
+    "bscan": "查看此步 B-scan",
+    "compare": "前后对比",
+    "qc": "QC 指标",
+    "spectrum": "频谱 / 能量分布",
+    "evidence": "导出此步结果",
+}
+
+OUTPUT_EFFECT_TITLES = {
+    "bscan": "B-scan Preview",
+    "compare": "Before / After",
+    "qc": "QC Metrics",
+    "spectrum": "Spectrum View",
+    "evidence": "Evidence Snapshot",
+}
+
+OUTPUT_EFFECT_EMPTY_MESSAGES = {
+    "bscan": "暂无预览，请先运行到来源节点",
+    "compare": "暂无对比，请先运行到来源节点",
+    "qc": "暂无 QC 指标，请先运行到来源节点",
+    "spectrum": "暂无频谱，请先运行到来源节点",
+    "evidence": "暂无 Evidence，请先运行到来源节点",
+}
+
+NEXT_METHOD_RECOMMENDATIONS = {
+    "zero_time": ["dewow", "frequency_filter_1d"],
+    "trace_correction": ["subtracting_average_2D", "frequency_filter_1d"],
+    "background_clutter": ["sec_gain", "wavelet_svd", "svd_subspace"],
+    "gain": ["svd_subspace", "wavelet_svd"],
+    "spatial_denoise": ["kirchhoff_migration", "stolt_migration", "time_to_depth"],
+    "velocity_model": ["geometry_depth_context"],
+    "geometry_depth": ["sec_gain", "kirchhoff_migration"],
+}
 
 
 def default_params_for_method(method_id: str) -> dict[str, object]:
@@ -746,7 +781,7 @@ class WorkflowNodeCard(QFrame):
             self.title_label.setStyleSheet("font-size: 15px; font-weight: bold;")
         if self.status_chip:
             self.status_chip.show()
-            self.status_chip.setStyleSheet("font-size: 12px; font-weight: bold; padding: 2px 6px;")
+            self.status_chip.setStyleSheet("font-size: 14px; font-weight: bold; padding: 2px 6px;")
         if self.eye_button:
             self.eye_button.show()
         if self.input_port_label:
@@ -1302,7 +1337,7 @@ class WorkflowNodeProxy(QGraphicsProxyWidget):
         super().__init__(parent)
         self.row = int(row)
         self.method = method
-        self.node_id = method.node_id if row >= 0 else PREVIEW_NODE_ID
+        self.node_id = method.node_id or (PREVIEW_NODE_ID if row < 0 else "")
         in_label, out_label = workflow_port_labels(method)
         self.input_port = WorkflowPortItem("input", self, in_label)
         self.output_port = WorkflowPortItem("output", self, out_label)
@@ -1562,6 +1597,7 @@ class WorkflowCanvasView(QGraphicsView):
     duplicate_node_requested = pyqtSignal(int)
     remove_node_requested = pyqtSignal(int)
     add_node_requested = pyqtSignal(str, QPointF)
+    add_connected_node_requested = pyqtSignal(str, QPointF, str)
     tuning_lab_requested = pyqtSignal(int)
     apply_best_params_requested = pyqtSignal(int)
     benchmark_node_requested = pyqtSignal(int)
@@ -1594,6 +1630,7 @@ class WorkflowCanvasView(QGraphicsView):
         self._resize_start_size = QSize()
         self._drag_source_port: WorkflowPortItem | None = None
         self._temp_edge: QGraphicsPathItem | None = None
+        self._node_output_cache: dict[str, dict] = {}
         self._preview_data = None
         self._preview_label = "Workflow Output"
         self._last_preview_source_node = None
@@ -1779,6 +1816,65 @@ class WorkflowCanvasView(QGraphicsView):
                 card.set_stale()
             except Exception:
                 pass
+        self._refresh_effect_preview_nodes()
+
+    def set_node_outputs(self, outputs: list[dict]) -> None:
+        """Cache per-node outputs so source-bound preview nodes can render."""
+        cache: dict[str, dict] = {}
+        for output in outputs or []:
+            node_id = str(output.get("node_id") or "")
+            if node_id:
+                cache[node_id] = dict(output)
+        self._node_output_cache = cache
+        self._refresh_effect_preview_nodes()
+
+    def _effect_preview_specs(self) -> list[dict]:
+        specs = self._canvas_layout.setdefault("preview_nodes", [])
+        if not isinstance(specs, list):
+            specs = []
+            self._canvas_layout["preview_nodes"] = specs
+        return specs
+
+    def _source_label_for_node(self, node_id: str) -> str:
+        for method in self._methods:
+            if method.node_id == node_id:
+                prefix = f"{int(method.order) + 1:02d}"
+                return f"{prefix} {get_method_display_name(method.method_id)}"
+        return "来源节点"
+
+    def _effect_preview_title(self, kind: str) -> str:
+        return OUTPUT_EFFECT_TITLES.get(str(kind), OUTPUT_EFFECT_TITLES["bscan"])
+
+    def _effect_preview_empty_message(self, kind: str) -> str:
+        return OUTPUT_EFFECT_EMPTY_MESSAGES.get(str(kind), OUTPUT_EFFECT_EMPTY_MESSAGES["bscan"])
+
+    def _effect_preview_label(self, spec: dict) -> str:
+        kind = str(spec.get("kind") or "bscan")
+        source_label = str(spec.get("source_label") or self._source_label_for_node(str(spec.get("source_node_id") or "")))
+        return f"{self._effect_preview_title(kind)} · {source_label}"
+
+    def _refresh_effect_preview_nodes(self) -> None:
+        for proxy in list(self._scene.proxies):
+            if not str(proxy.node_id).startswith(PREVIEW_NODE_PREFIX):
+                continue
+            card = proxy.widget()
+            if not isinstance(card, BscanPreviewCard):
+                continue
+            spec = getattr(proxy, "preview_spec", None)
+            if not isinstance(spec, dict):
+                continue
+            source_id = str(spec.get("source_node_id") or "")
+            cached = self._node_output_cache.get(source_id)
+            data = cached.get("data") if isinstance(cached, dict) else None
+            card.set_source_context(
+                title=self._effect_preview_title(str(spec.get("kind") or "bscan")),
+                empty_message=self._effect_preview_empty_message(str(spec.get("kind") or "bscan")),
+            )
+            card.set_preview_data(
+                data,
+                label=self._effect_preview_label(spec),
+                success=True,
+            )
 
     def viewport_scene_center(self) -> QPointF:
         """Return the current viewport center in scene coordinates."""
@@ -1910,7 +2006,14 @@ class WorkflowCanvasView(QGraphicsView):
             menu.addSeparator()
             menu.addAction("复制节点", lambda row=proxy.row: self.duplicate_node_requested.emit(row))
             menu.addAction("删除节点", lambda row=proxy.row: self.remove_node_requested.emit(row))
-            menu.addAction("添加预览节点", lambda: self._ensure_preview_visible())
+            menu.addAction(
+                "添加预览节点",
+                lambda p=proxy: self._create_output_effect_node(
+                    p.output_port,
+                    p.scenePos() + QPointF(p.boundingRect().width() + 80.0, 0.0),
+                    "bscan",
+                ),
+            )
             rename_action = menu.addAction("重命名节点")
             rename_action.setEnabled(False)
             menu.addAction(
@@ -1923,6 +2026,8 @@ class WorkflowCanvasView(QGraphicsView):
             menu.addAction("添加前后对比", self.preview_compare_requested.emit)
             menu.addAction("保存快照", self.preview_snapshot_requested.emit)
             menu.addAction("预览设置", self.preview_settings_requested.emit)
+            if str(proxy.node_id).startswith(PREVIEW_NODE_PREFIX):
+                menu.addAction("删除预览节点", lambda p=proxy: self._remove_output_effect_node(p.node_id))
             menu.addAction("适配到此节点", lambda p=proxy: self.fit_proxy(p))
         return menu
 
@@ -2205,9 +2310,17 @@ class WorkflowCanvasView(QGraphicsView):
                 return True
 
             if self._drag_source_port is not None:
+                source_port = self._drag_source_port
                 target = self._port_at_view_pos(view_pos)
                 if target is not None:
                     self._finish_temp_edge(target)
+                else:
+                    scene_pos = self.mapToScene(view_pos)
+                    global_pos = self.viewport().mapToGlobal(view_pos)
+                    self._clear_temp_edge()
+                    self._show_output_drop_menu(source_port, scene_pos, global_pos)
+                    event.accept()
+                    return True
                 self._clear_temp_edge()
                 event.accept()
                 return True
@@ -2244,6 +2357,121 @@ class WorkflowCanvasView(QGraphicsView):
         self._drag_scene_offset = QPointF()
         if not self._panning and not self._left_panning:
             self.setCursor(Qt.CursorShape.ArrowCursor)
+
+    def _show_output_drop_menu(
+        self,
+        source_port: WorkflowPortItem,
+        scene_pos: QPointF,
+        global_pos: QPoint,
+    ) -> None:
+        if source_port is None or source_port.port_name != "output":
+            return
+        menu = QMenu(self)
+        menu.addSection("推荐下一步")
+        menu.addAction(
+            OUTPUT_EFFECT_LABELS["bscan"],
+            lambda: self._create_output_effect_node(source_port, scene_pos, "bscan"),
+        )
+        menu.addAction(
+            OUTPUT_EFFECT_LABELS["compare"],
+            lambda: self._create_output_effect_node(source_port, scene_pos, "compare"),
+        )
+        menu.addAction(
+            OUTPUT_EFFECT_LABELS["qc"],
+            lambda: self._create_output_effect_node(source_port, scene_pos, "qc"),
+        )
+        more_menu = menu.addMenu("更多效果")
+        more_menu.addAction(
+            OUTPUT_EFFECT_LABELS["spectrum"],
+            lambda: self._create_output_effect_node(source_port, scene_pos, "spectrum"),
+        )
+        more_menu.addAction(
+            OUTPUT_EFFECT_LABELS["evidence"],
+            lambda: self._create_output_effect_node(source_port, scene_pos, "evidence"),
+        )
+
+        recommended = self._recommended_next_methods(source_port.owner.method)
+        if recommended:
+            next_menu = menu.addMenu("添加下一算法")
+            for method_id in recommended:
+                next_menu.addAction(
+                    get_method_display_name(method_id),
+                    lambda _checked=False, key=method_id, pos=QPointF(scene_pos), source=source_port.owner.node_id: (
+                        self.add_connected_node_requested.emit(key, pos, source)
+                    ),
+                )
+        menu.exec(global_pos)
+
+    def _recommended_next_methods(self, method: WorkflowMethod) -> list[str]:
+        stage_methods = NEXT_METHOD_RECOMMENDATIONS.get(method.stage_id, [])
+        if not stage_methods:
+            if method.method_id == "set_zero_time":
+                stage_methods = ["dewow", "frequency_filter_1d"]
+            elif method.method_id == "dewow":
+                stage_methods = ["subtracting_average_2D", "frequency_filter_1d"]
+            elif method.method_id == "subtracting_average_2D":
+                stage_methods = ["sec_gain", "wavelet_svd", "svd_subspace"]
+            elif method.method_id in {"sec_gain", "agcGain", "energy_decay_gain", "compensatingGain"}:
+                stage_methods = ["svd_subspace", "wavelet_svd"]
+        result: list[str] = []
+        for method_id in stage_methods:
+            if method_id in PROCESSING_METHODS and method_id != method.method_id and method_id not in result:
+                result.append(method_id)
+        return result
+
+    def _create_output_effect_node(
+        self,
+        source_port: WorkflowPortItem,
+        scene_pos: QPointF,
+        kind: str = "bscan",
+    ) -> str:
+        if source_port is None or source_port.port_name != "output":
+            return ""
+        kind = kind if kind in OUTPUT_EFFECT_TITLES else "bscan"
+        source_node_id = source_port.owner.node_id
+        specs = self._effect_preview_specs()
+        counter = 1 + sum(
+            1
+            for spec in specs
+            if str(spec.get("source_node_id") or "") == source_node_id
+            and str(spec.get("kind") or "bscan") == kind
+        )
+        clean_source = "".join(ch if ch.isalnum() else "_" for ch in source_node_id)[-18:]
+        preview_node_id = f"{PREVIEW_NODE_PREFIX}{kind}_{clean_source}_{counter}"
+        spec = {
+            "node_id": preview_node_id,
+            "source_node_id": source_node_id,
+            "source_port": "output",
+            "kind": kind,
+            "source_label": self._source_label_for_node(source_node_id),
+            "x": float(scene_pos.x()),
+            "y": float(scene_pos.y()),
+            "width": 320,
+            "height": 240,
+        }
+        specs.append(spec)
+        self._links.append(
+            WorkflowLink(source_node_id, preview_node_id, "output", "input", "preview")
+        )
+        self._rebuild()
+        self.links_changed.emit(self.current_links())
+        self.layout_changed.emit(self._canvas_layout)
+        return preview_node_id
+
+    def _remove_output_effect_node(self, node_id: str) -> None:
+        node_id = str(node_id)
+        specs = self._effect_preview_specs()
+        self._canvas_layout["preview_nodes"] = [
+            spec for spec in specs if str(spec.get("node_id") or "") != node_id
+        ]
+        self._links = [
+            link
+            for link in self._links
+            if link.from_node != node_id and link.to_node != node_id
+        ]
+        self._rebuild()
+        self.links_changed.emit(self.current_links())
+        self.layout_changed.emit(self._canvas_layout)
 
     def _start_temp_edge(self, port: WorkflowPortItem) -> None:
         self._drag_source_port = port
@@ -2389,6 +2617,15 @@ class WorkflowCanvasView(QGraphicsView):
             for edge in selected_edges:
                 self._scene.remove_edge(edge)
             return
+        selected_preview_nodes = [
+            item
+            for item in self._scene.selectedItems()
+            if isinstance(item, WorkflowNodeProxy)
+            and str(item.node_id).startswith(PREVIEW_NODE_PREFIX)
+        ]
+        if selected_preview_nodes:
+            self._remove_output_effect_node(selected_preview_nodes[0].node_id)
+            return
         selected_nodes = [item for item in self._scene.selectedItems() if isinstance(item, WorkflowNodeProxy) and item.row >= 0]
         if selected_nodes:
             self.remove_node_requested.emit(selected_nodes[0].row)
@@ -2524,6 +2761,60 @@ class WorkflowCanvasView(QGraphicsView):
         self._scene.proxy_by_id[PREVIEW_NODE_ID] = preview_proxy
         self._preview_proxy = preview_proxy
 
+        for spec_index, spec in enumerate(list(self._effect_preview_specs())):
+            source_node_id = str(spec.get("source_node_id") or "")
+            if not source_node_id:
+                continue
+            preview_node_id = str(spec.get("node_id") or "")
+            if not preview_node_id:
+                preview_node_id = f"{PREVIEW_NODE_PREFIX}{spec_index + 1}"
+                spec["node_id"] = preview_node_id
+            kind = str(spec.get("kind") or "bscan")
+            card = BscanPreviewCard(
+                title=self._effect_preview_title(kind),
+                empty_message=self._effect_preview_empty_message(kind),
+            )
+            source_label = str(spec.get("source_label") or self._source_label_for_node(source_node_id))
+            spec["source_label"] = source_label
+            cached = self._node_output_cache.get(source_node_id)
+            card.set_preview_data(
+                cached.get("data") if isinstance(cached, dict) else None,
+                label=self._effect_preview_label(spec),
+                success=True,
+            )
+            preview_method = WorkflowMethod(
+                "preview",
+                f"{kind}_preview",
+                enabled=True,
+                order=len(self._methods) + spec_index + 1,
+                node_id=preview_node_id,
+            )
+            preview_method.status = "success" if isinstance(cached, dict) and cached.get("data") is not None else "idle"
+            data = cached.get("data") if isinstance(cached, dict) else None
+            if data is not None and hasattr(data, "shape"):
+                preview_method.output_shape = data.shape
+            effect_proxy = WorkflowNodeProxy(-1, preview_method)
+            effect_proxy.preview_spec = spec
+            effect_proxy.output_port.hide()
+            effect_proxy.output_port.label_item.hide()
+            effect_proxy.resize_handle.hide()
+            effect_proxy.setWidget(card)
+            effect_proxy.setPos(float(spec.get("x", 120.0)), float(spec.get("y", 120.0)))
+            if "width" in spec or "height" in spec:
+                effect_proxy.apply_size(float(spec.get("width", 320)), float(spec.get("height", 240)))
+            self._scene.addItem(effect_proxy)
+            self._scene.proxies.append(effect_proxy)
+            self._scene.proxy_by_id[preview_node_id] = effect_proxy
+            if not any(
+                link.from_node == source_node_id
+                and link.to_node == preview_node_id
+                and getattr(link, "kind", "data") == "preview"
+                for link in self._links
+            ):
+                self._links.append(
+                    WorkflowLink(source_node_id, preview_node_id, "output", "input", "preview")
+                )
+
         self._scene.set_links(self._links)
         self.set_selected_row(self._current_row)
         self._apply_zoom_lod(force=True)
@@ -2540,6 +2831,14 @@ class WorkflowCanvasView(QGraphicsView):
         widget = proxy.widget()
         width = widget.width() if widget is not None else proxy.boundingRect().width()
         height = widget.height() if widget is not None else proxy.boundingRect().height()
+        if str(proxy.node_id).startswith(PREVIEW_NODE_PREFIX):
+            for spec in self._effect_preview_specs():
+                if str(spec.get("node_id") or "") == proxy.node_id:
+                    spec["x"] = float(proxy.pos().x())
+                    spec["y"] = float(proxy.pos().y())
+                    spec["width"] = int(width)
+                    spec["height"] = int(height)
+                    return
         nodes[proxy.node_id] = {
             "x": float(proxy.pos().x()),
             "y": float(proxy.pos().y()),

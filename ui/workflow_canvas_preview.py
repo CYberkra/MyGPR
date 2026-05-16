@@ -102,10 +102,12 @@ class BscanPreviewCard(QFrame):
 
     large_view_requested = pyqtSignal(object, str)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, title: str = "B-scan Preview", empty_message: str = "暂无预览，请先运行工作流"):
         super().__init__(parent)
         self._data: Any = None
         self._label = "Workflow Output"
+        self._title = str(title or "B-scan Preview")
+        self._empty_message = str(empty_message or "暂无预览，请先运行工作流")
         self._is_stale = False
         self._is_failed = False
         self._has_data = False
@@ -215,6 +217,14 @@ class BscanPreviewCard(QFrame):
             self._data = None
             self._has_data = False
             self._build()
+
+    def set_source_context(self, *, title: str | None = None, empty_message: str | None = None) -> None:
+        """Update title/empty-state text without changing the current preview data."""
+        if title is not None:
+            self._title = str(title or "B-scan Preview")
+        if empty_message is not None:
+            self._empty_message = str(empty_message or "暂无预览，请先运行工作流")
+        self._build()
 
     def set_stale(self) -> None:
         """Mark the preview as stale (result from previous run)."""
@@ -371,7 +381,7 @@ class BscanPreviewCard(QFrame):
 
         title_row = QHBoxLayout()
         title_row.setSpacing(6)
-        title = QLabel("B-scan Preview")
+        title = QLabel(self._title)
         title.setObjectName("previewTitle")
         title_row.addWidget(title, 1)
 
@@ -420,12 +430,12 @@ class BscanPreviewCard(QFrame):
         self.thumbnail_label.setMinimumHeight(150)
         pixmap = _array_to_pixmap(self._data, width=320, height=180)
         if pixmap is None:
-            self.thumbnail_label.setText("暂无预览，请先运行工作流")
+            self.thumbnail_label.setText(self._empty_message)
         else:
             self.thumbnail_label.setPixmap(pixmap)
         root.addWidget(self.thumbnail_label)
 
-        hint = QLabel("双击打开大图" if shape is not None else "暂无预览，请先运行工作流")
+        hint = QLabel("双击打开大图" if shape is not None else self._empty_message)
         hint.setObjectName("previewMeta")
         root.addWidget(hint)
 
