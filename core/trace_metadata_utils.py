@@ -302,8 +302,14 @@ def resample_trace_metadata(
         raise ValueError("target_trace_distance_m must be monotonically non-decreasing")
 
     resampled: dict[str, np.ndarray] = {}
-    nearest_idx = np.searchsorted(source_distance, target_distance, side="left")
-    nearest_idx = np.clip(nearest_idx, 0, trace_count - 1)
+    insert_idx = np.searchsorted(source_distance, target_distance, side="left")
+    right_idx = np.clip(insert_idx, 0, trace_count - 1)
+    left_idx = np.clip(insert_idx - 1, 0, trace_count - 1)
+    choose_left = (
+        np.abs(target_distance - source_distance[left_idx])
+        <= np.abs(source_distance[right_idx] - target_distance)
+    )
+    nearest_idx = np.where(choose_left, left_idx, right_idx)
 
     for key, values in trace_metadata.items():
         arr = np.asarray(values)

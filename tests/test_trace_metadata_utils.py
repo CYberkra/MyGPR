@@ -103,9 +103,10 @@ def test_resample_trace_metadata_interpolates_numeric_fields_and_marks_resampled
         "local_y_m": np.array([0.0, 0.0, 0.0], dtype=np.float32),
         "longitude": np.array([100.0, 100.0002, 100.0004], dtype=np.float64),
         "latitude": np.array([30.0, 30.0, 30.0], dtype=np.float64),
+        "height_source": np.array(["manual", "rtk", "altimeter"], dtype="<U16"),
         "alignment_status": np.array(["aligned", "aligned", "aligned"], dtype="<U16"),
     }
-    target_trace_distance_m = np.array([0.0, 1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+    target_trace_distance_m = np.array([0.0, 0.9, 2.0, 3.1, 4.0], dtype=np.float32)
 
     resampled = resample_trace_metadata(
         trace_metadata,
@@ -119,5 +120,6 @@ def test_resample_trace_metadata_interpolates_numeric_fields_and_marks_resampled
     assert float(resampled["trace_timestamp_s"][-1]) == 12.0
     assert np.allclose(resampled["local_x_m"], target_trace_distance_m)
     assert np.allclose(resampled["local_y_m"], 0.0)
+    assert resampled["height_source"].tolist() == ["manual", "manual", "rtk", "altimeter", "altimeter"]
     assert resampled["alignment_status"].shape == (5,)
     assert set(resampled["alignment_status"].tolist()) == {"resampled"}
