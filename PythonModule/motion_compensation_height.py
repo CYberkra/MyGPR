@@ -20,6 +20,20 @@ from __future__ import annotations
 import numpy as np
 
 
+def _as_positive_scalar(value: object) -> float | None:
+    """Return the first finite positive scalar from a runtime metadata value."""
+    try:
+        arr = np.asarray(value, dtype=np.float64).reshape(-1)
+    except (TypeError, ValueError):
+        return None
+    if arr.size == 0:
+        return None
+    scalar = float(arr[0])
+    if not np.isfinite(scalar) or scalar <= 0.0:
+        return None
+    return scalar
+
+
 def method_motion_compensation_height(
     data: np.ndarray,
     reference_height_mode: str = "mean",
@@ -92,9 +106,9 @@ def method_motion_compensation_height(
         return arr.copy(), meta
 
     # 2. 显式校验非正或 NaN 高度
-    if np.any(np.isnan(flight_height)):
+    if np.any(~np.isfinite(flight_height)):
         meta["skipped"] = True
-        meta["reason"] = "flight_height_m 包含 NaN 值"
+        meta["reason"] = "flight_height_m 包含 NaN 或 Inf 值"
         meta["input_height_valid"] = False
         return arr.copy(), meta
     if np.any(flight_height <= 0):
@@ -152,12 +166,13 @@ def method_motion_compensation_height(
         time_window_ns = kwargs.get("time_window_ns")
         if time_window_ns is None and trace_metadata is not None:
             time_window_ns = trace_metadata.get("time_window_ns")
-        if time_window_ns is None:
+        time_window_value = _as_positive_scalar(time_window_ns)
+        if time_window_value is None:
             meta["time_shift_correction_applied"] = False
             meta["time_shift_skip_reason"] = "无法获取时窗信息（time_window_ns），跳过时移校正"
         else:
-            meta["time_window_ns"] = float(time_window_ns)
-            dt_ns = float(time_window_ns) / max(samples - 1, 1)
+            meta["time_window_ns"] = time_window_value
+            dt_ns = time_window_value / max(samples - 1, 1)
             shifts_samples = delta_t_ns / dt_ns
 
             # 6. shift clamp

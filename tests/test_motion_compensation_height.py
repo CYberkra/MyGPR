@@ -70,7 +70,7 @@ def test_height_compensation_reduces_reflector_ridge_error():
 
 
 def test_height_compensation_skips_nonpositive_heights():
-    """零、负或 NaN 高度应安全跳过并返回拷贝数据。"""
+    """零、负或非有限高度应安全跳过并返回拷贝数据。"""
     rng = np.random.default_rng(7)
     data = rng.normal(size=(64, 16)).astype(np.float32)
     base_meta = {
@@ -86,6 +86,14 @@ def test_height_compensation_skips_nonpositive_heights():
     assert meta["input_height_valid"] is False
     assert np.array_equal(out, data)
     assert out is not data
+
+    # Inf
+    inf_meta = {**base_meta, "flight_height_m": np.full(16, np.inf, dtype=np.float64)}
+    out, meta = method_motion_compensation_height(data, trace_metadata=inf_meta)
+    assert meta["skipped"] is True
+    assert "Inf" in meta["reason"]
+    assert meta["input_height_valid"] is False
+    assert np.array_equal(out, data)
 
     # 零值
     zero_meta = {**base_meta, "flight_height_m": np.zeros(16, dtype=np.float64)}
@@ -190,6 +198,21 @@ def test_height_compensation_time_window_from_kwargs_first():
         trace_metadata=trace_metadata,
         time_window_ns=120.0,
     )
+    assert meta["time_window_ns"] == pytest.approx(120.0)
+
+
+def test_height_compensation_accepts_scalar_array_time_window():
+    """metadata 中的 time_window_ns 标量数组应按单个时窗值解析。"""
+    rng = np.random.default_rng(111)
+    data = rng.normal(size=(64, 12)).astype(np.float32)
+    trace_metadata = {
+        "flight_height_m": 1.5 + 0.1 * np.sin(np.linspace(0, np.pi, 12)),
+        "time_window_ns": np.array([120.0], dtype=np.float64),
+    }
+
+    _, meta = method_motion_compensation_height(data, trace_metadata=trace_metadata)
+
+    assert meta["time_shift_correction_applied"] is True
     assert meta["time_window_ns"] == pytest.approx(120.0)
 
 
