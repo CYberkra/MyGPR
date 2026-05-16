@@ -111,6 +111,17 @@ def test_gprpy_windowed_helpers_match_slow_edge_reference():
     assert np.allclose(apply_gprpy_agc_gain(raw, 5), _slow_gprpy_agc_gain(raw, 5))
 
 
+def test_gprpy_windowed_helpers_clamp_nonpositive_windows_to_one():
+    raw = np.arange(1, 25, dtype=np.float32).reshape(6, 4)
+
+    assert np.allclose(apply_gprpy_dewow(raw, 0), apply_gprpy_dewow(raw, 1))
+    assert np.allclose(
+        apply_gprpy_rem_mean_trace(raw, -3),
+        apply_gprpy_rem_mean_trace(raw, 1),
+    )
+    assert np.allclose(apply_gprpy_agc_gain(raw, 0), apply_gprpy_agc_gain(raw, 1))
+
+
 def test_dewow_matches_gprpy_baseline_windowed_edges():
     raw = np.arange(1, 49, dtype=np.float32).reshape(8, 6)
 

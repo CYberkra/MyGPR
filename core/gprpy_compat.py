@@ -26,7 +26,7 @@ def apply_gprpy_dewow(data: np.ndarray, window: int) -> np.ndarray:
     if totsamps == 0:
         raise ValueError("输入数据为空")
 
-    window = int(window)
+    window = max(1, int(window))
     if window >= totsamps:
         result = arr - np.mean(arr, axis=0, keepdims=True)
         return result.astype(np.float32, copy=False)
@@ -61,7 +61,7 @@ def apply_gprpy_rem_mean_trace(data: np.ndarray, ntraces: int) -> np.ndarray:
     if tottraces == 0:
         raise ValueError("输入数据为空")
 
-    ntraces = int(ntraces)
+    ntraces = max(1, int(ntraces))
     if ntraces >= tottraces:
         result = arr - np.mean(arr, axis=1, keepdims=True)
         return result.astype(np.float32, copy=False)
@@ -101,7 +101,7 @@ def gprpy_local_window_l2_energy(
     if totsamps == 0:
         raise ValueError("输入数据为空")
 
-    window = int(window)
+    window = max(1, int(window))
     if window > totsamps:
         energy = np.maximum(np.linalg.norm(arr, axis=0, keepdims=True), eps)
         return np.repeat(energy, totsamps, axis=0)
@@ -140,6 +140,6 @@ def apply_gprpy_agc_gain(data: np.ndarray, window: int) -> np.ndarray:
         raise ValueError("输入数据为空")
 
     eps = 1e-8
-    window = int(window)
+    window = max(1, int(window))
     energy = gprpy_local_window_l2_energy(arr, window, eps=eps)
     return np.divide(arr, energy).astype(np.float32, copy=False)
