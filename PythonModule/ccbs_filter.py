@@ -8,11 +8,15 @@ background trace based on cross-correlation similarity to remove horizontal clut
 direct-coupling waves, and ground reflections.
 """
 
+from __future__ import annotations
+
 import numpy as np
-from scipy import signal
 
 
-def apply_ccbs_filter(b_scan, reference_wave=None):
+def apply_ccbs_filter(
+    b_scan: np.ndarray,
+    reference_wave: np.ndarray | None = None,
+) -> np.ndarray:
     """
     Apply Cross-Correlation-Based Background Subtraction (CCBS) filter to GPR B-scan data.
 
@@ -190,25 +194,20 @@ def apply_ccbs_filter(b_scan, reference_wave=None):
     reference_2d = reference_wave[:, np.newaxis]  # Shape: (M, 1)
     weights_2d = weights[np.newaxis, :]  # Shape: (1, N)
 
-    # Compute weighted background for each trace
-    # background_i = H_i * v + (1 - H_i) * B_mean
-    #              = H_i * v + B_mean - H_i * B_mean
-    #              = B_mean + H_i * (v - B_mean)
-    #
-    # This formulation is numerically stable and clearly shows the interpolation
-    # between the two background estimates (mean and reference).
-
-    weighted_background = (
-        weights_2d * reference_2d + (1.0 - weights_2d) * b_mean_2d
-    )  # Shape: (M, N)
-
-    # Apply subtraction: S = B - background
-    processed = b_scan - weighted_background
+    # Apply subtraction without materializing a second full B-scan background:
+    # background_i = B_mean + H_i * (v - B_mean).
+    processed = np.array(b_scan, dtype=np.result_type(b_scan.dtype, np.float32), copy=True)
+    processed -= b_mean_2d
+    processed -= weights_2d * (reference_2d - b_mean_2d)
 
     return processed
 
 
-def method_ccbs(data, reference_wave=None, **kwargs):
+def method_ccbs(
+    data: np.ndarray,
+    reference_wave: np.ndarray | None = None,
+    **kwargs: object,
+) -> tuple[np.ndarray, dict[str, object]]:
     """
     Wrapper function for methods_registry compatibility.
 
