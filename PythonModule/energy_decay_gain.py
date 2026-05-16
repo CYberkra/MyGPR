@@ -36,7 +36,7 @@ def method_energy_decay_gain(
     gain_max = max(gain_min, float(max_gain))
     floor = max(0.0, float(floor_ratio))
 
-    decay = np.median(np.abs(arr.astype(np.float64)), axis=1)
+    decay = np.median(np.abs(arr), axis=1).astype(np.float64, copy=False)
     decay_smooth = _moving_average(decay, smooth_window)
     positive = decay_smooth[np.isfinite(decay_smooth) & (decay_smooth > 0.0)]
     if positive.size == 0:
