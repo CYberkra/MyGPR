@@ -31,7 +31,7 @@ def method_frequency_filter_1d(
     The method keeps the B-scan shape unchanged and only filters along axis 0
     (time/depth samples). Frequencies are specified in MHz to match GPR use.
     """
-    arr = np.asarray(data, dtype=np.float64)
+    arr = np.asarray(data, dtype=np.float32)
     if arr.ndim != 2:
         raise ValueError(f"输入数据必须是2维数组，当前 shape={arr.shape}")
     if arr.size == 0:
