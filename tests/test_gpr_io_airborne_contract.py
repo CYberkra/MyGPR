@@ -124,6 +124,8 @@ def test_subset_trace_metadata_slices_all_keys_by_indices():
         "trace_index": np.array([0, 1, 2], dtype=np.int32),
         "longitude": np.array([100.0, 101.0, 102.0], dtype=np.float64),
         "flight_height_m": np.array([5.0, 6.0, 7.0], dtype=np.float32),
+        "time_window_ns": np.array(120.0, dtype=np.float64),
+        "global_note": np.array(["line-9"], dtype=object),
     }
 
     subset = subset_trace_metadata(metadata, np.array([0, 2]))
@@ -132,6 +134,8 @@ def test_subset_trace_metadata_slices_all_keys_by_indices():
     assert np.array_equal(subset["trace_index"], np.array([0, 2], dtype=np.int32))
     assert np.array_equal(subset["longitude"], np.array([100.0, 102.0]))
     assert np.array_equal(subset["flight_height_m"], np.array([5.0, 7.0]))
+    assert float(subset["time_window_ns"]) == 120.0
+    assert subset["global_note"].tolist() == ["line-9"]
     assert subset["trace_index"] is not metadata["trace_index"]
 
 

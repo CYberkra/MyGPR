@@ -284,7 +284,14 @@ def subset_trace_metadata(
         return metadata
     subset = {}
     for key, values in metadata.items():
-        subset[key] = np.asarray(values)[trace_indices].copy()
+        arr = np.asarray(values)
+        if arr.ndim == 0:
+            subset[key] = np.array(arr, copy=True)
+            continue
+        try:
+            subset[key] = np.asarray(arr[trace_indices]).copy()
+        except (IndexError, TypeError, ValueError):
+            subset[key] = np.array(arr, copy=True)
     return subset
 
 
