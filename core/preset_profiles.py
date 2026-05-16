@@ -149,6 +149,24 @@ RECOMMENDED_RUN_PROFILES = {
             "svd_subspace",
         ],
     },
+    "mygpr_standard": {
+        "label": "MyGPR 标准流程",
+        "preset_key": "denoise_first",
+        "method_params": {
+            "set_zero_time": {"new_zero_time": 5.0},
+            "dewow": {"window": 61},
+            "subtracting_average_2D": {"ntraces": 51},
+            "sec_gain": {"gain_min": 1.0, "gain_max": 4.2, "power": 1.2},
+            "svd_subspace": {"rank_start": 1, "rank_end": 20},
+        },
+        "order": [
+            "set_zero_time",
+            "dewow",
+            "subtracting_average_2D",
+            "sec_gain",
+            "svd_subspace",
+        ],
+    },
     "high_quality_uav_gpr": {
         "label": "高质量 UAV-GPR",
         "preset_key": "raw_fidelity",
@@ -757,6 +775,16 @@ WORKFLOW_PRESETS = {
             "stage1": {"set_zero_time": True, "dewow": True},
             "stage2": {"fk_filter": True, "subtracting_average_2D": True},
             "stage3": {"sec_gain": True},
+            "stage4": {},
+        },
+    },
+    "mygpr_standard": {
+        "label": "MyGPR 标准流程",
+        "description": "原 MyGPR 经典五步处理链：零时、低频漂移、背景、增益、去噪。",
+        "stages": {
+            "stage1": {"set_zero_time": True, "dewow": True},
+            "stage2": {"subtracting_average_2D": True},
+            "stage3": {"sec_gain": True, "svd_subspace": True},
             "stage4": {},
         },
     },

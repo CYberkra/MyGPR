@@ -53,6 +53,43 @@ def test_high_quality_workflow_stage_grouping_matches_run_order():
     )
 
 
+def test_mygpr_standard_profile_matches_original_five_step_chain():
+    summary = build_profile_workflow_summary("mygpr_standard")
+
+    flattened = [
+        method_key
+        for stage in summary["stages"]
+        for method_key in stage["method_keys"]
+    ]
+    stage1 = next(
+        stage for stage in summary["stages"] if stage["stage_key"] == "stage1"
+    )
+    stage2 = next(
+        stage for stage in summary["stages"] if stage["stage_key"] == "stage2"
+    )
+    stage3 = next(
+        stage for stage in summary["stages"] if stage["stage_key"] == "stage3"
+    )
+
+    assert summary["label"] == "MyGPR 标准流程"
+    assert flattened == RECOMMENDED_RUN_PROFILES["mygpr_standard"]["order"]
+    assert flattened == [
+        "set_zero_time",
+        "dewow",
+        "subtracting_average_2D",
+        "sec_gain",
+        "svd_subspace",
+    ]
+    assert summary["unassigned_methods"] == []
+    assert stage1["method_keys"] == ["set_zero_time", "dewow"]
+    assert stage2["method_keys"] == ["subtracting_average_2D"]
+    assert stage3["method_keys"] == ["sec_gain", "svd_subspace"]
+    assert (
+        WORKFLOW_PRESETS["mygpr_standard"]["stages"]["stage3"]["svd_subspace"]
+        is True
+    )
+
+
 def test_high_quality_workflow_summary_records_motion_sensor_dependency():
     summary = build_profile_workflow_summary("high_quality_uav_gpr")
 

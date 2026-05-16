@@ -147,6 +147,50 @@ QUICK_PRESETS = {
             },
         ],
     },
+    "mygpr_standard": {
+        "name": "MyGPR 标准流程",
+        "description": (
+            "原 MyGPR 经典五步处理链：零时矫正、低频漂移矫正、"
+            "背景抑制、增益、去噪。"
+        ),
+        "methods": [
+            {
+                "category": "preprocessing",
+                "stage_id": "zero_time",
+                "method_id": "set_zero_time",
+                "enabled": True,
+                "params": {"new_zero_time": 5.0},
+            },
+            {
+                "category": "preprocessing",
+                "stage_id": "trace_correction",
+                "method_id": "dewow",
+                "enabled": True,
+                "params": {"window": 61},
+            },
+            {
+                "category": "background_removal",
+                "stage_id": "background_clutter",
+                "method_id": "subtracting_average_2D",
+                "enabled": True,
+                "params": {"ntraces": 51},
+            },
+            {
+                "category": "gain",
+                "stage_id": "gain",
+                "method_id": "sec_gain",
+                "enabled": True,
+                "params": {"gain_min": 1.0, "gain_max": 4.2, "power": 1.2},
+            },
+            {
+                "category": "denoising",
+                "stage_id": "spatial_denoise",
+                "method_id": "svd_subspace",
+                "enabled": True,
+                "params": {"rank_start": 1, "rank_end": 20},
+            },
+        ],
+    },
     "high_quality_uav_gpr": {
         "name": "高质量 UAV-GPR",
         "description": "面向无人机实测数据的完整高质量处理链",

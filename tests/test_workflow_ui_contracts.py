@@ -12,7 +12,11 @@ import numpy as np
 from PyQt6.QtWidgets import QApplication, QSlider
 
 from app_qt import GPRGuiQt
-from core.workflow_data import WorkflowMethod
+from core.workflow_data import (
+    QUICK_PRESETS,
+    WorkflowMethod,
+    build_default_workflow_config,
+)
 
 
 def _get_app() -> QApplication:
@@ -60,6 +64,42 @@ def test_workflow_workspace_exposes_default_uavgpr_chain_and_agc_warning():
         ]
         assert "agcGain" in gain_candidates
         assert "非严格保幅" in win.page_workflow.stage_warning.text()
+    finally:
+        win.close()
+        app.processEvents()
+
+
+def test_workflow_template_exposes_original_mygpr_standard_chain():
+    app = _get_app()
+    win = GPRGuiQt()
+    try:
+        template_labels = [
+            win.page_workflow.template_combo.itemText(index)
+            for index in range(win.page_workflow.template_combo.count())
+        ]
+        assert any("MyGPR 标准流程" in label for label in template_labels)
+
+        config = build_default_workflow_config("mygpr_standard")
+        method_ids = [method.method_id for method in config.methods]
+        stage_ids = [method.stage_id for method in config.methods]
+
+        assert QUICK_PRESETS["mygpr_standard"]["name"] == "MyGPR 标准流程"
+        assert method_ids == [
+            "set_zero_time",
+            "dewow",
+            "subtracting_average_2D",
+            "sec_gain",
+            "svd_subspace",
+        ]
+        assert stage_ids == [
+            "zero_time",
+            "trace_correction",
+            "background_clutter",
+            "gain",
+            "spatial_denoise",
+        ]
+        assert config.methods[1].params["window"] == 61
+        assert config.methods[3].params["gain_max"] == 4.2
     finally:
         win.close()
         app.processEvents()

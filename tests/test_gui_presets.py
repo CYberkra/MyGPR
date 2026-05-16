@@ -1380,6 +1380,19 @@ def test_workflow_presets_align_with_current_denoising_preference():
     assert "motion_compensation_v2" in high_quality_methods
     assert "agcGain" not in high_quality_methods
 
+    mygpr_standard_methods = [
+        item["method_id"] for item in QUICK_PRESETS["mygpr_standard"]["methods"]
+        if item.get("enabled", True) and not item.get("hidden", False)
+    ]
+    assert mygpr_standard_methods == RECOMMENDED_RUN_PROFILES["mygpr_standard"]["order"]
+    assert mygpr_standard_methods == [
+        "set_zero_time",
+        "dewow",
+        "subtracting_average_2D",
+        "sec_gain",
+        "svd_subspace",
+    ]
+
 
 def test_quality_page_exposes_report_and_snapshot_actions():
     app = _get_app()
