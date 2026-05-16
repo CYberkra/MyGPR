@@ -24,6 +24,8 @@ def check_syntax() -> None:
         ROOT / "ui" / "gui_workflow_page.py",
         ROOT / "core" / "workflow_executor.py",
         ROOT / "core" / "workflow_data.py",
+        ROOT / "core" / "workflow_registry.py",
+        ROOT / "core" / "workflow_runtime_contracts.py",
         ROOT / "core" / "processing_engine.py",
         ROOT / "core" / "shared_data_state.py",
         ROOT / "core" / "app_paths.py",
@@ -31,6 +33,20 @@ def check_syntax() -> None:
     for path in targets:
         ast.parse(path.read_text(encoding="utf-8"))
     print("[OK] Syntax checks")
+
+
+def check_workflow_registry() -> None:
+    from core.workflow_registry import validate_workflow_registry
+
+    errors = [
+        issue
+        for issue in validate_workflow_registry()
+        if issue.severity == "error"
+    ]
+    assert not errors, "Workflow registry errors: " + "; ".join(
+        f"{issue.code}: {issue.message}" for issue in errors
+    )
+    print("[OK] Workflow registry contract")
 
 
 def check_runtime_flows() -> None:
@@ -122,6 +138,7 @@ def check_runtime_flows() -> None:
 
 def main() -> int:
     check_syntax()
+    check_workflow_registry()
     check_runtime_flows()
     print("[OK] Preflight passed")
     return 0
