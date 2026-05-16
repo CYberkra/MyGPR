@@ -51,6 +51,7 @@ from core.quality_metrics import (  # noqa: E402
     compute_benchmark_metrics,
     ratio_fidelity,
 )
+from core.trace_metadata_utils import resample_bscan_columns_linear  # noqa: E402
 
 
 DEFAULT_GPRMAX_ROOT = Path(r"E:\gprMax\gprMax-v.3.1.7")
@@ -1021,14 +1022,11 @@ def _resample_bscan_samples(data: np.ndarray, target_samples: int | None) -> np.
 
     source_axis = np.linspace(0.0, 1.0, int(arr.shape[0]), dtype=np.float64)
     target_axis = np.linspace(0.0, 1.0, int(target_samples), dtype=np.float64)
-    resampled = np.empty((int(target_samples), int(arr.shape[1])), dtype=np.float32)
-    for col_idx in range(int(arr.shape[1])):
-        resampled[:, col_idx] = np.interp(
-            target_axis,
-            source_axis,
-            arr[:, col_idx].astype(np.float64),
-        ).astype(np.float32)
-    return resampled
+    return resample_bscan_columns_linear(
+        arr.T,
+        source_axis,
+        target_axis,
+    ).T.astype(np.float32, copy=False)
 
 
 def convert_gprmax_run(

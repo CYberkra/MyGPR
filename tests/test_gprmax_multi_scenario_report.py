@@ -356,6 +356,24 @@ def test_convert_gprmax_run_resamples_to_real_field_ascan_length(tmp_path: Path,
     ] <= 501
 
 
+def test_resample_bscan_samples_matches_numpy_interp_per_trace():
+    rng = np.random.default_rng(72)
+    raw = rng.normal(size=(13, 5)).astype(np.float32)
+    source_axis = np.linspace(0.0, 1.0, raw.shape[0], dtype=np.float64)
+    target_axis = np.linspace(0.0, 1.0, 31, dtype=np.float64)
+    expected = np.column_stack(
+        [
+            np.interp(target_axis, source_axis, raw[:, trace_idx].astype(np.float64))
+            for trace_idx in range(raw.shape[1])
+        ]
+    ).astype(np.float32)
+
+    result = report._resample_bscan_samples(raw, 31)
+
+    assert result.dtype == np.float32
+    assert np.allclose(result, expected)
+
+
 def test_ascan_sample_argument_defaults_to_real_field_length():
     args = report._parse_args([])
 
