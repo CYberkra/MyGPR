@@ -228,6 +228,24 @@ def test_equidistant_trace_resample_resamples_data_and_metadata():
     assert meta["trace_metadata_out"]["trace_index"].tolist() == [0, 1, 2, 3, 4]
 
 
+def test_equidistant_trace_resample_accepts_numpy_scalar_spacing():
+    raw = np.array([[0.0, 2.0, 4.0]], dtype=np.float32)
+    trace_metadata = {
+        "trace_index": np.array([0, 1, 2], dtype=np.int32),
+        "trace_distance_m": np.array([0.0, 2.0, 4.0], dtype=np.float32),
+    }
+
+    result, meta = method_equidistant_trace_resample(
+        raw,
+        spacing_m=np.array([1.0]),
+        trace_metadata=trace_metadata,
+    )
+
+    assert result.shape == (1, 5)
+    assert np.allclose(result[0], [0.0, 1.0, 2.0, 3.0, 4.0])
+    assert meta["spacing_m"] == 1.0
+
+
 def test_equidistant_trace_resample_runtime_metadata_roundtrip():
     raw = np.ones((3, 3), dtype=np.float32)
     trace_metadata = {
