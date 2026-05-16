@@ -731,7 +731,7 @@ def method_motion_compensation_v2(
             if resolved_time_window_ns is None and header_info:
                 resolved_time_window_ns = header_info.get("total_time_ns")
             if resolved_time_window_ns is None and "time_window_ns" in metadata:
-                resolved_time_window_ns = np.asarray(metadata["time_window_ns"]).reshape(-1)[0]
+                resolved_time_window_ns = _as_optional_float(metadata.get("time_window_ns"))
 
             resolved_time_window_value = _as_optional_float(resolved_time_window_ns)
             if resolved_time_window_value is None or resolved_time_window_value <= 0.0:

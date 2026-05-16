@@ -321,6 +321,24 @@ def test_v2_accepts_numpy_scalar_runtime_parameters():
     assert meta["air_wave_speed_m_per_ns"] == pytest.approx(AIR_WAVE_SPEED_M_PER_NS)
 
 
+def test_v2_empty_metadata_time_window_warns_instead_of_crashing():
+    data = np.zeros((64, 4), dtype=np.float32)
+    metadata = _base_metadata(4)
+    metadata["time_window_ns"] = np.array([], dtype=np.float64)
+
+    corrected, meta = method_motion_compensation_v2(
+        data,
+        trace_metadata=metadata,
+        compensate_time_shift=True,
+        compensate_amplitude=False,
+    )
+
+    warning_codes = {item["code"] for item in meta.get("runtime_warnings", [])}
+    assert corrected.shape == data.shape
+    assert meta["time_shift_correction_applied"] is False
+    assert "missing_time_window_ns" in warning_codes
+
+
 def test_v2_does_not_mutate_input_data_or_metadata():
     rng = np.random.default_rng(123)
     data = rng.normal(size=(32, 6)).astype(np.float32)
