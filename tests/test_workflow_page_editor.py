@@ -1087,6 +1087,21 @@ def test_workflow_config_manager_skips_invalid_config_files(monkeypatch, tmp_pat
     assert "跳过无法读取的工作流配置" in caplog.text
 
 
+def test_workflow_config_manager_logs_invalid_loaded_config(monkeypatch, tmp_path, caplog):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+
+    manager = WorkflowConfigManager()
+    broken_path = Path(manager.config_dir) / "broken.json"
+    broken_path.write_text("{not valid json", encoding="utf-8")
+
+    assert manager.load_config(str(broken_path)) is None
+    assert "加载配置失败" in caplog.text
+
+    manager.last_config_file = str(broken_path)
+    assert manager.load_last_config() is None
+    assert "加载上次配置失败" in caplog.text
+
+
 def test_lod_mode_thresholds():
     """测试 LOD 缩放阈值：60% full, 59% compact, 38% compact, 37% mini"""
     app = _get_app()

@@ -854,7 +854,7 @@ class WorkflowConfigManager:
                 data = json.load(f)
             return WorkflowConfig.from_dict(data)
         except Exception as e:
-            print(f"加载配置失败: {e}")
+            logger.warning("加载配置失败 %s: %s", filepath, e)
             return None
 
     def save_last_config(self, config: WorkflowConfig):
@@ -872,7 +872,7 @@ class WorkflowConfigManager:
                 data = json.load(f)
             return WorkflowConfig.from_dict(data)
         except Exception as e:
-            print(f"加载上次配置失败: {e}")
+            logger.warning("加载上次配置失败 %s: %s", self.last_config_file, e)
             return None
 
     def list_configs(self) -> List[Dict[str, str]]:
