@@ -65,6 +65,24 @@ def test_motion_compensation_speed_output_count_matches_metadata_length():
     assert meta["spacing_m"] == 1.0
 
 
+def test_motion_compensation_speed_accepts_numpy_scalar_spacing():
+    distance = np.array([0.0, 2.0, 4.0], dtype=np.float64)
+    data = _synthetic_bscan(8, distance)
+    trace_metadata = {
+        "trace_index": np.arange(distance.size, dtype=np.int32),
+        "trace_distance_m": distance.copy(),
+    }
+
+    corrected, meta = method_motion_compensation_speed(
+        data,
+        trace_metadata=trace_metadata,
+        spacing_m=np.array([1.0]),
+    )
+
+    assert corrected.shape[1] == 5
+    assert meta["spacing_m"] == 1.0
+
+
 def test_motion_compensation_speed_skips_nonmonotonic_distance():
     distance = np.array([0.0, 1.0, 0.8, 2.0], dtype=np.float64)
     data = _synthetic_bscan(8, distance)

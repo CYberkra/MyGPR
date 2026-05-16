@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from core.scalar_utils import to_float
 from core.trace_metadata_utils import (  # type: ignore[import]
     build_uniform_trace_distance_m,
     resample_bscan_columns_linear,
@@ -88,7 +89,7 @@ def method_motion_compensation_speed(
     trace_count = int(arr.shape[1])
     normalized_spacing_m = None
     if spacing_m is not None:
-        candidate_spacing = float(spacing_m)
+        candidate_spacing = to_float(spacing_m, default=0.0)
         if candidate_spacing > 0:
             normalized_spacing_m = candidate_spacing
 
