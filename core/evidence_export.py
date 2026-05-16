@@ -388,13 +388,22 @@ def _resample_columns_linear(data: np.ndarray, target_traces: int) -> np.ndarray
     arr = np.asarray(data, dtype=np.float32)
     if arr.ndim != 2 or arr.shape[1] == target_traces:
         return np.array(arr, copy=True)
+    if target_traces <= 0:
+        return np.empty((arr.shape[0], 0), dtype=np.float32)
 
-    source_axis = np.linspace(0.0, 1.0, arr.shape[1], dtype=np.float32)
-    target_axis = np.linspace(0.0, 1.0, target_traces, dtype=np.float32)
-    resampled = np.empty((arr.shape[0], target_traces), dtype=np.float32)
-    for row_idx in range(arr.shape[0]):
-        resampled[row_idx, :] = np.interp(target_axis, source_axis, arr[row_idx, :])
-    return resampled
+    source_position = np.linspace(
+        0.0,
+        float(arr.shape[1] - 1),
+        int(target_traces),
+        dtype=np.float32,
+    )
+    left_idx = np.floor(source_position).astype(np.int32)
+    right_idx = np.minimum(left_idx + 1, arr.shape[1] - 1)
+    weight = (source_position - left_idx.astype(np.float32)).astype(np.float32)
+    return (
+        arr[:, left_idx] * (1.0 - weight)[None, :]
+        + arr[:, right_idx] * weight[None, :]
+    ).astype(np.float32, copy=False)
 
 
 def export_chain_evidence(
