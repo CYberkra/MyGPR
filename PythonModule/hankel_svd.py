@@ -54,7 +54,11 @@ def _resolve_window_size(n_samples: int, window_length: int | None) -> int:
     return n_samples // 2
 
 
-def _build_vmssa_trajectory(data: np.ndarray, window_size: int) -> np.ndarray:
+def _build_vmssa_trajectory(
+    data: np.ndarray,
+    window_size: int,
+    dtype: np.dtype | type[np.floating] | None = None,
+) -> np.ndarray:
     """构建垂直 MSSA 轨迹矩阵。
 
     对每道（列）构建 Hankel 矩阵 (L, K)，然后垂直堆叠成 (P*L, K)。
@@ -63,13 +67,15 @@ def _build_vmssa_trajectory(data: np.ndarray, window_size: int) -> np.ndarray:
     L = window_size
     K = n_samples - L + 1
 
+    work_dtype = np.dtype(dtype) if dtype is not None else data.dtype
+
     if K <= 0:
         # 太短，无法构建轨迹矩阵
-        return np.zeros((0, 0), dtype=np.float64)
+        return np.zeros((0, 0), dtype=work_dtype)
 
     blocks = []
     for p in range(n_traces):
-        trace = data[:, p]
+        trace = np.asarray(data[:, p], dtype=work_dtype)
         # sliding_window_view 返回 (K, L)
         windows = sliding_window_view(trace, L)
         blocks.append(windows.T)  # (L, K)
@@ -77,21 +83,37 @@ def _build_vmssa_trajectory(data: np.ndarray, window_size: int) -> np.ndarray:
     return np.concatenate(blocks, axis=0)  # (P*L, K)
 
 
-def _svd_trajectory(trajectory: np.ndarray) -> tuple[np.ndarray, np.ndarray, int]:
+def _svd_trajectory(trajectory: np.ndarray) -> tuple[np.ndarray, np.ndarray, int, str]:
     """对轨迹矩阵做 SVD 分解。
 
-    返回：(left_singular_vectors, singular_values, rank)
+    返回：(right_singular_vectors, singular_values, rank, backend)
     """
     if trajectory.size == 0:
-        return np.zeros((0, 0)), np.zeros(0), 0
+        return np.zeros((0, 0)), np.zeros(0), 0, "none"
 
-    # 直接 SVD（当 K < P*L 时，比 covariance 方法更快）
-    U, s, Vh = scipy_svd(trajectory, full_matrices=False, check_finite=False)
+    rows, cols = trajectory.shape
+    if rows >= cols:
+        # V-MSSA 轨迹矩阵通常是 tall-skinny。用 X.T @ X 求右奇异向量，
+        # 避免保存 rows x cols 的左奇异向量，显著降低峰值内存。
+        gram = trajectory.T @ trajectory
+        eigenvalues, eigenvectors = np.linalg.eigh(gram)
+        order = np.argsort(eigenvalues)[::-1]
+        eigenvalues = np.maximum(eigenvalues[order], 0.0)
+        right_singular_vectors = eigenvectors[:, order].T
+        singular_values = np.sqrt(eigenvalues)
+        backend = "gram_eigh"
+    else:
+        # 宽矩阵较少见，保留直接 SVD 路径以覆盖极小窗口/单道输入。
+        _U, singular_values, right_singular_vectors = scipy_svd(
+            trajectory,
+            full_matrices=False,
+            check_finite=False,
+        )
+        backend = "full"
 
-    # 排序（按降序，scipy_svd 默认已排序）
-    rank = int(np.sum(s > 1e-12))
+    rank = int(np.sum(singular_values > 1e-12))
 
-    return U, s, rank
+    return right_singular_vectors, singular_values, rank, backend
 
 
 def _svht_rank_selection(singular_values: np.ndarray, aggressiveness: float = 1.0) -> int:
@@ -133,21 +155,16 @@ def _diagonal_average(hankel_matrix: np.ndarray) -> np.ndarray:
     L, K = hankel_matrix.shape
     N = L + K - 1
     output = np.zeros(N, dtype=np.float64)
-    counts = np.zeros(N, dtype=np.float64)
+    counts = np.convolve(np.ones(L, dtype=np.float64), np.ones(K, dtype=np.float64))
 
-    for i in range(L):
-        for j in range(K):
-            idx = i + j
-            output[idx] += hankel_matrix[i, j]
-            counts[idx] += 1.0
-
-    counts[counts == 0.0] = 1.0
+    for i, row in enumerate(hankel_matrix):
+        output[i : i + K] += row
     return output / counts
 
 
 def _reconstruct_vmssa(
     trajectory: np.ndarray,
-    left_singular_vectors: np.ndarray,
+    right_singular_vectors: np.ndarray,
     rank: int,
     n_samples: int,
     n_traces: int,
@@ -163,16 +180,15 @@ def _reconstruct_vmssa(
     if trajectory.size == 0 or rank <= 0:
         return np.zeros((n_samples, n_traces), dtype=np.float64)
 
-    # 重建轨迹矩阵 = U_r @ U_r.T @ X
-    U_r = left_singular_vectors[:, :rank]
-    reconstructed_trajectory = U_r @ (U_r.T @ trajectory)
+    V_r = right_singular_vectors[:rank, :]
+    projected = trajectory @ V_r.T
 
     # 将重建后的轨迹矩阵分割回每道，然后对角平均
     result = np.zeros((n_samples, n_traces), dtype=np.float64)
     for p in range(n_traces):
         sidx = p * L
         eidx = sidx + L
-        block = reconstructed_trajectory[sidx:eidx, :]  # (L, K)
+        block = projected[sidx:eidx, :] @ V_r  # (L, K)
         result[:, p] = _diagonal_average(block)
 
     return result
@@ -309,7 +325,10 @@ def method_hankel_svd(data, window_length=None, rank=None, max_rank=100, preview
 
     # 构建轨迹矩阵
     _poll_cancel(cancel_checker)
-    trajectory = _build_vmssa_trajectory(arr, window_size)
+    estimated_trajectory_bytes = n_traces * window_size * (n_samples - window_size + 1) * 8
+    trajectory_dtype = np.float32 if estimated_trajectory_bytes >= 32 * 1024 * 1024 else np.float64
+    trajectory_input = arr.astype(trajectory_dtype, copy=False)
+    trajectory = _build_vmssa_trajectory(trajectory_input, window_size)
 
     if trajectory.size == 0:
         _append_warning(metadata, "trajectory matrix is empty; returning zero output")
@@ -317,14 +336,23 @@ def method_hankel_svd(data, window_length=None, rank=None, max_rank=100, preview
 
     # SVD 分解
     _poll_cancel(cancel_checker)
-    left_singular_vectors, singular_values, full_rank = _svd_trajectory(trajectory)
-    metadata["svd_backend"] = "full"
+    right_singular_vectors, singular_values, full_rank, svd_solver = _svd_trajectory(trajectory)
+    metadata["svd_backend"] = "mixed" if svd_solver == "gram_eigh" else svd_solver
+    metadata["svd_solver"] = svd_solver
+    metadata["trajectory_dtype"] = str(trajectory.dtype)
 
     # 确定 rank
     auto_rank = rank is None or int(rank) <= 0
     if auto_rank:
         selected_rank = _svht_rank_selection(singular_values, aggressiveness=aggressiveness)
         metadata["rank_selection_mode"] = "svht_auto"
+        auto_rank_cap = max(1, min(int(max_rank), full_rank))
+        if selected_rank > auto_rank_cap:
+            _append_warning(
+                metadata,
+                f"auto-selected rank {selected_rank} was capped to max_rank {auto_rank_cap}",
+            )
+            selected_rank = auto_rank_cap
         if preview:
             preview_rank_cap = max(1, min(5, full_rank))
             if selected_rank > preview_rank_cap:
@@ -354,7 +382,7 @@ def method_hankel_svd(data, window_length=None, rank=None, max_rank=100, preview
     _poll_cancel(cancel_checker)
     reconstructed = _reconstruct_vmssa(
         trajectory,
-        left_singular_vectors,
+        right_singular_vectors,
         selected_rank,
         n_samples,
         n_traces,

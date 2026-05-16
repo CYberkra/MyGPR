@@ -149,17 +149,25 @@ def save_image(data, outimagename: str, title: str = '',
         cmap = kw_cmap
 
     arr = np.asarray(data)
-    plt.figure(figsize=(8, 4))
-    extent = None
-    if time_range is not None and distance_range is not None:
-        extent = [distance_range[0], distance_range[1], time_range[1], time_range[0]]
-    plt.imshow(arr, cmap=cmap, aspect='auto', extent=extent, **imshow_kwargs)
-    plt.title(title)
-    plt.xlabel('Distance (m)')
-    plt.ylabel('Time (ns)')
-    plt.tight_layout()
-    plt.savefig(outimagename, dpi=150)
-    plt.close()
+    fig, ax = plt.subplots(figsize=(8, 4))
+    try:
+        extent = None
+        if time_range is not None and distance_range is not None:
+            extent = [distance_range[0], distance_range[1], time_range[1], time_range[0]]
+        ax.imshow(arr, cmap=cmap, aspect='auto', extent=extent, **imshow_kwargs)
+        ax.set_title(title)
+        ax.set_xlabel('Distance (m)')
+        ax.set_ylabel('Time (ns)')
+        try:
+            fig.tight_layout()
+        except MemoryError:
+            pass
+        try:
+            fig.savefig(outimagename, dpi=150)
+        except MemoryError:
+            fig.savefig(outimagename, dpi=96)
+    finally:
+        plt.close(fig)
 
 
 def show_image(data, time_range=None, distance_range=None, cmap='gray'):

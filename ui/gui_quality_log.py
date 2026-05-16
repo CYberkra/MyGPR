@@ -463,6 +463,42 @@ class QualityLogPage(QWidget):
                     text.set_color(palette["text"])
         return palette
 
+    def _draw_canvas_safely(self, canvas) -> None:
+        """低内存环境下避免占位图渲染拖垮窗口创建。"""
+        try:
+            canvas.draw_idle()
+        except MemoryError:
+            return
+
+    def _finalize_figure(self, fig, canvas) -> None:
+        """统一收尾 2D 图表布局和刷新。"""
+        try:
+            fig.tight_layout()
+        except MemoryError:
+            return
+        self._draw_canvas_safely(canvas)
+
+    def release_plot_resources(self) -> None:
+        """窗口关闭时显式释放 Matplotlib 图表资源。"""
+        for fig_name, canvas_name in [
+            ("qc_fig", "qc_canvas"),
+            ("trajectory_fig", "trajectory_canvas"),
+            ("georef3d_fig", "georef3d_canvas"),
+        ]:
+            fig = getattr(self, fig_name, None)
+            canvas = getattr(self, canvas_name, None)
+            try:
+                if fig is not None:
+                    fig.clear()
+            except Exception:
+                pass
+            try:
+                if canvas is not None:
+                    canvas.close()
+                    canvas.deleteLater()
+            except Exception:
+                pass
+
     def append_record(self, text: str):
         """追加记录"""
         self.record.append(text)
@@ -516,8 +552,7 @@ class QualityLogPage(QWidget):
                 ax.set_xticks([])
                 ax.set_yticks([])
             self._style_figure(self.qc_fig, [self.qc_ax_spacing, self.qc_ax_height])
-            self.qc_fig.tight_layout()
-            self.qc_canvas.draw_idle()
+            self._finalize_figure(self.qc_fig, self.qc_canvas)
             return
 
         spacing_x = payload.get("spacing_x", [])
@@ -553,8 +588,7 @@ class QualityLogPage(QWidget):
         ax.set_ylabel("m")
 
         self._style_figure(self.qc_fig, [self.qc_ax_spacing, self.qc_ax_height])
-        self.qc_fig.tight_layout()
-        self.qc_canvas.draw_idle()
+        self._finalize_figure(self.qc_fig, self.qc_canvas)
 
     def set_airborne_trajectory_visualization(self, payload: dict | None):
         """绘制航空航迹图（含飞行高度剖面）。"""
@@ -584,8 +618,7 @@ class QualityLogPage(QWidget):
             ax.set_yticks([])
             ax_h.set_visible(False)
             self._style_figure(self.trajectory_fig, [ax])
-            self.trajectory_fig.tight_layout()
-            self.trajectory_canvas.draw_idle()
+            self._finalize_figure(self.trajectory_fig, self.trajectory_canvas)
             return
 
         longitude = np.asarray(payload.get("longitude", []), dtype=np.float64)
@@ -722,8 +755,7 @@ class QualityLogPage(QWidget):
             ax_h.set_visible(False)
 
         self._style_figure(self.trajectory_fig, [ax, ax_h])
-        self.trajectory_fig.tight_layout()
-        self.trajectory_canvas.draw_idle()
+        self._finalize_figure(self.trajectory_fig, self.trajectory_canvas)
 
     def set_airborne_georeference_3d_visualization(self, payload: dict | None):
         """绘制三维地理参考预览。"""
@@ -749,7 +781,7 @@ class QualityLogPage(QWidget):
             ax.set_zticks([])
             self._style_3d_axes(ax)
             self.georef3d_fig.subplots_adjust(left=0.05, right=0.98, bottom=0.05, top=0.92)
-            self.georef3d_canvas.draw_idle()
+            self._draw_canvas_safely(self.georef3d_canvas)
             return
 
         preview = payload.get("preview") or {}
@@ -901,7 +933,7 @@ class QualityLogPage(QWidget):
 
         self._style_3d_axes(ax)
         self.georef3d_fig.subplots_adjust(left=0.05, right=0.98, bottom=0.05, top=0.92)
-        self.georef3d_canvas.draw_idle()
+        self._draw_canvas_safely(self.georef3d_canvas)
 
     def _on_trajectory_click(self, event):
         """根据点击位置选中最近的航迹点。"""

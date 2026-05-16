@@ -791,6 +791,26 @@ class GPRGuiQt(QMainWindow):
         self._apply_style()
         self._sync_history_action_state()
 
+    def closeEvent(self, event):
+        """关闭窗口时释放嵌入式 Matplotlib 资源，避免批量 GUI 测试累积占用。"""
+        page_quality = getattr(self, "page_quality", None)
+        if page_quality is not None and hasattr(page_quality, "release_plot_resources"):
+            page_quality.release_plot_resources()
+        fig = getattr(self, "fig", None)
+        canvas = getattr(self, "canvas", None)
+        try:
+            if fig is not None:
+                fig.clear()
+        except Exception:
+            pass
+        try:
+            if canvas is not None:
+                canvas.close()
+                canvas.deleteLater()
+        except Exception:
+            pass
+        super().closeEvent(event)
+
     def _setup_ui(self):
         """设置UI"""
         central = QWidget()
