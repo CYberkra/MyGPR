@@ -220,7 +220,10 @@ def extract_airborne_csv_payload(
                 if trace_timestamps_s is None and "trace_timestamp_s" in metadata:
                     trace_timestamps_s = metadata["trace_timestamp_s"]
                 if header_info and "total_time_ns" in header_info:
-                    metadata["time_window_ns"] = float(header_info["total_time_ns"])
+                    metadata["time_window_ns"] = _safe_float(
+                        header_info["total_time_ns"],
+                        default=0.0,
+                    )
                 metadata = _integrate_optional_airborne_sidecars(
                     metadata,
                     trace_timestamps_s=trace_timestamps_s,
@@ -467,6 +470,25 @@ def _safe_attr_list(value: Any) -> list[float] | None:
         return None
 
 
+def _safe_float(value: Any, *, default: float) -> float:
+    if value is None:
+        return float(default)
+    if isinstance(value, str) and value.strip() == "":
+        return float(default)
+    try:
+        arr = np.asarray(value)
+    except (TypeError, ValueError):
+        arr = None
+    try:
+        if arr is not None:
+            if arr.size == 0:
+                return float(default)
+            return float(arr.reshape(-1)[0])
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
 def _build_gprmax_trace_metadata(
     traces: int,
     gprmax_config: dict[str, Any] | None,
@@ -519,7 +541,7 @@ def _build_gprmax_header_info(
     header = {
         "a_scan_length": int(samples),
         "num_traces": int(traces),
-        "total_time_ns": float(total_time_ns or 0.0),
+        "total_time_ns": _safe_float(total_time_ns, default=0.0),
         "time_step_s": time_step_s,
         "trace_interval_m": trace_interval_m,
         "source": "gprmax_out",

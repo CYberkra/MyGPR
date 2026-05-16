@@ -100,6 +100,31 @@ def test_extract_airborne_csv_payload_reads_explicit_trace_timestamps():
     assert updated_header["source"] == "airborne_csv"
 
 
+def test_extract_airborne_csv_payload_accepts_array_total_time_header():
+    header_info = {
+        "a_scan_length": 3,
+        "num_traces": 2,
+        "total_time_ns": np.array([120.0]),
+        "trace_interval_m": 0.5,
+    }
+    raw = np.array(
+        [
+            [100.0, 30.0, 10.0, 1.0, 5.0],
+            [100.0, 30.0, 10.0, 2.0, 5.0],
+            [100.0, 30.0, 10.0, 3.0, 5.0],
+            [100.001, 30.0, 11.0, 4.0, 6.0],
+            [100.001, 30.0, 11.0, 5.0, 6.0],
+            [100.001, 30.0, 11.0, 6.0, 6.0],
+        ],
+        dtype=np.float64,
+    )
+
+    _, metadata, _ = extract_airborne_csv_payload(raw, header_info)
+
+    assert metadata is not None
+    assert metadata["time_window_ns"] == 120.0
+
+
 def test_extract_airborne_csv_payload_plain_matrix_fallback_keeps_legacy_behavior():
     header_info = {
         "a_scan_length": 3,
