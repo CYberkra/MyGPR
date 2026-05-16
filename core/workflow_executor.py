@@ -139,9 +139,11 @@ class WorkflowExecutor(QObject):
                     self.history.append(result.copy())
                     self.step_records.append(
                         {
+                            "node_id": method.node_id,
                             "method_id": method.method_id,
                             "method_name": method_name,
                             "stage_id": getattr(method, "stage_id", ""),
+                            "data": result.copy(),
                             "input_shape": input_shape,
                             "output_shape": tuple(int(v) for v in result.shape),
                             "params": meta.get("params", dict(method.params or {})),

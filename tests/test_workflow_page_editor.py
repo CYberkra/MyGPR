@@ -544,11 +544,21 @@ def test_workflow_canvas_output_drop_blank_creates_source_bound_preview():
         specs = canvas._canvas_layout.get("preview_nodes", [])
         assert preview_id
         assert any(spec["node_id"] == preview_id for spec in specs)
-        assert any(
+        # 验证 preview link 不在 current_links() 中（这是我们想要的行为）
+        assert not any(
             link.from_node == source.node_id
             and link.to_node == preview_id
             and link.kind == "preview"
             for link in canvas.current_links()
+        )
+        # 但是验证 preview link 在 scene 中被正确创建了
+        assert canvas._scene.links is not None
+        assert len(canvas._scene.links) > 0
+        assert any(
+            link.from_node == source.node_id
+            and link.to_node == preview_id
+            and link.kind == "preview"
+            for link in canvas._scene.links
         )
 
         preview_proxy = canvas._scene.proxy_by_id[preview_id]

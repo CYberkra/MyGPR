@@ -1628,12 +1628,63 @@ class WorkflowCanvasView(QGraphicsView):
     ) -> None:
         ensure_workflow_method_ids(methods)
         self._methods = sorted(methods, key=lambda item: item.order)
-        self._links = self._default_links(self._methods) if links is None else [WorkflowLink.from_dict(link.to_dict()) for link in links]
+        if links is None:
+            self._links = self._default_links(self._methods)
+        else:
+            # Filter out preview links when loading
+            filtered_links = []
+            for link in links:
+                to_node = str(getattr(link, "to_node", ""))
+                kind = str(getattr(link, "kind", "data"))
+                is_preview = (
+                    kind == "preview"
+                    or to_node == PREVIEW_NODE_ID
+                    or to_node.startswith(PREVIEW_NODE_PREFIX)
+                )
+                if not is_preview:
+                    filtered_links.append(WorkflowLink.from_dict(link.to_dict()))
+            self._links = filtered_links
         self._canvas_layout = canvas_layout if isinstance(canvas_layout, dict) else {"nodes": {}}
         self._rebuild()
 
     def current_links(self) -> list[WorkflowLink]:
-        return [WorkflowLink.from_dict(link.to_dict()) for link in self._links]
+        """Return only real data links (not preview or UI-only links)."""
+        return [
+            WorkflowLink.from_dict(link.to_dict())
+            for link in self._links
+            if not self._is_preview_link(link)
+        ]
+    
+    def _is_preview_link(self, link: WorkflowLink) -> bool:
+        """Check if a link is a UI-only preview link."""
+        if getattr(link, "kind", "data") == "preview":
+            return True
+        to_node = str(getattr(link, "to_node", ""))
+        if to_node == PREVIEW_NODE_ID:
+            return True
+        if to_node.startswith(PREVIEW_NODE_PREFIX):
+            return True
+        return False
+    
+    def _all_links_with_previews(self) -> list[WorkflowLink]:
+        """Return all links including UI-only preview links for scene rendering."""
+        all_links = list(self._links)
+        for spec in self._effect_preview_specs():
+            source_node_id = str(spec.get("source_node_id") or "")
+            preview_node_id = str(spec.get("node_id") or "")
+            if source_node_id and preview_node_id:
+                # Check if this preview link is already in the list
+                has_link = any(
+                    link.from_node == source_node_id
+                    and link.to_node == preview_node_id
+                    and getattr(link, "kind", "data") == "preview"
+                    for link in all_links
+                )
+                if not has_link:
+                    all_links.append(
+                        WorkflowLink(source_node_id, preview_node_id, "output", "input", "preview")
+                    )
+        return all_links
 
     def update_node(self, row: int) -> None:
         """Update a single node without rebuilding the entire scene."""
@@ -2362,9 +2413,6 @@ class WorkflowCanvasView(QGraphicsView):
             "height": 240,
         }
         specs.append(spec)
-        self._links.append(
-            WorkflowLink(source_node_id, preview_node_id, "output", "input", "preview")
-        )
         self._rebuild()
         self.links_changed.emit(self.current_links())
         self.layout_changed.emit(self._canvas_layout)
@@ -2376,10 +2424,12 @@ class WorkflowCanvasView(QGraphicsView):
         self._canvas_layout["preview_nodes"] = [
             spec for spec in specs if str(spec.get("node_id") or "") != node_id
         ]
+        # Clean up any stale preview links that might still remain
         self._links = [
             link
             for link in self._links
-            if link.from_node != node_id and link.to_node != node_id
+            if not self._is_preview_link(link)
+            or (link.from_node != node_id and link.to_node != node_id)
         ]
         self._rebuild()
         self.links_changed.emit(self.current_links())
@@ -2717,17 +2767,7 @@ class WorkflowCanvasView(QGraphicsView):
             self._scene.addItem(effect_proxy)
             self._scene.proxies.append(effect_proxy)
             self._scene.proxy_by_id[preview_node_id] = effect_proxy
-            if not any(
-                link.from_node == source_node_id
-                and link.to_node == preview_node_id
-                and getattr(link, "kind", "data") == "preview"
-                for link in self._links
-            ):
-                self._links.append(
-                    WorkflowLink(source_node_id, preview_node_id, "output", "input", "preview")
-                )
-
-        self._scene.set_links(self._links)
+        self._scene.set_links(self._all_links_with_previews())
         self.set_selected_row(self._current_row)
         self._apply_zoom_lod(force=True)
         self._scene.setSceneRect(self._scene.itemsBoundingRect().adjusted(-240, -180, 480, 320))

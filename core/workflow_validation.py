@@ -232,6 +232,14 @@ def validate_workflow_config(
         kind = str(getattr(link, "kind", "data"))
         key = link_key(link)
 
+        # Skip preview/UI-only links completely
+        if kind == "preview":
+            continue
+        if to_node == preview_node_id:
+            continue
+        if to_node.startswith("__workflow_effect_preview__"):
+            continue
+
         if key in seen_link_keys:
             report.add("warning", "duplicate_link", "Duplicate canvas link detected.", link_key=key)
             continue
