@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 
 import numpy as np
@@ -1057,6 +1058,33 @@ def test_workflow_config_manager_uses_user_writable_template_dir(monkeypatch, tm
     assert config_dir.parent == expected_root
     assert config_dir.name == "workflow_configs"
     assert str(config_dir).startswith(str(tmp_path))
+
+
+def test_workflow_config_manager_skips_invalid_config_files(monkeypatch, tmp_path, caplog):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+
+    manager = WorkflowConfigManager()
+    config_dir = Path(manager.config_dir)
+    valid_path = config_dir / "valid.json"
+    broken_path = config_dir / "broken.json"
+
+    valid_path.write_text(
+        json.dumps(
+            {
+                "name": "有效模板",
+                "created_at": "2026-01-01T00:00:00",
+                "last_modified": "2026-01-02T00:00:00",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    broken_path.write_text("{not valid json", encoding="utf-8")
+
+    configs = manager.list_configs()
+
+    assert [item["filename"] for item in configs] == ["valid.json"]
+    assert "跳过无法读取的工作流配置" in caplog.text
 
 
 def test_lod_mode_thresholds():

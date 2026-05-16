@@ -6,12 +6,16 @@
 """
 
 import json
+import logging
 import os
 import uuid
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 
 from core.app_paths import get_workflow_templates_dir
+
+
+logger = logging.getLogger(__name__)
 
 
 # ============ 方法分类定义 ============
@@ -889,8 +893,8 @@ class WorkflowConfigManager:
                             "last_modified": data.get("last_modified", ""),
                         }
                     )
-                except:
-                    pass
+                except Exception as exc:
+                    logger.warning("跳过无法读取的工作流配置 %s: %s", filepath, exc)
 
         # 按最后修改时间排序
         configs.sort(key=lambda x: x["last_modified"], reverse=True)
