@@ -193,7 +193,7 @@ def _safe_zero_time_max_ns(n_samples: int, header_info: dict[str, Any]) -> float
     total_time_ns = header_info.get("total_time_ns")
     try:
         total = float(total_time_ns)
-    except Exception:
+    except (TypeError, ValueError):
         total = 48.0
     if total <= 0:
         total = 48.0
@@ -208,7 +208,7 @@ def _safe_agc_window_min(n_samples: int, header_info: dict[str, Any]) -> int:
     total_time_ns = header_info.get("total_time_ns") if header_info else None
     try:
         total = float(total_time_ns)
-    except Exception:
+    except (TypeError, ValueError):
         total = 0.0
     if total > 0.0:
         time_step_ns = total / samples
@@ -226,7 +226,7 @@ def _nyquist_mhz(n_samples: int, header_info: dict[str, Any]) -> float | None:
     sample_rate_hz = header_info.get("sample_rate_hz")
     try:
         sample_rate = float(sample_rate_hz)
-    except Exception:
+    except (TypeError, ValueError):
         sample_rate = 0.0
     if sample_rate > 0.0:
         return float(sample_rate / 2.0e6)
@@ -234,7 +234,7 @@ def _nyquist_mhz(n_samples: int, header_info: dict[str, Any]) -> float | None:
     time_step_s = header_info.get("time_step_s")
     try:
         step_s = float(time_step_s)
-    except Exception:
+    except (TypeError, ValueError):
         step_s = 0.0
     if step_s > 0.0:
         return float(1.0 / step_s / 2.0e6)
@@ -242,7 +242,7 @@ def _nyquist_mhz(n_samples: int, header_info: dict[str, Any]) -> float | None:
     total_time_ns = header_info.get("total_time_ns")
     try:
         total_ns = float(total_time_ns)
-    except Exception:
+    except (TypeError, ValueError):
         total_ns = 0.0
     if total_ns > 0.0:
         sample_rate = max(1, int(n_samples)) / (total_ns * 1.0e-9)
@@ -253,14 +253,14 @@ def _nyquist_mhz(n_samples: int, header_info: dict[str, Any]) -> float | None:
 def _as_int(value: Any) -> int | None:
     try:
         return int(round(float(value)))
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 
 def _as_float(value: Any) -> float | None:
     try:
         return float(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 
