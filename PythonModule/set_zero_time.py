@@ -49,10 +49,10 @@ def _apply_zero_time_shift(
     shift_samples = int(max(0.0, zero_time_value) / max(step_ns, 1.0e-12))
     shift_samples = max(0, min(shift_samples, ny - 1))
 
-    result = np.zeros((ny, nx), dtype=np.float32)
     if shift_samples == 0:
-        result[:] = arr
+        result = arr.astype(np.float32, copy=True)
     else:
+        result = np.zeros((ny, nx), dtype=np.float32)
         result[:-shift_samples, :] = arr[shift_samples:, :]
 
     return result.astype(np.float32, copy=False), int(shift_samples), float(step_s)
