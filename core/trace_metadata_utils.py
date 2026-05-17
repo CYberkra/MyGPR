@@ -54,6 +54,10 @@ def _normalize_sidecar_records(
         raise ValueError("sidecar_records must contain at least one timestamp")
     if longitude.size != timestamp_s.size or latitude.size != timestamp_s.size:
         raise ValueError("sidecar longitude/latitude must match timestamp length")
+    if not np.isfinite(timestamp_s).all():
+        raise ValueError("sidecar timestamp_s must contain only finite values")
+    if not np.isfinite(longitude).all() or not np.isfinite(latitude).all():
+        raise ValueError("sidecar longitude/latitude must contain only finite values")
 
     order = np.argsort(timestamp_s, kind="stable")
     return timestamp_s[order], longitude[order], latitude[order]
@@ -69,6 +73,8 @@ def _normalize_timestamped_payload(
     timestamp_s = _as_1d_array(payload["timestamp_s"], np.float64)
     if timestamp_s.size == 0:
         raise ValueError("sidecar payload must contain at least one timestamp")
+    if not np.isfinite(timestamp_s).all():
+        raise ValueError("sidecar timestamp_s must contain only finite values")
 
     normalized: dict[str, np.ndarray] = {}
     for field in required_fields:
@@ -77,6 +83,8 @@ def _normalize_timestamped_payload(
         values = _as_1d_array(payload[field], np.float64)
         if values.size != timestamp_s.size:
             raise ValueError(f"sidecar field '{field}' length mismatch")
+        if not np.isfinite(values).all():
+            raise ValueError(f"sidecar field '{field}' must contain only finite values")
         normalized[field] = values
 
     order = np.argsort(timestamp_s, kind="stable")

@@ -48,6 +48,29 @@ def test_align_sidecar_records_adds_trace_timestamps_and_local_xy_without_breaki
     assert abs(float(enriched["local_y_m"][2])) < 1.0
 
 
+def test_align_sidecar_records_rejects_non_finite_sidecar_timestamp():
+    module = importlib.import_module("core.trace_metadata_utils")
+    align_sidecar_records = module.align_sidecar_records
+
+    trace_metadata = {
+        "trace_index": np.array([0, 1], dtype=np.int32),
+        "longitude": np.array([100.0, 100.001], dtype=np.float64),
+        "latitude": np.array([30.0, 30.0], dtype=np.float64),
+    }
+    sidecar_records = {
+        "timestamp_s": np.array([10.0, np.nan], dtype=np.float64),
+        "longitude": np.array([100.0, 100.001], dtype=np.float64),
+        "latitude": np.array([30.0, 30.0], dtype=np.float64),
+    }
+
+    with pytest.raises(ValueError, match="timestamp_s"):
+        align_sidecar_records(
+            trace_metadata,
+            sidecar_records,
+            trace_timestamps_s=np.array([10.0, 11.0], dtype=np.float64),
+        )
+
+
 def test_build_uniform_trace_distance_m_returns_equal_spacing_axis():
     module = importlib.import_module("core.trace_metadata_utils")
     build_uniform_trace_distance_m = module.build_uniform_trace_distance_m
