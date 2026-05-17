@@ -134,3 +134,27 @@ def test_export_auto_tune_comparison_artifacts_serializes_nonfinite_metrics(tmp_
         rows = {row["metric"]: row for row in csv.DictReader(handle)}
     assert rows["nan_metric"]["manual_value"] == ""
     assert rows["inf_metric"]["auto_value"] == "[null]"
+
+
+def test_export_auto_tune_comparison_accepts_numpy_scalar_percentile_clip(tmp_path: Path):
+    raw = _build_export_fixture(samples=72, traces=18)
+    result = run_auto_tune_comparison(
+        raw,
+        pipeline=["dewow"],
+        manual_params_by_method={"dewow": {"window": 1}},
+        display_spec={"percentile_clip": np.array([95.0])},
+        search_mode="fast",
+    )
+
+    bundle = export_auto_tune_comparison_artifacts(
+        result,
+        out_dir=tmp_path,
+        bundle_name="numpy_clip_case",
+    )
+
+    summary = json.loads(
+        Path(bundle["artifacts"]["summary_json"]).read_text(encoding="utf-8")
+    )
+    assert summary["display_spec"]["percentile_clip"] == [95.0]
+    assert np.isfinite(summary["display_spec"]["vmin"])
+    assert np.isfinite(summary["display_spec"]["vmax"])

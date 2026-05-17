@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from core.auto_tune_comparison import AutoTuneComparisonRun, to_summary_dict
+from core.scalar_utils import to_float
 
 
 def export_auto_tune_comparison_artifacts(
@@ -152,7 +153,7 @@ def _locked_display_spec(
     if finite.size == 0:
         limit = 1.0
     elif clip is not None:
-        percentile = max(0.0, min(float(clip), 100.0))
+        percentile = max(0.0, min(to_float(clip, default=100.0), 100.0))
         limit = float(np.percentile(np.abs(finite), percentile))
     else:
         limit = float(np.nanmax(np.abs(finite)))
