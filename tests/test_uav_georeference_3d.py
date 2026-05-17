@@ -181,3 +181,21 @@ def test_build_airborne_georeference_payload_handles_bad_numeric_metadata():
     assert np.isfinite(payload["trace_distance_m"]).all()
     assert np.isfinite(payload["airborne_z_m"]).all()
     assert np.allclose(payload["trace_distance_m"], 0.0)
+
+
+def test_build_airborne_georeference_payload_replaces_nonfinite_metadata_values():
+    data = np.arange(18, dtype=np.float32).reshape(6, 3)
+    trace_metadata = {
+        "trace_distance_m": np.array([0.0, np.nan, np.inf], dtype=np.float64),
+        "flight_height_m": np.array([1.0, np.nan, 3.0], dtype=np.float64),
+    }
+
+    payload = build_airborne_georeference_3d_payload(
+        data,
+        {"total_time_ns": 60.0},
+        trace_metadata,
+    )
+
+    assert payload is not None
+    assert np.allclose(payload["trace_distance_m"], np.array([0.0, 0.0, 0.0]))
+    assert np.isfinite(payload["airborne_z_m"]).all()

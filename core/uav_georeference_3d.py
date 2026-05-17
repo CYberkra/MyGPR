@@ -78,7 +78,12 @@ def _safe_numeric(values: np.ndarray | None, target_len: int, fill_value: float 
         return np.full(target_len, fill_value, dtype=np.float64)
     if arr.size != target_len:
         return np.full(target_len, fill_value, dtype=np.float64)
-    return np.where(np.isfinite(arr), arr, fill_value).astype(np.float64)
+    finite = np.isfinite(arr)
+    if finite.all():
+        return arr.astype(np.float64, copy=False)
+    result = arr.copy()
+    result[~finite] = fill_value
+    return result
 
 
 def _dominant_trace_axis(
