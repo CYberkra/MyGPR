@@ -41,6 +41,32 @@ def _append_warning(metadata: dict[str, object], message: str) -> None:
         warnings.append(text)
 
 
+def _finite_float(value: object, name: str) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} 必须是有限数值") from None
+    if not np.isfinite(parsed):
+        raise ValueError(f"{name} 必须是有限数值")
+    return parsed
+
+
+def _optional_positive_int(value: object, name: str) -> int | None:
+    if value is None:
+        return None
+    parsed = _finite_float(value, name)
+    if parsed <= 0:
+        return None
+    return max(1, int(parsed))
+
+
+def _positive_int(value: object, name: str) -> int:
+    parsed = _finite_float(value, name)
+    if parsed <= 0:
+        raise ValueError(f"{name} 必须大于 0")
+    return max(1, int(parsed))
+
+
 def _poll_cancel(cancel_checker) -> None:
     """Raise standard cancellation exception when user aborts."""
     if cancel_checker and bool(cancel_checker()):
@@ -212,7 +238,10 @@ def method_hankel_svd(data, window_length=None, rank=None, max_rank=100, preview
         preview = kwargs.get("preview", preview)
     preview = bool(preview)
     cancel_checker = kwargs.get("cancel_checker")
-    aggressiveness = float(kwargs.get("aggressiveness", 1.0))
+    requested_window = _optional_positive_int(window_length, "window_length")
+    requested_rank = _optional_positive_int(rank, "rank")
+    max_rank_value = _positive_int(max_rank, "max_rank")
+    aggressiveness = _finite_float(kwargs.get("aggressiveness", 1.0), "aggressiveness")
     aggressiveness = max(0.01, min(aggressiveness, 10.0))
 
     n_samples, n_traces = arr.shape
@@ -248,14 +277,14 @@ def method_hankel_svd(data, window_length=None, rank=None, max_rank=100, preview
     metadata: dict[str, object] = {
         "method": "hankel_svd",
         "window_length": None,
-        "rank_requested": int(rank) if rank is not None and int(rank) > 0 else None,
-        "rank_mode": "fixed" if rank is not None and int(rank) > 0 else "auto",
+        "rank_requested": requested_rank,
+        "rank_mode": "fixed" if requested_rank is not None else "auto",
         "effective_rank_min": None,
         "effective_rank_max": None,
         "svd_backend": "full",
         "fallback_columns": 0,
         "window_selection_mode": "fixed",
-        "rank_selection_mode": "fixed" if rank is not None and int(rank) > 0 else "svht_auto",
+        "rank_selection_mode": "fixed" if requested_rank is not None else "svht_auto",
         "rho": aggressiveness,
         "recovery_mode": "mssa",
         "candidate_windows": [],
@@ -276,22 +305,24 @@ def method_hankel_svd(data, window_length=None, rank=None, max_rank=100, preview
     }
 
     if n_samples == 0 or n_traces == 0:
-        metadata["window_length"] = 1 if n_samples <= 1 else _resolve_window_size(n_samples, window_length)
+        metadata["window_length"] = (
+            1 if n_samples <= 1 else _resolve_window_size(n_samples, requested_window)
+        )
         _append_warning(metadata, "empty input matrix received")
         return result, metadata
 
     # 确定 window_size
-    auto_window = window_length is None or int(window_length) <= 0
+    auto_window = requested_window is None
     if auto_window:
         window_size = n_samples // 2
         metadata["window_selection_mode"] = "auto_n_div_2"
     else:
-        window_size = _resolve_window_size(n_samples, window_length)
+        window_size = _resolve_window_size(n_samples, requested_window)
         metadata["window_selection_mode"] = "fixed"
-        if window_length is not None and int(window_length) != window_size:
+        if requested_window != window_size:
             _append_warning(
                 metadata,
-                f"requested window_length {int(window_length)} was adjusted to feasible value {window_size}",
+                f"requested window_length {requested_window} was adjusted to feasible value {window_size}",
             )
 
     # 预览模式：限制窗口大小
@@ -321,7 +352,7 @@ def method_hankel_svd(data, window_length=None, rank=None, max_rank=100, preview
     metadata["svd_backend"] = "full"
 
     # 确定 rank
-    auto_rank = rank is None or int(rank) <= 0
+    auto_rank = requested_rank is None
     if auto_rank:
         selected_rank = _svht_rank_selection(singular_values, aggressiveness=aggressiveness)
         metadata["rank_selection_mode"] = "svht_auto"
@@ -336,15 +367,15 @@ def method_hankel_svd(data, window_length=None, rank=None, max_rank=100, preview
     else:
         # 对于2D MSSA，rank上限是min(P*L, K)，但为了兼容性，也限制为min(window_size, K)-1
         K = n_samples - window_size + 1
-        theoretical_max = min(full_rank, max_rank, window_size - 1, K - 1)
+        theoretical_max = min(full_rank, max_rank_value, window_size - 1, K - 1)
         theoretical_max = max(1, theoretical_max)
-        selected_rank = min(int(rank), theoretical_max)
+        selected_rank = min(requested_rank, theoretical_max)
         selected_rank = max(1, selected_rank)
         metadata["rank_selection_mode"] = "fixed"
-        if rank is not None and int(rank) != selected_rank:
+        if requested_rank != selected_rank:
             _append_warning(
                 metadata,
-                f"requested rank {int(rank)} was adjusted to feasible value {selected_rank}",
+                f"requested rank {requested_rank} was adjusted to feasible value {selected_rank}",
             )
 
     metadata["effective_rank_min"] = selected_rank

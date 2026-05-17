@@ -245,6 +245,19 @@ def test_infeasible_large_rank_is_capped():
     assert meta["effective_rank_max"] <= 7  # cannot exceed min(m, window_length)-1
 
 
+def test_non_finite_control_params_are_rejected():
+    raw = _make_noisy_bscan(16, rows=32, cols=8)
+
+    with pytest.raises(ValueError, match="window_length"):
+        method_hankel_svd(raw, window_length=np.nan, rank=3)
+
+    with pytest.raises(ValueError, match="rank"):
+        method_hankel_svd(raw, window_length=8, rank=np.inf)
+
+    with pytest.raises(ValueError, match="aggressiveness"):
+        method_hankel_svd(raw, window_length=8, rank=3, aggressiveness=np.nan)
+
+
 # ---------------------------------------------------------------------------
 # Edge-case robustness (must not crash)
 # ---------------------------------------------------------------------------
