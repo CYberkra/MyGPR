@@ -652,10 +652,10 @@ def target_preservation_ratio(
     start, stop = _resolve_row_range(row_range, n_rows)
     window = arr[start:stop, :n_cols]
     ref_window = ref[start:stop, :n_cols]
-    denom = float(np.sum(ref_window**2))
+    denom = _sum_square(ref_window)
     if denom <= EPS:
         return 0.0
-    return float(np.sum(window**2) / denom)
+    return float(_sum_square(window) / denom)
 
 
 def compute_motion_quality_metrics(
