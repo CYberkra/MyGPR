@@ -14,7 +14,9 @@ from core.quality_metrics import (
     deep_zone_contrast,
     detect_first_break_indices,
     first_break_std,
+    clipping_ratio,
     horizontal_coherence,
+    hot_pixel_ratio,
     local_saliency_preservation,
     low_freq_energy_ratio,
     pre_zero_energy_ratio,
@@ -142,3 +144,11 @@ def test_ridge_detection_handles_non_finite_row_range():
 
     assert detected.shape == (raw.shape[1],)
     assert np.isfinite(detected).all()
+
+
+def test_gain_quality_metrics_handle_non_finite_control_values():
+    raw = _build_test_profile()
+
+    assert np.isfinite(deep_zone_contrast(raw, deep_ratio=np.nan))
+    assert np.isfinite(clipping_ratio(raw, high_quantile=np.nan))
+    assert np.isfinite(hot_pixel_ratio(raw, z=np.nan))

@@ -402,7 +402,8 @@ def depth_rms_cv(data: np.ndarray) -> float:
 def deep_zone_contrast(data: np.ndarray, deep_ratio: float = 0.4) -> float:
     """Contrast estimate for the deep zone."""
     arr = _as_clean_2d(data)
-    start = int(np.floor(arr.shape[0] * (1.0 - float(deep_ratio))))
+    resolved_deep_ratio = float(np.clip(_finite_scalar(deep_ratio, 0.4), 0.0, 1.0))
+    start = int(np.floor(arr.shape[0] * (1.0 - resolved_deep_ratio)))
     deep = arr[max(0, start) :, :]
     if deep.size == 0:
         return 0.0
@@ -416,7 +417,8 @@ def clipping_ratio(data: np.ndarray, high_quantile: float = 0.999) -> float:
     max_abs = float(np.max(arr)) if arr.size else 0.0
     if max_abs <= EPS:
         return 0.0
-    q = float(np.quantile(arr, min(max(high_quantile, 0.9), 0.9999)))
+    quantile = float(np.clip(_finite_scalar(high_quantile, 0.999), 0.9, 0.9999))
+    q = float(np.quantile(arr, quantile))
     gate = max(q, 0.98 * max_abs)
     return float(np.mean(arr >= gate))
 
@@ -428,7 +430,8 @@ def hot_pixel_ratio(data: np.ndarray, z: float = 6.0) -> float:
     std = float(np.std(centered))
     if std <= EPS:
         return 0.0
-    return float(np.mean(np.abs(centered / std) >= float(z)))
+    threshold = max(_finite_scalar(z, 6.0), EPS)
+    return float(np.mean(np.abs(centered / std) >= threshold))
 
 
 def kurtosis_or_spikiness(data: np.ndarray) -> float:
