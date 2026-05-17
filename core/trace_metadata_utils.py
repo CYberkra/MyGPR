@@ -289,10 +289,15 @@ def resample_bscan_columns_linear(
     weight = np.where(target_distance <= unique_distance[0], 0.0, weight)
     weight = np.where(target_distance >= unique_distance[-1], 1.0, weight)
 
-    return (
-        source_values[:, left_idx] * (1.0 - weight)[None, :]
-        + source_values[:, right_idx] * weight[None, :]
-    ).astype(np.float32, copy=False)
+    result = np.empty((arr.shape[0], target_distance.size), dtype=np.float32)
+    np.multiply(
+        source_values[:, left_idx],
+        (1.0 - weight)[None, :],
+        out=result,
+        casting="unsafe",
+    )
+    result += source_values[:, right_idx] * weight[None, :]
+    return result
 
 
 def resample_trace_metadata(
