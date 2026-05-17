@@ -8,7 +8,11 @@ from pathlib import Path
 
 import numpy as np
 
-from core.benchmark_runner import _time_distance_ranges, run_benchmark_sample
+from core.benchmark_runner import (
+    _time_distance_ranges,
+    _to_jsonable,
+    run_benchmark_sample,
+)
 
 
 def test_benchmark_runner_writes_summary_and_metrics(tmp_path: Path):
@@ -43,3 +47,14 @@ def test_time_distance_ranges_accept_numpy_scalar_headers():
 
     assert time_range == (0.0, 80.0)
     assert distance_range == (0.0, 1.0)
+
+
+def test_benchmark_jsonable_serializes_nonfinite_numbers_as_null():
+    safe = _to_jsonable(
+        {
+            "nan_scalar": np.float64(np.nan),
+            "inf_array": np.array([1.0, np.inf], dtype=np.float32),
+        }
+    )
+
+    assert safe == {"nan_scalar": None, "inf_array": [1.0, None]}
