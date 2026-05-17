@@ -8,12 +8,16 @@ import numpy as np
 
 
 def _window_sums_axis0(arr: np.ndarray, starts: np.ndarray, ends: np.ndarray) -> np.ndarray:
-    padded = np.vstack([np.zeros((1, arr.shape[1]), dtype=np.float64), np.cumsum(arr, axis=0)])
+    padded = np.empty((arr.shape[0] + 1, arr.shape[1]), dtype=np.float64)
+    padded[0, :] = 0.0
+    np.cumsum(arr, axis=0, out=padded[1:, :])
     return padded[ends, :] - padded[starts, :]
 
 
 def _window_sums_axis1(arr: np.ndarray, starts: np.ndarray, ends: np.ndarray) -> np.ndarray:
-    padded = np.hstack([np.zeros((arr.shape[0], 1), dtype=np.float64), np.cumsum(arr, axis=1)])
+    padded = np.empty((arr.shape[0], arr.shape[1] + 1), dtype=np.float64)
+    padded[:, 0] = 0.0
+    np.cumsum(arr, axis=1, out=padded[:, 1:])
     return padded[:, ends] - padded[:, starts]
 
 
