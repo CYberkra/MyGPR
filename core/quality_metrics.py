@@ -21,6 +21,16 @@ def _finite_scalar(value: float, default: float) -> float:
     return parsed if np.isfinite(parsed) else float(default)
 
 
+def _safe_index(value: int | float | None, default: int = 0) -> int:
+    try:
+        parsed = float(default if value is None else value)
+    except (TypeError, ValueError):
+        return int(default)
+    if not np.isfinite(parsed):
+        return int(default)
+    return int(parsed)
+
+
 def relative_reduction(before: float, after: float) -> float:
     """Normalized improvement for metrics where lower is better."""
     before_value = _finite_scalar(before, EPS)
@@ -284,7 +294,7 @@ def detect_first_break_indices(
 def pre_zero_energy_ratio(data: np.ndarray, zero_idx: int) -> float:
     """Energy before zero-time divided by total energy."""
     arr = _as_clean_2d(data)
-    idx = max(0, min(int(zero_idx), arr.shape[0]))
+    idx = max(0, min(_safe_index(zero_idx), arr.shape[0]))
     total = float(np.sum(arr**2))
     if total <= EPS or idx <= 0:
         return 0.0
@@ -302,7 +312,7 @@ def first_break_std(
 def first_break_sharpness(data: np.ndarray, zero_idx: int) -> float:
     """Local mean gradient magnitude around the zero-time zone."""
     arr = _as_clean_2d(data)
-    idx = max(1, min(int(zero_idx), arr.shape[0] - 2))
+    idx = max(1, min(_safe_index(zero_idx, default=1), arr.shape[0] - 2))
     grad = np.abs(np.diff(arr, axis=0, prepend=arr[[0], :]))
     start = max(0, idx - 2)
     stop = min(arr.shape[0], idx + 3)
@@ -314,8 +324,10 @@ def baseline_bias(
 ) -> float:
     """Absolute baseline bias measured by trace means."""
     arr = _as_clean_2d(data)
-    if pre_zero_only and zero_idx is not None and zero_idx > 0:
-        arr = arr[: max(1, int(zero_idx)), :]
+    if pre_zero_only and zero_idx is not None:
+        idx = _safe_index(zero_idx)
+        if idx > 0:
+            arr = arr[: max(1, idx), :]
     trace_means = np.mean(arr, axis=0)
     return float(np.mean(np.abs(trace_means)))
 
@@ -494,7 +506,7 @@ def compute_benchmark_metrics(
     }
 
     if zero_idx is not None:
-        idx = int(zero_idx)
+        idx = _safe_index(zero_idx)
         metrics.update(
             {
                 "pre_zero_energy_ratio_before": pre_zero_energy_ratio(before_arr, idx),

@@ -67,6 +67,13 @@ def test_gain_related_metrics_detect_deep_contrast_improvement():
     assert pre_zero_energy_ratio(gained, 5) >= 0.0
 
 
+def test_zero_index_metrics_handle_non_finite_zero_idx():
+    raw = _build_test_profile()
+
+    assert pre_zero_energy_ratio(raw, np.nan) == 0.0
+    assert np.isfinite(compute_benchmark_metrics(raw, raw, zero_idx=np.inf)["first_break_sharpness_after"])
+
+
 def test_target_band_energy_ratio_handles_non_finite_band_values():
     raw = _build_test_profile()
 
