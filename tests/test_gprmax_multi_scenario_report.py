@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -382,6 +383,25 @@ def test_find_out_files_orders_per_trace_height_variation_outputs(tmp_path: Path
         "airborne_height_variation_cylinder_v1_trace002.out",
         "airborne_height_variation_cylinder_v1_trace010.out",
     ]
+
+
+def test_json_safe_removes_nonfinite_values_for_strict_report_json():
+    payload = {
+        "float_nan": float("nan"),
+        "float_inf": float("inf"),
+        "array": np.array([1.0, np.nan, np.inf], dtype=np.float64),
+        "np_scalar": np.float32(np.nan),
+        "flag": True,
+    }
+
+    safe = report._json_safe(payload)
+
+    assert safe["float_nan"] is None
+    assert safe["float_inf"] is None
+    assert safe["array"] == [1.0, None, None]
+    assert safe["np_scalar"] is None
+    assert safe["flag"] is True
+    json.dumps(safe, allow_nan=False)
 
 
 def test_standard_report_pipeline_covers_non_motion_uavgpr_flow():

@@ -714,14 +714,14 @@ def run_multi_scenario_report(
     }
     summary_json = report_dir / "summary.json"
     summary_json.write_text(
-        json.dumps(_json_safe(payload), ensure_ascii=False, indent=2),
+        json.dumps(_json_safe(payload), ensure_ascii=False, indent=2, allow_nan=False),
         encoding="utf-8",
     )
     html_path = render_html_report(report_dir, payload)
     payload["summary_json"] = str(summary_json)
     payload["html_report"] = str(html_path)
     summary_json.write_text(
-        json.dumps(_json_safe(payload), ensure_ascii=False, indent=2),
+        json.dumps(_json_safe(payload), ensure_ascii=False, indent=2, allow_nan=False),
         encoding="utf-8",
     )
     return payload
@@ -1132,11 +1132,11 @@ def convert_gprmax_run(
     structure_preview_path = run_result.scenario_dir / "structure.png"
     np.savetxt(bscan_csv_path, bscan, delimiter=",", fmt="%.8e")
     scenario_path.write_text(
-        json.dumps(_json_safe(scenario), ensure_ascii=False, indent=2),
+        json.dumps(_json_safe(scenario), ensure_ascii=False, indent=2, allow_nan=False),
         encoding="utf-8",
     )
     ground_truth_path.write_text(
-        json.dumps(_json_safe(ground_truth), ensure_ascii=False, indent=2),
+        json.dumps(_json_safe(ground_truth), ensure_ascii=False, indent=2, allow_nan=False),
         encoding="utf-8",
     )
     save_structure_preview(definition, structure_preview_path)
@@ -3815,17 +3815,17 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [_json_safe(item) for item in value]
     if isinstance(value, np.ndarray):
-        return value.tolist()
+        return _json_safe(value.tolist())
     if isinstance(value, np.generic):
-        return value.item()
+        return _json_safe(value.item())
     if isinstance(value, Path):
         return str(value)
-    if isinstance(value, float):
-        return float(value)
-    if isinstance(value, int):
-        return int(value)
     if value is None or isinstance(value, (str, bool)):
         return value
+    if isinstance(value, float):
+        return float(value) if np.isfinite(value) else None
+    if isinstance(value, int):
+        return int(value)
     return str(value)
 
 
