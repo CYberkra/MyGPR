@@ -33,7 +33,11 @@ def _derive_trace_distance_from_xy(trace_metadata: dict, trace_count: int) -> np
     local_x = local_x[:trace_count]
     local_y = local_y[:trace_count]
     step = np.sqrt(np.diff(local_x) ** 2 + np.diff(local_y) ** 2)
-    return np.concatenate(([0.0], np.cumsum(step))).astype(np.float32)
+    distance = np.empty(trace_count, dtype=np.float32)
+    distance[0] = 0.0
+    if trace_count > 1:
+        distance[1:] = np.cumsum(step, dtype=np.float64).astype(np.float32, copy=False)
+    return distance
 
 
 def _prepare_metadata_for_resampling(

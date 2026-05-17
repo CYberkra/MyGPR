@@ -116,6 +116,7 @@ def test_motion_compensation_speed_derives_distance_from_xy_fallback():
     assert meta.get("skipped") is not True
     assert meta["distance_source"] == "local_xy"
     output_distance = np.asarray(meta["trace_metadata_out"]["trace_distance_m"], dtype=np.float64)
+    assert meta["trace_metadata_out"]["trace_distance_m"].dtype == np.float32
     assert corrected.shape[1] == output_distance.size
     assert np.all(np.diff(output_distance) >= -1e-12)
 
