@@ -87,6 +87,34 @@ def test_integrate_optional_sidecars_with_rtk_and_imu_payloads_adds_motion_ready
     assert np.all(integrated["height_confidence"] > 0.0)
 
 
+def test_integrate_optional_sidecars_sorts_altimeter_payload_once_and_preserves_fields():
+    module = importlib.import_module("core.trace_metadata_utils")
+    integrate_optional_sidecars = module.integrate_optional_sidecars
+
+    trace_metadata = {
+        "trace_index": np.array([0, 1, 2], dtype=np.int32),
+        "trace_distance_m": np.array([0.0, 1.0, 2.0], dtype=np.float32),
+    }
+    altimeter_payload = {
+        "timestamp_s": np.array([2.0, 0.0, 1.0], dtype=np.float64),
+        "height_agl_m": np.array([2.0, 0.0, 1.0], dtype=np.float32),
+        "height_source": np.array(["c", "a", "b"], dtype="<U4"),
+        "snr": np.array([30.0, 10.0, 20.0], dtype=np.float32),
+        "target_count": np.array([1, 1, 1], dtype=np.int32),
+        "valid": np.array([1, 1, 1], dtype=np.int32),
+    }
+
+    integrated = integrate_optional_sidecars(
+        trace_metadata,
+        trace_timestamps_s=np.array([0.0, 1.0, 2.0], dtype=np.float64),
+        altimeter_payload=altimeter_payload,
+    )
+
+    assert np.allclose(integrated["height_agl_m"], np.array([0.0, 1.0, 2.0]))
+    assert integrated["height_source"].tolist() == ["a", "b", "c"]
+    assert np.all(integrated["height_confidence"] > 0.0)
+
+
 def test_integrate_optional_sidecars_prefers_explicit_rtk_local_xy():
     module = importlib.import_module("core.trace_metadata_utils")
     integrate_optional_sidecars = module.integrate_optional_sidecars

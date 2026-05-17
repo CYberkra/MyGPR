@@ -150,11 +150,16 @@ def _normalize_altimeter_payload(
     if "timestamp_s" not in payload:
         raise ValueError("sidecar payload must include 'timestamp_s'")
     raw_timestamp_s = _as_1d_array(payload["timestamp_s"], np.float64)
+    if raw_timestamp_s.size == 0:
+        raise ValueError("sidecar payload must contain at least one timestamp")
+    if "height_agl_m" not in payload:
+        raise ValueError("sidecar payload must include 'height_agl_m'")
+    height = _as_1d_array(payload["height_agl_m"], np.float64)
+    if height.size != raw_timestamp_s.size:
+        raise ValueError("sidecar field 'height_agl_m' length mismatch")
     order = np.argsort(raw_timestamp_s, kind="stable")
-    timestamp_s, fields = _normalize_timestamped_payload(
-        payload,
-        required_fields=("height_agl_m",),
-    )
+    timestamp_s = raw_timestamp_s[order]
+    fields: dict[str, np.ndarray] = {"height_agl_m": height[order]}
     for key in ("snr", "target_count", "valid"):
         if key not in payload:
             continue
