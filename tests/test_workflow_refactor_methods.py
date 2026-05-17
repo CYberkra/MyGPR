@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from core.processing_engine import (
     merge_result_header_info,
@@ -73,6 +74,31 @@ def test_manual_velocity_model_writes_header_updates():
     assert np.isclose(merged["velocity_m_per_ns"], 0.299792458 / 3.0)
     assert merged["velocity_model"]["epsilon_r"] == 9.0
     assert merged["velocity_model"]["uncertainty_fraction"] == 0.2
+
+
+def test_manual_velocity_model_rejects_non_finite_parameters():
+    data = np.ones((8, 4), dtype=np.float32)
+
+    with pytest.raises(ValueError, match="有限值"):
+        run_processing_method(
+            data,
+            "manual_velocity_model",
+            {"mode": "dielectric", "epsilon_r": np.inf},
+        )
+
+    with pytest.raises(ValueError, match="有限值"):
+        run_processing_method(
+            data,
+            "manual_velocity_model",
+            {"mode": "velocity", "velocity_m_per_ns": np.nan},
+        )
+
+    with pytest.raises(ValueError, match="非负有限值"):
+        run_processing_method(
+            data,
+            "manual_velocity_model",
+            {"uncertainty_fraction": np.inf},
+        )
 
 
 def test_geometry_depth_context_warns_for_missing_inputs_and_resolves_spacing():

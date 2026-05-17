@@ -32,19 +32,21 @@ def method_manual_velocity_model(
         raise ValueError("速度模型 mode 必须是 velocity 或 dielectric")
 
     if mode_key == "dielectric":
-        eps = float(epsilon_r)
-        if eps <= 1.0:
-            raise ValueError("介电常数 epsilon_r 必须大于 1")
+        eps = _finite_float(epsilon_r)
+        if eps is None or eps <= 1.0:
+            raise ValueError("介电常数 epsilon_r 必须是有限值且大于 1")
         velocity = C0_M_PER_NS / np.sqrt(eps)
     else:
-        velocity = float(velocity_m_per_ns)
+        velocity = _finite_float(velocity_m_per_ns)
+        if velocity is None:
+            raise ValueError("速度 velocity_m_per_ns 必须是有限值")
         if not (0.01 <= velocity <= C0_M_PER_NS):
             raise ValueError("速度 velocity_m_per_ns 必须在 0.01~0.299792458 m/ns 内")
         eps = float((C0_M_PER_NS / velocity) ** 2)
 
-    uncertainty = float(uncertainty_fraction)
-    if uncertainty < 0.0:
-        raise ValueError("uncertainty_fraction 不能为负")
+    uncertainty = _finite_float(uncertainty_fraction)
+    if uncertainty is None or uncertainty < 0.0:
+        raise ValueError("uncertainty_fraction 必须是非负有限值")
 
     model = {
         "type": "constant_velocity",
@@ -64,3 +66,11 @@ def method_manual_velocity_model(
             "epsilon_r": float(eps),
         },
     }
+
+
+def _finite_float(value: object) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if np.isfinite(parsed) else None
