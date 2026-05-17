@@ -176,12 +176,19 @@ def _convert_target(
     index: int,
     data_shape: tuple[int, int] | None,
 ) -> dict[str, Any]:
+    nested_target = raw.get("target")
+    if not isinstance(nested_target, dict):
+        nested_target = {}
     target_id = str(raw.get("id") or raw.get("target_id") or f"target_{index}")
     roi = _convert_roi(raw.get("target_roi") or raw.get("roi"), data_shape)
     target: dict[str, Any] = {
         "id": target_id,
         "target_id": str(raw.get("target_id") or target_id),
-        "type": str(raw.get("target_type") or raw.get("type") or "target"),
+        "type": str(
+            raw.get("target_type")
+            or _first_present(nested_target, "type", raw, "type")
+            or "target"
+        ),
         "must_preserve": bool(raw.get("must_preserve", True)),
         "roi": roi,
     }
@@ -194,8 +201,9 @@ def _convert_target(
         "label",
         "notes",
     ):
-        if raw.get(key) is not None:
-            target[key] = copy.deepcopy(raw[key])
+        value = _first_present(nested_target, key, raw, key)
+        if value is not None:
+            target[key] = copy.deepcopy(value)
     return target
 
 
