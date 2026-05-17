@@ -148,6 +148,28 @@ def test_convert_gprmax_ground_truth_preserves_nested_target_metadata():
     }
 
 
+def test_convert_gprmax_ground_truth_warns_when_background_overlaps_target():
+    sidecar = {
+        "schema": "gprmax_ground_truth_v1",
+        "dataset_id": "overlap_demo",
+        "target_roi": {
+            "sample_range": [10, 20],
+            "trace_range": [1, 4],
+        },
+        "background_roi": {
+            "sample_range": [10, 20],
+            "trace_range": [1, 4],
+        },
+    }
+
+    converted = convert_gprmax_ground_truth_to_mygpr(sidecar, data_shape=(40, 12))
+
+    assert any(
+        "background_roi overlaps target ROI almost completely" in warning
+        for warning in converted["conversion_warnings"]
+    )
+
+
 def test_convert_gprmax_ground_truth_accepts_numpy_roi_ranges():
     sidecar = {
         "schema": "gprmax_ground_truth_v1",

@@ -187,6 +187,31 @@ def test_load_gprmax_dataset_contract_reads_manifest_out_and_ground_truth(tmp_pa
     assert package.ground_truth_paths["ground_truth_file"] == tmp_path / "ground_truth.yaml"
 
 
+def test_dataset_contract_prefers_ground_truth_dataset_id_over_metadata(tmp_path: Path):
+    manifest_path = _write_contract_files(tmp_path)
+    (tmp_path / "metadata.json").write_text(
+        json.dumps({"scenario_id": "pipe_merged", "runs": 16}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (tmp_path / "ground_truth.yaml").write_text(
+        "\n".join(
+            [
+                "schema: gprmax_ground_truth_v1",
+                "dataset_id: pipe_demo",
+                "target_roi:",
+                "  sample_range: [12, 18]",
+                "  trace_range: [5, 9]",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    package = load_gprmax_dataset_contract(manifest_path)
+
+    assert package.scenario_id == "pipe_demo"
+    assert package.ground_truth["scenario_id"] == "pipe_demo"
+
+
 def test_gprmax_contract_feeds_truth_metrics_and_auto_tune_pipeline(tmp_path: Path):
     manifest_path = _write_contract_files(tmp_path)
     package = load_gprmax_dataset_contract(manifest_path)

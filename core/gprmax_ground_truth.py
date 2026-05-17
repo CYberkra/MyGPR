@@ -50,6 +50,7 @@ def convert_gprmax_ground_truth_to_mygpr(
     targets = _convert_targets(source, data_shape)
     analysis_roi = _convert_analysis_roi(source, targets, data_shape)
     background_rois = _convert_background_rois(source, data_shape)
+    conversion_warnings = _roi_conversion_warnings(targets, background_rois)
 
     converted: dict[str, Any] = {
         "schema": MYGPR_GROUND_TRUTH_SCHEMA,
@@ -73,8 +74,10 @@ def convert_gprmax_ground_truth_to_mygpr(
             else:
                 converted[key] = copy.deepcopy(value)
     warnings_list = source.get("_conversion_warnings")
-    if isinstance(warnings_list, list) and warnings_list:
-        converted["conversion_warnings"] = [str(item) for item in warnings_list]
+    if isinstance(warnings_list, list):
+        conversion_warnings.extend(str(item) for item in warnings_list if str(item))
+    if conversion_warnings:
+        converted["conversion_warnings"] = conversion_warnings
     return converted
 
 
@@ -276,6 +279,59 @@ def _convert_wavefield_rois(
             continue
         converted[str(key)] = payload
     return converted
+
+
+def _roi_conversion_warnings(
+    targets: list[dict[str, Any]],
+    background_rois: list[dict[str, int]],
+) -> list[str]:
+    warnings_list: list[str] = []
+    if not targets or not background_rois:
+        return warnings_list
+    target_rois = [
+        target.get("roi")
+        for target in targets
+        if isinstance(target.get("roi"), dict)
+    ]
+    for background_index, background_roi in enumerate(background_rois):
+        background_area = _roi_area(background_roi)
+        if background_area <= 0:
+            continue
+        for target_index, target_roi in enumerate(target_rois):
+            if not isinstance(target_roi, dict):
+                continue
+            overlap = _roi_intersection_area(background_roi, target_roi)
+            if overlap <= 0:
+                continue
+            fraction = overlap / max(background_area, 1)
+            if fraction >= 0.95:
+                warnings_list.append(
+                    "background_roi overlaps target ROI almost completely; "
+                    f"background_index={background_index}, target_index={target_index}, "
+                    f"overlap_fraction={fraction:.3f}"
+                )
+            else:
+                warnings_list.append(
+                    "background_roi overlaps target ROI; "
+                    f"background_index={background_index}, target_index={target_index}, "
+                    f"overlap_fraction={fraction:.3f}"
+                )
+    return warnings_list
+
+
+def _roi_area(roi: dict[str, int]) -> int:
+    return max(0, int(roi["time_end_idx"]) - int(roi["time_start_idx"])) * max(
+        0,
+        int(roi["dist_end_idx"]) - int(roi["dist_start_idx"]),
+    )
+
+
+def _roi_intersection_area(left: dict[str, int], right: dict[str, int]) -> int:
+    time_start = max(int(left["time_start_idx"]), int(right["time_start_idx"]))
+    time_end = min(int(left["time_end_idx"]), int(right["time_end_idx"]))
+    dist_start = max(int(left["dist_start_idx"]), int(right["dist_start_idx"]))
+    dist_end = min(int(left["dist_end_idx"]), int(right["dist_end_idx"]))
+    return max(0, time_end - time_start) * max(0, dist_end - dist_start)
 
 
 def _convert_roi(

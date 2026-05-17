@@ -75,8 +75,9 @@ def load_gprmax_dataset_contract(path: str | Path) -> GprMaxDatasetPackage:
     ground_truth_raw = load_ground_truth_yaml(ground_truth_file)
     scenario_id = str(
         manifest.get("scenario_id")
-        or metadata.get("scenario_id")
         or ground_truth_raw.get("scenario_id")
+        or ground_truth_raw.get("dataset_id")
+        or metadata.get("scenario_id")
         or primary_out_file.stem
     )
     ground_truth = adapt_gprmax_ground_truth(
