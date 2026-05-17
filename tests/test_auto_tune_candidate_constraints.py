@@ -7,6 +7,7 @@ from __future__ import annotations
 import numpy as np
 
 from core.auto_tune import auto_tune_method
+from core.auto_tune_constraints import constrain_auto_tune_params
 
 
 def _small_profile(samples: int = 96, traces: int = 36) -> np.ndarray:
@@ -86,6 +87,21 @@ def test_auto_tune_constrains_zero_time_to_safe_search_window():
     )
 
 
+def test_auto_tune_zero_time_ignores_nonfinite_total_time_metadata():
+    result = constrain_auto_tune_params(
+        "set_zero_time",
+        {"new_zero_time": 200.0},
+        (100, 36),
+        {"total_time_ns": np.inf},
+    )
+
+    assert result.effective_params["new_zero_time"] <= (48.0 * 0.35) + 1.0e-9
+    assert result.warnings
+    warning_details = result.warnings[0]["details"]
+    assert np.isfinite(warning_details["effective"])
+    assert np.isfinite(warning_details["maximum"])
+
+
 def test_auto_tune_constrains_agc_window_to_time_aware_minimum():
     raw = _small_profile(samples=200, traces=24)
 
@@ -105,6 +121,19 @@ def test_auto_tune_constrains_agc_window_to_time_aware_minimum():
         and trial.get("constraint_warnings")
         for trial in result["all_trials"]
     )
+
+
+def test_auto_tune_agc_window_ignores_nonfinite_total_time_metadata():
+    result = constrain_auto_tune_params(
+        "agcGain",
+        {"window": 1},
+        (200, 24),
+        {"total_time_ns": np.inf},
+    )
+
+    assert result.effective_params["window"] == 4
+    assert result.warnings
+    assert np.isfinite(result.warnings[0]["details"]["effective"])
 
 
 def test_auto_tune_agc_generated_candidates_respect_time_aware_minimum():
@@ -163,6 +192,33 @@ def test_auto_tune_constrains_frequency_filter_to_nyquist_and_valid_band():
     assert result["execution_stats"]["constraint_adjustment_count"] >= 1
     assert result["all_trials"][0]["requested_params"]["high_freq_mhz"] == 1200.0
     assert result["all_trials"][0]["effective_params"]["high_freq_mhz"] <= 500.0
+
+
+def test_auto_tune_frequency_filter_skips_nonfinite_nyquist_sources():
+    result = constrain_auto_tune_params(
+        "frequency_filter_1d",
+        {
+            "filter_type": "bandpass",
+            "low_freq_mhz": 900.0,
+            "high_freq_mhz": 1200.0,
+            "taper_ratio": np.inf,
+        },
+        (128, 24),
+        {
+            "sample_rate_hz": np.inf,
+            "time_step_s": np.nan,
+            "total_time_ns": 128.0,
+        },
+    )
+
+    assert result.effective_params["high_freq_mhz"] <= 500.0
+    assert result.effective_params["low_freq_mhz"] < result.effective_params["high_freq_mhz"]
+    assert result.effective_params["taper_ratio"] == np.inf
+    assert any(
+        warning["details"]["parameter"] == "high_freq_mhz"
+        and np.isfinite(warning["details"]["maximum"])
+        for warning in result.warnings
+    )
 
 
 def test_auto_tune_frequency_filter_uses_field_sfcw_band_from_context():

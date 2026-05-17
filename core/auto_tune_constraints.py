@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import floor, log2
+from math import floor, isfinite, log2
 from typing import Any
 
 from core.runtime_warnings import build_runtime_warning
@@ -190,12 +190,8 @@ def _resolve_shape(data_shape: tuple[int, int]) -> tuple[int, int]:
 
 
 def _safe_zero_time_max_ns(n_samples: int, header_info: dict[str, Any]) -> float:
-    total_time_ns = header_info.get("total_time_ns")
-    try:
-        total = float(total_time_ns)
-    except (TypeError, ValueError):
-        total = 48.0
-    if total <= 0:
+    total = _as_float(header_info.get("total_time_ns"))
+    if total is None or total <= 0:
         total = 48.0
     max_shift_samples = max(0, min(int(n_samples) - 1, int(round(n_samples * 0.35))))
     return float(max_shift_samples) * total / max(1, int(n_samples))
@@ -205,12 +201,8 @@ def _safe_agc_window_min(n_samples: int, header_info: dict[str, Any]) -> int:
     samples = max(1, int(n_samples))
     min_by_fraction = int(round(samples * 0.02))
     min_by_time = 0
-    total_time_ns = header_info.get("total_time_ns") if header_info else None
-    try:
-        total = float(total_time_ns)
-    except (TypeError, ValueError):
-        total = 0.0
-    if total > 0.0:
+    total = _as_float(header_info.get("total_time_ns") if header_info else None)
+    if total is not None and total > 0.0:
         time_step_ns = total / samples
         min_by_time = int(round(0.5 / max(time_step_ns, 1.0e-9)))
     minimum = max(3, min_by_fraction, min_by_time)
@@ -223,45 +215,36 @@ def _wavelet_level_limit(n_samples: int, n_traces: int) -> int:
 
 
 def _nyquist_mhz(n_samples: int, header_info: dict[str, Any]) -> float | None:
-    sample_rate_hz = header_info.get("sample_rate_hz")
-    try:
-        sample_rate = float(sample_rate_hz)
-    except (TypeError, ValueError):
-        sample_rate = 0.0
-    if sample_rate > 0.0:
+    sample_rate = _as_float(header_info.get("sample_rate_hz"))
+    if sample_rate is not None and sample_rate > 0.0:
         return float(sample_rate / 2.0e6)
 
-    time_step_s = header_info.get("time_step_s")
-    try:
-        step_s = float(time_step_s)
-    except (TypeError, ValueError):
-        step_s = 0.0
-    if step_s > 0.0:
+    step_s = _as_float(header_info.get("time_step_s"))
+    if step_s is not None and step_s > 0.0:
         return float(1.0 / step_s / 2.0e6)
 
-    total_time_ns = header_info.get("total_time_ns")
-    try:
-        total_ns = float(total_time_ns)
-    except (TypeError, ValueError):
-        total_ns = 0.0
-    if total_ns > 0.0:
+    total_ns = _as_float(header_info.get("total_time_ns"))
+    if total_ns is not None and total_ns > 0.0:
         sample_rate = max(1, int(n_samples)) / (total_ns * 1.0e-9)
         return float(sample_rate / 2.0e6)
     return None
 
 
 def _as_int(value: Any) -> int | None:
-    try:
-        return int(round(float(value)))
-    except (TypeError, ValueError):
+    parsed = _as_float(value)
+    if parsed is None:
         return None
+    return int(round(parsed))
 
 
 def _as_float(value: Any) -> float | None:
     try:
-        return float(value)
-    except (TypeError, ValueError):
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError):
         return None
+    if not isfinite(parsed):
+        return None
+    return parsed
 
 
 def _clamp_int_param(
