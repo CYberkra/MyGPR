@@ -10,6 +10,7 @@ import zipfile
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from core.auto_tune_comparison import run_auto_tune_comparison
 from core.auto_tune_comparison_export import (
@@ -341,6 +342,36 @@ def test_export_auto_tune_comparison_accepts_numpy_scalar_percentile_clip(tmp_pa
     assert summary["display_spec"]["percentile_clip"] == [95.0]
     assert np.isfinite(summary["display_spec"]["vmin"])
     assert np.isfinite(summary["display_spec"]["vmax"])
+
+
+def test_export_auto_tune_comparison_closes_figures_on_save_error(
+    tmp_path: Path,
+    monkeypatch,
+):
+    import matplotlib.pyplot as plt
+
+    raw = _build_export_fixture(samples=72, traces=18)
+    result = run_auto_tune_comparison(
+        raw,
+        pipeline=["dewow"],
+        manual_params_by_method={"dewow": {"window": 1}},
+        search_mode="fast",
+    )
+    before = set(plt.get_fignums())
+
+    def _raise_save_error(*_args, **_kwargs):
+        raise RuntimeError("savefig failed")
+
+    monkeypatch.setattr("matplotlib.figure.Figure.savefig", _raise_save_error)
+
+    with pytest.raises(RuntimeError, match="savefig failed"):
+        export_auto_tune_comparison_artifacts(
+            result,
+            out_dir=tmp_path,
+            bundle_name="save_error_case",
+        )
+
+    assert set(plt.get_fignums()) == before
 
 
 def test_locked_display_spec_ignores_nonfinite_values_when_scaling():

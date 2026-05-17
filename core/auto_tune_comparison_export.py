@@ -260,20 +260,22 @@ def _save_single_bscan(
     display_spec: dict[str, Any],
 ) -> None:
     fig, ax = plt.subplots(figsize=(7.4, 4.2), dpi=150)
-    image = ax.imshow(
-        np.asarray(data, dtype=np.float32),
-        cmap=str(display_spec["cmap"]),
-        aspect="auto",
-        vmin=float(display_spec["vmin"]),
-        vmax=float(display_spec["vmax"]),
-    )
-    ax.set_title(title)
-    ax.set_xlabel("Trace")
-    ax.set_ylabel("Sample")
-    fig.colorbar(image, ax=ax, shrink=0.82)
-    fig.tight_layout()
-    fig.savefig(out_path)
-    plt.close(fig)
+    try:
+        image = ax.imshow(
+            np.asarray(data, dtype=np.float32),
+            cmap=str(display_spec["cmap"]),
+            aspect="auto",
+            vmin=float(display_spec["vmin"]),
+            vmax=float(display_spec["vmax"]),
+        )
+        ax.set_title(title)
+        ax.set_xlabel("Trace")
+        ax.set_ylabel("Sample")
+        fig.colorbar(image, ax=ax, shrink=0.82)
+        fig.tight_layout()
+        fig.savefig(out_path)
+    finally:
+        plt.close(fig)
 
 
 def _save_side_by_side(
@@ -284,23 +286,25 @@ def _save_side_by_side(
     display_spec: dict[str, Any],
 ) -> None:
     fig, axes = plt.subplots(1, 2, figsize=(11.2, 4.2), dpi=150, constrained_layout=True)
-    for ax, arr, title in [
-        (axes[0], manual_data, "Manual baseline"),
-        (axes[1], auto_data, "Auto-tuned"),
-    ]:
-        image = ax.imshow(
-            np.asarray(arr, dtype=np.float32),
-            cmap=str(display_spec["cmap"]),
-            aspect="auto",
-            vmin=float(display_spec["vmin"]),
-            vmax=float(display_spec["vmax"]),
-        )
-        ax.set_title(title)
-        ax.set_xlabel("Trace")
-        ax.set_ylabel("Sample")
-    fig.colorbar(image, ax=axes.ravel().tolist(), shrink=0.82)
-    fig.savefig(out_path)
-    plt.close(fig)
+    try:
+        for ax, arr, title in [
+            (axes[0], manual_data, "Manual baseline"),
+            (axes[1], auto_data, "Auto-tuned"),
+        ]:
+            image = ax.imshow(
+                np.asarray(arr, dtype=np.float32),
+                cmap=str(display_spec["cmap"]),
+                aspect="auto",
+                vmin=float(display_spec["vmin"]),
+                vmax=float(display_spec["vmax"]),
+            )
+            ax.set_title(title)
+            ax.set_xlabel("Trace")
+            ax.set_ylabel("Sample")
+        fig.colorbar(image, ax=axes.ravel().tolist(), shrink=0.82)
+        fig.savefig(out_path)
+    finally:
+        plt.close(fig)
 
 
 def _build_params_rows(summary: dict[str, Any]) -> list[dict[str, Any]]:
