@@ -65,6 +65,10 @@ def _sum_square(arr: np.ndarray) -> float:
     return float(np.dot(values, values))
 
 
+def _paired_rmse(dx: np.ndarray, dy: np.ndarray) -> float:
+    return float(np.sqrt((np.dot(dx, dx) + np.dot(dy, dy)) / dx.size))
+
+
 def build_saliency_map(data: np.ndarray) -> np.ndarray:
     """Build a lightweight saliency map from amplitude and gradient energy."""
     arr = _as_clean_2d(data)
@@ -587,7 +591,7 @@ def path_rmse(
         raise ValueError("路径元数据不能为空")
     dx = obs_x[:n] - ref_x[:n]
     dy = obs_y[:n] - ref_y[:n]
-    return float(np.sqrt(np.mean(dx**2 + dy**2)))
+    return _paired_rmse(dx, dy)
 
 
 def footprint_rmse(
@@ -604,7 +608,7 @@ def footprint_rmse(
         raise ValueError("footprint 元数据不能为空")
     dx = obs_x[:n] - ref_x[:n]
     dy = obs_y[:n] - ref_y[:n]
-    return float(np.sqrt(np.mean(dx**2 + dy**2)))
+    return _paired_rmse(dx, dy)
 
 
 def periodic_banding_ratio(
