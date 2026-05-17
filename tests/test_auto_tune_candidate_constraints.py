@@ -143,7 +143,7 @@ def test_constraint_helpers_accept_array_scalars_without_silencing_invalid_value
     constrained = constrain_auto_tune_params(
         "agcGain",
         {"window": np.array([999])},
-        (100, 24),
+        (np.array([100]), np.array([24])),
         header_info={"total_time_ns": np.array([100.0])},
     )
 
@@ -159,6 +159,15 @@ def test_constraint_helpers_accept_array_scalars_without_silencing_invalid_value
 
     assert invalid.effective_params["window"] == "not-a-number"
     assert invalid.warnings == []
+
+    nonfinite = constrain_auto_tune_params(
+        "agcGain",
+        {"window": np.array([np.inf])},
+        (100, 24),
+        header_info={"total_time_ns": np.array([100.0])},
+    )
+    assert np.isinf(nonfinite.effective_params["window"][0])
+    assert nonfinite.warnings == []
 
 
 def test_auto_tune_constrains_frequency_filter_to_nyquist_and_valid_band():
