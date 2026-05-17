@@ -436,7 +436,7 @@ def _summarize_array(data: np.ndarray | None) -> dict[str, Any]:
         mean_value = float(np.mean(finite))
         std_value = float(np.std(finite))
     else:
-        min_value = max_value = mean_value = std_value = float("nan")
+        min_value = max_value = mean_value = std_value = None
     return {
         "present": True,
         "shape": [int(dim) for dim in arr.shape],
@@ -460,8 +460,13 @@ def _summarize_header_info(header_info: dict[str, Any] | None) -> dict[str, Any]
                 "shape": [int(dim) for dim in value.shape],
                 "dtype": str(value.dtype),
             }
-        elif isinstance(value, (np.floating, np.integer)):
+        elif isinstance(value, np.floating):
+            parsed = float(value.item())
+            summary[str(key)] = parsed if np.isfinite(parsed) else None
+        elif isinstance(value, np.integer):
             summary[str(key)] = value.item()
+        elif isinstance(value, float):
+            summary[str(key)] = value if np.isfinite(value) else None
         elif isinstance(value, (str, bool, int, float)) or value is None:
             summary[str(key)] = value
         else:

@@ -150,6 +150,27 @@ def test_shared_state_replay_package_stays_in_memory_until_export(tmp_path: Path
     assert list(tmp_path.iterdir()) == []
 
 
+def test_shared_state_replay_summary_uses_none_for_nonfinite_stats():
+    state = SharedDataState()
+    raw = np.array([[np.nan, np.inf], [-np.inf, np.nan]], dtype=np.float32)
+    state.load_data(
+        raw,
+        path="nonfinite.csv",
+        header_info={"total_time_ns": np.inf, "trace_interval_m": np.nan},
+    )
+
+    package = state.get_replay_evidence_package()
+    assert package is not None
+    stats = package["summary"]["current_stats"]
+    assert stats["finite_ratio"] == 0.0
+    assert stats["min"] is None
+    assert stats["max"] is None
+    assert stats["mean"] is None
+    assert stats["std"] is None
+    assert package["current"]["header_summary"]["total_time_ns"] is None
+    assert package["current"]["header_summary"]["trace_interval_m"] is None
+
+
 def test_export_replay_evidence_bundle_writes_one_zip(tmp_path: Path):
     state = SharedDataState()
     raw = np.arange(24, dtype=np.float32).reshape(6, 4)
