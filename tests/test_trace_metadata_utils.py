@@ -78,6 +78,19 @@ def test_build_uniform_trace_distance_m_accepts_numpy_scalar_spacing():
     )
 
 
+def test_xy_trace_distance_m_returns_cumulative_float32_distance():
+    module = importlib.import_module("core.trace_metadata_utils")
+    xy_trace_distance_m = module._xy_trace_distance_m
+
+    distance = xy_trace_distance_m(
+        np.array([0.0, 3.0, 3.0], dtype=np.float64),
+        np.array([0.0, 4.0, 8.0], dtype=np.float64),
+    )
+
+    assert distance.dtype == np.float32
+    assert np.array_equal(distance, np.array([0.0, 5.0, 9.0], dtype=np.float32))
+
+
 def test_resample_bscan_columns_linear_matches_numpy_interp_per_row():
     module = importlib.import_module("core.trace_metadata_utils")
     resample_bscan_columns_linear = module.resample_bscan_columns_linear

@@ -137,7 +137,11 @@ def _xy_trace_distance_m(local_x_m: np.ndarray, local_y_m: np.ndarray) -> np.nda
     if x.size == 0:
         return np.array([], dtype=np.float32)
     step = np.sqrt(np.diff(x) ** 2 + np.diff(y) ** 2)
-    return np.concatenate(([0.0], np.cumsum(step))).astype(np.float32)
+    distance = np.empty(x.size, dtype=np.float32)
+    distance[0] = 0.0
+    if x.size > 1:
+        distance[1:] = np.cumsum(step, dtype=np.float64).astype(np.float32, copy=False)
+    return distance
 
 
 def _normalize_altimeter_payload(
@@ -236,7 +240,7 @@ def build_uniform_trace_distance_m(
     steps = max(1, int(round((end - start) / spacing)))
     uniform = start + np.arange(steps + 1, dtype=np.float64) * spacing
     uniform[-1] = end
-    return uniform.astype(np.float32)
+    return uniform.astype(np.float32, copy=False)
 
 
 def resample_bscan_columns_linear(
