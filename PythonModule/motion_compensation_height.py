@@ -150,7 +150,7 @@ def method_motion_compensation_height(
     # 整体能量变化；它不等同于完整雷达方程补偿。
     if compensate_amplitude:
         amp_factors = (flight_height / h_ref) ** 2
-        corrected = corrected * amp_factors[np.newaxis, :]
+        corrected *= amp_factors[np.newaxis, :]
         meta["amplitude_correction_applied"] = True
     else:
         meta["amplitude_correction_applied"] = False
