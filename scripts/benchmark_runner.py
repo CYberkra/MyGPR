@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from core.benchmark_registry import list_benchmark_sample_ids
-from core.benchmark_runner import run_benchmark_sample
+from core.benchmark_runner import _to_jsonable, run_benchmark_sample
 
 
 def main() -> int:
@@ -39,7 +39,7 @@ def main() -> int:
         seed=args.seed,
         save_images=not args.no_images,
     )
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    print(json.dumps(_to_jsonable(summary), ensure_ascii=False, indent=2, allow_nan=False))
     return 0
 
 
