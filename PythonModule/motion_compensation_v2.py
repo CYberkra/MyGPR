@@ -84,8 +84,8 @@ def _compute_reference_height(
     if mode == "min":
         return float(np.min(height))
     if mode == "manual":
-        manual = float(manual_height_m)
-        if manual > 0.0 and np.isfinite(manual):
+        manual = _positive_finite_float(manual_height_m)
+        if manual is not None:
             return manual
         warnings.append(
             _warning(
@@ -95,6 +95,16 @@ def _compute_reference_height(
             )
         )
     return float(np.mean(height))
+
+
+def _positive_finite_float(value: Any) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(parsed) or parsed <= 0.0:
+        return None
+    return parsed
 
 
 def _select_height(
@@ -655,7 +665,8 @@ def method_motion_compensation_v2(
 
     meta["input_quality"] = input_quality
 
-    if valid_height and air_wave_speed_m_per_ns > 0.0:
+    air_wave_speed = _positive_finite_float(air_wave_speed_m_per_ns)
+    if valid_height and air_wave_speed is not None:
         h_ref = _compute_reference_height(
             height_m,
             mode=height_reference_mode,
@@ -689,7 +700,7 @@ def method_motion_compensation_v2(
             )
 
         if compensate_amplitude:
-            max_scale = max(float(max_amplitude_scale), 1.0)
+            max_scale = max(_positive_finite_float(max_amplitude_scale) or 1.0, 1.0)
             amp_scale = (height_m / h_ref) ** 2
             amp_scale = np.clip(amp_scale, 1.0 / max_scale, max_scale)
             corrected = corrected * amp_scale[np.newaxis, :].astype(np.float32)
@@ -705,7 +716,8 @@ def method_motion_compensation_v2(
             if resolved_time_window_ns is None and "time_window_ns" in metadata:
                 resolved_time_window_ns = np.asarray(metadata["time_window_ns"]).reshape(-1)[0]
 
-            if resolved_time_window_ns is None or float(resolved_time_window_ns) <= 0.0:
+            resolved_time_window_ns = _positive_finite_float(resolved_time_window_ns)
+            if resolved_time_window_ns is None:
                 quality_flags.append("missing_time_window_ns")
                 warnings.append(
                     _warning(
@@ -715,7 +727,7 @@ def method_motion_compensation_v2(
                 )
             else:
                 dt_ns = float(resolved_time_window_ns) / max(samples - 1, 1)
-                time_shift_ns = 2.0 * (height_m - h_ref) / float(air_wave_speed_m_per_ns)
+                time_shift_ns = 2.0 * (height_m - h_ref) / air_wave_speed
                 time_shift_samples = time_shift_ns / dt_ns
                 raw_shift_samples = time_shift_samples.copy()
                 clamp, clamp_source, clamp_details = _resolve_shift_sample_limit(

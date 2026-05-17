@@ -188,6 +188,45 @@ def test_v2_uses_time_window_shift_limit_when_sample_limit_is_auto():
     assert np.max(np.abs(meta["time_shift_samples"])) <= expected_limit + 1.0e-6
 
 
+def test_v2_invalid_manual_height_falls_back_to_mean_with_warning():
+    data = np.zeros((32, 4), dtype=np.float32)
+    metadata = _base_metadata(4)
+    expected_ref = float(np.mean(metadata["height_agl_m"]))
+
+    _, meta = method_motion_compensation_v2(
+        data,
+        trace_metadata=metadata,
+        height_reference_mode="manual",
+        manual_height_m="bad",
+        compensate_time_shift=False,
+        compensate_amplitude=False,
+    )
+
+    warning_codes = {item["code"] for item in meta.get("runtime_warnings", [])}
+    assert meta["height_reference_m"] == pytest.approx(expected_ref)
+    assert "invalid_manual_height" in warning_codes
+
+
+def test_v2_non_finite_time_window_skips_time_shift():
+    data = np.zeros((32, 4), dtype=np.float32)
+    metadata = _base_metadata(4)
+    metadata["time_window_ns"] = np.inf
+
+    _, meta = method_motion_compensation_v2(
+        data,
+        trace_metadata=metadata,
+        compensate_time_shift=True,
+        compensate_amplitude=False,
+    )
+
+    warning_codes = {item["code"] for item in meta.get("runtime_warnings", [])}
+    assert meta["input_quality"]["height_source_used"] == "height_agl_m"
+    assert meta["height_correction_applied"] is False
+    assert meta["time_shift_correction_applied"] is False
+    assert "missing_time_window_ns" in meta["quality_flags"]
+    assert "missing_time_window_ns" in warning_codes
+
+
 def test_v2_flags_timestamp_distance_gap_and_speed_outlier():
     data = np.zeros((32, 6), dtype=np.float32)
     metadata = _base_metadata(6)
