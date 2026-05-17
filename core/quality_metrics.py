@@ -351,8 +351,10 @@ def target_band_energy_ratio(
     arr_before = _as_clean_2d(before)
     arr_after = _as_clean_2d(after)
     mask = _band_mask(arr_before.shape[0], band)
-    spec_before = np.abs(np.fft.rfft(arr_before, axis=0)) ** 2
-    spec_after = np.abs(np.fft.rfft(arr_after, axis=0)) ** 2
+    spec_before = np.abs(np.fft.rfft(arr_before, axis=0))
+    spec_after = np.abs(np.fft.rfft(arr_after, axis=0))
+    np.square(spec_before, out=spec_before)
+    np.square(spec_after, out=spec_after)
     band_before = float(np.sum(spec_before[mask, :]))
     band_after = float(np.sum(spec_after[mask, :]))
     return float(band_after / max(band_before, EPS))
