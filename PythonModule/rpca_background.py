@@ -12,6 +12,25 @@ def _soft_threshold(x: np.ndarray, tau: float) -> np.ndarray:
     return np.sign(x) * np.maximum(np.abs(x) - tau, 0.0)
 
 
+def _finite_float(value: object, name: str) -> float:
+    parsed = float(value)
+    if not np.isfinite(parsed):
+        raise ValueError(f"{name} 必须是有限数值")
+    return parsed
+
+
+def _positive_float(value: object, name: str) -> float:
+    parsed = _finite_float(value, name)
+    if parsed <= 0.0:
+        raise ValueError(f"{name} 必须大于 0")
+    return parsed
+
+
+def _positive_int(value: object, name: str) -> int:
+    parsed = _positive_float(value, name)
+    return max(1, int(parsed))
+
+
 def method_rpca_background(
     data: np.ndarray,
     lam: float | None = None,
@@ -29,10 +48,15 @@ def method_rpca_background(
         raise ValueError(f"输入数据必须是2维数组，当前 shape={arr.shape}")
 
     rows, cols = arr.shape
-    lam_value = float(lam) if lam is not None else 1.0 / np.sqrt(max(rows, cols))
-    max_iter = max(1, int(max_iter))
-    tol = max(float(tol), 1e-9)
-    mu_report = float(mu) if (mu is not None and float(mu) > 0.0) else 0.0
+    lam_value = (
+        _positive_float(lam, "lam")
+        if lam is not None
+        else 1.0 / np.sqrt(max(rows, cols))
+    )
+    max_iter = _positive_int(max_iter, "max_iter")
+    tol = max(_positive_float(tol, "tol"), 1e-9)
+    mu_requested = _finite_float(mu, "mu") if mu is not None else 0.0
+    mu_report = mu_requested if mu_requested > 0.0 else 0.0
 
     fro_norm = norm(arr, ord="fro")
     if fro_norm == 0.0:
@@ -51,8 +75,8 @@ def method_rpca_background(
     dual_norm = max(norm(arr, 2), norm(arr.ravel(), np.inf) / max(lam_value, 1e-9))
     Y = arr / max(dual_norm, 1e-9)
 
-    if mu is not None and float(mu) > 0.0:
-        mu_initial = float(mu)
+    if mu_requested > 0.0:
+        mu_initial = mu_requested
     else:
         mu_initial = 1.25 / max(norm(arr, 2), 1e-9)
     mu_value = max(mu_initial, 1e-9)

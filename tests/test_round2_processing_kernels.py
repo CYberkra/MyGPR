@@ -465,6 +465,19 @@ def test_method_rpca_background_treats_zero_mu_as_auto_init():
     assert meta["mu"] > 1e-6
 
 
+def test_method_rpca_background_rejects_non_finite_iteration_params():
+    raw = np.ones((8, 5), dtype=np.float32)
+
+    with pytest.raises(ValueError, match="lam"):
+        method_rpca_background(raw, lam=np.nan)
+
+    with pytest.raises(ValueError, match="max_iter"):
+        method_rpca_background(raw, max_iter=np.inf)
+
+    with pytest.raises(ValueError, match="tol"):
+        method_rpca_background(raw, tol=0.0)
+
+
 def test_method_wavelet_2d_keeps_contract_and_reduces_impulse_noise_energy():
     rng = np.random.default_rng(10)
     rows, cols = 32, 24
