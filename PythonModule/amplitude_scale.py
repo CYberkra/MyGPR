@@ -37,7 +37,8 @@ def method_amplitude_scale(
         peak = float(np.max(np.abs(arr)))
         effective_scale = target_value / max(peak, safe_eps)
     elif resolved_mode == "rms":
-        rms = float(np.sqrt(np.mean(arr * arr, dtype=np.float64)))
+        values = arr.reshape(-1).astype(np.float64, copy=False)
+        rms = float(np.sqrt(np.dot(values, values) / values.size))
         effective_scale = target_value / max(rms, safe_eps)
     else:
         raise ValueError("amplitude_scale mode 必须是 constant、peak 或 rms")
