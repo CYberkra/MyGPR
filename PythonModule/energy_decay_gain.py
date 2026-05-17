@@ -80,8 +80,10 @@ def _moving_average(values: np.ndarray, window: int) -> np.ndarray:
     if window <= 1 or arr.size <= 1:
         return arr.copy()
     window = min(int(window), arr.size)
-    kernel = np.ones(window, dtype=np.float64) / float(window)
     pad_left = window // 2
     pad_right = window - 1 - pad_left
     padded = np.pad(arr, (pad_left, pad_right), mode="edge")
-    return np.convolve(padded, kernel, mode="valid")
+    prefix = np.empty(padded.size + 1, dtype=np.float64)
+    prefix[0] = 0.0
+    np.cumsum(padded, out=prefix[1:])
+    return (prefix[window:] - prefix[:-window]) / float(window)

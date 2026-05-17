@@ -20,7 +20,7 @@ from core.processing_engine import (
 from PythonModule.dewow import method_dewow
 from PythonModule.amplitude_scale import method_amplitude_scale
 from PythonModule.equidistant_trace_resample import method_equidistant_trace_resample
-from PythonModule.energy_decay_gain import method_energy_decay_gain
+from PythonModule.energy_decay_gain import _moving_average, method_energy_decay_gain
 from PythonModule.hankel_svd import method_hankel_svd
 from PythonModule.hilbert_envelope import method_hilbert_envelope
 from PythonModule.rpca_background import method_rpca_background
@@ -332,6 +332,23 @@ def test_method_energy_decay_gain_amplifies_late_low_energy_rows():
     assert meta["gain_curve"].shape == (12,)
     assert float(meta["gain_curve"][-1]) > float(meta["gain_curve"][0])
     assert float(result[-1, 0]) > float(raw[-1, 0])
+
+
+def test_energy_decay_moving_average_matches_edge_padded_convolution():
+    values = np.array([1.0, 2.0, 5.0, 9.0, 3.0], dtype=np.float64)
+    window = 4
+    pad_left = window // 2
+    pad_right = window - 1 - pad_left
+    padded = np.pad(values, (pad_left, pad_right), mode="edge")
+    expected = np.convolve(
+        padded,
+        np.ones(window, dtype=np.float64) / float(window),
+        mode="valid",
+    )
+
+    result = _moving_average(values, window)
+
+    assert np.allclose(result, expected)
 
 
 def test_method_energy_decay_gain_uses_robust_trace_statistic():
