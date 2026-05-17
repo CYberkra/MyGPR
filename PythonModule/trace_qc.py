@@ -36,7 +36,7 @@ def method_trace_qc(
     if resolved_mode not in {"mark", "mute", "remove"}:
         raise ValueError("trace_qc mode 必须是 mark、mute 或 remove")
 
-    rms = np.sqrt(np.mean(arr * arr, axis=0, dtype=np.float64))
+    rms = np.sqrt(np.einsum("ij,ij->j", arr, arr, optimize=True) / arr.shape[0])
     bad_mask = np.zeros(arr.shape[1], dtype=bool)
 
     empty_threshold = to_float(empty_rms_threshold, default=0.0)
