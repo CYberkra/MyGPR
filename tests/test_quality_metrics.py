@@ -14,6 +14,7 @@ from core.quality_metrics import (
     deep_zone_contrast,
     detect_first_break_indices,
     estimate_lateral_correlation_length,
+    estimate_singular_elbow_rank,
     first_break_std,
     clipping_ratio,
     horizontal_coherence,
@@ -153,6 +154,13 @@ def test_lateral_correlation_length_handles_non_finite_max_lag():
 
     assert estimate_lateral_correlation_length(raw, max_lag=np.nan) >= 1
     assert estimate_lateral_correlation_length(raw, max_lag=np.inf) >= 1
+
+
+def test_singular_elbow_rank_handles_non_finite_max_rank():
+    raw = _build_test_profile()
+
+    assert estimate_singular_elbow_rank(raw, max_rank=np.nan) >= 1
+    assert estimate_singular_elbow_rank(raw, max_rank=np.inf) >= 1
 
 
 def test_ridge_detection_handles_non_finite_row_range():

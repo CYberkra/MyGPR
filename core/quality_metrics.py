@@ -214,20 +214,21 @@ def estimate_depth_attenuation_curve(data: np.ndarray) -> np.ndarray:
 def estimate_singular_elbow_rank(data: np.ndarray, max_rank: int = 12) -> int:
     """Estimate low-rank elbow from singular values."""
     arr = _as_clean_2d(data)
+    resolved_max_rank = max(1, _safe_index(max_rank, default=12))
     ds_t = max(1, arr.shape[0] // 256)
     ds_x = max(1, arr.shape[1] // 128)
     proxy = arr[::ds_t, ::ds_x]
     if min(proxy.shape) <= 2:
         return 1
     singular = np.linalg.svd(proxy, full_matrices=False, compute_uv=False)
-    singular = singular[: max_rank + 2]
+    singular = singular[: resolved_max_rank + 2]
     if singular.size <= 2:
         return 1
     second_diff = np.diff(np.log(np.maximum(singular, EPS)), n=2)
     if second_diff.size == 0:
         return 1
     rank = int(np.argmax(np.abs(second_diff)) + 2)
-    return max(1, min(rank, max_rank))
+    return max(1, min(rank, resolved_max_rank))
 
 
 def weighted_score_parts(
