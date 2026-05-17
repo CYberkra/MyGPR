@@ -560,7 +560,7 @@ def ridge_error_metrics(
         "detected_ridge_idx": detected[:n].astype(np.int32),
         "ridge_residual_samples": residual,
         "raw_ridge_mae_samples": float(np.mean(np.abs(residual))),
-        "raw_ridge_rmse_samples": float(np.sqrt(np.mean(residual**2))),
+        "raw_ridge_rmse_samples": float(np.sqrt(_sum_square(residual) / residual.size)),
         "raw_ridge_max_abs_samples": float(np.max(np.abs(residual))),
     }
 
