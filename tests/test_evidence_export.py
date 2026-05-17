@@ -48,6 +48,31 @@ def test_export_chain_evidence_writes_summary_and_images(tmp_path: Path):
     assert (tmp_path / "demo-bundle-summary.json").exists()
 
 
+def test_export_chain_evidence_tolerates_invalid_plot_metadata(tmp_path: Path):
+    raw = np.arange(48, dtype=np.float32).reshape(12, 4)
+    summary = export_chain_evidence(
+        data=raw,
+        header_info={
+            "a_scan_length": 12,
+            "num_traces": 4,
+            "total_time_ns": "bad",
+            "trace_interval_m": "bad",
+        },
+        bundle_name="bad-metadata-bundle",
+        chain_name="坏元数据绘图链",
+        chain_description="metadata fallback",
+        steps=[("dewow", {"window": 5})],
+        out_dir=tmp_path,
+        title_prefix="Bad Metadata",
+        save_images=True,
+    )
+
+    assert summary["bundle_name"] == "bad-metadata-bundle"
+    assert (tmp_path / "bad-metadata-bundle-00-raw.png").exists()
+    assert (tmp_path / "bad-metadata-bundle-01-dewow.png").exists()
+    assert (tmp_path / "bad-metadata-bundle-raw-vs-final.png").exists()
+
+
 def test_export_standard_chain_for_sample_supports_both_stage_a_chains(tmp_path: Path):
     for chain_key in ("conservative_default", "aggressive_gain"):
         summary = export_standard_chain_for_sample(
