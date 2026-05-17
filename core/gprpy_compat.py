@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from core.scalar_utils import to_int
+
 
 def _window_sums_axis0(arr: np.ndarray, starts: np.ndarray, ends: np.ndarray) -> np.ndarray:
     padded = np.empty((arr.shape[0] + 1, arr.shape[1]), dtype=np.float64)
@@ -30,7 +32,7 @@ def apply_gprpy_dewow(data: np.ndarray, window: int) -> np.ndarray:
     if totsamps == 0:
         raise ValueError("输入数据为空")
 
-    window = max(1, int(window))
+    window = max(1, to_int(window, default=1))
     if window >= totsamps:
         result = arr - np.mean(arr, axis=0, keepdims=True)
         return result.astype(np.float32, copy=False)
@@ -65,7 +67,7 @@ def apply_gprpy_rem_mean_trace(data: np.ndarray, ntraces: int) -> np.ndarray:
     if tottraces == 0:
         raise ValueError("输入数据为空")
 
-    ntraces = max(1, int(ntraces))
+    ntraces = max(1, to_int(ntraces, default=1))
     if ntraces >= tottraces:
         result = arr - np.mean(arr, axis=1, keepdims=True)
         return result.astype(np.float32, copy=False)
@@ -105,7 +107,7 @@ def gprpy_local_window_l2_energy(
     if totsamps == 0:
         raise ValueError("输入数据为空")
 
-    window = max(1, int(window))
+    window = max(1, to_int(window, default=1))
     if window > totsamps:
         energy = np.maximum(np.linalg.norm(arr, axis=0, keepdims=True), eps)
         return np.repeat(energy, totsamps, axis=0)
@@ -144,6 +146,6 @@ def apply_gprpy_agc_gain(data: np.ndarray, window: int) -> np.ndarray:
         raise ValueError("输入数据为空")
 
     eps = 1e-8
-    window = max(1, int(window))
+    window = max(1, to_int(window, default=1))
     energy = gprpy_local_window_l2_energy(arr, window, eps=eps)
     return np.divide(arr, energy).astype(np.float32, copy=False)

@@ -78,6 +78,18 @@ def test_gprpy_baseline_helpers_match_processing_engine_kernels():
     assert np.isfinite(agc_expected).all()
 
 
+def test_gprpy_baseline_helpers_accept_numpy_scalar_windows():
+    raw = np.arange(30, dtype=np.float32).reshape(6, 5)
+
+    dewow_expected = apply_gprpy_dewow(raw, np.array([3]))
+    mean_trace_expected = apply_gprpy_rem_mean_trace(raw, np.array([3]))
+    agc_expected = apply_gprpy_agc_gain(raw, np.array([3]))
+
+    assert dewow_expected.shape == raw.shape
+    assert mean_trace_expected.shape == raw.shape
+    assert agc_expected.shape == raw.shape
+
+
 def test_method_set_zero_time_shifts_up_and_zero_fills_tail():
     raw = np.arange(20, dtype=np.float32).reshape(5, 4)
 
