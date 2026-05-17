@@ -35,6 +35,7 @@ def test_read_gprmax_out_merges_trace_files_in_numeric_order(tmp_path: Path):
 
     expected = np.column_stack(traces)
     assert result["data"].shape == (3, 3)
+    assert result["data"].dtype == np.float32
     assert np.array_equal(result["data"], expected)
     assert result["num_traces"] == 3
     assert result["samples_per_trace"] == 3

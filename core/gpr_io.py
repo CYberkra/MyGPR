@@ -860,7 +860,7 @@ def read_gprmax_out(out_path: str) -> dict:
         header_info = _attach_gprmax_ground_truth(header_info, out_path)
         trace_metadata = _build_gprmax_trace_metadata(data.shape[1], gprmax_config)
         return {
-            "data": data.astype(np.float32),
+            "data": data.astype(np.float32, copy=False),
             "num_traces": data.shape[1],
             "samples_per_trace": data.shape[0],
             "time_step_s": time_step_s,
@@ -914,7 +914,7 @@ def read_gprmax_out(out_path: str) -> dict:
     trace_metadata = _build_gprmax_trace_metadata(traces, gprmax_config)
 
     return {
-        "data": data.astype(np.float32),
+        "data": data.astype(np.float32, copy=False),
         "num_traces": traces,
         "samples_per_trace": data.shape[0],
         "time_step_s": time_step_s,
