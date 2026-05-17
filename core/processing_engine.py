@@ -324,7 +324,7 @@ def _run_legacy_adapter(
             (
                 output,
                 {
-                    "window": int(params.get("window", 11)),
+                    "window": _safe_int(params.get("window", 11), default=11)[0],
                     "method": "agcGain",
                 },
             ),
@@ -398,9 +398,20 @@ def _apply_agc_gain(
     _low_energy_guard: bool = False,
     **kwargs,
 ) -> tuple[np.ndarray, list[dict[str, Any]]]:
-    requested_window = int(window)
-    window = max(1, requested_window)
     warnings = []
+    requested_window, invalid_window = _safe_int(window, default=11)
+    if invalid_window:
+        warnings.append(
+            build_runtime_warning(
+                "parameter_invalid",
+                "AGC 窗口不是有效整数，已回退到默认值。",
+                method_id="agcGain",
+                parameter="window",
+                requested=window,
+                effective=requested_window,
+            )
+        )
+    window = max(1, requested_window)
     if requested_window < 1 or requested_window > data.shape[0]:
         warnings.append(
             build_runtime_warning(
@@ -464,6 +475,14 @@ def _apply_agc_gain(
         else:
             return apply_gprpy_agc_gain(data, window), warnings
     return np.divide(data, energy), warnings
+
+
+def _safe_int(value: Any, *, default: int) -> tuple[int, bool]:
+    try:
+        parsed = int(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return int(default), True
+    return parsed, False
 
 
 def _agc_energy_floor(data: np.ndarray, local_rms: np.ndarray) -> float:
