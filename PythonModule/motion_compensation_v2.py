@@ -158,7 +158,10 @@ def _compute_trace_distance(local_x_m: np.ndarray, local_y_m: np.ndarray) -> np.
     if local_x_m.size == 0:
         return np.array([], dtype=np.float64)
     step = np.sqrt(np.diff(local_x_m) ** 2 + np.diff(local_y_m) ** 2)
-    return np.concatenate(([0.0], np.cumsum(step))).astype(np.float64)
+    distance = np.empty(local_x_m.size, dtype=np.float64)
+    distance[0] = 0.0
+    distance[1:] = np.cumsum(step, dtype=np.float64)
+    return distance
 
 
 def _append_quality_warning(
