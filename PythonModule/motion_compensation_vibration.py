@@ -37,6 +37,31 @@ def _normalize_window(window: int, size: int) -> int:
     return max(1, resolved)
 
 
+def _finite_float(value: object, name: str) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} 必须是有限数值") from None
+    if not np.isfinite(parsed):
+        raise ValueError(f"{name} 必须是有限数值")
+    return parsed
+
+
+def _positive_int(value: object, name: str) -> int:
+    parsed = _finite_float(value, name)
+    if parsed <= 0:
+        raise ValueError(f"{name} 必须为正数")
+    return max(1, int(round(parsed)))
+
+
+def _resolve_trace_band(trace_band: tuple[float, float]) -> tuple[float, float]:
+    if len(trace_band) != 2:
+        raise ValueError("trace_band 必须包含 low/high 两个值")
+    low = _finite_float(trace_band[0], "trace_band[0]")
+    high = _finite_float(trace_band[1], "trace_band[1]")
+    return low, high
+
+
 def _extract_numeric_trace_field(
     trace_metadata: dict[str, Any],
     key: str,
@@ -138,6 +163,15 @@ def method_motion_compensation_vibration(
     if arr.ndim != 2:
         raise ValueError("振动补偿需要二维 B-scan 数据")
 
+    band_low, band_high = _resolve_trace_band(trace_band)
+    smooth_window = _positive_int(smooth_window, "smooth_window")
+    preserve_row_percentile = float(
+        np.clip(_finite_float(preserve_row_percentile, "preserve_row_percentile"), 0.0, 100.0)
+    )
+    preserve_mix = float(np.clip(_finite_float(preserve_mix, "preserve_mix"), 0.0, 1.0))
+    background_mix = float(np.clip(_finite_float(background_mix, "background_mix"), 0.0, 1.0))
+    max_restore_gain = max(1.0, _finite_float(max_restore_gain, "max_restore_gain"))
+
     samples, traces = arr.shape
     output = np.array(arr, copy=True)
     meta: dict[str, Any] = {
@@ -146,11 +180,11 @@ def method_motion_compensation_vibration(
         "trace_count": int(traces),
         "sample_count": int(samples),
         "deterministic": True,
-        "trace_band": [float(trace_band[0]), float(trace_band[1])],
-        "preserve_row_percentile": float(preserve_row_percentile),
-        "preserve_mix": float(preserve_mix),
-        "background_mix": float(background_mix),
-        "max_restore_gain": float(max_restore_gain),
+        "trace_band": [band_low, band_high],
+        "preserve_row_percentile": preserve_row_percentile,
+        "preserve_mix": preserve_mix,
+        "background_mix": background_mix,
+        "max_restore_gain": max_restore_gain,
         "provenance": {
             "workflow": "saliency_guarded_lateral_band_suppression_v1",
             "background_model": "ccbs_inspired_mean_trace_guard",
@@ -187,8 +221,8 @@ def method_motion_compensation_vibration(
 
     spectrum = np.fft.rfft(arr64, axis=1)
     freqs = np.fft.rfftfreq(traces, d=1.0)
-    low = max(0.0, float(trace_band[0]))
-    high = min(float(freqs[-1]), float(trace_band[1]))
+    low = max(0.0, band_low)
+    high = min(float(freqs[-1]), band_high)
     if high <= low:
         high = min(float(freqs[-1]), low + 0.04)
     band_mask = (freqs >= low) & (freqs <= high)

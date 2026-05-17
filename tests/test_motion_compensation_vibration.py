@@ -7,6 +7,7 @@ from __future__ import annotations
 import copy
 
 import numpy as np
+import pytest
 
 from PythonModule.motion_compensation_vibration import (  # type: ignore[import]
     method_motion_compensation_vibration,
@@ -80,6 +81,19 @@ def test_vibration_compensation_radar_only_fallback_is_explicit_and_deterministi
     assert trace_metadata.keys() == trace_metadata_before.keys()
     assert np.array_equal(trace_metadata["trace_index"], trace_metadata_before["trace_index"])
     assert trace_metadata["time_window_ns"] == trace_metadata_before["time_window_ns"]
+
+
+def test_vibration_compensation_rejects_non_finite_params():
+    raw, _context = generate_benchmark_sample("motion_compensation_v1", seed=42)
+
+    with pytest.raises(ValueError, match="trace_band"):
+        method_motion_compensation_vibration(raw, trace_band=(0.05, np.nan))
+
+    with pytest.raises(ValueError, match="smooth_window"):
+        method_motion_compensation_vibration(raw, smooth_window=np.inf)
+
+    with pytest.raises(ValueError, match="preserve_mix"):
+        method_motion_compensation_vibration(raw, preserve_mix=np.nan)
 
 
 def test_vibration_compensation_optionally_uses_angular_rate_metadata_without_mutation():
