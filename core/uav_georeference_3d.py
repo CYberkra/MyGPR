@@ -24,6 +24,30 @@ LOD_LIMITS: dict[str, tuple[int, int]] = {
     "high": (260, 180),
     "auto": (DEFAULT_MAX_PREVIEW_TRACES, DEFAULT_MAX_PREVIEW_SAMPLES),
 }
+CJK_FONT_CANDIDATES = (
+    "Microsoft YaHei",
+    "SimHei",
+    "Noto Sans CJK SC",
+    "Source Han Sans SC",
+    "PingFang SC",
+    "WenQuanYi Zen Hei",
+    "Arial Unicode MS",
+)
+
+
+def _configure_matplotlib_cjk_fonts(matplotlib_module: Any) -> None:
+    """Prefer installed CJK fonts for static preview exports."""
+    try:
+        from matplotlib import font_manager as fm
+
+        installed = {font.name for font in fm.fontManager.ttflist}
+        available = [name for name in CJK_FONT_CANDIDATES if name in installed]
+        if available:
+            matplotlib_module.rcParams["font.sans-serif"] = available + ["DejaVu Sans"]
+            matplotlib_module.rcParams["font.family"] = available + ["DejaVu Sans"]
+        matplotlib_module.rcParams["axes.unicode_minus"] = False
+    except Exception:
+        return
 
 
 def _as_float_array(values: Any) -> np.ndarray:
@@ -541,6 +565,7 @@ def save_airborne_georeference_3d_preview_png(
     import matplotlib
 
     matplotlib.use("Agg")
+    _configure_matplotlib_cjk_fonts(matplotlib)
     import matplotlib.pyplot as plt
     from matplotlib import colormaps, colors
 

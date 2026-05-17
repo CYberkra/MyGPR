@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
     QToolButton,
     QFileDialog,
     QMessageBox,
+    QSizePolicy,
 )
 from PyQt6.QtCore import QTimer
 from qfluentwidgets import PushButton, FluentIcon, SegmentedWidget
@@ -1088,22 +1089,20 @@ class QualityLogPage(QWidget):
 
         dialog = QDialog(self)
         dialog.setWindowTitle("UAV-GPR 三维运动补偿预览")
-        dialog.resize(1100, 760)
+        dialog.resize(1180, 820)
         layout = QVBoxLayout(dialog)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(8)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(4)
         title_row = QHBoxLayout()
+        title_row.setSpacing(8)
         title = QLabel("UAV-GPR 三维运动补偿预览")
         title.setProperty("class", "sectionTitle")
-        title_hint = QLabel("鼠标旋转/缩放/平移；坐标单位 m。彩色坐标轴表示 X/Y/Z，灰色网格为 XY 参考平面。")
-        title_hint.setWordWrap(True)
+        title.setMaximumHeight(28)
+        title_hint = QLabel("鼠标旋转/缩放/平移；坐标单位 m；彩色轴=X/Y/Z，灰色网格=XY 参考面。")
         title_hint.setProperty("class", "hintText")
         title_row.addWidget(title)
+        title_row.addWidget(title_hint)
         title_row.addStretch(1)
-        layout.addLayout(title_row)
-        layout.addWidget(title_hint)
-        controls = QHBoxLayout()
-        controls.setSpacing(6)
         layer_buttons = {
             "raw": self._create_dialog_layer_button(
                 "👁 原始", checked=self.btn_georef3d_raw.isChecked(), parent=dialog
@@ -1124,21 +1123,22 @@ class QualityLogPage(QWidget):
         export_button.setAutoRaise(True)
         layer_label = QLabel("图层")
         layer_label.setProperty("class", "hintText")
-        controls.addWidget(layer_label)
+        title_row.addWidget(layer_label)
         for key, button in layer_buttons.items():
             button.setEnabled(key in entries)
-            controls.addWidget(button)
-        controls.addWidget(bscan_button)
-        controls.addStretch(1)
-        controls.addWidget(export_button)
-        layout.addLayout(controls)
+            title_row.addWidget(button)
+        title_row.addWidget(bscan_button)
+        title_row.addWidget(export_button)
+        layout.addLayout(title_row)
         legend = QLabel("原始=橙色虚线，当前=青绿色实线，差异=紫色；绿色点为起点，红色点为终点。")
         legend.setProperty("class", "hintText")
-        legend.setWordWrap(True)
+        legend.setMaximumHeight(22)
         layout.addWidget(legend)
         view = gl.GLViewWidget()
         view.setBackgroundColor("w")
-        layout.addWidget(view)
+        view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        view.setMinimumHeight(640)
+        layout.addWidget(view, 1)
 
         def redraw_view(reset_camera: bool = False):
             view.clear()
@@ -1386,16 +1386,22 @@ class QualityLogPage(QWidget):
         """Fallback expanded preview that keeps static export independent from OpenGL."""
         dialog = QDialog(self)
         dialog.setWindowTitle("UAV-GPR 三维运动补偿预览")
-        dialog.resize(1100, 760)
+        dialog.resize(1180, 820)
         layout = QVBoxLayout(dialog)
-        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(4)
         if fallback_message:
             warning_label = QLabel(fallback_message)
             warning_label.setWordWrap(True)
             warning_label.setProperty("class", "hintText")
             layout.addWidget(warning_label)
         controls = QHBoxLayout()
-        controls.setSpacing(6)
+        controls.setSpacing(8)
+        title = QLabel("UAV-GPR 三维运动补偿预览")
+        title.setProperty("class", "sectionTitle")
+        title.setMaximumHeight(28)
+        controls.addWidget(title)
+        controls.addStretch(1)
         layer_buttons = {
             "raw": self._create_dialog_layer_button(
                 "👁 原始", checked=self.btn_georef3d_raw.isChecked(), parent=dialog
@@ -1414,16 +1420,24 @@ class QualityLogPage(QWidget):
         export_button.setText("导出当前视图 PNG")
         export_button.setToolTip("导出当前 Matplotlib 大窗口视图为 PNG")
         export_button.setAutoRaise(True)
+        layer_label = QLabel("图层")
+        layer_label.setProperty("class", "hintText")
+        controls.addWidget(layer_label)
         for key, button in layer_buttons.items():
             button.setEnabled(key in entries)
             controls.addWidget(button)
         controls.addWidget(bscan_button)
-        controls.addStretch(1)
         controls.addWidget(export_button)
         layout.addLayout(controls)
+        legend = QLabel("原始=橙色虚线，当前=青绿色实线，差异=紫色；坐标单位 m。")
+        legend.setProperty("class", "hintText")
+        legend.setMaximumHeight(22)
+        layout.addWidget(legend)
         fig = Figure(figsize=(10.8, 7.4), dpi=100)
         canvas = FigureCanvas(fig)
-        layout.addWidget(canvas)
+        canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        canvas.setMinimumHeight(640)
+        layout.addWidget(canvas, 1)
 
         def redraw_dialog():
             fig.clear()
