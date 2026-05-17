@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -117,6 +118,41 @@ def test_validate_config_accepts_recommended_profile_job(tmp_path: Path):
 
     assert result.ok is True
     assert result.errors == []
+
+
+def test_validate_config_rejects_nonfinite_numeric_params(tmp_path: Path):
+    input_csv = _write_small_csv(tmp_path / "input.csv")
+    cfg = {
+        "jobs": [
+            {
+                "id": "bad-param",
+                "input": str(input_csv),
+                "methods": [
+                    {"key": "sec_gain", "params": {"gain_max": float("nan")}},
+                ],
+            }
+        ]
+    }
+
+    result = cli_batch.validate_config(cfg, repo_root=str(tmp_path))
+
+    assert result.ok is False
+    assert any("must be finite" in error for error in result.errors)
+
+
+def test_cli_jsonable_removes_nonfinite_values_for_strict_summary_json():
+    payload = {
+        "metric": np.float64(np.inf),
+        "array": np.array([1.0, np.nan, np.inf], dtype=np.float32),
+        "flag": True,
+    }
+
+    safe = cli_batch._jsonable(payload)
+
+    assert safe["metric"] is None
+    assert safe["array"] == [1.0, None, None]
+    assert safe["flag"] is True
+    json.dumps(safe, allow_nan=False)
 
 
 def test_bundled_cli_batch_mvp_example_validates():

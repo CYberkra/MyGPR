@@ -196,9 +196,20 @@ def _coerce_param(method_key: str, param_name: str, value: Any) -> Any:
         raise ValueError(f"Unknown param '{param_name}' for method '{method_key}'")
 
     if meta["type"] == "int":
-        v = int(float(value))
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"Param {method_key}.{param_name} must be numeric") from exc
+        if not np.isfinite(parsed):
+            raise ValueError(f"Param {method_key}.{param_name} must be finite")
+        v = int(parsed)
     elif meta["type"] == "float":
-        v = float(value)
+        try:
+            v = float(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"Param {method_key}.{param_name} must be numeric") from exc
+        if not np.isfinite(v):
+            raise ValueError(f"Param {method_key}.{param_name} must be finite")
     else:
         v = value
 
@@ -679,10 +690,10 @@ def run_batch(cfg: Dict[str, Any], config_path: str, repo_root: str) -> int:
 
     summary_path = _build_summary_path(output_dir)
     with open(summary_path, "w", encoding="utf-8") as f:
-        json.dump(summary, f, ensure_ascii=False, indent=2)
+        json.dump(_jsonable(summary), f, ensure_ascii=False, indent=2, allow_nan=False)
 
     print("\n=== Summary ===")
-    print(json.dumps(summary["stats"], ensure_ascii=False))
+    print(json.dumps(_jsonable(summary["stats"]), ensure_ascii=False, allow_nan=False))
     print(f"summary_file: {os.path.relpath(summary_path, repo_root)}")
 
     return 0 if fail_count == 0 else 2
@@ -693,6 +704,24 @@ def _build_summary_path(output_dir: str) -> str:
     ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     suffix = uuid.uuid4().hex[:8]
     return os.path.join(output_dir, f"summary_{ts}_{suffix}.json")
+
+
+def _jsonable(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(item) for item in value]
+    if isinstance(value, np.ndarray):
+        return _jsonable(value.tolist())
+    if isinstance(value, np.generic):
+        return _jsonable(value.item())
+    if value is None or isinstance(value, (str, bool)):
+        return value
+    if isinstance(value, float):
+        return float(value) if np.isfinite(value) else None
+    if isinstance(value, int):
+        return int(value)
+    return value
 
 
 def cmd_validate(args) -> int:
