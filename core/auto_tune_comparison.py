@@ -546,7 +546,56 @@ def _compact_auto_tune_result(result: dict[str, Any]) -> dict[str, Any]:
         "risk_reason": result.get("risk_reason"),
         "selection_recommendation": result.get("selection_recommendation"),
         "execution_stats": _json_safe(result.get("execution_stats", {})),
+        "all_trials": _json_safe(_compact_trials(result.get("all_trials", []) or [])),
+        "coarse_trials": _json_safe(
+            _compact_trials(result.get("coarse_trials", []) or [])
+        ),
+        "fine_trials": _json_safe(_compact_trials(result.get("fine_trials", []) or [])),
+        "failed_trials": _json_safe(
+            _compact_trials(result.get("failed_trials", []) or [])
+        ),
     }
+
+
+def _compact_trials(trials: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    compact: list[dict[str, Any]] = []
+    for index, trial in enumerate(trials):
+        if not isinstance(trial, dict):
+            continue
+        metrics = trial.get("roi_metrics") or trial.get("metrics") or {}
+        compact.append(
+            {
+                "trial_index": int(trial.get("trial_index", index)),
+                "stage": trial.get("stage"),
+                "params": _json_safe(trial.get("params", {})),
+                "requested_params": _json_safe(trial.get("requested_params", {})),
+                "effective_params": _json_safe(trial.get("effective_params", {})),
+                "score": _json_safe(trial.get("score")),
+                "comparison_score": _json_safe(metrics.get("comparison_score")),
+                "truth_score": _json_safe(metrics.get("truth_score")),
+                "truth_target_energy_preservation": _json_safe(
+                    metrics.get("truth_target_energy_preservation")
+                ),
+                "truth_target_saliency_gain": _json_safe(
+                    metrics.get("truth_target_saliency_gain")
+                ),
+                "truth_background_energy_reduction": _json_safe(
+                    metrics.get("truth_background_energy_reduction")
+                ),
+                "truth_false_positive_ratio": _json_safe(
+                    metrics.get("truth_false_positive_ratio")
+                ),
+                "reason": trial.get("reason") or trial.get("error"),
+                "warnings": _json_safe(
+                    trial.get("constraint_warnings")
+                    or trial.get("warnings")
+                    or trial.get("runtime_warnings")
+                    or []
+                ),
+                "valid": bool(trial.get("valid", True)),
+            }
+        )
+    return compact
 
 
 def _candidate_summary(candidate: ComparisonCandidate) -> dict[str, Any]:

@@ -44,6 +44,8 @@ def export_auto_tune_comparison_artifacts(
         "raw_ground_truth_json": output_root / "raw_ground_truth.json",
         "truth_metrics_json": output_root / "truth_metrics.json",
         "workflow_params_json": output_root / "workflow_params.json",
+        "trial_table_csv": output_root / "trial_table.csv",
+        "trial_table_json": output_root / "trial_table.json",
         "manual_png": output_root / "manual_bscan.png",
         "auto_png": output_root / "auto_bscan.png",
         "side_by_side_png": output_root / "side_by_side.png",
@@ -117,6 +119,33 @@ def export_auto_tune_comparison_artifacts(
             "delta",
         ],
     )
+    trial_rows, trial_payload, trial_warnings = _build_trial_table(summary)
+    _write_csv_rows(
+        paths["trial_table_csv"],
+        trial_rows,
+        fieldnames=[
+            "branch",
+            "method_key",
+            "trial_index",
+            "selected",
+            "params_json",
+            "score",
+            "comparison_score",
+            "truth_score",
+            "truth_target_energy_preservation",
+            "truth_target_saliency_gain",
+            "truth_background_energy_reduction",
+            "truth_false_positive_ratio",
+            "reason",
+            "warnings_json",
+        ],
+    )
+    paths["trial_table_json"].write_text(
+        json.dumps(_json_safe(trial_payload), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    summary.setdefault("evidence_warnings", [])
+    summary["evidence_warnings"].extend(trial_warnings)
     paths["report_md"].write_text(
         _build_report_markdown(summary),
         encoding="utf-8",
@@ -329,6 +358,123 @@ def _build_metrics_rows(summary: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
+def _build_trial_table(
+    summary: dict[str, Any],
+) -> tuple[list[dict[str, Any]], dict[str, Any], list[str]]:
+    rows: list[dict[str, Any]] = []
+    warnings_list: list[str] = []
+    payload: dict[str, Any] = {"schema": "mygpr_autotune_trial_table_v1", "methods": {}}
+    automatic = summary.get("automatic") or {}
+    manual = summary.get("manual") or {}
+    manual_params = manual.get("params_by_method") or {}
+    auto_params = automatic.get("params_by_method") or {}
+    auto_results = automatic.get("auto_tune_results") or {}
+    pipeline = list(manual.get("pipeline") or automatic.get("pipeline") or [])
+    if not pipeline:
+        pipeline = sorted(set(manual_params) | set(auto_params) | set(auto_results))
+
+    for method_key in pipeline:
+        method_key = str(method_key)
+        method_payload: dict[str, Any] = {
+            "manual_params": _json_safe(manual_params.get(method_key, {})),
+            "automatic_params": _json_safe(auto_params.get(method_key, {})),
+            "trials": [],
+        }
+        rows.append(
+            _trial_row(
+                branch="manual",
+                method_key=method_key,
+                trial_index=0,
+                selected=True,
+                params=manual_params.get(method_key, {}),
+                score=None,
+                comparison_score=(manual.get("metrics") or {}).get("comparison_score"),
+                truth_metrics=manual.get("metrics") or {},
+                reason="manual baseline parameters",
+                warnings=manual.get("warnings") or [],
+            )
+        )
+        result = auto_results.get(method_key) or {}
+        trials = list(result.get("all_trials") or [])
+        selected_params = auto_params.get(method_key, {})
+        if not trials:
+            warning = f"trial data unavailable for method {method_key}; exported selected parameters only"
+            warnings_list.append(warning)
+            trials = [
+                {
+                    "trial_index": 0,
+                    "params": selected_params,
+                    "score": result.get("best_score"),
+                    "reason": result.get("best_reason") or warning,
+                    "warnings": [warning],
+                    "valid": True,
+                }
+            ]
+        method_payload["trials"] = _json_safe(trials)
+        for index, trial in enumerate(trials):
+            params = trial.get("params") or {}
+            rows.append(
+                _trial_row(
+                    branch="automatic",
+                    method_key=method_key,
+                    trial_index=int(trial.get("trial_index", index)),
+                    selected=_same_params(params, selected_params),
+                    params=params,
+                    score=trial.get("score"),
+                    comparison_score=trial.get("comparison_score"),
+                    truth_metrics=trial,
+                    reason=trial.get("reason") or result.get("best_reason") or "",
+                    warnings=trial.get("warnings") or [],
+                )
+            )
+        payload["methods"][method_key] = method_payload
+    payload["warnings"] = list(warnings_list)
+    return rows, payload, warnings_list
+
+
+def _trial_row(
+    *,
+    branch: str,
+    method_key: str,
+    trial_index: int,
+    selected: bool,
+    params: dict[str, Any],
+    score: Any,
+    comparison_score: Any,
+    truth_metrics: dict[str, Any],
+    reason: str,
+    warnings: list[Any],
+) -> dict[str, Any]:
+    return {
+        "branch": branch,
+        "method_key": method_key,
+        "trial_index": int(trial_index),
+        "selected": bool(selected),
+        "params_json": json.dumps(_json_safe(params or {}), ensure_ascii=False, sort_keys=True),
+        "score": _csv_value(score),
+        "comparison_score": _csv_value(comparison_score),
+        "truth_score": _csv_value(truth_metrics.get("truth_score")),
+        "truth_target_energy_preservation": _csv_value(
+            truth_metrics.get("truth_target_energy_preservation")
+        ),
+        "truth_target_saliency_gain": _csv_value(
+            truth_metrics.get("truth_target_saliency_gain")
+        ),
+        "truth_background_energy_reduction": _csv_value(
+            truth_metrics.get("truth_background_energy_reduction")
+        ),
+        "truth_false_positive_ratio": _csv_value(
+            truth_metrics.get("truth_false_positive_ratio")
+        ),
+        "reason": str(reason or ""),
+        "warnings_json": json.dumps(_json_safe(warnings or []), ensure_ascii=False),
+    }
+
+
+def _same_params(lhs: Any, rhs: Any) -> bool:
+    return _json_safe(lhs or {}) == _json_safe(rhs or {})
+
+
 def _build_truth_metrics(summary: dict[str, Any]) -> dict[str, Any]:
     info = summary.get("ground_truth_info") or {}
     if not info.get("enabled"):
@@ -502,9 +648,12 @@ def _build_report_markdown(summary: dict[str, Any]) -> str:
     delta = summary.get("metric_delta") or {}
     roi = summary.get("roi_info") or {}
     artifacts = summary.get("artifacts") or {}
+    ground_truth = summary.get("ground_truth_info") or {}
     notes = [str(item) for item in (summary.get("notes") or [])]
     lines = [
-        "# Auto-Tune Comparison Report",
+        "# AutoTune gprMax Evidence Report",
+        "",
+        "## 1. Experiment Summary",
         "",
         f"- Input: {summary.get('input_ref') or '--'}",
         f"- Verdict: {summary.get('verdict') or '--'}",
@@ -514,29 +663,161 @@ def _build_report_markdown(summary: dict[str, Any]) -> str:
         f"- Auto score: {_csv_value((automatic.get('metrics') or {}).get('comparison_score'))}",
         f"- Delta score: {_csv_value(delta.get('comparison_score'))}",
         "",
-        "## Pipeline",
+        "## 2. Ground Truth",
         "",
-        " -> ".join(str(item) for item in (manual.get("pipeline") or [])) or "--",
+        f"- Enabled: {bool(ground_truth.get('enabled'))}",
+        f"- Scenario ID: {ground_truth.get('scenario_id') or '--'}",
+        f"- Target count: {ground_truth.get('target_count', 0)}",
+        f"- Target: {_format_ground_truth_target(ground_truth)}",
+        f"- Background ROI: {_format_background_rois(ground_truth)}",
+        f"- Warnings: {_format_list(ground_truth.get('conversion_warnings') or [])}",
         "",
-        "## Artifacts",
+        "## 3. Metrics Table",
+        "",
+        _markdown_metrics_table(manual.get("metrics") or {}, automatic.get("metrics") or {}, delta),
+        "",
+        "## 4. Parameter Table",
+        "",
+        _markdown_params_table(manual, automatic),
+        "",
+        "## 5. Trial Summary",
+        "",
+        _markdown_trial_summary(summary),
+        "",
+        "## 6. Figures",
+        "",
+        f"![Manual B-scan]({_artifact_name(artifacts.get('manual_png'))})",
+        f"![AutoTune B-scan]({_artifact_name(artifacts.get('auto_png'))})",
+        f"![Side-by-side]({_artifact_name(artifacts.get('side_by_side_png'))})",
+        "",
+        "## 7. Reproducibility",
+        "",
+        f"- Pipeline: {' -> '.join(str(item) for item in (manual.get('pipeline') or [])) or '--'}",
+        f"- Summary JSON: `{_artifact_name(artifacts.get('summary_json'))}`",
+        f"- Evidence manifest: `evidence_manifest.json`",
+        f"- Converted ground truth: `converted_ground_truth.json`",
+        f"- Trial table: `trial_table.csv` / `trial_table.json`",
+        f"- Evidence bundle: `evidence_bundle.zip`",
+        "",
+        "### Artifacts",
         "",
     ]
     for key, path in artifacts.items():
-        lines.append(f"- {key}: `{path}`")
+        lines.append(f"- {key}: `{_artifact_name(path)}`")
     if notes:
         lines.extend(["", "## Notes", ""])
         for note in notes:
             lines.append(f"- {note}")
+    evidence_warnings = list(summary.get("evidence_warnings") or [])
+    if evidence_warnings:
+        lines.extend(["", "### Export Warnings", ""])
+        for warning in evidence_warnings:
+            lines.append(f"- {warning}")
     lines.extend(
         [
             "",
-            "## Research Boundary",
+            "## 8. Research Boundary",
             "",
-            "This export proves that manual and automatic branches were compared on the same input, ROI, and locked display scale. It does not by itself prove real-field target preservation; GPRMAX forward-model cases and field data should be used as validation datasets.",
+            "This result is validated under controlled gprMax / selected ROI conditions. It does not automatically prove performance on all field data.",
+            "",
+            "AGC, background suppression, migration, and gain can alter amplitude or geometry. Truth metrics should be interpreted together, not as a single brightness score.",
             "",
         ]
     )
     return "\n".join(lines)
+
+
+def _format_ground_truth_target(ground_truth: dict[str, Any]) -> str:
+    targets = ground_truth.get("targets") or []
+    if not targets:
+        return "--"
+    target = targets[0] if isinstance(targets[0], dict) else {}
+    roi = target.get("roi") if isinstance(target.get("roi"), dict) else {}
+    return (
+        f"type={target.get('type', '--')}, material={target.get('material', '--')}, "
+        f"depth_m={target.get('depth_m', '--')}, roi={_format_roi_inline(roi)}"
+    )
+
+
+def _format_background_rois(ground_truth: dict[str, Any]) -> str:
+    rois = [
+        _format_roi_inline(roi)
+        for roi in ground_truth.get("background_rois", []) or []
+        if isinstance(roi, dict)
+    ]
+    return "; ".join(rois) if rois else "--"
+
+
+def _format_roi_inline(roi: dict[str, Any]) -> str:
+    if not roi:
+        return "--"
+    return (
+        f"time=[{roi.get('time_start_idx')},{roi.get('time_end_idx')}), "
+        f"trace=[{roi.get('dist_start_idx')},{roi.get('dist_end_idx')})"
+    )
+
+
+def _format_list(values: list[Any]) -> str:
+    return "; ".join(str(item) for item in values) if values else "--"
+
+
+def _markdown_metrics_table(
+    manual_metrics: dict[str, Any],
+    auto_metrics: dict[str, Any],
+    delta: dict[str, Any],
+) -> str:
+    keys = sorted(set(manual_metrics) | set(auto_metrics) | set(delta))
+    lines = ["| Metric | Manual | AutoTune | Delta |", "|---|---:|---:|---:|"]
+    for key in keys:
+        lines.append(
+            f"| {key} | {_csv_value(manual_metrics.get(key)) or '--'} | "
+            f"{_csv_value(auto_metrics.get(key)) or '--'} | "
+            f"{_csv_value(delta.get(key)) or '--'} |"
+        )
+    return "\n".join(lines)
+
+
+def _markdown_params_table(manual: dict[str, Any], automatic: dict[str, Any]) -> str:
+    manual_params = manual.get("params_by_method") or {}
+    auto_params = automatic.get("params_by_method") or {}
+    pipeline = list(manual.get("pipeline") or automatic.get("pipeline") or [])
+    if not pipeline:
+        pipeline = sorted(set(manual_params) | set(auto_params))
+    lines = ["| Method | Manual params | AutoTune params |", "|---|---|---|"]
+    for method_key in pipeline:
+        lines.append(
+            f"| {method_key} | `{_csv_value(manual_params.get(method_key, {}))}` | "
+            f"`{_csv_value(auto_params.get(method_key, {}))}` |"
+        )
+    return "\n".join(lines)
+
+
+def _markdown_trial_summary(summary: dict[str, Any]) -> str:
+    automatic = summary.get("automatic") or {}
+    auto_results = automatic.get("auto_tune_results") or {}
+    lines: list[str] = []
+    if not auto_results:
+        return "- total trials: 0\n- warnings: AutoTune trial data unavailable."
+    for method_key, result in auto_results.items():
+        if not isinstance(result, dict):
+            continue
+        stats = result.get("execution_stats") or {}
+        trials = result.get("all_trials") or []
+        total = stats.get("total_trial_count", len(trials))
+        lines.append(f"### {method_key}")
+        lines.append(f"- total trials: {total}")
+        lines.append(f"- selected params: `{_csv_value(result.get('recommended_params') or result.get('best_params') or {})}`")
+        lines.append(f"- best score: {_csv_value(result.get('best_score')) or '--'}")
+        warnings_json = _csv_value(result.get("constraint_warnings") or [])
+        lines.append(f"- warnings: {warnings_json or '--'}")
+        lines.append("")
+    return "\n".join(lines).strip()
+
+
+def _artifact_name(path: Any) -> str:
+    if not path:
+        return ""
+    return Path(str(path)).name
 
 
 def _csv_value(value: Any) -> str:

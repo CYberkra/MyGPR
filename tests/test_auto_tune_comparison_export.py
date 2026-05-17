@@ -151,7 +151,10 @@ def test_export_auto_tune_comparison_artifacts_writes_research_bundle(tmp_path: 
     assert "comparison_score" in {row["metric"] for row in metrics_rows}
 
     report_text = Path(bundle["artifacts"]["report_md"]).read_text(encoding="utf-8")
-    assert "# Auto-Tune Comparison Report" in report_text
+    assert "# AutoTune gprMax Evidence Report" in report_text
+    assert "## 5. Trial Summary" in report_text
+    assert "## 7. Reproducibility" in report_text
+    assert "## 8. Research Boundary" in report_text
     assert "synthetic://case001" in report_text
 
 
@@ -179,6 +182,8 @@ def test_export_auto_tune_comparison_artifacts_writes_truth_evidence_bundle(tmp_
         "raw_ground_truth_json": "raw_ground_truth.json",
         "truth_metrics_json": "truth_metrics.json",
         "workflow_params_json": "workflow_params.json",
+        "trial_table_csv": "trial_table.csv",
+        "trial_table_json": "trial_table.json",
         "params_csv": "params_table.csv",
         "metrics_csv": "metrics_table.csv",
         "manual_png": "manual_bscan.png",
@@ -225,6 +230,19 @@ def test_export_auto_tune_comparison_artifacts_writes_truth_evidence_bundle(tmp_
     assert workflow["manual_params_by_method"]["dewow"]["window"] == 1
     assert "dewow" in workflow["automatic_params_by_method"]
 
+    with Path(bundle["artifacts"]["trial_table_csv"]).open(
+        "r", encoding="utf-8", newline=""
+    ) as handle:
+        trial_rows = list(csv.DictReader(handle))
+    assert any(row["branch"] == "manual" and row["selected"] == "True" for row in trial_rows)
+    assert any(row["branch"] == "automatic" for row in trial_rows)
+
+    trial_payload = json.loads(
+        Path(bundle["artifacts"]["trial_table_json"]).read_text(encoding="utf-8")
+    )
+    assert trial_payload["schema"] == "mygpr_autotune_trial_table_v1"
+    assert "dewow" in trial_payload["methods"]
+
     with zipfile.ZipFile(bundle["artifacts"]["evidence_zip"]) as zf:
         names = set(zf.namelist())
     assert {
@@ -233,6 +251,8 @@ def test_export_auto_tune_comparison_artifacts_writes_truth_evidence_bundle(tmp_
         "converted_ground_truth.json",
         "truth_metrics.json",
         "workflow_params.json",
+        "trial_table.csv",
+        "trial_table.json",
         "side_by_side.png",
     } <= names
 
