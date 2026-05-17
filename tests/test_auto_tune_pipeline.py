@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 
 import core.auto_tune_pipeline as auto_tune_pipeline
@@ -149,6 +151,26 @@ def test_pipeline_summary_is_json_safe_and_excludes_arrays():
     assert "auto_after" not in summary["steps"][0]
     assert isinstance(summary["automatic"]["params_by_method"]["dewow"]["window"], int)
     assert summary["overall_recommendation"] == result.overall_recommendation
+
+
+def test_pipeline_summary_sanitizes_nonfinite_scalar_values():
+    raw = _build_pipeline_profile(samples=72, traces=18)
+    result = run_auto_tune_pipeline(
+        raw,
+        pipeline=["dewow"],
+        manual_params_by_method={"dewow": {"window": 1}},
+        search_mode="fast",
+    )
+    result.metric_delta["pipeline_score"] = np.inf
+    result.manual.metrics["pipeline_score"] = np.nan
+    result.automatic.params_by_method["dewow"]["bad"] = np.array([1.0, np.inf])
+
+    summary = to_summary_dict(result)
+
+    assert summary["metric_delta"]["pipeline_score"] is None
+    assert summary["manual"]["metrics"]["pipeline_score"] is None
+    assert summary["automatic"]["params_by_method"]["dewow"]["bad"] == [1.0, None]
+    json.dumps(summary, allow_nan=False)
 
 
 def test_pipeline_summary_carries_parameter_domain_notes():

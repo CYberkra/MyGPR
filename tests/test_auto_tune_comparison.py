@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 
 from core.auto_tune_comparison import (
@@ -100,3 +102,23 @@ def test_comparison_summary_is_json_safe_and_excludes_arrays():
     ]
     assert "parameter_domain" in summary["automatic"]["auto_tune_results"]["dewow"]
     assert "risk_flags" in summary["automatic"]["auto_tune_results"]["dewow"]
+
+
+def test_comparison_summary_sanitizes_nonfinite_scalar_values():
+    raw = _build_drift_profile(samples=72, traces=18)
+    result = run_auto_tune_comparison(
+        raw,
+        pipeline=["dewow"],
+        manual_params_by_method={"dewow": {"window": 1}},
+        search_mode="fast",
+    )
+    result.metric_delta["comparison_score"] = np.inf
+    result.manual.metrics["comparison_score"] = np.nan
+    result.automatic.params_by_method["dewow"]["bad"] = np.array([1.0, np.inf])
+
+    summary = to_summary_dict(result)
+
+    assert summary["metric_delta"]["comparison_score"] is None
+    assert summary["manual"]["metrics"]["comparison_score"] is None
+    assert summary["automatic"]["params_by_method"]["dewow"]["bad"] == [1.0, None]
+    json.dumps(summary, allow_nan=False)
