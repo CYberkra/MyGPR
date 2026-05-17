@@ -6,9 +6,12 @@
 """
 
 import json
+import logging
 import os
 from datetime import datetime
 from typing import Dict, List, Optional, Any
+
+LOGGER = logging.getLogger(__name__)
 
 
 # ============ 方法分类定义 ============
@@ -523,8 +526,8 @@ class WorkflowConfigManager:
             with open(filepath, "r", encoding="utf-8") as f:
                 data = json.load(f)
             return WorkflowConfig.from_dict(data)
-        except Exception as e:
-            print(f"加载配置失败: {e}")
+        except Exception as exc:
+            LOGGER.warning("加载配置失败: %s", exc)
             return None
 
     def save_last_config(self, config: WorkflowConfig):
@@ -541,8 +544,8 @@ class WorkflowConfigManager:
             with open(self.last_config_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
             return WorkflowConfig.from_dict(data)
-        except Exception as e:
-            print(f"加载上次配置失败: {e}")
+        except Exception as exc:
+            LOGGER.warning("加载上次配置失败: %s", exc)
             return None
 
     def list_configs(self) -> List[Dict[str, str]]:
@@ -563,8 +566,8 @@ class WorkflowConfigManager:
                             "last_modified": data.get("last_modified", ""),
                         }
                     )
-                except:
-                    pass
+                except Exception as exc:
+                    LOGGER.warning("跳过无效工作流配置 %s: %s", filename, exc)
 
         # 按最后修改时间排序
         configs.sort(key=lambda x: x["last_modified"], reverse=True)

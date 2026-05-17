@@ -1346,18 +1346,14 @@ class QualityLogPage(QWidget):
         vertices = np.column_stack(
             [curtain_x.reshape(-1), curtain_y.reshape(-1), curtain_z.reshape(-1)]
         ).astype(np.float32)
-        face_rows = []
-        for r in range(rows - 1):
-            base = r * cols
-            next_base = (r + 1) * cols
-            for c in range(cols - 1):
-                a = base + c
-                b = base + c + 1
-                d = next_base + c
-                e = next_base + c + 1
-                face_rows.append((a, d, b))
-                face_rows.append((b, d, e))
-        faces = np.asarray(face_rows, dtype=np.uint32)
+        index_grid = np.arange(rows * cols, dtype=np.uint32).reshape(rows, cols)
+        a = index_grid[:-1, :-1].reshape(-1)
+        b = index_grid[:-1, 1:].reshape(-1)
+        d = index_grid[1:, :-1].reshape(-1)
+        e = index_grid[1:, 1:].reshape(-1)
+        faces = np.empty((a.size * 2, 3), dtype=np.uint32)
+        faces[0::2] = np.column_stack([a, d, b])
+        faces[1::2] = np.column_stack([b, d, e])
         finite_amp = amplitude[np.isfinite(amplitude)]
         if finite_amp.size:
             amp_min = float(np.min(finite_amp))

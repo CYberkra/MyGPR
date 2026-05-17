@@ -1710,6 +1710,35 @@ def test_georef3d_expanded_entries_ignore_small_panel_visibility():
         app.processEvents()
 
 
+def test_georef3d_mesh_faces_use_expected_grid_topology():
+    app = _get_app()
+    page = QualityLogPage()
+    try:
+        x = np.arange(12, dtype=np.float64).reshape(3, 4)
+        y = np.zeros_like(x)
+        z = np.zeros_like(x)
+        amplitude = np.linspace(-1.0, 1.0, 12, dtype=np.float64).reshape(3, 4)
+
+        vertices, faces, vertex_colors = page._build_georef3d_mesh_arrays(
+            x,
+            y,
+            z,
+            amplitude,
+            kind="current",
+        )
+
+        assert vertices.shape == (12, 3)
+        assert faces.shape == (12, 3)
+        assert faces.dtype == np.uint32
+        assert np.array_equal(faces[0], np.array([0, 4, 1], dtype=np.uint32))
+        assert np.array_equal(faces[1], np.array([1, 4, 5], dtype=np.uint32))
+        assert vertex_colors.shape == (12, 4)
+    finally:
+        page.release_plot_resources()
+        page.close()
+        app.processEvents()
+
+
 def test_processing_worker_compacts_large_meta_arrays():
     _get_app()
     raw = np.ones((4, 3), dtype=np.float32)
