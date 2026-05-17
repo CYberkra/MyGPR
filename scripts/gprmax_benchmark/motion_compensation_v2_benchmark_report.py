@@ -100,7 +100,7 @@ def run_motion_v2_benchmark_report(
     )
     summary_json = report_dir / "summary.json"
     summary_json.write_text(
-        json.dumps(_jsonable(payload), ensure_ascii=False, indent=2),
+        json.dumps(_jsonable(payload), ensure_ascii=False, indent=2, allow_nan=False),
         encoding="utf-8",
     )
     html_path = report_dir / "index.html"
@@ -108,7 +108,7 @@ def run_motion_v2_benchmark_report(
     payload["artifacts"]["html"] = str(html_path.resolve())
     payload["artifacts"]["summary_json"] = str(summary_json.resolve())
     summary_json.write_text(
-        json.dumps(_jsonable(payload), ensure_ascii=False, indent=2),
+        json.dumps(_jsonable(payload), ensure_ascii=False, indent=2, allow_nan=False),
         encoding="utf-8",
     )
     return _jsonable(payload)
@@ -636,9 +636,15 @@ def _jsonable(value: Any) -> Any:
     if isinstance(value, np.ndarray):
         return _jsonable(value.tolist())
     if isinstance(value, np.generic):
-        return value.item()
+        return _jsonable(value.item())
     if isinstance(value, Path):
         return str(value)
+    if value is None or isinstance(value, (str, bool)):
+        return value
+    if isinstance(value, float):
+        return float(value) if np.isfinite(value) else None
+    if isinstance(value, int):
+        return int(value)
     return value
 
 

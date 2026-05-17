@@ -100,5 +100,20 @@ def test_source_scenario_dir_report_loads_bscan_and_sidecars(tmp_path: Path):
     assert Path(payload["artifacts"]["html"]).exists()
 
 
+def test_jsonable_removes_nonfinite_values_for_strict_motion_report_json():
+    payload = {
+        "height": np.float64(np.inf),
+        "shifts": np.array([0.0, np.nan, np.inf], dtype=np.float32),
+        "flags": [True, None],
+    }
+
+    safe = report._jsonable(payload)
+
+    assert safe["height"] is None
+    assert safe["shifts"] == [0.0, None, None]
+    assert safe["flags"] == [True, None]
+    json.dumps(safe, allow_nan=False)
+
+
 def _write_text(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
