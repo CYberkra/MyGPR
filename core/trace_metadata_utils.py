@@ -132,6 +132,8 @@ def _ordered_optional_field(
     values = _as_1d_array(payload[key], dtype)
     if values.size != expected_size:
         raise ValueError(f"sidecar field '{key}' length mismatch")
+    if np.issubdtype(values.dtype, np.number) and not np.isfinite(values).all():
+        raise ValueError(f"sidecar field '{key}' must contain only finite values")
     return values[order]
 
 
