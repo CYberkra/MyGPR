@@ -160,7 +160,7 @@ def test_convert_gprmax_ground_truth_accepts_numpy_roi_ranges():
 
     converted = convert_gprmax_ground_truth_to_mygpr(
         sidecar,
-        data_shape=(32, 12),
+        data_shape=(np.array([32]), np.array([12])),
     )
 
     assert converted["targets"][0]["roi"] == {

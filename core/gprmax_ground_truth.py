@@ -335,7 +335,8 @@ def _clamp_roi(
 ) -> dict[str, int]:
     if data_shape is None:
         return {key: int(value) for key, value in roi.items()}
-    samples, traces = int(data_shape[0]), int(data_shape[1])
+    samples = max(1, to_int_or_none(data_shape[0]) or 1)
+    traces = max(1, to_int_or_none(data_shape[1]) or 1)
     time_start = max(0, min(int(roi["time_start_idx"]), max(samples - 1, 0)))
     time_end = max(time_start + 1, min(int(roi["time_end_idx"]), samples))
     dist_start = max(0, min(int(roi["dist_start_idx"]), max(traces - 1, 0)))
