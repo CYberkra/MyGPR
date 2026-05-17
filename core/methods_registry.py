@@ -851,6 +851,10 @@ PROCESSING_METHODS = {
                 "default": 0.1,
                 "min": 0.01,
                 "max": 1.0,
+                "tooltip": (
+                    "UAV 空气路径高度时移建议使用 0.299792458；"
+                    "若使用土壤等效速度需谨慎解释。"
+                ),
             },
         ],
         "auto_tune_enabled": True,

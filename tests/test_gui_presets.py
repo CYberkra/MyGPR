@@ -12,7 +12,7 @@ import numpy as np
 import app_qt
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap
-from PyQt6.QtWidgets import QApplication, QGroupBox, QScrollArea, QStackedWidget
+from PyQt6.QtWidgets import QApplication, QCheckBox, QComboBox, QGroupBox, QLineEdit, QScrollArea, QStackedWidget
 
 from app_qt import GPRGuiQt
 from core.methods_registry import (
@@ -1033,13 +1033,83 @@ def test_basic_flow_parses_bool_params_from_registry_contract():
         win.page_basic.set_method_by_key("ccbs")
         edit, _meta = win.page_basic.param_vars["use_custom_ref"]
 
-        edit.setText("true")
+        assert isinstance(edit, QCheckBox)
+        edit.setChecked(True)
         params = win.page_basic.get_current_params()
         assert params["use_custom_ref"] is True
 
-        edit.setText("false")
+        edit.setChecked(False)
         params = win.page_basic.get_current_params()
         assert params["use_custom_ref"] is False
+    finally:
+        win.close()
+        app.processEvents()
+
+
+def test_motion_height_common_params_expose_wave_speed_and_typed_controls():
+    app = _get_app()
+    win = GPRGuiQt()
+    try:
+        win.page_basic.set_method_by_key("motion_compensation_height")
+
+        assert list(win.page_basic.param_vars) == [
+            "reference_height_mode",
+            "manual_height",
+            "compensate_amplitude",
+            "compensate_time_shift",
+            "wave_speed_m_per_ns",
+        ]
+        mode_widget, _ = win.page_basic.param_vars["reference_height_mode"]
+        manual_widget, _ = win.page_basic.param_vars["manual_height"]
+        amp_widget, _ = win.page_basic.param_vars["compensate_amplitude"]
+        shift_widget, _ = win.page_basic.param_vars["compensate_time_shift"]
+        wave_widget, _ = win.page_basic.param_vars["wave_speed_m_per_ns"]
+
+        assert isinstance(mode_widget, QComboBox)
+        assert isinstance(manual_widget, QLineEdit)
+        assert isinstance(amp_widget, QCheckBox)
+        assert isinstance(shift_widget, QCheckBox)
+        assert isinstance(wave_widget, QLineEdit)
+        assert "0.299792458" in wave_widget.toolTip()
+        assert not manual_widget.isEnabled()
+
+        mode_widget.setCurrentText("manual")
+        assert manual_widget.isEnabled()
+        wave_widget.setText("0.299792458")
+        params = win.page_basic.get_current_params()
+        assert params["reference_height_mode"] == "manual"
+        assert params["wave_speed_m_per_ns"] == 0.299792458
+    finally:
+        win.close()
+        app.processEvents()
+
+
+def test_motion_v2_common_params_match_registry_workflow_contract():
+    app = _get_app()
+    win = GPRGuiQt()
+    try:
+        win.page_basic.set_method_by_key("motion_compensation_v2")
+
+        expected = [
+            "height_reference_mode",
+            "height_source",
+            "compensate_time_shift",
+            "compensate_amplitude",
+            "max_shift_samples",
+            "max_shift_ns",
+            "max_amplitude_scale",
+            "resample_spacing_m",
+            "apc_offset_x_m",
+            "apc_offset_y_m",
+            "apc_offset_z_m",
+            "max_abs_tilt_deg",
+        ]
+        assert list(win.page_basic.param_vars) == expected
+        assert set(QUICK_PRESETS["motion_compensation_v2"]["methods"][0]["params"]) <= set(expected)
+        assert isinstance(win.page_basic.param_vars["height_reference_mode"][0], QComboBox)
+        assert isinstance(win.page_basic.param_vars["height_source"][0], QComboBox)
+        assert isinstance(win.page_basic.param_vars["compensate_time_shift"][0], QCheckBox)
+        assert isinstance(win.page_basic.param_vars["compensate_amplitude"][0], QCheckBox)
     finally:
         win.close()
         app.processEvents()

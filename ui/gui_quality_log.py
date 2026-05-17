@@ -1090,7 +1090,18 @@ class QualityLogPage(QWidget):
         dialog.setWindowTitle("UAV-GPR 三维运动补偿预览")
         dialog.resize(1100, 760)
         layout = QVBoxLayout(dialog)
-        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+        title_row = QHBoxLayout()
+        title = QLabel("UAV-GPR 三维运动补偿预览")
+        title.setProperty("class", "sectionTitle")
+        title_hint = QLabel("鼠标旋转/缩放/平移；坐标单位 m。彩色坐标轴表示 X/Y/Z，灰色网格为 XY 参考平面。")
+        title_hint.setWordWrap(True)
+        title_hint.setProperty("class", "hintText")
+        title_row.addWidget(title)
+        title_row.addStretch(1)
+        layout.addLayout(title_row)
+        layout.addWidget(title_hint)
         controls = QHBoxLayout()
         controls.setSpacing(6)
         layer_buttons = {
@@ -1111,6 +1122,9 @@ class QualityLogPage(QWidget):
         export_button.setText("导出当前视图 PNG")
         export_button.setToolTip("导出当前 OpenGL 大窗口视图为 PNG")
         export_button.setAutoRaise(True)
+        layer_label = QLabel("图层")
+        layer_label.setProperty("class", "hintText")
+        controls.addWidget(layer_label)
         for key, button in layer_buttons.items():
             button.setEnabled(key in entries)
             controls.addWidget(button)
@@ -1118,16 +1132,27 @@ class QualityLogPage(QWidget):
         controls.addStretch(1)
         controls.addWidget(export_button)
         layout.addLayout(controls)
+        legend = QLabel("原始=橙色虚线，当前=青绿色实线，差异=紫色；绿色点为起点，红色点为终点。")
+        legend.setProperty("class", "hintText")
+        legend.setWordWrap(True)
+        layout.addWidget(legend)
         view = gl.GLViewWidget()
         view.setBackgroundColor("w")
         layout.addWidget(view)
 
         def redraw_view(reset_camera: bool = False):
             view.clear()
-            all_points: list[np.ndarray] = []
-            for key, (label, payload) in entries.items():
-                if not layer_buttons[key].isChecked():
-                    continue
+            selected = [
+                (key, label, payload)
+                for key, (label, payload) in entries.items()
+                if layer_buttons[key].isChecked()
+            ]
+            all_points = self._collect_georef3d_points(
+                [(key, payload) for key, _label, payload in selected],
+                include_bscan=bscan_button.isChecked(),
+            )
+            self._add_georef3d_reference_frame(view, all_points)
+            for key, label, payload in selected:
                 self._add_georef3d_payload_to_gl_view(
                     view,
                     payload,
@@ -1135,11 +1160,6 @@ class QualityLogPage(QWidget):
                     kind=key,
                     show_bscan=bscan_button.isChecked(),
                 )
-                x_m = np.asarray(payload.get("local_x_m", []), dtype=np.float64)
-                y_m = np.asarray(payload.get("local_y_m", []), dtype=np.float64)
-                z_m = np.asarray(payload.get("airborne_z_m", []), dtype=np.float64)
-                if x_m.size and y_m.size and z_m.size:
-                    all_points.append(np.column_stack([x_m, y_m, z_m]))
             if reset_camera and all_points:
                 points = np.vstack(all_points)
                 center = np.nanmean(points, axis=0)
@@ -1156,6 +1176,71 @@ class QualityLogPage(QWidget):
         redraw_view(True)
 
         dialog.exec()
+
+    def _collect_georef3d_points(
+        self,
+        entries: list[tuple[str, dict]],
+        *,
+        include_bscan: bool,
+    ) -> list[np.ndarray]:
+        """Collect trajectory and curtain points for camera and reference-frame bounds."""
+        all_points: list[np.ndarray] = []
+        for _kind, payload in entries:
+            x_m = np.asarray(payload.get("local_x_m", []), dtype=np.float64)
+            y_m = np.asarray(payload.get("local_y_m", []), dtype=np.float64)
+            z_m = np.asarray(payload.get("airborne_z_m", []), dtype=np.float64)
+            if x_m.size and y_m.size and z_m.size:
+                all_points.append(np.column_stack([x_m, y_m, z_m]))
+            if not include_bscan:
+                continue
+            preview = payload.get("preview") or {}
+            curtain_x = np.asarray(preview.get("curtain_x_m", []), dtype=np.float64)
+            curtain_y = np.asarray(preview.get("curtain_y_m", []), dtype=np.float64)
+            curtain_z = np.asarray(preview.get("curtain_z_m", []), dtype=np.float64)
+            if curtain_x.size and curtain_x.shape == curtain_y.shape == curtain_z.shape:
+                all_points.append(
+                    np.column_stack(
+                        [
+                            curtain_x.reshape(-1),
+                            curtain_y.reshape(-1),
+                            curtain_z.reshape(-1),
+                        ]
+                    )
+                )
+        return all_points
+
+    def _add_georef3d_reference_frame(self, view, all_points: list[np.ndarray]) -> None:
+        """Add OpenGL axes and an XY grid so the expanded preview has a real 3D frame."""
+        import pyqtgraph.opengl as gl
+
+        if all_points:
+            points = np.vstack(all_points)
+            finite_mask = np.isfinite(points).all(axis=1)
+            points = points[finite_mask]
+        else:
+            points = np.empty((0, 3), dtype=np.float64)
+        if points.size:
+            min_xyz = np.nanmin(points, axis=0)
+            max_xyz = np.nanmax(points, axis=0)
+        else:
+            min_xyz = np.array([0.0, 0.0, 0.0], dtype=np.float64)
+            max_xyz = np.array([10.0, 10.0, 5.0], dtype=np.float64)
+        span = np.maximum(max_xyz - min_xyz, np.array([1.0, 1.0, 1.0]))
+        pad = np.maximum(span * 0.08, np.array([0.5, 0.5, 0.2]))
+        origin = min_xyz - pad
+        size = span + 2.0 * pad
+
+        grid = gl.GLGridItem(color=(80, 80, 80, 72))
+        grid.setSize(x=float(size[0]), y=float(size[1]), z=0.0)
+        spacing = float(max(np.nanmax(size[:2]) / 10.0, 0.5))
+        grid.setSpacing(x=spacing, y=spacing, z=0.0)
+        grid.translate(float(origin[0] + size[0] / 2.0), float(origin[1] + size[1] / 2.0), float(origin[2]))
+        view.addItem(grid)
+
+        axis = gl.GLAxisItem(antialias=True)
+        axis.setSize(x=float(size[0]), y=float(size[1]), z=float(size[2]))
+        axis.translate(float(origin[0]), float(origin[1]), float(origin[2]))
+        view.addItem(axis)
 
     def _create_dialog_layer_button(
         self,

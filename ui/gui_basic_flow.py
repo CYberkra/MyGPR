@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QFormLayout,
     QLabel,
     QComboBox,
+    QCheckBox,
     QGroupBox,
     QTextEdit,
     QLineEdit,
@@ -225,6 +226,30 @@ class SplitActionButton(QWidget):
 
 class BasicFlowPage(QWidget):
     """基础流程页面 - 快速开始、方法选择、参数设置"""
+
+    BASIC_COMMON_PARAM_NAMES = {
+        "motion_compensation_height": [
+            "reference_height_mode",
+            "manual_height",
+            "compensate_amplitude",
+            "compensate_time_shift",
+            "wave_speed_m_per_ns",
+        ],
+        "motion_compensation_v2": [
+            "height_reference_mode",
+            "height_source",
+            "compensate_time_shift",
+            "compensate_amplitude",
+            "max_shift_samples",
+            "max_shift_ns",
+            "max_amplitude_scale",
+            "resample_spacing_m",
+            "apc_offset_x_m",
+            "apc_offset_y_m",
+            "apc_offset_z_m",
+            "max_abs_tilt_deg",
+        ],
+    }
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -473,7 +498,12 @@ class BasicFlowPage(QWidget):
         active_overrides = self._method_param_overrides.get(method_key, {})
 
         if self._basic_ultra_mode:
-            params = all_params[: self.BASIC_PARAM_LIMIT]
+            common_names = self.BASIC_COMMON_PARAM_NAMES.get(method_key)
+            if common_names:
+                params_by_name = {param.get("name"): param for param in all_params}
+                params = [params_by_name[name] for name in common_names if name in params_by_name]
+            else:
+                params = all_params[: self.BASIC_PARAM_LIMIT]
             hidden_count = max(0, len(all_params) - len(params))
             if hidden_count > 0:
                 self.param_hint_label.setText(
@@ -519,25 +549,86 @@ class BasicFlowPage(QWidget):
 
         for p in params:
             value = active_overrides.get(p["name"], p.get("default", ""))
-            edit = QLineEdit(str(value))
-            edit.setMinimumWidth(180)
-            edit.setMinimumHeight(32)
-            edit.setToolTip(
-                f"参数范围: {p.get('min', '无下限')} ~ {p.get('max', '无上限')}"
-            )
+            edit = self._create_param_editor(p, value)
             label = QLabel(p["label"])
             label.setWordWrap(True)
             self.param_layout.addRow(label, edit)
             self.param_vars[p["name"]] = (edit, p)
 
+        self._wire_motion_param_dependencies(method_key)
         self._refresh_apply_menu_state()
+
+    def _create_param_editor(self, meta: dict, value):
+        """Create a parameter editor matching the registry parameter type."""
+        param_type = meta.get("type")
+        if param_type == "choice":
+            edit = QComboBox()
+            choices = list(meta.get("choices", []))
+            for choice in choices:
+                edit.addItem(str(choice), choice)
+            value_text = str(value)
+            idx = edit.findText(value_text)
+            if idx < 0 and value_text:
+                edit.addItem(value_text, value)
+                idx = edit.findText(value_text)
+            edit.setCurrentIndex(max(idx, 0))
+        elif param_type == "bool":
+            edit = QCheckBox("启用")
+            edit.setChecked(bool(value))
+        else:
+            edit = QLineEdit(str(value))
+
+        edit.setMinimumWidth(180)
+        edit.setMinimumHeight(32)
+        tooltip = str(meta.get("tooltip") or "").strip()
+        range_text = f"参数范围: {meta.get('min', '无下限')} ~ {meta.get('max', '无上限')}"
+        edit.setToolTip(f"{tooltip}\n{range_text}" if tooltip else range_text)
+        return edit
+
+    def _wire_motion_param_dependencies(self, method_key: str) -> None:
+        """Disable manual height unless the reference-height mode is manual."""
+        mode_name = None
+        manual_name = None
+        if method_key == "motion_compensation_height":
+            mode_name = "reference_height_mode"
+            manual_name = "manual_height"
+        elif method_key == "motion_compensation_v2":
+            mode_name = "height_reference_mode"
+            manual_name = "manual_height_m"
+        if not mode_name or not manual_name:
+            return
+        mode_entry = self.param_vars.get(mode_name)
+        manual_entry = self.param_vars.get(manual_name)
+        if not mode_entry or not manual_entry:
+            return
+        mode_widget, _ = mode_entry
+        manual_widget, _ = manual_entry
+
+        def update_manual_enabled():
+            mode_value = self._read_param_widget_value(mode_widget, {"type": "choice"})
+            manual_widget.setEnabled(str(mode_value) == "manual")
+
+        if isinstance(mode_widget, QComboBox):
+            mode_widget.currentTextChanged.connect(lambda _text: update_manual_enabled())
+        update_manual_enabled()
+
+    def _read_param_widget_value(self, widget, meta: dict):
+        """Read a parameter editor value without assuming everything is QLineEdit."""
+        if isinstance(widget, QComboBox):
+            data = widget.currentData()
+            return widget.currentText() if data is None else data
+        if isinstance(widget, QCheckBox):
+            return widget.isChecked()
+        if isinstance(widget, QLineEdit):
+            return widget.text().strip()
+        return ""
 
     def _get_params(self):
         """获取当前参数值"""
         params = {}
         for name, (edit, meta) in self.param_vars.items():
             label = meta.get("label", name)
-            raw = edit.text().strip()
+            raw = self._read_param_widget_value(edit, meta)
             if raw == "":
                 default_val = meta.get("default", "")
                 if default_val in (None, ""):
@@ -550,12 +641,20 @@ class BasicFlowPage(QWidget):
                 elif meta["type"] == "float":
                     val = float(raw)
                 elif meta["type"] == "bool":
-                    lowered = raw.lower()
-                    if lowered in {"true", "1", "yes", "on"}:
-                        val = True
-                    elif lowered in {"false", "0", "no", "off"}:
-                        val = False
+                    if isinstance(raw, bool):
+                        val = raw
                     else:
+                        lowered = str(raw).lower()
+                        if lowered in {"true", "1", "yes", "on"}:
+                            val = True
+                        elif lowered in {"false", "0", "no", "off"}:
+                            val = False
+                        else:
+                            raise ValueError
+                elif meta["type"] == "choice":
+                    choices = meta.get("choices", [])
+                    val = raw
+                    if choices and val not in choices:
                         raise ValueError
                 else:
                     val = raw
