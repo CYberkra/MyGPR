@@ -360,3 +360,51 @@ def test_read_gprmax_out_attaches_manifest_ground_truth(tmp_path: Path):
     )
     assert result.ground_truth_info["enabled"] is True
     assert result.ground_truth_info["scenario_id"] == "pipe_manifest_demo"
+
+
+def test_read_gprmax_out_clamps_manifest_ground_truth_to_data_shape(tmp_path: Path):
+    data = np.zeros((32, 12), dtype=np.float32)
+    _write_gprmax_out(tmp_path / "pipe_merged.out", data)
+    (tmp_path / "ground_truth.yaml").write_text(
+        "\n".join(
+            [
+                "schema: gprmax_ground_truth_v1",
+                "dataset_id: clamped_pipe_demo",
+                "output_file: pipe_merged.out",
+                "target_roi:",
+                "  sample_range: [20, 80]",
+                "  trace_range: [8, 40]",
+                "background_roi:",
+                "  sample_range: [0, 99]",
+                "  trace_range: [0, 99]",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "pipe_manifest.json").write_text(
+        json.dumps(
+            {
+                "schema": "gprmax_dataset_manifest_v1",
+                "primary_out_file": "pipe_merged.out",
+                "ground_truth_file": "ground_truth.yaml",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = read_gprmax_out(str(tmp_path / "pipe_merged.out"))
+
+    ground_truth = payload["header_info"]["ground_truth"]
+    assert ground_truth["targets"][0]["roi"] == {
+        "time_start_idx": 20,
+        "time_end_idx": 32,
+        "dist_start_idx": 8,
+        "dist_end_idx": 12,
+    }
+    assert ground_truth["background_rois"][0] == {
+        "time_start_idx": 0,
+        "time_end_idx": 32,
+        "dist_start_idx": 0,
+        "dist_end_idx": 12,
+    }

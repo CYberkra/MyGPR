@@ -76,7 +76,10 @@ def convert_gprmax_ground_truth_to_mygpr(
     return converted
 
 
-def load_ground_truth_from_manifest(manifest_path: str) -> dict | None:
+def load_ground_truth_from_manifest(
+    manifest_path: str,
+    data_shape: tuple[int, int] | None = None,
+) -> dict | None:
     """Load and adapt gprMax ground truth referenced by a manifest JSON file."""
     path = Path(manifest_path).expanduser().resolve()
     if not path.exists():
@@ -110,7 +113,7 @@ def load_ground_truth_from_manifest(manifest_path: str) -> dict | None:
     if warnings_list:
         sidecar = copy.deepcopy(sidecar)
         sidecar["_conversion_warnings"] = warnings_list
-    converted = convert_gprmax_ground_truth_to_mygpr(sidecar)
+    converted = convert_gprmax_ground_truth_to_mygpr(sidecar, data_shape=data_shape)
     converted.setdefault("source_paths", {})
     converted["source_paths"].update(
         {

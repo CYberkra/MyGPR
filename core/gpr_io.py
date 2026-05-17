@@ -525,7 +525,13 @@ def _attach_gprmax_ground_truth(
     try:
         from core.gprmax_ground_truth import load_ground_truth_from_manifest
 
-        ground_truth = load_ground_truth_from_manifest(str(manifest_path))
+        samples = int(header.get("a_scan_length", 0) or 0)
+        traces = int(header.get("num_traces", 0) or 0)
+        data_shape = (samples, traces) if samples > 0 and traces > 0 else None
+        ground_truth = load_ground_truth_from_manifest(
+            str(manifest_path),
+            data_shape=data_shape,
+        )
     except Exception as exc:
         header["ground_truth_load_error"] = str(exc)
         header["ground_truth_manifest_path"] = str(manifest_path)
