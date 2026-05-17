@@ -562,6 +562,16 @@ def test_report_roi_helpers_accept_numpy_scalars_and_empty_starts():
     assert shifted["time_end_idx"] == 6
 
 
+def test_locked_vlim_ignores_nonfinite_values_without_full_concat():
+    manual = np.array([[np.nan, -2.0], [np.inf, 1.0]], dtype=np.float32)
+    auto = np.array([[0.0, 3.0], [-np.inf, 4.0]], dtype=np.float32)
+
+    assert report._locked_vlim([manual, auto]) == pytest.approx(
+        np.percentile([2.0, 1.0, 0.0, 3.0, 4.0], 99.3)
+    )
+    assert report._locked_vlim([np.array([[np.nan, np.inf]], dtype=np.float32)]) == 1.0
+
+
 def test_render_html_report_contains_required_research_sections(tmp_path: Path):
     payload = {
         "gprmax_root": "E:/gprMax/gprMax-v.3.1.7",

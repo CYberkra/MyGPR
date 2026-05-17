@@ -3272,14 +3272,29 @@ def _slice_roi(data: np.ndarray, roi: dict[str, int]) -> np.ndarray:
 
 
 def _locked_vlim(arrays: list[np.ndarray]) -> float:
-    values = np.concatenate([np.ravel(np.asarray(arr, dtype=np.float32)) for arr in arrays])
-    finite = values[np.isfinite(values)]
-    if finite.size == 0:
+    finite_abs = _finite_abs_values(arrays)
+    if finite_abs.size == 0:
         return 1.0
-    vlim = float(np.percentile(np.abs(finite), 99.3))
+    vlim = float(np.percentile(finite_abs, 99.3))
     if not np.isfinite(vlim) or vlim <= 0.0:
         return 1.0
     return vlim
+
+
+def _finite_abs_values(arrays: list[np.ndarray]) -> np.ndarray:
+    chunks: list[np.ndarray] = []
+    for arr in arrays:
+        values = np.ravel(np.asarray(arr, dtype=np.float32))
+        if values.size == 0:
+            continue
+        finite = values[np.isfinite(values)]
+        if finite.size:
+            chunks.append(np.abs(finite.astype(np.float64, copy=False)))
+    if not chunks:
+        return np.asarray([], dtype=np.float64)
+    if len(chunks) == 1:
+        return chunks[0]
+    return np.concatenate(chunks)
 
 
 def _comparison_without_arrays(comparison: dict[str, Any]) -> dict[str, Any]:
