@@ -9,6 +9,13 @@ from typing import Any
 import numpy as np
 
 
+def _finite_float(value: Any, name: str) -> float:
+    resolved = float(value)
+    if not np.isfinite(resolved):
+        raise ValueError(f"{name} 必须是有限数值")
+    return resolved
+
+
 def method_amplitude_scale(
     data: np.ndarray,
     mode: str = "constant",
@@ -26,11 +33,12 @@ def method_amplitude_scale(
         raise ValueError("输入数据为空")
 
     resolved_mode = str(mode or "constant").strip().lower()
-    target_value = float(target)
-    safe_eps = max(float(eps), 1.0e-12)
+    target_value = _finite_float(target, "target")
+    safe_eps = max(_finite_float(eps, "eps"), 1.0e-12)
 
     if resolved_mode == "constant":
-        effective_scale = float(scale)
+        requested_scale = _finite_float(scale, "scale")
+        effective_scale = requested_scale
     elif resolved_mode == "peak":
         peak = float(np.max(np.abs(arr)))
         effective_scale = target_value / max(peak, safe_eps)
@@ -44,7 +52,7 @@ def method_amplitude_scale(
     return result.astype(np.float32, copy=False), {
         "method": "amplitude_scale",
         "mode": resolved_mode,
-        "scale": float(scale),
+        "scale": _finite_float(scale, "scale"),
         "target": target_value,
         "effective_scale": float(effective_scale),
     }

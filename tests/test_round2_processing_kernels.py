@@ -351,6 +351,19 @@ def test_method_amplitude_scale_peak_and_rms_normalization():
     assert rms_meta["mode"] == "rms"
 
 
+def test_method_amplitude_scale_rejects_non_finite_params():
+    raw = np.ones((4, 3), dtype=np.float32)
+
+    with pytest.raises(ValueError, match="scale"):
+        method_amplitude_scale(raw, mode="constant", scale=np.nan)
+
+    with pytest.raises(ValueError, match="target"):
+        method_amplitude_scale(raw, mode="peak", target=np.inf)
+
+    with pytest.raises(ValueError, match="eps"):
+        method_amplitude_scale(raw, mode="rms", eps=np.nan)
+
+
 def test_method_hilbert_envelope_returns_trace_envelope():
     samples = 128
     t = np.linspace(0.0, 2.0 * np.pi, samples, endpoint=False, dtype=np.float64)
