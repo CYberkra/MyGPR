@@ -143,6 +143,10 @@ def _xy_trace_distance_m(local_x_m: np.ndarray, local_y_m: np.ndarray) -> np.nda
 def _normalize_altimeter_payload(
     payload: dict[str, np.ndarray],
 ) -> tuple[np.ndarray, dict[str, np.ndarray]]:
+    if "timestamp_s" not in payload:
+        raise ValueError("sidecar payload must include 'timestamp_s'")
+    raw_timestamp_s = _as_1d_array(payload["timestamp_s"], np.float64)
+    order = np.argsort(raw_timestamp_s, kind="stable")
     timestamp_s, fields = _normalize_timestamped_payload(
         payload,
         required_fields=("height_agl_m",),
@@ -153,13 +157,11 @@ def _normalize_altimeter_payload(
         values = _as_1d_array(payload[key], np.float64)
         if values.size != timestamp_s.size:
             raise ValueError(f"sidecar field '{key}' length mismatch")
-        order = np.argsort(_as_1d_array(payload["timestamp_s"], np.float64), kind="stable")
         fields[key] = values[order]
     if "height_source" in payload:
         values = _as_1d_array(payload["height_source"], str)
         if values.size != timestamp_s.size:
             raise ValueError("sidecar field 'height_source' length mismatch")
-        order = np.argsort(_as_1d_array(payload["timestamp_s"], np.float64), kind="stable")
         fields["height_source"] = values[order]
     return timestamp_s, fields
 
