@@ -136,7 +136,7 @@ def _xy_trace_distance_m(local_x_m: np.ndarray, local_y_m: np.ndarray) -> np.nda
         raise ValueError("local_x_m and local_y_m must have the same length")
     if x.size == 0:
         return np.array([], dtype=np.float32)
-    step = np.sqrt(np.diff(x) ** 2 + np.diff(y) ** 2)
+    step = np.hypot(np.diff(x), np.diff(y))
     distance = np.empty(x.size, dtype=np.float32)
     distance[0] = 0.0
     if x.size > 1:

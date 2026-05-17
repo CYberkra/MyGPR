@@ -125,7 +125,7 @@ def _dominant_trace_axis(
     if trace_distance is not None:
         distance = _safe_numeric(trace_distance, trace_count)
     else:
-        step = np.sqrt(np.diff(x) ** 2 + np.diff(y) ** 2)
+        step = np.hypot(np.diff(x), np.diff(y))
         distance = np.empty(trace_count, dtype=np.float64)
         distance[0] = 0.0
         if trace_count > 1:

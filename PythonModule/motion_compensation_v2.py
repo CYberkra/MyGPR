@@ -157,7 +157,7 @@ def _apply_time_shift(
 def _compute_trace_distance(local_x_m: np.ndarray, local_y_m: np.ndarray) -> np.ndarray:
     if local_x_m.size == 0:
         return np.array([], dtype=np.float64)
-    step = np.sqrt(np.diff(local_x_m) ** 2 + np.diff(local_y_m) ** 2)
+    step = np.hypot(np.diff(local_x_m), np.diff(local_y_m))
     distance = np.empty(local_x_m.size, dtype=np.float64)
     distance[0] = 0.0
     distance[1:] = np.cumsum(step, dtype=np.float64)

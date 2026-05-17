@@ -32,7 +32,7 @@ def _derive_trace_distance_from_xy(trace_metadata: dict, trace_count: int) -> np
 
     local_x = local_x[:trace_count]
     local_y = local_y[:trace_count]
-    step = np.sqrt(np.diff(local_x) ** 2 + np.diff(local_y) ** 2)
+    step = np.hypot(np.diff(local_x), np.diff(local_y))
     distance = np.empty(trace_count, dtype=np.float32)
     distance[0] = 0.0
     if trace_count > 1:
