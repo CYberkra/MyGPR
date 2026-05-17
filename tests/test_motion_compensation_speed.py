@@ -79,6 +79,41 @@ def test_motion_compensation_speed_skips_nonmonotonic_distance():
     assert np.array_equal(corrected, data)
 
 
+def test_motion_compensation_speed_skips_non_finite_spacing():
+    distance = np.array([0.0, 1.0, 2.0], dtype=np.float64)
+    data = _synthetic_bscan(8, distance)
+    trace_metadata = {
+        "trace_distance_m": distance.copy(),
+    }
+
+    corrected, meta = method_motion_compensation_speed(
+        data,
+        trace_metadata=trace_metadata,
+        spacing_m=np.nan,
+    )
+
+    assert meta["skipped"] is True
+    assert "spacing_m" in meta["reason"]
+    assert np.array_equal(corrected, data)
+
+
+def test_motion_compensation_speed_skips_non_finite_distance():
+    distance = np.array([0.0, np.nan, 2.0], dtype=np.float64)
+    data = _synthetic_bscan(8, np.array([0.0, 1.0, 2.0], dtype=np.float64))
+    trace_metadata = {
+        "trace_distance_m": distance.copy(),
+    }
+
+    corrected, meta = method_motion_compensation_speed(
+        data,
+        trace_metadata=trace_metadata,
+    )
+
+    assert meta["skipped"] is True
+    assert "非有限" in meta["reason"]
+    assert np.array_equal(corrected, data)
+
+
 def test_motion_compensation_speed_derives_distance_from_xy_fallback():
     local_x = np.array([0.0, 0.6, 1.7, 2.6, 4.0], dtype=np.float64)
     local_y = np.array([0.0, 0.1, 0.1, 0.2, 0.2], dtype=np.float64)

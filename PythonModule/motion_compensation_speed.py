@@ -30,6 +30,8 @@ def _derive_trace_distance_from_xy(trace_metadata: dict, trace_count: int) -> np
 
     local_x = local_x[:trace_count]
     local_y = local_y[:trace_count]
+    if not np.isfinite(local_x).all() or not np.isfinite(local_y).all():
+        raise ValueError("local_x_m / local_y_m 包含非有限值")
     step = np.sqrt(np.diff(local_x) ** 2 + np.diff(local_y) ** 2)
     return np.concatenate(([0.0], np.cumsum(step))).astype(np.float32)
 
@@ -73,6 +75,18 @@ def _resample_bscan_columns(
     return resampled
 
 
+def _optional_positive_float(value: object, name: str) -> float | None:
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} 必须是有限正数") from None
+    if not np.isfinite(parsed):
+        raise ValueError(f"{name} 必须是有限正数")
+    return parsed if parsed > 0.0 else None
+
+
 def method_motion_compensation_speed(
     data: np.ndarray,
     trace_metadata: dict | None = None,
@@ -102,11 +116,12 @@ def method_motion_compensation_speed(
         return arr.copy(), meta
 
     trace_count = int(arr.shape[1])
-    normalized_spacing_m = None
-    if spacing_m is not None:
-        candidate_spacing = float(spacing_m)
-        if candidate_spacing > 0:
-            normalized_spacing_m = candidate_spacing
+    try:
+        normalized_spacing_m = _optional_positive_float(spacing_m, "spacing_m")
+    except ValueError as exc:
+        meta["skipped"] = True
+        meta["reason"] = str(exc)
+        return arr.copy(), meta
 
     try:
         if "trace_distance_m" in trace_metadata:
@@ -116,6 +131,8 @@ def method_motion_compensation_speed(
             if source_distance_m.ndim != 1 or source_distance_m.size < trace_count:
                 raise ValueError("trace_metadata['trace_distance_m'] 长度不足或不是一维数组")
             source_distance_m = source_distance_m[:trace_count]
+            if not np.isfinite(source_distance_m).all():
+                raise ValueError("trace_distance_m 包含非有限值")
             distance_source = "trace_distance_m"
         else:
             source_distance_m = _derive_trace_distance_from_xy(trace_metadata, trace_count)
