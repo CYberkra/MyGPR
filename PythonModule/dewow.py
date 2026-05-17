@@ -20,6 +20,18 @@ def _apply_dewow_exact(data: np.ndarray, window: int) -> np.ndarray:
     return apply_gprpy_dewow(data, window)
 
 
+def _positive_int(value: object, name: str) -> int:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} 必须是有限正整数") from None
+    if not np.isfinite(parsed):
+        raise ValueError(f"{name} 必须是有限正整数")
+    if parsed <= 0:
+        raise ValueError(f"{name} 必须大于 0")
+    return max(1, int(round(parsed)))
+
+
 def dewow(
     infilename="",
     outfilename="",
@@ -72,8 +84,9 @@ def dewow(
 
 def method_dewow(data, window=23, **kwargs):
     """去直流（DeWOW）- GUI / auto-tune ndarray 接口。"""
-    result = _apply_dewow_exact(data, int(window))
-    return result, {"method": "dewow", "window": int(round(float(window)))}
+    resolved_window = _positive_int(window, "window")
+    result = _apply_dewow_exact(data, resolved_window)
+    return result, {"method": "dewow", "window": resolved_window}
 
 
 if __name__ == "__main__":

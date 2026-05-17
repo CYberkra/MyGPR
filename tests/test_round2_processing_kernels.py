@@ -47,6 +47,16 @@ def test_method_dewow_window_one_matches_gprpy_baseline():
     assert meta["window"] == 1
 
 
+def test_method_dewow_rejects_non_finite_window():
+    raw = np.arange(24, dtype=np.float32).reshape(6, 4)
+
+    with pytest.raises(ValueError, match="window"):
+        method_dewow(raw, window=np.nan)
+
+    with pytest.raises(ValueError, match="window"):
+        method_dewow(raw, window=0)
+
+
 def test_gprpy_baseline_helpers_match_processing_engine_kernels():
     rng = np.random.default_rng(42)
     raw = rng.normal(size=(10, 6)).astype(np.float32)
