@@ -11,7 +11,10 @@ from pathlib import Path
 import numpy as np
 
 from core.auto_tune_comparison import run_auto_tune_comparison
-from core.auto_tune_comparison_export import export_auto_tune_comparison_artifacts
+from core.auto_tune_comparison_export import (
+    _locked_display_spec,
+    export_auto_tune_comparison_artifacts,
+)
 
 
 def _build_export_fixture(samples: int = 84, traces: int = 24) -> np.ndarray:
@@ -158,3 +161,18 @@ def test_export_auto_tune_comparison_accepts_numpy_scalar_percentile_clip(tmp_pa
     assert summary["display_spec"]["percentile_clip"] == [95.0]
     assert np.isfinite(summary["display_spec"]["vmin"])
     assert np.isfinite(summary["display_spec"]["vmax"])
+
+
+def test_locked_display_spec_ignores_nonfinite_values_when_scaling():
+    manual = np.array([[np.nan, -2.0], [np.inf, 1.0]], dtype=np.float32)
+    auto = np.array([[0.0, 3.0], [-np.inf, 4.0]], dtype=np.float32)
+
+    spec = _locked_display_spec(
+        manual,
+        auto,
+        {"percentile_clip": 100.0},
+        cmap="gray",
+    )
+
+    assert spec["vmin"] == -4.0
+    assert spec["vmax"] == 4.0

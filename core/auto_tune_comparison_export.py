@@ -143,20 +143,14 @@ def _locked_display_spec(
 ) -> dict[str, Any]:
     source = dict(source_spec or {})
     clip = source.get("percentile_clip")
-    combined = np.concatenate(
-        [
-            np.ravel(np.asarray(manual_arr, dtype=np.float32)),
-            np.ravel(np.asarray(auto_arr, dtype=np.float32)),
-        ]
-    )
-    finite = combined[np.isfinite(combined)]
-    if finite.size == 0:
+    finite_abs = _finite_abs_values(manual_arr, auto_arr)
+    if finite_abs.size == 0:
         limit = 1.0
     elif clip is not None:
         percentile = max(0.0, min(to_float(clip, default=100.0), 100.0))
-        limit = float(np.percentile(np.abs(finite), percentile))
+        limit = float(np.percentile(finite_abs, percentile))
     else:
-        limit = float(np.nanmax(np.abs(finite)))
+        limit = float(np.max(finite_abs))
     if not np.isfinite(limit) or limit <= 0.0:
         limit = 1.0
     return {
@@ -168,6 +162,22 @@ def _locked_display_spec(
         "vmin": -limit,
         "vmax": limit,
     }
+
+
+def _finite_abs_values(*arrays: np.ndarray) -> np.ndarray:
+    chunks: list[np.ndarray] = []
+    for arr in arrays:
+        values = np.ravel(np.asarray(arr, dtype=np.float32))
+        if values.size == 0:
+            continue
+        finite = values[np.isfinite(values)]
+        if finite.size:
+            chunks.append(np.abs(finite.astype(np.float64, copy=False)))
+    if not chunks:
+        return np.asarray([], dtype=np.float64)
+    if len(chunks) == 1:
+        return chunks[0]
+    return np.concatenate(chunks)
 
 
 def _save_single_bscan(
