@@ -626,7 +626,8 @@ def periodic_banding_ratio(
     if window.shape[1] <= 2:
         return 0.0
     centered = window - np.mean(window, axis=1, keepdims=True)
-    spec = np.abs(np.fft.rfft(centered, axis=1)) ** 2
+    spec = np.abs(np.fft.rfft(centered, axis=1))
+    np.square(spec, out=spec)
     if spec.shape[1] <= 1:
         return 0.0
     freqs = np.fft.rfftfreq(window.shape[1], d=1.0)
