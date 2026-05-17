@@ -87,17 +87,18 @@ class KirchhoffResultDialog(QDialog):
             info_parts.append(f"数据: {self.data.shape[0]}×{self.data.shape[1]}")
 
         track_len = self.header_info.get("track_length_m")
-        if track_len:
-            info_parts.append(f"测线长度: {track_len:.1f}m")
+        track_len_value = _positive_float(track_len)
+        if track_len_value is not None:
+            info_parts.append(f"测线长度: {track_len_value:.1f}m")
 
         if self.header_info.get("is_elevation"):
-            elev_top = self.header_info.get("elevation_top_m")
-            elev_bottom = self.header_info.get("elevation_bottom_m")
+            elev_top = _finite_float(self.header_info.get("elevation_top_m"))
+            elev_bottom = _finite_float(self.header_info.get("elevation_bottom_m"))
             if elev_top is not None and elev_bottom is not None:
                 info_parts.append(f"高程: {elev_bottom:.1f}~{elev_top:.1f}m")
         elif self.header_info.get("is_depth"):
-            depth_max = self.header_info.get("depth_max_m")
-            if depth_max:
+            depth_max = _positive_float(self.header_info.get("depth_max_m"))
+            if depth_max is not None:
                 info_parts.append(f"深度: 0~{depth_max:.1f}m")
 
         return " | ".join(info_parts) if info_parts else "Kirchhoff 迁移结果"
@@ -155,33 +156,45 @@ class KirchhoffResultDialog(QDialog):
         n_samples, n_traces = self.data.shape
 
         # X轴：距离
-        track_len = self.header_info.get("track_length_m")
-        if track_len:
-            x_range = [0, float(track_len)]
+        track_len = _positive_float(self.header_info.get("track_length_m"))
+        if track_len is not None:
+            x_range = [0, track_len]
         else:
-            trace_interval = self.header_info.get("trace_interval_m", 1.0)
-            x_range = [0, n_traces * float(trace_interval)]
+            trace_interval = _positive_float(
+                self.header_info.get("trace_interval_m"),
+                default=1.0,
+            )
+            x_range = [0, n_traces * trace_interval]
 
         # Y轴：高程或深度
         if self.header_info.get("is_elevation"):
-            elev_top = self.header_info.get("elevation_top_m")
-            elev_bottom = self.header_info.get("elevation_bottom_m")
+            elev_top = _finite_float(self.header_info.get("elevation_top_m"))
+            elev_bottom = _finite_float(self.header_info.get("elevation_bottom_m"))
             if elev_top is not None and elev_bottom is not None:
                 # 高程轴：大的在上，小的在下
-                y_range = [float(elev_bottom), float(elev_top)]
+                y_range = [elev_bottom, elev_top]
             else:
-                depth_step = self.header_info.get("depth_step_m", 1.0)
-                y_range = [n_samples * float(depth_step), 0]
+                depth_step = _positive_float(
+                    self.header_info.get("depth_step_m"),
+                    default=1.0,
+                )
+                y_range = [n_samples * depth_step, 0]
         elif self.header_info.get("is_depth"):
-            depth_max = self.header_info.get("depth_max_m")
-            if depth_max:
-                y_range = [float(depth_max), 0]  # 深度轴：0在上，大的在下
+            depth_max = _positive_float(self.header_info.get("depth_max_m"))
+            if depth_max is not None:
+                y_range = [depth_max, 0]  # 深度轴：0在上，大的在下
             else:
-                depth_step = self.header_info.get("depth_step_m", 1.0)
-                y_range = [n_samples * float(depth_step), 0]
+                depth_step = _positive_float(
+                    self.header_info.get("depth_step_m"),
+                    default=1.0,
+                )
+                y_range = [n_samples * depth_step, 0]
         else:
-            total_time = self.header_info.get("total_time_ns", n_samples)
-            y_range = [float(total_time), 0]
+            total_time = _positive_float(
+                self.header_info.get("total_time_ns"),
+                default=float(n_samples),
+            )
+            y_range = [total_time, 0]
 
         return [x_range[0], x_range[1], y_range[0], y_range[1]]
 
@@ -217,3 +230,16 @@ class KirchhoffResultDialog(QDialog):
         """显示时调整画布"""
         super().showEvent(event)
         self.canvas.draw()
+
+
+def _finite_float(value, default=None):
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if np.isfinite(parsed) else default
+
+
+def _positive_float(value, default=None):
+    parsed = _finite_float(value, default=None)
+    return parsed if parsed is not None and parsed > 0 else default
