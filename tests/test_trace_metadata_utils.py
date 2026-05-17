@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import importlib
 import numpy as np
+import pytest
 
 
 def test_align_sidecar_records_adds_trace_timestamps_and_local_xy_without_breaking_legacy_fields():
@@ -61,6 +62,20 @@ def test_build_uniform_trace_distance_m_returns_equal_spacing_axis():
     )
 
 
+def test_build_uniform_trace_distance_m_rejects_non_finite_axis_or_spacing():
+    module = importlib.import_module("core.trace_metadata_utils")
+    build_uniform_trace_distance_m = module.build_uniform_trace_distance_m
+
+    with pytest.raises(ValueError, match="finite"):
+        build_uniform_trace_distance_m(np.array([0.0, np.nan, 2.0], dtype=np.float32))
+
+    with pytest.raises(ValueError, match="spacing_m"):
+        build_uniform_trace_distance_m(
+            np.array([0.0, 1.0, 2.0], dtype=np.float32),
+            spacing_m=np.inf,
+        )
+
+
 def test_resample_trace_metadata_interpolates_numeric_fields_and_marks_resampled_status():
     module = importlib.import_module("core.trace_metadata_utils")
     resample_trace_metadata = module.resample_trace_metadata
@@ -91,3 +106,19 @@ def test_resample_trace_metadata_interpolates_numeric_fields_and_marks_resampled
     assert np.allclose(resampled["local_y_m"], 0.0)
     assert resampled["alignment_status"].shape == (5,)
     assert set(resampled["alignment_status"].tolist()) == {"resampled"}
+
+
+def test_resample_trace_metadata_rejects_non_finite_target_axis():
+    module = importlib.import_module("core.trace_metadata_utils")
+    resample_trace_metadata = module.resample_trace_metadata
+
+    trace_metadata = {
+        "trace_index": np.array([0, 1, 2], dtype=np.int32),
+        "trace_distance_m": np.array([0.0, 1.0, 2.0], dtype=np.float32),
+    }
+
+    with pytest.raises(ValueError, match="target_trace_distance_m"):
+        resample_trace_metadata(
+            trace_metadata,
+            target_trace_distance_m=np.array([0.0, np.nan, 2.0], dtype=np.float32),
+        )

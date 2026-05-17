@@ -212,6 +212,8 @@ def build_uniform_trace_distance_m(
     distance = _as_1d_array(trace_distance_m, np.float64)
     if distance.size == 0:
         raise ValueError("trace_distance_m must contain at least one trace")
+    if not np.isfinite(distance).all():
+        raise ValueError("trace_distance_m must contain only finite values")
     if distance.size == 1:
         return distance.astype(np.float32, copy=True)
 
@@ -224,7 +226,7 @@ def build_uniform_trace_distance_m(
         spacing = float(np.median(positive)) if positive.size else 1.0
     else:
         spacing = float(spacing_m)
-    if spacing <= 0:
+    if not np.isfinite(spacing) or spacing <= 0:
         raise ValueError("spacing_m must be positive")
 
     start = float(distance[0])
@@ -245,12 +247,16 @@ def resample_trace_metadata(
     source_distance = _as_1d_array(trace_metadata.get("trace_distance_m"), np.float64)
     if source_distance.size != trace_count:
         raise ValueError("trace_distance_m length must match metadata trace count")
+    if not np.isfinite(source_distance).all():
+        raise ValueError("trace_distance_m must contain only finite values")
     if np.any(np.diff(source_distance) < 0):
         raise ValueError("trace_distance_m must be monotonically non-decreasing")
 
     target_distance = _as_1d_array(target_trace_distance_m, np.float64)
     if target_distance.size == 0:
         raise ValueError("target_trace_distance_m must contain at least one trace")
+    if not np.isfinite(target_distance).all():
+        raise ValueError("target_trace_distance_m must contain only finite values")
     if np.any(np.diff(target_distance) < 0):
         raise ValueError("target_trace_distance_m must be monotonically non-decreasing")
 
