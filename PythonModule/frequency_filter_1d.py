@@ -84,8 +84,8 @@ def method_frequency_filter_1d(
         result = np.array(arr, copy=True)
     else:
         spectrum = np.fft.rfft(arr, axis=0)
-        filtered = spectrum * mask[:, None]
-        result = np.fft.irfft(filtered, n=n_samples, axis=0)
+        spectrum *= mask[:, None]
+        result = np.fft.irfft(spectrum, n=n_samples, axis=0)
 
     meta = {
         "method": "frequency_filter_1d",
