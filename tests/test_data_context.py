@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import numpy as np
+
 from core.data_context import (
     apply_data_context_defaults,
     frequency_band_from_context,
@@ -52,3 +54,6 @@ def test_data_context_invalid_numeric_fields_fall_back_cleanly():
     assert infer_data_context(header) == "generic_bscan"
     assert frequency_band_from_context({"frequency_filter_band_mhz": ["bad", 170.0]}) is None
     assert frequency_band_from_context({"frequency_filter_band_mhz": [20.0]}) is None
+    assert infer_data_context({"source": "csv", "a_scan_length": np.inf}) == "generic_bscan"
+    assert frequency_band_from_context({"frequency_filter_band_mhz": [np.nan, 170.0]}) is None
+    assert frequency_band_from_context({"frequency_filter_band_mhz": [20.0, np.inf]}) is None

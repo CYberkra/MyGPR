@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from math import isfinite
 from pathlib import Path
 from typing import Any
 
@@ -51,10 +52,7 @@ def infer_data_context(
     }.issubset(set(metadata.keys())):
         return DATA_CONTEXT_UAV_GPR_SFCW_FIELD
 
-    try:
-        samples = int(header.get("a_scan_length") or 0)
-    except (TypeError, ValueError):
-        samples = 0
+    samples = _safe_positive_int(header.get("a_scan_length"), default=0)
     if samples == 501 and source in {"airborne_csv", "csv", ""}:
         return DATA_CONTEXT_UAV_GPR_SFCW_FIELD
 
@@ -133,13 +131,29 @@ def frequency_band_from_context(
     header = dict(header_info or {})
     band = header.get("frequency_filter_band_mhz")
     if isinstance(band, (list, tuple)) and len(band) >= 2:
-        try:
-            low = float(band[0])
-            high = float(band[1])
-        except (TypeError, ValueError, IndexError):
+        low = _safe_float(band[0])
+        high = _safe_float(band[1])
+        if low is None or high is None:
             return None
         if high > low >= 0.0:
             return low, high
     if infer_data_context(header) == DATA_CONTEXT_UAV_GPR_SFCW_FIELD:
         return FIELD_SFCW_BAND_MHZ
     return None
+
+
+def _safe_float(value: Any) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not isfinite(parsed):
+        return None
+    return parsed
+
+
+def _safe_positive_int(value: Any, *, default: int) -> int:
+    parsed = _safe_float(value)
+    if parsed is None or parsed <= 0:
+        return default
+    return int(parsed)
