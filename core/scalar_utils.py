@@ -69,9 +69,10 @@ def to_int(value: Any, *, default: int) -> int:
     if isinstance(scalar, str) and scalar.strip() == "":
         return int(default)
     try:
-        return int(float(scalar))
+        parsed = float(scalar)
     except (TypeError, ValueError):
         return int(default)
+    return int(parsed) if np.isfinite(parsed) else int(default)
 
 
 def to_int_or_none(value: Any) -> int | None:

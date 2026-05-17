@@ -30,6 +30,7 @@ def test_scalar_helpers_use_defaults_for_empty_or_invalid_values():
     assert to_float(np.array([], dtype=np.float64), default=2.0) == 2.0
     assert to_float(np.array([np.inf]), default=2.0) == 2.0
     assert to_int("", default=7) == 7
+    assert to_int(np.array([np.inf]), default=7) == 7
     assert to_float_or_none("not-a-number") is None
     assert to_float_or_none(np.array([np.nan])) is None
     assert to_int_or_none("not-a-number") is None
