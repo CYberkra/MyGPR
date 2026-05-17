@@ -15,6 +15,7 @@ Date: 2026-03-31
 from __future__ import annotations
 
 import importlib
+import logging
 from importlib.util import find_spec
 import os
 import re
@@ -23,6 +24,9 @@ from pathlib import Path
 from typing import Dict, Any, Optional, Tuple
 
 import numpy as np
+
+
+logger = logging.getLogger(__name__)
 
 HAS_H5PY = find_spec("h5py") is not None
 _H5PY_MODULE = None
@@ -455,7 +459,7 @@ def _find_gprmax_input_for_output(out_path: Path) -> Path | None:
 def _safe_attr_list(value: Any) -> list[float] | None:
     try:
         return [float(v) for v in value]
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 
@@ -474,7 +478,7 @@ def _build_gprmax_trace_metadata(
             if steps and len(steps) >= 1:
                 try:
                     candidate = float(steps[0])
-                except Exception:
+                except (TypeError, ValueError):
                     candidate = 0.0
                 if candidate > 0.0:
                     step = candidate
@@ -503,7 +507,7 @@ def _build_gprmax_header_info(
             if steps and len(steps) >= 1:
                 try:
                     trace_interval_m = float(steps[0])
-                except Exception:
+                except (TypeError, ValueError):
                     trace_interval_m = 0.0
                 if trace_interval_m > 0.0:
                     break
@@ -705,7 +709,8 @@ def read_gprmax_out(out_path: str) -> dict:
     if in_path is not None:
         try:
             gprmax_config = read_gprmax_in(str(in_path))
-        except Exception:
+        except Exception as exc:
+            logger.warning("无法解析匹配的 gprMax 输入文件 %s: %s", in_path, exc)
             gprmax_config = None
 
     with h5py.File(out_path, "r") as f:

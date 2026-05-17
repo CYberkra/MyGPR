@@ -73,3 +73,17 @@ def test_read_gprmax_out_attaches_impulse_context_from_matching_in(tmp_path: Pat
     assert header["trace_interval_m"] == 0.05
     assert result["trace_metadata"] is not None
     assert np.allclose(result["trace_metadata"]["trace_distance_m"], [0.0, 0.05, 0.1])
+
+
+def test_read_gprmax_out_logs_invalid_matching_in_and_falls_back(
+    tmp_path: Path, caplog
+):
+    data = np.arange(6, dtype=np.float32)
+    _write_gprmax_out(tmp_path / "broken_merged.out", data, dt=1e-10)
+    (tmp_path / "broken.in").write_text("#domain: not-a-number", encoding="utf-8")
+
+    result = read_gprmax_out(str(tmp_path / "broken_merged.out"))
+
+    assert result["data"].shape == (6, 1)
+    assert result["header_info"]["data_context"] == "gprmax"
+    assert "无法解析匹配的 gprMax 输入文件" in caplog.text
