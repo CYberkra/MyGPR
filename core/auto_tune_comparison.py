@@ -92,6 +92,7 @@ def run_auto_tune_comparison(
         embedded_ground_truth = header_info.get("ground_truth")
         if isinstance(embedded_ground_truth, dict):
             ground_truth = embedded_ground_truth
+    runtime_header_info = _header_without_ground_truth(header_info)
 
     profile_key = baseline_profile_key or (
         None if pipeline is not None else "uav_gpr_experience_baseline_v1"
@@ -114,7 +115,7 @@ def run_auto_tune_comparison(
         name="人工 baseline",
         source=manual_source,
         data=arr,
-        header_info=header_info,
+        header_info=runtime_header_info,
         trace_metadata=trace_metadata,
         pipeline=pipeline_order,
         params_by_method=manual_params,
@@ -131,7 +132,7 @@ def run_auto_tune_comparison(
         name="自动选参",
         source="auto_tune",
         data=arr,
-        header_info=header_info,
+        header_info=runtime_header_info,
         trace_metadata=trace_metadata,
         pipeline=pipeline_order,
         params_by_method=manual_params,
@@ -203,6 +204,14 @@ def _resolve_pipeline(
             f"未知经验 baseline profile: {baseline_profile_key}"
         )
     return [str(method_key) for method_key in profile.get("order", [])]
+
+
+def _header_without_ground_truth(header_info: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(header_info, dict):
+        return header_info
+    sanitized = dict(header_info)
+    sanitized.pop("ground_truth", None)
+    return sanitized
 
 
 def _validate_pipeline(pipeline: list[str]) -> None:

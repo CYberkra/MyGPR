@@ -180,6 +180,10 @@ def test_load_gprmax_dataset_contract_reads_manifest_out_and_ground_truth(tmp_pa
     )
     assert package.ground_truth["targets"][0]["roi"]["time_end_idx"] == 19
     assert package.header_info["ground_truth"] is package.ground_truth
+    assert package.ground_truth["source_paths"]["manifest_file"] == str(manifest_path)
+    assert package.ground_truth["source_paths"]["ground_truth_file"] == str(
+        tmp_path / "ground_truth.yaml"
+    )
     assert package.ground_truth_paths["ground_truth_file"] == tmp_path / "ground_truth.yaml"
 
 

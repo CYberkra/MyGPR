@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import numpy as np
 
+import core.auto_tune_comparison as auto_tune_comparison
 from core.auto_tune_comparison import (
     run_auto_tune_comparison,
     to_summary_dict,
@@ -194,6 +195,37 @@ def test_comparison_uses_header_ground_truth_metrics_and_summary_info():
     assert info["targets"][0]["material"] == "metal"
     assert info["source_paths"]["ground_truth_file"] == "ground_truth.yaml"
     assert info["conversion_warnings"] == ["synthetic warning"]
+
+
+def test_comparison_does_not_pass_ground_truth_into_auto_tune_search(monkeypatch):
+    raw = _build_drift_profile(samples=72, traces=18)
+
+    def fake_auto_tune_method(*args, **kwargs):
+        header = kwargs.get("header_info") or {}
+        assert "ground_truth" not in header
+        return {
+            "method_key": "dewow",
+            "recommended_params": {"window": 5},
+            "best_params": {"window": 5},
+            "best_score": 1.0,
+            "all_trials": [{"params": {"window": 5}, "score": 1.0}],
+        }
+
+    monkeypatch.setattr(
+        auto_tune_comparison,
+        "auto_tune_method",
+        fake_auto_tune_method,
+    )
+    result = run_auto_tune_comparison(
+        raw,
+        header_info={"ground_truth": _truth_manifest()},
+        pipeline=["dewow"],
+        manual_params_by_method={"dewow": {"window": 1}},
+        search_mode="fast",
+    )
+
+    assert "truth_score" in result.automatic.metrics
+    assert result.ground_truth_info["enabled"] is True
 
 
 def test_comparison_summary_serializes_nonfinite_metrics_as_null():
