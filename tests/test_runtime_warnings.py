@@ -69,6 +69,26 @@ def test_agc_gain_limits_low_energy_noise_amplification():
     assert "agc_low_energy_gain_guard" in codes
 
 
+def test_compensating_gain_invalid_params_fall_back_with_warning():
+    data = np.ones((12, 3), dtype=np.float32)
+
+    result, meta = run_processing_method(
+        data,
+        "compensatingGain",
+        {"gain_min": "bad", "gain_max": np.inf},
+    )
+
+    warnings = meta.get("runtime_warnings", [])
+    invalid_params = {
+        item.get("details", {}).get("parameter")
+        for item in warnings
+        if item.get("code") == "parameter_invalid"
+    }
+    assert result.shape == data.shape
+    assert np.isfinite(result).all()
+    assert {"gain_min", "gain_max"} <= invalid_params
+
+
 def test_running_average_preserves_shape_and_emits_warning_when_window_too_large():
     data = np.arange(60, dtype=np.float32).reshape(10, 6)
     result, meta = run_processing_method(data, "running_average_2D", {"ntraces": 999})

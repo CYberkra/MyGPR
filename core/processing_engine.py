@@ -314,8 +314,11 @@ def _run_legacy_adapter(
     warnings: list[dict[str, Any]] | None = None,
 ) -> Tuple[np.ndarray, Dict[str, Any]]:
     if method_id == "compensatingGain":
+        output, method_warnings = _apply_compensating_gain(data, **params)
         return _normalize_result(
-            method_id, _apply_compensating_gain(data, **params), warnings=warnings
+            method_id,
+            output,
+            warnings=merge_runtime_warnings(warnings, method_warnings),
         )
     if method_id == "agcGain":
         output, method_warnings = _apply_agc_gain(data, **params)
@@ -379,10 +382,35 @@ def _run_legacy_adapter(
 
 def _apply_compensating_gain(
     data: np.ndarray, gain_min: float = 1.0, gain_max: float = 6.0, **kwargs
-) -> np.ndarray:
-    gain_curve_db = np.linspace(float(gain_min), float(gain_max), data.shape[0])
+) -> tuple[np.ndarray, list[dict[str, Any]]]:
+    warnings = []
+    gain_min_db, invalid_min = _safe_float(gain_min, default=1.0)
+    gain_max_db, invalid_max = _safe_float(gain_max, default=6.0)
+    if invalid_min:
+        warnings.append(
+            build_runtime_warning(
+                "parameter_invalid",
+                "手动补偿增益下限不是有效数值，已回退到默认值。",
+                method_id="compensatingGain",
+                parameter="gain_min",
+                requested=gain_min,
+                effective=gain_min_db,
+            )
+        )
+    if invalid_max:
+        warnings.append(
+            build_runtime_warning(
+                "parameter_invalid",
+                "手动补偿增益上限不是有效数值，已回退到默认值。",
+                method_id="compensatingGain",
+                parameter="gain_max",
+                requested=gain_max,
+                effective=gain_max_db,
+            )
+        )
+    gain_curve_db = np.linspace(gain_min_db, gain_max_db, data.shape[0])
     gain_curve = 10.0 ** (gain_curve_db / 20.0)
-    return data * gain_curve[:, np.newaxis]
+    return data * gain_curve[:, np.newaxis], warnings
 
 
 AGC_EPS = 1.0e-8
@@ -482,6 +510,16 @@ def _safe_int(value: Any, *, default: int) -> tuple[int, bool]:
         parsed = int(float(value))
     except (TypeError, ValueError, OverflowError):
         return int(default), True
+    return parsed, False
+
+
+def _safe_float(value: Any, *, default: float) -> tuple[float, bool]:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return float(default), True
+    if not np.isfinite(parsed):
+        return float(default), True
     return parsed, False
 
 
