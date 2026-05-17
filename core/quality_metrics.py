@@ -43,7 +43,7 @@ def _as_clean_2d(data: np.ndarray) -> np.ndarray:
 def _normalized_abs(data: np.ndarray) -> np.ndarray:
     arr = np.abs(_as_clean_2d(data))
     trace_scale = np.max(arr, axis=0, keepdims=True)
-    trace_scale = np.where(trace_scale > EPS, trace_scale, 1.0)
+    trace_scale[trace_scale <= EPS] = 1.0
     return arr / trace_scale
 
 
