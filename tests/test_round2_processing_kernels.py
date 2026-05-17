@@ -221,6 +221,21 @@ def test_trace_qc_mute_and_remove_modes():
     assert removed_meta["trace_metadata_out"]["trace_index"].tolist() == [0, 2, 4]
 
 
+def test_trace_qc_non_finite_thresholds_fall_back_to_zero():
+    raw = np.ones((4, 5), dtype=np.float32)
+
+    result, meta = method_trace_qc(
+        raw,
+        empty_rms_threshold=np.nan,
+        spike_zscore=np.inf,
+    )
+
+    assert np.array_equal(result, raw)
+    assert meta["empty_rms_threshold"] == 0.0
+    assert meta["spike_zscore"] == 0.0
+    assert meta["bad_trace_count"] == 0
+
+
 def test_trace_qc_remove_filters_runtime_trace_metadata():
     raw = np.ones((4, 5), dtype=np.float32)
     trace_metadata = {"trace_index": np.arange(5, dtype=np.int32)}

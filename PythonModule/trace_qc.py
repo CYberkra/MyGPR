@@ -127,6 +127,7 @@ def _filter_trace_metadata(
 
 def _safe_float(value: Any, *, default: float) -> float:
     try:
-        return float(value)
+        parsed = float(value)
     except (TypeError, ValueError):
         return float(default)
+    return parsed if np.isfinite(parsed) else float(default)
