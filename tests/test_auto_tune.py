@@ -14,6 +14,8 @@ from core.auto_tune import (
     _resolve_time_step_ns,
     _sanitize_float_candidates,
     _sanitize_int_candidates,
+    _normalize_summary_value,
+    _value_at_domain_edge,
     auto_select_method_group,
     auto_tune_method,
 )
@@ -248,6 +250,14 @@ def test_auto_tune_candidate_sanitizers_accept_numpy_scalar_values():
 
     assert int_candidates == [12]
     assert float_candidates == [0.25]
+
+
+def test_auto_tune_parameter_domain_helpers_ignore_nonfinite_values():
+    summary = {"kind": "numeric", "count": 3, "min": np.float64(np.nan), "max": 10.0}
+
+    assert _value_at_domain_edge(np.array([10.0]), summary) is False
+    assert _normalize_summary_value(np.float64(np.nan)) is None
+    assert _normalize_summary_value(np.float64(3.5)) == 3.5
 
 
 def test_auto_tune_svd_subspace_returns_rank_interval_candidate():

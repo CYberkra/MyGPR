@@ -2554,18 +2554,19 @@ def _value_at_domain_edge(value: Any, summary: dict[str, Any]) -> bool:
         return False
     if int(summary.get("count", 0) or 0) <= 1:
         return False
-    try:
-        current = float(value)
-        minimum = float(summary.get("min"))
-        maximum = float(summary.get("max"))
-    except Exception:
+    current = to_float_or_none(value)
+    minimum = to_float_or_none(summary.get("min"))
+    maximum = to_float_or_none(summary.get("max"))
+    if current is None or minimum is None or maximum is None:
         return False
     return abs(current - minimum) <= 1.0e-9 or abs(current - maximum) <= 1.0e-9
 
 
 def _normalize_summary_value(value: Any) -> Any:
     if isinstance(value, np.generic):
-        return value.item()
+        value = value.item()
+    if isinstance(value, float) and not np.isfinite(value):
+        return None
     return value
 
 
