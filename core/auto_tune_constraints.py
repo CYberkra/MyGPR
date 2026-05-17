@@ -182,10 +182,13 @@ def constrain_auto_tune_trials(
 
 
 def _resolve_shape(data_shape: tuple[int, int]) -> tuple[int, int]:
-    if len(data_shape) != 2:
+    try:
+        if len(data_shape) != 2:
+            return 1, 1
+    except TypeError:
         return 1, 1
-    n_samples = max(1, int(data_shape[0]))
-    n_traces = max(1, int(data_shape[1]))
+    n_samples = max(1, _as_int(data_shape[0]) or 1)
+    n_traces = max(1, _as_int(data_shape[1]) or 1)
     return n_samples, n_traces
 
 

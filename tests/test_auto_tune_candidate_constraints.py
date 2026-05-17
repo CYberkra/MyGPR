@@ -102,6 +102,18 @@ def test_auto_tune_zero_time_ignores_nonfinite_total_time_metadata():
     assert np.isfinite(warning_details["maximum"])
 
 
+def test_auto_tune_constraints_tolerate_nonfinite_shape_values():
+    result = constrain_auto_tune_params(
+        "subtracting_average_2D",
+        {"ntraces": 501},
+        (np.inf, np.nan),
+    )
+
+    assert result.effective_params["ntraces"] == 1
+    assert result.warnings
+    assert np.isfinite(result.warnings[0]["details"]["maximum"])
+
+
 def test_auto_tune_constrains_agc_window_to_time_aware_minimum():
     raw = _small_profile(samples=200, traces=24)
 
