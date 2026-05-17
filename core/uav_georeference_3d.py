@@ -580,46 +580,48 @@ def save_airborne_georeference_3d_preview_png(
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     fig = plt.figure(figsize=(7.2, 5.0), dpi=140)
-    ax = fig.add_subplot(111, projection="3d")
-    x_m = np.asarray(payload.get("local_x_m", []), dtype=np.float64)
-    y_m = np.asarray(payload.get("local_y_m", []), dtype=np.float64)
-    z_m = np.asarray(payload.get("airborne_z_m", []), dtype=np.float64)
-    ground = payload.get("ground_elevation_m")
+    try:
+        ax = fig.add_subplot(111, projection="3d")
+        x_m = np.asarray(payload.get("local_x_m", []), dtype=np.float64)
+        y_m = np.asarray(payload.get("local_y_m", []), dtype=np.float64)
+        z_m = np.asarray(payload.get("airborne_z_m", []), dtype=np.float64)
+        ground = payload.get("ground_elevation_m")
 
-    if show_bscan:
-        finite_amp = amplitude[np.isfinite(amplitude)]
-        amp_min = float(preview.get("amplitude_min", np.min(finite_amp) if finite_amp.size else 0.0))
-        amp_max = float(preview.get("amplitude_max", np.max(finite_amp) if finite_amp.size else 1.0))
-        if not np.isfinite(amp_min) or not np.isfinite(amp_max) or amp_min == amp_max:
-            amp_min, amp_max = 0.0, 1.0
-        facecolors = colormaps.get_cmap("gray")(colors.Normalize(amp_min, amp_max)(amplitude))
-        ax.plot_surface(
-            curtain_x,
-            curtain_y,
-            curtain_z,
-            facecolors=facecolors,
-            linewidth=0,
-            antialiased=False,
-            shade=False,
-            alpha=0.88,
-        )
+        if show_bscan:
+            finite_amp = amplitude[np.isfinite(amplitude)]
+            amp_min = float(preview.get("amplitude_min", np.min(finite_amp) if finite_amp.size else 0.0))
+            amp_max = float(preview.get("amplitude_max", np.max(finite_amp) if finite_amp.size else 1.0))
+            if not np.isfinite(amp_min) or not np.isfinite(amp_max) or amp_min == amp_max:
+                amp_min, amp_max = 0.0, 1.0
+            facecolors = colormaps.get_cmap("gray")(colors.Normalize(amp_min, amp_max)(amplitude))
+            ax.plot_surface(
+                curtain_x,
+                curtain_y,
+                curtain_z,
+                facecolors=facecolors,
+                linewidth=0,
+                antialiased=False,
+                shade=False,
+                alpha=0.88,
+            )
 
-    if x_m.size and y_m.size and z_m.size:
-        ax.plot(x_m, y_m, z_m, color="#16a34a", linewidth=1.4, label="trajectory")
-        ax.scatter([x_m[0]], [y_m[0]], [z_m[0]], color="#10b981", s=28)
-        ax.scatter([x_m[-1]], [y_m[-1]], [z_m[-1]], color="#ef4444", s=28)
-        if isinstance(ground, np.ndarray) and ground.size == x_m.size:
-            ax.plot(x_m, y_m, ground, color="#f59e0b", linestyle="--", linewidth=1.0, label="ground")
+        if x_m.size and y_m.size and z_m.size:
+            ax.plot(x_m, y_m, z_m, color="#16a34a", linewidth=1.4, label="trajectory")
+            ax.scatter([x_m[0]], [y_m[0]], [z_m[0]], color="#10b981", s=28)
+            ax.scatter([x_m[-1]], [y_m[-1]], [z_m[-1]], color="#ef4444", s=28)
+            if isinstance(ground, np.ndarray) and ground.size == x_m.size:
+                ax.plot(x_m, y_m, ground, color="#f59e0b", linestyle="--", linewidth=1.0, label="ground")
 
-    ax.set_title(title)
-    ax.set_xlabel(str(payload.get("x_axis_label") or "X (m)"))
-    ax.set_ylabel(str(payload.get("y_axis_label") or "Y (m)"))
-    ax.set_zlabel(str(payload.get("z_axis_label") or "Z (m)"))
-    ax.view_init(elev=24, azim=-58)
-    handles, _ = ax.get_legend_handles_labels()
-    if handles:
-        ax.legend(loc="upper left")
-    fig.tight_layout()
-    fig.savefig(out)
-    plt.close(fig)
+        ax.set_title(title)
+        ax.set_xlabel(str(payload.get("x_axis_label") or "X (m)"))
+        ax.set_ylabel(str(payload.get("y_axis_label") or "Y (m)"))
+        ax.set_zlabel(str(payload.get("z_axis_label") or "Z (m)"))
+        ax.view_init(elev=24, azim=-58)
+        handles, _ = ax.get_legend_handles_labels()
+        if handles:
+            ax.legend(loc="upper left")
+        fig.tight_layout()
+        fig.savefig(out)
+    finally:
+        plt.close(fig)
     return str(out.resolve())

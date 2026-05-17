@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from core.uav_georeference_3d import (
     AIR_TWO_WAY_DEPTH_SCALE_M_PER_NS,
@@ -161,6 +162,31 @@ def test_save_airborne_georeference_3d_preview_png(tmp_path: Path):
 
     assert Path(out_path).exists()
     assert Path(out_path).stat().st_size > 0
+
+
+def test_save_airborne_georeference_3d_preview_closes_figure_on_save_error(
+    tmp_path: Path,
+    monkeypatch,
+):
+    import matplotlib.pyplot as plt
+
+    payload = build_airborne_georeference_3d_payload(
+        np.arange(80, dtype=np.float32).reshape(10, 8),
+        {"total_time_ns": 50.0},
+        {"trace_distance_m": np.linspace(0.0, 1.4, 8)},
+    )
+    assert payload is not None
+    before = set(plt.get_fignums())
+
+    def _raise_save_error(*_args, **_kwargs):
+        raise RuntimeError("savefig failed")
+
+    monkeypatch.setattr("matplotlib.figure.Figure.savefig", _raise_save_error)
+
+    with pytest.raises(RuntimeError, match="savefig failed"):
+        save_airborne_georeference_3d_preview_png(payload, tmp_path / "broken.png")
+
+    assert set(plt.get_fignums()) == before
 
 
 def test_build_airborne_georeference_payload_falls_back_to_trace_distance():

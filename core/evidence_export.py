@@ -127,16 +127,18 @@ def _save_comparison(
     raw: np.ndarray, final: np.ndarray, out_path: Path, right_title: str
 ):
     fig, axes = plt.subplots(1, 2, figsize=(12, 4), constrained_layout=True)
-    axes[0].imshow(raw, cmap="gray", aspect="auto")
-    axes[0].set_title("Raw")
-    axes[0].set_xlabel("Trace")
-    axes[0].set_ylabel("Sample")
-    axes[1].imshow(final, cmap="gray", aspect="auto")
-    axes[1].set_title(right_title)
-    axes[1].set_xlabel("Trace")
-    axes[1].set_ylabel("Sample")
-    fig.savefig(out_path, dpi=150)
-    plt.close(fig)
+    try:
+        axes[0].imshow(raw, cmap="gray", aspect="auto")
+        axes[0].set_title("Raw")
+        axes[0].set_xlabel("Trace")
+        axes[0].set_ylabel("Sample")
+        axes[1].imshow(final, cmap="gray", aspect="auto")
+        axes[1].set_title(right_title)
+        axes[1].set_xlabel("Trace")
+        axes[1].set_ylabel("Sample")
+        fig.savefig(out_path, dpi=150)
+    finally:
+        plt.close(fig)
 
 
 def _safe_replay_name(value: str | None, fallback: str = "replay_evidence") -> str:
