@@ -211,3 +211,22 @@ def test_resample_trace_metadata_rejects_non_finite_target_axis():
             trace_metadata,
             target_trace_distance_m=np.array([0.0, np.nan, 2.0], dtype=np.float32),
         )
+
+
+def test_integrate_optional_sidecars_rejects_non_finite_altimeter_quality_fields():
+    module = importlib.import_module("core.trace_metadata_utils")
+    integrate_optional_sidecars = module.integrate_optional_sidecars
+
+    trace_metadata = {"trace_index": np.array([0, 1], dtype=np.int32)}
+    altimeter_payload = {
+        "timestamp_s": np.array([10.0, 11.0], dtype=np.float64),
+        "height_agl_m": np.array([5.0, 5.2], dtype=np.float64),
+        "snr": np.array([12.0, np.nan], dtype=np.float64),
+    }
+
+    with pytest.raises(ValueError, match="snr"):
+        integrate_optional_sidecars(
+            trace_metadata,
+            trace_timestamps_s=np.array([10.0, 11.0], dtype=np.float64),
+            altimeter_payload=altimeter_payload,
+        )
