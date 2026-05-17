@@ -184,9 +184,9 @@ def _to_jsonable(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [_to_jsonable(item) for item in value]
     if isinstance(value, np.generic):
-        return value.item()
+        return _to_jsonable(value.item())
     if isinstance(value, float) and not np.isfinite(value):
-        return str(value)
+        return None
     return value
 
 
@@ -566,7 +566,7 @@ def _run_legacy_mode(output_dir: Path) -> dict[str, Any]:
         "entries": entries,
     }
     (output_dir / "summary.json").write_text(
-        json.dumps(_to_jsonable(summary), ensure_ascii=False, indent=2),
+        json.dumps(_to_jsonable(summary), ensure_ascii=False, indent=2, allow_nan=False),
         encoding="utf-8",
     )
     _write_legacy_summary_csv(output_dir, entries)
@@ -607,7 +607,7 @@ def _run_rewritten_mode(output_dir: Path, *, include_legacy: bool) -> dict[str, 
         }
 
     (output_dir / "summary.json").write_text(
-        json.dumps(_to_jsonable(summary), ensure_ascii=False, indent=2),
+        json.dumps(_to_jsonable(summary), ensure_ascii=False, indent=2, allow_nan=False),
         encoding="utf-8",
     )
     _write_metrics_csv(output_dir, entries)
