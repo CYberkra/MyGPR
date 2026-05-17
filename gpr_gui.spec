@@ -54,6 +54,10 @@ a = Analysis(
         
         # GUI 扩展
         'qfluentwidgets',
+        'pyqtgraph',
+        'pyqtgraph.opengl',
+        'OpenGL',
+        'OpenGL.GL',
         
         # 项目模块
         'core.gpr_io',

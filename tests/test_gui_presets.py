@@ -1607,6 +1607,39 @@ def test_georef3d_redraw_preserves_user_view():
         app.processEvents()
 
 
+def test_georef3d_expanded_entries_ignore_small_panel_visibility():
+    app = _get_app()
+    page = QualityLogPage()
+    try:
+        data = np.arange(80, dtype=np.float32).reshape(10, 8)
+        payload = build_airborne_georeference_3d_payload(
+            data,
+            {"total_time_ns": 80.0},
+            {
+                "trace_distance_m": np.linspace(0.0, 3.5, 8),
+                "flight_height_m": np.linspace(1.0, 1.2, 8),
+            },
+        )
+        assert payload is not None
+
+        page.set_airborne_georeference_3d_visualization(
+            {"raw": payload, "current": payload, "diff": payload}
+        )
+        page.btn_georef3d_raw.setChecked(False)
+        page.btn_georef3d_current.setChecked(True)
+        page.btn_georef3d_diff.setChecked(False)
+
+        visible = [kind for _label, kind, _payload in page._visible_georef3d_entries()]
+        available = set(page._available_georef3d_entries())
+
+        assert visible == ["current"]
+        assert available == {"raw", "current", "diff"}
+    finally:
+        page.release_plot_resources()
+        page.close()
+        app.processEvents()
+
+
 def test_processing_worker_compacts_large_meta_arrays():
     _get_app()
     raw = np.ones((4, 3), dtype=np.float32)

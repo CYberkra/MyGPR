@@ -16,6 +16,8 @@ from PyQt6.QtWidgets import (
     QStackedWidget,
     QDialog,
     QToolButton,
+    QFileDialog,
+    QMessageBox,
 )
 from PyQt6.QtCore import QTimer
 from qfluentwidgets import PushButton, FluentIcon, SegmentedWidget
@@ -970,7 +972,16 @@ class QualityLogPage(QWidget):
             )
         return entry
 
-    def _plot_georef3d_entry(self, ax, payload: dict, *, label: str, kind: str, palette: dict):
+    def _plot_georef3d_entry(
+        self,
+        ax,
+        payload: dict,
+        *,
+        label: str,
+        kind: str,
+        palette: dict,
+        show_bscan: bool | None = None,
+    ):
         preview = payload.get("preview") or {}
         curtain_x = np.asarray(preview.get("curtain_x_m", []), dtype=np.float64)
         curtain_y = np.asarray(preview.get("curtain_y_m", []), dtype=np.float64)
@@ -979,7 +990,8 @@ class QualityLogPage(QWidget):
         if curtain_x.size == 0 or curtain_x.shape != curtain_y.shape or curtain_x.shape != curtain_z.shape:
             return
 
-        show_bscan = self.btn_georef3d_bscan.isChecked()
+        if show_bscan is None:
+            show_bscan = self.btn_georef3d_bscan.isChecked()
         if show_bscan and amplitude.size and amplitude.shape == curtain_x.shape:
             finite_amp = amplitude[np.isfinite(amplitude)]
             amp_min = float(preview.get("amplitude_min", float(np.min(finite_amp)) if finite_amp.size else 0.0))
@@ -1047,17 +1059,30 @@ class QualityLogPage(QWidget):
                 entries.append(("差异", "diff", payload))
         return entries
 
+    def _available_georef3d_entries(self) -> dict[str, tuple[str, dict]]:
+        """Return all available expanded-preview payloads independent of panel visibility."""
+        bundle = self._georef3d_bundle or {}
+        available: dict[str, tuple[str, dict]] = {}
+        for key, label in (("raw", "原始"), ("current", "当前"), ("diff", "差异")):
+            payload = self._select_georef3d_payload(bundle.get(key))
+            if payload:
+                available[key] = (label, payload)
+        return available
+
     def _open_georef3d_dialog(self) -> None:
         """打开独立大窗口预览；优先 OpenGL，失败时回退 Matplotlib。"""
-        entries = self._visible_georef3d_entries()
+        entries = self._available_georef3d_entries()
         if not entries:
             return
         try:
             self._open_georef3d_pyqtgraph_dialog(entries)
-        except Exception:
-            self._open_georef3d_matplotlib_dialog(entries)
+        except Exception as exc:
+            self._open_georef3d_matplotlib_dialog(
+                entries,
+                fallback_message=f"未安装 OpenGL 预览依赖或初始化失败，已回退 Matplotlib：{exc}",
+            )
 
-    def _open_georef3d_pyqtgraph_dialog(self, entries: list[tuple[str, str, dict]]) -> None:
+    def _open_georef3d_pyqtgraph_dialog(self, entries: dict[str, tuple[str, dict]]) -> None:
         """Use pyqtgraph OpenGL for a smoother expanded 3D preview when available."""
         import pyqtgraph.opengl as gl
 
@@ -1065,33 +1090,112 @@ class QualityLogPage(QWidget):
         dialog.setWindowTitle("UAV-GPR 三维运动补偿预览")
         dialog.resize(1100, 760)
         layout = QVBoxLayout(dialog)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(6, 6, 6, 6)
+        controls = QHBoxLayout()
+        controls.setSpacing(6)
+        layer_buttons = {
+            "raw": self._create_dialog_layer_button(
+                "👁 原始", checked=self.btn_georef3d_raw.isChecked(), parent=dialog
+            ),
+            "current": self._create_dialog_layer_button(
+                "👁 当前", checked=self.btn_georef3d_current.isChecked(), parent=dialog
+            ),
+            "diff": self._create_dialog_layer_button(
+                "👁 差异", checked=self.btn_georef3d_diff.isChecked(), parent=dialog
+            ),
+        }
+        bscan_button = self._create_dialog_layer_button(
+            "👁 B-scan", checked=self.btn_georef3d_bscan.isChecked(), parent=dialog
+        )
+        export_button = QToolButton(dialog)
+        export_button.setText("导出当前视图 PNG")
+        export_button.setToolTip("导出当前 OpenGL 大窗口视图为 PNG")
+        export_button.setAutoRaise(True)
+        for key, button in layer_buttons.items():
+            button.setEnabled(key in entries)
+            controls.addWidget(button)
+        controls.addWidget(bscan_button)
+        controls.addStretch(1)
+        controls.addWidget(export_button)
+        layout.addLayout(controls)
         view = gl.GLViewWidget()
         view.setBackgroundColor("w")
         layout.addWidget(view)
 
-        all_points: list[np.ndarray] = []
-        for label, kind, payload in entries:
-            self._add_georef3d_payload_to_gl_view(view, payload, label=label, kind=kind)
-            x_m = np.asarray(payload.get("local_x_m", []), dtype=np.float64)
-            y_m = np.asarray(payload.get("local_y_m", []), dtype=np.float64)
-            z_m = np.asarray(payload.get("airborne_z_m", []), dtype=np.float64)
-            if x_m.size and y_m.size and z_m.size:
-                all_points.append(np.column_stack([x_m, y_m, z_m]))
+        def redraw_view(reset_camera: bool = False):
+            view.clear()
+            all_points: list[np.ndarray] = []
+            for key, (label, payload) in entries.items():
+                if not layer_buttons[key].isChecked():
+                    continue
+                self._add_georef3d_payload_to_gl_view(
+                    view,
+                    payload,
+                    label=label,
+                    kind=key,
+                    show_bscan=bscan_button.isChecked(),
+                )
+                x_m = np.asarray(payload.get("local_x_m", []), dtype=np.float64)
+                y_m = np.asarray(payload.get("local_y_m", []), dtype=np.float64)
+                z_m = np.asarray(payload.get("airborne_z_m", []), dtype=np.float64)
+                if x_m.size and y_m.size and z_m.size:
+                    all_points.append(np.column_stack([x_m, y_m, z_m]))
+            if reset_camera and all_points:
+                points = np.vstack(all_points)
+                center = np.nanmean(points, axis=0)
+                span = np.nanmax(points, axis=0) - np.nanmin(points, axis=0)
+                distance = float(max(np.nanmax(span) * 2.4, 8.0))
+                view.opts["center"].setX(float(center[0]))
+                view.opts["center"].setY(float(center[1]))
+                view.opts["center"].setZ(float(center[2]))
+                view.setCameraPosition(distance=distance, elevation=22, azimuth=-58)
 
-        if all_points:
-            points = np.vstack(all_points)
-            center = np.nanmean(points, axis=0)
-            span = np.nanmax(points, axis=0) - np.nanmin(points, axis=0)
-            distance = float(max(np.nanmax(span) * 2.4, 8.0))
-            view.opts["center"].setX(float(center[0]))
-            view.opts["center"].setY(float(center[1]))
-            view.opts["center"].setZ(float(center[2]))
-            view.setCameraPosition(distance=distance, elevation=22, azimuth=-58)
+        for button in list(layer_buttons.values()) + [bscan_button]:
+            button.toggled.connect(lambda _checked: redraw_view(False))
+        export_button.clicked.connect(lambda: self._export_georef3d_view_png(view, dialog))
+        redraw_view(True)
 
         dialog.exec()
 
-    def _add_georef3d_payload_to_gl_view(self, view, payload: dict, *, label: str, kind: str) -> None:
+    def _create_dialog_layer_button(
+        self,
+        text: str,
+        *,
+        checked: bool,
+        parent: QWidget | None = None,
+    ) -> QToolButton:
+        button = QToolButton(parent or self)
+        button.setText(text)
+        button.setCheckable(True)
+        button.setChecked(checked)
+        button.setAutoRaise(True)
+        return button
+
+    def _export_georef3d_view_png(self, view, dialog: QDialog) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            dialog,
+            "导出当前三维视图",
+            "uav_gpr_3d_view.png",
+            "PNG Images (*.png)",
+        )
+        if not path:
+            return
+        try:
+            pixmap = view.grab()
+            if pixmap.isNull() or not pixmap.save(path, "PNG"):
+                raise RuntimeError("当前视图截图为空或保存失败")
+        except Exception as exc:
+            QMessageBox.warning(dialog, "导出失败", f"无法导出当前视图 PNG：\n{exc}")
+
+    def _add_georef3d_payload_to_gl_view(
+        self,
+        view,
+        payload: dict,
+        *,
+        label: str,
+        kind: str,
+        show_bscan: bool = True,
+    ) -> None:
         """Add one trajectory/curtain payload to a pyqtgraph GLViewWidget."""
         import pyqtgraph.opengl as gl
 
@@ -1113,7 +1217,7 @@ class QualityLogPage(QWidget):
             )
             view.addItem(gl.GLScatterPlotItem(pos=endpoints, color=endpoint_colors, size=8.0))
 
-        if not self.btn_georef3d_bscan.isChecked():
+        if not show_bscan:
             return
         preview = payload.get("preview") or {}
         curtain_x = np.asarray(preview.get("curtain_x_m", []), dtype=np.float64)
@@ -1188,33 +1292,110 @@ class QualityLogPage(QWidget):
         vertex_colors[:, 3] = 0.50 if kind == "raw" else 0.82
         return vertices, faces, vertex_colors
 
-    def _open_georef3d_matplotlib_dialog(self, entries: list[tuple[str, str, dict]]) -> None:
+    def _open_georef3d_matplotlib_dialog(
+        self,
+        entries: dict[str, tuple[str, dict]],
+        *,
+        fallback_message: str | None = None,
+    ) -> None:
         """Fallback expanded preview that keeps static export independent from OpenGL."""
         dialog = QDialog(self)
         dialog.setWindowTitle("UAV-GPR 三维运动补偿预览")
         dialog.resize(1100, 760)
         layout = QVBoxLayout(dialog)
         layout.setContentsMargins(6, 6, 6, 6)
+        if fallback_message:
+            warning_label = QLabel(fallback_message)
+            warning_label.setWordWrap(True)
+            warning_label.setProperty("class", "hintText")
+            layout.addWidget(warning_label)
+        controls = QHBoxLayout()
+        controls.setSpacing(6)
+        layer_buttons = {
+            "raw": self._create_dialog_layer_button(
+                "👁 原始", checked=self.btn_georef3d_raw.isChecked(), parent=dialog
+            ),
+            "current": self._create_dialog_layer_button(
+                "👁 当前", checked=self.btn_georef3d_current.isChecked(), parent=dialog
+            ),
+            "diff": self._create_dialog_layer_button(
+                "👁 差异", checked=self.btn_georef3d_diff.isChecked(), parent=dialog
+            ),
+        }
+        bscan_button = self._create_dialog_layer_button(
+            "👁 B-scan", checked=self.btn_georef3d_bscan.isChecked(), parent=dialog
+        )
+        export_button = QToolButton(dialog)
+        export_button.setText("导出当前视图 PNG")
+        export_button.setToolTip("导出当前 Matplotlib 大窗口视图为 PNG")
+        export_button.setAutoRaise(True)
+        for key, button in layer_buttons.items():
+            button.setEnabled(key in entries)
+            controls.addWidget(button)
+        controls.addWidget(bscan_button)
+        controls.addStretch(1)
+        controls.addWidget(export_button)
+        layout.addLayout(controls)
         fig = Figure(figsize=(10.8, 7.4), dpi=100)
         canvas = FigureCanvas(fig)
         layout.addWidget(canvas)
-        ax = fig.add_subplot(111, projection="3d")
-        palette = self._get_plot_palette()
-        fig.patch.set_facecolor(palette["fig_face"])
-        for label, kind, payload in entries:
-            self._plot_georef3d_entry(ax, payload, label=label, kind=kind, palette=palette)
-        payload = entries[-1][2]
-        ax.set_title("UAV-GPR 三维运动补偿预览")
-        ax.set_xlabel(payload.get("x_axis_label") or "局部 X (m)")
-        ax.set_ylabel(payload.get("y_axis_label") or "局部 Y (m)")
-        ax.set_zlabel(payload.get("z_axis_label") or "等效高度/深度 (m)")
-        ax.view_init(elev=24, azim=-58)
-        handles, _ = ax.get_legend_handles_labels()
-        if handles:
-            ax.legend(loc="upper left")
-        self._style_3d_axes(ax)
-        canvas.draw_idle()
+
+        def redraw_dialog():
+            fig.clear()
+            ax = fig.add_subplot(111, projection="3d")
+            palette = self._get_plot_palette()
+            fig.patch.set_facecolor(palette["fig_face"])
+            selected = [
+                (label, key, payload)
+                for key, (label, payload) in entries.items()
+                if layer_buttons[key].isChecked()
+            ]
+            if not selected:
+                ax.text2D(0.5, 0.5, "未选择三维图层", transform=ax.transAxes, ha="center")
+                canvas.draw_idle()
+                return
+            for label, kind, payload in selected:
+                self._plot_georef3d_entry(
+                    ax,
+                    payload,
+                    label=label,
+                    kind=kind,
+                    palette=palette,
+                    show_bscan=bscan_button.isChecked(),
+                )
+            payload = selected[-1][2]
+            ax.set_title("UAV-GPR 三维运动补偿预览")
+            ax.set_xlabel(payload.get("x_axis_label") or "局部 X (m)")
+            ax.set_ylabel(payload.get("y_axis_label") or "局部 Y (m)")
+            ax.set_zlabel(payload.get("z_axis_label") or "等效高度/深度 (m)")
+            ax.view_init(elev=24, azim=-58)
+            handles, _ = ax.get_legend_handles_labels()
+            if handles:
+                ax.legend(loc="upper left")
+            self._style_3d_axes(ax)
+            canvas.draw_idle()
+
+        for button in list(layer_buttons.values()) + [bscan_button]:
+            button.toggled.connect(redraw_dialog)
+        export_button.clicked.connect(
+            lambda: self._export_georef3d_matplotlib_png(fig, dialog)
+        )
+        redraw_dialog()
         dialog.exec()
+
+    def _export_georef3d_matplotlib_png(self, fig: Figure, dialog: QDialog) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            dialog,
+            "导出当前三维视图",
+            "uav_gpr_3d_view.png",
+            "PNG Images (*.png)",
+        )
+        if not path:
+            return
+        try:
+            fig.savefig(path, dpi=160, bbox_inches="tight")
+        except Exception as exc:
+            QMessageBox.warning(dialog, "导出失败", f"无法导出当前视图 PNG：\n{exc}")
 
     def _redraw_airborne_georeference_3d(self):
         """绘制三维地理参考预览。"""
