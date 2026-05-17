@@ -933,6 +933,13 @@ def test_canvas_context_menu_exposes_add_node_groups_and_palette_adds_node():
         action_texts = [action.text() for action in menu.actions() if action.text()]
         assert "添加节点" in action_texts
         assert "适配全部节点" in action_texts
+        add_action = next(action for action in menu.actions() if action.text() == "添加节点")
+        add_submenu = add_action.menu()
+        assert add_submenu is not None
+        submenu_texts = [action.text() for action in add_submenu.actions()]
+        assert {"输入", "预处理", "几何", "背景/杂波", "去噪", "成像", "预览", "导出"} <= set(
+            submenu_texts
+        )
         assert page.palette_list.count() > 0
 
         initial = len(page.config.methods)

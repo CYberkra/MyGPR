@@ -2012,15 +2012,15 @@ class WorkflowCanvasView(QGraphicsView):
         menu = QMenu(self)
         add_menu = menu.addMenu("添加节点")
         quick_groups = {
-            "Input": [],
+            "输入": [],
             "QC": ["trace_qc"],
-            "Preprocess": ["set_zero_time", "dc_shift", "dewow", "frequency_filter_1d"],
-            "Geometry": ["motion_compensation_v2", "geometry_depth_context"],
-            "Clutter": ["subtracting_average_2D", "median_background_2D", "svd_bg", "fk_filter"],
-            "Denoise": ["svd_subspace", "wavelet_2d", "wavelet_svd"],
-            "Imaging": ["kirchhoff_migration", "stolt_migration", "time_to_depth"],
-            "Preview": [],
-            "Export": [],
+            "预处理": ["set_zero_time", "dc_shift", "dewow", "frequency_filter_1d"],
+            "几何": ["motion_compensation_v2", "geometry_depth_context"],
+            "背景/杂波": ["subtracting_average_2D", "median_background_2D", "svd_bg", "fk_filter"],
+            "去噪": ["svd_subspace", "wavelet_2d", "wavelet_svd"],
+            "成像": ["kirchhoff_migration", "stolt_migration", "time_to_depth"],
+            "预览": [],
+            "导出": [],
         }
         for label, method_ids in quick_groups.items():
             submenu = add_menu.addMenu(label)
