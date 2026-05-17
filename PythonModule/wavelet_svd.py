@@ -15,6 +15,18 @@ DEFAULT_THRESHOLD_STRATEGY = "mad_universal"
 LEGACY_THRESHOLD_STRATEGY = "global_fraction"
 
 
+def _finite_float(value: object, name: str) -> float:
+    resolved = float(value)
+    if not np.isfinite(resolved):
+        raise ValueError(f"{name} 必须是有限数值")
+    return resolved
+
+
+def _positive_int(value: object, name: str) -> int:
+    resolved = _finite_float(value, name)
+    return max(1, int(round(resolved)))
+
+
 def _resolve_threshold_strategy(strategy: str | None) -> str:
     normalized = str(strategy or DEFAULT_THRESHOLD_STRATEGY).strip().lower()
     if normalized in {DEFAULT_THRESHOLD_STRATEGY, LEGACY_THRESHOLD_STRATEGY}:
@@ -74,8 +86,12 @@ def method_wavelet_svd(
         threshold_mode = "soft"
 
     max_level = pywt.dwtn_max_level(arr.shape, wavelet)
-    actual_levels = max(1, min(int(levels), max_level if max_level > 0 else 1))
-    threshold = float(np.clip(threshold, 0.0, 1.0))
+    actual_levels = max(
+        1, min(_positive_int(levels, "levels"), max_level if max_level > 0 else 1)
+    )
+    threshold = float(np.clip(_finite_float(threshold, "threshold"), 0.0, 1.0))
+    rank_start = _positive_int(rank_start, "rank_start")
+    rank_end = _positive_int(rank_end, "rank_end")
     threshold_strategy = _resolve_threshold_strategy(threshold_strategy)
 
     coeffs = pywt.wavedec2(arr, wavelet=wavelet, level=actual_levels)

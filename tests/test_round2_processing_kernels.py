@@ -551,6 +551,16 @@ def test_method_wavelet_2d_supports_legacy_global_threshold_fallback():
     assert "detail_thresholds" not in meta
 
 
+def test_method_wavelet_2d_rejects_non_finite_tuning_params():
+    raw = np.ones((16, 12), dtype=np.float32)
+
+    with pytest.raises(ValueError, match="threshold"):
+        method_wavelet_2d(raw, threshold=np.nan)
+
+    with pytest.raises(ValueError, match="levels"):
+        method_wavelet_2d(raw, levels=np.inf)
+
+
 def test_method_wavelet_svd_uses_mad_universal_strategy_by_default():
     rng = np.random.default_rng(2)
     raw = rng.normal(0.0, 1.0, size=(64, 48)).astype(np.float32)
@@ -584,6 +594,16 @@ def test_method_wavelet_svd_supports_legacy_global_threshold_fallback():
     assert isinstance(meta["global_abs_threshold"], (int, float))
     assert float(meta["global_abs_threshold"]) > 0.0
     assert "detail_thresholds" not in meta
+
+
+def test_method_wavelet_svd_rejects_non_finite_tuning_params():
+    raw = np.ones((16, 12), dtype=np.float32)
+
+    with pytest.raises(ValueError, match="threshold"):
+        method_wavelet_svd(raw, threshold=np.nan)
+
+    with pytest.raises(ValueError, match="rank_end"):
+        method_wavelet_svd(raw, rank_end=np.inf)
 
 
 def test_method_wnnm_placeholder_stays_identity_while_deferred():
