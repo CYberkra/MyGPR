@@ -102,6 +102,51 @@ def test_truth_metrics_shift_processed_target_roi_with_zero_time_roi_change():
     assert metrics["truth_background_energy_reduction"] > 0.5
 
 
+def test_truth_metrics_accept_numpy_scalar_rois_and_empty_shift_starts():
+    raw = _reference_bscan()
+    processed = raw.copy()
+    ground_truth = {
+        "schema": "mygpr_gprmax_ground_truth_v1",
+        "scenario_id": "numpy_scalar_roi_demo",
+        "analysis_roi": {
+            "time_start_idx": np.array([8]),
+            "time_end_idx": np.array([56]),
+            "dist_start_idx": np.int64(4),
+            "dist_end_idx": np.array([28]),
+        },
+        "targets": [
+            {
+                "target_id": "target_01",
+                "roi": {
+                    "time_start_idx": np.array([24]),
+                    "time_end_idx": np.array([34]),
+                    "dist_start_idx": np.int64(12),
+                    "dist_end_idx": np.array([20]),
+                },
+                "must_preserve": True,
+            }
+        ],
+    }
+
+    metrics = compute_ground_truth_metrics(
+        raw,
+        processed,
+        ground_truth,
+        reference_roi={
+            "time_start_idx": None,
+            "dist_start_idx": np.array([0]),
+        },
+        processed_roi={
+            "time_start_idx": np.array([0]),
+            "dist_start_idx": np.array([0]),
+        },
+    )
+
+    assert all(np.isfinite(value) for value in metrics.values())
+    assert metrics["truth_target_count"] == 1.0
+    assert metrics["truth_target_energy_preservation"] == 1.0
+
+
 def test_truth_metrics_clean_nonfinite_inputs_before_roi_statistics():
     raw = _reference_bscan()
     processed = raw.copy()

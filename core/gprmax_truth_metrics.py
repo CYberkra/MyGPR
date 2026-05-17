@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 
 from core.quality_metrics import ratio_fidelity, relative_reduction
+from core.scalar_utils import to_int
 
 
 EPS = 1.0e-9
@@ -215,28 +216,44 @@ def _roi_shift(
     if not isinstance(reference_roi, dict) or not isinstance(processed_roi, dict):
         return 0, 0
     return (
-        int(processed_roi.get("time_start_idx", 0))
-        - int(reference_roi.get("time_start_idx", 0)),
-        int(processed_roi.get("dist_start_idx", 0))
-        - int(reference_roi.get("dist_start_idx", 0)),
+        to_int(processed_roi.get("time_start_idx"), default=0)
+        - to_int(reference_roi.get("time_start_idx"), default=0),
+        to_int(processed_roi.get("dist_start_idx"), default=0)
+        - to_int(reference_roi.get("dist_start_idx"), default=0),
     )
 
 
 def _shift_roi(roi: dict[str, int], row_shift: int, col_shift: int) -> dict[str, int]:
     return {
-        "time_start_idx": int(roi.get("time_start_idx", 0)) + int(row_shift),
-        "time_end_idx": int(roi.get("time_end_idx", 0)) + int(row_shift),
-        "dist_start_idx": int(roi.get("dist_start_idx", 0)) + int(col_shift),
-        "dist_end_idx": int(roi.get("dist_end_idx", 0)) + int(col_shift),
+        "time_start_idx": to_int(roi.get("time_start_idx"), default=0)
+        + int(row_shift),
+        "time_end_idx": to_int(roi.get("time_end_idx"), default=0)
+        + int(row_shift),
+        "dist_start_idx": to_int(roi.get("dist_start_idx"), default=0)
+        + int(col_shift),
+        "dist_end_idx": to_int(roi.get("dist_end_idx"), default=0)
+        + int(col_shift),
     }
 
 
 def _clamp_roi(roi: dict[str, Any], shape: tuple[int, int]) -> dict[str, int]:
     samples, traces = int(shape[0]), int(shape[1])
-    t0 = max(0, min(int(roi.get("time_start_idx", 0)), max(samples - 1, 0)))
-    t1 = max(t0 + 1, min(int(roi.get("time_end_idx", samples)), samples))
-    d0 = max(0, min(int(roi.get("dist_start_idx", 0)), max(traces - 1, 0)))
-    d1 = max(d0 + 1, min(int(roi.get("dist_end_idx", traces)), traces))
+    t0 = max(
+        0,
+        min(to_int(roi.get("time_start_idx"), default=0), max(samples - 1, 0)),
+    )
+    t1 = max(
+        t0 + 1,
+        min(to_int(roi.get("time_end_idx"), default=samples), samples),
+    )
+    d0 = max(
+        0,
+        min(to_int(roi.get("dist_start_idx"), default=0), max(traces - 1, 0)),
+    )
+    d1 = max(
+        d0 + 1,
+        min(to_int(roi.get("dist_end_idx"), default=traces), traces),
+    )
     return {
         "time_start_idx": int(t0),
         "time_end_idx": int(t1),
