@@ -54,6 +54,12 @@ def _gradient_energy(data: np.ndarray) -> np.ndarray:
     return np.sqrt(grad_t**2 + grad_x**2)
 
 
+def _row_mean_square(arr: np.ndarray) -> np.ndarray:
+    if arr.shape[1] == 0:
+        return np.zeros(arr.shape[0], dtype=np.float64)
+    return np.einsum("ij,ij->i", arr, arr, optimize=True) / arr.shape[1]
+
+
 def build_saliency_map(data: np.ndarray) -> np.ndarray:
     """Build a lightweight saliency map from amplitude and gradient energy."""
     arr = _as_clean_2d(data)
@@ -188,7 +194,7 @@ def estimate_lateral_correlation_length(
 def estimate_depth_attenuation_curve(data: np.ndarray) -> np.ndarray:
     """Estimate smoothed per-depth attenuation envelope."""
     arr = _as_clean_2d(data)
-    rms = np.sqrt(np.mean(arr**2, axis=1))
+    rms = np.sqrt(_row_mean_square(arr))
     window = max(5, min(len(rms) // 20, 41))
     if window % 2 == 0:
         window += 1
@@ -368,7 +374,7 @@ def local_saliency_preservation(before: np.ndarray, after: np.ndarray) -> float:
 def depth_rms_cv(data: np.ndarray) -> float:
     """Coefficient of variation of per-depth RMS values."""
     arr = _as_clean_2d(data)
-    depth_rms = np.sqrt(np.mean(arr**2, axis=1))
+    depth_rms = np.sqrt(_row_mean_square(arr))
     mean_rms = float(np.mean(depth_rms))
     if mean_rms <= EPS:
         return 0.0
