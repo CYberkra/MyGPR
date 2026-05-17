@@ -12,6 +12,8 @@ from core.quality_metrics import (
     baseline_bias,
     compute_benchmark_metrics,
     deep_zone_contrast,
+    detect_first_break_indices,
+    first_break_std,
     horizontal_coherence,
     local_saliency_preservation,
     low_freq_energy_ratio,
@@ -110,3 +112,16 @@ def test_compute_benchmark_metrics_exposes_stable_metric_schema():
     assert "local_saliency_preservation" in metrics
     assert "clipping_ratio_after" in metrics
     assert "first_break_sharpness_after" in metrics
+
+
+def test_first_break_metrics_handle_non_finite_controls():
+    raw = _build_test_profile()
+
+    indices = detect_first_break_indices(
+        raw,
+        threshold=np.nan,
+        search_ratio=np.inf,
+    )
+
+    assert indices.shape == (raw.shape[1],)
+    assert np.isfinite(first_break_std(raw, threshold=np.nan))

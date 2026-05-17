@@ -249,12 +249,15 @@ def detect_first_break_indices(
     """Detect per-trace first-break indices using lightweight rules."""
     arr = _as_clean_2d(data)
     n_samples, n_traces = arr.shape
-    search_end = max(4, min(n_samples, int(np.ceil(n_samples * float(search_ratio)))))
+    resolved_search_ratio = float(
+        np.clip(_finite_scalar(search_ratio, 0.35), 1.0e-4, 1.0)
+    )
+    search_end = max(4, min(n_samples, int(np.ceil(n_samples * resolved_search_ratio))))
     abs_norm = _normalized_abs(arr)
     gradient_norm = _normalized_abs(np.diff(arr, axis=0, prepend=arr[[0], :]))
     smooth_env = uniform_filter1d(abs_norm, size=5, axis=0, mode="nearest")
 
-    threshold = float(np.clip(threshold, 1.0e-4, 0.95))
+    threshold = float(np.clip(_finite_scalar(threshold, 0.05), 1.0e-4, 0.95))
     indices = np.zeros(n_traces, dtype=np.int32)
 
     for trace_idx in range(n_traces):
