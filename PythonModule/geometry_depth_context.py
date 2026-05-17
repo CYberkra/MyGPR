@@ -36,7 +36,8 @@ def method_geometry_depth_context(
     velocity = info.get("velocity_m_per_ns")
     if isinstance(velocity_model, dict):
         velocity = velocity_model.get("velocity_m_per_ns", velocity)
-    if require_velocity_model and velocity is None:
+    velocity_value = _positive_float(velocity)
+    if require_velocity_model and velocity_value is None:
         warnings.append(
             build_runtime_warning(
                 "missing_velocity_model",
@@ -57,7 +58,7 @@ def method_geometry_depth_context(
             )
         )
 
-    time_window_ns = _safe_float(info.get("total_time_ns"))
+    time_window_ns = _positive_float(info.get("total_time_ns"))
     if require_time_window and time_window_ns is None:
         warnings.append(
             build_runtime_warning(
@@ -82,7 +83,7 @@ def method_geometry_depth_context(
         )
 
     migration_context = {
-        "velocity_m_per_ns": _safe_float(velocity),
+        "velocity_m_per_ns": velocity_value,
         "trace_interval_m": trace_interval,
         "time_window_ns": time_window_ns,
         "has_agl_height": bool(has_agl),
@@ -132,3 +133,8 @@ def _safe_float(value: Any) -> float | None:
     if not np.isfinite(result):
         return None
     return result
+
+
+def _positive_float(value: Any) -> float | None:
+    result = _safe_float(value)
+    return result if result is not None and result > 0.0 else None

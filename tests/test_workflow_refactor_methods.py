@@ -128,6 +128,30 @@ def test_geometry_depth_context_warns_for_missing_inputs_and_resolves_spacing():
     )
 
 
+def test_geometry_depth_context_treats_nonpositive_context_as_missing():
+    data = np.ones((8, 4), dtype=np.float32)
+    params = prepare_runtime_params(
+        "geometry_depth_context",
+        {
+            "require_velocity_model": True,
+            "require_trace_spacing": False,
+            "require_time_window": True,
+            "require_agl": False,
+        },
+        {"velocity_m_per_ns": 0.0, "total_time_ns": np.inf},
+        None,
+        data.shape,
+    )
+
+    _, meta = run_processing_method(data, "geometry_depth_context", params)
+    warning_codes = {warning.get("code") for warning in meta.get("runtime_warnings", [])}
+
+    assert meta["geometry_depth_context"]["velocity_m_per_ns"] is None
+    assert meta["geometry_depth_context"]["time_window_ns"] is None
+    assert "missing_velocity_model" in warning_codes
+    assert "missing_time_window" in warning_codes
+
+
 def test_kirchhoff_runtime_length_ignores_invalid_track_length():
     params = prepare_runtime_params(
         "kirchhoff_migration",
