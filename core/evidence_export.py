@@ -286,6 +286,7 @@ def _write_motion_evidence_artifacts(
     if diff is not None:
         written.append(diff_bscan)
 
+    artifact_warnings: list[dict[str, Any]] = []
     for name, data, header, metadata, title in [
         ("raw_3d_preview.png", raw, raw_header, raw_metadata, "Raw 3D preview"),
         ("current_3d_preview.png", current, current_header, current_metadata, "Current 3D preview"),
@@ -305,12 +306,20 @@ def _write_motion_evidence_artifacts(
                 rel = Path("motion") / name
                 save_airborne_georeference_3d_preview_png(payload, root / rel, title=title)
                 written.append(rel)
-        except Exception:
+        except Exception as exc:
+            artifact_warnings.append(
+                {
+                    "code": "motion_3d_preview_export_failed",
+                    "file": str(Path("motion") / name).replace("\\", "/"),
+                    "message": str(exc),
+                }
+            )
             continue
 
     motion_quality_flags = {
         "runtime_warnings": _to_jsonable(app_context.get("runtime_warnings") or []),
         "last_run_summary": _to_jsonable(app_context.get("last_run_summary") or {}),
+        "artifact_warnings": _to_jsonable(artifact_warnings),
     }
     motion_params = {
         "preset_key": app_context.get("preset_key"),

@@ -163,3 +163,42 @@ def test_export_replay_evidence_bundle_includes_motion_preview_artifacts(tmp_pat
         assert "motion/diff_3d_preview.png" in names
         assert "motion/motion_quality_flags.json" in names
         assert "motion/motion_params.json" in names
+
+
+def test_motion_preview_export_failures_are_recorded(tmp_path: Path, monkeypatch):
+    state = SharedDataState()
+    raw = np.arange(120, dtype=np.float32).reshape(12, 10)
+    metadata = {
+        "trace_distance_m": np.linspace(0.0, 1.8, 10),
+        "flight_height_m": np.linspace(1.0, 1.2, 10),
+    }
+    state.load_data(
+        raw,
+        path="demo.csv",
+        header_info={"total_time_ns": 60.0, "trace_interval_m": 0.2},
+        trace_metadata=metadata,
+    )
+    state.apply_current_data(raw + 2.0, push_history=True, label="motion_compensation_v2")
+
+    def _raise_preview_error(*_args, **_kwargs):
+        raise RuntimeError("preview backend unavailable")
+
+    monkeypatch.setattr(
+        "core.evidence_export.save_airborne_georeference_3d_preview_png",
+        _raise_preview_error,
+    )
+
+    zip_path = tmp_path / "replay.zip"
+    export_replay_evidence_bundle(
+        state.get_replay_evidence_package(),
+        zip_path,
+        save_images=True,
+    )
+
+    with zipfile.ZipFile(zip_path) as zf:
+        flags = json.loads(zf.read("motion/motion_quality_flags.json").decode("utf-8"))
+
+    warnings = flags["artifact_warnings"]
+    assert warnings
+    assert warnings[0]["code"] == "motion_3d_preview_export_failed"
+    assert "preview backend unavailable" in warnings[0]["message"]
