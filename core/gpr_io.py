@@ -547,7 +547,7 @@ def _attach_gprmax_ground_truth(
 def _safe_attr_list(value: Any) -> list[float] | None:
     parsed: list[float] = []
     try:
-        iterator = list(value)
+        iterator = iter(value)
     except Exception:
         return None
     for item in iterator:
