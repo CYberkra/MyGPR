@@ -15,6 +15,7 @@ Date: 2026-03-31
 from __future__ import annotations
 
 import importlib
+import json
 import os
 import re
 import sys
@@ -464,6 +465,77 @@ def _related_gprmax_out_files(out_path: Path) -> list[Path]:
     return []
 
 
+def _find_gprmax_manifest_for_output(out_path: Path) -> Path | None:
+    """Find a manifest JSON near a gprMax output file."""
+    candidates: list[Path] = []
+    for pattern in ("*_manifest.json", "manifest.json", "dataset_manifest.json"):
+        candidates.extend(sorted(out_path.parent.glob(pattern)))
+    unique = list(dict.fromkeys(candidates))
+    if not unique:
+        return None
+
+    matching: list[Path] = []
+    for candidate in unique:
+        try:
+            payload = json.loads(candidate.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        primary = _manifest_path_value(
+            payload,
+            "primary_out_file",
+            "primary_out_path",
+            "out_file",
+            "merged_out_file",
+        )
+        if primary and Path(str(primary)).name == out_path.name:
+            matching.append(candidate)
+    if len(matching) == 1:
+        return matching[0]
+    return unique[0] if len(unique) == 1 else None
+
+
+def _manifest_path_value(payload: dict[str, Any], *keys: str) -> str | None:
+    groups = [
+        payload,
+        payload.get("paths_relative_to_output_dir"),
+        payload.get("paths"),
+        payload.get("files"),
+    ]
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        for key in keys:
+            value = group.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+
+
+def _attach_gprmax_ground_truth(
+    header_info: dict[str, Any],
+    out_path: Path,
+) -> dict[str, Any]:
+    """Attach converted gprMax ground truth from a nearby manifest when available."""
+    manifest_path = _find_gprmax_manifest_for_output(out_path)
+    if manifest_path is None:
+        return header_info
+    header = dict(header_info)
+    try:
+        from core.gprmax_ground_truth import load_ground_truth_from_manifest
+
+        ground_truth = load_ground_truth_from_manifest(str(manifest_path))
+    except Exception as exc:
+        header["ground_truth_load_error"] = str(exc)
+        header["ground_truth_manifest_path"] = str(manifest_path)
+        return header
+    if ground_truth:
+        header["ground_truth"] = ground_truth
+        header["ground_truth_manifest_path"] = str(manifest_path)
+    return header
+
+
 def _safe_attr_list(value: Any) -> list[float] | None:
     try:
         return [float(v) for v in value]
@@ -785,6 +857,7 @@ def read_gprmax_out(out_path: str) -> dict:
             attrs=attrs,
             gprmax_config=gprmax_config,
         )
+        header_info = _attach_gprmax_ground_truth(header_info, out_path)
         trace_metadata = _build_gprmax_trace_metadata(data.shape[1], gprmax_config)
         return {
             "data": data.astype(np.float32),
@@ -837,6 +910,7 @@ def read_gprmax_out(out_path: str) -> dict:
         attrs=attrs,
         gprmax_config=gprmax_config,
     )
+    header_info = _attach_gprmax_ground_truth(header_info, out_path)
     trace_metadata = _build_gprmax_trace_metadata(traces, gprmax_config)
 
     return {

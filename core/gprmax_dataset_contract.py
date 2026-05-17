@@ -10,8 +10,11 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import yaml
 
+from core.gprmax_ground_truth import (
+    convert_gprmax_ground_truth_to_mygpr,
+    load_gprmax_ground_truth,
+)
 from core.gpr_io import read_gprmax_out
 
 
@@ -20,8 +23,6 @@ MANIFEST_CANDIDATES = (
     "manifest.json",
     "dataset_manifest.json",
 )
-GROUND_TRUTH_SCHEMA = "gprmax_ground_truth_v1"
-MYGPR_GROUND_TRUTH_SCHEMA = "mygpr_gprmax_ground_truth_v1"
 
 
 @dataclass(frozen=True)
@@ -131,14 +132,7 @@ def resolve_manifest_path(path: str | Path) -> Path:
 
 def load_ground_truth_yaml(path: str | Path) -> dict[str, Any]:
     """Read gprMax ground-truth YAML sidecar."""
-    ground_truth_path = Path(path).expanduser().resolve()
-    if not ground_truth_path.exists():
-        raise FileNotFoundError(f"gprMax ground_truth.yaml not found: {ground_truth_path}")
-    with ground_truth_path.open("r", encoding="utf-8") as handle:
-        payload = yaml.safe_load(handle) or {}
-    if not isinstance(payload, dict):
-        raise ValueError(f"ground_truth.yaml must contain a mapping: {ground_truth_path}")
-    return payload
+    return load_gprmax_ground_truth(str(path))
 
 
 def adapt_gprmax_ground_truth(
@@ -149,163 +143,9 @@ def adapt_gprmax_ground_truth(
 ) -> dict[str, Any]:
     """Convert gprMax closed-interval ROI YAML into MyGPR truth manifest."""
     source = dict(ground_truth or {})
-    source_schema = str(source.get("schema") or "")
-    if source_schema and source_schema != GROUND_TRUTH_SCHEMA:
-        if source_schema == MYGPR_GROUND_TRUTH_SCHEMA:
-            return source
-        raise ValueError(f"Unsupported gprMax ground-truth schema: {source_schema}")
-
-    resolved_scenario_id = str(
-        scenario_id or source.get("scenario_id") or source.get("name") or "gprmax_dataset"
-    )
-    targets = _adapt_targets(source)
-    adapted: dict[str, Any] = {
-        "schema": MYGPR_GROUND_TRUTH_SCHEMA,
-        "source_schema": source_schema or GROUND_TRUTH_SCHEMA,
-        "scenario_id": resolved_scenario_id,
-        "targets": targets,
-    }
-
-    analysis_roi = _adapt_optional_roi(source.get("analysis_roi"))
-    if analysis_roi is None and data_shape is not None:
-        analysis_roi = {
-            "time_start_idx": 0,
-            "time_end_idx": int(data_shape[0]),
-            "dist_start_idx": 0,
-            "dist_end_idx": int(data_shape[1]),
-        }
-    if analysis_roi is not None:
-        adapted["analysis_roi"] = _clamp_roi(analysis_roi, data_shape)
-
-    wavefield_rois = _adapt_wavefield_rois(source.get("wavefield_rois"), data_shape)
-    if wavefield_rois:
-        adapted["wavefield_rois"] = wavefield_rois
-
-    metadata = source.get("metadata")
-    if isinstance(metadata, dict):
-        adapted["metadata"] = dict(metadata)
-
-    return adapted
-
-
-def _adapt_targets(source: dict[str, Any]) -> list[dict[str, Any]]:
-    raw_targets = source.get("targets")
-    if isinstance(raw_targets, list):
-        return [
-            _adapt_target(item, index)
-            for index, item in enumerate(raw_targets, start=1)
-            if isinstance(item, dict)
-        ]
-    target_roi = source.get("target_roi")
-    if target_roi is None:
-        return []
-    return [
-        _adapt_target(
-            {
-                "target_id": source.get("target_id") or source.get("id"),
-                "type": source.get("target_type") or source.get("type"),
-                "target_roi": target_roi,
-                "must_preserve": source.get("must_preserve", True),
-            },
-            1,
-        )
-    ]
-
-
-def _adapt_target(raw: dict[str, Any], index: int) -> dict[str, Any]:
-    roi = _adapt_optional_roi(raw.get("target_roi") or raw.get("roi"))
-    if roi is None:
-        raise ValueError(f"gprMax target #{index} is missing target_roi")
-    target: dict[str, Any] = {
-        "target_id": str(raw.get("target_id") or raw.get("id") or f"target_{index:02d}"),
-        "type": str(raw.get("target_type") or raw.get("type") or "target"),
-        "roi": roi,
-        "must_preserve": bool(raw.get("must_preserve", True)),
-    }
-    for key in ("label", "material", "notes"):
-        if key in raw:
-            target[key] = raw[key]
-    return target
-
-
-def _adapt_wavefield_rois(
-    raw_rois: Any,
-    data_shape: tuple[int, int] | None,
-) -> dict[str, dict[str, Any]]:
-    if not isinstance(raw_rois, dict):
-        return {}
-    adapted: dict[str, dict[str, Any]] = {}
-    for key, value in raw_rois.items():
-        if isinstance(value, dict) and ("sample_range" in value or "trace_range" in value):
-            roi = _adapt_optional_roi(value)
-            payload: dict[str, Any] = {}
-        elif isinstance(value, dict):
-            roi = _adapt_optional_roi(value.get("roi"))
-            payload = {k: v for k, v in value.items() if k != "roi"}
-        else:
-            continue
-        if roi is None:
-            continue
-        payload["roi"] = _clamp_roi(roi, data_shape)
-        adapted[str(key)] = payload
-    return adapted
-
-
-def _adapt_optional_roi(raw_roi: Any) -> dict[str, int] | None:
-    if raw_roi is None:
-        return None
-    if not isinstance(raw_roi, dict):
-        raise ValueError(f"ROI must be a mapping, got {type(raw_roi).__name__}")
-    if {"time_start_idx", "time_end_idx", "dist_start_idx", "dist_end_idx"}.issubset(
-        raw_roi.keys()
-    ):
-        return {
-            "time_start_idx": int(raw_roi["time_start_idx"]),
-            "time_end_idx": int(raw_roi["time_end_idx"]),
-            "dist_start_idx": int(raw_roi["dist_start_idx"]),
-            "dist_end_idx": int(raw_roi["dist_end_idx"]),
-        }
-    sample_range = raw_roi.get("sample_range")
-    trace_range = raw_roi.get("trace_range")
-    if sample_range is None or trace_range is None:
-        raise ValueError(f"ROI requires sample_range and trace_range: {raw_roi}")
-    s0, s1 = _closed_range(sample_range, label="sample_range")
-    t0, t1 = _closed_range(trace_range, label="trace_range")
-    return {
-        "time_start_idx": s0,
-        "time_end_idx": s1 + 1,
-        "dist_start_idx": t0,
-        "dist_end_idx": t1 + 1,
-    }
-
-
-def _closed_range(value: Any, *, label: str) -> tuple[int, int]:
-    if not isinstance(value, (list, tuple)) or len(value) != 2:
-        raise ValueError(f"{label} must be a two-item closed interval")
-    start = int(value[0])
-    end = int(value[1])
-    if start < 0 or end < start:
-        raise ValueError(f"{label} must satisfy 0 <= start <= end: {value}")
-    return start, end
-
-
-def _clamp_roi(
-    roi: dict[str, int],
-    data_shape: tuple[int, int] | None,
-) -> dict[str, int]:
-    if data_shape is None:
-        return dict(roi)
-    samples, traces = int(data_shape[0]), int(data_shape[1])
-    time_start = max(0, min(int(roi["time_start_idx"]), max(samples - 1, 0)))
-    time_end = max(time_start + 1, min(int(roi["time_end_idx"]), samples))
-    dist_start = max(0, min(int(roi["dist_start_idx"]), max(traces - 1, 0)))
-    dist_end = max(dist_start + 1, min(int(roi["dist_end_idx"]), traces))
-    return {
-        "time_start_idx": time_start,
-        "time_end_idx": time_end,
-        "dist_start_idx": dist_start,
-        "dist_end_idx": dist_end,
-    }
+    if scenario_id and not source.get("dataset_id"):
+        source["dataset_id"] = scenario_id
+    return convert_gprmax_ground_truth_to_mygpr(source, data_shape=data_shape)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -339,11 +179,20 @@ def _resolve_optional_path(
     *,
     keys: tuple[str, ...],
 ) -> Path | None:
-    for key in keys:
-        value = manifest.get(key)
-        if isinstance(value, str) and value.strip():
-            path = Path(value)
-            return path.expanduser().resolve() if path.is_absolute() else (dataset_dir / path).resolve()
+    groups = [
+        manifest,
+        manifest.get("paths_relative_to_output_dir"),
+        manifest.get("paths"),
+        manifest.get("files"),
+    ]
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        for key in keys:
+            value = group.get(key)
+            if isinstance(value, str) and value.strip():
+                path = Path(value)
+                return path.expanduser().resolve() if path.is_absolute() else (dataset_dir / path).resolve()
     return None
 
 

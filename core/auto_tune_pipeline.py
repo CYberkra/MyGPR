@@ -132,6 +132,10 @@ def run_auto_tune_pipeline(
     arr = np.asarray(data, dtype=np.float32)
     if arr.ndim != 2 or arr.size == 0:
         raise AutoTunePipelineError("流程级自动选参需要二维非空 B-scan 数据")
+    if ground_truth is None and isinstance(header_info, dict):
+        embedded_ground_truth = header_info.get("ground_truth")
+        if isinstance(embedded_ground_truth, dict):
+            ground_truth = embedded_ground_truth
 
     profile_key = baseline_profile_key or (
         None if pipeline is not None else "uav_gpr_experience_baseline_v1"

@@ -35,12 +35,18 @@ def compute_ground_truth_metrics(
     proc_analysis_roi = _shift_roi(ref_analysis_roi, row_shift, col_shift)
 
     ref_target_rois = _target_rois(ground_truth, ref.shape)
+    ref_background_rois = _background_rois(ground_truth, ref.shape)
+    proc_background_rois = [
+        _shift_roi(roi, row_shift, col_shift) for roi in ref_background_rois
+    ]
     if not ref_target_rois:
         return _compute_no_target_metrics(
             ref,
             proc,
             ref_analysis_roi=ref_analysis_roi,
             proc_analysis_roi=proc_analysis_roi,
+            ref_background_rois=ref_background_rois,
+            proc_background_rois=proc_background_rois,
         )
     proc_target_rois = [
         _shift_roi(roi, row_shift, col_shift) for roi in ref_target_rois
@@ -48,10 +54,14 @@ def compute_ground_truth_metrics(
 
     ref_target_mask = _mask_from_rois(ref.shape, ref_target_rois)
     proc_target_mask = _mask_from_rois(proc.shape, proc_target_rois)
-    ref_analysis_mask = _mask_from_rois(ref.shape, [ref_analysis_roi])
-    proc_analysis_mask = _mask_from_rois(proc.shape, [proc_analysis_roi])
-    ref_background_mask = ref_analysis_mask & ~ref_target_mask
-    proc_background_mask = proc_analysis_mask & ~proc_target_mask
+    if ref_background_rois:
+        ref_background_mask = _mask_from_rois(ref.shape, ref_background_rois)
+        proc_background_mask = _mask_from_rois(proc.shape, proc_background_rois)
+    else:
+        ref_analysis_mask = _mask_from_rois(ref.shape, [ref_analysis_roi])
+        proc_analysis_mask = _mask_from_rois(proc.shape, [proc_analysis_roi])
+        ref_background_mask = ref_analysis_mask & ~ref_target_mask
+        proc_background_mask = proc_analysis_mask & ~proc_target_mask
     if not np.any(ref_background_mask):
         ref_background_mask = ~ref_target_mask
     if not np.any(proc_background_mask):
@@ -111,9 +121,15 @@ def _compute_no_target_metrics(
     *,
     ref_analysis_roi: dict[str, int],
     proc_analysis_roi: dict[str, int],
+    ref_background_rois: list[dict[str, int]] | None = None,
+    proc_background_rois: list[dict[str, int]] | None = None,
 ) -> dict[str, float]:
-    ref_mask = _mask_from_rois(reference.shape, [ref_analysis_roi])
-    proc_mask = _mask_from_rois(processed.shape, [proc_analysis_roi])
+    if ref_background_rois:
+        ref_mask = _mask_from_rois(reference.shape, ref_background_rois)
+        proc_mask = _mask_from_rois(processed.shape, proc_background_rois or [])
+    else:
+        ref_mask = _mask_from_rois(reference.shape, [ref_analysis_roi])
+        proc_mask = _mask_from_rois(processed.shape, [proc_analysis_roi])
     ref_energy = _masked_mean_square(reference, ref_mask)
     proc_energy = _masked_mean_square(processed, proc_mask)
     background_reduction = relative_reduction(ref_energy, proc_energy)
@@ -176,6 +192,17 @@ def _target_rois(
         if target.get("must_preserve") is False:
             continue
         roi = target.get("roi")
+        if isinstance(roi, dict):
+            rois.append(_clamp_roi(roi, shape))
+    return rois
+
+
+def _background_rois(
+    ground_truth: dict[str, Any],
+    shape: tuple[int, int],
+) -> list[dict[str, int]]:
+    rois: list[dict[str, int]] = []
+    for roi in ground_truth.get("background_rois", []) or []:
         if isinstance(roi, dict):
             rois.append(_clamp_roi(roi, shape))
     return rois
