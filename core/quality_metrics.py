@@ -13,17 +13,27 @@ from scipy.ndimage import uniform_filter1d
 EPS = 1.0e-12
 
 
+def _finite_scalar(value: float, default: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return float(default)
+    return parsed if np.isfinite(parsed) else float(default)
+
+
 def relative_reduction(before: float, after: float) -> float:
     """Normalized improvement for metrics where lower is better."""
-    base = max(float(before), EPS)
-    return float(np.clip((base - float(after)) / base, -1.0, 1.0))
+    before_value = _finite_scalar(before, EPS)
+    after_value = _finite_scalar(after, before_value)
+    base = max(before_value, EPS)
+    return float(np.clip((base - after_value) / base, -1.0, 1.0))
 
 
 def ratio_fidelity(ratio: float, target: float = 1.0, tol: float = 0.15) -> float:
     """Score how close a ratio is to the desired target value."""
-    r = max(float(ratio), EPS)
-    t = max(float(target), EPS)
-    k = max(np.log1p(float(tol)), EPS)
+    r = max(_finite_scalar(ratio, EPS), EPS)
+    t = max(_finite_scalar(target, 1.0), EPS)
+    k = max(np.log1p(max(_finite_scalar(tol, 0.15), 0.0)), EPS)
     return float(np.exp(-abs(np.log(r / t)) / k))
 
 

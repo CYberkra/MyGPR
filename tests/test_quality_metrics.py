@@ -71,6 +71,13 @@ def test_relative_reduction_rewards_lower_after_value():
     assert relative_reduction(10.0, 12.0) < 0.0
 
 
+def test_relative_reduction_and_ratio_fidelity_do_not_return_nan_for_bad_scalars():
+    assert np.isfinite(relative_reduction(np.nan, 1.0))
+    assert np.isfinite(relative_reduction(10.0, np.inf))
+    assert np.isfinite(ratio_fidelity(np.nan))
+    assert np.isfinite(ratio_fidelity(1.0, target=np.inf, tol=np.nan))
+
+
 def test_ratio_fidelity_peaks_near_unity_and_penalizes_overshoot():
     center = ratio_fidelity(1.0)
     mild = ratio_fidelity(1.1)
