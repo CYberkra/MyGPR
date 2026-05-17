@@ -6,7 +6,11 @@ from __future__ import annotations
 
 import numpy as np
 
-from core.evidence_export import _resample_columns_linear, _time_distance_ranges
+from core.evidence_export import (
+    _resample_columns_linear,
+    _time_distance_ranges,
+    _to_jsonable,
+)
 
 
 def test_resample_columns_linear_matches_numpy_interp_per_row():
@@ -54,3 +58,19 @@ def test_time_distance_ranges_accept_numpy_scalar_header_values():
 
     assert time_range == (0.0, 60.0)
     assert distance_range == (0.0, 0.75)
+
+
+def test_evidence_jsonable_serializes_nonfinite_numbers_as_null():
+    payload = {
+        "nan_scalar": np.float64(np.nan),
+        "inf_array": np.array([1.0, np.inf], dtype=np.float32),
+        "ok_int": np.int64(3),
+    }
+
+    safe = _to_jsonable(payload)
+
+    assert safe == {
+        "nan_scalar": None,
+        "inf_array": [1.0, None],
+        "ok_int": 3,
+    }
