@@ -21,7 +21,7 @@ def _resolve_time_step_s(ny: int, time_step_s: float | None) -> float:
             value = float(time_step_s)
             if value > 0:
                 return value
-        except Exception:
+        except (TypeError, ValueError):
             pass
     return 48e-9 / max(1, int(ny))
 
