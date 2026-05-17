@@ -8,6 +8,18 @@ import numpy as np
 
 from core.gprpy_compat import apply_gprpy_agc_gain
 from core.processing_engine import run_processing_method
+from core.runtime_warnings import merge_runtime_warnings
+
+
+def test_merge_runtime_warnings_accepts_generator_without_materializing_group():
+    warnings = (
+        {"code": "demo", "message": "warning", "details": {"idx": idx}}
+        for idx in range(2)
+    )
+
+    merged = merge_runtime_warnings(warnings)
+
+    assert [item["details"]["idx"] for item in merged] == [0, 1]
 
 
 def test_agc_gain_emits_clamp_and_fallback_warning():

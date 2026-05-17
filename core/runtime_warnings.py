@@ -33,7 +33,7 @@ def merge_runtime_warnings(*warning_groups: Any) -> list[dict[str, Any]]:
         if isinstance(group, dict):
             iterable = [group]
         else:
-            iterable = list(group)
+            iterable = group
         for item in iterable:
             if not isinstance(item, dict):
                 continue
