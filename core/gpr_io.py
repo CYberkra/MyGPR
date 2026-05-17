@@ -82,6 +82,13 @@ def show_image(*args, **kwargs):
     return _read_file_data_module().show_image(*args, **kwargs)
 
 
+def _finite_float_or_raise(value: Any, context: str) -> float:
+    parsed = _safe_finite_float(value)
+    if parsed is None:
+        raise ValueError(f"{context} contains non-finite numeric value: {value!r}")
+    return parsed
+
+
 def read_gprmax_in(in_path: str) -> Dict[str, Any]:
     """Parse gprMax .in configuration file.
 
@@ -121,12 +128,15 @@ def read_gprmax_in(in_path: str) -> Dict[str, Any]:
                 config["title"] = line.replace("#title:", "").strip()
             elif line.startswith("#domain:"):
                 parts = line.replace("#domain:", "").strip().split()
-                config["domain"] = [float(p) for p in parts]
+                config["domain"] = [_finite_float_or_raise(p, "#domain") for p in parts]
             elif line.startswith("#dx_dy_dz:"):
                 parts = line.replace("#dx_dy_dz:", "").strip().split()
-                config["dx_dy_dz"] = [float(p) for p in parts]
+                config["dx_dy_dz"] = [_finite_float_or_raise(p, "#dx_dy_dz") for p in parts]
             elif line.startswith("#time_window:"):
-                config["time_window"] = float(line.replace("#time_window:", "").strip())
+                config["time_window"] = _finite_float_or_raise(
+                    line.replace("#time_window:", "").strip(),
+                    "#time_window",
+                )
             elif line.startswith("#material:"):
                 config["materials"].append(line)
             elif line.startswith("#geometry_objects_read:"):
@@ -140,24 +150,24 @@ def read_gprmax_in(in_path: str) -> Dict[str, Any]:
                 parts = line.replace("#hertzian_dipole:", "").strip().split()
                 if len(parts) >= 5:
                     config["src_position"] = [
-                        float(parts[1]),
-                        float(parts[2]),
-                        float(parts[3]),
+                        _finite_float_or_raise(parts[1], "#hertzian_dipole"),
+                        _finite_float_or_raise(parts[2], "#hertzian_dipole"),
+                        _finite_float_or_raise(parts[3], "#hertzian_dipole"),
                     ]
             elif line.startswith("#rx:"):
                 parts = line.replace("#rx:", "").strip().split()
                 if len(parts) >= 3:
                     config["rx_position"] = [
-                        float(parts[0]),
-                        float(parts[1]),
-                        float(parts[2]),
+                        _finite_float_or_raise(parts[0], "#rx"),
+                        _finite_float_or_raise(parts[1], "#rx"),
+                        _finite_float_or_raise(parts[2], "#rx"),
                     ]
             elif line.startswith("#src_steps:"):
                 parts = line.replace("#src_steps:", "").strip().split()
-                config["src_steps"] = [float(p) for p in parts]
+                config["src_steps"] = [_finite_float_or_raise(p, "#src_steps") for p in parts]
             elif line.startswith("#rx_steps:"):
                 parts = line.replace("#rx_steps:", "").strip().split()
-                config["rx_steps"] = [float(p) for p in parts]
+                config["rx_steps"] = [_finite_float_or_raise(p, "#rx_steps") for p in parts]
 
     return config
 

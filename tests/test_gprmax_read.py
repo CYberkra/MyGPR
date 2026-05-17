@@ -9,7 +9,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-from core.gpr_io import read_gprmax_out
+from core.gpr_io import read_gprmax_in, read_gprmax_out
 
 
 def _write_gprmax_out(path: Path, data: np.ndarray, *, dt: float = 1e-10) -> None:
@@ -73,6 +73,25 @@ def test_read_gprmax_out_attaches_impulse_context_from_matching_in(tmp_path: Pat
     assert header["trace_interval_m"] == 0.05
     assert result["trace_metadata"] is not None
     assert np.allclose(result["trace_metadata"]["trace_distance_m"], [0.0, 0.05, 0.1])
+
+
+def test_read_gprmax_in_rejects_nonfinite_geometry_values(tmp_path: Path):
+    in_path = tmp_path / "bad.in"
+    in_path.write_text(
+        "\n".join(
+            [
+                "#domain: 1.000 nan 0.010",
+                "#rx_steps: inf 0.000 0.000",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    try:
+        read_gprmax_in(str(in_path))
+        assert False, "expected non-finite gprMax .in values to be rejected"
+    except ValueError as exc:
+        assert "non-finite" in str(exc)
 
 
 def test_read_gprmax_out_logs_invalid_matching_in_and_falls_back(
