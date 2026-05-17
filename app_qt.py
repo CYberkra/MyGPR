@@ -4607,6 +4607,8 @@ class GPRGuiQt(QMainWindow):
             cmap=self._get_colormap(),
         )
         artifacts = dict(bundle.get("artifacts") or {})
+        if hasattr(self, "page_auto_tune") and self.page_auto_tune is not None:
+            self.page_auto_tune.set_evidence_export_result(bundle)
         artifact_order = [
             "summary_json",
             "manual_png",

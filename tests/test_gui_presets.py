@@ -172,6 +172,9 @@ def test_auto_tune_defaults_live_in_auto_tune_page():
         assert win.page_auto_tune.btn_auto_tune.isEnabled() is True
         assert win.page_auto_tune.btn_compare_manual_auto.text() == "人工/自动对比"
         assert win.page_auto_tune.btn_export_comparison.isEnabled() is False
+        win.page_auto_tune.segmented.setCurrentItem("truth")
+        assert win.page_auto_tune.stack.currentWidget() is win.page_auto_tune.page_truth
+        assert "未检测到 gprMax ground_truth.yaml" in win.page_auto_tune.truth_status_label.text()
         assert win.page_advanced.roi_status_label.text() == "手动 ROI: 未设置"
         assert win.page_advanced.btn_clear_manual_roi.isEnabled() is False
         assert win.page_basic.action_apply_manual.text() == "使用当前参数（默认）"
@@ -260,17 +263,37 @@ def test_auto_tune_page_handles_state_transitions():
             "verdict": "auto_better",
             "baseline_profile_key": "uav_gpr_experience_baseline_v1",
             "roi_info": {"label": "全图"},
-            "metric_delta": {"comparison_score": 0.35},
+            "metric_delta": {
+                "comparison_score": 0.35,
+                "truth_score": 0.2,
+                "truth_background_energy_reduction": 0.25,
+            },
             "manual": {
                 "pipeline": ["dewow"],
                 "params_by_method": {"dewow": {"window": 1}},
-                "metrics": {"comparison_score": 1.0},
+                "metrics": {
+                    "comparison_score": 1.0,
+                    "truth_score": 0.8,
+                    "truth_target_energy_preservation": 0.92,
+                    "truth_target_saliency_gain": 1.1,
+                    "truth_background_energy_reduction": 0.4,
+                    "truth_false_positive_ratio": 0.3,
+                    "truth_target_count": 1.0,
+                },
                 "warnings": [],
             },
             "automatic": {
                 "pipeline": ["dewow"],
                 "params_by_method": {"dewow": {"window": 32}},
-                "metrics": {"comparison_score": 1.35},
+                "metrics": {
+                    "comparison_score": 1.35,
+                    "truth_score": 1.0,
+                    "truth_target_energy_preservation": 0.95,
+                    "truth_target_saliency_gain": 1.4,
+                    "truth_background_energy_reduction": 0.65,
+                    "truth_false_positive_ratio": 0.2,
+                    "truth_target_count": 1.0,
+                },
                 "warnings": [],
                 "auto_tune_results": {
                     "dewow": {
@@ -292,6 +315,60 @@ def test_auto_tune_page_handles_state_transitions():
         assert win.page_auto_tune.result_state_label.text() == "对比完成"
         assert win.page_auto_tune.recommended_profile_label.text() == "自动选参更优"
         assert win.page_auto_tune.btn_export_comparison.isEnabled() is True
+        assert "auto=1.0000" in win.page_auto_tune.truth_metric_labels["truth_score"].text()
+        assert win.page_auto_tune.truth_params_table.rowCount() == 1
+        assert win.page_auto_tune.truth_params_table.item(0, 0).text() == "dewow"
+        assert win.page_auto_tune.btn_truth_export_evidence.isEnabled() is True
+    finally:
+        win.close()
+        app.processEvents()
+
+
+def test_auto_tune_truth_validation_page_displays_ground_truth_metadata():
+    app = _get_app()
+    win = GPRGuiQt()
+    try:
+        win.data_path = "sample_data/pipe_merged.out"
+        win.header_info = {
+            "ground_truth_manifest_path": "sample_data/pipe_manifest.json",
+            "ground_truth": {
+                "scenario_id": "pipe_demo",
+                "targets": [
+                    {
+                        "id": "target_0",
+                        "type": "pipe",
+                        "material": "metal",
+                        "depth_m": 0.42,
+                        "roi": {
+                            "time_start_idx": 720,
+                            "time_end_idx": 861,
+                            "dist_start_idx": 42,
+                            "dist_end_idx": 49,
+                        },
+                    }
+                ],
+                "background_rois": [
+                    {
+                        "time_start_idx": 100,
+                        "time_end_idx": 181,
+                        "dist_start_idx": 4,
+                        "dist_end_idx": 19,
+                    }
+                ],
+            },
+        }
+
+        win.page_auto_tune.refresh_truth_validation()
+
+        assert win.page_auto_tune.truth_status_label.text() == "真值验证已启用。"
+        assert win.page_auto_tune.truth_scenario_label.text() == "pipe_demo"
+        assert "type=pipe" in win.page_auto_tune.truth_target_label.text()
+        assert "material=metal" in win.page_auto_tune.truth_target_label.text()
+        assert "depth=0.42 m" in win.page_auto_tune.truth_target_label.text()
+        assert "time=[720,861)" in win.page_auto_tune.truth_target_roi_label.text()
+        assert "trace=42-48" in win.page_auto_tune.truth_target_roi_label.text()
+        assert "time=[100,181)" in win.page_auto_tune.truth_background_roi_label.text()
+        assert win.page_auto_tune.btn_export_comparison.isEnabled() is False
     finally:
         win.close()
         app.processEvents()

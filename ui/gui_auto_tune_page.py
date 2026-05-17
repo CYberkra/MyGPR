@@ -3,6 +3,7 @@
 """GUI 调参与实验页面。"""
 
 import json
+import os
 
 from PyQt6.QtWidgets import (
     QWidget,
@@ -16,6 +17,9 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QFrame,
     QStackedWidget,
+    QTableWidget,
+    QTableWidgetItem,
+    QHeaderView,
 )
 from qfluentwidgets import PushButton, FluentIcon, SegmentedWidget
 
@@ -33,6 +37,7 @@ class AutoTunePage(QWidget):
         self._last_result = None
         self._last_stage_compare_result = None
         self._last_comparison_result = None
+        self._last_evidence_bundle = None
         self.setup_ui()
 
     def setup_ui(self):
@@ -94,6 +99,7 @@ class AutoTunePage(QWidget):
         self.segmented.addItem("config", "参数配置")
         self.segmented.addItem("actions", "实验执行")
         self.segmented.addItem("results", "结果查看")
+        self.segmented.addItem("truth", "真值验证")
         layout.addWidget(self.segmented)
 
         self.stack = QStackedWidget(self)
@@ -102,10 +108,12 @@ class AutoTunePage(QWidget):
         self.page_config = self._build_config_page()
         self.page_actions = self._build_actions_page()
         self.page_results = self._build_results_page()
+        self.page_truth = self._build_truth_validation_page()
 
         self.stack.addWidget(self.page_config)
         self.stack.addWidget(self.page_actions)
         self.stack.addWidget(self.page_results)
+        self.stack.addWidget(self.page_truth)
 
         self.segmented.setCurrentItem("config")
         self.stack.setCurrentIndex(0)
@@ -405,13 +413,386 @@ class AutoTunePage(QWidget):
         layout.addStretch(1)
         return page
 
+    def _build_truth_validation_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+
+        status_box = QGroupBox("数据集真值状态")
+        status_layout = QVBoxLayout(status_box)
+        status_layout.setContentsMargins(10, 14, 10, 10)
+        status_layout.setSpacing(10)
+
+        self.truth_status_label = QLabel("当前数据未检测到 gprMax ground_truth.yaml，仍可做普通自动选参，但不能做真值验证。")
+        self.truth_status_label.setWordWrap(True)
+        self.truth_status_label.setProperty("class", "hintText")
+        status_layout.addWidget(self.truth_status_label)
+
+        status_grid = QWidget()
+        grid = QGridLayout(status_grid)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(16)
+        grid.setVerticalSpacing(8)
+
+        rows = [
+            ("当前输入文件", "truth_input_file_label"),
+            ("manifest", "truth_manifest_label"),
+            ("ground_truth", "truth_loaded_label"),
+            ("scenario_id", "truth_scenario_label"),
+            ("target", "truth_target_label"),
+            ("target ROI", "truth_target_roi_label"),
+            ("background ROI", "truth_background_roi_label"),
+            ("warning/error", "truth_warning_label"),
+        ]
+        for row, (name, attr) in enumerate(rows):
+            grid.addWidget(QLabel(name), row, 0)
+            label = QLabel("--")
+            label.setWordWrap(True)
+            if attr in {"truth_scenario_label", "truth_target_label"}:
+                label.setProperty("class", "titleSmall")
+            setattr(self, attr, label)
+            grid.addWidget(label, row, 1)
+        status_layout.addWidget(status_grid)
+        layout.addWidget(status_box)
+
+        bscan_box = QGroupBox("B-scan 对比入口")
+        bscan_layout = QVBoxLayout(bscan_box)
+        bscan_layout.setContentsMargins(10, 14, 10, 10)
+        bscan_layout.setSpacing(8)
+        self.truth_bscan_status_label = QLabel("尚未运行人工/自动对比。运行后可查看 Raw / Manual / AutoTune 状态，并导出 side-by-side Evidence。")
+        self.truth_bscan_status_label.setWordWrap(True)
+        self.truth_bscan_status_label.setProperty("class", "hintText")
+        bscan_layout.addWidget(self.truth_bscan_status_label)
+        layout.addWidget(bscan_box)
+
+        metrics_box = QGroupBox("Truth metrics")
+        metrics_layout = QVBoxLayout(metrics_box)
+        metrics_layout.setContentsMargins(10, 14, 10, 10)
+        metrics_layout.setSpacing(8)
+        metrics_grid = QWidget()
+        metrics_grid_layout = QGridLayout(metrics_grid)
+        metrics_grid_layout.setContentsMargins(0, 0, 0, 0)
+        metrics_grid_layout.setHorizontalSpacing(16)
+        metrics_grid_layout.setVerticalSpacing(8)
+        self.truth_metric_labels = {}
+        for row, metric_key in enumerate(
+            [
+                "truth_score",
+                "truth_target_energy_preservation",
+                "truth_target_saliency_gain",
+                "truth_background_energy_reduction",
+                "truth_false_positive_ratio",
+                "truth_target_count",
+            ]
+        ):
+            metrics_grid_layout.addWidget(QLabel(metric_key), row, 0)
+            label = QLabel("--")
+            label.setWordWrap(True)
+            self.truth_metric_labels[metric_key] = label
+            metrics_grid_layout.addWidget(label, row, 1)
+        metrics_layout.addWidget(metrics_grid)
+        layout.addWidget(metrics_box)
+
+        params_box = QGroupBox("参数对比表")
+        params_layout = QVBoxLayout(params_box)
+        params_layout.setContentsMargins(10, 14, 10, 10)
+        params_layout.setSpacing(8)
+        self.truth_params_table = QTableWidget(0, 3)
+        self.truth_params_table.setHorizontalHeaderLabels(["method", "manual 参数", "AutoTune 参数"])
+        self.truth_params_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.truth_params_table.setMinimumHeight(160)
+        self.truth_params_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        params_layout.addWidget(self.truth_params_table)
+        layout.addWidget(params_box)
+
+        evidence_box = QGroupBox("Evidence 操作")
+        evidence_layout = QVBoxLayout(evidence_box)
+        evidence_layout.setContentsMargins(10, 14, 10, 10)
+        evidence_layout.setSpacing(8)
+        evidence_row = QWidget()
+        evidence_row_layout = QHBoxLayout(evidence_row)
+        evidence_row_layout.setContentsMargins(0, 0, 0, 0)
+        evidence_row_layout.setSpacing(8)
+        self.btn_truth_run_comparison = PushButton(FluentIcon.VIEW, "运行人工/自动对比")
+        self.btn_truth_export_evidence = PushButton(FluentIcon.SAVE, "导出 Evidence")
+        self.btn_truth_open_output = PushButton(FluentIcon.FOLDER, "打开输出目录")
+        self.btn_truth_open_report = PushButton(FluentIcon.DOCUMENT, "查看 Markdown 报告")
+        self.btn_truth_export_evidence.setEnabled(False)
+        self.btn_truth_open_output.setEnabled(False)
+        self.btn_truth_open_report.setEnabled(False)
+        self.btn_truth_run_comparison.clicked.connect(self.btn_compare_manual_auto.click)
+        self.btn_truth_export_evidence.clicked.connect(self.btn_export_comparison.click)
+        self.btn_truth_open_output.clicked.connect(self._open_truth_output_dir)
+        self.btn_truth_open_report.clicked.connect(self._open_truth_report)
+        evidence_row_layout.addWidget(self.btn_truth_run_comparison)
+        evidence_row_layout.addWidget(self.btn_truth_export_evidence)
+        evidence_row_layout.addWidget(self.btn_truth_open_output)
+        evidence_row_layout.addWidget(self.btn_truth_open_report)
+        evidence_row_layout.addStretch(1)
+        evidence_layout.addWidget(evidence_row)
+        self.truth_evidence_label = QLabel("Evidence 尚未导出。")
+        self.truth_evidence_label.setWordWrap(True)
+        self.truth_evidence_label.setProperty("class", "hintText")
+        evidence_layout.addWidget(self.truth_evidence_label)
+        layout.addWidget(evidence_box)
+
+        layout.addStretch(1)
+        self.refresh_truth_validation()
+        return page
+
     def _on_segment_changed(self, route_key: str):
-        mapping = {"config": 0, "actions": 1, "results": 2}
+        if route_key == "truth":
+            self.refresh_truth_validation()
+        mapping = {"config": 0, "actions": 1, "results": 2, "truth": 3}
         self.stack.setCurrentIndex(mapping.get(route_key, 0))
 
     def _on_result_segment_changed(self, route_key: str):
         mapping = {"auto": 0, "stage": 1, "comparison": 2}
         self.result_stack.setCurrentIndex(mapping.get(route_key, 0))
+
+    def refresh_truth_validation(self):
+        """刷新 gprMax 真值验证面板。"""
+        ground_truth = self._current_ground_truth()
+        header_info = self._current_header_info()
+        comparison = self._last_comparison_result or {}
+        input_file = self._current_input_file()
+
+        self.truth_input_file_label.setText(input_file or "--")
+        manifest_path = (
+            header_info.get("ground_truth_manifest_path")
+            or ((ground_truth or {}).get("source_paths") or {}).get("manifest_file")
+        )
+        self.truth_manifest_label.setText("已找到" if manifest_path else "未找到")
+        if manifest_path:
+            self.truth_manifest_label.setToolTip(str(manifest_path))
+
+        if ground_truth:
+            self.truth_status_label.setText("真值验证已启用。")
+            self.truth_status_label.setStyleSheet("color: #137333;")
+            self.truth_loaded_label.setText("已加载")
+            self.truth_scenario_label.setText(str(ground_truth.get("scenario_id") or "--"))
+            self.truth_target_label.setText(self._format_truth_target(ground_truth))
+            self.truth_target_roi_label.setText(self._format_truth_target_rois(ground_truth))
+            self.truth_background_roi_label.setText(self._format_truth_background_rois(ground_truth))
+        else:
+            self.truth_status_label.setText(
+                "当前数据未检测到 gprMax ground_truth.yaml，仍可做普通自动选参，但不能做真值验证。"
+            )
+            self.truth_status_label.setStyleSheet("color: #9a6700;")
+            self.truth_loaded_label.setText("未加载")
+            self.truth_scenario_label.setText("--")
+            self.truth_target_label.setText("--")
+            self.truth_target_roi_label.setText("--")
+            self.truth_background_roi_label.setText("--")
+
+        warning = self._truth_warning_text(header_info, ground_truth)
+        self.truth_warning_label.setText(warning or "--")
+        self._refresh_truth_bscan_status(comparison)
+        self._refresh_truth_metrics(comparison)
+        self._refresh_truth_params_table(comparison)
+        self._refresh_truth_evidence_controls()
+
+    def _current_header_info(self) -> dict:
+        header = getattr(self.parent_window, "header_info", None)
+        return dict(header or {}) if isinstance(header, dict) else {}
+
+    def _current_ground_truth(self) -> dict | None:
+        header = self._current_header_info()
+        ground_truth = header.get("ground_truth")
+        if isinstance(ground_truth, dict):
+            return ground_truth
+        comparison_info = (self._last_comparison_result or {}).get("ground_truth_info")
+        if isinstance(comparison_info, dict) and comparison_info.get("enabled"):
+            return comparison_info
+        return None
+
+    def _current_input_file(self) -> str:
+        data_path = getattr(self.parent_window, "data_path", None)
+        if data_path:
+            return str(data_path)
+        header = self._current_header_info()
+        return str(header.get("out_path") or header.get("source_path") or "--")
+
+    def _truth_warning_text(self, header_info: dict, ground_truth: dict | None) -> str:
+        parts = []
+        if header_info.get("ground_truth_load_error"):
+            parts.append(str(header_info.get("ground_truth_load_error")))
+        if ground_truth:
+            parts.extend(str(item) for item in ground_truth.get("conversion_warnings", []) or [])
+        return "；".join(parts)
+
+    def _format_truth_target(self, ground_truth: dict) -> str:
+        targets = list(ground_truth.get("targets") or [])
+        if not targets:
+            return "无 target（no-target 场景）"
+        target = targets[0] if isinstance(targets[0], dict) else {}
+        parts = [
+            f"type={target.get('type', '--')}",
+            f"material={target.get('material', '--')}",
+            f"depth={self._format_optional_number(target.get('depth_m'), suffix=' m')}",
+        ]
+        center_x = target.get("center_x_m")
+        center_y = target.get("center_y_m")
+        radius = target.get("radius_m")
+        if center_x is not None or center_y is not None:
+            parts.append(
+                f"center=({self._format_optional_number(center_x)}, {self._format_optional_number(center_y)}) m"
+            )
+        if radius is not None:
+            parts.append(f"radius={self._format_optional_number(radius, suffix=' m')}")
+        if len(targets) > 1:
+            parts.append(f"target_count={len(targets)}")
+        return " | ".join(parts)
+
+    def _format_truth_target_rois(self, ground_truth: dict) -> str:
+        rois = []
+        for target in ground_truth.get("targets", []) or []:
+            if isinstance(target, dict) and isinstance(target.get("roi"), dict):
+                target_id = target.get("id") or target.get("target_id") or "target"
+                rois.append(f"{target_id}: {self._format_roi(target['roi'])}")
+        return "；".join(rois) if rois else "--"
+
+    def _format_truth_background_rois(self, ground_truth: dict) -> str:
+        rois = [
+            self._format_roi(roi)
+            for roi in ground_truth.get("background_rois", []) or []
+            if isinstance(roi, dict)
+        ]
+        return "；".join(rois) if rois else "未提供，metrics 将 fallback 到 analysis_roi - target_roi"
+
+    def _format_roi(self, roi: dict) -> str:
+        t0 = int(roi.get("time_start_idx", 0))
+        t1 = int(roi.get("time_end_idx", t0 + 1))
+        d0 = int(roi.get("dist_start_idx", 0))
+        d1 = int(roi.get("dist_end_idx", d0 + 1))
+        return (
+            f"MyGPR half-open time=[{t0},{t1}), trace=[{d0},{d1})；"
+            f"显示闭区间 time={t0}-{max(t0, t1 - 1)}, trace={d0}-{max(d0, d1 - 1)}"
+        )
+
+    def _format_optional_number(self, value, *, suffix: str = "") -> str:
+        if value is None:
+            return "--"
+        try:
+            return f"{float(value):.4g}{suffix}"
+        except (TypeError, ValueError):
+            return f"{value}{suffix}"
+
+    def _refresh_truth_bscan_status(self, comparison: dict):
+        if not comparison:
+            self.truth_bscan_status_label.setText(
+                "尚未运行人工/自动对比。运行后可查看 Raw / Manual / AutoTune 状态，并导出 side-by-side Evidence。"
+            )
+            return
+        artifacts = (self._last_evidence_bundle or {}).get("artifacts") or {}
+        side_by_side = artifacts.get("side_by_side_png")
+        if side_by_side:
+            self.truth_bscan_status_label.setText(
+                f"Raw / Manual / AutoTune 对比已生成；side-by-side Evidence: {side_by_side}"
+            )
+        else:
+            self.truth_bscan_status_label.setText(
+                "已生成 Raw / Manual / AutoTune side-by-side 对比状态，可导出 Evidence 查看图像、参数表和报告。"
+            )
+
+    def _refresh_truth_metrics(self, comparison: dict):
+        manual_metrics = ((comparison.get("manual") or {}).get("metrics") or {})
+        auto_metrics = ((comparison.get("automatic") or {}).get("metrics") or {})
+        delta_metrics = comparison.get("metric_delta") or {}
+        for metric_key, label in self.truth_metric_labels.items():
+            label.setText(
+                self._format_truth_metric_value(
+                    metric_key,
+                    manual_metrics,
+                    auto_metrics,
+                    delta_metrics,
+                )
+            )
+
+    def _format_truth_metric_value(
+        self,
+        metric_key: str,
+        manual_metrics: dict,
+        auto_metrics: dict,
+        delta_metrics: dict,
+    ) -> str:
+        manual_value = manual_metrics.get(metric_key)
+        auto_value = auto_metrics.get(metric_key)
+        delta_value = delta_metrics.get(metric_key)
+        if manual_value is None and auto_value is None:
+            return "--"
+        parts = []
+        if manual_value is not None:
+            parts.append(f"manual={self._metric_text(manual_value)}")
+        if auto_value is not None:
+            parts.append(f"auto={self._metric_text(auto_value)}")
+        if delta_value is not None:
+            parts.append(f"Δ={self._metric_text(delta_value)}")
+        return " | ".join(parts)
+
+    def _metric_text(self, value) -> str:
+        try:
+            return f"{float(value):.4f}"
+        except (TypeError, ValueError):
+            return str(value)
+
+    def _refresh_truth_params_table(self, comparison: dict):
+        manual = comparison.get("manual") or {}
+        automatic = comparison.get("automatic") or {}
+        pipeline = list(manual.get("pipeline") or automatic.get("pipeline") or [])
+        manual_params = manual.get("params_by_method") or {}
+        auto_params = automatic.get("params_by_method") or {}
+        if not pipeline:
+            pipeline = sorted(set(manual_params) | set(auto_params))
+        self.truth_params_table.setRowCount(len(pipeline))
+        for row, method_key in enumerate(pipeline):
+            self.truth_params_table.setItem(row, 0, QTableWidgetItem(str(method_key)))
+            self.truth_params_table.setItem(
+                row,
+                1,
+                QTableWidgetItem(json.dumps(manual_params.get(method_key, {}), ensure_ascii=False)),
+            )
+            self.truth_params_table.setItem(
+                row,
+                2,
+                QTableWidgetItem(json.dumps(auto_params.get(method_key, {}), ensure_ascii=False)),
+            )
+
+    def _refresh_truth_evidence_controls(self):
+        can_export = bool(self._last_comparison_result)
+        self.btn_truth_export_evidence.setEnabled(can_export)
+        artifacts = (self._last_evidence_bundle or {}).get("artifacts") or {}
+        output_dir = (self._last_evidence_bundle or {}).get("output_dir")
+        report_path = artifacts.get("report_md")
+        self.btn_truth_open_output.setEnabled(bool(output_dir))
+        self.btn_truth_open_report.setEnabled(bool(report_path))
+        if output_dir or report_path:
+            self.truth_evidence_label.setText(
+                "Evidence 已导出: "
+                + "；".join(
+                    str(item)
+                    for item in [output_dir, report_path]
+                    if item
+                )
+            )
+        else:
+            self.truth_evidence_label.setText("Evidence 尚未导出。")
+
+    def set_evidence_export_result(self, bundle: dict | None):
+        """记录最近一次 Evidence 导出结果并刷新真值验证入口。"""
+        self._last_evidence_bundle = dict(bundle or {}) if bundle else None
+        self.refresh_truth_validation()
+
+    def _open_truth_output_dir(self):
+        output_dir = (self._last_evidence_bundle or {}).get("output_dir")
+        if output_dir:
+            os.startfile(str(output_dir))
+
+    def _open_truth_report(self):
+        report_path = ((self._last_evidence_bundle or {}).get("artifacts") or {}).get("report_md")
+        if report_path:
+            os.startfile(str(report_path))
 
     def get_auto_tune_roi_mode(self) -> str:
         """获取自动选参 ROI 来源模式。"""
@@ -467,7 +848,9 @@ class AutoTunePage(QWidget):
     def show_comparison_running(self, roi_label: str, search_mode: str):
         """显示人工/自动对比运行中状态。"""
         self._last_comparison_result = None
+        self._last_evidence_bundle = None
         self.btn_export_comparison.setEnabled(False)
+        self.refresh_truth_validation()
         self._set_result_overview(
             state="对比中",
             stats=f"ROI={roi_label} | 搜索={search_mode}",
@@ -481,6 +864,7 @@ class AutoTunePage(QWidget):
     def show_comparison_result(self, summary: dict):
         """显示人工 baseline vs 自动选参对比结果摘要。"""
         self._last_comparison_result = dict(summary or {})
+        self._last_evidence_bundle = None
         self.btn_export_comparison.setEnabled(True)
         verdict = str(summary.get("verdict") or "tie")
         verdict_label = {
@@ -517,11 +901,14 @@ class AutoTunePage(QWidget):
         )
         self.result_segmented.setCurrentItem("comparison")
         self.comparison_summary.setPlainText(self._format_comparison_summary(summary))
+        self.refresh_truth_validation()
 
     def show_comparison_error(self, error_msg: str):
         """显示人工/自动对比失败状态。"""
         self._last_comparison_result = None
+        self._last_evidence_bundle = None
         self.btn_export_comparison.setEnabled(False)
+        self.refresh_truth_validation()
         self._set_result_overview(state="对比失败", risk="当前没有可用对比结果。")
         self.result_segmented.setCurrentItem("comparison")
         self.comparison_summary.setPlainText(f"人工/自动对比失败:\n{error_msg}")
@@ -654,8 +1041,10 @@ class AutoTunePage(QWidget):
         self.set_auto_tune_method_key(method_key)
         self.set_stage_compare_result(None)
         self._last_comparison_result = None
+        self._last_evidence_bundle = None
         self.comparison_summary.clear()
         self.btn_export_comparison.setEnabled(False)
+        self.refresh_truth_validation()
         if not method_key:
             self._set_result_overview(state="未分析")
             self.set_auto_tune_summary(
