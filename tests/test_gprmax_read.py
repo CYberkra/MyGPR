@@ -8,6 +8,7 @@ from pathlib import Path
 
 import h5py
 import numpy as np
+import pytest
 
 from core.gpr_io import read_gprmax_in, read_gprmax_out
 
@@ -18,6 +19,13 @@ def _write_gprmax_out(path: Path, data: np.ndarray, *, dt: float = 1e-10) -> Non
         rx_group.create_dataset("Ez", data=np.asarray(data, dtype=np.float32))
         handle.attrs["Iterations"] = int(np.asarray(data).shape[0])
         handle.attrs["dt"] = float(dt)
+        handle.attrs["nx_ny_nz"] = [1, 1, 1]
+
+
+def _write_malformed_gprmax_out(path: Path) -> None:
+    with h5py.File(path, "w") as handle:
+        handle.attrs["Iterations"] = 3
+        handle.attrs["dt"] = 1e-10
         handle.attrs["nx_ny_nz"] = [1, 1, 1]
 
 
@@ -120,3 +128,11 @@ def test_read_gprmax_out_logs_invalid_matching_in_and_falls_back(
     assert result["data"].shape == (6, 1)
     assert result["header_info"]["data_context"] == "gprmax"
     assert "无法解析匹配的 gprMax 输入文件" in caplog.text
+
+
+def test_read_gprmax_out_reports_malformed_fallback_trace_file(tmp_path: Path):
+    _write_malformed_gprmax_out(tmp_path / "broken_merged.out")
+    _write_malformed_gprmax_out(tmp_path / "broken1.out")
+
+    with pytest.raises(ValueError, match=r"rxs/rx1/Ez.*broken1\.out"):
+        read_gprmax_out(str(tmp_path / "broken_merged.out"))

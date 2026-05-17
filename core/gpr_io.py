@@ -740,6 +740,14 @@ load_bscan_csv = readcsv
 load_ascans_folder = read_ascans_folder
 
 
+def _read_gprmax_ez_dataset(handle: Any, source: str | Path) -> np.ndarray:
+    """Return the first receiver Ez trace with a user-facing error on malformed files."""
+    try:
+        return handle["rxs"]["rx1"]["Ez"][:]
+    except KeyError as exc:
+        raise ValueError(f"Cannot find 'rxs/rx1/Ez' in {source}") from exc
+
+
 def read_gprmax_out(out_path: str) -> dict:
     """读取 gprMax .out HDF5 文件，提取电场数据并组装为 B-scan 矩阵
 
@@ -779,7 +787,7 @@ def read_gprmax_out(out_path: str) -> dict:
 
         # 读取电场数据
         if "rxs" in f and "rx1" in f["rxs"] and "Ez" in f["rxs"]["rx1"]:
-            data = f["rxs"]["rx1"]["Ez"][:]
+            data = _read_gprmax_ez_dataset(f, out_path)
         else:
             # 文件可能为空（如合并失败的 merged.out）
             # 尝试降级到读取同目录的单独 .out 文件
@@ -804,7 +812,7 @@ def read_gprmax_out(out_path: str) -> dict:
                 iterations = first_attrs.get("Iterations", iterations)
                 dt = first_attrs.get("dt", dt)
                 attrs = first_attrs
-                data0 = f0["rxs"]["rx1"]["Ez"][:]
+                data0 = _read_gprmax_ez_dataset(f0, first_path)
 
             # 合并所有文件
             samples = _safe_positive_int(iterations) or int(data0.shape[0])
@@ -815,7 +823,7 @@ def read_gprmax_out(out_path: str) -> dict:
             for i, fname in enumerate(out_files[1:], 1):
                 fpath = os.path.join(folder, fname)
                 with h5py.File(fpath, "r") as fi:
-                    matrix[:, i] = fi["rxs"]["rx1"]["Ez"][:]
+                    matrix[:, i] = _read_gprmax_ez_dataset(fi, fpath)
             data = matrix
 
     # 处理数据形状
@@ -876,7 +884,7 @@ def read_gprmax_out(out_path: str) -> dict:
             for i, fname in enumerate(out_files):
                 fpath = os.path.join(folder, fname)
                 with h5py.File(fpath, "r") as f:
-                    matrix[:, i] = f["rxs"]["rx1"]["Ez"][:]
+                    matrix[:, i] = _read_gprmax_ez_dataset(f, fpath)
             data = matrix
         else:
             # 单道数据，重塑为列向量
