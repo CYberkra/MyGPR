@@ -96,6 +96,31 @@ def test_export_airborne_georeference_json_sanitizes_nonfinite_summary_values(
     json.dumps(summary, allow_nan=False)
 
 
+def test_export_airborne_georeference_text_outputs_sanitize_nonfinite_values(
+    tmp_path: Path,
+):
+    data = np.arange(24, dtype=np.float32).reshape(6, 4)
+    payload = build_airborne_georeference_3d_payload(
+        data,
+        {"total_time_ns": 60.0},
+        {"trace_distance_m": np.linspace(0.0, 0.9, 4)},
+    )
+    assert payload is not None
+    payload["preview"]["amplitude"][0, 0] = np.nan
+    payload["preview"]["curtain_x_m"][0, 0] = np.inf
+    payload["trace_distance_m"][0] = np.inf
+    payload["local_x_m"][0] = np.nan
+
+    result = export_airborne_georeference_3d_bundle(payload, tmp_path / "scene.vtk")
+
+    vtk_text = Path(result["vtk_path"]).read_text(encoding="utf-8").lower()
+    csv_text = Path(result["csv_path"]).read_text(encoding="utf-8").lower()
+    assert "nan" not in vtk_text
+    assert "inf" not in vtk_text
+    assert "nan" not in csv_text
+    assert "inf" not in csv_text
+
+
 def test_build_airborne_georeference_payload_falls_back_to_trace_distance():
     data = np.arange(24, dtype=np.float32).reshape(6, 4)
     trace_metadata = {

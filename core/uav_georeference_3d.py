@@ -369,6 +369,22 @@ def _jsonable(value: Any) -> Any:
     return value
 
 
+def _finite_float(value: Any, default: float = 0.0) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    return parsed if np.isfinite(parsed) else default
+
+
+def _finite_csv_value(value: Any) -> float | str:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return ""
+    return parsed if np.isfinite(parsed) else ""
+
+
 def _write_vtk_structured_grid(
     payload: dict[str, Any],
     vtk_path: Path,
@@ -391,16 +407,16 @@ def _write_vtk_structured_grid(
         for row in range(sample_count):
             for col in range(trace_count):
                 f.write(
-                    f"{float(curtain_x[row, col]):.6f} "
-                    f"{float(curtain_y[row, col]):.6f} "
-                    f"{float(curtain_z[row, col]):.6f}\n"
+                    f"{_finite_float(curtain_x[row, col]):.6f} "
+                    f"{_finite_float(curtain_y[row, col]):.6f} "
+                    f"{_finite_float(curtain_z[row, col]):.6f}\n"
                 )
         f.write(f"POINT_DATA {trace_count * sample_count}\n")
         f.write("SCALARS amplitude float 1\n")
         f.write("LOOKUP_TABLE default\n")
         for row in range(sample_count):
             for col in range(trace_count):
-                f.write(f"{float(amplitude[row, col]):.6f}\n")
+                f.write(f"{_finite_float(amplitude[row, col]):.6f}\n")
     return vtk_path
 
 
@@ -438,14 +454,14 @@ def _write_trace_summary_csv(payload: dict[str, Any], csv_path: Path) -> Path:
             writer.writerow(
                 {
                     "trace_index": int(trace_index[idx]),
-                    "trace_distance_m": float(trace_distance[idx]),
-                    "longitude": float(longitude[idx]) if isinstance(longitude, np.ndarray) else "",
-                    "latitude": float(latitude[idx]) if isinstance(latitude, np.ndarray) else "",
-                    "local_x_m": float(x_m[idx]),
-                    "local_y_m": float(y_m[idx]),
-                    "ground_elevation_m": float(ground[idx]) if isinstance(ground, np.ndarray) else "",
-                    "height_agl_m": float(agl[idx]) if isinstance(agl, np.ndarray) else "",
-                    "airborne_z_m": float(airborne_z[idx]),
+                    "trace_distance_m": _finite_csv_value(trace_distance[idx]),
+                    "longitude": _finite_csv_value(longitude[idx]) if isinstance(longitude, np.ndarray) else "",
+                    "latitude": _finite_csv_value(latitude[idx]) if isinstance(latitude, np.ndarray) else "",
+                    "local_x_m": _finite_csv_value(x_m[idx]),
+                    "local_y_m": _finite_csv_value(y_m[idx]),
+                    "ground_elevation_m": _finite_csv_value(ground[idx]) if isinstance(ground, np.ndarray) else "",
+                    "height_agl_m": _finite_csv_value(agl[idx]) if isinstance(agl, np.ndarray) else "",
+                    "airborne_z_m": _finite_csv_value(airborne_z[idx]),
                     "selected_trace_index": selected_trace if selected_trace is not None else "",
                 }
             )
