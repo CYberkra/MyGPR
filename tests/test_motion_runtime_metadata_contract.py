@@ -147,3 +147,25 @@ def test_non_motion_methods_do_not_mutate_trace_metadata(monkeypatch):
     assert "time_window_ns" not in observed_kwargs
     assert np.array_equal(trace_metadata["trace_distance_m"], source_distance)
     assert header_info["total_time_ns"] == pytest.approx(96.0)
+
+
+def test_invalid_total_time_metadata_falls_back_for_motion_context(monkeypatch):
+    raw = np.arange(12, dtype=np.float32).reshape(3, 4)
+    header_info = {"total_time_ns": "bad"}
+    observed: dict[str, float] = {}
+
+    def motion_stage(data, time_window_ns=None, **kwargs):
+        observed["time_window_ns"] = float(time_window_ns)
+        return data, {}
+
+    _register_method(monkeypatch, "test_motion_bad_total_time", motion_stage, motion=True)
+
+    executor = WorkflowExecutor(header_info=header_info, trace_metadata={})
+    result, _ = executor.execute_single(
+        raw,
+        WorkflowMethod("motion", "test_motion_bad_total_time"),
+    )
+
+    assert np.array_equal(result, raw)
+    assert observed["time_window_ns"] == pytest.approx(float(raw.shape[0]))
+    assert header_info["total_time_ns"] == "bad"

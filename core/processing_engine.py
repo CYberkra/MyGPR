@@ -84,14 +84,10 @@ def prepare_runtime_params(
         }
         and "time_step_s" not in runtime_params
     ):
-        total_time_ns = None
-        if header_info:
-            total_time_ns = header_info.get("total_time_ns")
-        try:
-            total_time_ns_value = float(total_time_ns)
-        except (TypeError, ValueError):
-            total_time_ns_value = 0.0
-        if total_time_ns_value > 0:
+        total_time_ns_value = _positive_float(
+            (header_info or {}).get("total_time_ns")
+        )
+        if total_time_ns_value is not None:
             time_step_s = total_time_ns_value * 1e-9 / samples
             runtime_params["time_step_s"] = time_step_s
             if method_id == "frequency_filter_1d":
@@ -104,12 +100,9 @@ def prepare_runtime_params(
         and "time_window_ns" not in runtime_params
         and "time_step_s" in runtime_params
     ):
-        try:
-            runtime_params["time_window_ns"] = (
-                float(runtime_params["time_step_s"]) * 1.0e9 * samples
-            )
-        except (TypeError, ValueError):
-            pass
+        time_step_s = _positive_float(runtime_params["time_step_s"])
+        if time_step_s is not None:
+            runtime_params["time_window_ns"] = time_step_s * 1.0e9 * samples
 
     needs_motion_runtime = _requires_motion_runtime_context(method_id)
 
@@ -131,15 +124,12 @@ def prepare_runtime_params(
         traces = max(1, int(data_shape[1]))
         info = header_info or {}
         if "length_m" not in runtime_params:
-            if (
-                info.get("track_length_m") is not None
-                and float(info.get("track_length_m", 0.0)) > 0
-            ):
-                runtime_params["length_m"] = float(info["track_length_m"])
-            elif info.get("trace_interval_m") is not None:
-                runtime_params["length_m"] = float(
-                    info.get("trace_interval_m", 0.0)
-                ) * max(traces - 1, 1)
+            track_length_m = _positive_float(info.get("track_length_m"))
+            trace_interval_m = _positive_float(info.get("trace_interval_m"))
+            if track_length_m is not None:
+                runtime_params["length_m"] = track_length_m
+            elif trace_interval_m is not None:
+                runtime_params["length_m"] = trace_interval_m * max(traces - 1, 1)
 
     return runtime_params
 
@@ -221,6 +211,17 @@ def _requires_motion_runtime_context(method_id: str) -> bool:
     return str(stage or "") == "motion_comp"
 
 
+def _positive_float(value: Any) -> float | None:
+    """Return a finite positive float, or None when metadata is unusable."""
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(parsed) or parsed <= 0:
+        return None
+    return parsed
+
+
 def _inject_runtime_metadata_context(
     runtime_params: dict[str, Any],
     *,
@@ -235,11 +236,9 @@ def _inject_runtime_metadata_context(
     if "trace_metadata" not in runtime_params and trace_metadata:
         runtime_params["trace_metadata"] = clone_trace_metadata(trace_metadata)
     if "time_window_ns" not in runtime_params:
-        total_time_ns = info.get("total_time_ns")
+        total_time_ns = _positive_float(info.get("total_time_ns"))
         runtime_params["time_window_ns"] = (
-            float(total_time_ns)
-            if total_time_ns and float(total_time_ns) > 0
-            else float(samples)
+            total_time_ns if total_time_ns is not None else float(samples)
         )
 
 

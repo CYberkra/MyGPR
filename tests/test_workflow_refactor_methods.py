@@ -102,6 +102,18 @@ def test_geometry_depth_context_warns_for_missing_inputs_and_resolves_spacing():
     )
 
 
+def test_kirchhoff_runtime_length_ignores_invalid_track_length():
+    params = prepare_runtime_params(
+        "kirchhoff_migration",
+        {},
+        {"track_length_m": "bad", "trace_interval_m": 0.5},
+        None,
+        (8, 4),
+    )
+
+    assert params["length_m"] == 1.5
+
+
 def test_default_workflow_contains_gain_candidates_and_hidden_migration():
     config = build_default_workflow_config("high_quality_uav_gpr")
     method_ids = [method.method_id for method in config.methods]
