@@ -57,6 +57,7 @@ def _truth_manifest() -> dict:
             {
                 "target_id": "hyperbola_01",
                 "type": "hyperbola",
+                "material": "metal",
                 "must_preserve": True,
                 "roi": {
                     "time_start_idx": 27,
@@ -64,6 +65,14 @@ def _truth_manifest() -> dict:
                     "dist_start_idx": 7,
                     "dist_end_idx": 23,
                 },
+            }
+        ],
+        "background_rois": [
+            {
+                "time_start_idx": 8,
+                "time_end_idx": 18,
+                "dist_start_idx": 3,
+                "dist_end_idx": 8,
             }
         ],
     }
@@ -168,6 +177,28 @@ def test_pipeline_summary_carries_parameter_domain_notes():
         list,
     )
     assert "risk_flags" in summary["steps"][0]["auto_tune_result"]
+
+
+def test_pipeline_summary_carries_compact_ground_truth_rois():
+    raw = _build_pipeline_profile(samples=72, traces=18)
+    result = run_auto_tune_pipeline(
+        raw,
+        pipeline=["dewow"],
+        manual_params_by_method={"dewow": {"window": 1}},
+        ground_truth=_truth_manifest(),
+        search_mode="fast",
+    )
+
+    info = to_summary_dict(result)["ground_truth_info"]
+
+    assert info["enabled"] is True
+    assert info["scenario_id"] == "pipeline_truth_demo"
+    assert info["target_count"] == 1
+    assert info["targets"][0]["target_id"] == "hyperbola_01"
+    assert info["targets"][0]["material"] == "metal"
+    assert info["targets"][0]["roi"]["time_start_idx"] == 27
+    assert info["background_rois"][0]["dist_end_idx"] == 8
+    assert "raw_sidecar" not in info
 
 
 def test_pipeline_locked_params_apply_to_both_branches_without_auto_tune(monkeypatch):

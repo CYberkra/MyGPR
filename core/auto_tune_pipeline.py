@@ -938,7 +938,28 @@ def _ground_truth_info(ground_truth: dict[str, Any] | None) -> dict[str, Any]:
         "scenario_id": ground_truth.get("scenario_id"),
         "target_count": int(len(preserved)),
         "analysis_roi": _json_safe(ground_truth.get("analysis_roi", {})),
+        "targets": _json_safe([_ground_truth_target_info(target) for target in preserved]),
+        "background_rois": _json_safe(ground_truth.get("background_rois", []) or []),
     }
+
+
+def _ground_truth_target_info(target: dict[str, Any]) -> dict[str, Any]:
+    summary: dict[str, Any] = {}
+    for key in (
+        "id",
+        "target_id",
+        "type",
+        "material",
+        "depth_m",
+        "center_x_m",
+        "center_y_m",
+        "radius_m",
+        "must_preserve",
+        "roi",
+    ):
+        if key in target:
+            summary[key] = target[key]
+    return summary
 
 
 def _json_safe(value: Any) -> Any:
@@ -950,12 +971,12 @@ def _json_safe(value: Any) -> Any:
         return value.tolist()
     if isinstance(value, np.generic):
         return value.item()
+    if value is None or isinstance(value, (str, bool)):
+        return value
     if isinstance(value, float):
         return float(value)
     if isinstance(value, int):
         return int(value)
-    if value is None or isinstance(value, (str, bool)):
-        return value
     return str(value)
 
 
