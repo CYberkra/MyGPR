@@ -259,8 +259,7 @@ def _mask_from_rois(shape: tuple[int, int], rois: list[dict[str, int]]) -> np.nd
 def _masked_values(data: np.ndarray, mask: np.ndarray) -> np.ndarray:
     if mask.shape != data.shape or not np.any(mask):
         return np.asarray([], dtype=np.float64)
-    values = np.asarray(data, dtype=np.float64)[mask]
-    return values[np.isfinite(values)]
+    return data[mask]
 
 
 def _masked_mean_square(data: np.ndarray, mask: np.ndarray) -> float:

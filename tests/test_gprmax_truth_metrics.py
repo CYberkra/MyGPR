@@ -102,6 +102,19 @@ def test_truth_metrics_shift_processed_target_roi_with_zero_time_roi_change():
     assert metrics["truth_background_energy_reduction"] > 0.5
 
 
+def test_truth_metrics_clean_nonfinite_inputs_before_roi_statistics():
+    raw = _reference_bscan()
+    processed = raw.copy()
+    raw[25, 13] = np.nan
+    raw[30, 14] = np.inf
+    processed[26, 15] = -np.inf
+
+    metrics = compute_ground_truth_metrics(raw, processed, _truth_manifest())
+
+    assert all(np.isfinite(value) for value in metrics.values())
+    assert metrics["truth_target_count"] == 1.0
+
+
 def test_truth_metrics_score_no_target_scene_as_false_positive_guard():
     raw = np.full((64, 32), 0.4, dtype=np.float32)
     suppressed = raw * 0.2
