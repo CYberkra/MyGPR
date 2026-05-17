@@ -65,6 +65,15 @@ def test_gain_related_metrics_detect_deep_contrast_improvement():
     assert pre_zero_energy_ratio(gained, 5) >= 0.0
 
 
+def test_target_band_energy_ratio_handles_non_finite_band_values():
+    raw = _build_test_profile()
+
+    ratio = target_band_energy_ratio(raw, raw, band=(np.nan, np.inf))
+
+    assert np.isfinite(ratio)
+    assert ratio > 0.0
+
+
 def test_relative_reduction_rewards_lower_after_value():
     assert relative_reduction(10.0, 6.0) > 0.0
     assert relative_reduction(10.0, 10.0) == 0.0
