@@ -9,6 +9,8 @@ from typing import Any, Iterable
 import numpy as np
 from scipy.ndimage import uniform_filter1d
 
+from core.scalar_utils import to_int
+
 
 EPS = 1.0e-12
 
@@ -119,10 +121,14 @@ def extract_roi_and_context(
     time_end = bounds.get("time_end_idx", n_samples)
     dist_start = bounds.get("dist_start_idx", 0)
     dist_end = bounds.get("dist_end_idx", n_traces)
-    t0 = max(0, min(int(0 if time_start is None else time_start), n_samples - 1))
-    t1 = max(t0 + 1, min(int(n_samples if time_end is None else time_end), n_samples))
-    d0 = max(0, min(int(0 if dist_start is None else dist_start), n_traces - 1))
-    d1 = max(d0 + 1, min(int(n_traces if dist_end is None else dist_end), n_traces))
+    t0_raw = to_int(time_start, default=0)
+    t1_raw = to_int(time_end, default=n_samples)
+    d0_raw = to_int(dist_start, default=0)
+    d1_raw = to_int(dist_end, default=n_traces)
+    t0 = max(0, min(t0_raw, n_samples - 1))
+    t1 = max(t0 + 1, min(t1_raw, n_samples))
+    d0 = max(0, min(d0_raw, n_traces - 1))
+    d1 = max(d0 + 1, min(d1_raw, n_traces))
 
     pad_t = max(2, int(round((t1 - t0) * padding_ratio)))
     pad_d = max(2, int(round((d1 - d0) * padding_ratio)))

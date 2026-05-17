@@ -13,6 +13,7 @@ from core.quality_metrics import (
     compute_benchmark_metrics,
     deep_zone_contrast,
     detect_first_break_indices,
+    extract_roi_and_context,
     horizontal_coherence,
     local_saliency_preservation,
     low_freq_energy_ratio,
@@ -140,3 +141,25 @@ def test_compute_benchmark_metrics_exposes_stable_metric_schema():
     assert "local_saliency_preservation" in metrics
     assert "clipping_ratio_after" in metrics
     assert "first_break_sharpness_after" in metrics
+
+
+def test_extract_roi_and_context_accepts_numpy_scalar_bounds():
+    raw = np.arange(80, dtype=np.float32).reshape(10, 8)
+
+    result = extract_roi_and_context(
+        raw,
+        {
+            "time_start_idx": np.array([2]),
+            "time_end_idx": np.array([6]),
+            "dist_start_idx": np.array([1]),
+            "dist_end_idx": np.array([5]),
+        },
+    )
+
+    assert result["bounds"] == {
+        "time_start_idx": 2,
+        "time_end_idx": 6,
+        "dist_start_idx": 1,
+        "dist_end_idx": 5,
+    }
+    assert result["roi_data"].shape == (4, 4)
