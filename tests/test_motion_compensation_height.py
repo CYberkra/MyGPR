@@ -87,6 +87,14 @@ def test_height_compensation_skips_nonpositive_heights():
     assert np.array_equal(out, data)
     assert out is not data
 
+    # Inf
+    inf_meta = {**base_meta, "flight_height_m": np.full(16, np.inf, dtype=np.float64)}
+    out, meta = method_motion_compensation_height(data, trace_metadata=inf_meta)
+    assert meta["skipped"] is True
+    assert "NaN/Inf" in meta["reason"]
+    assert meta["input_height_valid"] is False
+    assert np.array_equal(out, data)
+
     # 零值
     zero_meta = {**base_meta, "flight_height_m": np.zeros(16, dtype=np.float64)}
     out, meta = method_motion_compensation_height(data, trace_metadata=zero_meta)
@@ -191,6 +199,25 @@ def test_height_compensation_time_window_from_kwargs_first():
         time_window_ns=120.0,
     )
     assert meta["time_window_ns"] == pytest.approx(120.0)
+
+
+def test_height_compensation_skips_time_shift_for_non_finite_time_window():
+    rng = np.random.default_rng(111)
+    data = rng.normal(size=(64, 12)).astype(np.float32)
+    trace_metadata = {
+        "flight_height_m": np.linspace(1.0, 2.0, 12, dtype=np.float64),
+        "time_window_ns": np.inf,
+    }
+
+    _, meta = method_motion_compensation_height(
+        data,
+        trace_metadata=trace_metadata,
+    )
+
+    assert meta["input_height_valid"] is True
+    assert meta["amplitude_correction_applied"] is True
+    assert meta["time_shift_correction_applied"] is False
+    assert "time_window_ns" in meta["time_shift_skip_reason"]
 
 
 def test_height_compensation_empty_flight_height_array():
