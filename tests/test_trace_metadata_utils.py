@@ -230,3 +230,20 @@ def test_integrate_optional_sidecars_rejects_non_finite_altimeter_quality_fields
             trace_timestamps_s=np.array([10.0, 11.0], dtype=np.float64),
             altimeter_payload=altimeter_payload,
         )
+
+
+def test_timestamp_coverage_mask_rejects_non_finite_inputs():
+    module = importlib.import_module("core.trace_metadata_utils")
+    coverage_mask = module._timestamp_coverage_mask
+
+    with pytest.raises(ValueError, match="source_timestamps_s"):
+        coverage_mask(
+            np.array([10.0, np.nan], dtype=np.float64),
+            np.array([10.0], dtype=np.float64),
+        )
+
+    with pytest.raises(ValueError, match="target_timestamps_s"):
+        coverage_mask(
+            np.array([10.0, 11.0], dtype=np.float64),
+            np.array([np.inf], dtype=np.float64),
+        )

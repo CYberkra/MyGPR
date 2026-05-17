@@ -114,6 +114,10 @@ def _timestamp_coverage_mask(
     target = _as_1d_array(target_timestamps_s, np.float64)
     if source.size == 0:
         raise ValueError("source_timestamps_s must contain at least one timestamp")
+    if not np.isfinite(source).all():
+        raise ValueError("source_timestamps_s must contain only finite values")
+    if not np.isfinite(target).all():
+        raise ValueError("target_timestamps_s must contain only finite values")
     start = float(np.min(source))
     end = float(np.max(source))
     tol = max(float(tolerance_s), 0.0)
