@@ -186,18 +186,22 @@ def _normalize_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
     if score_terms is None:
         score_terms = gain_score_terms(metrics, method_key)
     risk_flags = list(candidate.get("risk_flags") or gain_risk_flags(metrics, method_key))
+    score_value = _finite_value(score, default=score_gain_candidate(metrics, method_key))
     return {
         "method_key": method_key,
         "method_label": str(
             candidate.get("method_label") or GAIN_METHOD_LABELS.get(method_key, method_key)
         ),
         "branch": str(candidate.get("branch") or ""),
-        "score": float(score),
+        "score": score_value,
         "params": dict(candidate.get("params") or {}),
         "reason": str(candidate.get("reason") or ""),
         "metrics": metrics,
         "risk_flags": risk_flags,
-        "score_terms": {str(key): float(value) for key, value in dict(score_terms).items()},
+        "score_terms": {
+            str(key): _finite_value(value, default=0.0)
+            for key, value in dict(score_terms).items()
+        },
     }
 
 
@@ -225,6 +229,14 @@ def _metric(metrics: dict[str, Any], key: str, default: float) -> float:
     if not np.isfinite(value):
         return float(default)
     return value
+
+
+def _finite_value(value: Any, *, default: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return float(default)
+    return parsed if np.isfinite(parsed) else float(default)
 
 
 def _dedupe(flags: list[str]) -> list[str]:

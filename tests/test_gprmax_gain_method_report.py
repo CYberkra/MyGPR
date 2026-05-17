@@ -112,6 +112,27 @@ def test_no_target_gain_selection_penalizes_false_positive_amplification():
     )
 
 
+def test_gain_candidate_selection_sanitizes_non_finite_external_scores():
+    decision = choose_gain_candidate(
+        [
+            {
+                "method_key": "sec_gain",
+                "score": np.nan,
+                "score_terms": {"external": np.inf},
+                "metrics": {"truth_score": 0.2},
+            },
+            {
+                "method_key": "agcGain",
+                "score": 0.1,
+                "metrics": {"truth_score": 0.1},
+            },
+        ]
+    )
+
+    assert np.isfinite(decision.score)
+    assert all(np.isfinite(value) for value in decision.score_terms.values())
+
+
 def test_compute_gain_metrics_exposes_truth_and_amplitude_preservation_fields():
     before = np.zeros((48, 12), dtype=np.float32)
     before[14:22, 4:8] = 1.0
