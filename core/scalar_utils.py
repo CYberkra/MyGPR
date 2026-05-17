@@ -15,6 +15,8 @@ def first_scalar(value: Any) -> Any:
         return None
     if isinstance(value, str):
         return value
+    if np.isscalar(value):
+        return value
     try:
         arr = np.asarray(value)
     except (TypeError, ValueError):

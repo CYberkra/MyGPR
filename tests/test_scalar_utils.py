@@ -17,6 +17,9 @@ from core.scalar_utils import (
 
 
 def test_scalar_helpers_accept_numpy_scalar_arrays():
+    assert first_scalar(np.float64(2.5)) == np.float64(2.5)
+    assert to_float(np.float64(2.5), default=0.0) == 2.5
+    assert to_int(np.int64(4), default=0) == 4
     assert first_scalar(np.array([3.5])) == 3.5
     assert to_float(np.array([3.5]), default=0.0) == 3.5
     assert to_int(np.array([3.5]), default=0) == 3
