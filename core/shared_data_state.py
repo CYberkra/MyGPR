@@ -258,7 +258,7 @@ class SharedDataState(QObject):
             self._refresh_replay_package()
 
     def _trim_history(self) -> None:
-        overflow = len(self.history) - int(self.max_history)
+        overflow = len(self.history) - _safe_history_limit(self.max_history)
         if overflow > 0:
             del self.history[:overflow]
 
@@ -358,6 +358,14 @@ def _clone_header_info(header_info: dict[str, Any] | None) -> dict[str, Any] | N
             np.array(value, copy=True) if isinstance(value, np.ndarray) else value
         )
     return cloned
+
+
+def _safe_history_limit(value: Any) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return 10
+    return max(1, parsed)
 
 
 def _append_unique_history_item(

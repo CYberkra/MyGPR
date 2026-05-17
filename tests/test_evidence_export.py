@@ -171,6 +171,18 @@ def test_shared_state_replay_summary_uses_none_for_nonfinite_stats():
     assert package["current"]["header_summary"]["trace_interval_m"] is None
 
 
+def test_shared_state_history_limit_falls_back_for_invalid_values():
+    state = SharedDataState()
+    state.max_history = np.inf
+    raw = np.arange(12, dtype=np.float32).reshape(3, 4)
+    state.load_data(raw, path="demo.csv")
+
+    for idx in range(12):
+        state.apply_current_data(raw + idx + 1, push_history=True, label=f"step-{idx}")
+
+    assert len(state.history) == 10
+
+
 def test_export_replay_evidence_bundle_writes_one_zip(tmp_path: Path):
     state = SharedDataState()
     raw = np.arange(24, dtype=np.float32).reshape(6, 4)
