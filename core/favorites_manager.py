@@ -6,12 +6,27 @@ import json
 import logging
 import os
 from datetime import datetime
+from math import isfinite
 from typing import Dict, List, Optional, Any
 
 from core.app_paths import get_favorites_dir
 from core.methods_registry import PROCESSING_METHODS
 
 logger = logging.getLogger(__name__)
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if value is None or isinstance(value, (str, bool)):
+        return value
+    if isinstance(value, float):
+        return value if isfinite(value) else None
+    if isinstance(value, int):
+        return value
+    return value
 
 
 class FavoritesManager:
@@ -43,7 +58,13 @@ class FavoritesManager:
         """保存收藏"""
         try:
             with open(self.favorites_file, "w", encoding="utf-8") as f:
-                json.dump(self.favorites, f, ensure_ascii=False, indent=2)
+                json.dump(
+                    _json_safe(self.favorites),
+                    f,
+                    ensure_ascii=False,
+                    indent=2,
+                    allow_nan=False,
+                )
         except Exception as e:
             logger.warning("保存收藏失败: %s", e)
 
@@ -167,7 +188,13 @@ class FavoritesManager:
         """导出收藏到文件"""
         try:
             with open(filepath, "w", encoding="utf-8") as f:
-                json.dump(self.favorites, f, ensure_ascii=False, indent=2)
+                json.dump(
+                    _json_safe(self.favorites),
+                    f,
+                    ensure_ascii=False,
+                    indent=2,
+                    allow_nan=False,
+                )
             logger.info("收藏已导出: %s", filepath)
         except Exception as e:
             logger.warning("导出收藏失败: %s", e)
