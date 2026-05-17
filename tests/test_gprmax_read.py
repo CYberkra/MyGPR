@@ -75,6 +75,20 @@ def test_read_gprmax_out_attaches_impulse_context_from_matching_in(tmp_path: Pat
     assert np.allclose(result["trace_metadata"]["trace_distance_m"], [0.0, 0.05, 0.1])
 
 
+def test_read_gprmax_out_ignores_nonfinite_time_step_attr(tmp_path: Path):
+    data = np.arange(12, dtype=np.float32).reshape(4, 3)
+    _write_gprmax_out(tmp_path / "bad_dt_merged.out", data, dt=np.inf)
+
+    result = read_gprmax_out(str(tmp_path / "bad_dt_merged.out"))
+
+    assert result["data"].shape == (4, 3)
+    assert result["time_step_s"] is None
+    assert result["total_time_ns"] is None
+    header = result["header_info"]
+    assert header["total_time_ns"] == 0.0
+    assert "gprmax_dt_s" not in header
+
+
 def test_read_gprmax_in_rejects_nonfinite_geometry_values(tmp_path: Path):
     in_path = tmp_path / "bad.in"
     in_path.write_text(
