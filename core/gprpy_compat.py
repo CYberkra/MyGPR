@@ -38,7 +38,7 @@ def apply_gprpy_dewow(data: np.ndarray, window: int) -> np.ndarray:
         return result.astype(np.float32, copy=False)
 
     halfwid = int(np.ceil(window / 2.0))
-    result = np.zeros(arr.shape, dtype=np.float64)
+    result = np.empty(arr.shape, dtype=np.float64)
 
     avg = np.mean(arr[0 : halfwid + 1, :], axis=0)
     result[0 : halfwid + 1, :] = arr[0 : halfwid + 1, :] - avg
@@ -73,7 +73,7 @@ def apply_gprpy_rem_mean_trace(data: np.ndarray, ntraces: int) -> np.ndarray:
         return result.astype(np.float32, copy=False)
 
     halfwid = int(np.ceil(ntraces / 2.0))
-    result = np.zeros(arr.shape, dtype=np.float64)
+    result = np.empty(arr.shape, dtype=np.float64)
 
     avg = np.mean(arr[:, 0 : halfwid + 1], axis=1, keepdims=True)
     result[:, 0 : halfwid + 1] = arr[:, 0 : halfwid + 1] - avg
@@ -114,7 +114,7 @@ def gprpy_local_window_l2_energy(
 
     halfwid = int(np.ceil(window / 2.0))
     squared = arr * arr
-    energy = np.zeros(arr.shape, dtype=np.float64)
+    energy = np.empty(arr.shape, dtype=np.float64)
 
     leading = np.maximum(np.linalg.norm(arr[0 : halfwid + 1, :], axis=0), eps)
     energy[0 : halfwid + 1, :] = leading[np.newaxis, :]
