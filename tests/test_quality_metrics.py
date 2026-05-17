@@ -87,6 +87,13 @@ def test_target_band_energy_ratio_handles_non_finite_band_values():
     assert ratio > 0.0
 
 
+def test_low_freq_energy_ratio_handles_non_finite_cutoff_ratio():
+    raw = _build_test_profile()
+
+    assert np.isfinite(low_freq_energy_ratio(raw, cutoff_ratio=np.nan))
+    assert np.isfinite(low_freq_energy_ratio(raw, cutoff_ratio=np.inf))
+
+
 def test_relative_reduction_rewards_lower_after_value():
     assert relative_reduction(10.0, 6.0) > 0.0
     assert relative_reduction(10.0, 10.0) == 0.0

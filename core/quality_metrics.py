@@ -342,7 +342,10 @@ def low_freq_energy_ratio(
     if spec.size == 0:
         return 0.0
     freqs = np.fft.rfftfreq(arr.shape[0], d=1.0 / fs if fs and fs > 0 else 1.0)
-    cutoff = float(cutoff_ratio) * float(freqs[-1] if freqs.size > 0 else 1.0)
+    resolved_cutoff_ratio = float(
+        np.clip(_finite_scalar(cutoff_ratio, 0.08), 0.0, 1.0)
+    )
+    cutoff = resolved_cutoff_ratio * float(freqs[-1] if freqs.size > 0 else 1.0)
     mask = freqs <= cutoff
     total = float(np.sum(spec))
     if total <= EPS:
