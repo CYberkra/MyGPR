@@ -62,6 +62,33 @@ def test_comparison_uses_current_ui_params_as_manual_baseline():
     assert result.verdict == "auto_better"
 
 
+def test_comparison_manual_roi_accepts_none_and_numpy_scalar_bounds():
+    raw = _build_drift_profile(samples=72, traces=18)
+
+    result = run_auto_tune_comparison(
+        raw,
+        pipeline=["dewow"],
+        manual_params_by_method={"dewow": {"window": 1}},
+        roi_spec={
+            "mode": "manual",
+            "bounds": {
+                "time_start_idx": None,
+                "time_end_idx": np.array([60]),
+                "dist_start_idx": np.int64(2),
+                "dist_end_idx": np.array([16]),
+            },
+        },
+        search_mode="fast",
+    )
+
+    assert result.roi_info["bounds"] == {
+        "time_start_idx": 0,
+        "time_end_idx": 60,
+        "dist_start_idx": 2,
+        "dist_end_idx": 16,
+    }
+
+
 def test_comparison_profile_fallback_uses_experience_baseline():
     raw = _build_drift_profile(samples=80, traces=24)
 
