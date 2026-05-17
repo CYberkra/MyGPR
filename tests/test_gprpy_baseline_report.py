@@ -61,3 +61,18 @@ def test_write_gprpy_baseline_report_outputs_html_and_summary(tmp_path: Path):
     assert len(payload["steps"]) == 3
     assert payload["steps"][0]["images"] == {}
     assert summary["artifacts"]["html"] == str(html_path.resolve())
+
+
+def test_jsonable_removes_nonfinite_values_for_strict_baseline_report_json():
+    payload = {
+        "metric": np.float64(np.inf),
+        "array": np.array([1.0, np.nan, np.inf], dtype=np.float32),
+        "flag": True,
+    }
+
+    safe = report._jsonable(payload)
+
+    assert safe["metric"] is None
+    assert safe["array"] == [1.0, None, None]
+    assert safe["flag"] is True
+    json.dumps(safe, allow_nan=False)

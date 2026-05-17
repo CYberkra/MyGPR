@@ -199,7 +199,7 @@ def write_gprpy_baseline_report(
 
     summary_json = output_dir / "summary.json"
     summary_json.write_text(
-        json.dumps(summary, ensure_ascii=False, indent=2),
+        json.dumps(_jsonable(summary), ensure_ascii=False, indent=2, allow_nan=False),
         encoding="utf-8",
     )
     html_path = output_dir / "index.html"
@@ -442,13 +442,19 @@ def _fmt(value: Any) -> str:
 
 def _jsonable(value: Any) -> Any:
     if isinstance(value, np.ndarray):
-        return value.tolist()
+        return _jsonable(value.tolist())
     if isinstance(value, (np.floating, np.integer)):
-        return value.item()
+        return _jsonable(value.item())
     if isinstance(value, dict):
         return {str(key): _jsonable(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [_jsonable(item) for item in value]
+    if value is None or isinstance(value, (str, bool)):
+        return value
+    if isinstance(value, float):
+        return float(value) if np.isfinite(value) else None
+    if isinstance(value, int):
+        return int(value)
     return value
 
 
