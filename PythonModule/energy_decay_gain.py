@@ -9,6 +9,13 @@ from typing import Any
 import numpy as np
 
 
+def _finite_float(value: Any, name: str) -> float:
+    resolved = float(value)
+    if not np.isfinite(resolved):
+        raise ValueError(f"{name} 必须是有限数值")
+    return resolved
+
+
 def method_energy_decay_gain(
     data: np.ndarray,
     strength: float = 1.0,
@@ -30,11 +37,13 @@ def method_energy_decay_gain(
     if arr.size == 0:
         raise ValueError("输入数据为空")
 
-    resolved_strength = max(0.0, float(strength))
-    smooth_window = max(1, int(round(float(smoothing_samples))))
-    gain_min = max(0.0, float(min_gain))
-    gain_max = max(gain_min, float(max_gain))
-    floor = max(0.0, float(floor_ratio))
+    resolved_strength = max(0.0, _finite_float(strength, "strength"))
+    smooth_window = max(
+        1, int(round(_finite_float(smoothing_samples, "smoothing_samples")))
+    )
+    gain_min = max(0.0, _finite_float(min_gain, "min_gain"))
+    gain_max = max(gain_min, _finite_float(max_gain, "max_gain"))
+    floor = max(0.0, _finite_float(floor_ratio, "floor_ratio"))
 
     decay = np.median(np.abs(arr.astype(np.float64)), axis=1)
     decay_smooth = _moving_average(decay, smooth_window)

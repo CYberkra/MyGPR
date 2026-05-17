@@ -7,6 +7,13 @@ from __future__ import annotations
 import numpy as np
 
 
+def _finite_float(value, name: str) -> float:
+    resolved = float(value)
+    if not np.isfinite(resolved):
+        raise ValueError(f"{name} 必须是有限数值")
+    return resolved
+
+
 def method_sec_gain(data, gain_min=1.0, gain_max=6.0, power=1.0, **kwargs):
     arr = np.asarray(data, dtype=np.float64)
     if arr.ndim != 2:
@@ -14,9 +21,9 @@ def method_sec_gain(data, gain_min=1.0, gain_max=6.0, power=1.0, **kwargs):
     if arr.size == 0:
         raise ValueError("输入数据为空")
 
-    gain_min = float(gain_min)
-    gain_max = float(gain_max)
-    power = max(float(power), 1.0e-6)
+    gain_min = _finite_float(gain_min, "gain_min")
+    gain_max = _finite_float(gain_max, "gain_max")
+    power = max(_finite_float(power, "power"), 1.0e-6)
 
     n_samples = int(arr.shape[0])
     t = np.linspace(0.0, 1.0, n_samples, dtype=np.float64) ** power

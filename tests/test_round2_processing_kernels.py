@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 import pywt
 
 from core.gprpy_compat import (
@@ -273,6 +274,16 @@ def test_method_sec_gain_returns_metadata_dict_and_curve():
     assert np.allclose(result[:, 0], meta["gain_curve"])
 
 
+def test_method_sec_gain_rejects_non_finite_params():
+    raw = np.ones((4, 3), dtype=np.float32)
+
+    with pytest.raises(ValueError, match="gain_max"):
+        method_sec_gain(raw, gain_min=1.0, gain_max=np.inf, power=1.0)
+
+    with pytest.raises(ValueError, match="power"):
+        method_sec_gain(raw, gain_min=1.0, gain_max=4.0, power=np.nan)
+
+
 def test_method_energy_decay_gain_amplifies_late_low_energy_rows():
     row_scale = np.linspace(1.0, 0.1, 12, dtype=np.float32)
     raw = np.repeat(row_scale[:, np.newaxis], 6, axis=1)
@@ -306,6 +317,16 @@ def test_method_energy_decay_gain_uses_robust_trace_statistic():
     assert np.isfinite(result).all()
     assert float(meta["decay_curve"][4]) == 1.0
     assert float(meta["gain_curve"][4]) <= 1.1
+
+
+def test_method_energy_decay_gain_rejects_non_finite_params():
+    raw = np.ones((8, 5), dtype=np.float32)
+
+    with pytest.raises(ValueError, match="strength"):
+        method_energy_decay_gain(raw, strength=np.nan)
+
+    with pytest.raises(ValueError, match="max_gain"):
+        method_energy_decay_gain(raw, max_gain=np.inf)
 
 
 def test_method_amplitude_scale_constant_mode():
