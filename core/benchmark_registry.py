@@ -225,8 +225,7 @@ def _build_motion_compensation_fixture(seed: int) -> tuple[np.ndarray, dict[str,
             dtype=np.float64,
         )
 
-    gt_spacing = np.full(traces - 1, trace_interval_m, dtype=np.float64)
-    gt_trace_distance = np.concatenate(([0.0], np.cumsum(gt_spacing)))
+    gt_trace_distance = np.arange(traces, dtype=np.float64) * trace_interval_m
     gt_local_x = gt_trace_distance.copy()
     gt_local_y = 0.22 * np.sin(2.0 * np.pi * trace_phase) + 0.05 * np.sin(
         2.0 * np.pi * 3.0 * trace_phase
@@ -255,7 +254,9 @@ def _build_motion_compensation_fixture(seed: int) -> tuple[np.ndarray, dict[str,
         2.0 * np.pi * 4.1 * trace_phase[1:]
     )
     obs_spacing = trace_interval_m * np.clip(spacing_scale, 0.58, None)
-    obs_trace_distance = np.concatenate(([0.0], np.cumsum(obs_spacing)))
+    obs_trace_distance = np.empty(traces, dtype=np.float64)
+    obs_trace_distance[0] = 0.0
+    obs_trace_distance[1:] = np.cumsum(obs_spacing, dtype=np.float64)
     obs_local_x = obs_trace_distance.copy()
     obs_local_y = gt_local_y + lateral_error
     obs_height = gt_height + height_error
