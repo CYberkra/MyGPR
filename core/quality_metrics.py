@@ -60,6 +60,11 @@ def _row_mean_square(arr: np.ndarray) -> np.ndarray:
     return np.einsum("ij,ij->i", arr, arr, optimize=True) / arr.shape[1]
 
 
+def _sum_square(arr: np.ndarray) -> float:
+    values = np.ravel(arr)
+    return float(np.dot(values, values))
+
+
 def build_saliency_map(data: np.ndarray) -> np.ndarray:
     """Build a lightweight saliency map from amplitude and gradient energy."""
     arr = _as_clean_2d(data)
@@ -279,10 +284,10 @@ def pre_zero_energy_ratio(data: np.ndarray, zero_idx: int) -> float:
     """Energy before zero-time divided by total energy."""
     arr = _as_clean_2d(data)
     idx = max(0, min(int(zero_idx), arr.shape[0]))
-    total = float(np.sum(arr**2))
+    total = _sum_square(arr)
     if total <= EPS or idx <= 0:
         return 0.0
-    return float(np.sum(arr[:idx, :] ** 2) / total)
+    return float(_sum_square(arr[:idx, :]) / total)
 
 
 def first_break_std(
@@ -352,10 +357,10 @@ def horizontal_coherence(data: np.ndarray) -> float:
     """Energy ratio of horizontally coherent background component."""
     arr = _as_clean_2d(data)
     background = np.mean(arr, axis=1, keepdims=True)
-    total = float(np.sum(arr**2))
+    total = _sum_square(arr)
     if total <= EPS:
         return 0.0
-    return float(np.sum(background**2) / total)
+    return float(_sum_square(background) / total)
 
 
 def local_saliency_preservation(before: np.ndarray, after: np.ndarray) -> float:
