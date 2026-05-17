@@ -71,16 +71,39 @@ def _compute_trace_distance(local_x_m: np.ndarray, local_y_m: np.ndarray) -> np.
 
 def _json_default(value: Any) -> Any:
     if isinstance(value, np.ndarray):
-        return value.tolist()
+        return _jsonable(value.tolist())
     if isinstance(value, (np.floating, np.integer)):
-        return value.item()
+        return _jsonable(value.item())
     if isinstance(value, Path):
         return str(value)
     raise TypeError(f"Unsupported type for JSON serialization: {type(value)!r}")
 
 
+def _jsonable(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(item) for item in value]
+    if isinstance(value, np.ndarray):
+        return _jsonable(value.tolist())
+    if isinstance(value, (np.floating, np.integer)):
+        return _jsonable(value.item())
+    if isinstance(value, Path):
+        return str(value)
+    if value is None or isinstance(value, (str, bool)):
+        return value
+    if isinstance(value, float):
+        return float(value) if np.isfinite(value) else None
+    if isinstance(value, int):
+        return int(value)
+    return value
+
+
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=_json_default), encoding="utf-8")
+    path.write_text(
+        json.dumps(_jsonable(payload), ensure_ascii=False, indent=2, allow_nan=False),
+        encoding="utf-8",
+    )
 
 
 def _save_case_bundle(path: Path, data: np.ndarray, header_info: dict[str, Any], trace_metadata: dict[str, Any]) -> None:
@@ -746,7 +769,7 @@ def main() -> None:
     )
 
     _write_json(OUTPUT_ROOT / "single_motion_demo_summary.json", summary)
-    print(json.dumps(summary, ensure_ascii=False, indent=2, default=_json_default))
+    print(json.dumps(_jsonable(summary), ensure_ascii=False, indent=2, allow_nan=False))
 
 
 if __name__ == "__main__":
