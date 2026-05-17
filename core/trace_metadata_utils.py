@@ -286,8 +286,8 @@ def resample_bscan_columns_linear(
     right_x = unique_distance[right_idx]
     denom = np.where(right_x > left_x, right_x - left_x, 1.0)
     weight = ((target_distance - left_x) / denom).astype(np.float32)
-    weight = np.where(target_distance <= unique_distance[0], 0.0, weight)
-    weight = np.where(target_distance >= unique_distance[-1], 1.0, weight)
+    weight[target_distance <= unique_distance[0]] = 0.0
+    weight[target_distance >= unique_distance[-1]] = 1.0
 
     result = np.empty((arr.shape[0], target_distance.size), dtype=np.float32)
     np.multiply(
