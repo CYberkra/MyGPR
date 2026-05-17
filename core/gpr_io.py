@@ -18,7 +18,7 @@ import importlib
 import json
 import os
 import re
-import sys
+import warnings
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple
 
@@ -31,7 +31,11 @@ try:
     HAS_H5PY = True
 except ImportError:
     HAS_H5PY = False
-    print("Warning: h5py not available. gprMax .out loading disabled.")
+    warnings.warn(
+        "h5py not available. gprMax .out loading disabled.",
+        RuntimeWarning,
+        stacklevel=2,
+    )
 
 # 直接导入 read_file_data 模块
 from read_file_data import readcsv, savecsv, save_image, show_image
