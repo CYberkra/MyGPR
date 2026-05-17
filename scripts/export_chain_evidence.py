@@ -14,7 +14,11 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.benchmark_registry import list_benchmark_sample_ids
-from core.evidence_export import STANDARD_CHAIN_SPECS, export_standard_chain_for_sample
+from core.evidence_export import (
+    STANDARD_CHAIN_SPECS,
+    _to_jsonable,
+    export_standard_chain_for_sample,
+)
 
 
 def main() -> int:
@@ -36,7 +40,7 @@ def main() -> int:
         seed=args.seed,
         save_images=not args.no_images,
     )
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    print(json.dumps(_to_jsonable(summary), ensure_ascii=False, indent=2, allow_nan=False))
     return 0
 
 
