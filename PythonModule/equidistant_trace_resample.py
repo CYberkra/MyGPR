@@ -14,6 +14,16 @@ from core.trace_metadata_utils import (
 )
 
 
+def _non_negative_float(value: Any, name: str) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} 必须是有限非负数值") from None
+    if not np.isfinite(parsed):
+        raise ValueError(f"{name} 必须是有限非负数值")
+    return max(0.0, parsed)
+
+
 def method_equidistant_trace_resample(
     data: np.ndarray,
     spacing_m: float = 0.0,
@@ -40,7 +50,7 @@ def method_equidistant_trace_resample(
     if np.any(np.diff(source_distance) < 0.0):
         raise ValueError("trace_distance_m 必须单调非递减")
 
-    requested_spacing = float(spacing_m or 0.0)
+    requested_spacing = _non_negative_float(spacing_m or 0.0, "spacing_m")
     target_distance = build_uniform_trace_distance_m(
         source_distance,
         spacing_m=requested_spacing if requested_spacing > 0.0 else None,

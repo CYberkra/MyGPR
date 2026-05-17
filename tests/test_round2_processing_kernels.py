@@ -289,6 +289,20 @@ def test_equidistant_trace_resample_runtime_metadata_roundtrip():
     assert np.allclose(merged["trace_distance_m"], [0.0, 1.0, 2.0, 3.0])
 
 
+def test_equidistant_trace_resample_rejects_non_finite_spacing():
+    raw = np.ones((3, 3), dtype=np.float32)
+    trace_metadata = {
+        "trace_distance_m": np.array([0.0, 1.0, 2.0], dtype=np.float32),
+    }
+
+    with pytest.raises(ValueError, match="spacing_m"):
+        method_equidistant_trace_resample(
+            raw,
+            spacing_m=np.nan,
+            trace_metadata=trace_metadata,
+        )
+
+
 def test_method_sec_gain_returns_metadata_dict_and_curve():
     raw = np.ones((4, 3), dtype=np.float32)
 
