@@ -7,6 +7,8 @@ from __future__ import annotations
 import csv
 import json
 import re
+import subprocess
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -31,18 +33,24 @@ def export_auto_tune_comparison_artifacts(
     cmap: str = "gray",
 ) -> dict[str, Any]:
     """Export a complete manual-vs-auto research evidence bundle."""
-    output_root = Path(out_dir)
+    output_root = Path(out_dir) / _safe_bundle_name(bundle_name)
     output_root.mkdir(parents=True, exist_ok=True)
     safe_name = _safe_bundle_name(bundle_name)
 
     paths = {
-        "summary_json": output_root / f"{safe_name}_comparison_summary.json",
-        "manual_png": output_root / f"{safe_name}_manual_bscan.png",
-        "auto_png": output_root / f"{safe_name}_auto_bscan.png",
-        "side_by_side_png": output_root / f"{safe_name}_side_by_side.png",
-        "params_csv": output_root / f"{safe_name}_params_table.csv",
-        "metrics_csv": output_root / f"{safe_name}_metrics_table.csv",
-        "report_md": output_root / f"{safe_name}_comparison_report.md",
+        "summary_json": output_root / "comparison_summary.json",
+        "evidence_manifest_json": output_root / "evidence_manifest.json",
+        "converted_ground_truth_json": output_root / "converted_ground_truth.json",
+        "raw_ground_truth_json": output_root / "raw_ground_truth.json",
+        "truth_metrics_json": output_root / "truth_metrics.json",
+        "workflow_params_json": output_root / "workflow_params.json",
+        "manual_png": output_root / "manual_bscan.png",
+        "auto_png": output_root / "auto_bscan.png",
+        "side_by_side_png": output_root / "side_by_side.png",
+        "params_csv": output_root / "params_table.csv",
+        "metrics_csv": output_root / "metrics_table.csv",
+        "report_md": output_root / "comparison_report.md",
+        "evidence_zip": output_root / "evidence_bundle.zip",
     }
 
     manual_arr = np.asarray(result.manual.result, dtype=np.float32)
@@ -80,10 +88,12 @@ def export_auto_tune_comparison_artifacts(
         **dict(summary.get("display_spec") or {}),
         **display_spec,
     }
-    summary["artifacts"] = {
-        key: str(path.resolve()) for key, path in paths.items()
-    }
     summary["exported_at"] = datetime.now().isoformat(timespec="seconds")
+    summary["artifacts"] = {
+        key: str(path.resolve())
+        for key, path in paths.items()
+        if key not in {"evidence_manifest_json", "evidence_zip"}
+    }
 
     _write_csv_rows(
         paths["params_csv"],
@@ -111,17 +121,50 @@ def export_auto_tune_comparison_artifacts(
         _build_report_markdown(summary),
         encoding="utf-8",
     )
+    ground_truth = getattr(result, "ground_truth", None)
+    if isinstance(ground_truth, dict):
+        paths["converted_ground_truth_json"].write_text(
+            json.dumps(_json_safe(ground_truth), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        raw_sidecar = ground_truth.get("raw_sidecar")
+        if isinstance(raw_sidecar, dict):
+            paths["raw_ground_truth_json"].write_text(
+                json.dumps(_json_safe(raw_sidecar), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+    paths["truth_metrics_json"].write_text(
+        json.dumps(_build_truth_metrics(summary), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    paths["workflow_params_json"].write_text(
+        json.dumps(_build_workflow_params(summary), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
     paths["summary_json"].write_text(
         json.dumps(_json_safe(summary), ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    paths["evidence_zip"].touch()
+    manifest = _build_evidence_manifest(
+        summary,
+        paths,
+        output_root=output_root,
+        input_ref=input_ref,
+        notes=notes or [],
+    )
+    paths["evidence_manifest_json"].write_text(
+        json.dumps(_json_safe(manifest), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    _write_evidence_zip(paths["evidence_zip"], paths, output_root)
 
     return _json_safe(
         {
             "bundle_name": safe_name,
             "output_dir": str(output_root.resolve()),
             "artifacts": {
-                key: str(path.resolve()) for key, path in paths.items()
+                key: str(path.resolve()) for key, path in paths.items() if path.exists()
             },
             "summary": summary,
         }
@@ -284,6 +327,160 @@ def _build_metrics_rows(summary: dict[str, Any]) -> list[dict[str, Any]]:
             }
         )
     return rows
+
+
+def _build_truth_metrics(summary: dict[str, Any]) -> dict[str, Any]:
+    info = summary.get("ground_truth_info") or {}
+    if not info.get("enabled"):
+        return {"enabled": False, "reason": "ground truth unavailable"}
+    manual_metrics = ((summary.get("manual") or {}).get("metrics") or {})
+    auto_metrics = ((summary.get("automatic") or {}).get("metrics") or {})
+    delta = summary.get("metric_delta") or {}
+    keys = [
+        "truth_score",
+        "truth_target_energy_preservation",
+        "truth_target_saliency_gain",
+        "truth_background_energy_reduction",
+        "truth_false_positive_ratio",
+        "truth_target_count",
+    ]
+    return {
+        "enabled": True,
+        "manual": {key: _json_safe(manual_metrics.get(key)) for key in keys},
+        "automatic": {key: _json_safe(auto_metrics.get(key)) for key in keys},
+        "delta": {key: _json_safe(delta.get(key)) for key in keys},
+    }
+
+
+def _build_workflow_params(summary: dict[str, Any]) -> dict[str, Any]:
+    manual = summary.get("manual") or {}
+    automatic = summary.get("automatic") or {}
+    auto_results = automatic.get("auto_tune_results") or {}
+    recommendation_reason: dict[str, Any] = {}
+    parameter_domain: dict[str, Any] = {}
+    for method_key, result in auto_results.items():
+        if not isinstance(result, dict):
+            continue
+        recommendation_reason[str(method_key)] = (
+            result.get("best_reason")
+            or result.get("selection_recommendation")
+            or result.get("risk_reason")
+        )
+        parameter_domain[str(method_key)] = result.get("parameter_domain")
+    return {
+        "pipeline": list(manual.get("pipeline") or automatic.get("pipeline") or []),
+        "manual_params_by_method": _json_safe(manual.get("params_by_method") or {}),
+        "automatic_params_by_method": _json_safe(
+            automatic.get("params_by_method") or {}
+        ),
+        "auto_tune_recommendation_reason": _json_safe(recommendation_reason),
+        "parameter_domain": _json_safe(parameter_domain),
+        "baseline_profile_key": summary.get("baseline_profile_key"),
+        "roi_info": _json_safe(summary.get("roi_info") or {}),
+    }
+
+
+def _build_evidence_manifest(
+    summary: dict[str, Any],
+    paths: dict[str, Path],
+    *,
+    output_root: Path,
+    input_ref: str | None,
+    notes: list[str],
+) -> dict[str, Any]:
+    ground_truth = summary.get("ground_truth_info") or {"enabled": False}
+    source_paths = ground_truth.get("source_paths") or {}
+    artifacts = {
+        key: {
+            "path": _relative_artifact_path(path, output_root),
+            "status": "available" if path.exists() else "missing",
+        }
+        for key, path in paths.items()
+    }
+    warnings_list = _summary_warnings(summary)
+    conversion_warnings = ground_truth.get("conversion_warnings") or []
+    warnings_list.extend(str(item) for item in conversion_warnings)
+    return {
+        "schema": "mygpr_autotune_evidence_v1",
+        "exported_at": summary.get("exported_at"),
+        "project": "MyGPR",
+        "git_commit": _safe_git_commit(warnings_list),
+        "input": {
+            "input_file": input_ref,
+            "manifest_file": source_paths.get("manifest_file"),
+            "ground_truth_file": source_paths.get("ground_truth_file"),
+        },
+        "ground_truth": {
+            "enabled": bool(ground_truth.get("enabled")),
+            "scenario_id": ground_truth.get("scenario_id"),
+            "target_count": int(ground_truth.get("target_count") or 0),
+            "has_background_rois": bool(ground_truth.get("has_background_rois")),
+            "conversion_warnings": _json_safe(conversion_warnings),
+        },
+        "workflow": {
+            "pipeline": list(
+                ((summary.get("manual") or {}).get("pipeline"))
+                or ((summary.get("automatic") or {}).get("pipeline"))
+                or []
+            ),
+            "baseline_profile_key": summary.get("baseline_profile_key"),
+            "roi_info": _json_safe(summary.get("roi_info") or {}),
+        },
+        "artifacts": artifacts,
+        "warnings": _json_safe(warnings_list),
+        "notes": [str(item) for item in notes],
+    }
+
+
+def _summary_warnings(summary: dict[str, Any]) -> list[str]:
+    warnings_list: list[str] = []
+    for branch in ("manual", "automatic"):
+        payload = summary.get(branch) or {}
+        warnings_list.extend(str(item) for item in payload.get("warnings", []) or [])
+    return warnings_list
+
+
+def _safe_git_commit(warnings_list: list[str]) -> str | None:
+    repo_root = Path(__file__).resolve().parents[1]
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError as exc:
+        warnings_list.append(f"git commit unavailable: {exc}")
+        return None
+    if result.returncode != 0:
+        warnings_list.append(
+            "git commit unavailable: " + (result.stderr.strip() or str(result.returncode))
+        )
+        return None
+    commit = result.stdout.strip()
+    return commit or None
+
+
+def _relative_artifact_path(path: Path, output_root: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(output_root.resolve()))
+    except ValueError:
+        return str(path.resolve())
+
+
+def _write_evidence_zip(
+    zip_path: Path,
+    paths: dict[str, Path],
+    output_root: Path,
+) -> None:
+    if zip_path.exists():
+        zip_path.unlink()
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for key, path in paths.items():
+            if key == "evidence_zip" or not path.exists():
+                continue
+            zf.write(path, _relative_artifact_path(path, output_root))
 
 
 def _write_csv_rows(

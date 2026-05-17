@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import csv
 import json
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -30,6 +31,52 @@ def _build_export_fixture(samples: int = 84, traces: int = 24) -> np.ndarray:
         data[row : row + 3, trace_idx] += np.array([0.25, 0.85, 0.25])
     data[56:60, 7:18] += 0.18 * np.hanning(4)[:, None]
     return data.astype(np.float32)
+
+
+def _truth_manifest() -> dict:
+    return {
+        "schema": "mygpr_gprmax_ground_truth_v1",
+        "scenario_id": "export_truth_demo",
+        "analysis_roi": {
+            "time_start_idx": 18,
+            "time_end_idx": 68,
+            "dist_start_idx": 3,
+            "dist_end_idx": 21,
+        },
+        "targets": [
+            {
+                "target_id": "pipe_01",
+                "type": "pipe",
+                "material": "metal",
+                "depth_m": 0.35,
+                "must_preserve": True,
+                "roi": {
+                    "time_start_idx": 24,
+                    "time_end_idx": 40,
+                    "dist_start_idx": 6,
+                    "dist_end_idx": 18,
+                },
+            }
+        ],
+        "background_rois": [
+            {
+                "time_start_idx": 8,
+                "time_end_idx": 18,
+                "dist_start_idx": 2,
+                "dist_end_idx": 8,
+            }
+        ],
+        "metrics_contract": {"purpose": "test"},
+        "source_paths": {
+            "manifest_file": "case001_manifest.json",
+            "ground_truth_file": "ground_truth.yaml",
+        },
+        "raw_sidecar": {
+            "schema": "gprmax_ground_truth_v1",
+            "dataset_id": "export_truth_demo",
+        },
+        "conversion_warnings": ["test warning"],
+    }
 
 
 def test_export_auto_tune_comparison_artifacts_writes_research_bundle(tmp_path: Path):
@@ -106,6 +153,119 @@ def test_export_auto_tune_comparison_artifacts_writes_research_bundle(tmp_path: 
     report_text = Path(bundle["artifacts"]["report_md"]).read_text(encoding="utf-8")
     assert "# Auto-Tune Comparison Report" in report_text
     assert "synthetic://case001" in report_text
+
+
+def test_export_auto_tune_comparison_artifacts_writes_truth_evidence_bundle(tmp_path: Path):
+    raw = _build_export_fixture()
+    result = run_auto_tune_comparison(
+        raw,
+        header_info={"ground_truth": _truth_manifest()},
+        pipeline=["dewow"],
+        manual_params_by_method={"dewow": {"window": 1}},
+        search_mode="fast",
+    )
+
+    bundle = export_auto_tune_comparison_artifacts(
+        result,
+        out_dir=tmp_path,
+        bundle_name="truth_case",
+        input_ref="synthetic://truth_case",
+    )
+
+    required = {
+        "summary_json": "comparison_summary.json",
+        "evidence_manifest_json": "evidence_manifest.json",
+        "converted_ground_truth_json": "converted_ground_truth.json",
+        "raw_ground_truth_json": "raw_ground_truth.json",
+        "truth_metrics_json": "truth_metrics.json",
+        "workflow_params_json": "workflow_params.json",
+        "params_csv": "params_table.csv",
+        "metrics_csv": "metrics_table.csv",
+        "manual_png": "manual_bscan.png",
+        "auto_png": "auto_bscan.png",
+        "side_by_side_png": "side_by_side.png",
+        "report_md": "comparison_report.md",
+        "evidence_zip": "evidence_bundle.zip",
+    }
+    for key, file_name in required.items():
+        path = Path(bundle["artifacts"][key])
+        assert path.name == file_name
+        assert path.exists(), key
+        assert path.stat().st_size > 0, key
+
+    manifest = json.loads(
+        Path(bundle["artifacts"]["evidence_manifest_json"]).read_text(encoding="utf-8")
+    )
+    assert manifest["schema"] == "mygpr_autotune_evidence_v1"
+    assert manifest["ground_truth"]["enabled"] is True
+    assert manifest["ground_truth"]["scenario_id"] == "export_truth_demo"
+    assert manifest["ground_truth"]["has_background_rois"] is True
+    assert manifest["artifacts"]["converted_ground_truth_json"]["status"] == "available"
+    assert manifest["artifacts"]["evidence_zip"]["status"] == "available"
+
+    converted = json.loads(
+        Path(bundle["artifacts"]["converted_ground_truth_json"]).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert converted["scenario_id"] == "export_truth_demo"
+    assert converted["raw_sidecar"]["schema"] == "gprmax_ground_truth_v1"
+
+    truth_metrics = json.loads(
+        Path(bundle["artifacts"]["truth_metrics_json"]).read_text(encoding="utf-8")
+    )
+    assert truth_metrics["enabled"] is True
+    assert truth_metrics["manual"]["truth_score"] is not None
+    assert truth_metrics["automatic"]["truth_score"] is not None
+
+    workflow = json.loads(
+        Path(bundle["artifacts"]["workflow_params_json"]).read_text(encoding="utf-8")
+    )
+    assert workflow["pipeline"] == ["dewow"]
+    assert workflow["manual_params_by_method"]["dewow"]["window"] == 1
+    assert "dewow" in workflow["automatic_params_by_method"]
+
+    with zipfile.ZipFile(bundle["artifacts"]["evidence_zip"]) as zf:
+        names = set(zf.namelist())
+    assert {
+        "comparison_summary.json",
+        "evidence_manifest.json",
+        "converted_ground_truth.json",
+        "truth_metrics.json",
+        "workflow_params.json",
+        "side_by_side.png",
+    } <= names
+
+
+def test_export_auto_tune_comparison_artifacts_marks_missing_truth_files(tmp_path: Path):
+    raw = _build_export_fixture(samples=72, traces=18)
+    result = run_auto_tune_comparison(
+        raw,
+        pipeline=["dewow"],
+        manual_params_by_method={"dewow": {"window": 1}},
+        search_mode="fast",
+    )
+
+    bundle = export_auto_tune_comparison_artifacts(
+        result,
+        out_dir=tmp_path,
+        bundle_name="no_truth_case",
+    )
+
+    manifest = json.loads(
+        Path(bundle["artifacts"]["evidence_manifest_json"]).read_text(encoding="utf-8")
+    )
+    assert manifest["ground_truth"]["enabled"] is False
+    assert manifest["artifacts"]["converted_ground_truth_json"]["status"] == "missing"
+    assert manifest["artifacts"]["raw_ground_truth_json"]["status"] == "missing"
+
+    truth_metrics = json.loads(
+        Path(bundle["artifacts"]["truth_metrics_json"]).read_text(encoding="utf-8")
+    )
+    assert truth_metrics == {
+        "enabled": False,
+        "reason": "ground truth unavailable",
+    }
 
 
 def test_export_auto_tune_comparison_artifacts_serializes_nonfinite_metrics(tmp_path: Path):

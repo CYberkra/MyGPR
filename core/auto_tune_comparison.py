@@ -66,6 +66,7 @@ class AutoTuneComparisonRun:
     metric_delta: dict[str, float]
     verdict: str
     ground_truth_info: dict[str, Any]
+    ground_truth: dict[str, Any] | None = None
 
 
 def run_auto_tune_comparison(
@@ -169,6 +170,7 @@ def run_auto_tune_comparison(
         metric_delta=metric_delta,
         verdict=_comparison_verdict(metric_delta),
         ground_truth_info=_ground_truth_info(ground_truth),
+        ground_truth=ground_truth,
     )
 
 
