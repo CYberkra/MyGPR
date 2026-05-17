@@ -370,6 +370,27 @@ def test_workflow_canvas_node_ports_and_edges_follow_proxy_moves():
         app.processEvents()
 
 
+def test_export_template_writes_strict_json(tmp_path: Path, monkeypatch):
+    app = _get_app()
+    page = WorkflowPage()
+    export_path = tmp_path / "workflow_export.json"
+    monkeypatch.setattr(
+        "ui.gui_workflow_page.QFileDialog.getSaveFileName",
+        lambda *args, **kwargs: (str(export_path), "JSON (*.json)"),
+    )
+    try:
+        page.config.methods[0].params["bad_value"] = float("nan")
+
+        page.export_template()
+
+        saved = json.loads(export_path.read_text(encoding="utf-8"))
+        json.dumps(saved, allow_nan=False)
+        assert saved["methods"][0]["params"]["bad_value"] is None
+    finally:
+        page.close()
+        app.processEvents()
+
+
 def test_workflow_card_port_type_mapping_and_preview_style_are_visible():
     app = _get_app()
     canvas = WorkflowCanvasView()

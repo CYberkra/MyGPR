@@ -49,6 +49,7 @@ from core.workflow_data import (
     WorkflowMethod,
     build_default_workflow_config,
     get_config_manager,
+    _json_safe,
 )
 from core.workflow_validation import to_text_with_suggestions, validate_workflow_config
 from ui.workflow_canvas_cards import (
@@ -2208,7 +2209,13 @@ class WorkflowPage(QWidget):
         import json
 
         with open(path, "w", encoding="utf-8") as handle:
-            json.dump(self.config.to_dict(), handle, ensure_ascii=False, indent=2)
+            json.dump(
+                _json_safe(self.config.to_dict()),
+                handle,
+                ensure_ascii=False,
+                indent=2,
+                allow_nan=False,
+            )
         self._log(f"模板已导出: {path}")
 
     def restore_default_template(self) -> None:
