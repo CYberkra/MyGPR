@@ -24,6 +24,7 @@ from core.quality_metrics import (
     relative_reduction,
     target_band_energy_ratio,
     detect_ridge_indices,
+    extract_roi_and_context,
     periodic_banding_ratio,
 )
 
@@ -153,6 +154,22 @@ def test_ridge_detection_handles_non_finite_row_range():
 
     assert detected.shape == (raw.shape[1],)
     assert np.isfinite(detected).all()
+
+
+def test_extract_roi_and_context_handles_non_finite_bounds():
+    raw = _build_test_profile()
+
+    result = extract_roi_and_context(
+        raw,
+        roi_bounds={
+            "time_start_idx": np.nan,
+            "time_end_idx": np.inf,
+            "dist_start_idx": np.nan,
+            "dist_end_idx": np.inf,
+        },
+    )
+
+    assert result["roi_data"].shape == raw.shape
 
 
 def test_gain_quality_metrics_handle_non_finite_control_values():
