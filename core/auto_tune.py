@@ -55,7 +55,7 @@ from core.quality_metrics import (
     weighted_score_parts,
 )
 from core.runtime_warnings import merge_runtime_warnings
-from core.scalar_utils import to_float, to_float_or_none, to_int_or_none
+from core.scalar_utils import to_float, to_float_or_none, to_int, to_int_or_none
 
 
 class AutoTuneError(RuntimeError):
@@ -3041,10 +3041,22 @@ def _slice_depth_band(
 def _slice_bounds(data: np.ndarray, bounds: dict[str, int]) -> np.ndarray:
     """Slice a 2D array with validated ROI/context bounds."""
     arr = np.asarray(data, dtype=np.float64)
-    t0 = max(0, min(int(bounds.get("time_start_idx", 0)), arr.shape[0] - 1))
-    t1 = max(t0 + 1, min(int(bounds.get("time_end_idx", arr.shape[0])), arr.shape[0]))
-    d0 = max(0, min(int(bounds.get("dist_start_idx", 0)), arr.shape[1] - 1))
-    d1 = max(d0 + 1, min(int(bounds.get("dist_end_idx", arr.shape[1])), arr.shape[1]))
+    t0 = max(
+        0,
+        min(to_int(bounds.get("time_start_idx"), default=0), arr.shape[0] - 1),
+    )
+    t1 = max(
+        t0 + 1,
+        min(to_int(bounds.get("time_end_idx"), default=arr.shape[0]), arr.shape[0]),
+    )
+    d0 = max(
+        0,
+        min(to_int(bounds.get("dist_start_idx"), default=0), arr.shape[1] - 1),
+    )
+    d1 = max(
+        d0 + 1,
+        min(to_int(bounds.get("dist_end_idx"), default=arr.shape[1]), arr.shape[1]),
+    )
     return arr[t0:t1, d0:d1]
 
 

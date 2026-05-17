@@ -14,6 +14,7 @@ from core.auto_tune import (
     _resolve_time_step_ns,
     _sanitize_float_candidates,
     _sanitize_int_candidates,
+    _slice_bounds,
     _normalize_summary_value,
     _value_at_domain_edge,
     auto_select_method_group,
@@ -375,6 +376,23 @@ def test_auto_tune_manual_roi_uses_explicit_bounds():
     assert result["roi_info"]["source"] == "manual"
     assert result["roi_info"]["label"] == "手动框选 ROI"
     assert any(trial.get("roi_used") for trial in result["all_trials"])
+
+
+def test_auto_tune_slice_bounds_accepts_none_and_numpy_scalars():
+    raw = np.arange(80, dtype=np.float32).reshape(10, 8)
+
+    result = _slice_bounds(
+        raw,
+        {
+            "time_start_idx": None,
+            "time_end_idx": np.array([6]),
+            "dist_start_idx": np.int64(1),
+            "dist_end_idx": np.array([5]),
+        },
+    )
+
+    assert result.shape == (6, 4)
+    assert result[0, 0] == raw[0, 1]
 
 
 def test_auto_tune_zero_time_uses_family_specific_shallow_region_even_with_manual_roi():
