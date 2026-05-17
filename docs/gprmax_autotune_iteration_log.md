@@ -171,3 +171,51 @@ bundles stay under `output/` and are not committed.
 - next step:
   - add a true noise/low-SNR scene and a multi-target scene after the current
     deterministic evidence bridge is committed.
+
+## Iteration 5 - Deterministic Additive Noise Stress Test
+
+- branch: `codex/research-gprmax-autotune`
+- base commit: `9603c0a`
+- goal: convert the previous "weak target" note into an actual stochastic
+  noise benchmark with deterministic random seeds and auditable metadata.
+- changed files:
+  - `scripts/gprmax_benchmark/add_noise_to_gprmax_dataset.py`
+  - `tests/test_gprmax_noise_dataset.py`
+  - `docs/gprmax_autotune_iteration_log.md`
+  - `docs/autotune_gprmax_pipe_demo_report.md`
+- source dataset:
+  - `output/gprmax_datasets/pipe_demo_longline_v1/pipe_demo_longline_v1_manifest.json`
+- generation commands:
+  - `python scripts/gprmax_benchmark/add_noise_to_gprmax_dataset.py --source output\gprmax_datasets\pipe_demo_longline_v1\pipe_demo_longline_v1_manifest.json --output-root output\gprmax_datasets --output-name pipe_demo_low_snr_noise_v1 --target-snr-db 3.0 --seed 20260517 --overwrite`
+  - `python scripts/gprmax_benchmark/add_noise_to_gprmax_dataset.py --source output\gprmax_datasets\pipe_demo_longline_v1\pipe_demo_longline_v1_manifest.json --output-root output\gprmax_datasets --output-name pipe_demo_noise_8db_v1 --target-snr-db 8.0 --seed 20260517 --overwrite`
+  - `python scripts/gprmax_benchmark/add_noise_to_gprmax_dataset.py --source output\gprmax_datasets\pipe_demo_longline_v1\pipe_demo_longline_v1_manifest.json --output-root output\gprmax_datasets --output-name pipe_demo_noise_15db_v1 --target-snr-db 15.0 --seed 20260517 --overwrite`
+- generated datasets:
+  - `output/gprmax_datasets/pipe_demo_low_snr_noise_v1/` (`actual_snr_db=3.000`)
+  - `output/gprmax_datasets/pipe_demo_noise_8db_v1/` (`actual_snr_db=8.000`)
+  - `output/gprmax_datasets/pipe_demo_noise_15db_v1/` (`actual_snr_db=15.000`)
+- audit result:
+  - all three noisy datasets reached `READY`.
+- Evidence pipeline:
+  - `dewow,subtracting_average_2D,sec_gain`
+- Evidence summary:
+
+| scenario_id | manual truth_score | AutoTune truth_score | delta | manual false_positive | AutoTune false_positive | report |
+|---|---:|---:|---:|---:|---:|---|
+| `pipe_demo_low_snr_noise_v1` | -1.102353 | -1.224633 | -0.122280 | 0.978858 | 1.018470 | `output/gprmax_autotune_real_smoke/pipe_demo_low_snr_noise_v1_standard/comparison_report.md` |
+| `pipe_demo_noise_8db_v1` | -1.125794 | -1.270860 | -0.145067 | 0.978855 | 1.020414 | `output/gprmax_autotune_real_smoke/pipe_demo_noise_8db_v1_standard/comparison_report.md` |
+| `pipe_demo_noise_15db_v1` | -1.037360 | -1.404514 | -0.367154 | 0.978847 | 1.024179 | `output/gprmax_autotune_real_smoke/pipe_demo_noise_15db_v1_standard/comparison_report.md` |
+
+- visual check:
+  - The standard pipeline side-by-side images are dominated by additive noise
+    texture. The target hyperbola is not reliably interpretable.
+- interpretation:
+  - This is a useful failure result. The current standard pipeline and scoring
+    domain are not robust to global additive Gaussian noise.
+  - These scenarios should not be used as a positive AutoTune claim yet.
+  - They should drive the next algorithm work: noise-aware candidate domains,
+    explicit denoise stage selection, and truth-aware evaluation of
+    target-preserving denoise methods.
+- next step:
+  - add a noise-aware AutoTune experiment path that compares denoise methods and
+    avoids treating gain/background settings as the whole solution to low-SNR
+    data.

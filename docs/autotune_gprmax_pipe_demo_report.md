@@ -203,6 +203,41 @@ not be treated as a failure. It shows why a paper-ready AutoTune evaluation
 cannot rely only on generic visual-quality scores: target preservation and
 false-positive control need explicit truth-aware validation.
 
+## Additive Noise Stress Test
+
+The earlier `weak_target_noise_v1` scene was a weak-contrast target, not a true
+random-noise scene. A deterministic noise augmentation step was therefore added
+to create noisy copies of the validated longline pipe dataset. The augmentation
+copies the raw gprMax HDF5 package, injects additive Gaussian noise into
+`/rxs/rx1/Ez`, and writes a fresh manifest, `ground_truth.yaml`, metadata, and
+README. The original gprMax output is not modified.
+
+Generated noisy datasets:
+
+| Scenario | Target SNR | Actual SNR | Audit |
+|---|---:|---:|---|
+| `pipe_demo_low_snr_noise_v1` | 3 dB | 3.000 dB | READY |
+| `pipe_demo_noise_8db_v1` | 8 dB | 8.000 dB | READY |
+| `pipe_demo_noise_15db_v1` | 15 dB | 15.000 dB | READY |
+
+Standard workflow result:
+
+| Scenario | Manual truth_score | AutoTune truth_score | Delta | Manual false_positive | AutoTune false_positive |
+|---|---:|---:|---:|---:|---:|
+| `pipe_demo_low_snr_noise_v1` | -1.102353 | -1.224633 | -0.122280 | 0.978858 | 1.018470 |
+| `pipe_demo_noise_8db_v1` | -1.125794 | -1.270860 | -0.145067 | 0.978855 | 1.020414 |
+| `pipe_demo_noise_15db_v1` | -1.037360 | -1.404514 | -0.367154 | 0.978847 | 1.024179 |
+
+This is a negative result, not a positive AutoTune claim. Under global additive
+Gaussian noise, the current standard pipeline does not recover a reliable target
+hyperbola, and the AutoTune branch is worse than the manual baseline on
+truth_score. Adding `wavelet_2d` to the 3 dB case did not fix the issue.
+
+The immediate conclusion is that low-SNR data needs a dedicated noise-aware
+AutoTune path. Gain and background removal are not sufficient. Future
+experiments should compare denoise methods explicitly and score them by
+target-preserving truth metrics instead of relying on generic visual quality.
+
 ## Current Conclusion
 
 This longline pipe scene and compact scenario matrix are the first usable MyGPR
@@ -220,12 +255,16 @@ What it supports:
   truth_score by about `1.798` and reduces false-positive ratio by about `1.524`.
 - Across the five-scenario compact matrix, the standard workflow AutoTune branch
   improves truth_score and reduces false-positive ratio in every scenario.
+- MyGPR can now create deterministic noisy gprMax derivatives with recorded SNR,
+  seed, manifest, and ground truth.
 
 What it does not support yet:
 
 - It does not prove general performance on real UAV-GPR field data.
 - It does not yet prove robustness across enough materials, random noise levels,
   or truly diverse geology.
+- It does not yet solve low-SNR additive-noise scenes; current noisy stress
+  tests are a known failure case.
 - It does not prove that the current manual baseline is the best human expert
   baseline.
 - It does not validate motion compensation.
@@ -243,13 +282,15 @@ What it does not support yet:
   main paper result.
 - `weak_target_noise_v1` is a low-contrast target scene, not a true stochastic
   noise scene.
+- Additive Gaussian noise scenes currently fail the standard AutoTune claim and
+  should be treated as stress tests until a noise-aware AutoTune path is built.
 
 ## Next Experiment Stage
 
 The next paper task is to move from the compact matrix to a stronger benchmark:
 
-1. Add a true noise/low-SNR scene where random or measured-like noise is
-   explicitly recorded in metadata.
+1. Build a noise-aware AutoTune experiment path that compares denoise methods
+   on the new 3/8/15 dB additive-noise datasets.
 2. Add `cylinder_depth_medium_v1` for a complete shallow/medium/deep depth
    sweep.
 3. Add `multi_target_pipe_v1`, including multi-target ground-truth schema and
