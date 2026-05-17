@@ -87,13 +87,17 @@ def prepare_runtime_params(
         total_time_ns = None
         if header_info:
             total_time_ns = header_info.get("total_time_ns")
-        if total_time_ns and float(total_time_ns) > 0:
-            time_step_s = float(total_time_ns) * 1e-9 / samples
+        try:
+            total_time_ns_value = float(total_time_ns)
+        except (TypeError, ValueError):
+            total_time_ns_value = 0.0
+        if total_time_ns_value > 0:
+            time_step_s = total_time_ns_value * 1e-9 / samples
             runtime_params["time_step_s"] = time_step_s
             if method_id == "frequency_filter_1d":
                 runtime_params.setdefault("sample_rate_hz", 1.0 / time_step_s)
             if method_id in {"subtracting_average_2D", "median_background_2D"}:
-                runtime_params.setdefault("time_window_ns", float(total_time_ns))
+                runtime_params.setdefault("time_window_ns", total_time_ns_value)
 
     if (
         method_id in {"subtracting_average_2D", "median_background_2D"}

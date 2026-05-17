@@ -214,6 +214,26 @@ def test_auto_tune_frequency_filter_returns_valid_band_candidate():
     assert len(result["coarse_trials"]) >= 1
 
 
+def test_auto_tune_frequency_filter_ignores_invalid_total_time_header():
+    raw = _build_test_profile(samples=128, traces=48)
+
+    result = auto_tune_method(
+        raw,
+        "frequency_filter_1d",
+        base_params={
+            "filter_type": "bandpass",
+            "low_freq_mhz": 10.0,
+            "high_freq_mhz": 250.0,
+            "taper_ratio": 0.08,
+        },
+        header_info={"total_time_ns": "bad"},
+        search_mode="fast",
+    )
+
+    assert result["family"] == "frequency"
+    assert result["best_params"]["low_freq_mhz"] < result["best_params"]["high_freq_mhz"]
+
+
 def test_auto_tune_svd_subspace_returns_rank_interval_candidate():
     raw = _build_test_profile(traces=96)
     result = auto_tune_method(

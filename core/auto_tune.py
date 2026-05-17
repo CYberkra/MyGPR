@@ -1565,8 +1565,12 @@ def _build_zero_time_candidates(
 
 def _resolve_time_step_ns(n_samples: int, header_info: dict[str, Any]) -> float:
     total_time_ns = header_info.get("total_time_ns") if header_info else None
-    if total_time_ns and float(total_time_ns) > 0:
-        return float(total_time_ns) / max(1, int(n_samples))
+    try:
+        total = float(total_time_ns)
+    except (TypeError, ValueError):
+        total = 0.0
+    if total > 0:
+        return total / max(1, int(n_samples))
     return 48.0 / max(1, int(n_samples))
 
 
@@ -1577,7 +1581,7 @@ def _agc_window_min(n_samples: int, header_info: dict[str, Any]) -> int:
     total_time_ns = header_info.get("total_time_ns") if header_info else None
     try:
         total = float(total_time_ns)
-    except Exception:
+    except (TypeError, ValueError):
         total = 0.0
     if total > 0.0:
         time_step_ns = total / samples
@@ -1596,7 +1600,7 @@ def _sanitize_int_candidates(
     for value in values:
         try:
             current = int(round(float(value)))
-        except Exception:
+        except (TypeError, ValueError):
             continue
         current = max(int(minimum), min(int(upper), current))
         if current not in cleaned:
@@ -1619,7 +1623,7 @@ def _adaptive_trace_windows(
     if base_value is not None:
         try:
             base_int = int(round(float(base_value)))
-        except Exception:
+        except (TypeError, ValueError):
             base_int = None
         if base_int is not None:
             adaptive.extend(
@@ -1640,7 +1644,7 @@ def _sanitize_float_candidates(values: list[Any], minimum: float) -> list[float]
     for value in values:
         try:
             current = float(value)
-        except Exception:
+        except (TypeError, ValueError):
             continue
         current = max(float(minimum), current)
         if current not in cleaned:
@@ -1895,21 +1899,21 @@ def _build_frequency_filter_trials(
 def _resolve_nyquist_mhz(n_samples: int, header_info: dict[str, Any]) -> float | None:
     try:
         sample_rate_hz = float(header_info.get("sample_rate_hz"))
-    except Exception:
+    except (TypeError, ValueError):
         sample_rate_hz = 0.0
     if sample_rate_hz > 0.0:
         return float(sample_rate_hz / 2.0e6)
 
     try:
         time_step_s = float(header_info.get("time_step_s"))
-    except Exception:
+    except (TypeError, ValueError):
         time_step_s = 0.0
     if time_step_s > 0.0:
         return float(1.0 / time_step_s / 2.0e6)
 
     try:
         total_time_ns = float(header_info.get("total_time_ns"))
-    except Exception:
+    except (TypeError, ValueError):
         total_time_ns = 0.0
     if total_time_ns > 0.0:
         return float(max(1, int(n_samples)) / (total_time_ns * 1.0e-9) / 2.0e6)
@@ -2573,7 +2577,7 @@ def _value_at_domain_edge(value: Any, summary: dict[str, Any]) -> bool:
         current = float(value)
         minimum = float(summary.get("min"))
         maximum = float(summary.get("max"))
-    except Exception:
+    except (TypeError, ValueError):
         return False
     return abs(current - minimum) <= 1.0e-9 or abs(current - maximum) <= 1.0e-9
 
