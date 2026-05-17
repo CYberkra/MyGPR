@@ -20,9 +20,14 @@ from read_file_data import save_image
 
 def _to_jsonable(value: Any) -> Any:
     if isinstance(value, np.ndarray):
-        return value.tolist()
-    if isinstance(value, (np.floating, np.integer)):
+        return _to_jsonable(value.tolist())
+    if isinstance(value, np.floating):
+        parsed = float(value.item())
+        return parsed if np.isfinite(parsed) else None
+    if isinstance(value, np.integer):
         return value.item()
+    if isinstance(value, float):
+        return value if np.isfinite(value) else None
     if isinstance(value, dict):
         return {str(k): _to_jsonable(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):

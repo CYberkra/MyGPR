@@ -73,6 +73,38 @@ def test_export_chain_evidence_tolerates_invalid_plot_metadata(tmp_path: Path):
     assert (tmp_path / "bad-metadata-bundle-raw-vs-final.png").exists()
 
 
+def test_export_chain_evidence_writes_standard_json_for_nonfinite_metadata(
+    tmp_path: Path,
+):
+    raw = np.arange(48, dtype=np.float32).reshape(12, 4)
+
+    export_chain_evidence(
+        data=raw,
+        header_info={
+            "a_scan_length": 12,
+            "num_traces": 4,
+            "total_time_ns": np.inf,
+            "trace_interval_m": np.nan,
+        },
+        bundle_name="nonfinite-metadata-bundle",
+        chain_name="非有限元数据链",
+        chain_description="metadata json fallback",
+        steps=[("dewow", {"window": 5})],
+        out_dir=tmp_path,
+        title_prefix="Nonfinite Metadata",
+        save_images=False,
+    )
+
+    summary_text = (tmp_path / "nonfinite-metadata-bundle-summary.json").read_text(
+        encoding="utf-8"
+    )
+    assert "Infinity" not in summary_text
+    assert "NaN" not in summary_text
+    summary = json.loads(summary_text)
+    assert summary["header_info"]["total_time_ns"] is None
+    assert summary["header_info"]["trace_interval_m"] is None
+
+
 def test_export_standard_chain_for_sample_supports_both_stage_a_chains(tmp_path: Path):
     for chain_key in ("conservative_default", "aggressive_gain"):
         summary = export_standard_chain_for_sample(
