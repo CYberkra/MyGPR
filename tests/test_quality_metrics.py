@@ -24,6 +24,7 @@ from core.quality_metrics import (
     relative_reduction,
     target_band_energy_ratio,
     detect_ridge_indices,
+    periodic_banding_ratio,
 )
 
 
@@ -152,3 +153,12 @@ def test_gain_quality_metrics_handle_non_finite_control_values():
     assert np.isfinite(deep_zone_contrast(raw, deep_ratio=np.nan))
     assert np.isfinite(clipping_ratio(raw, high_quantile=np.nan))
     assert np.isfinite(hot_pixel_ratio(raw, z=np.nan))
+
+
+def test_periodic_banding_ratio_handles_non_finite_trace_band():
+    raw = _build_test_profile()
+
+    ratio = periodic_banding_ratio(raw, trace_band=(np.nan, np.inf))
+
+    assert np.isfinite(ratio)
+    assert ratio >= 0.0
