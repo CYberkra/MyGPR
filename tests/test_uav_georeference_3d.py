@@ -46,6 +46,24 @@ def test_build_airborne_georeference_payload_with_limited_preview():
     assert np.isclose(payload["airborne_z_m"][0], 12.0)
 
 
+def test_build_airborne_georeference_payload_downsamples_without_losing_tail():
+    data = np.arange(15 * 14, dtype=np.float32).reshape(15, 14)
+
+    payload = build_airborne_georeference_3d_payload(
+        data,
+        {"total_time_ns": 70.0},
+        {"trace_distance_m": np.linspace(0.0, 1.3, 14)},
+        max_preview_traces=5,
+        max_preview_samples=6,
+    )
+
+    assert payload is not None
+    assert payload["preview"]["trace_indices"][-1] == 13
+    assert payload["preview"]["sample_indices"][-1] == 14
+    assert payload["preview"]["amplitude"][-1, -1] == data[-1, -1]
+    assert "downsampled_preview" in payload["quality_flags"]
+
+
 def test_export_airborne_georeference_bundle_writes_vtk_csv_json(tmp_path: Path):
     data = np.arange(200, dtype=np.float32).reshape(20, 10)
     trace_metadata = {
