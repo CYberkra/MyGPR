@@ -163,3 +163,23 @@ def test_extract_roi_and_context_accepts_numpy_scalar_bounds():
         "dist_end_idx": 5,
     }
     assert result["roi_data"].shape == (4, 4)
+
+
+def test_extract_roi_and_context_replaces_nonfinite_input_values():
+    raw = np.arange(80, dtype=np.float32).reshape(10, 8)
+    raw[2, 1] = np.nan
+    raw[3, 2] = np.inf
+
+    result = extract_roi_and_context(
+        raw,
+        {
+            "time_start_idx": 2,
+            "time_end_idx": 4,
+            "dist_start_idx": 1,
+            "dist_end_idx": 3,
+        },
+    )
+
+    assert np.isfinite(result["roi_data"]).all()
+    assert result["roi_data"][0, 0] == 0.0
+    assert result["roi_data"][1, 1] == 0.0
