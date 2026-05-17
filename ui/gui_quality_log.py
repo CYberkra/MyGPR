@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """GUI 质量与导出页面 - 包含处理记录、质量指标显示等功能。"""
 
+import logging
 import numpy as np
 
 from PyQt6.QtWidgets import (
@@ -22,6 +23,9 @@ from matplotlib.figure import Figure
 from matplotlib import colormaps, colors
 
 from core.theme_manager import get_theme_manager
+
+
+logger = logging.getLogger(__name__)
 
 
 class QualityLogPage(QWidget):
@@ -390,13 +394,13 @@ class QualityLogPage(QWidget):
             ax.yaxis.pane.set_edgecolor(palette["spine"])
             ax.zaxis.pane.set_edgecolor(palette["spine"])
         except Exception:
-            pass
+            logger.debug("Failed to style 3D pane colors.", exc_info=True)
         try:
             ax.xaxis._axinfo["grid"]["color"] = palette["grid"]
             ax.yaxis._axinfo["grid"]["color"] = palette["grid"]
             ax.zaxis._axinfo["grid"]["color"] = palette["grid"]
         except Exception:
-            pass
+            logger.debug("Failed to style 3D grid colors.", exc_info=True)
         return palette
 
     def _get_plot_palette(self) -> dict:
