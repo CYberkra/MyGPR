@@ -65,6 +65,25 @@ def test_background_removal_can_be_limited_to_time_range_ns():
     assert meta["time_range_source"] == "ns"
 
 
+def test_background_time_range_ignores_non_finite_bounds():
+    raw = np.arange(1, 81, dtype=np.float32).reshape(10, 8)
+    expected = apply_gprpy_rem_mean_trace(raw, 3)
+
+    result, meta = run_processing_method(
+        raw,
+        "subtracting_average_2D",
+        {
+            "ntraces": 3,
+            "time_start_ns": np.inf,
+            "time_end_ns": np.nan,
+            "time_window_ns": np.nan,
+        },
+    )
+
+    assert np.allclose(result, expected)
+    assert meta["time_range_source"] == "full"
+
+
 def test_median_background_removal_can_be_limited_to_sample_range():
     raw = np.arange(1, 81, dtype=np.float32).reshape(10, 8)
 

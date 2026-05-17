@@ -120,14 +120,13 @@ def _has_positive_value(value: Any) -> bool:
 
 
 def _as_int(value: Any, *, default: int) -> int:
-    try:
-        return int(float(value))
-    except (TypeError, ValueError):
-        return int(default)
+    parsed = _as_float(value, default=float(default))
+    return int(parsed)
 
 
 def _as_float(value: Any, *, default: float) -> float:
     try:
-        return float(value)
+        parsed = float(value)
     except (TypeError, ValueError):
         return float(default)
+    return parsed if np.isfinite(parsed) else float(default)
