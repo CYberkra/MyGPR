@@ -108,6 +108,34 @@ def test_pipeline_auto_tunes_each_step_on_current_state():
     assert result.overall_recommendation in {"adopt_auto", "review", "keep_manual"}
 
 
+def test_pipeline_manual_roi_accepts_none_and_numpy_scalar_bounds():
+    raw = _build_pipeline_profile(samples=72, traces=18)
+
+    result = run_auto_tune_pipeline(
+        raw,
+        pipeline=["dewow"],
+        manual_params_by_method={"dewow": {"window": 1}},
+        roi_spec={
+            "mode": "manual",
+            "bounds": {
+                "time_start_idx": None,
+                "time_end_idx": np.array([60]),
+                "dist_start_idx": np.int64(2),
+                "dist_end_idx": np.array([16]),
+            },
+        },
+        search_mode="fast",
+    )
+
+    assert result.roi_info["bounds"] == {
+        "time_start_idx": 0,
+        "time_end_idx": 60,
+        "dist_start_idx": 2,
+        "dist_end_idx": 16,
+    }
+    assert result.steps[0].manual_roi_before == result.roi_info["bounds"]
+
+
 def test_pipeline_uses_ground_truth_metrics_and_rolls_back_unsafe_auto(monkeypatch):
     raw = _build_pipeline_profile()
 
