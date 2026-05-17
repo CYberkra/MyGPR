@@ -100,3 +100,20 @@ def test_comparison_summary_is_json_safe_and_excludes_arrays():
     ]
     assert "parameter_domain" in summary["automatic"]["auto_tune_results"]["dewow"]
     assert "risk_flags" in summary["automatic"]["auto_tune_results"]["dewow"]
+
+
+def test_comparison_summary_serializes_nonfinite_metrics_as_null():
+    raw = _build_drift_profile(samples=72, traces=18)
+    result = run_auto_tune_comparison(
+        raw,
+        pipeline=["dewow"],
+        manual_params_by_method={"dewow": {"window": 1}},
+        search_mode="fast",
+    )
+    result.manual.metrics["nan_metric"] = np.float64(np.nan)
+    result.automatic.metrics["inf_metric"] = np.array([np.inf])
+
+    summary = to_summary_dict(result)
+
+    assert summary["manual"]["metrics"]["nan_metric"] is None
+    assert summary["automatic"]["metrics"]["inf_metric"] == [None]

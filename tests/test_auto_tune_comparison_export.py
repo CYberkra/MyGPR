@@ -103,3 +103,34 @@ def test_export_auto_tune_comparison_artifacts_writes_research_bundle(tmp_path: 
     report_text = Path(bundle["artifacts"]["report_md"]).read_text(encoding="utf-8")
     assert "# Auto-Tune Comparison Report" in report_text
     assert "synthetic://case001" in report_text
+
+
+def test_export_auto_tune_comparison_artifacts_serializes_nonfinite_metrics(tmp_path: Path):
+    raw = _build_export_fixture(samples=72, traces=18)
+    result = run_auto_tune_comparison(
+        raw,
+        pipeline=["dewow"],
+        manual_params_by_method={"dewow": {"window": 1}},
+        search_mode="fast",
+    )
+    result.manual.metrics["nan_metric"] = np.float64(np.nan)
+    result.automatic.metrics["inf_metric"] = np.array([np.inf])
+
+    bundle = export_auto_tune_comparison_artifacts(
+        result,
+        out_dir=tmp_path,
+        bundle_name="nonfinite_case",
+    )
+
+    summary = json.loads(
+        Path(bundle["artifacts"]["summary_json"]).read_text(encoding="utf-8")
+    )
+    assert summary["manual"]["metrics"]["nan_metric"] is None
+    assert summary["automatic"]["metrics"]["inf_metric"] == [None]
+
+    with Path(bundle["artifacts"]["metrics_csv"]).open(
+        "r", encoding="utf-8", newline=""
+    ) as handle:
+        rows = {row["metric"]: row for row in csv.DictReader(handle)}
+    assert rows["nan_metric"]["manual_value"] == ""
+    assert rows["inf_metric"]["auto_value"] == "[null]"
