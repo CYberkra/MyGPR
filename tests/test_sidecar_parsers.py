@@ -190,6 +190,23 @@ def test_parse_sidecar_csv_rejects_missing_timestamp_column(tmp_path: Path):
         parse_sidecar_csv(csv_path, kind="rtk")
 
 
+def test_parse_sidecar_csv_rejects_nonfinite_numeric_values(tmp_path: Path):
+    module = importlib.import_module("core.sidecar_parsers")
+    parse_sidecar_csv = module.parse_sidecar_csv
+
+    csv_path = tmp_path / "bad_altimeter.csv"
+    _write_csv(
+        csv_path,
+        [
+            {"timestamp": 1.0, "distance_m": "nan", "targets": 1},
+            {"timestamp": 2.0, "distance_m": 1.4, "targets": 1},
+        ],
+    )
+
+    with pytest.raises(ValueError, match="non-finite"):
+        parse_sidecar_csv(csv_path, kind="altimeter")
+
+
 def test_parse_sidecar_csv_rejects_unsupported_kind(tmp_path: Path):
     module = importlib.import_module("core.sidecar_parsers")
     parse_sidecar_csv = module.parse_sidecar_csv

@@ -55,7 +55,13 @@ def _coerce_float_array(rows: list[dict[str, str]], column: str) -> np.ndarray:
         raw = row.get(column, "")
         if raw in (None, ""):
             raise ValueError(f"Column '{column}' contains empty values")
-        values.append(float(raw))
+        try:
+            value = float(raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Column '{column}' contains invalid numeric values") from exc
+        if not np.isfinite(value):
+            raise ValueError(f"Column '{column}' contains non-finite values")
+        values.append(value)
     return np.asarray(values, dtype=np.float64)
 
 
@@ -65,7 +71,13 @@ def _coerce_int_array(rows: list[dict[str, str]], column: str) -> np.ndarray:
         raw = row.get(column, "")
         if raw in (None, ""):
             raise ValueError(f"Column '{column}' contains empty values")
-        values.append(int(float(raw)))
+        try:
+            value = float(raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Column '{column}' contains invalid integer values") from exc
+        if not np.isfinite(value):
+            raise ValueError(f"Column '{column}' contains non-finite values")
+        values.append(int(value))
     return np.asarray(values, dtype=np.int32)
 
 
