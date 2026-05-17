@@ -329,7 +329,8 @@ def low_freq_energy_ratio(
     """Low-frequency energy ratio along the time axis."""
     arr = _as_clean_2d(data)
     centered = arr - np.mean(arr, axis=0, keepdims=True)
-    spec = np.abs(np.fft.rfft(centered, axis=0)) ** 2
+    spec = np.abs(np.fft.rfft(centered, axis=0))
+    np.square(spec, out=spec)
     if spec.size == 0:
         return 0.0
     freqs = np.fft.rfftfreq(arr.shape[0], d=1.0 / fs if fs and fs > 0 else 1.0)
