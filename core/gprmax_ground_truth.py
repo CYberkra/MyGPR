@@ -12,6 +12,8 @@ from typing import Any
 
 import yaml
 
+from core.scalar_utils import to_int_or_none
+
 
 GPRMAX_GROUND_TRUTH_SCHEMA = "gprmax_ground_truth_v1"
 MYGPR_GROUND_TRUTH_SCHEMA = "mygpr_gprmax_ground_truth_v1"
@@ -312,10 +314,16 @@ def _convert_roi(
 
 
 def _closed_range(value: Any, label: str) -> tuple[int, int]:
-    if not isinstance(value, (list, tuple)) or len(value) != 2:
+    try:
+        values = list(value)
+    except TypeError as exc:
+        raise ValueError(f"{label} must be a two-item closed interval") from exc
+    if len(values) != 2:
         raise ValueError(f"{label} must be a two-item closed interval")
-    start = int(value[0])
-    end = int(value[1])
+    start = to_int_or_none(values[0])
+    end = to_int_or_none(values[1])
+    if start is None or end is None:
+        raise ValueError(f"{label} must contain finite numeric indices: {value}")
     if start < 0 or end < start:
         raise ValueError(f"{label} must satisfy 0 <= start <= end: {value}")
     return start, end

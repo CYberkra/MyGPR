@@ -148,6 +148,29 @@ def test_convert_gprmax_ground_truth_preserves_nested_target_metadata():
     }
 
 
+def test_convert_gprmax_ground_truth_accepts_numpy_roi_ranges():
+    sidecar = {
+        "schema": "gprmax_ground_truth_v1",
+        "dataset_id": "numpy_roi_demo",
+        "target_roi": {
+            "sample_range": np.array([10, 14]),
+            "trace_range": [np.array([4]), np.array([7])],
+        },
+    }
+
+    converted = convert_gprmax_ground_truth_to_mygpr(
+        sidecar,
+        data_shape=(32, 12),
+    )
+
+    assert converted["targets"][0]["roi"] == {
+        "time_start_idx": 10,
+        "time_end_idx": 15,
+        "dist_start_idx": 4,
+        "dist_end_idx": 8,
+    }
+
+
 def test_convert_gprmax_ground_truth_preserves_nested_target_metadata_in_target_list():
     sidecar = {
         "schema": "gprmax_ground_truth_v1",
