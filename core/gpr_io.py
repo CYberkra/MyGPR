@@ -361,12 +361,14 @@ def compute_trace_distance_m(longitude: np.ndarray, latitude: np.ndarray) -> np.
     lat_rad = np.radians(lat[:n])
     dlon = np.diff(lon_rad)
     dlat = np.diff(lat_rad)
-    a = (
-        np.sin(dlat / 2.0) ** 2
-        + np.cos(lat_rad[:-1]) * np.cos(lat_rad[1:]) * np.sin(dlon / 2.0) ** 2
-    )
-    c = 2.0 * np.arctan2(np.sqrt(a), np.sqrt(np.maximum(1.0 - a, 0.0)))
+    with np.errstate(invalid="ignore"):
+        a = (
+            np.sin(dlat / 2.0) ** 2
+            + np.cos(lat_rad[:-1]) * np.cos(lat_rad[1:]) * np.sin(dlon / 2.0) ** 2
+        )
+        c = 2.0 * np.arctan2(np.sqrt(a), np.sqrt(np.maximum(1.0 - a, 0.0)))
     distances = 6371000.0 * c
+    distances = np.where(np.isfinite(distances), distances, 0.0)
     cumulative = np.concatenate([[0.0], np.cumsum(distances)])
     return cumulative.astype(np.float32)
 

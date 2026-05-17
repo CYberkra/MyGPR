@@ -194,6 +194,17 @@ def test_compute_trace_distance_m_matches_known_haversine_scale():
     assert abs(float(distance_m[2]) - 222.4) < 2.0
 
 
+def test_compute_trace_distance_m_keeps_axis_finite_for_missing_coordinates():
+    longitude = np.array([100.0, np.nan, 100.002], dtype=np.float64)
+    latitude = np.array([30.0, 30.0, np.inf], dtype=np.float64)
+
+    distance_m = compute_trace_distance_m(longitude, latitude)
+
+    assert distance_m.shape == (3,)
+    assert np.isfinite(distance_m).all()
+    assert np.array_equal(distance_m, np.array([0.0, 0.0, 0.0], dtype=np.float32))
+
+
 def test_extract_airborne_csv_payload_with_optional_sidecars_enriches_metadata(tmp_path):
     header_info = {
         "a_scan_length": 3,
