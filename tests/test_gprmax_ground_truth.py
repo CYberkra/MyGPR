@@ -108,6 +108,46 @@ def test_convert_gprmax_ground_truth_uses_half_open_roi_and_preserves_raw_sideca
     assert converted["raw_sidecar"]["target_roi"]["trace_range"] == [42, 48]
 
 
+def test_convert_gprmax_ground_truth_preserves_nested_target_metadata():
+    sidecar = {
+        "schema": "gprmax_ground_truth_v1",
+        "dataset_id": "nested_target_demo",
+        "target_roi": {
+            "sample_range": [720, 860],
+            "trace_range": [42, 48],
+        },
+        "type": "legacy_top_level_type",
+        "material": "legacy_top_level_material",
+        "target": {
+            "type": "pipe",
+            "material": "metal",
+            "depth_m": 0.42,
+            "center_x_m": 1.4,
+            "center_y_m": 0.42,
+            "radius_m": 0.05,
+        },
+    }
+
+    converted = convert_gprmax_ground_truth_to_mygpr(
+        sidecar,
+        data_shape=(1000, 96),
+    )
+
+    target = converted["targets"][0]
+    assert target["type"] == "pipe"
+    assert target["material"] == "metal"
+    assert target["depth_m"] == 0.42
+    assert target["center_x_m"] == 1.4
+    assert target["center_y_m"] == 0.42
+    assert target["radius_m"] == 0.05
+    assert target["roi"] == {
+        "time_start_idx": 720,
+        "time_end_idx": 861,
+        "dist_start_idx": 42,
+        "dist_end_idx": 49,
+    }
+
+
 def test_load_ground_truth_from_manifest_reads_nested_path_and_warns_on_output_mismatch(
     tmp_path: Path,
 ):

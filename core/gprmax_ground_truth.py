@@ -139,19 +139,36 @@ def _convert_targets(
     target_roi = source.get("target_roi")
     if target_roi is None:
         return []
+    nested_target = source.get("target")
+    if not isinstance(nested_target, dict):
+        nested_target = {}
     target_payload = {
         "id": source.get("target_id") or source.get("id") or "target_0",
         "target_id": source.get("target_id") or source.get("id") or "target_0",
-        "type": source.get("target_type") or source.get("type"),
-        "material": source.get("material"),
-        "depth_m": source.get("depth_m"),
-        "center_x_m": source.get("center_x_m"),
-        "center_y_m": source.get("center_y_m"),
-        "radius_m": source.get("radius_m"),
+        "type": _first_present(nested_target, "type", source, "target_type", "type"),
+        "material": _first_present(nested_target, "material", source, "material"),
+        "depth_m": _first_present(nested_target, "depth_m", source, "depth_m"),
+        "center_x_m": _first_present(nested_target, "center_x_m", source, "center_x_m"),
+        "center_y_m": _first_present(nested_target, "center_y_m", source, "center_y_m"),
+        "radius_m": _first_present(nested_target, "radius_m", source, "radius_m"),
         "must_preserve": source.get("must_preserve", True),
         "target_roi": target_roi,
     }
     return [_convert_target(target_payload, 0, data_shape)]
+
+
+def _first_present(
+    primary: dict[str, Any],
+    primary_key: str,
+    fallback: dict[str, Any],
+    *fallback_keys: str,
+) -> Any:
+    if primary.get(primary_key) is not None:
+        return primary[primary_key]
+    for key in fallback_keys:
+        if fallback.get(key) is not None:
+            return fallback[key]
+    return None
 
 
 def _convert_target(
