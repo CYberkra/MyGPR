@@ -1060,6 +1060,34 @@ def test_workflow_config_manager_uses_user_writable_template_dir(monkeypatch, tm
     assert str(config_dir).startswith(str(tmp_path))
 
 
+def test_workflow_config_manager_writes_strict_json_for_nonfinite_values(monkeypatch, tmp_path):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+
+    manager = WorkflowConfigManager()
+    config = WorkflowConfig(
+        name="非有限参数模板",
+        methods=[
+            WorkflowMethod(
+                category="gain",
+                method_id="sec_gain",
+                params={"gain_max": float("inf"), "gain_min": float("nan")},
+                elapsed_ms=float("inf"),
+            )
+        ],
+    )
+
+    saved_path = Path(manager.save_config(config, "nonfinite.json"))
+    manager.save_last_config(config)
+
+    saved = json.loads(saved_path.read_text(encoding="utf-8"))
+    last = json.loads(Path(manager.last_config_file).read_text(encoding="utf-8"))
+    assert saved["methods"][0]["params"]["gain_max"] is None
+    assert saved["methods"][0]["params"]["gain_min"] is None
+    assert saved["methods"][0]["elapsed_ms"] is None
+    assert last["methods"][0]["params"]["gain_max"] is None
+    json.dumps(saved, allow_nan=False)
+
+
 def test_workflow_config_manager_skips_invalid_config_files(monkeypatch, tmp_path, caplog):
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
 

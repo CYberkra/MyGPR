@@ -10,12 +10,28 @@ import logging
 import os
 import uuid
 from datetime import datetime
+from math import isfinite
 from typing import Dict, List, Optional, Any
 
 from core.app_paths import get_workflow_templates_dir
 
 
 logger = logging.getLogger(__name__)
+
+
+def _json_safe(value: Any) -> Any:
+    """Return a workflow-template value that strict JSON can serialize."""
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if value is None or isinstance(value, (str, bool)):
+        return value
+    if isinstance(value, float):
+        return value if isfinite(value) else None
+    if isinstance(value, int):
+        return value
+    return value
 
 
 # ============ 方法分类定义 ============
@@ -835,7 +851,13 @@ class WorkflowConfigManager:
         filepath = os.path.join(self.config_dir, filename)
 
         with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(config.to_dict(), f, ensure_ascii=False, indent=2)
+            json.dump(
+                _json_safe(config.to_dict()),
+                f,
+                ensure_ascii=False,
+                indent=2,
+                allow_nan=False,
+            )
 
         return filepath
 
@@ -860,7 +882,13 @@ class WorkflowConfigManager:
     def save_last_config(self, config: WorkflowConfig):
         """保存上次使用的配置"""
         with open(self.last_config_file, "w", encoding="utf-8") as f:
-            json.dump(config.to_dict(), f, ensure_ascii=False, indent=2)
+            json.dump(
+                _json_safe(config.to_dict()),
+                f,
+                ensure_ascii=False,
+                indent=2,
+                allow_nan=False,
+            )
 
     def load_last_config(self) -> Optional[WorkflowConfig]:
         """加载上次使用的配置"""
