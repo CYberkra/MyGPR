@@ -10,6 +10,37 @@ _STOLT_AXIS_CACHE = {}
 _STOLT_GAIN_CACHE = {}
 
 
+def _finite_float(value, name: str) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be a finite number") from None
+    if not np.isfinite(parsed):
+        raise ValueError(f"{name} must be a finite number")
+    return parsed
+
+
+def _positive_float(value, name: str) -> float:
+    parsed = _finite_float(value, name)
+    if parsed <= 0.0:
+        raise ValueError(f"{name} must be positive")
+    return parsed
+
+
+def _non_negative_int(value, name: str) -> int:
+    parsed = _finite_float(value, name)
+    if parsed < 0.0:
+        raise ValueError(f"{name} must be non-negative")
+    return int(parsed)
+
+
+def _positive_int(value, name: str) -> int:
+    parsed = _finite_float(value, name)
+    if parsed <= 0.0:
+        raise ValueError(f"{name} must be positive")
+    return max(1, int(parsed))
+
+
 def _to_float32_2d(data: np.ndarray) -> np.ndarray:
     """转换为float32二维数组"""
     arr = np.asarray(data, dtype=np.float32)
@@ -59,22 +90,20 @@ def method_stolt_migration(data, dx=0.05, dt=0.1, v=0.10, pad_x=1, pad_t=1, **kw
     if nt < 2 or nx < 2:
         raise ValueError("Stolt migration requires at least 2x2 samples")
 
-    dx = float(dx)
-    dt = float(dt)
-    v = float(v)
-    if dx <= 0 or dt <= 0 or v <= 0:
-        raise ValueError("dx, dt, v must be positive")
+    dx = _positive_float(dx, "dx")
+    dt = _positive_float(dt, "dt")
+    v = _positive_float(v, "v")
 
-    pad_x = max(0, int(pad_x))
-    pad_t = max(0, int(pad_t))
+    pad_x = _non_negative_int(pad_x, "pad_x")
+    pad_t = _non_negative_int(pad_t, "pad_t")
 
-    jacobian_power = float(kwargs.get("stolt_jacobian_power", 0.05))
-    obliquity_power = float(kwargs.get("stolt_obliquity_power", 0.05))
-    mask_softness = float(kwargs.get("stolt_mask_softness", 0.03))
-    kz_smooth = max(1, int(kwargs.get("stolt_kz_smooth", 3)))
-    depth_gain = float(kwargs.get("stolt_depth_gain", 0.0))
-    depth_gain_power = float(kwargs.get("stolt_depth_gain_power", 1.1))
-    clip_percentile = float(kwargs.get("stolt_clip_percentile", 100.0))
+    jacobian_power = _finite_float(kwargs.get("stolt_jacobian_power", 0.05), "stolt_jacobian_power")
+    obliquity_power = _finite_float(kwargs.get("stolt_obliquity_power", 0.05), "stolt_obliquity_power")
+    mask_softness = _finite_float(kwargs.get("stolt_mask_softness", 0.03), "stolt_mask_softness")
+    kz_smooth = _positive_int(kwargs.get("stolt_kz_smooth", 3), "stolt_kz_smooth")
+    depth_gain = _finite_float(kwargs.get("stolt_depth_gain", 0.0), "stolt_depth_gain")
+    depth_gain_power = _finite_float(kwargs.get("stolt_depth_gain_power", 1.1), "stolt_depth_gain_power")
+    clip_percentile = _finite_float(kwargs.get("stolt_clip_percentile", 100.0), "stolt_clip_percentile")
 
     nt_pad = int(2 ** np.ceil(np.log2(nt * (1 + pad_t))))
     nx_pad = int(2 ** np.ceil(np.log2(nx * (1 + pad_x))))
