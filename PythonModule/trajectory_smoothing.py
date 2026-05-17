@@ -182,14 +182,14 @@ def method_trajectory_smoothing(
     # 沿平滑路径的累积距离
     dx_dist = np.diff(local_x_smooth)
     dy_dist = np.diff(local_y_smooth)
-    trace_distance_m = np.concatenate(
-        ([0.0], np.cumsum(np.sqrt(dx_dist ** 2 + dy_dist ** 2)))
-    ).astype(np.float64)
+    trace_distance_m = np.empty(n, dtype=np.float64)
+    trace_distance_m[0] = 0.0
+    trace_distance_m[1:] = np.cumsum(np.hypot(dx_dist, dy_dist), dtype=np.float64)
 
     # 计算平滑前后偏移量（米）
     dx = local_x_smooth - local_x_raw
     dy = local_y_smooth - local_y_raw
-    displacements_m = np.sqrt(dx ** 2 + dy ** 2)
+    displacements_m = np.hypot(dx, dy)
     meta["max_displacement_m"] = float(np.max(displacements_m))
     meta["mean_displacement_m"] = float(np.mean(displacements_m))
     meta["smoothed_traces"] = int(n)
