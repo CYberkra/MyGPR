@@ -4,9 +4,13 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
+import numpy as np
+
+from scripts.gprmax_benchmark import run_gprmax_cylinder_single_v1_smoke as smoke
 from scripts.gprmax_benchmark.run_gprmax_cylinder_single_v1_smoke import (
     build_gprmax_command,
     find_out_files,
@@ -61,3 +65,18 @@ def test_find_out_files_uses_numeric_suffix_sort(tmp_path: Path):
         "cylinder_single_v110.out",
         "cylinder_single_v130.out",
     ]
+
+
+def test_smoke_jsonable_removes_nonfinite_values_for_strict_json(tmp_path: Path):
+    payload = {
+        "value": np.float64(np.inf),
+        "array": np.array([1.0, np.nan, np.inf], dtype=np.float32),
+        "path": tmp_path / "summary.json",
+    }
+
+    safe = smoke._jsonable(payload)
+
+    assert safe["value"] is None
+    assert safe["array"] == [1.0, None, None]
+    assert safe["path"] == str(tmp_path / "summary.json")
+    json.dumps(safe, allow_nan=False)

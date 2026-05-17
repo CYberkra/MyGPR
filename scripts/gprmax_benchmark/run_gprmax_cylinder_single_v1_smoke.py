@@ -14,6 +14,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -158,7 +160,10 @@ def run_smoke(
         "converted_package_dir": str(converted_package_dir) if converted_package_dir else None,
     }
     summary_json = smoke_dir / "smoke_summary.json"
-    summary_json.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    summary_json.write_text(
+        json.dumps(_jsonable(summary), ensure_ascii=False, indent=2, allow_nan=False),
+        encoding="utf-8",
+    )
 
     if process.returncode != 0:
         raise RuntimeError(
@@ -174,6 +179,26 @@ def run_smoke(
         converted_package_dir=converted_package_dir,
         summary_json=summary_json,
     )
+
+
+def _jsonable(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(item) for item in value]
+    if isinstance(value, np.ndarray):
+        return _jsonable(value.tolist())
+    if isinstance(value, np.generic):
+        return _jsonable(value.item())
+    if isinstance(value, Path):
+        return str(value)
+    if value is None or isinstance(value, (str, bool)):
+        return value
+    if isinstance(value, float):
+        return float(value) if np.isfinite(value) else None
+    if isinstance(value, int):
+        return int(value)
+    return value
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
