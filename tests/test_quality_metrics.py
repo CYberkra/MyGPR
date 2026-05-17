@@ -21,6 +21,7 @@ from core.quality_metrics import (
     ratio_fidelity,
     relative_reduction,
     target_band_energy_ratio,
+    detect_ridge_indices,
 )
 
 
@@ -132,3 +133,12 @@ def test_first_break_metrics_handle_non_finite_controls():
 
     assert indices.shape == (raw.shape[1],)
     assert np.isfinite(first_break_std(raw, threshold=np.nan))
+
+
+def test_ridge_detection_handles_non_finite_row_range():
+    raw = _build_test_profile()
+
+    detected = detect_ridge_indices(raw, row_range=(np.nan, np.inf))
+
+    assert detected.shape == (raw.shape[1],)
+    assert np.isfinite(detected).all()

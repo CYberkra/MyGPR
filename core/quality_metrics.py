@@ -539,8 +539,8 @@ def _resolve_row_range(
     """Clamp an optional row window to valid array bounds."""
     if row_range is None:
         return 0, total_rows
-    start = max(0, min(int(row_range[0]), total_rows - 1))
-    stop = max(start + 1, min(int(row_range[1]), total_rows))
+    start = max(0, min(_safe_index(row_range[0]), total_rows - 1))
+    stop = max(start + 1, min(_safe_index(row_range[1], default=total_rows), total_rows))
     return start, stop
 
 
