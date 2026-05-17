@@ -746,7 +746,8 @@ class ThemeManager(QObject):
         try:
             with open(self.config_file, "r", encoding="utf-8") as f:
                 return json.load(f).get("theme", "light")
-        except Exception:
+        except Exception as e:
+            logger.warning("加载主题配置失败: %s", e)
             return "light"
 
     def _save_config(self, theme: str):
