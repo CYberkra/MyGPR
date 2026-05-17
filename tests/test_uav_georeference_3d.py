@@ -64,6 +64,21 @@ def test_build_airborne_georeference_payload_downsamples_without_losing_tail():
     assert "downsampled_preview" in payload["quality_flags"]
 
 
+def test_build_airborne_georeference_payload_accepts_numpy_scalar_total_time():
+    data = np.arange(30, dtype=np.float32).reshape(6, 5)
+
+    payload = build_airborne_georeference_3d_payload(
+        data,
+        {"total_time_ns": np.array([60.0])},
+        {"trace_distance_m": np.linspace(0.0, 1.0, 5)},
+    )
+
+    assert payload is not None
+    assert payload["total_time_ns"] == 60.0
+    assert np.isclose(payload["time_axis_ns"][-1], 60.0)
+    assert np.isclose(payload["depth_axis_m"][-1], 60.0 * AIR_TWO_WAY_DEPTH_SCALE_M_PER_NS)
+
+
 def test_export_airborne_georeference_bundle_writes_vtk_csv_json(tmp_path: Path):
     data = np.arange(200, dtype=np.float32).reshape(20, 10)
     trace_metadata = {

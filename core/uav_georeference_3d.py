@@ -11,6 +11,7 @@ from typing import Any
 
 import numpy as np
 
+from core.scalar_utils import to_float_or_none
 from core.trace_metadata_utils import derive_local_xy_m
 
 AIR_LIGHT_SPEED_M_PER_NS = 0.299792458
@@ -190,16 +191,12 @@ def _resolve_time_axis(
     quality_flags: list[str] = []
 
     sample_count = int(data.shape[0]) if data.ndim == 2 else int(np.asarray(data).shape[0])
-    total_time_ns = None
-    if header_info and header_info.get("total_time_ns") is not None:
-        try:
-            total_time_ns = float(header_info.get("total_time_ns"))
-        except Exception:
-            total_time_ns = None
+    total_time_ns = to_float_or_none((header_info or {}).get("total_time_ns"))
+    if total_time_ns is not None and not np.isfinite(total_time_ns):
+        total_time_ns = None
     if (total_time_ns is None or total_time_ns <= 0.0) and "time_window_ns" in meta:
-        try:
-            total_time_ns = float(np.asarray(meta["time_window_ns"]).reshape(-1)[0])
-        except Exception:
+        total_time_ns = to_float_or_none(meta["time_window_ns"])
+        if total_time_ns is not None and not np.isfinite(total_time_ns):
             total_time_ns = None
     if total_time_ns is None or total_time_ns <= 0.0:
         total_time_ns = float(max(sample_count - 1, 1))
