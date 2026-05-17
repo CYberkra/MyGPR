@@ -32,9 +32,10 @@ def to_float(value: Any, *, default: float) -> float:
     if isinstance(scalar, str) and scalar.strip() == "":
         return float(default)
     try:
-        return float(scalar)
+        parsed = float(scalar)
     except (TypeError, ValueError):
         return float(default)
+    return parsed if np.isfinite(parsed) else float(default)
 
 
 def to_optional_float(value: Any) -> float | None:
@@ -52,9 +53,10 @@ def to_float_or_none(value: Any) -> float | None:
     if isinstance(scalar, str) and scalar.strip() == "":
         return None
     try:
-        return float(scalar)
+        parsed = float(scalar)
     except (TypeError, ValueError):
         return None
+    return parsed if np.isfinite(parsed) else None
 
 
 def to_int(value: Any, *, default: int) -> int:
