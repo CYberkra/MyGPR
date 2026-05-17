@@ -39,9 +39,9 @@ class SharedDataState(QObject):
         trace_metadata: dict[str, np.ndarray] | None = None,
         source: str = "load",
     ):
-        array = np.array(data, copy=True)
-        self.current_data = array.copy()
-        self.original_data = array.copy()
+        array = np.asarray(data)
+        self.current_data = np.array(array, copy=True)
+        self.original_data = np.array(array, copy=True)
         self.current_trace_metadata = _clone_trace_metadata(trace_metadata)
         self.original_trace_metadata = _clone_trace_metadata(trace_metadata)
         self.header_info = _clone_header_info(header_info)

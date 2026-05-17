@@ -45,6 +45,21 @@ def test_shared_state_build_result_history_tracks_formal_labels():
     assert np.array_equal(history_items[2][1], raw + 2)
 
 
+def test_shared_state_load_data_keeps_independent_current_original_and_input():
+    state = SharedDataState()
+    raw = np.arange(12, dtype=np.float32).reshape(3, 4)
+
+    state.load_data(raw, path="demo.csv")
+    raw[0, 0] = 999.0
+    assert state.current_data is not None
+    assert state.original_data is not None
+    state.current_data[0, 1] = 888.0
+
+    assert float(state.current_data[0, 0]) != 999.0
+    assert float(state.original_data[0, 0]) != 999.0
+    assert float(state.original_data[0, 1]) != 888.0
+
+
 def test_shared_state_trims_history_internally():
     state = SharedDataState()
     state.max_history = 3
