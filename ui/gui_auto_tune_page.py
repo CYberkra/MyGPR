@@ -570,6 +570,7 @@ class AutoTunePage(QWidget):
     def refresh_truth_validation(self):
         """刷新 gprMax 真值验证面板。"""
         ground_truth = self._current_ground_truth()
+        incomplete_ground_truth_info = self._incomplete_ground_truth_info()
         header_info = self._current_header_info()
         comparison = self._last_comparison_result or {}
         input_file = self._current_input_file()
@@ -591,14 +592,13 @@ class AutoTunePage(QWidget):
             self.truth_target_label.setText(self._format_truth_target(ground_truth))
             self.truth_target_roi_label.setText(self._format_truth_target_rois(ground_truth))
             self.truth_background_roi_label.setText(self._format_truth_background_rois(ground_truth))
-        elif self._incomplete_ground_truth_info():
-            comparison_info = self._incomplete_ground_truth_info() or {}
+        elif incomplete_ground_truth_info:
             self.truth_status_label.setText(
                 "真值验证结果存在，但缺少完整 target/background ROI；请加载原始 gprMax manifest + ground_truth.yaml。"
             )
             self.truth_status_label.setStyleSheet("color: #9a6700;")
             self.truth_loaded_label.setText("仅有结果摘要")
-            self.truth_scenario_label.setText(str(comparison_info.get("scenario_id") or "--"))
+            self.truth_scenario_label.setText(str(incomplete_ground_truth_info.get("scenario_id") or "--"))
             self.truth_target_label.setText("--")
             self.truth_target_roi_label.setText("--")
             self.truth_background_roi_label.setText("--")
