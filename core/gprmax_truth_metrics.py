@@ -161,6 +161,8 @@ def _as_clean_2d(data: np.ndarray) -> np.ndarray:
         arr = arr.reshape(-1, 1)
     if arr.ndim != 2:
         raise ValueError(f"ground-truth metrics require 2D data, got shape={arr.shape}")
+    if np.isfinite(arr).all():
+        return arr
     return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
 
 
