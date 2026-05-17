@@ -4,7 +4,11 @@
 
 import json
 import os
+import platform
+import subprocess
 
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -464,6 +468,18 @@ class AutoTunePage(QWidget):
         self.truth_bscan_status_label.setWordWrap(True)
         self.truth_bscan_status_label.setProperty("class", "hintText")
         bscan_layout.addWidget(self.truth_bscan_status_label)
+        self.truth_side_by_side_preview = QLabel("暂无 side-by-side 预览。导出 Evidence 后会显示缩略图。")
+        self.truth_side_by_side_preview.setMinimumHeight(180)
+        self.truth_side_by_side_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.truth_side_by_side_preview.setWordWrap(True)
+        self.truth_side_by_side_preview.setStyleSheet(
+            "border: 1px solid #d0d7de; border-radius: 6px; background: #f6f8fa; color: #57606a;"
+        )
+        bscan_layout.addWidget(self.truth_side_by_side_preview)
+        self.btn_truth_open_side_by_side = PushButton(FluentIcon.VIEW, "打开 side-by-side 图片")
+        self.btn_truth_open_side_by_side.setEnabled(False)
+        self.btn_truth_open_side_by_side.clicked.connect(self._open_truth_side_by_side)
+        bscan_layout.addWidget(self.btn_truth_open_side_by_side)
         layout.addWidget(bscan_box)
 
         metrics_box = QGroupBox("Truth metrics")
@@ -575,6 +591,17 @@ class AutoTunePage(QWidget):
             self.truth_target_label.setText(self._format_truth_target(ground_truth))
             self.truth_target_roi_label.setText(self._format_truth_target_rois(ground_truth))
             self.truth_background_roi_label.setText(self._format_truth_background_rois(ground_truth))
+        elif self._incomplete_ground_truth_info():
+            comparison_info = self._incomplete_ground_truth_info() or {}
+            self.truth_status_label.setText(
+                "真值验证结果存在，但缺少完整 target/background ROI；请加载原始 gprMax manifest + ground_truth.yaml。"
+            )
+            self.truth_status_label.setStyleSheet("color: #9a6700;")
+            self.truth_loaded_label.setText("仅有结果摘要")
+            self.truth_scenario_label.setText(str(comparison_info.get("scenario_id") or "--"))
+            self.truth_target_label.setText("--")
+            self.truth_target_roi_label.setText("--")
+            self.truth_background_roi_label.setText("--")
         else:
             self.truth_status_label.setText(
                 "当前数据未检测到 gprMax ground_truth.yaml，仍可做普通自动选参，但不能做真值验证。"
@@ -603,9 +630,32 @@ class AutoTunePage(QWidget):
         if isinstance(ground_truth, dict):
             return ground_truth
         comparison_info = (self._last_comparison_result or {}).get("ground_truth_info")
-        if isinstance(comparison_info, dict) and comparison_info.get("enabled"):
+        if (
+            isinstance(comparison_info, dict)
+            and comparison_info.get("enabled")
+            and self._has_complete_truth_rois(comparison_info)
+        ):
             return comparison_info
         return None
+
+    def _incomplete_ground_truth_info(self) -> dict | None:
+        header = self._current_header_info()
+        if isinstance(header.get("ground_truth"), dict):
+            return None
+        comparison_info = (self._last_comparison_result or {}).get("ground_truth_info")
+        if (
+            isinstance(comparison_info, dict)
+            and comparison_info.get("enabled")
+            and not self._has_complete_truth_rois(comparison_info)
+        ):
+            return comparison_info
+        return None
+
+    def _has_complete_truth_rois(self, ground_truth: dict) -> bool:
+        return isinstance(ground_truth.get("targets"), list) and isinstance(
+            ground_truth.get("background_rois"),
+            list,
+        )
 
     def _current_input_file(self) -> str:
         data_path = getattr(self.parent_window, "data_path", None)
@@ -680,13 +730,19 @@ class AutoTunePage(QWidget):
             return f"{value}{suffix}"
 
     def _refresh_truth_bscan_status(self, comparison: dict):
-        if not comparison:
-            self.truth_bscan_status_label.setText(
-                "尚未运行人工/自动对比。运行后可查看 Raw / Manual / AutoTune 状态，并导出 side-by-side Evidence。"
-            )
-            return
         artifacts = (self._last_evidence_bundle or {}).get("artifacts") or {}
         side_by_side = artifacts.get("side_by_side_png")
+        self._refresh_truth_side_by_side_preview(side_by_side)
+        if not comparison:
+            if side_by_side:
+                self.truth_bscan_status_label.setText(
+                    f"已记录 side-by-side Evidence 预览路径: {side_by_side}"
+                )
+            else:
+                self.truth_bscan_status_label.setText(
+                    "尚未运行人工/自动对比。运行后可查看 Raw / Manual / AutoTune 状态，并导出 side-by-side Evidence。"
+                )
+            return
         if side_by_side:
             self.truth_bscan_status_label.setText(
                 f"Raw / Manual / AutoTune 对比已生成；side-by-side Evidence: {side_by_side}"
@@ -695,6 +751,36 @@ class AutoTunePage(QWidget):
             self.truth_bscan_status_label.setText(
                 "已生成 Raw / Manual / AutoTune side-by-side 对比状态，可导出 Evidence 查看图像、参数表和报告。"
             )
+
+    def _refresh_truth_side_by_side_preview(self, side_by_side_path):
+        self._truth_side_by_side_path = str(side_by_side_path or "")
+        self.btn_truth_open_side_by_side.setEnabled(False)
+        self.truth_side_by_side_preview.clear()
+        self.truth_side_by_side_preview.setPixmap(QPixmap())
+        self.truth_side_by_side_preview.setToolTip("")
+        if not side_by_side_path:
+            self.truth_side_by_side_preview.setText("暂无 side-by-side 预览。导出 Evidence 后会显示缩略图。")
+            return
+
+        path_text = str(side_by_side_path)
+        self.truth_side_by_side_preview.setToolTip(path_text)
+        self.btn_truth_open_side_by_side.setEnabled(os.path.exists(path_text))
+        if not os.path.exists(path_text):
+            self.truth_side_by_side_preview.setText(f"side-by-side PNG 路径已记录，但文件不存在：\n{path_text}")
+            return
+
+        pixmap = QPixmap(path_text)
+        if pixmap.isNull():
+            self.truth_side_by_side_preview.setText(f"side-by-side PNG 路径已记录，但无法载入缩略图：\n{path_text}")
+            return
+
+        scaled = pixmap.scaled(
+            720,
+            260,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        self.truth_side_by_side_preview.setPixmap(scaled)
 
     def _refresh_truth_metrics(self, comparison: dict):
         manual_metrics = ((comparison.get("manual") or {}).get("metrics") or {})
@@ -787,12 +873,46 @@ class AutoTunePage(QWidget):
     def _open_truth_output_dir(self):
         output_dir = (self._last_evidence_bundle or {}).get("output_dir")
         if output_dir:
-            os.startfile(str(output_dir))
+            self._open_path(str(output_dir))
 
     def _open_truth_report(self):
         report_path = ((self._last_evidence_bundle or {}).get("artifacts") or {}).get("report_md")
         if report_path:
-            os.startfile(str(report_path))
+            self._open_path(str(report_path))
+
+    def _open_truth_side_by_side(self):
+        side_by_side_path = getattr(self, "_truth_side_by_side_path", "")
+        if side_by_side_path:
+            self._open_path(side_by_side_path)
+
+    def _open_path(self, path: str) -> bool:
+        path_text = str(path or "")
+        if not path_text or not os.path.exists(path_text):
+            self._set_truth_open_warning(f"打开路径失败：路径不存在 {path_text or '--'}")
+            return False
+        try:
+            if os.name == "nt":
+                os.startfile(path_text)
+            elif platform.system() == "Darwin":
+                result = subprocess.run(["open", path_text], check=False)
+                if result.returncode != 0:
+                    self._set_truth_open_warning(f"打开路径失败：open 返回 {result.returncode}")
+                    return False
+            else:
+                result = subprocess.run(["xdg-open", path_text], check=False)
+                if result.returncode != 0:
+                    self._set_truth_open_warning(f"打开路径失败：xdg-open 返回 {result.returncode}")
+                    return False
+        except Exception as exc:
+            self._set_truth_open_warning(f"打开路径失败：{exc}")
+            return False
+        return True
+
+    def _set_truth_open_warning(self, message: str):
+        if hasattr(self, "truth_warning_label"):
+            self.truth_warning_label.setText(message)
+        if hasattr(self, "truth_evidence_label"):
+            self.truth_evidence_label.setText(message)
 
     def get_auto_tune_roi_mode(self) -> str:
         """获取自动选参 ROI 来源模式。"""

@@ -11,6 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import numpy as np
 import app_qt
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import QApplication, QGroupBox, QScrollArea, QStackedWidget
 
 from app_qt import GPRGuiQt
@@ -369,6 +370,78 @@ def test_auto_tune_truth_validation_page_displays_ground_truth_metadata():
         assert "trace=42-48" in win.page_auto_tune.truth_target_roi_label.text()
         assert "time=[100,181)" in win.page_auto_tune.truth_background_roi_label.text()
         assert win.page_auto_tune.btn_export_comparison.isEnabled() is False
+    finally:
+        win.close()
+        app.processEvents()
+
+
+def test_auto_tune_truth_validation_page_records_evidence_preview_path(tmp_path):
+    app = _get_app()
+    win = GPRGuiQt()
+    try:
+        side_by_side = tmp_path / "side_by_side.png"
+        pixmap = QPixmap(16, 16)
+        assert pixmap.save(str(side_by_side), "PNG")
+        report = tmp_path / "report.md"
+        report.write_text("# demo\n", encoding="utf-8")
+
+        win.page_auto_tune.set_evidence_export_result(
+            {
+                "output_dir": str(tmp_path),
+                "artifacts": {
+                    "side_by_side_png": str(side_by_side),
+                    "report_md": str(report),
+                },
+            }
+        )
+
+        assert str(side_by_side) in win.page_auto_tune.truth_bscan_status_label.text()
+        assert win.page_auto_tune.truth_side_by_side_preview.toolTip() == str(side_by_side)
+        assert win.page_auto_tune.btn_truth_open_side_by_side.isEnabled() is True
+        assert win.page_auto_tune.btn_truth_open_output.isEnabled() is True
+        assert win.page_auto_tune.btn_truth_open_report.isEnabled() is True
+    finally:
+        win.close()
+        app.processEvents()
+
+
+def test_auto_tune_truth_validation_open_path_handles_missing_path(tmp_path):
+    app = _get_app()
+    win = GPRGuiQt()
+    try:
+        missing = tmp_path / "missing.png"
+
+        assert win.page_auto_tune._open_path(str(missing)) is False
+
+        assert "路径不存在" in win.page_auto_tune.truth_warning_label.text()
+        assert str(missing) in win.page_auto_tune.truth_evidence_label.text()
+    finally:
+        win.close()
+        app.processEvents()
+
+
+def test_auto_tune_truth_validation_incomplete_ground_truth_info_is_warning():
+    app = _get_app()
+    win = GPRGuiQt()
+    try:
+        win.page_auto_tune.show_comparison_result(
+            {
+                "verdict": "insufficient",
+                "ground_truth_info": {
+                    "enabled": True,
+                    "scenario_id": "pipe_demo",
+                },
+                "manual": {"pipeline": [], "params_by_method": {}, "metrics": {}},
+                "automatic": {"pipeline": [], "params_by_method": {}, "metrics": {}},
+                "metric_delta": {},
+            }
+        )
+
+        assert "缺少完整 target/background ROI" in win.page_auto_tune.truth_status_label.text()
+        assert win.page_auto_tune.truth_loaded_label.text() == "仅有结果摘要"
+        assert win.page_auto_tune.truth_scenario_label.text() == "pipe_demo"
+        assert win.page_auto_tune.truth_target_roi_label.text() == "--"
+        assert win.page_auto_tune.truth_background_roi_label.text() == "--"
     finally:
         win.close()
         app.processEvents()
