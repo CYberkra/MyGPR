@@ -47,6 +47,11 @@ def test_export_auto_tune_comparison_artifacts_writes_research_bundle(tmp_path: 
         },
         search_mode="fast",
     )
+    result.metric_delta["comparison_score"] = np.inf
+    result.manual.metrics["comparison_score"] = np.nan
+    result.automatic.params_by_method["dewow"]["nonfinite_probe"] = np.array(
+        [1.0, np.inf]
+    )
 
     bundle = export_auto_tune_comparison_artifacts(
         result,
@@ -81,6 +86,13 @@ def test_export_auto_tune_comparison_artifacts_writes_research_bundle(tmp_path: 
     assert summary["display_spec"]["locked_scale"] is True
     assert "result" not in summary["manual"]
     assert "result" not in summary["automatic"]
+    assert summary["metric_delta"]["comparison_score"] is None
+    assert summary["manual"]["metrics"]["comparison_score"] is None
+    assert summary["automatic"]["params_by_method"]["dewow"]["nonfinite_probe"] == [
+        1.0,
+        None,
+    ]
+    json.dumps(summary, allow_nan=False)
 
     with Path(bundle["artifacts"]["params_csv"]).open(
         "r", encoding="utf-8", newline=""

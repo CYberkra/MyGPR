@@ -111,7 +111,12 @@ def export_auto_tune_comparison_artifacts(
         encoding="utf-8",
     )
     paths["summary_json"].write_text(
-        json.dumps(_json_safe(summary), ensure_ascii=False, indent=2),
+        json.dumps(
+            _json_safe(summary),
+            ensure_ascii=False,
+            indent=2,
+            allow_nan=False,
+        ),
         encoding="utf-8",
     )
 
@@ -346,13 +351,16 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [_json_safe(item) for item in value]
     if isinstance(value, np.ndarray):
-        return value.tolist()
-    if isinstance(value, np.generic):
+        return _json_safe(value.tolist())
+    if isinstance(value, np.floating):
+        parsed = float(value.item())
+        return parsed if np.isfinite(parsed) else None
+    if isinstance(value, np.integer):
         return value.item()
     if value is None or isinstance(value, (str, bool)):
         return value
     if isinstance(value, float):
-        return float(value)
+        return float(value) if np.isfinite(value) else None
     if isinstance(value, int):
         return int(value)
     return str(value)
