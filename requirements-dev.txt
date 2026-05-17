@@ -13,6 +13,8 @@ PyWavelets>=1.5,<2
 # GUI runtime (project currently uses PyQt6)
 PyQt6>=6.6,<7
 PyQt6-Fluent-Widgets[full]>=1.8,<2
+pyqtgraph>=0.13,<0.14
+PyOpenGL>=3.1,<4
 
 # Optional themes (legacy fallback)
 qt-material>=2.14
