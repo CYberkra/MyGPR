@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from core.evidence_export import _resample_columns_linear
+from core.evidence_export import _resample_columns_linear, _time_distance_ranges
 
 
 def test_resample_columns_linear_matches_numpy_interp_per_row():
@@ -39,3 +39,18 @@ def test_resample_columns_linear_returns_copy_when_trace_count_matches():
     result[0, 0] = -99.0
 
     assert data[0, 0] == 0.0
+
+
+def test_time_distance_ranges_accept_numpy_scalar_header_values():
+    data = np.zeros((6, 4), dtype=np.float32)
+
+    time_range, distance_range = _time_distance_ranges(
+        {
+            "total_time_ns": np.array([60.0]),
+            "trace_interval_m": np.array([0.25]),
+        },
+        data,
+    )
+
+    assert time_range == (0.0, 60.0)
+    assert distance_range == (0.0, 0.75)

@@ -28,6 +28,7 @@ from core.processing_engine import (
     run_processing_method,
 )
 from core.quality_metrics import compute_motion_quality_metrics
+from core.scalar_utils import to_float
 from read_file_data import save_image
 
 
@@ -107,8 +108,8 @@ def _summarize_runtime_context(runtime_params: dict[str, Any]) -> dict[str, Any]
 def _time_distance_ranges(header_info: dict[str, Any] | None, data: np.ndarray):
     if not header_info:
         return None, None
-    total_time_ns = float(header_info.get("total_time_ns", data.shape[0]))
-    trace_interval_m = float(header_info.get("trace_interval_m", 1.0))
+    total_time_ns = to_float(header_info.get("total_time_ns"), default=float(data.shape[0]))
+    trace_interval_m = to_float(header_info.get("trace_interval_m"), default=1.0)
     total_distance_m = trace_interval_m * max(data.shape[1] - 1, 1)
     return (0.0, total_time_ns), (0.0, total_distance_m)
 
