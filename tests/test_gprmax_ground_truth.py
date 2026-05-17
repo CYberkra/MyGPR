@@ -171,6 +171,64 @@ def test_convert_gprmax_ground_truth_accepts_numpy_roi_ranges():
     }
 
 
+def test_convert_gprmax_ground_truth_accepts_internal_numpy_scalar_rois():
+    sidecar = {
+        "schema": "gprmax_ground_truth_v1",
+        "dataset_id": "internal_numpy_roi_demo",
+        "analysis_roi": {
+            "time_start_idx": np.array([2]),
+            "time_end_idx": np.array([18]),
+            "dist_start_idx": np.int64(1),
+            "dist_end_idx": np.array([9]),
+        },
+        "targets": [
+            {
+                "id": "target_a",
+                "roi": {
+                    "time_start_idx": np.array([4]),
+                    "time_end_idx": np.array([12]),
+                    "dist_start_idx": np.int64(3),
+                    "dist_end_idx": np.array([7]),
+                },
+            }
+        ],
+    }
+
+    converted = convert_gprmax_ground_truth_to_mygpr(
+        sidecar,
+        data_shape=(np.array([32]), np.array([12])),
+    )
+
+    assert converted["analysis_roi"] == {
+        "time_start_idx": 2,
+        "time_end_idx": 18,
+        "dist_start_idx": 1,
+        "dist_end_idx": 9,
+    }
+    assert converted["targets"][0]["roi"] == {
+        "time_start_idx": 4,
+        "time_end_idx": 12,
+        "dist_start_idx": 3,
+        "dist_end_idx": 7,
+    }
+
+
+def test_convert_gprmax_ground_truth_rejects_invalid_internal_roi_with_clear_error():
+    sidecar = {
+        "schema": "gprmax_ground_truth_v1",
+        "dataset_id": "invalid_internal_roi_demo",
+        "target_roi": {
+            "time_start_idx": None,
+            "time_end_idx": 12,
+            "dist_start_idx": 3,
+            "dist_end_idx": 7,
+        },
+    }
+
+    with pytest.raises(ValueError, match="time_start_idx"):
+        convert_gprmax_ground_truth_to_mygpr(sidecar)
+
+
 def test_convert_gprmax_ground_truth_preserves_nested_target_metadata_in_target_list():
     sidecar = {
         "schema": "gprmax_ground_truth_v1",

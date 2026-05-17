@@ -292,10 +292,14 @@ def _convert_roi(
     }
     if internal_keys.issubset(raw_roi.keys()):
         roi = {
-            "time_start_idx": int(raw_roi["time_start_idx"]),
-            "time_end_idx": int(raw_roi["time_end_idx"]),
-            "dist_start_idx": int(raw_roi["dist_start_idx"]),
-            "dist_end_idx": int(raw_roi["dist_end_idx"]),
+            "time_start_idx": _required_int(
+                raw_roi["time_start_idx"], "time_start_idx"
+            ),
+            "time_end_idx": _required_int(raw_roi["time_end_idx"], "time_end_idx"),
+            "dist_start_idx": _required_int(
+                raw_roi["dist_start_idx"], "dist_start_idx"
+            ),
+            "dist_end_idx": _required_int(raw_roi["dist_end_idx"], "dist_end_idx"),
         }
     else:
         sample_range = raw_roi.get("sample_range")
@@ -329,18 +333,43 @@ def _closed_range(value: Any, label: str) -> tuple[int, int]:
     return start, end
 
 
+def _required_int(value: Any, label: str) -> int:
+    parsed = to_int_or_none(value)
+    if parsed is None:
+        raise ValueError(f"ROI {label} must contain a finite numeric index: {value!r}")
+    return parsed
+
+
 def _clamp_roi(
     roi: dict[str, int],
     data_shape: tuple[int, int] | None,
 ) -> dict[str, int]:
     if data_shape is None:
-        return {key: int(value) for key, value in roi.items()}
+        return {key: _required_int(value, key) for key, value in roi.items()}
     samples = max(1, to_int_or_none(data_shape[0]) or 1)
     traces = max(1, to_int_or_none(data_shape[1]) or 1)
-    time_start = max(0, min(int(roi["time_start_idx"]), max(samples - 1, 0)))
-    time_end = max(time_start + 1, min(int(roi["time_end_idx"]), samples))
-    dist_start = max(0, min(int(roi["dist_start_idx"]), max(traces - 1, 0)))
-    dist_end = max(dist_start + 1, min(int(roi["dist_end_idx"]), traces))
+    time_start = max(
+        0,
+        min(
+            _required_int(roi["time_start_idx"], "time_start_idx"),
+            max(samples - 1, 0),
+        ),
+    )
+    time_end = max(
+        time_start + 1,
+        min(_required_int(roi["time_end_idx"], "time_end_idx"), samples),
+    )
+    dist_start = max(
+        0,
+        min(
+            _required_int(roi["dist_start_idx"], "dist_start_idx"),
+            max(traces - 1, 0),
+        ),
+    )
+    dist_end = max(
+        dist_start + 1,
+        min(_required_int(roi["dist_end_idx"], "dist_end_idx"), traces),
+    )
     return {
         "time_start_idx": time_start,
         "time_end_idx": time_end,
