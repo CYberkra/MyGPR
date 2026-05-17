@@ -85,6 +85,7 @@ def test_target_band_energy_ratio_handles_non_finite_band_values():
 
     assert np.isfinite(ratio)
     assert ratio > 0.0
+    assert np.isfinite(target_band_energy_ratio(raw, raw, band=(0.2,)))
 
 
 def test_low_freq_energy_ratio_handles_non_finite_cutoff_ratio():
