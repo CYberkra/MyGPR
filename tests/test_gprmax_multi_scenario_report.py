@@ -533,6 +533,35 @@ def test_stepwise_comparison_exposes_pipeline_backend_decisions():
     assert "pipeline_score" in first_step["metrics"]["delta_auto_minus_manual"]
 
 
+def test_report_roi_helpers_accept_numpy_scalars_and_empty_starts():
+    data = np.arange(80, dtype=np.float32).reshape(10, 8)
+    roi = {
+        "time_start_idx": None,
+        "time_end_idx": np.array([8]),
+        "dist_start_idx": np.int64(1),
+        "dist_end_idx": np.array([6]),
+    }
+
+    clamped = report._clamp_roi(roi, data.shape)
+    sliced = report._slice_roi(data, roi)
+    shifted = report._roi_after_method(
+        roi,
+        "set_zero_time",
+        {"shift_samples": np.array([2])},
+        data.shape,
+    )
+
+    assert clamped == {
+        "time_start_idx": 0,
+        "time_end_idx": 8,
+        "dist_start_idx": 1,
+        "dist_end_idx": 6,
+    }
+    assert sliced.shape == (8, 5)
+    assert shifted["time_start_idx"] == 0
+    assert shifted["time_end_idx"] == 6
+
+
 def test_render_html_report_contains_required_research_sections(tmp_path: Path):
     payload = {
         "gprmax_root": "E:/gprMax/gprMax-v.3.1.7",

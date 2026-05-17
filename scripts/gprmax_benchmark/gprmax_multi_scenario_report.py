@@ -51,6 +51,7 @@ from core.quality_metrics import (  # noqa: E402
     compute_benchmark_metrics,
     ratio_fidelity,
 )
+from core.scalar_utils import to_int  # noqa: E402
 from core.trace_metadata_utils import resample_bscan_columns_linear  # noqa: E402
 
 
@@ -3100,22 +3101,34 @@ def _roi_after_method(
 ) -> dict[str, int]:
     if method_key != "set_zero_time":
         return _clamp_roi(roi, shape)
-    shift = int(meta.get("shift_samples") or 0)
+    shift = to_int(meta.get("shift_samples"), default=0)
     shifted = {
-        "time_start_idx": int(roi.get("time_start_idx", 0)) - shift,
-        "time_end_idx": int(roi.get("time_end_idx", shape[0])) - shift,
-        "dist_start_idx": int(roi.get("dist_start_idx", 0)),
-        "dist_end_idx": int(roi.get("dist_end_idx", shape[1])),
+        "time_start_idx": to_int(roi.get("time_start_idx"), default=0) - shift,
+        "time_end_idx": to_int(roi.get("time_end_idx"), default=shape[0]) - shift,
+        "dist_start_idx": to_int(roi.get("dist_start_idx"), default=0),
+        "dist_end_idx": to_int(roi.get("dist_end_idx"), default=shape[1]),
     }
     return _clamp_roi(shifted, shape)
 
 
 def _clamp_roi(roi: dict[str, int], shape: tuple[int, int]) -> dict[str, int]:
     samples, traces = int(shape[0]), int(shape[1])
-    t0 = max(0, min(int(roi.get("time_start_idx", 0)), max(samples - 1, 0)))
-    t1 = max(t0 + 1, min(int(roi.get("time_end_idx", samples)), samples))
-    d0 = max(0, min(int(roi.get("dist_start_idx", 0)), max(traces - 1, 0)))
-    d1 = max(d0 + 1, min(int(roi.get("dist_end_idx", traces)), traces))
+    t0 = max(
+        0,
+        min(to_int(roi.get("time_start_idx"), default=0), max(samples - 1, 0)),
+    )
+    t1 = max(
+        t0 + 1,
+        min(to_int(roi.get("time_end_idx"), default=samples), samples),
+    )
+    d0 = max(
+        0,
+        min(to_int(roi.get("dist_start_idx"), default=0), max(traces - 1, 0)),
+    )
+    d1 = max(
+        d0 + 1,
+        min(to_int(roi.get("dist_end_idx"), default=traces), traces),
+    )
     return {
         "time_start_idx": int(t0),
         "time_end_idx": int(t1),
@@ -3239,10 +3252,22 @@ def _comparison_verdict(metric_summary: dict[str, Any]) -> str:
 
 def _slice_roi(data: np.ndarray, roi: dict[str, int]) -> np.ndarray:
     arr = np.asarray(data, dtype=np.float32)
-    t0 = max(0, min(int(roi.get("time_start_idx", 0)), arr.shape[0] - 1))
-    t1 = max(t0 + 1, min(int(roi.get("time_end_idx", arr.shape[0])), arr.shape[0]))
-    d0 = max(0, min(int(roi.get("dist_start_idx", 0)), arr.shape[1] - 1))
-    d1 = max(d0 + 1, min(int(roi.get("dist_end_idx", arr.shape[1])), arr.shape[1]))
+    t0 = max(
+        0,
+        min(to_int(roi.get("time_start_idx"), default=0), arr.shape[0] - 1),
+    )
+    t1 = max(
+        t0 + 1,
+        min(to_int(roi.get("time_end_idx"), default=arr.shape[0]), arr.shape[0]),
+    )
+    d0 = max(
+        0,
+        min(to_int(roi.get("dist_start_idx"), default=0), arr.shape[1] - 1),
+    )
+    d1 = max(
+        d0 + 1,
+        min(to_int(roi.get("dist_end_idx"), default=arr.shape[1]), arr.shape[1]),
+    )
     return arr[t0:t1, d0:d1]
 
 
