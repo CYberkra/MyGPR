@@ -404,15 +404,17 @@ def _build_airborne_header_summary(metadata: dict[str, np.ndarray]) -> dict[str,
 
     if distance.size > 1:
         trace_steps = np.diff(distance)
+        trace_steps = trace_steps[np.isfinite(trace_steps)]
         mean_interval = float(np.mean(trace_steps)) if trace_steps.size else 0.0
         min_interval = float(np.min(trace_steps)) if trace_steps.size else 0.0
         max_interval = float(np.max(trace_steps)) if trace_steps.size else 0.0
     else:
         mean_interval = min_interval = max_interval = 0.0
 
-    if timestamps.size:
-        timestamp_min = float(np.min(timestamps))
-        timestamp_max = float(np.max(timestamps))
+    timestamps_valid = timestamps[np.isfinite(timestamps)]
+    if timestamps_valid.size:
+        timestamp_min = float(np.min(timestamps_valid))
+        timestamp_max = float(np.max(timestamps_valid))
     else:
         timestamp_min = timestamp_max = None
 
@@ -440,15 +442,15 @@ def _build_airborne_header_summary(metadata: dict[str, np.ndarray]) -> dict[str,
     return {
         "source": "airborne_csv",
         "trace_interval_m": mean_interval,
-        "track_length_m": float(distance[-1]) if distance.size else 0.0,
+        "track_length_m": _finite_last_or_default(distance),
         "trace_interval_min_m": min_interval,
         "trace_interval_max_m": max_interval,
-        "ground_elevation_min_m": float(np.min(ground)) if ground.size else 0.0,
-        "ground_elevation_max_m": float(np.max(ground)) if ground.size else 0.0,
-        "flight_height_min_m": float(np.min(flight)) if flight.size else 0.0,
-        "flight_height_max_m": float(np.max(flight)) if flight.size else 0.0,
-        "height_agl_min_m": float(np.min(height_agl)) if height_agl.size else 0.0,
-        "height_agl_max_m": float(np.max(height_agl)) if height_agl.size else 0.0,
+        "ground_elevation_min_m": _finite_min_or_default(ground),
+        "ground_elevation_max_m": _finite_max_or_default(ground),
+        "flight_height_min_m": _finite_min_or_default(flight),
+        "flight_height_max_m": _finite_max_or_default(flight),
+        "height_agl_min_m": _finite_min_or_default(height_agl),
+        "height_agl_max_m": _finite_max_or_default(height_agl),
         "trace_timestamp_min_s": timestamp_min,
         "trace_timestamp_max_s": timestamp_max,
         "height_confidence_min": confidence_min,
@@ -460,6 +462,24 @@ def _build_airborne_header_summary(metadata: dict[str, np.ndarray]) -> dict[str,
         "alignment_resampled_trace_count": alignment_resampled_count,
         "has_airborne_metadata": True,
     }
+
+
+def _finite_last_or_default(values: np.ndarray, default: float = 0.0) -> float:
+    finite = np.asarray(values, dtype=np.float64)
+    finite = finite[np.isfinite(finite)]
+    return float(finite[-1]) if finite.size else float(default)
+
+
+def _finite_min_or_default(values: np.ndarray, default: float = 0.0) -> float:
+    finite = np.asarray(values, dtype=np.float64)
+    finite = finite[np.isfinite(finite)]
+    return float(np.min(finite)) if finite.size else float(default)
+
+
+def _finite_max_or_default(values: np.ndarray, default: float = 0.0) -> float:
+    finite = np.asarray(values, dtype=np.float64)
+    finite = finite[np.isfinite(finite)]
+    return float(np.max(finite)) if finite.size else float(default)
 
 
 def _find_gprmax_input_for_output(out_path: Path) -> Path | None:

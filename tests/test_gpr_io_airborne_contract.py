@@ -100,6 +100,37 @@ def test_extract_airborne_csv_payload_reads_explicit_trace_timestamps():
     assert updated_header["source"] == "airborne_csv"
 
 
+def test_extract_airborne_csv_payload_header_summary_ignores_nonfinite_metadata():
+    header_info = {
+        "a_scan_length": 2,
+        "num_traces": 2,
+        "total_time_ns": 120.0,
+    }
+    raw = np.array(
+        [
+            [100.0, 30.0, 10.0, 1.0, 5.0, 10.0],
+            [100.0, 30.0, 10.0, 2.0, 5.0, 10.0],
+            [np.nan, 30.0, np.nan, 3.0, np.inf, np.nan],
+            [np.nan, 30.0, np.nan, 4.0, np.inf, np.nan],
+        ],
+        dtype=np.float64,
+    )
+
+    data, metadata, updated_header = extract_airborne_csv_payload(raw, header_info)
+
+    assert data.shape == (2, 2)
+    assert metadata is not None
+    assert updated_header is not None
+    numeric_values = [
+        value for value in updated_header.values() if isinstance(value, (float, int))
+    ]
+    assert all(np.isfinite(float(value)) for value in numeric_values)
+    assert updated_header["trace_timestamp_min_s"] == 10.0
+    assert updated_header["trace_timestamp_max_s"] == 10.0
+    assert updated_header["ground_elevation_min_m"] == 10.0
+    assert updated_header["flight_height_max_m"] == 5.0
+
+
 def test_extract_airborne_csv_payload_plain_matrix_fallback_keeps_legacy_behavior():
     header_info = {
         "a_scan_length": 3,
