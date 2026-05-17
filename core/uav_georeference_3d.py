@@ -346,9 +346,14 @@ def build_airborne_georeference_3d_payload(
 
 def _jsonable(value: Any) -> Any:
     if isinstance(value, np.ndarray):
-        return value.tolist()
-    if isinstance(value, (np.integer, np.floating)):
-        return value.item()
+        return _jsonable(value.tolist())
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, np.floating):
+        scalar = float(value)
+        return scalar if np.isfinite(scalar) else None
+    if isinstance(value, float):
+        return value if np.isfinite(value) else None
     if isinstance(value, dict):
         return {str(key): _jsonable(val) for key, val in value.items()}
     if isinstance(value, (list, tuple)):

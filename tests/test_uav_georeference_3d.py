@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -105,6 +106,24 @@ def test_export_airborne_georeference_bundle_writes_vtk_csv_json(tmp_path: Path)
     assert vtk_lines[point_header + 1] == "0.000000 0.000000 3.000000"
     lookup_header = vtk_lines.index("LOOKUP_TABLE default")
     assert vtk_lines[lookup_header + 1] == "0.000000"
+
+
+def test_export_airborne_georeference_bundle_serializes_nonfinite_summary(tmp_path: Path):
+    data = np.arange(40, dtype=np.float32).reshape(8, 5)
+    payload = build_airborne_georeference_3d_payload(
+        data,
+        {"total_time_ns": 40.0},
+        {"trace_distance_m": np.linspace(0.0, 1.0, 5)},
+    )
+    assert payload is not None
+    payload["preview"]["amplitude_min"] = np.float64(np.nan)
+    payload["preview"]["amplitude_max"] = np.float64(np.inf)
+
+    result = export_airborne_georeference_3d_bundle(payload, tmp_path / "scene.vtk")
+
+    summary = json.loads(Path(result["json_path"]).read_text(encoding="utf-8"))
+    assert summary["preview"]["amplitude_min"] is None
+    assert summary["preview"]["amplitude_max"] is None
 
 
 def test_build_airborne_georeference_payload_falls_back_to_trace_distance():
