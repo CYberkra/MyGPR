@@ -85,3 +85,21 @@ def test_build_airborne_georeference_payload_falls_back_to_trace_distance():
     assert "fallback_trace_distance_axis" in payload["quality_flags"]
     assert "missing_ground_elevation" in payload["quality_flags"]
     assert payload["has_longitude_latitude"] is False
+
+
+def test_build_airborne_georeference_payload_ignores_invalid_time_metadata():
+    data = np.arange(24, dtype=np.float32).reshape(6, 4)
+    trace_metadata = {
+        "trace_distance_m": np.linspace(0.0, 0.9, 4),
+        "time_window_ns": np.array(["bad"], dtype=object),
+    }
+
+    payload = build_airborne_georeference_3d_payload(
+        data,
+        {"total_time_ns": "bad"},
+        trace_metadata,
+    )
+
+    assert payload is not None
+    assert payload["total_time_ns"] == 5.0
+    assert "missing_total_time_ns" in payload["quality_flags"]

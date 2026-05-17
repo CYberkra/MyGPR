@@ -77,6 +77,20 @@ def _safe_numeric(values: np.ndarray | None, target_len: int, fill_value: float 
     return np.where(np.isfinite(arr), arr, fill_value).astype(np.float64)
 
 
+def _first_finite_float(value: Any) -> float | None:
+    try:
+        arr = np.asarray(value).reshape(-1)
+    except (TypeError, ValueError):
+        return None
+    if arr.size == 0:
+        return None
+    try:
+        parsed = float(arr[0])
+    except (TypeError, ValueError):
+        return None
+    return parsed if np.isfinite(parsed) else None
+
+
 def _dominant_trace_axis(
     trace_metadata: dict[str, Any] | None,
     trace_count: int,
@@ -189,15 +203,9 @@ def _resolve_time_axis(
     sample_count = int(data.shape[0]) if data.ndim == 2 else int(np.asarray(data).shape[0])
     total_time_ns = None
     if header_info and header_info.get("total_time_ns") is not None:
-        try:
-            total_time_ns = float(header_info.get("total_time_ns"))
-        except Exception:
-            total_time_ns = None
+        total_time_ns = _first_finite_float(header_info.get("total_time_ns"))
     if (total_time_ns is None or total_time_ns <= 0.0) and "time_window_ns" in meta:
-        try:
-            total_time_ns = float(np.asarray(meta["time_window_ns"]).reshape(-1)[0])
-        except Exception:
-            total_time_ns = None
+        total_time_ns = _first_finite_float(meta["time_window_ns"])
     if total_time_ns is None or total_time_ns <= 0.0:
         total_time_ns = float(max(sample_count - 1, 1))
         quality_flags.append("missing_total_time_ns")
