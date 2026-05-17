@@ -12,10 +12,6 @@ Round-2 drop-in version:
 from __future__ import annotations
 
 import numpy as np
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: F401
 
 from core.gprpy_compat import apply_gprpy_dewow
 from core.scalar_utils import to_float, to_int, to_int_or_none
