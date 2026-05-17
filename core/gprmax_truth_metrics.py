@@ -285,7 +285,7 @@ def _masked_mean_square(data: np.ndarray, mask: np.ndarray) -> float:
     values = _masked_values(data, mask)
     if values.size == 0:
         return 0.0
-    return float(np.mean(values**2))
+    return float(np.dot(values, values) / values.size)
 
 
 def _masked_mean_abs(data: np.ndarray, mask: np.ndarray) -> float:
