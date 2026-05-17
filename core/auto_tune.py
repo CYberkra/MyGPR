@@ -55,7 +55,7 @@ from core.quality_metrics import (
     weighted_score_parts,
 )
 from core.runtime_warnings import merge_runtime_warnings
-from core.scalar_utils import to_float
+from core.scalar_utils import to_float, to_float_or_none, to_int_or_none
 
 
 class AutoTuneError(RuntimeError):
@@ -1593,9 +1593,8 @@ def _sanitize_int_candidates(
 ) -> list[int]:
     cleaned: list[int] = []
     for value in values:
-        try:
-            current = int(round(float(value)))
-        except Exception:
+        current = to_int_or_none(value)
+        if current is None:
             continue
         current = max(int(minimum), min(int(upper), current))
         if current not in cleaned:
@@ -1616,10 +1615,7 @@ def _adaptive_trace_windows(
     ratio_values = [0.02, 0.03, 0.05, 0.08, 0.12, 0.2, 0.35, 0.5, 0.8]
     adaptive = [max(minimum, int(round(n_traces * ratio))) for ratio in ratio_values]
     if base_value is not None:
-        try:
-            base_int = int(round(float(base_value)))
-        except Exception:
-            base_int = None
+        base_int = to_int_or_none(base_value)
         if base_int is not None:
             adaptive.extend(
                 [max(minimum, base_int - 20), base_int, min(upper, base_int + 20)]
@@ -1637,9 +1633,8 @@ def _adaptive_trace_windows(
 def _sanitize_float_candidates(values: list[Any], minimum: float) -> list[float]:
     cleaned: list[float] = []
     for value in values:
-        try:
-            current = float(value)
-        except Exception:
+        current = to_float_or_none(value)
+        if current is None:
             continue
         current = max(float(minimum), current)
         if current not in cleaned:

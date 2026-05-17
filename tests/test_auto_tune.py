@@ -12,6 +12,8 @@ from core.auto_tune import (
     _agc_window_min,
     _resolve_nyquist_mhz,
     _resolve_time_step_ns,
+    _sanitize_float_candidates,
+    _sanitize_int_candidates,
     auto_select_method_group,
     auto_tune_method,
 )
@@ -230,6 +232,22 @@ def test_auto_tune_header_timing_helpers_accept_numpy_scalar_values():
     assert _resolve_time_step_ns(128, header) == 1.0
     assert _agc_window_min(128, header) >= 3
     assert _resolve_nyquist_mhz(128, header) == 1000.0
+
+
+def test_auto_tune_candidate_sanitizers_accept_numpy_scalar_values():
+    int_candidates = _sanitize_int_candidates(
+        [np.array([12.4]), np.inf, "bad"],
+        data_limit=40,
+        minimum=3,
+        upper=20,
+    )
+    float_candidates = _sanitize_float_candidates(
+        [np.array([0.25]), np.nan, "bad"],
+        minimum=0.1,
+    )
+
+    assert int_candidates == [12]
+    assert float_candidates == [0.25]
 
 
 def test_auto_tune_svd_subspace_returns_rank_interval_candidate():
