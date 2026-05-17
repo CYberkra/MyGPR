@@ -46,6 +46,19 @@ def test_shared_state_build_result_history_tracks_formal_labels():
     assert np.array_equal(history_items[2][1], raw + 2)
 
 
+def test_shared_state_load_data_keeps_current_and_original_independent():
+    state = SharedDataState()
+    raw = np.arange(6, dtype=np.float32).reshape(2, 3)
+
+    state.load_data(raw)
+    assert state.current_data is not None
+    assert state.original_data is not None
+    state.current_data[0, 0] = 999.0
+
+    assert state.original_data[0, 0] == 0.0
+    assert raw[0, 0] == 0.0
+
+
 def test_shared_state_trims_history_internally():
     state = SharedDataState()
     state.max_history = 3
