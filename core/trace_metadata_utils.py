@@ -182,10 +182,10 @@ def _build_altimeter_confidence(fields: dict[str, np.ndarray], size: int) -> np.
         confidence *= np.clip(snr / 20.0, 0.05, 1.0)
     if "target_count" in fields:
         target_count = np.asarray(fields["target_count"], dtype=np.float64)
-        confidence *= np.where(target_count > 0, 1.0, 0.25)
+        confidence[target_count <= 0] *= 0.25
     if "valid" in fields:
         valid = np.asarray(fields["valid"], dtype=np.float64)
-        confidence *= np.where(valid > 0, 1.0, 0.0)
+        confidence[valid <= 0] = 0.0
     return np.clip(confidence, 0.0, 1.0).astype(np.float32)
 
 
