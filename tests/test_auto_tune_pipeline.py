@@ -201,6 +201,23 @@ def test_pipeline_summary_carries_compact_ground_truth_rois():
     assert "raw_sidecar" not in info
 
 
+def test_pipeline_summary_serializes_nonfinite_metrics_as_null():
+    raw = _build_pipeline_profile(samples=72, traces=18)
+    result = run_auto_tune_pipeline(
+        raw,
+        pipeline=["dewow"],
+        manual_params_by_method={"dewow": {"window": 1}},
+        search_mode="fast",
+    )
+    result.manual.metrics["nan_metric"] = np.float64(np.nan)
+    result.automatic.metrics["inf_metric"] = np.array([np.inf])
+
+    summary = to_summary_dict(result)
+
+    assert summary["manual"]["metrics"]["nan_metric"] is None
+    assert summary["automatic"]["metrics"]["inf_metric"] == [None]
+
+
 def test_pipeline_locked_params_apply_to_both_branches_without_auto_tune(monkeypatch):
     raw = _build_pipeline_profile(samples=72, traces=18)
 

@@ -968,12 +968,14 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [_json_safe(item) for item in value]
     if isinstance(value, np.ndarray):
-        return value.tolist()
+        return _json_safe(value.tolist())
     if isinstance(value, np.generic):
-        return value.item()
+        return _json_safe(value.item())
     if value is None or isinstance(value, (str, bool)):
         return value
     if isinstance(value, float):
+        if not np.isfinite(value):
+            return None
         return float(value)
     if isinstance(value, int):
         return int(value)
