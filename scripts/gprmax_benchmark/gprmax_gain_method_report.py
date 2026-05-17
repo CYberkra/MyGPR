@@ -253,14 +253,14 @@ def run_gain_method_report(
     }
     summary_path = report_dir / "summary.json"
     summary_path.write_text(
-        json.dumps(_json_safe(payload), ensure_ascii=False, indent=2),
+        json.dumps(_json_safe(payload), ensure_ascii=False, indent=2, allow_nan=False),
         encoding="utf-8",
     )
     html_path = render_gain_method_html(report_dir, payload)
     payload["summary_json"] = str(summary_path)
     payload["html_report"] = str(html_path)
     summary_path.write_text(
-        json.dumps(_json_safe(payload), ensure_ascii=False, indent=2),
+        json.dumps(_json_safe(payload), ensure_ascii=False, indent=2, allow_nan=False),
         encoding="utf-8",
     )
     return payload
@@ -1133,11 +1133,11 @@ def _render_or_copy_structure(package: ScenarioPackage, out_path: Path) -> None:
 def _write_scenario_inputs(package: ScenarioPackage, scenario_dir: Path) -> None:
     np.savetxt(scenario_dir / "mygpr_bscan.csv", package.bscan, delimiter=",", fmt="%.8e")
     (scenario_dir / "scenario.json").write_text(
-        json.dumps(_json_safe(package.scenario), ensure_ascii=False, indent=2),
+        json.dumps(_json_safe(package.scenario), ensure_ascii=False, indent=2, allow_nan=False),
         encoding="utf-8",
     )
     (scenario_dir / "ground_truth.json").write_text(
-        json.dumps(_json_safe(package.ground_truth), ensure_ascii=False, indent=2),
+        json.dumps(_json_safe(package.ground_truth), ensure_ascii=False, indent=2, allow_nan=False),
         encoding="utf-8",
     )
 
@@ -1167,16 +1167,22 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 
 def _json_safe(value: Any) -> Any:
-    if isinstance(value, np.ndarray):
-        return value.tolist()
-    if isinstance(value, np.generic):
-        return value.item()
-    if isinstance(value, Path):
-        return str(value)
     if isinstance(value, dict):
         return {str(key): _json_safe(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [_json_safe(item) for item in value]
+    if isinstance(value, np.ndarray):
+        return _json_safe(value.tolist())
+    if isinstance(value, np.generic):
+        return _json_safe(value.item())
+    if isinstance(value, Path):
+        return str(value)
+    if value is None or isinstance(value, (str, bool)):
+        return value
+    if isinstance(value, float):
+        return float(value) if np.isfinite(value) else None
+    if isinstance(value, int):
+        return int(value)
     return value
 
 

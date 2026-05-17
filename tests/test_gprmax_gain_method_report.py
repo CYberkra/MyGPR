@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -270,6 +271,22 @@ def test_strip_variant_arrays_removes_large_image_payloads():
 
     assert "gain_output" not in cleaned[0]["manual"]
     assert "final_output" not in cleaned[0]["auto"]
+
+
+def test_json_safe_removes_nonfinite_values_for_strict_gain_report_json():
+    payload = {
+        "metric": np.float64(np.inf),
+        "params": {"window": np.nan, "enabled": True},
+        "array": np.array([1.0, np.nan, np.inf], dtype=np.float32),
+    }
+
+    safe = report._json_safe(payload)
+
+    assert safe["metric"] is None
+    assert safe["params"]["window"] is None
+    assert safe["params"]["enabled"] is True
+    assert safe["array"] == [1.0, None, None]
+    json.dumps(safe, allow_nan=False)
 
 
 def test_gain_report_images_use_variant_scale_instead_of_global_scale(tmp_path: Path, monkeypatch):
