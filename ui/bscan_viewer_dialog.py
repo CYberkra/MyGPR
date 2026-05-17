@@ -4,8 +4,9 @@
 
 from __future__ import annotations
 
-from typing import Any
 import io
+import logging
+from typing import Any
 
 import matplotlib
 
@@ -30,6 +31,9 @@ from PyQt6.QtWidgets import (
 )
 
 
+logger = logging.getLogger(__name__)
+
+
 def coerce_bscan_array(data: Any) -> np.ndarray | None:
     """Return a finite-compatible 2-D numeric array for B-scan viewing."""
     if data is None:
@@ -37,6 +41,7 @@ def coerce_bscan_array(data: Any) -> np.ndarray | None:
     try:
         array = np.asarray(data)
     except Exception:
+        logger.debug("Failed to coerce B-scan viewer data to ndarray.", exc_info=True)
         return None
     array = np.squeeze(array)
     if array.ndim != 2 or array.size == 0:
@@ -165,7 +170,7 @@ class BscanViewerDialog(QDialog):
             try:
                 self._colorbar.remove()
             except Exception:
-                pass
+                logger.debug("Failed to remove previous B-scan viewer colorbar.", exc_info=True)
             self._colorbar = None
         if self._view is None:
             self.info_label.setText("数据尺寸：--")
