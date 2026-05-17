@@ -96,3 +96,36 @@ def test_missing_sampling_info_skips_filter_instead_of_guessing_frequency():
     assert np.array_equal(filtered, raw)
     assert meta["skipped"] is True
     assert meta["runtime_warnings"][0]["code"] == "frequency_sampling_missing"
+
+
+def test_non_finite_sampling_info_skips_filter():
+    raw, _sample_rate_hz = _tone_profile()
+
+    filtered, meta = method_frequency_filter_1d(
+        raw,
+        filter_type="bandpass",
+        sample_rate_hz=np.inf,
+        time_step_s=np.nan,
+        sample_interval_ns=np.inf,
+    )
+
+    assert np.array_equal(filtered, raw)
+    assert meta["skipped"] is True
+    assert meta["runtime_warnings"][0]["code"] == "frequency_sampling_missing"
+
+
+def test_non_finite_frequency_params_are_sanitized():
+    raw, sample_rate_hz = _tone_profile()
+
+    filtered, meta = method_frequency_filter_1d(
+        raw,
+        filter_type="bandpass",
+        low_freq_mhz=np.inf,
+        high_freq_mhz=np.nan,
+        taper_ratio=np.inf,
+        sample_rate_hz=sample_rate_hz,
+    )
+
+    assert filtered.shape == raw.shape
+    assert np.isfinite(filtered).all()
+    assert meta["effective_params"]["skipped"] is True

@@ -109,25 +109,16 @@ def _resolve_sample_rate_hz(
         (sample_rate_hz, 1.0),
         (sample_rate_mhz, 1.0e6),
     ):
-        try:
-            numeric = float(value)
-        except (TypeError, ValueError):
-            continue
-        if numeric > 0.0:
+        numeric = _positive_float(value)
+        if numeric is not None:
             return numeric * multiplier
 
-    try:
-        step_s = float(time_step_s)
-    except (TypeError, ValueError):
-        step_s = 0.0
-    if step_s > 0.0:
+    step_s = _positive_float(time_step_s)
+    if step_s is not None:
         return 1.0 / step_s
 
-    try:
-        step_ns = float(sample_interval_ns)
-    except (TypeError, ValueError):
-        step_ns = 0.0
-    if step_ns > 0.0:
+    step_ns = _positive_float(sample_interval_ns)
+    if step_ns is not None:
         return 1.0 / (step_ns * 1.0e-9)
 
     return 0.0
@@ -151,7 +142,7 @@ def _build_filter_mask(
     high_hz = _mhz_to_hz(high_freq_mhz)
     notch_hz = _mhz_to_hz(notch_freq_mhz)
     notch_width_hz = _mhz_to_hz(notch_width_mhz)
-    taper_ratio = float(np.clip(taper_ratio, 0.0, 0.5))
+    taper_ratio = float(np.clip(_finite_float(taper_ratio, default=0.0), 0.0, 0.5))
 
     if filter_type == "lowpass":
         cutoff = _clamp_cutoff(high_hz, 0.0, nyquist_hz)
@@ -179,7 +170,7 @@ def _build_filter_mask(
         band_low = max(0.0, center - half)
         band_high = min(nyquist_hz, center + half)
         band = _bandpass_mask(freqs_hz, band_low, band_high, _transition_width(width, nyquist_hz, taper_ratio))
-        depth = float(np.clip(notch_depth, 0.0, 1.0))
+        depth = float(np.clip(_finite_float(notch_depth, default=1.0), 0.0, 1.0))
         mask = 1.0 - depth * band
         return mask, {
             "notch_freq_mhz": center / 1.0e6,
@@ -217,15 +208,26 @@ def _build_filter_mask(
 
 
 def _mhz_to_hz(value: float) -> float:
-    try:
-        numeric = float(value)
-    except (TypeError, ValueError):
-        numeric = 0.0
+    numeric = _finite_float(value, default=0.0)
     return numeric * 1.0e6
 
 
 def _clamp_cutoff(value_hz: float, minimum_hz: float, maximum_hz: float) -> float:
-    return float(max(minimum_hz, min(maximum_hz, float(value_hz))))
+    value = _finite_float(value_hz, default=0.0)
+    return float(max(minimum_hz, min(maximum_hz, value)))
+
+
+def _finite_float(value: object, *, default: float) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return float(default)
+    return numeric if np.isfinite(numeric) else float(default)
+
+
+def _positive_float(value: object) -> float | None:
+    numeric = _finite_float(value, default=0.0)
+    return numeric if numeric > 0.0 else None
 
 
 def _transition_width(reference_hz: float, nyquist_hz: float, taper_ratio: float) -> float:
