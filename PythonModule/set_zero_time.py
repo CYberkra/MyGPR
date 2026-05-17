@@ -19,11 +19,21 @@ def _resolve_time_step_s(ny: int, time_step_s: float | None) -> float:
     if time_step_s is not None:
         try:
             value = float(time_step_s)
-            if value > 0:
+            if np.isfinite(value) and value > 0:
                 return value
         except (TypeError, ValueError):
             pass
     return 48e-9 / max(1, int(ny))
+
+
+def _non_negative_float(value: object, name: str) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} 必须是有限非负数值") from None
+    if not np.isfinite(parsed):
+        raise ValueError(f"{name} 必须是有限非负数值")
+    return max(0.0, parsed)
 
 
 def _apply_zero_time_shift(
@@ -44,7 +54,8 @@ def _apply_zero_time_shift(
     step_s = _resolve_time_step_s(ny, time_step_s)
     step_ns = step_s * 1e9
 
-    shift_samples = int(max(0.0, float(new_zero_time)) / max(step_ns, 1.0e-12))
+    zero_time_ns = _non_negative_float(new_zero_time, "new_zero_time")
+    shift_samples = int(zero_time_ns / max(step_ns, 1.0e-12))
     shift_samples = max(0, min(shift_samples, ny - 1))
 
     result = np.zeros((ny, nx), dtype=np.float64)
@@ -145,12 +156,12 @@ def method_set_zero_time(data, new_zero_time=5.0, time_step_s=None, **kwargs):
     """零时间校正 - GUI / auto-tune ndarray 接口。"""
     result, shift_samples, step_s = _apply_zero_time_shift(
         data,
-        new_zero_time=float(new_zero_time),
+        new_zero_time=new_zero_time,
         time_step_s=time_step_s,
     )
     return result, {
         "method": "set_zero_time",
-        "new_zero_time": float(new_zero_time),
+        "new_zero_time": _non_negative_float(new_zero_time, "new_zero_time"),
         "shift_samples": int(shift_samples),
         "time_step_s": float(step_s),
     }

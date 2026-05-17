@@ -95,6 +95,26 @@ def test_method_set_zero_time_invalid_time_step_falls_back():
     assert meta["time_step_s"] == 48e-9 / raw.shape[0]
 
 
+def test_method_set_zero_time_non_finite_time_step_falls_back():
+    raw = np.arange(20, dtype=np.float32).reshape(5, 4)
+
+    result, meta = method_set_zero_time(
+        raw,
+        new_zero_time=20.0,
+        time_step_s=np.inf,
+    )
+
+    assert result.shape == raw.shape
+    assert meta["time_step_s"] == 48e-9 / raw.shape[0]
+
+
+def test_method_set_zero_time_rejects_non_finite_zero_time():
+    raw = np.arange(20, dtype=np.float32).reshape(5, 4)
+
+    with pytest.raises(ValueError, match="new_zero_time"):
+        method_set_zero_time(raw, new_zero_time=np.nan, time_step_s=10e-9)
+
+
 def test_method_time_cut_removes_below_selected_time():
     raw = np.arange(40, dtype=np.float32).reshape(10, 4)
 
