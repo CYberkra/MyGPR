@@ -51,7 +51,7 @@ def _gradient_energy(data: np.ndarray) -> np.ndarray:
     arr = _as_clean_2d(data)
     grad_t = np.diff(arr, axis=0, prepend=arr[[0], :])
     grad_x = np.diff(arr, axis=1, prepend=arr[:, [0]])
-    return np.sqrt(grad_t**2 + grad_x**2)
+    return np.hypot(grad_t, grad_x)
 
 
 def _row_mean_square(arr: np.ndarray) -> np.ndarray:
