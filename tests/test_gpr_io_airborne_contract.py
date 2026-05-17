@@ -165,6 +165,22 @@ def test_extract_airborne_csv_payload_invalid_shape_header_falls_back_to_matrix(
     assert updated_header == header_info
 
 
+def test_extract_airborne_csv_payload_handles_one_dimensional_raw_input():
+    header_info = {
+        "a_scan_length": 4,
+        "num_traces": 1,
+        "total_time_ns": 120.0,
+    }
+    raw = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float64)
+
+    data, metadata, updated_header = extract_airborne_csv_payload(raw, header_info)
+
+    assert data.shape == (4, 1)
+    assert np.array_equal(data[:, 0], raw.astype(np.float32))
+    assert metadata is None
+    assert updated_header == header_info
+
+
 def test_subset_trace_metadata_slices_all_keys_by_indices():
     metadata = {
         "trace_index": np.array([0, 1, 2], dtype=np.int32),

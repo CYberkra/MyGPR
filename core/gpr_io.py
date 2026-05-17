@@ -246,6 +246,8 @@ def extract_airborne_csv_payload(
     arr = np.asarray(raw_data)
     if arr.size == 0:
         raise ValueError("CSV 未读取到有效数据")
+    if arr.ndim == 1:
+        arr = arr.reshape(-1, 1)
 
     metadata = None
     updated_header = dict(header_info or {}) if header_info else None
