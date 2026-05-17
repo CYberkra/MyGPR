@@ -153,3 +153,22 @@ def test_read_gprmax_out_attaches_impulse_context_from_matching_in(tmp_path: Pat
     assert header["trace_interval_m"] == 0.05
     assert result["trace_metadata"] is not None
     assert np.allclose(result["trace_metadata"]["trace_distance_m"], [0.0, 0.05, 0.1])
+
+
+def test_read_gprmax_out_accepts_numpy_scalar_hdf5_attrs(tmp_path: Path):
+    data = np.arange(12, dtype=np.float32).reshape(4, 3)
+    with h5py.File(tmp_path / "array_attrs_merged.out", "w") as handle:
+        rx_group = handle.create_group("rxs").create_group("rx1")
+        rx_group.create_dataset("Ez", data=data)
+        handle.attrs["Iterations"] = np.array([4])
+        handle.attrs["dt"] = np.array([2.0e-10])
+        handle.attrs["nx_ny_nz"] = np.array([1, 2, 3])
+
+    result = read_gprmax_out(str(tmp_path / "array_attrs_merged.out"))
+
+    header = result["header_info"]
+    assert result["time_step_s"] == 2.0e-10
+    assert result["total_time_ns"] == 0.8
+    assert header["gprmax_iterations"] == 4
+    assert header["gprmax_dt_s"] == 2.0e-10
+    assert header["gprmax_nx_ny_nz"] == [1.0, 2.0, 3.0]

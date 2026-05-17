@@ -41,7 +41,7 @@ from core.data_context import (
     DATA_CONTEXT_UAV_GPR_SFCW_FIELD,
     apply_data_context_defaults,
 )
-from core.scalar_utils import to_float
+from core.scalar_utils import to_float, to_float_or_none, to_int
 
 
 def read_gprmax_in(in_path: str) -> Dict[str, Any]:
@@ -543,10 +543,17 @@ def _attach_gprmax_ground_truth(
 
 
 def _safe_attr_list(value: Any) -> list[float] | None:
+    parsed: list[float] = []
     try:
-        return [float(v) for v in value]
+        iterator = list(value)
     except Exception:
         return None
+    for item in iterator:
+        number = to_float_or_none(item)
+        if number is None:
+            return None
+        parsed.append(number)
+    return parsed
 
 
 def _build_gprmax_trace_metadata(
@@ -562,10 +569,7 @@ def _build_gprmax_trace_metadata(
         rx_steps = gprmax_config.get("rx_steps")
         for steps in (rx_steps, src_steps):
             if steps and len(steps) >= 1:
-                try:
-                    candidate = float(steps[0])
-                except Exception:
-                    candidate = 0.0
+                candidate = to_float(steps[0], default=0.0)
                 if candidate > 0.0:
                     step = candidate
                     break
@@ -591,10 +595,7 @@ def _build_gprmax_header_info(
     if gprmax_config:
         for steps in (gprmax_config.get("rx_steps"), gprmax_config.get("src_steps")):
             if steps and len(steps) >= 1:
-                try:
-                    trace_interval_m = float(steps[0])
-                except Exception:
-                    trace_interval_m = 0.0
+                trace_interval_m = to_float(steps[0], default=0.0)
                 if trace_interval_m > 0.0:
                     break
 
@@ -609,9 +610,9 @@ def _build_gprmax_header_info(
         "out_path": str(out_path),
     }
     if "Iterations" in attrs:
-        header["gprmax_iterations"] = int(attrs["Iterations"])
+        header["gprmax_iterations"] = to_int(attrs["Iterations"], default=0)
     if "dt" in attrs:
-        header["gprmax_dt_s"] = float(attrs["dt"])
+        header["gprmax_dt_s"] = to_float(attrs["dt"], default=0.0)
     if "nx_ny_nz" in attrs:
         nx_ny_nz = _safe_attr_list(attrs.get("nx_ny_nz"))
         if nx_ny_nz is not None:
@@ -834,7 +835,7 @@ def read_gprmax_out(out_path: str) -> dict:
                 data0 = f0["rxs"]["rx1"]["Ez"][:]
 
             # 合并所有文件
-            samples = int(iterations)
+            samples = to_int(iterations, default=int(np.asarray(data0).shape[0]))
             n_traces = len(out_files)
             matrix = np.zeros((samples, n_traces), dtype=np.float32)
             matrix[:, 0] = data0
@@ -848,11 +849,12 @@ def read_gprmax_out(out_path: str) -> dict:
     # gprMax 输出: (iterations,) - 单道数据
     # 需要根据文件数量重塑为矩阵
 
-    samples = int(iterations)
+    samples = to_int(iterations, default=int(np.asarray(data).shape[0]))
 
     # 如果数据是二维的（已合并的 merged.out），直接返回
     if data.ndim == 2 and data.shape[1] > 1:
-        time_step_s = float(dt) if dt else None
+        time_step_value = to_float(dt, default=0.0)
+        time_step_s = time_step_value if time_step_value > 0.0 else None
         total_time_ns = time_step_s * samples * 1e9 if time_step_s else None
         header_info = _build_gprmax_header_info(
             out_path=out_path,
@@ -904,7 +906,8 @@ def read_gprmax_out(out_path: str) -> dict:
             data = data.reshape(-1, 1)
 
     # 计算时间参数
-    time_step_s = float(dt) if dt else None
+    time_step_value = to_float(dt, default=0.0)
+    time_step_s = time_step_value if time_step_value > 0.0 else None
     total_time_ns = time_step_s * samples * 1e9 if time_step_s else None
     traces = data.shape[1] if data.ndim == 2 else 1
     header_info = _build_gprmax_header_info(
