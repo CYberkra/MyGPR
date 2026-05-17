@@ -210,7 +210,7 @@ class SharedDataState(QObject):
             data = state.get("data")
             if data is None:
                 continue
-            if snapshots and np.array_equal(snapshots[-1]["data"], data):
+            if snapshots and _arrays_equal(snapshots[-1]["data"], data):
                 continue
             snapshots.append(
                 {
@@ -368,11 +368,18 @@ def _safe_history_limit(value: Any) -> int:
     return max(1, parsed)
 
 
+def _arrays_equal(left: Any, right: Any) -> bool:
+    try:
+        return bool(np.array_equal(left, right, equal_nan=True))
+    except TypeError:
+        return bool(np.array_equal(left, right))
+
+
 def _append_unique_history_item(
     items: list[tuple[str, np.ndarray]], label: str, data: np.ndarray
 ) -> None:
     candidate = np.array(data, copy=True)
-    if items and np.array_equal(items[-1][1], candidate):
+    if items and _arrays_equal(items[-1][1], candidate):
         items[-1] = (label, candidate)
         return
     items.append((label, candidate))
@@ -392,7 +399,7 @@ def _append_unique_history_entry(
         "trace_metadata": _clone_trace_metadata(trace_metadata),
         "header_info": _clone_header_info(header_info),
     }
-    if items and np.array_equal(items[-1]["data"], candidate["data"]):
+    if items and _arrays_equal(items[-1]["data"], candidate["data"]):
         items[-1] = candidate
         return
     items.append(candidate)

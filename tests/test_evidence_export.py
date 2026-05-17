@@ -183,6 +183,19 @@ def test_shared_state_history_limit_falls_back_for_invalid_values():
     assert len(state.history) == 10
 
 
+def test_shared_state_deduplicates_nan_equivalent_history_snapshots():
+    state = SharedDataState()
+    raw = np.array([[1.0, np.nan], [2.0, np.inf]], dtype=np.float32)
+    state.load_data(raw, path="nan.csv")
+    state.apply_current_data(raw.copy(), push_history=True, label="same")
+
+    history_entries = state.build_result_history_entries()
+    compare_snapshots = state.build_formal_compare_snapshots()
+
+    assert len(history_entries) == 1
+    assert len(compare_snapshots) == 2
+
+
 def test_export_replay_evidence_bundle_writes_one_zip(tmp_path: Path):
     state = SharedDataState()
     raw = np.arange(24, dtype=np.float32).reshape(6, 4)
