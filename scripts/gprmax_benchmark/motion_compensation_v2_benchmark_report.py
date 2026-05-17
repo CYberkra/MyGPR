@@ -573,11 +573,26 @@ def _correction_metrics(raw: np.ndarray, corrected: np.ndarray) -> dict[str, flo
 
 
 def _robust_vlim(*arrays: np.ndarray) -> float:
-    values = np.concatenate([np.asarray(arr, dtype=np.float64).reshape(-1) for arr in arrays])
-    finite = np.abs(values[np.isfinite(values)])
-    if finite.size == 0:
+    finite_abs = _finite_abs_values(*arrays)
+    if finite_abs.size == 0:
         return 1.0
-    return max(float(np.percentile(finite, 98.5)), 1.0e-6)
+    return max(float(np.percentile(finite_abs, 98.5)), 1.0e-6)
+
+
+def _finite_abs_values(*arrays: np.ndarray) -> np.ndarray:
+    chunks: list[np.ndarray] = []
+    for arr in arrays:
+        values = np.asarray(arr, dtype=np.float64).reshape(-1)
+        if values.size == 0:
+            continue
+        finite = values[np.isfinite(values)]
+        if finite.size:
+            chunks.append(np.abs(finite))
+    if not chunks:
+        return np.asarray([], dtype=np.float64)
+    if len(chunks) == 1:
+        return chunks[0]
+    return np.concatenate(chunks)
 
 
 def _load_bscan_csv(path: Path) -> np.ndarray:

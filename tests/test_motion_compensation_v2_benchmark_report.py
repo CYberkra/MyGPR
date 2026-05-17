@@ -100,5 +100,16 @@ def test_source_scenario_dir_report_loads_bscan_and_sidecars(tmp_path: Path):
     assert Path(payload["artifacts"]["html"]).exists()
 
 
+def test_motion_report_robust_vlim_ignores_nonfinite_values():
+    before = np.array([[np.nan, -2.0], [np.inf, 1.0]], dtype=np.float32)
+    after = np.array([[0.0, 3.0], [-np.inf, 4.0]], dtype=np.float32)
+
+    assert report._robust_vlim(before, after) == max(
+        float(np.percentile([2.0, 1.0, 0.0, 3.0, 4.0], 98.5)),
+        1.0e-6,
+    )
+    assert report._robust_vlim(np.array([[np.nan, np.inf]], dtype=np.float32)) == 1.0
+
+
 def _write_text(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
