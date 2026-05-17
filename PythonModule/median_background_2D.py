@@ -61,7 +61,7 @@ def method_median_background_2d(
         selection,
         edge_taper_samples=edge_taper_samples,
     )
-    return result.astype(np.float32), {
+    return result.astype(np.float32, copy=False), {
         "method": "median_background_2D",
         "ntraces": ntraces,
         "time_start_idx": int(selection.start_idx),

@@ -30,7 +30,7 @@ def method_svd_subspace(
 
     min_dim = min(arr.shape)
     if min_dim < 2:
-        return arr.astype(np.float32), {
+        return arr.astype(np.float32, copy=False), {
             "method": "svd_subspace",
             "rank_start": 1,
             "rank_end": 1,
@@ -47,7 +47,7 @@ def method_svd_subspace(
         start_idx:end_idx, :
     ]
 
-    return reconstructed.astype(np.float32), {
+    return reconstructed.astype(np.float32, copy=False), {
         "method": "svd_subspace",
         "rank_start": rank_start,
         "rank_end": rank_end,

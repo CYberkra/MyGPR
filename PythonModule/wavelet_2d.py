@@ -122,4 +122,4 @@ def method_wavelet_2d(
     reconstructed = pywt.waverec2(filtered_coeffs, wavelet)
     reconstructed = reconstructed[: arr.shape[0], : arr.shape[1]]
 
-    return reconstructed.astype(np.float32), meta
+    return reconstructed.astype(np.float32, copy=False), meta

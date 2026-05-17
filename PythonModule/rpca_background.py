@@ -89,7 +89,7 @@ def method_rpca_background(
         Y = Y + mu_value * residual_matrix
         mu_value = min(mu_value * rho, mu_bar)
 
-    result = sparse.astype(np.float32)
+    result = sparse.astype(np.float32, copy=False)
     return result, {
         "method": "rpca_background",
         "iterations": iteration,
