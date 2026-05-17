@@ -190,9 +190,13 @@ def derive_local_xy_m(
         raise ValueError("longitude and latitude must have the same length")
     if lon.size == 0:
         return np.array([], dtype=np.float32), np.array([], dtype=np.float32)
+    if not np.isfinite(lon).all() or not np.isfinite(lat).all():
+        raise ValueError("longitude and latitude must contain only finite values")
 
     lon0 = float(lon[0] if origin_longitude is None else origin_longitude)
     lat0 = float(lat[0] if origin_latitude is None else origin_latitude)
+    if not np.isfinite(lon0) or not np.isfinite(lat0):
+        raise ValueError("origin longitude/latitude must be finite")
     lon_rad = np.radians(lon)
     lat_rad = np.radians(lat)
     lon0_rad = np.radians(lon0)

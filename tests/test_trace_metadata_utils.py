@@ -62,6 +62,24 @@ def test_build_uniform_trace_distance_m_returns_equal_spacing_axis():
     )
 
 
+def test_derive_local_xy_rejects_non_finite_coordinates():
+    module = importlib.import_module("core.trace_metadata_utils")
+    derive_local_xy_m = module.derive_local_xy_m
+
+    with pytest.raises(ValueError, match="longitude"):
+        derive_local_xy_m(
+            np.array([100.0, np.nan], dtype=np.float64),
+            np.array([30.0, 30.0], dtype=np.float64),
+        )
+
+    with pytest.raises(ValueError, match="origin"):
+        derive_local_xy_m(
+            np.array([100.0, 100.1], dtype=np.float64),
+            np.array([30.0, 30.0], dtype=np.float64),
+            origin_longitude=np.inf,
+        )
+
+
 def test_build_uniform_trace_distance_m_rejects_non_finite_axis_or_spacing():
     module = importlib.import_module("core.trace_metadata_utils")
     build_uniform_trace_distance_m = module.build_uniform_trace_distance_m
