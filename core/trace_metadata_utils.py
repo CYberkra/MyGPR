@@ -159,6 +159,8 @@ def _normalize_altimeter_payload(
         payload,
         required_fields=("height_agl_m",),
     )
+    raw_timestamp_s = _as_1d_array(payload["timestamp_s"], np.float64)
+    order = np.argsort(raw_timestamp_s, kind="stable")
     for key in ("snr", "target_count", "valid"):
         if key not in payload:
             continue
@@ -167,13 +169,11 @@ def _normalize_altimeter_payload(
             raise ValueError(f"sidecar field '{key}' length mismatch")
         if not np.isfinite(values).all():
             raise ValueError(f"sidecar field '{key}' must contain only finite values")
-        order = np.argsort(_as_1d_array(payload["timestamp_s"], np.float64), kind="stable")
         fields[key] = values[order]
     if "height_source" in payload:
         values = _as_1d_array(payload["height_source"], str)
         if values.size != timestamp_s.size:
             raise ValueError("sidecar field 'height_source' length mismatch")
-        order = np.argsort(_as_1d_array(payload["timestamp_s"], np.float64), kind="stable")
         fields["height_source"] = values[order]
     return timestamp_s, fields
 
