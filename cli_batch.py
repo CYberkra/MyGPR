@@ -90,13 +90,19 @@ def _parse_header_lines(lines: List[str]) -> Optional[Dict[str, float]]:
             val = float(m.group(0))
         except ValueError:
             return None
+        if not np.isfinite(val):
+            return None
         info[key] = val
     if not all(k in info for k in _HEADER_KEYS):
         return None
+    a_scan_length = int(info["Number of Samples"])
+    num_traces = int(info["Number of Traces"])
+    if a_scan_length <= 0 or num_traces <= 0:
+        return None
     return {
-        "a_scan_length": int(info["Number of Samples"]),
+        "a_scan_length": a_scan_length,
         "total_time_ns": float(info["Time windows (ns)"]),
-        "num_traces": int(info["Number of Traces"]),
+        "num_traces": num_traces,
         "trace_interval_m": float(info["Trace interval (m)"]),
     }
 

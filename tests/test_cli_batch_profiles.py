@@ -155,6 +155,28 @@ def test_load_gpr_csv_replaces_all_nonfinite_matrix_with_zero(tmp_path: Path):
     assert np.array_equal(data, np.zeros((2, 2), dtype=float))
 
 
+def test_detect_csv_header_ignores_nonfinite_and_nonpositive_shape(tmp_path: Path):
+    bad_inf = tmp_path / "bad_inf.csv"
+    bad_inf.write_text(
+        "Number of Samples = 1e999\n"
+        "Time windows (ns) = 120.0\n"
+        "Number of Traces = 8\n"
+        "Trace interval (m) = 1.0\n",
+        encoding="utf-8",
+    )
+    bad_shape = tmp_path / "bad_shape.csv"
+    bad_shape.write_text(
+        "Number of Samples = 0\n"
+        "Time windows (ns) = 120.0\n"
+        "Number of Traces = 8\n"
+        "Trace interval (m) = 1.0\n",
+        encoding="utf-8",
+    )
+
+    assert cli_batch.detect_csv_header(str(bad_inf)) is None
+    assert cli_batch.detect_csv_header(str(bad_shape)) is None
+
+
 def test_cli_jsonable_removes_nonfinite_values_for_strict_summary_json():
     payload = {
         "metric": np.float64(np.inf),
