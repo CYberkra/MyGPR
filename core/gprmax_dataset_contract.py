@@ -84,6 +84,8 @@ def load_gprmax_dataset_contract(path: str | Path) -> GprMaxDatasetPackage:
         data_shape=data.shape,
         scenario_id=scenario_id,
     )
+    header_info = dict(out_payload.get("header_info") or {})
+    header_info["ground_truth"] = ground_truth
 
     return GprMaxDatasetPackage(
         scenario_id=scenario_id,
@@ -93,7 +95,7 @@ def load_gprmax_dataset_contract(path: str | Path) -> GprMaxDatasetPackage:
         metadata_file=metadata_file,
         ground_truth_file=ground_truth_file,
         data=data,
-        header_info=dict(out_payload.get("header_info") or {}),
+        header_info=header_info,
         trace_metadata=out_payload.get("trace_metadata"),
         manifest=manifest,
         metadata=metadata,
