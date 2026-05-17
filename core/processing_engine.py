@@ -19,7 +19,7 @@ from core.gprpy_compat import (
     gprpy_local_window_l2_energy,
 )
 from core.runtime_warnings import build_runtime_warning, merge_runtime_warnings
-from core.scalar_utils import to_float
+from core.scalar_utils import to_float, to_int
 
 
 class ProcessingEngineError(RuntimeError):
@@ -320,7 +320,7 @@ def _run_legacy_adapter(
             (
                 output,
                 {
-                    "window": int(params.get("window", 11)),
+                    "window": to_int(params.get("window", 11), default=11),
                     "method": "agcGain",
                 },
             ),
@@ -394,7 +394,7 @@ def _apply_agc_gain(
     _low_energy_guard: bool = False,
     **kwargs,
 ) -> tuple[np.ndarray, list[dict[str, Any]]]:
-    requested_window = int(window)
+    requested_window = to_int(window, default=11)
     window = max(1, requested_window)
     warnings = []
     if requested_window < 1 or requested_window > data.shape[0]:
@@ -411,10 +411,8 @@ def _apply_agc_gain(
     use_low_energy_guard = bool(_low_energy_guard)
     time_step_s = kwargs.get("time_step_s")
     if use_low_energy_guard and time_step_s is not None:
-        try:
-            window_ns = float(time_step_s) * 1.0e9 * float(window)
-        except (TypeError, ValueError):
-            window_ns = None
+        step_s = to_float(time_step_s, default=0.0)
+        window_ns = step_s * 1.0e9 * float(window) if step_s > 0.0 else None
         if window_ns is not None and 0.0 < window_ns < AGC_MIN_WINDOW_NS:
             warnings.append(
                 build_runtime_warning(

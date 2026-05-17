@@ -56,6 +56,25 @@ def test_agc_gain_limits_low_energy_noise_amplification():
     assert "agc_low_energy_gain_guard" in codes
 
 
+def test_agc_gain_warning_path_accepts_numpy_scalar_runtime_params():
+    data = np.ones((16, 4), dtype=np.float32)
+
+    result, meta = run_processing_method(
+        data,
+        "agcGain",
+        {
+            "window": np.array([1]),
+            "_low_energy_guard": True,
+            "time_step_s": np.array([1.0e-12]),
+        },
+    )
+
+    warnings = meta.get("runtime_warnings", [])
+    codes = {item.get("code") for item in warnings}
+    assert result.shape == data.shape
+    assert "agc_window_too_short" in codes
+
+
 def test_running_average_preserves_shape_and_emits_warning_when_window_too_large():
     data = np.arange(60, dtype=np.float32).reshape(10, 6)
     result, meta = run_processing_method(data, "running_average_2D", {"ntraces": 999})
