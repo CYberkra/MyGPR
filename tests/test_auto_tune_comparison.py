@@ -29,6 +29,47 @@ def _build_drift_profile(samples: int = 96, traces: int = 28) -> np.ndarray:
     return data.astype(np.float32)
 
 
+def _truth_manifest() -> dict:
+    return {
+        "schema": "mygpr_gprmax_ground_truth_v1",
+        "scenario_id": "comparison_truth_demo",
+        "analysis_roi": {
+            "time_start_idx": 22,
+            "time_end_idx": 76,
+            "dist_start_idx": 4,
+            "dist_end_idx": 23,
+        },
+        "targets": [
+            {
+                "target_id": "ridge_01",
+                "type": "hyperbola",
+                "material": "metal",
+                "depth_m": 0.42,
+                "must_preserve": True,
+                "roi": {
+                    "time_start_idx": 29,
+                    "time_end_idx": 40,
+                    "dist_start_idx": 6,
+                    "dist_end_idx": 22,
+                },
+            }
+        ],
+        "background_rois": [
+            {
+                "time_start_idx": 10,
+                "time_end_idx": 20,
+                "dist_start_idx": 3,
+                "dist_end_idx": 9,
+            }
+        ],
+        "source_paths": {
+            "manifest_file": "synthetic_manifest.json",
+            "ground_truth_file": "ground_truth.yaml",
+        },
+        "conversion_warnings": ["synthetic warning"],
+    }
+
+
 def test_comparison_uses_current_ui_params_as_manual_baseline():
     raw = _build_drift_profile()
 
@@ -125,8 +166,34 @@ def test_comparison_summary_is_json_safe_and_excludes_arrays():
     assert summary["metric_delta"]["comparison_score"] == result.metric_delta[
         "comparison_score"
     ]
+    assert summary["ground_truth_info"]["enabled"] is False
     assert "parameter_domain" in summary["automatic"]["auto_tune_results"]["dewow"]
     assert "risk_flags" in summary["automatic"]["auto_tune_results"]["dewow"]
+
+
+def test_comparison_uses_header_ground_truth_metrics_and_summary_info():
+    raw = _build_drift_profile()
+    result = run_auto_tune_comparison(
+        raw,
+        header_info={"ground_truth": _truth_manifest()},
+        pipeline=["dewow"],
+        manual_params_by_method={"dewow": {"window": 1}},
+        search_mode="fast",
+    )
+
+    assert "truth_score" in result.manual.metrics
+    assert "truth_score" in result.automatic.metrics
+    assert "truth_score" in result.metric_delta
+
+    summary = to_summary_dict(result)
+    info = summary["ground_truth_info"]
+    assert info["enabled"] is True
+    assert info["scenario_id"] == "comparison_truth_demo"
+    assert info["target_count"] == 1
+    assert info["has_background_rois"] is True
+    assert info["targets"][0]["material"] == "metal"
+    assert info["source_paths"]["ground_truth_file"] == "ground_truth.yaml"
+    assert info["conversion_warnings"] == ["synthetic warning"]
 
 
 def test_comparison_summary_serializes_nonfinite_metrics_as_null():

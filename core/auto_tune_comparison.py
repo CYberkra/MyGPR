@@ -25,6 +25,7 @@ from core.quality_metrics import (
     compute_benchmark_metrics,
     ratio_fidelity,
 )
+from core.gprmax_truth_metrics import compute_ground_truth_metrics
 from core.scalar_utils import to_int
 
 
@@ -64,6 +65,7 @@ class AutoTuneComparisonRun:
     automatic: ComparisonCandidate
     metric_delta: dict[str, float]
     verdict: str
+    ground_truth_info: dict[str, Any]
 
 
 def run_auto_tune_comparison(
@@ -77,6 +79,7 @@ def run_auto_tune_comparison(
     roi_spec: dict[str, Any] | None = None,
     search_mode: str = "standard",
     display_spec: dict[str, Any] | None = None,
+    ground_truth: dict[str, Any] | None = None,
     progress_callback: ProgressCallback | None = None,
     cancel_checker: CancelChecker | None = None,
 ) -> AutoTuneComparisonRun:
@@ -84,6 +87,10 @@ def run_auto_tune_comparison(
     arr = np.asarray(data, dtype=np.float32)
     if arr.ndim != 2 or arr.size == 0:
         raise AutoTuneComparisonError("科研对比需要二维非空 B-scan 数据")
+    if ground_truth is None and isinstance(header_info, dict):
+        embedded_ground_truth = header_info.get("ground_truth")
+        if isinstance(embedded_ground_truth, dict):
+            ground_truth = embedded_ground_truth
 
     profile_key = baseline_profile_key or (
         None if pipeline is not None else "uav_gpr_experience_baseline_v1"
@@ -137,10 +144,16 @@ def run_auto_tune_comparison(
     )
 
     manual_candidate.metrics = _compute_candidate_metrics(
-        arr, manual_candidate.result, roi_info
+        arr,
+        manual_candidate.result,
+        roi_info,
+        ground_truth,
     )
     automatic_candidate.metrics = _compute_candidate_metrics(
-        arr, automatic_candidate.result, roi_info
+        arr,
+        automatic_candidate.result,
+        roi_info,
+        ground_truth,
     )
     metric_delta = _compute_metric_delta(
         manual_candidate.metrics, automatic_candidate.metrics
@@ -155,6 +168,7 @@ def run_auto_tune_comparison(
         automatic=automatic_candidate,
         metric_delta=metric_delta,
         verdict=_comparison_verdict(metric_delta),
+        ground_truth_info=_ground_truth_info(ground_truth),
     )
 
 
@@ -167,6 +181,7 @@ def to_summary_dict(result: AutoTuneComparisonRun) -> dict[str, Any]:
         "display_spec": _json_safe(result.display_spec),
         "verdict": result.verdict,
         "metric_delta": _json_safe(result.metric_delta),
+        "ground_truth_info": _json_safe(result.ground_truth_info),
         "manual": _candidate_summary(result.manual),
         "automatic": _candidate_summary(result.automatic),
     }
@@ -391,9 +406,20 @@ def _compute_candidate_metrics(
     raw: np.ndarray,
     processed: np.ndarray,
     roi_info: dict[str, Any],
+    ground_truth: dict[str, Any] | None,
 ) -> dict[str, float]:
     before, after = _slice_common_roi(raw, processed, roi_info.get("bounds"))
     metrics = compute_benchmark_metrics(before, after)
+    if ground_truth:
+        metrics.update(
+            compute_ground_truth_metrics(
+                raw,
+                processed,
+                ground_truth,
+                reference_roi=roi_info.get("bounds"),
+                processed_roi=roi_info.get("bounds"),
+            )
+        )
     metrics["comparison_score"] = _comparison_score(metrics)
     return {key: float(value) for key, value in metrics.items()}
 
@@ -535,6 +561,51 @@ def _candidate_summary(candidate: ComparisonCandidate) -> dict[str, Any]:
     }
 
 
+def _ground_truth_info(ground_truth: dict[str, Any] | None) -> dict[str, Any]:
+    if not ground_truth:
+        return {"enabled": False}
+    targets = ground_truth.get("targets", []) or []
+    preserved = [
+        target
+        for target in targets
+        if isinstance(target, dict) and target.get("must_preserve") is not False
+    ]
+    source_paths = ground_truth.get("source_paths") or {}
+    return {
+        "enabled": True,
+        "schema": ground_truth.get("schema"),
+        "scenario_id": ground_truth.get("scenario_id"),
+        "target_count": int(len(preserved)),
+        "has_background_rois": bool(ground_truth.get("background_rois")),
+        "analysis_roi": _json_safe(ground_truth.get("analysis_roi", {})),
+        "targets": _json_safe([_ground_truth_target_info(target) for target in preserved]),
+        "background_rois": _json_safe(ground_truth.get("background_rois", []) or []),
+        "source_paths": _json_safe(source_paths if isinstance(source_paths, dict) else {}),
+        "conversion_warnings": _json_safe(
+            ground_truth.get("conversion_warnings", []) or []
+        ),
+    }
+
+
+def _ground_truth_target_info(target: dict[str, Any]) -> dict[str, Any]:
+    summary: dict[str, Any] = {}
+    for key in (
+        "id",
+        "target_id",
+        "type",
+        "material",
+        "depth_m",
+        "center_x_m",
+        "center_y_m",
+        "radius_m",
+        "must_preserve",
+        "roi",
+    ):
+        if key in target:
+            summary[key] = target[key]
+    return summary
+
+
 def _default_display_spec() -> dict[str, Any]:
     return {
         "lock_color_scale": True,
@@ -552,14 +623,14 @@ def _json_safe(value: Any) -> Any:
         return _json_safe(value.tolist())
     if isinstance(value, np.generic):
         return _json_safe(value.item())
+    if value is None or isinstance(value, (str, bool)):
+        return value
     if isinstance(value, float):
         if not np.isfinite(value):
             return None
         return float(value)
     if isinstance(value, int):
         return int(value)
-    if value is None or isinstance(value, (str, bool)):
-        return value
     return str(value)
 
 
