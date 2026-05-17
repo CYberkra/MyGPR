@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from PythonModule.motion_compensation_attitude import method_motion_compensation_attitude  # type: ignore[import]
 from core.quality_metrics import footprint_rmse
@@ -166,6 +167,16 @@ def test_attitude_compensation_skips_missing_imu_fields():
     assert "trace_metadata_updates" not in meta
     assert np.array_equal(corrected, data)
     assert corrected is not data
+
+
+def test_attitude_compensation_rejects_non_finite_config_params():
+    data = np.ones((8, 4), dtype=np.float32)
+
+    with pytest.raises(ValueError, match="apc_offset_x_m"):
+        method_motion_compensation_attitude(data, apc_offset_x_m=np.nan)
+
+    with pytest.raises(ValueError, match="max_abs_tilt_deg"):
+        method_motion_compensation_attitude(data, max_abs_tilt_deg=np.inf)
 
 
 def test_attitude_compensation_clamps_excessive_tilt_with_warning_and_provenance():

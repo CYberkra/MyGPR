@@ -20,6 +20,23 @@ import numpy as np
 REQUIRED_FIELDS = ("roll_deg", "pitch_deg", "yaw_deg", "local_x_m", "local_y_m")
 
 
+def _finite_float(value: object, name: str) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} 必须是有限数值") from None
+    if not np.isfinite(parsed):
+        raise ValueError(f"{name} 必须是有限数值")
+    return parsed
+
+
+def _positive_float(value: object, name: str) -> float:
+    parsed = _finite_float(value, name)
+    if parsed <= 0:
+        raise ValueError(f"{name} 必须为正数")
+    return parsed
+
+
 def _extract_numeric_field(
     trace_metadata: dict,
     key: str,
@@ -68,12 +85,16 @@ def method_motion_compensation_attitude(
 
     amplitude_out = np.array(arr, copy=True)
     trace_count = int(arr.shape[1])
+    apc_offset_x_m = _finite_float(apc_offset_x_m, "apc_offset_x_m")
+    apc_offset_y_m = _finite_float(apc_offset_y_m, "apc_offset_y_m")
+    apc_offset_z_m = _finite_float(apc_offset_z_m, "apc_offset_z_m")
+    max_abs_tilt_deg = _positive_float(max_abs_tilt_deg, "max_abs_tilt_deg")
     meta: dict[str, object] = {
         "method": "motion_compensation_attitude",
-        "apc_offset_x_m": float(apc_offset_x_m),
-        "apc_offset_y_m": float(apc_offset_y_m),
-        "apc_offset_z_m": float(apc_offset_z_m),
-        "max_abs_tilt_deg": float(max_abs_tilt_deg),
+        "apc_offset_x_m": apc_offset_x_m,
+        "apc_offset_y_m": apc_offset_y_m,
+        "apc_offset_z_m": apc_offset_z_m,
+        "max_abs_tilt_deg": max_abs_tilt_deg,
         "trace_count": trace_count,
         "provenance": {
             "geometry_model": "yaw_rotated_tilt_plus_apc_offset_v1",
@@ -81,9 +102,6 @@ def method_motion_compensation_attitude(
             "required_fields": list(REQUIRED_FIELDS),
         },
     }
-
-    if max_abs_tilt_deg <= 0:
-        raise ValueError("max_abs_tilt_deg 必须为正数")
 
     if trace_metadata is None:
         meta["skipped"] = True
