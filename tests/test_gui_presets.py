@@ -447,6 +447,54 @@ def test_auto_tune_truth_validation_incomplete_ground_truth_info_is_warning():
         app.processEvents()
 
 
+def test_auto_tune_truth_validation_uses_complete_comparison_ground_truth_info():
+    app = _get_app()
+    win = GPRGuiQt()
+    try:
+        win.page_auto_tune.show_comparison_result(
+            {
+                "verdict": "auto_better",
+                "ground_truth_info": {
+                    "enabled": True,
+                    "scenario_id": "pipe_demo",
+                    "targets": [
+                        {
+                            "target_id": "target_0",
+                            "type": "pipe",
+                            "material": "metal",
+                            "roi": {
+                                "time_start_idx": 20,
+                                "time_end_idx": 31,
+                                "dist_start_idx": 5,
+                                "dist_end_idx": 9,
+                            },
+                        }
+                    ],
+                    "background_rois": [
+                        {
+                            "time_start_idx": 0,
+                            "time_end_idx": 12,
+                            "dist_start_idx": 0,
+                            "dist_end_idx": 4,
+                        }
+                    ],
+                },
+                "manual": {"pipeline": [], "params_by_method": {}, "metrics": {}},
+                "automatic": {"pipeline": [], "params_by_method": {}, "metrics": {}},
+                "metric_delta": {},
+            }
+        )
+
+        assert win.page_auto_tune.truth_status_label.text() == "真值验证已启用。"
+        assert win.page_auto_tune.truth_scenario_label.text() == "pipe_demo"
+        assert "type=pipe" in win.page_auto_tune.truth_target_label.text()
+        assert "trace=5-8" in win.page_auto_tune.truth_target_roi_label.text()
+        assert "time=[0,12)" in win.page_auto_tune.truth_background_roi_label.text()
+    finally:
+        win.close()
+        app.processEvents()
+
+
 def test_phase2_tabs_expose_prioritized_group_hierarchy_and_bridge():
     app = _get_app()
     win = GPRGuiQt()
