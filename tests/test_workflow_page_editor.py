@@ -14,7 +14,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import QEvent, QPoint, QPointF, QSettings, Qt
 from PyQt6.QtGui import QWheelEvent
-from PyQt6.QtWidgets import QApplication, QAbstractSpinBox, QCheckBox, QComboBox, QLineEdit, QSlider, QSplitter, QToolButton
+from PyQt6.QtWidgets import QApplication, QAbstractSpinBox, QCheckBox, QComboBox, QLabel, QLineEdit, QSlider, QSplitter, QToolButton
 
 from core.app_paths import get_workflow_templates_dir
 from core.workflow_data import WORKFLOW_STAGE_BY_ID, WorkflowConfig, WorkflowConfigManager, WorkflowMethod, build_default_workflow_config
@@ -804,6 +804,26 @@ def test_workflow_node_card_numeric_params_expose_slider():
         assert bool(slider.property("workflowWheelGuard"))
     finally:
         card.close()
+        app.processEvents()
+
+
+def test_param_row_tooltip_keeps_full_label_when_help_text_exists():
+    app = _get_app()
+    from ui.workflow_canvas_cards import ParamRowWidget
+
+    row = ParamRowWidget(
+        "very long parameter label for tooltip visibility",
+        QLineEdit("demo"),
+        tooltip="domain-specific help",
+    )
+    try:
+        labels = [child for child in row.findChildren(QLabel) if child.objectName() == "paramName"]
+        assert labels
+        tooltip = labels[0].toolTip()
+        assert "very long parameter label" in tooltip
+        assert "domain-specific help" in tooltip
+    finally:
+        row.close()
         app.processEvents()
 
 

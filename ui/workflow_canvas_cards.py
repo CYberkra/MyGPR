@@ -157,7 +157,8 @@ class ParamRowWidget(QWidget):
         name.setMinimumWidth(80)
         name.setMaximumWidth(150)
         name.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        name.setToolTip(str(label))
+        label_tooltip = str(label)
+        name.setToolTip(label_tooltip)
 
         top_row = QHBoxLayout()
         top_row.setContentsMargins(0, 0, 0, 0)
@@ -190,8 +191,9 @@ class ParamRowWidget(QWidget):
             layout.addLayout(top_row)
 
         if tooltip:
+            combined_tooltip = f"{label_tooltip}\n{tooltip}" if tooltip != label_tooltip else tooltip
             self.setToolTip(tooltip)
-            name.setToolTip(tooltip)
+            name.setToolTip(combined_tooltip)
             control.setToolTip(tooltip)
             if spin is not None:
                 spin.setToolTip(tooltip)
