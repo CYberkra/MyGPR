@@ -441,7 +441,10 @@ def edge_preservation(before: np.ndarray, after: np.ndarray) -> float:
 
 def median_first_break(indices: Iterable[int]) -> int:
     """Robust aggregate for detected first-break indices."""
-    arr = np.asarray(list(indices), dtype=np.float64)
+    if isinstance(indices, np.ndarray):
+        arr = indices.astype(np.float64, copy=False).reshape(-1)
+    else:
+        arr = np.asarray(list(indices), dtype=np.float64)
     if arr.size == 0:
         return 0
     return int(np.median(arr))

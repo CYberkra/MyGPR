@@ -16,6 +16,7 @@ from core.quality_metrics import (
     extract_roi_and_context,
     horizontal_coherence,
     local_saliency_preservation,
+    median_first_break,
     low_freq_energy_ratio,
     pre_zero_energy_ratio,
     ratio_fidelity,
@@ -183,3 +184,9 @@ def test_extract_roi_and_context_replaces_nonfinite_input_values():
     assert np.isfinite(result["roi_data"]).all()
     assert result["roi_data"][0, 0] == 0.0
     assert result["roi_data"][1, 1] == 0.0
+
+
+def test_median_first_break_accepts_numpy_array_without_list_conversion():
+    indices = np.array([8, 4, 6], dtype=np.int32)
+
+    assert median_first_break(indices) == 6
