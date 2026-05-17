@@ -389,6 +389,23 @@ def test_method_hilbert_envelope_normalize_and_log_compress():
     assert meta["log_compress"] is True
 
 
+def test_method_hilbert_envelope_parses_string_bools_and_rejects_bad_eps():
+    raw = np.ones((8, 2), dtype=np.float32)
+
+    result, meta = method_hilbert_envelope(
+        raw,
+        normalize="false",
+        log_compress="true",
+    )
+
+    assert result.shape == raw.shape
+    assert meta["normalize"] is False
+    assert meta["log_compress"] is True
+
+    with pytest.raises(ValueError, match="eps"):
+        method_hilbert_envelope(raw, eps=np.nan)
+
+
 def test_method_hankel_svd_keeps_contract_and_ignores_legacy_batch_kwarg():
     raw = np.arange(30, dtype=np.float32).reshape(10, 3)
 

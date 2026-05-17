@@ -10,6 +10,23 @@ import numpy as np
 from scipy.signal import hilbert
 
 
+def _finite_float(value: Any, name: str) -> float:
+    resolved = float(value)
+    if not np.isfinite(resolved):
+        raise ValueError(f"{name} 必须是有限数值")
+    return resolved
+
+
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"1", "true", "yes", "y", "on"}:
+            return True
+        if text in {"0", "false", "no", "n", "off", ""}:
+            return False
+    return bool(value)
+
+
 def method_hilbert_envelope(
     data: np.ndarray,
     normalize: bool = False,
@@ -25,18 +42,20 @@ def method_hilbert_envelope(
     if arr.size == 0:
         raise ValueError("输入数据为空")
 
-    safe_eps = max(float(eps), 1.0e-12)
+    normalize_enabled = _as_bool(normalize)
+    log_compress_enabled = _as_bool(log_compress)
+    safe_eps = max(_finite_float(eps, "eps"), 1.0e-12)
     envelope = np.abs(hilbert(arr.astype(np.float64), axis=0))
     peak_before_norm = float(np.max(envelope)) if envelope.size else 0.0
 
-    if bool(normalize):
+    if normalize_enabled:
         envelope = envelope / max(peak_before_norm, safe_eps)
-    if bool(log_compress):
+    if log_compress_enabled:
         envelope = np.log1p(envelope)
 
     return envelope.astype(np.float32, copy=False), {
         "method": "hilbert_envelope",
-        "normalize": bool(normalize),
-        "log_compress": bool(log_compress),
+        "normalize": normalize_enabled,
+        "log_compress": log_compress_enabled,
         "peak_before_norm": peak_before_norm,
     }
