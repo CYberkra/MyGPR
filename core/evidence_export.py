@@ -298,7 +298,8 @@ def _write_motion_evidence_artifacts(
                 data,
                 header,
                 metadata,
-                preview_lod="medium",
+                max_preview_traces=240,
+                max_preview_samples=160,
             )
             if payload is not None:
                 rel = Path("motion") / name

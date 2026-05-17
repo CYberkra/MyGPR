@@ -1,0 +1,28 @@
+{
+  "version": "1.0",
+  "description": "Synthetic UAV-GPR motion compensation demo package.",
+  "jobs": [
+    {
+      "id": "uav_gpr_motion_demo_v1",
+      "input": "sample_data/uav_gpr_motion_demo_v1/main.csv",
+      "rtk_path": "sample_data/uav_gpr_motion_demo_v1/rtk.csv",
+      "imu_path": "sample_data/uav_gpr_motion_demo_v1/imu.csv",
+      "altimeter_path": "sample_data/uav_gpr_motion_demo_v1/altimeter.csv",
+      "recommended_profile": "motion_compensation_v2",
+      "steps": [
+        {
+          "method": "motion_compensation_v2",
+          "params": {
+            "height_source": "auto",
+            "height_reference_mode": "mean",
+            "max_shift_samples": 8,
+            "max_shift_ns": 12.0,
+            "max_amplitude_scale": 1.8,
+            "resample_spacing_m": 0.34
+          }
+        }
+      ]
+    }
+  ],
+  "output_dir": "output/uav_gpr_motion_demo_v1"
+}

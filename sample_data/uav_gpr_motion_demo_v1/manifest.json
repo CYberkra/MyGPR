@@ -1,0 +1,36 @@
+{
+  "schema": "uav_gpr_motion_demo_v1",
+  "description": "Synthetic UAV-GPR 3D curtain and motion compensation demonstration dataset.",
+  "data_file": "main.csv",
+  "trace_timestamps_file": "trace_timestamps.csv",
+  "rtk_file": "rtk.csv",
+  "imu_file": "imu.csv",
+  "altimeter_file": "altimeter.csv",
+  "metadata_file": "metadata.json",
+  "expected_target": {
+    "type": "pipe_like_hyperbola",
+    "center_trace": 98.45,
+    "apex_sample": 67.0,
+    "sample_window": [
+      58,
+      91
+    ],
+    "trace_window": [
+      70,
+      130
+    ]
+  },
+  "recommended_workflow": "motion_compensation_v2",
+  "recommended_params": {
+    "height_source": "auto",
+    "height_reference_mode": "mean",
+    "max_shift_samples": 8,
+    "max_shift_ns": 12.0,
+    "max_amplitude_scale": 1.8,
+    "resample_spacing_m": 0.34
+  },
+  "notes": [
+    "Synthetic only; not field evidence.",
+    "Designed for MyGPR 3D preview, motion_compensation_v2 and Evidence export smoke checks."
+  ]
+}

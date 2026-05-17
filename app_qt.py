@@ -3444,24 +3444,18 @@ class GPRGuiQt(QMainWindow):
         header_info,
         trace_metadata,
     ) -> dict | None:
-        """Build cached LOD variants for one 3D preview layer."""
+        """Build one lightweight 3D preview payload for a layer."""
         if data is None:
             return None
         try:
-            payloads = {}
-            for lod in ("low", "medium", "high", "auto"):
-                payload = build_airborne_georeference_3d_payload(
-                    data,
-                    header_info,
-                    trace_metadata,
-                    selected_trace_index=self._selected_trace_index,
-                    preview_lod=lod,
-                )
-                if payload is not None:
-                    payloads[lod] = payload
-            if not payloads:
-                return None
-            return {"payloads_by_lod": payloads}
+            return build_airborne_georeference_3d_payload(
+                data,
+                header_info,
+                trace_metadata,
+                selected_trace_index=self._selected_trace_index,
+                max_preview_traces=240,
+                max_preview_samples=160,
+            )
         except Exception as exc:
             logger.warning("Failed to build airborne 3D georeference payload: %s", exc)
             return None
@@ -4999,16 +4993,23 @@ class GPRGuiQt(QMainWindow):
         payload = self._build_airborne_georeference_3d_plot_payload()
         if isinstance(payload, dict) and "current" in payload:
             current_entry = payload.get("current") or {}
-            payloads_by_lod = current_entry.get("payloads_by_lod") if isinstance(current_entry, dict) else None
-            if isinstance(payloads_by_lod, dict):
-                payload = (
-                    payloads_by_lod.get("auto")
-                    or payloads_by_lod.get("high")
-                    or payloads_by_lod.get("medium")
-                    or payloads_by_lod.get("low")
-                )
+            if isinstance(current_entry, dict) and "preview" in current_entry:
+                payload = current_entry
             else:
-                payload = None
+                payloads_by_lod = (
+                    current_entry.get("payloads_by_lod")
+                    if isinstance(current_entry, dict)
+                    else None
+                )
+                if isinstance(payloads_by_lod, dict):
+                    payload = (
+                        payloads_by_lod.get("auto")
+                        or payloads_by_lod.get("high")
+                        or payloads_by_lod.get("medium")
+                        or payloads_by_lod.get("low")
+                    )
+                else:
+                    payload = None
         if not payload:
             QMessageBox.information(
                 self, "无可导出三维预览", "请先导入航空数据并确认已有轨迹/高度元数据。"

@@ -1,0 +1,24 @@
+{
+  "schema": "uav_gpr_motion_demo_v1_metadata",
+  "samples": 160,
+  "traces": 180,
+  "total_time_ns": 95.0,
+  "air_wave_speed_m_per_ns": 0.299792458,
+  "reference_height_m": 0.12554740527647096,
+  "height_agl_min_m": 0.08,
+  "height_agl_max_m": 0.16,
+  "max_abs_time_shift_samples": 0.5085649822563079,
+  "expected_target": {
+    "type": "pipe_like_hyperbola",
+    "center_trace": 98.45,
+    "apex_sample": 67.0,
+    "sample_window": [
+      58,
+      91
+    ],
+    "trace_window": [
+      70,
+      130
+    ]
+  }
+}

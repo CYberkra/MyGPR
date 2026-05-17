@@ -14,8 +14,8 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QFrame,
     QStackedWidget,
-    QCheckBox,
-    QComboBox,
+    QDialog,
+    QToolButton,
 )
 from PyQt6.QtCore import QTimer
 from qfluentwidgets import PushButton, FluentIcon, SegmentedWidget
@@ -39,8 +39,8 @@ class QualityLogPage(QWidget):
         self._trajectory_trace_indices = np.array([], dtype=np.int32)
         self._selected_trace_index = None
         self._georef3d_bundle = {"raw": None, "current": None, "diff": None}
-        self._georef3d_render_cache = {}
-        self._georef3d_interacting = False
+        self._georef3d_view_state = None
+        self._georef3d_force_default_view = True
         self._georef3d_redraw_timer = QTimer(self)
         self._georef3d_redraw_timer.setSingleShot(True)
         self._georef3d_redraw_timer.timeout.connect(self._redraw_airborne_georeference_3d)
@@ -285,6 +285,7 @@ class QualityLogPage(QWidget):
         self.visual_stack.addWidget(trajectory_panel)
 
         georef3d_panel = QWidget()
+        self._georef3d_overlay_parent = georef3d_panel
         georef3d_panel_layout = QVBoxLayout(georef3d_panel)
         georef3d_panel_layout.setContentsMargins(0, 0, 0, 0)
         georef3d_panel_layout.setSpacing(8)
@@ -294,42 +295,52 @@ class QualityLogPage(QWidget):
         georef3d_hint.setWordWrap(True)
         georef3d_hint.setProperty("class", "hintText")
         georef3d_panel_layout.addWidget(georef3d_hint)
-        georef3d_controls = QWidget()
-        georef3d_controls_layout = QHBoxLayout(georef3d_controls)
-        georef3d_controls_layout.setContentsMargins(0, 0, 0, 0)
-        georef3d_controls_layout.setSpacing(8)
-        self.chk_georef3d_raw = QCheckBox("原始3D")
-        self.chk_georef3d_current = QCheckBox("当前3D")
-        self.chk_georef3d_bscan = QCheckBox("B-scan")
-        self.chk_georef3d_diff = QCheckBox("差异")
-        self.chk_georef3d_current.setChecked(True)
-        self.chk_georef3d_bscan.setChecked(True)
-        self.cmb_georef3d_lod = QComboBox()
-        self.cmb_georef3d_lod.addItems(["auto", "low", "medium", "high"])
-        self.cmb_georef3d_lod.setCurrentText("auto")
-        self.cmb_georef3d_lod.setToolTip("预览细节级别；交互拖拽时自动临时降为 low。")
-        self.georef3d_status = QLabel("LOD: auto")
-        self.georef3d_status.setProperty("class", "hintText")
-        for widget in [
-            self.chk_georef3d_raw,
-            self.chk_georef3d_current,
-            self.chk_georef3d_bscan,
-            self.chk_georef3d_diff,
-        ]:
-            widget.toggled.connect(self._schedule_georef3d_redraw)
-            georef3d_controls_layout.addWidget(widget)
-        georef3d_controls_layout.addWidget(QLabel("LOD"))
-        georef3d_controls_layout.addWidget(self.cmb_georef3d_lod)
-        georef3d_controls_layout.addWidget(self.georef3d_status)
-        georef3d_controls_layout.addStretch(1)
-        self.cmb_georef3d_lod.currentTextChanged.connect(self._schedule_georef3d_redraw)
-        georef3d_panel_layout.addWidget(georef3d_controls)
         self.georef3d_fig = Figure(figsize=(6.2, 4.8), dpi=100)
         self.georef3d_canvas = FigureCanvas(self.georef3d_fig)
         self.georef3d_ax = self.georef3d_fig.add_subplot(111, projection="3d")
+        self.btn_georef3d_raw = self._create_georef3d_overlay_button(
+            "👁 原始",
+            "显示原始三维航迹与剖面",
+            checked=False,
+        )
+        self.btn_georef3d_current = self._create_georef3d_overlay_button(
+            "👁 当前",
+            "显示当前/处理后三维航迹与剖面",
+            checked=True,
+        )
+        self.btn_georef3d_bscan = self._create_georef3d_overlay_button(
+            "👁 B-scan",
+            "显示或隐藏三维 B-scan 剖面带",
+            checked=True,
+        )
+        self.btn_georef3d_diff = self._create_georef3d_overlay_button(
+            "👁 差异",
+            "显示当前减原始的差异剖面",
+            checked=False,
+        )
+        self.btn_georef3d_reset_view = self._create_georef3d_overlay_button(
+            "↺",
+            "重置三维视角",
+            checkable=False,
+        )
+        self.btn_georef3d_expand = self._create_georef3d_overlay_button(
+            "⛶",
+            "展开三维预览",
+            checkable=False,
+        )
+        for button in [
+            self.btn_georef3d_raw,
+            self.btn_georef3d_current,
+            self.btn_georef3d_bscan,
+            self.btn_georef3d_diff,
+        ]:
+            button.toggled.connect(self._schedule_georef3d_redraw)
+        self.btn_georef3d_reset_view.clicked.connect(self._reset_georef3d_view)
+        self.btn_georef3d_expand.clicked.connect(self._open_georef3d_dialog)
         self.georef3d_canvas.mpl_connect("button_press_event", self._on_georef3d_interaction_start)
         self.georef3d_canvas.mpl_connect("button_release_event", self._on_georef3d_interaction_end)
         georef3d_panel_layout.addWidget(self.georef3d_canvas)
+        self._position_georef3d_overlay_controls()
         self.visual_stack.addWidget(georef3d_panel)
 
         self.visual_segmented.setCurrentItem("qc_chart")
@@ -377,6 +388,85 @@ class QualityLogPage(QWidget):
         self.set_airborne_qc_visualization(None)
         self.set_airborne_trajectory_visualization(None)
         self.set_airborne_georeference_3d_visualization(None)
+
+    def resizeEvent(self, event):
+        """页面尺寸变化时更新三维预览图内控制位置。"""
+        super().resizeEvent(event)
+        self._position_georef3d_overlay_controls()
+
+    def _create_georef3d_overlay_button(
+        self,
+        text: str,
+        tooltip: str,
+        *,
+        checked: bool = False,
+        checkable: bool = True,
+    ) -> QToolButton:
+        """创建画布内轻量控制按钮。"""
+        parent = getattr(self, "_georef3d_overlay_parent", self.georef3d_canvas)
+        button = QToolButton(parent)
+        button.setText(text)
+        button.setToolTip(tooltip)
+        button.setAutoRaise(True)
+        button.setCheckable(checkable)
+        if checkable:
+            button.setChecked(checked)
+        button.setMinimumHeight(24)
+        button.setStyleSheet(
+            "QToolButton {"
+            " background: rgba(255, 255, 255, 210);"
+            " border: 1px solid rgba(148, 163, 184, 160);"
+            " border-radius: 4px;"
+            " padding: 2px 7px;"
+            " color: #0f172a;"
+            "}"
+            "QToolButton:checked {"
+            " background: rgba(219, 234, 254, 230);"
+            " border-color: rgba(37, 99, 235, 180);"
+            "}"
+        )
+        button.adjustSize()
+        button.show()
+        button.raise_()
+        return button
+
+    def _position_georef3d_overlay_controls(self) -> None:
+        """把三维预览控制按钮放在画布内角落，避免占用主布局空间。"""
+        if not hasattr(self, "georef3d_canvas"):
+            return
+        canvas = self.georef3d_canvas
+        parent = getattr(self, "_georef3d_overlay_parent", canvas)
+        origin = canvas.mapTo(parent, canvas.rect().topLeft())
+        margin = 8
+        gap = 5
+        y = origin.y() + margin
+        x = origin.x() + margin
+        for button in [
+            getattr(self, "btn_georef3d_raw", None),
+            getattr(self, "btn_georef3d_current", None),
+        ]:
+            if button is None:
+                continue
+            button.adjustSize()
+            button.move(x, y)
+            button.raise_()
+            x += button.width() + gap
+
+        right_buttons = [
+            getattr(self, "btn_georef3d_bscan", None),
+            getattr(self, "btn_georef3d_diff", None),
+            getattr(self, "btn_georef3d_reset_view", None),
+            getattr(self, "btn_georef3d_expand", None),
+        ]
+        active = [button for button in right_buttons if button is not None]
+        for button in active:
+            button.adjustSize()
+        total_width = sum(button.width() for button in active) + gap * max(len(active) - 1, 0)
+        x = max(origin.x() + margin, origin.x() + canvas.width() - total_width - margin)
+        for button in active:
+            button.move(x, y)
+            button.raise_()
+            x += button.width() + gap
 
     def _wrap_text_panel(self, title: str, hint: str, text_edit: QTextEdit) -> QWidget:
         """包装摘要文本面板。"""
@@ -521,6 +611,10 @@ class QualityLogPage(QWidget):
 
     def release_plot_resources(self) -> None:
         """窗口关闭时显式释放 Matplotlib 图表资源。"""
+        try:
+            self._georef3d_redraw_timer.stop()
+        except Exception:
+            pass
         for fig_name, canvas_name in [
             ("qc_fig", "qc_canvas"),
             ("trajectory_fig", "trajectory_canvas"),
@@ -808,33 +902,70 @@ class QualityLogPage(QWidget):
             }
         else:
             self._georef3d_bundle = {"raw": None, "current": payload, "diff": None}
-        self._georef3d_render_cache.clear()
+        self._georef3d_force_default_view = self._georef3d_view_state is None
         self._schedule_georef3d_redraw()
 
     def _schedule_georef3d_redraw(self, *_args):
-        """Debounce 3D redraws caused by checkbox/LOD changes."""
+        """Debounce 3D redraws caused by layer changes."""
         if hasattr(self, "_georef3d_redraw_timer"):
             self._georef3d_redraw_timer.start(120)
 
     def _on_georef3d_interaction_start(self, _event):
-        self._georef3d_interacting = True
-        self._schedule_georef3d_redraw()
+        """记录交互前视角，不在鼠标按下时触发重绘。"""
+        self._georef3d_view_state = self._capture_georef3d_view_state()
 
     def _on_georef3d_interaction_end(self, _event):
-        self._georef3d_interacting = False
+        """记录交互后视角，不自动恢复默认视角。"""
+        self._georef3d_view_state = self._capture_georef3d_view_state()
+
+    def _capture_georef3d_view_state(self) -> dict | None:
+        """Capture current 3D view so redraws do not reset user navigation."""
+        ax = getattr(self, "georef3d_ax", None)
+        if ax is None or not hasattr(ax, "get_xlim3d"):
+            return None
+        try:
+            return {
+                "elev": float(ax.elev),
+                "azim": float(ax.azim),
+                "xlim": tuple(float(v) for v in ax.get_xlim3d()),
+                "ylim": tuple(float(v) for v in ax.get_ylim3d()),
+                "zlim": tuple(float(v) for v in ax.get_zlim3d()),
+            }
+        except Exception:
+            return None
+
+    def _restore_georef3d_view_state(self, ax, state: dict | None) -> None:
+        """Restore a captured 3D view, or apply the default view once."""
+        if state:
+            try:
+                ax.view_init(elev=float(state["elev"]), azim=float(state["azim"]))
+                ax.set_xlim3d(*state["xlim"])
+                ax.set_ylim3d(*state["ylim"])
+                ax.set_zlim3d(*state["zlim"])
+                return
+            except Exception:
+                pass
+        if self._georef3d_force_default_view:
+            ax.view_init(elev=24, azim=-58)
+            self._georef3d_force_default_view = False
+
+    def _reset_georef3d_view(self) -> None:
+        """用户显式请求时才恢复默认三维视角。"""
+        self._georef3d_view_state = None
+        self._georef3d_force_default_view = True
         self._schedule_georef3d_redraw()
 
     def _select_georef3d_payload(self, entry):
-        """Select a payload for current LOD from a payload or LOD map."""
+        """Select the cached preview payload, with compatibility for older LOD maps."""
         if not entry:
             return None
-        requested_lod = "low" if self._georef3d_interacting else self.cmb_georef3d_lod.currentText()
         if isinstance(entry, dict) and "payloads_by_lod" in entry:
             payloads = entry.get("payloads_by_lod") or {}
             return (
-                payloads.get(requested_lod)
-                or payloads.get("auto")
+                payloads.get("auto")
                 or payloads.get("medium")
+                or payloads.get("high")
+                or payloads.get("low")
                 or next(iter(payloads.values()), None)
             )
         return entry
@@ -848,7 +979,7 @@ class QualityLogPage(QWidget):
         if curtain_x.size == 0 or curtain_x.shape != curtain_y.shape or curtain_x.shape != curtain_z.shape:
             return
 
-        show_bscan = self.chk_georef3d_bscan.isChecked()
+        show_bscan = self.btn_georef3d_bscan.isChecked()
         if show_bscan and amplitude.size and amplitude.shape == curtain_x.shape:
             finite_amp = amplitude[np.isfinite(amplitude)]
             amp_min = float(preview.get("amplitude_min", float(np.min(finite_amp)) if finite_amp.size else 0.0))
@@ -898,27 +1029,202 @@ class QualityLogPage(QWidget):
                 ax.scatter([x_m[0]], [y_m[0]], [airborne_z_m[0]], color=palette["line_success"], s=30)
                 ax.scatter([x_m[-1]], [y_m[-1]], [airborne_z_m[-1]], color=palette["line_error"], s=30)
 
+    def _visible_georef3d_entries(self) -> list[tuple[str, str, dict]]:
+        """Return visible 3D layer payloads without rebuilding preview data."""
+        bundle = self._georef3d_bundle or {}
+        entries: list[tuple[str, str, dict]] = []
+        if self.btn_georef3d_raw.isChecked():
+            payload = self._select_georef3d_payload(bundle.get("raw"))
+            if payload:
+                entries.append(("原始3D", "raw", payload))
+        if self.btn_georef3d_current.isChecked():
+            payload = self._select_georef3d_payload(bundle.get("current"))
+            if payload:
+                entries.append(("当前3D", "current", payload))
+        if self.btn_georef3d_diff.isChecked():
+            payload = self._select_georef3d_payload(bundle.get("diff"))
+            if payload:
+                entries.append(("差异", "diff", payload))
+        return entries
+
+    def _open_georef3d_dialog(self) -> None:
+        """打开独立大窗口预览；优先 OpenGL，失败时回退 Matplotlib。"""
+        entries = self._visible_georef3d_entries()
+        if not entries:
+            return
+        try:
+            self._open_georef3d_pyqtgraph_dialog(entries)
+        except Exception:
+            self._open_georef3d_matplotlib_dialog(entries)
+
+    def _open_georef3d_pyqtgraph_dialog(self, entries: list[tuple[str, str, dict]]) -> None:
+        """Use pyqtgraph OpenGL for a smoother expanded 3D preview when available."""
+        import pyqtgraph.opengl as gl
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("UAV-GPR 三维运动补偿预览")
+        dialog.resize(1100, 760)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(0, 0, 0, 0)
+        view = gl.GLViewWidget()
+        view.setBackgroundColor("w")
+        layout.addWidget(view)
+
+        all_points: list[np.ndarray] = []
+        for label, kind, payload in entries:
+            self._add_georef3d_payload_to_gl_view(view, payload, label=label, kind=kind)
+            x_m = np.asarray(payload.get("local_x_m", []), dtype=np.float64)
+            y_m = np.asarray(payload.get("local_y_m", []), dtype=np.float64)
+            z_m = np.asarray(payload.get("airborne_z_m", []), dtype=np.float64)
+            if x_m.size and y_m.size and z_m.size:
+                all_points.append(np.column_stack([x_m, y_m, z_m]))
+
+        if all_points:
+            points = np.vstack(all_points)
+            center = np.nanmean(points, axis=0)
+            span = np.nanmax(points, axis=0) - np.nanmin(points, axis=0)
+            distance = float(max(np.nanmax(span) * 2.4, 8.0))
+            view.opts["center"].setX(float(center[0]))
+            view.opts["center"].setY(float(center[1]))
+            view.opts["center"].setZ(float(center[2]))
+            view.setCameraPosition(distance=distance, elevation=22, azimuth=-58)
+
+        dialog.exec()
+
+    def _add_georef3d_payload_to_gl_view(self, view, payload: dict, *, label: str, kind: str) -> None:
+        """Add one trajectory/curtain payload to a pyqtgraph GLViewWidget."""
+        import pyqtgraph.opengl as gl
+
+        x_m = np.asarray(payload.get("local_x_m", []), dtype=np.float64)
+        y_m = np.asarray(payload.get("local_y_m", []), dtype=np.float64)
+        z_m = np.asarray(payload.get("airborne_z_m", []), dtype=np.float64)
+        if x_m.size and y_m.size and z_m.size:
+            pos = np.column_stack([x_m, y_m, z_m]).astype(np.float32)
+            color = {
+                "raw": (1.0, 0.45, 0.0, 1.0),
+                "current": (0.0, 0.55, 0.62, 1.0),
+                "diff": (0.37, 0.29, 0.84, 1.0),
+            }.get(kind, (0.1, 0.1, 0.1, 1.0))
+            view.addItem(gl.GLLinePlotItem(pos=pos, color=color, width=2.0, antialias=True))
+            endpoints = np.vstack([pos[0], pos[-1]])
+            endpoint_colors = np.array(
+                [[0.0, 0.6, 0.25, 1.0], [0.9, 0.1, 0.1, 1.0]],
+                dtype=np.float32,
+            )
+            view.addItem(gl.GLScatterPlotItem(pos=endpoints, color=endpoint_colors, size=8.0))
+
+        if not self.btn_georef3d_bscan.isChecked():
+            return
+        preview = payload.get("preview") or {}
+        curtain_x = np.asarray(preview.get("curtain_x_m", []), dtype=np.float64)
+        curtain_y = np.asarray(preview.get("curtain_y_m", []), dtype=np.float64)
+        curtain_z = np.asarray(preview.get("curtain_z_m", []), dtype=np.float64)
+        amplitude = np.asarray(preview.get("amplitude", []), dtype=np.float64)
+        if (
+            curtain_x.size == 0
+            or curtain_x.shape != curtain_y.shape
+            or curtain_x.shape != curtain_z.shape
+            or amplitude.shape != curtain_x.shape
+        ):
+            return
+        vertices, faces, vertex_colors = self._build_georef3d_mesh_arrays(
+            curtain_x,
+            curtain_y,
+            curtain_z,
+            amplitude,
+            kind=kind,
+        )
+        mesh = gl.GLMeshItem(
+            vertexes=vertices,
+            faces=faces,
+            vertexColors=vertex_colors,
+            smooth=False,
+            drawEdges=False,
+        )
+        view.addItem(mesh)
+
+    def _build_georef3d_mesh_arrays(
+        self,
+        curtain_x: np.ndarray,
+        curtain_y: np.ndarray,
+        curtain_z: np.ndarray,
+        amplitude: np.ndarray,
+        *,
+        kind: str,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Convert curtain arrays to a triangle mesh for pyqtgraph OpenGL."""
+        rows, cols = curtain_x.shape
+        vertices = np.column_stack(
+            [curtain_x.reshape(-1), curtain_y.reshape(-1), curtain_z.reshape(-1)]
+        ).astype(np.float32)
+        face_rows = []
+        for r in range(rows - 1):
+            base = r * cols
+            next_base = (r + 1) * cols
+            for c in range(cols - 1):
+                a = base + c
+                b = base + c + 1
+                d = next_base + c
+                e = next_base + c + 1
+                face_rows.append((a, d, b))
+                face_rows.append((b, d, e))
+        faces = np.asarray(face_rows, dtype=np.uint32)
+        finite_amp = amplitude[np.isfinite(amplitude)]
+        if finite_amp.size:
+            amp_min = float(np.min(finite_amp))
+            amp_max = float(np.max(finite_amp))
+        else:
+            amp_min, amp_max = 0.0, 1.0
+        if not np.isfinite(amp_min) or not np.isfinite(amp_max) or amp_min == amp_max:
+            amp_min, amp_max = 0.0, 1.0
+        cmap_name = "seismic" if kind == "diff" else "gray"
+        cmap = colormaps.get_cmap(cmap_name)
+        if kind == "diff":
+            vmax = max(abs(amp_min), abs(amp_max), 1.0e-12)
+            norm = colors.Normalize(vmin=-vmax, vmax=vmax)
+        else:
+            norm = colors.Normalize(vmin=amp_min, vmax=amp_max)
+        vertex_colors = cmap(norm(amplitude.reshape(-1))).astype(np.float32)
+        vertex_colors[:, 3] = 0.50 if kind == "raw" else 0.82
+        return vertices, faces, vertex_colors
+
+    def _open_georef3d_matplotlib_dialog(self, entries: list[tuple[str, str, dict]]) -> None:
+        """Fallback expanded preview that keeps static export independent from OpenGL."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("UAV-GPR 三维运动补偿预览")
+        dialog.resize(1100, 760)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(6, 6, 6, 6)
+        fig = Figure(figsize=(10.8, 7.4), dpi=100)
+        canvas = FigureCanvas(fig)
+        layout.addWidget(canvas)
+        ax = fig.add_subplot(111, projection="3d")
+        palette = self._get_plot_palette()
+        fig.patch.set_facecolor(palette["fig_face"])
+        for label, kind, payload in entries:
+            self._plot_georef3d_entry(ax, payload, label=label, kind=kind, palette=palette)
+        payload = entries[-1][2]
+        ax.set_title("UAV-GPR 三维运动补偿预览")
+        ax.set_xlabel(payload.get("x_axis_label") or "局部 X (m)")
+        ax.set_ylabel(payload.get("y_axis_label") or "局部 Y (m)")
+        ax.set_zlabel(payload.get("z_axis_label") or "等效高度/深度 (m)")
+        ax.view_init(elev=24, azim=-58)
+        handles, _ = ax.get_legend_handles_labels()
+        if handles:
+            ax.legend(loc="upper left")
+        self._style_3d_axes(ax)
+        canvas.draw_idle()
+        dialog.exec()
+
     def _redraw_airborne_georeference_3d(self):
         """绘制三维地理参考预览。"""
+        previous_view = self._capture_georef3d_view_state()
         self.georef3d_fig.clear()
         self.georef3d_ax = self.georef3d_fig.add_subplot(111, projection="3d")
         ax = self.georef3d_ax
         palette = self._get_plot_palette()
         self.georef3d_fig.patch.set_facecolor(palette["fig_face"])
-        bundle = self._georef3d_bundle or {}
-        entries: list[tuple[str, str, dict]] = []
-        if self.chk_georef3d_raw.isChecked():
-            payload = self._select_georef3d_payload(bundle.get("raw"))
-            if payload:
-                entries.append(("原始3D", "raw", payload))
-        if self.chk_georef3d_current.isChecked():
-            payload = self._select_georef3d_payload(bundle.get("current"))
-            if payload:
-                entries.append(("当前3D", "current", payload))
-        if self.chk_georef3d_diff.isChecked():
-            payload = self._select_georef3d_payload(bundle.get("diff"))
-            if payload:
-                entries.append(("差异", "diff", payload))
+        entries = self._visible_georef3d_entries()
 
         if not entries:
             ax.set_title("三维地理参考预览")
@@ -934,8 +1240,11 @@ class QualityLogPage(QWidget):
             ax.set_xticks([])
             ax.set_yticks([])
             ax.set_zticks([])
+            self._restore_georef3d_view_state(ax, previous_view or self._georef3d_view_state)
             self._style_3d_axes(ax)
             self.georef3d_fig.subplots_adjust(left=0.05, right=0.98, bottom=0.05, top=0.92)
+            self._georef3d_view_state = self._capture_georef3d_view_state()
+            self._position_georef3d_overlay_controls()
             self._draw_canvas_safely(self.georef3d_canvas)
             return
 
@@ -967,7 +1276,7 @@ class QualityLogPage(QWidget):
             z_pad = max((z_max - z_min) * 0.08, 1e-6)
             ax.set_zlim(z_min - z_pad, z_max + z_pad)
 
-        ax.view_init(elev=24, azim=-58)
+        self._restore_georef3d_view_state(ax, previous_view or self._georef3d_view_state)
         handles, labels = ax.get_legend_handles_labels()
         if handles:
             ax.legend(loc="upper left")
@@ -991,8 +1300,8 @@ class QualityLogPage(QWidget):
 
         self._style_3d_axes(ax)
         self.georef3d_fig.subplots_adjust(left=0.05, right=0.98, bottom=0.05, top=0.92)
-        lod_text = "low" if self._georef3d_interacting else self.cmb_georef3d_lod.currentText()
-        self.georef3d_status.setText(f"LOD: {lod_text} | 图层: {len(entries)}")
+        self._georef3d_view_state = self._capture_georef3d_view_state()
+        self._position_georef3d_overlay_controls()
         self._draw_canvas_safely(self.georef3d_canvas)
 
     def _on_trajectory_click(self, event):

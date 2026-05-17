@@ -20,12 +20,14 @@ from core.methods_registry import (
     get_method_category_label,
     get_public_method_keys,
 )
+from core.uav_georeference_3d import build_airborne_georeference_3d_payload
 from core.preset_profiles import (
     DEFAULT_STARTUP_PRESET_KEY,
     GUI_PRESETS_V1,
     RECOMMENDED_RUN_PROFILES,
 )
 from core.workflow_data import METHOD_CATEGORIES, QUICK_PRESETS
+from ui.gui_quality_log import QualityLogPage
 from ui.gui_method_browser import MethodBrowserTree
 
 
@@ -1551,21 +1553,57 @@ def test_workflow_presets_align_with_current_denoising_preference():
 
 def test_quality_page_exposes_report_and_snapshot_actions():
     app = _get_app()
-    win = GPRGuiQt()
+    page = QualityLogPage()
     try:
-        assert win.page_quality.btn_generate_report.text() == "生成报告"
-        assert win.page_quality.btn_export_quality_snapshot.text() == "导出质量快照"
-        assert win.page_quality.btn_export_georeference_3d.text() == "导出3D地理参考"
-        assert win.page_quality.visual_stack.count() == 3
-        assert win.page_quality.chk_georef3d_current.isChecked()
-        assert win.page_quality.chk_georef3d_bscan.isChecked()
-        assert not win.page_quality.chk_georef3d_raw.isChecked()
-        assert not win.page_quality.chk_georef3d_diff.isChecked()
-        assert win.page_quality.cmb_georef3d_lod.currentText() == "auto"
-        assert win.page_quality.btn_generate_report.toolTip()
-        assert win.page_quality.btn_export_quality_snapshot.toolTip()
+        assert page.btn_generate_report.text() == "生成报告"
+        assert page.btn_export_quality_snapshot.text() == "导出质量快照"
+        assert page.btn_export_georeference_3d.text() == "导出3D地理参考"
+        assert page.visual_stack.count() == 3
+        assert page.btn_georef3d_current.isChecked()
+        assert page.btn_georef3d_bscan.isChecked()
+        assert not page.btn_georef3d_raw.isChecked()
+        assert not page.btn_georef3d_diff.isChecked()
+        assert hasattr(page, "btn_georef3d_expand")
+        assert hasattr(page, "btn_georef3d_reset_view")
+        assert not hasattr(page, "cmb_georef3d_lod")
+        assert page.btn_generate_report.toolTip()
+        assert page.btn_export_quality_snapshot.toolTip()
     finally:
-        win.close()
+        page.release_plot_resources()
+        page.close()
+        app.processEvents()
+
+
+def test_georef3d_redraw_preserves_user_view():
+    app = _get_app()
+    page = QualityLogPage()
+    try:
+        data = np.arange(80, dtype=np.float32).reshape(10, 8)
+        payload = build_airborne_georeference_3d_payload(
+            data,
+            {"total_time_ns": 80.0},
+            {
+                "trace_distance_m": np.linspace(0.0, 3.5, 8),
+                "flight_height_m": np.linspace(1.0, 1.2, 8),
+            },
+        )
+        assert payload is not None
+
+        page.set_airborne_georeference_3d_visualization(
+            {"raw": payload, "current": payload, "diff": payload}
+        )
+        page._redraw_airborne_georeference_3d()
+        page.georef3d_ax.view_init(elev=13.0, azim=41.0)
+        page._georef3d_view_state = page._capture_georef3d_view_state()
+
+        page.btn_georef3d_raw.setChecked(True)
+        page._redraw_airborne_georeference_3d()
+
+        assert abs(page.georef3d_ax.elev - 13.0) < 1.0e-6
+        assert abs(page.georef3d_ax.azim - 41.0) < 1.0e-6
+    finally:
+        page.release_plot_resources()
+        page.close()
         app.processEvents()
 
 
