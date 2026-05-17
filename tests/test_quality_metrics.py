@@ -13,6 +13,7 @@ from core.quality_metrics import (
     compute_benchmark_metrics,
     deep_zone_contrast,
     detect_first_break_indices,
+    estimate_lateral_correlation_length,
     first_break_std,
     clipping_ratio,
     horizontal_coherence,
@@ -145,6 +146,13 @@ def test_first_break_metrics_handle_non_finite_controls():
 
     assert indices.shape == (raw.shape[1],)
     assert np.isfinite(first_break_std(raw, threshold=np.nan))
+
+
+def test_lateral_correlation_length_handles_non_finite_max_lag():
+    raw = _build_test_profile()
+
+    assert estimate_lateral_correlation_length(raw, max_lag=np.nan) >= 1
+    assert estimate_lateral_correlation_length(raw, max_lag=np.inf) >= 1
 
 
 def test_ridge_detection_handles_non_finite_row_range():

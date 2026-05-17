@@ -177,7 +177,11 @@ def estimate_lateral_correlation_length(
     n_traces = arr.shape[1]
     if n_traces <= 2:
         return 1
-    max_lag_value = max(6, n_traces // 6) if max_lag is None else int(max_lag)
+    max_lag_value = (
+        max(6, n_traces // 6)
+        if max_lag is None
+        else max(1, _safe_index(max_lag, default=max(6, n_traces // 6)))
+    )
     resolved_max_lag = min(n_traces - 1, max_lag_value)
     centered = arr - np.mean(arr, axis=0, keepdims=True)
     std = np.std(centered, axis=0, keepdims=True)
