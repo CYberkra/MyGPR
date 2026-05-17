@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import io
 import subprocess
 import sys
 from pathlib import Path
@@ -225,3 +226,13 @@ def test_preexisting_staged_changes_are_rejected(tmp_path: Path):
     assert code == 1
     assert _head(repo) == before
     assert _git(repo, "diff", "--cached", "--name-only") == "tracked.txt"
+
+
+def test_safe_print_replaces_unencodable_console_text():
+    buffer = io.BytesIO()
+    stream = io.TextIOWrapper(buffer, encoding="gbk", errors="strict")
+
+    git_checkpoint._safe_print("Archived note: 版本快照 �", file=stream)
+    stream.flush()
+
+    assert b"Archived note:" in buffer.getvalue()

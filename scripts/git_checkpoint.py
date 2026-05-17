@@ -36,6 +36,22 @@ def _run_command(command: str, *, repo_root: Path) -> None:
         )
 
 
+def _safe_print(text: str, *, file=None) -> None:
+    """Print subprocess output without failing on a narrow Windows console encoding."""
+    if not text:
+        return
+    target = file or sys.stdout
+    payload = text.rstrip()
+    try:
+        print(payload, file=target)
+    except UnicodeEncodeError:
+        encoding = getattr(target, "encoding", None) or "utf-8"
+        safe_payload = payload.encode(encoding, errors="replace").decode(
+            encoding, errors="replace"
+        )
+        print(safe_payload, file=target)
+
+
 def _run_git(
     args: Sequence[str],
     *,
@@ -133,9 +149,9 @@ def _run_archive_checkpoint(
         check=False,
     )
     if result.stdout:
-        print(result.stdout.rstrip())
+        _safe_print(result.stdout)
     if result.stderr:
-        print(result.stderr.rstrip(), file=sys.stderr)
+        _safe_print(result.stderr, file=sys.stderr)
     if result.returncode != 0:
         raise GitCheckpointError(
             f"archive checkpoint failed with exit code {result.returncode}"
@@ -191,9 +207,9 @@ def _run_meeting_progress_note(
         check=False,
     )
     if result.stdout:
-        print(result.stdout.rstrip())
+        _safe_print(result.stdout)
     if result.stderr:
-        print(result.stderr.rstrip(), file=sys.stderr)
+        _safe_print(result.stderr, file=sys.stderr)
     if result.returncode != 0:
         raise GitCheckpointError(
             f"meeting progress note failed with exit code {result.returncode}"
