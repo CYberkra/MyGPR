@@ -121,7 +121,10 @@ def _dominant_trace_axis(
         distance = _safe_numeric(trace_distance, trace_count)
     else:
         step = np.sqrt(np.diff(x) ** 2 + np.diff(y) ** 2)
-        distance = np.concatenate(([0.0], np.cumsum(step))).astype(np.float64)
+        distance = np.empty(trace_count, dtype=np.float64)
+        distance[0] = 0.0
+        if trace_count > 1:
+            distance[1:] = np.cumsum(step, dtype=np.float64)
         quality_flags.append("derived_trace_distance_from_xy")
 
     if trace_index is None:

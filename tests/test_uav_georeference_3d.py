@@ -144,6 +144,25 @@ def test_build_airborne_georeference_payload_falls_back_to_trace_distance():
     assert payload["has_longitude_latitude"] is False
 
 
+def test_build_airborne_georeference_payload_derives_distance_from_local_xy():
+    data = np.arange(18, dtype=np.float32).reshape(6, 3)
+    trace_metadata = {
+        "local_x_m": np.array([0.0, 3.0, 3.0], dtype=np.float64),
+        "local_y_m": np.array([0.0, 4.0, 8.0], dtype=np.float64),
+        "flight_height_m": np.ones(3, dtype=np.float32),
+    }
+
+    payload = build_airborne_georeference_3d_payload(
+        data,
+        {"total_time_ns": 60.0},
+        trace_metadata,
+    )
+
+    assert payload is not None
+    assert np.allclose(payload["trace_distance_m"], np.array([0.0, 5.0, 9.0]))
+    assert "derived_trace_distance_from_xy" in payload["quality_flags"]
+
+
 def test_build_airborne_georeference_payload_handles_bad_numeric_metadata():
     data = np.arange(30, dtype=np.float32).reshape(6, 5)
     trace_metadata = {
