@@ -27,6 +27,7 @@ from PythonModule.hilbert_envelope import method_hilbert_envelope
 from PythonModule.rpca_background import method_rpca_background
 from PythonModule.sec_gain import method_sec_gain
 from PythonModule.set_zero_time import method_set_zero_time
+from PythonModule.svd_subspace import method_svd_subspace
 from PythonModule.time_cut import method_time_cut
 from PythonModule.trace_qc import method_trace_qc
 from PythonModule.wavelet_2d import method_wavelet_2d
@@ -604,6 +605,16 @@ def test_method_wavelet_svd_rejects_non_finite_tuning_params():
 
     with pytest.raises(ValueError, match="rank_end"):
         method_wavelet_svd(raw, rank_end=np.inf)
+
+
+def test_method_svd_subspace_rejects_non_finite_rank_params():
+    raw = np.ones((8, 5), dtype=np.float32)
+
+    with pytest.raises(ValueError, match="rank_start"):
+        method_svd_subspace(raw, rank_start=np.nan, rank_end=3)
+
+    with pytest.raises(ValueError, match="rank_end"):
+        method_svd_subspace(raw, rank_start=1, rank_end=np.inf)
 
 
 def test_method_wnnm_placeholder_stays_identity_while_deferred():

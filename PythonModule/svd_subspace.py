@@ -8,6 +8,16 @@ import numpy as np
 from scipy.linalg import svd
 
 
+def _positive_int(value: object, name: str) -> int:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} 必须是有限正整数") from None
+    if not np.isfinite(parsed):
+        raise ValueError(f"{name} 必须是有限正整数")
+    return max(1, int(parsed))
+
+
 def method_svd_subspace(
     data: np.ndarray,
     rank_start: int = 2,
@@ -36,8 +46,8 @@ def method_svd_subspace(
             "rank_end": 1,
         }
 
-    rank_start = max(1, int(rank_start))
-    rank_end = max(rank_start, int(rank_end))
+    rank_start = _positive_int(rank_start, "rank_start")
+    rank_end = max(rank_start, _positive_int(rank_end, "rank_end"))
     rank_end = min(rank_end, min_dim)
 
     U, S, Vt = svd(arr, full_matrices=False)
