@@ -241,8 +241,11 @@ def extract_airborne_csv_payload(
     updated_header = dict(header_info or {}) if header_info else None
 
     if header_info:
-        samples = int(header_info["a_scan_length"])
-        traces = int(header_info["num_traces"])
+        samples = _safe_positive_int(header_info.get("a_scan_length"))
+        traces = _safe_positive_int(header_info.get("num_traces"))
+        if samples is None or traces is None:
+            data = arr.astype(np.float32, copy=False)
+            return data, metadata, updated_header
         required_rows = samples * traces
 
         if arr.shape[1] >= 4 and arr.shape[0] >= required_rows:
@@ -259,8 +262,9 @@ def extract_airborne_csv_payload(
                 )
                 if trace_timestamps_s is None and "trace_timestamp_s" in metadata:
                     trace_timestamps_s = metadata["trace_timestamp_s"]
-                if header_info and "total_time_ns" in header_info:
-                    metadata["time_window_ns"] = float(header_info["total_time_ns"])
+                total_time_ns = _safe_finite_float(header_info.get("total_time_ns"))
+                if total_time_ns is not None:
+                    metadata["time_window_ns"] = total_time_ns
                 metadata = _integrate_optional_airborne_sidecars(
                     metadata,
                     trace_timestamps_s=trace_timestamps_s,
@@ -290,6 +294,21 @@ def extract_airborne_csv_payload(
 
     data = arr.astype(np.float32, copy=False)
     return data, metadata, updated_header
+
+
+def _safe_finite_float(value: Any) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return parsed if np.isfinite(parsed) else None
+
+
+def _safe_positive_int(value: Any) -> int | None:
+    parsed = _safe_finite_float(value)
+    if parsed is None or parsed <= 0:
+        return None
+    return int(parsed)
 
 
 def _integrate_optional_airborne_sidecars(
