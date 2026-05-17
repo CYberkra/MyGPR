@@ -260,7 +260,28 @@ def _build_config(
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    path.write_text(
+        json.dumps(_jsonable(payload), ensure_ascii=False, indent=2, allow_nan=False),
+        encoding="utf-8",
+    )
+
+
+def _jsonable(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(item) for item in value]
+    if isinstance(value, np.ndarray):
+        return _jsonable(value.tolist())
+    if isinstance(value, np.generic):
+        return _jsonable(value.item())
+    if value is None or isinstance(value, (str, bool)):
+        return value
+    if isinstance(value, float):
+        return float(value) if np.isfinite(value) else None
+    if isinstance(value, int):
+        return int(value)
+    return value
 
 
 def _write_readme(package_dir: Path) -> None:

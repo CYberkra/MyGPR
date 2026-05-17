@@ -7,9 +7,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
+
 import cli_batch
 
-from scripts.generate_uav_gpr_motion_v2_sample import generate_package
+from scripts.generate_uav_gpr_motion_v2_sample import _jsonable, generate_package
 
 
 def test_generate_uav_gpr_motion_v2_sample_package_files(tmp_path: Path):
@@ -42,6 +44,25 @@ def test_generate_uav_gpr_motion_v2_sample_package_files(tmp_path: Path):
     assert Path(job["rtk_path"]).is_absolute()
     assert Path(job["imu_path"]).is_absolute()
     assert Path(job["altimeter_path"]).is_absolute()
+
+    manifest = json.loads((package_dir / "manifest.json").read_text(encoding="utf-8"))
+    json.dumps(config, allow_nan=False)
+    json.dumps(manifest, allow_nan=False)
+
+
+def test_motion_v2_sample_jsonable_removes_nonfinite_values():
+    payload = {
+        "metric": np.float64(np.inf),
+        "array": np.array([1.0, np.nan, np.inf], dtype=np.float32),
+        "flag": True,
+    }
+
+    safe = _jsonable(payload)
+
+    assert safe["metric"] is None
+    assert safe["array"] == [1.0, None, None]
+    assert safe["flag"] is True
+    json.dumps(safe, allow_nan=False)
 
 
 def test_generated_uav_gpr_motion_v2_package_validates_and_runs(tmp_path: Path):
