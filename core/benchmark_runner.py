@@ -154,7 +154,12 @@ def run_benchmark_sample(
     if output_root is not None:
         final_json = output_root / f"{sample_id}-summary.json"
         final_json.write_text(
-            json.dumps(_to_jsonable(summary), ensure_ascii=False, indent=2),
+            json.dumps(
+                _to_jsonable(summary),
+                ensure_ascii=False,
+                indent=2,
+                allow_nan=False,
+            ),
             encoding="utf-8",
         )
         summary["summary_json"] = str(final_json)

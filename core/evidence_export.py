@@ -301,6 +301,7 @@ def export_replay_evidence_bundle(
                     _to_jsonable(snapshot.get("header_info") or {}),
                     ensure_ascii=False,
                     indent=2,
+                    allow_nan=False,
                 ),
                 encoding="utf-8",
             )
@@ -348,7 +349,12 @@ def export_replay_evidence_bundle(
 
         summary["artifacts"] = artifacts
         (root / "summary.json").write_text(
-            json.dumps(_to_jsonable(summary), ensure_ascii=False, indent=2),
+            json.dumps(
+                _to_jsonable(summary),
+                ensure_ascii=False,
+                indent=2,
+                allow_nan=False,
+            ),
             encoding="utf-8",
         )
         (root / "report.md").write_text(
@@ -494,7 +500,12 @@ def export_chain_evidence(
 
     summary_json = output_root / f"{bundle_name}-summary.json"
     summary_json.write_text(
-        json.dumps(_to_jsonable(summary), ensure_ascii=False, indent=2),
+        json.dumps(
+            _to_jsonable(summary),
+            ensure_ascii=False,
+            indent=2,
+            allow_nan=False,
+        ),
         encoding="utf-8",
     )
     summary["summary_json"] = str(summary_json)
@@ -533,7 +544,12 @@ def export_standard_chain_for_sample(
     summary["scenario"] = spec.scenario
     summary["seed"] = int(seed)
     Path(summary["summary_json"]).write_text(
-        json.dumps(_to_jsonable(summary), ensure_ascii=False, indent=2),
+        json.dumps(
+            _to_jsonable(summary),
+            ensure_ascii=False,
+            indent=2,
+            allow_nan=False,
+        ),
         encoding="utf-8",
     )
     return _to_jsonable(summary)
@@ -678,7 +694,12 @@ def export_motion_compensation_benchmark(
     }
     motion_metrics_json = output_root / "motion_metrics.json"
     motion_metrics_json.write_text(
-        json.dumps(_to_jsonable(motion_metrics), ensure_ascii=False, indent=2),
+        json.dumps(
+            _to_jsonable(motion_metrics),
+            ensure_ascii=False,
+            indent=2,
+            allow_nan=False,
+        ),
         encoding="utf-8",
     )
 
@@ -701,7 +722,12 @@ def export_motion_compensation_benchmark(
     }
     summary_json = output_root / f"{sample_id}-summary.json"
     summary_json.write_text(
-        json.dumps(_to_jsonable(summary), ensure_ascii=False, indent=2),
+        json.dumps(
+            _to_jsonable(summary),
+            ensure_ascii=False,
+            indent=2,
+            allow_nan=False,
+        ),
         encoding="utf-8",
     )
     summary["summary_json"] = str(summary_json)
