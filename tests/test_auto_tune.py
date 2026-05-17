@@ -234,6 +234,31 @@ def test_auto_tune_frequency_filter_ignores_invalid_total_time_header():
     assert result["best_params"]["low_freq_mhz"] < result["best_params"]["high_freq_mhz"]
 
 
+def test_auto_tune_frequency_filter_ignores_non_finite_timing_header():
+    raw = _build_test_profile(samples=128, traces=48)
+
+    result = auto_tune_method(
+        raw,
+        "frequency_filter_1d",
+        base_params={
+            "filter_type": "bandpass",
+            "low_freq_mhz": 10.0,
+            "high_freq_mhz": 250.0,
+            "taper_ratio": 0.08,
+        },
+        header_info={
+            "sample_rate_hz": np.inf,
+            "time_step_s": np.nan,
+            "total_time_ns": np.inf,
+        },
+        search_mode="fast",
+    )
+
+    assert result["family"] == "frequency"
+    assert np.isfinite(float(result["best_params"]["high_freq_mhz"]))
+    assert result["best_params"]["low_freq_mhz"] < result["best_params"]["high_freq_mhz"]
+
+
 def test_auto_tune_svd_subspace_returns_rank_interval_candidate():
     raw = _build_test_profile(traces=96)
     result = auto_tune_method(

@@ -1565,11 +1565,8 @@ def _build_zero_time_candidates(
 
 def _resolve_time_step_ns(n_samples: int, header_info: dict[str, Any]) -> float:
     total_time_ns = header_info.get("total_time_ns") if header_info else None
-    try:
-        total = float(total_time_ns)
-    except (TypeError, ValueError):
-        total = 0.0
-    if total > 0:
+    total = _positive_finite_float(total_time_ns)
+    if total is not None:
         return total / max(1, int(n_samples))
     return 48.0 / max(1, int(n_samples))
 
@@ -1579,11 +1576,8 @@ def _agc_window_min(n_samples: int, header_info: dict[str, Any]) -> int:
     min_by_fraction = int(round(samples * 0.02))
     min_by_time = 0
     total_time_ns = header_info.get("total_time_ns") if header_info else None
-    try:
-        total = float(total_time_ns)
-    except (TypeError, ValueError):
-        total = 0.0
-    if total > 0.0:
+    total = _positive_finite_float(total_time_ns)
+    if total is not None:
         time_step_ns = total / samples
         min_by_time = int(round(0.5 / max(time_step_ns, 1.0e-9)))
     minimum = max(3, min_by_fraction, min_by_time)
@@ -1897,27 +1891,28 @@ def _build_frequency_filter_trials(
 
 
 def _resolve_nyquist_mhz(n_samples: int, header_info: dict[str, Any]) -> float | None:
-    try:
-        sample_rate_hz = float(header_info.get("sample_rate_hz"))
-    except (TypeError, ValueError):
-        sample_rate_hz = 0.0
-    if sample_rate_hz > 0.0:
+    sample_rate_hz = _positive_finite_float(header_info.get("sample_rate_hz"))
+    if sample_rate_hz is not None:
         return float(sample_rate_hz / 2.0e6)
 
-    try:
-        time_step_s = float(header_info.get("time_step_s"))
-    except (TypeError, ValueError):
-        time_step_s = 0.0
-    if time_step_s > 0.0:
+    time_step_s = _positive_finite_float(header_info.get("time_step_s"))
+    if time_step_s is not None:
         return float(1.0 / time_step_s / 2.0e6)
 
-    try:
-        total_time_ns = float(header_info.get("total_time_ns"))
-    except (TypeError, ValueError):
-        total_time_ns = 0.0
-    if total_time_ns > 0.0:
+    total_time_ns = _positive_finite_float(header_info.get("total_time_ns"))
+    if total_time_ns is not None:
         return float(max(1, int(n_samples)) / (total_time_ns * 1.0e-9) / 2.0e6)
     return None
+
+
+def _positive_finite_float(value: Any) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(parsed) or parsed <= 0.0:
+        return None
+    return parsed
 
 
 def _build_subspace_rank_end_candidates(
