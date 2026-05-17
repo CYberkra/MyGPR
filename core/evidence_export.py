@@ -29,6 +29,10 @@ from core.processing_engine import (
 )
 from core.quality_metrics import compute_motion_quality_metrics
 from core.scalar_utils import to_float
+from core.uav_georeference_3d import (
+    build_airborne_georeference_3d_payload,
+    save_airborne_georeference_3d_preview_png,
+)
 from read_file_data import save_image
 
 
@@ -219,6 +223,113 @@ def _build_replay_report_markdown(summary: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _snapshot_by_role(snapshots: list[dict[str, Any]], role: str) -> dict[str, Any] | None:
+    for snapshot in snapshots:
+        if str(snapshot.get("role") or "") == role and snapshot.get("data") is not None:
+            return snapshot
+    return None
+
+
+def _build_preview_diff(raw: np.ndarray, current: np.ndarray) -> np.ndarray | None:
+    raw_arr = np.asarray(raw, dtype=np.float32)
+    current_arr = np.asarray(current, dtype=np.float32)
+    if raw_arr.ndim != 2 or current_arr.ndim != 2:
+        return None
+    rows = min(raw_arr.shape[0], current_arr.shape[0])
+    if rows <= 0:
+        return None
+    raw_arr = raw_arr[:rows, :]
+    current_arr = current_arr[:rows, :]
+    if raw_arr.shape[1] != current_arr.shape[1]:
+        source_x = np.linspace(0.0, 1.0, raw_arr.shape[1], dtype=np.float32)
+        target_x = np.linspace(0.0, 1.0, current_arr.shape[1], dtype=np.float32)
+        resampled = np.empty((rows, current_arr.shape[1]), dtype=np.float32)
+        for row_idx in range(rows):
+            resampled[row_idx, :] = np.interp(target_x, source_x, raw_arr[row_idx, :]).astype(np.float32)
+        raw_arr = resampled
+    return (current_arr - raw_arr).astype(np.float32, copy=False)
+
+
+def _write_motion_evidence_artifacts(
+    root: Path,
+    snapshots: list[dict[str, Any]],
+    app_context: dict[str, Any],
+    artifacts: list[dict[str, Any]],
+) -> None:
+    """Write optional motion/3D preview artifacts into a replay bundle."""
+    raw_snapshot = _snapshot_by_role(snapshots, "original")
+    current_snapshot = _snapshot_by_role(snapshots, "current")
+    if raw_snapshot is None or current_snapshot is None:
+        return
+
+    motion_dir = root / "motion"
+    motion_dir.mkdir(exist_ok=True)
+    raw = np.asarray(raw_snapshot.get("data"))
+    current = np.asarray(current_snapshot.get("data"))
+    raw_header = raw_snapshot.get("header_info") or {}
+    current_header = current_snapshot.get("header_info") or {}
+    raw_metadata = raw_snapshot.get("trace_metadata")
+    current_metadata = current_snapshot.get("trace_metadata")
+
+    raw_bscan = Path("motion") / "raw_bscan.png"
+    current_bscan = Path("motion") / "current_bscan.png"
+    diff_bscan = Path("motion") / "diff_bscan.png"
+    raw_time_range, raw_distance_range = _time_distance_ranges(raw_header, raw)
+    current_time_range, current_distance_range = _time_distance_ranges(current_header, current)
+    save_image(raw, str(root / raw_bscan), title="Raw B-scan", time_range=raw_time_range, distance_range=raw_distance_range)
+    save_image(current, str(root / current_bscan), title="Current B-scan", time_range=current_time_range, distance_range=current_distance_range)
+    diff = _build_preview_diff(raw, current)
+    if diff is not None:
+        save_image(diff, str(root / diff_bscan), title="Current - Raw", time_range=current_time_range, distance_range=current_distance_range, cmap="seismic")
+
+    written = [raw_bscan, current_bscan]
+    if diff is not None:
+        written.append(diff_bscan)
+
+    for name, data, header, metadata, title in [
+        ("raw_3d_preview.png", raw, raw_header, raw_metadata, "Raw 3D preview"),
+        ("current_3d_preview.png", current, current_header, current_metadata, "Current 3D preview"),
+        ("diff_3d_preview.png", diff, current_header, current_metadata, "3D difference preview"),
+    ]:
+        if data is None:
+            continue
+        try:
+            payload = build_airborne_georeference_3d_payload(
+                data,
+                header,
+                metadata,
+                preview_lod="medium",
+            )
+            if payload is not None:
+                rel = Path("motion") / name
+                save_airborne_georeference_3d_preview_png(payload, root / rel, title=title)
+                written.append(rel)
+        except Exception:
+            continue
+
+    motion_quality_flags = {
+        "runtime_warnings": _to_jsonable(app_context.get("runtime_warnings") or []),
+        "last_run_summary": _to_jsonable(app_context.get("last_run_summary") or {}),
+    }
+    motion_params = {
+        "preset_key": app_context.get("preset_key"),
+        "selected_method": _to_jsonable(app_context.get("selected_method") or {}),
+        "method_param_overrides": _to_jsonable(app_context.get("method_param_overrides") or {}),
+    }
+    flags_rel = Path("motion") / "motion_quality_flags.json"
+    params_rel = Path("motion") / "motion_params.json"
+    (root / flags_rel).write_text(json.dumps(_to_jsonable(motion_quality_flags), ensure_ascii=False, indent=2), encoding="utf-8")
+    (root / params_rel).write_text(json.dumps(_to_jsonable(motion_params), ensure_ascii=False, indent=2), encoding="utf-8")
+    written.extend([flags_rel, params_rel])
+
+    artifacts.append(
+        {
+            "role": "motion_comparison",
+            "files": [str(path).replace("\\", "/") for path in written],
+        }
+    )
+
+
 def _write_trace_metadata_npz(metadata: Any, out_path: Path) -> bool:
     if not isinstance(metadata, dict) or not metadata:
         return False
@@ -329,6 +440,14 @@ def export_replay_evidence_bundle(
                         else None
                     ),
                 }
+            )
+
+        if save_images:
+            _write_motion_evidence_artifacts(
+                root,
+                snapshots,
+                package.get("app_context") or {},
+                artifacts,
             )
 
         summary["artifacts"] = artifacts
@@ -598,6 +717,9 @@ def export_motion_compensation_benchmark(
             trace_metadata,
             current.shape,
         )
+        runtime_context = _summarize_runtime_context(runtime_params)
+        if "trace_metadata" not in runtime_context and trace_metadata:
+            runtime_context["trace_metadata"] = _summarize_trace_metadata(trace_metadata)
         current, runtime_meta = run_processing_method(current, method_key, runtime_params)
         header_info = merge_result_header_info(header_info, runtime_meta, current.shape)
         trace_metadata = merge_result_trace_metadata(trace_metadata, runtime_meta)
@@ -606,7 +728,7 @@ def export_motion_compensation_benchmark(
                 "step_index": idx,
                 "method_key": method_key,
                 "params": _to_jsonable(params),
-                "runtime_context": _summarize_runtime_context(runtime_params),
+                "runtime_context": runtime_context,
                 "runtime_meta": _to_jsonable(runtime_meta),
                 "shape": list(np.asarray(current).shape),
             }

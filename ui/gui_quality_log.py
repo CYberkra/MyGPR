@@ -14,7 +14,10 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QFrame,
     QStackedWidget,
+    QCheckBox,
+    QComboBox,
 )
+from PyQt6.QtCore import QTimer
 from qfluentwidgets import PushButton, FluentIcon, SegmentedWidget
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
@@ -35,6 +38,12 @@ class QualityLogPage(QWidget):
         self._trajectory_latitude = np.array([], dtype=np.float64)
         self._trajectory_trace_indices = np.array([], dtype=np.int32)
         self._selected_trace_index = None
+        self._georef3d_bundle = {"raw": None, "current": None, "diff": None}
+        self._georef3d_render_cache = {}
+        self._georef3d_interacting = False
+        self._georef3d_redraw_timer = QTimer(self)
+        self._georef3d_redraw_timer.setSingleShot(True)
+        self._georef3d_redraw_timer.timeout.connect(self._redraw_airborne_georeference_3d)
         self.setup_ui()
 
     def setup_ui(self):
@@ -285,9 +294,41 @@ class QualityLogPage(QWidget):
         georef3d_hint.setWordWrap(True)
         georef3d_hint.setProperty("class", "hintText")
         georef3d_panel_layout.addWidget(georef3d_hint)
+        georef3d_controls = QWidget()
+        georef3d_controls_layout = QHBoxLayout(georef3d_controls)
+        georef3d_controls_layout.setContentsMargins(0, 0, 0, 0)
+        georef3d_controls_layout.setSpacing(8)
+        self.chk_georef3d_raw = QCheckBox("原始3D")
+        self.chk_georef3d_current = QCheckBox("当前3D")
+        self.chk_georef3d_bscan = QCheckBox("B-scan")
+        self.chk_georef3d_diff = QCheckBox("差异")
+        self.chk_georef3d_current.setChecked(True)
+        self.chk_georef3d_bscan.setChecked(True)
+        self.cmb_georef3d_lod = QComboBox()
+        self.cmb_georef3d_lod.addItems(["auto", "low", "medium", "high"])
+        self.cmb_georef3d_lod.setCurrentText("auto")
+        self.cmb_georef3d_lod.setToolTip("预览细节级别；交互拖拽时自动临时降为 low。")
+        self.georef3d_status = QLabel("LOD: auto")
+        self.georef3d_status.setProperty("class", "hintText")
+        for widget in [
+            self.chk_georef3d_raw,
+            self.chk_georef3d_current,
+            self.chk_georef3d_bscan,
+            self.chk_georef3d_diff,
+        ]:
+            widget.toggled.connect(self._schedule_georef3d_redraw)
+            georef3d_controls_layout.addWidget(widget)
+        georef3d_controls_layout.addWidget(QLabel("LOD"))
+        georef3d_controls_layout.addWidget(self.cmb_georef3d_lod)
+        georef3d_controls_layout.addWidget(self.georef3d_status)
+        georef3d_controls_layout.addStretch(1)
+        self.cmb_georef3d_lod.currentTextChanged.connect(self._schedule_georef3d_redraw)
+        georef3d_panel_layout.addWidget(georef3d_controls)
         self.georef3d_fig = Figure(figsize=(6.2, 4.8), dpi=100)
         self.georef3d_canvas = FigureCanvas(self.georef3d_fig)
         self.georef3d_ax = self.georef3d_fig.add_subplot(111, projection="3d")
+        self.georef3d_canvas.mpl_connect("button_press_event", self._on_georef3d_interaction_start)
+        self.georef3d_canvas.mpl_connect("button_release_event", self._on_georef3d_interaction_end)
         georef3d_panel_layout.addWidget(self.georef3d_canvas)
         self.visual_stack.addWidget(georef3d_panel)
 
@@ -758,14 +799,128 @@ class QualityLogPage(QWidget):
         self._finalize_figure(self.trajectory_fig, self.trajectory_canvas)
 
     def set_airborne_georeference_3d_visualization(self, payload: dict | None):
+        """设置三维地理参考预览数据并延迟刷新。"""
+        if payload and any(key in payload for key in ("raw", "current", "diff")):
+            self._georef3d_bundle = {
+                "raw": payload.get("raw"),
+                "current": payload.get("current"),
+                "diff": payload.get("diff"),
+            }
+        else:
+            self._georef3d_bundle = {"raw": None, "current": payload, "diff": None}
+        self._georef3d_render_cache.clear()
+        self._schedule_georef3d_redraw()
+
+    def _schedule_georef3d_redraw(self, *_args):
+        """Debounce 3D redraws caused by checkbox/LOD changes."""
+        if hasattr(self, "_georef3d_redraw_timer"):
+            self._georef3d_redraw_timer.start(120)
+
+    def _on_georef3d_interaction_start(self, _event):
+        self._georef3d_interacting = True
+        self._schedule_georef3d_redraw()
+
+    def _on_georef3d_interaction_end(self, _event):
+        self._georef3d_interacting = False
+        self._schedule_georef3d_redraw()
+
+    def _select_georef3d_payload(self, entry):
+        """Select a payload for current LOD from a payload or LOD map."""
+        if not entry:
+            return None
+        requested_lod = "low" if self._georef3d_interacting else self.cmb_georef3d_lod.currentText()
+        if isinstance(entry, dict) and "payloads_by_lod" in entry:
+            payloads = entry.get("payloads_by_lod") or {}
+            return (
+                payloads.get(requested_lod)
+                or payloads.get("auto")
+                or payloads.get("medium")
+                or next(iter(payloads.values()), None)
+            )
+        return entry
+
+    def _plot_georef3d_entry(self, ax, payload: dict, *, label: str, kind: str, palette: dict):
+        preview = payload.get("preview") or {}
+        curtain_x = np.asarray(preview.get("curtain_x_m", []), dtype=np.float64)
+        curtain_y = np.asarray(preview.get("curtain_y_m", []), dtype=np.float64)
+        curtain_z = np.asarray(preview.get("curtain_z_m", []), dtype=np.float64)
+        amplitude = np.asarray(preview.get("amplitude", []), dtype=np.float64)
+        if curtain_x.size == 0 or curtain_x.shape != curtain_y.shape or curtain_x.shape != curtain_z.shape:
+            return
+
+        show_bscan = self.chk_georef3d_bscan.isChecked()
+        if show_bscan and amplitude.size and amplitude.shape == curtain_x.shape:
+            finite_amp = amplitude[np.isfinite(amplitude)]
+            amp_min = float(preview.get("amplitude_min", float(np.min(finite_amp)) if finite_amp.size else 0.0))
+            amp_max = float(preview.get("amplitude_max", float(np.max(finite_amp)) if finite_amp.size else 1.0))
+            if not np.isfinite(amp_min) or not np.isfinite(amp_max) or amp_min == amp_max:
+                amp_min, amp_max = 0.0, 1.0
+            cmap_name = "seismic" if kind == "diff" else "gray"
+            cmap = colormaps.get_cmap(cmap_name)
+            if kind == "diff":
+                vmax = max(abs(amp_min), abs(amp_max), 1.0e-12)
+                norm = colors.Normalize(vmin=-vmax, vmax=vmax)
+            else:
+                norm = colors.Normalize(vmin=amp_min, vmax=amp_max)
+            facecolors = cmap(norm(amplitude))
+            alpha = 0.55 if kind == "raw" else 0.88
+            ax.plot_surface(
+                curtain_x,
+                curtain_y,
+                curtain_z,
+                facecolors=facecolors,
+                alpha=alpha,
+                linewidth=0,
+                antialiased=False,
+                shade=False,
+            )
+
+        x_m = np.asarray(payload.get("local_x_m", []), dtype=np.float64)
+        y_m = np.asarray(payload.get("local_y_m", []), dtype=np.float64)
+        airborne_z_m = np.asarray(payload.get("airborne_z_m", []), dtype=np.float64)
+        if x_m.size and y_m.size and airborne_z_m.size:
+            color = {
+                "raw": palette["line_warning"],
+                "current": palette["line_success"],
+                "diff": palette["line_emphasis"],
+            }.get(kind, palette["line_primary"])
+            linestyle = "--" if kind == "raw" else "-"
+            ax.plot(
+                x_m,
+                y_m,
+                airborne_z_m,
+                color=color,
+                linewidth=1.4,
+                linestyle=linestyle,
+                label=label,
+            )
+            if kind == "current":
+                ax.scatter([x_m[0]], [y_m[0]], [airborne_z_m[0]], color=palette["line_success"], s=30)
+                ax.scatter([x_m[-1]], [y_m[-1]], [airborne_z_m[-1]], color=palette["line_error"], s=30)
+
+    def _redraw_airborne_georeference_3d(self):
         """绘制三维地理参考预览。"""
         self.georef3d_fig.clear()
         self.georef3d_ax = self.georef3d_fig.add_subplot(111, projection="3d")
         ax = self.georef3d_ax
         palette = self._get_plot_palette()
         self.georef3d_fig.patch.set_facecolor(palette["fig_face"])
+        bundle = self._georef3d_bundle or {}
+        entries: list[tuple[str, str, dict]] = []
+        if self.chk_georef3d_raw.isChecked():
+            payload = self._select_georef3d_payload(bundle.get("raw"))
+            if payload:
+                entries.append(("原始3D", "raw", payload))
+        if self.chk_georef3d_current.isChecked():
+            payload = self._select_georef3d_payload(bundle.get("current"))
+            if payload:
+                entries.append(("当前3D", "current", payload))
+        if self.chk_georef3d_diff.isChecked():
+            payload = self._select_georef3d_payload(bundle.get("diff"))
+            if payload:
+                entries.append(("差异", "diff", payload))
 
-        if not payload:
+        if not entries:
             ax.set_title("三维地理参考预览")
             ax.text2D(
                 0.5,
@@ -784,114 +939,17 @@ class QualityLogPage(QWidget):
             self._draw_canvas_safely(self.georef3d_canvas)
             return
 
+        for label, kind, payload in entries:
+            self._plot_georef3d_entry(ax, payload, label=label, kind=kind, palette=palette)
+
+        payload = entries[-1][2]
         preview = payload.get("preview") or {}
         x_m = np.asarray(payload.get("local_x_m", []), dtype=np.float64)
         y_m = np.asarray(payload.get("local_y_m", []), dtype=np.float64)
         airborne_z_m = np.asarray(payload.get("airborne_z_m", []), dtype=np.float64)
-        ground_elevation_m = payload.get("ground_elevation_m")
-        selected_trace_index = payload.get("selected_trace_index")
-
-        curtain_x = np.asarray(preview.get("curtain_x_m", []), dtype=np.float64)
-        curtain_y = np.asarray(preview.get("curtain_y_m", []), dtype=np.float64)
         curtain_z = np.asarray(preview.get("curtain_z_m", []), dtype=np.float64)
-        amplitude = np.asarray(preview.get("amplitude", []), dtype=np.float64)
         preview_trace_indices = np.asarray(preview.get("trace_indices", []), dtype=np.int32)
         preview_sample_indices = np.asarray(preview.get("sample_indices", []), dtype=np.int32)
-        if (
-            curtain_x.size == 0
-            or curtain_y.size == 0
-            or curtain_z.size == 0
-            or curtain_x.shape != curtain_y.shape
-            or curtain_x.shape != curtain_z.shape
-        ):
-            self.set_airborne_georeference_3d_visualization(None)
-            return
-
-        finite_amp = amplitude[np.isfinite(amplitude)]
-        amp_min = float(preview.get("amplitude_min", float(np.min(finite_amp)) if finite_amp.size else 0.0))
-        amp_max = float(preview.get("amplitude_max", float(np.max(finite_amp)) if finite_amp.size else 1.0))
-        if not np.isfinite(amp_min) or not np.isfinite(amp_max) or amp_min == amp_max:
-            amp_min, amp_max = 0.0, 1.0
-        norm = colors.Normalize(vmin=amp_min, vmax=amp_max)
-        cmap = colormaps.get_cmap("gray")
-
-        ax.plot_surface(
-            curtain_x,
-            curtain_y,
-            curtain_z,
-            color=palette["line_primary"],
-            alpha=0.18,
-            linewidth=0,
-            shade=False,
-        )
-        if amplitude.size:
-            flat_colors = cmap(norm(amplitude))
-            ax.scatter(
-                curtain_x.reshape(-1),
-                curtain_y.reshape(-1),
-                curtain_z.reshape(-1),
-                c=flat_colors.reshape(-1, 4),
-                s=2,
-                linewidths=0,
-                alpha=0.85,
-            )
-
-        if x_m.size and y_m.size and airborne_z_m.size:
-            ax.plot(
-                x_m,
-                y_m,
-                airborne_z_m,
-                color=palette["line_success"],
-                linewidth=1.5,
-                label="航迹",
-            )
-            ax.scatter(
-                [x_m[0]],
-                [y_m[0]],
-                [airborne_z_m[0]],
-                color=palette["line_success"],
-                s=36,
-                label="起点",
-            )
-            ax.scatter(
-                [x_m[-1]],
-                [y_m[-1]],
-                [airborne_z_m[-1]],
-                color=palette["line_error"],
-                s=36,
-                label="终点",
-            )
-            if ground_elevation_m is not None:
-                ground = np.asarray(ground_elevation_m, dtype=np.float64)
-                if ground.size == x_m.size:
-                    ax.plot(
-                        x_m,
-                        y_m,
-                        ground,
-                        color=palette["line_warning"],
-                        linewidth=1.1,
-                        linestyle="--",
-                        label="地表",
-                    )
-        if (
-            selected_trace_index is not None
-            and preview_trace_indices.size
-            and x_m.size
-            and airborne_z_m.size
-        ):
-            match = np.where(preview_trace_indices == int(selected_trace_index))[0]
-            if match.size:
-                idx = int(match[0])
-                ax.scatter(
-                    [x_m[idx]],
-                    [y_m[idx]],
-                    [airborne_z_m[idx]],
-                    color=palette["line_emphasis"],
-                    s=72,
-                    marker="x",
-                    linewidths=2.0,
-                    label="当前选中",
-                )
 
         ax.set_title("三维地理参考预览")
         ax.set_xlabel(payload.get("x_axis_label") or "局部 X (m)")
@@ -933,6 +991,8 @@ class QualityLogPage(QWidget):
 
         self._style_3d_axes(ax)
         self.georef3d_fig.subplots_adjust(left=0.05, right=0.98, bottom=0.05, top=0.92)
+        lod_text = "low" if self._georef3d_interacting else self.cmb_georef3d_lod.currentText()
+        self.georef3d_status.setText(f"LOD: {lod_text} | 图层: {len(entries)}")
         self._draw_canvas_safely(self.georef3d_canvas)
 
     def _on_trajectory_click(self, event):

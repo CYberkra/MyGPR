@@ -288,7 +288,7 @@ RECOMMENDED_RUN_PROFILES = {
         ],
     },
     "motion_compensation_v1": {
-        "label": "运动补偿 V1",
+        "label": "运动补偿 V1（兼容旧基准）",
         "preset_key": "raw_fidelity",
         "method_params": {
             "trajectory_smoothing": {
@@ -323,6 +323,36 @@ RECOMMENDED_RUN_PROFILES = {
             "motion_compensation_attitude",
             "motion_compensation_height",
             "motion_compensation_vibration",
+        ],
+    },
+    "motion_compensation_core_v1": {
+        "label": "运动补偿 Core V1",
+        "preset_key": "raw_fidelity",
+        "method_params": {
+            "trajectory_smoothing": {
+                "method": "savgol",
+                "window_length": 21,
+                "polyorder": 3,
+            },
+            "motion_compensation_speed": {"spacing_m": 0.0},
+            "motion_compensation_attitude": {
+                "apc_offset_x_m": 0.0,
+                "apc_offset_y_m": 0.0,
+                "apc_offset_z_m": 0.0,
+                "max_abs_tilt_deg": 20.0,
+            },
+            "motion_compensation_height": {
+                "reference_height_mode": "mean",
+                "compensate_amplitude": True,
+                "compensate_time_shift": True,
+                "wave_speed_m_per_ns": 0.1,
+            },
+        },
+        "order": [
+            "trajectory_smoothing",
+            "motion_compensation_speed",
+            "motion_compensation_attitude",
+            "motion_compensation_height",
         ],
     },
     "motion_compensation_v2": {

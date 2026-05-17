@@ -3414,19 +3414,83 @@ class GPRGuiQt(QMainWindow):
         return payload
 
     def _build_airborne_georeference_3d_plot_payload(self) -> dict | None:
-        """构建三维地理参考预览所需数据。"""
-        if self.data is None:
+        """构建三维地理参考预览所需的原始/当前/差异数据。"""
+        current = self._build_airborne_georeference_3d_payload_for(
+            self.data,
+            self.header_info,
+            self.trace_metadata,
+        )
+        raw = self._build_airborne_georeference_3d_payload_for(
+            self.shared_data.original_data,
+            self.shared_data.original_header_info,
+            self.shared_data.original_trace_metadata,
+        )
+        diff_data = self._build_georeference_difference_data(
+            self.shared_data.original_data,
+            self.data,
+        )
+        diff = self._build_airborne_georeference_3d_payload_for(
+            diff_data,
+            self.header_info,
+            self.trace_metadata,
+        )
+        if not any([raw, current, diff]):
+            return None
+        return {"raw": raw, "current": current, "diff": diff}
+
+    def _build_airborne_georeference_3d_payload_for(
+        self,
+        data,
+        header_info,
+        trace_metadata,
+    ) -> dict | None:
+        """Build cached LOD variants for one 3D preview layer."""
+        if data is None:
             return None
         try:
-            return build_airborne_georeference_3d_payload(
-                self.data,
-                self.header_info,
-                self.trace_metadata,
-                selected_trace_index=self._selected_trace_index,
-            )
+            payloads = {}
+            for lod in ("low", "medium", "high", "auto"):
+                payload = build_airborne_georeference_3d_payload(
+                    data,
+                    header_info,
+                    trace_metadata,
+                    selected_trace_index=self._selected_trace_index,
+                    preview_lod=lod,
+                )
+                if payload is not None:
+                    payloads[lod] = payload
+            if not payloads:
+                return None
+            return {"payloads_by_lod": payloads}
         except Exception as exc:
             logger.warning("Failed to build airborne 3D georeference payload: %s", exc)
             return None
+
+    def _build_georeference_difference_data(self, raw, current) -> np.ndarray | None:
+        """Build current-raw data for 3D preview only."""
+        if raw is None or current is None:
+            return None
+        raw_arr = np.asarray(raw, dtype=np.float32)
+        current_arr = np.asarray(current, dtype=np.float32)
+        if raw_arr.ndim != 2 or current_arr.ndim != 2:
+            return None
+        rows = min(raw_arr.shape[0], current_arr.shape[0])
+        if rows <= 0 or current_arr.shape[1] <= 0:
+            return None
+        raw_trimmed = raw_arr[:rows, :]
+        current_trimmed = current_arr[:rows, :]
+        if raw_trimmed.shape[1] != current_trimmed.shape[1]:
+            source_x = np.linspace(0.0, 1.0, raw_trimmed.shape[1], dtype=np.float32)
+            target_x = np.linspace(0.0, 1.0, current_trimmed.shape[1], dtype=np.float32)
+            resampled = np.empty((rows, current_trimmed.shape[1]), dtype=np.float32)
+            for row_idx in range(rows):
+                resampled[row_idx, :] = np.interp(
+                    target_x,
+                    source_x,
+                    raw_trimmed[row_idx, :],
+                ).astype(np.float32)
+            raw_trimmed = resampled
+        return (current_trimmed - raw_trimmed).astype(np.float32, copy=False)
 
     def _build_airborne_anomaly_details(self) -> list[dict]:
         """构建航空异常明细行。"""
@@ -4933,6 +4997,18 @@ class GPRGuiQt(QMainWindow):
     def export_airborne_georeference_3d_bundle(self):
         """导出三维地理参考预览文件。"""
         payload = self._build_airborne_georeference_3d_plot_payload()
+        if isinstance(payload, dict) and "current" in payload:
+            current_entry = payload.get("current") or {}
+            payloads_by_lod = current_entry.get("payloads_by_lod") if isinstance(current_entry, dict) else None
+            if isinstance(payloads_by_lod, dict):
+                payload = (
+                    payloads_by_lod.get("auto")
+                    or payloads_by_lod.get("high")
+                    or payloads_by_lod.get("medium")
+                    or payloads_by_lod.get("low")
+                )
+            else:
+                payload = None
         if not payload:
             QMessageBox.information(
                 self, "无可导出三维预览", "请先导入航空数据并确认已有轨迹/高度元数据。"

@@ -18,6 +18,12 @@ AIR_LIGHT_SPEED_M_PER_NS = 0.299792458
 AIR_TWO_WAY_DEPTH_SCALE_M_PER_NS = AIR_LIGHT_SPEED_M_PER_NS / 2.0
 DEFAULT_MAX_PREVIEW_TRACES = 240
 DEFAULT_MAX_PREVIEW_SAMPLES = 160
+LOD_LIMITS: dict[str, tuple[int, int]] = {
+    "low": (80, 60),
+    "medium": (160, 100),
+    "high": (260, 180),
+    "auto": (DEFAULT_MAX_PREVIEW_TRACES, DEFAULT_MAX_PREVIEW_SAMPLES),
+}
 
 
 def _as_float_array(values: Any) -> np.ndarray:
@@ -240,11 +246,19 @@ def build_airborne_georeference_3d_payload(
     selected_trace_index: int | None = None,
     max_preview_traces: int = DEFAULT_MAX_PREVIEW_TRACES,
     max_preview_samples: int = DEFAULT_MAX_PREVIEW_SAMPLES,
+    preview_lod: str = "auto",
 ) -> dict[str, Any] | None:
     """Build a 3D georeference payload for preview and export."""
     arr = np.asarray(data)
     if arr.ndim != 2 or arr.size == 0:
         return None
+    lod_key = str(preview_lod or "auto").lower()
+    if lod_key in LOD_LIMITS:
+        lod_traces, lod_samples = LOD_LIMITS[lod_key]
+        max_preview_traces = min(int(max_preview_traces), int(lod_traces))
+        max_preview_samples = min(int(max_preview_samples), int(lod_samples))
+    max_preview_traces = max(2, int(max_preview_traces))
+    max_preview_samples = max(2, int(max_preview_samples))
 
     trace_count = int(arr.shape[1])
     trace_count = max(trace_count, 1)
@@ -309,6 +323,7 @@ def build_airborne_georeference_3d_payload(
     payload = {
         "schema_version": 1,
         "source_kind": "uav_gpr_georeference_3d",
+        "preview_lod": lod_key if lod_key in LOD_LIMITS else "custom",
         "trace_count": int(trace_count),
         "sample_count": int(sample_count),
         "selected_trace_index": int(selected_trace_index) if selected_trace_index is not None else None,
@@ -513,3 +528,73 @@ def export_airborne_georeference_3d_bundle(
         "json_path": str(json_path.resolve()),
         "summary": summary,
     }
+
+
+def save_airborne_georeference_3d_preview_png(
+    payload: dict[str, Any],
+    out_path: str | Path,
+    *,
+    title: str = "UAV-GPR 3D preview",
+    show_bscan: bool = True,
+) -> str:
+    """Save a lightweight static PNG from a 3D georeference payload."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib import colormaps, colors
+
+    preview = payload.get("preview") or {}
+    curtain_x = np.asarray(preview.get("curtain_x_m", []), dtype=np.float64)
+    curtain_y = np.asarray(preview.get("curtain_y_m", []), dtype=np.float64)
+    curtain_z = np.asarray(preview.get("curtain_z_m", []), dtype=np.float64)
+    amplitude = np.asarray(preview.get("amplitude", []), dtype=np.float64)
+    if curtain_x.size == 0 or curtain_x.shape != curtain_y.shape or curtain_x.shape != curtain_z.shape:
+        raise ValueError("3D preview payload has no valid curtain mesh")
+
+    out = Path(out_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig = plt.figure(figsize=(7.2, 5.0), dpi=140)
+    ax = fig.add_subplot(111, projection="3d")
+    x_m = np.asarray(payload.get("local_x_m", []), dtype=np.float64)
+    y_m = np.asarray(payload.get("local_y_m", []), dtype=np.float64)
+    z_m = np.asarray(payload.get("airborne_z_m", []), dtype=np.float64)
+    ground = payload.get("ground_elevation_m")
+
+    if show_bscan:
+        finite_amp = amplitude[np.isfinite(amplitude)]
+        amp_min = float(preview.get("amplitude_min", np.min(finite_amp) if finite_amp.size else 0.0))
+        amp_max = float(preview.get("amplitude_max", np.max(finite_amp) if finite_amp.size else 1.0))
+        if not np.isfinite(amp_min) or not np.isfinite(amp_max) or amp_min == amp_max:
+            amp_min, amp_max = 0.0, 1.0
+        facecolors = colormaps.get_cmap("gray")(colors.Normalize(amp_min, amp_max)(amplitude))
+        ax.plot_surface(
+            curtain_x,
+            curtain_y,
+            curtain_z,
+            facecolors=facecolors,
+            linewidth=0,
+            antialiased=False,
+            shade=False,
+            alpha=0.88,
+        )
+
+    if x_m.size and y_m.size and z_m.size:
+        ax.plot(x_m, y_m, z_m, color="#16a34a", linewidth=1.4, label="trajectory")
+        ax.scatter([x_m[0]], [y_m[0]], [z_m[0]], color="#10b981", s=28)
+        ax.scatter([x_m[-1]], [y_m[-1]], [z_m[-1]], color="#ef4444", s=28)
+        if isinstance(ground, np.ndarray) and ground.size == x_m.size:
+            ax.plot(x_m, y_m, ground, color="#f59e0b", linestyle="--", linewidth=1.0, label="ground")
+
+    ax.set_title(title)
+    ax.set_xlabel(str(payload.get("x_axis_label") or "X (m)"))
+    ax.set_ylabel(str(payload.get("y_axis_label") or "Y (m)"))
+    ax.set_zlabel(str(payload.get("z_axis_label") or "Z (m)"))
+    ax.view_init(elev=24, azim=-58)
+    handles, _ = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend(loc="upper left")
+    fig.tight_layout()
+    fig.savefig(out)
+    plt.close(fig)
+    return str(out.resolve())

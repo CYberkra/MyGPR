@@ -126,3 +126,40 @@ def test_export_replay_evidence_bundle_writes_one_zip(tmp_path: Path):
 
     assert summary["storage"] == "memory_only_until_user_export"
     assert summary["snapshot_count"] >= 2
+
+
+def test_export_replay_evidence_bundle_includes_motion_preview_artifacts(tmp_path: Path):
+    state = SharedDataState()
+    raw = np.arange(120, dtype=np.float32).reshape(12, 10)
+    metadata = {
+        "trace_distance_m": np.linspace(0.0, 1.8, 10),
+        "flight_height_m": np.linspace(1.0, 1.2, 10),
+    }
+    state.load_data(
+        raw,
+        path="demo.csv",
+        header_info={"total_time_ns": 60.0, "trace_interval_m": 0.2},
+        trace_metadata=metadata,
+    )
+    state.apply_current_data(raw + 2.0, push_history=True, label="motion_compensation_v2")
+    package = state.get_replay_evidence_package()
+    assert package is not None
+    package["app_context"] = {
+        "preset_key": "motion_compensation_v2",
+        "runtime_warnings": [{"code": "demo"}],
+        "method_param_overrides": {"motion_compensation_v2": {"max_shift_ns": 20.0}},
+    }
+
+    zip_path = tmp_path / "replay.zip"
+    export_replay_evidence_bundle(package, zip_path, save_images=True)
+
+    with zipfile.ZipFile(zip_path) as zf:
+        names = set(zf.namelist())
+        assert "motion/raw_bscan.png" in names
+        assert "motion/current_bscan.png" in names
+        assert "motion/diff_bscan.png" in names
+        assert "motion/raw_3d_preview.png" in names
+        assert "motion/current_3d_preview.png" in names
+        assert "motion/diff_3d_preview.png" in names
+        assert "motion/motion_quality_flags.json" in names
+        assert "motion/motion_params.json" in names

@@ -157,11 +157,21 @@ def test_motion_compensation_v1_preset_order_matches_plan_order():
         "motion_compensation_height",
         "motion_compensation_vibration",
     ]
+    core_order = [
+        "trajectory_smoothing",
+        "motion_compensation_speed",
+        "motion_compensation_attitude",
+        "motion_compensation_height",
+    ]
 
     assert [
         item["method_id"] for item in QUICK_PRESETS["motion_compensation_v1"]["methods"]
     ] == expected_order
     assert RECOMMENDED_RUN_PROFILES["motion_compensation_v1"]["order"] == expected_order
+    assert [
+        item["method_id"] for item in QUICK_PRESETS["motion_compensation_core_v1"]["methods"]
+    ] == core_order
+    assert RECOMMENDED_RUN_PROFILES["motion_compensation_core_v1"]["order"] == core_order
 
 
 def test_auto_tune_defaults_live_in_auto_tune_page():
@@ -1547,6 +1557,11 @@ def test_quality_page_exposes_report_and_snapshot_actions():
         assert win.page_quality.btn_export_quality_snapshot.text() == "导出质量快照"
         assert win.page_quality.btn_export_georeference_3d.text() == "导出3D地理参考"
         assert win.page_quality.visual_stack.count() == 3
+        assert win.page_quality.chk_georef3d_current.isChecked()
+        assert win.page_quality.chk_georef3d_bscan.isChecked()
+        assert not win.page_quality.chk_georef3d_raw.isChecked()
+        assert not win.page_quality.chk_georef3d_diff.isChecked()
+        assert win.page_quality.cmb_georef3d_lod.currentText() == "auto"
         assert win.page_quality.btn_generate_report.toolTip()
         assert win.page_quality.btn_export_quality_snapshot.toolTip()
     finally:

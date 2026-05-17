@@ -61,6 +61,13 @@ METHOD_CATEGORIES = {
         "description": "结构化去噪和信号提纯",
         "methods": ["hankel_svd", "svd_subspace", "wavelet_2d", "wavelet_svd"],
     },
+    "artifact_suppression": {
+        "id": "artifact_suppression",
+        "name": "伪影抑制",
+        "icon": "▧",
+        "description": "周期条带、尖锐杂波等实验性增强",
+        "methods": ["motion_compensation_vibration", "running_average_2D"],
+    },
     "attribute_analysis": {
         "id": "attribute_analysis",
         "name": "属性分析",
@@ -85,7 +92,6 @@ METHOD_CATEGORIES = {
             "motion_compensation_speed",
             "motion_compensation_attitude",
             "motion_compensation_height",
-            "motion_compensation_vibration",
             "motion_compensation_v2",
         ],
     },
@@ -210,8 +216,8 @@ QUICK_PRESETS = {
         ],
     },
     "motion_compensation_v1": {
-        "name": "运动补偿 V1",
-        "description": "无人机GPR五维运动误差校正流程（确定性V1阶段）",
+        "name": "运动补偿 V1（兼容旧基准）",
+        "description": "保留旧五阶段基准；周期条带伪影抑制已不属于核心运动补偿链。",
         "methods": [
             {
                 "category": "motion_compensation",
@@ -248,7 +254,7 @@ QUICK_PRESETS = {
                 },
             },
             {
-                "category": "motion_compensation",
+                "category": "artifact_suppression",
                 "method_id": "motion_compensation_vibration",
                 "enabled": True,
                 "params": {
@@ -257,6 +263,46 @@ QUICK_PRESETS = {
                     "preserve_mix": 0.35,
                     "background_mix": 0.02,
                     "max_restore_gain": 1.25,
+                },
+            },
+        ],
+    },
+    "motion_compensation_core_v1": {
+        "name": "运动补偿 Core V1",
+        "description": "无人机GPR四项核心运动补偿原子流程，不包含周期条带伪影抑制。",
+        "methods": [
+            {
+                "category": "motion_compensation",
+                "method_id": "trajectory_smoothing",
+                "enabled": True,
+                "params": {"method": "savgol", "window_length": 21, "polyorder": 3},
+            },
+            {
+                "category": "motion_compensation",
+                "method_id": "motion_compensation_speed",
+                "enabled": True,
+                "params": {"spacing_m": 0.0},
+            },
+            {
+                "category": "motion_compensation",
+                "method_id": "motion_compensation_attitude",
+                "enabled": True,
+                "params": {
+                    "apc_offset_x_m": 0.0,
+                    "apc_offset_y_m": 0.0,
+                    "apc_offset_z_m": 0.0,
+                    "max_abs_tilt_deg": 20.0,
+                },
+            },
+            {
+                "category": "motion_compensation",
+                "method_id": "motion_compensation_height",
+                "enabled": True,
+                "params": {
+                    "reference_height_mode": "mean",
+                    "compensate_amplitude": True,
+                    "compensate_time_shift": True,
+                    "wave_speed_m_per_ns": 0.1,
                 },
             },
         ],

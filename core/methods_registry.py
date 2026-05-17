@@ -967,7 +967,7 @@ PROCESSING_METHODS = {
         },
     },
     "motion_compensation_vibration": {
-        "name": "振动/背景条带抑制",
+        "name": "周期条带伪影抑制（实验）",
         "type": "local",
         "func": method_motion_compensation_vibration,
         "params": [
@@ -1013,7 +1013,7 @@ PROCESSING_METHODS = {
             },
         ],
         "auto_tune_enabled": True,
-        "auto_tune_family": "motion_comp",
+        "auto_tune_family": "denoise",
         "auto_tune_candidates": {
             "smooth_window": [5, 9, 15],
             "preserve_row_percentile": [90.0, 94.0, 98.0],
@@ -1568,10 +1568,10 @@ METHOD_METADATA = {
         "display_name": "姿态/APC足迹修正",
     },
     "motion_compensation_vibration": {
-        "category": "motion_compensation",
+        "category": "artifact_suppression",
         "maturity": "experimental",
         "visibility": "public",
-        "display_name": "振动/背景条带抑制",
+        "display_name": "周期条带伪影抑制（实验）",
     },
     "motion_compensation_v2": {
         "category": "motion_compensation",
@@ -1647,11 +1647,11 @@ PREFERRED_METHOD_ORDER = [
     "wavelet_svd",
     "hilbert_envelope",
     "running_average_2D",
+    "motion_compensation_vibration",
     "motion_compensation_height",
     "motion_compensation_speed",
     "trajectory_smoothing",
     "motion_compensation_attitude",
-    "motion_compensation_vibration",
     "motion_compensation_v2",
     "stolt_migration",
     "kirchhoff_migration",
@@ -1700,6 +1700,7 @@ METHOD_CATEGORY_LABELS = {
     "migration": "迁移成像",
     "depth_conversion": "时间深度转换",
     "motion_compensation": "运动补偿",
+    "artifact_suppression": "伪影抑制",
     "quality_control": "质量控制",
     "attribute_analysis": "属性分析",
     "experimental": "实验功能",
@@ -1731,7 +1732,7 @@ AUTO_TUNE_STAGE_BY_METHOD = {
     "motion_compensation_speed": "motion_comp",
     "trajectory_smoothing": "motion_comp",
     "motion_compensation_attitude": "motion_comp",
-    "motion_compensation_vibration": "motion_comp",
+    "motion_compensation_vibration": "denoise",
     "motion_compensation_v2": "motion_comp",
 }
 

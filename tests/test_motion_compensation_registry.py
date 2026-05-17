@@ -23,22 +23,22 @@ from core.methods_registry import (
 from core.workflow_data import METHOD_CATEGORIES, QUICK_PRESETS, WorkflowConfig
 from core.preset_profiles import RECOMMENDED_RUN_PROFILES
 
-# All five V1 motion stages
-V1_MOTION_METHODS = [
+CORE_MOTION_METHODS = [
     "trajectory_smoothing",
     "motion_compensation_speed",
     "motion_compensation_attitude",
     "motion_compensation_height",
-    "motion_compensation_vibration",
 ]
+VIBRATION_METHOD = "motion_compensation_vibration"
+V1_LEGACY_METHODS = CORE_MOTION_METHODS + [VIBRATION_METHOD]
 
 BASE_DIR = Path(__file__).parent.parent
 
 
 def test_motion_methods_registered_public_and_have_params():
-    """All five V1 stages are visible, categorized, and have parameter definitions."""
+    """Core V1 stages are visible, categorized, and have parameter definitions."""
     public_keys = get_public_method_keys()
-    for key in V1_MOTION_METHODS:
+    for key in CORE_MOTION_METHODS:
         assert key in PROCESSING_METHODS, f"{key} not in PROCESSING_METHODS"
         assert is_public_method(key), f"{key} is not public"
         assert key in public_keys, f"{key} not in public method keys"
@@ -55,45 +55,57 @@ def test_motion_methods_registered_public_and_have_params():
 
 
 def test_motion_compensation_category_exists():
-    """The motion_compensation category is defined with all five methods."""
+    """The motion_compensation category is defined with core methods only."""
     assert "motion_compensation" in METHOD_CATEGORIES
     cat = METHOD_CATEGORIES["motion_compensation"]
     assert cat["name"] == "运动补偿"
-    for key in V1_MOTION_METHODS:
+    for key in CORE_MOTION_METHODS:
         assert key in cat["methods"], f"{key} not in motion_compensation category methods"
+    assert VIBRATION_METHOD not in cat["methods"]
 
     assert "motion_compensation" in METHOD_CATEGORY_LABELS
     assert METHOD_CATEGORY_LABELS["motion_compensation"] == "运动补偿"
+    assert METHOD_METADATA[VIBRATION_METHOD]["category"] == "artifact_suppression"
+    assert METHOD_METADATA[VIBRATION_METHOD]["display_name"] == "周期条带伪影抑制（实验）"
 
 
 def test_auto_tune_stage_assigned_for_all_motion_methods():
-    """All motion methods map to the motion_comp auto-tune stage."""
-    for key in V1_MOTION_METHODS:
+    """Core motion methods map to motion_comp; vibration is denoise/artifact work."""
+    for key in CORE_MOTION_METHODS:
         assert AUTO_TUNE_STAGE_BY_METHOD.get(key) == "motion_comp", f"{key} auto_tune_stage mismatch"
         assert PROCESSING_METHODS[key].get("auto_tune_family") == "motion_comp"
         assert PROCESSING_METHODS[key].get("auto_tune_enabled") is True
+    assert AUTO_TUNE_STAGE_BY_METHOD.get(VIBRATION_METHOD) == "denoise"
+    assert PROCESSING_METHODS[VIBRATION_METHOD].get("auto_tune_family") == "denoise"
 
 
 def test_motion_compensation_v1_quick_preset_exists():
     """The motion_compensation_v1 quick preset is defined with correct sequencing."""
     assert "motion_compensation_v1" in QUICK_PRESETS
     preset = QUICK_PRESETS["motion_compensation_v1"]
-    assert preset["name"] == "运动补偿 V1"
+    assert preset["name"] == "运动补偿 V1（兼容旧基准）"
 
     method_ids = [m["method_id"] for m in preset["methods"]]
-    assert method_ids == V1_MOTION_METHODS
+    assert method_ids == V1_LEGACY_METHODS
 
-    for m in preset["methods"]:
+    for m in preset["methods"][:-1]:
         assert m["category"] == "motion_compensation"
         assert m["enabled"] is True
+    assert preset["methods"][-1]["category"] == "artifact_suppression"
 
 
 def test_motion_compensation_v1_recommended_profile_exists():
     """The recommended run profile exists and sequences the deterministic V1 stages only."""
     assert "motion_compensation_v1" in RECOMMENDED_RUN_PROFILES
     profile = RECOMMENDED_RUN_PROFILES["motion_compensation_v1"]
-    assert profile["label"] == "运动补偿 V1"
-    assert profile["order"] == V1_MOTION_METHODS
+    assert profile["label"] == "运动补偿 V1（兼容旧基准）"
+    assert profile["order"] == V1_LEGACY_METHODS
+
+    assert "motion_compensation_core_v1" in RECOMMENDED_RUN_PROFILES
+    core_profile = RECOMMENDED_RUN_PROFILES["motion_compensation_core_v1"]
+    assert core_profile["label"] == "运动补偿 Core V1"
+    assert core_profile["order"] == CORE_MOTION_METHODS
+    assert VIBRATION_METHOD not in core_profile["order"]
 
     # Ensure no experimental/non-V1 methods sneak into the default preset
     forbidden = {"autofocus", "dem_coupling", "antenna_pattern_inversion", "rpm_notch"}
@@ -109,7 +121,14 @@ def test_motion_compensation_v1_preset_applies_to_workflow_config():
     assert ok is True
     enabled = cfg.get_enabled_methods()
     assert len(enabled) == 5
-    assert [m.method_id for m in enabled] == V1_MOTION_METHODS
+    assert [m.method_id for m in enabled] == V1_LEGACY_METHODS
+
+    cfg = WorkflowConfig()
+    ok = cfg.apply_preset("motion_compensation_core_v1")
+    assert ok is True
+    enabled = cfg.get_enabled_methods()
+    assert len(enabled) == 4
+    assert [m.method_id for m in enabled] == CORE_MOTION_METHODS
 
 
 def test_cli_config_validates(tmp_path: Path):
@@ -127,7 +146,7 @@ def test_cli_config_validates(tmp_path: Path):
 
 def test_motion_methods_have_reasonable_defaults():
     """Parameter defaults fall within advertised min/max ranges."""
-    for key in V1_MOTION_METHODS:
+    for key in V1_LEGACY_METHODS:
         for p in PROCESSING_METHODS[key].get("params", []):
             name = p["name"]
             default = p.get("default")

@@ -13,6 +13,7 @@ from core.uav_georeference_3d import (
     AIR_TWO_WAY_DEPTH_SCALE_M_PER_NS,
     build_airborne_georeference_3d_payload,
     export_airborne_georeference_3d_bundle,
+    save_airborne_georeference_3d_preview_png,
 )
 
 
@@ -63,6 +64,22 @@ def test_build_airborne_georeference_payload_downsamples_without_losing_tail():
     assert payload["preview"]["sample_indices"][-1] == 14
     assert payload["preview"]["amplitude"][-1, -1] == data[-1, -1]
     assert "downsampled_preview" in payload["quality_flags"]
+
+
+def test_build_airborne_georeference_payload_lod_limits_preview():
+    data = np.arange(220 * 180, dtype=np.float32).reshape(220, 180)
+
+    payload = build_airborne_georeference_3d_payload(
+        data,
+        {"total_time_ns": 80.0},
+        {"trace_distance_m": np.linspace(0.0, 9.0, 180)},
+        preview_lod="low",
+    )
+
+    assert payload is not None
+    assert payload["preview_lod"] == "low"
+    assert payload["preview"]["amplitude"].shape[0] <= 60 + 1
+    assert payload["preview"]["amplitude"].shape[1] <= 80 + 1
 
 
 def test_build_airborne_georeference_payload_accepts_numpy_scalar_total_time():
@@ -124,6 +141,26 @@ def test_export_airborne_georeference_bundle_serializes_nonfinite_summary(tmp_pa
     summary = json.loads(Path(result["json_path"]).read_text(encoding="utf-8"))
     assert summary["preview"]["amplitude_min"] is None
     assert summary["preview"]["amplitude_max"] is None
+
+
+def test_save_airborne_georeference_3d_preview_png(tmp_path: Path):
+    data = np.arange(80, dtype=np.float32).reshape(10, 8)
+    payload = build_airborne_georeference_3d_payload(
+        data,
+        {"total_time_ns": 50.0},
+        {"trace_distance_m": np.linspace(0.0, 1.4, 8)},
+        preview_lod="low",
+    )
+    assert payload is not None
+
+    out_path = save_airborne_georeference_3d_preview_png(
+        payload,
+        tmp_path / "preview.png",
+        title="Test preview",
+    )
+
+    assert Path(out_path).exists()
+    assert Path(out_path).stat().st_size > 0
 
 
 def test_build_airborne_georeference_payload_falls_back_to_trace_distance():
