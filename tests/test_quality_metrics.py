@@ -9,6 +9,7 @@ import numpy as np
 from PythonModule.dewow import method_dewow
 from core.processing_engine import _apply_subtracting_average_2d
 from core.quality_metrics import (
+    auto_roi_bounds,
     baseline_bias,
     compute_benchmark_metrics,
     deep_zone_contrast,
@@ -186,6 +187,14 @@ def test_extract_roi_and_context_handles_non_finite_bounds():
     )
 
     assert result["roi_data"].shape == raw.shape
+
+
+def test_auto_roi_bounds_handles_non_finite_padding_ratio():
+    raw = _build_test_profile()
+
+    bounds = auto_roi_bounds(raw, padding_ratio=np.nan)
+    assert 0 <= bounds["time_start_idx"] < bounds["time_end_idx"] <= raw.shape[0]
+    assert 0 <= bounds["dist_start_idx"] < bounds["dist_end_idx"] <= raw.shape[1]
 
 
 def test_gain_quality_metrics_handle_non_finite_control_values():

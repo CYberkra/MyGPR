@@ -83,6 +83,9 @@ def auto_roi_bounds(data: np.ndarray, padding_ratio: float = 0.12) -> dict[str, 
     """Estimate a rectangular ROI from the saliency distribution."""
     arr = _as_clean_2d(data)
     n_samples, n_traces = arr.shape
+    resolved_padding_ratio = float(
+        np.clip(_finite_scalar(padding_ratio, 0.12), 0.0, 1.0)
+    )
     saliency = build_saliency_map(arr)
 
     row_score = uniform_filter1d(
@@ -102,14 +105,14 @@ def auto_roi_bounds(data: np.ndarray, padding_ratio: float = 0.12) -> dict[str, 
         half = max(8, n_samples // 10)
         row_start, row_end = max(0, center - half), min(n_samples, center + half)
     else:
-        pad = max(4, int(round((row_idx[-1] - row_idx[0] + 1) * padding_ratio)))
+        pad = max(4, int(round((row_idx[-1] - row_idx[0] + 1) * resolved_padding_ratio)))
         row_start = max(0, int(row_idx[0]) - pad)
         row_end = min(n_samples, int(row_idx[-1]) + pad + 1)
 
     if col_idx.size == 0:
         col_start, col_end = 0, n_traces
     else:
-        pad = max(2, int(round((col_idx[-1] - col_idx[0] + 1) * padding_ratio)))
+        pad = max(2, int(round((col_idx[-1] - col_idx[0] + 1) * resolved_padding_ratio)))
         col_start = max(0, int(col_idx[0]) - pad)
         col_end = min(n_traces, int(col_idx[-1]) + pad + 1)
 
