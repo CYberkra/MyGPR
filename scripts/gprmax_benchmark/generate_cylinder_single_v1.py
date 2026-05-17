@@ -97,11 +97,11 @@ def generate_package(
     ground_truth = _build_ground_truth(simulation)
     model_in_path.write_text(_build_model_in(), encoding="utf-8")
     scenario_path.write_text(
-        json.dumps(_json_safe(scenario), ensure_ascii=False, indent=2),
+        json.dumps(_json_safe(scenario), ensure_ascii=False, indent=2, allow_nan=False),
         encoding="utf-8",
     )
     ground_truth_path.write_text(
-        json.dumps(_json_safe(ground_truth), ensure_ascii=False, indent=2),
+        json.dumps(_json_safe(ground_truth), ensure_ascii=False, indent=2, allow_nan=False),
         encoding="utf-8",
     )
     _save_preview(bscan, ground_truth, preview_path)
@@ -349,13 +349,13 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [_json_safe(item) for item in value]
     if isinstance(value, np.ndarray):
-        return value.tolist()
+        return _json_safe(value.tolist())
     if isinstance(value, np.generic):
-        return value.item()
+        return _json_safe(value.item())
     if value is None or isinstance(value, (str, bool)):
         return value
     if isinstance(value, float):
-        return float(value)
+        return float(value) if np.isfinite(value) else None
     if isinstance(value, int):
         return int(value)
     return str(value)

@@ -12,6 +12,7 @@ import numpy as np
 
 from core.auto_tune_comparison import run_auto_tune_comparison
 from core.auto_tune_comparison_export import export_auto_tune_comparison_artifacts
+from scripts.gprmax_benchmark import generate_cylinder_single_v1 as generator
 from scripts.gprmax_benchmark.generate_cylinder_single_v1 import generate_package
 
 
@@ -65,6 +66,21 @@ def test_generate_cylinder_single_v1_writes_clean_benchmark_package(tmp_path: Pa
     assert "#title: MyGPR cylinder_single_v1" in result.model_in_path.read_text(
         encoding="utf-8"
     )
+
+
+def test_cylinder_json_safe_removes_nonfinite_values_for_strict_json():
+    payload = {
+        "metric": np.float64(np.inf),
+        "array": np.array([1.0, np.nan, np.inf], dtype=np.float32),
+        "flag": True,
+    }
+
+    safe = generator._json_safe(payload)
+
+    assert safe["metric"] is None
+    assert safe["array"] == [1.0, None, None]
+    assert safe["flag"] is True
+    json.dumps(safe, allow_nan=False)
 
 
 def test_convert_gprmax_out_to_mygpr_csv_preserves_numeric_trace_order(tmp_path: Path):
