@@ -164,7 +164,9 @@ def load_gpr_csv(
         data = raw_data
 
     if np.isnan(data).any():
-        data = np.nan_to_num(data, nan=float(np.nanmean(data)))
+        finite = data[np.isfinite(data)]
+        fill_value = float(np.mean(finite)) if finite.size else 0.0
+        data = np.nan_to_num(data, nan=fill_value, posinf=fill_value, neginf=fill_value)
 
     if data.ndim == 1:
         data = data.reshape(-1, 1)

@@ -140,6 +140,21 @@ def test_validate_config_rejects_nonfinite_numeric_params(tmp_path: Path):
     assert any("must be finite" in error for error in result.errors)
 
 
+def test_load_gpr_csv_replaces_all_nonfinite_matrix_with_zero(tmp_path: Path):
+    input_csv = tmp_path / "all_nan.csv"
+    np.savetxt(
+        input_csv,
+        np.array([[np.nan, np.inf], [-np.inf, np.nan]], dtype=np.float32),
+        delimiter=",",
+    )
+
+    data, header_info, trace_metadata = cli_batch.load_gpr_csv(str(input_csv))
+
+    assert header_info is None
+    assert trace_metadata is None
+    assert np.array_equal(data, np.zeros((2, 2), dtype=float))
+
+
 def test_cli_jsonable_removes_nonfinite_values_for_strict_summary_json():
     payload = {
         "metric": np.float64(np.inf),
