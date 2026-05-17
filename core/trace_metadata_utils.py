@@ -324,6 +324,8 @@ def align_sidecar_records(
     timestamps = _as_1d_array(trace_timestamps_s, np.float64)
     if timestamps.size != trace_count:
         raise ValueError("trace_timestamps_s length must match trace_metadata")
+    if not np.isfinite(timestamps).all():
+        raise ValueError("trace_timestamps_s must contain only finite values")
 
     sidecar_t, sidecar_lon, sidecar_lat = _normalize_sidecar_records(sidecar_records)
     raw_sidecar_t = _as_1d_array(sidecar_records["timestamp_s"], np.float64)
@@ -383,6 +385,8 @@ def integrate_optional_sidecars(
         raise ValueError("trace_timestamps_s is required when integrating sidecars")
 
     timestamps = _as_1d_array(trace_timestamps_s, np.float64)
+    if not np.isfinite(timestamps).all():
+        raise ValueError("trace_timestamps_s must contain only finite values")
     enriched = {key: np.asarray(values).copy() for key, values in trace_metadata.items()}
     alignment_status = np.full(timestamps.size, "aligned", dtype="<U16")
 
