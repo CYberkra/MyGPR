@@ -60,6 +60,28 @@ def test_shared_state_load_data_keeps_independent_current_original_and_input():
     assert float(state.original_data[0, 1]) != 888.0
 
 
+def test_shared_state_header_info_clone_deep_copies_ground_truth_metadata():
+    state = SharedDataState()
+    raw = np.arange(6, dtype=np.float32).reshape(2, 3)
+    header_info = {
+        "ground_truth": {
+            "scenario_id": "pipe_demo",
+            "targets": [{"roi": {"time_start_idx": 1}}],
+        }
+    }
+
+    state.load_data(raw, path="demo.out", header_info=header_info)
+    header_info["ground_truth"]["targets"][0]["roi"]["time_start_idx"] = 99
+
+    assert state.header_info is not None
+    assert state.original_header_info is not None
+    assert state.header_info["ground_truth"]["targets"][0]["roi"]["time_start_idx"] == 1
+    assert (
+        state.original_header_info["ground_truth"]["targets"][0]["roi"]["time_start_idx"]
+        == 1
+    )
+
+
 def test_shared_state_trims_history_internally():
     state = SharedDataState()
     state.max_history = 3

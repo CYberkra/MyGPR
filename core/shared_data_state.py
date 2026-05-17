@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import copy
 from typing import Any
 
 import numpy as np
@@ -355,7 +356,9 @@ def _clone_header_info(header_info: dict[str, Any] | None) -> dict[str, Any] | N
     cloned: dict[str, Any] = {}
     for key, value in header_info.items():
         cloned[key] = (
-            np.array(value, copy=True) if isinstance(value, np.ndarray) else value
+            np.array(value, copy=True)
+            if isinstance(value, np.ndarray)
+            else copy.deepcopy(value)
         )
     return cloned
 
