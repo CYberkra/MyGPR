@@ -245,6 +245,51 @@ def extract_airborne_csv_payload(
 
             return data, metadata, updated_header
 
+        if (
+            arr.ndim == 2
+            and arr.shape[0] > 0
+            and arr.shape[1] > 0
+            and (rtk_path is not None or imu_path is not None or altimeter_path is not None)
+        ):
+            data = arr.astype(np.float32, copy=False)
+            trace_count = int(data.shape[1])
+            if trace_timestamps_s is None:
+                raise ValueError(
+                    "trace_timestamps_s is required when integrating sidecars with matrix CSV data"
+                )
+            timestamps = np.asarray(trace_timestamps_s, dtype=np.float64).reshape(-1)
+            if timestamps.size != trace_count:
+                raise ValueError(
+                    "trace_timestamps_s length must match matrix CSV trace count "
+                    f"({timestamps.size} != {trace_count})"
+                )
+            if not np.isfinite(timestamps).all():
+                raise ValueError("trace_timestamps_s must contain only finite values")
+            metadata = {
+                "trace_index": np.arange(trace_count, dtype=np.int32),
+                "trace_timestamp_s": timestamps.copy(),
+                "trace_distance_m": np.arange(trace_count, dtype=np.float32),
+            }
+            metadata = _integrate_optional_airborne_sidecars(
+                metadata,
+                trace_timestamps_s=timestamps,
+                rtk_path=rtk_path,
+                imu_path=imu_path,
+                altimeter_path=altimeter_path,
+            )
+            if updated_header is None:
+                updated_header = {}
+            updated_header.setdefault("a_scan_length", int(data.shape[0]))
+            updated_header.setdefault("num_traces", int(trace_count))
+            updated_header.update(_build_airborne_header_summary(metadata))
+            updated_header["source"] = "matrix_csv_with_sidecars"
+            updated_header = apply_data_context_defaults(
+                updated_header,
+                trace_metadata=metadata,
+                context=DATA_CONTEXT_UAV_GPR_SFCW_FIELD,
+            )
+            return data, metadata, updated_header
+
         if arr.shape[0] == traces and arr.shape[1] >= samples:
             data = arr[:, :samples].T.astype(np.float32, copy=False)
             return data, metadata, updated_header

@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 from typing import Any, cast
 
@@ -297,6 +298,63 @@ def test_import_csv_with_explicit_timestamp_column_forwards_sidecars(monkeypatch
         )
         assert forwarded["rtk_path"] == str(rtk_path)
         assert forwarded["imu_path"] == str(imu_path)
+        assert "warned" not in captured
+    finally:
+        _close_window(app, win)
+
+
+def test_import_matrix_csv_discovers_manifest_trace_timestamps_and_sidecars(monkeypatch, tmp_path: Path) -> None:
+    app = _get_app()
+    win = GPRGuiQt()
+    try:
+        csv_path = tmp_path / "main.csv"
+        csv_path.write_text("1,2,3\n4,5,6\n", encoding="utf-8")
+        (tmp_path / "trace_timestamps.csv").write_text(
+            "trace_index,timestamp_s\n0,10.0\n1,11.0\n2,12.0\n",
+            encoding="utf-8",
+        )
+        for name in ("rtk", "imu", "altimeter"):
+            (tmp_path / f"{name}.csv").write_text("timestamp_s,value\n10,1\n", encoding="utf-8")
+        (tmp_path / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "primary_data_file": "main.csv",
+                    "sample_count": 2,
+                    "trace_count": 3,
+                    "total_time_ns": 20.0,
+                    "sidecars": {
+                        "trace_timestamps": "trace_timestamps.csv",
+                        "rtk": "rtk.csv",
+                        "imu": "imu.csv",
+                        "altimeter": "altimeter.csv",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        captured: dict[str, Any] = {}
+        monkeypatch.setattr(
+            app_qt.QFileDialog,
+            "getOpenFileName",
+            lambda *args, **kwargs: (str(csv_path), "CSV Files (*.csv)"),
+        )
+        monkeypatch.setattr(win, "_warn_sidecar_ignored", lambda *args, **kwargs: captured.setdefault("warned", True))
+
+        def fake_load_with_progress(title: str, loader, path: str, **loader_kwargs):
+            captured["loader_kwargs"] = dict(loader_kwargs)
+            return {"data": np.zeros((2, 3), dtype=np.float32), "metadata": {}}
+
+        monkeypatch.setattr(win, "_load_with_progress", fake_load_with_progress)
+
+        win.import_csv_file()
+
+        forwarded = cast(dict[str, Any], captured["loader_kwargs"])
+        assert np.array_equal(
+            forwarded["trace_timestamps_s"], np.array([10.0, 11.0, 12.0], dtype=np.float64)
+        )
+        assert forwarded["rtk_path"] == str((tmp_path / "rtk.csv").resolve())
+        assert forwarded["imu_path"] == str((tmp_path / "imu.csv").resolve())
+        assert forwarded["altimeter_path"] == str((tmp_path / "altimeter.csv").resolve())
         assert "warned" not in captured
     finally:
         _close_window(app, win)

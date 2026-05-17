@@ -100,6 +100,62 @@ def test_extract_airborne_csv_payload_reads_explicit_trace_timestamps():
     assert updated_header["source"] == "airborne_csv"
 
 
+def test_extract_matrix_csv_payload_integrates_sidecars_with_trace_timestamps(tmp_path):
+    header_info = {
+        "a_scan_length": 3,
+        "num_traces": 2,
+        "total_time_ns": 120.0,
+        "trace_interval_m": 0.5,
+    }
+    raw = np.array(
+        [
+            [1.0, 4.0],
+            [2.0, 5.0],
+            [3.0, 6.0],
+        ],
+        dtype=np.float64,
+    )
+    rtk_path = tmp_path / "rtk.csv"
+    imu_path = tmp_path / "imu.csv"
+    altimeter_path = tmp_path / "altimeter.csv"
+    rtk_path.write_text(
+        "timestamp_s,longitude,latitude,local_x_m,local_y_m,ground_elevation_m,flight_height_m\n"
+        "10.0,100.0,30.0,0.0,0.0,20.0,1.0\n"
+        "11.0,100.001,30.0,0.5,0.1,20.2,1.2\n",
+        encoding="utf-8",
+    )
+    imu_path.write_text(
+        "timestamp_s,roll_deg,pitch_deg,yaw_deg\n"
+        "10.0,0.1,0.2,1.0\n"
+        "11.0,0.2,0.3,1.2\n",
+        encoding="utf-8",
+    )
+    altimeter_path.write_text(
+        "timestamp_s,height_agl_m,snr,target_count,valid\n"
+        "10.0,0.10,20,1,1\n"
+        "11.0,0.12,21,1,1\n",
+        encoding="utf-8",
+    )
+
+    data, metadata, updated_header = extract_airborne_csv_payload(
+        raw,
+        header_info,
+        trace_timestamps_s=np.array([10.0, 11.0], dtype=np.float64),
+        rtk_path=rtk_path,
+        imu_path=imu_path,
+        altimeter_path=altimeter_path,
+    )
+
+    assert np.array_equal(data, raw.astype(np.float32))
+    assert metadata is not None
+    assert np.array_equal(metadata["trace_timestamp_s"], np.array([10.0, 11.0]))
+    assert np.allclose(metadata["local_x_m"], np.array([0.0, 0.5]))
+    assert np.allclose(metadata["height_agl_m"], np.array([0.10, 0.12]))
+    assert updated_header is not None
+    assert updated_header["source"] == "matrix_csv_with_sidecars"
+    assert updated_header["has_airborne_metadata"] is True
+
+
 def test_extract_airborne_csv_payload_accepts_array_total_time_header():
     header_info = {
         "a_scan_length": 3,

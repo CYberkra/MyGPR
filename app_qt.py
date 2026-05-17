@@ -3745,6 +3745,8 @@ class GPRGuiQt(QMainWindow):
                 progress_callback(10, "正在检测文件格式...")
 
             header_info = detect_csv_header(path)
+            manifest_info = self._read_csv_sidecar_manifest(path)
+            header_info = self._merge_manifest_header_info(header_info, manifest_info)
             skip_lines = _detect_skiprows(path)
 
             if progress_callback:
@@ -4088,6 +4090,8 @@ class GPRGuiQt(QMainWindow):
             self._clear_runtime_warnings()
             import_warnings = []
             header_info = detect_csv_header(path)
+            manifest_info = self._read_csv_sidecar_manifest(path)
+            header_info = self._merge_manifest_header_info(header_info, manifest_info)
             skip_lines = _detect_skiprows(path)
 
             df = pd.read_csv(
@@ -4789,6 +4793,118 @@ class GPRGuiQt(QMainWindow):
         self._store_trace_timestamps_from_metadata(self.trace_metadata)
         return getattr(self, "_trace_timestamps_s", None)
 
+    def _read_csv_sidecar_manifest(self, path: str) -> dict | None:
+        """Read a same-folder manifest when it describes the selected CSV."""
+        try:
+            csv_path = Path(path).resolve()
+            manifest_path = csv_path.parent / "manifest.json"
+            if not manifest_path.exists():
+                return None
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            candidate_names = [
+                manifest.get("primary_data_file"),
+                manifest.get("data_file"),
+                manifest.get("main_csv"),
+            ]
+            sidecars = manifest.get("sidecars") if isinstance(manifest.get("sidecars"), dict) else {}
+            candidate_names.extend(
+                value for value in sidecars.values() if isinstance(value, str) and value.endswith(".csv")
+            )
+            explicit_data = [name for name in candidate_names if isinstance(name, str)]
+            if explicit_data:
+                data_matches = any((csv_path.parent / name).resolve() == csv_path for name in explicit_data)
+                if not data_matches:
+                    return None
+            return manifest
+        except (OSError, ValueError, json.JSONDecodeError):
+            return None
+
+    def _merge_manifest_header_info(self, header_info, manifest: dict | None):
+        """Use manifest shape/time hints for matrix CSV packages without headers."""
+        merged = dict(header_info or {})
+        if not isinstance(manifest, dict):
+            return header_info
+        if "sample_count" in manifest:
+            merged.setdefault("a_scan_length", int(manifest["sample_count"]))
+        if "trace_count" in manifest:
+            merged.setdefault("num_traces", int(manifest["trace_count"]))
+        if "total_time_ns" in manifest:
+            merged.setdefault("total_time_ns", float(manifest["total_time_ns"]))
+        if "trace_interval_m" in manifest:
+            merged.setdefault("trace_interval_m", float(manifest["trace_interval_m"]))
+        if "distance_start_m" in manifest and "distance_end_m" in manifest and "trace_count" in manifest:
+            trace_count = max(int(manifest.get("trace_count") or 0), 1)
+            if trace_count > 1:
+                span = float(manifest["distance_end_m"]) - float(manifest["distance_start_m"])
+                merged.setdefault("trace_interval_m", span / float(trace_count - 1))
+        return merged or header_info
+
+    def _manifest_sidecar_path(self, path: str, manifest: dict | None, key: str) -> str | None:
+        """Resolve a sidecar path from same-folder manifest keys."""
+        if not isinstance(manifest, dict):
+            return None
+        base = Path(path).resolve().parent
+        sidecars = manifest.get("sidecars") if isinstance(manifest.get("sidecars"), dict) else {}
+        candidates = [
+            sidecars.get(key),
+            sidecars.get(f"{key}_file"),
+            manifest.get(f"{key}_file"),
+        ]
+        if key == "trace_timestamps":
+            candidates.extend([manifest.get("trace_timestamps_file"), manifest.get("trace_timestamps")])
+        for candidate in candidates:
+            if not isinstance(candidate, str) or not candidate:
+                continue
+            resolved = (base / candidate).resolve()
+            if resolved.exists():
+                return str(resolved)
+        return None
+
+    def _read_trace_timestamps_sidecar(self, path: str, manifest: dict | None = None):
+        """Read trace_timestamps.csv from a manifest or same CSV directory."""
+        candidate = self._manifest_sidecar_path(path, manifest, "trace_timestamps")
+        if candidate is None:
+            default_path = Path(path).resolve().parent / "trace_timestamps.csv"
+            if default_path.exists():
+                candidate = str(default_path)
+        if candidate is None:
+            return None
+        try:
+            frame = pd.read_csv(candidate)
+        except (OSError, pd.errors.ParserError, UnicodeDecodeError):
+            return None
+        if frame.empty:
+            return None
+        column = None
+        for name in ("timestamp_s", "trace_timestamp_s", "time_s", "timestamp"):
+            if name in frame.columns:
+                column = name
+                break
+        if column is None:
+            numeric_cols = [
+                col for col in frame.columns if pd.to_numeric(frame[col], errors="coerce").notna().any()
+            ]
+            if not numeric_cols:
+                return None
+            column = numeric_cols[-1]
+        values = pd.to_numeric(frame[column], errors="coerce").to_numpy(dtype=np.float64)
+        if values.size == 0 or not np.isfinite(values).all():
+            return None
+        return values.copy()
+
+    def _discover_sidecar_files_for_csv(self, path: str, manifest: dict | None = None) -> dict[str, str]:
+        """Discover same-folder sidecars when the dataset package includes a manifest."""
+        discovered: dict[str, str] = {}
+        for key in ("rtk", "imu", "altimeter"):
+            candidate = self._manifest_sidecar_path(path, manifest, key)
+            if candidate is None:
+                default_path = Path(path).resolve().parent / f"{key}.csv"
+                if default_path.exists():
+                    candidate = str(default_path)
+            if candidate is not None:
+                discovered[key] = candidate
+        return discovered
+
     def _read_explicit_trace_timestamps_from_csv(self, path: str):
         """从主 CSV 第 6 列读取显式 trace 时间戳；不根据采样参数推导。"""
         try:
@@ -4831,13 +4947,17 @@ class GPRGuiQt(QMainWindow):
 
     def _build_sidecar_loader_kwargs(self, path: str) -> dict:
         """根据当前选择构造 CSV 加载 sidecar kwargs。"""
-        rtk_path = self._sidecar_files.get("rtk")
-        imu_path = self._sidecar_files.get("imu")
-        altimeter_path = self._sidecar_files.get("altimeter")
+        manifest = self._read_csv_sidecar_manifest(path)
+        discovered = self._discover_sidecar_files_for_csv(path, manifest)
+        rtk_path = self._sidecar_files.get("rtk") or discovered.get("rtk")
+        imu_path = self._sidecar_files.get("imu") or discovered.get("imu")
+        altimeter_path = self._sidecar_files.get("altimeter") or discovered.get("altimeter")
         if not rtk_path and not imu_path and not altimeter_path:
             return {}
 
         trace_timestamps_s = self._read_explicit_trace_timestamps_from_csv(path)
+        if trace_timestamps_s is None:
+            trace_timestamps_s = self._read_trace_timestamps_sidecar(path, manifest)
         if trace_timestamps_s is None and self._is_current_data_path(path):
             trace_timestamps_s = self._get_trace_timestamps_for_sidecars()
         if trace_timestamps_s is None:
