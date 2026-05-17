@@ -220,7 +220,10 @@ def _preview_indices(length: int, limit: int) -> np.ndarray:
     step = int(np.ceil(length / limit))
     idx = np.arange(0, length, step, dtype=np.int32)
     if idx.size == 0 or idx[-1] != length - 1:
-        idx = np.concatenate((idx, np.array([length - 1], dtype=np.int32)))
+        with_tail = np.empty(idx.size + 1, dtype=np.int32)
+        with_tail[:-1] = idx
+        with_tail[-1] = length - 1
+        idx = with_tail
     return idx
 
 
