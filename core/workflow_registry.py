@@ -32,11 +32,11 @@ OUTPUT_EFFECT_LABELS: dict[str, str] = {
 }
 
 OUTPUT_EFFECT_TITLES: dict[str, str] = {
-    "bscan": "B-scan Preview",
-    "compare": "Before / After",
-    "qc": "QC Metrics",
-    "spectrum": "Spectrum View",
-    "evidence": "Evidence Snapshot",
+    "bscan": "B-scan 预览",
+    "compare": "前后对比",
+    "qc": "QC 指标",
+    "spectrum": "频谱视图",
+    "evidence": "Evidence 快照",
 }
 
 OUTPUT_EFFECT_EMPTY_MESSAGES: dict[str, str] = {

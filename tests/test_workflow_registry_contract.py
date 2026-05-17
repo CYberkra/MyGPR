@@ -82,6 +82,8 @@ def test_output_effect_metadata_is_complete_and_user_visible():
     assert set(OUTPUT_EFFECT_TITLES) == expected
     assert set(OUTPUT_EFFECT_EMPTY_MESSAGES) == expected
     assert OUTPUT_EFFECT_LABELS["bscan"] == "查看此步 B-scan"
+    assert OUTPUT_EFFECT_TITLES["compare"] == "前后对比"
+    assert OUTPUT_EFFECT_TITLES["spectrum"] == "频谱视图"
 
 
 def test_port_label_mapping_distinguishes_velocity_preview_and_evidence():
