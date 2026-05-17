@@ -55,6 +55,7 @@ from core.quality_metrics import (
     weighted_score_parts,
 )
 from core.runtime_warnings import merge_runtime_warnings
+from core.scalar_utils import to_float
 
 
 class AutoTuneError(RuntimeError):
@@ -1565,8 +1566,9 @@ def _build_zero_time_candidates(
 
 def _resolve_time_step_ns(n_samples: int, header_info: dict[str, Any]) -> float:
     total_time_ns = header_info.get("total_time_ns") if header_info else None
-    if total_time_ns and float(total_time_ns) > 0:
-        return float(total_time_ns) / max(1, int(n_samples))
+    total_time_value = to_float(total_time_ns, default=0.0)
+    if total_time_value > 0:
+        return total_time_value / max(1, int(n_samples))
     return 48.0 / max(1, int(n_samples))
 
 
@@ -1575,10 +1577,7 @@ def _agc_window_min(n_samples: int, header_info: dict[str, Any]) -> int:
     min_by_fraction = int(round(samples * 0.02))
     min_by_time = 0
     total_time_ns = header_info.get("total_time_ns") if header_info else None
-    try:
-        total = float(total_time_ns)
-    except Exception:
-        total = 0.0
+    total = to_float(total_time_ns, default=0.0)
     if total > 0.0:
         time_step_ns = total / samples
         min_by_time = int(round(0.5 / max(time_step_ns, 1.0e-9)))
@@ -1893,24 +1892,15 @@ def _build_frequency_filter_trials(
 
 
 def _resolve_nyquist_mhz(n_samples: int, header_info: dict[str, Any]) -> float | None:
-    try:
-        sample_rate_hz = float(header_info.get("sample_rate_hz"))
-    except Exception:
-        sample_rate_hz = 0.0
+    sample_rate_hz = to_float(header_info.get("sample_rate_hz"), default=0.0)
     if sample_rate_hz > 0.0:
         return float(sample_rate_hz / 2.0e6)
 
-    try:
-        time_step_s = float(header_info.get("time_step_s"))
-    except Exception:
-        time_step_s = 0.0
+    time_step_s = to_float(header_info.get("time_step_s"), default=0.0)
     if time_step_s > 0.0:
         return float(1.0 / time_step_s / 2.0e6)
 
-    try:
-        total_time_ns = float(header_info.get("total_time_ns"))
-    except Exception:
-        total_time_ns = 0.0
+    total_time_ns = to_float(header_info.get("total_time_ns"), default=0.0)
     if total_time_ns > 0.0:
         return float(max(1, int(n_samples)) / (total_time_ns * 1.0e-9) / 2.0e6)
     return None

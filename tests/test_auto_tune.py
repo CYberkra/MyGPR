@@ -7,7 +7,14 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from core.auto_tune import AutoTuneError, auto_select_method_group, auto_tune_method
+from core.auto_tune import (
+    AutoTuneError,
+    _agc_window_min,
+    _resolve_nyquist_mhz,
+    _resolve_time_step_ns,
+    auto_select_method_group,
+    auto_tune_method,
+)
 from core.methods_registry import METHOD_METADATA, get_auto_tune_stage
 from core.preset_profiles import RECOMMENDED_RUN_PROFILES, WORKFLOW_STAGES
 from core.workflow_data import METHOD_CATEGORIES
@@ -212,6 +219,17 @@ def test_auto_tune_frequency_filter_returns_valid_band_candidate():
     assert result["best_params"]["low_freq_mhz"] < result["best_params"]["high_freq_mhz"]
     assert result["best_params"]["high_freq_mhz"] <= 500.0
     assert len(result["coarse_trials"]) >= 1
+
+
+def test_auto_tune_header_timing_helpers_accept_numpy_scalar_values():
+    header = {
+        "total_time_ns": np.array([128.0]),
+        "sample_rate_hz": np.float64(2.0e9),
+    }
+
+    assert _resolve_time_step_ns(128, header) == 1.0
+    assert _agc_window_min(128, header) >= 3
+    assert _resolve_nyquist_mhz(128, header) == 1000.0
 
 
 def test_auto_tune_svd_subspace_returns_rank_interval_candidate():
