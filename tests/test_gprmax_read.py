@@ -136,3 +136,11 @@ def test_read_gprmax_out_reports_malformed_fallback_trace_file(tmp_path: Path):
 
     with pytest.raises(ValueError, match=r"rxs/rx1/Ez.*broken1\.out"):
         read_gprmax_out(str(tmp_path / "broken_merged.out"))
+
+
+def test_read_gprmax_out_reports_trace_length_mismatch(tmp_path: Path):
+    _write_gprmax_out(tmp_path / "trace1.out", np.array([1.0, 2.0, 3.0]))
+    _write_gprmax_out(tmp_path / "trace2.out", np.array([4.0, 5.0]))
+
+    with pytest.raises(ValueError, match=r"length mismatch.*trace2\.out.*expected 3.*got 2"):
+        read_gprmax_out(str(tmp_path / "trace1.out"))

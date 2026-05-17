@@ -748,6 +748,17 @@ def _read_gprmax_ez_dataset(handle: Any, source: str | Path) -> np.ndarray:
         raise ValueError(f"Cannot find 'rxs/rx1/Ez' in {source}") from exc
 
 
+def _gprmax_trace_vector(data: np.ndarray, samples: int, source: str | Path) -> np.ndarray:
+    """Validate one gprMax trace before inserting it into a merged B-scan matrix."""
+    trace = np.asarray(data, dtype=np.float32).reshape(-1)
+    if trace.size != int(samples):
+        raise ValueError(
+            f"gprMax trace length mismatch in {source}: "
+            f"expected {int(samples)} samples, got {int(trace.size)}"
+        )
+    return trace
+
+
 def read_gprmax_out(out_path: str) -> dict:
     """读取 gprMax .out HDF5 文件，提取电场数据并组装为 B-scan 矩阵
 
@@ -818,12 +829,14 @@ def read_gprmax_out(out_path: str) -> dict:
             samples = _safe_positive_int(iterations) or int(data0.shape[0])
             n_traces = len(out_files)
             matrix = np.zeros((samples, n_traces), dtype=np.float32)
-            matrix[:, 0] = data0
+            matrix[:, 0] = _gprmax_trace_vector(data0, samples, first_path)
 
             for i, fname in enumerate(out_files[1:], 1):
                 fpath = os.path.join(folder, fname)
                 with h5py.File(fpath, "r") as fi:
-                    matrix[:, i] = _read_gprmax_ez_dataset(fi, fpath)
+                    matrix[:, i] = _gprmax_trace_vector(
+                        _read_gprmax_ez_dataset(fi, fpath), samples, fpath
+                    )
             data = matrix
 
     # 处理数据形状
@@ -884,7 +897,9 @@ def read_gprmax_out(out_path: str) -> dict:
             for i, fname in enumerate(out_files):
                 fpath = os.path.join(folder, fname)
                 with h5py.File(fpath, "r") as f:
-                    matrix[:, i] = _read_gprmax_ez_dataset(f, fpath)
+                    matrix[:, i] = _gprmax_trace_vector(
+                        _read_gprmax_ez_dataset(f, fpath), samples, fpath
+                    )
             data = matrix
         else:
             # 单道数据，重塑为列向量
