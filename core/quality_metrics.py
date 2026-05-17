@@ -640,8 +640,9 @@ def periodic_banding_ratio(
     if spec.shape[1] <= 1:
         return 0.0
     freqs = np.fft.rfftfreq(window.shape[1], d=1.0)
-    low = max(0.0, _finite_scalar(trace_band[0], 0.05))
-    high = min(float(freqs[-1]), _finite_scalar(trace_band[1], 0.18))
+    values = tuple(trace_band or ())
+    low = max(0.0, _finite_scalar(values[0] if len(values) > 0 else 0.05, 0.05))
+    high = min(float(freqs[-1]), _finite_scalar(values[1] if len(values) > 1 else 0.18, 0.18))
     if high <= low:
         high = min(float(freqs[-1]), low + 0.04)
     band_mask = (freqs >= low) & (freqs <= high)

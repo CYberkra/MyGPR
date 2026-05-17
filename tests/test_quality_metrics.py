@@ -170,3 +170,4 @@ def test_periodic_banding_ratio_handles_non_finite_trace_band():
 
     assert np.isfinite(ratio)
     assert ratio >= 0.0
+    assert np.isfinite(periodic_banding_ratio(raw, trace_band=(0.08,)))
