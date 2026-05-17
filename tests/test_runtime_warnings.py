@@ -75,6 +75,21 @@ def test_agc_gain_warning_path_accepts_numpy_scalar_runtime_params():
     assert "agc_window_too_short" in codes
 
 
+def test_compensating_gain_accepts_numpy_scalar_runtime_params():
+    data = np.ones((4, 2), dtype=np.float32)
+
+    result, meta = run_processing_method(
+        data,
+        "compensatingGain",
+        {"gain_min": np.array([0.0]), "gain_max": np.array([6.0])},
+    )
+
+    assert result.shape == data.shape
+    assert np.allclose(result[0], 1.0)
+    assert result[-1, 0] > result[0, 0]
+    assert meta["method_id"] == "compensatingGain"
+
+
 def test_running_average_preserves_shape_and_emits_warning_when_window_too_large():
     data = np.arange(60, dtype=np.float32).reshape(10, 6)
     result, meta = run_processing_method(data, "running_average_2D", {"ntraces": 999})

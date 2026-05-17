@@ -376,7 +376,9 @@ def _run_legacy_adapter(
 def _apply_compensating_gain(
     data: np.ndarray, gain_min: float = 1.0, gain_max: float = 6.0, **kwargs
 ) -> np.ndarray:
-    gain_curve_db = np.linspace(float(gain_min), float(gain_max), data.shape[0])
+    min_db = to_float(gain_min, default=1.0)
+    max_db = to_float(gain_max, default=6.0)
+    gain_curve_db = np.linspace(min_db, max_db, data.shape[0])
     gain_curve = 10.0 ** (gain_curve_db / 20.0)
     return data * gain_curve[:, np.newaxis]
 
