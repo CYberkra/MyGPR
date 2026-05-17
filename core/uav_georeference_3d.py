@@ -354,9 +354,14 @@ def build_airborne_georeference_3d_payload(
 
 def _jsonable(value: Any) -> Any:
     if isinstance(value, np.ndarray):
-        return value.tolist()
-    if isinstance(value, (np.integer, np.floating)):
+        return _jsonable(value.tolist())
+    if isinstance(value, np.floating):
+        parsed = float(value.item())
+        return parsed if np.isfinite(parsed) else None
+    if isinstance(value, np.integer):
         return value.item()
+    if isinstance(value, float):
+        return value if np.isfinite(value) else None
     if isinstance(value, dict):
         return {str(key): _jsonable(val) for key, val in value.items()}
     if isinstance(value, (list, tuple)):
@@ -496,7 +501,7 @@ def export_airborne_georeference_3d_bundle(
         "vtk_path": str(vtk_path),
     }
     json_path.write_text(
-        json.dumps(_jsonable(summary), ensure_ascii=False, indent=2),
+        json.dumps(_jsonable(summary), ensure_ascii=False, indent=2, allow_nan=False),
         encoding="utf-8",
     )
 

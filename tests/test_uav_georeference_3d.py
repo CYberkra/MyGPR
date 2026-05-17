@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -67,6 +68,32 @@ def test_export_airborne_georeference_bundle_writes_vtk_csv_json(tmp_path: Path)
     assert Path(result["json_path"]).exists()
     assert result["summary"]["trace_count"] == 10
     assert result["summary"]["preview"]["shape"] == [20, 10]
+
+
+def test_export_airborne_georeference_json_sanitizes_nonfinite_summary_values(
+    tmp_path: Path,
+):
+    data = np.arange(24, dtype=np.float32).reshape(6, 4)
+    payload = build_airborne_georeference_3d_payload(
+        data,
+        {"total_time_ns": 60.0},
+        {"trace_distance_m": np.linspace(0.0, 0.9, 4)},
+    )
+    assert payload is not None
+    payload["total_time_ns"] = np.inf
+    payload["preview"]["amplitude_min"] = np.nan
+    payload["preview"]["amplitude_max"] = np.inf
+
+    result = export_airborne_georeference_3d_bundle(payload, tmp_path / "scene.vtk")
+
+    summary_text = Path(result["json_path"]).read_text(encoding="utf-8")
+    assert "Infinity" not in summary_text
+    assert "NaN" not in summary_text
+    summary = json.loads(summary_text)
+    assert summary["total_time_ns"] is None
+    assert summary["preview"]["amplitude_min"] is None
+    assert summary["preview"]["amplitude_max"] is None
+    json.dumps(summary, allow_nan=False)
 
 
 def test_build_airborne_georeference_payload_falls_back_to_trace_distance():
