@@ -29,6 +29,7 @@ from core.processing_engine import (
 )
 from core.quality_metrics import compute_motion_quality_metrics
 from core.scalar_utils import to_float
+from core.trace_metadata_utils import resample_bscan_columns_linear
 from core.uav_georeference_3d import (
     build_airborne_georeference_3d_payload,
     save_airborne_georeference_3d_preview_png,
@@ -523,19 +524,9 @@ def _resample_columns_linear(data: np.ndarray, target_traces: int) -> np.ndarray
     if target_traces <= 0:
         return np.empty((arr.shape[0], 0), dtype=np.float32)
 
-    source_position = np.linspace(
-        0.0,
-        float(arr.shape[1] - 1),
-        int(target_traces),
-        dtype=np.float32,
-    )
-    left_idx = np.floor(source_position).astype(np.int32)
-    right_idx = np.minimum(left_idx + 1, arr.shape[1] - 1)
-    weight = (source_position - left_idx.astype(np.float32)).astype(np.float32)
-    return (
-        arr[:, left_idx] * (1.0 - weight)[None, :]
-        + arr[:, right_idx] * weight[None, :]
-    ).astype(np.float32, copy=False)
+    source_position = np.arange(arr.shape[1], dtype=np.float64)
+    target_position = np.linspace(0.0, float(arr.shape[1] - 1), int(target_traces), dtype=np.float64)
+    return resample_bscan_columns_linear(arr, source_position, target_position)
 
 
 def export_chain_evidence(

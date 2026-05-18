@@ -63,8 +63,8 @@ def test_generate_motion_effect_demo_outputs_visible_artifacts(motion_effect_dem
     summary = json.loads(result.summary_json.read_text(encoding="utf-8"))
     assert summary["pipeline"] == [
         "trajectory_smoothing",
-        "motion_compensation_speed",
         "motion_compensation_attitude",
+        "motion_compensation_speed",
         "motion_compensation_height",
     ]
     assert summary["bscan_rms_delta"] > 0.02

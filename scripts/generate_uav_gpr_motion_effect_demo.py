@@ -30,6 +30,7 @@ from core.processing_engine import (  # noqa: E402
     prepare_runtime_params,
     run_processing_method,
 )
+from core.trace_metadata_utils import resample_bscan_columns_linear  # noqa: E402
 from core.uav_georeference_3d import (  # noqa: E402
     build_airborne_georeference_3d_payload,
     save_airborne_georeference_3d_preview_png,
@@ -57,19 +58,19 @@ PIPELINE: tuple[tuple[str, dict[str, Any]], ...] = (
         },
     ),
     (
-        "motion_compensation_speed",
-        {
-            "spacing_m": 0.42,
-            "interpolation_mode": "linear",
-        },
-    ),
-    (
         "motion_compensation_attitude",
         {
             "apc_offset_x_m": 0.04,
             "apc_offset_y_m": -0.02,
             "apc_offset_z_m": 0.0,
             "max_abs_tilt_deg": 18.0,
+        },
+    ),
+    (
+        "motion_compensation_speed",
+        {
+            "spacing_m": 0.42,
+            "interpolation_mode": "linear",
         },
     ),
     (
@@ -127,10 +128,7 @@ def _shift_trace(trace: np.ndarray, shift_samples: float) -> np.ndarray:
 
 
 def _interp_columns(source: np.ndarray, source_x: np.ndarray, target_x: np.ndarray) -> np.ndarray:
-    out = np.empty((source.shape[0], target_x.size), dtype=np.float32)
-    for row in range(source.shape[0]):
-        out[row, :] = np.interp(target_x, source_x, source[row, :], left=0.0, right=0.0)
-    return out
+    return resample_bscan_columns_linear(source, source_x, target_x)
 
 
 def _build_ideal_bscan(uniform_x: np.ndarray, rng: np.random.Generator) -> tuple[np.ndarray, dict[str, Any]]:
@@ -446,6 +444,13 @@ def _save_bscan_comparison(path: Path, stages: list[dict[str, Any]]) -> None:
     plt.close(fig)
 
 
+def _stage_by_method(stages: list[dict[str, Any]], method_id: str) -> dict[str, Any]:
+    for stage in stages:
+        if stage.get("method") == method_id:
+            return stage
+    raise KeyError(f"stage not found: {method_id}")
+
+
 def _track_top_interface_std(data: np.ndarray) -> float:
     arr = np.asarray(data, dtype=np.float64)
     if arr.ndim != 2 or arr.shape[0] < 70:
@@ -516,7 +521,7 @@ It is not real field evidence and should not be used as a geological conclusion.
    sidecars in this folder can be aligned without the previous missing timestamp
    warning.
 3. Run the four-step motion workflow:
-   `trajectory_smoothing -> motion_compensation_speed -> motion_compensation_attitude -> motion_compensation_height`.
+   `trajectory_smoothing -> motion_compensation_attitude -> motion_compensation_speed -> motion_compensation_height`.
 4. Open the quality/export 3D preview. Raw and current 3D trajectories should
    differ, and the B-scan curtain should show a clearer target hyperbola after
    height compensation.
@@ -603,6 +608,7 @@ def generate_motion_effect_demo(output_dir: str | Path = DEFAULT_OUTPUT_DIR) -> 
     )
     stages = result["stages"]
     final_stage = stages[-1]
+    speed_stage = _stage_by_method(stages, "motion_compensation_speed")
     final_data = np.asarray(final_stage["data"], dtype=np.float32)
     raw_resampled = _resample_like_reference(np.asarray(stages[0]["data"], dtype=np.float32), final_data.shape[1])
     bscan_rms_delta = float(np.sqrt(np.mean((final_data - raw_resampled) ** 2)))
@@ -653,7 +659,7 @@ def generate_motion_effect_demo(output_dir: str | Path = DEFAULT_OUTPUT_DIR) -> 
         "top_interface_std_before": top_before,
         "top_interface_std_after": top_after,
         "before_spacing_std_m": float(np.std(np.diff(np.asarray(stages[0]["trace_metadata"]["trace_distance_m"], dtype=np.float64)))),
-        "after_speed_spacing_std_m": float(np.std(np.diff(np.asarray(stages[2]["trace_metadata"]["trace_distance_m"], dtype=np.float64)))),
+        "after_speed_spacing_std_m": float(np.std(np.diff(np.asarray(speed_stage["trace_metadata"]["trace_distance_m"], dtype=np.float64)))),
         "after_spacing_std_m": float(np.std(np.diff(np.asarray(final_stage["trace_metadata"]["trace_distance_m"], dtype=np.float64)))),
         "preview_paths": preview_paths,
         "stages": stage_summaries,

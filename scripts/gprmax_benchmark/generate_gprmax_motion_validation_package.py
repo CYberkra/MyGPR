@@ -29,6 +29,7 @@ if str(ROOT) not in sys.path:
 from core.uav_georeference_3d import (  # noqa: E402
     build_airborne_georeference_3d_payload,
 )
+from core.trace_metadata_utils import resample_bscan_columns_linear  # noqa: E402
 from PythonModule.motion_compensation_attitude import method_motion_compensation_attitude  # noqa: E402
 from PythonModule.motion_compensation_height import method_motion_compensation_height  # noqa: E402
 from PythonModule.motion_compensation_speed import method_motion_compensation_speed  # noqa: E402
@@ -352,10 +353,7 @@ def _resolve_trace_interval_m(header_info: dict[str, Any]) -> float:
 
 
 def _interp_columns(source: np.ndarray, source_x: np.ndarray, target_x: np.ndarray) -> np.ndarray:
-    out = np.empty((source.shape[0], target_x.size), dtype=np.float32)
-    for row in range(source.shape[0]):
-        out[row, :] = np.interp(target_x, source_x, source[row, :], left=0.0, right=0.0)
-    return out
+    return resample_bscan_columns_linear(source, source_x, target_x)
 
 
 def _shift_trace(trace: np.ndarray, shift_samples: float) -> np.ndarray:
