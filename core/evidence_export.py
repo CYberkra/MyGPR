@@ -243,12 +243,7 @@ def _build_preview_diff(raw: np.ndarray, current: np.ndarray) -> np.ndarray | No
     raw_arr = raw_arr[:rows, :]
     current_arr = current_arr[:rows, :]
     if raw_arr.shape[1] != current_arr.shape[1]:
-        source_x = np.linspace(0.0, 1.0, raw_arr.shape[1], dtype=np.float32)
-        target_x = np.linspace(0.0, 1.0, current_arr.shape[1], dtype=np.float32)
-        resampled = np.empty((rows, current_arr.shape[1]), dtype=np.float32)
-        for row_idx in range(rows):
-            resampled[row_idx, :] = np.interp(target_x, source_x, raw_arr[row_idx, :]).astype(np.float32)
-        raw_arr = resampled
+        raw_arr = _resample_columns_linear(raw_arr, current_arr.shape[1])
     return (current_arr - raw_arr).astype(np.float32, copy=False)
 
 

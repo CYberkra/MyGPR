@@ -7,6 +7,7 @@ from __future__ import annotations
 import numpy as np
 
 from core.evidence_export import (
+    _build_preview_diff,
     _resample_columns_linear,
     _time_distance_ranges,
     _to_jsonable,
@@ -43,6 +44,25 @@ def test_resample_columns_linear_returns_copy_when_trace_count_matches():
     result[0, 0] = -99.0
 
     assert data[0, 0] == 0.0
+
+
+def test_build_preview_diff_resamples_raw_when_trace_counts_differ():
+    raw = np.array(
+        [
+            [0.0, 1.0, 3.0, 6.0],
+            [2.0, 4.0, 8.0, 16.0],
+        ],
+        dtype=np.float32,
+    )
+    current = np.ones((2, 7), dtype=np.float32) * 10.0
+    expected_raw = _resample_columns_linear(raw, current.shape[1])
+
+    diff = _build_preview_diff(raw, current)
+
+    assert diff is not None
+    assert diff.dtype == np.float32
+    assert diff.shape == current.shape
+    assert np.allclose(diff, current - expected_raw, rtol=1e-6, atol=1e-6)
 
 
 def test_time_distance_ranges_accept_numpy_scalar_header_values():
