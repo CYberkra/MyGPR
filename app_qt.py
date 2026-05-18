@@ -1459,6 +1459,7 @@ class GPRGuiQt(QMainWindow):
             self.page_advanced.cmap_invert_var,
             self.page_advanced.show_cbar_var,
             self.page_advanced.show_grid_var,
+            self.page_advanced.show_physical_x_axis_var,
             self.page_advanced.show_physical_y_axis_var,
             self.page_advanced.percentile_var,
             self.page_advanced.normalize_var,
@@ -4547,6 +4548,9 @@ class GPRGuiQt(QMainWindow):
         lines.append(f"- 显示色标: {self.page_advanced.show_cbar_var.isChecked()}")
         lines.append(f"- 显示网格: {self.page_advanced.show_grid_var.isChecked()}")
         lines.append(
+            f"- 显示物理横轴（距离）: {self.page_advanced.show_physical_x_axis_var.isChecked()}"
+        )
+        lines.append(
             f"- 显示物理纵轴（时间/深度）: {self.page_advanced.show_physical_y_axis_var.isChecked()}"
         )
         lines.append(
@@ -5571,6 +5575,7 @@ class GPRGuiQt(QMainWindow):
             "cmap_invert": self.page_advanced.cmap_invert_var.isChecked(),
             "show_cbar": self.page_advanced.show_cbar_var.isChecked(),
             "show_grid": self.page_advanced.show_grid_var.isChecked(),
+            "show_physical_x_axis": self.page_advanced.show_physical_x_axis_var.isChecked(),
             "show_physical_y_axis": self.page_advanced.show_physical_y_axis_var.isChecked(),
             "percentile": self.page_advanced.percentile_var.isChecked(),
             "normalize": False
@@ -5691,6 +5696,13 @@ class GPRGuiQt(QMainWindow):
             and self.page_advanced.show_physical_y_axis_var.isChecked()
         )
 
+    def _use_physical_horizontal_axis(self) -> bool:
+        """Whether the display should convert trace columns to distance labels."""
+        return bool(
+            hasattr(self.page_advanced, "show_physical_x_axis_var")
+            and self.page_advanced.show_physical_x_axis_var.isChecked()
+        )
+
     def _build_trace_axis(
         self,
         n_traces: int,
@@ -5698,6 +5710,8 @@ class GPRGuiQt(QMainWindow):
         header_info_override: dict | None = None,
     ) -> np.ndarray:
         """构建距离轴（真实距离或均匀道距）。"""
+        if not self._use_physical_horizontal_axis():
+            return np.arange(n_traces, dtype=np.float32)
         meta = (
             trace_metadata_override
             if trace_metadata_override is not None
@@ -5801,9 +5815,15 @@ class GPRGuiQt(QMainWindow):
             )
         )
         use_physical_dist = bool(
+            self._use_physical_horizontal_axis()
+            and
             self.trace_metadata is not None
             and "trace_distance_m" in self.trace_metadata
-        ) or bool(self.header_info and self.header_info.get("trace_interval_m"))
+        ) or bool(
+            self._use_physical_horizontal_axis()
+            and self.header_info
+            and self.header_info.get("trace_interval_m")
+        )
 
         time_start_idx = (
             self._axis_value_to_index(time_axis, t_start, n_samples, "left")
@@ -5890,7 +5910,7 @@ class GPRGuiQt(QMainWindow):
         trace_axis = np.asarray(axis_info.get("trace_axis", []), dtype=np.float32)
         if time_axis.size > 1 and trace_axis.size > 1:
             extent = [trace_axis[0], trace_axis[-1], time_axis[-1], time_axis[0]]
-            xlabel = "距离 (m)"
+            xlabel = "距离 (m)" if self._use_physical_horizontal_axis() else "道数"
             ylabel = (
                 "高程 (m)"
                 if self._use_physical_vertical_axis() and header.get("is_elevation")

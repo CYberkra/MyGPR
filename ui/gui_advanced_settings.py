@@ -255,15 +255,21 @@ class AdvancedSettingsPage(QWidget):
         self.show_physical_y_axis_var.setToolTip(
             "默认按采样索引显示纵轴；开启后才使用 total_time_ns、深度或高程头信息显示物理纵轴。"
         )
+        self.show_physical_x_axis_var = QCheckBox("显示物理横轴（距离）")
+        self.show_physical_x_axis_var.setChecked(False)
+        self.show_physical_x_axis_var.setToolTip(
+            "默认按道索引显示横轴；开启后才使用 trace_distance_m 或 trace_interval_m 显示距离。"
+        )
         opts_l.addWidget(self.cmap_invert_var)
         opts_l.addWidget(self.show_cbar_var)
         opts_l.addWidget(self.show_grid_var)
+        opts_l.addWidget(self.show_physical_x_axis_var)
         opts_l.addWidget(self.show_physical_y_axis_var)
         opts_l.addStretch(1)
         view_layout.addWidget(opts_row)
 
         style_hint = QLabel(
-            "默认纵轴为采样索引，不做显示层时间/深度换算；需要按 ns、深度或高程判读时，再开启物理纵轴。"
+            "默认横轴为道索引、纵轴为采样索引，不做显示层距离或时间/深度换算；需要物理坐标判读时，再开启对应物理轴。"
         )
         style_hint.setWordWrap(True)
         style_hint.setProperty("class", "hintText")
