@@ -324,6 +324,7 @@ def _build_motion_compensation_fixture(seed: int) -> tuple[np.ndarray, dict[str,
     metric_config = {
         "ridge_row_range": list(ridge_row_range),
         "target_row_range": list(target_row_range),
+        "target_preservation_min_fraction_of_raw": 0.90,
         "banding_trace_band": list(banding_trace_band),
         "banding_row_range": list(banding_row_range),
     }

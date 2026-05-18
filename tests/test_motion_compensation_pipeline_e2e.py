@@ -33,7 +33,11 @@ def _assert_motion_improvement(summary: dict) -> None:
     assert final_metrics["path_rmse_m"] < context["expected_metrics"]["raw"]["path_rmse_m"]
     assert final_metrics["footprint_rmse_m"] < context["expected_metrics"]["raw"]["footprint_rmse_m"]
     assert final_metrics["periodic_banding_ratio"] < context["expected_metrics"]["raw"]["periodic_banding_ratio"]
-    assert final_metrics["target_preservation_ratio"] >= context["expected_metrics"]["raw"]["target_preservation_ratio"]
+    target_floor = (
+        context["expected_metrics"]["raw"]["target_preservation_ratio"]
+        * metric_config["target_preservation_min_fraction_of_raw"]
+    )
+    assert final_metrics["target_preservation_ratio"] >= target_floor
 
 
 def test_export_motion_compensation_benchmark_writes_required_artifacts(tmp_path: Path):

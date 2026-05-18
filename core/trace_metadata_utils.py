@@ -264,17 +264,22 @@ def resample_bscan_columns_linear(
         raise ValueError("source_distance_m length must match B-scan trace count")
     if source_distance.size == 0:
         raise ValueError("source_distance_m must contain at least one trace")
-    if np.any(np.diff(source_distance) < 0):
+    source_deltas = np.diff(source_distance)
+    if np.any(source_deltas < 0):
         raise ValueError("source_distance_m must be monotonically non-decreasing")
     if target_distance.size == 0:
         return np.empty((arr.shape[0], 0), dtype=np.float32)
 
-    unique_distance, reverse_index = np.unique(
-        source_distance[::-1],
-        return_index=True,
-    )
-    source_indices = (source_distance.size - 1 - reverse_index).astype(np.int64)
-    source_values = arr[:, source_indices]
+    if np.all(source_deltas > 0):
+        unique_distance = source_distance
+        source_values = arr
+    else:
+        unique_distance, reverse_index = np.unique(
+            source_distance[::-1],
+            return_index=True,
+        )
+        source_indices = (source_distance.size - 1 - reverse_index).astype(np.int64)
+        source_values = arr[:, source_indices]
     if unique_distance.size == 1:
         return np.repeat(source_values[:, :1], target_distance.size, axis=1)
 

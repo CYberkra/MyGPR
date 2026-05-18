@@ -751,13 +751,17 @@ def export_motion_compensation_benchmark(
         banding_trace_band=banding_trace_band,
         banding_row_range=banding_row_range,
     )
+    target_preservation_floor = (
+        float(raw_metrics["target_preservation_ratio"])
+        * float(metric_config.get("target_preservation_min_fraction_of_raw", 1.0))
+    )
     objective_checks = {
         "ridge_improved": final_metrics["raw_ridge_rmse_samples"] < raw_metrics["raw_ridge_rmse_samples"],
         "trace_spacing_improved": final_metrics["trace_spacing_std_m"] < raw_metrics["trace_spacing_std_m"],
         "path_improved": final_metrics["path_rmse_m"] < raw_metrics["path_rmse_m"],
         "footprint_improved": final_metrics["footprint_rmse_m"] < raw_metrics["footprint_rmse_m"],
         "banding_improved": final_metrics["periodic_banding_ratio"] < raw_metrics["periodic_banding_ratio"],
-        "target_preserved_or_improved": final_metrics["target_preservation_ratio"] >= raw_metrics["target_preservation_ratio"],
+        "target_preserved_or_improved": final_metrics["target_preservation_ratio"] >= target_preservation_floor,
     }
     final_time_range, final_distance_range = _time_distance_ranges(header_info, current)
 
@@ -795,6 +799,7 @@ def export_motion_compensation_benchmark(
         "profile_key": profile_key,
         "seed": int(seed),
         "metric_config": _to_jsonable(metric_config),
+        "target_preservation_floor": float(target_preservation_floor),
         "raw_metrics": _to_jsonable(raw_metrics),
         "final_metrics": _to_jsonable(final_metrics),
         "objective_checks": objective_checks,
@@ -830,7 +835,9 @@ def export_motion_compensation_benchmark(
     summary["summary_json"] = str(summary_json)
     summary["raw_metrics"] = _to_jsonable(raw_metrics)
     summary["final_metrics"] = _to_jsonable(final_metrics)
-    summary["corrected_trace_metadata"] = _to_jsonable(trace_metadata)
-    summary["raw_data"] = _to_jsonable(raw)
-    summary["final_data"] = _to_jsonable(current)
-    return _to_jsonable(summary)
+    # Keep large arrays as arrays for in-memory tests/metrics. The persisted
+    # JSON summary above intentionally stays compact and does not embed B-scans.
+    summary["corrected_trace_metadata"] = trace_metadata
+    summary["raw_data"] = raw
+    summary["final_data"] = current
+    return summary

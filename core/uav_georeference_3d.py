@@ -33,10 +33,14 @@ CJK_FONT_CANDIDATES = (
     "WenQuanYi Zen Hei",
     "Arial Unicode MS",
 )
+_MATPLOTLIB_CJK_CONFIGURED = False
 
 
 def _configure_matplotlib_cjk_fonts(matplotlib_module: Any) -> None:
     """Prefer installed CJK fonts for static preview exports."""
+    global _MATPLOTLIB_CJK_CONFIGURED
+    if _MATPLOTLIB_CJK_CONFIGURED:
+        return
     try:
         from matplotlib import font_manager as fm
 
@@ -48,6 +52,7 @@ def _configure_matplotlib_cjk_fonts(matplotlib_module: Any) -> None:
         matplotlib_module.rcParams["axes.unicode_minus"] = False
     except Exception:
         return
+    _MATPLOTLIB_CJK_CONFIGURED = True
 
 
 def _as_float_array(values: Any) -> np.ndarray:
@@ -329,8 +334,9 @@ def build_airborne_georeference_3d_payload(
     preview_y = y_m[preview_trace_idx]
     preview_z_top = airborne_z_m[preview_trace_idx]
     preview_depth = depth_axis_m[preview_sample_idx]
-    curtain_x = np.repeat(preview_x[np.newaxis, :], preview_sample_idx.size, axis=0)
-    curtain_y = np.repeat(preview_y[np.newaxis, :], preview_sample_idx.size, axis=0)
+    curtain_shape = (preview_sample_idx.size, preview_trace_idx.size)
+    curtain_x = np.broadcast_to(preview_x[np.newaxis, :], curtain_shape)
+    curtain_y = np.broadcast_to(preview_y[np.newaxis, :], curtain_shape)
     curtain_z = preview_z_top[np.newaxis, :] - preview_depth[:, np.newaxis]
 
     finite_preview = np.isfinite(preview_data)
@@ -513,6 +519,8 @@ def export_airborne_georeference_3d_bundle(
     _write_vtk_structured_grid(payload, vtk_path)
     _write_trace_summary_csv(payload, csv_path)
 
+    preview = payload.get("preview", {})
+    preview_amplitude = np.asarray(preview.get("amplitude", np.empty((0, 0))))
     summary = {
         "schema_version": int(payload.get("schema_version", 1)),
         "source_kind": payload.get("source_kind", "uav_gpr_georeference_3d"),
@@ -529,14 +537,14 @@ def export_airborne_georeference_3d_bundle(
             "z": payload.get("z_axis_label"),
         },
         "preview": {
-            "trace_stride": int(payload.get("preview", {}).get("trace_stride", 1)),
-            "sample_stride": int(payload.get("preview", {}).get("sample_stride", 1)),
+            "trace_stride": int(preview.get("trace_stride", 1)),
+            "sample_stride": int(preview.get("sample_stride", 1)),
             "shape": [
-                int(np.asarray(payload.get("preview", {}).get("amplitude", np.empty((0, 0)))).shape[0]),
-                int(np.asarray(payload.get("preview", {}).get("amplitude", np.empty((0, 0)))).shape[1]),
+                int(preview_amplitude.shape[0]),
+                int(preview_amplitude.shape[1]),
             ],
-            "amplitude_min": float(payload.get("preview", {}).get("amplitude_min", 0.0)),
-            "amplitude_max": float(payload.get("preview", {}).get("amplitude_max", 0.0)),
+            "amplitude_min": float(preview.get("amplitude_min", 0.0)),
+            "amplitude_max": float(preview.get("amplitude_max", 0.0)),
         },
         "trace_summary_csv": str(csv_path),
         "vtk_path": str(vtk_path),
@@ -564,7 +572,8 @@ def save_airborne_georeference_3d_preview_png(
     """Save a lightweight static PNG from a 3D georeference payload."""
     import matplotlib
 
-    matplotlib.use("Agg")
+    if str(matplotlib.get_backend()).lower() != "agg":
+        matplotlib.use("Agg")
     _configure_matplotlib_cjk_fonts(matplotlib)
     import matplotlib.pyplot as plt
     from matplotlib import colormaps, colors
