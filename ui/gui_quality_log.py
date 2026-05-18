@@ -1213,6 +1213,27 @@ class QualityLogPage(QWidget):
         """Add OpenGL axes and an XY grid so the expanded preview has a real 3D frame."""
         import pyqtgraph.opengl as gl
 
+        frame = self._georef3d_reference_geometry(all_points)
+        origin = frame["origin"]
+        size = frame["size"]
+
+        grid = gl.GLGridItem(color=(80, 80, 80, 72))
+        grid.setSize(x=float(size[0]), y=float(size[1]), z=0.0)
+        spacing = float(frame["grid_spacing"])
+        grid.setSpacing(x=spacing, y=spacing, z=0.0)
+        grid.translate(float(origin[0] + size[0] / 2.0), float(origin[1] + size[1] / 2.0), float(origin[2]))
+        view.addItem(grid)
+
+        axis = gl.GLAxisItem(antialias=True)
+        axis.setSize(x=float(size[0]), y=float(size[1]), z=float(size[2]))
+        axis.translate(float(origin[0]), float(origin[1]), float(origin[2]))
+        view.addItem(axis)
+        self._add_georef3d_colored_axis(view, "x", origin, size)
+        self._add_georef3d_colored_axis(view, "y", origin, size)
+        self._add_georef3d_colored_axis(view, "z", origin, size)
+
+    def _georef3d_reference_geometry(self, all_points: list[np.ndarray]) -> dict[str, np.ndarray | float]:
+        """Compute a stable right-handed 3D reference frame around preview data."""
         if all_points:
             points = np.vstack(all_points)
             finite_mask = np.isfinite(points).all(axis=1)
@@ -1229,18 +1250,45 @@ class QualityLogPage(QWidget):
         pad = np.maximum(span * 0.08, np.array([0.5, 0.5, 0.2]))
         origin = min_xyz - pad
         size = span + 2.0 * pad
-
-        grid = gl.GLGridItem(color=(80, 80, 80, 72))
-        grid.setSize(x=float(size[0]), y=float(size[1]), z=0.0)
         spacing = float(max(np.nanmax(size[:2]) / 10.0, 0.5))
-        grid.setSpacing(x=spacing, y=spacing, z=0.0)
-        grid.translate(float(origin[0] + size[0] / 2.0), float(origin[1] + size[1] / 2.0), float(origin[2]))
-        view.addItem(grid)
+        return {"origin": origin, "size": size, "grid_spacing": spacing}
 
-        axis = gl.GLAxisItem(antialias=True)
-        axis.setSize(x=float(size[0]), y=float(size[1]), z=float(size[2]))
-        axis.translate(float(origin[0]), float(origin[1]), float(origin[2]))
-        view.addItem(axis)
+    def _add_georef3d_colored_axis(self, view, axis: str, origin: np.ndarray, size: np.ndarray) -> None:
+        """Add one colored X/Y/Z axis line with a small text label."""
+        import pyqtgraph.opengl as gl
+
+        axis_index = {"x": 0, "y": 1, "z": 2}[axis]
+        colors_by_axis = {
+            "x": (0.90, 0.10, 0.10, 1.0),
+            "y": (0.10, 0.65, 0.18, 1.0),
+            "z": (0.10, 0.35, 0.95, 1.0),
+        }
+        labels_by_axis = {"x": "X", "y": "Y", "z": "Z"}
+        end = np.asarray(origin, dtype=np.float64).copy()
+        end[axis_index] += float(size[axis_index])
+        line = np.vstack([origin, end]).astype(np.float32)
+        view.addItem(
+            gl.GLLinePlotItem(
+                pos=line,
+                color=colors_by_axis[axis],
+                width=3.0,
+                antialias=True,
+            )
+        )
+        text_cls = getattr(gl, "GLTextItem", None)
+        if text_cls is None:
+            return
+        try:
+            label_pos = end.copy()
+            label_pos[axis_index] += max(float(size[axis_index]) * 0.035, 0.12)
+            text_item = text_cls(
+                pos=label_pos.astype(float),
+                text=labels_by_axis[axis],
+                color=colors_by_axis[axis],
+            )
+            view.addItem(text_item)
+        except Exception:
+            return
 
     def _create_dialog_layer_button(
         self,

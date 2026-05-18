@@ -1739,6 +1739,34 @@ def test_georef3d_mesh_faces_use_expected_grid_topology():
         app.processEvents()
 
 
+def test_georef3d_reference_geometry_wraps_preview_points():
+    app = _get_app()
+    page = QualityLogPage()
+    try:
+        points = [
+            np.array(
+                [
+                    [2.0, -1.0, 10.0],
+                    [8.0, 3.0, 12.0],
+                    [5.0, 1.0, 8.0],
+                ],
+                dtype=np.float64,
+            )
+        ]
+
+        frame = page._georef3d_reference_geometry(points)
+        origin = np.asarray(frame["origin"], dtype=np.float64)
+        size = np.asarray(frame["size"], dtype=np.float64)
+
+        assert np.all(origin < np.array([2.0, -1.0, 8.0]))
+        assert np.all(origin + size > np.array([8.0, 3.0, 12.0]))
+        assert float(frame["grid_spacing"]) >= 0.5
+    finally:
+        page.release_plot_resources()
+        page.close()
+        app.processEvents()
+
+
 def test_processing_worker_compacts_large_meta_arrays():
     _get_app()
     raw = np.ones((4, 3), dtype=np.float32)
