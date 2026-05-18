@@ -39,14 +39,6 @@ from core.gprmax_truth_metrics import compute_ground_truth_metrics  # noqa: E402
 from core.gpr_io import read_gprmax_out  # noqa: E402
 from core.methods_registry import PROCESSING_METHODS  # noqa: E402
 from core.preset_profiles import GUI_PRESETS_V1, RECOMMENDED_RUN_PROFILES  # noqa: E402
-from core.processing_engine import (  # noqa: E402
-    clone_header_info,
-    clone_trace_metadata,
-    merge_result_header_info,
-    merge_result_trace_metadata,
-    prepare_runtime_params,
-    run_processing_method,
-)
 from core.quality_metrics import (  # noqa: E402
     compute_benchmark_metrics,
     ratio_fidelity,
