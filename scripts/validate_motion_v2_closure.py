@@ -47,8 +47,8 @@ DEFAULT_DATASET = ROOT / "output" / "mygpr_uav_motion_effect_demo_v1"
 DEFAULT_OUTPUT = ROOT / "output" / "motion_v2_closure_validation"
 ATOMIC_PIPELINE = (
     "trajectory_smoothing",
-    "motion_compensation_speed",
     "motion_compensation_attitude",
+    "motion_compensation_speed",
     "motion_compensation_height",
 )
 COMPACT_META_KEYS = {
@@ -426,6 +426,8 @@ def _write_report(summary: dict[str, Any], report_path: Path) -> None:
         "",
         "## Main Result",
         "",
+        "- Atomic route: "
+        f"`{' -> '.join(summary['atomic_pipeline'])}`.",
         f"- Top-interface jitter std: raw `{metrics['top_interface_std_raw']:.3f}` -> atomic `{metrics['top_interface_std_atomic']:.3f}` -> V2 `{metrics['top_interface_std_v2']:.3f}` samples.",
         f"- Trace spacing std: raw `{metrics['spacing_std_raw_m']:.6f}` -> atomic `{metrics['spacing_std_atomic_m']:.6f}` -> V2 `{metrics['spacing_std_v2_m']:.6f}` m.",
         f"- RMS difference raw->atomic: `{metrics['rms_raw_to_atomic']:.6f}`.",

@@ -16,7 +16,7 @@
 ## 当前边界
 
 - `motion_compensation_v2`：当前推荐入口，负责高度时移、振幅归一化、姿态/APC 足迹元数据、等距道距重采样和质量告警。
-- 原子运动补偿节点：`trajectory_smoothing`、`motion_compensation_speed`、`motion_compensation_attitude`、`motion_compensation_height`，共享 V2 的 AGL 优先级、空气路径速度、clamp、warnings 和 trace metadata 输出契约。
+- 原子运动补偿节点：`trajectory_smoothing`、`motion_compensation_attitude`、`motion_compensation_speed`、`motion_compensation_height`，共享 V2 的 AGL 优先级、空气路径速度、clamp、warnings 和 trace metadata 输出契约。验证/ablation 顺序应先更新姿态/APC 足迹，再做等距道距重采样，最后做高度时移与振幅归一。
 - `motion_compensation_vibration`：周期条带伪影抑制（实验），可用于高级增强或去噪验证，不再作为运动补偿核心能力证明。
 
 ## 进入 V3 前置条件

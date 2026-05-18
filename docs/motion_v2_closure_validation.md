@@ -22,7 +22,8 @@ python scripts/validate_motion_v2_closure.py ^
 1. 读取 `main.csv`、`rtk.csv`、`imu.csv`、`altimeter.csv`。
 2. 通过 `trace_timestamp_s` 对齐辅助传感器，确认 RTK/IMU/高度计没有被忽略。
 3. 执行四个原子步骤：
-   `trajectory_smoothing -> motion_compensation_speed -> motion_compensation_attitude -> motion_compensation_height`。
+   `trajectory_smoothing -> motion_compensation_attitude -> motion_compensation_speed -> motion_compensation_height`。
+   姿态/APC 足迹更新必须先于等距道距重采样，避免后续姿态更新破坏 speed compensation 建立的等距 trace axis。
 4. 执行统一入口 `motion_compensation_v2`。
 5. 对比 B-scan、trace metadata、三维预览 payload 和回放 Evidence 包。
 
@@ -30,14 +31,14 @@ python scripts/validate_motion_v2_closure.py ^
 
 | 指标 | Raw | 四原子步骤 | Motion V2 |
 | --- | ---: | ---: | ---: |
-| 顶部界面抖动 std / sample | 0.288 | 0.174 | 0.171 |
-| 道间距抖动 std / m | 0.108801 | 0.010201 | 0.008717 |
+| 顶部界面抖动 std / sample | 0.288 | 0.186 | 0.171 |
+| 道间距抖动 std / m | 0.108801 | 0.014143 | 0.008717 |
 
 补充指标：
 
-- Raw -> 四原子步骤 B-scan RMS 差异：0.074367
+- Raw -> 四原子步骤 B-scan RMS 差异：0.073814
 - Raw -> Motion V2 B-scan RMS 差异：0.075112
-- 四原子步骤 -> Motion V2 B-scan RMS 差异：0.014511
+- 四原子步骤 -> Motion V2 B-scan RMS 差异：0.016069
 
 ## 契约检查
 
