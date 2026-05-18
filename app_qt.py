@@ -1459,6 +1459,7 @@ class GPRGuiQt(QMainWindow):
             self.page_advanced.cmap_invert_var,
             self.page_advanced.show_cbar_var,
             self.page_advanced.show_grid_var,
+            self.page_advanced.show_physical_y_axis_var,
             self.page_advanced.percentile_var,
             self.page_advanced.normalize_var,
             self.page_advanced.demean_var,
@@ -4546,6 +4547,9 @@ class GPRGuiQt(QMainWindow):
         lines.append(f"- 显示色标: {self.page_advanced.show_cbar_var.isChecked()}")
         lines.append(f"- 显示网格: {self.page_advanced.show_grid_var.isChecked()}")
         lines.append(
+            f"- 显示物理纵轴（时间/深度）: {self.page_advanced.show_physical_y_axis_var.isChecked()}"
+        )
+        lines.append(
             f"- Symmetric stretch: {self.page_advanced.symmetric_var.isChecked()}"
         )
         if self.page_advanced.percentile_var.isChecked():
@@ -5567,6 +5571,7 @@ class GPRGuiQt(QMainWindow):
             "cmap_invert": self.page_advanced.cmap_invert_var.isChecked(),
             "show_cbar": self.page_advanced.show_cbar_var.isChecked(),
             "show_grid": self.page_advanced.show_grid_var.isChecked(),
+            "show_physical_y_axis": self.page_advanced.show_physical_y_axis_var.isChecked(),
             "percentile": self.page_advanced.percentile_var.isChecked(),
             "normalize": False
             if skip_preprocess
@@ -5643,6 +5648,8 @@ class GPRGuiQt(QMainWindow):
             else self.header_info
         )
         if header and header.get("is_elevation"):
+            if not self._use_physical_vertical_axis():
+                return np.arange(n_samples, dtype=np.float32)
             elevation_top = header.get("elevation_top_m")
             depth_step = header.get("depth_step_m")
             if (
@@ -5662,6 +5669,8 @@ class GPRGuiQt(QMainWindow):
                     dtype=np.float32,
                 )
         if header and header.get("is_depth"):
+            if not self._use_physical_vertical_axis():
+                return np.arange(n_samples, dtype=np.float32)
             depth_step = header.get("depth_step_m")
             if depth_step is not None and float(depth_step) > 0:
                 return np.arange(n_samples, dtype=np.float32) * float(depth_step)
@@ -5669,9 +5678,18 @@ class GPRGuiQt(QMainWindow):
             if depth_max is not None:
                 return np.linspace(0.0, float(depth_max), n_samples, dtype=np.float32)
         if header and header.get("total_time_ns"):
+            if not self._use_physical_vertical_axis():
+                return np.arange(n_samples, dtype=np.float32)
             total_time_ns = float(header["total_time_ns"])
             return np.linspace(0.0, total_time_ns, n_samples, dtype=np.float32)
         return np.arange(n_samples, dtype=np.float32)
+
+    def _use_physical_vertical_axis(self) -> bool:
+        """Whether the display should convert sample rows to time/depth/elevation labels."""
+        return bool(
+            hasattr(self.page_advanced, "show_physical_y_axis_var")
+            and self.page_advanced.show_physical_y_axis_var.isChecked()
+        )
 
     def _build_trace_axis(
         self,
@@ -5773,6 +5791,8 @@ class GPRGuiQt(QMainWindow):
         )
         d_end = self._parse_float_edit(self.page_advanced.dist_end_edit, default=None)
         use_physical_time = bool(
+            self._use_physical_vertical_axis()
+            and
             self.header_info
             and (
                 self.header_info.get("total_time_ns")
@@ -5873,11 +5893,13 @@ class GPRGuiQt(QMainWindow):
             xlabel = "距离 (m)"
             ylabel = (
                 "高程 (m)"
-                if header.get("is_elevation")
+                if self._use_physical_vertical_axis() and header.get("is_elevation")
                 else "深度 (m)"
-                if header.get("is_depth")
+                if self._use_physical_vertical_axis() and header.get("is_depth")
                 else (
-                    "时间 (ns)" if header.get("total_time_ns") else "时间（采样索引）"
+                    "时间 (ns)"
+                    if self._use_physical_vertical_axis() and header.get("total_time_ns")
+                    else "采样点"
                 )
             )
         else:

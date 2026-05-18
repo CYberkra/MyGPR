@@ -522,6 +522,8 @@ def test_phase2_tabs_expose_prioritized_group_hierarchy_and_bridge():
         ]
         assert win.page_advanced.sidecar_box.isHidden() is False
         assert win.page_advanced.altimeter_sidecar_button.text() == "选择高度计"
+        assert win.page_advanced.show_physical_y_axis_var.text() == "显示物理纵轴（时间/深度）"
+        assert not win.page_advanced.show_physical_y_axis_var.isChecked()
 
         assert _top_level_group_titles(win.page_auto_tune) == [
             "实验流程",
@@ -535,6 +537,41 @@ def test_phase2_tabs_expose_prioritized_group_hierarchy_and_bridge():
             "图表查看",
             "运行记录",
         ]
+    finally:
+        win.close()
+        app.processEvents()
+
+
+def test_main_plot_uses_sample_axis_until_physical_y_axis_enabled():
+    app = _get_app()
+    win = GPRGuiQt()
+    try:
+        win.header_info = {"total_time_ns": 120.0, "trace_interval_m": 0.5}
+
+        sample_axis = win._build_time_axis(5)
+        assert np.array_equal(sample_axis, np.arange(5, dtype=np.float32))
+        cfg = win._resolve_plot_extent_and_labels(
+            np.zeros((5, 3), dtype=np.float32),
+            None,
+            {
+                "time_axis": sample_axis,
+                "trace_axis": np.array([0.0, 0.5, 1.0], dtype=np.float32),
+            },
+        )
+        assert cfg["ylabel"] == "采样点"
+
+        win.page_advanced.show_physical_y_axis_var.setChecked(True)
+        time_axis = win._build_time_axis(5)
+        assert np.allclose(time_axis, np.linspace(0.0, 120.0, 5, dtype=np.float32))
+        cfg = win._resolve_plot_extent_and_labels(
+            np.zeros((5, 3), dtype=np.float32),
+            None,
+            {
+                "time_axis": time_axis,
+                "trace_axis": np.array([0.0, 0.5, 1.0], dtype=np.float32),
+            },
+        )
+        assert cfg["ylabel"] == "时间 (ns)"
     finally:
         win.close()
         app.processEvents()

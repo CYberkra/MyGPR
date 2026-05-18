@@ -250,16 +250,29 @@ class AdvancedSettingsPage(QWidget):
         self.show_cbar_var.setToolTip("在图像右侧显示色标")
         self.show_grid_var = QCheckBox("显示网格")
         self.show_grid_var.setToolTip("在图像上叠加参考网格")
+        self.show_physical_y_axis_var = QCheckBox("显示物理纵轴（时间/深度）")
+        self.show_physical_y_axis_var.setChecked(False)
+        self.show_physical_y_axis_var.setToolTip(
+            "默认按采样索引显示纵轴；开启后才使用 total_time_ns、深度或高程头信息显示物理纵轴。"
+        )
         opts_l.addWidget(self.cmap_invert_var)
         opts_l.addWidget(self.show_cbar_var)
         opts_l.addWidget(self.show_grid_var)
+        opts_l.addWidget(self.show_physical_y_axis_var)
         opts_l.addStretch(1)
         view_layout.addWidget(opts_row)
 
-        style_hint = QLabel("摆动图适合看同相轴和波形结构；滑动对比可在主图中直接拖动分隔线，适合快速判读前后差异。")
+        style_hint = QLabel(
+            "默认纵轴为采样索引，不做显示层时间/深度换算；需要按 ns、深度或高程判读时，再开启物理纵轴。"
+        )
         style_hint.setWordWrap(True)
         style_hint.setProperty("class", "hintText")
         view_layout.addWidget(style_hint)
+
+        style_hint_2 = QLabel("摆动图适合看同相轴和波形结构；滑动对比可在主图中直接拖动分隔线，适合快速判读前后差异。")
+        style_hint_2.setWordWrap(True)
+        style_hint_2.setProperty("class", "hintText")
+        view_layout.addWidget(style_hint_2)
 
         layout.addWidget(view_box)
         layout.addStretch(1)
