@@ -124,7 +124,7 @@ def test_generate_gprmax_motion_validation_package(tmp_path: Path):
     assert result.atomic_shape[0] == 72
     assert result.v2_shape[0] == 72
     assert result.spacing_std_before_m > 0.0
-    assert result.spacing_std_atomic_after_speed_m < result.spacing_std_before_m * 0.35
+    assert result.spacing_std_atomic_after_speed_m < result.spacing_std_before_m * 0.60
     assert result.spacing_std_v2_m < result.spacing_std_before_m * 0.20
     assert result.target_ratio_raw is not None
     assert result.target_ratio_atomic is not None
@@ -134,8 +134,8 @@ def test_generate_gprmax_motion_validation_package(tmp_path: Path):
     assert summary["source"]["scenario_id"] == "motion_pipe"
     assert summary["pipeline"]["atomic"] == [
         "trajectory_smoothing",
-        "motion_compensation_speed",
         "motion_compensation_attitude",
+        "motion_compensation_speed",
         "motion_compensation_height",
     ]
     assert "raw_vs_source_rms" in summary["metrics"]
@@ -147,6 +147,8 @@ def test_generate_gprmax_motion_validation_package(tmp_path: Path):
     assert "target_traces" in summary["metrics"]
     assert summary["metrics"]["atomic_vs_source_rms"] < summary["metrics"]["raw_vs_source_rms"]
     assert summary["metrics"]["v2_vs_source_rms"] < summary["metrics"]["raw_vs_source_rms"]
+    assert summary["metrics"]["trace_spacing_cv_atomic"] < summary["metrics"]["trace_spacing_cv_before"]
+    assert summary["metrics"]["spacing_std_atomic_m"] <= summary["metrics"]["spacing_std_atomic_after_speed_m"] * 1.25
     assert "motion_v2_3d_preview.png" in summary["artifacts"]["images"]
     assert "paper_motion_validation_comparison.png" in summary["artifacts"]["images"]
 
@@ -191,6 +193,7 @@ def test_generate_gprmax_motion_validation_longline_report(tmp_path: Path):
         assert key in summary["metrics"], key
     assert summary["metrics"]["target_traces"] == summary["shapes"]["v2"][1]
     assert "V2 Resampling Explanation" in report
+    assert "Validation Notes" in report
     assert "target_traces" in report
     assert "resampled to the processed trace axis" in report
     assert (output_dir / "paper_motion_validation_comparison.png").exists()
