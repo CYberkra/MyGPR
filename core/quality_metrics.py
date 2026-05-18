@@ -147,8 +147,11 @@ def extract_roi_and_context(
     d0 = max(0, min(_safe_index(dist_start), n_traces - 1))
     d1 = max(d0 + 1, min(_safe_index(dist_end, default=n_traces), n_traces))
 
-    pad_t = max(2, int(round((t1 - t0) * padding_ratio)))
-    pad_d = max(2, int(round((d1 - d0) * padding_ratio)))
+    resolved_padding_ratio = float(
+        np.clip(_finite_scalar(padding_ratio, 0.18), 0.0, 1.0)
+    )
+    pad_t = max(2, int(round((t1 - t0) * resolved_padding_ratio)))
+    pad_d = max(2, int(round((d1 - d0) * resolved_padding_ratio)))
     c_t0 = max(0, t0 - pad_t)
     c_t1 = min(n_samples, t1 + pad_t)
     c_d0 = max(0, d0 - pad_d)

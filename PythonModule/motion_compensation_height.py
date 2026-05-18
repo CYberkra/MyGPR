@@ -17,10 +17,26 @@ V1 说明：
 
 from __future__ import annotations
 
+from typing import Any, Tuple
 import numpy as np
 
+from core.motion_compensation_core import (
+    apply_height_correction,
+    AIR_WAVE_SPEED_M_PER_NS,
+)
 
-def method_motion_compensation_height(
+
+def _positive_float(value: Any) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(parsed) or parsed <= 0.0:
+        return None
+    return parsed
+
+
+def method_motion_compensation_height_v1(
     data: np.ndarray,
     reference_height_mode: str = "mean",
     manual_height: float = 0.0,
@@ -31,8 +47,8 @@ def method_motion_compensation_height(
     interpolation_mode: str = "linear",
     trace_metadata: dict | None = None,
     **kwargs,
-) -> tuple[np.ndarray, dict]:
-    """飞行高度归一化处理。
+) -> Tuple[np.ndarray, dict]:
+    """[V1 兼容保留] 飞行高度归一化处理。
 
     Args:
         data: 输入 B-scan 数据，形状 (samples, traces)
@@ -56,7 +72,7 @@ def method_motion_compensation_height(
     samples, traces = arr.shape
     wave_speed = _positive_float(wave_speed_m_per_ns)
     meta: dict[str, object] = {
-        "method": "motion_compensation_height",
+        "method": "motion_compensation_height_v1",
         "compensate_amplitude": bool(compensate_amplitude),
         "compensate_time_shift": bool(compensate_time_shift),
         "wave_speed_m_per_ns": float(wave_speed) if wave_speed is not None else 0.0,
@@ -191,11 +207,101 @@ def method_motion_compensation_height(
     return corrected, meta
 
 
-def _positive_float(value: object) -> float | None:
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError):
-        return None
-    if not np.isfinite(parsed) or parsed <= 0.0:
-        return None
-    return parsed
+def method_motion_compensation_height(
+    data: np.ndarray,
+    reference_height_mode: str = "mean",
+    manual_height: float = 0.0,
+    compensate_amplitude: bool = True,
+    compensate_time_shift: bool = True,
+    wave_speed_m_per_ns: float = 0.0,  # Default 0.0 triggers V2-style behavior
+    max_shift_samples: float | None = 0.0,
+    interpolation_mode: str = "linear",
+    trace_metadata: dict | None = None,
+    **kwargs,
+) -> Tuple[np.ndarray, dict]:
+    """飞行高度归一化处理。
+
+    默认使用 V2 风格的核心逻辑（优先使用 height_agl_m，使用物理波速）。
+    为了兼容性，如果显式传递 wave_speed_m_per_ns=0.1，或者有 trace_metadata 但仅包含 flight_height_m 而没有 height_agl_m，将触发 V1 风格。
+
+    Args:
+        data: 输入 B-scan 数据，形状 (samples, traces)
+        reference_height_mode: 参考高度选择，"mean"/"min"/"manual"
+        manual_height: manual 模式下的参考高度（米）
+        compensate_amplitude: 是否做振幅校正
+        compensate_time_shift: 是否做时移校正
+        wave_speed_m_per_ns: 传播速度。默认 0.0 使用物理波速（V2 风格）；显式 0.1 触发 V1 兼容模式。
+        max_shift_samples: 时移样点上限；None 表示不限制
+        interpolation_mode: 插值模式；仅支持 "linear"
+        trace_metadata: 每道元数据，必须包含高度信息
+        **kwargs: 兼容其他参数
+
+    Returns:
+        (corrected_data, meta)
+    """
+    # Check if we should use V1 compatibility mode
+    use_v1 = False
+    if abs(wave_speed_m_per_ns - 0.1) < 1e-9:
+        use_v1 = True
+    elif trace_metadata is None:
+        use_v1 = True
+    else:
+        has_flight_height = "flight_height_m" in trace_metadata
+        has_agl_height = "height_agl_m" in trace_metadata
+        if has_flight_height and not has_agl_height:
+            use_v1 = True
+        elif not has_flight_height and not has_agl_height:
+            use_v1 = True
+
+    if use_v1:
+        return method_motion_compensation_height_v1(
+            data=data,
+            reference_height_mode=reference_height_mode,
+            manual_height=manual_height,
+            compensate_amplitude=compensate_amplitude,
+            compensate_time_shift=compensate_time_shift,
+            wave_speed_m_per_ns=wave_speed_m_per_ns if wave_speed_m_per_ns > 0.0 else 0.1,
+            max_shift_samples=max_shift_samples,
+            interpolation_mode=interpolation_mode,
+            trace_metadata=trace_metadata,
+            **kwargs,
+        )
+
+    # Use new V2-style core logic
+    resolved_speed = (
+        wave_speed_m_per_ns
+        if wave_speed_m_per_ns and wave_speed_m_per_ns > 0.0
+        else AIR_WAVE_SPEED_M_PER_NS
+    )
+    resolved_max_shift_samples = (
+        max_shift_samples if max_shift_samples and max_shift_samples > 0.0 else None
+    )
+    time_window_ns = kwargs.get("time_window_ns")
+    header_info = kwargs.get("header_info")
+
+    corrected, meta = apply_height_correction(
+        data=data,
+        trace_metadata=trace_metadata,
+        height_source="auto",
+        reference_height_mode=reference_height_mode,
+        manual_height_m=manual_height,
+        compensate_time_shift=compensate_time_shift,
+        compensate_amplitude=compensate_amplitude,
+        max_shift_samples=resolved_max_shift_samples,
+        max_shift_ns=20.0,
+        max_amplitude_scale=2.0,
+        air_wave_speed_m_per_ns=resolved_speed,
+        time_window_ns=time_window_ns,
+        header_info=header_info,
+    )
+
+    # Rename method to match expected name
+    meta["method"] = "motion_compensation_height"
+
+    # Backward compatibility with V1-style keys if needed
+    if "height_correction_applied" in meta:
+        meta["input_height_valid"] = meta["height_correction_applied"]
+    if "height_reference_m" in meta:
+        meta["reference_height_m"] = meta["height_reference_m"]
+
+    return corrected, meta

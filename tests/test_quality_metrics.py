@@ -188,6 +188,9 @@ def test_extract_roi_and_context_handles_non_finite_bounds():
 
     assert result["roi_data"].shape == raw.shape
 
+    padded = extract_roi_and_context(raw, padding_ratio=np.nan)
+    assert padded["context_data"].size > 0
+
 
 def test_auto_roi_bounds_handles_non_finite_padding_ratio():
     raw = _build_test_profile()
