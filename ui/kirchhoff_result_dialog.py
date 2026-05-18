@@ -144,7 +144,7 @@ class KirchhoffResultDialog(QDialog):
 
         # 调整布局
         self.fig.tight_layout()
-        self.canvas.draw()
+        self.canvas.draw_idle()
 
     def _compute_extent(self):
         """计算显示范围"""
@@ -183,9 +183,14 @@ class KirchhoffResultDialog(QDialog):
 
     def _compute_vmin_vmax(self):
         """计算色标范围"""
+        finite = np.asarray(self.data, dtype=np.float64)
+        finite = finite[np.isfinite(finite)]
+        if finite.size == 0:
+            return -1.0, 1.0
+
         # 使用百分比拉伸
         p_low, p_high = 0.5, 99.5
-        vmin, vmax = np.percentile(self.data, [p_low, p_high])
+        vmin, vmax = np.percentile(finite, [p_low, p_high])
 
         # 确保对称
         max_abs = max(abs(vmin), abs(vmax))
@@ -212,4 +217,4 @@ class KirchhoffResultDialog(QDialog):
     def showEvent(self, event):
         """显示时调整画布"""
         super().showEvent(event)
-        self.canvas.draw()
+        self.canvas.draw_idle()

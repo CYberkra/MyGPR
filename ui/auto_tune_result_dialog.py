@@ -350,7 +350,7 @@ class AutoTuneResultDialog(QDialog):
             ax.text(0.5, 0.5, "暂无候选评分图表", ha="center", va="center", color=palette["hint"])
             ax.set_axis_off()
             self._style_figure()
-            self.canvas.draw()
+            self.canvas.draw_idle()
             return
 
         family = self.result.get("family", "")
@@ -372,7 +372,7 @@ class AutoTuneResultDialog(QDialog):
 
         self._style_figure()
         self.fig.tight_layout()
-        self.canvas.draw()
+        self.canvas.draw_idle()
 
     def _plot_top_scores(self, ax, title: str):
         top_trials = self.sorted_trials[:8]
@@ -584,11 +584,17 @@ class AutoTuneResultDialog(QDialog):
         arr = np.asarray(values, dtype=float)
         if arr.size == 0:
             return arr
-        vmin = float(np.nanmin(arr))
-        vmax = float(np.nanmax(arr))
+        finite = arr[np.isfinite(arr)]
+        if finite.size == 0:
+            return np.ones_like(arr)
+        vmin = float(np.min(finite))
+        vmax = float(np.max(finite))
         if not np.isfinite(vmin) or not np.isfinite(vmax) or abs(vmax - vmin) < 1.0e-12:
             return np.ones_like(arr)
-        return (arr - vmin) / (vmax - vmin)
+        normalized = np.ones_like(arr)
+        finite_mask = np.isfinite(arr)
+        normalized[finite_mask] = (arr[finite_mask] - vmin) / (vmax - vmin)
+        return normalized
 
     def _trial_label(self, trial: dict) -> str:
         params = trial.get("params", {})
