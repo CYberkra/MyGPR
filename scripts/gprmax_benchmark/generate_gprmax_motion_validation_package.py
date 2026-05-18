@@ -1082,10 +1082,6 @@ def _build_summary(
     }
 
 
-def _spacing_std(metadata: dict[str, np.ndarray]) -> float:
-    return _spacing_stats(metadata)["std_m"]
-
-
 def _spacing_stats(metadata: dict[str, np.ndarray]) -> dict[str, float]:
     distance = np.asarray(metadata.get("trace_distance_m", []), dtype=np.float64)
     if distance.size < 3:

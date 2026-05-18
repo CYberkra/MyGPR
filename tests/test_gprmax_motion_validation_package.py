@@ -6,9 +6,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import h5py
 import numpy as np
+import pytest
 
 from core.gpr_io import extract_airborne_csv_payload
 from read_file_data import readcsv
@@ -92,11 +94,19 @@ def _write_gprmax_fixture(dataset_dir: Path) -> Path:
     return manifest_path
 
 
-def test_generate_gprmax_motion_validation_package(tmp_path: Path):
-    manifest_path = _write_gprmax_fixture(tmp_path / "dataset")
-    output_dir = tmp_path / "motion_validation"
-
+@pytest.fixture(scope="module")
+def default_motion_validation_package(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[Path, Any]:
+    root = tmp_path_factory.mktemp("gprmax_motion_validation_default")
+    manifest_path = _write_gprmax_fixture(root / "dataset")
+    output_dir = root / "motion_validation"
     result = generate_gprmax_motion_validation_package(manifest_path, output_dir, seed=7)
+    return output_dir, result
+
+
+def test_generate_gprmax_motion_validation_package(default_motion_validation_package):
+    output_dir, result = default_motion_validation_package
 
     for name in [
         "main.csv",
@@ -202,10 +212,8 @@ def test_generate_gprmax_motion_validation_longline_report(tmp_path: Path):
     assert (output_dir / "source_model_in.in").exists()
 
 
-def test_generated_gprmax_motion_package_sidecars_align(tmp_path: Path):
-    manifest_path = _write_gprmax_fixture(tmp_path / "dataset")
-    output_dir = tmp_path / "motion_validation"
-    generate_gprmax_motion_validation_package(manifest_path, output_dir, seed=11)
+def test_generated_gprmax_motion_package_sidecars_align(default_motion_validation_package):
+    output_dir, _result = default_motion_validation_package
 
     raw = readcsv(str(output_dir / "main.csv"))
     data, metadata, header = extract_airborne_csv_payload(
