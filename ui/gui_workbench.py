@@ -1761,7 +1761,7 @@ class WorkbenchPage(QWidget):
             # 更新指标
             self._update_metrics()
 
-            self.canvas.draw()
+            self.canvas.draw_idle()
         except Exception as e:
             self._log(f"预览刷新失败: {e}", "ERROR")
             logger.exception("Workbench preview refresh failed")
@@ -2134,31 +2134,26 @@ class WorkbenchPage(QWidget):
             self.data_range_label.setText("范围: --")
             return
 
-        # 计算聚焦比
-        # 聚焦比 = 信号能量 / 总能量
-        signal_energy = np.sum(data**2)
-        total_energy = data.size * np.mean(data**2)
-        focus_ratio = signal_energy / total_energy if total_energy > 0 else 0
+        from core.preset_profiles import compute_quality_metrics, compute_stolt_data_stats
 
-        # 计算热像素
-        # 热像素定义为超过均值3个标准差的像素
-        mean_val = np.mean(data)
-        std_val = np.std(data)
-        hot_pixels = np.sum(np.abs(data - mean_val) > 3 * std_val)
-
-        # 计算信噪比 (SNR)
-        # SNR = 10 * log10(信号功率 / 噪声功率)
-        # 这里使用简化计算：SNR = 20 * log10(mean / std)
-        if std_val > 0 and np.abs(mean_val) > 1e-12:
-            snr = 20 * np.log10(np.abs(mean_val) / std_val)
+        quality = compute_quality_metrics(data)
+        data_stats = compute_stolt_data_stats(data)
+        focus_ratio = float(quality.get("focus_ratio", 0.0))
+        hot_pixels = int(quality.get("hot_pixels", 0))
+        snr = float(data_stats.get("snr_db", 0.0)) if data_stats.get("valid") else 0.0
+        finite = np.asarray(data, dtype=float)
+        finite = finite[np.isfinite(finite)]
+        if finite.size:
+            data_min = float(np.min(finite))
+            data_max = float(np.max(finite))
         else:
-            snr = 0
+            data_min = data_max = 0.0
 
         # 更新显示
         self.focus_ratio_label.setText(f"聚焦比: {focus_ratio:.3f}")
         self.hot_pixels_label.setText(f"热像素: {hot_pixels}")
         self.snr_label.setText(f"SNR: {snr:.1f}dB")
-        self.data_range_label.setText(f"范围: [{data.min():.2f}, {data.max():.2f}]")
+        self.data_range_label.setText(f"范围: [{data_min:.2f}, {data_max:.2f}]")
 
         # 根据指标质量设置颜色（使用主题 class）
         from core.theme_manager import get_theme_manager

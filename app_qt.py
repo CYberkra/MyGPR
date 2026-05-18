@@ -3747,8 +3747,11 @@ class GPRGuiQt(QMainWindow):
                 progress_callback(10, "正在检测文件格式...")
 
             header_info = detect_csv_header(path)
-            manifest_info = self._read_csv_sidecar_manifest(path)
-            header_info = self._merge_manifest_header_info(header_info, manifest_info)
+            read_manifest = getattr(self, "_read_csv_sidecar_manifest", None)
+            merge_manifest = getattr(self, "_merge_manifest_header_info", None)
+            manifest_info = read_manifest(path) if callable(read_manifest) else {}
+            if callable(merge_manifest):
+                header_info = merge_manifest(header_info, manifest_info)
             skip_lines = _detect_skiprows(path)
 
             if progress_callback:

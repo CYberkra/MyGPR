@@ -29,6 +29,7 @@ from core.preset_profiles import (
 from core.workflow_data import METHOD_CATEGORIES, QUICK_PRESETS
 from ui.gui_quality_log import QualityLogPage
 from ui.gui_method_browser import MethodBrowserTree
+from ui.gui_param_editor import ParamEditorPanel
 
 
 class _DummyCanvasEvent:
@@ -423,6 +424,37 @@ def test_auto_tune_truth_validation_open_path_handles_missing_path(tmp_path):
         assert str(missing) in win.page_auto_tune.truth_evidence_label.text()
     finally:
         win.close()
+        app.processEvents()
+
+
+def test_workbench_param_editor_renders_choice_params_as_combo_box():
+    app = _get_app()
+    panel = ParamEditorPanel()
+    try:
+        panel.load_method("motion_compensation_height")
+
+        mode_widget = panel.param_widgets["reference_height_mode"]
+        height_source_widget = panel.param_widgets["height_source"]
+        manual_height_widget = panel.param_widgets["manual_height"]
+
+        assert isinstance(mode_widget, QComboBox)
+        assert isinstance(height_source_widget, QComboBox)
+        assert panel.get_current_params()["reference_height_mode"] == "mean"
+        assert manual_height_widget.isEnabled() is False
+
+        panel.set_current_params(
+            {
+                "reference_height_mode": "manual",
+                "height_source": "height_agl_m",
+            }
+        )
+
+        params = panel.get_current_params()
+        assert params["reference_height_mode"] == "manual"
+        assert params["height_source"] == "height_agl_m"
+        assert manual_height_widget.isEnabled() is True
+    finally:
+        panel.close()
         app.processEvents()
 
 

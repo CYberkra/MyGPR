@@ -42,6 +42,8 @@ class AutoTunePage(QWidget):
         self._last_stage_compare_result = None
         self._last_comparison_result = None
         self._last_evidence_bundle = None
+        self._truth_side_by_side_preview_cache_key = None
+        self._truth_side_by_side_preview_cache_pixmap = QPixmap()
         self.setup_ui()
 
     def setup_ui(self):
@@ -759,18 +761,38 @@ class AutoTunePage(QWidget):
         self.truth_side_by_side_preview.setPixmap(QPixmap())
         self.truth_side_by_side_preview.setToolTip("")
         if not side_by_side_path:
+            self._truth_side_by_side_preview_cache_key = None
+            self._truth_side_by_side_preview_cache_pixmap = QPixmap()
             self.truth_side_by_side_preview.setText("暂无 side-by-side 预览。导出 Evidence 后会显示缩略图。")
             return
 
         path_text = str(side_by_side_path)
         self.truth_side_by_side_preview.setToolTip(path_text)
-        self.btn_truth_open_side_by_side.setEnabled(os.path.exists(path_text))
-        if not os.path.exists(path_text):
+        exists = os.path.exists(path_text)
+        self.btn_truth_open_side_by_side.setEnabled(exists)
+        if not exists:
             self.truth_side_by_side_preview.setText(f"side-by-side PNG 路径已记录，但文件不存在：\n{path_text}")
+            return
+
+        stat = os.stat(path_text)
+        cache_key = (
+            path_text,
+            int(getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1_000_000_000))),
+            int(stat.st_size),
+        )
+        if (
+            cache_key == self._truth_side_by_side_preview_cache_key
+            and not self._truth_side_by_side_preview_cache_pixmap.isNull()
+        ):
+            self.truth_side_by_side_preview.setPixmap(
+                self._truth_side_by_side_preview_cache_pixmap
+            )
             return
 
         pixmap = QPixmap(path_text)
         if pixmap.isNull():
+            self._truth_side_by_side_preview_cache_key = None
+            self._truth_side_by_side_preview_cache_pixmap = QPixmap()
             self.truth_side_by_side_preview.setText(f"side-by-side PNG 路径已记录，但无法载入缩略图：\n{path_text}")
             return
 
@@ -780,6 +802,8 @@ class AutoTunePage(QWidget):
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
+        self._truth_side_by_side_preview_cache_key = cache_key
+        self._truth_side_by_side_preview_cache_pixmap = scaled
         self.truth_side_by_side_preview.setPixmap(scaled)
 
     def _refresh_truth_metrics(self, comparison: dict):

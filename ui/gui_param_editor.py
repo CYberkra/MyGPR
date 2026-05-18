@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
     QSpinBox,
     QDoubleSpinBox,
     QCheckBox,
+    QComboBox,
     QRadioButton,
     QButtonGroup,
 )
@@ -249,7 +250,7 @@ class ParamEditorPanel(QWidget):
             self.default_params[param_name] = default
 
             # 创建控件
-            widget = self._create_param_widget(param_type, default, min_val, max_val)
+            widget = self._create_param_widget(param_type, default, min_val, max_val, param)
             if widget:
                 widget.setToolTip(tooltip)
                 self.param_widgets[param_name] = widget
@@ -272,9 +273,44 @@ class ParamEditorPanel(QWidget):
 
                 self.param_layout.addWidget(row)
 
+        self._wire_motion_param_dependencies(method_id)
         self.param_layout.addStretch()
 
-    def _create_param_widget(self, param_type: str, default, min_val, max_val):
+    def _read_widget_value(self, widget):
+        if isinstance(widget, QComboBox):
+            data = widget.currentData()
+            return widget.currentText() if data is None else data
+        if isinstance(widget, QCheckBox):
+            return widget.isChecked()
+        if isinstance(widget, (QSpinBox, QDoubleSpinBox)):
+            return widget.value()
+        if isinstance(widget, QLineEdit):
+            return widget.text().strip()
+        return None
+
+    def _wire_motion_param_dependencies(self, method_id: str) -> None:
+        """Disable manual height unless the selected reference mode is manual."""
+        if method_id == "motion_compensation_height":
+            mode_name = "reference_height_mode"
+            manual_name = "manual_height"
+        elif method_id == "motion_compensation_v2":
+            mode_name = "height_reference_mode"
+            manual_name = "manual_height_m"
+        else:
+            return
+        mode_widget = self.param_widgets.get(mode_name)
+        manual_widget = self.param_widgets.get(manual_name)
+        if mode_widget is None or manual_widget is None:
+            return
+
+        def update_manual_enabled():
+            manual_widget.setEnabled(str(self._read_widget_value(mode_widget)) == "manual")
+
+        if isinstance(mode_widget, QComboBox):
+            mode_widget.currentIndexChanged.connect(lambda _idx: update_manual_enabled())
+        update_manual_enabled()
+
+    def _create_param_widget(self, param_type: str, default, min_val, max_val, meta: dict | None = None):
         """创建参数控件"""
         if param_type == "int":
             spin = QSpinBox()
@@ -305,6 +341,22 @@ class ParamEditorPanel(QWidget):
             # 连接信号，参数改变时触发预览
             check.toggled.connect(self._on_param_value_changed)
             return check
+
+        elif param_type == "choice":
+            combo = QComboBox()
+            choices = list((meta or {}).get("choices") or (meta or {}).get("options") or [])
+            if not choices and default not in (None, ""):
+                choices = [default]
+            for choice in choices:
+                combo.addItem(str(choice), choice)
+            default_text = str(default) if default is not None else ""
+            idx = combo.findText(default_text)
+            if idx < 0 and default_text:
+                combo.addItem(default_text, default)
+                idx = combo.findText(default_text)
+            combo.setCurrentIndex(max(idx, 0))
+            combo.currentIndexChanged.connect(self._on_param_value_changed)
+            return combo
 
         elif param_type == "str":
             edit = QLineEdit(str(default) if default is not None else "")
@@ -339,6 +391,9 @@ class ParamEditorPanel(QWidget):
                     widget.setValue(float(default) if default is not None else 0.0)
                 elif isinstance(widget, QCheckBox):
                     widget.setChecked(bool(default) if default is not None else False)
+                elif isinstance(widget, QComboBox):
+                    idx = widget.findText(str(default) if default is not None else "")
+                    widget.setCurrentIndex(max(idx, 0))
                 elif isinstance(widget, QLineEdit):
                     widget.setText(str(default) if default is not None else "")
 
@@ -358,6 +413,13 @@ class ParamEditorPanel(QWidget):
             elif isinstance(widget, QCheckBox):
                 widget.setChecked(bool(value) if value is not None else False)
                 changed = True
+            elif isinstance(widget, QComboBox):
+                idx = widget.findText(str(value) if value is not None else "")
+                if idx < 0 and value is not None:
+                    widget.addItem(str(value), value)
+                    idx = widget.findText(str(value))
+                widget.setCurrentIndex(max(idx, 0))
+                changed = True
             elif isinstance(widget, QLineEdit):
                 widget.setText(str(value) if value is not None else "")
                 changed = True
@@ -374,6 +436,8 @@ class ParamEditorPanel(QWidget):
                 params[param_name] = widget.value()
             elif isinstance(widget, QCheckBox):
                 params[param_name] = widget.isChecked()
+            elif isinstance(widget, QComboBox):
+                params[param_name] = self._read_widget_value(widget)
             elif isinstance(widget, QLineEdit):
                 params[param_name] = widget.text().strip()
         return params
