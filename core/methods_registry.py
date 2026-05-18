@@ -10,8 +10,6 @@
 
 from typing import Any
 
-import numpy as np
-
 from PythonModule.svd_background import method_svd_background
 from PythonModule.fk_filter import method_fk_filter
 from PythonModule.frequency_filter_1d import method_frequency_filter_1d
@@ -24,7 +22,6 @@ from PythonModule.time_to_depth import method_time_to_depth
 from PythonModule.trace_qc import method_trace_qc
 from PythonModule.sec_gain import method_sec_gain
 from PythonModule.sliding_average import method_sliding_average
-from PythonModule.rpca_placeholder import method_rpca_placeholder
 from PythonModule.rpca_background import method_rpca_background
 from PythonModule.wnnm_placeholder import method_wnnm_placeholder
 from PythonModule.ccbs_filter import method_ccbs
