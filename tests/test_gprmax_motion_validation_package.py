@@ -113,6 +113,7 @@ def test_generate_gprmax_motion_validation_package(tmp_path: Path):
         "atomic_motion_final_bscan.png",
         "motion_v2_final_bscan.png",
         "bscan_motion_validation_comparison.png",
+        "paper_motion_validation_comparison.png",
         "raw_3d_preview.png",
         "motion_v2_3d_preview.png",
         "README.md",
@@ -138,9 +139,64 @@ def test_generate_gprmax_motion_validation_package(tmp_path: Path):
         "motion_compensation_height",
     ]
     assert "raw_vs_source_rms" in summary["metrics"]
+    assert "ridge_rmse_samples_atomic" in summary["metrics"]
+    assert "target_apex_error_samples_v2" in summary["metrics"]
+    assert "target_roi_energy_preservation_atomic" in summary["metrics"]
+    assert "trace_spacing_cv_before" in summary["metrics"]
+    assert "max_gap_ratio_v2" in summary["metrics"]
+    assert "target_traces" in summary["metrics"]
     assert summary["metrics"]["atomic_vs_source_rms"] < summary["metrics"]["raw_vs_source_rms"]
     assert summary["metrics"]["v2_vs_source_rms"] < summary["metrics"]["raw_vs_source_rms"]
     assert "motion_v2_3d_preview.png" in summary["artifacts"]["images"]
+    assert "paper_motion_validation_comparison.png" in summary["artifacts"]["images"]
+
+
+def test_generate_gprmax_motion_validation_longline_report(tmp_path: Path):
+    manifest_path = _write_gprmax_fixture(tmp_path / "dataset")
+    output_dir = tmp_path / "motion_validation_longline"
+
+    result = generate_gprmax_motion_validation_package(
+        manifest_path,
+        output_dir,
+        seed=9,
+        target_traces=120,
+    )
+
+    summary = json.loads(result.summary_json.read_text(encoding="utf-8"))
+    report = result.report_md.read_text(encoding="utf-8")
+
+    assert result.raw_shape == (72, 120)
+    assert summary["source"]["original_gprmax_shape"] == [72, 18]
+    assert summary["source"]["derived_longline"] is True
+    assert summary["shapes"]["source"] == [72, 120]
+    assert summary["metrics"]["raw_vs_source_rms"] > summary["metrics"]["atomic_vs_source_rms"]
+    assert summary["metrics"]["raw_vs_source_rms"] > summary["metrics"]["v2_vs_source_rms"]
+    for key in [
+        "ridge_rmse_samples_raw",
+        "ridge_rmse_samples_atomic",
+        "ridge_rmse_samples_v2",
+        "target_apex_error_samples_raw",
+        "target_apex_error_samples_atomic",
+        "target_apex_error_samples_v2",
+        "target_roi_energy_preservation_raw",
+        "target_roi_energy_preservation_atomic",
+        "target_roi_energy_preservation_v2",
+        "trace_spacing_cv_before",
+        "trace_spacing_cv_v2",
+        "max_gap_ratio_before",
+        "max_gap_ratio_v2",
+        "resample_spacing_m",
+        "target_traces",
+    ]:
+        assert key in summary["metrics"], key
+    assert summary["metrics"]["target_traces"] == summary["shapes"]["v2"][1]
+    assert "V2 Resampling Explanation" in report
+    assert "target_traces" in report
+    assert "resampled to the processed trace axis" in report
+    assert (output_dir / "paper_motion_validation_comparison.png").exists()
+    assert (output_dir / "source_manifest.json").exists()
+    assert (output_dir / "source_ground_truth.yaml").exists()
+    assert (output_dir / "source_model_in.in").exists()
 
 
 def test_generated_gprmax_motion_package_sidecars_align(tmp_path: Path):

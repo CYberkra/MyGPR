@@ -5,9 +5,11 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import csv
 import json
 import math
+import shutil
 import sys
 from dataclasses import dataclass
 from datetime import datetime
@@ -133,6 +135,7 @@ def generate_gprmax_motion_validation_package(
     output_dir: str | Path | None = None,
     *,
     seed: int = 20260519,
+    target_traces: int | None = None,
 ) -> GprMaxMotionValidationResult:
     """Generate a UAV-motion validation package from a gprMax manifest/folder."""
     from core.gpr_io import extract_airborne_csv_payload
@@ -142,15 +145,26 @@ def generate_gprmax_motion_validation_package(
     out = Path(output_dir or _default_output_dir(package.scenario_id)).resolve()
     out.mkdir(parents=True, exist_ok=True)
 
-    source = _build_source_payload(package.data, package.header_info, seed=seed)
+    source = _build_source_payload(
+        package.data,
+        package.header_info,
+        seed=seed,
+        target_traces=target_traces,
+    )
     source["scenario_id"] = package.scenario_id
     source["source_manifest"] = str(package.manifest_path)
     source["source_primary_out_file"] = str(package.primary_out_file)
-    source["ground_truth"] = package.ground_truth
+    source["source_ground_truth_file"] = str(package.ground_truth_file)
+    source["ground_truth"] = _scale_ground_truth_for_trace_count(
+        package.ground_truth,
+        int(source["original_gprmax_shape"][1]),
+        int(source["traces"]),
+    )
     source["ground_truth_raw"] = package.ground_truth_raw
 
     _write_main_csv(out / "main.csv", source)
     _write_sidecars(out, source)
+    source["copied_source_artifacts"] = _copy_source_artifacts(out, source)
     _write_manifest(out, source)
     _write_metadata(out, source)
 
@@ -174,8 +188,9 @@ def generate_gprmax_motion_validation_package(
         {**V2_PARAMS, "resample_spacing_m": source["trace_interval_m"]},
     )
 
-    _write_images(out, source, raw_data, trace_metadata, header_info, atomic, v2)
     summary = _build_summary(out, source, raw_data, trace_metadata, atomic, v2)
+    _write_images(out, source, raw_data, trace_metadata, header_info, atomic, v2, summary)
+    summary["artifacts"]["images"] = _artifact_images(out)
     summary_path = out / "processing_summary.json"
     summary_path.write_text(
         json.dumps(_jsonable(summary), ensure_ascii=False, indent=2),
@@ -214,9 +229,13 @@ def _build_source_payload(
     header_info: dict[str, Any],
     *,
     seed: int,
+    target_traces: int | None = None,
 ) -> dict[str, Any]:
     rng = np.random.default_rng(seed)
     ideal = _normalize_bscan(data)
+    original_samples, original_traces = ideal.shape
+    if target_traces is not None and int(target_traces) > original_traces:
+        ideal = _resample_like_reference(ideal, int(target_traces))
     samples, traces = ideal.shape
     if traces < 2:
         raise ValueError("gprMax motion validation requires at least two traces")
@@ -269,6 +288,8 @@ def _build_source_payload(
     trace_distance[1:] = np.cumsum(np.hypot(np.diff(local_x), np.diff(local_y)), dtype=np.float64)
     return {
         "ideal_data": ideal,
+        "original_gprmax_shape": (int(original_samples), int(original_traces)),
+        "derived_longline": bool(traces != original_traces),
         "data": observed,
         "samples": samples,
         "traces": traces,
@@ -460,6 +481,10 @@ def _write_manifest(output_dir: Path, source: dict[str, Any]) -> None:
         "metadata_file": "metadata.json",
         "source_manifest": source.get("source_manifest"),
         "source_primary_out_file": source.get("source_primary_out_file"),
+        "source_ground_truth_file": source.get("source_ground_truth_file"),
+        "copied_source_artifacts": source.get("copied_source_artifacts", {}),
+        "source_shape": list(source.get("original_gprmax_shape", [])),
+        "derived_longline": bool(source.get("derived_longline", False)),
         "recommended_workflow": [method for method, _params in ATOMIC_PIPELINE],
         "recommended_v2_method": "motion_compensation_v2",
         "recommended_params": {
@@ -487,6 +512,10 @@ def _write_metadata(output_dir: Path, source: dict[str, Any]) -> None:
         "scenario_id": source.get("scenario_id"),
         "source_manifest": source.get("source_manifest"),
         "source_primary_out_file": source.get("source_primary_out_file"),
+        "source_ground_truth_file": source.get("source_ground_truth_file"),
+        "copied_source_artifacts": source.get("copied_source_artifacts", {}),
+        "source_shape": list(source.get("original_gprmax_shape", [])),
+        "derived_longline": bool(source.get("derived_longline", False)),
         "samples": int(source["samples"]),
         "traces": int(source["traces"]),
         "total_time_ns": float(source["total_time_ns"]),
@@ -501,6 +530,94 @@ def _write_metadata(output_dir: Path, source: dict[str, Any]) -> None:
         json.dumps(_jsonable(metadata), ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+
+
+def _copy_source_artifacts(output_dir: Path, source: dict[str, Any]) -> dict[str, str]:
+    """Copy small source descriptors next to the derived validation package."""
+    copied: dict[str, str] = {}
+    candidates = {
+        "source_manifest": source.get("source_manifest"),
+        "source_ground_truth": source.get("source_ground_truth_file"),
+    }
+    primary = Path(str(source.get("source_primary_out_file") or ""))
+    manifest = Path(str(source.get("source_manifest") or ""))
+    search_dirs = [path.parent for path in (primary, manifest) if str(path) and path.parent.exists()]
+    in_file: Path | None = None
+    for folder in search_dirs:
+        matches = sorted(folder.glob("*.in"))
+        if matches:
+            in_file = matches[0]
+            break
+    if in_file is not None:
+        candidates["source_model_in"] = str(in_file)
+
+    for key, value in candidates.items():
+        if not value:
+            continue
+        source_path = Path(str(value))
+        if not source_path.exists() or not source_path.is_file():
+            continue
+        suffix = source_path.suffix or ".txt"
+        target = output_dir / f"{key}{suffix}"
+        shutil.copy2(source_path, target)
+        copied[key] = str(target)
+    return copied
+
+
+def _scale_ground_truth_for_trace_count(
+    ground_truth: dict[str, Any] | None,
+    source_traces: int,
+    target_traces: int,
+) -> dict[str, Any] | None:
+    """Scale MyGPR half-open trace ROIs when a source B-scan is trace-resampled."""
+    if not isinstance(ground_truth, dict):
+        return ground_truth
+    if source_traces <= 0 or target_traces <= 0 or source_traces == target_traces:
+        return copy.deepcopy(ground_truth)
+    scaled = copy.deepcopy(ground_truth)
+    scale = float(target_traces) / float(source_traces)
+
+    def scale_roi(roi: dict[str, Any] | None) -> None:
+        if not isinstance(roi, dict):
+            return
+        d0 = int(roi.get("dist_start_idx", 0))
+        d1 = int(roi.get("dist_end_idx", target_traces))
+        roi["dist_start_idx"] = max(0, min(target_traces, int(math.floor(d0 * scale))))
+        roi["dist_end_idx"] = max(roi["dist_start_idx"], min(target_traces, int(math.ceil(d1 * scale))))
+
+    scale_roi(scaled.get("analysis_roi"))
+    for target in scaled.get("targets") or []:
+        if isinstance(target, dict):
+            scale_roi(target.get("roi"))
+    for background in scaled.get("background_rois") or []:
+        scale_roi(background)
+    scaled.setdefault("conversion_notes", []).append(
+        {
+            "code": "trace_roi_scaled_for_motion_validation_longline",
+            "message": "Trace ROI was scaled after resampling the source gprMax B-scan for a longer validation line.",
+            "source_traces": int(source_traces),
+            "target_traces": int(target_traces),
+        }
+    )
+    return scaled
+
+
+def _scale_single_roi_for_trace_count(
+    roi: dict[str, Any] | None,
+    source_traces: int,
+    target_traces: int,
+) -> dict[str, int] | None:
+    if not isinstance(roi, dict):
+        return None
+    scaled = dict(roi)
+    if source_traces <= 0 or target_traces <= 0 or source_traces == target_traces:
+        return {key: int(value) for key, value in scaled.items() if key.endswith("_idx")}
+    scale = float(target_traces) / float(source_traces)
+    d0 = int(scaled.get("dist_start_idx", 0))
+    d1 = int(scaled.get("dist_end_idx", target_traces))
+    scaled["dist_start_idx"] = max(0, min(target_traces, int(math.floor(d0 * scale))))
+    scaled["dist_end_idx"] = max(scaled["dist_start_idx"], min(target_traces, int(math.ceil(d1 * scale))))
+    return {key: int(value) for key, value in scaled.items() if key.endswith("_idx")}
 
 
 def _run_atomic_pipeline(
@@ -640,6 +757,7 @@ def _write_images(
     raw_header: dict[str, Any],
     atomic: dict[str, Any],
     v2: dict[str, Any],
+    summary: dict[str, Any],
 ) -> None:
     _save_bscan(output_dir / "source_gprmax_bscan.png", source["ideal_data"], "Source gprMax B-scan")
     _save_bscan(output_dir / "motion_injected_raw_bscan.png", raw_data, "Motion-injected raw B-scan")
@@ -653,6 +771,16 @@ def _write_images(
             ("four atomic steps", atomic["data"]),
             ("motion_compensation_v2", v2["data"]),
         ],
+    )
+    _save_paper_comparison(
+        output_dir / "paper_motion_validation_comparison.png",
+        [
+            ("source", source["ideal_data"]),
+            ("raw", raw_data),
+            ("atomic", atomic["data"]),
+            ("motion v2", v2["data"]),
+        ],
+        summary,
     )
     for name, data, header, metadata, title in [
         ("raw_3d_preview.png", raw_data, raw_header, raw_metadata, "Motion-injected raw 3D preview"),
@@ -777,6 +905,46 @@ def _save_comparison(path: Path, panels: list[tuple[str, np.ndarray]]) -> None:
         plt.close(fig)
 
 
+def _save_paper_comparison(
+    path: Path,
+    panels: list[tuple[str, np.ndarray]],
+    summary: dict[str, Any],
+) -> None:
+    """Save a paper-friendly four-panel B-scan comparison with locked scale."""
+    fig, axes = plt.subplots(2, 2, figsize=(11.2, 7.2), dpi=170)
+    try:
+        axes_arr = np.asarray(axes).reshape(-1)
+        vmin, vmax = _clip_for_display(*(data for _title, data in panels))
+        metrics = summary.get("metrics", {})
+        shapes = summary.get("shapes", {})
+        metric_keys = {
+            "source": None,
+            "raw": "raw_vs_source_rms",
+            "atomic": "atomic_vs_source_rms",
+            "motion v2": "v2_vs_source_rms",
+        }
+        for ax, (title, data) in zip(axes_arr, panels):
+            arr = np.asarray(data, dtype=np.float32)
+            ax.imshow(arr, cmap="gray", aspect="auto", vmin=vmin, vmax=vmax)
+            rms_key = metric_keys.get(title)
+            rms = metrics.get(rms_key) if rms_key else None
+            ridge_key = f"ridge_rmse_samples_{title.replace('motion v2', 'v2').replace(' ', '_')}"
+            ridge = metrics.get(ridge_key)
+            parts = [f"{title}  {tuple(shapes.get(title.replace('motion v2', 'v2'), arr.shape))}"]
+            if rms is not None:
+                parts.append(f"RMS={float(rms):.4g}")
+            if ridge is not None:
+                parts.append(f"ridge={float(ridge):.3g} samp")
+            ax.set_title("\n".join(parts), fontsize=10)
+            ax.set_xlabel("Trace")
+            ax.set_ylabel("Sample")
+        fig.suptitle("gprMax Motion Validation: Source vs Injected Raw vs Compensation", fontsize=12)
+        fig.tight_layout(rect=[0, 0, 1, 0.96])
+        fig.savefig(path)
+    finally:
+        plt.close(fig)
+
+
 def _clip_for_display(*arrays: np.ndarray) -> tuple[float, float]:
     chunks: list[np.ndarray] = []
     for data in arrays:
@@ -800,48 +968,102 @@ def _build_summary(
     atomic: dict[str, Any],
     v2: dict[str, Any],
 ) -> dict[str, Any]:
-    raw_spacing_std = _spacing_std(raw_metadata)
-    atomic_spacing_std = _spacing_std(atomic["trace_metadata"])
+    raw_spacing_stats = _spacing_stats(raw_metadata)
+    atomic_spacing_stats = _spacing_stats(atomic["trace_metadata"])
     atomic_speed_stage = _stage_by_method(atomic.get("stages") or [], "motion_compensation_speed")
-    atomic_speed_spacing_std = _spacing_std(atomic_speed_stage["trace_metadata"]) if atomic_speed_stage else atomic_spacing_std
-    v2_spacing_std = _spacing_std(v2["trace_metadata"])
+    atomic_speed_spacing_stats = _spacing_stats(atomic_speed_stage["trace_metadata"]) if atomic_speed_stage else atomic_spacing_stats
+    v2_spacing_stats = _spacing_stats(v2["trace_metadata"])
+    raw_shape = tuple(int(v) for v in np.asarray(raw_data).shape)
+    atomic_shape = tuple(int(v) for v in np.asarray(atomic["data"]).shape)
+    v2_shape = tuple(int(v) for v in np.asarray(v2["data"]).shape)
     source_resampled_atomic = _resample_like_reference(source["ideal_data"], np.asarray(atomic["data"]).shape[1])
     source_resampled_v2 = _resample_like_reference(source["ideal_data"], np.asarray(v2["data"]).shape[1])
+    source_resampled_raw = _resample_like_reference(source["ideal_data"], np.asarray(raw_data).shape[1])
     target_roi = _first_target_roi(source.get("ground_truth"))
+    raw_target_roi = _scale_single_roi_for_trace_count(target_roi, int(source["traces"]), int(raw_shape[1]))
+    atomic_target_roi = _scale_single_roi_for_trace_count(target_roi, int(source["traces"]), int(atomic_shape[1]))
+    v2_target_roi = _scale_single_roi_for_trace_count(target_roi, int(source["traces"]), int(v2_shape[1]))
+    source_energy = _target_roi_energy(source["ideal_data"], target_roi)
     metrics = {
-        "spacing_std_before_m": raw_spacing_std,
-        "spacing_std_atomic_m": atomic_spacing_std,
-        "spacing_std_atomic_after_speed_m": atomic_speed_spacing_std,
-        "spacing_std_v2_m": v2_spacing_std,
-        "raw_vs_source_rms": _rms_delta(raw_data, _resample_like_reference(source["ideal_data"], np.asarray(raw_data).shape[1])),
+        "spacing_std_before_m": raw_spacing_stats["std_m"],
+        "spacing_std_atomic_m": atomic_spacing_stats["std_m"],
+        "spacing_std_atomic_after_speed_m": atomic_speed_spacing_stats["std_m"],
+        "spacing_std_v2_m": v2_spacing_stats["std_m"],
+        "trace_spacing_cv_before": raw_spacing_stats["cv"],
+        "trace_spacing_cv_atomic": atomic_spacing_stats["cv"],
+        "trace_spacing_cv_v2": v2_spacing_stats["cv"],
+        "max_gap_ratio_before": raw_spacing_stats["max_gap_ratio"],
+        "max_gap_ratio_atomic": atomic_spacing_stats["max_gap_ratio"],
+        "max_gap_ratio_v2": v2_spacing_stats["max_gap_ratio"],
+        "raw_vs_source_rms": _rms_delta(raw_data, source_resampled_raw),
         "atomic_vs_source_rms": _rms_delta(atomic["data"], source_resampled_atomic),
         "v2_vs_source_rms": _rms_delta(v2["data"], source_resampled_v2),
         "atomic_rms_delta_from_raw": _rms_delta(atomic["data"], _resample_like_reference(raw_data, np.asarray(atomic["data"]).shape[1])),
         "v2_rms_delta_from_raw": _rms_delta(v2["data"], _resample_like_reference(raw_data, np.asarray(v2["data"]).shape[1])),
-        "target_ratio_raw": _target_energy_ratio(raw_data, target_roi),
-        "target_ratio_atomic": _target_energy_ratio(atomic["data"], target_roi),
-        "target_ratio_v2": _target_energy_ratio(v2["data"], target_roi),
+        "target_ratio_raw": _target_energy_ratio(raw_data, raw_target_roi),
+        "target_ratio_atomic": _target_energy_ratio(atomic["data"], atomic_target_roi),
+        "target_ratio_v2": _target_energy_ratio(v2["data"], v2_target_roi),
+        "ridge_rmse_samples_raw": _ridge_rmse_samples(raw_data, source_resampled_raw, raw_target_roi),
+        "ridge_rmse_samples_atomic": _ridge_rmse_samples(atomic["data"], source_resampled_atomic, atomic_target_roi),
+        "ridge_rmse_samples_v2": _ridge_rmse_samples(v2["data"], source_resampled_v2, v2_target_roi),
+        "reflector_flatness_metric_raw": _reflector_flatness_metric(raw_data, raw_target_roi),
+        "reflector_flatness_metric_atomic": _reflector_flatness_metric(atomic["data"], atomic_target_roi),
+        "reflector_flatness_metric_v2": _reflector_flatness_metric(v2["data"], v2_target_roi),
+        "target_apex_error_samples_raw": _target_apex_error_samples(raw_data, source_resampled_raw, raw_target_roi),
+        "target_apex_error_samples_atomic": _target_apex_error_samples(atomic["data"], source_resampled_atomic, atomic_target_roi),
+        "target_apex_error_samples_v2": _target_apex_error_samples(v2["data"], source_resampled_v2, v2_target_roi),
+        "target_roi_energy_preservation_raw": _energy_preservation(_target_roi_energy(raw_data, raw_target_roi), source_energy),
+        "target_roi_energy_preservation_atomic": _energy_preservation(_target_roi_energy(atomic["data"], atomic_target_roi), source_energy),
+        "target_roi_energy_preservation_v2": _energy_preservation(_target_roi_energy(v2["data"], v2_target_roi), source_energy),
+        "resample_spacing_m": _resample_spacing_from_meta(v2.get("meta", {}), source["trace_interval_m"]),
+        "target_traces": int(v2_shape[1]),
+    }
+    runtime_warnings = {
+        "atomic": _collect_runtime_warnings(*(stage.get("meta", {}) for stage in atomic.get("stages", []))),
+        "motion_v2": _collect_runtime_warnings(v2.get("meta", {})),
     }
     return {
         "schema": "mygpr_gprmax_motion_validation_summary_v1",
         "output_dir": str(output_dir),
+        "shapes": {
+            "source": [int(source["samples"]), int(source["traces"])],
+            "raw": list(raw_shape),
+            "atomic": list(atomic_shape),
+            "v2": list(v2_shape),
+            "original_gprmax": list(source.get("original_gprmax_shape", [])),
+        },
         "source": {
             "scenario_id": source.get("scenario_id"),
             "source_manifest": source.get("source_manifest"),
             "source_primary_out_file": source.get("source_primary_out_file"),
+            "source_ground_truth_file": source.get("source_ground_truth_file"),
+            "copied_source_artifacts": source.get("copied_source_artifacts", {}),
             "shape": [int(source["samples"]), int(source["traces"])],
+            "original_gprmax_shape": list(source.get("original_gprmax_shape", [])),
+            "derived_longline": bool(source.get("derived_longline", False)),
             "trace_interval_m": float(source["trace_interval_m"]),
             "total_time_ns": float(source["total_time_ns"]),
+            "target_roi": target_roi,
+            "target_geometry": _first_target_geometry(source.get("ground_truth")),
         },
         "pipeline": {
             "atomic": [method for method, _params in ATOMIC_PIPELINE],
             "motion_v2": "motion_compensation_v2",
         },
         "metrics": metrics,
+        "resampling_explanation": {
+            "motion_v2_resampled": bool(v2_shape[1] != raw_shape[1]),
+            "source_traces": int(raw_shape[1]),
+            "target_traces": int(v2_shape[1]),
+            "resample_spacing_m": metrics["resample_spacing_m"],
+            "source_resampled_for_rms_to_v2_trace_count": bool(v2_shape[1] != source["traces"]),
+            "comparison_note": "RMS/ROI metrics compare each processed B-scan against the source gprMax B-scan resampled onto the processed trace axis when trace counts differ.",
+        },
         "quality_flags": {
-            "atomic": list(atomic.get("meta", {}).get("quality_flags", []) or []),
+            "atomic": _collect_quality_flags(*(stage.get("meta", {}) for stage in atomic.get("stages", []))),
             "motion_v2": list(v2.get("meta", {}).get("quality_flags", []) or []),
         },
+        "runtime_warnings": runtime_warnings,
         "stage_meta": {
             "atomic_final": _compact_meta(atomic.get("stages", [])[-1].get("meta", {}) if atomic.get("stages") else {}),
             "motion_v2": _compact_meta(v2.get("meta", {})),
@@ -853,16 +1075,7 @@ def _build_summary(
             "report_md": str(output_dir / "motion_validation_report.md"),
             "images": {
                 name: str(output_dir / name)
-                for name in [
-                    "source_gprmax_bscan.png",
-                    "motion_injected_raw_bscan.png",
-                    "atomic_motion_final_bscan.png",
-                    "motion_v2_final_bscan.png",
-                    "bscan_motion_validation_comparison.png",
-                    "raw_3d_preview.png",
-                    "atomic_3d_preview.png",
-                    "motion_v2_3d_preview.png",
-                ]
+                for name in _image_names()
                 if (output_dir / name).exists()
             },
         },
@@ -870,10 +1083,25 @@ def _build_summary(
 
 
 def _spacing_std(metadata: dict[str, np.ndarray]) -> float:
+    return _spacing_stats(metadata)["std_m"]
+
+
+def _spacing_stats(metadata: dict[str, np.ndarray]) -> dict[str, float]:
     distance = np.asarray(metadata.get("trace_distance_m", []), dtype=np.float64)
     if distance.size < 3:
-        return 0.0
-    return float(np.std(np.diff(distance)))
+        return {"std_m": 0.0, "mean_m": 0.0, "cv": 0.0, "max_gap_ratio": 0.0}
+    gaps = np.diff(distance)
+    finite = gaps[np.isfinite(gaps) & (gaps > 0.0)]
+    if finite.size == 0:
+        return {"std_m": 0.0, "mean_m": 0.0, "cv": 0.0, "max_gap_ratio": 0.0}
+    mean = float(np.mean(finite))
+    std = float(np.std(finite))
+    return {
+        "std_m": std,
+        "mean_m": mean,
+        "cv": float(std / mean) if mean > 0.0 else 0.0,
+        "max_gap_ratio": float(np.max(finite) / mean) if mean > 0.0 else 0.0,
+    }
 
 
 def _stage_by_method(stages: list[dict[str, Any]], method_id: str) -> dict[str, Any] | None:
@@ -930,6 +1158,130 @@ def _target_energy_ratio(data: np.ndarray, roi: dict[str, int] | None) -> float 
     return float(np.mean(target * target) / max(float(np.mean(total * total)), 1.0e-12))
 
 
+def _target_roi_energy(data: np.ndarray, roi: dict[str, int] | None) -> float | None:
+    window = _roi_window(data, roi)
+    if window is None or window.size == 0:
+        return None
+    return float(np.mean(window * window))
+
+
+def _energy_preservation(candidate_energy: float | None, source_energy: float | None) -> float | None:
+    if candidate_energy is None or source_energy is None or source_energy <= 0.0:
+        return None
+    return float(candidate_energy / source_energy)
+
+
+def _roi_window(data: np.ndarray, roi: dict[str, int] | None) -> np.ndarray | None:
+    if not roi:
+        return None
+    arr = np.asarray(data, dtype=np.float64)
+    if arr.ndim != 2:
+        return None
+    t0 = max(0, min(arr.shape[0], int(roi.get("time_start_idx", 0))))
+    t1 = max(t0, min(arr.shape[0], int(roi.get("time_end_idx", arr.shape[0]))))
+    d0 = max(0, min(arr.shape[1], int(roi.get("dist_start_idx", 0))))
+    d1 = max(d0, min(arr.shape[1], int(roi.get("dist_end_idx", arr.shape[1]))))
+    if t1 <= t0 or d1 <= d0:
+        return None
+    return arr[t0:t1, d0:d1]
+
+
+def _ridge_rows(data: np.ndarray, roi: dict[str, int] | None) -> np.ndarray | None:
+    window = _roi_window(data, roi)
+    if window is None or window.size == 0:
+        return None
+    t0 = int(roi.get("time_start_idx", 0))
+    return t0 + np.argmax(np.abs(window), axis=0).astype(np.float64)
+
+
+def _ridge_rmse_samples(candidate: np.ndarray, source: np.ndarray, roi: dict[str, int] | None) -> float | None:
+    a = _ridge_rows(candidate, roi)
+    b = _ridge_rows(source, roi)
+    if a is None or b is None or a.size == 0 or b.size == 0:
+        return None
+    count = min(a.size, b.size)
+    return float(np.sqrt(np.mean((a[:count] - b[:count]) ** 2)))
+
+
+def _reflector_flatness_metric(data: np.ndarray, roi: dict[str, int] | None) -> float | None:
+    rows = _ridge_rows(data, roi)
+    if rows is None or rows.size == 0:
+        return None
+    return float(np.std(rows))
+
+
+def _target_apex_error_samples(candidate: np.ndarray, source: np.ndarray, roi: dict[str, int] | None) -> float | None:
+    cand = _roi_window(candidate, roi)
+    ref = _roi_window(source, roi)
+    if cand is None or ref is None or cand.size == 0 or ref.size == 0:
+        return None
+    cand_row = int(np.unravel_index(np.argmax(np.abs(cand)), cand.shape)[0])
+    ref_row = int(np.unravel_index(np.argmax(np.abs(ref)), ref.shape)[0])
+    return float(abs(cand_row - ref_row))
+
+
+def _resample_spacing_from_meta(meta: dict[str, Any], fallback: float) -> float:
+    for key in ("spacing_m", "resample_spacing_m"):
+        value = meta.get(key)
+        if value is not None:
+            candidate = float(value)
+            if np.isfinite(candidate) and candidate > 0.0:
+                return candidate
+    return float(fallback)
+
+
+def _collect_runtime_warnings(*metas: dict[str, Any]) -> list[str]:
+    warnings: list[str] = []
+    for meta in metas:
+        for key in ("runtime_warnings", "warnings"):
+            value = meta.get(key)
+            if isinstance(value, str):
+                warnings.append(value)
+            elif isinstance(value, (list, tuple)):
+                warnings.extend(str(item) for item in value if item)
+    return warnings
+
+
+def _collect_quality_flags(*metas: dict[str, Any]) -> list[str]:
+    flags: list[str] = []
+    for meta in metas:
+        value = meta.get("quality_flags")
+        if isinstance(value, str):
+            flags.append(value)
+        elif isinstance(value, (list, tuple)):
+            flags.extend(str(item) for item in value if item)
+    return flags
+
+
+def _first_target_geometry(ground_truth: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(ground_truth, dict):
+        return None
+    targets = ground_truth.get("targets") or []
+    if not targets or not isinstance(targets[0], dict):
+        return None
+    target = targets[0]
+    keys = ("id", "type", "material", "depth_m", "center_x_m", "center_y_m", "radius_m", "roi")
+    return {key: _jsonable(target.get(key)) for key in keys if key in target}
+
+
+def _image_names() -> list[str]:
+    return [
+        "source_gprmax_bscan.png",
+        "motion_injected_raw_bscan.png",
+        "atomic_motion_final_bscan.png",
+        "motion_v2_final_bscan.png",
+        "bscan_motion_validation_comparison.png",
+        "paper_motion_validation_comparison.png",
+        "raw_3d_preview.png",
+        "atomic_3d_preview.png",
+        "motion_v2_3d_preview.png",
+    ]
+
+
+def _artifact_images(output_dir: Path) -> dict[str, str]:
+    return {name: str(output_dir / name) for name in _image_names() if (output_dir / name).exists()}
+
+
 def _compact_meta(meta: dict[str, Any]) -> dict[str, Any]:
     keep = {
         "skipped",
@@ -950,6 +1302,8 @@ def _compact_meta(meta: dict[str, Any]) -> dict[str, Any]:
 
 def _render_report(summary: dict[str, Any]) -> str:
     metrics = summary["metrics"]
+    shapes = summary.get("shapes", {})
+    resampling = summary.get("resampling_explanation", {})
     lines = [
         "# gprMax Motion Compensation Validation",
         "",
@@ -958,7 +1312,26 @@ def _render_report(summary: dict[str, Any]) -> str:
         f"- Scenario: `{summary['source'].get('scenario_id')}`",
         f"- gprMax manifest: `{summary['source'].get('source_manifest')}`",
         f"- Primary .out: `{summary['source'].get('source_primary_out_file')}`",
+        f"- Source ground truth: `{summary['source'].get('source_ground_truth_file')}`",
         f"- Shape: `{summary['source'].get('shape')}`",
+        f"- Original gprMax shape: `{summary['source'].get('original_gprmax_shape')}`",
+        f"- Derived long-line scaffold: `{summary['source'].get('derived_longline')}`",
+        f"- Trace interval: `{summary['source'].get('trace_interval_m')}` m",
+        f"- Time window: `{summary['source'].get('total_time_ns')}` ns",
+        "",
+        "## Shapes",
+        "",
+        "| data | shape |",
+        "| --- | --- |",
+        f"| gprMax source | `{shapes.get('source')}` |",
+        f"| motion-injected raw | `{shapes.get('raw')}` |",
+        f"| four atomic steps | `{shapes.get('atomic')}` |",
+        f"| motion_compensation_v2 | `{shapes.get('v2')}` |",
+        "",
+        "## Target / ROI",
+        "",
+        f"- Target geometry: `{summary['source'].get('target_geometry')}`",
+        f"- Target ROI: `{summary['source'].get('target_roi')}`",
         "",
         "## Workflow",
         "",
@@ -981,12 +1354,30 @@ def _render_report(summary: dict[str, Any]) -> str:
     lines.extend(
         [
             "",
+            "## V2 Resampling Explanation",
+            "",
+            f"- V2 performed equal-distance resampling: `{resampling.get('motion_v2_resampled')}`",
+            f"- Source/raw trace count: `{resampling.get('source_traces')}`",
+            f"- V2 target_traces: `{resampling.get('target_traces')}`",
+            f"- V2 resample_spacing_m: `{resampling.get('resample_spacing_m')}`",
+            "- RMS and ROI metrics are computed against the gprMax source B-scan resampled to the processed trace axis when trace counts differ.",
+            "- Therefore a V2 shape mismatch is expected when equal-distance resampling changes the trace count; it is not treated as a processing error.",
+            "",
+            "## Quality Flags / Runtime Warnings",
+            "",
+            f"- Atomic quality_flags: `{summary.get('quality_flags', {}).get('atomic', [])}`",
+            f"- V2 quality_flags: `{summary.get('quality_flags', {}).get('motion_v2', [])}`",
+            f"- Atomic runtime_warnings: `{summary.get('runtime_warnings', {}).get('atomic', [])}`",
+            f"- V2 runtime_warnings: `{summary.get('runtime_warnings', {}).get('motion_v2', [])}`",
+            "",
             "## Artifacts",
             "",
             f"- Main CSV: `{summary['artifacts']['main_csv']}`",
             f"- Comparison image: `{summary['artifacts']['images'].get('bscan_motion_validation_comparison.png', '--')}`",
+            f"- Paper comparison image: `{summary['artifacts']['images'].get('paper_motion_validation_comparison.png', '--')}`",
             f"- Raw 3D preview: `{summary['artifacts']['images'].get('raw_3d_preview.png', '--')}`",
             f"- Motion V2 3D preview: `{summary['artifacts']['images'].get('motion_v2_3d_preview.png', '--')}`",
+            f"- Copied source artifacts: `{summary['source'].get('copied_source_artifacts', {})}`",
             "",
             "## Current Limitation",
             "",
@@ -1037,12 +1428,19 @@ def main() -> int:
     parser.add_argument("--dataset", required=True, help="gprMax manifest JSON or dataset directory")
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--seed", type=int, default=20260519)
+    parser.add_argument(
+        "--target-traces",
+        type=int,
+        default=None,
+        help="Optionally derive a longer validation line by resampling the source B-scan to this trace count.",
+    )
     args = parser.parse_args()
 
     result = generate_gprmax_motion_validation_package(
         args.dataset,
         args.output_dir,
         seed=args.seed,
+        target_traces=args.target_traces,
     )
     print(f"Output directory: {result.output_dir}")
     print(f"Main CSV: {result.main_csv}")
