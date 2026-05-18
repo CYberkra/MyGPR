@@ -18,7 +18,6 @@ from PyQt6.QtWidgets import (
     QLabel,
     QTextEdit,
     QSplitter,
-    QGroupBox,
     QButtonGroup,
     QRadioButton,
     QApplication,
@@ -46,7 +45,6 @@ from core.theme_manager import get_theme_manager
 import matplotlib
 
 matplotlib.use("QtAgg")
-import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 

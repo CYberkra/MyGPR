@@ -6,23 +6,19 @@ import numpy as np
 import matplotlib
 
 matplotlib.use("QtAgg")
-import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 
-from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QDialog,
     QVBoxLayout,
     QHBoxLayout,
-    QWidget,
     QLabel,
     QPushButton,
     QFileDialog,
     QMessageBox,
 )
-from PyQt6.QtGui import QIcon
 
 
 class KirchhoffResultDialog(QDialog):

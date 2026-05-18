@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 """中间参数编辑区"""
 
-import numpy as np
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget,
@@ -10,9 +9,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QScrollArea,
     QGroupBox,
-    QFormLayout,
     QSpinBox,
     QDoubleSpinBox,
     QCheckBox,
@@ -22,7 +19,6 @@ from PyQt6.QtWidgets import (
 from qfluentwidgets import (
     PushButton,
     PrimaryPushButton,
-    FluentIcon,
     ScrollArea,
 )
 
