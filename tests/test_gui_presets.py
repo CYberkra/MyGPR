@@ -1710,7 +1710,7 @@ def test_georef3d_expanded_entries_ignore_small_panel_visibility():
         app.processEvents()
 
 
-def test_georef3d_mesh_faces_use_expected_grid_topology():
+def test_georef3d_pyvista_grid_preserves_curtain_scalars():
     app = _get_app()
     page = QualityLogPage()
     try:
@@ -1719,20 +1719,18 @@ def test_georef3d_mesh_faces_use_expected_grid_topology():
         z = np.zeros_like(x)
         amplitude = np.linspace(-1.0, 1.0, 12, dtype=np.float64).reshape(3, 4)
 
-        vertices, faces, vertex_colors = page._build_georef3d_mesh_arrays(
+        grid = page._build_georef3d_pyvista_grid(
             x,
             y,
             z,
             amplitude,
-            kind="current",
         )
 
-        assert vertices.shape == (12, 3)
-        assert faces.shape == (12, 3)
-        assert faces.dtype == np.uint32
-        assert np.array_equal(faces[0], np.array([0, 4, 1], dtype=np.uint32))
-        assert np.array_equal(faces[1], np.array([1, 4, 5], dtype=np.uint32))
-        assert vertex_colors.shape == (12, 4)
+        assert grid.n_points == 12
+        assert grid.dimensions == (4, 3, 1)
+        assert "amplitude" in grid.point_data
+        assert grid.point_data["amplitude"].shape == (12,)
+        assert np.isclose(grid.point_data["amplitude"][0], amplitude.reshape(-1, order="F")[0])
     finally:
         page.release_plot_resources()
         page.close()

@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 """GUI 质量与导出页面 - 包含处理记录、质量指标显示等功能。"""
 
+import os
+
 import numpy as np
 
 from PyQt6.QtWidgets import (
@@ -1071,21 +1073,24 @@ class QualityLogPage(QWidget):
         return available
 
     def _open_georef3d_dialog(self) -> None:
-        """打开独立大窗口预览；优先 OpenGL，失败时回退 Matplotlib。"""
+        """打开独立大窗口预览；优先 PyVista，失败时回退 Matplotlib。"""
         entries = self._available_georef3d_entries()
         if not entries:
             return
         try:
-            self._open_georef3d_pyqtgraph_dialog(entries)
+            self._open_georef3d_pyvista_dialog(entries)
         except Exception as exc:
             self._open_georef3d_matplotlib_dialog(
                 entries,
-                fallback_message=f"未安装 OpenGL 预览依赖或初始化失败，已回退 Matplotlib：{exc}",
+                fallback_message=f"未安装 PyVista 三维预览依赖或初始化失败，已回退 Matplotlib：{exc}",
             )
 
-    def _open_georef3d_pyqtgraph_dialog(self, entries: dict[str, tuple[str, dict]]) -> None:
-        """Use pyqtgraph OpenGL for a smoother expanded 3D preview when available."""
-        import pyqtgraph.opengl as gl
+    def _open_georef3d_pyvista_dialog(self, entries: dict[str, tuple[str, dict]]) -> None:
+        """Use PyVista/VTK for the expanded 3D motion preview."""
+        if str(os.environ.get("QT_QPA_PLATFORM", "")).lower() == "offscreen":
+            raise RuntimeError("当前 Qt 平台为 offscreen，跳过 PyVista/VTK 交互预览")
+
+        from pyvistaqt import QtInteractor
 
         dialog = QDialog(self)
         dialog.setWindowTitle("UAV-GPR 三维运动补偿预览")
@@ -1098,7 +1103,7 @@ class QualityLogPage(QWidget):
         title = QLabel("UAV-GPR 三维运动补偿预览")
         title.setProperty("class", "sectionTitle")
         title.setMaximumHeight(28)
-        title_hint = QLabel("鼠标旋转/缩放/平移；坐标单位 m；彩色轴=X/Y/Z，灰色网格=XY 参考面。")
+        title_hint = QLabel("鼠标旋转/缩放/平移；坐标单位 m；PyVista 彩色坐标轴=X/Y/Z。")
         title_hint.setProperty("class", "hintText")
         title_row.addWidget(title)
         title_row.addWidget(title_hint)
@@ -1119,7 +1124,7 @@ class QualityLogPage(QWidget):
         )
         export_button = QToolButton(dialog)
         export_button.setText("导出当前视图 PNG")
-        export_button.setToolTip("导出当前 OpenGL 大窗口视图为 PNG")
+        export_button.setToolTip("导出当前 PyVista 大窗口视图为 PNG")
         export_button.setAutoRaise(True)
         layer_label = QLabel("图层")
         layer_label.setProperty("class", "hintText")
@@ -1134,14 +1139,14 @@ class QualityLogPage(QWidget):
         legend.setProperty("class", "hintText")
         legend.setMaximumHeight(22)
         layout.addWidget(legend)
-        view = gl.GLViewWidget()
-        view.setBackgroundColor("w")
-        view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        view.setMinimumHeight(640)
-        layout.addWidget(view, 1)
+        plotter = QtInteractor(dialog)
+        plotter.set_background("white")
+        plotter.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        plotter.setMinimumHeight(640)
+        layout.addWidget(plotter.interactor, 1)
 
         def redraw_view(reset_camera: bool = False):
-            view.clear()
+            plotter.clear()
             selected = [
                 (key, label, payload)
                 for key, (label, payload) in entries.items()
@@ -1151,28 +1156,37 @@ class QualityLogPage(QWidget):
                 [(key, payload) for key, _label, payload in selected],
                 include_bscan=bscan_button.isChecked(),
             )
-            self._add_georef3d_reference_frame(view, all_points)
+            self._add_georef3d_reference_frame(plotter, all_points)
             for key, label, payload in selected:
-                self._add_georef3d_payload_to_gl_view(
-                    view,
+                self._add_georef3d_payload_to_pyvista(
+                    plotter,
                     payload,
                     label=label,
                     kind=key,
                     show_bscan=bscan_button.isChecked(),
                 )
+            plotter.add_legend(bcolor="white", border=True, face=None)
+            plotter.reset_camera_clipping_range()
             if reset_camera and all_points:
                 points = np.vstack(all_points)
-                center = np.nanmean(points, axis=0)
-                span = np.nanmax(points, axis=0) - np.nanmin(points, axis=0)
-                distance = float(max(np.nanmax(span) * 2.4, 8.0))
-                view.opts["center"].setX(float(center[0]))
-                view.opts["center"].setY(float(center[1]))
-                view.opts["center"].setZ(float(center[2]))
-                view.setCameraPosition(distance=distance, elevation=22, azimuth=-58)
+                finite = points[np.isfinite(points).all(axis=1)]
+                if finite.size:
+                    center = np.nanmean(finite, axis=0)
+                    span = np.maximum(np.nanmax(finite, axis=0) - np.nanmin(finite, axis=0), 1.0)
+                    distance = float(max(np.nanmax(span) * 2.2, 8.0))
+                    plotter.camera_position = [
+                        (
+                            float(center[0] + distance),
+                            float(center[1] - distance),
+                            float(center[2] + distance * 0.55),
+                        ),
+                        (float(center[0]), float(center[1]), float(center[2])),
+                        (0.0, 0.0, 1.0),
+                    ]
 
         for button in list(layer_buttons.values()) + [bscan_button]:
             button.toggled.connect(lambda _checked: redraw_view(False))
-        export_button.clicked.connect(lambda: self._export_georef3d_view_png(view, dialog))
+        export_button.clicked.connect(lambda: self._export_georef3d_view_png(plotter, dialog))
         redraw_view(True)
 
         dialog.exec()
@@ -1209,28 +1223,36 @@ class QualityLogPage(QWidget):
                 )
         return all_points
 
-    def _add_georef3d_reference_frame(self, view, all_points: list[np.ndarray]) -> None:
-        """Add OpenGL axes and an XY grid so the expanded preview has a real 3D frame."""
-        import pyqtgraph.opengl as gl
+    def _add_georef3d_reference_frame(self, plotter, all_points: list[np.ndarray]) -> None:
+        """Add PyVista axes and an XY reference grid around the expanded preview."""
+        import pyvista as pv
 
         frame = self._georef3d_reference_geometry(all_points)
-        origin = frame["origin"]
-        size = frame["size"]
+        origin = np.asarray(frame["origin"], dtype=np.float64)
+        size = np.asarray(frame["size"], dtype=np.float64)
 
-        grid = gl.GLGridItem(color=(80, 80, 80, 72))
-        grid.setSize(x=float(size[0]), y=float(size[1]), z=0.0)
-        spacing = float(frame["grid_spacing"])
-        grid.setSpacing(x=spacing, y=spacing, z=0.0)
-        grid.translate(float(origin[0] + size[0] / 2.0), float(origin[1] + size[1] / 2.0), float(origin[2]))
-        view.addItem(grid)
-
-        axis = gl.GLAxisItem(antialias=True)
-        axis.setSize(x=float(size[0]), y=float(size[1]), z=float(size[2]))
-        axis.translate(float(origin[0]), float(origin[1]), float(origin[2]))
-        view.addItem(axis)
-        self._add_georef3d_colored_axis(view, "x", origin, size)
-        self._add_georef3d_colored_axis(view, "y", origin, size)
-        self._add_georef3d_colored_axis(view, "z", origin, size)
+        grid = pv.Plane(
+            center=(float(origin[0] + size[0] / 2.0), float(origin[1] + size[1] / 2.0), float(origin[2])),
+            direction=(0.0, 0.0, 1.0),
+            i_size=float(size[0]),
+            j_size=float(size[1]),
+            i_resolution=10,
+            j_resolution=10,
+        )
+        plotter.add_mesh(grid, color="#bfc7d5", opacity=0.16, show_edges=True, edge_color="#c8d0dd", label="XY参考面")
+        plotter.show_bounds(
+            grid="front",
+            location="outer",
+            xlabel="X (m)",
+            ylabel="Y (m)",
+            zlabel="Z (m)",
+            color="#334155",
+            font_size=10,
+        )
+        plotter.add_axes(line_width=3, labels_off=False)
+        self._add_georef3d_colored_axis(plotter, "x", origin, size)
+        self._add_georef3d_colored_axis(plotter, "y", origin, size)
+        self._add_georef3d_colored_axis(plotter, "z", origin, size)
 
     def _georef3d_reference_geometry(self, all_points: list[np.ndarray]) -> dict[str, np.ndarray | float]:
         """Compute a stable right-handed 3D reference frame around preview data."""
@@ -1253,40 +1275,37 @@ class QualityLogPage(QWidget):
         spacing = float(max(np.nanmax(size[:2]) / 10.0, 0.5))
         return {"origin": origin, "size": size, "grid_spacing": spacing}
 
-    def _add_georef3d_colored_axis(self, view, axis: str, origin: np.ndarray, size: np.ndarray) -> None:
+    def _add_georef3d_colored_axis(self, plotter, axis: str, origin: np.ndarray, size: np.ndarray) -> None:
         """Add one colored X/Y/Z axis line with a small text label."""
-        import pyqtgraph.opengl as gl
+        import pyvista as pv
 
         axis_index = {"x": 0, "y": 1, "z": 2}[axis]
         colors_by_axis = {
-            "x": (0.90, 0.10, 0.10, 1.0),
-            "y": (0.10, 0.65, 0.18, 1.0),
-            "z": (0.10, 0.35, 0.95, 1.0),
+            "x": "#d7191c",
+            "y": "#1a9641",
+            "z": "#2c7bb6",
         }
         labels_by_axis = {"x": "X", "y": "Y", "z": "Z"}
         end = np.asarray(origin, dtype=np.float64).copy()
         end[axis_index] += float(size[axis_index])
-        line = np.vstack([origin, end]).astype(np.float32)
-        view.addItem(
-            gl.GLLinePlotItem(
-                pos=line,
-                color=colors_by_axis[axis],
-                width=3.0,
-                antialias=True,
-            )
+        plotter.add_mesh(
+            pv.Line(origin, end),
+            color=colors_by_axis[axis],
+            line_width=4,
+            label=f"{labels_by_axis[axis]}轴",
         )
-        text_cls = getattr(gl, "GLTextItem", None)
-        if text_cls is None:
-            return
         try:
             label_pos = end.copy()
             label_pos[axis_index] += max(float(size[axis_index]) * 0.035, 0.12)
-            text_item = text_cls(
-                pos=label_pos.astype(float),
-                text=labels_by_axis[axis],
-                color=colors_by_axis[axis],
+            plotter.add_point_labels(
+                np.asarray([label_pos], dtype=np.float64),
+                [labels_by_axis[axis]],
+                text_color=colors_by_axis[axis],
+                font_size=18,
+                point_size=0,
+                shape=None,
+                always_visible=True,
             )
-            view.addItem(text_item)
         except Exception:
             return
 
@@ -1314,41 +1333,59 @@ class QualityLogPage(QWidget):
         if not path:
             return
         try:
-            pixmap = view.grab()
-            if pixmap.isNull() or not pixmap.save(path, "PNG"):
-                raise RuntimeError("当前视图截图为空或保存失败")
+            if hasattr(view, "screenshot"):
+                view.screenshot(path)
+            else:
+                pixmap = view.grab()
+                if pixmap.isNull() or not pixmap.save(path, "PNG"):
+                    raise RuntimeError("当前视图截图为空或保存失败")
         except Exception as exc:
             QMessageBox.warning(dialog, "导出失败", f"无法导出当前视图 PNG：\n{exc}")
 
-    def _add_georef3d_payload_to_gl_view(
+    def _add_georef3d_payload_to_pyvista(
         self,
-        view,
+        plotter,
         payload: dict,
         *,
         label: str,
         kind: str,
         show_bscan: bool = True,
     ) -> None:
-        """Add one trajectory/curtain payload to a pyqtgraph GLViewWidget."""
-        import pyqtgraph.opengl as gl
+        """Add one trajectory/curtain payload to a PyVista plotter."""
+        import pyvista as pv
 
         x_m = np.asarray(payload.get("local_x_m", []), dtype=np.float64)
         y_m = np.asarray(payload.get("local_y_m", []), dtype=np.float64)
         z_m = np.asarray(payload.get("airborne_z_m", []), dtype=np.float64)
         if x_m.size and y_m.size and z_m.size:
-            pos = np.column_stack([x_m, y_m, z_m]).astype(np.float32)
+            pos = np.column_stack([x_m, y_m, z_m]).astype(np.float64)
             color = {
-                "raw": (1.0, 0.45, 0.0, 1.0),
-                "current": (0.0, 0.55, 0.62, 1.0),
-                "diff": (0.37, 0.29, 0.84, 1.0),
-            }.get(kind, (0.1, 0.1, 0.1, 1.0))
-            view.addItem(gl.GLLinePlotItem(pos=pos, color=color, width=2.0, antialias=True))
+                "raw": "#f97316",
+                "current": "#0891b2",
+                "diff": "#7c3aed",
+            }.get(kind, "#111827")
+            if pos.shape[0] >= 2:
+                plotter.add_mesh(
+                    pv.lines_from_points(pos, close=False),
+                    color=color,
+                    line_width=4 if kind == "current" else 3,
+                    label=label,
+                )
             endpoints = np.vstack([pos[0], pos[-1]])
-            endpoint_colors = np.array(
-                [[0.0, 0.6, 0.25, 1.0], [0.9, 0.1, 0.1, 1.0]],
-                dtype=np.float32,
+            plotter.add_points(
+                endpoints[:1],
+                color="#16a34a",
+                point_size=12,
+                render_points_as_spheres=True,
+                label=f"{label}起点",
             )
-            view.addItem(gl.GLScatterPlotItem(pos=endpoints, color=endpoint_colors, size=8.0))
+            plotter.add_points(
+                endpoints[1:],
+                color="#dc2626",
+                point_size=12,
+                render_points_as_spheres=True,
+                label=f"{label}终点",
+            )
 
         if not show_bscan:
             return
@@ -1364,44 +1401,12 @@ class QualityLogPage(QWidget):
             or amplitude.shape != curtain_x.shape
         ):
             return
-        vertices, faces, vertex_colors = self._build_georef3d_mesh_arrays(
+        grid = self._build_georef3d_pyvista_grid(
             curtain_x,
             curtain_y,
             curtain_z,
             amplitude,
-            kind=kind,
         )
-        mesh = gl.GLMeshItem(
-            vertexes=vertices,
-            faces=faces,
-            vertexColors=vertex_colors,
-            smooth=False,
-            drawEdges=False,
-        )
-        view.addItem(mesh)
-
-    def _build_georef3d_mesh_arrays(
-        self,
-        curtain_x: np.ndarray,
-        curtain_y: np.ndarray,
-        curtain_z: np.ndarray,
-        amplitude: np.ndarray,
-        *,
-        kind: str,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Convert curtain arrays to a triangle mesh for pyqtgraph OpenGL."""
-        rows, cols = curtain_x.shape
-        vertices = np.column_stack(
-            [curtain_x.reshape(-1), curtain_y.reshape(-1), curtain_z.reshape(-1)]
-        ).astype(np.float32)
-        index_grid = np.arange(rows * cols, dtype=np.uint32).reshape(rows, cols)
-        a = index_grid[:-1, :-1].reshape(-1)
-        b = index_grid[:-1, 1:].reshape(-1)
-        d = index_grid[1:, :-1].reshape(-1)
-        e = index_grid[1:, 1:].reshape(-1)
-        faces = np.empty((a.size * 2, 3), dtype=np.uint32)
-        faces[0::2] = np.column_stack([a, d, b])
-        faces[1::2] = np.column_stack([b, d, e])
         finite_amp = amplitude[np.isfinite(amplitude)]
         if finite_amp.size:
             amp_min = float(np.min(finite_amp))
@@ -1411,15 +1416,37 @@ class QualityLogPage(QWidget):
         if not np.isfinite(amp_min) or not np.isfinite(amp_max) or amp_min == amp_max:
             amp_min, amp_max = 0.0, 1.0
         cmap_name = "seismic" if kind == "diff" else "gray"
-        cmap = colormaps.get_cmap(cmap_name)
-        if kind == "diff":
-            vmax = max(abs(amp_min), abs(amp_max), 1.0e-12)
-            norm = colors.Normalize(vmin=-vmax, vmax=vmax)
-        else:
-            norm = colors.Normalize(vmin=amp_min, vmax=amp_max)
-        vertex_colors = cmap(norm(amplitude.reshape(-1))).astype(np.float32)
-        vertex_colors[:, 3] = 0.50 if kind == "raw" else 0.82
-        return vertices, faces, vertex_colors
+        clim = (-max(abs(amp_min), abs(amp_max), 1.0e-12), max(abs(amp_min), abs(amp_max), 1.0e-12)) if kind == "diff" else (amp_min, amp_max)
+        plotter.add_mesh(
+            grid,
+            scalars="amplitude",
+            cmap=cmap_name,
+            clim=clim,
+            opacity=0.50 if kind == "raw" else 0.82,
+            show_edges=False,
+            show_scalar_bar=False,
+            label=f"{label} B-scan",
+        )
+
+    def _build_georef3d_pyvista_grid(
+        self,
+        curtain_x: np.ndarray,
+        curtain_y: np.ndarray,
+        curtain_z: np.ndarray,
+        amplitude: np.ndarray,
+    ):
+        """Convert curtain arrays to a PyVista StructuredGrid."""
+        import pyvista as pv
+
+        rows, cols = curtain_x.shape
+        grid = pv.StructuredGrid(
+            np.asarray(curtain_x, dtype=np.float64),
+            np.asarray(curtain_y, dtype=np.float64),
+            np.asarray(curtain_z, dtype=np.float64),
+        )
+        grid.dimensions = (cols, rows, 1)
+        grid.point_data["amplitude"] = np.asarray(amplitude, dtype=np.float64).reshape(-1, order="F")
+        return grid
 
     def _open_georef3d_matplotlib_dialog(
         self,
