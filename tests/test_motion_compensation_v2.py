@@ -10,9 +10,14 @@ import numpy as np
 import pytest
 
 from PythonModule.motion_compensation_v2 import (
+    _clone_metadata,
+    _field_1d,
+    _metadata_for_output,
     _resample_bscan_columns,
+    _resolve_shift_sample_limit,
     method_motion_compensation_v2,
 )
+from PythonModule import motion_compensation_core as motion_core
 
 
 AIR_WAVE_SPEED_M_PER_NS = 0.299792458
@@ -63,6 +68,24 @@ def test_resample_bscan_columns_matches_numpy_interp_for_nonuniform_distance():
     assert result.dtype == np.float32
     assert result.shape == (3, 6)
     assert np.allclose(result, expected, rtol=1e-6, atol=1e-6)
+
+
+def test_v2_private_helpers_route_to_shared_motion_core():
+    assert _clone_metadata is motion_core.clone_metadata
+    assert _field_1d is motion_core.field_1d
+    assert _metadata_for_output is motion_core.metadata_for_output
+    assert _resample_bscan_columns is not None
+    assert _resolve_shift_sample_limit(
+        max_shift_samples=1.0,
+        max_shift_ns=0.0,
+        sample_interval_ns=0.1,
+        sample_count=64,
+    ) == motion_core.resolve_shift_sample_limit(
+        max_shift_samples=1.0,
+        max_shift_ns=0.0,
+        sample_interval_ns=0.1,
+        sample_count=64,
+    )
 
 
 def test_v2_uses_agl_height_and_air_velocity_for_time_shift():
