@@ -15,6 +15,7 @@ from typing import Any
 
 import numpy as np
 
+from PythonModule.motion_compensation_core import AIR_WAVE_SPEED_M_PER_NS
 from core.runtime_warnings import build_runtime_warning
 from core.scalar_utils import to_float, to_optional_float
 from core.trace_metadata_utils import (
@@ -22,9 +23,6 @@ from core.trace_metadata_utils import (
     resample_bscan_columns_linear,
     resample_trace_metadata,
 )
-
-
-AIR_WAVE_SPEED_M_PER_NS = 0.299792458
 
 
 def _clone_metadata(trace_metadata: dict[str, Any] | None) -> dict[str, np.ndarray]:

@@ -22,6 +22,7 @@ from core.methods_registry import (
 )
 from core.workflow_data import METHOD_CATEGORIES, QUICK_PRESETS, WorkflowConfig
 from core.preset_profiles import RECOMMENDED_RUN_PROFILES
+from PythonModule.motion_compensation_core import AIR_WAVE_SPEED_M_PER_NS
 
 CORE_MOTION_METHODS = [
     "trajectory_smoothing",
@@ -30,13 +31,12 @@ CORE_MOTION_METHODS = [
     "motion_compensation_height",
 ]
 VIBRATION_METHOD = "motion_compensation_vibration"
-V1_LEGACY_METHODS = CORE_MOTION_METHODS + [VIBRATION_METHOD]
 
 BASE_DIR = Path(__file__).parent.parent
 
 
 def test_motion_methods_registered_public_and_have_params():
-    """Core V1 stages are visible, categorized, and have parameter definitions."""
+    """The four public atomic nodes are visible and use the motion category."""
     public_keys = get_public_method_keys()
     for key in CORE_MOTION_METHODS:
         assert key in PROCESSING_METHODS, f"{key} not in PROCESSING_METHODS"
@@ -80,30 +80,32 @@ def test_auto_tune_stage_assigned_for_all_motion_methods():
 
 
 def test_motion_compensation_v1_quick_preset_exists():
-    """The motion_compensation_v1 quick preset is defined with correct sequencing."""
+    """The legacy preset key now routes to the four V2-core atomic nodes."""
     assert "motion_compensation_v1" in QUICK_PRESETS
     preset = QUICK_PRESETS["motion_compensation_v1"]
-    assert preset["name"] == "运动补偿 V1（兼容旧基准）"
+    assert "V1" not in preset["name"]
+    assert "Legacy" not in preset["name"]
 
     method_ids = [m["method_id"] for m in preset["methods"]]
-    assert method_ids == V1_LEGACY_METHODS
+    assert method_ids == CORE_MOTION_METHODS
 
-    for m in preset["methods"][:-1]:
+    for m in preset["methods"]:
         assert m["category"] == "motion_compensation"
         assert m["enabled"] is True
-    assert preset["methods"][-1]["category"] == "artifact_suppression"
 
 
 def test_motion_compensation_v1_recommended_profile_exists():
-    """The recommended run profile exists and sequences the deterministic V1 stages only."""
+    """Compatibility profiles sequence only the four V2-core atomic nodes."""
     assert "motion_compensation_v1" in RECOMMENDED_RUN_PROFILES
     profile = RECOMMENDED_RUN_PROFILES["motion_compensation_v1"]
-    assert profile["label"] == "运动补偿 V1（兼容旧基准）"
-    assert profile["order"] == V1_LEGACY_METHODS
+    assert "V1" not in profile["label"]
+    assert "Legacy" not in profile["label"]
+    assert profile["order"] == CORE_MOTION_METHODS
 
     assert "motion_compensation_core_v1" in RECOMMENDED_RUN_PROFILES
     core_profile = RECOMMENDED_RUN_PROFILES["motion_compensation_core_v1"]
-    assert core_profile["label"] == "运动补偿 Core V1"
+    assert "V1" not in core_profile["label"]
+    assert "Legacy" not in core_profile["label"]
     assert core_profile["order"] == CORE_MOTION_METHODS
     assert VIBRATION_METHOD not in core_profile["order"]
 
@@ -115,13 +117,13 @@ def test_motion_compensation_v1_recommended_profile_exists():
 
 
 def test_motion_compensation_v1_preset_applies_to_workflow_config():
-    """Applying the preset to a WorkflowConfig produces the expected methods."""
+    """Applying compatibility presets yields only the four atomic motion nodes."""
     cfg = WorkflowConfig()
     ok = cfg.apply_preset("motion_compensation_v1")
     assert ok is True
     enabled = cfg.get_enabled_methods()
-    assert len(enabled) == 5
-    assert [m.method_id for m in enabled] == V1_LEGACY_METHODS
+    assert len(enabled) == 4
+    assert [m.method_id for m in enabled] == CORE_MOTION_METHODS
 
     cfg = WorkflowConfig()
     ok = cfg.apply_preset("motion_compensation_core_v1")
@@ -146,7 +148,7 @@ def test_cli_config_validates(tmp_path: Path):
 
 def test_motion_methods_have_reasonable_defaults():
     """Parameter defaults fall within advertised min/max ranges."""
-    for key in V1_LEGACY_METHODS:
+    for key in CORE_MOTION_METHODS + [VIBRATION_METHOD]:
         for p in PROCESSING_METHODS[key].get("params", []):
             name = p["name"]
             default = p.get("default")
@@ -156,3 +158,30 @@ def test_motion_methods_have_reasonable_defaults():
                 pytest.fail(f"{key}.{name} default {default} < min {p['min']}")
             if "max" in p and default > p["max"]:
                 pytest.fail(f"{key}.{name} default {default} > max {p['max']}")
+
+
+def test_atomic_motion_nodes_use_v2_core_defaults_and_no_legacy_ui():
+    """Atomic motion nodes remain public but no user-facing Legacy/V1 node is exposed."""
+    public_keys = get_public_method_keys()
+    for key in CORE_MOTION_METHODS:
+        func = PROCESSING_METHODS[key]["func"]
+        assert "legacy" not in getattr(func, "__module__", "").lower()
+
+    height_params = {
+        p["name"]: p for p in PROCESSING_METHODS["motion_compensation_height"]["params"]
+    }
+    assert height_params["wave_speed_m_per_ns"]["default"] == pytest.approx(
+        AIR_WAVE_SPEED_M_PER_NS
+    )
+    assert height_params["height_source"]["default"] == "auto"
+    assert set(height_params["height_source"]["choices"]) == {
+        "auto",
+        "height_agl_m",
+        "flight_height_m",
+    }
+
+    user_visible_names = " ".join(
+        str(PROCESSING_METHODS[key].get("name", "")) for key in public_keys
+    )
+    assert "Legacy" not in user_visible_names
+    assert "兼容旧基准" not in user_visible_names

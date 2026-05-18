@@ -1,153 +1,136 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""UAV-GPR 速度误差补偿模块（V1 等距重采样）。
-
-基于每道的累计距离，将非等距采样的 B-scan 沿道方向重采样到等距轴。
-V1 仅支持确定性的线性插值，不做带限/高阶插值。
-"""
+"""User-visible UAV-GPR equal-distance resampling atomic node."""
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 
-from core.scalar_utils import to_float
-from core.trace_metadata_utils import (  # type: ignore[import]
-    build_uniform_trace_distance_m,
-    resample_bscan_columns_linear,
-    resample_trace_metadata,
+from PythonModule.motion_compensation_core import (
+    clone_metadata,
+    compute_trace_distance,
+    metadata_for_output,
+    motion_warning,
+    resample_equal_distance,
 )
+from core.scalar_utils import to_float
+from core.trace_metadata_utils import build_uniform_trace_distance_m
 
 
-def _derive_trace_distance_from_xy(trace_metadata: dict, trace_count: int) -> np.ndarray:
-    """从 local_x_m / local_y_m 推导累计距离。"""
-    if "local_x_m" not in trace_metadata or "local_y_m" not in trace_metadata:
+METHOD_ID = "motion_compensation_speed"
+
+
+def _skip(
+    data: np.ndarray,
+    *,
+    reason: str,
+    code: str,
+    trace_count: int,
+    **extra: Any,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    return np.array(data, copy=True), {
+        "method": METHOD_ID,
+        "skipped": True,
+        "reason": reason,
+        "source_traces": int(trace_count),
+        "runtime_warnings": [motion_warning(METHOD_ID, code, reason, **extra)],
+        "quality_flags": [code],
+        **extra,
+    }
+
+
+def _derive_distance_from_xy(metadata: dict[str, np.ndarray], trace_count: int) -> np.ndarray:
+    if "local_x_m" not in metadata or "local_y_m" not in metadata:
         raise ValueError("缺少 trace_distance_m，且无法从 local_x_m / local_y_m 推导")
-
-    local_x = np.asarray(trace_metadata["local_x_m"], dtype=np.float64)
-    local_y = np.asarray(trace_metadata["local_y_m"], dtype=np.float64)
+    local_x = np.asarray(metadata["local_x_m"], dtype=np.float64)
+    local_y = np.asarray(metadata["local_y_m"], dtype=np.float64)
     if local_x.ndim != 1 or local_y.ndim != 1:
         raise ValueError("local_x_m / local_y_m 必须为一维数组")
     if local_x.size < trace_count or local_y.size < trace_count:
         raise ValueError("local_x_m / local_y_m 长度不足，无法覆盖全部道")
-
-    local_x = local_x[:trace_count]
-    local_y = local_y[:trace_count]
-    step = np.hypot(np.diff(local_x), np.diff(local_y))
-    distance = np.empty(trace_count, dtype=np.float32)
-    distance[0] = 0.0
-    if trace_count > 1:
-        distance[1:] = np.cumsum(step, dtype=np.float64).astype(np.float32, copy=False)
-    return distance
-
-
-def _prepare_metadata_for_resampling(
-    trace_metadata: dict,
-    trace_count: int,
-    trace_distance_m: np.ndarray,
-) -> dict[str, np.ndarray]:
-    """复制并裁剪 metadata，确保可用于重采样。"""
-    prepared: dict[str, np.ndarray] = {}
-    for key, values in trace_metadata.items():
-        arr = np.asarray(values)
-        if arr.ndim == 0 or arr.size == 1:
-            prepared[key] = np.array(arr, copy=True)
-            continue
-        if arr.ndim != 1:
-            raise ValueError(f"trace_metadata['{key}'] 必须为一维数组")
-        if arr.size < trace_count:
-            raise ValueError(f"trace_metadata['{key}'] 长度不足，无法覆盖全部道")
-        prepared[key] = np.array(arr[:trace_count], copy=True)
-
-    prepared["trace_distance_m"] = np.asarray(trace_distance_m, dtype=np.float32).copy()
-    return prepared
+    return compute_trace_distance(local_x[:trace_count], local_y[:trace_count])
 
 
 def method_motion_compensation_speed(
     data: np.ndarray,
-    trace_metadata: dict | None = None,
+    trace_metadata: dict[str, Any] | None = None,
     spacing_m: float | None = None,
     interpolation_mode: str = "linear",
-    **kwargs,
-) -> tuple[np.ndarray, dict]:
-    """速度误差补偿：按累计距离重采样到等距道轴。"""
+    **kwargs: Any,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Resample the B-scan and trace metadata onto an equal-distance axis."""
     arr = np.asarray(data, dtype=np.float32)
     if arr.ndim != 2:
         raise ValueError("速度误差补偿需要二维 B-scan 数据")
-
-    meta: dict[str, object] = {
-        "method": "motion_compensation_speed",
-        "interpolation_mode": str(interpolation_mode),
-        "source_traces": int(arr.shape[1]),
-    }
-
+    trace_count = int(arr.shape[1])
     if interpolation_mode != "linear":
-        raise ValueError(
-            f"interpolation_mode '{interpolation_mode}' 不受支持；V1 仅支持 'linear'"
+        raise ValueError(f"interpolation_mode '{interpolation_mode}' 不受支持；当前仅支持 'linear'")
+    if trace_metadata is None:
+        return _skip(
+            arr,
+            reason="缺少 trace_metadata，无法进行等距重采样",
+            code="missing_trace_metadata",
+            trace_count=trace_count,
         )
 
-    if trace_metadata is None:
-        meta["skipped"] = True
-        meta["reason"] = "缺少 trace_metadata，无法进行等距重采样"
-        return arr.copy(), meta
-
-    trace_count = int(arr.shape[1])
-    normalized_spacing_m = None
-    if spacing_m is not None:
-        candidate_spacing = to_float(spacing_m, default=0.0)
-        if candidate_spacing > 0:
-            normalized_spacing_m = candidate_spacing
-
+    metadata = clone_metadata(trace_metadata)
     try:
-        if "trace_distance_m" in trace_metadata:
-            source_distance_m = np.asarray(
-                trace_metadata["trace_distance_m"], dtype=np.float64
-            )
-            if source_distance_m.ndim != 1 or source_distance_m.size < trace_count:
+        if "trace_distance_m" in metadata:
+            source_distance = np.asarray(metadata["trace_distance_m"], dtype=np.float64)
+            if source_distance.ndim != 1 or source_distance.size < trace_count:
                 raise ValueError("trace_metadata['trace_distance_m'] 长度不足或不是一维数组")
-            source_distance_m = source_distance_m[:trace_count]
+            source_distance = source_distance[:trace_count]
             distance_source = "trace_distance_m"
         else:
-            source_distance_m = _derive_trace_distance_from_xy(trace_metadata, trace_count)
+            source_distance = _derive_distance_from_xy(metadata, trace_count)
             distance_source = "local_xy"
-
-        if np.any(np.diff(source_distance_m) < 0):
+        if not np.isfinite(source_distance).all():
+            raise ValueError("trace_distance_m 包含非有限值")
+        if np.any(np.diff(source_distance) < 0.0):
             raise ValueError("trace_distance_m 必须单调非递减；当前轨迹存在非单调距离")
-
-        metadata_for_resampling = _prepare_metadata_for_resampling(
-            trace_metadata,
-            trace_count,
-            source_distance_m,
-        )
-        target_distance_m = build_uniform_trace_distance_m(
-            source_distance_m,
-            spacing_m=normalized_spacing_m,
-        )
-        trace_metadata_out = resample_trace_metadata(
-            metadata_for_resampling,
-            target_trace_distance_m=target_distance_m,
-        )
     except ValueError as exc:
-        meta["skipped"] = True
-        meta["reason"] = str(exc)
-        return arr.copy(), meta
+        return _skip(
+            arr,
+            reason=str(exc),
+            code="invalid_trace_distance_m",
+            trace_count=trace_count,
+        )
 
-    corrected = resample_bscan_columns_linear(
+    requested_spacing = to_float(spacing_m, default=0.0) if spacing_m is not None else 0.0
+    target_distance = build_uniform_trace_distance_m(
+        source_distance,
+        spacing_m=requested_spacing if requested_spacing > 0.0 else None,
+    )
+    effective_spacing = 0.0
+    positive_spacing = np.diff(np.asarray(target_distance, dtype=np.float64))
+    positive_spacing = positive_spacing[positive_spacing > 0.0]
+    if positive_spacing.size:
+        effective_spacing = float(positive_spacing[0])
+
+    prepared_metadata = metadata_for_output(
+        metadata,
+        {"trace_distance_m": source_distance.astype(np.float32)},
+        trace_count,
+    )
+    corrected, trace_metadata_out, resample_meta = resample_equal_distance(
         arr,
-        np.asarray(source_distance_m, dtype=np.float64),
-        np.asarray(target_distance_m, dtype=np.float64),
+        prepared_metadata,
+        spacing_m=effective_spacing if effective_spacing > 0.0 else requested_spacing,
     )
-
-    spacing_values = np.diff(np.asarray(target_distance_m, dtype=np.float64))
-    positive_spacing = spacing_values[spacing_values > 0]
-    effective_spacing_m = float(positive_spacing[0]) if positive_spacing.size else 0.0
-
-    meta.update(
-        {
-            "distance_source": distance_source,
-            "source_traces": int(trace_count),
-            "target_traces": int(target_distance_m.size),
-            "spacing_m": effective_spacing_m,
-            "trace_metadata_out": trace_metadata_out,
-        }
-    )
-    return corrected, meta
+    resample_meta["spacing_m"] = effective_spacing
+    resample_meta["distance_source"] = distance_source
+    return corrected.astype(np.float32, copy=False), {
+        "method": METHOD_ID,
+        "skipped": False,
+        "interpolation_mode": str(interpolation_mode),
+        "trace_metadata_out": trace_metadata_out,
+        "runtime_warnings": [],
+        "quality_flags": [],
+        "provenance": {
+            "schema": "motion_compensation_atomic_v2",
+            "shared_core": "PythonModule.motion_compensation_core",
+        },
+        **resample_meta,
+    }

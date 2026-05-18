@@ -219,8 +219,8 @@ QUICK_PRESETS = {
         ],
     },
     "motion_compensation_v1": {
-        "name": "运动补偿 V1（兼容旧基准）",
-        "description": "保留旧五阶段基准；周期条带伪影抑制已不属于核心运动补偿链。",
+        "name": "分项运动补偿（兼容入口）",
+        "description": "保留旧 preset key，但四个用户可见原子节点已共享 UAV 运动补偿 V2 物理假设。",
         "methods": [
             {
                 "category": "motion_compensation",
@@ -251,28 +251,17 @@ QUICK_PRESETS = {
                 "enabled": True,
                 "params": {
                     "reference_height_mode": "mean",
+                    "height_source": "auto",
                     "compensate_amplitude": True,
                     "compensate_time_shift": True,
-                    "wave_speed_m_per_ns": 0.1,
-                },
-            },
-            {
-                "category": "artifact_suppression",
-                "method_id": "motion_compensation_vibration",
-                "enabled": True,
-                "params": {
-                    "smooth_window": 9,
-                    "preserve_row_percentile": 94.0,
-                    "preserve_mix": 0.35,
-                    "background_mix": 0.02,
-                    "max_restore_gain": 1.25,
+                    "wave_speed_m_per_ns": 0.299792458,
                 },
             },
         ],
     },
     "motion_compensation_core_v1": {
-        "name": "运动补偿 Core V1",
-        "description": "无人机GPR四项核心运动补偿原子流程，不包含周期条带伪影抑制。",
+        "name": "分项运动补偿（共享 V2 核心）",
+        "description": "无人机GPR四项原子运动补偿流程，共享 UAV 运动补偿 V2 物理假设。",
         "methods": [
             {
                 "category": "motion_compensation",
@@ -303,9 +292,10 @@ QUICK_PRESETS = {
                 "enabled": True,
                 "params": {
                     "reference_height_mode": "mean",
+                    "height_source": "auto",
                     "compensate_amplitude": True,
                     "compensate_time_shift": True,
-                    "wave_speed_m_per_ns": 0.1,
+                    "wave_speed_m_per_ns": 0.299792458,
                 },
             },
         ],

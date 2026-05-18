@@ -60,6 +60,9 @@ def test_motion_compensation_speed_output_count_matches_metadata_length():
     trace_metadata_out = meta["trace_metadata_out"]
     assert corrected.shape[1] == len(trace_metadata_out["trace_distance_m"])
     assert corrected.shape[1] == len(trace_metadata_out["trace_index"])
+    assert meta["runtime_warnings"] == []
+    assert meta["quality_flags"] == []
+    assert meta["provenance"]["shared_core"] == "PythonModule.motion_compensation_core"
     assert meta["source_traces"] == distance.size
     assert meta["target_traces"] == corrected.shape[1]
     assert meta["spacing_m"] == 1.0

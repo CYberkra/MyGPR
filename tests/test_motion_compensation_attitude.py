@@ -199,6 +199,29 @@ def test_attitude_compensation_clamps_excessive_tilt_with_warning_and_provenance
     assert np.allclose(meta["trace_metadata_updates"]["local_y_m"], expected["local_y_m"])
 
 
+def test_attitude_compensation_prefers_height_agl_for_footprint_projection():
+    data = np.zeros((16, 3), dtype=np.float32)
+    trace_metadata = {
+        "local_x_m": np.array([0.0, 1.0, 2.0], dtype=np.float64),
+        "local_y_m": np.zeros(3, dtype=np.float64),
+        "roll_deg": np.zeros(3, dtype=np.float64),
+        "pitch_deg": np.array([5.0, 5.0, 5.0], dtype=np.float64),
+        "yaw_deg": np.zeros(3, dtype=np.float64),
+        "height_agl_m": np.full(3, 1.0, dtype=np.float64),
+        "flight_height_m": np.full(3, 10.0, dtype=np.float64),
+    }
+
+    _, meta = method_motion_compensation_attitude(data, trace_metadata=trace_metadata)
+
+    expected_dx = np.tan(np.deg2rad(5.0)) * 1.0
+    assert meta["height_source_used"] == "height_agl_m"
+    assert meta["projection_height_source"] == "height_agl_m"
+    assert np.allclose(
+        meta["trace_metadata_updates"]["footprint_x_m"],
+        trace_metadata["local_x_m"] + expected_dx,
+    )
+
+
 def test_attitude_compensation_accepts_numpy_scalar_geometry_params():
     data = np.zeros((16, 4), dtype=np.float32)
     trace_metadata = {

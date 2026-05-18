@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "description": "Motion compensation V1 benchmark preset - deterministic five-stage UAV-GPR motion correction",
+  "description": "Motion compensation atomic benchmark preset - deterministic UAV-GPR motion correction stages",
   "jobs": [
     {
       "id": "motion_compensation_v1_benchmark",

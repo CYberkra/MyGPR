@@ -157,14 +157,8 @@ def test_motion_compensation_v1_preset_order_matches_plan_order():
         "motion_compensation_speed",
         "motion_compensation_attitude",
         "motion_compensation_height",
-        "motion_compensation_vibration",
     ]
-    core_order = [
-        "trajectory_smoothing",
-        "motion_compensation_speed",
-        "motion_compensation_attitude",
-        "motion_compensation_height",
-    ]
+    core_order = list(expected_order)
 
     assert [
         item["method_id"] for item in QUICK_PRESETS["motion_compensation_v1"]["methods"]

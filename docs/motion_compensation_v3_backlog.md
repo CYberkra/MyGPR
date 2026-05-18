@@ -2,7 +2,7 @@
 
 ## 结论
 
-本轮不实现完整 V3。当前工程继续把 `motion_compensation_v2` 作为推荐统一入口；`motion_compensation_core_v1` 仅作为四个原子运动补偿算法的边界清晰基线；`motion_compensation_vibration` 已从运动补偿核心链移出，定位为周期条带伪影抑制实验功能。
+本轮不实现完整 V3。当前工程继续把 `motion_compensation_v2` 作为推荐统一入口；四个用户可见原子运动补偿节点共享 V2 物理假设，用于分项验证、ablation 和调试；`motion_compensation_vibration` 已从运动补偿核心链移出，定位为周期条带伪影抑制实验功能。
 
 ## V3 暂缓项
 
@@ -16,7 +16,7 @@
 ## 当前边界
 
 - `motion_compensation_v2`：当前推荐入口，负责高度时移、振幅归一化、姿态/APC 足迹元数据、等距道距重采样和质量告警。
-- `motion_compensation_core_v1`：只包含 `trajectory_smoothing`、`motion_compensation_speed`、`motion_compensation_attitude`、`motion_compensation_height`。
+- 原子运动补偿节点：`trajectory_smoothing`、`motion_compensation_speed`、`motion_compensation_attitude`、`motion_compensation_height`，共享 V2 的 AGL 优先级、空气路径速度、clamp、warnings 和 trace metadata 输出契约。
 - `motion_compensation_vibration`：周期条带伪影抑制（实验），可用于高级增强或去噪验证，不再作为运动补偿核心能力证明。
 
 ## 进入 V3 前置条件

@@ -842,10 +842,17 @@ PROCESSING_METHODS = {
                 "default": True,
             },
             {
+                "name": "height_source",
+                "label": "高度来源",
+                "type": "choice",
+                "choices": ["auto", "height_agl_m", "flight_height_m"],
+                "default": "auto",
+            },
+            {
                 "name": "wave_speed_m_per_ns",
                 "label": "传播速度假设 (m/ns)",
                 "type": "float",
-                "default": 0.1,
+                "default": 0.299792458,
                 "min": 0.01,
                 "max": 1.0,
                 "tooltip": (
@@ -858,9 +865,10 @@ PROCESSING_METHODS = {
         "auto_tune_family": "motion_comp",
         "auto_tune_candidates": {
             "reference_height_mode": ["mean", "min"],
+            "height_source": ["auto"],
             "compensate_amplitude": [True, False],
             "compensate_time_shift": [True, False],
-            "wave_speed_m_per_ns": [0.05, 0.1, 0.15],
+            "wave_speed_m_per_ns": [0.299792458],
         },
     },
     "motion_compensation_speed": {

@@ -1,209 +1,324 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""UAV-GPR 飞行高度归一化模块
+"""User-visible UAV-GPR height normalization atomic node.
 
-基于每道数据的飞行高度（flight_height_m），对 B-scan 做振幅校正和/或时移校正，
-减弱因天线离地高度变化引起的能量起伏和同相轴漂移。
-
-输入要求：
-- data: 二维 numpy 数组 (samples, traces)
-- trace_metadata: 字典，必须包含 "flight_height_m" 键，值为每道的高度数组
-- time_window_ns: 通过 runtime contract 注入（Task 1），也可从 trace_metadata 读取
-
-V1 说明：
-- `wave_speed_m_per_ns=0.1` 是当前实现与 benchmark 对齐使用的传播速度常数。
-- 该常数用于保持既有数值行为稳定，不应在文档中自动等同为自由空间 / 空气段物理波速。
+The public method id remains ``motion_compensation_height``, but the physical
+contract now follows motion compensation V2: AGL height is preferred, the air
+path velocity defaults to c0, and all clamps/warnings are explicit.
 """
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 
+from PythonModule.motion_compensation_core import (
+    AIR_WAVE_SPEED_M_PER_NS,
+    apply_time_shift,
+    clone_metadata,
+    compute_reference_height,
+    motion_warning,
+    resolve_shift_sample_limit,
+    resolve_time_window_ns,
+    select_height,
+)
 from core.scalar_utils import to_float, to_optional_float
 
 
-def _as_positive_scalar(value: object) -> float | None:
-    """Return the first finite positive scalar from a runtime metadata value."""
-    try:
-        arr = np.asarray(value, dtype=np.float64).reshape(-1)
-    except (TypeError, ValueError):
-        return None
-    if arr.size == 0:
-        return None
-    scalar = float(arr[0])
-    if not np.isfinite(scalar) or scalar <= 0.0:
-        return None
-    return scalar
+METHOD_ID = "motion_compensation_height"
+
+
+def _skip(
+    data: np.ndarray,
+    *,
+    reason: str,
+    code: str,
+    trace_count: int,
+    warnings: list[dict[str, Any]] | None = None,
+    quality_flags: list[str] | None = None,
+    **extra: Any,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    runtime_warnings = list(warnings or [])
+    flags = list(quality_flags or [])
+    if code not in flags:
+        flags.append(code)
+    runtime_warnings.append(motion_warning(METHOD_ID, code, reason, **extra))
+    return np.array(data, copy=True), {
+        "method": METHOD_ID,
+        "skipped": True,
+        "reason": reason,
+        "source_traces": int(trace_count),
+        "input_height_valid": False,
+        "runtime_warnings": runtime_warnings,
+        "quality_flags": sorted(set(flags)),
+        **extra,
+    }
+
+
+def _reason_for_invalid_height(height: np.ndarray | None) -> str:
+    if height is None:
+        return "缺少 height_agl_m / flight_height_m 高度字段"
+    if height.size == 0:
+        return "高度数组为空"
+    if not np.isfinite(height).all():
+        if np.isnan(height).any():
+            return "高度包含 NaN"
+        return "高度包含 Inf"
+    if np.any(height <= 0.0):
+        return "高度包含零或负值"
+    return "高度长度与道数不一致"
 
 
 def method_motion_compensation_height(
     data: np.ndarray,
     reference_height_mode: str = "mean",
     manual_height: float = 0.0,
+    height_source: str = "auto",
     compensate_amplitude: bool = True,
     compensate_time_shift: bool = True,
-    wave_speed_m_per_ns: float = 0.1,
-    max_shift_samples: float | None = None,
+    air_wave_speed_m_per_ns: float = AIR_WAVE_SPEED_M_PER_NS,
+    wave_speed_m_per_ns: float | None = None,
+    max_shift_samples: float | None = 0.0,
+    max_shift_ns: float = 20.0,
+    max_amplitude_scale: float = 2.0,
     interpolation_mode: str = "linear",
-    trace_metadata: dict | None = None,
-    **kwargs,
-) -> tuple[np.ndarray, dict]:
-    """飞行高度归一化处理。
-
-    Args:
-        data: 输入 B-scan 数据，形状 (samples, traces)
-        reference_height_mode: 参考高度选择，"mean"/"min"/"manual"
-        manual_height: manual 模式下的参考高度（米）
-        compensate_amplitude: 是否做振幅校正
-        compensate_time_shift: 是否做时移校正
-        wave_speed_m_per_ns: 当前实现使用的传播速度常数（米/纳秒），默认 0.1 m/ns
-        max_shift_samples: 时移样点上限；None 表示不限制
-        interpolation_mode: 插值模式；V1 仅支持 "linear"
-        trace_metadata: 每道元数据，必须包含 "flight_height_m"
-        **kwargs: 兼容其他参数，优先使用 kwargs["time_window_ns"]
-
-    Returns:
-        (corrected_data, meta)
-    """
+    trace_metadata: dict[str, Any] | None = None,
+    header_info: dict[str, Any] | None = None,
+    time_window_ns: float | None = None,
+    **kwargs: Any,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Normalize height effects using the shared UAV motion V2 core."""
     arr = np.asarray(data, dtype=np.float32)
     if arr.ndim != 2:
-        raise ValueError("飞行高度归一化需要二维 B-scan 数据")
+        raise ValueError("motion_compensation_height requires a 2D B-scan array")
+    if interpolation_mode != "linear":
+        raise ValueError(
+            f"interpolation_mode '{interpolation_mode}' 不受支持；当前仅支持 'linear'"
+        )
 
-    samples, traces = arr.shape
+    samples, trace_count = arr.shape
+    metadata = clone_metadata(trace_metadata)
+    warnings: list[dict[str, Any]] = []
+    quality_flags: list[str] = []
+    if not metadata:
+        return _skip(
+            arr,
+            reason="缺少 height_agl_m / flight_height_m 高度字段",
+            code="missing_height_agl",
+            trace_count=trace_count,
+        )
+
+    try:
+        height_m, height_source_used = select_height(
+            metadata,
+            trace_count,
+            height_source=height_source,
+            method_id=METHOD_ID,
+            warnings=warnings,
+            quality_flags=quality_flags,
+        )
+    except ValueError as exc:
+        metadata_count = 0
+        for candidate in ("height_agl_m", "flight_height_m", str(height_source)):
+            if candidate in metadata:
+                metadata_count = int(np.asarray(metadata[candidate]).size)
+                break
+        reason = "高度数组为空" if metadata_count == 0 else "高度长度与道数不一致"
+        return _skip(
+            arr,
+            reason=reason,
+            code="height_length_mismatch",
+            trace_count=trace_count,
+            warnings=warnings,
+            quality_flags=quality_flags,
+            height_length_mismatch=True,
+            metadata_trace_count=metadata_count,
+            data_trace_count=trace_count,
+        )
+
+    if height_m is None:
+        return _skip(
+            arr,
+            reason=_reason_for_invalid_height(height_m),
+            code="missing_height_agl",
+            trace_count=trace_count,
+            warnings=warnings,
+            quality_flags=quality_flags,
+        )
+    if height_m.size != trace_count:
+        return _skip(
+            arr,
+            reason="高度长度与道数不一致",
+            code="height_length_mismatch",
+            trace_count=trace_count,
+            warnings=warnings,
+            quality_flags=quality_flags,
+            height_length_mismatch=True,
+            metadata_trace_count=int(height_m.size),
+            data_trace_count=trace_count,
+        )
+    if height_m.size == 0 or not np.isfinite(height_m).all() or np.any(height_m <= 0.0):
+        return _skip(
+            arr,
+            reason=_reason_for_invalid_height(height_m),
+            code="invalid_height_agl",
+            trace_count=trace_count,
+            warnings=warnings,
+            quality_flags=quality_flags,
+        )
+
+    speed_value = to_float(
+        wave_speed_m_per_ns if wave_speed_m_per_ns is not None else air_wave_speed_m_per_ns,
+        default=AIR_WAVE_SPEED_M_PER_NS,
+    )
+    if speed_value <= 0.0 or not np.isfinite(speed_value):
+        warnings.append(
+            motion_warning(
+                METHOD_ID,
+                "invalid_air_wave_speed",
+                "air_wave_speed_m_per_ns is invalid; falling back to c0.",
+                requested=speed_value,
+            )
+        )
+        quality_flags.append("invalid_air_wave_speed")
+        speed_value = AIR_WAVE_SPEED_M_PER_NS
+
     manual_height_value = to_float(manual_height, default=0.0)
-    wave_speed_value = to_float(wave_speed_m_per_ns, default=0.1)
-    max_shift_value = to_optional_float(max_shift_samples)
-    meta: dict[str, object] = {
-        "method": "motion_compensation_height",
-        "compensate_amplitude": bool(compensate_amplitude),
-        "compensate_time_shift": bool(compensate_time_shift),
-        "wave_speed_m_per_ns": wave_speed_value,
-        "max_shift_samples": max_shift_value,
-        "interpolation_mode": str(interpolation_mode),
+    max_shift_samples_value = to_optional_float(max_shift_samples)
+    max_shift_ns_value = to_float(max_shift_ns, default=0.0)
+    max_amplitude_scale_value = max(to_float(max_amplitude_scale, default=2.0), 1.0)
+    corrected = np.array(arr, copy=True)
+    h_ref = compute_reference_height(
+        height_m,
+        mode=reference_height_mode,
+        manual_height_m=manual_height_value,
+        warnings=warnings,
+        method_id=METHOD_ID,
+    )
+    if h_ref <= 0.0 or not np.isfinite(h_ref):
+        h_ref = float(np.mean(height_m))
+
+    meta: dict[str, Any] = {
+        "method": METHOD_ID,
+        "skipped": False,
+        "source_traces": int(trace_count),
+        "input_height_valid": True,
+        "height_source_requested": str(height_source),
+        "height_source_used": str(height_source_used),
+        "reference_height_mode": str(reference_height_mode),
+        "reference_height_m": float(h_ref),
+        "height_reference_m": float(h_ref),
+        "air_wave_speed_m_per_ns": float(speed_value),
+        "wave_speed_m_per_ns": float(speed_value),
+        "max_shift_samples": max_shift_samples_value,
+        "max_shift_samples_requested": max_shift_samples_value,
+        "max_shift_ns_requested": max_shift_ns_value,
+        "max_amplitude_scale": float(max_amplitude_scale_value),
+        "height_summary": {
+            "min_m": float(np.min(height_m)),
+            "max_m": float(np.max(height_m)),
+            "mean_m": float(np.mean(height_m)),
+            "std_m": float(np.std(height_m)),
+        },
+        "height_correction_applied": False,
+        "amplitude_correction_applied": False,
+        "time_shift_correction_applied": False,
+        "shift_clamped": False,
+        "time_shift_clamped": False,
+        "trace_metadata_updates": {
+            "height_agl_m": height_m.astype(np.float32),
+            "height_source": np.full(trace_count, str(height_source_used), dtype="<U32"),
+        },
+        "provenance": {
+            "schema": "motion_compensation_atomic_v2",
+            "shared_core": "PythonModule.motion_compensation_core",
+            "height_priority": ["height_agl_m", "flight_height_m"],
+            "air_path_velocity": "c0",
+        },
     }
 
-    # 1. 缺失 metadata 时安全跳过
-    if trace_metadata is None or "flight_height_m" not in trace_metadata:
-        meta["skipped"] = True
-        meta["reason"] = "缺少 trace_metadata['flight_height_m']"
-        return arr.copy(), meta
-
-    flight_height = np.asarray(trace_metadata["flight_height_m"], dtype=np.float32)
-    if flight_height.ndim != 1:
-        meta["skipped"] = True
-        meta["reason"] = "flight_height_m 必须为一维数组"
-        meta["input_height_valid"] = False
-        return arr.copy(), meta
-    if flight_height.size == 0:
-        meta["skipped"] = True
-        meta["reason"] = "flight_height_m 为空"
-        meta["input_height_valid"] = False
-        return arr.copy(), meta
-    if flight_height.size != traces:
-        meta["skipped"] = True
-        meta["reason"] = (
-            f"flight_height_m 长度与道数不一致：metadata={flight_height.size}, traces={traces}"
-        )
-        meta["input_height_valid"] = False
-        meta["height_length_mismatch"] = True
-        meta["metadata_trace_count"] = int(flight_height.size)
-        meta["data_trace_count"] = int(traces)
-        return arr.copy(), meta
-
-    # 2. 显式校验非正或 NaN 高度
-    if np.any(~np.isfinite(flight_height)):
-        meta["skipped"] = True
-        meta["reason"] = "flight_height_m 包含 NaN 或 Inf 值"
-        meta["input_height_valid"] = False
-        return arr.copy(), meta
-    if np.any(flight_height <= 0):
-        meta["skipped"] = True
-        meta["reason"] = "flight_height_m 包含零或负值"
-        meta["input_height_valid"] = False
-        return arr.copy(), meta
-
-    meta["input_height_valid"] = True
-
-    # 3. 计算参考高度
-    if reference_height_mode == "mean":
-        h_ref = float(np.mean(flight_height))
-    elif reference_height_mode == "min":
-        h_ref = float(np.min(flight_height))
-    elif reference_height_mode == "manual":
-        h_ref = manual_height_value
-    else:
-        h_ref = float(np.mean(flight_height))
-
-    if h_ref <= 0:
-        h_ref = 1.0
-
-    meta["reference_height_m"] = h_ref
-    meta["input_height_min_m"] = float(np.min(flight_height))
-    meta["input_height_max_m"] = float(np.max(flight_height))
-    meta["input_height_mean_m"] = float(np.mean(flight_height))
-    meta["input_height_std_m"] = float(np.std(flight_height))
-
-    corrected = arr.copy()
-
-    # 4. 振幅校正：基于高度变化的近似能量归一化
-    # 这里使用工程化的 h^2 比例做参考高度归一化，用于减弱高度起伏带来的
-    # 整体能量变化；它不等同于完整雷达方程补偿。
     if compensate_amplitude:
-        amp_factors = (flight_height / h_ref) ** 2
-        corrected *= amp_factors[np.newaxis, :]
+        amp_scale = (height_m / h_ref) ** 2
+        amp_scale = np.clip(
+            amp_scale,
+            1.0 / max_amplitude_scale_value,
+            max_amplitude_scale_value,
+        )
+        corrected = corrected * amp_scale[np.newaxis, :].astype(np.float32)
+        meta["trace_metadata_updates"]["height_amplitude_scale"] = amp_scale.astype(np.float32)
         meta["amplitude_correction_applied"] = True
-    else:
-        meta["amplitude_correction_applied"] = False
 
-    # 5. 时移校正
-    if compensate_time_shift and wave_speed_value > 0:
-        if interpolation_mode != "linear":
-            raise ValueError(
-                f"interpolation_mode '{interpolation_mode}' 不受支持；V1 仅支持 'linear'"
-            )
-
-        # 这里沿用当前 V1/benchmark 的传播速度常数，保持数值行为与既有
-        # preset / benchmark / evidence 一致。
-        delta_t_ns = 2.0 * (flight_height - h_ref) / wave_speed_value
-        meta["time_shift_correction_applied"] = True
-
-        # 按 Task 1 runtime contract 读取 time_window_ns
-        time_window_ns = kwargs.get("time_window_ns")
-        if time_window_ns is None and trace_metadata is not None:
-            time_window_ns = trace_metadata.get("time_window_ns")
-        time_window_value = _as_positive_scalar(time_window_ns)
-        if time_window_value is None:
-            meta["time_shift_correction_applied"] = False
-            meta["time_shift_skip_reason"] = "无法获取时窗信息（time_window_ns），跳过时移校正"
-        else:
-            meta["time_window_ns"] = time_window_value
-            dt_ns = time_window_value / max(samples - 1, 1)
-            shifts_samples = delta_t_ns / dt_ns
-
-            # 6. shift clamp
-            if max_shift_value is not None and max_shift_value > 0:
-                clamp = max_shift_value
-                shifts_clamped = np.clip(shifts_samples, -clamp, clamp)
-                meta["max_shift_samples_applied"] = float(np.max(np.abs(shifts_clamped)))
-                meta["shift_clamped"] = not np.allclose(shifts_samples, shifts_clamped)
-                shifts_samples = shifts_clamped
-            else:
-                meta["max_shift_samples_applied"] = float(np.max(np.abs(shifts_samples)))
-                meta["shift_clamped"] = False
-
-            sample_indices = np.arange(samples, dtype=np.float32)
-            for tr in range(traces):
-                shift = float(shifts_samples[tr])
-                if abs(shift) < 1e-3:
-                    continue
-                shifted_indices = sample_indices - shift
-                shifted_indices = np.clip(shifted_indices, 0, samples - 1)
-                corrected[:, tr] = np.interp(
-                    sample_indices,
-                    shifted_indices,
-                    corrected[:, tr],
+    if compensate_time_shift:
+        resolved_time_window = resolve_time_window_ns(
+            explicit_time_window_ns=time_window_ns,
+            trace_metadata=metadata,
+            header_info=header_info,
+            kwargs=kwargs,
+        )
+        if resolved_time_window is None or resolved_time_window <= 0.0:
+            warnings.append(
+                motion_warning(
+                    METHOD_ID,
+                    "missing_time_window_ns",
+                    "time_window_ns is missing; time-shift correction skipped.",
                 )
-    else:
-        meta["time_shift_correction_applied"] = False
+            )
+            quality_flags.append("missing_time_window_ns")
+        else:
+            dt_ns = float(resolved_time_window) / max(samples - 1, 1)
+            time_shift_ns = 2.0 * (height_m - h_ref) / speed_value
+            time_shift_samples = time_shift_ns / dt_ns
+            raw_shift_samples = time_shift_samples.copy()
+            clamp, clamp_source, clamp_details = resolve_shift_sample_limit(
+                max_shift_samples=max_shift_samples_value,
+                max_shift_ns=max_shift_ns_value,
+                sample_interval_ns=dt_ns,
+                sample_count=samples,
+            )
+            if clamp is not None:
+                time_shift_samples = np.clip(time_shift_samples, -clamp, clamp)
+                meta["max_shift_samples_effective"] = float(clamp)
+                meta["max_shift_limit_source"] = str(clamp_source)
+                meta.update(clamp_details)
+            else:
+                meta["max_shift_samples_effective"] = float(np.max(np.abs(time_shift_samples)))
+                meta["max_shift_limit_source"] = None
 
-    return corrected, meta
+            clamped_mask = ~np.isclose(raw_shift_samples, time_shift_samples)
+            if bool(np.any(clamped_mask)):
+                quality_flags.append("time_shift_clamped")
+                warnings.append(
+                    motion_warning(
+                        METHOD_ID,
+                        "time_shift_clamped",
+                        "Height time-shift correction exceeded configured limits and was clamped.",
+                        clamped_trace_count=int(np.count_nonzero(clamped_mask)),
+                        total_trace_count=trace_count,
+                        max_shift_samples_effective=float(meta["max_shift_samples_effective"]),
+                        max_shift_limit_source=str(clamp_source),
+                    )
+                )
+                meta["shift_clamped"] = True
+                meta["time_shift_clamped"] = True
+
+            corrected = apply_time_shift(corrected, time_shift_samples)
+            meta["time_window_ns"] = float(resolved_time_window)
+            meta["sample_interval_ns"] = float(dt_ns)
+            meta["time_shift_ns"] = time_shift_ns.astype(np.float32)
+            meta["time_shift_samples"] = time_shift_samples.astype(np.float32)
+            meta["raw_time_shift_samples_min"] = float(np.min(raw_shift_samples))
+            meta["raw_time_shift_samples_max"] = float(np.max(raw_shift_samples))
+            meta["max_shift_samples_applied"] = float(np.max(np.abs(time_shift_samples)))
+            meta["trace_metadata_updates"]["time_shift_ns"] = time_shift_ns.astype(np.float32)
+            meta["trace_metadata_updates"]["time_shift_samples"] = time_shift_samples.astype(np.float32)
+            meta["time_shift_correction_applied"] = True
+
+    meta["height_correction_applied"] = bool(
+        meta["amplitude_correction_applied"] or meta["time_shift_correction_applied"]
+    )
+    if "max_shift_samples_applied" not in meta:
+        meta["max_shift_samples_applied"] = 0.0
+    meta["runtime_warnings"] = warnings
+    meta["quality_flags"] = sorted(set(quality_flags))
+    return corrected.astype(np.float32, copy=False), meta

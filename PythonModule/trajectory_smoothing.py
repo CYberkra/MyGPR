@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""UAV-GPR 轨迹平滑模块（V1 横向几何修正）
+"""UAV-GPR trajectory smoothing atomic motion node.
 
 对经纬度轨迹进行平滑滤波，消除 GPS 高频噪声，不改变 B-scan 振幅数据。
 支持 Savitzky-Golay 滤波和滑动平均滤波。
 
-V1 行为：
+当前行为：
 - 不原地修改传入的 trace_metadata
 - 返回 trace_metadata_updates，包含平滑后的 local_x_m / local_y_m /
   trace_distance_m 以及位移指标
@@ -16,8 +16,20 @@ from __future__ import annotations
 
 import numpy as np
 
+from PythonModule.motion_compensation_core import motion_warning
 from core.scalar_utils import to_int_or_none
 from core.trace_metadata_utils import derive_local_xy_m  # type: ignore[import]
+
+
+METHOD_ID = "trajectory_smoothing"
+
+
+def _mark_skip(meta: dict, reason: str, code: str, **details) -> None:
+    """Attach the unified motion metadata warning contract to a skip result."""
+    meta["skipped"] = True
+    meta["reason"] = reason
+    meta["runtime_warnings"] = [motion_warning(METHOD_ID, code, reason, **details)]
+    meta["quality_flags"] = [code]
 
 
 def _ensure_odd_window(window: int, max_window: int) -> int:
@@ -70,7 +82,7 @@ def method_trajectory_smoothing(
     trace_metadata: dict | None = None,
     **kwargs,
 ) -> tuple[np.ndarray, dict]:
-    """轨迹平滑处理（V1 横向几何修正）。
+    """轨迹平滑处理（横向几何修正）。
 
     Args:
         data: 输入 B-scan 数据，形状 (samples, traces)
@@ -85,39 +97,46 @@ def method_trajectory_smoothing(
         位移指标以及 trace_metadata_updates（非原地修改）。
     """
     arr = np.asarray(data, dtype=np.float32)
-    meta: dict[str, object] = {"method": "trajectory_smoothing"}
+    meta: dict[str, object] = {"method": METHOD_ID}
 
     if trace_metadata is None or "longitude" not in trace_metadata or "latitude" not in trace_metadata:
-        meta["skipped"] = True
-        meta["reason"] = "缺少 trace_metadata['longitude'] 或 trace_metadata['latitude']"
+        _mark_skip(
+            meta,
+            "缺少 trace_metadata['longitude'] 或 trace_metadata['latitude']",
+            "missing_lon_lat",
+        )
         return arr.copy(), meta
 
     longitude = np.asarray(trace_metadata["longitude"], dtype=np.float64)
     latitude = np.asarray(trace_metadata["latitude"], dtype=np.float64)
 
     if longitude.ndim != 1 or latitude.ndim != 1:
-        meta["skipped"] = True
-        meta["reason"] = "longitude/latitude 必须为一维数组"
+        _mark_skip(meta, "longitude/latitude 必须为一维数组", "invalid_lon_lat")
         return arr.copy(), meta
 
     trace_count = int(arr.shape[1])
     if longitude.size != latitude.size:
-        meta["skipped"] = True
-        meta["reason"] = (
-            f"longitude/latitude 长度不一致：longitude={longitude.size}, latitude={latitude.size}"
+        _mark_skip(
+            meta,
+            f"longitude/latitude 长度不一致：longitude={longitude.size}, latitude={latitude.size}",
+            "metadata_length_mismatch",
+            longitude_count=int(longitude.size),
+            latitude_count=int(latitude.size),
         )
         meta["metadata_length_mismatch"] = True
         return arr.copy(), meta
 
     if longitude.size == 0:
-        meta["skipped"] = True
-        meta["reason"] = "轨迹数据为空"
+        _mark_skip(meta, "轨迹数据为空", "empty_trajectory")
         return arr.copy(), meta
 
     if longitude.size != trace_count:
-        meta["skipped"] = True
-        meta["reason"] = (
-            f"轨迹元数据长度与道数不一致：metadata={longitude.size}, traces={trace_count}"
+        _mark_skip(
+            meta,
+            f"轨迹元数据长度与道数不一致：metadata={longitude.size}, traces={trace_count}",
+            "metadata_trace_count_mismatch",
+            metadata_trace_count=int(longitude.size),
+            data_trace_count=int(trace_count),
         )
         meta["metadata_length_mismatch"] = True
         meta["metadata_trace_count"] = int(longitude.size)
@@ -133,8 +152,7 @@ def method_trajectory_smoothing(
         raise ValueError("polyorder must be numeric")
 
     if n < 3:
-        meta["skipped"] = True
-        meta["reason"] = "轨迹数据过短（少于3道）"
+        _mark_skip(meta, "轨迹数据过短（少于3道）", "too_few_traces")
         return arr.copy(), meta
 
     # 保留原始 lon/lat（若输入已含 _raw 则继承，否则以当前输入为准）
@@ -165,8 +183,12 @@ def method_trajectory_smoothing(
         lat_smooth = _moving_average_smooth_1d(latitude, wl)
         meta["window_length"] = int(wl)
     else:
-        meta["skipped"] = True
-        meta["reason"] = f"不支持的平滑方法: {method}"
+        _mark_skip(
+            meta,
+            f"不支持的平滑方法: {method}",
+            "unsupported_smoothing_method",
+            requested_method=str(method),
+        )
         return arr.copy(), meta
 
     # 使用统一原点的局部切平面 XY（米）
@@ -205,5 +227,12 @@ def method_trajectory_smoothing(
         "trace_distance_m": trace_distance_m,
     }
     meta["trace_metadata_updates"] = trace_metadata_updates
+    meta["runtime_warnings"] = []
+    meta["quality_flags"] = []
+    meta["provenance"] = {
+        "schema": "motion_compensation_atomic_v2",
+        "shared_core": "PythonModule.motion_compensation_core",
+        "algorithm": "trajectory_smoothing",
+    }
 
     return arr.copy(), meta

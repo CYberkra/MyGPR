@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from PythonModule.motion_compensation_height import method_motion_compensation_height
+from PythonModule.motion_compensation_core import AIR_WAVE_SPEED_M_PER_NS
 from core.benchmark_registry import generate_benchmark_sample
 from core.quality_metrics import ridge_error_metrics
 
@@ -137,7 +138,7 @@ def test_height_compensation_respects_max_shift_samples():
     heights = 2.0 + 0.5 * np.sin(np.linspace(0, 2 * np.pi, traces))
     trace_metadata = {
         "flight_height_m": heights.astype(np.float64),
-        "time_window_ns": 200.0,
+        "time_window_ns": 50.0,
     }
 
     _, meta_unclamped = method_motion_compensation_height(
@@ -237,6 +238,53 @@ def test_height_compensation_accepts_numpy_scalar_runtime_parameters():
     assert meta["wave_speed_m_per_ns"] == pytest.approx(0.1)
     assert meta["max_shift_samples"] == pytest.approx(2.0)
     assert meta["max_shift_samples_applied"] <= 2.0
+
+
+def test_height_compensation_defaults_to_air_wave_speed():
+    data = np.zeros((32, 4), dtype=np.float32)
+    trace_metadata = {
+        "height_agl_m": np.array([1.1, 1.2, 1.3, 1.4], dtype=np.float64),
+        "time_window_ns": 80.0,
+    }
+
+    _, meta = method_motion_compensation_height(data, trace_metadata=trace_metadata)
+
+    assert meta["air_wave_speed_m_per_ns"] == pytest.approx(AIR_WAVE_SPEED_M_PER_NS)
+    assert meta["wave_speed_m_per_ns"] == pytest.approx(AIR_WAVE_SPEED_M_PER_NS)
+
+
+def test_height_compensation_prefers_height_agl_over_flight_height():
+    data = np.zeros((32, 4), dtype=np.float32)
+    trace_metadata = {
+        "height_agl_m": np.array([1.0, 1.1, 1.2, 1.3], dtype=np.float64),
+        "flight_height_m": np.array([10.0, 11.0, 12.0, 13.0], dtype=np.float64),
+        "time_window_ns": 80.0,
+    }
+
+    _, meta = method_motion_compensation_height(data, trace_metadata=trace_metadata)
+
+    assert meta["height_source_used"] == "height_agl_m"
+    assert meta["height_reference_m"] == pytest.approx(1.15)
+
+
+def test_height_compensation_missing_time_window_warns_without_fake_shift():
+    data = np.zeros((32, 4), dtype=np.float32)
+    trace_metadata = {
+        "height_agl_m": np.array([1.0, 1.1, 1.2, 1.3], dtype=np.float64),
+    }
+
+    _, meta = method_motion_compensation_height(
+        data,
+        trace_metadata=trace_metadata,
+        compensate_time_shift=True,
+        compensate_amplitude=False,
+    )
+
+    warning_codes = {item["code"] for item in meta.get("runtime_warnings", [])}
+    assert "missing_time_window_ns" in warning_codes
+    assert "missing_time_window_ns" in meta["quality_flags"]
+    assert meta["time_shift_correction_applied"] is False
+    assert "time_shift_samples" not in meta
 
 
 def test_height_compensation_empty_flight_height_array():
