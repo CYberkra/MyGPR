@@ -7,13 +7,10 @@ from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
-    QHBoxLayout,
-    QLabel,
     QLineEdit,
     QTreeWidget,
     QTreeWidgetItem,
 )
-from qfluentwidgets import PushButton
 
 from core.methods_registry import (
     PROCESSING_METHODS,

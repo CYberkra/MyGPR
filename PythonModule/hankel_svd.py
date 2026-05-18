@@ -15,8 +15,6 @@
 
 from __future__ import annotations
 
-import math
-
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 from scipy.linalg import svd as scipy_svd

@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 """滑动平均背景去除"""
 
-import numpy as np
 from scipy.ndimage import uniform_filter1d
 
 
