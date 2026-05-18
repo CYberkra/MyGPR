@@ -37,7 +37,6 @@ from core.quality_metrics import (
     footprint_rmse,
     path_rmse,
     periodic_banding_ratio,
-    ridge_error_metrics,
     target_preservation_ratio,
     trace_spacing_std,
 )

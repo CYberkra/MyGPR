@@ -47,7 +47,6 @@ from core.quality_metrics import (  # noqa: E402
     clipping_ratio,
     compute_benchmark_metrics,
     hot_pixel_ratio,
-    ratio_fidelity,
 )
 from scripts.gprmax_benchmark import gprmax_multi_scenario_report as base_report  # noqa: E402
 

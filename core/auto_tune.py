@@ -29,7 +29,6 @@ from core.processing_engine import (
     run_processing_method,
 )
 from core.quality_metrics import (
-    auto_roi_bounds,
     baseline_bias,
     clipping_ratio,
     deep_zone_contrast,

@@ -20,7 +20,6 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.gprmax_benchmark.generate_cylinder_single_v1 import (  # noqa: E402
-    DEFAULT_PACKAGE_DIR,
     SCENARIO_ID,
     generate_package,
 )

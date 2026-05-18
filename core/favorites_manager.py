@@ -9,7 +9,6 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any
 
 from core.app_paths import get_favorites_dir
-from core.methods_registry import PROCESSING_METHODS
 
 logger = logging.getLogger(__name__)
 
