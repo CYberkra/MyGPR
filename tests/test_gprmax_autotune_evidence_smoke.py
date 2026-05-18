@@ -13,6 +13,7 @@ from pathlib import Path
 
 import h5py
 import numpy as np
+import pytest
 
 from core.auto_tune_comparison import run_auto_tune_comparison, to_summary_dict
 from core.auto_tune_comparison_export import export_auto_tune_comparison_artifacts
@@ -104,8 +105,17 @@ def _write_dataset(tmp_path: Path) -> Path:
     return manifest_path
 
 
-def test_gprmax_autotune_evidence_smoke_exports_truth_bundle(tmp_path: Path):
-    manifest_path = _write_dataset(tmp_path / "dataset")
+@pytest.fixture(scope="module")
+def pipe_demo_manifest(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Create the synthetic gprMax package once for this smoke module."""
+    return _write_dataset(tmp_path_factory.mktemp("gprmax_pipe_demo") / "dataset")
+
+
+def test_gprmax_autotune_evidence_smoke_exports_truth_bundle(
+    pipe_demo_manifest: Path,
+    tmp_path: Path,
+):
+    manifest_path = pipe_demo_manifest
     output_dir = tmp_path / "evidence"
 
     package = load_gprmax_dataset_contract(manifest_path)
@@ -188,8 +198,8 @@ def test_gprmax_autotune_evidence_smoke_exports_truth_bundle(tmp_path: Path):
     } <= names
 
 
-def test_gprmax_autotune_evidence_smoke_cli(tmp_path: Path):
-    manifest_path = _write_dataset(tmp_path / "dataset")
+def test_gprmax_autotune_evidence_smoke_cli(pipe_demo_manifest: Path, tmp_path: Path):
+    manifest_path = pipe_demo_manifest
     output_dir = tmp_path / "cli_evidence"
 
     completed = subprocess.run(
