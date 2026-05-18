@@ -8,11 +8,13 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from core.gpr_io import extract_airborne_csv_payload
 from core.uav_georeference_3d import build_airborne_georeference_3d_payload
 from read_file_data import readcsv
 from scripts.generate_uav_gpr_motion_effect_demo import (
+    MotionEffectDemoResult,
     SAMPLES,
     TRACES,
     generate_motion_effect_demo,
@@ -28,9 +30,17 @@ def _header() -> dict[str, float | int]:
     }
 
 
-def test_generate_motion_effect_demo_outputs_visible_artifacts(tmp_path: Path):
-    output_dir = tmp_path / "motion_effect_demo"
+@pytest.fixture(scope="module")
+def motion_effect_demo_dir(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[Path, MotionEffectDemoResult]:
+    output_dir = tmp_path_factory.mktemp("motion_effect_demo")
     result = generate_motion_effect_demo(output_dir)
+    return output_dir, result
+
+
+def test_generate_motion_effect_demo_outputs_visible_artifacts(motion_effect_demo_dir):
+    output_dir, result = motion_effect_demo_dir
 
     for name in [
         "main.csv",
@@ -62,9 +72,8 @@ def test_generate_motion_effect_demo_outputs_visible_artifacts(tmp_path: Path):
     assert summary["top_interface_std_after"] <= summary["top_interface_std_before"] + 2.0
 
 
-def test_motion_effect_demo_sidecars_align_without_explicit_timestamps(tmp_path: Path):
-    output_dir = tmp_path / "motion_effect_demo"
-    generate_motion_effect_demo(output_dir)
+def test_motion_effect_demo_sidecars_align_without_explicit_timestamps(motion_effect_demo_dir):
+    output_dir, _result = motion_effect_demo_dir
 
     raw = readcsv(str(output_dir / "main.csv"))
     data, metadata, header = extract_airborne_csv_payload(
