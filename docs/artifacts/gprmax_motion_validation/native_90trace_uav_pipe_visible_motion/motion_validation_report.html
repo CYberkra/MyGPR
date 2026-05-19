@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MyGPR gprMax 运动补偿验证报告</title>
+  <style>
+    :root {
+      --ink: #172033;
+      --muted: #5f6b7a;
+      --line: #d8dee8;
+      --panel: #ffffff;
+      --paper: #f4f6f9;
+      --accent: #0e766e;
+      --warn: #a16207;
+      --warn-soft: #fff3c4;
+      --good: #166534;
+      --good-soft: #dcfce7;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
+      background: var(--paper);
+      color: var(--ink);
+      line-height: 1.55;
+    }
+    header {
+      padding: 34px 44px 26px;
+      background: #fff;
+      border-bottom: 1px solid var(--line);
+    }
+    .eyebrow {
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 8px 0 12px;
+      font-size: 30px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+    h2 { margin: 0 0 6px; font-size: 21px; }
+    h3 { margin: 0 0 10px; font-size: 16px; }
+    p { margin: 0; color: var(--muted); }
+    main { padding: 24px 44px 44px; }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+    .metric-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px 16px;
+    }
+    .metric-card .label { color: var(--muted); font-size: 13px; }
+    .metric-card .value { margin-top: 6px; font-size: 22px; font-weight: 700; }
+    .band {
+      margin-top: 18px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+    }
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: end;
+      margin-bottom: 14px;
+    }
+    .section-head p { max-width: 760px; }
+    .facts {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .fact {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: #fbfcfe;
+    }
+    .fact span { display: block; color: var(--muted); font-size: 12px; }
+    .fact strong { display: block; margin-top: 4px; overflow-wrap: anywhere; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    th, td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+    th { color: var(--muted); font-weight: 700; background: #f8fafc; }
+    .figure-wide {
+      margin: 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #fff;
+    }
+    .figure-wide img, .preview img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+    .preview-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .preview {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: #fff;
+    }
+    .badge {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 3px 9px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .badge.good { color: var(--good); background: var(--good-soft); }
+    .badge.warn { color: var(--warn); background: var(--warn-soft); }
+    .badge.neutral { color: var(--muted); background: #edf1f7; }
+    code {
+      font-family: "Cascadia Mono", Consolas, monospace;
+      font-size: 12px;
+      background: #eef2f7;
+      padding: 2px 5px;
+      border-radius: 5px;
+    }
+    ul { margin: 0; padding-left: 20px; }
+    .footer-note {
+      margin-top: 18px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    @media (max-width: 980px) {
+      header, main { padding-left: 18px; padding-right: 18px; }
+      .summary-grid, .facts, .preview-grid { grid-template-columns: 1fr; }
+      .section-head { display: block; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="eyebrow">MyGPR / gprMax Motion Validation</div>
+    <h1>UAV-GPR 运动补偿验证闭环报告</h1>
+    <p>本报告使用 gprMax 地下波场作为 source，在 MyGPR 侧注入可控 UAV 运动扰动，并比较四原子补偿链与统一 Motion V2 的恢复效果。生成时间：2026-05-19 19:38:15</p>
+    <p class="footer-note">This run uses an exaggerated demo/stress UAV motion profile for visibility and is not a field-flight baseline.</p>
+    <div class="summary-grid">
+      <div class="metric-card"><div class="label">Raw vs Source RMS</div><div class="value">0.2347</div></div>
+      <div class="metric-card"><div class="label">Atomic vs Source RMS</div><div class="value">0.04835</div></div>
+      <div class="metric-card"><div class="label">Motion V2 vs Source RMS</div><div class="value">0.011</div></div>
+      <div class="metric-card"><div class="label">V2 道距 CV</div><div class="value">0.03582</div></div>
+    </div>
+  </header>
+  <main>
+    <section class="band">
+      <div class="section-head">
+        <h2>实验对象</h2>
+        <p>验证目标是软件链路和运动补偿恢复能力，不把该合成运动扰动视为真实外业地质结论。</p>
+      </div>
+      <div class="facts">
+        <div class="fact"><span>Scenario</span><strong>uav_pipe_gain_workflow_bscan_smoke</strong></div>
+        <div class="fact"><span>gprMax source shape</span><strong>[2037, 90]</strong></div>
+        <div class="fact"><span>Motion V2 shape</span><strong>[2037, 123]</strong></div>
+        <div class="fact"><span>Trace interval</span><strong>0.01 m</strong></div>
+        <div class="fact"><span>Time window</span><strong>24.02289441979553 ns</strong></div>
+        <div class="fact"><span>Derived long-line</span><strong>False</strong></div>
+        <div class="fact"><span>Height p-p</span><strong>0.1864 m</strong></div>
+        <div class="fact"><span>Lateral p-p</span><strong>0.09695 m</strong></div>
+        <div class="fact"><span>Max height shift</span><strong>59.96 samples</strong></div>
+      </div>
+    </section>
+    <section class="band">
+      <div class="section-head">
+        <h2>处理链路</h2>
+        <p>四原子链先更新姿态/APC 足迹，再执行等距道距重采样，最后做高度时移和振幅归一，避免后续姿态更新破坏 speed compensation 的 trace axis。</p>
+      </div>
+      <table>
+        <thead><tr><th>Route</th><th>Steps</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td>Atomic</td><td><code>trajectory_smoothing -&gt; motion_compensation_attitude -&gt; motion_compensation_speed -&gt; motion_compensation_height</code></td><td>用于 ablation、教学展示和分项验证。</td></tr>
+          <tr><td>Unified</td><td><code>motion_compensation_v2</code></td><td>推荐主线入口，统一输出 warnings、quality_flags 和 trace metadata。</td></tr>
+        </tbody>
+      </table>
+    </section>
+    <section class="band">
+      <div class="section-head">
+        <h2>关键指标</h2>
+        <p><span class="badge good">改善</span> RMS 越低越接近未注入运动扰动的 gprMax source；道距 CV 越低表示航迹重采样越稳定。</p>
+      </div>
+      <table>
+        <thead><tr><th>Metric</th><th>Value</th><th>Interpretation</th></tr></thead>
+        <tbody><tr><td>Raw vs Source RMS</td><td>0.23467</td><td>运动扰动注入后与原始 gprMax 的差异</td></tr>
+<tr><td>Atomic vs Source RMS</td><td>0.0483498</td><td>四原子补偿后残差</td></tr>
+<tr><td>Motion V2 vs Source RMS</td><td>0.0110029</td><td>统一 V2 补偿后残差</td></tr>
+<tr><td>Trace Spacing CV Before</td><td>0.251014</td><td>补偿前道距不均匀程度</td></tr>
+<tr><td>Trace Spacing CV Atomic</td><td>0.0353756</td><td>四原子补偿后道距不均匀程度</td></tr>
+<tr><td>Trace Spacing CV V2</td><td>0.0358158</td><td>V2 补偿后道距不均匀程度</td></tr>
+<tr><td>Target Apex Error Raw</td><td>48</td><td>补偿前目标顶点偏差 / sample</td></tr>
+<tr><td>Target Apex Error Atomic</td><td>5</td><td>四原子补偿后目标顶点偏差 / sample</td></tr>
+<tr><td>Target Apex Error V2</td><td>0</td><td>V2 补偿后目标顶点偏差 / sample</td></tr>
+<tr><td>Target ROI Preservation Atomic</td><td>1.11315</td><td>四原子目标 ROI 能量保持</td></tr>
+<tr><td>Target ROI Preservation V2</td><td>1.01829</td><td>V2 目标 ROI 能量保持</td></tr></tbody>
+      </table>
+    </section>
+    
+            <section class="band">
+              <div class="section-head">
+                <h2>四联 B-scan 证据图</h2>
+                <p>统一灰度范围，对比 gprMax source、motion-injected raw、四原子补偿、Motion V2。</p>
+              </div>
+              <figure class="figure-wide">
+                <img src="paper_motion_validation_comparison.png" alt="paper motion validation comparison">
+              </figure>
+            </section>
+            
+            <section class="band">
+              <div class="section-head">
+                <h2>B-scan 处理链路对比</h2>
+                <p>用于检查运动注入和补偿后的波形结构是否仍可解释。</p>
+              </div>
+              <figure class="figure-wide">
+                <img src="bscan_motion_validation_comparison.png" alt="motion validation bscan comparison">
+              </figure>
+            </section>
+            
+            <section class="band">
+              <div class="section-head">
+                <h2>三维轨迹与剖面预览</h2>
+                <p>检查补偿前后航迹、剖面带和高度变化是否进入可视化链路。</p>
+              </div>
+              <div class="preview-grid"><article class="preview"><h3>Raw 3D 预览</h3><img src="raw_3d_preview.png" alt="Raw 3D 预览"></article><article class="preview"><h3>Motion V2 3D 预览</h3><img src="motion_v2_3d_preview.png" alt="Motion V2 3D 预览"></article></div>
+            </section>
+            
+    <section class="band">
+      <div class="section-head">
+        <h2>V2 重采样解释</h2>
+        <p>Motion V2 可能改变 trace 数，这是等距道距重采样的预期结果，不应被误判为 shape 错误。</p>
+      </div>
+      <div class="facts">
+        <div class="fact"><span>Resampled</span><strong>True</strong></div>
+        <div class="fact"><span>Source traces</span><strong>90</strong></div>
+        <div class="fact"><span>Target traces</span><strong>123</strong></div>
+        <div class="fact"><span>Spacing</span><strong>0.01 m</strong></div>
+        <div class="fact"><span>Target ROI</span><strong>{&#x27;time_start_idx&#x27;: 760, &#x27;time_end_idx&#x27;: 883, &#x27;dist_start_idx&#x27;: 40, &#x27;dist_end_idx&#x27;: 53}</strong></div>
+        <div class="fact"><span>Target geometry</span><strong>{&#x27;id&#x27;: &#x27;target_0&#x27;, &#x27;type&#x27;: &#x27;pipe&#x27;, &#x27;material&#x27;: &#x27;pec&#x27;, &#x27;depth_m&#x27;: 0.33, &#x27;center_x_m&#x27;: 0.62, &#x27;center_y_m&#x27;: 0.22, &#x27;radius_m&#x27;: 0.035, &#x27;roi&#x27;: {&#x27;time_start_idx&#x27;: 760, &#x27;time_end_idx&#x27;: 883, &#x27;dist_start_idx&#x27;: 40, &#x27;dist_end_idx&#x27;: 53}}</strong></div>
+      </div>
+    </section>
+    <section class="band">
+      <div class="section-head">
+        <h2>质量告警与限制</h2>
+        <p>这些信息用于判断当前证据能否进入论文/组会结论。</p>
+      </div>
+      <ul><li><strong>info</strong> atomic_spacing_improved_after_reorder: The final atomic trace spacing CV is lower than raw after running attitude/APC before speed compensation.</li></ul>
+      <p class="footer-note">限制：地下波场来自 gprMax，但 UAV 运动扰动是在 MyGPR 侧注入；该报告证明的是补偿链路可复现和指标可解释，不直接代表真实外业泛化能力。</p>
+    </section>
+  </main>
+</body>
+</html>

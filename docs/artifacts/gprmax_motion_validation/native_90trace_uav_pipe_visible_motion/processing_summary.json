@@ -1,0 +1,199 @@
+{
+  "schema": "mygpr_gprmax_motion_validation_summary_v1",
+  "output_dir": "D:\\CDUT-UavGPR-Controller\\MyGPR\\output\\gprmax_motion_validation\\native_90trace_uav_pipe_visible_motion",
+  "shapes": {
+    "source": [
+      2037,
+      90
+    ],
+    "raw": [
+      2037,
+      90
+    ],
+    "atomic": [
+      2037,
+      120
+    ],
+    "v2": [
+      2037,
+      123
+    ],
+    "original_gprmax": [
+      2037,
+      90
+    ]
+  },
+  "source": {
+    "scenario_id": "uav_pipe_gain_workflow_bscan_smoke",
+    "source_manifest": "D:\\CDUT-UavGPR-Controller\\MyGPR\\output\\gprmax_native_longline\\uav_pipe_gain_workflow_bscan_smoke_20260519_012145\\uav_pipe_gain_workflow_bscan_smoke_manifest.json",
+    "source_primary_out_file": "D:\\CDUT-UavGPR-Controller\\MyGPR\\output\\gprmax_native_longline\\uav_pipe_gain_workflow_bscan_smoke_20260519_012145\\uav_pipe_gain_workflow_bscan_smoke_merged.out",
+    "source_ground_truth_file": "D:\\CDUT-UavGPR-Controller\\MyGPR\\output\\gprmax_native_longline\\uav_pipe_gain_workflow_bscan_smoke_20260519_012145\\ground_truth.yaml",
+    "copied_source_artifacts": {
+      "source_manifest": "D:\\CDUT-UavGPR-Controller\\MyGPR\\output\\gprmax_motion_validation\\native_90trace_uav_pipe_visible_motion\\source_manifest.json",
+      "source_ground_truth": "D:\\CDUT-UavGPR-Controller\\MyGPR\\output\\gprmax_motion_validation\\native_90trace_uav_pipe_visible_motion\\source_ground_truth.yaml",
+      "source_model_in": "D:\\CDUT-UavGPR-Controller\\MyGPR\\output\\gprmax_motion_validation\\native_90trace_uav_pipe_visible_motion\\source_model_in.in"
+    },
+    "shape": [
+      2037,
+      90
+    ],
+    "original_gprmax_shape": [
+      2037,
+      90
+    ],
+    "derived_longline": false,
+    "trace_interval_m": 0.01,
+    "total_time_ns": 24.02289441979553,
+    "motion_profile": {
+      "spacing_sin_fraction": 0.4,
+      "spacing_cos_fraction": 0.2,
+      "spacing_noise_fraction": 0.055,
+      "spacing_min_fraction": 0.42,
+      "spacing_max_fraction": 1.72,
+      "lateral_track_fraction": 0.14,
+      "lateral_min_trace_intervals": 1.1,
+      "lateral_max_trace_intervals": 3.8,
+      "target_height_shift_samples": 40.0,
+      "height_min_m": 0.22,
+      "height_max_m": 1.1,
+      "roll_amp_deg": 9.0,
+      "pitch_amp_deg": 8.0,
+      "yaw_base_deg": 4.0,
+      "yaw_amp_deg": 9.0,
+      "noise_std": 0.014,
+      "striping_amp": 0.024,
+      "local_y_peak_to_peak_m": 0.09695418777995038,
+      "height_agl_peak_to_peak_m": 0.18644322114886136,
+      "max_abs_height_shift_samples": 59.957623415699054,
+      "trace_spacing_peak_to_peak_m": 0.012493587777436387,
+      "roll_peak_to_peak_deg": 17.99402531035652,
+      "pitch_peak_to_peak_deg": 15.993073721151118,
+      "yaw_peak_to_peak_deg": 11.779751230307516
+    },
+    "target_roi": {
+      "time_start_idx": 760,
+      "time_end_idx": 883,
+      "dist_start_idx": 40,
+      "dist_end_idx": 53
+    },
+    "target_geometry": {
+      "id": "target_0",
+      "type": "pipe",
+      "material": "pec",
+      "depth_m": 0.33,
+      "center_x_m": 0.62,
+      "center_y_m": 0.22,
+      "radius_m": 0.035,
+      "roi": {
+        "time_start_idx": 760,
+        "time_end_idx": 883,
+        "dist_start_idx": 40,
+        "dist_end_idx": 53
+      }
+    }
+  },
+  "pipeline": {
+    "atomic": [
+      "trajectory_smoothing",
+      "motion_compensation_attitude",
+      "motion_compensation_speed",
+      "motion_compensation_height"
+    ],
+    "motion_v2": "motion_compensation_v2"
+  },
+  "metrics": {
+    "spacing_std_before_m": 0.0028641239376830077,
+    "spacing_std_atomic_m": 0.0003549118580041405,
+    "spacing_std_atomic_after_speed_m": 0.0003549118580041405,
+    "spacing_std_v2_m": 0.0003593281561748246,
+    "trace_spacing_cv_before": 0.2510141690490779,
+    "trace_spacing_cv_atomic": 0.035375607181751645,
+    "trace_spacing_cv_v2": 0.03581581783595268,
+    "max_gap_ratio_before": 1.4813824834895641,
+    "max_gap_ratio_atomic": 1.3842774550082484,
+    "max_gap_ratio_v2": 1.3939739955060286,
+    "raw_vs_source_rms": 0.2346697747707367,
+    "atomic_vs_source_rms": 0.04834984987974167,
+    "v2_vs_source_rms": 0.011002891696989536,
+    "atomic_rms_delta_from_raw": 0.23739001154899597,
+    "v2_rms_delta_from_raw": 0.23288115859031677,
+    "target_ratio_raw": 0.0869307820115183,
+    "target_ratio_atomic": 0.05725526542914091,
+    "target_ratio_v2": 0.05506671348818664,
+    "ridge_rmse_samples_raw": 44.68005922453206,
+    "ridge_rmse_samples_atomic": 5.0771820705759385,
+    "ridge_rmse_samples_v2": 3.153944898227081,
+    "reflector_flatness_metric_raw": 8.169795721447235,
+    "reflector_flatness_metric_atomic": 3.229875967499696,
+    "reflector_flatness_metric_v2": 3.049908040936931,
+    "target_apex_error_samples_raw": 48.0,
+    "target_apex_error_samples_atomic": 5.0,
+    "target_apex_error_samples_v2": 0.0,
+    "target_roi_energy_preservation_raw": 1.7469709668008708,
+    "target_roi_energy_preservation_atomic": 1.1131503902479623,
+    "target_roi_energy_preservation_v2": 1.018288431250972,
+    "resample_spacing_m": 0.01,
+    "target_traces": 123
+  },
+  "resampling_explanation": {
+    "motion_v2_resampled": true,
+    "source_traces": 90,
+    "target_traces": 123,
+    "resample_spacing_m": 0.01,
+    "source_resampled_for_rms_to_v2_trace_count": true,
+    "comparison_note": "RMS/ROI metrics compare each processed B-scan against the source gprMax B-scan resampled onto the processed trace axis when trace counts differ."
+  },
+  "quality_flags": {
+    "atomic": [],
+    "motion_v2": []
+  },
+  "runtime_warnings": {
+    "atomic": [],
+    "motion_v2": []
+  },
+  "validation_notes": [
+    {
+      "code": "atomic_spacing_improved_after_reorder",
+      "severity": "info",
+      "message": "The final atomic trace spacing CV is lower than raw after running attitude/APC before speed compensation."
+    }
+  ],
+  "stage_meta": {
+    "atomic_final": {
+      "skipped": false,
+      "source_traces": 120,
+      "height_source_used": "height_agl_m",
+      "reference_height_m": 0.605936857064565,
+      "shift_clamped": false,
+      "max_shift_samples_effective": 64.0,
+      "max_shift_samples_applied": 54.60950444948089,
+      "quality_flags": []
+    },
+    "motion_v2": {
+      "skipped": false,
+      "source_traces": 90,
+      "height_source_used": "height_agl_m",
+      "max_shift_samples_effective": 64.0,
+      "target_traces": 123,
+      "quality_flags": []
+    }
+  },
+  "artifacts": {
+    "main_csv": "D:\\CDUT-UavGPR-Controller\\MyGPR\\output\\gprmax_motion_validation\\native_90trace_uav_pipe_visible_motion\\main.csv",
+    "manifest": "D:\\CDUT-UavGPR-Controller\\MyGPR\\output\\gprmax_motion_validation\\native_90trace_uav_pipe_visible_motion\\manifest.json",
+    "metadata": "D:\\CDUT-UavGPR-Controller\\MyGPR\\output\\gprmax_motion_validation\\native_90trace_uav_pipe_visible_motion\\metadata.json",
+    "report_md": "D:\\CDUT-UavGPR-Controller\\MyGPR\\output\\gprmax_motion_validation\\native_90trace_uav_pipe_visible_motion\\motion_validation_report.md",
+    "report_html": "D:\\CDUT-UavGPR-Controller\\MyGPR\\output\\gprmax_motion_validation\\native_90trace_uav_pipe_visible_motion\\motion_validation_report.html",
+    "images": {
+      "source_gprmax_bscan.png": "D:\\CDUT-UavGPR-Controller\\MyGPR\\output\\gprmax_motion_validation\\native_90trace_uav_pipe_visible_motion\\source_gprmax_bscan.png",
+      "motion_injected_raw_bscan.png": "D:\\CDUT-UavGPR-Controller\\MyGPR\\output\\gprmax_motion_validation\\native_90trace_uav_pipe_visible_motion\\motion_injected_raw_bscan.png",
+      "atomic_motion_final_bscan.png": "D:\\CDUT-UavGPR-Controller\\MyGPR\\output\\gprmax_motion_validation\\native_90trace_uav_pipe_visible_motion\\atomic_motion_final_bscan.png",
+      "motion_v2_final_bscan.png": "D:\\CDUT-UavGPR-Controller\\MyGPR\\output\\gprmax_motion_validation\\native_90trace_uav_pipe_visible_motion\\motion_v2_final_bscan.png",
+      "bscan_motion_validation_comparison.png": "D:\\CDUT-UavGPR-Controller\\MyGPR\\output\\gprmax_motion_validation\\native_90trace_uav_pipe_visible_motion\\bscan_motion_validation_comparison.png",
+      "paper_motion_validation_comparison.png": "D:\\CDUT-UavGPR-Controller\\MyGPR\\output\\gprmax_motion_validation\\native_90trace_uav_pipe_visible_motion\\paper_motion_validation_comparison.png",
+      "raw_3d_preview.png": "D:\\CDUT-UavGPR-Controller\\MyGPR\\output\\gprmax_motion_validation\\native_90trace_uav_pipe_visible_motion\\raw_3d_preview.png",
+      "atomic_3d_preview.png": "D:\\CDUT-UavGPR-Controller\\MyGPR\\output\\gprmax_motion_validation\\native_90trace_uav_pipe_visible_motion\\atomic_3d_preview.png",
+      "motion_v2_3d_preview.png": "D:\\CDUT-UavGPR-Controller\\MyGPR\\output\\gprmax_motion_validation\\native_90trace_uav_pipe_visible_motion\\motion_v2_3d_preview.png"
+    }
+  }
+}

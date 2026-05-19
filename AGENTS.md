@@ -36,6 +36,7 @@ All commands below assume this directory is the working directory.
 - Keep generated reports, screenshots, CSV exports, HTML bundles, and replay ZIPs under `output/`; `output/` is intentionally ignored by Git.
 - If an output artifact is important enough for future development, first summarize the conclusion in `docs/` or the Obsidian vault.
 - Only copy selected, small, reusable evidence into `docs/artifacts/` when the artifact is needed to understand a committed document. Do not bulk-copy full report folders from `output/`.
+- When pushing work that will be reviewed from GitHub or ChatGPT web, include the key small evidence files needed for review under `docs/artifacts/` together with the code commit, such as concise summaries, Markdown/HTML reports, and selected PNG figures. Keep raw `.out`, full generated output folders, caches, and bulky data outside Git.
 - Large raw data, full gprMax runs, build products, and one-off GUI screenshots should remain outside Git unless the user explicitly asks to version a specific file.
 
 ## Primary Field Data Contract
