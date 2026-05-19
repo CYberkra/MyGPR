@@ -68,6 +68,18 @@
 | `target_roi_energy_preservation_v2` | 1.01829 |
 | `resample_spacing_m` | 0.01 |
 | `target_traces` | 123 |
+| `atomic_resample_spacing_m` | 0.01 |
+| `atomic_target_traces` | 120 |
+
+## Atomic Resampling Explanation
+
+- Atomic performed equal-distance resampling: `True`
+- Atomic source_traces: `90`
+- Atomic target_traces: `120`
+- Atomic resample_spacing_m: `0.009999999776482582`
+- Atomic resample_spacing_mode: `manual`
+- Atomic RMS and ROI metrics compare against the gprMax source B-scan resampled to the atomic processed trace axis when trace counts differ.
+- Therefore an atomic shape mismatch is expected after equal-distance resampling; it is not treated as a processing error.
 
 ## V2 Resampling Explanation
 

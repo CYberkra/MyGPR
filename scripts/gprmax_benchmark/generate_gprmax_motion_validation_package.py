@@ -1015,6 +1015,8 @@ def _build_summary(
     atomic_spacing_stats = _spacing_stats(atomic["trace_metadata"])
     atomic_speed_stage = _stage_by_method(atomic.get("stages") or [], "motion_compensation_speed")
     atomic_speed_spacing_stats = _spacing_stats(atomic_speed_stage["trace_metadata"]) if atomic_speed_stage else atomic_spacing_stats
+    atomic_speed_meta = atomic_speed_stage.get("meta", {}) if atomic_speed_stage else {}
+    atomic_speed_params = atomic_speed_stage.get("params", {}) if atomic_speed_stage else {}
     v2_spacing_stats = _spacing_stats(v2["trace_metadata"])
     raw_shape = tuple(int(v) for v in np.asarray(raw_data).shape)
     atomic_shape = tuple(int(v) for v in np.asarray(atomic["data"]).shape)
@@ -1060,6 +1062,11 @@ def _build_summary(
         "target_roi_energy_preservation_v2": _energy_preservation(_target_roi_energy(v2["data"], v2_target_roi), source_energy),
         "resample_spacing_m": _resample_spacing_from_meta(v2.get("meta", {}), source["trace_interval_m"]),
         "target_traces": int(v2_shape[1]),
+        "atomic_resample_spacing_m": _resample_spacing_from_meta(
+            atomic_speed_meta,
+            source["trace_interval_m"],
+        ),
+        "atomic_target_traces": int(atomic_shape[1]),
     }
     runtime_warnings = {
         "atomic": _collect_runtime_warnings(*(stage.get("meta", {}) for stage in atomic.get("stages", []))),
@@ -1097,6 +1104,12 @@ def _build_summary(
         },
         "metrics": metrics,
         "resampling_explanation": {
+            "atomic_resampled": bool(atomic_shape[1] != raw_shape[1]),
+            "atomic_source_traces": int(raw_shape[1]),
+            "atomic_target_traces": int(atomic_shape[1]),
+            "atomic_resample_spacing_m": metrics["atomic_resample_spacing_m"],
+            "atomic_resample_spacing_mode": "manual" if float(atomic_speed_params.get("spacing_m", 0.0) or 0.0) > 0.0 else "auto",
+            "source_resampled_for_rms_to_atomic_trace_count": bool(atomic_shape[1] != source["traces"]),
             "motion_v2_resampled": bool(v2_shape[1] != raw_shape[1]),
             "source_traces": int(raw_shape[1]),
             "target_traces": int(v2_shape[1]),
@@ -1426,6 +1439,16 @@ def _render_report(summary: dict[str, Any]) -> str:
         lines.append(f"| `{key}` | {display} |")
     lines.extend(
         [
+            "",
+            "## Atomic Resampling Explanation",
+            "",
+            f"- Atomic performed equal-distance resampling: `{resampling.get('atomic_resampled')}`",
+            f"- Atomic source_traces: `{resampling.get('atomic_source_traces')}`",
+            f"- Atomic target_traces: `{resampling.get('atomic_target_traces')}`",
+            f"- Atomic resample_spacing_m: `{resampling.get('atomic_resample_spacing_m')}`",
+            f"- Atomic resample_spacing_mode: `{resampling.get('atomic_resample_spacing_mode')}`",
+            "- Atomic RMS and ROI metrics compare against the gprMax source B-scan resampled to the atomic processed trace axis when trace counts differ.",
+            "- Therefore an atomic shape mismatch is expected after equal-distance resampling; it is not treated as a processing error.",
             "",
             "## V2 Resampling Explanation",
             "",
@@ -1808,6 +1831,20 @@ def _render_html_report(summary: dict[str, Any]) -> str:
       </table>
     </section>
     {"".join(image_sections)}
+    <section class="band">
+      <div class="section-head">
+        <h2>Atomic 重采样解释</h2>
+        <p>四原子链中的 speed compensation 也会执行等距道距重采样；atomic trace 数变化是预期结果，不是 shape 错误。</p>
+      </div>
+      <div class="facts">
+        <div class="fact"><span>Atomic resampled</span><strong>{_html(resampling.get("atomic_resampled"))}</strong></div>
+        <div class="fact"><span>Atomic source traces</span><strong>{_html(resampling.get("atomic_source_traces"))}</strong></div>
+        <div class="fact"><span>Atomic target traces</span><strong>{_html(resampling.get("atomic_target_traces"))}</strong></div>
+        <div class="fact"><span>Atomic spacing</span><strong>{_html(resampling.get("atomic_resample_spacing_m"))} m</strong></div>
+        <div class="fact"><span>Atomic spacing mode</span><strong>{_html(resampling.get("atomic_resample_spacing_mode"))}</strong></div>
+        <div class="fact"><span>RMS/ROI</span><strong>source resampled to atomic axis</strong></div>
+      </div>
+    </section>
     <section class="band">
       <div class="section-head">
         <h2>V2 重采样解释</h2>

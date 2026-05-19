@@ -201,20 +201,30 @@ def test_generate_gprmax_motion_validation_longline_report(tmp_path: Path):
         "max_gap_ratio_before",
         "max_gap_ratio_v2",
         "resample_spacing_m",
+        "atomic_resample_spacing_m",
+        "atomic_target_traces",
         "target_traces",
     ]:
         assert key in summary["metrics"], key
     assert summary["metrics"]["target_traces"] == summary["shapes"]["v2"][1]
+    assert summary["metrics"]["atomic_target_traces"] == summary["shapes"]["atomic"][1]
+    assert summary["resampling_explanation"]["atomic_resampled"] is True
+    assert summary["resampling_explanation"]["atomic_source_traces"] == summary["shapes"]["raw"][1]
+    assert summary["resampling_explanation"]["atomic_target_traces"] == summary["shapes"]["atomic"][1]
+    assert summary["resampling_explanation"]["atomic_resample_spacing_mode"] == "manual"
     assert summary["source"]["motion_profile"]["max_abs_height_shift_samples"] >= 8.0
     assert summary["source"]["motion_profile"]["height_agl_peak_to_peak_m"] > 0.15
     assert summary["source"]["motion_profile"]["local_y_peak_to_peak_m"] > 0.02
     assert "V2 Resampling Explanation" in report
+    assert "Atomic Resampling Explanation" in report
     assert "Validation Notes" in report
     assert "target_traces" in report
     assert "resampled to the processed trace axis" in report
     assert "UAV-GPR 运动补偿验证闭环报告" in html_report
     assert "paper_motion_validation_comparison.png" in html_report
     assert "Motion V2 可能改变 trace 数" in html_report
+    assert "Atomic 重采样解释" in html_report
+    assert "exaggerated demo/stress UAV motion profile" in html_report
     assert "Height p-p" in html_report
     assert (output_dir / "paper_motion_validation_comparison.png").exists()
     assert (output_dir / "source_manifest.json").exists()

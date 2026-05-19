@@ -1108,7 +1108,7 @@ PROCESSING_METHODS = {
             },
             {
                 "name": "resample_spacing_m",
-                "label": "等距重采样间距 (m)",
+                "label": "等距重采样间距 (m, 0=自动)",
                 "type": "float",
                 "default": 0.0,
                 "min": 0.0,

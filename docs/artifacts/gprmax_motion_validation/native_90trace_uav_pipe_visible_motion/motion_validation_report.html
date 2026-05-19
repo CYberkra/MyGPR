@@ -158,7 +158,7 @@
   <header>
     <div class="eyebrow">MyGPR / gprMax Motion Validation</div>
     <h1>UAV-GPR 运动补偿验证闭环报告</h1>
-    <p>本报告使用 gprMax 地下波场作为 source，在 MyGPR 侧注入可控 UAV 运动扰动，并比较四原子补偿链与统一 Motion V2 的恢复效果。生成时间：2026-05-19 19:38:15</p>
+    <p>本报告使用 gprMax 地下波场作为 source，在 MyGPR 侧注入可控 UAV 运动扰动，并比较四原子补偿链与统一 Motion V2 的恢复效果。生成时间：2026-05-19 20:39:52</p>
     <p class="footer-note">This run uses an exaggerated demo/stress UAV motion profile for visibility and is not a field-flight baseline.</p>
     <div class="summary-grid">
       <div class="metric-card"><div class="label">Raw vs Source RMS</div><div class="value">0.2347</div></div>
@@ -247,6 +247,20 @@
               <div class="preview-grid"><article class="preview"><h3>Raw 3D 预览</h3><img src="raw_3d_preview.png" alt="Raw 3D 预览"></article><article class="preview"><h3>Motion V2 3D 预览</h3><img src="motion_v2_3d_preview.png" alt="Motion V2 3D 预览"></article></div>
             </section>
             
+    <section class="band">
+      <div class="section-head">
+        <h2>Atomic 重采样解释</h2>
+        <p>四原子链中的 speed compensation 也会执行等距道距重采样；atomic trace 数变化是预期结果，不是 shape 错误。</p>
+      </div>
+      <div class="facts">
+        <div class="fact"><span>Atomic resampled</span><strong>True</strong></div>
+        <div class="fact"><span>Atomic source traces</span><strong>90</strong></div>
+        <div class="fact"><span>Atomic target traces</span><strong>120</strong></div>
+        <div class="fact"><span>Atomic spacing</span><strong>0.009999999776482582 m</strong></div>
+        <div class="fact"><span>Atomic spacing mode</span><strong>manual</strong></div>
+        <div class="fact"><span>RMS/ROI</span><strong>source resampled to atomic axis</strong></div>
+      </div>
+    </section>
     <section class="band">
       <div class="section-head">
         <h2>V2 重采样解释</h2>

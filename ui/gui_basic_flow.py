@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 """GUI基础流程页面 - 包含快速开始、方法选择、参数设置等基础UI"""
 
+import numpy as np
+
 from PyQt6.QtCore import QRect, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPen
 from PyQt6.QtWidgets import (
@@ -241,14 +243,7 @@ class BasicFlowPage(QWidget):
             "height_source",
             "compensate_time_shift",
             "compensate_amplitude",
-            "max_shift_samples",
-            "max_shift_ns",
-            "max_amplitude_scale",
             "resample_spacing_m",
-            "apc_offset_x_m",
-            "apc_offset_y_m",
-            "apc_offset_z_m",
-            "max_abs_tilt_deg",
         ],
     }
 
@@ -265,6 +260,8 @@ class BasicFlowPage(QWidget):
         self.btn_stolt_apply = None
         self.stolt_preset_combo = None
         self.stolt_auto_adapt_var = None
+        self.motion_v2_trace_metadata_status_label = None
+        self.motion_v2_apc_status_label = None
         self.setup_ui()
 
     def setup_ui(self):
@@ -490,6 +487,8 @@ class BasicFlowPage(QWidget):
         self.btn_stolt_apply = None
         self.stolt_preset_combo = None
         self.stolt_auto_adapt_var = None
+        self.motion_v2_trace_metadata_status_label = None
+        self.motion_v2_apc_status_label = None
 
         all_params = PROCESSING_METHODS[method_key].get("params", [])
         params = all_params
@@ -509,7 +508,8 @@ class BasicFlowPage(QWidget):
             if method_key == "motion_compensation_v2":
                 self.param_hint_label.setText(
                     f"类别：{category_label}。V2 自动读取导入/传感器同步后的 trace_metadata；"
-                    "这里只配置高度来源、参考高度、重采样、APC offset 和安全阈值。"
+                    "这里只配置高度来源、参考高度、开关和等距重采样。"
+                    "安全阈值与 APC offset 请在高级设置中调整。"
                 )
             elif hidden_count > 0:
                 self.param_hint_label.setText(
@@ -561,8 +561,146 @@ class BasicFlowPage(QWidget):
             self.param_layout.addRow(label, edit)
             self.param_vars[p["name"]] = (edit, p)
 
+        if method_key == "motion_compensation_v2":
+            self._add_motion_v2_status_rows(all_params, active_overrides)
+
         self._wire_motion_param_dependencies(method_key)
         self._refresh_apply_menu_state()
+
+    def _add_motion_v2_status_rows(self, all_params: list[dict], active_overrides: dict) -> None:
+        """Add read-only trace metadata/APC status rows for the V2 basic panel."""
+        self.motion_v2_trace_metadata_status_label = QLabel(
+            self._motion_v2_trace_metadata_status_text()
+        )
+        self.motion_v2_trace_metadata_status_label.setWordWrap(True)
+        self.motion_v2_trace_metadata_status_label.setProperty("class", "hintText")
+        self.motion_v2_trace_metadata_status_label.setToolTip(
+            "这些逐道字段来自导入和传感器同步结果，只显示状态，不允许在此手动填写数组。"
+        )
+        self.param_layout.addRow(
+            QLabel("trace_metadata 状态"),
+            self.motion_v2_trace_metadata_status_label,
+        )
+
+        self.motion_v2_apc_status_label = QLabel(
+            self._motion_v2_apc_status_text(all_params, active_overrides)
+        )
+        self.motion_v2_apc_status_label.setWordWrap(True)
+        self.motion_v2_apc_status_label.setProperty("class", "hintText")
+        self.motion_v2_apc_status_label.setToolTip(
+            "APC offset 是设备安装几何标定，不是逐道飞行传感器数组。"
+        )
+        self.param_layout.addRow(
+            QLabel("APC 配置状态"),
+            self.motion_v2_apc_status_label,
+        )
+
+    def _motion_v2_trace_metadata_status_text(self) -> str:
+        metadata = self._current_trace_metadata()
+        header = self._current_header_info()
+        required_groups = [
+            (
+                "height_agl_m",
+                ("height_agl_m",),
+                "缺 height_agl_m：高度时移 / 幅值归一可能跳过或 fallback。",
+            ),
+            (
+                "trace_distance_m",
+                ("trace_distance_m",),
+                "缺 trace_distance_m：等距重采样会跳过。",
+            ),
+            (
+                "local_x_m / local_y_m",
+                ("local_x_m", "local_y_m"),
+                "缺 local_x_m / local_y_m：三维轨迹和 APC 足迹显示会降级。",
+            ),
+            (
+                "roll_deg / pitch_deg / yaw_deg",
+                ("roll_deg", "pitch_deg", "yaw_deg"),
+                "缺 roll/pitch/yaw：姿态 footprint 修正会跳过。",
+            ),
+            (
+                "trace_timestamp_s",
+                ("trace_timestamp_s",),
+                "缺 trace_timestamp_s：传感器同步质量无法复核。",
+            ),
+        ]
+        ok: list[str] = []
+        warnings: list[str] = []
+        for label, keys, missing_text in required_groups:
+            if metadata is not None and all(self._metadata_field_present(metadata, key) for key in keys):
+                ok.append(label)
+            else:
+                warnings.append(missing_text)
+
+        has_time_window = False
+        if metadata is not None and self._metadata_field_present(metadata, "time_window_ns"):
+            has_time_window = True
+        if header:
+            has_time_window = has_time_window or any(
+                key in header and header.get(key) not in (None, "", 0)
+                for key in ("time_window_ns", "total_time_ns", "Time windows (ns)")
+            )
+        if has_time_window:
+            ok.append("time_window_ns")
+        else:
+            warnings.append("缺 time_window_ns：高度 time-shift 会跳过。")
+
+        if metadata is None:
+            return "未检测到 trace_metadata；请在导入时同步 RTK/IMU/高度计 sidecar。 " + " ".join(warnings)
+        return f"已检测：{', '.join(ok) if ok else '无'}。 " + " ".join(warnings)
+
+    def _motion_v2_apc_status_text(self, all_params: list[dict], active_overrides: dict) -> str:
+        params_by_name = {param.get("name"): param for param in all_params}
+        values = []
+        for key in ("apc_offset_x_m", "apc_offset_y_m", "apc_offset_z_m"):
+            default = params_by_name.get(key, {}).get("default", 0.0)
+            values.append(float(active_overrides.get(key, default) or 0.0))
+        if any(abs(value) > 1.0e-12 for value in values):
+            return (
+                "已配置 APC offset 覆盖："
+                f"X={values[0]:.4g} m, Y={values[1]:.4g} m, Z={values[2]:.4g} m。"
+                "这些是设备安装几何参数。"
+            )
+        return (
+            "未配置设备 APC 标定，当前按 0 处理；"
+            "如设备安装方式固定，应在高级设置或设备配置中标定一次。"
+        )
+
+    def _current_trace_metadata(self):
+        parent = self.parent_window
+        shared = getattr(parent, "shared_data", None)
+        if shared is not None:
+            metadata = getattr(shared, "current_trace_metadata", None) or getattr(
+                shared, "original_trace_metadata", None
+            )
+            if metadata is not None:
+                return metadata
+        return getattr(parent, "trace_metadata", None)
+
+    def _current_header_info(self) -> dict:
+        parent = self.parent_window
+        shared = getattr(parent, "shared_data", None)
+        if shared is not None:
+            header = getattr(shared, "header_info", None) or getattr(
+                shared, "original_header_info", None
+            )
+            if isinstance(header, dict):
+                return header
+        header = getattr(parent, "header_info", None)
+        return header if isinstance(header, dict) else {}
+
+    @staticmethod
+    def _metadata_field_present(metadata: dict, key: str) -> bool:
+        if key not in metadata:
+            return False
+        value = metadata.get(key)
+        if value is None:
+            return False
+        arr = np.asarray(value)
+        if np.issubdtype(arr.dtype, np.number):
+            return bool(arr.size and np.isfinite(arr.astype(float, copy=False)).any())
+        return bool(arr.size)
 
     def _create_param_editor(self, meta: dict, value):
         """Create a parameter editor matching the registry parameter type."""

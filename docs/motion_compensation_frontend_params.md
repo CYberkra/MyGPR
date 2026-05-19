@@ -2,6 +2,18 @@
 
 This note records the motion-compensation parameters that must remain visible in the MyGPR frontend. The source of truth for callable parameters is `core/methods_registry.py`; workflow defaults come from `core/workflow_data.py`.
 
+## Evidence Positioning
+
+- Normal motion validation: used to explain ordinary UAV-GPR motion compensation
+  behavior and metadata flow.
+- Stress / visible motion validation: uses an exaggerated demo/stress UAV
+  motion profile to make height variation, unequal spacing, and attitude
+  disturbance obvious for visual inspection. It demonstrates robustness and UI
+  explainability, but is not a field-flight baseline.
+- Final paper figure: should later be regenerated from a clearer native
+  120-200 trace gprMax scene. The current stress profile should not be the only
+  paper experiment.
+
 ## UX Boundary
 
 Motion compensation V2 must not ask users to hand-enter per-trace sensor arrays.
@@ -47,17 +59,18 @@ Method label: UAV 运动补偿 V2
 | Parameter | UI label | Source | Frontend tier | Default | Passed to backend | Notes |
 |---|---|---|---|---:|---|---|
 | `height_reference_mode` | 参考高度 | `methods_registry.py` / `workflow_data.py` | Common | `mean` | Yes | Dropdown: `mean`, `min`, `manual`. |
+| `manual_height_m` | 手动参考高度 (m) | `methods_registry.py` / `workflow_data.py` | Conditional common | `1.5` | Yes | Visible/active only when `height_reference_mode=manual`; otherwise disabled or hidden. |
 | `height_source` | 高度来源 | `methods_registry.py` / `workflow_data.py` | Common | `auto` | Yes | Dropdown: `auto`, `height_agl_m`, `flight_height_m`. |
 | `compensate_time_shift` | 高度时移校正 | `methods_registry.py` / `workflow_data.py` | Common | `True` | Yes | Checkbox/switch. |
 | `compensate_amplitude` | 高度振幅归一 | `methods_registry.py` / `workflow_data.py` | Common | `True` | Yes | Checkbox/switch. |
-| `max_shift_samples` | 最大时移样点 (0=按时间窗) | `methods_registry.py` / `workflow_data.py` | Common | `0.0` | Yes | Numeric input with registry range validation. |
-| `max_shift_ns` | 最大时移时间 (ns) | `methods_registry.py` / `workflow_data.py` | Common | `20.0` | Yes | Numeric input with registry range validation. |
-| `max_amplitude_scale` | 最大振幅倍率 | `methods_registry.py` / `workflow_data.py` | Common | `2.0` | Yes | Numeric input with registry range validation. |
-| `resample_spacing_m` | 等距重采样间距 (m) | `methods_registry.py` / `workflow_data.py` | Common | `0.0` | Yes | `0` disables equal-distance resampling. |
-| `apc_offset_x_m` | APC X偏移 (m) | `methods_registry.py` / `workflow_data.py` | Common | `0.0` | Yes | Numeric input. |
-| `apc_offset_y_m` | APC Y偏移 (m) | `methods_registry.py` / `workflow_data.py` | Common | `0.0` | Yes | Numeric input. |
-| `apc_offset_z_m` | APC Z偏移 (m) | `methods_registry.py` / `workflow_data.py` | Common | `0.0` | Yes | Numeric input. |
-| `max_abs_tilt_deg` | 最大姿态角 (deg) | `methods_registry.py` / `workflow_data.py` | Common | `20.0` | Yes | Numeric input. |
+| `resample_spacing_m` | 等距重采样间距 (m, 0=自动) | `methods_registry.py` / `workflow_data.py` | Common | `0.0` | Yes | `0` means automatic median positive spacing from `trace_distance_m`; positive values are manual spacing. |
+| `max_shift_samples` | 最大时移样点 (0=按时间窗) | `methods_registry.py` / `workflow_data.py` | Advanced safety | `0.0` | Yes | Numeric input with registry range validation. |
+| `max_shift_ns` | 最大时移时间 (ns) | `methods_registry.py` / `workflow_data.py` | Advanced safety | `20.0` | Yes | Numeric input with registry range validation. |
+| `max_amplitude_scale` | 最大振幅倍率 | `methods_registry.py` / `workflow_data.py` | Advanced safety | `2.0` | Yes | Numeric input with registry range validation. |
+| `max_abs_tilt_deg` | 最大姿态角 (deg) | `methods_registry.py` / `workflow_data.py` | Advanced safety | `20.0` | Yes | Numeric input. |
+| `apc_offset_x_m` | APC X偏移 (m) | `methods_registry.py` / `workflow_data.py` | Device calibration / advanced | `0.0` | Yes | Numeric input. |
+| `apc_offset_y_m` | APC Y偏移 (m) | `methods_registry.py` / `workflow_data.py` | Device calibration / advanced | `0.0` | Yes | Numeric input. |
+| `apc_offset_z_m` | APC Z偏移 (m) | `methods_registry.py` / `workflow_data.py` | Device calibration / advanced | `0.0` | Yes | Numeric input. |
 
 The V2 frontend intentionally keeps these as strategy and safety parameters:
 
@@ -68,3 +81,19 @@ The V2 frontend intentionally keeps these as strategy and safety parameters:
 - safety thresholds such as max shift, max amplitude scale, and max tilt.
 
 For `sample_data/uav_gpr_motion_demo_v3_clear_effect/main.csv` or equivalent clear-effect demos, prefer the dataset manifest's recommended V2 parameters. The current v2 API already uses `air_wave_speed_m_per_ns=0.299792458` internally for air-path height correction, so the frontend focus is exposing the remaining V2 controls consistently.
+
+## APC Device Calibration
+
+APC offset is a device installation geometry parameter, not dynamic flight
+sensor data.
+
+- `apc_offset_x_m`, `apc_offset_y_m`, and `apc_offset_z_m` describe the fixed
+  offset from the RTK/IMU/platform reference point to the GPR antenna phase
+  center.
+- If the UAV-GPR installation is fixed, these offsets should be calibrated once
+  in device configuration and reused automatically.
+- If APC offsets are not configured, MyGPR defaults them to `0`, which means it
+  assumes the antenna phase center coincides with the platform reference point.
+- The V2 node may still allow an advanced temporary override for experiments,
+  debugging, or ablation, but the normal workflow should not require users to
+  enter APC values every run.

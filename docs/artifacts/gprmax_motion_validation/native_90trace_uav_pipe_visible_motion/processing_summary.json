@@ -133,9 +133,17 @@
     "target_roi_energy_preservation_atomic": 1.1131503902479623,
     "target_roi_energy_preservation_v2": 1.018288431250972,
     "resample_spacing_m": 0.01,
-    "target_traces": 123
+    "target_traces": 123,
+    "atomic_resample_spacing_m": 0.009999999776482582,
+    "atomic_target_traces": 120
   },
   "resampling_explanation": {
+    "atomic_resampled": true,
+    "atomic_source_traces": 90,
+    "atomic_target_traces": 120,
+    "atomic_resample_spacing_m": 0.009999999776482582,
+    "atomic_resample_spacing_mode": "manual",
+    "source_resampled_for_rms_to_atomic_trace_count": true,
     "motion_v2_resampled": true,
     "source_traces": 90,
     "target_traces": 123,
@@ -172,9 +180,9 @@
     "motion_v2": {
       "skipped": false,
       "source_traces": 90,
+      "target_traces": 123,
       "height_source_used": "height_agl_m",
       "max_shift_samples_effective": 64.0,
-      "target_traces": 123,
       "quality_flags": []
     }
   },

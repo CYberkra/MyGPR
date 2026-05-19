@@ -1160,7 +1160,7 @@ def test_motion_v2_common_params_match_registry_workflow_contract():
     app = _get_app()
     win = GPRGuiQt()
     try:
-        win.page_basic.set_method_by_key("motion_compensation_v2")
+        win.page_basic.render_method_params("motion_compensation_v2")
 
         expected = [
             "height_reference_mode",
@@ -1168,23 +1168,67 @@ def test_motion_v2_common_params_match_registry_workflow_contract():
             "height_source",
             "compensate_time_shift",
             "compensate_amplitude",
+            "resample_spacing_m",
+        ]
+        advanced_or_calibration = {
             "max_shift_samples",
             "max_shift_ns",
             "max_amplitude_scale",
-            "resample_spacing_m",
+            "max_abs_tilt_deg",
             "apc_offset_x_m",
             "apc_offset_y_m",
             "apc_offset_z_m",
-            "max_abs_tilt_deg",
-        ]
+        }
+        registry_params = {
+            param["name"]
+            for param in PROCESSING_METHODS["motion_compensation_v2"]["params"]
+        }
         assert list(win.page_basic.param_vars) == expected
-        assert set(QUICK_PRESETS["motion_compensation_v2"]["methods"][0]["params"]) <= set(expected)
+        assert set(QUICK_PRESETS["motion_compensation_v2"]["methods"][0]["params"]) <= registry_params
+        assert advanced_or_calibration.isdisjoint(set(win.page_basic.param_vars))
         assert "trace_metadata" in win.page_basic.param_hint_label.text()
+        assert "高级设置" in win.page_basic.param_hint_label.text()
         assert isinstance(win.page_basic.param_vars["height_reference_mode"][0], QComboBox)
         assert isinstance(win.page_basic.param_vars["height_source"][0], QComboBox)
         assert isinstance(win.page_basic.param_vars["compensate_time_shift"][0], QCheckBox)
         assert isinstance(win.page_basic.param_vars["compensate_amplitude"][0], QCheckBox)
         assert not win.page_basic.param_vars["manual_height_m"][0].isEnabled()
+        assert win.page_basic.motion_v2_trace_metadata_status_label is not None
+        assert "缺 height_agl_m" in win.page_basic.motion_v2_trace_metadata_status_label.text()
+        assert win.page_basic.motion_v2_apc_status_label is not None
+        assert "未配置设备 APC 标定" in win.page_basic.motion_v2_apc_status_label.text()
+    finally:
+        win.close()
+        app.processEvents()
+
+
+def test_motion_v2_basic_panel_reports_trace_metadata_status():
+    app = _get_app()
+    win = GPRGuiQt()
+    try:
+        trace_count = 4
+        metadata = {
+            "height_agl_m": np.ones(trace_count, dtype=np.float32),
+            "trace_distance_m": np.arange(trace_count, dtype=np.float64),
+            "local_x_m": np.arange(trace_count, dtype=np.float64),
+            "local_y_m": np.zeros(trace_count, dtype=np.float64),
+            "roll_deg": np.zeros(trace_count, dtype=np.float64),
+            "pitch_deg": np.zeros(trace_count, dtype=np.float64),
+            "yaw_deg": np.zeros(trace_count, dtype=np.float64),
+            "trace_timestamp_s": np.linspace(0.0, 0.3, trace_count),
+        }
+        win.shared_data.current_data = np.zeros((8, trace_count), dtype=np.float32)
+        win.shared_data.current_trace_metadata = metadata
+        win.shared_data.header_info = {"total_time_ns": 12.0}
+        win.page_basic.render_method_params("motion_compensation_v2")
+
+        status_text = win.page_basic.motion_v2_trace_metadata_status_label.text()
+        assert "已检测" in status_text
+        assert "height_agl_m" in status_text
+        assert "trace_distance_m" in status_text
+        assert "roll_deg / pitch_deg / yaw_deg" in status_text
+        assert "time_window_ns" in status_text
+        assert "缺 height_agl_m" not in status_text
     finally:
         win.close()
         app.processEvents()
