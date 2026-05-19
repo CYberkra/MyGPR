@@ -310,6 +310,79 @@ def test_v2_resamples_data_and_metadata_to_uniform_trace_spacing():
     assert meta["resampling_applied"] is True
 
 
+def test_v2_zero_resample_spacing_auto_uses_median_trace_distance_step():
+    source_distance = np.array([0.0, 0.2, 0.4, 2.0], dtype=np.float64)
+    data = np.vstack(
+        [source_distance, source_distance**2, source_distance + 1.0]
+    ).astype(np.float32)
+    metadata = _base_metadata(4)
+    metadata["trace_distance_m"] = source_distance.copy()
+    metadata["local_x_m"] = source_distance.copy()
+    metadata["local_y_m"] = np.zeros(4, dtype=np.float64)
+    metadata["roll_deg"] = np.zeros(4, dtype=np.float64)
+    metadata["pitch_deg"] = np.zeros(4, dtype=np.float64)
+    metadata["yaw_deg"] = np.zeros(4, dtype=np.float64)
+
+    corrected, meta = method_motion_compensation_v2(
+        data,
+        trace_metadata=metadata,
+        compensate_time_shift=False,
+        compensate_amplitude=False,
+        resample_spacing_m=0.0,
+    )
+
+    out_distance = np.asarray(meta["trace_metadata_out"]["trace_distance_m"], dtype=np.float64)
+    assert meta["resampling_applied"] is True
+    assert meta["resample_spacing_mode"] == "auto"
+    assert meta["resample_spacing_m"] == pytest.approx(0.2)
+    assert meta["target_traces"] == corrected.shape[1] == out_distance.size
+    assert np.allclose(out_distance, np.linspace(0.0, 2.0, 11))
+
+
+def test_v2_manual_resample_spacing_records_manual_mode():
+    source_distance = np.array([0.0, 0.4, 1.1, 2.0], dtype=np.float64)
+    data = np.zeros((8, 4), dtype=np.float32)
+    metadata = _base_metadata(4)
+    metadata["trace_distance_m"] = source_distance.copy()
+    metadata["local_x_m"] = source_distance.copy()
+
+    corrected, meta = method_motion_compensation_v2(
+        data,
+        trace_metadata=metadata,
+        compensate_time_shift=False,
+        compensate_amplitude=False,
+        resample_spacing_m=0.5,
+    )
+
+    assert corrected.shape[1] == 5
+    assert meta["resampling_applied"] is True
+    assert meta["resample_spacing_mode"] == "manual"
+    assert meta["resample_spacing_m"] == pytest.approx(0.5)
+
+
+def test_v2_zero_resample_spacing_missing_distance_skips_with_warning():
+    data = np.zeros((16, 4), dtype=np.float32)
+    metadata = _base_metadata(4)
+    metadata.pop("trace_distance_m")
+    metadata.pop("local_x_m")
+
+    corrected, meta = method_motion_compensation_v2(
+        data,
+        trace_metadata=metadata,
+        compensate_time_shift=False,
+        compensate_amplitude=False,
+        resample_spacing_m=0.0,
+    )
+
+    warning_codes = {item["code"] for item in meta.get("runtime_warnings", [])}
+    assert corrected.shape == data.shape
+    assert meta["resampling_applied"] is False
+    assert meta["resample_spacing_mode"] == "skipped"
+    assert meta["target_traces"] == data.shape[1]
+    assert "missing_trace_distance_m" in warning_codes
+    assert "missing_trace_distance_m" in meta["quality_flags"]
+
+
 def test_v2_accepts_numpy_scalar_runtime_parameters():
     source_distance = np.array([0.0, 0.4, 1.1, 2.0], dtype=np.float64)
     data = np.zeros((64, 4), dtype=np.float32)

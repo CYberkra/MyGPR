@@ -287,6 +287,21 @@ def _resample_bscan_columns(
     return resample_bscan_columns(data, source_distance_m, target_distance_m)
 
 
+def _auto_resample_spacing_m(
+    source_distance_m: np.ndarray,
+) -> float | None:
+    """Return median positive trace spacing for automatic V2 resampling."""
+    distance = np.asarray(source_distance_m, dtype=np.float64)
+    if distance.ndim != 1 or distance.size < 2 or not np.isfinite(distance).all():
+        return None
+    deltas = np.diff(distance)
+    positive = deltas[np.isfinite(deltas) & (deltas > 0.0)]
+    if positive.size < 1:
+        return None
+    spacing = float(np.median(positive))
+    return spacing if np.isfinite(spacing) and spacing > 0.0 else None
+
+
 def method_motion_compensation_v2(
     data: np.ndarray,
     height_reference_mode: str = "mean",
@@ -348,6 +363,9 @@ def method_motion_compensation_v2(
         "time_shift_correction_applied": False,
         "amplitude_correction_applied": False,
         "resampling_applied": False,
+        "resample_spacing_m": None,
+        "resample_spacing_mode": "auto" if resample_spacing_value <= 0.0 else "manual",
+        "target_traces": int(trace_count),
         "provenance": {
             "schema": "motion_compensation_v2",
             "height_priority": ["height_agl_m", "flight_height_m"],
@@ -584,32 +602,49 @@ def method_motion_compensation_v2(
     )
     updates.update(attitude_updates)
 
-    if resample_spacing_value > 0.0:
-        metadata_for_resampling = _metadata_for_output(metadata, updates, trace_count)
-        source_distance = _numeric_field_or_none(
-            metadata_for_resampling, "trace_distance_m", trace_count
-        )
-        if source_distance is None:
-            quality_flags.append("missing_trace_distance_m")
-            warnings.append(
-                _warning(
-                    "missing_trace_distance_m",
-                    "trace_distance_m is missing; equal-distance resampling skipped.",
-                )
+    metadata_for_resampling = _metadata_for_output(metadata, updates, trace_count)
+    source_distance = _numeric_field_or_none(
+        metadata_for_resampling, "trace_distance_m", trace_count
+    )
+    if source_distance is None:
+        meta["resample_spacing_mode"] = "skipped"
+        quality_flags.append("missing_trace_distance_m")
+        warnings.append(
+            _warning(
+                "missing_trace_distance_m",
+                "trace_distance_m is missing; equal-distance resampling skipped.",
             )
-        elif np.any(np.diff(source_distance) < 0.0):
-            quality_flags.append("nonmonotonic_trace_distance_m")
+        )
+    elif np.any(np.diff(source_distance) < 0.0):
+        meta["resample_spacing_mode"] = "skipped"
+        quality_flags.append("nonmonotonic_trace_distance_m")
+        warnings.append(
+            _warning(
+                "nonmonotonic_trace_distance_m",
+                "trace_distance_m is not monotonic; equal-distance resampling skipped.",
+            )
+        )
+    else:
+        if resample_spacing_value > 0.0:
+            effective_resample_spacing = resample_spacing_value
+            meta["resample_spacing_mode"] = "manual"
+        else:
+            effective_resample_spacing = _auto_resample_spacing_m(source_distance)
+            meta["resample_spacing_mode"] = "auto" if effective_resample_spacing else "skipped"
+
+        if effective_resample_spacing is None:
+            quality_flags.append("insufficient_trace_distance_spacing")
             warnings.append(
                 _warning(
-                    "nonmonotonic_trace_distance_m",
-                    "trace_distance_m is not monotonic; equal-distance resampling skipped.",
+                    "insufficient_trace_distance_spacing",
+                    "trace_distance_m does not contain enough positive finite spacing values; equal-distance resampling skipped.",
                 )
             )
         else:
             corrected, trace_metadata_out, resample_meta = resample_equal_distance(
                 corrected,
                 metadata_for_resampling,
-                spacing_m=resample_spacing_value,
+                spacing_m=effective_resample_spacing,
             )
             meta["trace_metadata_out"] = trace_metadata_out
             meta["target_traces"] = int(resample_meta["target_traces"])

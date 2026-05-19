@@ -27,6 +27,7 @@ from PythonModule.motion_compensation_v2 import (  # noqa: E402
     AIR_WAVE_SPEED_M_PER_NS,
     method_motion_compensation_v2,
 )
+from PythonModule.motion_compensation_core import resample_bscan_columns  # noqa: E402
 from core.sidecar_integration import load_and_integrate_optional_sidecars  # noqa: E402
 from scripts.gprmax_benchmark.gprmax_multi_scenario_report import (  # noqa: E402
     build_scenario_definitions,
@@ -278,7 +279,13 @@ def _build_payload(
     motion_meta: dict[str, Any],
     save_images_flag: bool,
 ) -> dict[str, Any]:
-    delta = corrected - raw
+    comparison_raw, comparison_corrected, comparison_alignment = _comparison_arrays(
+        raw,
+        corrected,
+        trace_metadata=trace_metadata,
+        motion_meta=motion_meta,
+    )
+    delta = comparison_corrected - comparison_raw
     assets_dir = report_dir / "assets"
     assets_dir.mkdir(parents=True, exist_ok=True)
     images: dict[str, str] = {}
@@ -312,7 +319,9 @@ def _build_payload(
         "params": params,
         "input_summary": _array_summary(raw),
         "output_summary": _array_summary(corrected),
-        "correction_metrics": _correction_metrics(raw, corrected),
+        "comparison_reference_summary": _array_summary(comparison_raw),
+        "comparison_alignment": comparison_alignment,
+        "correction_metrics": _correction_metrics(comparison_raw, comparison_corrected),
         "motion_meta": _jsonable(motion_meta),
         "input_quality": _jsonable(motion_meta.get("input_quality", {})),
         "quality_flags": list(motion_meta.get("quality_flags", []) or []),
@@ -324,6 +333,53 @@ def _build_payload(
             "assets_dir": str(assets_dir.resolve()),
             "images": images,
         },
+    }
+
+
+def _comparison_arrays(
+    raw: np.ndarray,
+    corrected: np.ndarray,
+    *,
+    trace_metadata: dict[str, np.ndarray],
+    motion_meta: dict[str, Any],
+) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    """Return raw B-scan aligned to corrected trace axis for report deltas."""
+    raw_arr = np.asarray(raw, dtype=np.float32)
+    corrected_arr = np.asarray(corrected, dtype=np.float32)
+    if raw_arr.shape == corrected_arr.shape:
+        return raw_arr, corrected_arr, {"mode": "same_shape", "shape": list(raw_arr.shape)}
+
+    trace_metadata_out = motion_meta.get("trace_metadata_out")
+    if isinstance(trace_metadata_out, dict):
+        source_distance = np.asarray(trace_metadata.get("trace_distance_m"), dtype=np.float64)
+        target_distance = np.asarray(trace_metadata_out.get("trace_distance_m"), dtype=np.float64)
+        if (
+            source_distance.ndim == 1
+            and target_distance.ndim == 1
+            and source_distance.size == raw_arr.shape[1]
+            and target_distance.size == corrected_arr.shape[1]
+            and np.isfinite(source_distance).all()
+            and np.isfinite(target_distance).all()
+            and not np.any(np.diff(source_distance) < 0.0)
+        ):
+            aligned = resample_bscan_columns(raw_arr, source_distance, target_distance)
+            return aligned.astype(np.float32, copy=False), corrected_arr, {
+                "mode": "resampled_raw_to_corrected_trace_axis",
+                "source_traces": int(source_distance.size),
+                "target_traces": int(target_distance.size),
+                "source_start_m": float(source_distance[0]),
+                "source_end_m": float(source_distance[-1]),
+                "target_start_m": float(target_distance[0]),
+                "target_end_m": float(target_distance[-1]),
+            }
+
+    common_traces = min(raw_arr.shape[1], corrected_arr.shape[1])
+    common_samples = min(raw_arr.shape[0], corrected_arr.shape[0])
+    return raw_arr[:common_samples, :common_traces], corrected_arr[:common_samples, :common_traces], {
+        "mode": "cropped_fallback",
+        "raw_shape": list(raw_arr.shape),
+        "corrected_shape": list(corrected_arr.shape),
+        "comparison_shape": [int(common_samples), int(common_traces)],
     }
 
 
