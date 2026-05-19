@@ -45,6 +45,25 @@ START_TIMESTAMP_S = 4200.0
 TRACE_PERIOD_S = 0.08
 ORIGIN_LONGITUDE = 104.123456
 ORIGIN_LATITUDE = 30.654321
+MOTION_DEMO_PROFILE: dict[str, float] = {
+    "spacing_sin_fraction": 0.40,
+    "spacing_cos_fraction": 0.20,
+    "spacing_noise_fraction": 0.055,
+    "spacing_min_fraction": 0.42,
+    "spacing_max_fraction": 1.72,
+    "lateral_track_fraction": 0.14,
+    "lateral_min_trace_intervals": 1.10,
+    "lateral_max_trace_intervals": 3.80,
+    "target_height_shift_samples": 40.0,
+    "height_min_m": 0.22,
+    "height_max_m": 1.10,
+    "roll_amp_deg": 9.0,
+    "pitch_amp_deg": 8.0,
+    "yaw_base_deg": 4.0,
+    "yaw_amp_deg": 9.0,
+    "noise_std": 0.014,
+    "striping_amp": 0.024,
+}
 
 
 @dataclass(frozen=True)
@@ -101,7 +120,7 @@ ATOMIC_PIPELINE: tuple[tuple[str, dict[str, Any]], ...] = (
             "compensate_amplitude": True,
             "compensate_time_shift": True,
             "wave_speed_m_per_ns": AIR_WAVE_SPEED_M_PER_NS,
-            "max_shift_samples": 12.0,
+            "max_shift_samples": 64.0,
             "max_shift_ns": 20.0,
             "interpolation_mode": "linear",
         },
@@ -113,7 +132,7 @@ V2_PARAMS: dict[str, Any] = {
     "height_source": "auto",
     "compensate_time_shift": True,
     "compensate_amplitude": True,
-    "max_shift_samples": 12.0,
+    "max_shift_samples": 64.0,
     "max_shift_ns": 20.0,
     "max_amplitude_scale": 2.0,
     "resample_spacing_m": 0.0,
@@ -248,33 +267,44 @@ def _build_source_payload(
     uniform_x = np.arange(traces, dtype=np.float64) * trace_interval
     track_length = max(float(uniform_x[-1] - uniform_x[0]), trace_interval * max(traces - 1, 1))
     phase = np.linspace(0.0, 1.0, traces, dtype=np.float64)
+    profile = MOTION_DEMO_PROFILE
 
     spacing = trace_interval * (
         1.0
-        + 0.22 * np.sin(2.0 * np.pi * 1.8 * phase + 0.25)
-        + 0.10 * np.cos(2.0 * np.pi * 3.3 * phase)
+        + profile["spacing_sin_fraction"] * np.sin(2.0 * np.pi * 1.8 * phase + 0.25)
+        + profile["spacing_cos_fraction"] * np.cos(2.0 * np.pi * 3.3 * phase)
     )
-    spacing += rng.normal(0.0, trace_interval * 0.025, size=traces)
-    spacing = np.clip(spacing, trace_interval * 0.60, trace_interval * 1.45)
+    spacing += rng.normal(0.0, trace_interval * profile["spacing_noise_fraction"], size=traces)
+    spacing = np.clip(
+        spacing,
+        trace_interval * profile["spacing_min_fraction"],
+        trace_interval * profile["spacing_max_fraction"],
+    )
     local_x = np.cumsum(spacing)
     local_x -= local_x[0]
     local_x *= uniform_x[-1] / max(float(local_x[-1]), 1.0e-9)
-    lateral_amp = min(max(track_length * 0.08, trace_interval * 0.35), trace_interval * 1.50)
+    lateral_amp = min(
+        max(track_length * profile["lateral_track_fraction"], trace_interval * profile["lateral_min_trace_intervals"]),
+        trace_interval * profile["lateral_max_trace_intervals"],
+    )
     local_y = lateral_amp * np.sin(2.0 * np.pi * 0.72 * phase - 0.2)
-    local_y += lateral_amp * 0.25 * np.sin(2.0 * np.pi * 8.0 * phase)
+    local_y += lateral_amp * 0.35 * np.sin(2.0 * np.pi * 8.0 * phase)
 
     ground_elevation = 116.0 + 0.30 * np.sin(2.0 * np.pi * 0.35 * phase)
     dt_ns = total_time_ns / max(samples - 1, 1)
-    height_amp = min(max(6.0 * dt_ns * AIR_WAVE_SPEED_M_PER_NS / 2.0, 0.010), 0.18)
+    height_amp = min(
+        max(profile["target_height_shift_samples"] * dt_ns * AIR_WAVE_SPEED_M_PER_NS / 2.0, 0.025),
+        0.32,
+    )
     height_agl = 0.60 + height_amp * np.sin(2.0 * np.pi * 1.35 * phase + 0.45)
-    height_agl += height_amp * 0.25 * np.sin(2.0 * np.pi * 6.0 * phase)
-    height_agl = np.clip(height_agl, 0.35, 0.90)
+    height_agl += height_amp * 0.35 * np.sin(2.0 * np.pi * 6.0 * phase)
+    height_agl = np.clip(height_agl, profile["height_min_m"], profile["height_max_m"])
     flight_height = height_agl.copy()
     local_z = ground_elevation + flight_height
     longitude, latitude = _lon_lat_from_xy(local_x, local_y)
-    roll = 4.0 * np.sin(2.0 * np.pi * 1.9 * phase + 0.4)
-    pitch = 3.7 * np.cos(2.0 * np.pi * 1.5 * phase - 0.1)
-    yaw = 4.0 + 4.0 * np.sin(2.0 * np.pi * 0.55 * phase)
+    roll = profile["roll_amp_deg"] * np.sin(2.0 * np.pi * 1.9 * phase + 0.4)
+    pitch = profile["pitch_amp_deg"] * np.cos(2.0 * np.pi * 1.5 * phase - 0.1)
+    yaw = profile["yaw_base_deg"] + profile["yaw_amp_deg"] * np.sin(2.0 * np.pi * 0.55 * phase)
     timestamps = START_TIMESTAMP_S + TRACE_PERIOD_S * np.arange(traces, dtype=np.float64)
 
     observed = _interp_columns(ideal, uniform_x, local_x)
@@ -283,8 +313,8 @@ def _build_source_payload(
     for trace_idx in range(traces):
         observed[:, trace_idx] = _shift_trace(observed[:, trace_idx], shift_samples[trace_idx])
         observed[:, trace_idx] *= np.float32(np.clip((reference_height / height_agl[trace_idx]) ** 2, 0.50, 2.0))
-    observed += 0.012 * rng.normal(size=observed.shape).astype(np.float32)
-    observed += (0.018 * np.sin(2.0 * np.pi * 5.5 * phase))[None, :].astype(np.float32)
+    observed += profile["noise_std"] * rng.normal(size=observed.shape).astype(np.float32)
+    observed += (profile["striping_amp"] * np.sin(2.0 * np.pi * 5.5 * phase))[None, :].astype(np.float32)
     observed = _normalize_bscan(observed)
 
     trace_distance = np.empty(traces, dtype=np.float64)
@@ -302,6 +332,16 @@ def _build_source_payload(
         "uniform_x_m": uniform_x,
         "reference_height_m": reference_height,
         "height_shift_samples": shift_samples,
+        "motion_profile": {
+            **profile,
+            "local_y_peak_to_peak_m": float(np.ptp(local_y)),
+            "height_agl_peak_to_peak_m": float(np.ptp(height_agl)),
+            "max_abs_height_shift_samples": float(np.max(np.abs(shift_samples))),
+            "trace_spacing_peak_to_peak_m": float(np.ptp(np.diff(trace_distance))) if trace_distance.size > 2 else 0.0,
+            "roll_peak_to_peak_deg": float(np.ptp(roll)),
+            "pitch_peak_to_peak_deg": float(np.ptp(pitch)),
+            "yaw_peak_to_peak_deg": float(np.ptp(yaw)),
+        },
         "trace_metadata": {
             "trace_index": np.arange(traces, dtype=np.int32),
             "trace_timestamp_s": timestamps,
@@ -486,6 +526,7 @@ def _write_manifest(output_dir: Path, source: dict[str, Any]) -> None:
         "copied_source_artifacts": source.get("copied_source_artifacts", {}),
         "source_shape": list(source.get("original_gprmax_shape", [])),
         "derived_longline": bool(source.get("derived_longline", False)),
+        "motion_profile": _jsonable(source.get("motion_profile", {})),
         "recommended_workflow": [method for method, _params in ATOMIC_PIPELINE],
         "recommended_v2_method": "motion_compensation_v2",
         "recommended_params": {
@@ -525,6 +566,7 @@ def _write_metadata(output_dir: Path, source: dict[str, Any]) -> None:
         "height_min_m": float(np.min(source["trace_metadata"]["height_agl_m"])),
         "height_max_m": float(np.max(source["trace_metadata"]["height_agl_m"])),
         "max_abs_injected_shift_samples": float(np.max(np.abs(source["height_shift_samples"]))),
+        "motion_profile": _jsonable(source.get("motion_profile", {})),
         "ground_truth": source.get("ground_truth"),
     }
     (output_dir / "metadata.json").write_text(
@@ -1045,6 +1087,7 @@ def _build_summary(
             "derived_longline": bool(source.get("derived_longline", False)),
             "trace_interval_m": float(source["trace_interval_m"]),
             "total_time_ns": float(source["total_time_ns"]),
+            "motion_profile": _jsonable(source.get("motion_profile", {})),
             "target_roi": target_roi,
             "target_geometry": _first_target_geometry(source.get("ground_truth")),
         },
@@ -1734,6 +1777,9 @@ def _render_html_report(summary: dict[str, Any]) -> str:
         <div class="fact"><span>Trace interval</span><strong>{_html(source.get("trace_interval_m"))} m</strong></div>
         <div class="fact"><span>Time window</span><strong>{_html(source.get("total_time_ns"))} ns</strong></div>
         <div class="fact"><span>Derived long-line</span><strong>{_html(source.get("derived_longline"))}</strong></div>
+        <div class="fact"><span>Height p-p</span><strong>{_html(_fmt_metric((source.get("motion_profile") or {}).get("height_agl_peak_to_peak_m"), 4))} m</strong></div>
+        <div class="fact"><span>Lateral p-p</span><strong>{_html(_fmt_metric((source.get("motion_profile") or {}).get("local_y_peak_to_peak_m"), 4))} m</strong></div>
+        <div class="fact"><span>Max height shift</span><strong>{_html(_fmt_metric((source.get("motion_profile") or {}).get("max_abs_height_shift_samples"), 4))} samples</strong></div>
       </div>
     </section>
     <section class="band">
