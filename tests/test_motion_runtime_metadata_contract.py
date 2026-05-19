@@ -10,7 +10,7 @@ import pytest
 from core.methods_registry import PROCESSING_METHODS
 from core.processing_engine import prepare_runtime_params
 from core.workflow_data import WorkflowMethod
-from core.workflow_executor import WorkflowExecutor
+from core.workflow_executor import ExecutionError, WorkflowExecutor
 
 
 def _register_method(monkeypatch, method_id: str, func, *, motion: bool) -> None:
@@ -148,6 +148,26 @@ def test_non_motion_methods_do_not_mutate_trace_metadata(monkeypatch):
     assert "time_window_ns" not in observed_kwargs
     assert np.array_equal(trace_metadata["trace_distance_m"], source_distance)
     assert header_info["total_time_ns"] == pytest.approx(96.0)
+
+
+def test_workflow_executor_preserves_exception_cause_for_failed_step(monkeypatch):
+    raw = np.arange(12, dtype=np.float32).reshape(3, 4)
+
+    def failing_stage(data, **kwargs):
+        raise RuntimeError("synthetic failure")
+
+    _register_method(monkeypatch, "test_failing_stage", failing_stage, motion=False)
+
+    executor = WorkflowExecutor(header_info={}, trace_metadata={})
+
+    with pytest.raises(ExecutionError) as exc_info:
+        executor.execute_all(
+            raw,
+            [WorkflowMethod("preprocessing", "test_failing_stage")],
+        )
+
+    assert "执行 test_failing_stage 失败" in str(exc_info.value)
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
 
 
 def test_prepare_runtime_params_accepts_numpy_scalar_header_values():

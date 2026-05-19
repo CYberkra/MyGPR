@@ -85,7 +85,7 @@ class WorkflowExecutor(QObject):
             )
             return result, meta
         except ProcessingEngineError as e:
-            raise ExecutionError(str(e))
+            raise ExecutionError(str(e)) from e
 
     def execute_all(
         self, data: np.ndarray, methods: List[WorkflowMethod]
@@ -135,7 +135,7 @@ class WorkflowExecutor(QObject):
                 except Exception as e:
                     error_msg = str(e)
                     self.step_error.emit(method_name, error_msg)
-                    raise ExecutionError(f"执行 {method_name} 失败: {error_msg}")
+                    raise ExecutionError(f"执行 {method_name} 失败: {error_msg}") from e
 
             # 全部完成
             self.all_finished.emit(self.current_data)
