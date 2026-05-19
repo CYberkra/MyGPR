@@ -1164,6 +1164,7 @@ def test_motion_v2_common_params_match_registry_workflow_contract():
 
         expected = [
             "height_reference_mode",
+            "manual_height_m",
             "height_source",
             "compensate_time_shift",
             "compensate_amplitude",
@@ -1178,10 +1179,12 @@ def test_motion_v2_common_params_match_registry_workflow_contract():
         ]
         assert list(win.page_basic.param_vars) == expected
         assert set(QUICK_PRESETS["motion_compensation_v2"]["methods"][0]["params"]) <= set(expected)
+        assert "trace_metadata" in win.page_basic.param_hint_label.text()
         assert isinstance(win.page_basic.param_vars["height_reference_mode"][0], QComboBox)
         assert isinstance(win.page_basic.param_vars["height_source"][0], QComboBox)
         assert isinstance(win.page_basic.param_vars["compensate_time_shift"][0], QCheckBox)
         assert isinstance(win.page_basic.param_vars["compensate_amplitude"][0], QCheckBox)
+        assert not win.page_basic.param_vars["manual_height_m"][0].isEnabled()
     finally:
         win.close()
         app.processEvents()

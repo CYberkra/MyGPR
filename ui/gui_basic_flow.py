@@ -237,6 +237,7 @@ class BasicFlowPage(QWidget):
         ],
         "motion_compensation_v2": [
             "height_reference_mode",
+            "manual_height_m",
             "height_source",
             "compensate_time_shift",
             "compensate_amplitude",
@@ -505,7 +506,12 @@ class BasicFlowPage(QWidget):
             else:
                 params = all_params[: self.BASIC_PARAM_LIMIT]
             hidden_count = max(0, len(all_params) - len(params))
-            if hidden_count > 0:
+            if method_key == "motion_compensation_v2":
+                self.param_hint_label.setText(
+                    f"类别：{category_label}。V2 自动读取导入/传感器同步后的 trace_metadata；"
+                    "这里只配置高度来源、参考高度、重采样、APC offset 和安全阈值。"
+                )
+            elif hidden_count > 0:
                 self.param_hint_label.setText(
                     f"类别：{category_label}。已精简：仅展示前 {len(params)} 个常用参数，另外 {hidden_count} 个参数请到'高级设置'调整。"
                 )

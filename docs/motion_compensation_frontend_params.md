@@ -2,6 +2,21 @@
 
 This note records the motion-compensation parameters that must remain visible in the MyGPR frontend. The source of truth for callable parameters is `core/methods_registry.py`; workflow defaults come from `core/workflow_data.py`.
 
+## UX Boundary
+
+Motion compensation V2 must not ask users to hand-enter per-trace sensor arrays.
+The intended workflow is:
+
+1. Import GPR data plus RTK / IMU / altimeter sidecars.
+2. Sensor synchronization aligns sidecars to each trace.
+3. The importer/synchronizer writes `trace_metadata`.
+4. `motion_compensation_v2` reads `trace_metadata` automatically.
+5. The frontend exposes only strategy parameters and QC status.
+
+The frontend should not expose manual per-trace fields such as height arrays,
+roll/pitch/yaw arrays, x/y coordinates, or timestamps. Those values must come
+from sidecars or the synchronized import result.
+
 ## motion_compensation_height
 
 Method label: 飞行高度归一化
@@ -12,7 +27,7 @@ Method label: 飞行高度归一化
 | `manual_height` | 手动参考高度 (m) | `methods_registry.py` | Common | `10.0` | Yes | Enabled only when `reference_height_mode=manual`; otherwise disabled to avoid implying it is active. |
 | `compensate_amplitude` | 振幅校正 | `methods_registry.py` | Common | `True` | Yes | Render as a checkbox/switch. |
 | `compensate_time_shift` | 时移校正 | `methods_registry.py` | Common | `True` | Yes | Render as a checkbox/switch. |
-| `wave_speed_m_per_ns` | 传播速度假设 (m/ns) | `methods_registry.py` | Common | `0.1` | Yes | Critical for height time-shift. UAV air-path demos should use `0.299792458`; soil-equivalent velocity should be interpreted carefully. |
+| `wave_speed_m_per_ns` | 传播速度假设 (m/ns) | `methods_registry.py` | Common | `0.299792458` | Yes | Critical for height time-shift. UAV air-path demos should use `0.299792458`; soil-equivalent velocity should be interpreted carefully. |
 
 Recommended demo parameters for UAV air-path height shift:
 
@@ -43,5 +58,13 @@ Method label: UAV 运动补偿 V2
 | `apc_offset_y_m` | APC Y偏移 (m) | `methods_registry.py` / `workflow_data.py` | Common | `0.0` | Yes | Numeric input. |
 | `apc_offset_z_m` | APC Z偏移 (m) | `methods_registry.py` / `workflow_data.py` | Common | `0.0` | Yes | Numeric input. |
 | `max_abs_tilt_deg` | 最大姿态角 (deg) | `methods_registry.py` / `workflow_data.py` | Common | `20.0` | Yes | Numeric input. |
+
+The V2 frontend intentionally keeps these as strategy and safety parameters:
+
+- height source / reference height policy;
+- time shift and amplitude normalization toggles;
+- equal-distance resampling spacing, where `0` means automatic median trace spacing;
+- APC offset from device configuration, still editable for calibration;
+- safety thresholds such as max shift, max amplitude scale, and max tilt.
 
 For `sample_data/uav_gpr_motion_demo_v3_clear_effect/main.csv` or equivalent clear-effect demos, prefer the dataset manifest's recommended V2 parameters. The current v2 API already uses `air_wave_speed_m_per_ns=0.299792458` internally for air-path height correction, so the frontend focus is exposing the remaining V2 controls consistently.

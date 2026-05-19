@@ -1035,6 +1035,10 @@ PROCESSING_METHODS = {
         "name": "UAV 运动补偿 V2",
         "type": "local",
         "func": method_motion_compensation_v2,
+        "description": (
+            "自动读取导入/传感器同步生成的 trace_metadata；"
+            "界面只配置高度、重采样、APC 和安全阈值策略。"
+        ),
         "params": [
             {
                 "name": "height_reference_mode",
@@ -1042,6 +1046,7 @@ PROCESSING_METHODS = {
                 "type": "choice",
                 "choices": ["mean", "min", "manual"],
                 "default": "mean",
+                "tooltip": "选择参考高度策略；manual 时才使用手动参考高度。",
             },
             {
                 "name": "manual_height_m",
@@ -1050,6 +1055,7 @@ PROCESSING_METHODS = {
                 "default": 1.5,
                 "min": 0.01,
                 "max": 200.0,
+                "tooltip": "仅在参考高度=manual 时生效；逐道高度来自 trace_metadata。",
             },
             {
                 "name": "height_source",
@@ -1057,18 +1063,21 @@ PROCESSING_METHODS = {
                 "type": "choice",
                 "choices": ["auto", "height_agl_m", "flight_height_m"],
                 "default": "auto",
+                "tooltip": "选择 trace_metadata 中的高度字段；auto 优先使用 height_agl_m，必要时回退 flight_height_m。",
             },
             {
                 "name": "compensate_time_shift",
                 "label": "高度时移校正",
                 "type": "bool",
                 "default": True,
+                "tooltip": "根据逐道高度差做时间轴校正；逐道高度必须来自 sidecar 同步结果。",
             },
             {
                 "name": "compensate_amplitude",
                 "label": "高度振幅归一",
                 "type": "bool",
                 "default": True,
+                "tooltip": "按高度变化做幅值归一，受最大振幅倍率保护。",
             },
             {
                 "name": "max_shift_samples",
@@ -1077,6 +1086,7 @@ PROCESSING_METHODS = {
                 "default": 0.0,
                 "min": 0.0,
                 "max": 500.0,
+                "tooltip": "安全阈值；0 表示主要按 max_shift_ns 和采样时间窗换算。",
             },
             {
                 "name": "max_shift_ns",
@@ -1085,6 +1095,7 @@ PROCESSING_METHODS = {
                 "default": 20.0,
                 "min": 0.0,
                 "max": 200.0,
+                "tooltip": "安全阈值；限制高度时移的物理时间范围。",
             },
             {
                 "name": "max_amplitude_scale",
@@ -1093,6 +1104,7 @@ PROCESSING_METHODS = {
                 "default": 2.0,
                 "min": 1.0,
                 "max": 20.0,
+                "tooltip": "安全阈值；防止高度归一导致幅值过度放大。",
             },
             {
                 "name": "resample_spacing_m",
@@ -1101,6 +1113,7 @@ PROCESSING_METHODS = {
                 "default": 0.0,
                 "min": 0.0,
                 "max": 10.0,
+                "tooltip": "0 表示自动使用当前 trace_distance_m 的中位间距；输入正数表示手动目标道距。",
             },
             {
                 "name": "apc_offset_x_m",
@@ -1109,6 +1122,7 @@ PROCESSING_METHODS = {
                 "default": 0.0,
                 "min": -5.0,
                 "max": 5.0,
+                "tooltip": "设备配置中的相位中心 X 偏移，可按实测标定修正。",
             },
             {
                 "name": "apc_offset_y_m",
@@ -1117,6 +1131,7 @@ PROCESSING_METHODS = {
                 "default": 0.0,
                 "min": -5.0,
                 "max": 5.0,
+                "tooltip": "设备配置中的相位中心 Y 偏移，可按实测标定修正。",
             },
             {
                 "name": "apc_offset_z_m",
@@ -1125,6 +1140,7 @@ PROCESSING_METHODS = {
                 "default": 0.0,
                 "min": -5.0,
                 "max": 5.0,
+                "tooltip": "设备配置中的相位中心 Z 偏移，可按实测标定修正。",
             },
             {
                 "name": "max_abs_tilt_deg",
@@ -1133,6 +1149,7 @@ PROCESSING_METHODS = {
                 "default": 20.0,
                 "min": 0.1,
                 "max": 89.0,
+                "tooltip": "安全阈值；超过该姿态角的道会产生质量告警或被限制。",
             },
         ],
         "auto_tune_enabled": True,

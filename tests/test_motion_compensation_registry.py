@@ -185,3 +185,40 @@ def test_atomic_motion_nodes_use_v2_core_defaults_and_no_legacy_ui():
     )
     assert "Legacy" not in user_visible_names
     assert "兼容旧基准" not in user_visible_names
+
+
+def test_motion_v2_frontend_params_are_strategy_not_sensor_arrays():
+    """V2 UI exposes strategy controls; per-trace sensor values must come from trace_metadata."""
+    method = PROCESSING_METHODS["motion_compensation_v2"]
+    param_names = {p["name"] for p in method.get("params", [])}
+    expected_strategy_params = {
+        "height_reference_mode",
+        "manual_height_m",
+        "height_source",
+        "compensate_time_shift",
+        "compensate_amplitude",
+        "max_shift_samples",
+        "max_shift_ns",
+        "max_amplitude_scale",
+        "resample_spacing_m",
+        "apc_offset_x_m",
+        "apc_offset_y_m",
+        "apc_offset_z_m",
+        "max_abs_tilt_deg",
+    }
+    forbidden_manual_sensor_params = {
+        "height_agl_m",
+        "flight_height_m",
+        "roll_deg",
+        "pitch_deg",
+        "yaw_deg",
+        "local_x_m",
+        "local_y_m",
+        "trace_timestamp_s",
+        "timestamp_s",
+        "trace_distance_m",
+    }
+
+    assert param_names == expected_strategy_params
+    assert param_names.isdisjoint(forbidden_manual_sensor_params)
+    assert "trace_metadata" in method.get("description", "")
