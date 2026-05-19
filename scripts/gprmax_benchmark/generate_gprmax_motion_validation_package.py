@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import copy
 import csv
+import html
 import json
 import math
 import shutil
@@ -199,6 +200,8 @@ def generate_gprmax_motion_validation_package(
     )
     report_md = out / "motion_validation_report.md"
     report_md.write_text(_render_report(summary), encoding="utf-8")
+    report_html = out / "motion_validation_report.html"
+    report_html.write_text(_render_html_report(summary), encoding="utf-8")
     _write_readme(out, source)
 
     return GprMaxMotionValidationResult(
@@ -1073,6 +1076,7 @@ def _build_summary(
             "manifest": str(output_dir / "manifest.json"),
             "metadata": str(output_dir / "metadata.json"),
             "report_md": str(output_dir / "motion_validation_report.md"),
+            "report_html": str(output_dir / "motion_validation_report.html"),
             "images": {
                 name: str(output_dir / name)
                 for name in _image_names()
@@ -1426,6 +1430,362 @@ def _render_report(summary: dict[str, Any]) -> str:
         ]
     )
     return "\n".join(lines) + "\n"
+
+
+def _html(text: Any) -> str:
+    return html.escape(str(text), quote=True)
+
+
+def _fmt_metric(value: Any, digits: int = 4) -> str:
+    if value is None:
+        return "--"
+    if isinstance(value, (int, float)):
+        return f"{float(value):.{digits}g}"
+    return str(value)
+
+
+def _rel_img(summary: dict[str, Any], name: str) -> str | None:
+    value = ((summary.get("artifacts") or {}).get("images") or {}).get(name)
+    if not value:
+        return None
+    return Path(str(value)).name
+
+
+def _metric_delta_badge(before: Any, after: Any, *, lower_is_better: bool = True) -> str:
+    try:
+        before_value = float(before)
+        after_value = float(after)
+    except (TypeError, ValueError):
+        return '<span class="badge neutral">n/a</span>'
+    improved = after_value < before_value if lower_is_better else after_value > before_value
+    klass = "good" if improved else "warn"
+    label = "改善" if improved else "未改善"
+    return f'<span class="badge {klass}">{label}</span>'
+
+
+def _render_html_report(summary: dict[str, Any]) -> str:
+    """Render an evidence-first HTML report for group discussion."""
+    source = summary.get("source") or {}
+    metrics = summary.get("metrics") or {}
+    shapes = summary.get("shapes") or {}
+    resampling = summary.get("resampling_explanation") or {}
+    notes = summary.get("validation_notes") or []
+    comparison_img = _rel_img(summary, "paper_motion_validation_comparison.png")
+    bscan_img = _rel_img(summary, "bscan_motion_validation_comparison.png")
+    raw_3d = _rel_img(summary, "raw_3d_preview.png")
+    v2_3d = _rel_img(summary, "motion_v2_3d_preview.png")
+    atomic_route = " -> ".join((summary.get("pipeline") or {}).get("atomic") or [])
+    generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    metric_rows = [
+        ("Raw vs Source RMS", metrics.get("raw_vs_source_rms"), "运动扰动注入后与原始 gprMax 的差异"),
+        ("Atomic vs Source RMS", metrics.get("atomic_vs_source_rms"), "四原子补偿后残差"),
+        ("Motion V2 vs Source RMS", metrics.get("v2_vs_source_rms"), "统一 V2 补偿后残差"),
+        ("Trace Spacing CV Before", metrics.get("trace_spacing_cv_before"), "补偿前道距不均匀程度"),
+        ("Trace Spacing CV Atomic", metrics.get("trace_spacing_cv_atomic"), "四原子补偿后道距不均匀程度"),
+        ("Trace Spacing CV V2", metrics.get("trace_spacing_cv_v2"), "V2 补偿后道距不均匀程度"),
+        ("Target Apex Error Raw", metrics.get("target_apex_error_samples_raw"), "补偿前目标顶点偏差 / sample"),
+        ("Target Apex Error Atomic", metrics.get("target_apex_error_samples_atomic"), "四原子补偿后目标顶点偏差 / sample"),
+        ("Target Apex Error V2", metrics.get("target_apex_error_samples_v2"), "V2 补偿后目标顶点偏差 / sample"),
+        ("Target ROI Preservation Atomic", metrics.get("target_roi_energy_preservation_atomic"), "四原子目标 ROI 能量保持"),
+        ("Target ROI Preservation V2", metrics.get("target_roi_energy_preservation_v2"), "V2 目标 ROI 能量保持"),
+    ]
+    metric_table = "\n".join(
+        "<tr>"
+        f"<td>{_html(name)}</td>"
+        f"<td>{_html(_fmt_metric(value, 6))}</td>"
+        f"<td>{_html(desc)}</td>"
+        "</tr>"
+        for name, value, desc in metric_rows
+    )
+    note_items = "\n".join(
+        f"<li><strong>{_html(note.get('severity', 'info'))}</strong> "
+        f"{_html(note.get('code', 'note'))}: {_html(note.get('message', ''))}</li>"
+        for note in notes
+    ) or "<li>无额外告警。</li>"
+
+    image_sections: list[str] = []
+    if comparison_img:
+        image_sections.append(
+            f"""
+            <section class="band">
+              <div class="section-head">
+                <h2>四联 B-scan 证据图</h2>
+                <p>统一灰度范围，对比 gprMax source、motion-injected raw、四原子补偿、Motion V2。</p>
+              </div>
+              <figure class="figure-wide">
+                <img src="{_html(comparison_img)}" alt="paper motion validation comparison">
+              </figure>
+            </section>
+            """
+        )
+    if bscan_img:
+        image_sections.append(
+            f"""
+            <section class="band">
+              <div class="section-head">
+                <h2>B-scan 处理链路对比</h2>
+                <p>用于检查运动注入和补偿后的波形结构是否仍可解释。</p>
+              </div>
+              <figure class="figure-wide">
+                <img src="{_html(bscan_img)}" alt="motion validation bscan comparison">
+              </figure>
+            </section>
+            """
+        )
+    preview_cards = ""
+    for title, image_name in (("Raw 3D 预览", raw_3d), ("Motion V2 3D 预览", v2_3d)):
+        if image_name:
+            preview_cards += (
+                f'<article class="preview"><h3>{_html(title)}</h3>'
+                f'<img src="{_html(image_name)}" alt="{_html(title)}"></article>'
+            )
+    if preview_cards:
+        image_sections.append(
+            f"""
+            <section class="band">
+              <div class="section-head">
+                <h2>三维轨迹与剖面预览</h2>
+                <p>检查补偿前后航迹、剖面带和高度变化是否进入可视化链路。</p>
+              </div>
+              <div class="preview-grid">{preview_cards}</div>
+            </section>
+            """
+        )
+
+    return f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MyGPR gprMax 运动补偿验证报告</title>
+  <style>
+    :root {{
+      --ink: #172033;
+      --muted: #5f6b7a;
+      --line: #d8dee8;
+      --panel: #ffffff;
+      --paper: #f4f6f9;
+      --accent: #0e766e;
+      --warn: #a16207;
+      --warn-soft: #fff3c4;
+      --good: #166534;
+      --good-soft: #dcfce7;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      font-family: "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
+      background: var(--paper);
+      color: var(--ink);
+      line-height: 1.55;
+    }}
+    header {{
+      padding: 34px 44px 26px;
+      background: #fff;
+      border-bottom: 1px solid var(--line);
+    }}
+    .eyebrow {{
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }}
+    h1 {{
+      margin: 8px 0 12px;
+      font-size: 30px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }}
+    h2 {{ margin: 0 0 6px; font-size: 21px; }}
+    h3 {{ margin: 0 0 10px; font-size: 16px; }}
+    p {{ margin: 0; color: var(--muted); }}
+    main {{ padding: 24px 44px 44px; }}
+    .summary-grid {{
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }}
+    .metric-card {{
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px 16px;
+    }}
+    .metric-card .label {{ color: var(--muted); font-size: 13px; }}
+    .metric-card .value {{ margin-top: 6px; font-size: 22px; font-weight: 700; }}
+    .band {{
+      margin-top: 18px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+    }}
+    .section-head {{
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: end;
+      margin-bottom: 14px;
+    }}
+    .section-head p {{ max-width: 760px; }}
+    .facts {{
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }}
+    .fact {{
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: #fbfcfe;
+    }}
+    .fact span {{ display: block; color: var(--muted); font-size: 12px; }}
+    .fact strong {{ display: block; margin-top: 4px; overflow-wrap: anywhere; }}
+    table {{
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }}
+    th, td {{
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }}
+    th {{ color: var(--muted); font-weight: 700; background: #f8fafc; }}
+    .figure-wide {{
+      margin: 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #fff;
+    }}
+    .figure-wide img, .preview img {{
+      display: block;
+      width: 100%;
+      height: auto;
+    }}
+    .preview-grid {{
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }}
+    .preview {{
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: #fff;
+    }}
+    .badge {{
+      display: inline-block;
+      border-radius: 999px;
+      padding: 3px 9px;
+      font-size: 12px;
+      font-weight: 700;
+    }}
+    .badge.good {{ color: var(--good); background: var(--good-soft); }}
+    .badge.warn {{ color: var(--warn); background: var(--warn-soft); }}
+    .badge.neutral {{ color: var(--muted); background: #edf1f7; }}
+    code {{
+      font-family: "Cascadia Mono", Consolas, monospace;
+      font-size: 12px;
+      background: #eef2f7;
+      padding: 2px 5px;
+      border-radius: 5px;
+    }}
+    ul {{ margin: 0; padding-left: 20px; }}
+    .footer-note {{
+      margin-top: 18px;
+      color: var(--muted);
+      font-size: 13px;
+    }}
+    @media (max-width: 980px) {{
+      header, main {{ padding-left: 18px; padding-right: 18px; }}
+      .summary-grid, .facts, .preview-grid {{ grid-template-columns: 1fr; }}
+      .section-head {{ display: block; }}
+    }}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="eyebrow">MyGPR / gprMax Motion Validation</div>
+    <h1>UAV-GPR 运动补偿验证闭环报告</h1>
+    <p>本报告使用 gprMax 地下波场作为 source，在 MyGPR 侧注入可控 UAV 运动扰动，并比较四原子补偿链与统一 Motion V2 的恢复效果。生成时间：{_html(generated_at)}</p>
+    <div class="summary-grid">
+      <div class="metric-card"><div class="label">Raw vs Source RMS</div><div class="value">{_html(_fmt_metric(metrics.get("raw_vs_source_rms"), 4))}</div></div>
+      <div class="metric-card"><div class="label">Atomic vs Source RMS</div><div class="value">{_html(_fmt_metric(metrics.get("atomic_vs_source_rms"), 4))}</div></div>
+      <div class="metric-card"><div class="label">Motion V2 vs Source RMS</div><div class="value">{_html(_fmt_metric(metrics.get("v2_vs_source_rms"), 4))}</div></div>
+      <div class="metric-card"><div class="label">V2 道距 CV</div><div class="value">{_html(_fmt_metric(metrics.get("trace_spacing_cv_v2"), 4))}</div></div>
+    </div>
+  </header>
+  <main>
+    <section class="band">
+      <div class="section-head">
+        <h2>实验对象</h2>
+        <p>验证目标是软件链路和运动补偿恢复能力，不把该合成运动扰动视为真实外业地质结论。</p>
+      </div>
+      <div class="facts">
+        <div class="fact"><span>Scenario</span><strong>{_html(source.get("scenario_id"))}</strong></div>
+        <div class="fact"><span>gprMax source shape</span><strong>{_html(shapes.get("source"))}</strong></div>
+        <div class="fact"><span>Motion V2 shape</span><strong>{_html(shapes.get("v2"))}</strong></div>
+        <div class="fact"><span>Trace interval</span><strong>{_html(source.get("trace_interval_m"))} m</strong></div>
+        <div class="fact"><span>Time window</span><strong>{_html(source.get("total_time_ns"))} ns</strong></div>
+        <div class="fact"><span>Derived long-line</span><strong>{_html(source.get("derived_longline"))}</strong></div>
+      </div>
+    </section>
+    <section class="band">
+      <div class="section-head">
+        <h2>处理链路</h2>
+        <p>四原子链先更新姿态/APC 足迹，再执行等距道距重采样，最后做高度时移和振幅归一，避免后续姿态更新破坏 speed compensation 的 trace axis。</p>
+      </div>
+      <table>
+        <thead><tr><th>Route</th><th>Steps</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td>Atomic</td><td><code>{_html(atomic_route)}</code></td><td>用于 ablation、教学展示和分项验证。</td></tr>
+          <tr><td>Unified</td><td><code>motion_compensation_v2</code></td><td>推荐主线入口，统一输出 warnings、quality_flags 和 trace metadata。</td></tr>
+        </tbody>
+      </table>
+    </section>
+    <section class="band">
+      <div class="section-head">
+        <h2>关键指标</h2>
+        <p>{_metric_delta_badge(metrics.get("raw_vs_source_rms"), metrics.get("v2_vs_source_rms"))} RMS 越低越接近未注入运动扰动的 gprMax source；道距 CV 越低表示航迹重采样越稳定。</p>
+      </div>
+      <table>
+        <thead><tr><th>Metric</th><th>Value</th><th>Interpretation</th></tr></thead>
+        <tbody>{metric_table}</tbody>
+      </table>
+    </section>
+    {"".join(image_sections)}
+    <section class="band">
+      <div class="section-head">
+        <h2>V2 重采样解释</h2>
+        <p>Motion V2 可能改变 trace 数，这是等距道距重采样的预期结果，不应被误判为 shape 错误。</p>
+      </div>
+      <div class="facts">
+        <div class="fact"><span>Resampled</span><strong>{_html(resampling.get("motion_v2_resampled"))}</strong></div>
+        <div class="fact"><span>Source traces</span><strong>{_html(resampling.get("source_traces"))}</strong></div>
+        <div class="fact"><span>Target traces</span><strong>{_html(resampling.get("target_traces"))}</strong></div>
+        <div class="fact"><span>Spacing</span><strong>{_html(resampling.get("resample_spacing_m"))} m</strong></div>
+        <div class="fact"><span>Target ROI</span><strong>{_html(source.get("target_roi"))}</strong></div>
+        <div class="fact"><span>Target geometry</span><strong>{_html(source.get("target_geometry"))}</strong></div>
+      </div>
+    </section>
+    <section class="band">
+      <div class="section-head">
+        <h2>质量告警与限制</h2>
+        <p>这些信息用于判断当前证据能否进入论文/组会结论。</p>
+      </div>
+      <ul>{note_items}</ul>
+      <p class="footer-note">限制：地下波场来自 gprMax，但 UAV 运动扰动是在 MyGPR 侧注入；该报告证明的是补偿链路可复现和指标可解释，不直接代表真实外业泛化能力。</p>
+    </section>
+  </main>
+</body>
+</html>
+"""
 
 
 def _write_readme(output_dir: Path, source: dict[str, Any]) -> None:

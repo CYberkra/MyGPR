@@ -118,6 +118,7 @@ def test_generate_gprmax_motion_validation_package(default_motion_validation_pac
         "metadata.json",
         "processing_summary.json",
         "motion_validation_report.md",
+        "motion_validation_report.html",
         "source_gprmax_bscan.png",
         "motion_injected_raw_bscan.png",
         "atomic_motion_final_bscan.png",
@@ -161,6 +162,7 @@ def test_generate_gprmax_motion_validation_package(default_motion_validation_pac
     assert summary["metrics"]["spacing_std_atomic_m"] <= summary["metrics"]["spacing_std_atomic_after_speed_m"] * 1.25
     assert "motion_v2_3d_preview.png" in summary["artifacts"]["images"]
     assert "paper_motion_validation_comparison.png" in summary["artifacts"]["images"]
+    assert Path(summary["artifacts"]["report_html"]).exists()
 
 
 def test_generate_gprmax_motion_validation_longline_report(tmp_path: Path):
@@ -176,6 +178,7 @@ def test_generate_gprmax_motion_validation_longline_report(tmp_path: Path):
 
     summary = json.loads(result.summary_json.read_text(encoding="utf-8"))
     report = result.report_md.read_text(encoding="utf-8")
+    html_report = (output_dir / "motion_validation_report.html").read_text(encoding="utf-8")
 
     assert result.raw_shape == (72, 120)
     assert summary["source"]["original_gprmax_shape"] == [72, 18]
@@ -206,6 +209,9 @@ def test_generate_gprmax_motion_validation_longline_report(tmp_path: Path):
     assert "Validation Notes" in report
     assert "target_traces" in report
     assert "resampled to the processed trace axis" in report
+    assert "UAV-GPR 运动补偿验证闭环报告" in html_report
+    assert "paper_motion_validation_comparison.png" in html_report
+    assert "Motion V2 可能改变 trace 数" in html_report
     assert (output_dir / "paper_motion_validation_comparison.png").exists()
     assert (output_dir / "source_manifest.json").exists()
     assert (output_dir / "source_ground_truth.yaml").exists()
