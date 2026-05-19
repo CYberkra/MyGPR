@@ -911,9 +911,12 @@ class BasicFlowPage(QWidget):
 
     def set_method_by_key(self, key: str):
         """通过key设置当前方法"""
-        if key in self.method_keys:
-            idx = self.method_keys.index(key)
-            self.method_combo.setCurrentIndex(idx)
+        if key not in self.method_keys:
+            return
+        idx = self.method_keys.index(key)
+        previous_idx = self.method_combo.currentIndex()
+        self.method_combo.setCurrentIndex(idx)
+        if idx == previous_idx or not self._parent_handles_method_change():
             self._render_params(key)
 
     def apply_method_params(self, method_key: str, params: dict | None = None):
@@ -921,5 +924,13 @@ class BasicFlowPage(QWidget):
         if method_key not in self.method_keys:
             return
         idx = self.method_keys.index(method_key)
+        if params is not None:
+            self._method_param_overrides[method_key] = dict(params)
+        previous_idx = self.method_combo.currentIndex()
         self.method_combo.setCurrentIndex(idx)
-        self._render_params(method_key, params)
+        if idx == previous_idx or not self._parent_handles_method_change():
+            self._render_params(method_key)
+
+    def _parent_handles_method_change(self) -> bool:
+        """Return whether changing the combo will be rendered by the main window."""
+        return callable(getattr(self.parent_window, "_on_method_change", None))

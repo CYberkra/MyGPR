@@ -1234,6 +1234,33 @@ def test_motion_v2_basic_panel_reports_trace_metadata_status():
         app.processEvents()
 
 
+def test_basic_flow_apply_method_params_renders_once_on_index_change(monkeypatch):
+    app = _get_app()
+    win = GPRGuiQt()
+    try:
+        current_key = win.page_basic.get_current_method_key()
+        target_key = next(key for key in win.page_basic.method_keys if key != current_key)
+        calls = []
+
+        def fake_render(method_key, overrides=None):
+            calls.append((method_key, overrides))
+
+        monkeypatch.setattr(win.page_basic, "_render_params", fake_render)
+
+        win.page_basic.apply_method_params(target_key, {"window": 9})
+
+        assert calls == [(target_key, None)]
+        assert win.page_basic._method_param_overrides[target_key] == {"window": 9}
+
+        win.page_basic.apply_method_params(target_key)
+
+        assert calls == [(target_key, None), (target_key, None)]
+        assert win.page_basic._method_param_overrides[target_key] == {"window": 9}
+    finally:
+        win.close()
+        app.processEvents()
+
+
 def test_apply_single_method_separates_preview_and_commit_payload(monkeypatch):
     app = _get_app()
     win = GPRGuiQt()
