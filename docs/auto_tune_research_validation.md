@@ -146,6 +146,40 @@ AT-010 still does not authorize an overall AutoTune-superiority claim. It is a
 domain-convergence and preset-candidacy check on a single native benchmark
 scene.
 
+## Relative Background Window Candidate Policy (AT-011)
+
+AT-011 converts AT-009/AT-010 absolute `ntraces` findings into a reusable
+candidate-policy design. The key rule is:
+
+- absolute values from a single scene are not universal defaults.
+
+For `subtracting_average_2D`, candidate generation should be trace-count-aware
+and ratio-based. Each candidate should carry:
+
+- absolute `ntraces`,
+- `ntraces_ratio = ntraces / trace_count`,
+- optional physical window length `window_length_m = ntraces * trace_spacing_m`
+  when spacing is available,
+- a policy label (`local`, `medium`, `large`, `near_full_line`, `full_line`).
+
+The default ratio set is:
+
+- `0.05, 0.10, 0.20, 0.40, 0.70, 1.00`
+
+with odd-integer, deduplicated, clamped `ntraces`, and no default overflow
+beyond `trace_count`.
+
+AT-011 keeps the same primary validation lane constraints:
+
+- zero-time excluded or fixed-zero by validation policy;
+- dewow excluded from the primary lane;
+- conservative gain route for interpretable comparison.
+
+For GX-003, the interpretation should be:
+
+- AT-010's `89-121` / `97` result indicates large/near-full-line behavior on
+  that scene, not a universal `ntraces=97` preset.
+
 ## Metric Boundary
 
 Heuristic QC metrics and ground-truth metrics are separate.
