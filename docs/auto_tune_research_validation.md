@@ -111,6 +111,41 @@ refinement artifact and keeps the same claim boundary:
 - AGC is display-oriented/non-amplitude-preserving;
 - no overall AutoTune-superiority claim is allowed unless stronger evidence supports it.
 
+## Background ntraces Edge Check (AT-010)
+
+AT-010 is a focused follow-up to AT-009. Its only purpose is to test whether
+AT-009's `ntraces=73` recommendation was a true local plateau or a right-edge
+artifact caused by a bounded search domain.
+
+AT-010 keeps the same reduced primary lane:
+
+`background_suppression -> energy_decay_gain`
+
+with:
+
+- `zero_time_policy=excluded`
+- `dewow_policy=excluded_primary`
+
+AT-010 extends only the background suppression candidate domain and records
+explicit risk flags such as:
+
+- `best_params_at_edge`
+- `monotonic_rightward_trend`
+- `no_stable_plateau`
+- `multiple_near_optima`
+- `low_selection_confidence`
+
+The resulting preset status is classified as one of:
+
+- `preset_candidate_ready`
+- `provisional_single_scene_preset`
+- `not_ready_edge_limited`
+- `not_ready_metric_conflict`
+
+AT-010 still does not authorize an overall AutoTune-superiority claim. It is a
+domain-convergence and preset-candidacy check on a single native benchmark
+scene.
+
 ## Metric Boundary
 
 Heuristic QC metrics and ground-truth metrics are separate.
