@@ -15,8 +15,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      QT_QPA_PLATFORM: offscreen
-      MPLBACKEND: Agg
       PYTHONUNBUFFERED: "1"
 
     steps:
@@ -34,10 +32,16 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
+            xvfb \
             libegl1 \
             libgl1 \
             libxkbcommon-x11-0 \
-            libxcb-cursor0
+            libxcb-cursor0 \
+            libxcb-icccm4 \
+            libxcb-keysyms1 \
+            libxcb-randr0 \
+            libxcb-render-util0 \
+            libxcb-xinerama0
 
       - name: Install Python dependencies
         run: |
@@ -46,7 +50,11 @@ jobs:
           python -m pip install pytest
 
       - name: Run preflight smoke
-        run: python scripts/preflight_check.py
+        env:
+          QT_QPA_PLATFORM: xcb
+        run: xvfb-run -a python scripts/preflight_check.py
 
       - name: Run gprMax and AutoTune tests
-        run: python -m pytest tests -q -k "gprmax or auto_tune or auto_tune_comparison"
+        env:
+          QT_QPA_PLATFORM: xcb
+        run: xvfb-run -a python -m pytest tests -q -k "gprmax or auto_tune or auto_tune_comparison"
