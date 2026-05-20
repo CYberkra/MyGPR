@@ -147,3 +147,22 @@ def test_explicit_zero_time_param_still_applies_in_validation_policy(tmp_path: P
     step = result["steps"][0]
     assert step["params"]["new_zero_time"] == 1.0
     assert int(step["result_meta"]["shift_samples"]) == 1
+
+
+def test_empty_manual_params_do_not_fallback_to_manual_expert_defaults(tmp_path: Path):
+    raw = np.random.RandomState(1).randn(128, 16).astype(np.float32)
+    result = _run_branch(
+        branch="safe_default",
+        raw=raw,
+        header_info={"total_time_ns": 24.0, "time_step_s": 1.0e-9},
+        trace_metadata={"trace_distance_m": np.arange(raw.shape[1], dtype=np.float32)},
+        ground_truth=None,
+        figures_dir=tmp_path,
+        auto_tune=False,
+        search_mode="fast",
+        pipeline=["dewow"],
+        manual_params={},
+        zero_time_policy="legacy_default",
+    )
+    step = result["steps"][0]
+    assert step["params"] == {}

@@ -344,7 +344,9 @@ def _run_branch(
     active_pipeline = list(pipeline or DEFAULT_PIPELINE)
     if zero_time_policy == "excluded":
         active_pipeline = [key for key in active_pipeline if key != "set_zero_time"]
-    active_manual_params = manual_params or MANUAL_EXPERT_PARAMS
+    active_manual_params = (
+        manual_params if manual_params is not None else MANUAL_EXPERT_PARAMS
+    )
     for step_index, method_key in enumerate(active_pipeline, start=1):
         before = np.array(current, copy=True)
         params = dict(active_manual_params.get(method_key, {}))
