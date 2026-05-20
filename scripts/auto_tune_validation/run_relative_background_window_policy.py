@@ -27,7 +27,6 @@ if str(ROOT) not in sys.path:
 from scripts.auto_tune_validation import run_no_zerotime_gain_validation as at005a
 from scripts.auto_tune_validation.background_window_policy import (
     DEFAULT_RATIO_CANDIDATES,
-    BackgroundWindowCandidate,
     generate_relative_background_candidates,
 )
 from scripts.auto_tune_validation.run_post_zero_time_policy_rerun import DEFAULT_GX003_DATASET
@@ -46,7 +45,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ratio-candidates", default="0.05,0.10,0.20,0.40,0.70,1.00")
     args = parser.parse_args(argv)
 
-    ratio_candidates = [float(x.strip()) for x in str(args.ratio_candidates).split(",") if x.strip()]
+    try:
+        ratio_candidates = _parse_ratio_candidates(args.ratio_candidates)
+    except ValueError as exc:
+        parser.error(str(exc))
     result = run_validation(
         evidence_root=Path(args.evidence_root),
         dataset=args.dataset,
@@ -272,6 +274,25 @@ def run_validation(
     }
 
 
+def _parse_ratio_candidates(value: str) -> list[float]:
+    """Parse comma-separated positive ratio candidates for the CLI."""
+    ratios: list[float] = []
+    for raw in str(value).split(","):
+        item = raw.strip()
+        if not item:
+            continue
+        try:
+            ratio = float(item)
+        except ValueError as exc:
+            raise ValueError(f"invalid ratio candidate: {item!r}") from exc
+        if not np.isfinite(ratio) or ratio <= 0:
+            raise ValueError(f"ratio candidates must be positive finite numbers: {item!r}")
+        ratios.append(ratio)
+    if not ratios:
+        raise ValueError("at least one ratio candidate is required")
+    return ratios
+
+
 def _resolve_trace_spacing_m(header_info: dict[str, Any], trace_metadata: dict[str, Any]) -> float | None:
     for key in ("trace_interval_m", "trace_step_m"):
         value = header_info.get(key)
@@ -438,4 +459,3 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

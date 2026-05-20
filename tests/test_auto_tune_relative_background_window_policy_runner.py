@@ -8,8 +8,9 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pytest
 
-from scripts.auto_tune_validation.run_relative_background_window_policy import run_validation
+from scripts.auto_tune_validation.run_relative_background_window_policy import _parse_ratio_candidates, run_validation
 
 
 def test_at011_runner_writes_required_outputs(tmp_path: Path):
@@ -92,3 +93,11 @@ def test_at011_runner_writes_required_outputs(tmp_path: Path):
     ]
     for rel in required:
         assert (evidence_root / rel).exists(), rel
+
+
+def test_parse_ratio_candidates_rejects_invalid_values():
+    assert _parse_ratio_candidates("0.05, 0.1,1") == [0.05, 0.1, 1.0]
+    with pytest.raises(ValueError, match="positive finite"):
+        _parse_ratio_candidates("0.1,0")
+    with pytest.raises(ValueError, match="invalid ratio"):
+        _parse_ratio_candidates("0.1,bad")

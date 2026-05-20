@@ -27,6 +27,9 @@ def check_syntax() -> None:
         ROOT / "core" / "processing_engine.py",
         ROOT / "core" / "shared_data_state.py",
         ROOT / "core" / "app_paths.py",
+        ROOT / "scripts" / "auto_tune_validation" / "background_window_policy.py",
+        ROOT / "scripts" / "auto_tune_validation" / "run_background_ntraces_edge_check.py",
+        ROOT / "scripts" / "auto_tune_validation" / "run_relative_background_window_policy.py",
     ]
     for path in targets:
         ast.parse(path.read_text(encoding="utf-8"))
