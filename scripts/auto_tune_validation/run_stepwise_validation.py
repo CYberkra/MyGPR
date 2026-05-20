@@ -65,6 +65,12 @@ MANUAL_EXPERT_PARAMS = {
     },
 }
 AUTO_TUNE_SEARCH_MODE = {"smoke": "fast", "normal": "standard"}
+ZERO_TIME_POLICY_VALUES = {
+    "auto",
+    "legacy_default",
+    "explicit_only_fixed_zero",
+    "excluded",
+}
 HEURISTIC_KEYS = {
     "baseline_bias_before",
     "baseline_bias_after",
@@ -121,6 +127,7 @@ def run_validation(
     """Run AT-001 stepwise manual-vs-auto validation."""
     source_commit = source_commit or _git_rev_parse(ROOT)
     package = _load_dataset(dataset)
+    zero_time_policy = _infer_zero_time_policy(package)
     evidence_root.mkdir(parents=True, exist_ok=True)
     figures_dir = evidence_root / "figures"
     tables_dir = evidence_root / "tables"
@@ -153,6 +160,7 @@ def run_validation(
         figures_dir=figures_dir,
         auto_tune=False,
         search_mode=search_mode,
+        zero_time_policy=zero_time_policy,
     )
     automatic = _run_branch(
         branch="auto",
@@ -163,6 +171,7 @@ def run_validation(
         figures_dir=figures_dir,
         auto_tune=True,
         search_mode=search_mode,
+        zero_time_policy=zero_time_policy,
     )
 
     manual_png = figures_dir / "manual_bscan.png"
@@ -183,10 +192,12 @@ def run_validation(
         source_repo=source_repo,
         source_branch=source_branch,
         source_commit=source_commit,
+        zero_time_policy=zero_time_policy,
     )
     stepwise_report = {
         "schema": "mygpr_stepwise_report_v1",
         "step_index_convention": "one-based for processing steps; input preview is step_00",
+        "zero_time_policy": zero_time_policy,
         "metric_type": metric_type,
         "ground_truth_available": bool(ground_truth),
         "input_preview_png": _rel(input_png, evidence_root),
@@ -314,6 +325,7 @@ def _run_branch(
     figures_dir: Path,
     auto_tune: bool,
     search_mode: str,
+    zero_time_policy: str = "legacy_default",
     pipeline: list[str] | None = None,
     manual_params: dict[str, dict[str, Any]] | None = None,
     tune_methods: set[str] | None = None,
@@ -326,12 +338,25 @@ def _run_branch(
     auto_tune_results: dict[str, dict[str, Any]] = {}
     branch_invalid_reason = ""
     all_sanity: list[str] = []
+    if zero_time_policy not in ZERO_TIME_POLICY_VALUES:
+        raise ValueError(f"Unsupported zero_time_policy: {zero_time_policy}")
+
     active_pipeline = list(pipeline or DEFAULT_PIPELINE)
+    if zero_time_policy == "excluded":
+        active_pipeline = [key for key in active_pipeline if key != "set_zero_time"]
     active_manual_params = manual_params or MANUAL_EXPERT_PARAMS
     for step_index, method_key in enumerate(active_pipeline, start=1):
         before = np.array(current, copy=True)
         params = dict(active_manual_params.get(method_key, {}))
+        zero_time_policy_notes: list[str] = []
         should_tune = auto_tune and (tune_methods is None or method_key in tune_methods)
+        if method_key == "set_zero_time":
+            params, should_tune = _apply_zero_time_policy_to_step(
+                params=params,
+                should_tune=should_tune,
+                zero_time_policy=zero_time_policy,
+                notes=zero_time_policy_notes,
+            )
         if should_tune:
             try:
                 tune_result = auto_tune_method(
@@ -383,6 +408,8 @@ def _run_branch(
                 "output_shape": [int(current.shape[0]), int(current.shape[1])],
                 "params": _json_safe(params),
                 "runtime_warnings": runtime_warnings,
+                "zero_time_policy_notes": list(zero_time_policy_notes),
+                "result_meta": _json_safe(meta),
                 "qc_metrics": {
                     "heuristic": _json_safe(heuristic_metrics),
                     "ground_truth": _json_safe(ground_truth_metrics) if ground_truth else {},
@@ -404,7 +431,50 @@ def _run_branch(
         "ground_truth_metrics": final_truth,
         "sanity_warnings": sorted(set(all_sanity)),
         "branch_invalid_reason": branch_invalid_reason,
+        "zero_time_policy": zero_time_policy,
     }
+
+
+def _infer_zero_time_policy(package: dict[str, Any]) -> str:
+    """Infer a safe zero-time policy for validation datasets."""
+    scenario = package.get("scenario")
+    if isinstance(scenario, dict):
+        source = scenario.get("source")
+        if isinstance(source, dict):
+            source_kind = str(source.get("kind") or "").strip().lower()
+            if source_kind == "native_gprmax_converted":
+                return "explicit_only_fixed_zero"
+    header_info = package.get("header_info") if isinstance(package, dict) else None
+    if isinstance(header_info, dict):
+        data_context = str(header_info.get("data_context") or "").strip().lower()
+        if data_context in {"gprmax", "gprmax_impulse"}:
+            return "explicit_only_fixed_zero"
+    return "legacy_default"
+
+
+def _apply_zero_time_policy_to_step(
+    *,
+    params: dict[str, Any],
+    should_tune: bool,
+    zero_time_policy: str,
+    notes: list[str],
+) -> tuple[dict[str, Any], bool]:
+    """Apply validation-only zero-time policy at a single step."""
+    if zero_time_policy == "legacy_default":
+        return params, should_tune
+    if zero_time_policy == "excluded":
+        notes.append("Zero-time excluded by policy.")
+        return params, False
+    if zero_time_policy == "explicit_only_fixed_zero":
+        explicit = "new_zero_time" in params and params.get("new_zero_time") is not None
+        if explicit:
+            notes.append("Zero-time uses explicit parameter for this validation run.")
+            return params, False
+        notes.append(
+            "Zero-time missing in validation context; forced to fixed 0.0 ns to avoid implicit destructive defaults."
+        )
+        return {"new_zero_time": 0.0}, False
+    return params, should_tune
 
 
 def _common_heuristic_metrics(before: np.ndarray, after: np.ndarray) -> dict[str, float]:
@@ -476,6 +546,7 @@ def _build_summary(
     source_repo: str,
     source_branch: str,
     source_commit: str,
+    zero_time_policy: str,
 ) -> dict[str, Any]:
     return {
         "artifact_id": "AT-001",
@@ -491,6 +562,7 @@ def _build_summary(
             "hash": package["dataset_hash"],
         },
         "pipeline": list(DEFAULT_PIPELINE),
+        "zero_time_policy": zero_time_policy,
         "metric_type": metric_type,
         "ground_truth_available": bool(ground_truth),
         "heuristic_qc_only": not bool(ground_truth),

@@ -30,6 +30,32 @@ forced to match AutoTune parameters as the main experiment. If a manual branch
 fails early, the report must mark the branch invalid and avoid presenting the
 comparison as a fair manual-vs-auto conclusion.
 
+## Zero-Time Policy In Validation
+
+Validation runners now support context-aware zero-time policy control:
+
+- `legacy_default`: keep historical behavior.
+- `explicit_only_fixed_zero`: if `set_zero_time` exists but `new_zero_time` is
+  missing, force `new_zero_time=0.0` and disable implicit tuning for this step.
+- `excluded`: remove `set_zero_time` from the validation lane.
+
+For native gprMax-converted datasets (`source.kind=native_gprmax_converted`),
+validation defaults to `explicit_only_fixed_zero` to prevent destructive
+implicit shifts from method defaults.
+
+This policy is validation-only and does not remove user ability to set zero-time
+explicitly in normal workflows.
+
+## Reusable No-Zero-Time Preset
+
+AT-005A no-zero-time gain validation is treated as a reusable validation preset:
+
+- zero-time excluded,
+- lane separation for background-only and background+gain variants,
+- ground-truth metrics for GX-003-like benchmark data,
+- heuristic visual QC only for field-data lanes,
+- AGC marked as display-oriented and non-amplitude-preserving.
+
 ## Metric Boundary
 
 Heuristic QC metrics and ground-truth metrics are separate.
@@ -104,4 +130,3 @@ The AT-001 runner does not modify:
 - atomic motion compensation methods
 - `core.processing_engine`
 - AutoTune scoring logic
-

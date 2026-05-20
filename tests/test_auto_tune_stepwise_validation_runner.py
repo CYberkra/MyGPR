@@ -11,6 +11,8 @@ import numpy as np
 
 from scripts.auto_tune_validation.run_stepwise_validation import (
     _branch_invalid_reason,
+    _infer_zero_time_policy,
+    _run_branch,
     _sanity_warnings,
     run_validation,
 )
@@ -54,10 +56,12 @@ def test_stepwise_validation_runner_writes_required_evidence(tmp_path: Path):
     stepwise = json.loads((evidence_root / "manifests/stepwise_report.json").read_text(encoding="utf-8"))
     assert stepwise["metric_type"] == "ground_truth"
     assert stepwise["ground_truth_available"] is True
+    assert stepwise["zero_time_policy"] in {"legacy_default", "explicit_only_fixed_zero"}
     assert {step["branch"] for step in stepwise["steps"]} == {"manual", "auto"}
     for step in stepwise["steps"]:
         assert set(step["qc_metrics"]) == {"heuristic", "ground_truth"}
         assert "preview_png" in step
+        assert "result_meta" in step
 
     report = (evidence_root / "reports/comparison_report.md").read_text(encoding="utf-8")
     assert "Stepwise Sanity Table" in report
@@ -97,3 +101,49 @@ def test_runner_does_not_modify_motion_compensation_files():
     for path in motion_files:
         assert path.exists()
 
+
+def test_native_context_zero_time_policy_forces_fixed_zero_when_implicit(tmp_path: Path):
+    raw = np.random.RandomState(0).randn(2037, 90).astype(np.float32)
+    package = {
+        "scenario": {"source": {"kind": "native_gprmax_converted"}},
+        "header_info": {"total_time_ns": 24.022894, "time_step_s": 1.1793271683748419e-11, "data_context": "gprmax_impulse"},
+    }
+    policy = _infer_zero_time_policy(package)
+    assert policy == "explicit_only_fixed_zero"
+
+    result = _run_branch(
+        branch="safe_default",
+        raw=raw,
+        header_info={"total_time_ns": 24.022894, "time_step_s": 1.1793271683748419e-11},
+        trace_metadata={"trace_distance_m": np.arange(raw.shape[1], dtype=np.float32)},
+        ground_truth=None,
+        figures_dir=tmp_path,
+        auto_tune=False,
+        search_mode="fast",
+        pipeline=["set_zero_time"],
+        manual_params={},
+        zero_time_policy=policy,
+    )
+    step = result["steps"][0]
+    assert step["params"]["new_zero_time"] == 0.0
+    assert int(step["result_meta"]["shift_samples"]) == 0
+
+
+def test_explicit_zero_time_param_still_applies_in_validation_policy(tmp_path: Path):
+    raw = np.arange(50 * 8, dtype=np.float32).reshape(50, 8)
+    result = _run_branch(
+        branch="manual",
+        raw=raw,
+        header_info={"total_time_ns": 50.0, "time_step_s": 1.0e-9},
+        trace_metadata={"trace_distance_m": np.arange(raw.shape[1], dtype=np.float32)},
+        ground_truth=None,
+        figures_dir=tmp_path,
+        auto_tune=False,
+        search_mode="fast",
+        pipeline=["set_zero_time"],
+        manual_params={"set_zero_time": {"new_zero_time": 1.0}},
+        zero_time_policy="explicit_only_fixed_zero",
+    )
+    step = result["steps"][0]
+    assert step["params"]["new_zero_time"] == 1.0
+    assert int(step["result_meta"]["shift_samples"]) == 1

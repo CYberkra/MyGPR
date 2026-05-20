@@ -22,6 +22,7 @@ if str(ROOT) not in sys.path:
 from scripts.auto_tune_validation.run_stepwise_validation import (
     AUTO_TUNE_SEARCH_MODE,
     MANUAL_EXPERT_PARAMS,
+    _infer_zero_time_policy,
     _build_trial_table,
     _common_heuristic_metrics,
     _git_rev_parse,
@@ -89,6 +90,7 @@ def run_ablation(
     """Run AT-002 per-stage ablation on a native gprMax-converted benchmark."""
     source_commit = source_commit or _git_rev_parse(ROOT)
     package = _load_dataset(dataset)
+    zero_time_policy = _infer_zero_time_policy(package)
     evidence_root.mkdir(parents=True, exist_ok=True)
     figures_dir = evidence_root / "figures"
     tables_dir = evidence_root / "tables"
@@ -126,6 +128,7 @@ def run_ablation(
             pipeline=DEFAULT_PIPELINE,
             manual_params=dict(spec["manual_params"]),
             tune_methods=spec["tune_methods"],
+            zero_time_policy=zero_time_policy,
         )
 
     ablations: dict[str, dict[str, Any]] = {}
@@ -143,6 +146,7 @@ def run_ablation(
             pipeline=DEFAULT_PIPELINE,
             manual_params=MANUAL_EXPERT_PARAMS,
             tune_methods={method_key},
+            zero_time_policy=zero_time_policy,
         )
 
     for branch, result in {**branches, **{f"ablation_{k}": v for k, v in ablations.items()}}.items():
@@ -168,6 +172,7 @@ def run_ablation(
         source_branch=source_branch,
         source_commit=source_commit,
         mode=mode,
+        zero_time_policy=zero_time_policy,
         metric_type=metric_type,
         ground_truth=ground_truth,
         branches=branches,
@@ -219,6 +224,7 @@ def run_ablation(
         "dataset_name": package["dataset_name"],
         "ground_truth_available": bool(ground_truth),
         "metric_type": metric_type,
+        "zero_time_policy": zero_time_policy,
         "stage_winners": summary["stage_winners"],
         "report": str((reports_dir / "ablation_report.md").resolve()),
     }
@@ -267,6 +273,7 @@ def _build_summary(
     source_branch: str,
     source_commit: str,
     mode: str,
+    zero_time_policy: str,
     metric_type: str,
     ground_truth: dict[str, Any] | None,
     branches: dict[str, dict[str, Any]],
@@ -281,6 +288,7 @@ def _build_summary(
         "source_branch": source_branch,
         "source_commit": source_commit,
         "mode": mode,
+        "zero_time_policy": zero_time_policy,
         "dataset": {
             "name": package["dataset_name"],
             "path": package["dataset_path"],
