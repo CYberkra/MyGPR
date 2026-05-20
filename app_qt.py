@@ -812,6 +812,19 @@ class GPRGuiQt(QMainWindow):
 
     def closeEvent(self, event):
         """关闭窗口时释放嵌入式 Matplotlib 资源，避免批量 GUI 测试累积占用。"""
+        # 保存 UI 设置
+        try:
+            settings_path = _get_settings_path()
+            settings = {}
+            if os.path.exists(settings_path):
+                with open(settings_path, "r", encoding="utf-8") as f:
+                    settings = json.load(f)
+            if hasattr(self, "page_advanced"):
+                settings["view_style"] = self.page_advanced.get_view_style()
+            with open(settings_path, "w", encoding="utf-8") as f:
+                json.dump(settings, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
         page_quality = getattr(self, "page_quality", None)
         if page_quality is not None and hasattr(page_quality, "release_plot_resources"):
             page_quality.release_plot_resources()
@@ -3250,6 +3263,17 @@ class GPRGuiQt(QMainWindow):
             preset.get("ui"), preset_key=DEFAULT_STARTUP_PRESET_KEY
         )
         self._apply_preset_method_params(preset.get("method_params"))
+        # 恢复上次保存的显示形式
+        try:
+            settings_path = _get_settings_path()
+            if os.path.exists(settings_path):
+                with open(settings_path, "r", encoding="utf-8") as f:
+                    settings = json.load(f)
+                    view_style = settings.get("view_style")
+                    if view_style and hasattr(self, "page_advanced"):
+                        self.page_advanced.set_view_style(view_style)
+        except Exception:
+            pass
 
     def _refresh_observability_panel(self):
         """刷新可观测性面板"""
@@ -4425,7 +4449,7 @@ class GPRGuiQt(QMainWindow):
         view_style = self.page_advanced.get_view_style()
         slider_compare = self._is_main_slider_compare_active()
 
-        if slider_compare:
+        if slider_compare and view_style != "wiggle":
             n_panels = 1
         else:
             data_pairs = self._build_compare_data_pairs(
@@ -4451,12 +4475,20 @@ class GPRGuiQt(QMainWindow):
                 header_info_override=view_header_info,
             )
         elif view_style == "wiggle":
-            last_im = self._render_wiggle_pairs(
-                axes,
-                data_pairs,
-                axis_info,
-                plot_config,
-            )
+            if slider_compare:
+                last_im = self._render_wiggle_slider_compare(
+                    axes[0],
+                    display_data,
+                    axis_info,
+                    plot_config,
+                )
+            else:
+                last_im = self._render_wiggle_pairs(
+                    axes,
+                    data_pairs,
+                    axis_info,
+                    plot_config,
+                )
         else:
             last_im = self._render_data_pairs(
                 axes,
@@ -6436,6 +6468,47 @@ class GPRGuiQt(QMainWindow):
         if self.page_advanced.show_grid_var.isChecked():
             ax.grid(True, linestyle=":", alpha=0.3)
 
+    def _render_wiggle_slider_compare(
+        self,
+        ax,
+        display_data: np.ndarray,
+        axis_info: dict,
+        plot_config: dict,
+    ):
+        """渲染摆动图形式的滑动对比图。"""
+        left_label, left_data, right_label, right_data = self._build_slider_compare_pair(
+            display_data, header_info_override=None
+        )
+        try:
+            left_data = np.asarray(left_data, dtype=np.float32)
+            right_data = np.asarray(right_data, dtype=np.float32)
+        except Exception:
+            return None
+        if left_data.ndim != 2 or right_data.ndim != 2:
+            return None
+        min_rows = min(left_data.shape[0], right_data.shape[0])
+        min_cols = min(left_data.shape[1], right_data.shape[1])
+        left_data = left_data[:min_rows, :min_cols]
+        right_data = right_data[:min_rows, :min_cols]
+        merged = np.array(right_data, copy=True)
+        split_idx = int(round(self._main_slider_compare_ratio * max(min_cols - 1, 1)))
+        split_idx = max(0, min(split_idx, min_cols - 1))
+        merged[:, : split_idx + 1] = left_data[:, : split_idx + 1]
+        self._render_wiggle_panel(
+            ax, merged, f"滑动对比 ({left_label} | {right_label})", axis_info, plot_config
+        )
+        trace_axis = np.asarray(axis_info.get("trace_axis", []), dtype=np.float32)
+        if trace_axis.size == min_cols:
+            split_x = float(trace_axis[split_idx])
+        else:
+            extent = plot_config["extent"]
+            split_x = float(extent[0] + (extent[1] - extent[0]) * self._main_slider_compare_ratio)
+        from core.theme_manager import get_theme_manager
+        theme = get_theme_manager().get_current_theme()
+        divider_color = "#d9e6ff" if theme == "dark" else "#ffffff"
+        ax.axvline(x=split_x, color=divider_color, linewidth=1.6, alpha=0.85)
+        return None
+
     def _render_slider_compare_panel(
         self,
         ax,
@@ -7621,3 +7694,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
