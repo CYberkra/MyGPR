@@ -341,6 +341,10 @@ def _which(executable: str, env: dict[str, str] | None = None) -> str | None:
         found = shutil.which(executable, path=path_value)
         if found:
             return found
+        for directory in path_value.split(os.pathsep):
+            candidate = Path(directory) / executable
+            if candidate.is_file():
+                return str(candidate)
     return None
 
 
