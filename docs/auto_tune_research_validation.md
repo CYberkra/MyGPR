@@ -66,6 +66,30 @@ The purpose is to verify whether implicit default zero-time collapse is removed
 and to identify the next bottleneck step. AT-007 still does not authorize an
 overall AutoTune-superiority claim.
 
+## No-Dewow Post-Fix Lane (AT-008A)
+
+AT-008A is a post-AT-006/AT-007 lane that excludes both:
+
+1. `set_zero_time`
+2. `dewow`
+
+in its primary GX-003 validation chain:
+
+`background_suppression -> gain`
+
+AT-008A exists because AT-007 identified `dewow` as the first post-fix
+signal-loss bottleneck after the unsafe implicit zero-time shift was removed.
+This does **not** mean dewow is globally invalid. In AT-008A, dewow is kept as
+an optional diagnostic side lane with fixed windows (for example 256/512),
+while the main conclusion is based on the no-dewow primary lanes.
+
+AT-008A keeps the same claim boundary:
+
+- ground-truth metrics are only for GX-003-like validated benchmark data;
+- heuristic visual QC remains diagnostic only;
+- AGC remains display-oriented and non-amplitude-preserving;
+- no overall AutoTune-superiority claim is allowed without stronger multi-scene evidence.
+
 ## Metric Boundary
 
 Heuristic QC metrics and ground-truth metrics are separate.
