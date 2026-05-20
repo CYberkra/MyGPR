@@ -51,10 +51,10 @@ jobs:
 
       - name: Run preflight smoke
         env:
-          QT_QPA_PLATFORM: xcb
+          QT_QPA_PLATFORM: offscreen
         run: xvfb-run -a python scripts/preflight_check.py
 
       - name: Run gprMax and AutoTune tests
         env:
-          QT_QPA_PLATFORM: xcb
+          QT_QPA_PLATFORM: offscreen
         run: xvfb-run -a python -m pytest tests -q -k "gprmax or auto_tune or auto_tune_comparison"
