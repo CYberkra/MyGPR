@@ -46,6 +46,17 @@ python cli_batch.py run --config config/motion_compensation_v1_benchmark.json
 
 `cli_batch.py resume` is intentionally not implemented yet and exits non-zero.
 
+## Continuous Integration
+
+The `MyGPR Lightweight CI` GitHub Actions workflow runs on pushes and pull
+requests for `codex/research-gprmax-autotune`. It installs the development
+dependencies, runs `python scripts/preflight_check.py`, and runs the lightweight
+gprMax/AutoTune pytest subset.
+
+CI is a code smoke gate only. It does not run heavy gprMax simulations, does not
+require local native `.out` files, and does not validate paper or Evidence
+claims.
+
 ## Repository Map
 
 - `app_qt.py` - main PyQt6 GUI entry point.
