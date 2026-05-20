@@ -9,6 +9,7 @@ import csv
 import hashlib
 import json
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,10 @@ import numpy as np
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from core.auto_tune import AutoTuneError, auto_tune_method
 from core.gprmax_truth_metrics import compute_ground_truth_metrics
@@ -33,7 +38,6 @@ from core.quality_metrics import compute_benchmark_metrics
 from core.runtime_warnings import merge_runtime_warnings
 
 
-ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_FIXTURE = ROOT / "sample_data" / "gprmax_benchmarks" / "cylinder_single_v1"
 DEFAULT_PIPELINE = [
     "set_zero_time",
