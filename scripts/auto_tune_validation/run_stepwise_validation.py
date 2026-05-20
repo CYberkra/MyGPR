@@ -246,6 +246,13 @@ def _load_dataset(dataset: str) -> dict[str, Any]:
         csv_path = path / "mygpr_bscan.csv"
         scenario_path = path / "scenario.json"
         ground_truth_path = path / "ground_truth.json"
+        if not csv_path.exists() and (path / "tables" / "mygpr_bscan.csv").exists():
+            csv_path = path / "tables" / "mygpr_bscan.csv"
+            audit = _read_json_optional(path / "manifests" / "gprmax_package_audit.json") or {}
+            package_dir = Path(str(audit.get("package_dir") or ""))
+            if package_dir.exists():
+                scenario_path = package_dir / "scenario.json"
+                ground_truth_path = package_dir / "ground_truth.json"
     else:
         csv_path = path
         scenario_path = path.with_name("scenario.json")
@@ -307,6 +314,9 @@ def _run_branch(
     figures_dir: Path,
     auto_tune: bool,
     search_mode: str,
+    pipeline: list[str] | None = None,
+    manual_params: dict[str, dict[str, Any]] | None = None,
+    tune_methods: set[str] | None = None,
 ) -> dict[str, Any]:
     current = np.array(raw, copy=True)
     current_header = clone_header_info(header_info)
@@ -316,10 +326,13 @@ def _run_branch(
     auto_tune_results: dict[str, dict[str, Any]] = {}
     branch_invalid_reason = ""
     all_sanity: list[str] = []
-    for step_index, method_key in enumerate(DEFAULT_PIPELINE, start=1):
+    active_pipeline = list(pipeline or DEFAULT_PIPELINE)
+    active_manual_params = manual_params or MANUAL_EXPERT_PARAMS
+    for step_index, method_key in enumerate(active_pipeline, start=1):
         before = np.array(current, copy=True)
-        params = dict(MANUAL_EXPERT_PARAMS.get(method_key, {}))
-        if auto_tune:
+        params = dict(active_manual_params.get(method_key, {}))
+        should_tune = auto_tune and (tune_methods is None or method_key in tune_methods)
+        if should_tune:
             try:
                 tune_result = auto_tune_method(
                     current,
