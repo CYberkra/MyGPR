@@ -90,6 +90,27 @@ AT-008A keeps the same claim boundary:
 - AGC remains display-oriented and non-amplitude-preserving;
 - no overall AutoTune-superiority claim is allowed without stronger multi-scene evidence.
 
+## Background/Gain Policy Refinement (AT-009)
+
+AT-009 refines the AT-008A reduced primary lane:
+
+`background_suppression -> gain`
+
+with both `set_zero_time` and `dewow` excluded in the primary validation path.
+
+AT-009 focuses on:
+
+1. converging `subtracting_average_2D` (`ntraces`) candidate domain on GX-003;
+2. comparing gain policy variants under the same background setting;
+3. constrained AutoTune comparison inside the bounded domain only.
+
+AT-009 does not redesign global AutoTune scoring. It is a bounded policy
+refinement artifact and keeps the same claim boundary:
+
+- ground-truth metrics and heuristic QC are separated;
+- AGC is display-oriented/non-amplitude-preserving;
+- no overall AutoTune-superiority claim is allowed unless stronger evidence supports it.
+
 ## Metric Boundary
 
 Heuristic QC metrics and ground-truth metrics are separate.
