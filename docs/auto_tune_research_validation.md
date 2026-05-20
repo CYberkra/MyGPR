@@ -56,6 +56,16 @@ AT-005A no-zero-time gain validation is treated as a reusable validation preset:
 - heuristic visual QC only for field-data lanes,
 - AGC marked as display-oriented and non-amplitude-preserving.
 
+## Post-Policy Rerun (AT-007)
+
+AT-007 reruns AT-002-style ablation and AT-003-style stepwise diagnosis after
+AT-006 policy hardening. It compares pre-fix historical evidence vs post-fix
+results without overwriting old artifacts.
+
+The purpose is to verify whether implicit default zero-time collapse is removed
+and to identify the next bottleneck step. AT-007 still does not authorize an
+overall AutoTune-superiority claim.
+
 ## Metric Boundary
 
 Heuristic QC metrics and ground-truth metrics are separate.

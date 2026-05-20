@@ -42,9 +42,11 @@ from scripts.auto_tune_validation.run_native_ablation import (
 from scripts.auto_tune_validation.run_stepwise_validation import (
     AUTO_TUNE_SEARCH_MODE,
     MANUAL_EXPERT_PARAMS,
+    _apply_zero_time_policy_to_step,
     _branch_invalid_reason,
     _common_heuristic_metrics,
     _git_rev_parse,
+    _infer_zero_time_policy,
     _json_safe,
     _load_dataset,
     _runtime_warning_codes,
@@ -105,6 +107,7 @@ def run_diagnosis(
     """Replay AT-002 branches and export ROI/signal-loss diagnostics."""
     source_commit = source_commit or _git_rev_parse(ROOT)
     package = _load_dataset(dataset)
+    zero_time_policy = _infer_zero_time_policy(package)
     evidence_root.mkdir(parents=True, exist_ok=True)
     figures_dir = evidence_root / "figures"
     tables_dir = evidence_root / "tables"
@@ -141,6 +144,7 @@ def run_diagnosis(
             auto_tune=bool(spec["auto_tune"]),
             manual_params=dict(spec["manual_params"]),
             tune_methods=spec["tune_methods"],
+            zero_time_policy=zero_time_policy,
         )
         rows.extend(branch_rows)
         branch_summaries[branch] = branch_summary
@@ -165,6 +169,7 @@ def run_diagnosis(
             "source_evidence": "gprmax/GX-003_audited_native_gprmax_benchmark/",
         },
         "pipeline": DEFAULT_PIPELINE,
+        "zero_time_policy": zero_time_policy,
         "target_roi_initial": target_roi.as_dict(),
         "roi_alignment_assessment": roi_alignment,
         "first_failing_step": first_failure,
@@ -189,6 +194,7 @@ def run_diagnosis(
         "dataset_hash": package["dataset_hash"],
         "ground_truth_available": bool(package.get("ground_truth")),
         "metric_type": "ground_truth_and_heuristic_diagnostics",
+        "zero_time_policy": zero_time_policy,
         "artifacts": {
             "report": "reports/signal_loss_diagnosis_report.md",
             "step_diagnostics": "manifests/step_diagnostics.json",
@@ -213,6 +219,7 @@ def run_diagnosis(
         "dataset_name": package["dataset_name"],
         "first_failing_step": first_failure,
         "likely_root_cause": root_cause,
+        "zero_time_policy": zero_time_policy,
         "report": str((reports_dir / "signal_loss_diagnosis_report.md").resolve()),
     }
 
@@ -245,6 +252,7 @@ def _run_branch_diagnostics(
     auto_tune: bool,
     manual_params: dict[str, dict[str, Any]],
     tune_methods: set[str] | None,
+    zero_time_policy: str = "legacy_default",
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     search_mode = AUTO_TUNE_SEARCH_MODE[mode]
     current = np.array(raw, copy=True)
@@ -261,7 +269,15 @@ def _run_branch_diagnostics(
         before = np.array(current, copy=True)
         before_roi = current_roi
         params = dict(manual_params.get(method_key, {}))
+        zero_time_policy_notes: list[str] = []
         should_tune = auto_tune and (tune_methods is None or method_key in tune_methods)
+        if method_key == "set_zero_time":
+            params, should_tune = _apply_zero_time_policy_to_step(
+                params=params,
+                should_tune=should_tune,
+                zero_time_policy=zero_time_policy,
+                notes=zero_time_policy_notes,
+            )
         if should_tune:
             try:
                 tune_result = auto_tune_method(
@@ -327,6 +343,8 @@ def _run_branch_diagnostics(
             "input_shape": [int(before.shape[0]), int(before.shape[1])],
             "output_shape": [int(current.shape[0]), int(current.shape[1])],
             "params": _json_safe(params),
+            "zero_time_policy": zero_time_policy,
+            "zero_time_policy_notes": list(zero_time_policy_notes),
             "zero_time_shift_samples": int(shift_samples),
             "zero_time_shift_ns": float(shift_samples * step_s * 1e9) if step_s > 0 else 0.0,
             "roi_before": before_roi.as_dict(),
