@@ -13,6 +13,11 @@ from typing import Any
 
 import numpy as np
 
+from core.gprmax_ground_truth import (
+    convert_gprmax_ground_truth_to_mygpr,
+    load_gprmax_ground_truth,
+)
+
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -37,12 +42,16 @@ def audit_gprmax_package(path: str | Path) -> dict[str, Any]:
     model = _parse_gprmax_input(model_path) if model_path else {}
     csv_path = package_dir / "mygpr_bscan.csv"
     csv_shape = _read_csv_shape(csv_path)
-    raw_out_files = sorted(str(path.name) for path in package_dir.glob("*.out"))
-    ground_truth_path = package_dir / "ground_truth.json"
-    ground_truth = _read_json(ground_truth_path)
-
     source = scenario.get("source") if isinstance(scenario.get("source"), dict) else {}
     source_kind = str(source.get("kind") or "unknown")
+    external_raw_out = _resolve_source_path(source.get("raw_out_path"), package_dir)
+    raw_out_files = sorted(str(path.name) for path in package_dir.glob("*.out"))
+    raw_out_exists = bool(raw_out_files) or bool(external_raw_out and external_raw_out.exists())
+    raw_out_reference = str(external_raw_out) if external_raw_out else None
+    raw_out_hash_present = bool(source.get("raw_out_hash"))
+    ground_truth_path = package_dir / "ground_truth.json"
+    ground_truth_yaml_path = package_dir / "ground_truth.yaml"
+    ground_truth = _load_ground_truth_any(ground_truth_path, ground_truth_yaml_path, csv_shape)
     simulation = scenario.get("simulation") if isinstance(scenario.get("simulation"), dict) else {}
     domain = _float_list(scenario.get("domain_m") or model.get("domain_m"))
     dx_dy_dz = _float_list(scenario.get("dx_dy_dz_m") or model.get("dx_dy_dz_m"))
@@ -56,7 +65,13 @@ def audit_gprmax_package(path: str | Path) -> dict[str, Any]:
     if time_window_s is None and simulation.get("total_time_ns") is not None:
         time_window_s = float(simulation["total_time_ns"]) * 1e-9
     time_step_s = _float_or_none(simulation.get("time_step_s"))
-    dt_source = "gprMax .out" if raw_out_files else "synthetic fallback/scenario metadata"
+    dt_source = (
+        "native gprMax .out"
+        if raw_out_exists and source_kind == "native_gprmax_converted"
+        else "gprMax .out"
+        if raw_out_files
+        else "synthetic fallback/scenario metadata"
+    )
     dt_consistency = _dt_consistency(time_step_s, time_window_s, expected_sample_count)
 
     source_scan = _scan_range(
@@ -83,7 +98,11 @@ def audit_gprmax_package(path: str | Path) -> dict[str, Any]:
         warnings.append(
             "source.kind is synthetic_reference; this package is suitable for smoke/contract tests only."
         )
-    if not raw_out_files:
+    if source_kind == "native_gprmax_converted" and not raw_out_hash_present:
+        warnings.append("native_gprmax_converted source is missing raw_out_hash provenance")
+    if source_kind == "native_gprmax_converted" and raw_out_reference and not raw_out_files:
+        warnings.append("native .out is externally referenced but not committed inside the package")
+    if not raw_out_exists:
         warnings.append("No native gprMax .out file found in the package.")
     if pml["risk_flags"]:
         warnings.extend(pml["risk_flags"])
@@ -93,11 +112,21 @@ def audit_gprmax_package(path: str | Path) -> dict[str, Any]:
         errors.append("missing scenario.json")
     if not model_path:
         warnings.append("missing model.in or scenario model_file reference")
-    if ground_truth_path.exists() and not roi_audit["roi_inside_bscan"]:
+    if (ground_truth_path.exists() or ground_truth_yaml_path.exists()) and not roi_audit["roi_inside_bscan"]:
         errors.append("ground_truth ROI is missing or outside the available B-scan shape")
 
-    native_gprmax_verified = bool(raw_out_files) and source_kind not in {"synthetic_reference", "unknown"}
-    paper_usable = native_gprmax_verified and not errors and not pml["risk_flags"]
+    native_gprmax_verified = (
+        source_kind == "native_gprmax_converted"
+        and raw_out_exists
+        and raw_out_hash_present
+        and dt_source == "native gprMax .out"
+    )
+    boundary_risks = [
+        item
+        for item in pml["risk_flags"]
+        if "thin/2D dimension" not in item
+    ]
+    paper_usable = native_gprmax_verified and not errors and not boundary_risks
     return {
         "schema": "mygpr_gprmax_package_audit_v1",
         "package_dir": str(package_dir),
@@ -110,9 +139,12 @@ def audit_gprmax_package(path: str | Path) -> dict[str, Any]:
             "scenario_json": str(scenario_path) if scenario_path.exists() else None,
             "model_in": str(model_path) if model_path else None,
             "raw_out_files": raw_out_files,
-            "raw_out_exists": bool(raw_out_files),
+            "raw_out_reference": raw_out_reference,
+            "raw_out_hash": source.get("raw_out_hash"),
+            "raw_out_exists": raw_out_exists,
             "mygpr_bscan_csv": str(csv_path) if csv_path.exists() else None,
             "ground_truth_json": str(ground_truth_path) if ground_truth_path.exists() else None,
+            "ground_truth_yaml": str(ground_truth_yaml_path) if ground_truth_yaml_path.exists() else None,
         },
         "geometry": {
             "domain_m": domain,
@@ -211,6 +243,26 @@ def _read_json(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _load_ground_truth_any(
+    json_path: Path,
+    yaml_path: Path,
+    shape: tuple[int, int] | None,
+) -> dict[str, Any]:
+    if json_path.exists():
+        return _read_json(json_path)
+    if yaml_path.exists():
+        sidecar = load_gprmax_ground_truth(str(yaml_path))
+        return convert_gprmax_ground_truth_to_mygpr(sidecar, data_shape=shape)
+    return {}
+
+
+def _resolve_source_path(value: Any, package_dir: Path) -> Path | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    path = Path(value)
+    return path.expanduser().resolve() if path.is_absolute() else (package_dir / path).resolve()
 
 
 def _find_model_in(package_dir: Path, scenario: dict[str, Any]) -> Path | None:
