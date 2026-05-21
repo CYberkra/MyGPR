@@ -118,3 +118,24 @@ NP-006 adds a minimal Workbench callback wrapper to prevent legacy template exec
 - if callback is missing, Workbench shows a warning/confirmation dialog before execution to avoid silent bypass.
 
 This keeps main-window no-prior policy as the source of truth and avoids duplicating policy logic in Workbench.
+
+## NP-006B Workbench Single-method Guard Routing
+
+NP-006B extends guard routing to reachable Workbench non-template processing paths (`_request_preview` / `_run_current_method`).
+
+- single-method execution now maps method ids to no-prior action ids through `classify_workbench_method_action(...)` in `ui/gui_workbench.py`.
+- mapped actions call Workbench guard callback before processing request is queued.
+- callback parameters include `allow_override` and `show_dialog`:
+  - explicit run/apply path (`announce=True`) allows dialog-based confirmation.
+  - silent auto-preview path (`announce=False`) disables dialog and blocks when callback is missing, avoiding silent bypass.
+
+Current mapping:
+
+- `agcGain` -> `AGC_display_only`
+- `energy_decay_gain`, `sec_gain`, `compensatingGain`, `amplitude_scale` -> `conservative_energy_decay_gain_display`
+- `subtracting_average_2D`, `median_background_2D`, `running_average_2D` -> conservative/aggressive background action by relative `ntraces`
+- `fk_filter`, `ccbs`, `svd_bg` -> `background_suppression_conservative`
+- `dewow` -> `dewow`
+- `stolt_migration`, `kirchhoff_migration` -> `migration`
+
+Unmapped methods currently remain unguarded by Workbench-side classifier and should be reviewed in future incremental audit if they become high-risk no-prior paths.

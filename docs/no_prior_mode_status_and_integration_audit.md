@@ -49,6 +49,11 @@ This implementation is grounded in the accepted Evidence chain below (MyGPR-Evid
    - Proves: Workbench template execution now reuses main-window no-prior guard source of truth.
    - Does not prove: every Workbench legacy method path is fully guarded.
 
+8. NP-006B (MyGPR source integration)
+   - Role: Workbench single-method/preview execution guard routing.
+   - Proves: reachable Workbench non-template processing path now maps to no-prior actions and calls main guard callback before running.
+   - Does not prove: every possible method key is high-risk-classified (unmapped keys keep current behavior).
+
 ## 3. Current MyGPR Implementation
 
 ### Policy model
@@ -81,9 +86,11 @@ This implementation is grounded in the accepted Evidence chain below (MyGPR-Evid
   - template execution (`_on_template_execute`) now calls `_guard_workbench_action("workflow_run", ...)`
   - `set_no_prior_guard_callback(...)` allows Workbench to reuse main guard decision
   - callback missing path now shows explicit warning/confirmation instead of silent execution
+  - single-method preview/apply path (`_request_preview` called by `_on_params_changed` and `_run_current_method`) now maps method -> action and calls `_guard_workbench_action(...)` before scheduling processing
 - `app_qt.py`
   - injects Workbench callback via `_enforce_workbench_no_prior_action_guard(...)`
   - callback reuses `_enforce_no_prior_action_guard(...)` and main event logging path
+  - callback now accepts `allow_override` / `show_dialog` for explicit-run vs silent-preview behavior
 
 ### Tests
 
@@ -127,7 +134,7 @@ This implementation is grounded in the accepted Evidence chain below (MyGPR-Evid
 
 ## 6. Known Gaps
 
-1. Workbench template path is guarded, but legacy Workbench single-method execution/preview paths still need a complete per-action guard audit.
+1. Workbench template + mapped single-method paths are guarded, but unmapped method keys in Workbench classifier still follow existing behavior and need future audit if elevated risk is identified.
 2. Guard thresholds are still heuristic (not yet externally calibrated/validated).
 3. No dedicated full manual UI smoke evidence package yet.
 4. No user study or expert-evaluation protocol yet.
@@ -137,8 +144,8 @@ This implementation is grounded in the accepted Evidence chain below (MyGPR-Evid
 
 ## 7. Recommended Next Tasks (Ranked)
 
-1. **NP-006B**: Workbench single-method execution guard audit and minimal routing so non-template legacy paths share no-prior guard semantics.
-2. **UI-SMOKE-001**: Manual no-prior UI smoke checklist and result capture.
+1. **UI-SMOKE-001**: Manual no-prior UI smoke checklist and result capture (template + single-method guard behavior).
+2. **NP-006C**: Workbench unmapped method-key risk audit and optional classifier extension.
 3. **EV-001**: Evidence repository cleanup plan for broad historical noise artifacts.
 4. **AT-017**: scoring/risk-penalty what-if diagnostics (separate from no-prior guardrail semantics).
 5. **Paper-outline update**: add no-prior safety mode as a risk-control contribution.

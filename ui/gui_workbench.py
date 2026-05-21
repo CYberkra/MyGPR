@@ -52,6 +52,46 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 logger = logging.getLogger(__name__)
 
 
+def classify_workbench_method_action(
+    method_id: str, params: dict | None = None, trace_count: int = 0
+) -> str | None:
+    """将 Workbench 单方法执行映射到 no-prior guard action。"""
+    method_key = str(method_id or "").strip()
+    parameters = dict(params or {})
+
+    if method_key == "agcGain":
+        return "AGC_display_only"
+
+    if method_key in {
+        "energy_decay_gain",
+        "sec_gain",
+        "compensatingGain",
+        "amplitude_scale",
+    }:
+        return "conservative_energy_decay_gain_display"
+
+    if method_key in {
+        "subtracting_average_2D",
+        "median_background_2D",
+        "running_average_2D",
+    }:
+        ntraces = int(parameters.get("ntraces", 0) or 0)
+        if trace_count > 0 and ntraces >= max(41, int(trace_count * 0.5)):
+            return "background_suppression_aggressive"
+        return "background_suppression_conservative"
+
+    if method_key in {"fk_filter", "ccbs", "svd_bg"}:
+        return "background_suppression_conservative"
+
+    if method_key == "dewow":
+        return "dewow"
+
+    if method_key in {"stolt_migration", "kirchhoff_migration"}:
+        return "migration"
+
+    return None
+
+
 class PreviewWorker(QObject):
     """后台预览计算线程。"""
 
@@ -138,7 +178,7 @@ class WorkbenchPage(QWidget):
         super().__init__(parent)
         self.parent_window = parent
         self.data_state = data_state
-        self.no_prior_guard_callback: Callable[[str], bool] | None = None
+        self.no_prior_guard_callback: Callable[..., bool] | None = None
 
         # 数据状态
         self.raw_data = None  # 原始数据
@@ -189,26 +229,48 @@ class WorkbenchPage(QWidget):
         if self.data_state is not None:
             self.sync_from_shared_state({"reason": "init"})
 
-    def set_no_prior_guard_callback(
-        self, callback: Callable[[str], bool] | None
-    ) -> None:
+    def set_no_prior_guard_callback(self, callback: Callable[..., bool] | None) -> None:
         """注入 no-prior guard 回调。"""
         self.no_prior_guard_callback = callback
 
-    def _guard_workbench_action(self, action_id: str, title: str) -> bool:
+    def _guard_workbench_action(
+        self,
+        action_id: str,
+        title: str,
+        *,
+        allow_override: bool = True,
+        show_dialog: bool = True,
+    ) -> bool:
         """在 Workbench 侧请求 no-prior guard 判定。"""
         callback = self.no_prior_guard_callback
         if callable(callback):
             try:
-                return bool(callback(action_id))
+                try:
+                    return bool(
+                        callback(
+                            action_id,
+                            allow_override=allow_override,
+                            show_dialog=show_dialog,
+                        )
+                    )
+                except TypeError:
+                    return bool(callback(action_id))
             except Exception as exc:  # pragma: no cover - defensive path
                 self._log(f"无先验防护回调异常: {exc}", "WARN")
-                QMessageBox.warning(
-                    self,
-                    title,
-                    "无先验防护回调异常，已阻断当前操作。\n请先返回主界面进行人工复核。",
-                )
+                if show_dialog:
+                    QMessageBox.warning(
+                        self,
+                        title,
+                        "无先验防护回调异常，已阻断当前操作。\n请先返回主界面进行人工复核。",
+                    )
                 return False
+
+        if not show_dialog:
+            self._log(
+                "未接入 no-prior guard 回调，已阻断处理动作（避免静默绕过）",
+                "WARN",
+            )
+            return False
 
         choice = QMessageBox.question(
             self,
@@ -1056,6 +1118,26 @@ class WorkbenchPage(QWidget):
         announce: bool,
     ):
         """请求后台计算预览，只保留最新一条。"""
+        trace_count = int(input_data.shape[1]) if input_data is not None else 0
+        action_id = classify_workbench_method_action(
+            method_id,
+            params,
+            trace_count,
+        )
+        if action_id:
+            guard_title = f"无先验方法执行防护: {method_name}"
+            guard_allowed = self._guard_workbench_action(
+                action_id,
+                guard_title,
+                allow_override=announce,
+                show_dialog=announce,
+            )
+            if not guard_allowed:
+                self._log(f"方法执行已被防护策略阻断: {method_id}", "WARN")
+                self._apply_after_preview = False
+                self._update_action_buttons()
+                return
+
         self._preview_seq += 1
         request = {
             "seq": self._preview_seq,

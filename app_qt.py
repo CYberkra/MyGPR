@@ -6883,6 +6883,7 @@ class GPRGuiQt(QMainWindow):
         *,
         dialog_title: str,
         allow_override: bool = True,
+        show_dialog: bool = True,
     ) -> bool:
         """执行 no-prior UI guardrail 判定并处理弹窗。"""
         no_prior_policy = self._build_no_prior_qc_policy(
@@ -6902,11 +6903,20 @@ class GPRGuiQt(QMainWindow):
                 no_prior_policy,
                 override_used=False,
             )
-            message = guard.warning_text or "当前操作已被无先验高风险策略阻断。"
-            QMessageBox.warning(self, dialog_title, message)
+            if show_dialog:
+                message = guard.warning_text or "当前操作已被无先验高风险策略阻断。"
+                QMessageBox.warning(self, dialog_title, message)
             return False
 
         if guard.decision == "requires_confirmation":
+            if not show_dialog:
+                self._record_no_prior_guard_event(
+                    action_id,
+                    guard,
+                    no_prior_policy,
+                    override_used=False,
+                )
+                return False
             message = guard.warning_text or "当前操作需要人工确认。"
             choice = QMessageBox.question(
                 self,
@@ -6933,7 +6943,13 @@ class GPRGuiQt(QMainWindow):
             )
         return True
 
-    def _enforce_workbench_no_prior_action_guard(self, action_id: str) -> bool:
+    def _enforce_workbench_no_prior_action_guard(
+        self,
+        action_id: str,
+        *,
+        allow_override: bool = True,
+        show_dialog: bool = True,
+    ) -> bool:
         """Workbench 侧 no-prior guard 入口，复用主界面 guard 逻辑。"""
         title_map = {
             "workflow_run": "Workbench 无先验流程防护",
@@ -6944,7 +6960,8 @@ class GPRGuiQt(QMainWindow):
         return self._enforce_no_prior_action_guard(
             action_id,
             dialog_title=dialog_title,
-            allow_override=True,
+            allow_override=allow_override,
+            show_dialog=show_dialog,
         )
 
     def _classify_method_guard_action(
