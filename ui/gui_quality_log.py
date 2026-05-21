@@ -148,10 +148,17 @@ class QualityLogPage(QWidget):
         action_row_top_layout.setSpacing(8)
         action_row_top_layout.addWidget(self.btn_generate_report)
         action_row_top_layout.addWidget(self.btn_export_quality_snapshot)
-        action_row_top_layout.addWidget(self.btn_export_replay_evidence)
-        action_row_top_layout.addWidget(self.btn_export_georeference_3d)
         action_row_top_layout.addStretch(1)
         action_layout.addWidget(action_row_top)
+
+        action_row_mid = QWidget()
+        action_row_mid_layout = QHBoxLayout(action_row_mid)
+        action_row_mid_layout.setContentsMargins(0, 0, 0, 0)
+        action_row_mid_layout.setSpacing(8)
+        action_row_mid_layout.addWidget(self.btn_export_replay_evidence)
+        action_row_mid_layout.addWidget(self.btn_export_georeference_3d)
+        action_row_mid_layout.addStretch(1)
+        action_layout.addWidget(action_row_mid)
 
         action_row_bottom = QWidget()
         action_row_bottom_layout = QHBoxLayout(action_row_bottom)
@@ -1582,7 +1589,7 @@ class QualityLogPage(QWidget):
             ax.text2D(
                 0.5,
                 0.5,
-                "暂无三维地理参考数据",
+                "暂无三维地理参考数据\n暂无航迹数据",
                 transform=ax.transAxes,
                 ha="center",
                 va="center",
@@ -1604,10 +1611,6 @@ class QualityLogPage(QWidget):
 
         payload = entries[-1][2]
         preview = payload.get("preview") or {}
-        x_m = np.asarray(payload.get("local_x_m", []), dtype=np.float64)
-        y_m = np.asarray(payload.get("local_y_m", []), dtype=np.float64)
-        airborne_z_m = np.asarray(payload.get("airborne_z_m", []), dtype=np.float64)
-        curtain_z = np.asarray(preview.get("curtain_z_m", []), dtype=np.float64)
         preview_trace_indices = np.asarray(preview.get("trace_indices", []), dtype=np.int32)
         preview_sample_indices = np.asarray(preview.get("sample_indices", []), dtype=np.int32)
 
@@ -1616,16 +1619,12 @@ class QualityLogPage(QWidget):
         ax.set_ylabel(payload.get("y_axis_label") or "局部 Y (m)")
         ax.set_zlabel(payload.get("z_axis_label") or "等效高度/深度 (m)")
 
-        if x_m.size and y_m.size:
-            pad_x = max(float(np.nanmax(x_m) - np.nanmin(x_m)) * 0.08, 1e-6)
-            pad_y = max(float(np.nanmax(y_m) - np.nanmin(y_m)) * 0.08, 1e-6)
-            ax.set_xlim(float(np.nanmin(x_m) - pad_x), float(np.nanmax(x_m) + pad_x))
-            ax.set_ylim(float(np.nanmin(y_m) - pad_y), float(np.nanmax(y_m) + pad_y))
-        if airborne_z_m.size:
-            z_min = float(np.nanmin(curtain_z))
-            z_max = float(np.nanmax(np.concatenate([curtain_z.reshape(-1), airborne_z_m])))
-            z_pad = max((z_max - z_min) * 0.08, 1e-6)
-            ax.set_zlim(z_min - z_pad, z_max + z_pad)
+        bounds = self._compute_georef3d_bounds(entries, include_bscan=self.btn_georef3d_bscan.isChecked())
+        if bounds is not None:
+            (x_min, x_max), (y_min, y_max), (z_min, z_max) = bounds
+            ax.set_xlim(x_min, x_max)
+            ax.set_ylim(y_min, y_max)
+            ax.set_zlim(z_min, z_max)
 
         self._restore_georef3d_view_state(ax, previous_view or self._georef3d_view_state)
         handles, labels = ax.get_legend_handles_labels()
@@ -1654,6 +1653,31 @@ class QualityLogPage(QWidget):
         self._georef3d_view_state = self._capture_georef3d_view_state()
         self._position_georef3d_overlay_controls()
         self._draw_canvas_safely(self.georef3d_canvas)
+
+    def _compute_georef3d_bounds(
+        self,
+        entries: list[tuple[str, str, dict]],
+        *,
+        include_bscan: bool,
+    ) -> tuple[tuple[float, float], tuple[float, float], tuple[float, float]] | None:
+        """Compute robust 3D bounds from all visible payload objects."""
+        point_entries = [(kind, payload) for _label, kind, payload in entries]
+        points = self._collect_georef3d_points(point_entries, include_bscan=include_bscan)
+        if not points:
+            return None
+        stacked = np.vstack(points)
+        finite = stacked[np.isfinite(stacked).all(axis=1)]
+        if finite.size == 0:
+            return None
+        mins = np.min(finite, axis=0)
+        maxs = np.max(finite, axis=0)
+        span = np.maximum(maxs - mins, 1.0e-6)
+        padding = np.maximum(span * 0.08, 1.0e-6)
+        return (
+            (float(mins[0] - padding[0]), float(maxs[0] + padding[0])),
+            (float(mins[1] - padding[1]), float(maxs[1] + padding[1])),
+            (float(mins[2] - padding[2]), float(maxs[2] + padding[2])),
+        )
 
     def _on_trajectory_click(self, event):
         """根据点击位置选中最近的航迹点。"""

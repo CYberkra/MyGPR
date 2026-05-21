@@ -516,7 +516,7 @@ class WorkbenchPage(QWidget):
         toolbar_layout.setSpacing(10)
 
         # 标题
-        title = QLabel("工作台总控中心")
+        title = QLabel("工作台总控中心（Legacy Fallback）")
         title.setProperty("class", "titleMedium")
         toolbar_layout.addWidget(title)
 

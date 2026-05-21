@@ -1202,6 +1202,84 @@ def test_motion_v2_common_params_match_registry_workflow_contract():
         app.processEvents()
 
 
+def test_motion_v2_advanced_params_expand_in_main_basic_panel():
+    app = _get_app()
+    win = GPRGuiQt()
+    try:
+        win.page_basic.apply_method_params("motion_compensation_v2")
+        assert "apc_offset_x_m" not in win.page_basic.param_vars
+        assert win.page_basic.show_advanced_params_var.isChecked() is False
+
+        win.page_basic.show_advanced_params_var.setChecked(True)
+        assert "apc_offset_x_m" in win.page_basic.param_vars
+        assert "apc_offset_y_m" in win.page_basic.param_vars
+        assert "apc_offset_z_m" in win.page_basic.param_vars
+        assert "max_shift_samples" in win.page_basic.param_vars
+        assert "resample_spacing_m" in win.page_basic.param_vars
+        assert "APC offset" in win.page_basic.param_hint_label.text()
+    finally:
+        win.close()
+        app.processEvents()
+
+
+def test_main_plot_lineage_label_tracks_shared_formal_history():
+    app = _get_app()
+    win = GPRGuiQt()
+    try:
+        raw = np.arange(40, dtype=np.float32).reshape(8, 5)
+        win.shared_data.load_data(raw, path="demo.csv", source="test")
+        win.plot_data(win.data)
+        app.processEvents()
+        assert "Raw" in win._plot_lineage_label.text()
+
+        win.shared_data.apply_current_data(raw + 1.0, push_history=True, label="dewow")
+        win.plot_data(win.data)
+        app.processEvents()
+        assert "Raw -> dewow" in win._plot_lineage_label.text()
+        assert "处理链路" in win._plot_lineage_label.toolTip()
+    finally:
+        win.close()
+        app.processEvents()
+
+
+def test_quality_georef3d_bounds_use_all_visible_layers():
+    app = _get_app()
+    page = QualityLogPage()
+    try:
+        payload_raw = {
+            "local_x_m": [0.0, 1.0],
+            "local_y_m": [0.0, 1.0],
+            "airborne_z_m": [3.0, 3.2],
+            "preview": {
+                "curtain_x_m": [[0.0, 1.0], [0.0, 1.0]],
+                "curtain_y_m": [[0.0, 0.0], [1.0, 1.0]],
+                "curtain_z_m": [[0.5, 0.6], [0.7, 0.8]],
+            },
+        }
+        payload_current = {
+            "local_x_m": [10.0, 11.0],
+            "local_y_m": [5.0, 6.0],
+            "airborne_z_m": [4.0, 4.3],
+            "preview": {
+                "curtain_x_m": [[10.0, 11.0], [10.0, 11.0]],
+                "curtain_y_m": [[5.0, 5.0], [6.0, 6.0]],
+                "curtain_z_m": [[1.5, 1.6], [1.7, 1.8]],
+            },
+        }
+        bounds = page._compute_georef3d_bounds(
+            [("原始3D", "raw", payload_raw), ("当前3D", "current", payload_current)],
+            include_bscan=True,
+        )
+        assert bounds is not None
+        (x_min, x_max), (y_min, y_max), (z_min, z_max) = bounds
+        assert x_min < 0.0 and x_max > 11.0
+        assert y_min < 0.0 and y_max > 6.0
+        assert z_min < 0.5 and z_max > 4.3
+    finally:
+        page.close()
+        app.processEvents()
+
+
 def test_motion_v2_basic_panel_reports_trace_metadata_status():
     app = _get_app()
     win = GPRGuiQt()

@@ -417,6 +417,15 @@ class BasicFlowPage(QWidget):
         )
         method_layout.addWidget(self.method_combo)
 
+        self.show_advanced_params_var = QCheckBox("显示高级参数")
+        self.show_advanced_params_var.setToolTip(
+            "展开当前方法的完整参数。默认仅显示日常常用项；展开后参数默认值不变。"
+        )
+        self.show_advanced_params_var.toggled.connect(
+            self._on_show_advanced_params_toggled
+        )
+        method_layout.addWidget(self.show_advanced_params_var)
+
         self.param_container = QWidget()
         self.param_layout = QFormLayout(self.param_container)
         self.param_layout.setContentsMargins(4, 4, 4, 4)
@@ -509,7 +518,7 @@ class BasicFlowPage(QWidget):
                 self.param_hint_label.setText(
                     f"类别：{category_label}。V2 自动读取导入/传感器同步后的 trace_metadata；"
                     "这里只配置高度来源、参考高度、开关和等距重采样。"
-                    "安全阈值与 APC offset 请在高级设置中调整。"
+                    "展开高级参数（原高级设置能力）可编辑安全阈值与 APC offset。"
                 )
             elif hidden_count > 0:
                 self.param_hint_label.setText(
@@ -518,7 +527,16 @@ class BasicFlowPage(QWidget):
             else:
                 self.param_hint_label.setText(f"类别：{category_label}。")
         else:
-            self.param_hint_label.setText(f"类别：{category_label}。")
+            if method_key == "motion_compensation_v2":
+                self.param_hint_label.setText(
+                    f"类别：{category_label}。已展开完整参数。APC offset 是设备安装几何标定参数，"
+                    "不是动态飞行传感器数据；resample_spacing_m=0 表示自动使用中位道间距；"
+                    "V2 会在可用时自动读取 trace_metadata。"
+                )
+            else:
+                self.param_hint_label.setText(
+                    f"类别：{category_label}。已展开完整参数，参数默认值保持注册表定义。"
+                )
 
         # Stolt迁移特殊预设
         if method_key == "stolt_migration":
@@ -566,6 +584,15 @@ class BasicFlowPage(QWidget):
 
         self._wire_motion_param_dependencies(method_key)
         self._refresh_apply_menu_state()
+
+    def _on_show_advanced_params_toggled(self, checked: bool) -> None:
+        """Switch the daily panel between common and full parameter sets."""
+        current_key = self.get_current_method_key()
+        if not current_key:
+            return
+        self._update_current_method_overrides()
+        self._basic_ultra_mode = not bool(checked)
+        self._render_params(current_key)
 
     def _add_motion_v2_status_rows(self, all_params: list[dict], active_overrides: dict) -> None:
         """Add read-only trace metadata/APC status rows for the V2 basic panel."""

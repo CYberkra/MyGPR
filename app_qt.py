@@ -772,6 +772,10 @@ class GPRGuiQt(QMainWindow):
         self._main_view_limits = None
         self._main_press_state = None
         self._main_drag_threshold_px = 8
+        self._main_motion_draw_interval_s = 1.0 / 60.0
+        self._main_coord_update_interval_s = 1.0 / 40.0
+        self._last_main_motion_draw_ts = 0.0
+        self._last_main_coord_update_ts = 0.0
         self._last_display_trace_axis = np.array([], dtype=np.float32)
         self._last_display_trace_indices = np.array([], dtype=np.int32)
         self._last_display_time_axis = np.array([], dtype=np.float32)
@@ -890,9 +894,12 @@ class GPRGuiQt(QMainWindow):
         # 返回工作台按钮
         from qfluentwidgets import PushButton
 
-        self.btn_return_workbench = PushButton("返回工作台")
+        self.btn_return_workbench = PushButton("进入旧工作台（Legacy）")
         self.btn_return_workbench.clicked.connect(self.switch_to_workbench_mode)
         self.btn_return_workbench.setProperty("class", "successBtn")
+        self.btn_return_workbench.setToolTip(
+            "旧工作台仅作兼容回退；主流程建议使用当前主界面（日常处理/显示与对比/质量与导出）。"
+        )
         left_shell_layout.addWidget(self.btn_return_workbench)
 
         self._content_stack.addWidget(self._main_content_widget)
@@ -974,6 +981,9 @@ class GPRGuiQt(QMainWindow):
         self._main_ax.set_xlabel("距离（道索引）")
         self._main_ax.set_ylabel("时间（采样索引）")
         self.canvas = FigureCanvas(self.fig)
+        self.canvas.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
         self._main_toolbar = NavigationToolbar(self.canvas, self)
         self._main_toolbar.setObjectName("mainPlotToolbar")
         for action in self._main_toolbar.actions():
@@ -1012,6 +1022,10 @@ class GPRGuiQt(QMainWindow):
         plot_toolbar_layout.setSpacing(8)
         plot_toolbar_layout.addWidget(self._main_toolbar)
         plot_toolbar_layout.addStretch(1)
+        self._plot_lineage_label = QLabel("处理链路: Raw")
+        self._plot_lineage_label.setProperty("class", "hintText")
+        self._plot_lineage_label.setToolTip("当前显示数据的处理链路")
+        plot_toolbar_layout.addWidget(self._plot_lineage_label)
         self._plot_coord_label = QLabel("坐标: --")
         self._plot_coord_label.setProperty("class", "hintText")
         plot_toolbar_layout.addWidget(self._plot_coord_label)
@@ -1019,10 +1033,16 @@ class GPRGuiQt(QMainWindow):
 
         # 空状态卡片
         self.plot_stack_host = QWidget()
+        self.plot_stack_host.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
         plot_stack_layout = QStackedLayout(self.plot_stack_host)
         plot_stack_layout.setContentsMargins(0, 0, 0, 0)
 
         self.empty_state_card = self._create_empty_state_card()
+        self.empty_state_card.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
         plot_stack_layout.addWidget(self.empty_state_card)
         plot_stack_layout.addWidget(self.canvas)
         right_layout.addWidget(self.plot_stack_host, 1)
@@ -1436,6 +1456,9 @@ class GPRGuiQt(QMainWindow):
         self.page_advanced.slider_compare_var.stateChanged.connect(self._refresh_plot)
         self.page_advanced.btn_apply_crop.clicked.connect(self._refresh_plot)
         self.page_advanced.btn_reset_crop.clicked.connect(self._reset_crop)
+        self.page_advanced.btn_toggle_theme.clicked.connect(
+            self._toggle_theme_from_main_ui
+        )
         self.page_advanced.rtk_sidecar_button.clicked.connect(
             lambda: self._pick_sidecar_file("rtk")
         )
@@ -1563,8 +1586,8 @@ class GPRGuiQt(QMainWindow):
         if self._content_stack is not None and self.page_workbench is not None:
             self._content_stack.setCurrentWidget(self.page_workbench)
             self._sync_workbench_with_main_data()
-            self.status_label.setText("工作台总控页")
-            self._log("切换到工作台总控页")
+            self.status_label.setText("旧工作台（Legacy Fallback）")
+            self._log("切换到旧工作台（Legacy Fallback）")
 
     def _on_shared_data_changed(self, payload: dict):
         """共享数据状态变化后，同步相关视图。"""
@@ -1587,6 +1610,7 @@ class GPRGuiQt(QMainWindow):
             if reason == "loaded":
                 self._no_prior_guard_events = []
             self._reset_auto_tune_state("数据已更新，请重新自动选参。")
+        self._update_processing_lineage_display()
 
     def _normalize_selected_trace_index(self):
         """确保当前选中道号仍在有效范围内。"""
@@ -1726,7 +1750,13 @@ class GPRGuiQt(QMainWindow):
         ylim0 = start["ylim_start"]
         ax.set_xlim(xlim0[0] - dx_data, xlim0[1] - dx_data)
         ax.set_ylim(ylim0[0] - dy_data, ylim0[1] - dy_data)
-        self.canvas.draw_idle()
+        now_ts = time.perf_counter()
+        if (
+            now_ts - float(self._last_main_motion_draw_ts)
+            >= float(self._main_motion_draw_interval_s)
+        ):
+            self.canvas.draw_idle()
+            self._last_main_motion_draw_ts = now_ts
 
     def _on_main_canvas_release(self, event):
         """统一处理主图点击/拖框释放。"""
@@ -1837,6 +1867,13 @@ class GPRGuiQt(QMainWindow):
         """更新主图坐标读数。"""
         if self._plot_coord_label is None:
             return
+        now_ts = time.perf_counter()
+        if (
+            now_ts - float(self._last_main_coord_update_ts)
+            < float(self._main_coord_update_interval_s)
+        ):
+            return
+        self._last_main_coord_update_ts = now_ts
         if (
             event.inaxes not in self._main_plot_axes
             or event.xdata is None
@@ -1891,21 +1928,28 @@ class GPRGuiQt(QMainWindow):
         ax = start.get("axes")
         if ax is None or event.xdata is None or event.ydata is None:
             return
-        self._remove_drag_roi_preview()
         x0, x1 = sorted([float(start["xdata"]), float(event.xdata)])
         y0, y1 = sorted([float(start["ydata"]), float(event.ydata)])
-        self._drag_roi_preview_patch = Rectangle(
-            (x0, y0),
-            abs(x1 - x0),
-            abs(y1 - y0),
-            fill=False,
-            edgecolor="#38bdf8",
-            linewidth=1.2,
-            linestyle="--",
-            alpha=0.9,
-            zorder=7,
-        )
-        ax.add_patch(self._drag_roi_preview_patch)
+        if self._drag_roi_preview_patch is None:
+            self._drag_roi_preview_patch = Rectangle(
+                (x0, y0),
+                abs(x1 - x0),
+                abs(y1 - y0),
+                fill=False,
+                edgecolor="#38bdf8",
+                linewidth=1.2,
+                linestyle="--",
+                alpha=0.9,
+                zorder=7,
+            )
+            ax.add_patch(self._drag_roi_preview_patch)
+        else:
+            self._drag_roi_preview_patch.set_bounds(
+                x0,
+                y0,
+                abs(x1 - x0),
+                abs(y1 - y0),
+            )
         self.canvas.draw_idle()
 
     def _remove_drag_roi_preview(self):
@@ -2211,6 +2255,20 @@ class GPRGuiQt(QMainWindow):
 
         if stylesheet:
             self.setStyleSheet(stylesheet)
+
+    def _toggle_theme_from_main_ui(self):
+        """主界面显示页触发主题切换。"""
+        from core.theme_manager import get_theme_manager
+
+        theme_manager = get_theme_manager()
+        current_theme = theme_manager.toggle_theme()
+        app = QApplication.instance()
+        if app is not None:
+            theme_manager.apply_app_theme(app, current_theme)
+        self._apply_style()
+        self._refresh_plot()
+        info = theme_manager.get_theme_info(current_theme)
+        self._log(f"已切换到{info.get('name', current_theme)}")
 
     # ============ 日志和帮助方法 ============
 
@@ -4411,6 +4469,7 @@ class GPRGuiQt(QMainWindow):
                 last_im, axes, header_info_override=view_header_info
             )
         self.canvas.draw_idle()
+        self._update_processing_lineage_display()
 
         elapsed_ms = (time.perf_counter() - start_ts) * 1000.0
         self._plot_draw_count += 1
@@ -5576,8 +5635,53 @@ class GPRGuiQt(QMainWindow):
 
         current_label = str(getattr(self.shared_data, "current_label", "") or "").strip()
         if current_label and current_label != "原始数据" and current_label not in base_title:
-            return f"{base_title} - 当前处理：{current_label}"
+            base_title = f"{base_title} - 当前处理：{current_label}"
+        lineage_text = self._build_processing_lineage_text()
+        if lineage_text and lineage_text not in base_title:
+            return f"{base_title} | {lineage_text}"
         return base_title
+
+    def _build_processing_lineage_steps(self) -> list[str]:
+        """Build compact processing lineage from formal shared history labels."""
+        entries = self.shared_data.build_result_history_entries()
+        if not entries:
+            return ["Raw"]
+        labels: list[str] = []
+        for item in entries:
+            label = str(item.get("label") or "").strip()
+            if not label:
+                continue
+            if label in {"原始数据", "原始", "Raw", "raw"}:
+                norm = "Raw"
+            else:
+                norm = label
+            if not labels or labels[-1] != norm:
+                labels.append(norm)
+        return labels or ["Raw"]
+
+    def _build_processing_lineage_text(self) -> str:
+        """Return compact lineage string for toolbar/title."""
+        steps = self._build_processing_lineage_steps()
+        if len(steps) <= 1:
+            return "Raw"
+        return " -> ".join(steps)
+
+    def _build_processing_lineage_tooltip(self) -> str:
+        """Return detailed lineage tooltip text."""
+        steps = self._build_processing_lineage_steps()
+        lines = [f"数据源: {self.data_path or '未加载'}", "处理链路:"]
+        for idx, step in enumerate(steps, start=1):
+            lines.append(f"{idx}. {step}")
+        lines.append("说明: 视图交互（平移/缩放/滑动）不写入处理链路。")
+        return "\n".join(lines)
+
+    def _update_processing_lineage_display(self):
+        """Sync main toolbar lineage summary and tooltip."""
+        if not hasattr(self, "_plot_lineage_label") or self._plot_lineage_label is None:
+            return
+        lineage_text = self._build_processing_lineage_text()
+        self._plot_lineage_label.setText(f"处理链路: {lineage_text}")
+        self._plot_lineage_label.setToolTip(self._build_processing_lineage_tooltip())
 
     def _resolve_method_params(self, method_key: str):
         """解析方法参数"""
