@@ -1,0 +1,116 @@
+{
+  "window_layout": [
+    {
+      "size": "narrow",
+      "page": "日常处理",
+      "screenshot": "D:\\CDUT-UavGPR-Controller\\MyGPR\\docs\\ui_smoke_001_screenshots\\narrow_basic.png"
+    },
+    {
+      "size": "narrow",
+      "page": "调参与实验",
+      "screenshot": "D:\\CDUT-UavGPR-Controller\\MyGPR\\docs\\ui_smoke_001_screenshots\\narrow_auto_tune.png"
+    },
+    {
+      "size": "narrow",
+      "page": "显示与对比",
+      "screenshot": "D:\\CDUT-UavGPR-Controller\\MyGPR\\docs\\ui_smoke_001_screenshots\\narrow_advanced.png"
+    },
+    {
+      "size": "narrow",
+      "page": "质量与导出",
+      "screenshot": "D:\\CDUT-UavGPR-Controller\\MyGPR\\docs\\ui_smoke_001_screenshots\\narrow_quality.png"
+    },
+    {
+      "size": "narrow",
+      "page": "Workbench legacy",
+      "screenshot": "D:\\CDUT-UavGPR-Controller\\MyGPR\\docs\\ui_smoke_001_screenshots\\narrow_workbench.png"
+    },
+    {
+      "size": "medium",
+      "page": "日常处理",
+      "screenshot": "D:\\CDUT-UavGPR-Controller\\MyGPR\\docs\\ui_smoke_001_screenshots\\medium_basic.png"
+    },
+    {
+      "size": "medium",
+      "page": "调参与实验",
+      "screenshot": "D:\\CDUT-UavGPR-Controller\\MyGPR\\docs\\ui_smoke_001_screenshots\\medium_auto_tune.png"
+    },
+    {
+      "size": "medium",
+      "page": "显示与对比",
+      "screenshot": "D:\\CDUT-UavGPR-Controller\\MyGPR\\docs\\ui_smoke_001_screenshots\\medium_advanced.png"
+    },
+    {
+      "size": "medium",
+      "page": "质量与导出",
+      "screenshot": "D:\\CDUT-UavGPR-Controller\\MyGPR\\docs\\ui_smoke_001_screenshots\\medium_quality.png"
+    },
+    {
+      "size": "medium",
+      "page": "Workbench legacy",
+      "screenshot": "D:\\CDUT-UavGPR-Controller\\MyGPR\\docs\\ui_smoke_001_screenshots\\medium_workbench.png"
+    },
+    {
+      "size": "wide",
+      "page": "日常处理",
+      "screenshot": "D:\\CDUT-UavGPR-Controller\\MyGPR\\docs\\ui_smoke_001_screenshots\\wide_basic.png"
+    },
+    {
+      "size": "wide",
+      "page": "调参与实验",
+      "screenshot": "D:\\CDUT-UavGPR-Controller\\MyGPR\\docs\\ui_smoke_001_screenshots\\wide_auto_tune.png"
+    },
+    {
+      "size": "wide",
+      "page": "显示与对比",
+      "screenshot": "D:\\CDUT-UavGPR-Controller\\MyGPR\\docs\\ui_smoke_001_screenshots\\wide_advanced.png"
+    },
+    {
+      "size": "wide",
+      "page": "质量与导出",
+      "screenshot": "D:\\CDUT-UavGPR-Controller\\MyGPR\\docs\\ui_smoke_001_screenshots\\wide_quality.png"
+    },
+    {
+      "size": "wide",
+      "page": "Workbench legacy",
+      "screenshot": "D:\\CDUT-UavGPR-Controller\\MyGPR\\docs\\ui_smoke_001_screenshots\\wide_workbench.png"
+    }
+  ],
+  "display_compare": {
+    "theme_toggle_accessible": true,
+    "wiggle_accessible": true,
+    "render_after_theme_toggle": true
+  },
+  "advanced_params": {
+    "toggle_exists": true,
+    "apc_visible_after_expand": true,
+    "resample_spacing_visible_after_expand": true,
+    "added_params_count": 7
+  },
+  "bscan_interaction": {
+    "raw_rendered": true,
+    "view_interaction_history_unchanged": true,
+    "coord_label_present": true
+  },
+  "preview_3d": {
+    "3d_ax_exists": true,
+    "title": "三维地理参考预览"
+  },
+  "lineage": {
+    "raw": "处理链路: Raw",
+    "after_one_step": "处理链路: Raw -> set_zero_time",
+    "tooltip_has_chain": true,
+    "after_undo": "处理链路: Raw",
+    "after_reset": "处理链路: Raw",
+    "applied_method": "set_zero_time"
+  },
+  "no_prior_guard": {
+    "main_guard_method_exists": true,
+    "workbench_guard_callback_bound": false
+  },
+  "workbench": {
+    "legacy_button_text": "进入旧工作台（Legacy）",
+    "status_text": "Line9origin(36).csv | 采样:501 道数:2378 | 距离:224.4m"
+  },
+  "dataset": "C:\\Users\\17844\\Desktop\\02_Preprocessed_Standard\\2025-09_营山\\Line9origin(36).csv"
+}
