@@ -156,6 +156,10 @@ from core.no_prior_qc_policy import (
     derive_no_prior_level,
     policy_to_dict,
 )
+from core.no_prior_ui_guardrails import (
+    build_no_prior_guard_event,
+    evaluate_no_prior_action,
+)
 from core.auto_tune import (
     auto_select_method_group,
     auto_tune_method,
@@ -753,6 +757,7 @@ class GPRGuiQt(QMainWindow):
         self._last_quality_metrics = None
         self._last_run_summary = None
         self._last_no_prior_qc_policy = None
+        self._no_prior_guard_events = []
         self._runtime_warnings = []
         self._sidecar_files = {"rtk": None, "imu": None, "altimeter": None}
         self._trace_timestamps_s = None
@@ -1576,6 +1581,8 @@ class GPRGuiQt(QMainWindow):
             self._update_manual_roi_status()
         if reason in {"loaded", "undo", "reset"}:
             self._clear_runtime_warnings()
+            if reason == "loaded":
+                self._no_prior_guard_events = []
             self._reset_auto_tune_state("数据已更新，请重新自动选参。")
 
     def _normalize_selected_trace_index(self):
@@ -2420,6 +2427,16 @@ class GPRGuiQt(QMainWindow):
 
     def apply_method_auto_tuned_default(self):
         """按自动调参推荐参数执行当前方法。"""
+        if not self._enforce_no_prior_action_guard(
+            "preset_recommendation",
+            dialog_title="自动推荐参数",
+            allow_override=False,
+        ):
+            self.page_basic.set_apply_source_hint(
+                "无先验高风险策略已阻断自动推荐参数执行。"
+            )
+            return
+
         if not self._last_auto_tune_result:
             self.page_basic.set_apply_source_hint(
                 "当前无可用推荐结果，正在分析当前参数..."
@@ -2443,6 +2460,15 @@ class GPRGuiQt(QMainWindow):
 
     def start_auto_tune_current_method(self, auto_apply_after_finish: bool = False):
         """对当前方法执行单步自动选参。"""
+        if not self._enforce_no_prior_action_guard(
+            "AutoTune",
+            dialog_title="自动选参",
+            allow_override=False,
+        ):
+            self._pending_apply_after_auto_tune = False
+            self.page_basic.set_apply_source_hint("无先验高风险策略已阻断自动选参。")
+            return False
+
         if (
             self._ui_busy
             or self._worker is not None
@@ -2524,6 +2550,13 @@ class GPRGuiQt(QMainWindow):
 
     def start_auto_select_current_stage(self):
         """比较当前 stage 内多个可用方法并推荐最佳方法。"""
+        if not self._enforce_no_prior_action_guard(
+            "AutoTune",
+            dialog_title="同阶段比较",
+            allow_override=False,
+        ):
+            return False
+
         if (
             self._ui_busy
             or self._worker is not None
@@ -2613,6 +2646,13 @@ class GPRGuiQt(QMainWindow):
 
     def start_auto_tune_comparison(self):
         """运行人工 baseline vs 自动选参科研对比。"""
+        if not self._enforce_no_prior_action_guard(
+            "AutoTune",
+            dialog_title="人工/自动对比",
+            allow_override=False,
+        ):
+            return False
+
         if (
             self._ui_busy
             or self._worker is not None
@@ -2863,6 +2903,14 @@ class GPRGuiQt(QMainWindow):
 
     def apply_method_from_profile(self, profile_key: str):
         """使用自动选参档位参数并立即执行当前方法。"""
+        if not self._enforce_no_prior_action_guard(
+            "preset_recommendation",
+            dialog_title="应用推荐档",
+            allow_override=False,
+        ):
+            self.page_basic.set_apply_source_hint("无先验高风险策略已阻断推荐档执行。")
+            return
+
         if not self._last_auto_tune_result:
             QMessageBox.information(
                 self,
@@ -2911,6 +2959,13 @@ class GPRGuiQt(QMainWindow):
 
     def apply_stage_compare_choice(self):
         """将同阶段比较推荐的方法和参数写回日常处理。"""
+        if not self._enforce_no_prior_action_guard(
+            "preset_recommendation",
+            dialog_title="同阶段推荐写回",
+            allow_override=False,
+        ):
+            return
+
         if not self._last_auto_tune_group_result:
             QMessageBox.information(self, "同阶段比较", "暂无可用的阶段比较结果。")
             return
@@ -4381,6 +4436,15 @@ class GPRGuiQt(QMainWindow):
         params = self._resolve_method_params(method_key)
         params.update(visible_params)
 
+        method_action = self._classify_method_guard_action(method_key, params)
+        if method_action and not self._enforce_no_prior_action_guard(
+            method_action,
+            dialog_title="应用方法",
+            allow_override=True,
+        ):
+            self._log(f"无先验高风险策略已阻断方法执行: {method['name']}")
+            return
+
         self._push_history()
         self._method_param_overrides[method_key] = dict(params)
         self.page_basic.set_method_overrides(method_key, params)
@@ -4398,6 +4462,12 @@ class GPRGuiQt(QMainWindow):
         """运行默认处理流程"""
         if self.data is None or self.data_path is None:
             QMessageBox.warning(self, "无数据", "请先导入 CSV。")
+            return
+        if not self._enforce_no_prior_action_guard(
+            "workflow_run",
+            dialog_title="运行默认流程",
+            allow_override=True,
+        ):
             return
         try:
             current_method_key = self.page_basic.get_current_method_key()
@@ -4449,6 +4519,12 @@ class GPRGuiQt(QMainWindow):
         """运行推荐处理流程"""
         if self.data is None or self.data_path is None:
             QMessageBox.warning(self, "无数据", "请先导入 CSV。")
+            return
+        if not self._enforce_no_prior_action_guard(
+            "preset_recommendation",
+            dialog_title="运行推荐流程",
+            allow_override=False,
+        ):
             return
         profile = RECOMMENDED_RUN_PROFILES.get(profile_key)
         if not profile:
@@ -4685,6 +4761,14 @@ class GPRGuiQt(QMainWindow):
             "  - claim_boundary: "
             + str(no_prior_policy.get("claim_boundary") or "--")
         )
+        if self._no_prior_guard_events:
+            lines.append("- No-prior guard events:")
+            for event in self._no_prior_guard_events[-12:]:
+                lines.append(
+                    "  - {timestamp} | action={action_id} | decision={decision} | level={no_prior_level} | override={override_used} | reason={reason}".format(
+                        **event
+                    )
+                )
         anomaly_lines = self._build_airborne_anomaly_details()
         if anomaly_lines:
             lines.append("- Airborne anomaly details:")
@@ -4813,6 +4897,7 @@ class GPRGuiQt(QMainWindow):
                     )
                 )
             ),
+            f"无先验防护事件: {self._no_prior_guard_events}",
             f"日志文件: {os.path.join(get_logs_dir(), 'gpr_gui.log')}",
         ]
         lines.extend(self._build_airborne_metadata_summary())
@@ -5182,6 +5267,7 @@ class GPRGuiQt(QMainWindow):
             "method_param_overrides": dict(self._method_param_overrides),
             "runtime_warnings": list(self._runtime_warnings),
             "no_prior_qc_policy": no_prior_policy,
+            "no_prior_guard_events": list(self._no_prior_guard_events),
         }
 
         try:
@@ -5318,6 +5404,7 @@ class GPRGuiQt(QMainWindow):
                 metrics=self._last_quality_metrics,
                 airborne_qc=self._compute_airborne_qc_metrics(),
             ),
+            "no_prior_guard_events": list(self._no_prior_guard_events),
         }
 
         with open(json_path, "w", encoding="utf-8") as f:
@@ -6760,6 +6847,116 @@ class GPRGuiQt(QMainWindow):
         )
         return policy_to_dict(policy)
 
+    def _record_no_prior_guard_event(
+        self,
+        action_id: str,
+        decision,
+        no_prior_policy: dict,
+        *,
+        override_used: bool = False,
+    ) -> None:
+        """记录 no-prior UI guardrail 事件。"""
+        event = build_no_prior_guard_event(
+            action_id,
+            decision,
+            no_prior_policy,
+            override_used=override_used,
+        )
+        self._no_prior_guard_events.append(event)
+        if len(self._no_prior_guard_events) > 120:
+            self._no_prior_guard_events = self._no_prior_guard_events[-120:]
+        self._log(
+            "No-prior guard: action={action}, decision={decision}, level={level}, override={override}".format(
+                action=event.get("action_id"),
+                decision=event.get("decision"),
+                level=event.get("no_prior_level"),
+                override=event.get("override_used"),
+            )
+        )
+
+    def _enforce_no_prior_action_guard(
+        self,
+        action_id: str,
+        *,
+        dialog_title: str,
+        allow_override: bool = True,
+    ) -> bool:
+        """执行 no-prior UI guardrail 判定并处理弹窗。"""
+        no_prior_policy = self._build_no_prior_qc_policy(
+            metrics=self._last_quality_metrics,
+            airborne_qc=self._compute_airborne_qc_metrics(),
+        )
+        guard = evaluate_no_prior_action(
+            action_id,
+            no_prior_policy,
+            allow_override=allow_override,
+        )
+
+        if guard.decision == "blocked":
+            self._record_no_prior_guard_event(
+                action_id,
+                guard,
+                no_prior_policy,
+                override_used=False,
+            )
+            message = guard.warning_text or "当前操作已被无先验高风险策略阻断。"
+            QMessageBox.warning(self, dialog_title, message)
+            return False
+
+        if guard.decision == "requires_confirmation":
+            message = guard.warning_text or "当前操作需要人工确认。"
+            choice = QMessageBox.question(
+                self,
+                dialog_title,
+                message + "\n\n是否继续？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            override_used = choice == QMessageBox.StandardButton.Yes
+            self._record_no_prior_guard_event(
+                action_id,
+                guard,
+                no_prior_policy,
+                override_used=override_used,
+            )
+            return override_used
+
+        if guard.log_event:
+            self._record_no_prior_guard_event(
+                action_id,
+                guard,
+                no_prior_policy,
+                override_used=False,
+            )
+        return True
+
+    def _classify_method_guard_action(
+        self,
+        method_key: str,
+        params: dict,
+    ) -> str | None:
+        """将方法执行映射到 no-prior guard action。"""
+        if method_key == "agcGain":
+            return "AGC_display_only"
+        if method_key in {
+            "energy_decay_gain",
+            "sec_gain",
+            "compensatingGain",
+            "amplitude_scale",
+        }:
+            return "conservative_energy_decay_gain_display"
+
+        if method_key in {"subtracting_average_2D", "median_background_2D", "running_average_2D"}:
+            trace_count = int(self.data.shape[1]) if self.data is not None else 0
+            ntraces = int(params.get("ntraces", 0) or 0)
+            if trace_count > 0 and ntraces >= max(41, int(trace_count * 0.5)):
+                return "background_suppression_aggressive"
+            return "background_suppression_conservative"
+
+        if method_key in {"fk_filter", "ccbs", "svd_bg"}:
+            return "background_suppression_conservative"
+        return None
+
     def _compute_airborne_qc_metrics(self) -> dict | None:
         """基于当前每道元数据计算第一批航空 QC 指标。"""
         header = self.header_info or {}
@@ -6887,6 +7084,7 @@ class GPRGuiQt(QMainWindow):
                 metrics=self._last_quality_metrics,
                 airborne_qc=self._compute_airborne_qc_metrics(),
             ),
+            "no_prior_guard_events": list(self._no_prior_guard_events),
         }
         if workflow_summary:
             self._last_run_summary["workflow_summary"] = workflow_summary

@@ -64,3 +64,46 @@ In `app_qt.py`, no-prior policy is now surfaced in:
 ## Follow-up
 
 Suggested next task: NP-004 integrate this policy into explicit workflow-stage guardrails and warning UI affordances (without changing core algorithms).
+
+## NP-004 Guardrail Behavior
+
+NP-004 adds action-level UI guardrails driven by the same no-prior policy model.
+
+### Guarded actions
+
+- blocked (high-risk + no target prior + no ROI):
+  - `AutoTune`
+  - `preset_recommendation`
+  - `background_suppression_aggressive`
+- requires confirmation (high-risk):
+  - `AGC_display_only`
+  - `conservative_energy_decay_gain_display`
+  - `background_suppression_conservative`
+  - `workflow_run`
+- allowed:
+  - `raw_preview`
+
+### UI behavior
+
+- blocked actions show warning dialog and do not execute.
+- confirmation actions show warning dialog and require explicit user continue.
+- warning text uses NP-002 Chinese templates and keeps display-only caveat.
+
+### Event logging
+
+Each blocked/confirmed guard decision records a lightweight event with:
+
+- timestamp
+- action_id
+- decision
+- no_prior_level
+- reason
+- manual_review_required
+- override_used
+
+Events are included in diagnostics, report runtime state, quality snapshot JSON, and replay evidence app context.
+
+### Current limitation
+
+Guardrails are wired to confirmed main-window action handlers (`app_qt.py`).  
+If future code introduces new action entry points outside these handlers, they need explicit guard wiring.
