@@ -151,6 +151,11 @@ from core.runtime_warnings import (
     format_runtime_warning_text,
     merge_runtime_warnings,
 )
+from core.no_prior_qc_policy import (
+    build_no_prior_qc_policy,
+    derive_no_prior_level,
+    policy_to_dict,
+)
 from core.auto_tune import (
     auto_select_method_group,
     auto_tune_method,
@@ -747,6 +752,7 @@ class GPRGuiQt(QMainWindow):
         self._last_stolt_adaptive_reason = ""
         self._last_quality_metrics = None
         self._last_run_summary = None
+        self._last_no_prior_qc_policy = None
         self._runtime_warnings = []
         self._sidecar_files = {"rtk": None, "imu": None, "altimeter": None}
         self._trace_timestamps_s = None
@@ -1285,6 +1291,15 @@ class GPRGuiQt(QMainWindow):
         self.quality_airborne_alert_label = QLabel("airborne_alerts: --")
         self.quality_airborne_alert_label.setToolTip("航空元数据异常摘要")
 
+        self.no_prior_level_label = QLabel("no_prior_level: --")
+        self.no_prior_level_label.setToolTip("无先验质控等级（ok/caution/high_risk）")
+
+        self.no_prior_policy_label = QLabel("no_prior_policy: --")
+        self.no_prior_policy_label.setToolTip("无先验模式下的初始策略建议")
+
+        self.no_prior_blocked_label = QLabel("no_prior_blocked_actions: --")
+        self.no_prior_blocked_label.setToolTip("无先验高风险下的阻断动作")
+
         self.btn_quality_export = QPushButton("导出质量快照")
         self.btn_quality_export.setToolTip("将质量指标导出为JSON和CSV文件")
         self.btn_quality_export.clicked.connect(self.export_quality_snapshot)
@@ -1299,6 +1314,9 @@ class GPRGuiQt(QMainWindow):
             self.quality_spacing_label,
             self.quality_height_label,
             self.quality_airborne_alert_label,
+            self.no_prior_level_label,
+            self.no_prior_policy_label,
+            self.no_prior_blocked_label,
         ]:
             label.setProperty("class", "metricLabel")
             body_layout.addWidget(label)
@@ -3315,21 +3333,47 @@ class GPRGuiQt(QMainWindow):
     def _build_airborne_qc_summary_text(self) -> str:
         """构建航空质控摘要文本。"""
         qc = self._compute_airborne_qc_metrics()
-        if not qc:
-            return ""
-        lines = [
-            f"测线长度: {qc['track_length_m']:.2f} m",
-            f"道间距变异系数: {qc['trace_spacing_cv']:.3f}",
-            f"飞行高度跨度: {qc['flight_height_span_m']:.2f} m",
-            f"道间距离群点: {qc['spacing_outliers']}",
-            f"飞行高度离群点: {qc['height_outliers']}",
-        ]
-        if qc.get("alignment_status_available"):
-            lines.append(f"辅助文件外推道数: {qc['alignment_extrapolated_traces']}")
-        if qc.get("height_confidence_available"):
-            lines.append(f"低置信度高度计道数: {qc['height_confidence_low_traces']}")
-        alerts = qc.get("alerts") or []
-        lines.append("异常状态: " + (", ".join(alerts) if alerts else "正常"))
+        lines = []
+        if qc:
+            lines.extend(
+                [
+                    f"测线长度: {qc['track_length_m']:.2f} m",
+                    f"道间距变异系数: {qc['trace_spacing_cv']:.3f}",
+                    f"飞行高度跨度: {qc['flight_height_span_m']:.2f} m",
+                    f"道间距离群点: {qc['spacing_outliers']}",
+                    f"飞行高度离群点: {qc['height_outliers']}",
+                ]
+            )
+            if qc.get("alignment_status_available"):
+                lines.append(f"辅助文件外推道数: {qc['alignment_extrapolated_traces']}")
+            if qc.get("height_confidence_available"):
+                lines.append(f"低置信度高度计道数: {qc['height_confidence_low_traces']}")
+            alerts = qc.get("alerts") or []
+            lines.append("异常状态: " + (", ".join(alerts) if alerts else "正常"))
+
+        no_prior_policy = self._build_no_prior_qc_policy(
+            metrics=self._last_quality_metrics,
+            airborne_qc=qc,
+        )
+        lines.append("")
+        lines.append("无先验安全策略:")
+        lines.append(f"- 等级: {no_prior_policy.get('no_prior_level', '--')}")
+        lines.append(
+            "- 初始策略: "
+            + str(no_prior_policy.get("recommended_initial_policy", "--"))
+        )
+        lines.append(
+            "- 人工复核: "
+            + (
+                "required"
+                if no_prior_policy.get("manual_review_required")
+                else "not_required"
+            )
+        )
+        blocked_actions = ", ".join(no_prior_policy.get("blocked_actions", [])) or "--"
+        lines.append(f"- 阻断动作: {blocked_actions}")
+        claim_boundary = str(no_prior_policy.get("claim_boundary") or "--")
+        lines.append(f"- Claim boundary: {claim_boundary}")
         return "\n".join(lines)
 
     def _build_airborne_qc_plot_payload(self) -> dict | None:
@@ -4614,6 +4658,33 @@ class GPRGuiQt(QMainWindow):
                     else "正常"
                 )
             )
+        no_prior_policy = self._build_no_prior_qc_policy(
+            metrics=self._last_quality_metrics,
+            airborne_qc=airborne_qc,
+        )
+        lines.append("- No-prior safety policy:")
+        lines.append(
+            f"  - no_prior_level: {no_prior_policy.get('no_prior_level', '--')}"
+        )
+        lines.append(
+            "  - recommended_initial_policy: "
+            + str(no_prior_policy.get("recommended_initial_policy", "--"))
+        )
+        lines.append(
+            "  - manual_review_required: "
+            + str(bool(no_prior_policy.get("manual_review_required")))
+        )
+        lines.append(
+            "  - blocked_actions: "
+            + (
+                ", ".join(no_prior_policy.get("blocked_actions", []))
+                or "--"
+            )
+        )
+        lines.append(
+            "  - claim_boundary: "
+            + str(no_prior_policy.get("claim_boundary") or "--")
+        )
         anomaly_lines = self._build_airborne_anomaly_details()
         if anomaly_lines:
             lines.append("- Airborne anomaly details:")
@@ -4733,6 +4804,15 @@ class GPRGuiQt(QMainWindow):
             f"质量指标: {self._last_quality_metrics}",
             f"运行告警: {self._runtime_warnings}",
             f"航空质控: {self._compute_airborne_qc_metrics()}",
+            (
+                "无先验策略: "
+                + str(
+                    self._build_no_prior_qc_policy(
+                        metrics=self._last_quality_metrics,
+                        airborne_qc=self._compute_airborne_qc_metrics(),
+                    )
+                )
+            ),
             f"日志文件: {os.path.join(get_logs_dir(), 'gpr_gui.log')}",
         ]
         lines.extend(self._build_airborne_metadata_summary())
@@ -5083,6 +5163,10 @@ class GPRGuiQt(QMainWindow):
             pass
 
         export_package = dict(package)
+        no_prior_policy = self._build_no_prior_qc_policy(
+            metrics=self._last_quality_metrics,
+            airborne_qc=self._compute_airborne_qc_metrics(),
+        )
         export_package["app_context"] = {
             "timestamp": datetime.now().isoformat(timespec="seconds"),
             "version": self.version_text,
@@ -5097,6 +5181,7 @@ class GPRGuiQt(QMainWindow):
             "quality_metrics": dict(self._last_quality_metrics or {}),
             "method_param_overrides": dict(self._method_param_overrides),
             "runtime_warnings": list(self._runtime_warnings),
+            "no_prior_qc_policy": no_prior_policy,
         }
 
         try:
@@ -5229,6 +5314,10 @@ class GPRGuiQt(QMainWindow):
             "last_run_summary": dict(self._last_run_summary or {}),
             "method_param_overrides": dict(self._method_param_overrides),
             "runtime_warnings": list(self._runtime_warnings),
+            "no_prior_qc_policy": self._build_no_prior_qc_policy(
+                metrics=self._last_quality_metrics,
+                airborne_qc=self._compute_airborne_qc_metrics(),
+            ),
         }
 
         with open(json_path, "w", encoding="utf-8") as f:
@@ -6530,6 +6619,11 @@ class GPRGuiQt(QMainWindow):
         """设置质量指标"""
         self._last_quality_metrics = metrics
         airborne_qc = self._compute_airborne_qc_metrics()
+        no_prior_policy = self._build_no_prior_qc_policy(
+            metrics=metrics,
+            airborne_qc=airborne_qc,
+        )
+        self._last_no_prior_qc_policy = no_prior_policy
         if metrics is None:
             self.quality_focus_label.setText("focus_ratio: --")
             self.quality_hot_label.setText("hot_pixels: --")
@@ -6600,6 +6694,71 @@ class GPRGuiQt(QMainWindow):
                 self.page_quality.set_airborne_trajectory_visualization(None)
                 self.page_quality.set_airborne_georeference_3d_visualization(None)
                 self.page_quality.set_airborne_anomaly_details("")
+
+        blocked_actions = ", ".join(no_prior_policy.get("blocked_actions", []))
+        self.no_prior_level_label.setText(
+            f"no_prior_level: {no_prior_policy.get('no_prior_level', '--')}"
+        )
+        self.no_prior_policy_label.setText(
+            "no_prior_policy: "
+            + str(no_prior_policy.get("recommended_initial_policy", "--"))
+        )
+        self.no_prior_blocked_label.setText(
+            "no_prior_blocked_actions: " + (blocked_actions or "--")
+        )
+
+    def _target_prior_available_for_no_prior(self) -> bool:
+        """判断当前数据是否带有可用目标先验。"""
+        header = self.header_info or {}
+        ground_truth = header.get("ground_truth")
+        if not isinstance(ground_truth, dict):
+            return False
+        if ground_truth.get("targets"):
+            return True
+        if ground_truth.get("analysis_roi"):
+            return True
+        if ground_truth.get("background_rois"):
+            return True
+        return False
+
+    def _roi_available_for_no_prior(self) -> bool:
+        """判断当前是否存在可用 ROI。"""
+        return self._manual_roi_values is not None
+
+    def _build_no_prior_qc_policy(
+        self,
+        *,
+        metrics: dict | None = None,
+        airborne_qc: dict | None = None,
+    ) -> dict:
+        """构建无先验质控策略（UI/导出使用，不触发算法执行）。"""
+        if metrics is None:
+            metrics = self._last_quality_metrics
+        if airborne_qc is None:
+            airborne_qc = self._compute_airborne_qc_metrics()
+
+        target_prior_available = self._target_prior_available_for_no_prior()
+        roi_available = self._roi_available_for_no_prior()
+        metric_alerts = None
+        if metrics:
+            metric_alerts = {
+                key: self._is_metric_alert(key, float(metrics.get(key, 0.0)))
+                for key in ["focus_ratio", "hot_pixels", "spikiness", "time_ms"]
+            }
+        level = derive_no_prior_level(
+            quality_metrics=metrics,
+            metric_alerts=metric_alerts,
+            airborne_qc=airborne_qc,
+            runtime_warnings=self._runtime_warnings,
+            target_prior_available=target_prior_available,
+            roi_available=roi_available,
+        )
+        policy = build_no_prior_qc_policy(
+            no_prior_level=level,
+            target_prior_available=target_prior_available,
+            roi_available=roi_available,
+        )
+        return policy_to_dict(policy)
 
     def _compute_airborne_qc_metrics(self) -> dict | None:
         """基于当前每道元数据计算第一批航空 QC 指标。"""
@@ -6724,6 +6883,10 @@ class GPRGuiQt(QMainWindow):
             "notes": notes or [],
             "warnings": warnings or [],
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "no_prior_qc_policy": self._build_no_prior_qc_policy(
+                metrics=self._last_quality_metrics,
+                airborne_qc=self._compute_airborne_qc_metrics(),
+            ),
         }
         if workflow_summary:
             self._last_run_summary["workflow_summary"] = workflow_summary
