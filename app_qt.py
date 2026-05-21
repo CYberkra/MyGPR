@@ -933,6 +933,9 @@ class GPRGuiQt(QMainWindow):
 
         # ===== 工作台（总控中心 - 独立页面）=====
         self.page_workbench = WorkbenchPage(self, self.shared_data)
+        self.page_workbench.set_no_prior_guard_callback(
+            self._enforce_workbench_no_prior_action_guard
+        )
         # 添加到 _content_stack，作为最后一个页面
         self._content_stack.addWidget(self.page_workbench)
 
@@ -6929,6 +6932,20 @@ class GPRGuiQt(QMainWindow):
                 override_used=False,
             )
         return True
+
+    def _enforce_workbench_no_prior_action_guard(self, action_id: str) -> bool:
+        """Workbench 侧 no-prior guard 入口，复用主界面 guard 逻辑。"""
+        title_map = {
+            "workflow_run": "Workbench 无先验流程防护",
+            "AutoTune": "Workbench 无先验 AutoTune 防护",
+            "preset_recommendation": "Workbench 无先验预设防护",
+        }
+        dialog_title = title_map.get(action_id, "Workbench 无先验防护")
+        return self._enforce_no_prior_action_guard(
+            action_id,
+            dialog_title=dialog_title,
+            allow_override=True,
+        )
 
     def _classify_method_guard_action(
         self,

@@ -9,6 +9,7 @@ import logging
 import time
 import numpy as np
 from datetime import datetime
+from typing import Callable
 from PyQt6.QtCore import Qt, QObject, QThread, pyqtSignal
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
@@ -137,6 +138,7 @@ class WorkbenchPage(QWidget):
         super().__init__(parent)
         self.parent_window = parent
         self.data_state = data_state
+        self.no_prior_guard_callback: Callable[[str], bool] | None = None
 
         # 数据状态
         self.raw_data = None  # 原始数据
@@ -186,6 +188,47 @@ class WorkbenchPage(QWidget):
 
         if self.data_state is not None:
             self.sync_from_shared_state({"reason": "init"})
+
+    def set_no_prior_guard_callback(
+        self, callback: Callable[[str], bool] | None
+    ) -> None:
+        """注入 no-prior guard 回调。"""
+        self.no_prior_guard_callback = callback
+
+    def _guard_workbench_action(self, action_id: str, title: str) -> bool:
+        """在 Workbench 侧请求 no-prior guard 判定。"""
+        callback = self.no_prior_guard_callback
+        if callable(callback):
+            try:
+                return bool(callback(action_id))
+            except Exception as exc:  # pragma: no cover - defensive path
+                self._log(f"无先验防护回调异常: {exc}", "WARN")
+                QMessageBox.warning(
+                    self,
+                    title,
+                    "无先验防护回调异常，已阻断当前操作。\n请先返回主界面进行人工复核。",
+                )
+                return False
+
+        choice = QMessageBox.question(
+            self,
+            title,
+            (
+                "未接入无先验防护回调，Workbench 无法确认当前流程是否符合高风险防护策略。\n"
+                "为避免绕过防护，默认建议取消。\n\n是否仍继续执行模板？"
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        allowed = choice == QMessageBox.StandardButton.Yes
+        level = "WARN" if allowed else "INFO"
+        self._log(
+            "Workbench 未接入 no-prior guard 回调，模板执行{}".format(
+                "由用户确认继续" if allowed else "已取消"
+            ),
+            level,
+        )
+        return allowed
 
     def setup_ui(self):
         self.setObjectName("workbenchRoot")
@@ -686,6 +729,12 @@ class WorkbenchPage(QWidget):
         # 检查是否加载了数据
         if self.raw_data is None:
             self._log("未加载数据，请先导入数据", "ERROR")
+            return
+
+        if not self._guard_workbench_action(
+            "workflow_run", "无先验流程执行防护"
+        ):
+            self._log(f"模板执行已被防护策略阻断: {template_name}", "WARN")
             return
 
         # 获取模板

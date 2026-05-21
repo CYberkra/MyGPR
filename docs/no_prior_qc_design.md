@@ -106,4 +106,15 @@ Events are included in diagnostics, report runtime state, quality snapshot JSON,
 ### Current limitation
 
 Guardrails are wired to confirmed main-window action handlers (`app_qt.py`).  
-If future code introduces new action entry points outside these handlers, they need explicit guard wiring.
+If future code introduces new action entry points outside these handlers, they still need explicit guard wiring.
+
+## NP-006 Workbench Legacy Guard Wrapper
+
+NP-006 adds a minimal Workbench callback wrapper to prevent legacy template execution from silently bypassing no-prior guardrails.
+
+- `app_qt.py` now injects a Workbench callback (`_enforce_workbench_no_prior_action_guard`) that reuses `_enforce_no_prior_action_guard`.
+- `ui/gui_workbench.py` calls this callback before `_on_template_execute(...)` with action id `workflow_run`.
+- if callback denies action, template execution is blocked.
+- if callback is missing, Workbench shows a warning/confirmation dialog before execution to avoid silent bypass.
+
+This keeps main-window no-prior policy as the source of truth and avoids duplicating policy logic in Workbench.

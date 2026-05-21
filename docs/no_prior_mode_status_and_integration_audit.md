@@ -44,6 +44,11 @@ This implementation is grounded in the accepted Evidence chain below (MyGPR-Evid
    - Proves: core `app_qt.py` action paths enforce block/confirm policy in high-risk no-prior conditions.
    - Does not prove: all legacy/parallel UI execution entries are guarded.
 
+7. NP-006 (MyGPR source integration)
+   - Role: Workbench legacy template execution guard callback wrapper.
+   - Proves: Workbench template execution now reuses main-window no-prior guard source of truth.
+   - Does not prove: every Workbench legacy method path is fully guarded.
+
 ## 3. Current MyGPR Implementation
 
 ### Policy model
@@ -69,6 +74,16 @@ This implementation is grounded in the accepted Evidence chain below (MyGPR-Evid
   - diagnostics copy payload
   - action guards on main AutoTune/recommendation/method/pipeline entry points
   - guard event list tracking (`_no_prior_guard_events`)
+
+### Workbench legacy integration points
+
+- `ui/gui_workbench.py`
+  - template execution (`_on_template_execute`) now calls `_guard_workbench_action("workflow_run", ...)`
+  - `set_no_prior_guard_callback(...)` allows Workbench to reuse main guard decision
+  - callback missing path now shows explicit warning/confirmation instead of silent execution
+- `app_qt.py`
+  - injects Workbench callback via `_enforce_workbench_no_prior_action_guard(...)`
+  - callback reuses `_enforce_no_prior_action_guard(...)` and main event logging path
 
 ### Tests
 
@@ -112,7 +127,7 @@ This implementation is grounded in the accepted Evidence chain below (MyGPR-Evid
 
 ## 6. Known Gaps
 
-1. `ui/gui_workbench.py` template execution path may still bypass `app_qt.py` no-prior guardrails.
+1. Workbench template path is guarded, but legacy Workbench single-method execution/preview paths still need a complete per-action guard audit.
 2. Guard thresholds are still heuristic (not yet externally calibrated/validated).
 3. No dedicated full manual UI smoke evidence package yet.
 4. No user study or expert-evaluation protocol yet.
@@ -122,7 +137,7 @@ This implementation is grounded in the accepted Evidence chain below (MyGPR-Evid
 
 ## 7. Recommended Next Tasks (Ranked)
 
-1. **NP-006 / NP-005B**: Workbench legacy guard audit and minimal wrapper integration so template execution paths share no-prior guardrails.
+1. **NP-006B**: Workbench single-method execution guard audit and minimal routing so non-template legacy paths share no-prior guard semantics.
 2. **UI-SMOKE-001**: Manual no-prior UI smoke checklist and result capture.
 3. **EV-001**: Evidence repository cleanup plan for broad historical noise artifacts.
 4. **AT-017**: scoring/risk-penalty what-if diagnostics (separate from no-prior guardrail semantics).
@@ -141,4 +156,3 @@ Suggested conservative statement:
 - 以下显示增强仅用于可视化，不代表幅值保真或目标识别。
 - 未提供目标区域或先验信息，因此本结果不构成地下目标判断。
 - 建议由有经验人员复核后再尝试任何参数化处理。
-
