@@ -10,6 +10,10 @@ from core.gprmax_campaign.pairing import (
     generate_target_response,
     validate_paired_outputs,
 )
+from core.gprmax_campaign.preview import (
+    PairPreviewReportResult,
+    generate_pair_preview_report,
+)
 from core.gprmax_campaign.schema import (
     Campaign,
     CampaignScene,
@@ -40,8 +44,10 @@ __all__ = [
     "PairedOutputSpec",
     "PairedOutputValidationResult",
     "TargetResponseResult",
+    "PairPreviewReportResult",
     "validate_paired_outputs",
     "generate_target_response",
+    "generate_pair_preview_report",
     "run_gprmax_task",
     "validate_campaign",
 ]

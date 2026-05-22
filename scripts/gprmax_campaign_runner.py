@@ -17,6 +17,7 @@ if str(ROOT) not in sys.path:
 from core.gprmax_campaign import (
     GprMaxTaskSpec,
     PairedOutputSpec,
+    generate_pair_preview_report,
     generate_target_response,
     load_campaign_yaml,
     run_gprmax_task,
@@ -26,7 +27,7 @@ from core.gprmax_campaign import (
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="gprMax campaign backend runner (GX-RUN-001/002/003).",
+        description="gprMax campaign backend runner (GX-RUN-001/002/003/004).",
     )
     parser.add_argument("--campaign", help="Path to campaign YAML file.")
     parser.add_argument(
@@ -56,6 +57,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Validate raw/background outputs and generate target_response.",
     )
+    parser.add_argument(
+        "--preview-pair",
+        action="store_true",
+        help="Generate preview PNGs and lightweight paired report stubs.",
+    )
     parser.add_argument("--campaign-id", help="Campaign id for --pair-outputs mode.")
     parser.add_argument("--scene-id", help="Scene id for --pair-outputs mode.")
     parser.add_argument("--raw-output", help="Raw output path for --pair-outputs mode.")
@@ -73,6 +79,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--target-roi",
         help="Optional target ROI path/label for --pair-outputs metadata.",
+    )
+    parser.add_argument(
+        "--target-response",
+        help="Optional existing target_response input path for --preview-pair mode.",
     )
     parser.add_argument(
         "--json",
@@ -102,6 +112,8 @@ def _print_summary(result) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
+    if args.preview_pair:
+        return _run_preview_pair_mode(args)
     if args.pair_outputs:
         return _run_pair_outputs_mode(args)
     if args.dry_run or args.run_scene:
@@ -219,6 +231,48 @@ def _run_pair_outputs_mode(args: argparse.Namespace) -> int:
         for issue in result.issues:
             print(f"[{issue.get('level')}] {issue.get('code')}: {issue.get('message')}")
 
+    if args.json_path:
+        _write_json(args.json_path, result.to_dict())
+    return 0 if result.status == "success" else 1
+
+
+def _run_preview_pair_mode(args: argparse.Namespace) -> int:
+    missing = []
+    for key in ["campaign_id", "scene_id", "raw_output", "background_output", "output_dir"]:
+        if not getattr(args, key):
+            missing.append(f"--{key.replace('_', '-')}")
+    if missing:
+        print("ERROR: --preview-pair mode missing required args: " + ", ".join(missing))
+        return 2
+
+    result = generate_pair_preview_report(
+        campaign_id=str(args.campaign_id),
+        scene_id=str(args.scene_id),
+        raw_output_path=Path(args.raw_output),
+        background_output_path=Path(args.background_output),
+        target_response_path=Path(args.target_response) if args.target_response else None,
+        output_dir=Path(args.output_dir),
+        source_format=args.source_format,
+        target_roi=args.target_roi,
+    )
+    print(f"campaign_id: {result.campaign_id}")
+    print(f"scene_id: {result.scene_id}")
+    print(f"status: {result.status}")
+    if result.raw_preview_path:
+        print(f"raw_preview_path: {result.raw_preview_path}")
+    if result.background_preview_path:
+        print(f"background_preview_path: {result.background_preview_path}")
+    if result.target_response_preview_path:
+        print(f"target_response_preview_path: {result.target_response_preview_path}")
+    if result.paired_preview_panel_path:
+        print(f"paired_preview_panel_path: {result.paired_preview_panel_path}")
+    if result.report_md_path:
+        print(f"report_md_path: {result.report_md_path}")
+    if result.summary_json_path:
+        print(f"summary_json_path: {result.summary_json_path}")
+    if result.status != "success":
+        for issue in result.issues:
+            print(f"[{issue.get('level')}] {issue.get('code')}: {issue.get('message')}")
     if args.json_path:
         _write_json(args.json_path, result.to_dict())
     return 0 if result.status == "success" else 1
