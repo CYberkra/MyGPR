@@ -3,7 +3,7 @@
 Status: design specification only  
 Scope: MyGPR source repository only  
 Target UI area: optional `仿真与验证` control page  
-Implementation status: GX-RUN-001 implemented (backend dry-run only)  
+Implementation status: GX-RUN-001 and GX-RUN-002 implemented (backend-only)  
 Evidence repository: separate; not modified by this specification
 
 ## 1. Executive Summary
@@ -529,7 +529,9 @@ As of the current source baseline:
 
 - `core/gprmax_campaign/` backend loader/validator is implemented for dry-run.
 - `scripts/gprmax_campaign_runner.py` dry-run CLI is implemented.
-- gprMax execution mode is not implemented yet in GX-RUN-001.
+- single-scene local execution wrapper is implemented in GX-RUN-002.
+- only single-task execution is implemented; batch scheduling is not implemented.
+- paired output validation and target_response generation are not implemented.
 - `仿真与验证` page is not implemented yet.
 - No new gprMax benchmark is created by this document.
 - MyGPR-Evidence is not modified by this document.
@@ -540,8 +542,14 @@ Current dry-run command:
 python scripts/gprmax_campaign_runner.py --campaign path/to/campaign.yaml --dry-run
 ```
 
+Current single-task execution command:
+
+```text
+python scripts/gprmax_campaign_runner.py --campaign path/to/campaign.yaml --run-scene <scene_id> --variant raw_with_target
+```
+
 The next recommended task is:
 
 ```text
-GX-RUN-002: single local gprMax task execution wrapper (backend-only)
+GX-RUN-003: paired raw/background output validation and target_response generation
 ```

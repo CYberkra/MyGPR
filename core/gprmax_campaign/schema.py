@@ -101,3 +101,57 @@ class CampaignValidationResult:
             "scenes": [scene.to_dict() for scene in self.scenes],
             "issues": [issue.to_dict() for issue in self.issues],
         }
+
+
+@dataclass(frozen=True)
+class GprMaxTaskSpec:
+    """Execution specification for one local gprMax task."""
+
+    campaign_id: str
+    scene_id: str
+    variant: str
+    model_path: Path
+    output_dir: Path
+    gprmax_executable: str
+    timeout_seconds: float | None = None
+    extra_args: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class GprMaxRunResult:
+    """Execution result for one local gprMax task."""
+
+    campaign_id: str
+    scene_id: str
+    variant: str
+    model_path: Path
+    output_dir: Path
+    command: list[str]
+    status: str
+    return_code: int | None
+    started_at: str
+    ended_at: str
+    runtime_seconds: float
+    stdout_path: Path
+    stderr_path: Path
+    manifest_path: Path
+    error_message: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "campaign_id": self.campaign_id,
+            "scene_id": self.scene_id,
+            "variant": self.variant,
+            "model_path": str(self.model_path),
+            "output_dir": str(self.output_dir),
+            "command": list(self.command),
+            "status": self.status,
+            "return_code": self.return_code,
+            "started_at": self.started_at,
+            "ended_at": self.ended_at,
+            "runtime_seconds": self.runtime_seconds,
+            "stdout_path": str(self.stdout_path),
+            "stderr_path": str(self.stderr_path),
+            "manifest_path": str(self.manifest_path),
+            "error_message": self.error_message,
+        }
