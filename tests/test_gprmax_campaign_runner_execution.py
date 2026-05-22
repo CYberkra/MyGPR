@@ -38,6 +38,9 @@ def test_runner_success_writes_logs_and_manifest(tmp_path):
     assert result.manifest_path.exists()
     payload = json.loads(result.manifest_path.read_text(encoding="utf-8"))
     assert payload["status"] == "success"
+    assert "manifest_path" in payload
+    assert str(payload["manifest_path"]).endswith("run_manifest.json")
+    assert payload["manifest_path"] == result.to_dict()["manifest_path"]
 
 
 def test_runner_failure_return_code_recorded(tmp_path):

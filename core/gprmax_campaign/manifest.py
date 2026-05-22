@@ -33,6 +33,7 @@ def build_run_manifest_payload(
         "runtime_seconds": result.runtime_seconds,
         "stdout_path": str(result.stdout_path),
         "stderr_path": str(result.stderr_path),
+        "manifest_path": str(result.manifest_path),
         "timeout_seconds": task.timeout_seconds,
         "error_message": result.error_message,
         "host": {
