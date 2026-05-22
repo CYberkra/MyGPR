@@ -108,6 +108,29 @@ def test_npy_pair_works(tmp_path):
     np.testing.assert_allclose(arr, raw - bg)
 
 
+def test_single_column_csv_pair_preserves_2d_shape(tmp_path):
+    raw = np.array([[1.0], [2.0], [3.0]], dtype=np.float64)
+    bg = np.array([[0.25], [0.5], [0.75]], dtype=np.float64)
+    raw_path = tmp_path / "raw_single_column.csv"
+    bg_path = tmp_path / "background_single_column.csv"
+    np.savetxt(raw_path, raw, delimiter=",", fmt="%.10g")
+    np.savetxt(bg_path, bg, delimiter=",", fmt="%.10g")
+    spec = PairedOutputSpec(
+        campaign_id="GX-003",
+        scene_id="scene_single_column_csv",
+        raw_output_path=raw_path,
+        background_output_path=bg_path,
+        output_dir=tmp_path / "pair_single_column_csv",
+        source_format="csv",
+    )
+    result = generate_target_response(spec)
+    assert result.status == "success"
+    metrics = json.loads(result.metrics_path.read_text(encoding="utf-8"))
+    assert metrics["target_response_shape"] == [3, 1]
+    generated = np.load(result.target_response_npy_path)
+    np.testing.assert_allclose(generated, raw - bg)
+
+
 def test_cli_pair_outputs_valid(tmp_path):
     json_path = tmp_path / "pair_valid.json"
     out_dir = tmp_path / "pair_valid_out"

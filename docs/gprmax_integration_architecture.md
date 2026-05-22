@@ -552,6 +552,13 @@ Current single-task execution command:
 python scripts/gprmax_campaign_runner.py --campaign path/to/campaign.yaml --run-scene <scene_id> --variant raw_with_target
 ```
 
+For B-scan sweeps, use `--num-runs N`; the runner forwards this to gprMax as
+`-n N` and still records the complete command in `run_manifest.json`.
+
+```text
+python scripts/gprmax_campaign_runner.py --campaign path/to/campaign.yaml --run-scene <scene_id> --variant raw_with_target --num-runs 60
+```
+
 Current paired validation and target_response generation command:
 
 ```text

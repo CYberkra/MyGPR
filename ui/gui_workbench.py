@@ -52,6 +52,16 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 logger = logging.getLogger(__name__)
 
 
+def format_workbench_wiggle_sampling_notice(
+    *, n_traces: int, shown_traces: int, n_samples: int
+) -> str:
+    """Build the compact Workbench wiggle sampling status text."""
+    return (
+        f"摆动图抽样显示: {shown_traces}/{n_traces} 道，仅用于显示，不改变数据"
+        f" | 采样: {n_samples}"
+    )
+
+
 def classify_workbench_method_action(
     method_id: str, params: dict | None = None, trace_count: int = 0
 ) -> str | None:
@@ -396,7 +406,7 @@ class WorkbenchPage(QWidget):
 
         self.view_combo = ComboBox()
         self.view_combo.setFixedHeight(24)
-        self.view_combo.setFixedWidth(190)
+        self.view_combo.setMinimumWidth(190)
         self.view_combo.addItem("原始数据")
         self.view_combo.currentIndexChanged.connect(self._on_view_selection_changed)
         first_row_layout.addWidget(self.view_combo)
@@ -424,7 +434,7 @@ class WorkbenchPage(QWidget):
 
         self.compare_combo = ComboBox()
         self.compare_combo.setFixedHeight(24)
-        self.compare_combo.setFixedWidth(170)
+        self.compare_combo.setMinimumWidth(170)
         self.compare_combo.addItem("原始数据")
         self.compare_combo.currentIndexChanged.connect(
             self._on_compare_selection_changed
@@ -2055,7 +2065,11 @@ class WorkbenchPage(QWidget):
         self.ax.grid(True, alpha=0.2)
         self._safe_remove_colorbar()
         self.preview_info.setText(
-            f"摆动图 | 道数: {n_traces} | 显示: {len(trace_indices)} | 采样: {n_samples}"
+            format_workbench_wiggle_sampling_notice(
+                n_traces=n_traces,
+                shown_traces=len(trace_indices),
+                n_samples=n_samples,
+            )
         )
 
     def _plot_comparison(self):

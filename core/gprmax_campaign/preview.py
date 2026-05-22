@@ -110,7 +110,7 @@ def generate_pair_preview_report(
 
     metrics: dict[str, Any] | None = None
     if target_response_path:
-        target_arr = _load_array(Path(target_response_path), source_format)
+        target_arr = _load_array(Path(target_response_path), "auto")
     else:
         tr_result = generate_target_response(pair_spec)
         if tr_result.status != "success" or tr_result.target_response_npy_path is None:
@@ -218,7 +218,7 @@ def _load_array(path: Path, source_format: str) -> np.ndarray:
     if fmt == "npy":
         arr = np.load(path)
     else:
-        arr = np.genfromtxt(path, delimiter=",")
+        arr = np.genfromtxt(path, delimiter=",", ndmin=2)
     return np.asarray(arr, dtype=np.float64)
 
 

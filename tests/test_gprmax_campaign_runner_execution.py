@@ -158,3 +158,65 @@ def test_cli_run_valid_scene_with_fake_executable(tmp_path):
     assert proc.returncode == 0
     payload = json.loads(result_json.read_text(encoding="utf-8"))
     assert payload["status"] == "success"
+
+
+def test_cli_num_runs_forwards_gprmax_n_argument(tmp_path):
+    campaign_path = tmp_path / "campaign_exec.yaml"
+    output_root = tmp_path / "campaign_output"
+    campaign_path.write_text(
+        "\n".join(
+            [
+                "campaign_id: GX-RUN-002_cli_num_runs",
+                f"output_root: {output_root.as_posix()}",
+                f"gprmax_executable: {sys.executable}",
+                "scenes:",
+                "  - scene_id: scene_valid_01",
+                f"    raw_model: {str((FIXTURE_DIR / 'fake_gprmax_success.py').resolve()).replace('\\', '/')}",
+                f"    background_model: {str((FIXTURE_DIR / 'fake_gprmax_fail.py').resolve()).replace('\\', '/')}",
+                f"    materials: {str((FIXTURE_DIR / 'models' / 'materials.txt').resolve()).replace('\\', '/')}",
+                f"    target_roi: {str((FIXTURE_DIR / 'annotations' / 'target_roi.json').resolve()).replace('\\', '/')}",
+                "    expected_outputs:",
+                "      - raw_with_target",
+                "      - background_only",
+                "      - target_response",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    result_json = tmp_path / "result.json"
+    cmd = [
+        sys.executable,
+        str(RUNNER),
+        "--campaign",
+        str(campaign_path),
+        "--run-scene",
+        "scene_valid_01",
+        "--variant",
+        "raw_with_target",
+        "--num-runs",
+        "3",
+        "--json",
+        str(result_json),
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    assert proc.returncode == 0
+    payload = json.loads(result_json.read_text(encoding="utf-8"))
+    assert payload["command"][-2:] == ["-n", "3"]
+
+
+def test_cli_rejects_non_positive_num_runs(tmp_path):
+    cmd = [
+        sys.executable,
+        str(RUNNER),
+        "--campaign",
+        str(MISSING_EXPECTED),
+        "--run-scene",
+        "scene_missing_expected_outputs",
+        "--variant",
+        "raw_with_target",
+        "--num-runs",
+        "0",
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    assert proc.returncode == 2
+    assert "positive integer" in proc.stderr

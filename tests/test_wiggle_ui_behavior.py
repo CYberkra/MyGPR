@@ -10,6 +10,7 @@ import pytest
 from PyQt6.QtWidgets import QApplication
 
 from ui.gui_advanced_settings import AdvancedSettingsPage
+from ui.gui_workbench import format_workbench_wiggle_sampling_notice
 from app_qt import _load_app_settings_dict, _save_app_settings_dict
 
 
@@ -56,3 +57,14 @@ def test_wiggle_sampling_summary_for_line9_traces():
     assert summary["step"] == 30
     assert summary["shown"] == 80
     assert summary["total"] == 2378
+
+
+def test_workbench_wiggle_sampling_notice_is_display_only():
+    notice = format_workbench_wiggle_sampling_notice(
+        n_traces=2378,
+        shown_traces=80,
+        n_samples=501,
+    )
+    assert "80/2378" in notice
+    assert "仅用于显示" in notice
+    assert "不改变数据" in notice

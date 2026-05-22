@@ -47,6 +47,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Optional timeout seconds for process execution.",
     )
     parser.add_argument(
+        "--num-runs",
+        type=_positive_int,
+        help="Optional gprMax run count forwarded as '-n N' for B-scan sweeps.",
+    )
+    parser.add_argument(
         "--extra-arg",
         action="append",
         default=[],
@@ -62,23 +67,23 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Generate preview PNGs and lightweight paired report stubs.",
     )
-    parser.add_argument("--campaign-id", help="Campaign id for --pair-outputs mode.")
-    parser.add_argument("--scene-id", help="Scene id for --pair-outputs mode.")
-    parser.add_argument("--raw-output", help="Raw output path for --pair-outputs mode.")
+    parser.add_argument("--campaign-id", help="Campaign id for pair/preview modes.")
+    parser.add_argument("--scene-id", help="Scene id for pair/preview modes.")
+    parser.add_argument("--raw-output", help="Raw output path for pair/preview modes.")
     parser.add_argument(
         "--background-output",
-        help="Background output path for --pair-outputs mode.",
+        help="Background output path for pair/preview modes.",
     )
     parser.add_argument("--output-dir", help="Output directory for generated artifacts.")
     parser.add_argument(
         "--source-format",
         choices=["auto", "csv", "npy"],
         default="auto",
-        help="Input source format for --pair-outputs.",
+        help="Input source format for pair/preview modes.",
     )
     parser.add_argument(
         "--target-roi",
-        help="Optional target ROI path/label for --pair-outputs metadata.",
+        help="Optional target ROI path/label for pair/preview metadata.",
     )
     parser.add_argument(
         "--target-response",
@@ -110,6 +115,24 @@ def _print_summary(result) -> None:
             print(f"      [{issue.level}] {issue.code}: {issue.message}")
 
 
+def _positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a positive integer") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
+def _build_run_extra_args(args: argparse.Namespace) -> list[str]:
+    extra_args: list[str] = []
+    if args.num_runs is not None:
+        extra_args.extend(["-n", str(args.num_runs)])
+    extra_args.extend(str(item) for item in (args.extra_arg or []))
+    return extra_args
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     if args.preview_pair:
@@ -118,7 +141,7 @@ def main(argv: list[str] | None = None) -> int:
         return _run_pair_outputs_mode(args)
     if args.dry_run or args.run_scene:
         return _run_campaign_mode(args)
-    print("ERROR: specify one mode: --dry-run, --run-scene, or --pair-outputs.")
+    print("ERROR: specify one mode: --dry-run, --run-scene, --pair-outputs, or --preview-pair.")
     return 2
 
 
@@ -173,7 +196,7 @@ def _run_campaign_mode(args: argparse.Namespace) -> int:
             output_dir=output_dir,
             gprmax_executable=campaign.gprmax_executable,
             timeout_seconds=args.timeout_seconds,
-            extra_args=list(args.extra_arg or []),
+            extra_args=_build_run_extra_args(args),
         )
         run_result = run_gprmax_task(task)
         print(f"campaign_id: {run_result.campaign_id}")

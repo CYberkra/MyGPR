@@ -256,7 +256,7 @@ def _load_numeric_array(
         if fmt == "npy":
             arr = np.load(path)
         else:
-            arr = np.genfromtxt(path, delimiter=",")
+            arr = np.genfromtxt(path, delimiter=",", ndmin=2)
     except Exception as exc:
         issues.append(
             _issue(

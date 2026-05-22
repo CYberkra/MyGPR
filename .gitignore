@@ -8,3 +8,11 @@ PythonModule/__pycache__/
 output/
 favorites/
 workflow_templates/
+
+# gprMax simulation outputs generated during local benchmark runs.
+experiments/gprmax/**/*.out
+experiments/gprmax/**/*.h5
+experiments/gprmax/**/*.vti
+experiments/gprmax/**/*.vtk
+experiments/gprmax/**/converted/
+experiments/gprmax/**/paired_outputs/

@@ -9,6 +9,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import numpy as np
+
 from core.gprmax_campaign.preview import generate_pair_preview_report
 
 
@@ -53,6 +55,26 @@ def test_constant_arrays_do_not_crash_preview(tmp_path):
     )
     assert result.status == "success"
     assert result.paired_preview_panel_path and result.paired_preview_panel_path.exists()
+
+
+def test_preview_accepts_existing_npy_target_with_csv_sources(tmp_path):
+    out_dir = tmp_path / "preview_mixed_target"
+    target_response = tmp_path / "target_response.npy"
+
+    raw = np.genfromtxt(FIXTURE_DIR / "raw_valid.csv", delimiter=",")
+    bg = np.genfromtxt(FIXTURE_DIR / "background_valid.csv", delimiter=",")
+    np.save(target_response, raw - bg)
+    result = generate_pair_preview_report(
+        campaign_id="GX-004",
+        scene_id="scene_mixed_target",
+        raw_output_path=FIXTURE_DIR / "raw_valid.csv",
+        background_output_path=FIXTURE_DIR / "background_valid.csv",
+        target_response_path=target_response,
+        output_dir=out_dir,
+        source_format="csv",
+    )
+    assert result.status == "success"
+    assert result.target_response_preview_path and result.target_response_preview_path.exists()
 
 
 def test_cli_preview_pair_valid(tmp_path):
