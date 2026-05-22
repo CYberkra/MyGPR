@@ -3,7 +3,7 @@
 Status: design specification only  
 Scope: MyGPR source repository only  
 Target UI area: optional `仿真与验证` control page  
-Implementation status: not implemented  
+Implementation status: GX-RUN-001 implemented (backend dry-run only)  
 Evidence repository: separate; not modified by this specification
 
 ## 1. Executive Summary
@@ -522,16 +522,23 @@ This document is considered sufficient if:
 
 ## 13. Current Status
 
-As of this specification:
+As of the current source baseline:
 
-- gprMax campaign manager is not implemented.
-- `仿真与验证` page is not implemented.
-- `core/gprmax_campaign/` is not implemented.
+- `core/gprmax_campaign/` backend loader/validator is implemented for dry-run.
+- `scripts/gprmax_campaign_runner.py` dry-run CLI is implemented.
+- gprMax execution mode is not implemented yet in GX-RUN-001.
+- `仿真与验证` page is not implemented yet.
 - No new gprMax benchmark is created by this document.
 - MyGPR-Evidence is not modified by this document.
+
+Current dry-run command:
+
+```text
+python scripts/gprmax_campaign_runner.py --campaign path/to/campaign.yaml --dry-run
+```
 
 The next recommended task is:
 
 ```text
-GX-RUN-001: implement backend campaign loader and dry-run validator
+GX-RUN-002: single local gprMax task execution wrapper (backend-only)
 ```

@@ -1,0 +1,2 @@
+#simple materials fixture
+soil 6 0 1 0

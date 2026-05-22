@@ -1,0 +1,17 @@
+campaign_id: GX-RUN-001_valid
+output_root: output/gprmax_campaign_valid
+gprmax_executable: gprMax
+scenes:
+  - scene_id: scene_valid_01
+    description: valid paired scene
+    raw_model: models/raw_with_target.in
+    background_model: models/background_only.in
+    materials: models/materials.txt
+    target_roi: annotations/target_roi.json
+    expected_outputs:
+      - raw_with_target
+      - background_only
+      - target_response
+    tags:
+      - paired_benchmark
+      - dry_run
