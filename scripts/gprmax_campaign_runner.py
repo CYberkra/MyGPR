@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Backend-only gprMax campaign runner (dry-run + single task execution)."""
+"""Backend-only gprMax campaign runner (dry-run/scene-run/pair-outputs)."""
 
 from __future__ import annotations
 
@@ -16,6 +16,8 @@ if str(ROOT) not in sys.path:
 
 from core.gprmax_campaign import (
     GprMaxTaskSpec,
+    PairedOutputSpec,
+    generate_target_response,
     load_campaign_yaml,
     run_gprmax_task,
     validate_campaign,
@@ -24,22 +26,15 @@ from core.gprmax_campaign import (
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="gprMax campaign backend runner (GX-RUN-001/002).",
+        description="gprMax campaign backend runner (GX-RUN-001/002/003).",
     )
-    parser.add_argument(
-        "--campaign",
-        required=True,
-        help="Path to campaign YAML file.",
-    )
+    parser.add_argument("--campaign", help="Path to campaign YAML file.")
     parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Validate campaign only; do not execute gprMax.",
     )
-    parser.add_argument(
-        "--run-scene",
-        help="Run one scene_id after validation.",
-    )
+    parser.add_argument("--run-scene", help="Run one scene_id after validation.")
     parser.add_argument(
         "--variant",
         choices=["raw_with_target", "background_only"],
@@ -57,9 +52,32 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Extra CLI argument forwarded to gprMax executable (repeatable).",
     )
     parser.add_argument(
+        "--pair-outputs",
+        action="store_true",
+        help="Validate raw/background outputs and generate target_response.",
+    )
+    parser.add_argument("--campaign-id", help="Campaign id for --pair-outputs mode.")
+    parser.add_argument("--scene-id", help="Scene id for --pair-outputs mode.")
+    parser.add_argument("--raw-output", help="Raw output path for --pair-outputs mode.")
+    parser.add_argument(
+        "--background-output",
+        help="Background output path for --pair-outputs mode.",
+    )
+    parser.add_argument("--output-dir", help="Output directory for generated artifacts.")
+    parser.add_argument(
+        "--source-format",
+        choices=["auto", "csv", "npy"],
+        default="auto",
+        help="Input source format for --pair-outputs.",
+    )
+    parser.add_argument(
+        "--target-roi",
+        help="Optional target ROI path/label for --pair-outputs metadata.",
+    )
+    parser.add_argument(
         "--json",
         dest="json_path",
-        help="Optional path to write dry-run JSON summary.",
+        help="Optional path to write mode result JSON summary.",
     )
     return parser.parse_args(argv)
 
@@ -84,6 +102,18 @@ def _print_summary(result) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
+    if args.pair_outputs:
+        return _run_pair_outputs_mode(args)
+    if args.dry_run or args.run_scene:
+        return _run_campaign_mode(args)
+    print("ERROR: specify one mode: --dry-run, --run-scene, or --pair-outputs.")
+    return 2
+
+
+def _run_campaign_mode(args: argparse.Namespace) -> int:
+    if not args.campaign:
+        print("ERROR: --campaign is required for --dry-run and --run-scene mode.")
+        return 2
     try:
         campaign = load_campaign_yaml(args.campaign)
         result = validate_campaign(campaign)
@@ -94,13 +124,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         _print_summary(result)
         if args.json_path:
-            output_path = Path(args.json_path).expanduser().resolve()
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_text(
-                json.dumps(result.to_dict(), ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-            print(f"json_report: {output_path}")
+            _write_json(args.json_path, result.to_dict())
         return 0
 
     if args.run_scene:
@@ -152,17 +176,59 @@ def main(argv: list[str] | None = None) -> int:
         if run_result.error_message:
             print(f"error_message: {run_result.error_message}")
         if args.json_path:
-            output_path = Path(args.json_path).expanduser().resolve()
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_text(
-                json.dumps(run_result.to_dict(), ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-            print(f"json_report: {output_path}")
+            _write_json(args.json_path, run_result.to_dict())
         return 0 if run_result.status == "success" else 1
 
-    print("ERROR: specify either --dry-run or --run-scene.")
+    print("ERROR: unsupported campaign mode combination.")
     return 2
+
+
+def _run_pair_outputs_mode(args: argparse.Namespace) -> int:
+    missing = []
+    for key in ["campaign_id", "scene_id", "raw_output", "background_output", "output_dir"]:
+        if not getattr(args, key):
+            missing.append(f"--{key.replace('_', '-')}")
+    if missing:
+        print("ERROR: --pair-outputs mode missing required args: " + ", ".join(missing))
+        return 2
+
+    spec = PairedOutputSpec(
+        campaign_id=str(args.campaign_id),
+        scene_id=str(args.scene_id),
+        raw_output_path=Path(args.raw_output),
+        background_output_path=Path(args.background_output),
+        output_dir=Path(args.output_dir),
+        target_roi=args.target_roi,
+        source_format=args.source_format,
+    )
+    result = generate_target_response(spec)
+    print(f"campaign_id: {result.campaign_id}")
+    print(f"scene_id: {result.scene_id}")
+    print(f"status: {result.status}")
+    print(f"validation_summary_path: {result.validation_summary_path}")
+    if result.status == "success":
+        print(f"target_response_npy_path: {result.target_response_npy_path}")
+        print(f"target_response_csv_path: {result.target_response_csv_path}")
+        print(f"metrics_path: {result.metrics_path}")
+        if result.metrics:
+            print(
+                "target_response_energy: "
+                f"{result.metrics.get('target_response_energy')}"
+            )
+    else:
+        for issue in result.issues:
+            print(f"[{issue.get('level')}] {issue.get('code')}: {issue.get('message')}")
+
+    if args.json_path:
+        _write_json(args.json_path, result.to_dict())
+    return 0 if result.status == "success" else 1
+
+
+def _write_json(path: str | Path, payload: dict) -> None:
+    output_path = Path(path).expanduser().resolve()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"json_report: {output_path}")
 
 
 def _find_scene_by_id(scenes, scene_id: str):
