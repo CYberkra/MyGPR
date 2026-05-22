@@ -533,6 +533,7 @@ As of the current source baseline:
 - paired output validation and target_response generation are implemented in GX-RUN-003 (backend-only).
 - supported pairing input formats are CSV and NPY only.
 - `.out` / `.h5` parsing is not implemented in GX-RUN-003.
+- paired validation status naming is `ready` / `invalid`.
 - only single-task execution is implemented; batch scheduling is not implemented.
 - `仿真与验证` page is not implemented yet.
 - No new gprMax benchmark is created by this document.

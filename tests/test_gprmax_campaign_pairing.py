@@ -39,7 +39,7 @@ def test_valid_csv_pair_generates_target_response(tmp_path):
     generated = np.load(result.target_response_npy_path)
     np.testing.assert_allclose(generated, raw - bg)
     summary = json.loads(result.validation_summary_path.read_text(encoding="utf-8"))
-    assert summary["status"] == "valid"
+    assert summary["status"] == "ready"
     metrics = json.loads(result.metrics_path.read_text(encoding="utf-8"))
     assert metrics["raw_shape"] == [3, 3]
     assert "target_response_energy" in metrics

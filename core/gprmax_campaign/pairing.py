@@ -86,7 +86,7 @@ class TargetResponseResult:
 def validate_paired_outputs(
     spec: PairedOutputSpec,
 ) -> tuple[PairedOutputValidationResult, np.ndarray | None, np.ndarray | None]:
-    """Validate one pair and return parsed arrays when valid."""
+    """Validate one pair and return parsed arrays when ready."""
     issues: list[dict[str, Any]] = []
     raw_path = Path(spec.raw_output_path).expanduser().resolve()
     background_path = Path(spec.background_output_path).expanduser().resolve()
@@ -178,7 +178,7 @@ def validate_paired_outputs(
             )
         )
 
-    status = "valid" if not issues else "invalid"
+    status = "ready" if not issues else "invalid"
     result = PairedOutputValidationResult(
         campaign_id=spec.campaign_id,
         scene_id=spec.scene_id,
@@ -187,11 +187,11 @@ def validate_paired_outputs(
         raw_shape=tuple(raw.shape) if raw.ndim == 2 else None,
         background_shape=tuple(background.shape) if background.ndim == 2 else None,
     )
-    return (result, raw if status == "valid" else None, background if status == "valid" else None)
+    return (result, raw if status == "ready" else None, background if status == "ready" else None)
 
 
 def generate_target_response(spec: PairedOutputSpec) -> TargetResponseResult:
-    """Validate pair and generate target_response artifacts when valid."""
+    """Validate pair and generate target_response artifacts when ready."""
     output_dir = Path(spec.output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     validation_summary_path = output_dir / "paired_validation_summary.json"
@@ -203,7 +203,7 @@ def generate_target_response(spec: PairedOutputSpec) -> TargetResponseResult:
     validation_summary_path.write_text(
         json.dumps(validation.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    if validation.status != "valid" or raw is None or background is None:
+    if validation.status != "ready" or raw is None or background is None:
         return TargetResponseResult(
             campaign_id=spec.campaign_id,
             scene_id=spec.scene_id,
