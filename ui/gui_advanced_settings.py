@@ -116,6 +116,9 @@ class AdvancedSettingsPage(QWidget):
         self.view_style_combo.currentIndexChanged.connect(
             self._refresh_compare_select_visibility
         )
+        self.view_style_combo.currentIndexChanged.connect(
+            self._on_view_style_changed
+        )
 
     def _build_mode_page(self):
         """构建显示模式页面。"""
@@ -546,6 +549,17 @@ class AdvancedSettingsPage(QWidget):
         """获取当前显示形式。"""
         return str(self.view_style_combo.currentData() or "image")
 
+    def set_view_style(self, style: str) -> None:
+        """设置显示形式（用于持久化恢复）。"""
+        idx = self.view_style_combo.findData(style)
+        if idx >= 0:
+            self.view_style_combo.setCurrentIndex(idx)
+
+    def _on_view_style_changed(self) -> None:
+        """根据显示形式启用/禁用色图选择。"""
+        is_wiggle = self.get_view_style() == "wiggle"
+        self.cmap_combo.setEnabled(not is_wiggle)
+
     def set_manual_roi_status(self, text: str, has_roi: bool):
         """更新手动 ROI 状态显示。"""
         self.roi_status_label.setText(text)
@@ -580,3 +594,5 @@ class AdvancedSettingsPage(QWidget):
     def get_preset_key(self):
         """获取当前选中的预设key"""
         return None
+
+
