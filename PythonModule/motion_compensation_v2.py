@@ -74,8 +74,8 @@ def _analyze_trace_quality(
     warnings: list[dict[str, Any]],
     quality_flags: list[str],
 ) -> None:
-    timestamps = _numeric_field_or_none(metadata, "trace_timestamp_s", trace_count)
-    distance = _numeric_field_or_none(metadata, "trace_distance_m", trace_count)
+    timestamps = numeric_field_or_none(metadata, "trace_timestamp_s", trace_count)
+    distance = numeric_field_or_none(metadata, "trace_distance_m", trace_count)
     input_quality["trace_timestamp_available"] = timestamps is not None
     input_quality["trace_distance_available"] = distance is not None
 
@@ -197,94 +197,12 @@ def _analyze_trace_quality(
                     )
 
 
+# Backward-compatible private aliases used by existing tests and scripts.
 _clone_metadata = clone_metadata
 _field_1d = field_1d
-_numeric_field_or_none = numeric_field_or_none
-_apply_time_shift = apply_time_shift
 _metadata_for_output = metadata_for_output
-
-
-def _compute_reference_height(
-    height: np.ndarray,
-    *,
-    mode: str,
-    manual_height_m: float,
-    warnings: list[dict[str, Any]],
-) -> float:
-    return compute_reference_height(
-        height,
-        mode=mode,
-        manual_height_m=manual_height_m,
-        warnings=warnings,
-        method_id="motion_compensation_v2",
-    )
-
-
-def _select_height(
-    metadata: dict[str, np.ndarray],
-    trace_count: int,
-    *,
-    height_source: str,
-    warnings: list[dict[str, Any]],
-    quality_flags: list[str],
-) -> tuple[np.ndarray | None, str | None]:
-    return select_height(
-        metadata,
-        trace_count,
-        height_source=height_source,
-        method_id="motion_compensation_v2",
-        warnings=warnings,
-        quality_flags=quality_flags,
-    )
-
-
-def _resolve_shift_sample_limit(
-    *,
-    max_shift_samples: float | None,
-    max_shift_ns: float | None,
-    sample_interval_ns: float,
-    sample_count: int,
-) -> tuple[float | None, str | None, dict[str, float]]:
-    return resolve_shift_sample_limit(
-        max_shift_samples=max_shift_samples,
-        max_shift_ns=max_shift_ns,
-        sample_interval_ns=sample_interval_ns,
-        sample_count=sample_count,
-    )
-
-
-def _build_attitude_updates(
-    metadata: dict[str, np.ndarray],
-    trace_count: int,
-    *,
-    height_m: np.ndarray | None,
-    apc_offset_x_m: float,
-    apc_offset_y_m: float,
-    apc_offset_z_m: float,
-    max_abs_tilt_deg: float,
-    quality_flags: list[str],
-    warnings: list[dict[str, Any]],
-) -> dict[str, np.ndarray]:
-    return build_attitude_updates(
-        metadata,
-        trace_count,
-        height_m=height_m,
-        apc_offset_x_m=apc_offset_x_m,
-        apc_offset_y_m=apc_offset_y_m,
-        apc_offset_z_m=apc_offset_z_m,
-        max_abs_tilt_deg=max_abs_tilt_deg,
-        method_id="motion_compensation_v2",
-        quality_flags=quality_flags,
-        warnings=warnings,
-    )
-
-
-def _resample_bscan_columns(
-    data: np.ndarray,
-    source_distance_m: np.ndarray,
-    target_distance_m: np.ndarray,
-) -> np.ndarray:
-    return resample_bscan_columns(data, source_distance_m, target_distance_m)
+_resample_bscan_columns = resample_bscan_columns
+_resolve_shift_sample_limit = resolve_shift_sample_limit
 
 
 def method_motion_compensation_v2(
@@ -317,7 +235,7 @@ def method_motion_compensation_v2(
         raise ValueError("motion_compensation_v2 currently supports linear interpolation only")
 
     samples, trace_count = arr.shape
-    metadata = _clone_metadata(trace_metadata)
+    metadata = clone_metadata(trace_metadata)
     warnings: list[dict[str, Any]] = []
     quality_flags: list[str] = []
     updates: dict[str, np.ndarray] = {}
@@ -376,10 +294,11 @@ def method_motion_compensation_v2(
         return corrected, meta
 
     try:
-        height_m, height_source_used = _select_height(
+        height_m, height_source_used = select_height(
             metadata,
             trace_count,
             height_source=height_source,
+            method_id="motion_compensation_v2",
             warnings=warnings,
             quality_flags=quality_flags,
         )
@@ -407,7 +326,7 @@ def method_motion_compensation_v2(
             )
 
     alignment_status = np.asarray(metadata.get("alignment_status", []), dtype="<U16")
-    height_confidence = _numeric_field_or_none(metadata, "height_confidence", trace_count)
+    height_confidence = numeric_field_or_none(metadata, "height_confidence", trace_count)
     input_quality: dict[str, Any] = {
         "trace_count": int(trace_count),
         "height_source_requested": str(height_source),
@@ -464,11 +383,12 @@ def method_motion_compensation_v2(
     meta["input_quality"] = input_quality
 
     if valid_height and air_wave_speed_value > 0.0:
-        h_ref = _compute_reference_height(
+        h_ref = compute_reference_height(
             height_m,
             mode=height_reference_mode,
             manual_height_m=manual_height_value,
             warnings=warnings,
+            method_id="motion_compensation_v2",
         )
         if h_ref <= 0.0 or not np.isfinite(h_ref):
             h_ref = float(np.mean(height_m))
@@ -482,13 +402,13 @@ def method_motion_compensation_v2(
         }
         updates["height_agl_m"] = height_m.astype(np.float32)
         if "height_confidence" in metadata:
-            updates["height_confidence"] = _field_1d(
+            updates["height_confidence"] = field_1d(
                 metadata, "height_confidence", trace_count, dtype=np.float32
             )
         else:
             updates["height_confidence"] = np.ones(trace_count, dtype=np.float32)
         if "height_source" in metadata:
-            updates["height_source"] = _field_1d(
+            updates["height_source"] = field_1d(
                 metadata, "height_source", trace_count, dtype=str
             ).astype("<U32")
         elif height_source_used is not None:
@@ -524,7 +444,7 @@ def method_motion_compensation_v2(
                 time_shift_ns = 2.0 * (height_m - h_ref) / air_wave_speed_value
                 time_shift_samples = time_shift_ns / dt_ns
                 raw_shift_samples = time_shift_samples.copy()
-                clamp, clamp_source, clamp_details = _resolve_shift_sample_limit(
+                clamp, clamp_source, clamp_details = resolve_shift_sample_limit(
                     max_shift_samples=max_shift_samples_value,
                     max_shift_ns=max_shift_ns_value,
                     sample_interval_ns=dt_ns,
@@ -551,7 +471,7 @@ def method_motion_compensation_v2(
                             raw_shift_samples_max=float(np.max(raw_shift_samples)),
                         )
                     )
-                corrected = _apply_time_shift(corrected, time_shift_samples)
+                corrected = apply_time_shift(corrected, time_shift_samples)
                 updates["time_shift_ns"] = time_shift_ns.astype(np.float32)
                 updates["time_shift_samples"] = time_shift_samples.astype(np.float32)
                 meta["time_window_ns"] = resolved_time_window_value
@@ -571,7 +491,7 @@ def method_motion_compensation_v2(
         meta["height_source_used"] = str(height_source_used) if height_source_used else None
         meta["height_summary"] = {}
 
-    attitude_updates = _build_attitude_updates(
+    attitude_updates = build_attitude_updates(
         metadata,
         trace_count,
         height_m=height_m if valid_height else None,
@@ -579,14 +499,15 @@ def method_motion_compensation_v2(
         apc_offset_y_m=apc_offset_y_value,
         apc_offset_z_m=apc_offset_z_value,
         max_abs_tilt_deg=max_abs_tilt_value,
+        method_id="motion_compensation_v2",
         quality_flags=quality_flags,
         warnings=warnings,
     )
     updates.update(attitude_updates)
 
     if resample_spacing_value > 0.0:
-        metadata_for_resampling = _metadata_for_output(metadata, updates, trace_count)
-        source_distance = _numeric_field_or_none(
+        metadata_for_resampling = metadata_for_output(metadata, updates, trace_count)
+        source_distance = numeric_field_or_none(
             metadata_for_resampling, "trace_distance_m", trace_count
         )
         if source_distance is None:
