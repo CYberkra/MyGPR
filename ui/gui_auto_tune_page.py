@@ -1285,6 +1285,14 @@ class AutoTunePage(QWidget):
         return " | ".join(parts)
 
     def _build_risk_hint(self, result: dict) -> str:
+        label_info = result.get("recommendation_label_info") or {}
+        if label_info:
+            label = str(label_info.get("recommendation_label") or "--")
+            severity = str(label_info.get("severity") or "--")
+            flags = ", ".join(label_info.get("risk_flags") or []) or "--"
+            if label != "normal":
+                return f"推荐标签: {label} ({severity}) | 风险标记: {flags}"
+
         recommended_key = str(result.get("recommended_profile", "balanced"))
         confidence = float(result.get("selection_confidence", 0.0))
         failed = len(result.get("failed_trials", []))
@@ -1343,6 +1351,20 @@ class AutoTunePage(QWidget):
         lines.append(
             f"总分最高: {float(result.get('best_score', 0.0)):.4f} | 参数 {json.dumps(result.get('best_params', {}), ensure_ascii=False)}"
         )
+        label_info = result.get("recommendation_label_info") or {}
+        if label_info:
+            lines.append(
+                "推荐标签: {label} | severity={severity} | manual_review_recommended={manual}".format(
+                    label=label_info.get("recommendation_label", "--"),
+                    severity=label_info.get("severity", "--"),
+                    manual=bool(label_info.get("manual_review_recommended", False)),
+                )
+            )
+            risk_flags = ", ".join(label_info.get("risk_flags") or [])
+            if risk_flags:
+                lines.append(f"标签风险依据: {risk_flags}")
+            for msg in list(label_info.get("user_log_messages") or [])[:2]:
+                lines.append(f"提示: {msg}")
         best_constraint_warnings = result.get("best_constraint_warnings", []) or []
         if best_constraint_warnings:
             warning = best_constraint_warnings[0]

@@ -139,3 +139,35 @@ Current mapping:
 - `stolt_migration`, `kirchhoff_migration` -> `migration`
 
 Unmapped methods currently remain unguarded by Workbench-side classifier and should be reviewed in future incremental audit if they become high-risk no-prior paths.
+
+## AT-021 No-prior Background AutoTune Labeling (Non-blocking)
+
+AT-021 adds **warning/label/metadata** semantics for no-prior high-risk background AutoTune outcomes, without changing scoring and without blocking users.
+
+- AutoTune execution remains allowed.
+- Background suppression execution remains allowed.
+- No modal popup is added for this labeling path.
+- Candidate winner and score are unchanged.
+
+Implementation:
+
+- `core/auto_tune_recommendation_labels.py` adds a pure helper to generate:
+  - `recommendation_label`: `normal | caution | diagnostic_candidate | manual_review_recommended`
+  - `risk_flags`
+  - `user_log_messages`
+  - `claim_boundary`
+  - severity and risk basis payload
+- `app_qt.py` attaches this label payload to auto-tune results as `recommendation_label_info`, logs non-blocking warnings, and exports the payload into:
+  - diagnostics copy text
+  - quality snapshot JSON
+  - replay evidence app context
+
+Risk thresholds are heuristic diagnostics only (for wording and review intent), not ground-truth validation:
+
+- `ntraces_ratio > 0.05` local/manual-review caution
+- `ntraces_ratio > 0.10` medium-window caution
+- `ntraces_ratio > 0.20` large-window risk
+- preservation metrics below threshold (`local_saliency_preservation`, `edge_preservation`, `peak_ratio`)
+- negative selected score
+
+AT-021 explicitly avoids claims of target detection, underground correctness, preset promotion, or AutoTune superiority.

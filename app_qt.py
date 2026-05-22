@@ -160,6 +160,10 @@ from core.no_prior_ui_guardrails import (
     build_no_prior_guard_event,
     evaluate_no_prior_action,
 )
+from core.auto_tune_recommendation_labels import (
+    assess_auto_tune_recommendation_label,
+    recommendation_label_to_dict,
+)
 from core.auto_tune import (
     auto_select_method_group,
     auto_tune_method,
@@ -2488,15 +2492,13 @@ class GPRGuiQt(QMainWindow):
 
     def apply_method_auto_tuned_default(self):
         """按自动调参推荐参数执行当前方法。"""
-        if not self._enforce_no_prior_action_guard(
+        self._enforce_no_prior_action_guard(
             "preset_recommendation",
             dialog_title="自动推荐参数",
-            allow_override=False,
-        ):
-            self.page_basic.set_apply_source_hint(
-                "无先验高风险策略已阻断自动推荐参数执行。"
-            )
-            return
+            allow_override=True,
+            show_dialog=False,
+            advisory_only=True,
+        )
 
         if not self._last_auto_tune_result:
             self.page_basic.set_apply_source_hint(
@@ -2521,14 +2523,13 @@ class GPRGuiQt(QMainWindow):
 
     def start_auto_tune_current_method(self, auto_apply_after_finish: bool = False):
         """对当前方法执行单步自动选参。"""
-        if not self._enforce_no_prior_action_guard(
+        self._enforce_no_prior_action_guard(
             "AutoTune",
             dialog_title="自动选参",
-            allow_override=False,
-        ):
-            self._pending_apply_after_auto_tune = False
-            self.page_basic.set_apply_source_hint("无先验高风险策略已阻断自动选参。")
-            return False
+            allow_override=True,
+            show_dialog=False,
+            advisory_only=True,
+        )
 
         if (
             self._ui_busy
@@ -2611,12 +2612,13 @@ class GPRGuiQt(QMainWindow):
 
     def start_auto_select_current_stage(self):
         """比较当前 stage 内多个可用方法并推荐最佳方法。"""
-        if not self._enforce_no_prior_action_guard(
+        self._enforce_no_prior_action_guard(
             "AutoTune",
             dialog_title="同阶段比较",
-            allow_override=False,
-        ):
-            return False
+            allow_override=True,
+            show_dialog=False,
+            advisory_only=True,
+        )
 
         if (
             self._ui_busy
@@ -2707,12 +2709,13 @@ class GPRGuiQt(QMainWindow):
 
     def start_auto_tune_comparison(self):
         """运行人工 baseline vs 自动选参科研对比。"""
-        if not self._enforce_no_prior_action_guard(
+        self._enforce_no_prior_action_guard(
             "AutoTune",
             dialog_title="人工/自动对比",
-            allow_override=False,
-        ):
-            return False
+            allow_override=True,
+            show_dialog=False,
+            advisory_only=True,
+        )
 
         if (
             self._ui_busy
@@ -2808,6 +2811,7 @@ class GPRGuiQt(QMainWindow):
             self.page_auto_tune.show_cancelled()
             return
 
+        self._attach_auto_tune_recommendation_label(result)
         self._last_auto_tune_result = result
         self.page_basic.set_auto_tune_result_available(True, result.get("profiles", {}))
         self.page_basic.set_apply_source_hint(
@@ -2817,6 +2821,7 @@ class GPRGuiQt(QMainWindow):
         self._log(
             f"自动选参完成: {result.get('method_name', result.get('method_key'))} | 推荐参数 {result.get('recommended_params') or result.get('best_params')}"
         )
+        self._log_auto_tune_recommendation_label(result)
         if pending_apply:
             self._pending_apply_after_auto_tune = False
             profile_key = str(result.get("recommended_profile", "balanced"))
@@ -2845,6 +2850,7 @@ class GPRGuiQt(QMainWindow):
         self._last_auto_tune_group_result = result
         best_auto = result.get("best_auto_tune_result") or {}
         if best_auto:
+            self._attach_auto_tune_recommendation_label(best_auto)
             self._last_auto_tune_result = best_auto
             self.page_auto_tune.set_auto_tune_method_key(
                 result.get("best_method_key", best_auto.get("method_key"))
@@ -2857,6 +2863,7 @@ class GPRGuiQt(QMainWindow):
             )
         self.page_auto_tune.set_stage_compare_result(result)
         self.page_auto_tune.show_result(best_auto)
+        self._log_auto_tune_recommendation_label(best_auto)
         self._log(
             f"同阶段比较完成: 推荐 {result.get('best_method_name', result.get('best_method_key'))} | outer score {float(result.get('outer_score', 0.0)):.4f}"
         )
@@ -2964,13 +2971,13 @@ class GPRGuiQt(QMainWindow):
 
     def apply_method_from_profile(self, profile_key: str):
         """使用自动选参档位参数并立即执行当前方法。"""
-        if not self._enforce_no_prior_action_guard(
+        self._enforce_no_prior_action_guard(
             "preset_recommendation",
             dialog_title="应用推荐档",
-            allow_override=False,
-        ):
-            self.page_basic.set_apply_source_hint("无先验高风险策略已阻断推荐档执行。")
-            return
+            allow_override=True,
+            show_dialog=False,
+            advisory_only=True,
+        )
 
         if not self._last_auto_tune_result:
             QMessageBox.information(
@@ -3020,12 +3027,13 @@ class GPRGuiQt(QMainWindow):
 
     def apply_stage_compare_choice(self):
         """将同阶段比较推荐的方法和参数写回日常处理。"""
-        if not self._enforce_no_prior_action_guard(
+        self._enforce_no_prior_action_guard(
             "preset_recommendation",
             dialog_title="同阶段推荐写回",
-            allow_override=False,
-        ):
-            return
+            allow_override=True,
+            show_dialog=False,
+            advisory_only=True,
+        )
 
         if not self._last_auto_tune_group_result:
             QMessageBox.information(self, "同阶段比较", "暂无可用的阶段比较结果。")
@@ -4499,13 +4507,14 @@ class GPRGuiQt(QMainWindow):
         params.update(visible_params)
 
         method_action = self._classify_method_guard_action(method_key, params)
-        if method_action and not self._enforce_no_prior_action_guard(
-            method_action,
-            dialog_title="应用方法",
-            allow_override=True,
-        ):
-            self._log(f"无先验高风险策略已阻断方法执行: {method['name']}")
-            return
+        if method_action:
+            self._enforce_no_prior_action_guard(
+                method_action,
+                dialog_title="应用方法",
+                allow_override=True,
+                show_dialog=False,
+                advisory_only=True,
+            )
 
         self._push_history()
         self._method_param_overrides[method_key] = dict(params)
@@ -4823,6 +4832,10 @@ class GPRGuiQt(QMainWindow):
             "  - claim_boundary: "
             + str(no_prior_policy.get("claim_boundary") or "--")
         )
+        auto_tune_ctx = self._build_auto_tune_recommendation_context()
+        if auto_tune_ctx:
+            lines.append("- AutoTune recommendation label:")
+            lines.append(f"  - {auto_tune_ctx}")
         if self._no_prior_guard_events:
             lines.append("- No-prior guard events:")
             for event in self._no_prior_guard_events[-12:]:
@@ -4949,6 +4962,7 @@ class GPRGuiQt(QMainWindow):
             f"上次运行: {self._last_run_summary}",
             f"质量指标: {self._last_quality_metrics}",
             f"运行告警: {self._runtime_warnings}",
+            f"AutoTune推荐标签: {self._build_auto_tune_recommendation_context()}",
             f"航空质控: {self._compute_airborne_qc_metrics()}",
             (
                 "无先验策略: "
@@ -5328,6 +5342,7 @@ class GPRGuiQt(QMainWindow):
             "quality_metrics": dict(self._last_quality_metrics or {}),
             "method_param_overrides": dict(self._method_param_overrides),
             "runtime_warnings": list(self._runtime_warnings),
+            "auto_tune_recommendation_context": self._build_auto_tune_recommendation_context(),
             "no_prior_qc_policy": no_prior_policy,
             "no_prior_guard_events": list(self._no_prior_guard_events),
         }
@@ -5462,6 +5477,7 @@ class GPRGuiQt(QMainWindow):
             "last_run_summary": dict(self._last_run_summary or {}),
             "method_param_overrides": dict(self._method_param_overrides),
             "runtime_warnings": list(self._runtime_warnings),
+            "auto_tune_recommendation_context": self._build_auto_tune_recommendation_context(),
             "no_prior_qc_policy": self._build_no_prior_qc_policy(
                 metrics=self._last_quality_metrics,
                 airborne_qc=self._compute_airborne_qc_metrics(),
@@ -6915,9 +6931,67 @@ class GPRGuiQt(QMainWindow):
             return True
         return False
 
+    def _attach_auto_tune_recommendation_label(self, result: dict | None) -> None:
+        """为自动选参结果附加非阻断风险标签。"""
+        if not isinstance(result, dict):
+            return
+        method_key = str(result.get("method_key") or "")
+        if not method_key:
+            return
+        no_prior_policy = self._build_no_prior_qc_policy(
+            metrics=self._last_quality_metrics,
+            airborne_qc=self._compute_airborne_qc_metrics(),
+        )
+        trace_count = 0
+        if self.data is not None and np.asarray(self.data).ndim == 2:
+            trace_count = int(np.asarray(self.data).shape[1])
+        label = assess_auto_tune_recommendation_label(
+            method_key=method_key,
+            selected_params=result.get("recommended_params") or result.get("best_params"),
+            metrics=result.get("best_metrics"),
+            score=result.get("best_score"),
+            no_prior_policy=no_prior_policy,
+            trace_count=trace_count,
+        )
+        result["recommendation_label_info"] = recommendation_label_to_dict(label)
+
+    def _log_auto_tune_recommendation_label(self, result: dict | None) -> None:
+        """将自动选参建议标签写入日志（非阻断）。"""
+        if not isinstance(result, dict):
+            return
+        info = result.get("recommendation_label_info")
+        if not isinstance(info, dict):
+            return
+        label = str(info.get("recommendation_label") or "--")
+        severity = str(info.get("severity") or "--")
+        method_name = str(result.get("method_name") or result.get("method_key") or "--")
+        self._log(
+            f"AutoTune 推荐标签: {method_name} | label={label} | severity={severity}"
+        )
+        for message in list(info.get("user_log_messages") or []):
+            self._log(f"AutoTune 提示: {message}")
+
     def _roi_available_for_no_prior(self) -> bool:
         """判断当前是否存在可用 ROI。"""
         return self._manual_roi_values is not None
+
+    def _build_auto_tune_recommendation_context(self) -> dict:
+        """构建最近一次 AutoTune 推荐标签上下文（用于日志/导出）。"""
+        result = self._last_auto_tune_result or {}
+        if not isinstance(result, dict) or not result:
+            return {}
+        context = {
+            "method_key": result.get("method_key"),
+            "method_name": result.get("method_name"),
+            "recommended_params": result.get("recommended_params")
+            or result.get("best_params")
+            or {},
+            "best_score": result.get("best_score"),
+        }
+        label_info = result.get("recommendation_label_info")
+        if isinstance(label_info, dict):
+            context["recommendation_label_info"] = dict(label_info)
+        return context
 
     def _build_no_prior_qc_policy(
         self,
@@ -6988,6 +7062,7 @@ class GPRGuiQt(QMainWindow):
         dialog_title: str,
         allow_override: bool = True,
         show_dialog: bool = True,
+        advisory_only: bool = False,
     ) -> bool:
         """执行 no-prior UI guardrail 判定并处理弹窗。"""
         no_prior_policy = self._build_no_prior_qc_policy(
@@ -6999,6 +7074,18 @@ class GPRGuiQt(QMainWindow):
             no_prior_policy,
             allow_override=allow_override,
         )
+
+        if advisory_only:
+            if guard.log_event or guard.decision in {"blocked", "requires_confirmation", "caution"}:
+                self._record_no_prior_guard_event(
+                    action_id,
+                    guard,
+                    no_prior_policy,
+                    override_used=False,
+                )
+            if guard.warning_text:
+                self._log(f"No-prior advisory ({action_id}): {guard.warning_text}")
+            return True
 
         if guard.decision == "blocked":
             self._record_no_prior_guard_event(

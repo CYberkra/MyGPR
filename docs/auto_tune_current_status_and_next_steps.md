@@ -103,3 +103,16 @@ Reason: it directly addresses the current contradiction between candidate rankin
 - Accepted status: AT-013 and AT-014 accepted; metric-fidelity synthesis complete.
 - Gate status: **blocked**
 - Next recommended task: **AT-016 Risk-flag and scoring diagnostics design**
+
+## 11) AT-021 Update (No-prior Background Labeling Only)
+
+AT-021 introduces non-blocking recommendation labeling for no-prior high-risk background AutoTune outcomes:
+
+- no scoring change
+- no algorithm change
+- no candidate filtering
+- no modal popup / no hard block in this path
+
+Risky background outcomes are now explicitly marked as diagnostic/manual-review recommendations in logs and export metadata (instead of being phrased as validated default recommendations).
+
+This is a wording/metadata safety layer. It does not upgrade scientific claims and does not validate field correctness.
