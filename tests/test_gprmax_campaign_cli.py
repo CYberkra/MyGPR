@@ -48,3 +48,26 @@ def test_cli_json_writes_parseable_report(tmp_path):
     assert payload["campaign_id"] == "GX-RUN-001_valid"
     assert payload["status"] == "ready"
     assert payload["ready_count"] == 1
+
+
+def test_cli_missing_expected_outputs_reports_invalid_scene(tmp_path):
+    report_path = tmp_path / "campaign_invalid_report.json"
+    cmd = [
+        sys.executable,
+        str(RUNNER),
+        "--campaign",
+        str(FIXTURE_DIR / "campaign_missing_expected_outputs.yaml"),
+        "--dry-run",
+        "--json",
+        str(report_path),
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    assert proc.returncode == 0
+    assert "campaign_status: invalid" in proc.stdout
+    assert "scene_missing_expected_outputs: invalid" in proc.stdout
+    assert "expected_outputs_missing" in proc.stdout
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    assert payload["status"] == "invalid"
+    assert payload["invalid_count"] == 1
+    scene_issues = payload["scenes"][0]["issues"]
+    assert any(item["code"] == "expected_outputs_missing" for item in scene_issues)

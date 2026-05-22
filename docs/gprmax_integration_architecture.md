@@ -232,7 +232,10 @@ Required scene fields:
 - `materials`
 - `target_roi`
 - `expected_outputs`
-- `tags`
+
+Optional scene fields:
+
+- `tags` (default `[]` when omitted)
 
 Example:
 

@@ -6,8 +6,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from core.gprmax_campaign.campaign_loader import load_campaign_yaml
 
 
@@ -35,6 +33,8 @@ def test_loader_resolves_relative_paths_from_yaml_directory():
     ).resolve()
 
 
-def test_loader_rejects_missing_expected_outputs_field():
-    with pytest.raises(ValueError, match="missing required field: expected_outputs"):
-        load_campaign_yaml(FIXTURE_DIR / "campaign_missing_expected_outputs.yaml")
+def test_loader_allows_missing_expected_outputs_for_validator_stage():
+    campaign = load_campaign_yaml(FIXTURE_DIR / "campaign_missing_expected_outputs.yaml")
+    assert len(campaign.scenes) == 1
+    assert campaign.scenes[0].scene_id == "scene_missing_expected_outputs"
+    assert campaign.scenes[0].expected_outputs is None

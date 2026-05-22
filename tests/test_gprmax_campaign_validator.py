@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 from pathlib import Path
 
 from core.gprmax_campaign.campaign_loader import load_campaign_yaml
@@ -47,10 +46,8 @@ def test_validate_duplicate_scene_ids_detected():
 
 
 def test_validate_missing_expected_outputs_detected():
-    campaign = load_campaign_yaml(FIXTURE_DIR / "campaign_valid.yaml")
-    broken_scene = replace(campaign.scenes[0], expected_outputs=["raw_with_target"])
-    broken_campaign = replace(campaign, scenes=[broken_scene])
-    result = validate_campaign(broken_campaign)
+    campaign = load_campaign_yaml(FIXTURE_DIR / "campaign_missing_expected_outputs.yaml")
+    result = validate_campaign(campaign)
     assert result.status == "invalid"
     assert "expected_outputs_missing" in _issues_by_code(result.scenes[0])
 

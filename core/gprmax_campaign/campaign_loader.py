@@ -60,10 +60,6 @@ def load_campaign_yaml(path: str | Path) -> Campaign:
             _require_non_empty_str(scene_payload, "target_roi"),
             source_path.parent,
         )
-        if "expected_outputs" not in scene_payload:
-            raise ValueError(
-                f"Scene '{scene_id}' missing required field: expected_outputs"
-            )
         expected_outputs = scene_payload.get("expected_outputs")
         tags_raw = scene_payload.get("tags")
         if tags_raw is None:
