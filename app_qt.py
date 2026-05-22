@@ -220,23 +220,40 @@ def _get_settings_path() -> str:
     return os.path.join(settings_dir, "gpr_gui_settings.json")
 
 
+def _load_app_settings_dict() -> dict:
+    """加载设置字典。"""
+    settings_path = _get_settings_path()
+    if not os.path.exists(settings_path):
+        return {}
+    try:
+        with open(settings_path, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+        return loaded if isinstance(loaded, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_app_settings_dict(settings: dict) -> None:
+    """保存设置字典。"""
+    if not isinstance(settings, dict):
+        return
+    settings_path = _get_settings_path()
+    try:
+        with open(settings_path, "w", encoding="utf-8") as f:
+            json.dump(settings, f, ensure_ascii=False, indent=2)
+    except Exception:
+        return
+
+
 def _save_last_data_path(path: str):
     """保存上次加载的数据路径"""
     try:
         # 只保存有效的文件路径
         if not os.path.exists(path):
             return
-        settings_path = _get_settings_path()
-        settings = {}
-        if os.path.exists(settings_path):
-            try:
-                with open(settings_path, "r", encoding="utf-8") as f:
-                    settings = json.load(f)
-            except (OSError, json.JSONDecodeError):
-                settings = {}
+        settings = _load_app_settings_dict()
         settings["last_data_path"] = path
-        with open(settings_path, "w", encoding="utf-8") as f:
-            json.dump(settings, f, ensure_ascii=False, indent=2)
+        _save_app_settings_dict(settings)
     except Exception as e:
         logger.warning("Failed to save last data path: %s", e)
 
@@ -244,14 +261,10 @@ def _save_last_data_path(path: str):
 def _load_last_data_path() -> str:
     """加载上次的数据路径"""
     try:
-        settings_path = _get_settings_path()
-        if os.path.exists(settings_path):
-            with open(settings_path, "r", encoding="utf-8") as f:
-                settings = json.load(f)
-                path = settings.get("last_data_path", "")
-                # 验证路径是否存在
-                if path and os.path.exists(path):
-                    return path
+        settings = _load_app_settings_dict()
+        path = settings.get("last_data_path", "")
+        if path and os.path.exists(path):
+            return path
     except Exception as e:
         logger.warning("Failed to load last data path: %s", e)
     return ""
@@ -1068,6 +1081,7 @@ class GPRGuiQt(QMainWindow):
         self._connect_signals()
 
         # 初始化
+        self._restore_view_style_from_settings()
         self._apply_startup_preset_defaults()
         self._reset_auto_tune_state()
         self._update_manual_roi_status()
@@ -1446,6 +1460,9 @@ class GPRGuiQt(QMainWindow):
         self.page_advanced.cmap_combo.currentIndexChanged.connect(self._refresh_plot)
         self.page_advanced.view_style_combo.currentIndexChanged.connect(
             self._refresh_plot
+        )
+        self.page_advanced.view_style_combo.currentIndexChanged.connect(
+            self._on_view_style_changed
         )
         self.page_advanced.single_view_combo.currentIndexChanged.connect(
             self._refresh_plot
@@ -3878,6 +3895,36 @@ class GPRGuiQt(QMainWindow):
             logger.warning("Auto load last data failed: %s", e)
             self._log(f"自动加载上次数据失败: {e}")
 
+    def _on_view_style_changed(self):
+        """显示形式改变后持久化。"""
+        self._save_view_style_to_settings()
+
+    def _save_view_style_to_settings(self):
+        """保存当前显示形式到设置文件。"""
+        try:
+            style = self.page_advanced.get_view_style()
+            if style not in {"image", "wiggle"}:
+                style = "image"
+            settings = _load_app_settings_dict()
+            settings["view_style"] = style
+            _save_app_settings_dict(settings)
+        except Exception as exc:
+            logger.warning("Failed to save view style: %s", exc)
+
+    def _restore_view_style_from_settings(self):
+        """从设置文件恢复显示形式。"""
+        try:
+            settings = _load_app_settings_dict()
+            style = str(settings.get("view_style", "image")).strip().lower()
+            if style not in {"image", "wiggle"}:
+                style = "image"
+            if hasattr(self, "page_advanced") and self.page_advanced is not None:
+                self.page_advanced.set_view_style(style)
+        except Exception as exc:
+            logger.warning("Failed to restore view style: %s", exc)
+            if hasattr(self, "page_advanced") and self.page_advanced is not None:
+                self.page_advanced.set_view_style("image")
+
     def _load_with_progress(self, title, loader_func, *args, **loader_kwargs):
         """使用进度条对话框加载数据"""
         dialog = LoadingProgressDialog(self, title)
@@ -4424,6 +4471,8 @@ class GPRGuiQt(QMainWindow):
 
         view_style = self.page_advanced.get_view_style()
         slider_compare = self._is_main_slider_compare_active()
+        if slider_compare and view_style == "wiggle":
+            self._log("提示：滑动对比开启时优先使用图像分割对比，摆动图仅在非滑动对比模式显示。")
 
         if slider_compare:
             n_panels = 1
@@ -6397,6 +6446,14 @@ class GPRGuiQt(QMainWindow):
         max_traces = 80
         step = max(1, int(np.ceil(n_traces / max_traces)))
         trace_indices = np.arange(0, n_traces, step, dtype=int)
+        if hasattr(self, "page_advanced") and self.page_advanced is not None:
+            try:
+                self.page_advanced.update_wiggle_sampling_hint(
+                    shown_traces=int(trace_indices.size),
+                    total_traces=int(n_traces),
+                )
+            except Exception:
+                pass
 
         finite_values = np.asarray(data[np.isfinite(data)], dtype=float)
         amp_ref = float(np.max(np.abs(finite_values))) if finite_values.size else 0.0

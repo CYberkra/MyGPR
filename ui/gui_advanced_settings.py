@@ -116,6 +116,10 @@ class AdvancedSettingsPage(QWidget):
         self.view_style_combo.currentIndexChanged.connect(
             self._refresh_compare_select_visibility
         )
+        self.view_style_combo.currentIndexChanged.connect(
+            self._on_view_style_changed
+        )
+        self._refresh_view_style_ui_state()
 
     def _build_mode_page(self):
         """构建显示模式页面。"""
@@ -282,6 +286,11 @@ class AdvancedSettingsPage(QWidget):
         style_hint_2.setWordWrap(True)
         style_hint_2.setProperty("class", "hintText")
         view_layout.addWidget(style_hint_2)
+
+        self.wiggle_sampling_hint = QLabel("Wiggle 显示为抽样显示，仅用于显示，不改变数据。")
+        self.wiggle_sampling_hint.setWordWrap(True)
+        self.wiggle_sampling_hint.setProperty("class", "hintText")
+        view_layout.addWidget(self.wiggle_sampling_hint)
 
         layout.addWidget(view_box)
         layout.addStretch(1)
@@ -545,6 +554,54 @@ class AdvancedSettingsPage(QWidget):
     def get_view_style(self) -> str:
         """获取当前显示形式。"""
         return str(self.view_style_combo.currentData() or "image")
+
+    def set_view_style(self, style_key: str) -> None:
+        """设置显示形式。"""
+        key = str(style_key or "").strip().lower()
+        idx = self.view_style_combo.findData(key)
+        if idx < 0:
+            idx = self.view_style_combo.findData("image")
+        if idx < 0:
+            idx = 0
+        old_block = self.view_style_combo.blockSignals(True)
+        try:
+            self.view_style_combo.setCurrentIndex(idx)
+        finally:
+            self.view_style_combo.blockSignals(old_block)
+        self._refresh_view_style_ui_state()
+
+    def update_wiggle_sampling_hint(self, shown_traces: int | None, total_traces: int | None):
+        """更新 wiggle 抽样显示提示。"""
+        if shown_traces is None or total_traces is None or total_traces <= 0:
+            self.wiggle_sampling_hint.setText(
+                "Wiggle 显示为抽样显示，仅用于显示，不改变数据。"
+            )
+            return
+        self.wiggle_sampling_hint.setText(
+            f"Wiggle 显示为抽样显示，当前约显示 {int(shown_traces)} / {int(total_traces)} 道，仅用于显示，不改变数据。"
+        )
+
+    @staticmethod
+    def compute_wiggle_sampling_summary(n_traces: int, max_traces: int = 80) -> dict:
+        """计算 wiggle 显示抽样统计。"""
+        total = max(int(n_traces), 0)
+        max_show = max(int(max_traces), 1)
+        if total <= 0:
+            return {"total": 0, "max_traces": max_show, "step": 1, "shown": 0}
+        step = max(1, int((total + max_show - 1) // max_show))
+        shown = (total + step - 1) // step
+        return {"total": total, "max_traces": max_show, "step": step, "shown": shown}
+
+    def _on_view_style_changed(self, _index: int):
+        self._refresh_view_style_ui_state()
+
+    def _refresh_view_style_ui_state(self):
+        is_wiggle = self.get_view_style() == "wiggle"
+        self.cmap_combo.setEnabled(not is_wiggle)
+        if is_wiggle:
+            self.cmap_combo.setToolTip("摆动图模式下不使用色图")
+        else:
+            self.cmap_combo.setToolTip("选择色彩映射方案")
 
     def set_manual_roi_status(self, text: str, has_roi: bool):
         """更新手动 ROI 状态显示。"""
