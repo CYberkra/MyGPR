@@ -63,6 +63,23 @@ def test_runner_failure_return_code_recorded(tmp_path):
     assert payload["return_code"] == 7
 
 
+def test_runner_supports_executable_with_inline_args(tmp_path):
+    task = GprMaxTaskSpec(
+        campaign_id="C1",
+        scene_id="S1",
+        variant="raw_with_target",
+        model_path=FIXTURE_DIR / "fake_gprmax_success.py",
+        output_dir=tmp_path / "run_exec_inline_args",
+        gprmax_executable=f"{sys.executable} -u",
+    )
+    result = run_gprmax_task(task)
+    assert result.status == "success"
+    assert result.return_code == 0
+    payload = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    assert payload["command"][0].endswith("python.exe")
+    assert payload["command"][1] == "-u"
+
+
 def test_runner_timeout_recorded(tmp_path):
     task = GprMaxTaskSpec(
         campaign_id="C1",

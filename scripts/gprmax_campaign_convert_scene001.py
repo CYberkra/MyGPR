@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import h5py
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
@@ -43,6 +44,34 @@ def _convert_one(source_out: Path, out_dir: Path, stem: str) -> dict[str, Any]:
     return result
 
 
+def _convert_series(
+    source_base_out: Path,
+    out_dir: Path,
+    stem: str,
+    run_count: int,
+) -> dict[str, Any]:
+    base = source_base_out.with_suffix("")
+    collected: list[np.ndarray] = []
+    sources: list[str] = []
+    for idx in range(1, run_count + 1):
+        out_path = base.with_name(f"{base.name}{idx}.out")
+        if not out_path.exists():
+            raise FileNotFoundError(f"expected run output missing: {out_path}")
+        with h5py.File(out_path, "r") as f:
+            if "rxs" not in f or "rx1" not in f["rxs"] or "Ez" not in f["rxs"]["rx1"]:
+                raise ValueError(f"Missing rxs/rx1/Ez dataset in {out_path}")
+            ez = np.asarray(f["rxs"]["rx1"]["Ez"][:], dtype=np.float64)
+        if ez.ndim != 1:
+            raise ValueError(f"Expected 1D Ez trace in {out_path}, got shape={ez.shape}")
+        collected.append(ez)
+        sources.append(str(out_path))
+    bscan = np.column_stack(collected)
+    result = _save_array(np.asarray(bscan, dtype=np.float64), out_dir, stem)
+    result["source_out_series"] = sources
+    result["run_count"] = int(run_count)
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Convert GX-007 scene_001 .out to CSV/NPY.")
     parser.add_argument(
@@ -61,18 +90,50 @@ def main() -> int:
         "--background-converted-dir",
         default="D:/CDUT-UavGPR-Controller/MyGPR-Evidence/gprmax/GX-007/scene_001_single_shallow_pipe/background_only/converted",
     )
+    parser.add_argument(
+        "--raw-run-count",
+        type=int,
+        default=1,
+        help="If >1, load raw run outputs as <stem>1..N.out and merge into 2D B-scan.",
+    )
+    parser.add_argument(
+        "--background-run-count",
+        type=int,
+        default=1,
+        help="If >1, load background run outputs as <stem>1..N.out and merge into 2D B-scan.",
+    )
     parser.add_argument("--json", default="")
     args = parser.parse_args()
 
     raw_out = Path(args.raw_out).expanduser().resolve()
     bg_out = Path(args.background_out).expanduser().resolve()
-    if not raw_out.exists():
+    if args.raw_run_count <= 1 and not raw_out.exists():
         raise FileNotFoundError(f"raw out file not found: {raw_out}")
-    if not bg_out.exists():
+    if args.background_run_count <= 1 and not bg_out.exists():
         raise FileNotFoundError(f"background out file not found: {bg_out}")
 
-    raw_result = _convert_one(raw_out, Path(args.raw_converted_dir).expanduser().resolve(), "raw_bscan")
-    bg_result = _convert_one(bg_out, Path(args.background_converted_dir).expanduser().resolve(), "background_bscan")
+    if args.raw_run_count > 1:
+        raw_result = _convert_series(
+            raw_out,
+            Path(args.raw_converted_dir).expanduser().resolve(),
+            "raw_bscan",
+            args.raw_run_count,
+        )
+    else:
+        raw_result = _convert_one(
+            raw_out, Path(args.raw_converted_dir).expanduser().resolve(), "raw_bscan"
+        )
+    if args.background_run_count > 1:
+        bg_result = _convert_series(
+            bg_out,
+            Path(args.background_converted_dir).expanduser().resolve(),
+            "background_bscan",
+            args.background_run_count,
+        )
+    else:
+        bg_result = _convert_one(
+            bg_out, Path(args.background_converted_dir).expanduser().resolve(), "background_bscan"
+        )
 
     summary = {
         "status": "success",

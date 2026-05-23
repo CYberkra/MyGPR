@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import subprocess
 import time
+import shlex
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -25,7 +26,7 @@ def run_gprmax_task(task: GprMaxTaskSpec, cancel_event=None) -> GprMaxRunResult:
     stderr_path = output_dir / "stderr.log"
     manifest_path = output_dir / "run_manifest.json"
 
-    command = [str(task.gprmax_executable), str(model_path), *list(task.extra_args or [])]
+    command = _build_command(task, model_path)
     start_ts = time.perf_counter()
     started_at = _iso_now()
     status = "failed"
@@ -111,6 +112,19 @@ def _terminate_process(process: subprocess.Popen, grace_seconds: float) -> None:
             process.wait(timeout=grace_seconds)
         except Exception:
             return
+
+
+def _build_command(task: GprMaxTaskSpec, model_path: Path) -> list[str]:
+    raw_exec = str(task.gprmax_executable).strip()
+    if not raw_exec:
+        return [str(model_path), *list(task.extra_args or [])]
+    try:
+        exec_tokens = shlex.split(raw_exec, posix=False)
+    except ValueError:
+        exec_tokens = [raw_exec]
+    if not exec_tokens:
+        exec_tokens = [raw_exec]
+    return [*exec_tokens, str(model_path), *list(task.extra_args or [])]
 
 
 def _iso_now() -> str:
