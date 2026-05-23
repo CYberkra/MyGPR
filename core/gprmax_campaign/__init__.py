@@ -11,6 +11,7 @@ from core.gprmax_campaign.pairing import (
     generate_target_response,
     validate_paired_outputs,
 )
+from core.gprmax_campaign.metrics import compute_paired_metrics
 from core.gprmax_campaign.preview import (
     PairPreviewReportResult,
     generate_pair_preview_report,
@@ -47,6 +48,7 @@ __all__ = [
     "TargetResponseResult",
     "discover_converted_pair_paths",
     "PairPreviewReportResult",
+    "compute_paired_metrics",
     "validate_paired_outputs",
     "generate_target_response",
     "generate_pair_preview_report",

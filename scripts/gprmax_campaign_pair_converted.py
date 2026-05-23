@@ -8,6 +8,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,12 +32,28 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--raw", default="", help="Optional explicit raw converted array path.")
     parser.add_argument("--background", default="", help="Optional explicit background converted array path.")
     parser.add_argument("--prefer-format", choices=["npy", "csv"], default="npy")
+    parser.add_argument(
+        "--roi-json",
+        default="",
+        help="Optional ROI json file path with trace_range/sample_range.",
+    )
     parser.add_argument("--json", default="", help="Optional summary json output path.")
     return parser.parse_args(argv)
 
 
+def _load_roi_payload(path: str) -> dict[str, Any] | None:
+    if not path:
+        return None
+    roi_path = Path(path).expanduser().resolve()
+    payload = json.loads(roi_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"ROI payload must be a JSON object: {roi_path}")
+    return payload
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
+    roi_payload = _load_roi_payload(args.roi_json)
     raw, background = discover_converted_pair_paths(
         args.scene_root,
         prefer_format=args.prefer_format,
@@ -50,6 +67,7 @@ def main(argv: list[str] | None = None) -> int:
         raw_output_path=raw,
         background_output_path=background,
         output_dir=Path(args.output_dir),
+        target_roi=roi_payload,
         source_format="auto",
     )
     pair_result = generate_target_response(spec)
@@ -65,8 +83,12 @@ def main(argv: list[str] | None = None) -> int:
     summary = {
         "raw_path": str(raw),
         "background_path": str(background),
+        "roi_json": args.roi_json or None,
         "pair_result": pair_result.to_dict(),
         "preview_result": preview_result.to_dict(),
+        "pair_metrics_keys": (
+            sorted(pair_result.metrics.keys()) if pair_result.metrics else []
+        ),
     }
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     if args.json:

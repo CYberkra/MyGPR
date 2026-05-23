@@ -213,6 +213,11 @@ def test_pair_converted_script_gx008_like_scene_root(tmp_path):
     bg = np.array([[0.5, 1.0], [1.0, 1.5]], dtype=np.float64)
     np.save(raw_dir / "raw_bscan.npy", raw)
     np.save(bg_dir / "background_bscan.npy", bg)
+    roi_path = tmp_path / "roi.json"
+    roi_path.write_text(
+        json.dumps({"sample_range": [0, 2], "trace_range": [0, 2]}),
+        encoding="utf-8",
+    )
     out_dir = tmp_path / "paired_outputs"
     json_path = tmp_path / "pair_preview_summary.json"
     cmd = [
@@ -226,6 +231,8 @@ def test_pair_converted_script_gx008_like_scene_root(tmp_path):
         "GX-008",
         "--scene-id",
         "scene_001_flat_dry_sand_pec_shallow",
+        "--roi-json",
+        str(roi_path),
         "--json",
         str(json_path),
     ]
@@ -234,3 +241,5 @@ def test_pair_converted_script_gx008_like_scene_root(tmp_path):
     payload = json.loads(json_path.read_text(encoding="utf-8"))
     assert payload["pair_result"]["status"] == "success"
     assert payload["preview_result"]["status"] == "success"
+    assert "pair_metrics_keys" in payload
+    assert "roi_energy_ratio" in payload["pair_metrics_keys"]

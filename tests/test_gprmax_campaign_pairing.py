@@ -48,6 +48,12 @@ def test_valid_csv_pair_generates_target_response(tmp_path):
     metrics = json.loads(result.metrics_path.read_text(encoding="utf-8"))
     assert metrics["raw_shape"] == [3, 3]
     assert "target_response_energy" in metrics
+    assert "raw_background_mae" in metrics
+    assert "raw_background_mse" in metrics
+    assert "raw_background_rmse" in metrics
+    assert "raw_background_psnr" in metrics
+    assert "target_to_raw_energy_ratio" in metrics
+    assert "sparsity_or_concentration_proxy" in metrics
 
 
 def test_shape_mismatch_invalid(tmp_path):
@@ -138,6 +144,34 @@ def test_single_column_csv_pair_preserves_2d_shape(tmp_path):
     assert metrics["target_response_shape"] == [3, 1]
     generated = np.load(result.target_response_npy_path)
     np.testing.assert_allclose(generated, raw - bg)
+
+
+def test_pairing_with_roi_json_path_adds_roi_metric(tmp_path):
+    raw = np.array([[1.0, 1.0], [1.0, 1.0]], dtype=np.float64)
+    bg = np.zeros((2, 2), dtype=np.float64)
+    raw_path = tmp_path / "raw.csv"
+    bg_path = tmp_path / "bg.csv"
+    roi_path = tmp_path / "roi.json"
+    np.savetxt(raw_path, raw, delimiter=",", fmt="%.10g")
+    np.savetxt(bg_path, bg, delimiter=",", fmt="%.10g")
+    roi_path.write_text(
+        json.dumps({"sample_range": [0, 1], "trace_range": [0, 2]}),
+        encoding="utf-8",
+    )
+
+    spec = PairedOutputSpec(
+        campaign_id="GX-003",
+        scene_id="scene_roi",
+        raw_output_path=raw_path,
+        background_output_path=bg_path,
+        output_dir=tmp_path / "pair_roi",
+        target_roi=str(roi_path),
+        source_format="csv",
+    )
+    result = generate_target_response(spec)
+    assert result.status == "success"
+    metrics = json.loads(result.metrics_path.read_text(encoding="utf-8"))
+    assert metrics["roi_energy_ratio"] == 0.5
 
 
 def test_cli_pair_outputs_valid(tmp_path):

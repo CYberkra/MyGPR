@@ -356,7 +356,21 @@ The Evidence package must clearly distinguish:
 
 For synthetic paired data with known target response, full-reference metrics are allowed.
 
-Candidate metrics:
+Current standardized paired metrics are implemented in:
+
+- `core/gprmax_campaign/metrics.py`
+- specification: `docs/metrics/synthetic_paired_metrics.md`
+
+Current metric family:
+
+- energy and shape checks
+- MAE/MSE/RMSE
+- PSNR with safe zero-MSE handling
+- target/background and target/raw energy ratios
+- concentration proxy
+- optional ROI energy ratio with warning-based fallback
+
+Candidate future metrics:
 
 - MAE
 - MSE
@@ -532,6 +546,7 @@ As of the current source baseline:
 - single-scene local execution wrapper is implemented in GX-RUN-002.
 - paired output validation and target_response generation are implemented in GX-RUN-003 (backend-only).
 - preview PNG generation and lightweight report stubs are implemented in GX-RUN-004 (backend-only).
+- standardized synthetic paired metrics are implemented in METRIC-SYN-001 (`core/gprmax_campaign/metrics.py`).
 - optional GPU CLI passthrough is implemented in GX-RUN-GPU-001 (`--gpu`, `--gpu-device`, `--gpu-devices`).
 - explicit external gprMax runtime Python is supported (`--gprmax-python <python.exe>`), so MyGPR does not depend on a bare `gprMax` command being available on `PATH`.
 - supported pairing input formats are CSV and NPY only.

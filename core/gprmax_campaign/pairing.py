@@ -11,6 +11,8 @@ from typing import Any
 
 import numpy as np
 
+from core.gprmax_campaign.metrics import compute_paired_metrics
+
 
 @dataclass(frozen=True)
 class PairedOutputSpec:
@@ -21,7 +23,7 @@ class PairedOutputSpec:
     raw_output_path: Path
     background_output_path: Path
     output_dir: Path
-    target_roi: str | None = None
+    target_roi: dict[str, Any] | str | None = None
     source_format: str = "auto"
 
 
@@ -252,7 +254,8 @@ def generate_target_response(spec: PairedOutputSpec) -> TargetResponseResult:
     target_response = raw - background
     np.save(response_npy_path, target_response)
     np.savetxt(response_csv_path, target_response, delimiter=",", fmt="%.10g")
-    metrics = _build_metrics(raw, background, target_response)
+    roi = _resolve_roi(spec.target_roi)
+    metrics = compute_paired_metrics(raw, background, target_response, roi=roi)
     metrics_path.write_text(
         json.dumps(metrics, ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -339,37 +342,6 @@ def _issue(level: str, code: str, message: str, path: Path | None = None) -> dic
     return payload
 
 
-def _build_metrics(raw: np.ndarray, background: np.ndarray, target_response: np.ndarray) -> dict[str, Any]:
-    raw_energy = float(np.sum(np.square(raw)))
-    background_energy = float(np.sum(np.square(background)))
-    target_energy = float(np.sum(np.square(target_response)))
-    return {
-        "raw_shape": list(raw.shape),
-        "background_shape": list(background.shape),
-        "target_response_shape": list(target_response.shape),
-        "raw_min": float(np.min(raw)),
-        "raw_max": float(np.max(raw)),
-        "raw_mean": float(np.mean(raw)),
-        "raw_std": float(np.std(raw)),
-        "background_min": float(np.min(background)),
-        "background_max": float(np.max(background)),
-        "background_mean": float(np.mean(background)),
-        "background_std": float(np.std(background)),
-        "target_response_min": float(np.min(target_response)),
-        "target_response_max": float(np.max(target_response)),
-        "target_response_mean": float(np.mean(target_response)),
-        "target_response_std": float(np.std(target_response)),
-        "raw_energy": raw_energy,
-        "background_energy": background_energy,
-        "target_response_energy": target_energy,
-        "target_to_background_energy_ratio": (
-            float(target_energy / background_energy) if background_energy > 0 else None
-        ),
-        "abs_difference_mean": float(np.mean(np.abs(target_response))),
-        "abs_difference_max": float(np.max(np.abs(target_response))),
-    }
-
-
 def _pick_converted_file(folder: Path, stem: str, prefer_format: str) -> Path:
     suffix_priority = [".npy", ".csv"] if prefer_format.lower() != "csv" else [".csv", ".npy"]
     for suffix in suffix_priority:
@@ -381,3 +353,28 @@ def _pick_converted_file(folder: Path, stem: str, prefer_format: str) -> Path:
         if candidate.suffix.lower() in {".npy", ".csv"}:
             return candidate.resolve()
     return (folder / f"{stem}{suffix_priority[0]}").resolve()
+
+
+def _resolve_roi(target_roi: dict[str, Any] | str | None) -> dict[str, Any] | None:
+    if target_roi is None:
+        return None
+    if isinstance(target_roi, dict):
+        return target_roi
+    roi_candidate = str(target_roi).strip()
+    if not roi_candidate:
+        return None
+    roi_path = Path(roi_candidate).expanduser()
+    if roi_path.exists():
+        try:
+            payload = json.loads(roi_path.read_text(encoding="utf-8"))
+            if isinstance(payload, dict):
+                return payload
+        except Exception:
+            return None
+    try:
+        payload = json.loads(roi_candidate)
+        if isinstance(payload, dict):
+            return payload
+    except Exception:
+        return None
+    return None
