@@ -5,7 +5,10 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -23,6 +26,7 @@ from core.gprmax_campaign import (
     run_gprmax_task,
     validate_campaign,
 )
+from core.gprmax_campaign.manifest import build_run_manifest_payload
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -50,6 +54,22 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--num-runs",
         type=_positive_int,
         help="Optional gprMax run count forwarded as '-n N' for B-scan sweeps.",
+    )
+    parser.add_argument(
+        "--gpu",
+        action="store_true",
+        help="Enable optional gprMax GPU flag passthrough ('-gpu').",
+    )
+    parser.add_argument(
+        "--gpu-device",
+        type=_non_negative_int,
+        help="Use one CUDA device id, e.g. --gpu-device 0 (emits '-gpu 0').",
+    )
+    parser.add_argument(
+        "--gpu-devices",
+        type=_non_negative_int,
+        nargs="+",
+        help="Use multiple CUDA device ids, e.g. --gpu-devices 0 1 2 3.",
     )
     parser.add_argument(
         "--extra-arg",
@@ -125,12 +145,121 @@ def _positive_int(value: str) -> int:
     return parsed
 
 
+def _non_negative_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a non-negative integer") from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be a non-negative integer")
+    return parsed
+
+
 def _build_run_extra_args(args: argparse.Namespace) -> list[str]:
-    extra_args: list[str] = []
+    extra_args: list[str] = _sanitize_extra_args(args)
     if args.num_runs is not None:
         extra_args.extend(["-n", str(args.num_runs)])
-    extra_args.extend(str(item) for item in (args.extra_arg or []))
+    gpu_tokens = _build_gpu_args(args)
+    extra_args.extend(gpu_tokens)
     return extra_args
+
+
+def _sanitize_extra_args(args: argparse.Namespace) -> list[str]:
+    raw_args = [str(item) for item in (args.extra_arg or [])]
+    gpu_explicit = bool(args.gpu or args.gpu_device is not None or args.gpu_devices)
+    if not gpu_explicit:
+        return raw_args
+    sanitized: list[str] = []
+    skip_gpu_values = False
+    for token in raw_args:
+        if token == "-gpu":
+            skip_gpu_values = True
+            continue
+        if skip_gpu_values:
+            if token.startswith("-"):
+                skip_gpu_values = False
+                sanitized.append(token)
+            else:
+                continue
+        else:
+            sanitized.append(token)
+    return sanitized
+
+
+def _build_gpu_args(args: argparse.Namespace) -> list[str]:
+    device_ids = _resolve_gpu_device_ids(args)
+    if not (args.gpu or device_ids):
+        return []
+    if device_ids:
+        return ["-gpu", *[str(i) for i in device_ids]]
+    return ["-gpu"]
+
+
+def _resolve_gpu_device_ids(args: argparse.Namespace) -> list[int]:
+    if args.gpu_device is not None and args.gpu_devices:
+        raise argparse.ArgumentTypeError(
+            "--gpu-device and --gpu-devices are mutually exclusive"
+        )
+    if args.gpu_devices:
+        return list(args.gpu_devices)
+    if args.gpu_device is not None:
+        return [int(args.gpu_device)]
+    return []
+
+
+def _detect_nvcc_available() -> bool:
+    forced = _env_override_bool("MYGPR_GPU_CHECK_NVCC")
+    if forced is not None:
+        return forced
+    try:
+        proc = subprocess.run(
+            ["nvcc", "--version"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    except Exception:
+        return False
+    return proc.returncode == 0
+
+
+def _detect_pycuda_available() -> bool:
+    forced = _env_override_bool("MYGPR_GPU_CHECK_PYCUDA")
+    if forced is not None:
+        return forced
+    return importlib.util.find_spec("pycuda") is not None
+
+
+def _env_override_bool(name: str) -> bool | None:
+    raw = str(os.environ.get(name, "")).strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+def _build_gpu_warning(
+    *,
+    gpu_requested: bool,
+    nvcc_available: bool,
+    pycuda_available: bool,
+) -> str | None:
+    if not gpu_requested:
+        return None
+    missing = []
+    if not nvcc_available:
+        missing.append("nvcc")
+    if not pycuda_available:
+        missing.append("pycuda")
+    if not missing:
+        return None
+    return (
+        "GPU requested but environment check is incomplete: missing "
+        + ", ".join(missing)
+        + ". gprMax may fall back to CPU or fail at runtime."
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -163,6 +292,11 @@ def _run_campaign_mode(args: argparse.Namespace) -> int:
         return 0
 
     if args.run_scene:
+        try:
+            _ = _resolve_gpu_device_ids(args)
+        except argparse.ArgumentTypeError as exc:
+            print(f"ERROR: {exc}")
+            return 2
         if args.variant is None:
             print("ERROR: --variant is required when --run-scene is used.")
             return 2
@@ -187,6 +321,17 @@ def _run_campaign_mode(args: argparse.Namespace) -> int:
             if args.variant == "raw_with_target"
             else scene.background_model
         )
+        gpu_device_ids = _resolve_gpu_device_ids(args)
+        gpu_requested = bool(args.gpu or gpu_device_ids)
+        nvcc_available = _detect_nvcc_available()
+        pycuda_available = _detect_pycuda_available()
+        gpu_warning = _build_gpu_warning(
+            gpu_requested=gpu_requested,
+            nvcc_available=nvcc_available,
+            pycuda_available=pycuda_available,
+        )
+        if gpu_warning:
+            print(f"gpu_warning: {gpu_warning}")
         output_dir = campaign.output_root / scene.scene_id / args.variant
         task = GprMaxTaskSpec(
             campaign_id=campaign.campaign_id,
@@ -196,6 +341,12 @@ def _run_campaign_mode(args: argparse.Namespace) -> int:
             output_dir=output_dir,
             gprmax_executable=campaign.gprmax_executable,
             timeout_seconds=args.timeout_seconds,
+            requested_num_runs=args.num_runs,
+            gpu_requested=gpu_requested,
+            gpu_device_ids=gpu_device_ids,
+            nvcc_available=nvcc_available,
+            pycuda_available=pycuda_available,
+            gpu_warning=gpu_warning,
             extra_args=_build_run_extra_args(args),
         )
         run_result = run_gprmax_task(task)
@@ -211,7 +362,7 @@ def _run_campaign_mode(args: argparse.Namespace) -> int:
         if run_result.error_message:
             print(f"error_message: {run_result.error_message}")
         if args.json_path:
-            _write_json(args.json_path, run_result.to_dict())
+            _write_json(args.json_path, build_run_manifest_payload(task, run_result))
         return 0 if run_result.status == "success" else 1
 
     print("ERROR: unsupported campaign mode combination.")

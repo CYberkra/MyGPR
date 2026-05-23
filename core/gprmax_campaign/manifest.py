@@ -18,6 +18,9 @@ def build_run_manifest_payload(
     result: GprMaxRunResult,
 ) -> dict[str, Any]:
     """Build a compact JSON payload for run_manifest.json."""
+    gpu_device_ids = [int(i) for i in (task.gpu_device_ids or [])]
+    command = list(result.command)
+    gpu_flag_emitted = "-gpu" in command
     return {
         "schema_version": "gprmax_campaign_run_manifest_v1",
         "campaign_id": result.campaign_id,
@@ -25,8 +28,9 @@ def build_run_manifest_payload(
         "variant": result.variant,
         "model_path": str(result.model_path),
         "output_dir": str(result.output_dir),
-        "command": list(result.command),
+        "command": command,
         "status": result.status,
+        "run_status": result.status,
         "return_code": result.return_code,
         "started_at": result.started_at,
         "ended_at": result.ended_at,
@@ -35,6 +39,13 @@ def build_run_manifest_payload(
         "stderr_path": str(result.stderr_path),
         "manifest_path": str(result.manifest_path),
         "timeout_seconds": task.timeout_seconds,
+        "requested_num_runs": task.requested_num_runs,
+        "gpu_requested": bool(task.gpu_requested),
+        "gpu_flag_emitted": gpu_flag_emitted,
+        "gpu_device_ids": gpu_device_ids,
+        "nvcc_available": task.nvcc_available,
+        "pycuda_available": task.pycuda_available,
+        "gpu_warning": task.gpu_warning,
         "error_message": result.error_message,
         "host": {
             "platform": platform.platform(),

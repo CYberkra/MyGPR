@@ -115,6 +115,12 @@ class GprMaxTaskSpec:
     gprmax_executable: str
     timeout_seconds: float | None = None
     extra_args: list[str] = field(default_factory=list)
+    requested_num_runs: int | None = None
+    gpu_requested: bool = False
+    gpu_device_ids: list[int] = field(default_factory=list)
+    nvcc_available: bool | None = None
+    pycuda_available: bool | None = None
+    gpu_warning: str | None = None
 
 
 @dataclass(frozen=True)

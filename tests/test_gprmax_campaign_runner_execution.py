@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -41,6 +42,9 @@ def test_runner_success_writes_logs_and_manifest(tmp_path):
     assert "manifest_path" in payload
     assert str(payload["manifest_path"]).endswith("run_manifest.json")
     assert payload["manifest_path"] == result.to_dict()["manifest_path"]
+    assert payload["gpu_requested"] is False
+    assert payload["gpu_flag_emitted"] is False
+    assert payload["gpu_device_ids"] == []
 
 
 def test_runner_failure_return_code_recorded(tmp_path):
@@ -202,6 +206,8 @@ def test_cli_num_runs_forwards_gprmax_n_argument(tmp_path):
     assert proc.returncode == 0
     payload = json.loads(result_json.read_text(encoding="utf-8"))
     assert payload["command"][-2:] == ["-n", "3"]
+    assert payload["requested_num_runs"] == 3
+    assert payload["gpu_requested"] is False
 
 
 def test_cli_rejects_non_positive_num_runs(tmp_path):
@@ -220,3 +226,231 @@ def test_cli_rejects_non_positive_num_runs(tmp_path):
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     assert proc.returncode == 2
     assert "positive integer" in proc.stderr
+
+
+def test_cli_gpu_flag_passthrough_without_device(tmp_path):
+    campaign_path = tmp_path / "campaign_gpu.yaml"
+    output_root = tmp_path / "campaign_output"
+    campaign_path.write_text(
+        "\n".join(
+            [
+                "campaign_id: GX-RUN-GPU-001_cli_gpu",
+                f"output_root: {output_root.as_posix()}",
+                f"gprmax_executable: {sys.executable}",
+                "scenes:",
+                "  - scene_id: scene_valid_01",
+                f"    raw_model: {str((FIXTURE_DIR / 'fake_gprmax_success.py').resolve()).replace('\\', '/')}",
+                f"    background_model: {str((FIXTURE_DIR / 'fake_gprmax_fail.py').resolve()).replace('\\', '/')}",
+                f"    materials: {str((FIXTURE_DIR / 'models' / 'materials.txt').resolve()).replace('\\', '/')}",
+                f"    target_roi: {str((FIXTURE_DIR / 'annotations' / 'target_roi.json').resolve()).replace('\\', '/')}",
+                "    expected_outputs:",
+                "      - raw_with_target",
+                "      - background_only",
+                "      - target_response",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    result_json = tmp_path / "result_gpu.json"
+    cmd = [
+        sys.executable,
+        str(RUNNER),
+        "--campaign",
+        str(campaign_path),
+        "--run-scene",
+        "scene_valid_01",
+        "--variant",
+        "raw_with_target",
+        "--gpu",
+        "--json",
+        str(result_json),
+    ]
+    env = dict(os.environ)
+    env["MYGPR_GPU_CHECK_NVCC"] = "0"
+    env["MYGPR_GPU_CHECK_PYCUDA"] = "0"
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False, env=env)
+    assert proc.returncode == 0
+    payload = json.loads(result_json.read_text(encoding="utf-8"))
+    assert payload["command"][-1] == "-gpu"
+    assert payload["gpu_requested"] is True
+    assert payload["gpu_flag_emitted"] is True
+    assert payload["gpu_device_ids"] == []
+    assert payload["nvcc_available"] is False
+    assert payload["pycuda_available"] is False
+    assert "gpu_warning" in payload and payload["gpu_warning"]
+
+
+def test_cli_gpu_single_device_passthrough(tmp_path):
+    campaign_path = tmp_path / "campaign_gpu_single.yaml"
+    output_root = tmp_path / "campaign_output"
+    campaign_path.write_text(
+        "\n".join(
+            [
+                "campaign_id: GX-RUN-GPU-001_cli_gpu_single",
+                f"output_root: {output_root.as_posix()}",
+                f"gprmax_executable: {sys.executable}",
+                "scenes:",
+                "  - scene_id: scene_valid_01",
+                f"    raw_model: {str((FIXTURE_DIR / 'fake_gprmax_success.py').resolve()).replace('\\', '/')}",
+                f"    background_model: {str((FIXTURE_DIR / 'fake_gprmax_fail.py').resolve()).replace('\\', '/')}",
+                f"    materials: {str((FIXTURE_DIR / 'models' / 'materials.txt').resolve()).replace('\\', '/')}",
+                f"    target_roi: {str((FIXTURE_DIR / 'annotations' / 'target_roi.json').resolve()).replace('\\', '/')}",
+                "    expected_outputs:",
+                "      - raw_with_target",
+                "      - background_only",
+                "      - target_response",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    result_json = tmp_path / "result_gpu_single.json"
+    cmd = [
+        sys.executable,
+        str(RUNNER),
+        "--campaign",
+        str(campaign_path),
+        "--run-scene",
+        "scene_valid_01",
+        "--variant",
+        "raw_with_target",
+        "--gpu-device",
+        "0",
+        "--json",
+        str(result_json),
+    ]
+    env = dict(os.environ)
+    env["MYGPR_GPU_CHECK_NVCC"] = "1"
+    env["MYGPR_GPU_CHECK_PYCUDA"] = "1"
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False, env=env)
+    assert proc.returncode == 0
+    payload = json.loads(result_json.read_text(encoding="utf-8"))
+    assert payload["command"][-2:] == ["-gpu", "0"]
+    assert payload["gpu_device_ids"] == [0]
+    assert payload["nvcc_available"] is True
+    assert payload["pycuda_available"] is True
+    assert payload["gpu_warning"] is None
+
+
+def test_cli_gpu_multi_devices_passthrough(tmp_path):
+    campaign_path = tmp_path / "campaign_gpu_multi.yaml"
+    output_root = tmp_path / "campaign_output"
+    campaign_path.write_text(
+        "\n".join(
+            [
+                "campaign_id: GX-RUN-GPU-001_cli_gpu_multi",
+                f"output_root: {output_root.as_posix()}",
+                f"gprmax_executable: {sys.executable}",
+                "scenes:",
+                "  - scene_id: scene_valid_01",
+                f"    raw_model: {str((FIXTURE_DIR / 'fake_gprmax_success.py').resolve()).replace('\\', '/')}",
+                f"    background_model: {str((FIXTURE_DIR / 'fake_gprmax_fail.py').resolve()).replace('\\', '/')}",
+                f"    materials: {str((FIXTURE_DIR / 'models' / 'materials.txt').resolve()).replace('\\', '/')}",
+                f"    target_roi: {str((FIXTURE_DIR / 'annotations' / 'target_roi.json').resolve()).replace('\\', '/')}",
+                "    expected_outputs:",
+                "      - raw_with_target",
+                "      - background_only",
+                "      - target_response",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    result_json = tmp_path / "result_gpu_multi.json"
+    cmd = [
+        sys.executable,
+        str(RUNNER),
+        "--campaign",
+        str(campaign_path),
+        "--run-scene",
+        "scene_valid_01",
+        "--variant",
+        "raw_with_target",
+        "--gpu-devices",
+        "0",
+        "1",
+        "2",
+        "3",
+        "--json",
+        str(result_json),
+    ]
+    env = dict(os.environ)
+    env["MYGPR_GPU_CHECK_NVCC"] = "1"
+    env["MYGPR_GPU_CHECK_PYCUDA"] = "0"
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False, env=env)
+    assert proc.returncode == 0
+    payload = json.loads(result_json.read_text(encoding="utf-8"))
+    assert payload["command"][-5:] == ["-gpu", "0", "1", "2", "3"]
+    assert payload["gpu_device_ids"] == [0, 1, 2, 3]
+    assert payload["gpu_warning"] and "pycuda" in payload["gpu_warning"]
+
+
+def test_cli_num_runs_and_gpu_passthrough_combined(tmp_path):
+    campaign_path = tmp_path / "campaign_gpu_num_runs.yaml"
+    output_root = tmp_path / "campaign_output"
+    campaign_path.write_text(
+        "\n".join(
+            [
+                "campaign_id: GX-RUN-GPU-001_cli_gpu_combo",
+                f"output_root: {output_root.as_posix()}",
+                f"gprmax_executable: {sys.executable}",
+                "scenes:",
+                "  - scene_id: scene_valid_01",
+                f"    raw_model: {str((FIXTURE_DIR / 'fake_gprmax_success.py').resolve()).replace('\\', '/')}",
+                f"    background_model: {str((FIXTURE_DIR / 'fake_gprmax_fail.py').resolve()).replace('\\', '/')}",
+                f"    materials: {str((FIXTURE_DIR / 'models' / 'materials.txt').resolve()).replace('\\', '/')}",
+                f"    target_roi: {str((FIXTURE_DIR / 'annotations' / 'target_roi.json').resolve()).replace('\\', '/')}",
+                "    expected_outputs:",
+                "      - raw_with_target",
+                "      - background_only",
+                "      - target_response",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    result_json = tmp_path / "result_gpu_combo.json"
+    cmd = [
+        sys.executable,
+        str(RUNNER),
+        "--campaign",
+        str(campaign_path),
+        "--run-scene",
+        "scene_valid_01",
+        "--variant",
+        "raw_with_target",
+        "--num-runs",
+        "60",
+        "--gpu-device",
+        "0",
+        "--json",
+        str(result_json),
+    ]
+    env = dict(os.environ)
+    env["MYGPR_GPU_CHECK_NVCC"] = "1"
+    env["MYGPR_GPU_CHECK_PYCUDA"] = "1"
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False, env=env)
+    assert proc.returncode == 0
+    payload = json.loads(result_json.read_text(encoding="utf-8"))
+    assert "-n" in payload["command"]
+    assert "60" in payload["command"]
+    assert payload["command"][-2:] == ["-gpu", "0"]
+    assert payload["requested_num_runs"] == 60
+
+
+def test_cli_rejects_gpu_device_and_gpu_devices_together(tmp_path):
+    cmd = [
+        sys.executable,
+        str(RUNNER),
+        "--campaign",
+        str(MISSING_EXPECTED),
+        "--run-scene",
+        "scene_missing_expected_outputs",
+        "--variant",
+        "raw_with_target",
+        "--gpu-device",
+        "0",
+        "--gpu-devices",
+        "1",
+        "2",
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    assert proc.returncode == 2
+    assert "mutually exclusive" in proc.stdout
