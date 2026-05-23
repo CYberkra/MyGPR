@@ -274,3 +274,23 @@ Scope expectation:
 - implement diagnostic/report harness path only;
 - do not modify production AutoTune scoring semantics in this phase.
 
+## 18. AT-BG-002 Harness Draft Status
+
+AT-BG-002 diagnostic harness draft is implemented as:
+
+- `core/autotune_background_suppression.py`
+- `scripts/autotune_background_suppression_diagnostic.py`
+
+Current draft outputs:
+
+- `trial_table.json`
+- `trial_table.csv`
+- `selected_parameters.json`
+- `background_suppression_autotune_report.md`
+- `background_suppression_autotune_manifest.json`
+
+Status boundary:
+
+- diagnostic/report path only;
+- not wired into production AutoTune scoring;
+- not UI-integrated in this phase.
