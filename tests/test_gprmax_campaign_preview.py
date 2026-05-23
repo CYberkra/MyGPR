@@ -77,6 +77,49 @@ def test_preview_accepts_existing_npy_target_with_csv_sources(tmp_path):
     assert result.target_response_preview_path and result.target_response_preview_path.exists()
 
 
+def test_preview_existing_target_shape_mismatch_reports_paths(tmp_path):
+    out_dir = tmp_path / "preview_bad_target_shape"
+    target_response = tmp_path / "target_response.npy"
+    np.save(target_response, np.zeros((1, 2), dtype=np.float64))
+
+    result = generate_pair_preview_report(
+        campaign_id="GX-004",
+        scene_id="scene_bad_target_shape",
+        raw_output_path=FIXTURE_DIR / "raw_valid.csv",
+        background_output_path=FIXTURE_DIR / "background_valid.csv",
+        target_response_path=target_response,
+        output_dir=out_dir,
+        source_format="csv",
+    )
+
+    assert result.status == "invalid"
+    issue = result.issues[0]
+    assert issue["code"] == "target_response_shape_mismatch"
+    assert "target_response.npy" in issue["message"]
+    assert "raw_valid.csv" in issue["message"]
+
+
+def test_preview_existing_target_unsupported_suffix_writes_json_summary(tmp_path):
+    out_dir = tmp_path / "preview_bad_target_suffix"
+    target_response = tmp_path / "target_response.txt"
+    target_response.write_text("1,2\n3,4\n", encoding="utf-8")
+
+    result = generate_pair_preview_report(
+        campaign_id="GX-004",
+        scene_id="scene_bad_target_suffix",
+        raw_output_path=FIXTURE_DIR / "raw_valid.csv",
+        background_output_path=FIXTURE_DIR / "background_valid.csv",
+        target_response_path=target_response,
+        output_dir=out_dir,
+        source_format="csv",
+    )
+
+    assert result.status == "invalid"
+    assert result.summary_json_path and result.summary_json_path.exists()
+    payload = json.loads(result.summary_json_path.read_text(encoding="utf-8"))
+    assert payload["issues"][0]["code"] == "target_response_load_failed"
+
+
 def test_cli_preview_pair_valid(tmp_path):
     out_dir = tmp_path / "cli_preview_ok"
     json_path = tmp_path / "cli_preview_ok.json"

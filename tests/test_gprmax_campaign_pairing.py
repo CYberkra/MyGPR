@@ -56,7 +56,11 @@ def test_shape_mismatch_invalid(tmp_path):
     )
     result = generate_target_response(spec)
     assert result.status == "invalid"
-    assert any(item["code"] == "shape_mismatch" for item in result.issues)
+    issue = next(item for item in result.issues if item["code"] == "shape_mismatch")
+    assert "raw=" in issue["message"]
+    assert "background=" in issue["message"]
+    assert "raw_shape_mismatch.csv" in issue["message"]
+    assert "background_shape_mismatch.csv" in issue["message"]
 
 
 def test_missing_file_invalid(tmp_path):

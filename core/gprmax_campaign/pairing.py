@@ -156,7 +156,9 @@ def validate_paired_outputs(
             _issue(
                 "error",
                 "shape_mismatch",
-                f"shape mismatch: raw={raw.shape}, background={background.shape}",
+                "shape mismatch: "
+                f"raw={raw.shape} path={raw_path}; "
+                f"background={background.shape} path={background_path}",
             )
         )
     if not np.all(np.isfinite(raw)):

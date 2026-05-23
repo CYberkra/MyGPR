@@ -110,7 +110,35 @@ def generate_pair_preview_report(
 
     metrics: dict[str, Any] | None = None
     if target_response_path:
-        target_arr = _load_array(Path(target_response_path), "auto")
+        target_path = Path(target_response_path).expanduser().resolve()
+        try:
+            target_arr = _load_array(target_path, "auto")
+        except Exception as exc:
+            result = PairPreviewReportResult(
+                campaign_id=campaign_id,
+                scene_id=scene_id,
+                status="invalid",
+                output_dir=out_dir,
+                raw_preview_path=None,
+                background_preview_path=None,
+                target_response_preview_path=None,
+                paired_preview_panel_path=None,
+                report_md_path=None,
+                summary_json_path=summary_json_path,
+                issues=[
+                    {
+                        "level": "error",
+                        "code": "target_response_load_failed",
+                        "message": f"failed to load target_response path={target_path}: {exc}",
+                    }
+                ],
+                metrics=None,
+            )
+            summary_json_path.write_text(
+                json.dumps(result.to_dict(), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            return result
     else:
         tr_result = generate_target_response(pair_spec)
         if tr_result.status != "success" or tr_result.target_response_npy_path is None:
@@ -141,7 +169,12 @@ def generate_pair_preview_report(
             {
                 "level": "error",
                 "code": "target_response_shape_mismatch",
-                "message": f"target_response shape mismatch: target={target_arr.shape}, raw={raw_arr.shape}",
+                "message": (
+                    "target_response shape mismatch: "
+                    f"target={target_arr.shape} path="
+                    f"{Path(target_response_path).expanduser().resolve() if target_response_path else out_dir / 'target_response.npy'}; "
+                    f"raw={raw_arr.shape} path={Path(raw_output_path).expanduser().resolve()}"
+                ),
             }
         ]
         result = PairPreviewReportResult(
@@ -214,7 +247,13 @@ def generate_pair_preview_report(
 def _load_array(path: Path, source_format: str) -> np.ndarray:
     fmt = source_format.lower()
     if fmt == "auto":
-        fmt = "npy" if path.suffix.lower() == ".npy" else "csv"
+        suffix = path.suffix.lower()
+        if suffix == ".npy":
+            fmt = "npy"
+        elif suffix == ".csv":
+            fmt = "csv"
+        else:
+            raise ValueError(f"unsupported source format: {suffix or '<none>'}")
     if fmt == "npy":
         arr = np.load(path)
     else:

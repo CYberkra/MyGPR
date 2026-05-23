@@ -10,9 +10,17 @@ favorites/
 workflow_templates/
 
 # gprMax simulation outputs generated during local benchmark runs.
+*.out
+*.h5
 experiments/gprmax/**/*.out
 experiments/gprmax/**/*.h5
 experiments/gprmax/**/*.vti
 experiments/gprmax/**/*.vtk
+experiments/gprmax/**/*.vtu
+*.vti
+*.vtk
+*.vtu
 experiments/gprmax/**/converted/
 experiments/gprmax/**/paired_outputs/
+experiments/gprmax/**/gpu_smoke*/
+experiments/gprmax/**/smoke_outputs/

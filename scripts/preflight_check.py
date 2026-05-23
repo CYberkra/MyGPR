@@ -7,6 +7,7 @@ from __future__ import annotations
 import ast
 import gc
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -16,6 +17,56 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+
+GENERATED_ARTIFACT_SUFFIXES = {".out", ".h5", ".vti", ".vtk"}
+GENERATED_GPRMAX_OUTPUT_MARKERS = {
+    "/converted/",
+    "/paired_outputs/",
+    "/gpu_smoke/",
+    "/smoke_outputs/",
+}
+GENERATED_GPRMAX_OUTPUT_SUFFIXES = {".csv", ".npy", ".png", ".json"}
+
+
+def _normalize_git_path(path: str) -> str:
+    return str(path).replace("\\", "/").strip()
+
+
+def _is_generated_artifact_path(path: str) -> bool:
+    normalized = _normalize_git_path(path)
+    suffix = Path(normalized).suffix.lower()
+    if suffix in GENERATED_ARTIFACT_SUFFIXES:
+        return True
+    if normalized.startswith("experiments/gprmax/") and suffix in GENERATED_GPRMAX_OUTPUT_SUFFIXES:
+        return any(marker in normalized for marker in GENERATED_GPRMAX_OUTPUT_MARKERS)
+    return False
+
+
+def _staged_files() -> list[str]:
+    try:
+        proc = subprocess.run(
+            ["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except Exception:
+        return []
+    if proc.returncode != 0:
+        return []
+    return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+
+
+def check_staged_generated_artifacts() -> None:
+    blocked = [path for path in _staged_files() if _is_generated_artifact_path(path)]
+    if blocked:
+        details = "\n".join(f"  - {path}" for path in blocked)
+        raise AssertionError(
+            "Generated gprMax/native artifacts are staged and must stay out of "
+            f"MyGPR source:\n{details}"
+        )
+    print("[OK] Staged generated artifact guard")
 
 
 def check_syntax() -> None:
@@ -123,6 +174,7 @@ def check_runtime_flows() -> None:
 
 def main() -> int:
     check_syntax()
+    check_staged_generated_artifacts()
     check_runtime_flows()
     print("[OK] Preflight passed")
     return 0
