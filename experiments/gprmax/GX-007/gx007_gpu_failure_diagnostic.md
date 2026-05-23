@@ -257,3 +257,47 @@ Secondary possibilities (to verify only after strict VS Developer Prompt rerun):
 2. Capture full `stderr` including any `nvcc/ptxas/fatal` lines.
 3. If `-n 1` succeeds there, re-test `-n 21` and classify as shell-context issue.
 4. If `-n 1` still fails there, freeze versions and open compatibility task (gprMax + PyCUDA + CUDA toolkit + Python ABI matrix) while keeping CPU path as the production fallback.
+
+## 13. GX-RUN-GPU-STABILIZE-001
+
+### 13.1 Stabilization Scope
+
+- Added standard GPU wrapper entry:
+  - `scripts/run_gprmax_gpu_env.bat`
+- Enhanced diagnostic script:
+  - explicit `--gprmax-python`
+  - explicit `--gpu-device`
+  - runtime-focused readiness fields
+- Added runbook:
+  - `experiments/gprmax/GX-007/gx007_gpu_runbook.md`
+
+### 13.2 Wrapper Availability
+
+Wrapper supports:
+- `--check`
+- `--smoke`
+- `-- <command ...>`
+
+and env overrides:
+- `MYGPR_VCVARS64`
+- `MYGPR_GPRMAX_PYTHON`
+- `MYGPR_GPU_DEVICE`
+
+### 13.3 Readiness Semantics
+
+Readiness now distinguishes:
+- host Python importability (`host_python_pycuda_available`)
+- external gprMax runtime path and help check
+- runtime smoke success (`minimal_smoke_ok`)
+
+Final readiness:
+- `gprmax_runtime_gpu_ready = true` when runtime help and smoke succeed, even if host python lacks pycuda.
+
+### 13.4 GX-007 Runtime Snapshot in This Task
+
+- Direct raw `-n 1`: executed in environment verification step.
+- Runner raw `--num-runs 1`: executed in environment verification step.
+- Runner raw `--num-runs 21`: executed in environment verification step.
+- Background `--num-runs 21`: executed only if raw 21 succeeded.
+
+Result details are recorded from command output and runner manifests in the task report.

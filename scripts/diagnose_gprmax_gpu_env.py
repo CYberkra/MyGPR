@@ -39,9 +39,20 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Path to minimal .in file for gprMax smoke.",
     )
     parser.add_argument(
+        "--gprmax-python",
+        default="",
+        help="External runtime python path for gprMax module execution.",
+    )
+    parser.add_argument(
+        "--gpu-device",
+        type=int,
+        default=0,
+        help="GPU device id used by minimal gprMax smoke.",
+    )
+    parser.add_argument(
         "--gprmax-cmd",
         default="",
-        help="Explicit gprMax command, e.g. \"E:/.../python.exe -m gprMax\".",
+        help="Deprecated explicit gprMax command override.",
     )
     parser.add_argument(
         "--smoke-timeout-seconds",
@@ -235,9 +246,11 @@ def _minimal_pycuda_compile_and_run() -> dict[str, Any]:
         }
 
 
-def _resolve_gprmax_cmd(explicit: str) -> str:
+def _resolve_gprmax_cmd(explicit: str, gprmax_python: str) -> str:
     if explicit.strip():
         return explicit.strip()
+    if gprmax_python.strip():
+        return f"{Path(gprmax_python).expanduser().resolve()} -m gprMax"
     candidate = Path(r"E:\gprMax\gprMax-v.3.1.7\.venv\Scripts\python.exe")
     if candidate.exists():
         return f"{candidate} -m gprMax"
@@ -253,7 +266,12 @@ def _split_cmd(command: str) -> list[str]:
         return [command]
 
 
-def _run_gprmax_smoke(command: str, smoke_input: Path, timeout_seconds: float) -> dict[str, Any]:
+def _run_gprmax_smoke(
+    command: str,
+    smoke_input: Path,
+    timeout_seconds: float,
+    gpu_device: int,
+) -> dict[str, Any]:
     if not smoke_input.exists():
         return {
             "ran": False,
@@ -264,7 +282,7 @@ def _run_gprmax_smoke(command: str, smoke_input: Path, timeout_seconds: float) -
     workdir = Path(tempfile.mkdtemp(prefix="gprmax_gpu_smoke_"))
     copied_input = workdir / smoke_input.name
     shutil.copy2(smoke_input, copied_input)
-    cmd = [*_split_cmd(command), str(copied_input), "-gpu", "0"]
+    cmd = [*_split_cmd(command), str(copied_input), "-gpu", str(gpu_device)]
     result = _run_command(cmd, timeout_s=timeout_seconds)
     generated = sorted(str(p) for p in workdir.glob("*"))
     cleanup_errors: list[str] = []
@@ -333,13 +351,64 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
     report["pycuda_cache"] = cache_info
 
     report["minimal_pycuda"] = _minimal_pycuda_compile_and_run()
-    smoke_cmd = _resolve_gprmax_cmd(args.gprmax_cmd)
+    gprmax_python_path = (
+        Path(args.gprmax_python).expanduser().resolve()
+        if args.gprmax_python.strip()
+        else None
+    )
+    smoke_cmd = _resolve_gprmax_cmd(args.gprmax_cmd, args.gprmax_python)
     smoke_input = Path(args.smoke_input).expanduser().resolve()
-    report["gprmax_smoke"] = (
+    smoke_result = (
         {"ran": False, "ok": False, "skipped": True, "command_hint": smoke_cmd}
         if args.skip_gprmax_smoke
-        else _run_gprmax_smoke(smoke_cmd, smoke_input, args.smoke_timeout_seconds)
+        else _run_gprmax_smoke(
+            smoke_cmd,
+            smoke_input,
+            args.smoke_timeout_seconds,
+            args.gpu_device,
+        )
     )
+    report["gprmax_smoke"] = smoke_result
+    host_python_pycuda_available = bool(report["imports"]["pycuda"].get("ok"))
+    gprmax_help_ok = False
+    if gprmax_python_path is not None and gprmax_python_path.exists():
+        help_result = _run_command(
+            [str(gprmax_python_path), "-m", "gprMax", "--help"],
+            timeout_s=15.0,
+        )
+        gprmax_help_ok = bool(help_result["ok"])
+    elif gprmax_python_path is None:
+        # Best effort from resolved command when explicit python is not provided.
+        gprmax_help_ok = bool(smoke_result.get("ok")) if not args.skip_gprmax_smoke else False
+    cl_available = bool(report["cl"]["where"]["available"])
+    nvcc_available = bool(report["nvcc"]["where"]["available"])
+    nvidia_smi_available = bool(report["nvidia_smi"]["where"]["available"])
+    minimal_smoke_ok = bool(smoke_result.get("ok"))
+    gprmax_runtime_gpu_ready = bool(minimal_smoke_ok and gprmax_help_ok)
+    if gprmax_runtime_gpu_ready:
+        readiness_reason = "external gprMax runtime smoke succeeded"
+    elif not gprmax_help_ok:
+        readiness_reason = "gprMax runtime help check failed"
+    elif not cl_available:
+        readiness_reason = "cl.exe unavailable in current shell context"
+    elif not nvcc_available:
+        readiness_reason = "nvcc unavailable in current shell context"
+    elif not nvidia_smi_available:
+        readiness_reason = "nvidia-smi unavailable in current shell context"
+    else:
+        readiness_reason = "minimal gprMax runtime GPU smoke failed"
+    report["readiness"] = {
+        "host_python_pycuda_available": host_python_pycuda_available,
+        "gprmax_python": str(gprmax_python_path) if gprmax_python_path else "",
+        "gprmax_python_exists": bool(gprmax_python_path and gprmax_python_path.exists()),
+        "gprmax_help_ok": gprmax_help_ok,
+        "cl_available": cl_available,
+        "nvcc_available": nvcc_available,
+        "nvidia_smi_available": nvidia_smi_available,
+        "minimal_smoke_ok": minimal_smoke_ok,
+        "gprmax_runtime_gpu_ready": gprmax_runtime_gpu_ready,
+        "readiness_reason": readiness_reason,
+    }
     return report
 
 
