@@ -28,6 +28,7 @@ from PyQt6.QtWidgets import (
 from qfluentwidgets import PushButton, FluentIcon, SegmentedWidget
 
 from core.methods_registry import PROCESSING_METHODS, get_method_display_name
+from ui.research_console_page import ResearchConsolePage
 
 
 class AutoTunePage(QWidget):
@@ -106,6 +107,7 @@ class AutoTunePage(QWidget):
         self.segmented.addItem("actions", "实验执行")
         self.segmented.addItem("results", "结果查看")
         self.segmented.addItem("truth", "真值验证")
+        self.segmented.addItem("research", "研究验证")
         layout.addWidget(self.segmented)
 
         self.stack = QStackedWidget(self)
@@ -115,11 +117,13 @@ class AutoTunePage(QWidget):
         self.page_actions = self._build_actions_page()
         self.page_results = self._build_results_page()
         self.page_truth = self._build_truth_validation_page()
+        self.page_research = ResearchConsolePage(self)
 
         self.stack.addWidget(self.page_config)
         self.stack.addWidget(self.page_actions)
         self.stack.addWidget(self.page_results)
         self.stack.addWidget(self.page_truth)
+        self.stack.addWidget(self.page_research)
 
         self.segmented.setCurrentItem("config")
         self.stack.setCurrentIndex(0)
@@ -562,7 +566,9 @@ class AutoTunePage(QWidget):
     def _on_segment_changed(self, route_key: str):
         if route_key == "truth":
             self.refresh_truth_validation()
-        mapping = {"config": 0, "actions": 1, "results": 2, "truth": 3}
+        if route_key == "research" and hasattr(self, "page_research"):
+            self.page_research.refresh()
+        mapping = {"config": 0, "actions": 1, "results": 2, "truth": 3, "research": 4}
         self.stack.setCurrentIndex(mapping.get(route_key, 0))
 
     def _on_result_segment_changed(self, route_key: str):

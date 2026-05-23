@@ -1,0 +1,51 @@
+{
+  "evidence_root_candidates": [
+    "../MyGPR-Evidence",
+    "D:/CDUT-UavGPR-Controller/MyGPR-Evidence"
+  ],
+  "gprmax_artifacts": [
+    {
+      "id": "GX-008_scene001",
+      "path": "gprmax/GX-008_scene001_flat_dry_sand_pec_shallow_paired_diagnostic/",
+      "scene_id": "scene_001_flat_dry_sand_pec_shallow",
+      "display_name": "GX-008 scene_001 - dry sand - PEC shallow",
+      "expected_status": "paired_evidence_done"
+    },
+    {
+      "id": "GX-008_scene002",
+      "path": "gprmax/GX-008_scene002_flat_damp_sand_pec_shallow_paired_diagnostic/",
+      "scene_id": "scene_002_flat_damp_sand_pec_shallow",
+      "display_name": "GX-008 scene_002 - damp sand - PEC shallow",
+      "expected_status": "paired_evidence_done"
+    },
+    {
+      "id": "GX-008_scene003",
+      "path": "gprmax/GX-008_scene003_flat_dry_sand_pvc_shallow_paired_diagnostic/",
+      "scene_id": "scene_003_flat_dry_sand_pvc_shallow",
+      "display_name": "GX-008 scene_003 - dry sand - PVC shallow",
+      "expected_status": "paired_evidence_done_metrics_pending"
+    }
+  ],
+  "at_bg_artifacts": [
+    {
+      "id": "AT-BG_scene001",
+      "path": "autotune/AT-BG-003_GX008_scene001_background_suppression_diagnostic/",
+      "display_name": "AT-BG scene_001 diagnostic"
+    },
+    {
+      "id": "AT-BG_scene002",
+      "path": "autotune/AT-BG-004A_GX008_scene002_background_suppression_diagnostic/",
+      "display_name": "AT-BG scene_002 diagnostic"
+    },
+    {
+      "id": "AT-BG_multi_scene",
+      "path": "autotune/AT-BG-004B_GX008_scene001_scene002_background_suppression_comparison/",
+      "display_name": "AT-BG scene_001 + scene_002 comparison"
+    }
+  ],
+  "draft_scenes": [
+    "scene_004_flat_damp_sand_pvc_shallow",
+    "scene_005_flat_dry_sand_pec_medium",
+    "scene_006_flat_damp_sand_pec_medium"
+  ]
+}

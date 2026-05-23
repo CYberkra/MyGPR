@@ -612,6 +612,27 @@ def test_main_plot_uses_index_axes_until_physical_axes_enabled():
         app.processEvents()
 
 
+def test_auto_tune_tab_exposes_research_console_pages():
+    app = _get_app()
+    win = GPRGuiQt()
+    try:
+        win.page_auto_tune.segmented.setCurrentItem("research")
+        assert win.page_auto_tune.stack.currentWidget() is win.page_auto_tune.page_research
+        page = win.page_auto_tune.page_research
+        tab_names = [page.tabs.tabText(index) for index in range(page.tabs.count())]
+        assert tab_names == [
+            "仿真与验证 Dashboard",
+            "背景抑制 AutoTune",
+            "Evidence Viewer",
+            "gprMax 模型编辑器 v0",
+        ]
+        assert page.model_scene_list.count() >= 6
+        assert "read-only protected mode" in page.model_inspector_text.toPlainText()
+    finally:
+        win.close()
+        app.processEvents()
+
+
 def test_auto_tune_workbench_bridge_switches_to_workbench_mode():
     app = _get_app()
     win = GPRGuiQt()
