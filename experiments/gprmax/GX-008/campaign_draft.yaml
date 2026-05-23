@@ -3,38 +3,40 @@ draft_note: "Draft only. Non-executable unless later validated."
 output_root: D:/CDUT-UavGPR-Controller/MyGPR-Evidence/gprmax/GX-008
 gprmax_executable: gprMax
 scenes:
-  - scene_id: gx008_s01
-    description: "dry_sand_like flat PEC shallow"
-    raw_model: experiments/gprmax/GX-008/models/gx008_s01/raw_with_target.in
-    background_model: experiments/gprmax/GX-008/models/gx008_s01/background_only.in
-    materials: experiments/gprmax/GX-008/models/gx008_s01/materials.txt
-    target_roi: experiments/gprmax/GX-008/annotations/gx008_s01_roi.json
+  - scene_id: scene_001_flat_dry_sand_pec_shallow
+    description: "GX-008 draft core scene 1, not yet validated/not yet run"
+    raw_model: experiments/gprmax/GX-008/models/scene_001_flat_dry_sand_pec_shallow/raw_with_target.in
+    background_model: experiments/gprmax/GX-008/models/scene_001_flat_dry_sand_pec_shallow/background_only.in
+    materials: experiments/gprmax/GX-008/models/scene_001_flat_dry_sand_pec_shallow/materials.txt
+    target_roi: experiments/gprmax/GX-008/models/scene_001_flat_dry_sand_pec_shallow/roi_draft.json
     expected_outputs:
       - raw_with_target
       - background_only
       - target_response
     tags:
-      - gx008
-      - core
+      - draft
+      - not_validated
+      - not_run
       - dry_sand_like
       - flat
       - pec
       - shallow
 
-  - scene_id: gx008_s06
-    description: "damp_sand_like flat PEC medium"
-    raw_model: experiments/gprmax/GX-008/models/gx008_s06/raw_with_target.in
-    background_model: experiments/gprmax/GX-008/models/gx008_s06/background_only.in
-    materials: experiments/gprmax/GX-008/models/gx008_s06/materials.txt
-    target_roi: experiments/gprmax/GX-008/annotations/gx008_s06_roi.json
+  - scene_id: scene_002_flat_damp_sand_pec_shallow
+    description: "GX-008 draft core scene 2, not yet validated/not yet run"
+    raw_model: experiments/gprmax/GX-008/models/scene_002_flat_damp_sand_pec_shallow/raw_with_target.in
+    background_model: experiments/gprmax/GX-008/models/scene_002_flat_damp_sand_pec_shallow/background_only.in
+    materials: experiments/gprmax/GX-008/models/scene_002_flat_damp_sand_pec_shallow/materials.txt
+    target_roi: experiments/gprmax/GX-008/models/scene_002_flat_damp_sand_pec_shallow/roi_draft.json
     expected_outputs:
       - raw_with_target
       - background_only
       - target_response
     tags:
-      - gx008
-      - core
+      - draft
+      - not_validated
+      - not_run
       - damp_sand_like
       - flat
       - pec
-      - medium
+      - shallow
