@@ -84,6 +84,30 @@ Evidence:
 
 Secondary possibility (after fixing MSVC shell): gprMax + PyCUDA + CUDA version compatibility issue may still exist, but current blocker is earlier and deterministic.
 
+## 6.1 Runner Startup Command Root Cause (latest check)
+
+After confirming GPU smoke success in the gprMax venv, GX-007 runner failure was re-checked from run manifest:
+
+- failing command (old behavior):
+  - `["gprMax", "<scene_001 raw_with_target.in>", "-n", "21", "-gpu", "0"]`
+- failure:
+  - `status: failed`
+  - `return_code: null`
+  - `runtime_seconds: ~0.014`
+  - `error_message: [WinError 2] 系统找不到指定的文件。`
+
+This is a startup command resolution failure (`gprMax` not found in PATH for current shell), not a model-science failure.
+
+Fix path added in runner:
+
+- explicit runtime parameter: `--gprmax-python <path-to-venv-python>`
+- command mode:
+  - `<python.exe> -m gprMax <model.in> ...`
+- intended usage:
+  - `--gprmax-python E:\gprMax\gprMax-v.3.1.7\.venv\Scripts\python.exe`
+
+This decouples MyGPR host Python environment from gprMax runtime environment.
+
 ## 7. Attempted Fixes
 
 - Added diagnostics script `scripts/diagnose_gprmax_gpu_env.py`.
@@ -124,7 +148,7 @@ Do this as explicit environment maintenance, not in MyGPR source code.
 
 ## 9. GPU Readiness for GX-007
 
-- Current status: **not ready for reliable GX-007 GPU run in current shell**.
+- Current status: **pending re-validation with `--gprmax-python`**.
 - CPU path remains available and already produced complete small 2D diagnostic outputs.
 
 ## 10. Claim Boundary

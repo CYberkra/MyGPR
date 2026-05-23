@@ -113,6 +113,7 @@ class GprMaxTaskSpec:
     model_path: Path
     output_dir: Path
     gprmax_executable: str
+    gprmax_python: Path | None = None
     timeout_seconds: float | None = None
     extra_args: list[str] = field(default_factory=list)
     requested_num_runs: int | None = None
@@ -133,6 +134,7 @@ class GprMaxRunResult:
     model_path: Path
     output_dir: Path
     command: list[str]
+    command_mode: str
     status: str
     return_code: int | None
     started_at: str
@@ -142,6 +144,7 @@ class GprMaxRunResult:
     stderr_path: Path
     manifest_path: Path
     error_message: str | None = None
+    startup_error: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -151,6 +154,7 @@ class GprMaxRunResult:
             "model_path": str(self.model_path),
             "output_dir": str(self.output_dir),
             "command": list(self.command),
+            "command_mode": self.command_mode,
             "status": self.status,
             "return_code": self.return_code,
             "started_at": self.started_at,
@@ -160,4 +164,5 @@ class GprMaxRunResult:
             "stderr_path": str(self.stderr_path),
             "manifest_path": str(self.manifest_path),
             "error_message": self.error_message,
+            "startup_error": self.startup_error,
         }

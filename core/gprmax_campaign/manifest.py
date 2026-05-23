@@ -29,6 +29,8 @@ def build_run_manifest_payload(
         "model_path": str(result.model_path),
         "output_dir": str(result.output_dir),
         "command": command,
+        "gprmax_python": str(task.gprmax_python) if task.gprmax_python else None,
+        "gprmax_command_mode": result.command_mode,
         "status": result.status,
         "run_status": result.status,
         "return_code": result.return_code,
@@ -46,6 +48,7 @@ def build_run_manifest_payload(
         "nvcc_available": task.nvcc_available,
         "pycuda_available": task.pycuda_available,
         "gpu_warning": task.gpu_warning,
+        "startup_error": result.startup_error,
         "error_message": result.error_message,
         "host": {
             "platform": platform.platform(),

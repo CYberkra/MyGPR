@@ -39,6 +39,7 @@ def test_runner_success_writes_logs_and_manifest(tmp_path):
     assert result.manifest_path.exists()
     payload = json.loads(result.manifest_path.read_text(encoding="utf-8"))
     assert payload["status"] == "success"
+    assert payload["gprmax_command_mode"] == "path_executable"
     assert "manifest_path" in payload
     assert str(payload["manifest_path"]).endswith("run_manifest.json")
     assert payload["manifest_path"] == result.to_dict()["manifest_path"]
@@ -61,6 +62,7 @@ def test_runner_failure_return_code_recorded(tmp_path):
     assert result.return_code == 7
     payload = json.loads(result.manifest_path.read_text(encoding="utf-8"))
     assert payload["return_code"] == 7
+    assert payload["startup_error"] is False
 
 
 def test_runner_supports_executable_with_inline_args(tmp_path):
@@ -78,6 +80,7 @@ def test_runner_supports_executable_with_inline_args(tmp_path):
     payload = json.loads(result.manifest_path.read_text(encoding="utf-8"))
     assert payload["command"][0].endswith("python.exe")
     assert payload["command"][1] == "-u"
+    assert payload["gprmax_command_mode"] == "path_executable"
 
 
 def test_runner_timeout_recorded(tmp_path):
@@ -450,6 +453,102 @@ def test_cli_num_runs_and_gpu_passthrough_combined(tmp_path):
     assert "60" in payload["command"]
     assert payload["command"][-2:] == ["-gpu", "0"]
     assert payload["requested_num_runs"] == 60
+
+
+def test_cli_gprmax_python_builds_python_module_command(tmp_path):
+    campaign_path = tmp_path / "campaign_gpu_py.yaml"
+    output_root = tmp_path / "campaign_output"
+    campaign_path.write_text(
+        "\n".join(
+            [
+                "campaign_id: GX-RUN-GPRMAX-PYTHON-001_cli_py",
+                f"output_root: {output_root.as_posix()}",
+                f"gprmax_executable: {sys.executable}",
+                "scenes:",
+                "  - scene_id: scene_valid_01",
+                f"    raw_model: {str((FIXTURE_DIR / 'fake_gprmax_success.py').resolve()).replace('\\', '/')}",
+                f"    background_model: {str((FIXTURE_DIR / 'fake_gprmax_fail.py').resolve()).replace('\\', '/')}",
+                f"    materials: {str((FIXTURE_DIR / 'models' / 'materials.txt').resolve()).replace('\\', '/')}",
+                f"    target_roi: {str((FIXTURE_DIR / 'annotations' / 'target_roi.json').resolve()).replace('\\', '/')}",
+                "    expected_outputs:",
+                "      - raw_with_target",
+                "      - background_only",
+                "      - target_response",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    result_json = tmp_path / "result_gpu_py.json"
+    cmd = [
+        sys.executable,
+        str(RUNNER),
+        "--campaign",
+        str(campaign_path),
+        "--run-scene",
+        "scene_valid_01",
+        "--variant",
+        "raw_with_target",
+        "--gprmax-python",
+        str(sys.executable),
+        "--num-runs",
+        "21",
+        "--gpu-device",
+        "0",
+        "--json",
+        str(result_json),
+    ]
+    env = dict(os.environ)
+    env["MYGPR_GPU_CHECK_NVCC"] = "1"
+    env["MYGPR_GPU_CHECK_PYCUDA"] = "0"
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False, env=env)
+    assert proc.returncode == 1
+    payload = json.loads(result_json.read_text(encoding="utf-8"))
+    assert payload["gprmax_command_mode"] == "python_module"
+    assert payload["gprmax_python"] == str(Path(sys.executable).resolve())
+    assert payload["command"][:3] == [str(Path(sys.executable).resolve()), "-m", "gprMax"]
+    assert payload["command"][-4:] == ["-n", "21", "-gpu", "0"]
+    assert payload["gpu_warning"] and "external gprMax runtime python" in payload["gpu_warning"]
+
+
+def test_cli_gprmax_python_missing_path_fails_fast(tmp_path):
+    campaign_path = tmp_path / "campaign_gpu_py_missing.yaml"
+    output_root = tmp_path / "campaign_output"
+    campaign_path.write_text(
+        "\n".join(
+            [
+                "campaign_id: GX-RUN-GPRMAX-PYTHON-001_cli_py_missing",
+                f"output_root: {output_root.as_posix()}",
+                f"gprmax_executable: {sys.executable}",
+                "scenes:",
+                "  - scene_id: scene_valid_01",
+                f"    raw_model: {str((FIXTURE_DIR / 'fake_gprmax_success.py').resolve()).replace('\\', '/')}",
+                f"    background_model: {str((FIXTURE_DIR / 'fake_gprmax_fail.py').resolve()).replace('\\', '/')}",
+                f"    materials: {str((FIXTURE_DIR / 'models' / 'materials.txt').resolve()).replace('\\', '/')}",
+                f"    target_roi: {str((FIXTURE_DIR / 'annotations' / 'target_roi.json').resolve()).replace('\\', '/')}",
+                "    expected_outputs:",
+                "      - raw_with_target",
+                "      - background_only",
+                "      - target_response",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    missing_py = tmp_path / "not_found_python.exe"
+    cmd = [
+        sys.executable,
+        str(RUNNER),
+        "--campaign",
+        str(campaign_path),
+        "--run-scene",
+        "scene_valid_01",
+        "--variant",
+        "raw_with_target",
+        "--gprmax-python",
+        str(missing_py),
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    assert proc.returncode == 2
+    assert "gprMax runtime python not found" in proc.stdout
 
 
 def test_cli_rejects_gpu_device_and_gpu_devices_together(tmp_path):

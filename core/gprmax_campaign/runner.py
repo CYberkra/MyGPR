@@ -4,9 +4,9 @@
 
 from __future__ import annotations
 
+import shlex
 import subprocess
 import time
-import shlex
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -26,12 +26,13 @@ def run_gprmax_task(task: GprMaxTaskSpec, cancel_event=None) -> GprMaxRunResult:
     stderr_path = output_dir / "stderr.log"
     manifest_path = output_dir / "run_manifest.json"
 
-    command = _build_command(task, model_path)
+    command, command_mode = _build_command(task, model_path)
     start_ts = time.perf_counter()
     started_at = _iso_now()
     status = "failed"
     return_code = None
     error_message = None
+    startup_error = False
     process = None
     grace_seconds = 1.5
 
@@ -70,9 +71,11 @@ def run_gprmax_task(task: GprMaxTaskSpec, cancel_event=None) -> GprMaxRunResult:
                 time.sleep(0.1)
         except FileNotFoundError as exc:
             status = "failed"
+            startup_error = True
             error_message = str(exc)
         except Exception as exc:  # pragma: no cover - defensive runtime guard
             status = "failed"
+            startup_error = True
             error_message = str(exc)
             if process is not None and process.poll() is None:
                 _terminate_process(process, grace_seconds)
@@ -87,6 +90,7 @@ def run_gprmax_task(task: GprMaxTaskSpec, cancel_event=None) -> GprMaxRunResult:
         model_path=model_path,
         output_dir=output_dir,
         command=command,
+        command_mode=command_mode,
         status=status,
         return_code=return_code,
         started_at=started_at,
@@ -96,6 +100,7 @@ def run_gprmax_task(task: GprMaxTaskSpec, cancel_event=None) -> GprMaxRunResult:
         stderr_path=stderr_path,
         manifest_path=manifest_path,
         error_message=error_message,
+        startup_error=startup_error,
     )
     payload = build_run_manifest_payload(task, result)
     write_run_manifest(manifest_path, payload)
@@ -114,17 +119,27 @@ def _terminate_process(process: subprocess.Popen, grace_seconds: float) -> None:
             return
 
 
-def _build_command(task: GprMaxTaskSpec, model_path: Path) -> list[str]:
+def _build_command(task: GprMaxTaskSpec, model_path: Path) -> tuple[list[str], str]:
+    if task.gprmax_python is not None:
+        runtime_python = Path(task.gprmax_python).expanduser().resolve()
+        if not runtime_python.is_file():
+            raise FileNotFoundError(
+                f"gprMax runtime python not found: {runtime_python}"
+            )
+        return (
+            [str(runtime_python), "-m", "gprMax", str(model_path), *list(task.extra_args or [])],
+            "python_module",
+        )
     raw_exec = str(task.gprmax_executable).strip()
     if not raw_exec:
-        return [str(model_path), *list(task.extra_args or [])]
+        return ([str(model_path), *list(task.extra_args or [])], "path_executable")
     try:
         exec_tokens = shlex.split(raw_exec, posix=False)
     except ValueError:
         exec_tokens = [raw_exec]
     if not exec_tokens:
         exec_tokens = [raw_exec]
-    return [*exec_tokens, str(model_path), *list(task.extra_args or [])]
+    return ([*exec_tokens, str(model_path), *list(task.extra_args or [])], "path_executable")
 
 
 def _iso_now() -> str:

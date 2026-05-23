@@ -56,6 +56,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Optional gprMax run count forwarded as '-n N' for B-scan sweeps.",
     )
     parser.add_argument(
+        "--gprmax-python",
+        help=(
+            "Optional runtime python for gprMax module execution, e.g. "
+            "--gprmax-python E:/gprMax/.../.venv/Scripts/python.exe"
+        ),
+    )
+    parser.add_argument(
         "--gpu",
         action="store_true",
         help="Enable optional gprMax GPU flag passthrough ('-gpu').",
@@ -245,21 +252,35 @@ def _build_gpu_warning(
     gpu_requested: bool,
     nvcc_available: bool,
     pycuda_available: bool,
+    using_external_runtime_python: bool,
 ) -> str | None:
     if not gpu_requested:
         return None
     missing = []
     if not nvcc_available:
         missing.append("nvcc")
-    if not pycuda_available:
+    if not pycuda_available and not using_external_runtime_python:
         missing.append("pycuda")
-    if not missing:
+    if missing:
+        return (
+            "GPU requested but host environment check is incomplete: missing "
+            + ", ".join(missing)
+            + ". gprMax may fall back to CPU or fail at runtime."
+        )
+    if not pycuda_available and using_external_runtime_python:
+        return (
+            "GPU requested: host MyGPR Python cannot import pycuda, but "
+            "external gprMax runtime python was specified; actual GPU availability "
+            "depends on that runtime environment."
+        )
+    if not nvcc_available:
+        return (
+            "GPU requested but nvcc is not available in host PATH; external gprMax "
+            "runtime may still execute GPU if its environment is complete."
+        )
+    if not missing and pycuda_available:
         return None
-    return (
-        "GPU requested but environment check is incomplete: missing "
-        + ", ".join(missing)
-        + ". gprMax may fall back to CPU or fail at runtime."
-    )
+    return None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -321,6 +342,12 @@ def _run_campaign_mode(args: argparse.Namespace) -> int:
             if args.variant == "raw_with_target"
             else scene.background_model
         )
+        gprmax_python = None
+        if args.gprmax_python:
+            gprmax_python = Path(args.gprmax_python).expanduser().resolve()
+            if not gprmax_python.is_file():
+                print(f"ERROR: gprMax runtime python not found: {gprmax_python}")
+                return 2
         gpu_device_ids = _resolve_gpu_device_ids(args)
         gpu_requested = bool(args.gpu or gpu_device_ids)
         nvcc_available = _detect_nvcc_available()
@@ -329,6 +356,7 @@ def _run_campaign_mode(args: argparse.Namespace) -> int:
             gpu_requested=gpu_requested,
             nvcc_available=nvcc_available,
             pycuda_available=pycuda_available,
+            using_external_runtime_python=gprmax_python is not None,
         )
         if gpu_warning:
             print(f"gpu_warning: {gpu_warning}")
@@ -340,6 +368,7 @@ def _run_campaign_mode(args: argparse.Namespace) -> int:
             model_path=model_path,
             output_dir=output_dir,
             gprmax_executable=campaign.gprmax_executable,
+            gprmax_python=gprmax_python,
             timeout_seconds=args.timeout_seconds,
             requested_num_runs=args.num_runs,
             gpu_requested=gpu_requested,
