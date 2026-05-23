@@ -5,10 +5,10 @@ gprmax_executable: gprMax
 scenes:
   - scene_id: scene_001_flat_dry_sand_pec_shallow
     description: "GX-008 draft core scene 1, not yet validated/not yet run"
-    raw_model: experiments/gprmax/GX-008/models/scene_001_flat_dry_sand_pec_shallow/raw_with_target.in
-    background_model: experiments/gprmax/GX-008/models/scene_001_flat_dry_sand_pec_shallow/background_only.in
-    materials: experiments/gprmax/GX-008/models/scene_001_flat_dry_sand_pec_shallow/materials.txt
-    target_roi: experiments/gprmax/GX-008/models/scene_001_flat_dry_sand_pec_shallow/roi_draft.json
+    raw_model: models/scene_001_flat_dry_sand_pec_shallow/raw_with_target.in
+    background_model: models/scene_001_flat_dry_sand_pec_shallow/background_only.in
+    materials: models/scene_001_flat_dry_sand_pec_shallow/materials.txt
+    target_roi: models/scene_001_flat_dry_sand_pec_shallow/roi_draft.json
     expected_outputs:
       - raw_with_target
       - background_only
@@ -24,10 +24,10 @@ scenes:
 
   - scene_id: scene_002_flat_damp_sand_pec_shallow
     description: "GX-008 draft core scene 2, not yet validated/not yet run"
-    raw_model: experiments/gprmax/GX-008/models/scene_002_flat_damp_sand_pec_shallow/raw_with_target.in
-    background_model: experiments/gprmax/GX-008/models/scene_002_flat_damp_sand_pec_shallow/background_only.in
-    materials: experiments/gprmax/GX-008/models/scene_002_flat_damp_sand_pec_shallow/materials.txt
-    target_roi: experiments/gprmax/GX-008/models/scene_002_flat_damp_sand_pec_shallow/roi_draft.json
+    raw_model: models/scene_002_flat_damp_sand_pec_shallow/raw_with_target.in
+    background_model: models/scene_002_flat_damp_sand_pec_shallow/background_only.in
+    materials: models/scene_002_flat_damp_sand_pec_shallow/materials.txt
+    target_roi: models/scene_002_flat_damp_sand_pec_shallow/roi_draft.json
     expected_outputs:
       - raw_with_target
       - background_only
