@@ -40,3 +40,83 @@ scenes:
       - flat
       - pec
       - shallow
+
+  - scene_id: scene_003_flat_dry_sand_pvc_shallow
+    description: "GX-008 draft core scene 3, not yet validated/not yet run"
+    raw_model: models/scene_003_flat_dry_sand_pvc_shallow/raw_with_target.in
+    background_model: models/scene_003_flat_dry_sand_pvc_shallow/background_only.in
+    materials: models/scene_003_flat_dry_sand_pvc_shallow/materials.txt
+    target_roi: models/scene_003_flat_dry_sand_pvc_shallow/roi_draft.json
+    expected_outputs:
+      - raw_with_target
+      - background_only
+      - target_response
+    tags:
+      - draft
+      - not_validated
+      - not_run
+      - gx008
+      - dry_sand_like
+      - flat
+      - pvc
+      - shallow
+
+  - scene_id: scene_004_flat_damp_sand_pvc_shallow
+    description: "GX-008 draft core scene 4, not yet validated/not yet run"
+    raw_model: models/scene_004_flat_damp_sand_pvc_shallow/raw_with_target.in
+    background_model: models/scene_004_flat_damp_sand_pvc_shallow/background_only.in
+    materials: models/scene_004_flat_damp_sand_pvc_shallow/materials.txt
+    target_roi: models/scene_004_flat_damp_sand_pvc_shallow/roi_draft.json
+    expected_outputs:
+      - raw_with_target
+      - background_only
+      - target_response
+    tags:
+      - draft
+      - not_validated
+      - not_run
+      - gx008
+      - damp_sand_like
+      - flat
+      - pvc
+      - shallow
+
+  - scene_id: scene_005_flat_dry_sand_pec_medium
+    description: "GX-008 draft core scene 5, not yet validated/not yet run"
+    raw_model: models/scene_005_flat_dry_sand_pec_medium/raw_with_target.in
+    background_model: models/scene_005_flat_dry_sand_pec_medium/background_only.in
+    materials: models/scene_005_flat_dry_sand_pec_medium/materials.txt
+    target_roi: models/scene_005_flat_dry_sand_pec_medium/roi_draft.json
+    expected_outputs:
+      - raw_with_target
+      - background_only
+      - target_response
+    tags:
+      - draft
+      - not_validated
+      - not_run
+      - gx008
+      - dry_sand_like
+      - flat
+      - pec
+      - medium
+
+  - scene_id: scene_006_flat_damp_sand_pec_medium
+    description: "GX-008 draft core scene 6, not yet validated/not yet run"
+    raw_model: models/scene_006_flat_damp_sand_pec_medium/raw_with_target.in
+    background_model: models/scene_006_flat_damp_sand_pec_medium/background_only.in
+    materials: models/scene_006_flat_damp_sand_pec_medium/materials.txt
+    target_roi: models/scene_006_flat_damp_sand_pec_medium/roi_draft.json
+    expected_outputs:
+      - raw_with_target
+      - background_only
+      - target_response
+    tags:
+      - draft
+      - not_validated
+      - not_run
+      - gx008
+      - damp_sand_like
+      - flat
+      - pec
+      - medium
