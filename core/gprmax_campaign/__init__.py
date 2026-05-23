@@ -7,6 +7,7 @@ from core.gprmax_campaign.pairing import (
     PairedOutputSpec,
     PairedOutputValidationResult,
     TargetResponseResult,
+    discover_converted_pair_paths,
     generate_target_response,
     validate_paired_outputs,
 )
@@ -44,6 +45,7 @@ __all__ = [
     "PairedOutputSpec",
     "PairedOutputValidationResult",
     "TargetResponseResult",
+    "discover_converted_pair_paths",
     "PairPreviewReportResult",
     "validate_paired_outputs",
     "generate_target_response",

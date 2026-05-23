@@ -17,6 +17,7 @@ from core.gprmax_campaign.preview import generate_pair_preview_report
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_DIR = ROOT / "tests" / "fixtures" / "gprmax_campaign" / "pairing"
 RUNNER = ROOT / "scripts" / "gprmax_campaign_runner.py"
+PAIR_CONVERTED = ROOT / "scripts" / "gprmax_campaign_pair_converted.py"
 
 
 def test_preview_generation_valid_csv_pair(tmp_path):
@@ -200,3 +201,36 @@ def test_cli_preview_pair_json_parseable_invalid(tmp_path):
     payload = json.loads(json_path.read_text(encoding="utf-8"))
     assert payload["status"] == "invalid"
     assert any(issue["code"] == "raw_nan_or_inf" for issue in payload["issues"])
+
+
+def test_pair_converted_script_gx008_like_scene_root(tmp_path):
+    scene_root = tmp_path / "scene_001_flat_dry_sand_pec_shallow"
+    raw_dir = scene_root / "raw_with_target" / "converted"
+    bg_dir = scene_root / "background_only" / "converted"
+    raw_dir.mkdir(parents=True)
+    bg_dir.mkdir(parents=True)
+    raw = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float64)
+    bg = np.array([[0.5, 1.0], [1.0, 1.5]], dtype=np.float64)
+    np.save(raw_dir / "raw_bscan.npy", raw)
+    np.save(bg_dir / "background_bscan.npy", bg)
+    out_dir = tmp_path / "paired_outputs"
+    json_path = tmp_path / "pair_preview_summary.json"
+    cmd = [
+        sys.executable,
+        str(PAIR_CONVERTED),
+        "--scene-root",
+        str(scene_root),
+        "--output-dir",
+        str(out_dir),
+        "--campaign-id",
+        "GX-008",
+        "--scene-id",
+        "scene_001_flat_dry_sand_pec_shallow",
+        "--json",
+        str(json_path),
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    assert proc.returncode == 0
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    assert payload["pair_result"]["status"] == "success"
+    assert payload["preview_result"]["status"] == "success"

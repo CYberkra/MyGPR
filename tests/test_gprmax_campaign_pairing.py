@@ -11,7 +11,12 @@ from pathlib import Path
 
 import numpy as np
 
-from core.gprmax_campaign.pairing import PairedOutputSpec, generate_target_response, validate_paired_outputs
+from core.gprmax_campaign.pairing import (
+    PairedOutputSpec,
+    discover_converted_pair_paths,
+    generate_target_response,
+    validate_paired_outputs,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -215,3 +220,32 @@ def test_cli_pair_outputs_json_parseable_invalid(tmp_path):
     payload = json.loads(json_path.read_text(encoding="utf-8"))
     assert payload["status"] == "invalid"
     assert any(issue["code"] == "raw_nan_or_inf" for issue in payload["issues"])
+
+
+def test_discover_converted_pair_paths_prefers_npy(tmp_path):
+    scene_root = tmp_path / "scene"
+    raw_dir = scene_root / "raw_with_target" / "converted"
+    bg_dir = scene_root / "background_only" / "converted"
+    raw_dir.mkdir(parents=True)
+    bg_dir.mkdir(parents=True)
+    np.save(raw_dir / "raw_bscan.npy", np.ones((2, 2), dtype=np.float64))
+    np.save(bg_dir / "background_bscan.npy", np.zeros((2, 2), dtype=np.float64))
+
+    raw, bg = discover_converted_pair_paths(scene_root, prefer_format="npy")
+    assert raw.name == "raw_bscan.npy"
+    assert bg.name == "background_bscan.npy"
+
+
+def test_discover_converted_pair_paths_windows_style_string(tmp_path):
+    scene_root = tmp_path / "scene_win"
+    raw_dir = scene_root / "raw_with_target" / "converted"
+    bg_dir = scene_root / "background_only" / "converted"
+    raw_dir.mkdir(parents=True)
+    bg_dir.mkdir(parents=True)
+    np.savetxt(raw_dir / "raw_bscan.csv", np.ones((3, 1), dtype=np.float64), delimiter=",")
+    np.savetxt(bg_dir / "background_bscan.csv", np.zeros((3, 1), dtype=np.float64), delimiter=",")
+
+    win_like = str(scene_root).replace("/", "\\")
+    raw, bg = discover_converted_pair_paths(win_like, prefer_format="csv")
+    assert raw.name == "raw_bscan.csv"
+    assert bg.name == "background_bscan.csv"

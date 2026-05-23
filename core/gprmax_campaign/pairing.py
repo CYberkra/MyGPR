@@ -83,6 +83,40 @@ class TargetResponseResult:
         }
 
 
+def discover_converted_pair_paths(
+    scene_root: str | Path,
+    *,
+    prefer_format: str = "npy",
+    raw_path: str | Path | None = None,
+    background_path: str | Path | None = None,
+) -> tuple[Path, Path]:
+    """Discover converted raw/background array paths under a scene root.
+
+    Expected layout:
+    - <scene_root>/raw_with_target/converted/raw_bscan.{npy,csv}
+    - <scene_root>/background_only/converted/background_bscan.{npy,csv}
+    """
+    if raw_path and background_path:
+        return (
+            Path(raw_path).expanduser().resolve(),
+            Path(background_path).expanduser().resolve(),
+        )
+    root = Path(scene_root).expanduser().resolve()
+    raw_converted = root / "raw_with_target" / "converted"
+    bg_converted = root / "background_only" / "converted"
+    raw = (
+        _pick_converted_file(raw_converted, "raw_bscan", prefer_format)
+        if not raw_path
+        else Path(raw_path).expanduser().resolve()
+    )
+    bg = (
+        _pick_converted_file(bg_converted, "background_bscan", prefer_format)
+        if not background_path
+        else Path(background_path).expanduser().resolve()
+    )
+    return raw, bg
+
+
 def validate_paired_outputs(
     spec: PairedOutputSpec,
 ) -> tuple[PairedOutputValidationResult, np.ndarray | None, np.ndarray | None]:
@@ -334,3 +368,16 @@ def _build_metrics(raw: np.ndarray, background: np.ndarray, target_response: np.
         "abs_difference_mean": float(np.mean(np.abs(target_response))),
         "abs_difference_max": float(np.max(np.abs(target_response))),
     }
+
+
+def _pick_converted_file(folder: Path, stem: str, prefer_format: str) -> Path:
+    suffix_priority = [".npy", ".csv"] if prefer_format.lower() != "csv" else [".csv", ".npy"]
+    for suffix in suffix_priority:
+        candidate = folder / f"{stem}{suffix}"
+        if candidate.exists():
+            return candidate.resolve()
+    # fallback: pick first matching stem.* if present
+    for candidate in folder.glob(f"{stem}.*"):
+        if candidate.suffix.lower() in {".npy", ".csv"}:
+            return candidate.resolve()
+    return (folder / f"{stem}{suffix_priority[0]}").resolve()
