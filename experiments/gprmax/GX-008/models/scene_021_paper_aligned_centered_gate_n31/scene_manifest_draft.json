@@ -1,0 +1,61 @@
+{
+  "scene_id": "scene_021_paper_aligned_centered_gate_n31",
+  "based_on_scene": "scene_020_paper_aligned_single_target_repl",
+  "replication_type": "paper_aligned_speed_gate",
+  "paper_reference": "Learning to Remove Clutter in Real-World GPR Images Using Hybrid Data",
+  "changed_from_scene_020": [
+    "expected_num_runs reduced from 61 to 31",
+    "scan start shifted and centered around target x=0.50",
+    "target depth adjusted to shallower gate-friendly value",
+    "time_window reduced to control runtime"
+  ],
+  "unchanged_from_paper_alignment": [
+    "domain = 1.0 x 0.15 x 0.40 m",
+    "dx_dy_dz = 0.002 m",
+    "scan step = 0.01 m",
+    "target type/material = PEC cylinder"
+  ],
+  "unresolved_paper_parameters": [
+    "Table II exact soil material constants",
+    "exact built-in GSSI antenna command details",
+    "paper exact time_window"
+  ],
+  "validation_state": "draft_not_validated_not_run",
+  "expected_num_runs": 31,
+  "scan_start": {
+    "src_x": 0.30,
+    "rx_x": 0.35
+  },
+  "scan_end": {
+    "src_x": 0.60,
+    "rx_x": 0.65
+  },
+  "target_center": [0.50, 0.075, 0.10],
+  "target_material": "pec",
+  "target_depth": "approx_0p10m_speed_gate",
+  "target_size": "radius_0p03m_cylinder_short_axis_along_y",
+  "pair_contract": {
+    "required_identical_fields": [
+      "domain",
+      "dx_dy_dz",
+      "time_window",
+      "waveform",
+      "hertzian_dipole",
+      "rx",
+      "src_steps",
+      "rx_steps",
+      "soil_surface_material_region"
+    ],
+    "expected_difference": "target object only in raw_with_target",
+    "expected_pairing_formula": "target_response = raw - background"
+  },
+  "claim_boundary": [
+    "short centered diagnostic gate, not full paper B-scan",
+    "not exact replication",
+    "not full CLT-GPR replication",
+    "not CR-Net training",
+    "not field validation",
+    "not AutoTune evaluation",
+    "not paper-candidate benchmark"
+  ]
+}
