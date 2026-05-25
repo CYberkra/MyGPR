@@ -184,3 +184,26 @@ scenes:
       - dry_sand_like
       - pec
       - sphere
+
+  - scene_id: scene_010_micro_hyperbola_step001_dry_sand_pec_sphere
+    description: "GX-008 micro hyperbola diagnostic with step=0.01 (dx-aligned), not benchmark"
+    raw_model: models/scene_010_micro_hyperbola_step001_dry_sand_pec_sphere/raw_with_target.in
+    background_model: models/scene_010_micro_hyperbola_step001_dry_sand_pec_sphere/background_only.in
+    materials: models/scene_010_micro_hyperbola_step001_dry_sand_pec_sphere/materials.txt
+    target_roi: models/scene_010_micro_hyperbola_step001_dry_sand_pec_sphere/roi_draft.json
+    expected_outputs:
+      - raw_with_target
+      - background_only
+      - target_response
+    tags:
+      - draft
+      - not_validated
+      - not_run
+      - gx008
+      - micro_hyperbola
+      - diagnostic
+      - not_benchmark
+      - dry_sand_like
+      - pec
+      - sphere
+      - step_0p01
