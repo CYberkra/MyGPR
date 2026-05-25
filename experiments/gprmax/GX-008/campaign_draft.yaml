@@ -120,3 +120,26 @@ scenes:
       - flat
       - pec
       - medium
+
+  - scene_id: scene_007_flat_dry_sand_pec_sphere_shallow
+    description: "GX-008 hyperbola-oriented local PEC target draft"
+    raw_model: models/scene_007_flat_dry_sand_pec_sphere_shallow/raw_with_target.in
+    background_model: models/scene_007_flat_dry_sand_pec_sphere_shallow/background_only.in
+    materials: models/scene_007_flat_dry_sand_pec_sphere_shallow/materials.txt
+    target_roi: models/scene_007_flat_dry_sand_pec_sphere_shallow/roi_draft.json
+    expected_outputs:
+      - raw_with_target
+      - background_only
+      - target_response
+    tags:
+      - draft
+      - not_validated
+      - not_run
+      - gx008
+      - dry_sand_like
+      - flat
+      - pec
+      - shallow
+      - hyperbola_oriented
+      - local_target
+      - sphere

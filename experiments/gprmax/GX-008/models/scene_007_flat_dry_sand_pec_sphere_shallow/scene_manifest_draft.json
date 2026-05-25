@@ -1,0 +1,55 @@
+{
+  "scene_id": "scene_007_flat_dry_sand_pec_sphere_shallow",
+  "scene_role": "hyperbola_oriented_local_target_diagnostic",
+  "validation_state": "draft_not_validated_not_run",
+  "soil_type": "dry_sand_like",
+  "target_material": "pec",
+  "target_type": "sphere",
+  "target_depth_class": "shallow",
+  "expected_num_runs": 201,
+  "scan_design": {
+    "src_step_m": 0.005,
+    "rx_step_m": 0.005,
+    "expected_num_runs": 201,
+    "rx_start_x": 0.55,
+    "rx_end_x": 1.55,
+    "target_center_x": 1.0,
+    "scan_covers_target_center": true,
+    "runtime_note": "Must pass --num-runs 201 (or matching N) during execution; otherwise single-trace output may occur."
+  },
+  "pair_contract": {
+    "raw_file": "raw_with_target.in",
+    "background_file": "background_only.in",
+    "required_identical_fields": [
+      "domain",
+      "dx_dy_dz",
+      "time_window",
+      "waveform",
+      "hertzian_dipole",
+      "rx",
+      "src_steps",
+      "rx_steps",
+      "soil_material",
+      "surface_model"
+    ],
+    "expected_difference": "target object definition only",
+    "expected_pairing_formula": "target_response = raw - background"
+  },
+  "target_design": {
+    "type": "sphere",
+    "material": "pec",
+    "radius_m": 0.04,
+    "center_m": [1.0, 0.5, 0.2],
+    "orientation": "localized_target",
+    "hyperbola_intent": "scan aperture crosses target center for hyperbola-oriented diagnostic preview"
+  },
+  "claim_boundary": [
+    "GX-008 model draft only",
+    "hyperbola-oriented synthetic diagnostic candidate",
+    "not real gprMax run until executed",
+    "not Evidence artifact",
+    "not AutoTune evaluation",
+    "not field validation",
+    "not paper-candidate benchmark"
+  ]
+}
