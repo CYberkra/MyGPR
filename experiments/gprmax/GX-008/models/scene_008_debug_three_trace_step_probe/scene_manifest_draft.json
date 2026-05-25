@@ -1,0 +1,44 @@
+{
+  "scene_id": "scene_008_debug_three_trace_step_probe",
+  "scene_role": "stepping_probe_debug_only",
+  "validation_state": "draft_not_validated_not_run",
+  "soil_type": "dry_sand_like",
+  "target_material": "pec",
+  "target_type": "sphere",
+  "target_depth_class": "shallow",
+  "expected_num_runs": 3,
+  "scan_design": {
+    "src_step_m": 0.25,
+    "rx_step_m": 0.25,
+    "expected_num_runs": 3,
+    "rx_start_x": 0.35,
+    "rx_end_x": 0.85,
+    "target_center_x": 0.60,
+    "scan_covers_target_center": true
+  },
+  "pair_contract": {
+    "raw_file": "raw_with_target.in",
+    "background_file": "background_only.in",
+    "required_identical_fields": [
+      "domain",
+      "dx_dy_dz",
+      "time_window",
+      "waveform",
+      "hertzian_dipole",
+      "rx",
+      "src_steps",
+      "rx_steps",
+      "soil_material",
+      "surface_model"
+    ],
+    "expected_difference": "target object definition only",
+    "expected_pairing_formula": "target_response = raw - background"
+  },
+  "claim_boundary": [
+    "stepping probe diagnostic only",
+    "not benchmark scene",
+    "not Evidence artifact",
+    "not AutoTune evaluation",
+    "not field validation"
+  ]
+}

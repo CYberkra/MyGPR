@@ -1,0 +1,11 @@
+{
+  "scene_id": "scene_009_micro_hyperbola_dry_sand_pec_sphere",
+  "roi_role": "draft_synthetic_target_region",
+  "expected_target_region": "micro-hyperbola diagnostic around target center crossing zone",
+  "trace_window": [18, 44],
+  "depth_window": [110, 250],
+  "notes": [
+    "ROI is draft only for synthetic diagnostics.",
+    "Not field ground truth."
+  ]
+}

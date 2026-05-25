@@ -143,3 +143,44 @@ scenes:
       - hyperbola_oriented
       - local_target
       - sphere
+
+  - scene_id: scene_008_debug_three_trace_step_probe
+    description: "GX-008 debug stepping probe scene (3 traces), not benchmark"
+    raw_model: models/scene_008_debug_three_trace_step_probe/raw_with_target.in
+    background_model: models/scene_008_debug_three_trace_step_probe/background_only.in
+    materials: models/scene_008_debug_three_trace_step_probe/materials.txt
+    target_roi: models/scene_008_debug_three_trace_step_probe/roi_draft.json
+    expected_outputs:
+      - raw_with_target
+      - background_only
+      - target_response
+    tags:
+      - draft
+      - not_validated
+      - not_run
+      - gx008
+      - debug
+      - stepping_probe
+      - not_benchmark
+
+  - scene_id: scene_009_micro_hyperbola_dry_sand_pec_sphere
+    description: "GX-008 micro hyperbola diagnostic scene, not benchmark"
+    raw_model: models/scene_009_micro_hyperbola_dry_sand_pec_sphere/raw_with_target.in
+    background_model: models/scene_009_micro_hyperbola_dry_sand_pec_sphere/background_only.in
+    materials: models/scene_009_micro_hyperbola_dry_sand_pec_sphere/materials.txt
+    target_roi: models/scene_009_micro_hyperbola_dry_sand_pec_sphere/roi_draft.json
+    expected_outputs:
+      - raw_with_target
+      - background_only
+      - target_response
+    tags:
+      - draft
+      - not_validated
+      - not_run
+      - gx008
+      - micro_hyperbola
+      - diagnostic
+      - not_benchmark
+      - dry_sand_like
+      - pec
+      - sphere
