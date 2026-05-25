@@ -207,3 +207,22 @@ scenes:
       - pec
       - sphere
       - step_0p01
+
+  - scene_id: scene_020_paper_aligned_single_target_repl
+    description: "GX-008 paper-aligned single-target synthetic replication attempt"
+    raw_model: models/scene_020_paper_aligned_single_target_repl/raw_with_target.in
+    background_model: models/scene_020_paper_aligned_single_target_repl/background_only.in
+    materials: models/scene_020_paper_aligned_single_target_repl/materials.txt
+    target_roi: models/scene_020_paper_aligned_single_target_repl/roi_draft.json
+    expected_outputs:
+      - raw_with_target
+      - background_only
+      - target_response
+    tags:
+      - paper_aligned
+      - replication_attempt
+      - synthetic
+      - paired
+      - not_benchmark
+      - not_validated
+      - not_evidence

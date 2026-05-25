@@ -1,0 +1,52 @@
+{
+  "scene_id": "scene_020_paper_aligned_single_target_repl",
+  "replication_type": "paper_aligned_approximation",
+  "paper_reference": "Learning to Remove Clutter in Real-World GPR Images Using Hybrid Data",
+  "parameter_source_notes": [
+    "Simulation domain 100x15x40 cm and discretization 0.2 cm extracted from paper Section II-A.",
+    "Antenna frequency 1.5 GHz, antenna-to-soil distance 5 cm, step size 1 cm, 80 A-scans per B-scan extracted from paper Section II-A.",
+    "Exact Table II material values unresolved from currently available machine-extracted text."
+  ],
+  "unresolved_parameters": [
+    "Table II exact permittivity and conductivity values per soil category",
+    "Exact gprMax built-in antenna command parameters used by authors",
+    "Exact paper synthetic time_window value"
+  ],
+  "validation_state": "draft_not_validated_not_run",
+  "expected_num_runs": 61,
+  "scan_start": {
+    "src_x": 0.10,
+    "rx_x": 0.15
+  },
+  "scan_end": {
+    "src_x": 0.70,
+    "rx_x": 0.75
+  },
+  "target_center": [0.50, 0.075, 0.12],
+  "target_material": "pec",
+  "target_depth": "approx_0p12m",
+  "target_size": "radius_0p03m_cylinder_short_axis_along_y",
+  "pair_contract": {
+    "required_identical_fields": [
+      "domain",
+      "dx_dy_dz",
+      "time_window",
+      "waveform",
+      "hertzian_dipole",
+      "rx",
+      "src_steps",
+      "rx_steps",
+      "soil_surface_material_region"
+    ],
+    "expected_difference": "target object only in raw_with_target",
+    "expected_pairing_formula": "target_response = raw - background"
+  },
+  "claim_boundary": [
+    "one-scene paper-aligned synthetic replication attempt only",
+    "not full CLT-GPR replication",
+    "not CR-Net training",
+    "not field validation",
+    "not AutoTune evaluation",
+    "not paper-candidate benchmark yet"
+  ]
+}
