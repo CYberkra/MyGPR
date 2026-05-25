@@ -1,0 +1,52 @@
+{
+  "scene_id": "scene_031_gssi_ey_depth03_centered_n15_raw_gate",
+  "based_on_scene": "scene_029_gssi_ey_depth03_raw_gate_n31",
+  "replication_type": "paper_aligned_centered_n15_speed_gate",
+  "raw_visual_only": true,
+  "centered_gate": true,
+  "scan_centering_target_x": 0.5,
+  "expected_num_runs": 15,
+  "selected_component_for_visualization": "Ey",
+  "target_geometry": {
+    "type": "cylinder_along_y",
+    "x_center_m": 0.5,
+    "y_center_m": 0.075,
+    "z_center_m": 0.08,
+    "radius_m": 0.03,
+    "material": "pec"
+  },
+  "scan_design": {
+    "antenna_input_start_x_m": 0.462,
+    "scan_step_x_m": 0.01,
+    "expected_num_runs": 15,
+    "intent_rx_range_m": [
+      0.43,
+      0.57
+    ],
+    "intent_middle_trace_rx_x_m": 0.5
+  },
+  "changed_from_scene_029": [
+    "scan start / antenna position only, to center n15 aperture"
+  ],
+  "unchanged_from_scene_029": [
+    "target depth",
+    "target radius",
+    "soil",
+    "antenna model",
+    "target material",
+    "domain",
+    "dx_dy_dz",
+    "scan step"
+  ],
+  "background_not_run_in_this_task": true,
+  "clutter_free_not_generated": true,
+  "claim_boundary": [
+    "centered raw-only scan gate",
+    "no background in this task",
+    "no clutter-free in this task",
+    "not exact replication",
+    "not paper benchmark",
+    "not AutoTune evaluation",
+    "not field validation"
+  ]
+}
