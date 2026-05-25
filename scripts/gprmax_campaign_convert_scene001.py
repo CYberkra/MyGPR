@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Convert GX-007 scene_001 gprMax .out files to pairing-ready CSV/NPY."""
+"""Convert gprMax .out files to pairing-ready CSV/NPY."""
 
 from __future__ import annotations
 
@@ -49,6 +49,7 @@ def _convert_series(
     out_dir: Path,
     stem: str,
     run_count: int,
+    component: str,
 ) -> dict[str, Any]:
     base = source_base_out.with_suffix("")
     collected: list[np.ndarray] = []
@@ -58,17 +59,34 @@ def _convert_series(
         if not out_path.exists():
             raise FileNotFoundError(f"expected run output missing: {out_path}")
         with h5py.File(out_path, "r") as f:
-            if "rxs" not in f or "rx1" not in f["rxs"] or "Ez" not in f["rxs"]["rx1"]:
-                raise ValueError(f"Missing rxs/rx1/Ez dataset in {out_path}")
-            ez = np.asarray(f["rxs"]["rx1"]["Ez"][:], dtype=np.float64)
-        if ez.ndim != 1:
-            raise ValueError(f"Expected 1D Ez trace in {out_path}, got shape={ez.shape}")
-        collected.append(ez)
+            if "rxs" not in f:
+                raise ValueError(f"Missing rxs group in {out_path}")
+            receiver_names = sorted(str(name) for name in f["rxs"].keys())
+            if not receiver_names:
+                raise ValueError(f"No receiver group under rxs in {out_path}")
+            receiver_name = receiver_names[0]
+            receiver_group = f["rxs"][receiver_name]
+            available_components = sorted(str(name) for name in receiver_group.keys())
+            if component not in receiver_group:
+                raise ValueError(
+                    f"Missing requested component '{component}' in {out_path}; "
+                    f"receiver={receiver_name}; available={available_components}"
+                )
+            trace = np.asarray(receiver_group[component][:], dtype=np.float64)
+        if trace.ndim != 1:
+            raise ValueError(
+                f"Expected 1D {component} trace in {out_path}, got shape={trace.shape}"
+            )
+        collected.append(trace)
         sources.append(str(out_path))
     bscan = np.column_stack(collected)
     result = _save_array(np.asarray(bscan, dtype=np.float64), out_dir, stem)
     result["source_out_series"] = sources
     result["run_count"] = int(run_count)
+    result["selected_component"] = component
+    result["receiver_name"] = receiver_name
+    result["available_components"] = available_components
+    result["component_source"] = f"rxs/{receiver_name}/{component}"
     return result
 
 
@@ -103,6 +121,11 @@ def main() -> int:
         help="If >1, load background run outputs as <stem>1..N.out and merge into 2D B-scan.",
     )
     parser.add_argument("--json", default="")
+    parser.add_argument(
+        "--component",
+        default="Ez",
+        help="Receiver field component for multi-run conversion (default: Ez).",
+    )
     args = parser.parse_args()
 
     raw_out = Path(args.raw_out).expanduser().resolve()
@@ -118,6 +141,7 @@ def main() -> int:
             Path(args.raw_converted_dir).expanduser().resolve(),
             "raw_bscan",
             args.raw_run_count,
+            args.component,
         )
     else:
         raw_result = _convert_one(
@@ -129,6 +153,7 @@ def main() -> int:
             Path(args.background_converted_dir).expanduser().resolve(),
             "background_bscan",
             args.background_run_count,
+            args.component,
         )
     else:
         bg_result = _convert_one(
@@ -140,6 +165,7 @@ def main() -> int:
         "raw": raw_result,
         "background": bg_result,
         "shape_match": raw_result["shape"] == bg_result["shape"],
+        "selected_component": args.component,
     }
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     if args.json:

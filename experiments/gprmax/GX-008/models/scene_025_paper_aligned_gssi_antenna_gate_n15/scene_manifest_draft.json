@@ -42,7 +42,15 @@
     "paper exact antenna trajectory details and offset conventions",
     "paper exact A-scan count (80) not used in this gate"
   ],
-  "validation_state": "draft_not_validated_not_run",
+  "receiver_component_recommendation": "Ey",
+  "selected_component_for_conversion": "Ey",
+  "available_components": ["Ex", "Ey", "Ez", "Hx", "Hy", "Hz"],
+  "component_selection_rationale": [
+    "GSSI antenna raw-gate variability was validated on Ey in prior audit.",
+    "Component comparison on scene_025 n=15 shows Ey has stronger target_response energy and stronger trace-to-trace variability than Ez.",
+    "Ex is all-zero in this scene and is rejected for pairing use."
+  ],
+  "validation_state": "draft_component_validated_n15",
   "claim_boundary": [
     "GSSI antenna syntax and runtime gate only",
     "not exact replication",
