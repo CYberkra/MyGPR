@@ -50,7 +50,28 @@
     "Component comparison on scene_025 n=15 shows Ey has stronger target_response energy and stronger trace-to-trace variability than Ez.",
     "Ex is all-zero in this scene and is rejected for pairing use."
   ],
-  "validation_state": "draft_component_validated_n15",
+  "n31_component_confirmation": {
+    "status": "completed",
+    "ey_metrics": {
+      "shape": [3636, 31],
+      "target_response_energy": 0.16654497183557598,
+      "raw_background_psnr": 70.38088639553973,
+      "roi_energy_ratio": 0.0004316263418071876
+    },
+    "ez_metrics": {
+      "shape": [3636, 31],
+      "target_response_energy": 0.02504927487299834,
+      "raw_background_psnr": 70.21260369503368,
+      "roi_energy_ratio": 0.00047855112515785366
+    },
+    "comparison_conclusion": "Ey remains preferred over Ez at n=31 under current scene_025 setup.",
+    "confidence": "medium_high",
+    "unresolved_issues": [
+      "n=31 is still a gate setting and not the paper 80 A-scan full scan.",
+      "curvature visibility is improved but still preliminary; deeper diagnostic tuning may still be needed."
+    ]
+  },
+  "validation_state": "draft_component_validated_n31",
   "claim_boundary": [
     "GSSI antenna syntax and runtime gate only",
     "not exact replication",
