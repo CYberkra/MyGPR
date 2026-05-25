@@ -1,0 +1,68 @@
+{
+  "scene_id": "scene_037_gssi_ey_depth05_radius03_air_sand_interface_n80_geometry_gate",
+  "based_on_scene": "scene_036_gssi_ey_depth05_radius03_safe_n80_pair_gate",
+  "replication_type": "air_sand_interface_geometry_gate",
+  "raw_visual_only": false,
+  "expected_num_runs": 80,
+  "selected_component_for_visualization": "Ey",
+  "coordinate_convention": {
+    "z_axis_interpretation": "gprMax coordinate convention; dry sand occupies z=0.000..0.260, air occupies z=0.260..0.400",
+    "soil_surface_z_m": 0.260,
+    "antenna_skid_bottom_z_m": 0.310,
+    "antenna_to_soil_surface_distance_m": 0.050
+  },
+  "target_geometry": {
+    "type": "cylinder_along_y",
+    "x_center_m": 0.5,
+    "z_center_m": 0.180,
+    "radius_m": 0.03,
+    "cover_depth_m": 0.05,
+    "soil_surface_z_m": 0.260,
+    "target_upper_z_m": 0.210,
+    "target_lower_z_m": 0.150,
+    "y_range_m": [
+      0.002,
+      0.148
+    ],
+    "material": "pec",
+    "fully_inside_dry_sand": true
+  },
+  "scan_design": {
+    "antenna_input_start_x_m": 0.1,
+    "scan_step_x_m": 0.01,
+    "expected_num_runs": 80,
+    "antenna_input_x_range_m": [
+      0.1,
+      0.89
+    ],
+    "target_center_trace_1based": 41,
+    "target_center_trace_x_m": 0.5,
+    "actual_rx_x_range_m": "unknown_until_run_manifest",
+    "actual_src_x_range_m": "unknown_until_run_manifest"
+  },
+  "changed_from_scene_036": [
+    "added explicit air/free-space layer above dry sand",
+    "dry sand box changed from full domain to z=0.000..0.260",
+    "antenna skid bottom moved to z=0.310",
+    "target z coordinate redefined relative to soil surface z=0.260"
+  ],
+  "unchanged_from_scene_036": [
+    "domain",
+    "dx_dy_dz",
+    "time_window",
+    "dry sand Table II material",
+    "GSSI-like antenna model",
+    "selected component Ey",
+    "target material PEC",
+    "target radius03",
+    "cover depth05",
+    "n80 safe aperture"
+  ],
+  "claim_boundary": [
+    "air/sand interface synthetic GSSI/Ey geometry gate",
+    "not exact CLT-GPR replication",
+    "not paper benchmark",
+    "not field validation",
+    "not AutoTune evaluation"
+  ]
+}

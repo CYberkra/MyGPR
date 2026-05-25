@@ -444,3 +444,30 @@ scenes:
       - not_benchmark
       - not_evidence
       - not_validated
+
+  - scene_id: scene_037_gssi_ey_depth05_radius03_air_sand_interface_n80_geometry_gate
+    description: GX-008 air/sand interface depth05 radius03 n80 geometry gate under GSSI-like 1500 (Ey)
+    raw_model: models/scene_037_gssi_ey_depth05_radius03_air_sand_interface_n80_geometry_gate/raw_with_target.in
+    background_model: models/scene_037_gssi_ey_depth05_radius03_air_sand_interface_n80_geometry_gate/background_only.in
+    materials: models/scene_037_gssi_ey_depth05_radius03_air_sand_interface_n80_geometry_gate/materials.txt
+    target_roi: models/scene_037_gssi_ey_depth05_radius03_air_sand_interface_n80_geometry_gate/roi_draft.json
+    expected_outputs:
+      - raw_with_target
+      - background_only
+      - target_response
+    tags:
+      - gssi_antenna
+      - Ey
+      - air_sand_interface
+      - geometry_gate
+      - n80
+      - pair_gate
+      - radius03
+      - depth05
+      - safe_aperture
+      - single_target
+      - dry_sand
+      - pec
+      - not_benchmark
+      - not_evidence
+      - not_validated

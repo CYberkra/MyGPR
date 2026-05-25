@@ -1,0 +1,27 @@
+{
+  "scene_id": "scene_037_gssi_ey_depth05_radius03_air_sand_interface_n80_geometry_gate",
+  "roi_role": "draft_synthetic_target_region",
+  "sample_range": [
+    300,
+    1600
+  ],
+  "trace_range": [
+    25,
+    60
+  ],
+  "depth_window": [
+    300,
+    1600
+  ],
+  "trace_window": [
+    25,
+    60
+  ],
+  "expected_target_region": "draft window around trace 41 for air/sand interface depth05 radius03 n80 pair gate",
+  "notes": [
+    "Draft ROI only; not field truth",
+    "Target center trace expected near 41 under antenna input coordinates",
+    "Sample range must be recalibrated after actual target_response is generated",
+    "Air/sand interface may shift arrival times compared with scene_036"
+  ]
+}
