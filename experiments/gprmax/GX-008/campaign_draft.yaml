@@ -246,3 +246,26 @@ scenes:
       - not_benchmark
       - not_evidence
       - not_validated
+
+  - scene_id: scene_023_paper_aligned_tableii_material_gate_n31
+    description: "GX-008 paper-aligned Table II dry-sand material calibrated speed gate (n=31)"
+    raw_model: models/scene_023_paper_aligned_tableii_material_gate_n31/raw_with_target.in
+    background_model: models/scene_023_paper_aligned_tableii_material_gate_n31/background_only.in
+    materials: models/scene_023_paper_aligned_tableii_material_gate_n31/materials.txt
+    target_roi: models/scene_023_paper_aligned_tableii_material_gate_n31/roi_draft.json
+    expected_outputs:
+      - raw_with_target
+      - background_only
+      - target_response
+    tags:
+      - paper_aligned
+      - tableii_material
+      - speed_gate
+      - centered_scan
+      - synthetic
+      - paired
+      - dry_sand
+      - pec
+      - not_benchmark
+      - not_evidence
+      - not_validated
