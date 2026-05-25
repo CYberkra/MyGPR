@@ -1,0 +1,13 @@
+{
+  "scene_id": "scene_025_paper_aligned_gssi_antenna_gate_n15",
+  "roi_role": "draft_synthetic_target_region",
+  "sample_range": [120, 420],
+  "trace_range": [4, 12],
+  "depth_window": [120, 420],
+  "trace_window": [4, 12],
+  "expected_target_region": "centered gate around target crossing with GSSI-like antenna model",
+  "notes": [
+    "ROI is draft only; not field ground truth.",
+    "Antenna gate only; not full paper B-scan."
+  ]
+}

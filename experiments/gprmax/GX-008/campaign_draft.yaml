@@ -269,3 +269,26 @@ scenes:
       - not_benchmark
       - not_evidence
       - not_validated
+
+  - scene_id: scene_025_paper_aligned_gssi_antenna_gate_n15
+    description: "GX-008 paper-aligned GSSI antenna gate (n=15) for syntax/runtime feasibility"
+    raw_model: models/scene_025_paper_aligned_gssi_antenna_gate_n15/raw_with_target.in
+    background_model: models/scene_025_paper_aligned_gssi_antenna_gate_n15/background_only.in
+    materials: models/scene_025_paper_aligned_gssi_antenna_gate_n15/materials.txt
+    target_roi: models/scene_025_paper_aligned_gssi_antenna_gate_n15/roi_draft.json
+    expected_outputs:
+      - raw_with_target
+      - background_only
+      - target_response
+    tags:
+      - paper_aligned
+      - gssi_antenna
+      - antenna_gate
+      - dry_sand
+      - pec
+      - centered_scan
+      - synthetic
+      - paired
+      - not_benchmark
+      - not_evidence
+      - not_validated
