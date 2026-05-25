@@ -1,0 +1,53 @@
+{
+  "scene_id": "scene_033_gssi_ey_depth03_radius05_centered_n31_raw_gate",
+  "based_on_scene": "scene_032_gssi_ey_depth03_centered_n31_raw_gate",
+  "replication_type": "paper_aligned_radius05_gate",
+  "raw_visual_only": true,
+  "radius_gate": true,
+  "radius_gate_scope": "target_radius_only",
+  "expected_num_runs": 31,
+  "selected_component_for_visualization": "Ey",
+  "target_geometry": {
+    "type": "cylinder_along_y",
+    "x_center_m": 0.5,
+    "y_center_m": 0.075,
+    "z_center_m": 0.08,
+    "radius_m": 0.05,
+    "material": "pec"
+  },
+  "scan_design": {
+    "antenna_input_start_x_m": 0.382,
+    "scan_step_x_m": 0.01,
+    "expected_num_runs": 31,
+    "intent_rx_range_m": [
+      0.35,
+      0.65
+    ],
+    "intent_middle_trace_rx_x_m": 0.5
+  },
+  "changed_from_scene_032": [
+    "target radius 0.03 -> 0.05"
+  ],
+  "unchanged_from_scene_032": [
+    "target depth",
+    "target center",
+    "soil",
+    "antenna model",
+    "target material",
+    "domain",
+    "dx_dy_dz",
+    "scan step",
+    "aperture"
+  ],
+  "background_not_run_in_this_task": true,
+  "clutter_free_not_generated": true,
+  "claim_boundary": [
+    "centered depth03 radius05 raw-only n31 gate",
+    "no background in this task",
+    "no clutter-free in this task",
+    "not exact replication",
+    "not paper benchmark",
+    "not AutoTune evaluation",
+    "not field validation"
+  ]
+}
