@@ -257,7 +257,7 @@ class QualityLogPage(QWidget):
         self.visual_segmented = SegmentedWidget(self)
         self.visual_segmented.addItem("qc_chart", "质量图表")
         self.visual_segmented.addItem("trajectory", "航迹图")
-        self.visual_segmented.addItem("georef3d", "三维预览")
+        # 保持 MyGPR 与外部 3D 预览工具边界：主界面不展示内嵌三维入口。
         visual_layout.addWidget(self.visual_segmented)
 
         self.visual_stack = QStackedWidget(self)
@@ -512,7 +512,6 @@ class QualityLogPage(QWidget):
         mapping = {
             "qc_chart": 0,
             "trajectory": 1,
-            "georef3d": 2,
         }
         self.visual_stack.setCurrentIndex(mapping.get(route_key, 0))
 
@@ -1080,17 +1079,14 @@ class QualityLogPage(QWidget):
         return available
 
     def _open_georef3d_dialog(self) -> None:
-        """打开独立大窗口预览；优先 PyVista，失败时回退 Matplotlib。"""
+        """打开独立大窗口预览；统一使用 Matplotlib 兼容视图。"""
         entries = self._available_georef3d_entries()
         if not entries:
             return
-        try:
-            self._open_georef3d_pyvista_dialog(entries)
-        except Exception as exc:
-            self._open_georef3d_matplotlib_dialog(
-                entries,
-                fallback_message=f"未安装 PyVista 三维预览依赖或初始化失败，已回退 Matplotlib：{exc}",
-            )
+        self._open_georef3d_matplotlib_dialog(
+            entries,
+            fallback_message="MyGPR 当前不内置 PyVista 预览，已使用 Matplotlib 兼容视图。",
+        )
 
     def _open_georef3d_pyvista_dialog(self, entries: dict[str, tuple[str, dict]]) -> None:
         """Use PyVista/VTK for the expanded 3D motion preview."""
