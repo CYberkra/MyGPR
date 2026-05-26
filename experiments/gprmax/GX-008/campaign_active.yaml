@@ -1,0 +1,25 @@
+campaign_id: GX-008_scene037_active
+draft_note: "Active-only campaign for the current primary GX-008 scene."
+output_root: D:/CDUT-UavGPR-Controller/MyGPR-Evidence/gprmax/GX-008
+gprmax_executable: gprMax
+scenes:
+  - scene_id: scene_037_gssi_ey_depth05_radius03_air_sand_interface_n80_geometry_gate
+    description: GX-008 current primary active scene (air/sand interface, GSSI-like 1500, Ey, n80 pair)
+    raw_model: models/scene_037_gssi_ey_depth05_radius03_air_sand_interface_n80_geometry_gate/raw_with_target.in
+    background_model: models/scene_037_gssi_ey_depth05_radius03_air_sand_interface_n80_geometry_gate/background_only.in
+    materials: models/scene_037_gssi_ey_depth05_radius03_air_sand_interface_n80_geometry_gate/materials.txt
+    target_roi: models/scene_037_gssi_ey_depth05_radius03_air_sand_interface_n80_geometry_gate/roi_draft.json
+    expected_outputs:
+      - raw_with_target
+      - background_only
+      - target_response
+    tags:
+      - primary_active
+      - air_sand_interface
+      - GSSI_1500
+      - Ey
+      - n80
+      - synthetic_paired_diagnostic
+      - not_benchmark
+      - not_field_validation
+      - not_autotune
