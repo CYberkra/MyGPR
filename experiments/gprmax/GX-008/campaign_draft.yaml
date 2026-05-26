@@ -471,3 +471,31 @@ scenes:
       - not_benchmark
       - not_evidence
       - not_validated
+
+  - scene_id: scene_038_gssi_ey_depth07_radius03_air_sand_interface_n80_pair_gate
+    description: GX-008 depth07 radius03 air/sand interface n80 depth sensitivity gate under GSSI-like 1500 (Ey)
+    raw_model: models/scene_038_gssi_ey_depth07_radius03_air_sand_interface_n80_pair_gate/raw_with_target.in
+    background_model: models/scene_038_gssi_ey_depth07_radius03_air_sand_interface_n80_pair_gate/background_only.in
+    materials: models/scene_038_gssi_ey_depth07_radius03_air_sand_interface_n80_pair_gate/materials.txt
+    target_roi: models/scene_038_gssi_ey_depth07_radius03_air_sand_interface_n80_pair_gate/roi_draft.json
+    expected_outputs:
+      - raw_with_target
+      - background_only
+      - target_response
+    tags:
+      - depth_sensitivity_gate
+      - depth07
+      - air_sand_interface
+      - gssi_antenna
+      - GSSI_1500
+      - Ey
+      - n80
+      - pair_gate
+      - radius03
+      - single_target
+      - dry_sand
+      - pec
+      - not_primary_active
+      - not_benchmark
+      - not_field_validation
+      - not_autotune

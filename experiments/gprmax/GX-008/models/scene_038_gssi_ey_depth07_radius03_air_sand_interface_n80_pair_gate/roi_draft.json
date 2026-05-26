@@ -1,0 +1,15 @@
+{
+  "scene_id": "scene_038_gssi_ey_depth07_radius03_air_sand_interface_n80_pair_gate",
+  "roi_role": "draft_synthetic_target_region",
+  "sample_range": [420, 1900],
+  "trace_range": [20, 65],
+  "depth_window": [420, 1900],
+  "trace_window": [20, 65],
+  "expected_target_region": "draft window around trace 41 for depth07 radius03 air/sand n80 pair gate",
+  "notes": [
+    "Draft ROI only; not field truth",
+    "Target center trace expected near 41 under antenna input coordinates",
+    "Sample range is intentionally deeper/wider than scene_037 and must be recalibrated after target_response is generated",
+    "Do not use ROI metrics as detection accuracy"
+  ]
+}
