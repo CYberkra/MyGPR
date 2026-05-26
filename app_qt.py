@@ -189,7 +189,7 @@ from qfluentwidgets import FluentIcon
 
 # 导入页面模块
 from ui.gui_basic_flow import BasicFlowPage
-from ui.gui_auto_tune_page import AutoTunePage
+from ui.autotune_tuning_page import AutoTuneTuningPage
 from ui.gui_advanced_settings import AdvancedSettingsPage
 from ui.gui_quality_log import QualityLogPage
 
@@ -930,7 +930,7 @@ class GPRGuiQt(QMainWindow):
         self.control_tabs.setTabToolTip(idx_basic, "日常连续处理操作")
 
         # 页面2: 调参与实验
-        self.page_auto_tune = AutoTunePage(self)
+        self.page_auto_tune = AutoTuneTuningPage(self)
         idx_auto_tune = self.control_tabs.addTab(
             self.page_auto_tune, FluentIcon.SETTING.icon(), "调参与实验"
         )
