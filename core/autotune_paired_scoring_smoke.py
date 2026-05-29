@@ -174,6 +174,22 @@ def select_stable_pairs(inventories: list[TaskInventory]) -> list[TaskInventory]
     return selected
 
 
+def select_scoreable_pairs(inventories: list[TaskInventory]) -> list[TaskInventory]:
+    """Select scenes that can enter scoring (stable + convertible)."""
+    selected: list[TaskInventory] = []
+    for item in inventories:
+        if item.status not in {"stable_completed", "convertible_pair"}:
+            continue
+        if item.expected_trace_count is None:
+            continue
+        if item.raw_count != item.expected_trace_count or item.background_count != item.expected_trace_count:
+            continue
+        if item.raw_count != item.background_count:
+            continue
+        selected.append(item)
+    return selected
+
+
 def ensure_scene_arrays(
     item: TaskInventory,
     *,
@@ -263,9 +279,9 @@ def score_scene_candidates(
     median_bg = np.median(raw, axis=1, keepdims=True)
     candidates.append(("median_background", {"mode": "global_median"}, raw - median_bg))
 
+    u, s, vt = svd(raw, full_matrices=False, check_finite=False)
     for rank in (1, 2, 3, 5, 8, 10):
         r = int(max(1, min(rank, min(raw.shape))))
-        u, s, vt = svd(raw, full_matrices=False, check_finite=False)
         s_bg = np.zeros_like(s)
         s_bg[:r] = s[:r]
         bg = (u * s_bg) @ vt
@@ -691,6 +707,8 @@ def _classify_status(
 ) -> str:
     if expected is not None and raw_count == expected and background_count == expected and target_response_exists:
         return "stable_completed"
+    if expected is not None and raw_count == expected and background_count == expected and not target_response_exists:
+        return "convertible_pair"
     if latest_mtime >= running_threshold:
         return "running_or_unstable"
     if expected is None:
@@ -760,9 +778,9 @@ def _load_or_build_array(
 
 
 def _build_array_from_out_dir(out_dir: Path, component: str) -> np.ndarray:
-    out_files = sorted(out_dir.glob("*.out"), key=_out_file_sort_key)
+    out_files = _extract_numbered_out_files(out_dir)
     if not out_files:
-        raise FileNotFoundError(f"no .out files found in {out_dir}")
+        raise FileNotFoundError(f"no numbered trace .out files found in {out_dir}")
     traces = []
     for file in out_files:
         arr = _read_component_from_out(file, component)
@@ -776,6 +794,29 @@ def _build_array_from_out_dir(out_dir: Path, component: str) -> np.ndarray:
         raise ValueError(f"inconsistent sample length across out files in {out_dir}")
     stacked = np.column_stack(traces)
     return stacked
+
+
+def _extract_numbered_out_files(out_dir: Path) -> list[Path]:
+    numbered: list[tuple[int, Path]] = []
+    for file in out_dir.glob("*.out"):
+        match = re.search(r"(\d+)$", file.stem)
+        if not match:
+            continue
+        idx = int(match.group(1))
+        numbered.append((idx, file))
+    if not numbered:
+        return []
+    numbered.sort(key=lambda item: item[0])
+    indices = [idx for idx, _ in numbered]
+    unique_indices = sorted(set(indices))
+    if len(unique_indices) != len(indices):
+        raise ValueError(f"duplicate trace indices found in {out_dir}: {indices}")
+    expected = list(range(unique_indices[0], unique_indices[-1] + 1))
+    if unique_indices != expected:
+        raise ValueError(
+            f"trace indices are not continuous in {out_dir}: got={unique_indices}, expected={expected}"
+        )
+    return [path for _, path in numbered]
 
 
 def _out_file_sort_key(path: Path) -> tuple[str, int]:
@@ -894,3 +935,53 @@ def _cnr_proxy(processed: np.ndarray, sample_range: tuple[int, int], trace_range
     bg_std = float(np.std(bg_vals))
     denom = bg_std if bg_std > 1e-12 else 1e-12
     return float((signal - bg_mean) / denom)
+
+
+def summarize_candidate_aggregates(rows: list[CandidateScore]) -> dict[str, dict[str, Any]]:
+    """Aggregate candidate-level summary statistics across scenes."""
+    grouped: dict[str, list[CandidateScore]] = {}
+    for row in rows:
+        grouped.setdefault(row.candidate, []).append(row)
+
+    out: dict[str, dict[str, Any]] = {}
+    for candidate, items in sorted(grouped.items()):
+        maes = np.asarray([x.mae for x in items], dtype=np.float64)
+        rmses = np.asarray([x.rmse for x in items], dtype=np.float64)
+        psnrs = np.asarray([x.psnr for x in items if x.psnr is not None], dtype=np.float64)
+        ssims = np.asarray([x.ssim for x in items if x.ssim is not None], dtype=np.float64)
+        out[candidate] = {
+            "scene_count": len({x.scene_id for x in items}),
+            "mae_mean": float(np.mean(maes)),
+            "mae_median": float(np.median(maes)),
+            "rmse_mean": float(np.mean(rmses)),
+            "rmse_median": float(np.median(rmses)),
+            "psnr_mean": float(np.mean(psnrs)) if psnrs.size else None,
+            "psnr_median": float(np.median(psnrs)) if psnrs.size else None,
+            "ssim_mean": float(np.mean(ssims)) if ssims.size else None,
+            "ssim_median": float(np.median(ssims)) if ssims.size else None,
+            "selected_count": int(sum(1 for x in items if x.selected)),
+        }
+    return out
+
+
+def summarize_warning_counts(rows: list[CandidateScore]) -> dict[str, int]:
+    """Summarize warning tokens in trial rows."""
+    keys = ("roi_mode=auto_proxy", "psnr_none", "ssim_none")
+    counts = {k: 0 for k in keys}
+    for row in rows:
+        for warning in row.warnings:
+            if warning in counts:
+                counts[warning] += 1
+    return counts
+
+
+def top_k_candidates_for_scene(rows: list[CandidateScore], k: int = 3) -> dict[str, list[CandidateScore]]:
+    """Return top-k candidates per scene with the same selection rule."""
+    per_scene: dict[str, list[CandidateScore]] = {}
+    for row in rows:
+        per_scene.setdefault(row.scene_id, []).append(row)
+    ranked: dict[str, list[CandidateScore]] = {}
+    for scene_id, scene_rows in per_scene.items():
+        ordered = sorted(scene_rows, key=lambda r: (r.mae, r.rmse, -(r.psnr if r.psnr is not None else -math.inf)))
+        ranked[scene_id] = ordered[:k]
+    return ranked

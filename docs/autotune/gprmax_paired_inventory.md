@@ -1,6 +1,6 @@
 # gprMax Paired Inventory (GX-AT-SCORE-001)
 
-- scan_time_utc: `2026-05-28T16:23:37.736847+00:00`
+- scan_time_utc: `2026-05-29T00:21:05.014731+00:00`
 - total_tasks: `23`
 - claim_boundary:
   - synthetic paired scoring MVP only
@@ -80,9 +80,7 @@
 - raw_shape/background_shape/target_shape: `[2079, 80]` / `[2079, 80]` / `[2079, 80]`
 - target_response_exists: `True`
 - MyGPR_target_response.out exists: `True`
-- latest_mtime: `2026-05-28T16:17:27.905332+00:00`
-- notes:
-  - recent_mtime_within_running_window
+- latest_mtime: `2026-05-28T16:23:37.743849+00:00`
 
 ### 6. 2026-05-28_153536_742_scene_gssi1500_single_cylinder_air_sand_cdca_a0440b
 - task_dir: `D:\GPR_Simulation_Results\01_单次仿真\2026-05-28_153536_742_scene_gssi1500_single_cylinder_air_sand_cdca_a0440b`
@@ -94,9 +92,7 @@
 - raw_shape/background_shape/target_shape: `[2079, 80]` / `[2079, 80]` / `[2079, 80]`
 - target_response_exists: `True`
 - MyGPR_target_response.out exists: `True`
-- latest_mtime: `2026-05-28T16:17:28.190670+00:00`
-- notes:
-  - recent_mtime_within_running_window
+- latest_mtime: `2026-05-28T16:23:37.939903+00:00`
 
 ### 7. 2026-05-28_163735_009_scene_gssi1500_single_cylinder_air_sand_cdca_823a3e
 - task_dir: `D:\GPR_Simulation_Results\01_单次仿真\2026-05-28_163735_009_scene_gssi1500_single_cylinder_air_sand_cdca_823a3e`
@@ -108,9 +104,7 @@
 - raw_shape/background_shape/target_shape: `[2079, 80]` / `[2079, 80]` / `[2079, 80]`
 - target_response_exists: `True`
 - MyGPR_target_response.out exists: `True`
-- latest_mtime: `2026-05-28T16:17:28.503697+00:00`
-- notes:
-  - recent_mtime_within_running_window
+- latest_mtime: `2026-05-28T16:23:38.137748+00:00`
 
 ### 8. 2026-05-28_175134_703_scene_gssi1500_single_cylinder_air_sand_cdca_ae11ba
 - task_dir: `D:\GPR_Simulation_Results\01_单次仿真\2026-05-28_175134_703_scene_gssi1500_single_cylinder_air_sand_cdca_ae11ba`
@@ -122,9 +116,7 @@
 - raw_shape/background_shape/target_shape: `[2079, 80]` / `[2079, 80]` / `[2079, 80]`
 - target_response_exists: `True`
 - MyGPR_target_response.out exists: `True`
-- latest_mtime: `2026-05-28T16:17:28.822600+00:00`
-- notes:
-  - recent_mtime_within_running_window
+- latest_mtime: `2026-05-28T16:23:38.351721+00:00`
 
 ### 9. 2026-05-28_190133_084_scene_gssi1500_single_cylinder_air_sand_cdca_ddf940
 - task_dir: `D:\GPR_Simulation_Results\01_单次仿真\2026-05-28_190133_084_scene_gssi1500_single_cylinder_air_sand_cdca_ddf940`
@@ -151,9 +143,7 @@
 - raw_shape/background_shape/target_shape: `[2079, 80]` / `[2079, 80]` / `[2079, 80]`
 - target_response_exists: `True`
 - MyGPR_target_response.out exists: `True`
-- latest_mtime: `2026-05-28T16:17:29.130104+00:00`
-- notes:
-  - recent_mtime_within_running_window
+- latest_mtime: `2026-05-28T16:23:38.554262+00:00`
 
 ### 11. 2026-05-28_195850_659_scene_gssi1500_single_cylinder_air_sand_cdca_b3c39c
 - task_dir: `D:\GPR_Simulation_Results\01_单次仿真\2026-05-28_195850_659_scene_gssi1500_single_cylinder_air_sand_cdca_b3c39c`
@@ -165,9 +155,7 @@
 - raw_shape/background_shape/target_shape: `[2079, 80]` / `[2079, 80]` / `[2079, 80]`
 - target_response_exists: `True`
 - MyGPR_target_response.out exists: `True`
-- latest_mtime: `2026-05-28T16:17:29.428289+00:00`
-- notes:
-  - recent_mtime_within_running_window
+- latest_mtime: `2026-05-28T16:23:38.756918+00:00`
 
 ### 12. 2026-05-28_211907_973_scene_gssi1500_single_cylinder_air_sand_cdca_d41351
 - task_dir: `D:\GPR_Simulation_Results\01_单次仿真\2026-05-28_211907_973_scene_gssi1500_single_cylinder_air_sand_cdca_d41351`
@@ -179,13 +167,11 @@
 - raw_shape/background_shape/target_shape: `[2079, 80]` / `[2079, 80]` / `[2079, 80]`
 - target_response_exists: `True`
 - MyGPR_target_response.out exists: `True`
-- latest_mtime: `2026-05-28T16:17:29.728727+00:00`
-- notes:
-  - recent_mtime_within_running_window
+- latest_mtime: `2026-05-28T16:23:38.967637+00:00`
 
 ### 13. 2026-05-28_222526_086_scene_gssi1500_single_cylinder_air_sand_cdca_3e57aa
 - task_dir: `D:\GPR_Simulation_Results\01_单次仿真\2026-05-28_222526_086_scene_gssi1500_single_cylinder_air_sand_cdca_3e57aa`
-- status: `running_or_unstable`
+- status: `incomplete`
 - pair_status: `ambiguous`
 - expected_trace_count: `158`
 - raw_count/background_count: `158/134`
@@ -197,7 +183,6 @@
 - notes:
   - raw_background_count_mismatch
   - background_count_not_expected(134!=158)
-  - recent_mtime_within_running_window
 
 ### 14. task_001_T1_CYL_PEC_DS_d07_r02_x54_G15_Ey
 - task_dir: `D:\GPR_Simulation_Results\02_批量仿真\Batch_2026-05-28_145123_随机建模_T1_CYL_PEC_DS_G15Ey_n10_seed20260528\T1_单目标\task_001_T1_CYL_PEC_DS_d07_r02_x54_G15_Ey`

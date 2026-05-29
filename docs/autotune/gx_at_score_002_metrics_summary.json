@@ -1,0 +1,130 @@
+{
+  "task_id": "GX-AT-SCORE-002-SCORING-HARDENING",
+  "total_inventory_count": 23,
+  "stable_completed_count": 7,
+  "convertible_pair_count": 0,
+  "scored_scene_count": 7,
+  "trial_count": 63,
+  "per_candidate_aggregate": {
+    "baseline": {
+      "scene_count": 7,
+      "mae_mean": 0.26302430033683777,
+      "mae_median": 0.26302430033683777,
+      "rmse_mean": 0.8241364496732649,
+      "rmse_median": 0.8241364496732648,
+      "psnr_mean": 15.641040296389793,
+      "psnr_median": 15.641040296389795,
+      "ssim_mean": 0.04238600721620967,
+      "ssim_median": 0.03193903755008793,
+      "selected_count": 0
+    },
+    "mean_background": {
+      "scene_count": 7,
+      "mae_mean": 0.004870806321767824,
+      "mae_median": 0.001202677609398961,
+      "rmse_mean": 0.011960634091836536,
+      "rmse_median": 0.002947288160170004,
+      "psnr_mean": 29.156005295817913,
+      "psnr_median": 30.75664297036333,
+      "ssim_mean": 0.9274896893226577,
+      "ssim_median": 0.9499244796724733,
+      "selected_count": 0
+    },
+    "median_background": {
+      "scene_count": 7,
+      "mae_mean": 0.0012628246853897249,
+      "mae_median": 0.00018527754582464695,
+      "rmse_mean": 0.0030838462582582853,
+      "rmse_median": 0.00040236140951273287,
+      "psnr_mean": 47.34824764858569,
+      "psnr_median": 40.75920820122356,
+      "ssim_mean": 0.9692589914279629,
+      "ssim_median": 0.9962160065018686,
+      "selected_count": 7
+    },
+    "svd_rank_1": {
+      "scene_count": 7,
+      "mae_mean": 0.00501486671523058,
+      "mae_median": 0.001274331589229405,
+      "rmse_mean": 0.01199950438342223,
+      "rmse_median": 0.0029651078015523087,
+      "psnr_mean": 29.097932096726005,
+      "psnr_median": 30.740626130857514,
+      "ssim_mean": 0.9261663802479443,
+      "ssim_median": 0.9499772530235079,
+      "selected_count": 0
+    },
+    "svd_rank_10": {
+      "scene_count": 7,
+      "mae_mean": 0.012162373243232391,
+      "mae_median": 0.0018741030944511294,
+      "rmse_mean": 0.04229009448365861,
+      "rmse_median": 0.005361839946499396,
+      "psnr_mean": 19.909027768359227,
+      "psnr_median": 19.178112513615073,
+      "ssim_mean": 0.08944828020350104,
+      "ssim_median": 0.07126867644896577,
+      "selected_count": 0
+    },
+    "svd_rank_2": {
+      "scene_count": 7,
+      "mae_mean": 0.00875482612173073,
+      "mae_median": 0.0017269606469199061,
+      "rmse_mean": 0.033649046240597315,
+      "rmse_median": 0.0049032211340808785,
+      "psnr_mean": 21.65581296634047,
+      "psnr_median": 21.45239912725061,
+      "ssim_mean": 0.5195391150141171,
+      "ssim_median": 0.5204450968038009,
+      "selected_count": 0
+    },
+    "svd_rank_3": {
+      "scene_count": 7,
+      "mae_mean": 0.010794675842459713,
+      "mae_median": 0.0018407268216833472,
+      "rmse_mean": 0.039711103669394586,
+      "rmse_median": 0.005230371470753955,
+      "psnr_mean": 20.37474859874977,
+      "psnr_median": 19.532984037898306,
+      "ssim_mean": 0.2481760318694171,
+      "ssim_median": 0.25335360777059174,
+      "selected_count": 0
+    },
+    "svd_rank_5": {
+      "scene_count": 7,
+      "mae_mean": 0.011727077844885312,
+      "mae_median": 0.001867600716650486,
+      "rmse_mean": 0.0416526294703574,
+      "rmse_median": 0.005352880744523824,
+      "psnr_mean": 19.999549079113745,
+      "psnr_median": 19.20619027334656,
+      "ssim_mean": 0.12421304305024071,
+      "ssim_median": 0.14341281553384147,
+      "selected_count": 0
+    },
+    "svd_rank_8": {
+      "scene_count": 7,
+      "mae_mean": 0.01211603287707216,
+      "mae_median": 0.0018740561790764332,
+      "rmse_mean": 0.04222393829939402,
+      "rmse_median": 0.005361700005186669,
+      "psnr_mean": 19.917991935823768,
+      "psnr_median": 19.179061132402193,
+      "ssim_mean": 0.09310203741197351,
+      "ssim_median": 0.08362798837361445,
+      "selected_count": 0
+    }
+  },
+  "warnings_summary": {
+    "roi_mode=auto_proxy": 63,
+    "psnr_none": 0,
+    "ssim_none": 0
+  },
+  "scene_errors": [],
+  "claim_boundary": [
+    "synthetic paired scoring MVP only",
+    "not AutoTune superiority evidence",
+    "not field validation",
+    "not real-world detection correctness evidence"
+  ]
+}
