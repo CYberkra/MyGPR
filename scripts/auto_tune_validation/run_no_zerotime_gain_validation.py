@@ -8,6 +8,7 @@ import argparse
 import csv
 import html
 import json
+import os
 import re
 import sys
 from dataclasses import dataclass
@@ -39,10 +40,7 @@ from scripts.auto_tune_validation.run_stepwise_validation import (
 )
 
 
-FIELD_CANDIDATES = [
-    Path(r"C:\Users\17844\Desktop\02_Preprocessed_Standard\2025-09_营山\Line9origin(36).csv"),
-    Path(r"C:\Users\17844\Desktop\Line9origin(36).csv"),
-]
+FIELD_CANDIDATES = [Path(os.environ["MYGPR_YINGSHAN_LINE9_CSV"])] if os.environ.get("MYGPR_YINGSHAN_LINE9_CSV") else []
 
 
 @dataclass(frozen=True)

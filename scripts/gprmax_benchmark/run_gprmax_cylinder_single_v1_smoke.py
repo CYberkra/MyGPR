@@ -24,7 +24,7 @@ from scripts.gprmax_benchmark.generate_cylinder_single_v1 import (  # noqa: E402
 )
 
 
-DEFAULT_GPRMAX_ROOT = Path(r"E:\gprMax\gprMax-v.3.1.7")
+DEFAULT_GPRMAX_ROOT = Path(os.environ.get("MYGPR_GPRMAX_ROOT", "gprMax"))
 DEFAULT_SMOKE_ROOT = ROOT / "output" / "gprmax_smoke" / SCENARIO_ID
 
 

@@ -47,7 +47,7 @@ from core.scalar_utils import to_int  # noqa: E402
 from core.trace_metadata_utils import resample_bscan_columns_linear  # noqa: E402
 
 
-DEFAULT_GPRMAX_ROOT = Path(r"E:\gprMax\gprMax-v.3.1.7")
+DEFAULT_GPRMAX_ROOT = Path(os.environ.get("MYGPR_GPRMAX_ROOT", "gprMax"))
 DEFAULT_OUTPUT_ROOT = ROOT / "output" / "gprmax_multi_scenario_reports"
 DEFAULT_PROFILE_KEY = "uav_gpr_experience_baseline_v1"
 DEFAULT_RUNS = 96
@@ -361,7 +361,7 @@ def find_windows_vcvars64(explicit_path: str | None = None) -> Path | None:
 
     if os.name == "nt":
         vswhere = (
-            Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"))
+            Path(os.environ.get("ProgramFiles(x86)", ""))
             / "Microsoft Visual Studio"
             / "Installer"
             / "vswhere.exe"

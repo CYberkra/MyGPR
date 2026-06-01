@@ -251,9 +251,11 @@ def _resolve_gprmax_cmd(explicit: str, gprmax_python: str) -> str:
         return explicit.strip()
     if gprmax_python.strip():
         return f"{Path(gprmax_python).expanduser().resolve()} -m gprMax"
-    candidate = Path(r"E:\gprMax\gprMax-v.3.1.7\.venv\Scripts\python.exe")
-    if candidate.exists():
-        return f"{candidate} -m gprMax"
+    env_python = os.environ.get("MYGPR_GPRMAX_PYTHON", "").strip()
+    if env_python:
+        candidate = Path(env_python).expanduser()
+        if candidate.exists():
+            return f"{candidate.resolve()} -m gprMax"
     return "python -m gprMax"
 
 

@@ -5,13 +5,14 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 from datetime import datetime
 from pathlib import Path
 from typing import Sequence
 
 
-DEFAULT_VAULT_PATH = Path(r"D:\ClawX-Data\Obsidian\uav_gpr")
+DEFAULT_VAULT_PATH = Path(os.environ.get("MYGPR_OBSIDIAN_VAULT", ""))
 DEFAULT_NOTE_PATH = Path("10-项目/组会进展/组会进展记录.md")
 DATE_ONLY_HEADING_RE = re.compile(r"^##\s+\d{4}-\d{2}-\d{2}\s*$")
 LEGACY_CHILD_HEADING_RE = re.compile(

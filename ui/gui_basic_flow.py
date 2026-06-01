@@ -52,9 +52,27 @@ class SplitActionButton(QWidget):
         self._drop_width = 24
         self._hover_part = None
         self._pressed_part = None
+        self._visual_state = "normal"
         self.setMinimumHeight(34)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setMouseTracking(True)
+
+    def setText(self, text: str):
+        self._text = str(text or "")
+        self.update()
+
+    def text(self) -> str:
+        return self._text
+
+    def setVisualState(self, state: str):
+        state = str(state or "normal").lower()
+        if state not in {"normal", "busy", "success", "error", "dirty"}:
+            state = "normal"
+        if self._visual_state == state:
+            return
+        self._visual_state = state
+        self.setProperty("applyState", state)
+        self.update()
 
     def setMenu(self, menu):
         self._menu = menu
@@ -78,7 +96,14 @@ class SplitActionButton(QWidget):
         return None
 
     def _background_color(self) -> QColor:
-        base = QColor(themeColor())
+        state = getattr(self, "_visual_state", "normal")
+        state_colors = {
+            "busy": "#2563EB",
+            "success": "#16A34A",
+            "error": "#DC2626",
+            "dirty": "#F59E0B",
+        }
+        base = QColor(state_colors.get(state, themeColor()))
         if not self.isEnabled():
             base.setAlpha(90)
             return base
@@ -104,6 +129,7 @@ class SplitActionButton(QWidget):
     def leaveEvent(self, event):
         self._hover_part = None
         self._pressed_part = None
+        self._visual_state = "normal"
         self.update()
         super().leaveEvent(event)
 
@@ -229,6 +255,8 @@ class SplitActionButton(QWidget):
 class BasicFlowPage(QWidget):
     """基础流程页面 - 快速开始、方法选择、参数设置"""
 
+    parametersChanged = pyqtSignal()
+
     BASIC_COMMON_PARAM_NAMES = {
         "motion_compensation_height": [
             "reference_height_mode",
@@ -256,6 +284,8 @@ class BasicFlowPage(QWidget):
         self._apply_source_hint_text = "应用来源：当前参数"
         self._auto_tune_result_available = False
         self._basic_ultra_mode = False
+        self._params_dirty = False
+        self._apply_state = "idle"
         self.BASIC_PARAM_LIMIT = 4  # compatibility only; daily panel now shows full params by default
         self.btn_stolt_apply = None
         self.stolt_preset_combo = None
@@ -279,8 +309,8 @@ class BasicFlowPage(QWidget):
         scroll.setWidget(content)
 
         layout = QVBoxLayout(content)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(12)
+        layout.setContentsMargins(10, 8, 10, 10)
+        layout.setSpacing(11)
 
         basic_heading = QLabel("日常处理")
         basic_heading.setProperty("class", "sectionTitle")
@@ -295,6 +325,7 @@ class BasicFlowPage(QWidget):
         action_layout.setSpacing(8)
 
         self.btn_import = SplitActionButton("导入数据", FluentIcon.FOLDER, self)
+        self.btn_import.setObjectName("basicImportButton")
         self.btn_import.setToolTip(
             "点击主区域默认导入 CSV，点击右侧箭头查看其它导入方式"
         )
@@ -310,6 +341,7 @@ class BasicFlowPage(QWidget):
         self.btn_import.setMenu(self.import_menu)
 
         self.btn_apply = SplitActionButton("应用方法", FluentIcon.PLAY_SOLID, self)
+        self.btn_apply.setObjectName("basicApplyButton")
         self.btn_apply.setToolTip(
             "点击主区域按当前默认来源执行，点击右侧箭头切换默认应用来源"
         )
@@ -329,6 +361,7 @@ class BasicFlowPage(QWidget):
         self.set_auto_tune_result_available(False)
 
         self.btn_quick = PushButton(FluentIcon.SYNC, "默认流程")
+        self.btn_quick.setObjectName("basicQuickButton")
         self.btn_quick.setProperty("class", "basicGhostBtn")
         self.btn_quick.setMinimumHeight(34)
         self.btn_quick.setToolTip(
@@ -383,6 +416,12 @@ class BasicFlowPage(QWidget):
         row_third_l.setStretch(1, 1)
         action_layout.addWidget(row_third)
 
+        self.apply_feedback_label = QLabel("就绪：按当前参数执行。")
+        self.apply_feedback_label.setObjectName("ApplyFeedbackLabel")
+        self.apply_feedback_label.setWordWrap(True)
+        self.apply_feedback_label.setProperty("tone", "neutral")
+        action_layout.addWidget(self.apply_feedback_label)
+
         layout.addWidget(action_box)
 
         # 方法与参数
@@ -395,6 +434,7 @@ class BasicFlowPage(QWidget):
         method_layout.setSpacing(8)
 
         self.method_combo = QComboBox()
+        self.method_combo.setObjectName("methodCombo")
         self.method_combo.setMinimumHeight(34)
         self.method_combo.setToolTip("选择GPR数据处理方法")
         self.method_keys = get_public_method_keys()
@@ -406,14 +446,35 @@ class BasicFlowPage(QWidget):
         )
         method_layout.addWidget(self.method_combo)
 
+        self.method_inspector_header = QFrame()
+        self.method_inspector_header.setObjectName("MethodInspectorHeader")
+        inspector_header_layout = QVBoxLayout(self.method_inspector_header)
+        inspector_header_layout.setContentsMargins(10, 8, 10, 8)
+        inspector_header_layout.setSpacing(3)
+        self.method_category_tag = QLabel("类别")
+        self.method_category_tag.setObjectName("MethodCategoryTag")
+        self.method_name_label = QLabel("当前方法")
+        self.method_name_label.setObjectName("MethodNameLabel")
+        self.method_name_label.setWordWrap(True)
+        inspector_header_layout.addWidget(self.method_category_tag)
+        inspector_header_layout.addWidget(self.method_name_label)
+        method_layout.addWidget(self.method_inspector_header)
+
+        self.param_dirty_label = QLabel("参数未修改")
+        self.param_dirty_label.setObjectName("ParamDirtyLabel")
+        self.param_dirty_label.setProperty("tone", "clean")
+        self.param_dirty_label.setWordWrap(True)
+        method_layout.addWidget(self.param_dirty_label)
+
         # Basic and advanced parameters are displayed together by default.
         # The old collapsible toggle is intentionally removed to keep all
         # method parameters immediately visible in the daily workflow.
         self.show_advanced_params_var = None
 
         self.param_container = QWidget()
+        self.param_container.setObjectName("InspectorParamPanel")
         self.param_layout = QFormLayout(self.param_container)
-        self.param_layout.setContentsMargins(4, 4, 4, 4)
+        self.param_layout.setContentsMargins(8, 8, 8, 8)
         self.param_layout.setFieldGrowthPolicy(
             QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow
         )
@@ -474,6 +535,16 @@ class BasicFlowPage(QWidget):
         """公开方法：更新方法参数覆盖。"""
         self._method_param_overrides[method_key] = dict(params or {})
 
+
+    def _refresh_method_inspector_header(self, method_key: str) -> None:
+        """Update the compact Inspector-style method summary."""
+        category = get_method_category_label(method_key)
+        name = get_method_display_name(method_key)
+        if getattr(self, "method_category_tag", None) is not None:
+            self.method_category_tag.setText(category)
+        if getattr(self, "method_name_label", None) is not None:
+            self.method_name_label.setText(name)
+
     def _render_params(self, method_key: str, overrides: dict | None = None):
         """渲染方法参数输入框"""
         while self.param_layout.rowCount():
@@ -485,6 +556,7 @@ class BasicFlowPage(QWidget):
         self.motion_v2_trace_metadata_status_label = None
         self.motion_v2_apc_status_label = None
 
+        self._refresh_method_inspector_header(method_key)
         all_params = PROCESSING_METHODS[method_key].get("params", [])
         params = all_params
         category_label = get_method_category_label(method_key)
@@ -551,25 +623,96 @@ class BasicFlowPage(QWidget):
             stolt_preset_layout.addWidget(self.stolt_auto_adapt_var)
             stolt_preset_layout.addWidget(self.btn_stolt_apply)
             self.param_layout.addRow(QLabel("Stolt快速预设"), stolt_preset_row)
+            self.stolt_preset_combo.currentIndexChanged.connect(lambda _idx: self._mark_params_dirty())
+            self.stolt_auto_adapt_var.toggled.connect(lambda _checked: self._mark_params_dirty())
 
         if not params:
             self.param_layout.addRow(QLabel("(无参数)"))
             self._refresh_apply_menu_state()
+            self.mark_params_applied("当前方法无可调参数。")
             return
 
         for p in params:
             value = active_overrides.get(p["name"], p.get("default", ""))
             edit = self._create_param_editor(p, value)
             label = QLabel(p["label"])
+            label.setObjectName("ParamFieldLabel")
             label.setWordWrap(True)
             self.param_layout.addRow(label, edit)
             self.param_vars[p["name"]] = (edit, p)
+            self._wire_param_dirty_signal(edit)
 
         if method_key == "motion_compensation_v2":
             self._add_motion_v2_status_rows(all_params, active_overrides)
 
         self._wire_motion_param_dependencies(method_key)
         self._refresh_apply_menu_state()
+        self.mark_params_applied("参数已载入；修改后需重新应用。")
+
+    def _wire_param_dirty_signal(self, widget) -> None:
+        """Connect editor changes to the dirty-parameter indicator."""
+        try:
+            if isinstance(widget, QLineEdit):
+                widget.textEdited.connect(lambda _text: self._mark_params_dirty())
+            elif isinstance(widget, QComboBox):
+                widget.currentIndexChanged.connect(lambda _idx: self._mark_params_dirty())
+            elif isinstance(widget, QCheckBox):
+                widget.toggled.connect(lambda _checked: self._mark_params_dirty())
+        except Exception:
+            return
+
+    def _set_param_dirty_visual(self, dirty: bool, text: str | None = None) -> None:
+        self._params_dirty = bool(dirty)
+        label = getattr(self, "param_dirty_label", None)
+        if label is not None:
+            if dirty:
+                label.setText(text or "参数已修改，尚未应用")
+                label.setProperty("tone", "dirty")
+            else:
+                label.setText(text or "参数未修改")
+                label.setProperty("tone", "clean")
+            try:
+                label.style().unpolish(label); label.style().polish(label); label.update()
+            except Exception:
+                pass
+
+    def _mark_params_dirty(self) -> None:
+        self._set_param_dirty_visual(True, "参数已修改，尚未应用")
+        self.set_apply_button_state("dirty", "参数已修改，点击“应用方法”更新 B-scan。")
+        try:
+            self.parametersChanged.emit()
+        except Exception:
+            pass
+
+    def mark_params_applied(self, message: str | None = None) -> None:
+        self._set_param_dirty_visual(False, "参数未修改")
+        self.set_apply_button_state("idle", message or "就绪：按当前参数执行。")
+
+    def set_apply_button_state(self, state: str = "idle", message: str | None = None) -> None:
+        """Show clear apply-button feedback without changing processing semantics."""
+        state = str(state or "idle").lower()
+        mapping = {
+            "idle": ("应用方法", "normal", "neutral", "就绪：按当前参数执行。"),
+            "dirty": ("应用方法", "dirty", "warning", "参数已修改，尚未应用。"),
+            "busy": ("正在处理…", "busy", "info", "正在执行，请等待后台任务完成。"),
+            "success": ("已应用", "success", "success", "已应用到当前 B-scan。"),
+            "error": ("执行失败", "error", "danger", "方法执行失败，请查看全局日志。"),
+        }
+        text, visual, tone, default_msg = mapping.get(state, mapping["idle"])
+        self._apply_state = state
+        try:
+            self.btn_apply.setText(text)
+            self.btn_apply.setVisualState(visual)
+        except Exception:
+            pass
+        feedback = getattr(self, "apply_feedback_label", None)
+        if feedback is not None:
+            feedback.setText(message or default_msg)
+            feedback.setProperty("tone", tone)
+            try:
+                feedback.style().unpolish(feedback); feedback.style().polish(feedback); feedback.update()
+            except Exception:
+                pass
 
     def _on_show_advanced_params_toggled(self, checked: bool) -> None:
         """Switch the daily panel between common and full parameter sets."""

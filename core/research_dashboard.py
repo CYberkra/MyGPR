@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from core.app_paths import expand_path_template
+
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG_PATH = ROOT / "config" / "research_dashboard_defaults.json"
@@ -125,9 +127,10 @@ def resolve_evidence_root(config: dict[str, Any] | None = None) -> tuple[Path | 
     config = config or load_dashboard_config()
     warnings: list[str] = []
     for candidate in config.get("evidence_root_candidates", []):
-        path = Path(candidate)
-        if not path.is_absolute():
-            path = (ROOT / path).resolve()
+        raw = str(candidate or "").strip()
+        if not raw:
+            continue
+        path = Path(expand_path_template(raw, base_dir=ROOT))
         if path.exists():
             return path, warnings
         warnings.append(f"evidence root candidate missing: {path}")

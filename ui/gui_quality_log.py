@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QSizePolicy,
 )
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import Qt, QTimer
 from qfluentwidgets import PushButton, FluentIcon, SegmentedWidget
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
@@ -69,16 +69,39 @@ class QualityLogPage(QWidget):
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(12)
 
+        hero = QFrame()
+        hero.setObjectName("EvidenceHeroCard")
+        hero_layout = QHBoxLayout(hero)
+        hero_layout.setContentsMargins(16, 14, 16, 14)
+        hero_layout.setSpacing(12)
+
+        hero_mark = QLabel("GPR")
+        hero_mark.setObjectName("EvidenceHeroMark")
+        hero_mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hero_mark.setFixedSize(48, 48)
+
+        hero_text = QWidget()
+        hero_text_layout = QVBoxLayout(hero_text)
+        hero_text_layout.setContentsMargins(0, 0, 0, 0)
+        hero_text_layout.setSpacing(2)
         title = QLabel("质量与导出")
         title.setProperty("class", "sectionTitle")
-        layout.addWidget(title)
-
         hint = QLabel(
-            "集中查看运行记录、质量摘要与航空质控，并从这里完成报告、快照和诊断导出。"
+            "集中查看运行记录、质量摘要与航空质控，并生成 MyGPR 报告包。"
         )
         hint.setWordWrap(True)
         hint.setProperty("class", "hintText")
-        layout.addWidget(hint)
+        hero_text_layout.addWidget(title)
+        hero_text_layout.addWidget(hint)
+
+        hero_badge = QLabel("Markdown · HTML · PNG")
+        hero_badge.setObjectName("EvidenceHeroBadge")
+        hero_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        hero_layout.addWidget(hero_mark)
+        hero_layout.addWidget(hero_text, 1)
+        hero_layout.addWidget(hero_badge)
+        layout.addWidget(hero)
 
         flow_box = QGroupBox("查看顺序")
         flow_box.setProperty("class", "calloutBox")
@@ -146,15 +169,15 @@ class QualityLogPage(QWidget):
         action_layout.setSpacing(8)
 
         action_hint = QLabel(
-            "先看质量摘要，再决定是否生成报告、导出快照或复制诊断信息。"
+            "先看质量摘要，再决定是否生成报告包、导出快照或复制诊断信息。"
         )
         action_hint.setWordWrap(True)
         action_hint.setProperty("class", "hintText")
         action_layout.addWidget(action_hint)
 
-        self.btn_generate_report = PushButton(FluentIcon.DOCUMENT, "生成报告")
+        self.btn_generate_report = PushButton(FluentIcon.DOCUMENT, "生成报告包")
         self.btn_generate_report.setToolTip(
-            "导出当前图像、运行摘要和日志到 Markdown 报告"
+            "导出当前图像、运行摘要和日志到 Markdown + HTML 报告包"
         )
         self.btn_export_quality_snapshot = PushButton(
             FluentIcon.DOWNLOAD, "导出质量快照"

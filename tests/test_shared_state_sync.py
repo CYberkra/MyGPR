@@ -369,3 +369,38 @@ def test_workbench_save_result_preserves_motion_trace_metadata(
     finally:
         win.close()
         app.processEvents()
+
+
+def test_shared_state_skips_oversized_history_snapshot_for_memory_safety():
+    state = SharedDataState()
+    state.max_history_snapshot_bytes = 64
+    raw = np.ones((16, 16), dtype=np.float64)
+
+    state.load_data(raw, path="large.csv")
+    state.push_history(label="oversized_step")
+
+    assert state.can_undo() is False
+    assert len(state.history) == 0
+    summary = state.get_history_memory_summary()
+    assert summary["stored_count"] == 0
+    assert summary["pruned_count"] == 1
+    assert summary["pruned_summaries"][0]["label"] == "oversized_step"
+    assert summary["pruned_summaries"][0]["reason"] == "snapshot_exceeds_limit"
+
+
+def test_shared_state_trims_history_by_memory_budget():
+    state = SharedDataState()
+    state.max_history = 10
+    state.max_history_snapshot_bytes = 10_000_000
+    state.max_history_bytes = 2_000
+    raw = np.arange(100, dtype=np.float64).reshape(10, 10)
+
+    state.load_data(raw, path="demo.csv")
+    for idx in range(5):
+        state.apply_current_data(raw + idx + 1, push_history=True, label=f"step_{idx + 1}")
+
+    summary = state.get_history_memory_summary()
+    assert summary["stored_bytes"] <= state.max_history_bytes
+    assert summary["stored_count"] <= 2
+    assert summary["pruned_count"] >= 1
+    assert all(entry.get("data") is not None for entry in state.history)

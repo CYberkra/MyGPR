@@ -11,13 +11,13 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-APP_BACKGROUND = "#F5F7FB"
+APP_BACKGROUND = "#F7F9FC"
 CARD_BACKGROUND = "#FFFFFF"
-CARD_BORDER = "#E3E8F0"
-PRIMARY = "#2F7DF6"
-PRIMARY_DARK = "#1D4ED8"
-PRIMARY_LIGHT = "#EAF2FF"
-TEXT_PRIMARY = "#1F2937"
+CARD_BORDER = "#E3EAF3"
+PRIMARY = "#13A6A4"
+PRIMARY_DARK = "#08776F"
+PRIMARY_LIGHT = "#E7FAF7"
+TEXT_PRIMARY = "#172033"
 TEXT_MUTED = "#64748B"
 SUCCESS = "#22A06B"
 WARNING = "#F59E0B"
@@ -36,6 +36,41 @@ def is_dark_ui(theme: str | None = None, widget=None) -> bool:
     Palette probing is now used only when the explicit theme is missing or set
     to an automatic/system value. This keeps light and dark modes fully
     deterministic.
+
+    /* V0.7.0 brand and report export polish -------------------------- */
+    QLabel[class="sectionTitle"] {{
+        color: {text};
+        font-size: 18px;
+        font-weight: 850;
+        background: transparent;
+    }}
+    QLabel[class="hintText"] {{
+        color: {muted};
+        font-size: 12px;
+        background: transparent;
+    }}
+    QFrame#EvidenceHeroCard {{
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {card}, stop:1 {card_2});
+        border: 1px solid {border};
+        border-radius: 18px;
+    }}
+    QLabel#EvidenceHeroMark {{
+        background: {primary_light};
+        color: {primary_dark};
+        border: 1px solid {border_2};
+        border-radius: 15px;
+        font-weight: 900;
+        letter-spacing: 0.5px;
+    }}
+    QLabel#EvidenceHeroBadge {{
+        background: {neutral_bg};
+        color: {neutral_text};
+        border: 1px solid {neutral_border};
+        border-radius: 12px;
+        padding: 5px 10px;
+        font-weight: 800;
+    }}
+
     """
     theme_name = str(theme or "").strip().lower()
 
@@ -71,6 +106,41 @@ def set_dynamic_property(widget, name: str, value) -> bool:
 
     Returns True when a repolish is required. This avoids repeated
     unpolish/polish calls for status chips that refresh frequently.
+
+    /* V0.7.0 brand and report export polish -------------------------- */
+    QLabel[class="sectionTitle"] {{
+        color: {text};
+        font-size: 18px;
+        font-weight: 850;
+        background: transparent;
+    }}
+    QLabel[class="hintText"] {{
+        color: {muted};
+        font-size: 12px;
+        background: transparent;
+    }}
+    QFrame#EvidenceHeroCard {{
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {card}, stop:1 {card_2});
+        border: 1px solid {border};
+        border-radius: 18px;
+    }}
+    QLabel#EvidenceHeroMark {{
+        background: {primary_light};
+        color: {primary_dark};
+        border: 1px solid {border_2};
+        border-radius: 15px;
+        font-weight: 900;
+        letter-spacing: 0.5px;
+    }}
+    QLabel#EvidenceHeroBadge {{
+        background: {neutral_bg};
+        color: {neutral_text};
+        border: 1px solid {neutral_border};
+        border-radius: 12px;
+        padding: 5px 10px;
+        font-weight: 800;
+    }}
+
     """
     if widget is None:
         return False
@@ -105,6 +175,41 @@ def get_app_polish_stylesheet(theme: str | None = None, widget=None) -> str:
     toggles and page refreshes, so callers should pass ``widget=self`` when
     possible to resolve the real Qt palette before the cached stylesheet is
     selected.
+
+    /* V0.7.0 brand and report export polish -------------------------- */
+    QLabel[class="sectionTitle"] {{
+        color: {text};
+        font-size: 18px;
+        font-weight: 850;
+        background: transparent;
+    }}
+    QLabel[class="hintText"] {{
+        color: {muted};
+        font-size: 12px;
+        background: transparent;
+    }}
+    QFrame#EvidenceHeroCard {{
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {card}, stop:1 {card_2});
+        border: 1px solid {border};
+        border-radius: 18px;
+    }}
+    QLabel#EvidenceHeroMark {{
+        background: {primary_light};
+        color: {primary_dark};
+        border: 1px solid {border_2};
+        border-radius: 15px;
+        font-weight: 900;
+        letter-spacing: 0.5px;
+    }}
+    QLabel#EvidenceHeroBadge {{
+        background: {neutral_bg};
+        color: {neutral_text};
+        border: 1px solid {neutral_border};
+        border-radius: 12px;
+        padding: 5px 10px;
+        font-weight: 800;
+    }}
+
     """
     return _get_app_polish_stylesheet_cached(is_dark_ui(theme, widget=widget))
 
@@ -138,6 +243,7 @@ def _get_app_polish_stylesheet_cached(is_dark: bool) -> str:
         dash = "#3B4654"
         toolbar_bg = "#14191F"
         disabled_bg, disabled_text = "#1A2028", "#687386"
+        info_bg, info_text, info_border = "#172A46", "#BFDBFE", "#2B4C7E"
     else:
         bg = "#F6F8FC"
         card = CARD_BACKGROUND
@@ -164,6 +270,7 @@ def _get_app_polish_stylesheet_cached(is_dark: bool) -> str:
         dash = "#C8D3E1"
         toolbar_bg = "#FFFFFF"
         disabled_bg, disabled_text = "#F1F5F9", "#94A3B8"
+        info_bg, info_text, info_border = "#EFF6FF", "#2563EB", "#BFDBFE"
 
     return f"""
     QMainWindow {{
@@ -207,7 +314,7 @@ def _get_app_polish_stylesheet_cached(is_dark: bool) -> str:
     }}
 
     /* Status chips ---------------------------------------------------- */
-    QLabel#StatusChip, QLabel#MiniTag, QLabel#PlotStatusChip, QLabel#PlotInfoChip {{
+    QLabel#StatusChip, QLabel#MiniTag, QLabel#PlotStatusChip, QLabel#PlotInfoChip, QLabel#RuntimeSummaryChip, QLabel#PlotModeChip {{
         background: {primary_light};
         color: {primary_dark};
         border: 1px solid {border_2};
@@ -215,22 +322,27 @@ def _get_app_polish_stylesheet_cached(is_dark: bool) -> str:
         padding: 4px 9px;
         font-weight: 700;
     }}
-    QLabel#StatusChip[tone="neutral"], QLabel#PlotStatusChip[tone="neutral"] {{
+    QLabel#StatusChip[tone="neutral"], QLabel#PlotStatusChip[tone="neutral"], QLabel#RuntimeSummaryChip[tone="neutral"], QLabel#PlotModeChip[tone="neutral"] {{
         background: {neutral_bg};
         color: {neutral_text};
         border-color: {neutral_border};
     }}
-    QLabel#StatusChip[tone="good"], QLabel#PlotStatusChip[tone="good"] {{
+    QLabel#StatusChip[tone="good"], QLabel#PlotStatusChip[tone="good"], QLabel#RuntimeSummaryChip[tone="good"], QLabel#PlotModeChip[tone="success"] {{
         background: {good_bg};
         color: {good_text};
         border-color: {good_border};
     }}
-    QLabel#StatusChip[tone="warning"], QLabel#PlotStatusChip[tone="warning"] {{
+    QLabel#StatusChip[tone="info"], QLabel#PlotStatusChip[tone="info"], QLabel#RuntimeSummaryChip[tone="info"], QLabel#PlotModeChip[tone="info"] {{
+        background: {info_bg};
+        color: {info_text};
+        border-color: {info_border};
+    }}
+    QLabel#StatusChip[tone="warning"], QLabel#PlotStatusChip[tone="warning"], QLabel#RuntimeSummaryChip[tone="warning"], QLabel#PlotModeChip[tone="warning"] {{
         background: {warn_bg};
         color: {warn_text};
         border-color: {warn_border};
     }}
-    QLabel#StatusChip[tone="danger"], QLabel#PlotStatusChip[tone="danger"] {{
+    QLabel#StatusChip[tone="danger"], QLabel#PlotStatusChip[tone="danger"], QLabel#RuntimeSummaryChip[tone="danger"], QLabel#PlotModeChip[tone="danger"] {{
         background: {danger_bg};
         color: {danger_text};
         border-color: {danger_border};
@@ -825,6 +937,146 @@ def _get_app_polish_stylesheet_cached(is_dark: bool) -> str:
         border-radius: 14px;
     }}
 
+
+
+    /* V0.6.7 quality pass: professional B-scan + inspector + event stream ---- */
+    QWidget#mainWorkspacePanel QLabel.topInfoText,
+    QLabel[class="topInfoText"] {{
+        color: {muted};
+        font-weight: 600;
+        background: transparent;
+    }}
+    QLabel[class="topInfoMeta"] {{
+        color: {subtle};
+        font-weight: 600;
+        background: transparent;
+    }}
+    QWidget#controlPanel QGroupBox#basicMethodCard {{
+        background: {card};
+        border: 1px solid {border};
+        border-radius: 18px;
+    }}
+    QFrame#MethodInspectorHeader {{
+        background: {card_2};
+        border: 1px solid {border};
+        border-radius: 14px;
+    }}
+    QLabel#MethodCategoryTag {{
+        color: {primary_dark};
+        background: {primary_light};
+        border: 1px solid {border_2};
+        border-radius: 9px;
+        padding: 3px 8px;
+        font-size: 11px;
+        font-weight: 800;
+        max-width: 110px;
+    }}
+    QLabel#MethodNameLabel {{
+        color: {text};
+        background: transparent;
+        border: none;
+        font-size: 14px;
+        font-weight: 800;
+    }}
+    QWidget#InspectorParamPanel {{
+        background: {card_3};
+        border: 1px solid {border};
+        border-radius: 14px;
+    }}
+    QLabel#ParamFieldLabel {{
+        color: {muted};
+        background: transparent;
+        font-size: 12px;
+        font-weight: 700;
+    }}
+    QLabel#ParamDirtyLabel, QLabel#ApplyFeedbackLabel {{
+        background: {neutral_bg};
+        color: {neutral_text};
+        border: 1px solid {neutral_border};
+        border-radius: 10px;
+        padding: 5px 8px;
+        font-size: 12px;
+        font-weight: 700;
+    }}
+    QLabel#ParamDirtyLabel[tone="dirty"], QLabel#ApplyFeedbackLabel[tone="warning"] {{
+        background: {warn_bg};
+        color: {warn_text};
+        border-color: {warn_border};
+    }}
+    QLabel#ParamDirtyLabel[tone="clean"], QLabel#ApplyFeedbackLabel[tone="neutral"] {{
+        background: {neutral_bg};
+        color: {neutral_text};
+        border-color: {neutral_border};
+    }}
+    QLabel#ApplyFeedbackLabel[tone="info"] {{
+        background: {info_bg};
+        color: {info_text};
+        border-color: {info_border};
+    }}
+    QLabel#ApplyFeedbackLabel[tone="success"] {{
+        background: {good_bg};
+        color: {good_text};
+        border-color: {good_border};
+    }}
+    QLabel#ApplyFeedbackLabel[tone="danger"] {{
+        background: {danger_bg};
+        color: {danger_text};
+        border-color: {danger_border};
+    }}
+    QWidget#InspectorParamPanel QLineEdit,
+    QWidget#InspectorParamPanel QComboBox,
+    QWidget#InspectorParamPanel QSpinBox {{
+        min-height: 30px;
+        border-radius: 10px;
+        background: {input_bg};
+    }}
+    QPushButton[class="basicGhostBtn"] {{
+        background: transparent;
+        color: {muted};
+        border: 1px solid {border};
+        border-radius: 11px;
+        font-weight: 700;
+    }}
+    QPushButton[class="basicGhostBtn"]:hover {{
+        background: {neutral_bg};
+        color: {primary_dark};
+        border-color: {border_2};
+    }}
+    QTextEdit#RuntimeEventLog {{
+        background: {card_3};
+        border: 1px solid {border};
+        border-radius: 12px;
+        padding: 7px;
+        font-family: "Consolas", "Microsoft YaHei UI", monospace;
+        font-size: 12px;
+    }}
+    QLabel#PlotTitle {{
+        font-size: 18px;
+        font-weight: 900;
+    }}
+    QLabel#PlotInfoChip {{
+        background: {card_2};
+        color: {neutral_text};
+        border: 1px solid {border};
+        border-radius: 10px;
+        padding: 4px 8px;
+        font-weight: 700;
+    }}
+    QFrame#PlotBottomStatusBar {{
+        background: {card_3};
+        border: 1px solid {border};
+        border-radius: 12px;
+    }}
+    QFrame#MyGPRMark {{
+        background: transparent;
+        border: none;
+    }}
+    QLabel#RuntimeSummaryChip[tone="neutral"], QLabel#PlotModeChip[tone="neutral"] {{ background: {neutral_bg}; color: {neutral_text}; border-color: {neutral_border}; }}
+    QLabel#RuntimeSummaryChip[tone="info"], QLabel#PlotModeChip[tone="info"] {{ background: {info_bg}; color: {info_text}; border-color: {info_border}; }}
+    QLabel#RuntimeSummaryChip[tone="good"], QLabel#PlotModeChip[tone="success"] {{ background: {good_bg}; color: {good_text}; border-color: {good_border}; }}
+    QLabel#RuntimeSummaryChip[tone="warning"], QLabel#PlotModeChip[tone="warning"] {{ background: {warn_bg}; color: {warn_text}; border-color: {warn_border}; }}
+    QLabel#RuntimeSummaryChip[tone="danger"], QLabel#PlotModeChip[tone="danger"] {{ background: {danger_bg}; color: {danger_text}; border-color: {danger_border}; }}
+
     /* AutoTune full-theme stylesheet ---------------------------------- */
     QWidget#AutoTuneTuningPage {{
         background: transparent;
@@ -1103,6 +1355,55 @@ def _get_app_polish_stylesheet_cached(is_dark: bool) -> str:
         min-height: 22px;
         padding: 2px 7px;
     }}
+    QFrame#ProcessingStepperBar {{
+        background: {card_3};
+        border: 1px solid {border};
+        border-radius: 13px;
+    }}
+    QLabel#ProcessingStepperTitle {{
+        color: {muted};
+        font-weight: 900;
+        padding: 0px 4px;
+        background: transparent;
+    }}
+    QScrollArea#ProcessingStepperScroll,
+    QWidget#ProcessingStepperHost {{
+        background: transparent;
+        border: none;
+    }}
+    QLabel#ProcessingStepArrow {{
+        color: {muted};
+        font-weight: 900;
+        background: transparent;
+        padding: 0px 1px;
+    }}
+    QPushButton#ProcessingStepChip {{
+        background: {card_2};
+        color: {muted};
+        border: 1px solid {border};
+        border-radius: 12px;
+        padding: 3px 9px;
+        font-size: 12px;
+        font-weight: 800;
+    }}
+    QPushButton#ProcessingStepChip:hover {{
+        background: {neutral_bg};
+        color: {primary_dark};
+        border-color: {border_2};
+    }}
+    QPushButton#ProcessingStepChip[active="true"] {{
+        background: {info_bg};
+        color: {info_text};
+        border-color: {info_border};
+    }}
+    QPushButton#ProcessingStepChip[current="true"] {{
+        font-weight: 900;
+    }}
+    QPushButton#ProcessingStepChip[active="true"][current="true"] {{
+        background: {good_bg};
+        color: {good_text};
+        border-color: {good_border};
+    }}
 
     /* Daily processing modern card groupboxes -------------------------- */
     QGroupBox[cardStyle="modern"] {{
@@ -1153,6 +1454,253 @@ def _get_app_polish_stylesheet_cached(is_dark: bool) -> str:
         background: {warn_bg};
         color: {warn_text};
         border-color: {warn_border};
+    }}
+
+
+    /* V0.6.6 calm minimal visual refresh ----------------------------- */
+    QWidget#appCentralRoot {{
+        background: {bg};
+    }}
+    QWidget#mainWorkspacePanel,
+    QWidget#controlPanel,
+    QWidget#basicFlowRoot {{
+        background: transparent;
+    }}
+    QWidget#controlPanelShell {{
+        background: transparent;
+        border: none;
+    }}
+    QWidget#topInfoBar {{
+        background: {card};
+        border: 1px solid {border};
+        border-radius: 14px;
+        padding: 3px 8px;
+    }}
+    QWidget#topInfoBar QLabel,
+    QLabel[class="topInfoText"] {{
+        color: {muted};
+        background: transparent;
+        font-weight: 600;
+    }}
+    QLabel[class="topInfoMeta"] {{
+        color: {subtle};
+        background: transparent;
+        font-size: 12px;
+    }}
+    QSplitter#mainSplitter::handle {{
+        background: transparent;
+        width: 6px;
+        margin: 5px 1px;
+        border-radius: 3px;
+    }}
+    QSplitter#mainSplitter::handle:hover {{
+        background: {border_2};
+    }}
+    QWidget#basicFlowRoot QLabel[class="sectionTitle"] {{
+        color: {text};
+        background: transparent;
+        font-size: 19px;
+        font-weight: 900;
+        padding: 2px 0px 4px 0px;
+    }}
+    QGroupBox#basicActionCard,
+    QGroupBox#basicMethodCard,
+    QGroupBox#basicStatusCard {{
+        background: {card};
+        border: 1px solid {border};
+        border-radius: 18px;
+        margin-top: 0px;
+        padding-top: 32px;
+    }}
+    QGroupBox#basicActionCard::title,
+    QGroupBox#basicMethodCard::title,
+    QGroupBox#basicStatusCard::title {{
+        subcontrol-origin: padding;
+        subcontrol-position: top left;
+        left: 14px;
+        top: 8px;
+        color: {text};
+        background: transparent;
+        font-weight: 900;
+    }}
+    QWidget#basicFlowRoot QLabel[class="hintText"] {{
+        color: {subtle};
+        background: transparent;
+        font-size: 12px;
+    }}
+    QWidget#basicFlowRoot QLabel[class="statusChip"] {{
+        background: {primary_light};
+        color: {primary_dark};
+        border: 1px solid {border_2};
+        border-radius: 11px;
+        padding: 6px 9px;
+        font-weight: 800;
+    }}
+    SplitActionButton#basicImportButton,
+    SplitActionButton#basicApplyButton,
+    QPushButton#basicImportButton,
+    QPushButton#basicApplyButton {{
+        background: {primary};
+        color: white;
+        border: 1px solid {primary};
+        border-radius: 12px;
+        min-height: 36px;
+        font-weight: 900;
+    }}
+    SplitActionButton#basicImportButton:hover,
+    SplitActionButton#basicApplyButton:hover,
+    QPushButton#basicImportButton:hover,
+    QPushButton#basicApplyButton:hover {{
+        background: {primary_dark};
+        border-color: {primary_dark};
+        color: white;
+    }}
+    QPushButton[class="basicGhostBtn"],
+    PushButton[class="basicGhostBtn"] {{
+        background: {card_2};
+        color: {text};
+        border: 1px solid {border_2};
+        border-radius: 12px;
+        min-height: 34px;
+        font-weight: 750;
+    }}
+    QPushButton[class="basicGhostBtn"]:hover,
+    PushButton[class="basicGhostBtn"]:hover {{
+        background: {primary_light};
+        color: {primary_dark};
+        border-color: {primary};
+    }}
+    QPushButton#btnCancel:enabled {{
+        color: {danger_text};
+        border-color: {danger_border};
+        background: {danger_bg};
+    }}
+    QComboBox#methodCombo {{
+        background: {input_bg};
+        border: 1px solid {border_2};
+        border-radius: 12px;
+        min-height: 34px;
+        padding-left: 9px;
+        font-weight: 700;
+    }}
+    QTextEdit#basicInfoLog {{
+        background: {card_3};
+        border: 1px solid {border};
+        border-radius: 12px;
+        color: {muted};
+        padding: 8px;
+        font-size: 12px;
+    }}
+    QGroupBox#basicStatusCard {{
+        background: {card_2};
+        border-color: {border};
+    }}
+    QFrame#mainPlotCard {{
+        background: {card};
+        border: 1px solid {border};
+        border-radius: 22px;
+    }}
+    QFrame#PlotCardHeader {{
+        background: transparent;
+        border: none;
+        min-height: 32px;
+    }}
+    QLabel#PlotTitle {{
+        color: {text};
+        font-size: 18px;
+        font-weight: 900;
+        background: transparent;
+    }}
+    QLabel#PlotStatusChip,
+    QLabel#PlotInfoChip,
+    QLabel#RuntimeSummaryChip,
+    QLabel#PlotModeChip {{
+        background: {card_2};
+        color: {muted};
+        border: 1px solid {border};
+        border-radius: 12px;
+        padding: 4px 9px;
+        font-weight: 800;
+    }}
+    QLabel#PlotStatusChip[tone="good"] {{
+        background: {good_bg};
+        color: {good_text};
+        border-color: {good_border};
+    }}
+    QLabel#PlotStatusChip[tone="neutral"] {{
+        background: {card_2};
+        color: {muted};
+        border-color: {border};
+    }}
+    QFrame#PlotBottomStatusBar {{
+        background: {card_3};
+        border: 1px solid {border};
+        border-radius: 14px;
+    }}
+    QToolBar#mainPlotToolbar,
+    QFrame#mainPlotToolbar {{
+        background: {card};
+        border: 1px solid {border};
+        border-radius: 14px;
+        padding: 4px;
+        spacing: 4px;
+    }}
+    QToolButton {{
+        border-radius: 10px;
+        padding: 5px;
+    }}
+    QToolButton:hover {{
+        background: {primary_light};
+        color: {primary_dark};
+        border-color: {primary};
+    }}
+    QFrame#runtimeDrawer {{
+        background: {card};
+        border: 1px solid {border};
+        border-radius: 16px;
+    }}
+    QGroupBox#EvidenceChecklistCard,
+    QGroupBox#basicActionCard,
+    QGroupBox#basicMethodCard,
+    QGroupBox#basicStatusCard,
+    QFrame#mainPlotCard,
+    QFrame#runtimeDrawer {{
+        selection-background-color: {primary_light};
+    }}
+
+
+    /* V0.7.0 brand and report export polish -------------------------- */
+    QLabel[class="sectionTitle"] {{
+        color: {text};
+        font-size: 18px;
+        font-weight: 850;
+        background: transparent;
+    }}
+    QLabel[class="hintText"] {{
+        color: {muted};
+        font-size: 12px;
+        background: transparent;
+    }}
+    QFrame#EvidenceHeroCard {{
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {card}, stop:1 {card_2});
+        border: 1px solid {border};
+        border-radius: 18px;
+    }}
+    QLabel#EvidenceHeroMark {{
+        background: {primary_light};
+        color: {primary_dark};
+        border: 1px solid {border_2};
+        border-radius: 15px;
+        font-weight: 900;
+        letter-spacing: 0.5px;
+    }}
+    QLabel#EvidenceHeroBadge {{
+        background: {neutral_bg};
+        color: {neutral_text};
+        border: 1px solid {neutral_border};
+        border-radius: 12px;
+        padding: 5px 10px;
+        font-weight: 800;
     }}
 
     """

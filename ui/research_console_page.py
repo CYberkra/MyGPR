@@ -51,8 +51,12 @@ class ResearchConsolePage(QWidget):
         self._scene_items: list[dict[str, Any]] = []
         self._artifact_items: list[dict[str, Any]] = []
         self._model_scene_ids = [
-            "scene_037_gssi_ey_depth05_radius03_air_sand_interface_n80_geometry_gate",
-            "scene_038_gssi_ey_depth07_radius03_air_sand_interface_n80_pair_gate",
+            "scene_001_flat_dry_sand_pec_shallow",
+            "scene_002_flat_damp_sand_pec_shallow",
+            "scene_003_flat_dry_sand_pvc_shallow",
+            "scene_004_flat_damp_sand_pvc_shallow",
+            "scene_005_flat_dry_sand_pec_medium",
+            "scene_006_flat_damp_sand_pec_medium",
         ]
         self._build_ui()
         self.refresh()
@@ -378,7 +382,7 @@ class ResearchConsolePage(QWidget):
             ("已归档场景", f"{paired_done} / {len(scene_rows)}", "Paired Evidence", "ok" if paired_done else "warn"),
             ("标准化指标", f"{metrics_done} / {len(scene_rows)}", "standard metrics", "ok" if metrics_done else "warn"),
             ("AT-BG 诊断", f"{at_done} / {len(scene_rows)}", "mean / median / SVD", "ok" if at_done else "warn"),
-            ("保留模型", str(draft_count), "scene_037 / scene_038", "neutral"),
+            ("Draft 模型", str(draft_count), "scene_004 - scene_006", "neutral"),
             ("GPU Wrapper", "Ready", "通过标准入口执行", "ok"),
             ("Claim Boundary", "Active", "No field / no superiority claim", "warn"),
         ]

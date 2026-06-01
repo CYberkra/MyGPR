@@ -1,4 +1,4 @@
-# GPR_GUI development/test environment (Day1-Day2 hardening)
+# MyGPR development/test environment (Day1-Day2 hardening)
 # Install: python3 -m pip install -r requirements-dev.txt
 
 # Core numerical stack

@@ -4,8 +4,10 @@
 
 from __future__ import annotations
 
+import argparse
 import csv
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -24,17 +26,14 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from core.gpr_io import extract_airborne_csv_payload
+from core.app_paths import expand_path_template
 from core.processing_engine import prepare_runtime_params, run_processing_method
 from read_file_data import readcsv
 
 
-FIELD_CSV = Path(r"C:\Users\17844\Desktop\02_Preprocessed_Standard\2025-09_营山\Line9origin(36).csv")
-AT019_ROOT = Path(
-    r"D:\CDUT-UavGPR-Controller\MyGPR-Evidence\autotune\AT-019_yingshan_line9_full_autotune_diagnostics"
-)
-AT020_ROOT = Path(
-    r"D:\CDUT-UavGPR-Controller\MyGPR-Evidence\autotune\AT-020_yingshan_background_safety_whatif"
-)
+DEFAULT_FIELD_CSV = os.environ.get("MYGPR_YINGSHAN_LINE9_CSV", "")
+DEFAULT_AT019_ROOT = "${MYGPR_EVIDENCE_ROOT}/autotune/AT-019_yingshan_line9_full_autotune_diagnostics"
+DEFAULT_AT020_ROOT = "${MYGPR_EVIDENCE_ROOT}/autotune/AT-020_yingshan_background_safety_whatif"
 
 
 def _git_head(repo: Path) -> str:
@@ -148,16 +147,16 @@ def _plot_bscan(data: np.ndarray, path: Path, title: str) -> None:
     plt.close()
 
 
-def run() -> dict[str, Any]:
-    figures_dir = AT020_ROOT / "figures"
-    tables_dir = AT020_ROOT / "tables"
-    reports_dir = AT020_ROOT / "reports"
-    manifests_dir = AT020_ROOT / "manifests"
+def run(field_csv: Path, at019_root: Path, at020_root: Path) -> dict[str, Any]:
+    figures_dir = at020_root / "figures"
+    tables_dir = at020_root / "tables"
+    reports_dir = at020_root / "reports"
+    manifests_dir = at020_root / "manifests"
     for directory in [figures_dir, tables_dir, reports_dir, manifests_dir]:
         directory.mkdir(parents=True, exist_ok=True)
 
-    header = _read_header(FIELD_CSV)
-    raw_csv = readcsv(str(FIELD_CSV))
+    header = _read_header(field_csv)
+    raw_csv = readcsv(str(field_csv))
     data, trace_metadata, header_info = extract_airborne_csv_payload(raw_csv, header)
     data = np.asarray(data, dtype=np.float32)
     trace_metadata = dict(trace_metadata or {})
@@ -170,7 +169,7 @@ def run() -> dict[str, Any]:
         "AT-020 raw B-scan (diagnostic only; no target detection claim)",
     )
 
-    bg_df = pd.read_csv(AT019_ROOT / "tables" / "background_candidate_diagnostics.csv")
+    bg_df = pd.read_csv(at019_root / "tables" / "background_candidate_diagnostics.csv")
     rows: list[dict[str, Any]] = []
     for _, entry in bg_df.iterrows():
         stage = str(entry.get("stage", ""))
@@ -536,7 +535,7 @@ def run() -> dict[str, Any]:
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "source_commit": _git_head(ROOT),
         "based_on_at019_evidence_commit": "c391d8b2bae93281343e118e1be124d12a90b7a7",
-        "field_csv": str(FIELD_CSV),
+        "field_csv": str(field_csv),
         "shape": [int(data.shape[0]), int(data.shape[1])],
         "no_prior_level": "high_risk",
         "full_autotune_completed_from_at019": True,
@@ -627,8 +626,18 @@ def run() -> dict[str, Any]:
     return summary
 
 
-def main() -> int:
-    summary = run()
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Generate AT-020 YingShan background safety what-if diagnostics.")
+    parser.add_argument("--field-csv", default=DEFAULT_FIELD_CSV, help="Field CSV path, or set MYGPR_YINGSHAN_LINE9_CSV.")
+    parser.add_argument("--at019-root", default=DEFAULT_AT019_ROOT, help="AT-019 Evidence root. Supports MyGPR path placeholders.")
+    parser.add_argument("--output-root", default=DEFAULT_AT020_ROOT, help="AT-020 output root. Supports MyGPR path placeholders.")
+    args = parser.parse_args(argv)
+    if not str(args.field_csv).strip():
+        raise SystemExit("--field-csv is required, or set MYGPR_YINGSHAN_LINE9_CSV")
+    field_csv = Path(expand_path_template(args.field_csv)).resolve()
+    at019_root = Path(expand_path_template(args.at019_root)).resolve()
+    at020_root = Path(expand_path_template(args.output_root)).resolve()
+    summary = run(field_csv, at019_root, at020_root)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0
 

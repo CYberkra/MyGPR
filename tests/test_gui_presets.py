@@ -37,14 +37,7 @@ class _DummyCanvasEvent:
         self.__dict__.update(kwargs)
 
 
-class _DummyBbox:
-    width = 100.0
-    height = 100.0
-
-
 class _DummyAxes:
-    bbox = _DummyBbox()
-
     def add_patch(self, _patch):
         return None
 
@@ -190,7 +183,7 @@ def test_auto_tune_defaults_live_in_auto_tune_page():
         win.page_auto_tune.segmented.setCurrentItem("truth")
         assert win.page_auto_tune.stack.currentWidget() is win.page_auto_tune.page_truth
         assert "未检测到 gprMax ground_truth.yaml" in win.page_auto_tune.truth_status_label.text()
-        assert win.page_advanced.roi_status_label.text() == "手动 ROI: 未设置 · 图上框选未开启"
+        assert win.page_advanced.roi_status_label.text() == "手动 ROI: 未设置"
         assert win.page_advanced.btn_clear_manual_roi.isEnabled() is False
         assert win.page_basic.action_apply_manual.text() == "使用当前参数（默认）"
         assert win.page_basic.action_apply_auto_tuned.text() == "使用自动调参参数"
@@ -633,7 +626,7 @@ def test_auto_tune_tab_exposes_research_console_pages():
             "Evidence Viewer",
             "gprMax 模型编辑器 v0",
         ]
-        assert page.model_scene_list.count() == 2
+        assert page.model_scene_list.count() >= 6
         assert "read-only protected mode" in page.model_inspector_text.toPlainText()
     finally:
         win.close()
@@ -746,7 +739,7 @@ def test_manual_roi_is_prioritized_for_auto_tune_when_present():
         app.processEvents()
 
 
-def test_main_canvas_middle_drag_pans_like_grabbing_image(monkeypatch):
+def test_main_canvas_plain_drag_pans_like_grabbing_image(monkeypatch):
     app = _get_app()
     win = GPRGuiQt()
     try:
@@ -758,13 +751,11 @@ def test_main_canvas_middle_drag_pans_like_grabbing_image(monkeypatch):
         monkeypatch.setattr(win.canvas, "draw_idle", lambda: None)
 
         ax = win._main_plot_axes[0]
-        ax.set_xlim(2.0, 12.0)
-        ax.set_ylim(30.0, 10.0)
         original_xlim = tuple(float(v) for v in ax.get_xlim())
         original_ylim = tuple(float(v) for v in ax.get_ylim())
 
         press = _DummyCanvasEvent(
-            button=2,
+            button=1,
             inaxes=ax,
             x=100.0,
             y=100.0,
@@ -809,7 +800,7 @@ def test_main_canvas_middle_drag_pans_like_grabbing_image(monkeypatch):
         app.processEvents()
 
 
-def test_manual_roi_can_be_set_when_picker_enabled(monkeypatch):
+def test_manual_roi_can_be_set_by_shift_drag(monkeypatch):
     app = _get_app()
     win = GPRGuiQt()
     try:
@@ -820,7 +811,6 @@ def test_manual_roi_can_be_set_when_picker_enabled(monkeypatch):
 
         ax = _DummyAxes()
         win._main_plot_axes = [ax]
-        win._set_manual_roi_pick_enabled(True)
         press = _DummyCanvasEvent(
             button=1,
             inaxes=ax,
@@ -829,7 +819,7 @@ def test_manual_roi_can_be_set_when_picker_enabled(monkeypatch):
             xdata=1.0,
             ydata=2.0,
             dblclick=False,
-            key=None,
+            key="shift",
         )
         move = _DummyCanvasEvent(
             inaxes=ax,
@@ -844,7 +834,7 @@ def test_manual_roi_can_be_set_when_picker_enabled(monkeypatch):
             y=60.0,
             xdata=5.0,
             ydata=8.0,
-            key=None,
+            key="shift",
         )
 
         win._on_main_canvas_press(press)
@@ -861,7 +851,7 @@ def test_manual_roi_can_be_set_when_picker_enabled(monkeypatch):
         app.processEvents()
 
 
-def test_manual_roi_clear_action_resets_picker_roi(monkeypatch):
+def test_manual_roi_can_be_cleared_by_right_click(monkeypatch):
     app = _get_app()
     win = GPRGuiQt()
     try:
@@ -879,10 +869,21 @@ def test_manual_roi_clear_action_resets_picker_roi(monkeypatch):
             "time_end": 8.0,
         }
 
-        win._clear_manual_roi()
+        right_click = _DummyCanvasEvent(
+            button=3,
+            inaxes=ax,
+            x=20.0,
+            y=20.0,
+            xdata=2.0,
+            ydata=3.0,
+            dblclick=False,
+            key=None,
+        )
+
+        win._on_main_canvas_press(right_click)
 
         assert win._manual_roi_values is None
-        assert win.page_advanced.roi_status_label.text() == "手动 ROI: 未设置 · 图上框选未开启"
+        assert win.page_advanced.roi_status_label.text() == "手动 ROI: 未设置"
     finally:
         win.close()
         app.processEvents()
@@ -1151,7 +1152,6 @@ def test_motion_height_common_params_expose_wave_speed_and_typed_controls():
             "manual_height",
             "compensate_amplitude",
             "compensate_time_shift",
-            "height_source",
             "wave_speed_m_per_ns",
         ]
         mode_widget, _ = win.page_basic.param_vars["reference_height_mode"]

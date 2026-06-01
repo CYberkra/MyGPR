@@ -10,19 +10,15 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import h5py
 import numpy as np
+import h5py
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from core.gpr_io import read_gprmax_out
-
-DEFAULT_SCENE037 = (
-    "experiments/gprmax/GX-008/models/"
-    "scene_037_gssi_ey_depth05_radius03_air_sand_interface_n80_geometry_gate"
-)
+from core.app_paths import expand_path_template
 
 
 def _save_array(array: np.ndarray, out_dir: Path, stem: str) -> dict[str, Any]:
@@ -59,9 +55,6 @@ def _convert_series(
     base = source_base_out.with_suffix("")
     collected: list[np.ndarray] = []
     sources: list[str] = []
-    receiver_name = ""
-    available_components: list[str] = []
-
     for idx in range(1, run_count + 1):
         out_path = base.with_name(f"{base.name}{idx}.out")
         if not out_path.exists():
@@ -87,7 +80,6 @@ def _convert_series(
             )
         collected.append(trace)
         sources.append(str(out_path))
-
     bscan = np.column_stack(collected)
     result = _save_array(np.asarray(bscan, dtype=np.float64), out_dir, stem)
     result["source_out_series"] = sources
@@ -100,22 +92,22 @@ def _convert_series(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Convert gprMax .out files to CSV/NPY.")
+    parser = argparse.ArgumentParser(description="Convert GX-007 scene_001 .out to CSV/NPY.")
     parser.add_argument(
         "--raw-out",
-        default=f"{DEFAULT_SCENE037}/raw_with_target.out",
+        default="experiments/gprmax/GX-007/models/scene_001_single_shallow_pipe/raw_with_target.out",
     )
     parser.add_argument(
         "--background-out",
-        default=f"{DEFAULT_SCENE037}/background_only.out",
+        default="experiments/gprmax/GX-007/models/scene_001_single_shallow_pipe/background_only.out",
     )
     parser.add_argument(
         "--raw-converted-dir",
-        default="output/gprmax_converted/scene_037/raw_with_target",
+        default="${MYGPR_EVIDENCE_ROOT}/gprmax/GX-007/scene_001_single_shallow_pipe/raw_with_target/converted",
     )
     parser.add_argument(
         "--background-converted-dir",
-        default="output/gprmax_converted/scene_037/background_only",
+        default="${MYGPR_EVIDENCE_ROOT}/gprmax/GX-007/scene_001_single_shallow_pipe/background_only/converted",
     )
     parser.add_argument(
         "--raw-run-count",
@@ -147,27 +139,26 @@ def main() -> int:
     if args.raw_run_count > 1:
         raw_result = _convert_series(
             raw_out,
-            Path(args.raw_converted_dir).expanduser().resolve(),
+            Path(expand_path_template(args.raw_converted_dir)).resolve(),
             "raw_bscan",
             args.raw_run_count,
             args.component,
         )
     else:
         raw_result = _convert_one(
-            raw_out, Path(args.raw_converted_dir).expanduser().resolve(), "raw_bscan"
+            raw_out, Path(expand_path_template(args.raw_converted_dir)).resolve(), "raw_bscan"
         )
-
     if args.background_run_count > 1:
         bg_result = _convert_series(
             bg_out,
-            Path(args.background_converted_dir).expanduser().resolve(),
+            Path(expand_path_template(args.background_converted_dir)).resolve(),
             "background_bscan",
             args.background_run_count,
             args.component,
         )
     else:
         bg_result = _convert_one(
-            bg_out, Path(args.background_converted_dir).expanduser().resolve(), "background_bscan"
+            bg_out, Path(expand_path_template(args.background_converted_dir)).resolve(), "background_bscan"
         )
 
     summary = {

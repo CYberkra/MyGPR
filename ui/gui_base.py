@@ -16,6 +16,8 @@ import pandas as pd
 
 import matplotlib
 
+from core.app_errors import error_info_from_exception
+
 matplotlib.use("QtAgg")
 from matplotlib import font_manager as fm
 
@@ -225,6 +227,11 @@ def build_param_error_message(label: str, raw_value: str, detail: str) -> str:
 def build_processing_error_message(
     err: Exception, method_name: str = "未知方法"
 ) -> str:
+    info = error_info_from_exception(
+        err,
+        category="processing",
+        context={"method_name": method_name},
+    )
     return _format_explainable_error(
         what_happened=f"处理流程在'{method_name}'步骤执行失败。",
         possible_causes=[
@@ -235,7 +242,7 @@ def build_processing_error_message(
             "先用单步处理验证该方法，再检查参数设置是否合理。",
             "查看日志中的技术详情，必要时切换到其他方法确认数据本身是否可处理。",
         ],
-        technical_detail=str(err),
+        technical_detail=info.compact_message(),
     )
 
 

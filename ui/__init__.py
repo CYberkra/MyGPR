@@ -1,1 +1,1 @@
-"""UI modules for GPR GUI."""
+"""UI modules for MyGPR."""

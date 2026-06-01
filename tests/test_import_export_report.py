@@ -178,3 +178,66 @@ def test_report_includes_crop_bounds_when_crop_enabled(tmp_path: Path):
     finally:
         win.close()
         app.processEvents()
+
+
+def test_report_package_contains_normalized_evidence_sidecars(tmp_path: Path):
+    app = _get_app()
+    win = GPRGuiQt()
+    try:
+        raw = np.arange(120, dtype=np.float32).reshape(10, 12)
+        input_path = tmp_path / "demo.csv"
+        np.savetxt(input_path, raw, delimiter=",")
+        win.shared_data.load_data(raw, path=str(input_path), source="test")
+        win._default_output_dir = lambda: str(tmp_path)  # type: ignore[method-assign]
+
+        win.generate_report()
+
+        package_dir = next(tmp_path.glob("MyGPR_Evidence_Report_*"))
+        expected = {
+            "report.md",
+            "report.html",
+            "bscan_current_600dpi.png",
+            "manifest.json",
+            "evidence_index.json",
+            "workflow.json",
+            "processing_chain.json",
+            "params.json",
+            "display_settings.json",
+            "input_identity.json",
+            "software_version.json",
+            "method_registry_version.json",
+            "environment_summary.txt",
+            "runtime_log.txt",
+            "warnings.json",
+            "roi.json",
+            "figure_manifest.json",
+            "claim_boundary.txt",
+            "audit_note.md",
+        }
+        assert expected.issubset({item.name for item in package_dir.iterdir()})
+
+        manifest = json.loads((package_dir / "manifest.json").read_text(encoding="utf-8"))
+        assert manifest["schema"] == "mygpr.report_manifest.v4"
+        assert manifest["artifacts"]["workflow_json"] == "workflow.json"
+        assert manifest["artifacts"]["runtime_events_json"] == "runtime_events.json"
+        assert manifest["display_settings"]["display_only"] is True
+        assert manifest["history_memory"]["schema"] == "mygpr.history_memory.v1"
+
+        processing_chain = json.loads((package_dir / "processing_chain.json").read_text(encoding="utf-8"))
+        assert processing_chain["history_memory"]["schema"] == "mygpr.history_memory.v1"
+        assert processing_chain["lineage_export_forced_current"] is False
+
+        evidence_index = json.loads((package_dir / "evidence_index.json").read_text(encoding="utf-8"))
+        assert evidence_index["schema"] == "mygpr.evidence_index.v2"
+        assert "bscan_current_600dpi.png" in evidence_index["display_only_files"]
+
+        params = json.loads((package_dir / "params.json").read_text(encoding="utf-8"))
+        assert "processing_params" in params
+        runtime_events = json.loads((package_dir / "runtime_events.json").read_text(encoding="utf-8"))
+        assert runtime_events["schema"] == "mygpr.runtime_events.v1"
+        assert "events" in runtime_events
+        display = json.loads((package_dir / "display_settings.json").read_text(encoding="utf-8"))
+        assert display["display_only"] is True
+    finally:
+        win.close()
+        app.processEvents()

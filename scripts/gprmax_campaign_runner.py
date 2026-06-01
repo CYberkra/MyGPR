@@ -59,7 +59,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--gprmax-python",
         help=(
             "Optional runtime python for gprMax module execution, e.g. "
-            "--gprmax-python E:/gprMax/.../.venv/Scripts/python.exe"
+            "--gprmax-python <path-to-gprmax-python>"
         ),
     )
     parser.add_argument(

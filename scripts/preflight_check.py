@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Preflight checks before packaging GPR GUI."""
+"""Preflight checks before packaging MyGPR."""
 
 from __future__ import annotations
 
 import ast
 import gc
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -26,6 +27,12 @@ GENERATED_GPRMAX_OUTPUT_MARKERS = {
     "/smoke_outputs/",
 }
 GENERATED_GPRMAX_OUTPUT_SUFFIXES = {".csv", ".npy", ".png", ".jpg", ".jpeg", ".json"}
+
+LOCAL_ABSOLUTE_PATH_RE = re.compile(r"(?i)(?:(?<![A-Za-z])[A-Z]:[\\/]|/Users/|/home/[^/\s]+/|/mnt/[A-Za-z0-9_.-]+/)")
+LOCAL_PATH_SCAN_SUFFIXES = {".py", ".bat", ".cmd", ".ps1", ".json", ".yaml", ".yml", ".md", ".txt"}
+LOCAL_PATH_SCAN_SKIP_DIRS = {".git", "__pycache__", ".pytest_cache", "dist", "build", ".venv", "venv"}
+LOCAL_PATH_WARNING_LIMIT = 12
+HISTORICAL_LOCAL_PATH_DOC_PREFIXES = {"docs", "doc", "artifacts"}
 
 
 def _normalize_git_path(path: str) -> str:
@@ -58,6 +65,59 @@ def _staged_files() -> list[str]:
     return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
 
 
+def _iter_repository_text_files() -> list[Path]:
+    files: list[Path] = []
+    for path in ROOT.rglob("*"):
+        rel = path.relative_to(ROOT)
+        rel_parts = set(rel.parts)
+        if rel_parts & LOCAL_PATH_SCAN_SKIP_DIRS:
+            continue
+        # Historical audit/report markdown intentionally preserves local paths.
+        # Active config, scripts, launchers, and campaign YAML are still scanned.
+        if rel.parts and rel.parts[0] in HISTORICAL_LOCAL_PATH_DOC_PREFIXES:
+            continue
+        if rel.parts and rel.parts[0] == "tests":
+            continue
+        if path.suffix.lower() == ".md":
+            continue
+        if rel.as_posix() == "scripts/preflight_check.py":
+            continue
+        if path.is_file() and path.suffix.lower() in LOCAL_PATH_SCAN_SUFFIXES:
+            files.append(path)
+    return files
+
+
+def find_local_absolute_path_references(limit: int = LOCAL_PATH_WARNING_LIMIT) -> list[str]:
+    """Return concise warnings for local absolute path literals kept in source/docs."""
+    hits: list[str] = []
+    for path in _iter_repository_text_files():
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            continue
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            if not LOCAL_ABSOLUTE_PATH_RE.search(line):
+                continue
+            rel = path.relative_to(ROOT).as_posix()
+            excerpt = line.strip()
+            if len(excerpt) > 140:
+                excerpt = excerpt[:137] + "..."
+            hits.append(f"{rel}:{lineno}: {excerpt}")
+            if len(hits) >= limit:
+                return hits
+    return hits
+
+
+def check_local_absolute_path_warnings() -> None:
+    hits = find_local_absolute_path_references()
+    if not hits:
+        print("[OK] Local absolute path scan")
+        return
+    print("[WARN] Local absolute path references found; keep these local-only or move to config/env:")
+    for item in hits:
+        print(f"  - {item}")
+
+
 def check_staged_generated_artifacts() -> None:
     blocked = [path for path in _staged_files() if _is_generated_artifact_path(path)]
     if blocked:
@@ -76,7 +136,13 @@ def check_syntax() -> None:
         ROOT / "ui" / "gui_param_editor.py",
         ROOT / "core" / "workflow_executor.py",
         ROOT / "core" / "processing_engine.py",
+        ROOT / "core" / "shared_data_model.py",
         ROOT / "core" / "shared_data_state.py",
+        ROOT / "ui" / "shared_data_qt_adapter.py",
+        ROOT / "ui" / "report_export_controller.py",
+        ROOT / "ui" / "processing_lineage_controller.py",
+        ROOT / "ui" / "bscan_interaction_controller.py",
+        ROOT / "ui" / "autotune_sync_controller.py",
         ROOT / "core" / "app_paths.py",
         ROOT / "scripts" / "auto_tune_validation" / "background_window_policy.py",
         ROOT / "scripts" / "auto_tune_validation" / "run_background_ntraces_edge_check.py",
@@ -162,6 +228,7 @@ def check_runtime_flows() -> None:
 def main() -> int:
     check_syntax()
     check_staged_generated_artifacts()
+    check_local_absolute_path_warnings()
     check_runtime_flows()
     print("[OK] Preflight passed")
     return 0

@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from datetime import datetime
@@ -13,7 +14,7 @@ import re
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_VAULT_PATH = Path(r"D:\ClawX-Data\Obsidian\uav_gpr")
+DEFAULT_VAULT_PATH = Path(os.environ.get("MYGPR_OBSIDIAN_VAULT", ""))
 DEFAULT_NOTE_DIR = Path("40-归档与历史/版本快照")
 DEFAULT_INDEX_NOTE = Path("40-归档与历史/版本归档索引.md")
 

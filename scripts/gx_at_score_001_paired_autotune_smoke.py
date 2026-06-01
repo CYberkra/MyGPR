@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from core.app_paths import expand_path_template
 from core.autotune_paired_scoring_smoke import (
     build_inventory,
     ensure_scene_arrays,
@@ -28,12 +30,12 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run GX-AT-SCORE-001 paired autotune smoke.")
     parser.add_argument(
         "--root-single",
-        default=r"D:\GPR_Simulation_Results\01_单次仿真",
+        default=os.environ.get("MYGPR_GPRMAX_SINGLE_ROOT", "${MYGPR_GPR_RESULT_RUNS}/01_single"),
         help="Output V5 single-run root.",
     )
     parser.add_argument(
         "--root-batch",
-        default=r"D:\GPR_Simulation_Results\02_批量仿真",
+        default=os.environ.get("MYGPR_GPRMAX_BATCH_ROOT", "${MYGPR_GPR_RESULT_RUNS}/02_batch"),
         help="Output V5 batch root.",
     )
     parser.add_argument(
@@ -68,7 +70,7 @@ def main() -> int:
     docs_dir = Path(args.docs_dir).resolve()
     docs_dir.mkdir(parents=True, exist_ok=True)
 
-    roots = [Path(args.root_single), Path(args.root_batch)]
+    roots = [Path(expand_path_template(args.root_single)), Path(expand_path_template(args.root_batch))]
     inventories = build_inventory(roots, component_preference=args.component)
     inventory_md = docs_dir / "gprmax_paired_inventory.md"
     inventory_json = docs_dir / "gprmax_paired_inventory.json"

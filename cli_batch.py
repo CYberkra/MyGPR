@@ -16,6 +16,7 @@ Design goals:
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -179,6 +180,19 @@ LOCAL_METHODS = {
     "hankel_svd": method_hankel_svd,
     "sliding_avg": method_sliding_average,
 }
+
+OPTIONAL_METHOD_DEPENDENCIES = {
+    "wavelet_2d": [("pywt", "PyWavelets")],
+    "wavelet_svd": [("pywt", "PyWavelets")],
+}
+
+
+def _missing_optional_dependencies(method_key: str) -> list[str]:
+    missing: list[str] = []
+    for module_name, package_name in OPTIONAL_METHOD_DEPENDENCIES.get(method_key, []):
+        if importlib.util.find_spec(module_name) is None:
+            missing.append(package_name)
+    return missing
 
 
 @dataclass
@@ -376,6 +390,11 @@ def validate_config(cfg: Dict[str, Any], repo_root: str) -> ValidationResult:
             if key not in PROCESSING_METHODS:
                 errors.append(f"[{jid}] step#{step_i} unknown method key: {key}")
                 continue
+            missing_deps = _missing_optional_dependencies(str(key))
+            if missing_deps:
+                warnings.append(
+                    f"[{jid}] step#{step_i} method '{key}' requires missing package(s): {', '.join(missing_deps)}"
+                )
             try:
                 _merge_params(key, step.get("params"))
             except Exception as e:

@@ -27,7 +27,7 @@ def test_missing_evidence_root_does_not_crash(tmp_path: Path):
             "evidence_root_candidates": [str(tmp_path / "missing")],
             "gprmax_artifacts": [],
             "at_bg_artifacts": [],
-            "draft_scenes": ["fixture_scene_pending"],
+            "draft_scenes": ["scene_004_flat_damp_sand_pvc_shallow"],
         },
     )
 
@@ -39,13 +39,13 @@ def test_missing_evidence_root_does_not_crash(tmp_path: Path):
 
 
 def test_gprmax_artifact_reads_manifest_metrics_and_claim_boundary(tmp_path: Path):
-    artifact = tmp_path / "gprmax" / "GX-008_scene037"
+    artifact = tmp_path / "gprmax" / "GX-008_scene001"
     _write_json(
         artifact / "manifests" / "evidence_manifest.json",
         {
-            "artifact_id": "GX-008_scene037",
+            "artifact_id": "GX-008_scene001",
             "artifact_role": "synthetic_complete_2d_paired_diagnostic",
-            "scene_id": "scene_037_gssi_ey_depth05_radius03_air_sand_interface_n80_geometry_gate",
+            "scene_id": "scene_001_flat_dry_sand_pec_shallow",
             "raw_shape": [936, 41],
             "background_shape": [936, 41],
             "target_response_shape": [936, 41],
@@ -61,7 +61,7 @@ def test_gprmax_artifact_reads_manifest_metrics_and_claim_boundary(tmp_path: Pat
     summary = load_gprmax_artifact(artifact).to_dict()
 
     assert summary["status"] == "complete"
-    assert summary["scene_id"] == "scene_037_gssi_ey_depth05_radius03_air_sand_interface_n80_geometry_gate"
+    assert summary["scene_id"] == "scene_001_flat_dry_sand_pec_shallow"
     assert summary["raw_shape"] == [936, 41]
     assert summary["metrics_path"].endswith("standard_paired_metrics.json")
     assert summary["claim_boundary"] == ["not field validation"]
@@ -85,7 +85,7 @@ def test_at_bg_artifact_reads_selected_parameters(tmp_path: Path):
         {
             "artifact_id": "AT-BG",
             "artifact_role": "synthetic_background_suppression_autotune_diagnostic",
-            "scene_id": "scene_037_gssi_ey_depth05_radius03_air_sand_interface_n80_geometry_gate",
+            "scene_id": "scene_001_flat_dry_sand_pec_shallow",
             "trial_count": 17,
             "selected_trial_id": "trial_003",
             "claim_boundary": ["not production scoring"],

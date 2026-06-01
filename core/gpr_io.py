@@ -8,7 +8,7 @@ Supports:
 - gprMax .out files
 - gprMax .in configuration files
 
-Author: GPR_GUI Team
+Author: MyGPR Team
 Date: 2026-03-31
 """
 

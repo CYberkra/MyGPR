@@ -7,6 +7,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from core.app_paths import expand_path_template
+
 from core.gprmax_campaign.schema import Campaign, CampaignScene
 
 
@@ -110,7 +112,5 @@ def _require_non_empty_str(payload: dict[str, Any], key: str) -> str:
 
 
 def _resolve_path_value(raw_path: str, base_dir: Path) -> Path:
-    path = Path(raw_path).expanduser()
-    if path.is_absolute():
-        return path.resolve()
-    return (base_dir / path).resolve()
+    expanded = expand_path_template(raw_path, base_dir=base_dir)
+    return Path(expanded).resolve()

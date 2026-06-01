@@ -5,7 +5,7 @@ set "SCRIPT_DIR=%~dp0"
 set "REPO_ROOT=%SCRIPT_DIR%.."
 
 if not defined MYGPR_GPRMAX_PYTHON (
-  set "MYGPR_GPRMAX_PYTHON=E:\gprMax\gprMax-v.3.1.7\.venv\Scripts\python.exe"
+  set "MYGPR_GPRMAX_PYTHON=python"
 )
 if not defined MYGPR_GPU_DEVICE (
   set "MYGPR_GPU_DEVICE=0"
@@ -15,9 +15,7 @@ set "VCVARS_CANDIDATE="
 if defined MYGPR_VCVARS64 (
   set "VCVARS_CANDIDATE=%MYGPR_VCVARS64%"
 ) else (
-  if exist "E:\sisual stdio 2022\VC\Auxiliary\Build\vcvars64.bat" (
-    set "VCVARS_CANDIDATE=E:\sisual stdio 2022\VC\Auxiliary\Build\vcvars64.bat"
-  ) else if exist "%ProgramFiles%\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" (
+  if exist "%ProgramFiles%\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" (
     set "VCVARS_CANDIDATE=%ProgramFiles%\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
   ) else if exist "%ProgramFiles%\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat" (
     set "VCVARS_CANDIDATE=%ProgramFiles%\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat"

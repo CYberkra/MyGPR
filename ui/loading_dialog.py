@@ -130,6 +130,10 @@ class LoadingProgressDialog(QDialog):
         self.detail_label.setText(error_msg)
         self.btn_cancel.setText("关闭")
 
+        parent = self.parent()
+        if hasattr(parent, "_on_data_load_failed"):
+            parent._on_data_load_failed(error_msg)
+
     def _on_cancel(self):
         """取消/关闭"""
         if self.loader_thread and self.loader_thread.isRunning():

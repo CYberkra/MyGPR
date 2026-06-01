@@ -21,29 +21,25 @@ ROOT = Path(__file__).resolve().parents[1]
 GX008_MODELS = ROOT / "experiments" / "gprmax" / "GX-008" / "models"
 
 
-SCENE_037 = "scene_037_gssi_ey_depth05_radius03_air_sand_interface_n80_geometry_gate"
-SCENE_038 = "scene_038_gssi_ey_depth07_radius03_air_sand_interface_n80_pair_gate"
+def test_parses_gx008_scene001_pair_contract():
+    model = load_scene_model("scene_001_flat_dry_sand_pec_shallow")
 
-
-def test_parses_gx008_scene037_pair_contract():
-    model = load_scene_model(SCENE_037)
-
-    assert model.scene_id == SCENE_037
-    assert model.domain == "1.0 0.15 0.40"
-    assert model.expected_num_runs == 80
+    assert model.scene_id == "scene_001_flat_dry_sand_pec_shallow"
+    assert model.domain == "2.0 1.0 0.5"
+    assert model.expected_num_runs == 41
     assert model.pair_contract_status == "pairable"
     assert model.pair_contract_checks["raw_has_target"] is True
     assert model.pair_contract_checks["background_has_no_target"] is True
     assert "scripts\\run_gprmax_gpu_env.bat" in model.generated_gpu_command
 
 
-def test_parses_scene038_depth_supplement_material_and_roi():
-    model = load_scene_model(SCENE_038)
+def test_parses_scene003_pvc_material_and_roi():
+    model = load_scene_model("scene_003_flat_dry_sand_pvc_shallow")
 
-    assert model.target_material == "pec"
-    assert model.expected_num_runs == 80
-    assert model.roi["trace_range"] == [20, 65]
-    assert "dry_sand_tableii" in model.materials_text
+    assert model.target_material == "pvc_like"
+    assert model.target_depth_class == "shallow"
+    assert model.roi["expected_target_region"]["material"] == "pvc_like"
+    assert "pvc_like" in model.materials_text
 
 
 def test_missing_scene_files_return_warnings(tmp_path: Path):
@@ -56,7 +52,7 @@ def test_missing_scene_files_return_warnings(tmp_path: Path):
 
 
 def test_validate_scene_draft_returns_checks():
-    result = validate_scene_draft(SCENE_037)
+    result = validate_scene_draft("scene_003_flat_dry_sand_pvc_shallow")
 
     assert result["status"] == "pairable"
     assert result["checks"]["domain_same"] is True
@@ -65,22 +61,22 @@ def test_validate_scene_draft_returns_checks():
 
 def test_model_editor_v0_does_not_write_files():
     with pytest.raises(PermissionError):
-        clone_scene_as_draft(SCENE_037)
+        clone_scene_as_draft("scene_001_flat_dry_sand_pec_shallow")
     with pytest.raises(PermissionError):
-        save_scene_draft(SCENE_037)
+        save_scene_draft("scene_001_flat_dry_sand_pec_shallow")
 
 
 def test_invalid_roi_json_warns_without_crash(tmp_path: Path):
     scene = tmp_path / "scene_bad"
     scene.mkdir()
-    raw = GX008_MODELS / SCENE_037 / "raw_with_target.in"
-    background = GX008_MODELS / SCENE_037 / "background_only.in"
+    raw = GX008_MODELS / "scene_003_flat_dry_sand_pvc_shallow" / "raw_with_target.in"
+    background = GX008_MODELS / "scene_003_flat_dry_sand_pvc_shallow" / "background_only.in"
     (scene / "raw_with_target.in").write_text(raw.read_text(encoding="utf-8"), encoding="utf-8")
     (scene / "background_only.in").write_text(background.read_text(encoding="utf-8"), encoding="utf-8")
     (scene / "materials.txt").write_text("material_name,eps_r\npvc_like,3.5\n", encoding="utf-8")
     (scene / "roi_draft.json").write_text("{bad", encoding="utf-8")
     (scene / "scene_manifest_draft.json").write_text(
-        json.dumps({"expected_num_runs": 80, "target_material": "pec"}),
+        json.dumps({"expected_num_runs": 41, "target_material": "pvc_like"}),
         encoding="utf-8",
     )
 

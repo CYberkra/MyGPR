@@ -204,7 +204,7 @@ def test_cli_preview_pair_json_parseable_invalid(tmp_path):
 
 
 def test_pair_converted_script_gx008_like_scene_root(tmp_path):
-    scene_root = tmp_path / "fixture_pair_scene"
+    scene_root = tmp_path / "scene_001_flat_dry_sand_pec_shallow"
     raw_dir = scene_root / "raw_with_target" / "converted"
     bg_dir = scene_root / "background_only" / "converted"
     raw_dir.mkdir(parents=True)
@@ -230,7 +230,7 @@ def test_pair_converted_script_gx008_like_scene_root(tmp_path):
         "--campaign-id",
         "GX-008",
         "--scene-id",
-        "fixture_pair_scene",
+        "scene_001_flat_dry_sand_pec_shallow",
         "--roi-json",
         str(roi_path),
         "--json",

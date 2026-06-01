@@ -4,8 +4,10 @@
 
 from __future__ import annotations
 
+import argparse
 import csv
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,9 +28,11 @@ from core.no_prior_qc_policy import build_no_prior_qc_policy
 from core.processing_engine import prepare_runtime_params, run_processing_method
 from read_file_data import readcsv
 from core.gpr_io import extract_airborne_csv_payload
+from core.app_paths import expand_path_template
 
 
-FIELD_CSV = Path(r"C:\Users\17844\Desktop\02_Preprocessed_Standard\2025-09_营山\Line9origin(36).csv")
+DEFAULT_FIELD_CSV = os.environ.get("MYGPR_YINGSHAN_LINE9_CSV", "")
+DEFAULT_EVIDENCE_ROOT = "${MYGPR_EVIDENCE_ROOT}/autotune/AT-019_yingshan_line9_full_autotune_diagnostics"
 
 
 def _git_head(repo: Path) -> str:
@@ -98,8 +102,15 @@ def _plot_bscan(data: np.ndarray, path: Path, title: str) -> None:
     plt.close()
 
 
-def main() -> int:
-    evidence_root = Path(r"D:\CDUT-UavGPR-Controller\MyGPR-Evidence\autotune\AT-019_yingshan_line9_full_autotune_diagnostics")
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Generate AT-019 YingShan Line9 AutoTune diagnostics.")
+    parser.add_argument("--field-csv", default=DEFAULT_FIELD_CSV, help="Field CSV path, or set MYGPR_YINGSHAN_LINE9_CSV.")
+    parser.add_argument("--evidence-root", default=DEFAULT_EVIDENCE_ROOT, help="Output Evidence root. Supports MyGPR path placeholders.")
+    args = parser.parse_args(argv)
+    if not str(args.field_csv).strip():
+        raise SystemExit("--field-csv is required, or set MYGPR_YINGSHAN_LINE9_CSV")
+    field_csv = Path(expand_path_template(args.field_csv)).resolve()
+    evidence_root = Path(expand_path_template(args.evidence_root)).resolve()
     figures = evidence_root / "figures"
     tables = evidence_root / "tables"
     reports = evidence_root / "reports"
@@ -107,8 +118,8 @@ def main() -> int:
     for d in [figures, tables, reports, manifests]:
         d.mkdir(parents=True, exist_ok=True)
 
-    raw_csv = readcsv(str(FIELD_CSV))
-    header = _read_header(FIELD_CSV)
+    raw_csv = readcsv(str(field_csv))
+    header = _read_header(field_csv)
     data, trace_metadata, header_info = extract_airborne_csv_payload(raw_csv, header)
     data = np.asarray(data, dtype=np.float32)
     header_info = dict(header_info or {})
@@ -213,7 +224,7 @@ def main() -> int:
 
     no_prior = build_no_prior_qc_policy(no_prior_level="high_risk", target_prior_available=False, roi_available=False)
     no_prior_rows = [{
-        "file": FIELD_CSV.name,
+        "file": field_csv.name,
         "no_prior_level": no_prior.no_prior_level,
         "safe_auto_recommendation_allowed": no_prior.safe_auto_recommendation_allowed,
         "aggressive_background_suppression_allowed": no_prior.aggressive_background_suppression_allowed,
@@ -227,7 +238,7 @@ def main() -> int:
         "artifact_id": "AT-019",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "source_commit": _git_head(ROOT),
-        "field_csv": str(FIELD_CSV),
+        "field_csv": str(field_csv),
         "data_shape": [int(data.shape[0]), int(data.shape[1])],
         "first_warning_or_failure_stage": first_warn_stage,
         "full_autotune_completed": all(r.get("status", "ok") == "ok" for r in stage_rows if not str(r.get("method_key", "")).startswith("bg_diag_")),
@@ -259,7 +270,7 @@ def main() -> int:
         "- No-prior high-risk policy implies UI should block aggressive auto recommendation paths and require manual review.",
         "",
         "## Data summary",
-        f"- Field CSV: `{FIELD_CSV}`",
+        f"- Field CSV: `{field_csv}`",
         f"- Parsed shape: `{data.shape}`",
         "- ROI: none (no-prior field diagnostics)",
         "",
