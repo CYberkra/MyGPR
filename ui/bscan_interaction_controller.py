@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """B-scan mouse/keyboard interaction controller for MyGPR.
 
-This controller owns the main Matplotlib B-scan interaction surface: hover
-crosshair, trace selection, pan/zoom, manual ROI drag, slider compare dragging,
-and view-limit persistence.  It deliberately reads and writes the host window's
-existing attributes so V0.8.3 can reduce ``app_qt.py`` without changing runtime
-behavior or public GUI method names.
+This controller owns the main Matplotlib B-scan interaction surface: pan/zoom,
+manual ROI drag, slider compare dragging, coordinate readout, and view-limit
+persistence.  It deliberately reads and writes the host window's existing
+attributes so controller refactors can reduce ``app_qt.py`` without changing
+runtime behavior or public GUI method names.
 """
 
 from __future__ import annotations
@@ -75,7 +75,6 @@ class BscanInteractionController:
         """Update hover readout and handle explicit drag modes."""
         host = self.host
         host._update_plot_coord_label(event)
-        host._update_hover_crosshair(event)
         if host._main_press_state is None or host._toolbar_mode_active():
             return
         if event.x is None or event.y is None:
@@ -148,8 +147,9 @@ class BscanInteractionController:
             host._capture_main_view_limits_from_axes()
             return
 
-        if action == "inspect" and event.xdata is not None:
-            host._select_trace_from_x(float(event.xdata))
+        # Default inspect mode is intentionally read-only: coordinate readout
+        # provides trace/sample inspection without leaving persistent overlays
+        # or triggering heavy side-panel refreshes.
         host._capture_main_view_limits_from_axes()
 
     def event_button_number(self, event) -> int | None:
@@ -223,9 +223,18 @@ class BscanInteractionController:
             host._main_slider_compare_ratio = new_ratio
             return
 
-        host._main_slider_compare_ratio = new_ratio
+        old_ratio = float(host._main_slider_compare_ratio)
         host._last_slider_compare_draw_ts = now
-        host._refresh_plot()
+        updated = False
+        if hasattr(host, "_try_update_slider_compare_lightweight"):
+            updated = bool(host._try_update_slider_compare_lightweight(new_ratio, force=force))
+        if not updated:
+            host._main_slider_compare_ratio = new_ratio
+            host._refresh_plot()
+        elif force or abs(new_ratio - old_ratio) >= 0.0025:
+            # Keep the full-refresh signature stale enough that a later normal
+            # refresh will reconcile titles/colorbar, but do not rebuild during drag.
+            pass
 
     def on_main_canvas_scroll(self, event):
         """Zoom main plot. Shift = x-only, Ctrl = y-only."""
@@ -365,7 +374,7 @@ class BscanInteractionController:
             or host._last_display_data is None
         ):
             if host._last_coord_label_key != ("empty",):
-                host._plot_coord_label.setText("道 --   采样 --   距离 --   时间 --   振幅 --")
+                host._plot_coord_label.setText("坐标 --")
                 host._last_coord_label_key = ("empty",)
             return
 
@@ -392,14 +401,17 @@ class BscanInteractionController:
             return
         host._last_coord_label_key = label_key
         host._plot_coord_label.setText(
-            f"道 {raw_trace_idx}   采样 {time_idx}   距离 {trace_value:.2f}   时间 {time_value:.2f}   振幅 {amplitude:.4g}   {extra_hint}"
+            f"道 {raw_trace_idx} · 采样 {time_idx} · 幅 {amplitude:.4g} · {extra_hint}"
+        )
+        host._plot_coord_label.setToolTip(
+            f"道号 {raw_trace_idx} | 采样 {time_idx} | 距离 {trace_value:.2f} | 时间 {time_value:.2f} | 振幅 {amplitude:.4g}"
         )
 
     def on_main_canvas_leave(self, event):
         """Clear hover readout and transient crosshair when leaving main plot."""
         host = self.host
         if host._plot_coord_label is not None:
-            host._plot_coord_label.setText("道 --   采样 --   距离 --   时间 --   振幅 --")
+            host._plot_coord_label.setText("坐标 --")
         host._last_coord_label_key = ("empty",)
         host._clear_hover_crosshair_artists()
 
@@ -408,15 +420,13 @@ class BscanInteractionController:
         return bool(host._main_toolbar is not None and getattr(host._main_toolbar, "mode", ""))
 
     def select_trace_from_x(self, x_value: float):
-        """Select nearest displayed trace by x-coordinate."""
-        host = self.host
-        if (
-            host._last_display_trace_axis.size == 0
-            or host._last_display_trace_indices.size != host._last_display_trace_axis.size
-        ):
-            return
-        nearest = int(np.argmin(np.abs(host._last_display_trace_axis - float(x_value))))
-        host._set_selected_trace_index(int(host._last_display_trace_indices[nearest]))
+        """Deprecated no-op for the retired main-plot trace selection gesture.
+
+        Hover readout now covers trace/sample inspection.  Keeping this method as a
+        no-op preserves compatibility for older wrappers without reintroducing a
+        persistent selected-trace marker on the B-scan.
+        """
+        return None
 
     def draw_drag_roi_preview(self, start: dict, event):
         """Draw throttled transient ROI rectangle while dragging."""
@@ -486,116 +496,27 @@ class BscanInteractionController:
         host._capture_main_view_limits_from_axes()
 
     def clear_hover_crosshair_artists(self, draw: bool = True):
-        """Remove transient hover crosshair lines without touching selected trace marker."""
+        """Retired hover crosshair cleanup; remove legacy artists if present."""
         host = self.host
+        removed = False
         for artist in list(getattr(host, "_hover_crosshair_artists", []) or []):
             try:
                 artist.remove()
+                removed = True
             except Exception:
                 pass
         host._hover_crosshair_artists = []
         host._hover_crosshair_axes = None
         host._hover_crosshair_last_key = None
-        if draw:
+        if draw and removed:
             try:
                 host.canvas.draw_idle()
             except Exception:
                 pass
 
     def update_hover_crosshair(self, event):
-        """Reuse hover artists and throttle updates for smoother B-scan inspection."""
-        host = self.host
-        if host._toolbar_mode_active():
-            host._clear_hover_crosshair_artists()
-            return
-        if (
-            event is None
-            or event.inaxes not in host._main_plot_axes
-            or event.xdata is None
-            or event.ydata is None
-            or host._last_display_trace_axis.size == 0
-            or host._last_display_time_axis.size == 0
-        ):
-            host._clear_hover_crosshair_artists()
-            return
-
-        now = time.perf_counter()
-        if now - float(getattr(host, "_hover_crosshair_last_draw_ts", 0.0)) < float(getattr(host, "_hover_crosshair_draw_interval_s", 1.0 / 45.0)):
-            return
-
-        trace_idx = int(np.argmin(np.abs(host._last_display_trace_axis - float(event.xdata))))
-        time_idx = int(np.argmin(np.abs(host._last_display_time_axis - float(event.ydata))))
-        key = (id(event.inaxes), trace_idx, time_idx)
-        if key == host._hover_crosshair_last_key:
-            return
-        host._hover_crosshair_last_key = key
-        host._hover_crosshair_last_draw_ts = now
-
-        x = float(host._last_display_trace_axis[trace_idx])
-        y = float(host._last_display_time_axis[time_idx])
-        ax = event.inaxes
-        try:
-            from core.theme_manager import get_theme_manager
-            from ui.theme import get_effective_theme_key
-            theme_key = get_effective_theme_key(get_theme_manager().get_current_theme(), widget=host)
-        except Exception:
-            theme_key = "light"
-        color = "#5EEAD4" if theme_key == "dark" else "#0F766E"
-        alpha_span = 0.075 if theme_key == "light" else 0.12
-        alpha_v = 0.34 if theme_key == "light" else 0.52
-        alpha_h = 0.20 if theme_key == "light" else 0.34
-
-        if host._last_display_trace_axis.size > 1:
-            if trace_idx == 0:
-                half_width = abs(float(host._last_display_trace_axis[1] - host._last_display_trace_axis[0])) * 0.5
-            else:
-                half_width = abs(float(host._last_display_trace_axis[trace_idx] - host._last_display_trace_axis[trace_idx - 1])) * 0.5
-            half_width = max(half_width, 0.5)
-        else:
-            half_width = 0.5
-
-        ymin, ymax = ax.get_ylim()
-        polygon_xy = np.array(
-            [
-                [x - half_width, ymin],
-                [x - half_width, ymax],
-                [x + half_width, ymax],
-                [x + half_width, ymin],
-                [x - half_width, ymin],
-            ],
-            dtype=float,
-        )
-
-        artists = list(getattr(host, "_hover_crosshair_artists", []) or [])
-        needs_create = len(artists) != 3 or getattr(host, "_hover_crosshair_axes", None) is not ax
-        if not needs_create:
-            try:
-                span, vline, hline = artists
-                span.set_xy(polygon_xy)
-                span.set_facecolor(color)
-                span.set_alpha(alpha_span)
-                span.set_visible(True)
-                vline.set_xdata([x, x])
-                vline.set_color(color)
-                vline.set_alpha(alpha_v)
-                vline.set_visible(True)
-                hline.set_ydata([y, y])
-                hline.set_color(color)
-                hline.set_alpha(alpha_h)
-                hline.set_visible(True)
-                host.canvas.draw_idle()
-                return
-            except Exception:
-                host._clear_hover_crosshair_artists(draw=False)
-                needs_create = True
-
-        if needs_create:
-            span = ax.axvspan(x - half_width, x + half_width, color=color, alpha=alpha_span, zorder=8.5)
-            vline = ax.axvline(x, color=color, linewidth=0.85, linestyle="-", alpha=alpha_v, zorder=9)
-            hline = ax.axhline(y, color=color, linewidth=0.75, linestyle="-", alpha=alpha_h, zorder=9)
-            host._hover_crosshair_artists = [span, vline, hline]
-            host._hover_crosshair_axes = ax
-            host.canvas.draw_idle()
+        """Retired hover crosshair drawing; keep the main B-scan visually clean."""
+        return None
 
     def clear_selected_trace_marker_artists(self):
         """Remove selected-trace marker artists without redrawing the whole B-scan."""
@@ -622,41 +543,19 @@ class BscanInteractionController:
         return float(trace_axis[int(matches[0])])
 
     def refresh_selected_trace_marker_lightweight(self) -> bool:
-        """Update only selected-trace vertical marker after trace selection."""
+        """Retired selected-trace marker refresh; clear any legacy marker."""
         host = self.host
-        if not host._main_plot_axes:
-            return False
         host._clear_selected_trace_marker_artists()
-        selected_x = host._selected_trace_x_position()
-        if selected_x is None:
+        try:
             host.canvas.draw_idle()
-            return True
-        for ax in host._main_plot_axes:
-            line = ax.axvline(selected_x, color="#0F766E", linewidth=1.1, linestyle=":", alpha=0.72, zorder=8)
-            host._selected_trace_marker_artists.append(line)
-        host.canvas.draw_idle()
+        except Exception:
+            pass
         return True
 
     def draw_selected_trace_marker(self, axes, axis_info: dict):
-        """Draw selected-trace marker during full B-scan rendering."""
-        host = self.host
-        host._selected_trace_marker_artists = []
-        if host._selected_trace_index is None:
-            return
-
-        trace_axis = np.asarray(axis_info.get("trace_axis", []), dtype=np.float32)
-        trace_indices = np.asarray(axis_info.get("trace_indices", []), dtype=np.int32)
-        if trace_axis.size == 0 or trace_indices.size != trace_axis.size:
-            return
-
-        matches = np.flatnonzero(trace_indices == int(host._selected_trace_index))
-        if matches.size == 0:
-            return
-
-        selected_x = float(trace_axis[int(matches[0])])
-        for ax in axes:
-            line = ax.axvline(selected_x, color="#0F766E", linewidth=1.1, linestyle=":", alpha=0.72, zorder=8)
-            host._selected_trace_marker_artists.append(line)
+        """Retired selected-trace marker drawing; keep the B-scan visually clean."""
+        self.host._selected_trace_marker_artists = []
+        return
 
     def draw_manual_roi_marker(self, axes, axis_info: dict):
         """Draw current manual ROI on the main B-scan."""

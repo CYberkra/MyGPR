@@ -27,7 +27,7 @@ def _close_window(app: QApplication, win: GPRGuiQt) -> None:
     app.processEvents()
 
 
-def test_bscan_interaction_controller_wrappers_and_marker_smoke():
+def test_bscan_interaction_controller_wrappers_and_hover_inspect_smoke():
     app = _get_app()
     win = GPRGuiQt("MyGPR V-test")
     try:
@@ -49,12 +49,15 @@ def test_bscan_interaction_controller_wrappers_and_marker_smoke():
 
         win._set_selected_trace_index(2)
         assert win._selected_trace_index == 2
-        assert win._selected_trace_marker_artists
+        # Main B-scan no longer draws persistent selected-trace markers; hover
+        # readout/crosshair is the visual inspection path.
+        assert win._selected_trace_marker_artists == []
 
         x_pos = win._selected_trace_x_position()
         assert x_pos is not None
         win._select_trace_from_x(float(x_pos))
         assert win._selected_trace_index == 2
+        assert win._selected_trace_marker_artists == []
 
         event = SimpleNamespace(inaxes=win._main_plot_axes[0], xdata=float(x_pos), ydata=0.0, button=1, key="")
         win._update_plot_coord_label(event)

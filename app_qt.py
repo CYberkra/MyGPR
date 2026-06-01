@@ -972,6 +972,7 @@ class GPRGuiQt(QMainWindow):
         self._view_cache = {}
         self.compare_snapshots = []
         self._transient_compare_snapshots = []
+        self._lineage_compare_source_index = None
         self._compare_syncing = False
         self._data_revision = 0
         self._last_plot_signature = None
@@ -1013,7 +1014,12 @@ class GPRGuiQt(QMainWindow):
         self._main_drag_threshold_px = 8
         self._main_motion_draw_interval_s = 1.0 / 60.0
         self._roi_preview_draw_interval_s = 1.0 / 60.0
-        self._slider_compare_draw_interval_s = 1.0 / 30.0
+        # Slider compare dragging should feel immediate.  The initial v0.8.12
+        # path throttled to 30 Hz but still rebuilt the whole Matplotlib figure,
+        # which was visibly choppy on larger B-scans.  v0.8.13 uses a
+        # lightweight artist update during drag and only falls back to full
+        # refresh when the cache is unavailable.
+        self._slider_compare_draw_interval_s = 1.0 / 75.0
         self._main_coord_update_interval_s = 1.0 / 40.0
         self._last_main_motion_draw_ts = 0.0
         self._last_roi_preview_draw_ts = 0.0
@@ -1026,6 +1032,7 @@ class GPRGuiQt(QMainWindow):
         self._last_plot_extent = None
         self._main_plot_axes = []
         self._main_slider_compare_ratio = 0.5
+        self._slider_compare_render_cache = {}
         self._selected_trace_marker_artists = []
         self._hover_crosshair_artists = []
         self._hover_crosshair_axes = None
@@ -1224,8 +1231,8 @@ class GPRGuiQt(QMainWindow):
         self.main_plot_card = QFrame()
         self.main_plot_card.setObjectName("mainPlotCard")
         main_plot_layout = QVBoxLayout(self.main_plot_card)
-        main_plot_layout.setContentsMargins(12, 8, 12, 10)
-        main_plot_layout.setSpacing(6)
+        main_plot_layout.setContentsMargins(12, 8, 12, 7)
+        main_plot_layout.setSpacing(4)
 
         plot_header = self._create_plot_card_header()
         main_plot_layout.addWidget(plot_header)
@@ -1309,20 +1316,25 @@ class GPRGuiQt(QMainWindow):
 
         self._plot_bottom_status_bar = QFrame()
         self._plot_bottom_status_bar.setObjectName("PlotBottomStatusBar")
+        self._plot_bottom_status_bar.setMinimumHeight(28)
+        self._plot_bottom_status_bar.setMaximumHeight(34)
         bottom_status_layout = QHBoxLayout(self._plot_bottom_status_bar)
-        bottom_status_layout.setContentsMargins(7, 3, 7, 3)
-        bottom_status_layout.setSpacing(6)
-        self._plot_lineage_label = QLabel("处理链路：原始数据")
+        bottom_status_layout.setContentsMargins(5, 2, 5, 2)
+        bottom_status_layout.setSpacing(4)
+        self._plot_lineage_label = QLabel("链路：Raw")
         self._plot_lineage_label.setObjectName("PlotInfoChip")
+        self._plot_lineage_label.setMaximumWidth(560)
         self._plot_lineage_label.setToolTip("当前显示数据的处理链路")
-        self._plot_coord_label = QLabel("道 --   采样 --   距离 --   时间 --   振幅 --")
+        self._plot_coord_label = QLabel("坐标 --")
         self._plot_coord_label.setObjectName("PlotInfoChip")
-        self._plot_coord_label.setMinimumWidth(260)
-        self._interaction_mode_chip = QLabel("查看模式")
+        self._plot_coord_label.setMinimumWidth(128)
+        self._plot_coord_label.setToolTip("鼠标悬停时显示道号、采样点和振幅；完整坐标不再常驻占位。")
+        self._interaction_mode_chip = QLabel("查看")
         self._interaction_mode_chip.setObjectName("PlotModeChip")
+        self._interaction_mode_chip.setMaximumWidth(78)
         self._interaction_mode_chip.setProperty("tone", "neutral")
         self._interaction_mode_chip.setToolTip("当前 B-scan 鼠标交互模式")
-        bottom_status_layout.addWidget(self._plot_lineage_label)
+        bottom_status_layout.addWidget(self._plot_lineage_label, 2)
         bottom_status_layout.addWidget(self._plot_coord_label, 1)
         bottom_status_layout.addWidget(self._interaction_mode_chip)
         main_plot_layout.addWidget(self._plot_bottom_status_bar)
@@ -1581,27 +1593,31 @@ class GPRGuiQt(QMainWindow):
     def _create_runtime_panel_drawer(self):
         """创建主图下方的抽屉式运行信息区。"""
         bar = QWidget()
+        bar.setMaximumHeight(34)
         bar_layout = QHBoxLayout(bar)
         bar_layout.setContentsMargins(0, 0, 0, 0)
-        bar_layout.setSpacing(6)
+        bar_layout.setSpacing(4)
 
-        title = QLabel("运行信息")
+        title = QLabel("运行")
         title.setProperty("class", "topInfoMeta")
+        title.setMaximumWidth(38)
+        title.setToolTip("运行信息")
         bar_layout.addWidget(title)
 
         self.runtime_summary_chip = QLabel("状态：等待数据导入")
         self.runtime_summary_chip.setObjectName("RuntimeSummaryChip")
-        self.runtime_summary_chip.setMinimumWidth(180)
-        bar_layout.addWidget(self.runtime_summary_chip)
+        self.runtime_summary_chip.setMinimumWidth(138)
+        self.runtime_summary_chip.setMaximumWidth(420)
+        bar_layout.addWidget(self.runtime_summary_chip, 1)
 
-        self.btn_toggle_global_log = QPushButton("全局日志")
+        self.btn_toggle_global_log = QPushButton("日志")
         self.btn_toggle_global_log.setCheckable(True)
         self.btn_toggle_global_log.clicked.connect(
             lambda checked: self._show_runtime_panel("global_log" if checked else None)
         )
         bar_layout.addWidget(self.btn_toggle_global_log)
 
-        btn_collapse = QPushButton("收起")
+        btn_collapse = QPushButton("收")
         btn_collapse.clicked.connect(lambda: self._show_runtime_panel(None))
         bar_layout.addWidget(btn_collapse)
         bar_layout.addStretch(1)
@@ -1831,6 +1847,8 @@ class GPRGuiQt(QMainWindow):
         self.page_advanced.diff_var.stateChanged.connect(self._refresh_plot)
         self.page_advanced.slider_compare_var.stateChanged.connect(self._refresh_plot)
         self.page_advanced.slider_compare_var.stateChanged.connect(self._update_interaction_mode_status)
+        self.page_advanced.diff_var.stateChanged.connect(self._on_compare_mode_state_changed)
+        self.page_advanced.slider_compare_var.stateChanged.connect(self._on_compare_mode_state_changed)
         self.page_advanced.btn_apply_crop.clicked.connect(self._refresh_plot)
         self.page_advanced.btn_reset_crop.clicked.connect(self._reset_crop)
         self.page_advanced.btn_toggle_theme.clicked.connect(
@@ -1895,6 +1913,7 @@ class GPRGuiQt(QMainWindow):
             cb.stateChanged.connect(self._refresh_plot)
 
         self.page_advanced.compare_var.toggled.connect(self._on_compare_toggled)
+        self.page_advanced.compare_var.stateChanged.connect(self._on_compare_mode_state_changed)
 
         # 质量/日志页面
         self.page_quality.btn_generate_report.clicked.connect(self.generate_report)
@@ -2601,13 +2620,13 @@ class GPRGuiQt(QMainWindow):
         if chip is None:
             return
         if self._is_manual_roi_pick_enabled():
-            text, tone = "ROI 框选中", "warning"
+            text, tone = "ROI", "warning"
             tip = "ROI 模式已开启：左键拖动框选 ROI，Esc 可取消临时框。"
         elif self._is_main_slider_compare_active():
-            text, tone = "滑动对比", "info"
+            text, tone = "滑动", "info"
             tip = "滑动对比已开启：靠近分隔线后左键拖动分割位置。"
         else:
-            text, tone = "查看模式", "neutral"
+            text, tone = "查看", "neutral"
             tip = "默认查看：左键选道，滚轮缩放，中/右键拖动平移。"
         chip.setText(text)
         chip.setToolTip(tip)
@@ -3275,6 +3294,37 @@ class GPRGuiQt(QMainWindow):
             self.page_advanced.compare_controls_row.setVisible(enabled)
         if hasattr(self.page_advanced, "_refresh_compare_select_visibility"):
             self.page_advanced._refresh_compare_select_visibility()
+
+    def _on_compare_mode_state_changed(self, *args):
+        """Keep compare widgets, lineage compare and plot mode synchronized.
+
+        V0.8.8: when compare/slider mode is closed from the display page,
+        explicitly tear down lineage slider snapshots and force a single-image
+        refresh so the main panel cannot remain visually stuck in slider compare.
+        """
+        if getattr(self, "_compare_syncing", False):
+            return
+        try:
+            compare_checked = bool(getattr(self.page_advanced, "compare_var", None) and self.page_advanced.compare_var.isChecked())
+            diff_checked = bool(getattr(self.page_advanced, "diff_var", None) and self.page_advanced.diff_var.isChecked())
+            slider_checked = bool(getattr(self.page_advanced, "slider_compare_var", None) and self.page_advanced.slider_compare_var.isChecked())
+            any_compare = bool(compare_checked or diff_checked or slider_checked)
+            if not any_compare:
+                if hasattr(self.page_advanced, "mode_single") and not self.page_advanced.mode_single.isChecked():
+                    self.page_advanced.mode_single.setChecked(True)
+                self._main_slider_compare_ratio = 0.5
+                controller = getattr(self, "processing_lineage_controller", None)
+                if controller is not None and hasattr(controller, "on_compare_mode_disabled"):
+                    controller.on_compare_mode_disabled()
+                self._last_plot_signature = None
+            else:
+                controller = getattr(self, "processing_lineage_controller", None)
+                if controller is not None and hasattr(controller, "update_step_detail"):
+                    controller.update_step_detail()
+            self._on_compare_toggled(compare_checked)
+            self._update_interaction_mode_status()
+        except Exception:
+            logger.debug("Compare mode state sync failed", exc_info=True)
 
     def _refresh_plot(self):
         """刷新绘图（带防抖）"""
@@ -4642,6 +4692,8 @@ class GPRGuiQt(QMainWindow):
                 range_label = "固定 ±1"
             self._plot_range_chip.setText(f"拉伸：{range_label}")
         slider_compare = self._is_main_slider_compare_active()
+        if not slider_compare:
+            self._slider_compare_render_cache = {}
         if slider_compare and view_style == "wiggle":
             # 绘图刷新可能很频繁；该提示只作为状态展示，不写入全局日志，避免日志被刷新路径污染。
             self._set_runtime_summary("状态：滑动对比优先使用图像分割显示", "info")
@@ -4688,7 +4740,9 @@ class GPRGuiQt(QMainWindow):
                 plot_config,
                 header_info_override=view_header_info,
             )
-        self._draw_selected_trace_marker(axes, axis_info)
+        # Main B-scan selection-by-click and hover crosshair overlays have been
+        # retired; coordinate readout provides trace/sample inspection without
+        # leaving persistent selection markers on the plot.
         self._draw_manual_roi_marker(axes, axis_info)
         if self._main_view_limits and len(axes) == 1 and not slider_compare:
             axes[0].set_xlim(*self._main_view_limits["xlim"])
@@ -5949,6 +6003,13 @@ class GPRGuiQt(QMainWindow):
             else self.page_advanced.demean_var.isChecked(),
             "crop": self.page_advanced.crop_enable_var.isChecked(),
         }
+        controller = getattr(self, "processing_lineage_controller", None)
+        if controller is not None:
+            try:
+                sig["lineage_compare_mode"] = controller.get_active_compare_mode()
+                sig["lineage_compare_indices"] = tuple(controller._selected_compare_indices_sorted())
+            except Exception:
+                pass
         if self.page_advanced.compare_var.isChecked() or slider_compare:
             sig["left"] = self.page_advanced.compare_left_combo.currentText()
             sig["right"] = self.page_advanced.compare_right_combo.currentText()
@@ -6293,10 +6354,93 @@ class GPRGuiQt(QMainWindow):
         ylabel = str(header.get("display_ylabel") or ylabel)
         return {"extent": extent, "xlabel": xlabel, "ylabel": ylabel}
 
+    def _normalize_compare_visual_data(self, data: np.ndarray) -> np.ndarray:
+        """Return independently balanced display-only data for visual step comparison.
+
+        Processing-lineage comparison often juxtaposes raw, background-suppressed,
+        AGC, or other amplitude-altered stages.  A shared absolute colour range can
+        make low-energy stages look like a flat grey block.  For the stepper compare
+        UI we therefore use per-panel robust symmetric normalization, explicitly as
+        display-only visualization.  Numeric/Evidence metrics should use the stored
+        arrays, not this normalized rendering.
+        """
+        arr = np.asarray(data, dtype=np.float32)
+        if arr.ndim != 2 or arr.size == 0:
+            return arr
+        finite = arr[np.isfinite(arr)]
+        if finite.size == 0:
+            return np.zeros_like(arr, dtype=np.float32)
+        try:
+            high = 99.5
+            if getattr(self, "page_advanced", None) is not None and self.page_advanced.percentile_var.isChecked():
+                high = float(self._parse_float_edit(self.page_advanced.p_high_edit, default=99.0))
+            scale = float(np.percentile(np.abs(finite), max(50.0, min(99.99, high))))
+        except Exception:
+            scale = float(np.max(np.abs(finite))) if finite.size else 1.0
+        if not np.isfinite(scale) or scale <= 1.0e-12:
+            scale = float(np.max(np.abs(finite))) if finite.size else 1.0
+        if not np.isfinite(scale) or scale <= 1.0e-12:
+            return np.zeros_like(arr, dtype=np.float32)
+        balanced = np.nan_to_num(arr / scale, nan=0.0, posinf=1.0, neginf=-1.0)
+        return np.clip(balanced, -1.0, 1.0).astype(np.float32, copy=False)
+
+    def _get_lineage_compare_pairs_for_plot(
+        self,
+        display_data: np.ndarray,
+        *,
+        balanced_visual: bool = False,
+    ):
+        """Return display-only processing-lineage compare pairs when active."""
+        controller = getattr(self, "processing_lineage_controller", None)
+        if controller is None:
+            return None
+        mode = getattr(controller, "get_active_compare_mode", lambda: None)()
+        if mode not in {"grid", "diff", "slider"}:
+            return None
+        snapshots = controller.get_selected_compare_snapshots()
+        if len(snapshots) < 2:
+            return None
+        pairs = []
+        for snap in snapshots:
+            label = str(snap.get("label") or "链路步骤")
+            data = snap.get("data")
+            if data is None:
+                continue
+            try:
+                prepared = self._prepare_view_data(
+                    data,
+                    header_info_override=snap.get("header_info"),
+                    trace_metadata_override=snap.get("trace_metadata"),
+                )[0]
+            except Exception:
+                prepared = np.asarray(data)
+            if balanced_visual:
+                prepared = self._normalize_compare_visual_data(prepared)
+            pairs.append((label, prepared))
+        return pairs or None
+
     def _build_compare_data_pairs(
         self, display_data: np.ndarray, header_info_override: dict | None = None
     ):
-        """构建对比数据对（复用已处理的 display_data，避免重复 _prepare_view_data）"""
+        """构建对比数据对（复用已处理的 display_data，避免重复 _prepare_view_data）。"""
+        lineage_mode = None
+        controller = getattr(self, "processing_lineage_controller", None)
+        if controller is not None:
+            lineage_mode = controller.get_active_compare_mode()
+        if lineage_mode in {"grid", "diff"}:
+            lineage_pairs = self._get_lineage_compare_pairs_for_plot(
+                display_data, balanced_visual=(lineage_mode == "grid")
+            )
+            if lineage_pairs and lineage_mode == "diff" and len(lineage_pairs) >= 2:
+                left_label, left_data = lineage_pairs[0]
+                right_label, right_data = lineage_pairs[1]
+                min_rows = min(left_data.shape[0], right_data.shape[0])
+                min_cols = min(left_data.shape[1], right_data.shape[1])
+                diff = np.abs(left_data[:min_rows, :min_cols] - right_data[:min_rows, :min_cols])
+                return [(f"|{left_label} - {right_label}|", diff)]
+            if lineage_pairs:
+                return lineage_pairs
+
         if not self.page_advanced.compare_var.isChecked():
             return [(self._get_single_plot_title(header_info_override), display_data)]
         left_label = self.page_advanced.compare_left_combo.currentText()
@@ -6337,6 +6481,16 @@ class GPRGuiQt(QMainWindow):
         self, display_data: np.ndarray, header_info_override: dict | None = None
     ):
         """构建滑动对比所需的左右数据。"""
+        controller = getattr(self, "processing_lineage_controller", None)
+        if controller is not None and controller.get_active_compare_mode() == "slider":
+            lineage_pairs = self._get_lineage_compare_pairs_for_plot(
+                display_data, balanced_visual=True
+            )
+            if lineage_pairs and len(lineage_pairs) >= 2:
+                left_label, left_data = lineage_pairs[0]
+                right_label, right_data = lineage_pairs[1]
+                return left_label, left_data, right_label, right_data
+
         left_label = self.page_advanced.compare_left_combo.currentText() or "原始"
         right_label = self.page_advanced.compare_right_combo.currentText() or "当前"
 
@@ -6359,10 +6513,14 @@ class GPRGuiQt(QMainWindow):
         return left_label, left_data, right_label, right_data
 
     def _create_plot_axes(self, n_panels: int):
-        """创建绘图坐标轴"""
+        """创建绘图坐标轴。2 图横排，3–4 图使用轻量网格。"""
         if n_panels == 1:
             return [self.fig.add_subplot(111)]
-        return [self.fig.add_subplot(1, n_panels, i + 1) for i in range(n_panels)]
+        if n_panels == 2:
+            return [self.fig.add_subplot(1, 2, i + 1) for i in range(2)]
+        rows = 2
+        cols = int(np.ceil(n_panels / rows))
+        return [self.fig.add_subplot(rows, cols, i + 1) for i in range(n_panels)]
 
     def _get_or_create_plot_axes(self, n_panels: int):
         """获取或创建绘图坐标轴（复用已有）"""
@@ -6388,7 +6546,15 @@ class GPRGuiQt(QMainWindow):
     ):
         """渲染数据对（对比模式下统一色标）"""
         is_compare = len(data_pairs) > 1
-        if is_compare:
+        lineage_mode = None
+        controller = getattr(self, "processing_lineage_controller", None)
+        if controller is not None:
+            lineage_mode = controller.get_active_compare_mode()
+        if is_compare and lineage_mode == "grid":
+            # Grid compare uses per-panel balanced display-only data.  Keep a
+            # fixed common [-1, 1] range so every selected step remains visible.
+            shared_vmin, shared_vmax = -1.0, 1.0
+        elif is_compare:
             finite_parts = [
                 d[np.isfinite(d)] for _, d in data_pairs if np.isfinite(d).any()
             ]
@@ -6539,30 +6705,39 @@ class GPRGuiQt(QMainWindow):
         split_idx = max(0, min(split_idx, min_cols - 1))
         merged[:, : split_idx + 1] = left_data[:, : split_idx + 1]
 
-        finite_parts = [
-            part[np.isfinite(part)] for part in [left_data, right_data] if np.isfinite(part).any()
-        ]
-        if finite_parts:
-            all_data = np.concatenate(finite_parts)
-            vmin, vmax = self._compute_vmin_vmax(
-                all_data, header_info_override=header_info_override
-            )
-        else:
+        controller = getattr(self, "processing_lineage_controller", None)
+        lineage_slider = bool(controller is not None and controller.get_active_compare_mode() == "slider")
+        if lineage_slider:
+            # The lineage slider receives already-normalized display-only panels.
+            # Fixed limits prevent one high-energy processing stage from flattening
+            # the other side into an unreadable grey block.
             vmin, vmax = -1.0, 1.0
+        else:
+            finite_parts = [
+                part[np.isfinite(part)] for part in [left_data, right_data] if np.isfinite(part).any()
+            ]
+            if finite_parts:
+                all_data = np.concatenate(finite_parts)
+                vmin, vmax = self._compute_vmin_vmax(
+                    all_data, header_info_override=header_info_override
+                )
+            else:
+                vmin, vmax = -1.0, 1.0
 
         im = ax.imshow(
             merged,
             cmap=cmap,
             aspect="auto",
-            interpolation="nearest",
-            resample=False,
             extent=plot_config["extent"],
             vmin=vmin,
             vmax=vmax,
         )
         ax.set_xlabel(plot_config["xlabel"])
         ax.set_ylabel(plot_config["ylabel"])
-        ax.set_title(f"滑动对比 ({left_label} | {right_label})")
+        if lineage_slider:
+            ax.set_title(f"滑动对比 · 视觉均衡 ({left_label} | {right_label})")
+        else:
+            ax.set_title(f"滑动对比 ({left_label} | {right_label})")
 
         trace_axis = np.asarray(axis_info.get("trace_axis", []), dtype=np.float32)
         if trace_axis.size == min_cols:
@@ -6581,31 +6756,129 @@ class GPRGuiQt(QMainWindow):
         left_x = x0 + abs(x1 - x0) * 0.15
         right_x = x0 + abs(x1 - x0) * 0.85
 
-        ax.axvline(x=split_x, color=divider_color, linewidth=1.6, alpha=0.85)
-        ax.text(
+        handle_line = ax.axvline(x=split_x, color=label_bg_color, linewidth=4.0, alpha=0.18)
+        divider_line = ax.axvline(x=split_x, color=divider_color, linewidth=1.7, alpha=0.90)
+        left_text = ax.text(
             left_x,
             label_y,
             left_label,
             color=label_text_color,
-            fontsize=11,
+            fontsize=10,
             fontweight="bold",
             ha="center",
             va="center",
-            bbox=dict(boxstyle="round,pad=0.25", facecolor=label_bg_color, edgecolor="none", alpha=0.58),
+            bbox=dict(boxstyle="round,pad=0.22", facecolor=label_bg_color, edgecolor="none", alpha=0.52),
         )
-        ax.text(
+        right_text = ax.text(
             right_x,
             label_y,
             right_label,
             color=label_text_color,
-            fontsize=11,
+            fontsize=10,
             fontweight="bold",
             ha="center",
             va="center",
-            bbox=dict(boxstyle="round,pad=0.25", facecolor=label_bg_color, edgecolor="none", alpha=0.58),
+            bbox=dict(boxstyle="round,pad=0.22", facecolor=label_bg_color, edgecolor="none", alpha=0.52),
         )
+        self._slider_compare_render_cache = {
+            "image": im,
+            "ax": ax,
+            "left_data": left_data,
+            "right_data": right_data,
+            "merged_data": merged,
+            "split_idx": split_idx,
+            "min_rows": min_rows,
+            "min_cols": min_cols,
+            "trace_axis": trace_axis.copy() if trace_axis.size else np.array([], dtype=np.float32),
+            "extent": list(plot_config["extent"]),
+            "divider_line": divider_line,
+            "handle_line": handle_line,
+            "left_text": left_text,
+            "right_text": right_text,
+            "vmin": vmin,
+            "vmax": vmax,
+            "lineage_slider": lineage_slider,
+        }
         ax.grid(False)
         return im
+
+
+    def _slider_compare_split_x_from_cache(self, cache: dict, split_idx: int) -> float:
+        """Return the divider x-position for a cached slider-compare render."""
+        trace_axis = np.asarray(cache.get("trace_axis", []), dtype=np.float32)
+        if trace_axis.size and 0 <= int(split_idx) < trace_axis.size:
+            return float(trace_axis[int(split_idx)])
+        extent = cache.get("extent") or self._last_plot_extent or [0, 1, 1, 0]
+        try:
+            x0, x1 = float(extent[0]), float(extent[1])
+            return float(x0 + (x1 - x0) * float(self._main_slider_compare_ratio))
+        except Exception:
+            return float(split_idx)
+
+    def _try_update_slider_compare_lightweight(self, ratio: float, *, force: bool = False) -> bool:
+        """Move the main slider-compare divider without rebuilding the whole figure.
+
+        Dragging previously called ``_refresh_plot()``, which rebuilt axes,
+        labels, colorbar, compare data and the processing-lineage bar.  That is
+        correct for a mode switch but too heavy for mouse-motion events.  This
+        method updates only the cached image buffer and divider artist; if the
+        cache is stale or missing, callers can fall back to the normal refresh.
+        """
+        if not self._is_main_slider_compare_active():
+            return False
+        cache = getattr(self, "_slider_compare_render_cache", None) or {}
+        image = cache.get("image")
+        left_data = cache.get("left_data")
+        right_data = cache.get("right_data")
+        if image is None or left_data is None or right_data is None:
+            return False
+        try:
+            ratio = max(0.0, min(1.0, float(ratio)))
+            min_cols = int(cache.get("min_cols") or min(left_data.shape[1], right_data.shape[1]))
+            if min_cols <= 0:
+                return False
+            split_idx = int(round(ratio * max(min_cols - 1, 1)))
+            split_idx = max(0, min(split_idx, min_cols - 1))
+            if (not force) and split_idx == int(cache.get("split_idx", -1)):
+                self._main_slider_compare_ratio = ratio
+                return True
+
+            merged = cache.get("merged_data")
+            if merged is None or getattr(merged, "shape", None) != getattr(right_data, "shape", None):
+                merged = np.array(right_data, copy=True)
+                previous_split = -1
+            else:
+                previous_split = int(cache.get("split_idx", -1))
+
+            if previous_split < 0:
+                merged[:, : split_idx + 1] = left_data[:, : split_idx + 1]
+            elif split_idx > previous_split:
+                merged[:, previous_split + 1 : split_idx + 1] = left_data[
+                    :, previous_split + 1 : split_idx + 1
+                ]
+            elif split_idx < previous_split:
+                merged[:, split_idx + 1 : previous_split + 1] = right_data[
+                    :, split_idx + 1 : previous_split + 1
+                ]
+
+            self._main_slider_compare_ratio = ratio
+            cache["merged_data"] = merged
+            cache["split_idx"] = split_idx
+            image.set_data(merged)
+
+            split_x = self._slider_compare_split_x_from_cache(cache, split_idx)
+            divider_line = cache.get("divider_line")
+            if divider_line is not None:
+                divider_line.set_xdata([split_x, split_x])
+            handle_line = cache.get("handle_line")
+            if handle_line is not None:
+                handle_line.set_xdata([split_x, split_x])
+            self._slider_compare_render_cache = cache
+            self.canvas.draw_idle()
+            return True
+        except Exception:
+            logger.debug("Lightweight slider-compare update failed", exc_info=True)
+            return False
 
 
     def _clear_hover_crosshair_artists(self, draw: bool = True):
@@ -6667,8 +6940,6 @@ class GPRGuiQt(QMainWindow):
             render_data,
             cmap=render_cmap,
             aspect="auto",
-            interpolation="nearest",
-            resample=False,
             extent=extent,
             vmin=vmin,
             vmax=vmax,
@@ -6778,6 +7049,8 @@ class GPRGuiQt(QMainWindow):
                 "data": np.array(snap["data"], copy=False),
                 "trace_metadata": snap.get("trace_metadata"),
                 "header_info": snap.get("header_info"),
+                "source": snap.get("source"),
+                "source_index": snap.get("source_index"),
             }
             for snap in self._transient_compare_snapshots
         ]
@@ -6808,6 +7081,8 @@ class GPRGuiQt(QMainWindow):
                     "data": np.array(snap["data"], copy=False),
                     "trace_metadata": snap.get("trace_metadata"),
                     "header_info": snap.get("header_info"),
+                    "source": snap.get("source"),
+                    "source_index": snap.get("source_index"),
                 }
             )
 

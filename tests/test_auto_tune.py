@@ -25,16 +25,11 @@ from core.preset_profiles import RECOMMENDED_RUN_PROFILES, WORKFLOW_STAGES
 from core.workflow_data import METHOD_CATEGORIES
 
 
-EXPECTED_AUTOTUNE_DENOISE_METHODS = {
+EXPECTED_PUBLIC_DENOISE_METHODS = {
     "hankel_svd",
     "svd_subspace",
     "wavelet_2d",
     "wavelet_svd",
-}
-
-EXPECTED_PUBLIC_DENOISE_METHODS = EXPECTED_AUTOTUNE_DENOISE_METHODS | {
-    "trace_median_filter",
-    "trace_savgol_filter",
 }
 
 
@@ -581,7 +576,7 @@ def test_auto_select_method_group_returns_best_public_denoise_method():
     raw = _build_test_profile(traces=96)
     result = auto_select_method_group(
         raw,
-        sorted(EXPECTED_AUTOTUNE_DENOISE_METHODS),
+        sorted(EXPECTED_PUBLIC_DENOISE_METHODS),
         base_params_map={
             "hankel_svd": {"window_length": 48, "rank": 4},
             "svd_subspace": {"rank_start": 1, "rank_end": 20},
@@ -598,8 +593,8 @@ def test_auto_select_method_group_returns_best_public_denoise_method():
     )
 
     assert result["stage"] == "denoise"
-    assert result["best_method_key"] in EXPECTED_AUTOTUNE_DENOISE_METHODS
-    assert len(result["candidates"]) == len(EXPECTED_AUTOTUNE_DENOISE_METHODS)
+    assert result["best_method_key"] in EXPECTED_PUBLIC_DENOISE_METHODS
+    assert len(result["candidates"]) == len(EXPECTED_PUBLIC_DENOISE_METHODS)
     assert result["best_params"]
     assert np.isfinite(result["outer_score"])
 
@@ -619,7 +614,7 @@ def test_auto_select_method_group_rejects_mixed_stage_methods():
 
 
 def test_workflow_denoising_category_exposes_exact_public_denoise_methods():
-    assert set(METHOD_CATEGORIES["denoising"]["methods"]) == EXPECTED_AUTOTUNE_DENOISE_METHODS
+    assert set(METHOD_CATEGORIES["denoising"]["methods"]) == EXPECTED_PUBLIC_DENOISE_METHODS
 
 
 def test_stage3_workflow_methods_expose_exact_public_denoise_methods():
@@ -639,7 +634,7 @@ def test_recommended_profiles_cover_all_public_denoise_methods():
         exposed.update(
             method_key
             for method_key in profile.get("order", [])
-            if method_key in EXPECTED_AUTOTUNE_DENOISE_METHODS
+            if method_key in EXPECTED_PUBLIC_DENOISE_METHODS
         )
 
-    assert exposed == EXPECTED_AUTOTUNE_DENOISE_METHODS
+    assert exposed == EXPECTED_PUBLIC_DENOISE_METHODS

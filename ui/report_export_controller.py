@@ -420,7 +420,21 @@ class ReportExportController:
                     self._update_processing_lineage_display()
 
     def _build_processing_chain_export(self) -> list[dict]:
-            """Build a JSON-safe processing-chain summary for report packages."""
+            """Build a JSON-safe processing-chain summary for report packages.
+
+            Prefer the processing-lineage controller export so the UI stepper and
+            Evidence sidecar describe the same Raw/current/warning/pruned states.
+            Fall back to the historical shared-data export if the controller is not
+            available, for headless compatibility.
+            """
+            controller = getattr(self.host, "processing_lineage_controller", None)
+            if controller is not None and hasattr(controller, "build_export_steps"):
+                try:
+                    chain = controller.build_export_steps()
+                    if chain:
+                        return self._json_safe(chain)
+                except Exception:
+                    pass
             try:
                 entries = self.shared_data.build_result_history_entries()
             except Exception:
@@ -429,12 +443,21 @@ class ReportExportController:
             for idx, entry in enumerate(entries or []):
                 data = entry.get("data")
                 header = entry.get("header_info") or {}
+                warnings = header.get("runtime_warnings") or header.get("warnings") or []
                 item = {
                     "index": idx,
-                    "label": str(entry.get("label") or f"Step {idx + 1}"),
+                    "role": "original" if idx == 0 else ("current" if idx == len(entries) - 1 else "history"),
+                    "label": "Raw" if idx == 0 else str(entry.get("label") or f"Step {idx + 1}"),
+                    "ui_status": "Raw 原始输入" if idx == 0 else ("当前正式结果" if idx == len(entries) - 1 else "已成功应用"),
                     "shape": list(getattr(data, "shape", []) or []),
                     "method_key": header.get("method_key") or header.get("display_method_key"),
                     "display_title": header.get("display_title"),
+                    "warnings": warnings if isinstance(warnings, list) else [str(warnings)],
+                    "has_warning": bool(warnings),
+                    "has_full_data": data is not None,
+                    "memory_state": "stored",
+                    "display_only_preview": bool(idx != len(entries) - 1),
+                    "exportable": data is not None,
                 }
                 params = header.get("params") or header.get("method_params")
                 if isinstance(params, dict):
@@ -443,9 +466,16 @@ class ReportExportController:
             if not chain and self.data is not None:
                 chain.append({
                     "index": 0,
+                    "role": "original",
                     "label": "Raw",
+                    "ui_status": "Raw 原始输入",
                     "shape": list(getattr(self.data, "shape", []) or []),
                     "method_key": None,
+                    "has_warning": False,
+                    "has_full_data": True,
+                    "memory_state": "stored",
+                    "display_only_preview": False,
+                    "exportable": True,
                 })
             return chain
 

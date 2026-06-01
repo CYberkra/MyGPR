@@ -1352,18 +1352,20 @@ def _get_app_polish_stylesheet_cached(is_dark: bool) -> str:
         background: transparent;
     }}
     QLabel#PlotInfoChip {{
-        min-height: 22px;
-        padding: 2px 7px;
+        min-height: 20px;
+        padding: 1px 6px;
+        font-size: 11px;
     }}
     QFrame#ProcessingStepperBar {{
         background: {card_3};
         border: 1px solid {border};
-        border-radius: 13px;
+        border-radius: 11px;
     }}
     QLabel#ProcessingStepperTitle {{
         color: {muted};
         font-weight: 900;
-        padding: 0px 4px;
+        padding: 0px 2px;
+        font-size: 11px;
         background: transparent;
     }}
     QScrollArea#ProcessingStepperScroll,
@@ -1375,15 +1377,16 @@ def _get_app_polish_stylesheet_cached(is_dark: bool) -> str:
         color: {muted};
         font-weight: 900;
         background: transparent;
-        padding: 0px 1px;
+        padding: 0px;
+        font-size: 10px;
     }}
     QPushButton#ProcessingStepChip {{
         background: {card_2};
         color: {muted};
         border: 1px solid {border};
-        border-radius: 12px;
-        padding: 3px 9px;
-        font-size: 12px;
+        border-radius: 10px;
+        padding: 2px 7px;
+        font-size: 11px;
         font-weight: 800;
     }}
     QPushButton#ProcessingStepChip:hover {{
@@ -1403,6 +1406,112 @@ def _get_app_polish_stylesheet_cached(is_dark: bool) -> str:
         background: {good_bg};
         color: {good_text};
         border-color: {good_border};
+    }}
+    QPushButton#ProcessingStepChip[status="raw"] {{
+        background: {neutral_bg};
+        color: {neutral_text};
+        border-color: {neutral_border};
+    }}
+    QPushButton#ProcessingStepChip[status="applied"] {{
+        background: {card_2};
+        color: {text};
+        border-color: {border_2};
+    }}
+    QPushButton#ProcessingStepChip[status="current"] {{
+        background: {good_bg};
+        color: {good_text};
+        border-color: {good_border};
+    }}
+    QPushButton#ProcessingStepChip[status="viewing"],
+    QPushButton#ProcessingStepChip[status="viewing_warning"] {{
+        background: {info_bg};
+        color: {info_text};
+        border-color: {info_border};
+    }}
+    QPushButton#ProcessingStepChip[status="warning"] {{
+        background: {warn_bg};
+        color: {warn_text};
+        border-color: {warn_border};
+    }}
+    QPushButton#ProcessingStepChip[status="pruned"] {{
+        background: {disabled_bg};
+        color: {disabled_text};
+        border-color: {border};
+    }}
+    QLabel#ProcessingStepDetail {{
+        background: {card_2};
+        color: {muted};
+        border: 1px solid {border};
+        border-radius: 9px;
+        padding: 2px 7px;
+        font-size: 10px;
+        font-weight: 700;
+    }}
+    QFrame#ProcessingStepItem {{
+        background: transparent;
+        border: none;
+    }}
+    QPushButton#ProcessingStepChip[compareSelected="true"] {{
+        border-color: {primary_dark};
+    }}
+    QPushButton#ProcessingStepSelectDot {{
+        background: transparent;
+        color: {muted};
+        border: 1px solid {border};
+        border-radius: 8px;
+        padding: 0px;
+        font-size: 10px;
+        font-weight: 900;
+    }}
+    QPushButton#ProcessingStepSelectDot:hover {{
+        background: {info_bg};
+        color: {info_text};
+        border-color: {info_border};
+    }}
+    QPushButton#ProcessingStepSelectDot[selected="true"] {{
+        background: {primary_light};
+        color: {primary_dark};
+        border-color: {primary_dark};
+    }}
+    QPushButton#ProcessingStepSelectDot:disabled {{
+        background: transparent;
+        color: {disabled_text};
+        border-color: {border};
+    }}
+    QFrame#ProcessingCompareTray {{
+        background: transparent;
+        border: none;
+    }}
+    QLabel#ProcessingCompareTrayLabel {{
+        background: transparent;
+        color: {muted};
+        padding: 0px 1px;
+        font-size: 10px;
+        font-weight: 800;
+    }}
+    QPushButton#ProcessingStepperAction {{
+        background: {neutral_bg};
+        color: {neutral_text};
+        border: 1px solid {neutral_border};
+        border-radius: 9px;
+        padding: 1px 5px;
+        font-size: 10px;
+        font-weight: 900;
+    }}
+    QPushButton#ProcessingStepperAction:hover {{
+        background: {info_bg};
+        color: {info_text};
+        border-color: {info_border};
+    }}
+    QPushButton#ProcessingStepperAction:checked {{
+        background: {primary_light};
+        color: {primary_dark};
+        border-color: {primary_dark};
+    }}
+    QPushButton#ProcessingStepperAction:disabled {{
+        background: {disabled_bg};
+        color: {disabled_text};
+        border-color: {border};
     }}
 
     /* Daily processing modern card groupboxes -------------------------- */
