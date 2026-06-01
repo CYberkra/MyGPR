@@ -376,7 +376,7 @@ def _get_git_short_sha(base_dir: str) -> str:
         return "nogit"
 
 
-def build_version_string(app_name: str = "GPR_GUI") -> str:
+def build_version_string(app_name: str = "MyGPR") -> str:
     release_candidates = [
         os.path.join(BASE_DIR, "dist", "RELEASE_VERSION.txt"),
         os.path.join(os.path.dirname(BASE_DIR), "dist", "RELEASE_VERSION.txt"),
@@ -387,7 +387,10 @@ def build_version_string(app_name: str = "GPR_GUI") -> str:
     shortsha = _get_git_short_sha(BASE_DIR)
     if release:
         return f"{app_name} {release} ({shortsha})"
-    stamp = datetime.now().strftime("%Y%m%d")
+
+    # Include time-of-day so multiple development builds made on the same date
+    # are visually distinguishable in the window title, top status area and logs.
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     return f"{app_name} dev-{stamp} ({shortsha})"
 
 

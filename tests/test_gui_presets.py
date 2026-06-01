@@ -37,7 +37,14 @@ class _DummyCanvasEvent:
         self.__dict__.update(kwargs)
 
 
+class _DummyBbox:
+    width = 100.0
+    height = 100.0
+
+
 class _DummyAxes:
+    bbox = _DummyBbox()
+
     def add_patch(self, _patch):
         return None
 
@@ -183,7 +190,7 @@ def test_auto_tune_defaults_live_in_auto_tune_page():
         win.page_auto_tune.segmented.setCurrentItem("truth")
         assert win.page_auto_tune.stack.currentWidget() is win.page_auto_tune.page_truth
         assert "未检测到 gprMax ground_truth.yaml" in win.page_auto_tune.truth_status_label.text()
-        assert win.page_advanced.roi_status_label.text() == "手动 ROI: 未设置"
+        assert win.page_advanced.roi_status_label.text() == "手动 ROI: 未设置 · 图上框选未开启"
         assert win.page_advanced.btn_clear_manual_roi.isEnabled() is False
         assert win.page_basic.action_apply_manual.text() == "使用当前参数（默认）"
         assert win.page_basic.action_apply_auto_tuned.text() == "使用自动调参参数"
@@ -553,13 +560,13 @@ def test_phase2_tabs_expose_prioritized_group_hierarchy_and_bridge():
         assert win.page_advanced.show_physical_y_axis_var.text() == "显示物理纵轴（时间/深度）"
         assert not win.page_advanced.show_physical_y_axis_var.isChecked()
 
-        assert _top_level_group_titles(win.page_auto_tune) == [
-            "实验流程",
-        ]
+        assert win.page_auto_tune.chip_data.text().startswith("数据：")
+        assert win.page_auto_tune.trial_table.columnCount() == 7
         assert win.page_auto_tune.btn_open_workbench.text() == "进入工作台深度实验"
 
         assert _top_level_group_titles(win.page_quality) == [
             "查看顺序",
+            "Evidence 检查清单",
             "导出与诊断",
             "质量摘要",
             "图表查看",
@@ -626,7 +633,7 @@ def test_auto_tune_tab_exposes_research_console_pages():
             "Evidence Viewer",
             "gprMax 模型编辑器 v0",
         ]
-        assert page.model_scene_list.count() >= 6
+        assert page.model_scene_list.count() == 2
         assert "read-only protected mode" in page.model_inspector_text.toPlainText()
     finally:
         win.close()
@@ -640,18 +647,20 @@ def test_auto_tune_workbench_bridge_switches_to_workbench_mode():
         assert win._content_stack.currentWidget() is win._main_content_widget
         win.page_auto_tune.btn_open_workbench.click()
         app.processEvents()
-        assert win._content_stack.currentWidget() is win.page_workbench
+        assert getattr(win, "page_workbench", None) is None
+        assert win._content_stack.currentWidget() is win._main_content_widget
+        assert win.control_tabs.currentWidget() is win.page_basic
     finally:
         win.close()
         app.processEvents()
 
 
-def test_runtime_drawer_prefers_global_log_and_demotes_perf_metrics():
+def test_runtime_drawer_keeps_only_global_log_visible():
     app = _get_app()
     win = GPRGuiQt()
     try:
         assert win.btn_toggle_global_log.text() == "全局日志"
-        assert win.btn_toggle_quality.text() == "质量摘要"
+        assert not hasattr(win, "btn_toggle_quality")
 
         raw = np.arange(120, dtype=np.float32).reshape(10, 12) / 10.0
         win.shared_data.load_data(raw, path="demo.csv", source="test")
@@ -662,10 +671,10 @@ def test_runtime_drawer_prefers_global_log_and_demotes_perf_metrics():
 
         assert win._runtime_panel_container.isHidden() is False
         assert win._runtime_panel_stack.currentWidget() is win.global_log_box
+        assert win._runtime_panel_stack.count() == 1
         assert "runtime drawer smoke" in win.runtime_log_view.toPlainText()
-        assert win.performance_diag_box.title() == "性能诊断（低频）"
-        assert win.performance_diag_box.isCheckable() is True
-        assert win.performance_diag_box.isChecked() is False
+        assert win.performance_diag_box.isHidden() is True
+        assert "绘图性能" not in win.global_log_box.findChildren(type(win.runtime_log_view))[0].toPlainText()
     finally:
         win.close()
         app.processEvents()
@@ -737,7 +746,7 @@ def test_manual_roi_is_prioritized_for_auto_tune_when_present():
         app.processEvents()
 
 
-def test_main_canvas_plain_drag_pans_like_grabbing_image(monkeypatch):
+def test_main_canvas_middle_drag_pans_like_grabbing_image(monkeypatch):
     app = _get_app()
     win = GPRGuiQt()
     try:
@@ -749,11 +758,13 @@ def test_main_canvas_plain_drag_pans_like_grabbing_image(monkeypatch):
         monkeypatch.setattr(win.canvas, "draw_idle", lambda: None)
 
         ax = win._main_plot_axes[0]
+        ax.set_xlim(2.0, 12.0)
+        ax.set_ylim(30.0, 10.0)
         original_xlim = tuple(float(v) for v in ax.get_xlim())
         original_ylim = tuple(float(v) for v in ax.get_ylim())
 
         press = _DummyCanvasEvent(
-            button=1,
+            button=2,
             inaxes=ax,
             x=100.0,
             y=100.0,
@@ -798,7 +809,7 @@ def test_main_canvas_plain_drag_pans_like_grabbing_image(monkeypatch):
         app.processEvents()
 
 
-def test_manual_roi_can_be_set_by_shift_drag(monkeypatch):
+def test_manual_roi_can_be_set_when_picker_enabled(monkeypatch):
     app = _get_app()
     win = GPRGuiQt()
     try:
@@ -809,6 +820,7 @@ def test_manual_roi_can_be_set_by_shift_drag(monkeypatch):
 
         ax = _DummyAxes()
         win._main_plot_axes = [ax]
+        win._set_manual_roi_pick_enabled(True)
         press = _DummyCanvasEvent(
             button=1,
             inaxes=ax,
@@ -817,7 +829,7 @@ def test_manual_roi_can_be_set_by_shift_drag(monkeypatch):
             xdata=1.0,
             ydata=2.0,
             dblclick=False,
-            key="shift",
+            key=None,
         )
         move = _DummyCanvasEvent(
             inaxes=ax,
@@ -832,7 +844,7 @@ def test_manual_roi_can_be_set_by_shift_drag(monkeypatch):
             y=60.0,
             xdata=5.0,
             ydata=8.0,
-            key="shift",
+            key=None,
         )
 
         win._on_main_canvas_press(press)
@@ -849,7 +861,7 @@ def test_manual_roi_can_be_set_by_shift_drag(monkeypatch):
         app.processEvents()
 
 
-def test_manual_roi_can_be_cleared_by_right_click(monkeypatch):
+def test_manual_roi_clear_action_resets_picker_roi(monkeypatch):
     app = _get_app()
     win = GPRGuiQt()
     try:
@@ -867,21 +879,10 @@ def test_manual_roi_can_be_cleared_by_right_click(monkeypatch):
             "time_end": 8.0,
         }
 
-        right_click = _DummyCanvasEvent(
-            button=3,
-            inaxes=ax,
-            x=20.0,
-            y=20.0,
-            xdata=2.0,
-            ydata=3.0,
-            dblclick=False,
-            key=None,
-        )
-
-        win._on_main_canvas_press(right_click)
+        win._clear_manual_roi()
 
         assert win._manual_roi_values is None
-        assert win.page_advanced.roi_status_label.text() == "手动 ROI: 未设置"
+        assert win.page_advanced.roi_status_label.text() == "手动 ROI: 未设置 · 图上框选未开启"
     finally:
         win.close()
         app.processEvents()
@@ -1150,6 +1151,7 @@ def test_motion_height_common_params_expose_wave_speed_and_typed_controls():
             "manual_height",
             "compensate_amplitude",
             "compensate_time_shift",
+            "height_source",
             "wave_speed_m_per_ns",
         ]
         mode_widget, _ = win.page_basic.param_vars["reference_height_mode"]
@@ -1177,43 +1179,30 @@ def test_motion_height_common_params_expose_wave_speed_and_typed_controls():
         app.processEvents()
 
 
-def test_motion_v2_common_params_match_registry_workflow_contract():
+def test_motion_v2_params_show_full_registry_by_default():
     app = _get_app()
     win = GPRGuiQt()
     try:
         win.page_basic.render_method_params("motion_compensation_v2")
 
-        expected = [
-            "height_reference_mode",
-            "manual_height_m",
-            "height_source",
-            "compensate_time_shift",
-            "compensate_amplitude",
-            "resample_spacing_m",
-        ]
-        advanced_or_calibration = {
-            "max_shift_samples",
-            "max_shift_ns",
-            "max_amplitude_scale",
-            "max_abs_tilt_deg",
-            "apc_offset_x_m",
-            "apc_offset_y_m",
-            "apc_offset_z_m",
-        }
         registry_params = {
             param["name"]
             for param in PROCESSING_METHODS["motion_compensation_v2"]["params"]
         }
-        assert list(win.page_basic.param_vars) == expected
         assert set(QUICK_PRESETS["motion_compensation_v2"]["methods"][0]["params"]) <= registry_params
-        assert advanced_or_calibration.isdisjoint(set(win.page_basic.param_vars))
+        assert registry_params <= set(win.page_basic.param_vars)
         assert "trace_metadata" in win.page_basic.param_hint_label.text()
-        assert "高级设置" in win.page_basic.param_hint_label.text()
+        assert "高级设置" not in win.page_basic.param_hint_label.text()
         assert isinstance(win.page_basic.param_vars["height_reference_mode"][0], QComboBox)
         assert isinstance(win.page_basic.param_vars["height_source"][0], QComboBox)
         assert isinstance(win.page_basic.param_vars["compensate_time_shift"][0], QCheckBox)
         assert isinstance(win.page_basic.param_vars["compensate_amplitude"][0], QCheckBox)
+        assert "apc_offset_x_m" in win.page_basic.param_vars
+        assert "apc_offset_y_m" in win.page_basic.param_vars
+        assert "apc_offset_z_m" in win.page_basic.param_vars
+        assert "max_shift_samples" in win.page_basic.param_vars
         assert not win.page_basic.param_vars["manual_height_m"][0].isEnabled()
+        assert win.page_basic.show_advanced_params_var is None
         assert win.page_basic.motion_v2_trace_metadata_status_label is not None
         assert "缺 height_agl_m" in win.page_basic.motion_v2_trace_metadata_status_label.text()
         assert win.page_basic.motion_v2_apc_status_label is not None
@@ -1223,15 +1212,12 @@ def test_motion_v2_common_params_match_registry_workflow_contract():
         app.processEvents()
 
 
-def test_motion_v2_advanced_params_expand_in_main_basic_panel():
+def test_daily_basic_panel_no_longer_uses_advanced_params_toggle():
     app = _get_app()
     win = GPRGuiQt()
     try:
         win.page_basic.apply_method_params("motion_compensation_v2")
-        assert "apc_offset_x_m" not in win.page_basic.param_vars
-        assert win.page_basic.show_advanced_params_var.isChecked() is False
-
-        win.page_basic.show_advanced_params_var.setChecked(True)
+        assert win.page_basic.show_advanced_params_var is None
         assert "apc_offset_x_m" in win.page_basic.param_vars
         assert "apc_offset_y_m" in win.page_basic.param_vars
         assert "apc_offset_z_m" in win.page_basic.param_vars
@@ -1396,34 +1382,22 @@ def test_apply_single_method_separates_preview_and_commit_payload(monkeypatch):
         app.processEvents()
 
 
-def test_workbench_commit_prefers_preview_commit_payload(monkeypatch):
+def test_retired_workbench_save_entry_is_noop(monkeypatch):
     app = _get_app()
     win = GPRGuiQt()
     try:
         raw = np.arange(16, dtype=np.float32).reshape(4, 4)
-        preview = np.arange(6, dtype=np.float32).reshape(2, 3)
-        committed = raw + 100.0
 
         win.shared_data.load_data(raw, path="demo.csv", source="test")
-        win.page_workbench.set_preview_result(
-            preview,
-            title="预览: demo",
-            header_info={"total_time_ns": 12.0},
-            commit_data=committed,
-            commit_header_info={"total_time_ns": 24.0},
-        )
 
-        monkeypatch.setattr(win, "_mark_data_changed", lambda: None)
-        monkeypatch.setattr(win, "_update_current_compare_snapshot", lambda: None)
-        monkeypatch.setattr(win, "_update_empty_state_and_brief", lambda: None)
-        monkeypatch.setattr(win, "plot_data", lambda *_args, **_kwargs: None)
-        monkeypatch.setattr(win, "_set_last_run_summary", lambda *args, **kwargs: None)
-        monkeypatch.setattr(win, "_log", lambda *_args, **_kwargs: None)
+        messages = []
+        monkeypatch.setattr(win, "_log", lambda message: messages.append(message))
 
         win._on_workbench_save_result()
 
-        assert np.array_equal(win.shared_data.current_data, committed)
-        assert win.shared_data.header_info["total_time_ns"] == 24.0
+        assert getattr(win, "page_workbench", None) is None
+        assert np.array_equal(win.shared_data.current_data, raw)
+        assert any("旧工作台保存入口已移除" in message for message in messages)
     finally:
         win.close()
         app.processEvents()

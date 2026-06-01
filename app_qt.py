@@ -34,7 +34,8 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.patches import Rectangle
 
-from PyQt6.QtCore import Qt, QObject, QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QObject, QThread, QTimer, QSize, pyqtSignal
+from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -64,6 +65,115 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 logger = logging.getLogger(__name__)
+
+
+class HiResNavigationToolbar(NavigationToolbar):
+    """Matplotlib toolbar with theme-aware icons and high-resolution export.
+
+    The stock NavigationToolbar save action uses Matplotlib defaults, which can
+    produce soft PNGs on high-DPI screens.  MyGPR's B-scan export is evidence
+    facing, so toolbar saves default to 600 DPI and tight bounds.  The toolbar
+    icons are also redrawn with high-contrast Qt glyphs because the bundled
+    Matplotlib icons can become very low contrast in the light qfluent theme.
+    """
+
+    EXPORT_DPI = 600
+
+    _ACTION_SYMBOLS = {
+        "home": "⌂",
+        "back": "‹",
+        "forward": "›",
+        "pan": "✥",
+        "zoom": "⌕",
+        "subplots": "▦",
+        "customize": "⚙",
+        "save": "▣",
+    }
+
+    def __init__(self, canvas, parent=None):
+        super().__init__(canvas, parent)
+        self._theme_key = "light"
+        self.setIconSize(QSize(22, 22))
+        self.apply_theme("light")
+
+    def apply_theme(self, theme_key: str = "light") -> None:
+        self._theme_key = "dark" if str(theme_key).lower() == "dark" else "light"
+        fg = "#EAF0F8" if self._theme_key == "dark" else "#0F172A"
+        disabled = "#7C8797" if self._theme_key == "dark" else "#64748B"
+        for action in self.actions():
+            if action.isSeparator():
+                continue
+            symbol = self._symbol_for_action(action)
+            if not symbol:
+                continue
+            icon = QIcon()
+            icon.addPixmap(self._make_symbol_pixmap(symbol, fg), QIcon.Mode.Normal)
+            icon.addPixmap(self._make_symbol_pixmap(symbol, disabled), QIcon.Mode.Disabled)
+            action.setIcon(icon)
+
+    def save_figure(self, *args):  # noqa: D401 - Matplotlib toolbar override
+        """Save the current B-scan figure at evidence-grade resolution."""
+        default_path = str(Path.cwd() / "bscan_highres.png")
+        path, selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "保存高清 B-scan 图像",
+            default_path,
+            "PNG 高清图像 (*.png);;PDF 矢量图 (*.pdf);;SVG 矢量图 (*.svg);;所有文件 (*)",
+        )
+        if not path:
+            return
+        out_path = Path(path)
+        if not out_path.suffix:
+            if "PDF" in selected_filter:
+                out_path = out_path.with_suffix(".pdf")
+            elif "SVG" in selected_filter:
+                out_path = out_path.with_suffix(".svg")
+            else:
+                out_path = out_path.with_suffix(".png")
+        try:
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            self.canvas.figure.savefig(
+                str(out_path),
+                dpi=self.EXPORT_DPI,
+                bbox_inches="tight",
+                facecolor=self.canvas.figure.get_facecolor(),
+                edgecolor="none",
+            )
+        except Exception as exc:  # pragma: no cover - UI path
+            QMessageBox.critical(self, "保存失败", f"高清 B-scan 图像保存失败：\n{exc}")
+            return
+        self.canvas.draw_idle()
+
+    def _symbol_for_action(self, action) -> str | None:
+        haystack = " ".join(
+            part
+            for part in [
+                action.text() or "",
+                action.toolTip() or "",
+                action.statusTip() or "",
+                action.iconText() or "",
+            ]
+            if part
+        ).lower()
+        for key, symbol in self._ACTION_SYMBOLS.items():
+            if key in haystack:
+                return symbol
+        return None
+
+    def _make_symbol_pixmap(self, symbol: str, color: str) -> QPixmap:
+        pixmap = QPixmap(24, 24)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+        painter.setPen(QPen(QColor(color), 2))
+        font = painter.font()
+        font.setPointSize(14)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, symbol)
+        painter.end()
+        return pixmap
 
 
 def configure_logging() -> str:
@@ -194,7 +304,6 @@ from ui.gui_advanced_settings import AdvancedSettingsPage
 from ui.gui_quality_log import QualityLogPage
 
 # 导入新的工作台页面
-from ui.gui_workbench import WorkbenchPage
 from ui.loading_dialog import LoadingProgressDialog
 from ui.auto_tune_result_dialog import AutoTuneResultDialog
 
@@ -785,13 +894,18 @@ class GPRGuiQt(QMainWindow):
         self._display_trace_metadata_override = None
         self._selected_trace_index = None
         self._manual_roi_values = None
+        self._manual_roi_pick_enabled = False
         self._drag_roi_preview_patch = None
         self._main_view_limits = None
         self._main_press_state = None
         self._main_drag_threshold_px = 8
         self._main_motion_draw_interval_s = 1.0 / 60.0
+        self._roi_preview_draw_interval_s = 1.0 / 60.0
+        self._slider_compare_draw_interval_s = 1.0 / 30.0
         self._main_coord_update_interval_s = 1.0 / 40.0
         self._last_main_motion_draw_ts = 0.0
+        self._last_roi_preview_draw_ts = 0.0
+        self._last_slider_compare_draw_ts = 0.0
         self._last_main_coord_update_ts = 0.0
         self._last_display_trace_axis = np.array([], dtype=np.float32)
         self._last_display_trace_indices = np.array([], dtype=np.int32)
@@ -800,6 +914,9 @@ class GPRGuiQt(QMainWindow):
         self._last_plot_extent = None
         self._main_plot_axes = []
         self._main_slider_compare_ratio = 0.5
+        self._selected_trace_marker_artists = []
+        self._slider_hit_tolerance_px = 10
+        self._last_coord_label_key = None
 
         # 布局/容器状态
         self._main_content_widget = None
@@ -854,8 +971,10 @@ class GPRGuiQt(QMainWindow):
 
         self._main_content_widget = QWidget()
         root_layout = QHBoxLayout(self._main_content_widget)
-        root_layout.setContentsMargins(12, 10, 12, 10)
-        root_layout.setSpacing(10)
+        # Keep the chrome tight: the B-scan card should receive most of the
+        # available horizontal and vertical space.
+        root_layout.setContentsMargins(8, 6, 8, 6)
+        root_layout.setSpacing(8)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setObjectName("mainSplitter")
@@ -866,8 +985,8 @@ class GPRGuiQt(QMainWindow):
         right_panel = QWidget()
         self._right_panel = right_panel
         right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(4, 4, 4, 4)
-        right_layout.setSpacing(8)
+        right_layout.setContentsMargins(2, 2, 2, 2)
+        right_layout.setSpacing(6)
 
         # 左侧面板（控制区）
         left_shell = QWidget()
@@ -879,7 +998,7 @@ class GPRGuiQt(QMainWindow):
         left_panel = QWidget()
         self._left_panel = left_panel
         left_panel.setMinimumWidth(320)
-        left_panel.setMaximumWidth(560)
+        left_panel.setMaximumWidth(460)
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(6, 6, 6, 6)
         left_layout.setSpacing(8)
@@ -896,9 +1015,9 @@ class GPRGuiQt(QMainWindow):
         splitter.addWidget(left_shell)
         splitter.setChildrenCollapsible(False)
         splitter.setHandleWidth(6)
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 2)
-        splitter.setSizes([940, 420])
+        splitter.setStretchFactor(0, 5)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([1040, 360])
 
         # 创建多页控制面板
         self.control_tabs = QTabWidget()
@@ -907,17 +1026,6 @@ class GPRGuiQt(QMainWindow):
         self.control_tabs.setMovable(False)
         self.control_tabs.tabBar().setElideMode(Qt.TextElideMode.ElideRight)
         left_layout.addWidget(self.control_tabs)
-
-        # 返回工作台按钮
-        from qfluentwidgets import PushButton
-
-        self.btn_return_workbench = PushButton("进入旧工作台（Legacy）")
-        self.btn_return_workbench.clicked.connect(self.switch_to_workbench_mode)
-        self.btn_return_workbench.setProperty("class", "successBtn")
-        self.btn_return_workbench.setToolTip(
-            "旧工作台仅作兼容回退；主流程建议使用当前主界面（日常处理/显示与对比/质量与导出）。"
-        )
-        left_shell_layout.addWidget(self.btn_return_workbench)
 
         self._content_stack.addWidget(self._main_content_widget)
 
@@ -955,13 +1063,7 @@ class GPRGuiQt(QMainWindow):
         )
         self.control_tabs.setTabToolTip(idx_quality, "质量摘要、航迹图、日志与导出入口")
 
-        # ===== 工作台（总控中心 - 独立页面）=====
-        self.page_workbench = WorkbenchPage(self, self.shared_data)
-        self.page_workbench.set_no_prior_guard_callback(
-            self._enforce_workbench_no_prior_action_guard
-        )
-        # 添加到 _content_stack，作为最后一个页面
-        self._content_stack.addWidget(self.page_workbench)
+        # 旧工作台已彻底退役；主流程统一使用四个主标签页。
 
         # 默认显示主内容区（日常处理界面）
         self._content_stack.setCurrentWidget(self._main_content_widget)
@@ -991,8 +1093,18 @@ class GPRGuiQt(QMainWindow):
         status_layout.addWidget(self.version_label)
         right_layout.addWidget(status_bar)
 
-        # 绘图区域
-        self.fig = Figure(figsize=(9.5, 6.4), dpi=100)
+        # 主工作区绘图卡片：B-scan 是核心视觉区域，统一放入产品化卡片中。
+        self.main_plot_card = QFrame()
+        self.main_plot_card.setObjectName("mainPlotCard")
+        main_plot_layout = QVBoxLayout(self.main_plot_card)
+        main_plot_layout.setContentsMargins(10, 6, 10, 8)
+        main_plot_layout.setSpacing(5)
+
+        plot_header = self._create_plot_card_header()
+        main_plot_layout.addWidget(plot_header)
+
+        self.fig = Figure(figsize=(11.0, 6.4), dpi=100)
+        self.fig.subplots_adjust(left=0.058, right=0.992, top=0.925, bottom=0.105, wspace=0.18)
         self._main_ax = self.fig.add_subplot(111)
         self._main_ax.set_title("B-scan")
         self._main_ax.set_xlabel("距离（道索引）")
@@ -1001,7 +1113,7 @@ class GPRGuiQt(QMainWindow):
         self.canvas.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
-        self._main_toolbar = NavigationToolbar(self.canvas, self)
+        self._main_toolbar = HiResNavigationToolbar(self.canvas, self)
         self._main_toolbar.setObjectName("mainPlotToolbar")
         for action in self._main_toolbar.actions():
             action_haystack = " ".join(
@@ -1030,25 +1142,26 @@ class GPRGuiQt(QMainWindow):
         self.canvas.mpl_connect("motion_notify_event", self._on_main_canvas_motion)
         self.canvas.mpl_connect("button_release_event", self._on_main_canvas_release)
         self.canvas.mpl_connect("scroll_event", self._on_main_canvas_scroll)
+        self.canvas.mpl_connect("key_press_event", self._on_main_canvas_key_press)
         self.canvas.mpl_connect("figure_leave_event", self._on_main_canvas_leave)
         self._last_n_panels = 1
 
         plot_toolbar_row = QWidget()
+        plot_toolbar_row.setObjectName("PlotToolbarRow")
         plot_toolbar_layout = QHBoxLayout(plot_toolbar_row)
         plot_toolbar_layout.setContentsMargins(0, 0, 0, 0)
-        plot_toolbar_layout.setSpacing(8)
+        plot_toolbar_layout.setSpacing(4)
         plot_toolbar_layout.addWidget(self._main_toolbar)
         plot_toolbar_layout.addStretch(1)
-        self._plot_lineage_label = QLabel("处理链路: Raw")
-        self._plot_lineage_label.setProperty("class", "hintText")
-        self._plot_lineage_label.setToolTip("当前显示数据的处理链路")
-        plot_toolbar_layout.addWidget(self._plot_lineage_label)
-        self._plot_coord_label = QLabel("坐标: --")
-        self._plot_coord_label.setProperty("class", "hintText")
-        plot_toolbar_layout.addWidget(self._plot_coord_label)
-        right_layout.addWidget(plot_toolbar_row)
+        # The top row is reserved for Matplotlib navigation only.  Display mode,
+        # colormap and stretch controls live in the right-side Display/Compare page,
+        # so the main B-scan card does not duplicate those chips.
+        self._plot_display_mode_chip = None
+        self._plot_colormap_chip = None
+        self._plot_range_chip = None
+        main_plot_layout.addWidget(plot_toolbar_row)
 
-        # 空状态卡片
+        # 空状态卡片 / 绘图区堆叠
         self.plot_stack_host = QWidget()
         self.plot_stack_host.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
@@ -1062,13 +1175,31 @@ class GPRGuiQt(QMainWindow):
         )
         plot_stack_layout.addWidget(self.empty_state_card)
         plot_stack_layout.addWidget(self.canvas)
-        right_layout.addWidget(self.plot_stack_host, 1)
+        main_plot_layout.addWidget(self.plot_stack_host, 1)
+
+        self._plot_bottom_status_bar = QFrame()
+        self._plot_bottom_status_bar.setObjectName("PlotBottomStatusBar")
+        bottom_status_layout = QHBoxLayout(self._plot_bottom_status_bar)
+        bottom_status_layout.setContentsMargins(7, 3, 7, 3)
+        bottom_status_layout.setSpacing(6)
+        self._plot_lineage_label = QLabel("处理链路：原始数据")
+        self._plot_lineage_label.setObjectName("PlotInfoChip")
+        self._plot_lineage_label.setToolTip("当前显示数据的处理链路")
+        self._plot_coord_label = QLabel("坐标：--")
+        self._plot_coord_label.setObjectName("PlotInfoChip")
+        self._plot_coord_label.setMinimumWidth(260)
+        bottom_status_layout.addWidget(self._plot_lineage_label)
+        bottom_status_layout.addWidget(self._plot_coord_label, 1)
+        main_plot_layout.addWidget(self._plot_bottom_status_bar)
+
+        right_layout.addWidget(self.main_plot_card, 1)
 
         # 运行信息抽屉：默认收起，避免长期压缩主绘图区。
         self.global_log_box = self._create_global_log_box()
         self.quality_box = self._create_quality_box()
         self.quality_box.setChecked(True)
         self.quality_box.setCheckable(False)
+        self.quality_box.hide()
         self._runtime_panel_bar, self._runtime_panel_container = (
             self._create_runtime_panel_drawer()
         )
@@ -1091,37 +1222,202 @@ class GPRGuiQt(QMainWindow):
         self._log(f"版本: {self.version_text}")
         self._log("欢迎使用。请导入数据开始处理。")
 
+    def _create_plot_card_header(self):
+        """Create the productized B-scan workspace header."""
+        header = QFrame()
+        header.setObjectName("PlotCardHeader")
+        layout = QHBoxLayout(header)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+
+        title_box = QVBoxLayout()
+        title_box.setContentsMargins(0, 0, 0, 0)
+        title_box.setSpacing(0)
+        self._plot_title_label = QLabel("Bscan - 等待导入")
+        self._plot_title_label.setObjectName("PlotTitle")
+        # Kept as an attribute for compatibility, but intentionally not shown:
+        # the figure title now carries the current processing-stage wording.
+        self._plot_meta_label = QLabel("")
+        self._plot_meta_label.setObjectName("PlotSubtitle")
+        self._plot_meta_label.setWordWrap(True)
+        self._plot_meta_label.setVisible(False)
+        title_box.addWidget(self._plot_title_label)
+        layout.addLayout(title_box, 1)
+
+        self._plot_data_chip = QLabel("未载入")
+        self._plot_data_chip.setObjectName("PlotStatusChip")
+        self._plot_stage_chip = QLabel("原始数据")
+        self._plot_stage_chip.setObjectName("PlotStatusChip")
+        self._plot_shape_chip = QLabel("尺寸: --")
+        self._plot_shape_chip.setObjectName("PlotStatusChip")
+        layout.addWidget(self._plot_data_chip)
+        layout.addWidget(self._plot_stage_chip)
+        layout.addWidget(self._plot_shape_chip)
+        return header
+
+    def _set_plot_chip_tone(self, label, text, tone="neutral"):
+        if label is None:
+            return
+        changed = label.text() != text or label.property("tone") != tone
+        if not changed:
+            return
+        label.setText(text)
+        try:
+            from ui.theme import set_dynamic_property, repolish
+
+            if set_dynamic_property(label, "tone", tone):
+                repolish(label)
+            else:
+                label.update()
+        except Exception:
+            label.setProperty("tone", tone)
+            label.style().unpolish(label)
+            label.style().polish(label)
+            label.update()
+
+    def _update_main_workspace_summary(self):
+        """Refresh the B-scan workspace title, metadata and status chips."""
+        if not hasattr(self, "_plot_title_label"):
+            return
+        has_data = self.data is not None
+        if not has_data:
+            self._plot_title_label.setText("Bscan - 等待导入")
+            self._plot_meta_label.setText("")
+            self._plot_meta_label.setVisible(False)
+            self._set_plot_chip_tone(self._plot_data_chip, "未载入", "neutral")
+            self._set_plot_chip_tone(self._plot_stage_chip, "等待导入", "neutral")
+            self._set_plot_chip_tone(self._plot_shape_chip, "尺寸: --", "neutral")
+            if getattr(self, "runtime_summary_chip", None) is not None:
+                self.runtime_summary_chip.setText("状态：等待数据导入")
+            return
+
+        file_name = os.path.basename(self.data_path) if self.data_path else "当前数据"
+        stage = getattr(self.shared_data, "current_label", None) or "原始数据"
+        try:
+            shape_text = " × ".join(str(int(v)) for v in self.data.shape[:2])
+        except Exception:
+            shape_text = "--"
+        self._plot_title_label.setText(file_name)
+        self._plot_meta_label.setText("")
+        self._plot_meta_label.setVisible(False)
+        self._set_plot_chip_tone(self._plot_data_chip, "已载入", "good")
+        self._set_plot_chip_tone(self._plot_stage_chip, str(stage), "neutral")
+        self._set_plot_chip_tone(self._plot_shape_chip, f"尺寸: {shape_text}", "neutral")
+        if getattr(self, "runtime_summary_chip", None) is not None:
+            self.runtime_summary_chip.setText(f"状态：{stage} · {shape_text}")
+
+
+    def _polish_main_figure(self):
+        """Apply theme-aware visual polish to the Matplotlib B-scan canvas."""
+        try:
+            from core.theme_manager import get_theme_manager
+            from ui.theme import get_effective_theme_key
+
+            theme_key = get_effective_theme_key(
+                get_theme_manager().get_current_theme(), widget=self
+            )
+        except Exception:
+            theme_key = "light"
+
+        if theme_key == "dark":
+            fig_bg = "#151A21"
+            ax_bg = "#121820"
+            text = "#EAF0F8"
+            muted = "#A6B1C2"
+            grid = "#334155"
+            spine = "#3B4654"
+        else:
+            fig_bg = "#FFFFFF"
+            ax_bg = "#FFFFFF"
+            text = "#172033"
+            muted = "#475569"
+            grid = "#CBD5E1"
+            spine = "#D7DEE8"
+
+        try:
+            self.fig.set_facecolor(fig_bg)
+            self.fig.subplots_adjust(
+                left=0.058, right=0.992, top=0.925, bottom=0.105, wspace=0.18
+            )
+            for ax in self.fig.axes:
+                ax.set_facecolor(ax_bg)
+                ax.title.set_color(text)
+                ax.title.set_fontsize(12)
+                ax.title.set_fontweight("semibold")
+                ax.xaxis.label.set_color(muted)
+                ax.yaxis.label.set_color(muted)
+                ax.tick_params(colors=muted, labelsize=9)
+                for side in ("top", "right", "left", "bottom"):
+                    if side in ax.spines:
+                        ax.spines[side].set_color(spine)
+                        ax.spines[side].set_linewidth(0.8)
+                try:
+                    ax.grid(False)
+                except Exception:
+                    pass
+        except Exception:
+            return
+
     def _create_empty_state_card(self):
-        """创建空状态卡片"""
+        """创建更克制的产品化空状态卡片。"""
         card = QFrame()
         card.setObjectName("emptyStateCard")
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(28, 24, 28, 24)
-        layout.setSpacing(10)
+        layout.setContentsMargins(36, 28, 36, 28)
+        layout.setSpacing(12)
 
-        empty_badge = QLabel("ONBOARDING")
+        empty_icon = QLabel("⌁")
+        empty_icon.setObjectName("EmptyIcon")
+        empty_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        empty_badge = QLabel("GPR / UAV-GPR")
+        empty_badge.setObjectName("EmptyBadge")
         empty_badge.setProperty("class", "emptyBadge")
+        empty_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        empty_title = QLabel("欢迎来到 GPR 成像工作台")
+        empty_title = QLabel("导入 GPR 数据开始处理")
+        empty_title.setObjectName("EmptyTitle")
         empty_title.setProperty("class", "emptyTitle")
+        empty_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        empty_tip = QLabel("从一份 CSV 开始，30 秒看到首张 B-扫图像。")
+        empty_tip = QLabel("支持 CSV / GPR / 合成数据。导入后将在此显示 B-scan、坐标与处理链路。")
+        empty_tip.setObjectName("EmptySubtitle")
         empty_tip.setProperty("class", "emptySubtitle")
         empty_tip.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_tip.setWordWrap(True)
 
-        empty_steps = QLabel('① 导入 CSV　　② 选择方法　　③ 点击"应用所选方法"')
+        action_row = QHBoxLayout()
+        action_row.setSpacing(8)
+        self.btn_empty_import_csv = QPushButton("导入 CSV")
+        self.btn_empty_import_csv.setObjectName("PrimaryButton")
+        self.btn_empty_import_csv.setMinimumWidth(110)
+        self.btn_empty_import_csv.clicked.connect(self.import_csv_file)
+        self.btn_empty_import_folder = QPushButton("导入 A-scan 文件夹")
+        self.btn_empty_import_folder.setObjectName("SecondaryButton")
+        self.btn_empty_import_folder.setMinimumWidth(140)
+        self.btn_empty_import_folder.clicked.connect(self.import_ascans_folder)
+        action_row.addStretch(1)
+        action_row.addWidget(self.btn_empty_import_csv)
+        action_row.addWidget(self.btn_empty_import_folder)
+        action_row.addStretch(1)
+
+        empty_steps = QLabel("① 导入数据　→　② 选择处理流程　→　③ 查看结果 / 导出证据")
+        empty_steps.setObjectName("EmptySteps")
         empty_steps.setProperty("class", "emptySteps")
         empty_steps.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        empty_hint = QLabel('建议先用"高质量 UAV-GPR"或"默认流程"，再按需微调参数。')
+        empty_hint = QLabel("建议先完成基础处理，再进入 AutoTune 参数推荐或质量导出。")
+        empty_hint.setObjectName("EmptyHint")
         empty_hint.setProperty("class", "emptyHint")
         empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty_hint.setWordWrap(True)
 
         layout.addStretch(1)
+        layout.addWidget(empty_icon, alignment=Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(empty_badge, alignment=Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(empty_title, alignment=Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(empty_title)
         layout.addWidget(empty_tip)
+        layout.addLayout(action_row)
         layout.addWidget(empty_steps)
         layout.addWidget(empty_hint)
         layout.addStretch(1)
@@ -1133,7 +1429,7 @@ class GPRGuiQt(QMainWindow):
         panel = QFrame()
         panel.setObjectName("progressPanel")
         panel.setVisible(False)
-        panel.setFixedWidth(300)
+        panel.setMaximumWidth(300)
 
         layout = QHBoxLayout(panel)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1160,19 +1456,17 @@ class GPRGuiQt(QMainWindow):
         title.setProperty("class", "topInfoMeta")
         bar_layout.addWidget(title)
 
+        self.runtime_summary_chip = QLabel("状态：等待数据导入")
+        self.runtime_summary_chip.setObjectName("RuntimeSummaryChip")
+        self.runtime_summary_chip.setMinimumWidth(180)
+        bar_layout.addWidget(self.runtime_summary_chip)
+
         self.btn_toggle_global_log = QPushButton("全局日志")
         self.btn_toggle_global_log.setCheckable(True)
         self.btn_toggle_global_log.clicked.connect(
             lambda checked: self._show_runtime_panel("global_log" if checked else None)
         )
         bar_layout.addWidget(self.btn_toggle_global_log)
-
-        self.btn_toggle_quality = QPushButton("质量摘要")
-        self.btn_toggle_quality.setCheckable(True)
-        self.btn_toggle_quality.clicked.connect(
-            lambda checked: self._show_runtime_panel("quality" if checked else None)
-        )
-        bar_layout.addWidget(self.btn_toggle_quality)
 
         btn_collapse = QPushButton("收起")
         btn_collapse.clicked.connect(lambda: self._show_runtime_panel(None))
@@ -1182,17 +1476,15 @@ class GPRGuiQt(QMainWindow):
         container = QFrame()
         container.setObjectName("runtimeDrawer")
         container.setVisible(False)
-        container.setMaximumHeight(220)
+        container.setMaximumHeight(150)
         drawer_layout = QStackedLayout(container)
         drawer_layout.setContentsMargins(0, 0, 0, 0)
 
         drawer_layout.addWidget(self.global_log_box)
-        drawer_layout.addWidget(self.quality_box)
 
         self._runtime_panel_stack = drawer_layout
         self._runtime_panel_buttons = {
             "global_log": self.btn_toggle_global_log,
-            "quality": self.btn_toggle_quality,
         }
         return bar, container
 
@@ -1217,8 +1509,7 @@ class GPRGuiQt(QMainWindow):
             self._runtime_panel_container is not None
             and self._runtime_panel_stack is not None
         ):
-            index = 0 if panel_key == "global_log" else 1
-            self._runtime_panel_stack.setCurrentIndex(index)
+            self._runtime_panel_stack.setCurrentIndex(0)
             self._runtime_panel_container.setVisible(True)
 
     def _create_global_log_box(self):
@@ -1230,13 +1521,6 @@ class GPRGuiQt(QMainWindow):
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(6)
 
-        hint = QLabel(
-            "这里汇总当前会话的全局运行日志；绘图性能观测已降级为低频诊断入口。"
-        )
-        hint.setWordWrap(True)
-        hint.setProperty("class", "hintText")
-        layout.addWidget(hint)
-
         self.runtime_log_view = QTextEdit()
         self.runtime_log_view.setReadOnly(True)
         self.runtime_log_view.setPlaceholderText("暂无全局日志")
@@ -1246,8 +1530,11 @@ class GPRGuiQt(QMainWindow):
         self.runtime_log_view.setPlainText(self.page_basic.info.toPlainText().strip())
         layout.addWidget(self.runtime_log_view)
 
+        # Keep observability widgets alive for internal diagnostics, but do not
+        # embed them in the user-facing global log drawer. The drawer should show
+        # only the actual session log.
         self.performance_diag_box = self._create_observability_box()
-        layout.addWidget(self.performance_diag_box)
+        self.performance_diag_box.hide()
 
         return box
 
@@ -1434,11 +1721,7 @@ class GPRGuiQt(QMainWindow):
 
     def _connect_signals(self):
         """连接信号和槽"""
-        # ===== 工作台信号连接 =====
-        self.page_workbench.data_import_requested.connect(self.load_csv)
-        self.page_workbench.save_result_requested.connect(
-            self._on_workbench_save_result
-        )
+        # 旧工作台信号连接已移除。
 
         # 基础流程页面 - 日常处理界面
         self.page_basic.btn_import.clicked.connect(self.import_csv_file)
@@ -1603,12 +1886,9 @@ class GPRGuiQt(QMainWindow):
             self._log(f"切换到: {tab_name}")
 
     def switch_to_workbench_mode(self):
-        """切换到工作台总控页"""
-        if self._content_stack is not None and self.page_workbench is not None:
-            self._content_stack.setCurrentWidget(self.page_workbench)
-            self._sync_workbench_with_main_data()
-            self.status_label.setText("旧工作台（Legacy Fallback）")
-            self._log("切换到旧工作台（Legacy Fallback）")
+        """旧工作台已移除；保留兼容入口并回到日常处理页。"""
+        self.switch_to_main_mode("basic")
+        self._log("旧工作台已移除；请使用日常处理、AutoTune、显示与对比、质量与导出四个主标签页。")
 
     def _on_shared_data_changed(self, payload: dict):
         """共享数据状态变化后，同步相关视图。"""
@@ -1619,8 +1899,6 @@ class GPRGuiQt(QMainWindow):
         self._refresh_compare_snapshots_from_state(
             clear_transient=reason in {"loaded", "current_updated", "undo", "reset"}
         )
-        if hasattr(self, "page_workbench") and self.page_workbench is not None:
-            self.page_workbench.sync_from_shared_state(payload)
         self._update_empty_state_and_brief()
         if reason == "loaded":
             self._manual_roi_values = None
@@ -1632,6 +1910,66 @@ class GPRGuiQt(QMainWindow):
                 self._no_prior_guard_events = []
             self._reset_auto_tune_state("数据已更新，请重新自动选参。")
         self._update_processing_lineage_display()
+        self._sync_auto_tune_page_dataset_state(payload)
+
+    def _sync_auto_tune_page_dataset_state(self, payload: dict | None = None) -> None:
+        """Synchronize current loaded dataset metadata to AutoTuneTuningPage.
+
+        Metadata-only binding: this does not run AutoTune, does not change scoring,
+        and does not write Evidence artifacts.
+        """
+        page = getattr(self, "page_auto_tune", None)
+        if page is None:
+            return
+
+        data = getattr(self, "data", None)
+        if data is None:
+            clear = getattr(page, "clear_loaded_dataset", None)
+            if callable(clear):
+                clear()
+            return
+
+        shape = None
+        try:
+            shape = tuple(int(v) for v in getattr(data, "shape", ())[:2])
+        except Exception:
+            shape = None
+
+        path = getattr(self, "data_path", None)
+        header = getattr(self, "header_info", None) or {}
+        source = str(header.get("source") or (payload or {}).get("source") or "unknown")
+        if path:
+            lower_path = str(path).lower()
+            if lower_path.endswith(".csv"):
+                data_type = "CSV"
+            elif lower_path.endswith(".out"):
+                data_type = "gprMax .out"
+            elif lower_path.endswith(".npy"):
+                data_type = "NumPy"
+            else:
+                data_type = source
+        else:
+            data_type = source
+
+        stage = getattr(self.shared_data, "current_label", None) or "Raw"
+        component = None
+        for key in ("component", "selected_component", "rx_component"):
+            value = header.get(key)
+            if value:
+                component = str(value)
+                break
+
+        update = getattr(page, "set_loaded_dataset", None)
+        if callable(update):
+            update(
+                file_path=path,
+                data_shape=shape,
+                data_type=data_type,
+                component=component,
+                processing_stage="原始数据" if str(stage) == "Raw" else str(stage),
+                source_label=os.path.basename(path) if path else "当前数据",
+                data_array=data,
+            )
 
     def _normalize_selected_trace_index(self):
         """确保当前选中道号仍在有效范围内。"""
@@ -1651,12 +1989,45 @@ class GPRGuiQt(QMainWindow):
         if self.data is not None:
             self.plot_data(self.data)
 
+    def _set_manual_roi_pick_enabled(self, enabled: bool):
+        """启停主图手动 ROI 框选。默认关闭，避免日常点击/拖动 B-scan 被 ROI 逻辑干扰。"""
+        self._manual_roi_pick_enabled = bool(enabled)
+        if not self._manual_roi_pick_enabled:
+            self._remove_drag_roi_preview()
+            self._main_press_state = None
+        self._sync_auto_tune_roi_picker_state()
+        self._update_manual_roi_status()
+        if self.data is not None:
+            self.plot_data(self.data)
+
+    def _sync_auto_tune_roi_picker_state(self):
+        """同步 AutoTune 页面上的 ROI 框选开关。"""
+        page = getattr(self, "page_auto_tune", None)
+        if page is None or not hasattr(page, "btn_pick_roi"):
+            return
+        try:
+            blocker = page.btn_pick_roi.blockSignals(True)
+            page.btn_pick_roi.setChecked(bool(self._manual_roi_pick_enabled))
+            page.btn_pick_roi.blockSignals(blocker)
+        except Exception:
+            pass
+        if hasattr(page, "set_plot_roi_picker_status"):
+            try:
+                page.set_plot_roi_picker_status(bool(self._manual_roi_pick_enabled))
+            except Exception:
+                pass
+
+    def _is_manual_roi_pick_enabled(self) -> bool:
+        """主图是否允许左键拖拽框选 AutoTune 手动 ROI。"""
+        return bool(getattr(self, "_manual_roi_pick_enabled", False))
+
     def _update_manual_roi_status(self):
         """同步显示页中的手动 ROI 状态。"""
         if not hasattr(self, "page_advanced") or self.page_advanced is None:
             return
         if self._manual_roi_values is None:
-            self.page_advanced.set_manual_roi_status("手动 ROI: 未设置", False)
+            suffix = "已开启" if self._is_manual_roi_pick_enabled() else "未开启"
+            self.page_advanced.set_manual_roi_status(f"手动 ROI: 未设置 · 图上框选{suffix}", False)
             return
 
         vals = self._manual_roi_values
@@ -1666,7 +2037,7 @@ class GPRGuiQt(QMainWindow):
         )
 
     def _set_selected_trace_index(self, trace_index: int | None):
-        """设置当前选中的道号并刷新主图与航迹图。"""
+        """设置当前选中的道号；主图优先轻量更新竖线，避免整张 B-scan 重绘。"""
         if self.data is None or getattr(self.data, "ndim", 0) != 2:
             normalized = None
         elif trace_index is None:
@@ -1686,7 +2057,8 @@ class GPRGuiQt(QMainWindow):
             self.page_quality.set_airborne_georeference_3d_visualization(
                 self._build_airborne_georeference_3d_plot_payload()
             )
-        if self.data is not None:
+
+        if not self._refresh_selected_trace_marker_lightweight() and self.data is not None:
             self.plot_data(self.data)
 
     def _on_trajectory_trace_selected(self, trace_index: int):
@@ -1694,7 +2066,7 @@ class GPRGuiQt(QMainWindow):
         self._set_selected_trace_index(trace_index)
 
     def _on_main_canvas_press(self, event):
-        """统一记录主图鼠标按下事件。"""
+        """统一记录主图鼠标按下事件。默认查看模式不再用左键拖动平移。"""
         if self._toolbar_mode_active():
             return
         if (
@@ -1704,15 +2076,7 @@ class GPRGuiQt(QMainWindow):
         ):
             return
 
-        if event.button == 3:
-            if self._manual_roi_values is not None:
-                self._clear_manual_roi()
-            self._capture_main_view_limits_from_axes()
-            return
-
-        if event.button != 1:
-            return
-
+        button = self._event_button_number(event)
         if event.dblclick:
             self._reset_main_plot_view_to_default()
             return
@@ -1720,30 +2084,38 @@ class GPRGuiQt(QMainWindow):
         ax = event.inaxes
         xlim = ax.get_xlim()
         ylim = ax.get_ylim()
+        action = "inspect"
+        if button in {2, 3}:
+            action = "pan"
+        elif button == 1 and self._is_manual_roi_pick_enabled():
+            action = "roi"
+        elif button == 1 and self._is_slider_compare_split_hit(event):
+            action = "slider"
+        elif button != 1:
+            return
+
         self._main_press_state = {
             "x": float(event.x),
             "y": float(event.y),
             "xdata": float(event.xdata),
             "ydata": float(event.ydata),
             "key": str(event.key or ""),
+            "button": button,
+            "action": action,
             "axes": ax,
             "dragging": False,
-            "slider_mode": self._is_main_slider_compare_active(),
             "xlim_start": (float(xlim[0]), float(xlim[1])),
             "ylim_start": (float(ylim[0]), float(ylim[1])),
+            "bbox_width": max(1.0, float(ax.bbox.width)),
+            "bbox_height": max(1.0, float(ax.bbox.height)),
         }
 
     def _on_main_canvas_motion(self, event):
-        """鼠标移动时更新坐标读数；支持拖动平移（默认）和 Shift+拖动框选 ROI。"""
+        """鼠标移动时更新坐标读数；左键默认选道，显式模式才改变视图。"""
         self._update_plot_coord_label(event)
         if self._main_press_state is None or self._toolbar_mode_active():
             return
-        if (
-            event.x is None
-            or event.y is None
-            or event.xdata is None
-            or event.ydata is None
-        ):
+        if event.x is None or event.y is None:
             return
 
         start = self._main_press_state
@@ -1753,34 +2125,26 @@ class GPRGuiQt(QMainWindow):
             return
 
         start["dragging"] = True
-        key = str(start.get("key", "")).lower()
+        action = str(start.get("action") or "inspect")
 
-        if "shift" in key:
-            self._draw_drag_roi_preview(start, event)
+        if action == "roi":
+            if event.xdata is not None and event.ydata is not None:
+                self._draw_drag_roi_preview(start, event)
             return
 
-        if bool(start.get("slider_mode")):
-            self._update_main_slider_compare_ratio_from_event(event)
+        if action == "slider":
+            if event.xdata is not None:
+                self._update_main_slider_compare_ratio_from_event(event)
             return
 
-        # Pan like grabbing the image: viewport moves opposite to pointer delta.
-        ax = start["axes"]
-        dx_data = float(event.xdata) - float(start["xdata"])
-        dy_data = float(event.ydata) - float(start["ydata"])
-        xlim0 = start["xlim_start"]
-        ylim0 = start["ylim_start"]
-        ax.set_xlim(xlim0[0] - dx_data, xlim0[1] - dx_data)
-        ax.set_ylim(ylim0[0] - dy_data, ylim0[1] - dy_data)
-        now_ts = time.perf_counter()
-        if (
-            now_ts - float(self._last_main_motion_draw_ts)
-            >= float(self._main_motion_draw_interval_s)
-        ):
-            self.canvas.draw_idle()
-            self._last_main_motion_draw_ts = now_ts
+        if action == "pan":
+            self._pan_main_plot_by_pixels(start, dx, dy)
+            return
+
+        # inspect 模式下左键拖动不改变视图，避免误触造成“图像发飘”。
 
     def _on_main_canvas_release(self, event):
-        """统一处理主图点击/拖框释放。"""
+        """统一处理主图点击、拖框、平移释放。"""
         if self._main_press_state is None:
             self._capture_main_view_limits_from_axes()
             return
@@ -1799,12 +2163,12 @@ class GPRGuiQt(QMainWindow):
             bool(start.get("dragging"))
             and np.hypot(dx, dy) >= self._main_drag_threshold_px
         )
-        key = str(start.get("key", "")).lower()
+        action = str(start.get("action") or "inspect")
 
-        if is_drag and event.xdata is not None and event.ydata is not None:
-            if "shift" in key:
-                x0, x1 = sorted([float(start["xdata"]), float(event.xdata)])
-                y0, y1 = sorted([float(start["ydata"]), float(event.ydata)])
+        if is_drag and action == "roi" and event.xdata is not None and event.ydata is not None:
+            x0, x1 = sorted([float(start["xdata"]), float(event.xdata)])
+            y0, y1 = sorted([float(start["ydata"]), float(event.ydata)])
+            if abs(x1 - x0) > 1.0e-9 and abs(y1 - y0) > 1.0e-9:
                 self._manual_roi_values = {
                     "dist_start": x0,
                     "dist_end": x1,
@@ -1814,17 +2178,36 @@ class GPRGuiQt(QMainWindow):
                 self._update_manual_roi_status()
                 if self.data is not None:
                     self.plot_data(self.data)
-                return
-            if bool(start.get("slider_mode")):
-                self._update_main_slider_compare_ratio_from_event(event)
-                return
-            # Plain drag ends: persist the panned view limits.
+            return
+
+        if is_drag and action == "slider":
+            if event.xdata is not None:
+                self._update_main_slider_compare_ratio_from_event(event, force=True)
+            return
+
+        if is_drag and action == "pan":
             self._capture_main_view_limits_from_axes()
             return
 
-        if "alt" in key and event.xdata is not None:
+        # inspect 点击：左键直接选最近 trace。Alt 不再作为必要条件。
+        if action == "inspect" and event.xdata is not None:
             self._select_trace_from_x(float(event.xdata))
         self._capture_main_view_limits_from_axes()
+
+    def _event_button_number(self, event) -> int | None:
+        """将 Matplotlib 鼠标按钮值规整为 1/2/3。"""
+        button = getattr(event, "button", None)
+        try:
+            return int(button)
+        except Exception:
+            name = str(button).lower()
+            if "left" in name:
+                return 1
+            if "middle" in name:
+                return 2
+            if "right" in name:
+                return 3
+        return None
 
     def _is_main_slider_compare_active(self) -> bool:
         """主界面是否处于滑动对比模式。"""
@@ -1833,8 +2216,32 @@ class GPRGuiQt(QMainWindow):
             and self.page_advanced.slider_compare_var.isChecked()
         )
 
-    def _update_main_slider_compare_ratio_from_event(self, event):
-        """根据鼠标事件更新主图滑动对比位置。"""
+    def _is_slider_compare_split_hit(self, event) -> bool:
+        """仅当左键落在滑动对比分隔线附近时才接管拖动。"""
+        if not self._is_main_slider_compare_active():
+            return False
+        if (
+            event is None
+            or event.inaxes not in self._main_plot_axes
+            or event.xdata is None
+            or self._last_display_trace_axis.size == 0
+        ):
+            return False
+        x_min = float(self._last_display_trace_axis[0])
+        x_max = float(self._last_display_trace_axis[-1])
+        split_x = x_min + (x_max - x_min) * float(self._main_slider_compare_ratio)
+        try:
+            split_px = float(event.inaxes.transData.transform((split_x, float(event.ydata)))[0])
+            return abs(float(event.x) - split_px) <= float(self._slider_hit_tolerance_px)
+        except Exception:
+            return False
+
+    def _update_main_slider_compare_ratio_from_event(self, event, force: bool = False):
+        """根据鼠标事件更新主图滑动对比位置。
+
+        滑动对比会触发整张 B-scan 刷新，拖动时按较低频率节流；
+        释放鼠标时使用 force=True 进行一次最终位置同步。
+        """
         if (
             event is None
             or event.inaxes not in self._main_plot_axes
@@ -1853,11 +2260,18 @@ class GPRGuiQt(QMainWindow):
         new_ratio = max(0.0, min(1.0, new_ratio))
         if abs(new_ratio - self._main_slider_compare_ratio) < 1.0e-4:
             return
+
+        now = time.monotonic()
+        if not force and (now - self._last_slider_compare_draw_ts) < self._slider_compare_draw_interval_s:
+            self._main_slider_compare_ratio = new_ratio
+            return
+
         self._main_slider_compare_ratio = new_ratio
+        self._last_slider_compare_draw_ts = now
         self._refresh_plot()
 
     def _on_main_canvas_scroll(self, event):
-        """滚轮缩放主图。"""
+        """滚轮缩放主图。Shift=仅横向缩放，Ctrl=仅纵向缩放。"""
         if self._toolbar_mode_active() or self._is_main_slider_compare_active():
             return
         if (
@@ -1873,16 +2287,106 @@ class GPRGuiQt(QMainWindow):
         ylim = ax.get_ylim()
         xdata = float(event.xdata)
         ydata = float(event.ydata)
-        ax.set_xlim(
-            xdata - (xdata - xlim[0]) * scale,
-            xdata + (xlim[1] - xdata) * scale,
+        key = str(getattr(event, "key", "") or "").lower()
+        scale_x = scale if "control" not in key and "ctrl" not in key else 1.0
+        scale_y = scale if "shift" not in key else 1.0
+        new_xlim = (
+            xdata - (xdata - xlim[0]) * scale_x,
+            xdata + (xlim[1] - xdata) * scale_x,
         )
-        ax.set_ylim(
-            ydata - (ydata - ylim[0]) * scale,
-            ydata + (ylim[1] - ydata) * scale,
+        new_ylim = (
+            ydata - (ydata - ylim[0]) * scale_y,
+            ydata + (ylim[1] - ydata) * scale_y,
         )
+        self._set_clamped_axis_limits(ax, new_xlim, new_ylim)
         self._capture_main_view_limits_from_axes()
         self.canvas.draw_idle()
+
+    def _on_main_canvas_key_press(self, event):
+        """主图快捷键。Esc 退出临时状态，R 切换 ROI 框选，Home 重置视图。"""
+        key = str(getattr(event, "key", "") or "").lower()
+        if key == "escape":
+            self._main_press_state = None
+            self._remove_drag_roi_preview()
+            self.canvas.draw_idle()
+            return
+        if key == "r":
+            self._set_manual_roi_pick_enabled(not self._is_manual_roi_pick_enabled())
+            return
+        if key in {"home", "h"}:
+            self._reset_main_plot_view_to_default()
+
+    def _pan_main_plot_by_pixels(self, start: dict, dx_px: float, dy_px: float):
+        """按屏幕像素位移平移，避免 event.xdata 反复重算导致拖动发飘。"""
+        ax = start.get("axes")
+        if ax is None:
+            return
+        xlim0 = start.get("xlim_start") or ax.get_xlim()
+        ylim0 = start.get("ylim_start") or ax.get_ylim()
+        bbox_w = max(1.0, float(start.get("bbox_width") or ax.bbox.width or 1.0))
+        bbox_h = max(1.0, float(start.get("bbox_height") or ax.bbox.height or 1.0))
+        x_span = float(xlim0[1] - xlim0[0])
+        y_span = float(ylim0[1] - ylim0[0])
+        dx_data = -float(dx_px) / bbox_w * x_span
+        dy_data = -float(dy_px) / bbox_h * y_span
+        new_xlim = (float(xlim0[0]) + dx_data, float(xlim0[1]) + dx_data)
+        new_ylim = (float(ylim0[0]) + dy_data, float(ylim0[1]) + dy_data)
+        self._set_clamped_axis_limits(ax, new_xlim, new_ylim)
+        now_ts = time.perf_counter()
+        if (
+            now_ts - float(self._last_main_motion_draw_ts)
+            >= float(self._main_motion_draw_interval_s)
+        ):
+            self.canvas.draw_idle()
+            self._last_main_motion_draw_ts = now_ts
+
+    def _set_clamped_axis_limits(self, ax, xlim, ylim):
+        """设置视图范围，并限制在当前数据边界附近。"""
+        clamped_xlim, clamped_ylim = self._clamp_main_view_limits(xlim, ylim)
+        ax.set_xlim(*clamped_xlim)
+        ax.set_ylim(*clamped_ylim)
+
+    def _clamp_main_view_limits(self, xlim, ylim):
+        """限制缩放/平移边界，避免无限缩到空白或缩得过小。"""
+        if self._last_plot_extent is None:
+            return tuple(xlim), tuple(ylim)
+        x0, x1, y0, y1 = [float(v) for v in self._last_plot_extent]
+        xmin, xmax = sorted([x0, x1])
+        ymin, ymax = sorted([y0, y1])
+        data_x_span = max(1.0e-9, xmax - xmin)
+        data_y_span = max(1.0e-9, ymax - ymin)
+
+        def _clamp_pair(pair, low, high, min_span, max_span):
+            a, b = float(pair[0]), float(pair[1])
+            direction = 1.0 if b >= a else -1.0
+            lo, hi = sorted([a, b])
+            span = hi - lo
+            if span < min_span:
+                center = (lo + hi) * 0.5
+                lo = center - min_span * 0.5
+                hi = center + min_span * 0.5
+            elif span > max_span:
+                span = max_span
+                center = (lo + hi) * 0.5
+                lo = center - span * 0.5
+                hi = center + span * 0.5
+            span = hi - lo
+            if lo < low:
+                lo = low
+                hi = low + span
+            if hi > high:
+                hi = high
+                lo = high - span
+            lo = max(low, lo)
+            hi = min(high, hi)
+            return (lo, hi) if direction >= 0 else (hi, lo)
+
+        min_x_span = data_x_span / max(20.0, min(200.0, data_x_span))
+        min_y_span = data_y_span / max(20.0, min(200.0, data_y_span))
+        return (
+            _clamp_pair(xlim, xmin, xmax, min_x_span, data_x_span),
+            _clamp_pair(ylim, ymin, ymax, min_y_span, data_y_span),
+        )
 
     def _update_plot_coord_label(self, event):
         """更新主图坐标读数。"""
@@ -1903,7 +2407,9 @@ class GPRGuiQt(QMainWindow):
             or self._last_display_time_axis.size == 0
             or self._last_display_data is None
         ):
-            self._plot_coord_label.setText("坐标: --")
+            if self._last_coord_label_key != ("empty",):
+                self._plot_coord_label.setText("坐标：--")
+                self._last_coord_label_key = ("empty",)
             return
 
         trace_pos = float(event.xdata)
@@ -1918,15 +2424,25 @@ class GPRGuiQt(QMainWindow):
             if trace_idx < self._last_display_trace_indices.size
             else trace_idx
         )
-        extra_hint = "拖动分隔线调整对比" if self._is_main_slider_compare_active() else "拖框设 ROI"
+        if self._is_main_slider_compare_active():
+            extra_hint = "靠近分隔线拖动对比"
+        elif self._is_manual_roi_pick_enabled():
+            extra_hint = "左键拖框设 ROI"
+        else:
+            extra_hint = "左键选道 · 中/右键拖动平移"
+        label_key = (trace_idx, time_idx, extra_hint)
+        if label_key == self._last_coord_label_key:
+            return
+        self._last_coord_label_key = label_key
         self._plot_coord_label.setText(
-            f"距离: {trace_value:.2f} | 时间: {time_value:.2f} | 道号: {raw_trace_idx} | 振幅: {amplitude:.4f} | {extra_hint} | 右键清除 ROI | Alt+单击选道"
+            f"坐标：距离 {trace_value:.2f} · 时间 {time_value:.2f} · 道 {raw_trace_idx} · 振幅 {amplitude:.4f} · {extra_hint}"
         )
 
     def _on_main_canvas_leave(self, event):
         """鼠标离开主图时清空坐标读数。"""
         if self._plot_coord_label is not None:
-            self._plot_coord_label.setText("坐标: --")
+            self._plot_coord_label.setText("坐标：--")
+        self._last_coord_label_key = ("empty",)
 
     def _toolbar_mode_active(self) -> bool:
         return bool(
@@ -1949,6 +2465,11 @@ class GPRGuiQt(QMainWindow):
         ax = start.get("axes")
         if ax is None or event.xdata is None or event.ydata is None:
             return
+        now = time.monotonic()
+        if (now - self._last_roi_preview_draw_ts) < self._roi_preview_draw_interval_s:
+            return
+        self._last_roi_preview_draw_ts = now
+
         x0, x1 = sorted([float(start["xdata"]), float(event.xdata)])
         y0, y1 = sorted([float(start["ydata"]), float(event.ydata)])
         if self._drag_roi_preview_patch is None:
@@ -1981,6 +2502,10 @@ class GPRGuiQt(QMainWindow):
             except Exception:
                 pass
             self._drag_roi_preview_patch = None
+            try:
+                self.canvas.draw_idle()
+            except Exception:
+                pass
 
     def _capture_main_view_limits_from_axes(self):
         """记录当前主图缩放范围，供重绘后恢复。"""
@@ -2004,8 +2529,8 @@ class GPRGuiQt(QMainWindow):
         self._capture_main_view_limits_from_axes()
 
     def _sync_workbench_with_main_data(self):
-        """兼容旧调用：实际由共享数据状态统一驱动。"""
-        self._on_shared_data_changed({"reason": "manual_sync"})
+        """旧工作台同步入口已移除；保留兼容空实现。"""
+        self._update_empty_state_and_brief()
 
     def resizeEvent(self, event):
         """窗口尺寸变化时，调整左右区域的相对占比，避免控制区在窄窗口下异常拥挤。
@@ -2021,106 +2546,14 @@ class GPRGuiQt(QMainWindow):
             return
 
         total = max(1, self._main_splitter.size().width())
-        target_left = max(320, min(520, int(total * 0.30)))
-        target_right = max(640, total - target_left)
+        target_left = max(320, min(440, int(total * 0.24)))
+        target_right = max(760, total - target_left)
         self._main_splitter.setSizes([target_right, target_left])
 
     def _on_workbench_run_method(self, method_id: str, params: dict, source: str):
-        """工作台运行单方法"""
-        if self.data is None:
-            self.page_workbench._log("未加载数据", "ERROR")
-            return
-
-        # 获取输入数据
-        input_data, source_text = self.page_workbench.resolve_input_data(source)
-        input_header_info = self.page_workbench.resolve_input_header_info(source)
-        input_trace_metadata = self.page_workbench.resolve_input_trace_metadata(source)
-
-        if input_data is None:
-            input_data = self.data
-            source_text = "原始数据（fallback）"
-            input_header_info = self.header_info
-            input_trace_metadata = self.trace_metadata
-
-        # 记录开始时间
-        start_time = time.time()
-
-        # 获取方法信息
-        method_info = PROCESSING_METHODS.get(method_id)
-        if not method_info:
-            self.page_workbench._log(f"未知方法: {method_id}", "ERROR")
-            return
-
-        method_name = method_info.get("name", method_id)
-
-        # 禁用按钮，显示运行状态
-        self.page_workbench.param_editor.set_buttons_for_running()
-
-        # 记录详细信息到日志
-        param_str = ", ".join([f"{k}={v}" for k, v in params.items()])
-        self.page_workbench._log(f"{'=' * 40}")
-        self.page_workbench._log(f"方法: {method_name}")
-        self.page_workbench._log(f"输入源: {source_text} ({input_data.shape})")
-        self.page_workbench._log(f"参数: {param_str}")
-        self.page_workbench._log(f"正在执行...")
-
-        try:
-            # 执行方法
-            execution = self._apply_single_method(
-                input_data,
-                method_id,
-                params,
-                header_info=input_header_info,
-                trace_metadata=input_trace_metadata,
-            )
-            result = execution["result_data"]
-            result_header_info = execution["result_header_info"]
-            result_trace_metadata = execution["result_trace_metadata"]
-            preview_data = execution["preview_data"]
-            preview_header_info = execution["preview_header_info"]
-            preview_trace_metadata = execution["preview_trace_metadata"]
-            runtime_warnings = execution["meta"].get("runtime_warnings", []) or []
-
-            # 计算耗时
-            elapsed = (time.time() - start_time) * 1000  # ms
-
-            # 自动切换到结果视图
-            self.page_workbench.radio_result.setChecked(True)
-
-            # 更新工作台预览（不直接提交为正式结果）
-            self.page_workbench.set_preview_result(
-                preview_data,
-                f"预览: {method_name}",
-                header_info=preview_header_info,
-                trace_metadata=preview_trace_metadata,
-                commit_data=result,
-                commit_header_info=result_header_info,
-                commit_trace_metadata=result_trace_metadata,
-            )
-
-            for warning in runtime_warnings:
-                self.page_workbench._log(
-                    f"运行告警: {format_runtime_warning_text(warning)}", "WARN"
-                )
-
-            # 记录成功日志
-            self.page_workbench._log(f"预览完成！耗时 {elapsed:.1f}ms")
-            self.page_workbench._log(
-                f"预览: {result.shape} | 范围 [{result.min():.3f}, {result.max():.3f}]"
-            )
-            self.page_workbench._log(f"{'=' * 40}")
-
-        except Exception as e:
-            import traceback
-
-            error_msg = str(e)
-            traceback_str = traceback.format_exc()
-            self.page_workbench._log(f"执行失败: {error_msg}", "ERROR")
-            logger.error("Workbench method failed (%s):\n%s", method_id, traceback_str)
-
-        finally:
-            # 恢复按钮状态
-            self.page_workbench._update_action_buttons()
+        """旧工作台运行入口已移除。"""
+        self._log("旧工作台运行入口已移除；请使用日常处理页执行处理方法。")
+        return
 
     def _apply_single_method(
         self,
@@ -2178,104 +2611,106 @@ class GPRGuiQt(QMainWindow):
         }
 
     def _on_workbench_save_result(self):
-        """工作台保存结果"""
-        preview_data = getattr(self.page_workbench, "preview_data", None)
-        preview_header_info = getattr(self.page_workbench, "preview_header_info", None)
-        preview_trace_metadata = getattr(
-            self.page_workbench, "preview_trace_metadata", None
-        )
-        preview_commit_data = getattr(self.page_workbench, "preview_commit_data", None)
-        preview_commit_header_info = getattr(
-            self.page_workbench, "preview_commit_header_info", None
-        )
-        preview_commit_trace_metadata = getattr(
-            self.page_workbench, "preview_commit_trace_metadata", None
-        )
-        current_result_header_info = getattr(
-            self.page_workbench, "current_result_header_info", None
-        )
-        current_result_trace_metadata = getattr(
-            self.page_workbench, "current_result_trace_metadata", None
-        )
-        committed = (
-            np.array(preview_commit_data, copy=True)
-            if preview_commit_data is not None
-            else np.array(preview_data, copy=True)
-            if preview_data is not None
-            else (
-                np.array(self.page_workbench.current_result, copy=True)
-                if self.page_workbench.current_result is not None
-                else None
-            )
-        )
-
-        if committed is not None:
-            method_id = self.page_workbench.param_editor.current_method_id
-            method_info = PROCESSING_METHODS.get(method_id, {}) if method_id else {}
-            method_name = method_info.get("name", method_id or "工作台结果")
-            label = method_name
-            if preview_data is not None:
-                label = f"{method_name}_{datetime.now().strftime('%H:%M:%S')}"
-
-            self.shared_data.apply_current_data(
-                committed,
-                push_history=True,
-                source="workbench_commit",
-                label=label,
-                header_info=(
-                    preview_commit_header_info
-                    if preview_commit_data is not None
-                    else preview_header_info
-                    if preview_data is not None
-                    else current_result_header_info
-                ),
-                trace_metadata=(
-                    preview_commit_trace_metadata
-                    if preview_commit_data is not None
-                    else preview_trace_metadata
-                    if preview_data is not None
-                    else current_result_trace_metadata
-                ),
-            )
-            self._mark_data_changed()
-            self._update_current_compare_snapshot()
-            self._update_empty_state_and_brief()
-            self.plot_data(self.data)
-            try:
-                params = self.page_workbench.param_editor.get_current_params()
-            except Exception:
-                params = {}
-            self._set_last_run_summary(
-                run_type="workbench_commit",
-                label=method_name,
-                steps=[
-                    {
-                        "method_key": method_id or "workbench",
-                        "method_name": method_name,
-                        "params": params,
-                    }
-                ],
-                notes=["结果由工作台预览提交为正式结果"],
-            )
-            if preview_data is not None:
-                self.page_workbench._log(f"✓ 结果已保存: {label}")
-                self.page_workbench._log(f"  形状: {committed.shape}")
-                self.page_workbench._log(
-                    f"  范围: [{committed.min():.3f}, {committed.max():.3f}]"
-                )
-            self._log("工作台结果已应用到当前数据")
-        else:
-            self._log("没有可保存的结果")
+        """旧工作台保存入口已移除。"""
+        self._log("旧工作台保存入口已移除；当前结果请通过质量与导出页处理。")
+        return
 
     def _apply_style(self):
-        """应用样式表 - 使用主题管理器"""
+        """应用样式表 - 使用主题管理器 + 轻量视觉美化层。"""
         from core.theme_manager import get_theme_manager
 
         theme_manager = get_theme_manager()
-        stylesheet = theme_manager.get_theme_stylesheet()
+        stylesheet = theme_manager.get_theme_stylesheet() or ""
 
-        if stylesheet:
+        try:
+            from ui.theme import get_app_polish_stylesheet
+
+            stylesheet = stylesheet + "\n" + get_app_polish_stylesheet(theme_manager.get_current_theme(), widget=self)
+        except Exception as exc:
+            logger.debug("UI polish stylesheet unavailable: %s", exc)
+
+        if stylesheet and stylesheet != getattr(self, "_last_applied_stylesheet", None):
             self.setStyleSheet(stylesheet)
+            self._last_applied_stylesheet = stylesheet
+
+        current_theme = theme_manager.get_current_theme()
+        self._apply_main_workspace_direct_theme(current_theme)
+        page_auto_tune = getattr(self, "page_auto_tune", None)
+        if page_auto_tune is not None and hasattr(page_auto_tune, "refresh_theme"):
+            try:
+                page_auto_tune.refresh_theme(current_theme)
+            except Exception as exc:
+                logger.debug("AutoTune local theme refresh failed: %s", exc)
+
+    def _apply_main_workspace_direct_theme(self, theme: str | None = None):
+        """Apply local theme reinforcement to the B-scan workspace.
+
+        Some qfluentwidgets and Matplotlib toolbar styles can override broad QSS
+        selectors. This keeps the empty-state card and plot card readable in both
+        light and dark themes without changing plotting logic.
+        """
+        try:
+            from ui.theme import is_dark_ui
+
+            is_dark = is_dark_ui(theme, widget=self)
+        except Exception:
+            is_dark = str(theme or "").lower() == "dark"
+        effective_key = "dark" if is_dark else "light"
+        if getattr(self, "_last_workspace_direct_theme", None) == effective_key:
+            return
+        self._last_workspace_direct_theme = effective_key
+        if is_dark:
+            card = "#1B2027"
+            panel = "#151A21"
+            border = "#323A46"
+            dash = "#3B4654"
+            text = "#EAF0F8"
+            muted = "#A6B1C2"
+            primary_bg = "#172A46"
+            primary_text = "#93C5FD"
+            toolbar = "#14191F"
+        else:
+            card = "#FFFFFF"
+            panel = "#FBFDFF"
+            border = "#E6EBF2"
+            dash = "#C8D3E1"
+            text = "#172033"
+            muted = "#64748B"
+            primary_bg = "#EAF2FF"
+            primary_text = "#1D4ED8"
+            toolbar = "#FFFFFF"
+
+        if getattr(self, "main_plot_card", None) is not None:
+            self.main_plot_card.setStyleSheet(
+                f"QFrame#mainPlotCard {{ background: {card}; border: 1px solid {border}; border-radius: 18px; }}"
+            )
+        if getattr(self, "empty_state_card", None) is not None:
+            self.empty_state_card.setStyleSheet(
+                f"QFrame#emptyStateCard {{ background: {panel}; border: 1px dashed {dash}; border-radius: 18px; }}"
+            )
+        for name in ("_plot_title_label",):
+            label = getattr(self, name, None)
+            if label is not None:
+                label.setStyleSheet(f"color: {text}; background: transparent; font-weight: 800;")
+        for name in ("_plot_meta_label",):
+            label = getattr(self, name, None)
+            if label is not None:
+                label.setStyleSheet(f"color: {muted}; background: transparent;")
+        for name in ("_main_toolbar",):
+            widget = getattr(self, name, None)
+            if widget is not None:
+                if hasattr(widget, "apply_theme"):
+                    try:
+                        widget.apply_theme(effective_key)
+                    except Exception:
+                        pass
+                widget.setStyleSheet(
+                    f"QToolBar {{ background: {toolbar}; border: 1px solid {border}; border-radius: 10px; spacing: 3px; padding: 3px; }}"
+                    f"QToolButton {{ background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 4px; color: {text}; }}"
+                    f"QToolButton:hover {{ background: {primary_bg}; border-color: {border}; color: {primary_text}; }}"
+                    f"QToolButton:disabled {{ color: {muted}; background: transparent; }}"
+                    f"QToolButton:pressed, QToolButton:checked {{ background: {primary_bg}; border-color: {border}; color: {primary_text}; }}"
+                )
 
     def _toggle_theme_from_main_ui(self):
         """主界面显示页触发主题切换。"""
@@ -3181,11 +3616,18 @@ class GPRGuiQt(QMainWindow):
         from core.theme_manager import get_theme_manager
 
         theme = get_theme_manager().get_current_theme()
-        if theme == "dark":
-            fig_face = "#1f2125"
-            ax_face = "#23252a"
-            text_color = "#e8e8e8"
-            spine_color = "#5a606b"
+        try:
+            from ui.theme import is_dark_ui
+
+            effective_dark = is_dark_ui(theme, widget=self)
+        except Exception:
+            effective_dark = theme == "dark"
+
+        if effective_dark:
+            fig_face = "#111820"
+            ax_face = "#151A21"
+            text_color = "#EAF0F8"
+            spine_color = "#3B4654"
         else:
             fig_face = "#ffffff"
             ax_face = "#ffffff"
@@ -3301,6 +3743,8 @@ class GPRGuiQt(QMainWindow):
             )
         else:
             self.status_label.setText("未加载文件")
+
+        self._update_main_workspace_summary()
 
         if hasattr(self, "page_quality") and self.page_quality is not None:
             self.page_quality.set_line_summary(self._build_airborne_line_summary_text())
@@ -4470,6 +4914,20 @@ class GPRGuiQt(QMainWindow):
             self.cbar = None
 
         view_style = self.page_advanced.get_view_style()
+        try:
+            cmap_label = str(self._get_colormap(view_header_info))
+        except Exception:
+            cmap_label = "默认"
+        if getattr(self, "_plot_display_mode_chip", None) is not None:
+            style_label = {"image": "图像", "wiggle": "摆动图"}.get(str(view_style), str(view_style))
+            self._plot_display_mode_chip.setText(f"显示：{style_label}")
+        if getattr(self, "_plot_colormap_chip", None) is not None:
+            self._plot_colormap_chip.setText(f"色图：{cmap_label}")
+        if getattr(self, "_plot_range_chip", None) is not None:
+            range_label = "百分位" if self.page_advanced.percentile_var.isChecked() else "自动"
+            if view_header_info and view_header_info.get("display_fixed_unit_range"):
+                range_label = "固定 ±1"
+            self._plot_range_chip.setText(f"拉伸：{range_label}")
         slider_compare = self._is_main_slider_compare_active()
         if slider_compare and view_style == "wiggle":
             self._log("提示：滑动对比开启时优先使用图像分割对比，摆动图仅在非滑动对比模式显示。")
@@ -4525,6 +4983,7 @@ class GPRGuiQt(QMainWindow):
             self._draw_colorbar_if_needed(
                 last_im, axes, header_info_override=view_header_info
             )
+        self._polish_main_figure()
         self.canvas.draw_idle()
         self._update_processing_lineage_display()
 
@@ -4687,7 +5146,7 @@ class GPRGuiQt(QMainWindow):
         image_path = os.path.join(out_dir, f"report_{ts}.png")
 
         try:
-            self.fig.savefig(image_path, dpi=150)
+            self.fig.savefig(image_path, dpi=600, bbox_inches="tight")
         except Exception as e:
             self._log(f"报告截图失败: {e}")
 
@@ -5682,29 +6141,37 @@ class GPRGuiQt(QMainWindow):
             return None
         return next((s for s in self.compare_snapshots if s["label"] == label), None)
 
+    def _normalize_plot_stage_label(self, label: str | None) -> str:
+        """Return a compact stage label for the main B-scan figure title."""
+        text = str(label or "").strip()
+        if not text or text in {"当前", "Current", "current"}:
+            return ""
+        if text in {"Raw", "raw", "原始", "原始数据"}:
+            return "原始数据"
+        return text
+
     def _get_single_plot_title(self, header_info_override: dict | None = None) -> str:
         """获取单图模式下的标题。"""
-        header = (
-            header_info_override
-            if header_info_override is not None
-            else (self.header_info or {})
-        )
-        title = str(header.get("display_title") or "").strip() if header else ""
-        base_title = title or "B-扫"
-
+        stage = ""
         if self._is_single_view_mode():
             selected = getattr(self.page_advanced, "single_view_combo", None)
             selected_label = selected.currentText() if selected is not None else ""
-            if selected_label and selected_label not in base_title:
-                return f"{base_title} - 查看：{selected_label}"
-
-        current_label = str(getattr(self.shared_data, "current_label", "") or "").strip()
-        if current_label and current_label != "原始数据" and current_label not in base_title:
-            base_title = f"{base_title} - 当前处理：{current_label}"
-        lineage_text = self._build_processing_lineage_text()
-        if lineage_text and lineage_text not in base_title:
-            return f"{base_title} | {lineage_text}"
-        return base_title
+            stage = self._normalize_plot_stage_label(selected_label)
+        if not stage:
+            stage = self._normalize_plot_stage_label(
+                getattr(self.shared_data, "current_label", None)
+            )
+        if not stage:
+            header = (
+                header_info_override
+                if header_info_override is not None
+                else (self.header_info or {})
+            )
+            stage = self._normalize_plot_stage_label(
+                header.get("display_title") if header else ""
+            )
+        stage = stage or "原始数据"
+        return f"Bscan - {stage}"
 
     def _build_processing_lineage_steps(self) -> list[str]:
         """Build compact processing lineage from formal shared history labels."""
@@ -6363,7 +6830,7 @@ class GPRGuiQt(QMainWindow):
         """清除坐标轴上的艺术家对象"""
         for ax in axes:
             ax.cla()
-            ax.set_title("B-扫")
+            ax.set_title("Bscan")
 
     def _render_data_pairs(
         self,
@@ -6490,8 +6957,7 @@ class GPRGuiQt(QMainWindow):
             ax.set_xlim(x_axis[0] - spacing * 0.5, x_axis[-1] + spacing * 0.5)
         if y_axis.size > 0:
             ax.set_ylim(y_axis[-1], y_axis[0])
-        if self.page_advanced.show_grid_var.isChecked():
-            ax.grid(True, linestyle=":", alpha=0.3)
+        ax.grid(False)
 
     def _render_slider_compare_panel(
         self,
@@ -6543,6 +7009,8 @@ class GPRGuiQt(QMainWindow):
             merged,
             cmap=cmap,
             aspect="auto",
+            interpolation="nearest",
+            resample=False,
             extent=plot_config["extent"],
             vmin=vmin,
             vmax=vmax,
@@ -6591,12 +7059,56 @@ class GPRGuiQt(QMainWindow):
             va="center",
             bbox=dict(boxstyle="round,pad=0.25", facecolor=label_bg_color, edgecolor="none", alpha=0.58),
         )
-        if self.page_advanced.show_grid_var.isChecked():
-            ax.grid(True, linestyle=":", alpha=0.3)
+        ax.grid(False)
         return im
+
+    def _clear_selected_trace_marker_artists(self):
+        """移除当前主图上的选中道标记，不触发整图重绘。"""
+        for artist in list(getattr(self, "_selected_trace_marker_artists", []) or []):
+            try:
+                artist.remove()
+            except Exception:
+                pass
+        self._selected_trace_marker_artists = []
+
+    def _selected_trace_x_position(self) -> float | None:
+        """返回当前选中 trace 在显示坐标轴上的 X 位置。"""
+        if self._selected_trace_index is None:
+            return None
+        trace_axis = np.asarray(self._last_display_trace_axis, dtype=np.float32)
+        trace_indices = np.asarray(self._last_display_trace_indices, dtype=np.int32)
+        if trace_axis.size == 0 or trace_indices.size != trace_axis.size:
+            return None
+        matches = np.flatnonzero(trace_indices == int(self._selected_trace_index))
+        if matches.size == 0:
+            return None
+        return float(trace_axis[int(matches[0])])
+
+    def _refresh_selected_trace_marker_lightweight(self) -> bool:
+        """只重画选中道竖线，避免选 trace 时完整刷新 B-scan。"""
+        if not self._main_plot_axes:
+            return False
+        self._clear_selected_trace_marker_artists()
+        selected_x = self._selected_trace_x_position()
+        if selected_x is None:
+            self.canvas.draw_idle()
+            return True
+        for ax in self._main_plot_axes:
+            line = ax.axvline(
+                selected_x,
+                color="#64748b",
+                linewidth=0.9,
+                linestyle=":",
+                alpha=0.58,
+                zorder=8,
+            )
+            self._selected_trace_marker_artists.append(line)
+        self.canvas.draw_idle()
+        return True
 
     def _draw_selected_trace_marker(self, axes, axis_info: dict):
         """在主图上绘制当前选中道号的竖线。"""
+        self._selected_trace_marker_artists = []
         if self._selected_trace_index is None:
             return
 
@@ -6611,14 +7123,15 @@ class GPRGuiQt(QMainWindow):
 
         selected_x = float(trace_axis[int(matches[0])])
         for ax in axes:
-            ax.axvline(
+            line = ax.axvline(
                 selected_x,
                 color="#64748b",
-                linewidth=0.8,
+                linewidth=0.9,
                 linestyle=":",
-                alpha=0.45,
-                zorder=5,
+                alpha=0.58,
+                zorder=8,
             )
+            self._selected_trace_marker_artists.append(line)
 
     def _draw_manual_roi_marker(self, axes, axis_info: dict):
         """在主图上绘制当前手动 ROI。"""
@@ -6694,15 +7207,16 @@ class GPRGuiQt(QMainWindow):
             render_data,
             cmap=render_cmap,
             aspect="auto",
+            interpolation="nearest",
+            resample=False,
             extent=extent,
             vmin=vmin,
             vmax=vmax,
         )
         ax.set_xlabel(plot_config["xlabel"])
         ax.set_ylabel(plot_config["ylabel"])
-        ax.set_title(title)
-        if self.page_advanced.show_grid_var.isChecked():
-            ax.grid(True, linestyle=":", alpha=0.5)
+        ax.set_title(title, pad=4, fontsize=12, fontweight="semibold")
+        ax.grid(False)
         return im
 
     def _compute_vmin_vmax(
@@ -7198,16 +7712,10 @@ class GPRGuiQt(QMainWindow):
         allow_override: bool = True,
         show_dialog: bool = True,
     ) -> bool:
-        """Workbench 侧 no-prior guard 入口，复用主界面 guard 逻辑。"""
-        title_map = {
-            "workflow_run": "Workbench 无先验流程防护",
-            "AutoTune": "Workbench 无先验 AutoTune 防护",
-            "preset_recommendation": "Workbench 无先验预设防护",
-        }
-        dialog_title = title_map.get(action_id, "Workbench 无先验防护")
+        """旧工作台 no-prior guard 已退役；复用主 guard 保持兼容。"""
         return self._enforce_no_prior_action_guard(
             action_id,
-            dialog_title=dialog_title,
+            dialog_title="旧工作台无先验防护（兼容入口）",
             allow_override=allow_override,
             show_dialog=show_dialog,
         )
@@ -7664,7 +8172,7 @@ def main():
     app = QApplication(sys.argv)
     theme_name = apply_theme(app)
     qt_font_name = _configure_qt_cjk_font(app)
-    version_text = build_version_string("GPR_GUI")
+    version_text = build_version_string("MyGPR")
     logger.info("GPR GUI version=%s", version_text)
     win = GPRGuiQt(version_text=version_text)
     logger.info("Runtime log file: %s", log_path)

@@ -1,6 +1,0 @@
-# GX-008 scene_007 materials draft
-# Draft-only parameters from GX-008 spec paper-inspired range.
-# Formal literature citation lock is required in a later task.
-material_name,eps_r,sigma,mu_r,mag_sigma,notes
-dry_sand_like,3.0,0.001,1.0,0.0,GX-008 spec CR-Net-paper-inspired range
-pec,ideal_conductor,ideal_conductor,1.0,0.0,PEC idealized metallic target in gprMax

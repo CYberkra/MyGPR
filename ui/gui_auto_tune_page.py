@@ -478,9 +478,7 @@ class AutoTunePage(QWidget):
         self.truth_side_by_side_preview.setMinimumHeight(180)
         self.truth_side_by_side_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.truth_side_by_side_preview.setWordWrap(True)
-        self.truth_side_by_side_preview.setStyleSheet(
-            "border: 1px solid #d0d7de; border-radius: 6px; background: #f6f8fa; color: #57606a;"
-        )
+        self.truth_side_by_side_preview.setObjectName("TruthPreviewBox")
         bscan_layout.addWidget(self.truth_side_by_side_preview)
         self.btn_truth_open_side_by_side = PushButton(FluentIcon.VIEW, "打开 side-by-side 图片")
         self.btn_truth_open_side_by_side.setEnabled(False)
@@ -594,7 +592,7 @@ class AutoTunePage(QWidget):
 
         if ground_truth:
             self.truth_status_label.setText("真值验证已启用。")
-            self.truth_status_label.setStyleSheet("color: #137333;")
+            self._set_truth_status_tone("good")
             self.truth_loaded_label.setText("已加载")
             self.truth_scenario_label.setText(str(ground_truth.get("scenario_id") or "--"))
             self.truth_target_label.setText(self._format_truth_target(ground_truth))
@@ -604,7 +602,7 @@ class AutoTunePage(QWidget):
             self.truth_status_label.setText(
                 "真值验证结果存在，但缺少完整 target/background ROI；请加载原始 gprMax manifest + ground_truth.yaml。"
             )
-            self.truth_status_label.setStyleSheet("color: #9a6700;")
+            self._set_truth_status_tone("warning")
             self.truth_loaded_label.setText("仅有结果摘要")
             self.truth_scenario_label.setText(str(incomplete_ground_truth_info.get("scenario_id") or "--"))
             self.truth_target_label.setText("--")
@@ -614,7 +612,7 @@ class AutoTunePage(QWidget):
             self.truth_status_label.setText(
                 "当前数据未检测到 gprMax ground_truth.yaml，仍可做普通自动选参，但不能做真值验证。"
             )
-            self.truth_status_label.setStyleSheet("color: #9a6700;")
+            self._set_truth_status_tone("warning")
             self.truth_loaded_label.setText("未加载")
             self.truth_scenario_label.setText("--")
             self.truth_target_label.setText("--")
@@ -909,6 +907,24 @@ class AutoTunePage(QWidget):
         report_path = ((self._last_evidence_bundle or {}).get("artifacts") or {}).get("report_md")
         if report_path:
             self._open_path(str(report_path))
+
+
+    def _set_truth_status_tone(self, tone: str) -> None:
+        """Set truth status visual tone through theme QSS."""
+        try:
+            from ui.theme import set_dynamic_property, repolish
+
+            self.truth_status_label.setObjectName("TruthStatusLabel")
+            if set_dynamic_property(self.truth_status_label, "tone", tone):
+                repolish(self.truth_status_label)
+        except Exception:
+            try:
+                self.truth_status_label.setProperty("tone", tone)
+                self.truth_status_label.style().unpolish(self.truth_status_label)
+                self.truth_status_label.style().polish(self.truth_status_label)
+                self.truth_status_label.update()
+            except Exception:
+                pass
 
     def _open_truth_side_by_side(self):
         side_by_side_path = getattr(self, "_truth_side_by_side_path", "")

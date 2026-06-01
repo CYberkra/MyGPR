@@ -1,6 +1,0 @@
-# GX-008 scene_004 materials draft
-# Draft-only parameters from GX-008 spec paper-inspired range.
-# Formal literature citation lock is required in a later task.
-material_name,eps_r,sigma,mu_r,mag_sigma,notes
-damp_sand_like,8.0,0.01,1.0,0.0,GX-008 spec CR-Net-paper-inspired range
-pvc_like,3.5,0.0,1.0,0.0,GX-008 spec PVC draft parameter pending citation lock

@@ -38,7 +38,7 @@ def test_main_tabs_remove_batch_entry_but_keep_daily_processing_first():
         assert labels == ["日常处理", "调参与实验", "显示与对比", "质量与导出"]
         assert "批处理与报告" not in labels
         assert win.control_tabs.currentWidget() is win.page_basic
-        assert win.page_workbench is not None
+        assert getattr(win, "page_workbench", None) is None
     finally:
         win.close()
         app.processEvents()

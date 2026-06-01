@@ -121,8 +121,10 @@ def _target_lines(text: str) -> list[str]:
         stripped = line.strip()
         if stripped.startswith("#cylinder:") or stripped.startswith("#sphere:"):
             lines.append(stripped)
-        elif stripped.startswith("#box:") and "dry_sand_like" not in stripped and "damp_sand_like" not in stripped:
-            lines.append(stripped)
+        elif stripped.startswith("#box:"):
+            material = stripped.split()[-1].lower() if stripped.split() else ""
+            if not material.startswith(("dry_sand", "damp_sand", "air", "free_space")):
+                lines.append(stripped)
     return lines
 
 
@@ -191,6 +193,7 @@ def load_scene_model(scene_id: str, models_root: str | Path | None = None) -> Mo
 
     scan_design = manifest.get("scan_design") if isinstance(manifest.get("scan_design"), dict) else {}
     target_design = manifest.get("target_design") if isinstance(manifest.get("target_design"), dict) else {}
+    target_geometry = manifest.get("target_geometry") if isinstance(manifest.get("target_geometry"), dict) else {}
     expected_num_runs = manifest.get("expected_num_runs", scan_design.get("expected_num_runs"))
     if not isinstance(expected_num_runs, int):
         expected_num_runs = None
@@ -209,8 +212,18 @@ def load_scene_model(scene_id: str, models_root: str | Path | None = None) -> Mo
         rx_steps=_first(raw_directives, "rx_steps"),
         expected_num_runs=expected_num_runs,
         soil_type=str(manifest.get("soil_type") or ""),
-        target_material=str(manifest.get("target_material") or target_design.get("material") or ""),
-        target_type=str(manifest.get("target_type") or target_design.get("type") or ""),
+        target_material=str(
+            manifest.get("target_material")
+            or target_design.get("material")
+            or target_geometry.get("material")
+            or ""
+        ),
+        target_type=str(
+            manifest.get("target_type")
+            or target_design.get("type")
+            or target_geometry.get("type")
+            or ""
+        ),
         target_depth_class=str(manifest.get("target_depth_class") or ""),
         roi=roi or None,
         pair_contract_status=status,

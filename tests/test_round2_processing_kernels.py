@@ -660,3 +660,36 @@ def test_method_wnnm_placeholder_stays_identity_while_deferred():
     result = method_wnnm_placeholder(raw, weight=0.25)
 
     assert np.array_equal(result, raw)
+
+
+def test_trace_median_filter_runs_along_trace_axis():
+    raw = np.zeros((6, 7), dtype=np.float32)
+    raw[:, 3] = 100.0
+
+    result, meta = run_processing_method(
+        raw,
+        "trace_median_filter",
+        {"window_traces": 3, "preserve_mean": False},
+    )
+
+    assert result.shape == raw.shape
+    assert meta["method"] == "trace_median_filter"
+    assert meta["effective_window_traces"] == 3
+    assert float(np.max(np.abs(result[:, 3]))) == 0.0
+
+
+def test_trace_savgol_filter_runs_along_trace_axis_and_preserves_shape():
+    x = np.linspace(-1.0, 1.0, 9, dtype=np.float32)
+    raw = np.vstack([(x**2 + i).astype(np.float32) for i in range(5)])
+
+    result, meta = run_processing_method(
+        raw,
+        "trace_savgol_filter",
+        {"window_traces": 5, "polyorder": 2, "derivative": 0, "mode": "interp"},
+    )
+
+    assert result.shape == raw.shape
+    assert meta["method"] == "trace_savgol_filter"
+    assert meta["effective_window_traces"] == 5
+    assert meta["polyorder"] == 2
+    assert np.all(np.isfinite(result))

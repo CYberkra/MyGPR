@@ -51,12 +51,8 @@ class ResearchConsolePage(QWidget):
         self._scene_items: list[dict[str, Any]] = []
         self._artifact_items: list[dict[str, Any]] = []
         self._model_scene_ids = [
-            "scene_001_flat_dry_sand_pec_shallow",
-            "scene_002_flat_damp_sand_pec_shallow",
-            "scene_003_flat_dry_sand_pvc_shallow",
-            "scene_004_flat_damp_sand_pvc_shallow",
-            "scene_005_flat_dry_sand_pec_medium",
-            "scene_006_flat_damp_sand_pec_medium",
+            "scene_037_gssi_ey_depth05_radius03_air_sand_interface_n80_geometry_gate",
+            "scene_038_gssi_ey_depth07_radius03_air_sand_interface_n80_pair_gate",
         ]
         self._build_ui()
         self.refresh()
@@ -200,7 +196,7 @@ class ResearchConsolePage(QWidget):
 
         self.at_bg_overview = QLabel(CLAIM_BOUNDARY_TEXT)
         self.at_bg_overview.setWordWrap(True)
-        self.at_bg_overview.setStyleSheet("border: 1px solid #f0c36d; border-radius: 6px; padding: 8px; color: #8a5a00;")
+        self.at_bg_overview.setObjectName("WarningBanner")
         layout.addWidget(self.at_bg_overview)
 
         summary_box = QGroupBox("候选方法与多场景一致性")
@@ -257,7 +253,7 @@ class ResearchConsolePage(QWidget):
 
         banner = QLabel("Model Editor v0 / read-only protected mode. 编辑、保存、dry-run、GPU 运行在后续 draft-edit 模式开放。")
         banner.setWordWrap(True)
-        banner.setStyleSheet("border: 1px solid #d0d7de; border-radius: 6px; padding: 8px; color: #57606a;")
+        banner.setObjectName("InfoBanner")
         layout.addWidget(banner)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -322,7 +318,7 @@ class ResearchConsolePage(QWidget):
 
     def _nav_card(self, title: str, detail: str, tab_index: int) -> QFrame:
         frame = QFrame()
-        frame.setStyleSheet("QFrame { border: 1px solid #d0d7de; border-radius: 6px; background: #ffffff; }")
+        frame.setObjectName("ResearchNavCard")
         layout = QHBoxLayout(frame)
         layout.setContentsMargins(10, 8, 10, 8)
         text = QWidget()
@@ -343,14 +339,9 @@ class ResearchConsolePage(QWidget):
 
     @staticmethod
     def _status_card(title: str, value: str, detail: str, tone: str = "neutral") -> QFrame:
-        colors = {
-            "ok": ("#e6f4ea", "#137333"),
-            "warn": ("#fff8e1", "#b06000"),
-            "neutral": ("#f6f8fa", "#24292f"),
-        }
-        bg, fg = colors.get(tone, colors["neutral"])
         frame = QFrame()
-        frame.setStyleSheet(f"QFrame {{ border: 1px solid #d0d7de; border-radius: 6px; background: {bg}; }} QLabel {{ color: {fg}; }}")
+        frame.setObjectName("MetricCard")
+        frame.setProperty("tone", tone if tone in {"ok", "warn", "neutral"} else "neutral")
         layout = QVBoxLayout(frame)
         layout.setContentsMargins(10, 8, 10, 8)
         label_title = QLabel(title)
@@ -387,7 +378,7 @@ class ResearchConsolePage(QWidget):
             ("已归档场景", f"{paired_done} / {len(scene_rows)}", "Paired Evidence", "ok" if paired_done else "warn"),
             ("标准化指标", f"{metrics_done} / {len(scene_rows)}", "standard metrics", "ok" if metrics_done else "warn"),
             ("AT-BG 诊断", f"{at_done} / {len(scene_rows)}", "mean / median / SVD", "ok" if at_done else "warn"),
-            ("Draft 模型", str(draft_count), "scene_004 - scene_006", "neutral"),
+            ("保留模型", str(draft_count), "scene_037 / scene_038", "neutral"),
             ("GPU Wrapper", "Ready", "通过标准入口执行", "ok"),
             ("Claim Boundary", "Active", "No field / no superiority claim", "warn"),
         ]

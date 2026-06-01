@@ -99,6 +99,37 @@ def constrain_auto_tune_params(
             maximum=max(1, min_dim - 1),
             reason="rank_limit",
         )
+    elif method_key in {"trace_median_filter", "trace_savgol_filter"}:
+        _clamp_int_param(
+            method_key,
+            effective,
+            warnings,
+            parameter="window_traces",
+            minimum=1,
+            maximum=n_traces,
+            prefer_odd=True,
+            reason="trace_window_limit",
+        )
+        if method_key == "trace_savgol_filter":
+            window = _as_int(effective.get("window_traces")) or n_traces
+            _clamp_int_param(
+                method_key,
+                effective,
+                warnings,
+                parameter="polyorder",
+                minimum=1,
+                maximum=max(1, window - 1),
+                reason="savgol_polyorder_limit",
+            )
+            _clamp_int_param(
+                method_key,
+                effective,
+                warnings,
+                parameter="derivative",
+                minimum=0,
+                maximum=2,
+                reason="savgol_derivative_limit",
+            )
     elif method_key in {"svd_subspace", "wavelet_svd"}:
         _clamp_rank_interval(method_key, effective, warnings, rank_limit=min_dim)
         if method_key == "wavelet_svd":

@@ -26,6 +26,8 @@ from PythonModule.rpca_background import method_rpca_background
 from PythonModule.wnnm_placeholder import method_wnnm_placeholder
 from PythonModule.ccbs_filter import method_ccbs
 from PythonModule.median_background_2D import method_median_background_2d
+from PythonModule.trace_median_filter import method_trace_median_filter
+from PythonModule.trace_savgol_filter import method_trace_savgol_filter
 from PythonModule.svd_subspace import method_svd_subspace
 
 _method_wavelet_2d: Any
@@ -422,6 +424,71 @@ PROCESSING_METHODS = {
         "auto_tune_enabled": True,
         "auto_tune_family": "impulse",
         "auto_tune_candidates": {"ntraces": [3, 5, 7, 9, 11]},
+    },
+    "trace_median_filter": {
+        "name": "道向中值滤波",
+        "type": "local",
+        "func": method_trace_median_filter,
+        "params": [
+            {
+                "name": "window_traces",
+                "label": "Window traces",
+                "type": "int",
+                "default": 5,
+                "min": 3,
+                "max": 501,
+                "tooltip": "沿道向的局部中值窗口；自动修正为不超过道数的奇数。",
+            },
+            {
+                "name": "preserve_mean",
+                "label": "Preserve global mean",
+                "type": "bool",
+                "default": False,
+                "tooltip": "保持全局均值，便于前后图像亮度对比；一般保持关闭。",
+            },
+        ],
+        "auto_tune_enabled": False,
+        "auto_tune_family": "denoise",
+        "auto_tune_candidates": {"window_traces": [3, 5, 7, 9, 11]},
+    },
+    "trace_savgol_filter": {
+        "name": "道向 Savitzky-Golay 平滑",
+        "type": "local",
+        "func": method_trace_savgol_filter,
+        "params": [
+            {
+                "name": "window_traces",
+                "label": "Window traces",
+                "type": "int",
+                "default": 7,
+                "min": 3,
+                "max": 501,
+                "tooltip": "沿道向的 Savitzky-Golay 平滑窗口；必须为奇数，系统会自动修正。",
+            },
+            {
+                "name": "polyorder",
+                "label": "Polynomial order",
+                "type": "int",
+                "default": 2,
+                "min": 1,
+                "max": 5,
+                "tooltip": "局部多项式阶数，必须小于窗口长度。",
+            },
+            {
+                "name": "mode",
+                "label": "Edge mode",
+                "type": "choice",
+                "default": "interp",
+                "choices": ["interp", "nearest", "mirror", "constant", "wrap"],
+                "tooltip": "边缘处理方式；常规使用 interp 或 nearest。",
+            },
+        ],
+        "auto_tune_enabled": False,
+        "auto_tune_family": "denoise",
+        "auto_tune_candidates": {
+            "window_traces": [5, 7, 9, 11, 15],
+            "polyorder": [2, 3],
+        },
     },
     "svd_bg": {
         "name": "SVD background removal (low-rank)",
@@ -1503,6 +1570,18 @@ METHOD_METADATA = {
         "visibility": "public",
         "display_name": "尖锐杂波抑制",
     },
+    "trace_median_filter": {
+        "category": "denoising",
+        "maturity": "stable",
+        "visibility": "public",
+        "display_name": "道向中值滤波",
+    },
+    "trace_savgol_filter": {
+        "category": "denoising",
+        "maturity": "stable",
+        "visibility": "public",
+        "display_name": "道向 Savitzky-Golay 平滑",
+    },
     "svd_bg": {
         "category": "background_suppression",
         "maturity": "stable",
@@ -1668,6 +1747,8 @@ PREFERRED_METHOD_ORDER = [
     "compensatingGain",
     "agcGain",
     "hankel_svd",
+    "trace_median_filter",
+    "trace_savgol_filter",
     "svd_subspace",
     "wavelet_2d",
     "wavelet_svd",
@@ -1707,6 +1788,8 @@ METHOD_TAGS = {
     "kirchhoff_migration": "实验",
     "sliding_avg": "实验",
     "running_average_2D": "备选",
+    "trace_median_filter": "备选",
+    "trace_savgol_filter": "备选",
     "motion_compensation_height": "实验",
     "motion_compensation_speed": "实验",
     "trajectory_smoothing": "实验",
@@ -1751,6 +1834,8 @@ AUTO_TUNE_STAGE_BY_METHOD = {
     "agcGain": "gain",
     "running_average_2D": "impulse",
     "hankel_svd": "denoise",
+    "trace_median_filter": "denoise",
+    "trace_savgol_filter": "denoise",
     "svd_subspace": "denoise",
     "wavelet_2d": "denoise",
     "wavelet_svd": "denoise",

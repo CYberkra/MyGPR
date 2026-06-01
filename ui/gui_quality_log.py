@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
+    QGridLayout,
     QLabel,
     QTextEdit,
     QGroupBox,
@@ -101,6 +102,42 @@ class QualityLogPage(QWidget):
         flow_row_layout.addStretch(1)
         flow_layout.addWidget(flow_row)
         layout.addWidget(flow_box)
+
+        # ========== Evidence 检查清单 ==========
+        evidence_box = QGroupBox("Evidence 检查清单")
+        evidence_box.setObjectName("EvidenceChecklistCard")
+        evidence_box.setProperty("cardStyle", "modern")
+        evidence_layout = QVBoxLayout(evidence_box)
+        evidence_layout.setContentsMargins(12, 18, 12, 12)
+        evidence_layout.setSpacing(8)
+        evidence_hint = QLabel("导出前建议确认数据身份、处理链路、参数、图像、指标、风险和结论边界。")
+        evidence_hint.setWordWrap(True)
+        evidence_hint.setProperty("class", "hintText")
+        evidence_layout.addWidget(evidence_hint)
+
+        evidence_grid = QWidget()
+        evidence_grid_layout = QGridLayout(evidence_grid)
+        evidence_grid_layout.setContentsMargins(0, 0, 0, 0)
+        evidence_grid_layout.setHorizontalSpacing(8)
+        evidence_grid_layout.setVerticalSpacing(6)
+        evidence_items = [
+            ("数据身份", "待检查"),
+            ("处理链路", "待检查"),
+            ("参数记录", "待检查"),
+            ("图像输出", "可生成"),
+            ("指标", "待计算"),
+            ("warnings", "需复核"),
+            ("claim boundary", "待写入"),
+        ]
+        self.evidence_checklist_labels = []
+        for i, (name, status) in enumerate(evidence_items):
+            label = QLabel(f"{name}：{status}")
+            label.setObjectName("EvidenceCheckChip")
+            label.setProperty("tone", "warning" if "复核" in status or "待" in status else "neutral")
+            evidence_grid_layout.addWidget(label, i // 2, i % 2)
+            self.evidence_checklist_labels.append(label)
+        evidence_layout.addWidget(evidence_grid)
+        layout.addWidget(evidence_box)
 
         # ========== 顶部动作区 ==========
         action_box = QGroupBox("导出与诊断")
@@ -424,19 +461,7 @@ class QualityLogPage(QWidget):
         if checkable:
             button.setChecked(checked)
         button.setMinimumHeight(24)
-        button.setStyleSheet(
-            "QToolButton {"
-            " background: rgba(255, 255, 255, 210);"
-            " border: 1px solid rgba(148, 163, 184, 160);"
-            " border-radius: 4px;"
-            " padding: 2px 7px;"
-            " color: #0f172a;"
-            "}"
-            "QToolButton:checked {"
-            " background: rgba(219, 234, 254, 230);"
-            " border-color: rgba(37, 99, 235, 180);"
-            "}"
-        )
+        button.setObjectName("QualityToolButton")
         button.adjustSize()
         button.show()
         button.raise_()

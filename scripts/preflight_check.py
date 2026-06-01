@@ -18,14 +18,14 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-GENERATED_ARTIFACT_SUFFIXES = {".out", ".h5", ".vti", ".vtk"}
+GENERATED_ARTIFACT_SUFFIXES = {".out", ".h5", ".hdf5", ".vti", ".vtk", ".vtu"}
 GENERATED_GPRMAX_OUTPUT_MARKERS = {
     "/converted/",
     "/paired_outputs/",
     "/gpu_smoke/",
     "/smoke_outputs/",
 }
-GENERATED_GPRMAX_OUTPUT_SUFFIXES = {".csv", ".npy", ".png", ".json"}
+GENERATED_GPRMAX_OUTPUT_SUFFIXES = {".csv", ".npy", ".png", ".jpg", ".jpeg", ".json"}
 
 
 def _normalize_git_path(path: str) -> str:
@@ -99,26 +99,13 @@ def check_runtime_flows() -> None:
         data = np.tile(np.linspace(0, 10, 80, dtype=np.float32)[:, None], (1, 16))
         win.shared_data.load_data(data, path="demo.csv", source="preflight")
 
-        # Workbench apply should compute and commit the latest method result.
-        wb = win.page_workbench
-        wb.select_method("dewow")
-        wb.param_editor.param_widgets["window"].setValue(5)
-        wb._run_current_method()
-        deadline = time.time() + 5
-        while (
-            wb._preview_running or wb._pending_preview_request is not None
-        ) and time.time() < deadline:
-            app.processEvents()
-            time.sleep(0.01)
-        assert wb.preview_data is None, "Applied result should not leave stale preview data"
-        assert not np.array_equal(win.data, win.original_data), (
-            "Applied result should update shared current data"
+        # Main workspace should accept loaded data and render without legacy Workbench.
+        assert getattr(win, "page_workbench", None) is None, (
+            "Legacy Workbench must not be part of the active main UI"
         )
-
-        win.undo_last()
-        assert np.array_equal(win.data, win.original_data), (
-            "Undo should restore original data"
-        )
+        assert win.data is not None and win.original_data is not None
+        win.plot_data(win.data)
+        app.processEvents()
 
         # 临时对比快照不应覆盖当前正式结果。
         base = win.data.copy()

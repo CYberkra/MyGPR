@@ -666,6 +666,20 @@ WORKFLOW_STAGES = {
                 "tooltip": "增益放大后进行结构化去噪，平滑深部的细碎纹理噪声。",
                 "params": PROCESSING_METHODS["hankel_svd"]["params"],
             },
+            "trace_median_filter": {
+                "name": "道向中值滤波",
+                "available": True,
+                "default_enabled": False,
+                "tooltip": "沿 trace 方向做局部中值平滑，用于压制道间离群尖峰；不做背景扣除。",
+                "params": PROCESSING_METHODS["trace_median_filter"]["params"],
+            },
+            "trace_savgol_filter": {
+                "name": "道向 Savitzky-Golay 平滑",
+                "available": True,
+                "default_enabled": False,
+                "tooltip": "沿 trace 方向做局部多项式平滑，用于缓和横向抖动并尽量保留结构连续性。",
+                "params": PROCESSING_METHODS["trace_savgol_filter"]["params"],
+            },
             "svd_subspace": {
                 "name": "SVD子空间去噪",
                 "available": True,

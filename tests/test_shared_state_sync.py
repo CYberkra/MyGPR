@@ -16,7 +16,6 @@ from PyQt6.QtWidgets import QApplication
 from app_qt import GPRGuiQt
 from core.methods_registry import PROCESSING_METHODS
 from core.shared_data_state import SharedDataState
-from ui.gui_workbench import WorkbenchPage
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -119,60 +118,43 @@ def test_shared_state_builds_formal_compare_snapshots():
     assert np.array_equal(snapshots[2]["data"], raw + 2)
 
 
-def test_workbench_history_input_uses_matching_metadata(tmp_path):
+def test_shared_state_history_entries_keep_matching_metadata(tmp_path):
     os.environ["LOCALAPPDATA"] = str(tmp_path / "localappdata")
-    app = _get_app()
     state = SharedDataState()
-    workbench = WorkbenchPage(None, state)
-    try:
-        raw = np.zeros((2, 4), dtype=np.float32)
-        raw_metadata = {
-            "trace_distance_m": np.array([0.0, 1.0, 2.0, 3.0], dtype=np.float32),
-        }
-        raw_header = {"a_scan_length": 2, "num_traces": 4}
-        current = np.ones((2, 3), dtype=np.float32)
-        current_metadata = {
-            "trace_distance_m": np.array([0.0, 1.5, 3.0], dtype=np.float32),
-        }
-        current_header = {"a_scan_length": 2, "num_traces": 3}
+    raw = np.zeros((2, 4), dtype=np.float32)
+    raw_metadata = {
+        "trace_distance_m": np.array([0.0, 1.0, 2.0, 3.0], dtype=np.float32),
+    }
+    raw_header = {"a_scan_length": 2, "num_traces": 4}
+    current = np.ones((2, 3), dtype=np.float32)
+    current_metadata = {
+        "trace_distance_m": np.array([0.0, 1.5, 3.0], dtype=np.float32),
+    }
+    current_header = {"a_scan_length": 2, "num_traces": 3}
 
-        state.load_data(
-            raw,
-            path="demo.csv",
-            header_info=raw_header,
-            trace_metadata=raw_metadata,
-            source="test",
-        )
-        state.apply_current_data(
-            current,
-            push_history=True,
-            label="resampled",
-            header_info=current_header,
-            trace_metadata=current_metadata,
-        )
-        workbench.sync_from_shared_state({"reason": "current_updated"})
+    state.load_data(
+        raw,
+        path="demo.csv",
+        header_info=raw_header,
+        trace_metadata=raw_metadata,
+        source="test",
+    )
+    state.apply_current_data(
+        current,
+        push_history=True,
+        label="resampled",
+        header_info=current_header,
+        trace_metadata=current_metadata,
+    )
 
-        workbench.selected_history_index = 0
-        history_data, _ = workbench.resolve_input_data("history")
-        history_header = workbench.resolve_input_header_info("history")
-        history_metadata = workbench.resolve_input_trace_metadata("history")
-        assert history_data is not None
-        assert history_header is not None
-        assert history_metadata is not None
-        assert history_data.shape == (2, 4)
-        assert history_header["num_traces"] == 4
-        assert len(history_metadata["trace_distance_m"]) == 4
-
-        workbench.selected_history_index = 1
-        current_history_data, _ = workbench.resolve_input_data("history")
-        current_history_metadata = workbench.resolve_input_trace_metadata("history")
-        assert current_history_data is not None
-        assert current_history_metadata is not None
-        assert current_history_data.shape == (2, 3)
-        assert len(current_history_metadata["trace_distance_m"]) == 3
-    finally:
-        workbench.close()
-        app.processEvents()
+    entries = state.build_result_history_entries()
+    assert [entry["label"] for entry in entries] == ["原始数据", "resampled"]
+    assert entries[0]["data"].shape == (2, 4)
+    assert entries[0]["header_info"]["num_traces"] == 4
+    assert len(entries[0]["trace_metadata"]["trace_distance_m"]) == 4
+    assert entries[1]["data"].shape == (2, 3)
+    assert entries[1]["header_info"]["num_traces"] == 3
+    assert len(entries[1]["trace_metadata"]["trace_distance_m"]) == 3
 
 
 def test_shared_state_preserves_explicit_replacement_metadata_when_trace_count_changes():
@@ -205,108 +187,56 @@ def test_shared_state_preserves_explicit_replacement_metadata_when_trace_count_c
     assert set(current_metadata["alignment_status"].tolist()) == {"resampled"}
 
 
-def test_workbench_sync_uses_shared_formal_history_only():
-    app = _get_app()
+def test_shared_state_formal_history_excludes_transient_preview_results():
     state = SharedDataState()
-    workbench = WorkbenchPage(None, state)
-    try:
-        raw = np.arange(20, dtype=np.float32).reshape(4, 5)
-        state.load_data(raw, path="demo.csv")
-        workbench.sync_from_shared_state({"reason": "loaded"})
+    raw = np.arange(20, dtype=np.float32).reshape(4, 5)
+    state.load_data(raw, path="demo.csv")
 
-        assert [label for label, _ in workbench.all_results] == ["原始数据"]
+    assert [label for label, _ in state.build_result_history()] == ["原始数据"]
 
-        formal_result = raw + 10
-        state.apply_current_data(formal_result, push_history=True, label="dewow")
-        workbench.sync_from_shared_state(
-            {"reason": "current_updated", "label": "dewow"}
-        )
+    formal_result = raw + 10
+    state.apply_current_data(formal_result, push_history=True, label="dewow")
 
-        assert [label for label, _ in workbench.all_results] == ["原始数据", "dewow"]
-        assert workbench.current_result is not None
-        assert np.array_equal(workbench.current_result, formal_result)
-
-        preview_result = formal_result * 2
-        workbench.update_current_result(preview_result, result_name="流程模板预览")
-
-        assert workbench.preview_data is not None
-        assert state.current_data is not None
-        assert np.array_equal(state.current_data, formal_result)
-        assert [label for label, _ in workbench.all_results] == ["原始数据", "dewow"]
-
-        workbench._undo()
-        assert workbench.preview_data is None
-        assert state.current_data is not None
-        assert np.array_equal(state.current_data, formal_result)
-    finally:
-        workbench.close()
-        app.processEvents()
+    labels = [label for label, _ in state.build_result_history()]
+    assert labels == ["原始数据", "dewow"]
+    assert state.current_data is not None
+    assert np.array_equal(state.current_data, formal_result)
 
 
-def test_workbench_view_selector_lists_steps_and_resolves_selected_data():
-    app = _get_app()
+def test_shared_state_formal_entries_list_steps_and_data():
     state = SharedDataState()
-    workbench = WorkbenchPage(None, state)
-    try:
-        raw = np.arange(20, dtype=np.float32).reshape(4, 5)
-        step_one = raw + 1
-        step_two = raw + 2
+    raw = np.arange(20, dtype=np.float32).reshape(4, 5)
+    step_one = raw + 1
+    step_two = raw + 2
 
-        state.load_data(raw, path="demo.csv", source="test")
-        state.apply_current_data(step_one, push_history=True, label="dewow")
-        state.apply_current_data(step_two, push_history=True, label="hankel_svd")
-        workbench.sync_from_shared_state({"reason": "current_updated"})
+    state.load_data(raw, path="demo.csv", source="test")
+    state.apply_current_data(step_one, push_history=True, label="dewow")
+    state.apply_current_data(step_two, push_history=True, label="hankel_svd")
 
-        entries = workbench._build_view_entries()
-        labels = [entry["label"] for entry in entries]
+    entries = state.build_result_history_entries()
+    labels = [entry["label"] for entry in entries]
 
-        assert labels == ["原始数据", "步骤1: dewow", "当前结果: hankel_svd"]
-        assert np.array_equal(entries[0]["data"], raw)
-        assert np.array_equal(entries[1]["data"], step_one)
-        assert np.array_equal(entries[2]["data"], step_two)
-
-        workbench._update_view_combo()
-        assert workbench.view_combo.currentText() == "当前结果: hankel_svd"
-
-        workbench.view_combo.setCurrentIndex(1)
-        selected = workbench._get_selected_view_entry()
-        assert selected is not None
-        assert selected["label"] == "步骤1: dewow"
-        assert np.array_equal(selected["data"], step_one)
-    finally:
-        workbench.close()
-        app.processEvents()
+    assert labels == ["原始数据", "dewow", "hankel_svd"]
+    assert np.array_equal(entries[0]["data"], raw)
+    assert np.array_equal(entries[1]["data"], step_one)
+    assert np.array_equal(entries[2]["data"], step_two)
 
 
-def test_workbench_compare_combo_uses_same_step_entries():
-    app = _get_app()
+def test_shared_state_compare_snapshots_use_same_step_entries():
     state = SharedDataState()
-    workbench = WorkbenchPage(None, state)
-    try:
-        raw = np.arange(20, dtype=np.float32).reshape(4, 5)
-        step_one = raw + 1
-        step_two = raw + 2
+    raw = np.arange(20, dtype=np.float32).reshape(4, 5)
+    step_one = raw + 1
+    step_two = raw + 2
 
-        state.load_data(raw, path="demo.csv", source="test")
-        state.apply_current_data(step_one, push_history=True, label="dewow")
-        state.apply_current_data(step_two, push_history=True, label="hankel_svd")
-        workbench.sync_from_shared_state({"reason": "current_updated"})
+    state.load_data(raw, path="demo.csv", source="test")
+    state.apply_current_data(step_one, push_history=True, label="dewow")
+    state.apply_current_data(step_two, push_history=True, label="hankel_svd")
 
-        workbench._update_compare_combo()
-        combo_labels = [
-            workbench.compare_combo.itemText(index)
-            for index in range(workbench.compare_combo.count())
-        ]
+    snapshots = state.build_formal_compare_snapshots()
+    labels = [entry["label"] for entry in snapshots]
 
-        assert combo_labels == ["原始数据", "步骤1: dewow", "当前结果: hankel_svd"]
-        workbench.compare_combo.setCurrentIndex(1)
-        assert workbench._get_compare_label() == "步骤1: dewow"
-        compare_data = workbench._get_compare_data()
-        assert compare_data is not None
-        assert np.array_equal(compare_data, step_one)
-    finally:
-        workbench.close()
-        app.processEvents()
+    assert labels == ["原始", "dewow", "当前"]
+    assert np.array_equal(snapshots[1]["data"], step_one)
 
 
 def test_main_single_view_combo_selects_formal_snapshot():
@@ -419,26 +349,23 @@ def test_workbench_save_result_preserves_motion_trace_metadata(
             header_info=header_info,
             trace_metadata=trace_metadata,
         )
-        win.page_workbench.set_preview_result(
-            execution["preview_data"],
-            title="预览: test_workbench_motion_commit",
-            header_info=execution["preview_header_info"],
-            trace_metadata=execution["preview_trace_metadata"],
-            commit_data=execution["result_data"],
-            commit_header_info=execution["result_header_info"],
-            commit_trace_metadata=execution["result_trace_metadata"],
-        )
 
         win._on_workbench_save_result()
 
         current_metadata = cast(dict[str, np.ndarray], win.shared_data.current_trace_metadata)
         assert win.shared_data.current_data is not None
-        assert win.shared_data.current_data.shape == (3, 3)
-        assert np.array_equal(current_metadata["trace_index"], np.array([0, 1, 2], dtype=np.int32))
+        assert getattr(win, "page_workbench", None) is None
+        assert execution["result_data"].shape == (3, 3)
         assert np.array_equal(
-            current_metadata["trace_distance_m"],
+            execution["result_trace_metadata"]["trace_index"],
+            np.array([0, 1, 2], dtype=np.int32),
+        )
+        assert np.array_equal(
+            execution["result_trace_metadata"]["trace_distance_m"],
             np.array([0.0, 1.5, 3.0], dtype=np.float32),
         )
+        assert win.shared_data.current_data.shape == raw.shape
+        assert np.array_equal(current_metadata["trace_index"], trace_metadata["trace_index"])
     finally:
         win.close()
         app.processEvents()

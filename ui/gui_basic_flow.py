@@ -255,8 +255,8 @@ class BasicFlowPage(QWidget):
         self._apply_source_mode = "manual"
         self._apply_source_hint_text = "应用来源：当前参数"
         self._auto_tune_result_available = False
-        self._basic_ultra_mode = True
-        self.BASIC_PARAM_LIMIT = 4
+        self._basic_ultra_mode = False
+        self.BASIC_PARAM_LIMIT = 4  # compatibility only; daily panel now shows full params by default
         self.btn_stolt_apply = None
         self.stolt_preset_combo = None
         self.stolt_auto_adapt_var = None
@@ -286,18 +286,12 @@ class BasicFlowPage(QWidget):
         basic_heading.setProperty("class", "sectionTitle")
         layout.addWidget(basic_heading)
 
-        self.quick_path_hint = QLabel(
-            "围绕单条测线的日常处理操作。推荐顺序：导入数据 → 选择方法 → 应用方法或执行默认流程。"
-        )
-        self.quick_path_hint.setWordWrap(True)
-        self.quick_path_hint.setProperty("class", "hintText")
-        layout.addWidget(self.quick_path_hint)
-
         # 核心操作区域
         action_box = QGroupBox("核心操作")
+        action_box.setProperty("cardStyle", "modern")
         action_box.setObjectName("basicActionCard")
         action_layout = QVBoxLayout(action_box)
-        action_layout.setContentsMargins(10, 14, 10, 10)
+        action_layout.setContentsMargins(12, 18, 12, 12)
         action_layout.setSpacing(8)
 
         self.btn_import = SplitActionButton("导入数据", FluentIcon.FOLDER, self)
@@ -389,20 +383,15 @@ class BasicFlowPage(QWidget):
         row_third_l.setStretch(1, 1)
         action_layout.addWidget(row_third)
 
-        self.basic_save_hint = QLabel(
-            "结果图可在图像工具栏点击 保存 按钮保存；处理后的数据会自动同步到工作台。"
-        )
-        self.basic_save_hint.setWordWrap(True)
-        self.basic_save_hint.setProperty("class", "hintText")
-        action_layout.addWidget(self.basic_save_hint)
         layout.addWidget(action_box)
 
         # 方法与参数
-        method_box = QGroupBox("方法与常用参数")
+        method_box = QGroupBox("方法与参数")
+        method_box.setProperty("cardStyle", "modern")
         method_box.setObjectName("basicMethodCard")
         method_box.setToolTip("选择处理方法并配置参数")
         method_layout = QVBoxLayout(method_box)
-        method_layout.setContentsMargins(10, 14, 10, 10)
+        method_layout.setContentsMargins(12, 18, 12, 12)
         method_layout.setSpacing(8)
 
         self.method_combo = QComboBox()
@@ -417,14 +406,10 @@ class BasicFlowPage(QWidget):
         )
         method_layout.addWidget(self.method_combo)
 
-        self.show_advanced_params_var = QCheckBox("显示高级参数")
-        self.show_advanced_params_var.setToolTip(
-            "展开当前方法的完整参数。默认仅显示日常常用项；展开后参数默认值不变。"
-        )
-        self.show_advanced_params_var.toggled.connect(
-            self._on_show_advanced_params_toggled
-        )
-        method_layout.addWidget(self.show_advanced_params_var)
+        # Basic and advanced parameters are displayed together by default.
+        # The old collapsible toggle is intentionally removed to keep all
+        # method parameters immediately visible in the daily workflow.
+        self.show_advanced_params_var = None
 
         self.param_container = QWidget()
         self.param_layout = QFormLayout(self.param_container)
@@ -445,10 +430,11 @@ class BasicFlowPage(QWidget):
         layout.addWidget(method_box)
 
         data_view_box = QGroupBox("当前状态与运行反馈")
+        data_view_box.setProperty("cardStyle", "modern")
         data_view_box.setObjectName("basicStatusCard")
         data_view_box.setToolTip("显示当前加载数据、当前方法和执行反馈")
         data_view_layout = QVBoxLayout(data_view_box)
-        data_view_layout.setContentsMargins(10, 14, 10, 10)
+        data_view_layout.setContentsMargins(12, 18, 12, 12)
         data_view_layout.setSpacing(8)
 
         self.data_brief = QLabel("未加载数据")
@@ -529,13 +515,13 @@ class BasicFlowPage(QWidget):
         else:
             if method_key == "motion_compensation_v2":
                 self.param_hint_label.setText(
-                    f"类别：{category_label}。已展开完整参数。APC offset 是设备安装几何标定参数，"
+                    f"类别：{category_label}。显示完整参数。APC offset 是设备安装几何标定参数，"
                     "不是动态飞行传感器数据；resample_spacing_m=0 表示自动使用中位道间距；"
                     "V2 会在可用时自动读取 trace_metadata。"
                 )
             else:
                 self.param_hint_label.setText(
-                    f"类别：{category_label}。已展开完整参数，参数默认值保持注册表定义。"
+                    f"类别：{category_label}。显示完整参数，参数默认值保持注册表定义。"
                 )
 
         # Stolt迁移特殊预设

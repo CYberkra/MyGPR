@@ -5,47 +5,20 @@
   ],
   "gprmax_artifacts": [
     {
-      "id": "GX-008_scene001",
-      "path": "gprmax/GX-008_scene001_flat_dry_sand_pec_shallow_paired_diagnostic/",
-      "scene_id": "scene_001_flat_dry_sand_pec_shallow",
-      "display_name": "GX-008 scene_001 - dry sand - PEC shallow",
-      "expected_status": "paired_evidence_done"
+      "id": "GX-008_scene037",
+      "path": "gprmax/GX-008/scene_037_gssi_ey_depth05_radius03_air_sand_interface_n80_geometry_gate/",
+      "scene_id": "scene_037_gssi_ey_depth05_radius03_air_sand_interface_n80_geometry_gate",
+      "display_name": "GX-008 scene_037 - air/sand interface - depth05",
+      "expected_status": "primary_active"
     },
     {
-      "id": "GX-008_scene002",
-      "path": "gprmax/GX-008_scene002_flat_damp_sand_pec_shallow_paired_diagnostic/",
-      "scene_id": "scene_002_flat_damp_sand_pec_shallow",
-      "display_name": "GX-008 scene_002 - damp sand - PEC shallow",
-      "expected_status": "paired_evidence_done"
-    },
-    {
-      "id": "GX-008_scene003",
-      "path": "gprmax/GX-008_scene003_flat_dry_sand_pvc_shallow_paired_diagnostic/",
-      "scene_id": "scene_003_flat_dry_sand_pvc_shallow",
-      "display_name": "GX-008 scene_003 - dry sand - PVC shallow",
-      "expected_status": "paired_evidence_done_metrics_pending"
+      "id": "GX-008_scene038",
+      "path": "gprmax/GX-008/scene_038_gssi_ey_depth07_radius03_air_sand_interface_n80_pair_gate/",
+      "scene_id": "scene_038_gssi_ey_depth07_radius03_air_sand_interface_n80_pair_gate",
+      "display_name": "GX-008 scene_038 - depth07 supplement",
+      "expected_status": "supplementary_depth_sensitivity"
     }
   ],
-  "at_bg_artifacts": [
-    {
-      "id": "AT-BG_scene001",
-      "path": "autotune/AT-BG-003_GX008_scene001_background_suppression_diagnostic/",
-      "display_name": "AT-BG scene_001 diagnostic"
-    },
-    {
-      "id": "AT-BG_scene002",
-      "path": "autotune/AT-BG-004A_GX008_scene002_background_suppression_diagnostic/",
-      "display_name": "AT-BG scene_002 diagnostic"
-    },
-    {
-      "id": "AT-BG_multi_scene",
-      "path": "autotune/AT-BG-004B_GX008_scene001_scene002_background_suppression_comparison/",
-      "display_name": "AT-BG scene_001 + scene_002 comparison"
-    }
-  ],
-  "draft_scenes": [
-    "scene_004_flat_damp_sand_pvc_shallow",
-    "scene_005_flat_dry_sand_pec_medium",
-    "scene_006_flat_damp_sand_pec_medium"
-  ]
+  "at_bg_artifacts": [],
+  "draft_scenes": []
 }
