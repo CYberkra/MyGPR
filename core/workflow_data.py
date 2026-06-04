@@ -9,6 +9,7 @@ import json
 import logging
 import os
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, List, Optional, Any
 
 LOGGER = logging.getLogger(__name__)
@@ -480,10 +481,33 @@ class WorkflowConfigManager:
             base_dir = os.path.dirname(os.path.abspath(__file__))
             config_dir = os.path.join(base_dir, "workflows")
 
-        self.config_dir = config_dir
-        os.makedirs(config_dir, exist_ok=True)
+        self.config_dir = os.path.abspath(config_dir)
+        os.makedirs(self.config_dir, exist_ok=True)
 
-        self.last_config_file = os.path.join(config_dir, "_last_config.json")
+        self.last_config_file = os.path.join(self.config_dir, "_last_config.json")
+
+    def _safe_config_path(self, filename: str) -> str:
+        """Return a JSON config path constrained to ``self.config_dir``.
+
+        Workflow names and imported filenames can come from UI state.  Keep all
+        load/save/delete operations inside the workflow config directory and
+        reject path traversal such as ``../other.json``.
+        """
+        raw = str(filename or "").strip()
+        if not raw:
+            raise ValueError("配置文件名不能为空")
+        if not raw.endswith(".json"):
+            raw += ".json"
+        name = Path(raw).name
+        if name != raw or name in {".", ".."}:
+            raise ValueError(f"非法配置文件名: {filename}")
+        target = (Path(self.config_dir) / name).resolve()
+        root = Path(self.config_dir).resolve()
+        try:
+            target.relative_to(root)
+        except ValueError as exc:
+            raise ValueError(f"配置路径越界: {filename}") from exc
+        return str(target)
 
     def save_config(
         self, config: WorkflowConfig, filename: Optional[str] = None
@@ -492,10 +516,7 @@ class WorkflowConfigManager:
         if filename is None:
             filename = f"{config.name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
 
-        if not filename.endswith(".json"):
-            filename += ".json"
-
-        filepath = os.path.join(self.config_dir, filename)
+        filepath = self._safe_config_path(filename)
 
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(config.to_dict(), f, ensure_ascii=False, indent=2)
@@ -504,10 +525,11 @@ class WorkflowConfigManager:
 
     def load_config(self, filename: str) -> Optional[WorkflowConfig]:
         """加载配置"""
-        if not filename.endswith(".json"):
-            filename += ".json"
-
-        filepath = os.path.join(self.config_dir, filename)
+        try:
+            filepath = self._safe_config_path(filename)
+        except ValueError as exc:
+            LOGGER.warning("拒绝加载非法工作流配置名 %s: %s", filename, exc)
+            return None
 
         if not os.path.exists(filepath):
             return None
@@ -565,10 +587,11 @@ class WorkflowConfigManager:
 
     def delete_config(self, filename: str) -> bool:
         """删除配置"""
-        if not filename.endswith(".json"):
-            filename += ".json"
-
-        filepath = os.path.join(self.config_dir, filename)
+        try:
+            filepath = self._safe_config_path(filename)
+        except ValueError as exc:
+            LOGGER.warning("拒绝删除非法工作流配置名 %s: %s", filename, exc)
+            return False
 
         if os.path.exists(filepath):
             os.remove(filepath)

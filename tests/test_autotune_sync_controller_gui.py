@@ -76,3 +76,29 @@ def test_autotune_sync_controller_dataset_roi_and_no_prior_smoke():
         assert win._manual_roi_values is None
     finally:
         _close_window(app, win)
+
+
+def test_autotune_sync_loads_sibling_target_response_npy(tmp_path):
+    app = _get_app()
+    win = GPRGuiQt("MyGPR V-test")
+    try:
+        raw = np.arange(24, dtype=np.float32).reshape(6, 4)
+        target = raw - np.mean(raw, axis=1, keepdims=True)
+        raw_path = tmp_path / "raw_Ey.npy"
+        target_path = tmp_path / "target_response_Ey.npy"
+        np.save(raw_path, raw)
+        np.save(target_path, target)
+
+        win.data = raw
+        win.data_path = str(raw_path)
+        win.header_info = {"source": "npy", "component": "Ey"}
+        win.shared_data.current_label = "Raw"
+
+        win._sync_auto_tune_page_dataset_state({"reason": "loaded", "source": "npy"})
+
+        assert win.page_auto_tune._target_response_data is not None
+        assert np.allclose(win.page_auto_tune._target_response_data, target)
+        assert win.page_auto_tune._target_response_label == str(target_path)
+        assert win.page_auto_tune.state.synthetic_gt_available is True
+    finally:
+        _close_window(app, win)

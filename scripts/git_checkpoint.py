@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import shlex
 import subprocess
 import sys
 from datetime import datetime
@@ -29,7 +30,10 @@ def _flatten_file_args(items: list[list[str]] | None) -> list[str]:
 
 def _run_command(command: str, *, repo_root: Path) -> None:
     print(f"[verify] {command}")
-    result = subprocess.run(command, cwd=repo_root, shell=True, check=False)
+    argv = shlex.split(command)
+    if not argv:
+        raise GitCheckpointError("empty verification command")
+    result = subprocess.run(argv, cwd=repo_root, shell=False, check=False)
     if result.returncode != 0:
         raise GitCheckpointError(
             f"verification command failed with exit code {result.returncode}: {command}"

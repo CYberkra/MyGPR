@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""GUI 调参与实验页面。"""
+"""GUI 自动选参兼容页面。"""
 
 import json
 import os
@@ -32,7 +32,7 @@ from ui.research_console_page import ResearchConsolePage
 
 
 class AutoTunePage(QWidget):
-    """调参与实验页面。"""
+    """自动选参兼容页面。"""
 
     def __init__(self, parent=None):
         super().__init__(parent)

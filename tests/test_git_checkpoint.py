@@ -31,7 +31,7 @@ def _init_repo(tmp_path: Path) -> Path:
     repo.mkdir()
     _git(repo, "init")
     _git(repo, "config", "user.email", "codex@example.invalid")
-    _git(repo, "config", "user.name", "Codex Test")
+    _git(repo, "config", "user.name", "Automation Test")
     (repo / "tracked.txt").write_text("base\n", encoding="utf-8")
     _git(repo, "add", "tracked.txt")
     _git(repo, "commit", "-m", "init")

@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Created on Thur Nov 7 15:40:15 2024
-
-
-@author: 何海
-"""
+"""Legacy runtime helper kept for MyGPR processing compatibility."""
 
 import numpy as np
 # 导入读取数据的函数

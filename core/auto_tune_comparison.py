@@ -602,6 +602,20 @@ def _compact_trials(trials: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     or []
                 ),
                 "valid": bool(trial.get("valid", True)),
+                "candidate_space_hash": _json_safe(trial.get("candidate_space_hash")),
+                "candidate_space_profile_id": _json_safe(trial.get("candidate_space_profile_id")),
+                "candidate_space_config_version": _json_safe(trial.get("candidate_space_config_version")),
+                "candidate_space_recipe_ids": _json_safe(trial.get("candidate_space_recipe_ids", [])),
+                "candidate_id": _json_safe(trial.get("candidate_id")),
+                "candidate_source": _json_safe(trial.get("candidate_source")),
+                "candidate_group": _json_safe(trial.get("candidate_group")),
+                "candidate_parameters": _json_safe(trial.get("candidate_parameters", {})),
+                "candidate_warnings": _json_safe(trial.get("candidate_warnings", [])),
+                "score_version": _json_safe(trial.get("score_version")),
+                "scoring_boundary": _json_safe(trial.get("scoring_boundary")),
+                "manual_review_required": _json_safe(trial.get("manual_review_required")),
+                "display_only": _json_safe(trial.get("display_only")),
+                "metric_safe": _json_safe(trial.get("metric_safe")),
             }
         )
     return compact

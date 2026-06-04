@@ -78,7 +78,7 @@ def test_runner_supports_executable_with_inline_args(tmp_path):
     assert result.status == "success"
     assert result.return_code == 0
     payload = json.loads(result.manifest_path.read_text(encoding="utf-8"))
-    assert payload["command"][0].endswith("python.exe")
+    assert Path(payload["command"][0]).name == Path(sys.executable).name
     assert payload["command"][1] == "-u"
     assert payload["gprmax_command_mode"] == "path_executable"
 

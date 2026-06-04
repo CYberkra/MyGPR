@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 echo ========================================
-echo GPR GUI 打包工具
+echo MyGPR 打包工具
 echo ========================================
 echo.
 
@@ -46,17 +46,17 @@ echo [4/5] 开始打包（这可能需要几分钟）...
 pyinstaller gpr_gui.spec --clean --noconfirm
 
 :: 检查结果
-if exist "dist\GPR_GUI.exe" (
+if exist "dist\MyGPR.exe" (
     echo [5/5] 打包成功！
     echo.
     echo ========================================
     echo 打包完成！
     echo ========================================
     echo.
-    echo 生成的文件位置: %cd%\dist\GPR_GUI.exe
+    echo 生成的文件位置: %cd%\dist\MyGPR.exe
     echo.
     echo 文件大小:
-    dir "dist\GPR_GUI.exe" | findstr "GPR_GUI.exe"
+    dir "dist\MyGPR.exe" | findstr "MyGPR.exe"
     echo.
     echo 是否打开输出目录？
     choice /c YN /m "打开文件夹 (Y/N)"

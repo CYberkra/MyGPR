@@ -1,0 +1,11 @@
+{
+  "scene_id": "scene_008_debug_three_trace_step_probe",
+  "roi_role": "draft_synthetic_target_region",
+  "expected_target_region": "debug-only local target response around sphere center",
+  "trace_window": [1, 3],
+  "depth_window": [120, 260],
+  "notes": [
+    "ROI is draft for stepping/conversion diagnostics only.",
+    "Not field ground truth and not benchmark ROI."
+  ]
+}

@@ -136,6 +136,17 @@ def export_auto_tune_comparison_artifacts(
             "truth_target_saliency_gain",
             "truth_background_energy_reduction",
             "truth_false_positive_ratio",
+            "candidate_space_hash",
+            "candidate_space_profile_id",
+            "candidate_space_config_version",
+            "candidate_space_recipe_ids_json",
+            "candidate_id",
+            "candidate_source",
+            "candidate_group",
+            "candidate_parameters_json",
+            "scoring_boundary",
+            "manual_review_required",
+            "score_version",
             "reason",
             "warnings_json",
         ],
@@ -367,7 +378,12 @@ def _build_trial_table(
 ) -> tuple[list[dict[str, Any]], dict[str, Any], list[str]]:
     rows: list[dict[str, Any]] = []
     warnings_list: list[str] = []
-    payload: dict[str, Any] = {"schema": "mygpr_autotune_trial_table_v1", "methods": {}}
+    evidence_context = _build_autotune_v1_evidence_context(summary)
+    payload: dict[str, Any] = {
+        "schema": "mygpr_autotune_trial_table_v1",
+        "methods": {},
+        "autotune_v1_evidence": evidence_context,
+    }
     automatic = summary.get("automatic") or {}
     manual = summary.get("manual") or {}
     manual_params = manual.get("params_by_method") or {}
@@ -396,6 +412,7 @@ def _build_trial_table(
                 truth_metrics=manual.get("metrics") or {},
                 reason="manual baseline parameters",
                 warnings=manual.get("warnings") or [],
+                evidence_context=evidence_context,
             )
         )
         result = auto_results.get(method_key) or {}
@@ -429,6 +446,7 @@ def _build_trial_table(
                     truth_metrics=trial,
                     reason=trial.get("reason") or result.get("best_reason") or "",
                     warnings=trial.get("warnings") or [],
+                    evidence_context=evidence_context,
                 )
             )
         payload["methods"][method_key] = method_payload
@@ -448,7 +466,12 @@ def _trial_row(
     truth_metrics: dict[str, Any],
     reason: str,
     warnings: list[Any],
+    evidence_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    trial = dict(truth_metrics or {})
+    context = dict(evidence_context or {})
+    boundary = _trial_scoring_boundary(trial, context)
+    manual_review_required = _trial_manual_review_required(branch, trial, context)
     return {
         "branch": branch,
         "method_key": method_key,
@@ -457,23 +480,156 @@ def _trial_row(
         "params_json": json.dumps(_json_safe(params or {}), ensure_ascii=False, sort_keys=True),
         "score": _csv_value(score),
         "comparison_score": _csv_value(comparison_score),
-        "truth_score": _csv_value(truth_metrics.get("truth_score")),
+        "truth_score": _csv_value(trial.get("truth_score")),
         "truth_target_energy_preservation": _csv_value(
-            truth_metrics.get("truth_target_energy_preservation")
+            trial.get("truth_target_energy_preservation")
         ),
         "truth_target_saliency_gain": _csv_value(
-            truth_metrics.get("truth_target_saliency_gain")
+            trial.get("truth_target_saliency_gain")
         ),
         "truth_background_energy_reduction": _csv_value(
-            truth_metrics.get("truth_background_energy_reduction")
+            trial.get("truth_background_energy_reduction")
         ),
         "truth_false_positive_ratio": _csv_value(
-            truth_metrics.get("truth_false_positive_ratio")
+            trial.get("truth_false_positive_ratio")
         ),
+        "candidate_space_hash": _csv_value(trial.get("candidate_space_hash") or _first_value(context.get("candidate_space_hashes"))),
+        "candidate_space_profile_id": _csv_value(trial.get("candidate_space_profile_id") or trial.get("candidate_space_profile") or _first_value(context.get("profile_ids"))),
+        "candidate_space_config_version": _csv_value(trial.get("candidate_space_config_version") or _first_value(context.get("config_versions"))),
+        "candidate_space_recipe_ids_json": json.dumps(_json_safe(trial.get("candidate_space_recipe_ids") or context.get("recipe_ids") or []), ensure_ascii=False),
+        "candidate_id": _csv_value(trial.get("candidate_id")),
+        "candidate_source": _csv_value(trial.get("candidate_source")),
+        "candidate_group": _csv_value(trial.get("candidate_group")),
+        "candidate_parameters_json": json.dumps(_json_safe(trial.get("candidate_parameters") or {}), ensure_ascii=False, sort_keys=True),
+        "scoring_boundary": boundary,
+        "manual_review_required": bool(manual_review_required),
+        "score_version": _csv_value(trial.get("score_version") or trial.get("autotune_scoring_version") or context.get("score_version") or ""),
         "reason": str(reason or ""),
-        "warnings_json": json.dumps(_json_safe(warnings or []), ensure_ascii=False),
+        "warnings_json": json.dumps(_json_safe(warnings or trial.get("candidate_warnings") or []), ensure_ascii=False),
     }
 
+
+
+def _first_value(values: Any) -> Any:
+    if isinstance(values, (list, tuple)) and values:
+        return values[0]
+    return None
+
+
+def _unique_values(values: list[Any]) -> list[Any]:
+    seen: set[str] = set()
+    out: list[Any] = []
+    for value in values:
+        if value in (None, "", [], {}):
+            continue
+        safe = _json_safe(value)
+        key = json.dumps(safe, ensure_ascii=False, sort_keys=True)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(safe)
+    return out
+
+
+def _iter_auto_tune_trials(summary: dict[str, Any]):
+    automatic = summary.get("automatic") or {}
+    auto_results = automatic.get("auto_tune_results") or {}
+    if not isinstance(auto_results, dict):
+        return
+    for method_key, result in auto_results.items():
+        if not isinstance(result, dict):
+            continue
+        for trial in result.get("all_trials") or []:
+            if isinstance(trial, dict):
+                yield str(method_key), trial
+
+
+def _build_autotune_v1_evidence_context(summary: dict[str, Any]) -> dict[str, Any]:
+    """Collect candidate-space and scoring-boundary metadata for exports.
+
+    The context is deliberately compact and JSON-safe. It does not claim that
+    real no-prior metrics are ground truth; it records the boundary under which
+    the exported AutoTune trial table may be interpreted.
+    """
+    ground_truth = summary.get("ground_truth_info") or {}
+    roi = summary.get("roi_info") or {}
+    has_truth = bool(ground_truth.get("enabled"))
+    hashes: list[Any] = []
+    profiles: list[Any] = []
+    config_versions: list[Any] = []
+    recipe_ids: list[Any] = []
+    candidate_ids: list[Any] = []
+    score_versions: list[Any] = []
+    display_only = False
+    experimental = False
+    for _method_key, trial in _iter_auto_tune_trials(summary):
+        hashes.append(trial.get("candidate_space_hash"))
+        profiles.append(trial.get("candidate_space_profile_id") or trial.get("candidate_space_profile"))
+        config_versions.append(trial.get("candidate_space_config_version"))
+        recipe_ids.extend(trial.get("candidate_space_recipe_ids") or [])
+        candidate_ids.append(trial.get("candidate_id"))
+        score_versions.append(trial.get("score_version") or trial.get("autotune_scoring_version"))
+        if trial.get("display_only") or trial.get("metric_safe") is False:
+            display_only = True
+        params = trial.get("candidate_parameters") or {}
+        if isinstance(params, dict) and params.get("experimental"):
+            experimental = True
+    scoring_boundary = "synthetic_supervised" if has_truth else "field_no_prior_proxy"
+    manual_review_required = bool(
+        not has_truth
+        or str(roi.get("source") or "").lower() == "manual"
+        or display_only
+        or experimental
+    )
+    forbidden_metrics = [] if has_truth else ["MAE", "MSE", "RMSE", "PSNR", "SSIM", "MS-SSIM", "target_response_similarity"]
+    allowed_metrics = (
+        ["MAE", "MSE", "RMSE", "PSNR", "SSIM-like", "target_roi_preservation", "background_roi_suppression", "false_positive_risk"]
+        if has_truth
+        else ["SCR/CNR proxy", "contrast", "entropy", "continuity", "texture/coherence", "artifact risk"]
+    )
+    claim_boundary = (
+        "Synthetic supervised benchmark: candidate ranking may be interpreted against the provided target/background reference only for this controlled input."
+        if has_truth
+        else "Real no-prior proxy: candidate ranking is heuristic and must not be interpreted as closer to true subsurface structure; manual review is required."
+    )
+    return {
+        "enabled": bool(hashes or profiles or candidate_ids),
+        "schema": "mygpr_autotune_v1_evidence_context",
+        "candidate_space_hashes": _unique_values(hashes),
+        "profile_ids": _unique_values(profiles),
+        "config_versions": _unique_values(config_versions),
+        "recipe_ids": _unique_values(recipe_ids),
+        "candidate_ids": _unique_values(candidate_ids),
+        "score_version": _first_value(_unique_values(score_versions)) or "autotune_scoring_v2",
+        "scoring_boundary": scoring_boundary,
+        "target_response_available": has_truth,
+        "allowed_metrics": allowed_metrics,
+        "forbidden_metrics": forbidden_metrics,
+        "manual_review_required": manual_review_required,
+        "claim_boundary": claim_boundary,
+        "roi_mode": roi.get("source") or "full",
+        "display_only_candidates_present": bool(display_only),
+        "experimental_candidates_present": bool(experimental),
+    }
+
+
+def _trial_scoring_boundary(trial: dict[str, Any], context: dict[str, Any]) -> str:
+    return str(
+        trial.get("scoring_boundary")
+        or trial.get("claim_boundary_mode")
+        or context.get("scoring_boundary")
+        or "field_no_prior_proxy"
+    )
+
+
+def _trial_manual_review_required(branch: str, trial: dict[str, Any], context: dict[str, Any]) -> bool:
+    if branch == "manual":
+        return bool(context.get("manual_review_required", True))
+    if "manual_review_required" in trial:
+        return bool(trial.get("manual_review_required"))
+    if trial.get("display_only") or trial.get("metric_safe") is False:
+        return True
+    return bool(context.get("manual_review_required", True))
 
 def _same_params(lhs: Any, rhs: Any) -> bool:
     return _json_safe(lhs or {}) == _json_safe(rhs or {})
@@ -527,6 +683,7 @@ def _build_workflow_params(summary: dict[str, Any]) -> dict[str, Any]:
         "parameter_domain": _json_safe(parameter_domain),
         "baseline_profile_key": summary.get("baseline_profile_key"),
         "roi_info": _json_safe(summary.get("roi_info") or {}),
+        "autotune_v1_candidate_space": _json_safe(_build_autotune_v1_evidence_context(summary)),
     }
 
 
@@ -550,6 +707,9 @@ def _build_evidence_manifest(
     warnings_list = _summary_warnings(summary)
     conversion_warnings = ground_truth.get("conversion_warnings") or []
     warnings_list.extend(str(item) for item in conversion_warnings)
+    autotune_v1_context = _build_autotune_v1_evidence_context(summary)
+    if autotune_v1_context.get("manual_review_required"):
+        warnings_list.append("AutoTune V1 export requires manual review under the recorded scoring boundary.")
     return {
         "schema": "mygpr_autotune_evidence_v1",
         "exported_at": summary.get("exported_at"),
@@ -576,6 +736,7 @@ def _build_evidence_manifest(
             "baseline_profile_key": summary.get("baseline_profile_key"),
             "roi_info": _json_safe(summary.get("roi_info") or {}),
         },
+        "autotune_v1": _json_safe(autotune_v1_context),
         "artifacts": artifacts,
         "warnings": _json_safe(warnings_list),
         "notes": [str(item) for item in notes],
@@ -653,6 +814,7 @@ def _build_report_markdown(summary: dict[str, Any]) -> str:
     roi = summary.get("roi_info") or {}
     artifacts = summary.get("artifacts") or {}
     ground_truth = summary.get("ground_truth_info") or {}
+    v1_context = _build_autotune_v1_evidence_context(summary)
     notes = [str(item) for item in (summary.get("notes") or [])]
     lines = [
         "# AutoTune gprMax Evidence Report",
@@ -687,6 +849,10 @@ def _build_report_markdown(summary: dict[str, Any]) -> str:
         "## 5. Trial Summary",
         "",
         _markdown_trial_summary(summary),
+        "",
+        "## 5.1 AutoTune V1 Evidence Boundary",
+        "",
+        _markdown_autotune_v1_boundary(v1_context),
         "",
         "## 6. Figures",
         "",
@@ -730,6 +896,25 @@ def _build_report_markdown(summary: dict[str, Any]) -> str:
     )
     return "\n".join(lines)
 
+
+
+def _markdown_autotune_v1_boundary(context: dict[str, Any]) -> str:
+    if not context.get("enabled"):
+        return "- AutoTune V1 candidate-space metadata: not present in this export."
+    lines = [
+        f"- Candidate-space hash: `{_format_list(context.get('candidate_space_hashes') or [])}`",
+        f"- Profile: `{_format_list(context.get('profile_ids') or [])}`",
+        f"- Config version: `{_format_list(context.get('config_versions') or [])}`",
+        f"- Recipe ids: `{_format_list(context.get('recipe_ids') or [])}`",
+        f"- Scoring boundary: `{context.get('scoring_boundary')}`",
+        f"- Target response available: {bool(context.get('target_response_available'))}",
+        f"- Manual review required: {bool(context.get('manual_review_required'))}",
+        f"- Claim boundary: {context.get('claim_boundary')}",
+    ]
+    forbidden = context.get("forbidden_metrics") or []
+    if forbidden:
+        lines.append(f"- Forbidden full-reference metrics under this boundary: `{_format_list(forbidden)}`")
+    return "\n".join(lines)
 
 def _format_ground_truth_target(ground_truth: dict[str, Any]) -> str:
     targets = ground_truth.get("targets") or []

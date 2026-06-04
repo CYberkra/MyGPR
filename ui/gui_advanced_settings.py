@@ -19,6 +19,8 @@ from PyQt6.QtWidgets import (
 )
 from qfluentwidgets import PushButton, FluentIcon, SegmentedWidget
 
+from core.page_operation_contract import get_page_contract
+
 
 class AdvancedSettingsPage(QWidget):
     """显示与对比页面 — 顶部 SegmentedWidget + QStackedWidget。"""
@@ -26,6 +28,9 @@ class AdvancedSettingsPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent_window = parent
+        self.operation_contract = get_page_contract("display")
+        self.allowed_operation_types = self.operation_contract.allowed_operation_types
+        self.mutates_data = self.operation_contract.mutates_data
         self.setup_ui()
 
     def setup_ui(self):
@@ -45,35 +50,17 @@ class AdvancedSettingsPage(QWidget):
         page_hint.setProperty("class", "hintText")
         outer_layout.addWidget(page_hint)
 
-        flow_box = QGroupBox("查看顺序")
-        flow_box.setProperty("class", "calloutBox")
-        flow_layout = QVBoxLayout(flow_box)
-        flow_layout.setContentsMargins(10, 14, 10, 10)
-        flow_layout.setSpacing(8)
-
-        flow_hint = QLabel("推荐顺序：先确定显示模式，再设置聚焦范围，最后按需切到摆动图、滑动对比或增强性能选项。")
-        flow_hint.setWordWrap(True)
-        flow_hint.setProperty("class", "hintText")
-        flow_layout.addWidget(flow_hint)
-
-        flow_row = QWidget()
-        flow_row_layout = QHBoxLayout(flow_row)
-        flow_row_layout.setContentsMargins(0, 0, 0, 0)
-        flow_row_layout.setSpacing(8)
-        for text in ["① 显示模式", "② 聚焦交互", "③ 增强与性能"]:
-            chip = QLabel(text)
-            chip.setProperty("class", "statusChip")
-            flow_row_layout.addWidget(chip)
-        flow_row_layout.addStretch(1)
-        flow_layout.addWidget(flow_row)
-        outer_layout.addWidget(flow_box)
+        compact_hint = QLabel("显示设置只改变主图呈现方式，不改变数组处理结果。")
+        compact_hint.setWordWrap(True)
+        compact_hint.setProperty("class", "hintText")
+        outer_layout.addWidget(compact_hint)
 
         # ========== 顶部标签栏 ==========
         self.segmented = SegmentedWidget(self)
-        self.segmented.addItem("mode", "显示模式")
-        self.segmented.addItem("core", "核心显示")
-        self.segmented.addItem("interact", "聚焦交互")
-        self.segmented.addItem("enhance", "增强与性能")
+        self.segmented.addItem("mode", "模式")
+        self.segmented.addItem("core", "色图")
+        self.segmented.addItem("interact", "交互")
+        self.segmented.addItem("enhance", "增强")
         outer_layout.addWidget(self.segmented)
 
         # ========== 内容栈 ==========
@@ -92,7 +79,7 @@ class AdvancedSettingsPage(QWidget):
         self.page_interact = self._build_interact_page()
         self.stack.addWidget(self.page_interact)
 
-        # ---- 页面4: 增强与性能 ----
+        # ---- 页面4: 显示增强 ----
         self.page_enhance = self._build_enhance_page()
         self.stack.addWidget(self.page_enhance)
 
@@ -385,7 +372,7 @@ class AdvancedSettingsPage(QWidget):
         return scroll
 
     def _build_enhance_page(self):
-        """构建增强与性能页面。"""
+        """构建显示增强页面。"""
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -395,25 +382,25 @@ class AdvancedSettingsPage(QWidget):
         layout.setContentsMargins(0, 10, 0, 0)
         layout.setSpacing(16)
 
-        # 增强
-        enhance_box = QGroupBox("增强与对比辅助")
+        # 显示增强
+        enhance_box = QGroupBox("显示增强")
         enhance_layout = QVBoxLayout(enhance_box)
         enhance_layout.setSpacing(10)
 
-        enhance_hint = QLabel("对当前显示做增强和轻量预处理，便于判读与对比。")
+        enhance_hint = QLabel("仅调整当前主图的显示拉伸、归一化和对比度，不改变处理数组。")
         enhance_hint.setWordWrap(True)
         enhance_hint.setProperty("class", "hintText")
         enhance_layout.addWidget(enhance_hint)
 
         self.symmetric_var = QCheckBox("对称灰度拉伸（以零为中心）")
         self.symmetric_var.setToolTip("适合查看正负振幅对称的雷达数据")
-        self.chatgpt_style_var = QCheckBox("自动对比度（裁剪极值）")
-        self.chatgpt_style_var.setChecked(False)
-        self.chatgpt_style_var.setToolTip("自动裁剪极端值，增强主体反射")
+        self.auto_contrast_var = QCheckBox("自动对比度（裁剪极值）")
+        self.auto_contrast_var.setChecked(False)
+        self.auto_contrast_var.setToolTip("自动裁剪极端值，增强主体反射")
         self.percentile_var = QCheckBox("百分位拉伸")
         self.percentile_var.setToolTip("基于百分位数拉伸对比度")
         enhance_layout.addWidget(self.symmetric_var)
-        enhance_layout.addWidget(self.chatgpt_style_var)
+        enhance_layout.addWidget(self.auto_contrast_var)
         enhance_layout.addWidget(self.percentile_var)
 
         perc_row = QWidget()
@@ -437,74 +424,27 @@ class AdvancedSettingsPage(QWidget):
 
         self.normalize_var = QCheckBox("归一化（最大绝对值）")
         self.normalize_var.setToolTip("将显示数据归一化到 [-1, 1]")
-        self.demean_var = QCheckBox("去均值（逐道）")
-        self.demean_var.setToolTip("逐道去均值，减弱直流漂移")
+        self.demean_var = QCheckBox("显示去均值（逐道）")
+        self.demean_var.setToolTip("仅在显示层逐道去均值；不写入处理结果")
         enhance_layout.addWidget(self.normalize_var)
         enhance_layout.addWidget(self.demean_var)
 
         layout.addWidget(enhance_box)
 
-        # 可选 RTK/IMU/高度计辅助文件：仅保存用户手动选择的路径，不影响普通 CSV 导入。
-        self.sidecar_box = QGroupBox("可选 RTK/IMU/高度计 辅助文件")
-        sidecar_layout = QVBoxLayout(self.sidecar_box)
-        sidecar_layout.setSpacing(10)
-
-        sidecar_hint = QLabel(
-            "没有 RTK/IMU/高度计数据时可保持未选择；普通 CSV 导入和处理流程不受影响。"
-        )
-        sidecar_hint.setWordWrap(True)
-        sidecar_hint.setProperty("class", "hintText")
-        sidecar_layout.addWidget(sidecar_hint)
-
-        rtk_row = QWidget()
-        rtk_layout = QHBoxLayout(rtk_row)
-        rtk_layout.setContentsMargins(0, 0, 0, 0)
-        rtk_layout.setSpacing(8)
-        rtk_layout.addWidget(QLabel("RTK"))
+        # 空间辅助文件入口已迁移到“空间”页。这里仅保留隐藏兼容控件，
+        # 使旧的 sidecar 状态同步/测试不会因为属性缺失而中断；显示页仍保持 display-only。
+        self.sidecar_box = QGroupBox("空间辅助文件（已移至空间页）")
+        self.sidecar_box.setVisible(False)
         self.rtk_sidecar_label = QLabel("未选择")
-        self.rtk_sidecar_label.setProperty("class", "hintText")
         self.rtk_sidecar_button = PushButton("选择 RTK")
-        self.rtk_sidecar_button.setToolTip("选择可选 RTK CSV 辅助文件")
         self.rtk_sidecar_clear_button = PushButton("清除")
-        self.rtk_sidecar_clear_button.setToolTip("清除当前 RTK 辅助文件选择")
-        rtk_layout.addWidget(self.rtk_sidecar_label, stretch=1)
-        rtk_layout.addWidget(self.rtk_sidecar_button)
-        rtk_layout.addWidget(self.rtk_sidecar_clear_button)
-        sidecar_layout.addWidget(rtk_row)
-
-        imu_row = QWidget()
-        imu_layout = QHBoxLayout(imu_row)
-        imu_layout.setContentsMargins(0, 0, 0, 0)
-        imu_layout.setSpacing(8)
-        imu_layout.addWidget(QLabel("IMU"))
         self.imu_sidecar_label = QLabel("未选择")
-        self.imu_sidecar_label.setProperty("class", "hintText")
         self.imu_sidecar_button = PushButton("选择 IMU")
-        self.imu_sidecar_button.setToolTip("选择可选 IMU CSV 辅助文件")
         self.imu_sidecar_clear_button = PushButton("清除")
-        self.imu_sidecar_clear_button.setToolTip("清除当前 IMU 辅助文件选择")
-        imu_layout.addWidget(self.imu_sidecar_label, stretch=1)
-        imu_layout.addWidget(self.imu_sidecar_button)
-        imu_layout.addWidget(self.imu_sidecar_clear_button)
-        sidecar_layout.addWidget(imu_row)
-
-        altimeter_row = QWidget()
-        altimeter_layout = QHBoxLayout(altimeter_row)
-        altimeter_layout.setContentsMargins(0, 0, 0, 0)
-        altimeter_layout.setSpacing(8)
-        altimeter_layout.addWidget(QLabel("高度计"))
         self.altimeter_sidecar_label = QLabel("未选择")
-        self.altimeter_sidecar_label.setProperty("class", "hintText")
         self.altimeter_sidecar_button = PushButton("选择高度计")
-        self.altimeter_sidecar_button.setToolTip("选择可选高度计 CSV 辅助文件")
         self.altimeter_sidecar_clear_button = PushButton("清除")
-        self.altimeter_sidecar_clear_button.setToolTip("清除当前高度计辅助文件选择")
-        altimeter_layout.addWidget(self.altimeter_sidecar_label, stretch=1)
-        altimeter_layout.addWidget(self.altimeter_sidecar_button)
-        altimeter_layout.addWidget(self.altimeter_sidecar_clear_button)
-        sidecar_layout.addWidget(altimeter_row)
 
-        layout.addWidget(self.sidecar_box)
         layout.addStretch(1)
 
         scroll.setWidget(content)

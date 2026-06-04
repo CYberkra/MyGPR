@@ -1,0 +1,34 @@
+campaign_id: GX-007_paired_background_benchmark
+output_root: ${MYGPR_EVIDENCE_ROOT}/gprmax/GX-007
+gprmax_executable: gprMax
+
+scenes:
+  - scene_id: scene_001_single_shallow_pipe
+    description: Minimal shallow single target paired draft.
+    raw_model: models/scene_001_single_shallow_pipe/raw_with_target.in
+    background_model: models/scene_001_single_shallow_pipe/background_only.in
+    materials: models/scene_001_single_shallow_pipe/materials.txt
+    target_roi: annotations/scene_001_single_shallow_pipe_roi.json
+    expected_outputs:
+      - raw_with_target
+      - background_only
+      - target_response
+    tags:
+      - gx007
+      - shallow_target
+      - paired_benchmark
+
+  - scene_id: scene_002_single_deeper_pipe
+    description: Minimal deeper single target paired draft.
+    raw_model: models/scene_002_single_deeper_pipe/raw_with_target.in
+    background_model: models/scene_002_single_deeper_pipe/background_only.in
+    materials: models/scene_002_single_deeper_pipe/materials.txt
+    target_roi: annotations/scene_002_single_deeper_pipe_roi.json
+    expected_outputs:
+      - raw_with_target
+      - background_only
+      - target_response
+    tags:
+      - gx007
+      - deeper_target
+      - paired_benchmark

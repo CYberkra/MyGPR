@@ -1,0 +1,16 @@
+scene_id: scene_009_micro_hyperbola_dry_sand_pec_sphere
+purpose: micro-scale hyperbola trend diagnostic before any full-size run
+
+materials:
+  dry_sand_like:
+    eps_r: 3.0
+    sigma_s_per_m: 0.001
+    note: draft GX-008 dry_sand_like baseline
+  target:
+    type: pec sphere
+    center_m: [0.55, 0.30, 0.16]
+    radius_m: 0.06
+
+source_basis:
+  - GX-008 mini benchmark draft defaults
+  - reduced domain/time-window/trace-count for fast diagnosis

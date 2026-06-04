@@ -1,0 +1,7 @@
+﻿directory,python_file_count,physical_lines,non_empty_non_comment_lines,test_lines,script_lines,suspected_autotune_lines,suspected_ui_lines,suspected_core_processing_lines
+.,3,8818,7473,0,0,0,7847,971
+PythonModule,40,7710,5813,0,0,0,0,7710
+core,56,24749,21379,0,0,1976,0,20645
+scripts,56,29361,24446,353,29361,722,584,11899
+tests,124,21916,17651,21916,0,777,184,5606
+ui,20,14312,12238,0,0,1624,12688,1107

@@ -26,6 +26,7 @@ import numpy as np
 import pandas as pd
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
+from core.export_performance import write_json_sidecars, write_text_sidecars
 from core.methods_registry import PROCESSING_METHODS, get_public_method_keys
 from core.runtime_warnings import format_runtime_warning_text
 
@@ -85,6 +86,7 @@ class ReportExportController:
             figure_manifest_path = os.path.join(package_dir, "figure_manifest.json")
             claim_boundary_path = os.path.join(package_dir, "claim_boundary.txt")
             audit_note_path = os.path.join(package_dir, "audit_note.md")
+            autotune_scoring_path = os.path.join(package_dir, "autotune_scoring_v2.json")
 
             # Legacy top-level Markdown alias retained for older smoke tests and
             # users accustomed to report_*.md in the selected output directory.
@@ -103,7 +105,8 @@ class ReportExportController:
                     self._log(f"报告导出切回当前结果视图失败: {exc}")
 
             try:
-                self.fig.savefig(image_path, dpi=600, bbox_inches="tight")
+                with self._perf().span("export.report_figure_600dpi_ms"):
+                    self.fig.savefig(image_path, dpi=600, bbox_inches="tight")
             except Exception as e:
                 self._log(f"报告截图失败: {e}")
 
@@ -319,6 +322,16 @@ class ReportExportController:
             if auto_tune_ctx:
                 lines.append("- AutoTune recommendation label:")
                 lines.append(f"  - {auto_tune_ctx}")
+            scoring_record = last_run.get("autotune_scoring_record") if isinstance(last_run.get("autotune_scoring_record"), dict) else {}
+            if scoring_record:
+                try:
+                    from core.autotune_scoring_record import summarize_record
+
+                    lines.append("- AutoTune scoring v2:")
+                    for item in summarize_record(scoring_record).splitlines():
+                        lines.append(f"  - {item}")
+                except Exception:
+                    lines.append("- AutoTune scoring v2: recorded in sidecar")
             if self._no_prior_guard_events:
                 lines.append("- No-prior guard events:")
                 for event in self._no_prior_guard_events[-12:]:
@@ -377,6 +390,7 @@ class ReportExportController:
                     roi_path,
                     figure_manifest_path,
                     audit_note_path,
+                    autotune_scoring_path,
                     timestamp=ts,
                     package_dir=package_dir,
                     report_path=report_path,
@@ -394,14 +408,15 @@ class ReportExportController:
                 self._log(f"报告 sidecar 生成失败: {e}")
 
             try:
-                self._write_branded_report_html(
-                    html_path,
-                    ts,
-                    image_path,
-                    report_text,
-                    last_run=last_run,
-                    no_prior_policy=no_prior_policy,
-                )
+                with self._perf().span("export.report_html_ms"):
+                    self._write_branded_report_html(
+                        html_path,
+                        ts,
+                        image_path,
+                        report_text,
+                        last_run=last_run,
+                        no_prior_policy=no_prior_policy,
+                    )
                 self._log(f"报告包已保存: {package_dir}")
             except Exception as e:
                 logger.exception("Failed to write branded HTML report")
@@ -659,6 +674,8 @@ class ReportExportController:
                 "current_method_params": params or {},
                 "last_run_steps": last_run.get("steps", []),
                 "workflow_summary": last_run.get("workflow_summary", {}),
+                "autotune_scoring_record": last_run.get("autotune_scoring_record", {}) if isinstance(last_run.get("autotune_scoring_record"), dict) else {},
+                "autotune_recipe_plan": last_run.get("autotune_recipe_plan", {}) if isinstance(last_run.get("autotune_recipe_plan"), dict) else {},
                 "processing_chain_step_count": len(processing_chain),
                 "processing_chain_labels": [step.get("label") for step in processing_chain],
             }
@@ -746,6 +763,7 @@ class ReportExportController:
             roi_path: str,
             figure_manifest_path: str,
             audit_note_path: str,
+            autotune_scoring_path: str,
             *,
             timestamp: str,
             package_dir: str,
@@ -784,6 +802,22 @@ class ReportExportController:
                 "raw_warnings": self._json_safe(getattr(self, "_runtime_warnings", [])),
                 "no_prior_guard_events": self._json_safe(getattr(self, "_no_prior_guard_events", [])[-50:]),
             }
+            autotune_scoring_record = {}
+            if isinstance((last_run or {}).get("autotune_scoring_record"), dict):
+                autotune_scoring_record = dict((last_run or {}).get("autotune_scoring_record") or {})
+            chain_scoring_records = [
+                step.get("autotune_scoring_record")
+                for step in chain
+                if isinstance(step.get("autotune_scoring_record"), dict) and step.get("autotune_scoring_record")
+            ]
+            scoring_payload = {
+                "schema": "mygpr.autotune_scoring_v2_record.v1",
+                "timestamp": timestamp,
+                "record_source": "last_run_summary" if autotune_scoring_record else ("processing_chain" if chain_scoring_records else "not_available"),
+                "autotune_scoring_record": autotune_scoring_record or (chain_scoring_records[-1] if chain_scoring_records else {}),
+                "chain_scoring_records": chain_scoring_records,
+                "note": "scoring v2 records explain AutoTune recommendation ranking; real no-prior records are proxy scoring, not ground truth validation.",
+            }
             processing_chain_payload = {
                 "schema": "mygpr.processing_chain.v2",
                 "timestamp": timestamp,
@@ -821,6 +855,7 @@ class ReportExportController:
                 "processing_params": params,
                 "display_settings_file": os.path.basename(display_settings_path),
                 "last_run": last_run or {},
+                "autotune_scoring_record": autotune_scoring_record,
                 "note": "processing_params are algorithm inputs; display-only settings are stored separately and must not be used as processing evidence.",
             }
             display_payload = {
@@ -850,6 +885,7 @@ class ReportExportController:
                 "figure_manifest_json": os.path.basename(figure_manifest_path),
                 "claim_boundary_txt": os.path.basename(claim_boundary_path),
                 "audit_note_md": os.path.basename(audit_note_path),
+                "autotune_scoring_v2_json": os.path.basename(autotune_scoring_path),
             }
             if legacy_report_path:
                 artifact_files["legacy_report_markdown_alias"] = os.path.basename(legacy_report_path)
@@ -881,6 +917,7 @@ class ReportExportController:
                 "history_memory": history_memory,
                 "lineage_export_forced_current": bool(lineage_export_forced_current),
                 "last_run": last_run or {},
+                "autotune_scoring_v2": scoring_payload,
                 "current_method_params": params,
                 "display_settings": display_payload,
                 "roi": roi_payload,
@@ -900,16 +937,19 @@ class ReportExportController:
                 (warnings_path, warnings_payload),
                 (roi_path, roi_payload),
                 (figure_manifest_path, figure_manifest),
+                (autotune_scoring_path, scoring_payload),
                 (evidence_index_path, evidence_index),
                 (manifest_path, manifest),
             ]
-            for path, payload in writes:
-                with open(path, "w", encoding="utf-8") as f:
-                    json.dump(self._json_safe(payload), f, ensure_ascii=False, indent=2)
-            Path(runtime_log_path).write_text(runtime_log_text or "", encoding="utf-8")
-            Path(environment_summary_path).write_text(environment_summary, encoding="utf-8")
-            Path(claim_boundary_path).write_text(str(claim_boundary), encoding="utf-8")
-            Path(audit_note_path).write_text(audit_note_text, encoding="utf-8")
+            with self._perf().span("export.report_sidecar_json_ms"):
+                write_json_sidecars(writes, json_safe=self._json_safe)
+            with self._perf().span("export.report_sidecar_text_ms"):
+                write_text_sidecars([
+                    (runtime_log_path, runtime_log_text or ""),
+                    (environment_summary_path, environment_summary),
+                    (claim_boundary_path, str(claim_boundary)),
+                    (audit_note_path, audit_note_text),
+                ])
 
     def _write_branded_report_html(
             self,

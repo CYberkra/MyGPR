@@ -387,3 +387,94 @@ def test_locked_display_spec_ignores_nonfinite_values_when_scaling():
 
     assert spec["vmin"] == -4.0
     assert spec["vmax"] == 4.0
+
+
+def test_export_preserves_autotune_v1_candidate_space_manifest_fields(tmp_path: Path):
+    raw = _build_export_fixture(samples=72, traces=18)
+    result = run_auto_tune_comparison(
+        raw,
+        pipeline=["dewow"],
+        manual_params_by_method={"dewow": {"window": 1}},
+        roi_spec={
+            "mode": "manual",
+            "bounds": {
+                "time_start_idx": 10,
+                "time_end_idx": 50,
+                "dist_start_idx": 2,
+                "dist_end_idx": 14,
+            },
+            "label": "manual-review-roi",
+        },
+        search_mode="fast",
+    )
+    selected = dict(result.automatic.params_by_method.get("dewow") or {"window": 7})
+    result.automatic.auto_tune_results = {
+        "dewow": {
+            "best_score": 0.88,
+            "best_reason": "selected from V1 bounded candidate space",
+            "recommended_params": selected,
+            "all_trials": [
+                {
+                    "trial_index": 0,
+                    "stage": "coarse",
+                    "params": selected,
+                    "score": 0.88,
+                    "reason": "selected from V1 bounded candidate space",
+                    "warnings": [],
+                    "valid": True,
+                    "candidate_space_hash": "sha256:demo-space",
+                    "candidate_space_profile_id": "landslide_bedrock_sliding_surface",
+                    "candidate_space_config_version": "autotune_v1_profiles.v1",
+                    "candidate_space_recipe_ids": ["landslide_bedrock_interface"],
+                    "candidate_id": "dewow.window.7",
+                    "candidate_source": "adaptive",
+                    "candidate_group": "dewow_window",
+                    "candidate_parameters": {"window": selected.get("window", 7)},
+                    "score_version": "autotune_scoring_v2",
+                }
+            ],
+            "execution_stats": {"total_trial_count": 1},
+        }
+    }
+
+    bundle = export_auto_tune_comparison_artifacts(
+        result,
+        out_dir=tmp_path,
+        bundle_name="v1_manifest_case",
+        input_ref="field://no-prior-demo",
+    )
+
+    manifest = json.loads(
+        Path(bundle["artifacts"]["evidence_manifest_json"]).read_text(encoding="utf-8")
+    )
+    v1 = manifest["autotune_v1"]
+    assert v1["candidate_space_hashes"] == ["sha256:demo-space"]
+    assert v1["profile_ids"] == ["landslide_bedrock_sliding_surface"]
+    assert v1["scoring_boundary"] == "field_no_prior_proxy"
+    assert v1["manual_review_required"] is True
+    assert "RMSE" in v1["forbidden_metrics"]
+
+    trial_payload = json.loads(
+        Path(bundle["artifacts"]["trial_table_json"]).read_text(encoding="utf-8")
+    )
+    assert trial_payload["autotune_v1_evidence"]["candidate_ids"] == ["dewow.window.7"]
+
+    with Path(bundle["artifacts"]["trial_table_csv"]).open("r", encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    selected_rows = [row for row in rows if row["branch"] == "automatic" and row["selected"] == "True"]
+    assert selected_rows
+    row = selected_rows[0]
+    assert row["candidate_space_hash"] == "sha256:demo-space"
+    assert row["candidate_space_profile_id"] == "landslide_bedrock_sliding_surface"
+    assert row["candidate_id"] == "dewow.window.7"
+    assert row["scoring_boundary"] == "field_no_prior_proxy"
+    assert row["manual_review_required"] == "True"
+
+    workflow = json.loads(
+        Path(bundle["artifacts"]["workflow_params_json"]).read_text(encoding="utf-8")
+    )
+    assert workflow["autotune_v1_candidate_space"]["candidate_space_hashes"] == ["sha256:demo-space"]
+
+    report_text = Path(bundle["artifacts"]["report_md"]).read_text(encoding="utf-8")
+    assert "## 5.1 AutoTune V1 Evidence Boundary" in report_text
+    assert "field_no_prior_proxy" in report_text

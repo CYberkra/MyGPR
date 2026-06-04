@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="MyGPR mark">
+  <defs>
+    <linearGradient id="bg" x1="40" y1="34" x2="216" y2="222" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#E7FAF7"/>
+      <stop offset="1" stop-color="#EFF6FF"/>
+    </linearGradient>
+    <linearGradient id="line" x1="64" y1="60" x2="192" y2="210" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#13A6A4"/>
+      <stop offset="1" stop-color="#2563EB"/>
+    </linearGradient>
+  </defs>
+  <rect x="28" y="28" width="200" height="200" rx="52" fill="url(#bg)" stroke="#BDEBD1" stroke-width="6"/>
+  <path d="M70 102 H186" stroke="#64748B" stroke-width="7" stroke-linecap="round"/>
+  <path d="M128 57 V93" stroke="url(#line)" stroke-width="8" stroke-linecap="round"/>
+  <path d="M88 104 C96 74 160 74 168 104" fill="none" stroke="url(#line)" stroke-width="7" stroke-linecap="round"/>
+  <path d="M74 104 C84 56 172 56 182 104" fill="none" stroke="url(#line)" stroke-width="5" stroke-linecap="round" opacity="0.55"/>
+  <path d="M82 174 C104 139 152 139 174 174" fill="none" stroke="url(#line)" stroke-width="9" stroke-linecap="round"/>
+  <circle cx="128" cy="174" r="11" fill="url(#line)"/>
+  <path d="M102 197 H154" stroke="#64748B" stroke-width="5" stroke-linecap="round" opacity="0.75"/>
+</svg>

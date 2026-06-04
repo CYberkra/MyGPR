@@ -1,0 +1,5 @@
+# GX-007 scene_001 materials draft
+# Preliminary placeholder mapping for paired draft consistency checks.
+material_name,eps_r,sigma,mu_r,mag_sigma
+background_soil,9.0,0.01,1.0,0.0
+pipe_target,pec_builtin,pec_builtin,pec_builtin,pec_builtin

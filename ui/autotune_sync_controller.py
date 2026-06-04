@@ -12,6 +12,7 @@ stable while reducing main-window responsibilities.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import numpy as np
 from PyQt6.QtWidgets import QMessageBox
@@ -45,6 +46,67 @@ class AutoTuneSyncController:
             object.__setattr__(self, name, value)
         else:
             setattr(self.host, name, value)
+
+    def _resolve_target_response_for_autotune(self, *, data, path: str | None, header: dict, component: str | None):
+        """Resolve a same-shape synthetic target_response for the GUI simple runner.
+
+        Priority is deliberately conservative: explicit payload/header arrays or
+        sibling ``target_response_<component>.npy`` files inside a MyGPR-readable
+        run folder.  The GUI never pairs arrays across run/task folders.
+        """
+        shape = tuple(int(v) for v in np.asarray(data).shape[:2]) if data is not None else None
+        candidates = []
+        for key in ("target_response", "target_response_array"):
+            value = header.get(key)
+            if value is not None:
+                candidates.append((value, f"header:{key}"))
+        for key in ("target_response_path", "target_response_npy_path"):
+            value = header.get(key)
+            if value:
+                candidates.append((Path(str(value)), f"header:{key}"))
+
+        if path:
+            src = Path(str(path))
+            parent = src.parent
+            suffix_candidates = []
+            name = src.name
+            if name.startswith("raw_") and name.endswith(".npy"):
+                suffix_candidates.append(parent / name.replace("raw_", "target_response_", 1))
+            if component:
+                suffix_candidates.append(parent / f"target_response_{component}.npy")
+            suffix_candidates.extend(sorted(parent.glob("target_response_*.npy")))
+            seen = set()
+            for candidate in suffix_candidates:
+                try:
+                    resolved = candidate.resolve()
+                except Exception:
+                    resolved = candidate
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                candidates.append((candidate, str(candidate)))
+
+        for value, label in candidates:
+            try:
+                if isinstance(value, (str, os.PathLike, Path)):
+                    candidate_path = Path(value)
+                    if not candidate_path.exists() or candidate_path.suffix.lower() != ".npy":
+                        continue
+                    arr = np.load(candidate_path)
+                    label = str(candidate_path)
+                else:
+                    arr = np.asarray(value)
+                arr = np.asarray(arr, dtype=np.float64)
+                if shape is not None and tuple(arr.shape) != shape:
+                    continue
+                if not np.isfinite(arr).all():
+                    finite = arr[np.isfinite(arr)]
+                    fill = float(np.nanmedian(finite)) if finite.size else 0.0
+                    arr = np.where(np.isfinite(arr), arr, fill)
+                return arr, str(label)
+            except Exception:
+                continue
+        return None, None
 
     def _sync_auto_tune_page_dataset_state(self, payload: dict | None = None) -> None:
         """Synchronize current loaded dataset metadata to AutoTuneTuningPage.
@@ -93,6 +155,18 @@ class AutoTuneSyncController:
                 component = str(value)
                 break
 
+        target_header = dict(header)
+        if isinstance(payload, dict):
+            for key in ("target_response", "target_response_array", "target_response_path", "target_response_npy_path"):
+                if key in payload and key not in target_header:
+                    target_header[key] = payload[key]
+        target_response, target_response_label = self._resolve_target_response_for_autotune(
+            data=data,
+            path=path,
+            header=target_header,
+            component=component,
+        )
+
         update = getattr(page, "set_loaded_dataset", None)
         if callable(update):
             update(
@@ -103,11 +177,19 @@ class AutoTuneSyncController:
                 processing_stage="原始数据" if str(stage) == "Raw" else str(stage),
                 source_label=os.path.basename(path) if path else "当前数据",
                 data_array=data,
+                target_response_array=target_response,
+                target_response_label=target_response_label,
             )
 
     def _clear_manual_roi(self):
         """清除当前手动框选 ROI。"""
         self._manual_roi_values = None
+        page = getattr(self, "page_auto_tune", None)
+        if page is not None and hasattr(page, "set_plot_roi_picker_status"):
+            try:
+                page.set_plot_roi_picker_status(False)
+            except Exception:
+                pass
         self._update_manual_roi_status()
         if self.data is not None:
             self.plot_data(self.data)
@@ -149,8 +231,11 @@ class AutoTuneSyncController:
         if not hasattr(self, "page_advanced") or self.page_advanced is None:
             return
         if self._manual_roi_values is None:
-            suffix = "已开启" if self._is_manual_roi_pick_enabled() else "未开启"
-            self.page_advanced.set_manual_roi_status(f"手动 ROI: 未设置 · 图上框选{suffix}", False)
+            if self._is_manual_roi_pick_enabled():
+                text = "手动 ROI: 未设置 · 图上框选已开启"
+            else:
+                text = "手动 ROI: 未设置"
+            self.page_advanced.set_manual_roi_status(text, False)
             return
 
         vals = self._manual_roi_values
@@ -158,6 +243,14 @@ class AutoTuneSyncController:
             f"手动 ROI: X[{vals['dist_start']:.2f}, {vals['dist_end']:.2f}] | Y[{vals['time_start']:.2f}, {vals['time_end']:.2f}]",
             True,
         )
+        page = getattr(self, "page_auto_tune", None)
+        if page is not None and hasattr(page, "set_manual_roi_from_bounds"):
+            try:
+                bounds = self._get_manual_roi_bounds()
+                if bounds is not None:
+                    page.set_manual_roi_from_bounds(bounds, activate=True)
+            except Exception:
+                pass
 
     def _reset_auto_tune_state(self, message: str | None = None):
         """重置自动选参结果摘要。"""

@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-PyInstaller spec file for GPR GUI Application
+PyInstaller spec file for MyGPR Application
 """
 
 block_cipher = None
@@ -13,10 +13,12 @@ a = Analysis(
         # 主题扩展文件
         ('assets/styles_extra_light.qss', 'assets'),
         ('assets/styles_extra_dark.qss', 'assets'),
+        ('ui/qss/app_polish_template.qss', 'ui/qss'),
         # 配置文件
         ('assets/theme_config.json', 'assets'),
+        ('VERSION', '.'),
         # 启动脚本
-        ('启动GPR.bat', '.'),
+        ('启动MyGPR.bat', '.'),
     ],
     hiddenimports=[
         # PyQt6 核心
@@ -64,6 +66,18 @@ a = Analysis(
         'core.methods_registry',
         'core.processing_engine',
         'core.shared_data_state',
+        'core.shared_data_model',
+        'ui.shared_data_qt_adapter',
+        'ui.report_export_controller',
+        'ui.processing_lineage_controller',
+        'ui.bscan_interaction_controller',
+        'ui.autotune_sync_controller',
+        'ui.processing_worker_controller',
+        'core.autotune_background_runner',
+        'core.autotune_scoring_weights',
+        'core.autotune_recipe',
+        'core.autotune_workflow_planner',
+        'core.autotune_recipe_runner',
         'core.app_paths',
         'core.theme_manager',
         'core.workflow_data',
@@ -73,6 +87,7 @@ a = Analysis(
         'ui.gui_basic_flow',
         'ui.gui_advanced_settings',
         'ui.gui_quality_log',
+        'ui.georef3d_results_page',
         'ui.gui_method_browser',
         'ui.gui_param_editor',
         'ui.gui_workbench',
@@ -119,7 +134,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='GPR_GUI',
+    name='MyGPR',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

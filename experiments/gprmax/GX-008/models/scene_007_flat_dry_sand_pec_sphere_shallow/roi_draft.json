@@ -1,0 +1,20 @@
+{
+  "scene_id": "scene_007_flat_dry_sand_pec_sphere_shallow",
+  "roi_role": "draft_synthetic_target_region",
+  "expected_target_region": {
+    "label": "pec_sphere_main",
+    "target_type": "sphere",
+    "material": "pec",
+    "depth_m": 0.20,
+    "radius_m": 0.04
+  },
+  "depth_window": {
+    "sample_start_idx": 120,
+    "sample_end_idx": 320
+  },
+  "trace_window": {
+    "trace_start_idx": 70,
+    "trace_end_idx": 130
+  },
+  "notes": "ROI is draft only for synthetic scoring and visualization. Not field ground truth."
+}

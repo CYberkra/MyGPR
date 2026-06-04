@@ -47,5 +47,5 @@ set_loaded_dataset(..., data_array=data)
 - 不修改生产 AutoTune 评分逻辑。
 - 不写 Evidence。
 - 不运行 gprMax。
-- 不修改保留的 GX-008 scene_037 / scene_038 模型。
+- 不修改 GX-008/GX-009 模型。
 - 不改变主 B-scan 数据。

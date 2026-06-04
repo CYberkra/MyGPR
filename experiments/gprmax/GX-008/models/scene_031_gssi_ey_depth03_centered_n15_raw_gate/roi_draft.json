@@ -1,0 +1,25 @@
+{
+  "scene_id": "scene_031_gssi_ey_depth03_centered_n15_raw_gate",
+  "roi_role": "draft_synthetic_target_region",
+  "sample_range": [
+    90,
+    360
+  ],
+  "trace_range": [
+    4,
+    12
+  ],
+  "depth_window": [
+    90,
+    360
+  ],
+  "trace_window": [
+    4,
+    12
+  ],
+  "expected_target_region": "shallower candidate window for depth03 raw-only visibility gate",
+  "notes": [
+    "Centered n15 gate for x=0.50 target coverage validation",
+    "ROI draft only; not field truth"
+  ]
+}

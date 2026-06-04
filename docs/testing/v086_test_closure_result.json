@@ -1,0 +1,18 @@
+{
+  "schema": "mygpr.test_closure.v086",
+  "version": "V0.8.6",
+  "timestamp_utc": "2026-06-01T08:54:52Z",
+  "verified": {
+    "preflight": "passed",
+    "unit": "303 passed, 18 warnings",
+    "gui_smoke": "10 passed",
+    "wavelet": "8 passed, 158 deselected",
+    "bscan_export_static": "4 passed",
+    "integration_targeted_groups": "passed for auto_tune_pipeline, cli_batch_profiles, evidence_export, evidence_export_resample, import_export_report, gprpy/research_dashboard/sidecar/workflow groups"
+  },
+  "budgeted_not_full_run": [
+    "slow",
+    "gprmax",
+    "all"
+  ]
+}

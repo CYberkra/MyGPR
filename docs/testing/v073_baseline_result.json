@@ -1,0 +1,66 @@
+{
+  "schema": "mygpr.test_baseline.v1",
+  "root": "/mnt/data/mygpr_v073_work/mygpr_v072",
+  "python": "3.13.5",
+  "stages": [
+    {
+      "name": "preflight",
+      "command": [
+        "/usr/bin/xvfb-run",
+        "-a",
+        "/opt/pyvenv/bin/python",
+        "scripts/preflight_check.py"
+      ],
+      "returncode": 0,
+      "duration_s": 8.487
+    },
+    {
+      "name": "unit",
+      "command": [
+        "/opt/pyvenv/bin/python",
+        "-m",
+        "pytest",
+        "tests/test_auto_tune_candidate_constraints.py",
+        "tests/test_auto_tune_comparison.py",
+        "tests/test_auto_tune_recommendation_labels.py",
+        "tests/test_autotune_background_suppression_diagnostic.py",
+        "tests/test_background_time_range.py",
+        "tests/test_background_window_policy.py",
+        "tests/test_ccbs_filter.py",
+        "tests/test_data_context.py",
+        "tests/test_frequency_filter_1d.py",
+        "tests/test_git_checkpoint.py",
+        "tests/test_gpr_io_airborne_contract.py",
+        "tests/test_gpr_io_ascans_folder.py",
+        "tests/test_gprpy_baseline_alignment.py",
+        "tests/test_hankel_batch.py",
+        "tests/test_hankel_svd_2d_mssa_quality.py",
+        "tests/test_hankel_svd_contract.py",
+        "tests/test_hankel_svd_quality.py",
+        "tests/test_meeting_progress_note.py",
+        "tests/test_motion_compensation_attitude.py",
+        "tests/test_motion_compensation_height.py",
+        "tests/test_motion_compensation_registry.py",
+        "tests/test_motion_compensation_speed.py",
+        "tests/test_motion_compensation_trajectory.py",
+        "tests/test_motion_compensation_v2.py",
+        "tests/test_motion_compensation_vibration.py",
+        "tests/test_motion_quality_metrics.py",
+        "tests/test_motion_runtime_metadata_contract.py",
+        "tests/test_no_prior_qc_policy.py",
+        "tests/test_preflight_generated_artifact_guard.py",
+        "tests/test_pyinstaller_spec_assets.py",
+        "tests/test_quality_metrics.py",
+        "tests/test_round2_processing_kernels.py",
+        "tests/test_runtime_warnings.py",
+        "tests/test_scalar_utils.py",
+        "tests/test_trace_metadata_utils.py",
+        "tests/test_uav_georeference_3d.py",
+        "-q"
+      ],
+      "returncode": 0,
+      "duration_s": 21.637
+    }
+  ],
+  "ok": true
+}

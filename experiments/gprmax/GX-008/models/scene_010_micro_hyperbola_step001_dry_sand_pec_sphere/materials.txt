@@ -1,0 +1,14 @@
+scene_id: scene_010_micro_hyperbola_step001_dry_sand_pec_sphere
+purpose: fast diagnostic with step equal to dx to avoid stepping collapse
+
+materials:
+  dry_sand_like:
+    eps_r: 3.0
+    sigma_s_per_m: 0.001
+  target:
+    type: pec sphere
+    center_m: [0.65, 0.30, 0.16]
+    radius_m: 0.06
+
+notes:
+  - diagnostic-only scene, not benchmark claim

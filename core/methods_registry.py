@@ -1565,10 +1565,10 @@ METHOD_METADATA = {
         "display_name": "中值背景抑制",
     },
     "running_average_2D": {
-        "category": "clutter_suppression",
+        "category": "denoising",
         "maturity": "stable",
         "visibility": "public",
-        "display_name": "尖锐杂波抑制",
+        "display_name": "道向运行平均平滑",
     },
     "trace_median_filter": {
         "category": "denoising",
@@ -1592,7 +1592,7 @@ METHOD_METADATA = {
         "category": "filtering",
         "maturity": "stable",
         "visibility": "public",
-        "display_name": "F-K 锥形滤波",
+        "display_name": "F-K 频波数滤波",
     },
     "frequency_filter_1d": {
         "category": "filtering",
@@ -1802,8 +1802,8 @@ METHOD_CATEGORY_LABELS = {
     "time_correction": "时间校正",
     "drift_correction": "低频漂移矫正",
     "background_suppression": "背景抑制",
-    "clutter_suppression": "尖锐杂波抑制",
-    "filtering": "频域滤波",
+    "clutter_suppression": "杂波抑制",
+    "filtering": "频域/频波数滤波",
     "denoising": "去噪",
     "gain": "增益",
     "migration": "迁移成像",
@@ -1824,7 +1824,7 @@ AUTO_TUNE_STAGE_BY_METHOD = {
     "subtracting_average_2D": "background",
     "median_background_2D": "background",
     "svd_bg": "background",
-    "fk_filter": "background",
+    "fk_filter": "frequency",
     "frequency_filter_1d": "frequency",
     "ccbs": "background",
     "sec_gain": "gain",
@@ -1843,7 +1843,7 @@ AUTO_TUNE_STAGE_BY_METHOD = {
     "motion_compensation_speed": "motion_comp",
     "trajectory_smoothing": "motion_comp",
     "motion_compensation_attitude": "motion_comp",
-    "motion_compensation_vibration": "denoise",
+    "motion_compensation_vibration": "artifact",
     "motion_compensation_v2": "motion_comp",
 }
 

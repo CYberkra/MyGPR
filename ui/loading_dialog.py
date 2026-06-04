@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 """数据加载进度条对话框"""
 
+import time
+
 from PyQt6.QtCore import Qt, pyqtSignal, QThread
 from PyQt6.QtWidgets import (
     QDialog,
@@ -26,13 +28,29 @@ class DataLoaderThread(QThread):
         self.args = args
         self.kwargs = kwargs
         self._is_cancelled = False
+        self._last_progress_emit_ts = 0.0
+        self._last_progress_percent = None
 
     def run(self):
         """执行加载"""
         try:
             # 调用加载函数，传入进度回调
             def progress_callback(percent, message):
-                if not self._is_cancelled:
+                if self._is_cancelled:
+                    return
+                now = time.perf_counter()
+                percent = int(percent)
+                message = str(message)
+                should_emit = (
+                    self._last_progress_percent is None
+                    or percent >= 100
+                    or percent <= 0
+                    or percent != self._last_progress_percent
+                    or (now - self._last_progress_emit_ts) >= 0.08
+                )
+                if should_emit:
+                    self._last_progress_emit_ts = now
+                    self._last_progress_percent = percent
                     self.progress_updated.emit(percent, message)
 
             result = self.loader_func(

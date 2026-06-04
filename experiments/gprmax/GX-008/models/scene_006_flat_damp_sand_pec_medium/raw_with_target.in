@@ -1,0 +1,15 @@
+#title: GX-008 scene_006 flat damp_sand PEC medium raw_with_target draft
+#domain: 2.0 1.0 0.5
+#dx_dy_dz: 0.01 0.01 0.01
+#time_window: 18e-9
+#waveform: ricker 1.0 900e6 src_wave
+#hertzian_dipole: z 0.20 0.50 0.10 src_wave
+#rx: 0.25 0.50 0.10
+#src_steps: 0.005 0 0
+#rx_steps: 0.005 0 0
+
+#material: 8.0 0.01 1.0 0.0 damp_sand_like
+
+#box: 0 0 0 2.0 1.0 0.5 damp_sand_like
+#cylinder: 1.00 0.40 0.23 1.00 0.60 0.23 0.04 pec
+#geometry_view: 0 0 0 2.0 1.0 0.5 0.01 0.01 0.01 gx008_scene006_raw n

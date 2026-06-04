@@ -20,9 +20,12 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QMenu,
     QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
+    QToolButton,
 )
 
 
@@ -34,6 +37,8 @@ class ProcessingLineageController:
         self._last_selected_index: int | None = None
         self._compare_selected_indices: set[int] = set()
         self._compare_mode: str | None = None
+        self._last_stepper_signature: tuple | None = None
+
 
     # ------------------------------------------------------------------
     # UI construction
@@ -49,8 +54,8 @@ class ProcessingLineageController:
         host = self.host
         bar = QFrame()
         bar.setObjectName("ProcessingStepperBar")
-        bar.setMinimumHeight(38)
-        bar.setMaximumHeight(46)
+        bar.setMinimumHeight(48)
+        bar.setMaximumHeight(60)
         outer = QHBoxLayout(bar)
         outer.setContentsMargins(5, 2, 5, 2)
         outer.setSpacing(4)
@@ -68,8 +73,8 @@ class ProcessingLineageController:
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setMinimumHeight(28)
-        scroll.setMaximumHeight(32)
+        scroll.setMinimumHeight(38)
+        scroll.setMaximumHeight(44)
 
         host_widget = QWidget()
         host_widget.setObjectName("ProcessingStepperHost")
@@ -100,56 +105,89 @@ class ProcessingLineageController:
         tray.setMinimumHeight(28)
         tray.setMaximumHeight(32)
 
-        tray_label = QLabel("0/4")
+        tray.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+
+        tray_label = QLabel("对比 0/4")
         tray_label.setObjectName("ProcessingCompareTrayLabel")
-        tray_label.setMinimumWidth(44)
-        tray_label.setMaximumWidth(132)
+        tray_label.setMinimumWidth(58)
+        tray_label.setMaximumWidth(118)
         tray_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
         tray_layout.addWidget(tray_label)
         host._lineage_compare_tray_label = tray_label
 
-        slider_btn = QPushButton("滑")
+        menu_btn = QToolButton()
+        menu_btn.setObjectName("ProcessingStepperMenuAction")
+        menu_btn.setText("对比")
+        menu_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        menu_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        menu_btn.setMinimumSize(52, 28)
+        menu_btn.setMaximumSize(68, 32)
+        compare_menu = QMenu(menu_btn)
+        act_slider = compare_menu.addAction("滑动对比")
+        act_grid = compare_menu.addAction("网格对比")
+        act_diff = compare_menu.addAction("差值图")
+        compare_menu.addSeparator()
+        act_clear = compare_menu.addAction("清空选择")
+        act_slider.triggered.connect(lambda: self.apply_compare_mode("slider"))
+        act_grid.triggered.connect(lambda: self.apply_compare_mode("grid"))
+        act_diff.triggered.connect(lambda: self.apply_compare_mode("diff"))
+        act_clear.triggered.connect(self.clear_compare_selection)
+        menu_btn.setMenu(compare_menu)
+        tray_layout.addWidget(menu_btn)
+        host._lineage_compare_menu_button = menu_btn
+        host._lineage_compare_actions = {
+            "slider": act_slider,
+            "grid": act_grid,
+            "diff": act_diff,
+            "clear": act_clear,
+        }
+
+        slider_btn = QPushButton("滑动对比")
         slider_btn.setObjectName("ProcessingStepperAction")
         slider_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        slider_btn.setMinimumSize(28, 22)
-        slider_btn.setMaximumSize(34, 24)
+        slider_btn.setMinimumSize(66, 28)
+        slider_btn.setMaximumSize(82, 32)
         slider_btn.setCheckable(True)
         slider_btn.setEnabled(False)
+        slider_btn.setVisible(False)
         slider_btn.setToolTip("滑动对比：选择恰好两个步骤后启用；再次点击取消。")
         slider_btn.toggled.connect(lambda checked: self.toggle_compare_mode("slider", checked))
         tray_layout.addWidget(slider_btn)
         host._lineage_slider_compare_button = slider_btn
 
-        grid_btn = QPushButton("格")
+        grid_btn = QPushButton("网格对比")
         grid_btn.setObjectName("ProcessingStepperAction")
         grid_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        grid_btn.setMinimumSize(28, 22)
-        grid_btn.setMaximumSize(34, 24)
+        grid_btn.setMinimumSize(66, 28)
+        grid_btn.setMaximumSize(82, 32)
         grid_btn.setCheckable(True)
         grid_btn.setEnabled(False)
+        grid_btn.setVisible(False)
         grid_btn.setToolTip("网格对比：选择 2–4 个步骤后启用；共享色标多图查看。")
         grid_btn.toggled.connect(lambda checked: self.toggle_compare_mode("grid", checked))
         tray_layout.addWidget(grid_btn)
         host._lineage_grid_compare_button = grid_btn
 
-        diff_btn = QPushButton("差")
+        diff_btn = QPushButton("差值图")
         diff_btn.setObjectName("ProcessingStepperAction")
         diff_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        diff_btn.setMinimumSize(28, 22)
-        diff_btn.setMaximumSize(34, 24)
+        diff_btn.setMinimumSize(56, 28)
+        diff_btn.setMaximumSize(70, 32)
         diff_btn.setCheckable(True)
         diff_btn.setEnabled(False)
+        diff_btn.setVisible(False)
         diff_btn.setToolTip("差值图：选择恰好两个步骤后启用；显示 |A - B|。")
         diff_btn.toggled.connect(lambda checked: self.toggle_compare_mode("diff", checked))
         tray_layout.addWidget(diff_btn)
         host._lineage_diff_compare_button = diff_btn
 
-        clear_btn = QPushButton("清")
+        clear_btn = QPushButton("清空")
         clear_btn.setObjectName("ProcessingStepperAction")
         clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        clear_btn.setMinimumSize(28, 22)
-        clear_btn.setMaximumSize(34, 24)
+        clear_btn.setMinimumSize(48, 28)
+        clear_btn.setMaximumSize(60, 32)
         clear_btn.setEnabled(False)
+        clear_btn.setVisible(False)
         clear_btn.setToolTip("清空对比篮选择并回到单图。")
         clear_btn.clicked.connect(self.clear_compare_selection)
         tray_layout.addWidget(clear_btn)
@@ -265,7 +303,7 @@ class ProcessingLineageController:
                 return "viewing_warning"
             return "warning"
         if index == 0 and self.compact_step_label(entry.get("label") or "", index) == "Raw":
-            return "raw" if index != active_index else "viewing"
+            return "raw"
         if index == active_index and index != total - 1:
             return "viewing"
         if index == total - 1:
@@ -491,45 +529,102 @@ class ProcessingLineageController:
         names = self._selected_compare_names()
         tray = getattr(host, "_lineage_compare_tray", None)
         label = getattr(host, "_lineage_compare_tray_label", None)
+        selectable_count = sum(
+            1
+            for entry in entries
+            if bool(entry.get("data") is not None and not bool(entry.get("pruned")))
+        )
+        show_tray = bool(total > 1 and selectable_count > 1)
         if tray is not None:
-            tray.setVisible(True)
+            tray.setVisible(show_tray)
+            tray.setToolTip("处理链路对比篮；选择至少两个历史步骤后显示对比操作。")
         if label is not None:
             if not names:
-                label.setText("0/4")
+                label.setText("对比 0/4")
                 label.setToolTip("点步骤右侧小圆点加入对比；再次点击可取消。最多选择 4 个步骤。")
             elif len(names) == 1:
-                label.setText(f"1/4 · {self._compact_compare_names_text(names, max_chars=14)}")
+                label.setText(f"1/4 · {self._compact_compare_names_text(names, max_chars=10)}")
                 label.setToolTip("已选择：" + "、".join(names) + "。滑动/差值需要 2 个步骤；网格需要 2–4 个步骤。")
             else:
-                label.setText(f"{len(names)}/4 · {self._compact_compare_names_text(names, max_chars=18)}")
+                label.setText(f"{len(names)}/4 · {self._compact_compare_names_text(names, max_chars=12)}")
                 label.setToolTip("已选择：" + "、".join(names) + "。对比仅为 display-only，不改变正式处理结果。")
         buttons = self._mode_buttons()
         count = len(selected)
-        if buttons.get("slider") is not None:
-            buttons["slider"].setEnabled(count == 2)
-        if buttons.get("diff") is not None:
-            buttons["diff"].setEnabled(count == 2)
-        if buttons.get("grid") is not None:
-            buttons["grid"].setEnabled(2 <= count <= 4)
+        # Visible compare actions now live in a compact overflow menu so the
+        # processing-chain chips keep their horizontal space.  The legacy
+        # QPushButtons stay instantiated for old tests/call-sites but remain hidden.
+        for mode, btn in buttons.items():
+            if btn is not None:
+                btn.setVisible(False)
+                btn.setEnabled(self._is_compare_mode_valid(mode))
         clear_btn = getattr(host, "_lineage_clear_compare_button", None)
         if clear_btn is not None:
+            clear_btn.setVisible(False)
             clear_btn.setEnabled(count > 0)
+        menu_btn = getattr(host, "_lineage_compare_menu_button", None)
+        if menu_btn is not None:
+            menu_btn.setVisible(bool(count > 0))
+            menu_btn.setEnabled(bool(count > 0))
+            menu_btn.setText(f"对比 {count}/4" if count else "对比")
+            menu_btn.setToolTip(
+                "选择链路步骤后在此打开滑动对比、网格对比、差值图或清空选择。"
+                if count else "点步骤右侧小圆点加入对比篮。"
+            )
+        actions = getattr(host, "_lineage_compare_actions", {}) or {}
+        if actions:
+            if actions.get("slider") is not None:
+                actions["slider"].setEnabled(count == 2)
+            if actions.get("diff") is not None:
+                actions["diff"].setEnabled(count == 2)
+            if actions.get("grid") is not None:
+                actions["grid"].setEnabled(2 <= count <= 4)
+            if actions.get("clear") is not None:
+                actions["clear"].setEnabled(count > 0)
         self._sync_mode_buttons_checked()
 
-    def sync_stepper(self) -> None:
+    def _stepper_signature(self, entries: list[dict[str, Any]], current_index: int) -> tuple:
+        """Return a compact signature for the processing-lineage strip.
+
+        The main plot may refresh frequently during compare/slider operations.
+        Rebuilding every QPushButton in the lineage strip on each paint creates
+        avoidable UI churn.  This signature lets sync_stepper skip the rebuild
+        when the visible stepper state did not change.  It is display-only and
+        does not affect processing arrays or Evidence output.
+        """
+        total = len(entries)
+        items: list[tuple] = []
+        for idx, entry in enumerate(entries):
+            items.append(
+                (
+                    str(entry.get("label") or ""),
+                    tuple(self._entry_shape(entry)),
+                    bool(entry.get("data") is not None),
+                    bool(entry.get("pruned")),
+                    bool(self._entry_warnings(entry)),
+                    self._step_status(entry, idx, total, current_index),
+                    bool(idx in self._compare_selected_indices),
+                )
+            )
+        pruned_count = int((self._history_memory_summary().get("pruned_count") or 0))
+        return (
+            total,
+            int(current_index),
+            tuple(sorted(int(i) for i in self._compare_selected_indices)),
+            str(self._compare_mode or ""),
+            pruned_count,
+            tuple(items),
+        )
+
+    def sync_stepper(self, *, force: bool = False) -> None:
         """Refresh the clickable processing-lineage stepper."""
+        import time
+
         host = self.host
         layout = getattr(host, "_plot_stepper_layout", None)
         if layout is None:
             return
-        while layout.count():
-            item = layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
-        host._lineage_step_buttons = []
-        host._lineage_step_select_buttons = []
 
+        start_ts = time.perf_counter()
         entries = self._history_entries()
         if not entries:
             entries = [{"label": "Raw", "data": None, "header_info": {}}]
@@ -544,6 +639,22 @@ class ProcessingLineageController:
             current_index = total - 1
             host._lineage_view_index = None
 
+        signature = self._stepper_signature(entries, current_index)
+        if (not force) and signature == self._last_stepper_signature and layout.count() > 0:
+            self.update_step_detail(current_index)
+            monitor = getattr(host, "_perf_monitor", None)
+            if monitor is not None:
+                monitor.record("display.lineage_stepper_skip_ms", (time.perf_counter() - start_ts) * 1000.0)
+            return
+
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        host._lineage_step_buttons = []
+        host._lineage_step_select_buttons = []
+
         for idx, entry in enumerate(entries):
             item = QFrame()
             item.setObjectName("ProcessingStepItem")
@@ -555,8 +666,8 @@ class ProcessingLineageController:
             btn.setObjectName("ProcessingStepChip")
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setCheckable(False)
-            btn.setMinimumHeight(22)
-            btn.setMaximumHeight(26)
+            btn.setMinimumHeight(28)
+            btn.setMaximumHeight(34)
             status = self._step_status(entry, idx, total, current_index)
             btn.setProperty("active", "true" if idx == current_index else "false")
             btn.setProperty("current", "true" if idx == total - 1 else "false")
@@ -572,8 +683,8 @@ class ProcessingLineageController:
             selector.setCursor(Qt.CursorShape.PointingHandCursor)
             selector.setCheckable(True)
             selector.setChecked(idx in self._compare_selected_indices)
-            selector.setMinimumSize(18, 22)
-            selector.setMaximumSize(20, 24)
+            selector.setMinimumSize(20, 28)
+            selector.setMaximumSize(22, 32)
             selector.setProperty("selected", "true" if idx in self._compare_selected_indices else "false")
             can_select = bool(entry.get("data") is not None and not bool(entry.get("pruned")))
             selector.setEnabled(can_select)
@@ -602,15 +713,19 @@ class ProcessingLineageController:
             chip = QPushButton(f"裁剪 ×{pruned_count}")
             chip.setObjectName("ProcessingStepChip")
             chip.setEnabled(False)
-            chip.setMinimumHeight(22)
-            chip.setMaximumHeight(26)
+            chip.setMinimumHeight(28)
+            chip.setMaximumHeight(34)
             chip.setProperty("status", "pruned")
             chip.setToolTip("部分历史步骤因内存预算被裁剪；Evidence 中保留 summary-only 审计信息。")
             layout.addWidget(chip)
 
         layout.addStretch(1)
+        self._last_stepper_signature = signature
         self.update_step_detail(current_index)
         self._update_compare_tray()
+        monitor = getattr(host, "_perf_monitor", None)
+        if monitor is not None:
+            monitor.record("display.lineage_stepper_rebuild_ms", (time.perf_counter() - start_ts) * 1000.0)
 
     def on_step_clicked(self, index: int) -> None:
         """Temporarily switch the main B-scan view to a processing-lineage step."""
@@ -1075,6 +1190,9 @@ class ProcessingLineageController:
                 "params": self._entry_params(entry),
                 "runtime_ms": self._entry_elapsed_ms(entry),
                 "warnings": warnings,
+                "autotune_scoring_record": header.get("autotune_scoring_record") if isinstance(header.get("autotune_scoring_record"), dict) else {},
+                "autotune_recipe_step": header.get("autotune_recipe_step") if isinstance(header.get("autotune_recipe_step"), dict) else {},
+                "autotune_recipe_plan": header.get("autotune_recipe_plan") if isinstance(header.get("autotune_recipe_plan"), dict) else {},
                 "has_warning": bool(warnings),
                 "has_full_data": entry.get("data") is not None,
                 "memory_state": "summary_only" if bool(entry.get("pruned")) else "stored",

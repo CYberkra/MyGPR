@@ -32,6 +32,7 @@ from qfluentwidgets import (
 
 from core.methods_registry import (
     PROCESSING_METHODS,
+    get_method_category,
     get_method_display_name,
     get_method_category_label,
     get_public_method_keys,
@@ -49,11 +50,11 @@ class SplitActionButton(QWidget):
         self._text = text
         self._icon = icon
         self._menu = None
-        self._drop_width = 24
+        self._drop_width = 22
         self._hover_part = None
         self._pressed_part = None
         self._visual_state = "normal"
-        self.setMinimumHeight(34)
+        self.setMinimumHeight(30)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setMouseTracking(True)
 
@@ -78,7 +79,7 @@ class SplitActionButton(QWidget):
         self._menu = menu
 
     def sizeHint(self):
-        return QSize(180, 34)
+        return QSize(132, 30)
 
     def _main_rect(self) -> QRect:
         return QRect(0, 0, max(0, self.width() - self._drop_width), self.height())
@@ -202,9 +203,9 @@ class SplitActionButton(QWidget):
         text_width = font_metrics.horizontalAdvance(display_text) + 2
         content_width = icon_size + gap + text_width
 
-        # 分裂按钮右侧有单独下拉区，单纯按主区居中会显得整体偏左；
-        # 这里补偿半个下拉区宽度，让视觉中心更接近下面普通按钮。
-        visual_offset = self._drop_width // 2
+        # Keep text stable in compact drawers; avoid pushing content under the
+        # drop-down area on non-fullscreen windows.
+        visual_offset = 0
         content_left = left_rect.left() + max(
             inner_margin,
             (left_rect.width() - content_width) // 2 + visual_offset,
@@ -301,19 +302,26 @@ class BasicFlowPage(QWidget):
         outer_layout.setSpacing(0)
 
         scroll = QScrollArea(self)
+        scroll.setObjectName("DailyProcessingScroll")
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # Reserve a small visual gutter so the vertical scrollbar does not cover
+        # the right edge of parameter cards or the form editor.
+        scroll.setViewportMargins(0, 0, 8, 0)
         outer_layout.addWidget(scroll)
 
         content = QWidget()
+        content.setObjectName("DailyProcessingScrollContent")
         scroll.setWidget(content)
 
         layout = QVBoxLayout(content)
-        layout.setContentsMargins(10, 8, 10, 10)
-        layout.setSpacing(11)
+        layout.setContentsMargins(6, 6, 20, 7)
+        layout.setSpacing(7)
 
         basic_heading = QLabel("日常处理")
         basic_heading.setProperty("class", "sectionTitle")
+        basic_heading.setMaximumHeight(28)
         layout.addWidget(basic_heading)
 
         # 核心操作区域
@@ -321,17 +329,17 @@ class BasicFlowPage(QWidget):
         action_box.setProperty("cardStyle", "modern")
         action_box.setObjectName("basicActionCard")
         action_layout = QVBoxLayout(action_box)
-        action_layout.setContentsMargins(12, 18, 12, 12)
-        action_layout.setSpacing(8)
+        action_layout.setContentsMargins(8, 12, 8, 7)
+        action_layout.setSpacing(5)
 
         self.btn_import = SplitActionButton("导入数据", FluentIcon.FOLDER, self)
         self.btn_import.setObjectName("basicImportButton")
         self.btn_import.setToolTip(
-            "点击主区域默认导入 CSV，点击右侧箭头查看其它导入方式"
+            "点击主区域导入常见 GPR / CSV 数据，点击右侧箭头查看其它导入方式"
         )
 
         self.import_menu = QMenu(self)
-        self.action_import_csv = QAction("导入 CSV", self)
+        self.action_import_csv = QAction("导入 GPR / CSV 文件", self)
         self.action_import_folder = QAction("导入 A-scan 文件夹", self)
         self.action_import_out = QAction("导入 gprMax .out", self)
         self.import_menu.addAction(self.action_import_csv)
@@ -363,7 +371,7 @@ class BasicFlowPage(QWidget):
         self.btn_quick = PushButton(FluentIcon.SYNC, "默认流程")
         self.btn_quick.setObjectName("basicQuickButton")
         self.btn_quick.setProperty("class", "basicGhostBtn")
-        self.btn_quick.setMinimumHeight(34)
+        self.btn_quick.setMinimumHeight(28)
         self.btn_quick.setToolTip(
             "自动执行默认高质量流程：零时矫正 → 低频漂移抑制 → 频域滤波 → UAV运动补偿 → 背景/F-K → 去噪 → SEC增益；参数来源跟随“应用方法”的当前选项"
         )
@@ -371,24 +379,24 @@ class BasicFlowPage(QWidget):
         self.btn_cancel = PushButton(FluentIcon.CLOSE, "取消处理")
         self.btn_cancel.setObjectName("btnCancel")
         self.btn_cancel.setProperty("class", "basicGhostBtn")
-        self.btn_cancel.setMinimumHeight(34)
+        self.btn_cancel.setMinimumHeight(28)
         self.btn_cancel.setEnabled(False)
         self.btn_cancel.setToolTip("取消当前正在进行的处理任务")
 
         self.btn_undo = PushButton(FluentIcon.RETURN, "撤销")
         self.btn_undo.setProperty("class", "basicGhostBtn")
-        self.btn_undo.setMinimumHeight(34)
+        self.btn_undo.setMinimumHeight(28)
         self.btn_undo.setToolTip("撤销上一步操作，恢复到之前的状态（最多保存10步历史）")
 
         self.btn_reset = PushButton(FluentIcon.ROTATE, "重置原始")
         self.btn_reset.setProperty("class", "basicGhostBtn")
-        self.btn_reset.setMinimumHeight(34)
+        self.btn_reset.setMinimumHeight(28)
         self.btn_reset.setToolTip("重置为原始导入的数据状态")
 
         row_first = QWidget()
         row_first_l = QHBoxLayout(row_first)
         row_first_l.setContentsMargins(0, 0, 0, 0)
-        row_first_l.setSpacing(8)
+        row_first_l.setSpacing(5)
 
         row_first_l.addWidget(self.btn_import)
         row_first_l.addWidget(self.btn_apply)
@@ -399,7 +407,7 @@ class BasicFlowPage(QWidget):
         row_second = QWidget()
         row_second_l = QHBoxLayout(row_second)
         row_second_l.setContentsMargins(0, 0, 0, 0)
-        row_second_l.setSpacing(8)
+        row_second_l.setSpacing(5)
         row_second_l.addWidget(self.btn_quick)
         row_second_l.addWidget(self.btn_cancel)
         row_second_l.setStretch(0, 1)
@@ -409,7 +417,7 @@ class BasicFlowPage(QWidget):
         row_third = QWidget()
         row_third_l = QHBoxLayout(row_third)
         row_third_l.setContentsMargins(0, 0, 0, 0)
-        row_third_l.setSpacing(8)
+        row_third_l.setSpacing(5)
         row_third_l.addWidget(self.btn_undo)
         row_third_l.addWidget(self.btn_reset)
         row_third_l.setStretch(0, 1)
@@ -419,31 +427,32 @@ class BasicFlowPage(QWidget):
         self.apply_feedback_label = QLabel("就绪：按当前参数执行。")
         self.apply_feedback_label.setObjectName("ApplyFeedbackLabel")
         self.apply_feedback_label.setWordWrap(True)
+        self.apply_feedback_label.setMaximumHeight(24)
         self.apply_feedback_label.setProperty("tone", "neutral")
         action_layout.addWidget(self.apply_feedback_label)
 
         layout.addWidget(action_box)
 
-        # 方法与参数
-        method_box = QGroupBox("方法与参数")
+        # 处理阶段：用于筛选真实处理方法。真实执行历史由主图下方链路条记录。
+        layout.addWidget(self._build_processing_stage_filter())
+
+        # 当前步骤参数
+        method_box = QGroupBox("当前步骤参数")
         method_box.setProperty("cardStyle", "modern")
         method_box.setObjectName("basicMethodCard")
-        method_box.setToolTip("选择处理方法并配置参数")
+        method_box.setToolTip("选择当前处理步骤对应的方法，并配置关键参数")
         method_layout = QVBoxLayout(method_box)
-        method_layout.setContentsMargins(12, 18, 12, 12)
-        method_layout.setSpacing(8)
+        method_layout.setContentsMargins(10, 15, 10, 10)
+        method_layout.setSpacing(7)
 
         self.method_combo = QComboBox()
         self.method_combo.setObjectName("methodCombo")
-        self.method_combo.setMinimumHeight(34)
+        self.method_combo.setMinimumHeight(31)
         self.method_combo.setToolTip("选择GPR数据处理方法")
-        self.method_keys = get_public_method_keys()
-        self.method_combo.addItems(
-            [
-                f"[{get_method_category_label(k)}] {get_method_display_name(k)}"
-                for k in self.method_keys
-            ]
-        )
+        self.all_method_keys = get_public_method_keys()
+        self.method_keys = []
+        self._active_method_stage = "all"
+        self._rebuild_method_combo("all")
         method_layout.addWidget(self.method_combo)
 
         self.method_inspector_header = QFrame()
@@ -474,13 +483,13 @@ class BasicFlowPage(QWidget):
         self.param_container = QWidget()
         self.param_container.setObjectName("InspectorParamPanel")
         self.param_layout = QFormLayout(self.param_container)
-        self.param_layout.setContentsMargins(8, 8, 8, 8)
+        self.param_layout.setContentsMargins(7, 7, 7, 7)
         self.param_layout.setFieldGrowthPolicy(
             QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow
         )
         self.param_layout.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
         self.param_layout.setHorizontalSpacing(12)
-        self.param_layout.setVerticalSpacing(8)
+        self.param_layout.setVerticalSpacing(6)
         method_layout.addWidget(self.param_container)
 
         self.param_hint_label = QLabel("")
@@ -495,23 +504,26 @@ class BasicFlowPage(QWidget):
         data_view_box.setObjectName("basicStatusCard")
         data_view_box.setToolTip("显示当前加载数据、当前方法和执行反馈")
         data_view_layout = QVBoxLayout(data_view_box)
-        data_view_layout.setContentsMargins(12, 18, 12, 12)
-        data_view_layout.setSpacing(8)
+        data_view_layout.setContentsMargins(10, 15, 10, 10)
+        data_view_layout.setSpacing(6)
 
         self.data_brief = QLabel("未加载数据")
         self.data_brief.setProperty("class", "statusChip")
+        self.data_brief.setWordWrap(True)
+        self.data_brief.setMinimumHeight(28)
         self.data_brief.setToolTip("当前数据状态：显示数据矩阵尺寸和所选方法")
         data_view_layout.addWidget(self.data_brief)
 
-        status_hint = QLabel("这里集中显示导入概况、当前方法和最近一次执行反馈。")
+        status_hint = QLabel("导入概况、当前方法和最近一次执行反馈。")
         status_hint.setWordWrap(True)
         status_hint.setProperty("class", "hintText")
+        status_hint.setMaximumHeight(24)
         data_view_layout.addWidget(status_hint)
 
         self.info = QTextEdit()
         self.info.setReadOnly(True)
-        self.info.setMinimumHeight(120)
-        self.info.setMaximumHeight(160)
+        self.info.setMinimumHeight(84)
+        self.info.setMaximumHeight(110)
         self.info.setObjectName("basicInfoLog")
         self.info.setPlaceholderText("导入后展示：数据概况 / 当前方法 / 执行反馈")
         self.info.setToolTip("处理和操作日志显示区域")
@@ -522,6 +534,155 @@ class BasicFlowPage(QWidget):
 
         # 初始化参数渲染
         self._render_params(self.method_keys[0])
+
+    METHOD_STAGE_DEFS = [
+        ("all", "全部"),
+        ("correction", "校正/QC"),
+        ("filter", "滤波"),
+        ("suppress", "抑制"),
+        ("denoise", "去噪"),
+        ("gain", "增益"),
+        ("image", "成像/属性"),
+    ]
+
+    METHOD_STAGE_CATEGORIES = {
+        "correction": {
+            "time_correction",
+            "drift_correction",
+            "motion_compensation",
+            "quality_control",
+        },
+        "filter": {"filtering"},
+        "suppress": {
+            "background_suppression",
+            "clutter_suppression",
+            "artifact_suppression",
+        },
+        "denoise": {"denoising"},
+        "gain": {"gain"},
+        "image": {"migration", "depth_conversion", "attribute_analysis"},
+    }
+
+    def _build_processing_stage_filter(self) -> QGroupBox:
+        """Build actionable stage filter for the manual processing page.
+
+        The previous static flow card only explained Raw/校正/抑制/增益.  The
+        real processing history is already shown by the bottom lineage bar, so
+        this compact control now filters the method list by processing stage.
+        """
+        box = QGroupBox("处理阶段")
+        box.setProperty("cardStyle", "modern")
+        box.setObjectName("basicStageFilterCard")
+        box.setToolTip("筛选下方算法列表；真实处理链路显示在主图下方。")
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(8, 12, 8, 8)
+        layout.setSpacing(6)
+
+        self._stage_filter_buttons = {}
+        stage_rows = [self.METHOD_STAGE_DEFS[:3], self.METHOD_STAGE_DEFS[3:]]
+        for row_defs in stage_rows:
+            row = QWidget()
+            row_l = QHBoxLayout(row)
+            row_l.setContentsMargins(0, 0, 0, 0)
+            row_l.setSpacing(4)
+            for stage_key, stage_label in row_defs:
+                btn = PushButton(stage_label)
+                btn.setObjectName("StageFilterButton")
+                btn.setProperty("class", "stageFilterBtn")
+                btn.setCheckable(True)
+                btn.setMinimumHeight(26)
+                btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+                btn.setToolTip(f"只显示{stage_label}阶段的处理方法")
+                btn.clicked.connect(lambda _checked=False, key=stage_key: self.set_method_stage_filter(key))
+                row_l.addWidget(btn, 1)
+                self._stage_filter_buttons[stage_key] = btn
+            layout.addWidget(row)
+
+        self.stage_filter_hint = QLabel("按阶段筛选算法；显示设置请到“显示”页，真实处理历史见底部链路。")
+        self.stage_filter_hint.setObjectName("StageFilterHint")
+        self.stage_filter_hint.setProperty("class", "hintText")
+        self.stage_filter_hint.setWordWrap(True)
+        self.stage_filter_hint.setMaximumHeight(32)
+        layout.addWidget(self.stage_filter_hint)
+        self._refresh_stage_filter_buttons("all")
+        return box
+
+    def _method_stage_from_category(self, category: str) -> str:
+        category = str(category or "")
+        for stage_key, categories in self.METHOD_STAGE_CATEGORIES.items():
+            if category in categories:
+                return stage_key
+        return "all"
+
+    def _method_stage_for_key(self, method_key: str) -> str:
+        return self._method_stage_from_category(get_method_category(method_key))
+
+    def _method_keys_for_stage(self, stage_key: str) -> list[str]:
+        stage_key = str(stage_key or "all")
+        all_keys = list(getattr(self, "all_method_keys", []) or get_public_method_keys())
+        if stage_key == "all":
+            return all_keys
+        categories = self.METHOD_STAGE_CATEGORIES.get(stage_key, set())
+        return [key for key in all_keys if get_method_category(key) in categories]
+
+    def _format_method_combo_label(self, method_key: str) -> str:
+        return f"[{get_method_category_label(method_key)}] {get_method_display_name(method_key)}"
+
+    def _rebuild_method_combo(self, stage_key: str = "all", preserve_key: str | None = None) -> None:
+        if not hasattr(self, "method_combo") or self.method_combo is None:
+            return
+        preserve_key = preserve_key or (self.get_current_method_key() if getattr(self, "method_keys", None) else None)
+        self._active_method_stage = str(stage_key or "all")
+        keys = self._method_keys_for_stage(self._active_method_stage) or list(getattr(self, "all_method_keys", []) or get_public_method_keys())
+        self.method_keys = keys
+        self.method_combo.blockSignals(True)
+        self.method_combo.clear()
+        self.method_combo.addItems([self._format_method_combo_label(k) for k in self.method_keys])
+        if preserve_key in self.method_keys:
+            self.method_combo.setCurrentIndex(self.method_keys.index(preserve_key))
+        elif self.method_keys:
+            self.method_combo.setCurrentIndex(0)
+        self.method_combo.blockSignals(False)
+        self._refresh_stage_filter_buttons(self._active_method_stage)
+        if self.method_keys and hasattr(self, "param_layout"):
+            key = self.method_keys[self.method_combo.currentIndex()]
+            self._render_params(key)
+
+    def set_method_stage_filter(self, stage_key: str) -> None:
+        """Filter visible processing methods by stage without changing data."""
+        stage_key = str(stage_key or "all")
+        if stage_key not in dict(self.METHOD_STAGE_DEFS):
+            stage_key = "all"
+        previous_key = self.get_current_method_key()
+        self._rebuild_method_combo(stage_key, previous_key)
+        if getattr(self, "stage_filter_hint", None) is not None:
+            label = dict(self.METHOD_STAGE_DEFS).get(stage_key, "全部")
+            count = len(getattr(self, "method_keys", []) or [])
+            self.stage_filter_hint.setText(f"当前阶段：{label}，共 {count} 个可用方法。真实处理历史显示在底部链路。")
+
+    def _refresh_stage_filter_buttons(self, active_stage: str) -> None:
+        for stage_key, btn in getattr(self, "_stage_filter_buttons", {}).items():
+            btn.setChecked(stage_key == active_stage)
+            btn.setProperty("active", stage_key == active_stage)
+            try:
+                btn.style().unpolish(btn); btn.style().polish(btn); btn.update()
+            except Exception:
+                pass
+
+    def _flow_stage_from_category(self, category: str, method_key: str | None = None) -> str:
+        stage = self._method_stage_from_category(get_method_category(method_key)) if method_key else "all"
+        if stage in {"correction", "filter"}:
+            return "correct"
+        if stage == "suppress":
+            return "suppress"
+        if stage in {"gain", "denoise", "image"}:
+            return "enhance"
+        return "raw"
+
+    def _update_processing_flow_stepper(self, category: str, method_key: str | None = None) -> None:
+        # Legacy compatibility hook. The old static stepper was removed; stage
+        # filtering and the bottom lineage bar now carry the workflow context.
+        return
 
     def render_method_params(self, method_key: str, overrides: dict | None = None):
         """公开方法：渲染指定方法的参数输入。"""
@@ -544,6 +705,7 @@ class BasicFlowPage(QWidget):
             self.method_category_tag.setText(category)
         if getattr(self, "method_name_label", None) is not None:
             self.method_name_label.setText(name)
+        self._update_processing_flow_stepper(category, method_key)
 
     def _render_params(self, method_key: str, overrides: dict | None = None):
         """渲染方法参数输入框"""
@@ -1066,9 +1228,12 @@ class BasicFlowPage(QWidget):
             )
 
     def set_method_by_key(self, key: str):
-        """通过key设置当前方法"""
-        if key not in self.method_keys:
+        """通过key设置当前方法。若当前阶段过滤隐藏了该方法，则自动切换到对应阶段。"""
+        all_keys = list(getattr(self, "all_method_keys", []) or get_public_method_keys())
+        if key not in all_keys:
             return
+        if key not in self.method_keys:
+            self._rebuild_method_combo(self._method_stage_for_key(key), key)
         idx = self.method_keys.index(key)
         previous_idx = self.method_combo.currentIndex()
         self.method_combo.setCurrentIndex(idx)
@@ -1077,8 +1242,11 @@ class BasicFlowPage(QWidget):
 
     def apply_method_params(self, method_key: str, params: dict | None = None):
         """切换到指定方法并应用参数覆盖。"""
-        if method_key not in self.method_keys:
+        all_keys = list(getattr(self, "all_method_keys", []) or get_public_method_keys())
+        if method_key not in all_keys:
             return
+        if method_key not in self.method_keys:
+            self._rebuild_method_combo(self._method_stage_for_key(method_key), method_key)
         idx = self.method_keys.index(method_key)
         if params is not None:
             self._method_param_overrides[method_key] = dict(params)

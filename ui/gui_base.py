@@ -18,7 +18,8 @@ import matplotlib
 
 from core.app_errors import error_info_from_exception
 
-matplotlib.use("QtAgg")
+if str(os.environ.get("QT_QPA_PLATFORM", "")).lower() not in {"offscreen", "minimal"}:
+    matplotlib.use("QtAgg")
 from matplotlib import font_manager as fm
 
 from PyQt6.QtGui import QFont, QFontDatabase

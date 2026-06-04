@@ -1,0 +1,83 @@
+{
+  "scene_id": "scene_025_paper_aligned_gssi_antenna_gate_n15",
+  "based_on_scene": "scene_023_paper_aligned_tableii_material_gate_n31",
+  "replication_type": "paper_aligned_gssi_antenna_gate",
+  "antenna_model": "antenna_like_GSSI_1500",
+  "antenna_command_source": "gprMax user_models/cylinder_Bscan_GSSI_1500.in and user_libs/antennas/GSSI.py",
+  "gprmax_version": "3.1.7",
+  "changed_from_scene_023": [
+    "replace simplified waveform+hertzian_dipole+rx setup with Python antenna insertion: antenna_like_GSSI_1500(...)",
+    "expected_num_runs reduced from 31 to 15 for gate",
+    "scan start/end adjusted to n=15 while remaining centered around target"
+  ],
+  "unchanged_from_scene_023": [
+    "domain = 1.0 x 0.15 x 0.40 m",
+    "dx_dy_dz = 0.002 m",
+    "time_window = 14e-9",
+    "dry_sand Table II material",
+    "target geometry/material remains PEC cylinder",
+    "scan step = 0.01 m"
+  ],
+  "expected_num_runs": 15,
+  "scan_start": {
+    "antenna_x": 0.35
+  },
+  "scan_end": {
+    "antenna_x": 0.49
+  },
+  "target_center": [0.50, 0.075, 0.10],
+  "antenna_to_soil_distance_m": 0.05,
+  "pair_contract": {
+    "required_identical_fields": [
+      "domain",
+      "dx_dy_dz",
+      "time_window",
+      "python_antenna_command",
+      "soil_surface_material_region"
+    ],
+    "expected_difference": "target object only in raw_with_target",
+    "expected_pairing_formula": "target_response = raw - background"
+  },
+  "unresolved_antenna_parameters": [
+    "paper exact antenna trajectory details and offset conventions",
+    "paper exact A-scan count (80) not used in this gate"
+  ],
+  "receiver_component_recommendation": "Ey",
+  "selected_component_for_conversion": "Ey",
+  "available_components": ["Ex", "Ey", "Ez", "Hx", "Hy", "Hz"],
+  "component_selection_rationale": [
+    "GSSI antenna raw-gate variability was validated on Ey in prior audit.",
+    "Component comparison on scene_025 n=15 shows Ey has stronger target_response energy and stronger trace-to-trace variability than Ez.",
+    "Ex is all-zero in this scene and is rejected for pairing use."
+  ],
+  "n31_component_confirmation": {
+    "status": "completed",
+    "ey_metrics": {
+      "shape": [3636, 31],
+      "target_response_energy": 0.16654497183557598,
+      "raw_background_psnr": 70.38088639553973,
+      "roi_energy_ratio": 0.0004316263418071876
+    },
+    "ez_metrics": {
+      "shape": [3636, 31],
+      "target_response_energy": 0.02504927487299834,
+      "raw_background_psnr": 70.21260369503368,
+      "roi_energy_ratio": 0.00047855112515785366
+    },
+    "comparison_conclusion": "Ey remains preferred over Ez at n=31 under current scene_025 setup.",
+    "confidence": "medium_high",
+    "unresolved_issues": [
+      "n=31 is still a gate setting and not the paper 80 A-scan full scan.",
+      "curvature visibility is improved but still preliminary; deeper diagnostic tuning may still be needed."
+    ]
+  },
+  "validation_state": "draft_component_validated_n31",
+  "claim_boundary": [
+    "GSSI antenna syntax and runtime gate only",
+    "not exact replication",
+    "not full CLT-GPR replication",
+    "not field validation",
+    "not AutoTune evaluation",
+    "not paper-candidate benchmark"
+  ]
+}

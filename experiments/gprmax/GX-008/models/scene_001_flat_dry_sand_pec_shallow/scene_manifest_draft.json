@@ -1,0 +1,45 @@
+{
+  "scene_id": "scene_001_flat_dry_sand_pec_shallow",
+  "scene_role": "gx008_core_scene_draft",
+  "validation_state": "draft_not_validated_not_run",
+  "pair_contract": {
+    "raw_file": "raw_with_target.in",
+    "background_file": "background_only.in",
+    "required_identical_fields": [
+      "domain",
+      "dx_dy_dz",
+      "time_window",
+      "waveform",
+      "hertzian_dipole",
+      "rx",
+      "src_steps",
+      "rx_steps",
+      "soil_material",
+      "surface_model"
+    ],
+    "expected_difference": "target object definition only",
+    "expected_pairing_formula": "target_response = raw - background"
+  },
+  "scan_design": {
+    "src_step_m": 0.005,
+    "rx_step_m": 0.005,
+    "expected_num_runs": 41,
+    "runtime_note": "Must pass --num-runs 41 (or matching N) during execution; otherwise single-trace output may occur."
+  },
+  "expected_output_shape_policy": {
+    "type": "2d_array",
+    "axis_meaning": [
+      "samples",
+      "traces"
+    ],
+    "paired_shape_must_match": true
+  },
+  "target_design": {
+    "type": "cylinder",
+    "material": "pec",
+    "radius_m": 0.04,
+    "depth_m": 0.16,
+    "orientation": "cross_scan_y_axis",
+    "hyperbola_intent": "scan crosses localized target to form typical B-scan hyperbola"
+  }
+}

@@ -4,7 +4,7 @@
 ## Task
 - ID: `GX-UI-007-AUTOTUNE-TUNING-PAGE-REDESIGN`
 - Scope: UI-only refactor of `调参与实验` entry.
-- Boundary: no gprMax run, no retained GX-008 scene_037 / scene_038 model changes, no Evidence repo changes.
+- Boundary: no gprMax run, no GX-008/GX-009 model changes, no Evidence repo changes.
 
 ## What changed
 - Added new focused page class: `ui/autotune_tuning_page.py`

@@ -25,6 +25,39 @@ class BscanInteractionController:
     def __init__(self, host):
         self.host = host
 
+    def _request_draw(self, reason: str = "interaction", *, force: bool = False) -> None:
+        """Request a coalesced canvas draw when the host supports it."""
+        host = self.host
+        if hasattr(host, "_request_main_canvas_draw"):
+            host._request_main_canvas_draw(reason, force=force)
+            return
+        try:
+            host.canvas.draw_idle()
+        except Exception:
+            pass
+
+    @staticmethod
+    def _axes_bbox_size(ax) -> tuple[float, float]:
+        """Return axes pixel size with a safe fallback for lightweight test doubles.
+
+        Real Matplotlib axes expose ``ax.bbox.width`` and ``ax.bbox.height``.
+        Some GUI contract tests use small dummy axes that only implement the
+        methods needed by the interaction path; falling back to 1 px keeps the
+        controller deterministic without weakening the production behavior.
+        """
+        bbox = getattr(ax, "bbox", None)
+        width = getattr(bbox, "width", 1.0)
+        height = getattr(bbox, "height", 1.0)
+        try:
+            width = float(width)
+        except Exception:
+            width = 1.0
+        try:
+            height = float(height)
+        except Exception:
+            height = 1.0
+        return max(1.0, width), max(1.0, height)
+
     def on_main_canvas_press(self, event):
         """Record main-plot mouse press. Default inspect mode does not pan on left drag."""
         host = self.host
@@ -48,12 +81,18 @@ class BscanInteractionController:
         action = "inspect"
         if button in {2, 3}:
             action = "pan"
+        elif button == 1 and host._is_main_slider_compare_active():
+            # In slider-compare mode the main gesture is scrubbing the divider.
+            # Let the user click/drag anywhere on the B-scan instead of forcing
+            # a precise hit on the split line.
+            action = "slider"
+            host._update_main_slider_compare_ratio_from_event(event, force=True)
         elif button == 1 and host._is_manual_roi_pick_enabled():
             action = "roi"
-        elif button == 1 and host._is_slider_compare_split_hit(event):
-            action = "slider"
         elif button != 1:
             return
+
+        bbox_width, bbox_height = self._axes_bbox_size(ax)
 
         host._main_press_state = {
             "x": float(event.x),
@@ -67,14 +106,18 @@ class BscanInteractionController:
             "dragging": False,
             "xlim_start": (float(xlim[0]), float(xlim[1])),
             "ylim_start": (float(ylim[0]), float(ylim[1])),
-            "bbox_width": max(1.0, float(ax.bbox.width)),
-            "bbox_height": max(1.0, float(ax.bbox.height)),
+            "bbox_width": bbox_width,
+            "bbox_height": bbox_height,
         }
 
     def on_main_canvas_motion(self, event):
         """Update hover readout and handle explicit drag modes."""
         host = self.host
-        host._update_plot_coord_label(event)
+        if (
+            host._main_press_state is None
+            or str(host._main_press_state.get("action") or "") != "slider"
+        ):
+            host._update_plot_coord_label(event)
         if host._main_press_state is None or host._toolbar_mode_active():
             return
         if event.x is None or event.y is None:
@@ -83,11 +126,11 @@ class BscanInteractionController:
         start = host._main_press_state
         dx = float(event.x) - float(start["x"])
         dy = float(event.y) - float(start["y"])
-        if np.hypot(dx, dy) < host._main_drag_threshold_px:
+        action = str(start.get("action") or "inspect")
+        if action != "slider" and np.hypot(dx, dy) < host._main_drag_threshold_px:
             return
 
         start["dragging"] = True
-        action = str(start.get("action") or "inspect")
 
         if action == "roi":
             if event.xdata is not None and event.ydata is not None:
@@ -220,6 +263,7 @@ class BscanInteractionController:
 
         now = time.monotonic()
         if not force and (now - host._last_slider_compare_draw_ts) < host._slider_compare_draw_interval_s:
+            # Keep the numeric state current even when we skip a paint frame.
             host._main_slider_compare_ratio = new_ratio
             return
 
@@ -267,7 +311,7 @@ class BscanInteractionController:
         )
         host._set_clamped_axis_limits(ax, new_xlim, new_ylim)
         host._capture_main_view_limits_from_axes()
-        host.canvas.draw_idle()
+        self._request_draw("scroll")
 
     def on_main_canvas_key_press(self, event):
         """Esc clears transient states; R toggles ROI; Home/H resets view."""
@@ -276,7 +320,7 @@ class BscanInteractionController:
         if key == "escape":
             host._main_press_state = None
             host._remove_drag_roi_preview()
-            host.canvas.draw_idle()
+            self._request_draw("keyboard_escape")
             return
         if key == "r":
             host._set_manual_roi_pick_enabled(not host._is_manual_roi_pick_enabled())
@@ -292,8 +336,9 @@ class BscanInteractionController:
             return
         xlim0 = start.get("xlim_start") or ax.get_xlim()
         ylim0 = start.get("ylim_start") or ax.get_ylim()
-        bbox_w = max(1.0, float(start.get("bbox_width") or ax.bbox.width or 1.0))
-        bbox_h = max(1.0, float(start.get("bbox_height") or ax.bbox.height or 1.0))
+        default_bbox_w, default_bbox_h = self._axes_bbox_size(ax)
+        bbox_w = max(1.0, float(start.get("bbox_width") or default_bbox_w))
+        bbox_h = max(1.0, float(start.get("bbox_height") or default_bbox_h))
         x_span = float(xlim0[1] - xlim0[0])
         y_span = float(ylim0[1] - ylim0[0])
         dx_data = -float(dx_px) / bbox_w * x_span
@@ -303,7 +348,7 @@ class BscanInteractionController:
         host._set_clamped_axis_limits(ax, new_xlim, new_ylim)
         now_ts = time.perf_counter()
         if now_ts - float(host._last_main_motion_draw_ts) >= float(host._main_motion_draw_interval_s):
-            host.canvas.draw_idle()
+            self._request_draw("pan")
             host._last_main_motion_draw_ts = now_ts
 
     def set_clamped_axis_limits(self, ax, xlim, ylim):
@@ -356,6 +401,29 @@ class BscanInteractionController:
             _clamp_pair(ylim, ymin, ymax, min_y_span, data_y_span),
         )
 
+    @staticmethod
+    def _nearest_axis_index(axis: np.ndarray, value: float) -> int:
+        """Return nearest index on a monotonic axis without scanning the full array."""
+        arr = np.asarray(axis)
+        if arr.size <= 1:
+            return 0
+        try:
+            if arr[0] <= arr[-1]:
+                pos = int(np.searchsorted(arr, float(value), side="left"))
+            else:
+                pos = int(np.searchsorted(-arr, -float(value), side="left"))
+            if pos <= 0:
+                return 0
+            if pos >= arr.size:
+                return int(arr.size - 1)
+            left = pos - 1
+            right = pos
+            if abs(float(arr[right]) - float(value)) < abs(float(arr[left]) - float(value)):
+                return int(right)
+            return int(left)
+        except Exception:
+            return int(np.argmin(np.abs(arr - float(value))))
+
     def update_plot_coord_label(self, event):
         """Update compact trace/sample/amplitude readout."""
         host = self.host
@@ -380,8 +448,8 @@ class BscanInteractionController:
 
         trace_pos = float(event.xdata)
         time_pos = float(event.ydata)
-        trace_idx = int(np.argmin(np.abs(host._last_display_trace_axis - trace_pos)))
-        time_idx = int(np.argmin(np.abs(host._last_display_time_axis - time_pos)))
+        trace_idx = self._nearest_axis_index(host._last_display_trace_axis, trace_pos)
+        time_idx = self._nearest_axis_index(host._last_display_time_axis, time_pos)
         amplitude = float(host._last_display_data[time_idx, trace_idx])
         trace_value = float(host._last_display_trace_axis[trace_idx])
         time_value = float(host._last_display_time_axis[time_idx])
@@ -391,7 +459,7 @@ class BscanInteractionController:
             else trace_idx
         )
         if host._is_main_slider_compare_active():
-            extra_hint = "分隔线附近可拖动对比"
+            extra_hint = "单击/拖动调整对比"
         elif host._is_manual_roi_pick_enabled():
             extra_hint = "ROI 框选"
         else:
@@ -456,7 +524,7 @@ class BscanInteractionController:
             ax.add_patch(host._drag_roi_preview_patch)
         else:
             host._drag_roi_preview_patch.set_bounds(x0, y0, abs(x1 - x0), abs(y1 - y0))
-        host.canvas.draw_idle()
+        self._request_draw("roi_preview")
 
     def remove_drag_roi_preview(self):
         """Remove transient ROI preview rectangle."""
@@ -468,7 +536,7 @@ class BscanInteractionController:
                 pass
             host._drag_roi_preview_patch = None
             try:
-                host.canvas.draw_idle()
+                self._request_draw("roi_remove")
             except Exception:
                 pass
 
@@ -510,7 +578,7 @@ class BscanInteractionController:
         host._hover_crosshair_last_key = None
         if draw and removed:
             try:
-                host.canvas.draw_idle()
+                self._request_draw("hover_clear")
             except Exception:
                 pass
 
@@ -547,7 +615,7 @@ class BscanInteractionController:
         host = self.host
         host._clear_selected_trace_marker_artists()
         try:
-            host.canvas.draw_idle()
+            self._request_draw("trace_marker")
         except Exception:
             pass
         return True

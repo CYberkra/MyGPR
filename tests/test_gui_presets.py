@@ -10,6 +10,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
 import app_qt
+import ui.worker_threads as worker_threads
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import QApplication, QCheckBox, QComboBox, QGroupBox, QLineEdit, QScrollArea, QStackedWidget
@@ -28,6 +29,7 @@ from core.preset_profiles import (
 )
 from core.workflow_data import METHOD_CATEGORIES, QUICK_PRESETS
 from ui.gui_quality_log import QualityLogPage
+from ui.georef3d_results_page import Terrain3DResultsPage
 from ui.gui_method_browser import MethodBrowserTree
 from ui.gui_param_editor import ParamEditorPanel
 
@@ -109,7 +111,7 @@ def test_startup_preset_matches_registry_contract():
         assert not hasattr(win.page_advanced, "preset_combo")
         assert not hasattr(win.page_advanced, "fast" + "_preview_var")
         assert win._method_param_overrides == preset["method_params"]
-        assert win.page_advanced.sidecar_box.isHidden() is False
+        assert win.page_advanced.sidecar_box.isHidden() is True
     finally:
         win.close()
         app.processEvents()
@@ -544,10 +546,9 @@ def test_phase2_tabs_expose_prioritized_group_hierarchy_and_bridge():
             "聚焦裁剪",
             "ROI 状态",
             "增强与对比辅助",
-            "可选 RTK/IMU/高度计 辅助文件",
         ]
-        assert win.page_advanced.sidecar_box.isHidden() is False
-        assert win.page_advanced.altimeter_sidecar_button.text() == "选择高度计"
+        assert win.page_advanced.sidecar_box.isHidden() is True
+        assert win.page_terrain3d.altimeter_sidecar_button.text() == "选择"
         assert win.page_advanced.show_physical_x_axis_var.text() == "显示物理横轴（距离）"
         assert not win.page_advanced.show_physical_x_axis_var.isChecked()
         assert win.page_advanced.show_physical_y_axis_var.text() == "显示物理纵轴（时间/深度）"
@@ -558,13 +559,16 @@ def test_phase2_tabs_expose_prioritized_group_hierarchy_and_bridge():
         assert win.page_auto_tune.btn_open_workbench.text() == "进入工作台深度实验"
 
         assert _top_level_group_titles(win.page_quality) == [
-            "查看顺序",
-            "Evidence 检查清单",
-            "导出与诊断",
-            "质量摘要",
-            "图表查看",
-            "运行记录",
+            "质量概览",
+            "质量图表",
+            "报告与导出",
+            "处理记录",
+            "高级诊断",
         ]
+        assert [
+            win.page_terrain3d.view_tabs.tabText(i)
+            for i in range(win.page_terrain3d.view_tabs.count())
+        ] == ["剖面三维", "测线轨迹", "地形剖面", "C-scan", "基覆界面"]
     finally:
         win.close()
         app.processEvents()
@@ -652,7 +656,7 @@ def test_runtime_drawer_keeps_only_global_log_visible():
     app = _get_app()
     win = GPRGuiQt()
     try:
-        assert win.btn_toggle_global_log.text() == "全局日志"
+        assert win.btn_toggle_global_log.text() == "日志"
         assert not hasattr(win, "btn_toggle_quality")
 
         raw = np.arange(120, dtype=np.float32).reshape(10, 12) / 10.0
@@ -739,7 +743,7 @@ def test_manual_roi_is_prioritized_for_auto_tune_when_present():
         app.processEvents()
 
 
-def test_main_canvas_plain_drag_pans_like_grabbing_image(monkeypatch):
+def test_main_canvas_middle_drag_pans_like_grabbing_image(monkeypatch):
     app = _get_app()
     win = GPRGuiQt()
     try:
@@ -751,11 +755,18 @@ def test_main_canvas_plain_drag_pans_like_grabbing_image(monkeypatch):
         monkeypatch.setattr(win.canvas, "draw_idle", lambda: None)
 
         ax = win._main_plot_axes[0]
+        full_xlim = tuple(float(v) for v in ax.get_xlim())
+        full_ylim = tuple(float(v) for v in ax.get_ylim())
+        ax.set_xlim(full_xlim[0] + 2.0, full_xlim[1] - 2.0)
+        if full_ylim[0] < full_ylim[1]:
+            ax.set_ylim(full_ylim[0] + 4.0, full_ylim[1] - 4.0)
+        else:
+            ax.set_ylim(full_ylim[0] - 4.0, full_ylim[1] + 4.0)
         original_xlim = tuple(float(v) for v in ax.get_xlim())
         original_ylim = tuple(float(v) for v in ax.get_ylim())
 
         press = _DummyCanvasEvent(
-            button=1,
+            button=2,
             inaxes=ax,
             x=100.0,
             y=100.0,
@@ -800,7 +811,7 @@ def test_main_canvas_plain_drag_pans_like_grabbing_image(monkeypatch):
         app.processEvents()
 
 
-def test_manual_roi_can_be_set_by_shift_drag(monkeypatch):
+def test_manual_roi_can_be_set_by_explicit_picker_drag(monkeypatch):
     app = _get_app()
     win = GPRGuiQt()
     try:
@@ -809,6 +820,7 @@ def test_manual_roi_can_be_set_by_shift_drag(monkeypatch):
         monkeypatch.setattr(win, "plot_data", lambda *_args, **_kwargs: None)
         monkeypatch.setattr(win.canvas, "draw_idle", lambda: None)
 
+        win._set_manual_roi_pick_enabled(True)
         ax = _DummyAxes()
         win._main_plot_axes = [ax]
         press = _DummyCanvasEvent(
@@ -819,7 +831,7 @@ def test_manual_roi_can_be_set_by_shift_drag(monkeypatch):
             xdata=1.0,
             ydata=2.0,
             dblclick=False,
-            key="shift",
+            key=None,
         )
         move = _DummyCanvasEvent(
             inaxes=ax,
@@ -834,7 +846,7 @@ def test_manual_roi_can_be_set_by_shift_drag(monkeypatch):
             y=60.0,
             xdata=5.0,
             ydata=8.0,
-            key="shift",
+            key=None,
         )
 
         win._on_main_canvas_press(press)
@@ -851,39 +863,28 @@ def test_manual_roi_can_be_set_by_shift_drag(monkeypatch):
         app.processEvents()
 
 
-def test_manual_roi_can_be_cleared_by_right_click(monkeypatch):
+def test_manual_roi_can_be_cleared_by_clear_action(monkeypatch):
     app = _get_app()
     win = GPRGuiQt()
     try:
         raw = np.arange(120, dtype=np.float32).reshape(10, 12) / 10.0
         win.shared_data.load_data(raw, path="demo.csv", source="test")
         monkeypatch.setattr(win, "plot_data", lambda *_args, **_kwargs: None)
-        monkeypatch.setattr(win, "_capture_main_view_limits_from_axes", lambda: None)
 
-        ax = _DummyAxes()
-        win._main_plot_axes = [ax]
         win._manual_roi_values = {
             "dist_start": 1.0,
             "dist_end": 5.0,
             "time_start": 2.0,
             "time_end": 8.0,
         }
+        win._update_manual_roi_status()
+        assert win.page_advanced.btn_clear_manual_roi.isEnabled() is True
 
-        right_click = _DummyCanvasEvent(
-            button=3,
-            inaxes=ax,
-            x=20.0,
-            y=20.0,
-            xdata=2.0,
-            ydata=3.0,
-            dblclick=False,
-            key=None,
-        )
-
-        win._on_main_canvas_press(right_click)
+        win._clear_manual_roi()
 
         assert win._manual_roi_values is None
         assert win.page_advanced.roi_status_label.text() == "手动 ROI: 未设置"
+        assert win.page_advanced.btn_clear_manual_roi.isEnabled() is False
     finally:
         win.close()
         app.processEvents()
@@ -1805,8 +1806,8 @@ def test_processing_worker_uses_auto_tuned_params_per_step(monkeypatch):
         seen_params.append((method_key, dict(params)))
         return np.array(data, copy=True), {}
 
-    monkeypatch.setattr(app_qt, "auto_tune_method", fake_auto_tune_method)
-    monkeypatch.setattr(app_qt, "run_processing_method", fake_run_processing_method)
+    monkeypatch.setattr(worker_threads, "auto_tune_method", fake_auto_tune_method)
+    monkeypatch.setattr(worker_threads, "run_processing_method", fake_run_processing_method)
 
     worker = app_qt.ProcessingWorker(raw, tasks, execution_mode="sequential")
     captured = {}
@@ -1820,6 +1821,47 @@ def test_processing_worker_uses_auto_tuned_params_per_step(monkeypatch):
     assert seen_params[1][1]["window"] == 23
     assert seen_params[1][1]["window"] != 999
     assert len(captured["outputs"]) == 2
+
+
+def test_processing_worker_emits_step_completed_live_preview(monkeypatch):
+    _get_app()
+    raw = np.ones((3, 4), dtype=np.float32)
+    tasks = [
+        {
+            "method_key": "set_zero_time",
+            "method": PROCESSING_METHODS["set_zero_time"],
+            "params": {},
+            "out_dir": ".",
+        },
+        {
+            "method_key": "dewow",
+            "method": PROCESSING_METHODS["dewow"],
+            "params": {},
+            "out_dir": ".",
+        },
+    ]
+
+    call_index = {"value": 0}
+
+    def fake_run_processing_method(data, method_key, params, cancel_checker=None):
+        call_index["value"] += 1
+        return np.asarray(data, dtype=np.float32) + call_index["value"], {}
+
+    monkeypatch.setattr(worker_threads, "run_processing_method", fake_run_processing_method)
+
+    worker = app_qt.ProcessingWorker(raw, tasks, execution_mode="sequential")
+    previews = []
+    worker.step_completed.connect(lambda payload: previews.append(payload))
+
+    worker.run()
+
+    assert len(previews) == 2
+    assert [p["current"] for p in previews] == [1, 2]
+    assert [p["total"] for p in previews] == [2, 2]
+    assert previews[0]["method_key"] == "set_zero_time"
+    assert previews[1]["method_key"] == "dewow"
+    assert np.allclose(previews[0]["data"], raw + 1)
+    assert np.allclose(previews[1]["data"], raw + 3)
 
 
 def test_workflow_presets_align_with_current_denoising_preference():
@@ -1844,10 +1886,25 @@ def test_quality_page_exposes_report_and_snapshot_actions():
     app = _get_app()
     page = QualityLogPage()
     try:
-        assert page.btn_generate_report.text() == "生成报告"
-        assert page.btn_export_quality_snapshot.text() == "导出质量快照"
-        assert page.btn_export_georeference_3d.text() == "导出3D地理参考"
-        assert page.visual_stack.count() == 3
+        assert page.btn_generate_report.text() == "生成项目报告"
+        assert page.btn_export_quality_snapshot.text() == "导出质量检查表"
+        assert page.btn_export_replay_evidence.text() == "导出处理记录包"
+        assert page.visual_stack.count() == 1
+        assert page.btn_open_trajectory_space.text() == "查看测线轨迹"
+        assert not hasattr(page, "btn_export_georeference_3d")
+        assert page.btn_generate_report.toolTip()
+        assert page.btn_export_quality_snapshot.toolTip()
+    finally:
+        page.release_plot_resources()
+        page.close()
+        app.processEvents()
+
+
+def test_terrain3d_page_owns_georef3d_actions():
+    app = _get_app()
+    page = Terrain3DResultsPage()
+    try:
+        assert page.btn_export_georeference_3d.text() == "导出三维地理参考"
         assert page.btn_georef3d_current.isChecked()
         assert page.btn_georef3d_bscan.isChecked()
         assert not page.btn_georef3d_raw.isChecked()
@@ -1855,8 +1912,6 @@ def test_quality_page_exposes_report_and_snapshot_actions():
         assert hasattr(page, "btn_georef3d_expand")
         assert hasattr(page, "btn_georef3d_reset_view")
         assert not hasattr(page, "cmb_georef3d_lod")
-        assert page.btn_generate_report.toolTip()
-        assert page.btn_export_quality_snapshot.toolTip()
     finally:
         page.release_plot_resources()
         page.close()

@@ -3,10 +3,11 @@
 """Enhanced GPR I/O module.
 
 Supports:
-- Standard CSV B-scan files (with/without header)
+- Standard CSV/TXT B-scan files (with/without header)
 - Folder of A-scan CSV files
-- gprMax .out files
-- gprMax .in configuration files
+- gprMax .out files and .in configuration files
+- Lightweight native subsets: MALA RD3/RD7, ImpulseRadar IPRB, fixed SEG-Y, ENVI BSQ, NPY/NPZ
+- Recognized vendor formats with explicit conversion guidance: GSSI DZT, Sensors & Software DT1/HD, OKO GPR/GPR2
 
 Author: MyGPR Team
 Date: 2026-03-31
@@ -46,6 +47,17 @@ from core.data_context import (
     apply_data_context_defaults,
 )
 from core.scalar_utils import to_float, to_float_or_none, to_int
+
+from core.gpr_format_registry import get_format_spec
+from core.gpr_vendor_readers import (
+    GPRFormatReadError,
+    read_envi_bsq,
+    read_impulseradar_iprb,
+    read_mala_rd,
+    read_numpy_profile,
+    read_segy_fixed,
+    unsupported_known_format_message,
+)
 
 
 def read_gprmax_in(in_path: str) -> Dict[str, Any]:
@@ -134,18 +146,9 @@ def read_gprmax_in(in_path: str) -> Dict[str, Any]:
 def auto_load_data(path: str, **kwargs) -> Dict[str, Any]:
     """Auto-detect file type and load GPR data.
 
-    Supports:
-    - .out: gprMax simulation output
-    - .in: gprMax configuration file
-    - .csv: B-scan CSV file
-    - folder: Folder of A-scan CSV files
-
-    Args:
-        path: File or folder path
-        **kwargs: Additional arguments passed to specific loaders
-
-    Returns:
-        dict: Loaded data with metadata
+    The return payload is normalized to include ``data`` for profile-like files.
+    Known but not natively decoded vendor formats raise a clear error instead
+    of being mis-read as generic binary.
     """
     path = Path(path)
 
@@ -153,30 +156,46 @@ def auto_load_data(path: str, **kwargs) -> Dict[str, Any]:
         raise FileNotFoundError(f"Path not found: {path}")
 
     if path.is_dir():
-        # Folder of A-scan CSV files
         return read_ascans_folder(str(path), **kwargs)
 
     suffix = path.suffix.lower()
+    spec = get_format_spec(path)
 
     if suffix == ".out":
-        # gprMax simulation output (.out HDF5)
         return read_gprmax_out(str(path))
-
-    elif suffix == ".in":
-        # gprMax configuration file
+    if suffix == ".in":
         return read_gprmax_in(str(path))
-
-    elif suffix == ".csv":
-        # B-scan CSV file
+    if suffix in {".csv", ".txt"}:
         data = readcsv(str(path))
         return {
             "data": data,
-            "type": "bscan_csv",
+            "header_info": {
+                "a_scan_length": int(data.shape[0]),
+                "num_traces": int(data.shape[1]) if data.ndim >= 2 else 1,
+                "total_time_ns": 0.0,
+                "trace_interval_m": 0.0,
+                "source": "matrix_text",
+                "path": str(path),
+            },
+            "type": "bscan_text",
             "source": str(path),
+            "path": str(path),
         }
-
-    else:
-        raise ValueError(f"Unsupported file type: {suffix}")
+    if suffix in {".npy", ".npz"}:
+        return read_numpy_profile(str(path))
+    if suffix in {".rd3", ".rd7", ".rad"}:
+        return read_mala_rd(str(path))
+    if suffix in {".iprb", ".iprh"}:
+        return read_impulseradar_iprb(str(path))
+    if suffix in {".sgy", ".segy"}:
+        return read_segy_fixed(str(path))
+    if suffix in {".dat", ".hdr"}:
+        return read_envi_bsq(str(path))
+    if spec is not None and spec.support == "recognized":
+        raise GPRFormatReadError(
+            unsupported_known_format_message(str(path), spec.display_name, spec.notes)
+        )
+    raise ValueError(f"Unsupported file type: {suffix}")
 
 
 # ============ 文件夹 A-scan 数据加载 ============
@@ -1020,6 +1039,11 @@ __all__ = [
     "subset_trace_metadata",
     "compute_trace_distance_m",
     "auto_load_data",
+    "read_mala_rd",
+    "read_impulseradar_iprb",
+    "read_segy_fixed",
+    "read_envi_bsq",
+    "read_numpy_profile",
     "read_ascans_folder",
     "load_bscan_csv",
     "load_ascans_folder",

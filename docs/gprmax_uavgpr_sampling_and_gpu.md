@@ -67,7 +67,7 @@ Current workstation check on 2026-05-11:
 - `pycuda`: available in `E:\gprMax\gprMax-v.3.1.7\.venv`
 - `nvcc`: found at `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\bin\nvcc.exe`
 - `mpi4py`: not available, so MPI task farm is not ready
-- root cause found: ordinary PowerShell/Codex sessions did not load Visual Studio's
+- root cause found: ordinary PowerShell/agent sessions did not load Visual Studio's
   C++ build environment, so `nvcc` could not find `cl.exe`
 - `vcvars64.bat` is available at `E:\sisual stdio 2022\VC\Auxiliary\Build\vcvars64.bat`
 - the report script now auto-loads `vcvars64.bat` for Windows `--gpu` runs when `cl.exe`

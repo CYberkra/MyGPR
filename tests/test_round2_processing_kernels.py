@@ -5,7 +5,9 @@
 from __future__ import annotations
 
 import numpy as np
-import pywt
+import pytest
+
+pywt = pytest.importorskip("pywt")
 
 from core.gprpy_compat import (
     apply_gprpy_agc_gain,

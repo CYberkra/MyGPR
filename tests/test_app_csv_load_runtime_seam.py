@@ -6,10 +6,15 @@ from __future__ import annotations
 
 from typing import Any, cast
 
+import os
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("MPLBACKEND", "Agg")
+
 import numpy as np
 import pandas as pd
 
 import app_qt
+import ui.main_window_data_loading_mixin as data_loading_mixin
 
 
 class _DummyLoaderHost:
@@ -39,6 +44,11 @@ def test_load_single_csv_with_progress_forwards_optional_sidecar_kwargs(monkeypa
     monkeypatch.setattr(app_qt, "_detect_skiprows", fake_detect_skiprows)
     monkeypatch.setattr(app_qt.pd, "read_csv", fake_read_csv)
     monkeypatch.setattr(app_qt, "extract_airborne_csv_payload", fake_extract)
+    monkeypatch.setattr(data_loading_mixin, "extract_airborne_csv_payload", fake_extract)
+    monkeypatch.setattr(data_loading_mixin, "detect_csv_header", fake_detect_csv_header)
+    monkeypatch.setattr(data_loading_mixin, "_detect_skiprows", fake_detect_skiprows)
+    monkeypatch.setattr(data_loading_mixin.pd, "read_csv", fake_read_csv)
+    monkeypatch.setattr(data_loading_mixin, "extract_airborne_csv_payload", fake_extract)
 
     host = _DummyLoaderHost()
     trace_timestamps_s = np.array([10.0, 11.0, 12.0, 13.0], dtype=np.float64)
@@ -65,19 +75,22 @@ def test_load_single_csv_with_progress_preserves_legacy_call_shape(monkeypatch):
     raw_data = np.arange(6, dtype=np.float32).reshape(2, 3)
     captured: dict[str, object] = {}
 
-    monkeypatch.setattr(
-        app_qt,
-        "detect_csv_header",
-        lambda path: {"a_scan_length": 2, "num_traces": 3, "total_time_ns": 10.0},
-    )
-    monkeypatch.setattr(app_qt, "_detect_skiprows", lambda path: 0)
-    monkeypatch.setattr(app_qt.pd, "read_csv", lambda *args, **kwargs: [pd.DataFrame(raw_data)])
+    fake_header = lambda path: {"a_scan_length": 2, "num_traces": 3, "total_time_ns": 10.0}
+    fake_skip = lambda path: 0
+    fake_csv = lambda *args, **kwargs: [pd.DataFrame(raw_data)]
+    monkeypatch.setattr(app_qt, "detect_csv_header", fake_header)
+    monkeypatch.setattr(app_qt, "_detect_skiprows", fake_skip)
+    monkeypatch.setattr(app_qt.pd, "read_csv", fake_csv)
+    monkeypatch.setattr(data_loading_mixin, "detect_csv_header", fake_header)
+    monkeypatch.setattr(data_loading_mixin, "_detect_skiprows", fake_skip)
+    monkeypatch.setattr(data_loading_mixin.pd, "read_csv", fake_csv)
 
     def fake_extract(raw, header_info, **kwargs):
         captured["kwargs"] = dict(kwargs)
         return raw.astype(np.float32), None, header_info
 
     monkeypatch.setattr(app_qt, "extract_airborne_csv_payload", fake_extract)
+    monkeypatch.setattr(data_loading_mixin, "extract_airborne_csv_payload", fake_extract)
 
     host = _DummyLoaderHost()
     result = app_qt.GPRGuiQt._load_single_csv_with_progress(cast(Any, host), "dummy.csv")

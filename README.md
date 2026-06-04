@@ -7,7 +7,7 @@ benchmark evidence export.
 ## Runtime
 
 - Python 3.10+
-- PyQt6 and PyQt6-Fluent-Widgets
+- PyQt6 and qfluentwidgets / PyQt6-Fluent-Widgets
 - NumPy, Pandas, SciPy, Matplotlib, h5py, PyWavelets
 
 Install development dependencies:
@@ -27,7 +27,7 @@ python app_qt.py
 Windows shortcut:
 
 ```bash
-启动GPR.bat
+启动MyGPR.bat
 ```
 
 Run CLI batch validation and processing:
@@ -159,3 +159,13 @@ python scripts/archive_checkpoint.py --summary "checkpoint summary"
 ```
 
 The default vault target is configured in `scripts/archive_checkpoint.py`.
+## Versioning
+
+The package version is read from the root `VERSION` file and displayed in the GUI title/status area. For every delivered source zip, update `VERSION`, `CHANGELOG.md`, and the zip filename together.
+
+Check before release:
+
+```bash
+python scripts/check_version_consistency.py --expected 0.8.41
+```
+

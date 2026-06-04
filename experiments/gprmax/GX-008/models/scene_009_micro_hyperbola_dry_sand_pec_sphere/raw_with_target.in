@@ -1,0 +1,15 @@
+#title: GX-008 scene_009 micro hyperbola dry_sand PEC sphere raw_with_target draft
+#domain: 1.2 0.6 0.4
+#dx_dy_dz: 0.01 0.01 0.01
+#time_window: 12e-9
+#waveform: ricker 1.0 900e6 src_wave
+#hertzian_dipole: z 0.35 0.30 0.06 src_wave
+#rx: 0.40 0.30 0.06
+#src_steps: 0.005 0 0
+#rx_steps: 0.005 0 0
+
+#material: 3.0 0.001 1.0 0.0 dry_sand_like
+
+#box: 0 0 0 1.2 0.6 0.4 dry_sand_like
+#sphere: 0.55 0.30 0.16 0.06 pec
+#geometry_view: 0 0 0 1.2 0.6 0.4 0.01 0.01 0.01 gx008_scene009_raw n

@@ -189,10 +189,22 @@ class SharedDataModel:
         self._notify_changed({"reason": "undo", "revision": self.revision})
         return True
 
-    def reset_to_original(self, push_history: bool = True) -> bool:
+    def reset_to_original(
+        self,
+        push_history: bool = True,
+        *,
+        clear_history: bool = False,
+    ) -> bool:
+        """Restore the formal current result to the imported raw data.
+
+        ``push_history`` keeps the pre-reset state undoable for legacy call sites.
+        The main-window "重置原始" action passes ``clear_history=True`` so the
+        processing-lineage UI returns to a single Raw state instead of showing
+        Raw → processed → Raw.
+        """
         if self.original_data is None:
             return False
-        if push_history and self.current_data is not None:
+        if push_history and self.current_data is not None and not clear_history:
             self.push_history()
         self.current_data = np.array(self.original_data, copy=True)
         self.current_trace_metadata = _clone_trace_metadata(
@@ -200,10 +212,48 @@ class SharedDataModel:
         )
         self.header_info = _clone_header_info(self.original_header_info)
         self.current_label = self.original_label
+        if clear_history:
+            self.history = []
+            self.pruned_history_summaries = []
         self.revision += 1
         self._refresh_replay_package()
         self._notify_changed({"reason": "reset", "revision": self.revision})
         return True
+
+    def append_history_snapshot(
+        self,
+        data: np.ndarray,
+        *,
+        label: str,
+        header_info: dict[str, Any] | None = None,
+        trace_metadata: dict[str, np.ndarray] | None = None,
+    ) -> None:
+        """Append an explicit intermediate processing snapshot to history.
+
+        This is used by multi-step recipe/pipeline runs so the formal lineage
+        can show every executed step rather than condensing the run to one
+        summary label. It does not change the current formal result.
+        """
+        if data is None:
+            return
+        entry = {
+            "data": np.array(data, copy=True),
+            "trace_metadata": _clone_trace_metadata(trace_metadata),
+            "header_info": _clone_header_info(header_info),
+            "label": str(label or "处理步骤"),
+        }
+        entry["memory_bytes"] = _history_entry_nbytes(entry)
+        entry["array_summary"] = _summarize_array(entry.get("data"))
+
+        max_snapshot_bytes = int(getattr(self, "max_history_snapshot_bytes", 0) or 0)
+        if max_snapshot_bytes > 0 and entry["memory_bytes"] > max_snapshot_bytes:
+            self._record_pruned_history(entry, reason="snapshot_exceeds_limit")
+            self._refresh_replay_package()
+            return
+
+        self.history.append(entry)
+        self._trim_history()
+        self._refresh_replay_package()
 
     def build_result_history(self) -> list[tuple[str, np.ndarray]]:
         """构建正式结果时间线，供主界面和工作台统一展示。"""

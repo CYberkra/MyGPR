@@ -1,0 +1,20 @@
+{
+  "scene_id": "scene_002_flat_damp_sand_pec_shallow",
+  "roi_role": "draft_synthetic_target_region",
+  "expected_target_region": {
+    "label": "pec_pipe_main",
+    "target_type": "cylinder",
+    "material": "pec",
+    "depth_m": 0.17,
+    "radius_m": 0.04
+  },
+  "depth_window": {
+    "sample_start_idx": 140,
+    "sample_end_idx": 300
+  },
+  "trace_window": {
+    "trace_start_idx": 10,
+    "trace_end_idx": 30
+  },
+  "notes": "ROI is a draft for synthetic scoring/visualization only. Not field ground truth claim."
+}

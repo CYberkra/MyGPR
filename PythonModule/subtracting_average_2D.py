@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Created on Thur Nov 9 15:40:15 2023
-
-@author: 何海
-"""
+"""Legacy runtime helper kept for MyGPR processing compatibility."""
 
 from pathlib import Path
 
@@ -136,7 +132,7 @@ def main():
     # 设置窗口大小(大于1的一个整数)
     ntraces = 501
     # 进行背景抑制处理
-    loc_data = Subtracting_average_2D(
+    loc_data = subtracting_average_2D(
         infilename,
         outfilename,
         outimagename,

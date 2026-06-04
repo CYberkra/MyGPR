@@ -4,8 +4,10 @@
 
 import numpy as np
 import matplotlib
+import os
 
-matplotlib.use("QtAgg")
+if str(os.environ.get("QT_QPA_PLATFORM", "")).lower() not in {"offscreen", "minimal"}:
+    matplotlib.use("QtAgg")
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar

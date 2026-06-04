@@ -13,7 +13,7 @@ APP_QT = ROOT / "app_qt.py"
 def test_app_qt_line_budget_after_v08_controller_extraction():
     """The main window should remain within the V0.8 controller-boundary budget."""
     line_count = len(APP_QT.read_text(encoding="utf-8").splitlines())
-    assert line_count <= 7900
+    assert line_count <= 7700
 
 
 def test_app_qt_no_longer_imports_moved_autotune_guard_helpers():

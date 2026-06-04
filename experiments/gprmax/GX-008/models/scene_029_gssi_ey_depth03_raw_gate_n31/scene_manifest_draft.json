@@ -1,0 +1,47 @@
+{
+  "scene_id": "scene_029_gssi_ey_depth03_raw_gate_n31",
+  "based_on_scene": "scene_025_paper_aligned_gssi_antenna_gate_n15",
+  "replication_type": "paper_aligned_depth_gate",
+  "raw_visual_only": true,
+  "depth_gate_scope": "target_depth_only",
+  "material_calibration_scope": "unchanged_from_scene_025",
+  "selected_component_for_visualization": "Ey",
+  "changed_from_scene_025": [
+    "target center z changed from 0.10 m to 0.08 m (depth candidate about 3 cm from antenna reference plane)"
+  ],
+  "unchanged_from_scene_025": [
+    "antenna model: antenna_like_GSSI_1500",
+    "component: Ey",
+    "soil: dry_sand_tableii",
+    "target material: pec",
+    "target radius: 0.03 m",
+    "domain: 1.0 x 0.15 x 0.40 m",
+    "dx_dy_dz: 0.002 m",
+    "scan step: 0.01 m",
+    "scan aperture trajectory"
+  ],
+  "target_geometry": {
+    "type": "cylinder_along_y",
+    "x_center_m": 0.50,
+    "y_center_m": 0.075,
+    "z_center_m": 0.08,
+    "radius_m": 0.03
+  },
+  "scan_design": {
+    "raw_gate_num_runs_first": 15,
+    "raw_gate_num_runs_followup": 31,
+    "scan_start_x_m": 0.35,
+    "scan_step_x_m": 0.01
+  },
+  "background_not_run_in_this_task": true,
+  "clutter_free_not_generated": true,
+  "claim_boundary": [
+    "raw-only single-variable depth diagnostic",
+    "no background in this task",
+    "no clutter-free in this task",
+    "not exact replication",
+    "not paper benchmark",
+    "not AutoTune evaluation",
+    "not field validation"
+  ]
+}

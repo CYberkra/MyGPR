@@ -69,14 +69,15 @@ class QualityLogPage(QWidget):
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(12)
 
+        # ========== 页面说明 ==========
         hero = QFrame()
-        hero.setObjectName("EvidenceHeroCard")
+        hero.setObjectName("QualityHeroCard")
         hero_layout = QHBoxLayout(hero)
         hero_layout.setContentsMargins(16, 14, 16, 14)
         hero_layout.setSpacing(12)
 
-        hero_mark = QLabel("GPR")
-        hero_mark.setObjectName("EvidenceHeroMark")
+        hero_mark = QLabel("QC")
+        hero_mark.setObjectName("QualityHeroMark")
         hero_mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hero_mark.setFixedSize(48, 48)
 
@@ -84,18 +85,18 @@ class QualityLogPage(QWidget):
         hero_text_layout = QVBoxLayout(hero_text)
         hero_text_layout.setContentsMargins(0, 0, 0, 0)
         hero_text_layout.setSpacing(2)
-        title = QLabel("质量与导出")
+        title = QLabel("质量与报告")
         title.setProperty("class", "sectionTitle")
         hint = QLabel(
-            "集中查看运行记录、质量摘要与航空质控，并生成 MyGPR 报告包。"
+            "查看数据质量、处理记录、运行摘要，并导出项目报告或处理记录包。"
         )
         hint.setWordWrap(True)
         hint.setProperty("class", "hintText")
         hero_text_layout.addWidget(title)
         hero_text_layout.addWidget(hint)
 
-        hero_badge = QLabel("Markdown · HTML · PNG")
-        hero_badge.setObjectName("EvidenceHeroBadge")
+        hero_badge = QLabel("QC · 处理记录 · 报告")
+        hero_badge.setObjectName("QualityHeroBadge")
         hero_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         hero_layout.addWidget(hero_mark)
@@ -103,141 +104,76 @@ class QualityLogPage(QWidget):
         hero_layout.addWidget(hero_badge)
         layout.addWidget(hero)
 
-        flow_box = QGroupBox("查看顺序")
-        flow_box.setProperty("class", "calloutBox")
-        flow_layout = QVBoxLayout(flow_box)
-        flow_layout.setContentsMargins(10, 14, 10, 10)
-        flow_layout.setSpacing(8)
+        # 工程化 QC 状态卡：先给用户一行结论，再进入详细摘要/图表。
+        self.quality_status_row = QFrame()
+        self.quality_status_row.setObjectName("QualityStatusCardRow")
+        status_layout = QHBoxLayout(self.quality_status_row)
+        status_layout.setContentsMargins(0, 0, 0, 0)
+        status_layout.setSpacing(8)
+        self.quality_status_cards = {}
+        for key, title, value in [
+            ("data", "数据状态", "待导入"),
+            ("metadata", "元数据", "未接入"),
+            ("chart", "图表", "待计算"),
+            ("anomaly", "异常数量", "--"),
+            ("report", "报告状态", "待生成"),
+        ]:
+            card = QFrame()
+            card.setObjectName("QualityStatusCard")
+            card_l = QVBoxLayout(card)
+            card_l.setContentsMargins(10, 8, 10, 8)
+            card_l.setSpacing(2)
+            title_label = QLabel(title)
+            title_label.setObjectName("QualityStatusTitle")
+            value_label = QLabel(value)
+            value_label.setObjectName("QualityStatusValue")
+            value_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            card_l.addWidget(title_label)
+            card_l.addWidget(value_label)
+            status_layout.addWidget(card, 1)
+            self.quality_status_cards[key] = value_label
+        layout.addWidget(self.quality_status_row)
 
-        flow_hint = QLabel("推荐顺序：先看质量摘要，再看图表定位问题，最后导出报告、快照或诊断信息。")
-        flow_hint.setWordWrap(True)
-        flow_hint.setProperty("class", "hintText")
-        flow_layout.addWidget(flow_hint)
+        # V0.8.43: quality page uses a compact dashboard switcher.
+        # Only one responsibility group is shown at a time: QC, records, report, or advanced diagnostics.
+        self.quality_section_segmented = SegmentedWidget(self)
+        self.quality_section_segmented.addItem("qc", "数据质量")
+        self.quality_section_segmented.addItem("record", "处理记录")
+        self.quality_section_segmented.addItem("report", "报告导出")
+        self.quality_section_segmented.addItem("advanced", "高级")
+        layout.addWidget(self.quality_section_segmented)
 
-        flow_row = QWidget()
-        flow_row_layout = QHBoxLayout(flow_row)
-        flow_row_layout.setContentsMargins(0, 0, 0, 0)
-        flow_row_layout.setSpacing(8)
-        for text in ["① 质量摘要", "② 图表查看", "③ 导出与记录"]:
-            chip = QLabel(text)
-            chip.setProperty("class", "statusChip")
-            flow_row_layout.addWidget(chip)
-        flow_row_layout.addStretch(1)
-        flow_layout.addWidget(flow_row)
-        layout.addWidget(flow_box)
+        self.quality_section_stack = QStackedWidget(self)
+        layout.addWidget(self.quality_section_stack, 1)
 
-        # ========== Evidence 检查清单 ==========
-        evidence_box = QGroupBox("Evidence 检查清单")
-        evidence_box.setObjectName("EvidenceChecklistCard")
-        evidence_box.setProperty("cardStyle", "modern")
-        evidence_layout = QVBoxLayout(evidence_box)
-        evidence_layout.setContentsMargins(12, 18, 12, 12)
-        evidence_layout.setSpacing(8)
-        evidence_hint = QLabel("导出前建议确认数据身份、处理链路、参数、图像、指标、风险和结论边界。")
-        evidence_hint.setWordWrap(True)
-        evidence_hint.setProperty("class", "hintText")
-        evidence_layout.addWidget(evidence_hint)
+        qc_dashboard = QWidget()
+        qc_dashboard_layout = QVBoxLayout(qc_dashboard)
+        qc_dashboard_layout.setContentsMargins(0, 0, 0, 0)
+        qc_dashboard_layout.setSpacing(10)
 
-        evidence_grid = QWidget()
-        evidence_grid_layout = QGridLayout(evidence_grid)
-        evidence_grid_layout.setContentsMargins(0, 0, 0, 0)
-        evidence_grid_layout.setHorizontalSpacing(8)
-        evidence_grid_layout.setVerticalSpacing(6)
-        evidence_items = [
-            ("数据身份", "待检查"),
-            ("处理链路", "待检查"),
-            ("参数记录", "待检查"),
-            ("图像输出", "可生成"),
-            ("指标", "待计算"),
-            ("warnings", "需复核"),
-            ("claim boundary", "待写入"),
-        ]
-        self.evidence_checklist_labels = []
-        for i, (name, status) in enumerate(evidence_items):
-            label = QLabel(f"{name}：{status}")
-            label.setObjectName("EvidenceCheckChip")
-            label.setProperty("tone", "warning" if "复核" in status or "待" in status else "neutral")
-            evidence_grid_layout.addWidget(label, i // 2, i % 2)
-            self.evidence_checklist_labels.append(label)
-        evidence_layout.addWidget(evidence_grid)
-        layout.addWidget(evidence_box)
+        record_dashboard = QWidget()
+        record_dashboard_layout = QVBoxLayout(record_dashboard)
+        record_dashboard_layout.setContentsMargins(0, 0, 0, 0)
+        record_dashboard_layout.setSpacing(10)
 
-        # ========== 顶部动作区 ==========
-        action_box = QGroupBox("导出与诊断")
-        action_layout = QVBoxLayout(action_box)
-        action_layout.setContentsMargins(10, 14, 10, 10)
-        action_layout.setSpacing(8)
+        report_dashboard = QWidget()
+        report_dashboard_layout = QVBoxLayout(report_dashboard)
+        report_dashboard_layout.setContentsMargins(0, 0, 0, 0)
+        report_dashboard_layout.setSpacing(10)
 
-        action_hint = QLabel(
-            "先看质量摘要，再决定是否生成报告包、导出快照或复制诊断信息。"
-        )
-        action_hint.setWordWrap(True)
-        action_hint.setProperty("class", "hintText")
-        action_layout.addWidget(action_hint)
+        advanced_dashboard = QWidget()
+        advanced_dashboard_layout = QVBoxLayout(advanced_dashboard)
+        advanced_dashboard_layout.setContentsMargins(0, 0, 0, 0)
+        advanced_dashboard_layout.setSpacing(10)
 
-        self.btn_generate_report = PushButton(FluentIcon.DOCUMENT, "生成报告包")
-        self.btn_generate_report.setToolTip(
-            "导出当前图像、运行摘要和日志到 Markdown + HTML 报告包"
-        )
-        self.btn_export_quality_snapshot = PushButton(
-            FluentIcon.DOWNLOAD, "导出质量快照"
-        )
-        self.btn_export_quality_snapshot.setToolTip(
-            "导出当前质量指标、阈值与航空质控摘要"
-        )
-        self.btn_export_replay_evidence = PushButton(
-            FluentIcon.SAVE, "导出证据"
-        )
-        self.btn_export_replay_evidence.setToolTip(
-            "手动导出当前处理历史和回放证据包"
-        )
-        self.btn_export_georeference_3d = PushButton(
-            FluentIcon.SAVE_AS, "导出3D地理参考"
-        )
-        self.btn_export_georeference_3d.setToolTip(
-            "导出当前轨迹与剖面带的三维地理参考文件（VTK / CSV / JSON）"
-        )
-        self.btn_open_log_dir = PushButton(FluentIcon.FOLDER, "打开日志目录")
-        self.btn_open_log_dir.setToolTip("打开日志和输出目录")
-        self.btn_copy_diagnostics = PushButton(FluentIcon.COPY, "复制诊断信息")
-        self.btn_copy_diagnostics.setToolTip("复制当前环境、数据和日志摘要")
-
-        action_row_top = QWidget()
-        action_row_top_layout = QHBoxLayout(action_row_top)
-        action_row_top_layout.setContentsMargins(0, 0, 0, 0)
-        action_row_top_layout.setSpacing(8)
-        action_row_top_layout.addWidget(self.btn_generate_report)
-        action_row_top_layout.addWidget(self.btn_export_quality_snapshot)
-        action_row_top_layout.addStretch(1)
-        action_layout.addWidget(action_row_top)
-
-        action_row_mid = QWidget()
-        action_row_mid_layout = QHBoxLayout(action_row_mid)
-        action_row_mid_layout.setContentsMargins(0, 0, 0, 0)
-        action_row_mid_layout.setSpacing(8)
-        action_row_mid_layout.addWidget(self.btn_export_replay_evidence)
-        action_row_mid_layout.addWidget(self.btn_export_georeference_3d)
-        action_row_mid_layout.addStretch(1)
-        action_layout.addWidget(action_row_mid)
-
-        action_row_bottom = QWidget()
-        action_row_bottom_layout = QHBoxLayout(action_row_bottom)
-        action_row_bottom_layout.setContentsMargins(0, 0, 0, 0)
-        action_row_bottom_layout.setSpacing(8)
-        action_row_bottom_layout.addWidget(self.btn_open_log_dir)
-        action_row_bottom_layout.addWidget(self.btn_copy_diagnostics)
-        action_row_bottom_layout.addStretch(1)
-        action_layout.addWidget(action_row_bottom)
-        layout.addWidget(action_box)
-
-        # ========== 质量摘要区 ==========
-        summary_box = QGroupBox("质量摘要")
+        # ========== 质量概览区 ==========
+        summary_box = QGroupBox("质量概览")
         summary_layout = QVBoxLayout(summary_box)
         summary_layout.setContentsMargins(10, 14, 10, 10)
         summary_layout.setSpacing(10)
 
         summary_hint = QLabel(
-            "把测线结果、航空元数据、质控结论和异常明细分开看，避免同屏堆叠。"
+            "查看测线摘要、元数据完整性、质量检查结论和异常明细。"
         )
         summary_hint.setWordWrap(True)
         summary_hint.setProperty("class", "hintText")
@@ -271,7 +207,7 @@ class QualityLogPage(QWidget):
         self.metadata_summary.setMaximumHeight(220)
         self.summary_stack.addWidget(self._wrap_text_panel(
             "航空元数据摘要",
-            "用于快速确认经纬度、轨迹、时间和高度等元数据是否完整。",
+            "用于确认经纬度、轨迹、时间、高程和飞行高度等元数据是否完整；完整空间图请进入“空间”。",
             self.metadata_summary,
         ))
 
@@ -299,26 +235,20 @@ class QualityLogPage(QWidget):
 
         self.summary_segmented.setCurrentItem("line")
         self.summary_stack.setCurrentIndex(0)
-        layout.addWidget(summary_box)
+        qc_dashboard_layout.addWidget(summary_box)
 
-        # ========== 图表区 ==========
-        visual_box = QGroupBox("图表查看")
+        # ========== 质量图表 ==========
+        visual_box = QGroupBox("质量图表")
         visual_layout = QVBoxLayout(visual_box)
         visual_layout.setContentsMargins(10, 14, 10, 10)
         visual_layout.setSpacing(10)
 
         visual_hint = QLabel(
-            "先看质量图表判断稳定性，再切到航迹图定位异常位置和选中 trace。"
+            "用于判断道间距、飞行高度和异常点分布是否稳定；完整航迹位置请在“空间 > 测线轨迹”中查看。"
         )
         visual_hint.setWordWrap(True)
         visual_hint.setProperty("class", "hintText")
         visual_layout.addWidget(visual_hint)
-
-        self.visual_segmented = SegmentedWidget(self)
-        self.visual_segmented.addItem("qc_chart", "质量图表")
-        self.visual_segmented.addItem("trajectory", "航迹图")
-        # 保持 MyGPR 与外部 3D 预览工具边界：主界面不展示内嵌三维入口。
-        visual_layout.addWidget(self.visual_segmented)
 
         self.visual_stack = QStackedWidget(self)
         visual_layout.addWidget(self.visual_stack)
@@ -327,7 +257,7 @@ class QualityLogPage(QWidget):
         qc_panel_layout = QVBoxLayout(qc_panel)
         qc_panel_layout.setContentsMargins(0, 0, 0, 0)
         qc_panel_layout.setSpacing(8)
-        qc_hint = QLabel("用于查看道间距稳定性、飞行高度稳定性和异常点分布。")
+        qc_hint = QLabel("质量页只判断是否存在异常；航迹位置、地形剖面和空间联动放在空间成果页。")
         qc_hint.setWordWrap(True)
         qc_hint.setProperty("class", "hintText")
         qc_panel_layout.addWidget(qc_hint)
@@ -338,94 +268,106 @@ class QualityLogPage(QWidget):
         qc_panel_layout.addWidget(self.qc_canvas)
         self.visual_stack.addWidget(qc_panel)
 
-        trajectory_panel = QWidget()
-        trajectory_panel_layout = QVBoxLayout(trajectory_panel)
-        trajectory_panel_layout.setContentsMargins(0, 0, 0, 0)
-        trajectory_panel_layout.setSpacing(8)
-        trajectory_hint = QLabel("点击航迹图中的点可联动主图，定位对应 trace。")
-        trajectory_hint.setWordWrap(True)
-        trajectory_hint.setProperty("class", "hintText")
-        trajectory_panel_layout.addWidget(trajectory_hint)
-        self.trajectory_fig = Figure(figsize=(6, 4.8), dpi=100)
-        self.trajectory_canvas = FigureCanvas(self.trajectory_fig)
-        self.trajectory_ax = self.trajectory_fig.add_subplot(2, 1, 1)
-        self.trajectory_height_ax = self.trajectory_fig.add_subplot(2, 1, 2)
-        self.trajectory_canvas.mpl_connect(
-            "button_press_event", self._on_trajectory_click
-        )
-        trajectory_panel_layout.addWidget(self.trajectory_canvas)
-        self.visual_stack.addWidget(trajectory_panel)
+        trajectory_summary_panel = QFrame()
+        trajectory_summary_panel.setObjectName("ReportChecklistCard")
+        trajectory_summary_layout = QHBoxLayout(trajectory_summary_panel)
+        trajectory_summary_layout.setContentsMargins(10, 8, 10, 8)
+        trajectory_summary_layout.setSpacing(8)
+        self.trajectory_status_label = QLabel("航迹：未加载｜查看详情请进入 空间 > 测线轨迹")
+        self.trajectory_status_label.setProperty("class", "hintText")
+        self.trajectory_status_label.setWordWrap(True)
+        self.btn_open_trajectory_space = PushButton(FluentIcon.VIEW, "查看测线轨迹")
+        self.btn_open_trajectory_space.setToolTip("切换到空间成果页的测线轨迹视图")
+        trajectory_summary_layout.addWidget(self.trajectory_status_label, 1)
+        trajectory_summary_layout.addWidget(self.btn_open_trajectory_space)
+        visual_layout.addWidget(trajectory_summary_panel)
 
-        georef3d_panel = QWidget()
-        self._georef3d_overlay_parent = georef3d_panel
-        georef3d_panel_layout = QVBoxLayout(georef3d_panel)
-        georef3d_panel_layout.setContentsMargins(0, 0, 0, 0)
-        georef3d_panel_layout.setSpacing(8)
-        georef3d_hint = QLabel(
-            "三维预览展示航迹与剖面带的空间关系，导出时会同步保存 VTK、CSV 和 JSON。"
-        )
-        georef3d_hint.setWordWrap(True)
-        georef3d_hint.setProperty("class", "hintText")
-        georef3d_panel_layout.addWidget(georef3d_hint)
-        self.georef3d_fig = Figure(figsize=(6.2, 4.8), dpi=100)
-        self.georef3d_canvas = FigureCanvas(self.georef3d_fig)
-        self.georef3d_ax = self.georef3d_fig.add_subplot(111, projection="3d")
-        self.btn_georef3d_raw = self._create_georef3d_overlay_button(
-            "👁 原始",
-            "显示原始三维航迹与剖面",
-            checked=False,
-        )
-        self.btn_georef3d_current = self._create_georef3d_overlay_button(
-            "👁 当前",
-            "显示当前/处理后三维航迹与剖面",
-            checked=True,
-        )
-        self.btn_georef3d_bscan = self._create_georef3d_overlay_button(
-            "👁 B-scan",
-            "显示或隐藏三维 B-scan 剖面带",
-            checked=True,
-        )
-        self.btn_georef3d_diff = self._create_georef3d_overlay_button(
-            "👁 差异",
-            "显示当前减原始的差异剖面",
-            checked=False,
-        )
-        self.btn_georef3d_reset_view = self._create_georef3d_overlay_button(
-            "↺",
-            "重置三维视角",
-            checkable=False,
-        )
-        self.btn_georef3d_expand = self._create_georef3d_overlay_button(
-            "⛶",
-            "展开三维预览",
-            checkable=False,
-        )
-        for button in [
-            self.btn_georef3d_raw,
-            self.btn_georef3d_current,
-            self.btn_georef3d_bscan,
-            self.btn_georef3d_diff,
-        ]:
-            button.toggled.connect(self._schedule_georef3d_redraw)
-        self.btn_georef3d_reset_view.clicked.connect(self._reset_georef3d_view)
-        self.btn_georef3d_expand.clicked.connect(self._open_georef3d_dialog)
-        self.georef3d_canvas.mpl_connect("button_press_event", self._on_georef3d_interaction_start)
-        self.georef3d_canvas.mpl_connect("button_release_event", self._on_georef3d_interaction_end)
-        georef3d_panel_layout.addWidget(self.georef3d_canvas)
-        self._position_georef3d_overlay_controls()
-        self.visual_stack.addWidget(georef3d_panel)
-
-        self.visual_segmented.setCurrentItem("qc_chart")
         self.visual_stack.setCurrentIndex(0)
-        layout.addWidget(visual_box)
+        qc_dashboard_layout.addWidget(visual_box)
+
+        # ========== 报告与导出 ==========
+        action_box = QGroupBox("报告与导出")
+        action_layout = QVBoxLayout(action_box)
+        action_layout.setContentsMargins(10, 14, 10, 10)
+        action_layout.setSpacing(8)
+
+        action_hint = QLabel(
+            "面向工程使用导出项目报告、质量检查表和处理记录包；科研审计细节保留在高级导出中。"
+        )
+        action_hint.setWordWrap(True)
+        action_hint.setProperty("class", "hintText")
+        action_layout.addWidget(action_hint)
+
+        # 报告导出前检查：保留底层 Evidence 能力，但前端不暴露科研术语。
+        checklist_panel = QFrame()
+        checklist_panel.setObjectName("ReportChecklistCard")
+        checklist_layout = QGridLayout(checklist_panel)
+        checklist_layout.setContentsMargins(0, 0, 0, 0)
+        checklist_layout.setHorizontalSpacing(8)
+        checklist_layout.setVerticalSpacing(6)
+        checklist_items = [
+            ("数据文件", "待检查"),
+            ("处理步骤", "待检查"),
+            ("参数记录", "待检查"),
+            ("图像输出", "可生成"),
+            ("质量指标", "待计算"),
+            ("检查提示", "待检查"),
+            ("结论说明", "待填写"),
+        ]
+        self.evidence_checklist_labels = []
+        for i, (name, status) in enumerate(checklist_items):
+            label = QLabel(f"{name}：{status}")
+            label.setObjectName("ReportCheckChip")
+            label.setProperty("tone", "warning" if "复核" in status or "待" in status else "neutral")
+            checklist_layout.addWidget(label, i // 2, i % 2)
+            self.evidence_checklist_labels.append(label)
+        action_layout.addWidget(checklist_panel)
+
+        self.btn_generate_report = PushButton(FluentIcon.DOCUMENT, "生成项目报告")
+        self.btn_generate_report.setToolTip(
+            "导出当前图像、运行摘要和日志到 Markdown + HTML 报告包"
+        )
+        self.btn_export_quality_snapshot = PushButton(
+            FluentIcon.DOWNLOAD, "导出质量检查表"
+        )
+        self.btn_export_quality_snapshot.setToolTip(
+            "导出当前质量指标、阈值与航空质控摘要"
+        )
+        self.btn_export_replay_evidence = PushButton(
+            FluentIcon.SAVE, "导出处理记录包"
+        )
+        self.btn_export_replay_evidence.setToolTip(
+            "导出当前处理历史、参数记录和高级审计文件"
+        )
+        self.btn_open_log_dir = PushButton(FluentIcon.FOLDER, "打开输出目录")
+        self.btn_open_log_dir.setToolTip("打开日志和输出目录")
+
+        action_row_top = QWidget()
+        action_row_top_layout = QHBoxLayout(action_row_top)
+        action_row_top_layout.setContentsMargins(0, 0, 0, 0)
+        action_row_top_layout.setSpacing(8)
+        action_row_top_layout.addWidget(self.btn_generate_report)
+        action_row_top_layout.addWidget(self.btn_export_quality_snapshot)
+        action_row_top_layout.addStretch(1)
+        action_layout.addWidget(action_row_top)
+
+        action_row_bottom = QWidget()
+        action_row_bottom_layout = QHBoxLayout(action_row_bottom)
+        action_row_bottom_layout.setContentsMargins(0, 0, 0, 0)
+        action_row_bottom_layout.setSpacing(8)
+        action_row_bottom_layout.addWidget(self.btn_export_replay_evidence)
+        action_row_bottom_layout.addWidget(self.btn_open_log_dir)
+        action_row_bottom_layout.addStretch(1)
+        action_layout.addWidget(action_row_bottom)
+        report_dashboard_layout.addWidget(action_box)
 
         # ========== 运行记录区 ==========
-        record_box = QGroupBox("运行记录")
+        record_box = QGroupBox("处理记录")
         record_layout = QVBoxLayout(record_box)
         record_layout.setContentsMargins(10, 14, 10, 10)
         record_layout.setSpacing(8)
 
-        record_hint = QLabel("保留处理历史、诊断信息和导出前的最终核对记录。")
+        record_hint = QLabel("保留处理历史、导出前核对记录和可追溯操作信息。")
         record_hint.setWordWrap(True)
         record_hint.setProperty("class", "hintText")
         record_layout.addWidget(record_hint)
@@ -450,17 +392,48 @@ class QualityLogPage(QWidget):
         self.record.setMaximumHeight(280)
         self.record.setToolTip("处理操作历史，包含时间戳和方法信息")
         record_layout.addWidget(self.record)
-        layout.addWidget(record_box)
+        record_dashboard_layout.addWidget(record_box)
 
-        layout.addStretch(1)
+        # ========== 高级诊断 ==========
+        diagnostic_box = QGroupBox("高级诊断")
+        diagnostic_layout = QVBoxLayout(diagnostic_box)
+        diagnostic_layout.setContentsMargins(10, 14, 10, 10)
+        diagnostic_layout.setSpacing(8)
+        diagnostic_hint = QLabel(
+            "面向开发调试和科研审计，普通工程处理通常无需使用。"
+        )
+        diagnostic_hint.setWordWrap(True)
+        diagnostic_hint.setProperty("class", "hintText")
+        diagnostic_layout.addWidget(diagnostic_hint)
+        diagnostic_row = QWidget()
+        diagnostic_row_layout = QHBoxLayout(diagnostic_row)
+        diagnostic_row_layout.setContentsMargins(0, 0, 0, 0)
+        diagnostic_row_layout.setSpacing(8)
+        self.btn_copy_diagnostics = PushButton(FluentIcon.COPY, "复制诊断信息")
+        self.btn_copy_diagnostics.setToolTip("复制当前环境、数据和日志摘要")
+        diagnostic_row_layout.addWidget(self.btn_copy_diagnostics)
+        diagnostic_row_layout.addStretch(1)
+        diagnostic_layout.addWidget(diagnostic_row)
+        advanced_dashboard_layout.addWidget(diagnostic_box)
+
+        qc_dashboard_layout.addStretch(1)
+        record_dashboard_layout.addStretch(1)
+        report_dashboard_layout.addStretch(1)
+        advanced_dashboard_layout.addStretch(1)
+
+        self.quality_section_stack.addWidget(qc_dashboard)
+        self.quality_section_stack.addWidget(record_dashboard)
+        self.quality_section_stack.addWidget(report_dashboard)
+        self.quality_section_stack.addWidget(advanced_dashboard)
+        self.quality_section_segmented.setCurrentItem("qc")
+        self.quality_section_stack.setCurrentIndex(0)
 
         self.summary_segmented.currentItemChanged.connect(self._on_summary_segment_changed)
-        self.visual_segmented.currentItemChanged.connect(self._on_visual_segment_changed)
+        self.quality_section_segmented.currentItemChanged.connect(self._on_quality_section_changed)
 
         self.set_airborne_qc_visualization(None)
         self.set_airborne_trajectory_visualization(None)
-        self.set_airborne_georeference_3d_visualization(None)
-
+        self.btn_open_trajectory_space.clicked.connect(self._open_space_track_view)
     def resizeEvent(self, event):
         """页面尺寸变化时更新三维预览图内控制位置。"""
         super().resizeEvent(event)
@@ -556,12 +529,52 @@ class QualityLogPage(QWidget):
         }
         self.summary_stack.setCurrentIndex(mapping.get(route_key, 0))
 
-    def _on_visual_segment_changed(self, route_key: str):
+    def _on_quality_section_changed(self, route_key: str):
         mapping = {
-            "qc_chart": 0,
-            "trajectory": 1,
+            "qc": 0,
+            "record": 1,
+            "report": 2,
+            "advanced": 3,
         }
-        self.visual_stack.setCurrentIndex(mapping.get(route_key, 0))
+        self.quality_section_stack.setCurrentIndex(mapping.get(route_key, 0))
+
+    def _open_space_track_view(self):
+        """切换到空间成果页的测线轨迹视图。"""
+        parent = getattr(self, "parent_window", None)
+        if parent is None:
+            return
+        terrain_page = getattr(parent, "page_terrain3d", None)
+        try:
+            if hasattr(parent, "_switch_side_workspace"):
+                parent._switch_side_workspace(4)
+            if terrain_page is not None and hasattr(terrain_page, "focus_track_view"):
+                terrain_page.focus_track_view()
+        except Exception:
+            return
+
+    def _axis_label_for_user(self, payload: dict | None, axis: str) -> str:
+        """Return user-facing 3D axis labels; never expose internal metadata field names."""
+        payload = payload or {}
+        if axis == "x":
+            return "沿测线距离 / 局部 X (m)" if payload.get("has_longitude_latitude") else "沿测线距离 (m)"
+        if axis == "y":
+            return "横向偏移 / 局部 Y (m)" if payload.get("has_longitude_latitude") else "横向偏移 (m)"
+        return "高程 / 等效深度 (m)"
+
+    def _format_georef_quality_flags(self, flags) -> str:
+        """Map internal provenance flags to short engineering notes."""
+        if not flags:
+            return ""
+        mapping = {
+            "derived_local_xy_from_lon_lat": "局部坐标由经纬度换算",
+            "derived_distance_from_trace_index": "距离轴由道号估算",
+            "missing_ground_elevation": "缺少地表高程",
+            "missing_height_agl": "缺少飞行高度",
+        }
+        out = []
+        for flag in list(flags)[:4]:
+            out.append(mapping.get(str(flag), "空间元数据提示"))
+        return " | ".join(out)
 
     def _style_3d_axes(self, ax):
         """统一三维图表主题。"""
@@ -676,7 +689,6 @@ class QualityLogPage(QWidget):
             pass
         for fig_name, canvas_name in [
             ("qc_fig", "qc_canvas"),
-            ("trajectory_fig", "trajectory_canvas"),
             ("georef3d_fig", "georef3d_canvas"),
         ]:
             fig = getattr(self, fig_name, None)
@@ -705,17 +717,25 @@ class QualityLogPage(QWidget):
         """获取记录文本"""
         return self.record.toPlainText()
 
+    def _set_quality_status(self, key: str, value: str) -> None:
+        label = getattr(self, "quality_status_cards", {}).get(key)
+        if label is not None:
+            label.setText(value or "--")
+
     def set_metadata_summary(self, text: str):
         """设置航空元数据摘要文本。"""
         self.metadata_summary.setPlainText(text or "")
+        self._set_quality_status("metadata", "可用" if text else "未接入")
 
     def set_line_summary(self, text: str):
         """设置测线结果卡片文本。"""
         self.line_summary.setPlainText(text or "")
+        self._set_quality_status("data", "已加载" if text else "待导入")
 
     def set_airborne_qc_summary(self, text: str):
         """设置航空质控摘要文本。"""
         self.airborne_qc_summary.setPlainText(text or "")
+        self._set_quality_status("report", "可导出" if text else "待生成")
 
     def set_trace_selected_callback(self, callback):
         """设置航迹点击后的回调。"""
@@ -729,6 +749,7 @@ class QualityLogPage(QWidget):
         palette = self._get_plot_palette()
 
         if not payload:
+            self._set_quality_status("chart", "待计算")
             for ax, title in [
                 (self.qc_ax_spacing, "道间距"),
                 (self.qc_ax_height, "飞行高度"),
@@ -748,6 +769,8 @@ class QualityLogPage(QWidget):
             self._style_figure(self.qc_fig, [self.qc_ax_spacing, self.qc_ax_height])
             self._finalize_figure(self.qc_fig, self.qc_canvas)
             return
+
+        self._set_quality_status("chart", "已计算" if payload.get("flight") else "待计算")
 
         spacing_x = payload.get("spacing_x", [])
         spacing = payload.get("spacing", [])
@@ -785,42 +808,23 @@ class QualityLogPage(QWidget):
         self._finalize_figure(self.qc_fig, self.qc_canvas)
 
     def set_airborne_trajectory_visualization(self, payload: dict | None):
-        """绘制航空航迹图（含飞行高度剖面）。"""
-        self.trajectory_fig.clear()
-        self.trajectory_ax = self.trajectory_fig.add_subplot(2, 1, 1)
-        self.trajectory_height_ax = self.trajectory_fig.add_subplot(2, 1, 2)
-        ax = self.trajectory_ax
-        ax_h = self.trajectory_height_ax
-        palette = self._get_plot_palette()
-
+        """更新航迹 QC 摘要；完整航迹图由“空间 > 测线轨迹”负责显示。"""
         if not payload:
             self._trajectory_longitude = np.array([], dtype=np.float64)
             self._trajectory_latitude = np.array([], dtype=np.float64)
             self._trajectory_trace_indices = np.array([], dtype=np.int32)
             self._selected_trace_index = None
-            ax.set_title("航迹图")
-            ax.text(
-                0.5,
-                0.5,
-                "暂无航迹数据",
-                ha="center",
-                va="center",
-                transform=ax.transAxes,
-                color=palette["hint"],
-            )
-            ax.set_xticks([])
-            ax.set_yticks([])
-            ax_h.set_visible(False)
-            self._style_figure(self.trajectory_fig, [ax])
-            self._finalize_figure(self.trajectory_fig, self.trajectory_canvas)
+            if hasattr(self, "trajectory_status_label"):
+                self.trajectory_status_label.setText("航迹：未加载｜查看详情请进入 空间 > 测线轨迹")
             return
 
         longitude = np.asarray(payload.get("longitude", []), dtype=np.float64)
         latitude = np.asarray(payload.get("latitude", []), dtype=np.float64)
-        anomaly_mask = np.asarray(payload.get("anomaly_mask", []), dtype=bool)
         trace_indices = np.asarray(payload.get("trace_indices", []), dtype=np.int32)
+        anomaly_mask = np.asarray(payload.get("anomaly_mask", []), dtype=bool)
         flight_height = np.asarray(payload.get("flight_height_m", []), dtype=np.float64)
         selected_trace_index = payload.get("selected_trace_index")
+
         if (
             longitude.size == 0
             or latitude.size == 0
@@ -837,122 +841,16 @@ class QualityLogPage(QWidget):
             int(selected_trace_index) if selected_trace_index is not None else None
         )
 
-        # ===== 上子图：航迹图 =====
-        ax.set_title("航迹图（经纬度）")
-        ax.plot(longitude, latitude, color=palette["line_primary"], linewidth=1.4, zorder=1)
-        ax.scatter(
-            [longitude[0]],
-            [latitude[0]],
-            color=palette["line_success"],
-            s=42,
-            zorder=3,
-            label="起点",
-        )
-        ax.scatter(
-            [longitude[-1]],
-            [latitude[-1]],
-            color=palette["line_error"],
-            s=42,
-            zorder=3,
-            label="终点",
-        )
-
-        if anomaly_mask.size == longitude.size and np.any(anomaly_mask):
-            ax.scatter(
-                longitude[anomaly_mask],
-                latitude[anomaly_mask],
-                color=palette["line_warning"],
-                s=26,
-                zorder=4,
-                label="异常点",
+        anomaly_count = int(np.count_nonzero(anomaly_mask)) if anomaly_mask.size == longitude.size else 0
+        height_text = "飞行高度可用" if flight_height.size == longitude.size else "飞行高度缺失"
+        if hasattr(self, "trajectory_status_label"):
+            self.trajectory_status_label.setText(
+                f"航迹：{longitude.size} 个位置点｜异常点 {anomaly_count}｜{height_text}｜详情在 空间 > 测线轨迹"
             )
-
-        if self._selected_trace_index is not None:
-            selected_mask = trace_indices == self._selected_trace_index
-            if np.any(selected_mask):
-                ax.scatter(
-                    longitude[selected_mask],
-                    latitude[selected_mask],
-                    color=palette["line_emphasis"],
-                    s=64,
-                    marker="x",
-                    linewidths=1.8,
-                    zorder=5,
-                    label="当前选中",
-                )
-
-        finite_mask = np.isfinite(longitude) & np.isfinite(latitude)
-        if np.count_nonzero(finite_mask) > 0:
-            lon_valid = longitude[finite_mask]
-            lat_valid = latitude[finite_mask]
-            lon_span = (
-                float(np.max(lon_valid) - np.min(lon_valid)) if lon_valid.size else 0.0
-            )
-            lat_span = (
-                float(np.max(lat_valid) - np.min(lat_valid)) if lat_valid.size else 0.0
-            )
-            pad_lon = max(lon_span * 0.05, 1e-6)
-            pad_lat = max(lat_span * 0.05, 1e-6)
-            ax.set_xlim(
-                float(np.min(lon_valid) - pad_lon), float(np.max(lon_valid) + pad_lon)
-            )
-            ax.set_ylim(
-                float(np.min(lat_valid) - pad_lat), float(np.max(lat_valid) + pad_lat)
-            )
-
-        ax.set_xlabel("经度")
-        ax.set_ylabel("纬度")
-        ax.legend(loc="best")
-
-        # ===== 下子图：飞行高度剖面 =====
-        if flight_height.size == longitude.size:
-            ax_h.set_visible(True)
-            ax_h.set_title("飞行高度剖面")
-            x_axis = np.arange(longitude.size)
-            ax_h.fill_between(
-                x_axis,
-                flight_height,
-                alpha=0.25,
-                color=palette["line_primary"],
-            )
-            ax_h.plot(
-                x_axis,
-                flight_height,
-                color=palette["line_primary"],
-                linewidth=1.2,
-                label="飞行高度",
-            )
-            h_mean = float(np.mean(flight_height[np.isfinite(flight_height)])) if np.isfinite(flight_height).any() else None
-            if h_mean is not None:
-                ax_h.axhline(
-                    y=h_mean,
-                    color=palette["line_emphasis"],
-                    linestyle="--",
-                    linewidth=1.2,
-                    label=f"平均高度: {h_mean:.2f} m",
-                )
-            if self._selected_trace_index is not None:
-                selected_mask = trace_indices == self._selected_trace_index
-                if np.any(selected_mask):
-                    ax_h.scatter(
-                        x_axis[selected_mask],
-                        flight_height[selected_mask],
-                        color=palette["line_error"],
-                        s=48,
-                        zorder=5,
-                        label="当前选中",
-                    )
-            ax_h.set_xlabel("道号索引")
-            ax_h.set_ylabel("飞行高度 (m)")
-            ax_h.legend(loc="best")
-        else:
-            ax_h.set_visible(False)
-
-        self._style_figure(self.trajectory_fig, [ax, ax_h])
-        self._finalize_figure(self.trajectory_fig, self.trajectory_canvas)
 
     def set_airborne_georeference_3d_visualization(self, payload: dict | None):
         """设置三维地理参考预览数据并延迟刷新。"""
+        had_payload = bool(self._available_georef3d_entries()) if hasattr(self, "_available_georef3d_entries") else False
         if payload and any(key in payload for key in ("raw", "current", "diff")):
             self._georef3d_bundle = {
                 "raw": payload.get("raw"),
@@ -961,7 +859,15 @@ class QualityLogPage(QWidget):
             }
         else:
             self._georef3d_bundle = {"raw": None, "current": payload, "diff": None}
-        self._georef3d_force_default_view = self._georef3d_view_state is None
+        has_payload = bool(self._available_georef3d_entries()) if hasattr(self, "_available_georef3d_entries") else bool(payload)
+        # When real spatial data arrives after the empty state, discard the old
+        # 0--1 placeholder view. Otherwise Matplotlib restores the empty axes and
+        # the 3D scene appears blank even though the payload is valid.
+        if has_payload and not had_payload:
+            self._georef3d_view_state = None
+            self._georef3d_force_default_view = True
+        else:
+            self._georef3d_force_default_view = self._georef3d_view_state is None
         self._schedule_georef3d_redraw()
 
     def _schedule_georef3d_redraw(self, *_args):
@@ -992,6 +898,19 @@ class QualityLogPage(QWidget):
             }
         except Exception:
             return None
+
+    def _is_placeholder_georef3d_view(self, state: dict | None) -> bool:
+        """Return True for the 0--1 Matplotlib placeholder view from the empty state."""
+        if not state:
+            return False
+        try:
+            ranges = []
+            for key in ("xlim", "ylim", "zlim"):
+                lo, hi = state.get(key, (None, None))
+                ranges.append(abs(float(hi) - float(lo)))
+            return all(0.8 <= r <= 1.4 for r in ranges)
+        except Exception:
+            return False
 
     def _restore_georef3d_view_state(self, ax, state: dict | None) -> None:
         """Restore a captured 3D view, or apply the default view once."""
@@ -1586,9 +1505,9 @@ class QualityLogPage(QWidget):
                 )
             payload = selected[-1][2]
             ax.set_title("UAV-GPR 三维运动补偿预览")
-            ax.set_xlabel(payload.get("x_axis_label") or "局部 X (m)")
-            ax.set_ylabel(payload.get("y_axis_label") or "局部 Y (m)")
-            ax.set_zlabel(payload.get("z_axis_label") or "等效高度/深度 (m)")
+            ax.set_xlabel(self._axis_label_for_user(payload, "x"))
+            ax.set_ylabel(self._axis_label_for_user(payload, "y"))
+            ax.set_zlabel(self._axis_label_for_user(payload, "z"))
             ax.view_init(elev=24, azim=-58)
             handles, _ = ax.get_legend_handles_labels()
             if handles:
@@ -1627,13 +1546,15 @@ class QualityLogPage(QWidget):
         palette = self._get_plot_palette()
         self.georef3d_fig.patch.set_facecolor(palette["fig_face"])
         entries = self._visible_georef3d_entries()
+        if entries and self._is_placeholder_georef3d_view(previous_view):
+            previous_view = None
 
         if not entries:
             ax.set_title("三维地理参考预览")
             ax.text2D(
                 0.5,
                 0.5,
-                "暂无三维地理参考数据\n暂无航迹数据",
+                "空间数据未接入\n导入轨迹/高程/飞行高度后启用三维预览",
                 transform=ax.transAxes,
                 ha="center",
                 va="center",
@@ -1658,10 +1579,11 @@ class QualityLogPage(QWidget):
         preview_trace_indices = np.asarray(preview.get("trace_indices", []), dtype=np.int32)
         preview_sample_indices = np.asarray(preview.get("sample_indices", []), dtype=np.int32)
 
-        ax.set_title("三维地理参考预览")
-        ax.set_xlabel(payload.get("x_axis_label") or "局部 X (m)")
-        ax.set_ylabel(payload.get("y_axis_label") or "局部 Y (m)")
-        ax.set_zlabel(payload.get("z_axis_label") or "等效高度/深度 (m)")
+        has_georef = bool(payload.get("has_longitude_latitude") and (payload.get("has_ground_elevation") or payload.get("has_height_agl")))
+        ax.set_title("三维地理参考预览" if has_georef else "三维剖面预览（未地理参考）")
+        ax.set_xlabel(self._axis_label_for_user(payload, "x"))
+        ax.set_ylabel(self._axis_label_for_user(payload, "y"))
+        ax.set_zlabel(self._axis_label_for_user(payload, "z"))
 
         bounds = self._compute_georef3d_bounds(entries, include_bscan=self.btn_georef3d_bscan.isChecked())
         if bounds is not None:
@@ -1682,15 +1604,9 @@ class QualityLogPage(QWidget):
                 transform=ax.transAxes,
                 color=palette["hint"],
             )
-        quality_flags = payload.get("quality_flags") or []
-        if quality_flags:
-            ax.text2D(
-                0.02,
-                0.08,
-                " | ".join(str(item) for item in quality_flags[:4]),
-                transform=ax.transAxes,
-                color=palette["hint"],
-            )
+        # Do not print raw provenance / quality flags on the engineering view.
+        # Detailed spatial metadata status is shown in the right-side property panel
+        # and export metadata, keeping the 3D scene visually clean.
 
         self._style_3d_axes(ax)
         self.georef3d_fig.subplots_adjust(left=0.05, right=0.98, bottom=0.05, top=0.92)
@@ -1749,3 +1665,11 @@ class QualityLogPage(QWidget):
     def set_airborne_anomaly_details(self, text: str):
         """设置航空异常明细文本。"""
         self.airborne_anomaly_details.setPlainText(text or "")
+        clean = (text or "").strip()
+        if not clean:
+            value = "--"
+        elif "暂无" in clean or "未发现" in clean or "无明显" in clean:
+            value = "0"
+        else:
+            value = str(max(1, len([line for line in clean.splitlines() if line.strip()])))
+        self._set_quality_status("anomaly", value)

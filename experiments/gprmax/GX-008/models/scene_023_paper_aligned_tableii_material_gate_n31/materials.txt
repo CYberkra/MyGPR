@@ -1,0 +1,25 @@
+scene_id: scene_023_paper_aligned_tableii_material_gate_n31
+based_on_scene: scene_021_paper_aligned_centered_gate_n31
+replication_type: paper_aligned_tableii_material_speed_gate
+
+source:
+  paper: Learning_to_Remove_Clutter_in_Real-World_GPR_Images_Using_Hybrid_Data-复制.pdf
+  location: page_3_table_ii
+
+materials:
+  dry_sand_tableii:
+    eps_r: 3.0
+    sigma_s_per_m: 0.001
+    used_in_scene: true
+  pvc_tableii:
+    eps_r: 3.5
+    sigma_s_per_m: 0.0
+    used_in_scene: false
+    note: listed as Table II reference only; target remains PEC cylinder in scene_023.
+  pec:
+    source: gprMax builtin
+    used_in_scene: true
+
+notes:
+  - scene_023 is material calibration diagnostic only.
+  - Keep geometry, scan window, dx, expected_num_runs, source/rx and target geometry same as scene_021.

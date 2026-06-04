@@ -1,0 +1,12 @@
+#title: MyGPR gprMax GPU smoke model
+#domain: 0.20 0.10 0.10
+#dx_dy_dz: 0.01 0.01 0.01
+#time_window: 5e-9
+#pml_cells: 2
+
+#waveform: ricker 1 1e9 src
+#hertzian_dipole: z 0.05 0.05 0.05 src
+#rx: 0.06 0.05 0.05
+
+#material: 6.0 0.005 1.0 0.0 soil
+#box: 0 0 0 0.20 0.10 0.10 soil

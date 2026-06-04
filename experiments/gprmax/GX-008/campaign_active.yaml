@@ -1,6 +1,6 @@
 campaign_id: GX-008_scene037_active
 draft_note: "Active-only campaign for the current primary GX-008 scene."
-output_root: D:/CDUT-UavGPR-Controller/MyGPR-Evidence/gprmax/GX-008
+output_root: ${MYGPR_EVIDENCE_ROOT}/gprmax/GX-008
 gprmax_executable: gprMax
 scenes:
   - scene_id: scene_037_gssi_ey_depth05_radius03_air_sand_interface_n80_geometry_gate

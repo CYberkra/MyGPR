@@ -1,0 +1,49 @@
+{
+  "scene_id": "scene_001_gssi400_deep20_radius03_air_sand_feasibility_gate",
+  "experiment_family": "GX-009",
+  "purpose": "GSSI-like 400 MHz deep target feasibility gate",
+  "not_replacing": "GX-008 scene_037 primary active model",
+  "domain_m": [1.4, 0.45, 0.8],
+  "grid_m": [0.005, 0.005, 0.005],
+  "time_window_s": 3.5e-08,
+  "soil_surface_z_m": 0.55,
+  "dry_sand_z_range_m": [0.0, 0.55],
+  "air_z_range_m": [0.55, 0.8],
+  "antenna": {
+    "model": "antenna_like_GSSI_400",
+    "reference_z_m": 0.6,
+    "standoff_m": 0.05,
+    "reference_y_m": 0.225,
+    "scan_start_x_m": 0.3,
+    "scan_step_x_m": 0.02,
+    "n31_x_range_m": [0.3, 0.9]
+  },
+  "target": {
+    "type": "PEC cylinder along y",
+    "x_center_m": 0.7,
+    "z_center_m": 0.32,
+    "radius_m": 0.03,
+    "cover_depth_m": 0.2,
+    "upper_z_m": 0.35,
+    "lower_z_m": 0.29,
+    "y_range_m": [0.01, 0.44]
+  },
+  "component_policy": {
+    "selected_component": "unknown_until_component_audit",
+    "candidate_components": ["Ex", "Ey", "Ez", "Hx", "Hy", "Hz"]
+  },
+  "run_plan": [
+    "geometry-only raw/background",
+    "component audit n5 or n7 raw",
+    "raw-only n31 gate if geometry/component audit passes",
+    "no full background pair in this task unless explicitly approved later"
+  ],
+  "claim_boundary": [
+    "GSSI400 deep target feasibility gate only",
+    "not GX-008 replacement",
+    "not exact CLT-GPR replication",
+    "not finalized benchmark",
+    "not field validation",
+    "not AutoTune evaluation"
+  ]
+}

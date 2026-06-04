@@ -67,3 +67,35 @@ def test_bscan_interaction_controller_wrappers_and_hover_inspect_smoke():
         assert win._hover_crosshair_artists == []
     finally:
         _close_window(app, win)
+
+
+def test_bscan_nearest_axis_index_handles_monotonic_axes():
+    from ui.bscan_interaction_controller import BscanInteractionController
+
+    inc = np.array([0.0, 1.0, 2.0, 4.0], dtype=np.float32)
+    dec = np.array([4.0, 2.0, 1.0, 0.0], dtype=np.float32)
+    assert BscanInteractionController._nearest_axis_index(inc, 1.7) == 2
+    assert BscanInteractionController._nearest_axis_index(inc, -10.0) == 0
+    assert BscanInteractionController._nearest_axis_index(inc, 99.0) == 3
+    assert BscanInteractionController._nearest_axis_index(dec, 1.7) == 1
+    assert BscanInteractionController._nearest_axis_index(dec, -10.0) == 3
+    assert BscanInteractionController._nearest_axis_index(dec, 99.0) == 0
+
+
+def test_main_canvas_draw_requests_are_coalesced():
+    app = _get_app()
+    win = GPRGuiQt("MyGPR V-test")
+    try:
+        calls = []
+        win.canvas.draw_idle = lambda: calls.append("draw")  # type: ignore[method-assign]
+        win._last_canvas_draw_flush_ts = 0.0
+        win._request_main_canvas_draw("unit", min_interval_s=10.0)
+        assert len(calls) == 1
+        win._request_main_canvas_draw("unit", min_interval_s=10.0)
+        assert len(calls) == 1
+        assert win._pending_canvas_draw is True
+        win._flush_pending_canvas_draw()
+        assert len(calls) == 2
+        assert win._pending_canvas_draw is False
+    finally:
+        _close_window(app, win)

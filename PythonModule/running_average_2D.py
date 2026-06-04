@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Created on Thur Nov 9 15:50:15 2023
-
-@author: 何海
-"""
+"""Legacy runtime helper kept for MyGPR processing compatibility."""
 
 from pathlib import Path
 
