@@ -537,7 +537,7 @@ class ProjectPageMixin:
             self._refresh_processing_preview()
             self._refresh_target_source_options()
             self._refresh_target_widgets()
-            self.switch_workspace("home")
+            self.switch_workspace("data_management")
             QMessageBox.information(
                 self,
                 "删除项目",
@@ -600,10 +600,24 @@ class ProjectPageMixin:
             self._metric_card(self.project_metric_cards, "lines", "📊", "测线总数", str(st.line_count), "条"),
             self._metric_card(self.project_metric_cards, "raw", "💾", "已导入数据", raw_value, raw_suffix),
             self._metric_card(self.project_metric_cards, "trajectory", "📍", "辅助定位文件", str(st.trajectory_file_count), "个"),
+            self._metric_card(self.project_metric_cards, "reports", "▤", "报告状态", st.report_status, "", f"交付文件 {st.report_file_count} 个"),
             self._metric_card(self.project_metric_cards, "status", "◈", "项目状态", st.data_health_label, "", f"最后更新：{st.latest_update}"),
         ]:
             metrics.addWidget(card)
         v.addLayout(metrics)
+
+        # Status strip -- compact project context bar (EKKO_Project pattern)
+        status_parts = []
+        if st.line_count > 0:
+            status_parts.append(f"共 {st.line_count} 条测线")
+        if st.processed_line_count > 0:
+            status_parts.append(f"{st.processed_line_count} 条已处理")
+        if st.trajectory_file_count > 0:
+            status_parts.append(f"{st.trajectory_file_count} 条已定位")
+        status_text = " ｜ ".join(status_parts) if status_parts else "暂无数据"
+        status_label = QLabel(f"项目概况：{status_text}")
+        status_label.setObjectName("activityDesc")
+        v.addWidget(status_label)
 
         mid = QHBoxLayout()
         mid.setSpacing(lm.spacing)

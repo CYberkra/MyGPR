@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import QFileDialog, QHBoxLayout, QLabel, QMenu, QMessageBox
 
 from core.project_events import ProjectEventType
 from ui.field_panels.layout_metrics import layout_metrics_for
-from ui.field_panels.widgets import Card, CollapsibleSidePanel, MetricCard, PlotCard, open_plot_viewer
+from ui.field_panels.widgets import Card, CollapsibleSidePanel, MetricCard, PlotCard
 from ui.field_panels.plots import _style_axis
 from ui.field_panels.preview_helpers import _set_comfort_limits
 from ui.field_panels.spatial_3d_dialog import Spatial3DDialog, collect_project_spatial_scene
@@ -79,10 +79,6 @@ class SpatialPageMixin:
         more_menu = QMenu(more_btn)
         more_menu.addAction("⛶ 三维视图", self._action_open_3d_view)
         more_menu.addAction("▧ 生成平面图", self._action_generate_plan_map)
-        more_menu.addAction("⛶ 放大主图", lambda: open_plot_viewer(
-            self, title="空间成果主图放大查看（真实比例）",
-            draw_callback=self._draw_project_spatial_map,
-        ))
         more_btn.setMenu(more_menu)
         toolbar.addWidget(more_btn)
 
@@ -123,7 +119,7 @@ class SpatialPageMixin:
         left.addWidget(summary, 1)
         main.addLayout(left, 6)
 
-        # Right column: elevation, correlation, info
+        # Right column: elevation and info
         right = QVBoxLayout()
         right.setSpacing(lm.spacing)
 
@@ -139,10 +135,6 @@ class SpatialPageMixin:
         self.spatial_elevation_canvas = profile_card.canvas
         self._draw_current_elevation_profile(profile_card.canvas)
         right.addWidget(profile_card)
-
-        correlation_card = self._line_correlation_card()
-        self.spatial_correlation_canvas = correlation_card.canvas
-        right.addWidget(correlation_card)
 
         info_panel = self._spatial_info_panel()
         info_panel.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
@@ -277,19 +269,6 @@ class SpatialPageMixin:
             rows = [("暂无测线", "--", "--", "0", "0", "--")]
         self._fill_table(table, rows, highlight_row=self._selected_line_row() if self.line_records else -1)
         card.layout.addWidget(table)
-        return card
-
-    def _line_correlation_card(self) -> Card:
-        card = PlotCard(
-            "测线关联视图",
-            height=layout_metrics_for(self).spatial_correlation_h,
-            expand_title="测线关联视图放大查看",
-            expand_callback=self._draw_project_line_correlation,
-            expand_parent=self,
-        )
-        card.setProperty("layoutKey", "spatialCorrelationCard")
-        card.canvas.setObjectName("spatialCorrelationCanvas")
-        self._draw_project_line_correlation(card.canvas)
         return card
 
     def _spatial_info_panel(self) -> Card:
@@ -437,37 +416,6 @@ class SpatialPageMixin:
         ax2.tick_params(labelsize=7)
         fig.colorbar(im, ax=ax2, fraction=0.046, pad=0.02).ax.tick_params(labelsize=7)
         _style_axis(ax2)
-        fig.tight_layout(pad=0.55)
-        canvas.draw_idle()
-
-    def _draw_project_line_correlation(self, canvas) -> None:
-        if self.project_store is None or not self.line_records:
-            self._draw_empty_plot(canvas, "暂无测线关联")
-            return
-        fig = canvas.figure
-        fig.clear()
-        ax = fig.add_subplot(111)
-        plotted = False
-        max_len = max((float(line.get("length", 0.0) or 0.0) for line in self.line_records), default=1.0)
-        for idx, line in enumerate(self.line_records[:6]):
-            line_id = str(line.get("id", "--"))
-            length = float(line.get("length", 0.0) or 0.0)
-            if length <= 0:
-                continue
-            x = np.linspace(0.0, length, 8)
-            y = np.full_like(x, len(self.line_records[:6]) - idx, dtype=float)
-            ax.plot(x, y, marker="o", markerfacecolor="white", lw=1.2, label=line_id)
-            ax.text(-max(max_len * 0.04, 1), float(y[0]), line_id, va="center", fontsize=7)
-            plotted = True
-        if not plotted:
-            self._draw_empty_plot(canvas, "暂无测线关联")
-            return
-        current = self._selected_line_record()
-        if current.get("id") != "--":
-            ax.axvline(float(current.get("length", 0.0)) / 2, color="#F04438", ls="--", lw=1.0)
-        ax.set_yticks([])
-        ax.set_xlabel("里程 (m)", fontsize=8)
-        _style_axis(ax)
         fig.tight_layout(pad=0.55)
         canvas.draw_idle()
 

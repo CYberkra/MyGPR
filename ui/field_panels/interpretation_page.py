@@ -63,8 +63,6 @@ class InterpretationPageMixin(TargetActionsMixin):
             btn.clicked.connect(slot)
             toolbar.addWidget(btn)
         toolbar.addStretch(1)
-        for text in ["↖", "◎", "⊕", "⊖", "…"]:
-            toolbar.addWidget(QPushButton(text))
         card.layout.addLayout(toolbar)
 
         plot = PlotCard(

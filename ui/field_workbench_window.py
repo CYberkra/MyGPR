@@ -111,7 +111,7 @@ class FieldWorkbenchWindow(HomePageMixin, FieldTableMixin, FieldPreviewMixin, Pr
     def __init__(self, version_text: str = "MyGPR 勘探定位工作台") -> None:
         super().__init__()
         self.version_text = version_text
-        self.active_workspace = "home"
+        self.active_workspace = "data_management"
         self.workspace_pages: dict[str, QWidget] = {}
         self.workspace_buttons: dict[str, QPushButton] = {}
         self.nav_group = QButtonGroup(self)
@@ -174,7 +174,7 @@ class FieldWorkbenchWindow(HomePageMixin, FieldTableMixin, FieldPreviewMixin, Pr
         self.statusBar().hide()
         self._setup_ui()
         self._apply_style()
-        self.switch_workspace("home")
+        self.switch_workspace("data_management")
     def _detect_screen_profile(self) -> dict[str, int | float | str]:
         """Return the real Qt screen geometry used for laptop fit decisions.
 
@@ -383,6 +383,7 @@ class FieldWorkbenchWindow(HomePageMixin, FieldTableMixin, FieldPreviewMixin, Pr
         self._update_metric_card(self.project_metric_cards, "lines", str(st.line_count), "条")
         self._update_metric_card(self.project_metric_cards, "raw", raw_value, raw_suffix)
         self._update_metric_card(self.project_metric_cards, "trajectory", str(st.trajectory_file_count), "个")
+        self._update_metric_card(self.project_metric_cards, "reports", st.report_status, "", f"交付文件 {st.report_file_count} 个")
         self._update_metric_card(self.project_metric_cards, "status", st.data_health_label, "", f"最后更新：{st.latest_update}")
         self._update_project_tree()
         self._update_project_task_tabs()
@@ -953,8 +954,6 @@ class FieldWorkbenchWindow(HomePageMixin, FieldTableMixin, FieldPreviewMixin, Pr
         self.target_table = None
         self.target_canvas = None
         self.target_preview_canvas = None
-        self.workspace_pages["home"] = self._build_home_page()
-        self.stack.addWidget(self.workspace_pages["home"])
         for key in WORKSPACES:
             page = self._build_workspace_page(key)
             self.workspace_pages[key] = page
@@ -1146,8 +1145,6 @@ class FieldWorkbenchWindow(HomePageMixin, FieldTableMixin, FieldPreviewMixin, Pr
         layout.addWidget(self._build_header())
         self.stack = QStackedWidget()
         self.stack.setObjectName("pageStack")
-        self.workspace_pages["home"] = self._build_home_page()
-        self.stack.addWidget(self.workspace_pages["home"])
         for key in WORKSPACES:
             page = self._build_workspace_page(key)
             self.workspace_pages[key] = page
@@ -1207,10 +1204,6 @@ class FieldWorkbenchWindow(HomePageMixin, FieldTableMixin, FieldPreviewMixin, Pr
         nav = QHBoxLayout()
         nav.setContentsMargins(0, 0, 0, 4)
         nav.setSpacing(5)
-        home = self._make_nav_button("⌂", "home")
-        home.setFixedWidth(self._compact_value(48, 42))
-        nav.addWidget(home)
-        nav.addSpacing(2)
         for key, text in WORKSPACES.items():
             btn = self._make_nav_button(text, key)
             btn.setMinimumWidth(self._compact_value(108, 94))

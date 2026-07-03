@@ -12,6 +12,7 @@ from typing import Any
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
+from matplotlib.tri import Triangulation
 
 import matplotlib.pyplot as plt
 from PyQt6.QtCore import Qt, QUrl
@@ -104,30 +105,114 @@ class Spatial3DDialog(QDialog):
         fig.clear()
         ax = fig.add_subplot(111, projection="3d")
         if not self.trajectories:
-            ax.text2D(0.35, 0.5, "暂无可用三维空间成果", transform=ax.transAxes)
+            ax.text2D(
+                0.35,
+                0.5,
+                "需要轨迹数据才能显示三维视图\n\n"
+                "请在测线处理页面完成空间定位后刷新",
+                transform=ax.transAxes,
+                fontsize=12,
+                ha="center",
+                va="center",
+                color="#666",
+            )
+            ax.set_axis_off()
             fig.tight_layout(pad=1.0)
             self.canvas_3d.draw_idle()
             return
-        x0 = min(float(np.nanmin(item["x"])) for item in self.trajectories)
-        y0 = min(float(np.nanmin(item["y"])) for item in self.trajectories)
-        z_values = []
+
+        # Collect all trajectory points for the scene.
+        all_x = np.concatenate([item["x"] for item in self.trajectories])
+        all_y = np.concatenate([item["y"] for item in self.trajectories])
+        all_z = np.concatenate([item["z"] for item in self.trajectories])
+
+        # Use absolute coordinates when the range is small enough (< 1 000 000)
+        # to avoid meaningless large offsets; otherwise fall back to relative.
+        use_absolute = (
+            np.ptp(all_x) < 1_000_000
+            and np.ptp(all_y) < 1_000_000
+            and np.ptp(all_z) < 1_000_000
+        )
+        if use_absolute:
+            x_offset, y_offset = 0.0, 0.0
+            x_label, y_label, z_label = "东坐标 Easting (m)", "北坐标 Northing (m)", "高程 Elevation (m)"
+        else:
+            x_offset = float(np.nanmin(all_x))
+            y_offset = float(np.nanmin(all_y))
+            x_label, y_label, z_label = "相对 X (m)", "相对 Y (m)", "高程 / 目标 Z (m)"
+
+        # --- Terrain mesh via plot_trisurf ---
+        # Build a surface when there are enough distinct points and elevation
+        # variation is non-trivial (more than 1 cm across the site).
+        valid_mask = np.isfinite(all_x) & np.isfinite(all_y) & np.isfinite(all_z)
+        px, py, pz = all_x[valid_mask] - x_offset, all_y[valid_mask] - y_offset, all_z[valid_mask]
+        has_terrain = (
+            len(px) >= 10
+            and np.ptp(pz) > 0.01  # elevation varies > 1 cm
+        )
+        if has_terrain:
+            # Down-sample when the point cloud is large to keep the mesh
+            # lightweight and interactive.
+            max_vertices = 4000
+            if len(px) > max_vertices:
+                step = max(1, len(px) // max_vertices)
+                px_s, py_s, pz_s = px[::step], py[::step], pz[::step]
+            else:
+                px_s, py_s, pz_s = px, py, pz
+
+            try:
+                tri = Triangulation(px_s, py_s)
+                ax.plot_trisurf(
+                    tri,
+                    pz_s,
+                    cmap="terrain",
+                    alpha=0.55,
+                    edgecolor="none",
+                    antialiased=True,
+                    zorder=1,
+                )
+            except Exception:
+                # Degenerate triangulation (e.g. collinear points) -- skip
+                # the surface; trajectory lines will still render.
+                pass
+
+        # --- Trajectory lines ---
         for item in self.trajectories:
-            x = item["x"] - x0
-            y = item["y"] - y0
+            x = item["x"] - x_offset
+            y = item["y"] - y_offset
             z = item["z"]
-            z_values.extend(list(z))
-            line_width = 2.2 if item["line_id"] == self.selected_line else 1.4
-            ax.plot(x, y, z, linewidth=line_width, marker="o", markersize=2, markevery=max(1, len(x) // 30), label=item["line_id"])
-        target_points = [target for target in self.targets if target.get("x") is not None and target.get("y") is not None]
+            lw = 2.2 if item["line_id"] == self.selected_line else 1.4
+            ax.plot(
+                x,
+                y,
+                z,
+                linewidth=lw,
+                marker="o",
+                markersize=2,
+                markevery=max(1, len(x) // 30),
+                label=item["line_id"],
+                zorder=3,
+            )
+
+        # --- Target scatter ---
+        target_points = [
+            t for t in self.targets if t.get("x") is not None and t.get("y") is not None
+        ]
         if target_points:
-            tx = np.asarray([float(t["x"]) - x0 for t in target_points], dtype=float)
-            ty = np.asarray([float(t["y"]) - y0 for t in target_points], dtype=float)
+            tx = np.asarray([float(t["x"]) - x_offset for t in target_points], dtype=float)
+            ty = np.asarray([float(t["y"]) - y_offset for t in target_points], dtype=float)
             tz = np.asarray([float(t.get("z", 0.0)) for t in target_points], dtype=float)
-            ax.scatter(tx, ty, tz, marker="^", s=28, label="目标点")
-        ax.set_title("三维空间成果（相对工程坐标显示）", fontsize=11, fontweight="bold", loc="left")
-        ax.set_xlabel("相对 X (m)")
-        ax.set_ylabel("相对 Y (m)")
-        ax.set_zlabel("高程 / 目标 Z (m)")
+            ax.scatter(tx, ty, tz, marker="^", s=28, label="目标点", zorder=4)
+
+        ax.set_title(
+            "三维空间成果" + ("（工程坐标）" if use_absolute else "（相对工程坐标显示）"),
+            fontsize=11,
+            fontweight="bold",
+            loc="left",
+        )
+        ax.set_xlabel(x_label)
+        ax.set_ylabel(y_label)
+        ax.set_zlabel(z_label)
         ax.legend(loc="upper left", fontsize=8)
         try:
             ax.view_init(elev=28, azim=-52)
@@ -141,7 +226,16 @@ class Spatial3DDialog(QDialog):
         fig.clear()
         ax = fig.add_subplot(111)
         if not self.trajectories:
-            ax.text(0.5, 0.5, "暂无可用平面成果", ha="center", va="center", transform=ax.transAxes)
+            ax.text(
+                0.5,
+                0.5,
+                "需要轨迹数据才能显示平面视图",
+                ha="center",
+                va="center",
+                transform=ax.transAxes,
+                fontsize=12,
+                color="#666",
+            )
             ax.set_axis_off()
             self.canvas_plan.draw_idle()
             return

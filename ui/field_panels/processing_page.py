@@ -45,7 +45,7 @@ from ui.field_panels.processing_panel import (
 )
 from ui.field_panels.layout_metrics import layout_metrics_for
 from ui.field_panels.plots import draw_bscan
-from ui.field_panels.widgets import Card, CollapsibleSidePanel, MetricCard, PlotCard, open_plot_viewer
+from ui.field_panels.widgets import Card, MetricCard, PlotCard, open_plot_viewer
 
 logger = logging.getLogger(__name__)
 
@@ -110,26 +110,11 @@ class ProcessingPageMixin:
 
         params_card = self._processing_params_card()
         params_card.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
-        params_panel = CollapsibleSidePanel(
-            title="处理设置",
-            content=params_card,
-            expanded_width=lm.processing_params_w,
-            collapsed_width=34,
-        )
-        params_panel.setProperty("layoutKey", "processingParamsSidePanel")
-        # Keep the side panel compact, but give it enough vertical slack for
-        # Windows 125% font metrics.  The old +78 cap matched the screenshot
-        # harness but clipped the real Windows launch after QSS padding and
-        # spin-box button metrics were applied.
-        params_panel.setMaximumHeight(lm.processing_bscan_h + 140)
-        work.addWidget(params_panel, 0, Qt.AlignmentFlag.AlignTop)
+        params_card.setMaximumHeight(lm.processing_bscan_h + 40)
+        work.addWidget(params_card, 0, Qt.AlignmentFlag.AlignTop)
         v.addLayout(work, 3)
 
-        bottom = QHBoxLayout()
-        bottom.setSpacing(lm.spacing)
-        bottom.addWidget(self._processing_messages_card(), 4)
-        bottom.addWidget(self._processing_line_overview_card(), 1)
-        v.addLayout(bottom, 1)
+        v.addWidget(self._processing_messages_card(), 1)
         return widget
 
     def _processing_step_count(self) -> int:
@@ -228,6 +213,8 @@ class ProcessingPageMixin:
             self.processing_compare_button.setEnabled(bool(raw is not None and target is not None and raw is not target))
         if self.processing_execute_button is not None:
             self.processing_execute_button.setEnabled(raw is not None)
+        if getattr(self, "processing_batch_button", None) is not None:
+            self.processing_batch_button.setEnabled(raw is not None)
         if getattr(self, "processing_chain_status_label", None) is not None:
             if self.processing_last_failed:
                 self.processing_chain_status_label.setText("执行失败")
@@ -392,6 +379,44 @@ class ProcessingPageMixin:
         if self.processing_log_label is not None:
             self.processing_log_label.setText("↺  已重置到原始 B-scan，连续处理链已清空。")
 
+    def _batch_apply_processing(self) -> None:
+        """Apply current processing step to all imported lines."""
+        method_id = self.selected_processing_method_id
+        params = self._collect_processing_params()
+        if self.processing_log_label is not None:
+            self.processing_log_label.setText(
+                f"批量处理：正在对 {len(self.line_records)} 条测线执行 "
+                f"{field_method_display_name(method_id)}..."
+            )
+        ok_count = 0
+        fail_count = 0
+        for line in self.line_records:
+            line_id = str(line.get("id", ""))
+            if not line_id or self.project_store is None:
+                fail_count += 1
+                continue
+            try:
+                raw_dataset = self.project_store.load_line_data(line_id)
+                if raw_dataset is None:
+                    fail_count += 1
+                    continue
+                session = ManualProcessingSession(raw_dataset)
+                session.append_step(
+                    method_id, params, trajectory=self.trajectory_model
+                )
+                self.project_store.save_processed_line(
+                    line_id,
+                    session.current_dataset.matrix,
+                    session.build_save_payload(method_id, params),
+                )
+                ok_count += 1
+            except Exception:
+                fail_count += 1
+        if self.processing_log_label is not None:
+            self.processing_log_label.setText(
+                f"批量处理完成：{ok_count} 条成功，{fail_count} 条失败。"
+            )
+
     def _open_processing_compare_viewer(self) -> None:
         raw = self.active_gpr_dataset
         target = self._current_processing_dataset()
@@ -518,37 +543,6 @@ class ProcessingPageMixin:
             names = ", ".join(f"{k}={v}" for k, v in values.items()) or "无可推荐参数"
             self.processing_log_label.setText(f"✣  已更新 {field_method_display_name(self.selected_processing_method_id)} 的当前参数：{names}")
 
-    def _processing_line_overview_card(self) -> Card:
-        line = self._selected_line_record()
-        line_id = str(line.get("id", self.selected_line))
-        line_name = str(line.get("name", "当前测线"))
-        card = Card(title="当前测线")
-        card.setProperty("layoutKey", "processingLineOverviewCard")
-        lm = layout_metrics_for(self)
-        card.setMinimumHeight(lm.processing_line_overview_max_h)
-        card.setMaximumHeight(lm.processing_line_overview_max_h)
-
-        # Line map
-        line_map = PlotCard(None, height=lm.processing_line_map_h)
-        line_map.setProperty("layoutKey", "processingLineOverviewMapCard")
-        line_map.canvas.setObjectName("processingLineOverviewMapCanvas")
-        line_map.layout.setContentsMargins(0, 0, 0, 0)
-        marker = line.get("length", 0.0) / 2 if self.line_records else None
-        self._draw_current_line_strip(line_map.canvas, marker=marker)
-        card.layout.addWidget(line_map)
-
-        # Status info
-        status = QLabel(f"{line_name} | {float(line.get('length', 0.0)):.2f} m | {line.get('status', '--')}")
-        status.setObjectName("smallInfo")
-        status.setWordWrap(False)
-        status.setToolTip(
-            f"测线：{line_id} {line_name}\n长度：{float(line.get('length', 0.0)):.2f} m\n状态：{line.get('status', '--')}"
-        )
-        card.layout.addWidget(status)
-
-        card.layout.addStretch(1)
-        return card
-
     def _processing_params_card(self) -> Card:
         lm = layout_metrics_for(self)
         card = Card()
@@ -612,7 +606,7 @@ class ProcessingPageMixin:
         actions_group = QFrame()
         actions_group.setObjectName("paramGroup")
         actions_group.setProperty("layoutKey", "processingContinuousCard")
-        actions_group.setFixedHeight(148)
+        actions_group.setFixedHeight(174)
         actions_layout = QVBoxLayout(actions_group)
         actions_layout.setContentsMargins(5, 5, 5, 5)
         actions_layout.setSpacing(6)
@@ -657,6 +651,14 @@ class ProcessingPageMixin:
         self.processing_reset_button.clicked.connect(self._reset_processing_chain)
         undo_reset_row.addWidget(self.processing_reset_button, 1)
         actions_layout.addLayout(undo_reset_row)
+
+        batch_btn = QPushButton("批量处理全部测线")
+        batch_btn.setObjectName("smallButton")
+        batch_btn.setFixedHeight(26)
+        batch_btn.setToolTip("将当前算法和参数应用到所有已导入的测线")
+        batch_btn.clicked.connect(self._batch_apply_processing)
+        actions_layout.addWidget(batch_btn)
+        self.processing_batch_button = batch_btn
 
         self.processing_save_button = None
         card.layout.addWidget(actions_group)

@@ -39,7 +39,7 @@ class DeliveryPageMixin:
         v.addLayout(top)
 
         action = QHBoxLayout()
-        action.addStretch(1)
+        action.setSpacing(6)
         generate_btn = QPushButton("生成报告包")
         generate_btn.setObjectName("primaryButton")
         generate_btn.clicked.connect(self._action_generate_report_package)
@@ -48,10 +48,16 @@ class DeliveryPageMixin:
         pdf_btn.setObjectName("smallButton")
         pdf_btn.clicked.connect(self._action_generate_or_open_pdf_report)
         action.addWidget(pdf_btn)
+        batch_btn = QPushButton("批量导出")
+        batch_btn.setObjectName("smallButton")
+        batch_btn.setToolTip("一次性生成 HTML / PDF / CSV / JSON 全部报告文件并打开目录")
+        batch_btn.clicked.connect(self._action_batch_export_reports)
+        action.addWidget(batch_btn)
         open_btn = QPushButton("打开报告目录")
         open_btn.setObjectName("smallButton")
         open_btn.clicked.connect(self._action_open_reports_dir)
         action.addWidget(open_btn)
+        action.addStretch(1)
         v.addLayout(action)
         if bool(getattr(st, "dirty_modules", {}).get("report")):
             reasons = (getattr(st, "stale_reasons", {}) or {}).get("report", [])
@@ -103,6 +109,40 @@ class DeliveryPageMixin:
             )
         except Exception as exc:
             self._show_operation_error("生成报告包", exc)
+
+    def _action_batch_export_reports(self) -> None:
+        """Generate the full report package (HTML/PDF/CSV/JSON) and open the output directory."""
+        if self.project_store is None:
+            QMessageBox.warning(self, "批量导出", "请先新建或打开 MyGPR 项目。")
+            return
+        try:
+            result = generate_project_report_package(self.project_store)
+            if getattr(self, "linkage_controller", None) is not None:
+                self.linkage_controller.emit(
+                    ProjectEventType.REPORT_GENERATED,
+                    line_id=self.selected_line,
+                    reason="批量导出完成",
+                    changed_paths=[result.package_dir],
+                    refresh=False,
+                )
+            self._refresh_project_status_snapshot()
+            self._line_status_message = f"批量导出完成：{result.package_dir}（{result.file_count} 个文件）"
+            self._refresh_project_widgets()
+            pkg_dir = Path(result.package_dir)
+            if pkg_dir.exists():
+                QDesktopServices.openUrl(QUrl.fromLocalFile(str(pkg_dir)))
+            QMessageBox.information(
+                self,
+                "批量导出",
+                f"批量导出完成。\n"
+                f"目录：{result.package_dir}\n"
+                f"文件数：{result.file_count}\n"
+                f"HTML：{result.html_path}\n"
+                f"PDF：{result.pdf_path or '未生成'}\n\n"
+                "CSV/JSON 文件可在导出目录中查看。",
+            )
+        except Exception as exc:
+            self._show_operation_error("批量导出", exc)
 
     def _action_open_reports_dir(self) -> None:
         if self.project_root is None:
