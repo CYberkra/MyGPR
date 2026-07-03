@@ -1,0 +1,12 @@
+diff a/tests/test_adaptive_layout_metrics_v0911.py b/tests/test_adaptive_layout_metrics_v0911.py	(rejected hunks)
+@@ -24,8 +24,8 @@
+ 
+     assert metrics.compact is True
+     assert 360 <= metrics.processing_bscan_h <= 430
+-    # v0.9.24 compact min raised to 280 for button visibility (was 248→256→264)
+-    assert 280 <= metrics.processing_params_w <= 300
++    # v0.9.24 compact width stays bounded; the action area is compacted instead of widening the side panel.
++    assert 264 <= metrics.processing_params_w <= 300
+     assert metrics.processing_bottom_max_h <= int(metrics.window_height * 0.22)
+     assert metrics.spatial_map_h >= 330
+     assert metrics.spatial_map_h > metrics.spatial_dem_h * 4

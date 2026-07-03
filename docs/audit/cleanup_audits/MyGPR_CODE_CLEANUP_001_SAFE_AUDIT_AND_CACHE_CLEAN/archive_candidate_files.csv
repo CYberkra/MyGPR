@@ -1,0 +1,6 @@
+﻿path,classification,why_archive_candidate,risk_if_deleted,recommended_action
+CHATGPT_CHANGELOG_V0.7.2_TESTING_EVIDENCE_CLEANUP.md,tests,non-core test/experiment/utility area; review after V1.0 freeze,"may break reproducibility, tests, AutoTune evidence, or historical audit trace",do not delete in this round; consider archive/move after manual review
+CHATGPT_CHANGELOG_V0.7.3_TEST_BASELINE.md,tests,non-core test/experiment/utility area; review after V1.0 freeze,"may break reproducibility, tests, AutoTune evidence, or historical audit trace",do not delete in this round; consider archive/move after manual review
+experiments,experiment,non-core test/experiment/utility area; review after V1.0 freeze,"may break reproducibility, tests, AutoTune evidence, or historical audit trace",do not delete in this round; consider archive/move after manual review
+scripts,tests,non-core test/experiment/utility area; review after V1.0 freeze,"may break reproducibility, tests, AutoTune evidence, or historical audit trace",do not delete in this round; consider archive/move after manual review
+tests,tests,non-core test/experiment/utility area; review after V1.0 freeze,"may break reproducibility, tests, AutoTune evidence, or historical audit trace",do not delete in this round; consider archive/move after manual review

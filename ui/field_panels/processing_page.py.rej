@@ -1,0 +1,92 @@
+diff a/ui/field_panels/processing_page.py b/ui/field_panels/processing_page.py	(rejected hunks)
+@@ -113,11 +111,11 @@
+             collapsed_width=34,
+         )
+         params_panel.setProperty("layoutKey", "processingParamsSidePanel")
+-        # The side panel is secondary.  It must not become taller than the two
+-        # B-scan work cards, otherwise the bottom history/log area is pushed
+-        # below the 1080P/125% visible viewport.  Keep it aligned with the main
+-        # plots and make the actions compact instead of growing the page.
+-        params_panel.setMaximumHeight(lm.processing_bscan_h + 78)
++        # Keep the side panel compact, but give it enough vertical slack for
++        # Windows 125% font metrics.  The old +78 cap matched the screenshot
++        # harness but clipped the real Windows launch after QSS padding and
++        # spin-box button metrics were applied.
++        params_panel.setMaximumHeight(lm.processing_bscan_h + 140)
+         work.addWidget(params_panel, 0, Qt.AlignmentFlag.AlignTop)
+         v.addLayout(work, 3)
+ 
+@@ -484,7 +508,7 @@
+         card.setProperty("layoutKey", "processingParamsCard")
+         card.setFixedWidth(lm.processing_params_w)
+ 
+-        reset = QLabel("[v5] 一步一叠加，保存后写入项目")
++        reset = QLabel("一步一叠加，自动进入项目树")
+         reset.setObjectName("activityDesc")
+         reset.setWordWrap(False)
+         card.layout.addWidget(reset)
+@@ -529,10 +553,10 @@
+         actions_group = QFrame()
+         actions_group.setObjectName("paramGroup")
+         actions_group.setProperty("layoutKey", "processingContinuousCard")
+-        actions_group.setMinimumHeight(190)
++        actions_group.setFixedHeight(176)
+         actions_layout = QVBoxLayout(actions_group)
+         actions_layout.setContentsMargins(5, 5, 5, 5)
+-        actions_layout.setSpacing(10)
++        actions_layout.setSpacing(6)
+         title_row = QHBoxLayout()
+         actions_title = QLabel("连续处理")
+         actions_title.setObjectName("activityTitle")
+@@ -558,41 +582,35 @@
+         actions_layout.addWidget(self.processing_execute_button)
+ 
+         undo_reset_row = QHBoxLayout()
+-        undo_reset_row.setSpacing(10)
++        undo_reset_row.setSpacing(6)
+         self.processing_undo_step_button = QPushButton("撤回一步")
+         self.processing_undo_step_button.setObjectName("smallButton")
+         self.processing_undo_step_button.setFixedHeight(26)
+         self.processing_undo_step_button.setProperty("layoutKey", "processingUndoStepButton")
+         self.processing_undo_step_button.clicked.connect(self._undo_processing)
+-        undo_reset_row.addWidget(self.processing_undo_step_button)
++        undo_reset_row.addWidget(self.processing_undo_step_button, 1)
+         self.processing_reset_button = QPushButton("重置到原始")
+         self.processing_reset_button.setObjectName("smallButton")
+         self.processing_reset_button.setFixedHeight(26)
+         self.processing_reset_button.setProperty("layoutKey", "processingResetChainButton")
+         self.processing_reset_button.clicked.connect(self._reset_processing_chain)
+-        undo_reset_row.addWidget(self.processing_reset_button)
++        undo_reset_row.addWidget(self.processing_reset_button, 1)
+         actions_layout.addLayout(undo_reset_row)
+ 
+         self.processing_compare_button = QPushButton("前后对比")
+         self.processing_compare_button.setObjectName("smallButton")
+-        self.processing_compare_button.setFixedHeight(26)
++        self.processing_compare_button.setFixedHeight(30)
+         self.processing_compare_button.setProperty("layoutKey", "processingCompareButton")
+         self.processing_compare_button.clicked.connect(self._open_processing_compare_viewer)
+         actions_layout.addWidget(self.processing_compare_button)
+-
+-        self.processing_save_button = QPushButton("保存当前结果")
+-        self.processing_save_button.setObjectName("primaryButton")
+-        self.processing_save_button.setFixedHeight(30)
+-        self.processing_save_button.setProperty("layoutKey", "processingSaveResultButton")
+-        self.processing_save_button.clicked.connect(self._save_processing_result)
+-        actions_layout.addWidget(self.processing_save_button)
++        self.processing_save_button = None
+         card.layout.addWidget(actions_group)
+ 
+-        self.processing_info_label = QLabel("算法：未执行；输入/输出：--；耗时：--")
+-        self.processing_info_label.setObjectName("activityDesc")
+-        self.processing_info_label.setWordWrap(True)
+-        self.processing_info_label.setMaximumHeight(32)
+-        card.layout.addWidget(self.processing_info_label)
++        # Compact 1080P/125% Windows layout: do not render the algorithm
++        # status line under the action buttons.  Detailed status remains in
++        # the processing history/log area, while button enabled states show
++        # the current chain state.
++        self.processing_info_label = None
+         card.layout.addStretch(1)
+         self._populate_processing_methods()
+         return card

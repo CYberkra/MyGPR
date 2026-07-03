@@ -1,0 +1,10 @@
+diff a/tests/test_workbench_1080p_fit.py b/tests/test_workbench_1080p_fit.py	(rejected hunks)
+@@ -16,7 +16,7 @@
+ 
+ def test_default_window_size_is_not_larger_than_common_laptop_logical_area() -> None:
+     assert DEFAULT_1080P_SIZE == (1480, 790)
+-    assert COMPACT_1080P_FIT_SIZE == (1450, 790)
++    assert COMPACT_1080P_FIT_SIZE == (1536, 816)
+     assert MIN_WORKBENCH_SIZE[0] <= 1120
+     assert MIN_WORKBENCH_SIZE[1] <= 650
+ 

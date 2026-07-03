@@ -1,0 +1,15 @@
+campaign_id: GX-RUN-001_missing_background
+output_root: output/gprmax_campaign_missing_background
+gprmax_executable: gprMax
+scenes:
+  - scene_id: scene_missing_bg
+    raw_model: models/raw_with_target.in
+    background_model: models/background_missing.in
+    materials: models/materials.txt
+    target_roi: annotations/target_roi.json
+    expected_outputs:
+      raw_with_target: raw_with_target.out
+      background_only: background_only.out
+      target_response: target_response.csv
+    tags:
+      - invalid_fixture

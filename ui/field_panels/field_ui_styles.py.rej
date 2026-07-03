@@ -1,0 +1,10 @@
+diff a/ui/field_panels/field_ui_styles.py b/ui/field_panels/field_ui_styles.py	(rejected hunks)
+@@ -14,7 +14,7 @@
+ 
+ DEFAULT_1080P_SIZE = (1480, 790)
+ CAPTURE_1080P_SIZE = (1920, 1080)
+-COMPACT_1080P_FIT_SIZE = (1530, 810)
++COMPACT_1080P_FIT_SIZE = (1536, 816)
+ MIN_WORKBENCH_SIZE = (1120, 650)
+ COMPACT_SCREEN_HEIGHT_THRESHOLD = 850
+ COMPACT_SCREEN_WIDTH_THRESHOLD = 1550

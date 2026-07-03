@@ -1,0 +1,23 @@
+diff a/ui/field_workbench_window.py b/ui/field_workbench_window.py	(rejected hunks)
+@@ -228,8 +228,19 @@
+             return target
+         available_width = int(self.screen_profile.get("available_width", 0) or 0)
+         available_height = int(self.screen_profile.get("available_height", 0) or 0)
+-        width = min(target[0], max(MIN_WORKBENCH_SIZE[0], available_width - 12))
+-        height = min(target[1], max(MIN_WORKBENCH_SIZE[1], available_height - 12))
++        if self.compact_mode:
++            # On 15.6-inch 1080P notebooks with 125% Windows scaling,
++            # availableGeometry is typically 1536×816.  The previous
++            # min(target, available - 12) path opened the real app at
++            # about 1524×804 while diagnostics captured 1536×816, hiding
++            # tight right-panel regressions.  Compact mode should use the
++            # full usable desktop area; larger desktops stay on the normal
++            # target size below.
++            width = max(MIN_WORKBENCH_SIZE[0], available_width)
++            height = max(MIN_WORKBENCH_SIZE[1], available_height)
++        else:
++            width = min(target[0], max(MIN_WORKBENCH_SIZE[0], available_width - 12))
++            height = min(target[1], max(MIN_WORKBENCH_SIZE[1], available_height - 12))
+         return int(width), int(height)
+ 
+     def _compact_value(self, normal: int, compact: int) -> int:

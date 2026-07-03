@@ -1,0 +1,36 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""Shared visual constants for the MyGPR field workbench."""
+
+from __future__ import annotations
+
+ACCENT = "#0788A6"
+ACCENT_DARK = "#04728B"
+TEXT = "#102033"
+SUBTEXT = "#607085"
+BORDER = "#DCE4EC"
+CARD_BG = "#FFFFFF"
+PAGE_BG = "#F5F8FB"
+
+DEFAULT_1080P_SIZE = (1480, 790)
+CAPTURE_1080P_SIZE = (1920, 1080)
+COMPACT_1080P_FIT_SIZE = (1536, 816)
+MIN_WORKBENCH_SIZE = (1120, 650)
+COMPACT_SCREEN_HEIGHT_THRESHOLD = 850
+COMPACT_SCREEN_WIDTH_THRESHOLD = 1550
+
+__all__ = [
+    "ACCENT",
+    "ACCENT_DARK",
+    "TEXT",
+    "SUBTEXT",
+    "BORDER",
+    "CARD_BG",
+    "PAGE_BG",
+    "DEFAULT_1080P_SIZE",
+    "CAPTURE_1080P_SIZE",
+    "COMPACT_1080P_FIT_SIZE",
+    "MIN_WORKBENCH_SIZE",
+    "COMPACT_SCREEN_HEIGHT_THRESHOLD",
+    "COMPACT_SCREEN_WIDTH_THRESHOLD",
+]

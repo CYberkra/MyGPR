@@ -1,0 +1,11 @@
+campaign_id: GX-RUN-001_missing_expected_outputs
+output_root: output/gprmax_campaign_missing_expected_outputs
+gprmax_executable: gprMax
+scenes:
+  - scene_id: scene_missing_expected_outputs
+    raw_model: models/raw_with_target.in
+    background_model: models/background_only.in
+    materials: models/materials.txt
+    target_roi: annotations/target_roi.json
+    tags:
+      - invalid_fixture

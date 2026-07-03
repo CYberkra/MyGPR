@@ -1,0 +1,129 @@
+{"category": "developer_wording", "file": "app_qt.py", "line": 2772, "text": "Run the currently selected AutoTune workflow recipe.          The recipe is converted to existing processing methods and executed by         the standard ProcessingWorker path, so it inherits the same history,         metadata, warning, and display handling as manual workflows."}
+{"category": "developer_wording", "file": "app_qt.py", "line": 2935, "text": "Coalesce high-frequency Matplotlib canvas paints.          Mouse move, ROI drag and slider-compare gestures can emit many draw         requests per second.  This helper keeps the UI responsive by merging         requests into a bounded frame rate.  It changes only rendering cadence;         numerica"}
+{"category": "developer_wording", "file": "app_qt.py", "line": 3257, "text": "导入 GPR / CSV 数据文件。          CSV 保持原有 sidecar 同步链路；其它常见 GPR profile 文件走         ``auto_load_data`` 中央格式路由。"}
+{"category": "developer_wording", "file": "app_qt.py", "line": 2512, "text": "autotune.progress_request"}
+{"category": "developer_wording", "file": "app_qt.py", "line": 2540, "text": "autotune.progress_flush_ms"}
+{"category": "developer_wording", "file": "app_qt.py", "line": 2833, "text": "autotune_scoring_record"}
+{"category": "developer_wording", "file": "app_qt.py", "line": 2834, "text": "autotune_recipe_plan"}
+{"category": "developer_wording", "file": "app_qt.py", "line": 2835, "text": "autotune_target_goal"}
+{"category": "developer_wording", "file": "app_qt.py", "line": 2836, "text": "autotune_roi_mode"}
+{"category": "developer_wording", "file": "app_qt.py", "line": 1952, "text": "AutoTune local theme refresh failed: %s"}
+{"category": "developer_wording", "file": "ui/workbench_window.py", "line": 825, "text": "manifest.json"}
+{"category": "developer_wording", "file": "ui/workbench_window.py", "line": 846, "text": "delivery_manifest"}
+{"category": "developer_wording", "file": "ui/workbench_window.py", "line": 852, "text": "evidence"}
+{"category": "developer_wording", "file": "ui/workbench_window.py", "line": 858, "text": "delivery_manifest"}
+{"category": "developer_wording", "file": "ui/workbench_window.py", "line": 844, "text": "delivery_manifest"}
+{"category": "developer_wording", "file": "ui/workbench_window.py", "line": 853, "text": "evidence"}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 72, "text": "manifest.json"}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 73, "text": "evidence_index.json"}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 85, "text": "roi.json"}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 86, "text": "figure_manifest.json"}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 89, "text": "autotune_scoring_v2.json"}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 647, "text": "auto_tune_roi"}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 642, "text": "mygpr.roi.v1"}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 677, "text": "autotune_scoring_record"}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 678, "text": "autotune_recipe_plan"}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 713, "text": "mygpr.figure_manifest.v1"}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 716, "text": "Exported B-scan PNG records the current display state; display-only operations must not be interpreted as processing evidence."}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 817, "text": "autotune_scoring_record"}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 814, "text": "mygpr.autotune_scoring_v2_record.v1"}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 858, "text": "autotune_scoring_record"}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 859, "text": "processing_params are algorithm inputs; display-only settings are stored separately and must not be used as processing evidence."}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 871, "text": "manifest_json"}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 872, "text": "evidence_index_json"}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 885, "text": "figure_manifest_json"}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 888, "text": "autotune_scoring_v2_json"}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 893, "text": "mygpr.evidence_index.v2"}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 920, "text": "autotune_scoring_v2"}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 923, "text": "roi"}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 905, "text": "mygpr.report_manifest.v4"}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 325, "text": "autotune_scoring_record"}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 806, "text": "autotune_scoring_record"}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 809, "text": "autotune_scoring_record"}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 944, "text": "export.report_sidecar_json_ms"}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 946, "text": "export.report_sidecar_text_ms"}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 325, "text": "autotune_scoring_record"}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 677, "text": "autotune_scoring_record"}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 678, "text": "autotune_recipe_plan"}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 677, "text": "autotune_scoring_record"}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 678, "text": "autotune_recipe_plan"}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 807, "text": "autotune_scoring_record"}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 811, "text": "autotune_scoring_record"}
+{"category": "developer_wording", "file": "ui/report_export_controller.py", "line": 811, "text": "autotune_scoring_record"}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 3, "text": "参数推荐页（工程向导版）。  GX-UI-010 light polish pass: - 专门服务 参数推荐，不引入 研究实验室 / 三维查看器。 - 针对 MyGPR 当前右侧工作区宽度重排为“顶部状态 + 标签页”结构。 - 仅做 UI 状态联动，不触发 参数推荐/开发验证/交付记录 执行。 - 保留 旧版 AutoTunePage 兼容层，避免 app_qt 既有信号/状态调用断裂。"}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 52, "text": "UI-local state only; does not execute AutoTune or alter scoring logic."}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 139, "text": "参数推荐页；旧版 AutoTunePage 仅作为兼容层。"}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 197, "text": "set_evidence_export_result"}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 243, "text": "Synchronize the page with the dataset loaded by the main window.          This method is intentionally metadata-only. It does not execute AutoTune,         does not mutate production scoring, and does not write processing records."}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 1018, "text": "Open the read-only research console from the primary AutoTune page."}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 1560, "text": "Receive ROI index bounds from the main B-scan picker.          The main plot works in display-axis units.  ``AutoTuneSyncController``         converts those units to sample/trace indices and calls this method so         the AutoTune runner uses exactly the region the user dragged."}
+{"category": "research_wording", "file": "ui/autotune_tuning_page.py", "line": 1598, "text": "已基于当前 B-scan 响应强度生成自动建议区域；该区域不是目标真值标签"}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 1716, "text": "Run the minimal real backend when data is available.          For the 背景抑制 step, this calls ``core.autotune_background_runner``         on the currently loaded B-scan array. If only metadata is available,         it falls back to the deterministic UI preview rows."}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 1858, "text": "autotune.table_refresh"}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 2593, "text": "Force-refresh local AutoTune styling after an app theme switch."}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 2598, "text": "Refresh AutoTune page theme properties.          All AutoTune-specific QSS now lives in ``ui.theme``. The page only         exposes objectName / dynamic properties, which prevents local QSS from         drifting out of sync with the global light/dark theme."}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 355, "text": "AutoTuneAdvancedPanel"}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 366, "text": "AutoTuneTopControlBar"}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 428, "text": "AutoTuneRecipeCard"}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 443, "text": "AutoTuneRecipeFlow"}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 469, "text": "AutoTuneRecipeDetailTabs"}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 470, "text": "AutoTuneRecipeDetailTabBar"}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 472, "text": "QTabBar#AutoTuneRecipeDetailTabBar::tab {min-width: 34px; max-width: 44px; padding: 6px 4px; margin-right: 1px; font-size: 12px;}QTabBar#AutoTuneRecipeDetailTabBar::tab:selected { font-weight: 800; }"}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 683, "text": "AutoTuneDrawerScroll"}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 693, "text": "AutoTuneHeader"}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 699, "text": "AutoTuneTitle"}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 701, "text": "AutoTuneSubtitle"}
+{"category": "research_wording", "file": "ui/autotune_tuning_page.py", "line": 724, "text": "研究验证"}
+{"category": "research_wording", "file": "ui/autotune_tuning_page.py", "line": 726, "text": "开发/研究模式入口：查看只读研究验证控制台。"}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 1263, "text": "btn_pick_roi"}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 1797, "text": "autotune.generate_preview_ms"}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 1987, "text": "autotune.page_refresh_ms"}
+{"category": "research_wording", "file": "ui/autotune_tuning_page.py", "line": 1014, "text": "研究验证"}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 1646, "text": "btn_pick_roi"}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 1652, "text": "btn_auto_roi"}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 2042, "text": "autotune_scoring_record"}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 2071, "text": "autotune_scoring_record"}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 2246, "text": "autotune.parameter_table_refresh_ms"}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 2262, "text": "autotune.candidate_step_table_refresh_ms"}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 2424, "text": "autotune.ranking_table_refresh_ms"}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 2475, "text": "autotune.trial_table_refresh_ms"}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 2071, "text": "autotune_scoring_record"}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 2407, "text": "autotune.ranking_table_refresh_ms"}
+{"category": "developer_wording", "file": "ui/autotune_tuning_page.py", "line": 2451, "text": "autotune.trial_table_refresh_ms"}
+{"category": "developer_wording", "file": "ui/main_window_autotune_start_mixin.py", "line": 2, "text": "AutoTune worker start helpers for app_qt.GPRGuiQt."}
+{"category": "developer_wording", "file": "ui/main_window_autotune_start_mixin.py", "line": 17, "text": "AutoTune"}
+{"category": "developer_wording", "file": "ui/main_window_autotune_start_mixin.py", "line": 106, "text": "AutoTune"}
+{"category": "developer_wording", "file": "ui/main_window_autotune_start_mixin.py", "line": 203, "text": "AutoTune"}
+{"category": "developer_wording", "file": "ui/autotune_sync_controller.py", "line": 112, "text": "Synchronize current loaded dataset metadata to AutoTuneTuningPage.          Metadata-only binding: this does not run 参数推荐, does not change scoring,         and does not write processing record artifacts."}
+{"category": "research_wording", "file": "ui/autotune_sync_controller.py", "line": 337, "text": "ground_truth"}
+{"category": "developer_wording", "file": "ui/autotune_sync_controller.py", "line": 342, "text": "analysis_roi"}
+{"category": "developer_wording", "file": "ui/autotune_sync_controller.py", "line": 211, "text": "btn_pick_roi"}
+{"category": "developer_wording", "file": "ui/main_window_export_mixin.py", "line": 2, "text": "Report, evidence and diagnostic export helpers for app_qt.GPRGuiQt."}
+{"category": "developer_wording", "file": "ui/main_window_export_mixin.py", "line": 183, "text": "Return a JSON-serializable copy for Evidence sidecars."}
+{"category": "developer_wording", "file": "ui/main_window_export_mixin.py", "line": 434, "text": "sidecar_files"}
+{"category": "developer_wording", "file": "ui/main_window_export_mixin.py", "line": 588, "text": "sidecar_files"}
+{"category": "developer_wording", "file": "ui/main_window_export_mixin.py", "line": 283, "text": "Failed to export AutoTune comparison bundle: %s"}
+{"category": "developer_wording", "file": "ui/main_window_export_mixin.py", "line": 315, "text": "AutoTune推荐标签:"}
+{"category": "developer_wording", "file": "ui/main_window_export_mixin.py", "line": 405, "text": "replay_evidence_"}
+{"category": "developer_wording", "file": "ui/main_window_export_mixin.py", "line": 467, "text": "Failed to export replay evidence bundle: %s"}
+{"category": "developer_wording", "file": "ui/main_window_export_mixin.py", "line": 246, "text": "export.autotune_comparison_bundle_ms"}
+{"category": "developer_wording", "file": "ui/main_window_export_mixin.py", "line": 449, "text": "export.replay_evidence_zip_ms"}
+{"category": "research_wording", "file": "ui/main_window_export_mixin.py", "line": 254, "text": "GPRMAX 正演数据和真实外业数据可复用该导出格式做后续验证。"}
+{"category": "developer_wording", "file": "ui/main_window_export_mixin.py", "line": 453, "text": "replay_evidence_"}
+{"category": "developer_wording", "file": "ui/bscan_interaction_controller.py", "line": 135, "text": "roi"}
+{"category": "developer_wording", "file": "ui/bscan_interaction_controller.py", "line": 169, "text": "roi"}
+{"category": "developer_wording", "file": "ui/bscan_interaction_controller.py", "line": 91, "text": "roi"}
+{"category": "developer_wording", "file": "core/delivery_service.py", "line": 3, "text": "Auditable delivery checks, report, evidence index, and checksum package."}
+{"category": "developer_wording", "file": "core/delivery_service.py", "line": 97, "text": "evidence"}
+{"category": "developer_wording", "file": "core/delivery_service.py", "line": 174, "text": "evidence"}
+{"category": "developer_wording", "file": "core/delivery_service.py", "line": 100, "text": "manifest.json"}
+{"category": "developer_wording", "file": "core/auto_tune.py", "line": 3, "text": "Single-step rule-based auto-tuning for GPR preprocessing methods.  Validated round-2 drop-in version: - keeps the lightweight rule-based / ROI-aware architecture - adds robust budgeting, caching, failure tolerance and stable scoring - preserves GUI result schema while exposing extra execution stats"}
+{"category": "developer_wording", "file": "core/auto_tune.py", "line": 3041, "text": "Slice a 2D array with validated ROI/context bounds."}
+{"category": "research_wording", "file": "core/app_errors.py", "line": 1, "text": "Structured error taxonomy for MyGPR.  The classes in this module are intentionally GUI-free.  They let GUI, CLI, Evidence export, AutoTune and gprMax helpers report failures with stable error codes and audit-friendly metadata while still behaving like normal exceptions."}
+{"category": "developer_wording", "file": "core/app_errors.py", "line": 1, "text": "Structured error taxonomy for MyGPR.  The classes in this module are intentionally GUI-free.  They let GUI, CLI, Evidence export, AutoTune and gprMax helpers report failures with stable error codes and audit-friendly metadata while still behaving like normal exceptions."}
+{"category": "developer_wording", "file": "core/app_errors.py", "line": 106, "text": "MYGPR_EVIDENCE_EXPORT_ERROR"}
+{"category": "developer_wording", "file": "core/app_errors.py", "line": 107, "text": "evidence_export"}
+{"category": "research_wording", "file": "core/app_errors.py", "line": 112, "text": "MYGPR_GPRMAX_CONVERSION_ERROR"}
+{"category": "research_wording", "file": "core/app_errors.py", "line": 113, "text": "gprmax_conversion"}
+{"category": "developer_wording", "file": "core/app_errors.py", "line": 118, "text": "MYGPR_AUTOTUNE_SCORING_ERROR"}
+{"category": "developer_wording", "file": "core/app_errors.py", "line": 119, "text": "autotune_scoring"}
