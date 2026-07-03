@@ -117,11 +117,11 @@ def layout_metrics_for(widget: QWidget) -> FieldLayoutMetrics:
     processing_bottom_h = _clamp(content_h * 0.16, 120 if compact else 135, 145 if compact else 160)
     processing_params_w = _clamp(content_w * 0.185, 264 if compact else 278, 285 if compact else 320)
 
-    target_bscan_h = _clamp(content_h * 0.50, 350 if compact else 390, 410 if compact else 500)
-    target_table_h = _clamp(content_h * 0.16, 100, 120 if compact else 155)
+    target_bscan_h = _clamp(content_h * 0.52, 370 if compact else 410, 430 if compact else 520)
+    target_table_h = _clamp(content_h * 0.14, 90, 105 if compact else 135)
 
     spatial_map_h = _clamp(content_h * 0.56, 360 if compact else 400, 470 if compact else 540)
-    spatial_table_h = _clamp(content_h * 0.18, 110, 150 if compact else 185)
+    spatial_table_h = _clamp(content_h * 0.16, 100, 130 if compact else 165)
 
     delivery_side_h = _clamp(content_h * 0.28, 180 if compact else 200, 220 if compact else 270)
 
@@ -133,13 +133,13 @@ def layout_metrics_for(widget: QWidget) -> FieldLayoutMetrics:
         compact=compact,
         spacing=spacing,
         project_table_min_h=_clamp(content_h * 0.22, 135, 185 if compact else 215),
-        project_bottom_max_h=_clamp(content_h * 0.16, 115, 135 if compact else 155),
+        project_bottom_max_h=_clamp(content_h * 0.14, 105, 125 if compact else 145),
         project_ops_min_w=_clamp(content_w * 0.20, 245, 300 if compact else 340),
         project_ops_max_w=_clamp(content_w * 0.24, 300, 340 if compact else 390),
-        project_summary_map_h=_clamp(content_h * 0.13, 80, 105 if compact else 125),
+        project_summary_map_h=_clamp(content_h * 0.12, 80, 110 if compact else 130),
         project_summary_map_w=_clamp(content_w * 0.075, 88, 116 if compact else 132),
-        project_preview_bscan_h=_clamp(content_h * 0.11, 72, 92 if compact else 115),
-        project_preview_map_h=_clamp(content_h * 0.065, 44, 55 if compact else 72),
+        project_preview_bscan_h=_clamp(content_h * 0.10, 65, 82 if compact else 105),
+        project_preview_map_h=_clamp(content_h * 0.055, 38, 48 if compact else 62),
         processing_bscan_h=processing_bscan_h,
         processing_bottom_max_h=processing_bottom_h,
         processing_params_w=processing_params_w,
@@ -151,19 +151,19 @@ def layout_metrics_for(widget: QWidget) -> FieldLayoutMetrics:
         target_info_w=_clamp(content_w * 0.15, 200 if compact else 220, 225 if compact else 255),
         target_preview_h=_clamp(content_h * 0.065, 44, 55 if compact else 72),
         spatial_map_h=spatial_map_h,
-        spatial_profile_h=_clamp(content_h * 0.12, 85 if compact else 100, 115 if compact else 140),
+        spatial_profile_h=_clamp(content_h * 0.22, 140 if compact else 160, 190 if compact else 240),
         spatial_dem_h=_clamp(content_h * 0.08, 60 if compact else 70, 80 if compact else 90),
         spatial_correlation_h=_clamp(content_h * 0.12, 80, 105 if compact else 130),
-        spatial_info_max_h=_clamp(content_h * 0.14, 90, 120 if compact else 150),
+        spatial_info_max_h=_clamp(content_h * 0.12, 80, 105 if compact else 130),
         spatial_table_max_h=spatial_table_h,
         spatial_side_w=_clamp(content_w * 0.28, 345 if compact else 390, 410 if compact else 470),
         delivery_cover_w=_clamp(content_w * 0.22, 280 if compact else 310, 330 if compact else 400),
-        delivery_cover_min_h=_clamp(content_h * 0.38, 270 if compact else 310, 340 if compact else 430),
-        delivery_report_thumb_h=_clamp(content_h * 0.10, 64, 82 if compact else 105),
-        delivery_toc_min_h=_clamp(content_h * 0.38, 270 if compact else 310, 340 if compact else 430),
+        delivery_cover_min_h=_clamp(content_h * 0.33, 240 if compact else 280, 300 if compact else 390),
+        delivery_report_thumb_h=_clamp(content_h * 0.08, 55, 70 if compact else 90),
+        delivery_toc_min_h=_clamp(content_h * 0.33, 240 if compact else 280, 300 if compact else 390),
         delivery_side_min_w=_clamp(content_w * 0.20, 250, 300 if compact else 340),
         delivery_side_max_h=delivery_side_h,
-        delivery_files_max_h=_clamp(content_h * 0.14, 90, 115 if compact else 145),
+        delivery_files_max_h=_clamp(content_h * 0.12, 80, 100 if compact else 130),
     )
 
 

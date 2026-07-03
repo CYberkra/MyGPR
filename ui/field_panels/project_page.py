@@ -618,6 +618,7 @@ class ProjectPageMixin:
         status_label = QLabel(f"项目概况：{status_text}")
         status_label.setObjectName("activityDesc")
         status_label.setWordWrap(False)
+        status_label.setMaximumHeight(16)
         v.addWidget(status_label)
 
         mid = QHBoxLayout()
@@ -632,13 +633,13 @@ class ProjectPageMixin:
         )
         import_panel.setProperty("layoutKey", "projectOpsSidePanel")
         mid.addWidget(import_panel, 0)
-        v.addLayout(mid, 6)
+        v.addLayout(mid, 4)
 
         bottom = QHBoxLayout()
         bottom.setSpacing(lm.spacing)
         bottom.addWidget(self._task_tabs_card(), 7)
         bottom.addWidget(self._quick_preview_card(), 3)
-        v.addLayout(bottom, 2)
+        v.addLayout(bottom, 1)
         return widget
 
     def _project_summary_card(self) -> Card:
@@ -689,7 +690,7 @@ class ProjectPageMixin:
             row.addWidget(value_label, 1)
             card.layout.addLayout(row)
 
-        map_preview = PlotCard(None, height=max(60, min(lm.project_summary_map_h, 105)))
+        map_preview = PlotCard(None, height=max(50, min(lm.project_summary_map_h, 95)))
         map_preview.setProperty("layoutKey", "projectSummaryMapCard")
         map_preview.canvas.setObjectName("projectSummaryMapCanvas")
         map_preview.layout.setContentsMargins(0, 0, 0, 0)
@@ -742,7 +743,7 @@ class ProjectPageMixin:
             return card
 
         headers = ["测线", "源文件", "长度", "质量", "定位", "处理", "时间"] if getattr(self, "compact_mode", True) else ["测线名称", "源文件", "长度 (m)", "数据质量", "定位状态", "处理状态", "最近更新时间", "操作"]
-        row_count = max(len(self.line_records), 2) if len(self.line_records) <= 3 else max(len(self.line_records), 5)
+        row_count = max(len(self.line_records), 2) if len(self.line_records) <= 3 else max(len(self.line_records), 4)
         table = self._table(headers, row_count)
         table.setMinimumHeight(lm.project_table_min_h)
         table.setObjectName("projectLineTable")
@@ -860,7 +861,7 @@ class ProjectPageMixin:
         card.setProperty("layoutKey", "projectImportQcCard")
         card.setMinimumWidth(lm.project_ops_min_w)
         card.setMaximumWidth(lm.project_ops_max_w)
-        card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
 
         section_import = QLabel("数据导入")
         section_import.setObjectName("cardTitle")
@@ -897,7 +898,7 @@ class ProjectPageMixin:
         card = Card(title="任务与日志")
         card.setProperty("layoutKey", "projectTaskTabsCard")
         bottom_h = layout_metrics_for(self).project_bottom_max_h
-        card.setMinimumHeight(bottom_h)
+        card.setMinimumHeight(bottom_h - 25)
         tabs = QTabWidget()
         tabs.setObjectName("innerTabs")
         self.project_task_tabs = tabs
@@ -940,7 +941,7 @@ class ProjectPageMixin:
             empty_icon = QLabel("📊")
             empty_icon.setObjectName("sectionTitle")
             empty_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            empty_icon.setFixedHeight(28)
+            empty_icon.setFixedHeight(22)
             card.layout.addWidget(empty_icon)
             hint = QLabel("暂无预览数据")
             hint.setObjectName("sectionTitle")

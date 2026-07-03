@@ -125,7 +125,7 @@ class SpatialPageMixin:
 
         profile_card = PlotCard(
             "高程剖面与地形",
-            height=lm.spatial_profile_h + lm.spatial_dem_h,
+            height=lm.spatial_profile_h,
             expand_title="高程剖面与地形放大查看",
             expand_callback=self._draw_current_elevation_profile,
             expand_parent=self,
@@ -137,17 +137,18 @@ class SpatialPageMixin:
         right.addWidget(profile_card)
 
         info_panel = self._spatial_info_panel()
-        info_panel.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
-        right.addWidget(info_panel, 1)
+        right.addWidget(info_panel)
 
         right_widget = QWidget()
         right_widget.setLayout(right)
+        side_panel_height = lm.spatial_profile_h + lm.spatial_info_max_h + lm.spacing * 3
         side_panel = CollapsibleSidePanel(
             title="空间辅助",
             content=right_widget,
             expanded_width=lm.spatial_side_w,
             collapsed_width=34,
         )
+        side_panel.setMaximumHeight(side_panel_height)
         side_panel.setProperty("layoutKey", "spatialAuxSidePanel")
         main.addWidget(side_panel, 0, Qt.AlignmentFlag.AlignTop)
         v.addLayout(main, 1)
@@ -395,6 +396,9 @@ class SpatialPageMixin:
             return
         fig = canvas.figure
         fig.clear()
+        # Resize figure to exactly match the canvas so subplots don't overlap.
+        w_in, h_in = canvas.width() / fig.dpi, canvas.height() / fig.dpi
+        fig.set_size_inches(max(w_in, 2.5), max(h_in, 1.2))
         d = self.trajectory_model.distance
         z = self.trajectory_model.z
         # --- Top subplot: elevation profile line ---

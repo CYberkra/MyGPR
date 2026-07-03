@@ -606,7 +606,7 @@ class ProcessingPageMixin:
         actions_group = QFrame()
         actions_group.setObjectName("paramGroup")
         actions_group.setProperty("layoutKey", "processingContinuousCard")
-        actions_group.setFixedHeight(155)
+        actions_group.setFixedHeight(140)
         actions_layout = QVBoxLayout(actions_group)
         actions_layout.setContentsMargins(4, 4, 4, 4)
         actions_layout.setSpacing(4)
