@@ -712,7 +712,7 @@ class ProjectPageMixin:
         lm = layout_metrics_for(self)
         bar = QHBoxLayout()
         bar.addStretch(1)
-        for text in ["＋ 新建测线", "🗑 删除测线", "⇩ 导出清单", "↻ 刷新"]:
+        for text in ["＋ 新建", "🗑 删除", "⇩ 导出", "↻ 刷新"]:
             btn = QPushButton(text)
             btn.setObjectName("smallButton")
             if "刷新" in text:
@@ -774,11 +774,11 @@ class ProjectPageMixin:
         line = self._selected_line_record()
         frame = QFrame()
         frame.setObjectName("lineDetailPanel")
-        frame.setMinimumHeight(42 if lm.compact else 50)
-        frame.setMaximumHeight(50 if lm.compact else 58)
+        frame.setMinimumHeight(36 if lm.compact else 42)
+        frame.setMaximumHeight(42 if lm.compact else 50)
         row = QHBoxLayout(frame)
-        row.setContentsMargins(8, 6, 8, 6)
-        row.setSpacing(10)
+        row.setContentsMargins(6, 4, 6, 4)
+        row.setSpacing(8)
 
         title_col = QVBoxLayout()
         title_col.setSpacing(2)
@@ -872,12 +872,12 @@ class ProjectPageMixin:
             ("≋", "导入RTK/IMU", self._action_import_trajectory_dialog),
         ]:
             btn = self._make_action_tile(icon, label, callback)
-            btn.setMinimumHeight(32)
+            btn.setMinimumHeight(28)
             card.layout.addWidget(btn)
 
         section_maint = QLabel("项目维护")
         section_maint.setObjectName("cardTitle")
-        card.layout.addSpacing(2)
+        card.layout.addSpacing(1)
         sep = QFrame()
         sep.setObjectName("separatorLine")
         sep.setFrameShape(QFrame.Shape.HLine)
@@ -890,7 +890,7 @@ class ProjectPageMixin:
             self._make_action_tile("◎", "数据运维", self._action_open_data_ops_center),
             self._make_more_operations_button(),
         ]:
-            widget.setMinimumHeight(32)
+            widget.setMinimumHeight(28)
             card.layout.addWidget(widget)
         return card
 
@@ -898,7 +898,7 @@ class ProjectPageMixin:
         card = Card(title="任务与日志")
         card.setProperty("layoutKey", "projectTaskTabsCard")
         bottom_h = layout_metrics_for(self).project_bottom_max_h
-        card.setMinimumHeight(bottom_h - 25)
+        card.setMinimumHeight(bottom_h - 20)
         tabs = QTabWidget()
         tabs.setObjectName("innerTabs")
         self.project_task_tabs = tabs

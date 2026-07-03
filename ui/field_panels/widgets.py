@@ -53,7 +53,7 @@ class Card(QFrame):
         self.setObjectName(object_name)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(4, 3, 4, 3)
+        self.layout.setContentsMargins(4, 2, 4, 2)
         self.layout.setSpacing(2)
         self.title_bar: QWidget | None = None
         self.title_row: QHBoxLayout | None = None
@@ -64,7 +64,7 @@ class Card(QFrame):
         title_bar = QWidget()
         title_bar.setObjectName("cardTitleBar")
         title_bar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        title_bar.setFixedHeight(13)
+        title_bar.setFixedHeight(11)
         row = QHBoxLayout(title_bar)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(4)
@@ -95,7 +95,7 @@ class Card(QFrame):
 class MetricCard(Card):
     def __init__(self, icon: str, title: str, value: str, suffix: str = "", note: str = "") -> None:
         super().__init__(object_name="metricCard")
-        self.setFixedHeight(42)
+        self.setFixedHeight(38)
         row = QHBoxLayout()
         row.setSpacing(6)
         icon_box = QLabel(icon)
@@ -201,18 +201,15 @@ class PlotCard(Card):
         # height.  This is critical for 15.6-inch 1080P laptops with the
         # Windows taskbar visible.  Larger plot cards can still request a
         # larger explicit height via the constructor.
-        target_height = max(48, int(height))
         self.canvas.setMinimumHeight(target_height)
-        self.canvas.setMaximumHeight(target_height)
-        frame_height = target_height + (24 if title else 10)
+        frame_height = target_height + (16 if title else 8)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         # The parent PlotCard must never be compressed below its fixed-height
         # canvas.  Without an explicit minimum height, compact bottom rows can
         # report a card geometry smaller than its canvas, causing small map
         # previews to be clipped on Windows 1080P/125% displays.
         self.setMinimumHeight(frame_height)
-        self.setMaximumHeight(frame_height)
-        self.canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         if expand_callback is not None:
             btn = QPushButton("⛶")
             btn.setObjectName("smallButton")

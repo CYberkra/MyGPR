@@ -64,7 +64,7 @@ class SpatialPageMixin:
         # --- Toolbar ---
         toolbar = QHBoxLayout()
         toolbar.setSpacing(lm.spacing)
-        refresh_btn = QPushButton("↻ 刷新空间成果")
+        refresh_btn = QPushButton("↻ 刷新")
         refresh_btn.setObjectName("primaryButton")
         refresh_btn.clicked.connect(self._action_refresh_spatial_results)
         toolbar.addWidget(refresh_btn)
@@ -74,7 +74,7 @@ class SpatialPageMixin:
         export_btn.clicked.connect(self._action_export_spatial_coordinates)
         toolbar.addWidget(export_btn)
 
-        more_btn = QPushButton("⋯ 更多")
+        more_btn = QPushButton("⋯")
         more_btn.setObjectName("smallButton")
         more_menu = QMenu(more_btn)
         more_menu.addAction("⛶ 三维视图", self._action_open_3d_view)
@@ -83,7 +83,7 @@ class SpatialPageMixin:
         toolbar.addWidget(more_btn)
 
         toolbar.addStretch(1)
-        layer_btn = QPushButton("◎ 图层控制")
+        layer_btn = QPushButton("◎ 图层")
         layer_btn.setObjectName("smallButton")
         layer_btn.setMenu(self._make_spatial_layer_menu(layer_btn))
         toolbar.addWidget(layer_btn)
@@ -108,18 +108,18 @@ class SpatialPageMixin:
         map_card.setProperty("layoutKey", "spatialMapCard")
         map_card.canvas.setObjectName("spatialMapCanvas")
         map_card.canvas.setProperty("previewAutoAspect", True)
-        map_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        map_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         map_card.layout.setContentsMargins(0, 0, 0, 0)
         self.spatial_map_canvas = map_card.canvas
         self._draw_project_spatial_map(map_card.canvas)
-        left.addWidget(map_card, 0)
+        left.addWidget(map_card, 1)
 
         summary = self._spatial_summary_table()
         summary.setMaximumHeight(lm.spatial_table_max_h)
-        left.addWidget(summary, 1)
-        main.addLayout(left, 6)
+        left.addWidget(summary, 0)
+        main.addLayout(left, 7)
 
-        # Right column: elevation and info
+        # Right column: elevation and info — secondary analysis band
         right = QVBoxLayout()
         right.setSpacing(lm.spacing)
         right.setContentsMargins(0, 0, 0, 0)
@@ -129,10 +129,10 @@ class SpatialPageMixin:
         from matplotlib.figure import Figure as _Figure
         elevation_container = QWidget()
         elevation_layout = QVBoxLayout(elevation_container)
-        elevation_layout.setContentsMargins(4, 3, 4, 3)
-        elevation_layout.setSpacing(2)
+        elevation_layout.setContentsMargins(3, 2, 3, 2)
+        elevation_layout.setSpacing(1)
         # Title
-        _elev_title = QLabel("高程剖面与地形")
+        _elev_title = QLabel("高程剖面")
         _elev_title.setObjectName("cardTitle")
         elevation_layout.addWidget(_elev_title)
         # Canvas — expanding to fill all available space
@@ -157,12 +157,10 @@ class SpatialPageMixin:
             title="空间辅助",
             content=right_widget,
             expanded_width=lm.spatial_side_w,
-            collapsed_width=34,
+            collapsed_width=30,
         )
         side_panel.setProperty("layoutKey", "spatialAuxSidePanel")
-        main.addStretch(0)
         main.addWidget(side_panel, 1)
-        main.addStretch(0)
         v.addLayout(main, 1)
 
         # Redraw elevation profile after layout settles so the figure matches the

@@ -1356,17 +1356,17 @@ class FieldWorkbenchWindow(HomePageMixin, FieldTableMixin, FieldPreviewMixin, Pr
             QScrollArea {{ border: 0; }}
             QScrollBar:vertical {{ width: 10px; background: #EEF3F7; }}
             QScrollBar::handle:vertical {{ background: #C8D5E1; border-radius: 4px; }}
-            QFrame#card, QFrame#metricCard, QFrame#sideCard {{ background: {CARD_BG}; border: 1px solid {BORDER}; border-radius: 4px; }}
+            QFrame#card, QFrame#metricCard, QFrame#sideCard {{ background: {CARD_BG}; border: 1px solid {BORDER}; border-radius: 3px; }}
             QWidget#cardTitleBar {{ background: transparent; border: 0; }}
-            QLabel#cardTitle, QLabel#sideTitle {{ font-size: 12px; font-weight: 800; color: #14253A; }}
-            QLabel#pageTitle {{ font-size: 18px; font-weight: 900; color: #102033; }}
+            QLabel#cardTitle, QLabel#sideTitle {{ font-size: 11px; font-weight: 700; color: #1A2D42; }}
+            QLabel#pageTitle {{ font-size: 16px; font-weight: 800; color: #102033; }}
             QLabel#pageSubtitle {{ color: #53687A; font-weight: 500; }}
-            QLabel#metricIcon {{ background: #EAF6FF; border-radius: 8px; color: #1775FF; font-size: 18px; font-weight: 800; }}
-            QLabel#metricTitle {{ color: #53687A; font-weight: 700; }}
-            QLabel#metricValue {{ font-size: 17px; font-weight: 900; color: #101827; }}
-            QLabel#metricSuffix {{ color: #102033; padding-top: 5px; }}
-            QLabel#metricNote {{ color: #53687A; font-size: 11px; }}
-            QFrame#metricCard {{ min-height: 54px; }}
+            QLabel#metricIcon {{ background: #EAF6FF; border-radius: 7px; color: #1775FF; font-size: 16px; font-weight: 800; }}
+            QLabel#metricTitle {{ color: #53687A; font-weight: 600; font-size: 10px; }}
+            QLabel#metricValue {{ font-size: 15px; font-weight: 900; color: #101827; }}
+            QLabel#metricSuffix {{ color: #102033; padding-top: 4px; }}
+            QLabel#metricNote {{ color: #53687A; font-size: 10px; }}
+            QFrame#metricCard {{ min-height: 46px; }}
             QFrame#sideCard {{ background: #FFFFFF; }}
             QTreeWidget#projectTree {{ background: transparent; border: 0; outline: 0; color: #1C2B3A; }}
             QTreeWidget#projectTree::item {{ height: 22px; border-radius: 6px; padding: 1px 5px; }}
@@ -1375,24 +1375,24 @@ class FieldWorkbenchWindow(HomePageMixin, FieldTableMixin, FieldPreviewMixin, Pr
             QFrame#storageBar {{ background: #D8E0E8; border-radius: 4px; }}
             QFrame#storageBarInner {{ background: {ACCENT}; border-radius: 4px; }}
             QLabel#sideUsage {{ color: #53687A; padding-top: 4px; }}
-            QPushButton, QToolButton {{ background: #FFFFFF; border: 1px solid #D4DEE8; border-radius: 7px; padding: 4px 8px; color: #1A2B3E; font-weight: 650; }}
+            QPushButton, QToolButton {{ background: #FFFFFF; border: 1px solid #D4DEE8; border-radius: 5px; padding: 3px 7px; color: #1A2B3E; font-weight: 600; font-size: 11px; }}
             QPushButton:hover, QToolButton:hover {{ border-color: {ACCENT}; color: {ACCENT_DARK}; background: #F4FBFD; }}
-            QPushButton#primaryButton {{ background: {ACCENT}; color: white; border: 1px solid {ACCENT_DARK}; }}
+            QPushButton#primaryButton {{ background: {ACCENT}; color: white; border: 1px solid {ACCENT_DARK}; font-weight: 700; }}
             QPushButton#primaryButton:hover {{ background: {ACCENT_DARK}; color: white; }}
             QPushButton#primaryButton:pressed {{ background: #0B5ED7; color: white; }}
-            QPushButton#smallButton {{ padding: 4px 7px; font-size: 12px; }}
+            QPushButton#smallButton {{ padding: 3px 6px; font-size: 11px; font-weight: 600; }}
             QPushButton#smallButton:hover {{ background-color: #E8EDF2; }}
-            QPushButton#actionTileButton {{ min-height: 44px; padding: 4px 5px; font-size: 12px; }}
-            QTableWidget#dataTable {{ background: white; alternate-background-color: #F8FBFD; border: 1px solid #E1E8EF; border-radius: 7px; gridline-color: transparent; selection-background-color: #DDF4F7; selection-color: #0B4151; color: #243447; outline: 0; }}
-            QTableWidget#dataTable::item {{ padding: 4px 5px; color: #243447; border-bottom: 1px solid #EDF2F6; }}
+            QPushButton#actionTileButton {{ min-height: 36px; padding: 3px 4px; font-size: 11px; }}
+            QTableWidget#dataTable {{ background: white; alternate-background-color: #F8FBFD; border: 1px solid #E1E8EF; border-radius: 4px; gridline-color: transparent; selection-background-color: #DDF4F7; selection-color: #0B4151; color: #243447; outline: 0; }}
+            QTableWidget#dataTable::item {{ padding: 3px 4px; color: #243447; border-bottom: 1px solid #EDF2F6; }}
             QTableWidget#dataTable::item:selected {{ background: #E1F6F8; color: #0B4151; }}
-            QHeaderView::section {{ background: #F7FAFC; color: #506278; font-weight: 800; border: 0; border-bottom: 1px solid #DDE7F0; padding: 5px 5px; }}
+            QHeaderView::section {{ background: #F7FAFC; color: #506278; font-weight: 700; font-size: 11px; border: 0; border-bottom: 1px solid #DDE7F0; padding: 4px 4px; }}
             QTabWidget#innerTabs::pane {{ border: 0; }}
             QTabWidget#innerTabs QTabBar::tab {{ background: transparent; color: #53687A; padding: 6px 16px; border-bottom: 2px solid transparent; font-weight: 700; }}
             QTabWidget#innerTabs QTabBar::tab:selected {{ color: {ACCENT}; border-bottom: 2px solid {ACCENT}; }}
-            QLabel#sectionTitle {{ font-size: 15px; font-weight: 900; color: #14253A; }}
-            QLabel#keyLabel {{ color: #53687A; min-width: 68px; font-weight: 650; }}
-            QLabel#valueLabel {{ color: #17283B; font-weight: 650; }}
+            QLabel#sectionTitle {{ font-size: 13px; font-weight: 800; color: #14253A; }}
+            QLabel#keyLabel {{ color: #53687A; min-width: 68px; font-weight: 600; font-size: 11px; }}
+            QLabel#valueLabel {{ color: #17283B; font-weight: 600; font-size: 11px; }}
             QLabel#detailTitle {{ color: #102033; font-size: 13px; font-weight: 900; }}
             QLabel#detailSubtitle {{ color: #5B6F82; font-size: 11px; font-weight: 600; }}
             QFrame#lineDetailPanel, QFrame#targetHeroPanel, QFrame#reportStatusStrip {{ background: #F7FBFD; border: 1px solid #E2EAF2; border-radius: 4px; }}
@@ -1423,8 +1423,8 @@ class FieldWorkbenchWindow(HomePageMixin, FieldTableMixin, FieldPreviewMixin, Pr
             QFrame#activityTile {{ background: #FBFDFF; border: 1px solid #E4ECF3; border-radius: 4px; }}
             QLabel#activityIcon {{ color: {ACCENT}; font-size: 13px; font-weight: 900; }}
             QLabel#timeLabel {{ color: #6B7D90; font-size: 11px; }}
-            QFrame#paramGroup {{ background: #FBFDFF; border: 1px solid #E0E8EF; border-radius: 4px; padding: 4px; }}
-            QFrame#paramGroup QLabel {{ color: #243447; font-weight: 700; }}
+            QFrame#paramGroup {{ background: #FBFDFF; border: 1px solid #E0E8EF; border-radius: 3px; padding: 3px; }}
+            QFrame#paramGroup QLabel {{ color: #243447; font-weight: 600; font-size: 11px; }}
             QCheckBox {{ font-weight: 800; color: #102033; }}
             QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox {{ background: white; border: 1px solid #D4DEE8; border-radius: 5px; padding: 5px 8px; color: #102033; selection-background-color: #DDF4F7; selection-color: #0B4151; }}
             QSlider::groove:horizontal {{ height: 5px; background: #D7E2EA; border-radius: 2px; }}

@@ -554,7 +554,7 @@ class ProcessingPageMixin:
 
         # --- Algorithm selection section ---
         category_row = QHBoxLayout()
-        category_row.setSpacing(6)
+        category_row.setSpacing(4)
         category_row.addWidget(QLabel(PROCESSING_CATEGORY_LABEL))
         self.processing_category_combo = QComboBox()
         self.processing_category_combo.setMinimumHeight(22)
@@ -568,7 +568,7 @@ class ProcessingPageMixin:
         card.layout.addLayout(category_row)
 
         method_row = QHBoxLayout()
-        method_row.setSpacing(6)
+        method_row.setSpacing(4)
         method_row.addWidget(QLabel(PROCESSING_METHOD_LABEL))
         self.processing_method_combo = QComboBox()
         self.processing_method_combo.setMinimumHeight(22)
@@ -578,7 +578,7 @@ class ProcessingPageMixin:
 
         sep1 = QFrame()
         sep1.setFrameShape(QFrame.Shape.HLine)
-        sep1.setFixedHeight(2)
+        sep1.setFixedHeight(1)
         sep1.setStyleSheet("background-color: #D5DEE7; margin: 2px 0;")
         card.layout.addWidget(sep1)
 
@@ -587,7 +587,7 @@ class ProcessingPageMixin:
         group.setObjectName("paramGroup")
         group.setProperty("layoutKey", "processingParameterGroup")
         group_layout = QVBoxLayout(group)
-        group_layout.setContentsMargins(4, 4, 4, 4)
+        group_layout.setContentsMargins(3, 3, 3, 3)
         group_layout.setSpacing(2)
         title = QLabel(PROCESSING_PARAMS_TITLE)
         title.setObjectName("activityTitle")
@@ -601,19 +601,19 @@ class ProcessingPageMixin:
 
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.Shape.HLine)
-        sep2.setFixedHeight(2)
+        sep2.setFixedHeight(1)
         sep2.setStyleSheet("background-color: #D5DEE7; margin: 2px 0;")
         card.layout.addWidget(sep2)
 
-        # --- Actions section ---
+        # --- Actions section: hierarchical button layout ---
         actions_group = QFrame()
         actions_group.setObjectName("paramGroup")
         actions_group.setProperty("layoutKey", "processingContinuousCard")
-        actions_group.setFixedHeight(140)
         actions_layout = QVBoxLayout(actions_group)
-        actions_layout.setContentsMargins(4, 4, 4, 4)
-        actions_layout.setSpacing(4)
+        actions_layout.setContentsMargins(3, 3, 3, 3)
+        actions_layout.setSpacing(3)
 
+        # Chain status row
         chain_row = QHBoxLayout()
         chain_label = QLabel("处理链")
         chain_label.setObjectName("activityTitle")
@@ -625,29 +625,43 @@ class ProcessingPageMixin:
         chain_row.addWidget(self.processing_chain_status_label)
         actions_layout.addLayout(chain_row)
 
-        recommend_btn = QPushButton("推荐当前参数")
-        recommend_btn.setObjectName("smallButton")
-        recommend_btn.setFixedHeight(20)
-        recommend_btn.setProperty("layoutKey", "processingRecommendParamsButton")
-        recommend_btn.clicked.connect(self._recommend_processing_params)
-        actions_layout.addWidget(recommend_btn)
-
+        # Level 1: Primary action — execute
         self.processing_execute_button = QPushButton("执行当前步骤")
         self.processing_execute_button.setObjectName("primaryButton")
-        self.processing_execute_button.setFixedHeight(26)
+        self.processing_execute_button.setFixedHeight(28)
         self.processing_execute_button.setProperty("layoutKey", "processingExecuteStepButton")
         self.processing_execute_button.clicked.connect(self._apply_processing)
         actions_layout.addWidget(self.processing_execute_button)
 
+        # Level 2: Secondary actions — save
+        self.processing_save_button = QPushButton("保存结果")
+        self.processing_save_button.setObjectName("smallButton")
+        self.processing_save_button.setFixedHeight(24)
+        self.processing_save_button.setProperty("layoutKey", "processingSaveResultButton")
+        self.processing_save_button.clicked.connect(self._save_processing_result)
+        actions_layout.addWidget(self.processing_save_button)
+
+        # Level 3: Tertiary actions — recommend, compare, undo, reset, batch
+        tertiary_row = QHBoxLayout()
+        tertiary_row.setSpacing(3)
+        recommend_btn = QPushButton("推荐参数")
+        recommend_btn.setObjectName("smallButton")
+        recommend_btn.setFixedHeight(22)
+        recommend_btn.setToolTip("根据当前数据自动推荐参数")
+        recommend_btn.setProperty("layoutKey", "processingRecommendParamsButton")
+        recommend_btn.clicked.connect(self._recommend_processing_params)
+        tertiary_row.addWidget(recommend_btn)
+        actions_layout.addLayout(tertiary_row)
+
         undo_reset_row = QHBoxLayout()
-        undo_reset_row.setSpacing(6)
-        self.processing_undo_step_button = QPushButton("撤回一步")
+        undo_reset_row.setSpacing(3)
+        self.processing_undo_step_button = QPushButton("撤回")
         self.processing_undo_step_button.setObjectName("smallButton")
         self.processing_undo_step_button.setFixedHeight(22)
         self.processing_undo_step_button.setProperty("layoutKey", "processingUndoStepButton")
         self.processing_undo_step_button.clicked.connect(self._undo_processing)
         undo_reset_row.addWidget(self.processing_undo_step_button, 1)
-        self.processing_reset_button = QPushButton("重置到原始")
+        self.processing_reset_button = QPushButton("重置")
         self.processing_reset_button.setObjectName("smallButton")
         self.processing_reset_button.setFixedHeight(22)
         self.processing_reset_button.setProperty("layoutKey", "processingResetChainButton")
@@ -663,7 +677,6 @@ class ProcessingPageMixin:
         actions_layout.addWidget(batch_btn)
         self.processing_batch_button = batch_btn
 
-        self.processing_save_button = None
         card.layout.addWidget(actions_group)
         card.layout.addStretch(1)
 
@@ -820,43 +833,44 @@ class ProcessingPageMixin:
 
     def _processing_messages_card(self) -> Card:
         lm = layout_metrics_for(self)
-        card = Card(title="处理日志")
-        card.setProperty("layoutKey", "processingMessagesCard")
+        card = Card(title=”处理日志”)
+        card.setProperty(“layoutKey”, “processingMessagesCard”)
         card.setMinimumHeight(lm.processing_bottom_max_h)
         card.setMaximumHeight(lm.processing_bottom_max_h)
         tabs = QTabWidget()
-        tabs.setObjectName("innerTabs")
+        tabs.setObjectName(“innerTabs”)
 
         history = QWidget()
         vh = QVBoxLayout(history)
         vh.setContentsMargins(0, 0, 0, 0)
-        vh.setSpacing(2)
-        self.processing_history_table = self._table(["步次", "算法 / 参数", "状态", "时间", "操作"], 0)
+        vh.setSpacing(1)
+        self.processing_history_table = self._table([“步次”, “算法 / 参数”, “状态”, “时间”, “操作”], 0)
         vh.addWidget(self.processing_history_table, 1)
-        self.processing_history_hint_label = QLabel("尚未执行连续处理步骤。点击“执行当前步骤”后，会按当前算法继续叠加处理。")
-        self.processing_history_hint_label.setObjectName("activityDesc")
+        self.processing_history_hint_label = QLabel(“尚未执行连续处理步骤。点击”执行当前步骤”后，会按当前算法继续叠加处理。”)
+        self.processing_history_hint_label.setObjectName(“activityDesc”)
         self.processing_history_hint_label.setWordWrap(False)
-        self.processing_history_hint_label.setMaximumHeight(18)
+        self.processing_history_hint_label.setMaximumHeight(16)
         vh.addWidget(self.processing_history_hint_label)
-        tabs.addTab(history, "处理历史")
+        tabs.addTab(history, “处理历史”)
 
         warn = QWidget()
         v = QVBoxLayout(warn)
+        v.setSpacing(1)
         for icon, text, time in [
-            ("⚠", "L03   辅助定位文件缺少高密度数据", "10:15:32"),
-            ("✓", "L01   处理结果已保存", "10:12:08"),
-            ("ℹ", "L02   建议检查里程连续性（存在 1 处里程跳变）", "10:10:45"),
+            (“⚠”, “L03   辅助定位文件缺少高密度数据”, “10:15:32”),
+            (“✓”, “L01   处理结果已保存”, “10:12:08”),
+            (“ℹ”, “L02   建议检查里程连续性（存在 1 处里程跳变）”, “10:10:45”),
         ]:
             row = QHBoxLayout()
             row.addWidget(QLabel(icon))
             row.addWidget(QLabel(text), 1)
             row.addWidget(QLabel(time))
             v.addLayout(row)
-        self.processing_log_label = QLabel("ℹ  连续处理模式：每执行一次，左侧项目树自动新增一个 Step；撤回会同步移除最后一步。")
-        self.processing_log_label.setObjectName("activityDesc")
+        self.processing_log_label = QLabel(“ℹ  连续处理模式：每执行一次，左侧项目树自动新增一个 Step；撤回会同步移除最后一步。”)
+        self.processing_log_label.setObjectName(“activityDesc”)
         self.processing_log_label.setWordWrap(True)
         v.addWidget(self.processing_log_label)
-        tabs.addTab(warn, "日志")
+        tabs.addTab(warn, “日志”)
         card.layout.addWidget(tabs)
         return card
 
