@@ -53,8 +53,8 @@ class Card(QFrame):
         self.setObjectName(object_name)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(7, 5, 7, 5)
-        self.layout.setSpacing(4)
+        self.layout.setContentsMargins(5, 4, 5, 4)
+        self.layout.setSpacing(3)
         self.title_bar: QWidget | None = None
         self.title_row: QHBoxLayout | None = None
         if title:
@@ -64,10 +64,10 @@ class Card(QFrame):
         title_bar = QWidget()
         title_bar.setObjectName("cardTitleBar")
         title_bar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        title_bar.setFixedHeight(17)
+        title_bar.setFixedHeight(15)
         row = QHBoxLayout(title_bar)
         row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(6)
+        row.setSpacing(4)
         label = QLabel(title)
         label.setObjectName("cardTitle")
         label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
@@ -87,7 +87,7 @@ class Card(QFrame):
         if self.title_row is None:
             self._create_title_bar("")
         assert self.title_row is not None
-        button.setFixedHeight(17)
+        button.setFixedHeight(15)
         button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.title_row.addWidget(button, 0, Qt.AlignmentFlag.AlignVCenter)
 
@@ -95,13 +95,13 @@ class Card(QFrame):
 class MetricCard(Card):
     def __init__(self, icon: str, title: str, value: str, suffix: str = "", note: str = "") -> None:
         super().__init__(object_name="metricCard")
-        self.setFixedHeight(52)
+        self.setFixedHeight(46)
         row = QHBoxLayout()
         row.setSpacing(6)
         icon_box = QLabel(icon)
         icon_box.setObjectName("metricIcon")
         icon_box.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_box.setFixedSize(28, 28)
+        icon_box.setFixedSize(24, 24)
         row.addWidget(icon_box)
         col = QVBoxLayout()
         col.setSpacing(1)
@@ -203,7 +203,7 @@ class PlotCard(Card):
         # larger explicit height via the constructor.
         self.canvas.setMinimumHeight(target_height)
         self.canvas.setMaximumHeight(target_height)
-        frame_height = target_height + (34 if title else 16)
+        frame_height = target_height + (28 if title else 12)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         # The parent PlotCard must never be compressed below its fixed-height
         # canvas.  Without an explicit minimum height, compact bottom rows can
@@ -259,7 +259,7 @@ class CollapsibleSidePanel(QWidget):
         self.toggle_button.clicked.connect(self.toggle)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
+        layout.setSpacing(3)
         layout.addWidget(self.toggle_button)
         layout.addWidget(content, 1)
         self._apply_state()

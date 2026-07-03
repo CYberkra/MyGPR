@@ -57,7 +57,7 @@ class SpatialPageMixin:
         ctx_line = selected.get("name", "") or selected.get("id", "--")
         session = getattr(self, "processing_session", None)
         step_text = f"Step {session.current_step_index:02d}" if session and session.step_count else "原始"
-        status_strip = QLabel(f"当前测线：{ctx_line}　｜　处理：{step_text}")
+        status_strip = QLabel(f"当前测线：{ctx_line} | 处理：{step_text}")
         status_strip.setObjectName("statusStrip")
         v.addWidget(status_strip)
 
@@ -295,7 +295,7 @@ class SpatialPageMixin:
         card.layout.addWidget(lbl)
 
         # Separator
-        sep = QLabel("─" * 40)
+        sep = QLabel("─" * 30)
         sep.setObjectName("activityDesc")
         card.layout.addWidget(sep)
 
@@ -305,7 +305,6 @@ class SpatialPageMixin:
         lbl.setWordWrap(True)
         card.layout.addWidget(lbl)
 
-        card.layout.addStretch(1)
         return card
 
     def _spatial_layer_summary(self) -> str:

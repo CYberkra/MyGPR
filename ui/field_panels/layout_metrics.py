@@ -110,30 +110,20 @@ def layout_metrics_for(widget: QWidget) -> FieldLayoutMetrics:
     content_h = max(560, height - header_h - outer_margin - height_safety)
 
     # Page-specific primary visual heights.  These values intentionally use
-    # ratios plus clamps; they scale across 1366/1536/1920 logical widths while
-    # preserving minimum usable plot sizes on 1080P laptops.
-    processing_bscan_h = _clamp(content_h * 0.56, 360 if compact else 390, 430 if compact else 500)
-    # The processing history table must show at least the original row plus
-    # two recent steps on 1080P/125% screens; otherwise the new project-tree
-    # workflow feels hidden even though the data is present.  Keep it below
-    # the 22% layout diagnostic cap while giving the log/history rows enough
-    # breathing room.
-    processing_bottom_h = _clamp(content_h * 0.20, 154 if compact else 168, 170 if compact else 190)
-    # The manual-processing chain introduced in v0.9.22 needs a slightly wider
-    # side panel than the old single-method parameter strip.  Keep it bounded so
-    # the two B-scan panels remain dominant, but do not squeeze spin boxes and
-    # action buttons below their usable width on 1080P/125% Windows captures.
-    # v0.9.24: 264 min in compact mode with full-screen window (1530x810).
-    # Button spacing handled in processing_page.py setSpacing(10).
+    # tighter ratios plus clamps; they scale across 1366/1536/1920 logical
+    # widths while preserving usable plot sizes on 1080P laptops.
+    processing_bscan_h = _clamp(content_h * 0.60, 380 if compact else 420, 460 if compact else 540)
+    # Tighter bottom panel: keep history visible but minimize dead space.
+    processing_bottom_h = _clamp(content_h * 0.16, 120 if compact else 135, 145 if compact else 160)
     processing_params_w = _clamp(content_w * 0.185, 264 if compact else 278, 285 if compact else 320)
 
-    target_bscan_h = _clamp(content_h * 0.46, 320 if compact else 360, 370 if compact else 450)
-    target_table_h = _clamp(content_h * 0.18, 112, 140 if compact else 180)
+    target_bscan_h = _clamp(content_h * 0.50, 350 if compact else 390, 410 if compact else 500)
+    target_table_h = _clamp(content_h * 0.16, 100, 120 if compact else 155)
 
-    spatial_map_h = _clamp(content_h * 0.52, 330 if compact else 370, 430 if compact else 500)
-    spatial_table_h = _clamp(content_h * 0.22, 135, 185 if compact else 220)
+    spatial_map_h = _clamp(content_h * 0.56, 360 if compact else 400, 470 if compact else 540)
+    spatial_table_h = _clamp(content_h * 0.18, 110, 150 if compact else 185)
 
-    delivery_side_h = _clamp(content_h * 0.32, 200 if compact else 220, 250 if compact else 300)
+    delivery_side_h = _clamp(content_h * 0.28, 180 if compact else 200, 220 if compact else 270)
 
     return FieldLayoutMetrics(
         window_width=width,
@@ -142,14 +132,14 @@ def layout_metrics_for(widget: QWidget) -> FieldLayoutMetrics:
         content_height=content_h,
         compact=compact,
         spacing=spacing,
-        project_table_min_h=_clamp(content_h * 0.26, 155, 210 if compact else 245),
-        project_bottom_max_h=_clamp(content_h * 0.19, 140, 160 if compact else 185),
+        project_table_min_h=_clamp(content_h * 0.22, 135, 185 if compact else 215),
+        project_bottom_max_h=_clamp(content_h * 0.16, 115, 135 if compact else 155),
         project_ops_min_w=_clamp(content_w * 0.20, 245, 300 if compact else 340),
         project_ops_max_w=_clamp(content_w * 0.24, 300, 340 if compact else 390),
-        project_summary_map_h=_clamp(content_h * 0.16, 96, 126 if compact else 145),
+        project_summary_map_h=_clamp(content_h * 0.13, 80, 105 if compact else 125),
         project_summary_map_w=_clamp(content_w * 0.075, 88, 116 if compact else 132),
-        project_preview_bscan_h=_clamp(content_h * 0.13, 84, 110 if compact else 135),
-        project_preview_map_h=_clamp(content_h * 0.075, 50, 62 if compact else 82),
+        project_preview_bscan_h=_clamp(content_h * 0.11, 72, 92 if compact else 115),
+        project_preview_map_h=_clamp(content_h * 0.065, 44, 55 if compact else 72),
         processing_bscan_h=processing_bscan_h,
         processing_bottom_max_h=processing_bottom_h,
         processing_params_w=processing_params_w,
@@ -158,22 +148,22 @@ def layout_metrics_for(widget: QWidget) -> FieldLayoutMetrics:
         processing_param_label_w=_clamp(content_w * 0.052, 68, 78 if compact else 92),
         target_bscan_h=target_bscan_h,
         target_table_max_h=target_table_h,
-        target_info_w=_clamp(content_w * 0.16, 210 if compact else 235, 235 if compact else 270),
-        target_preview_h=_clamp(content_h * 0.075, 50, 64 if compact else 82),
+        target_info_w=_clamp(content_w * 0.15, 200 if compact else 220, 225 if compact else 255),
+        target_preview_h=_clamp(content_h * 0.065, 44, 55 if compact else 72),
         spatial_map_h=spatial_map_h,
-        spatial_profile_h=_clamp(content_h * 0.13, 100 if compact else 115, 130 if compact else 160),
-        spatial_dem_h=_clamp(content_h * 0.10, 70 if compact else 80, 90 if compact else 100),
-        spatial_correlation_h=_clamp(content_h * 0.135, 88, 118 if compact else 145),
-        spatial_info_max_h=_clamp(content_h * 0.17, 105, 140 if compact else 170),
+        spatial_profile_h=_clamp(content_h * 0.12, 85 if compact else 100, 115 if compact else 140),
+        spatial_dem_h=_clamp(content_h * 0.08, 60 if compact else 70, 80 if compact else 90),
+        spatial_correlation_h=_clamp(content_h * 0.12, 80, 105 if compact else 130),
+        spatial_info_max_h=_clamp(content_h * 0.14, 90, 120 if compact else 150),
         spatial_table_max_h=spatial_table_h,
         spatial_side_w=_clamp(content_w * 0.28, 345 if compact else 390, 410 if compact else 470),
-        delivery_cover_w=_clamp(content_w * 0.24, 300 if compact else 340, 360 if compact else 430),
-        delivery_cover_min_h=_clamp(content_h * 0.43, 300 if compact else 350, 380 if compact else 480),
-        delivery_report_thumb_h=_clamp(content_h * 0.115, 72, 96 if compact else 124),
-        delivery_toc_min_h=_clamp(content_h * 0.43, 300 if compact else 350, 380 if compact else 480),
+        delivery_cover_w=_clamp(content_w * 0.22, 280 if compact else 310, 330 if compact else 400),
+        delivery_cover_min_h=_clamp(content_h * 0.38, 270 if compact else 310, 340 if compact else 430),
+        delivery_report_thumb_h=_clamp(content_h * 0.10, 64, 82 if compact else 105),
+        delivery_toc_min_h=_clamp(content_h * 0.38, 270 if compact else 310, 340 if compact else 430),
         delivery_side_min_w=_clamp(content_w * 0.20, 250, 300 if compact else 340),
         delivery_side_max_h=delivery_side_h,
-        delivery_files_max_h=_clamp(content_h * 0.17, 105, 135 if compact else 170),
+        delivery_files_max_h=_clamp(content_h * 0.14, 90, 115 if compact else 145),
     )
 
 

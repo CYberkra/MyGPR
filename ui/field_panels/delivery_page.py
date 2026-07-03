@@ -39,7 +39,7 @@ class DeliveryPageMixin:
         v.addLayout(top)
 
         action = QHBoxLayout()
-        action.setSpacing(6)
+        action.setSpacing(4)
         generate_btn = QPushButton("生成报告包")
         generate_btn.setObjectName("primaryButton")
         generate_btn.clicked.connect(self._action_generate_report_package)
@@ -182,8 +182,7 @@ class DeliveryPageMixin:
         cover.setFixedWidth(lm.delivery_cover_w)
         cover.setMinimumHeight(lm.delivery_cover_min_h)
         c = QVBoxLayout(cover)
-        c.setContentsMargins(18, 18, 18, 18)
-        c.addStretch(1)
+        c.setContentsMargins(14, 12, 14, 12)
         rt = QLabel(f"{self.project_status.project_name}\n项目成果报告")
         rt.setObjectName("reportTitle")
         rt.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -196,15 +195,14 @@ class DeliveryPageMixin:
         c.addWidget(img)
         c.addWidget(QLabel(f"测区位置：{self.project_status.location}"), 0, Qt.AlignmentFlag.AlignCenter)
         c.addWidget(QLabel(f"最后更新：{self.project_status.latest_update}"), 0, Qt.AlignmentFlag.AlignCenter)
-        c.addStretch(1)
         toc = QFrame()
         toc.setObjectName("reportPage")
         toc.setProperty("layoutKey", "deliveryReportToc")
         toc.setMinimumHeight(lm.delivery_toc_min_h)
         toc.setMaximumWidth(520 if lm.compact else 640)
         t = QVBoxLayout(toc)
-        t.setContentsMargins(18, 18, 18, 18)
-        t.setSpacing(6)
+        t.setContentsMargins(14, 12, 14, 12)
+        t.setSpacing(4)
         for line in [
             "1. 项目概况",
             "   1.1 项目背景     1.2 测区概况     1.3 作业情况     1.4 数据概况",
@@ -222,18 +220,17 @@ class DeliveryPageMixin:
             lbl = QLabel(line)
             lbl.setObjectName("tocLine")
             t.addWidget(lbl)
-        t.addStretch(1)
         figure = QFrame()
         figure.setObjectName("reportPage")
         figure.setProperty("layoutKey", "deliveryReportFigure")
         figure.setMinimumHeight(lm.delivery_toc_min_h)
         figure.setMaximumWidth(360 if lm.compact else 460)
         f = QVBoxLayout(figure)
-        f.setContentsMargins(18, 18, 18, 18)
+        f.setContentsMargins(14, 12, 14, 12)
         fig_title = QLabel("当前图件预览")
         fig_title.setObjectName("sectionTitle")
         f.addWidget(fig_title)
-        figure_plot = PlotCard(None, height=max(lm.delivery_report_thumb_h + 22, 110))
+        figure_plot = PlotCard(None, height=max(lm.delivery_report_thumb_h + 16, 95))
         figure_plot.setProperty("layoutKey", "deliveryReportFigureThumbCard")
         figure_plot.canvas.setObjectName("deliveryReportFigureThumbCanvas")
         figure_plot.layout.setContentsMargins(0, 0, 0, 0)
@@ -248,8 +245,6 @@ class DeliveryPageMixin:
             lbl = QLabel(text)
             lbl.setObjectName("activityDesc")
             f.addWidget(lbl)
-        f.addStretch(1)
-
         row.addWidget(cover, 0, Qt.AlignmentFlag.AlignTop)
         row.addWidget(toc, 1, Qt.AlignmentFlag.AlignTop)
         row.addWidget(figure, 0, Qt.AlignmentFlag.AlignTop)
@@ -258,8 +253,8 @@ class DeliveryPageMixin:
         status = QFrame()
         status.setObjectName("reportStatusStrip")
         status_row = QHBoxLayout(status)
-        status_row.setContentsMargins(10, 6, 10, 6)
-        status_row.setSpacing(10)
+        status_row.setContentsMargins(8, 4, 8, 4)
+        status_row.setSpacing(8)
         for title, desc in [
             ("报告结构", "6 章 / 28 页，按项目交付模板组织"),
             ("成果检查", f"通过 {len(self.project_status.task_rows)} 项，待处理 {len([i for i in self.project_status.attention_items if i[0] == '⚠'])} 项"),
@@ -278,7 +273,7 @@ class DeliveryPageMixin:
         card.layout.addWidget(status)
         nav = QHBoxLayout()
         nav.addStretch(1)
-        nav.addWidget(QLabel("‹     1  / 28     ›"))
+        nav.addWidget(QLabel("‹  1 / 28  ›"))
         nav.addStretch(1)
         nav.addWidget(QPushButton("100%  ▾"))
         fullscreen_btn = QPushButton("全屏预览")
@@ -295,7 +290,7 @@ class DeliveryPageMixin:
         dialog.resize(1180, 760)
         dialog.setMinimumSize(900, 600)
         layout = QVBoxLayout(dialog)
-        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setContentsMargins(6, 6, 6, 6)
         layout.addWidget(self._report_preview_card(), 1)
         dialog.exec()
 
@@ -319,7 +314,7 @@ class DeliveryPageMixin:
         rows.append(("成果文件", "◷ 需重新生成" if getattr(st, "dirty_modules", {}).get("report") else ("● 通过" if st.report_file_count else "◷ 未生成"), f"交付文件 {st.report_file_count} 个", st.latest_update))
         self._fill_table(table, rows)
         card.layout.addWidget(table)
-        card.layout.addWidget(QLabel(f"检查完成：{len(rows)} 项      待处理：{sum(1 for r in rows if '待' in r[1] or '未' in r[1])} 项"))
+        card.layout.addWidget(QLabel(f"检查完成：{len(rows)} 项  待处理：{sum(1 for r in rows if '待' in r[1] or '未' in r[1])} 项"))
         return card
 
     def _delivery_files_card(self) -> Card:
@@ -363,12 +358,12 @@ class DeliveryPageMixin:
             row.setSpacing(lm.spacing)
             key_label = QLabel(key)
             key_label.setObjectName("keyLabel")
-            key_label.setFixedWidth(46 if lm.compact else 58)
+            key_label.setFixedWidth(40 if lm.compact else 50)
             value_label = QLabel(str(value))
             value_label.setObjectName("fieldBox")
             value_label.setToolTip(str(value))
             value_label.setWordWrap(False)
-            value_label.setMaximumHeight(24 if lm.compact else 30)
+            value_label.setMaximumHeight(22 if lm.compact else 26)
             row.addWidget(key_label)
             row.addWidget(value_label, 1)
             card.layout.addLayout(row)
@@ -376,7 +371,6 @@ class DeliveryPageMixin:
         note.setObjectName("activityDesc")
         note.setWordWrap(True)
         card.layout.addWidget(note)
-        card.layout.addStretch(1)
         return card
 
 

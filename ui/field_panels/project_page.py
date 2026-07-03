@@ -617,6 +617,7 @@ class ProjectPageMixin:
         status_text = " ｜ ".join(status_parts) if status_parts else "暂无数据"
         status_label = QLabel(f"项目概况：{status_text}")
         status_label.setObjectName("activityDesc")
+        status_label.setWordWrap(False)
         v.addWidget(status_label)
 
         mid = QHBoxLayout()
@@ -679,7 +680,7 @@ class ProjectPageMixin:
             row.setSpacing(lm.spacing)
             key_label = QLabel(key)
             key_label.setObjectName("keyLabel")
-            key_label.setFixedWidth(42 if lm.compact else 52)
+            key_label.setFixedWidth(38 if lm.compact else 46)
             value_label = QLabel(compact_text(value, limit))
             value_label.setObjectName("valueLabel")
             value_label.setToolTip(str(value or "--"))
@@ -688,7 +689,7 @@ class ProjectPageMixin:
             row.addWidget(value_label, 1)
             card.layout.addLayout(row)
 
-        map_preview = PlotCard(None, height=max(70, min(lm.project_summary_map_h, 120)))
+        map_preview = PlotCard(None, height=max(60, min(lm.project_summary_map_h, 105)))
         map_preview.setProperty("layoutKey", "projectSummaryMapCard")
         map_preview.canvas.setObjectName("projectSummaryMapCanvas")
         map_preview.layout.setContentsMargins(0, 0, 0, 0)
@@ -700,7 +701,6 @@ class ProjectPageMixin:
             placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
             map_preview.layout.addWidget(placeholder)
         card.layout.addWidget(map_preview)
-        card.layout.addStretch(1)
         return card
 
     def _line_list_card(self) -> Card:
@@ -742,7 +742,7 @@ class ProjectPageMixin:
             return card
 
         headers = ["测线", "源文件", "长度", "质量", "定位", "处理", "时间"] if getattr(self, "compact_mode", True) else ["测线名称", "源文件", "长度 (m)", "数据质量", "定位状态", "处理状态", "最近更新时间", "操作"]
-        row_count = max(len(self.line_records), 3) if len(self.line_records) <= 3 else max(len(self.line_records), 7)
+        row_count = max(len(self.line_records), 2) if len(self.line_records) <= 3 else max(len(self.line_records), 5)
         table = self._table(headers, row_count)
         table.setMinimumHeight(lm.project_table_min_h)
         table.setObjectName("projectLineTable")
@@ -773,11 +773,11 @@ class ProjectPageMixin:
         line = self._selected_line_record()
         frame = QFrame()
         frame.setObjectName("lineDetailPanel")
-        frame.setMinimumHeight(48 if lm.compact else 58)
-        frame.setMaximumHeight(56 if lm.compact else 66)
+        frame.setMinimumHeight(42 if lm.compact else 50)
+        frame.setMaximumHeight(50 if lm.compact else 58)
         row = QHBoxLayout(frame)
-        row.setContentsMargins(10, 8, 10, 8)
-        row.setSpacing(12)
+        row.setContentsMargins(8, 6, 8, 6)
+        row.setSpacing(10)
 
         title_col = QVBoxLayout()
         title_col.setSpacing(2)
@@ -795,7 +795,7 @@ class ProjectPageMixin:
             box = QFrame()
             box.setObjectName("miniStatBox")
             box_layout = QVBoxLayout(box)
-            box_layout.setContentsMargins(8, 4, 8, 4)
+            box_layout.setContentsMargins(6, 3, 6, 3)
             box_layout.setSpacing(0)
             v = QLabel(f"{value}{suffix}")
             v.setObjectName("miniStatValue")
@@ -871,27 +871,26 @@ class ProjectPageMixin:
             ("≋", "导入RTK/IMU", self._action_import_trajectory_dialog),
         ]:
             btn = self._make_action_tile(icon, label, callback)
-            btn.setMinimumHeight(36)
+            btn.setMinimumHeight(32)
             card.layout.addWidget(btn)
 
         section_maint = QLabel("项目维护")
         section_maint.setObjectName("cardTitle")
-        card.layout.addSpacing(4)
+        card.layout.addSpacing(2)
         sep = QFrame()
         sep.setObjectName("separatorLine")
         sep.setFrameShape(QFrame.Shape.HLine)
         sep.setFixedHeight(1)
         card.layout.addWidget(sep)
-        card.layout.addSpacing(2)
+        card.layout.addSpacing(1)
         card.layout.addWidget(section_maint)
         for widget in [
             self._make_action_tile("☑", "运行质检", self._action_run_quality_check),
             self._make_action_tile("◎", "数据运维", self._action_open_data_ops_center),
             self._make_more_operations_button(),
         ]:
-            widget.setMinimumHeight(36)
+            widget.setMinimumHeight(32)
             card.layout.addWidget(widget)
-        card.layout.addStretch(1)
         return card
 
     def _task_tabs_card(self) -> Card:
@@ -952,7 +951,6 @@ class ProjectPageMixin:
             desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
             desc.setWordWrap(True)
             card.layout.addWidget(desc)
-            card.layout.addStretch(1)
             return card
         row = QHBoxLayout()
         row.setSpacing(lm.spacing)
@@ -985,7 +983,6 @@ class ProjectPageMixin:
             info_grid.addWidget(k, r, 0)
             info_grid.addWidget(v, r, 1)
         right.addLayout(info_grid)
-        right.addStretch(1)
         row.addLayout(right, 2)
         card.layout.addLayout(row)
         return card

@@ -77,7 +77,7 @@ class ProcessingPageMixin:
         v.addLayout(metrics)
 
         status_row = QHBoxLayout()
-        status_row.setSpacing(10)
+        status_row.setSpacing(6)
         self.processing_status_label = QLabel("当前显示：-- / Step 00 原始 B-scan")
         self.processing_status_label.setObjectName("activityTitle")
         status_row.addWidget(self.processing_status_label, 1)
@@ -110,7 +110,7 @@ class ProcessingPageMixin:
 
         params_card = self._processing_params_card()
         params_card.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
-        params_card.setMaximumHeight(lm.processing_bscan_h + 40)
+        params_card.setMaximumHeight(lm.processing_bscan_h + 30)
         work.addWidget(params_card, 0, Qt.AlignmentFlag.AlignTop)
         v.addLayout(work, 3)
 
@@ -250,7 +250,7 @@ class ProcessingPageMixin:
             highlight = 0
         self._fill_table(self.processing_history_table, rows, highlight_row=highlight)
         for row in range(self.processing_history_table.rowCount()):
-            self.processing_history_table.setRowHeight(row, 20)
+            self.processing_history_table.setRowHeight(row, 18)
         if getattr(self, "processing_history_hint_label", None) is not None:
             if rows:
                 self.processing_history_hint_label.setText((session.summary_text() if session is not None else "") + "。步骤已同步到左侧项目树，撤回会同步删除最后一步。")
@@ -554,7 +554,7 @@ class ProcessingPageMixin:
         category_row.setSpacing(6)
         category_row.addWidget(QLabel(PROCESSING_CATEGORY_LABEL))
         self.processing_category_combo = QComboBox()
-        self.processing_category_combo.setMinimumHeight(26)
+        self.processing_category_combo.setMinimumHeight(22)
         for category in self.processing_categories:
             self.processing_category_combo.addItem(category, category)
         idx = self.processing_category_combo.findData(self.selected_processing_category)
@@ -568,7 +568,7 @@ class ProcessingPageMixin:
         method_row.setSpacing(6)
         method_row.addWidget(QLabel(PROCESSING_METHOD_LABEL))
         self.processing_method_combo = QComboBox()
-        self.processing_method_combo.setMinimumHeight(26)
+        self.processing_method_combo.setMinimumHeight(22)
         self.processing_method_combo.currentIndexChanged.connect(self._on_processing_method_changed)
         method_row.addWidget(self.processing_method_combo, 1)
         card.layout.addLayout(method_row)
@@ -584,15 +584,15 @@ class ProcessingPageMixin:
         group.setObjectName("paramGroup")
         group.setProperty("layoutKey", "processingParameterGroup")
         group_layout = QVBoxLayout(group)
-        group_layout.setContentsMargins(5, 5, 5, 5)
-        group_layout.setSpacing(3)
+        group_layout.setContentsMargins(4, 4, 4, 4)
+        group_layout.setSpacing(2)
         title = QLabel(PROCESSING_PARAMS_TITLE)
         title.setObjectName("activityTitle")
         group_layout.addWidget(title)
         self.processing_params_body = QWidget()
         self.processing_params_body_layout = QVBoxLayout(self.processing_params_body)
         self.processing_params_body_layout.setContentsMargins(0, 0, 0, 0)
-        self.processing_params_body_layout.setSpacing(3)
+        self.processing_params_body_layout.setSpacing(2)
         group_layout.addWidget(self.processing_params_body)
         card.layout.addWidget(group)
 
@@ -606,10 +606,10 @@ class ProcessingPageMixin:
         actions_group = QFrame()
         actions_group.setObjectName("paramGroup")
         actions_group.setProperty("layoutKey", "processingContinuousCard")
-        actions_group.setFixedHeight(174)
+        actions_group.setFixedHeight(155)
         actions_layout = QVBoxLayout(actions_group)
-        actions_layout.setContentsMargins(5, 5, 5, 5)
-        actions_layout.setSpacing(6)
+        actions_layout.setContentsMargins(4, 4, 4, 4)
+        actions_layout.setSpacing(4)
 
         chain_row = QHBoxLayout()
         chain_label = QLabel("处理链")
@@ -624,14 +624,14 @@ class ProcessingPageMixin:
 
         recommend_btn = QPushButton("推荐当前参数")
         recommend_btn.setObjectName("smallButton")
-        recommend_btn.setFixedHeight(22)
+        recommend_btn.setFixedHeight(20)
         recommend_btn.setProperty("layoutKey", "processingRecommendParamsButton")
         recommend_btn.clicked.connect(self._recommend_processing_params)
         actions_layout.addWidget(recommend_btn)
 
         self.processing_execute_button = QPushButton("执行当前步骤")
         self.processing_execute_button.setObjectName("primaryButton")
-        self.processing_execute_button.setFixedHeight(30)
+        self.processing_execute_button.setFixedHeight(26)
         self.processing_execute_button.setProperty("layoutKey", "processingExecuteStepButton")
         self.processing_execute_button.clicked.connect(self._apply_processing)
         actions_layout.addWidget(self.processing_execute_button)
@@ -640,13 +640,13 @@ class ProcessingPageMixin:
         undo_reset_row.setSpacing(6)
         self.processing_undo_step_button = QPushButton("撤回一步")
         self.processing_undo_step_button.setObjectName("smallButton")
-        self.processing_undo_step_button.setFixedHeight(26)
+        self.processing_undo_step_button.setFixedHeight(22)
         self.processing_undo_step_button.setProperty("layoutKey", "processingUndoStepButton")
         self.processing_undo_step_button.clicked.connect(self._undo_processing)
         undo_reset_row.addWidget(self.processing_undo_step_button, 1)
         self.processing_reset_button = QPushButton("重置到原始")
         self.processing_reset_button.setObjectName("smallButton")
-        self.processing_reset_button.setFixedHeight(26)
+        self.processing_reset_button.setFixedHeight(22)
         self.processing_reset_button.setProperty("layoutKey", "processingResetChainButton")
         self.processing_reset_button.clicked.connect(self._reset_processing_chain)
         undo_reset_row.addWidget(self.processing_reset_button, 1)
@@ -654,7 +654,7 @@ class ProcessingPageMixin:
 
         batch_btn = QPushButton("批量处理全部测线")
         batch_btn.setObjectName("smallButton")
-        batch_btn.setFixedHeight(26)
+        batch_btn.setFixedHeight(22)
         batch_btn.setToolTip("将当前算法和参数应用到所有已导入的测线")
         batch_btn.clicked.connect(self._batch_apply_processing)
         actions_layout.addWidget(batch_btn)
@@ -663,7 +663,6 @@ class ProcessingPageMixin:
         self.processing_save_button = None
         card.layout.addWidget(actions_group)
 
-        card.layout.addStretch(1)
         self._populate_processing_methods()
         return card
 
@@ -742,7 +741,7 @@ class ProcessingPageMixin:
             row.addWidget(lab)
             widget = self._make_param_widget(spec)
             widget.setMinimumWidth(104)
-            widget.setMinimumHeight(24)
+            widget.setMinimumHeight(20)
             row.addWidget(widget, 1)
             self.processing_params_body_layout.addLayout(row)
             self.processing_param_widgets[name] = widget
@@ -754,7 +753,7 @@ class ProcessingPageMixin:
             spin = QSpinBox()
             spin.setButtonSymbols(QSpinBox.ButtonSymbols.PlusMinus)
             spin.setMinimumWidth(104)
-            spin.setMinimumHeight(24)
+            spin.setMinimumHeight(20)
             spin.setRange(int(spec.get("min", -1000000)), int(spec.get("max", 1000000)))
             spin.setValue(int(default if default not in (None, "") else 0))
             return spin
@@ -762,7 +761,7 @@ class ProcessingPageMixin:
             spin = QDoubleSpinBox()
             spin.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.PlusMinus)
             spin.setMinimumWidth(104)
-            spin.setMinimumHeight(24)
+            spin.setMinimumHeight(20)
             spin.setRange(float(spec.get("min", -1_000_000.0)), float(spec.get("max", 1_000_000.0)))
             spin.setDecimals(4)
             spin.setSingleStep(0.1)
@@ -775,7 +774,7 @@ class ProcessingPageMixin:
         if typ in {"choice", "enum"} or spec.get("choices"):
             combo = QComboBox()
             combo.setMinimumWidth(104)
-            combo.setMinimumHeight(24)
+            combo.setMinimumHeight(20)
             choices = spec.get("choices") or []
             for choice in choices:
                 combo.addItem(str(choice), choice)
@@ -787,7 +786,7 @@ class ProcessingPageMixin:
             return combo
         edit = QLineEdit()
         edit.setMinimumWidth(104)
-        edit.setMinimumHeight(24)
+        edit.setMinimumHeight(20)
         edit.setText(str(default))
         return edit
 
@@ -827,12 +826,13 @@ class ProcessingPageMixin:
         history = QWidget()
         vh = QVBoxLayout(history)
         vh.setContentsMargins(0, 0, 0, 0)
+        vh.setSpacing(2)
         self.processing_history_table = self._table(["步次", "算法 / 参数", "状态", "时间", "操作"], 0)
         vh.addWidget(self.processing_history_table, 1)
         self.processing_history_hint_label = QLabel("尚未执行连续处理步骤。点击“执行当前步骤”后，会按当前算法继续叠加处理。")
         self.processing_history_hint_label.setObjectName("activityDesc")
         self.processing_history_hint_label.setWordWrap(False)
-        self.processing_history_hint_label.setMaximumHeight(22)
+        self.processing_history_hint_label.setMaximumHeight(18)
         vh.addWidget(self.processing_history_hint_label)
         tabs.addTab(history, "处理历史")
 
@@ -852,7 +852,6 @@ class ProcessingPageMixin:
         self.processing_log_label.setObjectName("activityDesc")
         self.processing_log_label.setWordWrap(True)
         v.addWidget(self.processing_log_label)
-        v.addStretch(1)
         tabs.addTab(warn, "日志")
         card.layout.addWidget(tabs)
         return card
