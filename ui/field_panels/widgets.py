@@ -197,10 +197,11 @@ class PlotCard(Card):
         self._draw_count = 0
         self.canvas = FigureCanvas(self.figure)
         target_height = max(48, int(height))
-        # Keep plot previews from expanding to Matplotlib's default 240 px
+        # Keep small plot previews from expanding to Matplotlib's default 240 px
         # height.  This is critical for 15.6-inch 1080P laptops with the
         # Windows taskbar visible.  Larger plot cards can still request a
         # larger explicit height via the constructor.
+        target_height = max(48, int(height))
         self.canvas.setMinimumHeight(target_height)
         self.canvas.setMaximumHeight(target_height)
         frame_height = target_height + (24 if title else 10)

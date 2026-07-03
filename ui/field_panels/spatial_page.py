@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from PyQt6.QtCore import Qt, QUrl
+from PyQt6.QtCore import QEvent, Qt, QTimer, QUrl
 from PyQt6.QtGui import QAction, QDesktopServices
 from PyQt6.QtWidgets import QFileDialog, QHBoxLayout, QLabel, QMenu, QMessageBox, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
@@ -122,37 +122,74 @@ class SpatialPageMixin:
         # Right column: elevation and info
         right = QVBoxLayout()
         right.setSpacing(lm.spacing)
+        right.setContentsMargins(0, 0, 0, 0)
 
-        profile_card = PlotCard(
-            "高程剖面与地形",
-            height=lm.spatial_profile_h,
-            expand_title="高程剖面与地形放大查看",
-            expand_callback=self._draw_current_elevation_profile,
-            expand_parent=self,
-        )
-        profile_card.setProperty("layoutKey", "spatialProfileCard")
-        profile_card.canvas.setObjectName("spatialProfileCanvas")
-        self.spatial_elevation_canvas = profile_card.canvas
-        self._draw_current_elevation_profile(profile_card.canvas)
-        right.addWidget(profile_card)
+        # Elevation profile — bypass Card to avoid its internal layout constraints.
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as _FigureCanvas
+        from matplotlib.figure import Figure as _Figure
+        elevation_container = QWidget()
+        elevation_layout = QVBoxLayout(elevation_container)
+        elevation_layout.setContentsMargins(4, 3, 4, 3)
+        elevation_layout.setSpacing(2)
+        # Title
+        _elev_title = QLabel("高程剖面与地形")
+        _elev_title.setObjectName("cardTitle")
+        elevation_layout.addWidget(_elev_title)
+        # Canvas — expanding to fill all available space
+        self.spatial_elevation_canvas = _FigureCanvas(_Figure(figsize=(4, 2.4), dpi=100, facecolor="white"))
+        self.spatial_elevation_canvas.setObjectName("spatialProfileCanvas")
+        self.spatial_elevation_canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.spatial_elevation_canvas.setMinimumHeight(0)
+        self.spatial_elevation_canvas.setMaximumHeight(16777215)
+        elevation_layout.addWidget(self.spatial_elevation_canvas, 1)
+        # Install event filter to redraw when the canvas resizes via Qt layout.
+        self.spatial_elevation_canvas.installEventFilter(self)
+        self._draw_current_elevation_profile(self.spatial_elevation_canvas)
+        right.addWidget(elevation_container, 1)
 
         info_panel = self._spatial_info_panel()
-        right.addWidget(info_panel)
+        info_panel.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        right.addWidget(info_panel, 0)
 
         right_widget = QWidget()
         right_widget.setLayout(right)
-        side_panel_height = lm.spatial_profile_h + lm.spatial_info_max_h + lm.spacing * 3
         side_panel = CollapsibleSidePanel(
             title="空间辅助",
             content=right_widget,
             expanded_width=lm.spatial_side_w,
             collapsed_width=34,
         )
-        side_panel.setMaximumHeight(side_panel_height)
         side_panel.setProperty("layoutKey", "spatialAuxSidePanel")
-        main.addWidget(side_panel, 0, Qt.AlignmentFlag.AlignTop)
+        main.addStretch(0)
+        main.addWidget(side_panel, 1)
+        main.addStretch(0)
         v.addLayout(main, 1)
+
+        # Redraw elevation profile after layout settles so the figure matches the
+        # actual canvas size (canvas starts at its default size before the page is shown).
+        QTimer.singleShot(400, self._deferred_elevation_redraw)
         return widget
+
+    def _deferred_elevation_redraw(self) -> None:
+        canvas = getattr(self, "spatial_elevation_canvas", None)
+        if canvas is None:
+            return
+        # Query the parent container's size for figure sizing.
+        parent = canvas.parentWidget()
+        if parent and parent.width() > 0 and parent.height() > 0:
+            dpi = canvas.figure.dpi or 100
+            w = max(parent.width() - 8, 200)
+            h = max(parent.height() - 20, 120)
+            canvas.figure.set_size_inches(w / dpi, h / dpi)
+            # Trigger a canvas resize so the layout and eventFilter update.
+            canvas.resize(w, h)
+
+    def eventFilter(self, obj, event) -> bool:
+        if (event.type() == QEvent.Type.Resize
+                and obj is getattr(self, "spatial_elevation_canvas", None)
+                and obj.isVisible()):
+            self._draw_current_elevation_profile(obj)
+        return super().eventFilter(obj, event)
 
     def _make_spatial_layer_menu(self, parent: QWidget) -> QMenu:
         menu = QMenu(parent)
@@ -396,9 +433,17 @@ class SpatialPageMixin:
             return
         fig = canvas.figure
         fig.clear()
-        # Resize figure to exactly match the canvas so subplots don't overlap.
-        w_in, h_in = canvas.width() / fig.dpi, canvas.height() / fig.dpi
-        fig.set_size_inches(max(w_in, 2.5), max(h_in, 1.2))
+        # Size figure to match the canvas's natural size (not the parent).
+        # The canvas's sizeHint equals the figure's size, so the layout gives
+        # the canvas exactly the space the figure requests.  We query the
+        # canvas's current size which Qt has already allocated.
+        dpi = fig.dpi or 100
+        w = max(canvas.width(), 200)
+        h = max(canvas.height(), 120)
+        fig.set_size_inches(w / dpi, h / dpi)
+        # NOTE: we do NOT call canvas.resize() here — that would make the
+        # canvas bigger than its parent and cause overflow.  Instead, the
+        # eventFilter catches future resize events and redraws the figure.
         d = self.trajectory_model.distance
         z = self.trajectory_model.z
         # --- Top subplot: elevation profile line ---

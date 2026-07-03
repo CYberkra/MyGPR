@@ -95,6 +95,10 @@ class ProcessingPageMixin:
         current_card.setProperty("layoutKey", "processingProcessedBscanCard")
         current_card.canvas.setObjectName("processingProcessedBscanCanvas")
         current_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        # Remove PlotCard's fixed-height constraint so the B-scan canvas fills
+        # the available vertical space instead of leaving blank gaps.
+        current_card.setMinimumHeight(0)
+        current_card.setMaximumHeight(16777215)
         self.processing_bscan_canvas = current_card.canvas
         self.processing_diff_canvas = None
         self._draw_processing_processed_bscan(current_card.canvas)
@@ -106,12 +110,11 @@ class ProcessingPageMixin:
         compare_btn.clicked.connect(self._open_processing_compare_viewer)
         self.processing_compare_button = compare_btn
         current_card.add_title_button(compare_btn)
-        work.addWidget(current_card, 84, Qt.AlignmentFlag.AlignTop)
+        work.addWidget(current_card, 84)
 
         params_card = self._processing_params_card()
         params_card.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
-        params_card.setMaximumHeight(lm.processing_bscan_h + 30)
-        work.addWidget(params_card, 0, Qt.AlignmentFlag.AlignTop)
+        work.addWidget(params_card, 0)
         v.addLayout(work, 3)
 
         v.addWidget(self._processing_messages_card(), 1)
@@ -662,6 +665,7 @@ class ProcessingPageMixin:
 
         self.processing_save_button = None
         card.layout.addWidget(actions_group)
+        card.layout.addStretch(1)
 
         self._populate_processing_methods()
         return card
