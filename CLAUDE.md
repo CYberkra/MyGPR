@@ -37,7 +37,6 @@ core/                          # 遗留内核（仍活跃）：gpr_data_model、
 PythonModule/                  # 算法包装器，经 method registry + cli_batch 动态加载
 cli_batch.py                   # 无头批处理入口（pyproject: mygpr-batch）
 tests/                         # pytest；sample_data/ 是测试夹具，勿删
-archive/history_v0.9.x/        # 历史轮次文档与一次性脚本归档（2026-07-30）
 ```
 
 ## 工程约束

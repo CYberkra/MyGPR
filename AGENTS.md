@@ -18,7 +18,7 @@ All commands below assume this directory is the working directory.
 - `PythonModule/` — 算法包装器；经方法注册表动态加载，静态 grep 不到引用≠死代码。
 - `tests/` + `sample_data/` — pytest 与测试夹具。
 - `scripts/` — 质量检查/治理脚本；其中被 `config/schema_catalog.json` 注册的不可移动。
-- `archive/` — 历史轮次文档与一次性脚本归档，不参与构建与测试。
+- 历史轮次文档与一次性脚本已于 2026-07-30 清理，可从 git 历史（a9fb92e）取回。
 
 ## Run / Test
 
@@ -41,4 +41,3 @@ python -m pytest tests/ -q
 
 - 大型原始数据、完整报告输出、GUI 截图不进 Git。
 - 需要评审的小证据文件放入 `docs/artifacts/` 随提交一起推送。
-- `archive/` 已归档的历史内容如需删除须用户确认。
