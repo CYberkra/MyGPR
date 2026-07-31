@@ -120,3 +120,40 @@ def test_choose_prefetch_zooms_large_area_drops_zoom():
     assert z1 < 16
     assert z1 >= 3
     assert count_tiles_for_bbox(*bbox, z0, z1) <= 400
+
+
+# ------------------------------------------------------------ GCJ-02 坐标转换
+
+def test_wgs84_to_gcj02_offsets_hundreds_of_meters_in_china():
+    """中国境内 WGS84→GCJ-02 应有百米级偏移（营山测区约 463 m）。"""
+    from ui.widgets.map_tiles import wgs84_to_gcj02
+    import math
+    glon, glat = wgs84_to_gcj02(106.8058, 31.2602)
+    dx = (glon - 106.8058) * 111320 * math.cos(math.radians(31.2602))
+    dy = (glat - 31.2602) * 110540
+    dist = math.hypot(dx, dy)
+    assert 300.0 < dist < 700.0
+
+
+def test_wgs84_to_gcj02_outside_china_unchanged():
+    """中国境外坐标原样返回。"""
+    from ui.widgets.map_tiles import wgs84_to_gcj02
+    assert wgs84_to_gcj02(-73.9857, 40.7484) == (-73.9857, 40.7484)   # 纽约
+    assert wgs84_to_gcj02(139.6917, 35.6895) == (139.6917, 35.6895)   # 东京
+
+
+def test_gcj02_roundtrip_sub_meter():
+    """WGS84→GCJ-02→WGS84 迭代反解应回到亚米级。"""
+    from ui.widgets.map_tiles import gcj02_to_wgs84, wgs84_to_gcj02
+    lon, lat = 106.8058, 31.2602
+    back = gcj02_to_wgs84(*wgs84_to_gcj02(lon, lat))
+    assert abs(back[0] - lon) < 1e-5    # ~1 m
+    assert abs(back[1] - lat) < 1e-5
+
+
+def test_is_gcj02_source():
+    from ui.widgets.map_tiles import is_gcj02_source
+    assert is_gcj02_source('gaode_img')
+    assert is_gcj02_source('gaode_vec')
+    assert not is_gcj02_source('osm')
+    assert not is_gcj02_source('')

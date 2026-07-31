@@ -32,11 +32,12 @@ from ui.widgets.context_menus import add_action, make_menu
 from ui.widgets.map_tiles import (DEFAULT_TILE_SOURCE, TILE_SOURCE_MAX_ZOOM,
                                   TILE_SOURCES, WORLD_SIZE_M,
                                   choose_prefetch_zooms, extract_epsg,
+                                  gcj02_to_wgs84, is_gcj02_source,
                                   lonlat_to_mercator, lonlat_to_tile,
                                   mercator_to_lonlat, resolve_basemap,
                                   tile_bounds_mercator,
                                   tile_range_for_bbox, tile_url,
-                                  zoom_for_resolution)
+                                  wgs84_to_gcj02, zoom_for_resolution)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -45,11 +46,14 @@ _USER_AGENT = 'MyGPR/1.0 (https://mygpr.local; tile client)'
 _HALF_WORLD = WORLD_SIZE_M / 2.0
 
 
-def _track_to_mercator(track) -> dict:
+def _track_to_mercator(track, gcj02: bool = False) -> dict:
     """把 SpatialTrack（鸭子类型）转换为展示用结构（Web Mercator 米）。
 
     返回 dict(line_id, name, xs, ys, zs, crs, source, mapped, epsg)。
     mapped=False 时 xs/ys 为原始坐标（不套底图）。
+
+    gcj02=True 时（底图为高德等火星坐标瓦片），WGS84/CGCS2000 经纬度
+    先做 GCJ-02 加密转换再转 Mercator，否则中国境内有 300~600 m 偏移。
     """
     points = list(getattr(track, 'points', ()) or ())
     xs = np.asarray([float(getattr(p, 'x', 0.0)) for p in points], dtype=float)
@@ -59,7 +63,20 @@ def _track_to_mercator(track) -> dict:
     source = str(getattr(track, 'source', '') or '')
     epsg = extract_epsg(crs)
     mapped = False
-    if epsg is not None:
+    if gcj02 and epsg is not None:
+        try:
+            # 先转 WGS84 经纬度（always_xy → lon,lat），再 GCJ-02 → Mercator
+            from ui.widgets.proj_safe import transform_coordinates
+            xs, ys = (np.asarray(a, dtype=float)
+                      for a in transform_coordinates(epsg, 4326, xs, ys))
+            converted = [wgs84_to_gcj02(lon, lat) for lon, lat in zip(xs, ys)]
+            converted = [lonlat_to_mercator(glon, glat) for glon, glat in converted]
+            xs = np.asarray([c[0] for c in converted], dtype=float)
+            ys = np.asarray([c[1] for c in converted], dtype=float)
+            mapped = True
+        except Exception as exc:  # noqa: BLE001 - 单条测线失败不影响其它
+            _LOGGER.debug('测线 GCJ-02 坐标转换失败 EPSG:%s: %s', epsg, exc)
+    if not mapped and epsg is not None:
         try:
             # 经 proj_safe 串行化：与地形构建工作线程并行调 PROJ 会段错误
             from ui.widgets.proj_safe import transform_coordinates
@@ -72,6 +89,10 @@ def _track_to_mercator(track) -> dict:
         # 无 EPSG 且坐标绝对值像经纬度（<1000）→ 按 EPSG:4326 处理
         if (np.nanmax(np.abs(xs)) < 1000.0 and np.nanmax(np.abs(ys)) < 1000.0
                 and np.isfinite(xs).all() and np.isfinite(ys).all()):
+            if gcj02:
+                converted = [wgs84_to_gcj02(lon, lat) for lon, lat in zip(xs, ys)]
+                xs = np.asarray([c[0] for c in converted], dtype=float)
+                ys = np.asarray([c[1] for c in converted], dtype=float)
             converted = [lonlat_to_mercator(lon, lat) for lon, lat in zip(xs, ys)]
             xs = np.asarray([c[0] for c in converted], dtype=float)
             ys = np.asarray([c[1] for c in converted], dtype=float)
@@ -351,6 +372,7 @@ class MapView(pg.GraphicsLayoutWidget):
         self._track_items: list = []
         self._track_summaries: list[dict] = []
         self._track_colors: dict = {}
+        self._raw_tracks: list = []
         self._dark = False
         self.setBackground('w')
         self.scene().sigMouseClicked.connect(self._on_mouse_clicked)
@@ -415,6 +437,9 @@ class MapView(pg.GraphicsLayoutWidget):
             self._overlay_layer.setVisible(True)
         elif self._overlay_layer is not None:
             self._overlay_layer.setVisible(False)
+        # 底图坐标系可能变化（高德 GCJ-02 ↔ OSM WGS84），测线需重新转换
+        if self._raw_tracks:
+            self._render_tracks()
 
     def prefetch_current_view(self, max_extra_zoom: int = 2) -> int:
         """预下载当前可视区域瓦片（离线包效果），返回基础层入队瓦片数。"""
@@ -472,18 +497,25 @@ class MapView(pg.GraphicsLayoutWidget):
         """设置测线轨迹并自动 fit 到全部轨迹范围。
 
         tracks: SpatialTrack 列表（鸭子类型取属性）；colors: {line_id: '#rrggbb'}。
+        原始轨迹留存：切换底图（WGS84 ↔ GCJ-02）时按新坐标系重新转换渲染。
         """
+        self._raw_tracks = list(tracks or [])
+        self._track_colors = dict(colors or {})
+        self._render_tracks()
+
+    def _render_tracks(self) -> None:
+        """按当前底图坐标系（WGS84 / GCJ-02）转换并绘制测线。"""
         for item in self._track_items:
             self._plot.removeItem(item)
         self._track_items = []
         self._track_summaries = []
-        self._track_colors = dict(colors or {})
         colors = self._track_colors
+        gcj02 = is_gcj02_source(self._layer.source_key())
 
         all_x = []
         all_y = []
-        for track in tracks or []:
-            info = _track_to_mercator(track)
+        for track in self._raw_tracks:
+            info = _track_to_mercator(track, gcj02=gcj02)
             self._track_summaries.append(info)
             xs, ys = info['xs'], info['ys']
             finite = np.isfinite(xs) & np.isfinite(ys)
@@ -521,6 +553,9 @@ class MapView(pg.GraphicsLayoutWidget):
         if not (np.isfinite(lon) and np.isfinite(lat)) or abs(lat) > 85.06:
             self._coord_label.hide()
             return
+        # 高德底图的世界坐标是 GCJ-02，读出统一回 WGS84 与测线数据一致
+        if is_gcj02_source(self._layer.source_key()):
+            lon, lat = gcj02_to_wgs84(lon, lat)
         self._coord_label.setText(f'{lat:.6f}, {lon:.6f}')
         self._coord_label.show()
         self._layout_overlays()
@@ -641,9 +676,11 @@ class MapView(pg.GraphicsLayoutWidget):
         menu.exec(event.screenPos().toPoint())
 
     def _copy_center_lonlat(self) -> None:
-        """视图中心 → 经纬度（'纬度,经度'，便于粘贴到奥维等软件对照）。"""
+        """视图中心 → WGS84 经纬度（'纬度,经度'，便于粘贴到奥维等软件对照）。"""
         center = self._plot.vb.viewRect().center()
         lon, lat = mercator_to_lonlat(center.x(), center.y())
+        if is_gcj02_source(self._layer.source_key()):
+            lon, lat = gcj02_to_wgs84(lon, lat)
         QApplication.clipboard().setText(f'{lat:.6f},{lon:.6f}')
 
     def track_summaries(self) -> list[dict]:
