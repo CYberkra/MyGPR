@@ -27,6 +27,7 @@ DEFAULT_SETTINGS = {
     'processing_left_collapsed': False,                  # 处理页左栏折叠状态
     'processing_right_collapsed': False,                 # 处理页右栏折叠状态
     'log_panel_collapsed': True,                         # 全局日志面板默认折叠
+    'spatial_local_dem': '',                             # 空间页本地 DEM 文件路径（'' = 在线下载）
 }
 
 

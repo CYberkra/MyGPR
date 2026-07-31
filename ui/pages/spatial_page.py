@@ -161,6 +161,7 @@ class SpatialPage(QWidget):
         self._colors = {}            # line_id -> '#rrggbb'
         self._restoring_basemap = False
         self._last_auto_prefetch_key = None   # 自动预下载去重（包围盒+瓦图源）
+        self._dem_base_text = ''              # 本地 DEM 标签基础文本（覆盖提示拼接用）
 
         self._build_ui()
         self._connect_internal()
@@ -198,6 +199,45 @@ class SpatialPage(QWidget):
             self._map_view.set_source(source)
         finally:
             self._restoring_basemap = False
+        self._auto_load_dem(sm)
+
+    def _auto_load_dem(self, sm: SettingsManager) -> None:
+        """启动自动加载上次导入的本地 DEM（默认在线下载，无需任何操作）。
+
+        文件已被移动/删除或解析失败时清除记录，静默回退在线下载。
+        """
+        path = str(sm.get('spatial_local_dem', '') or '')
+        if not path:
+            return
+        dem = None
+        if os.path.isfile(path):
+            try:
+                dem = load_xyz_grid(path)
+            except (OSError, ValueError):
+                dem = None
+        if dem is None:
+            sm.set('spatial_local_dem', '')
+            sm.save()
+            return
+        self._apply_local_dem(dem, path)
+
+    def _apply_local_dem(self, dem: dict, path: str) -> None:
+        """应用本地 DEM 到三维视图并更新卡片显示。"""
+        self._3d_view.set_local_dem(dem)
+        rows, cols = dem['elev'].shape
+        self._dem_base_text = f'{os.path.basename(path)}（{cols}×{rows}）'
+        self._3d_dem_label.setText(self._dem_base_text)
+        self._3d_dem_label.setToolTip(path)
+        self._3d_dem_clear_btn.setEnabled(True)
+
+    def _on_dem_notice(self, text: str) -> None:
+        """三维视图的 DEM 覆盖提示：拼到标签基础文本后。"""
+        if not self._3d_dem_clear_btn.isEnabled():
+            return  # 无本地 DEM，提示不适用
+        if text:
+            self._3d_dem_label.setText(f'{self._dem_base_text}；{text}')
+        else:
+            self._3d_dem_label.setText(self._dem_base_text)
 
     def _save_panel_state(self) -> None:
         sm = SettingsManager()
@@ -388,6 +428,7 @@ class SpatialPage(QWidget):
             self._3d_view.set_imagery_enabled)
         self._3d_dem_btn.clicked.connect(self._on_import_dem_clicked)
         self._3d_dem_clear_btn.clicked.connect(self._on_clear_dem_clicked)
+        self._3d_view.local_dem_notice.connect(self._on_dem_notice)
         self._left_panel.sig_collapsed.connect(self._save_panel_state)
         self._right_panel.sig_collapsed.connect(self._save_panel_state)
 
@@ -550,7 +591,10 @@ class SpatialPage(QWidget):
         self.basemap_prefetch_requested.emit()
 
     def _on_import_dem_clicked(self) -> None:
-        """导入本地 DEM（XYZ 格网）：三维地形改用本地高程，免在线下载。"""
+        """导入本地 DEM（XYZ 格网）：三维地形改用本地高程，免在线下载。
+
+        路径记入设置，之后启动自动加载，无需重复导入。
+        """
         path, _selected = QFileDialog.getOpenFileName(
             self, '选择本地 DEM 格网文件', '',
             'DEM 格网 (*.xyz *.csv *.txt);;所有文件 (*)')
@@ -561,18 +605,21 @@ class SpatialPage(QWidget):
         except (OSError, ValueError) as exc:
             self._3d_dem_label.setText(f'导入失败：{exc}')
             return
-        self._3d_view.set_local_dem(dem)
-        rows, cols = dem['elev'].shape
-        self._3d_dem_label.setText(f'{os.path.basename(path)}（{cols}×{rows}）')
-        self._3d_dem_label.setToolTip(path)
-        self._3d_dem_clear_btn.setEnabled(True)
+        self._apply_local_dem(dem, path)
+        sm = SettingsManager()
+        sm.set('spatial_local_dem', path)
+        sm.save()
 
     def _on_clear_dem_clicked(self) -> None:
-        """清除本地 DEM：三维地形回退在线高程瓦片。"""
+        """清除本地 DEM：三维地形回退在线高程瓦片，并删除设置记录。"""
         self._3d_view.set_local_dem(None)
+        self._dem_base_text = ''
         self._3d_dem_label.setText('未导入（在线下载高程）')
         self._3d_dem_label.setToolTip('')
         self._3d_dem_clear_btn.setEnabled(False)
+        sm = SettingsManager()
+        sm.set('spatial_local_dem', '')
+        sm.save()
 
     def _auto_prefetch_tracks(self) -> None:
         """轨迹加载后自动下载测线所在地理区域（按 包围盒+瓦图源 去重）。

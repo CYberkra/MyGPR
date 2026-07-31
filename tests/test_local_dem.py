@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from ui.widgets.local_dem import load_xyz_grid
+from ui.widgets.local_dem import dem_covers_bbox, load_xyz_grid
 
 
 def _write(tmp_path, text, name='dem.xyz'):
@@ -69,3 +69,16 @@ def test_no_valid_data_rejected(tmp_path):
     path = _write(tmp_path, 'header only\nnothing numeric\n')
     with pytest.raises(ValueError, match='数据行'):
         load_xyz_grid(path)
+
+
+def test_dem_covers_bbox():
+    dem = {'lons': np.array([104.0, 104.1]), 'lats': np.array([31.0, 31.1])}
+    # 完全在内部
+    assert dem_covers_bbox(dem, (104.01, 31.01, 104.09, 31.09))
+    # 边界贴齐也算覆盖
+    assert dem_covers_bbox(dem, (104.0, 31.0, 104.1, 31.1))
+    # 各方向超出
+    assert not dem_covers_bbox(dem, (103.9, 31.01, 104.09, 31.09))
+    assert not dem_covers_bbox(dem, (104.01, 31.01, 104.2, 31.09))
+    assert not dem_covers_bbox(dem, (104.01, 30.9, 104.09, 31.09))
+    assert not dem_covers_bbox(dem, (104.01, 31.01, 104.09, 31.2))

@@ -34,6 +34,7 @@ from PyQt6.QtWidgets import QLabel, QVBoxLayout, QWidget
 from qfluentwidgets import FluentIcon as FIF
 
 from ui.widgets.context_menus import add_action, make_menu
+from ui.widgets.local_dem import dem_covers_bbox
 from ui.widgets.map_tiles import (TILE_SOURCE_MAX_ZOOM, WORLD_SIZE_M,
                                   extract_epsg, lonlat_to_tile, tile_url,
                                   wgs84_to_gcj02, zoom_for_resolution)
@@ -254,6 +255,9 @@ class _TerrainWorker(QRunnable):
 class Trajectory3DView(QWidget):
     """三维轨迹视图容器（内部按需创建 GLViewWidget 或降级 QLabel）。"""
 
+    # 本地 DEM 覆盖提示：'' = 正常/已清除；非空 = 警告文本（GUI 线程发出）
+    local_dem_notice = pyqtSignal(str)
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         layout = QVBoxLayout(self)
@@ -378,6 +382,8 @@ class Trajectory3DView(QWidget):
         本地 DEM 优先于在线高程瓦片；影像贴图不受影响（仍在线下载）。
         """
         self._local_dem = dem
+        if dem is None:
+            self.local_dem_notice.emit('')
         if self._gl_view is None or self._terrain_src is None:
             return
         self._terrain_generation += 1   # 使进行中的地形任务失效
@@ -485,15 +491,23 @@ class Trajectory3DView(QWidget):
             # 本地 DEM（WGS84 经纬度格网）：轴换算到 Mercator 米交给 worker
             # 采样（Mercator x 仅随经度、y 仅随纬度，可 1D 分别换算）
             if self._local_dem is not None:
-                lons = np.asarray(self._local_dem['lons'], dtype=float)
-                lats = np.asarray(self._local_dem['lats'], dtype=float)
+                dlons = np.asarray(self._local_dem['lons'], dtype=float)
+                dlats = np.asarray(self._local_dem['lats'], dtype=float)
                 to_merc = LockedTransformer(4326, 3857)
-                dmx, _ = to_merc.transform(lons, np.zeros_like(lons))
-                _, dmy = to_merc.transform(np.zeros_like(lats), lats)
+                dmx, _ = to_merc.transform(dlons, np.zeros_like(dlons))
+                _, dmy = to_merc.transform(np.zeros_like(dlats), dlats)
                 prep['local_dem'] = {
                     'elev': np.asarray(self._local_dem['elev'], dtype=np.float32),
                     'mx': np.asarray(dmx, dtype=float),
                     'my': np.asarray(dmy, dtype=float)}
+                # 覆盖检查：未覆盖区域采样为 NaN → 被均值填平，提前提示
+                if dem_covers_bbox(self._local_dem,
+                                   (min(lons), min(lats),
+                                    max(lons), max(lats))):
+                    self.local_dem_notice.emit('')
+                else:
+                    self.local_dem_notice.emit(
+                        '本地 DEM 未完全覆盖当前测区，未覆盖区域地形将被填平')
             return prep
         except Exception as exc:  # noqa: BLE001 - 换算失败降级平面网格
             _LOGGER.debug('地形预计算失败: %s', exc)

@@ -70,3 +70,17 @@ def load_xyz_grid(path: str) -> dict:
     elev = np.full((ny, nx), np.nan, dtype=np.float32)
     elev[iy, ix] = zs_a.astype(np.float32)
     return {'elev': elev, 'lons': lons, 'lats': lats}
+
+
+def dem_covers_bbox(dem: dict, bbox, tolerance_deg: float = 1e-6) -> bool:
+    """本地 DEM 是否完整覆盖经纬度包围盒。
+
+    bbox: (min_lon, min_lat, max_lon, max_lat)；tolerance_deg 为边界容差。
+    """
+    min_lon, min_lat, max_lon, max_lat = (float(v) for v in bbox)
+    lons = np.asarray(dem['lons'], dtype=float)
+    lats = np.asarray(dem['lats'], dtype=float)
+    return (lons[0] <= min_lon + tolerance_deg
+            and lons[-1] >= max_lon - tolerance_deg
+            and lats[0] <= min_lat + tolerance_deg
+            and lats[-1] >= max_lat - tolerance_deg)
