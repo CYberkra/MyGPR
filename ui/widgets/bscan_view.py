@@ -7,14 +7,23 @@
 - ImageItem(axisOrder='row-major') + invertY(True)
 - autoLevels=False + 显式 levels=(vmin, vmax)
 - ColorBarItem 随行同步
+
+右键菜单（RoundMenu）：缩放组 / 色标子菜单 / 复制图像 / 导出 PNG。
+接入时已 vb.setMenuEnabled(False) 关闭 pyqtgraph 原生英文菜单
+（代价：右键拖拽框选缩放失效，由菜单缩放项补偿）。
 """
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QDateTime, pyqtSignal
 from PyQt6.QtGui import QColor
-from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import (QApplication, QHBoxLayout, QFileDialog,
+                             QVBoxLayout, QWidget)
 
 import pyqtgraph as pg
 from qfluentwidgets import FluentIcon as FIF, PushButton
+
+from ui import constants
+from ui.widgets.context_menus import (add_action, add_checkable_submenu,
+                                      make_menu)
 
 
 class BScanView(QWidget):
@@ -22,14 +31,17 @@ class BScanView(QWidget):
 
     信号:
         sig_point_picked(int, int): pick 模式下鼠标点击发射 (trace_index, sample_index)。
+        sig_colormap_changed(str): 右键菜单切换色标时发射（页面同步 ComboBox 用）。
     """
 
     sig_point_picked = pyqtSignal(int, int)
+    sig_colormap_changed = pyqtSignal(str)
 
     def __init__(self, parent=None, *, with_colorbar: bool = True):
         super().__init__(parent)
         self._pick_enabled = False
         self._image_shape = None  # (traces, samples) 显示坐标系尺寸
+        self._cmap_name = constants.DEFAULT_COLORMAP
 
         self._glw = pg.GraphicsLayoutWidget(self)
         self._plot = self._glw.addPlot(row=0, col=0, title='B-Scan图像')
@@ -37,6 +49,9 @@ class BScanView(QWidget):
         self._plot.setLabel('left', '采样点')
         self._plot.invertY(True)
         self._plot.setMouseEnabled(x=True, y=True)
+        # 关闭 pyqtgraph 原生英文右键菜单（右拖框选缩放随之失效，
+        # 缩放操作由自定义 RoundMenu 提供）
+        self._plot.vb.setMenuEnabled(False)
 
         # 预分配并复用
         self._image_item = pg.ImageItem(axisOrder='row-major')
@@ -176,10 +191,48 @@ class BScanView(QWidget):
 
     def set_colormap(self, name: str) -> None:
         """按 matplotlib 名取 LUT（九项见 SPEC §1，默认 seismic）。"""
+        self._cmap_name = str(name)
         self._cmap = pg.colormap.getFromMatplotlib(name)
         self._image_item.setColorMap(self._cmap)
         if self._colorbar is not None:
             self._colorbar.setColorMap(self._cmap)
+
+    def _choose_colormap(self, name: str) -> None:
+        """右键菜单选色标：应用到本视图并发信号让页面同步控件。"""
+        self.set_colormap(name)
+        self.sig_colormap_changed.emit(name)
+
+    # ------------------------------------------------------------------ 右键菜单
+    def _show_context_menu(self, event) -> None:
+        menu = make_menu(self)
+        add_action(menu, FIF.ZOOM_IN, '放大', self.zoom_in)
+        add_action(menu, FIF.ZOOM_OUT, '缩小', self.zoom_out)
+        add_action(menu, FIF.FIT_PAGE, '自适应', self.fit_to_data)
+        add_action(menu, None, '1:1', self.reset_1to1)
+        menu.addSeparator()
+        add_checkable_submenu(menu, '色标', constants.COLORMAPS,
+                              self._cmap_name, self._choose_colormap)
+        menu.addSeparator()
+        add_action(menu, FIF.COPY, '复制图像', self._copy_image,
+                   enabled=self._image_shape is not None)
+        add_action(menu, FIF.SAVE, '导出 PNG…', self._export_png,
+                   enabled=self._image_shape is not None)
+        menu.exec(event.screenPos().toPoint())
+
+    def _copy_image(self) -> None:
+        """视图内容复制到剪贴板。"""
+        QApplication.clipboard().setPixmap(self._glw.grab())
+
+    def _export_png(self) -> None:
+        """视图内容导出 PNG（默认文件名含标题与时间戳）。"""
+        import re
+        title = re.sub(r'[\\/:*?"<>|\s]+', '_', self._plot.titleLabel.text)
+        stamp = QDateTime.currentDateTime().toString('yyyyMMdd_HHmmss')
+        path, _selected = QFileDialog.getSaveFileName(
+            self, '导出 B-Scan 图像', f'bscan_{title}_{stamp}.png',
+            'PNG 图片 (*.png)')
+        if path:
+            self._glw.grab().save(path, 'PNG')
 
     # ------------------------------------------------------------------ 交互
     def set_pick_enabled(self, enabled: bool) -> None:
@@ -193,6 +246,10 @@ class BScanView(QWidget):
         self._scatter.setData(spots)
 
     def _on_mouse_clicked(self, event) -> None:
+        if event.button() == Qt.MouseButton.RightButton:
+            if self._plot.sceneBoundingRect().contains(event.scenePos()):
+                self._show_context_menu(event)
+            return
         if not self._pick_enabled or self._image_shape is None:
             return
         if event.button() != Qt.MouseButton.LeftButton:

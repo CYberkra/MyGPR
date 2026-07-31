@@ -12,26 +12,34 @@
 信号：import_requested(dict) / sync_requested(dict) /
 line_selected(str) / artifact_preview_requested(str, str)。
 
+右键菜单（RoundMenu）：测线表 = 复制数据文件路径 / 打开数据所在文件夹 /
+复制测线号（路径经 set_source_path_resolver 注入的回调查询）；
+成果表 = 预览所选（双击同效）。
+
 import_requested payload：{'preflight': bool, 'source', 'line_id', 'name', 'dielectric'}
 （'预检' 按钮 preflight=True → ProjectController.preflight_import；
  '导入' 按钮 preflight=False → ProjectController.import_line）
 sync_requested payload：{'line_id', 'paths': {'rtk', 'imu', 'altimeter', 'trace_timestamps'}}
 """
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont
+import os
+
+from PyQt6.QtCore import Qt, QUrl, pyqtSignal
+from PyQt6.QtGui import QDesktopServices, QFont
 from PyQt6.QtWidgets import (
-    QFileDialog, QFrame, QHBoxLayout, QHeaderView, QLabel, QTableWidget,
-    QTableWidgetItem, QVBoxLayout, QWidget,
+    QApplication, QFileDialog, QFrame, QHBoxLayout, QHeaderView, QLabel,
+    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
     BodyLabel, CaptionLabel, CardWidget, DoubleSpinBox, InfoBar,
     InfoBarPosition, LineEdit, PrimaryPushButton, PushButton, ScrollArea,
     SubtitleLabel,
 )
+from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants
 from ui.widgets import BScanView, clear_invalid, mark_invalid, validate_non_empty
+from ui.widgets.context_menus import add_action, make_menu
 
 # 导入文件对话框过滤器：优先 core.gpr_format_registry，失败回退（SPEC §6.3）
 try:
@@ -102,6 +110,7 @@ class ProjectPage(QWidget):
         self._artifacts = []        # list[ProjectArtifact]
         self._current_line_id = ''
         self._filling_table = False
+        self._source_path_resolver = None   # 主窗口注入：line_id → 源文件路径
 
         root = QVBoxLayout(self)
         root.setContentsMargins(*constants.PAGE_MARGINS)
@@ -307,6 +316,10 @@ class ProjectPage(QWidget):
         self._lines_table.setMinimumHeight(180)
         self._lines_table.itemSelectionChanged.connect(
             self._on_line_selection_changed)
+        self._lines_table.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu)
+        self._lines_table.customContextMenuRequested.connect(
+            self._on_lines_context_menu)
         lines_layout.addWidget(self._lines_table)
         layout.addWidget(lines_card)
 
@@ -326,6 +339,12 @@ class ProjectPage(QWidget):
         art_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         art_header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self._artifacts_table.setMinimumHeight(150)
+        self._artifacts_table.itemDoubleClicked.connect(
+            lambda _item: self._emit_artifact_preview())
+        self._artifacts_table.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu)
+        self._artifacts_table.customContextMenuRequested.connect(
+            self._on_artifacts_context_menu)
         art_layout.addWidget(self._artifacts_table)
         art_btn_row = QHBoxLayout()
         self.preview_artifact_btn = PushButton('预览所选', art_card)
@@ -501,6 +520,56 @@ class ProjectPage(QWidget):
         line_id = (self._current_line_id
                    or self.line_id_edit.text().strip() or 'L01')
         self.sync_requested.emit({'line_id': line_id, 'paths': paths})
+
+    def set_source_path_resolver(self, resolver) -> None:
+        """主窗口注入：line_id → 源数据文件路径（str|None）的查询回调。
+
+        右键菜单"复制路径/打开所在文件夹"的可用性依赖它；未注入或
+        查询返回 None 时对应菜单项禁用。
+        """
+        self._source_path_resolver = resolver
+
+    # ------------------------------------------------------------ 右键菜单
+    def _on_lines_context_menu(self, pos) -> None:
+        row = self._lines_table.rowAt(pos.y())
+        if row < 0 or row >= len(self._lines):
+            return
+        self._lines_table.selectRow(row)
+        line_id = str(getattr(self._lines[row], 'line_id', '') or '')
+        if not line_id:
+            return
+        source = None
+        if self._source_path_resolver is not None:
+            try:
+                source = self._source_path_resolver(line_id)
+            except Exception:  # noqa: BLE001 - 查询失败按无路径处理
+                source = None
+        menu = make_menu(self)
+        add_action(menu, FIF.COPY, '复制数据文件路径',
+                   lambda: QApplication.clipboard().setText(source),
+                   enabled=bool(source))
+        add_action(menu, FIF.FOLDER, '打开数据所在文件夹',
+                   lambda: self._open_source_folder(source),
+                   enabled=bool(source))
+        menu.addSeparator()
+        add_action(menu, None, '复制测线号',
+                   lambda: QApplication.clipboard().setText(line_id))
+        menu.exec(self._lines_table.viewport().mapToGlobal(pos))
+
+    @staticmethod
+    def _open_source_folder(source: str) -> None:
+        folder = os.path.dirname(str(source))
+        if folder:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
+
+    def _on_artifacts_context_menu(self, pos) -> None:
+        row = self._artifacts_table.rowAt(pos.y())
+        if row < 0 or row >= len(self._artifacts):
+            return
+        self._artifacts_table.selectRow(row)
+        menu = make_menu(self)
+        add_action(menu, FIF.VIEW, '预览所选', self._emit_artifact_preview)
+        menu.exec(self._artifacts_table.viewport().mapToGlobal(pos))
 
     def _on_line_selection_changed(self) -> None:
         if self._filling_table:

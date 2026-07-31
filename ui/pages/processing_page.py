@@ -323,6 +323,9 @@ class ProcessingPage(QWidget):
 
         # 预览
         self._cmap_combo.currentTextChanged.connect(self._bscan.set_colormap)
+        # 反向同步：B-scan 右键菜单改色标 → ComboBox 跟随（防两处状态不一致）
+        self._bscan.sig_colormap_changed.connect(
+            self._cmap_combo.setCurrentText)
         self._refresh_levels_btn.clicked.connect(self._refresh_levels)
         self._load_line_btn.clicked.connect(self.line_load_requested)
 

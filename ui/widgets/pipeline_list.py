@@ -2,13 +2,19 @@
 
 每行：序号 + 方法名 + 启用 CheckBox + ↑ ↓ 删除 小按钮；
 选中行高亮并发 sig_step_selected（-1 无）；任何行操作后发 sig_changed。
+
+右键菜单（RoundMenu）：上移 / 下移 / 启用-禁用切换 / 删除，
+与行内小按钮等价（小按钮难发现的补偿路径）；Delete 键删除当前行。
 """
 
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (QHBoxLayout, QLabel, QListWidget,
                              QListWidgetItem, QVBoxLayout, QWidget)
 from qfluentwidgets import CheckBox, TransparentToolButton
 from qfluentwidgets import FluentIcon as FIF
+
+from ui.widgets.context_menus import add_action, make_menu
 
 
 class _StepRow(QWidget):
@@ -53,6 +59,13 @@ class PipelineList(QWidget):
         self._steps = []
         self._list = QListWidget(self)
         self._list.currentRowChanged.connect(self._on_row_changed)
+        self._list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._list.customContextMenuRequested.connect(self._on_context_menu)
+        self._delete_shortcut = QShortcut(
+            QKeySequence(QKeySequence.StandardKey.Delete), self._list,
+            context=Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self._delete_shortcut.activated.connect(
+            lambda: self._remove_step(self._list.currentRow()))
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -109,6 +122,33 @@ class PipelineList(QWidget):
 
     def _on_row_changed(self, row):
         self.sig_step_selected.emit(row if row >= 0 else -1)
+
+    def _on_context_menu(self, pos) -> None:
+        row = self._list.rowAt(pos.y())
+        if row < 0 or row >= len(self._steps):
+            return
+        self._list.setCurrentRow(row)
+        enabled = bool(self._steps[row]['enabled'])
+        menu = make_menu(self)
+        add_action(menu, FIF.UP, '上移',
+                   lambda: self._move_step(row, -1), enabled=row > 0)
+        add_action(menu, FIF.DOWN, '下移',
+                   lambda: self._move_step(row, 1),
+                   enabled=row < len(self._steps) - 1)
+        menu.addSeparator()
+        add_action(menu, FIF.ACCEPT if enabled else FIF.CANCEL,
+                   '禁用' if enabled else '启用',
+                   lambda: self._toggle_enabled(row))
+        menu.addSeparator()
+        add_action(menu, FIF.DELETE, '删除',
+                   lambda: self._remove_step(row))
+        menu.exec(self._list.viewport().mapToGlobal(pos))
+
+    def _toggle_enabled(self, idx) -> None:
+        if 0 <= idx < len(self._steps):
+            self._steps[idx]['enabled'] = not self._steps[idx]['enabled']
+            self._rebuild(select=idx)
+            self.sig_changed.emit()
 
     def _on_enabled_toggled(self, idx):
         if 0 <= idx < len(self._steps):

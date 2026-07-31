@@ -22,9 +22,12 @@ import urllib.request
 
 import numpy as np
 import pyqtgraph as pg
-from PyQt6.QtCore import QObject, QRectF, QRunnable, QThreadPool, pyqtSignal
+from PyQt6.QtCore import QObject, QRectF, QRunnable, Qt, QThreadPool, pyqtSignal
 from PyQt6.QtGui import QColor, QImage
+from PyQt6.QtWidgets import QApplication
+from qfluentwidgets import FluentIcon as FIF
 
+from ui.widgets.context_menus import add_action, make_menu
 from ui.widgets.map_tiles import (DEFAULT_TILE_SOURCE, TILE_SOURCES, WORLD_SIZE_M,
                                   choose_prefetch_zooms, extract_epsg,
                                   lonlat_to_mercator, lonlat_to_tile,
@@ -319,6 +322,8 @@ class MapView(pg.GraphicsLayoutWidget):
         self._plot.hideAxis('left')
         self._plot.setAspectLocked(True)
         self._plot.showGrid(False, False)
+        # 关闭 pyqtgraph 原生英文右键菜单，右键由自定义 RoundMenu 接管
+        self._plot.vb.setMenuEnabled(False)
 
         self._layer = TileLayer(source_key)
         self._layer.prefetch_progress.connect(self.prefetch_progress)
@@ -327,6 +332,7 @@ class MapView(pg.GraphicsLayoutWidget):
         self._track_items: list = []
         self._track_summaries: list[dict] = []
         self.setBackground('w')
+        self.scene().sigMouseClicked.connect(self._on_mouse_clicked)
 
     # ------------------------------------------------------------ 底图
     def source_key(self) -> str:
@@ -410,6 +416,19 @@ class MapView(pg.GraphicsLayoutWidget):
             all_x.append(xs)
             all_y.append(ys)
 
+        self.fit_to_tracks()
+
+    def fit_to_tracks(self) -> None:
+        """视野自适应到全部轨迹范围（右键菜单"适应全部测线"同用）。"""
+        all_x, all_y = [], []
+        for info in self._track_summaries:
+            xs, ys = info.get('xs'), info.get('ys')
+            if xs is None or ys is None or not len(xs):
+                continue
+            finite = np.isfinite(xs) & np.isfinite(ys)
+            if np.count_nonzero(finite):
+                all_x.append(np.asarray(xs)[finite])
+                all_y.append(np.asarray(ys)[finite])
         if all_x:
             xs = np.concatenate(all_x)
             ys = np.concatenate(all_y)
@@ -419,6 +438,27 @@ class MapView(pg.GraphicsLayoutWidget):
                 xRange=(xs.min() - margin_x, xs.max() + margin_x),
                 yRange=(ys.min() - margin_y, ys.max() + margin_y),
                 padding=0.0)
+
+    # ------------------------------------------------------------ 右键菜单
+    def _on_mouse_clicked(self, event) -> None:
+        if event.button() != Qt.MouseButton.RightButton:
+            return
+        if not self._plot.sceneBoundingRect().contains(event.scenePos()):
+            return
+        menu = make_menu(self)
+        add_action(menu, FIF.FIT_PAGE, '适应全部测线', self.fit_to_tracks,
+                   enabled=bool(self._track_summaries))
+        add_action(menu, FIF.DOWNLOAD, '下载当前区域瓦片',
+                   self.prefetch_current_view)
+        menu.addSeparator()
+        add_action(menu, FIF.COPY, '复制中心坐标', self._copy_center_lonlat)
+        menu.exec(event.screenPos().toPoint())
+
+    def _copy_center_lonlat(self) -> None:
+        """视图中心 → 经纬度（'纬度,经度'，便于粘贴到奥维等软件对照）。"""
+        center = self._plot.vb.viewRect().center()
+        lon, lat = mercator_to_lonlat(center.x(), center.y())
+        QApplication.clipboard().setText(f'{lat:.6f},{lon:.6f}')
 
     def track_summaries(self) -> list[dict]:
         """最近一次 set_tracks 的坐标转换摘要（投影信息卡用）。"""

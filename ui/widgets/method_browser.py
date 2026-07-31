@@ -5,12 +5,16 @@ UI：顶部搜索 LineEdit（占位"搜索方法…"，实时过滤）→ 分类
 徽章：推荐 = 主题色 themeColor() / 备选 = #9ca3af / 实验 = #f59e0b，
 QSS 用 SPEC §1 徽章模板。tooltip 显示 method_id 与参数数。
 双击发 sig_add_requested；单击选中发 sig_method_selected。
+右键菜单（RoundMenu）：添加到处理链（等同双击）/ 复制方法名。
 """
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (QHBoxLayout, QTreeWidget, QTreeWidgetItem,
-                             QVBoxLayout, QWidget, QLabel)
+from PyQt6.QtWidgets import (QApplication, QHBoxLayout, QTreeWidget,
+                             QTreeWidgetItem, QVBoxLayout, QWidget, QLabel)
 from qfluentwidgets import LineEdit, themeColor
+from qfluentwidgets import FluentIcon as FIF
+
+from ui.widgets.context_menus import add_action, make_menu
 
 # 标签 → 徽章（文字色, 底色）
 _TAG_BADGE_COLORS = {
@@ -53,6 +57,8 @@ class MethodBrowser(QWidget):
         self._tree.setColumnCount(1)
         self._tree.currentItemChanged.connect(self._on_current_changed)
         self._tree.itemDoubleClicked.connect(self._on_double_clicked)
+        self._tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._tree.customContextMenuRequested.connect(self._on_context_menu)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -138,6 +144,20 @@ class MethodBrowser(QWidget):
         mid = self._method_id_of(item)
         if mid:
             self.sig_add_requested.emit(mid)
+
+    def _on_context_menu(self, pos) -> None:
+        item = self._tree.itemAt(pos)
+        mid = self._method_id_of(item)
+        if not mid:
+            return
+        self._tree.setCurrentItem(item)
+        menu = make_menu(self)
+        add_action(menu, FIF.ADD, '添加到处理链',
+                   lambda: self.sig_add_requested.emit(mid))
+        menu.addSeparator()
+        add_action(menu, FIF.COPY, '复制方法名',
+                   lambda: QApplication.clipboard().setText(mid))
+        menu.exec(self._tree.viewport().mapToGlobal(pos))
 
     def current_method_id(self):
         """当前选中方法 id（无则 None），供"添加所选方法"按钮使用。"""

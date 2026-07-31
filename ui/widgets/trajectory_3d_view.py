@@ -21,7 +21,9 @@ import urllib.request
 import numpy as np
 from PyQt6.QtCore import QObject, QRunnable, Qt, QThreadPool, pyqtSignal
 from PyQt6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from qfluentwidgets import FluentIcon as FIF
 
+from ui.widgets.context_menus import add_action, make_menu
 from ui.widgets.map_tiles import extract_epsg
 from ui.widgets.terrain_tiles import (decode_terrarium, mosaic_from_tiles,
                                       sample_bilinear, terrarium_cache_path,
@@ -129,6 +131,9 @@ class Trajectory3DView(QWidget):
         self._terrain_signals = None
         self._terrain_generation = 0
         self._origin = None
+        self._extent = 1.0   # set_tracks 记录的数据范围（重置视角用）
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._show_context_menu)
         if _gl is not None:
             self._gl_view = _gl.GLViewWidget(self)
             self._gl_view.setBackgroundColor('w')
@@ -199,13 +204,8 @@ class Trajectory3DView(QWidget):
             self._line_items.append(item)
 
         # 网格随数据范围调整，相机距离/中心自动适配
-        grid_size = max(extent * 2.0, 100.0)
-        self._grid.setSize(grid_size, grid_size)
-        self._grid.setSpacing(grid_size / 20.0, grid_size / 20.0)
-        self._grid.setVisible(True)
-        self._gl_view.setCameraPosition(
-            distance=max(extent * 2.5, 100.0), elevation=30.0, azimuth=45.0)
-        self._gl_view.opts['center'] = _Vector(0.0, 0.0, 0.0)
+        self._extent = extent
+        self._reset_camera()
 
         # 坐标系可识别 → 后台构建真实地形
         if epsg is None and lonlat_like:
@@ -226,6 +226,49 @@ class Trajectory3DView(QWidget):
                 self._terrain_pool.start(_TerrainWorker(
                     self._terrain_generation, prep,
                     _TERRAIN_CACHE_ROOT, self._terrain_signals))
+
+    # ------------------------------------------------------------ 视角 / 右键菜单
+    def _reset_camera(self) -> None:
+        """按记录的数据范围重置网格尺寸与相机（右键"重置视角"同用）。"""
+        if self._gl_view is None or self._grid is None:
+            return
+        extent = self._extent
+        grid_size = max(extent * 2.0, 100.0)
+        self._grid.setSize(grid_size, grid_size)
+        self._grid.setSpacing(grid_size / 20.0, grid_size / 20.0)
+        # 有地形时网格保持隐藏（旧逻辑：set_tracks 先清地形再显网格，等价）
+        self._grid.setVisible(self._terrain_item is None)
+        self._gl_view.setCameraPosition(
+            distance=max(extent * 2.5, 100.0), elevation=30.0, azimuth=45.0)
+        self._gl_view.opts['center'] = _Vector(0.0, 0.0, 0.0)
+
+    def _show_context_menu(self, pos) -> None:
+        if self._gl_view is None:
+            return
+        from qfluentwidgets import Action
+        menu = make_menu(self)
+        add_action(menu, FIF.ROTATE, '重置视角', self._reset_camera)
+        menu.addSeparator()
+        terrain_action = Action('显示地形')
+        terrain_action.setCheckable(True)
+        terrain_action.setChecked(
+            self._terrain_item is not None and self._terrain_item.visible())
+        terrain_action.triggered.connect(self._toggle_terrain)
+        menu.addAction(terrain_action)
+        grid_action = Action('显示网格')
+        grid_action.setCheckable(True)
+        grid_action.setChecked(self._grid is not None and self._grid.visible())
+        grid_action.triggered.connect(self._toggle_grid)
+        menu.addAction(grid_action)
+        menu.exec(self.mapToGlobal(pos))
+
+    def _toggle_terrain(self, checked: bool) -> None:
+        if self._terrain_item is not None:
+            self._terrain_item.setVisible(bool(checked))
+
+    def _toggle_grid(self, checked: bool) -> None:
+        if self._grid is not None:
+            self._grid.setVisible(bool(checked))
 
     # ------------------------------------------------------------ 地形
     def _prepare_terrain(self, epsg: int, bbox: tuple) -> dict | None:

@@ -352,6 +352,9 @@ class MyGPRMainWindow(FluentWindow):
             project.line_selected.connect(self._on_line_selected)
             project.artifact_preview_requested.connect(self._on_artifact_preview_requested)
             project.close_project_requested.connect(self._on_close_project_requested)
+            # 测线表右键"复制路径/打开所在文件夹"的路径查询回调
+            project.set_source_path_resolver(
+                self.project_controller.line_source_path)
 
         # ---------------- 处理页（SPEC §6.5）
         if hasattr(processing, 'run_requested'):

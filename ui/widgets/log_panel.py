@@ -11,7 +11,8 @@ from datetime import datetime
 
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtGui import QTextCursor
-from PyQt6.QtWidgets import QHBoxLayout, QStackedWidget, QTextEdit, QVBoxLayout
+from PyQt6.QtWidgets import (QFileDialog, QHBoxLayout, QStackedWidget,
+                             QTextEdit, QVBoxLayout)
 from qfluentwidgets import CardWidget, PushButton, SegmentedWidget
 
 from .job_widgets import MiniJobList
@@ -88,6 +89,10 @@ class LogPanel(CardWidget):
         clear_btn = PushButton('清空', self)
         clear_btn.setFixedWidth(60)
         clear_btn.clicked.connect(self._log_edit.clear)
+        export_btn = PushButton('导出…', self)
+        export_btn.setFixedWidth(70)
+        export_btn.setToolTip('日志文本保存到文件')
+        export_btn.clicked.connect(self._export_log)
 
         log_page = CardWidget(self)
         log_layout = QVBoxLayout(log_page)
@@ -96,6 +101,7 @@ class LogPanel(CardWidget):
         log_layout.addWidget(self._log_edit, 1)
         btn_row = QHBoxLayout()
         btn_row.addWidget(clear_btn)
+        btn_row.addWidget(export_btn)
         btn_row.addStretch(1)
         log_layout.addLayout(btn_row)
 
@@ -137,6 +143,20 @@ class LogPanel(CardWidget):
 
     def mini_jobs(self) -> MiniJobList:
         return self._mini_jobs
+
+    def _export_log(self) -> None:
+        """日志全文保存为 .txt（纯文本，不含着色标记）。"""
+        path, _selected = QFileDialog.getSaveFileName(
+            self, '导出日志',
+            'mygpr_log_%s.txt' % datetime.now().strftime('%Y%m%d_%H%M%S'),
+            '文本文件 (*.txt)')
+        if not path:
+            return
+        try:
+            with open(path, 'w', encoding='utf-8') as fh:
+                fh.write(self._log_edit.toPlainText())
+        except OSError as exc:
+            self.append_log('WARNING 日志导出失败: %s' % exc)
 
     def apply_theme(self, dark: bool) -> None:
         """主题换肤：深色 #1e1e1e/#333；浅色 #f5f5f5/#ddd/#333。"""

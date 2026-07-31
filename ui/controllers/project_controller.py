@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 import logging
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -168,6 +170,27 @@ class ProjectController(QObject):
         run_worker(runner, name="mygpr-project-close")
 
     # ------------------------------------------------------------------
+    def line_source_path(self, line_id: str) -> str | None:
+        """当前项目某测线的源数据文件路径（右键菜单"复制路径/打开位置"用）。
+
+        读项目根 ``raw/<line_id>/import_manifest.json`` 的 ``source_path``
+        （导入时由 field_line_store 持久化）；无项目/无清单/无字段返回 None。
+        同步小文件读取，供 UI 右键菜单构建时直接调用。
+        """
+        if self._current is None or not line_id:
+            return None
+        manifest = (Path(self._current.root_path) / 'raw' / str(line_id)
+                    / 'import_manifest.json')
+        try:
+            with open(manifest, 'r', encoding='utf-8') as fh:
+                payload = json.load(fh)
+        except (OSError, ValueError):
+            return None
+        if not isinstance(payload, dict):
+            return None
+        source = str(payload.get('source_path') or '')
+        return source or None
+
     def refresh_lines(self) -> None:
         backend = self._backend()
         project_id = self.current_project_id
