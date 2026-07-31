@@ -2,10 +2,10 @@
 """ProcessingPage — 处理工作台（SPEC §6.5）。
 
 三栏 QHBoxLayout：
-- 左栏 ScrollArea 固定 380px：卡片"方法库"（MethodBrowser）
+- 左栏 ScrollArea 固定 320px：卡片"方法库"（MethodBrowser）
 - 中栏 stretch：卡片"数据预览"（SegmentedWidget 原始数据/处理结果 + BScanView
   + colormap ComboBox + p_low/p_high + 刷新色阶 + 加载测线数据）+ 进度条（初始隐藏）
-- 右栏 ScrollArea 固定 400px：卡片"处理链"（PipelineList + 添加所选方法）、
+- 右栏 ScrollArea 固定 340px：卡片"处理链"（PipelineList + 添加所选方法）、
   卡片"参数设置"（ParamForm + 应用到选中步骤）、卡片"执行"、卡片"AutoTune 自动调参"
 
 页面纯展示 + 发信号，不直接调 controller/backend。
@@ -159,8 +159,8 @@ class ProcessingPage(QWidget):
         columns.setSpacing(constants.PAGE_SPACING)
         root.addLayout(columns, 1)
 
-        # ---------------- 左栏（固定 380px，可折叠）
-        left_scroll, left_layout = _make_scroll_column(380)
+        # ---------------- 左栏（展开 320px，可折叠；滚动栏宽须与面板展开宽一致）
+        left_scroll, left_layout = _make_scroll_column(320)
         left_panel = CollapsiblePanel(
             'left', expand_width=320, collapse_width=40, parent=self)
         left_panel.set_content_widget(left_scroll)
@@ -244,8 +244,8 @@ class ProcessingPage(QWidget):
         self._progress_bar.setVisible(False)
         middle_layout.addWidget(self._progress_bar)
 
-        # ---------------- 右栏（固定 400px，可折叠）
-        right_scroll, right_layout = _make_scroll_column(400)
+        # ---------------- 右栏（展开 340px，可折叠；滚动栏宽须与面板展开宽一致）
+        right_scroll, right_layout = _make_scroll_column(340)
         right_panel = CollapsiblePanel(
             'right', expand_width=340, collapse_width=40, parent=self)
         right_panel.set_content_widget(right_scroll)

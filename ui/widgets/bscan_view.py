@@ -63,7 +63,8 @@ class BScanView(QWidget):
         layout.addWidget(self._glw, 1)
 
         self._glw.scene().sigMouseClicked.connect(self._on_mouse_clicked)
-        self.apply_theme(False)
+        from qfluentwidgets import isDarkTheme
+        self.apply_theme(isDarkTheme())
 
     def _build_toolbar(self) -> QHBoxLayout:
         """缩放/平移/自适应工具条。"""
@@ -118,7 +119,8 @@ class BScanView(QWidget):
         self._plot.vb.scaleBy((1.0 / 1.2, 1.0 / 1.2))
 
     def fit_to_data(self) -> None:
-        """自适应窗口：显示全部数据。"""
+        """自适应窗口：显示全部数据（解除 1:1 的纵横锁定）。"""
+        self._plot.vb.setAspectLocked(False)
         self._plot.vb.autoRange()
 
     def reset_1to1(self) -> None:
@@ -158,9 +160,14 @@ class BScanView(QWidget):
         if mat.ndim != 2:
             raise ValueError('B-Scan 矩阵必须是二维 (samples, traces)')
         view = mat  # 零拷贝；row-major 下 y=采样(行)、x=道(列)
-        self._image_shape = (view.shape[1], view.shape[0])  # (traces, samples)
+        new_shape = (view.shape[1], view.shape[0])  # (traces, samples)
+        shape_changed = new_shape != self._image_shape
+        self._image_shape = new_shape
         self._image_item.setImage(view, autoLevels=False,
                                   levels=(float(vmin), float(vmax)))
+        if shape_changed:
+            # 新数据尺寸变化时自动铺满视野，避免换测线后图像跑出可视区
+            self.fit_to_data()
         if self._colorbar is not None:
             self._colorbar.setLevels((float(vmin), float(vmax)))
         self._plot.setTitle(title or 'B-Scan图像')
@@ -207,7 +214,7 @@ class BScanView(QWidget):
         self._plot.setTitle('B-Scan图像')
 
     def apply_theme(self, dark: bool) -> None:
-        """深色 bg 'k'/文字 'w'；浅色 bg 'w'/文字 'k'；轴 pen/textPen 同步。"""
+        """深色 bg 'k'/文字 'w'；浅色 bg 'w'/文字 'k'；轴 pen/textPen/标签同步。"""
         bg = 'k' if dark else 'w'
         fg = 'w' if dark else 'k'
         self._glw.setBackground(bg)
@@ -216,9 +223,14 @@ class BScanView(QWidget):
             axis = self._plot.getAxis(name)
             axis.setPen(pen)
             axis.setTextPen(pen)
+            # 刻度文字由 textPen 控制，但轴标题（道数/采样点）是独立 label，
+            # 不随 textPen 变色，需显式同步，否则深色主题下标题隐身
+            axis.setLabel(text=axis.labelText, color=fg)
         title_item = self._plot.titleLabel
         title_item.setText(title_item.text, color=fg)
         if self._colorbar is not None:
             caxis = self._colorbar.axis
             caxis.setPen(pen)
             caxis.setTextPen(pen)
+            if getattr(caxis, 'labelText', ''):
+                caxis.setLabel(text=caxis.labelText, color=fg)

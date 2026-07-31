@@ -40,13 +40,18 @@ class CollapsiblePanel(QWidget):
         self._content_layout.setContentsMargins(0, 0, 0, 0)
         self._content_layout.setSpacing(0)
 
-        # 折叠按钮
+        # 折叠按钮：明显底色 + 描边 + hover 高亮，窄条也能一眼发现
         self._collapse_btn = PushButton(self)
-        self._collapse_btn.setFixedSize(18, 60)
+        self._collapse_btn.setFixedSize(22, 64)
         self._update_button_icon()
-        self._collapse_btn.setToolTip('收起/展开面板')
+        self._collapse_btn.setToolTip('收起 / 展开面板')
         self._collapse_btn.setStyleSheet(
-            'PushButton { border: none; border-radius: 0; font-size: 10px; padding: 0; }')
+            'PushButton {'
+            ' background-color: rgba(0, 120, 215, 0.10);'
+            ' border: 1px solid rgba(0, 120, 215, 0.45);'
+            ' border-radius: 4px; padding: 0; }'
+            'PushButton:hover { background-color: rgba(0, 120, 215, 0.25); }'
+            'PushButton:pressed { background-color: rgba(0, 120, 215, 0.35); }')
         self._collapse_btn.clicked.connect(self.toggle)
 
         # 布局：按钮 + 内容（或 内容 + 按钮）

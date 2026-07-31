@@ -497,6 +497,12 @@ class MyGPRMainWindow(FluentWindow):
         """主题切换槽：setTheme + LogPanel 换肤 + 各 View.apply_theme + pg 背景。"""
         dark = str(theme) == constants.THEME_DARK
         apply_theme(theme)
+        # qfluentwidgets 1.11 的 CardWidget 等纯 paintEvent 控件在主题切换时
+        # 不会自动触发重绘（浅色底 + 深色文字的"半套主题"问题），这里强制
+        # 全量 update()，保证深浅主题即时、完整地生效。
+        for widget in self.findChildren(QWidget):
+            widget.update()
+        self.update()
         # 日志框换肤（style_spec §2.5）：启动回放浅色主题时保留初始 #2b2b2b 深底
         if not self._restoring_settings or dark:
             if hasattr(self.log_panel, 'apply_theme'):
