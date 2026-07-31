@@ -16,7 +16,7 @@ def clamp01(value: float) -> float:
     """Return *value* clipped to the closed interval [0, 1]."""
     try:
         value = float(value)
-    except Exception:
+    except (TypeError, ValueError, OverflowError):
         return 0.0
     if value != value:  # NaN
         return 0.0

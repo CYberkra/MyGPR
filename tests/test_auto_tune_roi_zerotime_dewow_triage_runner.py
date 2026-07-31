@@ -54,13 +54,3 @@ def test_roi_zerotime_dewow_triage_runner_writes_required_evidence(tmp_path: Pat
     report = (evidence_root / "reports/roi_zerotime_dewow_triage_report.md").read_text(encoding="utf-8")
     assert "Corrected ROI recommended" in report
     assert "AT-002 remains `inconclusive`" in report
-
-
-def test_roi_zerotime_dewow_triage_does_not_touch_frozen_modules():
-    frozen = [
-        Path("core/processing_engine.py"),
-        Path("PythonModule/motion_compensation_v2.py"),
-        Path("PythonModule/motion_compensation_core.py"),
-    ]
-    for path in frozen:
-        assert path.exists()

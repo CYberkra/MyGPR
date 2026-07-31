@@ -70,12 +70,12 @@ def test_motion_compensation_category_exists():
 
 
 def test_auto_tune_stage_assigned_for_all_motion_methods():
-    """Core motion methods map to motion_comp; vibration is denoise/artifact work."""
+    """Core motion methods map to motion_comp; vibration is artifact suppression."""
     for key in CORE_MOTION_METHODS:
         assert AUTO_TUNE_STAGE_BY_METHOD.get(key) == "motion_comp", f"{key} auto_tune_stage mismatch"
         assert PROCESSING_METHODS[key].get("auto_tune_family") == "motion_comp"
         assert PROCESSING_METHODS[key].get("auto_tune_enabled") is True
-    assert AUTO_TUNE_STAGE_BY_METHOD.get(VIBRATION_METHOD) == "denoise"
+    assert AUTO_TUNE_STAGE_BY_METHOD.get(VIBRATION_METHOD) == "artifact"
     assert PROCESSING_METHODS[VIBRATION_METHOD].get("auto_tune_family") == "denoise"
 
 

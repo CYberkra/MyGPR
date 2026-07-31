@@ -312,7 +312,7 @@ def _score_candidate(
 
     warning_parts = []
     if roi_energy_ratio < 0.35 and method != "baseline":
-        warning_parts.append("ROI 能量削弱明显")
+        warning_parts.append("关注范围能量削弱明显")
     if residual_ratio > 0.95 and method != "baseline":
         warning_parts.append("背景抑制有限")
     if cnr_gain < -0.05 and method != "baseline":

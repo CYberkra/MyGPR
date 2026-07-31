@@ -137,14 +137,26 @@ def _parse_rtk_rows(rows: list[dict[str, str]]) -> dict[str, Any]:
         "local_y_m",
         "local_z_m",
         "hdop",
+        "pdop",
+        "vdop",
+        "speed_mps",
     ):
         value = _optional_float_array(rows, resolved[field])
         if value is not None:
             payload[field] = value
-    for field in ("rtk_fix_type", "satellites"):
-        value = _optional_int_array(rows, resolved[field])
-        if value is not None:
-            payload[field] = value
+    satellites = _optional_int_array(rows, resolved["satellites"])
+    if satellites is not None:
+        payload["satellites"] = satellites
+    fix_column = resolved["rtk_fix_type"]
+    if fix_column is not None:
+        # Preserve the legacy numeric RTK fix contract whenever the source is
+        # numeric (for example 4=fixed, 5=float).  Vendor exports may also use
+        # labels such as "FIX"/"FLOAT", so fall back to a normalized string
+        # array instead of rejecting those files.
+        try:
+            payload["rtk_fix_type"] = _coerce_int_array(rows, fix_column)
+        except (TypeError, ValueError):
+            payload["rtk_fix_type"] = _optional_string_array(rows, fix_column)
     return _sort_by_timestamp(payload)
 
 

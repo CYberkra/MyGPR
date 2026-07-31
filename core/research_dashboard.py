@@ -14,7 +14,9 @@ from core.app_paths import expand_path_template
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_CONFIG_PATH = ROOT / "config" / "research_dashboard_defaults.json"
+_SOURCE_CONFIG_PATH = ROOT / "config" / "research_dashboard_defaults.json"
+_PACKAGED_CONFIG_PATH = ROOT / "mygpr" / "resources" / "config" / "research_dashboard_defaults.json"
+DEFAULT_CONFIG_PATH = _SOURCE_CONFIG_PATH if _SOURCE_CONFIG_PATH.is_file() else _PACKAGED_CONFIG_PATH
 
 
 @dataclass

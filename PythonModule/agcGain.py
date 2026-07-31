@@ -21,7 +21,6 @@ def agcGain(
     ----------
     Apply automated gain controll (AGC) by normalizing the energy
     of the signal over a given window width in each trace
-
     INPUT:
     ----------
     infilename        str,csv file of the data that needs to be processed
@@ -32,7 +31,6 @@ def agcGain(
     Scans_per_meter   int, 头信息中 Scans per meter 的值,如果该值为0，则可以用头信息中 Scans per second 的值代替。
     window            int, window width [in "number of samples"] ; 假设时间采样总数量数是N，则取值范围是[1,N]
                          例如FILE____032.DZT数据的时间采样总数量是512，则window的取值范围是[1,512]
-
     OUTPUT:
     ----------
     twtt       float,one-dimensional array, timeline, the unit is (ns)
@@ -41,18 +39,7 @@ def agcGain(
     """
 
     # 延迟导入 read_file_data
-    try:
-        from read_file_data import readcsv, savecsv, save_image
-    except ImportError:
-        import sys
-        import os
-
-        # 在打包环境中添加父目录到路径
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        parent_dir = os.path.dirname(current_dir)
-        if parent_dir not in sys.path:
-            sys.path.insert(0, parent_dir)
-        from read_file_data import readcsv, savecsv, save_image
+    from read_file_data import readcsv, savecsv, save_image
     # 读取数据矩阵
     data = readcsv(infilename)
     # 创建时间轴

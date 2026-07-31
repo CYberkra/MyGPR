@@ -427,7 +427,7 @@ def plan_workflow_recipes(
                 for key, value in bg_terms.items():
                     try:
                         terms[str(key)] = float(value)
-                    except Exception:
+                    except (TypeError, ValueError):
                         continue
             note = str(bg.get("note") or bg.get("warning") or "").strip() or "基于当前数据诊断和候选参数生成。"
             workflow_score_weights = {key: float(value) for key, value in workflow_breakdown.get("weights", {}).items()}

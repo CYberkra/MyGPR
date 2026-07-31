@@ -1,117 +1,36 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Pipeline-level auto-tuning with per-step scoring and rollback support."""
-
+"""Pipeline-level auto-tuning orchestration with rollback support."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Any, Callable
 
 import numpy as np
 
-from core.auto_tune import auto_tune_method
-from core.gprmax_truth_metrics import compute_ground_truth_metrics
+from mygpr.application.autotune.use_case import auto_tune_method
+from core.auto_tune_pipeline_geometry import _clamp_bounds
+from core.auto_tune_pipeline_evaluation import (
+    _assess_step_risk, _compute_branch_metrics, _compute_metric_delta,
+    _dedupe_flags, _extract_warning_messages, _overall_recommendation,
+)
+from core.auto_tune_pipeline_models import (
+    AutoTunePipelineError, AutoTunePipelineRun, PipelineCandidate,
+    PipelineStepRecord, _BranchState,
+)
+from core.auto_tune_pipeline_summary import (
+    _candidate_summary, _compact_auto_tune_result, _ground_truth_info,
+    _json_safe, _step_summary,
+)
 from core.methods_registry import PROCESSING_METHODS
 from core.preset_profiles import GUI_PRESETS_V1, RECOMMENDED_RUN_PROFILES
 from core.processing_engine import (
-    clone_header_info,
-    clone_trace_metadata,
-    merge_result_header_info,
-    merge_result_trace_metadata,
-    prepare_runtime_params,
-    run_processing_method,
+    clone_header_info, clone_trace_metadata, merge_result_header_info,
+    merge_result_trace_metadata, prepare_runtime_params, run_processing_method,
 )
-from core.quality_metrics import (
-    auto_roi_bounds,
-    compute_benchmark_metrics,
-    ratio_fidelity,
-)
-from core.scalar_utils import to_int
-
+from core.quality_metrics import auto_roi_bounds
 
 ProgressCallback = Callable[[int, int, str], None]
 CancelChecker = Callable[[], bool]
-
-SCORE_REJECT_DELTA = -0.02
-SCORE_REVIEW_DELTA = 0.02
-LOW_CONFIDENCE_THRESHOLD = 0.45
-LOW_MARGIN_THRESHOLD = 0.03
-
-
-class AutoTunePipelineError(RuntimeError):
-    """Raised when a pipeline-level auto-tune run cannot be executed."""
-
-
-@dataclass
-class PipelineCandidate:
-    """One final branch produced by a pipeline-level auto-tune run."""
-
-    name: str
-    source: str
-    pipeline: list[str]
-    params_by_method: dict[str, dict[str, Any]]
-    result: np.ndarray
-    metadata: dict[str, Any]
-    metrics: dict[str, float]
-    warnings: list[str] = field(default_factory=list)
-    auto_tune_results: dict[str, dict[str, Any]] = field(default_factory=dict)
-
-
-@dataclass
-class PipelineStepRecord:
-    """Per-step evidence for reports and research comparison."""
-
-    index: int
-    method_key: str
-    method_name: str
-    manual_params: dict[str, Any]
-    auto_params: dict[str, Any]
-    manual_before: np.ndarray
-    manual_after: np.ndarray
-    auto_before: np.ndarray
-    auto_after: np.ndarray
-    manual_metrics: dict[str, float]
-    auto_metrics: dict[str, float]
-    metric_delta: dict[str, float]
-    auto_tune_result: dict[str, Any] | None
-    manual_roi_before: dict[str, int]
-    manual_roi_after: dict[str, int]
-    auto_roi_before: dict[str, int]
-    auto_roi_after: dict[str, int]
-    warnings: dict[str, list[str]]
-    risk_flags: list[str]
-    recommendation: str
-    reason: str
-    rolled_back_to_manual: bool = False
-
-
-@dataclass
-class AutoTunePipelineRun:
-    """Full pipeline-level auto-tune result."""
-
-    input_shape: tuple[int, int]
-    pipeline: list[str]
-    baseline_profile_key: str | None
-    manual_source: str
-    roi_info: dict[str, Any]
-    ground_truth_info: dict[str, Any]
-    steps: list[PipelineStepRecord]
-    manual: PipelineCandidate
-    automatic: PipelineCandidate
-    metric_delta: dict[str, float]
-    overall_recommendation: str
-    risk_flags: list[str]
-
-
-@dataclass
-class _BranchState:
-    current: np.ndarray
-    header_info: dict[str, Any]
-    trace_metadata: dict[str, np.ndarray]
-    params_by_method: dict[str, dict[str, Any]]
-    warnings: list[str] = field(default_factory=list)
-    auto_tune_results: dict[str, dict[str, Any]] = field(default_factory=dict)
-
 
 def run_auto_tune_pipeline(
     data: np.ndarray,
@@ -268,7 +187,6 @@ def run_auto_tune_pipeline(
         risk_flags=overall_risk_flags,
     )
 
-
 def to_summary_dict(result: AutoTunePipelineRun) -> dict[str, Any]:
     """Return a JSON-safe summary without raw B-scan arrays."""
     return {
@@ -285,7 +203,6 @@ def to_summary_dict(result: AutoTunePipelineRun) -> dict[str, Any]:
         "automatic": _candidate_summary(result.automatic),
         "steps": [_step_summary(step) for step in result.steps],
     }
-
 
 def _run_pipeline_step(
     *,
@@ -441,7 +358,6 @@ def _run_pipeline_step(
     )
     return step, dict(manual_roi_after), next_auto_roi
 
-
 def _resolve_auto_params(
     *,
     method_key: str,
@@ -477,7 +393,6 @@ def _resolve_auto_params(
     tuned_params.update(tune_result.get("recommended_params", {}) or {})
     return tuned_params, tune_result
 
-
 def _execute_method(
     current: np.ndarray,
     method_key: str,
@@ -501,7 +416,6 @@ def _execute_method(
     )
     return np.asarray(result, dtype=np.float32), dict(meta or {})
 
-
 def _resolve_pipeline(
     pipeline: list[str] | None,
     baseline_profile_key: str | None,
@@ -515,12 +429,10 @@ def _resolve_pipeline(
         raise AutoTunePipelineError(f"未知经验 baseline profile: {baseline_profile_key}")
     return [str(method_key) for method_key in profile.get("order", [])]
 
-
 def _validate_pipeline(pipeline: list[str]) -> None:
     unknown = [method_key for method_key in pipeline if method_key not in PROCESSING_METHODS]
     if unknown:
         raise AutoTunePipelineError(f"pipeline 包含未知方法: {', '.join(unknown)}")
-
 
 def _resolve_manual_params(
     pipeline: list[str],
@@ -534,7 +446,6 @@ def _resolve_manual_params(
         params.update(manual_params_by_method.get(method_key, {}))
         resolved[method_key] = params
     return resolved
-
 
 def _profile_method_params(
     baseline_profile_key: str | None,
@@ -553,7 +464,6 @@ def _profile_method_params(
     for method_key, method_params in profile.get("method_params", {}).items():
         params[str(method_key)] = dict(method_params)
     return params
-
 
 def _resolve_roi_info(
     data: np.ndarray,
@@ -594,32 +504,6 @@ def _resolve_roi_info(
     }
 
 
-def _clamp_bounds(shape: tuple[int, int], bounds: dict[str, Any]) -> dict[str, int]:
-    samples, traces = int(shape[0]), int(shape[1])
-    t0 = max(
-        0,
-        min(to_int(bounds.get("time_start_idx"), default=0), max(samples - 1, 0)),
-    )
-    t1 = max(
-        t0 + 1,
-        min(to_int(bounds.get("time_end_idx"), default=samples), samples),
-    )
-    d0 = max(
-        0,
-        min(to_int(bounds.get("dist_start_idx"), default=0), max(traces - 1, 0)),
-    )
-    d1 = max(
-        d0 + 1,
-        min(to_int(bounds.get("dist_end_idx"), default=traces), traces),
-    )
-    return {
-        "time_start_idx": int(t0),
-        "time_end_idx": int(t1),
-        "dist_start_idx": int(d0),
-        "dist_end_idx": int(d1),
-    }
-
-
 def _map_roi_after_step(
     bounds: dict[str, int],
     before_shape: tuple[int, int],
@@ -635,371 +519,7 @@ def _map_roi_after_step(
     }
     return _clamp_bounds(after_shape, shifted)
 
-
-def _compute_branch_metrics(
-    reference: np.ndarray,
-    processed: np.ndarray,
-    reference_roi: dict[str, int],
-    processed_roi: dict[str, int],
-    ground_truth: dict[str, Any] | None,
-) -> dict[str, float]:
-    before_roi, after_roi = _slice_roi_pair(
-        reference,
-        processed,
-        reference_roi,
-        processed_roi,
-    )
-    metrics = compute_benchmark_metrics(before_roi, after_roi)
-    if ground_truth:
-        metrics.update(
-            compute_ground_truth_metrics(
-                reference,
-                processed,
-                ground_truth,
-                reference_roi=reference_roi,
-                processed_roi=processed_roi,
-            )
-        )
-    metrics["pipeline_score"] = _pipeline_score(metrics)
-    return {
-        key: float(value)
-        for key, value in metrics.items()
-        if isinstance(value, (int, float, np.integer, np.floating))
-        and np.isfinite(float(value))
-    }
-
-
-def _slice_roi_pair(
-    reference: np.ndarray,
-    processed: np.ndarray,
-    reference_roi: dict[str, int],
-    processed_roi: dict[str, int],
-) -> tuple[np.ndarray, np.ndarray]:
-    ref = np.asarray(reference, dtype=np.float32)
-    proc = np.asarray(processed, dtype=np.float32)
-    ref_bounds = _clamp_bounds(ref.shape, reference_roi)
-    proc_bounds = _clamp_bounds(proc.shape, processed_roi)
-    ref_roi = ref[
-        ref_bounds["time_start_idx"] : ref_bounds["time_end_idx"],
-        ref_bounds["dist_start_idx"] : ref_bounds["dist_end_idx"],
-    ]
-    proc_roi = proc[
-        proc_bounds["time_start_idx"] : proc_bounds["time_end_idx"],
-        proc_bounds["dist_start_idx"] : proc_bounds["dist_end_idx"],
-    ]
-    rows = max(1, min(ref_roi.shape[0], proc_roi.shape[0]))
-    cols = max(1, min(ref_roi.shape[1], proc_roi.shape[1]))
-    return ref_roi[:rows, :cols], proc_roi[:rows, :cols]
-
-
-def _pipeline_score(metrics: dict[str, float]) -> float:
-    band_fidelity = ratio_fidelity(metrics["target_band_energy_ratio"], tol=0.35)
-    saliency_fidelity = ratio_fidelity(
-        metrics["local_saliency_preservation"],
-        tol=0.35,
-    )
-    edge_fidelity = ratio_fidelity(metrics["edge_preservation"], tol=0.35)
-    deep_gain = max(0.0, float(metrics["deep_zone_contrast_gain"]) - 1.0)
-    target_loss_penalty = (
-        max(0.0, 0.55 - float(metrics["target_band_energy_ratio"])) * 3.0
-        + max(0.0, 0.55 - float(metrics["local_saliency_preservation"])) * 4.0
-        + max(0.0, 0.55 - float(metrics["edge_preservation"])) * 3.0
-    )
-    artifact_penalty = (
-        6.0 * float(metrics["clipping_ratio_after"])
-        + 4.0 * float(metrics["hot_pixel_ratio_after"])
-        + 0.08 * float(metrics["kurtosis_or_spikiness_after"])
-    )
-    score = (
-        1.2 * float(metrics["baseline_bias_reduction"])
-        + 1.4 * float(metrics["low_freq_energy_reduction"])
-        + 0.8 * float(metrics["horizontal_coherence_reduction"])
-        + 1.8 * band_fidelity
-        + 2.0 * saliency_fidelity
-        + 1.4 * edge_fidelity
-        + 0.4 * np.log1p(deep_gain)
-        - target_loss_penalty
-        - artifact_penalty
-    )
-    if "truth_score" in metrics:
-        score = 0.65 * score + 2.2 * float(metrics["truth_score"])
-    return float(score)
-
-
-def _compute_metric_delta(
-    manual_metrics: dict[str, float],
-    auto_metrics: dict[str, float],
-) -> dict[str, float]:
-    keys = sorted(set(manual_metrics) & set(auto_metrics))
-    return {
-        key: float(auto_metrics[key] - manual_metrics[key])
-        for key in keys
-        if np.isfinite(manual_metrics[key]) and np.isfinite(auto_metrics[key])
-    }
-
-
-def _assess_step_risk(
-    manual_metrics: dict[str, float],
-    auto_metrics: dict[str, float],
-    tune_result: dict[str, Any] | None,
-) -> tuple[list[str], str, str]:
-    flags: list[str] = []
-    score_delta = float(auto_metrics.get("pipeline_score", 0.0)) - float(
-        manual_metrics.get("pipeline_score", 0.0)
-    )
-    if score_delta < SCORE_REJECT_DELTA:
-        flags.append("auto_worse_than_manual")
-    elif abs(score_delta) <= SCORE_REVIEW_DELTA:
-        flags.append("near_tie")
-
-    if tune_result is not None:
-        confidence = float(tune_result.get("selection_confidence", 1.0))
-        margin = float(tune_result.get("selection_margin", 1.0))
-        stats = tune_result.get("execution_stats", {}) or {}
-        if confidence < LOW_CONFIDENCE_THRESHOLD:
-            flags.append("low_selection_confidence")
-        if margin < LOW_MARGIN_THRESHOLD:
-            flags.append("multiple_near_optima")
-        if int(stats.get("constraint_adjustment_count", 0) or 0) > 0:
-            flags.append("constraint_adjusted")
-        if tune_result.get("constraint_warnings"):
-            flags.append("constraint_adjusted")
-
-    truth_count = float(auto_metrics.get("truth_target_count", -1.0))
-    if truth_count > 0.0:
-        manual_preserve = float(
-            manual_metrics.get("truth_target_energy_preservation", 1.0)
-        )
-        auto_preserve = float(auto_metrics.get("truth_target_energy_preservation", 1.0))
-        manual_truth_score = float(manual_metrics.get("truth_score", 0.0))
-        auto_truth_score = float(auto_metrics.get("truth_score", 0.0))
-        if auto_preserve < manual_preserve - 0.08:
-            flags.append("target_truth_degraded")
-        elif auto_preserve < 0.55:
-            flags.append("low_truth_target_preservation")
-        if auto_truth_score < manual_truth_score - 0.05:
-            flags.append("target_truth_degraded")
-    elif truth_count == 0.0:
-        manual_fp = float(manual_metrics.get("truth_false_positive_ratio", 0.0))
-        auto_fp = float(auto_metrics.get("truth_false_positive_ratio", 0.0))
-        if auto_fp > manual_fp + max(0.10, abs(manual_fp) * 0.20):
-            flags.append("false_positive_risk")
-
-    if (
-        float(auto_metrics.get("clipping_ratio_after", 0.0))
-        > float(manual_metrics.get("clipping_ratio_after", 0.0)) + 0.01
-    ):
-        flags.append("overexposure_risk")
-    if (
-        float(auto_metrics.get("hot_pixel_ratio_after", 0.0))
-        > float(manual_metrics.get("hot_pixel_ratio_after", 0.0)) + 0.01
-    ):
-        flags.append("overexposure_risk")
-
-    flags = _dedupe_flags(flags)
-    severe = {
-        "auto_worse_than_manual",
-        "target_truth_degraded",
-        "false_positive_risk",
-        "overexposure_risk",
-    }
-    caution = {
-        "near_tie",
-        "low_selection_confidence",
-        "multiple_near_optima",
-        "constraint_adjusted",
-        "low_truth_target_preservation",
-    }
-    if any(flag in severe for flag in flags):
-        return flags, "keep_manual", _risk_reason(flags, score_delta)
-    if any(flag in caution for flag in flags):
-        return flags, "review", _risk_reason(flags, score_delta)
-    return flags, "adopt_auto", f"auto pipeline score delta={score_delta:.4f}"
-
-
-def _risk_reason(flags: list[str], score_delta: float) -> str:
-    if not flags:
-        return f"auto pipeline score delta={score_delta:.4f}"
-    return f"risk={', '.join(flags)}; auto pipeline score delta={score_delta:.4f}"
-
-
-def _overall_recommendation(
-    steps: list[PipelineStepRecord],
-    metric_delta: dict[str, float],
-    risk_flags: list[str],
-) -> str:
-    if any(step.recommendation == "keep_manual" for step in steps):
-        return "keep_manual"
-    final_delta = float(metric_delta.get("pipeline_score", 0.0))
-    if final_delta < SCORE_REJECT_DELTA:
-        return "keep_manual"
-    if any(step.recommendation == "review" for step in steps):
-        return "review"
-    if risk_flags or abs(final_delta) <= SCORE_REVIEW_DELTA:
-        return "review"
-    return "adopt_auto"
-
-
-def _dedupe_flags(flags: Any) -> list[str]:
-    seen: set[str] = set()
-    ordered: list[str] = []
-    for flag in flags:
-        text = str(flag)
-        if text and text not in seen:
-            seen.add(text)
-            ordered.append(text)
-    return ordered
-
-
-def _extract_warning_messages(meta: dict[str, Any]) -> list[str]:
-    messages: list[str] = []
-    for warning in meta.get("runtime_warnings", []) or []:
-        if isinstance(warning, dict):
-            messages.append(str(warning.get("message") or warning.get("code") or warning))
-        else:
-            messages.append(str(warning))
-    for warning in meta.get("warnings", []) or []:
-        messages.append(str(warning))
-    if meta.get("skipped"):
-        reason = str(meta.get("reason") or "method skipped")
-        messages.append(reason)
-    return messages
-
-
-def _compact_auto_tune_result(result: dict[str, Any] | None) -> dict[str, Any]:
-    if not result:
-        return {}
-    return {
-        "method_key": result.get("method_key"),
-        "method_name": result.get("method_name"),
-        "family": result.get("family"),
-        "recommended_profile": result.get("recommended_profile"),
-        "recommended_params": _json_safe(result.get("recommended_params", {})),
-        "best_params": _json_safe(result.get("best_params", {})),
-        "best_score": _json_safe(result.get("best_score")),
-        "best_reason": result.get("best_reason"),
-        "roi_info": _json_safe(result.get("roi_info", {})),
-        "parameter_domain": _json_safe(result.get("parameter_domain", {})),
-        "risk_flags": _json_safe(result.get("risk_flags", [])),
-        "risk_level": _json_safe(result.get("risk_level")),
-        "risk_reason": result.get("risk_reason"),
-        "selection_recommendation": result.get("selection_recommendation"),
-        "selection_confidence": _json_safe(result.get("selection_confidence")),
-        "selection_margin": _json_safe(result.get("selection_margin")),
-        "execution_stats": _json_safe(result.get("execution_stats", {})),
-        "constraint_warnings": _json_safe(result.get("constraint_warnings", [])),
-        "best_constraint_warnings": _json_safe(
-            result.get("best_constraint_warnings", [])
-        ),
-    }
-
-
-def _candidate_summary(candidate: PipelineCandidate) -> dict[str, Any]:
-    return {
-        "name": candidate.name,
-        "source": candidate.source,
-        "pipeline": list(candidate.pipeline),
-        "params_by_method": _json_safe(candidate.params_by_method),
-        "shape": [int(candidate.result.shape[0]), int(candidate.result.shape[1])],
-        "metrics": _json_safe(candidate.metrics),
-        "warnings": list(candidate.warnings),
-        "auto_tune_results": _json_safe(candidate.auto_tune_results),
-    }
-
-
-def _step_summary(step: PipelineStepRecord) -> dict[str, Any]:
-    return {
-        "index": int(step.index),
-        "method_key": step.method_key,
-        "method_name": step.method_name,
-        "manual_params": _json_safe(step.manual_params),
-        "auto_params": _json_safe(step.auto_params),
-        "manual_shape_after": [
-            int(step.manual_after.shape[0]),
-            int(step.manual_after.shape[1]),
-        ],
-        "auto_shape_after": [
-            int(step.auto_after.shape[0]),
-            int(step.auto_after.shape[1]),
-        ],
-        "manual_metrics": _json_safe(step.manual_metrics),
-        "auto_metrics": _json_safe(step.auto_metrics),
-        "metric_delta": _json_safe(step.metric_delta),
-        "auto_tune_result": _json_safe(step.auto_tune_result),
-        "manual_roi_before": _json_safe(step.manual_roi_before),
-        "manual_roi_after": _json_safe(step.manual_roi_after),
-        "auto_roi_before": _json_safe(step.auto_roi_before),
-        "auto_roi_after": _json_safe(step.auto_roi_after),
-        "warnings": _json_safe(step.warnings),
-        "risk_flags": list(step.risk_flags),
-        "recommendation": step.recommendation,
-        "reason": step.reason,
-        "rolled_back_to_manual": bool(step.rolled_back_to_manual),
-    }
-
-
-def _ground_truth_info(ground_truth: dict[str, Any] | None) -> dict[str, Any]:
-    if not ground_truth:
-        return {"enabled": False}
-    targets = ground_truth.get("targets", []) or []
-    preserved = [
-        target for target in targets if isinstance(target, dict) and target.get("must_preserve") is not False
-    ]
-    return {
-        "enabled": True,
-        "schema": ground_truth.get("schema"),
-        "scenario_id": ground_truth.get("scenario_id"),
-        "target_count": int(len(preserved)),
-        "analysis_roi": _json_safe(ground_truth.get("analysis_roi", {})),
-        "targets": _json_safe([_ground_truth_target_info(target) for target in preserved]),
-        "background_rois": _json_safe(ground_truth.get("background_rois", []) or []),
-    }
-
-
-def _ground_truth_target_info(target: dict[str, Any]) -> dict[str, Any]:
-    summary: dict[str, Any] = {}
-    for key in (
-        "id",
-        "target_id",
-        "type",
-        "material",
-        "depth_m",
-        "center_x_m",
-        "center_y_m",
-        "radius_m",
-        "must_preserve",
-        "roi",
-    ):
-        if key in target:
-            summary[key] = target[key]
-    return summary
-
-
-def _json_safe(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {str(key): _json_safe(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_json_safe(item) for item in value]
-    if isinstance(value, np.ndarray):
-        return _json_safe(value.tolist())
-    if isinstance(value, np.generic):
-        return _json_safe(value.item())
-    if value is None or isinstance(value, (str, bool)):
-        return value
-    if isinstance(value, float):
-        if not np.isfinite(value):
-            return None
-        return float(value)
-    if isinstance(value, int):
-        return int(value)
-    return str(value)
-
-
 __all__ = [
-    "AutoTunePipelineError",
-    "AutoTunePipelineRun",
-    "PipelineCandidate",
-    "PipelineStepRecord",
-    "run_auto_tune_pipeline",
-    "to_summary_dict",
+    "AutoTunePipelineError", "AutoTunePipelineRun", "PipelineCandidate",
+    "PipelineStepRecord", "run_auto_tune_pipeline", "to_summary_dict",
 ]

@@ -195,7 +195,7 @@ RECOMMENDED_RUN_PROFILES = {
         ],
     },
     "gprmax_impulse_validation": {
-        "label": "gprMax impulse 仿真验证",
+        "label": "gprMax 外部数据适配",
         "preset_key": "raw_fidelity",
         "method_params": {
             "set_zero_time": {"new_zero_time": 5.0},
@@ -776,8 +776,8 @@ WORKFLOW_PRESETS = {
         },
     },
     "gprmax_impulse_validation": {
-        "label": "gprMax impulse 仿真验证",
-        "description": "面向外部 gprMax impulse B-scan 的默认链路，不套用实测 SFCW 20-170MHz 固定频带。",
+        "label": "gprMax 外部数据适配",
+        "description": "面向外部 gprMax impulse B-scan 的兼容链路，不套用实测 SFCW 20-170MHz 固定频带。",
         "stages": {
             "stage1": {"set_zero_time": True, "dewow": True},
             "stage2": {"subtracting_average_2D": True},

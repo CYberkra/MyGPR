@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -139,13 +140,34 @@ def test_summary_paths_are_unique_within_same_second(tmp_path: Path):
     assert Path(first).suffix == ".json"
 
 
-def test_resume_placeholder_returns_nonzero(capsys):
-    result = cli_batch.cmd_resume(SimpleNamespace(summary="summary.json"))
+def test_resume_returns_ok_when_summary_has_no_failed_jobs(tmp_path: Path, capsys):
+    summary = tmp_path / "summary.json"
+    config = tmp_path / "config.json"
+    config.write_text('{"jobs": []}', encoding="utf-8")
+    summary.write_text(
+        json.dumps(
+            {
+                "config": str(config),
+                "output_dir": str(tmp_path / "out"),
+                "results": [{"job_id": "job-ok", "status": "ok"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = cli_batch.cmd_resume(SimpleNamespace(summary=str(summary), repo_root=str(tmp_path)))
+
+    captured = capsys.readouterr()
+    assert result == 0
+    assert "no failed jobs" in captured.out
+
+
+def test_resume_missing_summary_returns_nonzero(tmp_path: Path, capsys):
+    result = cli_batch.cmd_resume(SimpleNamespace(summary=str(tmp_path / "missing.json"), repo_root=str(tmp_path)))
 
     captured = capsys.readouterr()
     assert result == 2
-    assert "not implemented" in captured.out
-    assert "summary.json" in captured.out
+    assert "summary file not found" in captured.out
 
 
 def test_validate_config_rejects_unknown_recommended_profile(tmp_path: Path):

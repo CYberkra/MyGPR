@@ -1,0 +1,242 @@
+"""Native processing catalog/executor with controlled legacy fallback."""
+from __future__ import annotations
+
+from typing import Any, Sequence
+
+import numpy as np
+
+from mygpr.application.jobs.context import ExecutionContext
+from mygpr.application.processing.ports import ProcessingCatalogPort, ProcessingExecutorPort
+from mygpr.domain.processing.models import (
+    ProcessingMethodDescriptor,
+    ProcessingRequest,
+    ProcessingResult,
+    ResourceEstimate,
+)
+from mygpr.infrastructure.processing.algorithms.methods import NATIVE_ALGORITHMS
+
+
+class NativeProcessingCatalog(ProcessingCatalogPort):
+    """Catalog for methods already migrated from the historical engine."""
+
+    def get(self, method_id: str) -> ProcessingMethodDescriptor | None:
+        algorithm = NATIVE_ALGORITHMS.get(str(method_id))
+        if algorithm is None:
+            return None
+        capabilities = {"ndarray", "native", "cancellable"}
+        if algorithm.supports_chunking:
+            capabilities.update({"chunked", f"block-axis-{algorithm.block_axis}"})
+        elif algorithm.block_axis == "global":
+            capabilities.update({"global_transform", "file_backed_staging"})
+        elif algorithm.block_axis == "loaded_global":
+            capabilities.update({"global_transform", "loaded_global"})
+        if algorithm.auto_tune_family:
+            capabilities.add("auto_tune")
+        return ProcessingMethodDescriptor(
+            method_id=algorithm.method_id,
+            name=algorithm.name,
+            category=algorithm.category,
+            auto_tune_enabled=bool(algorithm.auto_tune_family),
+            auto_tune_family=algorithm.auto_tune_family,
+            auto_tune_stage=algorithm.auto_tune_stage or algorithm.auto_tune_family,
+            parameter_schema=dict(algorithm.parameter_schema or {}),
+            capabilities=frozenset(capabilities),
+            implementation_version=algorithm.implementation_version,
+        )
+
+    def list(self, *, public_only: bool = False) -> Sequence[ProcessingMethodDescriptor]:
+        del public_only
+        return tuple(self.get(method_id) for method_id in NATIVE_ALGORITHMS if self.get(method_id) is not None)
+
+    def auto_tune_stage(self, method_id: str) -> str:
+        descriptor = self.get(method_id)
+        return descriptor.auto_tune_stage if descriptor else ""
+
+    def raw_metadata(self, method_id: str) -> dict[str, Any]:
+        descriptor = self.get(method_id)
+        return {
+            "method_id": descriptor.method_id,
+            "name": descriptor.name,
+            "category": descriptor.category,
+            "auto_tune_enabled": descriptor.auto_tune_enabled,
+            "auto_tune_family": descriptor.auto_tune_family,
+            "auto_tune_stage": descriptor.auto_tune_stage,
+            "parameter_schema": dict(descriptor.parameter_schema),
+            "implementation_version": descriptor.implementation_version,
+        } if descriptor else {}
+
+
+class CompositeProcessingCatalog(ProcessingCatalogPort):
+    """Expose native descriptors first and retain legacy-only methods."""
+
+    def __init__(self, native: ProcessingCatalogPort, fallback: ProcessingCatalogPort) -> None:
+        self._native = native
+        self._fallback = fallback
+
+    def get(self, method_id: str) -> ProcessingMethodDescriptor | None:
+        native = self._native.get(method_id)
+        fallback = self._fallback.get(method_id)
+        if native is None:
+            return fallback
+        if fallback is None:
+            return native
+        return ProcessingMethodDescriptor(
+            method_id=fallback.method_id,
+            name=fallback.name,
+            category=fallback.category,
+            auto_tune_enabled=fallback.auto_tune_enabled,
+            auto_tune_family=fallback.auto_tune_family,
+            auto_tune_stage=fallback.auto_tune_stage,
+            visibility=fallback.visibility,
+            parameter_schema={**dict(fallback.parameter_schema), **dict(native.parameter_schema)},
+            capabilities=frozenset(set(fallback.capabilities) | set(native.capabilities)),
+            implementation_version=native.implementation_version,
+        )
+
+    def list(self, *, public_only: bool = False) -> Sequence[ProcessingMethodDescriptor]:
+        native = {item.method_id: item for item in self._native.list(public_only=public_only)}
+        ordered: list[ProcessingMethodDescriptor] = []
+        seen: set[str] = set()
+        for item in self._fallback.list(public_only=public_only):
+            ordered.append(self.get(item.method_id) or item)
+            seen.add(item.method_id)
+        ordered.extend(item for method_id, item in native.items() if method_id not in seen)
+        return tuple(ordered)
+
+    def auto_tune_stage(self, method_id: str) -> str:
+        return self._native.auto_tune_stage(method_id) or self._fallback.auto_tune_stage(method_id)
+
+    def raw_metadata(self, method_id: str) -> dict[str, Any]:
+        native = self._native.raw_metadata(method_id)
+        if not native:
+            return self._fallback.raw_metadata(method_id)
+        legacy = self._fallback.raw_metadata(method_id)
+        return {**legacy, **native}
+
+
+class NativeProcessingExecutor(ProcessingExecutorPort):
+    """Execute migrated methods without importing ``core.processing_engine``."""
+
+    def supports(self, method_id: str) -> bool:
+        return str(method_id) in NATIVE_ALGORITHMS
+
+    def execute(
+        self,
+        request: ProcessingRequest,
+        context: ExecutionContext | None = None,
+    ) -> ProcessingResult:
+        algorithm = NATIVE_ALGORITHMS.get(request.method_id)
+        if algorithm is None:
+            raise KeyError(f"native processing method not found: {request.method_id}")
+        execution_context = context or ExecutionContext.null()
+        execution_context.raise_if_cancelled()
+        params = prepare_native_params(request)
+        params["_execution_context"] = execution_context
+        params.setdefault("cancel_checker", execution_context.is_cancelled)
+        output, metadata = algorithm.function(request.data, params)
+        execution_context.raise_if_cancelled()
+        metadata = {**metadata, "implementation_version": algorithm.implementation_version}
+        warnings = [dict(item) for item in metadata.get("runtime_warnings", []) if isinstance(item, dict)]
+        for item in warnings:
+            execution_context.emit_warning(item)
+        header = clone_mapping(request.header_info)
+        header_updates = metadata.get("header_info_updates")
+        if isinstance(header_updates, dict):
+            header.update(clone_mapping(header_updates))
+        header.update(a_scan_length=int(output.shape[0]), num_traces=int(output.shape[1]))
+        trace_out = metadata.get("trace_metadata_out")
+        if isinstance(trace_out, dict):
+            trace_metadata = clone_trace_metadata(trace_out)
+        else:
+            trace_metadata = clone_trace_metadata(request.trace_metadata)
+            trace_updates = metadata.get("trace_metadata_updates")
+            if isinstance(trace_updates, dict):
+                trace_metadata.update(clone_trace_metadata(trace_updates))
+        return ProcessingResult(
+            data=output,
+            method_id=request.method_id,
+            params=dict(request.params),
+            metadata=metadata,
+            header_info=header,
+            trace_metadata=trace_metadata,
+            runtime_warnings=warnings,
+        )
+
+    def estimate(self, request: ProcessingRequest) -> ResourceEstimate:
+        algorithm = NATIVE_ALGORITHMS.get(request.method_id)
+        if algorithm is None:
+            raise KeyError(f"native processing method not found: {request.method_id}")
+        if algorithm.resource_estimator is not None:
+            return algorithm.resource_estimator(
+                tuple(int(value) for value in request.data.shape),
+                request.data.dtype,
+                dict(request.params),
+                dict(request.header_info),
+            )
+        base = int(np.asarray(request.data).nbytes)
+        multiplier = float(algorithm.memory_multiplier)
+        return ResourceEstimate(
+            memory_bytes=int(base * multiplier),
+            temporary_disk_bytes=int(base * float(algorithm.temporary_multiplier)),
+            relative_cost=algorithm.relative_cost,
+            supports_cancellation=True,
+            supports_chunking=algorithm.supports_file_backed,
+            notes=(
+                f"native implementation {algorithm.implementation_version}",
+                f"execution axis: {algorithm.block_axis}",
+                "global methods use file-backed staging but may allocate spectral/factor workspaces"
+                if algorithm.block_axis == "global" else "bounded block execution",
+            ),
+        )
+
+
+class CompositeProcessingExecutor(ProcessingExecutorPort):
+    """Route migrated methods to native code and everything else to fallback."""
+
+    def __init__(self, native: NativeProcessingExecutor, fallback: ProcessingExecutorPort) -> None:
+        self._native = native
+        self._fallback = fallback
+
+    def execute(self, request: ProcessingRequest, context: ExecutionContext | None = None) -> ProcessingResult:
+        if self._native.supports(request.method_id):
+            return self._native.execute(request, context)
+        return self._fallback.execute(request, context)
+
+    def estimate(self, request: ProcessingRequest) -> ResourceEstimate:
+        if self._native.supports(request.method_id):
+            return self._native.estimate(request)
+        return self._fallback.estimate(request)
+
+
+def prepare_native_params(request: ProcessingRequest) -> dict[str, Any]:
+    params = dict(request.params or {})
+    params.setdefault("_header_info", clone_mapping(request.header_info))
+    params.setdefault("_trace_metadata", clone_trace_metadata(request.trace_metadata))
+    samples = max(1, int(request.data.shape[0]))
+    total_time_ns = float(request.header_info.get("total_time_ns") or request.header_info.get("time_window_ns") or 0.0)
+    if total_time_ns > 0.0:
+        step_s = total_time_ns * 1.0e-9 / samples
+        params.setdefault("time_step_s", step_s)
+        params.setdefault("time_window_ns", total_time_ns)
+        if request.method_id == "frequency_filter_1d":
+            params.setdefault("sample_rate_hz", 1.0 / step_s)
+    return params
+
+
+def clone_mapping(value: dict[str, Any] | None) -> dict[str, Any]:
+    return {
+        str(key): np.array(item, copy=True) if isinstance(item, np.ndarray) else item
+        for key, item in (value or {}).items()
+    }
+
+
+def clone_trace_metadata(value: dict[str, np.ndarray] | None) -> dict[str, np.ndarray]:
+    return {str(key): np.array(item, copy=True) for key, item in (value or {}).items()}
+
+
+__all__ = [
+    "CompositeProcessingCatalog",
+    "CompositeProcessingExecutor",
+    "NativeProcessingCatalog",
+    "NativeProcessingExecutor",
+]

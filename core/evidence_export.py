@@ -34,7 +34,7 @@ from core.uav_georeference_3d import (
     build_airborne_georeference_3d_payload,
     save_airborne_georeference_3d_preview_png,
 )
-from read_file_data import save_image
+from PythonModule.read_file_data import save_image
 
 
 STANDARD_CHAIN_SPECS: dict[str, dict[str, Any]] = {
@@ -660,9 +660,9 @@ def export_motion_compensation_benchmark(
 ) -> dict[str, Any]:
     """Run the deterministic motion-compensation benchmark and export evidence."""
     if sample_id != "motion_compensation_v1":
-        raise ValueError(f"unsupported motion benchmark sample: {sample_id}")
+        raise ValueError(f"unsupported motion validation sample: {sample_id}")
     if profile_key != "motion_compensation_v1":
-        raise ValueError(f"unsupported motion benchmark profile: {profile_key}")
+        raise ValueError(f"unsupported motion validation profile: {profile_key}")
 
     spec = get_benchmark_sample_spec(sample_id)
     profile = RECOMMENDED_RUN_PROFILES.get(profile_key)

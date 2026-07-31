@@ -15,7 +15,7 @@ from typing import Any, Mapping, Sequence
 
 try:  # PyYAML is already a project dependency in the development environment.
     import yaml
-except Exception:  # pragma: no cover - exercised only in stripped deployments
+except ImportError:  # pragma: no cover - exercised only in stripped deployments
     yaml = None  # type: ignore[assignment]
 
 PROFILE_WEIGHT_FIELDS: tuple[str, ...] = (
@@ -28,8 +28,16 @@ PROFILE_WEIGHT_FIELDS: tuple[str, ...] = (
     "depth_weak_reflector",
 )
 
+_SOURCE_AUTOTUNE_V1_CONFIG_PATH = (
+    Path(__file__).resolve().parents[1] / "config" / "autotune_v1_profiles.yaml"
+)
+_PACKAGED_AUTOTUNE_V1_CONFIG_PATH = (
+    Path(__file__).resolve().parents[1] / "mygpr" / "resources" / "config" / "autotune_v1_profiles.yaml"
+)
 DEFAULT_AUTOTUNE_V1_CONFIG_PATH = (
-    Path(__file__).resolve().parents[1] / "configs" / "autotune_v1_profiles.yaml"
+    _SOURCE_AUTOTUNE_V1_CONFIG_PATH
+    if _SOURCE_AUTOTUNE_V1_CONFIG_PATH.is_file()
+    else _PACKAGED_AUTOTUNE_V1_CONFIG_PATH
 )
 
 # Stable aliases used by UI labels, report labels, CLI strings and previous

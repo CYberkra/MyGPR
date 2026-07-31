@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import logging
 import os
 import re
 import warnings
@@ -38,8 +39,10 @@ except ImportError:
         stacklevel=2,
     )
 
+logger = logging.getLogger(__name__)
+
 # 直接导入 read_file_data 模块
-from read_file_data import readcsv, savecsv, save_image, show_image
+from PythonModule.read_file_data import readcsv, savecsv, save_image, show_image
 from core.data_context import (
     DATA_CONTEXT_GPRMAX,
     DATA_CONTEXT_GPRMAX_IMPULSE,
@@ -60,84 +63,7 @@ from core.gpr_vendor_readers import (
 )
 
 
-def read_gprmax_in(in_path: str) -> Dict[str, Any]:
-    """Parse gprMax .in configuration file.
-
-    Extracts key parameters like domain size, dx, time window, etc.
-
-    Args:
-        in_path: Path to .in file
-
-    Returns:
-        dict: Configuration parameters
-    """
-    in_path = Path(in_path)
-    if not in_path.exists():
-        raise FileNotFoundError(f".in file not found: {in_path}")
-
-    config = {
-        "title": "",
-        "domain": None,
-        "dx_dy_dz": None,
-        "time_window": None,
-        "materials": [],
-        "geometry_files": [],
-        "waveform": None,
-        "src_position": None,
-        "rx_position": None,
-        "src_steps": None,
-        "rx_steps": None,
-    }
-
-    with open(in_path, "r") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("//"):
-                continue
-
-            if line.startswith("#title:"):
-                config["title"] = line.replace("#title:", "").strip()
-            elif line.startswith("#domain:"):
-                parts = line.replace("#domain:", "").strip().split()
-                config["domain"] = [float(p) for p in parts]
-            elif line.startswith("#dx_dy_dz:"):
-                parts = line.replace("#dx_dy_dz:", "").strip().split()
-                config["dx_dy_dz"] = [float(p) for p in parts]
-            elif line.startswith("#time_window:"):
-                config["time_window"] = float(line.replace("#time_window:", "").strip())
-            elif line.startswith("#material:"):
-                config["materials"].append(line)
-            elif line.startswith("#geometry_objects_read:"):
-                parts = line.replace("#geometry_objects_read:", "").strip().split()
-                if len(parts) >= 5:
-                    config["geometry_files"].append(parts[3])  # h5 file
-                    config["geometry_files"].append(parts[4])  # materials file
-            elif line.startswith("#waveform:"):
-                config["waveform"] = line
-            elif line.startswith("#hertzian_dipole:"):
-                parts = line.replace("#hertzian_dipole:", "").strip().split()
-                if len(parts) >= 5:
-                    config["src_position"] = [
-                        float(parts[1]),
-                        float(parts[2]),
-                        float(parts[3]),
-                    ]
-            elif line.startswith("#rx:"):
-                parts = line.replace("#rx:", "").strip().split()
-                if len(parts) >= 3:
-                    config["rx_position"] = [
-                        float(parts[0]),
-                        float(parts[1]),
-                        float(parts[2]),
-                    ]
-            elif line.startswith("#src_steps:"):
-                parts = line.replace("#src_steps:", "").strip().split()
-                config["src_steps"] = [float(p) for p in parts]
-            elif line.startswith("#rx_steps:"):
-                parts = line.replace("#rx_steps:", "").strip().split()
-                config["rx_steps"] = [float(p) for p in parts]
-
-    return config
+from core.gprmax_input_parser import read_gprmax_in
 
 
 # ============ Auto-detect and Load ============
@@ -234,7 +160,7 @@ def extract_airborne_csv_payload(
             use_rows = arr[:required_rows, :]
 
             # Typical airborne stacked format: [lon, lat, ground_z, amplitude, flight_h]
-            amp_col = 3 if use_rows.shape[1] >= 4 else _select_amp_column(use_rows)
+            amp_col = 3
             signal_1d = use_rows[:, amp_col].astype(np.float32, copy=False)
             data = signal_1d.reshape((traces, samples)).T
 
@@ -548,7 +474,7 @@ def _find_gprmax_manifest_for_output(out_path: Path) -> Path | None:
     for candidate in unique:
         try:
             payload = json.loads(candidate.read_text(encoding="utf-8"))
-        except Exception:
+        except (OSError, UnicodeError, json.JSONDecodeError):
             continue
         if not isinstance(payload, dict):
             continue
@@ -616,7 +542,7 @@ def _safe_attr_list(value: Any) -> list[float] | None:
     parsed: list[float] = []
     try:
         iterator = iter(value)
-    except Exception:
+    except TypeError:
         return None
     for item in iterator:
         number = to_float_or_none(item)
@@ -824,8 +750,8 @@ def read_ascans_folder(folder_path: str, max_files: int = 0, progress_cb=None) -
             )
             if values:
                 matrix[: len(values), idx] = values
-        except OSError:
-            pass
+        except OSError as exc:
+            logger.warning("跳过 A-scan 文件 %s: %s", csv_files[idx], exc)
 
         if progress_cb and (idx % 200 == 0 or idx == total - 1):
             progress_cb(idx + 1, total, f"读取 {csv_files[idx]} ({idx + 1}/{total})")
@@ -874,7 +800,7 @@ def read_gprmax_out(out_path: str) -> dict:
     if in_path is not None:
         try:
             gprmax_config = read_gprmax_in(str(in_path))
-        except Exception:
+        except (OSError, UnicodeError, ValueError):
             gprmax_config = None
 
     with h5py.File(out_path, "r") as f:
@@ -882,7 +808,6 @@ def read_gprmax_out(out_path: str) -> dict:
         attrs = dict(f.attrs)
         iterations = attrs.get("Iterations", 0)
         dt = attrs.get("dt", 0)
-        nx_ny_nz = attrs.get("nx_ny_nz", [1, 1, 1])
 
         # 读取电场数据
         if "rxs" in f and "rx1" in f["rxs"] and "Ez" in f["rxs"]["rx1"]:
@@ -938,7 +863,7 @@ def read_gprmax_out(out_path: str) -> dict:
         header_info = _attach_gprmax_ground_truth(header_info, out_path)
         trace_metadata = _build_gprmax_trace_metadata(data.shape[1], gprmax_config)
         return {
-            "data": data.astype(np.float32, copy=False),
+            "data": data.astype(np.float64, copy=False),
             "num_traces": data.shape[1],
             "samples_per_trace": data.shape[0],
             "time_step_s": time_step_s,
@@ -948,15 +873,6 @@ def read_gprmax_out(out_path: str) -> dict:
             "gprmax_config": gprmax_config,
             "in_path": str(in_path) if in_path else None,
         }
-
-    # 尝试读取道数信息
-    n_traces = 1
-    if "rxsteps" in attrs:
-        rxsteps = attrs["rxsteps"]
-        # 计算步进次数
-        if len(rxsteps) >= 1 and rxsteps[0] > 0:
-            # 估算道数
-            n_traces = 1
 
     # 如果数据是一维的，尝试查找同目录的其他 .out 文件
     if data.ndim == 1:

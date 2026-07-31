@@ -20,7 +20,7 @@ def _float_dict(values: Mapping | None) -> dict[str, float]:
     for key, value in dict(values or {}).items():
         try:
             out[str(key)] = float(value)
-        except Exception:
+        except (TypeError, ValueError):
             continue
     return out
 

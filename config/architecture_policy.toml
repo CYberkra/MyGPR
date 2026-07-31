@@ -1,0 +1,114 @@
+schema = "mygpr.architecture_policy.v2"
+
+[project_imports]
+prefixes = ["mygpr", "core", "PythonModule"]
+
+[layers.domain]
+paths = ["mygpr/domain"]
+allowed_local_import_prefixes = ["mygpr.domain"]
+
+[layers.application]
+paths = ["mygpr/application"]
+allowed_local_import_prefixes = ["mygpr.application", "mygpr.domain"]
+
+[layers.infrastructure]
+paths = ["mygpr/infrastructure"]
+allowed_local_import_prefixes = ["mygpr.infrastructure", "mygpr.application", "mygpr.domain"]
+
+[layers.interfaces]
+paths = ["mygpr/interfaces"]
+allowed_local_import_prefixes = ["mygpr.interfaces", "mygpr.application", "mygpr.domain", "mygpr.infrastructure"]
+
+[legacy_core]
+paths = ["core"]
+forbidden_import_prefixes = ["PyQt6", "PySide6", "qfluentwidgets", "studio_app", "frontend_sdk", "ui", "compatibility"]
+
+[path_policy]
+forbid_sys_path_mutation_under = ["core", "mygpr", "cli_batch.py"]
+
+[new_code_quality]
+paths = ["mygpr/domain", "mygpr/application", "mygpr/infrastructure", "mygpr/interfaces"]
+max_module_lines = 1000
+max_class_lines = 600
+max_function_lines = 100
+forbid_silent_exception_handlers = true
+
+[[migration_exceptions]]
+path_prefix = "mygpr/application/autotune"
+allowed_local_import_prefixes = []
+owner = "autotune"
+remove_after = "1.0.0"
+reason = "Verified historical AutoTune scoring functions are being decomposed behind application ports."
+max_function_lines = 450
+
+[[migration_exceptions]]
+path_prefix = "mygpr/application/autotune/legacy_engine.py"
+allowed_local_import_prefixes = ["mygpr.infrastructure"]
+owner = "autotune"
+remove_after = "1.0.0"
+reason = "Default-composition bridge retained for historical function-style imports."
+max_function_lines = 100
+
+[[migration_exceptions]]
+path_prefix = "mygpr/infrastructure/processing/legacy_adapter.py"
+allowed_local_import_prefixes = ["core"]
+owner = "processing-backend"
+remove_after = "1.0.0"
+reason = "Infrastructure adapter wraps the verified historical processing registry."
+max_function_lines = 100
+
+[[migration_exceptions]]
+path_prefix = "mygpr/domain/autotune/constraints.py"
+allowed_local_import_prefixes = []
+owner = "autotune"
+remove_after = "1.0.0"
+reason = "Method-specific constraint handlers are preserved pending decomposition."
+max_function_lines = 200
+
+[[migration_exceptions]]
+path_prefix = "mygpr/infrastructure/persistence/field_project_adapter.py"
+allowed_local_import_prefixes = ["core"]
+owner = "project-backend"
+remove_after = "1.1.0"
+reason = "Adapter wraps the verified hybrid FieldProjectStore."
+max_function_lines = 100
+
+[[migration_exceptions]]
+path_prefix = "mygpr/infrastructure/acquisition/legacy_adapter.py"
+allowed_local_import_prefixes = ["core"]
+owner = "acquisition-backend"
+remove_after = "1.1.0"
+reason = "Adapter wraps verified import and sensor synchronization kernels."
+max_function_lines = 100
+
+[[migration_exceptions]]
+path_prefix = "mygpr/infrastructure/processing/algorithms/kirchhoff"
+allowed_local_import_prefixes = []
+owner = "migration-imaging-backend"
+remove_after = "1.1.0"
+reason = "Numerical functions remain intact to preserve regression behavior."
+max_function_lines = 300
+
+[[migration_exceptions]]
+path_prefix = "mygpr/infrastructure/processing/algorithms/motion"
+allowed_local_import_prefixes = []
+owner = "motion-compensation-backend"
+remove_after = "1.1.0"
+reason = "Numerical functions remain intact for exact regression."
+max_function_lines = 450
+
+[[migration_exceptions]]
+path_prefix = "mygpr/infrastructure/persistence/interpretation_adapter.py"
+allowed_local_import_prefixes = ["core"]
+owner = "interpretation-backend"
+remove_after = "1.1.0"
+reason = "Persistence adapter reuses verified project-store serialization."
+max_function_lines = 100
+
+[[migration_exceptions]]
+path_prefix = "mygpr/infrastructure/persistence/spatial_adapter.py"
+allowed_local_import_prefixes = ["core"]
+owner = "spatial-backend"
+remove_after = "1.1.0"
+reason = "Persistence adapter reuses the verified spatial result store."
+max_function_lines = 100

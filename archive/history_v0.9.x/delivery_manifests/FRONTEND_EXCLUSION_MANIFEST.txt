@@ -1,0 +1,25 @@
+MyGPR 0.9.36 BACKEND-ONLY EXCLUSION MANIFEST
+
+Removed frontend roots:
+- ui/
+- studio_app/
+- frontend_sdk/
+- compatibility/
+- mygpr/presentation/
+
+Removed frontend support:
+- app_qt.py and mygpr_studio.py
+- Qt/Studio PyInstaller specs and Windows launchers
+- GUI/Studio requirements and Qt dependencies
+- UI assets, reference screenshots and frontend documentation
+- frontend-specific tests and capture/visual validation scripts
+
+Retained backend integration surfaces:
+- mygpr/interfaces/
+- mygpr/application/
+- mygpr/domain/
+- mygpr/infrastructure/
+- config/backend_api_v1.json
+- docs/backend/BACKEND_API_V1.md
+
+This package is not a desktop application. It is the backend/algorithm baseline for a redesigned frontend.

@@ -1,0 +1,10 @@
+# Backend validation profile: no Qt/VTK dependency.
+-r requirements-core.txt
+pytest==8.4.2
+pytest-timeout==2.4.0
+pytest-cov==7.0.0
+coverage==7.13.3
+hypothesis>=6.130,<7
+mutmut>=3.3,<4
+ruff==0.15.21
+mypy==1.20.2

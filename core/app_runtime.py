@@ -13,6 +13,7 @@ import os
 import warnings
 
 from core.app_paths import get_logs_dir, get_settings_dir
+from core.storage_primitives import atomic_write_json
 
 logger = logging.getLogger(__name__)
 
@@ -85,50 +86,45 @@ def _get_settings_path() -> str:
 
 
 def _load_app_settings_dict() -> dict:
-    """加载设置字典。"""
+    """加载设置字典；损坏设置不会覆盖或阻断应用启动。"""
     settings_path = _get_settings_path()
     if not os.path.exists(settings_path):
         return {}
     try:
         with open(settings_path, "r", encoding="utf-8") as f:
             loaded = json.load(f)
-        return loaded if isinstance(loaded, dict) else {}
-    except Exception:
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        logger.warning("Failed to load settings %s: %s", settings_path, exc)
         return {}
+    if not isinstance(loaded, dict):
+        logger.warning("Ignoring non-object settings document: %s", settings_path)
+        return {}
+    return loaded
 
 
 def _save_app_settings_dict(settings: dict) -> None:
-    """保存设置字典。"""
+    """使用原子替换保存设置，避免异常退出留下半写文件。"""
     if not isinstance(settings, dict):
+        logger.warning("Ignoring invalid settings payload of type %s", type(settings).__name__)
         return
     settings_path = _get_settings_path()
     try:
-        with open(settings_path, "w", encoding="utf-8") as f:
-            json.dump(settings, f, ensure_ascii=False, indent=2)
-    except Exception:
-        return
+        atomic_write_json(settings_path, settings)
+    except (OSError, TypeError, ValueError) as exc:
+        logger.warning("Failed to save settings %s: %s", settings_path, exc)
 
 
 def _save_last_data_path(path: str):
-    """保存上次加载的数据路径"""
-    try:
-        # 只保存有效的文件路径
-        if not os.path.exists(path):
-            return
-        settings = _load_app_settings_dict()
-        settings["last_data_path"] = path
-        _save_app_settings_dict(settings)
-    except Exception as e:
-        logger.warning("Failed to save last data path: %s", e)
+    """保存上次加载的数据路径。"""
+    if not os.path.exists(path):
+        return
+    settings = _load_app_settings_dict()
+    settings["last_data_path"] = path
+    _save_app_settings_dict(settings)
 
 
 def _load_last_data_path() -> str:
-    """加载上次的数据路径"""
-    try:
-        settings = _load_app_settings_dict()
-        path = settings.get("last_data_path", "")
-        if path and os.path.exists(path):
-            return path
-    except Exception as e:
-        logger.warning("Failed to load last data path: %s", e)
-    return ""
+    """加载上次的数据路径。"""
+    settings = _load_app_settings_dict()
+    path = settings.get("last_data_path", "")
+    return path if isinstance(path, str) and path and os.path.exists(path) else ""

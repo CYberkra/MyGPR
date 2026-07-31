@@ -20,9 +20,10 @@ from core.gprpy_compat import (
 )
 from core.runtime_warnings import build_runtime_warning, merge_runtime_warnings
 from core.scalar_utils import to_float, to_int
+from core.app_errors import MyGPRError
 
 
-class ProcessingEngineError(RuntimeError):
+class ProcessingEngineError(MyGPRError):
     """Raised when a processing method cannot be executed."""
 
 
@@ -147,6 +148,7 @@ def _filter_runtime_params(method_id: str, params: dict[str, Any]) -> dict[str, 
         key_text = str(key)
         if key_text.startswith("_"):
             if method_id == "agcGain" and key_text == "_low_energy_guard":
+                # agcGain is the only method that currently consumes _low_energy_guard
                 runtime_params[key_text] = value
             continue
         runtime_params[key] = value
@@ -211,7 +213,23 @@ def clone_trace_metadata(
 
 
 def _requires_motion_runtime_context(method_id: str) -> bool:
-    """Whether a method should receive motion runtime metadata context."""
+    """Whether a method should receive cloned motion-runtime metadata.
+
+    Runtime metadata is an execution capability, not an auto-tune classification.
+    Vibration suppression is scored in the artifact family but can still consume
+    IMU angular-rate/trajectory guidance, so it must receive the same metadata
+    context as the other motion methods.
+    """
+    motion_methods = {
+        "motion_compensation_height",
+        "motion_compensation_speed",
+        "trajectory_smoothing",
+        "motion_compensation_attitude",
+        "motion_compensation_vibration",
+        "motion_compensation_v2",
+    }
+    if str(method_id) in motion_methods:
+        return True
     method_info = PROCESSING_METHODS.get(method_id, {})
     stage = method_info.get("auto_tune_stage") or method_info.get("auto_tune_family")
     return str(stage or "") == "motion_comp"
@@ -370,7 +388,7 @@ def _run_legacy_adapter(
             method_id, method_set_zero_time(data, **params), warnings=warnings
         )
 
-    raise ProcessingEngineError(f"未实现的处理方法: {method_id}")
+    raise ProcessingEngineError(f"不支持的处理方法: {method_id}")
 
 
 def _apply_compensating_gain(

@@ -33,7 +33,6 @@ def evaluate_no_prior_action(
     roi_available = bool(policy.get("roi_available"))
     claim_boundary = str(policy.get("claim_boundary") or "")
     warning_lines = list(policy.get("user_facing_warnings") or [])
-
     if action == "raw_preview":
         return NoPriorGuardDecision(
             action_id=action,
@@ -43,7 +42,6 @@ def evaluate_no_prior_action(
             claim_boundary=claim_boundary,
             log_event=False,
         )
-
     if level != "high_risk" or target_prior_available or roi_available:
         return NoPriorGuardDecision(
             action_id=action,

@@ -1,12 +1,11 @@
 {
-  "version": "1.0",
-  "description": "Minimal CLI batch example using the bundled airborne CSV sample.",
+  "schema": "mygpr.cli_batch.v1",
+  "output_dir": "runtime_outputs/cli_batch_mvp",
   "jobs": [
     {
-      "id": "cli_batch_mvp",
-      "input": "sample_data/gui_sidecar_all_data_main.csv",
-      "recommended_profile": "high_quality_uav_gpr"
+      "id": "zero-time-reference-mvp",
+      "benchmark_sample": "zero_time_reference",
+      "recommended_profile": "robust_imaging"
     }
-  ],
-  "output_dir": "output/cli_batch_mvp"
+  ]
 }

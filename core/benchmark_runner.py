@@ -16,7 +16,7 @@ from .methods_registry import PROCESSING_METHODS, get_method_display_name
 from .processing_engine import prepare_runtime_params, run_processing_method
 from .quality_metrics import compute_benchmark_metrics
 from .scalar_utils import to_float
-from read_file_data import save_image
+from PythonModule.read_file_data import save_image
 
 
 def _to_jsonable(value: Any) -> Any:

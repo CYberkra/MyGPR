@@ -1,6 +1,8 @@
 {
-  "time_start_idx": 100,
-  "time_end_idx": 140,
-  "dist_start_idx": 20,
-  "dist_end_idx": 40
+  "schema": "mygpr.gprmax.target_roi.v1",
+  "scene_id": "scene_valid_01",
+  "sample_start": 20,
+  "sample_end": 80,
+  "trace_start": 10,
+  "trace_end": 40
 }

@@ -5,7 +5,7 @@
 Scope:
 - validate: config + inputs + method params validation
 - run: sequential batch processing with minimal summary output
-- resume: placeholder/basic hook (phase-2 target)
+- resume: re-run failed jobs from an existing summary JSON
 
 Design goals:
 - 使用 methods_registry 统一方法定义，避免重复
@@ -16,6 +16,7 @@ Design goals:
 from __future__ import annotations
 
 import argparse
+import importlib
 import importlib.util
 import json
 import os
@@ -31,15 +32,7 @@ import numpy as np
 import pandas as pd
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CORE_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "PythonModule_core"))
-MODULE_DIR = os.path.join(BASE_DIR, "PythonModule")
-if CORE_DIR not in sys.path:
-    sys.path.insert(0, CORE_DIR)
-if BASE_DIR not in sys.path:
-    sys.path.insert(0, BASE_DIR)
-if MODULE_DIR not in sys.path:
-    sys.path.insert(0, MODULE_DIR)
-
+# Package/root discovery is handled by Python; do not mutate sys.path.
 from core.benchmark_registry import list_benchmark_sample_ids
 from core.evidence_export import export_motion_compensation_benchmark
 from core.gpr_io import extract_airborne_csv_payload, savecsv, save_image
@@ -405,8 +398,15 @@ def validate_config(cfg: Dict[str, Any], repo_root: str) -> ValidationResult:
 
 # ---------- Run pipeline ----------
 def _get_core_func(module_name: str, func_name: str):
-    """获取核心模块函数"""
-    mod = __import__(module_name)
+    """Resolve a registered legacy kernel through its explicit package path.
+
+    Historical launchers inserted ``PythonModule`` into ``sys.path`` and then
+    imported kernels as top-level modules.  The production CLI no longer
+    mutates global import paths, so registry names are resolved under the
+    bundled ``PythonModule`` package instead.
+    """
+    qualified_name = module_name if "." in module_name else f"PythonModule.{module_name}"
+    mod = importlib.import_module(qualified_name)
     return getattr(mod, func_name)
 
 
@@ -746,10 +746,87 @@ def cmd_run(args) -> int:
 
 
 def cmd_resume(args) -> int:
-    print("resume: phase-1 placeholder (not implemented yet).")
-    if args.summary:
-        print(f"summary hint: {args.summary}")
-    return 2
+    repo_root = os.path.abspath(args.repo_root)
+    if not args.summary:
+        print("ERROR: --summary is required for resume.")
+        return 2
+    summary_path = _resolve_repo_path(str(args.summary), repo_root)
+    if not os.path.isfile(summary_path):
+        print(f"ERROR: summary file not found: {summary_path}")
+        return 2
+    try:
+        with open(summary_path, "r", encoding="utf-8") as f:
+            previous = json.load(f)
+    except Exception as exc:
+        print(f"ERROR: failed to read summary JSON: {exc}")
+        return 2
+
+    failed_ids = [
+        str(item.get("job_id"))
+        for item in previous.get("results", [])
+        if isinstance(item, dict) and str(item.get("status", "")).lower() not in {"ok", "success"}
+    ]
+    failed_ids = [item for item in failed_ids if item and item != "<unknown>"]
+    if not failed_ids:
+        print("resume: no failed jobs found in summary.")
+        return 0
+
+    config_ref = previous.get("config")
+    if not config_ref:
+        print("ERROR: summary does not contain a config path; cannot resume safely.")
+        return 2
+    config_path = _resolve_repo_path(str(config_ref), repo_root)
+    try:
+        cfg = load_config(config_path)
+    except Exception as exc:
+        print(f"ERROR: failed to load original config: {exc}")
+        return 2
+
+    failed_set = set(failed_ids)
+    jobs = [job for job in cfg.get("jobs", []) if str(job.get("id") or os.path.splitext(os.path.basename(str(job.get("input", ""))))[0]) in failed_set]
+    if not jobs:
+        print("ERROR: failed job ids were not found in the original config: " + ", ".join(failed_ids))
+        return 2
+
+    output_dir_ref = previous.get("output_dir") or cfg.get("output_dir", "output/cli_batch")
+    output_dir = _resolve_repo_path(str(output_dir_ref), repo_root)
+    os.makedirs(output_dir, exist_ok=True)
+    resumed = {
+        "started_at": datetime.now().isoformat(timespec="seconds"),
+        "resume_of": os.path.relpath(summary_path, repo_root),
+        "config": os.path.relpath(config_path, repo_root),
+        "output_dir": os.path.relpath(output_dir, repo_root),
+        "resumed_job_ids": failed_ids,
+        "results": [],
+    }
+    ok_count = 0
+    fail_count = 0
+    for job in jobs:
+        jid = str(job.get("id") or os.path.splitext(os.path.basename(str(job.get("input", ""))))[0])
+        try:
+            result = run_job(job, repo_root=repo_root, output_dir=output_dir)
+            resumed["results"].append(result)
+            ok_count += 1
+            print(f"[RESUMED OK] {jid}")
+        except Exception as exc:
+            fail_count += 1
+            resumed["results"].append({
+                "job_id": jid,
+                "input": job.get("input"),
+                "status": "failed",
+                "error": str(exc),
+                "traceback": traceback.format_exc(limit=3),
+            })
+            print(f"[RESUMED FAIL] {jid}: {exc}")
+    resumed["finished_at"] = datetime.now().isoformat(timespec="seconds")
+    resumed["stats"] = {"ok": ok_count, "failed": fail_count, "total": ok_count + fail_count}
+    resumed_path = _build_summary_path(output_dir)
+    with open(resumed_path, "w", encoding="utf-8") as f:
+        json.dump(resumed, f, ensure_ascii=False, indent=2)
+    print("\n=== Resume Summary ===")
+    print(json.dumps(resumed["stats"], ensure_ascii=False))
+    print(f"summary_file: {os.path.relpath(resumed_path, repo_root)}")
+    return 0 if fail_count == 0 else 2
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -773,8 +850,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_run.set_defaults(func=cmd_run)
 
-    p_resume = sub.add_parser("resume", help="resume interface (phase-1 placeholder)")
-    p_resume.add_argument("--summary", help="existing summary file (future use)")
+    p_resume = sub.add_parser("resume", help="rerun failed jobs from an existing summary")
+    p_resume.add_argument("--summary", required=True, help="existing summary file")
+    p_resume.add_argument(
+        "--repo-root", default=BASE_DIR, help="repo root for relative paths"
+    )
     p_resume.set_defaults(func=cmd_resume)
 
     return p

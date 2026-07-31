@@ -10,6 +10,8 @@ can exercise the data model without a QApplication.
 
 from __future__ import annotations
 
+import logging
+
 import copy
 import os
 from typing import Any
@@ -28,6 +30,8 @@ DEFAULT_MAX_HISTORY_BYTES = _env_int("MYGPR_HISTORY_MAX_BYTES", 256 * 1024 * 102
 DEFAULT_MAX_HISTORY_SNAPSHOT_BYTES = _env_int("MYGPR_HISTORY_MAX_SNAPSHOT_BYTES", 128 * 1024 * 1024)
 DEFAULT_MAX_PRUNED_HISTORY_SUMMARIES = _env_int("MYGPR_HISTORY_MAX_PRUNED_SUMMARIES", 50)
 
+
+_LOGGER = logging.getLogger(__name__)
 
 class SharedDataModel:
     """Single source of truth for loaded/processed data.
@@ -79,6 +83,7 @@ class SharedDataModel:
                 callback(payload)
             except Exception:
                 # Listener failures must not corrupt the application data state.
+                _LOGGER.exception("Shared-data change listener failed")
                 continue
 
     def load_data(

@@ -37,9 +37,8 @@ def test_generate_benchmark_sample_returns_deterministic_metadata():
     assert "header_info" in meta
 
 
-def test_wnnm_is_explicitly_deferred_and_excluded_from_benchmark_defaults():
-    assert METHOD_METADATA["wnnm_placeholder"]["maturity"] == "deferred"
-    assert METHOD_METADATA["wnnm_placeholder"]["visibility"] == "hidden"
+def test_wnnm_placeholder_is_removed_from_production_registry():
+    assert "wnnm_placeholder" not in METHOD_METADATA
     assert all(
         "wnnm_placeholder" not in spec.default_methods
         for spec in BENCHMARK_SAMPLES.values()

@@ -11,21 +11,33 @@ from __future__ import annotations
 import os
 import re
 import struct
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+from core.app_errors import MyGPRError
 
 
-class GPRFormatReadError(ValueError):
+class GPRFormatReadError(MyGPRError):
     """Raised when a known GPR format cannot be safely decoded."""
+
+
+class GprReaderFormat(str, Enum):
+    """GPR reader format type identifiers returned by native readers."""
+
+    NUMPY_ARRAY = "numpy_array"
+    MALA_RD = "mala_rd"
+    IMPULSERADAR_IPRB = "impulseradar_iprb"
+    SEGY_FIXED = "segy_fixed"
+    ENVI_BSQ = "envi_bsq"
 
 
 def _read_text(path: Path) -> str:
     for enc in ("utf-8", "latin-1", "cp1252"):
         try:
             return path.read_text(encoding=enc, errors="ignore")
-        except Exception:
+        except (OSError, UnicodeError):
             continue
     return path.read_bytes().decode("latin-1", errors="ignore")
 
@@ -106,11 +118,11 @@ def read_numpy_profile(path: str | os.PathLike[str]) -> dict[str, Any]:
             "num_traces": int(arr.shape[1]),
             "total_time_ns": 0.0,
             "trace_interval_m": 0.0,
-            "source": "numpy_array",
+            "source": GprReaderFormat.NUMPY_ARRAY,
             "path": str(p),
         }
     )
-    return {"data": arr, "header_info": header, "path": str(p), "format": "numpy_array"}
+    return {"data": arr, "header_info": header, "path": str(p), "format": GprReaderFormat.NUMPY_ARRAY}
 
 
 def read_mala_rd(path: str | os.PathLike[str]) -> dict[str, Any]:
@@ -148,11 +160,11 @@ def read_mala_rd(path: str | os.PathLike[str]) -> dict[str, Any]:
         "declared_last_trace": int(last_trace),
         "total_time_ns": float(time_window),
         "trace_interval_m": float(trace_interval),
-        "source": "mala_rd",
+        "source": GprReaderFormat.MALA_RD,
         "rad_path": str(rad),
         "data_path": str(data_path),
     }
-    return {"data": data, "header_info": header, "path": str(data_path), "format": "mala_rd"}
+    return {"data": data, "header_info": header, "path": str(data_path), "format": GprReaderFormat.MALA_RD}
 
 
 def read_impulseradar_iprb(path: str | os.PathLike[str]) -> dict[str, Any]:
@@ -191,12 +203,12 @@ def read_impulseradar_iprb(path: str | os.PathLike[str]) -> dict[str, Any]:
         "num_traces": int(traces),
         "total_time_ns": total_time_ns,
         "trace_interval_m": _num(kv.get("DISTANCE_INTERVAL"), 0.0) or 0.0,
-        "source": "impulseradar_iprb",
+        "source": GprReaderFormat.IMPULSERADAR_IPRB,
         "iprh_path": str(header_path),
         "data_path": str(data_path),
         "data_version": int(data_version),
     }
-    return {"data": data, "header_info": header, "path": str(data_path), "format": "impulseradar_iprb"}
+    return {"data": data, "header_info": header, "path": str(data_path), "format": GprReaderFormat.IMPULSERADAR_IPRB}
 
 
 def _segy_format_dtype(format_code: int) -> np.dtype | None:
@@ -244,11 +256,11 @@ def read_segy_fixed(path: str | os.PathLike[str]) -> dict[str, Any]:
         "sample_interval_us": int(sample_interval_us),
         "total_time_ns": float(sample_interval_us) * float(samples) * 1000.0,
         "trace_interval_m": 0.0,
-        "source": "segy_fixed",
+        "source": GprReaderFormat.SEGY_FIXED,
         "path": str(p),
         "sample_format_code": int(fmt),
     }
-    return {"data": data, "header_info": header, "path": str(p), "format": "segy_fixed"}
+    return {"data": data, "header_info": header, "path": str(p), "format": GprReaderFormat.SEGY_FIXED}
 
 
 def read_envi_bsq(path: str | os.PathLike[str]) -> dict[str, Any]:
@@ -284,13 +296,13 @@ def read_envi_bsq(path: str | os.PathLike[str]) -> dict[str, Any]:
         "num_traces": int(lines),
         "total_time_ns": 0.0,
         "trace_interval_m": 0.0,
-        "source": "envi_bsq",
+        "source": GprReaderFormat.ENVI_BSQ,
         "hdr_path": str(hdr),
         "data_path": str(data_path),
         "bands": int(bands),
         "data_type": int(data_type),
     }
-    return {"data": data, "header_info": header, "path": str(data_path), "format": "envi_bsq"}
+    return {"data": data, "header_info": header, "path": str(data_path), "format": GprReaderFormat.ENVI_BSQ}
 
 
 def unsupported_known_format_message(path: str | os.PathLike[str], display_name: str, notes: str = "") -> str:
@@ -303,6 +315,7 @@ def unsupported_known_format_message(path: str | os.PathLike[str], display_name:
 
 __all__ = [
     "GPRFormatReadError",
+    "GprReaderFormat",
     "read_numpy_profile",
     "read_mala_rd",
     "read_impulseradar_iprb",

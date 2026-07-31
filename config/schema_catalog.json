@@ -1,0 +1,735 @@
+{
+  "schema": "mygpr.schema_catalog.v1",
+  "schemas": [
+    {
+      "schema": "mygpr.artifact_pointer.v1",
+      "owner": "project-storage",
+      "mutable": false,
+      "migration_policy": "immutable-storage-reference",
+      "references": [
+        "core/field_artifact_store.py",
+        "core/project_storage_migration.py"
+      ]
+    },
+    {
+      "schema": "mygpr.autotune.preference_audit.v1",
+      "owner": "autotune",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "mygpr/application/autotune/service.py"
+      ]
+    },
+    {
+      "schema": "mygpr.backend_api_contract.v1",
+      "owner": "backend-api",
+      "mutable": false,
+      "migration_policy": "major-version-only",
+      "references": [
+        "scripts/check_backend_api_contract.py"
+      ]
+    },
+    {
+      "schema": "mygpr.basal_interface_annotation.v1",
+      "owner": "core",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "core/basal_interface_annotations.py"
+      ]
+    },
+    {
+      "schema": "mygpr.basal_interface_labels.v1",
+      "owner": "core",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "core/basal_interface_annotations.py"
+      ]
+    },
+    {
+      "schema": "mygpr.boreholes.v1",
+      "owner": "interpretation",
+      "mutable": true,
+      "migration_policy": "schema-registry migration; unknown newer versions open read-only",
+      "references": [
+        "mygpr/infrastructure/persistence/interpretation_adapter.py",
+        "mygpr/infrastructure/persistence/interpretation_adapter.py"
+      ]
+    },
+    {
+      "schema": "mygpr.compile_check.v1",
+      "owner": "core",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "scripts/check_python_compile.py"
+      ]
+    },
+    {
+      "schema": "mygpr.complexity_baseline.v1",
+      "owner": "core",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "scripts/check_complexity_budget.py"
+      ]
+    },
+    {
+      "schema": "mygpr.crash_report.v1",
+      "owner": "core",
+      "mutable": false,
+      "migration_policy": "immutable-diagnostic",
+      "references": [
+        "core/observability.py"
+      ]
+    },
+    {
+      "schema": "mygpr.debt_baseline.v1",
+      "owner": "core",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "scripts/check_debt_budget.py"
+      ]
+    },
+    {
+      "schema": "mygpr.delivery.v1",
+      "owner": "core",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "core/delivery_service.py"
+      ]
+    },
+    {
+      "schema": "mygpr.delivery_checks.v1",
+      "owner": "core",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "core/delivery_service.py"
+      ]
+    },
+    {
+      "schema": "mygpr.diff_coverage_report.v1",
+      "owner": "test-engineering",
+      "mutable": false,
+      "migration_policy": "immutable-test-evidence",
+      "references": [
+        "scripts/check_diff_coverage.py"
+      ]
+    },
+    {
+      "schema": "mygpr.error_info.v1",
+      "owner": "core",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "mygpr/domain/common/errors.py",
+        "scripts/check_backend_api_contract.py"
+      ]
+    },
+    {
+      "schema": "mygpr.field_project.v3",
+      "owner": "project-storage",
+      "mutable": true,
+      "migration_policy": "SchemaRegistry sequential migration + snapshot + quarantine",
+      "references": [
+        "core/field_project_models.py"
+      ]
+    },
+    {
+      "schema": "mygpr.file_transaction.v1",
+      "owner": "core",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "core/storage_primitives.py",
+        "core/storage_primitives.py",
+        "core/storage_primitives.py"
+      ]
+    },
+    {
+      "schema": "mygpr.gis_cache_entry.v1",
+      "owner": "gis",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "core/gis_cache.py"
+      ]
+    },
+    {
+      "schema": "mygpr.gis_layers.v2",
+      "owner": "gis",
+      "mutable": true,
+      "migration_policy": "SchemaRegistry sequential migration + snapshot + quarantine",
+      "references": [
+        "core/gis_layers.py"
+      ]
+    },
+    {
+      "schema": "mygpr.gpr_dataset.v1",
+      "owner": "core",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "core/gpr_data_model.py"
+      ]
+    },
+    {
+      "schema": "mygpr.history_memory.v1",
+      "owner": "core",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "core/shared_data_model.py"
+      ]
+    },
+    {
+      "schema": "mygpr.hybrid_artifact_transaction.v1",
+      "owner": "project-storage",
+      "mutable": true,
+      "migration_policy": "write-ahead recovery journal; roll-forward or rollback on writable open",
+      "references": [
+        "core/hybrid_transaction_journal.py"
+      ]
+    },
+    {
+      "schema": "mygpr.import_manifest.v2",
+      "owner": "core",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "core/field_line_store.py"
+      ]
+    },
+    {
+      "schema": "mygpr.interface_annotation.v2",
+      "owner": "interpretation",
+      "mutable": true,
+      "migration_policy": "versioned project-local contract; unknown newer versions open read-only",
+      "references": [
+        "mygpr/infrastructure/persistence/interpretation_adapter.py"
+      ]
+    },
+    {
+      "schema": "mygpr.interpretation_feature.v1",
+      "owner": "core",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "core/interpretation_service.py",
+        "core/project_models.py"
+      ]
+    },
+    {
+      "schema": "mygpr.interpretation_labels.v1",
+      "owner": "core",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "mygpr/application/interpretation/edit_service.py"
+      ]
+    },
+    {
+      "schema": "mygpr.interpretations.v1",
+      "owner": "core",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "core/interpretation_service.py",
+        "core/interpretation_service.py",
+        "mygpr/infrastructure/persistence/interpretation_adapter.py"
+      ]
+    },
+    {
+      "schema": "mygpr.job_event.v1",
+      "owner": "jobs",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "core/job_manager.py",
+        "mygpr/application/jobs/models.py"
+      ]
+    },
+    {
+      "schema": "mygpr.job_journal.v2",
+      "owner": "jobs",
+      "mutable": true,
+      "migration_policy": "SchemaRegistry sequential migration + snapshot + quarantine",
+      "references": [
+        "core/job_manager.py"
+      ]
+    },
+    {
+      "schema": "mygpr.job_result_summary.v1",
+      "owner": "backend-jobs",
+      "mutable": false,
+      "migration_policy": "additive-compatible",
+      "references": [
+        "mygpr/application/jobs/models.py"
+      ]
+    },
+    {
+      "schema": "mygpr.job_snapshot.v1",
+      "owner": "processing-backend",
+      "mutable": false,
+      "migration_policy": "versioned runtime API contract",
+      "references": [
+        "mygpr/application/jobs/models.py"
+      ]
+    },
+    {
+      "schema": "mygpr.line_container.v1",
+      "owner": "project-storage",
+      "mutable": true,
+      "migration_policy": "HDF5 container version migration with pre-migration snapshot",
+      "references": [
+        "core/hdf5_line_container.py"
+      ]
+    },
+    {
+      "schema": "mygpr.line_data_quality.v1",
+      "owner": "core",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "core/field_data_quality.py"
+      ]
+    },
+    {
+      "schema": "mygpr.line_trash.v1",
+      "owner": "project-storage",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "core/field_project_operations.py"
+      ]
+    },
+    {
+      "schema": "mygpr.log_event.v1",
+      "owner": "core",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "core/log_events.py",
+        "core/observability.py"
+      ]
+    },
+    {
+      "schema": "mygpr.motion_pipeline.v1",
+      "owner": "acquisition-backend",
+      "mutable": true,
+      "migration_policy": "backward-compatible additive evolution through Backend API v1",
+      "references": [
+        "mygpr/domain/acquisition/motion.py"
+      ]
+    },
+    {
+      "schema": "mygpr.mutation_contract.v1",
+      "owner": "test-engineering",
+      "mutable": false,
+      "migration_policy": "immutable-test-evidence",
+      "references": [
+        "scripts/run_mutation_contract.py"
+      ]
+    },
+    {
+      "schema": "mygpr.online_basemap_settings.v1",
+      "owner": "gis",
+      "mutable": true,
+      "migration_policy": "user-settings backward-compatible defaults",
+      "references": [
+        "core/online_basemap.py"
+      ]
+    },
+    {
+      "schema": "mygpr.orientation_fix.v2",
+      "owner": "core",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "core/field_line_store.py"
+      ]
+    },
+    {
+      "schema": "mygpr.processing_draft.v1",
+      "owner": "core",
+      "mutable": true,
+      "migration_policy": "versioned mutable index; atomic writes",
+      "references": [
+        "core/field_processing_draft_store.py",
+        "core/manual_processing_chain.py",
+        "mygpr/application/processing/workbench_service.py",
+        "mygpr/application/processing/workbench_service.py"
+      ]
+    },
+    {
+      "schema": "mygpr.processing_evidence.v1",
+      "owner": "processing",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "mygpr/application/processing/analysis_service.py"
+      ]
+    },
+    {
+      "schema": "mygpr.processing_manifest.v2",
+      "owner": "core",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "core/field_processing_bridge.py"
+      ]
+    },
+    {
+      "schema": "mygpr.processing_manifest.v3",
+      "owner": "processing-backend",
+      "mutable": true,
+      "migration_policy": "manifest version migration with artifact hash preservation",
+      "references": [
+        "core/field_artifact_store.py"
+      ]
+    },
+    {
+      "schema": "mygpr.processing_pipeline.v1",
+      "owner": "processing-backend",
+      "mutable": false,
+      "migration_policy": "versioned request API contract",
+      "references": [
+        "mygpr/domain/processing/models.py"
+      ]
+    },
+    {
+      "schema": "mygpr.processing_plugin.v1",
+      "owner": "core",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "core/algorithm_specs.py"
+      ]
+    },
+    {
+      "schema": "mygpr.processing_result.v1",
+      "owner": "project-storage",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "core/project_models.py"
+      ]
+    },
+    {
+      "schema": "mygpr.processing_save.v3",
+      "owner": "processing-backend",
+      "mutable": false,
+      "migration_policy": "immutable processing evidence; create a new version on change",
+      "references": [
+        "core/field_artifact_store.py",
+        "core/processing_artifact_index.py"
+      ]
+    },
+    {
+      "schema": "mygpr.processing_templates.v1",
+      "owner": "processing-application",
+      "mutable": true,
+      "migration_policy": "project-local versioned template store; atomic replacement and backward-compatible readers",
+      "references": [
+        "mygpr/application/processing/workbench_service.py",
+        "mygpr/application/processing/workbench_service.py"
+      ]
+    },
+    {
+      "schema": "mygpr.project.v1",
+      "owner": "project-storage",
+      "mutable": true,
+      "migration_policy": "SchemaRegistry sequential migration + snapshot + quarantine",
+      "references": [
+        "core/project_models.py"
+      ]
+    },
+    {
+      "schema": "mygpr.project_backup.v1",
+      "owner": "project-storage",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "core/field_project_backup.py",
+        "core/field_project_backup.py"
+      ]
+    },
+    {
+      "schema": "mygpr.project_format_compatibility.v1",
+      "owner": "core",
+      "mutable": false,
+      "migration_policy": "release-contract",
+      "references": [
+        "scripts/check_project_format_compatibility.py"
+      ]
+    },
+    {
+      "schema": "mygpr.project_integrity_report.v1",
+      "owner": "project-storage",
+      "mutable": true,
+      "migration_policy": "schema-registry migration; conservative pointer repair only",
+      "references": [
+        "core/project_integrity.py"
+      ]
+    },
+    {
+      "schema": "mygpr.project_lock.v2",
+      "owner": "project-storage",
+      "mutable": true,
+      "migration_policy": "backward-compatible stale-lock detection with boot and process-start markers",
+      "references": [
+        "core/storage_primitives.py"
+      ]
+    },
+    {
+      "schema": "mygpr.project_root_marker.v1",
+      "owner": "storage",
+      "mutable": false,
+      "migration_policy": "immutable-project-identity",
+      "references": [
+        "core/project_root_guard.py"
+      ]
+    },
+    {
+      "schema": "mygpr.project_runtime_session.v1",
+      "owner": "project-storage",
+      "mutable": true,
+      "migration_policy": "schema-registry migration; last session marker",
+      "references": [
+        "core/project_runtime_guard.py"
+      ]
+    },
+    {
+      "schema": "mygpr.project_state.v1",
+      "owner": "project-storage",
+      "mutable": true,
+      "migration_policy": "SchemaRegistry sequential migration + snapshot + quarantine",
+      "references": [
+        "core/project_state_tracker.py"
+      ]
+    },
+    {
+      "schema": "mygpr.project_trash.v1",
+      "owner": "project-storage",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "core/field_project_operations.py"
+      ]
+    },
+    {
+      "schema": "mygpr.qc_report.v1",
+      "owner": "project-storage",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "core/project_models.py"
+      ]
+    },
+    {
+      "schema": "mygpr.quarantine_record.v1",
+      "owner": "gis",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "core/schema_registry.py"
+      ]
+    },
+    {
+      "schema": "mygpr.recent_projects.v1",
+      "owner": "project-storage",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "core/field_project_operations.py"
+      ]
+    },
+    {
+      "schema": "mygpr.release_hygiene.v1",
+      "owner": "core",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "scripts/check_release_hygiene.py"
+      ]
+    },
+    {
+      "schema": "mygpr.report_document.v1",
+      "owner": "reporting",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "core/reporting_model.py"
+      ]
+    },
+    {
+      "schema": "mygpr.report_package.v3",
+      "owner": "reporting",
+      "mutable": true,
+      "migration_policy": "SchemaRegistry sequential migration + snapshot + quarantine",
+      "references": [
+        "core/report_export_models.py"
+      ]
+    },
+    {
+      "schema": "mygpr.report_preflight.v1",
+      "owner": "reporting",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "core/report_package_versions.py"
+      ]
+    },
+    {
+      "schema": "mygpr.report_seal.v1",
+      "owner": "reporting",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "core/reporting_model.py",
+        "core/reporting_model.py"
+      ]
+    },
+    {
+      "schema": "mygpr.report_version.v1",
+      "owner": "reporting",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "core/report_package_versions.py"
+      ]
+    },
+    {
+      "schema": "mygpr.report_version_index.v1",
+      "owner": "reporting",
+      "mutable": true,
+      "migration_policy": "versioned mutable index; atomic writes",
+      "references": [
+        "core/project_integrity.py",
+        "core/report_package_versions.py"
+      ]
+    },
+    {
+      "schema": "mygpr.schema_catalog.v1",
+      "owner": "core",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "scripts/generate_schema_catalog.py"
+      ]
+    },
+    {
+      "schema": "mygpr.sensor_sync.v2",
+      "owner": "sync",
+      "mutable": true,
+      "migration_policy": "SchemaRegistry sequential migration + snapshot + quarantine",
+      "references": [
+        "core/sensor_sync_models.py"
+      ]
+    },
+    {
+      "schema": "mygpr.source_files.v2",
+      "owner": "gis",
+      "mutable": true,
+      "migration_policy": "SchemaRegistry sequential migration + snapshot + quarantine",
+      "references": [
+        "core/source_file_registry.py"
+      ]
+    },
+    {
+      "schema": "mygpr.spatial_preflight.v1",
+      "owner": "gis",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "core/spatial_result_versions.py"
+      ]
+    },
+    {
+      "schema": "mygpr.spatial_result.v1",
+      "owner": "gis",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "core/spatial_result_versions.py"
+      ]
+    },
+    {
+      "schema": "mygpr.spatial_result_index.v1",
+      "owner": "gis",
+      "mutable": true,
+      "migration_policy": "versioned mutable index; atomic writes",
+      "references": [
+        "core/project_integrity.py",
+        "core/spatial_result_versions.py"
+      ]
+    },
+    {
+      "schema": "mygpr.spatial_synthesis.v1",
+      "owner": "gis",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "core/spatial_synthesis_service.py"
+      ]
+    },
+    {
+      "schema": "mygpr.storage_migration.v1",
+      "owner": "project-storage",
+      "mutable": false,
+      "migration_policy": "immutable migration evidence",
+      "references": [
+        "core/project_storage_migration.py"
+      ]
+    },
+    {
+      "schema": "mygpr.support_bundle.v2",
+      "owner": "core",
+      "mutable": false,
+      "migration_policy": "immutable-diagnostic",
+      "references": [
+        "core/observability.py"
+      ]
+    },
+    {
+      "schema": "mygpr.test_redundancy_report.v1",
+      "owner": "test-engineering",
+      "mutable": false,
+      "migration_policy": "immutable-test-evidence",
+      "references": [
+        "scripts/audit_test_redundancy.py"
+      ]
+    },
+    {
+      "schema": "mygpr.workspace_context.v1",
+      "owner": "project-storage",
+      "mutable": true,
+      "migration_policy": "schema-registry migration; newer versions open read-only",
+      "references": [
+        "core/workspace_context.py"
+      ]
+    },
+    {
+      "schema": "mygpr.workspace_session.v1",
+      "owner": "core",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "core/workspace_session.py"
+      ]
+    },
+    {
+      "schema": "mygpr.yingshan_full_validation.v1",
+      "owner": "scientific-validation",
+      "mutable": false,
+      "migration_policy": "immutable-test-evidence",
+      "references": [
+        "scripts/verify_yingshan_dataset.py"
+      ]
+    }
+  ]
+}

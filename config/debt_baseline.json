@@ -1,0 +1,14 @@
+{
+  "schema": "mygpr.debt_baseline.v1",
+  "policy": "release-ratchet; values may decrease but may not increase",
+  "metrics": {
+    "python_files": 389,
+    "source_lines": 138159,
+    "broad_exception_handlers": 519,
+    "silent_exception_handlers": 119,
+    "sys_path_mutations": 59,
+    "modules_over_1000_lines": 17,
+    "classes_over_1000_lines": 12,
+    "functions_over_100_lines": 124
+  }
+}

@@ -1,15 +1,12 @@
-#title: GX-008 scene_003 flat dry_sand PVC shallow background_only draft
+#title: scene_003_flat_dry_sand_pvc_shallow background pair
 #domain: 2.0 1.0 0.5
 #dx_dy_dz: 0.01 0.01 0.01
-#time_window: 18e-9
-#waveform: ricker 1.0 900e6 src_wave
-#hertzian_dipole: z 0.20 0.50 0.10 src_wave
-#rx: 0.25 0.50 0.10
-#src_steps: 0.005 0 0
-#rx_steps: 0.005 0 0
-
-#material: 3.0 0.001 1.0 0.0 dry_sand_like
+#time_window: 1.2e-07
+#material: 6.0 0.001 1.0 0.0 dry_sand_like
 #material: 3.5 0.0 1.0 0.0 pvc_like
-
-#box: 0 0 0 2.0 1.0 0.5 dry_sand_like
-#geometry_view: 0 0 0 2.0 1.0 0.5 0.01 0.01 0.01 gx008_scene003_background n
+#waveform: ricker 1.0 4.0e8 gx008_wave
+#hertzian_dipole: z 0.20 0.85 0.25 gx008_wave
+#rx: 0.24 0.85 0.25
+#src_steps: 0.04 0 0
+#rx_steps: 0.04 0 0
+#box: 0 0 0 2.0 0.70 0.5 dry_sand_like

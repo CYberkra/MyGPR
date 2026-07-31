@@ -1,0 +1,77 @@
+[build-system]
+requires = ["setuptools==83.0.0", "wheel==0.47.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mygpr-backend"
+version = "0.9.36"
+description = "MyGPR headless backend, algorithms, storage, processing, interpretation and GIS services"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+license = {text = "Proprietary"}
+authors = [{name = "MyGPR Project"}]
+dependencies = [
+  "numpy==2.5.1",
+  "pandas==2.3.3",
+  "scipy==1.18.0",
+  "matplotlib==3.11.0",
+  "Pillow==12.3.0",
+  "h5py==3.16.0",
+  "PyYAML==6.0.3",
+  "PyWavelets==1.9.0",
+  "pyproj==3.7.2",
+  "openpyxl==3.1.5",
+  "rasterio==1.5.0",
+  "fiona==1.10.1",
+  "defusedxml==0.7.1",
+]
+
+[project.optional-dependencies]
+gpu = []
+dev = ["pytest==8.4.2", "pytest-timeout==2.4.0", "pytest-cov==7.0.0", "coverage==7.13.3", "hypothesis>=6.130,<7", "mutmut>=3.3,<4", "ruff==0.15.21", "mypy==1.20.2"]
+build = ["build>=1.2,<2", "cyclonedx-bom>=5,<6", "pip-licenses>=5,<6"]
+
+[project.scripts]
+mygpr-batch = "cli_batch:main"
+mygpr-backend-smoke = "mygpr.interfaces.cli.backend_smoke:main"
+
+[tool.setuptools]
+include-package-data = true
+py-modules = ["cli_batch", "read_file_data"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["core*", "mygpr*", "PythonModule*"]
+exclude = ["tests*", "sample_data*", "experiments*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.json", "*.toml", "*.md", "*.csv"]
+"mygpr.resources.config" = ["*.yaml", "*.json"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.mypy]
+python_version = "3.13"
+warn_unused_ignores = true
+no_implicit_optional = true
+check_untyped_defs = true
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers"
+testpaths = ["tests"]
+xfail_strict = true
+
+[tool.coverage.run]
+branch = true
+source = ["mygpr", "core"]
+parallel = false
+
+[tool.coverage.report]
+show_missing = true
+precision = 2
+exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:", "raise NotImplementedError"]
+
+[tool.coverage.json]
+show_contexts = true

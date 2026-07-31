@@ -478,14 +478,18 @@ def get_benchmark_sample_spec(sample_id: str) -> BenchmarkSampleSpec:
     try:
         return BENCHMARK_SAMPLES[sample_id]
     except KeyError as exc:
-        raise KeyError(f"未知 benchmark sample: {sample_id}") from exc
+        raise KeyError(f"未知验证样本: {sample_id}") from exc
 
 
 def generate_benchmark_sample(
     sample_id: str,
     seed: int = DEFAULT_BENCHMARK_SEED,
 ) -> tuple[np.ndarray, dict[str, Any]]:
-    """Generate benchmark input data and metadata deterministically."""
+    """Generate benchmark input data and metadata deterministically.
+
+    Also populates sample_id, scenario, seed, title, focus_metrics,
+    default_methods, and tags from the spec.
+    """
     spec = get_benchmark_sample_spec(sample_id)
     data, meta = spec.builder(int(seed))
     payload = dict(meta)

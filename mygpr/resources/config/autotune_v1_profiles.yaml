@@ -1,0 +1,311 @@
+version: autotune_v1_final_candidate_2026_06_04
+status: design_final_candidate_not_production_default
+profiles:
+  balanced:
+    label_zh: 均衡处理
+    weights:
+      target_preservation: 0.3
+      background_suppression: 0.3
+      continuity: 0.3
+      contrast: 0.3
+      false_positive_penalty: 0.3
+      ringing_artifact_penalty: 0.3
+      depth_weak_reflector: 0.3
+    rationale: 无明确解释目标时使用，所有指标保持中等权重，避免过度锐化或过度扣除。
+    requires_batch_calibration: true
+  object_like_anomaly:
+    label_zh: 局部异常增强
+    weights:
+      target_preservation: 0.5
+      background_suppression: 0.4
+      continuity: 0.1
+      contrast: 0.5
+      false_positive_penalty: 0.3
+      ringing_artifact_penalty: 0.4
+      depth_weak_reflector: 0.2
+    rationale: 适用于点状、双曲线或局部缺陷响应，重视目标对比和背景抑制，但必须惩罚 ringing 与假阳性。
+    requires_batch_calibration: true
+  interface_layer_preservation:
+    label_zh: 连续界面保留
+    weights:
+      target_preservation: 0.4
+      background_suppression: 0.2
+      continuity: 0.55
+      contrast: 0.25
+      false_positive_penalty: 0.4
+      ringing_artifact_penalty: 0.3
+      depth_weak_reflector: 0.5
+    rationale: 适用于层状/界面型目标，优先保留横向连续性和深部弱反射，限制强背景扣除和高阶 SVD。
+    requires_batch_calibration: true
+  landslide_bedrock_sliding_surface:
+    label_zh: 滑坡基覆界面 / 潜在滑动面
+    weights:
+      target_preservation: 0.35
+      background_suppression: 0.2
+      continuity: 0.65
+      contrast: 0.25
+      false_positive_penalty: 0.5
+      ringing_artifact_penalty: 0.3
+      depth_weak_reflector: 0.65
+    rationale: 面向滑坡基覆界面、潜在滑动面，属于 interface-like / zone-like 目标，连续性、深部保留和误报控制优先级最高。
+    requires_batch_calibration: true
+  wet_weak_zone:
+    label_zh: 含水软弱带
+    weights:
+      target_preservation: 0.4
+      background_suppression: 0.25
+      continuity: 0.45
+      contrast: 0.35
+      false_positive_penalty: 0.4
+      ringing_artifact_penalty: 0.35
+      depth_weak_reflector: 0.7
+    rationale: 面向含水软弱带、衰减相关异常，保留低频与弱反射，不使用强高通作为默认偏好。
+    requires_batch_calibration: true
+  deep_weak_reflector:
+    label_zh: 深部弱反射增强
+    weights:
+      target_preservation: 0.45
+      background_suppression: 0.2
+      continuity: 0.35
+      contrast: 0.45
+      false_positive_penalty: 0.4
+      ringing_artifact_penalty: 0.45
+      depth_weak_reflector: 0.8
+    rationale: 面向深部弱反射，重视深度补偿和弱信号保留，背景抑制保持保守。
+    requires_batch_calibration: true
+recipes:
+- id: conservative_enhance
+  name: 保守增强
+  profiles:
+  - balanced
+  - interface_layer_preservation
+  - landslide_bedrock_sliding_surface
+  steps:
+  - zero_time_correction
+  - dewow_conservative
+  - bandpass_conservative
+  - weak_background_suppression_optional
+  - metric_safe_gain
+  - display_preview
+  risk: 最稳但可能抑制不足；适合作为默认安全基线。
+- id: background_suppression_first
+  name: 背景抑制优先
+  profiles:
+  - object_like_anomaly
+  steps:
+  - zero_time_correction
+  - dewow
+  - bandpass
+  - background_candidates_mean_median_sliding_svd
+  - artifact_check
+  - metric_safe_gain
+  risk: 可能删除真实水平界面或深部弱反射；不得用于层状目标默认流程。
+- id: interface_preservation
+  name: 连续界面保留
+  profiles:
+  - interface_layer_preservation
+  - landslide_bedrock_sliding_surface
+  steps:
+  - zero_time_correction
+  - dewow_conservative
+  - bandpass_low_cut_guarded
+  - sliding_background_weak_or_svd_rank1_only
+  - continuity_scoring
+  - depth_compensation_safe
+  risk: 可视上不一定最锐利；以保守处理和人工复核为边界。
+- id: deep_weak_reflector
+  name: 深部弱反射增强
+  profiles:
+  - deep_weak_reflector
+  - wet_weak_zone
+  - landslide_bedrock_sliding_surface
+  steps:
+  - zero_time_correction
+  - dewow_conservative
+  - bandpass_low_cut_guarded
+  - weak_background_suppression
+  - sec_or_exponential_gain
+  - artifact_check
+  risk: 增益可能放大噪声；AGC 只能作为 display-only。
+- id: wet_weak_zone
+  name: 含水软弱带倾向
+  profiles:
+  - wet_weak_zone
+  steps:
+  - zero_time_correction
+  - dewow_conservative
+  - bandpass_keep_low_frequency
+  - weak_background_suppression
+  - attenuation_continuity_scoring
+  - risk_label
+  risk: 不能把衰减带直接解释为含水层；必须人工复核。
+- id: object_focus_experimental
+  name: 局部异常聚焦（高级）
+  profiles:
+  - object_like_anomaly
+  steps:
+  - zero_time_correction
+  - dewow
+  - bandpass
+  - background_suppression
+  - migration_optional_experimental
+  - hilbert_display_optional
+  risk: 迁移依赖速度估计；V1.0 默认不纳入 production scoring，仅作为高级可选。
+candidate_spec:
+  background_suppression:
+    v1_default:
+    - mean_background
+    - median_background
+    - sliding_mean_background
+    - sliding_median_background
+    - svd_rank_sweep
+    v1_experimental:
+    - rpca
+    - nmf
+    - bms_like_background_matrix
+    fixed_candidates:
+      sliding_window_ntraces:
+      - 7
+      - 11
+      - 21
+      - 31
+      - 51
+      - 81
+      - 101
+      svd_rank:
+      - 1
+      - 2
+      - 3
+      - 5
+      - 8
+    adaptive_rules:
+    - window_ntraces = odd_clamp(round(k * lateral_correlation_length), 7, min(101, n_traces//2))
+    - add windows around estimated target lateral scale if trace_spacing is available
+    - svd_rank_candidates = fixed ranks union elbow_rank±1, clipped by profile caps
+    - for interface/landslide/deep profiles, cap default SVD removal at rank <= 1 or elbow_rank conservative lower bound
+  dewow:
+    fixed_candidates_samples:
+    - 16
+    - 32
+    - 64
+    - 128
+    - 256
+    adaptive_rules:
+    - 'if center_frequency exists: period_samples = sample_rate / center_frequency; add round(1T) and round(2T) windows'
+    - avoid too-short windows for wet/deep/interface profiles
+    metric_safe: true
+  bandpass:
+    fixed_candidates: antenna-aware low/high cutoff presets
+    adaptive_rules:
+    - derive Nyquist from dt
+    - estimate dominant_frequency and spectral energy percentiles
+    - for wet/deep/interface profiles, penalize aggressive high-pass settings
+    metric_safe: true
+  gain:
+    v1_default:
+    - sec_gain
+    - exponential_gain
+    display_only:
+    - agc
+    - strong_normalize
+    - percentile_stretch
+    adaptive_rules:
+    - estimate attenuation_ratio by depth/time envelope
+    - generate conservative/medium SEC gain_max candidates
+    - AGC window candidates recorded but excluded from full-reference scoring
+    metric_safe: SEC/exponential only, AGC display-only by default
+  denoise:
+    v1_default:
+    - trace_median_light
+    - hampel_spike_removal
+    - savitzky_golay_light
+    v1_experimental:
+    - wavelet_denoise
+    - fk_filter
+    adaptive_rules:
+    - enable spike filters only when spikiness/hot_pixel_ratio exceeds threshold
+    - for interface profiles, cap smoothing window to preserve lateral continuity and local breaks
+    metric_safe: only light filters; visualization-only filters cannot enter scoring
+  migration:
+    v1_default: disabled for production AutoTune scoring
+    v1_experimental:
+    - kirchhoff_or_fk_migration_velocity_sweep
+    rules:
+    - allow only in object-like advanced recipe
+    - require velocity source or explicit candidate range
+    - after UAV height/attitude/terrain compensation when metadata exists
+    risk: velocity-sensitive; not default for landslide/interface recipe
+scoring_spec:
+  synthetic_paired:
+    required_inputs:
+    - raw
+    - background
+    - target_response
+    target_response: raw - background; component-aware; same run/task only
+    full_reference_metrics:
+    - mae
+    - mse
+    - rmse
+    - psnr
+    - ssim_or_ssim_like
+    - corr_with_target_response
+    roi_metrics:
+    - target_roi_error
+    - target_roi_energy_preservation
+    - background_roi_energy_suppression
+    - false_positive_energy_outside_target
+    score_formula: normalized weighted sum of profile dimensions; full-reference metrics dominate when target_response exists
+    claim: synthetic supervised benchmark only; supports parameter ranking under known target_response, not real-world generalization
+  real_no_prior:
+    required_inputs:
+    - raw_or_current_bscan
+    allowed_metrics:
+    - scr_proxy
+    - cnr_proxy
+    - contrast
+    - entropy
+    - continuity
+    - texture_coherence
+    - artifact_risk
+    - new_hotspot_penalty
+    forbidden_metrics:
+    - mae_against_unknown_truth
+    - mse_against_unknown_truth
+    - psnr_against_unknown_truth
+    - ssim_against_unknown_truth
+    score_formula: heuristic recommendation score with risk labels; never ground-truth score
+    claim: field no-prior proxy; must show manual_review_required unless expert ROI and metadata are sufficient
+manifest_required_fields:
+- source_commit
+- software_version
+- input_identity
+- input_shape
+- component
+- workflow_recipe
+- goal_profile
+- candidate_space_hash
+- algorithm_sequence
+- parameters
+- scoring_mode
+- metrics
+- roi_mode
+- roi_definition
+- warnings
+- risk_labels
+- display_settings
+- preview_paths
+- trial_table_path
+- claim_boundary
+- manual_review_required
+warning_tags:
+- weak_target_response
+- roi_too_small
+- background_roi_too_small
+- shape_mismatch
+- nan_or_inf_detected
+- autotune_failed
+- display_only_transform_used
+- agc_excluded_from_scoring
+- svd_rank_may_remove_interface
+- highpass_may_remove_deep_or_wet_response
+- no_prior_manual_review_required

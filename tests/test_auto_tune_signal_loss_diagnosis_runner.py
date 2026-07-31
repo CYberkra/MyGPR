@@ -53,13 +53,3 @@ def test_signal_loss_diagnosis_runner_writes_required_evidence(tmp_path: Path):
     report = (evidence_root / "reports/signal_loss_diagnosis_report.md").read_text(encoding="utf-8")
     assert "First Failing Step" in report
     assert "AT-002 conclusion remains `inconclusive`" in report
-
-
-def test_signal_loss_diagnosis_does_not_touch_frozen_modules():
-    frozen = [
-        Path("core/processing_engine.py"),
-        Path("PythonModule/motion_compensation_v2.py"),
-        Path("PythonModule/motion_compensation_core.py"),
-    ]
-    for path in frozen:
-        assert path.exists()

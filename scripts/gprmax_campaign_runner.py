@@ -305,7 +305,6 @@ def _run_campaign_mode(args: argparse.Namespace) -> int:
     except Exception as exc:
         print(f"ERROR: {exc}")
         return 1
-
     if args.dry_run:
         _print_summary(result)
         if args.json_path:

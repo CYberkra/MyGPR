@@ -124,7 +124,7 @@ def build_recipe_execution_plan(recipe_result: Mapping[str, Any] | None) -> Reci
     if not isinstance(scoring_record, dict):
         scoring_record = {}
     return RecipeExecutionPlan(
-        name=str(row.get("name") or "AutoTune 推荐流程"),
+        name=str(row.get("name") or "参数推荐流程"),
         target_goal=str(row.get("target_goal") or "均衡推荐"),
         roi_mode=str(row.get("roi_mode") or "none"),
         score=float(row.get("score", 0.0) or 0.0),

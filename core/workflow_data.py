@@ -10,6 +10,8 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
+
+from core.storage_primitives import atomic_write_json
 from typing import Dict, List, Optional, Any
 
 LOGGER = logging.getLogger(__name__)
@@ -69,7 +71,7 @@ METHOD_CATEGORIES = {
         "id": "artifact_suppression",
         "name": "伪影抑制",
         "icon": "▧",
-        "description": "周期条带、尖锐杂波等实验性增强",
+        "description": "周期条带、尖锐杂波等高级增强",
         "methods": ["motion_compensation_vibration", "running_average_2D"],
     },
     "attribute_analysis": {
@@ -518,9 +520,7 @@ class WorkflowConfigManager:
 
         filepath = self._safe_config_path(filename)
 
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(config.to_dict(), f, ensure_ascii=False, indent=2)
-
+        atomic_write_json(filepath, config.to_dict())
         return filepath
 
     def load_config(self, filename: str) -> Optional[WorkflowConfig]:
@@ -544,8 +544,7 @@ class WorkflowConfigManager:
 
     def save_last_config(self, config: WorkflowConfig):
         """保存上次使用的配置"""
-        with open(self.last_config_file, "w", encoding="utf-8") as f:
-            json.dump(config.to_dict(), f, ensure_ascii=False, indent=2)
+        atomic_write_json(self.last_config_file, config.to_dict())
 
     def load_last_config(self) -> Optional[WorkflowConfig]:
         """加载上次使用的配置"""

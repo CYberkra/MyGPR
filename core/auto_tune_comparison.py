@@ -9,7 +9,7 @@ from typing import Any, Callable
 
 import numpy as np
 
-from core.auto_tune import auto_tune_method
+from mygpr.application.autotune.use_case import auto_tune_method
 from core.methods_registry import PROCESSING_METHODS
 from core.preset_profiles import GUI_PRESETS_V1, RECOMMENDED_RUN_PROFILES
 from core.processing_engine import (
@@ -27,13 +27,14 @@ from core.quality_metrics import (
 )
 from core.gprmax_truth_metrics import compute_ground_truth_metrics
 from core.scalar_utils import to_int
+from core.app_errors import MyGPRError
 
 
 ProgressCallback = Callable[[int, int, str], None]
 CancelChecker = Callable[[], bool]
 
 
-class AutoTuneComparisonError(RuntimeError):
+class AutoTuneComparisonError(MyGPRError):
     """Raised when a manual-vs-auto comparison cannot be executed."""
 
 
@@ -87,20 +88,18 @@ def run_auto_tune_comparison(
     """Run manual baseline and auto-tuned branches on the same input."""
     arr = np.asarray(data, dtype=np.float32)
     if arr.ndim != 2 or arr.size == 0:
-        raise AutoTuneComparisonError("科研对比需要二维非空 B-scan 数据")
+        raise AutoTuneComparisonError("参数对比需要二维非空 B-scan 数据")
     if ground_truth is None and isinstance(header_info, dict):
         embedded_ground_truth = header_info.get("ground_truth")
         if isinstance(embedded_ground_truth, dict):
             ground_truth = embedded_ground_truth
     runtime_header_info = _header_without_ground_truth(header_info)
-
     profile_key = baseline_profile_key or (
         None if pipeline is not None else "uav_gpr_experience_baseline_v1"
     )
     pipeline_order = _resolve_pipeline(pipeline, profile_key)
     if not pipeline_order:
-        raise AutoTuneComparisonError("科研对比 pipeline 不能为空")
-
+        raise AutoTuneComparisonError("参数对比流程不能为空")
     _validate_pipeline(pipeline_order)
     roi_info = _resolve_roi_info(arr, roi_spec)
     explicit_manual_params = bool(manual_params_by_method)
@@ -110,7 +109,6 @@ def run_auto_tune_comparison(
         profile_key,
         manual_params_by_method or {},
     )
-
     manual_candidate = _execute_candidate(
         name="人工 baseline",
         source=manual_source,
@@ -127,7 +125,6 @@ def run_auto_tune_comparison(
         progress_offset=0,
         progress_total=max(1, len(pipeline_order) * 2),
     )
-
     automatic_candidate = _execute_candidate(
         name="自动选参",
         source="auto_tune",
@@ -278,10 +275,9 @@ def _execute_candidate(
     warnings: list[str] = []
     step_records: list[dict[str, Any]] = []
     auto_tune_results: dict[str, dict[str, Any]] = {}
-
     for idx, method_key in enumerate(pipeline, start=1):
         if cancel_checker and bool(cancel_checker()):
-            raise AutoTuneComparisonError("用户已取消科研对比")
+            raise AutoTuneComparisonError("用户已取消参数对比")
         params = dict(resolved_params.get(method_key, {}))
         if auto_tune and PROCESSING_METHODS[method_key].get("auto_tune_enabled"):
             tune_result = auto_tune_method(
@@ -302,7 +298,6 @@ def _execute_candidate(
             params.update(recommended)
             resolved_params[method_key] = params
             auto_tune_results[method_key] = _compact_auto_tune_result(tune_result)
-
         if progress_callback is not None:
             progress_callback(
                 progress_offset + idx - 1,

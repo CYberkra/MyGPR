@@ -148,7 +148,7 @@ def _metadata_float(metadata: Mapping[str, Any], *keys: str) -> float | None:
         if key in metadata and metadata[key] is not None:
             try:
                 value = float(metadata[key])
-            except Exception:
+            except (TypeError, ValueError):
                 continue
             if math.isfinite(value) and value > 0.0:
                 return value
@@ -227,7 +227,7 @@ def _singular_elbow_rank(arr: np.ndarray | None) -> int | None:
     try:
         centered = arr - np.nanmedian(arr, axis=1, keepdims=True)
         singular = np.linalg.svd(centered, full_matrices=False, compute_uv=False)
-    except Exception:
+    except (FloatingPointError, ValueError, np.linalg.LinAlgError):
         return None
     singular = np.asarray(singular, dtype=np.float64)
     singular = singular[np.isfinite(singular) & (singular > 0.0)]

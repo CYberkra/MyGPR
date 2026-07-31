@@ -1,12 +1,20 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""工作流执行引擎 - 按顺序执行方法列表"""
+"""Qt-free workflow execution engine.
+
+The original implementation inherited ``QObject`` in the core layer.  This
+version exposes small Python event hooks with the same ``connect``/``emit``
+shape, so existing callers continue to work while CLI and headless consumers no
+longer require PyQt6.
+"""
+from __future__ import annotations
+
+from collections.abc import Callable
+from typing import Any, Generic, List, Optional, TypeVar
 
 import numpy as np
-from typing import List, Optional
-from PyQt6.QtCore import QObject, pyqtSignal
 
-from core.workflow_data import WorkflowMethod
+from core.app_errors import MyGPRError
 from core.methods_registry import PROCESSING_METHODS
 from core.processing_engine import (
     ProcessingEngineError,
@@ -17,52 +25,59 @@ from core.processing_engine import (
     prepare_runtime_params,
     run_processing_method,
 )
+from core.workflow_data import WorkflowMethod
+
+T = TypeVar("T")
 
 
-class ExecutionError(Exception):
-    """执行错误"""
+class EventHook(Generic[T]):
+    """Minimal signal-like hook used by the pure workflow runner."""
 
-    pass
+    def __init__(self) -> None:
+        self._callbacks: list[Callable[..., Any]] = []
+
+    def connect(self, callback: Callable[..., Any]) -> None:
+        if callback not in self._callbacks:
+            self._callbacks.append(callback)
+
+    def disconnect(self, callback: Callable[..., Any]) -> None:
+        try:
+            self._callbacks.remove(callback)
+        except ValueError:
+            pass
+
+    def emit(self, *args: Any, **kwargs: Any) -> None:
+        for callback in tuple(self._callbacks):
+            callback(*args, **kwargs)
 
 
-class WorkflowExecutor(QObject):
-    """工作流执行器"""
+class ExecutionError(MyGPRError):
+    """Workflow execution error."""
 
-    # 信号
-    step_started = pyqtSignal(str, int, int)  # (method_name, current, total)
-    step_finished = pyqtSignal(str, np.ndarray)  # (method_name, result)
-    step_error = pyqtSignal(str, str)  # (method_name, error_msg)
-    all_finished = pyqtSignal(np.ndarray)  # (final_result)
-    progress_updated = pyqtSignal(int, int)  # (current, total)
+
+class WorkflowExecutor:
+    """Sequential processing workflow executor with cooperative cancellation."""
 
     def __init__(
         self,
         header_info: dict | None = None,
         trace_metadata: dict[str, np.ndarray] | None = None,
-    ):
-        super().__init__()
-        self.history = []  # 执行历史
-        self.current_data = None
+    ) -> None:
+        self.step_started: EventHook[Any] = EventHook()
+        self.step_finished: EventHook[Any] = EventHook()
+        self.step_error: EventHook[Any] = EventHook()
+        self.all_finished: EventHook[Any] = EventHook()
+        self.progress_updated: EventHook[Any] = EventHook()
+        self.history: list[np.ndarray] = []
+        self.current_data: np.ndarray | None = None
         self.current_header_info = clone_header_info(header_info)
         self.current_trace_metadata = clone_trace_metadata(trace_metadata)
         self.is_running = False
         self._cancel_requested = False
 
-    def execute_single(
-        self, data: np.ndarray, method: WorkflowMethod
-    ) -> tuple[np.ndarray, dict]:
-        """执行单个方法
-
-        Args:
-            data: 输入数据
-            method: 方法配置
-
-        Returns:
-            处理后的数据
-        """
+    def execute_single(self, data: np.ndarray, method: WorkflowMethod) -> tuple[np.ndarray, dict]:
         method_id = method.method_id
         params = method.params or {}
-
         try:
             runtime_params = prepare_runtime_params(
                 method_id,
@@ -84,85 +99,58 @@ class WorkflowExecutor(QObject):
                 self.current_trace_metadata, meta
             )
             return result, meta
-        except ProcessingEngineError as e:
-            raise ExecutionError(str(e)) from e
+        except ProcessingEngineError as exc:
+            raise ExecutionError(str(exc)) from exc
 
-    def execute_all(
-        self, data: np.ndarray, methods: List[WorkflowMethod]
-    ) -> np.ndarray:
-        """顺序执行所有方法
-
-        Args:
-            data: 原始数据
-            methods: 方法列表（按顺序）
-
-        Returns:
-            最终处理结果
-        """
+    def execute_all(self, data: np.ndarray, methods: List[WorkflowMethod]) -> np.ndarray:
         self.is_running = True
         self._cancel_requested = False
-        self.current_data = data.copy()
+        self.current_data = np.array(data, copy=True)
         self.current_header_info = merge_result_header_info(
             self.current_header_info, None, self.current_data.shape
         )
-        self.history = [data.copy()]  # 保存原始数据
-
-        enabled_methods = [m for m in methods if m.enabled]
+        self.history = [np.array(data, copy=True)]
+        enabled_methods = [method for method in methods if method.enabled]
         total = len(enabled_methods)
-
         try:
-            for i, method in enumerate(enabled_methods):
+            for index, method in enumerate(enabled_methods, start=1):
                 if self._cancel_requested:
                     raise ExecutionError("用户取消执行")
-
-                method_id = method.method_id
-                method_info = PROCESSING_METHODS.get(method_id, {})
-                method_name = method_info.get("name", method_id)
-
-                # 发送开始信号
-                self.step_started.emit(method_name, i + 1, total)
-                self.progress_updated.emit(i + 1, total)
-
-                # 执行方法
+                method_info = PROCESSING_METHODS.get(method.method_id, {})
+                method_name = method_info.get("name", method.method_id)
+                self.step_started.emit(method_name, index, total)
+                self.progress_updated.emit(index, total)
                 try:
                     result, _ = self.execute_single(self.current_data, method)
-                    self.current_data = result
-                    self.history.append(result.copy())
-
-                    # 发送完成信号
-                    self.step_finished.emit(method_name, result)
-
-                except Exception as e:
-                    error_msg = str(e)
-                    self.step_error.emit(method_name, error_msg)
-                    raise ExecutionError(f"执行 {method_name} 失败: {error_msg}") from e
-
-            # 全部完成
+                except Exception as exc:
+                    self.step_error.emit(method_name, str(exc))
+                    raise ExecutionError(f"执行 {method_name} 失败: {exc}") from exc
+                self.current_data = result
+                self.history.append(np.array(result, copy=True))
+                self.step_finished.emit(method_name, result)
             self.all_finished.emit(self.current_data)
             return self.current_data
-
         finally:
             self.is_running = False
 
-    def cancel(self):
-        """请求取消执行"""
+    def cancel(self) -> None:
         self._cancel_requested = True
 
     def undo(self) -> Optional[np.ndarray]:
-        """撤销上一步"""
-        if len(self.history) > 1:
-            self.history.pop()  # 移除当前状态
-            self.current_data = self.history[-1].copy()
-            return self.current_data
-        return None
+        if len(self.history) <= 1:
+            return None
+        self.history.pop()
+        self.current_data = np.array(self.history[-1], copy=True)
+        return self.current_data
 
     def can_undo(self) -> bool:
-        """是否可以撤销"""
         return len(self.history) > 1
 
-    def reset(self, original_data: np.ndarray):
-        """重置到原始数据"""
-        self.current_data = original_data.copy()
-        self.history = [original_data.copy()]
+    def reset(self, original_data: np.ndarray) -> None:
+        self.current_data = np.array(original_data, copy=True)
+        self.history = [np.array(original_data, copy=True)]
         self.is_running = False
         self._cancel_requested = False
+
+
+__all__ = ["EventHook", "ExecutionError", "WorkflowExecutor"]

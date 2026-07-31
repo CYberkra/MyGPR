@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any
 
 from core.app_paths import get_favorites_dir
+from core.storage_primitives import atomic_write_json
 
 logger = logging.getLogger(__name__)
 
@@ -34,16 +35,15 @@ class FavoritesManager:
         try:
             with open(self.favorites_file, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as e:
             logger.warning("加载收藏失败: %s", e)
             return {"methods": {}, "last_updated": None}
 
     def _save_favorites(self):
         """保存收藏"""
         try:
-            with open(self.favorites_file, "w", encoding="utf-8") as f:
-                json.dump(self.favorites, f, ensure_ascii=False, indent=2)
-        except Exception as e:
+            atomic_write_json(self.favorites_file, self.favorites)
+        except (OSError, TypeError, ValueError) as e:
             logger.warning("保存收藏失败: %s", e)
 
     def _generate_unique_name(self, method_id: str, base_name: str) -> str:
@@ -165,10 +165,9 @@ class FavoritesManager:
     def export_favorites(self, filepath: str):
         """导出收藏到文件"""
         try:
-            with open(filepath, "w", encoding="utf-8") as f:
-                json.dump(self.favorites, f, ensure_ascii=False, indent=2)
+            atomic_write_json(filepath, self.favorites)
             logger.info("收藏已导出: %s", filepath)
-        except Exception as e:
+        except (OSError, TypeError, ValueError) as e:
             logger.warning("导出收藏失败: %s", e)
 
     def import_favorites(self, filepath: str):
@@ -198,5 +197,5 @@ class FavoritesManager:
             self.favorites["last_updated"] = datetime.now().isoformat()
             self._save_favorites()
             logger.info("收藏已导入: %s", filepath)
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, TypeError, ValueError, KeyError) as e:
             logger.warning("导入收藏失败: %s", e)

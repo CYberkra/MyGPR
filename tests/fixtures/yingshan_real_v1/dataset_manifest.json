@@ -1,0 +1,614 @@
+{
+  "schema": "mygpr.scientific_dataset.v1",
+  "dataset_id": "yingshan_airborne_gpr_2025_v1",
+  "source": "Yingshan Xiaoshui Town Fengtai Village UAV-GPR field measurements",
+  "data_policy": "full files are external acceptance assets; repository contains deterministic trace subsets and full-file hashes",
+  "lines": {
+    "3": {
+      "filename": "Line3origin(36).csv",
+      "sha256": "048d4fd0a709a8841dac13d3aa1ca571fe6372f6ac1e2e7312b029fe6c1b475f",
+      "size_bytes": 46948191,
+      "sample_count": 501,
+      "trace_count": 1813,
+      "time_window_ns": 700.0,
+      "trace_interval_m": 0.08537,
+      "subset_trace_indices": [
+        0,
+        120,
+        241,
+        362,
+        483,
+        604,
+        724,
+        845,
+        966,
+        1087,
+        1208,
+        1328,
+        1449,
+        1570,
+        1691,
+        1812
+      ],
+      "subset_shape": [
+        501,
+        16
+      ],
+      "subset_sha256": "fb5abd943a44e91cf2197d1996fce6d7c34c599e245c8c6ae0ab2fc80723f52d",
+      "subset_statistics": {
+        "min": -0.05963160842657089,
+        "max": 0.06689395010471344,
+        "mean": 6.348877377604367e-06,
+        "std": 0.0075150602497160435,
+        "rms": 0.007515062954649816
+      },
+      "preprocessing_v1": {
+        "pipeline": [
+          {
+            "method_id": "dewow",
+            "params": {
+              "window": 23
+            }
+          },
+          {
+            "method_id": "subtracting_average_2D",
+            "params": {
+              "ntraces": 16
+            }
+          },
+          {
+            "method_id": "sec_gain",
+            "params": {
+              "gain_min": 1.0,
+              "gain_max": 6.0,
+              "power": 1.0
+            }
+          },
+          {
+            "method_id": "running_average_2D",
+            "params": {
+              "ntraces": 5
+            }
+          }
+        ],
+        "shape": [
+          501,
+          16
+        ],
+        "dtype": "float32",
+        "quantized_decimals": 7,
+        "quantized_sha256": "41a119e1881651625541a87e5f127c7e5a7760135cde141c98b86ab08c3f6cd3",
+        "statistics": {
+          "min": -0.03674176335334778,
+          "max": 0.03255801275372505,
+          "mean": 8.223742042900994e-08,
+          "std": 0.003123534144833684,
+          "rms": 0.003123534349109707
+        },
+        "step_versions": [
+          {
+            "method_id": "dewow",
+            "implementation_version": "native-1.0"
+          },
+          {
+            "method_id": "subtracting_average_2D",
+            "implementation_version": "native-1.0"
+          },
+          {
+            "method_id": "sec_gain",
+            "implementation_version": "native-1.0"
+          },
+          {
+            "method_id": "running_average_2D",
+            "implementation_version": "native-1.0"
+          }
+        ]
+      }
+    },
+    "6": {
+      "filename": "Line6origin(36).csv",
+      "sha256": "70be52fc095076ca8ad09e1c4aa8e1ccc71d4ac408fc09d98459053c5d669589",
+      "size_bytes": 48223598,
+      "sample_count": 501,
+      "trace_count": 1661,
+      "time_window_ns": 700.0,
+      "trace_interval_m": 0.09347,
+      "subset_trace_indices": [
+        0,
+        110,
+        221,
+        332,
+        442,
+        553,
+        664,
+        774,
+        885,
+        996,
+        1106,
+        1217,
+        1328,
+        1438,
+        1549,
+        1660
+      ],
+      "subset_shape": [
+        501,
+        16
+      ],
+      "subset_sha256": "0fccc3952af429dd6e035856cc5240005ee2baa783157bc1c07757c358a28066",
+      "subset_statistics": {
+        "min": -0.05954626202583313,
+        "max": 0.06577324122190475,
+        "mean": 4.780411018145969e-06,
+        "std": 0.007437481079250574,
+        "rms": 0.0074374829065888244
+      },
+      "preprocessing_v1": {
+        "pipeline": [
+          {
+            "method_id": "dewow",
+            "params": {
+              "window": 23
+            }
+          },
+          {
+            "method_id": "subtracting_average_2D",
+            "params": {
+              "ntraces": 16
+            }
+          },
+          {
+            "method_id": "sec_gain",
+            "params": {
+              "gain_min": 1.0,
+              "gain_max": 6.0,
+              "power": 1.0
+            }
+          },
+          {
+            "method_id": "running_average_2D",
+            "params": {
+              "ntraces": 5
+            }
+          }
+        ],
+        "shape": [
+          501,
+          16
+        ],
+        "dtype": "float32",
+        "quantized_decimals": 7,
+        "quantized_sha256": "c1813578dcc9a42f23935efa04a7605b77c40b2384d163d3e3d7be6afd87bfd8",
+        "statistics": {
+          "min": -0.0063744522631168365,
+          "max": 0.006226516794413328,
+          "mean": -1.2289699213852145e-07,
+          "std": 0.000732189801055938,
+          "rms": 0.0007321898252783511
+        },
+        "step_versions": [
+          {
+            "method_id": "dewow",
+            "implementation_version": "native-1.0"
+          },
+          {
+            "method_id": "subtracting_average_2D",
+            "implementation_version": "native-1.0"
+          },
+          {
+            "method_id": "sec_gain",
+            "implementation_version": "native-1.0"
+          },
+          {
+            "method_id": "running_average_2D",
+            "implementation_version": "native-1.0"
+          }
+        ]
+      }
+    },
+    "7": {
+      "filename": "Line7origin(36).csv",
+      "sha256": "f687e739fd31a77678234d539d7a090cbebbac695aae5ae94f39b8a8c8c6f747",
+      "size_bytes": 46813602,
+      "sample_count": 501,
+      "trace_count": 1654,
+      "time_window_ns": 700.0,
+      "trace_interval_m": 0.09427,
+      "subset_trace_indices": [
+        0,
+        110,
+        220,
+        330,
+        440,
+        551,
+        661,
+        771,
+        881,
+        991,
+        1102,
+        1212,
+        1322,
+        1432,
+        1542,
+        1653
+      ],
+      "subset_shape": [
+        501,
+        16
+      ],
+      "subset_sha256": "7241215cc9d0b0bee42cd9c81c4892096ea891fb99a6675ac709bc8355c6e53f",
+      "subset_statistics": {
+        "min": -0.05637208744883537,
+        "max": 0.0639307051897049,
+        "mean": 3.955078227591002e-06,
+        "std": 0.007426321506500244,
+        "rms": 0.00742632299147278
+      },
+      "preprocessing_v1": {
+        "pipeline": [
+          {
+            "method_id": "dewow",
+            "params": {
+              "window": 23
+            }
+          },
+          {
+            "method_id": "subtracting_average_2D",
+            "params": {
+              "ntraces": 16
+            }
+          },
+          {
+            "method_id": "sec_gain",
+            "params": {
+              "gain_min": 1.0,
+              "gain_max": 6.0,
+              "power": 1.0
+            }
+          },
+          {
+            "method_id": "running_average_2D",
+            "params": {
+              "ntraces": 5
+            }
+          }
+        ],
+        "shape": [
+          501,
+          16
+        ],
+        "dtype": "float32",
+        "quantized_decimals": 7,
+        "quantized_sha256": "626c58014922df0d8354616a575d6334f6acbbbf3930dfaaf0e5f1f1d18d11d3",
+        "statistics": {
+          "min": -0.0075500705279409885,
+          "max": 0.007643009535968304,
+          "mean": 4.105399131759668e-09,
+          "std": 0.0008025446441024542,
+          "rms": 0.0008025446201463036
+        },
+        "step_versions": [
+          {
+            "method_id": "dewow",
+            "implementation_version": "native-1.0"
+          },
+          {
+            "method_id": "subtracting_average_2D",
+            "implementation_version": "native-1.0"
+          },
+          {
+            "method_id": "sec_gain",
+            "implementation_version": "native-1.0"
+          },
+          {
+            "method_id": "running_average_2D",
+            "implementation_version": "native-1.0"
+          }
+        ]
+      }
+    },
+    "9": {
+      "filename": "Line9origin(36).csv",
+      "sha256": "655f72f99de4cbcb22b1b9be64dc8ebdf2f156accbe9b27729c6862f6b1e172d",
+      "size_bytes": 68794423,
+      "sample_count": 501,
+      "trace_count": 2378,
+      "time_window_ns": 700.0,
+      "trace_interval_m": 0.09093,
+      "subset_trace_indices": [
+        0,
+        158,
+        316,
+        475,
+        633,
+        792,
+        950,
+        1109,
+        1267,
+        1426,
+        1584,
+        1743,
+        1901,
+        2060,
+        2218,
+        2377
+      ],
+      "subset_shape": [
+        501,
+        16
+      ],
+      "subset_sha256": "a91411914c082bfa7f28207ac7e38436686357738006b81ce6957ca069c97895",
+      "subset_statistics": {
+        "min": -0.06856805086135864,
+        "max": 0.07508785277605057,
+        "mean": 7.689566700719297e-06,
+        "std": 0.007925528101623058,
+        "rms": 0.007925531847060269
+      },
+      "preprocessing_v1": {
+        "pipeline": [
+          {
+            "method_id": "dewow",
+            "params": {
+              "window": 23
+            }
+          },
+          {
+            "method_id": "subtracting_average_2D",
+            "params": {
+              "ntraces": 16
+            }
+          },
+          {
+            "method_id": "sec_gain",
+            "params": {
+              "gain_min": 1.0,
+              "gain_max": 6.0,
+              "power": 1.0
+            }
+          },
+          {
+            "method_id": "running_average_2D",
+            "params": {
+              "ntraces": 5
+            }
+          }
+        ],
+        "shape": [
+          501,
+          16
+        ],
+        "dtype": "float32",
+        "quantized_decimals": 7,
+        "quantized_sha256": "998a728dfab285c012cf7610212808090acb62a21e6c1aa09722fb97a8ffa6eb",
+        "statistics": {
+          "min": -0.006485107354819775,
+          "max": 0.006389280781149864,
+          "mean": -1.618142277948209e-07,
+          "std": 0.0006637067417614162,
+          "rms": 0.0006637067633684734
+        },
+        "step_versions": [
+          {
+            "method_id": "dewow",
+            "implementation_version": "native-1.0"
+          },
+          {
+            "method_id": "subtracting_average_2D",
+            "implementation_version": "native-1.0"
+          },
+          {
+            "method_id": "sec_gain",
+            "implementation_version": "native-1.0"
+          },
+          {
+            "method_id": "running_average_2D",
+            "implementation_version": "native-1.0"
+          }
+        ]
+      }
+    },
+    "L1": {
+      "filename": "LineL1origin(36).csv",
+      "sha256": "f523cf169ce1d958244a2be6a2046f383d3e8f241c514b633a8afde8443d5819",
+      "size_bytes": 54764223,
+      "sample_count": 501,
+      "trace_count": 1950,
+      "time_window_ns": 700.0,
+      "trace_interval_m": 0.09526,
+      "subset_trace_indices": [
+        0,
+        129,
+        259,
+        389,
+        519,
+        649,
+        779,
+        909,
+        1039,
+        1169,
+        1299,
+        1429,
+        1559,
+        1689,
+        1819,
+        1949
+      ],
+      "subset_shape": [
+        501,
+        16
+      ],
+      "subset_sha256": "12091ae67a039d5e3f0c64750b17cc54aaa6fd015e4d7d4330092c2c5c910ba0",
+      "subset_statistics": {
+        "min": -0.05936271324753761,
+        "max": 0.06749188154935837,
+        "mean": 5.4381307563744485e-06,
+        "std": 0.007548958528786898,
+        "rms": 0.007548960811665887
+      },
+      "preprocessing_v1": {
+        "pipeline": [
+          {
+            "method_id": "dewow",
+            "params": {
+              "window": 23
+            }
+          },
+          {
+            "method_id": "subtracting_average_2D",
+            "params": {
+              "ntraces": 16
+            }
+          },
+          {
+            "method_id": "sec_gain",
+            "params": {
+              "gain_min": 1.0,
+              "gain_max": 6.0,
+              "power": 1.0
+            }
+          },
+          {
+            "method_id": "running_average_2D",
+            "params": {
+              "ntraces": 5
+            }
+          }
+        ],
+        "shape": [
+          501,
+          16
+        ],
+        "dtype": "float32",
+        "quantized_decimals": 7,
+        "quantized_sha256": "497ec693df12353bcb7f9582582d4acfb446111b39f4005f37a44708271cd71d",
+        "statistics": {
+          "min": -0.008043251000344753,
+          "max": 0.007584566716104746,
+          "mean": -6.69233273242753e-08,
+          "std": 0.0007663241703994572,
+          "rms": 0.0007663242201044923
+        },
+        "step_versions": [
+          {
+            "method_id": "dewow",
+            "implementation_version": "native-1.0"
+          },
+          {
+            "method_id": "subtracting_average_2D",
+            "implementation_version": "native-1.0"
+          },
+          {
+            "method_id": "sec_gain",
+            "implementation_version": "native-1.0"
+          },
+          {
+            "method_id": "running_average_2D",
+            "implementation_version": "native-1.0"
+          }
+        ]
+      }
+    },
+    "X1": {
+      "filename": "LineX1origin(36).csv",
+      "sha256": "31c813ccead18d1f3615d8a410b2a1abc831e611e1a81ae8900f6714c9ec53bc",
+      "size_bytes": 24014207,
+      "sample_count": 501,
+      "trace_count": 938,
+      "time_window_ns": 700.0,
+      "trace_interval_m": 0.09339,
+      "subset_trace_indices": [
+        0,
+        62,
+        124,
+        187,
+        249,
+        312,
+        374,
+        437,
+        499,
+        562,
+        624,
+        687,
+        749,
+        812,
+        874,
+        937
+      ],
+      "subset_shape": [
+        501,
+        16
+      ],
+      "subset_sha256": "96a603aa95f77886a02a69b8e068e15f7dfb5efa65cc44ceb10169f566d13cfd",
+      "subset_statistics": {
+        "min": -0.06100276857614517,
+        "max": 0.06769350171089172,
+        "mean": 5.214439624978695e-06,
+        "std": 0.007497171405702829,
+        "rms": 0.00749717328169833
+      },
+      "preprocessing_v1": {
+        "pipeline": [
+          {
+            "method_id": "dewow",
+            "params": {
+              "window": 23
+            }
+          },
+          {
+            "method_id": "subtracting_average_2D",
+            "params": {
+              "ntraces": 16
+            }
+          },
+          {
+            "method_id": "sec_gain",
+            "params": {
+              "gain_min": 1.0,
+              "gain_max": 6.0,
+              "power": 1.0
+            }
+          },
+          {
+            "method_id": "running_average_2D",
+            "params": {
+              "ntraces": 5
+            }
+          }
+        ],
+        "shape": [
+          501,
+          16
+        ],
+        "dtype": "float32",
+        "quantized_decimals": 7,
+        "quantized_sha256": "bea779cf8c2696a596b8706af5c03d912bf89c689bf099efa2186cf0a22f42a9",
+        "statistics": {
+          "min": -0.0065291281789541245,
+          "max": 0.0064079174771904945,
+          "mean": -8.866533818263633e-08,
+          "std": 0.000755929620936513,
+          "rms": 0.0007559296338777151
+        },
+        "step_versions": [
+          {
+            "method_id": "dewow",
+            "implementation_version": "native-1.0"
+          },
+          {
+            "method_id": "subtracting_average_2D",
+            "implementation_version": "native-1.0"
+          },
+          {
+            "method_id": "sec_gain",
+            "implementation_version": "native-1.0"
+          },
+          {
+            "method_id": "running_average_2D",
+            "implementation_version": "native-1.0"
+          }
+        ]
+      }
+    }
+  }
+}

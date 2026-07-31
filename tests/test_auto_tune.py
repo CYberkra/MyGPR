@@ -27,6 +27,16 @@ from core.workflow_data import METHOD_CATEGORIES
 
 EXPECTED_PUBLIC_DENOISE_METHODS = {
     "hankel_svd",
+    "running_average_2D",
+    "svd_subspace",
+    "trace_median_filter",
+    "trace_savgol_filter",
+    "wavelet_2d",
+    "wavelet_svd",
+}
+
+EXPECTED_RECOMMENDED_DENOISE_METHODS = {
+    "hankel_svd",
     "svd_subspace",
     "wavelet_2d",
     "wavelet_svd",
@@ -530,10 +540,13 @@ def test_auto_tune_raises_when_all_candidates_fail():
 
 def test_auto_tune_stage_metadata_is_available_for_comparable_methods():
     assert get_auto_tune_stage("subtracting_average_2D") == "background"
-    assert get_auto_tune_stage("fk_filter") == "background"
+    assert get_auto_tune_stage("fk_filter") == "frequency"
     assert get_auto_tune_stage("frequency_filter_1d") == "frequency"
+    assert get_auto_tune_stage("running_average_2D") == "impulse"
     assert get_auto_tune_stage("hankel_svd") == "denoise"
     assert get_auto_tune_stage("svd_subspace") == "denoise"
+    assert get_auto_tune_stage("trace_median_filter") == "denoise"
+    assert get_auto_tune_stage("trace_savgol_filter") == "denoise"
     assert get_auto_tune_stage("wavelet_2d") == "denoise"
     assert get_auto_tune_stage("wavelet_svd") == "denoise"
 
@@ -542,11 +555,10 @@ def test_auto_select_method_group_returns_best_background_method():
     raw = _build_test_profile(traces=96)
     result = auto_select_method_group(
         raw,
-        ["subtracting_average_2D", "median_background_2D", "fk_filter"],
+        ["subtracting_average_2D", "median_background_2D"],
         base_params_map={
             "subtracting_average_2D": {"ntraces": 51},
             "median_background_2D": {"ntraces": 51},
-            "fk_filter": {"angle_low": 12, "angle_high": 55, "taper_width": 4},
         },
         roi_spec={
             "mode": "crop",
@@ -565,9 +577,8 @@ def test_auto_select_method_group_returns_best_background_method():
     assert result["best_method_key"] in {
         "subtracting_average_2D",
         "median_background_2D",
-        "fk_filter",
     }
-    assert len(result["candidates"]) == 3
+    assert len(result["candidates"]) == 2
     assert result["best_params"]
     assert np.isfinite(result["outer_score"])
 
@@ -576,7 +587,7 @@ def test_auto_select_method_group_returns_best_public_denoise_method():
     raw = _build_test_profile(traces=96)
     result = auto_select_method_group(
         raw,
-        sorted(EXPECTED_PUBLIC_DENOISE_METHODS),
+        sorted(EXPECTED_RECOMMENDED_DENOISE_METHODS),
         base_params_map={
             "hankel_svd": {"window_length": 48, "rank": 4},
             "svd_subspace": {"rank_start": 1, "rank_end": 20},
@@ -593,8 +604,8 @@ def test_auto_select_method_group_returns_best_public_denoise_method():
     )
 
     assert result["stage"] == "denoise"
-    assert result["best_method_key"] in EXPECTED_PUBLIC_DENOISE_METHODS
-    assert len(result["candidates"]) == len(EXPECTED_PUBLIC_DENOISE_METHODS)
+    assert result["best_method_key"] in EXPECTED_RECOMMENDED_DENOISE_METHODS
+    assert len(result["candidates"]) == len(EXPECTED_RECOMMENDED_DENOISE_METHODS)
     assert result["best_params"]
     assert np.isfinite(result["outer_score"])
 
@@ -604,17 +615,17 @@ def test_auto_select_method_group_rejects_mixed_stage_methods():
     with pytest.raises(AutoTuneError, match="同组方法必须属于同一 auto-tune stage"):
         auto_select_method_group(
             raw,
-            ["subtracting_average_2D", "sec_gain"],
+            ["subtracting_average_2D", "fk_filter"],
             base_params_map={
                 "subtracting_average_2D": {"ntraces": 51},
-                "sec_gain": {"gain_min": 1.0, "gain_max": 4.5, "power": 1.1},
+                "fk_filter": {"angle_low": 12, "angle_high": 55, "taper_width": 4},
             },
             search_mode="fast",
         )
 
 
-def test_workflow_denoising_category_exposes_exact_public_denoise_methods():
-    assert set(METHOD_CATEGORIES["denoising"]["methods"]) == EXPECTED_PUBLIC_DENOISE_METHODS
+def test_workflow_denoising_category_exposes_exact_recommended_denoise_methods():
+    assert set(METHOD_CATEGORIES["denoising"]["methods"]) == EXPECTED_RECOMMENDED_DENOISE_METHODS
 
 
 def test_stage3_workflow_methods_expose_exact_public_denoise_methods():
@@ -628,13 +639,13 @@ def test_stage3_workflow_methods_expose_exact_public_denoise_methods():
     assert stage3_methods == EXPECTED_PUBLIC_DENOISE_METHODS
 
 
-def test_recommended_profiles_cover_all_public_denoise_methods():
+def test_recommended_profiles_cover_all_recommended_denoise_methods():
     exposed = set()
     for profile in RECOMMENDED_RUN_PROFILES.values():
         exposed.update(
             method_key
             for method_key in profile.get("order", [])
-            if method_key in EXPECTED_PUBLIC_DENOISE_METHODS
+            if method_key in EXPECTED_RECOMMENDED_DENOISE_METHODS
         )
 
-    assert exposed == EXPECTED_PUBLIC_DENOISE_METHODS
+    assert exposed == EXPECTED_RECOMMENDED_DENOISE_METHODS

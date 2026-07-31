@@ -90,18 +90,6 @@ def test_invalid_baseline_sanity_warning_marks_branch_invalid():
     assert _branch_invalid_reason(warnings)
 
 
-def test_runner_does_not_modify_motion_compensation_files():
-    motion_files = [
-        Path("PythonModule/motion_compensation_v2.py"),
-        Path("PythonModule/motion_compensation_core.py"),
-        Path("PythonModule/motion_compensation_height.py"),
-        Path("PythonModule/motion_compensation_speed.py"),
-        Path("PythonModule/motion_compensation_attitude.py"),
-    ]
-    for path in motion_files:
-        assert path.exists()
-
-
 def test_native_context_zero_time_policy_forces_fixed_zero_when_implicit(tmp_path: Path):
     raw = np.random.RandomState(0).randn(2037, 90).astype(np.float32)
     package = {

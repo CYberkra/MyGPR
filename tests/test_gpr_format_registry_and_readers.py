@@ -8,6 +8,7 @@ import pytest
 
 from core.gpr_format_registry import get_format_spec, supported_file_dialog_filter
 from core.gpr_io import auto_load_data
+from core.gpr_vendor_readers import GprReaderFormat
 
 
 def test_format_registry_covers_common_gpr_inputs():
@@ -40,7 +41,7 @@ def test_auto_load_mala_rd3_with_rad(tmp_path: Path):
     raw.tofile(tmp_path / "line.rd3")
     result = auto_load_data(str(tmp_path / "line.rd3"))
     assert result["data"].shape == (samples, traces)
-    assert result["header_info"]["source"] == "mala_rd"
+    assert result["header_info"]["source"] == GprReaderFormat.MALA_RD
     assert result["header_info"]["total_time_ns"] == 80
 
 
@@ -53,7 +54,7 @@ def test_auto_load_impulseradar_iprb_with_iprh(tmp_path: Path):
     np.arange(samples * traces, dtype=np.int16).tofile(tmp_path / "profile.iprb")
     result = auto_load_data(str(tmp_path / "profile.iprb"))
     assert result["data"].shape == (samples, traces)
-    assert result["header_info"]["source"] == "impulseradar_iprb"
+    assert result["header_info"]["source"] == GprReaderFormat.IMPULSERADAR_IPRB
     assert result["header_info"]["data_version"] == 16
 
 
@@ -75,7 +76,7 @@ def test_auto_load_fixed_segy_int16(tmp_path: Path):
     path.write_bytes(text_header + bytes(bin_header) + bytes(body))
     result = auto_load_data(str(path))
     assert result["data"].shape == (samples, traces)
-    assert result["header_info"]["source"] == "segy_fixed"
+    assert result["header_info"]["source"] == GprReaderFormat.SEGY_FIXED
 
 
 def test_recognized_but_not_native_format_fails_clearly(tmp_path: Path):

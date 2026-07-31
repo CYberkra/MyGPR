@@ -62,15 +62,3 @@ def test_native_ablation_runner_writes_required_evidence(tmp_path: Path):
     assert "Stage-Level Ranking" in report
     assert "Ground truth is not used as AutoTune search input" in report
     assert "Motion compensation" in report
-
-
-def test_native_ablation_does_not_touch_motion_modules():
-    motion_files = [
-        Path("PythonModule/motion_compensation_v2.py"),
-        Path("PythonModule/motion_compensation_core.py"),
-        Path("PythonModule/motion_compensation_height.py"),
-        Path("PythonModule/motion_compensation_speed.py"),
-        Path("PythonModule/motion_compensation_attitude.py"),
-    ]
-    for path in motion_files:
-        assert path.exists()

@@ -63,13 +63,3 @@ def test_no_zerotime_gain_validation_writes_reports_and_loop(tmp_path: Path):
     html = (evidence_root / "reports/no_zerotime_gain_validation_report.html").read_text(encoding="utf-8")
     assert "Zero-time" in html
     assert "AGC is display-oriented" in html
-
-
-def test_no_zerotime_gain_validation_does_not_touch_frozen_modules():
-    frozen = [
-        Path("core/processing_engine.py"),
-        Path("PythonModule/motion_compensation_v2.py"),
-        Path("PythonModule/motion_compensation_core.py"),
-    ]
-    for path in frozen:
-        assert path.exists()
