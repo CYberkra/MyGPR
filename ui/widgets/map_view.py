@@ -55,11 +55,10 @@ def _track_to_mercator(track) -> dict:
     mapped = False
     if epsg is not None:
         try:
-            from pyproj import Transformer
-            transformer = Transformer.from_crs(f'EPSG:{epsg}', 'EPSG:3857',
-                                               always_xy=True)
+            # 经 proj_safe 串行化：与地形构建工作线程并行调 PROJ 会段错误
+            from ui.widgets.proj_safe import transform_coordinates
             xs, ys = (np.asarray(a, dtype=float)
-                      for a in transformer.transform(xs, ys))
+                      for a in transform_coordinates(epsg, 3857, xs, ys))
             mapped = True
         except Exception as exc:  # noqa: BLE001 - 单条测线失败不影响其它
             _LOGGER.debug('测线坐标转换失败 EPSG:%s: %s', epsg, exc)

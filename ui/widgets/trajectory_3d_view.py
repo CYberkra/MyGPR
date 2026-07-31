@@ -83,10 +83,11 @@ class _TerrainWorker(QRunnable):
     def run(self) -> None:
         payload = None
         try:
-            from pyproj import Transformer
+            # 经 proj_safe 串行化：PROJ C 库多线程并行建 Transformer 会
+            # 在 proj.dll 内段错误（0xc0000005），见 proj_safe 模块 docstring
+            from ui.widgets.proj_safe import LockedTransformer
             x_min, y_min, x_max, y_max = self._bbox
-            to_lonlat = Transformer.from_crs(
-                f'EPSG:{self._epsg}', 'EPSG:4326', always_xy=True)
+            to_lonlat = LockedTransformer(self._epsg, 4326)
             corners_x = [x_min, x_min, x_max, x_max]
             corners_y = [y_min, y_min, y_max, y_max]
             lons, lats = to_lonlat.transform(corners_x, corners_y)
@@ -108,8 +109,7 @@ class _TerrainWorker(QRunnable):
                 gy = np.linspace(y_min, y_max, steps_y)
                 mesh_x, mesh_y = np.meshgrid(gx, gy)
                 lon, lat = to_lonlat.transform(mesh_x.ravel(), mesh_y.ravel())
-                to_merc = Transformer.from_crs('EPSG:4326', 'EPSG:3857',
-                                               always_xy=True)
+                to_merc = LockedTransformer(4326, 3857)
                 mx, my = to_merc.transform(lon, lat)
                 z = sample_bilinear(elev, xs_m, ys_m, mx, my)
                 z = z.reshape(mesh_x.shape)

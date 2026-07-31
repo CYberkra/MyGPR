@@ -7,10 +7,12 @@
 ``/tmp/mygpr_shots/``，随后以退出码 0 退出。
 """
 import argparse
+import logging
 import os
+import platform
 import sys
 
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QtMsgType, QTimer, qInstallMessageHandler
 from PyQt6.QtGui import QFont, QGuiApplication
 from PyQt6.QtWidgets import QApplication
 from qfluentwidgets import Theme, setTheme
@@ -20,12 +22,60 @@ from qfluentwidgets import Theme, setTheme
 # 下拉框）仍是深色。禁用后由 theme_helpers.apply_theme 显式 setPalette，
 # 深浅主题完全由应用内设置决定，跨机器表现一致。
 os.environ.setdefault('QT_QPA_PLATFORM', 'windows:darkmode=0')
+# PROJ C 库多线程并行创建 Transformer 会在 proj.dll 段错误（已发生两次
+# 真实崩溃）。全局 PROJ 上下文 + ui.widgets.proj_safe 锁双保险；
+# 必须在 pyproj 首次导入前设置。
+os.environ.setdefault('PYPROJ_GLOBAL_CONTEXT', 'ON')
 
+from core.observability import (configure_structured_logging,
+                                install_global_exception_hooks)
 from ui import constants
 from ui.main_window import MyGPRMainWindow
 
 SMOKE_SHOTS_DIR = '/tmp/mygpr_shots'
 SMOKE_DELAY_MS = 3000
+
+
+def _setup_diagnostics() -> None:
+    """接入 core.observability：崩溃捕获 + 结构化事件日志 + Qt 消息转发。
+
+    产物（均写入 ``~/MyGPR/logs/``）：
+    - ``crash-*.json``      未捕获 Python 异常报告（含 traceback）；
+    - ``native-crash.log``  faulthandler 捕获的原生崩溃堆栈（段错误等）；
+    - ``mygpr-events.jsonl`` 结构化事件（启动/退出/Qt 警告/各模块日志）。
+
+    日志里出现 ``app start`` 而无 ``app exit`` 即上次运行是崩溃退出。
+    """
+    install_global_exception_hooks(constants.LOG_DIR)
+    configure_structured_logging(constants.LOG_DIR)
+
+    # 各模块 logger（ui.widgets.* 等）默认 propagate 到 root——把 mygpr
+    # 的文件 handler 挂到 root，让所有模块日志都落进同一个 jsonl；
+    # mygpr 自身关掉 propagate 防双写。
+    mygpr_logger = logging.getLogger('mygpr')
+    root_logger = logging.getLogger()
+    for handler in mygpr_logger.handlers:
+        if handler not in root_logger.handlers:
+            root_logger.addHandler(handler)
+    mygpr_logger.propagate = False
+    if root_logger.level in (logging.NOTSET,) or root_logger.level > logging.INFO:
+        root_logger.setLevel(logging.INFO)
+
+    def _qt_message_handler(mode, context, message) -> None:
+        qt_logger = logging.getLogger('mygpr.qt')
+        location = f'{context.file}:{context.line}' if context.file else ''
+        if mode in (QtMsgType.QtDebugMsg, QtMsgType.QtInfoMsg):
+            qt_logger.debug('qt %s %s', message, location)
+        elif mode == QtMsgType.QtWarningMsg:
+            qt_logger.warning('qt %s %s', message, location)
+        else:
+            qt_logger.error('qt %s %s', message, location)
+
+    qInstallMessageHandler(_qt_message_handler)
+
+    logging.getLogger('mygpr.app').info(
+        'app start python=%s platform=%s pid=%s',
+        sys.version.split()[0], platform.platform(), os.getpid())
 
 
 def _run_smoke(window: MyGPRMainWindow) -> None:
@@ -57,6 +107,8 @@ def _run_smoke(window: MyGPRMainWindow) -> None:
 
 
 def main() -> int:
+    _setup_diagnostics()
+
     parser = argparse.ArgumentParser(description=constants.APP_NAME)
     parser.add_argument('--smoke', action='store_true',
                         help='offscreen 验收：3s 后截图各页面到 /tmp/mygpr_shots/ 并退出')
@@ -84,7 +136,10 @@ def main() -> int:
     if args.smoke:
         QTimer.singleShot(SMOKE_DELAY_MS, lambda: _run_smoke(window))
 
-    return app.exec()
+    exit_code = app.exec()
+    # 与 'app start' 配对：日志里有 start 无 exit 即上次运行崩溃退出
+    logging.getLogger('mygpr.app').info('app exit code=%s', exit_code)
+    return exit_code
 
 
 if __name__ == '__main__':
