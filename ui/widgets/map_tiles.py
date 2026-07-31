@@ -29,8 +29,43 @@ TILE_SOURCES = {
     'gaode_img': ('高德影像',
                   'https://webst0{s}.is.autonavi.com/appmaptile'
                   '?style=6&x={x}&y={y}&z={z}'),
+    # 高德影像注记（透明 PNG：路网/地名），叠加在 gaode_img 之上
+    'gaode_img_lbl': ('高德影像注记',
+                      'https://webst0{s}.is.autonavi.com/appmaptile'
+                      '?style=8&x={x}&y={y}&z={z}'),
 }
 DEFAULT_TILE_SOURCE = 'gaode_img'
+
+# 各瓦图源有效最大级别：高德 z19 起只返回灰色占位图（实证，非真实影像）
+TILE_SOURCE_MAX_ZOOM = {
+    'osm': 19,
+    'gaode_vec': 18,
+    'gaode_img': 18,
+    'gaode_img_lbl': 18,
+}
+
+# 底图预设（用户可切换项）：key -> (显示名, 基础瓦图源, 叠加瓦图源|None)。
+# key 与基础瓦图源同名，保证旧配置（spatial_basemap_source）仍然有效。
+BASEMAP_LAYERS = {
+    'gaode_img': ('卫星影像（高德·含路网标注）', 'gaode_img', 'gaode_img_lbl'),
+    'gaode_vec': ('矢量地图（高德）', 'gaode_vec', None),
+    'osm': ('OpenStreetMap', 'osm', None),
+}
+
+
+def resolve_basemap(key) -> tuple[str, str, str | None]:
+    """底图 key → (底图 key, 基础瓦图源 key, 叠加瓦图源 key|None)。
+
+    兼容直接传瓦图源 key（无叠加层）；未知 key 回退默认底图。
+    """
+    key = str(key or '')
+    if key in BASEMAP_LAYERS:
+        _display, base, overlay = BASEMAP_LAYERS[key]
+        return key, base, overlay
+    if key in TILE_SOURCES:
+        return key, key, None
+    _display, base, overlay = BASEMAP_LAYERS[DEFAULT_TILE_SOURCE]
+    return DEFAULT_TILE_SOURCE, base, overlay
 
 _EPSG_RE = re.compile(r'EPSG:(\d+)')
 
@@ -154,7 +189,8 @@ def choose_prefetch_zooms(lon_min: float, lat_min: float,
 
 __all__ = [
     'EARTH_RADIUS_M', 'MAX_LATITUDE', 'WORLD_SIZE_M', 'TILE_SIZE_PX',
-    'TILE_SOURCES', 'DEFAULT_TILE_SOURCE',
+    'TILE_SOURCES', 'DEFAULT_TILE_SOURCE', 'TILE_SOURCE_MAX_ZOOM',
+    'BASEMAP_LAYERS', 'resolve_basemap',
     'extract_epsg', 'lonlat_to_mercator', 'mercator_to_lonlat',
     'lonlat_to_tile', 'tile_bounds_mercator', 'tile_url',
     'zoom_for_resolution', 'tile_range_for_bbox', 'count_tiles_for_bbox',

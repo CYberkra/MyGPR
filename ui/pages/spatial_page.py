@@ -26,7 +26,7 @@ from qfluentwidgets import FluentIcon as FIF
 from ui import constants
 from ui.settings_manager import SettingsManager
 from ui.widgets.collapsible_panel import CollapsiblePanel
-from ui.widgets.map_tiles import DEFAULT_TILE_SOURCE, TILE_SOURCES
+from ui.widgets.map_tiles import BASEMAP_LAYERS, DEFAULT_TILE_SOURCE
 from ui.widgets.map_view import MapView
 from ui.widgets.trajectory_3d_view import Trajectory3DView
 
@@ -184,7 +184,7 @@ class SpatialPage(QWidget):
         self._right_panel.set_collapsed(
             bool(sm.get('spatial_right_collapsed', False)), animate=False)
         source = str(sm.get('spatial_basemap_source', DEFAULT_TILE_SOURCE))
-        if source not in TILE_SOURCES:
+        if source not in BASEMAP_LAYERS:
             source = DEFAULT_TILE_SOURCE
         self._restoring_basemap = True
         try:
@@ -233,7 +233,7 @@ class SpatialPage(QWidget):
         source_label.setMinimumWidth(40)
         source_row.addWidget(source_label)
         self._basemap_combo = ComboBox(basemap_card)
-        for key, (display, _url) in TILE_SOURCES.items():
+        for key, (display, _base, _overlay) in BASEMAP_LAYERS.items():
             self._basemap_combo.addItem(display, userData=key)
         source_row.addWidget(self._basemap_combo, 1)
         basemap_layout.addLayout(source_row)

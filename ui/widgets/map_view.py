@@ -29,10 +29,12 @@ from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import ToolButton
 
 from ui.widgets.context_menus import add_action, make_menu
-from ui.widgets.map_tiles import (DEFAULT_TILE_SOURCE, TILE_SOURCES, WORLD_SIZE_M,
+from ui.widgets.map_tiles import (DEFAULT_TILE_SOURCE, TILE_SOURCE_MAX_ZOOM,
+                                  TILE_SOURCES, WORLD_SIZE_M,
                                   choose_prefetch_zooms, extract_epsg,
                                   lonlat_to_mercator, lonlat_to_tile,
-                                  mercator_to_lonlat, tile_bounds_mercator,
+                                  mercator_to_lonlat, resolve_basemap,
+                                  tile_bounds_mercator,
                                   tile_range_for_bbox, tile_url,
                                   zoom_for_resolution)
 
@@ -162,6 +164,10 @@ class TileLayer(pg.GraphicsObject):
         return os.path.join(self._cache_root, self._source_key,
                             str(z), str(x), f'{y}.png')
 
+    def _max_zoom(self) -> int:
+        """该瓦图源的有效最大级别（超出会返回占位图）。"""
+        return TILE_SOURCE_MAX_ZOOM.get(self._source_key, 19)
+
     # ------------------------------------------------------------ GraphicsObject
     def boundingRect(self) -> QRectF:
         return QRectF(-_HALF_WORLD, -_HALF_WORLD, WORLD_SIZE_M, WORLD_SIZE_M)
@@ -175,7 +181,7 @@ class TileLayer(pg.GraphicsObject):
             return
         dpr = painter.device().devicePixelRatioF() if painter.device() else 1.0
         mpp = rect.width() / max(view_box.width() * dpr, 1.0)
-        zoom = zoom_for_resolution(mpp)
+        zoom = min(zoom_for_resolution(mpp), self._max_zoom())
         n = 2 ** zoom
 
         # 可视范围（Web Mercator 米，y 向上）→ 瓦片编号范围（y 向下）
@@ -236,10 +242,12 @@ class TileLayer(pg.GraphicsObject):
         self.update()
 
     # ------------------------------------------------------------ 离线预下载
-    def prefetch_current_view(self, max_extra_zoom: int = 2) -> int:
+    def prefetch_current_view(self, max_extra_zoom: int = 2,
+                              report_progress: bool = True) -> int:
         """把当前可视范围在 zoom..zoom+max_extra_zoom 的瓦片全部入队下载。
 
-        返回入队总瓦片数；完成进度经 prefetch_progress 信号回报。
+        返回入队总瓦片数；report_progress=True 时完成进度经
+        prefetch_progress 信号回报（叠加层用 False，避免进度重复计数）。
         """
         view_box = self.getViewBox()
         if view_box is None:
@@ -248,10 +256,11 @@ class TileLayer(pg.GraphicsObject):
         if rect.width() <= 0:
             return 0
         mpp = rect.width() / max(view_box.width(), 1.0)
-        base_zoom = zoom_for_resolution(mpp)
+        base_zoom = min(zoom_for_resolution(mpp), self._max_zoom())
         self._failed.clear()
         queued = 0
-        for zoom in range(base_zoom, base_zoom + max(0, int(max_extra_zoom)) + 1):
+        zoom_top = min(base_zoom + max(0, int(max_extra_zoom)), self._max_zoom())
+        for zoom in range(base_zoom, zoom_top + 1):
             n = 2 ** zoom
             lon_min, lat_min = mercator_to_lonlat(rect.x(), rect.y())
             lon_max, lat_max = mercator_to_lonlat(rect.x() + rect.width(),
@@ -270,25 +279,29 @@ class TileLayer(pg.GraphicsObject):
                         self._source_key, zoom, tx, ty,
                         self._cache_path(zoom, tx, ty), self._signals))
                     queued += 1
-        self._prefetch_total = queued
+        self._prefetch_total = queued if report_progress else 0
         self._prefetch_done = 0
-        if queued:
+        if queued and report_progress:
             self.prefetch_progress.emit(0, queued)
         return queued
 
     def prefetch_region(self, lon_min: float, lat_min: float,
                         lon_max: float, lat_max: float,
                         *, detail_zoom: int = 16,
-                        max_tiles: int = 400) -> int:
+                        max_tiles: int = 400,
+                        report_progress: bool = True) -> int:
         """预下载经纬度包围盒区域的瓦片（多级别，受 max_tiles 预算约束）。
 
         级别范围由 map_tiles.choose_prefetch_zooms 决定：默认精细到 z16，
         向上 4 级概览；区域过大时自动降级别保证总量不超预算。
-        返回入队总瓦片数；完成进度经 prefetch_progress 信号回报。
+        返回入队总瓦片数；report_progress=True 时完成进度经
+        prefetch_progress 信号回报（叠加层用 False，避免进度重复计数）。
         """
         zoom_min, zoom_max = choose_prefetch_zooms(
             lon_min, lat_min, lon_max, lat_max,
             detail_zoom=detail_zoom, max_tiles=max_tiles)
+        zoom_max = min(zoom_max, self._max_zoom())
+        zoom_min = min(zoom_min, zoom_max)
         self._failed.clear()
         queued = 0
         for zoom in range(zoom_min, zoom_max + 1):
@@ -304,9 +317,9 @@ class TileLayer(pg.GraphicsObject):
                         self._source_key, zoom, tx, ty,
                         self._cache_path(zoom, tx, ty), self._signals))
                     queued += 1
-        self._prefetch_total = queued
+        self._prefetch_total = queued if report_progress else 0
         self._prefetch_done = 0
-        if queued:
+        if queued and report_progress:
             self.prefetch_progress.emit(0, queued)
         return queued
 
@@ -326,9 +339,14 @@ class MapView(pg.GraphicsLayoutWidget):
         # 关闭 pyqtgraph 原生英文右键菜单，右键由自定义 RoundMenu 接管
         self._plot.vb.setMenuEnabled(False)
 
-        self._layer = TileLayer(source_key)
+        self._basemap_key, base_key, overlay_key = resolve_basemap(source_key)
+        self._layer = TileLayer(base_key)
         self._layer.prefetch_progress.connect(self.prefetch_progress)
         self._plot.addItem(self._layer)
+        # 叠加层（如影像注记）：惰性创建，压在基础层之上、测线之下
+        self._overlay_layer: TileLayer | None = None
+        if overlay_key is not None:
+            self._ensure_overlay_layer(overlay_key)
 
         self._track_items: list = []
         self._track_summaries: list[dict] = []
@@ -373,14 +391,38 @@ class MapView(pg.GraphicsLayoutWidget):
 
     # ------------------------------------------------------------ 底图
     def source_key(self) -> str:
-        return self._layer.source_key()
+        return self._basemap_key
+
+    def _ensure_overlay_layer(self, overlay_key: str) -> 'TileLayer':
+        """惰性创建叠加瓦片层（Z 值高于基础层、低于测线轨迹）。"""
+        if self._overlay_layer is None:
+            self._overlay_layer = TileLayer(overlay_key)
+            self._overlay_layer.setZValue(-99.0)
+            self._plot.addItem(self._overlay_layer)
+        return self._overlay_layer
 
     def set_source(self, source_key: str) -> None:
-        self._layer.set_source(source_key)
+        """切换底图（BASEMAP_LAYERS 预设 key；兼容直接传瓦图源 key）。"""
+        key, base_key, overlay_key = resolve_basemap(source_key)
+        if key == self._basemap_key and (
+                self._overlay_layer is None
+                or self._overlay_layer.source_key() == overlay_key):
+            return
+        self._basemap_key = key
+        self._layer.set_source(base_key)
+        if overlay_key is not None:
+            self._ensure_overlay_layer(overlay_key).set_source(overlay_key)
+            self._overlay_layer.setVisible(True)
+        elif self._overlay_layer is not None:
+            self._overlay_layer.setVisible(False)
 
     def prefetch_current_view(self, max_extra_zoom: int = 2) -> int:
-        """预下载当前可视区域瓦片（离线包效果），返回入队瓦片数。"""
-        return self._layer.prefetch_current_view(max_extra_zoom)
+        """预下载当前可视区域瓦片（离线包效果），返回基础层入队瓦片数。"""
+        queued = self._layer.prefetch_current_view(max_extra_zoom)
+        if self._overlay_layer is not None and self._overlay_layer.isVisible():
+            self._overlay_layer.prefetch_current_view(
+                max_extra_zoom, report_progress=False)
+        return queued
 
     def tracks_bbox_lonlat(self) -> tuple | None:
         """已配准轨迹的经纬度联合包围盒 (lon_min, lat_min, lon_max, lat_max)。
@@ -417,8 +459,13 @@ class MapView(pg.GraphicsLayoutWidget):
         bbox = self.tracks_bbox_lonlat()
         if bbox is None:
             return 0
-        return self._layer.prefetch_region(
+        queued = self._layer.prefetch_region(
             *bbox, detail_zoom=detail_zoom, max_tiles=max_tiles)
+        if self._overlay_layer is not None and self._overlay_layer.isVisible():
+            self._overlay_layer.prefetch_region(
+                *bbox, detail_zoom=detail_zoom, max_tiles=max_tiles,
+                report_progress=False)
+        return queued
 
     # ------------------------------------------------------------ 轨迹
     def set_tracks(self, tracks, colors: dict | None = None) -> None:
