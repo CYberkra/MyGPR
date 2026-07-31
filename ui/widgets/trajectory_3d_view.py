@@ -48,14 +48,19 @@ class _TerrainSignals(QObject):
 
 
 class _TerrainWorker(QRunnable):
-    """后台地形构建：下载高程瓦片 → 马赛克 → 重采样到测线坐标系网格。"""
+    """后台地形构建：下载高程瓦片 → 马赛克 → 双线性重采样。
 
-    def __init__(self, generation: int, epsg: int, bbox: tuple,
+    只做 urllib 下载与 numpy 运算——pyproj/PROJ 坐标换算全部在 GUI
+    线程由 ``_prepare_terrain`` 预先完成。PROJ C 库在工作线程内创建
+    Transformer 会在 proj.dll 段错误（native-crash.log 实证），即使
+    Python 层加锁串行化也无法避免，因此工作线程完全不碰 pyproj。
+    """
+
+    def __init__(self, generation: int, prep: dict,
                  cache_root: str, signals: _TerrainSignals) -> None:
         super().__init__()
         self._generation = int(generation)
-        self._epsg = int(epsg)
-        self._bbox = bbox          # (x_min, y_min, x_max, y_max) 源坐标系
+        self._prep = prep            # _prepare_terrain 的预计算结果
         self._cache_root = cache_root
         self._signals = signals
 
@@ -83,17 +88,9 @@ class _TerrainWorker(QRunnable):
     def run(self) -> None:
         payload = None
         try:
-            # 经 proj_safe 串行化：PROJ C 库多线程并行建 Transformer 会
-            # 在 proj.dll 内段错误（0xc0000005），见 proj_safe 模块 docstring
-            from ui.widgets.proj_safe import LockedTransformer
-            x_min, y_min, x_max, y_max = self._bbox
-            to_lonlat = LockedTransformer(self._epsg, 4326)
-            corners_x = [x_min, x_min, x_max, x_max]
-            corners_y = [y_min, y_min, y_max, y_max]
-            lons, lats = to_lonlat.transform(corners_x, corners_y)
-            zoom, x0, x1, y0, y1 = tile_grid_for_bbox(
-                min(lons), min(lats), max(lons), max(lats))
-
+            prep = self._prep
+            zoom = prep['zoom']
+            x0, x1, y0, y1 = prep['tile_range']
             tiles = {}
             for tx in range(x0, x1 + 1):
                 for ty in range(y0, y1 + 1):
@@ -102,21 +99,14 @@ class _TerrainWorker(QRunnable):
                         tiles[(tx, ty)] = block
             if tiles:
                 elev, xs_m, ys_m = mosaic_from_tiles(tiles, zoom, x0, x1, y0, y1)
-                # 源坐标系规则网格 → 经纬度 → Mercator 米 → 双线性采样
-                steps_x = min(_TERRAIN_GRID, 96)
-                steps_y = min(_TERRAIN_GRID, 96)
-                gx = np.linspace(x_min, x_max, steps_x)
-                gy = np.linspace(y_min, y_max, steps_y)
-                mesh_x, mesh_y = np.meshgrid(gx, gy)
-                lon, lat = to_lonlat.transform(mesh_x.ravel(), mesh_y.ravel())
-                to_merc = LockedTransformer(4326, 3857)
-                mx, my = to_merc.transform(lon, lat)
-                z = sample_bilinear(elev, xs_m, ys_m, mx, my)
-                z = z.reshape(mesh_x.shape)
+                # 预计算的 Mercator 采样点 → 双线性采样 → 源坐标系规则网格
+                z = sample_bilinear(elev, xs_m, ys_m, prep['mx'], prep['my'])
+                z = z.reshape(prep['shape'])
                 if np.isfinite(z).any():
                     mean = float(np.nanmean(z))
                     z = np.where(np.isfinite(z), z, np.float32(mean))
-                    payload = {'gx': gx, 'gy': gy, 'z': z.astype(np.float32)}
+                    payload = {'gx': prep['gx'], 'gy': prep['gy'],
+                               'z': z.astype(np.float32)}
         except Exception as exc:  # noqa: BLE001 - 任意失败静默降级平面网格
             _LOGGER.debug('地形构建失败: %s', exc)
             payload = None
@@ -229,11 +219,48 @@ class Trajectory3DView(QWidget):
                     float(all_xyz[:, 0].max() + pad_x),
                     float(all_xyz[:, 1].max() + pad_y))
             self._terrain_generation += 1
-            self._terrain_pool.start(_TerrainWorker(
-                self._terrain_generation, epsg, bbox,
-                _TERRAIN_CACHE_ROOT, self._terrain_signals))
+            # pyproj 坐标换算在 GUI 线程预计算（工作线程碰 PROJ 会段错误），
+            # worker 只拿预计算结果做下载与采样
+            prep = self._prepare_terrain(epsg, bbox)
+            if prep is not None:
+                self._terrain_pool.start(_TerrainWorker(
+                    self._terrain_generation, prep,
+                    _TERRAIN_CACHE_ROOT, self._terrain_signals))
 
     # ------------------------------------------------------------ 地形
+    def _prepare_terrain(self, epsg: int, bbox: tuple) -> dict | None:
+        """GUI 线程预计算地形任务的全部 pyproj 坐标换算。
+
+        PROJ C 库在 QThreadPool 工作线程内创建 Transformer 会在 proj.dll
+        段错误（native-crash.log 实证），故所有换算集中在此处（GUI 线程，
+        与地图换算同线程、天然无并发）；worker 只做 urllib 下载与 numpy。
+        返回 dict(zoom, tile_range, gx, gy, mx, my, shape)；失败返回 None
+        （降级为平面网格）。
+        """
+        try:
+            from ui.widgets.proj_safe import LockedTransformer
+            x_min, y_min, x_max, y_max = bbox
+            to_lonlat = LockedTransformer(epsg, 4326)
+            lons, lats = to_lonlat.transform(
+                [x_min, x_min, x_max, x_max], [y_min, y_min, y_max, y_max])
+            zoom, x0, x1, y0, y1 = tile_grid_for_bbox(
+                min(lons), min(lats), max(lons), max(lats))
+            # 源坐标系规则网格 → 经纬度 → Mercator 米（worker 内双线性采样用）
+            steps_x = min(_TERRAIN_GRID, 96)
+            steps_y = min(_TERRAIN_GRID, 96)
+            gx = np.linspace(x_min, x_max, steps_x)
+            gy = np.linspace(y_min, y_max, steps_y)
+            mesh_x, mesh_y = np.meshgrid(gx, gy)
+            lon, lat = to_lonlat.transform(mesh_x.ravel(), mesh_y.ravel())
+            mx, my = LockedTransformer(4326, 3857).transform(lon, lat)
+            return {'zoom': zoom, 'tile_range': (x0, x1, y0, y1),
+                    'gx': gx, 'gy': gy,
+                    'mx': np.asarray(mx, dtype=float),
+                    'my': np.asarray(my, dtype=float),
+                    'shape': mesh_x.shape}
+        except Exception as exc:  # noqa: BLE001 - 换算失败降级平面网格
+            _LOGGER.debug('地形预计算失败: %s', exc)
+            return None
     def _clear_terrain(self) -> None:
         if self._terrain_item is not None and self._gl_view is not None:
             self._gl_view.removeItem(self._terrain_item)

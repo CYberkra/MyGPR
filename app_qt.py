@@ -22,10 +22,6 @@ from qfluentwidgets import Theme, setTheme
 # 下拉框）仍是深色。禁用后由 theme_helpers.apply_theme 显式 setPalette，
 # 深浅主题完全由应用内设置决定，跨机器表现一致。
 os.environ.setdefault('QT_QPA_PLATFORM', 'windows:darkmode=0')
-# PROJ C 库多线程并行创建 Transformer 会在 proj.dll 段错误（已发生两次
-# 真实崩溃）。全局 PROJ 上下文 + ui.widgets.proj_safe 锁双保险；
-# 必须在 pyproj 首次导入前设置。
-os.environ.setdefault('PYPROJ_GLOBAL_CONTEXT', 'ON')
 
 from core.observability import (configure_structured_logging,
                                 install_global_exception_hooks)

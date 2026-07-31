@@ -1,14 +1,12 @@
 # -*- coding: utf-8 -*-
 """pyproj 线程安全封装。
 
-背景：PROJ C 库在 GUI 线程（地图坐标换算）与 QThreadPool 工作线程
-（地形构建）并行创建 Transformer / 执行 transform 时，会在 proj.dll
-内部段错误（Windows 事件查看器：python.exe 崩溃，faulting module
-proj_9-*.dll，异常码 0xc0000005）并伴随堆损坏（0xc0000374）。
-
-措施：进程级互斥锁串行化所有 Transformer 创建与坐标转换；入口
-app_qt.py 同时设置 ``PYPROJ_GLOBAL_CONTEXT=ON``（须先于 pyproj 导入）
-双保险。transform 是毫秒级纯计算，串行化对 UI 无感知影响。
+背景：PROJ C 库在 QThreadPool 工作线程内创建 Transformer 会在 proj.dll
+段错误（native-crash.log 实证：Windows 事件查看器 0xc0000005，
+faulting module proj_9-*.dll），Python 层加锁也无法避免（锁内照样崩）。
+因此 UI 侧所有 pyproj 调用限定在 GUI 线程（地图换算、地形预计算），
+工作线程完全不碰 pyproj；本模块的进程级锁作为额外保险，防止未来
+新增调用点时无意引入跨线程并发。
 """
 from __future__ import annotations
 
