@@ -12,20 +12,24 @@
 """
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QIcon, QPixmap
-from PyQt6.QtWidgets import (QHBoxLayout, QListWidget, QListWidgetItem,
-                             QStackedWidget, QVBoxLayout, QWidget)
-from qfluentwidgets import (CaptionLabel, CardWidget, ComboBox,
+from PyQt6.QtWidgets import (QFileDialog, QHBoxLayout, QListWidget,
+                             QListWidgetItem, QStackedWidget, QVBoxLayout,
+                             QWidget)
+from qfluentwidgets import (CaptionLabel, CardWidget, ComboBox, DoubleSpinBox,
                             PrimaryPushButton, PushButton, ScrollArea,
-                            SegmentedWidget, SubtitleLabel)
+                            SegmentedWidget, SubtitleLabel, SwitchButton)
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants
 from ui.settings_manager import SettingsManager
 from ui.widgets.collapsible_panel import CollapsiblePanel
+from ui.widgets.local_dem import load_xyz_grid
 from ui.widgets.map_tiles import BASEMAP_LAYERS, DEFAULT_TILE_SOURCE
 from ui.widgets.map_view import MapView
 from ui.widgets.trajectory_3d_view import Trajectory3DView
@@ -249,6 +253,58 @@ class SpatialPage(QWidget):
         self._crs_label.setWordWrap(True)
         crs_layout.addWidget(self._crs_label)
         left_layout.addWidget(crs_card)
+
+        view3d_card, view3d_layout = _make_card('三维显示')
+        exag_row = QHBoxLayout()
+        exag_row.setSpacing(constants.CARD_SPACING)
+        exag_label = CaptionLabel('垂直夸张:', view3d_card)
+        exag_label.setMinimumWidth(60)
+        exag_row.addWidget(exag_label)
+        self._3d_exag_spin = DoubleSpinBox(view3d_card)
+        self._3d_exag_spin.setRange(0.5, 5.0)
+        self._3d_exag_spin.setSingleStep(0.5)
+        self._3d_exag_spin.setValue(1.0)
+        self._3d_exag_spin.setSuffix(' x')
+        exag_row.addWidget(self._3d_exag_spin, 1)
+        view3d_layout.addLayout(exag_row)
+        drape_row = QHBoxLayout()
+        drape_row.setSpacing(constants.CARD_SPACING)
+        drape_label = CaptionLabel('测线贴地:', view3d_card)
+        drape_label.setMinimumWidth(60)
+        drape_label.setToolTip('开：测线高程从地形采样（抑制 RTK 高程噪声）；关：原始 GPS 高程')
+        drape_row.addWidget(drape_label)
+        self._3d_drape_switch = SwitchButton(view3d_card)
+        drape_row.addWidget(self._3d_drape_switch, 1)
+        view3d_layout.addLayout(drape_row)
+        imagery_row = QHBoxLayout()
+        imagery_row.setSpacing(constants.CARD_SPACING)
+        imagery_label = CaptionLabel('影像贴图:', view3d_card)
+        imagery_label.setMinimumWidth(60)
+        imagery_label.setToolTip('开：地形表面贴卫星影像；关：高程色表')
+        imagery_row.addWidget(imagery_label)
+        self._3d_imagery_switch = SwitchButton(view3d_card)
+        self._3d_imagery_switch.setChecked(True)
+        imagery_row.addWidget(self._3d_imagery_switch, 1)
+        view3d_layout.addLayout(imagery_row)
+        dem_row = QHBoxLayout()
+        dem_row.setSpacing(constants.CARD_SPACING)
+        dem_label = CaptionLabel('本地 DEM:', view3d_card)
+        dem_label.setMinimumWidth(60)
+        dem_label.setToolTip(
+            '导入 Global Mapper 等导出的 WGS84 经纬度 XYZ 格网，\n'
+            '三维地形优先使用本地数据，不再在线下载高程')
+        dem_row.addWidget(dem_label)
+        self._3d_dem_btn = PushButton('导入…', view3d_card, FIF.FOLDER)
+        dem_row.addWidget(self._3d_dem_btn)
+        self._3d_dem_clear_btn = PushButton('清除', view3d_card, FIF.CLOSE)
+        self._3d_dem_clear_btn.setEnabled(False)
+        dem_row.addWidget(self._3d_dem_clear_btn)
+        dem_row.addStretch(1)
+        view3d_layout.addLayout(dem_row)
+        self._3d_dem_label = CaptionLabel('未导入（在线下载高程）', view3d_card)
+        self._3d_dem_label.setWordWrap(True)
+        view3d_layout.addWidget(self._3d_dem_label)
+        left_layout.addWidget(view3d_card)
         left_layout.addStretch(1)
 
         # ---------------- 中栏（stretch）
@@ -324,6 +380,14 @@ class SpatialPage(QWidget):
         self._prefetch_btn.clicked.connect(self._on_prefetch_clicked)
         self._map_view.prefetch_progress.connect(self._on_prefetch_progress)
         self._set_current_btn.clicked.connect(self._on_set_current_clicked)
+        self._3d_exag_spin.valueChanged.connect(
+            self._3d_view.set_vertical_exaggeration)
+        self._3d_drape_switch.checkedChanged.connect(
+            self._3d_view.set_track_drape)
+        self._3d_imagery_switch.checkedChanged.connect(
+            self._3d_view.set_imagery_enabled)
+        self._3d_dem_btn.clicked.connect(self._on_import_dem_clicked)
+        self._3d_dem_clear_btn.clicked.connect(self._on_clear_dem_clicked)
         self._left_panel.sig_collapsed.connect(self._save_panel_state)
         self._right_panel.sig_collapsed.connect(self._save_panel_state)
 
@@ -484,6 +548,31 @@ class SpatialPage(QWidget):
         else:
             self._prefetch_label.setText('测线区域瓦片已全部缓存')
         self.basemap_prefetch_requested.emit()
+
+    def _on_import_dem_clicked(self) -> None:
+        """导入本地 DEM（XYZ 格网）：三维地形改用本地高程，免在线下载。"""
+        path, _selected = QFileDialog.getOpenFileName(
+            self, '选择本地 DEM 格网文件', '',
+            'DEM 格网 (*.xyz *.csv *.txt);;所有文件 (*)')
+        if not path:
+            return
+        try:
+            dem = load_xyz_grid(path)
+        except (OSError, ValueError) as exc:
+            self._3d_dem_label.setText(f'导入失败：{exc}')
+            return
+        self._3d_view.set_local_dem(dem)
+        rows, cols = dem['elev'].shape
+        self._3d_dem_label.setText(f'{os.path.basename(path)}（{cols}×{rows}）')
+        self._3d_dem_label.setToolTip(path)
+        self._3d_dem_clear_btn.setEnabled(True)
+
+    def _on_clear_dem_clicked(self) -> None:
+        """清除本地 DEM：三维地形回退在线高程瓦片。"""
+        self._3d_view.set_local_dem(None)
+        self._3d_dem_label.setText('未导入（在线下载高程）')
+        self._3d_dem_label.setToolTip('')
+        self._3d_dem_clear_btn.setEnabled(False)
 
     def _auto_prefetch_tracks(self) -> None:
         """轨迹加载后自动下载测线所在地理区域（按 包围盒+瓦图源 去重）。

@@ -146,8 +146,41 @@ def sample_bilinear(elev: np.ndarray, xs: np.ndarray, ys: np.ndarray,
     return out
 
 
+def sample_imagery_pixels(tiles: dict, x0: int, y0: int, x1: int, y1: int,
+                          qpx: np.ndarray, qpy: np.ndarray,
+                          tile_px: int = 256) -> np.ndarray | None:
+    """影像瓦片块按全局像素坐标双线性采样 RGB。
+
+    tiles: {(tx, ty): (tile_px, tile_px, 3)}（瓦片原始朝向：行向下为南）。
+    qpx/qpy: 该级别全局像素坐标（= lonlat_to_tile 返回值 × tile_px），
+    任意形状、二者同形状。采样逐通道复用 sample_bilinear。
+    返回 (..., 3) float32；瓦片缺失或块外的顶点为 NaN；tiles 为空返回 None。
+    """
+    if not tiles:
+        return None
+    cols = int(x1) - int(x0) + 1
+    rows = int(y1) - int(y0) + 1
+    mosaic = np.full((rows * tile_px, cols * tile_px, 3), np.nan,
+                     dtype=np.float32)
+    for (tx, ty), block in tiles.items():
+        if not (x0 <= tx <= x1 and y0 <= ty <= y1):
+            continue
+        block = np.asarray(block, dtype=np.float32)
+        row = (int(ty) - int(y0)) * tile_px   # 原始朝向：行 0 为北，向下为南
+        col = (int(tx) - int(x0)) * tile_px
+        mosaic[row:row + block.shape[0], col:col + block.shape[1]] = block[..., :3]
+    xs = np.arange(cols * tile_px, dtype=float)
+    ys = np.arange(rows * tile_px, dtype=float)
+    fx = np.asarray(qpx, dtype=float) - int(x0) * tile_px - 0.5
+    fy = np.asarray(qpy, dtype=float) - int(y0) * tile_px - 0.5
+    channels = [sample_bilinear(mosaic[:, :, c], xs, ys, fx, fy)
+                for c in range(3)]
+    return np.stack(channels, axis=-1)
+
+
 __all__ = [
     'TERRARIUM_URL', 'TERRARIUM_MAX_ZOOM',
     'terrarium_url', 'terrarium_cache_path', 'decode_terrarium',
     'tile_grid_for_bbox', 'mosaic_from_tiles', 'sample_bilinear',
+    'sample_imagery_pixels',
 ]
