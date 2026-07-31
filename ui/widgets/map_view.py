@@ -24,8 +24,9 @@ import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtCore import QObject, QRectF, QRunnable, Qt, QThreadPool, pyqtSignal
 from PyQt6.QtGui import QColor, QImage
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 from qfluentwidgets import FluentIcon as FIF
+from qfluentwidgets import ToolButton
 
 from ui.widgets.context_menus import add_action, make_menu
 from ui.widgets.map_tiles import (DEFAULT_TILE_SOURCE, TILE_SOURCES, WORLD_SIZE_M,
@@ -331,8 +332,44 @@ class MapView(pg.GraphicsLayoutWidget):
 
         self._track_items: list = []
         self._track_summaries: list[dict] = []
+        self._track_colors: dict = {}
+        self._dark = False
         self.setBackground('w')
         self.scene().sigMouseClicked.connect(self._on_mouse_clicked)
+        self.scene().sigMouseMoved.connect(self._on_mouse_moved)
+
+        # ---------------- 浮动覆盖层（子控件，resizeEvent 中定位） ----------------
+        # 左上：测线图例（色块 + 名称），set_tracks 时重建
+        self._legend = QFrame(self)
+        self._legend.setObjectName('mapLegend')
+        self._legend_layout = QVBoxLayout(self._legend)
+        self._legend_layout.setContentsMargins(10, 8, 10, 8)
+        self._legend_layout.setSpacing(4)
+        self._legend_labels: list = []
+        self._legend.hide()
+
+        # 右上：缩放按钮列（放大 / 缩小 / 适应全部测线）
+        self._zoom_panel = QFrame(self)
+        self._zoom_panel.setObjectName('mapZoomPanel')
+        zoom_layout = QVBoxLayout(self._zoom_panel)
+        zoom_layout.setContentsMargins(4, 4, 4, 4)
+        zoom_layout.setSpacing(4)
+        for icon, tip, slot in (
+                (FIF.ZOOM_IN, '放大', self._zoom_in),
+                (FIF.ZOOM_OUT, '缩小', self._zoom_out),
+                (FIF.FIT_PAGE, '适应全部测线', self.fit_to_tracks)):
+            btn = ToolButton(icon, self._zoom_panel)
+            btn.setFixedSize(30, 30)
+            btn.setToolTip(tip)
+            btn.clicked.connect(slot)
+            zoom_layout.addWidget(btn)
+
+        # 右下：鼠标位置经纬度实时读出（纬度,经度，与"复制中心坐标"格式一致）
+        self._coord_label = QLabel(self)
+        self._coord_label.setObjectName('mapCoordLabel')
+        self._coord_label.hide()
+
+        self._restyle_overlays()
 
     # ------------------------------------------------------------ 底图
     def source_key(self) -> str:
@@ -393,7 +430,8 @@ class MapView(pg.GraphicsLayoutWidget):
             self._plot.removeItem(item)
         self._track_items = []
         self._track_summaries = []
-        colors = dict(colors or {})
+        self._track_colors = dict(colors or {})
+        colors = self._track_colors
 
         all_x = []
         all_y = []
@@ -417,6 +455,107 @@ class MapView(pg.GraphicsLayoutWidget):
             all_y.append(ys)
 
         self.fit_to_tracks()
+        self._rebuild_legend()
+
+    # ------------------------------------------------------------ 浮动覆盖层
+    def _zoom_in(self) -> None:
+        self._plot.vb.scaleBy((0.75, 0.75))
+
+    def _zoom_out(self) -> None:
+        self._plot.vb.scaleBy((1.0 / 0.75, 1.0 / 0.75))
+
+    def _on_mouse_moved(self, pos) -> None:
+        """鼠标位置 → 经纬度实时读出（视图世界坐标恒为 Web Mercator 米）。"""
+        if not self._plot.sceneBoundingRect().contains(pos):
+            self._coord_label.hide()
+            return
+        point = self._plot.vb.mapSceneToView(pos)
+        lon, lat = mercator_to_lonlat(point.x(), point.y())
+        if not (np.isfinite(lon) and np.isfinite(lat)) or abs(lat) > 85.06:
+            self._coord_label.hide()
+            return
+        self._coord_label.setText(f'{lat:.6f}, {lon:.6f}')
+        self._coord_label.show()
+        self._layout_overlays()
+
+    def _rebuild_legend(self) -> None:
+        """按当前测线重建左上图例（色块 + 名称）；无测线时隐藏。"""
+        while self._legend_layout.count():
+            child = self._legend_layout.takeAt(0)
+            widget = child.widget()
+            if widget is not None:
+                widget.setParent(None)   # 立刻摘除，避免与重建内容重叠一帧
+                widget.deleteLater()
+        self._legend_labels = []
+        entries = []
+        for info in self._track_summaries:
+            label = info.get('name') or info.get('line_id')
+            if not label:
+                continue
+            color = self._track_colors.get(info.get('line_id'), '#1f77b4')
+            entries.append((label, color))
+        if not entries:
+            self._legend.hide()
+            return
+        text_color = '#f0f0f0' if self._dark else '#202020'
+        for label, color in entries:
+            row = QWidget(self._legend)
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(6)
+            swatch = QFrame(row)
+            swatch.setFixedSize(14, 14)
+            swatch.setStyleSheet(
+                f'background-color: {color}; border-radius: 3px;'
+                f' border: 1px solid rgba(0,0,0,80);')
+            name = QLabel(str(label), row)
+            name.setStyleSheet(f'color: {text_color}; background: transparent;')
+            self._legend_labels.append(name)
+            row_layout.addWidget(swatch)
+            row_layout.addWidget(name)
+            row_layout.addStretch(1)
+            self._legend_layout.addWidget(row)
+        self._legend.show()
+        self._layout_overlays()
+
+    def _restyle_overlays(self) -> None:
+        """覆盖层样式跟随深浅主题（图例行不重建，只刷新文字颜色）。"""
+        if self._dark:
+            panel = ('background-color: rgba(32,32,32,200);'
+                     ' border: 1px solid rgba(255,255,255,45); border-radius: 8px;')
+            text = '#f0f0f0'
+        else:
+            panel = ('background-color: rgba(255,255,255,220);'
+                     ' border: 1px solid rgba(0,0,0,45); border-radius: 8px;')
+            text = '#202020'
+        self._legend.setStyleSheet(f'QFrame#mapLegend {{ {panel} }}')
+        self._zoom_panel.setStyleSheet(f'QFrame#mapZoomPanel {{ {panel} }}')
+        self._coord_label.setStyleSheet(
+            f'QLabel#mapCoordLabel {{ {panel} color: {text}; padding: 3px 8px; }}')
+        for name in self._legend_labels:
+            name.setStyleSheet(f'color: {text}; background: transparent;')
+
+    def _layout_overlays(self) -> None:
+        """把浮动覆盖层定位到四角（resize / 内容尺寸变化时调用）。"""
+        # pyqtgraph addPlot() 内部会提前触发 resizeEvent，此时覆盖层尚未创建
+        if not hasattr(self, '_legend'):
+            return
+        margin = 10
+        if self._legend.isVisible():
+            self._legend.adjustSize()
+            self._legend.move(margin, margin)
+        self._zoom_panel.adjustSize()
+        self._zoom_panel.move(
+            self.width() - self._zoom_panel.width() - margin, margin)
+        if self._coord_label.isVisible():
+            self._coord_label.adjustSize()
+            self._coord_label.move(
+                self.width() - self._coord_label.width() - margin,
+                self.height() - self._coord_label.height() - margin)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._layout_overlays()
 
     def fit_to_tracks(self) -> None:
         """视野自适应到全部轨迹范围（右键菜单"适应全部测线"同用）。"""
@@ -467,7 +606,9 @@ class MapView(pg.GraphicsLayoutWidget):
     # ------------------------------------------------------------ 主题
     def apply_theme(self, dark: bool) -> None:
         """深色黑底 / 浅色白底（瓦片覆盖不到的空区可见）。"""
+        self._dark = bool(dark)
         self.setBackground('k' if dark else 'w')
+        self._restyle_overlays()
 
 
 __all__ = ['MapView', 'TileLayer']

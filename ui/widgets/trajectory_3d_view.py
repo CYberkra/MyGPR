@@ -2,7 +2,9 @@
 """Trajectory3DView — 三维测线轨迹视图（可叠加真实地形）。
 
 pyqtgraph.opengl.GLViewWidget：GLGridItem 地面网格 + 每条测线一条
-GLLinePlotItem（颜色与平面地图一致）。坐标归一化到局部原点（全体点减均值），
+GLLinePlotItem（颜色与平面地图一致）。EPSG:4326（经纬度）轨迹先转
+Web Mercator 米再显示——否则 xy（度，跨度 ~0.01）与 z（米，百米级）
+尺度悬殊，测线会塌缩成一根竖线。坐标归一化到局部原点（全体点减均值），
 z 取 elevation_m。import pyqtgraph.opengl 失败（缺 PyOpenGL）时降级为
 QLabel 提示，不影响页面其余部分。
 
@@ -24,7 +26,7 @@ from PyQt6.QtWidgets import QLabel, QVBoxLayout, QWidget
 from qfluentwidgets import FluentIcon as FIF
 
 from ui.widgets.context_menus import add_action, make_menu
-from ui.widgets.map_tiles import extract_epsg
+from ui.widgets.map_tiles import WORLD_SIZE_M, extract_epsg
 from ui.widgets.terrain_tiles import (decode_terrarium, mosaic_from_tiles,
                                       sample_bilinear, terrarium_cache_path,
                                       terrarium_url, tile_grid_for_bbox)
@@ -41,6 +43,71 @@ _LOGGER = logging.getLogger(__name__)
 _TERRAIN_CACHE_ROOT = os.path.join(os.path.expanduser('~'), 'MyGPR', 'tile_cache')
 _USER_AGENT = 'MyGPR/1.0 (https://mygpr.local; terrain client)'
 _TERRAIN_GRID = 96               # 地形网格每边最大采样数
+
+
+def _lonlat_xyz_to_mercator(xyz: np.ndarray) -> np.ndarray:
+    """经纬度（度）xyz → Web Mercator（米）xyz，z 原样保留。"""
+    out = np.array(xyz, dtype=float, copy=True)
+    radius = WORLD_SIZE_M / (2.0 * np.pi)
+    out[:, 0] = radius * np.radians(out[:, 0])
+    lat = np.radians(np.clip(out[:, 1], -85.0, 85.0))
+    out[:, 1] = radius * np.log(np.tan(np.pi / 4.0 + lat / 2.0))
+    return out
+
+
+_TERRAIN_CMAP = None
+
+
+def _terrain_cmap():
+    """gist_earth 地形色表（绿谷→棕山→白雪顶），惰性构建。"""
+    global _TERRAIN_CMAP
+    if _TERRAIN_CMAP is None:
+        import pyqtgraph as pg
+        _TERRAIN_CMAP = pg.colormap.getFromMatplotlib('gist_earth')
+    return _TERRAIN_CMAP
+
+
+_TERRAIN_SHADER = 'mygprTerrain'
+
+
+def _register_terrain_shader() -> None:
+    """注册自定义地形着色器（幂等）。
+
+    pyqtgraph 内置 'shaded' 的光照方向为 (1,-1,-1)，朝上的地表
+    dot(normal, light) 恒为负 → 只剩 0.2 环境光，地形渲成近全黑。
+    这里改为顶光 (0.35,-0.35,0.87) + abs() 双面受光 + 0.45 环境光。
+    """
+    from pyqtgraph.opengl import shaders
+    if _TERRAIN_SHADER in shaders.ShaderProgram.names:
+        return
+    shaders.ShaderProgram(_TERRAIN_SHADER, [
+        shaders.VertexShader("""
+            uniform mat4 u_mvp;
+            uniform mat3 u_normal;
+            attribute vec4 a_position;
+            attribute vec3 a_normal;
+            attribute vec4 a_color;
+            varying vec4 v_color;
+            varying vec3 v_normal;
+            void main() {
+                v_normal = normalize(u_normal * a_normal);
+                v_color = a_color;
+                gl_Position = u_mvp * a_position;
+            }
+        """),
+        shaders.FragmentShader("""
+            #ifdef GL_ES
+            precision mediump float;
+            #endif
+            varying vec4 v_color;
+            varying vec3 v_normal;
+            void main() {
+                vec3 n = normalize(v_normal);
+                float p = abs(dot(n, normalize(vec3(0.35, -0.35, 0.87))));
+                vec3 rgb = v_color.rgb * (0.45 + 0.55 * p);
+                gl_FragColor = vec4(rgb, v_color.a);
+            }
+        """)])
 
 
 class _TerrainSignals(QObject):
@@ -182,10 +249,32 @@ class Trajectory3DView(QWidget):
             if np.count_nonzero(finite) < 1:
                 continue
             arrays.append((str(getattr(track, 'line_id', '') or ''), xyz[finite]))
+            if np.nanmax(np.abs(xyz[:, :2])) >= 1000.0:
+                lonlat_like = False
             if epsg is None:
                 epsg = extract_epsg(getattr(track, 'coordinate_system', ''))
         if not arrays:
             return
+
+        # 坐标系启发：无 EPSG 且数值像经纬度 → 按 EPSG:4326
+        if epsg is None and lonlat_like:
+            epsg = 4326
+        # 地形包围盒用原始源坐标计算（必须在 4326→Mercator 显示转换之前，
+        # 否则会把 Mercator 米当经纬度再转一遍，地形整个失效）
+        terrain_bbox = None
+        if epsg is not None:
+            raw_xyz = np.concatenate([xyz for _lid, xyz in arrays])
+            pad_x = max((raw_xyz[:, 0].max() - raw_xyz[:, 0].min()) * 0.05, 1e-6)
+            pad_y = max((raw_xyz[:, 1].max() - raw_xyz[:, 1].min()) * 0.05, 1e-6)
+            terrain_bbox = (float(raw_xyz[:, 0].min() - pad_x),
+                            float(raw_xyz[:, 1].min() - pad_y),
+                            float(raw_xyz[:, 0].max() + pad_x),
+                            float(raw_xyz[:, 1].max() + pad_y))
+        if epsg == 4326:
+            # 经纬度（度）→ Web Mercator（米）。否则 xy 跨度仅 ~0.01°，
+            # 在高程（百米级）/网格尺度下测线塌缩成一根竖线（营山数据实测）
+            arrays = [(lid, _lonlat_xyz_to_mercator(xyz))
+                      for lid, xyz in arrays]
 
         # 全体点减均值 → 局部原点，z 同样归一化避免相机被大高程数值拉远
         origin = np.mean(np.concatenate([xyz for _lid, xyz in arrays]), axis=0)
@@ -194,8 +283,6 @@ class Trajectory3DView(QWidget):
         for line_id, xyz in arrays:
             local = xyz - origin
             extent = max(extent, float(np.abs(local[:, :2]).max()), 1.0)
-            if np.nanmax(np.abs(xyz[:, :2])) >= 1000.0:
-                lonlat_like = False
             color = colors.get(line_id, '#1f77b4')
             item = _gl.GLLinePlotItem(
                 pos=local, color=color, width=2.0,
@@ -208,20 +295,11 @@ class Trajectory3DView(QWidget):
         self._reset_camera()
 
         # 坐标系可识别 → 后台构建真实地形
-        if epsg is None and lonlat_like:
-            epsg = 4326
-        if epsg is not None:
-            all_xyz = np.concatenate([xyz for _lid, xyz in arrays])
-            pad_x = max((all_xyz[:, 0].max() - all_xyz[:, 0].min()) * 0.05, 1e-6)
-            pad_y = max((all_xyz[:, 1].max() - all_xyz[:, 1].min()) * 0.05, 1e-6)
-            bbox = (float(all_xyz[:, 0].min() - pad_x),
-                    float(all_xyz[:, 1].min() - pad_y),
-                    float(all_xyz[:, 0].max() + pad_x),
-                    float(all_xyz[:, 1].max() + pad_y))
+        if terrain_bbox is not None:
             self._terrain_generation += 1
             # pyproj 坐标换算在 GUI 线程预计算（工作线程碰 PROJ 会段错误），
             # worker 只拿预计算结果做下载与采样
-            prep = self._prepare_terrain(epsg, bbox)
+            prep = self._prepare_terrain(epsg, terrain_bbox)
             if prep is not None:
                 self._terrain_pool.start(_TerrainWorker(
                     self._terrain_generation, prep,
@@ -296,8 +374,16 @@ class Trajectory3DView(QWidget):
             mesh_x, mesh_y = np.meshgrid(gx, gy)
             lon, lat = to_lonlat.transform(mesh_x.ravel(), mesh_y.ravel())
             mx, my = LockedTransformer(4326, 3857).transform(lon, lat)
+            gx_out, gy_out = gx, gy
+            if int(epsg) == 4326:
+                # 显示坐标已转 Mercator 米（见 set_tracks），地形网格同步：
+                # mx 仅随 lon 变、my 仅随 lat 变，可取 1D 网格轴
+                mx2 = np.asarray(mx, dtype=float).reshape(mesh_x.shape)
+                my2 = np.asarray(my, dtype=float).reshape(mesh_x.shape)
+                gx_out = mx2[0, :]
+                gy_out = my2[:, 0]
             return {'zoom': zoom, 'tile_range': (x0, x1, y0, y1),
-                    'gx': gx, 'gy': gy,
+                    'gx': gx_out, 'gy': gy_out,
                     'mx': np.asarray(mx, dtype=float),
                     'my': np.asarray(my, dtype=float),
                     'shape': mesh_x.shape}
@@ -323,11 +409,39 @@ class Trajectory3DView(QWidget):
             # 高程基准对齐：DEM（正高）与测线 GPS 高程常有系统性偏差（大地水准面
             # 差距可达数十米），按各自均值对齐保证测线贴地显示
             z = z - float(np.mean(z))
+            # 均值对齐后局部地形仍可能高出测线几十米把线埋住：
+            # 整体下移地形使其最高点始终低于测线最低点（留 1% 间距），
+            # 保证测线永远浮在地形表面之上可见
+            if self._line_items:
+                line_z_min = min(float(li.pos[:, 2].min())
+                                 for li in self._line_items)
+                margin = max(self._extent * 0.01, 1.0)
+                sink = line_z_min - margin - float(z.max())
+                if sink < 0.0:
+                    z = z + sink
             self._clear_terrain()
             # z 形状 (len(x), len(y))：pyqtgraph 期望 x 为第一维
             z = np.ascontiguousarray(z.T)
+            # heightColor shader 按 z∈[0,1] 绝对值取色（实测米级高程渲成全黑），
+            # 改用 gist_earth 地形色表逐顶点着色 + shaded 光照
+            z_min = float(z.min())
+            z_span = max(float(z.max()) - z_min, 1e-6)
+            z_norm = (z - z_min) / z_span
+            lut = _terrain_cmap().getLookupTable(0.0, 1.0, 256)
+            # gist_earth 低端是深海深蓝（陆地区域渲成发黑），只取陆地段 0.38~1.0
+            z_land = 0.38 + 0.62 * z_norm
+            colors = lut[np.clip(
+                (z_land * 255.0).astype(np.int64), 0, 255)]
+            if colors.shape[-1] == 3:
+                # getLookupTable 只回 RGB；GLSurfacePlotItem 顶点色必须 4 通道，
+                # 否则 VBO 按 4 字节/顶点错行读取，颜色全乱（实证渲成近全黑）
+                alpha = np.full(colors.shape[:-1] + (1,), 255, dtype=np.uint8)
+                colors = np.concatenate([colors, alpha], axis=-1)
+            # MeshData 原生支持 uint8 顶点色（0-255），转 float32 会把色值放大 255 倍
+            _register_terrain_shader()
             item = _gl.GLSurfacePlotItem(
-                x=x, y=y, z=z, shader='heightColor', smooth=True)
+                x=x, y=y, z=z, colors=np.ascontiguousarray(colors, np.uint8),
+                shader=_TERRAIN_SHADER, smooth=True)
             self._gl_view.addItem(item)
             self._terrain_item = item
             self._grid.setVisible(False)   # 地形就位后隐藏平面网格
