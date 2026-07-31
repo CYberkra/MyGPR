@@ -208,6 +208,11 @@ class MyGPRMainWindow(FluentWindow):
     # ============================================================ 组装
     def _init_window(self) -> None:
         self.setWindowTitle(constants.APP_NAME)
+        # 禁用 Mica 亚克力背景：Win11 24H2 上浅色 Mica Backdrop 渲染失效，
+        # 会导致标题栏/导航栏整片透明、透出桌面（浅色主题"基本不可用"的根因）。
+        # 禁用后窗口自行绘制实色背景（浅 #f0f4f9 / 深 #202020），
+        # 深浅主题都能稳定渲染，且在 Win10/Win11 各版本表现一致。
+        self.setMicaEffectEnabled(False)
         # 屏幕自适应：目标 1450×850，但不超过可用桌面的 92%；最小尺寸同样
         # 受屏幕约束，避免小屏/高缩放机器上窗口比屏幕大、按钮被挤出可视区。
         from PyQt6.QtWidgets import QApplication
