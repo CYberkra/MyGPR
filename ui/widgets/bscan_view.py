@@ -8,7 +8,12 @@
 - autoLevels=False + 显式 levels=(vmin, vmax)
 - ColorBarItem 随行同步
 
-右键菜单（RoundMenu）：缩放组 / 色标子菜单 / 复制图像 / 导出 PNG。
+十字光标读数：鼠标在图像区移动时显示十字线 + 左下角读数浮层
+（道号/距起点/纵轴物理值/幅值；PreviewBundle 带 trace_axis_m /
+sample_axis 时显示物理量，降采样数据附"原始约 N"），右键菜单可开关。
+
+右键菜单（RoundMenu）：缩放组 / 色标子菜单 / 十字光标开关 /
+复制图像 / 导出 PNG。
 接入时已 vb.setMenuEnabled(False) 关闭 pyqtgraph 原生英文菜单
 （代价：右键拖拽框选缩放失效，由菜单缩放项补偿）。
 """
@@ -19,11 +24,45 @@ from PyQt6.QtWidgets import (QApplication, QHBoxLayout, QFileDialog,
                              QVBoxLayout, QWidget)
 
 import pyqtgraph as pg
-from qfluentwidgets import FluentIcon as FIF, PushButton
+from qfluentwidgets import CaptionLabel, FluentIcon as FIF, PushButton
 
 from ui import constants
 from ui.widgets.context_menus import (add_action, add_checkable_submenu,
                                       make_menu)
+
+
+def format_crosshair_readout(trace: int, sample: int, shape: tuple,
+                             amplitude: float, *,
+                             trace_axis_m=None, sample_axis=None,
+                             sample_axis_label: str = '',
+                             trace_count: int = 0,
+                             sample_count: int = 0) -> str:
+    """十字光标读数文本（纯函数，便于测试）。
+
+    trace/sample 为显示坐标（0 基）；shape=(n_traces, n_samples)。
+    trace_axis_m/sample_axis 为与显示矩阵等长的物理轴（None 跳过）。
+    trace_count/sample_count 为原始（未降采样）数量，与显示数不同
+    时追加"（原始约 N）"（strided 降采样近似线性映射）。
+    """
+    n_traces, n_samples = shape
+    lines = [f'道 {trace + 1}']
+    if trace_count and trace_count != n_traces:
+        approx = int(round(trace * (trace_count - 1) / max(n_traces - 1, 1)))
+        lines[0] += f'（原始约 {approx + 1}）'
+    if trace_axis_m is not None and 0 <= trace < len(trace_axis_m):
+        lines.append(f'距起点 {float(trace_axis_m[trace]):.3g} m')
+    if sample_axis is not None and 0 <= sample < len(sample_axis):
+        label = sample_axis_label or '纵轴'
+        lines.append(f'{label} {float(sample_axis[sample]):.4g}')
+    else:
+        text = f'采样 {sample + 1}'
+        if sample_count and sample_count != n_samples:
+            approx = int(round(sample * (sample_count - 1)
+                               / max(n_samples - 1, 1)))
+            text += f'（原始约 {approx + 1}）'
+        lines.append(text)
+    lines.append(f'幅值 {amplitude:.4g}')
+    return '\n'.join(lines)
 
 
 class BScanView(QWidget):
@@ -42,6 +81,13 @@ class BScanView(QWidget):
         self._pick_enabled = False
         self._image_shape = None  # (traces, samples) 显示坐标系尺寸
         self._cmap_name = constants.DEFAULT_COLORMAP
+        # 十字光标读数状态（PreviewBundle 物理轴元数据）
+        self._crosshair_on = True
+        self._trace_axis_m = None
+        self._sample_axis = None
+        self._sample_axis_label = ''
+        self._trace_count = 0
+        self._sample_count = 0
 
         self._glw = pg.GraphicsLayoutWidget(self)
         self._plot = self._glw.addPlot(row=0, col=0, title='B-Scan图像')
@@ -57,6 +103,13 @@ class BScanView(QWidget):
         self._image_item = pg.ImageItem(axisOrder='row-major')
         self._image_item.setLevels((0.0, 1.0))
         self._plot.addItem(self._image_item)
+
+        # 十字光标线（默认隐藏，鼠标进入图像区显示）
+        self._vline = pg.InfiniteLine(angle=90, movable=False)
+        self._hline = pg.InfiniteLine(angle=0, movable=False)
+        for line in (self._vline, self._hline):
+            line.setVisible(False)
+            self._plot.addItem(line, ignoreBounds=True)
 
         self._colorbar = None
         if with_colorbar:
@@ -77,7 +130,17 @@ class BScanView(QWidget):
         layout.addLayout(self._build_toolbar())
         layout.addWidget(self._glw, 1)
 
+        # 十字光标读数浮层（左下角，半透明底白字，深浅主题通用）
+        self._readout = CaptionLabel(self)
+        self._readout.setStyleSheet(
+            'CaptionLabel { background-color: rgba(0, 0, 0, 150); '
+            'color: white; border-radius: 4px; padding: 4px 8px; }')
+        self._readout.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._readout.hide()
+
         self._glw.scene().sigMouseClicked.connect(self._on_mouse_clicked)
+        self._glw.scene().sigMouseMoved.connect(self._on_mouse_moved)
         from qfluentwidgets import isDarkTheme
         self.apply_theme(isDarkTheme())
 
@@ -157,6 +220,13 @@ class BScanView(QWidget):
             x_label=getattr(bundle, 'x_label', '道数'),
             y_label=getattr(bundle, 'y_label', '采样点'),
         )
+        # 十字光标读数用物理轴元数据（可选；与显示矩阵同降采样）
+        self._trace_axis_m = getattr(bundle, 'trace_axis_m', None)
+        self._sample_axis = getattr(bundle, 'sample_axis', None)
+        self._sample_axis_label = str(
+            getattr(bundle, 'sample_axis_label', '') or '')
+        self._trace_count = int(getattr(bundle, 'trace_count', 0) or 0)
+        self._sample_count = int(getattr(bundle, 'sample_count', 0) or 0)
 
     def set_matrix(self, matrix, vmin, vmax, *,
                    title="", x_label="道数", y_label="采样点") -> None:
@@ -178,6 +248,12 @@ class BScanView(QWidget):
         new_shape = (view.shape[1], view.shape[0])  # (traces, samples)
         shape_changed = new_shape != self._image_shape
         self._image_shape = new_shape
+        # 直接 set_matrix 的调用方没有物理轴元数据，读数退回索引显示
+        self._trace_axis_m = None
+        self._sample_axis = None
+        self._sample_axis_label = ''
+        self._trace_count = 0
+        self._sample_count = 0
         self._image_item.setImage(view, autoLevels=False,
                                   levels=(float(vmin), float(vmax)))
         if shape_changed:
@@ -204,6 +280,7 @@ class BScanView(QWidget):
 
     # ------------------------------------------------------------------ 右键菜单
     def _show_context_menu(self, event) -> None:
+        from qfluentwidgets import Action
         menu = make_menu(self)
         add_action(menu, FIF.ZOOM_IN, '放大', self.zoom_in)
         add_action(menu, FIF.ZOOM_OUT, '缩小', self.zoom_out)
@@ -212,6 +289,11 @@ class BScanView(QWidget):
         menu.addSeparator()
         add_checkable_submenu(menu, '色标', constants.COLORMAPS,
                               self._cmap_name, self._choose_colormap)
+        crosshair_action = Action('十字光标读数')
+        crosshair_action.setCheckable(True)
+        crosshair_action.setChecked(self._crosshair_on)
+        crosshair_action.triggered.connect(self._toggle_crosshair)
+        menu.addAction(crosshair_action)
         menu.addSeparator()
         add_action(menu, FIF.COPY, '复制图像', self._copy_image,
                    enabled=self._image_shape is not None)
@@ -238,6 +320,60 @@ class BScanView(QWidget):
     def set_pick_enabled(self, enabled: bool) -> None:
         """开启后鼠标点击把图像坐标换算成 (trace, sample) 发 sig_point_picked。"""
         self._pick_enabled = bool(enabled)
+
+    def _toggle_crosshair(self, checked: bool) -> None:
+        self._crosshair_on = bool(checked)
+        if not self._crosshair_on:
+            self._hide_crosshair()
+
+    def _on_mouse_moved(self, pos) -> None:
+        """鼠标在图像区移动：十字线跟手 + 左下角读数浮层。"""
+        if not self._crosshair_on or self._image_shape is None:
+            self._hide_crosshair()
+            return
+        if not self._plot.sceneBoundingRect().contains(pos):
+            self._hide_crosshair()
+            return
+        view_point = self._plot.vb.mapSceneToView(pos)
+        trace, sample = int(view_point.x()), int(view_point.y())
+        n_traces, n_samples = self._image_shape
+        if not (0 <= trace < n_traces and 0 <= sample < n_samples):
+            self._hide_crosshair()
+            return
+        # ImageItem 像素中心在半整数处，十字线对到像素中心
+        self._vline.setPos(trace + 0.5)
+        self._hline.setPos(sample + 0.5)
+        self._vline.setVisible(True)
+        self._hline.setVisible(True)
+        amplitude = float(self._image_item.image[sample, trace])
+        self._readout.setText(format_crosshair_readout(
+            trace, sample, self._image_shape, amplitude,
+            trace_axis_m=self._trace_axis_m,
+            sample_axis=self._sample_axis,
+            sample_axis_label=self._sample_axis_label,
+            trace_count=self._trace_count,
+            sample_count=self._sample_count))
+        self._readout.setVisible(True)
+        self._position_readout()
+
+    def _hide_crosshair(self) -> None:
+        self._vline.setVisible(False)
+        self._hline.setVisible(False)
+        self._readout.hide()
+
+    def _position_readout(self) -> None:
+        self._readout.adjustSize()
+        margin = 10
+        self._readout.move(
+            margin, self.height() - self._readout.height() - margin)
+
+    def leaveEvent(self, event) -> None:
+        self._hide_crosshair()
+        super().leaveEvent(event)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._position_readout()
 
     def set_overlay_points(self, points, color: str = '#fbbf24') -> None:
         """解释页标注散点：points 为 [(trace, sample), ...]（图像坐标系）。"""
@@ -268,6 +404,7 @@ class BScanView(QWidget):
         self._image_item.clear()
         self._scatter.setData([])
         self._image_shape = None
+        self._hide_crosshair()
         self._plot.setTitle('B-Scan图像')
 
     def apply_theme(self, dark: bool) -> None:
@@ -291,3 +428,9 @@ class BScanView(QWidget):
             caxis.setTextPen(pen)
             if getattr(caxis, 'labelText', ''):
                 caxis.setLabel(text=caxis.labelText, color=fg)
+        # 十字光标：深色主题黄 / 浅色主题深红（图像与白底上均醒目）
+        crosshair_pen = pg.mkPen(
+            '#ffe135' if dark else '#c8000a',
+            style=Qt.PenStyle.DashLine, width=1)
+        self._vline.setPen(crosshair_pen)
+        self._hline.setPen(crosshair_pen)

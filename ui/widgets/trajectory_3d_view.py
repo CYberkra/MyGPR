@@ -423,6 +423,10 @@ class Trajectory3DView(QWidget):
         from qfluentwidgets import Action
         menu = make_menu(self)
         add_action(menu, FIF.ROTATE, '重置视角', self._reset_camera)
+        add_action(menu, None, '顶视', lambda: self._set_camera_preset('top'))
+        add_action(menu, None, '斜视 45°',
+                   lambda: self._set_camera_preset('oblique'))
+        add_action(menu, None, '侧视', lambda: self._set_camera_preset('side'))
         menu.addSeparator()
         terrain_action = Action('显示地形')
         terrain_action.setCheckable(True)
@@ -435,7 +439,28 @@ class Trajectory3DView(QWidget):
         grid_action.setChecked(self._grid is not None and self._grid.visible())
         grid_action.triggered.connect(self._toggle_grid)
         menu.addAction(grid_action)
+        menu.addSeparator()
+        add_action(menu, FIF.SAVE, '导出截图 PNG…', self._export_screenshot)
         menu.exec(self.mapToGlobal(pos))
+
+    def _set_camera_preset(self, preset: str) -> None:
+        """视角预设：顶视 / 斜视 45° / 侧视（距离与中心保持不动）。"""
+        if self._gl_view is None:
+            return
+        elevation, azimuth = {'top': (89.0, -90.0),
+                              'oblique': (45.0, 45.0),
+                              'side': (8.0, 0.0)}[preset]
+        self._gl_view.setCameraPosition(elevation=elevation, azimuth=azimuth)
+
+    def _export_screenshot(self) -> None:
+        """GL 视图内容导出 PNG（grabFramebuffer 抓取帧缓冲）。"""
+        from PyQt6.QtCore import QDateTime
+        from PyQt6.QtWidgets import QFileDialog
+        stamp = QDateTime.currentDateTime().toString('yyyyMMdd_HHmmss')
+        path, _selected = QFileDialog.getSaveFileName(
+            self, '导出三维视图截图', f'view3d_{stamp}.png', 'PNG 图片 (*.png)')
+        if path:
+            self._gl_view.grabFramebuffer().save(path, 'PNG')
 
     def _toggle_terrain(self, checked: bool) -> None:
         if self._terrain_item is not None:
