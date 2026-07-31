@@ -98,10 +98,65 @@ def zoom_for_resolution(meters_per_pixel: float, *, min_zoom: int = 1,
     return max(min_zoom, min(max_zoom, int(round(zoom))))
 
 
+def tile_range_for_bbox(lon_min: float, lat_min: float,
+                        lon_max: float, lat_max: float,
+                        zoom: int) -> tuple[int, int, int, int]:
+    """经纬度包围盒在某级别下覆盖的瓦片编号范围 (x0, x1, y0, y1)（含端点）。
+
+    纬度自动钳制到 Web Mercator 有效范围；经度按 [-180, 180] 截断。
+    """
+    n = 2 ** int(zoom)
+    lon_min = max(-180.0, min(180.0, float(lon_min)))
+    lon_max = max(-180.0, min(180.0, float(lon_max)))
+    if lon_max < lon_min:
+        lon_min, lon_max = lon_max, lon_min
+    if lat_max < lat_min:
+        lat_min, lat_max = lat_max, lat_min
+    x0f, _ = lonlat_to_tile(lon_min, 0.0, zoom)
+    x1f, _ = lonlat_to_tile(lon_max, 0.0, zoom)
+    _, y0f = lonlat_to_tile(0.0, lat_max, zoom)   # 北 → 较小瓦片 y
+    _, y1f = lonlat_to_tile(0.0, lat_min, zoom)
+    return (max(0, min(n - 1, int(x0f))), max(0, min(n - 1, int(x1f))),
+            max(0, min(n - 1, int(y0f))), max(0, min(n - 1, int(y1f))))
+
+
+def count_tiles_for_bbox(lon_min: float, lat_min: float,
+                         lon_max: float, lat_max: float,
+                         zoom_min: int, zoom_max: int) -> int:
+    """zoom_min..zoom_max 范围内覆盖包围盒的瓦片总数。"""
+    total = 0
+    for zoom in range(int(zoom_min), int(zoom_max) + 1):
+        x0, x1, y0, y1 = tile_range_for_bbox(
+            lon_min, lat_min, lon_max, lat_max, zoom)
+        total += (x1 - x0 + 1) * (y1 - y0 + 1)
+    return total
+
+
+def choose_prefetch_zooms(lon_min: float, lat_min: float,
+                          lon_max: float, lat_max: float,
+                          *, detail_zoom: int = 16, overview_span: int = 4,
+                          max_tiles: int = 400) -> tuple[int, int]:
+    """为包围盒预下载选 (zoom_min, zoom_max)。
+
+    detail_zoom 为目标最精细级别；zoom_min = detail_zoom - overview_span。
+    若瓦片总数超过 max_tiles，则整体下调级别直到满足预算（不低于级别 3）。
+    """
+    detail_zoom = max(3, min(19, int(detail_zoom)))
+    while detail_zoom > 3:
+        zoom_min = max(1, detail_zoom - int(overview_span))
+        if count_tiles_for_bbox(lon_min, lat_min, lon_max, lat_max,
+                                zoom_min, detail_zoom) <= int(max_tiles):
+            break
+        detail_zoom -= 1
+    zoom_min = max(1, detail_zoom - int(overview_span))
+    return zoom_min, detail_zoom
+
+
 __all__ = [
     'EARTH_RADIUS_M', 'MAX_LATITUDE', 'WORLD_SIZE_M', 'TILE_SIZE_PX',
     'TILE_SOURCES', 'DEFAULT_TILE_SOURCE',
     'extract_epsg', 'lonlat_to_mercator', 'mercator_to_lonlat',
     'lonlat_to_tile', 'tile_bounds_mercator', 'tile_url',
-    'zoom_for_resolution',
+    'zoom_for_resolution', 'tile_range_for_bbox', 'count_tiles_for_bbox',
+    'choose_prefetch_zooms',
 ]

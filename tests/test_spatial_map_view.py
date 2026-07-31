@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import math
 
-from ui.widgets.map_tiles import (extract_epsg, lonlat_to_mercator,
+from ui.widgets.map_tiles import (choose_prefetch_zooms, count_tiles_for_bbox,
+                                  extract_epsg, lonlat_to_mercator,
                                   lonlat_to_tile, mercator_to_lonlat,
-                                  tile_bounds_mercator)
+                                  tile_bounds_mercator, tile_range_for_bbox)
 
 
 # ------------------------------------------------------------------ 瓦片数学
@@ -66,3 +67,56 @@ def test_extract_epsg_returns_none_without_code():
 def test_extract_epsg_simple():
     assert extract_epsg("EPSG:4326") == 4326
     assert extract_epsg("prefix EPSG:3857 suffix") == 3857
+
+
+# ------------------------------------------------------------------ 包围盒预下载
+def test_tile_range_for_bbox_small_area_single_tile():
+    """小范围（百米级测区）在低级别下应收敛到单张瓦片。"""
+    x0, x1, y0, y1 = tile_range_for_bbox(106.55, 31.08, 106.56, 31.09, 12)
+    assert x0 == x1 and y0 == y1
+
+
+def test_tile_range_for_bbox_covers_all_points():
+    """包围盒内任意采样点的瓦片编号都落在返回范围内。"""
+    bbox = (106.5, 31.0, 106.7, 31.2)
+    zoom = 13
+    x0, x1, y0, y1 = tile_range_for_bbox(*bbox, zoom)
+    for i in range(5):
+        lon = bbox[0] + (bbox[2] - bbox[0]) * i / 4.0
+        lat = bbox[1] + (bbox[3] - bbox[1]) * i / 4.0
+        fx, fy = lonlat_to_tile(lon, lat, zoom)
+        assert x0 <= int(fx) <= x1
+        assert y0 <= int(fy) <= y1
+
+
+def test_tile_range_for_bbox_swapped_and_clamped():
+    """经纬度顺序颠倒自动纠正；纬度越界钳制不抛异常。"""
+    x0, x1, y0, y1 = tile_range_for_bbox(106.7, 95.0, 106.5, -95.0, 10)
+    assert x1 >= x0 and y1 >= y0
+    assert 0 <= x0 <= x1 < 2 ** 10
+    assert 0 <= y0 <= y1 < 2 ** 10
+
+
+def test_count_tiles_for_bbox_monotonic_with_zoom():
+    """级别越高瓦片数越多。"""
+    bbox = (106.5, 31.0, 106.6, 31.1)
+    low = count_tiles_for_bbox(*bbox, 10, 11)
+    high = count_tiles_for_bbox(*bbox, 14, 15)
+    assert high > low >= 1
+
+
+def test_choose_prefetch_zooms_respects_tile_budget():
+    """选定级别范围后瓦片总数不超预算（小测区直接给足 detail_zoom）。"""
+    bbox = (106.55, 31.05, 106.57, 31.07)   # 约 2km 测区
+    z0, z1 = choose_prefetch_zooms(*bbox, detail_zoom=16, max_tiles=400)
+    assert z1 == 16
+    assert count_tiles_for_bbox(*bbox, z0, z1) <= 400
+
+
+def test_choose_prefetch_zooms_large_area_drops_zoom():
+    """超大区域（全省）必须降级别满足预算，且不低于级别 3。"""
+    bbox = (97.0, 26.0, 108.0, 34.0)   # 四川量级
+    z0, z1 = choose_prefetch_zooms(*bbox, detail_zoom=16, max_tiles=400)
+    assert z1 < 16
+    assert z1 >= 3
+    assert count_tiles_for_bbox(*bbox, z0, z1) <= 400

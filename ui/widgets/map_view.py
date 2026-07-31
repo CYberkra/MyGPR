@@ -26,9 +26,10 @@ from PyQt6.QtCore import QObject, QRectF, QRunnable, QThreadPool, pyqtSignal
 from PyQt6.QtGui import QColor, QImage
 
 from ui.widgets.map_tiles import (DEFAULT_TILE_SOURCE, TILE_SOURCES, WORLD_SIZE_M,
-                                  extract_epsg, lonlat_to_mercator,
-                                  lonlat_to_tile, mercator_to_lonlat,
-                                  tile_bounds_mercator, tile_url,
+                                  choose_prefetch_zooms, extract_epsg,
+                                  lonlat_to_mercator, lonlat_to_tile,
+                                  mercator_to_lonlat, tile_bounds_mercator,
+                                  tile_range_for_bbox, tile_url,
                                   zoom_for_resolution)
 
 _LOGGER = logging.getLogger(__name__)
@@ -272,6 +273,40 @@ class TileLayer(pg.GraphicsObject):
             self.prefetch_progress.emit(0, queued)
         return queued
 
+    def prefetch_region(self, lon_min: float, lat_min: float,
+                        lon_max: float, lat_max: float,
+                        *, detail_zoom: int = 16,
+                        max_tiles: int = 400) -> int:
+        """预下载经纬度包围盒区域的瓦片（多级别，受 max_tiles 预算约束）。
+
+        级别范围由 map_tiles.choose_prefetch_zooms 决定：默认精细到 z16，
+        向上 4 级概览；区域过大时自动降级别保证总量不超预算。
+        返回入队总瓦片数；完成进度经 prefetch_progress 信号回报。
+        """
+        zoom_min, zoom_max = choose_prefetch_zooms(
+            lon_min, lat_min, lon_max, lat_max,
+            detail_zoom=detail_zoom, max_tiles=max_tiles)
+        self._failed.clear()
+        queued = 0
+        for zoom in range(zoom_min, zoom_max + 1):
+            x0, x1, y0, y1 = tile_range_for_bbox(
+                lon_min, lat_min, lon_max, lat_max, zoom)
+            for tx in range(x0, x1 + 1):
+                for ty in range(y0, y1 + 1):
+                    key = (zoom, tx, ty)
+                    if key in self._images or key in self._inflight:
+                        continue
+                    self._inflight.add(key)
+                    self._pool.start(_TileWorker(
+                        self._source_key, zoom, tx, ty,
+                        self._cache_path(zoom, tx, ty), self._signals))
+                    queued += 1
+        self._prefetch_total = queued
+        self._prefetch_done = 0
+        if queued:
+            self.prefetch_progress.emit(0, queued)
+        return queued
+
 
 class MapView(pg.GraphicsLayoutWidget):
     """平面地图视图：瓦片底图 + 测线轨迹折线。"""
@@ -304,6 +339,44 @@ class MapView(pg.GraphicsLayoutWidget):
     def prefetch_current_view(self, max_extra_zoom: int = 2) -> int:
         """预下载当前可视区域瓦片（离线包效果），返回入队瓦片数。"""
         return self._layer.prefetch_current_view(max_extra_zoom)
+
+    def tracks_bbox_lonlat(self) -> tuple | None:
+        """已配准轨迹的经纬度联合包围盒 (lon_min, lat_min, lon_max, lat_max)。
+
+        没有任何已配准（mapped）轨迹时返回 None。
+        """
+        xs, ys = [], []
+        for info in self._track_summaries:
+            if not info.get('mapped'):
+                continue
+            tx = info.get('xs')
+            ty = info.get('ys')
+            if tx is None or ty is None or not len(tx):
+                continue
+            finite = np.isfinite(tx) & np.isfinite(ty)
+            if np.count_nonzero(finite):
+                xs.append(np.asarray(tx)[finite])
+                ys.append(np.asarray(ty)[finite])
+        if not xs:
+            return None
+        mx = np.concatenate(xs)
+        my = np.concatenate(ys)
+        lon_min, lat_min = mercator_to_lonlat(mx.min(), my.min())
+        lon_max, lat_max = mercator_to_lonlat(mx.max(), my.max())
+        # 外扩约 8%（最小约 0.002° ≈ 200m），保证轨迹边缘不在瓦片边界上
+        pad_lon = max((lon_max - lon_min) * 0.08, 0.002)
+        pad_lat = max((lat_max - lat_min) * 0.08, 0.002)
+        return (lon_min - pad_lon, lat_min - pad_lat,
+                lon_max + pad_lon, lat_max + pad_lat)
+
+    def prefetch_tracks(self, *, detail_zoom: int = 16,
+                        max_tiles: int = 400) -> int:
+        """按测线包围盒预下载对应地理区域瓦片；无已配准轨迹返回 0。"""
+        bbox = self.tracks_bbox_lonlat()
+        if bbox is None:
+            return 0
+        return self._layer.prefetch_region(
+            *bbox, detail_zoom=detail_zoom, max_tiles=max_tiles)
 
     # ------------------------------------------------------------ 轨迹
     def set_tracks(self, tracks, colors: dict | None = None) -> None:

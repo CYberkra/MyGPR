@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import numpy as np
 import pyqtgraph as pg
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QIcon, QPixmap
 from PyQt6.QtWidgets import (QHBoxLayout, QListWidget, QListWidgetItem,
                              QStackedWidget, QVBoxLayout, QWidget)
@@ -156,6 +156,7 @@ class SpatialPage(QWidget):
         self._lines_by_id = {}       # 测线记录（rtk_status 等）
         self._colors = {}            # line_id -> '#rrggbb'
         self._restoring_basemap = False
+        self._last_auto_prefetch_key = None   # 自动预下载去重（包围盒+瓦图源）
 
         self._build_ui()
         self._connect_internal()
@@ -236,7 +237,7 @@ class SpatialPage(QWidget):
             self._basemap_combo.addItem(display, userData=key)
         source_row.addWidget(self._basemap_combo, 1)
         basemap_layout.addLayout(source_row)
-        self._prefetch_btn = PushButton('预下载当前区域', basemap_card, FIF.DOWNLOAD)
+        self._prefetch_btn = PushButton('预下载测线区域', basemap_card, FIF.DOWNLOAD)
         basemap_layout.addWidget(self._prefetch_btn)
         self._prefetch_label = CaptionLabel('', basemap_card)
         self._prefetch_label.setWordWrap(True)
@@ -364,6 +365,8 @@ class SpatialPage(QWidget):
         self._refresh_views()
         self._refresh_crs_card()
         self._refresh_detail()
+        # 轨迹就绪后自动预下载测线所在地理区域（延迟执行，等视图 fit 完成）
+        QTimer.singleShot(800, self._auto_prefetch_tracks)
 
     def set_lines(self, lines: list) -> None:
         """测线记录列表（取 line_id/name/rtk_status 等，鸭子类型）。"""
@@ -472,12 +475,31 @@ class SpatialPage(QWidget):
         sm.save()
 
     def _on_prefetch_clicked(self) -> None:
-        queued = self._map_view.prefetch_current_view(max_extra_zoom=2)
+        # 优先按测线包围盒下载对应地理区域；无已配准轨迹回退当前视野
+        queued = self._map_view.prefetch_tracks()
+        if queued == 0 and self._map_view.tracks_bbox_lonlat() is None:
+            queued = self._map_view.prefetch_current_view(max_extra_zoom=2)
         if queued > 0:
             self._prefetch_label.setText(f'正在下载 {queued} 张瓦片…')
         else:
-            self._prefetch_label.setText('当前区域瓦片已全部缓存')
+            self._prefetch_label.setText('测线区域瓦片已全部缓存')
         self.basemap_prefetch_requested.emit()
+
+    def _auto_prefetch_tracks(self) -> None:
+        """轨迹加载后自动下载测线所在地理区域（按 包围盒+瓦图源 去重）。
+
+        只处理已配准轨迹；未配准（原始坐标）测线不触发下载。
+        """
+        bbox = self._map_view.tracks_bbox_lonlat()
+        if bbox is None:
+            return
+        key = (tuple(round(v, 5) for v in bbox), self._map_view.source_key())
+        if key == self._last_auto_prefetch_key:
+            return
+        self._last_auto_prefetch_key = key
+        queued = self._map_view.prefetch_tracks()
+        if queued > 0:
+            self._prefetch_label.setText(f'自动下载测线区域 {queued} 张瓦片…')
 
     def _on_prefetch_progress(self, done: int, total: int) -> None:
         if total <= 0:
