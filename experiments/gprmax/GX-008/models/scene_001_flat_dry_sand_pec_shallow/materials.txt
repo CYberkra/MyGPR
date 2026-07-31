@@ -1,3 +1,0 @@
-material_name,relative_permittivity,conductivity_s_per_m,role
-dry_sand_like,6.0,0.001,background
-pec,pec,0.0,target

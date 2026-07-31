@@ -5,7 +5,6 @@
 Supports:
 - Standard CSV/TXT B-scan files (with/without header)
 - Folder of A-scan CSV files
-- gprMax .out files and .in configuration files
 - Lightweight native subsets: MALA RD3/RD7, ImpulseRadar IPRB, fixed SEG-Y, ENVI BSQ, NPY/NPZ
 - Recognized vendor formats with explicit conversion guidance: GSSI DZT, Sensors & Software DT1/HD, OKO GPR/GPR2
 
@@ -20,24 +19,11 @@ import json
 import logging
 import os
 import re
-import warnings
 from pathlib import Path
 from typing import Dict, Any
 
 import numpy as np
 
-# Try to import h5py for gprMax .out support
-try:
-    import h5py
-
-    HAS_H5PY = True
-except ImportError:
-    HAS_H5PY = False
-    warnings.warn(
-        "h5py not available. gprMax .out loading disabled.",
-        RuntimeWarning,
-        stacklevel=2,
-    )
 
 logger = logging.getLogger(__name__)
 
@@ -63,9 +49,6 @@ from core.gpr_vendor_readers import (
 )
 
 
-from core.gprmax_input_parser import read_gprmax_in
-
-
 # ============ Auto-detect and Load ============
 
 
@@ -87,10 +70,6 @@ def auto_load_data(path: str, **kwargs) -> Dict[str, Any]:
     suffix = path.suffix.lower()
     spec = get_format_spec(path)
 
-    if suffix == ".out":
-        return read_gprmax_out(str(path))
-    if suffix == ".in":
-        return read_gprmax_in(str(path))
     if suffix in {".csv", ".txt"}:
         data = readcsv(str(path))
         return {
@@ -411,220 +390,6 @@ def _build_airborne_header_summary(metadata: dict[str, np.ndarray]) -> dict[str,
     }
 
 
-def _find_gprmax_input_for_output(out_path: Path) -> Path | None:
-    """Find the most likely .in file that produced a gprMax .out file."""
-    trace_prefix = _gprmax_output_prefix(out_path)
-    candidates = [
-        out_path.with_suffix(".in"),
-        out_path.with_name(out_path.stem.replace("_merged", "") + ".in"),
-        out_path.with_name(trace_prefix + ".in"),
-    ]
-    for candidate in dict.fromkeys(candidates):
-        if candidate.exists():
-            return candidate
-    in_files = sorted(out_path.parent.glob("*.in"))
-    return in_files[0] if in_files else None
-
-
-def _gprmax_output_prefix(out_path: Path) -> str:
-    """Return the shared filename prefix for gprMax per-trace .out files."""
-    stem = out_path.stem
-    if stem.endswith("_merged"):
-        stem = stem[: -len("_merged")]
-    match = re.match(r"^(.*?)(\d+)$", stem)
-    return match.group(1) if match else stem
-
-
-def _gprmax_trace_index(path: Path, prefix: str) -> int | None:
-    """Return the per-trace numeric suffix for a related gprMax .out file."""
-    stem = path.stem
-    if "merged" in stem.lower() or not stem.startswith(prefix):
-        return None
-    suffix = stem[len(prefix) :]
-    if not suffix.isdigit():
-        return None
-    return int(suffix)
-
-
-def _related_gprmax_out_files(out_path: Path) -> list[Path]:
-    """List .out files that belong to the same gprMax B-scan run."""
-    prefix = _gprmax_output_prefix(out_path)
-    related: list[tuple[int, str, Path]] = []
-    for candidate in out_path.parent.glob("*.out"):
-        trace_index = _gprmax_trace_index(candidate, prefix)
-        if trace_index is not None:
-            related.append((trace_index, candidate.name, candidate))
-    if related:
-        return [item[2] for item in sorted(related, key=lambda item: (item[0], item[1]))]
-    if "merged" not in out_path.stem.lower():
-        return [out_path]
-    return []
-
-
-def _find_gprmax_manifest_for_output(out_path: Path) -> Path | None:
-    """Find a manifest JSON near a gprMax output file."""
-    candidates: list[Path] = []
-    for pattern in ("*_manifest.json", "manifest.json", "dataset_manifest.json"):
-        candidates.extend(sorted(out_path.parent.glob(pattern)))
-    unique = list(dict.fromkeys(candidates))
-    if not unique:
-        return None
-
-    matching: list[Path] = []
-    for candidate in unique:
-        try:
-            payload = json.loads(candidate.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError):
-            continue
-        if not isinstance(payload, dict):
-            continue
-        primary = _manifest_path_value(
-            payload,
-            "primary_out_file",
-            "primary_out_path",
-            "out_file",
-            "merged_out_file",
-        )
-        if primary and Path(str(primary)).name == out_path.name:
-            matching.append(candidate)
-    if len(matching) == 1:
-        return matching[0]
-    return unique[0] if len(unique) == 1 else None
-
-
-def _manifest_path_value(payload: dict[str, Any], *keys: str) -> str | None:
-    groups = [
-        payload,
-        payload.get("paths_relative_to_output_dir"),
-        payload.get("paths"),
-        payload.get("files"),
-    ]
-    for group in groups:
-        if not isinstance(group, dict):
-            continue
-        for key in keys:
-            value = group.get(key)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-    return None
-
-
-def _attach_gprmax_ground_truth(
-    header_info: dict[str, Any],
-    out_path: Path,
-) -> dict[str, Any]:
-    """Attach converted gprMax ground truth from a nearby manifest when available."""
-    manifest_path = _find_gprmax_manifest_for_output(out_path)
-    if manifest_path is None:
-        return header_info
-    header = dict(header_info)
-    try:
-        from core.gprmax_ground_truth import load_ground_truth_from_manifest
-
-        samples = int(header.get("a_scan_length", 0) or 0)
-        traces = int(header.get("num_traces", 0) or 0)
-        data_shape = (samples, traces) if samples > 0 and traces > 0 else None
-        ground_truth = load_ground_truth_from_manifest(
-            str(manifest_path),
-            data_shape=data_shape,
-        )
-    except Exception as exc:
-        header["ground_truth_load_error"] = str(exc)
-        header["ground_truth_manifest_path"] = str(manifest_path)
-        return header
-    if ground_truth:
-        header["ground_truth"] = ground_truth
-        header["ground_truth_manifest_path"] = str(manifest_path)
-    return header
-
-
-def _safe_attr_list(value: Any) -> list[float] | None:
-    parsed: list[float] = []
-    try:
-        iterator = iter(value)
-    except TypeError:
-        return None
-    for item in iterator:
-        number = to_float_or_none(item)
-        if number is None:
-            return None
-        parsed.append(number)
-    return parsed
-
-
-def _build_gprmax_trace_metadata(
-    traces: int,
-    gprmax_config: dict[str, Any] | None,
-) -> dict[str, np.ndarray] | None:
-    """Create deterministic per-trace distance metadata from gprMax step commands."""
-    if traces <= 0:
-        return None
-    step = None
-    if gprmax_config:
-        src_steps = gprmax_config.get("src_steps")
-        rx_steps = gprmax_config.get("rx_steps")
-        for steps in (rx_steps, src_steps):
-            if steps and len(steps) >= 1:
-                candidate = to_float(steps[0], default=0.0)
-                if candidate > 0.0:
-                    step = candidate
-                    break
-    if step is None:
-        return None
-    return {
-        "trace_index": np.arange(traces, dtype=np.int32),
-        "trace_distance_m": (np.arange(traces, dtype=np.float32) * np.float32(step)),
-    }
-
-
-def _build_gprmax_header_info(
-    *,
-    out_path: Path,
-    samples: int,
-    traces: int,
-    time_step_s: float | None,
-    total_time_ns: float | None,
-    attrs: dict[str, Any],
-    gprmax_config: dict[str, Any] | None,
-) -> dict[str, Any]:
-    trace_interval_m = 0.0
-    if gprmax_config:
-        for steps in (gprmax_config.get("rx_steps"), gprmax_config.get("src_steps")):
-            if steps and len(steps) >= 1:
-                trace_interval_m = to_float(steps[0], default=0.0)
-                if trace_interval_m > 0.0:
-                    break
-
-    header = {
-        "a_scan_length": int(samples),
-        "num_traces": int(traces),
-        "total_time_ns": to_float(total_time_ns, default=0.0),
-        "time_step_s": time_step_s,
-        "trace_interval_m": trace_interval_m,
-        "source": "gprmax_out",
-        "source_format": "gprmax_out",
-        "out_path": str(out_path),
-    }
-    if "Iterations" in attrs:
-        header["gprmax_iterations"] = to_int(attrs["Iterations"], default=0)
-    if "dt" in attrs:
-        header["gprmax_dt_s"] = to_float(attrs["dt"], default=0.0)
-    if "nx_ny_nz" in attrs:
-        nx_ny_nz = _safe_attr_list(attrs.get("nx_ny_nz"))
-        if nx_ny_nz is not None:
-            header["gprmax_nx_ny_nz"] = nx_ny_nz
-
-    context = DATA_CONTEXT_GPRMAX
-    if gprmax_config and "impulse" in str(gprmax_config.get("waveform") or "").lower():
-        context = DATA_CONTEXT_GPRMAX_IMPULSE
-    return apply_data_context_defaults(
-        header,
-        gprmax_config=gprmax_config,
-        source_path=out_path,
-        context=context,
-    )
-
-
 _ASCAN_NUM_RE = re.compile(r"(\d+)(?=\.csv$)", re.IGNORECASE)
 
 
@@ -771,186 +536,11 @@ load_bscan_csv = readcsv
 load_ascans_folder = read_ascans_folder
 
 
-def read_gprmax_out(out_path: str) -> dict:
-    """读取 gprMax .out HDF5 文件，提取电场数据并组装为 B-scan 矩阵
-
-    Args:
-        out_path: gprMax .out 文件路径
-
-    Returns:
-        dict: {
-            "data": np.ndarray (samples x traces, float32),
-            "num_traces": int,
-            "samples_per_trace": int,
-            "time_step_s": float or None,
-            "total_time_ns": float or None,
-        }
-    """
-    if not HAS_H5PY:
-        raise ImportError(
-            "h5py is required to read gprMax .out files. Install with: pip install h5py"
-        )
-
-    out_path = Path(out_path)
-    if not out_path.exists():
-        raise FileNotFoundError(f"gprMax .out file not found: {out_path}")
-
-    gprmax_config = None
-    in_path = _find_gprmax_input_for_output(out_path)
-    if in_path is not None:
-        try:
-            gprmax_config = read_gprmax_in(str(in_path))
-        except (OSError, UnicodeError, ValueError):
-            gprmax_config = None
-
-    with h5py.File(out_path, "r") as f:
-        # 读取属性
-        attrs = dict(f.attrs)
-        iterations = attrs.get("Iterations", 0)
-        dt = attrs.get("dt", 0)
-
-        # 读取电场数据
-        if "rxs" in f and "rx1" in f["rxs"] and "Ez" in f["rxs"]["rx1"]:
-            data = f["rxs"]["rx1"]["Ez"][:]
-        else:
-            # 文件可能为空（如合并失败的 merged.out）
-            # 尝试降级到读取同目录的单独 .out 文件
-            out_files = _related_gprmax_out_files(out_path)
-            if not out_files:
-                raise ValueError(
-                    f"Cannot find 'rxs/rx1/Ez' in {out_path} and no other .out files found"
-                )
-
-            # 读取第一个文件获取参数
-            with h5py.File(out_files[0], "r") as f0:
-                first_attrs = dict(f0.attrs)
-                iterations = first_attrs.get("Iterations", iterations)
-                dt = first_attrs.get("dt", dt)
-                attrs = first_attrs
-                data0 = f0["rxs"]["rx1"]["Ez"][:]
-
-            # 合并所有文件
-            samples = to_int(iterations, default=int(np.asarray(data0).shape[0]))
-            n_traces = len(out_files)
-            matrix = np.zeros((samples, n_traces), dtype=np.float32)
-            matrix[:, 0] = data0
-
-            for i, out_file in enumerate(out_files[1:], 1):
-                with h5py.File(out_file, "r") as fi:
-                    matrix[:, i] = fi["rxs"]["rx1"]["Ez"][:]
-            data = matrix
-
-    # 处理数据形状
-    # gprMax 输出: (iterations,) - 单道数据
-    # 需要根据文件数量重塑为矩阵
-
-    samples = to_int(iterations, default=int(np.asarray(data).shape[0]))
-
-    # 如果数据是二维的（已合并的 merged.out），直接返回
-    if data.ndim == 2 and data.shape[1] > 1:
-        time_step_value = to_float(dt, default=0.0)
-        time_step_s = time_step_value if time_step_value > 0.0 else None
-        total_time_ns = time_step_s * samples * 1e9 if time_step_s else None
-        header_info = _build_gprmax_header_info(
-            out_path=out_path,
-            samples=data.shape[0],
-            traces=data.shape[1],
-            time_step_s=time_step_s,
-            total_time_ns=total_time_ns,
-            attrs=attrs,
-            gprmax_config=gprmax_config,
-        )
-        header_info = _attach_gprmax_ground_truth(header_info, out_path)
-        trace_metadata = _build_gprmax_trace_metadata(data.shape[1], gprmax_config)
-        return {
-            "data": data.astype(np.float64, copy=False),
-            "num_traces": data.shape[1],
-            "samples_per_trace": data.shape[0],
-            "time_step_s": time_step_s,
-            "total_time_ns": total_time_ns,
-            "header_info": header_info,
-            "trace_metadata": trace_metadata,
-            "gprmax_config": gprmax_config,
-            "in_path": str(in_path) if in_path else None,
-        }
-
-    # 如果数据是一维的，尝试查找同目录的其他 .out 文件
-    if data.ndim == 1:
-        out_files = _related_gprmax_out_files(out_path)
-
-        if len(out_files) > 1:
-            # 多个文件，需要合并
-            n_traces = len(out_files)
-            matrix = np.zeros((samples, n_traces), dtype=np.float32)
-
-            for i, out_file in enumerate(out_files):
-                with h5py.File(out_file, "r") as f:
-                    matrix[:, i] = f["rxs"]["rx1"]["Ez"][:]
-            data = matrix
-        else:
-            # 单道数据，重塑为列向量
-            data = data.reshape(-1, 1)
-
-    # 计算时间参数
-    time_step_value = to_float(dt, default=0.0)
-    time_step_s = time_step_value if time_step_value > 0.0 else None
-    total_time_ns = time_step_s * samples * 1e9 if time_step_s else None
-    traces = data.shape[1] if data.ndim == 2 else 1
-    header_info = _build_gprmax_header_info(
-        out_path=out_path,
-        samples=data.shape[0],
-        traces=traces,
-        time_step_s=time_step_s,
-        total_time_ns=total_time_ns,
-        attrs=attrs,
-        gprmax_config=gprmax_config,
-    )
-    header_info = _attach_gprmax_ground_truth(header_info, out_path)
-    trace_metadata = _build_gprmax_trace_metadata(traces, gprmax_config)
-
-    return {
-        "data": data.astype(np.float32, copy=False),
-        "num_traces": traces,
-        "samples_per_trace": data.shape[0],
-        "time_step_s": time_step_s,
-        "total_time_ns": total_time_ns,
-        "header_info": header_info,
-        "trace_metadata": trace_metadata,
-        "gprmax_config": gprmax_config,
-        "in_path": str(in_path) if in_path else None,
-    }
-
-
-def save_gprmax_out_as_csv(out_path: str, csv_path: str = None) -> str:
-    """将 gprMax .out 文件转换为 CSV 格式
-
-    Args:
-        out_path: gprMax .out 文件路径
-        csv_path: 输出 CSV 路径（可选，默认同目录同名）
-
-    Returns:
-        str: 生成的 CSV 文件路径
-    """
-    result = read_gprmax_out(out_path)
-    data = result["data"]
-
-    if csv_path is None:
-        csv_path = str(Path(out_path).with_suffix(".csv"))
-
-    # 保存为 CSV（无 header）
-    np.savetxt(csv_path, data, delimiter=",", fmt="%.6f")
-
-    return csv_path
-
-
 __all__ = [
     "readcsv",
     "savecsv",
     "save_image",
     "show_image",
-    "read_gprmax_in",
-    "read_gprmax_out",
-    "save_gprmax_out_as_csv",
     "extract_airborne_csv_payload",
     "subset_trace_metadata",
     "compute_trace_distance_m",

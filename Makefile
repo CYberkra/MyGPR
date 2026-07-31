@@ -6,8 +6,7 @@ test:
 	$(PYTHON) -m pytest -q
 
 smoke:
-	$(PYTHON) backend_smoke.py
-	$(PYTHON) backend_project_smoke.py
+	$(PYTHON) app_qt.py --smoke
 
 compile:
 	$(PYTHON) scripts/check_python_compile.py

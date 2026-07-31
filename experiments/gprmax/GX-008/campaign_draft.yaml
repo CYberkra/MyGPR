@@ -1,8 +1,0 @@
-schema: mygpr_gprmax_campaign_v1
-campaign_id: GX-008
-status: read_only_fixture
-scenes:
-  - scene_id: scene_001_flat_dry_sand_pec_shallow
-    expected_num_runs: 41
-  - scene_id: scene_003_flat_dry_sand_pvc_shallow
-    expected_num_runs: 41
