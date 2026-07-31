@@ -1,0 +1,494 @@
+# -*- coding: utf-8 -*-
+"""SpatialPage — 空间信息页（在线地图底图 + 高程剖面 + 三维轨迹）。
+
+三栏 QHBoxLayout（模式照抄 processing_page）：
+- 左栏 ScrollArea 固定 320px（可折叠）：卡片"测线"（多选勾选列表 + 颜色块）、
+  卡片"底图"（瓦图源 ComboBox + 预下载按钮 + 进度）、卡片"投影信息"
+- 中栏 stretch：SegmentedWidget 切换"平面地图 / 高程剖面 / 三维视图"
+  + QStackedWidget（MapView / 高程剖面 PlotWidget / Trajectory3DView）
+- 右栏 ScrollArea 固定 340px（可折叠）：卡片"测线详情" + "设为当前测线"
+
+页面纯展示 + 发信号，不直接调 controller/backend。
+"""
+from __future__ import annotations
+
+import numpy as np
+import pyqtgraph as pg
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QIcon, QPixmap
+from PyQt6.QtWidgets import (QHBoxLayout, QListWidget, QListWidgetItem,
+                             QStackedWidget, QVBoxLayout, QWidget)
+from qfluentwidgets import (CaptionLabel, CardWidget, ComboBox,
+                            PrimaryPushButton, PushButton, ScrollArea,
+                            SegmentedWidget, SubtitleLabel)
+from qfluentwidgets import FluentIcon as FIF
+
+from ui import constants
+from ui.settings_manager import SettingsManager
+from ui.widgets.collapsible_panel import CollapsiblePanel
+from ui.widgets.map_tiles import DEFAULT_TILE_SOURCE, TILE_SOURCES
+from ui.widgets.map_view import MapView
+from ui.widgets.trajectory_3d_view import Trajectory3DView
+
+# 中栏分段（SegmentedWidget routeKey）
+_SEG_MAP = 'planMap'
+_SEG_PROFILE = 'elevationProfile'
+_SEG_3D = 'trajectory3d'
+
+# 测线颜色循环（matplotlib tab10）
+_TRACK_COLORS = ('#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+                 '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf')
+
+
+def _page_title(text: str) -> SubtitleLabel:
+    """页面标题：SubtitleLabel 微软雅黑 12pt Bold 居中（SPEC §1）。"""
+    label = SubtitleLabel(text)
+    label.setFont(QFont(constants.FONT_FAMILY, 12, QFont.Weight.Bold))
+    label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    return label
+
+
+def _card_title(text: str) -> SubtitleLabel:
+    """卡片标题：SubtitleLabel 微软雅黑 10pt Bold（SPEC §1）。"""
+    label = SubtitleLabel(text)
+    label.setFont(QFont(constants.FONT_FAMILY, 10, QFont.Weight.Bold))
+    return label
+
+
+def _make_card(title: str) -> tuple:
+    """卡片范式：CardWidget + QVBoxLayout，首行卡片标题。返回 (card, layout)。"""
+    card = CardWidget()
+    layout = QVBoxLayout(card)
+    layout.setContentsMargins(*constants.CARD_MARGINS)
+    layout.setSpacing(constants.CARD_SPACING)
+    layout.addWidget(_card_title(title))
+    return card, layout
+
+
+def _make_scroll_column(width: int) -> tuple:
+    """固定宽滚动栏：ScrollArea(固定 width) + 内容 widget + QVBoxLayout。
+    返回 (scroll_area, content_layout)。"""
+    scroll = ScrollArea()
+    scroll.setFixedWidth(width)
+    scroll.setWidgetResizable(True)
+    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    scroll.setStyleSheet(
+        'QScrollArea { background-color: transparent; border: none; }')
+    content = QWidget(scroll)
+    content.setFixedWidth(width - 16)
+    content.setObjectName('pageScrollContent')
+    content.setStyleSheet(
+        'QWidget#pageScrollContent { background-color: transparent; }')
+    layout = QVBoxLayout(content)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(constants.PAGE_SPACING)
+    scroll.setWidget(content)
+    return scroll, layout
+
+
+def _color_icon(hex_color: str) -> QIcon:
+    """12×12 纯色块图标（测线列表颜色标识）。"""
+    pixmap = QPixmap(12, 12)
+    pixmap.fill(QColor(hex_color))
+    return QIcon(pixmap)
+
+
+class ElevationProfileView(pg.PlotWidget):
+    """高程剖面：选中测线的里程-高程曲线（里程由相邻点距离累积）。"""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._plot_item = self.getPlotItem()
+        self._plot_item.setLabel('bottom', '里程', units='m')
+        self._plot_item.setLabel('left', '高程', units='m')
+        self._plot_item.showGrid(x=True, y=True, alpha=0.3)
+        from qfluentwidgets import isDarkTheme
+        self.apply_theme(isDarkTheme())
+
+    def set_tracks(self, tracks, colors: dict) -> None:
+        """重绘选中测线的里程-高程曲线。"""
+        self._plot_item.clear()
+        legend = self._plot_item.legend
+        if legend is not None:
+            legend.clear()
+        else:
+            legend = self._plot_item.addLegend(offset=(8, 8))
+        colors = dict(colors or {})
+        for track in tracks or []:
+            points = list(getattr(track, 'points', ()) or ())
+            if len(points) < 2:
+                continue
+            xs = np.asarray([float(getattr(p, 'x', 0.0)) for p in points])
+            ys = np.asarray([float(getattr(p, 'y', 0.0)) for p in points])
+            zs = np.asarray([float(getattr(p, 'elevation_m', 0.0)) for p in points])
+            finite = np.isfinite(xs) & np.isfinite(ys) & np.isfinite(zs)
+            if np.count_nonzero(finite) < 2:
+                continue
+            steps = np.hypot(np.diff(xs[finite]), np.diff(ys[finite]))
+            mileage = np.concatenate(([0.0], np.cumsum(steps)))
+            line_id = str(getattr(track, 'line_id', '') or '')
+            name = str(getattr(track, 'name', '') or line_id)
+            pen = pg.mkPen(QColor(colors.get(line_id, '#1f77b4')), width=2)
+            self._plot_item.plot(mileage, zs[finite], pen=pen, name=name)
+
+    def apply_theme(self, dark: bool) -> None:
+        """深色 bg 'k'/文字 'w'；浅色 bg 'w'/文字 'k'；轴 pen/textPen 同步。"""
+        bg = 'k' if dark else 'w'
+        fg = 'w' if dark else 'k'
+        self.setBackground(bg)
+        pen = pg.mkPen(QColor(fg))
+        for name in ('bottom', 'left'):
+            axis = self._plot_item.getAxis(name)
+            axis.setPen(pen)
+            axis.setTextPen(pen)
+
+
+class SpatialPage(QWidget):
+    """空间信息页面。"""
+
+    current_line_requested = pyqtSignal(str)    # 设为当前测线（line_id）
+    basemap_prefetch_requested = pyqtSignal()   # 预下载当前区域（页面内部已处理，供外部观测）
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._tracks = []            # 全量 SpatialTrack
+        self._tracks_by_id = {}
+        self._lines_by_id = {}       # 测线记录（rtk_status 等）
+        self._colors = {}            # line_id -> '#rrggbb'
+        self._restoring_basemap = False
+
+        self._build_ui()
+        self._connect_internal()
+        self._restore_state()
+
+    # ============================================================ 面板状态
+    def panel_states(self) -> dict:
+        return {
+            'left': self._left_panel.is_collapsed(),
+            'right': self._right_panel.is_collapsed(),
+        }
+
+    def set_panel_collapsed(self, *, left: bool = None, right: bool = None,
+                            animate: bool = True) -> None:
+        if left is not None:
+            self._left_panel.set_collapsed(bool(left), animate=animate)
+        if right is not None:
+            self._right_panel.set_collapsed(bool(right), animate=animate)
+
+    def _restore_state(self) -> None:
+        """恢复折叠状态 + 底图源选择。"""
+        sm = SettingsManager()
+        self._left_panel.set_collapsed(
+            bool(sm.get('spatial_left_collapsed', False)), animate=False)
+        self._right_panel.set_collapsed(
+            bool(sm.get('spatial_right_collapsed', False)), animate=False)
+        source = str(sm.get('spatial_basemap_source', DEFAULT_TILE_SOURCE))
+        if source not in TILE_SOURCES:
+            source = DEFAULT_TILE_SOURCE
+        self._restoring_basemap = True
+        try:
+            index = self._basemap_combo.findData(source)
+            if index >= 0:
+                self._basemap_combo.setCurrentIndex(index)
+            self._map_view.set_source(source)
+        finally:
+            self._restoring_basemap = False
+
+    def _save_panel_state(self) -> None:
+        sm = SettingsManager()
+        sm.set('spatial_left_collapsed', self._left_panel.is_collapsed())
+        sm.set('spatial_right_collapsed', self._right_panel.is_collapsed())
+        sm.save()
+
+    # ============================================================ UI 构建
+    def _build_ui(self) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(*constants.PAGE_MARGINS)
+        root.setSpacing(constants.PAGE_SPACING)
+        root.addWidget(_page_title('空间信息'))
+
+        columns = QHBoxLayout()
+        columns.setSpacing(constants.PAGE_SPACING)
+        root.addLayout(columns, 1)
+
+        # ---------------- 左栏（展开 320px，可折叠）
+        left_scroll, left_layout = _make_scroll_column(320)
+        left_panel = CollapsiblePanel(
+            'left', expand_width=320, collapse_width=40, parent=self)
+        left_panel.set_content_widget(left_scroll)
+        columns.addWidget(left_panel)
+        self._left_panel = left_panel
+
+        lines_card, lines_layout = _make_card('测线')
+        self._line_list = QListWidget(lines_card)
+        self._line_list.setMinimumHeight(180)
+        lines_layout.addWidget(self._line_list, 1)
+        left_layout.addWidget(lines_card, 1)
+
+        basemap_card, basemap_layout = _make_card('底图')
+        source_row = QHBoxLayout()
+        source_row.setSpacing(constants.CARD_SPACING)
+        source_label = CaptionLabel('来源:', basemap_card)
+        source_label.setMinimumWidth(40)
+        source_row.addWidget(source_label)
+        self._basemap_combo = ComboBox(basemap_card)
+        for key, (display, _url) in TILE_SOURCES.items():
+            self._basemap_combo.addItem(display, userData=key)
+        source_row.addWidget(self._basemap_combo, 1)
+        basemap_layout.addLayout(source_row)
+        self._prefetch_btn = PushButton('预下载当前区域', basemap_card, FIF.DOWNLOAD)
+        basemap_layout.addWidget(self._prefetch_btn)
+        self._prefetch_label = CaptionLabel('', basemap_card)
+        self._prefetch_label.setWordWrap(True)
+        basemap_layout.addWidget(self._prefetch_label)
+        left_layout.addWidget(basemap_card)
+
+        crs_card, crs_layout = _make_card('投影信息')
+        self._crs_label = CaptionLabel('暂无轨迹数据', crs_card)
+        self._crs_label.setWordWrap(True)
+        crs_layout.addWidget(self._crs_label)
+        left_layout.addWidget(crs_card)
+        left_layout.addStretch(1)
+
+        # ---------------- 中栏（stretch）
+        middle = QWidget(self)
+        middle_layout = QVBoxLayout(middle)
+        middle_layout.setContentsMargins(0, 0, 0, 0)
+        middle_layout.setSpacing(constants.PAGE_SPACING)
+        columns.addWidget(middle, 1)
+
+        view_card, view_layout = _make_card('空间视图')
+        seg_row = QHBoxLayout()
+        seg_row.setSpacing(constants.CARD_SPACING)
+        self._view_segment = SegmentedWidget(view_card)
+        self._view_segment.addItem(
+            _SEG_MAP, '平面地图', onClick=lambda: self._switch_view(_SEG_MAP))
+        self._view_segment.addItem(
+            _SEG_PROFILE, '高程剖面', onClick=lambda: self._switch_view(_SEG_PROFILE))
+        self._view_segment.addItem(
+            _SEG_3D, '三维视图', onClick=lambda: self._switch_view(_SEG_3D))
+        self._view_segment.setCurrentItem(_SEG_MAP)
+        seg_row.addWidget(self._view_segment)
+        seg_row.addStretch(1)
+        view_layout.addLayout(seg_row)
+
+        self._view_stack = QStackedWidget(view_card)
+        self._map_view = MapView(view_card)
+        self._map_view.setMinimumHeight(300)
+        self._profile_view = ElevationProfileView(view_card)
+        self._profile_view.setMinimumHeight(300)
+        self._3d_view = Trajectory3DView(view_card)
+        self._3d_view.setMinimumHeight(300)
+        self._view_stack.addWidget(self._map_view)
+        self._view_stack.addWidget(self._profile_view)
+        self._view_stack.addWidget(self._3d_view)
+        view_layout.addWidget(self._view_stack, 1)
+        middle_layout.addWidget(view_card, 1)
+
+        # ---------------- 右栏（展开 340px，可折叠）
+        right_scroll, right_layout = _make_scroll_column(340)
+        right_panel = CollapsiblePanel(
+            'right', expand_width=340, collapse_width=40, parent=self)
+        right_panel.set_content_widget(right_scroll)
+        columns.addWidget(right_panel)
+        self._right_panel = right_panel
+
+        detail_card, detail_layout = _make_card('测线详情')
+        self._detail_labels = {}
+        for key, title in (('name', '名称'), ('traces', '道数'),
+                           ('elevation', '高程范围'), ('rtk', 'RTK状态'),
+                           ('crs', '坐标系')):
+            row = QHBoxLayout()
+            row.setSpacing(constants.CARD_SPACING)
+            title_label = CaptionLabel(f'{title}:', detail_card)
+            title_label.setMinimumWidth(70)
+            row.addWidget(title_label)
+            value_label = CaptionLabel('--', detail_card)
+            value_label.setWordWrap(True)
+            row.addWidget(value_label, 1)
+            detail_layout.addLayout(row)
+            self._detail_labels[key] = value_label
+        self._set_current_btn = PrimaryPushButton(
+            '设为当前测线', detail_card, FIF.ACCEPT)
+        self._set_current_btn.setEnabled(False)
+        detail_layout.addWidget(self._set_current_btn)
+        right_layout.addWidget(detail_card)
+        right_layout.addStretch(1)
+
+    # ============================================================ 内部接线
+    def _connect_internal(self) -> None:
+        self._line_list.itemChanged.connect(self._on_line_check_changed)
+        self._line_list.currentItemChanged.connect(self._on_line_selected)
+        self._basemap_combo.currentIndexChanged.connect(self._on_basemap_changed)
+        self._prefetch_btn.clicked.connect(self._on_prefetch_clicked)
+        self._map_view.prefetch_progress.connect(self._on_prefetch_progress)
+        self._set_current_btn.clicked.connect(self._on_set_current_clicked)
+        self._left_panel.sig_collapsed.connect(self._save_panel_state)
+        self._right_panel.sig_collapsed.connect(self._save_panel_state)
+
+    # ============================================================ 公共接口（供主窗口接线）
+    def set_tracks(self, tracks: list) -> None:
+        """空间轨迹列表（SpatialTrack，鸭子类型取属性）。"""
+        self._tracks = list(tracks or [])
+        self._tracks_by_id = {}
+        self._colors = {}
+        for index, track in enumerate(self._tracks):
+            line_id = str(getattr(track, 'line_id', '') or '')
+            if not line_id:
+                continue
+            self._tracks_by_id[line_id] = track
+            self._colors[line_id] = _TRACK_COLORS[index % len(_TRACK_COLORS)]
+
+        # 重建勾选列表（默认全选，保持已有勾选状态）
+        previous_checked = {}
+        for row in range(self._line_list.count()):
+            item = self._line_list.item(row)
+            previous_checked[str(item.data(Qt.ItemDataRole.UserRole) or '')] = (
+                item.checkState() == Qt.CheckState.Checked)
+        self._line_list.blockSignals(True)
+        self._line_list.clear()
+        for track in self._tracks:
+            line_id = str(getattr(track, 'line_id', '') or '')
+            if not line_id:
+                continue
+            name = str(getattr(track, 'name', '') or line_id)
+            item = QListWidgetItem(_color_icon(self._colors[line_id]), name)
+            item.setData(Qt.ItemDataRole.UserRole, line_id)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            checked = previous_checked.get(line_id, True)
+            item.setCheckState(
+                Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
+            self._line_list.addItem(item)
+        self._line_list.blockSignals(False)
+
+        self._refresh_views()
+        self._refresh_crs_card()
+        self._refresh_detail()
+
+    def set_lines(self, lines: list) -> None:
+        """测线记录列表（取 line_id/name/rtk_status 等，鸭子类型）。"""
+        self._lines_by_id = {}
+        for line in lines or []:
+            line_id = str(getattr(line, 'line_id', '') or '')
+            if line_id:
+                self._lines_by_id[line_id] = line
+        self._refresh_detail()
+
+    def apply_theme(self, dark: bool) -> None:
+        """主题切换转发：地图 / 剖面 / 三维视图。"""
+        self._map_view.apply_theme(dark)
+        self._profile_view.apply_theme(dark)
+        self._3d_view.apply_theme(dark)
+
+    # ============================================================ 内部逻辑
+    def _selected_line_id(self) -> str:
+        item = self._line_list.currentItem()
+        return str(item.data(Qt.ItemDataRole.UserRole) or '') if item else ''
+
+    def _checked_tracks(self) -> list:
+        """勾选中的测线轨迹（保持 set_tracks 顺序）。"""
+        checked = set()
+        for row in range(self._line_list.count()):
+            item = self._line_list.item(row)
+            if item.checkState() == Qt.CheckState.Checked:
+                checked.add(str(item.data(Qt.ItemDataRole.UserRole) or ''))
+        return [track for track in self._tracks
+                if str(getattr(track, 'line_id', '') or '') in checked]
+
+    def _switch_view(self, route_key: str) -> None:
+        widget = {_SEG_MAP: self._map_view, _SEG_PROFILE: self._profile_view,
+                  _SEG_3D: self._3d_view}.get(route_key, self._map_view)
+        self._view_stack.setCurrentWidget(widget)
+
+    def _refresh_views(self) -> None:
+        """勾选集合变化 → 三个视图同步重绘。"""
+        tracks = self._checked_tracks()
+        self._map_view.set_tracks(tracks, self._colors)
+        self._profile_view.set_tracks(tracks, self._colors)
+        self._3d_view.set_tracks(tracks, self._colors)
+
+    def _refresh_crs_card(self) -> None:
+        """投影信息卡：坐标系 / EPSG / 数据来源（按轨迹摘要汇总）。"""
+        summaries = self._map_view.track_summaries()
+        if not summaries:
+            self._crs_label.setText('暂无轨迹数据')
+            return
+        lines = []
+        for info in summaries:
+            crs = info.get('crs') or '未标注'
+            epsg = info.get('epsg')
+            epsg_text = f'EPSG:{epsg}' if epsg is not None else 'EPSG 未识别'
+            mapped_text = '已配准底图' if info.get('mapped') else '原始坐标（未配准底图）'
+            source = info.get('source') or '未知来源'
+            lines.append(
+                f"{info.get('name') or info.get('line_id')}: {crs}（{epsg_text}，"
+                f'{mapped_text}，{source}）')
+        self._crs_label.setText('\n'.join(lines))
+
+    def _refresh_detail(self) -> None:
+        """测线详情卡：名称 / 道数 / 高程范围 / RTK状态 / 坐标系。"""
+        line_id = self._selected_line_id()
+        track = self._tracks_by_id.get(line_id)
+        line = self._lines_by_id.get(line_id)
+        labels = self._detail_labels
+        if track is None and line is None:
+            for label in labels.values():
+                label.setText('--')
+            self._set_current_btn.setEnabled(False)
+            return
+        name = str(getattr(track, 'name', '') or getattr(line, 'name', '') or line_id)
+        points = list(getattr(track, 'points', ()) or ()) if track is not None else []
+        trace_count = int(getattr(line, 'trace_count', 0) or 0) if line is not None else 0
+        traces_text = str(trace_count or len(points) or '--')
+        elevations = [float(getattr(p, 'elevation_m', 0.0))
+                      for p in points if np.isfinite(float(getattr(p, 'elevation_m', 0.0)))]
+        if elevations:
+            elevation_text = f'{min(elevations):.2f} ~ {max(elevations):.2f} m'
+        else:
+            elevation_text = '--'
+        rtk = str(getattr(line, 'rtk_status', '') or '--') if line is not None else '--'
+        crs = str(getattr(track, 'coordinate_system', '') or '--') if track is not None else '--'
+        labels['name'].setText(name)
+        labels['traces'].setText(traces_text)
+        labels['elevation'].setText(elevation_text)
+        labels['rtk'].setText(rtk)
+        labels['crs'].setText(crs)
+        self._set_current_btn.setEnabled(bool(line_id))
+
+    # ---------------- 槽
+    def _on_line_check_changed(self, _item) -> None:
+        self._refresh_views()
+
+    def _on_line_selected(self, _current, _previous=None) -> None:
+        self._refresh_detail()
+
+    def _on_basemap_changed(self, index: int) -> None:
+        if self._restoring_basemap:
+            return
+        source = str(self._basemap_combo.itemData(index) or DEFAULT_TILE_SOURCE)
+        self._map_view.set_source(source)
+        sm = SettingsManager()
+        sm.set('spatial_basemap_source', source)
+        sm.save()
+
+    def _on_prefetch_clicked(self) -> None:
+        queued = self._map_view.prefetch_current_view(max_extra_zoom=2)
+        if queued > 0:
+            self._prefetch_label.setText(f'正在下载 {queued} 张瓦片…')
+        else:
+            self._prefetch_label.setText('当前区域瓦片已全部缓存')
+        self.basemap_prefetch_requested.emit()
+
+    def _on_prefetch_progress(self, done: int, total: int) -> None:
+        if total <= 0:
+            return
+        done = min(int(done), int(total))
+        if done >= total:
+            self._prefetch_label.setText(f'预下载完成：{total} 张瓦片')
+        else:
+            self._prefetch_label.setText(f'正在下载 {done}/{total} 张瓦片…')
+
+    def _on_set_current_clicked(self) -> None:
+        line_id = self._selected_line_id()
+        if line_id:
+            self.current_line_requested.emit(line_id)

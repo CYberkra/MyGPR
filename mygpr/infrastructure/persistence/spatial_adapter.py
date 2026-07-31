@@ -43,6 +43,10 @@ class SpatialPersistenceMixin:
                 crs = "EPSG:4326"
             z = first("local_z_m", "elevation_m", "altitude_m", "height_m", "z")
             if x is None or y is None:
+                # CSV 导入的测线 trace metadata 常无坐标键，回退到轨迹文件
+                track = self._spatial_track_from_trajectory(line, coordinate_system)
+                if track is not None:
+                    tracks.append(track)
                 continue
             if z is None:
                 z = np.zeros_like(x)
@@ -54,6 +58,29 @@ class SpatialPersistenceMixin:
             )
             tracks.append(SpatialTrack(line.line_id, line.name, points, crs, source))
         return tuple(tracks)
+
+    def _spatial_track_from_trajectory(self, line, coordinate_system: str) -> SpatialTrack | None:
+        """轨迹文件回退：store.load_trajectory(line_id) → SpatialTrack。
+
+        x/y/z 与 coordinate_system 照抄 TrajectoryModel（投影米坐标）；
+        无轨迹文件或全部坐标非有限值时返回 None。
+        """
+        try:
+            trajectory = self._store.load_trajectory(line.line_id)
+        except Exception:  # noqa: BLE001 - 无轨迹文件等 → 该测线无空间轨迹
+            return None
+        points = tuple(
+            SpatialTrackPoint(
+                int(point.trace_index) if point.trace_index >= 0 else index,
+                float(point.x), float(point.y), float(point.z))
+            for index, point in enumerate(trajectory.points)
+            if np.isfinite(point.x) and np.isfinite(point.y)
+        )
+        if not points:
+            return None
+        crs = next((str(p.coordinate_system) for p in trajectory.points
+                    if p.coordinate_system), coordinate_system)
+        return SpatialTrack(line.line_id, line.name, points, crs, "trajectory file")
 
     def list_spatial_results(self) -> Sequence[SpatialResult]:
         with self._lock:

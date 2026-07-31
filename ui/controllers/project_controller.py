@@ -35,6 +35,7 @@ class ProjectController(QObject):
     artifact_preview_ready = pyqtSignal(str, object)  # artifact_id, PreviewBundle
     preflight_ready = pyqtSignal(object)         # ImportPreflight
     preflight_failed = pyqtSignal(str)
+    spatial_tracks_ready = pyqtSignal(list)      # list[SpatialTrack]
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -202,6 +203,27 @@ class ProjectController(QObject):
                 self.artifacts_updated.emit(line_id, artifacts)
 
         run_worker(runner, name="mygpr-artifacts-refresh")
+
+    # ------------------------------------------------------------------
+    def load_spatial_tracks(self) -> None:
+        """加载当前项目的空间轨迹（backend.spatial.load_tracks），供空间信息页。"""
+        backend = self._backend()
+        project_id = self.current_project_id
+        if backend is None:
+            return
+        if project_id is None:
+            self.spatial_tracks_ready.emit([])
+            return
+
+        def runner() -> None:
+            try:
+                tracks = list(backend.spatial.load_tracks(project_id))
+            except Exception as exc:  # noqa: BLE001
+                self.log_message.emit(f"加载空间轨迹失败：{friendly_error_message(exc)}")
+            else:
+                self.spatial_tracks_ready.emit(tracks)
+
+        run_worker(runner, name="mygpr-spatial-tracks")
 
     # ------------------------------------------------------------------
     def preview_line(self, line_id: str) -> None:

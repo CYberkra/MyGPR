@@ -46,6 +46,7 @@ HomePage = _import_page_class('ui.pages.home_page', 'HomePage')
 ProjectPage = _import_page_class('ui.pages.project_page', 'ProjectPage')
 ProcessingPage = _import_page_class('ui.pages.processing_page', 'ProcessingPage')
 InterpretationPage = _import_page_class('ui.pages.interpretation_page', 'InterpretationPage')
+SpatialPage = _import_page_class('ui.pages.spatial_page', 'SpatialPage')
 DeliveryPage = _import_page_class('ui.pages.delivery_page', 'DeliveryPage')
 JobsPage = _import_page_class('ui.pages.jobs_page', 'JobsPage')
 SettingsPage = _import_page_class('ui.pages.settings_page', 'SettingsPage')
@@ -255,6 +256,8 @@ class MyGPRMainWindow(FluentWindow):
              NavigationItemPosition.TOP),
             ('interpretationInterface', InterpretationPage, FIF.EDIT, '解释',
              NavigationItemPosition.TOP),
+            ('spatialInterface', SpatialPage, FIF.GLOBE, '空间信息',
+             NavigationItemPosition.TOP),
             ('deliveryInterface', DeliveryPage, FIF.SEND, '成果', NavigationItemPosition.TOP),
             ('jobsInterface', JobsPage, FIF.SYNC, '任务', NavigationItemPosition.TOP),
             ('settingsInterface', SettingsPage, FIF.SETTING, '设置',
@@ -306,6 +309,7 @@ class MyGPRMainWindow(FluentWindow):
         project = self._page('projectInterface')
         processing = self._page('processingInterface')
         interpretation = self._page('interpretationInterface')
+        spatial = self._page('spatialInterface')
         delivery = self._page('deliveryInterface')
         jobs = self._page('jobsInterface')
         settings_page = self._page('settingsInterface')
@@ -365,6 +369,10 @@ class MyGPRMainWindow(FluentWindow):
                 interpretation.redo_requested.connect(self.interpretation_controller.redo)
                 interpretation.save_requested.connect(self.interpretation_controller.save)
 
+        # ---------------- 空间信息页
+        if hasattr(spatial, 'current_line_requested'):
+            spatial.current_line_requested.connect(self._on_spatial_current_line)
+
         # ---------------- 成果页（SPEC §6.7）
         if hasattr(delivery, 'spatial_requested'):
             delivery.spatial_requested.connect(self._on_spatial_requested)
@@ -397,6 +405,8 @@ class MyGPRMainWindow(FluentWindow):
             pc.artifact_preview_ready.connect(self._on_artifact_preview)
             pc.preflight_ready.connect(self._on_preflight_ready)
             pc.preflight_failed.connect(self._on_preflight_failed)
+            if hasattr(spatial, 'set_tracks') and hasattr(pc, 'spatial_tracks_ready'):
+                pc.spatial_tracks_ready.connect(spatial.set_tracks)
             if hasattr(project, 'set_busy'):
                 pc.busy_changed.connect(project.set_busy)
 
@@ -716,6 +726,10 @@ class MyGPRMainWindow(FluentWindow):
         project_id = self._current_project_id()
         if project_id and self.delivery_controller is not None:
             self.delivery_controller.refresh_spatial(project_id)
+        # 空间信息页：项目打开后加载空间轨迹
+        if self.project_controller is not None and hasattr(
+                self.project_controller, 'load_spatial_tracks'):
+            self.project_controller.load_spatial_tracks()
         name = getattr(summary, 'name', '')
         self._infobar('success', '项目', f'项目已打开：{name}')
         self.log_message(f'SUCCESS 当前项目：{name}（{root}）')
@@ -747,6 +761,10 @@ class MyGPRMainWindow(FluentWindow):
         if hasattr(delivery, 'set_lines'):
             delivery.set_lines([])
             delivery.set_spatial_results([])
+        spatial = self._page('spatialInterface')
+        if hasattr(spatial, 'set_tracks'):
+            spatial.set_tracks([])
+            spatial.set_lines([])
         self.log_message('INFO 项目已关闭，相关页面恢复未打开项目状态')
 
     def _on_open_failed(self, message: str) -> None:
@@ -763,14 +781,21 @@ class MyGPRMainWindow(FluentWindow):
             interpretation.set_line_label(self._current_line_id)
 
     def _on_lines_updated(self, lines: list) -> None:
-        """lines_updated → 项目页测线表（自动选中首行）+ 成果页测线多选。"""
+        """lines_updated → 项目页测线表（自动选中首行）+ 成果页/空间页测线多选。"""
         lines = list(lines or [])
         project = self._page('projectInterface')
         delivery = self._page('deliveryInterface')
+        spatial = self._page('spatialInterface')
         if hasattr(project, 'set_lines'):
             project.set_lines(lines)   # 非空时自动选中首行 → line_selected
         if hasattr(delivery, 'set_lines'):
             delivery.set_lines(lines)
+        if hasattr(spatial, 'set_lines'):
+            spatial.set_lines(lines)
+        # 测线集合变化后空间轨迹同步重载（导入/同步完成均触发 lines_updated）
+        if self.project_controller is not None and hasattr(
+                self.project_controller, 'load_spatial_tracks'):
+            self.project_controller.load_spatial_tracks()
         valid_ids = [str(getattr(line, 'line_id', '') or '') for line in lines]
         if self._current_line_id not in valid_ids:
             self._current_line_id = valid_ids[0] if valid_ids else ''
@@ -789,6 +814,14 @@ class MyGPRMainWindow(FluentWindow):
         if self.project_controller is not None:
             self.project_controller.preview_line(line_id)
             self.project_controller.refresh_artifacts(line_id)
+
+    def _on_spatial_current_line(self, line_id: str) -> None:
+        """空间信息页"设为当前测线" → 复用测线选择逻辑 + InfoBar 提示。"""
+        line_id = str(line_id or '')
+        if not line_id or line_id == self._current_line_id:
+            return
+        self._on_line_selected(line_id)
+        self._infobar('success', '空间信息', f'已设为当前测线：{line_id}')
 
     def _on_artifacts_updated(self, line_id: str, artifacts: list) -> None:
         """artifacts_updated → 项目页成果表；处理完成后自动预览最新成果。"""
