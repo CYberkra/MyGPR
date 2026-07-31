@@ -1,6 +1,6 @@
 {
   "schema": "mygpr.backend_source_manifest.v1",
-  "version": "0.9.36",
+  "version": "0.9.37",
   "required_files": [
     "VERSION",
     "pyproject.toml",

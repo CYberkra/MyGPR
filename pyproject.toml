@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mygpr-backend"
-version = "0.9.36"
+version = "0.9.37"
 description = "MyGPR headless backend, algorithms, storage, processing, interpretation and GIS services"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 license = {text = "Proprietary"}
-authors = [{name = "MyGPR Project"}]
+authors = [{name = "邸建豪"}, {name = "袁林"}, {name = "詹萍"}]
 dependencies = [
   "numpy==2.5.1",
   "pandas==2.3.3",

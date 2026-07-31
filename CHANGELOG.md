@@ -1,3 +1,15 @@
+## 0.9.37 Qt UI Overhaul & Windows Theme Fixes（2026-07-31）
+
+- Fixed light/dark theme rendering on Win11 dark-mode systems: disabled Mica
+  backdrop (light Mica leaves title/navigation bar transparent on 24H2),
+  forced Fusion style, opted out Qt auto dark mode (windows:darkmode=0),
+  and applied explicit per-theme palette + QSS for native item views.
+- Added spatial info page with tiled online basemap (OpenStreetMap) and
+  3D trajectory view; trajectory falls back to CSV-derived tracks.
+- Fixed processing page column widths, fold-button affordance, B-Scan axis
+  theming, and project page preview clipping.
+- About card: authors 邸建豪 袁林 詹萍.
+
 ## 0.9.36 Interpretation Lab Migration（2026-07-25）
 
 - Added reversible interpretation editing sessions with assisted whole-line/interval tracing, signal snapping, smoothing, vertical shift, metadata and uncertainty bands.

@@ -25,8 +25,8 @@ from qfluentwidgets import (
 
 from ui import constants
 
-_FALLBACK_VERSION = '0.9.36'
-_AUTHOR = 'MyGPR 开发团队'
+_FALLBACK_VERSION = '0.9.37'
+_AUTHOR = '邸建豪 袁林 詹萍'
 _COPYRIGHT = '© 2025 MyGPR 保留所有权利'
 
 
