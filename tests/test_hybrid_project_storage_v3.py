@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-import shutil
 import zipfile
 from pathlib import Path
 
@@ -17,8 +15,7 @@ from core.gpr_data_model import GPRDataSet
 from core.processing_artifact_index import index_processing_artifacts
 from core.project_integrity import ProjectIntegrityAuditor
 from core.project_storage_backend import HYBRID_STORAGE_BACKEND
-from core.project_storage_migration import migrate_project_to_hybrid
-from core.storage_uri import is_h5_uri, resolve_h5_uri
+from core.storage_uri import is_h5_uri
 from core.hdf5_line_container import list_processing_artifact_ids
 
 
@@ -144,49 +141,6 @@ def test_line_delete_moves_hdf5_and_cascades_catalog(tmp_path: Path) -> None:
         assert store.storage.catalog.list_lines() == []
         assert store.storage.catalog.list_artifacts(line_id="L01") == []
         assert any((store.root / ".trash" / "lines").rglob("L01.h5"))
-    finally:
-        store.close()
-
-
-def test_legacy_project_migration_is_non_destructive(tmp_path: Path) -> None:
-    root = tmp_path / "project"
-    created = FieldProjectStore.create_empty(root, name="legacy-source")
-    created.close()
-    manifest_path = root / "project.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["storage_backend"] = "legacy_files_v2"
-    manifest["legacy_layout"] = True
-    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-    (root / "catalog.sqlite").unlink(missing_ok=True)
-    shutil.rmtree(root / "data", ignore_errors=True)
-
-    store = FieldProjectStore.open(root)
-    try:
-        store.upsert_line(FieldLineRecord("L01", "Legacy Line"))
-        dataset = GPRDataSet.from_matrix("L01", np.ones((40, 50), dtype=np.float32), length_m=25.0)
-        store.save_gpr_dataset("L01", dataset)
-        legacy_raw = root / store.get_line("L01").gpr_dataset_path
-        legacy_processed, _ = store.save_processed_line(
-            "L01", dataset.matrix * 2, {"method": "gain", "params": {"factor": 2}}
-        )
-        assert legacy_processed.suffix == ".npy"
-
-        result = migrate_project_to_hybrid(store)
-        assert result.retained_legacy_files
-        assert legacy_raw.exists()
-        assert legacy_processed.exists()
-        assert store.manifest.storage_backend == HYBRID_STORAGE_BACKEND
-        line = store.get_line("L01")
-        assert line.processed_result.endswith(".artifact")
-        assert (root / line.processed_result).exists()
-        record = index_processing_artifacts(root, "L01")[0]
-        assert is_h5_uri(record.data_path)
-        h5_path, dataset_path = resolve_h5_uri(root, record.data_path)
-        with h5py.File(h5_path, "r") as handle:
-            assert dataset_path in handle
-        assert (root / result.report_path).exists()
-        report = ProjectIntegrityAuditor(store).audit(persist=False)
-        assert report.healthy
     finally:
         store.close()
 

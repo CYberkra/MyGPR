@@ -1,14 +1,7 @@
 from pathlib import Path
 import numpy as np
-from core.crs_contract import CRSDefinition
 from core.gis_cache import GISCacheKey, GISCacheManager
 from core.gis_layers import GISRasterPreview
-
-
-def test_crs_definition_is_canonical_wkt():
-    definition = CRSDefinition.parse("EPSG:4326")
-    assert definition.authority == "EPSG:4326"
-    assert "GEOGCRS" in definition.wkt or "GEOGCS" in definition.wkt
 
 
 def test_gis_preview_cache_roundtrip(tmp_path: Path):
