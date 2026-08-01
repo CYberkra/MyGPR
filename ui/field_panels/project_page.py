@@ -7,13 +7,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
-from PyQt6.QtCore import Qt, QUrl
+from PyQt6.QtCore import Qt, QUrl, QSettings
 from PyQt6.QtWidgets import (
+    QAbstractItemView,
     QDialog,
     QFileDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QMessageBox,
     QInputDialog,
@@ -22,6 +24,7 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QTabWidget,
     QSizePolicy,
+    QTableWidget,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -747,8 +750,24 @@ class ProjectPageMixin:
         table = self._table(headers, row_count)
         table.setMinimumHeight(lm.project_table_min_h)
         table.setObjectName("projectLineTable")
+        # Allow multi-select and column resizing for dense line tables.
+        table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        header = table.horizontalHeader()
+        for i in range(table.columnCount()):
+            header.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(True)
         self.line_table = table
         self._fill_table(table, self._line_rows(), highlight_row=self._selected_line_row(), sort_column=0)
+        self._restore_line_table_column_widths(table)
+        header.sectionResized.connect(lambda _l, _o, _n: self._save_line_table_column_widths())
+
+        def _line_table_key(event) -> None:
+            if event.key() == Qt.Key.Key_Delete:
+                self._action_delete_selected_lines()
+            else:
+                QTableWidget.keyPressEvent(table, event)
+
+        table.keyPressEvent = _line_table_key
         table.cellClicked.connect(self._select_line_from_table)
         card.layout.addWidget(table, 1)
         card.layout.addWidget(self._selected_line_detail_strip(), 0)
@@ -987,6 +1006,82 @@ class ProjectPageMixin:
         row.addLayout(right, 2)
         card.layout.addLayout(row)
         return card
+
+
+    def select_line(self, line_id: str) -> None:
+        """Programmatically select a line by id and refresh all dependent UI."""
+        for idx, line in enumerate(self.line_records):
+            if line.get("id") == line_id:
+                self._select_line_from_table(idx, 0)
+                return
+
+    def _action_delete_selected_lines(self) -> None:
+        """Batch-delete all selected rows from the project line table."""
+        table = self.line_table
+        if table is None or self.project_store is None:
+            return
+        rows = sorted({idx.row() for idx in table.selectedIndexes() if idx.row() < len(self.line_records)}, reverse=True)
+        if not rows:
+            return
+        line_ids = [self.line_records[r]["id"] for r in rows]
+        names = [f"{self.line_records[r]['id']} {self.line_records[r].get('name', '')}" for r in rows]
+        detail = "\n".join(names[:8])
+        if len(names) > 8:
+            detail += f"\n……其余 {len(names) - 8} 条"
+        reply = QMessageBox.question(
+            self,
+            "确认批量删除测线",
+            f"即将删除 {len(line_ids)} 条测线：\n{detail}\n\n"
+            "此操作会删除项目内关联文件，不会删除项目目录外的原始来源文件。是否继续？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        failed: list[tuple[str, str]] = []
+        for line_id in line_ids:
+            try:
+                delete_project_line(self.project_store, line_id, reason="batch-delete")
+            except Exception as exc:
+                failed.append((line_id, str(exc)))
+        self._sync_project_lines_to_ui()
+        self._clear_line_dependent_processing_state()
+        self._refresh_project_widgets()
+        self._refresh_processing_preview()
+        if failed:
+            QMessageBox.warning(
+                self,
+                "批量删除测线",
+                f"成功 {len(line_ids) - len(failed)} 条，失败 {len(failed)} 条：\n"
+                + "\n".join(f"{lid}: {msg}" for lid, msg in failed[:8]),
+            )
+        else:
+            self._line_status_message = f"已批量删除 {len(line_ids)} 条测线。"
+            self._refresh_project_widgets()
+
+    def _restore_line_table_column_widths(self, table: QTableWidget) -> None:
+        settings = QSettings("MyGPR", "MyGPR")
+        widths = settings.value("ui/project_line_table_column_widths")
+        if not isinstance(widths, list):
+            return
+        header = table.horizontalHeader()
+        for i, w in enumerate(widths):
+            if i >= table.columnCount():
+                break
+            try:
+                w_int = int(w)
+            except Exception:
+                continue
+            if w_int > 0:
+                header.resizeSection(i, w_int)
+
+    def _save_line_table_column_widths(self) -> None:
+        table = self.line_table
+        if table is None:
+            return
+        settings = QSettings("MyGPR", "MyGPR")
+        widths = [table.columnWidth(i) for i in range(table.columnCount())]
+        settings.setValue("ui/project_line_table_column_widths", widths)
 
 
 __all__ = ["ProjectPageMixin"]

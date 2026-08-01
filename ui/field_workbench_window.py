@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Callable
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from PyQt6.QtCore import Qt, QSize, QPoint, QUrl
-from PyQt6.QtGui import QAction, QDesktopServices, QIcon, QPixmap, QColor
+from PyQt6.QtCore import Qt, QSize, QPoint, QUrl, QSettings
+from PyQt6.QtGui import QAction, QDesktopServices, QIcon, QPixmap, QColor, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication,
     QAbstractItemView,
@@ -50,6 +50,11 @@ try:  # keep the workbench usable even if the branding helper changes later
     from ui.app_branding import make_mygpr_brand_pixmap
 except Exception:  # pragma: no cover - fallback for isolated smoke tests
     make_mygpr_brand_pixmap = None
+try:
+    from qfluentwidgets import InfoBar, InfoBarPosition
+except Exception:  # pragma: no cover - fallback when qfluentwidgets is not present
+    InfoBar = None
+    InfoBarPosition = None
 from core.field_project_store import FieldLineRecord, FieldProjectStore
 from core.field_project_operations import (
     FieldProjectOperationError,
@@ -174,6 +179,7 @@ class FieldWorkbenchWindow(HomePageMixin, FieldTableMixin, FieldPreviewMixin, Pr
         self.statusBar().hide()
         self._setup_ui()
         self._apply_style()
+        self._setup_global_shortcuts()
         self.switch_workspace("data_management")
     def _detect_screen_profile(self) -> dict[str, int | float | str]:
         """Return the real Qt screen geometry used for laptop fit decisions.
@@ -964,8 +970,68 @@ class FieldWorkbenchWindow(HomePageMixin, FieldTableMixin, FieldPreviewMixin, Pr
         self._refresh_project_widgets()
         QMessageBox.warning(self, title, str(exc))
 
+    def _setup_global_shortcuts(self) -> None:
+        """Register global workspace and action shortcuts.
 
+        Shortcuts are attached to the main window so they survive workspace
+        page rebuilds and remain discoverable through F1 help.
+        """
+        for idx, key in enumerate(WORKSPACES):
+            QShortcut(
+                QKeySequence(f"Ctrl+{idx + 1}"),
+                self,
+                activated=lambda k=key: self.switch_workspace(k),
+            )
+        QShortcut(QKeySequence("F1"), self, activated=self._show_help_dialog)
+        self._setup_processing_shortcuts()
 
+    def _setup_processing_shortcuts(self) -> None:
+        QShortcut(QKeySequence("Ctrl+R"), self, activated=self._run_current_processing_step_shortcut)
+        QShortcut(QKeySequence("Ctrl+L"), self, activated=self._save_processing_result_shortcut)
+
+    def _run_current_processing_step_shortcut(self) -> None:
+        if self.active_workspace != "processing_lab":
+            self.switch_workspace("processing_lab")
+        if self.processing_execute_button is not None and self.processing_execute_button.isEnabled():
+            self._apply_processing()
+
+    def _save_processing_result_shortcut(self) -> None:
+        if self.active_workspace != "processing_lab":
+            self.switch_workspace("processing_lab")
+        if self.processing_save_button is not None and self.processing_save_button.isEnabled():
+            self._save_processing_result()
+
+    def _show_help_dialog(self) -> None:
+        workspace_shortcuts = "\n".join(f"Ctrl+{i + 1}  {name}" for i, name in enumerate(WORKSPACES.values()))
+        text = (
+            "键盘快捷方式\n\n"
+            f"{workspace_shortcuts}\n"
+            "\n处理页：\n"
+            "Ctrl+R  执行当前步骤\n"
+            "Ctrl+L  保存处理结果\n"
+            "\n项目页：\n"
+            "Delete  删除选中的测线（支持多选）\n"
+            "\nF1  显示本帮助"
+        )
+        QMessageBox.information(self, "快捷方式帮助", text)
+
+    def _notify_success(self, title: str, content: str, duration_ms: int = 2500) -> None:
+        """Show a lightweight success notice at the top of the workbench."""
+        if InfoBar is not None and InfoBarPosition is not None:
+            try:
+                InfoBar.success(
+                    title=title,
+                    content=content,
+                    orient=Qt.Orientation.Horizontal,
+                    isClosable=True,
+                    position=InfoBarPosition.TOP,
+                    duration=duration_ms,
+                    parent=self,
+                )
+                return
+            except Exception:
+                pass
+        self.statusBar().showMessage(f"✓ {title}：{content}", duration_ms)
 
 
     def _sync_project_lines_to_ui(self) -> None:

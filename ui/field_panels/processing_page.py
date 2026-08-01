@@ -106,7 +106,7 @@ class ProcessingPageMixin:
         compare_btn = QPushButton("⊞")
         compare_btn.setObjectName("smallButton")
         compare_btn.setFixedWidth(28)
-        compare_btn.setToolTip("原始 / 当前 / 差异图对比查看")
+        compare_btn.setToolTip("原始 / 当前 / 差异图对比查看（处理后可点）")
         compare_btn.clicked.connect(self._open_processing_compare_viewer)
         self.processing_compare_button = compare_btn
         current_card.add_title_button(compare_btn)
@@ -347,6 +347,12 @@ class ProcessingPageMixin:
                 line["updated"] = "刚刚"
                 break
         self._refresh_project_widgets()
+        if getattr(self, "_notify_success", None) is not None:
+            step_count = self._processing_step_count()
+            self._notify_success(
+                "处理步骤完成",
+                f"{self.selected_line} 已执行 Step {step_count:02d}：{field_method_display_name(self.selected_processing_method_id)}",
+            )
 
     def _undo_processing(self) -> None:
         session = getattr(self, "processing_session", None)
@@ -489,7 +495,7 @@ class ProcessingPageMixin:
         session = getattr(self, "processing_session", None)
         if session is None or session.step_count == 0:
             if self.processing_log_label is not None:
-                self.processing_log_label.setText("⚠  当前还没有连续处理结果。请先点击“执行当前步骤”。")
+                self.processing_log_label.setText("⚠  当前还没有连续处理结果。请先点击「执行当前步骤」。")
             return
         data_path: Path | None = None
         params_path: Path | None = None
@@ -529,6 +535,11 @@ class ProcessingPageMixin:
                 refresh=False,
             )
         self._refresh_project_widgets()
+        if getattr(self, "_notify_success", None) is not None:
+            self._notify_success(
+                "处理结果已保存",
+                f"{self.selected_line} 的连续处理结果已同步到项目与测线清单。",
+            )
         if self.processing_log_label is not None:
             if data_path and params_path:
                 self.processing_log_label.setText(
@@ -629,6 +640,7 @@ class ProcessingPageMixin:
         self.processing_execute_button = QPushButton("执行当前步骤")
         self.processing_execute_button.setObjectName("primaryButton")
         self.processing_execute_button.setFixedHeight(28)
+        self.processing_execute_button.setToolTip("执行当前算法步骤（Ctrl+R）")
         self.processing_execute_button.setProperty("layoutKey", "processingExecuteStepButton")
         self.processing_execute_button.clicked.connect(self._apply_processing)
         actions_layout.addWidget(self.processing_execute_button)
@@ -637,6 +649,7 @@ class ProcessingPageMixin:
         self.processing_save_button = QPushButton("保存结果")
         self.processing_save_button.setObjectName("smallButton")
         self.processing_save_button.setFixedHeight(24)
+        self.processing_save_button.setToolTip("保存当前处理结果到项目（Ctrl+L）")
         self.processing_save_button.setProperty("layoutKey", "processingSaveResultButton")
         self.processing_save_button.clicked.connect(self._save_processing_result)
         actions_layout.addWidget(self.processing_save_button)
@@ -658,12 +671,14 @@ class ProcessingPageMixin:
         self.processing_undo_step_button = QPushButton("撤回")
         self.processing_undo_step_button.setObjectName("smallButton")
         self.processing_undo_step_button.setFixedHeight(22)
+        self.processing_undo_step_button.setToolTip("撤回到上一步处理状态")
         self.processing_undo_step_button.setProperty("layoutKey", "processingUndoStepButton")
         self.processing_undo_step_button.clicked.connect(self._undo_processing)
         undo_reset_row.addWidget(self.processing_undo_step_button, 1)
         self.processing_reset_button = QPushButton("重置")
         self.processing_reset_button.setObjectName("smallButton")
         self.processing_reset_button.setFixedHeight(22)
+        self.processing_reset_button.setToolTip("重置处理链到原始 B-scan")
         self.processing_reset_button.setProperty("layoutKey", "processingResetChainButton")
         self.processing_reset_button.clicked.connect(self._reset_processing_chain)
         undo_reset_row.addWidget(self.processing_reset_button, 1)
@@ -833,44 +848,44 @@ class ProcessingPageMixin:
 
     def _processing_messages_card(self) -> Card:
         lm = layout_metrics_for(self)
-        card = Card(title=”处理日志”)
-        card.setProperty(“layoutKey”, “processingMessagesCard”)
+        card = Card(title="处理日志")
+        card.setProperty("layoutKey", "processingMessagesCard")
         card.setMinimumHeight(lm.processing_bottom_max_h)
         card.setMaximumHeight(lm.processing_bottom_max_h)
         tabs = QTabWidget()
-        tabs.setObjectName(“innerTabs”)
+        tabs.setObjectName("innerTabs")
 
         history = QWidget()
         vh = QVBoxLayout(history)
         vh.setContentsMargins(0, 0, 0, 0)
         vh.setSpacing(1)
-        self.processing_history_table = self._table([“步次”, “算法 / 参数”, “状态”, “时间”, “操作”], 0)
+        self.processing_history_table = self._table(["步次", "算法 / 参数", "状态", "时间", "操作"], 0)
         vh.addWidget(self.processing_history_table, 1)
-        self.processing_history_hint_label = QLabel(“尚未执行连续处理步骤。点击”执行当前步骤”后，会按当前算法继续叠加处理。”)
-        self.processing_history_hint_label.setObjectName(“activityDesc”)
+        self.processing_history_hint_label = QLabel("尚未执行连续处理步骤。点击「执行当前步骤」后，会按当前算法继续叠加处理。")
+        self.processing_history_hint_label.setObjectName("activityDesc")
         self.processing_history_hint_label.setWordWrap(False)
         self.processing_history_hint_label.setMaximumHeight(16)
         vh.addWidget(self.processing_history_hint_label)
-        tabs.addTab(history, “处理历史”)
+        tabs.addTab(history, "处理历史")
 
         warn = QWidget()
         v = QVBoxLayout(warn)
         v.setSpacing(1)
         for icon, text, time in [
-            (“⚠”, “L03   辅助定位文件缺少高密度数据”, “10:15:32”),
-            (“✓”, “L01   处理结果已保存”, “10:12:08”),
-            (“ℹ”, “L02   建议检查里程连续性（存在 1 处里程跳变）”, “10:10:45”),
+            ("⚠", "L03   辅助定位文件缺少高密度数据", "10:15:32"),
+            ("✓", "L01   处理结果已保存", "10:12:08"),
+            ("ℹ", "L02   建议检查里程连续性（存在 1 处里程跳变）", "10:10:45"),
         ]:
             row = QHBoxLayout()
             row.addWidget(QLabel(icon))
             row.addWidget(QLabel(text), 1)
             row.addWidget(QLabel(time))
             v.addLayout(row)
-        self.processing_log_label = QLabel(“ℹ  连续处理模式：每执行一次，左侧项目树自动新增一个 Step；撤回会同步移除最后一步。”)
-        self.processing_log_label.setObjectName(“activityDesc”)
+        self.processing_log_label = QLabel("ℹ  连续处理模式：每执行一次，左侧项目树自动新增一个 Step；撤回会同步移除最后一步。")
+        self.processing_log_label.setObjectName("activityDesc")
         self.processing_log_label.setWordWrap(True)
         v.addWidget(self.processing_log_label)
-        tabs.addTab(warn, “日志”)
+        tabs.addTab(warn, "日志")
         card.layout.addWidget(tabs)
         return card
 
