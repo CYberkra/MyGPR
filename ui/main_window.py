@@ -350,6 +350,7 @@ class MyGPRMainWindow(FluentWindow):
             project.import_requested.connect(self._on_import_requested)
             project.sync_requested.connect(self._on_sync_requested)
             project.line_selected.connect(self._on_line_selected)
+            project.line_process_requested.connect(self._on_line_process_requested)
             project.artifact_preview_requested.connect(self._on_artifact_preview_requested)
             project.close_project_requested.connect(self._on_close_project_requested)
             # 测线表右键"复制路径/打开所在文件夹"的路径查询回调
@@ -822,6 +823,15 @@ class MyGPRMainWindow(FluentWindow):
         if self.project_controller is not None:
             self.project_controller.preview_line(line_id)
             self.project_controller.refresh_artifacts(line_id)
+
+    def _on_line_process_requested(self, line_id: str) -> None:
+        """项目页双击测线 → 设为当前测线并加载数据，跳转处理页。"""
+        line_id = str(line_id or '')
+        if not line_id:
+            return
+        self._on_line_selected(line_id)
+        self._goto_page('processingInterface')
+        self._infobar('info', '数据预览', f'正在加载测线 {line_id} …')
 
     def _on_spatial_current_line(self, line_id: str) -> None:
         """空间信息页"设为当前测线" → 复用测线选择逻辑 + InfoBar 提示。"""

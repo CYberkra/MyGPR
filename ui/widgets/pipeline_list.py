@@ -10,11 +10,36 @@
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (QHBoxLayout, QLabel, QListWidget,
-                             QListWidgetItem, QVBoxLayout, QWidget)
+                             QListWidgetItem, QSizePolicy, QVBoxLayout,
+                             QWidget)
 from qfluentwidgets import CheckBox, TransparentToolButton
 from qfluentwidgets import FluentIcon as FIF
 
 from ui.widgets.context_menus import add_action, make_menu
+
+
+class _ElidedLabel(QLabel):
+    """宽度不足时右侧省略号截断，完整文本放 tooltip。
+
+    步骤行空间被序号/启用框/按钮挤占后，长方法名（如"周期条带伪影
+    抑制（实验）"）不再顶出横向滚动条；悬浮可看到全名。
+    """
+
+    def __init__(self, text='', parent=None):
+        super().__init__(text, parent)
+        self._full_text = text
+        self.setToolTip(text)
+        self.setMinimumWidth(0)
+        policy = self.sizePolicy()
+        policy.setHorizontalPolicy(QSizePolicy.Policy.Ignored)
+        self.setSizePolicy(policy)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        elided = self.fontMetrics().elidedText(
+            self._full_text, Qt.TextElideMode.ElideRight,
+            max(self.width() - 4, 10))
+        super().setText(elided)
 
 
 class _StepRow(QWidget):
@@ -25,8 +50,8 @@ class _StepRow(QWidget):
         self.index_label = QLabel(str(index + 1), self)
         self.index_label.setMinimumWidth(20)
         self.index_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.name_label = QLabel(step.get('label') or step.get('method_id', ''),
-                                 self)
+        self.name_label = _ElidedLabel(step.get('label') or step.get('method_id', ''),
+                                       self)
         self.enabled_box = CheckBox('启用', self)
         self.enabled_box.setChecked(bool(step.get('enabled', True)))
         self.up_btn = TransparentToolButton(FIF.UP, self)

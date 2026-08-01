@@ -10,9 +10,11 @@
 - set_busy(bool)：禁用操作按钮
 
 信号：import_requested(dict) / sync_requested(dict) /
-line_selected(str) / artifact_preview_requested(str, str)。
+line_selected(str) / line_process_requested(str) /
+artifact_preview_requested(str, str)。
 
-右键菜单（RoundMenu）：测线表 = 复制数据文件路径 / 打开数据所在文件夹 /
+右键菜单（RoundMenu）：测线表 = 处理该测线（跳转处理页，双击同效）/
+复制数据文件路径 / 打开数据所在文件夹 /
 复制测线号（路径经 set_source_path_resolver 注入的回调查询）；
 成果表 = 预览所选（双击同效）。
 
@@ -99,6 +101,7 @@ class ProjectPage(QWidget):
     import_requested = pyqtSignal(dict)
     sync_requested = pyqtSignal(dict)
     line_selected = pyqtSignal(str)
+    line_process_requested = pyqtSignal(str)   # 双击/右键 → 跳转处理页处理该测线
     artifact_preview_requested = pyqtSignal(str, str)
     close_project_requested = pyqtSignal()
 
@@ -316,6 +319,8 @@ class ProjectPage(QWidget):
         self._lines_table.setMinimumHeight(180)
         self._lines_table.itemSelectionChanged.connect(
             self._on_line_selection_changed)
+        self._lines_table.itemDoubleClicked.connect(
+            self._emit_line_process_request)
         self._lines_table.setContextMenuPolicy(
             Qt.ContextMenuPolicy.CustomContextMenu)
         self._lines_table.customContextMenuRequested.connect(
@@ -545,6 +550,9 @@ class ProjectPage(QWidget):
             except Exception:  # noqa: BLE001 - 查询失败按无路径处理
                 source = None
         menu = make_menu(self)
+        add_action(menu, FIF.DEVELOPER_TOOLS, '处理该测线（跳转处理页）',
+                   lambda: self.line_process_requested.emit(line_id))
+        menu.addSeparator()
         add_action(menu, FIF.COPY, '复制数据文件路径',
                    lambda: QApplication.clipboard().setText(source),
                    enabled=bool(source))
@@ -583,6 +591,15 @@ class ProjectPage(QWidget):
             return
         self._current_line_id = line_id
         self.line_selected.emit(line_id)
+
+    def _emit_line_process_request(self, item) -> None:
+        """双击测线行 → 请主窗口跳转处理页处理该测线（单击已保证选中）。"""
+        row = self._lines_table.row(item)
+        if row < 0 or row >= len(self._lines):
+            return
+        line_id = str(getattr(self._lines[row], 'line_id', '') or '')
+        if line_id:
+            self.line_process_requested.emit(line_id)
 
     def _emit_artifact_preview(self) -> None:
         row = self._artifacts_table.currentRow()
