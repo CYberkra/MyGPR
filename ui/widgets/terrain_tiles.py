@@ -93,10 +93,14 @@ def mosaic_from_tiles(tiles: dict, zoom: int,
         if not (x0 <= tx <= x1 and y0 <= ty <= y1):
             continue
         block = np.asarray(block, dtype=np.float32)
-        # 瓦片行向下为南 → 马赛克行向上为北（y 升序），行序翻转
+        # 瓦片行向下为南 → 马赛克行向上为北（y 升序）：
+        # 既要翻转瓦片间的行序（ty=y1 南瓦片在 row 0），
+        # 也要翻转瓦片内部行序（block 行 0 是该瓦片北缘，
+        # 应落在马赛克该块区的上沿）——漏掉内部翻转会把
+        # 瓦片尺度（z14 约 2km）内的地形南北镜像（营山实测复现）
         row = (int(y1) - int(ty)) * tile_px
         col = (int(tx) - int(x0)) * tile_px
-        elev[row:row + block.shape[0], col:col + block.shape[1]] = block
+        elev[row:row + block.shape[0], col:col + block.shape[1]] = block[::-1, :]
 
     bx0, by0, _, _ = tile_bounds_mercator(zoom, x0, y1)   # 西南角（最小 x/y）
     step = WORLD_SIZE_M / (2 ** int(zoom)) / tile_px

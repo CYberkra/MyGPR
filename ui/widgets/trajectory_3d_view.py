@@ -656,16 +656,32 @@ class Trajectory3DView(QWidget):
             y = np.asarray(payload['gy'], dtype=float) - origin[1]
             z = np.asarray(payload['z'], dtype=float)   # (len(gy), len(gx))
             z_mean = float(np.mean(z))
-            # 垂直夸张：关于 DEM 均值缩放起伏；非贴地模式再做高程基准
-            # 对齐 + 整体下沉（保证 GPS 高程测线不被地形埋住，同旧行为）
+            # 垂直夸张：关于 DEM 均值缩放起伏；非贴地模式做高程基准对齐：
+            # GPS 轨迹常为椭球高、DEM 为正常高，存在系统性基准差
+            # （营山实测约 -44m），用测线 footprint 处的中位偏差平移地形，
+            # 保留两侧真实起伏关系（旧"整体下沉到测线以下"会把地形压到
+            # 任意远，轨迹看似悬空，且坡向对比失去意义）
             z_disp = (z - z_mean) * self._exag
             if not self._drape and self._line_items:
-                line_z_min = min(float(li.pos[:, 2].min())
-                                 for li in self._line_items)
-                margin = max(self._extent * 0.01, 1.0)
-                sink = line_z_min - margin - float(z_disp.max())
-                if sink < 0.0:
-                    z_disp = z_disp + sink
+                gx = np.asarray(payload['gx'], dtype=float)
+                gy = np.asarray(payload['gy'], dtype=float)
+                offsets = []
+                for _lid, _color, xyz in self._track_data:
+                    under = sample_bilinear(z, gx, gy, xyz[:, 0], xyz[:, 1])
+                    valid = np.isfinite(under)
+                    if np.count_nonzero(valid) >= 8:
+                        offsets.append(float(np.median(xyz[valid, 2] - under[valid])))
+                if offsets:
+                    z_disp = z_disp + float(np.median(np.asarray(offsets)))
+                else:
+                    # DEM 未覆盖测线（离线/局部瓦片缺失）：退回整体下沉，
+                    # 保证 GPS 高程测线不被地形埋住（同旧行为）
+                    line_z_min = min(float(li.pos[:, 2].min())
+                                     for li in self._line_items)
+                    margin = max(self._extent * 0.01, 1.0)
+                    sink = line_z_min - margin - float(z_disp.max())
+                    if sink < 0.0:
+                        z_disp = z_disp + sink
             # 顶点色兜底：gist_earth 陆地段色表（影像缺失/关闭时用）
             z_min = float(z_disp.min())
             z_span = max(float(z_disp.max()) - z_min, 1e-6)

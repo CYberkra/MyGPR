@@ -79,6 +79,29 @@ def test_mosaic_from_tiles_missing_tile_is_nan():
     assert np.isnan(elev).all()
 
 
+def test_mosaic_from_tiles_flips_rows_within_tile():
+    """瓦片内部行序必须翻转：瓦片行 0 为北缘，马赛克行 0 为南缘。
+
+    回归：漏掉内部翻转会把瓦片尺度内的地形南北镜像（营山实测
+    下坡地形显示成上坡，与 GPS 轨迹坡向相反）。
+    """
+    zoom = 5
+    # 单瓦片：行 0（北）= 500m，逐行向南递减到行 255（南）= 245m
+    block = (500.0 - np.arange(256, dtype=np.float32)).reshape(256, 1)
+    block = np.repeat(block, 256, axis=1)
+    elev, xs, ys = mosaic_from_tiles({(10, 20): block}, zoom, 10, 10, 20, 20)
+    assert np.all(np.diff(ys) > 0)
+    # 马赛克行 0（最南）= 瓦片最后一行 245m；行 255（最北）= 500m
+    assert elev[0, 0] == pytest.approx(245.0)
+    assert elev[-1, 0] == pytest.approx(500.0)
+    # 沿 y 升序（南→北）采样应得到递增高程（避开边缘一行，双线性需在格点内）
+    qy = np.array([ys[8], ys[-8]])
+    qx = np.array([xs[8], xs[8]])
+    profile = sample_bilinear(elev, xs, ys, qx, qy)
+    assert np.isfinite(profile).all()
+    assert profile[0] < profile[1]
+
+
 # ------------------------------------------------------------------ 双线性采样
 def test_sample_bilinear_linear_field():
     """线性场 z = x + 2y 上采样误差应≈0。"""
