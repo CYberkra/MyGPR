@@ -56,3 +56,17 @@ python scripts/check_architecture.py
 ```
 
 GUI/DPI、多 GB 真实数据和传感器文件必须在 Windows 目标机验收。
+
+## Agent skills
+
+### Issue tracker
+
+Issues 与 PRD 追踪在 GitHub Issues（CYberkra/MyGPR），操作用 `gh` CLI。详见 `docs/agents/issue-tracker.md`。
+
+### Triage labels
+
+使用 mattpocock/skills 默认五角色标签：`needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`。详见 `docs/agents/triage-labels.md`。
+
+### Domain docs
+
+单上下文布局：仓库根部 `CONTEXT.md` + `docs/adr/`（由 domain-modeling 类技能按需懒创建）。详见 `docs/agents/domain.md`。
