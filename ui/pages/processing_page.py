@@ -112,6 +112,8 @@ class ProcessingPage(QWidget):
         self._selected_step = -1
         self._autotune_result = None    # (method_id, dict)
         self._selected_method_id = ''   # 方法库当前选中方法
+        self._line_ids: list[str] = []  # 与 _line_combo 逐项对应的 line_id
+        self._artifact_ids: list[str] = []  # 与 _artifact_combo 逐项对应的 artifact_id
 
         self._build_ui()
         self._connect_internal()
@@ -443,50 +445,55 @@ class ProcessingPage(QWidget):
 
     def set_lines(self, lines: list) -> None:
         """测线列表 → 处理页测线选择下拉。"""
-        previous = str(self._line_combo.currentData() or '')
+        previous = str(self._line_combo.currentText() or '')
+        # 从显示文本解析 line_id（兼容 qfluentwidgets ComboBox 不保存 userData）
+        previous_id = self._line_ids[self._line_combo.currentIndex()] if self._line_combo.currentIndex() >= 0 else ''
         self._line_combo.blockSignals(True)
         self._line_combo.clear()
+        self._line_ids = []
         for line in lines or []:
             line_id = str(getattr(line, 'line_id', '') or '')
             name = str(getattr(line, 'name', '') or '')
             display = f"{line_id} {name}".strip()
-            self._line_combo.addItem(display or line_id, line_id)
+            self._line_combo.addItem(display or line_id)
+            self._line_ids.append(line_id)
         self._line_combo.blockSignals(False)
-        self._set_line_combo_without_emit(previous)
+        self._set_line_combo_without_emit(previous_id)
 
     def set_artifacts(self, artifacts: list) -> None:
         """成果列表 → 处理页成果选择下拉；默认选中最新一条。"""
         self._artifact_combo.blockSignals(True)
         self._artifact_combo.clear()
+        self._artifact_ids = []
         for art in artifacts or []:
             artifact_id = str(getattr(art, 'artifact_id', '') or '')
             name = str(getattr(art, 'name', '') or '')
             created = str(getattr(art, 'created_at', '') or '')
             display = f"{name}  {created}".strip()
-            self._artifact_combo.addItem(display or artifact_id, artifact_id)
+            self._artifact_combo.addItem(display or artifact_id)
+            self._artifact_ids.append(artifact_id)
         self._artifact_combo.blockSignals(False)
         if self._artifact_combo.count():
             self._artifact_combo.setCurrentIndex(self._artifact_combo.count() - 1)
 
     def _set_line_combo_without_emit(self, line_id: str) -> None:
         line_id = str(line_id or '')
-        idx = self._line_combo.findData(line_id)
-        if idx < 0 and self._line_combo.count():
-            idx = 0
+        try:
+            idx = self._line_ids.index(line_id)
+        except ValueError:
+            idx = 0 if self._line_ids else -1
         if idx >= 0:
             self._line_combo.blockSignals(True)
             self._line_combo.setCurrentIndex(idx)
             self._line_combo.blockSignals(False)
 
     def _on_line_combo_changed(self, index: int) -> None:
-        line_id = str(self._line_combo.itemData(index) or '')
-        if line_id:
-            self.line_changed.emit(line_id)
+        if 0 <= index < len(self._line_ids):
+            self.line_changed.emit(self._line_ids[index])
 
     def _on_artifact_combo_changed(self, index: int) -> None:
-        artifact_id = str(self._artifact_combo.itemData(index) or '')
-        if artifact_id:
-            self.artifact_selected.emit(artifact_id)
+        if 0 <= index < len(self._artifact_ids):
+            self.artifact_selected.emit(self._artifact_ids[index])
 
     def current_pipeline(self) -> dict:
         """当前处理链定义：{"steps": [...], "result_name": str}。"""
