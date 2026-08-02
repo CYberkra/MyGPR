@@ -14,7 +14,7 @@
 """
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QKeySequence, QShortcut
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     CaptionLabel, CardWidget, ComboBox, DoubleSpinBox, InfoBar,
@@ -197,6 +197,7 @@ class ProcessingPage(QWidget):
         self._line_label = CaptionLabel('当前测线: --', preview_card)
         seg_row.addWidget(self._line_label)
         self._load_line_btn = PushButton('加载测线数据', preview_card)
+        self._load_line_btn.setToolTip('加载当前测线的原始数据到预览区（Ctrl+L）')
         seg_row.addWidget(self._load_line_btn)
         preview_layout.addLayout(seg_row)
 
@@ -214,6 +215,7 @@ class ProcessingPage(QWidget):
         self._cmap_combo.addItems(constants.COLORMAPS)
         self._cmap_combo.setCurrentText(constants.DEFAULT_COLORMAP)
         self._cmap_combo.setMinimumWidth(90)
+        self._cmap_combo.setToolTip('选择 B-scan 色标')
         tool_row.addWidget(self._cmap_combo)
         tool_row.addStretch(1)
         self._p_low_spin = DoubleSpinBox(preview_card)
@@ -223,6 +225,7 @@ class ProcessingPage(QWidget):
         self._p_low_spin.setValue(0.0)
         self._p_low_spin.setPrefix('低% ')
         self._p_low_spin.setMinimumWidth(76)
+        self._p_low_spin.setToolTip('色阶下限百分位')
         tool_row.addWidget(self._p_low_spin)
         self._p_high_spin = DoubleSpinBox(preview_card)
         self._p_high_spin.setRange(0.0, 100.0)
@@ -231,8 +234,10 @@ class ProcessingPage(QWidget):
         self._p_high_spin.setValue(100.0)
         self._p_high_spin.setPrefix('高% ')
         self._p_high_spin.setMinimumWidth(76)
+        self._p_high_spin.setToolTip('色阶上限百分位')
         tool_row.addWidget(self._p_high_spin)
         self._refresh_levels_btn = PushButton('刷新色阶', preview_card)
+        self._refresh_levels_btn.setToolTip('按当前百分位重新计算色阶')
         tool_row.addWidget(self._refresh_levels_btn)
         preview_layout.addLayout(tool_row)
         middle_layout.addWidget(preview_card, 1)
@@ -257,6 +262,7 @@ class ProcessingPage(QWidget):
         self._pipeline_list.setMinimumHeight(200)
         pipeline_layout.addWidget(self._pipeline_list, 1)
         self._add_method_btn = PushButton('添加所选方法', pipeline_card)
+        self._add_method_btn.setToolTip('将左侧方法库当前选中的方法加入处理链')
         pipeline_layout.addWidget(self._add_method_btn)
         right_layout.addWidget(pipeline_card, 1)
 
@@ -264,6 +270,7 @@ class ProcessingPage(QWidget):
         self._param_form = ParamForm(param_card)
         param_layout.addWidget(self._param_form, 1)
         self._apply_params_btn = PushButton('应用到选中步骤', param_card)
+        self._apply_params_btn.setToolTip('把当前参数表单内容写入处理链当前选中步骤')
         self._apply_params_btn.setEnabled(False)
         param_layout.addWidget(self._apply_params_btn)
         right_layout.addWidget(param_card, 1)
@@ -276,12 +283,15 @@ class ProcessingPage(QWidget):
         name_row.addWidget(name_label)
         self._result_name_edit = LineEdit(exec_card)
         self._result_name_edit.setPlaceholderText('例如: 增益处理后结果')
+        self._result_name_edit.setToolTip('处理成果保存名称')
         name_row.addWidget(self._result_name_edit, 1)
         exec_layout.addLayout(name_row)
         run_row = QHBoxLayout()
         run_row.setSpacing(constants.CARD_SPACING)
         self._run_btn = PrimaryPushButton('运行处理链', exec_card, FIF.PLAY)
+        self._run_btn.setToolTip('执行右侧处理链（Ctrl+R）')
         self._cancel_btn = PushButton('取消', exec_card)
+        self._cancel_btn.setToolTip('取消正在运行的处理任务')
         self._cancel_btn.setEnabled(False)
         run_row.addWidget(self._run_btn, 1)
         run_row.addWidget(self._cancel_btn)
@@ -298,6 +308,7 @@ class ProcessingPage(QWidget):
         method_row.addWidget(self._autotune_method_label, 1)
         autotune_layout.addLayout(method_row)
         self._autotune_btn = PushButton('开始调参', autotune_card)
+        self._autotune_btn.setToolTip('对左侧选中的方法自动搜索最优参数')
         self._autotune_btn.setEnabled(False)
         autotune_layout.addWidget(self._autotune_btn)
         autotune_layout.addWidget(_create_separator())
@@ -305,6 +316,7 @@ class ProcessingPage(QWidget):
         self._autotune_result_label.setWordWrap(True)
         autotune_layout.addWidget(self._autotune_result_label)
         self._adopt_params_btn = PushButton('采用最优参数', autotune_card)
+        self._adopt_params_btn.setToolTip('把调参结果写入处理链当前步骤')
         self._adopt_params_btn.setEnabled(False)
         autotune_layout.addWidget(self._adopt_params_btn)
         right_layout.addWidget(autotune_card)
@@ -336,6 +348,14 @@ class ProcessingPage(QWidget):
         # AutoTune
         self._autotune_btn.clicked.connect(self._on_autotune_clicked)
         self._adopt_params_btn.clicked.connect(self._on_adopt_params)
+
+        # 快捷键：运行 / 加载测线
+        self._run_shortcut = QShortcut(QKeySequence("Ctrl+R"), self)
+        self._run_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+        self._run_shortcut.activated.connect(self._on_run_clicked)
+        self._load_shortcut = QShortcut(QKeySequence("Ctrl+L"), self)
+        self._load_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+        self._load_shortcut.activated.connect(self.line_load_requested)
 
         # 面板折叠状态持久化
         self._left_panel.sig_collapsed.connect(self._save_panel_state)

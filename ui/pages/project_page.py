@@ -26,16 +26,16 @@ sync_requested payload：{'line_id', 'paths': {'rtk', 'imu', 'altimeter', 'trace
 
 import os
 
-from PyQt6.QtCore import Qt, QUrl, pyqtSignal
-from PyQt6.QtGui import QDesktopServices, QFont
+from PyQt6.QtCore import Qt, QSettings, QTimer, QUrl, pyqtSignal
+from PyQt6.QtGui import QDesktopServices, QFont, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
-    QApplication, QFileDialog, QFrame, QHBoxLayout, QHeaderView, QLabel,
-    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QApplication, QDialog, QFileDialog, QFrame, QHBoxLayout, QHeaderView,
+    QLabel, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
     BodyLabel, CaptionLabel, CardWidget, DoubleSpinBox, InfoBar,
-    InfoBarPosition, LineEdit, PrimaryPushButton, PushButton, ScrollArea,
-    SubtitleLabel,
+    InfoBarPosition, LineEdit, MessageBox, PrimaryPushButton, PushButton,
+    ScrollArea, SubtitleLabel,
 )
 from qfluentwidgets import FluentIcon as FIF
 
@@ -102,6 +102,7 @@ class ProjectPage(QWidget):
     sync_requested = pyqtSignal(dict)
     line_selected = pyqtSignal(str)
     line_process_requested = pyqtSignal(str)   # 双击/右键 → 跳转处理页处理该测线
+    line_delete_requested = pyqtSignal(list)   # 批量删除所选测线
     artifact_preview_requested = pyqtSignal(str, str)
     close_project_requested = pyqtSignal()
 
@@ -313,14 +314,19 @@ class ProjectPage(QWidget):
         self._lines_table.setSelectionBehavior(
             QTableWidget.SelectionBehavior.SelectRows)
         self._lines_table.setSelectionMode(
-            QTableWidget.SelectionMode.SingleSelection)
+            QTableWidget.SelectionMode.ExtendedSelection)
         header = self._lines_table.horizontalHeader()
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.sectionResized.connect(self._save_lines_column_widths)
         self._lines_table.setMinimumHeight(180)
         self._lines_table.itemSelectionChanged.connect(
             self._on_line_selection_changed)
         self._lines_table.itemDoubleClicked.connect(
             self._emit_line_process_request)
+        self._delete_lines_shortcut = QShortcut(
+            QKeySequence(QKeySequence.StandardKey.Delete), self._lines_table,
+            context=Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self._delete_lines_shortcut.activated.connect(self._on_delete_selected_lines)
         self._lines_table.setContextMenuPolicy(
             Qt.ContextMenuPolicy.CustomContextMenu)
         self._lines_table.customContextMenuRequested.connect(
@@ -343,6 +349,7 @@ class ProjectPage(QWidget):
         art_header = self._artifacts_table.horizontalHeader()
         art_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         art_header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        art_header.sectionResized.connect(self._save_artifacts_column_widths)
         self._artifacts_table.setMinimumHeight(150)
         self._artifacts_table.itemDoubleClicked.connect(
             lambda _item: self._emit_artifact_preview())
@@ -405,11 +412,21 @@ class ProjectPage(QWidget):
                     self._lines_table.setItem(row, col, item)
         finally:
             self._filling_table = False
+        self._restore_column_widths(self._lines_table, 'lines')
         if self._lines:
             self._lines_table.selectRow(0)   # 触发 itemSelectionChanged → line_selected
         else:
             self._current_line_id = ''
             self.set_artifacts([])
+
+    def select_line(self, line_id: str) -> bool:
+        """按 line_id 选中并触发预览；未找到返回 False。"""
+        line_id = str(line_id or '')
+        for idx, line in enumerate(self._lines):
+            if str(getattr(line, 'line_id', '') or '') == line_id:
+                self._lines_table.selectRow(idx)
+                return True
+        return False
 
     def set_artifacts(self, artifacts: list) -> None:
         """刷新成果表。"""
@@ -432,6 +449,7 @@ class ProjectPage(QWidget):
             )
             for col, text in enumerate(values):
                 self._artifacts_table.setItem(row, col, QTableWidgetItem(text))
+        self._restore_column_widths(self._artifacts_table, 'artifacts')
 
     def set_preflight_result(self, text: str, ok: bool) -> None:
         """预检结果区：ok 绿色 / 失败红色。"""
@@ -552,6 +570,8 @@ class ProjectPage(QWidget):
         menu = make_menu(self)
         add_action(menu, FIF.DEVELOPER_TOOLS, '处理该测线（跳转处理页）',
                    lambda: self.line_process_requested.emit(line_id))
+        add_action(menu, FIF.DELETE, '删除所选测线',
+                   self._on_delete_selected_lines)
         menu.addSeparator()
         add_action(menu, FIF.COPY, '复制数据文件路径',
                    lambda: QApplication.clipboard().setText(source),
@@ -614,6 +634,60 @@ class ProjectPage(QWidget):
                    or str(getattr(self._artifacts[row], 'line_id', '') or ''))
         if artifact_id and line_id:
             self.artifact_preview_requested.emit(line_id, artifact_id)
+
+    # ------------------------------------------------------------- 批量删除 / 列宽记忆
+    def _on_delete_selected_lines(self) -> None:
+        """Delete 键 / 右键：确认后批量删除所选测线。"""
+        rows = sorted({idx.row() for idx in self._lines_table.selectionModel().selectedRows()})
+        if not rows:
+            return
+        line_ids = []
+        for row in rows:
+            if 0 <= row < len(self._lines):
+                lid = str(getattr(self._lines[row], 'line_id', '') or '')
+                if lid:
+                    line_ids.append(lid)
+        if not line_ids:
+            return
+        box = MessageBox(
+            '确认删除所选测线？',
+            f'将删除 {len(line_ids)} 条测线（数据会移入项目 .trash 回收站，可恢复）：\n'
+            + '\n'.join(f'  • {lid}' for lid in line_ids),
+            self,
+        )
+        box.yesButton.setText('删除')
+        box.cancelButton.setText('取消')
+        if box.exec() == QDialog.DialogCode.Accepted:
+            self.line_delete_requested.emit(line_ids)
+
+    def _column_widths_key(self, table_name: str) -> str:
+        return f'ui/project_page/{table_name}_column_widths'
+
+    def _save_lines_column_widths(self) -> None:
+        self._save_column_widths(self._lines_table, 'lines')
+
+    def _save_artifacts_column_widths(self) -> None:
+        self._save_column_widths(self._artifacts_table, 'artifacts')
+
+    def _save_column_widths(self, table: QTableWidget, table_name: str) -> None:
+        header = table.horizontalHeader()
+        widths = [header.sectionSize(i) for i in range(table.columnCount())]
+        settings = QSettings('MyGPR', 'MyGPR')
+        settings.setValue(self._column_widths_key(table_name), widths)
+
+    def _restore_column_widths(self, table: QTableWidget, table_name: str) -> None:
+        settings = QSettings('MyGPR', 'MyGPR')
+        widths = settings.value(self._column_widths_key(table_name))
+        if not isinstance(widths, list):
+            return
+        header = table.horizontalHeader()
+        for i, w in enumerate(widths):
+            if isinstance(w, int) and 0 <= i < table.columnCount():
+                header.resizeSection(i, w)
+
+    def _settings(self) -> QSettings:
+        """统一 QSettings 根，避免各页用不同组织名。"""
+        return QSettings('MyGPR', 'MyGPR')
 
 
 __all__ = ['ProjectPage']

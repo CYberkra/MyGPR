@@ -13,11 +13,14 @@ import logging
 import os
 import threading
 
-from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QIcon
+from PyQt6.QtCore import (
+    QEasingCurve, QPropertyAnimation, Qt, QTimer, pyqtSignal,
+)
+from PyQt6.QtGui import QIcon, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
-    QDialog, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QStackedWidget,
-    QTextEdit, QVBoxLayout, QWidget,
+    QDialog, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QMessageBox,
+    QPushButton, QStackedWidget, QTextBrowser, QTextEdit, QVBoxLayout,
+    QWidget,
 )
 from qfluentwidgets import (
     CardWidget, FluentIcon as FIF, FluentWindow, InfoBar, InfoBarPosition,
@@ -197,6 +200,8 @@ class MyGPRMainWindow(FluentWindow):
         self._spatial_job_ids = set()       # 空间成果任务（完成后刷新空间成果表）
         self._processing_job_id = ''        # 处理页当前运行任务
         self._preview_newest_artifact = False  # 处理完成后自动预览最新成果
+        self._show_run_completion_notice = False  # 处理完成后提示一次
+        self._pending_select_line_id = ''        # 导入完成后要选中的测线
 
         self._init_window()
         self._create_controllers()
@@ -306,6 +311,25 @@ class MyGPRMainWindow(FluentWindow):
         """按 objectName 取页面（占位页返回原样，调用方自行判接口）。"""
         return self.pages.get(object_name)
 
+        # 全局快捷键：Ctrl+1~8 切换页签，F1 显示快捷键清单
+        self._page_shortcuts = [
+            ('Ctrl+1', 'homeInterface', '主页'),
+            ('Ctrl+2', 'projectInterface', '项目'),
+            ('Ctrl+3', 'processingInterface', '处理'),
+            ('Ctrl+4', 'interpretationInterface', '解释'),
+            ('Ctrl+5', 'spatialInterface', '空间信息'),
+            ('Ctrl+6', 'deliveryInterface', '成果'),
+            ('Ctrl+7', 'jobsInterface', '任务'),
+            ('Ctrl+8', 'settingsInterface', '设置'),
+        ]
+        for seq, obj_name, _title in self._page_shortcuts:
+            sc = QShortcut(QKeySequence(seq), self)
+            sc.setContext(Qt.ShortcutContext.WindowShortcut)
+            sc.activated.connect(lambda checked=False, on=obj_name: self._goto_page(on))
+        self._shortcuts_help = QShortcut(QKeySequence("F1"), self)
+        self._shortcuts_help.setContext(Qt.ShortcutContext.WindowShortcut)
+        self._shortcuts_help.activated.connect(self._show_shortcuts_dialog)
+
     def _connect_signals(self) -> None:
         """全量业务接线（SPEC §7）：Page 信号 → Controller 槽；Controller 信号 → Page set_xxx。"""
         self._log_signal.connect(self._on_log_message)
@@ -351,6 +375,7 @@ class MyGPRMainWindow(FluentWindow):
             project.sync_requested.connect(self._on_sync_requested)
             project.line_selected.connect(self._on_line_selected)
             project.line_process_requested.connect(self._on_line_process_requested)
+            project.line_delete_requested.connect(self._on_line_delete_requested)
             project.artifact_preview_requested.connect(self._on_artifact_preview_requested)
             project.close_project_requested.connect(self._on_close_project_requested)
             # 测线表右键"复制路径/打开所在文件夹"的路径查询回调
@@ -595,6 +620,30 @@ class MyGPRMainWindow(FluentWindow):
         if page is not None:
             self.switchTo(page)
 
+    def _show_shortcuts_dialog(self) -> None:
+        """F1：弹出当前支持的快捷键清单。"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle('快捷键')
+        dialog.setMinimumSize(360, 300)
+        layout = QVBoxLayout(dialog)
+        text = QTextBrowser(dialog)
+        text.setOpenExternalLinks(False)
+        rows = ['<h3>快捷键清单</h3><ul>']
+        for seq, _obj, title in self._page_shortcuts:
+            rows.append(f'<li><b>{seq}</b>：切换到{title}</li>')
+        rows.extend([
+            '<li><b>Ctrl+R</b>：处理页运行处理链</li>',
+            '<li><b>Ctrl+L</b>：处理页加载测线数据</li>',
+            '<li><b>Delete</b>：处理链删除选中步骤 / 项目页删除选中测线</li>',
+            '</ul><p>提示：处理链步骤行支持右键菜单（上移/下移/删除）。</p>',
+        ])
+        text.setHtml(''.join(rows))
+        layout.addWidget(text)
+        btn = QPushButton('关闭', dialog)
+        btn.clicked.connect(dialog.close)
+        layout.addWidget(btn)
+        dialog.exec()
+
     def _current_project_id(self):
         if self.project_controller is None:
             return None
@@ -797,6 +846,12 @@ class MyGPRMainWindow(FluentWindow):
         spatial = self._page('spatialInterface')
         if hasattr(project, 'set_lines'):
             project.set_lines(lines)   # 非空时自动选中首行 → line_selected
+        # 导入完成后：若记录了目标测线，选中并预览它
+        pending = getattr(self, '_pending_select_line_id', '')
+        if pending and hasattr(project, 'select_line'):
+            if project.select_line(pending):
+                self._on_line_selected(pending)
+            self._pending_select_line_id = ''
         if hasattr(delivery, 'set_lines'):
             delivery.set_lines(lines)
         if hasattr(spatial, 'set_lines'):
@@ -884,6 +939,37 @@ class MyGPRMainWindow(FluentWindow):
             project.set_preview_bundle(bundle)
         if hasattr(processing, 'set_result_bundle'):
             processing.set_result_bundle(bundle)
+        if getattr(self, '_show_run_completion_notice', False):
+            self._show_run_completion_notice = False
+            self._infobar('success', '处理完成', '已更新处理结果预览')
+
+    def _on_line_delete_requested(self, line_ids: list[str]) -> None:
+        """项目页 Delete 批量删除 → 确认后交给 ProjectController。"""
+        line_ids = [str(lid) for lid in (line_ids or []) if lid]
+        if not line_ids:
+            return
+        if self.project_controller is None or not self._require_project():
+            return
+        names = []
+        project = self._page('projectInterface')
+        lines = getattr(project, '_lines', []) if project is not None else []
+        for line in lines:
+            if str(getattr(line, 'line_id', '') or '') in line_ids:
+                names.append(f"{line.line_id} {getattr(line, 'name', '')}".strip())
+        detail = '\n'.join(names[:8])
+        if len(names) > 8:
+            detail += f'\n……其余 {len(names) - 8} 条'
+        reply = QMessageBox.question(
+            self,
+            '确认删除测线',
+            f'即将删除 {len(line_ids)} 条测线：\n{detail}\n\n'
+            '该操作会删除项目内关联文件，不会删除项目目录外的原始来源文件。是否继续？',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self.project_controller.delete_lines(line_ids)
 
     # ============================================================ 导入 / 预检 / 传感器同步
     def _on_import_requested(self, payload: dict) -> None:
@@ -891,20 +977,22 @@ class MyGPRMainWindow(FluentWindow):
         if self.project_controller is None or not self._require_project():
             return
         payload = dict(payload or {})
+        line_id = str(payload.get('line_id', '') or 'L01')
         if payload.get('preflight'):
             self.project_controller.preflight_import(
                 str(payload.get('source', '')),
-                str(payload.get('line_id', '') or 'L01'),
+                line_id,
                 float(payload.get('dielectric', constants.DEFAULT_DIELECTRIC)))
             return
         job_id = self.project_controller.import_line(
             str(payload.get('source', '')),
-            str(payload.get('line_id', '') or 'L01'),
+            line_id,
             str(payload.get('name', '') or ''),
             float(payload.get('dielectric', constants.DEFAULT_DIELECTRIC)))
         if job_id:
             self._import_job_ids.add(str(job_id))
-            self._infobar('info', '导入测线', '导入任务已提交，可在任务页查看进度')
+            self._pending_select_line_id = line_id
+            self._infobar('info', '导入测线', '导入任务已提交，完成后会自动选中该测线')
 
     def _on_preflight_ready(self, result) -> None:
         """preflight_ready → 项目页预检结果区（鸭子类型取字段）。"""
@@ -974,6 +1062,7 @@ class MyGPRMainWindow(FluentWindow):
             self._current_project_id(), line_id, {'steps': steps}, result_name)
         if job_id:
             self._processing_job_id = str(job_id)
+            self._show_run_completion_notice = True
             processing = self._page('processingInterface')
             if hasattr(processing, 'set_running'):
                 processing.set_running(True, str(job_id))

@@ -14,7 +14,13 @@ import os
 import threading
 import uuid
 from dataclasses import asdict, dataclass, field
-from enum import StrEnum
+try:
+    from enum import StrEnum
+except ImportError:  # pragma: no cover - Python <3.11 fallback
+    from enum import Enum
+
+    class StrEnum(str, Enum):  # type: ignore[no-redef]
+        pass
 from pathlib import Path
 from typing import Any, Callable, List, Iterable
 

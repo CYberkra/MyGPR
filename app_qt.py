@@ -17,6 +17,18 @@ from PyQt6.QtGui import QFont, QGuiApplication
 from PyQt6.QtWidgets import QApplication
 from qfluentwidgets import Theme, setTheme
 
+# Python <3.11 没有 enum.StrEnum；给全局 enum 模块补一个最低限度兼容实现，
+# 让 core / domain 各模块的 `from enum import StrEnum` 能直接工作。
+try:
+    from enum import StrEnum
+except ImportError:  # pragma: no cover - Python 3.10 fallback
+    import enum
+
+    class StrEnum(str, enum.Enum):
+        pass
+
+    enum.StrEnum = StrEnum
+
 # 禁用 Qt6 的 Windows 系统深色模式自动接管：否则在系统深色模式下 Qt 会
 # 反复用系统深色 palette 覆盖应用 palette，浅色主题下原生控件（表格/列表/
 # 下拉框）仍是深色。禁用后由 theme_helpers.apply_theme 显式 setPalette，

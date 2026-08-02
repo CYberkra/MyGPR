@@ -395,5 +395,30 @@ class ProjectController(QObject):
         bridge.watch(job_id, title=f"传感器同步 {line_id}")
         return job_id
 
+    def delete_lines(self, line_ids: list[str], *, reason: str = "batch-delete") -> None:
+        """批量删除当前项目中的多条测线（项目页 Delete 键入口）。"""
+        backend = self._backend()
+        project_id = self._project_id_or_warn()
+        if backend is None or project_id is None:
+            return
+        line_ids = [str(lid) for lid in (line_ids or []) if lid]
+        if not line_ids:
+            return
+        self._set_busy(True)
+
+        def runner() -> None:
+            try:
+                for line_id in line_ids:
+                    backend.projects.delete_line(project_id, line_id, reason=reason)
+            except Exception as exc:  # noqa: BLE001
+                self.log_message.emit(f"删除测线失败：{friendly_error_message(exc)}")
+            else:
+                self.log_message.emit(f"已删除 {len(line_ids)} 条测线")
+            finally:
+                self._set_busy(False)
+                self.refresh_lines()
+
+        run_worker(runner, name="mygpr-lines-delete")
+
 
 __all__ = ["ProjectController"]
