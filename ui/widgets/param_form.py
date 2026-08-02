@@ -8,7 +8,7 @@ schema: [{name, label, type('int'|'float'), default, min, max}]
 """
 
 from PyQt6.QtCore import pyqtSignal
-from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import CaptionLabel, DoubleSpinBox, PushButton, SpinBox
 
 _BASIC_LIMIT = 4
@@ -81,9 +81,15 @@ class ParamForm(QWidget):
         editor.valueChanged.connect(lambda *_: self.sig_changed.emit())
 
         lbl = CaptionLabel(label, self)
-        lbl.setMinimumWidth(100)
+        lbl.setMinimumWidth(120)
+        lbl.setMaximumWidth(180)
+        lbl.setWordWrap(False)
+        editor.setMinimumWidth(90)
+        editor.setSizePolicy(QSizePolicy.Policy.Expanding,
+                             QSizePolicy.Policy.Fixed)
         row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
+        row.setContentsMargins(0, 2, 0, 2)
+        row.setSpacing(10)
         row.addWidget(lbl)
         row.addWidget(editor, 1)
         self._editors[name] = editor

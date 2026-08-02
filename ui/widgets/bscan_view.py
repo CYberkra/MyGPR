@@ -24,7 +24,8 @@ from PyQt6.QtWidgets import (QApplication, QHBoxLayout, QFileDialog,
                              QVBoxLayout, QWidget)
 
 import pyqtgraph as pg
-from qfluentwidgets import CaptionLabel, FluentIcon as FIF, PushButton
+from PyQt6.QtWidgets import QLabel
+from qfluentwidgets import FluentIcon as FIF, PushButton
 
 from ui import constants
 from ui.widgets.context_menus import (add_action, add_checkable_submenu,
@@ -131,10 +132,13 @@ class BScanView(QWidget):
         layout.addWidget(self._glw, 1)
 
         # 十字光标读数浮层（左下角，半透明底白字，深浅主题通用）
-        self._readout = CaptionLabel(self)
+        self._readout = QLabel(self)
         self._readout.setStyleSheet(
-            'CaptionLabel { background-color: rgba(0, 0, 0, 150); '
-            'color: white; border-radius: 4px; padding: 4px 8px; }')
+            'QLabel { background-color: rgba(0, 0, 0, 150); '
+            'color: white; border-radius: 4px; padding: 6px 10px; '
+            'font-size: 12px; line-height: 1.5; }')
+        self._readout.setWordWrap(False)
+        self._readout.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
         self._readout.setAttribute(
             Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._readout.hide()
