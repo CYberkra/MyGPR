@@ -848,17 +848,20 @@ class MyGPRMainWindow(FluentWindow):
         spatial = self._page('spatialInterface')
         processing = self._page('processingInterface')
         if hasattr(project, 'set_lines'):
-            project.set_lines(lines)   # 非空时自动选中首行 → line_selected
+            project.set_lines(lines)
         # 导入完成后：若记录了目标测线，选中并预览它
         pending = getattr(self, '_pending_select_line_id', '')
         if pending and hasattr(project, 'select_line'):
             if project.select_line(pending):
                 self._on_line_selected(pending)
             self._pending_select_line_id = ''
-        elif hasattr(project, 'select_line') and self._current_line_id and lines:
-            # 其他刷新场景（处理完成、传感器同步等）保持用户当前选中的测线，
-            # 避免自动跳回首行导致结果预览错位。
-            project.select_line(self._current_line_id)
+        elif hasattr(project, 'select_line') and lines:
+            # 保持用户当前测线；尚未选中时默认首条。
+            target = self._current_line_id or str(
+                getattr(lines[0], 'line_id', '') or '')
+            if target and project.select_line(target):
+                if target != self._current_line_id:
+                    self._on_line_selected(target)
         if hasattr(processing, 'set_lines'):
             processing.set_lines(lines)
         if hasattr(delivery, 'set_lines'):

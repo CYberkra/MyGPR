@@ -120,6 +120,15 @@ class PipelineList(QWidget):
         self._rebuild(select=len(self._steps) - 1)
         self.sig_changed.emit()
 
+    def update_step_params(self, index: int, params: dict) -> bool:
+        """直接更新第 index 步的 params 并重绘该行，保持选中状态不变。"""
+        if not (0 <= index < len(self._steps)):
+            return False
+        self._steps[index]['params'] = dict(params or {})
+        self._rebuild(select=index)
+        self.sig_changed.emit()
+        return True
+
     # ------------------------------------------------------------- 内部
     def _rebuild(self, select=None):
         self._list.blockSignals(True)

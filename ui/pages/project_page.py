@@ -413,9 +413,9 @@ class ProjectPage(QWidget):
         finally:
             self._filling_table = False
         self._restore_column_widths(self._lines_table, 'lines')
-        if self._lines:
-            self._lines_table.selectRow(0)   # 触发 itemSelectionChanged → line_selected
-        else:
+        # 不再自动选中首行：由主窗口在 _on_lines_updated 中按需恢复/设置当前测线，
+        # 避免刷新时先跳到首行再跳回，导致结果预览和 InfoBar 闪烁错位。
+        if not self._lines:
             self._current_line_id = ''
             self.set_artifacts([])
 

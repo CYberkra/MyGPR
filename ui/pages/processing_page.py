@@ -588,19 +588,19 @@ class ProcessingPage(QWidget):
 
     def _apply_params_to_selected(self) -> None:
         """"应用到选中步骤"按钮：表单值写回选中步骤。"""
-        steps = self._pipeline_list.steps()
-        if not (0 <= self._selected_step < len(steps)):
+        if self._selected_step < 0:
             InfoBar.warning(title='参数设置', content='请先选中处理链中的步骤',
                             orient=Qt.Orientation.Horizontal, isClosable=True,
                             position=InfoBarPosition.TOP, duration=3000,
                             parent=self)
             return
         values = self._param_form.values()
-        steps[self._selected_step]['params'] = values
-        # set_steps 重建后恢复原选中行（写回保持选中上下文）
-        self._pipeline_list.set_steps(steps)
-        self._pipeline_list._list.setCurrentRow(self._selected_step)
-        self._pipeline_list.sig_changed.emit()
+        if not self._pipeline_list.update_step_params(self._selected_step, values):
+            InfoBar.warning(title='参数设置', content='处理链步骤已失效，请重新选择',
+                            orient=Qt.Orientation.Horizontal, isClosable=True,
+                            position=InfoBarPosition.TOP, duration=3000,
+                            parent=self)
+            return
         InfoBar.success(title='参数设置', content='参数已应用到选中步骤',
                         orient=Qt.Orientation.Horizontal, isClosable=True,
                         position=InfoBarPosition.TOP, duration=2000,
