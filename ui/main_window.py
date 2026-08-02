@@ -388,6 +388,8 @@ class MyGPRMainWindow(FluentWindow):
             processing.cancel_requested.connect(self._on_processing_cancel)
             processing.autotune_requested.connect(self._on_autotune_requested)
             processing.line_load_requested.connect(self._on_line_load_requested)
+            processing.line_changed.connect(self._on_processing_line_changed)
+            processing.artifact_selected.connect(self._on_processing_artifact_selected)
 
         # ---------------- 解释页（SPEC §6.6）
         if hasattr(interpretation, 'open_session_requested'):
@@ -844,6 +846,7 @@ class MyGPRMainWindow(FluentWindow):
         project = self._page('projectInterface')
         delivery = self._page('deliveryInterface')
         spatial = self._page('spatialInterface')
+        processing = self._page('processingInterface')
         if hasattr(project, 'set_lines'):
             project.set_lines(lines)   # 非空时自动选中首行 → line_selected
         # 导入完成后：若记录了目标测线，选中并预览它
@@ -852,6 +855,12 @@ class MyGPRMainWindow(FluentWindow):
             if project.select_line(pending):
                 self._on_line_selected(pending)
             self._pending_select_line_id = ''
+        elif hasattr(project, 'select_line') and self._current_line_id and lines:
+            # 其他刷新场景（处理完成、传感器同步等）保持用户当前选中的测线，
+            # 避免自动跳回首行导致结果预览错位。
+            project.select_line(self._current_line_id)
+        if hasattr(processing, 'set_lines'):
+            processing.set_lines(lines)
         if hasattr(delivery, 'set_lines'):
             delivery.set_lines(lines)
         if hasattr(spatial, 'set_lines'):
@@ -897,13 +906,16 @@ class MyGPRMainWindow(FluentWindow):
         self._infobar('success', '空间信息', f'已设为当前测线：{line_id}')
 
     def _on_artifacts_updated(self, line_id: str, artifacts: list) -> None:
-        """artifacts_updated → 项目页成果表；处理完成后自动预览最新成果。"""
+        """artifacts_updated → 项目页/处理页成果表；处理完成后自动预览最新成果。"""
         if str(line_id) != self._current_line_id:
             return
         artifacts = list(artifacts or [])
         project = self._page('projectInterface')
+        processing = self._page('processingInterface')
         if hasattr(project, 'set_artifacts'):
             project.set_artifacts(artifacts)
+        if hasattr(processing, 'set_artifacts'):
+            processing.set_artifacts(artifacts)
         if self._preview_newest_artifact:
             self._preview_newest_artifact = False
             if artifacts and self.project_controller is not None:
@@ -1043,6 +1055,20 @@ class MyGPRMainWindow(FluentWindow):
         if line_id and self.project_controller is not None:
             self.project_controller.preview_line(line_id)
             self._infobar('info', '数据预览', f'正在加载测线 {line_id} …')
+
+    def _on_processing_line_changed(self, line_id: str) -> None:
+        """处理页测线下拉变化 → 同步为当前测线并刷新原始数据/成果列表。"""
+        line_id = str(line_id or '')
+        if not line_id or line_id == self._current_line_id:
+            return
+        self._on_line_selected(line_id)
+        self._infobar('info', '切换测线', f'已切换到 {line_id}')
+
+    def _on_processing_artifact_selected(self, artifact_id: str) -> None:
+        """处理页成果下拉变化 → 预览所选处理结果。"""
+        line_id = self._require_line()
+        if line_id and artifact_id and self.project_controller is not None:
+            self.project_controller.preview_artifact(line_id, str(artifact_id))
 
     def _on_run_requested(self, payload: dict) -> None:
         """run_requested(dict) → run_pipeline（含结果名回退）。"""

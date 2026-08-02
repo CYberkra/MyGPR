@@ -98,6 +98,8 @@ class ProcessingPage(QWidget):
     cancel_requested = pyqtSignal()
     autotune_requested = pyqtSignal(str, dict)  # method_id, params_hint
     line_load_requested = pyqtSignal()
+    line_changed = pyqtSignal(str)              # 处理页测线选择变化
+    artifact_selected = pyqtSignal(str)         # 处理页成果选择变化
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -194,8 +196,21 @@ class ProcessingPage(QWidget):
         self._preview_segment.setCurrentItem(_SEG_ORIGINAL)
         seg_row.addWidget(self._preview_segment)
         seg_row.addStretch(1)
-        self._line_label = CaptionLabel('当前测线: --', preview_card)
-        seg_row.addWidget(self._line_label)
+
+        line_label = CaptionLabel('当前测线:', preview_card)
+        seg_row.addWidget(line_label)
+        self._line_combo = ComboBox(preview_card)
+        self._line_combo.setMinimumWidth(130)
+        self._line_combo.setToolTip('在处理页直接切换当前测线')
+        seg_row.addWidget(self._line_combo)
+
+        art_label = CaptionLabel('成果:', preview_card)
+        seg_row.addWidget(art_label)
+        self._artifact_combo = ComboBox(preview_card)
+        self._artifact_combo.setMinimumWidth(150)
+        self._artifact_combo.setToolTip('选择该测线历次处理结果进行预览')
+        seg_row.addWidget(self._artifact_combo)
+
         self._load_line_btn = PushButton('加载测线数据', preview_card)
         self._load_line_btn.setToolTip('加载当前测线的原始数据到预览区（Ctrl+L）')
         seg_row.addWidget(self._load_line_btn)
@@ -340,6 +355,8 @@ class ProcessingPage(QWidget):
             self._cmap_combo.setCurrentText)
         self._refresh_levels_btn.clicked.connect(self._refresh_levels)
         self._load_line_btn.clicked.connect(self.line_load_requested)
+        self._line_combo.currentIndexChanged.connect(self._on_line_combo_changed)
+        self._artifact_combo.currentIndexChanged.connect(self._on_artifact_combo_changed)
 
         # 执行
         self._run_btn.clicked.connect(self._on_run_clicked)
@@ -421,8 +438,55 @@ class ProcessingPage(QWidget):
         self._adopt_params_btn.setEnabled(bool(best))
 
     def set_line_label(self, text: str) -> None:
-        """当前测线标签。"""
-        self._line_label.setText('当前测线: %s' % (text or '--'))
+        """当前测线标签（同步到测线选择下拉，不触发信号）。"""
+        self._set_line_combo_without_emit(str(text or ''))
+
+    def set_lines(self, lines: list) -> None:
+        """测线列表 → 处理页测线选择下拉。"""
+        previous = str(self._line_combo.currentData() or '')
+        self._line_combo.blockSignals(True)
+        self._line_combo.clear()
+        for line in lines or []:
+            line_id = str(getattr(line, 'line_id', '') or '')
+            name = str(getattr(line, 'name', '') or '')
+            display = f"{line_id} {name}".strip()
+            self._line_combo.addItem(display or line_id, line_id)
+        self._line_combo.blockSignals(False)
+        self._set_line_combo_without_emit(previous)
+
+    def set_artifacts(self, artifacts: list) -> None:
+        """成果列表 → 处理页成果选择下拉；默认选中最新一条。"""
+        self._artifact_combo.blockSignals(True)
+        self._artifact_combo.clear()
+        for art in artifacts or []:
+            artifact_id = str(getattr(art, 'artifact_id', '') or '')
+            name = str(getattr(art, 'name', '') or '')
+            created = str(getattr(art, 'created_at', '') or '')
+            display = f"{name}  {created}".strip()
+            self._artifact_combo.addItem(display or artifact_id, artifact_id)
+        self._artifact_combo.blockSignals(False)
+        if self._artifact_combo.count():
+            self._artifact_combo.setCurrentIndex(self._artifact_combo.count() - 1)
+
+    def _set_line_combo_without_emit(self, line_id: str) -> None:
+        line_id = str(line_id or '')
+        idx = self._line_combo.findData(line_id)
+        if idx < 0 and self._line_combo.count():
+            idx = 0
+        if idx >= 0:
+            self._line_combo.blockSignals(True)
+            self._line_combo.setCurrentIndex(idx)
+            self._line_combo.blockSignals(False)
+
+    def _on_line_combo_changed(self, index: int) -> None:
+        line_id = str(self._line_combo.itemData(index) or '')
+        if line_id:
+            self.line_changed.emit(line_id)
+
+    def _on_artifact_combo_changed(self, index: int) -> None:
+        artifact_id = str(self._artifact_combo.itemData(index) or '')
+        if artifact_id:
+            self.artifact_selected.emit(artifact_id)
 
     def current_pipeline(self) -> dict:
         """当前处理链定义：{"steps": [...], "result_name": str}。"""
