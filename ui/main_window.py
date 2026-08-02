@@ -207,6 +207,7 @@ class MyGPRMainWindow(FluentWindow):
         self._create_controllers()
         self._create_pages()
         self._build_ui()
+        self._setup_global_shortcuts()
         self._connect_signals()
         self._init_state()
 
@@ -311,7 +312,8 @@ class MyGPRMainWindow(FluentWindow):
         """按 objectName 取页面（占位页返回原样，调用方自行判接口）。"""
         return self.pages.get(object_name)
 
-        # 全局快捷键：Ctrl+1~8 切换页签，F1 显示快捷键清单
+    def _setup_global_shortcuts(self) -> None:
+        """全局快捷键：Ctrl+1~8 切换页签，F1 显示快捷键清单。"""
         self._page_shortcuts = [
             ('Ctrl+1', 'homeInterface', '主页'),
             ('Ctrl+2', 'projectInterface', '项目'),

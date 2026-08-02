@@ -2,11 +2,24 @@
 """Backend-only pytest configuration and isolated runtime roots."""
 from __future__ import annotations
 
+import enum
 import os
 from pathlib import Path
 import shutil
 import sys
 import tempfile
+
+# Python 3.10 compatibility: provide a StrEnum that behaves like the 3.11+ builtin.
+# core/domain modules import `from enum import StrEnum`; without this patch the
+# fallback str() representation is the enum name, breaking severity comparisons.
+try:
+    from enum import StrEnum  # noqa: F401
+except ImportError:
+    class StrEnum(str, enum.Enum):
+        def __str__(self) -> str:
+            return self.value
+
+    enum.StrEnum = StrEnum
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:

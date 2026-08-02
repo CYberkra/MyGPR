@@ -11,6 +11,7 @@ import logging
 import os
 import platform
 import sys
+import time
 
 from PyQt6.QtCore import Qt, QtMsgType, QTimer, qInstallMessageHandler
 from PyQt6.QtGui import QFont, QGuiApplication
@@ -25,7 +26,8 @@ except ImportError:  # pragma: no cover - Python 3.10 fallback
     import enum
 
     class StrEnum(str, enum.Enum):
-        pass
+        def __str__(self) -> str:
+            return self.value
 
     enum.StrEnum = StrEnum
 
@@ -38,10 +40,11 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'windows:darkmode=0')
 from core.observability import (configure_structured_logging,
                                 install_global_exception_hooks)
 from ui import constants
-from ui.main_window import MyGPRMainWindow
+from ui.main_window import MyGPRMainWindow, PlaceholderPage
 
 SMOKE_SHOTS_DIR = '/tmp/mygpr_shots'
 SMOKE_DELAY_MS = 3000
+SMOKE_BACKEND_TIMEOUT_MS = 5000
 
 
 def _setup_diagnostics() -> None:
@@ -87,10 +90,64 @@ def _setup_diagnostics() -> None:
 
 
 def _run_smoke(window: MyGPRMainWindow) -> None:
-    """截图全部导航页 + 整体窗口到 /tmp/mygpr_shots/，然后退出码 0。"""
+    """截图全部导航页 + 整体窗口到 /tmp/mygpr_shots/，并做结构性断言。
+
+    断言内容：
+    - 页面数量与命名符合预期；
+    - 没有页面降级为 PlaceholderPage；
+    - ProjectController / ProcessingController 已成功加载；
+    - 后端在超时前进入 ready 状态。
+
+    任一断言失败均以非 0 退出码终止，避免“页面建设中”也被判定为成功。
+    """
     os.makedirs(SMOKE_SHOTS_DIR, exist_ok=True)
     app = QApplication.instance()
     saved = []
+    errors = []
+
+    expected_names = [
+        'homeInterface', 'projectInterface', 'processingInterface',
+        'interpretationInterface', 'spatialInterface', 'deliveryInterface',
+        'jobsInterface', 'settingsInterface',
+    ]
+
+    # 1) 页面数量与命名
+    actual_names = list(window.pages.keys())
+    if actual_names != expected_names:
+        errors.append(
+            f'页面列表不匹配: expected={expected_names}, actual={actual_names}')
+
+    # 2) 没有占位页
+    placeholder_names = [
+        name for name, page in window.pages.items()
+        if isinstance(page, PlaceholderPage)
+    ]
+    if placeholder_names:
+        errors.append(f'以下页面降级为占位页: {placeholder_names}')
+
+    # 3) 核心 Controller 已加载
+    if window.project_controller is None:
+        errors.append('ProjectController 未加载')
+    if window.processing_controller is None:
+        errors.append('ProcessingController 未加载')
+
+    # 4) 后端就绪（等待最多 SMOKE_BACKEND_TIMEOUT_MS）
+    waited = 0
+    step_ms = 100
+    while not window._backend_ready and waited < SMOKE_BACKEND_TIMEOUT_MS:
+        app.processEvents()
+        # QThread.msleep 会阻塞事件循环，改用轮询 processEvents
+        time.sleep(step_ms / 1000.0)
+        waited += step_ms
+    if not window._backend_ready:
+        errors.append(
+            f'后端未在 {SMOKE_BACKEND_TIMEOUT_MS}ms 内就绪')
+
+    if errors:
+        for err in errors:
+            print(f'[smoke] FAIL: {err}', file=sys.stderr)
+        app.exit(1)
+        return
 
     pages = list(window.pages.items())
     for object_name, page in pages:
