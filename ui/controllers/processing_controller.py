@@ -14,7 +14,7 @@ from ui.desktop_backend_facade import (
     pipeline_from_dicts,
     pipeline_to_raw,
 )
-from ui.controllers.backend_controller import friendly_error_message, run_worker
+from ui.controllers.backend_controller import friendly_error_message, run_command
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -163,40 +163,70 @@ class ProcessingController(QObject):
 
     # ------------------------------------------------------------------
     def run_autotune(self, project_id, line_id, method_id: str, params_hint: dict) -> None:
-        backend = self._backend()
-        bridge = self._job_bridge()
+        run_command(
+            _AutotuneSubmitCommand(self, project_id, line_id, method_id, params_hint),
+            name="mygpr-autotune-submit",
+        )
+
+
+# ------------------------------------------------------------------
+# Worker commands (replaces run_worker closures)
+# ------------------------------------------------------------------
+
+class _AutotuneSubmitCommand:
+    __slots__ = (
+        "_controller",
+        "_project_id",
+        "_line_id",
+        "_method_id",
+        "_params_hint",
+    )
+
+    def __init__(
+        self,
+        controller: ProcessingController,
+        project_id: Any,
+        line_id: Any,
+        method_id: str,
+        params_hint: dict,
+    ) -> None:
+        self._controller = controller
+        self._project_id = project_id
+        self._line_id = line_id
+        self._method_id = str(method_id)
+        self._params_hint = params_hint
+
+    def execute(self) -> None:
+        c = self._controller
+        backend = c._backend()
+        bridge = c._job_bridge()
         if backend is None or bridge is None:
             return
-        method_id = str(method_id)
+        try:
+            dataset = backend.projects.read_dataset(str(self._project_id), str(self._line_id))
+            data = np.asarray(dataset.data, dtype=np.float32)
+            kwargs: dict[str, Any] = {}
+            if self._params_hint:
+                kwargs["candidate_params"] = [dict(self._params_hint)]
+            job_id = backend.submit_autotune(data, self._method_id, **kwargs)
+        except Exception as exc:  # noqa: BLE001
+            message = friendly_error_message(exc)
+            c.log_message.emit(f"自动调参提交失败：{message}")
+            c.autotune_failed.emit(self._method_id, message)
+            return
+        c.log_message.emit(f"自动调参已提交：{self._method_id}")
 
-        def runner() -> None:
-            try:
-                dataset = backend.projects.read_dataset(str(project_id), str(line_id))
-                data = np.asarray(dataset.data, dtype=np.float32)
-                kwargs: dict[str, Any] = {}
-                if params_hint:
-                    kwargs["candidate_params"] = [dict(params_hint)]
-                job_id = backend.submit_autotune(data, method_id, **kwargs)
-            except Exception as exc:  # noqa: BLE001
-                message = friendly_error_message(exc)
-                self.log_message.emit(f"自动调参提交失败：{message}")
-                self.autotune_failed.emit(method_id, message)
-                return
-            self.log_message.emit(f"自动调参已提交：{method_id}")
+        def _done(success: bool, message: str, result: Any) -> None:
+            if success:
+                c.autotune_finished.emit(
+                    self._method_id, dict(result) if isinstance(result, Mapping) else {}
+                )
+                c.log_message.emit(f"自动调参完成：{self._method_id}")
+            else:
+                c.autotune_failed.emit(self._method_id, message)
+                c.log_message.emit(f"自动调参失败：{message}")
 
-            def _done(success: bool, message: str, result: Any) -> None:
-                if success:
-                    self.autotune_finished.emit(
-                        method_id, dict(result) if isinstance(result, Mapping) else {}
-                    )
-                    self.log_message.emit(f"自动调参完成：{method_id}")
-                else:
-                    self.autotune_failed.emit(method_id, message)
-                    self.log_message.emit(f"自动调参失败：{message}")
-
-            self._watch_with_callback(job_id, f"自动调参 {method_id}", _done)
-
-        run_worker(runner, name="mygpr-autotune-submit")
+        c._watch_with_callback(job_id, f"自动调参 {self._method_id}", _done)
 
 
 __all__ = ["ProcessingController", "build_method_dicts"]

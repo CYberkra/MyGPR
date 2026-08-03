@@ -8,7 +8,7 @@ from typing import Any, Callable
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
-from ui.controllers.backend_controller import friendly_error_message, run_worker
+from ui.controllers.backend_controller import friendly_error_message, run_command
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -48,32 +48,10 @@ class InterpretationController(QObject):
 
     # ------------------------------------------------------------------
     def open_session(self, project_id: str, line_id: str) -> None:
-        backend = self._backend()
-        if backend is None:
-            self.session_failed.emit("后端尚未就绪")
-            return
-        if self._busy:
-            self.log_message.emit("操作进行中，请稍后…")
-            return
-        self._set_busy(True)
-
-        def runner() -> None:
-            try:
-                snapshot = backend.interpretation_edit.open_session(
-                    str(project_id), str(line_id)
-                )
-            except Exception as exc:  # noqa: BLE001
-                message = friendly_error_message(exc)
-                self.log_message.emit(f"打开标注会话失败：{message}")
-                self.session_failed.emit(message)
-            else:
-                self._session_id = snapshot.session_id
-                self.log_message.emit(f"标注会话已打开：{line_id}")
-                self.session_opened.emit(snapshot)
-            finally:
-                self._set_busy(False)
-
-        run_worker(runner, name="mygpr-interpretation-open")
+        run_command(
+            _OpenSessionCommand(self, project_id, line_id),
+            name="mygpr-interpretation-open",
+        )
 
     def _run_edit(
         self,
@@ -82,31 +60,10 @@ class InterpretationController(QObject):
         *,
         name: str = "mygpr-interpretation-edit",
     ) -> None:
-        backend = self._backend()
-        session_id = self._session_id
-        if backend is None:
-            return
-        if session_id is None:
-            self.session_failed.emit("请先打开标注会话")
-            return
-        if self._busy:
-            self.log_message.emit("操作进行中，请稍后…")
-            return
-        self._set_busy(True)
-
-        def runner() -> None:
-            try:
-                snapshot = operation(backend.interpretation_edit, session_id)
-            except Exception as exc:  # noqa: BLE001
-                message = friendly_error_message(exc)
-                self.log_message.emit(f"{operation_name}失败：{message}")
-                self.session_failed.emit(message)
-            else:
-                self.session_updated.emit(snapshot)
-            finally:
-                self._set_busy(False)
-
-        run_worker(runner, name=name)
+        run_command(
+            _InterpretationEditCommand(self, operation_name, operation),
+            name=name,
+        )
 
     # ------------------------------------------------------------------
     def replace_points(self, points: list[tuple[int, int]]) -> None:
@@ -139,32 +96,10 @@ class InterpretationController(QObject):
 
     # ------------------------------------------------------------------
     def save(self, status: str = "draft") -> None:
-        backend = self._backend()
-        session_id = self._session_id
-        if backend is None:
-            return
-        if session_id is None:
-            self.session_failed.emit("请先打开标注会话")
-            return
-        if self._busy:
-            self.log_message.emit("操作进行中，请稍后…")
-            return
-        self._set_busy(True)
-
-        def runner() -> None:
-            try:
-                backend.interpretation_edit.save_session(session_id, status=str(status or "draft"))
-            except Exception as exc:  # noqa: BLE001
-                message = friendly_error_message(exc)
-                self.log_message.emit(f"保存标注失败：{message}")
-                self.session_failed.emit(message)
-            else:
-                self.log_message.emit("标注已保存")
-                self.saved.emit("标注已保存")
-            finally:
-                self._set_busy(False)
-
-        run_worker(runner, name="mygpr-interpretation-save")
+        run_command(
+            _SaveSessionCommand(self, status),
+            name="mygpr-interpretation-save",
+        )
 
     def close_session(self) -> None:
         backend = self._backend()
@@ -178,6 +113,115 @@ class InterpretationController(QObject):
             self.log_message.emit(f"关闭标注会话失败：{friendly_error_message(exc)}")
         else:
             self.log_message.emit("标注会话已关闭")
+
+
+# ------------------------------------------------------------------
+# Worker commands (replaces run_worker closures)
+# ------------------------------------------------------------------
+
+class _OpenSessionCommand:
+    __slots__ = ("_controller", "_project_id", "_line_id")
+
+    def __init__(self, controller: InterpretationController, project_id: str, line_id: str) -> None:
+        self._controller = controller
+        self._project_id = project_id
+        self._line_id = line_id
+
+    def execute(self) -> None:
+        c = self._controller
+        backend = c._backend()
+        if backend is None:
+            c.session_failed.emit("后端尚未就绪")
+            return
+        if c._busy:
+            c.log_message.emit("操作进行中，请稍后…")
+            return
+        c._set_busy(True)
+        try:
+            snapshot = backend.interpretation_edit.open_session(
+                str(self._project_id), str(self._line_id)
+            )
+        except Exception as exc:  # noqa: BLE001
+            message = friendly_error_message(exc)
+            c.log_message.emit(f"打开标注会话失败：{message}")
+            c.session_failed.emit(message)
+        else:
+            c._session_id = snapshot.session_id
+            c.log_message.emit(f"标注会话已打开：{self._line_id}")
+            c.session_opened.emit(snapshot)
+        finally:
+            c._set_busy(False)
+
+
+class _InterpretationEditCommand:
+    __slots__ = ("_controller", "_operation_name", "_operation")
+
+    def __init__(
+        self,
+        controller: InterpretationController,
+        operation_name: str,
+        operation: Callable[[Any, str], Any],
+    ) -> None:
+        self._controller = controller
+        self._operation_name = operation_name
+        self._operation = operation
+
+    def execute(self) -> None:
+        c = self._controller
+        backend = c._backend()
+        session_id = c._session_id
+        if backend is None:
+            return
+        if session_id is None:
+            c.session_failed.emit("请先打开标注会话")
+            return
+        if c._busy:
+            c.log_message.emit("操作进行中，请稍后…")
+            return
+        c._set_busy(True)
+        try:
+            snapshot = self._operation(backend.interpretation_edit, session_id)
+        except Exception as exc:  # noqa: BLE001
+            message = friendly_error_message(exc)
+            c.log_message.emit(f"{self._operation_name}失败：{message}")
+            c.session_failed.emit(message)
+        else:
+            c.session_updated.emit(snapshot)
+        finally:
+            c._set_busy(False)
+
+
+class _SaveSessionCommand:
+    __slots__ = ("_controller", "_status")
+
+    def __init__(self, controller: InterpretationController, status: str = "draft") -> None:
+        self._controller = controller
+        self._status = status
+
+    def execute(self) -> None:
+        c = self._controller
+        backend = c._backend()
+        session_id = c._session_id
+        if backend is None:
+            return
+        if session_id is None:
+            c.session_failed.emit("请先打开标注会话")
+            return
+        if c._busy:
+            c.log_message.emit("操作进行中，请稍后…")
+            return
+        c._set_busy(True)
+        try:
+            backend.interpretation_edit.save_session(session_id, status=str(self._status or "draft"))
+        except Exception as exc:  # noqa: BLE001
+            message = friendly_error_message(exc)
+            c.log_message.emit(f"保存标注失败：{message}")
+            c.session_failed.emit(message)
+        else:
+            c.log_message.emit("标注已保存")
+            c.saved.emit("标注已保存")
+        finally:
+            c._set_busy(False)
 
 
 __all__ = ["InterpretationController"]

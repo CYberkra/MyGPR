@@ -8,7 +8,7 @@ from typing import Any
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
-from ui.controllers.backend_controller import friendly_error_message, run_worker
+from ui.controllers.backend_controller import friendly_error_message, run_command
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -66,19 +66,10 @@ class DeliveryController(QObject):
 
     # ------------------------------------------------------------------
     def refresh_spatial(self, project_id: str) -> None:
-        backend = self._backend()
-        if backend is None:
-            return
-
-        def runner() -> None:
-            try:
-                results = list(backend.spatial.list_results(str(project_id)))
-            except Exception as exc:  # noqa: BLE001
-                self.log_message.emit(f"刷新空间成果失败：{friendly_error_message(exc)}")
-            else:
-                self.spatial_results_updated.emit(results)
-
-        run_worker(runner, name="mygpr-spatial-refresh")
+        run_command(
+            _SpatialRefreshCommand(self, project_id),
+            name="mygpr-spatial-refresh",
+        )
 
     def create_spatial(self, project_id: str, name: str, line_ids: list[str]) -> str | None:
         selected = [str(item) for item in (line_ids or [])]
@@ -125,6 +116,30 @@ class DeliveryController(QObject):
                 str(dest_root),
             ),
         )
+
+
+# ------------------------------------------------------------------
+# Worker commands (replaces run_worker closures)
+# ------------------------------------------------------------------
+
+class _SpatialRefreshCommand:
+    __slots__ = ("_controller", "_project_id")
+
+    def __init__(self, controller: DeliveryController, project_id: str) -> None:
+        self._controller = controller
+        self._project_id = project_id
+
+    def execute(self) -> None:
+        c = self._controller
+        backend = c._backend()
+        if backend is None:
+            return
+        try:
+            results = list(backend.spatial.list_results(str(self._project_id)))
+        except Exception as exc:  # noqa: BLE001
+            c.log_message.emit(f"刷新空间成果失败：{friendly_error_message(exc)}")
+        else:
+            c.spatial_results_updated.emit(results)
 
 
 __all__ = ["DeliveryController"]

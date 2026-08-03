@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import datetime
 import logging
-from ui.controllers.backend_controller import run_worker
+from ui.controllers.backend_controller import run_command
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
@@ -697,13 +697,28 @@ class _JobCenterMixin:
             self._infobar('warning', '任务中心', '后端尚未就绪')
             return
 
-        def runner() -> None:
-            try:
-                removed = backend.jobs.prune()
-            except Exception as exc:  # noqa: BLE001
-                _LOGGER.warning('jobs prune 失败: %s', exc)
-                self._log_signal.emit(f'WARNING 清理已完成任务失败: {exc}')
-            else:
-                self._log_signal.emit(f'INFO 已清理 {len(removed)} 个终态任务记录')
+        run_command(
+            _JobsPruneCommand(self, backend),
+            name='mygpr-jobs-prune',
+        )
 
-        run_worker(runner, name='mygpr-jobs-prune')
+
+# ------------------------------------------------------------------
+# Worker commands (replaces run_worker closures)
+# ------------------------------------------------------------------
+
+class _JobsPruneCommand:
+    __slots__ = ("_mixins", "_backend")
+
+    def __init__(self, mixins: Any, backend: Any) -> None:
+        self._mixins = mixins
+        self._backend = backend
+
+    def execute(self) -> None:
+        try:
+            removed = self._backend.jobs.prune()
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.warning('jobs prune 失败: %s', exc)
+            self._mixins._log_signal.emit(f'WARNING 清理已完成任务失败: {exc}')
+        else:
+            self._mixins._log_signal.emit(f'INFO 已清理 {len(removed)} 个终态任务记录')

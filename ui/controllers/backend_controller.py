@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Any, Callable
+from typing import Any, Callable, Protocol
 
 import numpy as np
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
@@ -21,6 +21,22 @@ from mygpr.interfaces.backend import MyGPRBackend  # noqa: F401 — type-check o
 _LOGGER = logging.getLogger(__name__)
 
 PROJECT_BUSY_MESSAGE = "项目正被其他任务占用，请稍后重试"
+
+
+class WorkerCommand(Protocol):
+    def execute(self) -> None: ...
+
+
+def run_command(command: WorkerCommand, *, name: str = "mygpr-ui-worker") -> threading.Thread:
+    """Start ``command.execute()`` on a daemon worker thread and return the thread."""
+    thread = threading.Thread(target=command.execute, name=name, daemon=True)
+    thread.start()
+    return thread
+
+
+def run_worker(target: Callable[[], None], *, name: str = "mygpr-ui-worker") -> threading.Thread:
+    """Deprecated: use ``run_command`` with a ``WorkerCommand`` instead."""
+    return run_command(target, name=name)  # type: ignore[arg-type]
 
 _STATUS_BY_EVENT = {
     JobEventType.QUEUED: "queued",
@@ -283,8 +299,10 @@ __all__ = [
     "BackendController",
     "JobBridge",
     "PROJECT_BUSY_MESSAGE",
+    "WorkerCommand",
     "extract_small_result",
     "friendly_error_message",
+    "run_command",
     "run_worker",
     "snapshot_error_message",
 ]
