@@ -16,14 +16,15 @@ from typing import Any
 
 from core.app_errors import error_info_from_exception
 from core.field_artifact_store import FieldArtifactStoreMixin
-from core.field_line_store import FieldLineStoreMixin
 from core.field_interface_store import FieldInterfaceStoreMixin
+from core.field_line_store import FieldLineStoreMixin
 from core.field_processing_draft_store import FieldProcessingDraftStoreMixin
-from core.field_project_runtime_store import FieldProjectRuntimeStoreMixin
 from core.field_project_models import (
     FIELD_PROJECT_SCHEMA, TARGET_FIELDS, FieldLineRecord, FieldProjectManifest,
     atomic_write_json, atomic_write_text, local_now,
 )
+from core.field_project_protocol import FieldProjectStoreProtocol
+from core.field_project_runtime_store import FieldProjectRuntimeStoreMixin
 from core.field_spatial_store import FieldSpatialStoreMixin
 from core.project_repository import ProjectAccessMode, ProjectRepository, ProjectSession
 from core.project_root_guard import ensure_project_root_marker
@@ -39,7 +40,7 @@ class FieldProjectStore(
     FieldTargetStoreMixin, FieldSpatialStoreMixin, FieldArtifactStoreMixin,
     FieldProjectRuntimeStoreMixin,
 ):
-    """Durable project-manifest coordinator for the field workbench."""
+    """Durable project-manifest coordinator (see ``FieldProjectStoreProtocol``)."""
 
     MANIFEST_NAME = "project.json"
     DIRECTORIES = (
@@ -173,4 +174,4 @@ class FieldProjectStore(
             logger.error("Failed to save project manifest: %s [%s]", error_info.user_message, error_info.error_code)
             raise
 
-__all__ = ["FIELD_PROJECT_SCHEMA", "FieldLineRecord", "FieldProjectManifest", "FieldProjectStore", "TARGET_FIELDS", "local_now"]
+__all__ = ["FIELD_PROJECT_SCHEMA", "FieldLineRecord", "FieldProjectManifest", "FieldProjectStore", "FieldProjectStoreProtocol", "TARGET_FIELDS", "local_now"]
