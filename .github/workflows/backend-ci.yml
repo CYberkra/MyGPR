@@ -1,4 +1,4 @@
-name: MyGPR backend CI
+name: MyGPR CI
 
 on:
   pull_request:
@@ -22,3 +22,52 @@ jobs:
       - run: python backend_smoke.py
       - run: python backend_project_smoke.py
       - run: python -m pytest -q
+
+  backend-matrix:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: python -m pip install -r requirements-test-backend.txt
+      - run: python -m pytest -q
+
+  gui-linux-offscreen:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: python -m pip install -r requirements-core.txt -r requirements-gui.txt -r requirements-dev.txt
+      - run: QT_QPA_PLATFORM=offscreen python app_qt.py --smoke
+
+  gui-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: python -m pip install -r requirements-core.txt -r requirements-gui.txt -r requirements-dev.txt
+      - run: python app_qt.py --smoke
+
+  clean-install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install .
+      - run: python -c "import mygpr; print('import ok')"
+      - run: python -m pytest tests/test_version_consistency.py tests/test_spatial_online_basemap_contract.py -q

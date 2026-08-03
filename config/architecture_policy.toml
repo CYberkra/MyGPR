@@ -23,6 +23,18 @@ allowed_local_import_prefixes = ["mygpr.interfaces", "mygpr.application", "mygpr
 paths = ["core"]
 forbidden_import_prefixes = ["PyQt6", "PySide6", "qfluentwidgets", "studio_app", "frontend_sdk", "ui", "compatibility"]
 
+[layers.ui]
+paths = ["ui"]
+allowed_local_import_prefixes = ["ui", "mygpr.interfaces"]
+
+[[migration_exceptions]]
+path_prefix = "ui/desktop_backend_facade.py"
+allowed_local_import_prefixes = ["core", "mygpr.application", "mygpr.domain"]
+owner = "qt-ui"
+remove_after = "1.0.0"
+reason = "Facade concentrates all ui→core/ui→domain/ui→application imports; other ui/ modules must route through it."
+max_function_lines = 100
+
 [path_policy]
 forbid_sys_path_mutation_under = ["core", "mygpr", "cli_batch.py"]
 

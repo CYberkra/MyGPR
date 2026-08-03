@@ -12,9 +12,7 @@ from typing import Any
 import numpy as np
 from PyQt6.QtCore import QObject, pyqtSignal
 
-from core.gpr_data_model import GPRDataSet
-from core.gui_rendering import bundle_from_dataset
-from mygpr.domain.acquisition.models import SensorSyncSettings
+from ui.desktop_backend_facade import GPRDataSet, bundle_from_dataset
 from ui.controllers.backend_controller import friendly_error_message, run_worker
 
 _LOGGER = logging.getLogger(__name__)

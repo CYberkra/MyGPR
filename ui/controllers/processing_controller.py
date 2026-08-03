@@ -9,14 +9,15 @@ from typing import Any, Callable, Mapping
 import numpy as np
 from PyQt6.QtCore import QObject, pyqtSignal
 
-from core.method_registry_metadata import (
+from ui.desktop_backend_facade import (
     METHOD_CATEGORY_LABELS,
     METHOD_METADATA,
     METHOD_TAGS,
     PREFERRED_METHOD_ORDER,
+    PipelineDefinition,
+    PipelineStep,
+    PROCESSING_METHODS,
 )
-from core.methods_registry import PROCESSING_METHODS
-from mygpr.domain.processing.models import PipelineDefinition, PipelineStep
 from ui.controllers.backend_controller import friendly_error_message, run_worker
 
 _LOGGER = logging.getLogger(__name__)

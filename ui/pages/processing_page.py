@@ -23,7 +23,7 @@ from qfluentwidgets import (
 )
 from qfluentwidgets import FluentIcon as FIF
 
-from core.gui_rendering import compute_levels
+from ui.desktop_backend_facade import compute_levels
 from ui import constants
 from ui.widgets import (BScanView, CollapsiblePanel, MethodBrowser, ParamForm,
                         PipelineList, mark_invalid, clear_invalid,

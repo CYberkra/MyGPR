@@ -43,9 +43,9 @@ from ui import constants
 from ui.widgets import BScanView, clear_invalid, mark_invalid, validate_non_empty
 from ui.widgets.context_menus import add_action, make_menu
 
-# 导入文件对话框过滤器：优先 core.gpr_format_registry，失败回退（SPEC §6.3）
+# 导入文件对话框过滤器：通过 DesktopBackendFacade 获取（SPEC §6.3）
 try:
-    from core.gpr_format_registry import supported_file_dialog_filter
+    from ui.desktop_backend_facade import supported_file_dialog_filter
     _GPR_FILE_FILTER = supported_file_dialog_filter()
 except Exception:  # noqa: BLE001 - 后端模块不可用时回退
     _GPR_FILE_FILTER = ('GPR 数据文件 (*.csv *.txt *.dat *.sgy *.segy *.rd3 '

@@ -15,7 +15,7 @@ from typing import Any, Callable
 import numpy as np
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
-from mygpr.application.jobs.models import JobEventType, JobResultSummary, JobSnapshot
+from ui.desktop_backend_facade import JobEventType, JobResultSummary, JobSnapshot
 from mygpr.interfaces.backend import MyGPRBackend
 
 _LOGGER = logging.getLogger(__name__)
