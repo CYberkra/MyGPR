@@ -16,4 +16,9 @@
 3. 增加项目自动保存、崩溃恢复和增量备份服务。
 4. 完善 AutoTune 安全边界、候选流程空间和证据导出。
 
-前端设计、Qt 页面和桌面打包不在本交付包范围内。
+## 前端（v0.9.37 已交付）
+
+- Qt GUI 可用：`app_qt.py` 启动，七页导航 + 右侧日志面板。
+- 架构门禁已建立：`ui/` → `core/` 通过 `desktop_backend_facade.py` 统一通道。
+- `MyGPRMainWindow` 已拆分：组装器（`main_window.py`）+ 信号 mixin（`window_mixins.py`）。
+- CI 已覆盖：Linux offscreen、Windows GUI、Python 3.11/3.12/3.13、干净安装。

@@ -23,7 +23,9 @@ python cli_batch.py --help             # 无头批处理入口
 ```text
 app_qt.py                      # GUI 入口（DPI PassThrough、主题、--smoke）
 ui/                            # PyQt6 前端
-  main_window.py               # FluentWindow 组装器，屏幕自适应窗口尺寸
+  main_window.py               # FluentWindow 组装器（信号 handler 分发至 window_mixins.py）
+  window_mixins.py             # 信号 handler mixin：项目/测线/导入预检/处理/解释/成果/任务
+  desktop_backend_facade.py    # ui→core/domain/application 统一导入通道（架构门禁例外）
   pages/                       # 七个页面，纯展示 + 发信号
   widgets/                     # BScanView / CollapsiblePanel / LogPanel 等
   controllers/                 # Qt 控制器：run_worker 后台线程 + 信号回主线程

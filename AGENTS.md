@@ -12,7 +12,7 @@ All commands below assume this directory is the working directory.
 ## Repo Map
 
 - `app_qt.py` — GUI 入口（DPI PassThrough、`--smoke` 离屏截图）。
-- `ui/` — Qt 前端：`main_window.py` 组装器 + `pages/`（七页）+ `widgets/` + `controllers/`。
+- `ui/` — Qt 前端：`main_window.py` 组装器（信号 handler 分发至 `window_mixins.py`）+ `pages/`（七页）+ `widgets/` + `controllers/` + `desktop_backend_facade.py`（ui→core 统一通道）。
 - `mygpr/` — 后端分层：interfaces / application / domain / infrastructure。
 - `core/` — 遗留内核（仍活跃），由 mygpr infrastructure 适配器调用。
 - `PythonModule/` — 算法包装器；经方法注册表动态加载，静态 grep 不到引用≠死代码。
