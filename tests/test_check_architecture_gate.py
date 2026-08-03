@@ -41,3 +41,10 @@ def test_check_architecture_reports_layer_violations():
     policy = _load_policy()
     errors, _graph = module._check_layers(policy)
     assert isinstance(errors, list)
+
+
+def test_check_architecture_reports_ui_reverse_dependencies():
+    module = _load_check_architecture()
+    policy = _load_policy()
+    errors = module._check_ui_reverse_dependencies(policy)
+    assert isinstance(errors, list)

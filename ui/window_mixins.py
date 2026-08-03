@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import datetime
 import logging
-import threading
+from ui.controllers.backend_controller import run_worker
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
@@ -706,5 +706,4 @@ class _JobCenterMixin:
             else:
                 self._log_signal.emit(f'INFO 已清理 {len(removed)} 个终态任务记录')
 
-        threading.Thread(target=runner, name='mygpr-jobs-prune',
-                         daemon=True).start()
+        run_worker(runner, name='mygpr-jobs-prune')

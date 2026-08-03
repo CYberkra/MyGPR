@@ -282,6 +282,21 @@ def _check_new_code_quality(policy: dict) -> list[str]:
     return errors
 
 
+def _check_ui_reverse_dependencies(policy: dict) -> list[str]:
+    errors: list[str] = []
+    ui_prefix = "ui."
+    for root in ["core", "mygpr", "PythonModule", "app_qt.py", "cli_batch.py"]:
+        for path in py_files(root):
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for imported in imported_names(tree, path):
+                if imported.name == ui_prefix or imported.name.startswith(ui_prefix):
+                    errors.append(
+                        f"{path.relative_to(ROOT)}:{imported.line}: "
+                        f"reverse ui dependency: {imported.name}"
+                    )
+    return errors
+
+
 def _check_frozen_modules(policy: dict) -> list[str]:
     errors: list[str] = []
     for item in policy.get("frozen_modules", []):
@@ -311,6 +326,7 @@ def main() -> int:
     errors.extend(_check_compatibility_registry(policy))
     errors.extend(_check_new_code_quality(policy))
     errors.extend(_check_frozen_modules(policy))
+    errors.extend(_check_ui_reverse_dependencies(policy))
     if errors:
         print("\n".join(errors))
         return 1

@@ -13,11 +13,6 @@ import platform
 import sys
 import time
 
-from PyQt6.QtCore import Qt, QtMsgType, QTimer, qInstallMessageHandler
-from PyQt6.QtGui import QFont, QGuiApplication
-from PyQt6.QtWidgets import QApplication
-from qfluentwidgets import Theme, setTheme
-
 # Python <3.11 没有 enum.StrEnum；给全局 enum 模块补一个最低限度兼容实现，
 # 让 core / domain 各模块的 `from enum import StrEnum` 能直接工作。
 try:
@@ -35,12 +30,12 @@ except ImportError:  # pragma: no cover - Python 3.10 fallback
 # 反复用系统深色 palette 覆盖应用 palette，浅色主题下原生控件（表格/列表/
 # 下拉框）仍是深色。禁用后由 theme_helpers.apply_theme 显式 setPalette，
 # 深浅主题完全由应用内设置决定，跨机器表现一致。
-os.environ.setdefault('QT_QPA_PLATFORM', 'windows:darkmode=0')
+if sys.platform == "win32":
+    os.environ.setdefault('QT_QPA_PLATFORM', 'windows:darkmode=0')
 
 from core.observability import (configure_structured_logging,
                                 install_global_exception_hooks)
 from ui import constants
-from ui.main_window import MyGPRMainWindow, PlaceholderPage
 
 SMOKE_SHOTS_DIR = '/tmp/mygpr_shots'
 SMOKE_DELAY_MS = 3000
@@ -172,6 +167,19 @@ def _run_smoke(window: MyGPRMainWindow) -> None:
 
 
 def main() -> int:
+    try:
+        from PyQt6.QtCore import QtMsgType
+        from PyQt6.QtGui import QFont
+        from PyQt6.QtWidgets import QApplication, QGuiApplication
+        from qfluentwidgets import setTheme, Theme
+    except ImportError as exc:
+        print(
+            "ERROR: MyGPR GUI dependencies are not installed.\n"
+            "Install them with: pip install -e '.[gui]'",
+            file=sys.stderr,
+        )
+        raise SystemExit(1) from exc
+
     _setup_diagnostics()
 
     parser = argparse.ArgumentParser(description=constants.APP_NAME)
