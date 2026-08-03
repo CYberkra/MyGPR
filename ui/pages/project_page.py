@@ -45,8 +45,8 @@ from ui.widgets.context_menus import add_action, make_menu
 
 # 导入文件对话框过滤器：通过 DesktopBackendFacade 获取（SPEC §6.3）
 try:
-    from ui.desktop_backend_facade import supported_file_dialog_filter
-    _GPR_FILE_FILTER = supported_file_dialog_filter()
+    from ui.desktop_backend_facade import file_dialog_filter
+    _GPR_FILE_FILTER = file_dialog_filter()
 except Exception:  # noqa: BLE001 - 后端模块不可用时回退
     _GPR_FILE_FILTER = ('GPR 数据文件 (*.csv *.txt *.dat *.sgy *.segy *.rd3 '
                         '*.rd7 *.out *.npy *.npz);;所有文件 (*)')

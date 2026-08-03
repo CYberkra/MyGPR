@@ -15,8 +15,8 @@ from typing import Any, Callable
 import numpy as np
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
-from ui.desktop_backend_facade import JobEventType, JobResultSummary, JobSnapshot
-from mygpr.interfaces.backend import MyGPRBackend
+from ui.desktop_backend_facade import JobEventType, JobResultSummary, UiJobSnapshot, job_snapshot_from_raw
+from mygpr.interfaces.backend import MyGPRBackend  # noqa: F401 — type-check only
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ def friendly_error_message(exc: BaseException | None) -> str:
     return message or type(exc).__name__
 
 
-def snapshot_error_message(snapshot: JobSnapshot) -> str:
+def snapshot_error_message(snapshot: UiJobSnapshot) -> str:
     """Build the user-facing message for a failed/cancelled job snapshot."""
     if snapshot.error_code == "MYGPR_PROJECT_BUSY":
         return PROJECT_BUSY_MESSAGE
@@ -168,15 +168,16 @@ class JobBridge(QObject):
         message = ""
         result: Any = None
         try:
-            snapshot = self._backend.jobs.snapshot(job_id)
+            raw_snapshot = self._backend.jobs.snapshot(job_id)
         except KeyError:
             message = "任务状态不可用"
         else:
-            status = snapshot.status.value
+            snapshot = job_snapshot_from_raw(raw_snapshot)
+            status = snapshot.status
             success = status == "completed"
             if success:
                 message = snapshot.message or "任务完成"
-                result = extract_small_result(snapshot.result)
+                result = extract_small_result(raw_snapshot.result)
             elif status == "cancelled":
                 message = snapshot.message or "任务已取消"
             else:

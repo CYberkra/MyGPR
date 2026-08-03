@@ -10,13 +10,9 @@ import numpy as np
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from ui.desktop_backend_facade import (
-    METHOD_CATEGORY_LABELS,
-    METHOD_METADATA,
-    METHOD_TAGS,
-    PREFERRED_METHOD_ORDER,
-    PipelineDefinition,
-    PipelineStep,
-    PROCESSING_METHODS,
+    method_catalog,
+    pipeline_from_dicts,
+    pipeline_to_raw,
 )
 from ui.controllers.backend_controller import friendly_error_message, run_worker
 
@@ -32,30 +28,23 @@ def _schema_to_list(parameter_schema: Mapping[str, Any]) -> list[dict]:
     return params
 
 
-def build_method_dicts(descriptors) -> list[dict]:
-    """Merge service descriptors with registry display metadata."""
-    order = {method_id: index for index, method_id in enumerate(PREFERRED_METHOD_ORDER)}
+def build_method_dicts(entries: tuple[UiMethodEntry, ...]) -> list[dict]:
+    """Convert facade method catalog entries to the list-of-dicts shape the UI expects."""
     items: list[dict] = []
-    for descriptor in descriptors:
-        method_id = str(descriptor.method_id)
-        meta = METHOD_METADATA.get(method_id, {})
-        raw = PROCESSING_METHODS.get(method_id, {})
-        category = str(meta.get("category") or descriptor.category or "experimental")
-        tag = METHOD_TAGS.get(method_id)
+    for entry in entries:
         items.append(
             {
-                "method_id": method_id,
-                "name": str(descriptor.name),
-                "display_name": str(meta.get("display_name") or descriptor.name),
-                "category": category,
-                "category_label": str(METHOD_CATEGORY_LABELS.get(category, category)),
-                "tags": [str(tag)] if tag else [],
-                "auto_tune_enabled": bool(descriptor.auto_tune_enabled),
-                "parameter_schema": _schema_to_list(descriptor.parameter_schema),
-                "description": str(raw.get("description") or ""),
+                "method_id": entry.method_id,
+                "name": entry.name,
+                "display_name": entry.display_name,
+                "category": entry.category,
+                "category_label": entry.category_label,
+                "tags": list(entry.tags),
+                "auto_tune_enabled": entry.auto_tune_enabled,
+                "parameter_schema": list(entry.parameter_schema),
+                "description": entry.description,
             }
         )
-    items.sort(key=lambda item: (order.get(item["method_id"], len(order)), item["method_id"]))
     return items
 
 
@@ -112,24 +101,19 @@ class ProcessingController(QObject):
 
     # ------------------------------------------------------------------
     def load_methods(self) -> None:
-        backend = self._backend()
-        if backend is None or self._loading:
+        if self._loading:
             return
         self._loading = True
-
-        def runner() -> None:
-            try:
-                descriptors = backend.processing.list_methods(public_only=True)
-                methods = build_method_dicts(descriptors)
-            except Exception as exc:  # noqa: BLE001
-                self.log_message.emit(f"加载方法库失败：{friendly_error_message(exc)}")
-            else:
-                self.methods_loaded.emit(methods)
-                self.log_message.emit(f"方法库已加载：{len(methods)} 个方法")
-            finally:
-                self._loading = False
-
-        run_worker(runner, name="mygpr-methods-load")
+        try:
+            entries = method_catalog()
+            methods = build_method_dicts(entries)
+        except Exception as exc:  # noqa: BLE001
+            self.log_message.emit(f"加载方法库失败：{friendly_error_message(exc)}")
+        else:
+            self.methods_loaded.emit(methods)
+            self.log_message.emit(f"方法库已加载：{len(methods)} 个方法")
+        finally:
+            self._loading = False
 
     # ------------------------------------------------------------------
     def run_pipeline(
@@ -145,19 +129,11 @@ class ProcessingController(QObject):
         if backend is None or bridge is None:
             return None
         try:
-            steps = [
-                PipelineStep(
-                    method_id=str(step.get("method_id", "")),
-                    params=dict(step.get("params") or {}),
-                    enabled=bool(step.get("enabled", True)),
-                    label=str(step.get("label", "")),
-                )
-                for step in dict(pipeline_def or {}).get("steps", [])
-            ]
-            pipeline = PipelineDefinition(
-                steps=steps,
+            ui_pipeline = pipeline_from_dicts(
+                list(dict(pipeline_def or {}).get("steps", [])),
                 name=str(result_name or dict(pipeline_def or {}).get("name", "")),
             )
+            pipeline = pipeline_to_raw(ui_pipeline)
         except Exception as exc:  # noqa: BLE001
             message = friendly_error_message(exc)
             self.log_message.emit(f"处理链定义无效：{message}")
@@ -176,7 +152,7 @@ class ProcessingController(QObject):
             self.log_message.emit(f"处理链提交失败：{message}")
             self.run_finished.emit(False, message)
             return None
-        self.log_message.emit(f"处理链已提交：{line_id}（{len(steps)} 步）")
+        self.log_message.emit(f"处理链已提交：{line_id}（{len(ui_pipeline.steps)} 步）")
         self.run_submitted.emit(job_id)
         self._watch_with_callback(
             job_id,

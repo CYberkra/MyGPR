@@ -12,7 +12,7 @@ from typing import Any
 import numpy as np
 from PyQt6.QtCore import QObject, pyqtSignal
 
-from ui.desktop_backend_facade import GPRDataSet, bundle_from_dataset
+from ui.desktop_backend_facade import build_preview_bundle
 from ui.controllers.backend_controller import friendly_error_message, run_worker
 
 _LOGGER = logging.getLogger(__name__)
@@ -299,14 +299,11 @@ class ProjectController(QObject):
 
     @staticmethod
     def _bundle_from_window(matrix: Any, line_id: str, *, title: str):
-        dataset = GPRDataSet(
+        return build_preview_bundle(
             line_id=line_id,
             matrix=np.asarray(matrix, dtype=np.float32),
-            distance_axis_m=np.empty(0, dtype=np.float32),
-            time_axis_ns=np.empty(0, dtype=np.float32),
-            depth_axis_m=np.empty(0, dtype=np.float32),
+            title=title,
         )
-        return bundle_from_dataset(dataset, title=title)
 
     # ------------------------------------------------------------------
     def preflight_import(self, source: str, line_id: str, dielectric: float) -> None:

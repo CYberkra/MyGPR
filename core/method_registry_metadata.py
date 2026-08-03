@@ -181,6 +181,7 @@ METHOD_METADATA = {
         "maturity": "experimental",
         "visibility": "public",
         "display_name": "UAV 运动补偿 V2",
+        "description": "Unified motion compensation V2. Per-trace sensor values come from trace_metadata, not manual input.",
     },
     "stolt_migration": {
         "category": "migration",
@@ -211,6 +212,12 @@ METHOD_METADATA = {
         "maturity": "experimental",
         "visibility": "public",
         "display_name": "滑动平均背景抑制",
+    },
+    "rtm_migration": {
+        "category": "migration",
+        "maturity": "experimental",
+        "visibility": "public",
+        "display_name": "RTM 反向时间迁移",
     },
 }
 
@@ -248,6 +255,7 @@ PREFERRED_METHOD_ORDER = [
     "motion_compensation_v2",
     "stolt_migration",
     "kirchhoff_migration",
+    "rtm_migration",
     "time_to_depth",
 ]
 
@@ -272,6 +280,7 @@ METHOD_TAGS = {
     "hilbert_envelope": "推荐",
     "stolt_migration": "实验",
     "kirchhoff_migration": "实验",
+    "rtm_migration": "实验",
     "sliding_avg": "实验",
     "running_average_2D": "备选",
     "trace_median_filter": "备选",
@@ -331,6 +340,7 @@ AUTO_TUNE_STAGE_BY_METHOD = {
     "motion_compensation_attitude": "motion_comp",
     "motion_compensation_vibration": "artifact",
     "motion_compensation_v2": "motion_comp",
+    "rtm_migration": "migration",
 }
 
 METHOD_DISPLAY_NAMES = {key: value["display_name"] for key, value in METHOD_METADATA.items()}

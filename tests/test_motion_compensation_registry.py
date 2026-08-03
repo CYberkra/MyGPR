@@ -161,10 +161,12 @@ def test_motion_v2_frontend_params_are_strategy_not_sensor_arrays():
         "max_shift_ns",
         "max_amplitude_scale",
         "resample_spacing_m",
+        "interpolation_mode",
         "apc_offset_x_m",
         "apc_offset_y_m",
         "apc_offset_z_m",
         "max_abs_tilt_deg",
+        "air_wave_speed_m_per_ns",
     }
     forbidden_manual_sensor_params = {
         "height_agl_m",

@@ -23,7 +23,7 @@ from qfluentwidgets import (
 )
 from qfluentwidgets import FluentIcon as FIF
 
-from ui.desktop_backend_facade import compute_levels
+from ui.desktop_backend_facade import compute_display_levels
 from ui import constants
 from ui.widgets import (BScanView, CollapsiblePanel, MethodBrowser, ParamForm,
                         PipelineList, mark_invalid, clear_invalid,
@@ -534,7 +534,7 @@ class ProcessingPage(QWidget):
                             position=InfoBarPosition.TOP, duration=3000,
                             parent=self)
             return
-        vmin, vmax = compute_levels(bundle.matrix, p_low, p_high)
+        vmin, vmax = compute_display_levels(bundle.matrix, p_low=p_low, p_high=p_high)
         self._bscan.set_matrix(
             bundle.matrix, vmin, vmax,
             title=getattr(bundle, 'title', ''),

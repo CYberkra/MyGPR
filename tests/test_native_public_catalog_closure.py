@@ -15,7 +15,7 @@ def _public_method_ids() -> set[str]:
 
 def test_every_public_processing_method_has_a_native_backend() -> None:
     public_methods = _public_method_ids()
-    assert len(public_methods) == 32
+    assert len(public_methods) == 33
     assert public_methods <= set(NATIVE_ALGORITHMS)
 
 

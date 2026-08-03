@@ -210,7 +210,7 @@ NATIVE_ALGORITHMS: dict[str, NativeAlgorithm] = {
     ),
     "frequency_filter_1d": NativeAlgorithm(
         "frequency_filter_1d", "Frequency filter", "filter", method_frequency_filter, "columns",
-        auto_tune_family="frequency", parameter_schema=_schema(filter_type={"type": "str", "default": "bandpass"}, low_freq_mhz={"type": "float", "default": 10.0}, high_freq_mhz={"type": "float", "default": 800.0}),
+        auto_tune_family="frequency", parameter_schema=_schema(filter_type={"type": "str", "default": "bandpass"}, low_freq_mhz={"type": "float", "default": 10.0}, high_freq_mhz={"type": "float", "default": 800.0}, taper_ratio={"type": "float", "default": 0.0, "min": 0.0, "max": 0.5}),
     ),
     "trace_median_filter": NativeAlgorithm(
         "trace_median_filter", "Trace median filter", "denoise", method_trace_median, "rows",
@@ -253,7 +253,7 @@ NATIVE_ALGORITHMS: dict[str, NativeAlgorithm] = {
         parameter_schema=_schema(
             reference_height_mode={"type": "str", "default": "mean"},
             manual_height={"type": "float", "default": 10.0, "min": 0.0},
-            height_source={"type": "str", "default": "auto"},
+            height_source={"type": "str", "default": "auto", "choices": ("auto", "height_agl_m", "flight_height_m")},
             compensate_amplitude={"type": "bool", "default": True},
             compensate_time_shift={"type": "bool", "default": True},
             wave_speed_m_per_ns={"type": "float", "default": 0.299792458, "min": 0.01},
