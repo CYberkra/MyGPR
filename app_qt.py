@@ -33,9 +33,12 @@ except ImportError:  # pragma: no cover - Python 3.10 fallback
 if sys.platform == "win32":
     os.environ.setdefault('QT_QPA_PLATFORM', 'windows:darkmode=0')
 
+from PyQt6.QtCore import QtMsgType, QTimer, qInstallMessageHandler
+from PyQt6.QtWidgets import QApplication
 from core.observability import (configure_structured_logging,
                                 install_global_exception_hooks)
 from ui import constants
+from ui.main_window import MyGPRMainWindow, PlaceholderPage
 
 SMOKE_SHOTS_DIR = '/tmp/mygpr_shots'
 SMOKE_DELAY_MS = 3000
@@ -168,9 +171,9 @@ def _run_smoke(window: MyGPRMainWindow) -> None:
 
 def main() -> int:
     try:
-        from PyQt6.QtCore import QtMsgType
-        from PyQt6.QtGui import QFont
-        from PyQt6.QtWidgets import QApplication, QGuiApplication
+        from PyQt6.QtCore import Qt, QtMsgType
+        from PyQt6.QtGui import QFont, QGuiApplication
+        from PyQt6.QtWidgets import QApplication
         from qfluentwidgets import setTheme, Theme
     except ImportError as exc:
         print(
