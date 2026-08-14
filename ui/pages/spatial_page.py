@@ -116,7 +116,9 @@ class ElevationProfileView(pg.PlotWidget):
         if legend is not None:
             legend.clear()
         else:
-            legend = self._plot_item.addLegend(offset=(8, 8))
+            legend = self._plot_item.addLegend(
+                offset=(8, 8),
+                labelTextColor='w' if self._dark else 'k')
         colors = dict(colors or {})
         for track in tracks or []:
             points = list(getattr(track, 'points', ()) or ())
@@ -136,15 +138,24 @@ class ElevationProfileView(pg.PlotWidget):
             self._plot_item.plot(mileage, zs[finite], pen=pen, name=name)
 
     def apply_theme(self, dark: bool) -> None:
-        """深色 bg 'k'/文字 'w'；浅色 bg 'w'/文字 'k'；轴 pen/textPen 同步。"""
+        """深色 bg 'k'/文字 'w'；浅色 bg 'w'/文字 'k'；轴 pen/textPen/标签/图例同步。"""
+        self._dark = bool(dark)
         bg = 'k' if dark else 'w'
         fg = 'w' if dark else 'k'
         self.setBackground(bg)
-        pen = pg.mkPen(QColor(fg))
+        # 不能用 QColor(fg)：Qt 颜色名不含 'w'/'k'，非法色会变黑导致深色下轴字不可见
+        pen = pg.mkPen(fg)
         for name in ('bottom', 'left'):
             axis = self._plot_item.getAxis(name)
             axis.setPen(pen)
             axis.setTextPen(pen)
+            # 轴标题（里程/高程）是独立 label，不随 textPen 变色，需显式同步
+            axis.setLabel(text=axis.labelText, color=fg)
+        # 已有图例的条目文字颜色不随主题更新，逐条同步
+        legend = self._plot_item.legend
+        if legend is not None:
+            for _sample, label in legend.items:
+                label.setText(label.text, color=fg)
 
 
 class SpatialPage(QWidget):

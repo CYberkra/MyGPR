@@ -79,7 +79,7 @@ def _create_separator() -> QFrame:
     line = QFrame()
     line.setFrameShape(QFrame.Shape.HLine)
     line.setFrameShadow(QFrame.Shadow.Sunken)
-    line.setStyleSheet('color: #e0e0e0;')
+    line.setStyleSheet('color: rgba(128, 128, 128, 90);')
     return line
 
 

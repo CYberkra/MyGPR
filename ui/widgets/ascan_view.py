@@ -4,7 +4,6 @@
 pen 宽 2、Y 范围 min-0.1 ~ max+0.1、轴标签 bottom='采样点' / left='幅度'。
 """
 
-from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QVBoxLayout, QWidget
 
 import pyqtgraph as pg
@@ -47,16 +46,19 @@ class AScanView(QWidget):
         self._curve.setData([], [])
 
     def apply_theme(self, dark: bool) -> None:
-        """深色 bg 'k'/曲线 'w'；浅色 bg 'w'/曲线 'b'；轴 pen/textPen 同步。"""
+        """深色 bg 'k'/曲线 'w'；浅色 bg 'w'/曲线 'b'；轴 pen/textPen/标签同步。"""
         bg = 'k' if dark else 'w'
         fg = 'w' if dark else 'k'
         curve_color = 'w' if dark else 'b'
         self._plot.setBackground(bg)
         self._curve.setPen(pg.mkPen(curve_color, width=2))
-        pen = pg.mkPen(QColor(fg))
+        # 不能用 QColor(fg)：Qt 颜色名不含 'w'/'k'，非法色会变黑导致深色下轴字不可见
+        pen = pg.mkPen(fg)
         for name in ('bottom', 'left'):
             axis = self._plot.getAxis(name)
             axis.setPen(pen)
             axis.setTextPen(pen)
+            # 轴标题（采样点/幅度）是独立 label，不随 textPen 变色，需显式同步
+            axis.setLabel(text=axis.labelText, color=fg)
         title_item = self._plot.getPlotItem().titleLabel
         title_item.setText(title_item.text, color=fg)

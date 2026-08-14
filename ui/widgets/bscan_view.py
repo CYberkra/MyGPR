@@ -19,7 +19,6 @@ sample_axis 时显示物理量，降采样数据附"原始约 N"），右键菜�
 """
 
 from PyQt6.QtCore import Qt, QDateTime, pyqtSignal
-from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (QApplication, QHBoxLayout, QFileDialog,
                              QVBoxLayout, QWidget)
 
@@ -154,39 +153,32 @@ class BScanView(QWidget):
         layout.setContentsMargins(0, 0, 0, 4)
         layout.setSpacing(4)
 
-        btn_style = (
-            'PushButton { border: 1px solid #ddd; border-radius: 4px; '
-            'padding: 2px 8px; font-size: 11px; }'
-            'PushButton:hover { background-color: #f0f0f0; }'
-        )
-
         self._zoom_in_btn = PushButton('+', self)
         self._zoom_in_btn.setToolTip('放大')
-        self._zoom_in_btn.setStyleSheet(btn_style)
         self._zoom_in_btn.setFixedSize(28, 24)
         self._zoom_in_btn.clicked.connect(self.zoom_in)
         layout.addWidget(self._zoom_in_btn)
 
         self._zoom_out_btn = PushButton('-', self)
         self._zoom_out_btn.setToolTip('缩小')
-        self._zoom_out_btn.setStyleSheet(btn_style)
         self._zoom_out_btn.setFixedSize(28, 24)
         self._zoom_out_btn.clicked.connect(self.zoom_out)
         layout.addWidget(self._zoom_out_btn)
 
         self._fit_btn = PushButton('自适应', self)
         self._fit_btn.setToolTip('适应窗口大小')
-        self._fit_btn.setStyleSheet(btn_style)
         self._fit_btn.setMinimumHeight(24)
         self._fit_btn.clicked.connect(self.fit_to_data)
         layout.addWidget(self._fit_btn)
 
         self._one_to_one_btn = PushButton('1:1', self)
         self._one_to_one_btn.setToolTip('像素 1:1 显示')
-        self._one_to_one_btn.setStyleSheet(btn_style)
         self._one_to_one_btn.setMinimumHeight(24)
         self._one_to_one_btn.clicked.connect(self.reset_1to1)
         layout.addWidget(self._one_to_one_btn)
+
+        self._toolbar_buttons = (self._zoom_in_btn, self._zoom_out_btn,
+                                 self._fit_btn, self._one_to_one_btn)
 
         layout.addStretch(1)
         return layout
@@ -416,7 +408,19 @@ class BScanView(QWidget):
         bg = 'k' if dark else 'w'
         fg = 'w' if dark else 'k'
         self._glw.setBackground(bg)
-        pen = pg.mkPen(QColor(fg))
+        # 工具条按钮：紧凑尺寸保留，颜色随主题（硬编码浅色会在深色下突兀）
+        border = '#5a5a5a' if dark else '#d9d9d9'
+        hover = '#3d3d3d' if dark else '#f0f0f0'
+        btn_qss = (
+            f'PushButton {{ border: 1px solid {border}; border-radius: 4px; '
+            f'padding: 2px 8px; font-size: 11px; }}'
+            f'PushButton:hover {{ background-color: {hover}; }}'
+        )
+        for btn in getattr(self, '_toolbar_buttons', ()):
+            btn.setStyleSheet(btn_qss)
+        # 注意不能用 QColor(fg)：Qt 颜色名不含 'w'/'k'，QColor('w') 非法会变黑，
+        # 深色主题下轴刻度黑底黑字不可见；pg.mkPen 支持 'w'/'k' 简写
+        pen = pg.mkPen(fg)
         for name in ('bottom', 'left'):
             axis = self._plot.getAxis(name)
             axis.setPen(pen)
