@@ -175,8 +175,8 @@ class ProcessingPage(QWidget):
         self._method_browser = MethodBrowser(methods_card)
         self._method_browser.setMinimumHeight(320)
         methods_layout.addWidget(self._method_browser, 1)
+        # 卡片占满左栏全部可用高度，不再在底部留空白
         left_layout.addWidget(methods_card, 1)
-        left_layout.addStretch(1)
 
         # ---------------- 中栏（stretch）
         middle = QWidget(self)

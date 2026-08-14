@@ -294,13 +294,14 @@ class MyGPRMainWindow(FluentWindow, _ProjectLifecycleMixin, _LineArtifactMixin,
 
     def _build_ui(self) -> None:
         """右侧全局可折叠面板（折叠按钮 + LogPanel 承载）。"""
-        # 折叠按钮：宽18 高60，去圆角去边框（style_spec §2.5 逐字 QSS）
-        self.fold_button = PushButton('◀', self)
+        # 折叠按钮：chevron 图标 + 主题色淡底长条（与 CollapsiblePanel 统一视觉）
+        from ui.widgets import chevron_left_icon, collapse_button_qss
+        self.fold_button = PushButton('', self)
         self.fold_button.setFixedSize(constants.FOLD_BUTTON_WIDTH,
                                       constants.FOLD_BUTTON_HEIGHT)
-        self.fold_button.setToolTip('收起/展开右侧面板')
-        self.fold_button.setStyleSheet(
-            'PushButton { border: none; border-radius: 0; font-size: 10px; padding: 0; }')
+        self.fold_button.setIcon(FIF.CHEVRON_RIGHT_MED.icon())
+        self.fold_button.setToolTip('收起右侧面板')
+        self.fold_button.setStyleSheet(collapse_button_qss())
         self.fold_button.clicked.connect(self._toggle_panel)
 
         # 面板容器：LogPanel（A2）或内置回退
@@ -498,7 +499,7 @@ class MyGPRMainWindow(FluentWindow, _ProjectLifecycleMixin, _LineArtifactMixin,
         if bool(self.settings.get('log_panel_collapsed', True)):
             self._panel_collapsed = True
             self.log_panel.hide()
-            self.fold_button.setText('▶')
+            self._set_fold_button_look(collapsed=True)
 
         # 后端就绪门控：除主页/设置外页面禁用，backend_ready 后 enable
         if self.backend_controller is not None:
@@ -534,15 +535,25 @@ class MyGPRMainWindow(FluentWindow, _ProjectLifecycleMixin, _LineArtifactMixin,
         if self._panel_collapsed:
             # 本次是展开完成
             self._panel_collapsed = False
-            self.fold_button.setText('◀')
+            self._set_fold_button_look(collapsed=False)
         else:
             # 本次是收起完成：hide 并复位 maximumWidth
             self._panel_collapsed = True
             self.log_panel.hide()
             self.log_panel.setMaximumWidth(constants.PANEL_MAX_WIDTH)
-            self.fold_button.setText('▶')
+            self._set_fold_button_look(collapsed=True)
         self.settings.set('log_panel_collapsed', self._panel_collapsed)
         self.settings.save()
+
+    def _set_fold_button_look(self, collapsed: bool) -> None:
+        """全局日志面板折叠按钮的图标与提示随状态切换。"""
+        from ui.widgets import chevron_left_icon
+        if collapsed:
+            self.fold_button.setIcon(chevron_left_icon())
+            self.fold_button.setToolTip('展开右侧面板')
+        else:
+            self.fold_button.setIcon(FIF.CHEVRON_RIGHT_MED.icon())
+            self.fold_button.setToolTip('收起右侧面板')
 
     # ============================================================ 日志 / 主题 / 后端门控
     def log_message(self, msg: str) -> None:

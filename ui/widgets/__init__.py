@@ -6,7 +6,8 @@ JobTable / MiniJobList / LogPanel / validators 函数与 StrictComboBox。
 
 from .ascan_view import AScanView
 from .bscan_view import BScanView
-from .collapsible_panel import CollapsiblePanel
+from .collapsible_panel import (CollapsiblePanel, chevron_left_icon,
+                                collapse_button_qss)
 from .job_widgets import JobTable, MiniJobList
 from .log_panel import LogPanel
 from .method_browser import MethodBrowser
@@ -26,6 +27,8 @@ __all__ = [
     'MiniJobList',
     'LogPanel',
     'CollapsiblePanel',
+    'chevron_left_icon',
+    'collapse_button_qss',
     'validate_non_empty',
     'validate_host',
     'validate_port',

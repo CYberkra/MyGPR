@@ -2,16 +2,41 @@
 """CollapsiblePanel — 可折叠侧栏容器。
 
 把任意内容 QWidget 包裹成可横向折叠/展开的侧栏。
-折叠后只保留一个窄按钮条，点击可重新展开。
+折叠按钮为沿面板边缘的纵向长条（chevron 图标 + 主题色淡底），
+展开/折叠时都容易发现；折叠后按钮铺满整个窄条。
 
 与全局 LogPanel 的折叠动画风格保持一致：
 - QPropertyAnimation(maximumWidth) 220ms OutCubic
-- 折叠按钮 QSS 去圆角去边框
+- 主题色淡底 + hover 加深
 """
 
 from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, Qt, pyqtSignal
-from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
-from qfluentwidgets import FluentIcon as FIF, PushButton
+from PyQt6.QtGui import QIcon, QTransform
+from PyQt6.QtWidgets import QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
+from qfluentwidgets import FluentIcon as FIF, PushButton, themeColor
+
+_EXPAND_BUTTON_WIDTH = 16
+
+
+def chevron_left_icon() -> QIcon:
+    """CHEVRON_RIGHT_MED 水平翻转得到向左 chevron。"""
+    pm = FIF.CHEVRON_RIGHT_MED.icon().pixmap(16, 16)
+    return QIcon(pm.transformed(QTransform().scale(-1, 1)))
+
+
+def collapse_button_qss() -> str:
+    c = themeColor()
+    r, g, b = c.red(), c.green(), c.blue()
+    return (
+        'PushButton {'
+        f' background-color: rgba({r}, {g}, {b}, 0.10);'
+        f' border: 1px solid rgba({r}, {g}, {b}, 0.40);'
+        ' border-radius: 6px; padding: 0; }'
+        'PushButton:hover {'
+        f' background-color: rgba({r}, {g}, {b}, 0.22);'
+        f' border: 1px solid rgba({r}, {g}, {b}, 0.60); }}'
+        'PushButton:pressed {'
+        f' background-color: rgba({r}, {g}, {b}, 0.32); }}')
 
 
 class CollapsiblePanel(QWidget):
@@ -40,30 +65,27 @@ class CollapsiblePanel(QWidget):
         self._content_layout.setContentsMargins(0, 0, 0, 0)
         self._content_layout.setSpacing(0)
 
-        # 折叠按钮：明显底色 + 描边 + hover 高亮，窄条也能一眼发现
+        # 折叠按钮：贴边的纵向长条，主题色淡底 + chevron 图标，
+        # 常态可见、hover 加深，一眼可发现。
         self._collapse_btn = PushButton(self)
-        self._collapse_btn.setFixedSize(22, 64)
-        self._update_button_icon()
-        self._collapse_btn.setToolTip('收起 / 展开面板')
-        self._collapse_btn.setStyleSheet(
-            'PushButton {'
-            ' background-color: rgba(0, 120, 215, 0.10);'
-            ' border: 1px solid rgba(0, 120, 215, 0.45);'
-            ' border-radius: 4px; padding: 0; }'
-            'PushButton:hover { background-color: rgba(0, 120, 215, 0.25); }'
-            'PushButton:pressed { background-color: rgba(0, 120, 215, 0.35); }')
+        self._collapse_btn.setFixedWidth(_EXPAND_BUTTON_WIDTH)
+        # PushButton 默认垂直 sizePolicy 为 Fixed，需显式放开才能纵向铺满
+        self._collapse_btn.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+        self._collapse_btn.setStyleSheet(collapse_button_qss())
         self._collapse_btn.clicked.connect(self.toggle)
+        self._update_button_icon()
 
-        # 布局：按钮 + 内容（或 内容 + 按钮）
+        # 布局：按钮 + 内容（或 内容 + 按钮），按钮纵向铺满
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        layout.setSpacing(2)
         if self._side == 'left':
-            layout.addWidget(self._collapse_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+            layout.addWidget(self._collapse_btn, 0)
             layout.addWidget(self._content, 1)
         else:
             layout.addWidget(self._content, 1)
-            layout.addWidget(self._collapse_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+            layout.addWidget(self._collapse_btn, 0)
 
         # 动画
         self._animation = QPropertyAnimation(self, b'maximumWidth', self)
@@ -103,6 +125,10 @@ class CollapsiblePanel(QWidget):
         self._animation.setStartValue(current)
         self._animation.setEndValue(target)
 
+        # 折叠后按钮铺满窄条，作为唯一的展开入口
+        self._collapse_btn.setFixedWidth(
+            self._collapse_width - 4 if collapsed else _EXPAND_BUTTON_WIDTH)
+
         if collapsed:
             self._content.setVisible(False)
             self._update_button_icon()
@@ -127,7 +153,11 @@ class CollapsiblePanel(QWidget):
 
     def _update_button_icon(self) -> None:
         if self._side == 'left':
-            icon = FIF.RIGHT_ARROW if self._collapsed else FIF.LEFT_ARROW
+            # 左栏：展开时点击向左收起（chevron ←），折叠后向右展开（chevron →）
+            icon = FIF.CHEVRON_RIGHT_MED.icon() if self._collapsed \
+                else chevron_left_icon()
         else:
-            icon = FIF.LEFT_ARROW if self._collapsed else FIF.RIGHT_ARROW
+            icon = chevron_left_icon() if self._collapsed \
+                else FIF.CHEVRON_RIGHT_MED.icon()
         self._collapse_btn.setIcon(icon)
+        self._collapse_btn.setToolTip('展开面板' if self._collapsed else '收起面板')
