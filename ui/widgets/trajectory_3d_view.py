@@ -8,9 +8,11 @@ Web Mercator 米再显示——否则 xy（度，跨度 ~0.01）与 z（米，�
 z 取 elevation_m。import pyqtgraph.opengl 失败（缺 PyOpenGL）时降级为
 QLabel 提示，不影响页面其余部分。
 
-真实地形：测线坐标系可识别（EPSG 或经纬度启发）时，后台线程按测线包围盒
-下载 AWS Terrarium 高程瓦片（磁盘缓存 ~/MyGPR/tile_cache/terrarium/），
-解码拼接后双线性重采样到测线坐标系规则网格，以 GLSurfacePlotItem
+真实地形三种来源（set_terrain_source）：在线下载（测线坐标系可识别时，
+后台线程按测线包围盒下载 AWS Terrarium 高程瓦片，磁盘缓存
+~/MyGPR/tile_cache/terrarium/）、本地 DEM 格网、测线数据估算
+（地面散点 = 轨迹海拔 − 离地高度，线性三角剖分插值成网格，免高程瓦片下载）。
+解码拼接后重采样到测线坐标系规则网格，以 GLSurfacePlotItem
 （自定义顶光 shader + 逐顶点色）铺地；网络失败静默降级为平面网格。
 影像贴图：同一后台任务再按 GCJ-02 全局像素坐标逐顶点采样高德影像
 （与 2D 地图共用磁盘缓存），有效顶点覆盖色表；不可用则退回
@@ -38,7 +40,8 @@ from ui.widgets.local_dem import dem_covers_bbox
 from ui.widgets.map_tiles import (TILE_SOURCE_MAX_ZOOM, WORLD_SIZE_M,
                                   extract_epsg, lonlat_to_tile, tile_url,
                                   wgs84_to_gcj02, zoom_for_resolution)
-from ui.widgets.terrain_tiles import (decode_terrarium, mosaic_from_tiles,
+from ui.widgets.terrain_tiles import (decode_terrarium, interpolate_scatter,
+                                      mosaic_from_tiles,
                                       sample_bilinear, sample_imagery_pixels,
                                       terrarium_cache_path,
                                       terrarium_url, tile_grid_for_bbox)
@@ -65,6 +68,23 @@ def _lonlat_xyz_to_mercator(xyz: np.ndarray) -> np.ndarray:
     lat = np.radians(np.clip(out[:, 1], -85.0, 85.0))
     out[:, 1] = radius * np.log(np.tan(np.pi / 4.0 + lat / 2.0))
     return out
+
+
+def _point_ground_z(p) -> float:
+    """单点地表高程估算：优先 metadata 的 ground_elevation_m，
+    否则 轨迹海拔 − 离地高度（flight_height_m）；缺数据返回 NaN。"""
+    ge = getattr(p, 'ground_elevation_m', None)
+    if ge is not None and np.isfinite(ge):
+        return float(ge)
+    z = getattr(p, 'elevation_m', None)
+    fh = getattr(p, 'flight_height_m', None)
+    if z is None or fh is None:
+        return float('nan')
+    z = float(z)
+    fh = float(fh)
+    if not (np.isfinite(z) and np.isfinite(fh)):
+        return float('nan')
+    return z - fh
 
 
 _TERRAIN_CMAP = None
@@ -199,6 +219,7 @@ class _TerrainWorker(QRunnable):
         try:
             prep = self._prep
             local = prep.get('local_dem')
+            estimate = prep.get('estimate')
             if local is not None:
                 # 本地 DEM：免下载，直接在 Mercator 轴上双线性采样
                 z = sample_bilinear(local['elev'], local['mx'], local['my'],
@@ -209,6 +230,14 @@ class _TerrainWorker(QRunnable):
                     z = np.where(np.isfinite(z), z, np.float32(mean))
                     payload = {'gx': prep['gx'], 'gy': prep['gy'],
                                'z': z.astype(np.float32)}
+            elif estimate is not None:
+                # 测线数据估算：散点（轨迹海拔−离地高度）线性三角剖分
+                # 插值到显示网格（共线单测线等退化分布自动回退 IDW）
+                z = interpolate_scatter(estimate['px'], estimate['py'],
+                                        estimate['pz'],
+                                        estimate['qx'], estimate['qy'])
+                payload = {'gx': prep['gx'], 'gy': prep['gy'],
+                           'z': z.reshape(prep['shape']).astype(np.float32)}
             else:
                 zoom = prep['zoom']
                 x0, x1, y0, y1 = prep['tile_range']
@@ -279,6 +308,8 @@ class Trajectory3DView(QWidget):
         self._imagery_on = True          # 地形影像贴图（关 = 高程色表）
         self._local_dem = None           # 本地 DEM {'elev','lons','lats'}（优先于在线瓦片）
         self._terrain_src = None         # (epsg, terrain_bbox) 供本地 DEM 变更后重建地形
+        self._terrain_source = 'online'  # 地形来源：online / local_dem / estimated
+        self._ground_points = None       # 测线估算地面散点 (n,3) 显示坐标，z=地表高程
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
         if _gl is not None:
@@ -325,10 +356,15 @@ class Trajectory3DView(QWidget):
                                float(getattr(p, 'y', 0.0)),
                                float(getattr(p, 'elevation_m', 0.0))]
                               for p in points], dtype=float)
+            gxyz = np.asarray([[float(getattr(p, 'x', 0.0)),
+                                float(getattr(p, 'y', 0.0)),
+                                _point_ground_z(p)]
+                               for p in points], dtype=float)
             finite = np.isfinite(xyz).all(axis=1)
             if np.count_nonzero(finite) < 1:
                 continue
-            arrays.append((str(getattr(track, 'line_id', '') or ''), xyz[finite]))
+            arrays.append((str(getattr(track, 'line_id', '') or ''),
+                           xyz[finite], gxyz[finite]))
             if np.nanmax(np.abs(xyz[:, :2])) >= 1000.0:
                 lonlat_like = False
             if epsg is None:
@@ -343,7 +379,7 @@ class Trajectory3DView(QWidget):
         # 否则会把 Mercator 米当经纬度再转一遍，地形整个失效）
         terrain_bbox = None
         if epsg is not None:
-            raw_xyz = np.concatenate([xyz for _lid, xyz in arrays])
+            raw_xyz = np.concatenate([xyz for _lid, xyz, _g in arrays])
             pad_x = max((raw_xyz[:, 0].max() - raw_xyz[:, 0].min()) * 0.05, 1e-6)
             pad_y = max((raw_xyz[:, 1].max() - raw_xyz[:, 1].min()) * 0.05, 1e-6)
             terrain_bbox = (float(raw_xyz[:, 0].min() - pad_x),
@@ -353,14 +389,19 @@ class Trajectory3DView(QWidget):
         if epsg == 4326:
             # 经纬度（度）→ Web Mercator（米）。否则 xy 跨度仅 ~0.01°，
             # 在高程（百米级）/网格尺度下测线塌缩成一根竖线（营山数据实测）
-            arrays = [(lid, _lonlat_xyz_to_mercator(xyz))
-                      for lid, xyz in arrays]
+            arrays = [(lid, _lonlat_xyz_to_mercator(xyz),
+                       _lonlat_xyz_to_mercator(gxyz))
+                      for lid, xyz, gxyz in arrays]
 
         # 全体点减均值 → 局部原点，z 同样归一化避免相机被大高程数值拉远
-        origin = np.mean(np.concatenate([xyz for _lid, xyz in arrays]), axis=0)
+        origin = np.mean(np.concatenate([xyz for _lid, xyz, _g in arrays]), axis=0)
         self._origin = origin
         self._track_data = [(line_id, colors.get(line_id, '#1f77b4'), xyz)
-                            for line_id, xyz in arrays]
+                            for line_id, xyz, _g in arrays]
+        # 测线估算地面散点（显示坐标系，与地形网格同坐标 → 可直接 IDW）
+        gcat = np.concatenate([g for _lid, _xyz, g in arrays])
+        gok = np.isfinite(gcat).all(axis=1)
+        self._ground_points = gcat[gok] if np.count_nonzero(gok) else None
         extent = 0.0
         for _lid, _color, xyz in self._track_data:
             extent = max(extent,
@@ -376,10 +417,25 @@ class Trajectory3DView(QWidget):
         self._terrain_src = (epsg, terrain_bbox) if terrain_bbox is not None else None
         self._start_terrain_build()
 
-    def set_local_dem(self, dem: dict | None) -> None:
-        """设置/清除本地 DEM 格网（load_xyz_grid 返回值；None = 回退在线瓦片）。
+    def set_terrain_source(self, mode: str) -> None:
+        """地形来源：'online' 在线下载 / 'local_dem' 本地 DEM /
+        'estimated' 测线数据估算（轨迹海拔 − 离地高度插值成网格）。
+        切换后立即按新来源重建地形；来源数据不足时自动回退在线下载。"""
+        mode = str(mode)
+        if mode not in ('online', 'local_dem', 'estimated'):
+            return
+        changed = mode != self._terrain_source
+        self._terrain_source = mode
+        if not changed or self._gl_view is None or self._terrain_src is None:
+            return
+        self._terrain_generation += 1   # 使进行中的地形任务失效
+        self._start_terrain_build()
 
-        本地 DEM 优先于在线高程瓦片；影像贴图不受影响（仍在线下载）。
+    def set_local_dem(self, dem: dict | None) -> None:
+        """设置/清除本地 DEM 格网（load_xyz_grid 返回值；None = 清除）。
+
+        仅当当前地形来源为 'local_dem' 时参与地形构建；
+        影像贴图不受影响（仍在线下载）。
         """
         self._local_dem = dem
         if dem is None:
@@ -513,9 +569,26 @@ class Trajectory3DView(QWidget):
                     'my': np.asarray(my, dtype=float),
                     'shape': mesh_x.shape,
                     'imagery': imagery}
+            if self._terrain_source == 'estimated':
+                # 测线数据估算：地面散点（显示坐标系）IDW 插值到显示网格，
+                # 免高程瓦片下载；散点不足回退在线下载并提示
+                gp = self._ground_points
+                if gp is not None and len(gp) >= 4:
+                    qmesh_x, qmesh_y = np.meshgrid(gx_out, gy_out)
+                    prep['estimate'] = {
+                        'px': np.asarray(gp[:, 0], dtype=float),
+                        'py': np.asarray(gp[:, 1], dtype=float),
+                        'pz': np.asarray(gp[:, 2], dtype=float),
+                        'qx': qmesh_x.ravel(), 'qy': qmesh_y.ravel()}
+                    self.local_dem_notice.emit(
+                        '地形来自测线数据估算（轨迹海拔 − 离地高度），'
+                        '仅为近似地表，精度低于实测 DEM')
+                else:
+                    self.local_dem_notice.emit(
+                        '测线数据缺少离地高度/地表高程信息，已回退在线下载地形')
             # 本地 DEM（WGS84 经纬度格网）：轴换算到 Mercator 米交给 worker
             # 采样（Mercator x 仅随经度、y 仅随纬度，可 1D 分别换算）
-            if self._local_dem is not None:
+            elif self._terrain_source == 'local_dem' and self._local_dem is not None:
                 dlons = np.asarray(self._local_dem['lons'], dtype=float)
                 dlats = np.asarray(self._local_dem['lats'], dtype=float)
                 to_merc = LockedTransformer(4326, 3857)
@@ -533,6 +606,10 @@ class Trajectory3DView(QWidget):
                 else:
                     self.local_dem_notice.emit(
                         '本地 DEM 未完全覆盖当前测区，未覆盖区域地形将被填平')
+            elif self._terrain_source == 'local_dem':
+                self.local_dem_notice.emit('未导入本地 DEM 文件，使用在线下载地形')
+            else:
+                self.local_dem_notice.emit('')
             return prep
         except Exception as exc:  # noqa: BLE001 - 换算失败降级平面网格
             _LOGGER.debug('地形预计算失败: %s', exc)

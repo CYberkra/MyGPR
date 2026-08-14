@@ -14,6 +14,8 @@ class SpatialTrackPoint:
     elevation_m: float = 0.0
     interface_elevation_m: float | None = None
     interface_depth_m: float | None = None
+    flight_height_m: float | None = None
+    ground_elevation_m: float | None = None
 
 
 @dataclass(frozen=True, slots=True)

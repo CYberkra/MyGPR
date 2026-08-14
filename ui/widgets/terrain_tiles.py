@@ -182,9 +182,72 @@ def sample_imagery_pixels(tiles: dict, x0: int, y0: int, x1: int, y1: int,
     return np.stack(channels, axis=-1)
 
 
+def idw_grid(px: np.ndarray, py: np.ndarray, pz: np.ndarray,
+             qx: np.ndarray, qy: np.ndarray,
+             *, k: int = 12, power: float = 2.0,
+             min_points: int = 4) -> np.ndarray:
+    """散点反距离加权（IDW）插值到任意查询点。
+
+    px/py/pz: 一维等长散点（非有限值已在外部过滤）；
+    qx/qy: 同形状查询点，返回同形状 float32。
+    散点数少于 ``min_points`` 抛 ValueError（调用方据此回退其他数据源）。
+    单条直线测线等退化分布也能工作（interpolate_scatter 的兜底）。
+    """
+    from scipy.spatial import cKDTree
+
+    px = np.asarray(px, dtype=float).ravel()
+    py = np.asarray(py, dtype=float).ravel()
+    pz = np.asarray(pz, dtype=float).ravel()
+    qx = np.asarray(qx, dtype=float)
+    qy = np.asarray(qy, dtype=float)
+    if px.size < int(min_points):
+        raise ValueError(f'散点数 {px.size} 少于下限 {min_points}，无法 IDW 插值')
+    tree = cKDTree(np.column_stack([px, py]))
+    kk = min(int(k), px.size)
+    dist, idx = tree.query(np.column_stack([qx.ravel(), qy.ravel()]), k=kk)
+    dist = np.maximum(dist, 1e-9)
+    weights = 1.0 / dist ** float(power)
+    values = np.sum(weights * pz[idx], axis=1) / np.sum(weights, axis=1)
+    return values.astype(np.float32).reshape(qx.shape)
+
+
+def interpolate_scatter(px: np.ndarray, py: np.ndarray, pz: np.ndarray,
+                        qx: np.ndarray, qy: np.ndarray,
+                        *, min_points: int = 4) -> np.ndarray:
+    """散点 → 规则/任意查询网格的主插值入口。
+
+    优先线性三角剖分（griddata linear，凸包内对平面/缓变地形精确），
+    凸包外的查询点用最近邻补齐；三角剖分失败（共线单测线等退化分布）
+    回退 IDW。散点数少于 ``min_points`` 抛 ValueError。
+    """
+    from scipy.interpolate import griddata
+    from scipy.spatial import QhullError
+
+    px = np.asarray(px, dtype=float).ravel()
+    py = np.asarray(py, dtype=float).ravel()
+    pz = np.asarray(pz, dtype=float).ravel()
+    qx = np.asarray(qx, dtype=float)
+    qy = np.asarray(qy, dtype=float)
+    if px.size < int(min_points):
+        raise ValueError(f'散点数 {px.size} 少于下限 {min_points}，无法插值')
+    points = np.column_stack([px, py])
+    queries = np.column_stack([qx.ravel(), qy.ravel()])
+    try:
+        values = griddata(points, pz, queries, method='linear')
+        if np.isfinite(values).any():
+            holes = ~np.isfinite(values)
+            if holes.any():   # 凸包外：最近邻补齐（边缘不外推坡度）
+                nearest = griddata(points, pz, queries[holes], method='nearest')
+                values[holes] = nearest
+            return values.astype(np.float32).reshape(qx.shape)
+    except QhullError:
+        pass   # 共线/退化分布 → IDW
+    return idw_grid(px, py, pz, qx, qy, min_points=min_points)
+
+
 __all__ = [
     'TERRARIUM_URL', 'TERRARIUM_MAX_ZOOM',
     'terrarium_url', 'terrarium_cache_path', 'decode_terrarium',
     'tile_grid_for_bbox', 'mosaic_from_tiles', 'sample_bilinear',
-    'sample_imagery_pixels',
+    'sample_imagery_pixels', 'idw_grid', 'interpolate_scatter',
 ]

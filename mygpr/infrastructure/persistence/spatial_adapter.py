@@ -42,6 +42,8 @@ class SpatialPersistenceMixin:
                 source = "geographic trace metadata"
                 crs = "EPSG:4326"
             z = first("local_z_m", "elevation_m", "altitude_m", "height_m", "z")
+            fh = first("flight_height_m", "height_agl_m", "agl_m")
+            ge = first("ground_elevation_m")
             if x is None or y is None:
                 # CSV 导入的测线 trace metadata 常无坐标键，回退到轨迹文件
                 track = self._spatial_track_from_trajectory(line, coordinate_system)
@@ -51,8 +53,18 @@ class SpatialPersistenceMixin:
             if z is None:
                 z = np.zeros_like(x)
             count = min(len(x), len(y), len(z))
+
+            def _at(values, index: int):
+                if values is None or index >= len(values) or not np.isfinite(values[index]):
+                    return None
+                return float(values[index])
+
             points = tuple(
-                SpatialTrackPoint(index, float(x[index]), float(y[index]), float(z[index]))
+                SpatialTrackPoint(
+                    index, float(x[index]), float(y[index]), float(z[index]),
+                    flight_height_m=_at(fh, index),
+                    ground_elevation_m=_at(ge, index),
+                )
                 for index in range(count)
                 if np.isfinite(x[index]) and np.isfinite(y[index])
             )
@@ -72,7 +84,12 @@ class SpatialPersistenceMixin:
         points = tuple(
             SpatialTrackPoint(
                 int(point.trace_index) if point.trace_index >= 0 else index,
-                float(point.x), float(point.y), float(point.z))
+                float(point.x), float(point.y), float(point.z),
+                flight_height_m=(
+                    float(point.flight_height_m)
+                    if np.isfinite(point.flight_height_m) else None
+                ),
+            )
             for index, point in enumerate(trajectory.points)
             if np.isfinite(point.x) and np.isfinite(point.y)
         )

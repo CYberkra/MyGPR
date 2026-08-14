@@ -162,6 +162,8 @@ class SpatialPage(QWidget):
         self._restoring_basemap = False
         self._last_auto_prefetch_key = None   # 自动预下载去重（包围盒+瓦图源）
         self._dem_base_text = ''              # 本地 DEM 标签基础文本（覆盖提示拼接用）
+        self._terrain_mode = 'online'         # 三维地形来源：online / estimated / local_dem
+        self._restoring_terrain = False       # 恢复/程序化设置地形来源下拉时屏蔽信号
 
         self._build_ui()
         self._connect_internal()
@@ -200,6 +202,28 @@ class SpatialPage(QWidget):
         finally:
             self._restoring_basemap = False
         self._auto_load_dem(sm)
+        mode = str(sm.get('spatial_terrain_source', 'online') or 'online')
+        if mode not in ('online', 'estimated', 'local_dem'):
+            mode = 'online'
+        if mode == 'local_dem' and not self._3d_dem_clear_btn.isEnabled():
+            mode = 'online'   # 上次导入的 DEM 文件已丢失，回退在线下载
+        self._set_terrain_mode(mode, persist=False)
+
+    def _set_terrain_mode(self, mode: str, *, persist: bool = True) -> None:
+        """设置三维地形来源（更新下拉 + 三维视图 + 可选持久化）。"""
+        self._terrain_mode = mode
+        self._restoring_terrain = True
+        try:
+            index = self._3d_terrain_combo.findData(mode)
+            if index >= 0:
+                self._3d_terrain_combo.setCurrentIndex(index)
+        finally:
+            self._restoring_terrain = False
+        self._3d_view.set_terrain_source(mode)
+        if persist:
+            sm = SettingsManager()
+            sm.set('spatial_terrain_source', mode)
+            sm.save()
 
     def _auto_load_dem(self, sm: SettingsManager) -> None:
         """启动自动加载上次导入的本地 DEM（默认在线下载，无需任何操作）。
@@ -231,13 +255,9 @@ class SpatialPage(QWidget):
         self._3d_dem_clear_btn.setEnabled(True)
 
     def _on_dem_notice(self, text: str) -> None:
-        """三维视图的 DEM 覆盖提示：拼到标签基础文本后。"""
-        if not self._3d_dem_clear_btn.isEnabled():
-            return  # 无本地 DEM，提示不适用
-        if text:
-            self._3d_dem_label.setText(f'{self._dem_base_text}；{text}')
-        else:
-            self._3d_dem_label.setText(self._dem_base_text)
+        """三维视图的地形提示（DEM 覆盖 / 估算回退等）：拼到标签基础文本后。"""
+        base = self._dem_base_text or '未导入本地 DEM'
+        self._3d_dem_label.setText(f'{base}；{text}' if text else base)
 
     def _save_panel_state(self) -> None:
         sm = SettingsManager()
@@ -326,6 +346,21 @@ class SpatialPage(QWidget):
         self._3d_imagery_switch.setChecked(True)
         imagery_row.addWidget(self._3d_imagery_switch, 1)
         view3d_layout.addLayout(imagery_row)
+        terrain_row = QHBoxLayout()
+        terrain_row.setSpacing(constants.CARD_SPACING)
+        terrain_label = CaptionLabel('地形来源:', view3d_card)
+        terrain_label.setMinimumWidth(60)
+        terrain_label.setToolTip(
+            '在线下载：联网获取全球高程瓦片（默认）；\n'
+            '测线数据估算：地表高程 = 轨迹海拔 − 离地高度，无需联网，仅为近似；\n'
+            '本地 DEM：使用导入的 Global Mapper 等 XYZ 格网')
+        terrain_row.addWidget(terrain_label)
+        self._3d_terrain_combo = ComboBox(view3d_card)
+        self._3d_terrain_combo.addItem('在线下载', userData='online')
+        self._3d_terrain_combo.addItem('测线数据估算', userData='estimated')
+        self._3d_terrain_combo.addItem('本地 DEM', userData='local_dem')
+        terrain_row.addWidget(self._3d_terrain_combo, 1)
+        view3d_layout.addLayout(terrain_row)
         dem_row = QHBoxLayout()
         dem_row.setSpacing(constants.CARD_SPACING)
         dem_label = CaptionLabel('本地 DEM:', view3d_card)
@@ -428,6 +463,8 @@ class SpatialPage(QWidget):
             self._3d_view.set_imagery_enabled)
         self._3d_dem_btn.clicked.connect(self._on_import_dem_clicked)
         self._3d_dem_clear_btn.clicked.connect(self._on_clear_dem_clicked)
+        self._3d_terrain_combo.currentIndexChanged.connect(
+            self._on_terrain_source_changed)
         self._3d_view.local_dem_notice.connect(self._on_dem_notice)
         self._left_panel.sig_collapsed.connect(self._save_panel_state)
         self._right_panel.sig_collapsed.connect(self._save_panel_state)
@@ -590,6 +627,19 @@ class SpatialPage(QWidget):
             self._prefetch_label.setText('测线区域瓦片已全部缓存')
         self.basemap_prefetch_requested.emit()
 
+    def _on_terrain_source_changed(self, index: int) -> None:
+        """地形来源下拉：本地 DEM 尚未导入时先引导导入，取消则回退原选择。"""
+        if self._restoring_terrain:
+            return
+        mode = str(self._3d_terrain_combo.itemData(index) or 'online')
+        if mode == 'local_dem' and not self._3d_dem_clear_btn.isEnabled():
+            self._on_import_dem_clicked()   # 成功路径内部会切到 local_dem
+            if self._terrain_mode != 'local_dem':
+                # 用户取消导入 → 下拉回退到原来源
+                self._set_terrain_mode(self._terrain_mode, persist=False)
+            return
+        self._set_terrain_mode(mode)
+
     def _on_import_dem_clicked(self) -> None:
         """导入本地 DEM（XYZ 格网）：三维地形改用本地高程，免在线下载。
 
@@ -606,6 +656,7 @@ class SpatialPage(QWidget):
             self._3d_dem_label.setText(f'导入失败：{exc}')
             return
         self._apply_local_dem(dem, path)
+        self._set_terrain_mode('local_dem')
         sm = SettingsManager()
         sm.set('spatial_local_dem', path)
         sm.save()
@@ -617,6 +668,8 @@ class SpatialPage(QWidget):
         self._3d_dem_label.setText('未导入（在线下载高程）')
         self._3d_dem_label.setToolTip('')
         self._3d_dem_clear_btn.setEnabled(False)
+        if self._terrain_mode == 'local_dem':
+            self._set_terrain_mode('online')
         sm = SettingsManager()
         sm.set('spatial_local_dem', '')
         sm.save()
