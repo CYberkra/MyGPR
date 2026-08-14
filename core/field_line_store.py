@@ -142,7 +142,11 @@ class FieldLineStoreMixin:
                     TrajectoryPoint(
                         distance_m=float(row.get("distance_m", 0.0)),
                         x=float(x_values[idx]), y=float(y_values[idx]),
-                        z=float(row.get("elevation", 0.0)),
+                        # CSV 第 3 列 elevation 是地表高程、第 5 列 height_m 是
+                        # 飞行高度（离地）；轨迹海拔 = 地表 + 飞行高度，
+                        # 与 sensor_sync 的 local_z = ground + flight 语义一致
+                        z=float(row.get("elevation", 0.0)) + float(row.get("height_m", 0.0)),
+                        flight_height_m=float(row.get("height_m", 0.0)),
                         quality="已投影" if projection_payload.get("status") == "ok" else "未投影",
                         longitude=float(row.get("longitude", 0.0)),
                         latitude=float(row.get("latitude", 0.0)),

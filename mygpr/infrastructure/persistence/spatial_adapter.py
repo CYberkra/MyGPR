@@ -52,6 +52,9 @@ class SpatialPersistenceMixin:
                 continue
             if z is None:
                 z = np.zeros_like(x)
+                # z 为合成零值时「海拔 − 离地高度」无意义，禁用该估算回退
+                # （ground_elevation_m 仍存在，不受影响）
+                fh = None
             count = min(len(x), len(y), len(z))
 
             def _at(values, index: int):

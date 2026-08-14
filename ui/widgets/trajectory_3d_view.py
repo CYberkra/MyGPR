@@ -237,7 +237,10 @@ class _TerrainWorker(QRunnable):
                                         estimate['pz'],
                                         estimate['qx'], estimate['qy'])
                 payload = {'gx': prep['gx'], 'gy': prep['gy'],
-                           'z': z.reshape(prep['shape']).astype(np.float32)}
+                           'z': z.reshape(prep['shape']).astype(np.float32),
+                           # 估算地形与测线同源（z − 离地高度），无基准差，
+                           # 跳过基准对齐以保留真实离地间距
+                           'datum_align': False}
             else:
                 zoom = prep['zoom']
                 x0, x1, y0, y1 = prep['tile_range']
@@ -739,7 +742,8 @@ class Trajectory3DView(QWidget):
             # 保留两侧真实起伏关系（旧"整体下沉到测线以下"会把地形压到
             # 任意远，轨迹看似悬空，且坡向对比失去意义）
             z_disp = (z - z_mean) * self._exag
-            if not self._drape and self._line_items:
+            if (not self._drape and self._line_items
+                    and payload.get('datum_align', True)):
                 gx = np.asarray(payload['gx'], dtype=float)
                 gy = np.asarray(payload['gy'], dtype=float)
                 offsets = []
