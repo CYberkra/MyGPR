@@ -10,8 +10,17 @@ schema: [{name, label, type('int'|'float'), default, min, max}]
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import CaptionLabel, DoubleSpinBox, PushButton, SpinBox
+from qfluentwidgets import FluentIcon as FIF
 
 _BASIC_LIMIT = 4
+
+
+def _schema_signature(schema) -> tuple:
+    """schema 结构签名（名称/标签/类型/范围），用于判断是否需要重建表单。"""
+    return tuple(
+        (str(item.get('name', '')), str(item.get('label', '')),
+         str(item.get('type', 'float')), item.get('min'), item.get('max'))
+        for item in (schema or []))
 
 
 class ParamForm(QWidget):
@@ -32,9 +41,16 @@ class ParamForm(QWidget):
 
     # ------------------------------------------------------------- schema
     def set_schema(self, schema) -> None:
-        """重建表单。schema 项: {name,label,type,default,min,max}。"""
+        """重建表单。schema 项: {name,label,type,default,min,max}。
+
+        schema 结构未变（如移动/启停同一方法步骤）时跳过重建，
+        保留编辑器与"高级参数"展开状态，避免闪烁和状态丢失。
+        """
+        schema = [dict(item) for item in (schema or [])]
+        if self._editors and _schema_signature(schema) == _schema_signature(self._schema):
+            return
         self.clear()
-        self._schema = [dict(item) for item in (schema or [])]
+        self._schema = schema
 
         basic = self._schema[:_BASIC_LIMIT]
         advanced = self._schema[_BASIC_LIMIT:]
@@ -42,7 +58,8 @@ class ParamForm(QWidget):
             self._layout.addLayout(self._build_row(item))
 
         if advanced:
-            self._advanced_btn = PushButton('高级参数 ▶', self)
+            self._advanced_btn = PushButton('高级参数', self,
+                                            FIF.CHEVRON_RIGHT_MED)
             self._advanced_btn.setCheckable(False)
             self._advanced_btn.clicked.connect(self._toggle_advanced)
             self._layout.addWidget(self._advanced_btn)
@@ -109,8 +126,9 @@ class ParamForm(QWidget):
         if self._advanced_widget is not None:
             self._advanced_widget.setVisible(self._advanced_visible)
         if self._advanced_btn is not None:
-            self._advanced_btn.setText(
-                '高级参数 ▼' if self._advanced_visible else '高级参数 ▶')
+            self._advanced_btn.setIcon(
+                FIF.CHEVRON_DOWN_MED.icon() if self._advanced_visible
+                else FIF.CHEVRON_RIGHT_MED.icon())
 
     # ------------------------------------------------------------- 值存取
     def values(self) -> dict:

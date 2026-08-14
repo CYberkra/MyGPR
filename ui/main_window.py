@@ -211,6 +211,8 @@ class MyGPRMainWindow(FluentWindow, _ProjectLifecycleMixin, _LineArtifactMixin,
         self._import_job_ids = set()        # 测线导入/传感器同步任务（完成后刷新测线）
         self._spatial_job_ids = set()       # 空间成果任务（完成后刷新空间成果表）
         self._processing_job_id = ''        # 处理页当前运行任务
+        self._processing_line_id = ''       # 运行提交时的测线（防运行中切测线竞态）
+        self._processing_cancel_requested = False  # 用户主动取消（区别于失败）
         self._preview_newest_artifact = False  # 处理完成后自动预览最新成果
         self._show_run_completion_notice = False  # 处理完成后提示一次
         self._pending_select_line_id = ''        # 导入完成后要选中的测线

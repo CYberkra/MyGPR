@@ -6,7 +6,8 @@
 - 中栏 stretch：卡片"数据预览"（SegmentedWidget 原始数据/处理结果 + BScanView
   + colormap ComboBox + p_low/p_high + 刷新色阶 + 加载测线数据）+ 进度条（初始隐藏）
 - 右栏 ScrollArea 固定 340px：卡片"处理链"（PipelineList + 添加所选方法）、
-  卡片"参数设置"（ParamForm + 应用到选中步骤）、卡片"执行"、卡片"AutoTune 自动调参"
+  卡片"参数设置"（ParamForm + 应用到选中步骤）、卡片"执行"（输入数据选择
+  支持从某个成果继续处理 + 结果名 + 运行/取消）、卡片"AutoTune 自动调参"
 
 页面纯展示 + 发信号，不直接调 controller/backend。
 内部联动：PipelineList.sig_step_selected → ParamForm 载入该步骤参数；
@@ -259,12 +260,20 @@ class ProcessingPage(QWidget):
         preview_layout.addLayout(tool_row)
         middle_layout.addWidget(preview_card, 1)
 
-        # 进度条（初始隐藏）
+        # 进度条 + 进度消息（初始隐藏）
+        progress_row = QHBoxLayout()
+        progress_row.setSpacing(constants.CARD_SPACING)
         self._progress_bar = ProgressBar(middle)
         self._progress_bar.setRange(0, 100)
         self._progress_bar.setValue(0)
-        self._progress_bar.setVisible(False)
-        middle_layout.addWidget(self._progress_bar)
+        progress_row.addWidget(self._progress_bar, 1)
+        self._progress_label = CaptionLabel('', middle)
+        self._progress_label.setMinimumWidth(0)
+        progress_row.addWidget(self._progress_label, 1)
+        self._progress_row_widget = QWidget(middle)
+        self._progress_row_widget.setLayout(progress_row)
+        self._progress_row_widget.setVisible(False)
+        middle_layout.addWidget(self._progress_row_widget)
 
         # ---------------- 右栏（展开 340px，可折叠；滚动栏宽须与面板展开宽一致）
         right_scroll, right_layout = _make_scroll_column(340)
@@ -293,6 +302,17 @@ class ProcessingPage(QWidget):
         right_layout.addWidget(param_card, 1)
 
         exec_card, exec_layout = _make_card('执行')
+        input_row = QHBoxLayout()
+        input_row.setSpacing(constants.CARD_SPACING)
+        input_label = CaptionLabel('输入数据:', exec_card)
+        input_label.setMinimumWidth(100)
+        input_row.addWidget(input_label)
+        self._input_combo = ComboBox(exec_card)
+        self._input_combo.addItem('原始数据')
+        self._input_combo.setToolTip(
+            '处理链的输入：默认从原始数据开始；选择某个成果则在该成果基础上继续处理')
+        input_row.addWidget(self._input_combo, 1)
+        exec_layout.addLayout(input_row)
         name_row = QHBoxLayout()
         name_row.setSpacing(constants.CARD_SPACING)
         name_label = CaptionLabel('结果名称:', exec_card)
@@ -405,19 +425,21 @@ class ProcessingPage(QWidget):
         self._job_id = job_id or ''
         self._run_btn.setEnabled(not self._running)
         self._cancel_btn.setEnabled(self._running)
-        self._progress_bar.setVisible(self._running)
+        self._progress_row_widget.setVisible(self._running)
         if self._running:
             self._progress_bar.setValue(0)
+            self._progress_label.setText('')
 
     def set_progress(self, completed: int, total: int, message: str) -> None:
-        """进度更新：total>0 按比例，否则按百分数；message 写入 tooltip。"""
+        """进度更新：total>0 按比例，否则按百分数；message 显示在进度条右侧。"""
         if total and total > 0:
             self._progress_bar.setRange(0, int(total))
             self._progress_bar.setValue(min(int(completed), int(total)))
         else:
             self._progress_bar.setRange(0, 100)
             self._progress_bar.setValue(max(0, min(int(completed), 100)))
-        self._progress_bar.setToolTip(message or '')
+        self._progress_label.setText(str(message or ''))
+        self._progress_label.setToolTip(str(message or ''))
 
     def set_autotune_result(self, method_id: str, result: dict) -> None:
         """AutoTune 结果 {best_params, ...} → CaptionLabel 区 + 暂存最优参数。"""
@@ -461,20 +483,58 @@ class ProcessingPage(QWidget):
         self._set_line_combo_without_emit(previous_id)
 
     def set_artifacts(self, artifacts: list) -> None:
-        """成果列表 → 处理页成果选择下拉；默认选中最新一条。"""
+        """成果列表 → 处理页成果选择下拉与执行卡输入数据下拉。
+
+        保持用户当前选择（仍在列表中则不改动、不发射信号）；
+        无有效选择时静默落到最新一条。自动预览由主窗口
+        _preview_newest_artifact 路径统一负责，避免双重预览。
+        """
+        previous_id = ''
+        idx = self._artifact_combo.currentIndex()
+        if 0 <= idx < len(self._artifact_ids):
+            previous_id = self._artifact_ids[idx]
+
         self._artifact_combo.blockSignals(True)
+        self._input_combo.blockSignals(True)
         self._artifact_combo.clear()
+        self._input_combo.clear()
         self._artifact_ids = []
+        self._input_combo.addItem('原始数据')   # 索引 0 = 从原始数据开始
         for art in artifacts or []:
             artifact_id = str(getattr(art, 'artifact_id', '') or '')
             name = str(getattr(art, 'name', '') or '')
             created = str(getattr(art, 'created_at', '') or '')
             display = f"{name}  {created}".strip()
             self._artifact_combo.addItem(display or artifact_id)
+            self._input_combo.addItem(f'成果: {display or artifact_id}')
             self._artifact_ids.append(artifact_id)
+
+        # 保持旧选择；否则默认最新一条
+        try:
+            keep = self._artifact_ids.index(previous_id) if previous_id else -1
+        except ValueError:
+            keep = -1
+        if keep < 0 and self._artifact_ids:
+            keep = len(self._artifact_ids) - 1
+        if keep >= 0:
+            self._artifact_combo.setCurrentIndex(keep)
+            self._input_combo.setCurrentIndex(keep + 1)
+        else:
+            self._input_combo.setCurrentIndex(0)
         self._artifact_combo.blockSignals(False)
-        if self._artifact_combo.count():
-            self._artifact_combo.setCurrentIndex(self._artifact_combo.count() - 1)
+        self._input_combo.blockSignals(False)
+
+    def select_artifact(self, artifact_id: str) -> bool:
+        """静默选中指定成果（不发射 artifact_selected，供主窗口自动预览时同步）。"""
+        artifact_id = str(artifact_id or '')
+        try:
+            idx = self._artifact_ids.index(artifact_id)
+        except ValueError:
+            return False
+        self._artifact_combo.blockSignals(True)
+        self._artifact_combo.setCurrentIndex(idx)
+        self._artifact_combo.blockSignals(False)
+        return True
 
     def _set_line_combo_without_emit(self, line_id: str) -> None:
         line_id = str(line_id or '')
@@ -496,10 +556,15 @@ class ProcessingPage(QWidget):
             self.artifact_selected.emit(self._artifact_ids[index])
 
     def current_pipeline(self) -> dict:
-        """当前处理链定义：{"steps": [...], "result_name": str}。"""
+        """当前处理链定义：{"steps", "result_name", "input_artifact_id"}。"""
+        input_idx = self._input_combo.currentIndex()
+        input_artifact_id = (
+            self._artifact_ids[input_idx - 1]
+            if 1 <= input_idx <= len(self._artifact_ids) else '')
         return {
             'steps': self._pipeline_list.steps(),
             'result_name': self._result_name_edit.text().strip(),
+            'input_artifact_id': input_artifact_id,
         }
 
     # ============================================================ 内部逻辑

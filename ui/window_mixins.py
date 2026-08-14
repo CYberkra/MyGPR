@@ -243,6 +243,11 @@ class _LineArtifactMixin:
         line_id = str(line_id or '')
         if not line_id:
             return
+        if line_id != self._current_line_id:
+            # 切换测线：清掉处理页"处理结果"分段里上一条测线的残留预览
+            processing = self._page('processingInterface')
+            if hasattr(processing, 'set_result_bundle'):
+                processing.set_result_bundle(None)
         self._current_line_id = line_id
         self._update_line_labels()
         if self.project_controller is not None:
@@ -282,6 +287,9 @@ class _LineArtifactMixin:
             if artifacts and self.project_controller is not None:
                 artifact_id = str(getattr(artifacts[-1], 'artifact_id', '') or '')
                 if artifact_id:
+                    # 同步处理页成果下拉的选中项（静默），再预览
+                    if hasattr(processing, 'select_artifact'):
+                        processing.select_artifact(artifact_id)
                     self.project_controller.preview_artifact(
                         self._current_line_id, artifact_id)
 
@@ -440,7 +448,7 @@ class _ProcessingMixin:
             self.project_controller.preview_artifact(line_id, str(artifact_id))
 
     def _on_run_requested(self, payload: dict) -> None:
-        """run_requested(dict) → run_pipeline（含结果名回退）。"""
+        """run_requested(dict) → run_pipeline（含结果名回退与链式输入）。"""
         if self.processing_controller is None:
             return
         line_id = self._require_line()
@@ -453,10 +461,16 @@ class _ProcessingMixin:
             return
         result_name = str(payload.get('result_name') or ''
                           ).strip() or f'处理结果_{line_id}'
+        input_artifact_id = str(payload.get('input_artifact_id') or '')
         job_id = self.processing_controller.run_pipeline(
-            self._current_project_id(), line_id, {'steps': steps}, result_name)
+            self._current_project_id(), line_id, {'steps': steps}, result_name,
+            input_artifact_id=input_artifact_id)
         if job_id:
             self._processing_job_id = str(job_id)
+            # 快照提交时的测线：运行期间用户可能切换测线，
+            # 完成回调必须回到本条测线刷新成果，而不是"完成那一刻的当前测线"
+            self._processing_line_id = line_id
+            self._processing_cancel_requested = False
             self._show_run_completion_notice = True
             processing = self._page('processingInterface')
             if hasattr(processing, 'set_running'):
@@ -465,21 +479,36 @@ class _ProcessingMixin:
     def _on_processing_cancel(self) -> None:
         bridge = self._job_bridge()
         if bridge is not None and self._processing_job_id:
+            self._processing_cancel_requested = True
             bridge.cancel(self._processing_job_id)
             self.log_message(f'INFO 已请求取消处理任务 {self._processing_job_id}')
 
     def _on_run_finished(self, success: bool, message: str) -> None:
-        """run_finished → 恢复运行态 + InfoBar + 刷新成果并自动预览。"""
+        """run_finished → 恢复运行态 + InfoBar + 刷新成果并自动预览。
+
+        用户主动取消按 info 提示而非错误；成果刷新回到提交时的测线，
+        只有该测线仍是当前测线时才自动预览最新成果。
+        """
         self._processing_job_id = ''
+        cancelled = bool(getattr(self, '_processing_cancel_requested', False))
+        self._processing_cancel_requested = False
+        run_line_id = str(getattr(self, '_processing_line_id', '')
+                          or self._current_line_id)
+        self._processing_line_id = ''
         processing = self._page('processingInterface')
         if hasattr(processing, 'set_running'):
             processing.set_running(False)
         if success:
-            self._infobar('success', '处理链', message or '处理链运行完成')
-            if self.project_controller is not None and self._current_line_id:
-                self._preview_newest_artifact = True
-                self.project_controller.refresh_artifacts(self._current_line_id)
+            self._infobar('success', '处理链',
+                          message or f'处理链运行完成：{run_line_id}')
+            if self.project_controller is not None and run_line_id:
+                # 只有成果属于当前查看的测线时才自动预览，避免抢走用户视图
+                self._preview_newest_artifact = (
+                    run_line_id == self._current_line_id)
+                self.project_controller.refresh_artifacts(run_line_id)
                 self.project_controller.refresh_lines()
+        elif cancelled:
+            self._infobar('info', '处理链', f'处理链已取消：{run_line_id}')
         else:
             self._infobar('error', '处理链', message or '处理链运行失败')
 
@@ -686,8 +715,12 @@ class _JobCenterMixin:
     def _cancel_job(self, job_id: str) -> None:
         bridge = self._job_bridge()
         if bridge is not None:
-            bridge.cancel(str(job_id))
-            self.log_message(f'INFO 已请求取消任务 {str(job_id)[:8]}…')
+            job_id = str(job_id)
+            if job_id and job_id == self._processing_job_id:
+                # 从任务页/日志面板取消处理任务同样按"已取消"提示，而非失败
+                self._processing_cancel_requested = True
+            bridge.cancel(job_id)
+            self.log_message(f'INFO 已请求取消任务 {job_id[:8]}…')
 
     def _on_prune_jobs(self) -> None:
         """清理已完成任务：backend.jobs.prune（工作线程，不阻塞 UI）。"""
