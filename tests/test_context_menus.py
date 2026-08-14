@@ -143,3 +143,35 @@ def test_project_page_resolver_default_none(qapp):
     from ui.pages.project_page import ProjectPage
     page = ProjectPage()
     assert page._source_path_resolver is None
+
+
+# ------------------------------------------------------------------ 删除测线
+def test_delete_lines_command_uses_maintenance_service(qapp):
+    """_DeleteLinesCommand 必须走 backend.maintenance.delete_line。
+
+    回归守护：ProjectService（backend.projects）没有 delete_line，
+    误调会 AttributeError 被静默记日志，表现为"删除没有反应"。
+    """
+    from ui.controllers.project_controller import (
+        ProjectController, _DeleteLinesCommand)
+
+    calls = []
+
+    def _delete(project_id, line_id, *, reason):
+        calls.append((project_id, line_id, reason))
+        return SimpleNamespace(line_id=line_id)
+
+    maintenance = SimpleNamespace(delete_line=_delete)
+    projects = SimpleNamespace()   # 故意不提供 delete_line
+    backend = SimpleNamespace(maintenance=maintenance, projects=projects)
+
+    controller = ProjectController()
+    controller.set_backend(SimpleNamespace(backend=backend, job_bridge=None))
+    logs = []
+    controller.log_message.connect(lambda m: logs.append(m))
+
+    _DeleteLinesCommand(controller, 'p1', ['L01', 'L02'], reason='t').execute()
+
+    assert calls == [('p1', 'L01', 't'), ('p1', 'L02', 't')]
+    assert any('已删除 2 条测线' in m for m in logs)
+    assert not any('删除测线失败' in m for m in logs)

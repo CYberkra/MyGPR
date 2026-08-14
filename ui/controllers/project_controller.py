@@ -575,7 +575,7 @@ class _DeleteLinesCommand:
             return
         try:
             for line_id in self._line_ids:
-                backend.projects.delete_line(self._project_id, line_id, reason=self._reason)
+                backend.maintenance.delete_line(self._project_id, line_id, reason=self._reason)
         except Exception as exc:  # noqa: BLE001
             c.log_message.emit(f"删除测线失败：{friendly_error_message(exc)}")
         else:

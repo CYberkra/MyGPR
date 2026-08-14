@@ -15,7 +15,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QDialog, QFileDialog, QFormLayout, QHBoxLayout, QLabel,
-    QMessageBox, QPushButton, QTextBrowser, QVBoxLayout,
+    QPushButton, QTextBrowser, QVBoxLayout,
 )
 from qfluentwidgets import (
     InfoBar, InfoBarPosition, LineEdit, PrimaryPushButton, PushButton,
@@ -325,30 +325,11 @@ class _LineArtifactMixin:
             self._infobar('success', '处理完成', '已更新处理结果预览')
 
     def _on_line_delete_requested(self, line_ids: list[str]) -> None:
-        """项目页 Delete 批量删除 → 确认后交给 ProjectController。"""
+        """项目页删除所选测线（页面已弹确认框）→ 交给 ProjectController。"""
         line_ids = [str(lid) for lid in (line_ids or []) if lid]
         if not line_ids:
             return
         if self.project_controller is None or not self._require_project():
-            return
-        names = []
-        project = self._page('projectInterface')
-        lines = getattr(project, '_lines', []) if project is not None else []
-        for line in lines:
-            if str(getattr(line, 'line_id', '') or '') in line_ids:
-                names.append(f"{line.line_id} {getattr(line, 'name', '')}".strip())
-        detail = '\n'.join(names[:8])
-        if len(names) > 8:
-            detail += f'\n……其余 {len(names) - 8} 条'
-        reply = QMessageBox.question(
-            self,
-            '确认删除测线',
-            f'即将删除 {len(line_ids)} 条测线：\n{detail}\n\n'
-            '该操作会删除项目内关联文件，不会删除项目目录外的原始来源文件。是否继续？',
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
             return
         self.project_controller.delete_lines(line_ids)
 
