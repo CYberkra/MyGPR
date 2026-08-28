@@ -16,12 +16,12 @@ import os
 from PyQt6.QtCore import Qt, QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices, QFont
 from PyQt6.QtWidgets import (
-    QFileDialog, QFrame, QHBoxLayout, QHeaderView, QListWidget,
+    QDialog, QFileDialog, QFrame, QHBoxLayout, QHeaderView, QListWidget,
     QListWidgetItem, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
     CaptionLabel, CardWidget, InfoBar, InfoBarPosition, LineEdit,
-    PrimaryPushButton, PushButton, ScrollArea, SubtitleLabel,
+    MessageBox, PrimaryPushButton, PushButton, ScrollArea, SubtitleLabel,
 )
 
 from ui import constants
@@ -31,8 +31,8 @@ from ui.widgets import clear_invalid, mark_invalid, validate_non_empty
 _REPORT_FIELDS = (
     ('pdf_path', 'PDF:'),
     ('html_path', 'HTML:'),
-    ('excel_path', 'Excel:'),
-    ('zip_path', 'ZIP:'),
+    ('xlsx_path', 'Excel:'),
+    ('delivery_zip_path', 'ZIP:'),
 )
 _REPORT_DIR_KEYS = ('package_dir', 'output_dir', 'root_dir', 'dir')
 
@@ -336,5 +336,16 @@ class DeliveryPage(QWidget):
         path, _selected_filter = QFileDialog.getOpenFileName(
             self, '选择备份归档', constants.DEFAULT_PROJECT_ROOT,
             '备份归档 (*.zip *.tar *.tar.gz *.tgz);;所有文件 (*)')
-        if path:
+        if not path:
+            return
+        # P0-3：恢复会覆盖当前项目，需显式确认
+        box = MessageBox(
+            '从备份恢复',
+            f'将用以下备份归档覆盖当前项目：\n{path}\n\n'
+            '恢复会替换当前项目的测线、成果与配置，此操作不可撤销。确认继续？',
+            self,
+        )
+        box.yesButton.setText('恢复')
+        box.cancelButton.setText('取消')
+        if box.exec() == QDialog.DialogCode.Accepted:
             self.restore_requested.emit(path)

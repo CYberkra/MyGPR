@@ -31,9 +31,11 @@ def test_check_architecture_passes_on_clean_repo():
     errors, graph = module._check_layers(policy)
     cycle_errors = module._check_layer_cycles(graph)
     legacy_errors = module._check_legacy_core(policy)
+    ui_errors = module._check_ui_reverse_dependencies(policy)
     assert not errors, f"layer violations: {errors}"
     assert not cycle_errors, f"cycles: {cycle_errors}"
     assert not legacy_errors, f"legacy violations: {legacy_errors}"
+    assert not ui_errors, f"reverse ui dependencies: {ui_errors}"
 
 
 def test_check_architecture_reports_layer_violations():
@@ -47,4 +49,7 @@ def test_check_architecture_reports_ui_reverse_dependencies():
     module = _load_check_architecture()
     policy = _load_policy()
     errors = module._check_ui_reverse_dependencies(policy)
+    # 入口脚本 app_qt.py 被策略豁免；其余文件（core/mygpr/PythonModule/cli_batch）仍受约束
     assert isinstance(errors, list)
+    assert not any('app_qt.py' in err for err in errors), (
+        f"app_qt.py 应被豁免: {errors}")

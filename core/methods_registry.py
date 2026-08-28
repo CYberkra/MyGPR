@@ -27,7 +27,15 @@ from core.method_registry_metadata import (
     METHOD_TAGS,
     PREFERRED_METHOD_ORDER,
 )
-from mygpr.infrastructure.processing.algorithms.methods import NATIVE_ALGORITHMS
+
+
+def _get_native_algorithms() -> dict[str, Any]:
+    """Lazy import of NATIVE_ALGORITHMS（避免 core→mygpr.infrastructure 顶层依赖）。
+
+    TODO: 1.1.0 前通过端口/延迟注入彻底消除此依赖，届时删除本函数与迁移豁免。
+    """
+    from mygpr.infrastructure.processing.algorithms.methods import NATIVE_ALGORITHMS
+    return NATIVE_ALGORITHMS
 
 
 def _legacy_adapter(native_func: Any) -> Any:
@@ -64,7 +72,7 @@ _LEGACY_ADAPTER_METHODS = frozenset({
     "running_average_2D",
 })
 
-for method_id, algorithm in NATIVE_ALGORITHMS.items():
+for method_id, algorithm in _get_native_algorithms().items():
     meta = METHOD_METADATA.get(method_id, {})
 
     # Convert parameter_schema from dict to legacy list-of-dicts format.

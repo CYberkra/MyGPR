@@ -35,7 +35,17 @@ from core.method_registry_metadata import (
     PREFERRED_METHOD_ORDER,
 )
 from core.methods_registry import PROCESSING_METHODS
+from mygpr.domain.acquisition.models import SensorSyncSettings
 from mygpr.domain.processing.models import PipelineDefinition, PipelineStep
+
+__all__ = [
+    "GPRDataSet",
+    "JobEventType",
+    "JobResultSummary",
+    "PipelineDefinition",
+    "PipelineStep",
+    "SensorSyncSettings",
+]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -63,16 +73,18 @@ def build_preview_bundle(
     title: str = "",
     p_low: float = 2.0,
     p_high: float = 98.0,
+    time_window_ns: float = 250.0,
 ) -> Any:
     """Build a :class:`PreviewBundle` from raw array data.
 
     Constructs a minimal ``GPRDataSet``-like object internally and forwards
     to ``core.gui_rendering.bundle_from_dataset``.  The UI never sees
-    ``GPRDataSet``.
+    ``GPRDataSet``.  ``time_window_ns`` 必须为真实测线时窗（P1-5），否则
+    预览纵轴物理刻度错误。
     """
     sample_count = int(getattr(matrix, "shape", (0,))[0])
     trace_count = int(getattr(matrix, "shape", (0, 1))[1])
-    time_window_ns = 250.0
+    time_window_ns = float(time_window_ns or 250.0)
     dataset = GPRDataSet(
         line_id=line_id,
         matrix=matrix,

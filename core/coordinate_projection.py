@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import Iterable
 
 import numpy as np
-from core.app_errors import MyGPRError
+from mygpr.domain.common.errors import MyGPRError
 
 try:  # pyproj is the formal runtime dependency for projection work.
     from pyproj import CRS, Transformer  # type: ignore

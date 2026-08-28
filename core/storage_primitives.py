@@ -55,14 +55,20 @@ def fsync_directory(path: Path) -> None:
 
 
 def fsync_file(path: str | Path) -> None:
-    """Flush one existing file to stable storage where the OS permits it."""
+    """Flush one existing file to stable storage where the OS permits it.
+
+    Windows ``FlushFileBuffers`` requires a handle with write access, so the
+    file is opened ``rb+``; a read-only handle would silently fail fsync on
+    Windows.  Read-only files keep the previous best-effort behaviour.
+    """
     source = Path(path)
     try:
-        with source.open("rb") as stream:
+        with source.open("rb+") as stream:
             os.fsync(stream.fileno())
     except OSError:
-        # Some virtual/network filesystems do not expose a durable fsync.
-        # Callers still retain atomic rename and higher-level recovery logs.
+        # Read-only files, and some virtual/network filesystems, do not
+        # expose a durable fsync.  Callers still retain atomic rename and
+        # higher-level recovery logs.
         return
 
 
@@ -167,15 +173,51 @@ def _boot_id() -> str:
 
 
 def _process_start_marker(pid: int) -> str:
-    """Return a marker that distinguishes PID reuse on Linux."""
+    """Return a marker that distinguishes PID reuse across platforms.
+
+    Linux reads the kernel ``starttime`` field from ``/proc/<pid>/stat``;
+    Windows derives the process creation FILETIME via ``GetProcessTimes``.
+    Returns "" when the marker is unavailable (the stale check then simply
+    skips the reuse comparison instead of mis-detecting a live lock).
+    """
+    pid = int(pid)
+    if os.name == "nt":
+        return _windows_process_start_marker(pid)
     try:
-        raw = Path(f"/proc/{int(pid)}/stat").read_text(encoding="utf-8")
+        raw = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
         # The second field can contain spaces inside parentheses.  Field 22 is
         # therefore indexed from the tail after the final ')'.
         tail = raw.rsplit(")", 1)[1].strip().split()
         return tail[19] if len(tail) > 19 else ""
     except (OSError, UnicodeError, ValueError, IndexError):
         return ""
+
+
+def _windows_process_start_marker(pid: int) -> str:
+    import ctypes
+    from ctypes import wintypes
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return ""
+    try:
+        creation = wintypes.FILETIME()
+        exit_time = wintypes.FILETIME()
+        kernel_time = wintypes.FILETIME()
+        user_time = wintypes.FILETIME()
+        if not kernel32.GetProcessTimes(
+            handle,
+            ctypes.byref(creation),
+            ctypes.byref(exit_time),
+            ctypes.byref(kernel_time),
+            ctypes.byref(user_time),
+        ):
+            return ""
+        return f"{creation.dwHighDateTime:08x}{creation.dwLowDateTime:08x}"
+    finally:
+        kernel32.CloseHandle(handle)
 
 
 @dataclass

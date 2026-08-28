@@ -15,7 +15,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QDialog, QFileDialog, QFormLayout, QHBoxLayout, QLabel,
-    QPushButton, QTextBrowser, QVBoxLayout,
+    QPushButton, QTextBrowser, QToolButton, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
     InfoBar, InfoBarPosition, LineEdit, PrimaryPushButton, PushButton,
@@ -68,6 +68,18 @@ class _ProjectLifecycleMixin:
         name_edit.setPlaceholderText('例如: 新区道路探测')
         form.addRow('项目名称:', name_edit)
 
+        # P1-9：6 个可选元数据折叠进"项目详情"，首屏只留根目录+名称
+        detail_btn = QToolButton(dialog)
+        detail_btn.setText('项目详情（可选）')
+        detail_btn.setCheckable(True)
+        detail_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        detail_btn.setArrowType(Qt.ArrowType.RightArrow)
+        form.addRow(detail_btn)
+
+        detail_widget = QWidget(dialog)
+        detail_form = QFormLayout(detail_widget)
+        detail_form.setContentsMargins(0, 0, 0, 0)
+        detail_form.setSpacing(8)
         meta_edits = {}
         for key, label in (('location', '位置(可选):'), ('operator', '操作员(可选):'),
                            ('project_no', '项目编号(可选):'),
@@ -75,8 +87,17 @@ class _ProjectLifecycleMixin:
                            ('coordinate_system', '坐标系(可选):'),
                            ('vertical_datum', '高程基准(可选):')):
             edit = LineEdit(dialog)
-            form.addRow(label, edit)
+            detail_form.addRow(label, edit)
             meta_edits[key] = edit
+        detail_widget.setVisible(False)
+        form.addRow(detail_widget)
+
+        def _toggle_detail(checked: bool) -> None:
+            detail_widget.setVisible(checked)
+            detail_btn.setArrowType(
+                Qt.ArrowType.DownArrow if checked else Qt.ArrowType.RightArrow)
+
+        detail_btn.toggled.connect(_toggle_detail)
         layout.addLayout(form)
 
         btn_row = QHBoxLayout()
@@ -278,14 +299,17 @@ class _LineArtifactMixin:
         artifacts = list(artifacts or [])
         project = self._page('projectInterface')
         processing = self._page('processingInterface')
+        interpretation = self._page('interpretationInterface')
         if hasattr(project, 'set_artifacts'):
             project.set_artifacts(artifacts)
         if hasattr(processing, 'set_artifacts'):
             processing.set_artifacts(artifacts)
+        if hasattr(interpretation, 'set_artifacts'):
+            interpretation.set_artifacts(artifacts)
         if self._preview_newest_artifact:
             self._preview_newest_artifact = False
             if artifacts and self.project_controller is not None:
-                artifact_id = str(getattr(artifacts[-1], 'artifact_id', '') or '')
+                artifact_id = str(getattr(artifacts[0], 'artifact_id', '') or '')
                 if artifact_id:
                     # 同步处理页成果下拉的选中项（静默），再预览
                     if hasattr(processing, 'select_artifact'):
@@ -323,6 +347,9 @@ class _LineArtifactMixin:
         if getattr(self, '_show_run_completion_notice', False):
             self._show_run_completion_notice = False
             self._infobar('success', '处理完成', '已更新处理结果预览')
+            # P1-4：运行完成自动切到"处理结果"分段，避免提示与画面矛盾
+            if hasattr(processing, 'show_result_segment'):
+                processing.show_result_segment()
 
     def _on_line_delete_requested(self, line_ids: list[str]) -> None:
         """项目页删除所选测线（页面已弹确认框）→ 交给 ProjectController。"""
@@ -493,7 +520,8 @@ class _ProcessingMixin:
         else:
             self._infobar('error', '处理链', message or '处理链运行失败')
 
-    def _on_autotune_requested(self, method_id: str, params_hint: dict) -> None:
+    def _on_autotune_requested(self, method_id: str, params_hint: dict,
+                                  input_artifact_id: str = "") -> None:
         if self.processing_controller is None:
             return
         line_id = self._require_line()
@@ -501,16 +529,26 @@ class _ProcessingMixin:
             return
         self.processing_controller.run_autotune(
             self._current_project_id(), line_id, str(method_id),
-            dict(params_hint or {}))
+            dict(params_hint or {}),
+            input_artifact_id=str(input_artifact_id or ""))
+        # P2-7：运行期间禁用"开始调参"，防重复提交
+        processing = self._page('processingInterface')
+        if hasattr(processing, 'set_autotune_running'):
+            processing.set_autotune_running(True)
         self._infobar('info', 'AutoTune 自动调参', f'已提交调参任务：{method_id}')
 
     def _on_autotune_finished(self, method_id: str, result: dict) -> None:
         processing = self._page('processingInterface')
+        if hasattr(processing, 'set_autotune_running'):
+            processing.set_autotune_running(False)
         if hasattr(processing, 'set_autotune_result'):
             processing.set_autotune_result(method_id, result)
         self._infobar('success', 'AutoTune 自动调参', f'调参完成：{method_id}')
 
     def _on_autotune_failed(self, method_id: str, message: str) -> None:
+        processing = self._page('processingInterface')
+        if hasattr(processing, 'set_autotune_running'):
+            processing.set_autotune_running(False)
         self._infobar('error', 'AutoTune 自动调参',
                       f'{method_id}: {message}')
 
@@ -533,13 +571,15 @@ class _InterpretationMixin:
                                int(getattr(point, 'sample_index', 0))))
         return result
 
-    def _on_open_session_requested(self) -> None:
+    def _on_open_session_requested(self, artifact_id: str = "") -> None:
         if self.interpretation_controller is None:
             return
         line_id = self._require_line()
         if line_id:
             self.interpretation_controller.open_session(
-                self._current_project_id(), line_id)
+                self._current_project_id(), line_id,
+                input_artifact_id=str(artifact_id or ""),
+            )
 
     def _on_session_opened(self, snapshot) -> None:
         interpretation = self._page('interpretationInterface')
@@ -548,9 +588,17 @@ class _InterpretationMixin:
         interpretation.set_points(self._snapshot_points(snapshot))
         line_id = str(getattr(snapshot, 'line_id', '') or self._current_line_id)
         interpretation.set_session_info(f'会话已打开（{line_id}）')
+        if hasattr(interpretation, 'set_session_active'):
+            interpretation.set_session_active(True)
         self._infobar('success', '界面解释标注', f'标注会话已打开：{line_id}')
         if self.project_controller is not None and self._current_line_id:
-            self.project_controller.preview_line(self._current_line_id)
+            artifact_id = str(getattr(snapshot, 'input_artifact_id', '') or '')
+            if artifact_id:
+                # 在成果上标注：预览该成果而非原始数据
+                self.project_controller.preview_artifact(
+                    self._current_line_id, artifact_id)
+            else:
+                self.project_controller.preview_line(self._current_line_id)
 
     def _on_session_updated(self, snapshot) -> None:
         interpretation = self._page('interpretationInterface')
@@ -558,6 +606,9 @@ class _InterpretationMixin:
             interpretation.set_points(self._snapshot_points(snapshot))
 
     def _on_session_failed(self, message: str) -> None:
+        interpretation = self._page('interpretationInterface')
+        if hasattr(interpretation, 'set_session_active'):
+            interpretation.set_session_active(False)
         self._infobar('error', '界面解释标注', message)
 
     def _on_points_changed(self, points: list) -> None:
@@ -675,12 +726,20 @@ class _JobCenterMixin:
     def _on_job_completed(self, job_id: str, success: bool, message: str,
                           result) -> None:
         job_id = str(job_id)
-        level = 'SUCCESS' if success else 'WARNING'
-        self.log_message(
-            f'{level} 任务 {job_id[:8]}… {"完成" if success else "结束"}：{message}')
+        if success:
+            self.log_message(
+                f'SUCCESS 任务 {job_id[:8]}… 完成：{message}')
+        else:
+            self.log_message(
+                f'WARNING 任务 {job_id[:8]}… 结束：{message}')
+            # P0-1：失败必须显式反馈；处理任务由 run_finished 单独弹窗，避免重复
+            if job_id != self._processing_job_id:
+                self._infobar('error', '任务失败',
+                              message or '任务执行失败，详见任务页', duration=8000)
+        status = 'completed' if success else 'failed'
         for view in self._job_views():
-            if hasattr(view, 'remove_inactive'):
-                view.remove_inactive()
+            if hasattr(view, 'set_status'):
+                view.set_status(job_id, status)
         # 导入/同步完成 → 刷新测线列表
         if job_id in self._import_job_ids:
             self._import_job_ids.discard(job_id)

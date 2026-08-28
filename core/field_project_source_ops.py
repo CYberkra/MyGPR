@@ -8,7 +8,7 @@ import logging
 import shutil
 from pathlib import Path
 
-from core.app_errors import error_info_from_exception
+from mygpr.domain.common.errors import error_info_from_exception
 from core.field_project_errors import FieldProjectOperationError
 from core.field_project_models import local_now, validate_line_id
 from core.field_project_store import FieldLineRecord, FieldProjectStore

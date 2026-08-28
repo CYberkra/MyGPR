@@ -18,9 +18,9 @@ from core.gprpy_compat import (
     apply_gprpy_rem_mean_trace,
     gprpy_local_window_l2_energy,
 )
-from core.runtime_warnings import build_runtime_warning, merge_runtime_warnings
-from core.scalar_utils import to_float, to_int
-from core.app_errors import MyGPRError
+from mygpr.domain.processing.warnings import build_runtime_warning, merge_runtime_warnings
+from mygpr.domain.common.scalars import to_float, to_int
+from mygpr.domain.common.errors import MyGPRError
 
 
 class ProcessingEngineError(MyGPRError):

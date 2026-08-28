@@ -3,7 +3,7 @@
 """Shared project-operation exceptions without importing the large operation facade."""
 from __future__ import annotations
 
-from core.app_errors import MyGPRError
+from mygpr.domain.common.errors import MyGPRError
 
 
 class FieldProjectOperationError(MyGPRError):

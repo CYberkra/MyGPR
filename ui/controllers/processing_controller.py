@@ -162,9 +162,11 @@ class ProcessingController(QObject):
         return job_id
 
     # ------------------------------------------------------------------
-    def run_autotune(self, project_id, line_id, method_id: str, params_hint: dict) -> None:
+    def run_autotune(self, project_id, line_id, method_id: str,
+                     params_hint: dict, input_artifact_id: str = "") -> None:
         run_command(
-            _AutotuneSubmitCommand(self, project_id, line_id, method_id, params_hint),
+            _AutotuneSubmitCommand(self, project_id, line_id, method_id,
+                                   params_hint, input_artifact_id),
             name="mygpr-autotune-submit",
         )
 
@@ -180,6 +182,7 @@ class _AutotuneSubmitCommand:
         "_line_id",
         "_method_id",
         "_params_hint",
+        "_input_artifact_id",
     )
 
     def __init__(
@@ -189,12 +192,14 @@ class _AutotuneSubmitCommand:
         line_id: Any,
         method_id: str,
         params_hint: dict,
+        input_artifact_id: str = "",
     ) -> None:
         self._controller = controller
         self._project_id = project_id
         self._line_id = line_id
         self._method_id = str(method_id)
         self._params_hint = params_hint
+        self._input_artifact_id = str(input_artifact_id or "")
 
     def execute(self) -> None:
         c = self._controller
@@ -203,7 +208,15 @@ class _AutotuneSubmitCommand:
         if backend is None or bridge is None:
             return
         try:
-            dataset = backend.projects.read_dataset(str(self._project_id), str(self._line_id))
+            if self._input_artifact_id:
+                # P2-6：支持对处理成果调参（读取所选成果数据）
+                dataset = backend.projects.read_artifact_dataset(
+                    str(self._project_id), str(self._line_id),
+                    self._input_artifact_id,
+                )
+            else:
+                dataset = backend.projects.read_dataset(
+                    str(self._project_id), str(self._line_id))
             data = np.asarray(dataset.data, dtype=np.float32)
             kwargs: dict[str, Any] = {}
             if self._params_hint:

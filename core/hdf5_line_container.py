@@ -13,7 +13,7 @@ from typing import Any, Callable
 import h5py
 import numpy as np
 
-from core.gpr_data_model import GPRDataSet
+from core.gpr_data_model import GPRDataSet, time_to_depth_axis
 from core.hdf5_array_proxy import HDF5ArrayProxy
 from core.storage_primitives import atomic_output_path, fsync_file, utc_now
 
@@ -28,6 +28,16 @@ STAGING_ROOT = "/_staging"
 
 def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _coerce_float(value: Any) -> float | None:
+    """宽容浮点转换（None/非法值返回 None）。"""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def choose_chunk_shape(shape: tuple[int, int], dtype: np.dtype, *, target_bytes: int = 1024 * 1024) -> tuple[int, int]:
@@ -425,6 +435,20 @@ def load_processing_dataset(path: str | Path, *, artifact_id: str, raw_dataset: 
             depth = np.asarray(raw["depth_m"][...], dtype=np.float32)
         dielectric = float(input_meta.get("dielectric_constant") or 9.0)
         time_window = float(input_meta.get("time_window_ns") or (time_axis[-1] if time_axis.size else 250.0))
+    # P1-1：优先用 manifest 持久化的输出 header 重建物理轴（形状变更方法如
+    # time_cut/set_zero_time 会改变时间窗与零点，否则二次处理/成像按原始时窗算错）。
+    output_header = manifest.get("output_header") if isinstance(manifest.get("output_header"), dict) else {}
+    out_time_window = _coerce_float(output_header.get("total_time_ns") or output_header.get("time_window_ns"))
+    out_offset = _coerce_float(output_header.get("time_cut_offset_ns")) or 0.0
+    if out_time_window and out_time_window > 0:
+        time_window = out_time_window
+    sample_count = int(getattr(proxy, "shape", (0, 0))[0])
+    if output_header and sample_count > 0:
+        time_axis = out_offset + np.linspace(0.0, time_window, sample_count, dtype=np.float32)
+        depth = time_to_depth_axis(time_axis, dielectric)
+        if len(distance) != int(getattr(proxy, "shape", (0, 0))[1]):
+            distance = np.linspace(0.0, max(float(int(getattr(proxy, "shape", (0, 0))[1]) - 1), 1.0),
+                                   int(getattr(proxy, "shape", (0, 0))[1]), dtype=np.float32)
     # Shape-changing processing nodes may define explicit axes in future.  Until
     # then GPRDataSet rebuilds a mismatched axis rather than returning invalid lengths.
     return GPRDataSet(

@@ -27,8 +27,8 @@ from core.processing_engine import (
     prepare_runtime_params,
     run_processing_method,
 )
-from core.quality_metrics import compute_motion_quality_metrics
-from core.scalar_utils import to_float
+from mygpr.domain.autotune.quality_metrics import compute_motion_quality_metrics
+from mygpr.domain.common.scalars import to_float
 from core.trace_metadata_utils import resample_bscan_columns_linear
 from core.uav_georeference_3d import (
     build_airborne_georeference_3d_payload,

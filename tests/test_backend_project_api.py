@@ -157,3 +157,87 @@ def test_cancelled_project_artifact_commit_leaves_no_artifact(tmp_path: Path) ->
         assert backend.projects.list_artifacts(summary.project_id, "L01") == ()
     finally:
         backend.shutdown()
+
+
+def test_project_api_chained_processing_records_parent(tmp_path: Path) -> None:
+    """回归：从成果继续处理（input_artifact_id）须在成果上记录血缘 parent_artifact_id。
+
+    P1-2：此前 GUI 保存路径 payload 顶层无 parent_artifact_id → _base_manifest 恒取 ""
+    → 无处理谱系可追溯。
+    """
+    backend = MyGPRBackend.create_default(max_workers=1)
+    try:
+        summary = backend.projects.create_project(tmp_path / "chained", name="Chained")
+        backend.projects.save_line_dataset(
+            summary.project_id, "L01", _data(), name="L01",
+            length_m=23.5, time_window_ns=500.0,
+        )
+        p1 = PipelineDefinition(name="p1", steps=(PipelineStep("dewow", {"window": 11}),))
+        job1 = backend.submit_project_pipeline(summary.project_id, "L01", p1, result_name="成果A")
+        snap1 = backend.jobs.wait(job1, timeout=30)
+        assert snap1.status is JobStatus.COMPLETED, snap1.error_message
+        artifact_a = snap1.result
+        assert artifact_a is not None and artifact_a.artifact_id
+        assert artifact_a.parent_artifact_id == ""  # 从原始数据处理，无父
+
+        # 从成果 A 继续处理 → 成果 B 必须记录 parent=A
+        p2 = PipelineDefinition(name="p2", steps=(PipelineStep("agcGain", {"window": 9}),))
+        job2 = backend.submit_project_pipeline(
+            summary.project_id, "L01", p2, result_name="成果B",
+            input_artifact_id=artifact_a.artifact_id,
+        )
+        snap2 = backend.jobs.wait(job2, timeout=30)
+        assert snap2.status is JobStatus.COMPLETED, snap2.error_message
+        artifact_b = snap2.result
+        assert artifact_b is not None and artifact_b.artifact_id
+        assert artifact_b.parent_artifact_id == artifact_a.artifact_id, (
+            f"预期血缘 {artifact_a.artifact_id}，实际 {artifact_b.parent_artifact_id!r}")
+
+        # 列表读取同样保留血缘
+        by_id = {a.artifact_id: a for a in backend.projects.list_artifacts(summary.project_id, "L01")}
+        assert by_id[artifact_b.artifact_id].parent_artifact_id == artifact_a.artifact_id
+    finally:
+        backend.shutdown()
+
+
+def test_project_api_processing_artifact_persists_output_axes(tmp_path: Path) -> None:
+    """回归：P1-1 成果持久化输出轴——time_cut 改变时窗/零点后，读回成果物理轴按新时窗重建。
+
+    此前 manifest 只存 input_dataset，加载恒用原始时窗 → 二次处理/成像按错误物理轴计算。
+    keep_range [250, 500) ns：72 采样截成 36，时窗 500→250ns，零点偏移 250ns。
+    """
+    backend = MyGPRBackend.create_default(max_workers=1)
+    try:
+        summary = backend.projects.create_project(tmp_path / "axes", name="Axes")
+        backend.projects.save_line_dataset(
+            summary.project_id, "L01", _data(72, 48), name="L01",
+            length_m=23.5, time_window_ns=500.0,
+        )
+        pipeline = PipelineDefinition(
+            name="cut", steps=(PipelineStep("time_cut", {
+                "mode": "keep_range", "time_start_ns": 250.0, "time_end_ns": 500.0,
+            }),),
+        )
+        job = backend.submit_project_pipeline(
+            summary.project_id, "L01", pipeline, result_name="cutA")
+        snap = backend.jobs.wait(job, timeout=30)
+        assert snap.status is JobStatus.COMPLETED, snap.error_message
+        artifact = snap.result
+        assert artifact is not None and artifact.artifact_id
+
+        info = backend.projects.get_artifact_dataset_info(
+            summary.project_id, "L01", artifact.artifact_id)
+        assert tuple(info.shape) == (36, 48)  # 采样数减半
+
+        dataset = backend.projects.read_artifact_dataset(
+            summary.project_id, "L01", artifact.artifact_id)
+        header = dataset.header_info
+        time_axis = header.get("time_axis_ns")
+        time_axis = (np.asarray(time_axis, dtype=np.float32)
+                     if time_axis is not None else np.array([], dtype=np.float32))
+        assert time_axis.size == 36, f"时间轴长度应为 36，实际 {time_axis.size}"
+        assert float(header.get("time_window_ns") or 0.0) == pytest.approx(250.0, abs=1.0)
+        assert float(time_axis[0]) == pytest.approx(250.0, abs=1.0)   # 零点偏移
+        assert float(time_axis[-1]) == pytest.approx(500.0, abs=1.0)  # 终点=新时窗终点
+    finally:
+        backend.shutdown()

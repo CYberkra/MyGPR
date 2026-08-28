@@ -216,6 +216,7 @@ class MyGPRMainWindow(FluentWindow, _ProjectLifecycleMixin, _LineArtifactMixin,
         self._preview_newest_artifact = False  # 处理完成后自动预览最新成果
         self._show_run_completion_notice = False  # 处理完成后提示一次
         self._pending_select_line_id = ''        # 导入完成后要选中的测线
+        self._backend_error_bar = None           # 后端初始化失败的常驻错误横幅
 
         self._init_window()
         self._create_controllers()
@@ -224,6 +225,19 @@ class MyGPRMainWindow(FluentWindow, _ProjectLifecycleMixin, _LineArtifactMixin,
         self._setup_global_shortcuts()
         self._connect_signals()
         self._init_state()
+        # 注入设置值到页面（设置页更改后下次启动生效）
+        self._inject_page_settings()
+
+    def _inject_page_settings(self) -> None:
+        """注入设置页保存的默认值到各页面控件（非信号驱动，首次启动 / 重启生效）。"""
+        project = self._page('projectInterface')
+        if hasattr(project, 'set_default_dielectric'):
+            project.set_default_dielectric(
+                self.settings.get('default_dielectric', constants.DEFAULT_DIELECTRIC))
+        spatial = self._page('spatialInterface')
+        if hasattr(spatial, 'set_auto_prefetch_enabled'):
+            spatial.set_auto_prefetch_enabled(
+                bool(self.settings.get('auto_prefetch_basemap', True)))
 
     # ============================================================ 组装
     def _init_window(self) -> None:
@@ -506,7 +520,8 @@ class MyGPRMainWindow(FluentWindow, _ProjectLifecycleMixin, _LineArtifactMixin,
         # 后端就绪门控：除主页/设置外页面禁用，backend_ready 后 enable
         if self.backend_controller is not None:
             self._set_backend_ready(False)
-            self.backend_controller.start()
+            self.backend_controller.start(
+                max_workers=int(self.settings.get('max_workers', constants.MAX_WORKERS)))
             self.log_message('INFO 后端初始化中…')
         else:
             self.log_message('WARNING BackendController 未就绪（骨架阶段），全部页面保持启用')
@@ -612,6 +627,30 @@ class MyGPRMainWindow(FluentWindow, _ProjectLifecycleMixin, _LineArtifactMixin,
     def _on_backend_failed(self, error: str) -> None:
         self.log_message(f'ERROR 后端初始化失败: {error}')
         logger.error('backend init failed: %s', error)
+        # P0-2：失败必须可见——常驻错误横幅（含重试），而非静默禁用页面
+        if self._backend_error_bar is not None:
+            self._backend_error_bar.close()
+        retry_btn = PushButton('重试')
+        retry_btn.clicked.connect(self._retry_backend)
+        bar = InfoBar.error(
+            title='后端未就绪',
+            content=str(error or '后端初始化失败，部分功能不可用'),
+            orient=Qt.Orientation.Horizontal,
+            isClosable=True,
+            position=InfoBarPosition.TOP,
+            duration=-1,  # 常驻，直到重试成功或用户手动关闭
+            parent=self)
+        bar.addWidget(retry_btn)
+        self._backend_error_bar = bar
+
+    def _retry_backend(self) -> None:
+        """后端失败后重试初始化；成功后由 _on_backend_ready 恢复页面。"""
+        if self._backend_error_bar is not None:
+            self._backend_error_bar.close()
+            self._backend_error_bar = None
+        if self.backend_controller is not None:
+            self.backend_controller.start(
+                max_workers=int(self.settings.get('max_workers', constants.MAX_WORKERS)))
 
     def _on_backend_ready(self) -> None:
         """backend_ready：接通 JobBridge → 任务控件；加载方法库与预设。"""
@@ -638,7 +677,7 @@ class MyGPRMainWindow(FluentWindow, _ProjectLifecycleMixin, _LineArtifactMixin,
             level, InfoBar.info)
         if duration is None:
             duration = {'success': 2000, 'info': 2000,
-                        'warning': 3000, 'error': 5000}[level]
+                        'warning': 3000, 'error': 15000}[level]  # 错误常驻更久，避免来不及读
         fn(title=title, content=str(content),
            orient=Qt.Orientation.Horizontal, isClosable=True,
            position=InfoBarPosition.TOP, duration=duration, parent=self)

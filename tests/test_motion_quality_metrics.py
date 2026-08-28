@@ -7,7 +7,7 @@ from __future__ import annotations
 import pytest
 
 from core.benchmark_registry import generate_benchmark_sample
-from core.quality_metrics import compute_motion_quality_metrics
+from mygpr.domain.autotune.quality_metrics import compute_motion_quality_metrics
 
 
 def _benchmark_metrics_payload(seed: int = 42):

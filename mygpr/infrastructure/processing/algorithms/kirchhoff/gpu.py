@@ -6,6 +6,7 @@ importable on CPU-only systems.
 from __future__ import annotations
 
 import math
+import logging
 from typing import Any
 
 import numpy as np
@@ -21,6 +22,9 @@ from mygpr.infrastructure.processing.algorithms.kirchhoff.shared import (
     _ricker,
     _setup_grid,
 )
+
+_LOGGER = logging.getLogger(__name__)
+
 
 def _run_kirchhoff_gpu(
     arr: np.ndarray,
@@ -252,17 +256,17 @@ def _run_kirchhoff_gpu(
     total_time = (time.perf_counter() - t_start) * 1000
     timings["total"] = total_time
 
-    # Print timing summary
-    print("\n" + "=" * 60)
-    print("Kirchhoff GPU Timing Breakdown")
-    print("=" * 60)
-    for phase, ms in timings.items():
-        if phase != "total":
-            pct = (ms / total_time) * 100
-            print(f"  {phase:20s}: {ms:8.1f} ms ({pct:5.1f}%)")
-    print("-" * 60)
-    print(f"  {'TOTAL':20s}: {total_time:8.1f} ms")
-    print("=" * 60 + "\n")
+    # 计时 breakdown 走 logger（不 print，避免 GUI 模式下丢失且污染 stdout）
+    if _LOGGER.isEnabledFor(logging.INFO):
+        lines = ["=" * 60, "Kirchhoff GPU Timing Breakdown", "=" * 60]
+        for phase, ms in timings.items():
+            if phase != "total":
+                pct = (ms / total_time) * 100
+                lines.append(f"  {phase:20s}: {ms:8.1f} ms ({pct:5.1f}%)")
+        lines.append("-" * 60)
+        lines.append(f"  {'TOTAL':20s}: {total_time:8.1f} ms")
+        lines.append("=" * 60)
+        _LOGGER.info("\n" + "\n".join(lines))
 
     corrected_shape = (int(output_migrated.shape[0]), int(output_migrated.shape[1]))
 

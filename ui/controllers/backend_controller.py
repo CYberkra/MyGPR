@@ -34,10 +34,6 @@ def run_command(command: WorkerCommand, *, name: str = "mygpr-ui-worker") -> thr
     return thread
 
 
-def run_worker(target: Callable[[], None], *, name: str = "mygpr-ui-worker") -> threading.Thread:
-    """Deprecated: use ``run_command`` with a ``WorkerCommand`` instead."""
-    return run_command(target, name=name)  # type: ignore[arg-type]
-
 _STATUS_BY_EVENT = {
     JobEventType.QUEUED: "queued",
     JobEventType.STARTED: "running",
@@ -51,11 +47,24 @@ _POLL_INTERVAL_S = 0.2
 
 
 def friendly_error_message(exc: BaseException | None) -> str:
-    """Map backend errors to user-facing Chinese messages (error_code first)."""
+    """Map backend errors to user-facing Chinese messages (error_code first).
+
+    MyGPRError 子类（含 error_code 属性）显示 ``[错误码] 消息 — 建议``，
+    让用户可操作地排障而非纯 str(exc)。无 error_code 的异常保持原行为。
+    """
     if exc is None:
         return "未知错误"
-    if getattr(exc, "error_code", "") == "MYGPR_PROJECT_BUSY":
-        return PROJECT_BUSY_MESSAGE
+    # P1：MyGPRError 子类含 error_code，按结构输出建议（不 import domain 层）
+    exc_error_code = str(getattr(exc, "error_code", "") or "")
+    if exc_error_code:
+        if exc_error_code == "MYGPR_PROJECT_BUSY":
+            return PROJECT_BUSY_MESSAGE
+        hint = str(getattr(exc, "hint", "") or getattr(exc, "default_hint", "") or "")
+        text = f"[{exc_error_code}] {str(exc).strip()}"
+        if hint:
+            text += f" — {hint}"
+        return text
+    # 无 error_code 的通用异常（绝大多数 Value/Type/KeyError），保持原行为
     message = str(exc).strip()
     return message or type(exc).__name__
 
@@ -215,9 +224,13 @@ class _BackendInitWorker(QObject):
     succeeded = pyqtSignal(object)
     failed = pyqtSignal(str)
 
+    def __init__(self, max_workers: int = 2) -> None:
+        super().__init__()
+        self._max_workers = int(max(1, max_workers))
+
     def run(self) -> None:
         try:
-            backend = MyGPRBackend.create_default(max_workers=2)
+            backend = MyGPRBackend.create_default(max_workers=self._max_workers)
         except Exception as exc:  # noqa: BLE001 - surface any init failure to the GUI
             _LOGGER.exception("backend initialisation failed")
             self.failed.emit(friendly_error_message(exc))
@@ -239,13 +252,13 @@ class BackendController(QObject):
         self._thread: QThread | None = None
         self._worker: _BackendInitWorker | None = None
 
-    def start(self) -> None:
+    def start(self, *, max_workers: int = 2) -> None:
         """Create the backend on a QThread; emits backend_ready/failed."""
         if self.backend is not None or self._thread is not None:
             return
         self.log_message.emit("后端初始化中…")
         thread = QThread(self)
-        worker = _BackendInitWorker()
+        worker = _BackendInitWorker(max_workers=int(max_workers))
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         worker.succeeded.connect(self._on_backend_created)

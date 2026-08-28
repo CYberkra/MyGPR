@@ -543,11 +543,21 @@ class LegacyFieldProjectSession(InterpretationPersistenceMixin, SpatialPersisten
     ) -> ProjectArtifact:
         safe = validate_line_id(line_id)
         context.raise_if_cancelled()
+        # P1-2：parent_artifact_id 必须出现在 payload 顶层，否则 _base_manifest
+        # 只查顶层键 → 恒为 ""，处理谱系（血缘）丢失
+        parent_id = str(
+            (params or {}).get("parent_artifact_id")
+            or (input_dataset or {}).get("parent_artifact_id") or ""
+        )
+        # P1-1：输出 header（含新时间窗/零点/轴含义）持久化到 manifest，供加载时重建物理轴
+        output_header = dict(params.get("output_header") or {})
         payload = {
             "method": method_id,
             "method_name": method_name or name,
             "params": dict(params),
             "branch_id": str(branch_id or f"{safe}:main"),
+            "parent_artifact_id": parent_id,
+            "output_header": output_header,
             "input_dataset": _json_safe_mapping(input_dataset),
             "manifest": {
                 "method_id": method_id,
@@ -583,6 +593,8 @@ class LegacyFieldProjectSession(InterpretationPersistenceMixin, SpatialPersisten
         return safe
 
     def list_report_packages(self) -> Sequence[ReportPackage]:
+        if not getattr(self._store.storage, "is_hybrid", False):
+            return []
         rows = self._store.storage.catalog.list_exports(export_kind="engineering_report")
         result: list[ReportPackage] = []
         for row in rows:

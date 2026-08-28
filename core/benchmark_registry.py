@@ -10,7 +10,7 @@ from typing import Any, Callable
 import numpy as np
 
 from core.methods_registry import PROCESSING_METHODS
-from core.quality_metrics import compute_motion_quality_metrics
+from mygpr.domain.autotune.quality_metrics import compute_motion_quality_metrics
 
 
 DEFAULT_BENCHMARK_SEED = 42

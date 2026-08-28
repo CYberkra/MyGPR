@@ -42,7 +42,7 @@ def check_compile(root: Path, values: Iterable[str]) -> dict[str, object]:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("paths", nargs="*", default=["core", "mygpr", "PythonModule", "ui", "scripts", "tests", "app_qt.py", "cli_batch.py", "mygpr/interfaces/cli/backend_smoke.py"])
+    parser.add_argument("paths", nargs="*", default=["core", "mygpr", "PythonModule", "ui", "scripts", "tests", "app_qt.py", "cli_batch.py", "backend_smoke.py", "backend_project_smoke.py", "mygpr/interfaces/cli/backend_smoke.py"])
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     args = parser.parse_args(argv)
     payload = check_compile(args.root.resolve(), args.paths)

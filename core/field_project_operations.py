@@ -32,7 +32,7 @@ from core.source_file_registry import (
     record_source_file,
     remove_line_source_records,
 )
-from core.app_errors import error_info_from_exception
+from mygpr.domain.common.errors import error_info_from_exception
 from core.storage_primitives import atomic_write_json, utc_now
 from core.field_project_errors import FieldProjectOperationError
 from core.field_project_backup import (

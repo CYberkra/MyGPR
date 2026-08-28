@@ -14,6 +14,29 @@ from mygpr.application.project.service import ProjectService
 from mygpr.domain.processing.models import BlockPipelineSummary, PipelineDefinition, ResourceEstimate
 from mygpr.domain.project.models import LineDatasetInfo, ProjectArtifact
 
+# 输出 header 中需要持久化的轴标量（P1-1：形状变更方法如 time_cut/set_zero_time
+# 会改变时间窗与零点，若不保存，二次处理/成像的物理轴会按原始时窗错误计算）
+_OUTPUT_HEADER_KEYS = (
+    "total_time_ns", "time_window_ns", "time_cut_offset_ns",
+    "a_scan_length", "num_traces", "dielectric_constant", "axis_transform",
+)
+
+
+def _output_header_summary(header: dict[str, Any] | None) -> dict[str, Any]:
+    """从处理结果 header 提取可 JSON 序列化的输出轴标量。"""
+    header = dict(header or {})
+    out: dict[str, Any] = {}
+    for key in _OUTPUT_HEADER_KEYS:
+        if key not in header:
+            continue
+        value = header[key]
+        if isinstance(value, np.ndarray):
+            continue
+        if isinstance(value, np.generic):
+            value = value.item()
+        out[key] = value
+    return out
+
 
 @dataclass(slots=True)
 class ProjectLineBlockSource:
@@ -171,6 +194,7 @@ class ProjectProcessingService:
             params={
                 "pipeline": steps, "lineage": lineage, "execution_mode": "loaded",
                 "parent_artifact_id": input_artifact_id,
+                "output_header": _output_header_summary(result.header_info),
             },
             pipeline=[{**step, "lineage": lineage[index]} for index, step in enumerate(steps)],
             branch_id=branch_id or f"{line_id}:main",
@@ -225,6 +249,7 @@ class ProjectProcessingService:
                 "pipeline": steps, "lineage": lineage,
                 "execution_mode": "file_backed_blocks",
                 "parent_artifact_id": input_artifact_id,
+                "output_header": _output_header_summary(summary.header_info),
             },
             pipeline=[{**step, "lineage": lineage[index]} for index, step in enumerate(steps)],
             branch_id=branch_id or f"{line_id}:main",

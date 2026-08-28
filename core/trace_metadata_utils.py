@@ -8,7 +8,7 @@ from typing import Any
 
 import numpy as np
 
-from core.scalar_utils import to_float
+from mygpr.domain.common.scalars import to_float
 
 EARTH_RADIUS_M = 6378137.0
 

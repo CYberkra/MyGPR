@@ -10,9 +10,12 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 import shutil
 import uuid
 import zipfile
+
+_LOGGER = logging.getLogger(__name__)
 from pathlib import Path
 from typing import Any
 
@@ -303,8 +306,8 @@ def _collect_line_evidence(
             if not interface_path.exists():
                 try:
                     interface_path = store.export_spatial_interface_curve(line.line_id)
-                except Exception:
-                    pass
+                except Exception:  # noqa: BLE001 - 曲线缺失时报告继续，仅告警
+                    _LOGGER.warning("空间界面曲线导出失败（报告继续生成）：%s", line.line_id)
             interface_rows.append(_interface_to_row(
                 line.line_id, interface_summary, interface_path, store.root
             ))
@@ -732,22 +735,25 @@ def generate_project_report_package(
             "file_count": result.file_count,
         }
         store.save_manifest()
-        store.storage.catalog.register_export({
-            "export_id": report_id or final_package_dir.name,
-            "export_kind": "engineering_report",
-            "path": result.package_dir,
-            "status": "sealed",
-            "sha256": zip_hash,
-            "created_at": generated_at,
-            "metadata": {
-                "manifest_path": result.manifest_path,
-                "pdf_path": result.pdf_path,
-                "html_path": result.html_path,
-                "delivery_zip_path": result.delivery_zip_path,
-                "file_count": result.file_count,
-                "report_profile": summary["report_profile"],
-            },
-        })
+        # legacy 项目无 catalog，跳过导出登记（报告文件与 manifest 照常落盘）
+        if getattr(getattr(store, "storage", None), "is_hybrid", False):
+            store.storage.catalog.register_export({
+                "export_id": report_id or final_package_dir.name,
+                "export_kind": "engineering_report",
+                "path": result.package_dir,
+                "status": "sealed",
+                "sha256": zip_hash,
+                "created_at": generated_at,
+                "metadata": {
+                    "manifest_path": result.manifest_path,
+                    "pdf_path": result.pdf_path,
+                    "html_path": result.html_path,
+                    "xlsx_path": result.xlsx_path,
+                    "delivery_zip_path": result.delivery_zip_path,
+                    "file_count": result.file_count,
+                    "report_profile": summary["report_profile"],
+                },
+            })
         store.append_log(f"生成正式工程成果报告包：{result.package_dir}")
         report(10, 10, "正式工程报告包生成完成")
         return result

@@ -14,7 +14,7 @@ from __future__ import annotations
 import numpy as np
 
 from core.gprpy_compat import apply_gprpy_dewow
-from core.scalar_utils import to_float, to_int, to_int_or_none
+from mygpr.domain.common.scalars import to_float, to_int, to_int_or_none
 
 
 def _apply_dewow_exact(data: np.ndarray, window: int) -> np.ndarray:

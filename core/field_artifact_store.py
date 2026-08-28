@@ -67,6 +67,7 @@ def _base_manifest(
     method_id = str(raw_manifest.get("method_id") or params.get("method") or "")
     method_name = str(raw_manifest.get("method_name") or params.get("method_name") or method_id)
     input_dataset = params.get("input_dataset") if isinstance(params.get("input_dataset"), dict) else {}
+    output_header = params.get("output_header") if isinstance(params.get("output_header"), dict) else {}
     collected_params = params.get("params") if isinstance(params.get("params"), dict) else {}
     branch_id = str(params.get("branch_id") or raw_manifest.get("branch_id") or f"{line_id}:main")
     parent_artifact_id = str(params.get("parent_artifact_id") or raw_manifest.get("parent_artifact_id") or "")
@@ -85,6 +86,7 @@ def _base_manifest(
         "params": collected_params,
         "saved_at": saved_at,
         "input_dataset": input_dataset or raw_manifest.get("input_dataset", {}),
+        "output_header": output_header or raw_manifest.get("output_header", {}),
         "output_shape": list(shape),
     }
     return manifest, collected_params, method_id, method_name, branch_id, parent_artifact_id

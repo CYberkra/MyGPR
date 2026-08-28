@@ -97,7 +97,7 @@ class ProcessingPage(QWidget):
 
     run_requested = pyqtSignal(dict)            # current_pipeline() 载荷（含 steps）
     cancel_requested = pyqtSignal()
-    autotune_requested = pyqtSignal(str, dict)  # method_id, params_hint
+    autotune_requested = pyqtSignal(str, dict, str)  # method_id, params_hint, input_artifact_id
     line_load_requested = pyqtSignal()
     line_changed = pyqtSignal(str)              # 处理页测线选择变化
     artifact_selected = pyqtSignal(str)         # 处理页成果选择变化
@@ -112,6 +112,7 @@ class ProcessingPage(QWidget):
         self._job_id = ''
         self._selected_step = -1
         self._autotune_result = None    # (method_id, dict)
+        self._autotune_running = False  # AutoTune 运行中（防重复提交）
         self._selected_method_id = ''   # 方法库当前选中方法
         self._line_ids: list[str] = []  # 与 _line_combo 逐项对应的 line_id
         self._artifact_ids: list[str] = []  # 与 _artifact_combo 逐项对应的 artifact_id
@@ -419,6 +420,12 @@ class ProcessingPage(QWidget):
         if self._current_segment() == _SEG_RESULT:
             self._show_bundle(_SEG_RESULT)
 
+    def show_result_segment(self) -> None:
+        """切换到"处理结果"预览分段（运行完成后自动展示新成果）。"""
+        self._preview_segment.setCurrentItem(_SEG_RESULT)
+        if self._current_segment() == _SEG_RESULT:
+            self._show_bundle(_SEG_RESULT)
+
     def set_running(self, running: bool, job_id: str = '') -> None:
         """运行态切换：运行按钮/取消按钮互斥 + 进度条显隐。"""
         self._running = bool(running)
@@ -515,7 +522,7 @@ class ProcessingPage(QWidget):
         except ValueError:
             keep = -1
         if keep < 0 and self._artifact_ids:
-            keep = len(self._artifact_ids) - 1
+            keep = 0
         if keep >= 0:
             self._artifact_combo.setCurrentIndex(keep)
             self._input_combo.setCurrentIndex(keep + 1)
@@ -612,7 +619,16 @@ class ProcessingPage(QWidget):
         method = self._methods_by_id.get(method_id, {})
         self._autotune_method_label.setText(
             method.get('display_name') or method_id or '--')
-        self._autotune_btn.setEnabled(bool(method_id))
+        self._update_autotune_enabled()
+
+    def _update_autotune_enabled(self) -> None:
+        self._autotune_btn.setEnabled(
+            bool(self._selected_method_id) and not self._autotune_running)
+
+    def set_autotune_running(self, running: bool) -> None:
+        """AutoTune 运行期间禁用「开始调参」，防重复提交（P2-7）。"""
+        self._autotune_running = bool(running)
+        self._update_autotune_enabled()
 
     def _on_add_selected_method(self) -> None:
         method_id = self._method_browser.current_method_id()
@@ -682,15 +698,8 @@ class ProcessingPage(QWidget):
                             position=InfoBarPosition.TOP, duration=3000,
                             parent=self)
             return
-        ok, msg = validate_non_empty(self._result_name_edit.text(), '结果名称')
-        if not ok:
-            mark_invalid(self._result_name_edit, msg)
-            InfoBar.warning(title='执行', content=msg,
-                            orient=Qt.Orientation.Horizontal, isClosable=True,
-                            position=InfoBarPosition.TOP, duration=3000,
-                            parent=self)
-            return
         clear_invalid(self._result_name_edit)
+        # 结果名可留空：窗口层有默认名回退（处理结果_{line_id}），此处不强填
         self.run_requested.emit(self.current_pipeline())
 
     # ---------------- AutoTune
@@ -704,7 +713,15 @@ class ProcessingPage(QWidget):
                             parent=self)
             return
         params_hint = self._param_form.values()
-        self.autotune_requested.emit(method_id, params_hint)
+        self.autotune_requested.emit(method_id, params_hint, self._input_artifact_id())
+
+    def _input_artifact_id(self) -> str:
+        """输入数据下拉当前选中的 artifact_id（''=原始数据）。"""
+        idx = self._input_combo.currentIndex()
+        if idx <= 0:
+            return ''
+        artifact_idx = idx - 1
+        return self._artifact_ids[artifact_idx] if 0 <= artifact_idx < len(self._artifact_ids) else ''
 
     def _on_adopt_params(self) -> None:
         if self._autotune_result is None:

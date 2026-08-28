@@ -388,8 +388,13 @@ class ProjectPage(QWidget):
         self._update_action_state()
 
     def set_lines(self, lines: list) -> None:
-        """刷新测线表；自动选中首行（触发 line_selected）。"""
+        """刷新测线表；自动建议下一测线号（UX P2-1）。"""
         self._lines = list(lines or [])
+        # P2-1：如果导入表单的测线号仍是默认 L01，按现有线数自动建议 L02/L03…
+        if self.line_id_edit.text().strip() in ('', 'L01'):
+            suggest = self._suggest_line_id()
+            if suggest != 'L01':
+                self.line_id_edit.setText(suggest)
         self._filling_table = True
         try:
             self._lines_table.setRowCount(0)
@@ -474,6 +479,13 @@ class ProjectPage(QWidget):
         """当前选中测线号（供主窗口接线使用）。"""
         return self._current_line_id
 
+    def set_default_dielectric(self, value) -> None:
+        """设置默认介电常数（导入表单默认值，来自设置页）。"""
+        try:
+            self.dielectric_spin.setValue(float(value))
+        except (TypeError, ValueError):
+            pass
+
     # ============================================================ 内部
     def _has_project(self) -> bool:
         return self._summary is not None
@@ -492,6 +504,16 @@ class ProjectPage(QWidget):
         if path:
             self.file_edit.setText(path)
             clear_invalid(self.file_edit)
+
+    def _suggest_line_id(self) -> str:
+        """按现有测线号自动建议下一个（L01→L02→L03…，跳过已占用）。"""
+        existing = {str(getattr(line, 'line_id', '') or '')
+                    for line in self._lines}
+        for i in range(1, 100):
+            candidate = f'L{i:02d}'
+            if candidate not in existing:
+                return candidate
+        return 'L99'
 
     def _browse_sensor_file(self, key: str) -> None:
         path, _selected = QFileDialog.getOpenFileName(

@@ -180,9 +180,13 @@ def _check_legacy_core(policy: dict) -> list[str]:
     forbidden = tuple(spec["forbidden_import_prefixes"])
     for root in spec["paths"]:
         for path in py_files(root):
+            exception = _migration_exception(policy, path) or {}
+            allowed = tuple(exception.get("allowed_local_import_prefixes", []))
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
             for imported in imported_names(tree, path):
                 if any(_matches_prefix(imported.name, prefix) for prefix in forbidden):
+                    if _local_import_allowed(imported.name, allowed):
+                        continue
                     errors.append(
                         f"{path.relative_to(ROOT)}:{imported.line}: forbidden legacy-core import {imported.name}"
                     )
@@ -285,7 +289,11 @@ def _check_new_code_quality(policy: dict) -> list[str]:
 def _check_ui_reverse_dependencies(policy: dict) -> list[str]:
     errors: list[str] = []
     ui_prefix = "ui."
+    # 入口脚本（依赖图顶端）可豁免：它们按设计装配 ui 包，门禁只约束后端层
+    excluded = set(policy.get("ui_reverse_dependency_exceptions", {}).get("paths", []))
     for root in ["core", "mygpr", "PythonModule", "app_qt.py", "cli_batch.py"]:
+        if root in excluded:
+            continue
         for path in py_files(root):
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
             for imported in imported_names(tree, path):

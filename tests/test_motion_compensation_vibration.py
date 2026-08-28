@@ -12,7 +12,7 @@ from PythonModule.motion_compensation_vibration import (  # type: ignore[import]
     method_motion_compensation_vibration,
 )
 from core.benchmark_registry import generate_benchmark_sample
-from core.quality_metrics import periodic_banding_ratio, target_preservation_ratio
+from mygpr.domain.autotune.quality_metrics import periodic_banding_ratio, target_preservation_ratio
 
 
 def _relative_reduction(before: float, after: float) -> float:

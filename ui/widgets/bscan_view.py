@@ -401,7 +401,8 @@ class BScanView(QWidget):
         self._scatter.setData([])
         self._image_shape = None
         self._hide_crosshair()
-        self._plot.setTitle('B-Scan图像')
+        # P2-5：空态引导文案，替代只剩坐标轴
+        self._plot.setTitle('暂无数据 — 请先在项目页导入测线')
 
     def apply_theme(self, dark: bool) -> None:
         """深色 bg 'k'/文字 'w'；浅色 bg 'w'/文字 'k'；轴 pen/textPen/标签同步。"""

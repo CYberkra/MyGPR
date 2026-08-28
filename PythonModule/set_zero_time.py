@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from core.scalar_utils import to_float, to_float_or_none
+from mygpr.domain.common.scalars import to_float, to_float_or_none
 
 
 def _resolve_time_step_s(ny: int, time_step_s: float | None) -> float:

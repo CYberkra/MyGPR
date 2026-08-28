@@ -21,11 +21,27 @@ allowed_local_import_prefixes = ["mygpr.interfaces", "mygpr.application", "mygpr
 
 [legacy_core]
 paths = ["core"]
-forbidden_import_prefixes = ["PyQt6", "PySide6", "qfluentwidgets", "studio_app", "frontend_sdk", "ui", "compatibility"]
+# 只禁核心的"深层"依赖（infrastructure/application/interfaces）；mygpr.domain 是
+# 共享领域内核，过渡期内 core 引用它属于最不坏的方向（methods_registry 经迁移豁免）。
+forbidden_import_prefixes = ["PyQt6", "PySide6", "qfluentwidgets", "studio_app", "frontend_sdk", "ui", "compatibility", "mygpr.infrastructure", "mygpr.application", "mygpr.interfaces"]
 
 [layers.ui]
 paths = ["ui"]
 allowed_local_import_prefixes = ["ui", "mygpr.interfaces"]
+
+[[migration_exceptions]]
+path_prefix = "core/methods_registry.py"
+allowed_local_import_prefixes = ["mygpr.infrastructure.processing.algorithms.methods"]
+owner = "processing-backend"
+remove_after = "1.1.0"
+reason = "NATIVE_ALGORITHMS 单一事实来源暂以懒加载方式进入 legacy registry；1.1.0 前改端口/延迟注入。"
+
+[[migration_exceptions]]
+path_prefix = "ui/constants.py"
+allowed_local_import_prefixes = ["core.app_paths"]
+owner = "qt-ui"
+remove_after = "1.1.0"
+reason = "ui/constants.LOG_DIR 委托 core.app_paths 统一日志根目录，消除 Windows 下 GUI/core 日志分家。"
 
 [[migration_exceptions]]
 path_prefix = "ui/desktop_backend_facade.py"
@@ -37,6 +53,11 @@ max_function_lines = 100
 
 [path_policy]
 forbid_sys_path_mutation_under = ["core", "mygpr", "cli_batch.py"]
+
+[ui_reverse_dependency_exceptions]
+# GUI/CLI 入口脚本位于依赖图顶端，按设计可 import ui；反向依赖门禁只约束后端层。
+paths = ["app_qt.py"]
+reason = "GUI 入口 app_qt.py 按设计装配 ui 包（main_window 等）；core/mygpr/PythonModule 仍受禁。"
 
 [new_code_quality]
 paths = ["mygpr/domain", "mygpr/application", "mygpr/infrastructure", "mygpr/interfaces"]

@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Backend-only pytest configuration and isolated runtime roots."""
+"""Backend-only pytest configuration and isolated runtime roots.
+
+含一个 session 级 ``qapp`` fixture：跨测试模块共享同一 QApplication，避免
+qfluentwidgets 的全局 QConfig 单例在模块间被 GC 后悬垂（``wrapped object deleted``）。
+GUI 测试文件不再各自定义模块级 qapp，统一引用本 fixture；后端 CI（无 PyQt6）
+下相关用例自动 skip。
+"""
 from __future__ import annotations
 
 import enum
@@ -8,6 +14,8 @@ from pathlib import Path
 import shutil
 import sys
 import tempfile
+
+import pytest
 
 # Python 3.10 compatibility: provide a StrEnum that behaves like the 3.11+ builtin.
 # core/domain modules import `from enum import StrEnum`; without this patch the
@@ -66,3 +74,19 @@ def pytest_unconfigure(config) -> None:
         if os.environ.get("MYGPR_LOG_DIR") == log_root:
             os.environ.pop("MYGPR_LOG_DIR", None)
         _RUNTIME_ROOT = None
+
+
+@pytest.fixture(scope="session")
+def qapp():
+    """Session 级 QApplication：整个会话共享同一实例。
+
+    各 GUI 测试文件统一引用本 fixture（不再各自定义模块级 qapp），避免
+    qfluentwidgets 全局 QConfig 单例在模块间 QApplication 被 GC 后悬垂。
+    后端 CI（未装 PyQt6）下相关用例自动 skip。
+    """
+    try:
+        from PyQt6.QtWidgets import QApplication
+    except Exception:  # noqa: BLE001 - 依赖缺失时跳过 GUI 用例
+        pytest.skip("PyQt6 未安装，跳过 GUI 测试")
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    return QApplication.instance() or QApplication([])

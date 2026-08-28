@@ -12,7 +12,7 @@ from typing import Any
 import numpy as np
 from PyQt6.QtCore import QObject, pyqtSignal
 
-from ui.desktop_backend_facade import build_preview_bundle
+from ui.desktop_backend_facade import SensorSyncSettings, build_preview_bundle
 from ui.controllers.backend_controller import friendly_error_message, run_command
 
 _LOGGER = logging.getLogger(__name__)
@@ -42,6 +42,9 @@ class ProjectController(QObject):
         self._backend_controller = None
         self._current = None
         self._busy = False
+        # 预览代数：每次发起新预览自增，worker 回包时若代数已过期则丢弃，
+        # 防止快速切换测线时旧预览覆盖新预览。
+        self._preview_generation = 0
 
     # ------------------------------------------------------------------
     def set_backend(self, backend_controller) -> None:
@@ -183,9 +186,10 @@ class ProjectController(QObject):
         if backend is None or project_id is None:
             return
         line_id = str(line_id)
+        self._preview_generation += 1
 
         run_command(
-            _PreviewLineCommand(self, project_id, line_id),
+            _PreviewLineCommand(self, project_id, line_id, self._preview_generation),
             name="mygpr-line-preview",
         )
 
@@ -196,18 +200,46 @@ class ProjectController(QObject):
             return
         line_id = str(line_id)
         artifact_id = str(artifact_id)
+        self._preview_generation += 1
 
         run_command(
-            _PreviewArtifactCommand(self, project_id, line_id, artifact_id),
+            _PreviewArtifactCommand(self, project_id, line_id, artifact_id, self._preview_generation),
             name="mygpr-artifact-preview",
         )
 
     @staticmethod
-    def _bundle_from_window(matrix: Any, line_id: str, *, title: str):
+    def _bundle_from_window(
+        matrix: Any,
+        line_id: str,
+        *,
+        title: str = "",
+        time_window_ns: float = 250.0,
+        length_m: float | None = None,
+        sample_indices: Any = None,
+        trace_indices: Any = None,
+        total_samples: int = 0,
+        total_traces: int = 0,
+    ) -> Any:
+        """从 read_window 结果构建预览 bundle。
+
+        P1-5：透传真实 time_window_ns 与通过 sample/trace_indices 重建的物理轴，
+        避免所有页面预览纵轴硬编码 250ns 导致刻度错误。
+        """
+        time_axis_ns = None
+        distance_axis_m = None
+        if sample_indices is not None and total_samples > 0:
+            base = np.linspace(0.0, float(time_window_ns), int(total_samples), dtype=np.float32)
+            time_axis_ns = base[np.asarray(sample_indices, dtype=np.int64)]
+        if trace_indices is not None and total_traces > 0:
+            base = np.linspace(0.0, float(length_m or max(int(total_traces) - 1, 1)), int(total_traces), dtype=np.float32)
+            distance_axis_m = base[np.asarray(trace_indices, dtype=np.int64)]
         return build_preview_bundle(
             line_id=line_id,
             matrix=np.asarray(matrix, dtype=np.float32),
             title=title,
+            time_window_ns=float(time_window_ns),
+            time_axis_ns=time_axis_ns,
+            distance_axis_m=distance_axis_m,
         )
 
     # ------------------------------------------------------------------
@@ -233,6 +265,7 @@ class ProjectController(QObject):
                 dielectric_constant=float(dielectric),
             )
         except Exception as exc:  # noqa: BLE001
+            _LOGGER.exception("测线导入提交失败")
             self.log_message.emit(f"测线导入提交失败：{friendly_error_message(exc)}")
             return None
         self.log_message.emit(f"测线导入已提交：{line_id}")
@@ -273,6 +306,7 @@ class ProjectController(QObject):
                 settings=settings_obj,
             )
         except Exception as exc:  # noqa: BLE001
+            _LOGGER.exception("传感器同步提交失败")
             self.log_message.emit(f"传感器同步提交失败：{friendly_error_message(exc)}")
             return None
         self.log_message.emit(f"传感器同步已提交：{line_id}")
@@ -328,6 +362,7 @@ class _CreateProjectCommand:
                 vertical_datum=str(meta.get("vertical_datum", "")),
             )
         except Exception as exc:  # noqa: BLE001
+            _LOGGER.exception("新建项目失败")
             message = friendly_error_message(exc)
             c.log_message.emit(f"新建项目失败：{message}")
             c.open_failed.emit(message)
@@ -357,6 +392,7 @@ class _OpenProjectCommand:
         try:
             summary = backend.projects.open_project(str(self._root))
         except Exception as exc:  # noqa: BLE001
+            _LOGGER.exception("打开项目失败")
             message = friendly_error_message(exc)
             c.log_message.emit(f"打开项目失败：{message}")
             c.open_failed.emit(message)
@@ -385,6 +421,7 @@ class _CloseProjectCommand:
         try:
             backend.projects.close_project(self._project_id, force=False)
         except Exception as exc:  # noqa: BLE001
+            _LOGGER.exception("关闭项目失败")
             c.log_message.emit(f"关闭项目失败：{friendly_error_message(exc)}")
         else:
             c._current = None
@@ -409,6 +446,7 @@ class _RefreshLinesCommand:
         try:
             lines = list(backend.projects.list_lines(self._project_id))
         except Exception as exc:  # noqa: BLE001
+            _LOGGER.exception("刷新测线列表失败")
             c.log_message.emit(f"刷新测线列表失败：{friendly_error_message(exc)}")
         else:
             c.lines_updated.emit(lines)
@@ -430,6 +468,7 @@ class _RefreshArtifactsCommand:
         try:
             artifacts = list(backend.projects.list_artifacts(self._project_id, self._line_id))
         except Exception as exc:  # noqa: BLE001
+            _LOGGER.exception("刷新成果列表失败")
             c.log_message.emit(f"刷新成果列表失败：{friendly_error_message(exc)}")
         else:
             c.artifacts_updated.emit(self._line_id, artifacts)
@@ -450,18 +489,26 @@ class _LoadSpatialTracksCommand:
         try:
             tracks = list(backend.spatial.load_tracks(self._project_id))
         except Exception as exc:  # noqa: BLE001
+            _LOGGER.exception("加载空间轨迹失败")
             c.log_message.emit(f"加载空间轨迹失败：{friendly_error_message(exc)}")
         else:
             c.spatial_tracks_ready.emit(tracks)
 
 
 class _PreviewLineCommand:
-    __slots__ = ("_controller", "_project_id", "_line_id")
+    __slots__ = ("_controller", "_project_id", "_line_id", "_generation")
 
-    def __init__(self, controller: ProjectController, project_id: str, line_id: str) -> None:
+    def __init__(
+        self,
+        controller: ProjectController,
+        project_id: str,
+        line_id: str,
+        generation: int,
+    ) -> None:
         self._controller = controller
         self._project_id = project_id
         self._line_id = line_id
+        self._generation = generation
 
     def execute(self) -> None:
         c = self._controller
@@ -469,21 +516,30 @@ class _PreviewLineCommand:
         if backend is None:
             return
         try:
-            matrix, _sample_idx, _trace_idx = backend.projects.read_window(
+            info = backend.projects.get_dataset_info(self._project_id, self._line_id)
+            matrix, sample_idx, trace_idx = backend.projects.read_window(
                 self._project_id,
                 self._line_id,
                 max_samples=_PREVIEW_MAX_SAMPLES,
                 max_traces=_PREVIEW_MAX_TRACES,
             )
-            bundle = c._bundle_from_window(matrix, self._line_id, title=f"测线 {self._line_id}")
+            bundle = c._bundle_from_window(
+                matrix, self._line_id, title=f"测线 {self._line_id}",
+                time_window_ns=info.time_window_ns, length_m=info.length_m,
+                sample_indices=sample_idx, trace_indices=trace_idx,
+                total_samples=info.shape[0], total_traces=info.shape[1],
+            )
         except Exception as exc:  # noqa: BLE001
+            _LOGGER.exception("数据预览失败")
             c.log_message.emit(f"数据预览失败：{friendly_error_message(exc)}")
         else:
+            if c._preview_generation != self._generation:
+                return
             c.dataset_preview_ready.emit(bundle)
 
 
 class _PreviewArtifactCommand:
-    __slots__ = ("_controller", "_project_id", "_line_id", "_artifact_id")
+    __slots__ = ("_controller", "_project_id", "_line_id", "_artifact_id", "_generation")
 
     def __init__(
         self,
@@ -491,11 +547,13 @@ class _PreviewArtifactCommand:
         project_id: str,
         line_id: str,
         artifact_id: str,
+        generation: int,
     ) -> None:
         self._controller = controller
         self._project_id = project_id
         self._line_id = line_id
         self._artifact_id = artifact_id
+        self._generation = generation
 
     def execute(self) -> None:
         c = self._controller
@@ -503,17 +561,27 @@ class _PreviewArtifactCommand:
         if backend is None:
             return
         try:
-            matrix, _sample_idx, _trace_idx = backend.projects.read_artifact_window(
+            info = backend.projects.get_artifact_dataset_info(
+                self._project_id, self._line_id, self._artifact_id)
+            matrix, sample_idx, trace_idx = backend.projects.read_artifact_window(
                 self._project_id,
                 self._line_id,
                 self._artifact_id,
                 max_samples=_PREVIEW_MAX_SAMPLES,
                 max_traces=_PREVIEW_MAX_TRACES,
             )
-            bundle = c._bundle_from_window(matrix, self._line_id, title=f"成果 {self._artifact_id}")
+            bundle = c._bundle_from_window(
+                matrix, self._line_id, title=f"成果 {self._artifact_id}",
+                time_window_ns=info.time_window_ns, length_m=info.length_m,
+                sample_indices=sample_idx, trace_indices=trace_idx,
+                total_samples=info.shape[0], total_traces=info.shape[1],
+            )
         except Exception as exc:  # noqa: BLE001
+            _LOGGER.exception("成果预览失败")
             c.log_message.emit(f"成果预览失败：{friendly_error_message(exc)}")
         else:
+            if c._preview_generation != self._generation:
+                return
             c.artifact_preview_ready.emit(self._artifact_id, bundle)
 
 
@@ -545,6 +613,7 @@ class _PreflightImportCommand:
                 dielectric_constant=float(self._dielectric),
             )
         except Exception as exc:  # noqa: BLE001
+            _LOGGER.exception("导入预检失败")
             message = friendly_error_message(exc)
             c.log_message.emit(f"导入预检失败：{message}")
             c.preflight_failed.emit(message)
@@ -577,6 +646,7 @@ class _DeleteLinesCommand:
             for line_id in self._line_ids:
                 backend.maintenance.delete_line(self._project_id, line_id, reason=self._reason)
         except Exception as exc:  # noqa: BLE001
+            _LOGGER.exception("删除测线失败")
             c.log_message.emit(f"删除测线失败：{friendly_error_message(exc)}")
         else:
             c.log_message.emit(f"已删除 {len(self._line_ids)} 条测线")

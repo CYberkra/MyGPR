@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from core.scalar_utils import to_float
+from mygpr.domain.common.scalars import to_float
 
 
 def method_sec_gain(

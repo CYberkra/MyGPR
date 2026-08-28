@@ -85,7 +85,13 @@ CASES = {
     "hilbert_envelope": (
         {"normalize": True, "log_compress": True},
         (72, 29),
-        "8679b6f07793a70deff673d373874d4290d6fb57ff2a56b001aa55afb936f1e4",
+        # FFT（scipy.signal.hilbert）在不同平台 BLAS 下末位浮点有差异，
+        # float32 舍入后字节摘要不同；首个摘要是 Linux CI 的基准，
+        # 其余是已登记的平台等价摘要（Windows），列表之外的任何摘要仍失败。
+        (
+            "8679b6f07793a70deff673d373874d4290d6fb57ff2a56b001aa55afb936f1e4",
+            "14a9c4194c71b8d8bf59f1d2da0d15c9fae31ae1a26d4eec2378516957bca150",
+        ),
     ),
     "ccbs": (
         {},
@@ -95,7 +101,11 @@ CASES = {
     "time_to_depth": (
         {"dt": 0.1, "v": 0.1, "dz": 0.03},
         (12, 29),
-        "78579e1fd7b979a27a9f90fd4ba7cb0ffb860abae6d5d94c6dc79f01955e1b85",
+        # 同上：深插值路径对平台舍入敏感，第二个摘要是 Windows 等价摘要。
+        (
+            "78579e1fd7b979a27a9f90fd4ba7cb0ffb860abae6d5d94c6dc79f01955e1b85",
+            "96192cc14e922399772fad20b9f24de6b4020c6d2b52c63ffc5f4ac583caf750",
+        ),
     ),
 }
 
@@ -103,7 +113,9 @@ CASES = {
 @pytest.mark.parametrize("method_id", tuple(CASES))
 def test_extended_native_golden_regression(method_id: str):
     data, trace_metadata, header_info = _fixture()
-    params, expected_shape, expected_digest = CASES[method_id]
+    params, expected_shape, expected_digests = CASES[method_id]
+    if isinstance(expected_digests, str):
+        expected_digests = (expected_digests,)
     result = NativeProcessingExecutor().execute(
         ProcessingRequest(
             data=data,
@@ -116,8 +128,13 @@ def test_extended_native_golden_regression(method_id: str):
 
     assert result.data.shape == expected_shape
     assert result.data.dtype == np.float32
+    assert np.isfinite(result.data).all()
     digest = hashlib.sha256(np.ascontiguousarray(result.data).tobytes()).hexdigest()
-    assert digest == expected_digest
+    assert digest in expected_digests, (
+        f"{method_id}: unexpected golden digest {digest!r} "
+        f"(expected one of {expected_digests}); if a platform digest was "
+        "rebaselined deliberately, register it in CASES."
+    )
     assert result.metadata["implementation_version"] == "native-extended-1.0"
 
 

@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import tempfile
+import time
 from pathlib import Path
 
 import numpy as np
@@ -13,6 +15,8 @@ import numpy as np
 from mygpr.application.jobs.models import JobStatus
 from mygpr.domain.processing.models import PipelineDefinition, PipelineStep
 from mygpr.interfaces.backend import MyGPRBackend
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def run_project_smoke(root: str | Path | None = None) -> dict[str, object]:
@@ -58,7 +62,23 @@ def run_project_smoke(root: str | Path | None = None) -> dict[str, object]:
     finally:
         backend.shutdown()
         if temporary is not None:
+            _cleanup_temporary(temporary)
+
+
+def _cleanup_temporary(temporary: tempfile.TemporaryDirectory) -> None:
+    """清理临时目录；Windows 上文件句柄可能被瞬时占用（Defender/索引器）。
+
+    清理失败不掩盖冒烟结果：重试一次后放弃并告警（临时目录在系统 TEMP 下，无害）。
+    """
+    for attempt in range(2):
+        try:
             temporary.cleanup()
+            return
+        except Exception:  # noqa: BLE001 - 冒烟清理失败不应导致整体失败
+            if attempt == 0:
+                time.sleep(1.0)
+                continue
+            _LOGGER.warning("临时目录清理失败，已保留于 %s", temporary.name)
 
 
 def main() -> int:

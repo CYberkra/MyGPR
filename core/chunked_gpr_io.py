@@ -480,12 +480,27 @@ def save_dataset_directory(
             json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         check_cancel(cancel_requested)
+        # 先把旧目录改名到备份位再换入 staging，避免"先删后换"在崩溃时
+        # 同时失去新旧两份数据；同卷 rename 是原子操作。
+        backup_dir: Path | None = None
         if final_dir.exists():
             if final_dir.is_dir():
-                shutil.rmtree(final_dir)
+                backup_dir = final_dir.with_name(
+                    f".{final_dir.name}.backup_{os.getpid()}_{id(matrix):x}"
+                )
+                if backup_dir.exists():
+                    shutil.rmtree(backup_dir, ignore_errors=True)
+                final_dir.replace(backup_dir)
             else:
                 final_dir.unlink()
-        staging.replace(final_dir)
+        try:
+            staging.replace(final_dir)
+        except Exception:
+            if backup_dir is not None and backup_dir.exists() and not final_dir.exists():
+                backup_dir.replace(final_dir)
+            raise
+        if backup_dir is not None:
+            shutil.rmtree(backup_dir, ignore_errors=True)
         return final_dir
     except Exception:
         shutil.rmtree(staging, ignore_errors=True)

@@ -8,7 +8,7 @@ from typing import Any
 
 import numpy as np
 
-from core.runtime_warnings import build_runtime_warning
+from mygpr.domain.processing.warnings import build_runtime_warning
 
 
 _VALID_MODES = {"interp", "nearest", "mirror", "constant", "wrap"}

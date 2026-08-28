@@ -4,8 +4,8 @@
 公共接口：
 - load_settings(dict)：回放设置到控件（blockSignals，不触发 theme_changed）
 - settings() -> dict：当前控件值（键与 ui.settings_manager.DEFAULT_SETTINGS 对齐：
-  theme / default_dielectric / default_colormap / preview_max_samples /
-  max_workers / project_root）
+  theme / default_dielectric / max_workers / project_root；
+  default_colormap / preview_max_samples 因消费端硬编码已移除，避免"设置了没反应"）
 - set_theme_text(str)：主窗口主题切换后回写主题 ComboBox（blockSignals）
 
 信号：theme_changed(str)（'浅色主题' / '深色主题'）。
@@ -19,8 +19,8 @@ from PyQt6.QtWidgets import (
     QFileDialog, QFrame, QHBoxLayout, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
-    BodyLabel, CaptionLabel, CardWidget, ComboBox, DoubleSpinBox, LineEdit,
-    PushButton, ScrollArea, SpinBox, SubtitleLabel,
+    BodyLabel, CaptionLabel, CardWidget, CheckBox, ComboBox, DoubleSpinBox,
+    LineEdit, PushButton, ScrollArea, SpinBox, SubtitleLabel,
 )
 
 from ui import constants
@@ -129,32 +129,17 @@ class SettingsPage(ScrollArea):
         diel_row.addStretch(1)
         layout.addLayout(diel_row)
 
-        # 默认颜色映射（九项，默认 seismic）
-        cmap_row = QHBoxLayout()
-        cmap_label = CaptionLabel('默认颜色映射:', card)
-        cmap_label.setMinimumWidth(100)
-        self._cmap_combo = ComboBox(card)
-        self._cmap_combo.addItems(constants.COLORMAPS)
-        self._cmap_combo.setCurrentText(constants.DEFAULT_COLORMAP)
-        self._cmap_combo.setMinimumWidth(120)
-        cmap_row.addWidget(cmap_label)
-        cmap_row.addWidget(self._cmap_combo)
-        cmap_row.addStretch(1)
-        layout.addLayout(cmap_row)
+        # 自动预下载底图（空间页加载轨迹后自动下载瓦片）
+        prefetch_row = QHBoxLayout()
+        self._prefetch_check = CheckBox('自动预下载测线区域底图', card)
+        self._prefetch_check.setToolTip('空间页加载轨迹后自动下载当地底图瓦片；关掉可避免自动联网。')
+        prefetch_row.addWidget(self._prefetch_check)
+        prefetch_row.addStretch(1)
+        layout.addLayout(prefetch_row)
 
-        # 预览下采样上限（300-4000，默认 900）
-        ds_row = QHBoxLayout()
-        ds_label = CaptionLabel('预览下采样上限:', card)
-        ds_label.setMinimumWidth(100)
-        self._downsample_spin = SpinBox(card)
-        self._downsample_spin.setRange(300, 4000)
-        self._downsample_spin.setSingleStep(100)
-        self._downsample_spin.setValue(constants.PREVIEW_MAX_SAMPLES)
-        self._downsample_spin.setMinimumWidth(120)
-        ds_row.addWidget(ds_label)
-        ds_row.addWidget(self._downsample_spin)
-        ds_row.addStretch(1)
-        layout.addLayout(ds_row)
+        # 默认颜色映射（九项，默认 seismic）—— 消费端（bscan_view）目前硬编码，暂不接线
+        # 预览下采样上限（300-4000，默认 900）—— 消费端（project_controller）目前硬编码，暂不接线
+        # 这两个设置项已从 UI 移除，避免「设置了没反应」伤信任；待消费端统一接入后再恢复。
         return card
 
     def _build_processing_card(self, parent) -> CardWidget:
@@ -216,8 +201,8 @@ class SettingsPage(ScrollArea):
     def load_settings(self, data: dict) -> None:
         """回放设置到控件（blockSignals，不触发 theme_changed）。未知键忽略。"""
         data = dict(data or {})
-        widgets = (self._theme_combo, self._dielectric_spin, self._cmap_combo,
-                   self._downsample_spin, self._workers_spin, self._root_edit)
+        widgets = (self._theme_combo, self._dielectric_spin,
+                   self._workers_spin, self._root_edit, self._prefetch_check)
         for widget in widgets:
             widget.blockSignals(True)
         try:
@@ -225,14 +210,12 @@ class SettingsPage(ScrollArea):
                 str(data.get('theme', constants.THEME_LIGHT)))
             self._dielectric_spin.setValue(float(data.get(
                 'default_dielectric', constants.DEFAULT_DIELECTRIC)))
-            self._cmap_combo.setCurrentText(
-                str(data.get('default_colormap', constants.DEFAULT_COLORMAP)))
-            self._downsample_spin.setValue(int(data.get(
-                'preview_max_samples', constants.PREVIEW_MAX_SAMPLES)))
             self._workers_spin.setValue(
                 int(data.get('max_workers', constants.MAX_WORKERS)))
             self._root_edit.setText(
                 str(data.get('project_root', constants.DEFAULT_PROJECT_ROOT)))
+            self._prefetch_check.setChecked(bool(data.get(
+                'auto_prefetch_basemap', True)))
         finally:
             for widget in widgets:
                 widget.blockSignals(False)
@@ -242,11 +225,10 @@ class SettingsPage(ScrollArea):
         return {
             'theme': self._theme_combo.currentText(),
             'default_dielectric': float(self._dielectric_spin.value()),
-            'default_colormap': self._cmap_combo.currentText(),
-            'preview_max_samples': int(self._downsample_spin.value()),
             'max_workers': int(self._workers_spin.value()),
             'project_root': self._root_edit.text().strip()
                             or constants.DEFAULT_PROJECT_ROOT,
+            'auto_prefetch_basemap': bool(self._prefetch_check.isChecked()),
         }
 
     def set_theme_text(self, text: str) -> None:

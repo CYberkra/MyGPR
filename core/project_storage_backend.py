@@ -4,11 +4,14 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+import json
 import sqlite3
 from pathlib import Path
 from typing import Any
 
-from core.gpr_data_model import GPRDataSet
+import numpy as np
+
+from core.gpr_data_model import GPRDataSet, time_to_depth_axis
 from core.field_project_models import validate_line_id
 from core.hybrid_transaction_journal import HybridArtifactTransactionJournal
 from core.hdf5_line_container import (
@@ -27,6 +30,22 @@ HYBRID_STORAGE_BACKEND = "hybrid_hdf5_sqlite_v1"
 LEGACY_STORAGE_BACKEND = "legacy_files_v2"
 
 
+def _load_json(path: Path) -> dict[str, Any]:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError, TypeError):
+        return {}
+
+
+def _coerce_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 class ProjectStorageBackend(ABC):
     def __init__(self, root: str | Path, manifest: Any, *, read_only: bool = False) -> None:
         self.root = Path(root).resolve()
@@ -42,12 +61,102 @@ class ProjectStorageBackend(ABC):
 
 
 class LegacyProjectStorageBackend(ProjectStorageBackend):
+    """Legacy npy/sidecar 存储后端。
+
+    无 SQLite catalog；成果以 ``processed/{line_id}/{line_id}_processed_*.npy``
+    + 旁车 JSON（manifest/params）落盘，读取经 ``index_processing_artifacts``
+    的 npy 回退扫描。这里补齐 adapter 无条件调用的读取接口，使旧项目
+    成果预览/二次处理不再 AttributeError（P0-3）。
+    """
+
     @property
     def is_hybrid(self) -> bool:
         return False
 
     def ensure_structure(self, *, recover_transactions: bool = True) -> None:
         return None
+
+    def load_processing_artifact(
+        self,
+        line_id: str,
+        artifact_id: str,
+        *,
+        raw_dataset: GPRDataSet | None = None,
+    ) -> GPRDataSet:
+        """从 legacy npy + 旁车 JSON 重建处理成果数据集。
+
+        旁车命名约定与 ``core/processing_artifact_index.py`` 的 npy 回退扫描一致：
+        ``{line_id}_processing_manifest_{timestamp}.json`` / ``{line_id}_params_{timestamp}.json``，
+        缺失时回退到无时间戳的 legacy 文件。
+        """
+        safe_line = validate_line_id(line_id)
+        processed_root = self.root / "processed" / safe_line
+        data_path = processed_root / f"{artifact_id}.npy"
+        if not data_path.exists():
+            raise FileNotFoundError(
+                f"legacy 处理成果不存在: {artifact_id!r} for line {safe_line!r}"
+            )
+        timestamp = artifact_id
+        prefix = f"{safe_line}_processed_"
+        if timestamp.startswith(prefix):
+            timestamp = timestamp[len(prefix):]
+        manifest_path = processed_root / f"{safe_line}_processing_manifest_{timestamp}.json"
+        if not manifest_path.exists():
+            manifest_path = processed_root / f"{safe_line}_processing_manifest.json"
+        params_path = processed_root / f"{safe_line}_params_{timestamp}.json"
+        if not params_path.exists():
+            params_path = processed_root / f"{safe_line}_params.json"
+        manifest = _load_json(manifest_path) if manifest_path.exists() else {}
+        params = _load_json(params_path) if params_path.exists() else {}
+        input_dataset = (
+            params.get("input_dataset")
+            if isinstance(params.get("input_dataset"), dict) else {}
+        )
+        # legacy 回退路径同样不得整文件读入内存；float32 npy 以 memmap
+        # 透传给 GPRDataSet.from_matrix（copy=False 不会物化）。
+        matrix = np.load(data_path, mmap_mode="r", allow_pickle=False)
+        # P1-1：优先用持久化的输出 header 重建物理轴（time_cut/set_zero_time 改变时窗/零点）
+        output_header = (
+            manifest.get("output_header")
+            if isinstance(manifest.get("output_header"), dict) else {}
+        )
+        out_time_window = _coerce_float(
+            output_header.get("total_time_ns") or output_header.get("time_window_ns")
+        )
+        out_offset = _coerce_float(output_header.get("time_cut_offset_ns")) or 0.0
+        if out_time_window and out_time_window > 0:
+            time_window = out_time_window
+        else:
+            time_window = _coerce_float(
+                input_dataset.get("time_window_ns")
+                or manifest.get("time_window_ns") or 250.0
+            ) or 250.0
+        sample_count = int(matrix.shape[0])
+        time_axis = None
+        if output_header and sample_count > 0:
+            time_axis = out_offset + np.linspace(0.0, time_window, sample_count, dtype=np.float32)
+        metadata = {
+            **manifest,
+            "artifact_id": artifact_id,
+            "input_dataset": input_dataset,
+        }
+        dataset = GPRDataSet.from_matrix(
+            line_id=safe_line,
+            matrix=matrix,
+            length_m=_coerce_float(input_dataset.get("length_m")),
+            time_window_ns=time_window,
+            dielectric_constant=_coerce_float(
+                input_dataset.get("dielectric_constant")
+                or manifest.get("dielectric_constant") or 9.0
+            ) or 9.0,
+            source_path=str(input_dataset.get("source_path") or ""),
+            format_name=str(input_dataset.get("format_name") or "memory"),
+            metadata=metadata,
+        )
+        if time_axis is not None and len(time_axis) == dataset.sample_count:
+            dataset.time_axis_ns = time_axis
+            dataset.depth_axis_m = time_to_depth_axis(time_axis, dataset.dielectric_constant)
+        return dataset
 
 
 class HybridProjectStorageBackend(ProjectStorageBackend):

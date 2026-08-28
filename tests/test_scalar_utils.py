@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from core.scalar_utils import (
+from mygpr.domain.common.scalars import (
     first_scalar,
     first_two_floats,
     to_float,

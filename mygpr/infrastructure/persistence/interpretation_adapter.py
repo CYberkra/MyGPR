@@ -149,6 +149,12 @@ class InterpretationPersistenceMixin:
             self._store.root, f"metadata/interpretations/features/{safe}.geojson"
         )
 
+    def _append_audit(self, event: str, *, object_type: str, object_id: str, payload: dict) -> None:
+        """记录审计事件；legacy 项目无 catalog，静默跳过（与 field_project_runtime_store 一致）。"""
+        if not getattr(self._store.storage, "is_hybrid", False):
+            return
+        self._append_audit(event, object_type=object_type, object_id=object_id, payload=payload)
+
     def list_interpretation_features(self, line_id: str) -> Sequence[InterpretationFeature]:
         safe = self._validated_line(line_id)
         path = self._interpretation_path(safe)
@@ -179,7 +185,7 @@ class InterpretationPersistenceMixin:
         }
         with self._lock:
             self._store.write_json(self._interpretation_path(safe), payload)
-            self._store.storage.catalog.append_audit(
+            self._append_audit(
                 "interpretation_features_replaced", object_type="line", object_id=safe,
                 payload={"feature_count": len(features)},
             )
@@ -297,7 +303,7 @@ class InterpretationPersistenceMixin:
                 safe, legacy_value, export_labels=True
             )
             self._store.write_json(contract_path, _interface_payload(saved))
-            self._store.storage.catalog.append_audit(
+            self._append_audit(
                 "basal_interface_saved", object_type="line", object_id=safe,
                 payload={
                     "version": saved.version, "status": saved.status,
@@ -350,7 +356,7 @@ class InterpretationPersistenceMixin:
                     "boreholes": [asdict(item) for item in sorted(items.values(), key=lambda value: value.borehole_id)],
                 },
             )
-            self._store.storage.catalog.append_audit(
+            self._append_audit(
                 "borehole_saved", object_type="borehole", object_id=borehole_id,
                 payload={"line_id": normalized.line_id},
             )
@@ -370,7 +376,7 @@ class InterpretationPersistenceMixin:
                     "boreholes": [asdict(item) for item in sorted(items.values(), key=lambda value: value.borehole_id)],
                 },
             )
-            self._store.storage.catalog.append_audit(
+            self._append_audit(
                 "borehole_deleted", object_type="borehole", object_id=safe
             )
         return True

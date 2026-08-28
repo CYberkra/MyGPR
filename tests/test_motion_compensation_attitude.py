@@ -7,7 +7,7 @@ from __future__ import annotations
 import numpy as np
 
 from PythonModule.motion_compensation_attitude import method_motion_compensation_attitude  # type: ignore[import]
-from core.quality_metrics import footprint_rmse
+from mygpr.domain.autotune.quality_metrics import footprint_rmse
 
 
 def _copy_metadata(trace_metadata: dict) -> dict:

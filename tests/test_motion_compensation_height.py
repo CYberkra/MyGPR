@@ -10,7 +10,7 @@ import pytest
 from PythonModule.motion_compensation_height import method_motion_compensation_height
 from PythonModule.motion_compensation_core import AIR_WAVE_SPEED_M_PER_NS
 from core.benchmark_registry import generate_benchmark_sample
-from core.quality_metrics import ridge_error_metrics
+from mygpr.domain.autotune.quality_metrics import ridge_error_metrics
 
 
 def _ridge_amplitude_variance(data: np.ndarray, row_range: tuple[int, int]) -> float:
@@ -64,7 +64,7 @@ def test_height_compensation_reduces_reflector_ridge_error():
         assert reduction >= 0.40
 
     # target preservation: 目标带能量不应过度损失（>= 60%）
-    from core.quality_metrics import target_preservation_ratio
+    from mygpr.domain.autotune.quality_metrics import target_preservation_ratio
 
     tpr = target_preservation_ratio(corrected, raw, row_range=target_row_range)
     assert tpr >= 0.60

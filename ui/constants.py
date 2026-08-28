@@ -3,8 +3,14 @@
 
 对应 SPEC §2 [A1]：窗口尺寸 / 默认项 / 状态色 / 徽章色对。
 颜色值逐字复刻 style_spec §1.2。
+
+路径类常量（LOG_DIR）委托 ``core.app_paths`` 统一来源（策略迁移豁免），
+避免 Windows 下 GUI 日志（~/MyGPR/logs）与 core 事件/崩溃日志
+（%LOCALAPPDATA%/MyGPR/output/logs）分家。
 """
 import os
+
+from core.app_paths import get_logs_dir as _core_get_logs_dir
 
 # ---------------------------------------------------------------- 窗口
 APP_NAME = 'MyGPR 探地雷达数据处理软件'
@@ -60,7 +66,7 @@ LOG_QSS_LIGHT = ('#f5f5f5', '#333', '#ddd')
 # ---------------------------------------------------------------- 日志文件（style_spec §5.4）
 DEFAULT_LOG_MAX_BYTES = 10 * 1024 * 1024   # 10MB
 DEFAULT_LOG_BACKUP_COUNT = 5
-LOG_DIR = os.path.join(os.path.expanduser('~'), 'MyGPR', 'logs')
+LOG_DIR = _core_get_logs_dir()   # 与 core.app_paths.get_logs_dir() 统一（单源）
 
 # ---------------------------------------------------------------- 默认项
 DEFAULT_DIELECTRIC = 9.0

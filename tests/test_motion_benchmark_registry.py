@@ -7,7 +7,7 @@ from __future__ import annotations
 import numpy as np
 
 from core.benchmark_registry import BENCHMARK_SCENARIOS, generate_benchmark_sample
-from core.quality_metrics import periodic_banding_ratio
+from mygpr.domain.autotune.quality_metrics import periodic_banding_ratio
 
 
 def test_motion_v1_benchmark_returns_required_context_and_is_deterministic():

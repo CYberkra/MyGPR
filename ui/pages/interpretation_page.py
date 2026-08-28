@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
 """InterpretationPage — 界面解释标注（SPEC §6.6）。
 
-- 顶部工具卡片：测线 Label + 打开标注会话 | 自动追踪/吸附/平滑/撤销/重做 |
-  PrimaryPushButton('保存标注') + 状态 CaptionLabel
+- 顶部工具卡片：测线 Label + 数据下拉（原始数据/处理成果） + 打开标注会话 |
+  自动追踪/吸附/平滑/撤销/重做 | PrimaryPushButton('保存标注') + 状态 CaptionLabel
+- 数据下拉选中处理成果时，open_session_requested 携带该 artifact_id（''=原始数据），
+  实现"处理→在成果上标注"链路（P1-3）
 - BScanView（pick 模式，点击追加点；overlay 显示当前标注点列，颜色 #fbbf24）
-- 底部信息条：点数/会话状态
+- 会话未打开时编辑按钮与 pick 前置禁用（P1-6），避免"点了才报错"
 
 页面纯展示 + 发信号：内部维护当前点列，pick 点击追加并发 points_changed。
 """
@@ -13,7 +15,8 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
-    CaptionLabel, CardWidget, PrimaryPushButton, PushButton, SubtitleLabel,
+    CaptionLabel, CardWidget, ComboBox, PrimaryPushButton, PushButton,
+    SubtitleLabel,
 )
 
 from ui import constants
@@ -50,7 +53,7 @@ def _create_separator(vertical: bool = False) -> QFrame:
 class InterpretationPage(QWidget):
     """界面解释标注页面。"""
 
-    open_session_requested = pyqtSignal()
+    open_session_requested = pyqtSignal(str)  # artifact_id（''=原始数据）
     auto_trace_requested = pyqtSignal()
     snap_requested = pyqtSignal()
     smooth_requested = pyqtSignal()
@@ -63,6 +66,7 @@ class InterpretationPage(QWidget):
         super().__init__(parent)
         self._points = []           # [(trace_index, sample_index), ...]
         self._busy = False
+        self._session_active = False  # 会话未打开时禁用编辑按钮与 pick
         self._build_ui()
         self._connect_internal()
 
@@ -87,6 +91,14 @@ class InterpretationPage(QWidget):
         row.addWidget(line_label)
         self._line_label = CaptionLabel('--', tool_card)
         row.addWidget(self._line_label)
+        row.addSpacing(8)
+        artifact_label = CaptionLabel('数据:', tool_card)
+        row.addWidget(artifact_label)
+        self._artifact_combo = ComboBox(tool_card)
+        self._artifact_combo.addItem('原始数据')
+        self._artifact_combo.setCurrentIndex(0)
+        self._artifact_combo.setMinimumWidth(160)
+        row.addWidget(self._artifact_combo)
         self._open_session_btn = PushButton('打开标注会话', tool_card)
         row.addWidget(self._open_session_btn)
         row.addWidget(_create_separator(vertical=True))
@@ -119,7 +131,7 @@ class InterpretationPage(QWidget):
         bscan_layout.addWidget(_card_title('剖面标注'))
         self._bscan = BScanView(bscan_card)
         self._bscan.setMinimumHeight(320)
-        self._bscan.set_pick_enabled(True)
+        self._bscan.set_pick_enabled(False)  # 会话打开前禁用 pick（P1-6）
         bscan_layout.addWidget(self._bscan, 1)
         root.addWidget(bscan_card, 1)
 
@@ -135,7 +147,7 @@ class InterpretationPage(QWidget):
 
     # ============================================================ 内部接线
     def _connect_internal(self) -> None:
-        self._open_session_btn.clicked.connect(self.open_session_requested)
+        self._open_session_btn.clicked.connect(self._on_open_session_clicked)
         self._auto_trace_btn.clicked.connect(self.auto_trace_requested)
         self._snap_btn.clicked.connect(self.snap_requested)
         self._smooth_btn.clicked.connect(self.smooth_requested)
@@ -153,6 +165,26 @@ class InterpretationPage(QWidget):
         """当前测线标签（顶部工具卡片）。"""
         self._line_label.setText(text or '--')
 
+    def set_artifacts(self, artifacts) -> None:
+        """处理成果列表 → 数据下拉（原始数据 + 各成果）；保持旧选择，否则默认原始数据。"""
+        current = self._current_artifact_id()
+        self._artifact_combo.blockSignals(True)
+        self._artifact_combo.clear()
+        self._artifact_combo.addItem('原始数据')  # index 0 = 原始数据
+        for artifact in (artifacts or []):
+            artifact_id = str(getattr(artifact, 'artifact_id', '') or '')
+            if not artifact_id:
+                continue
+            name = str(getattr(artifact, 'name', '') or artifact_id)
+            self._artifact_combo.addItem(f'成果: {name}')
+            self._artifact_combo.setItemData(self._artifact_combo.count() - 1, artifact_id)
+        if current:
+            found = self._index_of_artifact(current)
+            self._artifact_combo.setCurrentIndex(found if found >= 0 else 0)
+        else:
+            self._artifact_combo.setCurrentIndex(0)
+        self._artifact_combo.blockSignals(False)
+
     def set_session_info(self, text: str) -> None:
         """会话状态文案（顶部状态 CaptionLabel + 底部信息条）。"""
         text = text or '未打开会话'
@@ -166,14 +198,40 @@ class InterpretationPage(QWidget):
         self._refresh_info()
 
     def set_busy(self, busy: bool) -> None:
-        """忙态：禁用全部操作按钮。"""
+        """忙态：禁用全部操作按钮；会话状态由 set_session_active 控制。"""
         self._busy = bool(busy)
-        for btn in (self._open_session_btn, self._auto_trace_btn,
-                    self._snap_btn, self._smooth_btn, self._undo_btn,
-                    self._redo_btn, self._save_btn):
-            btn.setEnabled(not self._busy)
+        self._open_session_btn.setEnabled(not self._busy)
+        self._update_edit_enabled()
+
+    def set_session_active(self, active: bool) -> None:
+        """会话状态：未开会话禁用编辑按钮与 pick（P1-6），避免"点了才报错"。"""
+        self._session_active = bool(active)
+        self._update_edit_enabled()
 
     # ============================================================ 内部逻辑
+    def _on_open_session_clicked(self) -> None:
+        """打开标注会话 → 携带当前数据选择（''=原始数据，否则为成果 artifact_id）。"""
+        self.open_session_requested.emit(self._current_artifact_id())
+
+    def _current_artifact_id(self) -> str:
+        index = self._artifact_combo.currentIndex()
+        if index <= 0:
+            return ''
+        return str(self._artifact_combo.itemData(index) or '')
+
+    def _index_of_artifact(self, artifact_id: str) -> int:
+        for i in range(1, self._artifact_combo.count()):
+            if str(self._artifact_combo.itemData(i) or '') == artifact_id:
+                return i
+        return -1
+
+    def _update_edit_enabled(self) -> None:
+        enabled = self._session_active and not self._busy
+        for btn in (self._auto_trace_btn, self._snap_btn, self._smooth_btn,
+                    self._undo_btn, self._redo_btn, self._save_btn):
+            btn.setEnabled(enabled)
+        self._bscan.set_pick_enabled(enabled)
+
     def _on_point_picked(self, trace: int, sample: int) -> None:
         """pick 点击追加点 → overlay 刷新 + points_changed。"""
         self._points.append((int(trace), int(sample)))

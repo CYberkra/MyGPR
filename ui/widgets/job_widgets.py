@@ -8,9 +8,9 @@ running 状态显示进度条。
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (QHBoxLayout, QHeaderView, QLabel,
-                             QTableWidget, QTableWidgetItem,
+                             QStackedLayout, QTableWidget, QTableWidgetItem,
                              QVBoxLayout, QWidget)
-from qfluentwidgets import ProgressBar, PushButton, ScrollArea
+from qfluentwidgets import CaptionLabel, ProgressBar, PushButton, ScrollArea
 
 _STATUS_TEXT = {
     'queued': '排队',
@@ -69,7 +69,21 @@ class JobTable(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self._table)
+        # P2-6：无任务时空态占位（QStackedLayout 切换，避免纯空白）
+        empty_page = QWidget(self)
+        empty_layout = QVBoxLayout(empty_page)
+        empty_label = CaptionLabel('暂无任务', empty_page)
+        empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_label.setStyleSheet('color: #9ca3af; font-size: 13px;')
+        empty_layout.addWidget(empty_label)
+        self._stack = QStackedLayout()
+        self._stack.addWidget(empty_page)   # index 0 = 空态
+        self._stack.addWidget(self._table)  # index 1 = 表格
+        layout.addLayout(self._stack)
+
+    def _update_empty_state(self) -> None:
+        """无任务时显示空态占位。"""
+        self._stack.setCurrentIndex(0 if not self._rows else 1)
 
     # ------------------------------------------------------------- 接口
     def upsert_job(self, job_id: str, title: str) -> None:
@@ -80,6 +94,7 @@ class JobTable(QWidget):
         self._table.insertRow(row)
         self._rows[job_id] = row
         self._table.setItem(row, self._COL_TITLE, QTableWidgetItem(title))
+        self._update_empty_state()
 
         badge = _make_status_badge('queued')
         holder = QWidget(self._table)
@@ -145,6 +160,7 @@ class JobTable(QWidget):
             self._badges.pop(job_id, None)
         self._rows = {j: i for i, j in enumerate(
             self._rows_ordered_ids())}
+        self._update_empty_state()
 
     # ------------------------------------------------------------- 内部
     def _rows_ordered_ids(self):
@@ -174,6 +190,11 @@ class MiniJobList(QWidget):
         self._box = QVBoxLayout(self._container)
         self._box.setContentsMargins(0, 0, 0, 0)
         self._box.setSpacing(6)
+        # P2-6：无活动任务时空态占位
+        self._empty_label = CaptionLabel('暂无任务', self._container)
+        self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty_label.setStyleSheet('color: #9ca3af; font-size: 13px;')
+        self._box.addWidget(self._empty_label)
         self._box.addStretch(1)
         self._scroll.setWidget(self._container)
 
@@ -262,6 +283,10 @@ class MiniJobList(QWidget):
         entry['widget'].deleteLater()
 
     def _refresh_visibility(self):
-        """仅显示活动任务。"""
+        """仅显示活动任务；无活动任务时显示空态占位。"""
+        any_active = False
         for entry in self._jobs.values():
-            entry['widget'].setVisible(entry['status'] in _ACTIVE_STATUSES)
+            active = entry['status'] in _ACTIVE_STATUSES
+            entry['widget'].setVisible(active)
+            any_active = any_active or active
+        self._empty_label.setVisible(not any_active)

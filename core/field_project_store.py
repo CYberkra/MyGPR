@@ -14,7 +14,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from core.app_errors import error_info_from_exception
+from mygpr.domain.common.errors import error_info_from_exception
 from core.field_artifact_store import FieldArtifactStoreMixin
 from core.field_interface_store import FieldInterfaceStoreMixin
 from core.field_line_store import FieldLineStoreMixin

@@ -172,6 +172,7 @@ class SpatialPage(QWidget):
         self._colors = {}            # line_id -> '#rrggbb'
         self._restoring_basemap = False
         self._last_auto_prefetch_key = None   # 自动预下载去重（包围盒+瓦图源）
+        self._auto_prefetch_enabled = True     # 默认启用（受设置页开关控制，P2-4）
         self._dem_base_text = ''              # 本地 DEM 标签基础文本（覆盖提示拼接用）
         self._terrain_mode = 'online'         # 三维地形来源：online / estimated / local_dem
         self._restoring_terrain = False       # 恢复/程序化设置地形来源下拉时屏蔽信号
@@ -689,7 +690,10 @@ class SpatialPage(QWidget):
         """轨迹加载后自动下载测线所在地理区域（按 包围盒+瓦图源 去重）。
 
         只处理已配准轨迹；未配准（原始坐标）测线不触发下载。
+        受设置项 auto_prefetch_basemap 控制（P2-4）。
         """
+        if not self._auto_prefetch_enabled:
+            return
         bbox = self._map_view.tracks_bbox_lonlat()
         if bbox is None:
             return
@@ -700,6 +704,10 @@ class SpatialPage(QWidget):
         queued = self._map_view.prefetch_tracks()
         if queued > 0:
             self._prefetch_label.setText(f'自动下载测线区域 {queued} 张瓦片…')
+
+    def set_auto_prefetch_enabled(self, enabled: bool) -> None:
+        """设置页开关：自动预下载底图是否启用（P2-4）。"""
+        self._auto_prefetch_enabled = bool(enabled)
 
     def _on_prefetch_progress(self, done: int, total: int) -> None:
         if total <= 0:

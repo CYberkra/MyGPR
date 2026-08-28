@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any, Callable
 
 from PyQt6.QtCore import QObject, pyqtSignal
@@ -28,6 +29,9 @@ class InterpretationController(QObject):
         self._backend_controller = None
         self._session_id: str | None = None
         self._busy = False
+        # execute 跑在 run_command 每次新建的线程上，"检查 _busy 再置位"
+        # 分离会产生 TOCTOU；用非阻塞锁把占用判定与置位合成原子操作。
+        self._busy_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     def set_backend(self, backend_controller) -> None:
@@ -46,10 +50,21 @@ class InterpretationController(QObject):
             self._busy = value
             self.busy_changed.emit(value)
 
+    def _try_begin_busy(self) -> bool:
+        """原子地占用控制器；已被占用时返回 False（调用方提示稍后再试）。"""
+        if not self._busy_lock.acquire(blocking=False):
+            return False
+        self._set_busy(True)
+        return True
+
+    def _end_busy(self) -> None:
+        self._busy_lock.release()
+        self._set_busy(False)
+
     # ------------------------------------------------------------------
-    def open_session(self, project_id: str, line_id: str) -> None:
+    def open_session(self, project_id: str, line_id: str, input_artifact_id: str = "") -> None:
         run_command(
-            _OpenSessionCommand(self, project_id, line_id),
+            _OpenSessionCommand(self, project_id, line_id, input_artifact_id),
             name="mygpr-interpretation-open",
         )
 
@@ -120,12 +135,19 @@ class InterpretationController(QObject):
 # ------------------------------------------------------------------
 
 class _OpenSessionCommand:
-    __slots__ = ("_controller", "_project_id", "_line_id")
+    __slots__ = ("_controller", "_project_id", "_line_id", "_input_artifact_id")
 
-    def __init__(self, controller: InterpretationController, project_id: str, line_id: str) -> None:
+    def __init__(
+        self,
+        controller: InterpretationController,
+        project_id: str,
+        line_id: str,
+        input_artifact_id: str = "",
+    ) -> None:
         self._controller = controller
         self._project_id = project_id
         self._line_id = line_id
+        self._input_artifact_id = input_artifact_id
 
     def execute(self) -> None:
         c = self._controller
@@ -133,13 +155,13 @@ class _OpenSessionCommand:
         if backend is None:
             c.session_failed.emit("后端尚未就绪")
             return
-        if c._busy:
+        if not c._try_begin_busy():
             c.log_message.emit("操作进行中，请稍后…")
             return
-        c._set_busy(True)
         try:
             snapshot = backend.interpretation_edit.open_session(
-                str(self._project_id), str(self._line_id)
+                str(self._project_id), str(self._line_id),
+                input_artifact_id=str(self._input_artifact_id or ""),
             )
         except Exception as exc:  # noqa: BLE001
             message = friendly_error_message(exc)
@@ -150,7 +172,7 @@ class _OpenSessionCommand:
             c.log_message.emit(f"标注会话已打开：{self._line_id}")
             c.session_opened.emit(snapshot)
         finally:
-            c._set_busy(False)
+            c._end_busy()
 
 
 class _InterpretationEditCommand:
@@ -175,10 +197,9 @@ class _InterpretationEditCommand:
         if session_id is None:
             c.session_failed.emit("请先打开标注会话")
             return
-        if c._busy:
+        if not c._try_begin_busy():
             c.log_message.emit("操作进行中，请稍后…")
             return
-        c._set_busy(True)
         try:
             snapshot = self._operation(backend.interpretation_edit, session_id)
         except Exception as exc:  # noqa: BLE001
@@ -188,7 +209,7 @@ class _InterpretationEditCommand:
         else:
             c.session_updated.emit(snapshot)
         finally:
-            c._set_busy(False)
+            c._end_busy()
 
 
 class _SaveSessionCommand:
@@ -207,10 +228,9 @@ class _SaveSessionCommand:
         if session_id is None:
             c.session_failed.emit("请先打开标注会话")
             return
-        if c._busy:
+        if not c._try_begin_busy():
             c.log_message.emit("操作进行中，请稍后…")
             return
-        c._set_busy(True)
         try:
             backend.interpretation_edit.save_session(session_id, status=str(self._status or "draft"))
         except Exception as exc:  # noqa: BLE001
@@ -221,7 +241,7 @@ class _SaveSessionCommand:
             c.log_message.emit("标注已保存")
             c.saved.emit("标注已保存")
         finally:
-            c._set_busy(False)
+            c._end_busy()
 
 
 __all__ = ["InterpretationController"]

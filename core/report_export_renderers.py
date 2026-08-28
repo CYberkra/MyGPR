@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import html
+import logging
 import uuid
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,8 @@ import numpy as np
 from core.gis_map_export import export_project_plan_map
 from core.plot_font_policy import configure_matplotlib_cjk_fonts
 from core.report_export_rows import _sha256_file
+
+_LOGGER = logging.getLogger(__name__)
 from core.tabular_security import safe_tabular_value
 
 def _write_xlsx_report(
@@ -136,8 +139,8 @@ def _write_report_figures(store: Any, figures_dir: Path, *, line_ids: set[str] |
                     y=np.interp(curve[finite],np.arange(dataset.sample_count),dataset.depth_axis_m)
                     ax.plot(np.asarray(dataset.distance_axis_m)[finite],y,linewidth=1.7,label="基覆界面")
                     ax.legend(fontsize=8)
-        except Exception:
-            pass
+        except Exception:  # noqa: BLE001 - 注解缺失时图件继续生成，仅告警
+            _LOGGER.warning("基覆界面注解加载失败（图件继续生成）：%s", line.line_id)
         ax.set_title(f"{line.line_id} 原始 B-scan 与基覆界面")
         ax.set_xlabel("距离 (m)"); ax.set_ylabel("深度 (m)")
         out=figures_dir/f"{line.line_id}_basal_interface.png"; fig.tight_layout(); fig.savefig(out,bbox_inches="tight"); plt.close(fig); outputs.append(out)

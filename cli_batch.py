@@ -36,7 +36,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 from core.benchmark_registry import list_benchmark_sample_ids
 from core.evidence_export import export_motion_compensation_benchmark
 from core.gpr_io import extract_airborne_csv_payload, savecsv, save_image
-from core.data_context import recommended_profile_for_header
+from mygpr.domain.autotune.data_context import recommended_profile_for_header
 from core.processing_engine import (
     merge_result_header_info,
     merge_result_trace_metadata,

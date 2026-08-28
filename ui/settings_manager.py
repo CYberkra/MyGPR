@@ -18,16 +18,15 @@ logger = logging.getLogger(__name__)
 # 全量默认键（MyGPR 版）
 DEFAULT_SETTINGS = {
     'theme': constants.THEME_LIGHT,                     # '浅色主题' / '深色主题'
-    'default_dielectric': constants.DEFAULT_DIELECTRIC,  # 9.0
-    'default_colormap': constants.DEFAULT_COLORMAP,      # 'seismic'
-    'preview_max_samples': constants.PREVIEW_MAX_SAMPLES,  # 900
-    'max_workers': constants.MAX_WORKERS,                # 2
+    'default_dielectric': constants.DEFAULT_DIELECTRIC,  # 9.0（导入表单默认值）
+    'max_workers': constants.MAX_WORKERS,                # 2（后端并行线程数，重启生效）
     'project_root': constants.DEFAULT_PROJECT_ROOT,      # ~/Documents/MyGPRProjects
     'recent_projects': [],                               # 最多 10 条
     'processing_left_collapsed': False,                  # 处理页左栏折叠状态
     'processing_right_collapsed': False,                 # 处理页右栏折叠状态
     'log_panel_collapsed': True,                         # 全局日志面板默认折叠
     'spatial_local_dem': '',                             # 空间页本地 DEM 文件路径（'' = 在线下载）
+    'auto_prefetch_basemap': True,                       # 空间页加载轨迹后自动预下载底图
 }
 
 

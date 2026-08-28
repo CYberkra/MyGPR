@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from core.app_errors import MyGPRError
+from mygpr.domain.common.errors import MyGPRError
 
 
 class GPRFormatReadError(MyGPRError):
@@ -104,12 +104,12 @@ def _ensure_2d_matrix(data: np.ndarray, *, source: str) -> np.ndarray:
 def read_numpy_profile(path: str | os.PathLike[str]) -> dict[str, Any]:
     p = Path(path)
     if p.suffix.lower() == ".npz":
-        with np.load(p) as z:
+        with np.load(p, allow_pickle=False) as z:
             key = "data" if "data" in z.files else z.files[0]
             data = z[key]
             header = {"npz_key": key, "npz_keys": list(z.files)}
     else:
-        data = np.load(p)
+        data = np.load(p, mmap_mode="r", allow_pickle=False)
         header = {}
     arr = _ensure_2d_matrix(data, source=str(p))
     header.update(

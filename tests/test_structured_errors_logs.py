@@ -1,4 +1,4 @@
-from core.app_errors import InputDataError, error_info_from_exception
+from mygpr.domain.common.errors import InputDataError, error_info_from_exception
 
 
 def test_structured_error_to_dict_contains_stable_code():

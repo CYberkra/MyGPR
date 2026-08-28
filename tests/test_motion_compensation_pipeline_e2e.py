@@ -11,7 +11,7 @@ from pathlib import Path
 import cli_batch
 from core.benchmark_registry import generate_benchmark_sample
 from core.evidence_export import export_motion_compensation_benchmark
-from core.quality_metrics import compute_motion_quality_metrics
+from mygpr.domain.autotune.quality_metrics import compute_motion_quality_metrics
 
 
 def _assert_motion_improvement(summary: dict) -> None:

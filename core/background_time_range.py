@@ -10,7 +10,7 @@ from typing import Any
 
 import numpy as np
 
-from core.scalar_utils import first_scalar, to_float, to_int
+from mygpr.domain.common.scalars import first_scalar, to_float, to_int
 
 
 @dataclass(frozen=True)
