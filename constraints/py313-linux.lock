@@ -48,7 +48,7 @@ pluggy==1.6.0
 pooch==1.9.0
 pyparsing==3.3.2
 pyproj==3.7.2
-pytest-timeout==2.4.0
+pytest-timeout==2.3.1
 pytest==8.4.2
 python-dateutil==2.9.0.post0
 pytz==2026.2

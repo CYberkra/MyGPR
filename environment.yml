@@ -2,7 +2,7 @@ name: mygpr-backend
 channels:
   - conda-forge
 dependencies:
-  - python>=3.11,<3.14
+  - python>=3.12,<3.14
   - pip
   - numpy
   - pandas
