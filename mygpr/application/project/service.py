@@ -231,7 +231,8 @@ class ProjectService:
         settings: SensorSyncSettings | None = None,
         context: ExecutionContext | None = None,
     ) -> ProjectSensorSyncResult:
-        resolve_optional = lambda value: None if value is None else Path(value).expanduser().resolve()
+        def resolve_optional(value):
+            return None if value is None else Path(value).expanduser().resolve()
         return self._session(project_id).synchronize_line_sensors(
             line_id,
             rtk_path=Path(rtk_path).expanduser().resolve(),

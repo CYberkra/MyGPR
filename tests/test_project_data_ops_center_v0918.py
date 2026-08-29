@@ -17,7 +17,6 @@ from core.field_project_operations import (
 from core.source_file_registry import (
     export_source_file_manifest_csv,
     get_line_source_record,
-    load_source_registry,
     source_status_label_for_line,
 )
 

@@ -5,7 +5,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from core.field_project_store import FieldProjectStore
 from core.project_storage_backend import LegacyProjectStorageBackend
 from tests.field_project_test_utils import create_test_project
 from core.gpr_data_model import GPRDataSet

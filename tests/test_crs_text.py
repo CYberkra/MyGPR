@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import numpy as np
 
 from core.crs_text import canonical_crs_text, embedded_epsg
 

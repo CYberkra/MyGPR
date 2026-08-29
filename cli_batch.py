@@ -21,7 +21,6 @@ import importlib.util
 import json
 import os
 import re
-import sys
 import traceback
 import uuid
 from dataclasses import dataclass
@@ -425,7 +424,6 @@ def _run_core_method(
     end_position = data.shape[1]
     scans_per_meter = 1
 
-    import tempfile
 
     temp_in_csv = os.path.join(out_dir, "temp_in.csv")
     temp_out_csv = os.path.join(out_dir, f"{method_key}_tmp_out.csv")

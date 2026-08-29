@@ -118,7 +118,7 @@ def method_motion_compensation_height(
             warnings=warnings,
             quality_flags=quality_flags,
         )
-    except ValueError as exc:
+    except ValueError:
         metadata_count = 0
         for candidate in ("height_agl_m", "flight_height_m", str(height_source)):
             if candidate in metadata:

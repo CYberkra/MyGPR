@@ -10,7 +10,7 @@
 - 主题色淡底 + hover 加深
 """
 
-from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, Qt, pyqtSignal
+from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, pyqtSignal
 from PyQt6.QtGui import QIcon, QTransform
 from PyQt6.QtWidgets import QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import FluentIcon as FIF, PushButton, themeColor

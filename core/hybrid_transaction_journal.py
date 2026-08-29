@@ -9,7 +9,6 @@ recoverable and idempotent after process termination or power loss.
 from __future__ import annotations
 
 import json
-import shutil
 import uuid
 from dataclasses import dataclass
 from pathlib import Path

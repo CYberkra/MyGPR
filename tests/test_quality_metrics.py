@@ -64,7 +64,6 @@ def _slow_detect_first_break_indices(
 def _build_test_profile(samples: int = 128, traces: int = 32) -> np.ndarray:
     rng = np.random.default_rng(42)
     t = np.linspace(0.0, 1.0, samples, dtype=np.float64)[:, None]
-    x = np.linspace(0.0, 1.0, traces, dtype=np.float64)[None, :]
     data = 0.35 * np.sin(2.0 * np.pi * 2.0 * t)
     data = np.repeat(data, traces, axis=1)
     data += 0.04 * rng.normal(size=(samples, traces))

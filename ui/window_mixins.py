@@ -7,18 +7,17 @@ main_window.py.
 """
 from __future__ import annotations
 
-import datetime
 import logging
+from typing import Any
+
 from ui.controllers.backend_controller import run_command
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
-    QDialog, QFileDialog, QFormLayout, QHBoxLayout, QLabel,
-    QPushButton, QTextBrowser, QToolButton, QVBoxLayout, QWidget,
+    QDialog, QFileDialog, QFormLayout, QHBoxLayout, QToolButton, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
-    InfoBar, InfoBarPosition, LineEdit, PrimaryPushButton, PushButton,
+    LineEdit, PrimaryPushButton, PushButton,
 )
 
 from ui import constants

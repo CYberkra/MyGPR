@@ -2,7 +2,6 @@
 """Bootstrap/update schema ownership catalog without deleting manual metadata."""
 from __future__ import annotations
 import json
-from pathlib import Path
 from scripts.check_schema_catalog import CATALOG, discovered
 
 

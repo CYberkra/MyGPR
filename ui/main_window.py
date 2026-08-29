@@ -10,21 +10,18 @@ PlaceholderPage（QLabel '页面建设中' 居中），controller 为 None（con
 """
 import datetime
 import logging
-import os
-import threading
 
 from PyQt6.QtCore import (
     QEasingCurve, QPropertyAnimation, Qt, QTimer, pyqtSignal,
 )
 from PyQt6.QtGui import QIcon, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
-    QDialog, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QMessageBox,
-    QPushButton, QStackedWidget, QTextBrowser, QTextEdit, QVBoxLayout,
+    QDialog, QHBoxLayout, QLabel, QPushButton, QStackedWidget, QTextBrowser, QTextEdit, QVBoxLayout,
     QWidget,
 )
 from qfluentwidgets import (
     CardWidget, FluentIcon as FIF, FluentWindow, InfoBar, InfoBarPosition,
-    LineEdit, NavigationItemPosition, PrimaryPushButton, PushButton,
+    NavigationItemPosition, PushButton,
     SegmentedWidget, SplashScreen,
 )
 
@@ -311,7 +308,7 @@ class MyGPRMainWindow(FluentWindow, _ProjectLifecycleMixin, _LineArtifactMixin,
     def _build_ui(self) -> None:
         """右侧全局可折叠面板（折叠按钮 + LogPanel 承载）。"""
         # 折叠按钮：chevron 图标 + 主题色淡底长条（与 CollapsiblePanel 统一视觉）
-        from ui.widgets import chevron_left_icon, collapse_button_qss
+        from ui.widgets import collapse_button_qss
         self.fold_button = PushButton('', self)
         self.fold_button.setFixedSize(constants.FOLD_BUTTON_WIDTH,
                                       constants.FOLD_BUTTON_HEIGHT)

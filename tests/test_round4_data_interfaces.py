@@ -5,7 +5,6 @@ from pathlib import Path
 
 import numpy as np
 
-from core.field_project_store import FieldProjectStore
 from tests.field_project_test_utils import create_test_project
 from core.gpr_data_model import GPRDataSet, load_gpr_dataset
 from core.trajectory_model import TrajectoryModel

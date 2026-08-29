@@ -1,4 +1,4 @@
-# MyGPR backend/core runtime (Python 3.11-3.13, no Qt dependency)
+# MyGPR backend/core runtime (Python 3.12-3.13, no Qt dependency)
 numpy==2.5.1
 pandas==2.3.3
 scipy==1.18.0

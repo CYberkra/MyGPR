@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import math
 import logging
-from typing import Any
 
 import numpy as np
 
@@ -374,7 +373,6 @@ def _run_kirchhoff_stack_gpu(
 
     x_shot_grid = np.arange(1, data_resized.shape[1] + 1)
     shot_results = []
-    total_shots = len(x_shot_grid)
 
     travel_time_gpu = cp.asarray(travel_time, dtype=cp.float64)
 

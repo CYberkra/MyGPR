@@ -10,7 +10,6 @@ a per-trace 1D Hankel SVD would achieve.
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from PythonModule.hankel_svd import method_hankel_svd
 

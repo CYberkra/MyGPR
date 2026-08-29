@@ -24,7 +24,9 @@ def main(argv: list[str] | None = None) -> int:
     errors: list[str] = []
     rows: list[dict[str, object]] = []
     for rel, thresholds in policy.get("critical_modules", {}).items():
-        record = files.get(rel) or files.get(str((ROOT / rel).resolve()))
+        # coverage.py JSON 的键随平台使用本机分隔符，统一按 posix 变体查找。
+        local_rel = rel.replace("/", "\\") if "\\" in next(iter(files), "") else rel
+        record = files.get(rel) or files.get(local_rel) or files.get(str((ROOT / rel).resolve()))
         if record is None:
             errors.append(f"critical module absent from coverage data: {rel}")
             continue

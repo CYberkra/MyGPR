@@ -45,3 +45,8 @@ windows_fit_check_*/
 !docs/ui_reference/five_page_v1/*.png
 !tests/fixtures/**/*.json
 !sample_data/gprmax_benchmarks/**/ground_truth.json
+
+# coverage artifacts
+.coverage
+coverage.json
+htmlcov/

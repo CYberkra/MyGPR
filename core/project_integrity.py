@@ -12,7 +12,6 @@ artifacts are never rewritten or deleted.
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 import time
 from dataclasses import asdict, dataclass, field
@@ -24,7 +23,7 @@ except ImportError:  # pragma: no cover - Python <3.11 fallback
     class StrEnum(str, Enum):  # type: ignore[no-redef]
         pass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from core.field_project_models import local_now
 from core.processing_artifact_index import index_processing_artifacts

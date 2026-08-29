@@ -421,8 +421,13 @@ class ProjectCatalog:
             db.execute(f"PRAGMA wal_checkpoint({mode})").fetchall()
 
     def integrity_check(self) -> tuple[bool, str]:
-        with self._connect() as db:
-            row = db.execute("PRAGMA integrity_check").fetchone()
+        # 损坏检测是本方法的承诺：文件头损坏导致连接失败时，
+        # 必须返回 (False, 原因) 而不是向调用方抛 DatabaseError。
+        try:
+            with self._connect() as db:
+                row = db.execute("PRAGMA integrity_check").fetchone()
+        except sqlite3.DatabaseError as exc:
+            return False, str(exc)
         message = str(row[0] if row else "unknown")
         return message.lower() == "ok", message
 

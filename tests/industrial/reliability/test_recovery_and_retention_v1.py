@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 from threading import Event
-import time
 
 import numpy as np
 import pytest

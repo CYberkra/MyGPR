@@ -276,7 +276,8 @@ class InterpretationPersistenceMixin:
                 edit_metadata=dict(annotation.edit_metadata),
             )
 
-            confidence_name = lambda value: "high" if value >= 0.82 else ("medium" if value >= 0.58 else "low")
+            def confidence_name(value):
+                return "high" if value >= 0.82 else ("medium" if value >= 0.58 else "low")
             legacy_value = BasalInterfaceAnnotation(
                 line_id=safe, trace_count=int(info.shape[1]), sample_count=int(info.shape[0]),
                 source_result_id=saved.processing_result or f"{safe}_raw",

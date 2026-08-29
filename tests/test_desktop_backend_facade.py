@@ -8,7 +8,6 @@ are pure Python.
 from __future__ import annotations
 
 import types
-from dataclasses import asdict
 
 import numpy as np
 import pytest

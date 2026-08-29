@@ -4,14 +4,13 @@
 
 from __future__ import annotations
 
-import json
 import shutil
 import uuid
 from pathlib import Path
 
 import numpy as np
 
-from core.field_project_models import FieldLineRecord, count_csv_rows, local_now, validate_line_id
+from core.field_project_models import FieldLineRecord, local_now, validate_line_id
 from core.coordinate_projection import ProjectionError, project_lonlat_to_xy
 from core.gpr_data_model import GPRDataSet, load_gpr_dataset, load_gpr_dataset_for_import
 from core.chunked_gpr_io import (

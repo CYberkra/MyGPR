@@ -16,21 +16,12 @@ from mygpr.application.jobs.cancellation import CancellationToken
 from mygpr.application.jobs.context import ExecutionContext
 from mygpr.domain.processing.models import ProcessingRequest
 from mygpr.domain.processing.warnings import merge_runtime_warnings
-from mygpr.application.autotune.candidate_generators import (
-    _agc_window_min,
-    _resolve_nyquist_mhz,
-    _resolve_time_step_ns,
-    _sanitize_float_candidates,
-    _sanitize_int_candidates,
-)
 from mygpr.application.autotune.candidate_planner import _build_candidate_trials
 from mygpr.application.autotune.context import _build_auto_tune_context, _get_search_plan
 from mygpr.application.autotune.diagnostics import (
-    _normalize_summary_value,
     _selection_stability,
     _summarize_failed_trials,
     _summarize_parameter_domain,
-    _value_at_domain_edge,
 )
 from mygpr.application.autotune.errors import AutoTuneCancelled, AutoTuneError
 from mygpr.application.autotune.evaluation import (
@@ -39,7 +30,7 @@ from mygpr.application.autotune.evaluation import (
     _select_seed_trials,
 )
 from mygpr.application.autotune.refinement import _refine_candidate_trials
-from mygpr.application.autotune.scoring import _SCORE_FUNCTIONS, _slice_bounds
+from mygpr.application.autotune.scoring import _SCORE_FUNCTIONS
 from mygpr.application.autotune.utils import _merge_trials, _public_params
 from mygpr.domain.autotune.models import (
     AutoTuneContext,

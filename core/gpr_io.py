@@ -15,7 +15,6 @@ Date: 2026-03-31
 from __future__ import annotations
 
 import importlib
-import json
 import logging
 import os
 import re
@@ -30,12 +29,10 @@ logger = logging.getLogger(__name__)
 # 直接导入 read_file_data 模块
 from PythonModule.read_file_data import readcsv, savecsv, save_image, show_image
 from mygpr.domain.autotune.data_context import (
-    DATA_CONTEXT_GPRMAX,
-    DATA_CONTEXT_GPRMAX_IMPULSE,
     DATA_CONTEXT_UAV_GPR_SFCW_FIELD,
     apply_data_context_defaults,
 )
-from mygpr.domain.common.scalars import to_float, to_float_or_none, to_int
+from mygpr.domain.common.scalars import to_float
 
 from core.gpr_format_registry import get_format_spec
 from core.gpr_vendor_readers import (

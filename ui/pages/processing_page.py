@@ -27,8 +27,7 @@ from qfluentwidgets import FluentIcon as FIF
 from ui.desktop_backend_facade import compute_display_levels
 from ui import constants
 from ui.widgets import (BScanView, CollapsiblePanel, MethodBrowser, ParamForm,
-                        PipelineList, mark_invalid, clear_invalid,
-                        validate_non_empty)
+                        PipelineList, clear_invalid)
 
 # 预览分段（SegmentedWidget routeKey）
 _SEG_ORIGINAL = 'originalData'
@@ -474,7 +473,6 @@ class ProcessingPage(QWidget):
 
     def set_lines(self, lines: list) -> None:
         """测线列表 → 处理页测线选择下拉。"""
-        previous = str(self._line_combo.currentText() or '')
         # 从显示文本解析 line_id（兼容 qfluentwidgets ComboBox 不保存 userData）
         previous_id = self._line_ids[self._line_combo.currentIndex()] if self._line_combo.currentIndex() >= 0 else ''
         self._line_combo.blockSignals(True)

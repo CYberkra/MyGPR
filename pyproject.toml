@@ -52,14 +52,40 @@ exclude = ["tests*", "sample_data*", "experiments*"]
 "mygpr.resources.config" = ["*.yaml", "*.json"]
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py312"
 line-length = 120
+
+[tool.ruff.lint.per-file-ignores]
+# 治理/引导脚本：sys.path 引导与紧凑单行风格为有意为之
+"scripts/**" = ["E402", "E701", "E702"]
+"cli_batch.py" = ["E402"]
+# 测试模块：offscreen 环境设置与 Qt skip 守卫要求延迟导入
+"tests/**" = ["E402"]
+# 遗留报告渲染代码的紧凑单行风格
+"core/report_export_renderers.py" = ["E402", "E702"]
+"core/field_report_export.py" = ["E402", "E702"]
+"core/gpr_io.py" = ["E402"]
+"core/spatial_result_versions.py" = ["E702"]
+"core/field_interface_store.py" = ["E702"]
+# 方法注册表分组与领域包 __init__ 的星号再导出是既定绑定模式
+"core/method_registry_groups/**" = ["F403", "F405"]
+# 绑定模块：wavelet 可选回退块必须先于条件导入
+"core/method_registry_bindings.py" = ["E402"]
+"mygpr/domain/spatial/__init__.py" = ["F403"]
+"mygpr/domain/interpretation/__init__.py" = ["F403"]
 
 [tool.mypy]
 python_version = "3.13"
 warn_unused_ignores = true
 no_implicit_optional = true
 check_untyped_defs = true
+
+# PythonModule/ 是无类型注解的遗留算法包装层，按 Any 处理（绑定经
+# core/method_registry_bindings.py 再导出，不做静态类型检查）。
+[[tool.mypy.overrides]]
+module = "PythonModule.*"
+follow_imports = "skip"
+ignore_errors = true
 
 [tool.pytest.ini_options]
 addopts = "-ra --strict-markers"

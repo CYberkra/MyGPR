@@ -10,7 +10,7 @@ composition.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol
 
 from core.field_project_models import FieldProjectManifest, FieldLineRecord
 from core.project_storage_backend import ProjectStorageBackend

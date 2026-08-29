@@ -26,11 +26,11 @@ sync_requested payload：{'line_id', 'paths': {'rtk', 'imu', 'altimeter', 'trace
 
 import os
 
-from PyQt6.QtCore import Qt, QSettings, QTimer, QUrl, pyqtSignal
+from PyQt6.QtCore import Qt, QSettings, QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices, QFont, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication, QDialog, QFileDialog, QFrame, QHBoxLayout, QHeaderView,
-    QLabel, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
     BodyLabel, CaptionLabel, CardWidget, DoubleSpinBox, InfoBar,

@@ -2,7 +2,6 @@
 """错误映射测试：friendly_error_message 对 MyGPRError 子类输出可操作建议。"""
 from __future__ import annotations
 
-from types import SimpleNamespace
 
 import pytest
 

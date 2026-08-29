@@ -119,7 +119,6 @@ def _build_zero_time_fixture(seed: int) -> tuple[np.ndarray, dict[str, Any]]:
     rng = np.random.default_rng(seed)
     samples, traces = 192, 72
     t = np.linspace(0.0, 1.0, samples, dtype=np.float64)[:, None]
-    x = np.linspace(0.0, 1.0, traces, dtype=np.float64)[None, :]
     data = 0.03 * rng.normal(size=(samples, traces))
     data += 0.08 * np.sin(2.0 * np.pi * 2.2 * t)
     data += 0.04 * (t - 0.3)

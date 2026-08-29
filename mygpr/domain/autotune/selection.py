@@ -117,8 +117,8 @@ def _trial_objectives(family: str, trial: dict[str, Any]) -> tuple[float, ...]:
 
 
 def _dominates(lhs: tuple[float, ...], rhs: tuple[float, ...]) -> bool:
-    return all(l >= r for l, r in zip(lhs, rhs)) and any(
-        l > r for l, r in zip(lhs, rhs)
+    return all(li >= ri for li, ri in zip(lhs, rhs)) and any(
+        li > ri for li, ri in zip(lhs, rhs)
     )
 
 

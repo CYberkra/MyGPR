@@ -10,6 +10,7 @@ import numpy as np
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from ui.desktop_backend_facade import (
+    UiMethodEntry,
     method_catalog,
     pipeline_from_dicts,
     pipeline_to_raw,

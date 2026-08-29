@@ -2,7 +2,6 @@ import numpy as np
 
 from core.field_processing_bridge import (
     COMPATIBILITY_CHECK_METHOD_IDS,
-    check_method_compatibility,
     get_field_method_categories,
     recommended_params,
     run_priority_compatibility_checks,

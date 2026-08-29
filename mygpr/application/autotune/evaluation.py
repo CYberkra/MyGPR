@@ -100,7 +100,6 @@ def _evaluate_trial_candidates(
                 execution_context,
             )
             result = result_value.data
-            result_meta = result_value.metadata
             method_runtime_warnings = list(result_value.runtime_warnings or [])
             record = _score_trial_with_context(
                 context,

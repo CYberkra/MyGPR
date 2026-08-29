@@ -31,7 +31,6 @@ def scan(root: Path) -> dict:
 
     for current, dirnames, filenames in os.walk(root):
         current_path = Path(current)
-        rel_current = current_path.relative_to(root)
 
         # Do not descend into legitimate local environments or VCS metadata.
         dirnames[:] = [name for name in dirnames if name not in EXCLUDED_DIR_NAMES]

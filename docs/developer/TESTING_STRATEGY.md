@@ -1,108 +1,67 @@
-# MyGPR 分层测试与风险门禁
+# MyGPR 测试与质量门禁
 
-适用版本：MyGPR v0.9.28 及后续版本。
+适用版本：MyGPR v0.9.37 及后续版本。
 
-## 1. 目标
+> 历史说明：v0.9.28 时代文档描述过基于 `config/test_impact.toml` 的六级风险门禁
+> （`run_quality_gate.py affected/merge/nightly/release`）。该体系及其脚本
+> 已从当前树中移除，本文描述的是**当前实际存在并强制执行**的门禁。
 
-MyGPR 不再把 900 余项全量测试作为每次修改的默认反馈路径。测试体系由中央策略文件 `config/test_impact.toml` 驱动，根据实际变更自动选择测试，并在高风险变更时升级门禁。
+## 1. 当前门禁清单
 
-质量要求没有降低：全量自动化仍作为夜间和发布门禁保留；日常开发改为更快的静态检查、受影响测试和固定业务冒烟。
+CI（`.github/workflows/backend-ci.yml`）对每个 PR / 主分支推送强制执行：
 
-## 2. 门禁层级
-
-| 门禁 | 典型用途 | 内容 |
+| 门禁 | 执行位置 | 内容 |
 |---|---|---|
-| `l0` | 保存前、文档修改 | 编译、Ruff 严重错误、测试工具 Mypy、版本和策略一致性 |
-| `affected` | 日常开发默认入口 | 由变更影响图自动决定 L0、受影响测试、合并门禁或完整门禁 |
-| `smoke` | 快速业务健康检查 | 固定核心工程链，不包含所有 GUI 边缘情况 |
-| `merge` | PR、合并前 | 受影响测试 + 核心冒烟 + GUI 冒烟 + 跨模块集成冒烟 |
-| `nightly` | 每夜构建 | 按测试模块进程隔离运行非硬件、非 Windows、非大数据自动化 |
-| `release` | 发布候选 | 全自动化模块隔离回归；随后进行 Windows、真实设备和大数据人工验收 |
+| 编译检查 | `backend` job | `scripts/check_python_compile.py`（全库可编译） |
+| 架构红线 | `backend` job | `scripts/check_architecture.py`（分层方向、环、迁移所有权、增长限额） |
+| Schema 目录 | `backend` job | `scripts/check_schema_catalog.py`（所有权 + 迁移政策） |
+| 后端冒烟 | `backend` job | `backend_smoke.py`、`backend_project_smoke.py` |
+| 全量 pytest + 覆盖率 | `backend` job | `pytest --cov=mygpr --cov=core`，随后 `check_coverage_policy.py` 棘轮校验 |
+| 静态检查 | `backend` job | `ruff check .`（零容忍）；mypy 错误数棘轮（`scripts/check_mypy_budget.py`） |
+| 治理预算 | `backend` job | `check_debt_budget.py`（宽异常/静默处理/sys.path/超长模块棘轮）、`check_complexity_budget.py`、`check_release_hygiene.py`、`check_project_format_compatibility.py` |
+| Python 矩阵 | `backend-matrix` | 3.12 / 3.13 全量 pytest（3.11 已移除：钉版 numpy==2.5.1 要求 ≥3.12） |
+| GUI 冒烟 + pytest | `gui-linux-offscreen` / `gui-windows` | 离屏/原生冒烟截图 + **带 Qt 的全量 pytest**（GUI 用例仅在含 Qt 的 job 执行） |
+| clean-install | `clean-install` | 干净环境 `pip install .` + 契约测试 + `pip wheel` 可构建性 |
 
-`affected` 是推荐的自动入口。它可以对纯文档改动降到 L0，也可以把 Job Manager、工程存储、schema 或传感器同步改动直接提升到 `release`。
+本地等价命令：`make gate`（即 `scripts/run_backend_quality_gate.py`，与 CI backend job 同一清单）。
 
-## 3. 常用命令
+## 2. 覆盖率棘轮
 
-```bash
-# 查看某次改动会触发什么，不执行测试
-python scripts/run_quality_gate.py affected --changed-file core/gis_layers.py --plan
+`config/coverage_policy.json` 定义全局与 6 个关键模块的行/分支覆盖率下限。
+阈值按当前实测值设置并只收紧不放松（棘轮）；发现覆盖率下降时，修复测试而不是调低阈值。
+全局目标（75%/60%）仍是长期方向，达成前以棘轮下限守门。
 
-# 日常：根据 Git diff 自动选择并运行
-python scripts/run_quality_gate.py affected
+## 3. 静态分析棘轮
 
-# 指定比较基线
-python scripts/run_quality_gate.py merge --base origin/main
+- **ruff**：零容忍，任何新问题都会让 CI 失败。遗留代码的既定风格差异
+  （`scripts/`、`core/` 部分文件）通过 `pyproject.toml` 的 per-file-ignores 显式登记。
+- **mypy**：全库 505 个既有错误登记在 `config/mypy_baseline.json`；
+  `scripts/check_mypy_budget.py` 只允许减少不允许增加（容差 5%，吸收平台差异）。
 
-# 固定业务冒烟
-python scripts/run_quality_gate.py smoke --no-promote
+## 4. 测试分层与标记
 
-# 夜间和发布门禁
-python scripts/run_quality_gate.py nightly --no-promote
-python scripts/run_quality_gate.py release --no-promote
-```
+`pytest.ini` 以 `--strict-markers` 注册 marker。当前实际使用的执行层级：
+`unit`、`integration`、`slow`、`large_data`、`industrial` 及 `tests/industrial/`
+五个子域（acceptance/performance/property/reliability/scientific_validation/static_contract）。
 
-Windows 可使用：
+约定：
 
-```bat
-scripts\run_quality_gate.bat affected
-scripts\run_quality_gate.bat merge --base origin/main
-```
+- 需要 Qt 的测试模块**必须在模块顶部** `pytest.importorskip("PyQt6")`
+  （无 Qt 的后端 CI 依赖它静默跳过；session 级 `qapp` fixture 见 `tests/conftest.py`）；
+- 需要外部不可变数据的测试必须打 `external_data` marker 并用环境变量门控
+  （现存示例：`MYGPR_YINGSHAN_DATA`）；
+- 随机数据必须种子化；禁止 `time.sleep` 轮询式等待超过 50ms；
+- 测试文件按被测模块命名（`test_<module>.py`）；`*_v09xx` 历史命名仅允许存量。
 
-## 4. 风险升级规则
+## 5. 未落地、明确不承诺的项
 
-中央影响图目前采用以下规则：
+以下能力**当前不存在**，任何文档/计划引用它们前必须先实现：
 
-- 工程 schema、项目存储、处理会话和源文件注册：`release`；
-- Job Manager、取消和事务回滚：`release`；
-- 雷达—RTK—IMU 同步和逐道元数据：`release`；
-- GIS、标注、正式报告、通用处理链和导入：`merge`；
-- 自动调参、运动补偿、gprMax 专项：`affected`；
-- UI 公共外壳：`merge`；
-- 纯文档：`l0`；
-- 未映射的生产代码：保守升级到 `merge`。
+- 基于影响图的受影响测试选择（无 `config/test_impact.toml`）；
+- nightly / release 独立工作流；
+- SBOM 生成与许可证扫描（`requirements-build.txt` 中的工具尚未接入任何自动化）；
+- `config/industrial_acceptance_matrix.json` 中列出的现场验收项
+  （磁盘满、断电、外接盘断连、10GB 长跑等）尚无自动化测试。
 
-修改 `config/test_impact.toml` 本身会触发 `release`，防止通过缩小映射绕过验证。
-
-## 5. 测试分类
-
-所有测试在收集时由 `tests/conftest.py` 根据中央策略自动获得两类标记：
-
-1. 执行层级：`unit`、`gui`、`integration`、`slow`、`gprmax`；
-2. 业务域：`jobs`、`sync`、`gis`、`annotation`、`reporting`、`storage`、`project`、`processing` 等。
-
-固定主链额外标记为 `smoke`。平台或资源测试使用 `windows`、`hardware`、`large_data`、`release_only`。
-
-虽然可以直接执行 `pytest -m gis`，日常仍推荐使用 `run_quality_gate.py`，因为它会先缩小测试文件范围，避免 pytest 为了 marker 过滤而导入全部 232 个测试模块。
-
-## 6. 原生 GUI 隔离
-
-PyQt6、Matplotlib 和 VTK 含有进程级原生状态。门禁不会把所有 GUI 测试塞进同一 pytest 进程：
-
-- 纯 headless 受影响测试合并执行以提高速度；
-- GUI、gprMax、VTK 和交互式 Matplotlib 测试按文件隔离；
-- 夜间和发布回归继续采用“一测试模块一进程”。
-
-这避免把原生库析构冲突误判为业务断言失败。
-
-## 7. CI
-
-- `.github/workflows/quality-gates.yml`：PR/主分支风险门禁和 Windows GUI 冒烟；
-- `.github/workflows/nightly.yml`：每日四分片隔离回归；
-- `.github/workflows/release-gate.yml`：Linux/Windows 发布候选四分片回归。
-
-每个门禁都会生成 `artifacts/test-results/*.json`，保存实际变更、匹配规则、测试清单、耗时和失败阶段。
-
-## 8. 新增代码或测试时
-
-新增生产模块时，必须在 `config/test_impact.toml` 中添加或确认影响规则。新增测试时，应通过 `test_groups` 使其获得正确业务域和执行层级。然后执行：
-
-```bash
-python scripts/check_test_policy.py
-python scripts/run_quality_gate.py affected --changed-file <新文件> --plan
-```
-
-策略校验会检查缺失测试路径、无匹配测试组、未知 marker、无效门禁等级，以及所有测试是否至少拥有一个层级和业务域标记。
-
-## 9. 现场与实机验收
-
-自动化发布门禁不替代以下项目：Windows 125%/150%/175% DPI、多 GB/数十 GB 数据、外接硬盘断连、磁盘耗尽、断电恢复、真实 RTK/IMU/GPR 时间同步、错误 CRS、GNSS 丢解和正式报告打印。这些属于发布后的现场验收清单，而不是每次提交的本地反馈链。
+现场与实机验收（DPI、多 GB 数据、真实 RTK/IMU/GPR 同步、错误 CRS 等）属于
+发布后人工验收清单，不由本地门禁替代。

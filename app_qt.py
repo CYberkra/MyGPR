@@ -171,7 +171,7 @@ def _run_smoke(window: MyGPRMainWindow) -> None:
 
 def main() -> int:
     try:
-        from PyQt6.QtCore import Qt, QtMsgType
+        from PyQt6.QtCore import Qt
         from PyQt6.QtGui import QFont, QGuiApplication
         from PyQt6.QtWidgets import QApplication
         from qfluentwidgets import setTheme, Theme
