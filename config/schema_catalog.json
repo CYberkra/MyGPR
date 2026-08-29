@@ -730,6 +730,15 @@
       "references": [
         "scripts/verify_yingshan_dataset.py"
       ]
+    },
+    {
+      "schema": "mygpr.mypy_baseline.v1",
+      "owner": "core",
+      "mutable": true,
+      "migration_policy": "ratchet-count-may-decrease-only",
+      "references": [
+        "scripts/check_mypy_budget.py"
+      ]
     }
   ]
 }
