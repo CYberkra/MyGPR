@@ -1,10 +1,18 @@
 # -*- coding: utf-8 -*-
-"""空间信息页瓦片数学 / CRS 解析纯函数测试（无 Qt 依赖）。"""
+"""空间信息页瓦片数学 / CRS 解析纯函数测试（无 Qt 依赖）。
+
+模块本身不依赖 Qt，但 ``ui/widgets/__init__.py`` 会级联导入 PyQt6，
+因此在无 Qt 的后端 CI 环境整体跳过。
+"""
 from __future__ import annotations
 
 import math
 
-from ui.widgets.map_tiles import (choose_prefetch_zooms, count_tiles_for_bbox,
+import pytest
+
+pytest.importorskip("PyQt6")  # 经 ui/widgets/__init__ 级联依赖 Qt
+
+from ui.widgets.map_tiles import (choose_prefetch_zooms, count_tiles_for_bbox,  # noqa: E402
                                   extract_epsg, lonlat_to_mercator,
                                   lonlat_to_tile, mercator_to_lonlat,
                                   tile_bounds_mercator, tile_range_for_bbox)

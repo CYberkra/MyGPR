@@ -6,9 +6,11 @@ import io
 
 import numpy as np
 import pytest
-from PIL import Image
 
-from ui.widgets.terrain_tiles import (decode_terrarium, mosaic_from_tiles,
+pytest.importorskip("PyQt6")  # 后端 CI（无 Qt）自动跳过，见 tests/conftest.py qapp 设计
+from PIL import Image  # noqa: E402
+
+from ui.widgets.terrain_tiles import (decode_terrarium, mosaic_from_tiles,  # noqa: E402
                                       sample_bilinear, terrarium_url,
                                       tile_grid_for_bbox)
 

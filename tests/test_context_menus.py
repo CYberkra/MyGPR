@@ -9,7 +9,9 @@ from types import SimpleNamespace
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 import pytest
-from PyQt6.QtWidgets import QApplication
+
+pytest.importorskip("PyQt6")  # 后端 CI（无 Qt）自动跳过，见 tests/conftest.py qapp 设计
+from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 
 @pytest.fixture(scope='module')

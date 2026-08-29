@@ -6,7 +6,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from ui.controllers.backend_controller import (
+pytest.importorskip("PyQt6")  # 后端 CI（无 Qt）自动跳过，见 tests/conftest.py qapp 设计
+
+from ui.controllers.backend_controller import (  # noqa: E402
     PROJECT_BUSY_MESSAGE,
     friendly_error_message,
 )

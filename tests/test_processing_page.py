@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from ui.pages.processing_page import ProcessingPage
+pytest.importorskip("PyQt6")  # 后端 CI（无 Qt）自动跳过，见 tests/conftest.py qapp 设计
+
+from ui.pages.processing_page import ProcessingPage  # noqa: E402
 
 
 class TestAutoTuneGate:

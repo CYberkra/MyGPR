@@ -3,7 +3,9 @@
 import numpy as np
 import pytest
 
-from ui.widgets.local_dem import dem_covers_bbox, load_xyz_grid
+pytest.importorskip("PyQt6")  # 后端 CI（无 Qt）自动跳过，见 tests/conftest.py qapp 设计
+
+from ui.widgets.local_dem import dem_covers_bbox, load_xyz_grid  # noqa: E402
 
 
 def _write(tmp_path, text, name='dem.xyz'):

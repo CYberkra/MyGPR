@@ -7,9 +7,11 @@
 from __future__ import annotations
 
 import pytest
-from qfluentwidgets import CheckBox, ComboBox, DoubleSpinBox, LineEdit, SpinBox
 
-from ui.widgets.param_form import ParamForm
+pytest.importorskip("qfluentwidgets")  # 后端 CI（无 Qt）自动跳过，见 tests/conftest.py qapp 设计
+from qfluentwidgets import CheckBox, ComboBox, DoubleSpinBox, LineEdit, SpinBox  # noqa: E402
+
+from ui.widgets.param_form import ParamForm  # noqa: E402
 
 
 _SCHEMA = [

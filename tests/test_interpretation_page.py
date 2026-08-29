@@ -6,7 +6,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from ui.pages.interpretation_page import InterpretationPage
+pytest.importorskip("PyQt6")  # 后端 CI（无 Qt）自动跳过，见 tests/conftest.py qapp 设计
+
+from ui.pages.interpretation_page import InterpretationPage  # noqa: E402
 
 
 def _artifacts():
