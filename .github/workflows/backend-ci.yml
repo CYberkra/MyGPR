@@ -16,6 +16,8 @@ jobs:
           python-version: '3.13'
           cache: pip
       - run: python -m pip install -r requirements-test-backend.txt
+      # 门禁脚本会 import core/mygpr，需要以可编辑方式安装包本身
+      - run: python -m pip install -e .
       - run: python scripts/check_python_compile.py
       - run: python scripts/check_architecture.py
       - run: python scripts/check_schema_catalog.py
