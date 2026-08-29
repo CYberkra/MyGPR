@@ -18,7 +18,9 @@ FORBIDDEN_FILE_NAMES = {"mygpr_handoff.zip"}
 # These directories are legitimate local developer state and must not make a
 # source checkout fail hygiene checks.  They are pruned before traversal so a
 # project-local virtual environment does not generate thousands of false hits.
-EXCLUDED_DIR_NAMES = {".venv", "venv", "env", ".git"}
+# Cache dirs (__pycache__/.mypy_cache/...) remain forbidden in a *release*
+# package but are produced by any CI/dev run, so traversal skips them.
+EXCLUDED_DIR_NAMES = {".venv", "venv", "env", ".git", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
 
 
 def project_root() -> Path:
