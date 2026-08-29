@@ -87,10 +87,12 @@ CASES = {
         (72, 29),
         # FFT（scipy.signal.hilbert）在不同平台 BLAS 下末位浮点有差异，
         # float32 舍入后字节摘要不同；首个摘要是 Linux CI 的基准，
-        # 其余是已登记的平台等价摘要（Windows），列表之外的任何摘要仍失败。
+        # 其余是已登记的平台等价摘要（Windows / Linux py3.12），
+        # 列表之外的任何摘要仍失败。
         (
             "8679b6f07793a70deff673d373874d4290d6fb57ff2a56b001aa55afb936f1e4",
             "14a9c4194c71b8d8bf59f1d2da0d15c9fae31ae1a26d4eec2378516957bca150",
+            "dcee79c7e0c77b22b6ac6846dd6f30b031af68e9fcc3fa04e33150688cf31e37",
         ),
     ),
     "ccbs": (
