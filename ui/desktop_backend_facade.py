@@ -28,6 +28,7 @@ from mygpr.application.jobs.models import JobEventType, JobResultSummary  # noqa
 from core.gpr_data_model import GPRDataSet
 from core.gui_rendering import bundle_from_dataset, compute_levels
 from core.gpr_format_registry import supported_file_dialog_filter
+from core.app_paths import get_tile_cache_dir
 from core.method_registry_metadata import (
     METHOD_CATEGORY_LABELS,
     METHOD_METADATA,
@@ -103,6 +104,72 @@ def file_dialog_filter() -> str:
     return supported_file_dialog_filter()
 
 
+def tile_cache_dir() -> str:
+    """Return the shared user-writable basemap and terrain cache directory."""
+    return get_tile_cache_dir()
+
+
+# 常见参数名 → 中文标签（注册表未提供 label 时的显示回退）
+_PARAM_LABELS = {
+    "mode": "模式", "time_start_ns": "起始时间 (ns)", "time_end_ns": "结束时间 (ns)",
+    "new_zero_time": "新零时刻 (ns)", "window": "窗口长度", "strength": "强度",
+    "smoothing_samples": "平滑采样数", "min_gain": "最小增益", "max_gain": "最大增益",
+    "floor_ratio": "基底比例", "scale": "缩放系数", "target": "目标值",
+    "ntraces": "道数", "wavelet": "小波基", "levels": "分解层数",
+    "threshold": "阈值", "threshold_strategy": "阈值策略", "rank_start": "起始秩",
+    "rank_end": "终止秩", "normalize": "归一化", "log_compress": "对数压缩",
+    "use_custom_ref": "自定义参考", "dt": "时间采样 (ns)", "v": "波速 (m/ns)",
+    "dz": "深度步长 (m)", "gain_min": "增益下限", "gain_max": "增益上限",
+    "empty_rms_threshold": "空道 RMS 阈值", "spike_zscore": "尖峰 Z 分数",
+    "manual_trace_indices": "手动指定道号", "spacing_m": "道间距 (m)",
+    "t0": "起始时刻 (ns)", "t1": "结束时刻 (ns)", "order": "阶数",
+    "fmin": "下限频率 (MHz)", "fmax": "上限频率 (MHz)", "rank": "秩",
+    "power": "幂次", "tmax": "最大时窗 (ns)", "factor": "系数",
+    "alpha": "权重系数", "lambda_": "正则系数", "max_iter": "最大迭代次数",
+    "tol": "收敛容差", "sigma": "标准差", "radius": "半径", "width": "宽度",
+    "height": "高度", "depth": "深度", "velocity": "速度", "frequency": "频率",
+    "amplitude": "幅度", "phase": "相位", "offset": "偏移量", "ratio": "比例",
+    "method": "方法", "axis": "轴向", "dtype": "数据类型", "enabled": "启用",
+    "start_trace": "起始道", "end_trace": "结束道", "start_sample": "起始采样点",
+    "end_sample": "结束采样点", "traces": "道数", "samples": "采样数",
+    "cutoff": "截止频率", "lowcut": "低通截止", "highcut": "高通截止",
+    "filter_order": "滤波器阶数", "apply_agc": "应用 AGC", "agc_window": "AGC 窗口",
+    "clip": "限幅", "eps": "最小除数", "start": "起始", "end": "结束",
+    "step": "步长", "size": "尺寸", "length": "长度", "num": "数量",
+}
+
+
+def _extract_parameter_schema(raw: Mapping[str, Any]) -> tuple[dict, ...]:
+    """从注册表原始描述提取参数 schema（统一为 list[dict]，每项必含 name）。
+
+    兼容两种注册表形态：
+    - ``parameter_schema`` 为 dict[name -> spec]（domain/infrastructure 侧）
+    - ``params`` 为 list[spec]（core.methods_registry 侧，spec 自带 name）
+
+    此前只读 ``parameter_schema`` 键，而 core 注册表实际叫 ``params``，
+    导致 36 个方法的参数 schema 传到 UI 全为空，参数表单无法构建、
+    "应用到选中步骤" 永远禁用 —— 本函数即该缺陷的修复点。
+    """
+    items: list[dict] = []
+    dict_schema = raw.get("parameter_schema")
+    if isinstance(dict_schema, Mapping) and dict_schema:
+        for key, item in dict_schema.items():
+            entry = dict(item) if isinstance(item, Mapping) else {}
+            entry.setdefault("name", str(key))
+            items.append(entry)
+    else:
+        list_schema = raw.get("params")
+        if isinstance(list_schema, (list, tuple)):
+            for index, item in enumerate(list_schema):
+                entry = dict(item) if isinstance(item, Mapping) else {}
+                entry.setdefault("name", "param_%d" % index)
+                items.append(entry)
+    for entry in items:
+        entry.setdefault("label", _PARAM_LABELS.get(
+            str(entry.get("name", "")), str(entry.get("name", ""))))
+    return tuple(items)
+
+
 def method_catalog() -> tuple[UiMethodEntry, ...]:
     """Return the processing method catalog as typed, immutable DTOs.
 
@@ -123,10 +190,7 @@ def method_catalog() -> tuple[UiMethodEntry, ...]:
             category_label=str(METHOD_CATEGORY_LABELS.get(category, category)),
             tags=(str(tag),) if tag else (),
             auto_tune_enabled=bool(raw.get("auto_tune_enabled", False)),
-            parameter_schema=tuple(
-                dict(item) if isinstance(item, Mapping) else {"name": str(key)}
-                for key, item in (raw.get("parameter_schema") or {}).items()
-            ),
+            parameter_schema=_extract_parameter_schema(raw),
             description=str(raw.get("description") or ""),
         )
         items.append(entry)
@@ -179,6 +243,7 @@ __all__ = [
     "compute_display_levels",
     "build_preview_bundle",
     "file_dialog_filter",
+    "tile_cache_dir",
     "method_catalog",
     "pipeline_from_dicts",
     "pipeline_to_raw",

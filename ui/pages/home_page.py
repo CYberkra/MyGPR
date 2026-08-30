@@ -8,6 +8,10 @@
 
 信号：new_project_requested / open_project_requested /
 import_line_requested / goto_page(str)。
+
+布局（v0.9.38 重设计）：
+- 左栏固定 ~400px：当前项目（含快速操作按钮组）+ 最近任务
+- 右栏 stretch：数据预览（B-Scan 默认近似方形显示，符合雷达剖面习惯）
 """
 
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -17,6 +21,7 @@ from qfluentwidgets import (
     BodyLabel, CaptionLabel, CardWidget, ComboBox, PrimaryPushButton,
     PushButton, ScrollArea, SubtitleLabel, TitleLabel,
 )
+from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants
 from ui.widgets import BScanView, MiniJobList
@@ -24,7 +29,7 @@ from ui.widgets import BScanView, MiniJobList
 
 # ------------------------------------------------------------ 小工厂（卡片范式逐字 SPEC §1）
 def _create_separator() -> QFrame:
-    """分隔线工厂：QFrame.HLine + Sunken + 'color: #e0e0e0;'。"""
+    """分隔线工厂：QFrame.HLine + Sunken + 半透明灰。"""
     line = QFrame()
     line.setFrameShape(QFrame.Shape.HLine)
     line.setFrameShadow(QFrame.Shadow.Sunken)
@@ -81,18 +86,29 @@ class HomePage(ScrollArea):
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         root.addWidget(title)
 
-        root.addWidget(self._build_project_card(container))
-        root.addWidget(self._build_actions_card(container))
-        root.addWidget(self._build_preview_card(container), 1)
-        root.addWidget(self._build_jobs_card(container))
-        root.addStretch(1)
+        # 主体两栏：左栏（项目+任务）/ 右栏（预览）
+        body = QHBoxLayout()
+        body.setSpacing(constants.PAGE_SPACING)
+        root.addLayout(body, 1)
+
+        left = QVBoxLayout()
+        left.setSpacing(constants.PAGE_SPACING)
+        left.addWidget(self._build_project_card(container))
+        left.addWidget(self._build_jobs_card(container), 1)
+        left_widget = QWidget(container)
+        left_widget.setLayout(left)
+        left_widget.setFixedWidth(400)
+        left_widget.setStyleSheet('background-color: transparent;')
+        body.addWidget(left_widget, 0)
+
+        body.addWidget(self._build_preview_card(container), 1)
 
         self.setWidget(container)
         self.set_current_project(None)
 
     # ============================================================ 卡片构建
     def _build_project_card(self, parent) -> CardWidget:
-        """卡片1"当前项目"：未打开显示提示；打开后显示 名称/路径/测线数/存储后端/状态徽章。"""
+        """"当前项目"卡：项目信息 + 快速操作按钮（合并为一张卡，减少纵向堆叠）。"""
         card, layout = _create_card('当前项目')
 
         # 空态
@@ -127,6 +143,34 @@ class HomePage(ScrollArea):
         status_row.addStretch(1)
         info_layout.addLayout(status_row)
         layout.addWidget(self._info_widget)
+
+        # 快速操作（2×2 网格，窄栏下不拥挤）
+        layout.addWidget(_create_separator())
+        actions_title = CaptionLabel('快速操作', card)
+        actions_title.setStyleSheet('font-size: 11px; font-weight: bold;')
+        layout.addWidget(actions_title)
+
+        self.new_btn = PrimaryPushButton('新建项目', card, FIF.ADD)
+        self.open_btn = PushButton('打开项目', card, FIF.FOLDER)
+        self.import_btn = PushButton('导入测线', card, FIF.DOWNLOAD)
+        self.processing_btn = PushButton('打开处理台', card, FIF.DEVELOPER_TOOLS)
+
+        self.new_btn.clicked.connect(self.new_project_requested)
+        self.open_btn.clicked.connect(self.open_project_requested)
+        self.import_btn.clicked.connect(self.import_line_requested)
+        self.processing_btn.clicked.connect(
+            lambda: self.goto_page.emit('processingInterface'))
+
+        btn_row1 = QHBoxLayout()
+        btn_row1.setSpacing(constants.CARD_SPACING)
+        btn_row1.addWidget(self.new_btn, 1)
+        btn_row1.addWidget(self.open_btn, 1)
+        btn_row2 = QHBoxLayout()
+        btn_row2.setSpacing(constants.CARD_SPACING)
+        btn_row2.addWidget(self.import_btn, 1)
+        btn_row2.addWidget(self.processing_btn, 1)
+        layout.addLayout(btn_row1)
+        layout.addLayout(btn_row2)
         return card
 
     def _add_info_row(self, layout: QVBoxLayout, label_text: str) -> BodyLabel:
@@ -141,35 +185,11 @@ class HomePage(ScrollArea):
         layout.addLayout(row)
         return value
 
-    def _build_actions_card(self, parent) -> CardWidget:
-        """卡片2"快速操作"：按钮行，发信号给主窗口跳导航。"""
-        card, layout = _create_card('快速操作')
-        row = QHBoxLayout()
-        row.setSpacing(constants.CARD_SPACING)
-
-        self.new_btn = PrimaryPushButton('新建项目', card)
-        self.open_btn = PushButton('打开项目', card)
-        self.import_btn = PushButton('导入测线', card)
-        self.processing_btn = PushButton('打开处理台', card)
-
-        self.new_btn.clicked.connect(self.new_project_requested)
-        self.open_btn.clicked.connect(self.open_project_requested)
-        self.import_btn.clicked.connect(self.import_line_requested)
-        self.processing_btn.clicked.connect(
-            lambda: self.goto_page.emit('processingInterface'))
-
-        for btn in (self.new_btn, self.open_btn, self.import_btn,
-                    self.processing_btn):
-            row.addWidget(btn)
-        row.addStretch(1)
-        layout.addLayout(row)
-        return card
-
     def _build_preview_card(self, parent) -> CardWidget:
-        """卡片3"数据预览"：BScanView(min 300px) + colormap ComboBox（九项，默认 seismic）。"""
+        """"数据预览"卡：BScanView（默认近似方形）+ 色标 ComboBox。"""
         card, layout = _create_card('数据预览')
         self._bscan = BScanView(card)
-        self._bscan.setMinimumHeight(300)
+        self._bscan.setMinimumHeight(320)
         layout.addWidget(self._bscan, 1)
 
         row = QHBoxLayout()
@@ -180,6 +200,8 @@ class HomePage(ScrollArea):
         self._cmap_combo.setCurrentText(constants.DEFAULT_COLORMAP)
         self._cmap_combo.setMinimumWidth(120)
         self._cmap_combo.currentTextChanged.connect(self._bscan.set_colormap)
+        # 反向同步：右键菜单改色标 → ComboBox 跟随
+        self._bscan.sig_colormap_changed.connect(self._cmap_combo.setCurrentText)
         row.addWidget(label)
         row.addWidget(self._cmap_combo)
         row.addStretch(1)
@@ -187,11 +209,11 @@ class HomePage(ScrollArea):
         return card
 
     def _build_jobs_card(self, parent) -> CardWidget:
-        """卡片4"最近任务"：内嵌 MiniJobList。"""
+        """"最近任务"卡：内嵌 MiniJobList。"""
         card, layout = _create_card('最近任务')
         self._mini_jobs = MiniJobList(card)
-        self._mini_jobs.setMinimumHeight(150)
-        layout.addWidget(self._mini_jobs)
+        self._mini_jobs.setMinimumHeight(120)
+        layout.addWidget(self._mini_jobs, 1)
         return card
 
     # ============================================================ 公共接口（主窗口喂数据）

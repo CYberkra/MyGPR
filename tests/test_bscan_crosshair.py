@@ -104,3 +104,44 @@ class TestCrosshairWidget:
         view._on_mouse_moved(QPointF(-100.0, -100.0))
         assert not view._vline.isVisible()
         assert view._readout.isHidden()
+
+    def test_theme_styles_the_toolbar_surface_and_button_text(self, qapp):
+        from ui.widgets.bscan_view import BScanView
+
+        view = BScanView()
+        view.apply_theme(True)
+        assert '#000000' in view._toolbar.styleSheet()
+        for button in view._toolbar_buttons:
+            assert '#2d2d2d' in button.styleSheet()
+            assert '#f0f0f0' in button.styleSheet()
+
+        view.apply_theme(False)
+        assert '#ffffff' in view._toolbar.styleSheet()
+        for button in view._toolbar_buttons:
+            assert '#ffffff' in button.styleSheet()
+            assert '#202020' in button.styleSheet()
+
+
+class TestPreviewCoordinateMapping:
+    def test_downsampled_preview_maps_between_view_and_source_coordinates(self, qapp):
+        """Picks and overlays share the original, rather than preview, grid."""
+        from ui.widgets.bscan_view import BScanView
+
+        view = BScanView()
+        # A 900 × 900 preview represents a 1,800 × 1,800 source B-scan.
+        # Check both endpoints and an interior location.  A 2:1 downsample
+        # cannot make every source coordinate exactly reversible, so validate
+        # that the round-trip remains within one source sample.
+        view._image_shape = (900, 900)
+        view._trace_count = 1800
+        view._sample_count = 1800
+
+        assert view._view_to_data(0, 0) == (0, 0)
+        assert view._view_to_data(899, 899) == (1799, 1799)
+        assert view._view_to_data(450, 450) == (901, 901)
+
+        for trace, sample in ((0, 0), (1799, 1799), (901, 901)):
+            preview_trace, preview_sample = view._data_to_view(trace, sample)
+            restored = view._view_to_data(round(preview_trace), round(preview_sample))
+            assert abs(restored[0] - trace) <= 1
+            assert abs(restored[1] - sample) <= 1

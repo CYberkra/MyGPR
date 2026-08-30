@@ -140,6 +140,11 @@ class _ProjectLifecycleMixin:
 
     def _on_close_project_requested(self) -> None:
         if self.project_controller is not None and self._require_project():
+            # The edit service keeps an in-memory session bound to this project.
+            # Release it before the backend closes the project, otherwise a later
+            # project open can retain stale annotation state.
+            if self.interpretation_controller is not None:
+                self.interpretation_controller.close_session()
             self.project_controller.close_current()
 
     def _on_project_opened(self, summary) -> None:

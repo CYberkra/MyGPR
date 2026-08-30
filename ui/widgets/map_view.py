@@ -6,7 +6,8 @@
 - TileLayer（pg.GraphicsObject）：按当前可视范围/缩放级别计算所需 XYZ 瓦片，
   只绘制磁盘缓存已有的；缺失瓦片入队 QThreadPool 后台下载（urllib + UA 头，
   失败静默），下载完成后 update() 重绘。磁盘缓存
-  ``~/MyGPR/tile_cache/{source_key}/{z}/{x}/{y}.png``，命中缓存不再联网。
+  ``ui.desktop_backend_facade.tile_cache_dir()/{source_key}/{z}/{x}/{y}.png``，
+  命中缓存不再联网。
 - 轨迹叠加：每条测线一条彩色折线 + 端点散点。坐标系字符串经
   ``map_tiles.extract_epsg`` 提取 EPSG 后用 pyproj 转到 3857；无 EPSG 且
   坐标绝对值 <1000（像经纬度）按 EPSG:4326 处理；仍不行则按原始坐标绘制
@@ -28,6 +29,7 @@ from PyQt6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QVBoxLayo
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import ToolButton
 
+from ui.desktop_backend_facade import tile_cache_dir
 from ui.widgets.context_menus import add_action, make_menu
 from ui.widgets.map_tiles import (DEFAULT_TILE_SOURCE, TILE_SOURCE_MAX_ZOOM,
                                   TILE_SOURCES, WORLD_SIZE_M,
@@ -41,7 +43,7 @@ from ui.widgets.map_tiles import (DEFAULT_TILE_SOURCE, TILE_SOURCE_MAX_ZOOM,
 
 _LOGGER = logging.getLogger(__name__)
 
-_TILE_CACHE_ROOT = os.path.join(os.path.expanduser('~'), 'MyGPR', 'tile_cache')
+_TILE_CACHE_ROOT = tile_cache_dir()
 _USER_AGENT = 'MyGPR/1.0 (https://mygpr.local; tile client)'
 _HALF_WORLD = WORLD_SIZE_M / 2.0
 

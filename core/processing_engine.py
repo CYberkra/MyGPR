@@ -128,7 +128,9 @@ def prepare_runtime_params(
     if method_id == "kirchhoff_migration":
         traces = max(1, int(data_shape[1]))
         info = header_info or {}
-        if "length_m" not in runtime_params:
+        # UI 会把 schema 默认值（0.0）一并传入，仅判 "不存在" 会导致
+        # 真实测线长度永远无法注入，Kirchhoff 偏移在 GUI 中必然失败。
+        if to_float(runtime_params.get("length_m"), default=0.0) <= 0.0:
             track_length_m = to_float(info.get("track_length_m"), default=0.0)
             if track_length_m > 0:
                 runtime_params["length_m"] = track_length_m
@@ -248,7 +250,9 @@ def _inject_runtime_metadata_context(
         runtime_params["header_info"] = clone_header_info(info)
     if "trace_metadata" not in runtime_params and trace_metadata:
         runtime_params["trace_metadata"] = clone_trace_metadata(trace_metadata)
-    if "time_window_ns" not in runtime_params:
+    # UI 会传入 schema 默认值 0.0（占位），视为未设置时用真实时窗覆盖，
+    # 否则 Kirchhoff/RTM 等需要真实时窗的方法在 GUI 中必失败。
+    if to_float(runtime_params.get("time_window_ns"), default=0.0) <= 0.0:
         total_time_ns = info.get("total_time_ns")
         total_time_value = to_float(total_time_ns, default=0.0)
         runtime_params["time_window_ns"] = (

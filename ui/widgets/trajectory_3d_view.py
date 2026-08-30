@@ -10,7 +10,7 @@ QLabel 提示，不影响页面其余部分。
 
 真实地形三种来源（set_terrain_source）：在线下载（测线坐标系可识别时，
 后台线程按测线包围盒下载 AWS Terrarium 高程瓦片，磁盘缓存
-~/MyGPR/tile_cache/terrarium/）、本地 DEM 格网、测线数据估算
+``ui.desktop_backend_facade.tile_cache_dir()/terrarium/``）、本地 DEM 格网、测线数据估算
 （地面散点 = 轨迹海拔 − 离地高度，线性三角剖分插值成网格，免高程瓦片下载）。
 解码拼接后重采样到测线坐标系规则网格，以 GLSurfacePlotItem
 （自定义顶光 shader + 逐顶点色）铺地；网络失败静默降级为平面网格。
@@ -35,6 +35,7 @@ from PyQt6.QtCore import QObject, QRunnable, Qt, QThreadPool, pyqtSignal
 from PyQt6.QtWidgets import QLabel, QVBoxLayout, QWidget
 from qfluentwidgets import FluentIcon as FIF
 
+from ui.desktop_backend_facade import tile_cache_dir
 from ui.widgets.context_menus import add_action, make_menu
 from ui.widgets.local_dem import dem_covers_bbox
 from ui.widgets.map_tiles import (TILE_SOURCE_MAX_ZOOM, WORLD_SIZE_M,
@@ -55,7 +56,7 @@ except Exception:  # noqa: BLE001 - PyOpenGL 缺失等任意导入失败 → 降
 
 _LOGGER = logging.getLogger(__name__)
 
-_TERRAIN_CACHE_ROOT = os.path.join(os.path.expanduser('~'), 'MyGPR', 'tile_cache')
+_TERRAIN_CACHE_ROOT = tile_cache_dir()
 _USER_AGENT = 'MyGPR/1.0 (https://mygpr.local; terrain client)'
 _TERRAIN_GRID = 96               # 地形网格每边最大采样数
 

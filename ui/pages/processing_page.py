@@ -187,6 +187,8 @@ class ProcessingPage(QWidget):
         columns.addWidget(middle, 1)
 
         preview_card, preview_layout = _make_card('数据预览')
+        # 顶行拆两行，避免一行内控件挤压叠字：
+        #   行1 = 原始/结果分段 + 加载按钮；行2 = 测线 / 成果 下拉
         seg_row = QHBoxLayout()
         seg_row.setSpacing(constants.CARD_SPACING)
         self._preview_segment = SegmentedWidget(preview_card)
@@ -200,24 +202,27 @@ class ProcessingPage(QWidget):
         seg_row.addWidget(self._preview_segment)
         seg_row.addStretch(1)
 
-        line_label = CaptionLabel('当前测线:', preview_card)
-        seg_row.addWidget(line_label)
-        self._line_combo = ComboBox(preview_card)
-        self._line_combo.setMinimumWidth(130)
-        self._line_combo.setToolTip('在处理页直接切换当前测线')
-        seg_row.addWidget(self._line_combo)
-
-        art_label = CaptionLabel('成果:', preview_card)
-        seg_row.addWidget(art_label)
-        self._artifact_combo = ComboBox(preview_card)
-        self._artifact_combo.setMinimumWidth(150)
-        self._artifact_combo.setToolTip('选择该测线历次处理结果进行预览')
-        seg_row.addWidget(self._artifact_combo)
-
         self._load_line_btn = PushButton('加载测线数据', preview_card)
         self._load_line_btn.setToolTip('加载当前测线的原始数据到预览区（Ctrl+L）')
         seg_row.addWidget(self._load_line_btn)
         preview_layout.addLayout(seg_row)
+
+        sel_row = QHBoxLayout()
+        sel_row.setSpacing(constants.CARD_SPACING)
+        line_label = CaptionLabel('当前测线:', preview_card)
+        sel_row.addWidget(line_label)
+        self._line_combo = ComboBox(preview_card)
+        self._line_combo.setMinimumWidth(130)
+        self._line_combo.setToolTip('在处理页直接切换当前测线')
+        sel_row.addWidget(self._line_combo, 1)
+
+        art_label = CaptionLabel('成果:', preview_card)
+        sel_row.addWidget(art_label)
+        self._artifact_combo = ComboBox(preview_card)
+        self._artifact_combo.setMinimumWidth(150)
+        self._artifact_combo.setToolTip('选择该测线历次处理结果进行预览')
+        sel_row.addWidget(self._artifact_combo, 1)
+        preview_layout.addLayout(sel_row)
 
         self._bscan = BScanView(preview_card)
         self._bscan.setMinimumHeight(300)

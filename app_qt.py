@@ -4,13 +4,15 @@
 启动流程：QApplication → setTheme(Theme.LIGHT) → SplashScreen(600ms) → MyGPRMainWindow
 
 ``--smoke``：offscreen 验收模式——3 秒后将主窗口及各导航页截图保存到
-``/tmp/mygpr_shots/``，随后以退出码 0 退出。
+系统临时目录下的 ``mygpr_shots/``（可由 ``MYGPR_SMOKE_SHOTS_DIR`` 覆盖），
+随后以退出码 0 退出。
 """
 import argparse
 import logging
 import os
 import platform
 import sys
+import tempfile
 import time
 
 # Python <3.11 没有 enum.StrEnum；给全局 enum 模块补一个最低限度兼容实现，
@@ -40,7 +42,10 @@ from core.observability import (configure_structured_logging,
 from ui import constants
 from ui.main_window import MyGPRMainWindow, PlaceholderPage
 
-SMOKE_SHOTS_DIR = '/tmp/mygpr_shots'
+# Keep smoke artifacts outside the installation directory and avoid the
+# POSIX-only /tmp path when validating Windows packages.  CI can override it.
+SMOKE_SHOTS_DIR = os.environ.get(
+    'MYGPR_SMOKE_SHOTS_DIR', os.path.join(tempfile.gettempdir(), 'mygpr_shots'))
 SMOKE_DELAY_MS = 3000
 SMOKE_BACKEND_TIMEOUT_MS = 5000
 
@@ -48,7 +53,7 @@ SMOKE_BACKEND_TIMEOUT_MS = 5000
 def _setup_diagnostics() -> None:
     """接入 core.observability：崩溃捕获 + 结构化事件日志 + Qt 消息转发。
 
-    产物（均写入 ``~/MyGPR/logs/``）：
+    产物（均写入 ``core.app_paths`` 决定的 MyGPR 日志目录）：
     - ``crash-*.json``      未捕获 Python 异常报告（含 traceback）；
     - ``native-crash.log``  faulthandler 捕获的原生崩溃堆栈（段错误等）；
     - ``mygpr-events.jsonl`` 结构化事件（启动/退出/Qt 警告/各模块日志）。
@@ -88,7 +93,7 @@ def _setup_diagnostics() -> None:
 
 
 def _run_smoke(window: MyGPRMainWindow) -> None:
-    """截图全部导航页 + 整体窗口到 /tmp/mygpr_shots/，并做结构性断言。
+    """截图全部导航页 + 整体窗口到 ``SMOKE_SHOTS_DIR``，并做结构性断言。
 
     断言内容：
     - 页面数量与命名符合预期；
@@ -144,6 +149,7 @@ def _run_smoke(window: MyGPRMainWindow) -> None:
     if errors:
         for err in errors:
             print(f'[smoke] FAIL: {err}', file=sys.stderr)
+        window.close()
         app.exit(1)
         return
 
@@ -166,6 +172,7 @@ def _run_smoke(window: MyGPRMainWindow) -> None:
     for path in saved:
         print(f'[smoke] saved: {path}')
     print(f'[smoke] OK, {len(saved)} screenshots -> {SMOKE_SHOTS_DIR}')
+    window.close()
     app.exit(0)
 
 
@@ -187,7 +194,7 @@ def main() -> int:
 
     parser = argparse.ArgumentParser(description=constants.APP_NAME)
     parser.add_argument('--smoke', action='store_true',
-                        help='offscreen 验收：3s 后截图各页面到 /tmp/mygpr_shots/ 并退出')
+                        help='offscreen 验收：3s 后截图各页面到临时目录（可由 MYGPR_SMOKE_SHOTS_DIR 覆盖）并退出')
     args, _ = parser.parse_known_args()
 
     # 高 DPI 自适应：125%/150% 等系统缩放下按真实比例换算逻辑像素，

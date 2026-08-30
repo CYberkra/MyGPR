@@ -36,6 +36,13 @@ def get_logs_dir() -> str:
     return path
 
 
+def get_tile_cache_dir() -> str:
+    """Return the shared, user-writable basemap and terrain tile cache."""
+    path = os.path.join(get_app_data_dir(), "tile_cache")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
 def get_favorites_dir() -> str:
     path = os.path.join(get_app_data_dir(), "favorites")
     os.makedirs(path, exist_ok=True)

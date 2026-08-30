@@ -120,19 +120,23 @@ class ProjectPage(QWidget):
         root.setContentsMargins(*constants.PAGE_MARGINS)
         root.setSpacing(constants.PAGE_SPACING)
 
-        # 页面标题：SubtitleLabel 微软雅黑 12pt Bold 居中（SPEC §1）
+        # 页头：标题居左 + 无项目提示居右，单行紧凑排布，不再独占两行纵向空间
+        header_row = QHBoxLayout()
+        header_row.setSpacing(constants.CARD_SPACING)
         title = SubtitleLabel('项目管理', self)
         title.setFont(QFont(constants.FONT_FAMILY, 12, QFont.Weight.Bold))
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        root.addWidget(title)
+        header_row.addWidget(title)
+        header_row.addStretch(1)
 
         # 无项目提示（SPEC §7：未打开项目时操作按钮禁用并提示）
         self._no_project_hint = CaptionLabel(
             '尚未打开项目 —— 请先在主页打开或新建项目', self)
         self._no_project_hint.setStyleSheet(
             'color: %s; font-size: 11px;' % constants.COLOR_WARNING)
-        self._no_project_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        root.addWidget(self._no_project_hint)
+        self._no_project_hint.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        header_row.addWidget(self._no_project_hint)
+        root.addLayout(header_row)
 
         body = QHBoxLayout()
         body.setSpacing(constants.PAGE_SPACING)
@@ -318,7 +322,7 @@ class ProjectPage(QWidget):
         header = self._lines_table.horizontalHeader()
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         header.sectionResized.connect(self._save_lines_column_widths)
-        self._lines_table.setMinimumHeight(180)
+        self._fit_table_height(self._lines_table, min_h=96, max_h=200)
         self._lines_table.itemSelectionChanged.connect(
             self._on_line_selection_changed)
         self._lines_table.itemDoubleClicked.connect(
@@ -350,7 +354,7 @@ class ProjectPage(QWidget):
         art_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         art_header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         art_header.sectionResized.connect(self._save_artifacts_column_widths)
-        self._artifacts_table.setMinimumHeight(150)
+        self._fit_table_height(self._artifacts_table, min_h=84, max_h=160)
         self._artifacts_table.itemDoubleClicked.connect(
             lambda _item: self._emit_artifact_preview())
         self._artifacts_table.setContextMenuPolicy(
@@ -366,13 +370,30 @@ class ProjectPage(QWidget):
         art_layout.addLayout(art_btn_row)
         layout.addWidget(art_card)
 
-        # 卡片"数据预览"
+        # 卡片"数据预览"（占满剩余空间，B-Scan 默认近似方形，保证完整显示）
         preview_card, preview_layout = _create_card('数据预览')
         self._bscan = BScanView(preview_card)
-        self._bscan.setMinimumHeight(320)
+        self._bscan.setMinimumHeight(260)
         preview_layout.addWidget(self._bscan, 1)
         layout.addWidget(preview_card, 1)
         return layout
+
+    @staticmethod
+    def _fit_table_height(table, min_h: int, max_h: int) -> None:
+        """按内容行数收缩表格高度，把剩余空间让给下方数据预览。
+
+        行数少时表格不再占满固定高度（避免大面积空白把预览挤出可视区）；
+        行数超过 max_h 时表格内部滚动。
+        """
+        rows = table.rowCount()
+        header_h = table.horizontalHeader().height() or 30
+        if rows <= 0:
+            content_h = header_h + 52          # 空表：表头 + 提示区
+        else:
+            row_h = table.rowHeight(0) or 28
+            content_h = header_h + rows * row_h + 6
+        content_h += table.frameWidth() * 2
+        table.setFixedHeight(max(min_h, min(max_h, content_h)))
 
     # ============================================================ 公共接口（主窗口喂数据）
     def set_project_info(self, summary) -> None:
@@ -418,6 +439,7 @@ class ProjectPage(QWidget):
         finally:
             self._filling_table = False
         self._restore_column_widths(self._lines_table, 'lines')
+        self._fit_table_height(self._lines_table, min_h=96, max_h=200)
         # 不再自动选中首行：由主窗口在 _on_lines_updated 中按需恢复/设置当前测线，
         # 避免刷新时先跳到首行再跳回，导致结果预览和 InfoBar 闪烁错位。
         if not self._lines:
@@ -455,6 +477,7 @@ class ProjectPage(QWidget):
             for col, text in enumerate(values):
                 self._artifacts_table.setItem(row, col, QTableWidgetItem(text))
         self._restore_column_widths(self._artifacts_table, 'artifacts')
+        self._fit_table_height(self._artifacts_table, min_h=84, max_h=160)
 
     def set_preflight_result(self, text: str, ok: bool) -> None:
         """预检结果区：ok 绿色 / 失败红色。"""

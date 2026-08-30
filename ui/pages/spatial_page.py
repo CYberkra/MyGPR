@@ -44,6 +44,74 @@ _TRACK_COLORS = ('#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
                  '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf')
 
 
+def _coverage_statistics(tracks: list) -> dict[str, object]:
+    """Return project coverage figures derived solely from spatial tracks.
+
+    Spatial tracks normally use projected metre coordinates.  Geographic
+    longitude/latitude tracks are also accepted by the spatial adapter, so
+    those are measured with a small haversine calculation instead of treating
+    degrees as metres.  Invalid coordinates are ignored without preventing
+    the rest of a project's coverage summary from rendering.
+    """
+    track_count = 0
+    point_count = 0
+    segment_count = 0
+    length_m = 0.0
+
+    for track in tracks or []:
+        points: list[tuple[float, float]] = []
+        for point in getattr(track, 'points', ()) or ():
+            try:
+                x = float(getattr(point, 'x', float('nan')))
+                y = float(getattr(point, 'y', float('nan')))
+            except (TypeError, ValueError):
+                continue
+            if np.isfinite(x) and np.isfinite(y):
+                points.append((x, y))
+
+        if not points:
+            continue
+        track_count += 1
+        point_count += len(points)
+
+        # SpatialPersistenceMixin labels longitude/latitude tracks EPSG:4326.
+        # Only use coordinate magnitudes as a legacy fallback when the CRS is
+        # missing: local metre coordinates can legitimately be near (0, 0).
+        crs = str(getattr(track, 'coordinate_system', '') or '').lower()
+        geographic = (
+            '4326' in crs or '4490' in crs or 'wgs84' in crs
+            or 'geographic' in crs or '经纬' in crs
+            or (not crs and all(abs(x) <= 180.0 and abs(y) <= 90.0
+                               for x, y in points))
+        )
+        for (x0, y0), (x1, y1) in zip(points, points[1:]):
+            segment_count += 1
+            if geographic:
+                lat0, lat1 = np.radians((y0, y1))
+                dlat = lat1 - lat0
+                dlon = np.radians(x1 - x0)
+                a = (np.sin(dlat / 2.0) ** 2
+                     + np.cos(lat0) * np.cos(lat1) * np.sin(dlon / 2.0) ** 2)
+                length_m += 6_371_008.8 * 2.0 * np.arctan2(
+                    np.sqrt(a), np.sqrt(max(0.0, 1.0 - a)))
+            else:
+                length_m += float(np.hypot(x1 - x0, y1 - y0))
+
+    return {
+        'track_count': track_count,
+        'point_count': point_count,
+        'segment_count': segment_count,
+        'length_m': length_m,
+    }
+
+
+def _format_distance(distance_m: float) -> str:
+    """Format a distance compactly for the spatial coverage card."""
+    if distance_m >= 1000.0:
+        return f'{distance_m / 1000.0:.2f} km'
+    return f'{distance_m:.0f} m'
+
+
 def _page_title(text: str) -> SubtitleLabel:
     """页面标题：SubtitleLabel 微软雅黑 12pt Bold 居中（SPEC §1）。"""
     label = SubtitleLabel(text)
@@ -456,8 +524,30 @@ class SpatialPage(QWidget):
             '设为当前测线', detail_card, FIF.ACCEPT)
         self._set_current_btn.setEnabled(False)
         detail_layout.addWidget(self._set_current_btn)
-        right_layout.addWidget(detail_card)
-        right_layout.addStretch(1)
+
+        coverage_card, coverage_layout = _make_card('项目覆盖统计')
+        self._coverage_labels = {}
+        for key, title in (('tracks', '含轨迹测线'), ('points', '轨迹点数'),
+                           ('length', '总里程'), ('spacing', '平均点距')):
+            row = QHBoxLayout()
+            row.setSpacing(constants.CARD_SPACING)
+            title_label = CaptionLabel(f'{title}:', coverage_card)
+            title_label.setMinimumWidth(88)
+            row.addWidget(title_label)
+            value_label = CaptionLabel('--', coverage_card)
+            value_label.setWordWrap(True)
+            row.addWidget(value_label, 1)
+            coverage_layout.addLayout(row)
+            self._coverage_labels[key] = value_label
+        coverage_hint = CaptionLabel(
+            '统计仅基于已载入的空间轨迹，不修改项目数据。', coverage_card)
+        coverage_hint.setWordWrap(True)
+        coverage_layout.addWidget(coverage_hint)
+
+        # Let the two information cards share the full sidebar height.  This
+        # avoids a visually disconnected blank area below a short detail card.
+        right_layout.addWidget(detail_card, 1)
+        right_layout.addWidget(coverage_card, 1)
 
     # ============================================================ 内部接线
     def _connect_internal(self) -> None:
@@ -519,6 +609,7 @@ class SpatialPage(QWidget):
         self._refresh_views()
         self._refresh_crs_card()
         self._refresh_detail()
+        self._refresh_coverage_statistics()
         # 轨迹就绪后自动预下载测线所在地理区域（延迟执行，等视图 fit 完成）
         QTimer.singleShot(800, self._auto_prefetch_tracks)
 
@@ -611,6 +702,20 @@ class SpatialPage(QWidget):
         labels['rtk'].setText(rtk)
         labels['crs'].setText(crs)
         self._set_current_btn.setEnabled(bool(line_id))
+
+    def _refresh_coverage_statistics(self) -> None:
+        """Update the frontend-only project coverage summary from all tracks."""
+        statistics = _coverage_statistics(self._tracks)
+        labels = self._coverage_labels
+        labels['tracks'].setText(f"{statistics['track_count']} 条")
+        labels['points'].setText(f"{statistics['point_count']:,} 个")
+        labels['length'].setText(_format_distance(float(statistics['length_m'])))
+        segments = int(statistics['segment_count'])
+        if segments:
+            spacing = float(statistics['length_m']) / segments
+            labels['spacing'].setText(_format_distance(spacing))
+        else:
+            labels['spacing'].setText('--')
 
     # ---------------- 槽
     def _on_line_check_changed(self, _item) -> None:
