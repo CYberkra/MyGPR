@@ -11,7 +11,7 @@
 
 ## P1
 
-1. 继续拆分 `core/` 历史算法与基础设施适配器。
+1. ~~继续拆分 `core/` 历史算法与基础设施适配器~~ **核心处理栈收敛已完成（2026-08-31）**：cli_batch/evidence_export/field_processing_bridge 全部切 `NativeProcessingExecutor` 生产路径，`processing_engine` 降级为测试对照基线（4 个手写 kernel 是 atol=0 等价性锚点，1.1.0 退役）；注册表/桥/ bindings 的进一步清理见 `_handoff_20260830/P1-1_core历史处理栈收敛计划.md` 第 5 节。
 2. 完成 GIS、三维、制图和报告服务的无界面 API。
 3. 增加项目自动保存、崩溃恢复和增量备份服务。
 4. 完善 AutoTune 安全边界、候选流程空间和证据导出。
