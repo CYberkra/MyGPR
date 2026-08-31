@@ -100,8 +100,8 @@ GPR_FORMAT_SPECS: tuple[GPRFormatSpec, ...] = (
         key="oko_gpr",
         display_name="Geotech OKO GPR/GPR2",
         extensions=("gpr", "gpr2"),
-        support="recognized",
-        notes="已识别为常见 GPR 输入；建议外部转换为 CSV/SEG-Y/ENVI 后导入。",
+        support="native-subset",
+        notes="解码 OKO-2 .GPR2（RGPR readGPR2 布局：444B 头 + 均衡数组 + 36B 道头 float32）；.GPR 旧版格式同布局尝试解码，魔数不符则报错。",
     ),
 )
 

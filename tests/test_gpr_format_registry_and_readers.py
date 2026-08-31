@@ -4,7 +4,6 @@ import struct
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 from core.gpr_format_registry import get_format_spec, supported_file_dialog_filter
 from core.gpr_io import auto_load_data
@@ -80,9 +79,9 @@ def test_auto_load_fixed_segy_int16(tmp_path: Path):
 
 
 def test_recognized_but_not_native_format_fails_clearly(tmp_path: Path):
-    # DZT/DT1 已升级为 native-subset 解码器；OKO 仍是 recognized-only
-    path = tmp_path / "line.gpr"
-    path.write_bytes(b"not-a-real-oko")
-    with pytest.raises(Exception) as exc:
-        auto_load_data(str(path))
-    assert "已被识别为常见 GPR 数据格式" in str(exc.value)
+    # 当前注册表所有格式均可解码；该消息契约保留给未来新登记的 recognized-only 格式
+    from core.gpr_vendor_readers import unsupported_known_format_message
+
+    message = unsupported_known_format_message(str(tmp_path / "line.xxx"), "示例格式", "补充说明")
+    assert "已被识别为常见 GPR 数据格式" in message
+    assert "补充说明" in message

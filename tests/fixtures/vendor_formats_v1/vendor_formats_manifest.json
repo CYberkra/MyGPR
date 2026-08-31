@@ -137,6 +137,83 @@
         "trace_count": 32,
         "note": "first 32 full trace blocks; reader output must equal vendor_trace_subset_v1.npz:sns_dt1_matrix"
       }
+    },
+    "segy_real": {
+      "file": "segy_f3_traces32.sgy",
+      "sha256": "a0cecd44852a0d7774c00b0a161bcb8f72ae79e07a879f982d93c196586bb77e",
+      "provenance": "equinor/segyio test-data/f3.sgy (real F3 offshore seismic, Apache-2.0), first 32 traces",
+      "matrix": {
+        "shape": [
+          75,
+          32
+        ],
+        "dtype": "float32"
+      },
+      "header": {
+        "sample_format_code": 3,
+        "samples": 75
+      },
+      "external_full_file": {
+        "name": "f3.sgy",
+        "sha256": "6008d05547c6b8f6050cea7ca4683f1be3fac260235cad47eb5e61ee05d2ce23",
+        "size_bytes": 165060
+      }
+    },
+    "envi_bsq_derived": {
+      "files": {
+        "data": "envi_from_dzt.dat",
+        "header": "envi_from_dzt.hdr"
+      },
+      "sha256": {
+        "data": "2509c45285a3924164dc3317bedc2a777151971cc682188a3616963d4a585b14",
+        "header": "9bb346c74cc668f1285ac8569137abd054095edd819d7dd1e78f7f369294ff8f"
+      },
+      "provenance": "ENVI BSQ float32 derived from the frozen GSSI DZT 32-trace subset (real sample data, re-encoded)",
+      "matrix": {
+        "shape": [
+          512,
+          32
+        ],
+        "dtype": "float32",
+        "note": "reader returns samples x traces"
+      }
+    },
+    "mala_rd3_derived": {
+      "files": {
+        "data": "mala_from_dzt.rd3",
+        "header": "mala_from_dzt.rad"
+      },
+      "sha256": {
+        "data": "cfc2f22a27645b5a870c9f827438a0062a71dce598cc0892e799de5536e42a62",
+        "header": "a30ed453afb2fba566127574bcc66f5ddacfd16eacc73db6d6f72585e6d6e05c"
+      },
+      "provenance": "MALÅ rd3 int16 derived from the frozen GSSI DZT 32-trace subset; .rad fields sampled from the DZT header",
+      "matrix": {
+        "shape": [
+          512,
+          32
+        ],
+        "dtype": "int16"
+      },
+      "rad_fields": {
+        "SAMPLES": 512,
+        "TIME WINDOW": 48.0,
+        "DISTANCE INTERVAL": 0.02
+      }
+    },
+    "oko_gpr2_synthetic": {
+      "file": "oko_synthetic.GPR2",
+      "sha256": "7b6262ed8b2b560006bed922dbc53e5d6e74e42c9d5fbe78b84aaff15449e360",
+      "provenance": "synthetic OKO-2 GPR2 built per RGPR readGPR2 layout (magic 0xFEDCBA98, 444B header, 512B offset arrays, 36B trace heads); header: Tall=120ns Ddxmm=25mm antenna 'АБ-400'",
+      "matrix": {
+        "shape": [
+          300,
+          24
+        ],
+        "dtype": "float32",
+        "npz_key": "oko_gpr2_matrix"
+      },
+      "note": "synthetic acceptance asset; no public OKO sample channel exists (see P0-3 plan)"
     }
   }
 }

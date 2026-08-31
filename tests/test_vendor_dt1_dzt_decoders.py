@@ -25,7 +25,11 @@ from core.gpr_format_registry import get_format_spec
 from core.gpr_io import auto_load_data
 from core.gpr_vendor_readers import (
     GPRFormatReadError,
+    read_geotech_oko_gpr2,
     read_gssi_dzt,
+    read_mala_rd,
+    read_envi_bsq,
+    read_segy_fixed,
     read_sensors_software_dt1,
 )
 
@@ -156,11 +160,72 @@ def test_dzt_rejects_truncated_file(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 4) 外部全文件回归（CI 无资产时跳过）
+# 4) RD3 / ENVI / SEG-Y 样例（真实数据派生，仓库内）
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("format_key", ["gssi_dzt", "sensors_software_dt1"])
+def test_mala_rd3_derived_sample_roundtrip() -> None:
+    spec = MANIFEST["formats"]["mala_rd3_derived"]
+    result = read_mala_rd(FIXTURES / spec["files"]["data"])
+    expected = _subset("gssi_dzt_matrix")
+    assert result["data"].shape == tuple(spec["matrix"]["shape"])
+    assert np.array_equal(result["data"], expected.astype(np.float32))
+    assert result["header_info"]["total_time_ns"] == pytest.approx(48.0)
+
+
+def test_envi_derived_sample_roundtrip() -> None:
+    spec = MANIFEST["formats"]["envi_bsq_derived"]
+    result = read_envi_bsq(FIXTURES / spec["files"]["data"])
+    expected = _subset("gssi_dzt_matrix")  # reader returns samples x traces
+    assert result["data"].shape == tuple(spec["matrix"]["shape"])
+    assert np.array_equal(result["data"], expected)
+
+
+def test_segy_clip_decodes_real_f3_subset() -> None:
+    spec = MANIFEST["formats"]["segy_real"]
+    result = read_segy_fixed(FIXTURES / spec["file"])
+    assert result["data"].shape == tuple(spec["matrix"]["shape"])
+    assert result["header_info"]["sample_format_code"] == spec["header"]["sample_format_code"]
+    assert np.isfinite(result["data"]).all()
+
+
+# ---------------------------------------------------------------------------
+# 5) OKO GPR2（合成样例，RGPR readGPR2 布局）
+# ---------------------------------------------------------------------------
+
+
+def test_oko_synthetic_roundtrip_and_header_fields() -> None:
+    spec = MANIFEST["formats"]["oko_gpr2_synthetic"]
+    result = read_geotech_oko_gpr2(FIXTURES / spec["file"])
+    expected = _subset("oko_gpr2_matrix")
+    assert result["format"].value == "geotech_oko_gpr2"
+    assert result["data"].shape == tuple(spec["matrix"]["shape"])
+    assert np.array_equal(result["data"], expected)
+    info = result["header_info"]
+    assert info["total_time_ns"] == pytest.approx(120.0)
+    assert info["trace_interval_m"] == pytest.approx(0.025)
+    assert info["antenna_name"] == "АБ-400"
+    assert info["trace_positions"][-1] == pytest.approx(23 * 25)
+
+
+def test_oko_rejects_bad_magic(tmp_path: Path) -> None:
+    file = tmp_path / "line.GPR2"
+    file.write_bytes(b"\x00" * 512)
+    with pytest.raises(GPRFormatReadError, match="魔数"):
+        read_geotech_oko_gpr2(file)
+
+
+def test_registry_marks_oko_as_native_subset() -> None:
+    assert get_format_spec("line.gpr2").support == "native-subset"
+    assert get_format_spec("line.gpr").support == "native-subset"
+
+
+# ---------------------------------------------------------------------------
+# 6) 外部全文件回归（CI 无资产时跳过）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("format_key", ["gssi_dzt", "sensors_software_dt1", "segy_real"])
 def test_full_vendor_files_match_frozen_hashes(format_key: str) -> None:
     root = os.environ.get("MYGPR_VENDOR_SAMPLE_DATA")
     if not root:
@@ -168,8 +233,13 @@ def test_full_vendor_files_match_frozen_hashes(format_key: str) -> None:
     spec = MANIFEST["formats"][format_key]
     if format_key == "gssi_dzt":
         path = Path(root) / "gssi_dzt" / spec["file"]
-    else:
+    elif format_key == "sensors_software_dt1":
         path = Path(root) / "sns_dt1" / spec["files"]["data"]
+    else:
+        path = Path(root) / "segy" / spec["external_full_file"]["name"]
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        assert digest == spec["external_full_file"]["sha256"]
+        return
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     expected = spec["sha256"]
     if isinstance(expected, dict):  # DT1 按 data/header/gps 分键
