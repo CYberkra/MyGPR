@@ -34,6 +34,7 @@
 1. **候选 2：双执行器底层收敛**：实施计划见 `_handoff_20260830/任务F候选2_双执行器收敛实施计划.md`。**全部阶段（0–3）已完成（2026-08-31）**：`tests/test_native_convergence_baseline.py` + `fixtures/processing_convergence/descriptor_baseline.json` 钉死 36 方法数值/描述符基线；`metadata_bridge.py` 统一 display 元数据来源；`legacy_adapter.py` 与 Composite 两类已删除，生产装配直连 `NativeProcessingCatalog`/`NativeProcessingExecutor`（commits `52518b6`/`0f569fd`/`81122e8`/`7c26667`）；阶段 3 收尾（CI 五链路全绿、GUI 冒烟、文档同步）亦已完成。后续演进见 P1-1（处理栈收敛，2026-08-31 完成）。
 2. **候选 3：关闭**（facade 重构后仅 259 行，原"体量膨胀"不成立，不再拆分）。
 3. **RFC issue #6** 已归档任务 F 决策记录。
+4. **候选 4：UI 视觉一致性打磨**：计划与审计见 `_handoff_20260830/任务F候选4_UI视觉一致性打磨计划.md`。**已完成（2026-08-31，commit `ff375ef`）**：语义色单轨（日志 Bootstrap 四色 → 语义色同色相深底增亮变体，双轨残留归零）；六页私有分隔线工厂收敛为 `ui/widgets/separators.py`（主题自适应）；图表色板归一 `CHART_TRACK_COLORS`/`CHART_OVERLAY_COLOR`（matplotlib 默认蓝出清）。758 passed + 完整 gate 绿 + 冒烟 9 截图，行为零变化。
 
 ## 已知偶发 flake（待治理）
 
