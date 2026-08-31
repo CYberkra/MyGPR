@@ -28,14 +28,16 @@ import pytest
 
 from mygpr.domain.processing.models import ProcessingRequest
 from mygpr.infrastructure.processing.algorithms.methods import NATIVE_ALGORITHMS
-from mygpr.infrastructure.processing.legacy_adapter import (
-    LegacyProcessingCatalog,
-    LegacyProcessingExecutor,
-)
 from mygpr.infrastructure.processing.native_adapter import (
-    CompositeProcessingCatalog,
     NativeProcessingCatalog,
     NativeProcessingExecutor,
+)
+
+from core.processing_engine import (
+    clone_header_info,
+    clone_trace_metadata,
+    prepare_runtime_params,
+    run_processing_method,
 )
 
 FIXTURE_PATH = (
@@ -47,8 +49,25 @@ def _json_normalize(value: object) -> object:
     """把 tuple 等 JSON 可序列化但类型不稳的值归一到 fixture 的 JSON 形态。"""
     return json.loads(json.dumps(value, ensure_ascii=False))
 
+
+def _legacy_kernel(request: ProcessingRequest) -> np.ndarray:
+    """复刻旧 LegacyProcessingExecutor 的执行路径（core kernel 直调，等价证据用）。
+
+    自任务 F 候选 2 拆除 legacy 适配器后，历史对照统一走
+    ``core.processing_engine`` 原始 kernel。
+    """
+    prepared = prepare_runtime_params(
+        request.method_id,
+        request.params,
+        clone_header_info(request.header_info),
+        clone_trace_metadata(request.trace_metadata),
+        request.data.shape,
+    )
+    output, _ = run_processing_method(request.data, request.method_id, prepared)
+    return np.asarray(output)
+
 # 数值等价证据矩阵：method_id -> (证据类型, 所在测试文件)
-# direct_comparison = 测试内同时跑 native 与 legacy 执行器并 assert_allclose
+# direct_comparison = 测试内同时跑 native 执行器与 core kernel（旧 Legacy 执行器路径）并 assert_allclose
 # golden_digest      = native 输出被 SHA-256 摘要钉死（摘要于迁移验证时捕获）
 # bitwise_kernel     = 与历史 CPU kernel 逐位一致
 # determinism_contract = 实验性方法，仅要求确定性/预算契约（无 legacy 对照）
@@ -140,7 +159,7 @@ def test_equivalence_evidence_covers_all_native_methods() -> None:
         ),
     ],
 )
-def test_wavelet_native_matches_legacy_executor(method_id: str, params: dict) -> None:
+def test_wavelet_native_matches_legacy_kernel(method_id: str, params: dict) -> None:
     """阶段 0 缺口补齐：wavelet 两方法此前只有 kernel 契约测试，无执行器级对比。
 
     两条路径最终调同一实现（PythonModule 已是兼容门面），预期逐位一致。
@@ -152,8 +171,8 @@ def test_wavelet_native_matches_legacy_executor(method_id: str, params: dict) ->
         header_info={"total_time_ns": 128.0},
     )
     native = NativeProcessingExecutor().execute(request)
-    legacy = LegacyProcessingExecutor().execute(request)
-    np.testing.assert_allclose(native.data, legacy.data, rtol=0.0, atol=0.0)
+    legacy = _legacy_kernel(request)
+    np.testing.assert_allclose(native.data, legacy, rtol=0.0, atol=0.0)
 
 
 @pytest.mark.parametrize("method_id", sorted(NATIVE_ALGORITHMS))
@@ -179,27 +198,16 @@ def test_descriptor_baseline_matches_native_catalog(method_id: str) -> None:
     assert _json_normalize(actual) == expected
 
 
-def test_native_catalog_matches_former_composite_behavior() -> None:
-    """阶段 2 拆除 Composite/Legacy 目录前的等价护栏：行为必须完全一致。
-
-    包括目录遍历顺序、public_only 过滤与 autotune 依赖的 raw_metadata/auto_tune_stage。
-    """
-    native_catalog = NativeProcessingCatalog()
-    composite = CompositeProcessingCatalog(NativeProcessingCatalog(), LegacyProcessingCatalog())
-    assert [d.method_id for d in native_catalog.list()] == [
-        d.method_id for d in composite.list()
-    ]
-    assert [d.method_id for d in native_catalog.list(public_only=True)] == [
-        d.method_id for d in composite.list(public_only=True)
-    ]
-    for method_id in NATIVE_ALGORITHMS:
-        assert native_catalog.get(method_id) == composite.get(method_id)
-        assert native_catalog.auto_tune_stage(method_id) == composite.auto_tune_stage(method_id)
-        native_raw = native_catalog.raw_metadata(method_id)
-        composite_raw = composite.raw_metadata(method_id)
-        assert native_raw["auto_tune_family"] == composite_raw.get("auto_tune_family", "")
-        assert native_raw["auto_tune_stage"] == composite_raw.get("auto_tune_stage", "")
-        assert native_raw["visibility"] == composite_raw.get("visibility", "public")
+def test_native_catalog_list_order_and_public_filter() -> None:
+    """目录遍历顺序与 public_only 过滤契约（收敛后自足断言，不再依赖已删的 Composite）。"""
+    catalog = NativeProcessingCatalog()
+    ids = [d.method_id for d in catalog.list()]
+    assert ids == list(NATIVE_ALGORITHMS)
+    public_ids = [d.method_id for d in catalog.list(public_only=True)]
+    assert len(public_ids) < len(ids)
+    assert all(catalog.get(mid).visibility == "public" for mid in public_ids)  # type: ignore[union-attr]
+    hidden = [mid for mid in ids if catalog.get(mid).visibility == "hidden"]  # type: ignore[union-attr]
+    assert hidden and all(mid not in public_ids for mid in hidden)
 
 
 def test_descriptor_baseline_fixture_is_complete() -> None:

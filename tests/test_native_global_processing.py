@@ -9,8 +9,27 @@ import pytest
 from mygpr.application.processing.service import ProcessingService
 from mygpr.domain.processing.models import PipelineDefinition, PipelineStep, ProcessingRequest
 from mygpr.infrastructure.processing.block_executor import FileBackedBlockPipelineExecutor
-from mygpr.infrastructure.processing.legacy_adapter import LegacyProcessingExecutor
 from mygpr.infrastructure.processing.native_adapter import NativeProcessingCatalog, NativeProcessingExecutor
+
+from core.processing_engine import (
+    clone_header_info,
+    clone_trace_metadata,
+    prepare_runtime_params,
+    run_processing_method,
+)
+
+
+def _legacy_kernel(request: ProcessingRequest) -> np.ndarray:
+    """复刻旧 LegacyProcessingExecutor 的执行路径（core kernel 直调，等价证据用）。"""
+    prepared = prepare_runtime_params(
+        request.method_id,
+        request.params,
+        clone_header_info(request.header_info),
+        clone_trace_metadata(request.trace_metadata),
+        request.data.shape,
+    )
+    output, _ = run_processing_method(request.data, request.method_id, prepared)
+    return np.asarray(output)
 
 
 def _matrix(rows: int = 96, cols: int = 72) -> np.ndarray:
@@ -40,8 +59,8 @@ def test_native_global_methods_match_historical_kernels(
 ) -> None:
     request = ProcessingRequest(data=_matrix(), method_id=method_id, params=params)
     native = NativeProcessingExecutor().execute(request)
-    legacy = LegacyProcessingExecutor().execute(request)
-    np.testing.assert_allclose(native.data, legacy.data, rtol=0.0, atol=atol)
+    legacy = _legacy_kernel(request)
+    np.testing.assert_allclose(native.data, legacy, rtol=0.0, atol=atol)
     assert native.metadata["implementation_version"] == "native-global-1.0"
 
 

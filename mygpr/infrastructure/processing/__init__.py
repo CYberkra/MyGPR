@@ -10,10 +10,6 @@ from typing import Any
 
 _EXPORTS = {
     "FileBackedBlockPipelineExecutor": ("mygpr.infrastructure.processing.block_executor", "FileBackedBlockPipelineExecutor"),
-    "LegacyProcessingCatalog": ("mygpr.infrastructure.processing.legacy_adapter", "LegacyProcessingCatalog"),
-    "LegacyProcessingExecutor": ("mygpr.infrastructure.processing.legacy_adapter", "LegacyProcessingExecutor"),
-    "CompositeProcessingCatalog": ("mygpr.infrastructure.processing.native_adapter", "CompositeProcessingCatalog"),
-    "CompositeProcessingExecutor": ("mygpr.infrastructure.processing.native_adapter", "CompositeProcessingExecutor"),
     "NativeProcessingCatalog": ("mygpr.infrastructure.processing.native_adapter", "NativeProcessingCatalog"),
     "NativeProcessingExecutor": ("mygpr.infrastructure.processing.native_adapter", "NativeProcessingExecutor"),
 }

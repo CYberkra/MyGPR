@@ -11,11 +11,30 @@ from mygpr.application.jobs.context import ExecutionContext
 from mygpr.application.processing.service import ProcessingService
 from mygpr.domain.processing.models import PipelineDefinition, PipelineStep, ProcessingRequest
 from mygpr.infrastructure.processing.block_executor import FileBackedBlockPipelineExecutor
-from mygpr.infrastructure.processing.legacy_adapter import LegacyProcessingExecutor
 from mygpr.infrastructure.processing.native_adapter import (
     NativeProcessingCatalog,
     NativeProcessingExecutor,
 )
+
+from core.processing_engine import (
+    clone_header_info,
+    clone_trace_metadata,
+    prepare_runtime_params,
+    run_processing_method,
+)
+
+
+def _legacy_kernel(request: ProcessingRequest) -> np.ndarray:
+    """复刻旧 LegacyProcessingExecutor 的执行路径（core kernel 直调，等价证据用）。"""
+    prepared = prepare_runtime_params(
+        request.method_id,
+        request.params,
+        clone_header_info(request.header_info),
+        clone_trace_metadata(request.trace_metadata),
+        request.data.shape,
+    )
+    output, _ = run_processing_method(request.data, request.method_id, prepared)
+    return np.asarray(output)
 
 
 def _data(rows: int = 128, cols: int = 97) -> np.ndarray:
@@ -49,7 +68,7 @@ def test_native_algorithms_match_verified_legacy_results(method_id: str, params:
         header_info={"total_time_ns": 480.0},
     )
     native = NativeProcessingExecutor().execute(request).data
-    legacy = LegacyProcessingExecutor().execute(request).data
+    legacy = _legacy_kernel(request)
     np.testing.assert_allclose(native, legacy, rtol=0.0, atol=atol)
 
 

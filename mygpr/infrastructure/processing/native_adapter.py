@@ -1,4 +1,9 @@
-"""Native processing catalog/executor with controlled legacy fallback."""
+"""Native processing catalog/executor (converged single implementation).
+
+自任务 F 候选 2 收敛起，native 目录/执行器是唯一实现：
+``NATIVE_ALGORITHMS`` 覆盖全部历史方法（36/36），展示元数据经
+:mod:`metadata_bridge` 取自 core 单一事实来源；旧 Legacy/Composite 适配器已拆除。
+"""
 from __future__ import annotations
 
 from typing import Any, Sequence
@@ -90,54 +95,6 @@ class NativeProcessingCatalog(ProcessingCatalogPort):
         }
 
 
-class CompositeProcessingCatalog(ProcessingCatalogPort):
-    """Expose native descriptors first and retain legacy-only methods."""
-
-    def __init__(self, native: ProcessingCatalogPort, fallback: ProcessingCatalogPort) -> None:
-        self._native = native
-        self._fallback = fallback
-
-    def get(self, method_id: str) -> ProcessingMethodDescriptor | None:
-        native = self._native.get(method_id)
-        fallback = self._fallback.get(method_id)
-        if native is None:
-            return fallback
-        if fallback is None:
-            return native
-        return ProcessingMethodDescriptor(
-            method_id=fallback.method_id,
-            name=fallback.name,
-            category=fallback.category,
-            auto_tune_enabled=fallback.auto_tune_enabled,
-            auto_tune_family=fallback.auto_tune_family,
-            auto_tune_stage=fallback.auto_tune_stage,
-            visibility=fallback.visibility,
-            parameter_schema={**dict(fallback.parameter_schema), **dict(native.parameter_schema)},
-            capabilities=frozenset(set(fallback.capabilities) | set(native.capabilities)),
-            implementation_version=native.implementation_version,
-        )
-
-    def list(self, *, public_only: bool = False) -> Sequence[ProcessingMethodDescriptor]:
-        native = {item.method_id: item for item in self._native.list(public_only=public_only)}
-        ordered: list[ProcessingMethodDescriptor] = []
-        seen: set[str] = set()
-        for item in self._fallback.list(public_only=public_only):
-            ordered.append(self.get(item.method_id) or item)
-            seen.add(item.method_id)
-        ordered.extend(item for method_id, item in native.items() if method_id not in seen)
-        return tuple(ordered)
-
-    def auto_tune_stage(self, method_id: str) -> str:
-        return self._native.auto_tune_stage(method_id) or self._fallback.auto_tune_stage(method_id)
-
-    def raw_metadata(self, method_id: str) -> dict[str, Any]:
-        native = self._native.raw_metadata(method_id)
-        if not native:
-            return self._fallback.raw_metadata(method_id)
-        legacy = self._fallback.raw_metadata(method_id)
-        return {**legacy, **native}
-
-
 class NativeProcessingExecutor(ProcessingExecutorPort):
     """Execute migrated methods without importing ``core.processing_engine``."""
 
@@ -214,24 +171,6 @@ class NativeProcessingExecutor(ProcessingExecutorPort):
         )
 
 
-class CompositeProcessingExecutor(ProcessingExecutorPort):
-    """Route migrated methods to native code and everything else to fallback."""
-
-    def __init__(self, native: NativeProcessingExecutor, fallback: ProcessingExecutorPort) -> None:
-        self._native = native
-        self._fallback = fallback
-
-    def execute(self, request: ProcessingRequest, context: ExecutionContext | None = None) -> ProcessingResult:
-        if self._native.supports(request.method_id):
-            return self._native.execute(request, context)
-        return self._fallback.execute(request, context)
-
-    def estimate(self, request: ProcessingRequest) -> ResourceEstimate:
-        if self._native.supports(request.method_id):
-            return self._native.estimate(request)
-        return self._fallback.estimate(request)
-
-
 def prepare_native_params(request: ProcessingRequest) -> dict[str, Any]:
     params = dict(request.params or {})
     params.setdefault("_header_info", clone_mapping(request.header_info))
@@ -259,8 +198,6 @@ def clone_trace_metadata(value: dict[str, np.ndarray] | None) -> dict[str, np.nd
 
 
 __all__ = [
-    "CompositeProcessingCatalog",
-    "CompositeProcessingExecutor",
     "NativeProcessingCatalog",
     "NativeProcessingExecutor",
 ]
