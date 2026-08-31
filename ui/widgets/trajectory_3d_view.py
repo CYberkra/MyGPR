@@ -23,6 +23,7 @@ gist_earth 陆地段色表。显示模式（均不动原始数据）：
 瓦片解码 / 采样数学均为 ui.widgets.terrain_tiles 中的纯函数。
 """
 from __future__ import annotations
+from ui import constants
 
 import logging
 import io
@@ -400,7 +401,7 @@ class Trajectory3DView(QWidget):
         # 全体点减均值 → 局部原点，z 同样归一化避免相机被大高程数值拉远
         origin = np.mean(np.concatenate([xyz for _lid, xyz, _g in arrays]), axis=0)
         self._origin = origin
-        self._track_data = [(line_id, colors.get(line_id, '#1f77b4'), xyz)
+        self._track_data = [(line_id, colors.get(line_id, constants.CHART_TRACK_DEFAULT), xyz)
                             for line_id, xyz, _g in arrays]
         # 测线估算地面散点（显示坐标系，与地形网格同坐标 → 可直接 IDW）
         gcat = np.concatenate([g for _lid, _xyz, g in arrays])

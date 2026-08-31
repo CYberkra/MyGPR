@@ -14,6 +14,7 @@ from PyQt6.QtGui import QTextCursor
 from PyQt6.QtWidgets import (QFileDialog, QHBoxLayout, QStackedWidget,
                              QTextEdit, QVBoxLayout)
 from qfluentwidgets import CardWidget, PushButton, SegmentedWidget
+from ui import constants
 
 from .job_widgets import MiniJobList
 
@@ -48,12 +49,12 @@ _LOG_QSS_LIGHT = """QTextEdit {
     font-size: 11px;
 }"""
 
-# 级别关键词 → 颜色（SPEC §1，逐字规则）
+# 级别关键词 → 颜色（SPEC §1 关键词规则 + constants 语义色单轨，任务 F 候选 4）
 _LEVEL_RULES = (
-    (('ERROR', '失败', '错误'), '#dc3545'),
-    (('WARNING', '警告'), '#ffc107'),
-    (('SUCCESS', '成功', '完成'), '#28a745'),
-    (('INFO',), '#17a2b8'),
+    (('ERROR', '失败', '错误'), constants.LOG_COLOR_ERROR),
+    (('WARNING', '警告'), constants.LOG_COLOR_WARNING),
+    (('SUCCESS', '成功', '完成'), constants.LOG_COLOR_SUCCESS),
+    (('INFO',), constants.LOG_COLOR_INFO),
 )
 
 

@@ -29,6 +29,7 @@ from PyQt6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QVBoxLayo
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import ToolButton
 
+from ui import constants
 from ui.desktop_backend_facade import tile_cache_dir
 from ui.widgets.context_menus import add_action, make_menu
 from ui.widgets.map_tiles import (DEFAULT_TILE_SOURCE, TILE_SOURCE_MAX_ZOOM,
@@ -524,7 +525,7 @@ class MapView(pg.GraphicsLayoutWidget):
             if np.count_nonzero(finite) < 1:
                 continue
             xs, ys = xs[finite], ys[finite]
-            color = QColor(colors.get(info['line_id'], '#1f77b4'))
+            color = QColor(colors.get(info['line_id'], constants.CHART_TRACK_DEFAULT))
             pen = pg.mkPen(color, width=2)
             line_item = self._plot.plot(xs, ys, pen=pen)
             endpoint_item = pg.ScatterPlotItem(
@@ -576,7 +577,7 @@ class MapView(pg.GraphicsLayoutWidget):
             label = info.get('name') or info.get('line_id')
             if not label:
                 continue
-            color = self._track_colors.get(info.get('line_id'), '#1f77b4')
+            color = self._track_colors.get(info.get('line_id'), constants.CHART_TRACK_DEFAULT)
             entries.append((label, color))
         if not entries:
             self._legend.hide()

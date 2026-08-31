@@ -125,7 +125,7 @@ class BScanView(QWidget):
 
         # overlay 标注散点（解释页）
         self._scatter = pg.ScatterPlotItem(size=8, pen=None,
-                                           brush=pg.mkBrush('#fbbf24'))
+                                           brush=pg.mkBrush(constants.CHART_OVERLAY_COLOR))
         self._plot.addItem(self._scatter)
 
         self._cmap = None
@@ -419,7 +419,7 @@ class BScanView(QWidget):
         super().resizeEvent(event)
         self._position_readout()
 
-    def set_overlay_points(self, points, color: str = '#fbbf24') -> None:
+    def set_overlay_points(self, points, color: str = constants.CHART_OVERLAY_COLOR) -> None:
         """解释页标注散点：points 为 [(trace, sample), ...]（原始数据坐标系）。
 
         预览矩阵可能经 strided 降采样（>900×1800），此处把原始坐标
