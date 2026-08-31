@@ -50,3 +50,6 @@ windows_fit_check_*/
 .coverage
 coverage.json
 htmlcov/
+
+# Debug scratch dirs from ad-hoc scripts (never commit)
+tmp*/
