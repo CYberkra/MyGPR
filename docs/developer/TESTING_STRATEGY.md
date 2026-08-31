@@ -1,6 +1,6 @@
 # MyGPR 测试与质量门禁
 
-适用版本：MyGPR v0.9.37 及后续版本。
+适用版本：MyGPR v0.9.38 及后续版本。
 
 > 历史说明：v0.9.28 时代文档描述过基于 `config/test_impact.toml` 的六级风险门禁
 > （`run_quality_gate.py affected/merge/nightly/release`）。该体系及其脚本

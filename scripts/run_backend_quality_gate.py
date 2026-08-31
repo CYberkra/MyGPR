@@ -12,6 +12,7 @@ COMMANDS = [
     [sys.executable, "scripts/check_python_compile.py"],
     [sys.executable, "scripts/check_architecture.py"],
     [sys.executable, "scripts/check_schema_catalog.py"],
+    [sys.executable, "scripts/check_backend_api_contract.py"],
     [sys.executable, "-m", "ruff", "check", "."],
     [sys.executable, "scripts/check_mypy_budget.py"],
     [sys.executable, "scripts/check_debt_budget.py"],

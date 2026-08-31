@@ -20,8 +20,9 @@ from PyQt6.QtWidgets import (
     QListWidgetItem, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
-    CaptionLabel, CardWidget, InfoBar, InfoBarPosition, LineEdit,
-    MessageBox, PrimaryPushButton, PushButton, ScrollArea, SubtitleLabel,
+    CaptionLabel, CardWidget, CheckBox, InfoBar, InfoBarPosition, LineEdit,
+    MessageBox, PrimaryPushButton, PushButton, ScrollArea, SpinBox,
+    SubtitleLabel,
 )
 
 from ui import constants
@@ -73,7 +74,7 @@ class DeliveryPage(QWidget):
 
     spatial_requested = pyqtSignal(dict)   # {'name': str, 'line_ids': list[str]}
     report_requested = pyqtSignal(dict)    # {'package_name': str}
-    backup_requested = pyqtSignal(str)     # 备份目标目录
+    backup_requested = pyqtSignal(dict)    # {'destination_dir': str, 'incremental': bool, 'retention_keep': int|None}
     restore_requested = pyqtSignal(str)    # 备份归档路径
 
     def __init__(self, parent=None):
@@ -188,6 +189,19 @@ class DeliveryPage(QWidget):
         backup_row.addWidget(self._restore_btn)
         backup_row.addStretch(1)
         backup_layout.addLayout(backup_row)
+        options_row = QHBoxLayout()
+        options_row.setSpacing(constants.CARD_SPACING)
+        self._incremental_check = CheckBox('增量备份（仅打包相对上次备份的变化）', backup_card)
+        self._incremental_check.setChecked(True)
+        options_row.addWidget(self._incremental_check)
+        options_row.addWidget(CaptionLabel('保留最近'))
+        self._retention_spin = SpinBox(backup_card)
+        self._retention_spin.setRange(1, 100)
+        self._retention_spin.setValue(10)
+        options_row.addWidget(self._retention_spin)
+        options_row.addWidget(CaptionLabel('个备份'))
+        options_row.addStretch(1)
+        backup_layout.addLayout(options_row)
         root.addWidget(backup_card)
         root.addStretch(1)
 
@@ -328,7 +342,11 @@ class DeliveryPage(QWidget):
         dest = QFileDialog.getExistingDirectory(
             self, '选择备份目录', constants.DEFAULT_PROJECT_ROOT)
         if dest:
-            self.backup_requested.emit(dest)
+            self.backup_requested.emit({
+                'destination_dir': dest,
+                'incremental': self._incremental_check.isChecked(),
+                'retention_keep': int(self._retention_spin.value()),
+            })
 
     def _on_restore_clicked(self) -> None:
         if self._busy:

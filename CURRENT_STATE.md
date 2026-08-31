@@ -1,6 +1,6 @@
 # Current State — Desktop Qt GUI + headless backend
 
-Version: 0.9.37
+Version: 0.9.38
 
 This package now ships both the Qt6 desktop frontend and the headless backend.
 

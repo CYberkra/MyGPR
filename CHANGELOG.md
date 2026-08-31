@@ -1,3 +1,32 @@
+## 0.9.38 Vendor Formats, Headless Delivery & Data Safety（2026-08-31）
+
+- Vendor formats now decode natively: Sensors & Software DT1/HD, GSSI DZT and
+  Geotech OKO GPR2 promoted from recognized-only to native-subset readers;
+  acceptance assets (sha256-pinned real samples from GPRPy/segyio, derived
+  RD3/ENVI clips and a synthetic OKO profile) frozen under
+  `tests/fixtures/vendor_formats_v1/`.
+- Headless delivery API: `MyGPRBackend.build_georeference_3d` (job system),
+  the public-method contract expanded to all 18 backend methods with an
+  anti-drift test, and a headless end-to-end acceptance test (import →
+  sensor sync → interface annotation → 3D job → spatial result → report
+  package) that never touches Qt.
+- Data safety: incremental backup chains (changed-files-only packs with
+  automatic base-merge restore and missing-base rejection) plus
+  `retention_keep` pruning, wired through ports/service/`submit_project_backup`.
+- AutoTune: direct coverage for the constraint/candidate layers (clamping,
+  failed-trial contract, deterministic generation) and an auditable
+  evidence export (`mygpr.autotune_evidence.v1`) with body SHA-256.
+- Processing-stack convergence: CLI batch, evidence export and the field
+  bridge now execute through the native executor; `core/processing_engine`
+  is a test-only comparison baseline.
+- Fixed latent bugs: recursion in the interpretation audit hook (catalog
+  audit log was never written), invalid `check_cancelled` call in
+  `submit_spatial_result`, case-sensitive DT1 sidecar lookup on Linux.
+- Storage reliability: ENOSPC injection tests pinning import/artifact
+  rollback contracts; Yingshan six-line golden regression validated against
+  full real-world data.
+- User guide added at `docs/user/用户指南.md`.
+
 ## 0.9.37 Qt UI Overhaul & Windows Theme Fixes（2026-07-31）
 
 - Fixed light/dark theme rendering on Win11 dark-mode systems: disabled Mica

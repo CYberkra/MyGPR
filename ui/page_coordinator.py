@@ -728,13 +728,20 @@ class PageCoordinator:
         if hasattr(delivery, 'set_report_result'):
             delivery.set_report_result(result)
 
-    def _on_backup_requested(self, dest_dir: str) -> None:
+    def _on_backup_requested(self, options: dict) -> None:
         if self.delivery_controller is None or not self._require_project():
             return
+        dest = str(options.get('destination_dir', ''))
+        if not dest:
+            return
         job_id = self.delivery_controller.backup_project(
-            self._current_project_id(), str(dest_dir))
+            self._current_project_id(), dest,
+            incremental=bool(options.get('incremental', False)),
+            retention_keep=options.get('retention_keep'),
+        )
         if job_id:
-            self._infobar('info', '项目备份', f'备份任务已提交 → {dest_dir}')
+            mode = '增量' if options.get('incremental') else '全量'
+            self._infobar('info', '项目备份', f'{mode}备份任务已提交 → {dest}')
 
     def _on_restore_requested(self, archive_path: str) -> None:
         if not self._backend_ready:

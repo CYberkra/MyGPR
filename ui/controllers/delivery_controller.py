@@ -99,12 +99,21 @@ class DeliveryController(QObject):
             on_done=_on_done,
         )
 
-    def backup_project(self, project_id: str, dest_dir: str) -> str | None:
+    def backup_project(
+        self,
+        project_id: str,
+        dest_dir: str,
+        *,
+        incremental: bool = False,
+        retention_keep: int | None = None,
+    ) -> str | None:
         return self._submit_and_watch(
             "项目备份",
             lambda backend: backend.submit_project_backup(
                 str(project_id),
                 destination_dir=str(dest_dir),
+                incremental=bool(incremental),
+                retention_keep=retention_keep,
             ),
         )
 

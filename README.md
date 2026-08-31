@@ -1,4 +1,4 @@
-# MyGPR 0.9.37
+# MyGPR 0.9.38
 
 (UAV-)GPR 探地雷达数据处理、解释与 GIS 服务的桌面应用 + 无头后端。
 PyQt6 + PyQt6-Fluent-Widgets 桌面前端，配分层后端（`mygpr/` 清洁架构 + `core/` 遗留内核）。
