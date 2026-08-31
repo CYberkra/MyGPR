@@ -27,23 +27,18 @@ from mygpr.domain.autotune.models import (
     TrialScore,
 )
 from mygpr.infrastructure.processing.autotune_adapter import DomainAutoTuneConstraintPolicy
-from mygpr.infrastructure.processing.legacy_adapter import (
-    LegacyProcessingCatalog,
-    LegacyProcessingExecutor,
-)
+from mygpr.infrastructure.processing.legacy_adapter import LegacyProcessingExecutor
 from mygpr.infrastructure.processing.native_adapter import (
-    CompositeProcessingCatalog,
     CompositeProcessingExecutor,
     NativeProcessingCatalog,
     NativeProcessingExecutor,
 )
 
-_LEGACY_CATALOG = LegacyProcessingCatalog()
+_CATALOG = NativeProcessingCatalog()
 _LEGACY_EXECUTOR = LegacyProcessingExecutor()
-_NATIVE_CATALOG = NativeProcessingCatalog()
 _NATIVE_EXECUTOR = NativeProcessingExecutor()
 _DEFAULT_DEPENDENCIES = AutoTuneDependencies(
-    catalog=CompositeProcessingCatalog(_NATIVE_CATALOG, _LEGACY_CATALOG),
+    catalog=_CATALOG,
     executor=CompositeProcessingExecutor(_NATIVE_EXECUTOR, _LEGACY_EXECUTOR),
     constraints=DomainAutoTuneConstraintPolicy(),
 )

@@ -88,6 +88,13 @@ allowed_local_import_prefixes = ["core"]
 owner = "processing-backend"
 remove_after = "1.0.0"
 reason = "Infrastructure adapter wraps the verified historical processing registry."
+
+[[migration_exceptions]]
+path_prefix = "mygpr/infrastructure/processing/metadata_bridge.py"
+allowed_local_import_prefixes = ["core.methods_registry", "core.method_registry_metadata"]
+owner = "processing-backend"
+remove_after = "1.0.0"
+reason = "Convergence single-point bridge: native catalog reads display metadata from core single source (task F candidate 2)."
 max_function_lines = 100
 
 [[migration_exceptions]]

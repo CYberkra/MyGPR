@@ -33,14 +33,8 @@ from mygpr.infrastructure.acquisition.legacy_adapter import (
 )
 from mygpr.infrastructure.persistence.field_project_adapter import LegacyFieldProjectRepository
 from mygpr.infrastructure.processing.block_executor import FileBackedBlockPipelineExecutor
-from mygpr.infrastructure.processing.legacy_adapter import (
-    LegacyProcessingCatalog,
-    LegacyProcessingExecutor,
-)
 from mygpr.infrastructure.system.resource_policy import LocalProcessingResourcePolicy
 from mygpr.infrastructure.processing.native_adapter import (
-    CompositeProcessingCatalog,
-    CompositeProcessingExecutor,
     NativeProcessingCatalog,
     NativeProcessingExecutor,
 )
@@ -109,12 +103,8 @@ class MyGPRBackend:
 
     @classmethod
     def create_default(cls, *, max_workers: int = 2) -> "MyGPRBackend":
-        legacy_catalog = LegacyProcessingCatalog()
-        legacy_executor = LegacyProcessingExecutor()
-        native_catalog = NativeProcessingCatalog()
-        native_executor = NativeProcessingExecutor()
-        catalog = CompositeProcessingCatalog(native_catalog, legacy_catalog)
-        executor = CompositeProcessingExecutor(native_executor, legacy_executor)
+        catalog = NativeProcessingCatalog()
+        executor = NativeProcessingExecutor()
         block_executor = FileBackedBlockPipelineExecutor()
         resource_policy = LocalProcessingResourcePolicy()
         dependencies = AutoTuneDependencies(

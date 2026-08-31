@@ -14,15 +14,23 @@ from mygpr.domain.processing.models import (
     ResourceEstimate,
 )
 from mygpr.infrastructure.processing.algorithms.methods import NATIVE_ALGORITHMS
+from mygpr.infrastructure.processing.metadata_bridge import legacy_overlay
 
 
 class NativeProcessingCatalog(ProcessingCatalogPort):
-    """Catalog for methods already migrated from the historical engine."""
+    """Catalog for methods migrated from the historical engine.
+
+    ``NATIVE_ALGORITHMS`` 覆盖全部历史方法（36/36）。展示元数据（中文
+    display_name、category、visibility、auto_tune_*）经
+    :mod:`metadata_bridge` 取自 core 单一事实来源，与旧 Composite 目录输出等价
+    （由 ``tests/test_native_convergence_baseline.py`` 的 descriptor 基线断言）。
+    """
 
     def get(self, method_id: str) -> ProcessingMethodDescriptor | None:
         algorithm = NATIVE_ALGORITHMS.get(str(method_id))
         if algorithm is None:
             return None
+        overlay = legacy_overlay(str(method_id))
         capabilities = {"ndarray", "native", "cancellable"}
         if algorithm.supports_chunking:
             capabilities.update({"chunked", f"block-axis-{algorithm.block_axis}"})
@@ -32,21 +40,31 @@ class NativeProcessingCatalog(ProcessingCatalogPort):
             capabilities.update({"global_transform", "loaded_global"})
         if algorithm.auto_tune_family:
             capabilities.add("auto_tune")
+        capabilities.update(overlay["legacy_capabilities"])
+        auto_tune_family = overlay["auto_tune_family"] or algorithm.auto_tune_family
+        auto_tune_stage = overlay["auto_tune_stage"] or algorithm.auto_tune_stage or auto_tune_family
         return ProcessingMethodDescriptor(
             method_id=algorithm.method_id,
-            name=algorithm.name,
-            category=algorithm.category,
-            auto_tune_enabled=bool(algorithm.auto_tune_family),
-            auto_tune_family=algorithm.auto_tune_family,
-            auto_tune_stage=algorithm.auto_tune_stage or algorithm.auto_tune_family,
+            name=overlay["name"] or algorithm.name,
+            category=overlay["category"] or algorithm.category,
+            auto_tune_enabled=bool(auto_tune_family),
+            auto_tune_family=auto_tune_family,
+            auto_tune_stage=auto_tune_stage,
+            visibility=overlay["visibility"],
             parameter_schema=dict(algorithm.parameter_schema or {}),
             capabilities=frozenset(capabilities),
             implementation_version=algorithm.implementation_version,
         )
 
     def list(self, *, public_only: bool = False) -> Sequence[ProcessingMethodDescriptor]:
-        del public_only
-        return tuple(self.get(method_id) for method_id in NATIVE_ALGORITHMS if self.get(method_id) is not None)
+        descriptors: list[ProcessingMethodDescriptor] = []
+        for method_id in NATIVE_ALGORITHMS:
+            if public_only and legacy_overlay(str(method_id))["visibility"] != "public":
+                continue
+            descriptor = self.get(method_id)
+            if descriptor is not None:
+                descriptors.append(descriptor)
+        return tuple(descriptors)
 
     def auto_tune_stage(self, method_id: str) -> str:
         descriptor = self.get(method_id)
@@ -54,16 +72,22 @@ class NativeProcessingCatalog(ProcessingCatalogPort):
 
     def raw_metadata(self, method_id: str) -> dict[str, Any]:
         descriptor = self.get(method_id)
+        if descriptor is None:
+            return {}
+        overlay = legacy_overlay(str(method_id))
         return {
             "method_id": descriptor.method_id,
             "name": descriptor.name,
+            "display_name": overlay["name"],
             "category": descriptor.category,
+            "maturity": overlay.get("maturity") or "experimental",
             "auto_tune_enabled": descriptor.auto_tune_enabled,
             "auto_tune_family": descriptor.auto_tune_family,
             "auto_tune_stage": descriptor.auto_tune_stage,
+            "visibility": descriptor.visibility,
             "parameter_schema": dict(descriptor.parameter_schema),
             "implementation_version": descriptor.implementation_version,
-        } if descriptor else {}
+        }
 
 
 class CompositeProcessingCatalog(ProcessingCatalogPort):

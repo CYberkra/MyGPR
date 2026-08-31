@@ -157,11 +157,11 @@ def test_wavelet_native_matches_legacy_executor(method_id: str, params: dict) ->
 
 
 @pytest.mark.parametrize("method_id", sorted(NATIVE_ALGORITHMS))
-def test_descriptor_baseline_matches_composite_output(method_id: str) -> None:
-    """Composite 目录输出必须逐字段复现基线 fixture（阶段 1 的回归断言来源）。"""
+def test_descriptor_baseline_matches_native_catalog(method_id: str) -> None:
+    """合并后的 NativeProcessingCatalog 必须逐字段复现基线 fixture（阶段 1 回归断言）。"""
     baseline = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
     assert method_id in baseline, f"baseline fixture 缺少 {method_id}，需重新生成"
-    catalog = CompositeProcessingCatalog(NativeProcessingCatalog(), LegacyProcessingCatalog())
+    catalog = NativeProcessingCatalog()
     descriptor = catalog.get(method_id)
     assert descriptor is not None
     expected = baseline[method_id]
@@ -177,6 +177,29 @@ def test_descriptor_baseline_matches_composite_output(method_id: str) -> None:
         "implementation_version": descriptor.implementation_version,
     }
     assert _json_normalize(actual) == expected
+
+
+def test_native_catalog_matches_former_composite_behavior() -> None:
+    """阶段 2 拆除 Composite/Legacy 目录前的等价护栏：行为必须完全一致。
+
+    包括目录遍历顺序、public_only 过滤与 autotune 依赖的 raw_metadata/auto_tune_stage。
+    """
+    native_catalog = NativeProcessingCatalog()
+    composite = CompositeProcessingCatalog(NativeProcessingCatalog(), LegacyProcessingCatalog())
+    assert [d.method_id for d in native_catalog.list()] == [
+        d.method_id for d in composite.list()
+    ]
+    assert [d.method_id for d in native_catalog.list(public_only=True)] == [
+        d.method_id for d in composite.list(public_only=True)
+    ]
+    for method_id in NATIVE_ALGORITHMS:
+        assert native_catalog.get(method_id) == composite.get(method_id)
+        assert native_catalog.auto_tune_stage(method_id) == composite.auto_tune_stage(method_id)
+        native_raw = native_catalog.raw_metadata(method_id)
+        composite_raw = composite.raw_metadata(method_id)
+        assert native_raw["auto_tune_family"] == composite_raw.get("auto_tune_family", "")
+        assert native_raw["auto_tune_stage"] == composite_raw.get("auto_tune_stage", "")
+        assert native_raw["visibility"] == composite_raw.get("visibility", "public")
 
 
 def test_descriptor_baseline_fixture_is_complete() -> None:
