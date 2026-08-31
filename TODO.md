@@ -13,7 +13,8 @@
 
 1. ~~继续拆分 `core/` 历史算法与基础设施适配器~~ **核心处理栈收敛已完成（2026-08-31）**：cli_batch/evidence_export/field_processing_bridge 全部切 `NativeProcessingExecutor` 生产路径，`processing_engine` 降级为测试对照基线（4 个手写 kernel 是 atol=0 等价性锚点，1.1.0 退役）；注册表/桥/ bindings 的进一步清理见 `_handoff_20260830/P1-1_core历史处理栈收敛计划.md` 第 5 节。
 2. ~~完成 GIS、三维、制图和报告服务的无界面 API~~ **已完成（2026-08-31）**：`MyGPRBackend.build_georeference_3d`（job 系统）补上三维地理配准入口；契约 `backend_api_v1.json` 扩容至全部 18 个公开方法（含 `submit_spatial_result`/`submit_project_restore` 等），配防漂移测试；无头全链路验收（导入→传感器同步→界面标注→3D job→空间成果→报告包）纯公共 API 跑通。顺带修两个存量 bug：解释审计钩子递归（catalog.append_audit 从未触达）、`submit_spatial_result` 的 `check_cancelled` 笔误。commit `1897d3f`。
-3. 增加项目自动保存、崩溃恢复和增量备份服务。
+3. ~~增加项目自动保存、崩溃恢复和增量备份服务~~ **已完成（2026-08-31）**：崩溃恢复已有事务回滚/前滚 + ENOSPC 注入覆盖（P0-2）；本次补齐 `backup_project_archive` **增量链**（对比基准 manifest 只打包变更文件、恢复时自动沿 `incremental_base_archive` 回溯合并、缺基准即报错）与**保留策略** `retention_keep`（成功后按 project_id 裁剪最旧档案）；参数经 ports/Service/`submit_project_backup` 全链透传，契约签名重冻结。commit `980dbe5`。
+   注：周期性"自动备份调度"属 UI 定时器职责，无头场景用外部调度调 `submit_project_backup(incremental=True, retention_keep=N)` 即可，后端不再内置调度器。
 4. 完善 AutoTune 安全边界、候选流程空间和证据导出。
 
 ## P2
