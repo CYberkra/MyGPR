@@ -16,7 +16,7 @@ import os
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
-    QFileDialog, QFrame, QHBoxLayout, QVBoxLayout, QWidget,
+    QFileDialog, QHBoxLayout, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
     BodyLabel, CaptionLabel, CardWidget, CheckBox, ComboBox, DoubleSpinBox,
@@ -43,15 +43,6 @@ def _read_version() -> str:
 
 
 # ------------------------------------------------------------ 小工厂（卡片范式逐字 SPEC §1）
-def _create_separator() -> QFrame:
-    """分隔线工厂：QFrame.HLine + Sunken + 'color: #e0e0e0;'。"""
-    line = QFrame()
-    line.setFrameShape(QFrame.Shape.HLine)
-    line.setFrameShadow(QFrame.Shadow.Sunken)
-    line.setStyleSheet('color: rgba(128, 128, 128, 90);')
-    return line
-
-
 def _create_card(title: str) -> tuple:
     """卡片范式：CardWidget + QVBoxLayout(spacing=10, margins=15)，首行 SubtitleLabel 10pt Bold。"""
     card = CardWidget()

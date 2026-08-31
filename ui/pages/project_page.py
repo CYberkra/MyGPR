@@ -29,7 +29,7 @@ import os
 from PyQt6.QtCore import Qt, QSettings, QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices, QFont, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
-    QApplication, QDialog, QFileDialog, QFrame, QHBoxLayout, QHeaderView,
+    QApplication, QDialog, QFileDialog, QHBoxLayout, QHeaderView,
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
@@ -40,7 +40,7 @@ from qfluentwidgets import (
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants
-from ui.widgets import BScanView, clear_invalid, mark_invalid, validate_non_empty
+from ui.widgets import BScanView, clear_invalid, mark_invalid, validate_non_empty, make_separator
 from ui.widgets.context_menus import add_action, make_menu
 
 # 导入文件对话框过滤器：通过 DesktopBackendFacade 获取（SPEC §6.3）
@@ -74,15 +74,6 @@ _INFO_FIELDS = (
 
 
 # ------------------------------------------------------------ 小工厂（卡片范式逐字 SPEC §1）
-def _create_separator() -> QFrame:
-    """分隔线工厂：QFrame.HLine + Sunken + 'color: #e0e0e0;'。"""
-    line = QFrame()
-    line.setFrameShape(QFrame.Shape.HLine)
-    line.setFrameShadow(QFrame.Shadow.Sunken)
-    line.setStyleSheet('color: rgba(128, 128, 128, 90);')
-    return line
-
-
 def _create_card(title: str) -> tuple:
     """卡片范式：CardWidget + QVBoxLayout(spacing=10, margins=15)，首行 SubtitleLabel 10pt Bold。"""
     card = CardWidget()
@@ -181,7 +172,7 @@ class ProjectPage(QWidget):
             row.addWidget(value, 1)
             layout.addLayout(row)
             self._info_values[attr] = value
-        layout.addWidget(_create_separator())
+        layout.addWidget(make_separator())
         btn_row = QHBoxLayout()
         self.close_btn = PushButton('关闭项目', card)
         self.close_btn.clicked.connect(self.close_project_requested)
@@ -244,7 +235,7 @@ class ProjectPage(QWidget):
         layout.addLayout(btn_row)
 
         # 预检结果 CaptionLabel 区
-        layout.addWidget(_create_separator())
+        layout.addWidget(make_separator())
         self._preflight_label = CaptionLabel('预检结果将显示在此处', card)
         self._preflight_label.setWordWrap(True)
         self._preflight_label.setStyleSheet(

@@ -16,7 +16,7 @@ import_line_requested / goto_page(str)。
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel, CaptionLabel, CardWidget, ComboBox, PrimaryPushButton,
     PushButton, ScrollArea, SubtitleLabel, TitleLabel,
@@ -24,19 +24,10 @@ from qfluentwidgets import (
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants
-from ui.widgets import BScanView, MiniJobList
+from ui.widgets import BScanView, MiniJobList, make_separator
 
 
 # ------------------------------------------------------------ 小工厂（卡片范式逐字 SPEC §1）
-def _create_separator() -> QFrame:
-    """分隔线工厂：QFrame.HLine + Sunken + 半透明灰。"""
-    line = QFrame()
-    line.setFrameShape(QFrame.Shape.HLine)
-    line.setFrameShadow(QFrame.Shadow.Sunken)
-    line.setStyleSheet('color: rgba(128, 128, 128, 90);')
-    return line
-
-
 def _create_card(title: str) -> tuple:
     """卡片范式：CardWidget + QVBoxLayout(spacing=10, margins=15)，首行 SubtitleLabel 10pt Bold。"""
     card = CardWidget()
@@ -145,7 +136,7 @@ class HomePage(ScrollArea):
         layout.addWidget(self._info_widget)
 
         # 快速操作（2×2 网格，窄栏下不拥挤）
-        layout.addWidget(_create_separator())
+        layout.addWidget(make_separator())
         actions_title = CaptionLabel('快速操作', card)
         actions_title.setStyleSheet('font-size: 11px; font-weight: bold;')
         layout.addWidget(actions_title)

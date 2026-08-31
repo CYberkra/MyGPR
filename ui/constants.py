@@ -53,15 +53,27 @@ BADGE_COLOR_PAIRS = {
 }
 
 # ---------------------------------------------------------------- 日志（style_spec §1.2/§2.5）
-LOG_COLOR_ERROR = '#dc3545'
-LOG_COLOR_WARNING = '#ffc107'
-LOG_COLOR_SUCCESS = '#28a745'
-LOG_COLOR_INFO = '#17a2b8'
+# 日志配色派生自语义色单轨（任务 F 候选 4：消除 Bootstrap/Tailwind 双轨）。
+# 深底终端上 Tailwind 语义原值明度不足，故取同色相高亮度变体；
+# 色相与语义一一对应，仅明度适配深底（#2b2b2b 系背景）。
+LOG_COLOR_ERROR = '#ff5c5c'    # ← COLOR_ERROR #ef4444 深底增亮
+LOG_COLOR_WARNING = '#ffb84d'  # ← COLOR_WARNING #f59e0b 深底增亮
+LOG_COLOR_SUCCESS = '#34d97b'  # ← COLOR_SUCCESS #22c55e 深底增亮
+LOG_COLOR_INFO = '#5b9dff'     # ← COLOR_INFO #3b82f6 深底增亮
 
 # 日志面板 QSS 三套配色（bg / fg / border）
 LOG_QSS_TERMINAL = ('#2b2b2b', '#e0e0e0', '#404040')   # 初始（浅色主题下也用深底）
 LOG_QSS_DARK = ('#1e1e1e', '#e0e0e0', '#333')
 LOG_QSS_LIGHT = ('#f5f5f5', '#333', '#ddd')
+
+# ---------------------------------------------------------------- 图表/可视化（任务 F 候选 4：图表色板归一）
+# 测线颜色循环：matplotlib tab10（数据系列用，与语义状态色分命名空间——
+# 图表色编码的是"测线身份"而非"状态"，故独立成板）。
+CHART_TRACK_COLORS = ('#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+                      '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf')
+CHART_TRACK_DEFAULT = CHART_TRACK_COLORS[0]
+# 解释标注高亮（SPEC §6.6：pick/overlay 琥珀 #fbbf24）
+CHART_OVERLAY_COLOR = '#fbbf24'
 
 # ---------------------------------------------------------------- 日志文件（style_spec §5.4）
 DEFAULT_LOG_MAX_BYTES = 10 * 1024 * 1024   # 10MB

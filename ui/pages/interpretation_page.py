@@ -23,7 +23,7 @@ import math
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QFrame, QHBoxLayout, QHeaderView, QTableWidget,
+    QAbstractItemView, QHBoxLayout, QHeaderView, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
@@ -33,9 +33,9 @@ from qfluentwidgets import (
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants
-from ui.widgets import BScanView
+from ui.widgets import BScanView, make_separator
 
-_OVERLAY_COLOR = '#fbbf24'   # 标注散点颜色（SPEC §6.6）
+_OVERLAY_COLOR = constants.CHART_OVERLAY_COLOR   # 标注散点颜色（SPEC §6.6）
 _C_M_PER_NS = 0.29979        # 真空光速 c (m/ns)
 
 
@@ -52,16 +52,6 @@ def _card_title(text: str) -> SubtitleLabel:
     label = SubtitleLabel(text)
     label.setFont(QFont(constants.FONT_FAMILY, 10, QFont.Weight.Bold))
     return label
-
-
-def _create_separator(vertical: bool = False) -> QFrame:
-    """分隔线工厂：HLine/VLine + Sunken + 半透明灰（深浅色通用）。"""
-    line = QFrame()
-    line.setFrameShape(QFrame.Shape.VLine if vertical
-                       else QFrame.Shape.HLine)
-    line.setFrameShadow(QFrame.Shadow.Sunken)
-    line.setStyleSheet('color: rgba(128, 128, 128, 90);')
-    return line
 
 
 class InterpretationPage(QWidget):
@@ -151,12 +141,12 @@ class InterpretationPage(QWidget):
         self._smooth_btn.setToolTip('对标注点列做滑动中值平滑')
         for btn in (self._auto_trace_btn, self._snap_btn, self._smooth_btn):
             row2.addWidget(btn)
-        row2.addWidget(_create_separator(vertical=True))
+        row2.addWidget(make_separator(vertical=True))
         self._undo_btn = PushButton('撤销', card, FIF.CANCEL)
         self._redo_btn = PushButton('重做', card, FIF.SYNC)
         row2.addWidget(self._undo_btn)
         row2.addWidget(self._redo_btn)
-        row2.addWidget(_create_separator(vertical=True))
+        row2.addWidget(make_separator(vertical=True))
         self._save_btn = PrimaryPushButton('保存标注', card, FIF.SAVE)
         self._save_btn.setToolTip('保存当前标注点列到项目')
         row2.addWidget(self._save_btn)

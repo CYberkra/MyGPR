@@ -40,8 +40,7 @@ _SEG_PROFILE = 'elevationProfile'
 _SEG_3D = 'trajectory3d'
 
 # 测线颜色循环（matplotlib tab10）
-_TRACK_COLORS = ('#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
-                 '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf')
+_TRACK_COLORS = constants.CHART_TRACK_COLORS
 
 
 def _coverage_statistics(tracks: list) -> dict[str, object]:
@@ -202,7 +201,7 @@ class ElevationProfileView(pg.PlotWidget):
             mileage = np.concatenate(([0.0], np.cumsum(steps)))
             line_id = str(getattr(track, 'line_id', '') or '')
             name = str(getattr(track, 'name', '') or line_id)
-            pen = pg.mkPen(QColor(colors.get(line_id, '#1f77b4')), width=2)
+            pen = pg.mkPen(QColor(colors.get(line_id, constants.CHART_TRACK_DEFAULT)), width=2)
             self._plot_item.plot(mileage, zs[finite], pen=pen, name=name)
 
     def apply_theme(self, dark: bool) -> None:

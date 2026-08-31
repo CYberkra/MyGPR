@@ -155,13 +155,13 @@ class _FallbackLogPanel(CardWidget):
         timestamp = datetime.datetime.now().strftime('%H:%M:%S')
         color = None
         if any(k in msg for k in ('ERROR', '失败', '错误')):
-            color = constants.LOG_COLOR_ERROR     # #dc3545
+            color = constants.LOG_COLOR_ERROR     # #ff5c5c
         elif any(k in msg for k in ('WARNING', '警告')):
-            color = constants.LOG_COLOR_WARNING   # #ffc107
+            color = constants.LOG_COLOR_WARNING   # #ffb84d
         elif any(k in msg for k in ('SUCCESS', '成功', '完成')):
-            color = constants.LOG_COLOR_SUCCESS   # #28a745
+            color = constants.LOG_COLOR_SUCCESS   # #34d97b
         elif 'INFO' in msg:
-            color = constants.LOG_COLOR_INFO      # #17a2b8
+            color = constants.LOG_COLOR_INFO      # #5b9dff
         text = f'[{timestamp}] {msg}'
         if color:
             text = f'<span style="color:{color}">{text}</span>'

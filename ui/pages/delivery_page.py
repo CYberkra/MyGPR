@@ -16,7 +16,7 @@ import os
 from PyQt6.QtCore import Qt, QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices, QFont
 from PyQt6.QtWidgets import (
-    QDialog, QFileDialog, QFrame, QHBoxLayout, QHeaderView, QListWidget,
+    QDialog, QFileDialog, QHBoxLayout, QHeaderView, QListWidget,
     QListWidgetItem, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
@@ -26,7 +26,7 @@ from qfluentwidgets import (
 )
 
 from ui import constants
-from ui.widgets import clear_invalid, mark_invalid, validate_non_empty
+from ui.widgets import clear_invalid, mark_invalid, validate_non_empty, make_separator
 
 # 报告结果字段（鸭子类型：dict 键或对象属性）
 _REPORT_FIELDS = (
@@ -51,15 +51,6 @@ def _card_title(text: str) -> SubtitleLabel:
     label = SubtitleLabel(text)
     label.setFont(QFont(constants.FONT_FAMILY, 10, QFont.Weight.Bold))
     return label
-
-
-def _create_separator() -> QFrame:
-    """分隔线工厂：QFrame.HLine + Sunken + color:#e0e0e0（SPEC §1）。"""
-    line = QFrame()
-    line.setFrameShape(QFrame.Shape.HLine)
-    line.setFrameShadow(QFrame.Shadow.Sunken)
-    line.setStyleSheet('color: rgba(128, 128, 128, 90);')
-    return line
 
 
 def _get(obj, key, default=''):
@@ -129,7 +120,7 @@ class DeliveryPage(QWidget):
 
         self._spatial_btn = PrimaryPushButton('生成空间成果', spatial_card)
         spatial_layout.addWidget(self._spatial_btn)
-        spatial_layout.addWidget(_create_separator())
+        spatial_layout.addWidget(make_separator())
 
         self._spatial_table = QTableWidget(0, 3, spatial_card)
         self._spatial_table.setHorizontalHeaderLabels(
@@ -156,7 +147,7 @@ class DeliveryPage(QWidget):
         report_layout.addLayout(pkg_row)
         self._report_btn = PrimaryPushButton('生成报告包', report_card)
         report_layout.addWidget(self._report_btn)
-        report_layout.addWidget(_create_separator())
+        report_layout.addWidget(make_separator())
 
         self._report_path_labels = {}
         for key, caption in _REPORT_FIELDS:

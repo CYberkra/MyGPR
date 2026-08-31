@@ -16,7 +16,7 @@
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QKeySequence, QShortcut
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     CaptionLabel, CardWidget, ComboBox, DoubleSpinBox, InfoBar,
     InfoBarPosition, LineEdit, PrimaryPushButton, ProgressBar, PushButton,
@@ -27,7 +27,8 @@ from qfluentwidgets import FluentIcon as FIF
 from ui.desktop_backend_facade import compute_display_levels
 from ui import constants
 from ui.widgets import (BScanView, CollapsiblePanel, MethodBrowser, ParamForm,
-                        PipelineList, clear_invalid)
+                        PipelineList, clear_invalid,
+    make_separator,)
 
 # 预览分段（SegmentedWidget routeKey）
 _SEG_ORIGINAL = 'originalData'
@@ -58,15 +59,6 @@ def _make_card(title: str) -> tuple:
     layout.setSpacing(constants.CARD_SPACING)
     layout.addWidget(_card_title(title))
     return card, layout
-
-
-def _create_separator() -> QFrame:
-    """分隔线工厂：QFrame.HLine + Sunken + color:#e0e0e0（SPEC §1）。"""
-    line = QFrame()
-    line.setFrameShape(QFrame.Shape.HLine)
-    line.setFrameShadow(QFrame.Shadow.Sunken)
-    line.setStyleSheet('color: rgba(128, 128, 128, 90);')
-    return line
 
 
 def _make_scroll_column(width: int) -> tuple:
@@ -353,7 +345,7 @@ class ProcessingPage(QWidget):
         self._autotune_btn.setToolTip('对左侧选中的方法自动搜索最优参数')
         self._autotune_btn.setEnabled(False)
         autotune_layout.addWidget(self._autotune_btn)
-        autotune_layout.addWidget(_create_separator())
+        autotune_layout.addWidget(make_separator())
         self._autotune_result_label = CaptionLabel('暂无调参结果', autotune_card)
         self._autotune_result_label.setWordWrap(True)
         autotune_layout.addWidget(self._autotune_result_label)
