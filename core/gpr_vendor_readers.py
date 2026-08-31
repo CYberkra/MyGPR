@@ -85,6 +85,25 @@ def _sidecar(path: Path, suffix: str) -> Path:
     return path.with_suffix(suffix)
 
 
+def _sidecar_ci(path: Path, suffix: str) -> Path:
+    """大小写不敏感的同名 sidecar 查找。
+
+    厂商文件的扩展名大小写随意（.HD/.hd、.DT1/.dt1），Windows 文件系统不区分，
+    Linux（CI）区分；先试精确名，再按 ``stem+suffix`` 的小写形式扫描同目录。
+    """
+    exact = path.with_suffix(suffix)
+    if exact.exists():
+        return exact
+    target = (path.stem + suffix).lower()
+    try:
+        for entry in path.parent.iterdir():
+            if entry.is_file() and entry.name.lower() == target:
+                return entry
+    except OSError:
+        pass
+    return exact
+
+
 def _ensure_2d_matrix(data: np.ndarray, *, source: str) -> np.ndarray:
     arr = np.asarray(data)
     if arr.ndim == 1:
@@ -318,10 +337,10 @@ def read_sensors_software_dt1(path: str | os.PathLike[str]) -> dict[str, Any]:
     p = Path(path)
     if p.suffix.lower() == ".hd":
         header_path = p
-        data_path = p.with_suffix(".dt1")
+        data_path = _sidecar_ci(p, ".dt1")
     else:
         data_path = p
-        header_path = p.with_suffix(".hd")
+        header_path = _sidecar_ci(p, ".hd")
     if not data_path.exists():
         raise GPRFormatReadError(f"Sensors & Software .DT1 数据文件不存在: {data_path}")
     if not header_path.exists():

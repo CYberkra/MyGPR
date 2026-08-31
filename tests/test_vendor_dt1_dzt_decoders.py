@@ -124,6 +124,21 @@ def test_dt1_rejects_size_mismatch(tmp_path: Path) -> None:
         read_sensors_software_dt1(data)
 
 
+def test_dt1_sidecar_lookup_is_case_insensitive(tmp_path: Path) -> None:
+    """扩展名大小写与约定相反时也能配对（Linux 文件系统区分大小写）。"""
+    samples = 4
+    head = [1.0, 0.0, float(samples)] + [0.0] * 29
+    payload = b"".join(struct.pack("<h", tr * 10 + k) for tr in range(3) for k in range(samples))
+    data = tmp_path / "line.dt1"
+    data.write_bytes(b"".join(struct.pack("<32f", *head) + payload[tr * samples * 2 : (tr + 1) * samples * 2] for tr in range(3)))
+    (tmp_path / "line.HD").write_text(
+        "NUMBER OF TRACES   = 3\nNUMBER OF PTS/TRC  = 4\nPOSITION UNITS     = m\n",
+        encoding="utf-8",
+    )
+    result = read_sensors_software_dt1(data)
+    assert result["data"].shape == (samples, 3)
+
+
 def test_dzt_rejects_unknown_bits(tmp_path: Path) -> None:
     head = bytearray(1024)
     struct.pack_into("<3h", head, 2, 1024, 8, 24)  # rh_data=1块, samples=8, bits=24
