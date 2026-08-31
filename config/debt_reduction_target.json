@@ -1,0 +1,12 @@
+{
+  "schema": "mygpr.debt_reduction_target.v2",
+  "description": "Active industrialisation target. The release baseline is a non-regression ratchet; these lower values are the measurable reduction objective and are intentionally not reported as already complete.",
+  "target_metrics": {
+    "broad_exception_handlers": 500,
+    "silent_exception_handlers": 100,
+    "sys_path_mutations": 0,
+    "modules_over_1000_lines": 15,
+    "classes_over_1000_lines": 10,
+    "functions_over_100_lines": 110
+  }
+}

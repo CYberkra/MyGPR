@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from core.data_context import (
+from mygpr.domain.autotune.data_context import (
     apply_data_context_defaults,
     frequency_band_from_context,
     infer_data_context,

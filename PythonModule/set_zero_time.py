@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from core.scalar_utils import to_float, to_float_or_none
+from mygpr.domain.common.scalars import to_float, to_float_or_none
 
 
 def _resolve_time_step_s(ny: int, time_step_s: float | None) -> float:
@@ -75,17 +75,7 @@ def set_zero_time(
     it keeps the original matrix size, shifts data upward by the
     zero-time offset, and zero-fills the tail.
     """
-    try:
-        from read_file_data import readcsv, savecsv, save_image
-    except ImportError:
-        import sys
-        import os
-
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        parent_dir = os.path.dirname(current_dir)
-        if parent_dir not in sys.path:
-            sys.path.insert(0, parent_dir)
-        from read_file_data import readcsv, savecsv, save_image
+    from read_file_data import readcsv, savecsv, save_image
 
     data = np.asarray(readcsv(infilename), dtype=np.float64)
     ny, nx = data.shape

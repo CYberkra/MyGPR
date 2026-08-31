@@ -97,6 +97,9 @@ def method_stolt_migration(data, dx=0.05, dt=0.1, v=0.10, pad_x=1, pad_t=1, **kw
     stolt_wkx = np.zeros_like(spec_wkx, dtype=np.complex64)
     mapped_mask = np.zeros_like(spec_wkx.real, dtype=np.float32)
 
+    # O(nx * nz) per-trace interpolation loop.  For >2000 traces this can take
+    # multiple seconds.  Future optimization: pre-compute kx mapping or use
+    # RegularGridInterpolator.
     for ix in range(nx_pad):
         if cancel_checker and ix % 4 == 0 and bool(cancel_checker()):
             raise Exception("用户已取消（Stolt映射插值）")

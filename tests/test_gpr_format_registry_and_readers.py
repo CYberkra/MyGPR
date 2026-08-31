@@ -4,10 +4,10 @@ import struct
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 from core.gpr_format_registry import get_format_spec, supported_file_dialog_filter
 from core.gpr_io import auto_load_data
+from core.gpr_vendor_readers import GprReaderFormat
 
 
 def test_format_registry_covers_common_gpr_inputs():
@@ -40,7 +40,7 @@ def test_auto_load_mala_rd3_with_rad(tmp_path: Path):
     raw.tofile(tmp_path / "line.rd3")
     result = auto_load_data(str(tmp_path / "line.rd3"))
     assert result["data"].shape == (samples, traces)
-    assert result["header_info"]["source"] == "mala_rd"
+    assert result["header_info"]["source"] == GprReaderFormat.MALA_RD
     assert result["header_info"]["total_time_ns"] == 80
 
 
@@ -53,7 +53,7 @@ def test_auto_load_impulseradar_iprb_with_iprh(tmp_path: Path):
     np.arange(samples * traces, dtype=np.int16).tofile(tmp_path / "profile.iprb")
     result = auto_load_data(str(tmp_path / "profile.iprb"))
     assert result["data"].shape == (samples, traces)
-    assert result["header_info"]["source"] == "impulseradar_iprb"
+    assert result["header_info"]["source"] == GprReaderFormat.IMPULSERADAR_IPRB
     assert result["header_info"]["data_version"] == 16
 
 
@@ -75,12 +75,13 @@ def test_auto_load_fixed_segy_int16(tmp_path: Path):
     path.write_bytes(text_header + bytes(bin_header) + bytes(body))
     result = auto_load_data(str(path))
     assert result["data"].shape == (samples, traces)
-    assert result["header_info"]["source"] == "segy_fixed"
+    assert result["header_info"]["source"] == GprReaderFormat.SEGY_FIXED
 
 
 def test_recognized_but_not_native_format_fails_clearly(tmp_path: Path):
-    path = tmp_path / "line.dzt"
-    path.write_bytes(b"not-a-real-dzt")
-    with pytest.raises(Exception) as exc:
-        auto_load_data(str(path))
-    assert "已被识别为常见 GPR 数据格式" in str(exc.value)
+    # 当前注册表所有格式均可解码；该消息契约保留给未来新登记的 recognized-only 格式
+    from core.gpr_vendor_readers import unsupported_known_format_message
+
+    message = unsupported_known_format_message(str(tmp_path / "line.xxx"), "示例格式", "补充说明")
+    assert "已被识别为常见 GPR 数据格式" in message
+    assert "补充说明" in message

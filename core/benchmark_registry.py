@@ -10,7 +10,7 @@ from typing import Any, Callable
 import numpy as np
 
 from core.methods_registry import PROCESSING_METHODS
-from core.quality_metrics import compute_motion_quality_metrics
+from mygpr.domain.autotune.quality_metrics import compute_motion_quality_metrics
 
 
 DEFAULT_BENCHMARK_SEED = 42
@@ -119,7 +119,6 @@ def _build_zero_time_fixture(seed: int) -> tuple[np.ndarray, dict[str, Any]]:
     rng = np.random.default_rng(seed)
     samples, traces = 192, 72
     t = np.linspace(0.0, 1.0, samples, dtype=np.float64)[:, None]
-    x = np.linspace(0.0, 1.0, traces, dtype=np.float64)[None, :]
     data = 0.03 * rng.normal(size=(samples, traces))
     data += 0.08 * np.sin(2.0 * np.pi * 2.2 * t)
     data += 0.04 * (t - 0.3)
@@ -478,14 +477,18 @@ def get_benchmark_sample_spec(sample_id: str) -> BenchmarkSampleSpec:
     try:
         return BENCHMARK_SAMPLES[sample_id]
     except KeyError as exc:
-        raise KeyError(f"未知 benchmark sample: {sample_id}") from exc
+        raise KeyError(f"未知验证样本: {sample_id}") from exc
 
 
 def generate_benchmark_sample(
     sample_id: str,
     seed: int = DEFAULT_BENCHMARK_SEED,
 ) -> tuple[np.ndarray, dict[str, Any]]:
-    """Generate benchmark input data and metadata deterministically."""
+    """Generate benchmark input data and metadata deterministically.
+
+    Also populates sample_id, scenario, seed, title, focus_metrics,
+    default_methods, and tags from the spec.
+    """
     spec = get_benchmark_sample_spec(sample_id)
     data, meta = spec.builder(int(seed))
     payload = dict(meta)

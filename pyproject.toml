@@ -1,0 +1,106 @@
+[build-system]
+requires = ["setuptools==83.0.0", "wheel==0.47.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mygpr"
+version = "0.9.38"
+description = "MyGPR desktop application and headless backend for GPR data processing, interpretation and GIS services"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+license = {text = "Proprietary"}
+authors = [{name = "邸建豪"}, {name = "袁林"}, {name = "詹萍"}]
+dependencies = [
+  "numpy==2.5.1",
+  "pandas==2.3.3",
+  "scipy==1.18.0",
+  "matplotlib==3.11.0",
+  "Pillow==12.3.0",
+  "h5py==3.16.0",
+  "PyYAML==6.0.3",
+  "PyWavelets==1.9.0",
+  "pyproj==3.7.2",
+  "openpyxl==3.1.5",
+  "rasterio==1.5.0",
+  "fiona==1.10.1",
+  "defusedxml==0.7.1",
+]
+
+[project.optional-dependencies]
+gui = ["PyQt6>=6.6", "PyQt6-Fluent-Widgets>=1.8", "pyqtgraph>=0.13", "PyOpenGL>=3.1"]
+gpu = []
+dev = ["pytest==8.4.2", "pytest-timeout==2.3.1", "pytest-cov==7.0.0", "coverage==7.13.3", "hypothesis>=6.130,<7", "mutmut>=3.3,<4", "ruff==0.15.21", "mypy==1.20.2"]
+build = ["build>=1.2,<2", "cyclonedx-bom>=5,<6", "pip-licenses>=5,<6"]
+
+[project.scripts]
+mygpr = "app_qt:main"
+mygpr-batch = "cli_batch:main"
+mygpr-backend-smoke = "mygpr.interfaces.cli.backend_smoke:main"
+
+[tool.setuptools]
+include-package-data = true
+py-modules = ["app_qt", "cli_batch", "read_file_data"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["core*", "mygpr*", "ui*", "PythonModule*"]
+exclude = ["tests*", "sample_data*", "experiments*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.json", "*.toml", "*.md", "*.csv"]
+"ui" = ["resources/*.png"]
+"mygpr.resources.config" = ["*.yaml", "*.json"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint.per-file-ignores]
+# 治理/引导脚本：sys.path 引导与紧凑单行风格为有意为之
+"scripts/**" = ["E402", "E701", "E702"]
+"cli_batch.py" = ["E402"]
+# 测试模块：offscreen 环境设置与 Qt skip 守卫要求延迟导入
+"tests/**" = ["E402"]
+# 遗留报告渲染代码的紧凑单行风格
+"core/report_export_renderers.py" = ["E402", "E702"]
+"core/field_report_export.py" = ["E402", "E702"]
+"core/gpr_io.py" = ["E402"]
+"core/spatial_result_versions.py" = ["E702"]
+"core/field_interface_store.py" = ["E702"]
+# 方法注册表分组与领域包 __init__ 的星号再导出是既定绑定模式
+"core/method_registry_groups/**" = ["F403", "F405"]
+# 绑定模块：wavelet 可选回退块必须先于条件导入
+"core/method_registry_bindings.py" = ["E402"]
+"mygpr/domain/spatial/__init__.py" = ["F403"]
+"mygpr/domain/interpretation/__init__.py" = ["F403"]
+
+[tool.mypy]
+python_version = "3.13"
+warn_unused_ignores = true
+no_implicit_optional = true
+check_untyped_defs = true
+
+# PythonModule/ 是无类型注解的遗留算法包装层，按 Any 处理（绑定经
+# core/method_registry_bindings.py 再导出，不做静态类型检查）。
+[[tool.mypy.overrides]]
+module = "PythonModule.*"
+follow_imports = "skip"
+ignore_errors = true
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers"
+testpaths = ["tests"]
+xfail_strict = true
+
+[tool.coverage.run]
+branch = true
+source = ["mygpr", "core"]
+parallel = false
+
+[tool.coverage.report]
+show_missing = true
+precision = 2
+exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:", "raise NotImplementedError"]
+
+[tool.coverage.json]
+show_contexts = true

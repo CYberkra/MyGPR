@@ -1,0 +1,161 @@
+schema = "mygpr.architecture_policy.v2"
+
+[project_imports]
+prefixes = ["mygpr", "core", "PythonModule"]
+
+[layers.domain]
+paths = ["mygpr/domain"]
+allowed_local_import_prefixes = ["mygpr.domain"]
+
+[layers.application]
+paths = ["mygpr/application"]
+allowed_local_import_prefixes = ["mygpr.application", "mygpr.domain"]
+
+[layers.infrastructure]
+paths = ["mygpr/infrastructure"]
+allowed_local_import_prefixes = ["mygpr.infrastructure", "mygpr.application", "mygpr.domain"]
+
+[layers.interfaces]
+paths = ["mygpr/interfaces"]
+allowed_local_import_prefixes = ["mygpr.interfaces", "mygpr.application", "mygpr.domain", "mygpr.infrastructure"]
+
+[legacy_core]
+paths = ["core"]
+# 只禁核心的"深层"依赖（infrastructure/application/interfaces）；mygpr.domain 是
+# 共享领域内核，过渡期内 core 引用它属于最不坏的方向（methods_registry 经迁移豁免）。
+forbidden_import_prefixes = ["PyQt6", "PySide6", "qfluentwidgets", "studio_app", "frontend_sdk", "ui", "compatibility", "mygpr.infrastructure", "mygpr.application", "mygpr.interfaces"]
+
+[layers.ui]
+paths = ["ui"]
+allowed_local_import_prefixes = ["ui", "mygpr.interfaces"]
+
+[[migration_exceptions]]
+path_prefix = "core/methods_registry.py"
+allowed_local_import_prefixes = ["mygpr.infrastructure.processing.algorithms.methods"]
+owner = "processing-backend"
+remove_after = "1.1.0"
+reason = "NATIVE_ALGORITHMS 单一事实来源暂以懒加载方式进入 legacy registry；1.1.0 前改端口/延迟注入。"
+
+[[migration_exceptions]]
+path_prefix = "core/evidence_export.py"
+allowed_local_import_prefixes = ["mygpr.domain", "mygpr.infrastructure.processing.native_adapter"]
+owner = "processing-backend"
+remove_after = "1.1.0"
+reason = "证据导出与 UI/cli_batch 共用 native 执行路径（P1-1 步骤 1 收敛）；随 processing_engine 兼容壳化一并复查。"
+
+[[migration_exceptions]]
+path_prefix = "core/field_processing_bridge.py"
+allowed_local_import_prefixes = ["mygpr.domain", "mygpr.infrastructure.processing.native_adapter"]
+owner = "processing-backend"
+remove_after = "1.1.0"
+reason = "数据集级执行桥与证据 manifest 契约保留，内部执行已切 native（P1-1 步骤 2）；1.1.0 前评估随 processing_engine 退役。"
+
+[[migration_exceptions]]
+path_prefix = "ui/constants.py"
+allowed_local_import_prefixes = ["core.app_paths"]
+owner = "qt-ui"
+remove_after = "1.1.0"
+reason = "ui/constants.LOG_DIR 委托 core.app_paths 统一日志根目录，消除 Windows 下 GUI/core 日志分家。"
+
+[[migration_exceptions]]
+path_prefix = "ui/desktop_backend_facade.py"
+allowed_local_import_prefixes = ["core", "mygpr.application", "mygpr.domain"]
+owner = "qt-ui"
+remove_after = "1.0.0"
+reason = "Facade concentrates all ui→core/ui→domain/ui→application imports; other ui/ modules must route through it."
+max_function_lines = 100
+
+[path_policy]
+forbid_sys_path_mutation_under = ["core", "mygpr", "cli_batch.py"]
+
+[ui_reverse_dependency_exceptions]
+# GUI/CLI 入口脚本位于依赖图顶端，按设计可 import ui；反向依赖门禁只约束后端层。
+paths = ["app_qt.py"]
+reason = "GUI 入口 app_qt.py 按设计装配 ui 包（main_window 等）；core/mygpr/PythonModule 仍受禁。"
+
+[new_code_quality]
+paths = ["mygpr/domain", "mygpr/application", "mygpr/infrastructure", "mygpr/interfaces"]
+max_module_lines = 1000
+max_class_lines = 600
+max_function_lines = 100
+forbid_silent_exception_handlers = true
+
+[[migration_exceptions]]
+path_prefix = "mygpr/application/autotune"
+allowed_local_import_prefixes = []
+owner = "autotune"
+remove_after = "1.0.0"
+reason = "Verified historical AutoTune scoring functions are being decomposed behind application ports."
+max_function_lines = 450
+
+[[migration_exceptions]]
+path_prefix = "mygpr/application/autotune/legacy_engine.py"
+allowed_local_import_prefixes = ["mygpr.infrastructure"]
+owner = "autotune"
+remove_after = "1.0.0"
+reason = "Default-composition bridge retained for historical function-style imports."
+max_function_lines = 100
+
+[[migration_exceptions]]
+path_prefix = "mygpr/infrastructure/processing/metadata_bridge.py"
+allowed_local_import_prefixes = ["core.methods_registry", "core.method_registry_metadata"]
+owner = "processing-backend"
+remove_after = "1.0.0"
+reason = "Convergence single-point bridge: native catalog reads display metadata from core single source (task F candidate 2)."
+max_function_lines = 100
+
+[[migration_exceptions]]
+path_prefix = "mygpr/domain/autotune/constraints.py"
+allowed_local_import_prefixes = []
+owner = "autotune"
+remove_after = "1.0.0"
+reason = "Method-specific constraint handlers are preserved pending decomposition."
+max_function_lines = 200
+
+[[migration_exceptions]]
+path_prefix = "mygpr/infrastructure/persistence/field_project_adapter.py"
+allowed_local_import_prefixes = ["core"]
+owner = "project-backend"
+remove_after = "1.1.0"
+reason = "Adapter wraps the verified hybrid FieldProjectStore."
+max_function_lines = 100
+
+[[migration_exceptions]]
+path_prefix = "mygpr/infrastructure/acquisition/legacy_adapter.py"
+allowed_local_import_prefixes = ["core"]
+owner = "acquisition-backend"
+remove_after = "1.1.0"
+reason = "Adapter wraps verified import and sensor synchronization kernels."
+max_function_lines = 100
+
+[[migration_exceptions]]
+path_prefix = "mygpr/infrastructure/processing/algorithms/kirchhoff"
+allowed_local_import_prefixes = []
+owner = "migration-imaging-backend"
+remove_after = "1.1.0"
+reason = "Numerical functions remain intact to preserve regression behavior."
+max_function_lines = 300
+
+[[migration_exceptions]]
+path_prefix = "mygpr/infrastructure/processing/algorithms/motion"
+allowed_local_import_prefixes = []
+owner = "motion-compensation-backend"
+remove_after = "1.1.0"
+reason = "Numerical functions remain intact for exact regression."
+max_function_lines = 450
+
+[[migration_exceptions]]
+path_prefix = "mygpr/infrastructure/persistence/interpretation_adapter.py"
+allowed_local_import_prefixes = ["core"]
+owner = "interpretation-backend"
+remove_after = "1.1.0"
+reason = "Persistence adapter reuses verified project-store serialization."
+max_function_lines = 100
+
+[[migration_exceptions]]
+path_prefix = "mygpr/infrastructure/persistence/spatial_adapter.py"
+allowed_local_import_prefixes = ["core"]
+owner = "spatial-backend"
+remove_after = "1.1.0"
+reason = "Persistence adapter reuses the verified spatial result store."
+max_function_lines = 100

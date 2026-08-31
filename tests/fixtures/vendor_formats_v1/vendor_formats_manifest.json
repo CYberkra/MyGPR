@@ -1,0 +1,219 @@
+{
+  "schema": "mygpr.vendor_format_samples.v1",
+  "dataset_id": "vendor_format_samples_v1",
+  "source": "GPRPy exampledata (github.com/NSGeophysics/GPRPy, MIT), redistributed reference samples",
+  "data_policy": "full files are external acceptance assets (sha256 pinned); repository carries 32-trace float32 subsets for decoder tests",
+  "external_root_env": "MYGPR_VENDOR_SAMPLE_DATA",
+  "formats": {
+    "gssi_dzt": {
+      "file": "FILE____032.DZT",
+      "sha256": "e7e1e9b087addebf27a55b2b62bff5180a560b4225a9e84b77f9de0abd48ff8a",
+      "size_bytes": 1065984,
+      "header": {
+        "rh_tag": 1792,
+        "rh_data_blocks": 1024,
+        "rh_nsamp": 512,
+        "rh_bits": 16,
+        "rh_zero": 0,
+        "rhf_sps": 100.0,
+        "rhf_spm": 50.0,
+        "rhf_range_ns": 48.0,
+        "rh_npass": 0,
+        "rh_nchan": 1,
+        "header_bytes": 1024
+      },
+      "matrix": {
+        "shape": [
+          512,
+          1040
+        ],
+        "dtype": "float32",
+        "note": "uint16 storage, signed offset 2^15 applied on read"
+      },
+      "subset": {
+        "trace_count": 32,
+        "sha256": "e278e72849b0f2053ee5dcbd2c2c850feb3d740881e98e49e0e7122a13c509f1",
+        "statistics": {
+          "min": -32768.0,
+          "max": 7701.0,
+          "mean": -134.06744384765625,
+          "std": 2785.259711661718,
+          "rms": 2788.484488195292
+        }
+      },
+      "repository_clip": {
+        "file": "gssi_FILE____032_head32.DZT",
+        "sha256": "765826626545c121d9d5fabb41f58f1c893b3e6e110939fa74fb1b8ce90995d2",
+        "trace_count": 32,
+        "note": "1024B header + first 32 traces; reader output must equal vendor_trace_subset_v1.npz:gssi_dzt_matrix"
+      }
+    },
+    "sensors_software_dt1": {
+      "files": {
+        "data": "XLINE00.DT1",
+        "header": "XLINE00.HD",
+        "gps": "GPS.xyz"
+      },
+      "sha256": {
+        "data": "054d2988cd132a77319020f3b8e1f51b03d6025ae80670a39f5729f8d7ecd940",
+        "header": "04b652c3edb98b6635f4c86ef19134a1919ffe06c2df3425a71bd72eda823046",
+        "gps": "dccb97512b506c7aa2802de6a673178db1a11c8fe54afb06b288b7283c0f16dd"
+      },
+      "size_bytes": {
+        "data": 1660968,
+        "header": 749,
+        "gps": 4188
+      },
+      "binary_layout": {
+        "file_header": "none",
+        "bytes_per_trace": 3128,
+        "trace_header_floats": 32,
+        "samples_dtype": "int16_le",
+        "trace_header_fields": {
+          "idx0": "trace_number_1based",
+          "idx1": "position",
+          "idx2": "samples_per_trace",
+          "idx7": "stacks"
+        },
+        "first_trace_head_preview": [
+          1.0,
+          0.0,
+          1500.0,
+          0.0,
+          0.0,
+          2.0,
+          800.0,
+          8.0
+        ],
+        "last_trace_number": 531,
+        "last_trace_position": 1060.0,
+        "cross_check": "last trace position == HD FINAL POSITION; last trace idx2 == samples"
+      },
+      "header_text_fields": {
+        "NUMBER OF TRACES": "531",
+        "NUMBER OF PTS/TRC": "1500",
+        "TIMEZERO AT POINT": "3.18",
+        "TOTAL TIME WINDOW": "1200.000",
+        "STARTING POSITION": "0.0000",
+        "FINAL POSITION": "1060.0000",
+        "STEP SIZE USED": "2.0000",
+        "POSITION UNITS": "ft",
+        "NOMINAL FREQUENCY": "50.00",
+        "ANTENNA SEPARATION": "3.0000",
+        "PULSER VOLTAGE (V)": "12",
+        "NUMBER OF STACKS": "8",
+        "SURVEY MODE": "Reflection",
+        "STACKING TYPE": "F1, P8, DynaQ OFF",
+        "DVL Serial#": "0051-7179-0014",
+        "Control Mod Serial#": "0022-7132-0014",
+        "Transmitter Serial#": "0024-6738-0009",
+        "Receiver Serial#": "0025-7129-0018",
+        "Start DVL Battery": "12.39V",
+        "Start Rx Battery": "12.42V",
+        "Start Tx Battery": "12.54V 12.50V"
+      },
+      "matrix": {
+        "shape": [
+          1500,
+          531
+        ],
+        "dtype": "float32"
+      },
+      "subset": {
+        "trace_count": 32,
+        "sha256": "9483641127b37fc37991eef2d3777fe956a8408cc0009a6ae4238fc89c8d25aa",
+        "statistics": {
+          "min": -25516.0,
+          "max": 13681.0,
+          "mean": -152.83285416666666,
+          "std": 1285.9317996916102,
+          "rms": 1294.9820364664652
+        }
+      },
+      "repository_clip": {
+        "file": "sns_XLINE00_traces32.DT1",
+        "hd_file": "sns_XLINE00_traces32.HD",
+        "sha256": "5341f4ae5df38f90b08fcdf2a3c54e4b9465d2b0c37305091dcc87e82b3a3f6a",
+        "trace_count": 32,
+        "note": "first 32 full trace blocks; reader output must equal vendor_trace_subset_v1.npz:sns_dt1_matrix"
+      }
+    },
+    "segy_real": {
+      "file": "segy_f3_traces32.sgy",
+      "sha256": "a0cecd44852a0d7774c00b0a161bcb8f72ae79e07a879f982d93c196586bb77e",
+      "provenance": "equinor/segyio test-data/f3.sgy (real F3 offshore seismic, Apache-2.0), first 32 traces",
+      "matrix": {
+        "shape": [
+          75,
+          32
+        ],
+        "dtype": "float32"
+      },
+      "header": {
+        "sample_format_code": 3,
+        "samples": 75
+      },
+      "external_full_file": {
+        "name": "f3.sgy",
+        "sha256": "6008d05547c6b8f6050cea7ca4683f1be3fac260235cad47eb5e61ee05d2ce23",
+        "size_bytes": 165060
+      }
+    },
+    "envi_bsq_derived": {
+      "files": {
+        "data": "envi_from_dzt.dat",
+        "header": "envi_from_dzt.hdr"
+      },
+      "sha256": {
+        "data": "2509c45285a3924164dc3317bedc2a777151971cc682188a3616963d4a585b14",
+        "header": "9bb346c74cc668f1285ac8569137abd054095edd819d7dd1e78f7f369294ff8f"
+      },
+      "provenance": "ENVI BSQ float32 derived from the frozen GSSI DZT 32-trace subset (real sample data, re-encoded)",
+      "matrix": {
+        "shape": [
+          512,
+          32
+        ],
+        "dtype": "float32",
+        "note": "reader returns samples x traces"
+      }
+    },
+    "mala_rd3_derived": {
+      "files": {
+        "data": "mala_from_dzt.rd3",
+        "header": "mala_from_dzt.rad"
+      },
+      "sha256": {
+        "data": "cfc2f22a27645b5a870c9f827438a0062a71dce598cc0892e799de5536e42a62",
+        "header": "a30ed453afb2fba566127574bcc66f5ddacfd16eacc73db6d6f72585e6d6e05c"
+      },
+      "provenance": "MALÅ rd3 int16 derived from the frozen GSSI DZT 32-trace subset; .rad fields sampled from the DZT header",
+      "matrix": {
+        "shape": [
+          512,
+          32
+        ],
+        "dtype": "int16"
+      },
+      "rad_fields": {
+        "SAMPLES": 512,
+        "TIME WINDOW": 48.0,
+        "DISTANCE INTERVAL": 0.02
+      }
+    },
+    "oko_gpr2_synthetic": {
+      "file": "oko_synthetic.GPR2",
+      "sha256": "7b6262ed8b2b560006bed922dbc53e5d6e74e42c9d5fbe78b84aaff15449e360",
+      "provenance": "synthetic OKO-2 GPR2 built per RGPR readGPR2 layout (magic 0xFEDCBA98, 444B header, 512B offset arrays, 36B trace heads); header: Tall=120ns Ddxmm=25mm antenna 'АБ-400'",
+      "matrix": {
+        "shape": [
+          300,
+          24
+        ],
+        "dtype": "float32",
+        "npz_key": "oko_gpr2_matrix"
+      },
+      "note": "synthetic acceptance asset; no public OKO sample channel exists (see P0-3 plan)"
+    }
+  }
+}

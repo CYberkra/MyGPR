@@ -1,6 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Unified ndarray processing engine for GUI, workflow, and batch execution."""
+"""Legacy ndarray processing engine — test-only comparison baseline.
+
+自 P1-1 收敛（0.9.37+）起，生产执行统一走
+``mygpr.infrastructure.processing.native_adapter.NativeProcessingExecutor``
+（UI / cli_batch / evidence_export / field_processing_bridge 同一路径）。
+本模块不再有任何生产调用方，仅作为等价性证据的**对照基准**保留：
+
+- ``run_processing_method`` / ``prepare_runtime_params``：测试中复刻旧执行
+  语义（NaN 清洗、运行时参数注入），供 direct-comparison 等价矩阵对照；
+- 四个手写历史 kernel（compensatingGain / agcGain / subtracting_average_2D /
+  running_average_2D）是 atol=0 级对照的唯一来源，删除它们会摧毁等价证据；
+- ``merge_result_header_info`` / ``merge_result_trace_metadata`` 是仍在
+  生产的纯函数合并语义（cli_batch / evidence_export / bridge 消费）。
+
+计划 1.1.0 前随 golden 摘要资产完善后整体退役（见
+``_handoff_20260830/P1-1_core历史处理栈收敛计划.md``）。"""
 
 from __future__ import annotations
 
@@ -18,11 +33,12 @@ from core.gprpy_compat import (
     apply_gprpy_rem_mean_trace,
     gprpy_local_window_l2_energy,
 )
-from core.runtime_warnings import build_runtime_warning, merge_runtime_warnings
-from core.scalar_utils import to_float, to_int
+from mygpr.domain.processing.warnings import build_runtime_warning, merge_runtime_warnings
+from mygpr.domain.common.scalars import to_float, to_int
+from mygpr.domain.common.errors import MyGPRError
 
 
-class ProcessingEngineError(RuntimeError):
+class ProcessingEngineError(MyGPRError):
     """Raised when a processing method cannot be executed."""
 
 
@@ -127,7 +143,9 @@ def prepare_runtime_params(
     if method_id == "kirchhoff_migration":
         traces = max(1, int(data_shape[1]))
         info = header_info or {}
-        if "length_m" not in runtime_params:
+        # UI 会把 schema 默认值（0.0）一并传入，仅判 "不存在" 会导致
+        # 真实测线长度永远无法注入，Kirchhoff 偏移在 GUI 中必然失败。
+        if to_float(runtime_params.get("length_m"), default=0.0) <= 0.0:
             track_length_m = to_float(info.get("track_length_m"), default=0.0)
             if track_length_m > 0:
                 runtime_params["length_m"] = track_length_m
@@ -147,6 +165,7 @@ def _filter_runtime_params(method_id: str, params: dict[str, Any]) -> dict[str, 
         key_text = str(key)
         if key_text.startswith("_"):
             if method_id == "agcGain" and key_text == "_low_energy_guard":
+                # agcGain is the only method that currently consumes _low_energy_guard
                 runtime_params[key_text] = value
             continue
         runtime_params[key] = value
@@ -211,7 +230,23 @@ def clone_trace_metadata(
 
 
 def _requires_motion_runtime_context(method_id: str) -> bool:
-    """Whether a method should receive motion runtime metadata context."""
+    """Whether a method should receive cloned motion-runtime metadata.
+
+    Runtime metadata is an execution capability, not an auto-tune classification.
+    Vibration suppression is scored in the artifact family but can still consume
+    IMU angular-rate/trajectory guidance, so it must receive the same metadata
+    context as the other motion methods.
+    """
+    motion_methods = {
+        "motion_compensation_height",
+        "motion_compensation_speed",
+        "trajectory_smoothing",
+        "motion_compensation_attitude",
+        "motion_compensation_vibration",
+        "motion_compensation_v2",
+    }
+    if str(method_id) in motion_methods:
+        return True
     method_info = PROCESSING_METHODS.get(method_id, {})
     stage = method_info.get("auto_tune_stage") or method_info.get("auto_tune_family")
     return str(stage or "") == "motion_comp"
@@ -230,7 +265,9 @@ def _inject_runtime_metadata_context(
         runtime_params["header_info"] = clone_header_info(info)
     if "trace_metadata" not in runtime_params and trace_metadata:
         runtime_params["trace_metadata"] = clone_trace_metadata(trace_metadata)
-    if "time_window_ns" not in runtime_params:
+    # UI 会传入 schema 默认值 0.0（占位），视为未设置时用真实时窗覆盖，
+    # 否则 Kirchhoff/RTM 等需要真实时窗的方法在 GUI 中必失败。
+    if to_float(runtime_params.get("time_window_ns"), default=0.0) <= 0.0:
         total_time_ns = info.get("total_time_ns")
         total_time_value = to_float(total_time_ns, default=0.0)
         runtime_params["time_window_ns"] = (
@@ -370,7 +407,7 @@ def _run_legacy_adapter(
             method_id, method_set_zero_time(data, **params), warnings=warnings
         )
 
-    raise ProcessingEngineError(f"未实现的处理方法: {method_id}")
+    raise ProcessingEngineError(f"不支持的处理方法: {method_id}")
 
 
 def _apply_compensating_gain(

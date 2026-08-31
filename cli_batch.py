@@ -5,7 +5,7 @@
 Scope:
 - validate: config + inputs + method params validation
 - run: sequential batch processing with minimal summary output
-- resume: placeholder/basic hook (phase-2 target)
+- resume: re-run failed jobs from an existing summary JSON
 
 Design goals:
 - 使用 methods_registry 统一方法定义，避免重复
@@ -16,11 +16,11 @@ Design goals:
 from __future__ import annotations
 
 import argparse
+import importlib
 import importlib.util
 import json
 import os
 import re
-import sys
 import traceback
 import uuid
 from dataclasses import dataclass
@@ -31,25 +31,17 @@ import numpy as np
 import pandas as pd
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CORE_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "PythonModule_core"))
-MODULE_DIR = os.path.join(BASE_DIR, "PythonModule")
-if CORE_DIR not in sys.path:
-    sys.path.insert(0, CORE_DIR)
-if BASE_DIR not in sys.path:
-    sys.path.insert(0, BASE_DIR)
-if MODULE_DIR not in sys.path:
-    sys.path.insert(0, MODULE_DIR)
-
+# Package/root discovery is handled by Python; do not mutate sys.path.
 from core.benchmark_registry import list_benchmark_sample_ids
 from core.evidence_export import export_motion_compensation_benchmark
 from core.gpr_io import extract_airborne_csv_payload, savecsv, save_image
-from core.data_context import recommended_profile_for_header
+from mygpr.domain.autotune.data_context import recommended_profile_for_header
 from core.processing_engine import (
     merge_result_header_info,
     merge_result_trace_metadata,
-    prepare_runtime_params,
-    run_processing_method,
 )
+from mygpr.domain.processing.models import ProcessingRequest
+from mygpr.infrastructure.processing.native_adapter import NativeProcessingExecutor
 from core.preset_profiles import (
     GUI_PRESETS_V1,
     RECOMMENDED_RUN_PROFILES,
@@ -59,10 +51,6 @@ from core.preset_profiles import (
 # 使用统一的方法注册表
 from core.methods_registry import (
     PROCESSING_METHODS,
-    method_svd_background,
-    method_fk_filter,
-    method_hankel_svd,
-    method_sliding_average,
 )
 
 
@@ -172,14 +160,6 @@ def load_gpr_csv(
 
     return np.asarray(data, dtype=float), header_info, trace_metadata
 
-
-# 本地方法注册（用于兼容旧的本地方法调用）
-LOCAL_METHODS = {
-    "svd_bg": method_svd_background,
-    "fk_filter": method_fk_filter,
-    "hankel_svd": method_hankel_svd,
-    "sliding_avg": method_sliding_average,
-}
 
 OPTIONAL_METHOD_DEPENDENCIES = {
     "wavelet_2d": [("pywt", "PyWavelets")],
@@ -404,110 +384,17 @@ def validate_config(cfg: Dict[str, Any], repo_root: str) -> ValidationResult:
 
 
 # ---------- Run pipeline ----------
-def _get_core_func(module_name: str, func_name: str):
-    """获取核心模块函数"""
-    mod = __import__(module_name)
-    return getattr(mod, func_name)
+_NATIVE_EXECUTOR = NativeProcessingExecutor()
 
 
-def _run_core_method(
-    method_key: str,
-    func_name: str,
-    module_name: str,
-    data: np.ndarray,
-    params: Dict[str, Any],
-    out_dir: str,
-) -> np.ndarray:
-    func = _get_core_func(module_name, func_name)
-
-    length_trace = data.shape[0]
-    start_position = 0
-    end_position = data.shape[1]
-    scans_per_meter = 1
-
-    import tempfile
-
-    temp_in_csv = os.path.join(out_dir, "temp_in.csv")
-    temp_out_csv = os.path.join(out_dir, f"{method_key}_tmp_out.csv")
-    temp_out_png = os.path.join(out_dir, f"{method_key}_tmp_out.png")
-    savecsv(data, temp_in_csv)
-
-    if method_key == "compensatingGain":
-        gain_min = float(params.get("gain_min", 1.0))
-        gain_max = float(params.get("gain_max", 6.0))
-        gain_func = np.linspace(gain_min, gain_max, data.shape[0]).tolist()
-        func(
-            temp_in_csv,
-            temp_out_csv,
-            temp_out_png,
-            length_trace,
-            start_position,
-            end_position,
-            gain_func,
-        )
-    elif method_key == "dewow":
-        window = int(params.get("window", max(1, length_trace // 4)))
-        func(
-            temp_in_csv,
-            temp_out_csv,
-            temp_out_png,
-            length_trace,
-            start_position,
-            scans_per_meter,
-            window,
-        )
-    elif method_key == "set_zero_time":
-        new_zero_time = float(params.get("new_zero_time", 5.0))
-        func(
-            temp_in_csv,
-            temp_out_csv,
-            temp_out_png,
-            length_trace,
-            start_position,
-            scans_per_meter,
-            new_zero_time,
-        )
-    elif method_key == "agcGain":
-        window = int(params.get("window", max(1, length_trace // 4)))
-        func(
-            temp_in_csv,
-            temp_out_csv,
-            temp_out_png,
-            length_trace,
-            start_position,
-            scans_per_meter,
-            window,
-        )
-    elif method_key == "subtracting_average_2D":
-        ntraces = int(params.get("ntraces", 501))
-        func(
-            temp_in_csv,
-            temp_out_csv,
-            temp_out_png,
-            length_trace,
-            start_position,
-            scans_per_meter,
-            ntraces,
-        )
-    elif method_key == "running_average_2D":
-        ntraces = int(params.get("ntraces", 9))
-        func(
-            temp_in_csv,
-            temp_out_csv,
-            temp_out_png,
-            length_trace,
-            start_position,
-            scans_per_meter,
-            ntraces,
-        )
-    else:
-        raise ValueError(f"Unsupported core method in phase-1: {method_key}")
-
-    out_df = pd.read_csv(temp_out_csv, header=None)
-    out_data = out_df.values
-    if out_data.ndim == 1:
-        out_data = out_data.reshape(-1, 1)
-    return out_data
+def _sanitize_for_native(data: np.ndarray) -> np.ndarray:
+    """Native 执行器不做输入清洗；保留旧 legacy 引擎的防御性 NaN 处理。"""
+    arr = np.asarray(data)
+    if np.isfinite(arr).all():
+        return arr
+    finite = np.isfinite(arr)
+    fill = float(np.mean(arr[finite])) if finite.any() else 0.0
+    return np.nan_to_num(arr, nan=fill, posinf=fill, neginf=fill)
 
 
 def run_job(job: Dict[str, Any], repo_root: str, output_dir: str) -> Dict[str, Any]:
@@ -578,39 +465,27 @@ def run_job(job: Dict[str, Any], repo_root: str, output_dir: str) -> Dict[str, A
     )
     for idx, step in enumerate(methods):
         key = step["key"]
-        meta = PROCESSING_METHODS[key]
         params = _merge_params(key, step.get("params"))
 
-        if meta["type"] == "core":
-            new_data = _run_core_method(
-                key, meta["func"], meta["module"], current, params, job_out_dir
+        result = _NATIVE_EXECUTOR.execute(
+            ProcessingRequest(
+                data=_sanitize_for_native(current),
+                method_id=key,
+                params=params,
+                header_info=current_header_info,
+                trace_metadata=current_trace_metadata,
             )
-            current_header_info = merge_result_header_info(
-                current_header_info,
-                None,
-                np.asarray(new_data).shape,
-            )
-        else:
-            new_data, result_meta = run_processing_method(
-                current,
-                key,
-                prepare_runtime_params(
-                    key,
-                    params,
-                    current_header_info,
-                    current_trace_metadata,
-                    current.shape,
-                ),
-            )
-            current_header_info = merge_result_header_info(
-                current_header_info,
-                result_meta,
-                np.asarray(new_data).shape,
-            )
-            current_trace_metadata = merge_result_trace_metadata(
-                current_trace_metadata,
-                result_meta,
-            )
+        )
+        new_data = np.asarray(result.data)
+        current_header_info = merge_result_header_info(
+            current_header_info,
+            result.metadata,
+            new_data.shape,
+        )
+        current_trace_metadata = merge_result_trace_metadata(
+            current_trace_metadata,
+            result.metadata,
+        )
 
         step_csv = os.path.join(job_out_dir, f"{idx:02d}_{key}.csv")
         step_png = os.path.join(job_out_dir, f"{idx:02d}_{key}.png")
@@ -746,10 +621,87 @@ def cmd_run(args) -> int:
 
 
 def cmd_resume(args) -> int:
-    print("resume: phase-1 placeholder (not implemented yet).")
-    if args.summary:
-        print(f"summary hint: {args.summary}")
-    return 2
+    repo_root = os.path.abspath(args.repo_root)
+    if not args.summary:
+        print("ERROR: --summary is required for resume.")
+        return 2
+    summary_path = _resolve_repo_path(str(args.summary), repo_root)
+    if not os.path.isfile(summary_path):
+        print(f"ERROR: summary file not found: {summary_path}")
+        return 2
+    try:
+        with open(summary_path, "r", encoding="utf-8") as f:
+            previous = json.load(f)
+    except Exception as exc:
+        print(f"ERROR: failed to read summary JSON: {exc}")
+        return 2
+
+    failed_ids = [
+        str(item.get("job_id"))
+        for item in previous.get("results", [])
+        if isinstance(item, dict) and str(item.get("status", "")).lower() not in {"ok", "success"}
+    ]
+    failed_ids = [item for item in failed_ids if item and item != "<unknown>"]
+    if not failed_ids:
+        print("resume: no failed jobs found in summary.")
+        return 0
+
+    config_ref = previous.get("config")
+    if not config_ref:
+        print("ERROR: summary does not contain a config path; cannot resume safely.")
+        return 2
+    config_path = _resolve_repo_path(str(config_ref), repo_root)
+    try:
+        cfg = load_config(config_path)
+    except Exception as exc:
+        print(f"ERROR: failed to load original config: {exc}")
+        return 2
+
+    failed_set = set(failed_ids)
+    jobs = [job for job in cfg.get("jobs", []) if str(job.get("id") or os.path.splitext(os.path.basename(str(job.get("input", ""))))[0]) in failed_set]
+    if not jobs:
+        print("ERROR: failed job ids were not found in the original config: " + ", ".join(failed_ids))
+        return 2
+
+    output_dir_ref = previous.get("output_dir") or cfg.get("output_dir", "output/cli_batch")
+    output_dir = _resolve_repo_path(str(output_dir_ref), repo_root)
+    os.makedirs(output_dir, exist_ok=True)
+    resumed = {
+        "started_at": datetime.now().isoformat(timespec="seconds"),
+        "resume_of": os.path.relpath(summary_path, repo_root),
+        "config": os.path.relpath(config_path, repo_root),
+        "output_dir": os.path.relpath(output_dir, repo_root),
+        "resumed_job_ids": failed_ids,
+        "results": [],
+    }
+    ok_count = 0
+    fail_count = 0
+    for job in jobs:
+        jid = str(job.get("id") or os.path.splitext(os.path.basename(str(job.get("input", ""))))[0])
+        try:
+            result = run_job(job, repo_root=repo_root, output_dir=output_dir)
+            resumed["results"].append(result)
+            ok_count += 1
+            print(f"[RESUMED OK] {jid}")
+        except Exception as exc:
+            fail_count += 1
+            resumed["results"].append({
+                "job_id": jid,
+                "input": job.get("input"),
+                "status": "failed",
+                "error": str(exc),
+                "traceback": traceback.format_exc(limit=3),
+            })
+            print(f"[RESUMED FAIL] {jid}: {exc}")
+    resumed["finished_at"] = datetime.now().isoformat(timespec="seconds")
+    resumed["stats"] = {"ok": ok_count, "failed": fail_count, "total": ok_count + fail_count}
+    resumed_path = _build_summary_path(output_dir)
+    with open(resumed_path, "w", encoding="utf-8") as f:
+        json.dump(resumed, f, ensure_ascii=False, indent=2)
+    print("\n=== Resume Summary ===")
+    print(json.dumps(resumed["stats"], ensure_ascii=False))
+    print(f"summary_file: {os.path.relpath(resumed_path, repo_root)}")
+    return 0 if fail_count == 0 else 2
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -773,8 +725,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_run.set_defaults(func=cmd_run)
 
-    p_resume = sub.add_parser("resume", help="resume interface (phase-1 placeholder)")
-    p_resume.add_argument("--summary", help="existing summary file (future use)")
+    p_resume = sub.add_parser("resume", help="rerun failed jobs from an existing summary")
+    p_resume.add_argument("--summary", required=True, help="existing summary file")
+    p_resume.add_argument(
+        "--repo-root", default=BASE_DIR, help="repo root for relative paths"
+    )
     p_resume.set_defaults(func=cmd_resume)
 
     return p

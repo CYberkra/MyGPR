@@ -11,7 +11,7 @@ from typing import Any
 
 import numpy as np
 
-from core.scalar_utils import to_float_or_none
+from mygpr.domain.common.scalars import to_float_or_none
 from core.trace_metadata_utils import derive_local_xy_m
 
 AIR_LIGHT_SPEED_M_PER_NS = 0.299792458

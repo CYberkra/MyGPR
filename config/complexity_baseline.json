@@ -1,0 +1,17 @@
+{
+  "schema": "mygpr.complexity_baseline.v1",
+  "policy": "release-ratchet; high-complexity counts may decrease but may not increase",
+  "source_roots": [
+    "core",
+    "ui",
+    "mygpr",
+    "PythonModule"
+  ],
+  "metrics": {
+    "function_count": 3468,
+    "max_decision_points": 79,
+    "functions_over_30": 20,
+    "functions_over_40": 6,
+    "functions_over_60": 3
+  }
+}

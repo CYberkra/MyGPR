@@ -1,0 +1,258 @@
+"""Declarative method definitions for the legacy registry."""
+from __future__ import annotations
+
+from core.method_registry_bindings import *  # noqa: F401,F403
+
+PROCESSING_METHODS_CALIBRATION = {
+    "compensatingGain": {
+            "name": "0 compensatingGain (manual gain compensation)",
+            "type": "core",
+            "module": "compensatingGain",
+            "func": "compensatingGain",
+            "params": [
+                {
+                    "name": "gain_min",
+                    "label": "Gain min",
+                    "type": "float",
+                    "default": 1.0,
+                    "min": 0.1,
+                    "max": 20.0,
+                },
+                {
+                    "name": "gain_max",
+                    "label": "Gain max",
+                    "type": "float",
+                    "default": 6.0,
+                    "min": 0.1,
+                    "max": 50.0,
+                },
+            ],
+            "auto_tune_enabled": True,
+            "auto_tune_family": "gain",
+            "auto_tune_candidates": {
+                "gain_min": [0.8, 1.0, 1.2],
+                "gain_max": [2.5, 3.5, 4.5, 5.5, 7.0, 9.0, 12.0],
+            },
+        },
+    "dewow": {
+            "name": "1 dewow (low-frequency drift correction)",
+            "type": "local",
+            "module": "dewow",
+            "func": method_dewow,
+            "params": [
+                {
+                    "name": "window",
+                    "label": "Window (samples)",
+                    "type": "int",
+                    "default": 23,
+                    "min": 1,
+                    "max": 1000,
+                },
+            ],
+            "auto_tune_enabled": True,
+            "auto_tune_family": "drift",
+            "auto_tune_candidates": {"window": [16, 32, 64, 128, 256]},
+        },
+    "set_zero_time": {
+            "name": "2 set_zero_time (zero-time correction)",
+            "type": "local",
+            "module": "set_zero_time",
+            "func": method_set_zero_time,
+            "params": [
+                {
+                    "name": "new_zero_time",
+                    "label": "Zero-time (ns)",
+                    "type": "float",
+                    "default": 5.0,
+                    "min": 0.0,
+                    "max": 1000.0,
+                },
+            ],
+            "auto_tune_enabled": True,
+            "auto_tune_family": "zero_time",
+            "auto_tune_candidates": {
+                "detectors": ["threshold", "peak", "first_break"],
+                "thresholds": [0.02, 0.05, 0.08, 0.12],
+                "backup_samples": [2, 4, 6, 8],
+                "search_ratio": 0.35,
+            },
+        },
+    "time_cut": {
+            "name": "2.1 time_cut (time/depth window crop)",
+            "type": "local",
+            "module": "time_cut",
+            "func": method_time_cut,
+            "params": [
+                {
+                    "name": "mode",
+                    "label": "Mode",
+                    "type": "str",
+                    "default": "remove_below",
+                    "tooltip": "remove_below、remove_above 或 keep_range",
+                },
+                {
+                    "name": "time_start_ns",
+                    "label": "Time start (ns)",
+                    "type": "float",
+                    "default": 0.0,
+                    "min": 0.0,
+                    "max": 100000.0,
+                },
+                {
+                    "name": "time_end_ns",
+                    "label": "Time end (ns, 0=all)",
+                    "type": "float",
+                    "default": 0.0,
+                    "min": 0.0,
+                    "max": 100000.0,
+                },
+            ],
+        },
+    "trace_qc": {
+            "name": "2.2 trace_qc (bad trace quality control)",
+            "type": "local",
+            "module": "trace_qc",
+            "func": method_trace_qc,
+            "params": [
+                {
+                    "name": "mode",
+                    "label": "Mode",
+                    "type": "str",
+                    "default": "mark",
+                    "tooltip": "mark 只标记，mute 静音坏道，remove 删除坏道。",
+                },
+                {
+                    "name": "empty_rms_threshold",
+                    "label": "Empty RMS threshold",
+                    "type": "float",
+                    "default": 0.0,
+                    "min": 0.0,
+                    "max": 1000000.0,
+                },
+                {
+                    "name": "spike_zscore",
+                    "label": "Spike z-score",
+                    "type": "float",
+                    "default": 0.0,
+                    "min": 0.0,
+                    "max": 1000.0,
+                },
+                {
+                    "name": "manual_trace_indices",
+                    "label": "Manual trace indices",
+                    "type": "str",
+                    "default": "",
+                    "tooltip": "可填 3,8-12 这类 0-based 道号；留空则只用阈值检测。",
+                },
+            ],
+        },
+    "equidistant_trace_resample": {
+            "name": "2.3 equidistant_trace_resample (uniform trace spacing)",
+            "type": "local",
+            "module": "equidistant_trace_resample",
+            "func": method_equidistant_trace_resample,
+            "params": [
+                {
+                    "name": "spacing_m",
+                    "label": "Spacing (m, 0=median)",
+                    "type": "float",
+                    "default": 0.0,
+                    "min": 0.0,
+                    "max": 100000.0,
+                    "tooltip": "目标道间距；0 表示使用当前 trace_distance_m 的中位间距。",
+                },
+            ],
+        },
+    "agcGain": {
+            "name": "3 agcGain (AGC correction)",
+            "type": "core",
+            "module": "agcGain",
+            "func": "agcGain",
+            "params": [
+                {
+                    "name": "window",
+                    "label": "Window (samples)",
+                    "type": "int",
+                    "default": 11,
+                    "min": 1,
+                    "max": 1000,
+                },
+            ],
+            "auto_tune_enabled": True,
+            "auto_tune_family": "gain",
+            "auto_tune_candidates": {
+                "window": [7, 11, 21, 31, 41, 61, 81, 121],
+                "_low_energy_guard": [True],
+            },
+        },
+    "energy_decay_gain": {
+            "name": "Energy decay gain",
+            "type": "local",
+            "func": method_energy_decay_gain,
+            "params": [
+                {
+                    "name": "strength",
+                    "label": "Strength",
+                    "type": "float",
+                    "default": 1.0,
+                    "min": 0.0,
+                    "max": 3.0,
+                },
+                {
+                    "name": "smoothing_samples",
+                    "label": "Smoothing samples",
+                    "type": "int",
+                    "default": 31,
+                    "min": 1,
+                    "max": 2001,
+                },
+                {
+                    "name": "max_gain",
+                    "label": "Max gain",
+                    "type": "float",
+                    "default": 8.0,
+                    "min": 1.0,
+                    "max": 100.0,
+                },
+            ],
+            "auto_tune_enabled": True,
+            "auto_tune_family": "gain",
+            "auto_tune_candidates": {
+                "strength": [0.5, 0.8, 1.0, 1.2],
+                "smoothing_samples": [15, 31, 61, 101],
+                "max_gain": [4.0, 6.0, 8.0, 12.0],
+            },
+        },
+    "amplitude_scale": {
+            "name": "Amplitude scale / normalization",
+            "type": "local",
+            "func": method_amplitude_scale,
+            "params": [
+                {
+                    "name": "mode",
+                    "label": "Mode",
+                    "type": "str",
+                    "default": "constant",
+                    "tooltip": "constant、peak 或 rms",
+                },
+                {
+                    "name": "scale",
+                    "label": "Scale",
+                    "type": "float",
+                    "default": 1.0,
+                    "min": -100000.0,
+                    "max": 100000.0,
+                },
+                {
+                    "name": "target",
+                    "label": "Target amplitude",
+                    "type": "float",
+                    "default": 1.0,
+                    "min": 0.0,
+                    "max": 100000.0,
+                },
+            ],
+        },
+}
+
+__all__ = ["PROCESSING_METHODS_CALIBRATION"]

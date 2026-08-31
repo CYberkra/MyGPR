@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from core.scalar_utils import to_float
+from mygpr.domain.common.scalars import to_float
 
 
 def method_sec_gain(
@@ -27,7 +27,7 @@ def method_sec_gain(
     power = max(to_float(power, default=1.0), 1.0e-6)
 
     n_samples = int(arr.shape[0])
-    t = np.linspace(0.0, 1.0, n_samples, dtype=np.float32) ** np.float32(power)
+    t = np.linspace(0.0, 1.0, n_samples, dtype=np.float64) ** np.float32(power)
     gain_curve = (gain_min + (gain_max - gain_min) * t).astype(np.float32)
     result = arr * gain_curve[:, None]
 

@@ -3,7 +3,8 @@
 """Legacy runtime helper kept for MyGPR processing compatibility."""
 
 import numpy as np
-# 导入读取数据的函数
+
+from read_file_data import readcsv, save_image, savecsv
 
 
 def compensatingGain(
@@ -38,18 +39,6 @@ def compensatingGain(
     """
 
 
-    # 延迟导入 read_file_data
-    try:
-        from read_file_data import readcsv, savecsv, save_image
-    except ImportError:
-        import sys
-        import os
-        # 在打包环境中添加父目录到路径
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        parent_dir = os.path.dirname(current_dir)
-        if parent_dir not in sys.path:
-            sys.path.insert(0, parent_dir)
-        from read_file_data import readcsv, savecsv, save_image
     # 错误码及错误信息
     error_sign = 0
     error_feedback = ""

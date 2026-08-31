@@ -1,0 +1,12 @@
+{
+  "schema": "mygpr.yingshan_borehole_truth.v1",
+  "criterion": {"metric": "absolute_error_m", "maximum_m": 1.0},
+  "observations": [
+    {"line_id": "3", "borehole_id": "ZK07", "borehole_bedrock_depth_m": 16.5, "published_gpr_depth_m": 16.7},
+    {"line_id": "3", "borehole_id": "ZK08", "borehole_bedrock_depth_m": 14.3, "published_gpr_depth_m": 14.4},
+    {"line_id": "6", "borehole_id": "ZK09", "borehole_bedrock_depth_m": 11.2, "published_gpr_depth_m": 11.5},
+    {"line_id": "7", "borehole_id": "ZK09", "borehole_bedrock_depth_m": 11.2, "published_gpr_depth_m": 11.5},
+    {"line_id": "9", "borehole_id": "ZK08", "borehole_bedrock_depth_m": 14.3, "published_gpr_depth_m": 14.0}
+  ],
+  "provenance": "Project acceptance presentation pages 29-32; values are frozen as the published baseline, not recomputed picks."
+}

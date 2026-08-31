@@ -1,0 +1,16 @@
+# Critical ownership boundaries
+/core/field_project_* @mygpr/project-storage
+/core/project_* @mygpr/project-storage
+/core/schema_registry.py @mygpr/project-storage
+/core/job_* @mygpr/runtime
+/core/sensor_sync.py @mygpr/geospatial
+/core/gis_* @mygpr/geospatial
+/core/crs_contract.py @mygpr/geospatial
+/core/field_report_export.py @mygpr/reporting
+/core/reporting_model.py @mygpr/reporting
+/ui/ @mygpr/desktop-ui
+/.github/workflows/ @mygpr/release
+/requirements*.txt @mygpr/release
+/pyproject.toml @mygpr/release
+/config/architecture_policy.toml @mygpr/architecture
+/config/debt_baseline.json @mygpr/architecture

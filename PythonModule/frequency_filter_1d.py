@@ -8,8 +8,8 @@ from typing import Any
 
 import numpy as np
 
-from core.runtime_warnings import build_runtime_warning
-from core.scalar_utils import to_float
+from mygpr.domain.processing.warnings import build_runtime_warning
+from mygpr.domain.common.scalars import to_float
 
 
 def method_frequency_filter_1d(

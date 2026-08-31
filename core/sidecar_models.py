@@ -14,6 +14,9 @@ RTK_OPTIONAL_FIELDS = (
     "rtk_fix_type",
     "satellites",
     "hdop",
+    "pdop",
+    "vdop",
+    "speed_mps",
 )
 
 IMU_REQUIRED_FIELDS = ("timestamp_s", "roll_deg", "pitch_deg", "yaw_deg")
@@ -34,6 +37,9 @@ RTK_COLUMN_ALIASES = {
     "rtk_fix_type": ("rtk_fix_type", "fix", "fix_type"),
     "satellites": ("satellites", "sat", "num_satellites"),
     "hdop": ("hdop", "dop"),
+    "pdop": ("pdop",),
+    "vdop": ("vdop",),
+    "speed_mps": ("speed_mps", "speed", "ground_speed_mps", "velocity_mps"),
 }
 
 IMU_COLUMN_ALIASES = {

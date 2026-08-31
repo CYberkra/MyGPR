@@ -14,7 +14,7 @@ from __future__ import annotations
 import numpy as np
 
 from core.gprpy_compat import apply_gprpy_dewow
-from core.scalar_utils import to_float, to_int, to_int_or_none
+from mygpr.domain.common.scalars import to_float, to_int, to_int_or_none
 
 
 def _apply_dewow_exact(data: np.ndarray, window: int) -> np.ndarray:
@@ -33,17 +33,7 @@ def dewow(
     """
     Legacy CSV-I/O wrapper kept for compatibility with older scripts.
     """
-    try:
-        from read_file_data import readcsv, savecsv, save_image
-    except ImportError:
-        import sys
-        import os
-
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        parent_dir = os.path.dirname(current_dir)
-        if parent_dir not in sys.path:
-            sys.path.insert(0, parent_dir)
-        from read_file_data import readcsv, savecsv, save_image
+    from read_file_data import readcsv, savecsv, save_image
 
     raw = np.asarray(readcsv(infilename), dtype=np.float64)
     if raw.ndim != 2:

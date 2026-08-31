@@ -15,5 +15,7 @@ def _load_version_checker():
 
 
 def test_version_file_changelog_and_packaging_spec_are_consistent():
+    root = Path(__file__).resolve().parents[1]
+    expected = (root / "VERSION").read_text(encoding="utf-8-sig").strip()
     checker = _load_version_checker()
-    assert checker.check_version_consistency() == "0.8.60"
+    assert checker.check_version_consistency() == expected

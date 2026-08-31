@@ -1,0 +1,6 @@
+{
+  "schema": "mygpr.mypy_baseline.v1",
+  "policy": "ratchet; error count may decrease but may not increase",
+  "tolerance": 0.05,
+  "baseline_errors": 473
+}

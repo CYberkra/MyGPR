@@ -1,0 +1,21 @@
+{
+  "schema": "mygpr.project_format_compatibility.v1",
+  "family": "mygpr.field_project",
+  "current_schema": "mygpr.field_project.v3",
+  "minimum_migratable_version": 1,
+  "newer_schema_policy": "read_only",
+  "snapshot_before_migration": true,
+  "required_fields_after_migration": [
+    "project_id",
+    "name",
+    "lines",
+    "revision",
+    "coordinate_crs_wkt",
+    "vertical_crs_wkt",
+    "storage_policy",
+    "storage_backend",
+    "catalog_path",
+    "line_container_pattern",
+    "legacy_layout"
+  ]
+}

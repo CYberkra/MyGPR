@@ -1,8 +1,0 @@
-scene_id=scene_002_gssi400_deep20_radius03_air_sand_dx002_smoke_gate
-dry_sand_tableii eps_r=3.0 sigma=0.001 mu_r=1.0 magnetic_loss=0.0 used_in_scene=true
-air_free_space implicit_z_range=0.550..0.800 used_in_scene=true
-pec gprMax_builtin used_in_scene=true
-antenna_model=antenna_like_GSSI_400
-selected_component=unknown_until_component_audit
-note=dx002_resolution_compatibility_smoke_gate_only
-claim_boundary=not_gx008_replacement_not_full_pair_not_benchmark_not_field_validation_not_autotune

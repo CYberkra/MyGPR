@@ -173,7 +173,6 @@ def _reconstruct_vmssa(
     返回: 重建后的数据 (n_samples, n_traces)
     """
     L = window_size
-    K = n_samples - L + 1
 
     if trajectory.size == 0 or rank <= 0:
         return np.zeros((n_samples, n_traces), dtype=np.float64)

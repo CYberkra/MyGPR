@@ -8,7 +8,7 @@ import numpy as np
 
 from PythonModule.dewow import method_dewow
 from core.processing_engine import _apply_subtracting_average_2d
-from core.quality_metrics import (
+from mygpr.domain.autotune.quality_metrics import (
     baseline_bias,
     compute_benchmark_metrics,
     deep_zone_contrast,
@@ -32,7 +32,7 @@ def _slow_detect_first_break_indices(
     search_ratio: float = 0.35,
 ) -> np.ndarray:
     from scipy.ndimage import uniform_filter1d
-    from core.quality_metrics import _normalized_abs
+    from mygpr.domain.autotune.quality_metrics import _normalized_abs
 
     arr = np.asarray(data, dtype=np.float64)
     n_samples, n_traces = arr.shape
@@ -64,7 +64,6 @@ def _slow_detect_first_break_indices(
 def _build_test_profile(samples: int = 128, traces: int = 32) -> np.ndarray:
     rng = np.random.default_rng(42)
     t = np.linspace(0.0, 1.0, samples, dtype=np.float64)[:, None]
-    x = np.linspace(0.0, 1.0, traces, dtype=np.float64)[None, :]
     data = 0.35 * np.sin(2.0 * np.pi * 2.0 * t)
     data = np.repeat(data, traces, axis=1)
     data += 0.04 * rng.normal(size=(samples, traces))

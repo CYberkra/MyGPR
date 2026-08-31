@@ -1,94 +1,92 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""Pytest collection markers for controllable MyGPR test subsets.
+"""Backend-only pytest configuration and isolated runtime roots.
 
-The project now contains GUI, gprMax, integration and long-running validation
-coverage in one tests/ tree.  These markers keep local/CI commands explicit
-without editing every historical test file.
+含一个 session 级 ``qapp`` fixture：跨测试模块共享同一 QApplication，避免
+qfluentwidgets 的全局 QConfig 单例在模块间被 GC 后悬垂（``wrapped object deleted``）。
+GUI 测试文件不再各自定义模块级 qapp，统一引用本 fixture；后端 CI（无 PyQt6）
+下相关用例自动 skip。
 """
-
 from __future__ import annotations
 
+import enum
+import os
 from pathlib import Path
+import shutil
+import sys
+import tempfile
 
-GUI_NAME_HINTS = (
-    "gui",
-    "daily_processing",
-    "result_dialog",
-    "no_prior_ui",
-    "wiggle_ui",
-    "workbench",
-    "roi_picker",
-    "app_sidecar_gui",
-    "import_export_report",
-    "shared_state_sync",
-)
+import pytest
 
-SLOW_NAME_HINTS = (
-    "runner",
-    "benchmark",
-    "validation",
-    "multi_scene",
-    "native",
-    "package",
-    "motion_pipeline",
-    "e2e",
-    "no_zerotime",
-    "post_zero_time",
-    "risk_flag",
-    "signal_loss",
-    "demo",
-)
+# Python 3.10 compatibility: provide a StrEnum that behaves like the 3.11+ builtin.
+# core/domain modules import `from enum import StrEnum`; without this patch the
+# fallback str() representation is the enum name, breaking severity comparisons.
+try:
+    from enum import StrEnum  # noqa: F401
+except ImportError:
+    class StrEnum(str, enum.Enum):
+        def __str__(self) -> str:
+            return self.value
+
+    enum.StrEnum = StrEnum
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+_RUNTIME_ROOT: Path | None = None
 
 
-# Broad sweep/regression files that are too expensive for the fast unit baseline
-# despite generic filenames.
-EXPLICIT_SLOW_FILES = {
-    "test_auto_tune.py",
-}
+def pytest_configure(config) -> None:
+    marker_docs = {
+        "industrial": "industrial acceptance/regression evidence",
+        "acceptance": "end-to-end user workflow acceptance",
+        "reliability": "fault recovery and long-run reliability",
+        "performance": "resource and throughput verification",
+        "scientific_validation": "field-data and scientific-result validation",
+        "property": "property/fuzz-oriented input contract tests",
+        "static_contract": "source/configuration architecture contract",
+        "requirement(ids)": "requirement identifiers covered by a test",
+        "risk(ids)": "risk identifiers mitigated by a test",
+        "level(name)": "test level",
+        "external_data": "requires external immutable acceptance data",
+        "hardware": "requires physical hardware",
+        "windows": "requires Windows target environment",
+        "large_data": "large-data acceptance test",
+        "release_only": "release evidence lane only",
+    }
+    for marker, description in marker_docs.items():
+        config.addinivalue_line("markers", f"{marker}: {description}")
+    global _RUNTIME_ROOT
+    if not os.environ.get("MYGPR_RUNTIME_ROOT"):
+        _RUNTIME_ROOT = Path(tempfile.mkdtemp(prefix="mygpr-backend-test-runtime-"))
+        os.environ["MYGPR_RUNTIME_ROOT"] = str(_RUNTIME_ROOT)
+    os.environ.setdefault("MYGPR_LOG_DIR", str(Path(os.environ["MYGPR_RUNTIME_ROOT"]) / "logs"))
 
-INTEGRATION_NAME_HINTS = (
-    "cli",
-    "sidecar",
-    "evidence",
-    "export",
-    "workflow",
-    "pipeline",
-    "dashboard",
-    "campaign",
-    "package",
-    "runner",
-    "validation",
-    "report",
-)
+
+def pytest_unconfigure(config) -> None:
+    global _RUNTIME_ROOT
+    if _RUNTIME_ROOT is not None:
+        runtime_text = str(_RUNTIME_ROOT)
+        shutil.rmtree(_RUNTIME_ROOT, ignore_errors=True)
+        if os.environ.get("MYGPR_RUNTIME_ROOT") == runtime_text:
+            os.environ.pop("MYGPR_RUNTIME_ROOT", None)
+        log_root = str(_RUNTIME_ROOT / "logs")
+        if os.environ.get("MYGPR_LOG_DIR") == log_root:
+            os.environ.pop("MYGPR_LOG_DIR", None)
+        _RUNTIME_ROOT = None
 
 
-def pytest_collection_modifyitems(config, items):  # noqa: D401 - pytest hook
-    """Auto-apply high-level subset markers from test filenames."""
-    for item in items:
-        name = Path(str(item.fspath)).name.lower()
-        markers = {mark.name for mark in item.iter_markers()}
+@pytest.fixture(scope="session")
+def qapp():
+    """Session 级 QApplication：整个会话共享同一实例。
 
-        if any(hint in name for hint in GUI_NAME_HINTS):
-            item.add_marker("gui")
-            markers.add("gui")
-
-        if "gprmax" in name or name.startswith("test_gx_"):
-            item.add_marker("gprmax")
-            item.add_marker("integration")
-            markers.update({"gprmax", "integration"})
-
-        if "wavelet" in name:
-            item.add_marker("wavelet")
-            markers.add("wavelet")
-
-        if name in EXPLICIT_SLOW_FILES or any(hint in name for hint in SLOW_NAME_HINTS):
-            item.add_marker("slow")
-            markers.add("slow")
-
-        if any(hint in name for hint in INTEGRATION_NAME_HINTS):
-            item.add_marker("integration")
-            markers.add("integration")
-
-        if not ({"gui", "integration", "slow", "gprmax"} & markers):
-            item.add_marker("unit")
+    各 GUI 测试文件统一引用本 fixture（不再各自定义模块级 qapp），避免
+    qfluentwidgets 全局 QConfig 单例在模块间 QApplication 被 GC 后悬垂。
+    后端 CI（未装 PyQt6）下相关用例自动 skip。
+    """
+    try:
+        from PyQt6.QtWidgets import QApplication
+    except Exception:  # noqa: BLE001 - 依赖缺失时跳过 GUI 用例
+        pytest.skip("PyQt6 未安装，跳过 GUI 测试")
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    return QApplication.instance() or QApplication([])

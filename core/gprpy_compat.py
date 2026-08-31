@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from core.scalar_utils import to_int
+from mygpr.domain.common.scalars import to_int
 
 
 def _window_sums_axis0(arr: np.ndarray, starts: np.ndarray, ends: np.ndarray) -> np.ndarray:

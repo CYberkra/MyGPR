@@ -1,0 +1,8 @@
+{
+  "schema": "mygpr.industrial_acceptance_matrix.v1",
+  "required_for_commercial_release": [
+    {"id": "WIN-FAULT-001", "requirement": "REQ-WIN-001", "platform": "windows", "evidence": "artifacts/acceptance/windows/acceptance-evidence.json", "tests": ["disk_full", "process_kill", "sqlite_crash_windows", "hdf5_crash_windows", "external_drive_disconnect", "file_lock", "10gb_long_run"]},
+    {"id": "CUDA-001", "requirement": "REQ-GPU-001", "platform": "cuda", "evidence": "artifacts/acceptance/cuda/acceptance-evidence.json", "tests": ["device_probe", "memory_budget", "oom_rejection", "cpu_gpu_numeric_agreement", "cancel_release"]},
+    {"id": "HIL-001", "requirement": "REQ-HW-001", "platform": "hardware", "evidence": "artifacts/acceptance/hardware/acceptance-evidence.json", "tests": ["rtk_ingest", "imu_ingest", "altimeter_ingest", "clock_alignment", "radar_capture"]}
+  ]
+}

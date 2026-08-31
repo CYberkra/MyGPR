@@ -1,6 +1,0 @@
-# GX-008 scene_001 materials draft
-# Draft-only parameters from GX-008 spec paper-inspired range.
-# Formal literature citation lock is required in a later task.
-material_name,eps_r,sigma,mu_r,mag_sigma,notes
-dry_sand_like,3.0,0.001,1.0,0.0,GX-008 spec CR-Net-paper-inspired range
-pec_target,pec_builtin,pec_builtin,pec_builtin,pec_builtin,ideal metal reference target

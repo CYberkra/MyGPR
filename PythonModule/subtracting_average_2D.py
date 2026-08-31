@@ -46,18 +46,7 @@ def subtracting_average_2D(
     """
 
     # 延迟导入 read_file_data
-    try:
-        from read_file_data import readcsv, savecsv, save_image
-    except ImportError:
-        import sys
-        import os
-
-        # 在打包环境中添加父目录到路径
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        parent_dir = os.path.dirname(current_dir)
-        if parent_dir not in sys.path:
-            sys.path.insert(0, parent_dir)
-        from read_file_data import readcsv, savecsv, save_image
+    from read_file_data import readcsv, savecsv, save_image
     # 读取数据矩阵、时间轴和空间轴信息
     data = readcsv(infilename)
     # 创建时间轴

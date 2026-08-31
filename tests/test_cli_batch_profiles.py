@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,6 +12,26 @@ import numpy as np
 
 import cli_batch
 from core.preset_profiles import RECOMMENDED_RUN_PROFILES
+from mygpr.domain.processing.models import ProcessingResult
+
+
+class _RecordingExecutor:
+    """捕获 ProcessingRequest 并原样返回的最小执行器替身。"""
+
+    def __init__(self) -> None:
+        self.requests: list = []
+
+    def execute(self, request, context=None):
+        self.requests.append(request)
+        return ProcessingResult(
+            data=np.asarray(request.data, dtype=np.float32),
+            method_id=request.method_id,
+            params=dict(request.params),
+            metadata={"method": request.method_id},
+            header_info=dict(request.header_info or {}),
+            trace_metadata=dict(request.trace_metadata or {}),
+            runtime_warnings=[],
+        )
 
 
 def _write_small_csv(path: Path) -> Path:
@@ -139,13 +160,34 @@ def test_summary_paths_are_unique_within_same_second(tmp_path: Path):
     assert Path(first).suffix == ".json"
 
 
-def test_resume_placeholder_returns_nonzero(capsys):
-    result = cli_batch.cmd_resume(SimpleNamespace(summary="summary.json"))
+def test_resume_returns_ok_when_summary_has_no_failed_jobs(tmp_path: Path, capsys):
+    summary = tmp_path / "summary.json"
+    config = tmp_path / "config.json"
+    config.write_text('{"jobs": []}', encoding="utf-8")
+    summary.write_text(
+        json.dumps(
+            {
+                "config": str(config),
+                "output_dir": str(tmp_path / "out"),
+                "results": [{"job_id": "job-ok", "status": "ok"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = cli_batch.cmd_resume(SimpleNamespace(summary=str(summary), repo_root=str(tmp_path)))
+
+    captured = capsys.readouterr()
+    assert result == 0
+    assert "no failed jobs" in captured.out
+
+
+def test_resume_missing_summary_returns_nonzero(tmp_path: Path, capsys):
+    result = cli_batch.cmd_resume(SimpleNamespace(summary=str(tmp_path / "missing.json"), repo_root=str(tmp_path)))
 
     captured = capsys.readouterr()
     assert result == 2
-    assert "not implemented" in captured.out
-    assert "summary.json" in captured.out
+    assert "summary file not found" in captured.out
 
 
 def test_validate_config_rejects_unknown_recommended_profile(tmp_path: Path):
@@ -265,22 +307,14 @@ def test_run_job_forwards_rtk_imu_sidecars_into_motion_runtime(monkeypatch, tmp_
     trace_timestamps_s = np.linspace(0.0, 0.7, 8, dtype=np.float64)
     seen: dict[str, np.ndarray] = {}
 
-    def assert_sidecar_metadata(data, trace_metadata=None, **kwargs):
-        assert trace_metadata is not None
-        seen["roll_deg"] = np.asarray(trace_metadata["roll_deg"], dtype=np.float32)
-        seen["local_x_m"] = np.asarray(trace_metadata["local_x_m"], dtype=np.float32)
-        seen["trace_timestamp_s"] = np.asarray(
-            trace_metadata["trace_timestamp_s"], dtype=np.float64
-        )
-        return data, {"method": "test_cli_sidecar_runtime"}
-
+    recording = _RecordingExecutor()
+    monkeypatch.setattr(cli_batch, "_NATIVE_EXECUTOR", recording)
     monkeypatch.setitem(
         cli_batch.PROCESSING_METHODS,
         "test_cli_sidecar_runtime",
         {
             "name": "test_cli_sidecar_runtime",
-            "type": "local",
-            "func": assert_sidecar_metadata,
+            "type": "native",
             "params": [],
             "auto_tune_family": "motion_comp",
         },
@@ -298,6 +332,14 @@ def test_run_job_forwards_rtk_imu_sidecars_into_motion_runtime(monkeypatch, tmp_
     result = cli_batch.run_job(job, repo_root=str(tmp_path), output_dir=str(tmp_path / "out"))
 
     assert result["status"] == "ok"
+    assert len(recording.requests) == 1
+    trace_metadata = recording.requests[0].trace_metadata
+    assert trace_metadata is not None
+    seen["roll_deg"] = np.asarray(trace_metadata["roll_deg"], dtype=np.float32)
+    seen["local_x_m"] = np.asarray(trace_metadata["local_x_m"], dtype=np.float32)
+    seen["trace_timestamp_s"] = np.asarray(
+        trace_metadata["trace_timestamp_s"], dtype=np.float64
+    )
     assert np.array_equal(seen["trace_timestamp_s"], trace_timestamps_s)
     assert seen["roll_deg"].shape == (8,)
     assert seen["local_x_m"].shape == (8,)
@@ -310,29 +352,15 @@ def test_run_job_forwards_rtk_imu_altimeter_sidecars_into_motion_runtime(
     rtk_path, imu_path = _write_motion_sidecars(tmp_path)
     altimeter_path = _write_altimeter_sidecar(tmp_path)
     trace_timestamps_s = np.linspace(0.0, 0.7, 8, dtype=np.float64)
-    seen: dict[str, np.ndarray] = {}
 
-    def assert_sidecar_metadata(data, trace_metadata=None, **kwargs):
-        assert trace_metadata is not None
-        seen["height_agl_m"] = np.asarray(trace_metadata["height_agl_m"], dtype=np.float32)
-        seen["height_confidence"] = np.asarray(
-            trace_metadata["height_confidence"], dtype=np.float32
-        )
-        seen["height_source"] = np.asarray(trace_metadata["height_source"])
-        seen["roll_deg"] = np.asarray(trace_metadata["roll_deg"], dtype=np.float32)
-        seen["local_x_m"] = np.asarray(trace_metadata["local_x_m"], dtype=np.float32)
-        seen["trace_timestamp_s"] = np.asarray(
-            trace_metadata["trace_timestamp_s"], dtype=np.float64
-        )
-        return data, {"method": "test_cli_altimeter_runtime"}
-
+    recording = _RecordingExecutor()
+    monkeypatch.setattr(cli_batch, "_NATIVE_EXECUTOR", recording)
     monkeypatch.setitem(
         cli_batch.PROCESSING_METHODS,
         "test_cli_altimeter_runtime",
         {
             "name": "test_cli_altimeter_runtime",
-            "type": "local",
-            "func": assert_sidecar_metadata,
+            "type": "native",
             "params": [],
             "auto_tune_family": "motion_comp",
         },
@@ -354,11 +382,18 @@ def test_run_job_forwards_rtk_imu_altimeter_sidecars_into_motion_runtime(
     result = cli_batch.run_job(job, repo_root=str(tmp_path), output_dir=str(tmp_path / "out"))
 
     assert result["status"] == "ok"
-    assert np.array_equal(seen["trace_timestamp_s"], trace_timestamps_s)
-    assert seen["height_agl_m"].shape == (8,)
-    assert seen["height_agl_m"][0] == np.float32(1.2)
-    assert seen["height_agl_m"][-1] == np.float32(1.4)
-    assert np.all(seen["height_confidence"] > 0.0)
-    assert set(seen["height_source"].tolist()) == {"nar15"}
-    assert seen["roll_deg"].shape == (8,)
-    assert seen["local_x_m"].shape == (8,)
+    assert len(recording.requests) == 1
+    trace_metadata = recording.requests[0].trace_metadata
+    assert trace_metadata is not None
+    assert np.array_equal(
+        np.asarray(trace_metadata["trace_timestamp_s"], dtype=np.float64),
+        trace_timestamps_s,
+    )
+    height_agl_m = np.asarray(trace_metadata["height_agl_m"], dtype=np.float32)
+    assert height_agl_m.shape == (8,)
+    assert height_agl_m[0] == np.float32(1.2)
+    assert height_agl_m[-1] == np.float32(1.4)
+    assert np.all(np.asarray(trace_metadata["height_confidence"]) > 0.0)
+    assert set(np.asarray(trace_metadata["height_source"]).tolist()) == {"nar15"}
+    assert np.asarray(trace_metadata["roll_deg"]).shape == (8,)
+    assert np.asarray(trace_metadata["local_x_m"]).shape == (8,)

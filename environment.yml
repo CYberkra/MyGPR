@@ -1,0 +1,19 @@
+name: mygpr-backend
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.12,<3.14
+  - pip
+  - numpy
+  - pandas
+  - scipy
+  - matplotlib
+  - pillow
+  - h5py
+  - pyyaml
+  - pywavelets
+  - pyproj
+  - openpyxl
+  - rasterio
+  - fiona
+  - defusedxml

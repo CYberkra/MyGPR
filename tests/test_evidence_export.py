@@ -4,8 +4,6 @@
 
 from __future__ import annotations
 
-import json
-import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -13,10 +11,8 @@ import numpy as np
 from core.evidence_export import (
     STANDARD_CHAIN_SPECS,
     export_chain_evidence,
-    export_replay_evidence_bundle,
     export_standard_chain_for_sample,
 )
-from core.shared_data_state import SharedDataState
 
 
 def test_export_chain_evidence_writes_summary_and_images(tmp_path: Path):
@@ -70,135 +66,3 @@ def test_export_standard_chain_for_sample_supports_both_stage_a_chains(tmp_path:
         if method_key == "agcGain"
     )
     assert agc_step["_low_energy_guard"] is True
-
-
-def test_shared_state_replay_package_stays_in_memory_until_export(tmp_path: Path):
-    state = SharedDataState()
-    raw = np.arange(24, dtype=np.float32).reshape(6, 4)
-    state.load_data(
-        raw,
-        path="demo.csv",
-        header_info={"total_time_ns": 60.0, "trace_interval_m": 0.25},
-        trace_metadata={"distance_m": np.linspace(0.0, 0.75, 4)},
-    )
-    state.apply_current_data(raw + 1.0, push_history=True, label="dewow")
-
-    package = state.get_replay_evidence_package()
-    assert package is not None
-    assert package["package_type"] == "mygpr_replay_evidence"
-    assert package["storage"] == "memory_only_until_user_export"
-    assert package["snapshot_count"] >= 2
-    assert package["snapshots"][0]["role"] == "original"
-    assert package["snapshots"][-1]["role"] == "current"
-    assert list(tmp_path.iterdir()) == []
-
-
-def test_export_replay_evidence_bundle_writes_one_zip(tmp_path: Path):
-    state = SharedDataState()
-    raw = np.arange(24, dtype=np.float32).reshape(6, 4)
-    state.load_data(
-        raw,
-        path="demo.csv",
-        header_info={"total_time_ns": 60.0, "trace_interval_m": 0.25},
-        trace_metadata={"distance_m": np.linspace(0.0, 0.75, 4)},
-    )
-    state.apply_current_data(raw + 1.0, push_history=True, label="dewow")
-
-    zip_path = tmp_path / "replay.zip"
-    result = export_replay_evidence_bundle(
-        state.get_replay_evidence_package(),
-        zip_path,
-        save_images=False,
-    )
-
-    assert result["zip_path"] == str(zip_path.resolve())
-    assert [path.name for path in tmp_path.iterdir()] == ["replay.zip"]
-    with zipfile.ZipFile(zip_path) as zf:
-        names = set(zf.namelist())
-        assert "summary.json" in names
-        assert "report.md" in names
-        assert any(name.startswith("data/") and name.endswith(".npy") for name in names)
-        assert any(
-            name.startswith("metadata/") and name.endswith("-header.json")
-            for name in names
-        )
-        summary = json.loads(zf.read("summary.json").decode("utf-8"))
-
-    assert summary["storage"] == "memory_only_until_user_export"
-    assert summary["snapshot_count"] >= 2
-
-
-def test_export_replay_evidence_bundle_includes_motion_preview_artifacts(tmp_path: Path):
-    state = SharedDataState()
-    raw = np.arange(120, dtype=np.float32).reshape(12, 10)
-    metadata = {
-        "trace_distance_m": np.linspace(0.0, 1.8, 10),
-        "flight_height_m": np.linspace(1.0, 1.2, 10),
-    }
-    state.load_data(
-        raw,
-        path="demo.csv",
-        header_info={"total_time_ns": 60.0, "trace_interval_m": 0.2},
-        trace_metadata=metadata,
-    )
-    state.apply_current_data(raw + 2.0, push_history=True, label="motion_compensation_v2")
-    package = state.get_replay_evidence_package()
-    assert package is not None
-    package["app_context"] = {
-        "preset_key": "motion_compensation_v2",
-        "runtime_warnings": [{"code": "demo"}],
-        "method_param_overrides": {"motion_compensation_v2": {"max_shift_ns": 20.0}},
-    }
-
-    zip_path = tmp_path / "replay.zip"
-    export_replay_evidence_bundle(package, zip_path, save_images=True)
-
-    with zipfile.ZipFile(zip_path) as zf:
-        names = set(zf.namelist())
-        assert "motion/raw_bscan.png" in names
-        assert "motion/current_bscan.png" in names
-        assert "motion/diff_bscan.png" in names
-        assert "motion/raw_3d_preview.png" in names
-        assert "motion/current_3d_preview.png" in names
-        assert "motion/diff_3d_preview.png" in names
-        assert "motion/motion_quality_flags.json" in names
-        assert "motion/motion_params.json" in names
-
-
-def test_motion_preview_export_failures_are_recorded(tmp_path: Path, monkeypatch):
-    state = SharedDataState()
-    raw = np.arange(120, dtype=np.float32).reshape(12, 10)
-    metadata = {
-        "trace_distance_m": np.linspace(0.0, 1.8, 10),
-        "flight_height_m": np.linspace(1.0, 1.2, 10),
-    }
-    state.load_data(
-        raw,
-        path="demo.csv",
-        header_info={"total_time_ns": 60.0, "trace_interval_m": 0.2},
-        trace_metadata=metadata,
-    )
-    state.apply_current_data(raw + 2.0, push_history=True, label="motion_compensation_v2")
-
-    def _raise_preview_error(*_args, **_kwargs):
-        raise RuntimeError("preview backend unavailable")
-
-    monkeypatch.setattr(
-        "core.evidence_export.save_airborne_georeference_3d_preview_png",
-        _raise_preview_error,
-    )
-
-    zip_path = tmp_path / "replay.zip"
-    export_replay_evidence_bundle(
-        state.get_replay_evidence_package(),
-        zip_path,
-        save_images=True,
-    )
-
-    with zipfile.ZipFile(zip_path) as zf:
-        flags = json.loads(zf.read("motion/motion_quality_flags.json").decode("utf-8"))
-
-    warnings = flags["artifact_warnings"]
-    assert warnings
-    assert warnings[0]["code"] == "motion_3d_preview_export_failed"
-    assert "preview backend unavailable" in warnings[0]["message"]

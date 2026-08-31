@@ -1,0 +1,250 @@
+{
+  "schema": "mygpr.backend_api_contract.v1",
+  "api_version": "1.0",
+  "compatibility": {
+    "add_optional_fields": true,
+    "rename_or_remove_fields": false,
+    "change_existing_field_type": false,
+    "change_error_code_semantics": false
+  },
+  "facade_methods": {
+    "create_default": "(*, max_workers: int = 2) -> \"MyGPRBackend\"",
+    "submit_processing": "(self, request: ProcessingRequest, *, title: str | None = None) -> str",
+    "submit_pipeline": "(self, data: np.ndarray, pipeline: PipelineDefinition, *, header_info: dict[str, Any] | None = None, trace_metadata: dict[str, np.ndarray] | None = None, title: str | None = None) -> str",
+    "submit_autotune": "(self, data: np.ndarray, method_key: str, *, title: str | None = None, **kwargs: Any) -> str",
+    "submit_line_import": "(self, project_id: str, source: str, *, line_id: str, name: str = , copy_into_project: bool = True, dielectric_constant: float = 9.0, title: str | None = None) -> str",
+    "submit_batch_line_import": "(self, project_id: str, sources: list[str] | tuple[str, ...], *, title: str | None = None) -> str",
+    "submit_project_quality_check": "(self, project_id: str, *, title: str | None = None) -> str",
+    "submit_line_quality_check": "(self, project_id: str, line_id: str, *, title: str | None = None) -> str",
+    "submit_line_source_relink": "(self, project_id: str, line_id: str, new_source: str, *, allow_mismatch: bool = False, title: str | None = None) -> str",
+    "submit_source_file_check": "(self, project_id: str, *, title: str | None = None) -> str",
+    "submit_line_transpose": "(self, project_id: str, line_id: str, *, title: str | None = None) -> str",
+    "submit_sensor_sync": "(self, project_id: str, line_id: str, *, rtk_path: str, trace_timestamps_path: str | None = None, imu_path: str | None = None, altimeter_path: str | None = None, settings: SensorSyncSettings | None = None, title: str | None = None) -> str",
+    "submit_project_pipeline": "(self, project_id: str, line_id: str, pipeline: PipelineDefinition, *, result_name: str = , branch_id: str = , input_artifact_id: str = , title: str | None = None) -> str",
+    "submit_project_report": "(self, project_id: str, *, package_name: str | None = None, report_profile: dict[str, Any] | None = None, title: str | None = None) -> str",
+    "submit_project_backup": "(self, project_id: str, destination_dir: str | None = None, *, require_external_device: bool = False, incremental: bool = False, retention_keep: int | None = None, title: str | None = None) -> str",
+    "submit_spatial_result": "(self, project_id: str, *, name: str, line_ids: tuple[str, ...] | list[str] | None = None, velocity_m_per_ns: float | None = None, generate_surface: bool = True, title: str | None = None) -> str",
+    "build_georeference_3d": "(self, project_id: str, line_id: str, *, preview_lod: str = auto, max_preview_traces: int = 240, max_preview_samples: int = 160, title: str | None = None) -> str",
+    "submit_project_restore": "(self, archive_path: str, destination_root: str, *, project_dir_name: str | None = None, open_after_restore: bool = True, title: str | None = None) -> str",
+    "shutdown": "(self, *, wait: bool = True, cancel_futures: bool = True, timeout_s: float = 30.0) -> None"
+  },
+  "types": {
+    "mygpr.interfaces.backend.MyGPRBackend": {
+      "kind": "dataclass",
+      "fields": [
+        "processing",
+        "acquisition",
+        "autotune",
+        "projects",
+        "project_processing",
+        "reporting",
+        "interpretation",
+        "spatial",
+        "jobs",
+        "api_version"
+      ]
+    },
+    "mygpr.application.jobs.models.JobEvent": {
+      "kind": "dataclass",
+      "fields": [
+        "job_id",
+        "event_type",
+        "sequence",
+        "timestamp_utc",
+        "message",
+        "completed",
+        "total",
+        "payload",
+        "schema_version"
+      ]
+    },
+    "mygpr.application.jobs.models.JobSnapshot": {
+      "kind": "dataclass",
+      "fields": [
+        "job_id",
+        "title",
+        "status",
+        "completed",
+        "total",
+        "message",
+        "result",
+        "result_released",
+        "error_type",
+        "error_code",
+        "error_message",
+        "error_details",
+        "resource_keys",
+        "created_at_utc",
+        "updated_at_utc",
+        "schema_version"
+      ]
+    },
+    "mygpr.application.jobs.models.JobResultSummary": {
+      "kind": "dataclass",
+      "fields": [
+        "result_type",
+        "estimated_bytes",
+        "shape",
+        "dtype",
+        "message",
+        "schema_version"
+      ]
+    },
+    "mygpr.domain.processing.models.ProcessingMethodDescriptor": {
+      "kind": "dataclass",
+      "fields": [
+        "method_id",
+        "name",
+        "category",
+        "auto_tune_enabled",
+        "auto_tune_family",
+        "auto_tune_stage",
+        "visibility",
+        "parameter_schema",
+        "capabilities",
+        "implementation_version"
+      ]
+    },
+    "mygpr.domain.processing.models.ProcessingRequest": {
+      "kind": "dataclass",
+      "fields": [
+        "data",
+        "method_id",
+        "params",
+        "header_info",
+        "trace_metadata"
+      ]
+    },
+    "mygpr.domain.processing.models.ProcessingResult": {
+      "kind": "dataclass",
+      "fields": [
+        "data",
+        "method_id",
+        "params",
+        "metadata",
+        "header_info",
+        "trace_metadata",
+        "runtime_warnings"
+      ]
+    },
+    "mygpr.domain.processing.models.ResourceEstimate": {
+      "kind": "dataclass",
+      "fields": [
+        "memory_bytes",
+        "temporary_disk_bytes",
+        "relative_cost",
+        "supports_cancellation",
+        "supports_chunking",
+        "notes"
+      ]
+    },
+    "mygpr.domain.processing.models.PipelineStep": {
+      "kind": "dataclass",
+      "fields": [
+        "method_id",
+        "params",
+        "enabled",
+        "label"
+      ]
+    },
+    "mygpr.domain.processing.models.PipelineDefinition": {
+      "kind": "dataclass",
+      "fields": [
+        "steps",
+        "schema_version",
+        "name"
+      ]
+    },
+    "mygpr.domain.project.models.ProjectSummary": {
+      "kind": "dataclass",
+      "fields": [
+        "project_id",
+        "name",
+        "root_path",
+        "schema",
+        "storage_backend",
+        "revision",
+        "status",
+        "read_only",
+        "line_count"
+      ]
+    },
+    "mygpr.domain.project.models.ProjectLine": {
+      "kind": "dataclass",
+      "fields": [
+        "line_id",
+        "name",
+        "length_m",
+        "sample_count",
+        "trace_count",
+        "data_quality",
+        "processing_status",
+        "data_format",
+        "raw_size_mb",
+        "updated_at"
+      ]
+    },
+    "mygpr.domain.project.models.ProjectArtifact": {
+      "kind": "dataclass",
+      "fields": [
+        "artifact_id",
+        "line_id",
+        "name",
+        "data_reference",
+        "branch_id",
+        "parent_artifact_id",
+        "method_id",
+        "method_name",
+        "status",
+        "shape",
+        "dtype",
+        "sha256",
+        "created_at",
+        "manifest"
+      ]
+    },
+    "mygpr.domain.reporting.models.ReportPackage": {
+      "kind": "dataclass",
+      "fields": [
+        "package_dir",
+        "manifest_path",
+        "generated_at",
+        "file_count",
+        "pdf_path",
+        "html_path",
+        "xlsx_path",
+        "delivery_zip_path",
+        "delivery_zip_sha256_path",
+        "seal_path",
+        "metadata"
+      ]
+    }
+  },
+  "job_state_transitions": {
+    "queued": [
+      "running",
+      "cancelled",
+      "failed"
+    ],
+    "running": [
+      "completed",
+      "cancelled",
+      "failed"
+    ],
+    "completed": [],
+    "cancelled": [],
+    "failed": []
+  },
+  "stable_error_schema": "mygpr.error_info.v1",
+  "stable_error_codes": {
+    "InputDataError": "MYGPR_INPUT_DATA_ERROR",
+    "ProcessingMethodError": "MYGPR_PROCESSING_METHOD_ERROR",
+    "ParameterValidationError": "MYGPR_PARAMETER_VALIDATION_ERROR",
+    "ProjectBusyContractError": "MYGPR_PROJECT_BUSY",
+    "EvidenceExportError": "MYGPR_EVIDENCE_EXPORT_ERROR",
+    "GprMaxConversionError": "MYGPR_GPRMAX_CONVERSION_ERROR",
+    "AutoTuneScoringError": "MYGPR_AUTOTUNE_SCORING_ERROR",
+    "JobRunnerClosedError": "MYGPR_JOB_RUNNER_CLOSED",
+    "BackendShutdownError": "MYGPR_BACKEND_SHUTDOWN_TIMEOUT"
+  }
+}

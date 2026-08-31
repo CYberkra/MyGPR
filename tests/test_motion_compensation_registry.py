@@ -4,11 +4,8 @@
 
 from __future__ import annotations
 
-import json
-import os
 from pathlib import Path
 
-import numpy as np
 import pytest
 
 from core.methods_registry import (
@@ -20,7 +17,6 @@ from core.methods_registry import (
     get_method_category,
     is_public_method,
 )
-from core.workflow_data import METHOD_CATEGORIES, QUICK_PRESETS, WorkflowConfig
 from core.preset_profiles import RECOMMENDED_RUN_PROFILES
 from PythonModule.motion_compensation_core import AIR_WAVE_SPEED_M_PER_NS
 
@@ -55,14 +51,7 @@ def test_motion_methods_registered_public_and_have_params():
 
 
 def test_motion_compensation_category_exists():
-    """The motion_compensation category is defined with core methods only."""
-    assert "motion_compensation" in METHOD_CATEGORIES
-    cat = METHOD_CATEGORIES["motion_compensation"]
-    assert cat["name"] == "运动补偿"
-    for key in CORE_MOTION_METHODS:
-        assert key in cat["methods"], f"{key} not in motion_compensation category methods"
-    assert VIBRATION_METHOD not in cat["methods"]
-
+    """The motion_compensation category label is defined; vibration stays in artifact_suppression."""
     assert "motion_compensation" in METHOD_CATEGORY_LABELS
     assert METHOD_CATEGORY_LABELS["motion_compensation"] == "运动补偿"
     assert METHOD_METADATA[VIBRATION_METHOD]["category"] == "artifact_suppression"
@@ -70,28 +59,13 @@ def test_motion_compensation_category_exists():
 
 
 def test_auto_tune_stage_assigned_for_all_motion_methods():
-    """Core motion methods map to motion_comp; vibration is denoise/artifact work."""
+    """Core motion methods map to motion_comp; vibration is artifact suppression."""
     for key in CORE_MOTION_METHODS:
         assert AUTO_TUNE_STAGE_BY_METHOD.get(key) == "motion_comp", f"{key} auto_tune_stage mismatch"
         assert PROCESSING_METHODS[key].get("auto_tune_family") == "motion_comp"
         assert PROCESSING_METHODS[key].get("auto_tune_enabled") is True
-    assert AUTO_TUNE_STAGE_BY_METHOD.get(VIBRATION_METHOD) == "denoise"
+    assert AUTO_TUNE_STAGE_BY_METHOD.get(VIBRATION_METHOD) == "artifact"
     assert PROCESSING_METHODS[VIBRATION_METHOD].get("auto_tune_family") == "denoise"
-
-
-def test_motion_compensation_v1_quick_preset_exists():
-    """The legacy preset key now routes to the four V2-core atomic nodes."""
-    assert "motion_compensation_v1" in QUICK_PRESETS
-    preset = QUICK_PRESETS["motion_compensation_v1"]
-    assert "V1" not in preset["name"]
-    assert "Legacy" not in preset["name"]
-
-    method_ids = [m["method_id"] for m in preset["methods"]]
-    assert method_ids == CORE_MOTION_METHODS
-
-    for m in preset["methods"]:
-        assert m["category"] == "motion_compensation"
-        assert m["enabled"] is True
 
 
 def test_motion_compensation_v1_recommended_profile_exists():
@@ -114,23 +88,6 @@ def test_motion_compensation_v1_recommended_profile_exists():
     order_lower = " ".join(profile["order"]).lower()
     for f in forbidden:
         assert f not in order_lower, f"forbidden keyword {f} found in profile order"
-
-
-def test_motion_compensation_v1_preset_applies_to_workflow_config():
-    """Applying compatibility presets yields only the four atomic motion nodes."""
-    cfg = WorkflowConfig()
-    ok = cfg.apply_preset("motion_compensation_v1")
-    assert ok is True
-    enabled = cfg.get_enabled_methods()
-    assert len(enabled) == 4
-    assert [m.method_id for m in enabled] == CORE_MOTION_METHODS
-
-    cfg = WorkflowConfig()
-    ok = cfg.apply_preset("motion_compensation_core_v1")
-    assert ok is True
-    enabled = cfg.get_enabled_methods()
-    assert len(enabled) == 4
-    assert [m.method_id for m in enabled] == CORE_MOTION_METHODS
 
 
 def test_cli_config_validates(tmp_path: Path):
@@ -201,10 +158,12 @@ def test_motion_v2_frontend_params_are_strategy_not_sensor_arrays():
         "max_shift_ns",
         "max_amplitude_scale",
         "resample_spacing_m",
+        "interpolation_mode",
         "apc_offset_x_m",
         "apc_offset_y_m",
         "apc_offset_z_m",
         "max_abs_tilt_deg",
+        "air_wave_speed_m_per_ns",
     }
     forbidden_manual_sensor_params = {
         "height_agl_m",

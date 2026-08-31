@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from PythonModule.trajectory_smoothing import method_trajectory_smoothing
-from core.quality_metrics import path_rmse
+from mygpr.domain.autotune.quality_metrics import path_rmse
 from core.trace_metadata_utils import derive_local_xy_m  # type: ignore[import]
 
 

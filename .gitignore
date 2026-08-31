@@ -1,26 +1,55 @@
-.release_venv/
-build/
-dist/
+# Python
 __pycache__/
-PythonModule/__pycache__/
-*.pyc
-.settings/
-output/
-favorites/
-workflow_templates/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
 
-# gprMax simulation outputs generated during local benchmark runs.
-*.out
-*.h5
-experiments/gprmax/**/*.out
-experiments/gprmax/**/*.h5
-experiments/gprmax/**/*.vti
-experiments/gprmax/**/*.vtk
-experiments/gprmax/**/*.vtu
-*.vti
-*.vtk
-*.vtu
-experiments/gprmax/**/converted/
-experiments/gprmax/**/paired_outputs/
-experiments/gprmax/**/gpu_smoke*/
-experiments/gprmax/**/smoke_outputs/
+# IDE
+.vscode/
+.idea/
+
+# Environment
+.env
+.venv/
+venv/
+env/
+
+# Runtime
+runtime_projects/
+*.tmp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+artifacts/test-results/
+.pytest_cache/
+*.rej
+*.orig
+*.output
+
+# MyGPR specific
+windows_fit_check_*/
+*.png
+*.json
+*.npy
+
+# Source-owned configuration, fixtures, and UI references must remain trackable.
+!config/*.json
+!assets/theme_config.json
+!assets/ui_reference/*.png
+!docs/design/reference_ui/*.png
+!docs/ui_reference/five_page_v1/*.png
+!tests/fixtures/**/*.json
+!sample_data/gprmax_benchmarks/**/ground_truth.json
+
+# coverage artifacts
+.coverage
+coverage.json
+htmlcov/
+
+# Debug scratch dirs from ad-hoc scripts (never commit)
+tmp*/

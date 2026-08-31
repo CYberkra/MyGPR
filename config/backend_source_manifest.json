@@ -1,0 +1,27 @@
+{
+  "schema": "mygpr.backend_source_manifest.v1",
+  "version": "0.9.38",
+  "required_files": [
+    "VERSION",
+    "pyproject.toml",
+    "requirements-core.txt",
+    "requirements-test-backend.txt",
+    "README.md",
+    "CURRENT_STATE.md",
+    "DEV_HANDOFF.md",
+    "cli_batch.py",
+    "backend_smoke.py",
+    "backend_project_smoke.py",
+    "config/backend_api_v1.json",
+    "core/__init__.py",
+    "mygpr/__init__.py",
+    "PythonModule/__init__.py"
+  ],
+  "excluded_frontend_roots": [
+    "ui",
+    "studio_app",
+    "frontend_sdk",
+    "compatibility",
+    "mygpr/presentation"
+  ]
+}

@@ -24,17 +24,23 @@ from core.preset_profiles import RECOMMENDED_RUN_PROFILES
 from core.processing_engine import (
     merge_result_header_info,
     merge_result_trace_metadata,
-    prepare_runtime_params,
-    run_processing_method,
 )
-from core.quality_metrics import compute_motion_quality_metrics
-from core.scalar_utils import to_float
+from mygpr.domain.autotune.quality_metrics import compute_motion_quality_metrics
+from mygpr.domain.common.scalars import to_float
+from mygpr.domain.processing.models import ProcessingRequest
+from mygpr.infrastructure.processing.native_adapter import (
+    NativeProcessingExecutor,
+    prepare_native_params,
+)
 from core.trace_metadata_utils import resample_bscan_columns_linear
 from core.uav_georeference_3d import (
     build_airborne_georeference_3d_payload,
     save_airborne_georeference_3d_preview_png,
 )
-from read_file_data import save_image
+from PythonModule.read_file_data import save_image
+
+# 与 UI/cli_batch 同一条生产执行路径（native）。
+_EVIDENCE_EXECUTOR = NativeProcessingExecutor()
 
 
 STANDARD_CHAIN_SPECS: dict[str, dict[str, Any]] = {
@@ -570,25 +576,36 @@ def export_chain_evidence(
 
     current = arr
     for idx, (method_key, params) in enumerate(steps, start=1):
-        runtime_params = prepare_runtime_params(
-            method_key,
-            dict(params),
-            header_info,
-            trace_metadata,
-            current.shape,
+        request = ProcessingRequest(
+            data=current,
+            method_id=method_key,
+            params=dict(params),
+            header_info=header_info,
+            trace_metadata=trace_metadata,
         )
-        result, meta = run_processing_method(current, method_key, runtime_params)
+        result = _EVIDENCE_EXECUTOR.execute(request)
+        runtime_context = _summarize_runtime_context(
+            {
+                "header_info": request.header_info,
+                "trace_metadata": request.trace_metadata,
+                "time_window_ns": prepare_native_params(request).get("time_window_ns"),
+            }
+        )
+        if "trace_metadata" not in runtime_context and trace_metadata:
+            runtime_context["trace_metadata"] = _summarize_trace_metadata(trace_metadata)
+        current = np.asarray(result.data)
+        meta = result.metadata
         step_record: dict[str, Any] = {
             "step_index": idx,
             "method_key": method_key,
             "params": _to_jsonable(params),
-            "runtime_context": _summarize_runtime_context(runtime_params),
+            "runtime_context": runtime_context,
             "runtime_meta": _to_jsonable(meta),
         }
         if save_images:
             out_png = output_root / f"{bundle_name}-{idx:02d}-{method_key}.png"
             save_image(
-                result,
+                current,
                 str(out_png),
                 title=f"{title_prefix} - {method_key}",
                 time_range=time_range,
@@ -596,7 +613,6 @@ def export_chain_evidence(
             )
             step_record["output_png"] = str(out_png)
         summary["steps"].append(step_record)
-        current = np.asarray(result, dtype=np.float32)
 
     if save_images:
         comparison_png = output_root / f"{bundle_name}-raw-vs-final.png"
@@ -660,9 +676,9 @@ def export_motion_compensation_benchmark(
 ) -> dict[str, Any]:
     """Run the deterministic motion-compensation benchmark and export evidence."""
     if sample_id != "motion_compensation_v1":
-        raise ValueError(f"unsupported motion benchmark sample: {sample_id}")
+        raise ValueError(f"unsupported motion validation sample: {sample_id}")
     if profile_key != "motion_compensation_v1":
-        raise ValueError(f"unsupported motion benchmark profile: {profile_key}")
+        raise ValueError(f"unsupported motion validation profile: {profile_key}")
 
     spec = get_benchmark_sample_spec(sample_id)
     profile = RECOMMENDED_RUN_PROFILES.get(profile_key)
@@ -708,17 +724,25 @@ def export_motion_compensation_benchmark(
     steps_summary: list[dict[str, Any]] = []
     for idx, method_key in enumerate(profile.get("order", []), start=1):
         params = _default_params_for(method_key)
-        runtime_params = prepare_runtime_params(
-            method_key,
-            params,
-            header_info,
-            trace_metadata,
-            current.shape,
+        request = ProcessingRequest(
+            data=current,
+            method_id=method_key,
+            params=params,
+            header_info=header_info,
+            trace_metadata=trace_metadata,
         )
-        runtime_context = _summarize_runtime_context(runtime_params)
+        runtime_context = _summarize_runtime_context(
+            {
+                "header_info": request.header_info,
+                "trace_metadata": request.trace_metadata,
+                "time_window_ns": prepare_native_params(request).get("time_window_ns"),
+            }
+        )
         if "trace_metadata" not in runtime_context and trace_metadata:
             runtime_context["trace_metadata"] = _summarize_trace_metadata(trace_metadata)
-        current, runtime_meta = run_processing_method(current, method_key, runtime_params)
+        result = _EVIDENCE_EXECUTOR.execute(request)
+        current = np.asarray(result.data)
+        runtime_meta = result.metadata
         header_info = merge_result_header_info(header_info, runtime_meta, current.shape)
         trace_metadata = merge_result_trace_metadata(trace_metadata, runtime_meta)
         steps_summary.append(

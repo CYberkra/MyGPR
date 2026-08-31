@@ -11,21 +11,36 @@ from __future__ import annotations
 import os
 import re
 import struct
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+from mygpr.domain.common.errors import MyGPRError
 
 
-class GPRFormatReadError(ValueError):
+class GPRFormatReadError(MyGPRError):
     """Raised when a known GPR format cannot be safely decoded."""
+
+
+class GprReaderFormat(str, Enum):
+    """GPR reader format type identifiers returned by native readers."""
+
+    NUMPY_ARRAY = "numpy_array"
+    MALA_RD = "mala_rd"
+    IMPULSERADAR_IPRB = "impulseradar_iprb"
+    SEGY_FIXED = "segy_fixed"
+    ENVI_BSQ = "envi_bsq"
+    SENSORS_SOFTWARE_DT1 = "sensors_software_dt1"
+    GSSI_DZT = "gssi_dzt"
+    GEOTECH_OKO_GPR2 = "geotech_oko_gpr2"
 
 
 def _read_text(path: Path) -> str:
     for enc in ("utf-8", "latin-1", "cp1252"):
         try:
             return path.read_text(encoding=enc, errors="ignore")
-        except Exception:
+        except (OSError, UnicodeError):
             continue
     return path.read_bytes().decode("latin-1", errors="ignore")
 
@@ -71,6 +86,25 @@ def _sidecar(path: Path, suffix: str) -> Path:
     return path.with_suffix(suffix)
 
 
+def _sidecar_ci(path: Path, suffix: str) -> Path:
+    """大小写不敏感的同名 sidecar 查找。
+
+    厂商文件的扩展名大小写随意（.HD/.hd、.DT1/.dt1），Windows 文件系统不区分，
+    Linux（CI）区分；先试精确名，再按 ``stem+suffix`` 的小写形式扫描同目录。
+    """
+    exact = path.with_suffix(suffix)
+    if exact.exists():
+        return exact
+    target = (path.stem + suffix).lower()
+    try:
+        for entry in path.parent.iterdir():
+            if entry.is_file() and entry.name.lower() == target:
+                return entry
+    except OSError:
+        pass
+    return exact
+
+
 def _ensure_2d_matrix(data: np.ndarray, *, source: str) -> np.ndarray:
     arr = np.asarray(data)
     if arr.ndim == 1:
@@ -92,12 +126,12 @@ def _ensure_2d_matrix(data: np.ndarray, *, source: str) -> np.ndarray:
 def read_numpy_profile(path: str | os.PathLike[str]) -> dict[str, Any]:
     p = Path(path)
     if p.suffix.lower() == ".npz":
-        with np.load(p) as z:
+        with np.load(p, allow_pickle=False) as z:
             key = "data" if "data" in z.files else z.files[0]
             data = z[key]
             header = {"npz_key": key, "npz_keys": list(z.files)}
     else:
-        data = np.load(p)
+        data = np.load(p, mmap_mode="r", allow_pickle=False)
         header = {}
     arr = _ensure_2d_matrix(data, source=str(p))
     header.update(
@@ -106,11 +140,11 @@ def read_numpy_profile(path: str | os.PathLike[str]) -> dict[str, Any]:
             "num_traces": int(arr.shape[1]),
             "total_time_ns": 0.0,
             "trace_interval_m": 0.0,
-            "source": "numpy_array",
+            "source": GprReaderFormat.NUMPY_ARRAY,
             "path": str(p),
         }
     )
-    return {"data": arr, "header_info": header, "path": str(p), "format": "numpy_array"}
+    return {"data": arr, "header_info": header, "path": str(p), "format": GprReaderFormat.NUMPY_ARRAY}
 
 
 def read_mala_rd(path: str | os.PathLike[str]) -> dict[str, Any]:
@@ -148,11 +182,11 @@ def read_mala_rd(path: str | os.PathLike[str]) -> dict[str, Any]:
         "declared_last_trace": int(last_trace),
         "total_time_ns": float(time_window),
         "trace_interval_m": float(trace_interval),
-        "source": "mala_rd",
+        "source": GprReaderFormat.MALA_RD,
         "rad_path": str(rad),
         "data_path": str(data_path),
     }
-    return {"data": data, "header_info": header, "path": str(data_path), "format": "mala_rd"}
+    return {"data": data, "header_info": header, "path": str(data_path), "format": GprReaderFormat.MALA_RD}
 
 
 def read_impulseradar_iprb(path: str | os.PathLike[str]) -> dict[str, Any]:
@@ -191,12 +225,12 @@ def read_impulseradar_iprb(path: str | os.PathLike[str]) -> dict[str, Any]:
         "num_traces": int(traces),
         "total_time_ns": total_time_ns,
         "trace_interval_m": _num(kv.get("DISTANCE_INTERVAL"), 0.0) or 0.0,
-        "source": "impulseradar_iprb",
+        "source": GprReaderFormat.IMPULSERADAR_IPRB,
         "iprh_path": str(header_path),
         "data_path": str(data_path),
         "data_version": int(data_version),
     }
-    return {"data": data, "header_info": header, "path": str(data_path), "format": "impulseradar_iprb"}
+    return {"data": data, "header_info": header, "path": str(data_path), "format": GprReaderFormat.IMPULSERADAR_IPRB}
 
 
 def _segy_format_dtype(format_code: int) -> np.dtype | None:
@@ -244,11 +278,11 @@ def read_segy_fixed(path: str | os.PathLike[str]) -> dict[str, Any]:
         "sample_interval_us": int(sample_interval_us),
         "total_time_ns": float(sample_interval_us) * float(samples) * 1000.0,
         "trace_interval_m": 0.0,
-        "source": "segy_fixed",
+        "source": GprReaderFormat.SEGY_FIXED,
         "path": str(p),
         "sample_format_code": int(fmt),
     }
-    return {"data": data, "header_info": header, "path": str(p), "format": "segy_fixed"}
+    return {"data": data, "header_info": header, "path": str(p), "format": GprReaderFormat.SEGY_FIXED}
 
 
 def read_envi_bsq(path: str | os.PathLike[str]) -> dict[str, Any]:
@@ -284,13 +318,216 @@ def read_envi_bsq(path: str | os.PathLike[str]) -> dict[str, Any]:
         "num_traces": int(lines),
         "total_time_ns": 0.0,
         "trace_interval_m": 0.0,
-        "source": "envi_bsq",
+        "source": GprReaderFormat.ENVI_BSQ,
         "hdr_path": str(hdr),
         "data_path": str(data_path),
         "bands": int(bands),
         "data_type": int(data_type),
     }
-    return {"data": data, "header_info": header, "path": str(data_path), "format": "envi_bsq"}
+    return {"data": data, "header_info": header, "path": str(data_path), "format": GprReaderFormat.ENVI_BSQ}
+
+
+def read_sensors_software_dt1(path: str | os.PathLike[str]) -> dict[str, Any]:
+    """Decode Sensors & Software (PulseEKKO) .DT1 traces with the .HD text header.
+
+    二进制布局（经 GPRPy XLINE00 样例实证）：
+    - 无文件头；``N × (128B 道头 + samples×int16)`` 连续排列
+    - 32-float 道头：``[0]`` 道号(1-based)、``[1]`` 位置、``[2]`` 每道采样数、``[7]`` 叠加次数
+    - ``.HD`` 为纯文本键值头，位置单位可为 ft（换算为 m）
+    """
+    p = Path(path)
+    if p.suffix.lower() == ".hd":
+        header_path = p
+        data_path = _sidecar_ci(p, ".dt1")
+    else:
+        data_path = p
+        header_path = _sidecar_ci(p, ".hd")
+    if not data_path.exists():
+        raise GPRFormatReadError(f"Sensors & Software .DT1 数据文件不存在: {data_path}")
+    if not header_path.exists():
+        raise GPRFormatReadError(f"Sensors & Software .DT1 需要同名 .hd 文本头文件: {header_path}")
+
+    kv = _parse_key_values(_read_text(header_path))
+    file_size = data_path.stat().st_size
+    with data_path.open("rb") as stream:
+        first_head = struct.unpack("<32f", stream.read(128))
+        samples = int(first_head[2]) if first_head[2] > 0 else _int(kv.get("NUMBER_OF_PTS_TRC"), 0) or 0
+        if samples <= 0:
+            raise GPRFormatReadError("DT1 道头缺少有效每道采样数")
+        bytes_per_trace = 128 + samples * 2
+        traces = file_size // bytes_per_trace
+        if traces <= 0 or file_size % bytes_per_trace != 0:
+            raise GPRFormatReadError(
+                f"DT1 文件长度与道头声明的采样数不符: size={file_size}, samples={samples}"
+            )
+        data = np.empty((samples, traces), dtype=np.float32)
+        positions = np.empty(traces, dtype=np.float64)
+        for index in range(traces):
+            stream.seek(index * bytes_per_trace)
+            trace_head = struct.unpack("<32f", stream.read(128))
+            positions[index] = float(trace_head[1])
+            data[:, index] = np.frombuffer(
+                stream.read(samples * 2), dtype="<i2", count=samples
+            ).astype(np.float32)
+
+    total_time_ns = _num(kv.get("TOTAL_TIME_WINDOW"), 0.0) or 0.0
+    step_size = _num(kv.get("STEP_SIZE_USED"), 0.0) or 0.0
+    pos_units = str(kv.get("POSITION_UNITS", "m")).lower()
+    if pos_units == "ft":
+        step_size *= 0.3048
+    header = {
+        "a_scan_length": int(samples),
+        "num_traces": int(traces),
+        "total_time_ns": float(total_time_ns),
+        "trace_interval_m": float(step_size),
+        "nominal_frequency_mhz": _num(kv.get("NOMINAL_FREQUENCY"), 0.0) or 0.0,
+        "stacks": _int(kv.get("NUMBER_OF_STACKS"), 0) or 0,
+        "source": GprReaderFormat.SENSORS_SOFTWARE_DT1,
+        "hd_path": str(header_path),
+        "data_path": str(data_path),
+        "trace_positions": positions,
+    }
+    return {
+        "data": data,
+        "header_info": header,
+        "path": str(data_path),
+        "format": GprReaderFormat.SENSORS_SOFTWARE_DT1,
+    }
+
+
+def read_gssi_dzt(path: str | os.PathLike[str]) -> dict[str, Any]:
+    """Decode GSSI .DZT profiles (conservative single-channel subset).
+
+    布局（DZT.File.Format 文档 + GPRPy/readgssi 实现共识）：
+    - 1024B 固定头（little-endian）；``rh_data`` 决定头块数（每块 1024B）
+    - 样本位宽 ``rh_bits`` ∈ {8, 16, 32}；uint8/uint16 需减 ``2^(bits-1)`` 转有符号
+    - 数据按道连续存储，reshape 为 (traces, samples) 后转置
+    """
+    p = Path(path)
+    file_size = p.stat().st_size
+    if file_size < 1024:
+        raise GPRFormatReadError(f"DZT 文件过短: {file_size}")
+    with p.open("rb") as stream:
+        head = stream.read(1024)
+    _rh_tag, rh_data, samples, rh_bits, _rh_zero = struct.unpack("<5h", head[:10])
+    sps, spm, _mpm, _position, time_range_ns = struct.unpack("<5f", head[10:30])
+    rh_npass, = struct.unpack("<h", head[30:32])
+    rh_nchan, = struct.unpack("<h", head[52:54])
+    # rh_data<1024 时为 1024B 头块数；≥1024 时为直接字节数（1024 处两种解读一致）
+    header_bytes = rh_data if rh_data >= 1024 else 1024 * rh_data
+    if samples <= 0 or rh_bits not in (8, 16, 32):
+        raise GPRFormatReadError(f"DZT 头字段无效: samples={samples}, bits={rh_bits}")
+    if file_size <= header_bytes:
+        raise GPRFormatReadError(f"DZT 无数据体: size={file_size}, header={header_bytes}")
+    dtype = {8: np.dtype("u1"), 16: np.dtype("<u2"), 32: np.dtype("<i4")}[rh_bits]
+    element_size = dtype.itemsize
+    available = file_size - header_bytes
+    bytes_per_trace = samples * element_size
+    traces = available // bytes_per_trace
+    if traces <= 0:
+        raise GPRFormatReadError("DZT 数据体不足一个完整 trace")
+    with p.open("rb") as stream:
+        stream.seek(header_bytes)
+        raw = np.frombuffer(
+            stream.read(traces * bytes_per_trace), dtype=dtype, count=traces * samples
+        )
+    if rh_bits in (8, 16):
+        data = (raw.astype(np.float64) - float(2 ** (rh_bits - 1))).astype(np.float32)
+    else:
+        data = raw.astype(np.float32)
+    data = data.reshape((traces, samples)).T
+    header = {
+        "a_scan_length": int(samples),
+        "num_traces": int(traces),
+        "total_time_ns": float(time_range_ns),
+        "trace_interval_m": float(spm) if spm and spm > 0 else 0.0,
+        "scans_per_second": float(sps) if sps and sps > 0 else 0.0,
+        "bits_per_sample": int(rh_bits),
+        "channels": int(rh_nchan),
+        "passes": int(rh_npass),
+        "source": GprReaderFormat.GSSI_DZT,
+        "path": str(p),
+    }
+    return {"data": data, "header_info": header, "path": str(p), "format": GprReaderFormat.GSSI_DZT}
+
+
+def read_geotech_oko_gpr2(path: str | os.PathLike[str]) -> dict[str, Any]:
+    """Decode Geotech OKO-2 ``.GPR2`` profiles (RGPR readGPR2 port).
+
+    布局（RGPR ``R/readGPR2.R`` 移植，全部 little-endian 字节流、无对齐填充）：
+    - 444B 固定头，起始魔数 ``0xFEDCBA98``（LE 字节 ``98 BA DC FE``）；
+      关键字段 ``NTraces``/``NSamples``/``Tall``(总时窗 ns)/``Ddxmm``(道间距 mm)
+    - 偏移 512 处：``ColorArray``（256×4B）+ 均衡数组（float32 × NSamples）
+    - 逐道：36B 道头（int64 rTime + pos/x/y/z/iAnt/labelID/labelpos 各 int32）
+      + float32 × NSamples
+    - 头内俄语字段（AntenName 等）按 windows-1251 解码
+    """
+    p = Path(path)
+    file_size = p.stat().st_size
+    if file_size < 512:
+        raise GPRFormatReadError(f"OKO GPR2 文件过短: {file_size}")
+    head_struct = struct.Struct(
+        "<4s9Ifi4q2QI2i2f2I2i3I40s40s40s40s40s40s2q2iIih3I2HIHf"
+    )
+    with p.open("rb") as stream:
+        blob = stream.read(512)
+        if len(blob) < head_struct.size:
+            raise GPRFormatReadError(f"OKO GPR2 头不完整: {len(blob)} < {head_struct.size}")
+        fields = head_struct.unpack_from(blob, 0)
+        if fields[0] != b"\x98\xba\xdc\xfe":
+            raise GPRFormatReadError(
+                f"OKO GPR2 魔数不符: 期望 0xFEDCBA98, 实际 {fields[0].hex()}"
+            )
+        (
+            _label, _id_version, _main_number, _ser_number, _prof_ser_number, _state,
+            n_traces, n_samples, _n_text_labels, tall_ns, _eps, dd_x_mm,
+            _start_position, _start_x, _start_y, _start_z,
+            _create_time, _manipulation_time, _la, _tstart, _tspp,
+            _spp_threshold, _kraz, _win_size, _hor_win_size, _white, _black,
+            _scan_mode, _n_sum, _ntpz,
+            anten_name_raw, _operator_raw, _object_raw, _tips1_raw, _tips2_raw, _tips3_raw,
+            _user_number, _last_user_number, _zero_zone, _shift_procent,
+            _first_label_number, _ab2_shift, _s_curs_angl,
+            _n_ant_serial, _dw_p_version_ms, _dw_p_version_ls,
+            _anten_id, _device_id, _state2, _height_above_road, _f_tall,
+        ) = fields
+        if n_traces <= 0 or n_samples <= 0:
+            raise GPRFormatReadError(f"OKO GPR2 头字段无效: NTraces={n_traces}, NSamples={n_samples}")
+        stream.seek(512)
+        stream.read(256 * 4)  # ColorArray
+        stream.read(n_samples * 4)  # Equalisation factor array
+        trace_head_struct = struct.Struct("<q7I")
+        data = np.empty((n_samples, n_traces), dtype=np.float32)
+        r_time = np.empty(n_traces, dtype=np.float64)
+        positions = np.empty(n_traces, dtype=np.float64)
+        for index in range(n_traces):
+            trace_head = stream.read(trace_head_struct.size)
+            if len(trace_head) < trace_head_struct.size:
+                raise GPRFormatReadError(f"OKO GPR2 道头不完整: trace {index}")
+            th = trace_head_struct.unpack(trace_head)
+            r_time[index] = th[0]
+            positions[index] = th[1]
+            row = stream.read(n_samples * 4)
+            if len(row) < n_samples * 4:
+                raise GPRFormatReadError(f"OKO GPR2 道数据不完整: trace {index}")
+            data[:, index] = np.frombuffer(row, dtype="<f4", count=n_samples)
+
+    def _decode_cyrillic(raw: bytes) -> str:
+        return raw.split(b"\x00", 1)[0].decode("windows-1251", errors="replace").strip()
+
+    header = {
+        "a_scan_length": int(n_samples),
+        "num_traces": int(n_traces),
+        "total_time_ns": float(tall_ns),
+        "trace_interval_m": float(dd_x_mm) / 1000.0,
+        "antenna_name": _decode_cyrillic(anten_name_raw),
+        "profile_number": int(_main_number),
+        "source": GprReaderFormat.GEOTECH_OKO_GPR2,
+        "path": str(p),
+        "trace_positions": positions,
+        "trace_times": r_time,
+    }
+    return {"data": data, "header_info": header, "path": str(p), "format": GprReaderFormat.GEOTECH_OKO_GPR2}
 
 
 def unsupported_known_format_message(path: str | os.PathLike[str], display_name: str, notes: str = "") -> str:
@@ -303,9 +540,13 @@ def unsupported_known_format_message(path: str | os.PathLike[str], display_name:
 
 __all__ = [
     "GPRFormatReadError",
+    "GprReaderFormat",
     "read_numpy_profile",
     "read_mala_rd",
     "read_impulseradar_iprb",
+    "read_sensors_software_dt1",
+    "read_gssi_dzt",
+    "read_geotech_oko_gpr2",
     "read_segy_fixed",
     "read_envi_bsq",
     "unsupported_known_format_message",

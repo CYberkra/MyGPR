@@ -1,0 +1,3 @@
+-r requirements-core.txt
+# Select the CuPy CUDA wheel matching the target CUDA runtime during deployment.
+# Example: cupy-cuda12x==13.6.0

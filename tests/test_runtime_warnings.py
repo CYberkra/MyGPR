@@ -8,7 +8,7 @@ import numpy as np
 
 from core.gprpy_compat import apply_gprpy_agc_gain
 from core.processing_engine import run_processing_method
-from core.runtime_warnings import merge_runtime_warnings
+from mygpr.domain.processing.warnings import merge_runtime_warnings
 
 
 def test_merge_runtime_warnings_accepts_generator_without_materializing_group():

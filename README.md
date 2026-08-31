@@ -1,171 +1,49 @@
-# MyGPR
+# MyGPR 0.9.38
 
-MyGPR is a PyQt6 desktop application for UAV/GPR B-scan data inspection,
-processing, auto-tuning, sidecar metadata integration, and deterministic
-benchmark evidence export.
+(UAV-)GPR 探地雷达数据处理、解释与 GIS 服务的桌面应用 + 无头后端。
+PyQt6 + PyQt6-Fluent-Widgets 桌面前端，配分层后端（`mygpr/` 清洁架构 + `core/` 遗留内核）。
 
-## Runtime
+> 权威架构文档：`CLAUDE.md`（中文）；当前状态：`CURRENT_STATE.md`；交接规则：`DEV_HANDOFF.md`。
 
-- Python 3.10+
-- PyQt6 and qfluentwidgets / PyQt6-Fluent-Widgets
-- NumPy, Pandas, SciPy, Matplotlib, h5py, PyWavelets
+## 代码结构
 
-Install development dependencies:
+- `ui/`：Qt 前端——`main_window.py` 注册 8 个导航页，`controllers/` 五个 QObject 控制器，
+  `widgets/` B-scan/AScan/参数表单/地图/3D 轨迹控件；UI→core 唯一通道为 `ui/desktop_backend_facade.py`。
+- `core/`：遗留内核——GPR 数据模型与 IO（mmap/分块）、项目存储、方法注册表、GIS、报告导出。
+- `mygpr/`：分层后端——`interfaces/`（公共 API：`MyGPRBackend.create_default()`）→
+  `application/`（按域分组服务）→ `domain/`（纯领域模型）→ `infrastructure/`（legacy 适配与持久化）。
+- `PythonModule/`：算法包装模块；算法单一事实来源为
+  `mygpr/infrastructure/processing/algorithms/methods` 的 `NATIVE_ALGORITHMS`。
+- `scripts/`：质量门禁与治理脚本；`config/`：架构政策、schema 注册表、覆盖率/债务预算。
+- `tests/`：656+ 用例，含 `tests/industrial/`（acceptance/performance/property/reliability/
+  scientific_validation/static_contract）。
+- `cli_batch.py`：无头批处理（`validate`/`run`/`resume`）；`backend_smoke.py`、
+  `backend_project_smoke.py`：后端冒烟。
 
-```bash
-python -m pip install -r requirements-dev.txt
-```
+## 环境要求
 
-## Main Entry Points
+Python **3.12–3.13**（钉版 `numpy==2.5.1` 要求 ≥3.12；CI 矩阵与 `requires-python` 已对齐）。
 
-Run the GUI:
-
-```bash
-python app_qt.py
-```
-
-Windows shortcut:
-
-```bash
-启动MyGPR.bat
-```
-
-Run CLI batch validation and processing:
+## 安装
 
 ```bash
-python cli_batch.py validate --config config/cli_batch_mvp_example.json
-python cli_batch.py run --config config/cli_batch_mvp_example.json
+python -m venv .venv
+. .venv/Scripts/activate       # Linux/macOS: . .venv/bin/activate
+python -m pip install -r requirements-core.txt
+python -m pip install -r requirements-gui.txt   # 桌面前端
+python -m pip install -e .
 ```
 
-Run deterministic motion-compensation benchmark evidence export:
+## 启动与验证
 
 ```bash
-python cli_batch.py validate --config config/motion_compensation_v1_benchmark.json
-python cli_batch.py run --config config/motion_compensation_v1_benchmark.json
+python app_qt.py                                  # 桌面 GUI
+QT_QPA_PLATFORM=offscreen python app_qt.py --smoke  # GUI 离屏冒烟
+python backend_smoke.py && python backend_project_smoke.py
+python -m pytest tests/ -q
 ```
 
-`cli_batch.py resume` is intentionally not implemented yet and exits non-zero.
+## 二次开发入口
 
-## Continuous Integration
-
-The `MyGPR Lightweight CI` GitHub Actions workflow runs on pushes and pull
-requests for `codex/research-gprmax-autotune`. It installs the development
-dependencies, runs `python scripts/preflight_check.py`, and runs the lightweight
-gprMax/AutoTune pytest subset.
-
-CI is a code smoke gate only. It does not run heavy gprMax simulations, does not
-require local native `.out` files, and does not validate paper or Evidence
-claims.
-
-## Repository Map
-
-- `app_qt.py` - main PyQt6 GUI entry point.
-- `cli_batch.py` - batch processing and benchmark CLI.
-- `core/` - shared runtime logic, I/O, method registry, processing engine,
-  presets, sidecar integration, metrics, and evidence export.
-- `ui/` - Qt pages, dialogs, workbench widgets, parameter editors, and logs.
-- `PythonModule/` - ndarray algorithms plus legacy CSV wrapper compatibility.
-- `tests/` - pytest unit and integration coverage.
-- `scripts/preflight_check.py` - syntax plus GUI/runtime smoke gate.
-- `config/` - runnable CLI and benchmark configs.
-- `sample_data/` - bundled sidecar and benchmark-compatible sample data.
-- `output/` - generated artifacts, ignored by git.
-
-## Sample Data
-
-Current bundled examples:
-
-- `sample_data/gui_sidecar_all_data_main.csv` - airborne CSV with explicit
-  trace timestamps.
-- `sample_data/gui_sidecar_all_data_rtk.csv` - RTK sidecar.
-- `sample_data/gui_sidecar_all_data_imu.csv` - IMU sidecar.
-- `sample_data/gui_sidecar_all_data_README.md` - GUI sidecar verification notes.
-- `sample_data/motion_compensation_v1/README.md` - deterministic motion
-  benchmark semantics and expected artifacts.
-
-## Processing Surface
-
-The method registry and processing engine are the coordination points:
-
-- `core/methods_registry.py` defines public methods, metadata, category labels,
-  parameter schemas, and auto-tune stages.
-- `core/processing_engine.py` runs ndarray methods and preserves runtime
-  metadata/warnings.
-- `core/preset_profiles.py` defines GUI presets and recommended CLI profiles.
-
-Motion-compensation V1 currently uses this deterministic sequence:
-
-```text
-trajectory_smoothing
-motion_compensation_speed
-motion_compensation_attitude
-motion_compensation_height
-motion_compensation_vibration
-```
-
-## UAV-GPR Research Specs
-
-- `docs/uav_gpr_standard_processing_flow.md` - recommended UAV measured-data
-  processing flow and literature-backed ordering.
-- `docs/auto_tune_research_comparison_design.md` - manual baseline vs
-  auto-tuned comparison page contract for research evidence.
-- `docs/motion_compensation_v2_design.md` - RTK/IMU/altimeter motion
-  compensation rebuild plan.
-
-## Verification
-
-Focused smoke:
-
-```bash
-python scripts/preflight_check.py
-```
-
-Full test suite:
-
-```bash
-python -m pytest -q
-```
-
-Useful targeted checks:
-
-```bash
-python -m pytest tests/test_cli_batch_profiles.py -q
-python -m pytest tests/test_runtime_warnings.py -q
-python -m pytest tests/test_motion_compensation_pipeline_e2e.py -q
-```
-
-Fast syntax check for edited Python files:
-
-```bash
-python -m py_compile app_qt.py cli_batch.py core/processing_engine.py
-```
-
-## Packaging
-
-```bash
-build_exe.bat
-pyinstaller gpr_gui.spec --clean --noconfirm
-```
-
-Run `python scripts/preflight_check.py` before packaging.
-
-## Archiving Stable Checkpoints
-
-For stable, user-meaningful checkpoints, prefer a descriptive commit and,
-when the conclusion should survive future sessions, archive it with:
-
-```bash
-python scripts/archive_checkpoint.py --summary "checkpoint summary"
-```
-
-The default vault target is configured in `scripts/archive_checkpoint.py`.
-## Versioning
-
-The package version is read from the root `VERSION` file and displayed in the GUI title/status area. For every delivered source zip, update `VERSION`, `CHANGELOG.md`, and the zip filename together.
-
-Check before release:
-
-```bash
-python scripts/check_version_consistency.py --expected 0.8.41
-```
-
+新前端/集成方使用 `mygpr/interfaces/` 公共边界、`mygpr/application/` 服务层与
+`config/backend_api_v1.json` 契约；不要直接 import 持久化内部。
