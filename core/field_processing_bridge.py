@@ -23,10 +23,16 @@ from core.methods_registry import PROCESSING_METHODS
 from core.processing_engine import (
     merge_result_header_info,
     merge_result_trace_metadata,
-    prepare_runtime_params,
-    run_processing_method,
 )
 from core.trajectory_model import TrajectoryModel
+from mygpr.domain.processing.models import ProcessingRequest
+from mygpr.infrastructure.processing.native_adapter import (
+    NativeProcessingExecutor,
+    prepare_native_params,
+)
+
+# 与 UI/cli_batch/evidence_export 共用的生产执行路径（P1-1 步骤 2 收敛）。
+_BRIDGE_EXECUTOR = NativeProcessingExecutor()
 
 
 # Keep trace-count-changing operations out of the legacy field workbench.  The
@@ -450,13 +456,16 @@ def run_registered_method(
     ui_params = dict(params or {})
     header_info = build_header_info(dataset)
     trace_metadata = build_trace_metadata(dataset, trajectory)
-    runtime_params = prepare_runtime_params(
-        method_id,
-        ui_params,
-        header_info,
-        trace_metadata,
-        dataset.matrix.shape,
+    request = ProcessingRequest(
+        data=dataset.matrix,
+        method_id=method_id,
+        params=ui_params,
+        header_info=header_info,
+        trace_metadata=trace_metadata,
     )
+    runtime_params = prepare_native_params(request)
+    runtime_params.pop("_execution_context", None)
+    runtime_params.pop("cancel_checker", None)
     if cancel_checker is not None:
         runtime_params.setdefault("cancel_checker", cancel_checker)
     if progress_callback is not None:
@@ -467,9 +476,9 @@ def run_registered_method(
     start = time.perf_counter()
     if progress_callback is not None:
         progress_callback(1, 4, f"执行 {display_name(method_id, info)}")
-    result, result_meta = run_processing_method(
-        dataset.matrix, method_id, runtime_params, cancel_checker=cancel_checker
-    )
+    result = _BRIDGE_EXECUTOR.execute(request)
+    result_meta = dict(result.metadata)
+    result = result.data
     elapsed_s = time.perf_counter() - start
     header_out = merge_result_header_info(header_info, result_meta, result.shape)
     trace_out = merge_result_trace_metadata(trace_metadata, result_meta)
@@ -532,7 +541,7 @@ def run_registered_method(
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "artifact_role": artifact_role,
         "axis_transform": axis_transform,
-        "engine": "core.processing_engine",
+        "engine": "mygpr NativeProcessingExecutor",
         "bridge": "core.field_processing_bridge",
         "line_id": dataset.line_id,
         "source_line_id": dataset.line_id,

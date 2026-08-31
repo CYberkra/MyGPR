@@ -44,6 +44,13 @@ remove_after = "1.1.0"
 reason = "证据导出与 UI/cli_batch 共用 native 执行路径（P1-1 步骤 1 收敛）；随 processing_engine 兼容壳化一并复查。"
 
 [[migration_exceptions]]
+path_prefix = "core/field_processing_bridge.py"
+allowed_local_import_prefixes = ["mygpr.domain", "mygpr.infrastructure.processing.native_adapter"]
+owner = "processing-backend"
+remove_after = "1.1.0"
+reason = "数据集级执行桥与证据 manifest 契约保留，内部执行已切 native（P1-1 步骤 2）；1.1.0 前评估随 processing_engine 退役。"
+
+[[migration_exceptions]]
 path_prefix = "ui/constants.py"
 allowed_local_import_prefixes = ["core.app_paths"]
 owner = "qt-ui"
