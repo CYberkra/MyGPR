@@ -151,9 +151,13 @@ class InterpretationPersistenceMixin:
 
     def _append_audit(self, event: str, *, object_type: str, object_id: str, payload: dict) -> None:
         """记录审计事件；legacy 项目无 catalog，静默跳过（与 field_project_runtime_store 一致）。"""
-        if not getattr(self._store.storage, "is_hybrid", False):
+        storage = getattr(self._store, "storage", None)
+        catalog = getattr(storage, "catalog", None)
+        if catalog is None:
             return
-        self._append_audit(event, object_type=object_type, object_id=object_id, payload=payload)
+        catalog.append_audit(
+            event, object_type=object_type, object_id=object_id, payload=payload
+        )
 
     def list_interpretation_features(self, line_id: str) -> Sequence[InterpretationFeature]:
         safe = self._validated_line(line_id)

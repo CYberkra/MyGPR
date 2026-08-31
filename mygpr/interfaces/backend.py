@@ -365,7 +365,7 @@ class MyGPRBackend:
             if not bool(preflight.get("passed")):
                 errors = "; ".join(str(item) for item in preflight.get("errors", ()))
                 raise ValueError(errors or "spatial preflight failed")
-            context.check_cancelled()
+            context.raise_if_cancelled()
             context.report_progress(1, 2, "生成空间成果")
             result = self.spatial.create_result(
                 project_id,
@@ -379,6 +379,29 @@ class MyGPRBackend:
 
         return self._submit_project_job(
             project_id, title or f"生成空间成果: {name}", operation
+        )
+
+    def build_georeference_3d(
+        self,
+        project_id: str,
+        line_id: str,
+        *,
+        preview_lod: str = "auto",
+        max_preview_traces: int = 240,
+        max_preview_samples: int = 160,
+        title: str | None = None,
+    ) -> str:
+        """Build a 3D georeference payload for one line as a shared-system job."""
+        return self._submit_project_job(
+            project_id,
+            title or f"三维地理配准: {line_id}",
+            lambda context: self.spatial.build_georeference_3d(
+                project_id,
+                line_id,
+                preview_lod=preview_lod,
+                max_preview_traces=max_preview_traces,
+                max_preview_samples=max_preview_samples,
+            ),
         )
 
     def submit_project_restore(

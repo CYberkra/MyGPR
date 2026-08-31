@@ -212,6 +212,15 @@ class ProjectSessionPort(Protocol):
 
     def set_current_spatial_result(self, result_id: str) -> None: ...
 
+    def build_georeference_3d(
+        self,
+        line_id: str,
+        *,
+        preview_lod: str = "auto",
+        max_preview_traces: int = 240,
+        max_preview_samples: int = 160,
+    ) -> Mapping[str, Any]: ...
+
     def list_report_packages(self) -> Sequence[ReportPackage]: ...
 
     def audit(

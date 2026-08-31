@@ -7,6 +7,7 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
+from core.field_project_models import validate_line_id
 from core.spatial_result_versions import SpatialResultVersionService
 from mygpr.domain.spatial.models import SpatialResult, SpatialTrack, SpatialTrackPoint
 
@@ -142,6 +143,32 @@ class SpatialPersistenceMixin:
         with self._lock:
             self._store.assert_writable()
             SpatialResultVersionService(self._store).set_current(str(result_id))
+
+    def build_georeference_3d(
+        self,
+        line_id: str,
+        *,
+        preview_lod: str = "auto",
+        max_preview_traces: int = 240,
+        max_preview_samples: int = 160,
+    ) -> Mapping[str, Any]:
+        """三维地理配准载荷（无人机轨迹 + B-scan 预览），无界面 API（P1-2）。"""
+        from core.field_processing_bridge import build_header_info
+        from core.uav_georeference_3d import build_airborne_georeference_3d_payload
+
+        safe = validate_line_id(str(line_id))
+        dataset = self._store.load_gpr_dataset(safe)
+        metadata = dict(self.read_trace_metadata(safe))
+        payload = build_airborne_georeference_3d_payload(
+            np.asarray(dataset.matrix),
+            build_header_info(dataset),
+            metadata,
+            selected_trace_index=None,
+            preview_lod=preview_lod,
+            max_preview_traces=max_preview_traces,
+            max_preview_samples=max_preview_samples,
+        )
+        return {} if payload is None else payload
 
 
 

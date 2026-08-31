@@ -25,3 +25,20 @@ class SpatialService:
 
     def set_current(self, project_id: str, result_id: str) -> None:
         self._projects.set_current_spatial_result(project_id, result_id)
+
+    def build_georeference_3d(
+        self,
+        project_id: str,
+        line_id: str,
+        *,
+        preview_lod: str = "auto",
+        max_preview_traces: int = 240,
+        max_preview_samples: int = 160,
+    ) -> Mapping[str, Any]:
+        return self._projects.build_georeference_3d(
+            project_id,
+            line_id,
+            preview_lod=preview_lod,
+            max_preview_traces=max_preview_traces,
+            max_preview_samples=max_preview_samples,
+        )

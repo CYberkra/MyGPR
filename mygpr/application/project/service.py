@@ -437,6 +437,22 @@ class ProjectService:
     def set_current_spatial_result(self, project_id: str, result_id: str) -> None:
         self._session(project_id).set_current_spatial_result(result_id)
 
+    def build_georeference_3d(
+        self,
+        project_id: str,
+        line_id: str,
+        *,
+        preview_lod: str = "auto",
+        max_preview_traces: int = 240,
+        max_preview_samples: int = 160,
+    ) -> dict:
+        return dict(self._session(project_id).build_georeference_3d(
+            line_id,
+            preview_lod=preview_lod,
+            max_preview_traces=max_preview_traces,
+            max_preview_samples=max_preview_samples,
+        ))
+
     def list_report_packages(self, project_id: str) -> tuple[ReportPackage, ...]:
         return tuple(self._session(project_id).list_report_packages())
 
