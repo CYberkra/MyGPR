@@ -39,9 +39,9 @@ from mygpr.domain.autotune.data_context import recommended_profile_for_header
 from core.processing_engine import (
     merge_result_header_info,
     merge_result_trace_metadata,
-    prepare_runtime_params,
-    run_processing_method,
 )
+from mygpr.domain.processing.models import ProcessingRequest
+from mygpr.infrastructure.processing.native_adapter import NativeProcessingExecutor
 from core.preset_profiles import (
     GUI_PRESETS_V1,
     RECOMMENDED_RUN_PROFILES,
@@ -51,10 +51,6 @@ from core.preset_profiles import (
 # 使用统一的方法注册表
 from core.methods_registry import (
     PROCESSING_METHODS,
-    method_svd_background,
-    method_fk_filter,
-    method_hankel_svd,
-    method_sliding_average,
 )
 
 
@@ -164,14 +160,6 @@ def load_gpr_csv(
 
     return np.asarray(data, dtype=float), header_info, trace_metadata
 
-
-# 本地方法注册（用于兼容旧的本地方法调用）
-LOCAL_METHODS = {
-    "svd_bg": method_svd_background,
-    "fk_filter": method_fk_filter,
-    "hankel_svd": method_hankel_svd,
-    "sliding_avg": method_sliding_average,
-}
 
 OPTIONAL_METHOD_DEPENDENCIES = {
     "wavelet_2d": [("pywt", "PyWavelets")],
@@ -396,116 +384,17 @@ def validate_config(cfg: Dict[str, Any], repo_root: str) -> ValidationResult:
 
 
 # ---------- Run pipeline ----------
-def _get_core_func(module_name: str, func_name: str):
-    """Resolve a registered legacy kernel through its explicit package path.
-
-    Historical launchers inserted ``PythonModule`` into ``sys.path`` and then
-    imported kernels as top-level modules.  The production CLI no longer
-    mutates global import paths, so registry names are resolved under the
-    bundled ``PythonModule`` package instead.
-    """
-    qualified_name = module_name if "." in module_name else f"PythonModule.{module_name}"
-    mod = importlib.import_module(qualified_name)
-    return getattr(mod, func_name)
+_NATIVE_EXECUTOR = NativeProcessingExecutor()
 
 
-def _run_core_method(
-    method_key: str,
-    func_name: str,
-    module_name: str,
-    data: np.ndarray,
-    params: Dict[str, Any],
-    out_dir: str,
-) -> np.ndarray:
-    func = _get_core_func(module_name, func_name)
-
-    length_trace = data.shape[0]
-    start_position = 0
-    end_position = data.shape[1]
-    scans_per_meter = 1
-
-
-    temp_in_csv = os.path.join(out_dir, "temp_in.csv")
-    temp_out_csv = os.path.join(out_dir, f"{method_key}_tmp_out.csv")
-    temp_out_png = os.path.join(out_dir, f"{method_key}_tmp_out.png")
-    savecsv(data, temp_in_csv)
-
-    if method_key == "compensatingGain":
-        gain_min = float(params.get("gain_min", 1.0))
-        gain_max = float(params.get("gain_max", 6.0))
-        gain_func = np.linspace(gain_min, gain_max, data.shape[0]).tolist()
-        func(
-            temp_in_csv,
-            temp_out_csv,
-            temp_out_png,
-            length_trace,
-            start_position,
-            end_position,
-            gain_func,
-        )
-    elif method_key == "dewow":
-        window = int(params.get("window", max(1, length_trace // 4)))
-        func(
-            temp_in_csv,
-            temp_out_csv,
-            temp_out_png,
-            length_trace,
-            start_position,
-            scans_per_meter,
-            window,
-        )
-    elif method_key == "set_zero_time":
-        new_zero_time = float(params.get("new_zero_time", 5.0))
-        func(
-            temp_in_csv,
-            temp_out_csv,
-            temp_out_png,
-            length_trace,
-            start_position,
-            scans_per_meter,
-            new_zero_time,
-        )
-    elif method_key == "agcGain":
-        window = int(params.get("window", max(1, length_trace // 4)))
-        func(
-            temp_in_csv,
-            temp_out_csv,
-            temp_out_png,
-            length_trace,
-            start_position,
-            scans_per_meter,
-            window,
-        )
-    elif method_key == "subtracting_average_2D":
-        ntraces = int(params.get("ntraces", 501))
-        func(
-            temp_in_csv,
-            temp_out_csv,
-            temp_out_png,
-            length_trace,
-            start_position,
-            scans_per_meter,
-            ntraces,
-        )
-    elif method_key == "running_average_2D":
-        ntraces = int(params.get("ntraces", 9))
-        func(
-            temp_in_csv,
-            temp_out_csv,
-            temp_out_png,
-            length_trace,
-            start_position,
-            scans_per_meter,
-            ntraces,
-        )
-    else:
-        raise ValueError(f"Unsupported core method in phase-1: {method_key}")
-
-    out_df = pd.read_csv(temp_out_csv, header=None)
-    out_data = out_df.values
-    if out_data.ndim == 1:
-        out_data = out_data.reshape(-1, 1)
-    return out_data
+def _sanitize_for_native(data: np.ndarray) -> np.ndarray:
+    """Native 执行器不做输入清洗；保留旧 legacy 引擎的防御性 NaN 处理。"""
+    arr = np.asarray(data)
+    if np.isfinite(arr).all():
+        return arr
+    finite = np.isfinite(arr)
+    fill = float(np.mean(arr[finite])) if finite.any() else 0.0
+    return np.nan_to_num(arr, nan=fill, posinf=fill, neginf=fill)
 
 
 def run_job(job: Dict[str, Any], repo_root: str, output_dir: str) -> Dict[str, Any]:
@@ -576,39 +465,27 @@ def run_job(job: Dict[str, Any], repo_root: str, output_dir: str) -> Dict[str, A
     )
     for idx, step in enumerate(methods):
         key = step["key"]
-        meta = PROCESSING_METHODS[key]
         params = _merge_params(key, step.get("params"))
 
-        if meta["type"] == "core":
-            new_data = _run_core_method(
-                key, meta["func"], meta["module"], current, params, job_out_dir
+        result = _NATIVE_EXECUTOR.execute(
+            ProcessingRequest(
+                data=_sanitize_for_native(current),
+                method_id=key,
+                params=params,
+                header_info=current_header_info,
+                trace_metadata=current_trace_metadata,
             )
-            current_header_info = merge_result_header_info(
-                current_header_info,
-                None,
-                np.asarray(new_data).shape,
-            )
-        else:
-            new_data, result_meta = run_processing_method(
-                current,
-                key,
-                prepare_runtime_params(
-                    key,
-                    params,
-                    current_header_info,
-                    current_trace_metadata,
-                    current.shape,
-                ),
-            )
-            current_header_info = merge_result_header_info(
-                current_header_info,
-                result_meta,
-                np.asarray(new_data).shape,
-            )
-            current_trace_metadata = merge_result_trace_metadata(
-                current_trace_metadata,
-                result_meta,
-            )
+        )
+        new_data = np.asarray(result.data)
+        current_header_info = merge_result_header_info(
+            current_header_info,
+            result.metadata,
+            new_data.shape,
+        )
+        current_trace_metadata = merge_result_trace_metadata(
+            current_trace_metadata,
+            result.metadata,
+        )
 
         step_csv = os.path.join(job_out_dir, f"{idx:02d}_{key}.csv")
         step_png = os.path.join(job_out_dir, f"{idx:02d}_{key}.png")

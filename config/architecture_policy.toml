@@ -37,6 +37,13 @@ remove_after = "1.1.0"
 reason = "NATIVE_ALGORITHMS 单一事实来源暂以懒加载方式进入 legacy registry；1.1.0 前改端口/延迟注入。"
 
 [[migration_exceptions]]
+path_prefix = "core/evidence_export.py"
+allowed_local_import_prefixes = ["mygpr.domain", "mygpr.infrastructure.processing.native_adapter"]
+owner = "processing-backend"
+remove_after = "1.1.0"
+reason = "证据导出与 UI/cli_batch 共用 native 执行路径（P1-1 步骤 1 收敛）；随 processing_engine 兼容壳化一并复查。"
+
+[[migration_exceptions]]
 path_prefix = "ui/constants.py"
 allowed_local_import_prefixes = ["core.app_paths"]
 owner = "qt-ui"
