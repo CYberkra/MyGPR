@@ -26,6 +26,6 @@
 
 ## 任务 F（架构优化）后续
 
-1. **候选 2：双执行器底层收敛**：UI 侧 schema 已统一（facade `_extract_parameter_schema`），但 `LegacyProcessingExecutor`（`mygpr/infrastructure/processing/legacy_adapter.py`）与 `NativeProcessingExecutor`（`native_adapter.py`）双实现仍并存。需评估合并或明确契约边界。
+1. **候选 2：双执行器底层收敛**：实施计划见 `_handoff_20260830/任务F候选2_双执行器收敛实施计划.md`。**阶段 0（等价性基线）已完成**：`tests/test_native_convergence_baseline.py` + `fixtures/processing_convergence/descriptor_baseline.json` 钉死 36 方法数值/描述符基线（native 覆盖已达 36/36，legacy 执行器生产路径已不可达）。元数据决策已定案：display 元数据经 `metadata_bridge.py` 引用 core 单一来源，parameter_schema 固化进 `NativeAlgorithm`。待办：阶段 1 元数据收敛 → 阶段 2 拆除 Legacy/Composite 四类 → 阶段 3 收尾。
 2. **候选 3：关闭**（facade 重构后仅 259 行，原"体量膨胀"不成立，不再拆分）。
 3. **RFC issue #6** 已归档任务 F 决策记录。

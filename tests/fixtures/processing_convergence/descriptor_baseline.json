@@ -1,0 +1,1304 @@
+{
+  "agcGain": {
+    "auto_tune_enabled": true,
+    "auto_tune_family": "gain",
+    "auto_tune_stage": "gain",
+    "capabilities": [
+      "auto_tune",
+      "block-axis-columns",
+      "cancellable",
+      "chunked",
+      "native",
+      "ndarray"
+    ],
+    "category": "gain",
+    "implementation_version": "native-1.0",
+    "name": "自动增益控制（AGC）",
+    "parameter_schema": {
+      "window": {
+        "default": 11,
+        "min": 1,
+        "type": "int"
+      }
+    },
+    "visibility": "public"
+  },
+  "amplitude_scale": {
+    "auto_tune_enabled": false,
+    "auto_tune_family": "",
+    "auto_tune_stage": "gain",
+    "capabilities": [
+      "cancellable",
+      "global_transform",
+      "loaded_global",
+      "native",
+      "ndarray"
+    ],
+    "category": "gain",
+    "implementation_version": "native-extended-1.0",
+    "name": "幅值缩放/归一化",
+    "parameter_schema": {
+      "mode": {
+        "default": "constant",
+        "type": "str"
+      },
+      "scale": {
+        "default": 1.0,
+        "type": "float"
+      },
+      "target": {
+        "default": 1.0,
+        "type": "float"
+      }
+    },
+    "visibility": "public"
+  },
+  "ccbs": {
+    "auto_tune_enabled": false,
+    "auto_tune_family": "",
+    "auto_tune_stage": "background",
+    "capabilities": [
+      "cancellable",
+      "global_transform",
+      "loaded_global",
+      "native",
+      "ndarray"
+    ],
+    "category": "background_suppression",
+    "implementation_version": "native-extended-1.0",
+    "name": "互相关背景抑制（CCBS）",
+    "parameter_schema": {
+      "use_custom_ref": {
+        "default": false,
+        "type": "bool"
+      }
+    },
+    "visibility": "public"
+  },
+  "compensatingGain": {
+    "auto_tune_enabled": true,
+    "auto_tune_family": "gain",
+    "auto_tune_stage": "gain",
+    "capabilities": [
+      "auto_tune",
+      "block-axis-columns",
+      "cancellable",
+      "chunked",
+      "native",
+      "ndarray"
+    ],
+    "category": "gain",
+    "implementation_version": "native-1.0",
+    "name": "增益补偿",
+    "parameter_schema": {
+      "gain_max": {
+        "default": 6.0,
+        "type": "float"
+      },
+      "gain_min": {
+        "default": 1.0,
+        "type": "float"
+      }
+    },
+    "visibility": "public"
+  },
+  "dewow": {
+    "auto_tune_enabled": true,
+    "auto_tune_family": "drift",
+    "auto_tune_stage": "drift",
+    "capabilities": [
+      "auto_tune",
+      "block-axis-columns",
+      "cancellable",
+      "chunked",
+      "native",
+      "ndarray"
+    ],
+    "category": "drift_correction",
+    "implementation_version": "native-1.0",
+    "name": "低频漂移矫正（Dewow）",
+    "parameter_schema": {
+      "window": {
+        "default": 23,
+        "min": 1,
+        "type": "int"
+      }
+    },
+    "visibility": "public"
+  },
+  "energy_decay_gain": {
+    "auto_tune_enabled": true,
+    "auto_tune_family": "gain",
+    "auto_tune_stage": "gain",
+    "capabilities": [
+      "auto_tune",
+      "cancellable",
+      "global_transform",
+      "loaded_global",
+      "native",
+      "ndarray"
+    ],
+    "category": "gain",
+    "implementation_version": "native-extended-1.0",
+    "name": "能量衰减增益",
+    "parameter_schema": {
+      "floor_ratio": {
+        "default": 0.05,
+        "type": "float"
+      },
+      "max_gain": {
+        "default": 8.0,
+        "type": "float"
+      },
+      "min_gain": {
+        "default": 0.5,
+        "type": "float"
+      },
+      "smoothing_samples": {
+        "default": 31,
+        "min": 1,
+        "type": "int"
+      },
+      "strength": {
+        "default": 1.0,
+        "type": "float"
+      }
+    },
+    "visibility": "public"
+  },
+  "equidistant_trace_resample": {
+    "auto_tune_enabled": false,
+    "auto_tune_family": "",
+    "auto_tune_stage": "preprocess",
+    "capabilities": [
+      "cancellable",
+      "global_transform",
+      "loaded_global",
+      "native",
+      "ndarray"
+    ],
+    "category": "quality_control",
+    "implementation_version": "native-extended-1.0",
+    "name": "等距道重采样",
+    "parameter_schema": {
+      "spacing_m": {
+        "default": 0.0,
+        "min": 0.0,
+        "type": "float"
+      }
+    },
+    "visibility": "hidden"
+  },
+  "fk_filter": {
+    "auto_tune_enabled": true,
+    "auto_tune_family": "fk",
+    "auto_tune_stage": "frequency",
+    "capabilities": [
+      "auto_tune",
+      "cancellable",
+      "file_backed_staging",
+      "global_transform",
+      "native",
+      "ndarray"
+    ],
+    "category": "filtering",
+    "implementation_version": "native-global-1.0",
+    "name": "F-K 频波数滤波",
+    "parameter_schema": {
+      "angle_high": {
+        "default": 65.0,
+        "type": "float"
+      },
+      "angle_low": {
+        "default": 10.0,
+        "type": "float"
+      },
+      "taper_width": {
+        "default": 5.0,
+        "type": "float"
+      }
+    },
+    "visibility": "public"
+  },
+  "frequency_filter_1d": {
+    "auto_tune_enabled": true,
+    "auto_tune_family": "frequency",
+    "auto_tune_stage": "frequency",
+    "capabilities": [
+      "auto_tune",
+      "block-axis-columns",
+      "cancellable",
+      "chunked",
+      "native",
+      "ndarray"
+    ],
+    "category": "filtering",
+    "implementation_version": "native-1.0",
+    "name": "一维频域滤波",
+    "parameter_schema": {
+      "filter_type": {
+        "default": "bandpass",
+        "type": "str"
+      },
+      "high_freq_mhz": {
+        "default": 800.0,
+        "type": "float"
+      },
+      "low_freq_mhz": {
+        "default": 10.0,
+        "type": "float"
+      },
+      "taper_ratio": {
+        "default": 0.0,
+        "max": 0.5,
+        "min": 0.0,
+        "type": "float"
+      }
+    },
+    "visibility": "public"
+  },
+  "hankel_svd": {
+    "auto_tune_enabled": true,
+    "auto_tune_family": "denoise",
+    "auto_tune_stage": "denoise",
+    "capabilities": [
+      "auto_tune",
+      "cancellable",
+      "file_backed_staging",
+      "global_transform",
+      "native",
+      "ndarray"
+    ],
+    "category": "denoising",
+    "implementation_version": "native-global-1.0",
+    "name": "Hankel-SVD 去噪",
+    "parameter_schema": {
+      "aggressiveness": {
+        "default": 0.5,
+        "type": "float"
+      },
+      "rank": {
+        "default": 0,
+        "min": 0,
+        "type": "int"
+      },
+      "window_length": {
+        "default": 0,
+        "min": 0,
+        "type": "int"
+      }
+    },
+    "visibility": "public"
+  },
+  "hilbert_envelope": {
+    "auto_tune_enabled": false,
+    "auto_tune_family": "",
+    "auto_tune_stage": "",
+    "capabilities": [
+      "block-axis-columns",
+      "cancellable",
+      "chunked",
+      "native",
+      "ndarray"
+    ],
+    "category": "attribute_analysis",
+    "implementation_version": "native-extended-1.0",
+    "name": "Hilbert 包络",
+    "parameter_schema": {
+      "log_compress": {
+        "default": false,
+        "type": "bool"
+      },
+      "normalize": {
+        "default": false,
+        "type": "bool"
+      }
+    },
+    "visibility": "public"
+  },
+  "kirchhoff_migration": {
+    "auto_tune_enabled": false,
+    "auto_tune_family": "",
+    "auto_tune_stage": "",
+    "capabilities": [
+      "cancellable",
+      "global_transform",
+      "loaded_global",
+      "native",
+      "ndarray"
+    ],
+    "category": "migration",
+    "implementation_version": "native-kirchhoff-2.0",
+    "name": "Kirchhoff 迁移",
+    "parameter_schema": {
+      "allow_gpu_runtime_fallback": {
+        "default": true,
+        "type": "bool"
+      },
+      "alpha": {
+        "default": 1.0,
+        "type": "float"
+      },
+      "backend": {
+        "default": "auto",
+        "type": "str"
+      },
+      "depth": {
+        "default": 40.0,
+        "min": 0.01,
+        "type": "float"
+      },
+      "freq": {
+        "default": 50000000.0,
+        "min": 1.0,
+        "type": "float"
+      },
+      "hei_cor": {
+        "default": 0,
+        "type": "int"
+      },
+      "length_m": {
+        "default": 0.0,
+        "min": 0.0,
+        "type": "float"
+      },
+      "num_cal": {
+        "default": 1,
+        "min": 1,
+        "type": "int"
+      },
+      "time_window_ns": {
+        "default": 0.0,
+        "min": 0.0,
+        "type": "float"
+      },
+      "topo_cor": {
+        "default": 0,
+        "type": "int"
+      },
+      "v": {
+        "default": 0.1,
+        "min": 0.001,
+        "type": "float"
+      },
+      "weight": {
+        "default": 0.5,
+        "min": 0.0,
+        "type": "float"
+      }
+    },
+    "visibility": "public"
+  },
+  "median_background_2D": {
+    "auto_tune_enabled": true,
+    "auto_tune_family": "background",
+    "auto_tune_stage": "background",
+    "capabilities": [
+      "auto_tune",
+      "block-axis-rows",
+      "cancellable",
+      "chunked",
+      "native",
+      "ndarray"
+    ],
+    "category": "background_suppression",
+    "implementation_version": "native-extended-1.0",
+    "name": "中值背景抑制",
+    "parameter_schema": {
+      "ntraces": {
+        "default": 51,
+        "min": 1,
+        "type": "int"
+      },
+      "time_end_ns": {
+        "default": 0.0,
+        "type": "float"
+      },
+      "time_start_ns": {
+        "default": 0.0,
+        "type": "float"
+      }
+    },
+    "visibility": "public"
+  },
+  "motion_compensation_attitude": {
+    "auto_tune_enabled": true,
+    "auto_tune_family": "motion_comp",
+    "auto_tune_stage": "motion_comp",
+    "capabilities": [
+      "auto_tune",
+      "cancellable",
+      "global_transform",
+      "loaded_global",
+      "native",
+      "ndarray",
+      "trace_metadata"
+    ],
+    "category": "motion_compensation",
+    "implementation_version": "native-motion-2.0",
+    "name": "姿态/APC足迹修正",
+    "parameter_schema": {
+      "apc_offset_x_m": {
+        "default": 0.0,
+        "type": "float"
+      },
+      "apc_offset_y_m": {
+        "default": 0.0,
+        "type": "float"
+      },
+      "apc_offset_z_m": {
+        "default": 0.0,
+        "type": "float"
+      },
+      "max_abs_tilt_deg": {
+        "default": 20.0,
+        "min": 1.0,
+        "type": "float"
+      }
+    },
+    "visibility": "public"
+  },
+  "motion_compensation_height": {
+    "auto_tune_enabled": true,
+    "auto_tune_family": "motion_comp",
+    "auto_tune_stage": "motion_comp",
+    "capabilities": [
+      "auto_tune",
+      "cancellable",
+      "global_transform",
+      "loaded_global",
+      "native",
+      "ndarray",
+      "trace_metadata"
+    ],
+    "category": "motion_compensation",
+    "implementation_version": "native-motion-2.0",
+    "name": "飞行高度归一化",
+    "parameter_schema": {
+      "compensate_amplitude": {
+        "default": true,
+        "type": "bool"
+      },
+      "compensate_time_shift": {
+        "default": true,
+        "type": "bool"
+      },
+      "height_source": {
+        "choices": [
+          "auto",
+          "height_agl_m",
+          "flight_height_m"
+        ],
+        "default": "auto",
+        "type": "str"
+      },
+      "manual_height": {
+        "default": 10.0,
+        "min": 0.0,
+        "type": "float"
+      },
+      "reference_height_mode": {
+        "default": "mean",
+        "type": "str"
+      },
+      "wave_speed_m_per_ns": {
+        "default": 0.299792458,
+        "min": 0.01,
+        "type": "float"
+      }
+    },
+    "visibility": "public"
+  },
+  "motion_compensation_speed": {
+    "auto_tune_enabled": true,
+    "auto_tune_family": "motion_comp",
+    "auto_tune_stage": "motion_comp",
+    "capabilities": [
+      "auto_tune",
+      "cancellable",
+      "global_transform",
+      "loaded_global",
+      "native",
+      "ndarray",
+      "trace_metadata"
+    ],
+    "category": "motion_compensation",
+    "implementation_version": "native-motion-2.0",
+    "name": "速度误差补偿",
+    "parameter_schema": {
+      "spacing_m": {
+        "default": 0.0,
+        "min": 0.0,
+        "type": "float"
+      }
+    },
+    "visibility": "public"
+  },
+  "motion_compensation_v2": {
+    "auto_tune_enabled": true,
+    "auto_tune_family": "motion_comp",
+    "auto_tune_stage": "motion_comp",
+    "capabilities": [
+      "auto_tune",
+      "cancellable",
+      "global_transform",
+      "loaded_global",
+      "native",
+      "ndarray",
+      "trace_metadata"
+    ],
+    "category": "motion_compensation",
+    "implementation_version": "native-motion-2.0",
+    "name": "UAV 运动补偿 V2",
+    "parameter_schema": {
+      "air_wave_speed_m_per_ns": {
+        "default": 0.299792458,
+        "min": 0.01,
+        "type": "float"
+      },
+      "apc_offset_x_m": {
+        "default": 0.0,
+        "type": "float"
+      },
+      "apc_offset_y_m": {
+        "default": 0.0,
+        "type": "float"
+      },
+      "apc_offset_z_m": {
+        "default": 0.0,
+        "type": "float"
+      },
+      "compensate_amplitude": {
+        "default": true,
+        "type": "bool"
+      },
+      "compensate_time_shift": {
+        "default": true,
+        "type": "bool"
+      },
+      "height_reference_mode": {
+        "default": "mean",
+        "type": "str"
+      },
+      "height_source": {
+        "default": "auto",
+        "type": "str"
+      },
+      "interpolation_mode": {
+        "default": "linear",
+        "type": "str"
+      },
+      "manual_height_m": {
+        "default": 1.5,
+        "min": 0.01,
+        "type": "float"
+      },
+      "max_abs_tilt_deg": {
+        "default": 20.0,
+        "min": 1.0,
+        "type": "float"
+      },
+      "max_amplitude_scale": {
+        "default": 2.0,
+        "type": "float"
+      },
+      "max_shift_ns": {
+        "default": 20.0,
+        "type": "float"
+      },
+      "max_shift_samples": {
+        "default": 0.0,
+        "type": "float"
+      },
+      "resample_spacing_m": {
+        "default": 0.0,
+        "min": 0.0,
+        "type": "float"
+      }
+    },
+    "visibility": "public"
+  },
+  "motion_compensation_vibration": {
+    "auto_tune_enabled": true,
+    "auto_tune_family": "denoise",
+    "auto_tune_stage": "artifact",
+    "capabilities": [
+      "auto_tune",
+      "cancellable",
+      "global_transform",
+      "loaded_global",
+      "native",
+      "ndarray"
+    ],
+    "category": "artifact_suppression",
+    "implementation_version": "native-motion-2.0",
+    "name": "周期条带伪影抑制（实验）",
+    "parameter_schema": {
+      "background_mix": {
+        "default": 0.02,
+        "type": "float"
+      },
+      "max_restore_gain": {
+        "default": 1.25,
+        "type": "float"
+      },
+      "preserve_mix": {
+        "default": 0.35,
+        "type": "float"
+      },
+      "preserve_row_percentile": {
+        "default": 94.0,
+        "type": "float"
+      },
+      "smooth_window": {
+        "default": 9,
+        "min": 1,
+        "type": "int"
+      }
+    },
+    "visibility": "public"
+  },
+  "rpca_background": {
+    "auto_tune_enabled": false,
+    "auto_tune_family": "",
+    "auto_tune_stage": "",
+    "capabilities": [
+      "cancellable",
+      "file_backed_staging",
+      "global_transform",
+      "native",
+      "ndarray"
+    ],
+    "category": "background_suppression",
+    "implementation_version": "native-global-1.0",
+    "name": "RPCA 背景抑制",
+    "parameter_schema": {
+      "lam": {
+        "default": 0.08,
+        "type": "float"
+      },
+      "max_iter": {
+        "default": 120,
+        "type": "int"
+      },
+      "mu": {
+        "default": 0.0,
+        "type": "float"
+      },
+      "tol": {
+        "default": 1e-06,
+        "type": "float"
+      }
+    },
+    "visibility": "hidden"
+  },
+  "rtm_migration": {
+    "auto_tune_enabled": false,
+    "auto_tune_family": "",
+    "auto_tune_stage": "migration",
+    "capabilities": [
+      "cancellable",
+      "global_transform",
+      "loaded_global",
+      "native",
+      "ndarray"
+    ],
+    "category": "migration",
+    "implementation_version": "experimental-rtm-1.0",
+    "name": "RTM 反向时间迁移",
+    "parameter_schema": {
+      "boundary_strength": {
+        "default": 3.5,
+        "max": 12.0,
+        "min": 0.0,
+        "type": "float"
+      },
+      "boundary_width": {
+        "default": 24,
+        "min": 0,
+        "type": "int"
+      },
+      "cfl_limit": {
+        "default": 0.65,
+        "max": 0.7,
+        "min": 0.2,
+        "type": "float"
+      },
+      "depth": {
+        "default": 20.0,
+        "min": 0.01,
+        "type": "float"
+      },
+      "depth_m": {
+        "default": 20.0,
+        "min": 0.01,
+        "type": "float"
+      },
+      "dt_ns": {
+        "default": 0.1,
+        "min": 1e-09,
+        "type": "float"
+      },
+      "dx": {
+        "default": 0.0,
+        "min": 0.0,
+        "type": "float"
+      },
+      "dx_m": {
+        "default": 0.0,
+        "min": 0.0,
+        "type": "float"
+      },
+      "dz": {
+        "default": 0.0,
+        "min": 0.0,
+        "type": "float"
+      },
+      "dz_m": {
+        "default": 0.0,
+        "min": 0.0,
+        "type": "float"
+      },
+      "injection_scale": {
+        "default": 1.0,
+        "type": "float"
+      },
+      "length_m": {
+        "default": 0.0,
+        "min": 0.0,
+        "type": "float"
+      },
+      "max_cell_updates": {
+        "default": 1500000000,
+        "min": 1,
+        "type": "int"
+      },
+      "max_grid_elements": {
+        "default": 40000000,
+        "min": 1,
+        "type": "int"
+      },
+      "normalize": {
+        "default": false,
+        "type": "bool"
+      },
+      "remove_surface_row": {
+        "default": true,
+        "type": "bool"
+      },
+      "source_depth_index": {
+        "default": 1,
+        "min": 0,
+        "type": "int"
+      },
+      "time_window_ns": {
+        "default": 0.0,
+        "min": 0.0,
+        "type": "float"
+      },
+      "v": {
+        "default": 0.1,
+        "min": 0.001,
+        "type": "float"
+      },
+      "velocity_m_per_ns": {
+        "default": 0.1,
+        "min": 0.001,
+        "type": "float"
+      }
+    },
+    "visibility": "public"
+  },
+  "running_average_2D": {
+    "auto_tune_enabled": true,
+    "auto_tune_family": "impulse",
+    "auto_tune_stage": "impulse",
+    "capabilities": [
+      "auto_tune",
+      "block-axis-rows",
+      "cancellable",
+      "chunked",
+      "native",
+      "ndarray"
+    ],
+    "category": "denoising",
+    "implementation_version": "native-1.0",
+    "name": "道向运行平均平滑",
+    "parameter_schema": {
+      "ntraces": {
+        "default": 9,
+        "min": 1,
+        "type": "int"
+      }
+    },
+    "visibility": "public"
+  },
+  "sec_gain": {
+    "auto_tune_enabled": true,
+    "auto_tune_family": "gain",
+    "auto_tune_stage": "gain",
+    "capabilities": [
+      "auto_tune",
+      "block-axis-columns",
+      "cancellable",
+      "chunked",
+      "native",
+      "ndarray"
+    ],
+    "category": "gain",
+    "implementation_version": "native-1.0",
+    "name": "SEC 增益",
+    "parameter_schema": {
+      "gain_max": {
+        "default": 6.0,
+        "type": "float"
+      },
+      "gain_min": {
+        "default": 1.0,
+        "type": "float"
+      },
+      "power": {
+        "default": 1.0,
+        "type": "float"
+      }
+    },
+    "visibility": "public"
+  },
+  "set_zero_time": {
+    "auto_tune_enabled": true,
+    "auto_tune_family": "zero_time",
+    "auto_tune_stage": "zero_time",
+    "capabilities": [
+      "auto_tune",
+      "block-axis-columns",
+      "cancellable",
+      "chunked",
+      "native",
+      "ndarray"
+    ],
+    "category": "time_correction",
+    "implementation_version": "native-1.0",
+    "name": "零时矫正",
+    "parameter_schema": {
+      "new_zero_time": {
+        "default": 5.0,
+        "min": 0.0,
+        "type": "float"
+      }
+    },
+    "visibility": "public"
+  },
+  "sliding_avg": {
+    "auto_tune_enabled": true,
+    "auto_tune_family": "background",
+    "auto_tune_stage": "background",
+    "capabilities": [
+      "auto_tune",
+      "block-axis-rows",
+      "cancellable",
+      "chunked",
+      "native",
+      "ndarray"
+    ],
+    "category": "background_suppression",
+    "implementation_version": "native-1.0",
+    "name": "滑动平均背景抑制",
+    "parameter_schema": {
+      "axis": {
+        "default": 1,
+        "type": "int"
+      },
+      "window_size": {
+        "default": 10,
+        "min": 1,
+        "type": "int"
+      }
+    },
+    "visibility": "public"
+  },
+  "stolt_migration": {
+    "auto_tune_enabled": false,
+    "auto_tune_family": "",
+    "auto_tune_stage": "",
+    "capabilities": [
+      "cancellable",
+      "file_backed_staging",
+      "global_transform",
+      "native",
+      "ndarray"
+    ],
+    "category": "migration",
+    "implementation_version": "native-global-1.0",
+    "name": "Stolt 迁移",
+    "parameter_schema": {
+      "dt": {
+        "default": 0.1,
+        "type": "float"
+      },
+      "dx": {
+        "default": 0.05,
+        "type": "float"
+      },
+      "pad_t": {
+        "default": 1,
+        "type": "int"
+      },
+      "pad_x": {
+        "default": 1,
+        "type": "int"
+      },
+      "v": {
+        "default": 0.1,
+        "type": "float"
+      }
+    },
+    "visibility": "public"
+  },
+  "subtracting_average_2D": {
+    "auto_tune_enabled": true,
+    "auto_tune_family": "background",
+    "auto_tune_stage": "background",
+    "capabilities": [
+      "auto_tune",
+      "block-axis-rows",
+      "cancellable",
+      "chunked",
+      "native",
+      "ndarray"
+    ],
+    "category": "background_suppression",
+    "implementation_version": "native-1.0",
+    "name": "平均背景抑制",
+    "parameter_schema": {
+      "ntraces": {
+        "default": 501,
+        "min": 1,
+        "type": "int"
+      }
+    },
+    "visibility": "public"
+  },
+  "svd_bg": {
+    "auto_tune_enabled": true,
+    "auto_tune_family": "background",
+    "auto_tune_stage": "background",
+    "capabilities": [
+      "auto_tune",
+      "cancellable",
+      "file_backed_staging",
+      "global_transform",
+      "native",
+      "ndarray"
+    ],
+    "category": "background_suppression",
+    "implementation_version": "native-global-1.0",
+    "name": "SVD 背景抑制",
+    "parameter_schema": {
+      "rank": {
+        "default": 1,
+        "min": 1,
+        "type": "int"
+      },
+      "solver": {
+        "default": "auto",
+        "type": "str"
+      }
+    },
+    "visibility": "public"
+  },
+  "svd_subspace": {
+    "auto_tune_enabled": true,
+    "auto_tune_family": "denoise",
+    "auto_tune_stage": "denoise",
+    "capabilities": [
+      "auto_tune",
+      "cancellable",
+      "file_backed_staging",
+      "global_transform",
+      "native",
+      "ndarray"
+    ],
+    "category": "denoising",
+    "implementation_version": "native-global-1.0",
+    "name": "SVD 子空间去噪",
+    "parameter_schema": {
+      "rank_end": {
+        "default": 20,
+        "min": 1,
+        "type": "int"
+      },
+      "rank_start": {
+        "default": 1,
+        "min": 1,
+        "type": "int"
+      },
+      "solver": {
+        "default": "auto",
+        "type": "str"
+      }
+    },
+    "visibility": "public"
+  },
+  "time_cut": {
+    "auto_tune_enabled": false,
+    "auto_tune_family": "",
+    "auto_tune_stage": "preprocess",
+    "capabilities": [
+      "cancellable",
+      "global_transform",
+      "loaded_global",
+      "native",
+      "ndarray"
+    ],
+    "category": "time_correction",
+    "implementation_version": "native-extended-1.0",
+    "name": "时间窗裁剪",
+    "parameter_schema": {
+      "mode": {
+        "default": "remove_below",
+        "type": "str"
+      },
+      "time_end_ns": {
+        "default": 0.0,
+        "type": "float"
+      },
+      "time_start_ns": {
+        "default": 0.0,
+        "type": "float"
+      }
+    },
+    "visibility": "public"
+  },
+  "time_to_depth": {
+    "auto_tune_enabled": false,
+    "auto_tune_family": "",
+    "auto_tune_stage": "",
+    "capabilities": [
+      "cancellable",
+      "global_transform",
+      "loaded_global",
+      "native",
+      "ndarray"
+    ],
+    "category": "depth_conversion",
+    "implementation_version": "native-extended-1.0",
+    "name": "时间-深度转换",
+    "parameter_schema": {
+      "dt": {
+        "default": 0.1,
+        "type": "float"
+      },
+      "dz": {
+        "default": 0.02,
+        "type": "float"
+      },
+      "v": {
+        "default": 0.1,
+        "type": "float"
+      }
+    },
+    "visibility": "public"
+  },
+  "trace_median_filter": {
+    "auto_tune_enabled": true,
+    "auto_tune_family": "denoise",
+    "auto_tune_stage": "denoise",
+    "capabilities": [
+      "auto_tune",
+      "block-axis-rows",
+      "cancellable",
+      "chunked",
+      "native",
+      "ndarray"
+    ],
+    "category": "denoising",
+    "implementation_version": "native-1.0",
+    "name": "道向中值滤波",
+    "parameter_schema": {
+      "window_traces": {
+        "default": 5,
+        "min": 1,
+        "type": "int"
+      }
+    },
+    "visibility": "public"
+  },
+  "trace_qc": {
+    "auto_tune_enabled": false,
+    "auto_tune_family": "",
+    "auto_tune_stage": "preprocess",
+    "capabilities": [
+      "cancellable",
+      "global_transform",
+      "loaded_global",
+      "native",
+      "ndarray"
+    ],
+    "category": "quality_control",
+    "implementation_version": "native-extended-1.0",
+    "name": "坏道质量控制",
+    "parameter_schema": {
+      "empty_rms_threshold": {
+        "default": 0.0,
+        "type": "float"
+      },
+      "manual_trace_indices": {
+        "default": "",
+        "type": "str"
+      },
+      "mode": {
+        "default": "mark",
+        "type": "str"
+      },
+      "spike_zscore": {
+        "default": 0.0,
+        "type": "float"
+      }
+    },
+    "visibility": "hidden"
+  },
+  "trace_savgol_filter": {
+    "auto_tune_enabled": true,
+    "auto_tune_family": "denoise",
+    "auto_tune_stage": "denoise",
+    "capabilities": [
+      "auto_tune",
+      "block-axis-rows",
+      "cancellable",
+      "chunked",
+      "native",
+      "ndarray"
+    ],
+    "category": "denoising",
+    "implementation_version": "native-1.0",
+    "name": "道向 Savitzky-Golay 平滑",
+    "parameter_schema": {
+      "polyorder": {
+        "default": 2,
+        "type": "int"
+      },
+      "window_traces": {
+        "default": 7,
+        "min": 1,
+        "type": "int"
+      }
+    },
+    "visibility": "public"
+  },
+  "trajectory_smoothing": {
+    "auto_tune_enabled": true,
+    "auto_tune_family": "motion_comp",
+    "auto_tune_stage": "motion_comp",
+    "capabilities": [
+      "auto_tune",
+      "cancellable",
+      "global_transform",
+      "loaded_global",
+      "native",
+      "ndarray",
+      "trace_metadata"
+    ],
+    "category": "motion_compensation",
+    "implementation_version": "native-motion-2.0",
+    "name": "轨迹平滑",
+    "parameter_schema": {
+      "method": {
+        "default": "savgol",
+        "type": "str"
+      },
+      "polyorder": {
+        "default": 3,
+        "min": 1,
+        "type": "int"
+      },
+      "window_length": {
+        "default": 21,
+        "min": 3,
+        "type": "int"
+      }
+    },
+    "visibility": "public"
+  },
+  "wavelet_2d": {
+    "auto_tune_enabled": true,
+    "auto_tune_family": "denoise",
+    "auto_tune_stage": "denoise",
+    "capabilities": [
+      "auto_tune",
+      "cancellable",
+      "file_backed_staging",
+      "global_transform",
+      "native",
+      "ndarray"
+    ],
+    "category": "denoising",
+    "implementation_version": "native-extended-1.0",
+    "name": "Wavelet 2D 去噪",
+    "parameter_schema": {
+      "levels": {
+        "default": 2,
+        "min": 1,
+        "type": "int"
+      },
+      "threshold": {
+        "default": 0.1,
+        "type": "float"
+      },
+      "threshold_strategy": {
+        "default": "mad_universal",
+        "type": "str"
+      },
+      "wavelet": {
+        "default": "db4",
+        "type": "str"
+      }
+    },
+    "visibility": "public"
+  },
+  "wavelet_svd": {
+    "auto_tune_enabled": true,
+    "auto_tune_family": "denoise",
+    "auto_tune_stage": "denoise",
+    "capabilities": [
+      "auto_tune",
+      "cancellable",
+      "file_backed_staging",
+      "global_transform",
+      "native",
+      "ndarray"
+    ],
+    "category": "denoising",
+    "implementation_version": "native-extended-1.0",
+    "name": "Wavelet-SVD 复合去噪",
+    "parameter_schema": {
+      "levels": {
+        "default": 2,
+        "min": 1,
+        "type": "int"
+      },
+      "rank_end": {
+        "default": 20,
+        "min": 1,
+        "type": "int"
+      },
+      "rank_start": {
+        "default": 1,
+        "min": 1,
+        "type": "int"
+      },
+      "threshold": {
+        "default": 0.05,
+        "type": "float"
+      },
+      "threshold_strategy": {
+        "default": "mad_universal",
+        "type": "str"
+      },
+      "wavelet": {
+        "default": "db4",
+        "type": "str"
+      }
+    },
+    "visibility": "public"
+  }
+}
