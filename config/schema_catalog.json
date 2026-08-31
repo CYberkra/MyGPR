@@ -739,6 +739,15 @@
       "references": [
         "scripts/check_mypy_budget.py"
       ]
+    },
+    {
+      "schema": "mygpr.autotune_evidence.v1",
+      "owner": "processing-backend",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "mygpr/application/autotune/evidence.py"
+      ]
     }
   ]
 }
