@@ -166,7 +166,10 @@ def test_acquisition_jobs_and_motion_pipeline_contract(tmp_path: Path) -> None:
             imu_path=str(imu_path),
         )
         synced = backend.jobs.wait(sync_job, timeout=30)
-        assert synced.status is JobStatus.COMPLETED, synced.error_message
+        assert synced.status is JobStatus.COMPLETED, (
+            f"sensor sync flaked: {synced.status}, stage={synced.message!r}, "
+            f"errors={synced.error_details!r}"
+        )
 
         integrated = backend.acquisition.motion_pipeline()
         assert [step.method_id for step in integrated.steps] == ["motion_compensation_v2"]

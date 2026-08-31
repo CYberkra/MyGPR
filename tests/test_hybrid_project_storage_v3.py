@@ -121,8 +121,10 @@ def test_export_catalog_and_backup_snapshot_are_consistent(tmp_path: Path) -> No
         assert result.verified
         with zipfile.ZipFile(result.archive_path) as archive:
             names = set(archive.namelist())
-        assert "catalog.sqlite" in names
-        assert "data/lines/L01.h5" in names
+        missing = {"catalog.sqlite", "data/lines/L01.h5"} - names
+        assert not missing, (
+            f"backup snapshot flaked: missing={sorted(missing)}, names={sorted(names)}"
+        )
         assert "catalog.sqlite-wal" not in names
         assert "catalog.sqlite-shm" not in names
     finally:

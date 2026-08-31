@@ -34,3 +34,12 @@
 1. **候选 2：双执行器底层收敛**：实施计划见 `_handoff_20260830/任务F候选2_双执行器收敛实施计划.md`。**阶段 0–2 已完成**：`tests/test_native_convergence_baseline.py` + `fixtures/processing_convergence/descriptor_baseline.json` 钉死 36 方法数值/描述符基线；`metadata_bridge.py` 统一 display 元数据来源；`legacy_adapter.py` 与 Composite 两类已删除，生产装配直连 `NativeProcessingCatalog`/`NativeProcessingExecutor`（commits `52518b6`/`0f569fd`/`81122e8`）。待办：阶段 3 收尾（CI 确认、文档）。
 2. **候选 3：关闭**（facade 重构后仅 259 行，原"体量膨胀"不成立，不再拆分）。
 3. **RFC issue #6** 已归档任务 F 决策记录。
+
+## 已知偶发 flake（待治理）
+
+全量并发下偶发、单跑必过的两个用例（Windows 文件句柄/时序类，CI 历史无失败现场）：
+
+1. `tests/test_backend_acquisition_api.py::test_acquisition_jobs_and_motion_pipeline_contract`（sensor_sync job）
+2. `tests/test_hybrid_project_storage_v3.py::test_export_catalog_and_backup_snapshot_are_consistent`（备份快照缺 catalog.sqlite/L01.h5）
+
+两处失败断言已改为**自动转储现场**（job 状态/阶段/错误详情、缺失文件清单）。下次复现时按断言消息定位根因；本会话内 3 次全量 + 组合 9 次未复现。
