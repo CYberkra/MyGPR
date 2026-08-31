@@ -19,8 +19,10 @@ from __future__ import annotations
 from typing import Any
 
 from ui import constants
-from ui.controllers.backend_controller import run_command
 from ui.logger_config import setup_logger
+
+# run_command（backend_controller，依赖 PyQt6）在 _on_prune_jobs 内按需导入，
+# 使本模块在无 Qt 的打包/测试环境也可导入（tests/test_page_coordinator.py 依赖此性质）。
 
 _LOGGER = setup_logger('mygpr_window', 'logs/mygpr_window.log')
 
@@ -840,6 +842,7 @@ class PageCoordinator:
             self._infobar('warning', '任务中心', '后端尚未就绪')
             return
 
+        from ui.controllers.backend_controller import run_command
         run_command(
             _JobsPruneCommand(self, backend),
             name='mygpr-jobs-prune',
