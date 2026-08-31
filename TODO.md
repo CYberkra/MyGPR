@@ -18,7 +18,14 @@
 
 ## 前端（v0.9.37 已交付）
 
-- Qt GUI 可用：`app_qt.py` 启动，七页导航 + 右侧日志面板。
+- Qt GUI 可用：`app_qt.py` 启动，8 页导航 + 右侧日志面板。
 - 架构门禁已建立：`ui/` → `core/` 通过 `desktop_backend_facade.py` 统一通道。
 - `MyGPRMainWindow` 已拆分：组装器（`main_window.py`）+ 跨页接线器（`page_coordinator.py`）。
+- **任务 F 候选 1 已完成**（PageCoordinator 重构，commit `193d3a1` + CI 修复 `95ce4b4`/`c7281b6`，RFC #6）。
 - CI 已覆盖：Linux offscreen、Windows GUI、Python 3.11/3.12/3.13、干净安装。
+
+## 任务 F（架构优化）后续
+
+1. **候选 2：双执行器底层收敛**：UI 侧 schema 已统一（facade `_extract_parameter_schema`），但 `LegacyProcessingExecutor`（`mygpr/infrastructure/processing/legacy_adapter.py`）与 `NativeProcessingExecutor`（`native_adapter.py`）双实现仍并存。需评估合并或明确契约边界。
+2. **候选 3：关闭**（facade 重构后仅 259 行，原"体量膨胀"不成立，不再拆分）。
+3. **RFC issue #6** 已归档任务 F 决策记录。
