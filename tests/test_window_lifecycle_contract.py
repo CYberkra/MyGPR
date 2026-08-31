@@ -19,14 +19,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from core.app_paths import get_tile_cache_dir
 
 
-_WINDOW_MIXINS = Path(__file__).resolve().parents[1] / "ui" / "window_mixins.py"
+_PAGE_COORDINATOR = Path(__file__).resolve().parents[1] / "ui" / "page_coordinator.py"
 _APP_ENTRY = Path(__file__).resolve().parents[1] / "app_qt.py"
 
 
 def _project_close_call_lines() -> dict[str, int]:
-    tree = ast.parse(_WINDOW_MIXINS.read_text(encoding="utf-8"))
+    tree = ast.parse(_PAGE_COORDINATOR.read_text(encoding="utf-8"))
     for node in tree.body:
-        if not isinstance(node, ast.ClassDef) or node.name != "_ProjectLifecycleMixin":
+        if not isinstance(node, ast.ClassDef) or node.name != "PageCoordinator":
             continue
         for method in node.body:
             if not isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -40,7 +40,7 @@ def _project_close_call_lines() -> dict[str, int]:
                 if child.func.attr in {"close_session", "close_current"}:
                     calls[child.func.attr] = child.lineno
             return calls
-    raise AssertionError("_ProjectLifecycleMixin._on_close_project_requested not found")
+    raise AssertionError("PageCoordinator._on_close_project_requested not found")
 
 
 class ProjectCloseLifecycleContractTests(unittest.TestCase):

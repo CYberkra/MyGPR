@@ -28,7 +28,7 @@ mygpr
 - `ui/` → `core/` violations have been removed via `ui/desktop_backend_facade.py`.
 - `MyGPRMainWindow` (was 1360 lines) has been split into the core assembler
   (`ui/main_window.py`, ~715 lines) plus signal-handler mixins
-  (`ui/window_mixins.py`) grouped by domain:
+  (`ui/page_coordinator.py`) grouped by domain:
   project lifecycle, line/artifact, import/preflight, processing,
   interpretation, delivery, and job center.
 - `config/architecture_policy.toml` now declares `[layers.ui]` with a migration

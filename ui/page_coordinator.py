@@ -1,143 +1,234 @@
 # -*- coding: utf-8 -*-
-"""Mixin classes for MyGPRMainWindow signal handlers (split from 1360-line monolith).
+"""PageCoordinator — 跨页业务信号链的集中接线器（任务 F 候选 1）。
 
-Each mixin groups handlers for one logical domain.  MyGPRMainWindow inherits
-from all mixins via multiple inheritance; signal/slot wiring stays in
-main_window.py.
+职责边界：
+- ``main_window.py``：窗口组装（页面创建 / 导航 / 主题 / 面板 / 快捷键 /
+  后端就绪门控）与项目对话框；
+- 本模块：全部跨页业务信号链（page 信号 → controller 调用 → page 刷新），
+  以及处理 / 导入 / 任务域的运行态（运行中任务、提交时测线快照、待选测线等）。
+
+单条信号链 = 本类一个方法。除 Qt 信号连接外不依赖窗口内部实现，
+仅通过鸭子类型的 window 服务接口（``_page`` / ``_infobar`` / ``log_message`` /
+``_require_project`` 等）访问窗口，因此每条链可用假窗口独立做单元测试；
+``connect_all()`` 是唯一的信号注册入口，由主窗口组装完成后调用一次。
+
+本模块不得创建 QWidget（与 controllers 同一纪律）。
 """
 from __future__ import annotations
 
-import logging
 from typing import Any
 
-from ui.controllers.backend_controller import run_command
-
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (
-    QDialog, QFileDialog, QFormLayout, QHBoxLayout, QToolButton, QVBoxLayout, QWidget,
-)
-from qfluentwidgets import (
-    LineEdit, PrimaryPushButton, PushButton,
-)
-
 from ui import constants
+from ui.controllers.backend_controller import run_command
 from ui.logger_config import setup_logger
 
-_LOGGER = setup_logger('mygpr_window', 'logs/mygpr_window.log', level=logging.DEBUG)
+_LOGGER = setup_logger('mygpr_window', 'logs/mygpr_window.log')
 
 
-# ================================================================ 项目生命周期
-class _ProjectLifecycleMixin:
-    """新建/打开/关闭项目对话框 + project_opened/project_closed 分发。"""
+class PageCoordinator:
+    """跨页业务信号链与运行态的唯一持有者。"""
 
-    def _show_new_project_dialog(self) -> None:
-        """新建项目对话框：选目录 + 项目名 + 可选元数据 → create_project。"""
-        if not self._backend_ready:
-            self._infobar('warning', '新建项目', '后端尚未就绪，请稍后再试')
-            return
-        if self.project_controller is None:
-            return
-        dialog = QDialog(self)
-        dialog.setWindowTitle('新建项目')
-        dialog.setMinimumWidth(520)
-        layout = QVBoxLayout(dialog)
-        form = QFormLayout()
-        form.setSpacing(10)
+    def __init__(self, window) -> None:
+        self._win = window
+        # ---- 业务接线状态（自 main_window 迁入，SPEC §7）----
+        self._current_line_id = ''          # 当前测线（项目/处理/解释页共用）
+        self._known_job_ids = set()         # 已 upsert 到任务控件的任务
+        self._import_job_ids = set()        # 测线导入/传感器同步任务（完成后刷新测线）
+        self._spatial_job_ids = set()       # 空间成果任务（完成后刷新空间成果表）
+        self._processing_job_id = ''        # 处理页当前运行任务
+        self._processing_line_id = ''       # 运行提交时的测线（防运行中切测线竞态）
+        self._processing_cancel_requested = False  # 用户主动取消（区别于失败）
+        self._preview_newest_artifact = False  # 处理完成后自动预览最新成果
+        self._show_run_completion_notice = False  # 处理完成后提示一次
+        self._pending_select_line_id = ''        # 导入完成后要选中的测线
 
-        root_row = QHBoxLayout()
-        root_edit = LineEdit(dialog)
-        root_edit.setText(str(self.settings.get(
-            'project_root', constants.DEFAULT_PROJECT_ROOT)))
-        browse_btn = PushButton('浏览', dialog)
-        browse_btn.setFixedWidth(70)
+    # ------------------------------------------------------------ 窗口服务接口（鸭子类型，便于假窗口测试）
+    def _page(self, object_name: str):
+        return self._win._page(object_name)
 
-        def _browse() -> None:
-            path = QFileDialog.getExistingDirectory(
-                dialog, '选择项目根目录', root_edit.text().strip()
-                or constants.DEFAULT_PROJECT_ROOT)
-            if path:
-                root_edit.setText(path)
+    def _infobar(self, level: str, title: str, content: str,
+                 duration: int = None) -> None:
+        self._win._infobar(level, title, content, duration)
 
-        browse_btn.clicked.connect(_browse)
-        root_row.addWidget(root_edit, 1)
-        root_row.addWidget(browse_btn)
-        form.addRow('项目根目录:', root_row)
+    def log_message(self, msg: str) -> None:
+        self._win.log_message(msg)
 
-        name_edit = LineEdit(dialog)
-        name_edit.setPlaceholderText('例如: 新区道路探测')
-        form.addRow('项目名称:', name_edit)
+    def _goto_page(self, object_name: str) -> None:
+        self._win._goto_page(object_name)
 
-        # P1-9：6 个可选元数据折叠进"项目详情"，首屏只留根目录+名称
-        detail_btn = QToolButton(dialog)
-        detail_btn.setText('项目详情（可选）')
-        detail_btn.setCheckable(True)
-        detail_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        detail_btn.setArrowType(Qt.ArrowType.RightArrow)
-        form.addRow(detail_btn)
+    @property
+    def _backend_ready(self) -> bool:
+        return self._win._backend_ready
 
-        detail_widget = QWidget(dialog)
-        detail_form = QFormLayout(detail_widget)
-        detail_form.setContentsMargins(0, 0, 0, 0)
-        detail_form.setSpacing(8)
-        meta_edits = {}
-        for key, label in (('location', '位置(可选):'), ('operator', '操作员(可选):'),
-                           ('project_no', '项目编号(可选):'),
-                           ('device_model', '设备型号(可选):'),
-                           ('coordinate_system', '坐标系(可选):'),
-                           ('vertical_datum', '高程基准(可选):')):
-            edit = LineEdit(dialog)
-            detail_form.addRow(label, edit)
-            meta_edits[key] = edit
-        detail_widget.setVisible(False)
-        form.addRow(detail_widget)
+    def _current_project_id(self):
+        return self._win._current_project_id()
 
-        def _toggle_detail(checked: bool) -> None:
-            detail_widget.setVisible(checked)
-            detail_btn.setArrowType(
-                Qt.ArrowType.DownArrow if checked else Qt.ArrowType.RightArrow)
+    def _require_project(self) -> bool:
+        return self._win._require_project()
 
-        detail_btn.toggled.connect(_toggle_detail)
-        layout.addLayout(form)
+    def _require_line(self) -> str:
+        return self._win._require_line()
 
-        btn_row = QHBoxLayout()
-        btn_row.addStretch(1)
-        ok_btn = PrimaryPushButton('创建', dialog)
-        cancel_btn = PushButton('取消', dialog)
-        cancel_btn.clicked.connect(dialog.reject)
-        btn_row.addWidget(ok_btn)
-        btn_row.addWidget(cancel_btn)
-        layout.addLayout(btn_row)
+    def _job_bridge(self):
+        return self._win._job_bridge()
 
-        def _accept() -> None:
-            name = name_edit.text().strip()
-            root = root_edit.text().strip()
-            if not root:
-                self._infobar('warning', '新建项目', '项目根目录不能为空')
-                return
-            if not name:
-                self._infobar('warning', '新建项目', '项目名称不能为空')
-                return
-            meta = {key: edit.text().strip()
-                    for key, edit in meta_edits.items() if edit.text().strip()}
-            dialog.accept()
-            self.project_controller.create_project(root, name, meta)
+    # ---- 窗口属性透传（控制器 / 设置 / 日志面板）----
+    @property
+    def backend_controller(self):
+        return self._win.backend_controller
 
-        ok_btn.clicked.connect(_accept)
-        dialog.exec()
+    @property
+    def project_controller(self):
+        return self._win.project_controller
 
-    def _open_project_dialog(self) -> None:
-        """打开项目：目录对话框 → open_project。"""
-        if not self._backend_ready:
-            self._infobar('warning', '打开项目', '后端尚未就绪，请稍后再试')
-            return
-        if self.project_controller is None:
-            return
-        root = QFileDialog.getExistingDirectory(
-            self, '选择项目目录', str(self.settings.get(
-                'project_root', constants.DEFAULT_PROJECT_ROOT)))
-        if root:
-            self.project_controller.open_project(root)
+    @property
+    def processing_controller(self):
+        return self._win.processing_controller
 
+    @property
+    def interpretation_controller(self):
+        return self._win.interpretation_controller
+
+    @property
+    def delivery_controller(self):
+        return self._win.delivery_controller
+
+    @property
+    def settings(self):
+        return self._win.settings
+
+    @property
+    def log_panel(self):
+        return self._win.log_panel
+
+    @property
+    def _log_signal(self):
+        return self._win._log_signal
+
+    # ============================================================ 信号注册（唯一入口）
+    def connect_all(self) -> None:
+        """全量业务接线：Page 信号 → 本模块槽；Controller 信号 → 本模块 / Page。"""
+        home = self._page('homeInterface')
+        project = self._page('projectInterface')
+        processing = self._page('processingInterface')
+        interpretation = self._page('interpretationInterface')
+        spatial = self._page('spatialInterface')
+        delivery = self._page('deliveryInterface')
+        jobs = self._page('jobsInterface')
+
+        # ---------------- 主页（SPEC §6.2）
+        if hasattr(home, 'new_project_requested'):
+            home.new_project_requested.connect(self._win._show_new_project_dialog)
+            home.open_project_requested.connect(self._win._open_project_dialog)
+            home.import_line_requested.connect(
+                lambda: self._goto_page('projectInterface'))
+            home.goto_page.connect(self._goto_page)
+            home_jobs = home.mini_jobs()
+            if home_jobs is not None and hasattr(home_jobs, 'cancel_requested'):
+                home_jobs.cancel_requested.connect(self._cancel_job)
+
+        # ---------------- 项目页（SPEC §6.3）
+        if hasattr(project, 'import_requested'):
+            project.import_requested.connect(self._on_import_requested)
+            project.sync_requested.connect(self._on_sync_requested)
+            project.line_selected.connect(self._on_line_selected)
+            project.line_process_requested.connect(self._on_line_process_requested)
+            project.line_delete_requested.connect(self._on_line_delete_requested)
+            project.artifact_preview_requested.connect(
+                self._on_artifact_preview_requested)
+            project.close_project_requested.connect(self._on_close_project_requested)
+            # 测线表右键"复制路径/打开所在文件夹"的路径查询回调
+            project.set_source_path_resolver(
+                self.project_controller.line_source_path)
+
+        # ---------------- 处理页（SPEC §6.5）
+        if hasattr(processing, 'run_requested'):
+            processing.run_requested.connect(self._on_run_requested)
+            processing.cancel_requested.connect(self._on_processing_cancel)
+            processing.autotune_requested.connect(self._on_autotune_requested)
+            processing.line_load_requested.connect(self._on_line_load_requested)
+            processing.line_changed.connect(self._on_processing_line_changed)
+            processing.artifact_selected.connect(
+                self._on_processing_artifact_selected)
+
+        # ---------------- 解释页（SPEC §6.6）
+        if hasattr(interpretation, 'open_session_requested'):
+            interpretation.open_session_requested.connect(
+                self._on_open_session_requested)
+            interpretation.points_changed.connect(self._on_points_changed)
+            if self.interpretation_controller is not None:
+                interpretation.auto_trace_requested.connect(
+                    self.interpretation_controller.auto_trace)
+                interpretation.snap_requested.connect(
+                    self.interpretation_controller.snap)
+                interpretation.smooth_requested.connect(
+                    self.interpretation_controller.smooth)
+                interpretation.undo_requested.connect(
+                    self.interpretation_controller.undo)
+                interpretation.redo_requested.connect(
+                    self.interpretation_controller.redo)
+                interpretation.save_requested.connect(
+                    self.interpretation_controller.save)
+
+        # ---------------- 空间信息页
+        if hasattr(spatial, 'current_line_requested'):
+            spatial.current_line_requested.connect(self._on_spatial_current_line)
+
+        # ---------------- 成果页（SPEC §6.7）
+        if hasattr(delivery, 'spatial_requested'):
+            delivery.spatial_requested.connect(self._on_spatial_requested)
+            delivery.report_requested.connect(self._on_report_requested)
+            delivery.backup_requested.connect(self._on_backup_requested)
+            delivery.restore_requested.connect(self._on_restore_requested)
+
+        # ---------------- 任务页（SPEC §6.8）
+        if hasattr(jobs, 'cancel_requested'):
+            jobs.cancel_requested.connect(self._cancel_job)
+            jobs.prune_requested.connect(self._on_prune_jobs)
+
+        # ---------------- 右侧日志面板任务取消
+        if hasattr(self.log_panel, 'cancel_job_requested'):
+            self.log_panel.cancel_job_requested.connect(self._cancel_job)
+
+        # ---------------- 控制器 → 本模块 / 页面
+        pc = self.project_controller
+        if pc is not None:
+            pc.project_opened.connect(self._on_project_opened)
+            pc.project_closed.connect(self._on_project_closed)
+            pc.open_failed.connect(self._on_open_failed)
+            pc.lines_updated.connect(self._on_lines_updated)
+            pc.artifacts_updated.connect(self._on_artifacts_updated)
+            pc.dataset_preview_ready.connect(self._on_dataset_preview)
+            pc.artifact_preview_ready.connect(self._on_artifact_preview)
+            pc.preflight_ready.connect(self._on_preflight_ready)
+            pc.preflight_failed.connect(self._on_preflight_failed)
+            if hasattr(spatial, 'set_tracks') and hasattr(pc, 'spatial_tracks_ready'):
+                pc.spatial_tracks_ready.connect(spatial.set_tracks)
+            if hasattr(project, 'set_busy'):
+                pc.busy_changed.connect(project.set_busy)
+
+        prc = self.processing_controller
+        if prc is not None:
+            if hasattr(processing, 'set_methods'):
+                prc.methods_loaded.connect(self._on_methods_loaded)
+            prc.run_finished.connect(self._on_run_finished)
+            prc.autotune_finished.connect(self._on_autotune_finished)
+            prc.autotune_failed.connect(self._on_autotune_failed)
+
+        ic = self.interpretation_controller
+        if ic is not None and hasattr(interpretation, 'set_points'):
+            ic.session_opened.connect(self._on_session_opened)
+            ic.session_updated.connect(self._on_session_updated)
+            ic.session_failed.connect(self._on_session_failed)
+            ic.saved.connect(self._on_annotation_saved)
+            ic.busy_changed.connect(interpretation.set_busy)
+
+        dc = self.delivery_controller
+        if dc is not None and hasattr(delivery, 'set_spatial_results'):
+            dc.spatial_results_updated.connect(delivery.set_spatial_results)
+            dc.report_generated.connect(self._on_report_generated)
+
+    # ============================================================ 项目生命周期
     def _on_close_project_requested(self) -> None:
         if self.project_controller is not None and self._require_project():
             # The edit service keeps an in-memory session bound to this project.
@@ -209,11 +300,7 @@ class _ProjectLifecycleMixin:
     def _on_open_failed(self, message: str) -> None:
         self._infobar('error', '项目', message)
 
-
-# ================================================================ 测线 / 成果 / 预览
-class _LineArtifactMixin:
-    """测线选择、数据预览、成果预览、批量删除。"""
-
+    # ============================================================ 测线 / 成果 / 预览
     def _update_line_labels(self) -> None:
         """当前测线标签：处理页 / 解释页共用。"""
         processing = self._page('processingInterface')
@@ -233,7 +320,7 @@ class _LineArtifactMixin:
         if hasattr(project, 'set_lines'):
             project.set_lines(lines)
         # 导入完成后：若记录了目标测线，选中并预览它
-        pending = getattr(self, '_pending_select_line_id', '')
+        pending = self._pending_select_line_id
         if pending and hasattr(project, 'select_line'):
             if project.select_line(pending):
                 self._on_line_selected(pending)
@@ -348,7 +435,7 @@ class _LineArtifactMixin:
             project.set_preview_bundle(bundle)
         if hasattr(processing, 'set_result_bundle'):
             processing.set_result_bundle(bundle)
-        if getattr(self, '_show_run_completion_notice', False):
+        if self._show_run_completion_notice:
             self._show_run_completion_notice = False
             self._infobar('success', '处理完成', '已更新处理结果预览')
             # P1-4：运行完成自动切到"处理结果"分段，避免提示与画面矛盾
@@ -364,11 +451,7 @@ class _LineArtifactMixin:
             return
         self.project_controller.delete_lines(line_ids)
 
-
-# ================================================================ 导入 / 预检 / 传感器同步
-class _ImportPreflightMixin:
-    """import_requested / preflight / sync 信号路由。"""
-
+    # ============================================================ 导入 / 预检 / 传感器同步
     def _on_import_requested(self, payload: dict) -> None:
         """import_requested：preflight=True→预检；False→提交导入任务。"""
         if self.project_controller is None or not self._require_project():
@@ -427,11 +510,7 @@ class _ImportPreflightMixin:
             self._import_job_ids.add(str(job_id))
             self._infobar('info', '传感器同步', '同步任务已提交')
 
-
-# ================================================================ 处理页
-class _ProcessingMixin:
-    """处理页信号路由：run / cancel / autotune / 测线切换 / 成果选择。"""
-
+    # ============================================================ 处理域
     def _on_methods_loaded(self, methods: list) -> None:
         """方法库 → 处理页 MethodBrowser。"""
         processing = self._page('processingInterface')
@@ -502,10 +581,9 @@ class _ProcessingMixin:
         只有该测线仍是当前测线时才自动预览最新成果。
         """
         self._processing_job_id = ''
-        cancelled = bool(getattr(self, '_processing_cancel_requested', False))
+        cancelled = self._processing_cancel_requested
         self._processing_cancel_requested = False
-        run_line_id = str(getattr(self, '_processing_line_id', '')
-                          or self._current_line_id)
+        run_line_id = str(self._processing_line_id or self._current_line_id)
         self._processing_line_id = ''
         processing = self._page('processingInterface')
         if hasattr(processing, 'set_running'):
@@ -525,7 +603,7 @@ class _ProcessingMixin:
             self._infobar('error', '处理链', message or '处理链运行失败')
 
     def _on_autotune_requested(self, method_id: str, params_hint: dict,
-                                  input_artifact_id: str = "") -> None:
+                               input_artifact_id: str = "") -> None:
         if self.processing_controller is None:
             return
         line_id = self._require_line()
@@ -556,11 +634,7 @@ class _ProcessingMixin:
         self._infobar('error', 'AutoTune 自动调参',
                       f'{method_id}: {message}')
 
-
-# ================================================================ 解释页
-class _InterpretationMixin:
-    """解释页信号路由：会话打开 / 更新 / 点替换 / 保存。"""
-
+    # ============================================================ 解释域
     @staticmethod
     def _snapshot_points(snapshot) -> list:
         """InterfaceEditSnapshot → [(trace, sample), ...]（鸭子类型）。"""
@@ -625,11 +699,7 @@ class _InterpretationMixin:
             interpretation.set_session_info('已保存')
         self._infobar('success', '界面解释标注', message or '标注已保存')
 
-
-# ================================================================ 成果页
-class _DeliveryMixin:
-    """成果页信号路由：空间成果 / 报告 / 备份 / 恢复。"""
-
+    # ============================================================ 成果域
     def _on_spatial_requested(self, payload: dict) -> None:
         if self.delivery_controller is None or not self._require_project():
             return
@@ -677,11 +747,7 @@ class _DeliveryMixin:
         if job_id:
             self._infobar('info', '恢复备份', f'恢复任务已提交 → {dest_root}')
 
-
-# ================================================================ 任务中心
-class _JobCenterMixin:
-    """JobBridge → 任务控件（JobTable / LogPanel.mini_jobs / HomePage.mini_jobs）。"""
-
+    # ============================================================ 任务中心
     def _job_views(self) -> tuple:
         """(JobTable, LogPanel.mini_jobs, HomePage.mini_jobs)（None 已过滤）。"""
         views = []
@@ -780,15 +846,11 @@ class _JobCenterMixin:
         )
 
 
-# ------------------------------------------------------------------
-# Worker commands (replaces run_worker closures)
-# ------------------------------------------------------------------
-
 class _JobsPruneCommand:
-    __slots__ = ("_mixins", "_backend")
+    __slots__ = ("_coordinator", "_backend")
 
-    def __init__(self, mixins: Any, backend: Any) -> None:
-        self._mixins = mixins
+    def __init__(self, coordinator: PageCoordinator, backend: Any) -> None:
+        self._coordinator = coordinator
         self._backend = backend
 
     def execute(self) -> None:
@@ -796,6 +858,6 @@ class _JobsPruneCommand:
             removed = self._backend.jobs.prune()
         except Exception as exc:  # noqa: BLE001
             _LOGGER.warning('jobs prune 失败: %s', exc)
-            self._mixins._log_signal.emit(f'WARNING 清理已完成任务失败: {exc}')
+            self._coordinator._log_signal.emit(f'WARNING 清理已完成任务失败: {exc}')
         else:
-            self._mixins._log_signal.emit(f'INFO 已清理 {len(removed)} 个终态任务记录')
+            self._coordinator._log_signal.emit(f'INFO 已清理 {len(removed)} 个终态任务记录')
