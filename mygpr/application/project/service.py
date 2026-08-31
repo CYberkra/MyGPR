@@ -492,12 +492,16 @@ class ProjectService:
         destination_dir: str | Path | None = None,
         *,
         require_external_device: bool = False,
+        incremental: bool = False,
+        retention_keep: int | None = None,
         context: ExecutionContext | None = None,
     ) -> ProjectBackup:
         destination = None if destination_dir is None else Path(destination_dir).expanduser().resolve()
         return self._session(project_id).backup(
             destination,
             require_external_device=require_external_device,
+            incremental=incremental,
+            retention_keep=retention_keep,
             context=context or ExecutionContext.null(),
         )
 

@@ -687,6 +687,8 @@ class LegacyFieldProjectSession(InterpretationPersistenceMixin, SpatialPersisten
         destination_dir: Path | None,
         *,
         require_external_device: bool,
+        incremental: bool = False,
+        retention_keep: int | None = None,
         context: ExecutionContext,
     ) -> ProjectBackup:
         with self._lock:
@@ -696,6 +698,8 @@ class LegacyFieldProjectSession(InterpretationPersistenceMixin, SpatialPersisten
                 cancel_requested=context.is_cancelled,
                 progress_callback=context.report_progress,
                 require_external_device=require_external_device,
+                incremental=incremental,
+                retention_keep=retention_keep,
             )
         return ProjectBackup(
             archive_path=result.archive_path,

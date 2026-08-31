@@ -245,6 +245,8 @@ class ProjectSessionPort(Protocol):
         destination_dir: Path | None,
         *,
         require_external_device: bool,
+        incremental: bool = False,
+        retention_keep: int | None = None,
         context: ExecutionContext,
     ) -> ProjectBackup: ...
 

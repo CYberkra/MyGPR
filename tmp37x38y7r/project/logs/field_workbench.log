@@ -1,0 +1,4 @@
+[2026-08-31T14:47:32.160+00:00] 创建项目：DBG
+[2026-08-31T14:47:32.260+00:00] 创建并验证项目备份: D:\Claude\kimi_mygpr\MyGPR_work\tmp37x38y7r\backup\project_backup_2026-08-31T144732.169_0000.zip, files=4, size=0.004MB, incremental=False
+[2026-08-31T14:47:32.373+00:00] 创建并验证项目备份: D:\Claude\kimi_mygpr\MyGPR_work\tmp37x38y7r\backup\project_backup_2026-08-31T144732.301_0000.zip, files=3, size=0.005MB, incremental=True
+[2026-08-31T14:47:32.491+00:00] 创建并验证项目备份: D:\Claude\kimi_mygpr\MyGPR_work\tmp37x38y7r\backup\project_backup_2026-08-31T144732.425_0000.zip, files=4, size=0.005MB, incremental=True

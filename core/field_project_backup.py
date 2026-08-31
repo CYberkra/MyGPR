@@ -22,6 +22,10 @@ from core.storage_primitives import atomic_output_path, utc_now
 
 PROJECT_MANIFEST_NAME = FieldProjectStore.MANIFEST_NAME
 
+# 增量备份：基准 manifest 内的文件名约定与保留策略默认值。
+INCREMENTAL_BASE_MANIFEST = "backup_manifest.json"
+DEFAULT_MAX_BACKUPS = 10
+
 
 @dataclass(frozen=True)
 class ProjectBackupResult:
@@ -62,6 +66,57 @@ def _unique_destination(path: Path) -> Path:
     raise FieldProjectOperationError(f"无法创建唯一目录：{path}")
 
 
+def _latest_backup_manifest(backup_dir: Path, root_name: str, project_id: str) -> tuple[dict[str, Any], str] | None:
+    """Return (newest same-project backup manifest, archive file name).
+
+    档案名前缀为 ``{root_name}_backup_``（与 backup_project_archive 一致），
+    并以 manifest 内 project_id 复核，防止误用其它项目的档案。
+    """
+    best: tuple[str, dict[str, Any], str] | None = None
+    try:
+        archives = sorted(backup_dir.glob(f"{root_name}_backup_*.zip"))
+    except OSError:
+        return None
+    for archive in archives:
+        try:
+            with zipfile.ZipFile(archive, "r") as handle:
+                payload = json.loads(handle.read(INCREMENTAL_BASE_MANIFEST).decode("utf-8"))
+        except (OSError, zipfile.BadZipFile, KeyError, json.JSONDecodeError):
+            continue
+        if str(payload.get("project_id") or "") != project_id:
+            continue
+        created = str(payload.get("created_at") or "")
+        if best is None or created > best[0]:
+            best = (created, payload, archive.name)
+    return None if best is None else (best[1], best[2])
+
+
+def _prune_old_backups(backup_dir: Path, root_name: str, project_id: str, keep: int, *, current: Path) -> list[str]:
+    """Delete the oldest same-project archives beyond ``keep``; return removed names."""
+    if keep <= 0:
+        return []
+    prunable: list[Path] = []
+    for path in backup_dir.glob(f"{root_name}_backup_*.zip"):
+        if path == current:
+            continue
+        try:
+            with zipfile.ZipFile(path, "r") as handle:
+                payload = json.loads(handle.read(INCREMENTAL_BASE_MANIFEST).decode("utf-8"))
+        except (OSError, zipfile.BadZipFile, KeyError, json.JSONDecodeError):
+            continue
+        if str(payload.get("project_id") or "") == project_id:
+            prunable.append(path)
+    prunable.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+    removed: list[str] = []
+    for stale in prunable[max(keep - 1, 0):]:
+        try:
+            stale.unlink()
+            removed.append(stale.name)
+        except OSError:
+            continue
+    return removed
+
+
 def backup_project_archive(
     store: FieldProjectStore,
     destination_dir: str | Path | None = None,
@@ -69,8 +124,16 @@ def backup_project_archive(
     cancel_requested: Callable[[], bool] | None = None,
     progress_callback: Callable[[int, int, str], None] | None = None,
     require_external_device: bool = False,
+    incremental: bool = False,
+    retention_keep: int | None = None,
 ) -> ProjectBackupResult:
-    """Create a checksummed backup and perform a restore-style verification."""
+    """Create a checksummed backup and perform a restore-style verification.
+
+    ``incremental=True`` 只打包自同目录最近一次同项目备份以来变化/新增的文件
+    （对比路径 + sha256）；manifest 记录基准档案与被省略的未变文件数。
+    ``retention_keep`` 在成功后删除最旧的同项目档案，仅保留最近 N 个。
+    """
+    incremental_base: dict[str, Any] | None = None
     backup_dir = (
         Path(destination_dir).expanduser().resolve()
         if destination_dir is not None
@@ -95,10 +158,28 @@ def backup_project_archive(
     if require_external_device and not external_device:
         raise FieldProjectOperationError("正式灾难恢复备份必须选择不同物理设备。")
 
+    if incremental:
+        found = _latest_backup_manifest(backup_dir, store.root.name, str(store.manifest.project_id))
+        if found is None:
+            incremental = False  # 无基准可依，退化为全量
+            incremental_base, incremental_base_name = None, ""
+        else:
+            incremental_base, incremental_base_name = found
+    else:
+        incremental_base, incremental_base_name = None, ""
+    base_files: dict[str, dict[str, Any]] = {}
+    if incremental and incremental_base is not None:
+        base_files = {
+            str(row["path"]): row
+            for row in incremental_base.get("files", [])
+            if isinstance(row, dict)
+        }
+
     stamp = utc_now().replace(":", "").replace("+", "_")
     archive = backup_dir / f"{store.root.name}_backup_{stamp}.zip"
     excluded_parts = {".git", ".venv", "__pycache__", "backups", ".transactions", ".trash"}
     candidates: list[tuple[Path, Path]] = []
+    unchanged_count = 0
     for path in store.root.rglob("*"):
         if path.is_symlink():
             raise FieldProjectOperationError(f"项目包含符号链接，拒绝备份：{path.relative_to(store.root)}")
@@ -109,6 +190,16 @@ def backup_project_archive(
             continue
         if path.name in {"catalog.sqlite-wal", "catalog.sqlite-shm"}:
             continue
+        if incremental and base_files:
+            row = base_files.get(rel.as_posix())
+            if (
+                row is not None
+                and int(row.get("size_bytes", -1)) == path.stat().st_size
+            ):
+                # 大小相同再比对内容哈希，避免误跳过同尺寸变更文件。
+                if _sha256_path(path) == str(row.get("sha256", "")):
+                    unchanged_count += 1
+                    continue
         candidates.append((path, rel))
 
     file_rows: list[dict[str, Any]] = []
@@ -134,6 +225,9 @@ def backup_project_archive(
                 "source_device": str(getattr(os.stat(store.root), "st_dev", "")),
                 "backup_device": str(getattr(os.stat(backup_dir), "st_dev", "")),
                 "external_device": external_device,
+                "incremental": bool(incremental),
+                "incremental_base_archive": incremental_base_name if incremental else "",
+                "unchanged_files_omitted": unchanged_count if incremental else 0,
                 "files": file_rows,
             }
             archive_file.writestr(
@@ -157,7 +251,12 @@ def backup_project_archive(
         json.dumps(backup_manifest, ensure_ascii=False, sort_keys=True).encode("utf-8")
     ).hexdigest()
     size_mb = round(archive.stat().st_size / (1024 * 1024), 3)
-    store.append_log(f"创建并验证项目备份: {archive}, files={len(file_rows)}, size={size_mb:.3f}MB")
+    if retention_keep is not None:
+        _prune_old_backups(backup_dir, store.root.name, str(store.manifest.project_id), int(retention_keep), current=archive)
+    store.append_log(
+        f"创建并验证项目备份: {archive}, files={len(file_rows)}, size={size_mb:.3f}MB, "
+        f"incremental={bool(incremental)}"
+    )
     return ProjectBackupResult(str(archive), len(file_rows), size_mb, manifest_sha, True, external_device, True)
 
 
@@ -261,14 +360,50 @@ def restore_project_archive(
     project_dir_name: str | None = None,
     read_only_verify: bool = True,
 ) -> ProjectRestoreResult:
-    """Restore a backup as a new project after strict manifest verification."""
+    """Restore a backup as a new project after strict manifest verification.
+
+    增量备份（manifest ``incremental=true``）自动沿 ``incremental_base_archive``
+    链在同目录回溯合并基准内容；缺失任何一层基准即报错。
+    """
     archive = Path(archive_path).expanduser().resolve()
     if not archive.is_file() or archive.is_symlink():
         raise FieldProjectOperationError(f"备份文件不存在或不安全：{archive}")
     destination_parent = Path(destination_root).expanduser().resolve()
     destination_parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(archive, "r") as source:
+
+    layers: list[tuple[Path, zipfile.ZipFile, dict[str, Any], dict[str, zipfile.ZipInfo]]] = []
+    opened: list[zipfile.ZipFile] = []
+    try:
+        source = zipfile.ZipFile(archive, "r")
+        opened.append(source)
         manifest, members = _validated_backup_members(source)
+        if bool(manifest.get("incremental")):
+            base_name = str(manifest.get("incremental_base_archive") or "")
+            base_path = archive.parent / base_name
+            if not base_name or not base_path.is_file():
+                raise FieldProjectOperationError(
+                    f"增量备份缺少基准档案：{base_name or '(未记录)'}"
+                )
+            base_file = zipfile.ZipFile(base_path, "r")
+            opened.append(base_file)
+            base_manifest, base_members = _validated_backup_members(base_file)
+            layers.append((base_path, base_file, base_manifest, base_members))
+        layers.append((archive, source, manifest, members))
+        # 成员与其来源层绑定：后层（更新）覆盖前层同名成员
+        combined: dict[str, tuple[dict[str, Any], zipfile.ZipInfo, zipfile.ZipFile]] = {}
+        for _path, _handle, layer_manifest, layer_members in layers:
+            rows_by_path = {
+                str(row["path"]): row
+                for row in layer_manifest["files"]
+                if isinstance(row, dict)
+            }
+            for rel, info in layer_members.items():
+                row = rows_by_path.get(rel)
+                if row is not None:
+                    combined[rel] = (row, info, _handle)
+        manifest = {**manifest, "files": [item[0] for item in combined.values()]}
+        members = {rel: item[1] for rel, item in combined.items()}
+        member_handles = {rel: item[2] for rel, item in combined.items()}
         required_bytes = sum(int(row["size_bytes"]) for row in manifest["files"])
         free_bytes = shutil.disk_usage(destination_parent).free
         reserve = max(64 * 1024 * 1024, required_bytes // 20)
@@ -287,8 +422,11 @@ def restore_project_archive(
             for rel, info in members.items():
                 destination = resolve_managed_path(staging, rel)
                 row = rows[rel]
+                layer_handle = member_handles.get(rel)
+                if layer_handle is None:
+                    raise FieldProjectOperationError(f"备份链缺少成员：{rel}")
                 _extract_verified_member(
-                    source,
+                    layer_handle,
                     info,
                     destination,
                     expected_size=int(row["size_bytes"]),
@@ -307,6 +445,9 @@ def restore_project_archive(
         finally:
             if not staging_moved:
                 shutil.rmtree(staging, ignore_errors=True)
+    finally:
+        for handle in opened:
+            handle.close()
     if read_only_verify:
         restored = FieldProjectStore.open(target, access_mode="read_only")
         restored.close()

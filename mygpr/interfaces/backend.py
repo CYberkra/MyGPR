@@ -330,6 +330,8 @@ class MyGPRBackend:
         destination_dir: str | None = None,
         *,
         require_external_device: bool = False,
+        incremental: bool = False,
+        retention_keep: int | None = None,
         title: str | None = None,
     ) -> str:
         """Create and verify a portable project backup."""
@@ -340,6 +342,8 @@ class MyGPRBackend:
                 project_id,
                 destination_dir,
                 require_external_device=require_external_device,
+                incremental=incremental,
+                retention_keep=retention_keep,
                 context=context,
             ),
         )
