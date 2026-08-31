@@ -1,6 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Unified ndarray processing engine for GUI, workflow, and batch execution."""
+"""Legacy ndarray processing engine — test-only comparison baseline.
+
+自 P1-1 收敛（0.9.37+）起，生产执行统一走
+``mygpr.infrastructure.processing.native_adapter.NativeProcessingExecutor``
+（UI / cli_batch / evidence_export / field_processing_bridge 同一路径）。
+本模块不再有任何生产调用方，仅作为等价性证据的**对照基准**保留：
+
+- ``run_processing_method`` / ``prepare_runtime_params``：测试中复刻旧执行
+  语义（NaN 清洗、运行时参数注入），供 direct-comparison 等价矩阵对照；
+- 四个手写历史 kernel（compensatingGain / agcGain / subtracting_average_2D /
+  running_average_2D）是 atol=0 级对照的唯一来源，删除它们会摧毁等价证据；
+- ``merge_result_header_info`` / ``merge_result_trace_metadata`` 是仍在
+  生产的纯函数合并语义（cli_batch / evidence_export / bridge 消费）。
+
+计划 1.1.0 前随 golden 摘要资产完善后整体退役（见
+``_handoff_20260830/P1-1_core历史处理栈收敛计划.md``）。"""
 
 from __future__ import annotations
 
