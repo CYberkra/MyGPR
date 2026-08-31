@@ -80,8 +80,9 @@ def test_auto_load_fixed_segy_int16(tmp_path: Path):
 
 
 def test_recognized_but_not_native_format_fails_clearly(tmp_path: Path):
-    path = tmp_path / "line.dzt"
-    path.write_bytes(b"not-a-real-dzt")
+    # DZT/DT1 已升级为 native-subset 解码器；OKO 仍是 recognized-only
+    path = tmp_path / "line.gpr"
+    path.write_bytes(b"not-a-real-oko")
     with pytest.raises(Exception) as exc:
         auto_load_data(str(path))
     assert "已被识别为常见 GPR 数据格式" in str(exc.value)

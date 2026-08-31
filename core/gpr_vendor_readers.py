@@ -31,6 +31,8 @@ class GprReaderFormat(str, Enum):
     IMPULSERADAR_IPRB = "impulseradar_iprb"
     SEGY_FIXED = "segy_fixed"
     ENVI_BSQ = "envi_bsq"
+    SENSORS_SOFTWARE_DT1 = "sensors_software_dt1"
+    GSSI_DZT = "gssi_dzt"
 
 
 def _read_text(path: Path) -> str:
@@ -305,6 +307,130 @@ def read_envi_bsq(path: str | os.PathLike[str]) -> dict[str, Any]:
     return {"data": data, "header_info": header, "path": str(data_path), "format": GprReaderFormat.ENVI_BSQ}
 
 
+def read_sensors_software_dt1(path: str | os.PathLike[str]) -> dict[str, Any]:
+    """Decode Sensors & Software (PulseEKKO) .DT1 traces with the .HD text header.
+
+    二进制布局（经 GPRPy XLINE00 样例实证）：
+    - 无文件头；``N × (128B 道头 + samples×int16)`` 连续排列
+    - 32-float 道头：``[0]`` 道号(1-based)、``[1]`` 位置、``[2]`` 每道采样数、``[7]`` 叠加次数
+    - ``.HD`` 为纯文本键值头，位置单位可为 ft（换算为 m）
+    """
+    p = Path(path)
+    if p.suffix.lower() == ".hd":
+        header_path = p
+        data_path = p.with_suffix(".dt1")
+    else:
+        data_path = p
+        header_path = p.with_suffix(".hd")
+    if not data_path.exists():
+        raise GPRFormatReadError(f"Sensors & Software .DT1 数据文件不存在: {data_path}")
+    if not header_path.exists():
+        raise GPRFormatReadError(f"Sensors & Software .DT1 需要同名 .hd 文本头文件: {header_path}")
+
+    kv = _parse_key_values(_read_text(header_path))
+    file_size = data_path.stat().st_size
+    with data_path.open("rb") as stream:
+        first_head = struct.unpack("<32f", stream.read(128))
+        samples = int(first_head[2]) if first_head[2] > 0 else _int(kv.get("NUMBER_OF_PTS_TRC"), 0) or 0
+        if samples <= 0:
+            raise GPRFormatReadError("DT1 道头缺少有效每道采样数")
+        bytes_per_trace = 128 + samples * 2
+        traces = file_size // bytes_per_trace
+        if traces <= 0 or file_size % bytes_per_trace != 0:
+            raise GPRFormatReadError(
+                f"DT1 文件长度与道头声明的采样数不符: size={file_size}, samples={samples}"
+            )
+        data = np.empty((samples, traces), dtype=np.float32)
+        positions = np.empty(traces, dtype=np.float64)
+        for index in range(traces):
+            stream.seek(index * bytes_per_trace)
+            trace_head = struct.unpack("<32f", stream.read(128))
+            positions[index] = float(trace_head[1])
+            data[:, index] = np.frombuffer(
+                stream.read(samples * 2), dtype="<i2", count=samples
+            ).astype(np.float32)
+
+    total_time_ns = _num(kv.get("TOTAL_TIME_WINDOW"), 0.0) or 0.0
+    step_size = _num(kv.get("STEP_SIZE_USED"), 0.0) or 0.0
+    pos_units = str(kv.get("POSITION_UNITS", "m")).lower()
+    if pos_units == "ft":
+        step_size *= 0.3048
+    header = {
+        "a_scan_length": int(samples),
+        "num_traces": int(traces),
+        "total_time_ns": float(total_time_ns),
+        "trace_interval_m": float(step_size),
+        "nominal_frequency_mhz": _num(kv.get("NOMINAL_FREQUENCY"), 0.0) or 0.0,
+        "stacks": _int(kv.get("NUMBER_OF_STACKS"), 0) or 0,
+        "source": GprReaderFormat.SENSORS_SOFTWARE_DT1,
+        "hd_path": str(header_path),
+        "data_path": str(data_path),
+        "trace_positions": positions,
+    }
+    return {
+        "data": data,
+        "header_info": header,
+        "path": str(data_path),
+        "format": GprReaderFormat.SENSORS_SOFTWARE_DT1,
+    }
+
+
+def read_gssi_dzt(path: str | os.PathLike[str]) -> dict[str, Any]:
+    """Decode GSSI .DZT profiles (conservative single-channel subset).
+
+    布局（DZT.File.Format 文档 + GPRPy/readgssi 实现共识）：
+    - 1024B 固定头（little-endian）；``rh_data`` 决定头块数（每块 1024B）
+    - 样本位宽 ``rh_bits`` ∈ {8, 16, 32}；uint8/uint16 需减 ``2^(bits-1)`` 转有符号
+    - 数据按道连续存储，reshape 为 (traces, samples) 后转置
+    """
+    p = Path(path)
+    file_size = p.stat().st_size
+    if file_size < 1024:
+        raise GPRFormatReadError(f"DZT 文件过短: {file_size}")
+    with p.open("rb") as stream:
+        head = stream.read(1024)
+    _rh_tag, rh_data, samples, rh_bits, _rh_zero = struct.unpack("<5h", head[:10])
+    sps, spm, _mpm, _position, time_range_ns = struct.unpack("<5f", head[10:30])
+    rh_npass, = struct.unpack("<h", head[30:32])
+    rh_nchan, = struct.unpack("<h", head[52:54])
+    # rh_data<1024 时为 1024B 头块数；≥1024 时为直接字节数（1024 处两种解读一致）
+    header_bytes = rh_data if rh_data >= 1024 else 1024 * rh_data
+    if samples <= 0 or rh_bits not in (8, 16, 32):
+        raise GPRFormatReadError(f"DZT 头字段无效: samples={samples}, bits={rh_bits}")
+    if file_size <= header_bytes:
+        raise GPRFormatReadError(f"DZT 无数据体: size={file_size}, header={header_bytes}")
+    dtype = {8: np.dtype("u1"), 16: np.dtype("<u2"), 32: np.dtype("<i4")}[rh_bits]
+    element_size = dtype.itemsize
+    available = file_size - header_bytes
+    bytes_per_trace = samples * element_size
+    traces = available // bytes_per_trace
+    if traces <= 0:
+        raise GPRFormatReadError("DZT 数据体不足一个完整 trace")
+    with p.open("rb") as stream:
+        stream.seek(header_bytes)
+        raw = np.frombuffer(
+            stream.read(traces * bytes_per_trace), dtype=dtype, count=traces * samples
+        )
+    if rh_bits in (8, 16):
+        data = (raw.astype(np.float64) - float(2 ** (rh_bits - 1))).astype(np.float32)
+    else:
+        data = raw.astype(np.float32)
+    data = data.reshape((traces, samples)).T
+    header = {
+        "a_scan_length": int(samples),
+        "num_traces": int(traces),
+        "total_time_ns": float(time_range_ns),
+        "trace_interval_m": float(spm) if spm and spm > 0 else 0.0,
+        "scans_per_second": float(sps) if sps and sps > 0 else 0.0,
+        "bits_per_sample": int(rh_bits),
+        "channels": int(rh_nchan),
+        "passes": int(rh_npass),
+        "source": GprReaderFormat.GSSI_DZT,
+        "path": str(p),
+    }
+    return {"data": data, "header_info": header, "path": str(p), "format": GprReaderFormat.GSSI_DZT}
+
+
 def unsupported_known_format_message(path: str | os.PathLike[str], display_name: str, notes: str = "") -> str:
     return (
         f"{display_name} 已被识别为常见 GPR 数据格式，但 V0.8.40 尚未内置可靠解码器。"
@@ -319,6 +445,8 @@ __all__ = [
     "read_numpy_profile",
     "read_mala_rd",
     "read_impulseradar_iprb",
+    "read_sensors_software_dt1",
+    "read_gssi_dzt",
     "read_segy_fixed",
     "read_envi_bsq",
     "unsupported_known_format_message",

@@ -40,6 +40,12 @@
           "std": 2785.259711661718,
           "rms": 2788.484488195292
         }
+      },
+      "repository_clip": {
+        "file": "gssi_FILE____032_head32.DZT",
+        "sha256": "765826626545c121d9d5fabb41f58f1c893b3e6e110939fa74fb1b8ce90995d2",
+        "trace_count": 32,
+        "note": "1024B header + first 32 traces; reader output must equal vendor_trace_subset_v1.npz:gssi_dzt_matrix"
       }
     },
     "sensors_software_dt1": {
@@ -123,6 +129,13 @@
           "std": 1285.9317996916102,
           "rms": 1294.9820364664652
         }
+      },
+      "repository_clip": {
+        "file": "sns_XLINE00_traces32.DT1",
+        "hd_file": "sns_XLINE00_traces32.HD",
+        "sha256": "5341f4ae5df38f90b08fcdf2a3c54e4b9465d2b0c37305091dcc87e82b3a3f6a",
+        "trace_count": 32,
+        "note": "first 32 full trace blocks; reader output must equal vendor_trace_subset_v1.npz:sns_dt1_matrix"
       }
     }
   }
