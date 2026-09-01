@@ -24,6 +24,7 @@ from core.security_paths import resolve_managed_path
 from core.project_integrity import ProjectIntegrityAuditor
 from mygpr.application.jobs.context import ExecutionContext
 from mygpr.infrastructure.persistence.interpretation_adapter import InterpretationPersistenceMixin
+from mygpr.infrastructure.persistence.intermediate_cleanup import IntermediateCleanupMixin
 from mygpr.infrastructure.persistence.spatial_adapter import SpatialPersistenceMixin
 from mygpr.application.project.ports import ProjectRepositoryPort, ProjectSessionPort
 from mygpr.domain.reporting.models import ReportPackage
@@ -131,7 +132,9 @@ def _artifact(record: ProcessingArtifactRecord) -> ProjectArtifact:
     )
 
 
-class LegacyFieldProjectSession(InterpretationPersistenceMixin, SpatialPersistenceMixin, ProjectSessionPort):
+class LegacyFieldProjectSession(
+    InterpretationPersistenceMixin, IntermediateCleanupMixin, SpatialPersistenceMixin, ProjectSessionPort
+):
     """One open project; concrete storage objects remain private to this adapter."""
 
     def __init__(self, store: FieldProjectStore) -> None:
@@ -574,6 +577,8 @@ class LegacyFieldProjectSession(InterpretationPersistenceMixin, SpatialPersisten
                 payload,
                 cancel_requested=context.is_cancelled,
                 progress_callback=context.report_progress,
+                artifact_kind=str((params or {}).get("artifact_kind") or "processing"),
+                run_group_id=str((params or {}).get("run_group_id") or ""),
             )
             record = next(
                 item
@@ -586,6 +591,7 @@ class LegacyFieldProjectSession(InterpretationPersistenceMixin, SpatialPersisten
         safe = validate_line_id(line_id) if line_id else None
         with self._lock:
             return tuple(_artifact(record) for record in index_processing_artifacts(self._store.root, safe))
+
 
     def _validated_line(self, line_id: str) -> str:
         safe = validate_line_id(line_id)

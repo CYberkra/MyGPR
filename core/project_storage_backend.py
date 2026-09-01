@@ -302,7 +302,9 @@ class HybridProjectStorageBackend(ProjectStorageBackend):
         return {
             "artifact_id": artifact_id,
             "line_id": line_id,
-            "artifact_kind": "processing",
+            "artifact_kind": str(
+                (params or {}).get("artifact_kind") or "processing"
+            ),
             "artifact_role": manifest.get("artifact_role") or "processing_result",
             "branch_id": branch_id,
             "parent_artifact_id": parent_artifact_id,

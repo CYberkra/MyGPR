@@ -35,18 +35,12 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 from core.benchmark_registry import list_benchmark_sample_ids
 from core.evidence_export import export_motion_compensation_benchmark
 from core.gpr_io import extract_airborne_csv_payload, savecsv, save_image
-from mygpr.domain.autotune.data_context import recommended_profile_for_header
 from core.processing_engine import (
     merge_result_header_info,
     merge_result_trace_metadata,
 )
 from mygpr.domain.processing.models import ProcessingRequest
 from mygpr.infrastructure.processing.native_adapter import NativeProcessingExecutor
-from core.preset_profiles import (
-    GUI_PRESETS_V1,
-    RECOMMENDED_RUN_PROFILES,
-    build_profile_workflow_summary,
-)
 
 # 使用统一的方法注册表
 from core.methods_registry import (
@@ -221,58 +215,14 @@ def _merge_params(
     return out
 
 
-def _resolve_recommended_profile_methods(profile_key: str) -> List[Dict[str, Any]]:
-    profile = RECOMMENDED_RUN_PROFILES.get(profile_key)
-    if profile is None:
-        raise ValueError(f"unknown recommended_profile: {profile_key}")
-
-    preset_key = str(profile.get("preset_key") or "")
-    preset = GUI_PRESETS_V1.get(preset_key)
-    if preset is None:
+def _resolve_job_methods(job: Dict[str, Any]) -> List[Dict[str, Any]]:
+    methods = job.get("methods")
+    if not isinstance(methods, list) or not methods:
         raise ValueError(
-            f"recommended_profile '{profile_key}' references unknown preset_key: {preset_key}"
-        )
-
-    merged_method_params: Dict[str, Dict[str, Any]] = {}
-    for method_key, params in preset.get("method_params", {}).items():
-        merged_method_params[method_key] = dict(params)
-    for method_key, params in profile.get("method_params", {}).items():
-        merged_method_params[method_key] = dict(params)
-
-    methods: List[Dict[str, Any]] = []
-    for method_key in profile.get("order", []):
-        if method_key not in PROCESSING_METHODS:
-            raise ValueError(
-                f"recommended_profile '{profile_key}' references unknown method: {method_key}"
-            )
-        methods.append(
-            {
-                "key": method_key,
-                "params": dict(merged_method_params.get(method_key, {})),
-            }
+            "job 必须提供非空 methods 列表（recommended_profile 预设档已在 0.9.38 移除，"
+            "请显式给出逐步算法与参数）"
         )
     return methods
-
-
-def _resolve_job_methods(
-    job: Dict[str, Any],
-    header_info: Optional[Dict[str, Any]] = None,
-) -> List[Dict[str, Any]]:
-    methods = job.get("methods")
-    recommended_profile = job.get("recommended_profile")
-
-    if methods and recommended_profile:
-        raise ValueError("job cannot define both methods and recommended_profile")
-    if methods:
-        if not isinstance(methods, list):
-            raise ValueError("methods must be a non-empty list")
-        return methods
-    if recommended_profile:
-        profile_key = str(recommended_profile)
-        if profile_key.lower() in {"auto", "default"}:
-            profile_key = recommended_profile_for_header(header_info)
-        return _resolve_recommended_profile_methods(profile_key)
-    raise ValueError("methods must be non-empty list or recommended_profile must be set")
 
 
 def load_config(config_path: str) -> Dict[str, Any]:
@@ -335,6 +285,12 @@ def validate_config(cfg: Dict[str, Any], repo_root: str) -> ValidationResult:
         jid = job.get("id", f"job#{i}")
         input_path = job.get("input")
         benchmark_sample = job.get("benchmark_sample")
+        if job.get("recommended_profile") is not None:
+            errors.append(
+                f"[{jid}] recommended_profile 已在 0.9.38 移除：请改用 methods 列表"
+                "（每项 {{'key': 算法, 'params': {{...}}}}）"
+            )
+            continue
         if not input_path and not benchmark_sample:
             errors.append(f"[{jid}] missing input")
             continue
@@ -402,15 +358,9 @@ def run_job(job: Dict[str, Any], repo_root: str, output_dir: str) -> Dict[str, A
     if benchmark_sample:
         if benchmark_sample != "motion_compensation_v1":
             raise ValueError(f"unsupported benchmark_sample: {benchmark_sample}")
-        if str(job.get("recommended_profile") or "") != "motion_compensation_v1":
-            raise ValueError(
-                "motion benchmark job requires recommended_profile=motion_compensation_v1"
-            )
-
         summary = export_motion_compensation_benchmark(
             output_dir,
             sample_id=str(benchmark_sample),
-            profile_key="motion_compensation_v1",
             seed=int(job.get("seed", 42)),
             save_images=True,
         )
@@ -418,7 +368,6 @@ def run_job(job: Dict[str, Any], repo_root: str, output_dir: str) -> Dict[str, A
         return {
             "job_id": job.get("id") or str(benchmark_sample),
             "benchmark_sample": str(benchmark_sample),
-            "recommended_profile": job.get("recommended_profile"),
             "status": "ok",
             "steps": summary["steps"],
             "final_shape": [
@@ -456,13 +405,7 @@ def run_job(job: Dict[str, Any], repo_root: str, output_dir: str) -> Dict[str, A
     current_trace_metadata = trace_metadata
     steps_summary: List[Dict[str, Any]] = []
 
-    methods = _resolve_job_methods(job, current_header_info)
-    requested_profile = str(job.get("recommended_profile") or "")
-    resolved_profile = (
-        recommended_profile_for_header(current_header_info)
-        if requested_profile.lower() in {"auto", "default"}
-        else job.get("recommended_profile")
-    )
+    methods = _resolve_job_methods(job)
     for idx, step in enumerate(methods):
         key = step["key"]
         params = _merge_params(key, step.get("params"))
@@ -512,17 +455,12 @@ def run_job(job: Dict[str, Any], repo_root: str, output_dir: str) -> Dict[str, A
     result = {
         "job_id": jid,
         "input": input_path,
-        "recommended_profile": resolved_profile,
         "status": "ok",
         "steps": steps_summary,
         "final_csv": os.path.relpath(final_csv, repo_root),
         "final_png": os.path.relpath(final_png, repo_root),
         "final_shape": list(current.shape),
     }
-    if resolved_profile:
-        result["profile_workflow"] = build_profile_workflow_summary(
-            str(resolved_profile)
-        )
     return result
 
 

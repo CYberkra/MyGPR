@@ -377,6 +377,39 @@ class ProjectService:
     ) -> tuple[ProjectArtifact, ...]:
         return tuple(self._session(project_id).list_artifacts(line_id))
 
+    def export_artifact_segy(
+        self,
+        project_id: str,
+        line_id: str,
+        artifact_id: str,
+        destination: str | Path,
+    ) -> Path:
+        """处理成果导出为 SEG-Y（需求 C1；行业交付格式，含轨迹坐标）。"""
+        line_data = self.read_artifact_dataset(project_id, line_id, artifact_id)
+        from mygpr.application.project.segy_export import write_segy
+
+        positions = None
+        trace_metadata = line_data.trace_metadata or {}
+        for key in ("trace_distance_m", "local_x_m", "distance_m"):
+            if key in trace_metadata:
+                positions = np.asarray(trace_metadata[key], dtype=np.float64)
+                break
+        return write_segy(
+            destination,
+            line_data.data,
+            line_id=line_id,
+            result_name=artifact_id,
+            trace_positions=positions,
+        )
+
+    def clear_intermediate_artifacts(
+        self,
+        project_id: str,
+        line_id: str | None = None,
+    ) -> tuple[dict, ...]:
+        """删除 intermediate 成果并返回清理审计清单（需求 B7/Q17.B）。"""
+        return tuple(self._session(project_id).clear_intermediate_artifacts(line_id))
+
     def list_interpretation_features(
         self, project_id: str, line_id: str
     ) -> tuple[InterpretationFeature, ...]:

@@ -38,6 +38,7 @@ def test_project_native_pipeline_does_not_materialize_full_dataset(tmp_path: Pat
             summary.project_id,
             "L01",
             pipeline,
+            save_intermediates=False,
         )
         params_path = Path(summary.root_path) / str(artifact.manifest["params_path"])
         payload = json.loads(params_path.read_text(encoding="utf-8"))
@@ -119,6 +120,7 @@ def test_project_global_native_pipeline_avoids_full_hdf5_materialization(tmp_pat
             summary.project_id,
             "L01",
             pipeline,
+            save_intermediates=False,
         )
         params_path = Path(summary.root_path) / str(artifact.manifest["params_path"])
         payload = json.loads(params_path.read_text(encoding="utf-8"))

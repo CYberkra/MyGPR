@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Motion compensation registry, preset, and config validation tests."""
+"""Motion compensation registry and config validation tests."""
 
 from __future__ import annotations
 
@@ -17,7 +17,6 @@ from core.methods_registry import (
     get_method_category,
     is_public_method,
 )
-from core.preset_profiles import RECOMMENDED_RUN_PROFILES
 from PythonModule.motion_compensation_core import AIR_WAVE_SPEED_M_PER_NS
 
 CORE_MOTION_METHODS = [
@@ -68,30 +67,8 @@ def test_auto_tune_stage_assigned_for_all_motion_methods():
     assert PROCESSING_METHODS[VIBRATION_METHOD].get("auto_tune_family") == "denoise"
 
 
-def test_motion_compensation_v1_recommended_profile_exists():
-    """Compatibility profiles sequence only the four V2-core atomic nodes."""
-    assert "motion_compensation_v1" in RECOMMENDED_RUN_PROFILES
-    profile = RECOMMENDED_RUN_PROFILES["motion_compensation_v1"]
-    assert "V1" not in profile["label"]
-    assert "Legacy" not in profile["label"]
-    assert profile["order"] == CORE_MOTION_METHODS
-
-    assert "motion_compensation_core_v1" in RECOMMENDED_RUN_PROFILES
-    core_profile = RECOMMENDED_RUN_PROFILES["motion_compensation_core_v1"]
-    assert "V1" not in core_profile["label"]
-    assert "Legacy" not in core_profile["label"]
-    assert core_profile["order"] == CORE_MOTION_METHODS
-    assert VIBRATION_METHOD not in core_profile["order"]
-
-    # Ensure no experimental/non-V1 methods sneak into the default preset
-    forbidden = {"autofocus", "dem_coupling", "antenna_pattern_inversion", "rpm_notch"}
-    order_lower = " ".join(profile["order"]).lower()
-    for f in forbidden:
-        assert f not in order_lower, f"forbidden keyword {f} found in profile order"
-
-
 def test_cli_config_validates(tmp_path: Path):
-    """CLI config file validates against the new benchmark preset."""
+    """CLI config file validates (explicit methods chain)."""
     import cli_batch
 
     config_path = BASE_DIR / "config" / "motion_compensation_v1_benchmark.json"

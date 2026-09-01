@@ -45,6 +45,8 @@ class ProcessingArtifactRecord:
     save_schema: str = ""
     branch_id: str = ""
     parent_artifact_id: str = ""
+    artifact_kind: str = "processing"
+    run_group_id: str = ""
 
     @property
     def shape_changed(self) -> bool:
@@ -138,7 +140,7 @@ def _index_catalog_artifacts(root: Path, line_id: str | None = None) -> list[Pro
         return []
     try:
         rows = ProjectCatalog(catalog_path, read_only=True).list_artifacts(
-            line_id=line_id, artifact_kind="processing"
+            line_id=line_id
         )
     except (sqlite3.Error, OSError, TypeError, ValueError):
         return []
@@ -151,6 +153,8 @@ def _index_catalog_artifacts(root: Path, line_id: str | None = None) -> list[Pro
         records.append(ProcessingArtifactRecord(
             artifact_id=str(row.get("artifact_id") or ""),
             line_id=str(row.get("line_id") or ""),
+            artifact_kind=str(row.get("artifact_kind") or "processing"),
+            run_group_id=str(params.get("run_group_id") or ""),
             data_path=make_h5_uri(h5_path, dataset_path),
             params_path=str(manifest.get("params_path") or ""),
             manifest_path=str(manifest.get("manifest_path") or ""),

@@ -1,12 +1,45 @@
 {
   "schema": "mygpr.cli_batch.v1",
-  "output_dir": "output/motion_compensation_v1_benchmark",
+  "output_dir": "runtime_outputs/motion_benchmark",
   "jobs": [
     {
-      "id": "motion_compensation_v1_benchmark",
+      "id": "motion-benchmark",
       "benchmark_sample": "motion_compensation_v1",
-      "recommended_profile": "motion_compensation_v1",
-      "seed": 42
+      "methods": [
+        {
+          "key": "trajectory_smoothing",
+          "params": {
+            "method": "savgol",
+            "window_length": 21,
+            "polyorder": 3
+          }
+        },
+        {
+          "key": "motion_compensation_speed",
+          "params": {
+            "spacing_m": 0.0
+          }
+        },
+        {
+          "key": "motion_compensation_attitude",
+          "params": {
+            "apc_offset_x_m": 0.0,
+            "apc_offset_y_m": 0.0,
+            "apc_offset_z_m": 0.0,
+            "max_abs_tilt_deg": 20.0
+          }
+        },
+        {
+          "key": "motion_compensation_height",
+          "params": {
+            "reference_height_mode": "mean",
+            "height_source": "auto",
+            "compensate_amplitude": true,
+            "compensate_time_shift": true,
+            "wave_speed_m_per_ns": 0.299792458
+          }
+        }
+      ]
     }
   ]
 }

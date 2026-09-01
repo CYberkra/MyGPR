@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """Composition root and stable backend façade."""
 from __future__ import annotations
+from pathlib import Path
 
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -287,9 +288,14 @@ class MyGPRBackend:
         result_name: str = "",
         branch_id: str = "",
         input_artifact_id: str = "",
+        save_intermediates: bool = True,
         title: str | None = None,
     ) -> str:
-        """Process a persisted project line and commit the result."""
+        """Process a persisted project line and commit the result.
+
+        ``save_intermediates=False`` 走分块流式执行（大文件推荐），
+        不落盘逐步中间成果。
+        """
         return self._submit_project_job(
             project_id,
             title or f"项目处理: {line_id}",
@@ -300,8 +306,21 @@ class MyGPRBackend:
                 result_name=result_name,
                 branch_id=branch_id,
                 input_artifact_id=input_artifact_id,
+                save_intermediates=save_intermediates,
                 context=context,
             ),
+        )
+
+    def export_artifact_segy(
+        self,
+        project_id: str,
+        line_id: str,
+        artifact_id: str,
+        destination: str | Path,
+    ) -> Path:
+        """Export one processing artifact as SEG-Y (industry delivery format)."""
+        return self.projects.export_artifact_segy(
+            project_id, line_id, artifact_id, destination
         )
 
     def submit_project_report(

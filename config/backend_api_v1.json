@@ -20,11 +20,12 @@
     "submit_source_file_check": "(self, project_id: str, *, title: str | None = None) -> str",
     "submit_line_transpose": "(self, project_id: str, line_id: str, *, title: str | None = None) -> str",
     "submit_sensor_sync": "(self, project_id: str, line_id: str, *, rtk_path: str, trace_timestamps_path: str | None = None, imu_path: str | None = None, altimeter_path: str | None = None, settings: SensorSyncSettings | None = None, title: str | None = None) -> str",
-    "submit_project_pipeline": "(self, project_id: str, line_id: str, pipeline: PipelineDefinition, *, result_name: str = , branch_id: str = , input_artifact_id: str = , title: str | None = None) -> str",
+    "submit_project_pipeline": "(self, project_id: str, line_id: str, pipeline: PipelineDefinition, *, result_name: str = , branch_id: str = , input_artifact_id: str = , save_intermediates: bool = True, title: str | None = None) -> str",
     "submit_project_report": "(self, project_id: str, *, package_name: str | None = None, report_profile: dict[str, Any] | None = None, title: str | None = None) -> str",
     "submit_project_backup": "(self, project_id: str, destination_dir: str | None = None, *, require_external_device: bool = False, incremental: bool = False, retention_keep: int | None = None, title: str | None = None) -> str",
     "submit_spatial_result": "(self, project_id: str, *, name: str, line_ids: tuple[str, ...] | list[str] | None = None, velocity_m_per_ns: float | None = None, generate_surface: bool = True, title: str | None = None) -> str",
     "build_georeference_3d": "(self, project_id: str, line_id: str, *, preview_lod: str = auto, max_preview_traces: int = 240, max_preview_samples: int = 160, title: str | None = None) -> str",
+    "export_artifact_segy": "(self, project_id: str, line_id: str, artifact_id: str, destination: str | Path) -> Path",
     "submit_project_restore": "(self, archive_path: str, destination_root: str, *, project_dir_name: str | None = None, open_after_restore: bool = True, title: str | None = None) -> str",
     "shutdown": "(self, *, wait: bool = True, cancel_futures: bool = True, timeout_s: float = 30.0) -> None"
   },

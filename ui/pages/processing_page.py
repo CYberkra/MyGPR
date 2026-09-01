@@ -16,7 +16,8 @@
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QKeySequence, QShortcut
-from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import (QAbstractItemView, QHBoxLayout, QListWidget,
+                             QVBoxLayout, QWidget)
 from qfluentwidgets import (
     CaptionLabel, CardWidget, ComboBox, DoubleSpinBox, InfoBar,
     InfoBarPosition, LineEdit, PrimaryPushButton, ProgressBar, PushButton,
@@ -92,6 +93,7 @@ class ProcessingPage(QWidget):
     line_load_requested = pyqtSignal()
     line_changed = pyqtSignal(str)              # 处理页测线选择变化
     artifact_selected = pyqtSignal(str)         # 处理页成果选择变化
+    batch_run_requested = pyqtSignal(dict)      # {'line_ids': [...], 'pipeline': current_pipeline()}
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -155,6 +157,30 @@ class ProcessingPage(QWidget):
         columns = QHBoxLayout()
         columns.setSpacing(constants.PAGE_SPACING)
         root.addLayout(columns, 1)
+
+        # ---------------- 批量处理卡（B4：一键套用当前链到勾选测线）
+        batch_card, batch_layout = _make_card('批量处理')
+        batch_desc = CaptionLabel(
+            '把当前单测线页编排的处理链，套用到勾选的测线并批量运行；'
+            '每条测线一个独立任务，可逐条取消。运行后仍可回单测线页单独调整重跑。')
+        batch_desc.setWordWrap(True)
+        batch_layout.addWidget(batch_desc)
+        self._batch_line_list = QListWidget(batch_card)
+        self._batch_line_list.setSelectionMode(
+            QAbstractItemView.SelectionMode.MultiSelection)
+        self._batch_line_list.setMinimumHeight(96)
+        batch_layout.addWidget(self._batch_line_list)
+        batch_row = QHBoxLayout()
+        batch_row.setSpacing(constants.CARD_SPACING)
+        self._batch_select_all_btn = PushButton('全选', batch_card)
+        self._batch_clear_btn = PushButton('清空选择', batch_card)
+        self._batch_run_btn = PrimaryPushButton('套用到勾选测线并运行', batch_card)
+        batch_row.addWidget(self._batch_select_all_btn)
+        batch_row.addWidget(self._batch_clear_btn)
+        batch_row.addStretch(1)
+        batch_row.addWidget(self._batch_run_btn)
+        batch_layout.addLayout(batch_row)
+        root.addWidget(batch_card)
 
         # ---------------- 左栏（展开 320px，可折叠；滚动栏宽须与面板展开宽一致）
         left_scroll, left_layout = _make_scroll_column(320)
@@ -292,10 +318,6 @@ class ProcessingPage(QWidget):
         param_card, param_layout = _make_card('参数设置')
         self._param_form = ParamForm(param_card)
         param_layout.addWidget(self._param_form, 1)
-        self._apply_params_btn = PushButton('应用到选中步骤', param_card)
-        self._apply_params_btn.setToolTip('把当前参数表单内容写入处理链当前选中步骤')
-        self._apply_params_btn.setEnabled(False)
-        param_layout.addWidget(self._apply_params_btn)
         right_layout.addWidget(param_card, 1)
 
         exec_card, exec_layout = _make_card('执行')
@@ -365,7 +387,9 @@ class ProcessingPage(QWidget):
 
         # 处理链 ↔ 参数表单
         self._pipeline_list.sig_step_selected.connect(self._on_step_selected)
-        self._apply_params_btn.clicked.connect(self._apply_params_to_selected)
+        # 参数表单值变化 → 自动写入选中步骤（任务 F 候选 4 需求确认书 B1：
+        # 删除"应用到选中步骤"按钮，改值即生效，无需额外点击）
+        self._param_form.sig_changed.connect(self._auto_write_params_to_selected)
 
         # 预览
         self._cmap_combo.currentTextChanged.connect(self._bscan.set_colormap)
@@ -423,6 +447,9 @@ class ProcessingPage(QWidget):
             self._show_bundle(_SEG_RESULT)
 
     def set_running(self, running: bool, job_id: str = '') -> None:
+        self._batch_run_btn.setEnabled(not running)
+        self._batch_select_all_btn.setEnabled(not running)
+        self._batch_clear_btn.setEnabled(not running)
         """运行态切换：运行按钮/取消按钮互斥 + 进度条显隐。"""
         self._running = bool(running)
         self._job_id = job_id or ''
@@ -469,7 +496,8 @@ class ProcessingPage(QWidget):
         self._set_line_combo_without_emit(str(text or ''))
 
     def set_lines(self, lines: list) -> None:
-        """测线列表 → 处理页测线选择下拉。"""
+        """测线列表 → 处理页测线选择下拉 + 批量勾选列表。"""
+        self.set_batch_lines(lines)
         # 从显示文本解析 line_id（兼容 qfluentwidgets ComboBox 不保存 userData）
         previous_id = self._line_ids[self._line_combo.currentIndex()] if self._line_combo.currentIndex() >= 0 else ''
         self._line_combo.blockSignals(True)
@@ -649,7 +677,6 @@ class ProcessingPage(QWidget):
         steps = self._pipeline_list.steps()
         if not (0 <= self._selected_step < len(steps)):
             self._param_form.clear()
-            self._apply_params_btn.setEnabled(False)
             return
         step = steps[self._selected_step]
         method = self._methods_by_id.get(step.get('method_id', ''), {})
@@ -660,27 +687,17 @@ class ProcessingPage(QWidget):
         else:
             # 无 schema：保持表单为空
             self._param_form.clear()
-        self._apply_params_btn.setEnabled(bool(schema))
 
-    def _apply_params_to_selected(self) -> None:
-        """"应用到选中步骤"按钮：表单值写回选中步骤。"""
-        if self._selected_step < 0:
-            InfoBar.warning(title='参数设置', content='请先选中处理链中的步骤',
-                            orient=Qt.Orientation.Horizontal, isClosable=True,
-                            position=InfoBarPosition.TOP, duration=3000,
-                            parent=self)
+    def _auto_write_params_to_selected(self) -> None:
+        """参数表单值变化 → 自动写入选中步骤（B1：改值即生效，无按钮）。
+
+        静默写回：表单由本页驱动（set_values 不触发 sig_changed 循环），此处
+        仅处理用户编辑；步骤失效时静默丢弃（选中态变化会重新载入表单）。
+        """
+        if not (0 <= self._selected_step < len(self._pipeline_list.steps())):
             return
-        values = self._param_form.values()
-        if not self._pipeline_list.update_step_params(self._selected_step, values):
-            InfoBar.warning(title='参数设置', content='处理链步骤已失效，请重新选择',
-                            orient=Qt.Orientation.Horizontal, isClosable=True,
-                            position=InfoBarPosition.TOP, duration=3000,
-                            parent=self)
-            return
-        InfoBar.success(title='参数设置', content='参数已应用到选中步骤',
-                        orient=Qt.Orientation.Horizontal, isClosable=True,
-                        position=InfoBarPosition.TOP, duration=2000,
-                        parent=self)
+        self._pipeline_list.update_step_params(self._selected_step,
+                                               self._param_form.values())
 
     # ---------------- 执行
     def _on_run_clicked(self) -> None:

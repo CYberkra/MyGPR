@@ -5,7 +5,45 @@
     {
       "id": "zero-time-reference-mvp",
       "benchmark_sample": "zero_time_reference",
-      "recommended_profile": "robust_imaging"
+      "methods": [
+        {
+          "key": "set_zero_time"
+        },
+        {
+          "key": "dewow",
+          "params": {
+            "window": 23
+          }
+        },
+        {
+          "key": "subtracting_average_2D",
+          "params": {
+            "ntraces": 21
+          }
+        },
+        {
+          "key": "fk_filter",
+          "params": {
+            "angle_low": 10,
+            "angle_high": 60,
+            "taper_width": 5
+          }
+        },
+        {
+          "key": "sec_gain",
+          "params": {
+            "gain_min": 1.0,
+            "gain_max": 6.0
+          }
+        },
+        {
+          "key": "svd_subspace",
+          "params": {
+            "rank_start": 2,
+            "rank_end": 8
+          }
+        }
+      ]
     }
   ]
 }
