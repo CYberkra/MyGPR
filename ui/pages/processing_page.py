@@ -292,10 +292,6 @@ class ProcessingPage(QWidget):
         param_card, param_layout = _make_card('参数设置')
         self._param_form = ParamForm(param_card)
         param_layout.addWidget(self._param_form, 1)
-        self._apply_params_btn = PushButton('应用到选中步骤', param_card)
-        self._apply_params_btn.setToolTip('把当前参数表单内容写入处理链当前选中步骤')
-        self._apply_params_btn.setEnabled(False)
-        param_layout.addWidget(self._apply_params_btn)
         right_layout.addWidget(param_card, 1)
 
         exec_card, exec_layout = _make_card('执行')
@@ -365,7 +361,9 @@ class ProcessingPage(QWidget):
 
         # 处理链 ↔ 参数表单
         self._pipeline_list.sig_step_selected.connect(self._on_step_selected)
-        self._apply_params_btn.clicked.connect(self._apply_params_to_selected)
+        # 参数表单值变化 → 自动写入选中步骤（任务 F 候选 4 需求确认书 B1：
+        # 删除"应用到选中步骤"按钮，改值即生效，无需额外点击）
+        self._param_form.sig_changed.connect(self._auto_write_params_to_selected)
 
         # 预览
         self._cmap_combo.currentTextChanged.connect(self._bscan.set_colormap)
@@ -649,7 +647,6 @@ class ProcessingPage(QWidget):
         steps = self._pipeline_list.steps()
         if not (0 <= self._selected_step < len(steps)):
             self._param_form.clear()
-            self._apply_params_btn.setEnabled(False)
             return
         step = steps[self._selected_step]
         method = self._methods_by_id.get(step.get('method_id', ''), {})
@@ -660,27 +657,17 @@ class ProcessingPage(QWidget):
         else:
             # 无 schema：保持表单为空
             self._param_form.clear()
-        self._apply_params_btn.setEnabled(bool(schema))
 
-    def _apply_params_to_selected(self) -> None:
-        """"应用到选中步骤"按钮：表单值写回选中步骤。"""
-        if self._selected_step < 0:
-            InfoBar.warning(title='参数设置', content='请先选中处理链中的步骤',
-                            orient=Qt.Orientation.Horizontal, isClosable=True,
-                            position=InfoBarPosition.TOP, duration=3000,
-                            parent=self)
+    def _auto_write_params_to_selected(self) -> None:
+        """参数表单值变化 → 自动写入选中步骤（B1：改值即生效，无按钮）。
+
+        静默写回：表单由本页驱动（set_values 不触发 sig_changed 循环），此处
+        仅处理用户编辑；步骤失效时静默丢弃（选中态变化会重新载入表单）。
+        """
+        if not (0 <= self._selected_step < len(self._pipeline_list.steps())):
             return
-        values = self._param_form.values()
-        if not self._pipeline_list.update_step_params(self._selected_step, values):
-            InfoBar.warning(title='参数设置', content='处理链步骤已失效，请重新选择',
-                            orient=Qt.Orientation.Horizontal, isClosable=True,
-                            position=InfoBarPosition.TOP, duration=3000,
-                            parent=self)
-            return
-        InfoBar.success(title='参数设置', content='参数已应用到选中步骤',
-                        orient=Qt.Orientation.Horizontal, isClosable=True,
-                        position=InfoBarPosition.TOP, duration=2000,
-                        parent=self)
+        self._pipeline_list.update_step_params(self._selected_step,
+                                               self._param_form.values())
 
     # ---------------- 执行
     def _on_run_clicked(self) -> None:
