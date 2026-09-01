@@ -48,6 +48,7 @@ PUBLIC_METHODS = (
     "submit_project_backup",
     "submit_spatial_result",
     "build_georeference_3d",
+    "export_artifact_segy",
     "submit_project_restore",
     "shutdown",
 )

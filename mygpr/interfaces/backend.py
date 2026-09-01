@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """Composition root and stable backend façade."""
 from __future__ import annotations
+from pathlib import Path
 
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -308,6 +309,18 @@ class MyGPRBackend:
                 save_intermediates=save_intermediates,
                 context=context,
             ),
+        )
+
+    def export_artifact_segy(
+        self,
+        project_id: str,
+        line_id: str,
+        artifact_id: str,
+        destination: str | Path,
+    ) -> Path:
+        """Export one processing artifact as SEG-Y (industry delivery format)."""
+        return self.projects.export_artifact_segy(
+            project_id, line_id, artifact_id, destination
         )
 
     def submit_project_report(

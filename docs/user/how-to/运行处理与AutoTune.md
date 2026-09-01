@@ -6,17 +6,13 @@
 
 ![处理页：导入数据后的方法库与处理链](../images/light/light_processingInterface_data.png)
 
-## 预设档
+## 参数编辑
 
-不想手动编排时直接选预设档（自动展开为算法序列 + 推荐参数）：
+处理链选中某步骤后，右侧参数表单即载入该步骤参数；**改动数值立即写入处理链**，无需点任何应用按钮。范围越界的值无法提交（表单校验）。
 
-| 预设档 | 用途 |
-|---|---|
-| `robust_imaging` | 通用稳健成像（零时矫正→去漂移→背景消除→FK 滤波→增益→SVD） |
-| `high_quality_uav_gpr` | 无人机数据高质量流程 |
-| `hankel_denoise` / `wavelet_2d_denoise` / `wavelet_svd_denoise` | 去噪专项 |
-| `motion_compensation_v1/v2` | 无人机运动补偿 |
-| `gprmax_impulse_validation` | gprMax 仿真验证 |
+## 批量处理
+
+页面下方「批量处理」卡：勾选要处理的测线（默认全选）→ 点「套用到勾选测线并运行」。当前单测线页编排的处理链会逐条套用到每条测线，每条测线一个独立任务（任务页可逐条跟进/取消）。运行后仍可回单测线页对某条测线单独调整重跑。
 
 ## AutoTune 自动调参
 
@@ -28,13 +24,18 @@
 
 ![预设档处理链示意](../images/processing_chain.png)
 
-## 处理成果
+## 处理成果与中间成果
 
 运行完成后结果自动成为**处理成果（Artifact）**：
 
 - 与原始 B-scan 并排对比（处理页预览）
 - 完整谱系：输入数据、算法、参数、运行时警告全部记入处理清单（SHA-256 证据链，见[原理解释](../explanation/处理证据链与数据安全.md)）
-- 解释页标注默认基于最新处理成果；也可切换回原始数据
+- **逐步中间成果**：链内每一步的输出都会落盘为 `intermediate` 成果（与最终成果同属一个运行组），便于逐步对比检查
+- 中间成果可一键清理（只保留清单哈希供审计，数据可重跑再生）
+
+## SEG-Y 导出
+
+任一处理成果可导出为 SEG-Y（float32 大端，行业标准交付格式）：编程接口 `backend.export_artifact_segy(project_id, line_id, artifact_id, destination)`。
 
 ## 注意
 
