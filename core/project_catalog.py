@@ -288,6 +288,22 @@ class ProjectCatalog:
                 item[key[:-5] if key.endswith("_json") else key] = [] if key == "shape_json" else {}
         return item
 
+    def delete_intermediate_artifact(self, artifact_id: str) -> None:
+        """删除中间成果：子项改挂其父，保谱系连续（需求 Q17.B）。"""
+        with self.transaction() as db:
+            row = db.execute(
+                "SELECT parent_artifact_id FROM artifacts WHERE artifact_id=?",
+                (str(artifact_id),),
+            ).fetchone()
+            if row is None:
+                return
+            parent = row[0] or ""
+            db.execute(
+                "UPDATE artifacts SET parent_artifact_id=? WHERE parent_artifact_id=?",
+                (str(parent) or None, str(artifact_id)),
+            )
+            db.execute("DELETE FROM artifacts WHERE artifact_id=?", (str(artifact_id),))
+
     def delete_artifact(self, artifact_id: str) -> None:
         """Remove one artifact and restore its branch head to the parent."""
         with self.transaction() as db:

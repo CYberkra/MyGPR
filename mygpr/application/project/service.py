@@ -377,6 +377,14 @@ class ProjectService:
     ) -> tuple[ProjectArtifact, ...]:
         return tuple(self._session(project_id).list_artifacts(line_id))
 
+    def clear_intermediate_artifacts(
+        self,
+        project_id: str,
+        line_id: str | None = None,
+    ) -> tuple[dict, ...]:
+        """删除 intermediate 成果并返回清理审计清单（需求 B7/Q17.B）。"""
+        return tuple(self._session(project_id).clear_intermediate_artifacts(line_id))
+
     def list_interpretation_features(
         self, project_id: str, line_id: str
     ) -> tuple[InterpretationFeature, ...]:

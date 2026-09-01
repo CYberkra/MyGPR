@@ -84,6 +84,8 @@ def _write_xlsx_report(
     tmp.replace(path)
 
 def _write_report_figures(store: Any, figures_dir: Path, *, line_ids: set[str] | None = None, include_plan_map: bool = True, cancel_checker=None, progress_callback=None) -> list[Path]:
+    import matplotlib
+    matplotlib.use("Agg")   # 无头交付：绘图不拉入 Qt backend（Qt-import 隔离红线）
     import matplotlib.pyplot as plt
     figures_dir.mkdir(parents=True, exist_ok=True)
     outputs: list[Path] = []
@@ -235,6 +237,8 @@ def _write_pdf_report(path: Path, *, summary: dict[str, Any], lines: list[dict[s
     CSV/JSON/XLSX remain the normalized evidence tables and the checksum manifest
     provides independent package-integrity verification.
     """
+    import matplotlib
+    matplotlib.use("Agg")   # 同上：无头交付红线
     from matplotlib.backends.backend_pdf import PdfPages
     from matplotlib import font_manager
     import matplotlib.pyplot as plt

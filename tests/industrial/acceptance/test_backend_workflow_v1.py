@@ -77,7 +77,11 @@ def test_headless_real_data_project_workflow_is_reopenable_and_auditable(tmp_pat
         assert reopened.project_id == project.project_id
         assert backend.projects.get_dataset_info(reopened.project_id, "L09").shape == matrix.shape
         artifacts = backend.projects.list_artifacts(reopened.project_id, "L09")
-        assert len(artifacts) == 1 and artifacts[0].sha256 == artifact.sha256
+        finals = [a for a in artifacts if a.manifest.get("artifact_kind", "processing") == "processing"]
+        intermediates = [a for a in artifacts if a.manifest.get("artifact_kind") == "intermediate"]
+        assert len(finals) == 1 and finals[0].sha256 == artifact.sha256
+        assert len(intermediates) == 2
+        assert all(a.manifest.get("run_group_id") for a in intermediates)
         assert_qt_imports_unchanged(qt_before)
     finally:
         backend.shutdown()

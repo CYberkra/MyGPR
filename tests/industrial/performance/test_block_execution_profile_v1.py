@@ -43,7 +43,8 @@ def test_file_backed_project_pipeline_never_materializes_hdf5_proxy(tmp_path: Pa
         assert estimate.supports_chunking
         assert estimate.memory_bytes < 64 * 1024 * 1024
         assert estimate.temporary_disk_bytes < 64 * 1024 * 1024
-        job_id = backend.submit_project_pipeline(project.project_id, "L01", pipeline)
+        job_id = backend.submit_project_pipeline(
+            project.project_id, "L01", pipeline, save_intermediates=False)
         snapshot = backend.jobs.wait(job_id, timeout=120)
         assert snapshot.status is JobStatus.COMPLETED, snapshot.error_message
         artifact = snapshot.result

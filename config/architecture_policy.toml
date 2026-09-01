@@ -113,6 +113,13 @@ reason = "Method-specific constraint handlers are preserved pending decompositio
 max_function_lines = 200
 
 [[migration_exceptions]]
+path_prefix = "mygpr/infrastructure/persistence/intermediate_cleanup.py"
+allowed_local_import_prefixes = ["core.hdf5_line_container", "core.security_paths", "core.processing_artifact_index", "core.field_project_models"]
+owner = "processing-backend"
+remove_after = "1.0.0"
+reason = "Persistence cleanup mixin over hybrid storage; inherits adapter conventions."
+
+[[migration_exceptions]]
 path_prefix = "mygpr/infrastructure/persistence/field_project_adapter.py"
 allowed_local_import_prefixes = ["core"]
 owner = "project-backend"

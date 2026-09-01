@@ -3,6 +3,8 @@
 """Project-bound processing use cases."""
 from __future__ import annotations
 
+import uuid
+
 from dataclasses import dataclass
 from typing import Any, Iterator
 
@@ -96,10 +98,21 @@ class ProjectProcessingService:
         result_name: str = "",
         branch_id: str = "",
         input_artifact_id: str = "",
+        save_intermediates: bool = True,
         context: ExecutionContext | None = None,
     ) -> ProjectArtifact:
+        """跑链并提交最终成果。
+
+        ``save_intermediates=True``（默认，需求 B7）时每步输出落盘为
+        ``intermediate`` 成果并归入同一 run_group；此时分块流式执行不可用
+        （中间矩阵必须物化），自动改走 loaded 路径——多 GB 数据请传 False。
+        """
         execution_context = context or ExecutionContext.null()
-        if self._processing.supports_block_pipeline(pipeline):
+        use_block = (
+            not save_intermediates
+            and self._processing.supports_block_pipeline(pipeline)
+        )
+        if use_block:
             artifact = self._execute_block_pipeline(
                 project_id, line_id, pipeline, result_name, branch_id, input_artifact_id, execution_context
             )
@@ -174,6 +187,7 @@ class ProjectProcessingService:
             self._projects.read_artifact_dataset(project_id, line_id, input_artifact_id)
             if input_artifact_id else self._projects.read_dataset(project_id, line_id)
         )
+        run_group_id = uuid.uuid4().hex
         result = self._processing.execute_pipeline(
             source.data,
             pipeline,
@@ -184,6 +198,38 @@ class ProjectProcessingService:
         steps = pipeline_steps(pipeline)
         lineage = loaded_pipeline_lineage(result.step_results, self._processing)
         final_method = result.step_results[-1].method_id if result.step_results else "pipeline"
+
+        # B7：逐步中间成果落盘（final 之外每步一个 intermediate 成果，
+        # run_group_id 归组；数据可重跑再生，清单哈希保留审计）
+        step_context = context.child(1, 2)
+        for index, step_result in enumerate(result.step_results[:-1], start=1):
+            step_name = f"{result_name or pipeline.name} 步骤{index}_{step_result.method_id}"
+            self._projects.save_processing_artifact(
+                project_id,
+                line_id,
+                step_result.data,
+                name=step_name,
+                method_id=step_result.method_id,
+                method_name=step_result.method_id,
+                params={
+                    "pipeline": steps[:index],
+                    "lineage": lineage[:index],
+                    "execution_mode": "loaded",
+                    "parent_artifact_id": input_artifact_id,
+                    "output_header": _output_header_summary(step_result.header_info),
+                    "artifact_kind": "intermediate",
+                    "run_group_id": run_group_id,
+                    "run_step_index": index,
+                },
+                pipeline=[{**step, "lineage": lineage[i]} for i, step in enumerate(steps[:index])],
+                branch_id=branch_id or f"{line_id}:main",
+                input_dataset={
+                    **source.header_info, "execution_mode": "loaded",
+                    "parent_artifact_id": input_artifact_id,
+                },
+                context=step_context,
+            )
+
         return self._projects.save_processing_artifact(
             project_id,
             line_id,
@@ -195,6 +241,8 @@ class ProjectProcessingService:
                 "pipeline": steps, "lineage": lineage, "execution_mode": "loaded",
                 "parent_artifact_id": input_artifact_id,
                 "output_header": _output_header_summary(result.header_info),
+                "artifact_kind": "processing",
+                "run_group_id": run_group_id,
             },
             pipeline=[{**step, "lineage": lineage[index]} for index, step in enumerate(steps)],
             branch_id=branch_id or f"{line_id}:main",
@@ -202,7 +250,7 @@ class ProjectProcessingService:
                 **source.header_info, "execution_mode": "loaded",
                 "parent_artifact_id": input_artifact_id,
             },
-            context=context.child(1, 2),
+            context=step_context,
         )
 
     def _save_block_result(

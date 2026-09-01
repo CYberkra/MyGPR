@@ -103,6 +103,8 @@ class FieldArtifactStoreMixin:
         *,
         cancel_requested=None,
         progress_callback=None,
+        artifact_kind: str = "processing",
+        run_group_id: str = "",
     ) -> tuple[Path, Path]:
         safe_line_id = validate_line_id(line_id)
         line = self.get_line(safe_line_id)
@@ -114,6 +116,9 @@ class FieldArtifactStoreMixin:
         artifact_id = f"{safe_line_id}_processed_{timestamp}"
         paths = _artifact_paths(self.root, safe_line_id, timestamp, artifact_id)
         saved_at = local_now()
+        # 注入必须在 _base_manifest 之前：collected_params 从 params 派生，
+        # _commit_catalog_manifest 依赖 collected_params 里的 artifact_kind/run_group_id
+        params = {**params, "artifact_kind": str(artifact_kind), "run_group_id": str(run_group_id)}
         manifest, collected_params, method_id, method_name, branch_id, parent_id = _base_manifest(
             line_id=safe_line_id,
             artifact_id=artifact_id,
@@ -329,8 +334,11 @@ class FieldArtifactStoreMixin:
                 {
                     "artifact_id": values["artifact_id"],
                     "line_id": values["line_id"],
-                    "artifact_kind": "processing",
+                    "artifact_kind": str(
+                        (manifest.get("params") or {}).get("artifact_kind") or "processing"
+                    ),
                     "artifact_role": manifest.get("artifact_role") or "processing_result",
+                    "run_group_id": str((manifest.get("params") or {}).get("run_group_id") or ""),
                     "branch_id": values["branch_id"],
                     "parent_artifact_id": values["parent_artifact_id"],
                     "h5_path": manifest.get("h5_path", ""),
