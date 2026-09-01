@@ -531,9 +531,14 @@ class MyGPRMainWindow(FluentWindow):
                 ctrl.set_backend(self.backend_controller)
         bridge = getattr(self.backend_controller, 'job_bridge', None)
         if bridge is not None:
-            bridge.progress_changed.connect(self._on_job_progress)
-            bridge.status_changed.connect(self._on_job_status)
-            bridge.job_completed.connect(self._on_job_completed)
+            # 任务信号槽在 PageCoordinator（候选 1 重构迁移到接线器）；
+            # 旧指向 self._on_job_progress 会 AttributeError 炸断本方法，
+            # 导致 load_methods 不执行 → 方法库为空。
+            pc = self.page_coordinator
+            if pc is not None and hasattr(pc, '_on_job_progress'):
+                bridge.progress_changed.connect(pc._on_job_progress)
+                bridge.status_changed.connect(pc._on_job_status)
+                bridge.job_completed.connect(pc._on_job_completed)
         if self.processing_controller is not None:
             self.processing_controller.load_methods()
 
