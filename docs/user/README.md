@@ -9,7 +9,7 @@
 | **查某个细节**（格式矩阵、预设档、文件位置） | [参考手册](reference/index.md) |
 | **理解原理**（证据链、数据安全模型） | [原理解释](explanation/处理证据链与数据安全.md) |
 
-![MyGPR 主界面](images/light/light_overall.png)
+![MyGPR 主界面：已导入营山测线并生成预览](images/light/light_homeInterface_preview.png)
 
 ![深色主题](images/dark/dark_overall.png)
 

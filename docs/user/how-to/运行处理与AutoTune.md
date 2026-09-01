@@ -4,7 +4,7 @@
 
 处理页方法库按分类列出全部 36 个算法（中文分类 + 推荐/备选/实验标签）。双击添加到处理链；链按顺序执行，每步输出作为下步输入。右侧参数表单提供类型/范围校验（越界值无法提交）。
 
-![处理页：方法库与处理链](../images/light/light_processingInterface.png)
+![处理页：导入数据后的方法库与处理链](../images/light/light_processingInterface_data.png)
 
 ## 预设档
 
