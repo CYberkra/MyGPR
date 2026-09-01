@@ -11,7 +11,6 @@ from types import SimpleNamespace
 import numpy as np
 
 import cli_batch
-from core.preset_profiles import RECOMMENDED_RUN_PROFILES
 from mygpr.domain.processing.models import ProcessingResult
 
 
@@ -108,26 +107,21 @@ def _write_altimeter_sidecar(tmp_path: Path) -> Path:
     return altimeter_path
 
 
-def test_resolve_job_methods_uses_recommended_profile_defaults():
-    methods = cli_batch._resolve_job_methods(
-        {
-            "recommended_profile": "hankel_denoise",
-        }
-    )
+def test_resolve_job_methods_requires_explicit_methods():
+    """0.9.38 起预设档移除：job 必须显式给出 methods。"""
+    import pytest
 
-    assert [step["key"] for step in methods] == RECOMMENDED_RUN_PROFILES[
-        "hankel_denoise"
-    ]["order"]
-    assert methods[-1]["key"] == "hankel_svd"
-    assert methods[-1]["params"] == {"window_length": 0, "rank": 0}
+    with pytest.raises(ValueError, match="methods"):
+        cli_batch._resolve_job_methods({})
 
 
-def test_validate_config_accepts_recommended_profile_job(tmp_path: Path):
+def test_validate_config_rejects_removed_recommended_profile(tmp_path: Path):
+    """预设档已移除：recommended_profile 字段必须报错，防止旧配置静默跑错链。"""
     input_csv = _write_small_csv(tmp_path / "input.csv")
     cfg = {
         "jobs": [
             {
-                "id": "wavelet-job",
+                "id": "legacy-profile",
                 "input": str(input_csv),
                 "recommended_profile": "wavelet_2d_denoise",
             }
@@ -136,8 +130,8 @@ def test_validate_config_accepts_recommended_profile_job(tmp_path: Path):
 
     result = cli_batch.validate_config(cfg, repo_root=str(tmp_path))
 
-    assert result.ok is True
-    assert result.errors == []
+    assert result.ok is False
+    assert result.errors, "recommended_profile 应报错而非被忽略"
 
 
 def test_bundled_cli_batch_mvp_example_validates():
@@ -205,24 +199,24 @@ def test_validate_config_rejects_unknown_recommended_profile(tmp_path: Path):
     result = cli_batch.validate_config(cfg, repo_root=str(tmp_path))
 
     assert result.ok is False
-    assert any("unknown recommended_profile" in error for error in result.errors)
+    assert any("recommended_profile" in error for error in result.errors)
 
 
-def test_run_job_expands_recommended_profile_into_steps(tmp_path: Path):
+def test_run_job_runs_explicit_wavelet_methods(tmp_path: Path):
     input_csv = _write_small_csv(tmp_path / "input.csv")
     job = {
         "id": "wavelet-job",
         "input": str(input_csv),
-        "recommended_profile": "wavelet_2d_denoise",
+        "methods": [
+            {"key": "dewow", "params": {"window": 3}},
+            {"key": "wavelet_2d", "params": {"levels": 2}},
+        ],
     }
 
     result = cli_batch.run_job(job, repo_root=str(tmp_path), output_dir=str(tmp_path / "out"))
 
-    assert [step["key"] for step in result["steps"]] == RECOMMENDED_RUN_PROFILES[
-        "wavelet_2d_denoise"
-    ]["order"]
+    assert [step["key"] for step in result["steps"]] == ["dewow", "wavelet_2d"]
     assert result["status"] == "ok"
-    assert result["final_shape"] == [48, 16]
 
 
 def test_run_job_uses_runtime_metadata_merge_for_motion_local_methods(tmp_path: Path):
@@ -260,7 +254,7 @@ def test_run_job_expands_motion_compensation_v2_profile(tmp_path: Path):
     job = {
         "id": "motion-v2-runtime",
         "input": str(input_csv),
-        "recommended_profile": "motion_compensation_v2",
+        "methods": [{"key": "motion_compensation_v2", "params": {}}],
     }
 
     result = cli_batch.run_job(job, repo_root=str(tmp_path), output_dir=str(tmp_path / "out"))
@@ -268,37 +262,6 @@ def test_run_job_expands_motion_compensation_v2_profile(tmp_path: Path):
     assert result["status"] == "ok"
     assert [step["key"] for step in result["steps"]] == ["motion_compensation_v2"]
     assert result["final_shape"] == [4, 8]
-
-
-def test_run_job_expands_high_quality_uav_gpr_profile(tmp_path: Path):
-    input_csv = _write_airborne_csv(tmp_path / "airborne.csv")
-    job = {
-        "id": "high-quality-uav",
-        "input": str(input_csv),
-        "recommended_profile": "high_quality_uav_gpr",
-    }
-
-    result = cli_batch.run_job(job, repo_root=str(tmp_path), output_dir=str(tmp_path / "out"))
-
-    assert result["status"] == "ok"
-    assert [step["key"] for step in result["steps"]] == RECOMMENDED_RUN_PROFILES[
-        "high_quality_uav_gpr"
-    ]["order"]
-    assert result["final_shape"][0] == 4
-    assert "agcGain" not in [step["key"] for step in result["steps"]]
-    workflow = result["profile_workflow"]
-    stage2 = next(
-        stage for stage in workflow["stages"] if stage["stage_key"] == "stage2"
-    )
-    assert workflow["profile_key"] == "high_quality_uav_gpr"
-    assert stage2["method_keys"][:2] == [
-        "frequency_filter_1d",
-        "motion_compensation_v2",
-    ]
-    assert any(
-        warning["method_key"] == "motion_compensation_v2"
-        for warning in workflow["sensor_dependency_warnings"]
-    )
 
 
 def test_run_job_forwards_rtk_imu_sidecars_into_motion_runtime(monkeypatch, tmp_path: Path):

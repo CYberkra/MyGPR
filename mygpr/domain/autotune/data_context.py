@@ -86,11 +86,9 @@ def apply_data_context_defaults(
         header.setdefault("sweep_stop_mhz", FIELD_SFCW_BAND_MHZ[1])
         header.setdefault("frequency_points", 501)
         header.setdefault("frequency_filter_band_mhz", list(FIELD_SFCW_BAND_MHZ))
-        header.setdefault("default_processing_profile", "high_quality_uav_gpr")
         header.setdefault("frequency_filter_policy", "instrument_sweep_band")
     elif resolved in {DATA_CONTEXT_GPRMAX, DATA_CONTEXT_GPRMAX_IMPULSE}:
         header.setdefault("source", "gprmax_out")
-        header.setdefault("default_processing_profile", "gprmax_impulse_validation")
         header.setdefault("frequency_filter_policy", "model_or_auto_tune_only")
         if gprmax_config:
             waveform = gprmax_config.get("waveform")
@@ -101,28 +99,9 @@ def apply_data_context_defaults(
             if gprmax_config.get("dx_dy_dz") is not None:
                 header.setdefault("gprmax_dx_dy_dz_m", list(gprmax_config["dx_dy_dz"]))
     else:
-        header.setdefault("default_processing_profile", "high_quality_uav_gpr")
         header.setdefault("frequency_filter_policy", "manual_or_auto_tune")
 
     return header
-
-
-def recommended_profile_for_header(
-    header_info: dict[str, Any] | None,
-    *,
-    fallback: str = "high_quality_uav_gpr",
-) -> str:
-    """Return the default profile key for an imported dataset."""
-    header = dict(header_info or {})
-    explicit = str(header.get("default_processing_profile") or "").strip()
-    if explicit:
-        return explicit
-    context = infer_data_context(header)
-    if context in {DATA_CONTEXT_GPRMAX, DATA_CONTEXT_GPRMAX_IMPULSE}:
-        return "gprmax_impulse_validation"
-    if context == DATA_CONTEXT_UAV_GPR_SFCW_FIELD:
-        return "high_quality_uav_gpr"
-    return fallback
 
 
 def frequency_band_from_context(

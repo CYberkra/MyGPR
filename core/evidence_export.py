@@ -20,7 +20,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from core.benchmark_registry import generate_benchmark_sample, get_benchmark_sample_spec
-from core.preset_profiles import RECOMMENDED_RUN_PROFILES
 from core.processing_engine import (
     merge_result_header_info,
     merge_result_trace_metadata,
@@ -42,6 +41,38 @@ from PythonModule.read_file_data import save_image
 # 与 UI/cli_batch 同一条生产执行路径（native）。
 _EVIDENCE_EXECUTOR = NativeProcessingExecutor()
 
+
+# motion 基准链（0.9.38 起内联：预设档已移除，此链是 motion_compensation_v1
+# 基准的既定规程，参数与原 RECOMMENDED_RUN_PROFILES 逐字一致）
+MOTION_BENCHMARK_CHAIN: dict[str, Any] = {
+    "order": [
+        "trajectory_smoothing",
+        "motion_compensation_speed",
+        "motion_compensation_attitude",
+        "motion_compensation_height",
+    ],
+    "method_params": {
+        "trajectory_smoothing": {
+            "method": "savgol",
+            "window_length": 21,
+            "polyorder": 3,
+        },
+        "motion_compensation_speed": {"spacing_m": 0.0},
+        "motion_compensation_attitude": {
+            "apc_offset_x_m": 0.0,
+            "apc_offset_y_m": 0.0,
+            "apc_offset_z_m": 0.0,
+            "max_abs_tilt_deg": 20.0,
+        },
+        "motion_compensation_height": {
+            "reference_height_mode": "mean",
+            "height_source": "auto",
+            "compensate_amplitude": True,
+            "compensate_time_shift": True,
+            "wave_speed_m_per_ns": 0.299792458,
+        },
+    },
+}
 
 STANDARD_CHAIN_SPECS: dict[str, dict[str, Any]] = {
     "conservative_default": {
@@ -488,8 +519,7 @@ def export_replay_evidence_bundle(
 
 
 def _default_params_for(method_key: str) -> dict[str, Any]:
-    profile = RECOMMENDED_RUN_PROFILES.get("motion_compensation_v1") or {}
-    return dict((profile.get("method_params") or {}).get(method_key) or {})
+    return dict((MOTION_BENCHMARK_CHAIN.get("method_params") or {}).get(method_key) or {})
 
 
 def _save_trace_metadata_csv(
@@ -670,20 +700,14 @@ def export_motion_compensation_benchmark(
     out_dir: str | Path,
     *,
     sample_id: str = "motion_compensation_v1",
-    profile_key: str = "motion_compensation_v1",
     seed: int = 42,
     save_images: bool = True,
 ) -> dict[str, Any]:
     """Run the deterministic motion-compensation benchmark and export evidence."""
     if sample_id != "motion_compensation_v1":
         raise ValueError(f"unsupported motion validation sample: {sample_id}")
-    if profile_key != "motion_compensation_v1":
-        raise ValueError(f"unsupported motion validation profile: {profile_key}")
-
     spec = get_benchmark_sample_spec(sample_id)
-    profile = RECOMMENDED_RUN_PROFILES.get(profile_key)
-    if not profile:
-        raise KeyError(f"未知 motion profile: {profile_key}")
+    profile = MOTION_BENCHMARK_CHAIN
 
     raw, sample_meta = generate_benchmark_sample(sample_id, seed=seed)
     output_root = Path(out_dir)
@@ -722,7 +746,7 @@ def export_motion_compensation_benchmark(
 
     current = np.asarray(raw, dtype=np.float32)
     steps_summary: list[dict[str, Any]] = []
-    for idx, method_key in enumerate(profile.get("order", []), start=1):
+    for idx, method_key in enumerate(profile["order"], start=1):
         params = _default_params_for(method_key)
         request = ProcessingRequest(
             data=current,
@@ -811,7 +835,6 @@ def export_motion_compensation_benchmark(
     motion_metrics = {
         "sample_id": sample_id,
         "sample_title": spec.title,
-        "profile_key": profile_key,
         "seed": int(seed),
         "metric_config": _to_jsonable(metric_config),
         "target_preservation_floor": float(target_preservation_floor),
@@ -828,8 +851,6 @@ def export_motion_compensation_benchmark(
     summary = {
         "sample_id": sample_id,
         "sample_title": spec.title,
-        "profile_key": profile_key,
-        "profile_label": profile.get("label"),
         "seed": int(seed),
         "header_info": _to_jsonable(header_info),
         "steps": steps_summary,
