@@ -748,6 +748,15 @@
       "references": [
         "mygpr/application/autotune/evidence.py"
       ]
+    },
+    {
+      "schema": "mygpr.intermediate_cleanup.v1",
+      "owner": "processing-backend",
+      "mutable": true,
+      "migration_policy": "append-only cleanup audit log; entries immutable once written",
+      "references": [
+        "mygpr/infrastructure/persistence/intermediate_cleanup.py"
+      ]
     }
   ]
 }
