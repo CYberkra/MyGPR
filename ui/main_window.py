@@ -711,13 +711,20 @@ class MyGPRMainWindow(FluentWindow):
         return True
 
     def _require_line(self) -> str:
-        """返回当前测线号；无项目/无测线时提示并返回 ''。"""
+        """返回当前测线号；无项目/无测线时提示并返回 ''。
+
+        当前测线的写入点在 PageCoordinator（候选 1 状态迁移），
+        此处只读——须委托 coordinator，读 self 会 AttributeError
+        且被 Qt 信号槽吞掉（表现为"运行处理链没反应"）。
+        """
         if not self._require_project():
             return ''
-        if not self._current_line_id:
+        pc = self.page_coordinator
+        line_id = getattr(pc, '_current_line_id', '') if pc is not None else ''
+        if not line_id:
             self._infobar('warning', '提示', '请先在项目页导入并选择测线')
             return ''
-        return self._current_line_id
+        return line_id
 
     def _job_bridge(self):
         if self.backend_controller is None:
