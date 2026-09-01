@@ -160,6 +160,7 @@ class PageCoordinator:
         # ---------------- 处理页（SPEC §6.5）
         if hasattr(processing, 'run_requested'):
             processing.run_requested.connect(self._on_run_requested)
+            processing.batch_run_requested.connect(self._on_batch_run_requested)
             processing.cancel_requested.connect(self._on_processing_cancel)
             processing.autotune_requested.connect(self._on_autotune_requested)
             processing.line_load_requested.connect(self._on_line_load_requested)
@@ -553,6 +554,27 @@ class PageCoordinator:
         line_id = self._require_line()
         if line_id and artifact_id and self.project_controller is not None:
             self.project_controller.preview_artifact(line_id, str(artifact_id))
+
+    def _on_batch_run_requested(self, payload: dict) -> None:
+        """批量处理：勾选测线逐条提交（每测线独立 job，可单条取消）。"""
+        if self.processing_controller is None or not self._require_project():
+            return
+        payload = dict(payload or {})
+        line_ids = [str(v) for v in (payload.get('line_ids') or [])]
+        if not line_ids:
+            self._infobar('warning', '批量处理', '请先勾选至少一条测线')
+            return
+        steps = list((payload.get('pipeline') or {}).get('steps') or [])
+        if not steps:
+            self._infobar('warning', '批量处理', '处理链为空，请先在单测线页编排处理链')
+            return
+        submitted = self.processing_controller.run_pipeline_batch(
+            self._current_project_id(), line_ids, payload.get('pipeline') or {},
+            str((payload.get('pipeline') or {}).get('result_name') or ''),
+            input_artifact_id=str((payload.get('pipeline') or {}).get('input_artifact_id') or ''),
+        )
+        self._infobar('success', '批量处理',
+                      f'已提交 {len(submitted)}/{len(line_ids)} 条测线的处理任务，任务页可逐条跟进')
 
     def _on_run_requested(self, payload: dict) -> None:
         """run_requested(dict) → run_pipeline（含结果名回退与链式输入）。"""

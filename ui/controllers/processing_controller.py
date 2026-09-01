@@ -117,6 +117,28 @@ class ProcessingController(QObject):
             self._loading = False
 
     # ------------------------------------------------------------------
+    def run_pipeline_batch(
+        self,
+        project_id: str,
+        line_ids: list[str],
+        pipeline_def: dict,
+        result_name: str,
+        input_artifact_id: str = "",
+    ) -> list[str]:
+        """批量：每条测线一个独立 job，逐条提交并挂完成回调。"""
+        submitted: list[str] = []
+        for line_id in line_ids:
+            job_id = self.run_pipeline(
+                project_id,
+                str(line_id),
+                pipeline_def,
+                f"{result_name}_{line_id}" if result_name else result_name,
+                input_artifact_id=input_artifact_id,
+            )
+            if job_id:
+                submitted.append(job_id)
+        return submitted
+
     def run_pipeline(
         self,
         project_id,
