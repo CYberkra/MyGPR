@@ -532,13 +532,10 @@ class MyGPRMainWindow(FluentWindow):
         bridge = getattr(self.backend_controller, 'job_bridge', None)
         if bridge is not None:
             # 任务信号槽在 PageCoordinator（候选 1 重构迁移到接线器）；
-            # 旧指向 self._on_job_progress 会 AttributeError 炸断本方法，
-            # 导致 load_methods 不执行 → 方法库为空。
-            pc = self.page_coordinator
-            if pc is not None and hasattr(pc, '_on_job_progress'):
-                bridge.progress_changed.connect(pc._on_job_progress)
-                bridge.status_changed.connect(pc._on_job_status)
-                bridge.job_completed.connect(pc._on_job_completed)
+            # 由接线器显式接线：槽位不存在会立刻 AttributeError 暴露，
+            # 而非 hasattr 探测静默跳过（历史事故：load_methods 不执行 → 方法库为空）。
+            if self.page_coordinator is not None:
+                self.page_coordinator.connect_job_bridge(bridge)
         if self.processing_controller is not None:
             self.processing_controller.load_methods()
 
@@ -720,7 +717,9 @@ class MyGPRMainWindow(FluentWindow):
         if not self._require_project():
             return ''
         pc = self.page_coordinator
-        line_id = getattr(pc, '_current_line_id', '') if pc is not None else ''
+        if pc is None:
+            return ''
+        line_id = pc.current_line_id()   # coordinator 拥有该状态（候选 1 迁移）
         if not line_id:
             self._infobar('warning', '提示', '请先在项目页导入并选择测线')
             return ''
