@@ -174,6 +174,12 @@ def _run_smoke(window: MyGPRMainWindow) -> None:
     print(f'[smoke] OK, {len(saved)} screenshots -> {SMOKE_SHOTS_DIR}')
     window.close()
     app.exit(0)
+    # Qt 6.11 offscreen 的进程拆除阶段存在偶发段错误（所有断言与截图
+    # 完成之后才发生；本地 Windows 与 CI Linux 均可复现，非回归）。
+    # 验收信号已全部产出，验收模式下直接硬退出绕开 teardown。
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)
 
 
 def main() -> int:
