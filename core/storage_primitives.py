@@ -13,6 +13,7 @@ import json
 import os
 import shutil
 import socket
+import sys
 import tempfile
 import threading
 import uuid
@@ -153,6 +154,27 @@ def _pid_alive(pid: int) -> bool:
         return False
     if pid == os.getpid():
         return True
+    if sys.platform == "win32":
+        # os.kill(pid, 0) 在 Windows 上对不存在的 PID 会抛
+        # OSError(WinError 6 句柄无效)，且可能以 SystemError 形态逃逸
+        # （"<class 'OSError'> returned a result with an exception set"，
+        # 用户可见为新建/打开项目报错）。改用 Win32 OpenProcess 判活。
+        import ctypes
+
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+        if not handle:
+            return False  # 进程不存在或无权查询（无权视为存活更保守，但锁场景取 False 更安全）
+        try:
+            exit_code = ctypes.c_ulong()
+            if kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                return exit_code.value == STILL_ACTIVE
+            return True
+        finally:
+            kernel32.CloseHandle(handle)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
