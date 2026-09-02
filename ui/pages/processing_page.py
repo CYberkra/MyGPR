@@ -16,8 +16,7 @@
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QKeySequence, QShortcut
-from PyQt6.QtWidgets import (QAbstractItemView, QHBoxLayout, QListWidget,
-                             QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (QHBoxLayout, QVBoxLayout, QWidget)
 from qfluentwidgets import (
     CaptionLabel, CardWidget, ComboBox, DoubleSpinBox, InfoBar,
     InfoBarPosition, LineEdit, PrimaryPushButton, ProgressBar, PushButton,
@@ -85,7 +84,9 @@ class ProcessingPage(QWidget):
     line_load_requested = pyqtSignal()
     line_changed = pyqtSignal(str)              # 处理页测线选择变化
     artifact_selected = pyqtSignal(str)         # 处理页成果选择变化
-    batch_run_requested = pyqtSignal(dict)      # {'line_ids': [...], 'pipeline': current_pipeline()}
+    # 批量处理（B4）UI 已按用户决策暂时屏蔽（2026-09-02）：卡片、信号与
+    # 接线整体撤下；后端 run_pipeline_batch 契约保留，恢复时重建本页卡片
+    # 并回接 page_coordinator._on_batch_run_requested 即可。
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -149,30 +150,6 @@ class ProcessingPage(QWidget):
         columns = QHBoxLayout()
         columns.setSpacing(constants.PAGE_SPACING)
         root.addLayout(columns, 1)
-
-        # ---------------- 批量处理卡（B4：一键套用当前链到勾选测线）
-        batch_card, batch_layout = _make_card('批量处理')
-        batch_desc = CaptionLabel(
-            '把当前单测线页编排的处理链，套用到勾选的测线并批量运行；'
-            '每条测线一个独立任务，可逐条取消。运行后仍可回单测线页单独调整重跑。')
-        batch_desc.setWordWrap(True)
-        batch_layout.addWidget(batch_desc)
-        self._batch_line_list = QListWidget(batch_card)
-        self._batch_line_list.setSelectionMode(
-            QAbstractItemView.SelectionMode.MultiSelection)
-        self._batch_line_list.setMinimumHeight(96)
-        batch_layout.addWidget(self._batch_line_list)
-        batch_row = QHBoxLayout()
-        batch_row.setSpacing(constants.CARD_SPACING)
-        self._batch_select_all_btn = PushButton('全选', batch_card)
-        self._batch_clear_btn = PushButton('清空选择', batch_card)
-        self._batch_run_btn = PrimaryPushButton('套用到勾选测线并运行', batch_card)
-        batch_row.addWidget(self._batch_select_all_btn)
-        batch_row.addWidget(self._batch_clear_btn)
-        batch_row.addStretch(1)
-        batch_row.addWidget(self._batch_run_btn)
-        batch_layout.addLayout(batch_row)
-        root.addWidget(batch_card)
 
         # ---------------- 左栏（展开 320px，可折叠；滚动栏宽须与面板展开宽一致）
         left_scroll, left_layout = _make_scroll_column(320)
@@ -439,9 +416,6 @@ class ProcessingPage(QWidget):
             self._show_bundle(_SEG_RESULT)
 
     def set_running(self, running: bool, job_id: str = '') -> None:
-        self._batch_run_btn.setEnabled(not running)
-        self._batch_select_all_btn.setEnabled(not running)
-        self._batch_clear_btn.setEnabled(not running)
         """运行态切换：运行按钮/取消按钮互斥 + 进度条显隐。"""
         self._running = bool(running)
         self._job_id = job_id or ''
@@ -488,8 +462,7 @@ class ProcessingPage(QWidget):
         self._set_line_combo_without_emit(str(text or ''))
 
     def set_lines(self, lines: list) -> None:
-        """测线列表 → 处理页测线选择下拉 + 批量勾选列表。"""
-        self.set_batch_lines(lines)
+        """测线列表 → 处理页测线选择下拉。"""
         # 从显示文本解析 line_id（兼容 qfluentwidgets ComboBox 不保存 userData）
         previous_id = self._line_ids[self._line_combo.currentIndex()] if self._line_combo.currentIndex() >= 0 else ''
         self._line_combo.blockSignals(True)
