@@ -6,11 +6,15 @@ failed 失败 / cancelled 已取消。
 running 状态显示进度条。
 """
 
+import re
+
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (QHBoxLayout, QHeaderView, QLabel,
                              QStackedLayout, QTableWidget, QTableWidgetItem,
                              QVBoxLayout, QWidget)
 from qfluentwidgets import CaptionLabel, ProgressBar, PushButton, ScrollArea
+
+from ui.motion import animate_badge_color, animate_progress
 
 _STATUS_TEXT = {
     'queued': '排队',
@@ -127,10 +131,10 @@ class JobTable(QWidget):
         bar = self._table.cellWidget(row, self._COL_PROGRESS)
         if total and total > 0:
             bar.setRange(0, int(total))
-            bar.setValue(min(int(completed), int(total)))
+            animate_progress(bar, min(int(completed), int(total)))
         else:
             bar.setRange(0, 100)
-            bar.setValue(int(completed))
+            animate_progress(bar, int(completed))
         bar.setVisible(True)
         self._table.item(row, self._COL_MESSAGE).setText(message or '')
 
@@ -140,9 +144,13 @@ class JobTable(QWidget):
             return
         badge = self._badges.get(job_id)
         if badge is not None:
+            end_hex = _STATUS_BADGE.get(status, '#9ca3af')
             badge.setText(_STATUS_TEXT.get(status, status))
-            badge.setStyleSheet(
-                _BADGE_QSS % _STATUS_BADGE.get(status, '#9ca3af'))
+            # 从徽章当前背景色渐变到新状态色（qss 模板同源，见 ui.motion）
+            match = re.search(r'background-color:\s*(#[0-9a-fA-F]{6})',
+                              badge.styleSheet())
+            start_hex = match.group(1) if match else '#9ca3af'
+            animate_badge_color(badge, _BADGE_QSS, start_hex, end_hex)
         item = self._table.item(row, self._COL_STATUS)
         if item is not None:
             item.setData(Qt.ItemDataRole.UserRole, status)
@@ -248,10 +256,10 @@ class MiniJobList(QWidget):
         bar = entry['bar']
         if total and total > 0:
             bar.setRange(0, int(total))
-            bar.setValue(min(int(completed), int(total)))
+            animate_progress(bar, min(int(completed), int(total)))
         else:
             bar.setRange(0, 100)
-            bar.setValue(int(completed))
+            animate_progress(bar, int(completed))
         if message:
             entry['title_label'].setToolTip(message)
 
@@ -259,11 +267,12 @@ class MiniJobList(QWidget):
         entry = self._jobs.get(job_id)
         if entry is None:
             return
+        old_hex = _STATUS_BADGE.get(entry['status'], '#9ca3af')
         entry['status'] = status
         badge = entry['badge']
+        end_hex = _STATUS_BADGE.get(status, '#9ca3af')
         badge.setText(_STATUS_TEXT.get(status, status))
-        badge.setStyleSheet(
-            _BADGE_QSS % _STATUS_BADGE.get(status, '#9ca3af'))
+        animate_badge_color(badge, _BADGE_QSS, old_hex, end_hex)
         entry['cancel'].setEnabled(status in _ACTIVE_STATUSES)
         self._refresh_visibility()
 
