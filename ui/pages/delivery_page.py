@@ -22,11 +22,12 @@ from PyQt6.QtWidgets import (
 from qfluentwidgets import (
     CaptionLabel, CardWidget, CheckBox, InfoBar, InfoBarPosition, LineEdit,
     MessageBox, PrimaryPushButton, PushButton, ScrollArea, SpinBox,
-    SubtitleLabel,
+    StrongBodyLabel, SubtitleLabel,
 )
 
 from ui import constants
-from ui.widgets import clear_invalid, mark_invalid, validate_non_empty, make_separator
+from ui.widgets import (clear_invalid, make_page_title, make_separator, mark_invalid,
+                        validate_non_empty)
 
 # 报告结果字段（鸭子类型：dict 键或对象属性）
 _REPORT_FIELDS = (
@@ -36,14 +37,6 @@ _REPORT_FIELDS = (
     ('delivery_zip_path', 'ZIP:'),
 )
 _REPORT_DIR_KEYS = ('package_dir', 'output_dir', 'root_dir', 'dir')
-
-
-def _page_title(text: str) -> SubtitleLabel:
-    """页面标题：SubtitleLabel 微软雅黑 12pt Bold 居中（SPEC §1）。"""
-    label = SubtitleLabel(text)
-    label.setFont(QFont(constants.FONT_FAMILY, 12, QFont.Weight.Bold))
-    label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    return label
 
 
 def _card_title(text: str) -> SubtitleLabel:
@@ -95,7 +88,7 @@ class DeliveryPage(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(scroll)
 
-        root.addWidget(_page_title('成果与交付'))
+        root.addWidget(make_page_title('成果与交付'))
 
         # ---------------- 卡片1：空间成果
         spatial_card, spatial_layout = self._make_card('空间成果')
@@ -105,13 +98,11 @@ class DeliveryPage(QWidget):
         name_label.setMinimumWidth(100)
         name_row.addWidget(name_label)
         self._spatial_name_edit = LineEdit(spatial_card)
-        self._spatial_name_edit.setPlaceholderText('例如: 全场剖面拼接成果')
+        self._spatial_name_edit.setPlaceholderText('例如：全场剖面拼接成果')
         name_row.addWidget(self._spatial_name_edit, 1)
         spatial_layout.addLayout(name_row)
 
-        lines_label = CaptionLabel('选择测线（可多选）:', spatial_card)
-        lines_label.setStyleSheet(
-            'font-family: "Microsoft YaHei"; font-size: 9pt; font-weight: bold;')
+        lines_label = StrongBodyLabel('选择测线（可多选）：', spatial_card)
         spatial_layout.addWidget(lines_label)
         self._lines_list = QListWidget(spatial_card)
         self._lines_list.setMinimumHeight(120)
@@ -119,7 +110,10 @@ class DeliveryPage(QWidget):
         spatial_layout.addWidget(self._lines_list)
 
         self._spatial_btn = PrimaryPushButton('生成空间成果', spatial_card)
-        spatial_layout.addWidget(self._spatial_btn)
+        spatial_btn_row = QHBoxLayout()
+        spatial_btn_row.addStretch(1)
+        spatial_btn_row.addWidget(self._spatial_btn)
+        spatial_layout.addLayout(spatial_btn_row)
         spatial_layout.addWidget(make_separator())
 
         self._spatial_table = QTableWidget(0, 3, spatial_card)
@@ -146,7 +140,10 @@ class DeliveryPage(QWidget):
         pkg_row.addWidget(self._report_name_edit, 1)
         report_layout.addLayout(pkg_row)
         self._report_btn = PrimaryPushButton('生成报告包', report_card)
-        report_layout.addWidget(self._report_btn)
+        report_btn_row = QHBoxLayout()
+        report_btn_row.addStretch(1)
+        report_btn_row.addWidget(self._report_btn)
+        report_layout.addLayout(report_btn_row)
         report_layout.addWidget(make_separator())
 
         self._report_path_labels = {}

@@ -33,18 +33,10 @@ from qfluentwidgets import (
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants
-from ui.widgets import BScanView, make_separator
+from ui.widgets import BScanView, make_page_title, make_separator
 
 _OVERLAY_COLOR = constants.CHART_OVERLAY_COLOR   # 标注散点颜色（SPEC §6.6）
 _C_M_PER_NS = 0.29979        # 真空光速 c (m/ns)
-
-
-def _page_title(text: str) -> SubtitleLabel:
-    """页面标题：SubtitleLabel 微软雅黑 12pt Bold 居中（SPEC §1）。"""
-    label = SubtitleLabel(text)
-    label.setFont(QFont(constants.FONT_FAMILY, 12, QFont.Weight.Bold))
-    label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    return label
 
 
 def _card_title(text: str) -> SubtitleLabel:
@@ -82,7 +74,7 @@ class InterpretationPage(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(*constants.PAGE_MARGINS)
         root.setSpacing(constants.PAGE_SPACING)
-        root.addWidget(_page_title('界面解释标注'))
+        root.addWidget(make_page_title('界面解释标注'))
         root.addWidget(self._build_tool_card())
 
         body = QHBoxLayout()

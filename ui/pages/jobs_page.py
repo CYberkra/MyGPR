@@ -6,21 +6,12 @@
 转发 cancel_requested，并在清理时发 prune_requested。
 """
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont
+from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
-from qfluentwidgets import CardWidget, PushButton, SubtitleLabel
+from qfluentwidgets import CardWidget, PushButton
 
 from ui import constants
-from ui.widgets import JobTable
-
-
-def _page_title(text: str) -> SubtitleLabel:
-    """页面标题：SubtitleLabel 微软雅黑 12pt Bold 居中（SPEC §1）。"""
-    label = SubtitleLabel(text)
-    label.setFont(QFont(constants.FONT_FAMILY, 12, QFont.Weight.Bold))
-    label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    return label
+from ui.widgets import JobTable, make_page_title
 
 
 class JobsPage(QWidget):
@@ -39,7 +30,7 @@ class JobsPage(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(*constants.PAGE_MARGINS)
         root.setSpacing(constants.PAGE_SPACING)
-        root.addWidget(_page_title('任务中心'))
+        root.addWidget(make_page_title('任务中心'))
 
         card = CardWidget(self)
         card_layout = QVBoxLayout(card)
