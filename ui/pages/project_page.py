@@ -29,7 +29,7 @@ import os
 from PyQt6.QtCore import Qt, QSettings, QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices, QFont, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
-    QApplication, QDialog, QFileDialog, QHBoxLayout, QHeaderView,
+    QApplication, QDialog, QHBoxLayout, QHeaderView,
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
@@ -39,7 +39,7 @@ from qfluentwidgets import (
 )
 from qfluentwidgets import FluentIcon as FIF
 
-from ui import constants
+from ui import constants, file_dialogs
 from ui.widgets import BScanView, clear_invalid, mark_invalid, validate_non_empty, make_separator
 from ui.widgets.context_menus import add_action, make_menu
 
@@ -513,7 +513,7 @@ class ProjectPage(QWidget):
         self._no_project_hint.setVisible(not self._has_project())
 
     def _browse_import_file(self) -> None:
-        path, _selected = QFileDialog.getOpenFileName(
+        path, _selected = file_dialogs.getOpenFileName(
             self, '选择 GPR 数据文件', '', _GPR_FILE_FILTER)
         if path:
             self.file_edit.setText(path)
@@ -530,7 +530,7 @@ class ProjectPage(QWidget):
         return 'L99'
 
     def _browse_sensor_file(self, key: str) -> None:
-        path, _selected = QFileDialog.getOpenFileName(
+        path, _selected = file_dialogs.getOpenFileName(
             self, '选择%s' % dict(_SENSOR_ROWS)[key].rstrip(':'), '',
             _SENSOR_FILE_FILTER)
         if path:

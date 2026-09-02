@@ -15,15 +15,13 @@ import os
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import (
-    QFileDialog, QHBoxLayout, QVBoxLayout, QWidget,
-)
+from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel, CaptionLabel, CardWidget, CheckBox, ComboBox, DoubleSpinBox,
     LineEdit, PushButton, ScrollArea, SpinBox, SubtitleLabel,
 )
 
-from ui import constants
+from ui import constants, file_dialogs
 
 _FALLBACK_VERSION = '0.9.38'
 _AUTHOR = '邸建豪 袁林 詹萍'
@@ -232,7 +230,7 @@ class SettingsPage(ScrollArea):
 
     # ============================================================ 内部
     def _browse_project_root(self) -> None:
-        path = QFileDialog.getExistingDirectory(
+        path = file_dialogs.getExistingDirectory(
             self, '选择默认项目根目录', self._root_edit.text().strip()
             or constants.DEFAULT_PROJECT_ROOT)
         if path:

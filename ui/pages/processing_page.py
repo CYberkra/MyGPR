@@ -26,6 +26,7 @@ from qfluentwidgets import FluentIcon as FIF
 
 from ui.desktop_backend_facade import compute_display_levels
 from ui import constants
+from ui.motion import animate_progress
 from ui.widgets import (BScanView, CollapsiblePanel, make_page_title, MethodBrowser, ParamForm,
                         PipelineList, clear_invalid,
     make_separator,)
@@ -430,10 +431,12 @@ class ProcessingPage(QWidget):
         """进度更新：total>0 按比例，否则按百分数；message 显示在进度条右侧。"""
         if total and total > 0:
             self._progress_bar.setRange(0, int(total))
-            self._progress_bar.setValue(min(int(completed), int(total)))
+            animate_progress(self._progress_bar,
+                             min(int(completed), int(total)))
         else:
             self._progress_bar.setRange(0, 100)
-            self._progress_bar.setValue(max(0, min(int(completed), 100)))
+            animate_progress(self._progress_bar,
+                             max(0, min(int(completed), 100)))
         self._progress_label.setText(str(message or ''))
         self._progress_label.setToolTip(str(message or ''))
 
