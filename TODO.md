@@ -6,7 +6,8 @@
 
 1. ~~使用营山完整六测线数据执行后端 Golden 回归~~ **已完成（2026-08-31）**：`tests/industrial/scientific_validation/test_yingshan_golden_v1.py` 三层全绿（子集指纹 / 钻孔基准 / 全文件 SHA256+头部）。全文件层需设 `MYGPR_YINGSHAN_DATA` 指向数据目录（CI 无数据时自动 skip，属设计行为）；本机数据路径见 `_handoff_20260830/`。
 2. ~~完成多 GB 导入、取消、磁盘不足、异常断电与恢复测试~~ **已完成（2026-08-31）**：分块导入/取消回滚、事务回滚/前滚、进程锁、深完整性此前已覆盖；磁盘不足（ENOSPC）缺口由 `tests/industrial/reliability/test_disk_full_injection_v1.py` 补齐（导入回滚 / 工件目录+日志回滚 / 原始容器可读性三项契约）。
-3. ~~扩展厂商格式真实样例：RD3/RD7、DZT、DT1/HD、OKO、SEG-Y、ENVI~~ **已完成（2026-08-31）**：DZT/DT1/OKO 解码器落地（注册表全部 `native-subset`）；六格式验收资产齐备——真实样例 DZT/DT1（GPRPy）与 SEG-Y（segyio F3）+ 真实数据派生 RD3/ENVI + OKO 合成样例，全部 SHA256 登记 `tests/fixtures/vendor_formats_v1/vendor_formats_manifest.json`。遗留：OKO 真实样例无公开渠道（合成验收已覆盖），真实样例取得后按 `MYGPR_VENDOR_SAMPLE_DATA` 加 external 回归。计划见 `_handoff_20260830/P0-3_厂商格式样例与解码器计划.md`。
+3. ~~扩展厂商格式真实样例：RD3/RD7、DZT、DT1/HD、SEG-Y、ENVI~~ **已完成（2026-08-31）**：DZT/DT1 解码器落地（注册表全部 `native-subset`）；五格式验收资产齐备——真实样例 DZT/DT1（GPRPy）与 SEG-Y（segyio F3）+ 真实数据派生 RD3/ENVI，全部 SHA256 登记 `tests/fixtures/vendor_formats_v1/vendor_formats_manifest.json`。计划见 `_handoff_20260830/P0-3_厂商格式样例与解码器计划.md`。
+   注：OKO GPR2 支持曾随本项落地（合成样例验收），**2026-09-01 已按用户决策整体移除**（无公开真实样例渠道，设备不使用）——解码器、注册表条目、夹具与文档引用已删除。
 4. 固化 `mygpr/interfaces/` 与 `config/backend_api_v1.json`，供新前端调用。（已有机读契约 `backend_api_v1.json` + `check_backend_api_contract.py` + CI 契约测试；后续仅随 API 变更维护）
 
 ## P1
@@ -21,7 +22,9 @@
 
 0. **处理链路需求实施（2026-09-01 拷问确立）**：B1 参数自动写入（删应用按钮）✅、B3 预设档全删 ✅（commit `1631f27`，breaking：cli_batch `recommended_profile` 校验报错）、B4 批量处理卡 ✅（`85af1e7`）、B7 逐步中间成果落盘+运行组归组+一键清理 ✅（`8493449`）、C1 SEG-Y 导出 ✅（`export_artifact_segy`，契约 19 方法）。全部 CI 绿。ML 阶段后置项：链模板/链推荐/非线性拓扑。
 
-1. ~~软件使用指南~~ **初版已完成（2026-08-31）**：`docs/user/用户指南.md`——安装启动、8 页导览、格式支持矩阵（P0-3 后全直读）、GUI/批处理双工作流、备份恢复与故障排查；`GUI_README.md` 过时信息（DT1/DZT/OKO"仅识别不解码"、导航页数）已同步修正。后续按用户反馈迭代章节（教程截图不进 git）。
+0.5 **启动耗时治理（2026-09-01）**：`-X importtime` 精确剖析后把 matplotlib 链移出 GUI 启动导入路径——`report_export_renderers` 的 `gis_map_export`（顶层拉 `matplotlib.figure`）与报告包适配器链改为函数级导入，导入树 **3.75s → 2.97s（-21%）**，matplotlib 完全退出启动期。报告/GIS 出图运行时行为不变（Agg 无头红线保持）。剩余头部：注册表链 ~1.3s（架构性，算法单一事实源启动期必需）、qfluentwidgets ~0.6s（UI 框架本体）、`pyqtgraph.opengl` ~0.29s（SpatialPage 构造期即建 3D 视图，惰性化需动 14 处引用点+数据补投，收益/风险比低，暂缓）。
+
+1. ~~软件使用指南~~ **初版已完成（2026-08-31）**：`docs/user/用户指南.md`——安装启动、8 页导览、格式支持矩阵（P0-3 后全直读）、GUI/批处理双工作流、备份恢复与故障排查；`GUI_README.md` 过时信息（DT1/DZT"仅识别不解码"、导航页数）已同步修正。后续按用户反馈迭代章节（教程截图不进 git）。
 2. ~~全面构建使用文档（Diátaxis 四象限）~~ **已完成（2026-08-31）**：按行业标准 [Diátaxis](https://diataxis.fr/) 框架重构为文档树 `docs/user/`——**tutorials**（营山零基础全流程 15 分钟）、**how-to** ×6（导入/传感器同步/处理与AutoTune/标注与空间成果/报告备份/无界面批处理）、**reference** ×3（格式矩阵含二进制布局速查/预设档算法序列/项目目录与文件位置）、**explanation**（处理证据链与数据安全模型）；入口 `docs/user/README.md` 按目的路由，旧单文件指南降为速览版并互链；15 文件相对链接互验全过。
 
 ## 前端（v0.9.37 已交付）

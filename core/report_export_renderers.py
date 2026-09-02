@@ -11,7 +11,8 @@ from typing import Any
 
 import numpy as np
 
-from core.gis_map_export import export_project_plan_map
+# gis_map_export 顶层拉入 matplotlib（实测 ~0.5s），仅报告出图需要，
+# 改为 _write_report_figures 内函数级导入，避免进入 GUI 启动导入链。
 from core.plot_font_policy import configure_matplotlib_cjk_fonts
 from core.report_export_rows import _sha256_file
 
@@ -97,6 +98,8 @@ def _write_report_figures(store: Any, figures_dir: Path, *, line_ids: set[str] |
     try:
         if not include_plan_map:
             raise LookupError("plan map excluded by report profile")
+        from core.gis_map_export import export_project_plan_map
+
         export_project_plan_map(
             store,
             plan_path,

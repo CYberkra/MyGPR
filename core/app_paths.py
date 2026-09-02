@@ -18,11 +18,6 @@ def get_app_data_dir() -> str:
     return path
 
 
-def get_settings_dir() -> str:
-    path = os.path.join(get_app_data_dir(), "settings")
-    os.makedirs(path, exist_ok=True)
-    return path
-
 
 def get_output_dir() -> str:
     path = os.path.join(get_app_data_dir(), "output")
@@ -43,16 +38,6 @@ def get_tile_cache_dir() -> str:
     return path
 
 
-def get_favorites_dir() -> str:
-    path = os.path.join(get_app_data_dir(), "favorites")
-    os.makedirs(path, exist_ok=True)
-    return path
-
-
-def get_workflow_templates_dir() -> str:
-    path = os.path.join(get_app_data_dir(), "workflow_templates")
-    os.makedirs(path, exist_ok=True)
-    return path
 
 
 def get_repo_root() -> str:
@@ -89,29 +74,3 @@ def get_default_gpr_result_runs_dir() -> str:
     return os.path.join(get_output_dir(), "gpr_result_runs")
 
 
-def expand_path_template(raw_path: str, *, base_dir: str | os.PathLike[str] | None = None) -> str:
-    """Expand MyGPR path placeholders and environment variables.
-
-    Supported placeholders:
-    - ${MYGPR_REPO_ROOT}
-    - ${MYGPR_EVIDENCE_ROOT}
-    - ${MYGPR_GPR_RESULT_RUNS}
-
-    Standard environment variables are also expanded. Relative paths are resolved
-    against ``base_dir`` when provided.
-    """
-    text = str(raw_path or "").strip()
-    replacements = {
-        "${MYGPR_REPO_ROOT}": get_repo_root(),
-        "$MYGPR_REPO_ROOT": get_repo_root(),
-        "${MYGPR_EVIDENCE_ROOT}": get_default_evidence_root(),
-        "$MYGPR_EVIDENCE_ROOT": get_default_evidence_root(),
-        "${MYGPR_GPR_RESULT_RUNS}": get_default_gpr_result_runs_dir(),
-        "$MYGPR_GPR_RESULT_RUNS": get_default_gpr_result_runs_dir(),
-    }
-    for key, value in replacements.items():
-        text = text.replace(key, value)
-    text = os.path.expanduser(os.path.expandvars(text))
-    if base_dir and text and not os.path.isabs(text):
-        text = os.path.join(os.fspath(base_dir), text)
-    return os.path.abspath(text) if text else text

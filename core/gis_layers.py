@@ -99,20 +99,6 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def validate_crs(value: Any, *, required: bool = False) -> str:
-    text = str(value or "").strip()
-    if not text:
-        if required:
-            raise ValueError("工程坐标系必须使用 EPSG 编号或完整 WKT。")
-        return ""
-    if CRS is None:
-        return text
-    try:
-        crs = CRS.from_user_input(text)
-    except Exception as exc:
-        raise ValueError(f"无法解析坐标系：{text}") from exc
-    return crs.to_wkt()
-
 def _flatten_coordinate_pairs(value: Any) -> Iterable[tuple[float, float]]:
     if isinstance(value, (list, tuple)) and len(value) >= 2 and all(isinstance(v, (int, float)) for v in value[:2]):
         yield float(value[0]), float(value[1])

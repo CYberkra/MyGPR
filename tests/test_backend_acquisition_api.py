@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import time
 from pathlib import Path
 
 import numpy as np
@@ -61,6 +62,22 @@ def _sensor_files(root: Path, trace_count: int = 4) -> tuple[Path, Path, Path]:
     return trace_path, rtk_path, imu_path
 
 
+def _wait_terminal(backend: MyGPRBackend, job_id: str, timeout_s: float = 120.0):
+    """轮询到作业终态再返回。
+
+    ``backend.jobs.wait`` 超时是静默返回非终态快照（设计如此），全量并发
+    下 30s 也可能不够，历史上让 COMPLETED 断言撞上运行中的作业（Windows
+    时序类 flake）。这里轮询到终态，排除"等得不够久"这一失败模式；终态
+    若为 FAILED/CANCELLED，错误细节由调用方断言消息携带。
+    """
+    deadline = time.monotonic() + timeout_s
+    snapshot = backend.jobs.wait(job_id, timeout=30)
+    while not snapshot.is_terminal and time.monotonic() < deadline:
+        time.sleep(0.2)
+        snapshot = backend.jobs.wait(job_id, timeout=5)
+    return snapshot
+
+
 def test_headless_acquisition_preflight_import_and_sensor_sync(tmp_path: Path) -> None:
     qt_before = qt_module_snapshot()
     source = tmp_path / "line.npy"
@@ -109,7 +126,7 @@ def test_headless_acquisition_preflight_import_and_sensor_sync(tmp_path: Path) -
             backend.acquisition.motion_pipeline(),
             result_name="motion-v2",
         )
-        motion = backend.jobs.wait(motion_job, timeout=30)
+        motion = _wait_terminal(backend, motion_job)
         assert motion.status is JobStatus.COMPLETED, motion.error_message
         assert motion.result.method_id == "motion_compensation_v2"
         assert_qt_imports_unchanged(qt_before)
@@ -152,7 +169,7 @@ def test_acquisition_jobs_and_motion_pipeline_contract(tmp_path: Path) -> None:
             line_id="L01",
             dielectric_constant=12.5,
         )
-        imported = backend.jobs.wait(import_job, timeout=30)
+        imported = _wait_terminal(backend, import_job)
         assert imported.status is JobStatus.COMPLETED, imported.error_message
         assert backend.projects.get_dataset_info(
             project.project_id, "L01"
@@ -165,7 +182,8 @@ def test_acquisition_jobs_and_motion_pipeline_contract(tmp_path: Path) -> None:
             trace_timestamps_path=str(trace_path),
             imu_path=str(imu_path),
         )
-        synced = backend.jobs.wait(sync_job, timeout=30)
+        # jobs.wait 超时会静默返回非终态快照，见 _wait_terminal 注释。
+        synced = _wait_terminal(backend, sync_job)
         assert synced.status is JobStatus.COMPLETED, (
             f"sensor sync flaked: {synced.status}, stage={synced.message!r}, "
             f"errors={synced.error_details!r}"

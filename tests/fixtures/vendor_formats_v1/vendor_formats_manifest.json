@@ -200,20 +200,6 @@
         "TIME WINDOW": 48.0,
         "DISTANCE INTERVAL": 0.02
       }
-    },
-    "oko_gpr2_synthetic": {
-      "file": "oko_synthetic.GPR2",
-      "sha256": "7b6262ed8b2b560006bed922dbc53e5d6e74e42c9d5fbe78b84aaff15449e360",
-      "provenance": "synthetic OKO-2 GPR2 built per RGPR readGPR2 layout (magic 0xFEDCBA98, 444B header, 512B offset arrays, 36B trace heads); header: Tall=120ns Ddxmm=25mm antenna 'АБ-400'",
-      "matrix": {
-        "shape": [
-          300,
-          24
-        ],
-        "dtype": "float32",
-        "npz_key": "oko_gpr2_matrix"
-      },
-      "note": "synthetic acceptance asset; no public OKO sample channel exists (see P0-3 plan)"
     }
   }
 }

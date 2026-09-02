@@ -33,7 +33,6 @@ class GprReaderFormat(str, Enum):
     ENVI_BSQ = "envi_bsq"
     SENSORS_SOFTWARE_DT1 = "sensors_software_dt1"
     GSSI_DZT = "gssi_dzt"
-    GEOTECH_OKO_GPR2 = "geotech_oko_gpr2"
 
 
 def _read_text(path: Path) -> str:
@@ -451,85 +450,6 @@ def read_gssi_dzt(path: str | os.PathLike[str]) -> dict[str, Any]:
     return {"data": data, "header_info": header, "path": str(p), "format": GprReaderFormat.GSSI_DZT}
 
 
-def read_geotech_oko_gpr2(path: str | os.PathLike[str]) -> dict[str, Any]:
-    """Decode Geotech OKO-2 ``.GPR2`` profiles (RGPR readGPR2 port).
-
-    布局（RGPR ``R/readGPR2.R`` 移植，全部 little-endian 字节流、无对齐填充）：
-    - 444B 固定头，起始魔数 ``0xFEDCBA98``（LE 字节 ``98 BA DC FE``）；
-      关键字段 ``NTraces``/``NSamples``/``Tall``(总时窗 ns)/``Ddxmm``(道间距 mm)
-    - 偏移 512 处：``ColorArray``（256×4B）+ 均衡数组（float32 × NSamples）
-    - 逐道：36B 道头（int64 rTime + pos/x/y/z/iAnt/labelID/labelpos 各 int32）
-      + float32 × NSamples
-    - 头内俄语字段（AntenName 等）按 windows-1251 解码
-    """
-    p = Path(path)
-    file_size = p.stat().st_size
-    if file_size < 512:
-        raise GPRFormatReadError(f"OKO GPR2 文件过短: {file_size}")
-    head_struct = struct.Struct(
-        "<4s9Ifi4q2QI2i2f2I2i3I40s40s40s40s40s40s2q2iIih3I2HIHf"
-    )
-    with p.open("rb") as stream:
-        blob = stream.read(512)
-        if len(blob) < head_struct.size:
-            raise GPRFormatReadError(f"OKO GPR2 头不完整: {len(blob)} < {head_struct.size}")
-        fields = head_struct.unpack_from(blob, 0)
-        if fields[0] != b"\x98\xba\xdc\xfe":
-            raise GPRFormatReadError(
-                f"OKO GPR2 魔数不符: 期望 0xFEDCBA98, 实际 {fields[0].hex()}"
-            )
-        (
-            _label, _id_version, _main_number, _ser_number, _prof_ser_number, _state,
-            n_traces, n_samples, _n_text_labels, tall_ns, _eps, dd_x_mm,
-            _start_position, _start_x, _start_y, _start_z,
-            _create_time, _manipulation_time, _la, _tstart, _tspp,
-            _spp_threshold, _kraz, _win_size, _hor_win_size, _white, _black,
-            _scan_mode, _n_sum, _ntpz,
-            anten_name_raw, _operator_raw, _object_raw, _tips1_raw, _tips2_raw, _tips3_raw,
-            _user_number, _last_user_number, _zero_zone, _shift_procent,
-            _first_label_number, _ab2_shift, _s_curs_angl,
-            _n_ant_serial, _dw_p_version_ms, _dw_p_version_ls,
-            _anten_id, _device_id, _state2, _height_above_road, _f_tall,
-        ) = fields
-        if n_traces <= 0 or n_samples <= 0:
-            raise GPRFormatReadError(f"OKO GPR2 头字段无效: NTraces={n_traces}, NSamples={n_samples}")
-        stream.seek(512)
-        stream.read(256 * 4)  # ColorArray
-        stream.read(n_samples * 4)  # Equalisation factor array
-        trace_head_struct = struct.Struct("<q7I")
-        data = np.empty((n_samples, n_traces), dtype=np.float32)
-        r_time = np.empty(n_traces, dtype=np.float64)
-        positions = np.empty(n_traces, dtype=np.float64)
-        for index in range(n_traces):
-            trace_head = stream.read(trace_head_struct.size)
-            if len(trace_head) < trace_head_struct.size:
-                raise GPRFormatReadError(f"OKO GPR2 道头不完整: trace {index}")
-            th = trace_head_struct.unpack(trace_head)
-            r_time[index] = th[0]
-            positions[index] = th[1]
-            row = stream.read(n_samples * 4)
-            if len(row) < n_samples * 4:
-                raise GPRFormatReadError(f"OKO GPR2 道数据不完整: trace {index}")
-            data[:, index] = np.frombuffer(row, dtype="<f4", count=n_samples)
-
-    def _decode_cyrillic(raw: bytes) -> str:
-        return raw.split(b"\x00", 1)[0].decode("windows-1251", errors="replace").strip()
-
-    header = {
-        "a_scan_length": int(n_samples),
-        "num_traces": int(n_traces),
-        "total_time_ns": float(tall_ns),
-        "trace_interval_m": float(dd_x_mm) / 1000.0,
-        "antenna_name": _decode_cyrillic(anten_name_raw),
-        "profile_number": int(_main_number),
-        "source": GprReaderFormat.GEOTECH_OKO_GPR2,
-        "path": str(p),
-        "trace_positions": positions,
-        "trace_times": r_time,
-    }
-    return {"data": data, "header_info": header, "path": str(p), "format": GprReaderFormat.GEOTECH_OKO_GPR2}
-
-
 def unsupported_known_format_message(path: str | os.PathLike[str], display_name: str, notes: str = "") -> str:
     return (
         f"{display_name} 已被识别为常见 GPR 数据格式，但 V0.8.40 尚未内置可靠解码器。"
@@ -546,7 +466,6 @@ __all__ = [
     "read_impulseradar_iprb",
     "read_sensors_software_dt1",
     "read_gssi_dzt",
-    "read_geotech_oko_gpr2",
     "read_segy_fixed",
     "read_envi_bsq",
     "unsupported_known_format_message",

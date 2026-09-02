@@ -61,12 +61,3 @@ def merge_runtime_warnings(*warning_groups: Any) -> list[dict[str, Any]]:
     return merged
 
 
-def format_runtime_warning_text(warning: dict[str, Any]) -> str:
-    """Format a warning for logs and reports."""
-    if not warning:
-        return ""
-    details = warning.get("details", {}) or {}
-    if details:
-        details_text = ", ".join(f"{k}={v}" for k, v in details.items())
-        return f"[{warning.get('code', 'warning')}] {warning.get('message', '')} ({details_text})"
-    return f"[{warning.get('code', 'warning')}] {warning.get('message', '')}"

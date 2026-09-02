@@ -21,9 +21,6 @@ from scipy.linalg import svd as scipy_svd
 
 
 DEFAULT_SVHT_BASE = 2.858
-DEFAULT_WINDOW_SIZE = 0  # 0 表示自动 (N//2)
-
-
 class ProcessingCancelled(Exception):
     """用户主动取消处理。"""
 

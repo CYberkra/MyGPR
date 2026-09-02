@@ -25,14 +25,6 @@ _LEGACY_GLOBAL_TRANSFORM_METHODS = frozenset(
     {"kirchhoff_migration", "stolt_migration", "fk_filter"}
 )
 
-_METADATA_KEYS = (
-    "name",
-    "category",
-    "visibility",
-    "auto_tune_enabled",
-    "auto_tune_family",
-)
-
 
 def legacy_overlay(method_id: str) -> dict[str, Any]:
     """返回 core 侧对该方法的展示元数据覆盖。
