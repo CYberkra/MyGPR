@@ -1,43 +1,53 @@
 # -*- coding: utf-8 -*-
-"""ui.file_dialogs — 强制 Qt 风格文件/目录对话框（禁用原生 IFileDialog）。
+"""ui.file_dialogs — 文件/目录对话框统一入口。
 
-为什么存在：PyQt6-Fluent-Widgets 的无边框窗口（frameless + Win32 钩子）
-与 Windows 原生 IFileDialog 组合时，对话框打开瞬间会触发
-``OSError returned a result with an exception set`` 甚至无声退出
-（用户实测：主页"新建项目/打开项目"必现；Linux offscreen CI 亦有
-同族段错误）。根因是原生对话框挂在 Win32 owner 钩子上与 qfw 的
-消息钩子互相干扰。
+所有 UI 层文件对话框一律 import 本模块，不直接用 QFileDialog，
+便于全局策略（路径规范化等）只改一处。
 
-方案：QFileDialog 全静态方法的影子包装，统一注入
-``DontUseNativeDialog``——Qt 内部实现走 QWidget 绘制，与无边框窗口
-完全兼容。所有 UI 层文件对话框一律 import 本模块，不直接用
-QFileDialog。
+历史说明：曾在此强制 ``DontUseNativeDialog``，因为当时误诊原生
+IFileDialog 为 "<class 'OSError'> returned a result with an exception
+set" 弹窗的元凶；根因实为 ``core.storage_primitives._pid_alive`` 在
+Windows 上用 ``os.kill(pid, 0)`` 判活（死 PID 抛 SystemError 逃逸），
+修复后原生对话框与无边框窗口并无冲突，已恢复默认原生样式（更美观）。
+
+本模块同时规范化返回路径：Qt 对话框在 Windows 上返回正斜杠路径，
+这里统一转回反斜杠，避免下游 Windows API / 显示层混用两种分隔符。
 """
 from __future__ import annotations
 
+import sys
+from pathlib import PureWindowsPath
+
 from PyQt6.QtWidgets import QFileDialog, QWidget
 
-_OPTIONS = QFileDialog.Option.DontUseNativeDialog
+
+def _normalize(path: str) -> str:
+    """Windows 上把 Qt 返回的 'C:/a/b' 规范为 'C:\\a\\b'；其他平台原样。"""
+    if not path:
+        return path
+    if sys.platform == 'win32':
+        return str(PureWindowsPath(path))
+    return path
 
 
 def getExistingDirectory(parent: QWidget | None, caption: str,
                          directory: str) -> str:
-    """选择目录（非原生）。返回所选路径，取消返回空串。"""
-    return QFileDialog.getExistingDirectory(
-        parent, caption, directory, options=_OPTIONS)
+    """选择目录。返回所选路径，取消返回空串。"""
+    return _normalize(QFileDialog.getExistingDirectory(
+        parent, caption, directory))
 
 
 def getOpenFileName(parent: QWidget | None, caption: str, directory: str,
-                    file_filter: str = '') -> str:
-    """选择单个文件（非原生）。返回 (路径, 过滤器)，取消路径为空串。"""
+                    file_filter: str = '') -> tuple[str, str]:
+    """选择单个文件。返回 (路径, 过滤器)，取消路径为空串。"""
     path, selected = QFileDialog.getOpenFileName(
-        parent, caption, directory, file_filter, options=_OPTIONS)
-    return path, selected
+        parent, caption, directory, file_filter)
+    return _normalize(path), selected
 
 
 def getSaveFileName(parent: QWidget | None, caption: str, directory: str,
-                    file_filter: str = '') -> str:
-    """保存文件（非原生）。返回 (路径, 过滤器)，取消路径为空串。"""
+                    file_filter: str = '') -> tuple[str, str]:
+    """保存文件。返回 (路径, 过滤器)，取消路径为空串。"""
     path, selected = QFileDialog.getSaveFileName(
-        parent, caption, directory, file_filter, options=_OPTIONS)
-    return path, selected
+        parent, caption, directory, file_filter)
+    return _normalize(path), selected
