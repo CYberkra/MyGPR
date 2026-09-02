@@ -285,7 +285,6 @@ def backup_project_archive(
         json.dumps(backup_manifest, ensure_ascii=False, sort_keys=True).encode("utf-8")
     ).hexdigest()
     file_count = len(backup_manifest.get("files", []))
-    unchanged_count = int(backup_manifest.get("unchanged_files_omitted", 0))
     size_mb = round(archive.stat().st_size / (1024 * 1024), 3)
     if retention_keep is not None:
         _prune_old_backups(backup_dir, store.root.name, str(store.manifest.project_id), int(retention_keep), current=archive)
