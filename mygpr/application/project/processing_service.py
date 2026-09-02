@@ -12,9 +12,18 @@ import numpy as np
 
 from mygpr.application.jobs.context import ExecutionContext
 from mygpr.application.processing.service import ProcessingService
-from mygpr.application.project.service import ProjectService
+from mygpr.application.project.service import (
+    ProjectApplicationError,
+    ProjectService,
+)
 from mygpr.domain.processing.models import BlockPipelineSummary, PipelineDefinition, ResourceEstimate
 from mygpr.domain.project.models import LineDatasetInfo, ProjectArtifact
+
+
+class ProjectReadOnlyError(ProjectApplicationError):
+    """只读会话上请求写入类操作（错误码 MYGPR_PROJECT_READ_ONLY）。"""
+
+    error_code = "MYGPR_PROJECT_READ_ONLY"
 
 # 输出 header 中需要持久化的轴标量（P1-1：形状变更方法如 time_cut/set_zero_time
 # 会改变时间窗与零点，若不保存，二次处理/成像的物理轴会按原始时窗错误计算）
@@ -108,6 +117,15 @@ class ProjectProcessingService:
         （中间矩阵必须物化），自动改走 loaded 路径——多 GB 数据请传 False。
         """
         execution_context = context or ExecutionContext.null()
+        summary = self._projects.get_summary(project_id)
+        if summary.read_only:
+            # 只读会话（陈旧锁未恢复/另一实例占用）整条链算完才在 catalog
+            # 写入时失败，白费算力且报错不指向根因——入口即拦截并给
+            # 可操作提示（P1 评审：processing_service 缺 read_only 前置检查）。
+            raise ProjectReadOnlyError(
+                f"项目以只读方式打开（可能存在残留锁或另一实例占用），"
+                f"无法保存处理成果：{summary.root_path}。"
+                f"请关闭其他实例后重新打开项目。")
         use_block = (
             not save_intermediates
             and self._processing.supports_block_pipeline(pipeline)

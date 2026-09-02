@@ -390,7 +390,11 @@ class _OpenProjectCommand:
             c._set_busy(False)
             return
         try:
-            summary = backend.projects.open_project(str(self._root))
+            # 显式打开项目=人类操作；锁的持有进程已由 _pid_alive 判死时
+            # 恢复陈旧锁（默认 False 会让 AUTO 静默降级为只读会话，
+            # 处理链写 catalog 时才报 "Project catalog is read-only"）。
+            summary = backend.projects.open_project(
+                str(self._root), recover_stale_lock=True)
         except Exception as exc:  # noqa: BLE001
             _LOGGER.exception("打开项目失败")
             message = friendly_error_message(exc)

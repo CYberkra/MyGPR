@@ -10,6 +10,7 @@ the destination and fsync the parent directory when the platform supports it.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import socket
@@ -141,6 +142,9 @@ class ProjectLockError(RuntimeError):
     pass
 
 
+_LOGGER = logging.getLogger(__name__)
+
+
 class ProjectReadOnlyError(PermissionError):
     pass
 
@@ -159,15 +163,23 @@ def _pid_alive(pid: int) -> bool:
         # OSError(WinError 6 句柄无效)，且可能以 SystemError 形态逃逸
         # （"<class 'OSError'> returned a result with an exception set"，
         # 用户可见为新建/打开项目报错）。改用 Win32 OpenProcess 判活。
+        # use_last_error=True 才能可靠读到 GetLastError 错误码。
         import ctypes
 
         PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
         STILL_ACTIVE = 259
-        kernel32 = ctypes.windll.kernel32
+        ERROR_ACCESS_DENIED = 5
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         handle = kernel32.OpenProcess(
             PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
         if not handle:
-            return False  # 进程不存在或无权查询（无权视为存活更保守，但锁场景取 False 更安全）
+            # 不存在的 PID → ERROR_INVALID_PARAMETER/ERROR_INVALID_SID 类；
+            # 存在但拒访（PPL/服务/DACL）→ ERROR_ACCESS_DENIED。
+            # 拒访必须视为存活：宁可让用户手删陈旧锁，也不能把活锁
+            # 恢复掉造成双实例写同一项目（数据安全红线）。
+            if ctypes.get_last_error() == ERROR_ACCESS_DENIED:
+                return True
+            return False
         try:
             exit_code = ctypes.c_ulong()
             if kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
@@ -303,9 +315,33 @@ class ProjectLock(AbstractContextManager["ProjectLock"]):
             except FileExistsError:
                 stale = self._is_stale()
                 if stale and self.recover_stale:
-                    self.lock_path.unlink(missing_ok=True)
+                    # 原子 rename 抢占恢复权： stale 判定与 unlink 之间存在
+                    # TOCTOU 窗口，若另一实例先恢复并建了新锁，直接 unlink
+                    # 会误删对方的活锁造成双实例写同一项目。rename 到唯一
+                    # 私有名天然互斥——只有 rename 成功的一方有恢复权；
+                    # rename 失败说明锁刚被别人动过，回到 O_EXCL 重试。
+                    quarantine = self.lock_path.with_name(
+                        f".{self.lock_path.name}.stale.{self.token}")
+                    try:
+                        os.replace(self.lock_path, quarantine)
+                    except FileNotFoundError:
+                        continue
+                    try:
+                        # 二次校验：rename 到手的是否仍是当初判定的陈旧锁
+                        # （防竞争窗口内原持有者复活重写）。
+                        if self._is_stale():
+                            self.lock_path.unlink(missing_ok=True)
+                            continue
+                        os.replace(quarantine, self.lock_path)
+                    except OSError:
+                        quarantine.unlink(missing_ok=True)
                     continue
                 if self.mode == ProjectAccessMode.AUTO:
+                    # 静默降级是历史事故源头（P1 评审）：锁存在且未恢复时
+                    # AUTO 转只读，用户跑到写 catalog 才报错。至少留痕。
+                    _LOGGER.warning(
+                        "项目锁被占用且未恢复，会话降级为只读：%s",
+                        self.root)
                     self.read_only = True
                     self._held = True
                     return self
