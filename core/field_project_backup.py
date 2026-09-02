@@ -24,9 +24,6 @@ PROJECT_MANIFEST_NAME = FieldProjectStore.MANIFEST_NAME
 
 # 增量备份：基准 manifest 内的文件名约定与保留策略默认值。
 INCREMENTAL_BASE_MANIFEST = "backup_manifest.json"
-DEFAULT_MAX_BACKUPS = 10
-
-
 @dataclass(frozen=True)
 class ProjectBackupResult:
     """Result of creating and verifying a portable project backup archive."""

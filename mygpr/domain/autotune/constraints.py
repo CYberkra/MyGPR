@@ -200,18 +200,6 @@ def constrain_auto_tune_params(
     )
 
 
-def constrain_auto_tune_trials(
-    method_key: str,
-    trials: list[dict[str, Any]],
-    data_shape: tuple[int, int],
-    header_info: dict[str, Any] | None = None,
-) -> list[ParameterConstraintResult]:
-    """Constrain a list of trial params."""
-    return [
-        constrain_auto_tune_params(method_key, trial, data_shape, header_info)
-        for trial in trials
-    ]
-
 
 def _resolve_shape(data_shape: tuple[int, int]) -> tuple[int, int]:
     if len(data_shape) != 2:

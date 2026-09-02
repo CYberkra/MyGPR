@@ -836,33 +836,6 @@ def delete_project_permanently(
 archive_project_line = delete_project_line
 
 
-def delete_project_to_trash(
-    store: FieldProjectStore,
-    *,
-    recent_store: RecentProjectsStore | None = None,
-    reason: str = "用户删除项目",
-) -> ProjectDeleteResult:
-    """Move the whole project to a sibling recycle-bin directory."""
-    root = _assert_safe_project_root_for_removal(store)
-    project_name = store.manifest.name
-    stamp = utc_now().replace(":", "").replace("+", "_")
-    trash_parent = root.parent / ".mygpr_trash"
-    trash_parent.mkdir(parents=True, exist_ok=True)
-    destination = _unique_destination(trash_parent / f"{stamp}_{root.name}")
-    store.append_log(f"项目移入回收站：reason={reason}")
-    store.close()
-    shutil.move(str(root), str(destination))
-    atomic_write_json(destination / "project_trash_record.json", {
-        "schema": "mygpr.project_trash.v1",
-        "project_name": project_name,
-        "original_path": str(root),
-        "trashed_path": str(destination),
-        "reason": reason,
-        "trashed_at": utc_now(),
-    })
-    removed = (recent_store or RecentProjectsStore()).remove(root)
-    return ProjectDeleteResult(project_name, str(root), str(destination), removed)
-
 
 def prune_missing_recent_projects(*, recent_store: RecentProjectsStore | None = None) -> int:
     """Remove stale recent project entries whose manifest is gone."""

@@ -23,7 +23,6 @@ except ImportError:  # pragma: no cover - reported through ProjectionError
     Transformer = None  # type: ignore
 
 
-CGCS2000_GEOGRAPHIC_EPSG = 4490
 WGS84_GEOGRAPHIC_EPSG = 4326
 
 
