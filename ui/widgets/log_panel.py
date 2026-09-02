@@ -11,10 +11,9 @@ from datetime import datetime
 
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtGui import QTextCursor
-from PyQt6.QtWidgets import (QFileDialog, QHBoxLayout, QStackedWidget,
-                             QTextEdit, QVBoxLayout)
+from PyQt6.QtWidgets import QHBoxLayout, QStackedWidget, QTextEdit, QVBoxLayout
 from qfluentwidgets import CardWidget, PushButton, SegmentedWidget
-from ui import constants
+from ui import constants, file_dialogs
 
 from .job_widgets import MiniJobList
 
@@ -147,7 +146,7 @@ class LogPanel(CardWidget):
 
     def _export_log(self) -> None:
         """日志全文保存为 .txt（纯文本，不含着色标记）。"""
-        path, _selected = QFileDialog.getSaveFileName(
+        path, _selected = file_dialogs.getSaveFileName(
             self, '导出日志',
             'mygpr_log_%s.txt' % datetime.now().strftime('%Y%m%d_%H%M%S'),
             '文本文件 (*.txt)')

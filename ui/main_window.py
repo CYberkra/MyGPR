@@ -16,7 +16,7 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtGui import QIcon, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
-    QDialog, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QPushButton,
+    QDialog, QFormLayout, QHBoxLayout, QLabel, QPushButton,
     QStackedWidget, QTextBrowser, QTextEdit, QToolButton, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
@@ -25,7 +25,7 @@ from qfluentwidgets import (
     SegmentedWidget, SplashScreen,
 )
 
-from ui import constants
+from ui import constants, file_dialogs
 from ui.page_coordinator import PageCoordinator
 from ui.logger_config import setup_logger
 from ui.settings_manager import SettingsManager
@@ -562,7 +562,7 @@ class MyGPRMainWindow(FluentWindow):
         browse_btn.setFixedWidth(70)
 
         def _browse() -> None:
-            path = QFileDialog.getExistingDirectory(
+            path = file_dialogs.getExistingDirectory(
                 dialog, '选择项目根目录', root_edit.text().strip()
                 or constants.DEFAULT_PROJECT_ROOT)
             if path:
@@ -642,7 +642,7 @@ class MyGPRMainWindow(FluentWindow):
             return
         if self.project_controller is None:
             return
-        root = QFileDialog.getExistingDirectory(
+        root = file_dialogs.getExistingDirectory(
             self, '选择项目目录', str(self.settings.get(
                 'project_root', constants.DEFAULT_PROJECT_ROOT)))
         if root:

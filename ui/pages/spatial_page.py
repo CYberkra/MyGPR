@@ -18,15 +18,15 @@ import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QIcon, QPixmap
-from PyQt6.QtWidgets import (QFileDialog, QHBoxLayout, QListWidget,
-                             QListWidgetItem, QStackedWidget, QVBoxLayout,
-                             QWidget)
+from PyQt6.QtWidgets import (
+    QHBoxLayout, QListWidget, QListWidgetItem, QStackedWidget, QVBoxLayout, QWidget,
+)
 from qfluentwidgets import (CaptionLabel, CardWidget, ComboBox, DoubleSpinBox,
                             PrimaryPushButton, PushButton, ScrollArea,
                             SegmentedWidget, SubtitleLabel, SwitchButton)
 from qfluentwidgets import FluentIcon as FIF
 
-from ui import constants
+from ui import constants, file_dialogs
 from ui.settings_manager import SettingsManager
 from ui.widgets.collapsible_panel import CollapsiblePanel
 from ui.widgets.local_dem import load_xyz_grid
@@ -754,7 +754,7 @@ class SpatialPage(QWidget):
 
         路径记入设置，之后启动自动加载，无需重复导入。
         """
-        path, _selected = QFileDialog.getOpenFileName(
+        path, _selected = file_dialogs.getOpenFileName(
             self, '选择本地 DEM 格网文件', '',
             'DEM 格网 (*.xyz *.csv *.txt);;所有文件 (*)')
         if not path:

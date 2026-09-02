@@ -516,9 +516,10 @@ class Trajectory3DView(QWidget):
     def _export_screenshot(self) -> None:
         """GL 视图内容导出 PNG（grabFramebuffer 抓取帧缓冲）。"""
         from PyQt6.QtCore import QDateTime
-        from PyQt6.QtWidgets import QFileDialog
+
+        from ui import file_dialogs
         stamp = QDateTime.currentDateTime().toString('yyyyMMdd_HHmmss')
-        path, _selected = QFileDialog.getSaveFileName(
+        path, _selected = file_dialogs.getSaveFileName(
             self, '导出三维视图截图', f'view3d_{stamp}.png', 'PNG 图片 (*.png)')
         if path:
             self._gl_view.grabFramebuffer().save(path, 'PNG')

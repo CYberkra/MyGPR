@@ -16,7 +16,7 @@ import os
 from PyQt6.QtCore import Qt, QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices, QFont
 from PyQt6.QtWidgets import (
-    QDialog, QFileDialog, QHBoxLayout, QHeaderView, QListWidget,
+    QDialog, QHBoxLayout, QHeaderView, QListWidget,
     QListWidgetItem, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
@@ -25,7 +25,7 @@ from qfluentwidgets import (
     StrongBodyLabel, SubtitleLabel,
 )
 
-from ui import constants
+from ui import constants, file_dialogs
 from ui.widgets import (clear_invalid, make_page_title, make_separator, mark_invalid,
                         validate_non_empty)
 
@@ -327,7 +327,7 @@ class DeliveryPage(QWidget):
     def _on_backup_clicked(self) -> None:
         if self._busy:
             return
-        dest = QFileDialog.getExistingDirectory(
+        dest = file_dialogs.getExistingDirectory(
             self, '选择备份目录', constants.DEFAULT_PROJECT_ROOT)
         if dest:
             self.backup_requested.emit({
@@ -339,7 +339,7 @@ class DeliveryPage(QWidget):
     def _on_restore_clicked(self) -> None:
         if self._busy:
             return
-        path, _selected_filter = QFileDialog.getOpenFileName(
+        path, _selected_filter = file_dialogs.getOpenFileName(
             self, '选择备份归档', constants.DEFAULT_PROJECT_ROOT,
             '备份归档 (*.zip *.tar *.tar.gz *.tgz);;所有文件 (*)')
         if not path:

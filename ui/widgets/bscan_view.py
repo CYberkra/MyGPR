@@ -19,14 +19,13 @@ sample_axis 时显示物理量，降采样数据附"原始约 N"），右键菜�
 """
 
 from PyQt6.QtCore import Qt, QDateTime, pyqtSignal
-from PyQt6.QtWidgets import (QApplication, QHBoxLayout, QFileDialog,
-                             QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout, QWidget
 
 import pyqtgraph as pg
 from PyQt6.QtWidgets import QLabel
 from qfluentwidgets import FluentIcon as FIF, PushButton
 
-from ui import constants
+from ui import constants, file_dialogs
 from ui.widgets.context_menus import (add_action, add_checkable_submenu,
                                       make_menu)
 
@@ -354,7 +353,7 @@ class BScanView(QWidget):
         import re
         title = re.sub(r'[\\/:*?"<>|\s]+', '_', self._plot.titleLabel.text)
         stamp = QDateTime.currentDateTime().toString('yyyyMMdd_HHmmss')
-        path, _selected = QFileDialog.getSaveFileName(
+        path, _selected = file_dialogs.getSaveFileName(
             self, '导出 B-Scan 图像', f'bscan_{title}_{stamp}.png',
             'PNG 图片 (*.png)')
         if path:
