@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -19,6 +20,8 @@ from core.field_project_store import FieldProjectStore
 from core.project_root_guard import ensure_project_root_marker
 from core.security_paths import UnsafeManagedPathError, resolve_managed_path, safe_relative_path
 from core.storage_primitives import atomic_output_path, utc_now
+
+_LOGGER = logging.getLogger(__name__)
 
 PROJECT_MANIFEST_NAME = FieldProjectStore.MANIFEST_NAME
 
@@ -175,86 +178,122 @@ def backup_project_archive(
     stamp = utc_now().replace(":", "").replace("+", "_")
     archive = backup_dir / f"{store.root.name}_backup_{stamp}.zip"
     excluded_parts = {".git", ".venv", "__pycache__", "backups", ".transactions", ".trash"}
-    candidates: list[tuple[Path, Path]] = []
-    unchanged_count = 0
-    for path in store.root.rglob("*"):
-        if path.is_symlink():
-            raise FieldProjectOperationError(f"项目包含符号链接，拒绝备份：{path.relative_to(store.root)}")
-        if not path.is_file():
-            continue
-        rel = path.relative_to(store.root)
-        if any(part in excluded_parts for part in rel.parts) or path.name == ".mygpr.lock":
-            continue
-        if path.name in {"catalog.sqlite-wal", "catalog.sqlite-shm"}:
-            continue
-        if incremental and base_files:
-            row = base_files.get(rel.as_posix())
-            if (
-                row is not None
-                and int(row.get("size_bytes", -1)) == path.stat().st_size
-            ):
-                # 大小相同再比对内容哈希，避免误跳过同尺寸变更文件。
-                if _sha256_path(path) == str(row.get("sha256", "")):
-                    unchanged_count += 1
-                    continue
-        candidates.append((path, rel))
 
-    file_rows: list[dict[str, Any]] = []
-    backup_manifest: dict[str, Any]
-    with atomic_output_path(archive, suffix=".backup.tmp") as temporary:
-        with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive_file:
-            for index, (path, rel) in enumerate(candidates, start=1):
-                if cancel_requested is not None and cancel_requested():
-                    from core.job_manager import JobCancelled
+    def _enumerate_candidates() -> tuple[list[tuple[Path, Path]], int]:
+        # Windows 下全量并发测试/备份期间偶发源文件枚举缺漏（句柄延迟释放、
+        # 索引服务短暂锁定），这里每次重试都重新枚举，而不是复用陈旧清单。
+        found: list[tuple[Path, Path]] = []
+        unchanged = 0
+        for path in store.root.rglob("*"):
+            if path.is_symlink():
+                raise FieldProjectOperationError(f"项目包含符号链接，拒绝备份：{path.relative_to(store.root)}")
+            if not path.is_file():
+                continue
+            rel = path.relative_to(store.root)
+            if any(part in excluded_parts for part in rel.parts) or path.name == ".mygpr.lock":
+                continue
+            if path.name in {"catalog.sqlite-wal", "catalog.sqlite-shm"}:
+                continue
+            if incremental and base_files:
+                row = base_files.get(rel.as_posix())
+                if (
+                    row is not None
+                    and int(row.get("size_bytes", -1)) == path.stat().st_size
+                ):
+                    # 大小相同再比对内容哈希，避免误跳过同尺寸变更文件。
+                    if _sha256_path(path) == str(row.get("sha256", "")):
+                        unchanged += 1
+                        continue
+            found.append((path, rel))
+        return found, unchanged
 
-                    raise JobCancelled("项目备份已取消")
-                digest = _sha256_path(path)
-                archive_file.write(path, rel.as_posix())
-                file_rows.append({"path": rel.as_posix(), "size_bytes": path.stat().st_size, "sha256": digest})
-                if progress_callback is not None:
-                    progress_callback(index, max(len(candidates), 1), f"备份 {rel.as_posix()}")
-            backup_manifest = {
-                "schema": "mygpr.project_backup.v1",
-                "project_id": store.manifest.project_id,
-                "project_name": store.manifest.name,
-                "project_schema": store.manifest.schema,
-                "created_at": utc_now(),
-                "source_device": str(getattr(os.stat(store.root), "st_dev", "")),
-                "backup_device": str(getattr(os.stat(backup_dir), "st_dev", "")),
-                "external_device": external_device,
-                "incremental": bool(incremental),
-                "incremental_base_archive": incremental_base_name if incremental else "",
-                "unchanged_files_omitted": unchanged_count if incremental else 0,
-                "files": file_rows,
-            }
-            archive_file.writestr(
-                "backup_manifest.json",
-                json.dumps(backup_manifest, ensure_ascii=False, indent=2).encode("utf-8"),
-            )
-        with zipfile.ZipFile(temporary, "r") as archive_file:
-            bad = archive_file.testzip()
-            if bad is not None:
-                raise FieldProjectOperationError(f"备份 ZIP 校验失败：{bad}")
-            manifest_payload = json.loads(archive_file.read("backup_manifest.json").decode("utf-8"))
-            for row in manifest_payload.get("files", []):
-                digest = hashlib.sha256()
-                with archive_file.open(row["path"], "r") as member:
-                    for block in iter(lambda: member.read(8 * 1024 * 1024), b""):
-                        digest.update(block)
-                if digest.hexdigest() != row["sha256"]:
-                    raise FieldProjectOperationError(f"备份内容哈希不一致：{row['path']}")
+    def _write_backup_archive(candidates: list[tuple[Path, Path]], unchanged_count: int) -> dict[str, Any]:
+        file_rows: list[dict[str, Any]] = []
+        with atomic_output_path(archive, suffix=".backup.tmp") as temporary:
+            with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive_file:
+                for index, (path, rel) in enumerate(candidates, start=1):
+                    if cancel_requested is not None and cancel_requested():
+                        from core.job_manager import JobCancelled
+
+                        raise JobCancelled("项目备份已取消")
+                    digest = _sha256_path(path)
+                    archive_file.write(path, rel.as_posix())
+                    file_rows.append({"path": rel.as_posix(), "size_bytes": path.stat().st_size, "sha256": digest})
+                    if progress_callback is not None:
+                        progress_callback(index, max(len(candidates), 1), f"备份 {rel.as_posix()}")
+                backup_manifest = {
+                    "schema": "mygpr.project_backup.v1",
+                    "project_id": store.manifest.project_id,
+                    "project_name": store.manifest.name,
+                    "project_schema": store.manifest.schema,
+                    "created_at": utc_now(),
+                    "source_device": str(getattr(os.stat(store.root), "st_dev", "")),
+                    "backup_device": str(getattr(os.stat(backup_dir), "st_dev", "")),
+                    "external_device": external_device,
+                    "incremental": bool(incremental),
+                    "incremental_base_archive": incremental_base_name if incremental else "",
+                    "unchanged_files_omitted": unchanged_count if incremental else 0,
+                    "files": file_rows,
+                }
+                archive_file.writestr(
+                    "backup_manifest.json",
+                    json.dumps(backup_manifest, ensure_ascii=False, indent=2).encode("utf-8"),
+                )
+            # 写后校验：ZIP 自检 + 逐成员哈希，再与源目录现状交叉核对。
+            # 枚举后源目录仍可能新增文件（并发写场景），那属于内容演进而非
+            # 漏文件，只提示缺失方向的不一致。
+            with zipfile.ZipFile(temporary, "r") as archive_file:
+                bad = archive_file.testzip()
+                if bad is not None:
+                    raise FieldProjectOperationError(f"备份 ZIP 校验失败：{bad}")
+                manifest_payload = json.loads(archive_file.read("backup_manifest.json").decode("utf-8"))
+                for row in manifest_payload.get("files", []):
+                    digest = hashlib.sha256()
+                    with archive_file.open(row["path"], "r") as member:
+                        for block in iter(lambda: member.read(8 * 1024 * 1024), b""):
+                            digest.update(block)
+                    if digest.hexdigest() != row["sha256"]:
+                        raise FieldProjectOperationError(f"备份内容哈希不一致：{row['path']}")
+                archived = {row["path"] for row in manifest_payload.get("files", [])}
+                current_sources = {rel.as_posix() for _, rel in _enumerate_candidates()[0]}
+                missing_in_archive = sorted(current_sources - archived)
+                if missing_in_archive:
+                    raise FieldProjectOperationError(
+                        f"备份内容与源目录不一致：missing={missing_in_archive[:3]}"
+                    )
+            return backup_manifest
+
+    backup_manifest: dict[str, Any] | None = None
+    last_incomplete: Exception | None = None
+    for _attempt in range(2):
+        try:
+            backup_manifest = _write_backup_archive(*_enumerate_candidates())
+            break
+        except (OSError, FieldProjectOperationError) as exc:
+            # 只自动重试"源目录与档案不一致"这一类瞬时缺漏；哈希不符等
+            # 内容损坏不重试（重试同样损坏，徒增时长）。
+            if "备份内容与源目录不一致" not in str(exc):
+                raise
+            last_incomplete = exc
+            _LOGGER.warning("备份与源目录不一致，第 %d 次重试：%s", _attempt + 1, exc)
+    if backup_manifest is None:
+        raise FieldProjectOperationError(
+            f"备份两次尝试均与源目录不一致（疑似并发写入或句柄延迟释放）：{last_incomplete}"
+        )
 
     manifest_sha = hashlib.sha256(
         json.dumps(backup_manifest, ensure_ascii=False, sort_keys=True).encode("utf-8")
     ).hexdigest()
+    file_count = len(backup_manifest.get("files", []))
+    unchanged_count = int(backup_manifest.get("unchanged_files_omitted", 0))
     size_mb = round(archive.stat().st_size / (1024 * 1024), 3)
     if retention_keep is not None:
         _prune_old_backups(backup_dir, store.root.name, str(store.manifest.project_id), int(retention_keep), current=archive)
     store.append_log(
-        f"创建并验证项目备份: {archive}, files={len(file_rows)}, size={size_mb:.3f}MB, "
+        f"创建并验证项目备份: {archive}, files={file_count}, size={size_mb:.3f}MB, "
         f"incremental={bool(incremental)}"
     )
-    return ProjectBackupResult(str(archive), len(file_rows), size_mb, manifest_sha, True, external_device, True)
+    return ProjectBackupResult(str(archive), file_count, size_mb, manifest_sha, True, external_device, True)
 
 
 def _zip_member_is_symlink(member: zipfile.ZipInfo) -> bool:

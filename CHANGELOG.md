@@ -1,3 +1,17 @@
+## Unreleased
+
+- Startup import path: matplotlib (gis_map_export / report figure chain) moved
+  out of the GUI import tree (3.75s → 2.97s measured via `-X importtime`);
+  report/GIS rendering behavior unchanged.
+- Hardened the two known Windows-flaky tests: backup archive now cross-checks
+  packed files against a fresh source enumeration and retries once on mismatch;
+  acquisition job tests poll to terminal state instead of trusting the silent
+  non-terminal snapshot `jobs.wait` returns on timeout (15× stress loop green).
+- Removed Geotech OKO GPR/GPR2 support (user decision): the native-subset
+  reader, registry entry, synthetic acceptance fixture, npz subset key and
+  user-guide references are deleted; `.gpr`/`.gpr2` files now fail with the
+  generic unsupported-extension error.
+
 ## 0.9.38 Vendor Formats, Headless Delivery & Data Safety（2026-08-31）
 
 - Vendor formats now decode natively: Sensors & Software DT1/HD, GSSI DZT and
