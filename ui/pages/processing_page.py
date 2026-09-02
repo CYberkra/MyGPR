@@ -82,7 +82,6 @@ class ProcessingPage(QWidget):
     run_requested = pyqtSignal(dict)            # current_pipeline() 载荷（含 steps）
     cancel_requested = pyqtSignal()
     autotune_requested = pyqtSignal(str, dict, str)  # method_id, params_hint, input_artifact_id
-    line_load_requested = pyqtSignal()
     line_changed = pyqtSignal(str)              # 处理页测线选择变化
     artifact_selected = pyqtSignal(str)         # 处理页成果选择变化
     # 批量处理（B4）UI 已按用户决策暂时屏蔽（2026-09-02）：卡片、信号与
@@ -189,10 +188,6 @@ class ProcessingPage(QWidget):
         self._preview_segment.setCurrentItem(_SEG_ORIGINAL)
         seg_row.addWidget(self._preview_segment)
         seg_row.addStretch(1)
-
-        self._load_line_btn = PushButton('加载测线数据', preview_card)
-        self._load_line_btn.setToolTip('加载当前测线的原始数据到预览区（Ctrl+L）')
-        seg_row.addWidget(self._load_line_btn)
         preview_layout.addLayout(seg_row)
 
         sel_row = QHBoxLayout()
@@ -367,7 +362,6 @@ class ProcessingPage(QWidget):
         self._bscan.sig_colormap_changed.connect(
             self._cmap_combo.setCurrentText)
         self._refresh_levels_btn.clicked.connect(self._refresh_levels)
-        self._load_line_btn.clicked.connect(self.line_load_requested)
         self._line_combo.currentIndexChanged.connect(self._on_line_combo_changed)
         self._artifact_combo.currentIndexChanged.connect(self._on_artifact_combo_changed)
 
@@ -383,9 +377,6 @@ class ProcessingPage(QWidget):
         self._run_shortcut = QShortcut(QKeySequence("Ctrl+R"), self)
         self._run_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
         self._run_shortcut.activated.connect(self._on_run_clicked)
-        self._load_shortcut = QShortcut(QKeySequence("Ctrl+L"), self)
-        self._load_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
-        self._load_shortcut.activated.connect(self.line_load_requested)
 
         # 面板折叠状态持久化
         self._left_panel.sig_collapsed.connect(self._save_panel_state)

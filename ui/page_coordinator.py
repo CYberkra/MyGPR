@@ -162,7 +162,6 @@ class PageCoordinator:
             processing.run_requested.connect(self._on_run_requested)
             processing.cancel_requested.connect(self._on_processing_cancel)
             processing.autotune_requested.connect(self._on_autotune_requested)
-            processing.line_load_requested.connect(self._on_line_load_requested)
             processing.line_changed.connect(self._on_processing_line_changed)
             processing.artifact_selected.connect(
                 self._on_processing_artifact_selected)
@@ -532,13 +531,6 @@ class PageCoordinator:
         processing = self._page('processingInterface')
         if hasattr(processing, 'set_methods'):
             processing.set_methods(methods)
-
-    def _on_line_load_requested(self) -> None:
-        """处理页"加载测线数据" → 预览当前测线原始数据。"""
-        line_id = self._require_line()
-        if line_id and self.project_controller is not None:
-            self.project_controller.preview_line(line_id)
-            self._infobar('info', '数据预览', f'正在加载测线 {line_id} …')
 
     def _on_processing_line_changed(self, line_id: str) -> None:
         """处理页测线下拉变化 → 同步为当前测线并刷新原始数据/成果列表。"""
