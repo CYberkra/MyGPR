@@ -383,6 +383,15 @@ class InMemoryJobRunner:
         except JobCancelledError:
             self._mark_cancelled(job_id, "任务已取消")
             return
+        except RuntimeError as exc:
+            # core 侧 24 处协作取消抛 core.job_manager.JobCancelled（同为
+            # RuntimeError；application 层受架构政策限制不能 import core），
+            # 按 duck-type 识别为取消，避免 _on_future_done 把 CANCELLED
+            # 标成 FAILED 误导用户。1.1.0 取消异常统一后移除。
+            if type(exc).__name__ == "JobCancelled" and type(exc).__module__ == "core.job_manager":
+                self._mark_cancelled(job_id, str(exc) or "任务已取消")
+                return
+            raise
 
         estimated = _estimate_object_bytes(result)
         released = estimated > self._retention.max_result_bytes

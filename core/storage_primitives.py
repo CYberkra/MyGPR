@@ -315,6 +315,13 @@ class ProjectLock(AbstractContextManager["ProjectLock"]):
             except FileExistsError:
                 stale = self._is_stale()
                 if stale and self.recover_stale:
+                    # 陈旧锁的持有者 PID（rename 抢占后用于复核归属）
+                    try:
+                        stale_pid = int(json.loads(
+                            self.lock_path.read_text(encoding="utf-8")
+                        ).get("pid") or 0)
+                    except (OSError, ValueError):
+                        stale_pid = 0
                     # 原子 rename 抢占恢复权： stale 判定与 unlink 之间存在
                     # TOCTOU 窗口，若另一实例先恢复并建了新锁，直接 unlink
                     # 会误删对方的活锁造成双实例写同一项目。rename 到唯一
@@ -327,13 +334,22 @@ class ProjectLock(AbstractContextManager["ProjectLock"]):
                     except FileNotFoundError:
                         continue
                     try:
-                        # 二次校验：rename 到手的是否仍是当初判定的陈旧锁
-                        # （防竞争窗口内原持有者复活重写）。
-                        if self._is_stale():
-                            self.lock_path.unlink(missing_ok=True)
+                        # 二次校验：rename 抢占成功后，读 quarantine 里的
+                        # 锁内容并按 token 复核——确认抢到手的仍是当初
+                        # 判定的陈旧锁（防竞争窗口内原持有者复活重写）。
+                        # 注意不能调 _is_stale()：它读 self.lock_path，
+                        # 而该文件已被 rename 走，恒 FileNotFoundError
+                        # → 恒判 stale（旧实现的恢复权实际失效）。
+                        quarantine_payload = json.loads(
+                            quarantine.read_text(encoding="utf-8"))
+                        if int(quarantine_payload.get("pid") or 0) != stale_pid:
+                            # 内容被换过 → 归还锁文件，回 O_EXCL 循环
+                            os.replace(quarantine, self.lock_path)
                             continue
-                        os.replace(quarantine, self.lock_path)
-                    except OSError:
+                        self.lock_path.unlink(missing_ok=True)
+                        quarantine.unlink(missing_ok=True)
+                        continue
+                    except (OSError, ValueError):
                         quarantine.unlink(missing_ok=True)
                     continue
                 if self.mode == ProjectAccessMode.AUTO:

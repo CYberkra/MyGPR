@@ -62,7 +62,9 @@ def animate_progress(bar: QProgressBar, target: int, *,
     if anim is None:
         anim = QVariantAnimation(bar)
         anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        anim.valueChanged.connect(bar.setValue)
+        # QVariantAnimation 对 float 起止值插值出 float，PyQt6 的
+        # setValue(int) 收到 float 会抛 TypeError（实机 abort）→ 显式转 int。
+        anim.valueChanged.connect(lambda value: bar.setValue(int(value)))
         bar._motion_anim = anim
     anim.setDuration(DEFAULT_DURATION_MS)
     anim.setStartValue(float(current))
