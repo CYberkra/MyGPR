@@ -6,7 +6,7 @@ Supports:
 - Standard CSV/TXT B-scan files (with/without header)
 - Folder of A-scan CSV files
 - Lightweight native subsets: MALA RD3/RD7, ImpulseRadar IPRB, fixed SEG-Y, ENVI BSQ, NPY/NPZ
-- Recognized vendor formats with explicit conversion guidance: GSSI DZT, Sensors & Software DT1/HD, OKO GPR/GPR2
+- Recognized vendor formats with explicit conversion guidance: GSSI DZT, Sensors & Software DT1/HD
 
 Author: MyGPR Team
 Date: 2026-03-31
@@ -38,7 +38,6 @@ from core.gpr_format_registry import get_format_spec
 from core.gpr_vendor_readers import (
     GPRFormatReadError,
     read_envi_bsq,
-    read_geotech_oko_gpr2,
     read_gssi_dzt,
     read_impulseradar_iprb,
     read_mala_rd,
@@ -100,8 +99,6 @@ def auto_load_data(path: str, **kwargs) -> Dict[str, Any]:
         return read_sensors_software_dt1(str(path))
     if suffix in {".dzt"}:
         return read_gssi_dzt(str(path))
-    if suffix in {".gpr", ".gpr2"}:
-        return read_geotech_oko_gpr2(str(path))
     if spec is not None and spec.support == "recognized":
         raise GPRFormatReadError(
             unsupported_known_format_message(str(path), spec.display_name, spec.notes)
@@ -557,7 +554,6 @@ __all__ = [
     "read_envi_bsq",
     "read_sensors_software_dt1",
     "read_gssi_dzt",
-    "read_geotech_oko_gpr2",
     "read_numpy_profile",
     "read_ascans_folder",
     "load_bscan_csv",

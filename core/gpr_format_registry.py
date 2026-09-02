@@ -96,13 +96,6 @@ GPR_FORMAT_SPECS: tuple[GPRFormatSpec, ...] = (
         support="native-subset",
         notes="解码单通道 uint8/uint16/int32 profile；DZX/DZG 辅助文件暂不解析。",
     ),
-    GPRFormatSpec(
-        key="oko_gpr",
-        display_name="Geotech OKO GPR/GPR2",
-        extensions=("gpr", "gpr2"),
-        support="native-subset",
-        notes="解码 OKO-2 .GPR2（RGPR readGPR2 布局：444B 头 + 均衡数组 + 36B 道头 float32）；.GPR 旧版格式同布局尝试解码，魔数不符则报错。",
-    ),
 )
 
 

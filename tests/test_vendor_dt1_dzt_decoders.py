@@ -25,7 +25,6 @@ from core.gpr_format_registry import get_format_spec
 from core.gpr_io import auto_load_data
 from core.gpr_vendor_readers import (
     GPRFormatReadError,
-    read_geotech_oko_gpr2,
     read_gssi_dzt,
     read_mala_rd,
     read_envi_bsq,
@@ -190,38 +189,7 @@ def test_segy_clip_decodes_real_f3_subset() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 5) OKO GPR2（合成样例，RGPR readGPR2 布局）
-# ---------------------------------------------------------------------------
-
-
-def test_oko_synthetic_roundtrip_and_header_fields() -> None:
-    spec = MANIFEST["formats"]["oko_gpr2_synthetic"]
-    result = read_geotech_oko_gpr2(FIXTURES / spec["file"])
-    expected = _subset("oko_gpr2_matrix")
-    assert result["format"].value == "geotech_oko_gpr2"
-    assert result["data"].shape == tuple(spec["matrix"]["shape"])
-    assert np.array_equal(result["data"], expected)
-    info = result["header_info"]
-    assert info["total_time_ns"] == pytest.approx(120.0)
-    assert info["trace_interval_m"] == pytest.approx(0.025)
-    assert info["antenna_name"] == "АБ-400"
-    assert info["trace_positions"][-1] == pytest.approx(23 * 25)
-
-
-def test_oko_rejects_bad_magic(tmp_path: Path) -> None:
-    file = tmp_path / "line.GPR2"
-    file.write_bytes(b"\x00" * 512)
-    with pytest.raises(GPRFormatReadError, match="魔数"):
-        read_geotech_oko_gpr2(file)
-
-
-def test_registry_marks_oko_as_native_subset() -> None:
-    assert get_format_spec("line.gpr2").support == "native-subset"
-    assert get_format_spec("line.gpr").support == "native-subset"
-
-
-# ---------------------------------------------------------------------------
-# 6) 外部全文件回归（CI 无资产时跳过）
+# 5) 外部全文件回归（CI 无资产时跳过）
 # ---------------------------------------------------------------------------
 
 

@@ -37,4 +37,4 @@ python app_qt.py
 ## 常见问题
 - 日志文件位于 `~/MyGPR/logs/`；设置文件位于 `ui/config/settings.json` 同级的用户目录
 - 后端无 Qt 依赖，可独立使用：`python backend_smoke.py --skip-autotune`、`python cli_batch.py run --config <cfg>`
-- 全部数据格式（CSV/RD3/RD7/DT1/DZT/OKO/SEG-Y/ENVI/ImpulseRadar/gprMax/NPY）均可直接导入，详见用户指南第 3 节格式矩阵
+- 全部数据格式（CSV/RD3/RD7/DT1/DZT/SEG-Y/ENVI/ImpulseRadar/gprMax/NPY）均可直接导入，详见用户指南第 3 节格式矩阵
