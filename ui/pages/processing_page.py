@@ -27,21 +27,13 @@ from qfluentwidgets import FluentIcon as FIF
 
 from ui.desktop_backend_facade import compute_display_levels
 from ui import constants
-from ui.widgets import (BScanView, CollapsiblePanel, MethodBrowser, ParamForm,
+from ui.widgets import (BScanView, CollapsiblePanel, make_page_title, MethodBrowser, ParamForm,
                         PipelineList, clear_invalid,
     make_separator,)
 
 # 预览分段（SegmentedWidget routeKey）
 _SEG_ORIGINAL = 'originalData'
 _SEG_RESULT = 'processResult'
-
-
-def _page_title(text: str) -> SubtitleLabel:
-    """页面标题：SubtitleLabel 微软雅黑 12pt Bold 居中（SPEC §1）。"""
-    label = SubtitleLabel(text)
-    label.setFont(QFont(constants.FONT_FAMILY, 12, QFont.Weight.Bold))
-    label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    return label
 
 
 def _card_title(text: str) -> SubtitleLabel:
@@ -152,7 +144,7 @@ class ProcessingPage(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(*constants.PAGE_MARGINS)
         root.setSpacing(constants.PAGE_SPACING)
-        root.addWidget(_page_title('处理工作台'))
+        root.addWidget(make_page_title('处理工作台'))
 
         columns = QHBoxLayout()
         columns.setSpacing(constants.PAGE_SPACING)

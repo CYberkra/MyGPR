@@ -32,6 +32,7 @@ from ui.widgets.collapsible_panel import CollapsiblePanel
 from ui.widgets.local_dem import load_xyz_grid
 from ui.widgets.map_tiles import BASEMAP_LAYERS, DEFAULT_TILE_SOURCE
 from ui.widgets.map_view import MapView
+from ui.widgets import make_page_title
 from ui.widgets.trajectory_3d_view import Trajectory3DView
 
 # 中栏分段（SegmentedWidget routeKey）
@@ -109,14 +110,6 @@ def _format_distance(distance_m: float) -> str:
     if distance_m >= 1000.0:
         return f'{distance_m / 1000.0:.2f} km'
     return f'{distance_m:.0f} m'
-
-
-def _page_title(text: str) -> SubtitleLabel:
-    """页面标题：SubtitleLabel 微软雅黑 12pt Bold 居中（SPEC §1）。"""
-    label = SubtitleLabel(text)
-    label.setFont(QFont(constants.FONT_FAMILY, 12, QFont.Weight.Bold))
-    label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    return label
 
 
 def _card_title(text: str) -> SubtitleLabel:
@@ -349,7 +342,7 @@ class SpatialPage(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(*constants.PAGE_MARGINS)
         root.setSpacing(constants.PAGE_SPACING)
-        root.addWidget(_page_title('空间信息'))
+        root.addWidget(make_page_title('空间信息'))
 
         columns = QHBoxLayout()
         columns.setSpacing(constants.PAGE_SPACING)

@@ -13,7 +13,7 @@ from .log_panel import LogPanel
 from .method_browser import MethodBrowser
 from .param_form import ParamForm
 from .pipeline_list import PipelineList
-from .separators import make_h_separator, make_separator
+from .separators import make_h_separator, make_page_title, make_separator
 from .validators import (FunctionValidator, StrictComboBox, clear_invalid,
                          mark_invalid, validate_directory, validate_host,
                          validate_non_empty, validate_port)
@@ -32,6 +32,7 @@ __all__ = [
     'collapse_button_qss',
     'make_h_separator',
     'make_separator',
+    'make_page_title',
     'validate_non_empty',
     'validate_host',
     'validate_port',
