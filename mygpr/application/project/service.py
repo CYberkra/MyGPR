@@ -105,8 +105,15 @@ class ProjectService:
         root: str | Path,
         *,
         read_only: bool = False,
-        recover_stale_lock: bool = False,
+        recover_stale_lock: bool = True,
     ) -> ProjectSummary:
+        """打开项目。
+
+        ``recover_stale_lock`` 默认 True：持锁进程已由 ``_pid_alive``
+        判死时恢复陈旧锁。旧行为（False）会让 AUTO 模式静默降级为
+        只读会话，用户跑处理链时才报 "Project catalog is read-only"。
+        纯读取场景可显式传 False。
+        """
         resolved = str(Path(root).expanduser().resolve())
         with self._lock:
             existing_id = next((pid for pid, value in self._roots.items() if value == resolved), "")
