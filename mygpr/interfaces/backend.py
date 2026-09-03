@@ -60,7 +60,10 @@ class BackendShutdownError(MyGPRError):
     default_hint = "继续等待任务结束，或检查未响应的处理算法和外部存储。"
 
 
-@dataclass(slots=True)
+# eq=False：保留 object 身份哈希，使本实例可作 WeakKeyDictionary 的键
+# （惰性派生服务缓存，见 backend_controller 的 _WORKBENCH_SERVICES）。
+# 字段均为服务引用，默认字段相等语义本就不适用。
+@dataclass(slots=True, eq=False)
 class MyGPRBackend:
     """Backend services exposed to any presentation technology.
 
