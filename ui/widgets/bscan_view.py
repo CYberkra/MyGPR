@@ -93,6 +93,9 @@ class BScanView(QWidget):
         self._sample_axis_label = ''
         self._trace_count = 0
         self._sample_count = 0
+        # A-scan 波形跟随浮窗（懒创建；Phase1 1.1）
+        self._ascan_popup = None
+        self._ascan_follow = False
 
         self._glw = pg.GraphicsLayoutWidget(self)
         self._plot = self._glw.addPlot(row=0, col=0, title='B-Scan图像')
@@ -337,6 +340,11 @@ class BScanView(QWidget):
         crosshair_action.setChecked(self._crosshair_on)
         crosshair_action.triggered.connect(self._toggle_crosshair)
         menu.addAction(crosshair_action)
+        ascan_action = Action('A-scan 波形跟随')
+        ascan_action.setCheckable(True)
+        ascan_action.setChecked(self._ascan_follow)
+        ascan_action.triggered.connect(self.set_ascan_follow)
+        menu.addAction(ascan_action)
         menu.addSeparator()
         add_action(menu, FIF.COPY, '复制图像', self._copy_image,
                    enabled=self._image_shape is not None)
@@ -368,6 +376,34 @@ class BScanView(QWidget):
         self._crosshair_on = bool(checked)
         if not self._crosshair_on:
             self._hide_crosshair()
+
+    def set_ascan_follow(self, enabled: bool) -> None:
+        """开关"A-scan 波形跟随"：懒创建浮窗并同步 pick 模式（Phase1 1.1）。"""
+        from ui.widgets.ascan_popup import AScanPopup
+
+        self._ascan_follow = bool(enabled)
+        if enabled:
+            if self._ascan_popup is None:
+                self._ascan_popup = AScanPopup(self.window())
+            self._ascan_popup.show()
+            self.set_pick_enabled(True)
+        elif self._ascan_popup is not None:
+            self._ascan_popup.hide()
+
+    def _emit_point_picked(self, trace: int, sample: int) -> None:
+        """统一 pick 发射口：跟随浮窗消费 + 原信号照常发出。"""
+        if (self._ascan_follow and self._ascan_popup is not None
+                and self._image_shape is not None):
+            import numpy as np
+
+            image = np.asarray(self._image_item.image)
+            if 0 <= trace < image.shape[1]:
+                dist = (self._trace_axis_m[trace]
+                        if self._trace_axis_m is not None
+                        and trace < len(self._trace_axis_m) else None)
+                self._ascan_popup.show_trace(
+                    image[:, trace], trace_index=trace, distance_m=dist)
+        self.sig_point_picked.emit(trace, sample)
 
     def _on_mouse_moved(self, pos) -> None:
         """鼠标在图像区移动：十字线跟手 + 左下角读数浮层。"""
@@ -473,7 +509,10 @@ class BScanView(QWidget):
         n_traces, n_samples = self._image_shape
         if 0 <= trace < n_traces and 0 <= sample < n_samples:
             # 统一发射原始数据坐标：预览可能降采样，后端会话在原始坐标系工作
-            self.sig_point_picked.emit(*self._view_to_data(trace, sample))
+            data_trace, data_sample = self._view_to_data(trace, sample)
+            # 跟随浮窗用显示坐标列（与当前预览一致）；原信号用原始坐标
+            self._emit_point_picked(trace, sample)
+            del data_trace, data_sample
 
     # ------------------------------------------------------------------ 其它
     def clear(self) -> None:
