@@ -12,6 +12,7 @@ import numpy as np
 
 from core.field_project_models import FieldLineRecord, local_now, validate_line_id
 from core.coordinate_projection import ProjectionError, project_lonlat_to_xy
+from core.security_paths import resolve_managed_path
 from core.gpr_data_model import GPRDataSet, load_gpr_dataset, load_gpr_dataset_for_import
 from core.chunked_gpr_io import (
     ImportCancelled,
@@ -349,7 +350,12 @@ class FieldLineStoreMixin:
             if not path.exists():
                 raise FileNotFoundError(path)
             return self.storage.load_raw_dataset(line_id)
-        path = self.root / line.gpr_dataset_path if line.gpr_dataset_path else self.gpr_dataset_path(line_id)
+        # manifest JSON 是用户可写字段，相对路径必须证明仍受管理目录约束
+        path = (
+            resolve_managed_path(self.root, line.gpr_dataset_path)
+            if line.gpr_dataset_path
+            else self.gpr_dataset_path(line_id)
+        )
         if not path.exists():
             alternative = self.gpr_chunked_dataset_path(line_id)
             if alternative.exists():
@@ -490,7 +496,12 @@ class FieldLineStoreMixin:
         line_id = self._safe_line_id(line_id)
         try:
             line = self.get_line(line_id)
-            path = self.root / line.trajectory_path if line.trajectory_path else self.trajectory_path(line_id)
+            # trajectory_path 同样来自用户可写的 manifest，需受控解析
+            path = (
+                resolve_managed_path(self.root, line.trajectory_path)
+                if line.trajectory_path
+                else self.trajectory_path(line_id)
+            )
         except KeyError:
             path = self.trajectory_path(line_id)
         if path.exists():
