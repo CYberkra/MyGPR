@@ -27,7 +27,13 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 # 直接导入 read_file_data 模块
-from PythonModule.read_file_data import readcsv, savecsv, save_image, show_image
+from PythonModule.read_file_data import (
+    MAX_MATRIX_TEXT_BYTES,
+    readcsv,
+    savecsv,
+    save_image,
+    show_image,
+)
 from mygpr.domain.autotune.data_context import (
     DATA_CONTEXT_UAV_GPR_SFCW_FIELD,
     apply_data_context_defaults,
@@ -474,6 +480,12 @@ def read_ascans_folder(folder_path: str, max_files: int = 0, progress_cb=None) -
 
     # 用第一个文件确定 header 行数和采样点数
     first_path = os.path.join(folder_path, csv_files[0])
+    # 大文件纪律：首文件被 readlines() 整读进内存，拒绝异常大的输入
+    if os.path.getsize(first_path) > MAX_MATRIX_TEXT_BYTES:
+        raise ValueError(
+            f"A-scan CSV 过大，拒绝整文件载入内存：{first_path} 共 "
+            f"{os.path.getsize(first_path)} 字节（上限 {MAX_MATRIX_TEXT_BYTES} 字节）"
+        )
     with open(first_path, "r", encoding="utf-8", errors="ignore") as f:
         first_lines = f.readlines()
 

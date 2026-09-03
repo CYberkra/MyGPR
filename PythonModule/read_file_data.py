@@ -8,6 +8,6 @@ loading the source file by physical path breaks in one-file bundles.
 
 from __future__ import annotations
 
-from read_file_data import readcsv, save_image, savecsv, show_image
+from read_file_data import MAX_MATRIX_TEXT_BYTES, readcsv, save_image, savecsv, show_image
 
-__all__ = ["readcsv", "savecsv", "save_image", "show_image"]
+__all__ = ["MAX_MATRIX_TEXT_BYTES", "readcsv", "savecsv", "save_image", "show_image"]

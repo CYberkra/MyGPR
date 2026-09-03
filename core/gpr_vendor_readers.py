@@ -85,6 +85,17 @@ def _sidecar(path: Path, suffix: str) -> Path:
     return path.with_suffix(suffix)
 
 
+def _map_raw(data_path: Path, dtype: np.dtype) -> np.memmap:
+    """只读 memmap 整个厂商数据文件。
+
+    原始字节保留在页缓存中不整体物化为 RAM 副本，峰值内存只剩最终的
+    float32 结果；空文件在此转为统一的领域错误。
+    """
+    if data_path.stat().st_size == 0:
+        raise GPRFormatReadError(f"厂商数据文件为空: {data_path}")
+    return np.memmap(data_path, dtype=dtype, mode="r")
+
+
 def _sidecar_ci(path: Path, suffix: str) -> Path:
     """大小写不敏感的同名 sidecar 查找。
 
@@ -166,7 +177,7 @@ def read_mala_rd(path: str | os.PathLike[str]) -> dict[str, Any]:
     if not samples or samples <= 0:
         raise GPRFormatReadError("MALÅ .rad 缺少有效 SAMPLES")
     dtype = np.dtype("<i2") if data_path.suffix.lower() == ".rd3" else np.dtype("<i4")
-    raw = np.fromfile(data_path, dtype=dtype)
+    raw = _map_raw(data_path, dtype)
     traces = raw.size // samples
     if traces <= 0:
         raise GPRFormatReadError("MALÅ 数据长度不足一个 trace")
@@ -208,7 +219,7 @@ def read_impulseradar_iprb(path: str | os.PathLike[str]) -> dict[str, Any]:
     if data_version not in {16, 32}:
         raise GPRFormatReadError(f"暂不支持 DATA VERSION={data_version}")
     dtype = np.dtype("<i2") if data_version == 16 else np.dtype("<i4")
-    raw = np.fromfile(data_path, dtype=dtype)
+    raw = _map_raw(data_path, dtype)
     traces = raw.size // samples
     if traces <= 0:
         raise GPRFormatReadError("ImpulseRadar 数据长度不足一个 trace")
@@ -305,7 +316,7 @@ def read_envi_bsq(path: str | os.PathLike[str]) -> dict[str, Any]:
         raise GPRFormatReadError("ENVI .hdr 缺少 samples/lines/data type 或 data type 不支持")
     endian = ">" if byte_order == 1 and dtype_map[data_type] != "u1" else "<"
     dtype = np.dtype((endian + dtype_map[data_type]) if dtype_map[data_type] != "u1" else dtype_map[data_type])
-    raw = np.fromfile(data_path, dtype=dtype)
+    raw = _map_raw(data_path, dtype)
     expected = samples * lines * bands
     if raw.size < expected:
         raise GPRFormatReadError(f"ENVI 数据长度不足: {raw.size} < {expected}")

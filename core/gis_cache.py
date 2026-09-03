@@ -15,6 +15,11 @@ import numpy as np
 from core.array_storage import atomic_save_npz_compressed
 from core.storage_primitives import atomic_write_json, utc_now
 
+# 缓存条目是应用自己写入的降采样预览，正常远小于该上限；超大 npz 视为
+# 异常残留，按缓存未命中处理（删除后由 loader 重建），避免显示路径把
+# 未知大小的文件整载入内存。
+MAX_CACHE_NPZ_BYTES = 512 * 1024 * 1024
+
 
 @dataclass(frozen=True)
 class GISCacheKey:
@@ -39,19 +44,23 @@ class GISCacheManager:
         data_path = self.root / f"{digest}.npz"
         meta_path = self.root / f"{digest}.json"
         if data_path.exists() and meta_path.exists():
-            with np.load(data_path, allow_pickle=False) as archive:
-                from core.gis_layers import GISRasterPreview
-                extent_values = tuple(float(value) for value in archive["extent"])
-                if len(extent_values) != 4:
-                    raise ValueError("Invalid cached raster extent")
-                extent = (extent_values[0], extent_values[1], extent_values[2], extent_values[3])
-                return GISRasterPreview(
-                    array=archive["array"],
-                    extent=extent,
-                    crs=str(archive["crs"].item()),
-                    nodata=float(archive["nodata"].item()) if bool(archive["has_nodata"].item()) else None,
-                    is_dem=bool(archive["is_dem"].item()),
-                )
+            if data_path.stat().st_size > MAX_CACHE_NPZ_BYTES:
+                data_path.unlink(missing_ok=True)
+                meta_path.unlink(missing_ok=True)
+            else:
+                with np.load(data_path, allow_pickle=False) as archive:
+                    from core.gis_layers import GISRasterPreview
+                    extent_values = tuple(float(value) for value in archive["extent"])
+                    if len(extent_values) != 4:
+                        raise ValueError("Invalid cached raster extent")
+                    extent = (extent_values[0], extent_values[1], extent_values[2], extent_values[3])
+                    return GISRasterPreview(
+                        array=archive["array"],
+                        extent=extent,
+                        crs=str(archive["crs"].item()),
+                        nodata=float(archive["nodata"].item()) if bool(archive["has_nodata"].item()) else None,
+                        is_dem=bool(archive["is_dem"].item()),
+                    )
         preview = loader()
         atomic_save_npz_compressed(data_path, {
             "array": np.asarray(preview.array),

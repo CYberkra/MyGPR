@@ -11,6 +11,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib import font_manager
+import os
 import re
 
 
@@ -31,6 +32,10 @@ _HEADER_KEYS = [
     "Number of Traces",
     "Trace interval",
 ]
+
+# 大文件纪律：readcsv 走 pandas 整文件解码（float64，峰值约为文件大小的
+# 2-3 倍），必须拒绝远超常规 GPR 文本矩阵的输入，防止静默 OOM。
+MAX_MATRIX_TEXT_BYTES = 1024 * 1024 * 1024
 
 
 def _configure_cjk_font() -> None:
@@ -123,6 +128,12 @@ def _detect_skiprows(path: str, max_lines: int = 10) -> int:
 
 def readcsv(path: str) -> np.ndarray:
     # Read numeric CSV, auto-skip header/meta lines if present
+    file_size = os.path.getsize(path)
+    if file_size > MAX_MATRIX_TEXT_BYTES:
+        raise ValueError(
+            f"文本矩阵过大，拒绝整文件载入内存：{path} 共 {file_size} 字节"
+            f"（上限 {MAX_MATRIX_TEXT_BYTES} 字节）；请先分块/降采样或转换格式"
+        )
     skiprows = _detect_skiprows(path)
     df = pd.read_csv(path, header=None, skiprows=skiprows)
     arr = df.values.astype(float)
