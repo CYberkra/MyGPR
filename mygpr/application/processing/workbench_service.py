@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -34,6 +35,37 @@ from mygpr.domain.project.models import ProjectArtifact
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _atomic_write_json(path: Path, payload: Any) -> None:
+    """镜像 core.storage_primitives.atomic_write_json 的持久化纪律。
+
+    application 层受架构政策限制不能 import core，故在本地复刻同一套
+    约定：隐藏的唯一临时名（并发写互不踩踏）+ fsync + 原子替换 +
+    目录 fsync。待 application 引入持久化端口后收敛到单一实现。
+    """
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with temporary.open("w", encoding="utf-8") as stream:
+            stream.write(json.dumps(payload, ensure_ascii=False, indent=2))
+            stream.flush()
+            try:
+                os.fsync(stream.fileno())
+            except OSError:
+                pass
+        temporary.replace(target)
+        try:
+            dir_fd = os.open(target.parent, os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except OSError:
+            pass
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _bounded_indices(size: int, maximum: int) -> np.ndarray:
@@ -583,10 +615,7 @@ class ProcessingWorkbenchService:
             ],
         }
         path = self._draft_path(session)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        temporary.replace(path)
+        _atomic_write_json(path, payload)
 
     def _load_draft_steps(self, session: _Session) -> list[WorkbenchStep]:
         path = self._draft_path(session)
@@ -636,9 +665,7 @@ class ProcessingWorkbenchService:
         path = self._template_path(project_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {"schema": "mygpr.processing_templates.v1", "updated_at": _utc_now(), "templates": list(records)}
-        temporary = path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        temporary.replace(path)
+        _atomic_write_json(path, payload)
 
     @staticmethod
     def _template_from_record(record: dict[str, Any]) -> ProcessingTemplate:

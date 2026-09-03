@@ -62,6 +62,10 @@ def fsync_file(path: str | Path) -> None:
     Windows ``FlushFileBuffers`` requires a handle with write access, so the
     file is opened ``rb+``; a read-only handle would silently fail fsync on
     Windows.  Read-only files keep the previous best-effort behaviour.
+
+    本函数面向"按路径 fsync"或句柄可能只读的场景。对已经以写模式打开的
+    句柄（``"wb"``/``"a"``/``mkstemp``），直接 ``os.fsync(stream.fileno())``
+    即可，不必经此函数重开文件；错误语义（是否吞 OSError）由调用方决定。
     """
     source = Path(path)
     try:
