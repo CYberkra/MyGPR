@@ -70,6 +70,8 @@ forbid_sys_path_mutation_under = ["core", "mygpr", "cli_batch.py"]
 
 [ui_reverse_dependency_exceptions]
 # GUI/CLI 入口脚本位于依赖图顶端，按设计可 import ui；反向依赖门禁只约束后端层。
+# 同理，app_qt.py 作为进程组合根也允许装配 core.observability（结构化日志与
+# 全局异常钩子，先于任何 UI 存在）；业务逻辑仍必须经 mygpr.interfaces 后端 API。
 paths = ["app_qt.py"]
 reason = "GUI 入口 app_qt.py 按设计装配 ui 包（main_window 等）；core/mygpr/PythonModule 仍受禁。"
 

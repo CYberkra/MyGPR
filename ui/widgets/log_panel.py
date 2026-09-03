@@ -1,7 +1,7 @@
 """LogPanel — 右侧全局折叠面板容器（SPEC §5.7）。
 
 CardWidget 容器 max 380px/min 0，margins 6/spacing 6；
-顶部 SegmentedWidget("日志","任务") + QStackedWidget；
+顶部 SegmentedWidget("日志","任务") + OpacityAniStackedWidget（切 tab 220ms 淡入淡出）；
 日志 tab：QTextEdit 只读（QSS 逐字照 SPEC §1）+ 按钮行（"清空"宽60）；
 任务 tab：MiniJobList。
 append_log 自动加 [HH:MM:SS] 前缀 + 级别关键词着色 + 滚到底。
@@ -11,8 +11,9 @@ from datetime import datetime
 
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtGui import QTextCursor
-from PyQt6.QtWidgets import QHBoxLayout, QStackedWidget, QTextEdit, QVBoxLayout
+from PyQt6.QtWidgets import QHBoxLayout, QTextEdit, QVBoxLayout
 from qfluentwidgets import CardWidget, PushButton, SegmentedWidget
+from qfluentwidgets.components.widgets.stacked_widget import OpacityAniStackedWidget
 from ui import constants, file_dialogs
 
 from .job_widgets import MiniJobList
@@ -77,9 +78,9 @@ class LogPanel(CardWidget):
         self.setMaximumWidth(380)
         self.setMinimumHeight(400)
 
-        # 顶部：SegmentedWidget("日志","任务") + QStackedWidget
+        # 顶部：SegmentedWidget("日志","任务") + OpacityAniStackedWidget
         self._segmented = SegmentedWidget(self)
-        self._stacked = QStackedWidget(self)
+        self._stacked = OpacityAniStackedWidget(self)
         self._stacked.setMinimumWidth(364)
 
         # 日志 tab
