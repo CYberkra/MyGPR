@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import os
 import uuid
 from dataclasses import dataclass, field
@@ -32,6 +33,8 @@ from mygpr.domain.processing.workbench import (
 )
 from mygpr.domain.project.models import ProjectArtifact
 
+_LOGGER = logging.getLogger(__name__)
+
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -51,10 +54,9 @@ def _atomic_write_json(path: Path, payload: Any) -> None:
         with temporary.open("w", encoding="utf-8") as stream:
             stream.write(json.dumps(payload, ensure_ascii=False, indent=2))
             stream.flush()
-            try:
-                os.fsync(stream.fileno())
-            except OSError:
-                pass
+            # 文件 fsync 失败 = 持久化未落盘：与 core 纪律一致向上传播，
+            # 由调用方决定重试/提示，而非静默吞掉留下"成功"假象。
+            os.fsync(stream.fileno())
         temporary.replace(target)
         try:
             dir_fd = os.open(target.parent, os.O_RDONLY)
@@ -63,7 +65,10 @@ def _atomic_write_json(path: Path, payload: Any) -> None:
             finally:
                 os.close(dir_fd)
         except OSError:
-            pass
+            # 目录 fsync 在部分文件系统（FAT/网络挂载）不受支持；文件本体
+            # 已 fsync 且原子替换完成，此处失败只损失目录项即时可见性。
+            _LOGGER.warning("目录 fsync 失败（不影响文件内容持久化）：%s",
+                            target.parent)
     finally:
         temporary.unlink(missing_ok=True)
 
