@@ -16,7 +16,7 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtGui import QIcon, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
-    QDialog, QFormLayout, QHBoxLayout, QLabel, QPushButton,
+    QDialog, QFormLayout, QHBoxLayout, QLabel, QPushButton, QStackedWidget,
     QTextBrowser, QTextEdit, QToolButton, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
@@ -26,7 +26,6 @@ from qfluentwidgets import (
 )
 
 from ui import constants, file_dialogs
-from qfluentwidgets.components.widgets.stacked_widget import OpacityAniStackedWidget
 from ui.page_coordinator import PageCoordinator
 from ui.logger_config import setup_logger
 from ui.settings_manager import SettingsManager
@@ -109,7 +108,9 @@ class _FallbackLogPanel(CardWidget):
         layout.setSpacing(constants.PANEL_SPACING)
 
         self.segmented = SegmentedWidget(self)
-        self.stacked = OpacityAniStackedWidget(self)
+        # 文本密集面板：即时切换（OpacityAni 对 QTextEdit 逐帧重栅格化卡顿、
+        # 回切闪白，见 LogPanel 注释）。
+        self.stacked = QStackedWidget(self)
         self.stacked.setMinimumWidth(364)
 
         # 日志 tab
