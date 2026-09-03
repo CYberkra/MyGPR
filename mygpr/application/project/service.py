@@ -468,7 +468,10 @@ class ProjectService:
     def create_spatial_result(
         self, project_id: str, *, name: str, line_ids: Sequence[str] | None = None,
         velocity_m_per_ns: float | None = None, generate_surface: bool = True,
+        context: ExecutionContext | None = None,
     ) -> SpatialResult:
+        if context is not None:
+            context.raise_if_cancelled()
         return self._session(project_id).create_spatial_result(
             name=name, line_ids=line_ids, velocity_m_per_ns=velocity_m_per_ns,
             generate_surface=generate_surface,
@@ -485,7 +488,10 @@ class ProjectService:
         preview_lod: str = "auto",
         max_preview_traces: int = 240,
         max_preview_samples: int = 160,
+        context: ExecutionContext | None = None,
     ) -> dict:
+        if context is not None:
+            context.raise_if_cancelled()
         return dict(self._session(project_id).build_georeference_3d(
             line_id,
             preview_lod=preview_lod,

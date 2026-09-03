@@ -402,13 +402,25 @@ class InMemoryJobRunner:
             current.result = retained
             current.result_released = released
             current.retained_result_bytes = 0 if released else estimated
-            current.completed = max(current.completed, current.total or 10_000)
-            current.total = max(current.total, 10_000)
+            if current.total > 0:
+                # 任务报告过真实进度：保留实际值，只把 completed 补齐到 total。
+                current.completed = max(current.completed, current.total)
+            else:
+                # 从未报告进度的任务以合成的 100%/100% 收尾，仅表示“已完成”。
+                current.completed = 10_000
+                current.total = 10_000
+            final_completed, final_total = current.completed, current.total
             current.message = "任务完成"
             current.updated_at_utc = _now()
             current.terminal_at_monotonic = time.monotonic()
             self._enforce_result_budget_locked()
-        self._emit(job_id, JobEventType.COMPLETED, message="任务完成", completed=10_000, total=10_000)
+        self._emit(
+            job_id,
+            JobEventType.COMPLETED,
+            message="任务完成",
+            completed=final_completed,
+            total=final_total,
+        )
         with self._lock:
             self._subscribers[job_id] = []
 

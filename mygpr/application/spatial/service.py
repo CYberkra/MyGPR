@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Sequence
 
+from mygpr.application.jobs.context import ExecutionContext
 from mygpr.application.project.service import ProjectService
 from mygpr.domain.spatial.models import SpatialResult, SpatialTrack
 
@@ -20,8 +21,24 @@ class SpatialService:
     def preflight(self, project_id: str, *, line_ids: Sequence[str] | None = None, generate_surface: bool = True) -> Mapping[str, Any]:
         return self._projects.spatial_preflight(project_id, line_ids=line_ids, generate_surface=generate_surface)
 
-    def create_result(self, project_id: str, *, name: str, line_ids: Sequence[str] | None = None, velocity_m_per_ns: float | None = None, generate_surface: bool = True) -> SpatialResult:
-        return self._projects.create_spatial_result(project_id, name=name, line_ids=line_ids, velocity_m_per_ns=velocity_m_per_ns, generate_surface=generate_surface)
+    def create_result(
+        self,
+        project_id: str,
+        *,
+        name: str,
+        line_ids: Sequence[str] | None = None,
+        velocity_m_per_ns: float | None = None,
+        generate_surface: bool = True,
+        context: ExecutionContext | None = None,
+    ) -> SpatialResult:
+        return self._projects.create_spatial_result(
+            project_id,
+            name=name,
+            line_ids=line_ids,
+            velocity_m_per_ns=velocity_m_per_ns,
+            generate_surface=generate_surface,
+            context=context,
+        )
 
     def set_current(self, project_id: str, result_id: str) -> None:
         self._projects.set_current_spatial_result(project_id, result_id)
@@ -34,6 +51,7 @@ class SpatialService:
         preview_lod: str = "auto",
         max_preview_traces: int = 240,
         max_preview_samples: int = 160,
+        context: ExecutionContext | None = None,
     ) -> Mapping[str, Any]:
         return self._projects.build_georeference_3d(
             project_id,
@@ -41,4 +59,5 @@ class SpatialService:
             preview_lod=preview_lod,
             max_preview_traces=max_preview_traces,
             max_preview_samples=max_preview_samples,
+            context=context,
         )

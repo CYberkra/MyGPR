@@ -79,7 +79,11 @@ def build_contract() -> dict[str, Any]:
         value = _resolve(path)
         entry: dict[str, Any] = {"kind": "dataclass" if is_dataclass(value) else "class"}
         if is_dataclass(value):
-            entry["fields"] = [item.name for item in fields(value)]
+            # 契约只描述公共 API：以下划线开头的字段（含 __weakref__ 这类
+            # slots 实现细节）不属于公共表面，不进快照。
+            entry["fields"] = [
+                item.name for item in fields(value) if not item.name.startswith("_")
+            ]
         types[path] = entry
     methods = {
         name: _signature(getattr(MyGPRBackend, name))

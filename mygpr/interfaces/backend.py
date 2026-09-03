@@ -4,7 +4,8 @@
 from __future__ import annotations
 from pathlib import Path
 
-from dataclasses import dataclass
+import weakref
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 import numpy as np
@@ -41,8 +42,14 @@ from mygpr.infrastructure.processing.native_adapter import (
 )
 
 BACKEND_API_VERSION = "1.0"
-_WORKBENCH_SERVICES: dict[int, ProcessingWorkbenchService] = {}
-_INTERPRETATION_EDIT_SERVICES: dict[int, InterpretationEditService] = {}
+# 以弱引用键缓存惰性派生服务：后端对象回收后缓存自动失效，杜绝
+# id(self) 复用导致新后端错绑旧服务的问题。
+_WORKBENCH_SERVICES: "weakref.WeakKeyDictionary[Any, ProcessingWorkbenchService]" = (
+    weakref.WeakKeyDictionary()
+)
+_INTERPRETATION_EDIT_SERVICES: "weakref.WeakKeyDictionary[Any, InterpretationEditService]" = (
+    weakref.WeakKeyDictionary()
+)
 
 
 class BackendShutdownError(MyGPRError):
@@ -71,6 +78,9 @@ class MyGPRBackend:
     spatial: SpatialService
     jobs: InMemoryJobRunner
     api_version: str = BACKEND_API_VERSION
+    # 声明 __weakref__ 使 slots dataclass 可被 WeakKeyDictionary 键控；
+    # dataclasses.fields() 不含 dunder 字段，不影响 backend_api_v1 契约快照。
+    __weakref__: Any = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if not hasattr(self.projects, "_maintenance_service"):
@@ -86,20 +96,18 @@ class MyGPRBackend:
 
     @property
     def processing_workbench(self) -> ProcessingWorkbenchService:
-        key = id(self)
-        service = _WORKBENCH_SERVICES.get(key)
+        service = _WORKBENCH_SERVICES.get(self)
         if service is None:
             service = ProcessingWorkbenchService(self.projects, self.processing)
-            _WORKBENCH_SERVICES[key] = service
+            _WORKBENCH_SERVICES[self] = service
         return service
 
     @property
     def interpretation_edit(self) -> InterpretationEditService:
-        key = id(self)
-        service = _INTERPRETATION_EDIT_SERVICES.get(key)
+        service = _INTERPRETATION_EDIT_SERVICES.get(self)
         if service is None:
             service = InterpretationEditService(self.projects, self.interpretation)
-            _INTERPRETATION_EDIT_SERVICES[key] = service
+            _INTERPRETATION_EDIT_SERVICES[self] = service
         return service
 
     @classmethod
@@ -240,7 +248,7 @@ class MyGPRBackend:
 
 
     def submit_line_quality_check(self, project_id: str, line_id: str, *, title: str | None = None) -> str:
-        return self._submit_project_job(project_id, title or f"测线数据质检: {line_id}", lambda context: self.maintenance.run_line_quality_check(project_id, line_id))
+        return self._submit_project_job(project_id, title or f"测线数据质检: {line_id}", lambda context: self.maintenance.run_line_quality_check(project_id, line_id, context=context))
 
     def submit_line_source_relink(self, project_id: str, line_id: str, new_source: str, *, allow_mismatch: bool = False, title: str | None = None) -> str:
         return self._submit_project_job(project_id, title or f"重新定位源文件: {line_id}", lambda context: self.maintenance.relink_line_source(project_id, line_id, new_source, allow_mismatch=allow_mismatch, context=context))
@@ -396,6 +404,7 @@ class MyGPRBackend:
                 line_ids=selected,
                 velocity_m_per_ns=velocity_m_per_ns,
                 generate_surface=generate_surface,
+                context=context,
             )
             context.report_progress(2, 2, "空间成果已提交")
             return result
@@ -424,6 +433,7 @@ class MyGPRBackend:
                 preview_lod=preview_lod,
                 max_preview_traces=max_preview_traces,
                 max_preview_samples=max_preview_samples,
+                context=context,
             ),
         )
 
@@ -440,7 +450,7 @@ class MyGPRBackend:
 
         def operation(context: ExecutionContext) -> Any:
             context.report_progress(0, 2, "校验备份包")
-            context.check_cancelled()
+            context.raise_if_cancelled()
             result = self.projects.restore_project(
                 archive_path,
                 destination_root,
@@ -473,8 +483,8 @@ class MyGPRBackend:
                 "backend shutdown timed out with active jobs: " + ", ".join(pending)
             )
         self.projects.close_all(force=False)
-        _WORKBENCH_SERVICES.pop(id(self), None)
-        _INTERPRETATION_EDIT_SERVICES.pop(id(self), None)
+        _WORKBENCH_SERVICES.pop(self, None)
+        _INTERPRETATION_EDIT_SERVICES.pop(self, None)
 
 
 __all__ = ["BACKEND_API_VERSION", "BackendShutdownError", "MyGPRBackend"]

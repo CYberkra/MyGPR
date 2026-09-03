@@ -43,7 +43,11 @@ class ProjectMaintenanceService:
         self,
         project_id: str,
         line_id: str,
+        *,
+        context: ExecutionContext | None = None,
     ) -> LineQualityReport:
+        if context is not None:
+            context.raise_if_cancelled()
         return self._projects._session(project_id).run_line_quality_check(line_id)
 
     def run_project_quality_check(
