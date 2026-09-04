@@ -6,9 +6,8 @@
 ``QThread``; ``JobBridge`` converts the backend's worker-thread job events
 into Qt signals that are safe to consume from the GUI thread.
 """
-from __future__ import annotations
-
 import logging
+import re
 import threading
 from typing import Any, Callable, Protocol
 
@@ -64,9 +63,19 @@ def friendly_error_message(exc: BaseException | None) -> str:
         if hint:
             text += f" — {hint}"
         return text
-    # 无 error_code 的通用异常（绝大多数 Value/Type/KeyError），保持原行为
+    # HDF5 容器损坏（如写入中断产生的 bad layout message）：给可操作提示
+    # 而非裸 KeyError，指引用户从原始 CSV 重新导入测线
     message = str(exc).strip()
+    if _HDF5_CORRUPT_PATTERN.search(message):
+        return ("数据文件损坏，无法读取。请删除该测线后从原始 CSV 重新导入；"
+                "处理结果无法保留（详见日志）")
     return message or type(exc).__name__
+
+
+_HDF5_CORRUPT_PATTERN = re.compile(
+    r"bad version number|truncated file|file signature not found|"
+    "unable to load file metadata|corrupt",
+    re.IGNORECASE)
 
 
 def snapshot_error_message(snapshot: UiJobSnapshot) -> str:

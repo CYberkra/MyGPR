@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import shutil
 import uuid
 from pathlib import Path
 from typing import Any, Callable
@@ -205,7 +206,9 @@ def write_raw_dataset(
 
 def load_raw_dataset(path: str | Path, *, line_id: str) -> GPRDataSet:
     source = Path(path).resolve()
-    with h5py.File(source, "r", libver="latest", swmr=True) as handle:
+    # 只读消费者且写路径走原子替换（读到的要么旧要么新），不开 SWMR：
+    # SWMR reader 对截断损坏文件会无限期等待（复现实证），预览路径必须快失败
+    with h5py.File(source, "r", libver="latest") as handle:
         raw = handle["raw"]
         metadata_raw = raw.attrs.get("metadata_json", "{}")
         if isinstance(metadata_raw, bytes):
@@ -232,6 +235,36 @@ def load_raw_dataset(path: str | Path, *, line_id: str) -> GPRDataSet:
     )
 
 
+def _verify_written_artifact(path: Path, artifact_id: str, digest: str,
+                             shape: tuple[int, ...], dtype: np.dtype) -> None:
+    """Re-open a freshly written container and validate the committed artifact.
+
+    fletcher32 chunks are checksum-verified by HDF5 on read, so touching a
+    sample block detects torn metadata as well as silent data corruption
+    (the "bad version number for layout message" failure mode seen when an
+    in-place ``r+`` write is interrupted).  Raises RuntimeError on any
+    mismatch so the caller can discard the temporary file.
+    """
+    final_path = f"{PROCESSING_ROOT}/{artifact_id}"
+    with h5py.File(path, "r", libver="latest") as handle:
+        if final_path not in handle:
+            raise RuntimeError(f"写回验证失败：{final_path} 不存在")
+        group = handle[final_path]
+        dataset = group["bscan"]
+        if tuple(dataset.shape) != tuple(shape):
+            raise RuntimeError(
+                f"写回验证失败：形状 {dataset.shape} != 预期 {shape}")
+        if dataset.dtype != dtype:
+            raise RuntimeError(
+                f"写回验证失败：dtype {dataset.dtype} != 预期 {dtype}")
+        dataset[shape[0] // 2, 0:1]  # fletcher32-verified read of one row
+        if str(group.attrs.get("status", "")) != "committed":
+            raise RuntimeError("写回验证失败：artifact 状态不是 committed")
+        written = _load_json_attr(group, "manifest_json").get("output_data_sha256", "")
+        if digest and written != digest:
+            raise RuntimeError("写回验证失败：sha256 摘要不匹配")
+
+
 def write_processing_artifact(
     path: str | Path,
     *,
@@ -242,6 +275,15 @@ def write_processing_artifact(
     cancel_requested=None,
     progress_callback=None,
 ) -> dict[str, Any]:
+    """Commit a processing artifact via a whole-file atomic replacement.
+
+    The previous implementation opened the live container ``r+`` and mutated
+    it in place; a crash mid-write (e.g. the 2026-09-02 motion-abort storm)
+    left the HDF5 metadata inconsistent and the whole line unreadable.  The
+    container is now copied to a sibling temporary file, the artifact is
+    written and read-back verified there, and only then atomically published,
+    so an interrupted save can never corrupt the original file.
+    """
     source = Path(path).resolve()
     if not source.exists():
         raise FileNotFoundError(source)
@@ -249,50 +291,55 @@ def write_processing_artifact(
     staging_path = f"{STAGING_ROOT}/processing_{staging_id}"
     final_path = f"{PROCESSING_ROOT}/{artifact_id}"
     result: dict[str, Any]
-    with h5py.File(source, "r+", libver="latest") as handle:
-        if final_path in handle:
-            raise FileExistsError(f"Processing artifact already exists: {artifact_id}")
-        staging = handle.require_group(staging_path)
-        try:
-            dataset, digest = _write_matrix(
-                staging,
-                "bscan",
-                matrix,
-                cancel_requested=cancel_requested,
-                progress_callback=progress_callback,
-            )
-            staged_manifest = dict(manifest)
-            staged_manifest.update(
-                artifact_id=artifact_id,
-                dataset_path=f"{final_path}/bscan",
-                output_data_sha256=digest,
-                output_shape=list(dataset.shape),
-                output_dtype=str(dataset.dtype),
-                committed_at=utc_now(),
-            )
-            staging.attrs["manifest_json"] = _json(staged_manifest)
-            staging.attrs["params_json"] = _json(params)
-            staging.attrs["status"] = "staged"
-            handle.flush()
-            handle.move(staging_path, final_path)
-            final = handle[final_path]
-            final.attrs["status"] = "committed"
-            handle.attrs["updated_at"] = utc_now()
-            handle.flush()
-            result = {
-                "artifact_id": artifact_id,
-                "dataset_path": f"{final_path}/bscan",
-                "shape": list(dataset.shape),
-                "dtype": str(dataset.dtype),
-                "sha256": digest,
-                "manifest": staged_manifest,
-            }
-        except (OSError, RuntimeError, TypeError, ValueError, KeyError):
-            if staging_path in handle:
-                del handle[staging_path]
+    with atomic_output_path(source, suffix=".h5.artifact.tmp") as temporary:
+        temporary = Path(temporary)
+        shutil.copy2(source, temporary)
+        with h5py.File(temporary, "r+", libver="latest") as handle:
+            if final_path in handle:
+                raise FileExistsError(f"Processing artifact already exists: {artifact_id}")
+            staging = handle.require_group(staging_path)
+            try:
+                dataset, digest = _write_matrix(
+                    staging,
+                    "bscan",
+                    matrix,
+                    cancel_requested=cancel_requested,
+                    progress_callback=progress_callback,
+                )
+                staged_manifest = dict(manifest)
+                staged_manifest.update(
+                    artifact_id=artifact_id,
+                    dataset_path=f"{final_path}/bscan",
+                    output_data_sha256=digest,
+                    output_shape=list(dataset.shape),
+                    output_dtype=str(dataset.dtype),
+                    committed_at=utc_now(),
+                )
+                staging.attrs["manifest_json"] = _json(staged_manifest)
+                staging.attrs["params_json"] = _json(params)
+                staging.attrs["status"] = "staged"
                 handle.flush()
-            raise
-    fsync_file(source)
+                handle.move(staging_path, final_path)
+                final = handle[final_path]
+                final.attrs["status"] = "committed"
+                handle.attrs["updated_at"] = utc_now()
+                handle.flush()
+                result = {
+                    "artifact_id": artifact_id,
+                    "dataset_path": f"{final_path}/bscan",
+                    "shape": list(dataset.shape),
+                    "dtype": str(dataset.dtype),
+                    "sha256": digest,
+                    "manifest": staged_manifest,
+                }
+            except (OSError, RuntimeError, TypeError, ValueError, KeyError):
+                if staging_path in handle:
+                    del handle[staging_path]
+                    handle.flush()
+                raise
+        _verify_written_artifact(
+            temporary, artifact_id, result["sha256"],
+            tuple(result["shape"]), np.dtype(result["dtype"]))
     return result
 
 def delete_processing_artifact(path: str | Path, artifact_id: str) -> bool:

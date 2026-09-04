@@ -232,15 +232,22 @@ class ParamForm(QWidget):
 
     @staticmethod
     def _set_editor(editor, value):
-        """按控件类型写回值。"""
+        """按控件类型写回值。
+
+        int SpinBox 传 float 会 TypeError abort（PyQt6 严格签名；2026-09-02
+        实机 380 次循环崩溃即此根因），持久化/恢复的参数可能带 .0，统一钳到
+        控件量程后转换。
+        """
         if isinstance(editor, CheckBox):
             editor.setChecked(bool(value))
         elif isinstance(editor, ComboBox):
             editor.setCurrentText(str(value))
         elif isinstance(editor, LineEdit):
             editor.setText(str(value) if value is not None else '')
+        elif isinstance(editor, DoubleSpinBox):
+            editor.setValue(float(value))
         else:
-            editor.setValue(value)
+            editor.setValue(int(value))
 
     def clear(self) -> None:
         while self._layout.count():

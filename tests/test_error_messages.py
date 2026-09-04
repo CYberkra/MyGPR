@@ -49,3 +49,22 @@ class TestFriendlyErrorMessage:
         text = friendly_error_message(exc)
         assert "[MYGPR_INPUT_DATA_ERROR]" in text
         assert "查看日志中的技术详情" in text
+
+    def test_hdf5_corrupt_bad_layout_message(self):
+        exc = KeyError("Unable to synchronously open object "
+                       "(bad version number for layout message)")
+        text = friendly_error_message(exc)
+        assert "数据文件损坏" in text
+        assert "原始 CSV 重新导入" in text
+
+    def test_hdf5_corrupt_file_signature(self):
+        text = friendly_error_message(OSError("file signature not found"))
+        assert "数据文件损坏" in text
+
+    def test_hdf5_corrupt_truncated(self):
+        text = friendly_error_message(OSError("truncated file: eof = 0, sblock = 1"))
+        assert "数据文件损坏" in text
+
+    def test_unrelated_english_message_untouched(self):
+        # 非 HDF5 签名的异常保持原样（不误伤普通 OSError）
+        assert friendly_error_message(OSError("permission denied")) == "permission denied"
