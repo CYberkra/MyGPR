@@ -59,7 +59,10 @@ def friendly_error_message(exc: BaseException | None) -> str:
         if exc_error_code == "MYGPR_PROJECT_BUSY":
             return PROJECT_BUSY_MESSAGE
         hint = str(getattr(exc, "hint", "") or getattr(exc, "default_hint", "") or "")
-        text = f"[{exc_error_code}] {str(exc).strip()}"
+        # MyGPRError.__str__ 已输出 compact_message（[code] 消息 + 建议后缀）；
+        # 直接用 str(exc) 会造成 [code]/建议 双份，拆结构化字段重组。
+        raw = str(getattr(exc, "user_message", "") or str(exc).strip())
+        text = f"[{exc_error_code}] {raw}"
         if hint:
             text += f" — {hint}"
         return text
@@ -69,12 +72,20 @@ def friendly_error_message(exc: BaseException | None) -> str:
     if _HDF5_CORRUPT_PATTERN.search(message):
         return ("数据文件损坏，无法读取。请删除该测线后从原始 CSV 重新导入；"
                 "处理结果无法保留（详见日志）")
+    if isinstance(exc, PermissionError) or _FILE_IN_USE_PATTERN.search(message):
+        return ("文件被占用，无法完成写入。请关闭正在预览该测线的窗口或其他"
+                "占用该文件的程序后重试（详见日志）")
     return message or type(exc).__name__
 
 
 _HDF5_CORRUPT_PATTERN = re.compile(
     r"bad version number|truncated file|file signature not found|"
     "unable to load file metadata|corrupt",
+    re.IGNORECASE)
+
+_FILE_IN_USE_PATTERN = re.compile(
+    r"WinError 32|WinError 33|being used by another process|"
+    "denied access|拒绝访问",
     re.IGNORECASE)
 
 

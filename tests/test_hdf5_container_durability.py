@@ -114,4 +114,10 @@ def test_corrupted_container_load_raises_with_actionable_hint(tmp_path: Path) ->
     container.write_bytes(bytes(data[: len(data) // 3]))
     with pytest.raises((OSError, RuntimeError, KeyError)) as excinfo:
         load_raw_dataset(container, line_id="L01")
-    assert "数据文件损坏" in str(excinfo.value) or "重新导入" not in str(excinfo.value)
+    # 契约走全链路：GUI 的 friendly_error_message 必须把该异常映射为可操作中文提示
+    # （backend CI 无 PyQt6，friendly_error_message 的 import 链需要 Qt → 跳过映射断言）
+    pytest.importorskip("PyQt6")
+    from ui.controllers.backend_controller import friendly_error_message
+    mapped = friendly_error_message(excinfo.value)
+    assert "数据文件损坏" in mapped
+    assert "重新导入" in mapped
