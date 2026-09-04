@@ -4,18 +4,12 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 import numpy as np
 import pytest
-from PyQt6.QtWidgets import QApplication
 
 from ui.widgets.bscan_view import BScanDisplayMode, BScanView
 
 
-@pytest.fixture(scope='module')
-def app():
-    return QApplication.instance() or QApplication([])
-
-
 @pytest.fixture
-def view(app):
+def view(qapp):
     v = BScanView()
     v.set_matrix((np.random.randn(100, 150) * 0.02).astype(np.float32),
                  -0.1, 0.1, title='t')

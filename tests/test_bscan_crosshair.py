@@ -11,15 +11,8 @@ import numpy as np
 import pytest
 
 pytest.importorskip("PyQt6")  # 后端 CI（无 Qt）自动跳过，见 tests/conftest.py qapp 设计
-from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 from ui.widgets.bscan_view import format_crosshair_readout  # noqa: E402
-
-
-@pytest.fixture(scope='module')
-def qapp():
-    app = QApplication.instance() or QApplication([])
-    yield app
 
 
 # ------------------------------------------------------------------ 纯函数
