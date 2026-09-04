@@ -5,6 +5,8 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 import numpy as np
 import pytest
 
+pytest.importorskip("PyQt6")  # 后端 CI（无 Qt）自动跳过
+
 from ui.widgets.bscan_view import BScanDisplayMode, BScanView
 
 
