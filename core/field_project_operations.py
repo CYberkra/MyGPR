@@ -749,6 +749,7 @@ def delete_project_line(store: FieldProjectStore, line_id: str, *, reason: str =
     move_path(store.root / "processed" / safe_line_id)
     if getattr(getattr(store, "storage", None), "is_hybrid", False):
         move_path(store.storage.line_container_path(safe_line_id))
+        move_path(store.storage.line_artifacts_dir(safe_line_id))
     move_path(store.root / "targets" / f"{safe_line_id}_targets.csv")
     spatial_dir = store.root / "spatial"
     if spatial_dir.exists():

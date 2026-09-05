@@ -2,9 +2,10 @@
 """HDF5 容器持久性回归测试（fix/hdf5-durability）。
 
 背景：2026-09-02 处理保存中断导致 L01/L09 容器损坏（bad layout message），
-write_processing_artifact 曾对活容器 in-place r+ 写入。回归契约：
-1. 处理保存走整文件原子替换，中途失败原文件完好可读；
-2. 写入后读回验证失败时临时文件被丢弃、原文件不被发布；
+write_processing_artifact 曾对活容器 in-place r+ 写入。P3-2 起改为 per-artifact
+sidecar 文件（<stem>.artifacts/<artifact_id>.h5），回归契约：
+1. 处理保存走 sidecar 整文件原子替换，容器本体一个字节不动；
+2. 写入后读回验证失败时临时文件被丢弃、sidecar 不被发布，容器仍然逐位不变；
 3. 损坏容器 load_raw_dataset 抛出带可操作提示的 RuntimeError。
 """
 from __future__ import annotations
@@ -17,8 +18,11 @@ import pytest
 
 from core.gpr_data_model import GPRDataSet
 from core.hdf5_line_container import (
+    artifacts_dir_path,
     initialize_line_container,
+    load_processing_dataset,
     load_raw_dataset,
+    locate_processing_artifact,
     write_processing_artifact,
     write_raw_dataset,
 )
@@ -42,7 +46,7 @@ def test_raw_write_readback_roundtrip(tmp_path: Path) -> None:
     assert np.allclose(np.asarray(ds.distance_axis_m), _dataset().distance_axis_m)
 
 
-def test_artifact_write_publishes_readable_container(tmp_path: Path) -> None:
+def test_artifact_write_publishes_sidecar_and_container_byte_stable(tmp_path: Path) -> None:
     container = tmp_path / "L01.h5"
     _write_container(container)
     before = container.read_bytes()
@@ -54,17 +58,23 @@ def test_artifact_write_publishes_readable_container(tmp_path: Path) -> None:
         params={},
     )
     assert result["sha256"]
-    # 已发布容器可读且包含 artifact
-    with h5py.File(container, "r", libver="latest", swmr=True) as handle:
+    # 容器逐位不变：保存成品不触碰测线容器
+    assert container.read_bytes() == before
+    # sidecar 已发布且内部布局与旧容器内嵌布局一致
+    sidecar = artifacts_dir_path(container) / "L01_art.h5"
+    assert result["h5_file"] == str(sidecar)
+    with h5py.File(sidecar, "r", libver="latest", swmr=True) as handle:
         assert "processing/artifacts/L01_art/bscan" in handle
         assert handle["processing/artifacts/L01_art"].attrs["status"] == "committed"
-    # raw 数据在整文件替换后仍然完好
+    assert locate_processing_artifact(container, "L01_art")[0] == sidecar
+    # raw 数据仍在容器内且完好；成品矩阵经双读接口回读一致
     assert load_raw_dataset(container, line_id="L01").matrix.shape == (32, 24)
-    assert len(container.read_bytes()) > len(before)
+    ds = load_processing_dataset(container, artifact_id="L01_art")
+    assert np.array_equal(np.asarray(ds.matrix), np.ones((32, 24), dtype=np.float32))
 
 
 def test_artifact_write_failure_preserves_original_container(tmp_path: Path, monkeypatch) -> None:
-    """验证阶段抛错 → 临时文件被丢弃，原容器字节不变（不被坏文件覆盖）。"""
+    """验证阶段抛错 → sidecar 临时文件被丢弃，容器逐位不变。"""
     import core.hdf5_line_container as mod
 
     container = tmp_path / "L01.h5"
@@ -83,11 +93,13 @@ def test_artifact_write_failure_preserves_original_container(tmp_path: Path, mon
             manifest={"method_id": "noop"},
             params={},
         )
-    # 原文件未被替换，且仍然可读
+    # 容器逐位不变且仍然可读
     assert container.read_bytes() == original_bytes
     load_raw_dataset(container, line_id="L01")
-    # 没有残留 .tmp 兄弟文件
+    # 没有残留 .tmp 文件（容器兄弟目录与 sidecar 目录内都没有）
     assert list(container.parent.glob("*.tmp")) == []
+    assert list(artifacts_dir_path(container).glob("*.tmp")) == []
+
 
 
 def test_artifact_write_rejects_duplicate_id(tmp_path: Path) -> None:
@@ -121,3 +133,64 @@ def test_corrupted_container_load_raises_with_actionable_hint(tmp_path: Path) ->
     mapped = friendly_error_message(excinfo.value)
     assert "数据文件损坏" in mapped
     assert "重新导入" in mapped
+
+
+def test_data_uri_opens_sidecar_directly(tmp_path: Path) -> None:
+    """backend 返回的 data_uri 中文件部分指向 sidecar，URI 直开可读到矩阵。"""
+    from core.storage_uri import make_h5_uri, resolve_h5_uri
+
+    container = tmp_path / "L01.h5"
+    _write_container(container)
+    result = write_processing_artifact(
+        container,
+        artifact_id="L01_art",
+        matrix=np.ones((32, 24), dtype=np.float32),
+        manifest={"method_id": "noop"},
+        params={},
+    )
+    sidecar = artifacts_dir_path(container) / "L01_art.h5"
+    uri = make_h5_uri(sidecar, result["dataset_path"])
+    file_path, dataset_path = resolve_h5_uri(tmp_path, uri)
+    assert file_path == sidecar
+    assert dataset_path == result["dataset_path"]
+    with h5py.File(file_path, "r") as handle:
+        assert dataset_path in handle
+
+
+def test_sidecar_and_legacy_container_group_coexist(tmp_path: Path) -> None:
+    """双读并存：legacy 容器内嵌组 + 新 sidecar 同时可见；delete 双删。"""
+    from core.hdf5_line_container import (
+        delete_processing_artifact,
+        list_processing_artifact_ids,
+        locate_processing_artifact,
+    )
+
+    container = tmp_path / "L01.h5"
+    _write_container(container)
+    matrix = np.ones((32, 24), dtype=np.float32)
+    # 手工在容器内造 legacy 内嵌组（旧版本布局，绕过新 sidecar 写路径）
+    with h5py.File(container, "r+", libver="latest") as handle:
+        group = handle.require_group("processing/artifacts/L01_old")
+        group.create_dataset("bscan", data=matrix)
+        group.attrs["status"] = "committed"
+        group.attrs["manifest_json"] = "{}"
+    # 新写一个 sidecar
+    result = write_processing_artifact(
+        container,
+        artifact_id="L01_new",
+        matrix=np.zeros((32, 24), dtype=np.float32),
+        manifest={"method_id": "noop"},
+        params={},
+    )
+    assert result["h5_file"] == str(artifacts_dir_path(container) / "L01_new.h5")
+
+    ids = list_processing_artifact_ids(container)
+    assert ids == ["L01_new", "L01_old"], ids
+    # 双读：legacy 走容器、sidecar 走独立文件
+    assert locate_processing_artifact(container, "L01_old")[0] == container
+    assert locate_processing_artifact(container, "L01_new")[0] == artifacts_dir_path(container) / "L01_new.h5"
+    # 双删：legacy 删容器组（r+ 打开，不触碰其他字节段）、sidecar unlink
+    delete_processing_artifact(container, "L01_old")
+    delete_processing_artifact(container, "L01_new")
+    assert list_processing_artifact_ids(container) == []
+    assert not (artifacts_dir_path(container) / "L01_new.h5").exists()
