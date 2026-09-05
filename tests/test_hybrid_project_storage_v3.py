@@ -117,11 +117,16 @@ def test_export_catalog_and_backup_snapshot_are_consistent(tmp_path: Path) -> No
         rows = store.list_project_exports(export_kind="test_csv")
         assert rows and rows[0]["sha256"] == registered["sha256"]
 
+        raw = store.load_gpr_dataset("L01")
+        store.save_processed_line("L01", np.asarray(raw.matrix), {"method": "noop", "params": {}})
+
         result = backup_project_archive(store, tmp_path / "backups")
         assert result.verified
         with zipfile.ZipFile(result.archive_path) as archive:
             names = set(archive.namelist())
         missing = {"catalog.sqlite", "data/lines/L01.h5"} - names
+        sidecars = {name for name in names if name.startswith("data/lines/L01.artifacts/") and name.endswith(".h5")}
+        assert sidecars, f"backup snapshot flaked: no sidecar, names={sorted(names)}"
         assert not missing, (
             f"backup snapshot flaked: missing={sorted(missing)}, names={sorted(names)}"
         )
@@ -137,12 +142,18 @@ def test_line_delete_moves_hdf5_and_cascades_catalog(tmp_path: Path) -> None:
         raw = store.load_gpr_dataset("L01")
         store.save_processed_line("L01", np.asarray(raw.matrix), {"method": "noop", "params": {}})
         line_h5 = store.storage.line_container_path("L01")
+        sidecar_dir = store.storage.line_artifacts_dir("L01")
+        sidecars = list(sidecar_dir.glob("*.h5"))
+        assert sidecars, "save_processed_line 未产生 sidecar 文件"
         result = delete_project_line(store, "L01")
         assert result.remaining_line_count == 0
         assert not line_h5.exists()
+        assert not sidecar_dir.exists()
         assert store.storage.catalog.list_lines() == []
         assert store.storage.catalog.list_artifacts(line_id="L01") == []
         assert any((store.root / ".trash" / "lines").rglob("L01.h5"))
+        trashed = list((store.root / ".trash" / "lines").rglob("*.h5"))
+        assert len(trashed) >= 2, f"sidecar 未随容器入回收站: {trashed}"
     finally:
         store.close()
 

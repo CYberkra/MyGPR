@@ -28,8 +28,8 @@ from PyQt6.QtWidgets import QLabel
 from qfluentwidgets import FluentIcon as FIF, PushButton
 
 from ui import constants, file_dialogs
-from ui.widgets.context_menus import (add_action, add_checkable_submenu,
-                                      make_menu)
+from ui.widgets.context_menus import (RoundMenu, add_action,
+                                      add_checkable_submenu, make_menu)
 
 
 class BScanDisplayMode(Enum):
@@ -361,7 +361,7 @@ class BScanView(QWidget):
         ascan_action.setChecked(self._ascan_follow)
         ascan_action.triggered.connect(self.set_ascan_follow)
         menu.addAction(ascan_action)
-        mode_submenu = menu.addMenu('显示模式')
+        mode_submenu = RoundMenu('显示模式', menu)
         for mode in BScanDisplayMode:
             mode_label = {
                 BScanDisplayMode.GRAYSCALE: '灰度',
@@ -374,6 +374,7 @@ class BScanView(QWidget):
             act.triggered.connect(
                 lambda _checked=False, m=mode: self.set_display_mode(m))
             mode_submenu.addAction(act)
+        menu.addMenu(mode_submenu)
         menu.addSeparator()
         add_action(menu, FIF.COPY, '复制图像', self._copy_image,
                    enabled=self._image_shape is not None)
