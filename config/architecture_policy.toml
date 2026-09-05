@@ -168,3 +168,19 @@ owner = "spatial-backend"
 remove_after = "1.1.0"
 reason = "Persistence adapter reuses the verified spatial result store."
 max_function_lines = 100
+
+[[migration_exceptions]]
+path_prefix = "mygpr/infrastructure/persistence/velocity_adapter.py"
+allowed_local_import_prefixes = ["core"]
+owner = "spatial-backend"
+remove_after = "1.1.0"
+reason = "Persistence adapter reuses the verified field line store for velocity model write-back."
+max_function_lines = 100
+
+[[migration_exceptions]]
+path_prefix = "mygpr/infrastructure/persistence/grid_adapter.py"
+allowed_local_import_prefixes = ["core"]
+owner = "spatial-backend"
+remove_after = "1.1.0"
+reason = "Persistence adapter reuses coordinate projection and GIS layer store for grid outputs."
+max_function_lines = 100

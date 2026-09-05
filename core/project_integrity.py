@@ -331,8 +331,25 @@ class ProjectIntegrityAuditor:
             expected = str(row.get("sha256") or "")
             if not artifact_id or not dataset_path:
                 continue
+            # Sidecar 布局：catalog 的 h5_path 指向 sidecar 文件；legacy 行
+            # 无 h5_path 或仍指容器，回退容器路径（双读兼容，不迁移）。
+            artifact_file = container
+            row_h5_path = str(row.get("h5_path") or "")
+            if row_h5_path:
+                candidate = self.root / row_h5_path
+                try:
+                    candidate.resolve().relative_to(self.root)
+                    artifact_file = candidate
+                except (ValueError, OSError):
+                    issues.append(self._issue(
+                        "storage.artifact_hash_unreadable", IntegritySeverity.ERROR, "storage",
+                        f"处理产物 {artifact_id} 路径越界，拒绝读取。",
+                        object_id=artifact_id,
+                        path=self._rel(container), details={"line_id": line_id},
+                    ))
+                    continue
             try:
-                actual = compute_dataset_sha256(container, dataset_path)
+                actual = compute_dataset_sha256(artifact_file, dataset_path)
             except PROJECT_AUDIT_ERRORS as exc:
                 issues.append(self._issue(
                     "storage.artifact_hash_unreadable", IntegritySeverity.ERROR, "storage",

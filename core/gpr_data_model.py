@@ -565,10 +565,24 @@ def load_gpr_dataset(
             length_axis = np.asarray(npz["distance_axis_m"], dtype=np.float32) if "distance_axis_m" in npz else None
             time_axis = np.asarray(npz["time_axis_ns"], dtype=np.float32) if "time_axis_ns" in npz else None
             depth_axis = np.asarray(npz["depth_axis_m"], dtype=np.float32) if "depth_axis_m" in npz else None
+            # save_npz 把 to_metadata() 序列化为 metadata 成员（0 维 Unicode 数组）；
+            # 读取端必须还原 dielectric_constant 与 metadata（速度分析证据等），
+            # 否则写回测线的 ε 与证据在下次加载时静默丢失。
+            stored_meta: dict[str, Any] = {}
+            if "metadata" in npz:
+                try:
+                    parsed = json.loads(str(npz["metadata"]))
+                    if isinstance(parsed, dict):
+                        stored_meta = parsed
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    stored_meta = {}
         ds = GPRDataSet.from_matrix(
             line_id, matrix,
             length_m=float(length_axis[-1]) if length_axis is not None and len(length_axis) else length_m,
-            dielectric_constant=dielectric_constant, source_path=str(src), format_name="npz-dataset",
+            time_window_ns=float(stored_meta.get("time_window_ns", 250.0)),
+            dielectric_constant=float(stored_meta.get("dielectric_constant", dielectric_constant)),
+            source_path=str(src), format_name="npz-dataset",
+            metadata=dict(stored_meta.get("metadata") or {"source_name": src.name}),
         )
         if length_axis is not None:
             ds.distance_axis_m = length_axis

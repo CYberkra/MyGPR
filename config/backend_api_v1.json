@@ -25,6 +25,9 @@
     "submit_project_backup": "(self, project_id: str, destination_dir: str | None = None, *, require_external_device: bool = False, incremental: bool = False, retention_keep: int | None = None, title: str | None = None) -> str",
     "submit_spatial_result": "(self, project_id: str, *, name: str, line_ids: tuple[str, ...] | list[str] | None = None, velocity_m_per_ns: float | None = None, generate_surface: bool = True, title: str | None = None) -> str",
     "build_georeference_3d": "(self, project_id: str, line_id: str, *, preview_lod: str = auto, max_preview_traces: int = 240, max_preview_samples: int = 160, title: str | None = None) -> str",
+    "submit_velocity_analysis": "(self, project_id: str, line_id: str, picks: Sequence[Mapping[str, Any]], *, apply: bool = True, title: str | None = None) -> str",
+    "submit_line_grouping": "(self, project_id: str, *, tolerance_m: float = 20.0, title: str | None = None) -> str",
+    "submit_grid_layer": "(self, project_id: str, line_ids: Sequence[str], *, cell_size_m: float = 1.0, title: str | None = None) -> str",
     "export_artifact_segy": "(self, project_id: str, line_id: str, artifact_id: str, destination: str | Path) -> Path",
     "submit_project_restore": "(self, archive_path: str, destination_root: str, *, project_dir_name: str | None = None, open_after_restore: bool = True, title: str | None = None) -> str",
     "shutdown": "(self, *, wait: bool = True, cancel_futures: bool = True, timeout_s: float = 30.0) -> None"
@@ -41,6 +44,8 @@
         "reporting",
         "interpretation",
         "spatial",
+        "velocity",
+        "grid",
         "jobs",
         "api_version"
       ]
@@ -246,6 +251,8 @@
     "GprMaxConversionError": "MYGPR_GPRMAX_CONVERSION_ERROR",
     "AutoTuneScoringError": "MYGPR_AUTOTUNE_SCORING_ERROR",
     "JobRunnerClosedError": "MYGPR_JOB_RUNNER_CLOSED",
-    "BackendShutdownError": "MYGPR_BACKEND_SHUTDOWN_TIMEOUT"
+    "BackendShutdownError": "MYGPR_BACKEND_SHUTDOWN_TIMEOUT",
+    "VelocityAnalysisError": "MYGPR_VELOCITY_ANALYSIS_ERROR",
+    "GridAnalysisError": "MYGPR_GRID_ANALYSIS_ERROR"
   }
 }

@@ -17,9 +17,11 @@
 from __future__ import annotations
 
 from typing import Any
+import uuid
 
 from ui import constants
 from ui.logger_config import setup_logger
+
 
 # run_command（backend_controller，依赖 PyQt6）在 _on_prune_jobs 内按需导入，
 # 使本模块在无 Qt 的打包/测试环境也可导入（tests/test_page_coordinator.py 依赖此性质）。
@@ -38,6 +40,7 @@ class PageCoordinator:
         self._import_job_ids = set()        # 测线导入/传感器同步任务（完成后刷新测线）
         self._spatial_job_ids = set()       # 空间成果任务（完成后刷新空间成果表）
         self._processing_job_id = ''        # 处理页当前运行任务
+        self._velocity_token = None         # 速度分析当前提交代（None = 无在飞提交）
         self._processing_line_id = ''       # 运行提交时的测线（防运行中切测线竞态）
         self._processing_cancel_requested = False  # 用户主动取消（区别于失败）
         self._preview_newest_artifact = False  # 处理完成后自动预览最新成果
@@ -171,6 +174,8 @@ class PageCoordinator:
             interpretation.open_session_requested.connect(
                 self._on_open_session_requested)
             interpretation.points_changed.connect(self._on_points_changed)
+            interpretation.velocity_requested.connect(
+                self._on_velocity_requested)
             if self.interpretation_controller is not None:
                 interpretation.auto_trace_requested.connect(
                     self.interpretation_controller.auto_trace)
@@ -229,6 +234,8 @@ class PageCoordinator:
             prc.run_finished.connect(self._on_run_finished)
             prc.autotune_finished.connect(self._on_autotune_finished)
             prc.autotune_failed.connect(self._on_autotune_failed)
+            prc.velocity_finished.connect(self._on_velocity_finished)
+            prc.velocity_failed.connect(self._on_velocity_failed)
 
         ic = self.interpretation_controller
         if ic is not None and hasattr(interpretation, 'set_points'):
@@ -299,10 +306,14 @@ class PageCoordinator:
             processing.set_line_label('')
             processing.set_original_bundle(None)
             processing.set_result_bundle(None)
+        self._velocity_token = None  # 关闭项目即失效当前提交代，迟到回调全部丢弃
+        if hasattr(interpretation, 'set_session_active'):
+            interpretation.set_session_active(False)
         if hasattr(interpretation, 'set_line_label'):
             interpretation.set_line_label('')
             interpretation.set_session_info('未打开会话')
             interpretation.set_points([])
+            interpretation.set_velocity_failed('')  # 项目关闭 = 状态重置，非失败
         if hasattr(delivery, 'set_lines'):
             delivery.set_lines([])
             delivery.set_spatial_results([])
@@ -375,6 +386,12 @@ class PageCoordinator:
             processing = self._page('processingInterface')
             if hasattr(processing, 'set_result_bundle'):
                 processing.set_result_bundle(None)
+            # 在飞速度分析回调带旧测线，会被 line 守卫丢弃；
+            # 同步失效 token 并复位解释页，避免新测线永久停留在"拟合中"
+            self._velocity_token = None
+            interpretation = self._page('interpretationInterface')
+            if hasattr(interpretation, 'set_velocity_failed'):
+                interpretation.set_velocity_failed('')  # 空串 = 状态重置，非失败
         self._current_line_id = line_id
         self._update_line_labels()
         if self.project_controller is not None:
@@ -634,6 +651,69 @@ class PageCoordinator:
         if hasattr(processing, 'set_autotune_result'):
             processing.set_autotune_result(method_id, result)
         self._infobar('success', 'AutoTune 自动调参', f'调参完成：{method_id}')
+
+    def _on_velocity_requested(self, points: list) -> None:
+        """解释页「拟合速度模型」→ 处理控制器提交速度分析 job。"""
+        if self.processing_controller is None:
+            return
+        line_id = self._require_line()
+        if not line_id:
+            return
+        if len(points or []) < 3:
+            self._infobar('warning', '速度分析',
+                          '双曲线拟合至少需要 3 个拾取点（当前 %d 个）'
+                          % len(points or []))
+            return
+        interpretation = self._page('interpretationInterface')
+        if hasattr(interpretation, 'set_velocity_running'):
+            interpretation.set_velocity_running(True)
+        # token 先生成并登记，再启动 worker：保证任何时点的失败都能匹配
+        token = uuid.uuid4().hex
+        self._velocity_token = token
+        self.processing_controller.run_velocity_analysis(
+            token, self._current_project_id(), line_id, list(points or []))
+        self._infobar('info', '速度分析',
+                      '已提交速度分析任务：%s（%d 个拾取点）'
+                      % (line_id, len(points or [])))
+
+    def _velocity_callback_current(self, token: str, project_id: str,
+                                   line_id: str) -> bool:
+        """回调有效性：token 匹配当前提交代 + 项目/测线仍一致。
+
+        token 是每次提交的代标识：重开同项目/测线的新提交会换 token，
+        关闭项目会失效 token，迟到回调因此不会误伤新会话或在飞任务。
+        """
+        if token != getattr(self, '_velocity_token', None):
+            self.log_message('INFO 速度分析回调代次过期，已忽略')
+            return False
+        if str(project_id) != str(self._current_project_id() or ''):
+            self.log_message(
+                f'INFO 速度分析回调来自已关闭项目 {project_id}，已忽略')
+            return False
+        if str(line_id) != str(self._current_line_id or ''):
+            self.log_message(
+                f'INFO 速度分析回调测线 {line_id} 非当前测线，已忽略')
+            return False
+        return True
+
+    def _on_velocity_finished(self, token: str, project_id: str,
+                              line_id: str, result: dict) -> None:
+        """速度分析完成 → 解释页卡片回填 + InfoBar（仅限当前代次/项目/测线）。"""
+        if not self._velocity_callback_current(token, project_id, line_id):
+            return
+        interpretation = self._page('interpretationInterface')
+        if hasattr(interpretation, 'set_velocity_result'):
+            interpretation.set_velocity_result(line_id, result)
+        self._infobar('success', '速度分析', f'速度模型已写回：{line_id}')
+
+    def _on_velocity_failed(self, token: str, project_id: str,
+                            line_id: str, message: str) -> None:
+        if not self._velocity_callback_current(token, project_id, line_id):
+            return
+        interpretation = self._page('interpretationInterface')
+        if hasattr(interpretation, 'set_velocity_failed'):
+            interpretation.set_velocity_failed(message)
+        self._infobar('error', '速度分析', f'{line_id}: {message}')
 
     def _on_autotune_failed(self, method_id: str, message: str) -> None:
         processing = self._page('processingInterface')

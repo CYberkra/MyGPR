@@ -148,6 +148,7 @@ class _TerrainSignals(QObject):
     """QRunnable 无法自带信号，用独立 QObject 回主线程。"""
 
     finished = pyqtSignal(int, object)   # generation, payload(dict|None)
+    notice = pyqtSignal(str)             # 用户可见的构建提示（成功/降级原因）
 
 
 class _TerrainWorker(QRunnable):
@@ -246,12 +247,23 @@ class _TerrainWorker(QRunnable):
             else:
                 zoom = prep['zoom']
                 x0, x1, y0, y1 = prep['tile_range']
+                requested = (x1 - x0 + 1) * (y1 - y0 + 1)
                 tiles = {}
                 for tx in range(x0, x1 + 1):
                     for ty in range(y0, y1 + 1):
                         block = self._fetch_tile(zoom, tx, ty)
                         if block is not None:
                             tiles[(tx, ty)] = block
+                if not tiles:
+                    self._signals.notice.emit(
+                        '在线高程瓦片下载失败（网络不可达或超时），'
+                        '已回退为平面网格；检查网络后可在右键菜单切换地形来源')
+                elif len(tiles) < requested:
+                    self._signals.notice.emit(
+                        f'在线高程瓦片部分下载失败（{len(tiles)}/{requested}），'
+                        '未覆盖区域地形将被填平')
+                else:
+                    self._signals.notice.emit('')
                 if tiles:
                     elev, xs_m, ys_m = mosaic_from_tiles(tiles, zoom, x0, x1, y0, y1)
                     # 预计算的 Mercator 采样点 → 双线性采样 → 源坐标系规则网格
@@ -280,9 +292,12 @@ class _TerrainWorker(QRunnable):
                     if rgb is not None and np.isfinite(rgb).any():
                         payload['imagery'] = rgb.reshape(
                             prep['shape'] + (3,)).astype(np.float32)
-        except Exception as exc:  # noqa: BLE001 - 任意失败静默降级平面网格
+        except Exception as exc:  # noqa: BLE001 - 降级平面网格并提示
             _LOGGER.debug('地形构建失败: %s', exc)
             payload = None
+            if self._prep.get('local_dem') is None and self._prep.get('estimate') is None:
+                self._signals.notice.emit(
+                    f'在线地形构建失败（{exc}），已回退为平面网格')
         self._signals.finished.emit(self._generation, payload)
 
 
@@ -329,6 +344,7 @@ class Trajectory3DView(QWidget):
             self._terrain_pool.setMaxThreadCount(1)
             self._terrain_signals = _TerrainSignals(self)
             self._terrain_signals.finished.connect(self._on_terrain_finished)
+            self._terrain_signals.notice.connect(self.local_dem_notice)
         else:
             self._fallback_label = QLabel('三维视图需要 PyOpenGL', self)
             self._fallback_label.setAlignment(Qt.AlignmentFlag.AlignCenter)

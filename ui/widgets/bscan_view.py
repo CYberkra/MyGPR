@@ -28,8 +28,8 @@ from PyQt6.QtWidgets import QLabel
 from qfluentwidgets import FluentIcon as FIF, PushButton
 
 from ui import constants, file_dialogs
-from ui.widgets.context_menus import (add_action, add_checkable_submenu,
-                                      make_menu)
+from ui.widgets.context_menus import (RoundMenu, add_action,
+                                      add_checkable_submenu, make_menu)
 
 
 class BScanDisplayMode(Enum):
@@ -361,7 +361,7 @@ class BScanView(QWidget):
         ascan_action.setChecked(self._ascan_follow)
         ascan_action.triggered.connect(self.set_ascan_follow)
         menu.addAction(ascan_action)
-        mode_submenu = menu.addMenu('显示模式')
+        mode_submenu = RoundMenu('显示模式', menu)
         for mode in BScanDisplayMode:
             mode_label = {
                 BScanDisplayMode.GRAYSCALE: '灰度',
@@ -374,6 +374,7 @@ class BScanView(QWidget):
             act.triggered.connect(
                 lambda _checked=False, m=mode: self.set_display_mode(m))
             mode_submenu.addAction(act)
+        menu.addMenu(mode_submenu)
         menu.addSeparator()
         add_action(menu, FIF.COPY, '复制图像', self._copy_image,
                    enabled=self._image_shape is not None)
@@ -507,21 +508,6 @@ class BScanView(QWidget):
         elif self._ascan_popup is not None:
             self._ascan_popup.hide()
 
-    def _emit_point_picked(self, trace: int, sample: int) -> None:
-        """统一 pick 发射口：跟随浮窗消费 + 原信号照常发出。"""
-        if (self._ascan_follow and self._ascan_popup is not None
-                and self._image_shape is not None):
-            import numpy as np
-
-            image = np.asarray(self._image_item.image)
-            if 0 <= trace < image.shape[1]:
-                dist = (self._trace_axis_m[trace]
-                        if self._trace_axis_m is not None
-                        and trace < len(self._trace_axis_m) else None)
-                self._ascan_popup.show_trace(
-                    image[:, trace], trace_index=trace, distance_m=dist)
-        self.sig_point_picked.emit(trace, sample)
-
     def _on_mouse_moved(self, pos) -> None:
         """鼠标在图像区移动：十字线跟手 + 左下角读数浮层。"""
         if not self._crosshair_on or self._image_shape is None:
@@ -625,11 +611,31 @@ class BScanView(QWidget):
         trace, sample = int(view_point.x()), int(view_point.y())
         n_traces, n_samples = self._image_shape
         if 0 <= trace < n_traces and 0 <= sample < n_samples:
-            # 统一发射原始数据坐标：预览可能降采样，后端会话在原始坐标系工作
+            # sig_point_picked 契约是原始数据坐标：预览可能降采样，
+            # 后端会话（界面标注/双曲线拾取）全部在原始坐标系工作。
             data_trace, data_sample = self._view_to_data(trace, sample)
-            # 跟随浮窗用显示坐标列（与当前预览一致）；原信号用原始坐标
-            self._emit_point_picked(trace, sample)
-            del data_trace, data_sample
+            self._emit_point_picked(data_trace, data_sample, view_trace=trace)
+
+    def _emit_point_picked(self, trace: int, sample: int, *, view_trace: int | None = None) -> None:
+        """统一 pick 发射口：跟随浮窗消费 + 原信号照常发出。
+
+        trace/sample 为原始数据坐标（信号契约）；view_trace 是点击处的
+        显示坐标道号——跟随浮窗画的波形取自当前预览矩阵，必须用显示
+        索引取列，否则降采样预览下波形与十字线错位。
+        """
+        if (self._ascan_follow and self._ascan_popup is not None
+                and self._image_shape is not None):
+            import numpy as np
+
+            image = np.asarray(self._image_item.image)
+            display_trace = self._image_shape[0] - 1 if view_trace is None else int(view_trace)
+            if 0 <= display_trace < image.shape[1]:
+                dist = (self._trace_axis_m[display_trace]
+                        if self._trace_axis_m is not None
+                        and display_trace < len(self._trace_axis_m) else None)
+                self._ascan_popup.show_trace(
+                    image[:, display_trace], trace_index=display_trace, distance_m=dist)
+        self.sig_point_picked.emit(trace, sample)
 
     # ------------------------------------------------------------------ 其它
     def clear(self) -> None:
