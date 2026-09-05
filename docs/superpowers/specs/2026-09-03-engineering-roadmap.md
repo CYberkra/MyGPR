@@ -21,9 +21,13 @@
 验收：真机点击剖面出波形；三态切换数据一致；全量测试绿；冒烟过 — 已达成（GUI 测试带 importorskip 守卫）
 
 ### Phase 2 — 速度分析 + 网格抽象（2 个 PR，预计 2 周）
-- [ ] 2.1 双曲线拾取拟合（解释页交互 + 最小二乘 + 速度模型写回 + 证据链）
-- [ ] 2.2 测线组/网格抽象（轨迹聚类成组 + application 层通用"网格化属性→GIS 图层"管线）
-附带：PNG 深度/成果图进报告包（报告包机制现成）
+- [x] 2.1 双曲线拾取拟合（解释页交互 + 最小二乘 + 速度模型写回 + 证据链）
+  — eea2953/b3a4cb5/fa615dc/90f0c2e（domain 拟合 v=2/√A + 持久化写回 + facade/证据 schema + 解释页速度卡与 coordinator 链）
+  验收：tests/test_velocity_analysis_api.py 全绿（API 链 + 深度轴重算断言）；离屏冒烟速度卡渲染/门控验证
+- [x] 2.2 测线组/网格抽象（轨迹聚类成组 + application 层通用"网格化属性→GIS 图层"管线）
+  — grid commit（domain/grid 聚类 + application/grid 用例 + grid_adapter + submit_line_grouping/submit_grid_layer job）
+  验收：tests/test_grid_clustering.py 9 用例全绿（domain 5 + bucket mean 1 + API job 链 3）
+附带：PNG 深度/成果图进报告包（报告包机制现成）— 已达成（report_export_renderers._write_report_figures 出深度轴 B-scan PNG + project_plan_map.png；test_report_industry_package_v0926 验证）
 
 ### Phase 3 — 成图交付（2-3 个 PR，预计 2-3 周）
 - [ ] 3.1 界面深度切片视图（深度滑条交互 + 等值线）
