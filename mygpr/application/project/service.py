@@ -6,7 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 from threading import RLock
 from dataclasses import dataclass
-from typing import Iterator, Sequence
+from typing import Any, Iterator, Mapping, Sequence
 
 import numpy as np
 
@@ -498,6 +498,15 @@ class ProjectService:
             max_preview_traces=max_preview_traces,
             max_preview_samples=max_preview_samples,
         ))
+
+    def load_velocity_model(self, project_id: str, line_id: str) -> Mapping[str, Any] | None:
+        return self._session(project_id).load_velocity_model(line_id)
+
+    def save_velocity_model(
+        self, project_id: str, line_id: str, v_m_ns: float, *,
+        evidence: Mapping[str, Any] | None = None,
+    ) -> None:
+        self._session(project_id).save_velocity_model(line_id, v_m_ns, evidence=evidence)
 
     def list_report_packages(self, project_id: str) -> tuple[ReportPackage, ...]:
         return tuple(self._session(project_id).list_report_packages())
