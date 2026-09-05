@@ -171,6 +171,8 @@ class PageCoordinator:
             interpretation.open_session_requested.connect(
                 self._on_open_session_requested)
             interpretation.points_changed.connect(self._on_points_changed)
+            interpretation.velocity_requested.connect(
+                self._on_velocity_requested)
             if self.interpretation_controller is not None:
                 interpretation.auto_trace_requested.connect(
                     self.interpretation_controller.auto_trace)
@@ -229,6 +231,8 @@ class PageCoordinator:
             prc.run_finished.connect(self._on_run_finished)
             prc.autotune_finished.connect(self._on_autotune_finished)
             prc.autotune_failed.connect(self._on_autotune_failed)
+            prc.velocity_finished.connect(self._on_velocity_finished)
+            prc.velocity_failed.connect(self._on_velocity_failed)
 
         ic = self.interpretation_controller
         if ic is not None and hasattr(interpretation, 'set_points'):
@@ -303,6 +307,7 @@ class PageCoordinator:
             interpretation.set_line_label('')
             interpretation.set_session_info('未打开会话')
             interpretation.set_points([])
+            interpretation.set_velocity_failed('项目已关闭')
         if hasattr(delivery, 'set_lines'):
             delivery.set_lines([])
             delivery.set_spatial_results([])
@@ -634,6 +639,37 @@ class PageCoordinator:
         if hasattr(processing, 'set_autotune_result'):
             processing.set_autotune_result(method_id, result)
         self._infobar('success', 'AutoTune 自动调参', f'调参完成：{method_id}')
+
+    def _on_velocity_requested(self, points: list) -> None:
+        """解释页「拟合速度模型」→ 处理控制器提交速度分析 job。"""
+        if self.processing_controller is None:
+            return
+        line_id = self._require_line()
+        if not line_id:
+            return
+        if len(points or []) < 3:
+            self._infobar('warning', '速度分析',
+                          '双曲线拟合至少需要 3 个拾取点（当前 %d 个）'
+                          % len(points or []))
+            return
+        self.processing_controller.run_velocity_analysis(
+            self._current_project_id(), line_id, list(points or []))
+        self._infobar('info', '速度分析',
+                      '已提交速度分析任务：%s（%d 个拾取点）'
+                      % (line_id, len(points or [])))
+
+    def _on_velocity_finished(self, line_id: str, result: dict) -> None:
+        """速度分析完成 → 解释页卡片回填 + InfoBar。"""
+        interpretation = self._page('interpretationInterface')
+        if hasattr(interpretation, 'set_velocity_result'):
+            interpretation.set_velocity_result(line_id, result)
+        self._infobar('success', '速度分析', f'速度模型已写回：{line_id}')
+
+    def _on_velocity_failed(self, line_id: str, message: str) -> None:
+        interpretation = self._page('interpretationInterface')
+        if hasattr(interpretation, 'set_velocity_failed'):
+            interpretation.set_velocity_failed(message)
+        self._infobar('error', '速度分析', f'{line_id}: {message}')
 
     def _on_autotune_failed(self, method_id: str, message: str) -> None:
         processing = self._page('processingInterface')
