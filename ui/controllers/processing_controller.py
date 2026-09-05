@@ -58,9 +58,9 @@ class ProcessingController(QObject):
     run_finished = pyqtSignal(bool, str)    # success, message
     autotune_finished = pyqtSignal(str, dict)   # method_id, {best_params, ...}
     autotune_failed = pyqtSignal(str, str)
-    velocity_submitted = pyqtSignal(str)    # job_id
-    velocity_finished = pyqtSignal(str, str, dict)  # project_id, line_id, {evidence, ...}
-    velocity_failed = pyqtSignal(str, str, str)     # project_id, line_id, message
+    velocity_submitted = pyqtSignal(str, str)   # job_id, token
+    velocity_finished = pyqtSignal(str, str, str, dict)  # token, project_id, line_id, {evidence, ...}
+    velocity_failed = pyqtSignal(str, str, str, str)     # token, project_id, line_id, message
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -198,10 +198,13 @@ class ProcessingController(QObject):
 
 
     def run_velocity_analysis(
-        self, project_id, line_id: str, picks: list[tuple[int, int]]
+        self, token: str, project_id, line_id: str,
+        picks: list[tuple[int, int]],
     ) -> None:
+        """提交速度分析；token 由 coordinator 生成并在提交前登记，用于匹配回调。"""
         run_command(
-            _VelocitySubmitCommand(self, project_id, line_id, picks),
+            _VelocitySubmitCommand(
+                self, str(token), project_id, line_id, picks),
             name="mygpr-velocity-submit",
         )
 
@@ -280,16 +283,18 @@ class _AutotuneSubmitCommand:
 class _VelocitySubmitCommand:
     """拾取点 → submit_velocity_analysis job → 结果经 velocity_finished 回 UI。"""
 
-    __slots__ = ("_controller", "_project_id", "_line_id", "_picks")
+    __slots__ = ("_controller", "_token", "_project_id", "_line_id", "_picks")
 
     def __init__(
         self,
         controller: ProcessingController,
+        token: str,
         project_id: Any,
         line_id: str,
         picks: list[tuple[int, int]],
     ) -> None:
         self._controller = controller
+        self._token = str(token)
         self._project_id = str(project_id)
         self._line_id = str(line_id)
         self._picks = [(int(t), int(s)) for t, s in (picks or [])]
@@ -299,11 +304,12 @@ class _VelocitySubmitCommand:
         backend = c._backend()
         bridge = c._job_bridge()
         if backend is None or bridge is None:
-            c.velocity_failed.emit(self._project_id, self._line_id, "后端尚未就绪")
+            c.velocity_failed.emit(
+                self._token, self._project_id, self._line_id, "后端尚未就绪")
             return
         if len(self._picks) < 3:
             c.velocity_failed.emit(
-                self._project_id, self._line_id,
+                self._token, self._project_id, self._line_id,
                 "双曲线拟合至少需要 3 个拾取点")
             return
         try:
@@ -315,20 +321,22 @@ class _VelocitySubmitCommand:
         except Exception as exc:  # noqa: BLE001
             message = friendly_error_message(exc)
             c.log_message.emit(f"速度分析提交失败：{message}")
-            c.velocity_failed.emit(self._project_id, self._line_id, message)
+            c.velocity_failed.emit(
+                self._token, self._project_id, self._line_id, message)
             return
         c.log_message.emit(f"速度分析已提交：{self._line_id}")
-        c.velocity_submitted.emit(job_id)
+        c.velocity_submitted.emit(job_id, self._token)
 
         def _done(success: bool, message: str, result: Any) -> None:
             if success:
                 c.velocity_finished.emit(
-                    self._project_id, self._line_id,
+                    self._token, self._project_id, self._line_id,
                     dict(result) if isinstance(result, Mapping) else {}
                 )
                 c.log_message.emit(f"速度分析完成：{self._line_id}")
             else:
-                c.velocity_failed.emit(self._project_id, self._line_id, message)
+                c.velocity_failed.emit(
+                    self._token, self._project_id, self._line_id, message)
                 c.log_message.emit(f"速度分析失败：{message}")
 
         c._watch_with_callback(job_id, f"速度分析 {self._line_id}", _done)
