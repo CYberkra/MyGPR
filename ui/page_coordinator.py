@@ -386,6 +386,12 @@ class PageCoordinator:
             processing = self._page('processingInterface')
             if hasattr(processing, 'set_result_bundle'):
                 processing.set_result_bundle(None)
+            # 在飞速度分析回调带旧测线，会被 line 守卫丢弃；
+            # 同步失效 token 并复位解释页，避免新测线永久停留在"拟合中"
+            self._velocity_token = None
+            interpretation = self._page('interpretationInterface')
+            if hasattr(interpretation, 'set_velocity_failed'):
+                interpretation.set_velocity_failed('')  # 空串 = 状态重置，非失败
         self._current_line_id = line_id
         self._update_line_labels()
         if self.project_controller is not None:
