@@ -401,7 +401,11 @@ class InterpretationPage(QWidget):
         self._velocity_result_label.setText('\n'.join(lines))
 
     def set_velocity_failed(self, message: str) -> None:
-        """速度分析失败 → 卡片显示错误；空串视为状态重置（项目关闭）。"""
+        """速度分析失败 → 卡片显示错误。
+
+        空串（或 coordinator 项目关闭重置）→ 恢复「尚未拟合」。
+        两种路径都解除在飞态，防止任务在飞时关项目导致按钮永久禁用。
+        """
         self._velocity_running = False
         self._update_edit_enabled()
         self._velocity_result_label.setText(

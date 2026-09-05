@@ -303,11 +303,13 @@ class PageCoordinator:
             processing.set_line_label('')
             processing.set_original_bundle(None)
             processing.set_result_bundle(None)
+        if hasattr(interpretation, 'set_session_active'):
+            interpretation.set_session_active(False)
         if hasattr(interpretation, 'set_line_label'):
             interpretation.set_line_label('')
             interpretation.set_session_info('未打开会话')
             interpretation.set_points([])
-            interpretation.set_velocity_failed('项目已关闭')
+            interpretation.set_velocity_failed('')  # 项目关闭 = 状态重置，非失败
         if hasattr(delivery, 'set_lines'):
             delivery.set_lines([])
             delivery.set_spatial_results([])
