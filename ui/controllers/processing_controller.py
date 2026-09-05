@@ -59,8 +59,8 @@ class ProcessingController(QObject):
     autotune_finished = pyqtSignal(str, dict)   # method_id, {best_params, ...}
     autotune_failed = pyqtSignal(str, str)
     velocity_submitted = pyqtSignal(str)    # job_id
-    velocity_finished = pyqtSignal(str, dict)   # line_id, {evidence, ...}
-    velocity_failed = pyqtSignal(str, str)      # line_id, message
+    velocity_finished = pyqtSignal(str, str, dict)  # project_id, line_id, {evidence, ...}
+    velocity_failed = pyqtSignal(str, str, str)     # project_id, line_id, message
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -299,11 +299,12 @@ class _VelocitySubmitCommand:
         backend = c._backend()
         bridge = c._job_bridge()
         if backend is None or bridge is None:
-            c.velocity_failed.emit(self._line_id, "后端尚未就绪")
+            c.velocity_failed.emit(self._project_id, self._line_id, "后端尚未就绪")
             return
         if len(self._picks) < 3:
             c.velocity_failed.emit(
-                self._line_id, "双曲线拟合至少需要 3 个拾取点")
+                self._project_id, self._line_id,
+                "双曲线拟合至少需要 3 个拾取点")
             return
         try:
             job_id = backend.submit_velocity_analysis(
@@ -314,7 +315,7 @@ class _VelocitySubmitCommand:
         except Exception as exc:  # noqa: BLE001
             message = friendly_error_message(exc)
             c.log_message.emit(f"速度分析提交失败：{message}")
-            c.velocity_failed.emit(self._line_id, message)
+            c.velocity_failed.emit(self._project_id, self._line_id, message)
             return
         c.log_message.emit(f"速度分析已提交：{self._line_id}")
         c.velocity_submitted.emit(job_id)
@@ -322,11 +323,12 @@ class _VelocitySubmitCommand:
         def _done(success: bool, message: str, result: Any) -> None:
             if success:
                 c.velocity_finished.emit(
-                    self._line_id, dict(result) if isinstance(result, Mapping) else {}
+                    self._project_id, self._line_id,
+                    dict(result) if isinstance(result, Mapping) else {}
                 )
                 c.log_message.emit(f"速度分析完成：{self._line_id}")
             else:
-                c.velocity_failed.emit(self._line_id, message)
+                c.velocity_failed.emit(self._project_id, self._line_id, message)
                 c.log_message.emit(f"速度分析失败：{message}")
 
         c._watch_with_callback(job_id, f"速度分析 {self._line_id}", _done)

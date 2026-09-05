@@ -663,14 +663,32 @@ class PageCoordinator:
                       '已提交速度分析任务：%s（%d 个拾取点）'
                       % (line_id, len(points or [])))
 
-    def _on_velocity_finished(self, line_id: str, result: dict) -> None:
-        """速度分析完成 → 解释页卡片回填 + InfoBar。"""
+    def _on_velocity_finished(self, project_id: str, line_id: str,
+                              result: dict) -> None:
+        """速度分析完成 → 解释页卡片回填 + InfoBar（仅限当前项目/测线）。"""
+        if str(project_id) != str(self._current_project_id() or ''):
+            self.log_message(
+                f'INFO 速度分析回调来自已关闭项目 {project_id}，已忽略')
+            return
+        if str(line_id) != str(self._current_line_id or ''):
+            self.log_message(
+                f'INFO 速度分析回调测线 {line_id} 非当前测线，已忽略')
+            return
         interpretation = self._page('interpretationInterface')
         if hasattr(interpretation, 'set_velocity_result'):
             interpretation.set_velocity_result(line_id, result)
         self._infobar('success', '速度分析', f'速度模型已写回：{line_id}')
 
-    def _on_velocity_failed(self, line_id: str, message: str) -> None:
+    def _on_velocity_failed(self, project_id: str, line_id: str,
+                            message: str) -> None:
+        if str(project_id) != str(self._current_project_id() or ''):
+            self.log_message(
+                f'INFO 速度分析回调来自已关闭项目 {project_id}，已忽略')
+            return
+        if str(line_id) != str(self._current_line_id or ''):
+            self.log_message(
+                f'INFO 速度分析回调测线 {line_id} 非当前测线，已忽略')
+            return
         interpretation = self._page('interpretationInterface')
         if hasattr(interpretation, 'set_velocity_failed'):
             interpretation.set_velocity_failed(message)
