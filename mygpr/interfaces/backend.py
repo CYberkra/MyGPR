@@ -6,7 +6,7 @@ from pathlib import Path
 
 import weakref
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, Mapping, Sequence
 
 import numpy as np
 
@@ -25,6 +25,7 @@ from mygpr.application.interpretation.service import InterpretationService
 from mygpr.application.interpretation.edit_service import InterpretationEditService
 from mygpr.application.spatial.service import SpatialService
 from mygpr.domain.processing.models import PipelineDefinition, ProcessingRequest
+from mygpr.application.velocity.service import VelocityAnalysisService
 from mygpr.domain.common.errors import MyGPRError
 from mygpr.domain.acquisition.models import SensorSyncSettings
 from mygpr.infrastructure.processing.autotune_adapter import DomainAutoTuneConstraintPolicy
@@ -79,6 +80,7 @@ class MyGPRBackend:
     reporting: ReportingService
     interpretation: InterpretationService
     spatial: SpatialService
+    velocity: VelocityAnalysisService
     jobs: InMemoryJobRunner
     api_version: str = BACKEND_API_VERSION
     # 声明 __weakref__ 使 slots dataclass 可被 WeakKeyDictionary 键控；
@@ -141,6 +143,7 @@ class MyGPRBackend:
             reporting=ReportingService(projects),
             interpretation=InterpretationService(projects),
             spatial=SpatialService(projects),
+            velocity=VelocityAnalysisService(projects),
             jobs=InMemoryJobRunner(max_workers=max_workers),
         )
 
@@ -437,6 +440,24 @@ class MyGPRBackend:
                 max_preview_traces=max_preview_traces,
                 max_preview_samples=max_preview_samples,
                 context=context,
+            ),
+        )
+
+    def submit_velocity_analysis(
+        self,
+        project_id: str,
+        line_id: str,
+        picks: Sequence[Mapping[str, Any]],
+        *,
+        apply: bool = True,
+        title: str | None = None,
+    ) -> str:
+        """Fit a diffraction hyperbola from picked points and write back the velocity model."""
+        return self._submit_project_job(
+            project_id,
+            title or f"速度分析: {line_id}",
+            lambda context: self.velocity.analyze(
+                project_id, line_id, [dict(p) for p in picks], apply=apply, context=context
             ),
         )
 

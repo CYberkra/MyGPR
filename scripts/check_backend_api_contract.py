@@ -48,6 +48,7 @@ PUBLIC_METHODS = (
     "submit_project_backup",
     "submit_spatial_result",
     "build_georeference_3d",
+    "submit_velocity_analysis",
     "export_artifact_segy",
     "submit_project_restore",
     "shutdown",
@@ -100,6 +101,7 @@ def build_contract() -> dict[str, Any]:
         ProcessingMethodError,
         ProjectBusyContractError,
     )
+    from mygpr.domain.velocity.errors import VelocityAnalysisError
     error_codes = {
         item.__name__: item.error_code
         for item in (
@@ -112,6 +114,7 @@ def build_contract() -> dict[str, Any]:
             AutoTuneScoringError,
             JobRunnerClosedError,
             BackendShutdownError,
+            VelocityAnalysisError,
         )
     }
     return {

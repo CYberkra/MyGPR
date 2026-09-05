@@ -757,6 +757,15 @@
       "references": [
         "mygpr/infrastructure/persistence/intermediate_cleanup.py"
       ]
+    },
+    {
+      "schema": "mygpr.velocity_analysis_evidence.v1",
+      "owner": "spatial-backend",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "mygpr/application/velocity/evidence.py"
+      ]
     }
   ]
 }
