@@ -374,6 +374,7 @@ class BScanView(QWidget):
             act.triggered.connect(
                 lambda _checked=False, m=mode: self.set_display_mode(m))
             mode_submenu.addAction(act)
+        menu.addMenu(mode_submenu)
         menu.addSeparator()
         add_action(menu, FIF.COPY, '复制图像', self._copy_image,
                    enabled=self._image_shape is not None)
