@@ -30,7 +30,9 @@
 附带：PNG 深度/成果图进报告包（报告包机制现成）— 已达成（report_export_renderers._write_report_figures 出深度轴 B-scan PNG + project_plan_map.png；test_report_industry_package_v0926 验证）
 
 ### Phase 3 — 成图交付（2-3 个 PR，预计 2-3 周）
-- [ ] 3.1 界面深度切片视图（深度滑条交互 + 等值线）
+- [x] 3.1 界面深度切片视图（深度滑条交互 + 等值线）
+  — bdabb4e/80adcc8/5b5a343/8da949c/b0998b7（application 预览用例+契约 / DepthSliceView 组件 / SpatialPage 第4段+滑条 / controller+coordinator 接线 / API 集成测试）
+  验收：tests/test_depth_slice_api.py 3 用例全绿（payload 契约 8.12m 双程换算 + 空标注报错 + 存图层 job 回读）；离屏冒烟 9 截图；定向套件 59 passed
 - [ ] 3.2 GeoTIFF/SHP 导出（rasterio/fiona，复用 GIS 图层）
 - [ ] 3.3 DXF 导出（ezdxf 新依赖；测线轨迹/界面等值线/标注按图层组织）
 
