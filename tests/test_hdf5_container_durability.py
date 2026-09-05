@@ -194,3 +194,42 @@ def test_sidecar_and_legacy_container_group_coexist(tmp_path: Path) -> None:
     delete_processing_artifact(container, "L01_new")
     assert list_processing_artifact_ids(container) == []
     assert not (artifacts_dir_path(container) / "L01_new.h5").exists()
+
+
+def test_corrupted_sidecar_falls_back_to_legacy_container_group(tmp_path: Path) -> None:
+    """sidecar 存在但损坏 → 双读回退 legacy 容器组，不因 sidecar 打不开而失败。"""
+    from core.hdf5_line_container import (
+        list_processing_artifact_ids,
+        load_processing_dataset,
+        locate_processing_artifact,
+        processing_artifact_exists,
+        read_processing_artifact_record,
+        read_processing_manifest,
+    )
+
+    container = tmp_path / "L01.h5"
+    _write_container(container)
+    matrix = np.ones((32, 24), dtype=np.float32)
+    sidecar = artifacts_dir_path(container) / "L01_legacy.h5"
+    with h5py.File(container, "r+", libver="latest") as handle:
+        group = handle.require_group("processing/artifacts/L01_legacy")
+        group.create_dataset("bscan", data=matrix)
+        group.attrs["status"] = "committed"
+        group.attrs["manifest_json"] = "{}"
+    # 造一个损坏的 sidecar（同名 artifact，截断的字节）
+    sidecar.parent.mkdir(parents=True, exist_ok=True)
+    sidecar.write_bytes(b"\x89HDF\r\n\x1a\n" + b"\x00" * 64)
+
+    # 全部读函数回退到 legacy 容器组，而不是被坏 sidecar 挡住
+    assert locate_processing_artifact(container, "L01_legacy")[0] == container
+    assert processing_artifact_exists(container, "L01_legacy")
+    record = read_processing_artifact_record(container, "L01_legacy")
+    assert record["h5_file"] == str(container)
+    assert record["status"] == "committed"
+    assert read_processing_manifest(container, "L01_legacy") == {}
+    ds = load_processing_dataset(container, artifact_id="L01_legacy")
+    assert np.array_equal(np.asarray(ds.matrix), matrix)
+    assert list_processing_artifact_ids(container) == ["L01_legacy"]
+    # 无 sidecar 无容器组 → 仍然报 not found
+    with pytest.raises(FileNotFoundError):
+        locate_processing_artifact(container, "L01_absent")

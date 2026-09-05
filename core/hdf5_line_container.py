@@ -292,15 +292,22 @@ def locate_processing_artifact(path: str | Path, artifact_id: str) -> tuple[Path
     """Locate an artifact's backing file (dual-read: sidecar first, legacy next).
 
     过渡期兼容两种布局：sidecar ``<stem>.artifacts/<artifact_id>.h5`` 优先，
-    其次旧容器内嵌组 ``/processing/artifacts/<artifact_id>``。返回
-    ``(file_path, dataset_path)``；两处都不存在时抛 FileNotFoundError。
+    其次旧容器内嵌组 ``/processing/artifacts/<artifact_id>``。两处均做可读
+    探测（能打开且含 ``bscan``）：sidecar 损坏时回退容器，容器打不开时不
+    影响有效 sidecar；两处均不可读才抛 FileNotFoundError。
+    返回 ``(file_path, dataset_path)``。
     """
     _validate_artifact_id(artifact_id)
     source = Path(path).resolve()
     group_path = f"{PROCESSING_ROOT}/{artifact_id}"
     sidecar = artifacts_dir_path(source) / f"{artifact_id}.h5"
     if sidecar.is_file():
-        return sidecar, f"{group_path}/bscan"
+        try:
+            with h5py.File(sidecar, "r", libver="latest", swmr=True) as handle:
+                if f"{group_path}/bscan" in handle:
+                    return sidecar, f"{group_path}/bscan"
+        except (OSError, RuntimeError, TypeError, ValueError, KeyError):
+            pass
     if source.is_file():
         try:
             with h5py.File(source, "r", libver="latest", swmr=True) as handle:
@@ -416,8 +423,14 @@ def processing_artifact_exists(path: str | Path, artifact_id: str) -> bool:
     _validate_artifact_id(artifact_id)
     source = Path(path).resolve()
     group_path = f"{PROCESSING_ROOT}/{artifact_id}"
-    if (artifacts_dir_path(source) / f"{artifact_id}.h5").is_file():
-        return True
+    sidecar = artifacts_dir_path(source) / f"{artifact_id}.h5"
+    if sidecar.is_file():
+        try:
+            with h5py.File(sidecar, "r", libver="latest", swmr=True) as handle:
+                if f"{group_path}/bscan" in handle:
+                    return True
+        except (OSError, RuntimeError, TypeError, ValueError, KeyError):
+            pass
     if not source.is_file():
         return False
     try:
