@@ -652,6 +652,9 @@ class PageCoordinator:
                           '双曲线拟合至少需要 3 个拾取点（当前 %d 个）'
                           % len(points or []))
             return
+        interpretation = self._page('interpretationInterface')
+        if hasattr(interpretation, 'set_velocity_running'):
+            interpretation.set_velocity_running(True)
         self.processing_controller.run_velocity_analysis(
             self._current_project_id(), line_id, list(points or []))
         self._infobar('info', '速度分析',
