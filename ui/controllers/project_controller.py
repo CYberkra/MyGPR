@@ -437,6 +437,9 @@ class _CreateProjectCommand:
             c.log_message.emit(f"新建项目失败：{message}")
             c.open_failed.emit(message)
         else:
+            # 与 _OpenProjectCommand 同理：项目上下文切换时刻推进代数。
+            c._depth_preview_generation += 1
+            c._preview_generation += 1
             c._current = summary
             c.log_message.emit(f"项目已创建：{summary.name}")
             c.project_opened.emit(summary)
@@ -471,6 +474,11 @@ class _OpenProjectCommand:
             c.log_message.emit(f"打开项目失败：{message}")
             c.open_failed.emit(message)
         else:
+            # 项目上下文真正切换的时刻再次推进代数：busy 窗口内发起的
+            # 预览请求仍指向旧项目，其回包代数可能与 open 前的推进撞车，
+            # 不在此推进则门卫会放行旧项目 payload。
+            c._depth_preview_generation += 1
+            c._preview_generation += 1
             c._current = summary
             c.log_message.emit(f"项目已打开：{summary.name}")
             c.project_opened.emit(summary)
@@ -498,6 +506,11 @@ class _CloseProjectCommand:
             _LOGGER.exception("关闭项目失败")
             c.log_message.emit(f"关闭项目失败：{friendly_error_message(exc)}")
         else:
+            # 与 open/create 成功路径同理：busy 窗口内发起的预览请求
+            # 仍指向本项目，close_current 的前置推进可被其自增抵消；
+            # 项目上下文清除时刻再次推进，确保 in-flight 回包全部过期。
+            c._depth_preview_generation += 1
+            c._preview_generation += 1
             c._current = None
             c.log_message.emit("项目已关闭")
             c.project_closed.emit()
