@@ -36,6 +36,9 @@ class ProjectController(QObject):
     preflight_ready = pyqtSignal(object)         # ImportPreflight
     preflight_failed = pyqtSignal(str)
     spatial_tracks_ready = pyqtSignal(list)      # list[SpatialTrack]
+    depth_preview_ready = pyqtSignal(object, list, float)  # payload, line_ids, cell_size_m
+    depth_layer_saved = pyqtSignal(str, list, float)       # job_id, line_ids, cell_size_m
+    depth_save_failed = pyqtSignal(str)                    # message
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -179,7 +182,6 @@ class ProjectController(QObject):
             name="mygpr-spatial-tracks",
         )
 
-    # ------------------------------------------------------------------
     def preview_line(self, line_id: str) -> None:
         backend = self._backend()
         project_id = self._project_id_or_warn()
@@ -657,6 +659,42 @@ class _DeleteLinesCommand:
         finally:
             c._set_busy(False)
             c.refresh_lines()
+
+
+class _DepthPreviewCommand:
+    """worker 线程执行 interface_depth_preview，结果经 depth_preview_ready 回 UI。"""
+
+    __slots__ = ("_controller", "_project_id", "_line_ids", "_cell_size_m")
+
+    def __init__(
+        self,
+        controller: ProjectController,
+        project_id: str,
+        line_ids: list[str],
+        cell_size_m: float,
+    ) -> None:
+        self._controller = controller
+        self._project_id = project_id
+        self._line_ids = line_ids
+        self._cell_size_m = cell_size_m
+
+    def execute(self) -> None:
+        c = self._controller
+        backend = c._backend()
+        if backend is None:
+            return
+        try:
+            payload = backend.interface_depth_preview(
+                self._project_id,
+                self._line_ids,
+                cell_size_m=self._cell_size_m,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.exception("深度切片预览失败")
+            c.log_message.emit(f"深度切片预览失败：{friendly_error_message(exc)}")
+        else:
+            c.depth_preview_ready.emit(
+                payload, list(self._line_ids), self._cell_size_m)
 
 
 __all__ = ["ProjectController"]

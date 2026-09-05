@@ -193,6 +193,10 @@ class PageCoordinator:
         # ---------------- 空间信息页
         if hasattr(spatial, 'current_line_requested'):
             spatial.current_line_requested.connect(self._on_spatial_current_line)
+        if hasattr(spatial, 'depth_preview_requested'):
+            spatial.depth_preview_requested.connect(self._on_depth_preview_requested)
+        if hasattr(spatial, 'save_depth_layer_requested'):
+            spatial.save_depth_layer_requested.connect(self._on_save_depth_layer_requested)
 
         # ---------------- 成果页（SPEC §6.7）
         if hasattr(delivery, 'spatial_requested'):
@@ -224,6 +228,12 @@ class PageCoordinator:
             pc.preflight_failed.connect(self._on_preflight_failed)
             if hasattr(spatial, 'set_tracks') and hasattr(pc, 'spatial_tracks_ready'):
                 pc.spatial_tracks_ready.connect(spatial.set_tracks)
+            if hasattr(spatial, 'set_depth_grid') and hasattr(pc, 'depth_preview_ready'):
+                pc.depth_preview_ready.connect(spatial.set_depth_grid)
+            if hasattr(pc, 'depth_layer_saved'):
+                pc.depth_layer_saved.connect(self._on_depth_layer_saved)
+            if hasattr(pc, 'depth_save_failed'):
+                pc.depth_save_failed.connect(self._on_depth_save_failed)
             if hasattr(project, 'set_busy'):
                 pc.busy_changed.connect(project.set_busy)
 
@@ -321,6 +331,8 @@ class PageCoordinator:
         if hasattr(spatial, 'set_tracks'):
             spatial.set_tracks([])
             spatial.set_lines([])
+        if hasattr(spatial, 'clear_depth_grid'):
+            spatial.clear_depth_grid()
         self.log_message('INFO 项目已关闭，相关页面恢复未打开项目状态')
 
     def _on_open_failed(self, message: str) -> None:
@@ -786,6 +798,32 @@ class PageCoordinator:
         if hasattr(interpretation, 'set_session_info'):
             interpretation.set_session_info('已保存')
         self._infobar('success', '界面解释标注', message or '标注已保存')
+
+    # ============================================================ 深度切片域
+    def _on_depth_preview_requested(self, line_ids: list) -> None:
+        """空间页切到深度切片段 / 勾选变化 → 请求界面深度预览。"""
+        pc = self.project_controller
+        if pc is None or not self._require_project():
+            return
+        pc.request_depth_preview(list(line_ids or []))
+
+    def _on_save_depth_layer_requested(self, line_ids: list, cell_size_m: float) -> None:
+        """空间页「存为图层」→ 提交网格化界面深度图层 job。"""
+        pc = self.project_controller
+        if pc is None or not self._require_project():
+            return
+        pc.submit_depth_layer(list(line_ids or []), float(cell_size_m or 1.0))
+
+    def _on_depth_layer_saved(self, job_id: str, line_ids: list, cell_size_m: float) -> None:
+        """深度图层 job 完成 → 日志 + InfoBar（无图层列表页，无需刷新）。"""
+        self._infobar('success', '深度图层',
+                      f'已保存 {len(line_ids)} 条测线的界面深度图层'
+                      f'（格网 {cell_size_m:.2f} m）')
+        self.log_message(
+            f'SUCCESS 深度图层已保存：{len(line_ids)} 条测线，任务 {job_id[:8]}…')
+
+    def _on_depth_save_failed(self, message: str) -> None:
+        self._infobar('error', '深度图层', message or '深度图层任务失败', duration=8000)
 
     # ============================================================ 成果域
     def _on_spatial_requested(self, payload: dict) -> None:
