@@ -12,6 +12,9 @@ from __future__ import annotations
 import json
 import math
 import tempfile
+
+import numpy as np
+
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -218,6 +221,42 @@ def persist_grouping(
     return payload
 
 
+def interface_depth_preview(
+    projects: ProjectService,
+    project_id: str,
+    line_ids: Sequence[str],
+    *,
+    cell_size_m: float = 1.0,
+) -> dict[str, Any]:
+    """界面深度网格 → UI 预览 payload（不落盘；落盘走 submit_grid_layer）。
+
+    复用 gridded_interface_depth 的采集与网格化；把规则网格转成
+    pyqtgraph ImageItem 直接可用的矩阵（行序 = y 降序，与 AttributeGrid
+    一致）+ 等值线/滑条所需的元数据。Phase 3.1 深度切片视图数据源；
+    Phase 4 能量切片换属性采集函数即可复用同一 payload 契约。
+    """
+    grid = gridded_interface_depth(
+        projects, project_id, line_ids, cell_size_m=cell_size_m)
+    matrix = np.full((grid.nrows, grid.ncols), np.nan, dtype=float)
+    for row_idx, row in enumerate(grid.values):
+        for col_idx, value in enumerate(row):
+            if value is not None:
+                matrix[row_idx, col_idx] = value
+    finite = matrix[np.isfinite(matrix)]
+    return {
+        "attribute": grid.attribute_name,
+        "cell_size_m": grid.cell_size_m,
+        "ncols": grid.ncols,
+        "nrows": grid.nrows,
+        "x_origin_m": grid.x_origin_m,
+        "y_origin_m": grid.y_origin_m,
+        "valid_count": grid.valid_count,
+        "matrix": matrix,
+        "depth_min_m": float(finite.min()) if finite.size else float("nan"),
+        "depth_max_m": float(finite.max()) if finite.size else float("nan"),
+    }
+
+
 __all__ = [
     "DEFAULT_GROUP_TOLERANCE_M",
     "INTERFACE_DEPTH_ATTRIBUTE",
@@ -227,6 +266,7 @@ __all__ = [
     "grid_attribute",
     "gridded_interface_depth",
     "group_project_tracks",
+    "interface_depth_preview",
     "persist_grouping",
     "write_grid_geojson",
 ]

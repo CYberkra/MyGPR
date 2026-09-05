@@ -51,6 +51,7 @@ PUBLIC_METHODS = (
     "submit_velocity_analysis",
     "submit_line_grouping",
     "submit_grid_layer",
+    "interface_depth_preview",
     "export_artifact_segy",
     "submit_project_restore",
     "shutdown",

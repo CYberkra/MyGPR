@@ -499,6 +499,21 @@ class MyGPRBackend:
             ),
         )
 
+    def interface_depth_preview(
+        self,
+        project_id: str,
+        line_ids: Sequence[str],
+        *,
+        cell_size_m: float = 1.0,
+    ) -> dict[str, Any]:
+        """界面深度网格预览 payload（同步、轻量、不落盘）。
+
+        返回 dict（attribute/cell_size_m/ncols/nrows/x_origin_m/y_origin_m/
+        valid_count/matrix/depth_min_m/depth_max_m）；落盘走 submit_grid_layer。
+        """
+        return self.grid.interface_depth_preview(
+            project_id, tuple(str(item) for item in line_ids), cell_size_m=cell_size_m)
+
     def submit_project_restore(
         self,
         archive_path: str,

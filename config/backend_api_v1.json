@@ -28,6 +28,7 @@
     "submit_velocity_analysis": "(self, project_id: str, line_id: str, picks: Sequence[Mapping[str, Any]], *, apply: bool = True, title: str | None = None) -> str",
     "submit_line_grouping": "(self, project_id: str, *, tolerance_m: float = 20.0, title: str | None = None) -> str",
     "submit_grid_layer": "(self, project_id: str, line_ids: Sequence[str], *, cell_size_m: float = 1.0, title: str | None = None) -> str",
+    "interface_depth_preview": "(self, project_id: str, line_ids: Sequence[str], *, cell_size_m: float = 1.0) -> dict[str, Any]",
     "export_artifact_segy": "(self, project_id: str, line_id: str, artifact_id: str, destination: str | Path) -> Path",
     "submit_project_restore": "(self, archive_path: str, destination_root: str, *, project_dir_name: str | None = None, open_after_restore: bool = True, title: str | None = None) -> str",
     "shutdown": "(self, *, wait: bool = True, cancel_futures: bool = True, timeout_s: float = 30.0) -> None"

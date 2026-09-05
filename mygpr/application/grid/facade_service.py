@@ -4,12 +4,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from mygpr.application.grid.service import (
     DEFAULT_GROUP_TOLERANCE_M,
     gridded_interface_depth,
     group_project_tracks,
+    interface_depth_preview,
     persist_grouping,
     write_grid_geojson,
 )
@@ -71,6 +72,14 @@ class GridService:
             },
             "crs": crs_name,
         }
+
+    def interface_depth_preview(
+        self, project_id: str, line_ids: Sequence[str], *,
+        cell_size_m: float = 1.0,
+    ) -> dict[str, Any]:
+        """界面深度网格预览 payload（同步、不落盘；落盘走 export）。"""
+        return interface_depth_preview(
+            self._projects, project_id, line_ids, cell_size_m=cell_size_m)
 
     def _resolve_crs(self, project_id: str) -> str:
         metadata = self._projects.get_metadata(project_id)
