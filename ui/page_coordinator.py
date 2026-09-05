@@ -229,7 +229,7 @@ class PageCoordinator:
             if hasattr(spatial, 'set_tracks') and hasattr(pc, 'spatial_tracks_ready'):
                 pc.spatial_tracks_ready.connect(spatial.set_tracks)
             if hasattr(spatial, 'set_depth_grid') and hasattr(pc, 'depth_preview_ready'):
-                pc.depth_preview_ready.connect(spatial.set_depth_grid)
+                pc.depth_preview_ready.connect(self._on_depth_preview_ready)
             if hasattr(pc, 'depth_layer_saved'):
                 pc.depth_layer_saved.connect(self._on_depth_layer_saved)
             if hasattr(pc, 'depth_save_failed'):
@@ -330,7 +330,10 @@ class PageCoordinator:
         spatial = self._page('spatialInterface')
         if hasattr(spatial, 'set_tracks'):
             spatial.set_tracks([])
-            spatial.set_lines([])
+        spatial.set_lines([])
+        pc = self.project_controller
+        if pc is not None and hasattr(pc, 'invalidate_depth_previews'):
+            pc.invalidate_depth_previews()
         if hasattr(spatial, 'clear_depth_grid'):
             spatial.clear_depth_grid()
         self.log_message('INFO 项目已关闭，相关页面恢复未打开项目状态')
@@ -806,6 +809,22 @@ class PageCoordinator:
         if pc is None or not self._require_project():
             return
         pc.request_depth_preview(list(line_ids or []))
+
+    def _on_depth_preview_ready(self, payload: dict, line_ids: list,
+                                cell_size_m: float, generation: int) -> None:
+        """深度预览回包交付门卫：代数过期即丢弃，再交给空间页渲染。
+
+        双层防护 ②：worker 发射时的代数经信号快照传递；本 slot 在主线程
+        执行，若期间项目关闭/新请求已推进代数，则此回包已失效。
+        """
+        pc = self.project_controller
+        if pc is None:
+            return
+        if generation != pc._depth_preview_generation:
+            return
+        spatial = self._page('spatialInterface')
+        if hasattr(spatial, 'set_depth_grid'):
+            spatial.set_depth_grid(payload, line_ids, cell_size_m)
 
     def _on_save_depth_layer_requested(self, line_ids: list, cell_size_m: float) -> None:
         """空间页「存为图层」→ 提交网格化界面深度图层 job。"""
