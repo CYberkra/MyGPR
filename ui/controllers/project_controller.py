@@ -86,15 +86,16 @@ class ProjectController(QObject):
             self.log_message.emit("请先在主页打开或新建项目")
         return project_id
 
-    # ------------------------------------------------------------------
     def create_project(self, root: str, name: str, meta: dict) -> None:
         if self._busy:
             self.log_message.emit("操作进行中，请稍后…")
             return
-        meta = dict(meta or {})
+        # 新建项目同样切换项目上下文，使旧项目在途预览回包过期。
+        self._depth_preview_generation += 1
+        self._preview_generation += 1
         self._set_busy(True)
         run_command(
-            _CreateProjectCommand(self, root, name, meta),
+            _CreateProjectCommand(self, root, name, dict(meta or {})),
             name="mygpr-project-create",
         )
 
@@ -102,6 +103,10 @@ class ProjectController(QObject):
         if self._busy:
             self.log_message.emit("操作进行中，请稍后…")
             return
+        # 打开/切换项目前使旧项目在途预览回包过期（A→B 直切时 A 的
+        # 回包代数与新项目相同，不推进则门卫会放行旧 payload）。
+        self._depth_preview_generation += 1
+        self._preview_generation += 1
         self._set_busy(True)
         run_command(
             _OpenProjectCommand(self, root),

@@ -292,6 +292,11 @@ class PageCoordinator:
         if self.project_controller is not None and hasattr(
                 self.project_controller, 'load_spatial_tracks'):
             self.project_controller.load_spatial_tracks()
+        # A→B 直切：清空空间页残留的 A 项目深度切片与勾选态，
+        # 否则非空 payload 守卫会压制 B 项目首次进入深度段的预览请求。
+        spatial = self._page('spatialInterface')
+        if hasattr(spatial, 'clear_depth_grid'):
+            spatial.clear_depth_grid()
         name = getattr(summary, 'name', '')
         self._infobar('success', '项目', f'项目已打开：{name}')
         self.log_message(f'SUCCESS 当前项目：{name}（{root}）')
