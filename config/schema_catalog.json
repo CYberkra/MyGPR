@@ -766,6 +766,16 @@
       "references": [
         "mygpr/application/velocity/evidence.py"
       ]
+    },
+    {
+      "schema": "mygpr.line_groups.v1",
+      "owner": "spatial-backend",
+      "mutable": true,
+      "migration_policy": "whole-file replace via atomic write; bump schema version on structural change",
+      "references": [
+        "mygpr/domain/grid/models.py",
+        "mygpr/infrastructure/persistence/grid_adapter.py"
+      ]
     }
   ]
 }

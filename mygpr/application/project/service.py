@@ -26,6 +26,7 @@ from mygpr.domain.project.models import (
     ProjectBackup,
     ProjectLine,
     ProjectLineData,
+    ProjectMetadata,
     ProjectRestore,
     ProjectSummary,
 )
@@ -192,6 +193,9 @@ class ProjectService:
 
     def get_summary(self, project_id: str) -> ProjectSummary:
         return self._session(project_id).summary
+
+    def get_metadata(self, project_id: str) -> ProjectMetadata:
+        return self._session(project_id).get_metadata()
 
     def list_open_projects(self) -> tuple[ProjectSummary, ...]:
         with self._lock:
@@ -453,6 +457,23 @@ class ProjectService:
 
     def load_spatial_tracks(self, project_id: str) -> tuple[SpatialTrack, ...]:
         return tuple(self._session(project_id).load_spatial_tracks())
+
+    def load_line_groups(self, project_id: str) -> dict | None:
+        payload = self._session(project_id).load_line_groups()
+        return dict(payload) if payload is not None else None
+
+    def save_line_groups(self, project_id: str, payload: Mapping[str, Any]) -> None:
+        self._session(project_id).save_line_groups(payload)
+
+    def list_gis_layers(self, project_id: str) -> tuple[dict, ...]:
+        return tuple(dict(item) for item in self._session(project_id).list_gis_layers())
+
+    def import_grid_layer(
+        self, project_id: str, geojson_path: Path, *, name: str, role: str
+    ) -> dict:
+        return dict(self._session(project_id).import_grid_layer(
+            geojson_path, name=name, role=role
+        ))
 
     def list_spatial_results(self, project_id: str) -> tuple[SpatialResult, ...]:
         return tuple(self._session(project_id).list_spatial_results())

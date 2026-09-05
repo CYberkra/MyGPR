@@ -26,6 +26,10 @@ from mygpr.application.interpretation.edit_service import InterpretationEditServ
 from mygpr.application.spatial.service import SpatialService
 from mygpr.domain.processing.models import PipelineDefinition, ProcessingRequest
 from mygpr.application.velocity.service import VelocityAnalysisService
+from mygpr.application.grid.facade_service import (
+    DEFAULT_GROUP_TOLERANCE_M,
+    GridService,
+)
 from mygpr.domain.common.errors import MyGPRError
 from mygpr.domain.acquisition.models import SensorSyncSettings
 from mygpr.infrastructure.processing.autotune_adapter import DomainAutoTuneConstraintPolicy
@@ -81,6 +85,7 @@ class MyGPRBackend:
     interpretation: InterpretationService
     spatial: SpatialService
     velocity: VelocityAnalysisService
+    grid: "GridService"
     jobs: InMemoryJobRunner
     api_version: str = BACKEND_API_VERSION
     # 声明 __weakref__ 使 slots dataclass 可被 WeakKeyDictionary 键控；
@@ -144,6 +149,7 @@ class MyGPRBackend:
             interpretation=InterpretationService(projects),
             spatial=SpatialService(projects),
             velocity=VelocityAnalysisService(projects),
+            grid=GridService(projects),
             jobs=InMemoryJobRunner(max_workers=max_workers),
         )
 
@@ -458,6 +464,38 @@ class MyGPRBackend:
             title or f"速度分析: {line_id}",
             lambda context: self.velocity.analyze(
                 project_id, line_id, [dict(p) for p in picks], apply=apply, context=context
+            ),
+        )
+
+    def submit_line_grouping(
+        self,
+        project_id: str,
+        *,
+        tolerance_m: float = DEFAULT_GROUP_TOLERANCE_M,
+        title: str | None = None,
+    ) -> str:
+        """Cluster spatial tracks into line groups and persist the sidecar."""
+        return self._submit_project_job(
+            project_id,
+            title or "测线分组",
+            lambda context: self.grid.group_lines(project_id, tolerance_m=tolerance_m),
+        )
+
+    def submit_grid_layer(
+        self,
+        project_id: str,
+        line_ids: Sequence[str],
+        *,
+        cell_size_m: float = 1.0,
+        title: str | None = None,
+    ) -> str:
+        """Grid interface depths for the given lines and import as a GIS layer."""
+        selected = tuple(str(item) for item in line_ids)
+        return self._submit_project_job(
+            project_id,
+            title or f"网格化界面深度: {len(selected)}线",
+            lambda context: self.grid.export_interface_depth_grid(
+                project_id, list(selected), cell_size_m=cell_size_m, context=context
             ),
         )
 

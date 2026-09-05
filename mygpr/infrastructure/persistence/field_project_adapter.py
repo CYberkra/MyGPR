@@ -27,6 +27,7 @@ from mygpr.infrastructure.persistence.interpretation_adapter import Interpretati
 from mygpr.infrastructure.persistence.intermediate_cleanup import IntermediateCleanupMixin
 from mygpr.infrastructure.persistence.spatial_adapter import SpatialPersistenceMixin
 from mygpr.infrastructure.persistence.velocity_adapter import VelocityPersistenceMixin
+from mygpr.infrastructure.persistence.grid_adapter import GridPersistenceMixin
 from mygpr.application.project.ports import ProjectRepositoryPort, ProjectSessionPort
 from mygpr.domain.reporting.models import ReportPackage
 from mygpr.domain.acquisition.models import ProjectSensorSyncResult, SensorSyncSettings
@@ -135,7 +136,7 @@ def _artifact(record: ProcessingArtifactRecord) -> ProjectArtifact:
 
 class LegacyFieldProjectSession(
     InterpretationPersistenceMixin, IntermediateCleanupMixin, SpatialPersistenceMixin,
-    VelocityPersistenceMixin, ProjectSessionPort
+    VelocityPersistenceMixin, GridPersistenceMixin, ProjectSessionPort
 ):
     """One open project; concrete storage objects remain private to this adapter."""
 

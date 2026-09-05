@@ -49,6 +49,8 @@ PUBLIC_METHODS = (
     "submit_spatial_result",
     "build_georeference_3d",
     "submit_velocity_analysis",
+    "submit_line_grouping",
+    "submit_grid_layer",
     "export_artifact_segy",
     "submit_project_restore",
     "shutdown",
@@ -102,6 +104,7 @@ def build_contract() -> dict[str, Any]:
         ProjectBusyContractError,
     )
     from mygpr.domain.velocity.errors import VelocityAnalysisError
+    from mygpr.domain.grid.errors import GridAnalysisError
     error_codes = {
         item.__name__: item.error_code
         for item in (
@@ -115,6 +118,7 @@ def build_contract() -> dict[str, Any]:
             JobRunnerClosedError,
             BackendShutdownError,
             VelocityAnalysisError,
+            GridAnalysisError,
         )
     }
     return {
