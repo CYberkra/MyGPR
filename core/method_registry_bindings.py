@@ -64,7 +64,6 @@ except ModuleNotFoundError as e:
 
 
 from PythonModule.dewow import method_dewow as method_dewow  # explicit re-export
-from PythonModule.equidistant_trace_resample import method_equidistant_trace_resample as method_equidistant_trace_resample  # explicit re-export
 from PythonModule.energy_decay_gain import method_energy_decay_gain as method_energy_decay_gain  # explicit re-export
 from PythonModule.set_zero_time import method_set_zero_time as method_set_zero_time  # explicit re-export
 from PythonModule.motion_compensation_height import method_motion_compensation_height as method_motion_compensation_height  # explicit re-export

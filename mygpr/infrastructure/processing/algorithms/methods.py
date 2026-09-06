@@ -22,7 +22,6 @@ from mygpr.infrastructure.processing.algorithms.extended import (
     native_amplitude_scale,
     native_ccbs,
     native_energy_decay_gain,
-    native_equidistant_trace_resample,
     native_hilbert_envelope,
     native_median_background,
     native_time_cut,
@@ -119,14 +118,8 @@ NATIVE_ALGORITHMS: dict[str, NativeAlgorithm] = {
     "trace_qc": NativeAlgorithm(
         "trace_qc", "Trace quality control", "preprocess", native_trace_qc, "loaded_global",
         implementation_version="native-extended-1.0",
-        parameter_schema=_schema(mode={"type": "str", "default": "mark"}, empty_rms_threshold={"type": "float", "default": 0.0}, spike_zscore={"type": "float", "default": 0.0}, manual_trace_indices={"type": "str", "default": ""}),
+        parameter_schema=_schema(mode={"type": "str", "default": "mark"}, empty_rms_threshold={"type": "float", "default": 0.0}, spike_zscore={"type": "float", "default": 6.0, "min": 0.0}, manual_trace_indices={"type": "str", "default": ""}),
         memory_multiplier=3.0, temporary_multiplier=1.0, relative_cost="low",
-    ),
-    "equidistant_trace_resample": NativeAlgorithm(
-        "equidistant_trace_resample", "Equal-distance trace resampling", "preprocess", native_equidistant_trace_resample, "loaded_global",
-        implementation_version="native-extended-1.0",
-        parameter_schema=_schema(spacing_m={"type": "float", "default": 0.0, "min": 0.0}),
-        memory_multiplier=4.0, temporary_multiplier=2.0, relative_cost="medium",
     ),
     "energy_decay_gain": NativeAlgorithm(
         "energy_decay_gain", "Robust energy-decay gain", "gain", native_energy_decay_gain, "loaded_global",
@@ -149,14 +142,14 @@ NATIVE_ALGORITHMS: dict[str, NativeAlgorithm] = {
     "wavelet_2d": NativeAlgorithm(
         "wavelet_2d", "2D wavelet denoising", "denoise", native_wavelet_2d, "global",
         implementation_version="native-extended-1.0", auto_tune_family="denoise", auto_tune_stage="denoise",
-        parameter_schema=_schema(wavelet={"type": "str", "default": "db4"}, levels={"type": "int", "default": 2, "min": 1}, threshold={"type": "float", "default": 0.1}, threshold_strategy={"type": "str", "default": "mad_universal"}),
+        parameter_schema=_schema(wavelet={"type": "str", "default": "db4"}, levels={"type": "int", "default": 2, "min": 1}, threshold={"type": "float", "default": 1.0, "min": 0.0, "max": 1.0}, threshold_strategy={"type": "str", "default": "mad_universal"}),
         memory_multiplier=8.0, temporary_multiplier=3.0, relative_cost="high",
     ),
     "wavelet_svd": NativeAlgorithm(
         "wavelet_svd", "Wavelet-SVD denoising", "denoise", native_wavelet_svd, "global",
         implementation_version="native-extended-1.0", auto_tune_family="denoise", auto_tune_stage="denoise",
-        parameter_schema=_schema(wavelet={"type": "str", "default": "db4"}, levels={"type": "int", "default": 2, "min": 1}, threshold={"type": "float", "default": 0.05}, threshold_strategy={"type": "str", "default": "mad_universal"}, rank_start={"type": "int", "default": 1, "min": 1}, rank_end={"type": "int", "default": 20, "min": 1}),
         memory_multiplier=10.0, temporary_multiplier=4.0, relative_cost="very_high",
+        parameter_schema=_schema(wavelet={"type": "str", "default": "db4"}, levels={"type": "int", "default": 2, "min": 1}, threshold={"type": "float", "default": 1.0, "min": 0.0, "max": 1.0}, threshold_strategy={"type": "str", "default": "mad_universal"}, rank_start={"type": "int", "default": 1, "min": 1}, rank_end={"type": "int", "default": 2, "min": 1}, svd_mode={"type": "str", "default": "keep", "choices": ["keep", "remove"]}),
     ),
     "hilbert_envelope": NativeAlgorithm(
         "hilbert_envelope", "Hilbert envelope", "attribute", native_hilbert_envelope, "columns",
@@ -167,7 +160,10 @@ NATIVE_ALGORITHMS: dict[str, NativeAlgorithm] = {
     "ccbs": NativeAlgorithm(
         "ccbs", "Cross-correlation background subtraction", "background", native_ccbs, "loaded_global",
         implementation_version="native-extended-1.0",
-        parameter_schema=_schema(use_custom_ref={"type": "bool", "default": False}),
+        parameter_schema=_schema(
+            use_custom_ref={"type": "bool", "default": False},
+            reference_trace_index={"type": "int", "default": -1, "min": -1},
+        ),
         memory_multiplier=5.0, temporary_multiplier=1.0, relative_cost="medium",
     ),
     "time_to_depth": NativeAlgorithm(
@@ -230,7 +226,7 @@ NATIVE_ALGORITHMS: dict[str, NativeAlgorithm] = {
     "svd_subspace": NativeAlgorithm(
         "svd_subspace", "SVD subspace reconstruction", "denoise", method_svd_subspace_native, "global",
         implementation_version="native-global-1.0", auto_tune_family="denoise",
-        parameter_schema=_schema(rank_start={"type": "int", "default": 1, "min": 1}, rank_end={"type": "int", "default": 20, "min": 1}, solver={"type": "str", "default": "auto"}),
+        parameter_schema=_schema(rank_start={"type": "int", "default": 1, "min": 1}, rank_end={"type": "int", "default": 2, "min": 1}, solver={"type": "str", "default": "auto"}),
         memory_multiplier=3.5, temporary_multiplier=2.0, relative_cost="high",
         file_function=file_svd_subspace_native,
     ),
@@ -243,7 +239,9 @@ NATIVE_ALGORITHMS: dict[str, NativeAlgorithm] = {
     "stolt_migration": NativeAlgorithm(
         "stolt_migration", "Stolt migration", "migration", method_stolt_migration_native, "global",
         implementation_version="native-global-1.0",
-        parameter_schema=_schema(dx={"type": "float", "default": 0.05}, dt={"type": "float", "default": 0.1}, v={"type": "float", "default": 0.10}, pad_x={"type": "int", "default": 1}, pad_t={"type": "int", "default": 1}),
+        parameter_schema=_schema(dx={"type": "float", "default": 0.05}, dt={"type": "float", "default": 0.1}, v={"type": "float", "default": 0.10}, pad_x={"type": "int", "default": 1}, pad_t={"type": "int", "default": 1},
+                                 stolt_jacobian_power={"type": "float", "default": 0.0, "min": 0.0, "max": 1.0},
+                                 stolt_obliquity_power={"type": "float", "default": 1.0, "min": 0.0, "max": 1.0}),
         memory_multiplier=12.0, temporary_multiplier=3.0, relative_cost="very_high",
     ),
     "motion_compensation_height": NativeAlgorithm(
@@ -331,7 +329,7 @@ NATIVE_ALGORITHMS: dict[str, NativeAlgorithm] = {
             depth={"type": "float", "default": 40.0, "min": 0.01},
             v={"type": "float", "default": 0.10, "min": 0.001},
             alpha={"type": "float", "default": 1.0},
-            weight={"type": "float", "default": 0.5, "min": 0.0},
+            weight={"type": "float", "default": 0.05, "min": 0.0},
             num_cal={"type": "int", "default": 1, "min": 1},
             topo_cor={"type": "int", "default": 0},
             hei_cor={"type": "int", "default": 0},

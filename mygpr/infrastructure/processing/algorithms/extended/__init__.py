@@ -9,7 +9,6 @@ from .amplitude import method_amplitude_scale
 from .ccbs import method_ccbs
 from .depth import method_time_to_depth
 from .energy_gain import method_energy_decay_gain
-from .equidistant import method_equidistant_trace_resample
 from .hilbert import method_hilbert_envelope
 from .median_background import method_median_background_2d
 from .time_cut import method_time_cut
@@ -44,9 +43,6 @@ def native_time_cut(data: Any, params: dict[str, Any]):
 def native_trace_qc(data: Any, params: dict[str, Any]):
     return _execute(method_trace_qc, data, params)
 
-
-def native_equidistant_trace_resample(data: Any, params: dict[str, Any]):
-    return _execute(method_equidistant_trace_resample, data, params)
 
 
 def native_energy_decay_gain(data: Any, params: dict[str, Any]):

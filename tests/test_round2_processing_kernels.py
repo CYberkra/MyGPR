@@ -15,13 +15,14 @@ from core.gprpy_compat import (
     apply_gprpy_rem_mean_trace,
 )
 from core.processing_engine import (
+    merge_result_header_info,
     merge_result_trace_metadata,
     prepare_runtime_params,
     run_processing_method,
 )
 from PythonModule.dewow import method_dewow
 from PythonModule.amplitude_scale import method_amplitude_scale
-from PythonModule.equidistant_trace_resample import method_equidistant_trace_resample
+from mygpr.infrastructure.processing.algorithms.motion.speed import method_motion_compensation_speed
 from PythonModule.energy_decay_gain import _moving_average, method_energy_decay_gain
 from PythonModule.hankel_svd import method_hankel_svd
 from PythonModule.hilbert_envelope import method_hilbert_envelope
@@ -105,6 +106,36 @@ def test_method_set_zero_time_shifts_up_and_zero_fills_tail():
     assert meta["time_step_s"] == 10e-9
 
 
+def test_method_set_zero_time_headerless_raises_without_step_fallback():
+    raw = np.arange(20, dtype=np.float32).reshape(5, 4)
+
+    with pytest.raises(ValueError, match="时间基准"):
+        method_set_zero_time(raw, new_zero_time=20.0)
+
+
+def test_method_set_zero_time_explicit_step_still_shifts():
+    raw = np.arange(20, dtype=np.float32).reshape(5, 4)
+
+    result, meta = method_set_zero_time(raw, new_zero_time=20.0, time_step_s=10e-9)
+
+    expected = np.zeros_like(raw)
+    expected[:-2, :] = raw[2:, :]
+    assert np.array_equal(result, expected)
+    assert meta["shift_samples"] == 2
+    assert meta["time_step_s"] == 10e-9
+
+
+def test_method_set_zero_time_nonpositive_is_noop_without_time_basis():
+    raw = np.arange(20, dtype=np.float32).reshape(5, 4)
+
+    result, meta = method_set_zero_time(raw, new_zero_time=0.0)
+
+    assert np.array_equal(result, raw)
+    assert meta["shift_samples"] == 0
+    assert meta["time_step_s"] == 0.0
+    assert meta["new_zero_time"] == 0.0
+
+
 def test_method_time_cut_removes_below_selected_time():
     raw = np.arange(40, dtype=np.float32).reshape(10, 4)
 
@@ -172,6 +203,48 @@ def test_time_cut_runtime_params_use_header_total_time_ns():
     assert np.array_equal(result, raw[:4, :])
     assert meta["time_end_idx"] == 4
     assert meta["header_info_updates"]["total_time_ns"] == 40.0
+
+
+def test_time_cut_without_time_basis_raises():
+    raw = np.arange(40, dtype=np.float32).reshape(10, 4)
+
+    with pytest.raises(ValueError, match="时间基准"):
+        method_time_cut(raw, mode="remove_below", time_end_ns=40.0)
+
+
+def test_time_cut_header_info_fallback_resolves_total_time_ns():
+    raw = np.arange(40, dtype=np.float32).reshape(10, 4)
+
+    result, meta = method_time_cut(
+        raw,
+        mode="remove_below",
+        time_end_ns=40.0,
+        header_info={"total_time_ns": 100.0},
+    )
+
+    assert np.array_equal(result, raw[:4, :])
+    assert meta["time_end_idx"] == 4
+    assert meta["header_info_updates"]["total_time_ns"] == 40.0
+
+
+def test_time_cut_noop_keeps_header_untouched():
+    raw = np.arange(40, dtype=np.float32).reshape(10, 4)
+
+    result, meta = method_time_cut(raw, mode="remove_below", time_end_ns=0.0)
+
+    assert np.array_equal(result, raw)
+    assert "header_info_updates" not in meta
+    assert meta["output_samples"] == 10
+
+
+def test_time_cut_noop_via_engine_does_not_poison_header():
+    raw = np.arange(40, dtype=np.float32).reshape(10, 4)
+
+    result, meta = run_processing_method(raw, "time_cut", {"mode": "remove_below"})
+    merged = merge_result_header_info({"total_time_ns": 100.0}, meta, result.shape)
+
+    assert np.array_equal(result, raw)
+    assert merged["total_time_ns"] == 100.0
 
 
 def test_trace_qc_default_marks_without_changing_data():
@@ -245,7 +318,7 @@ def test_trace_qc_remove_filters_runtime_trace_metadata():
     assert merged["trace_index"].tolist() == [1, 2, 3]
 
 
-def test_equidistant_trace_resample_resamples_data_and_metadata():
+def test_motion_compensation_speed_resamples_data_and_metadata():
     raw = np.vstack(
         [
             np.array([0.0, 2.0, 4.0], dtype=np.float32),
@@ -258,7 +331,7 @@ def test_equidistant_trace_resample_resamples_data_and_metadata():
         "local_x_m": np.array([0.0, 2.0, 4.0], dtype=np.float32),
     }
 
-    result, meta = method_equidistant_trace_resample(
+    result, meta = method_motion_compensation_speed(
         raw,
         spacing_m=1.0,
         trace_metadata=trace_metadata,
@@ -274,14 +347,14 @@ def test_equidistant_trace_resample_resamples_data_and_metadata():
     assert meta["trace_metadata_out"]["trace_index"].tolist() == [0, 1, 2, 3, 4]
 
 
-def test_equidistant_trace_resample_accepts_numpy_scalar_spacing():
+def test_motion_compensation_speed_accepts_numpy_scalar_spacing():
     raw = np.array([[0.0, 2.0, 4.0]], dtype=np.float32)
     trace_metadata = {
         "trace_index": np.array([0, 1, 2], dtype=np.int32),
         "trace_distance_m": np.array([0.0, 2.0, 4.0], dtype=np.float32),
     }
 
-    result, meta = method_equidistant_trace_resample(
+    result, meta = method_motion_compensation_speed(
         raw,
         spacing_m=np.array([1.0]),
         trace_metadata=trace_metadata,
@@ -292,21 +365,21 @@ def test_equidistant_trace_resample_accepts_numpy_scalar_spacing():
     assert meta["spacing_m"] == 1.0
 
 
-def test_equidistant_trace_resample_runtime_metadata_roundtrip():
+def test_motion_compensation_speed_runtime_metadata_roundtrip():
     raw = np.ones((3, 3), dtype=np.float32)
     trace_metadata = {
         "trace_index": np.array([0, 1, 2], dtype=np.int32),
         "trace_distance_m": np.array([0.0, 1.5, 3.0], dtype=np.float32),
     }
     params = prepare_runtime_params(
-        "equidistant_trace_resample",
+        "motion_compensation_speed",
         {"spacing_m": 1.0},
         None,
         trace_metadata,
         raw.shape,
     )
 
-    result, meta = run_processing_method(raw, "equidistant_trace_resample", params)
+    result, meta = run_processing_method(raw, "motion_compensation_speed", params)
     merged = merge_result_trace_metadata(trace_metadata, meta)
 
     assert result.shape == (3, 4)
