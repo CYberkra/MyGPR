@@ -80,15 +80,55 @@ def apply_ccbs_filter(
 def method_ccbs(
     data: np.ndarray,
     reference_wave: np.ndarray | None = None,
+    use_custom_ref: bool = False,
+    reference_trace_index: int | None = None,
+    trace_metadata: dict[str, Any] | None = None,
     **kwargs: object,
 ) -> tuple[np.ndarray, dict[str, object]]:
-    """Registry-compatible CCBS wrapper."""
+    """Registry-compatible CCBS wrapper.
+
+    Reference-wave resolution order (Wu 2022: measured reference echo of the
+    target-free zone):
+    1. explicit ``reference_wave`` array (Python API / tests);
+    2. ``trace_metadata["reference_wave"]`` array injected by the pipeline;
+    3. ``reference_trace_index`` parameter (JSON-safe scalar, GUI-usable);
+    4. fall back to the per-row mean with a warning when
+       ``use_custom_ref`` is requested but no source resolves.
+    """
 
     del kwargs
-    result = apply_ccbs_filter(data, reference_wave=reference_wave)
+    resolved = reference_wave
+    source = "explicit" if resolved is not None else None
+    warnings: list[str] = []
+    if resolved is None and use_custom_ref:
+        metadata_arrays = trace_metadata or {}
+        candidate = metadata_arrays.get("reference_wave")
+        if candidate is not None:
+            resolved = np.asarray(candidate).reshape(-1)
+            source = "trace_metadata"
+    if resolved is None and use_custom_ref and reference_trace_index is not None:
+        index = int(reference_trace_index)
+        scan = np.asarray(data)
+        trace_count = int(scan.shape[1]) if scan.ndim == 2 else 0
+        if 0 <= index < trace_count:
+            resolved = scan[:, index].reshape(-1)
+            source = "reference_trace_index"
+        else:
+            warnings.append(
+                f"reference_trace_index {index} 超出范围 [0, {trace_count})"
+            )
+    if resolved is None and use_custom_ref and source is None:
+        warnings.append(
+            "use_custom_ref 已启用但未提供参考波"
+            "（trace_metadata['reference_wave'] 或 reference_trace_index），"
+            "回退为均值参考"
+        )
+    result = apply_ccbs_filter(data, reference_wave=resolved)
     metadata = {
         "method": "CCBS",
         "description": "Cross-Correlation-Based Background Subtraction",
-        "reference_used": reference_wave is not None,
+        "reference_used": resolved is not None,
+        "reference_source": source,
+        "runtime_warnings": warnings,
     }
     return result, metadata

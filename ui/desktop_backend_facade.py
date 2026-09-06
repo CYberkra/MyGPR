@@ -118,7 +118,7 @@ _PARAM_LABELS = {
     "ntraces": "道数", "wavelet": "小波基", "levels": "分解层数",
     "threshold": "阈值", "threshold_strategy": "阈值策略", "rank_start": "起始秩",
     "rank_end": "终止秩", "normalize": "归一化", "log_compress": "对数压缩",
-    "use_custom_ref": "自定义参考", "dt": "时间采样 (ns)", "v": "波速 (m/ns)",
+    "use_custom_ref": "自定义参考", "reference_trace_index": "参考道号 (0-based, -1=不使用)", "dt": "时间采样 (ns)", "v": "波速 (m/ns)",
     "dz": "深度步长 (m)", "gain_min": "增益下限", "gain_max": "增益上限",
     "empty_rms_threshold": "空道 RMS 阈值", "spike_zscore": "尖峰 Z 分数",
     "manual_trace_indices": "手动指定道号", "spacing_m": "道间距 (m)",
