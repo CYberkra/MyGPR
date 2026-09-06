@@ -135,7 +135,7 @@ def _build_candidate_trials(
                 stage=stage,
                 budget=max(2, stage_budget // 2),
             )
-            threshold_default = float(base_params.get("threshold", 0.05))
+            threshold_default = float(base_params.get("threshold", 1.0))
             threshold_values = _trim_numeric_candidates(
                 _sanitize_float_candidates(
                     list(config.get("threshold", []))

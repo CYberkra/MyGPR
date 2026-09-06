@@ -69,8 +69,13 @@
     "name": "互相关背景抑制（CCBS）",
     "parameter_schema": {
       "use_custom_ref": {
-        "default": false,
-        "type": "bool"
+        "type": "bool",
+        "default": false
+      },
+      "reference_trace_index": {
+        "type": "int",
+        "default": -1,
+        "min": -1
       }
     },
     "visibility": "public"
@@ -165,29 +170,6 @@
       }
     },
     "visibility": "public"
-  },
-  "equidistant_trace_resample": {
-    "auto_tune_enabled": false,
-    "auto_tune_family": "",
-    "auto_tune_stage": "preprocess",
-    "capabilities": [
-      "cancellable",
-      "global_transform",
-      "loaded_global",
-      "native",
-      "ndarray"
-    ],
-    "category": "quality_control",
-    "implementation_version": "native-extended-1.0",
-    "name": "等距道重采样",
-    "parameter_schema": {
-      "spacing_m": {
-        "default": 0.0,
-        "min": 0.0,
-        "type": "float"
-      }
-    },
-    "visibility": "hidden"
   },
   "fk_filter": {
     "auto_tune_enabled": true,
@@ -382,7 +364,7 @@
         "type": "float"
       },
       "weight": {
-        "default": 0.5,
+        "default": 0.05,
         "min": 0.0,
         "type": "float"
       }
@@ -950,6 +932,18 @@
       "v": {
         "default": 0.1,
         "type": "float"
+      },
+      "stolt_jacobian_power": {
+        "default": 0.0,
+        "max": 1.0,
+        "min": 0.0,
+        "type": "float"
+      },
+      "stolt_obliquity_power": {
+        "default": 1.0,
+        "max": 1.0,
+        "min": 0.0,
+        "type": "float"
       }
     },
     "visibility": "public"
@@ -1023,7 +1017,7 @@
     "name": "SVD 子空间去噪",
     "parameter_schema": {
       "rank_end": {
-        "default": 20,
+        "default": 2,
         "min": 1,
         "type": "int"
       },
@@ -1151,7 +1145,8 @@
         "type": "str"
       },
       "spike_zscore": {
-        "default": 0.0,
+        "default": 6.0,
+        "min": 0.0,
         "type": "float"
       }
     },
@@ -1241,7 +1236,9 @@
         "type": "int"
       },
       "threshold": {
-        "default": 0.1,
+        "default": 1.0,
+        "max": 1.0,
+        "min": 0.0,
         "type": "float"
       },
       "threshold_strategy": {
@@ -1271,32 +1268,42 @@
     "implementation_version": "native-extended-1.0",
     "name": "Wavelet-SVD 复合去噪",
     "parameter_schema": {
+      "wavelet": {
+        "type": "str",
+        "default": "db4"
+      },
       "levels": {
+        "type": "int",
         "default": 2,
-        "min": 1,
-        "type": "int"
-      },
-      "rank_end": {
-        "default": 20,
-        "min": 1,
-        "type": "int"
-      },
-      "rank_start": {
-        "default": 1,
-        "min": 1,
-        "type": "int"
+        "min": 1
       },
       "threshold": {
-        "default": 0.05,
-        "type": "float"
+        "type": "float",
+        "default": 1.0,
+        "min": 0.0,
+        "max": 1.0
       },
       "threshold_strategy": {
-        "default": "mad_universal",
-        "type": "str"
+        "type": "str",
+        "default": "mad_universal"
       },
-      "wavelet": {
-        "default": "db4",
-        "type": "str"
+      "rank_start": {
+        "type": "int",
+        "default": 1,
+        "min": 1
+      },
+      "rank_end": {
+        "type": "int",
+        "default": 2,
+        "min": 1
+      },
+      "svd_mode": {
+        "type": "str",
+        "default": "keep",
+        "choices": [
+          "keep",
+          "remove"
+        ]
       }
     },
     "visibility": "public"

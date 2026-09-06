@@ -35,10 +35,12 @@ from mygpr.infrastructure.processing.native_adapter import (
 _BRIDGE_EXECUTOR = NativeProcessingExecutor()
 
 
-# Keep trace-count-changing operations out of the legacy field workbench.  The
-# method remains available through the backend processing catalog, where callers
+# Trace-count-changing methods are kept out of the legacy field workbench;
+# they remain available through the backend processing catalog, where callers
 # must explicitly accept the new geometry and trace metadata contract.
-HIDDEN_FIELD_METHOD_IDS: set[str] = {"equidistant_trace_resample"}
+# Currently empty: equidistant_trace_resample was removed (merged into
+# motion_compensation_speed). Add method ids here to hide them again.
+HIDDEN_FIELD_METHOD_IDS: set[str] = set()
 
 
 COMPATIBILITY_CHECK_METHOD_IDS = [
@@ -72,7 +74,6 @@ METHOD_CATEGORY_OVERRIDES = {
     "time_cut": "校正预处理",
     "trace_qc": "校正预处理",
     "dewow": "校正预处理",
-    "equidistant_trace_resample": "校正预处理",
     "subtracting_average_2D": "背景抑制",
     "median_background_2D": "背景抑制",
     "running_average_2D": "背景抑制",
@@ -110,7 +111,6 @@ METHOD_DISPLAY_NAMES = {
     "time_cut": "时间窗裁剪",
     "trace_qc": "坏道质检",
     "dewow": "去低频漂移 dewow",
-    "equidistant_trace_resample": "等距道重采样（改变道数）",
     "subtracting_average_2D": "平均背景去除",
     "median_background_2D": "中值背景去除",
     "running_average_2D": "尖锐杂波抑制",

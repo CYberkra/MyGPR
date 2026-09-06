@@ -4,14 +4,16 @@
 三栏 QHBoxLayout（模式照抄 processing_page）：
 - 左栏 ScrollArea 固定 320px（可折叠）：卡片"测线"（多选勾选列表 + 颜色块）、
   卡片"底图"（瓦图源 ComboBox + 预下载按钮 + 进度）、卡片"投影信息"
-- 中栏 stretch：SegmentedWidget 切换"平面地图 / 高程剖面 / 三维视图"
-  + QStackedWidget（MapView / 高程剖面 PlotWidget / Trajectory3DView）
+- 中栏 stretch：SegmentedWidget 切换"平面地图 / 高程剖面 / 三维视图 / 深度切片"
+  + QStackedWidget（MapView / 高程剖面 PlotWidget / Trajectory3DView /
+  DepthSliceView + 深度滑条 + 存为图层按钮）
 - 右栏 ScrollArea 固定 340px（可折叠）：卡片"测线详情" + "设为当前测线"
 
 页面纯展示 + 发信号，不直接调 controller/backend。
 """
 from __future__ import annotations
 
+import math
 import os
 
 import numpy as np
@@ -23,7 +25,7 @@ from PyQt6.QtWidgets import (
 )
 from qfluentwidgets import (CaptionLabel, CardWidget, ComboBox, DoubleSpinBox,
                             PrimaryPushButton, PushButton, ScrollArea,
-                            SegmentedWidget, SubtitleLabel, SwitchButton)
+                            SegmentedWidget, Slider, SubtitleLabel, SwitchButton)
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants, file_dialogs
@@ -33,12 +35,13 @@ from ui.widgets.local_dem import load_xyz_grid
 from ui.widgets.map_tiles import BASEMAP_LAYERS, DEFAULT_TILE_SOURCE
 from ui.widgets.map_view import MapView
 from ui.widgets import make_page_title
+from ui.widgets.depth_slice_view import DepthSliceView
 from ui.widgets.trajectory_3d_view import Trajectory3DView
-
 # 中栏分段（SegmentedWidget routeKey）
 _SEG_MAP = 'planMap'
 _SEG_PROFILE = 'elevationProfile'
 _SEG_3D = 'trajectory3d'
+_SEG_DEPTH = 'depthSlice'
 
 # 测线颜色循环（matplotlib tab10）
 _TRACK_COLORS = constants.CHART_TRACK_COLORS
@@ -223,6 +226,8 @@ class SpatialPage(QWidget):
 
     current_line_requested = pyqtSignal(str)    # 设为当前测线（line_id）
     basemap_prefetch_requested = pyqtSignal()   # 预下载当前区域（页面内部已处理，供外部观测）
+    depth_preview_requested = pyqtSignal(list)          # 深度切片预览（勾选 line_ids）
+    save_depth_layer_requested = pyqtSignal(list, float)  # 存为图层（line_ids, cell_size_m）
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -236,6 +241,8 @@ class SpatialPage(QWidget):
         self._dem_base_text = ''              # 本地 DEM 标签基础文本（覆盖提示拼接用）
         self._terrain_mode = 'online'         # 三维地形来源：online / estimated / local_dem
         self._restoring_terrain = False       # 恢复/程序化设置地形来源下拉时屏蔽信号
+        self._depth_payload_line_ids = []     # 深度切片预览请求的 line_ids（存图层回发用）
+        self._depth_cell_size_m = 1.0         # 深度切片网格 cell_size_m（存图层回发用）
 
         self._build_ui()
         self._connect_internal()
@@ -471,6 +478,8 @@ class SpatialPage(QWidget):
             _SEG_PROFILE, '高程剖面', onClick=lambda: self._switch_view(_SEG_PROFILE))
         self._view_segment.addItem(
             _SEG_3D, '三维视图', onClick=lambda: self._switch_view(_SEG_3D))
+        self._view_segment.addItem(
+            _SEG_DEPTH, '深度切片', onClick=lambda: self._switch_view(_SEG_DEPTH))
         self._view_segment.setCurrentItem(_SEG_MAP)
         seg_row.addWidget(self._view_segment)
         seg_row.addStretch(1)
@@ -483,10 +492,28 @@ class SpatialPage(QWidget):
         self._profile_view.setMinimumHeight(300)
         self._3d_view = Trajectory3DView(view_card)
         self._3d_view.setMinimumHeight(300)
+        self._depth_view = DepthSliceView(view_card)
+        self._depth_view.setMinimumHeight(300)
         self._view_stack.addWidget(self._map_view)
         self._view_stack.addWidget(self._profile_view)
         self._view_stack.addWidget(self._3d_view)
-        view_layout.addWidget(self._view_stack, 1)
+        self._view_stack.addWidget(self._depth_view)
+
+        # 深度切片控制行：深度滑条（0.01m 步进，整数 ×100 映射）+ 数值 + 存为图层
+        depth_row = QHBoxLayout()
+        depth_row.setSpacing(constants.CARD_SPACING)
+        self._depth_slider = Slider(Qt.Orientation.Horizontal, view_card)
+        self._depth_slider.setRange(0, 0)
+        self._depth_slider.setValue(0)
+        self._depth_value_label = CaptionLabel('深度: --', view_card)
+        self._depth_value_label.setMinimumWidth(96)
+        self._depth_save_btn = PushButton('存为图层', view_card)
+        self._depth_save_btn.setEnabled(False)
+        depth_row.addWidget(CaptionLabel('切片深度', view_card))
+        depth_row.addWidget(self._depth_slider, 1)
+        depth_row.addWidget(self._depth_value_label)
+        depth_row.addWidget(self._depth_save_btn)
+        view_layout.addLayout(depth_row)
         middle_layout.addWidget(view_card, 1)
 
         # ---------------- 右栏（展开 340px，可折叠）
@@ -553,13 +580,9 @@ class SpatialPage(QWidget):
             self._3d_view.set_vertical_exaggeration)
         self._3d_drape_switch.checkedChanged.connect(
             self._3d_view.set_track_drape)
-        self._3d_imagery_switch.checkedChanged.connect(
-            self._3d_view.set_imagery_enabled)
-        self._3d_dem_btn.clicked.connect(self._on_import_dem_clicked)
-        self._3d_dem_clear_btn.clicked.connect(self._on_clear_dem_clicked)
-        self._3d_terrain_combo.currentIndexChanged.connect(
-            self._on_terrain_source_changed)
         self._3d_view.local_dem_notice.connect(self._on_dem_notice)
+        self._depth_slider.valueChanged.connect(self._on_depth_slider_changed)
+        self._depth_save_btn.clicked.connect(self._on_save_depth_layer_clicked)
         self._left_panel.sig_collapsed.connect(self._save_panel_state)
         self._right_panel.sig_collapsed.connect(self._save_panel_state)
 
@@ -614,11 +637,59 @@ class SpatialPage(QWidget):
                 self._lines_by_id[line_id] = line
         self._refresh_detail()
 
+    def set_depth_grid(self, payload: dict, line_ids: list,
+                       cell_size_m: float) -> None:
+        """接收界面深度切片预览 payload（interface_depth_preview 返回值）。
+
+        line_ids/cell_size_m 为发起预览时的请求参数，"存为图层"时原样回发。
+        载入视图 + 滑条范围（0.01m 步进，整数 ×100 映射）+ 默认切片取
+        深度范围中值；有数据后启用"存为图层"。
+        """
+        matrix = payload.get('matrix') if isinstance(payload, dict) else None
+        if matrix is None:
+            self.clear_depth_grid()
+            return
+        self._depth_payload_line_ids = [str(x) for x in line_ids or []]
+        self._depth_cell_size_m = float(cell_size_m or 1.0)
+        cell = self._depth_cell_size_m
+        self._depth_view.set_grid(
+            matrix,
+            x_origin_m=float(payload.get('x_origin_m') or 0.0),
+            y_origin_m=float(payload.get('y_origin_m') or 0.0),
+            cell_size_m=cell,
+            attribute=str(payload.get('attribute') or '界面深度切片'))
+        dmin = float(payload.get('depth_min_m'))
+        dmax = float(payload.get('depth_max_m'))
+        if not (math.isfinite(dmin) and math.isfinite(dmax)):
+            self.clear_depth_grid()
+            return
+        lo, hi = int(round(dmin * 100.0)), int(round(dmax * 100.0))
+        if hi <= lo:
+            hi = lo + 1
+        self._depth_slider.blockSignals(True)
+        self._depth_slider.setRange(lo, hi)
+        self._depth_slider.setValue((lo + hi) // 2)
+        self._depth_slider.blockSignals(False)
+        self._on_depth_slider_changed((lo + hi) // 2)
+        self._depth_save_btn.setEnabled(True)
+
+    def clear_depth_grid(self) -> None:
+        """清空深度切片视图与控制状态（预览失败/项目切换时）。"""
+        self._depth_payload_line_ids = []
+        self._depth_view.clear_grid()
+        self._depth_slider.blockSignals(True)
+        self._depth_slider.setRange(0, 0)
+        self._depth_slider.setValue(0)
+        self._depth_slider.blockSignals(False)
+        self._depth_value_label.setText('深度: --')
+        self._depth_save_btn.setEnabled(False)
+
     def apply_theme(self, dark: bool) -> None:
-        """主题切换转发：地图 / 剖面 / 三维视图。"""
+        """主题切换转发：地图 / 剖面 / 三维视图 / 深度切片。"""
         self._map_view.apply_theme(dark)
         self._profile_view.apply_theme(dark)
         self._3d_view.apply_theme(dark)
+        self._depth_view.apply_theme(dark)
 
     # ============================================================ 内部逻辑
     def _selected_line_id(self) -> str:
@@ -637,15 +708,22 @@ class SpatialPage(QWidget):
 
     def _switch_view(self, route_key: str) -> None:
         widget = {_SEG_MAP: self._map_view, _SEG_PROFILE: self._profile_view,
-                  _SEG_3D: self._3d_view}.get(route_key, self._map_view)
+                  _SEG_3D: self._3d_view, _SEG_DEPTH: self._depth_view}.get(
+            route_key, self._map_view)
         self._view_stack.setCurrentWidget(widget)
+        if route_key == _SEG_DEPTH and not self._depth_payload_line_ids:
+            # 首次切到深度切片段：自动以当前勾选测线请求一次预览
+            checked = [str(t.line_id) for t in self._checked_tracks()]
+            if checked:
+                self.depth_preview_requested.emit(checked)
 
     def _refresh_views(self) -> None:
-        """勾选集合变化 → 三个视图同步重绘。"""
+        """勾选集合变化 → 四个视图同步重绘。"""
         tracks = self._checked_tracks()
         self._map_view.set_tracks(tracks, self._colors)
         self._profile_view.set_tracks(tracks, self._colors)
         self._3d_view.set_tracks(tracks, self._colors)
+        self._depth_view.set_tracks(tracks, self._colors)
 
     def _refresh_crs_card(self) -> None:
         """投影信息卡：坐标系 / EPSG / 数据来源（按轨迹摘要汇总）。"""
@@ -819,3 +897,17 @@ class SpatialPage(QWidget):
         line_id = self._selected_line_id()
         if line_id:
             self.current_line_requested.emit(line_id)
+
+    def _on_depth_slider_changed(self, value: int) -> None:
+        """滑条（0.01m 步进整数）→ 等值线 level + 数值标签。"""
+        depth_m = value / 100.0
+        self._depth_value_label.setText(f'深度: {depth_m:.2f} m')
+        self._depth_view.set_isoline(depth_m)
+
+    def _on_save_depth_layer_clicked(self) -> None:
+        """存为图层：发信号（line_ids, cell_size_m），页面不调 backend。"""
+        line_ids = list(self._depth_payload_line_ids)
+        if not line_ids or self._depth_view.value_range() is None:
+            return
+        self.save_depth_layer_requested.emit(
+            line_ids, float(self._depth_cell_size_m))

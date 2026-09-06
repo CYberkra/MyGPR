@@ -36,6 +36,9 @@ class ProjectController(QObject):
     preflight_ready = pyqtSignal(object)         # ImportPreflight
     preflight_failed = pyqtSignal(str)
     spatial_tracks_ready = pyqtSignal(list)      # list[SpatialTrack]
+    depth_preview_ready = pyqtSignal(object, list, float, int)  # payload, line_ids, cell_size_m, generation
+    depth_layer_saved = pyqtSignal(str, list, float)       # job_id, line_ids, cell_size_m
+    depth_save_failed = pyqtSignal(str)                    # message
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -45,6 +48,8 @@ class ProjectController(QObject):
         # 预览代数：每次发起新预览自增，worker 回包时若代数已过期则丢弃，
         # 防止快速切换测线时旧预览覆盖新预览。
         self._preview_generation = 0
+        # 深度切片预览代数：与数据/成果预览独立计数（不同预览域互不失效）。
+        self._depth_preview_generation = 0
 
     # ------------------------------------------------------------------
     def set_backend(self, backend_controller) -> None:
@@ -81,15 +86,16 @@ class ProjectController(QObject):
             self.log_message.emit("请先在主页打开或新建项目")
         return project_id
 
-    # ------------------------------------------------------------------
     def create_project(self, root: str, name: str, meta: dict) -> None:
         if self._busy:
             self.log_message.emit("操作进行中，请稍后…")
             return
-        meta = dict(meta or {})
+        # 新建项目同样切换项目上下文，使旧项目在途预览回包过期。
+        self._depth_preview_generation += 1
+        self._preview_generation += 1
         self._set_busy(True)
         run_command(
-            _CreateProjectCommand(self, root, name, meta),
+            _CreateProjectCommand(self, root, name, dict(meta or {})),
             name="mygpr-project-create",
         )
 
@@ -97,6 +103,10 @@ class ProjectController(QObject):
         if self._busy:
             self.log_message.emit("操作进行中，请稍后…")
             return
+        # 打开/切换项目前使旧项目在途预览回包过期（A→B 直切时 A 的
+        # 回包代数与新项目相同，不推进则门卫会放行旧 payload）。
+        self._depth_preview_generation += 1
+        self._preview_generation += 1
         self._set_busy(True)
         run_command(
             _OpenProjectCommand(self, root),
@@ -110,11 +120,18 @@ class ProjectController(QObject):
         if self._busy:
             self.log_message.emit("操作进行中，请稍后…")
             return
+        # 关闭前使在途预览回包过期，防止旧项目 payload 渲染进后续视图。
+        self._depth_preview_generation += 1
+        self._preview_generation += 1
         self._set_busy(True)
         run_command(
             _CloseProjectCommand(self, project_id),
             name="mygpr-project-close",
         )
+
+    def invalidate_depth_previews(self) -> None:
+        """使在途深度预览回包过期（项目关闭/测线变更等场景调用）。"""
+        self._depth_preview_generation += 1
 
     # ------------------------------------------------------------------
     def line_source_path(self, line_id: str) -> str | None:
@@ -179,7 +196,6 @@ class ProjectController(QObject):
             name="mygpr-spatial-tracks",
         )
 
-    # ------------------------------------------------------------------
     def preview_line(self, line_id: str) -> None:
         backend = self._backend()
         project_id = self._project_id_or_warn()
@@ -328,6 +344,60 @@ class ProjectController(QObject):
             name="mygpr-lines-delete",
         )
 
+    def request_depth_preview(self, line_ids: list[str], cell_size_m: float = 1.0) -> None:
+        """离线程请求界面深度切片预览；带代数 token，旧回包按代数丢弃。"""
+        backend = self._backend()
+        project_id = self._project_id_or_warn()
+        if backend is None or project_id is None:
+            return
+        line_ids = [str(lid) for lid in (line_ids or []) if lid]
+        if not line_ids:
+            return
+        self._depth_preview_generation += 1
+        run_command(
+            _DepthPreviewCommand(self, project_id, line_ids,
+                                 float(cell_size_m or 1.0),
+                                 self._depth_preview_generation),
+            name="mygpr-depth-preview",
+        )
+
+    def submit_depth_layer(self, line_ids: list[str], cell_size_m: float) -> str | None:
+        """提交网格化界面深度图层 job；bridge.watch 后经 depth_layer_saved 回 UI。"""
+        backend = self._backend()
+        bridge = self._job_bridge()
+        project_id = self._project_id_or_warn()
+        if backend is None or bridge is None or project_id is None:
+            return None
+        line_ids = [str(lid) for lid in (line_ids or []) if lid]
+        if not line_ids:
+            return None
+        try:
+            job_id = backend.submit_grid_layer(
+                project_id, line_ids, cell_size_m=float(cell_size_m or 1.0))
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.exception("深度图层提交失败")
+            message = friendly_error_message(exc)
+            self.log_message.emit(f"深度图层提交失败：{message}")
+            self.depth_save_failed.emit(message)
+            return None
+        self.log_message.emit(f"深度图层任务已提交：{job_id[:8]}…")
+        bridge.watch(job_id, title="网格化界面深度图层")
+
+        def _on_done(job_id_: str, success: bool, message: str, _result: object) -> None:
+            if job_id_ != job_id:
+                return
+            try:
+                self.job_completed.disconnect(_on_done)
+            except TypeError:
+                pass
+            if success:
+                self.depth_layer_saved.emit(job_id_, line_ids, float(cell_size_m or 1.0))
+            else:
+                self.depth_save_failed.emit(message or "深度图层任务失败")
+
+        self.job_completed.connect(_on_done)
+        return job_id
+
 
 # ------------------------------------------------------------------
 # Worker commands (replaces run_worker closures)
@@ -367,6 +437,9 @@ class _CreateProjectCommand:
             c.log_message.emit(f"新建项目失败：{message}")
             c.open_failed.emit(message)
         else:
+            # 与 _OpenProjectCommand 同理：项目上下文切换时刻推进代数。
+            c._depth_preview_generation += 1
+            c._preview_generation += 1
             c._current = summary
             c.log_message.emit(f"项目已创建：{summary.name}")
             c.project_opened.emit(summary)
@@ -401,6 +474,11 @@ class _OpenProjectCommand:
             c.log_message.emit(f"打开项目失败：{message}")
             c.open_failed.emit(message)
         else:
+            # 项目上下文真正切换的时刻再次推进代数：busy 窗口内发起的
+            # 预览请求仍指向旧项目，其回包代数可能与 open 前的推进撞车，
+            # 不在此推进则门卫会放行旧项目 payload。
+            c._depth_preview_generation += 1
+            c._preview_generation += 1
             c._current = summary
             c.log_message.emit(f"项目已打开：{summary.name}")
             c.project_opened.emit(summary)
@@ -428,6 +506,11 @@ class _CloseProjectCommand:
             _LOGGER.exception("关闭项目失败")
             c.log_message.emit(f"关闭项目失败：{friendly_error_message(exc)}")
         else:
+            # 与 open/create 成功路径同理：busy 窗口内发起的预览请求
+            # 仍指向本项目，close_current 的前置推进可被其自增抵消；
+            # 项目上下文清除时刻再次推进，确保 in-flight 回包全部过期。
+            c._depth_preview_generation += 1
+            c._preview_generation += 1
             c._current = None
             c.log_message.emit("项目已关闭")
             c.project_closed.emit()
@@ -657,6 +740,49 @@ class _DeleteLinesCommand:
         finally:
             c._set_busy(False)
             c.refresh_lines()
+
+
+class _DepthPreviewCommand:
+    """worker 线程执行 interface_depth_preview，结果经 depth_preview_ready 回 UI。"""
+
+    __slots__ = ("_controller", "_project_id", "_line_ids", "_cell_size_m", "_generation")
+
+    def __init__(
+        self,
+        controller: ProjectController,
+        project_id: str,
+        line_ids: list[str],
+        cell_size_m: float,
+        generation: int,
+    ) -> None:
+        self._controller = controller
+        self._project_id = project_id
+        self._line_ids = line_ids
+        self._cell_size_m = cell_size_m
+        self._generation = generation
+
+    def execute(self) -> None:
+        c = self._controller
+        backend = c._backend()
+        if backend is None:
+            return
+        try:
+            payload = backend.interface_depth_preview(
+                self._project_id,
+                self._line_ids,
+                cell_size_m=self._cell_size_m,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.exception("深度切片预览失败")
+            c.log_message.emit(f"深度切片预览失败：{friendly_error_message(exc)}")
+        else:
+            # 双层防护 ①：worker 线程先按代数丢弃明显过期的回包。
+            # 接收端还会按发射时快照的代数二次校验（close/open 推进
+            # 代数可能发生在 emit 排队之后、slot 执行之前）。
+            if c._depth_preview_generation != self._generation:
+                return
+            c.depth_preview_ready.emit(
+                payload, list(self._line_ids), self._cell_size_m, self._generation)
 
 
 __all__ = ["ProjectController"]

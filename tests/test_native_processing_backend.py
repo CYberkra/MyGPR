@@ -149,3 +149,35 @@ def test_file_backed_pipeline_cancellation_removes_workspace(tmp_path: Path) -> 
             context=context,
         )
     assert list((tmp_path / "workspace").iterdir()) == []
+
+
+def test_native_zero_time_headerless_raises_without_step_fallback() -> None:
+    request = ProcessingRequest(
+        data=_data(),
+        method_id="set_zero_time",
+        params={"new_zero_time": 5.0},
+        header_info={},
+    )
+
+    with pytest.raises(ValueError, match="时间基准"):
+        NativeProcessingExecutor().execute(request)
+
+
+def test_native_zero_time_falls_back_to_header_info_time_basis() -> None:
+    data = _data()
+    request = ProcessingRequest(
+        data=data,
+        method_id="set_zero_time",
+        params={"new_zero_time": 5.0},
+        header_info={"time_window_ns": 480.0},
+    )
+
+    result = NativeProcessingExecutor().execute(request)
+    step_s = 480.0e-9 / data.shape[0]
+    shift = int(round(5.0e-9 / step_s))
+    expected = np.zeros_like(data)
+    expected[:-shift] = data[shift:]
+
+    assert result.metadata["time_step_s"] == pytest.approx(step_s)
+    assert result.metadata["shift_samples"] == shift
+    np.testing.assert_allclose(result.data, expected, rtol=0.0, atol=0.0)

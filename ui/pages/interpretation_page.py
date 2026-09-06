@@ -57,12 +57,14 @@ class InterpretationPage(QWidget):
     redo_requested = pyqtSignal()
     save_requested = pyqtSignal()
     points_changed = pyqtSignal(list)      # 当前标注点列 [(trace, sample), ...]
+    velocity_requested = pyqtSignal(list)  # 拾取点 [(trace, sample), ...] → 速度分析
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._points = []           # [(trace_index, sample_index), ...] 原始数据坐标
         self._bundle = None         # 当前预览 bundle（取时间轴做深度换算）
         self._busy = False
+        self._velocity_running = False  # 提交后到回调前的在飞窗口，防重复提交
         self._session_active = False  # 会话未打开时禁用编辑按钮与 pick
         self._build_ui()
         self._connect_internal()
@@ -238,6 +240,23 @@ class InterpretationPage(QWidget):
             'color: %s; font-size: 11px;' % constants.COLOR_DISABLED)
         depth_layout.addWidget(formula_hint)
         layout.addWidget(depth_card)
+
+        # ---------------- 速度分析（Phase 2.1）
+        velocity_card = CardWidget(column)
+        velocity_layout = QVBoxLayout(velocity_card)
+        velocity_layout.setContentsMargins(*constants.CARD_MARGINS)
+        velocity_layout.setSpacing(constants.CARD_SPACING)
+        velocity_layout.addWidget(_card_title('速度分析'))
+        self._velocity_btn = PushButton('拟合速度模型', velocity_card)
+        self._velocity_btn.setToolTip(
+            '用当前标注点拟合绕射双曲线：t² = A·x² + B·x + C ⇒ v = 2/√A\n'
+            '需要 ≥3 个拾取点；结果写回测线速度模型并重算深度轴')
+        self._velocity_btn.setEnabled(False)  # 会话打开且点数足够后启用
+        velocity_layout.addWidget(self._velocity_btn)
+        self._velocity_result_label = CaptionLabel('尚未拟合', velocity_card)
+        self._velocity_result_label.setWordWrap(True)
+        velocity_layout.addWidget(self._velocity_result_label)
+        layout.addWidget(velocity_card)
         return column
 
     def _build_info_bar(self) -> CardWidget:
@@ -265,6 +284,8 @@ class InterpretationPage(QWidget):
         self._clear_points_btn.clicked.connect(self._on_clear_points)
         self._dielectric_spin.valueChanged.connect(
             lambda _v: self._refresh_points_table())
+        self._velocity_btn.clicked.connect(
+            lambda: self.velocity_requested.emit(list(self._points)))
 
     # ============================================================ 公共接口（供主窗口接线）
     def set_bundle(self, bundle) -> None:
@@ -309,6 +330,7 @@ class InterpretationPage(QWidget):
         self._bscan.set_overlay_points(self._points, _OVERLAY_COLOR)
         self._refresh_points_table()
         self._refresh_info()
+        self._update_edit_enabled()
 
     def set_busy(self, busy: bool) -> None:
         """忙态：禁用全部操作按钮；会话状态由 set_session_active 控制。"""
@@ -344,7 +366,50 @@ class InterpretationPage(QWidget):
                     self._undo_btn, self._redo_btn, self._save_btn,
                     self._remove_point_btn, self._clear_points_btn):
             btn.setEnabled(enabled)
+        # 速度分析还需 ≥3 个拾取点（双曲线 3 参数拟合下限）且不在飞
+        self._velocity_btn.setEnabled(
+            enabled and not self._velocity_running and len(self._points) >= 3)
         self._bscan.set_pick_enabled(enabled)
+
+    def set_velocity_running(self, running: bool) -> None:
+        """速度分析在飞态：提交后置 True，完成/失败回调置 False，防重复提交。"""
+        self._velocity_running = bool(running)
+        self._velocity_result_label.setText(
+            '拟合中…' if running else '尚未拟合')
+        self._update_edit_enabled()
+
+    def set_velocity_result(self, line_id: str, result: dict) -> None:
+        """速度分析完成 → 卡片显示拟合证据（v/εr/x0/z0/RMSE）。"""
+        self._velocity_running = False
+        self._update_edit_enabled()
+        body = (result or {}).get('evidence', {}).get('body', {}) \
+            if isinstance(result, dict) else {}
+        if not body:
+            self._velocity_result_label.setText('拟合完成（无证据返回）')
+            return
+        lines = [
+            '测线: %s' % (line_id or '--'),
+            '速度: %.4f m/ns (εr=%.2f)' % (
+                float(body.get('v_m_ns', 0.0)),
+                float(body.get('dielectric_constant', 0.0))),
+            '绕射点: x=%.2f m, z=%.2f m' % (
+                float(body.get('x0_m', 0.0)), float(body.get('z0_m', 0.0))),
+            'RMSE: %.3f ns | 拾取点: %d' % (
+                float(body.get('rmse_ns', 0.0)),
+                int(body.get('pick_count', 0))),
+        ]
+        self._velocity_result_label.setText('\n'.join(lines))
+
+    def set_velocity_failed(self, message: str) -> None:
+        """速度分析失败 → 卡片显示错误。
+
+        空串（或 coordinator 项目关闭重置）→ 恢复「尚未拟合」。
+        两种路径都解除在飞态，防止任务在飞时关项目导致按钮永久禁用。
+        """
+        self._velocity_running = False
+        self._update_edit_enabled()
+        self._velocity_result_label.setText(
+            ('拟合失败: %s' % message) if message else '尚未拟合')
 
     def _on_point_picked(self, trace: int, sample: int) -> None:
         """pick 点击追加点（原始数据坐标）→ overlay/列表刷新 + points_changed。"""
@@ -352,6 +417,7 @@ class InterpretationPage(QWidget):
         self._bscan.set_overlay_points(self._points, _OVERLAY_COLOR)
         self._refresh_points_table()
         self._refresh_info()
+        self._update_edit_enabled()
         self.points_changed.emit(list(self._points))
 
     def _on_remove_selected_point(self) -> None:
@@ -374,6 +440,7 @@ class InterpretationPage(QWidget):
         self._bscan.set_overlay_points(self._points, _OVERLAY_COLOR)
         self._refresh_points_table()
         self._refresh_info()
+        self._update_edit_enabled()
         self.points_changed.emit(list(self._points))
 
     # ---------------- 点列表与深度换算

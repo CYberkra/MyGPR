@@ -89,7 +89,7 @@ def method_kirchhoff_migration(
     depth=40.0,
     v=0.10,
     alpha=1.0,
-    weight=0.5,
+    weight=0.05,
     num_cal=1,
     topo_cor=0,
     hei_cor=0,

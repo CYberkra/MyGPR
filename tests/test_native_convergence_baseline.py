@@ -97,7 +97,6 @@ EQUIVALENCE_EVIDENCE: dict[str, tuple[str, str]] = {
     # tests/test_native_extended_processing.py — golden 摘要
     "time_cut": ("golden_digest", "test_native_extended_processing.py"),
     "trace_qc": ("golden_digest", "test_native_extended_processing.py"),
-    "equidistant_trace_resample": ("golden_digest", "test_native_extended_processing.py"),
     "energy_decay_gain": ("golden_digest", "test_native_extended_processing.py"),
     "amplitude_scale": ("golden_digest", "test_native_extended_processing.py"),
     "median_background_2D": ("golden_digest", "test_native_extended_processing.py"),
