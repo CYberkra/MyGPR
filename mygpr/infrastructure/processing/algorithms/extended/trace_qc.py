@@ -15,7 +15,7 @@ def method_trace_qc(
     data: np.ndarray,
     mode: str = "mark",
     empty_rms_threshold: float = 0.0,
-    spike_zscore: float = 0.0,
+    spike_zscore: float = 6.0,
     manual_trace_indices: str = "",
     trace_metadata: dict[str, np.ndarray] | None = None,
     **kwargs: Any,
@@ -43,7 +43,7 @@ def method_trace_qc(
     if empty_threshold > 0.0:
         bad_mask |= rms <= empty_threshold
 
-    zscore_threshold = to_float(spike_zscore, default=0.0)
+    zscore_threshold = to_float(spike_zscore, default=6.0)
     if zscore_threshold > 0.0 and arr.shape[1] >= 3:
         median = float(np.median(rms))
         mad = float(np.median(np.abs(rms - median)))
