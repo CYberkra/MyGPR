@@ -142,6 +142,15 @@ def constrain_auto_tune_params(
                 maximum=_wavelet_level_limit(n_samples, n_traces),
                 reason="wavelet_level_limit",
             )
+            _clamp_float_param(
+                method_key,
+                effective,
+                warnings,
+                parameter="threshold",
+                minimum=0.0,
+                maximum=1.0,
+                reason="wavelet_threshold_multiplier_range",
+            )
     elif method_key == "hankel_svd":
         _clamp_int_param(
             method_key,

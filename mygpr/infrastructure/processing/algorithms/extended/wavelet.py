@@ -108,7 +108,7 @@ def method_wavelet_2d(
     data: np.ndarray,
     wavelet: str = "db4",
     levels: int = 2,
-    threshold: float = 0.1,
+    threshold: float = 1.0,
     threshold_strategy: str = DEFAULT_THRESHOLD_STRATEGY,
     threshold_mode: str = "soft",
     **kwargs: Any,
@@ -148,15 +148,22 @@ def method_wavelet_2d(
 def method_wavelet_svd(
     data: np.ndarray,
     wavelet: str = "db4",
-    levels: int = 3,
-    threshold: float = 0.1,
-    rank_start: int = 2,
-    rank_end: int = 40,
+    levels: int = 2,
+    threshold: float = 1.0,
+    rank_start: int = 1,
+    rank_end: int = 2,
     threshold_strategy: str = DEFAULT_THRESHOLD_STRATEGY,
     threshold_mode: str = "soft",
+    svd_mode: str = "keep",
     **kwargs: Any,
 ) -> tuple[np.ndarray, dict[str, Any]]:
-    del kwargs
+    if svd_mode not in ("keep", "remove"):
+        raise ValueError(f"svd_mode 必须是 'keep' 或 'remove'，收到: {svd_mode!r}")
+    rank_start = max(1, int(rank_start))
+    rank_end = max(rank_start, int(rank_end))
+    if svd_mode == "remove":
+        rank_start = 2
+        rank_end = max(2, rank_end)
     pywt = _require_pywt()
     arr = np.asarray(data, dtype=np.float64)
     if arr.ndim != 2:
@@ -176,6 +183,12 @@ def method_wavelet_svd(
             "solver": "exact",
         },
     )
+    if svd_mode == "remove":
+        # 论文口径：从近似系数中剔除 SVD 第一主分量（直达波/背景趋势），
+        # 即 subspace 返回 rank_start=2..rank_end 的投影与"置零分量1"逐位一致。
+        svd_mode_meta = "removed_rank1"
+    else:
+        svd_mode_meta = "kept"
     detail_only = [np.asarray(approximation, dtype=np.float64), *coeffs[1:]]
     filtered, threshold_metadata = _threshold_details(
         detail_only,
@@ -195,7 +208,7 @@ def method_wavelet_svd(
         "rank_end": int(rank_end),
         "threshold_mode": threshold_mode,
         "threshold_strategy": strategy,
-        "svd_solver": svd_meta.get("solver", "exact"),
+        "svd_mode": svd_mode_meta,
         **threshold_metadata,
     }
 
