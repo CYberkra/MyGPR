@@ -498,6 +498,7 @@ class SpatialPage(QWidget):
         self._view_stack.addWidget(self._profile_view)
         self._view_stack.addWidget(self._3d_view)
         self._view_stack.addWidget(self._depth_view)
+        view_layout.addWidget(self._view_stack, 1)
 
         # 深度切片控制行：深度滑条（0.01m 步进，整数 ×100 映射）+ 数值 + 存为图层
         depth_row = QHBoxLayout()

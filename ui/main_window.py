@@ -241,6 +241,13 @@ class MyGPRMainWindow(FluentWindow):
                     min(constants.WINDOW_HEIGHT, max_h))
         self.setMinimumSize(min(constants.WINDOW_MIN_WIDTH, max_w),
                             min(constants.WINDOW_MIN_HEIGHT, max_h))
+        # Windows 默认级联放置会把新窗口不断往右下推；窗口接近屏宽时
+        # 右缘会伸出屏幕，屏外部分不渲染（整块黑），看起来像"界面被压缩"。
+        # 显式居中到可用桌面，保证窗口完整落在屏内。
+        if available is not None and available.width() > 0:
+            frame = self.frameGeometry()
+            frame.moveCenter(available.center())
+            self.move(frame.topLeft())
         self.setWindowIcon(QIcon(constants.APP_ICON_PATH))
         self.navigationInterface.setExpandWidth(constants.NAV_EXPAND_WIDTH)
 
