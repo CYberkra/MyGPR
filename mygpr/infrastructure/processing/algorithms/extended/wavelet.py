@@ -1,6 +1,6 @@
-"""Optional native wavelet and wavelet-SVD denoising.
+"""Optional native wavelet denoising.
 
-PyWavelets is imported only when one of these methods executes so the complete
+PyWavelets is imported only when this method executes so the complete
 backend remains importable on CPU-only/minimal installations.
 """
 from __future__ import annotations
@@ -145,77 +145,8 @@ def method_wavelet_2d(
     }
 
 
-def method_wavelet_svd(
-    data: np.ndarray,
-    wavelet: str = "db4",
-    levels: int = 2,
-    threshold: float = 1.0,
-    rank_start: int = 1,
-    rank_end: int = 2,
-    threshold_strategy: str = DEFAULT_THRESHOLD_STRATEGY,
-    threshold_mode: str = "soft",
-    svd_mode: str = "keep",
-    **kwargs: Any,
-) -> tuple[np.ndarray, dict[str, Any]]:
-    if svd_mode not in ("keep", "remove"):
-        raise ValueError(f"svd_mode 必须是 'keep' 或 'remove'，收到: {svd_mode!r}")
-    rank_start = max(1, int(rank_start))
-    rank_end = max(rank_start, int(rank_end))
-    if svd_mode == "remove":
-        rank_start = 2
-        rank_end = max(2, rank_end)
-    pywt = _require_pywt()
-    arr = np.asarray(data, dtype=np.float64)
-    if arr.ndim != 2:
-        raise ValueError(f"输入数据必须是2维数组，当前 shape={arr.shape}")
-    if threshold_mode not in {"soft", "hard"}:
-        threshold_mode = "soft"
-    max_level = pywt.dwtn_max_level(arr.shape, wavelet)
-    actual_levels = max(1, min(int(levels), max_level if max_level > 0 else 1))
-    resolved_threshold = float(np.clip(threshold, 0.0, 1.0))
-    strategy = _resolve_threshold_strategy(threshold_strategy)
-    coeffs = pywt.wavedec2(arr, wavelet=wavelet, level=actual_levels)
-    approximation, svd_meta = method_svd_subspace_native(
-        coeffs[0],
-        {
-            "rank_start": int(rank_start),
-            "rank_end": min(int(rank_end), min(coeffs[0].shape)),
-            "solver": "exact",
-        },
-    )
-    if svd_mode == "remove":
-        # 论文口径：从近似系数中剔除 SVD 第一主分量（直达波/背景趋势），
-        # 即 subspace 返回 rank_start=2..rank_end 的投影与"置零分量1"逐位一致。
-        svd_mode_meta = "removed_rank1"
-    else:
-        svd_mode_meta = "kept"
-    detail_only = [np.asarray(approximation, dtype=np.float64), *coeffs[1:]]
-    filtered, threshold_metadata = _threshold_details(
-        detail_only,
-        arr=arr,
-        threshold=resolved_threshold,
-        threshold_strategy=strategy,
-        threshold_mode=threshold_mode,
-        pywt=pywt,
-    )
-    reconstructed = pywt.waverec2(filtered, wavelet)[: arr.shape[0], : arr.shape[1]]
-    return reconstructed.astype(np.float32, copy=False), {
-        "method": "wavelet_svd",
-        "wavelet": wavelet,
-        "levels": actual_levels,
-        "threshold": resolved_threshold,
-        "rank_start": int(rank_start),
-        "rank_end": int(rank_end),
-        "threshold_mode": threshold_mode,
-        "threshold_strategy": strategy,
-        "svd_mode": svd_mode_meta,
-        **threshold_metadata,
-    }
-
-
 __all__ = [
     "DEFAULT_THRESHOLD_STRATEGY",
     "LEGACY_THRESHOLD_STRATEGY",
     "method_wavelet_2d",
-    "method_wavelet_svd",
 ]

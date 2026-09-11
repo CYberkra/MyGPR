@@ -122,62 +122,6 @@ def _build_candidate_trials(
                 if int(rank_end) >= rank_start:
                     trials.append({"rank_start": rank_start, "rank_end": int(rank_end)})
             return _dedupe_candidates(trials)
-        if method_key == "wavelet_svd":
-            rank_start_default = config.get("rank_start", [1])
-            if isinstance(rank_start_default, list):
-                rank_start_default = rank_start_default[0] if rank_start_default else 1
-            rank_start = int(base_params.get("rank_start", rank_start_default))
-            rank_end_values = _build_subspace_rank_end_candidates(
-                data,
-                context,
-                config,
-                base_value=base_params.get("rank_end"),
-                stage=stage,
-                budget=max(2, stage_budget // 2),
-            )
-            threshold_default = float(base_params.get("threshold", 1.0))
-            threshold_values = _trim_numeric_candidates(
-                _sanitize_float_candidates(
-                    list(config.get("threshold", []))
-                    + [
-                        threshold_default * 0.7,
-                        threshold_default,
-                        threshold_default * 1.3,
-                    ],
-                    minimum=0.01,
-                ),
-                budget=max(2, min(3, stage_budget)),
-                center=threshold_default,
-            )
-            levels_default = int(base_params.get("levels", 2))
-            levels_values = _trim_numeric_candidates(
-                _sanitize_int_candidates(
-                    list(config.get("levels", []))
-                    + [levels_default - 1, levels_default, levels_default + 1],
-                    data.shape[0],
-                    minimum=1,
-                    upper=8,
-                ),
-                budget=max(1, min(3, stage_budget)),
-                center=levels_default,
-            )
-            wavelet_name = str(base_params.get("wavelet", "db4"))
-            trials = []
-            for rank_end, threshold, levels in itertools.product(
-                rank_end_values, threshold_values, levels_values
-            ):
-                if int(rank_end) >= rank_start:
-                    trials.append(
-                        {
-                            "wavelet": wavelet_name,
-                            "levels": int(levels),
-                            "threshold": float(threshold),
-                            "rank_start": rank_start,
-                            "rank_end": int(rank_end),
-                        }
-                    )
-            return _dedupe_candidates(trials)
-    if family == "gain":
         if method_key == "sec_gain":
             gain_min_default = config.get("gain_min", 1.0)
             if isinstance(gain_min_default, list):

@@ -214,68 +214,6 @@ def _refine_candidate_trials(
                             "_seed_rank": seed_rank,
                         }
                     )
-        elif (
-            family == "denoise" and method_key == "wavelet_svd" and "rank_end" in params
-        ):
-            center = int(params["rank_end"])
-            rank_start = int(params.get("rank_start", 1))
-            rank_limit = max(rank_start, min(data.shape))
-            rank_values = _sanitize_int_candidates(
-                [
-                    int(round(center * 0.80)),
-                    int(round(center * 0.90)),
-                    center,
-                    int(round(center * 1.10)),
-                    int(round(center * 1.20)),
-                ],
-                rank_limit,
-                minimum=rank_start,
-                upper=rank_limit,
-            )
-            rank_values = _trim_numeric_candidates(
-                rank_values, budget=max(2, plan["fine_budget"] // 2), center=center
-            )
-            threshold_center = float(params.get("threshold", 0.05))
-            threshold_values = _trim_numeric_candidates(
-                _sanitize_float_candidates(
-                    [
-                        threshold_center * 0.8,
-                        threshold_center * 0.95,
-                        threshold_center,
-                        threshold_center * 1.1,
-                        threshold_center * 1.25,
-                    ],
-                    minimum=0.01,
-                ),
-                budget=max(2, min(3, plan["fine_budget"])),
-                center=threshold_center,
-            )
-            levels_center = int(params.get("levels", 2))
-            levels_values = _trim_numeric_candidates(
-                _sanitize_int_candidates(
-                    [levels_center - 1, levels_center, levels_center + 1],
-                    data.shape[0],
-                    minimum=1,
-                    upper=8,
-                ),
-                budget=max(1, min(3, plan["fine_budget"])),
-                center=levels_center,
-            )
-            wavelet_name = str(params.get("wavelet", "db4"))
-            for rank_end, threshold, levels in itertools.product(
-                rank_values, threshold_values, levels_values
-            ):
-                if int(rank_end) >= rank_start:
-                    refined.append(
-                        {
-                            "wavelet": wavelet_name,
-                            "levels": int(levels),
-                            "threshold": float(threshold),
-                            "rank_start": rank_start,
-                            "rank_end": int(rank_end),
-                            "_seed_rank": seed_rank,
-                        }
-                    )
         elif family == "gain" and method_key == "sec_gain":
             center_gain = float(params.get("gain_max", 5.0))
             center_power = float(params.get("power", 1.0))

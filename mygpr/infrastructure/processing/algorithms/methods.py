@@ -23,12 +23,13 @@ from mygpr.infrastructure.processing.algorithms.extended import (
     native_ccbs,
     native_energy_decay_gain,
     native_hilbert_envelope,
+    native_inverse_q,
     native_median_background,
+    native_mixed_phase_deconvolution,
     native_time_cut,
     native_time_to_depth,
     native_trace_qc,
     native_wavelet_2d,
-    native_wavelet_svd,
 )
 from mygpr.infrastructure.processing.algorithms.frequency import method_frequency_filter
 from mygpr.infrastructure.processing.algorithms.global_spectral import (
@@ -144,12 +145,6 @@ NATIVE_ALGORITHMS: dict[str, NativeAlgorithm] = {
         implementation_version="native-extended-1.0", auto_tune_family="denoise", auto_tune_stage="denoise",
         parameter_schema=_schema(wavelet={"type": "str", "default": "db4"}, levels={"type": "int", "default": 2, "min": 1}, threshold={"type": "float", "default": 1.0, "min": 0.0, "max": 1.0}, threshold_strategy={"type": "str", "default": "mad_universal"}),
         memory_multiplier=8.0, temporary_multiplier=3.0, relative_cost="high",
-    ),
-    "wavelet_svd": NativeAlgorithm(
-        "wavelet_svd", "Wavelet-SVD denoising", "denoise", native_wavelet_svd, "global",
-        implementation_version="native-extended-1.0", auto_tune_family="denoise", auto_tune_stage="denoise",
-        memory_multiplier=10.0, temporary_multiplier=4.0, relative_cost="very_high",
-        parameter_schema=_schema(wavelet={"type": "str", "default": "db4"}, levels={"type": "int", "default": 2, "min": 1}, threshold={"type": "float", "default": 1.0, "min": 0.0, "max": 1.0}, threshold_strategy={"type": "str", "default": "mad_universal"}, rank_start={"type": "int", "default": 1, "min": 1}, rank_end={"type": "int", "default": 2, "min": 1}, svd_mode={"type": "str", "default": "keep", "choices": ["keep", "remove"]}),
     ),
     "hilbert_envelope": NativeAlgorithm(
         "hilbert_envelope", "Hilbert envelope", "attribute", native_hilbert_envelope, "columns",
@@ -381,6 +376,29 @@ NATIVE_ALGORITHMS: dict[str, NativeAlgorithm] = {
         implementation_version="native-global-1.0",
         parameter_schema=_schema(lam={"type": "float", "default": 0.08}, mu={"type": "float", "default": 0.0}, max_iter={"type": "int", "default": 120}, tol={"type": "float", "default": 1e-6}),
         memory_multiplier=9.0, temporary_multiplier=3.0, relative_cost="very_high",
+    ),
+    "mixed_phase_deconvolution": NativeAlgorithm(
+        "mixed_phase_deconvolution", "混合相位反褶积 (Schmelzbach 2015)", "denoise", native_mixed_phase_deconvolution, "loaded_global",
+        implementation_version="native-extended-1.0", auto_tune_family="denoise", auto_tune_stage="denoise",
+        parameter_schema=_schema(
+            operator_length={"type": "int", "default": 35, "min": 5},
+            supertrace_traces={"type": "int", "default": 11, "min": 3},
+            prewhitening={"type": "float", "default": 0.1, "min": 0.0, "max": 0.1},
+            window_start_ns={"type": "float", "default": 0.0},
+            window_end_ns={"type": "float", "default": 0.0},
+            rotation_step_deg={"type": "float", "default": 5.0, "min": 1.0, "max": 45.0},
+            apply_phase_rotation={"type": "bool", "default": True},
+        ),
+        memory_multiplier=4.0, temporary_multiplier=1.0, relative_cost="medium",
+    ),
+    "inverse_q": NativeAlgorithm(
+        "inverse_q", "Inverse-Q 衰减补偿 (Wang 2002)", "filter", native_inverse_q, "loaded_global",
+        implementation_version="native-extended-1.0", auto_tune_family="filter", auto_tune_stage="frequency",
+        parameter_schema=_schema(
+            q_value={"type": "float", "default": 50.0, "min": 1.0},
+            gain_limit_db={"type": "float", "default": 40.0, "min": 10.0, "max": 100.0},
+        ),
+        memory_multiplier=4.0, temporary_multiplier=1.0, relative_cost="medium",
     ),
 
 }

@@ -111,7 +111,7 @@ class ProcessingService:
             if "global_transform" in descriptor.capabilities:
                 multiplier = max(multiplier, 8)
                 notes.append(f"global transform: {step.method_id}")
-            elif step.method_id in {"svd_bg", "svd_subspace", "wavelet_svd", "hankel_svd", "rpca_background"}:
+            elif step.method_id in {"svd_bg", "svd_subspace", "hankel_svd", "rpca_background"}:
                 multiplier = max(multiplier, 6)
                 notes.append(f"high-memory method: {step.method_id}")
         return ResourceEstimate(

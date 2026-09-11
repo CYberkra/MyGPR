@@ -157,7 +157,6 @@ def load_gpr_csv(
 
 OPTIONAL_METHOD_DEPENDENCIES = {
     "wavelet_2d": [("pywt", "PyWavelets")],
-    "wavelet_svd": [("pywt", "PyWavelets")],
 }
 
 

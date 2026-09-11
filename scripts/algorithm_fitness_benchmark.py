@@ -184,6 +184,73 @@ def scene_envelope() -> tuple[np.ndarray, dict]:
     return data, meta
 
 
+def scene_deconv_sparse() -> tuple[np.ndarray, dict]:
+    """稀疏反射率 + 90° 混合相位子波, 留反射率参考考核反褶积脉冲化与相位校正。"""
+    from scipy.signal import hilbert as _hilbert
+
+    samples, traces = 400, 30
+    dt_ns = 1.4
+    rng = np.random.default_rng(20260909)
+    reflectivity = np.zeros((samples, traces), dtype=np.float64)
+    rows = rng.integers(40, samples - 40, size=traces * 4)
+    cols = rng.integers(0, traces, size=traces * 4)
+    signs = rng.choice([-1.0, 1.0], size=traces * 4)
+    for r, c, s in zip(rows, cols, signs):
+        reflectivity[r, c] += s * rng.uniform(0.5, 1.0)
+    t = np.arange(samples, dtype=np.float64)
+    ricker = (1.0 - 2.0 * ((t - 100.0) / 12.0) ** 2) * np.exp(
+        -(((t - 100.0) / 12.0) ** 2)
+    )
+    mixed_phase = np.imag(_hilbert(ricker))  # 90° 旋转 → 混合相位
+    clean = np.zeros_like(reflectivity)
+    for c in range(traces):
+        clean[:, c] = np.convolve(reflectivity[:, c], mixed_phase, mode="same")
+    noisy = clean + 0.02 * rng.normal(size=clean.shape)
+    meta = _meta(samples * dt_ns, 0.09)
+    meta["clean_reference"] = clean
+    meta["reflectivity_reference"] = reflectivity
+    meta["time_step_ns"] = dt_ns
+    return noisy, meta
+def scene_inverse_q() -> tuple[np.ndarray, dict]:
+    """constant-Q 衰减合成, 考核 inverse-q 深部能量补偿 (无干净参考, 用钳制语义)。"""
+    samples, traces = 256, 96
+    dt_ns = 1.4
+    q_true = 40.0
+    rng = np.random.default_rng(20260910)
+    t = np.arange(samples, dtype=np.float64)[:, None] * dt_ns
+    freqs = np.fft.rfftfreq(samples, d=dt_ns * 1e-9)
+    data = np.zeros((samples, traces), dtype=np.float64)
+    for c in range(traces):
+        center = 40.0 + 1.2 * c
+        pulse = (1.0 - 2.0 * ((t[:, 0] - center) / 14.0) ** 2) * np.exp(
+            -((t[:, 0] - center) / 14.0) ** 2
+        )
+        data[:, c] = pulse + 0.04 * rng.normal(0.0, 1.0, samples)
+    spectrum = np.fft.rfft(data, axis=0)
+    t_s = np.arange(samples, dtype=np.float64)[:, None] * dt_ns * 1e-9
+    f_ref = 0.5 * float(freqs[-1])
+    rows = t_s * freqs[None, :]
+    attenuation = np.exp(-np.pi * rows / q_true) * np.exp(
+        -1j * 2.0 * rows / q_true * np.log(np.maximum(freqs / f_ref, 1e-30))[None, :]
+    )
+    k_idx = np.arange(spectrum.shape[0], dtype=np.float64)
+    out = np.empty_like(data)
+    for start in range(0, samples, 32):
+        stop = min(samples, start + 32)
+        n_block = np.arange(start, stop)[:, None]
+        basis = np.exp(1j * 2.0 * np.pi * n_block * k_idx[None, :] / samples)
+        weights = attenuation[start:stop] * basis
+        out[start:stop] = 2.0 * np.real(weights @ spectrum) / samples
+        out[start:stop] -= (
+            np.real(attenuation[start:stop, 0][:, None] * spectrum[0][None, :]) / samples
+        )
+    out += 0.008 * rng.normal(size=out.shape)
+    meta = _meta(samples * dt_ns, 0.09)
+    meta["time_step_ns"] = dt_ns
+    meta["q_true"] = q_true
+    return out, meta
+
+
 SCENES = {
     "zero_time": scene_zero_time,
     "drift": scene_drift,
@@ -194,6 +261,8 @@ SCENES = {
     "fk_dip": scene_fk_dip,
     "migration": scene_migration,
     "envelope": scene_envelope,
+    "deconv_sparse": scene_deconv_sparse,
+    "inverse_q": scene_inverse_q,
 }
 
 
@@ -263,8 +332,10 @@ TASKS = [
     ("fk_dip", "fk_filter", {}, "filter"),
     # --- 去噪族 (denoise_snr scene) ---
     ("denoise_snr", "wavelet_2d", {}, "denoise"),
-    ("denoise_snr", "wavelet_svd", {}, "denoise"),
     ("denoise_snr", "svd_subspace", {}, "denoise"),
+    # --- 反褶积/衰减补偿族 ---
+    ("deconv_sparse", "mixed_phase_deconvolution", {"operator_length": 35, "supertrace_traces": 11, "prewhitening": 0.1}, "deconv"),
+    ("inverse_q", "inverse_q", {"q_value": 40.0, "gain_limit_db": 40.0}, "decomp"),
     ("denoise_snr", "hankel_svd", {"aggressiveness": 0.5}, "denoise"),
     ("denoise_snr", "trace_median_filter", {"window_traces": 5}, "denoise"),
     ("denoise_snr", "trace_savgol_filter", {"window_traces": 7, "polyorder": 2}, "denoise"),
@@ -571,6 +642,56 @@ def _score_task(scene, method, before, after, out, meta, res_meta, warnings) -> 
         acc = np.mean([1.0 if min(abs(p - r) for r in rows) <= 2 else 0.0 for p in peaks])
         comps.append(acc)
         detail["peak_accuracy"] = acc
+
+    if method == "mixed_phase_deconvolution":
+        # 反褶积评分: 全局峭度提升 (脉冲化, 主指标) + 逐道 |corr(reflectivity)| 中位数提升 (次指标)
+        refl = meta.get("reflectivity_reference")
+        def _global_kurtosis(arr):
+            arr = arr - arr.mean()
+            return float((arr**4).mean() / max((arr**2).mean() ** 2, 1e-30))
+
+        k_before = _global_kurtosis(before)
+        k_after = _global_kurtosis(after)
+        comps.append(_clamp01((k_after / max(k_before, 1e-30)) / 3.0))
+        if refl is not None:
+            def per_trace_corr(a):
+                a = a - a.mean(axis=0, keepdims=True)
+                b = refl - refl.mean(axis=0, keepdims=True)
+                num = np.sum(a * b, axis=0)
+                den = np.sqrt(np.sum(a * a, axis=0) * np.sum(b * b, axis=0))
+                return np.abs(num / np.maximum(den, 1e-30))
+
+            before_med = float(np.median(per_trace_corr(before)))
+            after_med = float(np.median(per_trace_corr(after)))
+            if _finite(after_med) and _finite(before_med) and after_med > before_med:
+                comps.append(_clamp01((after_med - before_med) / 0.012))
+            detail.update({"corr_before": before_med, "corr_after": after_med})
+        meta_kurt = res_meta.get("kurtosis")
+        if _finite(meta_kurt):
+            detail.update({"kurtosis": meta_kurt})
+
+    if method == "inverse_q":
+        # 评分: 深部能量恢复 (后半窗) + 包络增益封顶遵守钳制 + 输出有限
+        half = before.shape[0] // 2
+
+        def band_energy(arr):
+            spec = np.abs(np.fft.rfft(arr[half:, :] - arr[half:, :].mean(axis=0), axis=0)) ** 2
+            return float(np.sum(spec))
+
+        e_before = band_energy(before)
+        e_after = band_energy(after)
+        if _finite(e_after) and _finite(e_before) and e_before > 0:
+            comps.append(_clamp01(e_after / e_before / 30.0))  # 30x 能量增益 = 满分
+        # 振幅钳制: 输出包络不超过输入的 10^(limit/20) x 1.5 (跨频点泄漏容差)
+        from scipy.signal import hilbert as _hb
+
+        env_b = np.abs(_hb(before[half:, :], axis=0))
+        env_a = np.abs(_hb(after[half:, :], axis=0))
+        limit_db = res_meta.get("gain_limit_db", 40.0)
+        cap = 10.0 ** (float(limit_db) / 20.0) if _finite(limit_db) else 100.0
+        peak_gain = float(np.max(env_a) / max(np.max(env_b), 1e-30))
+        comps.append(_clamp01(1.0 if peak_gain < cap * 1.5 else 0.0))
+        detail.update({"deep_energy_gain": e_after / max(e_before, 1e-30), "peak_gain": peak_gain})
 
     if not comps:
         # 兜底: 有限输出 + 非平凡变化 → 0.5

@@ -30,16 +30,13 @@ from PythonModule.trace_savgol_filter import method_trace_savgol_filter as metho
 from PythonModule.svd_subspace import method_svd_subspace as method_svd_subspace  # explicit re-export
 
 _method_wavelet_2d: Any
-_method_wavelet_svd: Any
 
 try:
     import pywt as _pywt  # noqa: F401
     from PythonModule.wavelet_2d import method_wavelet_2d as _imported_method_wavelet_2d
-    from PythonModule.wavelet_svd import method_wavelet_svd as _imported_method_wavelet_svd
 
     HAS_PYWAVELETS = True
     _method_wavelet_2d = _imported_method_wavelet_2d
-    _method_wavelet_svd = _imported_method_wavelet_svd
 except ModuleNotFoundError as e:
     if e.name != "pywt":
         raise
@@ -51,16 +48,9 @@ except ModuleNotFoundError as e:
             "Wavelet 2D 去噪需要安装 PyWavelets。请执行: pip install PyWavelets"
         )
 
-    def _missing_wavelet_svd(*args, **kwargs):
-        raise ImportError(
-            "Wavelet-SVD 需要安装 PyWavelets。请执行: pip install PyWavelets"
-        )
-
     # Preserve the historical compatibility identity exposed by core.methods_registry.
     _missing_wavelet_2d.__module__ = "core.methods_registry"
-    _missing_wavelet_svd.__module__ = "core.methods_registry"
     _method_wavelet_2d = _missing_wavelet_2d
-    _method_wavelet_svd = _missing_wavelet_svd
 
 
 from PythonModule.dewow import method_dewow as method_dewow  # explicit re-export

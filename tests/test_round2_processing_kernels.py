@@ -33,7 +33,6 @@ from PythonModule.svd_background import method_svd_background
 from PythonModule.time_cut import method_time_cut
 from PythonModule.trace_qc import method_trace_qc
 from PythonModule.wavelet_2d import method_wavelet_2d
-from PythonModule.wavelet_svd import method_wavelet_svd
 from PythonModule.wnnm_placeholder import method_wnnm_placeholder
 
 
@@ -630,37 +629,6 @@ def test_method_wavelet_2d_keeps_contract_and_reduces_impulse_noise_energy():
     assert abs(float(result[21, 17])) < abs(float(raw[21, 17]))
 
 
-def test_method_wavelet_svd_keeps_contract_and_reduces_impulse_noise_energy():
-    rng = np.random.default_rng(11)
-    rows, cols = 32, 24
-    base = np.sin(np.linspace(0.0, 4.0 * np.pi, rows, dtype=np.float32))[:, None]
-    raw = np.repeat(base, cols, axis=1)
-    raw = raw + 0.05 * rng.standard_normal(size=raw.shape).astype(np.float32)
-    raw[10, 6] += 3.0
-    raw[25, 19] -= 2.2
-    expected_levels = max(1, min(2, pywt.dwtn_max_level(raw.shape, "db4")))
-
-    result, meta = method_wavelet_svd(
-        raw,
-        levels=2,
-        threshold=0.08,
-        rank_start=1,
-        rank_end=6,
-    )
-
-    assert result.shape == raw.shape
-    assert result.dtype == np.float32
-    assert isinstance(meta, dict)
-    assert meta["method"] == "wavelet_svd"
-    assert meta["wavelet"] == "db4"
-    assert meta["levels"] == expected_levels
-    assert meta["threshold"] == 0.08
-    assert meta["rank_start"] == 1
-    assert meta["rank_end"] == 6
-    assert abs(float(result[10, 6])) < abs(float(raw[10, 6]))
-    assert abs(float(result[25, 19])) < abs(float(raw[25, 19]))
-
-
 def test_method_wavelet_2d_uses_mad_universal_strategy_by_default():
     rng = np.random.default_rng(0)
     raw = rng.normal(0.0, 1.0, size=(64, 48)).astype(np.float32)
@@ -685,41 +653,6 @@ def test_method_wavelet_2d_supports_legacy_global_threshold_fallback():
         raw,
         levels=2,
         threshold=0.12,
-        threshold_strategy="global_fraction",
-    )
-
-    assert meta["threshold_strategy"] == "global_fraction"
-    assert isinstance(meta["global_abs_threshold"], (int, float))
-    assert float(meta["global_abs_threshold"]) > 0.0
-    assert "detail_thresholds" not in meta
-
-
-def test_method_wavelet_svd_uses_mad_universal_strategy_by_default():
-    rng = np.random.default_rng(2)
-    raw = rng.normal(0.0, 1.0, size=(64, 48)).astype(np.float32)
-
-    _, meta = method_wavelet_svd(raw, levels=2, threshold=0.08, rank_start=1, rank_end=6)
-
-    assert meta["threshold_strategy"] == "mad_universal"
-    assert isinstance(meta["estimated_sigma"], (int, float))
-    estimated_sigma = float(meta["estimated_sigma"])
-    detail_thresholds = meta["detail_thresholds"]
-    assert estimated_sigma > 0.0
-    assert isinstance(detail_thresholds, list)
-    assert len(detail_thresholds) == meta["levels"]
-    assert all(float(item["abs_threshold"]) > 0.0 for item in detail_thresholds)
-
-
-def test_method_wavelet_svd_supports_legacy_global_threshold_fallback():
-    rng = np.random.default_rng(3)
-    raw = rng.normal(0.0, 1.0, size=(64, 48)).astype(np.float32)
-
-    _, meta = method_wavelet_svd(
-        raw,
-        levels=2,
-        threshold=0.08,
-        rank_start=1,
-        rank_end=6,
         threshold_strategy="global_fraction",
     )
 
