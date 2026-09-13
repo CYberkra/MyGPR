@@ -56,7 +56,47 @@ def test_connect_job_bridge_pins_all_three_signals() -> None:
 
 def test_coordinator_line_state_attribute_exists() -> None:
     """coordinator 必须保留 _current_line_id 状态并经 current_line_id() 暴露。"""
-    pc = PageCoordinator.__new__(PageCoordinator)
+    class _StubWindow:
+        _backend_ready = True
+        backend_controller = None
+        project_controller = None
+        processing_controller = None
+        interpretation_controller = None
+        delivery_controller = None
+        settings = None
+        log_panel = None
+
+        def _page(self, name):
+            return None
+
+        def _infobar(self, *args):
+            return None
+
+        def log_message(self, msg):
+            return None
+
+        def _goto_page(self, name):
+            return None
+
+        def _show_new_project_dialog(self):
+            return None
+
+        def _open_project_dialog(self):
+            return None
+
+        def _current_project_id(self):
+            return None
+
+        def _require_project(self):
+            return False
+
+        def _require_line(self):
+            return ''
+
+        def _job_bridge(self):
+            return None
+
+    pc = PageCoordinator(_StubWindow())
     pc._current_line_id = 'L03'
     assert pc.current_line_id() == 'L03'
 

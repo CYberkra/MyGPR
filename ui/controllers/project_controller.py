@@ -138,6 +138,11 @@ class ProjectController(QObject):
         """使在途深度预览回包过期（项目关闭/测线变更等场景调用）。"""
         self._depth_preview_generation += 1
 
+    @property
+    def depth_preview_generation(self) -> int:
+        """深度预览当前代数（只读）：接线层交付门卫用，推进只在本类内部。"""
+        return self._depth_preview_generation
+
     # ------------------------------------------------------------------
     def line_source_path(self, line_id: str) -> None:
         """异步查询当前项目某测线的源数据文件路径（右键菜单"复制路径/
@@ -429,7 +434,7 @@ class ProjectController(QObject):
             if job_id_ != job_id:
                 return
             try:
-                self.job_completed.disconnect(_on_done)
+                bridge.job_completed.disconnect(_on_done)
             except TypeError:
                 pass
             if success:
@@ -437,7 +442,7 @@ class ProjectController(QObject):
             else:
                 self.depth_save_failed.emit(message or "深度图层任务失败")
 
-        self.job_completed.connect(_on_done)
+        bridge.job_completed.connect(_on_done)
         return job_id
 
 

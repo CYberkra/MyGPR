@@ -17,8 +17,7 @@ import math
 import os
 
 import numpy as np
-import pyqtgraph as pg
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QObject, QRunnable, Qt, QThreadPool, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QIcon, QPixmap
 from PyQt6.QtWidgets import (
     QHBoxLayout, QListWidget, QStackedWidget, QVBoxLayout, QWidget,
@@ -29,15 +28,16 @@ from qfluentwidgets import (CaptionLabel, ComboBox, DoubleSpinBox,
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants, file_dialogs
+from ui.geo_utils import coverage_statistics, format_distance
 from ui.page_scaffold import (PanelStateMixin, make_card, make_scroll_column,
                               rebuild_check_list)
 from ui.widgets.collapsible_panel import CollapsiblePanel
+from ui.widgets.elevation_profile_view import ElevationProfileView
 from ui.widgets.local_dem import load_xyz_grid
 from ui.widgets.map_tiles import BASEMAP_LAYERS, DEFAULT_TILE_SOURCE
 from ui.widgets.map_view import MapView
 from ui.widgets import make_page_title
 from ui.widgets.depth_slice_view import DepthSliceView
-from ui.widgets.pg_view_base import style_plot_item
 from ui.widgets.trajectory_3d_view import Trajectory3DView
 # 中栏分段（SegmentedWidget routeKey）
 _SEG_MAP = 'planMap'
@@ -49,74 +49,6 @@ _SEG_DEPTH = 'depthSlice'
 _TRACK_COLORS = constants.CHART_TRACK_COLORS
 
 
-def _coverage_statistics(tracks: list) -> dict[str, object]:
-    """Return project coverage figures derived solely from spatial tracks.
-
-    Spatial tracks normally use projected metre coordinates.  Geographic
-    longitude/latitude tracks are also accepted by the spatial adapter, so
-    those are measured with a small haversine calculation instead of treating
-    degrees as metres.  Invalid coordinates are ignored without preventing
-    the rest of a project's coverage summary from rendering.
-    """
-    track_count = 0
-    point_count = 0
-    segment_count = 0
-    length_m = 0.0
-
-    for track in tracks or []:
-        points: list[tuple[float, float]] = []
-        for point in getattr(track, 'points', ()) or ():
-            try:
-                x = float(getattr(point, 'x', float('nan')))
-                y = float(getattr(point, 'y', float('nan')))
-            except (TypeError, ValueError):
-                continue
-            if np.isfinite(x) and np.isfinite(y):
-                points.append((x, y))
-
-        if not points:
-            continue
-        track_count += 1
-        point_count += len(points)
-
-        # SpatialPersistenceMixin labels longitude/latitude tracks EPSG:4326.
-        # Only use coordinate magnitudes as a legacy fallback when the CRS is
-        # missing: local metre coordinates can legitimately be near (0, 0).
-        crs = str(getattr(track, 'coordinate_system', '') or '').lower()
-        geographic = (
-            '4326' in crs or '4490' in crs or 'wgs84' in crs
-            or 'geographic' in crs or '经纬' in crs
-            or (not crs and all(abs(x) <= 180.0 and abs(y) <= 90.0
-                               for x, y in points))
-        )
-        for (x0, y0), (x1, y1) in zip(points, points[1:]):
-            segment_count += 1
-            if geographic:
-                lat0, lat1 = np.radians((y0, y1))
-                dlat = lat1 - lat0
-                dlon = np.radians(x1 - x0)
-                a = (np.sin(dlat / 2.0) ** 2
-                     + np.cos(lat0) * np.cos(lat1) * np.sin(dlon / 2.0) ** 2)
-                length_m += 6_371_008.8 * 2.0 * np.arctan2(
-                    np.sqrt(a), np.sqrt(max(0.0, 1.0 - a)))
-            else:
-                length_m += float(np.hypot(x1 - x0, y1 - y0))
-
-    return {
-        'track_count': track_count,
-        'point_count': point_count,
-        'segment_count': segment_count,
-        'length_m': length_m,
-    }
-
-
-def _format_distance(distance_m: float) -> str:
-    """Format a distance compactly for the spatial coverage card."""
-    if distance_m >= 1000.0:
-        return f'{distance_m / 1000.0:.2f} km'
-    return f'{distance_m:.0f} m'
-
-
 def _color_icon(hex_color: str) -> QIcon:
     """12×12 纯色块图标（测线列表颜色标识）。"""
     pixmap = QPixmap(12, 12)
@@ -124,56 +56,32 @@ def _color_icon(hex_color: str) -> QIcon:
     return QIcon(pixmap)
 
 
-class ElevationProfileView(pg.PlotWidget):
-    """高程剖面：选中测线的里程-高程曲线（里程由相邻点距离累积）。"""
+# ------------------------------------------------------------ 本地 DEM 异步加载
+# XYZ 格网解析（大文件整读 + numpy 格网还原）离开 GUI 线程，结果信号回主线程
+# 再喂三维视图（参照 ui/widgets/trajectory_3d_view.py 的 QThreadPool worker 模式）。
+class _DemLoadSignals(QObject):
+    """QRunnable 无法自带信号，用独立 QObject 回主线程。"""
 
-    def __init__(self, parent=None) -> None:
-        super().__init__(parent)
-        self._plot_item = self.getPlotItem()
-        self._plot_item.setLabel('bottom', '里程', units='m')
-        self._plot_item.setLabel('left', '高程', units='m')
-        self._plot_item.showGrid(x=True, y=True, alpha=0.3)
-        from qfluentwidgets import isDarkTheme
-        self.apply_theme(isDarkTheme())
+    # generation, dem(dict|None), path, error（''=成功）
+    finished = pyqtSignal(int, object, str, str)
 
-    def set_tracks(self, tracks, colors: dict) -> None:
-        """重绘选中测线的里程-高程曲线。"""
-        self._plot_item.clear()
-        legend = self._plot_item.legend
-        if legend is not None:
-            legend.clear()
+
+class _DemLoadWorker(QRunnable):
+    """后台线程解析 XYZ 格网；解析失败带回错误文本由主线程决定提示。"""
+
+    def __init__(self, generation: int, path: str, signals: _DemLoadSignals) -> None:
+        super().__init__()
+        self._generation = int(generation)
+        self._path = path
+        self._signals = signals
+
+    def run(self) -> None:
+        try:
+            dem = load_xyz_grid(self._path)
+        except (OSError, ValueError) as exc:
+            self._signals.finished.emit(self._generation, None, self._path, str(exc))
         else:
-            legend = self._plot_item.addLegend(
-                offset=(8, 8),
-                labelTextColor='w' if self._dark else 'k')
-        colors = dict(colors or {})
-        for track in tracks or []:
-            points = list(getattr(track, 'points', ()) or ())
-            if len(points) < 2:
-                continue
-            xs = np.asarray([float(getattr(p, 'x', 0.0)) for p in points])
-            ys = np.asarray([float(getattr(p, 'y', 0.0)) for p in points])
-            zs = np.asarray([float(getattr(p, 'elevation_m', 0.0)) for p in points])
-            finite = np.isfinite(xs) & np.isfinite(ys) & np.isfinite(zs)
-            if np.count_nonzero(finite) < 2:
-                continue
-            steps = np.hypot(np.diff(xs[finite]), np.diff(ys[finite]))
-            mileage = np.concatenate(([0.0], np.cumsum(steps)))
-            line_id = str(getattr(track, 'line_id', '') or '')
-            name = str(getattr(track, 'name', '') or line_id)
-            pen = pg.mkPen(QColor(colors.get(line_id, constants.CHART_TRACK_DEFAULT)), width=2)
-            self._plot_item.plot(mileage, zs[finite], pen=pen, name=name)
-
-    def apply_theme(self, dark: bool) -> None:
-        """深色 bg 'k'/文字 'w'；浅色 bg 'w'/文字 'k'；轴 pen/textPen/标签/图例同步。"""
-        self._dark = bool(dark)
-        self.setBackground('k' if dark else 'w')
-        fg = style_plot_item(self._plot_item, dark)
-        # 已有图例的条目文字颜色不随主题更新，逐条同步
-        legend = self._plot_item.legend
-        if legend is not None:
-            for _sample, label in legend.items:
-                label.setText(label.text, color=fg)
+            self._signals.finished.emit(self._generation, dem, self._path, '')
 
 
 class SpatialPage(PanelStateMixin, QWidget):
@@ -201,6 +109,12 @@ class SpatialPage(PanelStateMixin, QWidget):
         self._depth_payload_line_ids = []     # 深度切片预览请求的 line_ids（存图层回发用）
         self._depth_cell_size_m = 1.0         # 深度切片网格 cell_size_m（存图层回发用）
         self._sm = None                       # 共享 SettingsManager（主窗口注入，唯一写者）
+        self._dem_pool = QThreadPool(self)    # 本地 DEM 解析（大文件不冻结 GUI 线程）
+        self._dem_pool.setMaxThreadCount(1)
+        self._dem_load_signals = _DemLoadSignals(self)
+        self._dem_load_signals.finished.connect(self._on_dem_loaded)
+        self._dem_load_generation = 0         # DEM 加载代次（旧任务回包丢弃）
+        self._pending_dem_auto = False        # 在途 DEM 加载是否启动自动加载（失败处理不同）
 
         self._build_ui()
         self._connect_internal()
@@ -269,6 +183,7 @@ class SpatialPage(PanelStateMixin, QWidget):
         """启动自动加载上次导入的本地 DEM（默认在线下载，无需任何操作）。
 
         文件已被移动/删除或解析失败时清除记录，静默回退在线下载。
+        解析在工作线程执行（大 DEM 不冻结启动），结果回主线程应用。
         """
         sm = self._sm
         if sm is None:
@@ -276,16 +191,36 @@ class SpatialPage(PanelStateMixin, QWidget):
         path = str(sm.get('spatial_local_dem', '') or '')
         if not path:
             return
-        dem = None
-        if os.path.isfile(path):
-            try:
-                dem = load_xyz_grid(path)
-            except (OSError, ValueError):
-                dem = None
-        if dem is None:
+        if not os.path.isfile(path):
             self._persist_setting('spatial_local_dem', '')
             return
+        self._start_dem_load(path, auto=True)
+
+    def _start_dem_load(self, path: str, *, auto: bool) -> None:
+        """把 XYZ 格网解析交给工作线程；auto=启动自动加载（失败静默清记录）。
+
+        代次守卫：快速连续导入/自动加载时，旧任务的回包直接丢弃。
+        """
+        self._dem_load_generation += 1
+        self._pending_dem_auto = auto
+        self._dem_pool.start(_DemLoadWorker(
+            self._dem_load_generation, path, self._dem_load_signals))
+
+    def _on_dem_loaded(self, generation: int, dem, path: str, error: str) -> None:
+        """DEM 解析回包（GUI 线程）：应用格网或按来源处理失败。"""
+        if generation != self._dem_load_generation:
+            return
+        if dem is None:
+            if self._pending_dem_auto:
+                # 自动加载失败：清除记录，静默回退在线下载（原同步语义）
+                self._persist_setting('spatial_local_dem', '')
+            else:
+                self._3d_dem_label.setText(f'导入失败：{error}')
+            return
         self._apply_local_dem(dem, path)
+        if not self._pending_dem_auto:
+            self._set_terrain_mode('local_dem')
+            self._persist_setting('spatial_local_dem', path)
 
     def _apply_local_dem(self, dem: dict, path: str) -> None:
         """应用本地 DEM 到三维视图并更新卡片显示。"""
@@ -728,15 +663,15 @@ class SpatialPage(PanelStateMixin, QWidget):
 
     def _refresh_coverage_statistics(self) -> None:
         """Update the frontend-only project coverage summary from all tracks."""
-        statistics = _coverage_statistics(self._tracks)
+        statistics = coverage_statistics(self._tracks)
         labels = self._coverage_labels
         labels['tracks'].setText(f"{statistics['track_count']} 条")
         labels['points'].setText(f"{statistics['point_count']:,} 个")
-        labels['length'].setText(_format_distance(float(statistics['length_m'])))
+        labels['length'].setText(format_distance(float(statistics['length_m'])))
         segments = int(statistics['segment_count'])
         if segments:
             spacing = float(statistics['length_m']) / segments
-            labels['spacing'].setText(_format_distance(spacing))
+            labels['spacing'].setText(format_distance(spacing))
         else:
             labels['spacing'].setText('--')
 
@@ -782,20 +717,14 @@ class SpatialPage(PanelStateMixin, QWidget):
         """导入本地 DEM（XYZ 格网）：三维地形改用本地高程，免在线下载。
 
         路径记入设置，之后启动自动加载，无需重复导入。
+        解析在工作线程执行，回包后切到 local_dem 并持久化路径。
         """
         path, _selected = file_dialogs.getOpenFileName(
             self, '选择本地 DEM 格网文件', '',
             'DEM 格网 (*.xyz *.csv *.txt);;所有文件 (*)')
         if not path:
             return
-        try:
-            dem = load_xyz_grid(path)
-        except (OSError, ValueError) as exc:
-            self._3d_dem_label.setText(f'导入失败：{exc}')
-            return
-        self._apply_local_dem(dem, path)
-        self._set_terrain_mode('local_dem')
-        self._persist_setting('spatial_local_dem', path)
+        self._start_dem_load(path, auto=False)
 
     def _on_clear_dem_clicked(self) -> None:
         """清除本地 DEM：三维地形回退在线高程瓦片，并删除设置记录。"""

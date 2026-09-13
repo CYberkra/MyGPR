@@ -311,7 +311,7 @@ class Trajectory3DView(QWidget):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        self._gl_view = None
+        self._gl_view = None           # 惰性创建：首次需要 3D 内容时才建（见 _ensure_gl_view）
         self._grid = None
         self._line_items: list = []
         self._terrain_item = None
@@ -330,25 +330,41 @@ class Trajectory3DView(QWidget):
         self._terrain_src = None         # (epsg, terrain_bbox) 供本地 DEM 变更后重建地形
         self._terrain_source = 'online'  # 地形来源：online / local_dem / estimated
         self._ground_points = None       # 测线估算地面散点 (n,3) 显示坐标，z=地表高程
+        self._theme_dark = False         # 主题缓存：GL 未建时先记住，创建时应用
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
-        if _gl is not None:
-            self._gl_view = _gl.GLViewWidget(self)
-            self._gl_view.setBackgroundColor('w')
-            self._grid = _gl.GLGridItem()
-            self._grid.setSize(500.0, 500.0)
-            self._grid.setSpacing(20.0, 20.0)
-            self._gl_view.addItem(self._grid)
-            layout.addWidget(self._gl_view, 1)
-            self._terrain_pool = QThreadPool(self)
-            self._terrain_pool.setMaxThreadCount(1)
-            self._terrain_signals = _TerrainSignals(self)
-            self._terrain_signals.finished.connect(self._on_terrain_finished)
-            self._terrain_signals.notice.connect(self.local_dem_notice)
-        else:
+        if _gl is None:
+            # 无 PyOpenGL：降级 QLabel，不影响页面其余部分（lazy 语义不改变此分支）
             self._fallback_label = QLabel('三维视图需要 PyOpenGL', self)
             self._fallback_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             layout.addWidget(self._fallback_label, 1)
+
+    def _ensure_gl_view(self) -> bool:
+        """首次需要显示 3D 内容时创建 GLViewWidget 与地形线程池。
+
+        惰性创建避免为从不打开三维分段的用户支付 GL 上下文构建成本；
+        GL 未建期间的语义值（主题/夸张/贴地/影像/地形来源/DEM）均已
+        缓存在实例字段，创建后由首个 set_tracks 统一生效。
+        返回 False = 无 PyOpenGL（降级路径）。
+        """
+        if self._gl_view is not None:
+            return True
+        if _gl is None:
+            return False
+        layout = self.layout()
+        self._gl_view = _gl.GLViewWidget(self)
+        self._gl_view.setBackgroundColor('k' if self._theme_dark else 'w')
+        self._grid = _gl.GLGridItem()
+        self._grid.setSize(500.0, 500.0)
+        self._grid.setSpacing(20.0, 20.0)
+        self._gl_view.addItem(self._grid)
+        layout.addWidget(self._gl_view, 1)
+        self._terrain_pool = QThreadPool(self)
+        self._terrain_pool.setMaxThreadCount(1)
+        self._terrain_signals = _TerrainSignals(self)
+        self._terrain_signals.finished.connect(self._on_terrain_finished)
+        self._terrain_signals.notice.connect(self.local_dem_notice)
+        return True
 
     # ------------------------------------------------------------ 数据
     def set_tracks(self, tracks, colors: dict | None = None) -> None:
@@ -356,8 +372,9 @@ class Trajectory3DView(QWidget):
 
         tracks: SpatialTrack 列表（鸭子类型取属性）；colors: {line_id: '#rrggbb'}。
         坐标系可识别时后台构建真实地形，完成后自动替换平面网格。
+        首次调用触发 GLViewWidget 的惰性创建。
         """
-        if self._gl_view is None:
+        if not self._ensure_gl_view():
             return
         for item in self._line_items:
             self._gl_view.removeItem(item)
@@ -495,7 +512,7 @@ class Trajectory3DView(QWidget):
         self._gl_view.opts['center'] = _Vector(0.0, 0.0, 0.0)
 
     def _show_context_menu(self, pos) -> None:
-        if self._gl_view is None:
+        if not self._ensure_gl_view():
             return
         from qfluentwidgets import Action
         menu = make_menu(self)
@@ -821,7 +838,8 @@ class Trajectory3DView(QWidget):
 
     # ------------------------------------------------------------ 主题
     def apply_theme(self, dark: bool) -> None:
-        """深色黑底 / 浅色白底。"""
+        """深色黑底 / 浅色白底；GL 未建时缓存语义值，惰性创建时应用。"""
+        self._theme_dark = bool(dark)
         if self._gl_view is not None:
             self._gl_view.setBackgroundColor('k' if dark else 'w')
 

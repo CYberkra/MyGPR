@@ -295,6 +295,22 @@ class BackendController(QObject):
     def is_ready(self) -> bool:
         return self.backend is not None and self.job_bridge is not None
 
+    def prune_jobs(self) -> bool:
+        """清理全部终态任务记录（工作线程执行，不阻塞 UI）。
+
+        结果经 ``log_message`` 信号回 GUI 线程；后端未就绪时返回 False，
+        由调用方决定提示话术。backend 句柄只在本类内部使用——接线层
+        不得再 ``getattr(controller, 'backend')`` 旁路。
+        """
+        backend = self.backend
+        if backend is None:
+            return False
+        run_command(
+            _JobsPruneCommand(self, backend),
+            name='mygpr-jobs-prune',
+        )
+        return True
+
     def shutdown(self) -> None:
         """Shut the backend down; exceptions are swallowed and logged."""
         if self.job_bridge is not None:
@@ -326,6 +342,26 @@ class BackendController(QObject):
     def _on_thread_finished(self) -> None:
         self._thread = None
         self._worker = None
+
+
+class _JobsPruneCommand:
+    """worker 线程执行 ``backend.jobs.prune()``（BackendController 私有命令）。"""
+
+    __slots__ = ("_controller", "_backend")
+
+    def __init__(self, controller: BackendController, backend: Any) -> None:
+        self._controller = controller
+        self._backend = backend
+
+    def execute(self) -> None:
+        try:
+            removed = self._backend.jobs.prune()
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.warning('jobs prune 失败: %s', exc)
+            self._controller.log_message.emit(f'WARNING 清理已完成任务失败: {exc}')
+        else:
+            self._controller.log_message.emit(
+                f'INFO 已清理 {len(removed)} 个终态任务记录')
 
 
 __all__ = [

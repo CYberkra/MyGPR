@@ -24,7 +24,12 @@ python cli_batch.py --help             # 无头批处理入口
 app_qt.py                      # GUI 入口（DPI PassThrough、主题、--smoke）
 ui/                            # PyQt6 前端
   main_window.py               # FluentWindow 纯组装器（页面/导航/主题/面板/快捷键/后端门控）
-  page_coordinator.py          # 跨页业务信号链 + 运行态（单链可独立测试）
+  page_coordinator.py          # 跨页信号链薄门面（窗口服务接口 + 三段委派）
+  coordinator_project.py       #   └ ProjectChain：项目/测线/成果/导入/删除链
+  coordinator_processing.py    #   └ ProcessingChain：处理/AutoTune/速度/深度切片/解释
+  coordinator_jobs.py          #   └ JobHub：任务事件三视图同构扇出、取消/清理
+  dialogs.py                   # 接线器/controllers 许可的唯一对话框模块（函数式 API）
+  geo_utils.py                 # 覆盖统计纯函数（haversine，无 Qt 依赖）
   desktop_backend_facade.py    # ui→core/domain/application 统一导入通道（架构门禁例外）
   pages/                       # 七个页面，纯展示 + 发信号
   widgets/                     # BScanView / CollapsiblePanel / LogPanel 等

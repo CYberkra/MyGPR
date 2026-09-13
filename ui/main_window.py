@@ -97,6 +97,8 @@ class _FallbackLogPanel(CardWidget):
     日志 tab：QTextEdit 只读 + 按钮行('清空' 60px)。
     """
 
+    cancel_job_requested = pyqtSignal(str)   # 与 LogPanel 同构（JobHub 显式接线）
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumWidth(0)
@@ -464,29 +466,34 @@ class MyGPRMainWindow(FluentWindow):
             self.log_panel.append_log(msg)
 
     def _on_theme_changed(self, theme: str) -> None:
-        """主题切换槽：setTheme + LogPanel 换肤 + 各 View.apply_theme + pg 背景。"""
+        """主题切换槽：setTheme + LogPanel 换肤 + 各 View.apply_theme + 全量重绘。
+
+        全窗控件单轮遍历同时完成 update() 与 apply_theme（原两轮 findChildren
+        遍历在视图树大时构成重绘风暴）；页面/视图树运行期基本不变，
+        无缓存列表的需求，单轮已够。
+        """
         dark = str(theme) == constants.THEME_DARK
         apply_theme(theme)
         # qfluentwidgets 1.11 的 CardWidget 等纯 paintEvent 控件在主题切换时
         # 不会自动触发重绘（浅色底 + 深色文字的"半套主题"问题），这里强制
         # 全量 update()，保证深浅主题即时、完整地生效。
-        for widget in self.findChildren(QWidget):
-            widget.update()
-        self.update()
         # 日志框换肤（style_spec §2.5）：启动回放浅色主题时保留初始 #2b2b2b 深底
         if not self._restoring_settings or dark:
             if hasattr(self.log_panel, 'apply_theme'):
                 self.log_panel.apply_theme(dark)
             elif hasattr(self.log_panel, 'set_theme'):
                 self.log_panel.set_theme(theme)
-        # 所有 BScanView/AScanView（鸭子类型，A2 交付后自动生效）
+        # 单轮遍历：重绘 + 主题应用一次完成（所有 BScanView/AScanView 等
+        # 鸭子类型实现 apply_theme 的控件；log_panel 已在上文单独换肤）
         for widget in self.findChildren(QWidget):
+            widget.update()
             apply_fn = getattr(widget, 'apply_theme', None)
             if callable(apply_fn) and widget is not self.log_panel:
                 try:
                     apply_fn(dark)
                 except Exception as e:
                     logger.debug('apply_theme 调用失败: %s', e)
+        self.update()
         # 设置页主题 ComboBox 回写（blockSignals 防循环）
         settings_page = self._page('settingsInterface')
         if hasattr(settings_page, 'set_theme_text'):

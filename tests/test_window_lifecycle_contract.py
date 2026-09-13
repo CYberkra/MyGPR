@@ -19,19 +19,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from core.app_paths import get_tile_cache_dir
 
 
-_PAGE_COORDINATOR = Path(__file__).resolve().parents[1] / "ui" / "page_coordinator.py"
+_PROJECT_CHAIN = Path(__file__).resolve().parents[1] / "ui" / "coordinator_project.py"
 _APP_ENTRY = Path(__file__).resolve().parents[1] / "app_qt.py"
 
 
 def _project_close_call_lines() -> dict[str, int]:
-    tree = ast.parse(_PAGE_COORDINATOR.read_text(encoding="utf-8"))
+    tree = ast.parse(_PROJECT_CHAIN.read_text(encoding="utf-8"))
     for node in tree.body:
-        if not isinstance(node, ast.ClassDef) or node.name != "PageCoordinator":
+        if not isinstance(node, ast.ClassDef) or node.name != "ProjectChain":
             continue
         for method in node.body:
             if not isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
-            if method.name != "_on_close_project_requested":
+            if method.name != "on_close_project_requested":
                 continue
             calls: dict[str, int] = {}
             for child in ast.walk(method):
@@ -40,7 +40,7 @@ def _project_close_call_lines() -> dict[str, int]:
                 if child.func.attr in {"close_session", "close_current"}:
                     calls[child.func.attr] = child.lineno
             return calls
-    raise AssertionError("PageCoordinator._on_close_project_requested not found")
+    raise AssertionError("ProjectChain.on_close_project_requested not found")
 
 
 class ProjectCloseLifecycleContractTests(unittest.TestCase):

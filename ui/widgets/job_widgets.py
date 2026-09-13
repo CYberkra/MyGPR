@@ -205,6 +205,10 @@ class JobTable(QWidget):
                       enumerate(survivors)}
         self._update_empty_state()
 
+    def remove_inactive(self) -> None:
+        """与 MiniJobList 同构的清理接口：JobHub 对三视图统一分发用。"""
+        self.clear_finished()
+
     # ------------------------------------------------------------- 内部
     def _status_of(self, row):
         item = self._table.item(row, self._COL_STATUS)
