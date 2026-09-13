@@ -40,6 +40,9 @@ from qfluentwidgets import (
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants, file_dialogs
+from ui.page_scaffold import (make_card, make_form_row,
+                              style_transparent_scroll)
+from ui.theme_helpers import status_color
 from ui.widgets import BScanView, clear_invalid, mark_invalid, validate_non_empty, make_separator
 from ui.widgets.context_menus import add_action, make_menu
 
@@ -71,19 +74,6 @@ _INFO_FIELDS = (
     ('坐标系:', 'coordinate_system'),
     ('高程基准:', 'vertical_datum'),
 )
-
-
-# ------------------------------------------------------------ 小工厂（卡片范式逐字 SPEC §1）
-def _create_card(title: str) -> tuple:
-    """卡片范式：CardWidget + QVBoxLayout(spacing=10, margins=15)，首行 SubtitleLabel 10pt Bold。"""
-    card = CardWidget()
-    layout = QVBoxLayout(card)
-    layout.setContentsMargins(*constants.CARD_MARGINS)
-    layout.setSpacing(constants.CARD_SPACING)
-    header = SubtitleLabel(title, card)
-    header.setFont(QFont(constants.FONT_FAMILY, 10, QFont.Weight.Bold))
-    layout.addWidget(header)
-    return card, layout
 
 
 class ProjectPage(QWidget):
@@ -125,7 +115,7 @@ class ProjectPage(QWidget):
         self._no_project_hint = CaptionLabel(
             '尚未打开项目 —— 请先在主页打开或新建项目', self)
         self._no_project_hint.setStyleSheet(
-            'color: %s; font-size: 11px;' % constants.COLOR_WARNING)
+            'color: %s; font-size: 11px;' % status_color('warning'))
         self._no_project_hint.setAlignment(
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         header_row.addWidget(self._no_project_hint)
@@ -142,10 +132,8 @@ class ProjectPage(QWidget):
     # ============================================================ 左列（固定 460px ScrollArea）
     def _build_left_column(self) -> ScrollArea:
         scroll = ScrollArea(self)
-        scroll.setWidgetResizable(True)
+        style_transparent_scroll(scroll)
         scroll.setFixedWidth(460)
-        scroll.setStyleSheet(
-            'QScrollArea { background-color: transparent; border: none; }')
         container = QWidget(scroll)
         container.setStyleSheet('background-color: transparent;')
         layout = QVBoxLayout(container)
@@ -161,18 +149,14 @@ class ProjectPage(QWidget):
 
     def _build_info_card(self, parent) -> CardWidget:
         """卡片1"项目信息"：名称/编号/位置/操作员/设备型号/坐标系/高程基准 只读 + 关闭项目。"""
-        card, layout = _create_card('项目信息')
+        card, layout = make_card('项目信息')
         self._info_values = {}
         for label_text, attr in _INFO_FIELDS:
-            row = QHBoxLayout()
-            label = CaptionLabel(label_text, card)
-            label.setMinimumWidth(100)
             value = BodyLabel('--', card)
             value.setTextInteractionFlags(
                 Qt.TextInteractionFlag.TextSelectableByMouse)
-            row.addWidget(label)
-            row.addWidget(value, 1)
-            layout.addLayout(row)
+            layout.addLayout(make_form_row(label_text, value, parent=card,
+                                           trailing_stretch=False))
             self._info_values[attr] = value
         layout.addWidget(make_separator())
         btn_row = QHBoxLayout()
@@ -185,22 +169,17 @@ class ProjectPage(QWidget):
 
     def _build_import_card(self, parent) -> CardWidget:
         """卡片2"导入测线"：文件+浏览 / 测线号(默认 L01) / 名称 / 介电常数(1-81, 默认 9.0) / 预检+导入 / 预检结果区。"""
-        card, layout = _create_card('导入测线')
+        card, layout = make_card('导入测线')
 
         # 数据文件行
-        file_row = QHBoxLayout()
-        file_label = CaptionLabel('数据文件:', card)
-        file_label.setMinimumWidth(100)
         self.file_edit = LineEdit(card)
         self.file_edit.setPlaceholderText('选择 GPR 数据文件…')
         self.file_edit.setMinimumWidth(180)
         browse_btn = PushButton('浏览', card)
         browse_btn.setFixedWidth(70)
         browse_btn.clicked.connect(self._browse_import_file)
-        file_row.addWidget(file_label)
-        file_row.addWidget(self.file_edit, 1)
-        file_row.addWidget(browse_btn)
-        layout.addLayout(file_row)
+        layout.addLayout(make_form_row('数据文件:', self.file_edit, browse_btn,
+                                       parent=card, trailing_stretch=False))
 
         # 测线号 / 名称
         self.line_id_edit = self._add_labeled_edit(
@@ -209,19 +188,14 @@ class ProjectPage(QWidget):
             layout, card, '名称:', placeholder='留空则使用测线号')
 
         # 介电常数
-        diel_row = QHBoxLayout()
-        diel_label = CaptionLabel('介电常数:', card)
-        diel_label.setMinimumWidth(100)
         self.dielectric_spin = DoubleSpinBox(card)
         self.dielectric_spin.setRange(1.0, 81.0)
         self.dielectric_spin.setDecimals(2)
         self.dielectric_spin.setSingleStep(0.5)
         self.dielectric_spin.setValue(constants.DEFAULT_DIELECTRIC)
         self.dielectric_spin.setMinimumWidth(120)
-        diel_row.addWidget(diel_label)
-        diel_row.addWidget(self.dielectric_spin)
-        diel_row.addStretch(1)
-        layout.addLayout(diel_row)
+        layout.addLayout(make_form_row('介电常数:', self.dielectric_spin,
+                                       parent=card))
 
         # 按钮行：预检 + 导入
         btn_row = QHBoxLayout()
@@ -241,19 +215,16 @@ class ProjectPage(QWidget):
         self._preflight_label = CaptionLabel('预检结果将显示在此处', card)
         self._preflight_label.setWordWrap(True)
         self._preflight_label.setStyleSheet(
-            'color: %s; font-size: 11px;' % constants.COLOR_DISABLED)
+            'color: %s; font-size: 11px;' % status_color('disabled'))
         self._preflight_label.setMinimumHeight(34)
         layout.addWidget(self._preflight_label)
         return card
 
     def _build_sync_card(self, parent) -> CardWidget:
         """卡片3"传感器同步"：rtk/imu/altimeter/trace_timestamps 四个文件行 + 提交同步。"""
-        card, layout = _create_card('传感器同步')
+        card, layout = make_card('传感器同步')
         self._sensor_edits = {}
         for key, label_text in _SENSOR_ROWS:
-            row = QHBoxLayout()
-            label = CaptionLabel(label_text, card)
-            label.setMinimumWidth(100)
             edit = LineEdit(card)
             edit.setPlaceholderText('可选' if key != 'rtk' else '选择 RTK 文件（必填）…')
             edit.setMinimumWidth(180)
@@ -261,14 +232,14 @@ class ProjectPage(QWidget):
             browse_btn.setFixedWidth(70)
             browse_btn.clicked.connect(
                 lambda _checked=False, k=key: self._browse_sensor_file(k))
-            row.addWidget(label)
-            row.addWidget(edit, 1)
-            row.addWidget(browse_btn)
-            layout.addLayout(row)
+            layout.addLayout(make_form_row(label_text, edit, browse_btn,
+                                           parent=card,
+                                           trailing_stretch=False))
             self._sensor_edits[key] = edit
 
         hint = CaptionLabel('同步目标测线 = 右侧测线列表当前选中行（未选中时使用上方测线号）', card)
-        hint.setStyleSheet('color: %s; font-size: 11px;' % constants.COLOR_DISABLED)
+        hint.setStyleSheet('color: %s; font-size: 11px;'
+                           % status_color('disabled'))
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
@@ -282,17 +253,14 @@ class ProjectPage(QWidget):
 
     def _add_labeled_edit(self, layout, card, label_text, *, default='',
                           placeholder='') -> LineEdit:
-        row = QHBoxLayout()
-        label = CaptionLabel(label_text, card)
-        label.setMinimumWidth(100)
+        """标签+输入框表单行（收敛实现见 ui.page_scaffold.make_form_row）。"""
         edit = LineEdit(card)
         edit.setText(default)
         if placeholder:
             edit.setPlaceholderText(placeholder)
         edit.setMinimumWidth(180)
-        row.addWidget(label)
-        row.addWidget(edit, 1)
-        layout.addLayout(row)
+        layout.addLayout(make_form_row(label_text, edit, parent=card,
+                                       trailing_stretch=False))
         return edit
 
     # ============================================================ 右侧（stretch）
@@ -301,7 +269,7 @@ class ProjectPage(QWidget):
         layout.setSpacing(constants.PAGE_SPACING)
 
         # 卡片"测线列表"
-        lines_card, lines_layout = _create_card('测线列表')
+        lines_card, lines_layout = make_card('测线列表')
         self._lines_table = QTableWidget(0, 7, lines_card)
         self._lines_table.setHorizontalHeaderLabels(
             ['测线号', '名称', '道数', '采样数', '长度m', '质量', '处理状态'])
@@ -332,7 +300,7 @@ class ProjectPage(QWidget):
         layout.addWidget(lines_card)
 
         # 卡片"处理成果(Artifact)"
-        art_card, art_layout = _create_card('处理成果(Artifact)')
+        art_card, art_layout = make_card('处理成果(Artifact)')
         self._artifacts_table = QTableWidget(0, 6, art_card)
         self._artifacts_table.setHorizontalHeaderLabels(
             ['名称', '方法', '形状', '创建时间', 'SHA前8位', '操作'])
@@ -366,7 +334,7 @@ class ProjectPage(QWidget):
         layout.addWidget(art_card)
 
         # 卡片"数据预览"（占满剩余空间，B-Scan 默认近似方形，保证完整显示）
-        preview_card, preview_layout = _create_card('数据预览')
+        preview_card, preview_layout = make_card('数据预览')
         self._bscan = BScanView(preview_card)
         self._bscan.setMinimumHeight(260)
         preview_layout.addWidget(self._bscan, 1)
@@ -483,7 +451,7 @@ class ProjectPage(QWidget):
     def set_preflight_result(self, text: str, ok: bool) -> None:
         """预检结果区：ok 绿色 / 失败红色。"""
         self._preflight_label.setText(str(text or ''))
-        color = constants.COLOR_SUCCESS if ok else constants.COLOR_ERROR
+        color = status_color('success' if ok else 'error')
         self._preflight_label.setStyleSheet(
             'color: %s; font-size: 11px;' % color)
 
@@ -569,7 +537,7 @@ class ProjectPage(QWidget):
         if preflight:
             self._preflight_label.setText('预检中…')
             self._preflight_label.setStyleSheet(
-                'color: %s; font-size: 11px;' % constants.COLOR_INFO)
+                'color: %s; font-size: 11px;' % status_color('info'))
         self.import_requested.emit(payload)
 
     def _emit_sync_request(self) -> None:

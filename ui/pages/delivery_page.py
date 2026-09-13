@@ -14,18 +14,21 @@
 import os
 
 from PyQt6.QtCore import Qt, QUrl, pyqtSignal
-from PyQt6.QtGui import QDesktopServices, QFont
+from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
     QDialog, QHBoxLayout, QHeaderView, QListWidget,
-    QListWidgetItem, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
-    CaptionLabel, CardWidget, CheckBox, InfoBar, InfoBarPosition, LineEdit,
+    CaptionLabel, CheckBox, InfoBar, InfoBarPosition, LineEdit,
     MessageBox, PrimaryPushButton, PushButton, ScrollArea, SpinBox,
-    StrongBodyLabel, SubtitleLabel,
+    StrongBodyLabel,
 )
 
 from ui import constants, file_dialogs
+from ui.page_scaffold import (make_card, make_form_row, rebuild_check_list,
+                              style_transparent_scroll)
+from ui.theme_helpers import status_color
 from ui.widgets import (clear_invalid, make_page_title, make_separator, mark_invalid,
                         validate_non_empty)
 
@@ -39,18 +42,18 @@ _REPORT_FIELDS = (
 _REPORT_DIR_KEYS = ('package_dir', 'output_dir', 'root_dir', 'dir')
 
 
-def _card_title(text: str) -> SubtitleLabel:
-    """卡片标题：SubtitleLabel 微软雅黑 10pt Bold（SPEC §1）。"""
-    label = SubtitleLabel(text)
-    label.setFont(QFont(constants.FONT_FAMILY, 10, QFont.Weight.Bold))
-    return label
-
-
 def _get(obj, key, default=''):
     """鸭子类型取值：dict 键优先，其次对象属性。"""
     if isinstance(obj, dict):
         return obj.get(key, default)
     return getattr(obj, key, default)
+
+
+def _line_display(line) -> str:
+    """测线显示文本：'名称 (线号)'，名称缺失或与线号相同时只显示线号。"""
+    line_id = str(_get(line, 'line_id', '') or _get(line, 'id', ''))
+    name = str(_get(line, 'name', '') or line_id)
+    return '%s (%s)' % (name, line_id) if name != line_id else line_id
 
 
 class DeliveryPage(QWidget):
@@ -71,11 +74,9 @@ class DeliveryPage(QWidget):
     # ============================================================ UI 构建
     def _build_ui(self) -> None:
         scroll = ScrollArea(self)
-        scroll.setWidgetResizable(True)
+        style_transparent_scroll(scroll)
         scroll.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setStyleSheet(
-            'QScrollArea { background-color: transparent; border: none; }')
         content = QWidget(scroll)
         content.setObjectName('deliveryScrollContent')
         content.setStyleSheet(
@@ -91,16 +92,12 @@ class DeliveryPage(QWidget):
         root.addWidget(make_page_title('成果与交付'))
 
         # ---------------- 卡片1：空间成果
-        spatial_card, spatial_layout = self._make_card('空间成果')
-        name_row = QHBoxLayout()
-        name_row.setSpacing(constants.CARD_SPACING)
-        name_label = CaptionLabel('成果名称:', spatial_card)
-        name_label.setMinimumWidth(100)
-        name_row.addWidget(name_label)
+        spatial_card, spatial_layout = make_card('空间成果', parent=self)
         self._spatial_name_edit = LineEdit(spatial_card)
         self._spatial_name_edit.setPlaceholderText('例如：全场剖面拼接成果')
-        name_row.addWidget(self._spatial_name_edit, 1)
-        spatial_layout.addLayout(name_row)
+        spatial_layout.addLayout(make_form_row(
+            '成果名称:', self._spatial_name_edit, parent=spatial_card,
+            trailing_stretch=False))
 
         lines_label = StrongBodyLabel('选择测线（可多选）：', spatial_card)
         spatial_layout.addWidget(lines_label)
@@ -129,16 +126,12 @@ class DeliveryPage(QWidget):
         root.addWidget(spatial_card)
 
         # ---------------- 卡片2：项目报告
-        report_card, report_layout = self._make_card('项目报告')
-        pkg_row = QHBoxLayout()
-        pkg_row.setSpacing(constants.CARD_SPACING)
-        pkg_label = CaptionLabel('报告包名:', report_card)
-        pkg_label.setMinimumWidth(100)
-        pkg_row.addWidget(pkg_label)
+        report_card, report_layout = make_card('项目报告', parent=self)
         self._report_name_edit = LineEdit(report_card)
         self._report_name_edit.setPlaceholderText('可空，留空使用默认包名')
-        pkg_row.addWidget(self._report_name_edit, 1)
-        report_layout.addLayout(pkg_row)
+        report_layout.addLayout(make_form_row(
+            '报告包名:', self._report_name_edit, parent=report_card,
+            trailing_stretch=False))
         self._report_btn = PrimaryPushButton('生成报告包', report_card)
         report_btn_row = QHBoxLayout()
         report_btn_row.addStretch(1)
@@ -148,16 +141,11 @@ class DeliveryPage(QWidget):
 
         self._report_path_labels = {}
         for key, caption in _REPORT_FIELDS:
-            row = QHBoxLayout()
-            row.setSpacing(constants.CARD_SPACING)
-            cap = CaptionLabel(caption, report_card)
-            cap.setMinimumWidth(100)
-            row.addWidget(cap)
             value = CaptionLabel('--', report_card)
             value.setStyleSheet(
-                'color: %s; font-size: 11px;' % constants.COLOR_DISABLED)
-            row.addWidget(value, 1)
-            report_layout.addLayout(row)
+                'color: %s; font-size: 11px;' % status_color('disabled'))
+            report_layout.addLayout(make_form_row(
+                caption, value, parent=report_card, trailing_stretch=False))
             self._report_path_labels[key] = value
         open_row = QHBoxLayout()
         open_row.addStretch(1)
@@ -168,7 +156,7 @@ class DeliveryPage(QWidget):
         root.addWidget(report_card)
 
         # ---------------- 卡片3：备份与恢复
-        backup_card, backup_layout = self._make_card('备份与恢复')
+        backup_card, backup_layout = make_card('备份与恢复', parent=self)
         backup_row = QHBoxLayout()
         backup_row.setSpacing(constants.CARD_SPACING)
         self._backup_btn = PushButton('备份当前项目', backup_card)
@@ -192,15 +180,6 @@ class DeliveryPage(QWidget):
         backup_layout.addLayout(options_row)
         root.addWidget(backup_card)
         root.addStretch(1)
-
-    def _make_card(self, title: str) -> tuple:
-        """卡片范式：CardWidget + QVBoxLayout spacing=10 margins=(15,15,15,15)。"""
-        card = CardWidget(self)
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(*constants.CARD_MARGINS)
-        layout.setSpacing(constants.CARD_SPACING)
-        layout.addWidget(_card_title(title))
-        return card, layout
 
     # ============================================================ 内部接线
     def _connect_internal(self) -> None:
@@ -281,26 +260,16 @@ class DeliveryPage(QWidget):
     def set_lines(self, lines: list) -> None:
         """可选测线列表（主窗口注入；dict/对象鸭子类型，取 line_id 与 name）。
 
-        重建列表时保持已有勾选状态（与 spatial_page.set_tracks 同模式），
-        避免刷新测线集合后丢掉用户已勾选的测线；新出现的测线维持默认不勾选。
+        重建列表时保持已有勾选状态（rebuild_check_list 同 spatial_page
+        模式），避免刷新测线集合后丢掉用户已勾选的测线；新出现的测线维持
+        默认不勾选。
         """
-        previous_checked = {}
-        for row in range(self._lines_list.count()):
-            item = self._lines_list.item(row)
-            previous_checked[str(item.data(Qt.ItemDataRole.UserRole) or '')] = (
-                item.checkState() == Qt.CheckState.Checked)
-        self._lines_list.clear()
-        for line in (lines or []):
-            line_id = str(_get(line, 'line_id', '') or _get(line, 'id', ''))
-            name = str(_get(line, 'name', '') or line_id)
-            item = QListWidgetItem('%s (%s)' % (name, line_id)
-                                   if name != line_id else line_id)
-            item.setData(Qt.ItemDataRole.UserRole, line_id)
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            checked = previous_checked.get(line_id, False)
-            item.setCheckState(
-                Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
-            self._lines_list.addItem(item)
+        rebuild_check_list(
+            self._lines_list, lines or [],
+            key_fn=lambda line: str(
+                _get(line, 'line_id', '') or _get(line, 'id', '')),
+            text_fn=_line_display,
+            default_checked=False)
 
     # ============================================================ 内部逻辑
     def _on_spatial_clicked(self) -> None:

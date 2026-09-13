@@ -2,8 +2,8 @@
 
 状态中文映射：queued 排队 / running 运行中 / completed 已完成 /
 failed 失败 / cancelled 已取消。
-徽章配色：完成 #22c55e、失败 #ef4444、运行 #3b82f6、排队/取消 #9ca3af。
-running 状态显示进度条。
+徽章配色：白字彩底，颜色随主题查表（ui.theme_helpers.status_color，
+深色取同色相高亮度变体，保证深底对比度）；running 状态显示进度条。
 """
 
 import re
@@ -15,6 +15,8 @@ from PyQt6.QtWidgets import (QHBoxLayout, QHeaderView, QLabel,
 from qfluentwidgets import CaptionLabel, ProgressBar, PushButton, ScrollArea
 
 from ui.motion import animate_badge_color, animate_progress
+from ui.page_scaffold import style_transparent_scroll
+from ui.theme_helpers import status_color
 
 _STATUS_TEXT = {
     'queued': '排队',
@@ -24,12 +26,13 @@ _STATUS_TEXT = {
     'cancelled': '已取消',
 }
 
-_STATUS_BADGE = {
-    'queued': '#9ca3af',
-    'running': '#3b82f6',
-    'completed': '#22c55e',
-    'failed': '#ef4444',
-    'cancelled': '#9ca3af',
+# 状态 → status_color 语义键（queued/cancelled 灰色同 disabled）
+_STATUS_COLOR_KEY = {
+    'queued': 'disabled',
+    'running': 'info',
+    'completed': 'success',
+    'failed': 'error',
+    'cancelled': 'disabled',
 }
 
 _ACTIVE_STATUSES = ('queued', 'running')
@@ -38,11 +41,23 @@ _BADGE_QSS = ('QLabel { padding: 2px 10px; border-radius: 10px; '
               'font-size: 12px; font-weight: bold; '
               'color: #ffffff; background-color: %s; }')
 
+_EMPTY_LABEL_QSS = 'color: %s; font-size: 13px;'
+
+
+def _status_badge_color(status: str) -> str:
+    """状态徽章底色（随主题）：未知状态回落 disabled 灰。"""
+    return status_color(_STATUS_COLOR_KEY.get(status, 'disabled'))
+
 
 def _make_status_badge(status: str) -> QLabel:
     badge = QLabel(_STATUS_TEXT.get(status, status))
-    badge.setStyleSheet(_BADGE_QSS % _STATUS_BADGE.get(status, '#9ca3af'))
+    badge.setStyleSheet(_BADGE_QSS % _status_badge_color(status))
     return badge
+
+
+def _restyle_status_badge(badge: QLabel, status: str) -> None:
+    """不换文字只按状态重刷徽章配色（主题切换路径用，无渐变动画）。"""
+    badge.setStyleSheet(_BADGE_QSS % _status_badge_color(status))
 
 
 class JobTable(QWidget):
@@ -78,7 +93,8 @@ class JobTable(QWidget):
         empty_layout = QVBoxLayout(empty_page)
         empty_label = CaptionLabel('暂无任务', empty_page)
         empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        empty_label.setStyleSheet('color: #9ca3af; font-size: 13px;')
+        empty_label.setStyleSheet(
+            _EMPTY_LABEL_QSS % status_color('disabled'))
         empty_layout.addWidget(empty_label)
         self._stack = QStackedLayout()
         self._stack.addWidget(empty_page)   # index 0 = 空态
@@ -88,6 +104,13 @@ class JobTable(QWidget):
     def _update_empty_state(self) -> None:
         """无任务时显示空态占位。"""
         self._stack.setCurrentIndex(0 if not self._rows else 1)
+
+    def apply_theme(self, dark: bool) -> None:
+        """主题切换：徽章与空态占位文字色按新主题重刷（主窗口遍历调用）。"""
+        self._empty_label.setStyleSheet(
+            _EMPTY_LABEL_QSS % status_color('disabled'))
+        for job_id, badge in self._badges.items():
+            _restyle_status_badge(badge, self._status_of(self._rows[job_id]))
 
     # ------------------------------------------------------------- 接口
     def upsert_job(self, job_id: str, title: str) -> None:
@@ -144,12 +167,12 @@ class JobTable(QWidget):
             return
         badge = self._badges.get(job_id)
         if badge is not None:
-            end_hex = _STATUS_BADGE.get(status, '#9ca3af')
+            end_hex = _status_badge_color(status)
             badge.setText(_STATUS_TEXT.get(status, status))
             # 从徽章当前背景色渐变到新状态色（qss 模板同源，见 ui.motion）
             match = re.search(r'background-color:\s*(#[0-9a-fA-F]{6})',
                               badge.styleSheet())
-            start_hex = match.group(1) if match else '#9ca3af'
+            start_hex = match.group(1) if match else _status_badge_color(status)
             animate_badge_color(badge, _BADGE_QSS, start_hex, end_hex)
         item = self._table.item(row, self._COL_STATUS)
         if item is not None:
@@ -198,9 +221,7 @@ class MiniJobList(QWidget):
         self._jobs = {}   # job_id -> dict(row_widget, bar, status_label, status)
 
         self._scroll = ScrollArea(self)
-        self._scroll.setWidgetResizable(True)
-        self._scroll.setStyleSheet(
-            'QScrollArea { background-color: transparent; border: none; }')
+        style_transparent_scroll(self._scroll)
         self._container = QWidget(self._scroll)
         self._container.setStyleSheet('background-color: transparent;')
         self._box = QVBoxLayout(self._container)
@@ -209,7 +230,8 @@ class MiniJobList(QWidget):
         # P2-6：无活动任务时空态占位
         self._empty_label = CaptionLabel('暂无任务', self._container)
         self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._empty_label.setStyleSheet('color: #9ca3af; font-size: 13px;')
+        self._empty_label.setStyleSheet(
+            _EMPTY_LABEL_QSS % status_color('disabled'))
         self._box.addWidget(self._empty_label)
         self._box.addStretch(1)
         self._scroll.setWidget(self._container)
@@ -275,10 +297,10 @@ class MiniJobList(QWidget):
         entry = self._jobs.get(job_id)
         if entry is None:
             return
-        old_hex = _STATUS_BADGE.get(entry['status'], '#9ca3af')
+        old_hex = _status_badge_color(entry['status'])
         entry['status'] = status
         badge = entry['badge']
-        end_hex = _STATUS_BADGE.get(status, '#9ca3af')
+        end_hex = _status_badge_color(status)
         badge.setText(_STATUS_TEXT.get(status, status))
         animate_badge_color(badge, _BADGE_QSS, old_hex, end_hex)
         entry['cancel'].setEnabled(status in _ACTIVE_STATUSES)
@@ -290,6 +312,13 @@ class MiniJobList(QWidget):
                        if e['status'] not in _ACTIVE_STATUSES]:
             self._remove_row(job_id)
         self._refresh_visibility()
+
+    def apply_theme(self, dark: bool) -> None:
+        """主题切换：徽章与空态占位文字色按新主题重刷（主窗口遍历调用）。"""
+        self._empty_label.setStyleSheet(
+            _EMPTY_LABEL_QSS % status_color('disabled'))
+        for entry in self._jobs.values():
+            _restyle_status_badge(entry['badge'], entry['status'])
 
     # ------------------------------------------------------------- 内部
     def _remove_row(self, job_id):

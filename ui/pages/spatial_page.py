@@ -19,22 +19,25 @@ import os
 import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QIcon, QPixmap
+from PyQt6.QtGui import QColor, QIcon, QPixmap
 from PyQt6.QtWidgets import (
-    QHBoxLayout, QListWidget, QListWidgetItem, QStackedWidget, QVBoxLayout, QWidget,
+    QHBoxLayout, QListWidget, QStackedWidget, QVBoxLayout, QWidget,
 )
-from qfluentwidgets import (CaptionLabel, CardWidget, ComboBox, DoubleSpinBox,
-                            PrimaryPushButton, PushButton, ScrollArea,
-                            SegmentedWidget, Slider, SubtitleLabel, SwitchButton)
+from qfluentwidgets import (CaptionLabel, ComboBox, DoubleSpinBox,
+                            PrimaryPushButton, PushButton,
+                            SegmentedWidget, Slider, SwitchButton)
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants, file_dialogs
+from ui.page_scaffold import (PanelStateMixin, make_card, make_scroll_column,
+                              rebuild_check_list)
 from ui.widgets.collapsible_panel import CollapsiblePanel
 from ui.widgets.local_dem import load_xyz_grid
 from ui.widgets.map_tiles import BASEMAP_LAYERS, DEFAULT_TILE_SOURCE
 from ui.widgets.map_view import MapView
 from ui.widgets import make_page_title
 from ui.widgets.depth_slice_view import DepthSliceView
+from ui.widgets.pg_view_base import style_plot_item
 from ui.widgets.trajectory_3d_view import Trajectory3DView
 # 中栏分段（SegmentedWidget routeKey）
 _SEG_MAP = 'planMap'
@@ -114,44 +117,6 @@ def _format_distance(distance_m: float) -> str:
     return f'{distance_m:.0f} m'
 
 
-def _card_title(text: str) -> SubtitleLabel:
-    """卡片标题：SubtitleLabel 微软雅黑 10pt Bold（SPEC §1）。"""
-    label = SubtitleLabel(text)
-    label.setFont(QFont(constants.FONT_FAMILY, 10, QFont.Weight.Bold))
-    return label
-
-
-def _make_card(title: str) -> tuple:
-    """卡片范式：CardWidget + QVBoxLayout，首行卡片标题。返回 (card, layout)。"""
-    card = CardWidget()
-    layout = QVBoxLayout(card)
-    layout.setContentsMargins(*constants.CARD_MARGINS)
-    layout.setSpacing(constants.CARD_SPACING)
-    layout.addWidget(_card_title(title))
-    return card, layout
-
-
-def _make_scroll_column(width: int) -> tuple:
-    """固定宽滚动栏：ScrollArea(固定 width) + 内容 widget + QVBoxLayout。
-    返回 (scroll_area, content_layout)。"""
-    scroll = ScrollArea()
-    scroll.setFixedWidth(width)
-    scroll.setWidgetResizable(True)
-    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-    scroll.setStyleSheet(
-        'QScrollArea { background-color: transparent; border: none; }')
-    content = QWidget(scroll)
-    content.setFixedWidth(width - 16)
-    content.setObjectName('pageScrollContent')
-    content.setStyleSheet(
-        'QWidget#pageScrollContent { background-color: transparent; }')
-    layout = QVBoxLayout(content)
-    layout.setContentsMargins(0, 0, 0, 0)
-    layout.setSpacing(constants.PAGE_SPACING)
-    scroll.setWidget(content)
-    return scroll, layout
-
-
 def _color_icon(hex_color: str) -> QIcon:
     """12×12 纯色块图标（测线列表颜色标识）。"""
     pixmap = QPixmap(12, 12)
@@ -202,17 +167,8 @@ class ElevationProfileView(pg.PlotWidget):
     def apply_theme(self, dark: bool) -> None:
         """深色 bg 'k'/文字 'w'；浅色 bg 'w'/文字 'k'；轴 pen/textPen/标签/图例同步。"""
         self._dark = bool(dark)
-        bg = 'k' if dark else 'w'
-        fg = 'w' if dark else 'k'
-        self.setBackground(bg)
-        # 不能用 QColor(fg)：Qt 颜色名不含 'w'/'k'，非法色会变黑导致深色下轴字不可见
-        pen = pg.mkPen(fg)
-        for name in ('bottom', 'left'):
-            axis = self._plot_item.getAxis(name)
-            axis.setPen(pen)
-            axis.setTextPen(pen)
-            # 轴标题（里程/高程）是独立 label，不随 textPen 变色，需显式同步
-            axis.setLabel(text=axis.labelText, color=fg)
+        self.setBackground('k' if dark else 'w')
+        fg = style_plot_item(self._plot_item, dark)
         # 已有图例的条目文字颜色不随主题更新，逐条同步
         legend = self._plot_item.legend
         if legend is not None:
@@ -220,13 +176,15 @@ class ElevationProfileView(pg.PlotWidget):
                 label.setText(label.text, color=fg)
 
 
-class SpatialPage(QWidget):
+class SpatialPage(PanelStateMixin, QWidget):
     """空间信息页面。"""
 
     current_line_requested = pyqtSignal(str)    # 设为当前测线（line_id）
     basemap_prefetch_requested = pyqtSignal()   # 预下载当前区域（页面内部已处理，供外部观测）
     depth_preview_requested = pyqtSignal(list)          # 深度切片预览（勾选 line_ids）
     save_depth_layer_requested = pyqtSignal(list, float)  # 存为图层（line_ids, cell_size_m）
+
+    _PANEL_STATE_PREFIX = 'spatial'
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -268,34 +226,12 @@ class SpatialPage(QWidget):
         sm.save()
 
     # ============================================================ 面板状态
-    def panel_states(self) -> dict:
-        return {
-            'left': self._left_panel.is_collapsed(),
-            'right': self._right_panel.is_collapsed(),
-        }
-
-    def set_panel_collapsed(self, *, left: bool = None, right: bool = None,
-                            animate: bool = True) -> None:
-        if left is not None:
-            self._left_panel.set_collapsed(bool(left), animate=animate)
-        if right is not None:
-            self._right_panel.set_collapsed(bool(right), animate=animate)
-
     def _restore_state(self) -> None:
         """恢复折叠状态 + 底图源选择（共享实例注入后生效；未注入不读盘）。"""
+        self._restore_panel_state()
         sm = self._sm
         if sm is None:
             return
-        self._left_panel.blockSignals(True)
-        self._right_panel.blockSignals(True)
-        try:
-            self._left_panel.set_collapsed(
-                bool(sm.get('spatial_left_collapsed', False)), animate=False)
-            self._right_panel.set_collapsed(
-                bool(sm.get('spatial_right_collapsed', False)), animate=False)
-        finally:
-            self._left_panel.blockSignals(False)
-            self._right_panel.blockSignals(False)
         source = str(sm.get('spatial_basemap_source', DEFAULT_TILE_SOURCE))
         if source not in BASEMAP_LAYERS:
             source = DEFAULT_TILE_SOURCE
@@ -365,12 +301,6 @@ class SpatialPage(QWidget):
         base = self._dem_base_text or '未导入本地 DEM'
         self._3d_dem_label.setText(f'{base}；{text}' if text else base)
 
-    def _save_panel_state(self) -> None:
-        self._persist_setting('spatial_left_collapsed',
-                              self._left_panel.is_collapsed())
-        self._persist_setting('spatial_right_collapsed',
-                              self._right_panel.is_collapsed())
-
     # ============================================================ UI 构建
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -383,20 +313,20 @@ class SpatialPage(QWidget):
         root.addLayout(columns, 1)
 
         # ---------------- 左栏（展开 320px，可折叠）
-        left_scroll, left_layout = _make_scroll_column(320)
+        left_scroll, left_layout = make_scroll_column(320)
         left_panel = CollapsiblePanel(
             'left', expand_width=320, collapse_width=40, parent=self)
         left_panel.set_content_widget(left_scroll)
         columns.addWidget(left_panel)
         self._left_panel = left_panel
 
-        lines_card, lines_layout = _make_card('测线')
+        lines_card, lines_layout = make_card('测线')
         self._line_list = QListWidget(lines_card)
         self._line_list.setMinimumHeight(180)
         lines_layout.addWidget(self._line_list, 1)
         left_layout.addWidget(lines_card, 1)
 
-        basemap_card, basemap_layout = _make_card('底图')
+        basemap_card, basemap_layout = make_card('底图')
         source_row = QHBoxLayout()
         source_row.setSpacing(constants.CARD_SPACING)
         source_label = CaptionLabel('来源:', basemap_card)
@@ -414,13 +344,13 @@ class SpatialPage(QWidget):
         basemap_layout.addWidget(self._prefetch_label)
         left_layout.addWidget(basemap_card)
 
-        crs_card, crs_layout = _make_card('投影信息')
+        crs_card, crs_layout = make_card('投影信息')
         self._crs_label = CaptionLabel('暂无轨迹数据', crs_card)
         self._crs_label.setWordWrap(True)
         crs_layout.addWidget(self._crs_label)
         left_layout.addWidget(crs_card)
 
-        view3d_card, view3d_layout = _make_card('三维显示')
+        view3d_card, view3d_layout = make_card('三维显示')
         exag_row = QHBoxLayout()
         exag_row.setSpacing(constants.CARD_SPACING)
         exag_label = CaptionLabel('垂直夸张:', view3d_card)
@@ -495,7 +425,7 @@ class SpatialPage(QWidget):
         middle_layout.setSpacing(constants.PAGE_SPACING)
         columns.addWidget(middle, 1)
 
-        view_card, view_layout = _make_card('空间视图')
+        view_card, view_layout = make_card('空间视图')
         seg_row = QHBoxLayout()
         seg_row.setSpacing(constants.CARD_SPACING)
         self._view_segment = SegmentedWidget(view_card)
@@ -545,14 +475,14 @@ class SpatialPage(QWidget):
         middle_layout.addWidget(view_card, 1)
 
         # ---------------- 右栏（展开 340px，可折叠）
-        right_scroll, right_layout = _make_scroll_column(340)
+        right_scroll, right_layout = make_scroll_column(340)
         right_panel = CollapsiblePanel(
             'right', expand_width=340, collapse_width=40, parent=self)
         right_panel.set_content_widget(right_scroll)
         columns.addWidget(right_panel)
         self._right_panel = right_panel
 
-        detail_card, detail_layout = _make_card('测线详情')
+        detail_card, detail_layout = make_card('测线详情')
         self._detail_labels = {}
         for key, title in (('name', '名称'), ('traces', '道数'),
                            ('elevation', '高程范围'), ('rtk', 'RTK状态'),
@@ -572,7 +502,7 @@ class SpatialPage(QWidget):
         self._set_current_btn.setEnabled(False)
         detail_layout.addWidget(self._set_current_btn)
 
-        coverage_card, coverage_layout = _make_card('项目覆盖统计')
+        coverage_card, coverage_layout = make_card('项目覆盖统计')
         self._coverage_labels = {}
         for key, title in (('tracks', '含轨迹测线'), ('points', '轨迹点数'),
                            ('length', '总里程'), ('spacing', '平均点距')):
@@ -634,26 +564,15 @@ class SpatialPage(QWidget):
             self._colors[line_id] = _TRACK_COLORS[index % len(_TRACK_COLORS)]
 
         # 重建勾选列表（默认全选，保持已有勾选状态）
-        previous_checked = {}
-        for row in range(self._line_list.count()):
-            item = self._line_list.item(row)
-            previous_checked[str(item.data(Qt.ItemDataRole.UserRole) or '')] = (
-                item.checkState() == Qt.CheckState.Checked)
-        self._line_list.blockSignals(True)
-        self._line_list.clear()
-        for track in self._tracks:
-            line_id = str(getattr(track, 'line_id', '') or '')
-            if not line_id:
-                continue
-            name = str(getattr(track, 'name', '') or line_id)
-            item = QListWidgetItem(_color_icon(self._colors[line_id]), name)
-            item.setData(Qt.ItemDataRole.UserRole, line_id)
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            checked = previous_checked.get(line_id, True)
-            item.setCheckState(
-                Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
-            self._line_list.addItem(item)
-        self._line_list.blockSignals(False)
+        rebuild_check_list(
+            self._line_list, self._tracks,
+            key_fn=lambda track: str(getattr(track, 'line_id', '') or ''),
+            text_fn=lambda track: (
+                str(getattr(track, 'name', '') or '')
+                or str(getattr(track, 'line_id', '') or '')),
+            default_checked=True,
+            icon_fn=lambda track: _color_icon(
+                self._colors[str(getattr(track, 'line_id', '') or '')]))
 
         self._refresh_views()
         self._refresh_crs_card()

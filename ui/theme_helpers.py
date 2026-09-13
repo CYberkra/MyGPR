@@ -108,6 +108,69 @@ def patch_combo_box_menu() -> None:
     ComboBoxMenu.__init__ = _patched_init
 
 
+def control_palette(dark: bool) -> dict:
+    """主题感知控件调色板（按钮/工具条/覆盖层/表格底色单源）。
+
+    收敛自 bscan_view 维护的第二套深浅调色板（surface/border/hover/
+    button_bg/button_text + 地图浮动覆盖层面板色），并把
+    :func:`native_views_qss` 的表格配色并入同一来源。键：
+
+    - 图表/工具条：``plot_bg``/``plot_fg``/``surface``/``border``/
+      ``hover``/``button_bg``/``button_text``；
+    - 浮动覆盖层（地图图例/缩放面板/坐标读出）：``panel_bg``/
+      ``panel_border``/``text``；
+    - 原生 item view（QTableWidget 等 QSS）：``table_base``/``table_text``/
+      ``table_border``/``table_header_bg``/``table_grid``。
+    """
+    if dark:
+        return {
+            'plot_bg': 'k', 'plot_fg': 'w',
+            'surface': '#000000', 'border': '#5a5a5a',
+            'hover': '#3d3d3d', 'button_bg': '#2d2d2d',
+            'button_text': '#f0f0f0',
+            'panel_bg': 'rgba(32,32,32,200)',
+            'panel_border': 'rgba(255,255,255,45)',
+            'text': '#f0f0f0',
+            'table_base': '#1e1e1e', 'table_text': '#e6e6e6',
+            'table_border': '#3c3c3c', 'table_header_bg': '#2d2d2d',
+            'table_grid': '#3c3c3c',
+        }
+    return {
+        'plot_bg': 'w', 'plot_fg': 'k',
+        'surface': '#ffffff', 'border': '#d9d9d9',
+        'hover': '#f0f0f0', 'button_bg': '#ffffff',
+        'button_text': '#202020',
+        'panel_bg': 'rgba(255,255,255,220)',
+        'panel_border': 'rgba(0,0,0,45)',
+        'text': '#202020',
+        'table_base': '#ffffff', 'table_text': '#1a1a1a',
+        'table_border': '#d9d9d9', 'table_header_bg': '#f5f5f5',
+        'table_grid': '#e5e5e5',
+    }
+
+
+def status_color(key: str) -> str:
+    """语义状态文字色（随主题查表）：success/warning/error/info/disabled。
+
+    新代码置文字色一律走本函数，勿直接用 constants.COLOR_* 裸常量
+    （深色主题下固定浅灰/浅色值对比度不足或刺眼）。
+    """
+    light, dark = constants.STATUS_COLORS[key]
+    return dark if isDarkTheme() else light
+
+
+def badge_colors(key: str) -> tuple:
+    """药丸徽章配色 ``(文字色, 底色)``（随主题查表）。
+
+    key 为语义键（success/warning/error/info/neutral）或 RTK 定位状态
+    中文（经 constants.BADGE_STATUS_KEYS 映射）。浅色 = 彩字淡底；
+    深色 = 白字彩底（淡底在深底上呈刺眼白块，参照任务中心徽章做法）。
+    """
+    key = constants.BADGE_STATUS_KEYS.get(key, key)
+    light, dark = constants.BADGE_COLOR_SETS[key]
+    return dark if isDarkTheme() else light
+
+
 def native_views_qss(dark: bool) -> str:
     """原生控件（表格/列表/树/表头）随主题换肤的应用级 QSS。
 
@@ -115,13 +178,14 @@ def native_views_qss(dark: bool) -> str:
     item view 传播不可靠（实测深→浅往返后 QTableWidget 残留深色），
     而应用级 QSS 立即对所有现存及未来匹配的控件生效。
     qfluentwidgets 自有控件带控件级 QSS，同优先级下控件级优先，不受影响。
+    配色单源：control_palette(dark)['table_*']。
     """
-    if dark:
-        base, text, border = '#1e1e1e', '#e6e6e6', '#3c3c3c'
-        header_bg, grid = '#2d2d2d', '#3c3c3c'
-    else:
-        base, text, border = '#ffffff', '#1a1a1a', '#d9d9d9'
-        header_bg, grid = '#f5f5f5', '#e5e5e5'
+    palette = control_palette(dark)
+    base = palette['table_base']
+    text = palette['table_text']
+    border = palette['table_border']
+    header_bg = palette['table_header_bg']
+    grid = palette['table_grid']
     return (
         'QTableWidget, QTableView, QListWidget, QListView, QTreeWidget,'
         ' QTreeView {'

@@ -1,0 +1,256 @@
+# -*- coding: utf-8 -*-
+"""页面脚手架（UI 收敛轮）：卡片 / 透明滚动栏 / 表单行 / 下拉与勾选列表填充 /
+折叠面板状态持久化。
+
+把 8 个页面里逐字复制的小工厂收敛到这一处纯 Qt 帮助函数（无业务逻辑）：
+``make_card``/``card_title``（原 6 份 _create_card/_make_card）、
+``make_scroll_column``（原 2 份 + 散落的透明 QScrollArea QSS）、
+``make_form_row``（标签 minWidth=100 + 控件 + stretch 约 30 处）、
+``refill_combo``（下拉重建-保持选择，userData 驱动）、
+``rebuild_check_list``（勾选列表重建-保持勾选，spatial/delivery 同模式）、
+``PanelStateMixin``（processing/spatial 两页折叠状态三件套）。
+
+各页面公开信号/方法签名不变；本模块只做"组装"，不做业务。
+"""
+
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QFont
+from PyQt6.QtWidgets import (QHBoxLayout, QListWidgetItem, QVBoxLayout, QWidget)
+from qfluentwidgets import CaptionLabel, CardWidget, ScrollArea, SubtitleLabel
+
+from ui import constants
+
+__all__ = [
+    'make_card', 'card_title', 'style_transparent_scroll',
+    'make_scroll_column', 'make_form_row',
+    'refill_combo', 'rebuild_check_list', 'PanelStateMixin',
+]
+
+
+# ---------------------------------------------------------------- 卡片
+def card_title(text: str) -> SubtitleLabel:
+    """卡片标题：SubtitleLabel 微软雅黑 10pt Bold（SPEC §1）。
+
+    收敛自 delivery/processing/interpretation/spatial 四份逐字重复的
+    私有 ``_card_title``。
+    """
+    label = SubtitleLabel(text)
+    label.setFont(QFont(constants.FONT_FAMILY, 10, QFont.Weight.Bold))
+    return label
+
+
+def make_card(title: str, *, parent=None) -> tuple:
+    """卡片范式（SPEC §1）：CardWidget + QVBoxLayout(margins=15, spacing=10)，
+    首行 10pt Bold 卡片标题。返回 ``(card, layout)``。
+
+    收敛自 home/settings/project 的 ``_create_card`` 与
+    processing/spatial 的 ``_make_card``、delivery 的方法版
+    ``_make_card``（其 ``CardWidget(self)`` 父参数经 ``parent=`` 传入）。
+    """
+    card = CardWidget(parent)
+    layout = QVBoxLayout(card)
+    layout.setContentsMargins(*constants.CARD_MARGINS)
+    layout.setSpacing(constants.CARD_SPACING)
+    layout.addWidget(card_title(title))
+    return card, layout
+
+
+# ---------------------------------------------------------------- 透明滚动栏
+def style_transparent_scroll(scroll, *, resizable: bool = True) -> None:
+    """透明无边框滚动区样式统一入口（整页/面板内 ScrollArea 的散落 QSS）。
+
+    与 :func:`make_scroll_column`（固定宽栏）互补：本函数只设样式，
+    不建内容容器（各页自建 container/layout，边距各异）。
+    """
+    if resizable:
+        scroll.setWidgetResizable(True)
+    scroll.setStyleSheet(
+        'QScrollArea { background-color: transparent; border: none; }')
+
+
+def make_scroll_column(width: int, *, parent=None,
+                       object_name: str = 'pageScrollContent') -> tuple:
+    """固定宽透明滚动栏：ScrollArea(固定 width，透明、横向滚动条恒关) +
+    内容 widget(固定 width-16，透明) + 内容 QVBoxLayout(0 边距, spacing=15)。
+    返回 ``(scroll_area, content_layout)``。
+
+    收敛自 processing/spatial 两份 ``_make_scroll_column``，并统一各页
+    散落的 ``QScrollArea{background-color:transparent;border:none;}`` QSS。
+    """
+    scroll = ScrollArea(parent)
+    scroll.setFixedWidth(width)
+    scroll.setWidgetResizable(True)
+    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    scroll.setStyleSheet(
+        'QScrollArea { background-color: transparent; border: none; }')
+    content = QWidget(scroll)
+    content.setFixedWidth(width - 16)
+    content.setObjectName(object_name)
+    content.setStyleSheet(
+        f'QWidget#{object_name} {{ background-color: transparent; }}')
+    layout = QVBoxLayout(content)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(constants.PAGE_SPACING)
+    scroll.setWidget(content)
+    return scroll, layout
+
+
+# ---------------------------------------------------------------- 表单行
+def make_form_row(label_text: str, field, *extra, label_min_width: int = 100,
+                  parent=None, trailing_stretch: bool = True) -> QHBoxLayout:
+    """表单行：CaptionLabel(minWidth=100) + 控件(stretch) + 扩展控件 + stretch。
+
+    收敛 settings/project/delivery/home 等页逐字重复的
+    「标签(minWidth=100)+控件+stretch」样板。返回行布局（供 addLayout）。
+
+    :param extra: 行尾附加控件（如「浏览」按钮、提示标签）；
+    :param trailing_stretch: 行尾是否加 stretch（以按钮收尾的行传 False）。
+    """
+    row = QHBoxLayout()
+    label = CaptionLabel(label_text, parent)
+    label.setMinimumWidth(label_min_width)
+    row.addWidget(label)
+    row.addWidget(field, 1)
+    for widget in extra:
+        row.addWidget(widget)
+    if trailing_stretch:
+        row.addStretch(1)
+    return row
+
+
+# ---------------------------------------------------------------- 下拉/勾选列表
+def refill_combo(combo, items, text_fn, data_fn=None, *,
+                 previous_data=None, prepend=()) -> None:
+    """blockSignals 下重建下拉项，并按 ``previous_data`` 找回选择。
+
+    收敛 processing ``set_lines``/``set_artifacts``、interpretation
+    ``set_artifacts`` 的「清空-重填-保持选择」簿记——qfluentwidgets 1.8+
+    ComboBox 完整支持 userData（addItem(text, userData)/currentData()/
+    findData()），平行索引列表簿记因此删除。
+
+    :param text_fn: item → 显示文本；:param data_fn: item → userData
+        （返回 None 时该项不传 userData）；
+    :param previous_data: 重填前选择（None 表示重填后回退首项；
+        不传则自动取重填前的 ``currentData()``）；
+    :param prepend: 先填的 ``(text, data)`` 占位项（如 ('原始数据', '')）；
+    :return: 无。找回失败一律回退索引 0——各调用方把"最新/默认"项排最前，
+        与原各页「默认最新一条 / 原始数据」语义一致。
+    """
+    if previous_data is None:
+        previous_data = combo.currentData()
+    combo.blockSignals(True)
+    try:
+        combo.clear()
+        for text, data in prepend:
+            combo.addItem(str(text), userData=data)
+        for item in items or []:
+            text = str(text_fn(item))
+            data = data_fn(item) if data_fn is not None else None
+            if data is None:
+                combo.addItem(text)
+            else:
+                combo.addItem(text, userData=data)
+        index = combo.findData(previous_data) \
+            if previous_data not in (None, '') else -1
+        if index < 0 and combo.count():
+            index = 0
+        if index >= 0:
+            combo.setCurrentIndex(index)
+    finally:
+        combo.blockSignals(False)
+
+
+def rebuild_check_list(widget, items, *, key_fn, text_fn,
+                       default_checked: bool = False, icon_fn=None) -> None:
+    """重建勾选列表并保持已有勾选状态（spatial 测线列表 / delivery
+    测线多选逐字同模式的收敛实现）。
+
+    :param key_fn: item → UserRole 键；:param text_fn: item → 显示文本；
+    :param default_checked: 新出现条目的默认勾选态；
+    :param icon_fn: item → QIcon 或 None（spatial 的颜色块图标）。
+    """
+    previous_checked = {}
+    for row in range(widget.count()):
+        item = widget.item(row)
+        previous_checked[str(item.data(Qt.ItemDataRole.UserRole) or '')] = (
+            item.checkState() == Qt.CheckState.Checked)
+    widget.blockSignals(True)
+    try:
+        widget.clear()
+        for entry in items or []:
+            key = str(key_fn(entry) or '')
+            if not key:
+                continue
+            icon = icon_fn(entry) if icon_fn is not None else None
+            if icon is None:
+                item = QListWidgetItem(str(text_fn(entry)))
+            else:
+                item = QListWidgetItem(icon, str(text_fn(entry)))
+            item.setData(Qt.ItemDataRole.UserRole, key)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            checked = previous_checked.get(key, default_checked)
+            item.setCheckState(
+                Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
+            widget.addItem(item)
+    finally:
+        widget.blockSignals(False)
+
+
+# ---------------------------------------------------------------- 折叠面板状态
+class PanelStateMixin:
+    """左右折叠面板状态持久化 mixin（processing/spatial 两页三件套收敛）。
+
+    约定子类：
+    - 属性 ``_sm``：共享 SettingsManager（主窗口注入，可 None）；
+    - 属性 ``_left_panel`` / ``_right_panel``：CollapsiblePanel；
+    - 类常量 ``_PANEL_STATE_PREFIX``：SettingsManager 键前缀
+      （如 ``'processing'`` → 键 ``processing_left_collapsed``）。
+
+    子类在 ``_connect_internal`` 中把两面板 ``sig_collapsed`` 接到
+    ``self._save_panel_state``；``set_settings_manager`` 注入后调用
+    ``self._restore_panel_state()``。
+    """
+
+    _PANEL_STATE_PREFIX = ''
+
+    def panel_states(self) -> dict:
+        """当前左右面板折叠状态。"""
+        return {
+            'left': self._left_panel.is_collapsed(),
+            'right': self._right_panel.is_collapsed(),
+        }
+
+    def set_panel_collapsed(self, *, left: bool = None, right: bool = None,
+                            animate: bool = True) -> None:
+        """设置左右面板折叠状态。"""
+        if left is not None:
+            self._left_panel.set_collapsed(bool(left), animate=animate)
+        if right is not None:
+            self._right_panel.set_collapsed(bool(right), animate=animate)
+
+    def _save_panel_state(self) -> None:
+        """把当前折叠状态写回共享 SettingsManager（未注入时静默跳过）。"""
+        sm = self._sm
+        if sm is None:
+            return
+        prefix = self._PANEL_STATE_PREFIX
+        sm.set(f'{prefix}_left_collapsed', self._left_panel.is_collapsed())
+        sm.set(f'{prefix}_right_collapsed', self._right_panel.is_collapsed())
+        sm.save()
+
+    def _restore_panel_state(self) -> None:
+        """从共享 SettingsManager 恢复折叠状态（未注入不读盘）。"""
+        sm = self._sm
+        if sm is None:
+            return
+        prefix = self._PANEL_STATE_PREFIX
+        self._left_panel.blockSignals(True)
+        self._right_panel.blockSignals(True)
+        try:
+            self._left_panel.set_collapsed(
+                bool(sm.get(f'{prefix}_left_collapsed', False)), animate=False)
+            self._right_panel.set_collapsed(
+                bool(sm.get(f'{prefix}_right_collapsed', False)), animate=False)
+        finally:
+            self._left_panel.blockSignals(False)
+            self._right_panel.blockSignals(False)

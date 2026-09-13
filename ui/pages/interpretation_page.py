@@ -21,29 +21,23 @@
 import math
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QAbstractItemView, QHBoxLayout, QHeaderView, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
     CaptionLabel, CardWidget, ComboBox, DoubleSpinBox, PrimaryPushButton,
-    PushButton, SubtitleLabel,
+    PushButton,
 )
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants
+from ui.page_scaffold import card_title, make_card, refill_combo
+from ui.theme_helpers import status_color
 from ui.widgets import BScanView, make_page_title, make_separator
 
 _OVERLAY_COLOR = constants.CHART_OVERLAY_COLOR   # 标注散点颜色（SPEC §6.6）
 _C_M_PER_NS = 0.29979        # 真空光速 c (m/ns)
-
-
-def _card_title(text: str) -> SubtitleLabel:
-    """卡片标题：SubtitleLabel 微软雅黑 10pt Bold（SPEC §1）。"""
-    label = SubtitleLabel(text)
-    label.setFont(QFont(constants.FONT_FAMILY, 10, QFont.Weight.Bold))
-    return label
 
 
 class InterpretationPage(QWidget):
@@ -89,11 +83,7 @@ class InterpretationPage(QWidget):
 
     def _build_tool_card(self) -> CardWidget:
         """顶部工具卡片：两行布局（行1 会话来源 / 行2 编辑操作）。"""
-        card = CardWidget(self)
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(*constants.CARD_MARGINS)
-        layout.setSpacing(constants.CARD_SPACING)
-        layout.addWidget(_card_title('标注工具'))
+        card, layout = make_card('标注工具', parent=self)
 
         # ---- 行1：会话来源（测线 / 数据版本 / 打开会话）+ 状态
         row1 = QHBoxLayout()
@@ -120,7 +110,7 @@ class InterpretationPage(QWidget):
         row1.addWidget(status_label)
         self._session_status_label = CaptionLabel('未打开会话', card)
         self._session_status_label.setStyleSheet(
-            'color: %s; font-size: 11px;' % constants.COLOR_DISABLED)
+            'color: %s; font-size: 11px;' % status_color('disabled'))
         row1.addWidget(self._session_status_label)
         layout.addLayout(row1)
 
@@ -147,18 +137,14 @@ class InterpretationPage(QWidget):
         row2.addStretch(1)
         hint = CaptionLabel('提示：在剖面图上左键点击拾取标注点', card)
         hint.setStyleSheet(
-            'color: %s; font-size: 11px;' % constants.COLOR_DISABLED)
+            'color: %s; font-size: 11px;' % status_color('disabled'))
         row2.addWidget(hint)
         layout.addLayout(row2)
         return card
 
     def _build_bscan_card(self) -> CardWidget:
         """剖面标注卡片：BScanView（pick 模式 + overlay）。"""
-        card = CardWidget(self)
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(*constants.CARD_MARGINS)
-        layout.setSpacing(constants.CARD_SPACING)
-        layout.addWidget(_card_title('剖面标注'))
+        card, layout = make_card('剖面标注', parent=self)
         self._bscan = BScanView(card)
         self._bscan.setMinimumHeight(420)
         self._bscan.set_pick_enabled(False)  # 会话打开前禁用 pick（P1-6）
@@ -179,11 +165,11 @@ class InterpretationPage(QWidget):
         points_layout.setContentsMargins(*constants.CARD_MARGINS)
         points_layout.setSpacing(constants.CARD_SPACING)
         header_row = QHBoxLayout()
-        header_row.addWidget(_card_title('标注点列表'))
+        header_row.addWidget(card_title('标注点列表'))
         header_row.addStretch(1)
         self._points_count_label = CaptionLabel('0 个点', points_card)
         self._points_count_label.setStyleSheet(
-            'color: %s; font-size: 11px;' % constants.COLOR_DISABLED)
+            'color: %s; font-size: 11px;' % status_color('disabled'))
         header_row.addWidget(self._points_count_label)
         points_layout.addLayout(header_row)
 
@@ -214,11 +200,7 @@ class InterpretationPage(QWidget):
         layout.addWidget(points_card, 1)
 
         # ---------------- 深度换算
-        depth_card = CardWidget(column)
-        depth_layout = QVBoxLayout(depth_card)
-        depth_layout.setContentsMargins(*constants.CARD_MARGINS)
-        depth_layout.setSpacing(constants.CARD_SPACING)
-        depth_layout.addWidget(_card_title('深度换算'))
+        depth_card, depth_layout = make_card('深度换算', parent=column)
         diel_row = QHBoxLayout()
         diel_row.setSpacing(constants.CARD_SPACING)
         diel_label = CaptionLabel('介电常数 εr:', depth_card)
@@ -237,16 +219,12 @@ class InterpretationPage(QWidget):
                                     depth_card)
         formula_hint.setWordWrap(True)
         formula_hint.setStyleSheet(
-            'color: %s; font-size: 11px;' % constants.COLOR_DISABLED)
+            'color: %s; font-size: 11px;' % status_color('disabled'))
         depth_layout.addWidget(formula_hint)
         layout.addWidget(depth_card)
 
         # ---------------- 速度分析（Phase 2.1）
-        velocity_card = CardWidget(column)
-        velocity_layout = QVBoxLayout(velocity_card)
-        velocity_layout.setContentsMargins(*constants.CARD_MARGINS)
-        velocity_layout.setSpacing(constants.CARD_SPACING)
-        velocity_layout.addWidget(_card_title('速度分析'))
+        velocity_card, velocity_layout = make_card('速度分析', parent=column)
         self._velocity_btn = PushButton('拟合速度模型', velocity_card)
         self._velocity_btn.setToolTip(
             '用当前标注点拟合绕射双曲线：t² = A·x² + B·x + C ⇒ v = 2/√A\n'
@@ -300,23 +278,16 @@ class InterpretationPage(QWidget):
 
     def set_artifacts(self, artifacts) -> None:
         """处理成果列表 → 数据下拉（原始数据 + 各成果）；保持旧选择，否则默认原始数据。"""
-        current = self._current_artifact_id()
-        self._artifact_combo.blockSignals(True)
-        self._artifact_combo.clear()
-        self._artifact_combo.addItem('原始数据')  # index 0 = 原始数据
-        for artifact in (artifacts or []):
-            artifact_id = str(getattr(artifact, 'artifact_id', '') or '')
-            if not artifact_id:
-                continue
-            name = str(getattr(artifact, 'name', '') or artifact_id)
-            self._artifact_combo.addItem(f'成果: {name}')
-            self._artifact_combo.setItemData(self._artifact_combo.count() - 1, artifact_id)
-        if current:
-            found = self._index_of_artifact(current)
-            self._artifact_combo.setCurrentIndex(found if found >= 0 else 0)
-        else:
-            self._artifact_combo.setCurrentIndex(0)
-        self._artifact_combo.blockSignals(False)
+        def _artifact_id(artifact) -> str:
+            return str(getattr(artifact, 'artifact_id', '') or '')
+
+        refill_combo(
+            self._artifact_combo,
+            [a for a in (artifacts or []) if _artifact_id(a)],
+            lambda a: f'成果: {str(getattr(a, "name", "") or _artifact_id(a))}',
+            _artifact_id,
+            previous_data=self._current_artifact_id(),
+            prepend=(('原始数据', ''),))   # index 0 = 原始数据
 
     def set_session_info(self, text: str) -> None:
         """会话状态文案（顶部状态 CaptionLabel + 底部信息条）。"""
@@ -353,12 +324,6 @@ class InterpretationPage(QWidget):
         if index <= 0:
             return ''
         return str(self._artifact_combo.itemData(index) or '')
-
-    def _index_of_artifact(self, artifact_id: str) -> int:
-        for i in range(1, self._artifact_combo.count()):
-            if str(self._artifact_combo.itemData(i) or '') == artifact_id:
-                return i
-        return -1
 
     def _update_edit_enabled(self) -> None:
         enabled = self._session_active and not self._busy

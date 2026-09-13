@@ -2,7 +2,8 @@
 
 UI：顶部搜索 LineEdit（占位"搜索方法…"，实时过滤）→ 分类 QTreeWidget
 （一级 = category_label，二级 = display_name + 标签徽章）。
-徽章：推荐 = 主题色 themeColor() / 备选 = #9ca3af / 实验 = #f59e0b，
+徽章：白字彩底、随主题刷新——推荐 = 运行时 themeColor()（经 apply_theme
+重建，避免构建时快照过期）/ 备选 = disabled 灰 / 实验 = warning 琥珀，
 QSS 用 SPEC §1 徽章模板。tooltip 显示 method_id 与参数数。
 双击发 sig_add_requested；单击选中发 sig_method_selected。
 右键菜单（RoundMenu）：添加到处理链（等同双击）/ 复制方法名。
@@ -14,27 +15,26 @@ from PyQt6.QtWidgets import (QApplication, QHBoxLayout, QTreeWidget,
 from qfluentwidgets import LineEdit, themeColor
 from qfluentwidgets import FluentIcon as FIF
 
+from ui.theme_helpers import status_color
 from ui.widgets.context_menus import add_action, make_menu
-
-# 标签 → 徽章（文字色, 底色）
-_TAG_BADGE_COLORS = {
-    '推荐': ('#ffffff', None),          # None → 运行时 themeColor()
-    '备选': ('#ffffff', '#9ca3af'),
-    '实验': ('#ffffff', '#f59e0b'),
-}
-_DEFAULT_BADGE = ('#ffffff', '#9ca3af')
 
 _BADGE_QSS = ('QLabel { padding: 2px 10px; border-radius: 10px; '
               'font-size: 12px; font-weight: bold; '
-              'color: %s; background-color: %s; }')
+              'color: #ffffff; background-color: %s; }')
+
+
+def _tag_badge_bg(tag: str) -> str:
+    """标签徽章底色（随主题）：推荐 = 当前主题色（构建后经 apply_theme 刷新）。"""
+    if tag == '推荐':
+        return themeColor().name()
+    if tag == '实验':
+        return status_color('warning')
+    return status_color('disabled')   # 备选 / 未知标签
 
 
 def _make_badge(tag: str) -> QLabel:
-    fg, bg = _TAG_BADGE_COLORS.get(tag, _DEFAULT_BADGE)
-    if bg is None:
-        bg = themeColor().name()
     badge = QLabel(tag)
-    badge.setStyleSheet(_BADGE_QSS % (fg, bg))
+    badge.setStyleSheet(_BADGE_QSS % _tag_badge_bg(tag))
     return badge
 
 
@@ -47,6 +47,7 @@ class MethodBrowser(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._methods = []
+        self._badges = []   # (badge QLabel, tag)：主题切换时重刷底色
 
         self._search = LineEdit(self)
         self._search.setPlaceholderText('搜索方法…')
@@ -107,7 +108,9 @@ class MethodBrowser(QWidget):
                                     row_widget)
                 row.addWidget(name_label, 1)
                 for tag in (m.get('tags') or []):
-                    row.addWidget(_make_badge(str(tag)))
+                    badge = _make_badge(str(tag))
+                    self._badges.append((badge, str(tag)))
+                    row.addWidget(badge)
                 self._tree.setItemWidget(child, 0, row_widget)
             top.setExpanded(True)
 
@@ -128,6 +131,12 @@ class MethodBrowser(QWidget):
                 child.setHidden(not hit)
                 visible_children += int(hit)
             top.setHidden(visible_children == 0)
+
+    def apply_theme(self, dark: bool) -> None:
+        """主题切换：重建徽章底色——「推荐」的 themeColor() 是构建时快照，
+        主窗口主题切换遍历（findChildren + apply_theme）会调到本方法。"""
+        for badge, tag in self._badges:
+            badge.setStyleSheet(_BADGE_QSS % _tag_badge_bg(tag))
 
     # ------------------------------------------------------------- 信号
     def _method_id_of(self, item):

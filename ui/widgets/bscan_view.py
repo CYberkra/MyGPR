@@ -18,8 +18,8 @@ sample_axis 时显示物理量，降采样数据附"原始约 N"），右键菜�
 （代价：右键拖拽框选缩放失效，由菜单缩放项补偿）。
 """
 
-from PyQt6.QtCore import Qt, QDateTime, pyqtSignal
-from PyQt6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout, QWidget
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
 from enum import Enum
 
@@ -27,9 +27,11 @@ import pyqtgraph as pg
 from PyQt6.QtWidgets import QLabel
 from qfluentwidgets import FluentIcon as FIF, PushButton
 
-from ui import constants, file_dialogs
+from ui import constants
+from ui.theme_helpers import control_palette
 from ui.widgets.context_menus import (RoundMenu, add_action,
                                       add_checkable_submenu, make_menu)
+from ui.widgets.pg_view_base import GraphicsViewBase, style_plot_item
 
 
 class BScanDisplayMode(Enum):
@@ -74,8 +76,11 @@ def format_crosshair_readout(trace: int, sample: int, shape: tuple,
     return '\n'.join(lines)
 
 
-class BScanView(QWidget):
+class BScanView(GraphicsViewBase, QWidget):
     """B-Scan 剖面图像视图。
+
+    缩放/导出/轴主题继承 GraphicsViewBase（pg_view_base）；
+    比例策略（方形/铺满/1:1）与十字光标等为本类专属。
 
     信号:
         sig_point_picked(int, int): pick 模式下鼠标点击发射 (trace_index, sample_index)，
@@ -112,6 +117,7 @@ class BScanView(QWidget):
 
         self._glw = pg.GraphicsLayoutWidget(self)
         self._plot = self._glw.addPlot(row=0, col=0, title='B-Scan图像')
+        self._plot_item = self._plot   # GraphicsViewBase 约定属性
         self._plot.setLabel('bottom', '道数')
         self._plot.setLabel('left', '采样点')
         self._plot.invertY(True)
@@ -214,14 +220,13 @@ class BScanView(QWidget):
         layout.addStretch(1)
         return layout
 
-    # ------------------------------------------------------------------ 缩放
-    def zoom_in(self) -> None:
-        """放大 20%。"""
-        self._plot.vb.scaleBy((1.2, 1.2))
+    # ------------------------------------------------------------------ 缩放 / 导出
+    def _export_grab_target(self):
+        """PNG 导出/复制抓取目标：图形画布（不含工具条）。"""
+        return self._glw
 
-    def zoom_out(self) -> None:
-        """缩小 20%。"""
-        self._plot.vb.scaleBy((1.0 / 1.2, 1.0 / 1.2))
+    def _fit_view(self) -> None:
+        self.fit_to_data()
 
     def fit_to_data(self) -> None:
         """自适应窗口：显示全部数据（解除纵横锁定，拉伸铺满）。"""
@@ -378,24 +383,11 @@ class BScanView(QWidget):
         menu.addSeparator()
         add_action(menu, FIF.COPY, '复制图像', self._copy_image,
                    enabled=self._image_shape is not None)
-        add_action(menu, FIF.SAVE, '导出 PNG…', self._export_png,
+        add_action(menu, FIF.SAVE, '导出 PNG…',
+                   lambda: self.export_png(
+                       title=self._plot.titleLabel.text, prefix='bscan'),
                    enabled=self._image_shape is not None)
         menu.exec(event.screenPos().toPoint())
-
-    def _copy_image(self) -> None:
-        """视图内容复制到剪贴板。"""
-        QApplication.clipboard().setPixmap(self._glw.grab())
-
-    def _export_png(self) -> None:
-        """视图内容导出 PNG（默认文件名含标题与时间戳）。"""
-        import re
-        title = re.sub(r'[\\/:*?"<>|\s]+', '_', self._plot.titleLabel.text)
-        stamp = QDateTime.currentDateTime().toString('yyyyMMdd_HHmmss')
-        path, _selected = file_dialogs.getSaveFileName(
-            self, '导出 B-Scan 图像', f'bscan_{title}_{stamp}.png',
-            'PNG 图片 (*.png)')
-        if path:
-            self._glw.grab().save(path, 'PNG')
 
     # ------------------------------------------------------------------ 交互
     def set_pick_enabled(self, enabled: bool) -> None:
@@ -656,47 +648,38 @@ class BScanView(QWidget):
         self._plot.setTitle('暂无数据 — 请先在项目页导入测线')
 
     def apply_theme(self, dark: bool) -> None:
-        """深色 bg 'k'/文字 'w'；浅色 bg 'w'/文字 'k'；轴 pen/textPen/标签同步。"""
-        bg = 'k' if dark else 'w'
-        fg = 'w' if dark else 'k'
-        self._glw.setBackground(bg)
-        surface = '#000000' if dark else '#ffffff'
-        self._toolbar.setStyleSheet(
-            f'QWidget#bscanToolbar {{ background-color: {surface}; }}')
-        # 工具条按钮：紧凑尺寸保留，颜色随主题（硬编码浅色会在深色下突兀）
-        border = '#5a5a5a' if dark else '#d9d9d9'
-        hover = '#3d3d3d' if dark else '#f0f0f0'
-        button_bg = '#2d2d2d' if dark else '#ffffff'
-        button_text = '#f0f0f0' if dark else '#202020'
-        btn_qss = (
-            f'PushButton {{ background-color: {button_bg}; color: {button_text}; '
-            f'border: 1px solid {border}; border-radius: 4px; '
-            f'padding: 2px 8px; font-size: 11px; }}'
-            f'PushButton:hover {{ background-color: {hover}; }}'
-        )
-        for btn in getattr(self, '_toolbar_buttons', ()):
-            btn.setStyleSheet(btn_qss)
-        # 注意不能用 QColor(fg)：Qt 颜色名不含 'w'/'k'，QColor('w') 非法会变黑，
-        # 深色主题下轴刻度黑底黑字不可见；pg.mkPen 支持 'w'/'k' 简写
-        pen = pg.mkPen(fg)
-        for name in ('bottom', 'left'):
-            axis = self._plot.getAxis(name)
-            axis.setPen(pen)
-            axis.setTextPen(pen)
-            # 刻度文字由 textPen 控制，但轴标题（道数/采样点）是独立 label，
-            # 不随 textPen 变色，需显式同步，否则深色主题下标题隐身
-            axis.setLabel(text=axis.labelText, color=fg)
-        title_item = self._plot.titleLabel
-        title_item.setText(title_item.text, color=fg)
-        if self._colorbar is not None:
-            caxis = self._colorbar.axis
-            caxis.setPen(pen)
-            caxis.setTextPen(pen)
-            if getattr(caxis, 'labelText', ''):
-                caxis.setLabel(text=caxis.labelText, color=fg)
+        """深色 bg 'k'/文字 'w'；浅色 bg 'w'/文字 'k'；轴/色标/工具条/十字光标同步。
+
+        轴 pen/textPen/标签/标题走 pg_view_base.style_plot_item 统一循环；
+        工具条按钮等控件配色走 control_palette 单源。
+        """
+        self._dark = bool(dark)
+        palette = control_palette(dark)
+        self._glw.setBackground(palette['plot_bg'])
+        style_plot_item(
+            self._plot, dark,
+            colorbar_axis=(self._colorbar.axis
+                           if self._colorbar is not None else None))
+        self._refresh_control_palette(dark)
         # 十字光标：深色主题黄 / 浅色主题深红（图像与白底上均醒目）
         crosshair_pen = pg.mkPen(
             '#ffe135' if dark else '#c8000a',
             style=Qt.PenStyle.DashLine, width=1)
         self._vline.setPen(crosshair_pen)
         self._hline.setPen(crosshair_pen)
+
+    def _refresh_control_palette(self, dark: bool) -> None:
+        """工具条按钮配色（control_palette 单源，主题切换时重刷）。"""
+        palette = control_palette(dark)
+        self._toolbar.setStyleSheet(
+            f'QWidget#bscanToolbar {{ background-color: {palette["surface"]}; }}')
+        # 工具条按钮：紧凑尺寸保留，颜色随主题（硬编码浅色会在深色下突兀）
+        btn_qss = (
+            f'PushButton {{ background-color: {palette["button_bg"]}; '
+            f'color: {palette["button_text"]}; '
+            f'border: 1px solid {palette["border"]}; border-radius: 4px; '
+            f'padding: 2px 8px; font-size: 11px; }}'
+            f'PushButton:hover {{ background-color: {palette["hover"]}; }}'
+        )
+        for btn in getattr(self, '_toolbar_buttons', ()):
+            btn.setStyleSheet(btn_qss)

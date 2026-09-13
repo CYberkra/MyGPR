@@ -38,18 +38,46 @@ PANEL_SPACING = 6
 PANEL_MARGINS = (6, 6, 6, 6)
 
 # ---------------------------------------------------------------- 状态色（style_spec §1.2）
-COLOR_SUCCESS = '#22c55e'
-COLOR_WARNING = '#f59e0b'
-COLOR_ERROR = '#ef4444'
-COLOR_INFO = '#3b82f6'
-COLOR_DISABLED = '#9ca3af'
+# 浅色值 + 深色变体（(浅色, 深色) 成对）。深色变体沿用 LOG_COLOR_* 的
+# "同色相高亮度"原则（#2b2b2b 系深底对比度）；新代码须经
+# ui.theme_helpers.status_color()/badge_colors() 按主题查表，
+# 以下裸常量仅作兼容别名保留。
+STATUS_COLORS = {
+    'success': ('#22c55e', '#34d97b'),
+    'warning': ('#f59e0b', '#ffb84d'),
+    'error': ('#ef4444', '#ff5c5c'),
+    'info': ('#3b82f6', '#5b9dff'),
+    'disabled': ('#9ca3af', '#9ca3af'),
+}
 
-# 徽章配色对（文字色, 底色），逐字复刻 style_spec §1.2
+COLOR_SUCCESS = STATUS_COLORS['success'][0]
+COLOR_WARNING = STATUS_COLORS['warning'][0]
+COLOR_ERROR = STATUS_COLORS['error'][0]
+COLOR_INFO = STATUS_COLORS['info'][0]
+COLOR_DISABLED = STATUS_COLORS['disabled'][0]
+
+# 徽章配色对（文字色, 底色）：浅色 = 彩字淡底（style_spec §1.2 逐字值）；
+# 深色 = 白字彩底（参照任务中心徽章的双主题安全做法，淡底在深底上刺眼）。
+BADGE_COLOR_SETS = {
+    'success': (('#22c55e', '#f0fdf4'), ('#ffffff', '#15803d')),
+    'warning': (('#f59e0b', '#fffbeb'), ('#ffffff', '#b45309')),
+    'info': (('#3b82f6', '#eff6ff'), ('#ffffff', '#1d4ed8')),
+    'error': (('#ef4444', '#fef2f2'), ('#ffffff', '#b91c1c')),
+    'neutral': (('#9ca3af', '#f3f4f6'), ('#e5e7eb', '#4b5563')),
+}
+
+# RTK 定位状态 → 徽章语义键
+BADGE_STATUS_KEYS = {
+    '未定位': 'neutral',
+    '单点定位': 'warning',
+    'RTK浮点解': 'info',
+    'RTK固定解': 'success',
+}
+
+# 兼容别名：逐字保留 style_spec §1.2 浅色徽章配色对（按中文状态键）。
 BADGE_COLOR_PAIRS = {
-    '未定位': ('#9ca3af', '#f3f4f6'),
-    '单点定位': ('#f59e0b', '#fffbeb'),
-    'RTK浮点解': ('#3b82f6', '#eff6ff'),
-    'RTK固定解': ('#22c55e', '#f0fdf4'),
+    status: BADGE_COLOR_SETS[key][0]
+    for status, key in BADGE_STATUS_KEYS.items()
 }
 
 # ---------------------------------------------------------------- 日志（style_spec §1.2/§2.5）

@@ -31,7 +31,9 @@ from qfluentwidgets import ToolButton
 
 from ui import constants
 from ui.desktop_backend_facade import tile_cache_dir
+from ui.theme_helpers import control_palette
 from ui.widgets.context_menus import add_action, make_menu
+from ui.widgets.pg_view_base import GraphicsViewBase
 from ui.widgets.map_tiles import (DEFAULT_TILE_SOURCE, TILE_SOURCE_MAX_ZOOM,
                                   TILE_SOURCES, WORLD_SIZE_M,
                                   choose_prefetch_zooms, extract_epsg,
@@ -348,14 +350,19 @@ class TileLayer(pg.GraphicsObject):
         return queued
 
 
-class MapView(pg.GraphicsLayoutWidget):
-    """平面地图视图：瓦片底图 + 测线轨迹折线。"""
+class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
+    """平面地图视图：瓦片底图 + 测线轨迹折线。
+
+    缩放/导出继承 GraphicsViewBase（统一步长 1.25 与 PNG 导出）；
+    右键菜单含「导出 PNG…」（UI 收敛轮能力补齐）。
+    """
 
     prefetch_progress = pyqtSignal(int, int)    # 已完成, 总数
 
     def __init__(self, source_key: str = DEFAULT_TILE_SOURCE, parent=None) -> None:
         super().__init__(parent)
         self._plot = self.addPlot()
+        self._plot_item = self._plot   # GraphicsViewBase 约定属性
         self._plot.hideAxis('bottom')
         self._plot.hideAxis('left')
         self._plot.setAspectLocked(True)
@@ -398,8 +405,8 @@ class MapView(pg.GraphicsLayoutWidget):
         zoom_layout.setContentsMargins(4, 4, 4, 4)
         zoom_layout.setSpacing(4)
         for icon, tip, slot in (
-                (FIF.ZOOM_IN, '放大', self._zoom_in),
-                (FIF.ZOOM_OUT, '缩小', self._zoom_out),
+                (FIF.ZOOM_IN, '放大', self.zoom_in),
+                (FIF.ZOOM_OUT, '缩小', self.zoom_out),
                 (FIF.FIT_PAGE, '适应全部测线', self.fit_to_tracks)):
             btn = ToolButton(icon, self._zoom_panel)
             btn.setFixedSize(30, 30)
@@ -540,11 +547,9 @@ class MapView(pg.GraphicsLayoutWidget):
         self._rebuild_legend()
 
     # ------------------------------------------------------------ 浮动覆盖层
-    def _zoom_in(self) -> None:
-        self._plot.vb.scaleBy((0.75, 0.75))
-
-    def _zoom_out(self) -> None:
-        self._plot.vb.scaleBy((1.0 / 0.75, 1.0 / 0.75))
+    def _fit_view(self) -> None:
+        """自适应视野（GraphicsViewBase.zoom_fit → 适应全部测线）。"""
+        self.fit_to_tracks()
 
     def _on_mouse_moved(self, pos) -> None:
         """鼠标位置 → 经纬度实时读出（视图世界坐标恒为 Web Mercator 米）。"""
@@ -582,7 +587,7 @@ class MapView(pg.GraphicsLayoutWidget):
         if not entries:
             self._legend.hide()
             return
-        text_color = '#f0f0f0' if self._dark else '#202020'
+        text_color = control_palette(self._dark)['text']
         for label, color in entries:
             row = QWidget(self._legend)
             row_layout = QHBoxLayout(row)
@@ -604,15 +609,15 @@ class MapView(pg.GraphicsLayoutWidget):
         self._layout_overlays()
 
     def _restyle_overlays(self) -> None:
-        """覆盖层样式跟随深浅主题（图例行不重建，只刷新文字颜色）。"""
-        if self._dark:
-            panel = ('background-color: rgba(32,32,32,200);'
-                     ' border: 1px solid rgba(255,255,255,45); border-radius: 8px;')
-            text = '#f0f0f0'
-        else:
-            panel = ('background-color: rgba(255,255,255,220);'
-                     ' border: 1px solid rgba(0,0,0,45); border-radius: 8px;')
-            text = '#202020'
+        """覆盖层样式跟随深浅主题（图例行不重建，只刷新文字颜色）。
+
+        配色单源：control_palette(dark)['panel_*'/'text']。
+        """
+        palette = control_palette(self._dark)
+        panel = (f"background-color: {palette['panel_bg']};"
+                 f" border: 1px solid {palette['panel_border']};"
+                 ' border-radius: 8px;')
+        text = palette['text']
         self._legend.setStyleSheet(f'QFrame#mapLegend {{ {panel} }}')
         self._zoom_panel.setStyleSheet(f'QFrame#mapZoomPanel {{ {panel} }}')
         self._coord_label.setStyleSheet(
@@ -672,10 +677,14 @@ class MapView(pg.GraphicsLayoutWidget):
         menu = make_menu(self)
         add_action(menu, FIF.FIT_PAGE, '适应全部测线', self.fit_to_tracks,
                    enabled=bool(self._track_summaries))
+        add_action(menu, FIF.ZOOM_IN, '放大', self.zoom_in)
+        add_action(menu, FIF.ZOOM_OUT, '缩小', self.zoom_out)
         add_action(menu, FIF.DOWNLOAD, '下载当前区域瓦片',
                    self.prefetch_current_view)
         menu.addSeparator()
         add_action(menu, FIF.COPY, '复制中心坐标', self._copy_center_lonlat)
+        add_action(menu, FIF.SAVE, '导出 PNG…',
+                   lambda: self.export_png(prefix='map'))
         menu.exec(event.screenPos().toPoint())
 
     def _copy_center_lonlat(self) -> None:

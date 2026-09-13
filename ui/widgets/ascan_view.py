@@ -2,19 +2,24 @@
 
 简单 pg.PlotWidget 包装，复刻 style_spec §3.3 A-Scan 区：
 pen 宽 2、Y 范围 min-0.1 ~ max+0.1、轴标签 bottom='采样点' / left='幅度'。
+
+缩放/导出/轴主题继承 GraphicsViewBase（pg_view_base 统一收敛）。
 """
 
 from PyQt6.QtWidgets import QVBoxLayout, QWidget
 
 import pyqtgraph as pg
 
+from ui.widgets.pg_view_base import GraphicsViewBase, style_plot_item
 
-class AScanView(QWidget):
+
+class AScanView(GraphicsViewBase, QWidget):
     """A-Scan 时域波形视图。"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._plot = pg.PlotWidget(self, title='A-Scan时域波形')
+        self._plot_item = self._plot.getPlotItem()   # GraphicsViewBase 约定属性
         self._plot.setLabel('bottom', '采样点')
         self._plot.setLabel('left', '幅度')
         self._curve = self._plot.plot(pen=pg.mkPen('b', width=2))
@@ -46,19 +51,8 @@ class AScanView(QWidget):
         self._curve.setData([], [])
 
     def apply_theme(self, dark: bool) -> None:
-        """深色 bg 'k'/曲线 'w'；浅色 bg 'w'/曲线 'b'；轴 pen/textPen/标签同步。"""
-        bg = 'k' if dark else 'w'
-        fg = 'w' if dark else 'k'
-        curve_color = 'w' if dark else 'b'
-        self._plot.setBackground(bg)
-        self._curve.setPen(pg.mkPen(curve_color, width=2))
-        # 不能用 QColor(fg)：Qt 颜色名不含 'w'/'k'，非法色会变黑导致深色下轴字不可见
-        pen = pg.mkPen(fg)
-        for name in ('bottom', 'left'):
-            axis = self._plot.getAxis(name)
-            axis.setPen(pen)
-            axis.setTextPen(pen)
-            # 轴标题（采样点/幅度）是独立 label，不随 textPen 变色，需显式同步
-            axis.setLabel(text=axis.labelText, color=fg)
-        title_item = self._plot.getPlotItem().titleLabel
-        title_item.setText(title_item.text, color=fg)
+        """深色 bg 'k'/曲线 'w'；浅色 bg 'w'/曲线 'b'；轴 pen/textPen/标签/标题同步。"""
+        self._dark = bool(dark)
+        self._plot.setBackground('k' if dark else 'w')
+        self._curve.setPen(pg.mkPen('w' if dark else 'b', width=2))
+        style_plot_item(self._plot_item, dark)

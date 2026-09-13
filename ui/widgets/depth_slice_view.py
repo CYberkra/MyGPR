@@ -15,10 +15,12 @@ from __future__ import annotations
 
 import numpy as np
 import pyqtgraph as pg
-from PyQt6.QtCore import QPointF
+from PyQt6.QtCore import QPointF, Qt
 from PyQt6.QtGui import QTransform
 
 from qfluentwidgets import isDarkTheme
+
+from ui.widgets.pg_view_base import GraphicsViewBase, style_plot_item
 
 __all__ = ["DepthSliceView"]
 
@@ -26,8 +28,12 @@ _ISOLINE_PEN_DARK = (255, 210, 90)
 _ISOLINE_PEN_LIGHT = (176, 108, 0)
 
 
-class DepthSliceView(pg.PlotWidget):
-    """平面标量场视图：色块网格 + 等值线 + 测线轨迹叠加。"""
+class DepthSliceView(GraphicsViewBase, pg.PlotWidget):
+    """平面标量场视图：色块网格 + 等值线 + 测线轨迹叠加。
+
+    缩放/导出/轴主题继承 GraphicsViewBase；右键菜单（导出 PNG/自适应/
+    复制图像）随本类补齐（UI 收敛轮能力补齐）。
+    """
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -47,6 +53,9 @@ class DepthSliceView(pg.PlotWidget):
         self._plot_item.addItem(self._track_scatter)
         self._grid_extent = None    # (x0, y0, x1, y1) 有效网格范围（米）
         self._matrix = None
+        # 关闭 pyqtgraph 原生英文右键菜单，右键由统一 RoundMenu 接管
+        self._plot_item.vb.setMenuEnabled(False)
+        self.scene().sigMouseClicked.connect(self._on_mouse_clicked)
         self.apply_theme(isDarkTheme())
 
     # ------------------------------------------------------------ 网格
@@ -175,18 +184,31 @@ class DepthSliceView(pg.PlotWidget):
         self._plot_item.setXRange(min(xs), max(xs), padding=0.05)
         self._plot_item.setYRange(min(ys), max(ys), padding=0.05)
 
+    # ------------------------------------------------------------ 缩放 / 右键菜单
+    def _fit_view(self) -> None:
+        """自适应视野（网格 ∪ 轨迹范围；皆空时 no-op）。"""
+        self._auto_range()
+
+    def _on_mouse_clicked(self, event) -> None:
+        """右键 → 统一 RoundMenu：缩放组 + 标准项（自适应/复制图像/导出 PNG）。"""
+        if event.button() != Qt.MouseButton.RightButton:
+            return
+        if not self._plot_item.sceneBoundingRect().contains(event.scenePos()):
+            return
+        from qfluentwidgets import FluentIcon as FIF
+        from ui.widgets.context_menus import add_action, make_menu
+        menu = make_menu(self)
+        add_action(menu, FIF.ZOOM_IN, '放大', self.zoom_in)
+        add_action(menu, FIF.ZOOM_OUT, '缩小', self.zoom_out)
+        self._add_standard_menu_actions(menu, can_export=self._matrix is not None,
+                                        export_prefix='depth_slice')
+        menu.exec(event.screenPos().toPoint())
+
     # ------------------------------------------------------------ 主题
     def apply_theme(self, dark: bool) -> None:
         """深色 bg 'k'/文字 'w'；浅色 bg 'w'/文字 'k'（与剖面视图一致）。"""
         self._dark = bool(dark)
-        bg = 'k' if dark else 'w'
-        fg = 'w' if dark else 'k'
-        self.setBackground(bg)
-        pen = pg.mkPen(fg)
-        for name in ('bottom', 'left'):
-            axis = self._plot_item.getAxis(name)
-            axis.setPen(pen)
-            axis.setTextPen(pen)
-            axis.setLabel(text=axis.labelText, color=fg)
+        self.setBackground('k' if dark else 'w')
+        style_plot_item(self._plot_item, dark)
         self._isocurve.setPen(pg.mkPen(
             _ISOLINE_PEN_DARK if dark else _ISOLINE_PEN_LIGHT, width=2))
