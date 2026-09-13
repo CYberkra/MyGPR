@@ -19,10 +19,16 @@ _BASIC_LIMIT = 4
 
 
 def _schema_signature(schema) -> tuple:
-    """schema 结构签名（名称/标签/类型/范围），用于判断是否需要重建表单。"""
+    """schema 结构签名（名称/标签/类型/范围/默认值/可选值）。
+
+    纳入 default 与 choices：只改方法默认值的注册表更新必须触发表单重建，
+    否则旧编辑器默认值静默过期（编辑器初值来自重建时的 default）。
+    """
     return tuple(
         (str(item.get('name', '')), str(item.get('label', '')),
-         str(item.get('type', 'float')), item.get('min'), item.get('max'))
+         str(item.get('type', 'float')), item.get('min'), item.get('max'),
+         item.get('default'),
+         tuple(str(c) for c in (item.get('choices') or ())))
         for item in (schema or []))
 
 

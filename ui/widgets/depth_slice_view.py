@@ -44,6 +44,11 @@ class DepthSliceView(GraphicsViewBase, pg.PlotWidget):
         self._plot_item.setAspectLocked(True)
         self._image = pg.ImageItem(axisOrder='row-major')
         self._plot_item.addItem(self._image)
+        # 色标：viridis 默认保持（SPEC 深度切片色表），ColorBarItem 提供
+        # level 范围读出（值域刻度随 set_grid 同步）
+        self._cmap = pg.colormap.get('viridis')
+        self._colorbar = pg.ColorBarItem(label='场值', interactive=False)
+        self._colorbar.setImageItem(self._image, insert_in=self._plot_item)
         self._isocurve = pg.IsocurveItem(axisOrder='row-major')
         self._isocurve.setPen(pg.mkPen(_ISOLINE_PEN_DARK, width=2))
         self._isocurve.setZValue(5)
@@ -91,7 +96,9 @@ class DepthSliceView(GraphicsViewBase, pg.PlotWidget):
         levels = self._value_range()
         if levels is not None:
             self._image.setLevels(levels)
-        self._image.setLookupTable(pg.colormap.get('viridis').getLookupTable())
+            self._colorbar.setLevels(levels)
+        self._image.setLookupTable(self._cmap.getLookupTable())
+        self._colorbar.setColorMap(self._cmap)
         self._isocurve.setData(values, level=self._isocurve.level)
         self._isocurve.setTransform(transform)
         # 网格覆盖范围含半格边距（cell 中心语义：图像边沿在中心 ± 0.5 cell）
@@ -110,6 +117,7 @@ class DepthSliceView(GraphicsViewBase, pg.PlotWidget):
         self._matrix = None
         self._grid_extent = None
         self._plot_item.setTitle(None)
+        self._colorbar.setLevels((0.0, 1.0))
 
     def value_range(self) -> tuple[float, float] | None:
         """当前矩阵的 (min, max)，无有效数据时 None（供滑条定界）。"""
@@ -206,9 +214,13 @@ class DepthSliceView(GraphicsViewBase, pg.PlotWidget):
 
     # ------------------------------------------------------------ 主题
     def apply_theme(self, dark: bool) -> None:
-        """深色 bg 'k'/文字 'w'；浅色 bg 'w'/文字 'k'（与剖面视图一致）。"""
+        """深色 bg 'k'/文字 'w'；浅色 bg 'w'/文字 'k'（与剖面视图一致）。
+
+        轴/标题/色标轴统一走 style_plot_item（色标轴随主题同步）。
+        """
         self._dark = bool(dark)
         self.setBackground('k' if dark else 'w')
-        style_plot_item(self._plot_item, dark)
+        style_plot_item(self._plot_item, dark,
+                        colorbar_axis=self._colorbar.axis)
         self._isocurve.setPen(pg.mkPen(
             _ISOLINE_PEN_DARK if dark else _ISOLINE_PEN_LIGHT, width=2))

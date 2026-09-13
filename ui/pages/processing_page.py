@@ -299,9 +299,11 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._run_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
         self._run_shortcut.activated.connect(self._on_run_clicked)
 
-        # 面板折叠状态持久化
-        self._left_panel.sig_collapsed.connect(self._save_panel_state)
-        self._right_panel.sig_collapsed.connect(self._save_panel_state)
+        # 面板折叠：状态持久化 + 窄窗自动折叠痕迹清理（尊重手动选择）
+        self._left_panel.sig_collapsed.connect(
+            lambda collapsed: self._on_side_panel_collapsed('left', collapsed))
+        self._right_panel.sig_collapsed.connect(
+            lambda collapsed: self._on_side_panel_collapsed('right', collapsed))
 
     # ============================================================ 公共接口（供主窗口接线）
     def set_methods(self, methods: list) -> None:
@@ -606,7 +608,7 @@ class ProcessingPage(PanelStateMixin, QWidget):
             merged.update(best)
             steps[target]['params'] = merged
             self._pipeline_list.set_steps(steps)
-            self._pipeline_list._list.setCurrentRow(target)
+            self._pipeline_list.select_step(target)
             self._pipeline_list.sig_changed.emit()
         else:
             self._param_form.set_values(best)

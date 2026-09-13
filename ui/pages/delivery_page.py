@@ -105,6 +105,14 @@ class DeliveryPage(QWidget):
         self._lines_list.setMinimumHeight(120)
         self._lines_list.setMaximumHeight(180)
         spatial_layout.addWidget(self._lines_list)
+        # 空态引导：无测线时列表藏起、提示占位
+        self._lines_empty_hint = CaptionLabel(
+            '暂无测线，请先在项目管理页导入', spatial_card)
+        self._lines_empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._lines_empty_hint.setStyleSheet(
+            'color: %s; font-size: 11px;' % status_color('disabled'))
+        spatial_layout.addWidget(self._lines_empty_hint)
+        self._lines_list.setVisible(False)
 
         self._spatial_btn = PrimaryPushButton('生成空间成果', spatial_card)
         spatial_btn_row = QHBoxLayout()
@@ -270,6 +278,10 @@ class DeliveryPage(QWidget):
                 _get(line, 'line_id', '') or _get(line, 'id', '')),
             text_fn=_line_display,
             default_checked=False)
+        # 空态显隐：有测线显示勾选列表，无测线显示引导文案
+        has_lines = self._lines_list.count() > 0
+        self._lines_list.setVisible(has_lines)
+        self._lines_empty_hint.setVisible(not has_lines)
 
     # ============================================================ 内部逻辑
     def _on_spatial_clicked(self) -> None:

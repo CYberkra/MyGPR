@@ -50,8 +50,62 @@ _TILE_CACHE_ROOT = tile_cache_dir()
 _USER_AGENT = 'MyGPR/1.0 (https://mygpr.local; tile client)'
 _HALF_WORLD = WORLD_SIZE_M / 2.0
 
+# per-track 坐标转换结果缓存：GCJ-02 底图下逐点 wgs84_to_gcj02 + 逐点
+# lonlat_to_mercator 的 Python 循环是交互卡顿主因（切底图/重勾选时全量
+# 重算）。指纹 = id + 点数 + 首尾点坐标 + 坐标系 + gcj02 标志；缓存值持有
+# track 强引用防止 id 复用误判，上限 128 条防无限增长。
+_TRACK_MERCATOR_CACHE_MAX = 128
+_track_mercator_cache: dict = {}
+
+
+def _track_fingerprint(track, gcj02: bool) -> tuple:
+    """track 数据指纹：id + 点数 + 首尾点坐标 + 坐标系 + gcj02 标志。
+
+    点数或首尾变化即失效；中间点原地 mutate 的极端场景不识别
+    （与 set_tracks 整列替换的实际数据流一致）。
+    """
+
+    def _coord(point):
+        if point is None:
+            return None
+        return (float(getattr(point, 'x', 0.0)),
+                float(getattr(point, 'y', 0.0)),
+                float(getattr(point, 'elevation_m', 0.0)))
+
+    points = list(getattr(track, 'points', ()) or ())
+    return (id(track), len(points),
+            _coord(points[0]) if points else None,
+            _coord(points[-1]) if points else None,
+            str(getattr(track, 'coordinate_system', '') or ''),
+            str(getattr(track, 'source', '') or ''),
+            str(getattr(track, 'line_id', '') or ''),
+            bool(gcj02))
+
 
 def _track_to_mercator(track, gcj02: bool = False) -> dict:
+    """把 SpatialTrack（鸭子类型）转换为展示用结构（Web Mercator 米）。
+
+    返回 dict(line_id, name, xs, ys, zs, crs, source, mapped, epsg)。
+    mapped=False 时 xs/ys 为原始坐标（不套底图）。
+
+    gcj02=True 时（底图为高德等火星坐标瓦片），WGS84/CGCS2000 经纬度
+    先做 GCJ-02 加密转换再转 Mercator，否则中国境内有 300~600 m 偏移。
+    结果按 :func:`_track_fingerprint` 缓存，set_source 切底图重渲染时
+    同指纹直接命中（gcj02 标志是指纹组成部分，不会串底图）。
+    """
+    key = _track_fingerprint(track, gcj02)
+    cached = _track_mercator_cache.get(key)
+    if cached is not None:
+        return cached[1]
+    result = _track_to_mercator_uncached(track, gcj02=gcj02)
+    if len(_track_mercator_cache) >= _TRACK_MERCATOR_CACHE_MAX:
+        _track_mercator_cache.clear()
+    # 值里持 track 强引用：防止其被回收后 id 被新对象复用造成指纹撞车
+    _track_mercator_cache[key] = (track, result)
+    return result
+
+
+def _track_to_mercator_uncached(track, gcj02: bool = False) -> dict:
     """把 SpatialTrack（鸭子类型）转换为展示用结构（Web Mercator 米）。
 
     返回 dict(line_id, name, xs, ys, zs, crs, source, mapped, epsg)。
@@ -552,7 +606,11 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
         self.fit_to_tracks()
 
     def _on_mouse_moved(self, pos) -> None:
-        """鼠标位置 → 经纬度实时读出（视图世界坐标恒为 Web Mercator 米）。"""
+        """鼠标位置 → 经纬度实时读出（视图世界坐标恒为 Web Mercator 米）。
+
+        坐标文本实际变化或浮层首次显示才重新定位（adjustSize+move 不随
+        鼠标移动逐帧触发）；位置微调只更新文本。
+        """
         if not self._plot.sceneBoundingRect().contains(pos):
             self._coord_label.hide()
             return
@@ -564,9 +622,11 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
         # 高德底图的世界坐标是 GCJ-02，读出统一回 WGS84 与测线数据一致
         if is_gcj02_source(self._layer.source_key()):
             lon, lat = gcj02_to_wgs84(lon, lat)
-        self._coord_label.setText(f'{lat:.6f}, {lon:.6f}')
-        self._coord_label.show()
-        self._layout_overlays()
+        text = f'{lat:.6f}, {lon:.6f}'
+        if self._coord_label.isHidden() or self._coord_label.text() != text:
+            self._coord_label.setText(text)
+            self._coord_label.show()
+            self._layout_coord_label()
 
     def _rebuild_legend(self) -> None:
         """按当前测线重建左上图例（色块 + 名称）；无测线时隐藏。"""
@@ -625,6 +685,16 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
         for name in self._legend_labels:
             name.setStyleSheet(f'color: {text}; background: transparent;')
 
+    def _layout_coord_label(self) -> None:
+        """右下坐标读出定位：文本变化 / 首次显示 / 窗口 resize 时才调用。"""
+        if not self._coord_label.isVisible():
+            return
+        self._coord_label.adjustSize()
+        margin = 10
+        self._coord_label.move(
+            self.width() - self._coord_label.width() - margin,
+            self.height() - self._coord_label.height() - margin)
+
     def _layout_overlays(self) -> None:
         """把浮动覆盖层定位到四角（resize / 内容尺寸变化时调用）。"""
         # pyqtgraph addPlot() 内部会提前触发 resizeEvent，此时覆盖层尚未创建
@@ -637,11 +707,7 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
         self._zoom_panel.adjustSize()
         self._zoom_panel.move(
             self.width() - self._zoom_panel.width() - margin, margin)
-        if self._coord_label.isVisible():
-            self._coord_label.adjustSize()
-            self._coord_label.move(
-                self.width() - self._coord_label.width() - margin,
-                self.height() - self._coord_label.height() - margin)
+        self._layout_coord_label()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)

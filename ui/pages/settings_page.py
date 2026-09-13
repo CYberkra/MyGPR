@@ -32,7 +32,7 @@ _COPYRIGHT = '© 2025 MyGPR 保留所有权利'
 
 
 def _read_version() -> str:
-    """版本读仓库根 VERSION 文件，缺失/异常回退 0.9.36（SPEC §6.4）。"""
+    """版本读仓库根 VERSION 文件，缺失/异常回退 0.9.38（SPEC §6.4）。"""
     try:
         root = os.path.dirname(os.path.dirname(os.path.dirname(
             os.path.abspath(__file__))))
@@ -134,7 +134,7 @@ class SettingsPage(ScrollArea):
         return card
 
     def _build_about_card(self, parent):
-        """卡片4"关于"：版本（VERSION 文件，回退 0.9.36）/ 作者 / 版权。"""
+        """卡片4"关于"：版本（VERSION 文件，回退 0.9.38）/ 作者 / 版权。"""
         card, layout = make_card('关于')
         for label_text, value_text in (
                 ('版本:', _read_version()),

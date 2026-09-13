@@ -18,7 +18,7 @@ sample_axis 时显示物理量，降采样数据附"原始约 N"），右键菜�
 （代价：右键拖拽框选缩放失效，由菜单缩放项补偿）。
 """
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
 from enum import Enum
@@ -42,6 +42,23 @@ class BScanDisplayMode(Enum):
     WAVEFORM = 'waveform'      # 波形叠加：正负对称双线
 
 
+def _downsample_map_index(view_index: int, view_count: int,
+                          data_count: int) -> int:
+    """显示坐标索引 → 原始数据索引（strided 降采样近似线性映射）。
+
+    读数"原始约 N"标注与 pick/overlay 坐标换算共用本函数，避免双实现漂移。
+    """
+    return int(round(view_index * (data_count - 1)
+                     / max(view_count - 1, 1)))
+
+
+def _downsample_map_index_inverse(data_index, view_count: int,
+                                  data_count: int):
+    """原始数据索引 → 显示坐标（_downsample_map_index 的逆映射）。"""
+    return (data_index * max(view_count - 1, 1)
+            / max(data_count - 1, 1))
+
+
 def format_crosshair_readout(trace: int, sample: int, shape: tuple,
                              amplitude: float, *,
                              trace_axis_m=None, sample_axis=None,
@@ -58,7 +75,7 @@ def format_crosshair_readout(trace: int, sample: int, shape: tuple,
     n_traces, n_samples = shape
     lines = [f'道 {trace + 1}']
     if trace_count and trace_count != n_traces:
-        approx = int(round(trace * (trace_count - 1) / max(n_traces - 1, 1)))
+        approx = _downsample_map_index(trace, n_traces, trace_count)
         lines[0] += f'（原始约 {approx + 1}）'
     if trace_axis_m is not None and 0 <= trace < len(trace_axis_m):
         lines.append(f'距起点 {float(trace_axis_m[trace]):.3g} m')
@@ -68,8 +85,7 @@ def format_crosshair_readout(trace: int, sample: int, shape: tuple,
     else:
         text = f'采样 {sample + 1}'
         if sample_count and sample_count != n_samples:
-            approx = int(round(sample * (sample_count - 1)
-                               / max(n_samples - 1, 1)))
+            approx = _downsample_map_index(sample, n_samples, sample_count)
             text += f'（原始约 {approx + 1}）'
         lines.append(text)
     lines.append(f'幅值 {amplitude:.4g}')
@@ -171,6 +187,13 @@ class BScanView(GraphicsViewBase, QWidget):
         self._readout.setAttribute(
             Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._readout.hide()
+        # 读数文本 30ms 节流：移动中十字线即时跟手（setPos 便宜），
+        # 文本 setText/adjustSize 触发布局合并到定时器刷新（首次出现即时）。
+        self._readout_timer = QTimer(self)
+        self._readout_timer.setSingleShot(True)
+        self._readout_timer.setInterval(30)
+        self._readout_timer.timeout.connect(self._flush_crosshair_readout)
+        self._pending_readout = None   # (trace, sample, amplitude)
 
         self._glw.scene().sigMouseClicked.connect(self._on_mouse_clicked)
         self._glw.scene().sigMouseMoved.connect(self._on_mouse_moved)
@@ -324,9 +347,10 @@ class BScanView(GraphicsViewBase, QWidget):
             self._fit_current_mode()
         if self._colorbar is not None:
             self._colorbar.setLevels((float(vmin), float(vmax)))
-        # 非灰度模式下保持当前显示模式连续（Phase1 1.2）
+        # 非灰度模式下按当前显示模式重渲染波形；新数据到达保持用户视野，
+        # 不重置缩放（reset_view=False，模式切换才重置）
         if self.display_mode is not BScanDisplayMode.GRAYSCALE:
-            self.set_display_mode(self.display_mode)
+            self._apply_display_mode(self.display_mode, reset_view=False)
         self._plot.setTitle(title or 'B-Scan图像')
         self._plot.setLabel('bottom', x_label)
         self._plot.setLabel('left', y_label)
@@ -400,12 +424,20 @@ class BScanView(GraphicsViewBase, QWidget):
             self._hide_crosshair()
 
     def set_display_mode(self, mode) -> None:
-        """切换灰度/变面积/波形叠加三态；共用同一坐标变换与色标（Phase1 1.2）。"""
+        """切换灰度/变面积/波形叠加三态；模式切换时重置视野（用户主动切换）。"""
         if isinstance(mode, str):
             mode = BScanDisplayMode(mode)
         if not isinstance(mode, BScanDisplayMode):
             raise ValueError(f'未知显示模式: {mode!r}')
         self.display_mode = mode
+        self._apply_display_mode(mode, reset_view=True)
+
+    def _apply_display_mode(self, mode, *, reset_view: bool) -> None:
+        """应用显示模式；reset_view 仅用户切换模式时为 True。
+
+        set_matrix 新数据到达时以 reset_view=False 重渲染波形，保持用户
+        当前缩放/视野（原实现无条件 autoRange，新数据会冲掉手动缩放）。
+        """
         img = self._image_item.image
         if img is None:
             return
@@ -420,9 +452,11 @@ class BScanView(GraphicsViewBase, QWidget):
             self._image_item.show()
         self._render_wiggle(img,
                             filled=(mode is BScanDisplayMode.WIGGLE),
-                            symmetric=(mode is BScanDisplayMode.WAVEFORM))
+                            symmetric=(mode is BScanDisplayMode.WAVEFORM),
+                            reset_view=reset_view)
 
-    def _render_wiggle(self, img, *, filled: bool, symmetric: bool) -> None:
+    def _render_wiggle(self, img, *, filled: bool, symmetric: bool,
+                       reset_view: bool = False) -> None:
         """变面积/波形叠加：pg.arrayToQPath C 层批量构建（向量化，非逐道循环）。
 
         填充（变面积）用每道"上升沿正包络+基线回程"闭合；波形叠加为
@@ -485,7 +519,8 @@ class BScanView(GraphicsViewBase, QWidget):
         self._wiggle_item.setPen(pg.mkPen(QColor(*rgb).darker(140), width=1))
         self._wiggle_item.setBrush(fill if filled else pg.mkBrush(None))
         self._wiggle_item.show()
-        self._plot.getViewBox().autoRange()
+        if reset_view:
+            self._plot.getViewBox().autoRange()
 
     def set_ascan_follow(self, enabled: bool) -> None:
         """开关"A-scan 波形跟随"：懒创建浮窗并同步 pick 模式（Phase1 1.1）。"""
@@ -510,7 +545,7 @@ class BScanView(GraphicsViewBase, QWidget):
         self._ascan_follow = False
 
     def _on_mouse_moved(self, pos) -> None:
-        """鼠标在图像区移动：十字线跟手 + 左下角读数浮层。"""
+        """鼠标在图像区移动：十字线跟手 + 左下角读数浮层（文本 30ms 合并刷新）。"""
         if not self._crosshair_on or self._image_shape is None:
             self._hide_crosshair()
             return
@@ -528,7 +563,22 @@ class BScanView(GraphicsViewBase, QWidget):
         self._hline.setPos(sample + 0.5)
         self._vline.setVisible(True)
         self._hline.setVisible(True)
-        amplitude = float(self._image_item.image[sample, trace])
+        self._pending_readout = (trace, sample,
+                                 float(self._image_item.image[sample, trace]))
+        if self._readout.isVisible():
+            if not self._readout_timer.isActive():
+                self._readout_timer.start()
+        else:
+            self._flush_crosshair_readout()   # 首次出现即时，不等节流
+        self._readout.setVisible(True)
+
+    def _flush_crosshair_readout(self) -> None:
+        """节流刷新读数文本 + 浮层定位（_readout_timer 与首次出现共用）。"""
+        pending = self._pending_readout
+        if pending is None:
+            return
+        self._pending_readout = None
+        trace, sample, amplitude = pending
         self._readout.setText(format_crosshair_readout(
             trace, sample, self._image_shape, amplitude,
             trace_axis_m=self._trace_axis_m,
@@ -536,10 +586,11 @@ class BScanView(GraphicsViewBase, QWidget):
             sample_axis_label=self._sample_axis_label,
             trace_count=self._trace_count,
             sample_count=self._sample_count))
-        self._readout.setVisible(True)
         self._position_readout()
 
     def _hide_crosshair(self) -> None:
+        self._readout_timer.stop()
+        self._pending_readout = None
         self._vline.setVisible(False)
         self._hline.setVisible(False)
         self._readout.hide()
@@ -556,7 +607,8 @@ class BScanView(GraphicsViewBase, QWidget):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        self._position_readout()
+        if self._readout.isVisible():
+            self._position_readout()
 
     def set_overlay_points(self, points, color: str = constants.CHART_OVERLAY_COLOR) -> None:
         """解释页标注散点：points 为 [(trace, sample), ...]（原始数据坐标系）。
@@ -579,9 +631,9 @@ class BScanView(GraphicsViewBase, QWidget):
         n_traces, n_samples = self._image_shape
         t, s = int(trace), int(sample)
         if self._trace_count and self._trace_count != n_traces:
-            t = int(round(t * (self._trace_count - 1) / max(n_traces - 1, 1)))
+            t = _downsample_map_index(t, n_traces, self._trace_count)
         if self._sample_count and self._sample_count != n_samples:
-            s = int(round(s * (self._sample_count - 1) / max(n_samples - 1, 1)))
+            s = _downsample_map_index(s, n_samples, self._sample_count)
         return t, s
 
     def _data_to_view(self, trace, sample) -> tuple:
@@ -591,9 +643,9 @@ class BScanView(GraphicsViewBase, QWidget):
         n_traces, n_samples = self._image_shape
         t, s = float(trace), float(sample)
         if self._trace_count and self._trace_count != n_traces:
-            t = t * max(n_traces - 1, 1) / max(self._trace_count - 1, 1)
+            t = _downsample_map_index_inverse(t, n_traces, self._trace_count)
         if self._sample_count and self._sample_count != n_samples:
-            s = s * max(n_samples - 1, 1) / max(self._sample_count - 1, 1)
+            s = _downsample_map_index_inverse(s, n_samples, self._sample_count)
         return t, s
 
     def _on_mouse_clicked(self, event) -> None:

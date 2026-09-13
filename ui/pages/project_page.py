@@ -27,7 +27,8 @@ sync_requested payload：{'line_id', 'paths': {'rtk', 'imu', 'altimeter', 'trace
 import os
 
 from PyQt6.QtCore import Qt, QSettings, QUrl, pyqtSignal
-from PyQt6.QtGui import QDesktopServices, QFont, QKeySequence, QShortcut
+from PyQt6.QtGui import (QBrush, QColor, QDesktopServices, QFont,
+                         QKeySequence, QShortcut)
 from PyQt6.QtWidgets import (
     QApplication, QDialog, QHBoxLayout, QHeaderView,
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
@@ -419,9 +420,19 @@ class ProjectPage(QWidget):
         return False
 
     def set_artifacts(self, artifacts: list) -> None:
-        """刷新成果表。"""
+        """刷新成果表；空表用一行占位引导（不占选择、不响应双击）。"""
         self._artifacts = list(artifacts or [])
         self._artifacts_table.setRowCount(0)
+        if not self._artifacts:
+            self._artifacts_table.insertRow(0)
+            placeholder = QTableWidgetItem('暂无成果，处理完成后在此显示')
+            placeholder.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            placeholder.setFlags(Qt.ItemFlag.NoItemFlags)
+            placeholder.setForeground(QBrush(QColor(status_color('disabled'))))
+            self._artifacts_table.setItem(0, 0, placeholder)
+            self._artifacts_table.setSpan(0, 0, 1, 6)
+            self._fit_table_height(self._artifacts_table, min_h=84, max_h=160)
+            return
         for artifact in self._artifacts:
             row = self._artifacts_table.rowCount()
             self._artifacts_table.insertRow(row)
@@ -751,10 +762,6 @@ class ProjectPage(QWidget):
         for i, w in enumerate(widths):
             if 0 <= i < table.columnCount():
                 header.resizeSection(i, w)
-
-    def _settings(self) -> QSettings:
-        """统一 QSettings 根，避免各页用不同组织名。"""
-        return QSettings('MyGPR', 'MyGPR')
 
 
 __all__ = ['ProjectPage']

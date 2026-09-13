@@ -31,6 +31,7 @@ from ui import constants, file_dialogs
 from ui.geo_utils import coverage_statistics, format_distance
 from ui.page_scaffold import (PanelStateMixin, make_card, make_scroll_column,
                               rebuild_check_list)
+from ui.theme_helpers import status_color
 from ui.widgets.collapsible_panel import CollapsiblePanel
 from ui.widgets.elevation_profile_view import ElevationProfileView
 from ui.widgets.local_dem import load_xyz_grid
@@ -259,6 +260,14 @@ class SpatialPage(PanelStateMixin, QWidget):
         self._line_list = QListWidget(lines_card)
         self._line_list.setMinimumHeight(180)
         lines_layout.addWidget(self._line_list, 1)
+        # 空态引导：无测线时列表藏起、提示占位（参照 home_page 空项目做法）
+        self._lines_empty_hint = CaptionLabel(
+            '暂无测线，请先在项目管理页导入', lines_card)
+        self._lines_empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._lines_empty_hint.setStyleSheet(
+            'color: %s; font-size: 11px;' % status_color('disabled'))
+        lines_layout.addWidget(self._lines_empty_hint, 1)
+        self._line_list.setVisible(False)
         left_layout.addWidget(lines_card, 1)
 
         basemap_card, basemap_layout = make_card('底图')
@@ -482,8 +491,10 @@ class SpatialPage(PanelStateMixin, QWidget):
         self._3d_view.local_dem_notice.connect(self._on_dem_notice)
         self._depth_slider.valueChanged.connect(self._on_depth_slider_changed)
         self._depth_save_btn.clicked.connect(self._on_save_depth_layer_clicked)
-        self._left_panel.sig_collapsed.connect(self._save_panel_state)
-        self._right_panel.sig_collapsed.connect(self._save_panel_state)
+        self._left_panel.sig_collapsed.connect(
+            lambda collapsed: self._on_side_panel_collapsed('left', collapsed))
+        self._right_panel.sig_collapsed.connect(
+            lambda collapsed: self._on_side_panel_collapsed('right', collapsed))
 
     # ============================================================ 公共接口（供主窗口接线）
     def set_tracks(self, tracks: list) -> None:
@@ -508,6 +519,11 @@ class SpatialPage(PanelStateMixin, QWidget):
             default_checked=True,
             icon_fn=lambda track: _color_icon(
                 self._colors[str(getattr(track, 'line_id', '') or '')]))
+
+        # 空态显隐：有测线显示勾选列表，无测线显示引导文案
+        has_lines = self._line_list.count() > 0
+        self._line_list.setVisible(has_lines)
+        self._lines_empty_hint.setVisible(not has_lines)
 
         self._refresh_views()
         self._refresh_crs_card()
@@ -573,11 +589,13 @@ class SpatialPage(PanelStateMixin, QWidget):
         self._depth_save_btn.setEnabled(False)
 
     def apply_theme(self, dark: bool) -> None:
-        """主题切换转发：地图 / 剖面 / 三维视图 / 深度切片。"""
+        """主题切换转发：地图 / 剖面 / 三维视图 / 深度切片 + 空态提示色。"""
         self._map_view.apply_theme(dark)
         self._profile_view.apply_theme(dark)
         self._3d_view.apply_theme(dark)
         self._depth_view.apply_theme(dark)
+        self._lines_empty_hint.setStyleSheet(
+            'color: %s; font-size: 11px;' % status_color('disabled'))
 
     # ============================================================ 内部逻辑
     def _selected_line_id(self) -> str:

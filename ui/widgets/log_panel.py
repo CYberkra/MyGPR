@@ -89,6 +89,8 @@ class LogPanel(CardWidget):
         self._log_edit = QTextEdit(self)
         self._log_edit.setReadOnly(True)
         self._log_edit.setStyleSheet(_LOG_QSS_INITIAL)
+        # 长时间批处理会话内存防线性增长：超出 5000 块后自动丢弃最旧日志
+        self._log_edit.document().setMaximumBlockCount(5000)
         clear_btn = PushButton('清空', self)
         clear_btn.setFixedWidth(60)
         clear_btn.clicked.connect(self._log_edit.clear)

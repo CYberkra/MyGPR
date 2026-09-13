@@ -8,7 +8,7 @@
 ``make_form_row``（标签 minWidth=100 + 控件 + stretch 约 30 处）、
 ``refill_combo``（下拉重建-保持选择，userData 驱动）、
 ``rebuild_check_list``（勾选列表重建-保持勾选，spatial/delivery 同模式）、
-``PanelStateMixin``（processing/spatial 两页折叠状态三件套）。
+``PanelStateMixin``（processing/spatial 两页折叠状态三件套 + 窄窗自动折叠）。
 
 各页面公开信号/方法签名不变；本模块只做"组装"，不做业务。
 """
@@ -197,8 +197,14 @@ def rebuild_check_list(widget, items, *, key_fn, text_fn,
 
 
 # ---------------------------------------------------------------- 折叠面板状态
+# 窄窗自动折叠：中栏（左右面板之间）解析宽度低于该阈值时，自动折叠仍展开的
+# 侧栏（优先保中栏可视面积）；窗口恢复到容纳宽度时，仅自动展开"本次自动
+# 折叠过"的侧栏——用户手动折叠 / 持久化恢复的侧栏保持尊重用户选择。
+_MIDDLE_MIN_PX = 360
+
+
 class PanelStateMixin:
-    """左右折叠面板状态持久化 mixin（processing/spatial 两页三件套收敛）。
+    """左右折叠面板状态持久化 + 窄窗自动折叠 mixin（processing/spatial）。
 
     约定子类：
     - 属性 ``_sm``：共享 SettingsManager（主窗口注入，可 None）；
@@ -207,11 +213,21 @@ class PanelStateMixin:
       （如 ``'processing'`` → 键 ``processing_left_collapsed``）。
 
     子类在 ``_connect_internal`` 中把两面板 ``sig_collapsed`` 接到
-    ``self._save_panel_state``；``set_settings_manager`` 注入后调用
+    ``_on_side_panel_collapsed``；``set_settings_manager`` 注入后调用
     ``self._restore_panel_state()``。
+
+    自动折叠策略（resizeEvent 驱动，解析式算宽度，几何滞后无关）：
+    - 中栏可用宽度 = 页宽 − 页边距 − 栏间距×2 − 两侧栏当前占位宽度和；
+    - 低于 :data:`_MIDDLE_MIN_PX` 时自动折叠展开中的侧栏（记住是哪些）；
+    - 恢复宽度后仅展开记住的侧栏；手动折叠/展开会清除自动痕迹。
     """
 
     _PANEL_STATE_PREFIX = ''
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._auto_collapsed_sides: set[str] = set()
+        self._in_auto_panel_change = False
 
     def panel_states(self) -> dict:
         """当前左右面板折叠状态。"""
@@ -228,6 +244,66 @@ class PanelStateMixin:
         if right is not None:
             self._right_panel.set_collapsed(bool(right), animate=animate)
 
+    # ------------------------------------------------------------ 窄窗自动折叠
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._auto_collapse_side_panels()
+
+    def _middle_available_px(self) -> int:
+        """中栏（左右面板之间）解析可用宽度。
+
+        用 ``footprint_width()`` 而非几何宽度：resizeEvent 内子控件几何
+        滞后一帧，折叠/展开动画中途读 width() 会拿到过渡值。
+        """
+        margins = self.layout().contentsMargins()
+        fixed = (margins.left() + margins.right()
+                 + 2 * constants.PAGE_SPACING)
+        return (self.width() - fixed
+                - self._left_panel.footprint_width()
+                - self._right_panel.footprint_width())
+
+    def _auto_panel(self, panel, collapsed: bool) -> None:
+        """自动折叠/展开单侧栏：抑制持久化（瞬态布局自适应，不写入设置）。"""
+        self._in_auto_panel_change = True
+        try:
+            panel.set_collapsed(collapsed, animate=False)
+        finally:
+            self._in_auto_panel_change = False
+
+    def _auto_collapse_side_panels(self) -> None:
+        """窄窗自动折叠 / 恢复侧栏（策略见类 docstring）。"""
+        room = self._middle_available_px()
+        for side, panel in (('left', self._left_panel),
+                            ('right', self._right_panel)):
+            if panel.is_collapsed():
+                # 展开该侧栏会消耗 expand−collapse 的中栏宽度，
+                # 展开后仍不低于阈值才自动展开，且仅限自动折叠过的。
+                cost = panel.expand_width() - panel.footprint_width()
+                if (side in self._auto_collapsed_sides
+                        and room - cost >= _MIDDLE_MIN_PX):
+                    self._auto_panel(panel, False)
+                    self._auto_collapsed_sides.discard(side)
+                    room -= cost
+            elif room < _MIDDLE_MIN_PX:
+                # 该侧栏展开占位下中栏过窄 → 自动折叠让位（记住自动痕迹）。
+                # 标记在折叠之后落：set_collapsed 同步触发 sig_collapsed →
+                # _on_side_panel_collapsed 清理痕迹，随后再补标记。
+                self._auto_panel(panel, True)
+                self._auto_collapsed_sides.add(side)
+                room += panel.expand_width() - panel.footprint_width()
+
+    def _on_side_panel_collapsed(self, side: str, collapsed: bool) -> None:
+        """侧栏折叠状态变化：手动操作清除自动痕迹（尊重用户），并持久化。
+
+        自动路径（_in_auto_panel_change）不清痕迹、不写设置——痕迹由
+        自动策略自己维护，持久化只记用户/外部程序化的显式变更。
+        """
+        if self._in_auto_panel_change:
+            return
+        self._auto_collapsed_sides.discard(side)
+        self._save_panel_state()
+
+    # ------------------------------------------------------------ 持久化
     def _save_panel_state(self) -> None:
         """把当前折叠状态写回共享 SettingsManager（未注入时静默跳过）。"""
         sm = self._sm

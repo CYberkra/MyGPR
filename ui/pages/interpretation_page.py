@@ -377,21 +377,28 @@ class InterpretationPage(QWidget):
             ('拟合失败: %s' % message) if message else '尚未拟合')
 
     def _on_point_picked(self, trace: int, sample: int) -> None:
-        """pick 点击追加点（原始数据坐标）→ overlay/列表刷新 + points_changed。"""
+        """pick 点击追加点（原始数据坐标）→ overlay/列表末行增量插入 + points_changed。"""
         self._points.append((int(trace), int(sample)))
         self._bscan.set_overlay_points(self._points, _OVERLAY_COLOR)
-        self._refresh_points_table()
+        self._append_points_row(len(self._points) - 1)
         self._refresh_info()
         self._update_edit_enabled()
         self.points_changed.emit(list(self._points))
 
     def _on_remove_selected_point(self) -> None:
-        """删除列表选中行对应的标注点。"""
+        """删除列表选中行对应的标注点（局部删行 + 后续行号重排）。"""
         row = self._points_table.currentRow()
         if not (0 <= row < len(self._points)):
             return
         del self._points[row]
-        self._emit_points_updated()
+        table = self._points_table
+        table.removeRow(row)
+        for r in range(row, table.rowCount()):
+            item = table.item(r, 0)
+            if item is not None:
+                item.setText(str(r + 1))
+        self._points_count_label.setText('%d 个点' % len(self._points))
+        self._emit_points_updated(table_updated=True)
 
     def _on_clear_points(self) -> None:
         """清空全部标注点。"""
@@ -400,10 +407,15 @@ class InterpretationPage(QWidget):
         self._points = []
         self._emit_points_updated()
 
-    def _emit_points_updated(self) -> None:
-        """点列变更统一出口：overlay + 表格 + 信息条 + 信号。"""
+    def _emit_points_updated(self, *, table_updated: bool = False) -> None:
+        """点列变更统一出口：overlay + 表格 + 信息条 + 信号。
+
+        table_updated=True 表示调用方已完成表格局部更新（单点删除），
+        此处跳过整表重建。
+        """
         self._bscan.set_overlay_points(self._points, _OVERLAY_COLOR)
-        self._refresh_points_table()
+        if not table_updated:
+            self._refresh_points_table()
         self._refresh_info()
         self._update_edit_enabled()
         self.points_changed.emit(list(self._points))
@@ -434,25 +446,41 @@ class InterpretationPage(QWidget):
             return None
         return 0.5 * _C_M_PER_NS * float(time_ns) / math.sqrt(eps)
 
+    def _point_row_values(self, index: int, trace: int, sample: int) -> tuple:
+        """单行五列文本（# / 道 / 采样点 / 时间(ns) / 深度(m)）。"""
+        time_ns = self._sample_time_ns(sample)
+        depth_m = (self._estimate_depth_m(time_ns)
+                   if time_ns is not None else None)
+        return (
+            str(index + 1),
+            str(trace + 1),
+            str(sample + 1),
+            ('%.2f' % time_ns) if time_ns is not None else '--',
+            ('%.3f' % depth_m) if depth_m is not None else '--',
+        )
+
+    def _append_points_row(self, index: int) -> None:
+        """末行增量插入（拾取热路径）：O(1) 追加，不重建整张表。"""
+        table = self._points_table
+        trace, sample = self._points[index]
+        row = table.rowCount()
+        table.insertRow(row)
+        for col, text in enumerate(self._point_row_values(index, trace, sample)):
+            item = QTableWidgetItem(text)
+            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            table.setItem(row, col, item)
+        self._points_count_label.setText('%d 个点' % len(self._points))
+
     def _refresh_points_table(self) -> None:
-        """重建标注点表格（道/采样点/时间/深度列）。"""
+        """整表重建（外部整列替换 / 介电常数变化 / 清空）。"""
         table = self._points_table
         table.blockSignals(True)
         table.setRowCount(0)
         for index, (trace, sample) in enumerate(self._points):
             row = table.rowCount()
             table.insertRow(row)
-            time_ns = self._sample_time_ns(sample)
-            depth_m = (self._estimate_depth_m(time_ns)
-                       if time_ns is not None else None)
-            values = (
-                str(index + 1),
-                str(trace + 1),
-                str(sample + 1),
-                ('%.2f' % time_ns) if time_ns is not None else '--',
-                ('%.3f' % depth_m) if depth_m is not None else '--',
-            )
-            for col, text in enumerate(values):
+            for col, text in enumerate(
+                    self._point_row_values(index, trace, sample)):
                 item = QTableWidgetItem(text)
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 table.setItem(row, col, item)

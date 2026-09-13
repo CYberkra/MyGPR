@@ -108,6 +108,17 @@ class CollapsiblePanel(QWidget):
     def is_collapsed(self) -> bool:
         return self._collapsed
 
+    def expand_width(self) -> int:
+        """展开态目标栏宽（窄窗自动折叠策略计算用）。"""
+        return self._expand_width
+
+    def footprint_width(self) -> int:
+        """当前状态占用的栏宽：折叠 = collapse_width，展开 = expand_width。
+
+        解析式布局计算用（不读几何，避免 resizeEvent 里子控件几何滞后一帧）。
+        """
+        return self._collapse_width if self._collapsed else self._expand_width
+
     def set_collapsed(self, collapsed: bool, animate: bool = True) -> None:
         """折叠或展开面板。"""
         collapsed = bool(collapsed)
