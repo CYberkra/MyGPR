@@ -29,6 +29,7 @@ from mygpr.domain.project.models import (
     ProjectMetadata,
     ProjectRestore,
     ProjectSummary,
+    ArtifactDeleteResult,
 )
 
 
@@ -387,6 +388,28 @@ class ProjectService:
         line_id: str | None = None,
     ) -> tuple[ProjectArtifact, ...]:
         return tuple(self._session(project_id).list_artifacts(line_id))
+
+    def list_artifact_descendants(
+        self,
+        project_id: str,
+        line_id: str,
+        artifact_id: str,
+    ) -> tuple[str, ...]:
+        """某成果的全部后代（含自身，只读）。"""
+        return self._session(project_id).list_artifact_descendants(line_id, artifact_id)
+
+    def delete_artifacts(
+        self,
+        project_id: str,
+        line_id: str,
+        artifact_ids: Sequence[str],
+        *,
+        reason: str = "用户删除成果",
+    ) -> ArtifactDeleteResult:
+        """把处理成果移入项目回收站（级联由调用方经 list_artifact_descendants 确认）。"""
+        return self._session(project_id).delete_artifacts(
+            line_id, artifact_ids, reason=reason
+        )
 
     def export_artifact_segy(
         self,

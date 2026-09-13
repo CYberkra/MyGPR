@@ -27,6 +27,7 @@ PUBLIC_TYPES = (
     "mygpr.domain.project.models.ProjectSummary",
     "mygpr.domain.project.models.ProjectLine",
     "mygpr.domain.project.models.ProjectArtifact",
+    "mygpr.domain.project.models.ArtifactDeleteResult",
     "mygpr.domain.reporting.models.ReportPackage",
 )
 
@@ -53,6 +54,8 @@ PUBLIC_METHODS = (
     "submit_grid_layer",
     "interface_depth_preview",
     "export_artifact_segy",
+    "list_artifact_descendants",
+    "delete_artifacts",
     "submit_project_restore",
     "shutdown",
 )

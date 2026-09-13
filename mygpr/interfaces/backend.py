@@ -32,6 +32,7 @@ from mygpr.application.grid.facade_service import (
 )
 from mygpr.domain.common.errors import MyGPRError
 from mygpr.domain.acquisition.models import SensorSyncSettings
+from mygpr.domain.project.models import ArtifactDeleteResult
 from mygpr.infrastructure.processing.autotune_adapter import DomainAutoTuneConstraintPolicy
 from mygpr.infrastructure.acquisition.legacy_adapter import (
     LegacyAcquisitionReader,
@@ -342,6 +343,26 @@ class MyGPRBackend:
         return self.projects.export_artifact_segy(
             project_id, line_id, artifact_id, destination
         )
+
+    def list_artifact_descendants(
+        self,
+        project_id: str,
+        line_id: str,
+        artifact_id: str,
+    ) -> tuple[str, ...]:
+        """Read-only descendant closure of one artifact (blood line, inclusive)."""
+        return self.projects.list_artifact_descendants(project_id, line_id, artifact_id)
+
+    def delete_artifacts(
+        self,
+        project_id: str,
+        line_id: str,
+        artifact_ids: list[str],
+        *,
+        reason: str = "用户删除成果",
+    ) -> ArtifactDeleteResult:
+        """Move processing artifacts into the project trash (cascade pre-collected)."""
+        return self.projects.delete_artifacts(project_id, line_id, artifact_ids, reason=reason)
 
     def submit_project_report(
         self,

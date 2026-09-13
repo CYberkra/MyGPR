@@ -258,6 +258,16 @@ class LineDeleteResult:
 
 
 @dataclass(frozen=True, slots=True)
+class ArtifactDeleteResult:
+    """Result of moving processing artifacts into the project trash."""
+
+    line_id: str
+    deleted_artifact_ids: tuple[str, ...]
+    trash_dir: str
+    remaining_artifact_count: int
+
+
+@dataclass(frozen=True, slots=True)
 class BatchImportItemResult:
     source: str
     line_id: str

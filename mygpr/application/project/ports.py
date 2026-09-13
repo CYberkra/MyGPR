@@ -25,6 +25,7 @@ from mygpr.domain.project.models import (
     ProjectRestore,
     ProjectSummary,
     ProjectMetadata, LineQualityReport, SourceFileStatus, LineDeleteResult, BatchImportSummary,
+    ArtifactDeleteResult,
 )
 
 
@@ -53,6 +54,10 @@ class ProjectSessionPort(Protocol):
     def transpose_line_dataset(self, line_id: str, *, context: ExecutionContext) -> LineQualityReport: ...
 
     def delete_line(self, line_id: str, *, reason: str) -> LineDeleteResult: ...
+
+    def list_artifact_descendants(self, line_id: str, artifact_id: str) -> tuple[str, ...]: ...
+
+    def delete_artifacts(self, line_id: str, artifact_ids: Sequence[str], *, reason: str) -> ArtifactDeleteResult: ...
 
     def batch_import_lines(self, sources: Sequence[Path], *, context: ExecutionContext) -> BatchImportSummary: ...
 
