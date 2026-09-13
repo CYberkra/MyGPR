@@ -155,10 +155,13 @@ class PageCoordinator:
             project.line_delete_requested.connect(self._on_line_delete_requested)
             project.artifact_preview_requested.connect(
                 self._on_artifact_preview_requested)
+            project.artifact_delete_requested.connect(
+                self._on_artifact_delete_requested)
             project.close_project_requested.connect(self._on_close_project_requested)
-            # 测线表右键"复制路径/打开所在文件夹"的路径查询回调
-            project.set_source_path_resolver(
-                self.project_controller.line_source_path)
+        # 测线表右键"复制路径/打开所在文件夹"：异步路径查询回包缓存进页面
+        pc0 = self.project_controller
+        if pc0 is not None and hasattr(project, 'set_line_source_path'):
+            pc0.line_source_path_ready.connect(project.set_line_source_path)
 
         # ---------------- 处理页（SPEC §6.5）
         if hasattr(processing, 'run_requested'):
@@ -224,6 +227,7 @@ class PageCoordinator:
             pc.artifacts_updated.connect(self._on_artifacts_updated)
             pc.dataset_preview_ready.connect(self._on_dataset_preview)
             pc.artifact_preview_ready.connect(self._on_artifact_preview)
+            pc.preview_invalidated.connect(self._on_preview_invalidated)
             pc.preflight_ready.connect(self._on_preflight_ready)
             pc.preflight_failed.connect(self._on_preflight_failed)
             if hasattr(spatial, 'set_tracks') and hasattr(pc, 'spatial_tracks_ready'):
@@ -234,6 +238,8 @@ class PageCoordinator:
                 pc.depth_layer_saved.connect(self._on_depth_layer_saved)
             if hasattr(pc, 'depth_save_failed'):
                 pc.depth_save_failed.connect(self._on_depth_save_failed)
+            pc.artifact_descendants_ready.connect(
+                self._on_artifact_descendants_ready)
             if hasattr(project, 'set_busy'):
                 pc.busy_changed.connect(project.set_busy)
 
@@ -365,6 +371,14 @@ class PageCoordinator:
         processing = self._page('processingInterface')
         if hasattr(project, 'set_lines'):
             project.set_lines(lines)
+        # 预热右键菜单"复制路径"缓存：异步查询各测线源文件路径，
+        # 回包经 line_source_path_ready → project.set_line_source_path 入缓存
+        if self.project_controller is not None and hasattr(
+                project, 'set_line_source_path'):
+            for line in lines:
+                lid = str(getattr(line, 'line_id', '') or '')
+                if lid:
+                    self.project_controller.line_source_path(lid)
         # 导入完成后：若记录了目标测线，选中并预览它
         pending = self._pending_select_line_id
         if pending and hasattr(project, 'select_line'):
@@ -494,6 +508,16 @@ class PageCoordinator:
             if hasattr(processing, 'show_result_segment'):
                 processing.show_result_segment()
 
+    def _on_preview_invalidated(self) -> None:
+        """当前预览的成果已被删除 → 清空项目页/处理页的成果预览。"""
+        project = self._page('projectInterface')
+        processing = self._page('processingInterface')
+        empty = None
+        if hasattr(project, 'set_preview_bundle'):
+            project.set_preview_bundle(empty)
+        if hasattr(processing, 'set_result_bundle'):
+            processing.set_result_bundle(empty)
+
     def _on_line_delete_requested(self, line_ids: list[str]) -> None:
         """项目页删除所选测线（页面已弹确认框）→ 交给 ProjectController。"""
         line_ids = [str(lid) for lid in (line_ids or []) if lid]
@@ -502,6 +526,41 @@ class PageCoordinator:
         if self.project_controller is None or not self._require_project():
             return
         self.project_controller.delete_lines(line_ids)
+
+    def _on_artifact_delete_requested(self, line_id: str,
+                                      artifact_ids: list) -> None:
+        """项目页删除成果 → 异步查后代闭包 → 级联确认框 → 提交删除。"""
+        if self.project_controller is None or not self._require_project():
+            return
+        line_id = str(line_id or '')
+        ids = [str(a) for a in (artifact_ids or []) if a]
+        if not line_id or not ids:
+            return
+        self.project_controller.get_artifact_descendants(line_id, ids[:1])
+
+    def _on_artifact_descendants_ready(self, line_id: str,
+                                       descendants: list,
+                                       names: dict) -> None:
+        """后代闭包回包（GUI 线程）→ 级联确认框 → 确认后提交删除。"""
+        descendants = [str(a) for a in (descendants or []) if a]
+        if not descendants:
+            return
+        pc = self.project_controller
+        if pc is None or not self._require_project():
+            return
+        shown = '\n'.join(
+            f'  • {dict(names or {}).get(aid, aid[:8])}' for aid in descendants)
+        from qfluentwidgets import MessageBox  # 本模块纪律：不建 QWidget，按需导入
+        box = MessageBox(
+            '确认删除成果？',
+            f'将删除 {len(descendants)} 个成果（含级联派生成果，数据会移入项目 '
+            f'.trash 回收站，可恢复）：\n{shown}\n\n确认继续？',
+            self._page('projectInterface'),
+        )
+        box.yesButton.setText('删除')
+        box.cancelButton.setText('取消')
+        if box.exec() == 1:  # QDialog.DialogCode.Accepted
+            pc.delete_artifacts(line_id, descendants)
 
     # ============================================================ 导入 / 预检 / 传感器同步
     def _on_import_requested(self, payload: dict) -> None:

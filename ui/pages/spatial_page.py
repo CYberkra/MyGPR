@@ -29,7 +29,6 @@ from qfluentwidgets import (CaptionLabel, CardWidget, ComboBox, DoubleSpinBox,
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants, file_dialogs
-from ui.settings_manager import SettingsManager
 from ui.widgets.collapsible_panel import CollapsiblePanel
 from ui.widgets.local_dem import load_xyz_grid
 from ui.widgets.map_tiles import BASEMAP_LAYERS, DEFAULT_TILE_SOURCE
@@ -243,10 +242,30 @@ class SpatialPage(QWidget):
         self._restoring_terrain = False       # 恢复/程序化设置地形来源下拉时屏蔽信号
         self._depth_payload_line_ids = []     # 深度切片预览请求的 line_ids（存图层回发用）
         self._depth_cell_size_m = 1.0         # 深度切片网格 cell_size_m（存图层回发用）
+        self._sm = None                       # 共享 SettingsManager（主窗口注入，唯一写者）
 
         self._build_ui()
         self._connect_internal()
         self._restore_state()
+
+    # ============================================================ 设置注入
+    def set_settings_manager(self, sm) -> None:
+        """注入主窗口共享的 SettingsManager 并恢复页面状态。
+
+        页面不再自行构造 SettingsManager：两页相继 save 曾互相覆盖
+        （各自写"构造时快照合并后的全量 dict"），共享实例成为唯一写者后
+        读-改-写竞态消除。未注入时页面保持默认状态、不写盘。
+        """
+        self._sm = sm
+        self._restore_state()
+
+    def _persist_setting(self, key: str, value) -> None:
+        """写设置：共享实例为唯一写者；未注入（如单元测试）时静默跳过。"""
+        sm = self._sm
+        if sm is None:
+            return
+        sm.set(key, value)
+        sm.save()
 
     # ============================================================ 面板状态
     def panel_states(self) -> dict:
@@ -263,12 +282,20 @@ class SpatialPage(QWidget):
             self._right_panel.set_collapsed(bool(right), animate=animate)
 
     def _restore_state(self) -> None:
-        """恢复折叠状态 + 底图源选择。"""
-        sm = SettingsManager()
-        self._left_panel.set_collapsed(
-            bool(sm.get('spatial_left_collapsed', False)), animate=False)
-        self._right_panel.set_collapsed(
-            bool(sm.get('spatial_right_collapsed', False)), animate=False)
+        """恢复折叠状态 + 底图源选择（共享实例注入后生效；未注入不读盘）。"""
+        sm = self._sm
+        if sm is None:
+            return
+        self._left_panel.blockSignals(True)
+        self._right_panel.blockSignals(True)
+        try:
+            self._left_panel.set_collapsed(
+                bool(sm.get('spatial_left_collapsed', False)), animate=False)
+            self._right_panel.set_collapsed(
+                bool(sm.get('spatial_right_collapsed', False)), animate=False)
+        finally:
+            self._left_panel.blockSignals(False)
+            self._right_panel.blockSignals(False)
         source = str(sm.get('spatial_basemap_source', DEFAULT_TILE_SOURCE))
         if source not in BASEMAP_LAYERS:
             source = DEFAULT_TILE_SOURCE
@@ -280,7 +307,7 @@ class SpatialPage(QWidget):
             self._map_view.set_source(source)
         finally:
             self._restoring_basemap = False
-        self._auto_load_dem(sm)
+        self._auto_load_dem()
         mode = str(sm.get('spatial_terrain_source', 'online') or 'online')
         if mode not in ('online', 'estimated', 'local_dem'):
             mode = 'online'
@@ -300,15 +327,16 @@ class SpatialPage(QWidget):
             self._restoring_terrain = False
         self._3d_view.set_terrain_source(mode)
         if persist:
-            sm = SettingsManager()
-            sm.set('spatial_terrain_source', mode)
-            sm.save()
+            self._persist_setting('spatial_terrain_source', mode)
 
-    def _auto_load_dem(self, sm: SettingsManager) -> None:
+    def _auto_load_dem(self) -> None:
         """启动自动加载上次导入的本地 DEM（默认在线下载，无需任何操作）。
 
         文件已被移动/删除或解析失败时清除记录，静默回退在线下载。
         """
+        sm = self._sm
+        if sm is None:
+            return
         path = str(sm.get('spatial_local_dem', '') or '')
         if not path:
             return
@@ -319,8 +347,7 @@ class SpatialPage(QWidget):
             except (OSError, ValueError):
                 dem = None
         if dem is None:
-            sm.set('spatial_local_dem', '')
-            sm.save()
+            self._persist_setting('spatial_local_dem', '')
             return
         self._apply_local_dem(dem, path)
 
@@ -339,10 +366,10 @@ class SpatialPage(QWidget):
         self._3d_dem_label.setText(f'{base}；{text}' if text else base)
 
     def _save_panel_state(self) -> None:
-        sm = SettingsManager()
-        sm.set('spatial_left_collapsed', self._left_panel.is_collapsed())
-        sm.set('spatial_right_collapsed', self._right_panel.is_collapsed())
-        sm.save()
+        self._persist_setting('spatial_left_collapsed',
+                              self._left_panel.is_collapsed())
+        self._persist_setting('spatial_right_collapsed',
+                              self._right_panel.is_collapsed())
 
     # ============================================================ UI 构建
     def _build_ui(self) -> None:
@@ -581,6 +608,12 @@ class SpatialPage(QWidget):
             self._3d_view.set_vertical_exaggeration)
         self._3d_drape_switch.checkedChanged.connect(
             self._3d_view.set_track_drape)
+        self._3d_imagery_switch.checkedChanged.connect(
+            self._3d_view.set_imagery_enabled)
+        self._3d_terrain_combo.currentIndexChanged.connect(
+            self._on_terrain_source_changed)
+        self._3d_dem_btn.clicked.connect(self._on_import_dem_clicked)
+        self._3d_dem_clear_btn.clicked.connect(self._on_clear_dem_clicked)
         self._3d_view.local_dem_notice.connect(self._on_dem_notice)
         self._depth_slider.valueChanged.connect(self._on_depth_slider_changed)
         self._depth_save_btn.clicked.connect(self._on_save_depth_layer_clicked)
@@ -800,9 +833,7 @@ class SpatialPage(QWidget):
             return
         source = str(self._basemap_combo.itemData(index) or DEFAULT_TILE_SOURCE)
         self._map_view.set_source(source)
-        sm = SettingsManager()
-        sm.set('spatial_basemap_source', source)
-        sm.save()
+        self._persist_setting('spatial_basemap_source', source)
 
     def _on_prefetch_clicked(self) -> None:
         # 优先按测线包围盒下载对应地理区域；无已配准轨迹回退当前视野
@@ -845,9 +876,7 @@ class SpatialPage(QWidget):
             return
         self._apply_local_dem(dem, path)
         self._set_terrain_mode('local_dem')
-        sm = SettingsManager()
-        sm.set('spatial_local_dem', path)
-        sm.save()
+        self._persist_setting('spatial_local_dem', path)
 
     def _on_clear_dem_clicked(self) -> None:
         """清除本地 DEM：三维地形回退在线高程瓦片，并删除设置记录。"""
@@ -858,9 +887,7 @@ class SpatialPage(QWidget):
         self._3d_dem_clear_btn.setEnabled(False)
         if self._terrain_mode == 'local_dem':
             self._set_terrain_mode('online')
-        sm = SettingsManager()
-        sm.set('spatial_local_dem', '')
-        sm.save()
+        self._persist_setting('spatial_local_dem', '')
 
     def _auto_prefetch_tracks(self) -> None:
         """轨迹加载后自动下载测线所在地理区域（按 包围盒+瓦图源 去重）。

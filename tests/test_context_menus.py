@@ -20,13 +20,31 @@ def qapp():
 
 # ------------------------------------------------------------------ line_source_path
 class TestLineSourcePath:
-    """ProjectController.line_source_path：读 raw/<line_id>/import_manifest.json。"""
+    """ProjectController.line_source_path：异步读 raw/<line_id>/import_manifest.json。"""
 
     def _controller(self, root):
         from ui.controllers.project_controller import ProjectController
         controller = ProjectController()
         controller._current = SimpleNamespace(root_path=str(root))
         return controller
+
+    def _resolve(self, controller, line_id, timeout_s=5.0):
+        """发起异步查询并等待回包（无 pytest-qt，轮询 processEvents）。"""
+        import time
+
+        from PyQt6.QtCore import QCoreApplication
+        results = []
+        controller.line_source_path_ready.connect(
+            lambda lid, path: results.append((lid, path)))
+        controller.line_source_path(line_id)
+        deadline = time.monotonic() + timeout_s
+        while not results and time.monotonic() < deadline:
+            QCoreApplication.processEvents()
+            time.sleep(0.005)
+        assert results, f'line_source_path({line_id}) 未回包'
+        lid, path = results[-1]
+        assert lid == line_id
+        return path
 
     def test_roundtrip(self, tmp_path):
         manifest = tmp_path / 'raw' / 'L01' / 'import_manifest.json'
@@ -35,18 +53,18 @@ class TestLineSourcePath:
             {'schema': 'mygpr.import_manifest.v2', 'line_id': 'L01',
              'source_path': 'D:/data/营山/L01.csv'}), encoding='utf-8')
         controller = self._controller(tmp_path)
-        assert controller.line_source_path('L01') == 'D:/data/营山/L01.csv'
+        assert self._resolve(controller, 'L01') == 'D:/data/营山/L01.csv'
 
     def test_missing_manifest_returns_none(self, tmp_path):
         controller = self._controller(tmp_path)
-        assert controller.line_source_path('L99') is None
+        assert self._resolve(controller, 'L99') is None
 
     def test_invalid_json_returns_none(self, tmp_path):
         manifest = tmp_path / 'raw' / 'L01' / 'import_manifest.json'
         manifest.parent.mkdir(parents=True)
         manifest.write_text('{not json', encoding='utf-8')
         controller = self._controller(tmp_path)
-        assert controller.line_source_path('L01') is None
+        assert self._resolve(controller, 'L01') is None
 
     def test_empty_source_path_returns_none(self, tmp_path):
         manifest = tmp_path / 'raw' / 'L01' / 'import_manifest.json'
@@ -54,12 +72,12 @@ class TestLineSourcePath:
         manifest.write_text(json.dumps({'line_id': 'L01', 'source_path': ''}),
                             encoding='utf-8')
         controller = self._controller(tmp_path)
-        assert controller.line_source_path('L01') is None
+        assert self._resolve(controller, 'L01') is None
 
     def test_no_project_returns_none(self):
         from ui.controllers.project_controller import ProjectController
         controller = ProjectController()
-        assert controller.line_source_path('L01') is None
+        assert self._resolve(controller, 'L01') is None
 
 
 # ------------------------------------------------------------------ BScanView 色标信号
@@ -137,12 +155,18 @@ def test_method_browser_context_menu_uses_method_id(qapp):
     assert browser._method_id_of(top.child(0)) == 'agc'
 
 
-# ------------------------------------------------------------------ ProjectPage resolver
-def test_project_page_resolver_default_none(qapp):
-    """未注入 resolver 时右键菜单路径项应按无路径处理（不抛异常）。"""
+# ------------------------------------------------------------------ ProjectPage 路径缓存
+def test_project_page_line_source_path_cache(qapp):
+    """异步回包缓存：set_line_source_path 喂入后右键菜单素材可用。"""
     from ui.pages.project_page import ProjectPage
     page = ProjectPage()
-    assert page._source_path_resolver is None
+    assert page._source_path_cache == {}
+    page.set_line_source_path('L01', 'D:/data/L01.csv')
+    assert page._source_path_cache['L01'] == 'D:/data/L01.csv'
+    page.set_line_source_path('L02', None)
+    assert page._source_path_cache['L02'] is None
+    page.set_line_source_path('', 'ignored')
+    assert '' not in page._source_path_cache
 
 
 # ------------------------------------------------------------------ 删除测线

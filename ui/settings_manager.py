@@ -25,6 +25,10 @@ DEFAULT_SETTINGS = {
     'processing_left_collapsed': False,                  # 处理页左栏折叠状态
     'processing_right_collapsed': False,                 # 处理页右栏折叠状态
     'log_panel_collapsed': True,                         # 全局日志面板默认折叠
+    'spatial_basemap_source': 'gaode_img',               # 空间页底图源（与 map_tiles.DEFAULT_TILE_SOURCE 一致）
+    'spatial_terrain_source': 'online',                  # 三维地形来源：online / estimated / local_dem
+    'spatial_left_collapsed': False,                     # 空间页左栏折叠状态
+    'spatial_right_collapsed': False,                    # 空间页右栏折叠状态
     'spatial_local_dem': '',                             # 空间页本地 DEM 文件路径（'' = 在线下载）
     'auto_prefetch_basemap': True,                       # 空间页加载轨迹后自动预下载底图
 }

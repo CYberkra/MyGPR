@@ -151,10 +151,15 @@ class DepthSliceView(pg.PlotWidget):
 
     # ------------------------------------------------------------ 内部
     def _auto_range(self) -> None:
-        """网格/轨迹变化后重设视野：以网格范围并集轨迹点为准。"""
+        """网格/轨迹变化后重设视野：有网格按网格（并集轨迹点），
+        否则按已有轨迹数据 fit；两者都没有才 no-op。
+
+        无网格阶段（未请求深度预览时）也要能自适应，否则视图永远停在
+        初始 0~1 视野，轨迹点挤在角落看不见。
+        """
+        data = self._track_scatter.points()
         if self._grid_extent is not None:
             x0, y0, x1, y1 = self._grid_extent
-            data = self._track_scatter.points()
             if data.size:
                 xs = [float(pt.pos().x()) for pt in data]
                 ys = [float(pt.pos().y()) for pt in data]
@@ -162,6 +167,13 @@ class DepthSliceView(pg.PlotWidget):
                 y0, y1 = min(y0, min(ys)), max(y1, max(ys))
             self._plot_item.setXRange(x0, x1, padding=0.05)
             self._plot_item.setYRange(y0, y1, padding=0.05)
+            return
+        if not data.size:
+            return
+        xs = [float(pt.pos().x()) for pt in data]
+        ys = [float(pt.pos().y()) for pt in data]
+        self._plot_item.setXRange(min(xs), max(xs), padding=0.05)
+        self._plot_item.setYRange(min(ys), max(ys), padding=0.05)
 
     # ------------------------------------------------------------ 主题
     def apply_theme(self, dark: bool) -> None:

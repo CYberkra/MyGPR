@@ -291,6 +291,10 @@ class MyGPRMainWindow(FluentWindow):
         ]
         for object_name, page_class, icon, text, position in page_specs:
             page = page_class(self) if page_class else PlaceholderPage(text, self)
+            # 注入共享 SettingsManager：页面不再各自构造实例，避免读-改-写
+            # 互相覆盖（共享实例是唯一写者）
+            if hasattr(page, 'set_settings_manager'):
+                page.set_settings_manager(self.settings)
             page.setObjectName(object_name)
             self.addSubInterface(page, icon, text, position=position)
             self.pages[object_name] = page

@@ -160,21 +160,29 @@ class JobTable(QWidget):
         cancel_btn.setEnabled(status in _ACTIVE_STATUSES)
 
     def clear_finished(self) -> None:
-        """移除终态行（供"清理已完成"按钮）。"""
-        for job_id in [j for j, r in self._rows.items()
-                       if self._status_of(r) not in _ACTIVE_STATUSES]:
-            self._table.removeRow(self._rows[job_id])
-            del self._rows[job_id]
+        """移除终态行（供"清理已完成"按钮）。
+
+        先收集要删的行号、按行号倒序 removeRow（倒序保证前排删除
+        不影响后排行号），再按可视顺序重建 _rows 映射——循环中边删边用
+        旧映射会让非相邻多任务的行号漂移，删错/删不掉。
+        """
+        finished = sorted(
+            ((job_id, row) for job_id, row in self._rows.items()
+             if self._status_of(row) not in _ACTIVE_STATUSES),
+            key=lambda pair: pair[1], reverse=True)
+        if not finished:
+            return
+        for job_id, row in finished:
+            self._table.removeRow(row)
+            self._rows.pop(job_id, None)
             self._badges.pop(job_id, None)
-        self._rows = {j: i for i, j in enumerate(
-            self._rows_ordered_ids())}
+        # 删除后幸存行的相对顺序不变，按旧行号升序重排即为新行号
+        survivors = sorted(self._rows.items(), key=lambda kv: kv[1])
+        self._rows = {job_id: index for index, (job_id, _old) in
+                      enumerate(survivors)}
         self._update_empty_state()
 
     # ------------------------------------------------------------- 内部
-    def _rows_ordered_ids(self):
-        pairs = sorted(self._rows.items(), key=lambda kv: kv[1])
-        return [j for j, _ in pairs]
-
     def _status_of(self, row):
         item = self._table.item(row, self._COL_STATUS)
         return item.data(Qt.ItemDataRole.UserRole) if item else None

@@ -34,11 +34,14 @@ class ProjectController(QObject):
     dataset_preview_ready = pyqtSignal(object)   # PreviewBundle (raw data)
     artifact_preview_ready = pyqtSignal(str, object)  # artifact_id, PreviewBundle
     preflight_ready = pyqtSignal(object)         # ImportPreflight
-    preflight_failed = pyqtSignal(str)
+    preflight_failed = pyqtSignal(str)           # 导入预检失败消息
+    preview_invalidated = pyqtSignal()           # 预览中的成果已被删除
     spatial_tracks_ready = pyqtSignal(list)      # list[SpatialTrack]
     depth_preview_ready = pyqtSignal(object, list, float, int)  # payload, line_ids, cell_size_m, generation
     depth_layer_saved = pyqtSignal(str, list, float)       # job_id, line_ids, cell_size_m
     depth_save_failed = pyqtSignal(str)                    # message
+    artifact_descendants_ready = pyqtSignal(str, list, dict)  # line_id, 后代闭包, {artifact_id: 名称}
+    line_source_path_ready = pyqtSignal(str, object)          # line_id, 源文件路径|None
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -50,6 +53,8 @@ class ProjectController(QObject):
         self._preview_generation = 0
         # 深度切片预览代数：与数据/成果预览独立计数（不同预览域互不失效）。
         self._depth_preview_generation = 0
+        # 当前预览中的成果 id（删除该成果时需清空各页预览）
+        self._current_preview_artifact_id = ''
 
     # ------------------------------------------------------------------
     def set_backend(self, backend_controller) -> None:
@@ -134,26 +139,27 @@ class ProjectController(QObject):
         self._depth_preview_generation += 1
 
     # ------------------------------------------------------------------
-    def line_source_path(self, line_id: str) -> str | None:
-        """当前项目某测线的源数据文件路径（右键菜单"复制路径/打开位置"用）。
+    def line_source_path(self, line_id: str) -> None:
+        """异步查询当前项目某测线的源数据文件路径（右键菜单"复制路径/
+        打开所在文件夹"素材）。
 
         读项目根 ``raw/<line_id>/import_manifest.json`` 的 ``source_path``
-        （导入时由 field_line_store 持久化）；无项目/无清单/无字段返回 None。
-        同步小文件读取，供 UI 右键菜单构建时直接调用。
+        （导入时由 field_line_store 持久化）；小文件 I/O 放到 worker 线程，
+        结果经 ``line_source_path_ready(line_id, path|None)`` 回 GUI 线程。
+        无项目/无清单/无字段时回 None。
         """
-        if self._current is None or not line_id:
-            return None
-        manifest = (Path(self._current.root_path) / 'raw' / str(line_id)
+        line_id = str(line_id or '')
+        if not line_id:
+            return
+        if self._current is None:
+            self.line_source_path_ready.emit(line_id, None)
+            return
+        manifest = (Path(self._current.root_path) / 'raw' / line_id
                     / 'import_manifest.json')
-        try:
-            with open(manifest, 'r', encoding='utf-8') as fh:
-                payload = json.load(fh)
-        except (OSError, ValueError):
-            return None
-        if not isinstance(payload, dict):
-            return None
-        source = str(payload.get('source_path') or '')
-        return source or None
+        run_command(
+            _LineSourcePathCommand(self, line_id, manifest),
+            name="mygpr-line-source-path",
+        )
 
     def refresh_lines(self) -> None:
         backend = self._backend()
@@ -216,6 +222,7 @@ class ProjectController(QObject):
             return
         line_id = str(line_id)
         artifact_id = str(artifact_id)
+        self._current_preview_artifact_id = artifact_id
         self._preview_generation += 1
 
         run_command(
@@ -342,6 +349,41 @@ class ProjectController(QObject):
         run_command(
             _DeleteLinesCommand(self, project_id, line_ids, reason),
             name="mygpr-lines-delete",
+        )
+
+    def delete_artifacts(self, line_id: str, artifact_ids: list[str]) -> None:
+        """删除成果（级联名单已由 coordinator 确认）→ 移入项目回收站。"""
+        backend = self._backend()
+        project_id = self._project_id_or_warn()
+        if backend is None or project_id is None:
+            return
+        ids = [str(a) for a in (artifact_ids or []) if a]
+        if not ids or not str(line_id):
+            return
+        self._set_busy(True)
+        run_command(
+            _DeleteArtifactsCommand(self, project_id, str(line_id), ids),
+            name="mygpr-artifacts-delete",
+        )
+
+    def get_artifact_descendants(self, line_id: str,
+                                 artifact_ids: list[str]) -> None:
+        """异步查询某成果（或多个）的后代闭包（含自身）+ 名称表。
+
+        供级联确认框：结果经 ``artifact_descendants_ready(line_id,
+        descendants, names)`` 回 GUI 线程；查询失败只记日志（与原同步版
+        返回 [] 一致，不弹确认框）。
+        """
+        backend = self._backend()
+        project_id = self._project_id_or_warn()
+        if backend is None or project_id is None:
+            return
+        ids = [str(a) for a in (artifact_ids or []) if a]
+        if not ids or not str(line_id):
+            return
+        run_command(
+            _ArtifactDescendantsCommand(self, project_id, str(line_id), ids),
+            name="mygpr-artifact-descendants",
         )
 
     def request_depth_preview(self, line_ids: list[str], cell_size_m: float = 1.0) -> None:
@@ -742,6 +784,53 @@ class _DeleteLinesCommand:
             c.refresh_lines()
 
 
+class _DeleteArtifactsCommand:
+    """worker 线程删除成果（移入回收站）；成功后刷新成果列表。"""
+
+    __slots__ = ("_controller", "_project_id", "_line_id", "_artifact_ids")
+
+    def __init__(
+        self,
+        controller: ProjectController,
+        project_id: str,
+        line_id: str,
+        artifact_ids: list[str],
+    ) -> None:
+        self._controller = controller
+        self._project_id = project_id
+        self._line_id = line_id
+        self._artifact_ids = artifact_ids
+
+    def execute(self) -> None:
+        c = self._controller
+        backend = c._backend()
+        if backend is None:
+            c._set_busy(False)
+            return
+        try:
+            result = backend.delete_artifacts(
+                self._project_id, self._line_id, list(self._artifact_ids))
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.exception("删除成果失败")
+            c.log_message.emit(f"删除成果失败：{friendly_error_message(exc)}")
+        else:
+            deleted = list(result.deleted_artifact_ids)
+            c.log_message.emit(
+                f"已删除 {len(deleted)} 个成果（含级联），已移入项目回收站")
+            if c._current_preview_artifact_id in deleted:
+                c._current_preview_artifact_id = ''
+                c.preview_invalidated.emit()
+        finally:
+            c._set_busy(False)
+            try:
+                artifacts = list(backend.projects.list_artifacts(
+                    self._project_id, self._line_id))
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception("刷新成果列表失败", exc_info=True)
+                return
+            c.artifacts_updated.emit(self._line_id, artifacts)
+
+
 class _DepthPreviewCommand:
     """worker 线程执行 interface_depth_preview，结果经 depth_preview_ready 回 UI。"""
 
@@ -783,6 +872,75 @@ class _DepthPreviewCommand:
                 return
             c.depth_preview_ready.emit(
                 payload, list(self._line_ids), self._cell_size_m, self._generation)
+
+
+class _LineSourcePathCommand:
+    """worker 线程读 import_manifest.json 的 source_path（小文件 I/O 离开 UI 线程）。"""
+
+    __slots__ = ("_controller", "_line_id", "_manifest")
+
+    def __init__(self, controller: ProjectController, line_id: str,
+                 manifest: Path) -> None:
+        self._controller = controller
+        self._line_id = line_id
+        self._manifest = manifest
+
+    def execute(self) -> None:
+        path = None
+        try:
+            with open(self._manifest, 'r', encoding='utf-8') as fh:
+                payload = json.load(fh)
+        except (OSError, ValueError):
+            payload = None
+        if isinstance(payload, dict):
+            source = str(payload.get('source_path') or '')
+            path = source or None
+        self._controller.line_source_path_ready.emit(self._line_id, path)
+
+
+class _ArtifactDescendantsCommand:
+    """worker 线程查询后代闭包 + 成果名称（级联确认框素材）。"""
+
+    __slots__ = ("_controller", "_project_id", "_line_id", "_artifact_ids")
+
+    def __init__(self, controller: ProjectController, project_id: str,
+                 line_id: str, artifact_ids: list[str]) -> None:
+        self._controller = controller
+        self._project_id = project_id
+        self._line_id = line_id
+        self._artifact_ids = artifact_ids
+
+    def execute(self) -> None:
+        c = self._controller
+        backend = c._backend()
+        if backend is None:
+            return
+        descendants: list[str] = []
+        seen: set[str] = set()
+        try:
+            for aid in self._artifact_ids:
+                closure = backend.list_artifact_descendants(
+                    self._project_id, self._line_id, aid)
+                for item in closure:
+                    if item not in seen:
+                        seen.add(item)
+                        descendants.append(item)
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.exception("查询成果后代失败")
+            c.log_message.emit(f"查询成果后代失败：{friendly_error_message(exc)}")
+            return
+        names: dict[str, str] = {}
+        try:
+            artifacts = backend.projects.list_artifacts(
+                self._project_id, self._line_id)
+            for item in artifacts:
+                aid = str(getattr(item, "artifact_id", "") or "")
+                if aid:
+                    names[aid] = (str(getattr(item, "name", "") or "")
+                                  or aid[:8])
+        except Exception:  # noqa: BLE001 - 名称仅供展示，失败退回 aid 前 8 位
+            pass
+        c.artifact_descendants_ready.emit(self._line_id, descendants, names)
 
 
 __all__ = ["ProjectController"]

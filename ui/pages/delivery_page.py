@@ -279,7 +279,16 @@ class DeliveryPage(QWidget):
         return self._report_name_edit.text().strip()
 
     def set_lines(self, lines: list) -> None:
-        """可选测线列表（主窗口注入；dict/对象鸭子类型，取 line_id 与 name）。"""
+        """可选测线列表（主窗口注入；dict/对象鸭子类型，取 line_id 与 name）。
+
+        重建列表时保持已有勾选状态（与 spatial_page.set_tracks 同模式），
+        避免刷新测线集合后丢掉用户已勾选的测线；新出现的测线维持默认不勾选。
+        """
+        previous_checked = {}
+        for row in range(self._lines_list.count()):
+            item = self._lines_list.item(row)
+            previous_checked[str(item.data(Qt.ItemDataRole.UserRole) or '')] = (
+                item.checkState() == Qt.CheckState.Checked)
         self._lines_list.clear()
         for line in (lines or []):
             line_id = str(_get(line, 'line_id', '') or _get(line, 'id', ''))
@@ -288,7 +297,9 @@ class DeliveryPage(QWidget):
                                    if name != line_id else line_id)
             item.setData(Qt.ItemDataRole.UserRole, line_id)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(Qt.CheckState.Unchecked)
+            checked = previous_checked.get(line_id, False)
+            item.setCheckState(
+                Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
             self._lines_list.addItem(item)
 
     # ============================================================ 内部逻辑

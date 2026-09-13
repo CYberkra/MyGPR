@@ -503,10 +503,19 @@ class BScanView(QWidget):
         if enabled:
             if self._ascan_popup is None:
                 self._ascan_popup = AScanPopup(self.window())
+                self._ascan_popup.closed.connect(self._on_ascan_popup_closed)
             self._ascan_popup.show()
             self.set_pick_enabled(True)
         elif self._ascan_popup is not None:
             self._ascan_popup.hide()
+
+    def _on_ascan_popup_closed(self) -> None:
+        """浮窗被用户关闭（仅隐藏、实例复用）：回落跟随标志。
+
+        与菜单取消勾选同效——不动 pick 模式（set_ascan_follow(False)
+        同样只隐藏浮窗），仅让下次右键菜单的勾选态与浮窗实际状态一致。
+        """
+        self._ascan_follow = False
 
     def _on_mouse_moved(self, pos) -> None:
         """鼠标在图像区移动：十字线跟手 + 左下角读数浮层。"""

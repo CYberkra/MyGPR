@@ -15,7 +15,7 @@ artifact_preview_requested(str, str)。
 
 右键菜单（RoundMenu）：测线表 = 处理该测线（跳转处理页，双击同效）/
 复制数据文件路径 / 打开数据所在文件夹 /
-复制测线号（路径经 set_source_path_resolver 注入的回调查询）；
+复制测线号（路径为 controller 异步查询回包缓存，set_line_source_path 喂入）；
 成果表 = 预览所选（双击同效）。
 
 import_requested payload：{'preflight': bool, 'source', 'line_id', 'name', 'dielectric'}
@@ -35,7 +35,7 @@ from PyQt6.QtWidgets import (
 from qfluentwidgets import (
     BodyLabel, CaptionLabel, CardWidget, DoubleSpinBox, InfoBar,
     InfoBarPosition, LineEdit, MessageBox, PrimaryPushButton, PushButton,
-    ScrollArea, SubtitleLabel,
+    ScrollArea, SubtitleLabel, ToolButton,
 )
 from qfluentwidgets import FluentIcon as FIF
 
@@ -95,6 +95,7 @@ class ProjectPage(QWidget):
     line_process_requested = pyqtSignal(str)   # 双击/右键 → 跳转处理页处理该测线
     line_delete_requested = pyqtSignal(list)   # 批量删除所选测线
     artifact_preview_requested = pyqtSignal(str, str)
+    artifact_delete_requested = pyqtSignal(str, list)  # 删除成果（单/批）
     close_project_requested = pyqtSignal()
 
     def __init__(self, parent=None):
@@ -105,7 +106,8 @@ class ProjectPage(QWidget):
         self._artifacts = []        # list[ProjectArtifact]
         self._current_line_id = ''
         self._filling_table = False
-        self._source_path_resolver = None   # 主窗口注入：line_id → 源文件路径
+        self._source_path_cache: dict[str, str | None] = {}  # line_id → 源文件路径（异步回包缓存）
+        self._sm = None                     # 共享 SettingsManager（主窗口注入）
 
         root = QVBoxLayout(self)
         root.setContentsMargins(*constants.PAGE_MARGINS)
@@ -331,9 +333,9 @@ class ProjectPage(QWidget):
 
         # 卡片"处理成果(Artifact)"
         art_card, art_layout = _create_card('处理成果(Artifact)')
-        self._artifacts_table = QTableWidget(0, 5, art_card)
+        self._artifacts_table = QTableWidget(0, 6, art_card)
         self._artifacts_table.setHorizontalHeaderLabels(
-            ['名称', '方法', '形状', '创建时间', 'SHA前8位'])
+            ['名称', '方法', '形状', '创建时间', 'SHA前8位', '操作'])
         self._artifacts_table.verticalHeader().setVisible(False)
         self._artifacts_table.setEditTriggers(
             QTableWidget.EditTrigger.NoEditTriggers)
@@ -344,6 +346,8 @@ class ProjectPage(QWidget):
         art_header = self._artifacts_table.horizontalHeader()
         art_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         art_header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        art_header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
+        self._artifacts_table.setColumnWidth(5, 56)
         art_header.sectionResized.connect(self._save_artifacts_column_widths)
         self._fit_table_height(self._artifacts_table, min_h=84, max_h=160)
         self._artifacts_table.itemDoubleClicked.connect(
@@ -465,6 +469,12 @@ class ProjectPage(QWidget):
                 str(getattr(artifact, 'created_at', '') or '--'),
                 sha[:8] if sha else '--',
             )
+            del_btn = ToolButton(FIF.DELETE)
+            del_btn.setToolTip('删除该成果（移入回收站）')
+            aid = str(getattr(artifact, 'artifact_id', '') or '')
+            del_btn.clicked.connect(
+                lambda _=False, aid_=aid: self._on_artifact_delete_clicked(aid_))
+            self._artifacts_table.setCellWidget(row, 5, del_btn)
             for col, text in enumerate(values):
                 self._artifacts_table.setItem(row, col, QTableWidgetItem(text))
         self._restore_column_widths(self._artifacts_table, 'artifacts')
@@ -580,13 +590,15 @@ class ProjectPage(QWidget):
                    or self.line_id_edit.text().strip() or 'L01')
         self.sync_requested.emit({'line_id': line_id, 'paths': paths})
 
-    def set_source_path_resolver(self, resolver) -> None:
-        """主窗口注入：line_id → 源数据文件路径（str|None）的查询回调。
+    def set_line_source_path(self, line_id: str, path) -> None:
+        """主窗口/controller 异步回包：缓存测线源文件路径（右键菜单素材）。
 
-        右键菜单"复制路径/打开所在文件夹"的可用性依赖它；未注入或
-        查询返回 None 时对应菜单项禁用。
+        由 page_coordinator 把 ProjectController.line_source_path_ready
+        接到本方法；查询在 worker 线程完成，右键菜单构建时直接读缓存。
         """
-        self._source_path_resolver = resolver
+        line_id = str(line_id or '')
+        if line_id:
+            self._source_path_cache[line_id] = str(path) if path else None
 
     # ------------------------------------------------------------ 右键菜单
     def _on_lines_context_menu(self, pos) -> None:
@@ -597,12 +609,7 @@ class ProjectPage(QWidget):
         line_id = str(getattr(self._lines[row], 'line_id', '') or '')
         if not line_id:
             return
-        source = None
-        if self._source_path_resolver is not None:
-            try:
-                source = self._source_path_resolver(line_id)
-            except Exception:  # noqa: BLE001 - 查询失败按无路径处理
-                source = None
+        source = self._source_path_cache.get(line_id)
         menu = make_menu(self)
         add_action(menu, FIF.DEVELOPER_TOOLS, '处理该测线（跳转处理页）',
                    lambda: self.line_process_requested.emit(line_id))
@@ -633,10 +640,13 @@ class ProjectPage(QWidget):
         self._artifacts_table.selectRow(row)
         menu = make_menu(self)
         add_action(menu, FIF.VIEW, '预览所选', self._emit_artifact_preview)
+        add_action(menu, FIF.DELETE, '删除所选成果',
+                   self._on_artifacts_context_delete)
         menu.exec(self._artifacts_table.viewport().mapToGlobal(pos))
 
     def _on_line_selection_changed(self) -> None:
         if self._filling_table:
+            self._current_line_id = ''
             return
         row = self._lines_table.currentRow()
         if row < 0 or row >= len(self._lines):
@@ -671,6 +681,30 @@ class ProjectPage(QWidget):
         if artifact_id and line_id:
             self.artifact_preview_requested.emit(line_id, artifact_id)
 
+    def _on_artifact_delete_clicked(self, artifact_id: str) -> None:
+        """成果表操作列删除按钮 → 请求删除（级联确认在 coordinator）。"""
+        artifact_id = str(artifact_id or '')
+        if not artifact_id:
+            return
+        line_id = self._current_line_id
+        if not line_id:
+            for item in self._artifacts:
+                if str(getattr(item, 'artifact_id', '') or '') == artifact_id:
+                    line_id = str(getattr(item, 'line_id', '') or '')
+                    break
+        if not line_id:
+            return
+        self.artifact_delete_requested.emit(line_id, [artifact_id])
+
+    def _on_artifacts_context_delete(self) -> None:
+        """右键删除所选成果（级联确认在 coordinator）。"""
+        row = self._artifacts_table.currentRow()
+        if row < 0 or row >= len(self._artifacts):
+            return
+        artifact_id = str(getattr(self._artifacts[row], 'artifact_id', '') or '')
+        if artifact_id:
+            self._on_artifact_delete_clicked(artifact_id)
+
     # ------------------------------------------------------------- 批量删除 / 列宽记忆
     def _on_delete_selected_lines(self) -> None:
         """Delete 键 / 右键：确认后批量删除所选测线。"""
@@ -699,6 +733,12 @@ class ProjectPage(QWidget):
     def _column_widths_key(self, table_name: str) -> str:
         return f'ui/project_page/{table_name}_column_widths'
 
+    def set_settings_manager(self, sm) -> None:
+        """注入主窗口共享的 SettingsManager 并重放列宽恢复（含 QSettings 迁移）。"""
+        self._sm = sm
+        self._restore_column_widths(self._lines_table, 'lines')
+        self._restore_column_widths(self._artifacts_table, 'artifacts')
+
     def _save_lines_column_widths(self) -> None:
         self._save_column_widths(self._lines_table, 'lines')
 
@@ -707,18 +747,41 @@ class ProjectPage(QWidget):
 
     def _save_column_widths(self, table: QTableWidget, table_name: str) -> None:
         header = table.horizontalHeader()
-        widths = [header.sectionSize(i) for i in range(table.columnCount())]
-        settings = QSettings('MyGPR', 'MyGPR')
-        settings.setValue(self._column_widths_key(table_name), widths)
+        widths = [int(header.sectionSize(i)) for i in range(table.columnCount())]
+        sm = self._sm
+        if sm is None:
+            return
+        sm.set(self._column_widths_key(table_name), widths)
+        sm.save()
 
     def _restore_column_widths(self, table: QTableWidget, table_name: str) -> None:
-        settings = QSettings('MyGPR', 'MyGPR')
-        widths = settings.value(self._column_widths_key(table_name))
-        if not isinstance(widths, list):
+        """恢复列宽：优先读共享 SettingsManager；旧版 QSettings 读到即迁移。
+
+        迁移语义：QSettings('MyGPR','MyGPR') 里残留的列宽写入 SettingsManager
+        （JSON list）并清掉旧键；之后新写入只走 SettingsManager。
+        """
+        key = self._column_widths_key(table_name)
+        widths = None
+        legacy = QSettings('MyGPR', 'MyGPR')
+        stored = legacy.value(key)
+        if isinstance(stored, list):
+            widths = [int(w) for w in stored
+                      if isinstance(w, (int, float)) and int(w) > 0]
+            sm = self._sm
+            if sm is not None:
+                sm.set(key, widths)
+                sm.save()
+                legacy.remove(key)
+        elif self._sm is not None:
+            stored = self._sm.get(key)
+            if isinstance(stored, list):
+                widths = [int(w) for w in stored
+                          if isinstance(w, (int, float)) and int(w) > 0]
+        if not widths:
             return
         header = table.horizontalHeader()
         for i, w in enumerate(widths):
-            if isinstance(w, int) and 0 <= i < table.columnCount():
+            if 0 <= i < table.columnCount():
                 header.resizeSection(i, w)
 
     def _settings(self) -> QSettings:

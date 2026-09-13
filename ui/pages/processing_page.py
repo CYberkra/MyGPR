@@ -102,6 +102,7 @@ class ProcessingPage(QWidget):
         self._selected_method_id = ''   # 方法库当前选中方法
         self._line_ids: list[str] = []  # 与 _line_combo 逐项对应的 line_id
         self._artifact_ids: list[str] = []  # 与 _artifact_combo 逐项对应的 artifact_id
+        self._sm = None                 # 共享 SettingsManager（主窗口注入，唯一写者）
 
         self._build_ui()
         self._connect_internal()
@@ -123,19 +124,32 @@ class ProcessingPage(QWidget):
         if right is not None:
             self._right_panel.set_collapsed(bool(right), animate=animate)
 
+    def set_settings_manager(self, sm) -> None:
+        """注入主窗口共享的 SettingsManager（唯一写者）并恢复折叠状态。"""
+        self._sm = sm
+        self._restore_panel_state()
+
     def _restore_panel_state(self) -> None:
-        """从 SettingsManager 恢复折叠状态。"""
-        from ui.settings_manager import SettingsManager
-        sm = SettingsManager()
-        self._left_panel.set_collapsed(
-            bool(sm.get('processing_left_collapsed', False)), animate=False)
-        self._right_panel.set_collapsed(
-            bool(sm.get('processing_right_collapsed', False)), animate=False)
+        """从共享 SettingsManager 恢复折叠状态（未注入不读盘）。"""
+        sm = self._sm
+        if sm is None:
+            return
+        self._left_panel.blockSignals(True)
+        self._right_panel.blockSignals(True)
+        try:
+            self._left_panel.set_collapsed(
+                bool(sm.get('processing_left_collapsed', False)), animate=False)
+            self._right_panel.set_collapsed(
+                bool(sm.get('processing_right_collapsed', False)), animate=False)
+        finally:
+            self._left_panel.blockSignals(False)
+            self._right_panel.blockSignals(False)
 
     def _save_panel_state(self) -> None:
-        """把当前折叠状态写回 SettingsManager。"""
-        from ui.settings_manager import SettingsManager
-        sm = SettingsManager()
+        """把当前折叠状态写回共享 SettingsManager（未注入时静默跳过）。"""
+        sm = self._sm
+        if sm is None:
+            return
         sm.set('processing_left_collapsed', self._left_panel.is_collapsed())
         sm.set('processing_right_collapsed', self._right_panel.is_collapsed())
         sm.save()
