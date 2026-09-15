@@ -154,6 +154,14 @@ reason = "Numerical functions remain intact for exact regression."
 max_function_lines = 450
 
 [[migration_exceptions]]
+path_prefix = "mygpr/infrastructure/processing/algorithms/extended"
+allowed_local_import_prefixes = []
+owner = "processing-backend"
+remove_after = "1.1.0"
+reason = "Numerical functions remain intact to preserve regression behavior; sibling algorithm packages kirchhoff/motion are exempted on the same grounds."
+max_function_lines = 150
+
+[[migration_exceptions]]
 path_prefix = "mygpr/infrastructure/persistence/interpretation_adapter.py"
 allowed_local_import_prefixes = ["core"]
 owner = "interpretation-backend"
@@ -183,4 +191,12 @@ allowed_local_import_prefixes = ["core"]
 owner = "spatial-backend"
 remove_after = "1.1.0"
 reason = "Persistence adapter reuses coordinate projection and GIS layer store for grid outputs."
+max_function_lines = 100
+
+[[migration_exceptions]]
+path_prefix = "mygpr/infrastructure/persistence/artifact_delete.py"
+allowed_local_import_prefixes = ["core.field_project_errors", "core.field_project_models", "core.hdf5_line_container", "core.processing_artifact_index", "core.storage_primitives", "core.field_project_store"]
+owner = "processing-backend"
+remove_after = "1.1.0"
+reason = "Persistence adapter over hybrid artifact storage; inherits adapter conventions from its field_project_adapter / intermediate_cleanup siblings."
 max_function_lines = 100
