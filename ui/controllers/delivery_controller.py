@@ -19,6 +19,7 @@ class DeliveryController(QObject):
     log_message = pyqtSignal(str)
     spatial_results_updated = pyqtSignal(list)
     report_generated = pyqtSignal(object)     # ReportPackage
+    report_list_updated = pyqtSignal(list)    # [ReportPackage, ...] 全量列表
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -69,6 +70,13 @@ class DeliveryController(QObject):
         run_command(
             _SpatialRefreshCommand(self, project_id),
             name="mygpr-spatial-refresh",
+        )
+
+    def refresh_reports(self, project_id: str) -> None:
+        """项目报告包全量列表（文件树「项目报告」组 + 成果页共用数据源）。"""
+        run_command(
+            _ReportsRefreshCommand(self, project_id),
+            name="mygpr-reports-refresh",
         )
 
     def create_spatial(self, project_id: str, name: str, line_ids: list[str]) -> str | None:
@@ -149,6 +157,27 @@ class _SpatialRefreshCommand:
             c.log_message.emit(f"刷新空间成果失败：{friendly_error_message(exc)}")
         else:
             c.spatial_results_updated.emit(results)
+
+
+class _ReportsRefreshCommand:
+    __slots__ = ("_controller", "_project_id")
+
+    def __init__(self, controller: DeliveryController, project_id: str) -> None:
+        self._controller = controller
+        self._project_id = project_id
+
+    def execute(self) -> None:
+        c = self._controller
+        backend = c._backend()
+        if backend is None:
+            return
+        try:
+            packages = list(
+                backend.projects.list_report_packages(str(self._project_id)))
+        except Exception as exc:  # noqa: BLE001
+            c.log_message.emit(f"刷新项目报告列表失败：{friendly_error_message(exc)}")
+        else:
+            c.report_list_updated.emit(packages)
 
 
 __all__ = ["DeliveryController"]

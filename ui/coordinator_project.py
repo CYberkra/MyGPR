@@ -62,12 +62,15 @@ class ProjectChain:
         if pc0 is not None:
             pc0.line_source_path_ready.connect(project.set_line_source_path)
 
-        # ---------------- 左侧常驻测线树（与项目页测线表同一信号语义）
-        tree = co.line_tree()
+        # ---------------- 左侧常驻文件树（与项目页测线表同一信号语义）
+        tree = co.file_tree()
         if tree is not None:
             tree.line_selected.connect(self.on_line_selected)
             tree.line_process_requested.connect(self.on_line_process_requested)
             tree.line_delete_requested.connect(self.on_line_delete_requested)
+            # 空间成果/项目报告叶子点击 → 跳成果页
+            tree.delivery_focus_requested.connect(
+                lambda _kind: co.goto_page('deliveryInterface'))
 
         # ---------------- 空间信息页：设为当前测线（测线归属项目域）
         spatial.current_line_requested.connect(self.on_spatial_current_line)
@@ -102,6 +105,10 @@ class ProjectChain:
         if dc is not None:
             dc.spatial_results_updated.connect(delivery.set_spatial_results)
             dc.report_generated.connect(self.on_report_generated)
+            if tree is not None:
+                # 文件树「空间成果 / 项目报告」组与成果页同一数据源
+                dc.spatial_results_updated.connect(tree.set_spatial_results)
+                dc.report_list_updated.connect(tree.set_reports)
 
     # ============================================================ 项目生命周期
     def on_close_project_requested(self) -> None:
@@ -120,8 +127,8 @@ class ProjectChain:
         project = co.page('projectInterface')
         home.set_current_project(summary)
         project.set_project_info(summary)
-        if co.line_tree() is not None:
-            co.line_tree().set_project_info(summary)
+        if co.file_tree() is not None:
+            co.file_tree().set_project_info(summary)
         root = str(getattr(summary, 'root_path', '') or '')
         if root:
             co.settings.add_recent_project(root)
@@ -132,6 +139,7 @@ class ProjectChain:
         project_id = co.current_project_id()
         if project_id and co.delivery_controller is not None:
             co.delivery_controller.refresh_spatial(project_id)
+            co.delivery_controller.refresh_reports(project_id)
         # 空间信息页：项目打开后加载空间轨迹
         if co.project_controller is not None:
             co.project_controller.load_spatial_tracks()
@@ -155,8 +163,8 @@ class ProjectChain:
         home.set_current_project(None)
         home.set_preview_bundle(None)
         project.set_project_info(None)
-        if co.line_tree() is not None:
-            co.line_tree().set_project_info(None)
+        if co.file_tree() is not None:
+            co.file_tree().set_project_info(None)
         project.set_lines([])
         project.set_artifacts([])
         project.set_preview_bundle(None)
@@ -185,12 +193,12 @@ class ProjectChain:
 
     # ============================================================ 测线 / 成果 / 预览
     def update_line_labels(self) -> None:
-        """当前测线标签：处理页 / 解释页 / 测线树共用。"""
+        """当前测线标签：处理页 / 解释页 / 文件树共用。"""
         co = self._co
         co.page('processingInterface').set_line_label(self.current_line_id)
         co.page('interpretationInterface').set_line_label(self.current_line_id)
-        if co.line_tree() is not None:
-            co.line_tree().set_current_line(self.current_line_id)
+        if co.file_tree() is not None:
+            co.file_tree().set_current_line(self.current_line_id)
 
     def on_lines_updated(self, lines: list) -> None:
         """lines_updated → 项目页测线表（自动选中首行）+ 成果页/空间页测线多选。"""
@@ -224,8 +232,8 @@ class ProjectChain:
         processing.set_lines(lines)
         delivery.set_lines(lines)
         spatial.set_lines(lines)
-        if co.line_tree() is not None:
-            co.line_tree().set_lines(lines)
+        if co.file_tree() is not None:
+            co.file_tree().set_lines(lines)
         # 测线集合变化后空间轨迹同步重载（导入/同步完成均触发 lines_updated）
         if co.project_controller is not None:
             co.project_controller.load_spatial_tracks()
@@ -456,6 +464,10 @@ class ProjectChain:
 
     def on_report_generated(self, result) -> None:
         self._co.page('deliveryInterface').set_report_result(result)
+        # 报告列表刷新（文件树「项目报告」组）；失败仅记日志，不影响主流程
+        project_id = self._co.current_project_id()
+        if project_id and self._co.delivery_controller is not None:
+            self._co.delivery_controller.refresh_reports(project_id)
 
     def on_backup_requested(self, options: dict) -> None:
         if self._co.delivery_controller is None or not self._co.require_project():

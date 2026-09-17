@@ -29,17 +29,17 @@ PANEL_ANIM_DURATION_MS = 220
 FOLD_BUTTON_WIDTH = 18
 FOLD_BUTTON_HEIGHT = 60
 
-# 左侧常驻测线树面板（主窗口 widgetLayout 内容区首位插入，顶部页签条之下全高）
-LINE_TREE_PANEL_WIDTH = 232
-LINE_TREE_HEADER_HEIGHT = 44
+# 左侧常驻文件树面板（主窗口 widgetLayout 内容区首位插入，顶部页签条之下全高）
+FILE_TREE_PANEL_WIDTH = 232
+FILE_TREE_HEADER_HEIGHT = 44
 
 # 底部输出面板（OutputPanel：日志/任务，横贯页面区下方）
 OUTPUT_PANEL_HEIGHT = 160
 OUTPUT_PANEL_HEADER_HEIGHT = 34
 
-# DockPanel 统一细条宽度（左右坞共用；LINE_TREE_COLLAPSED_WIDTH 保留别名）
+# DockPanel 统一细条宽度（左右坞共用；FILE_TREE_COLLAPSED_WIDTH 保留别名）
 DOCK_COLLAPSED_WIDTH = 18
-LINE_TREE_COLLAPSED_WIDTH = DOCK_COLLAPSED_WIDTH
+FILE_TREE_COLLAPSED_WIDTH = DOCK_COLLAPSED_WIDTH
 
 # ---------------------------------------------------------------- 字体 / 间距
 FONT_FAMILY = 'Microsoft YaHei'

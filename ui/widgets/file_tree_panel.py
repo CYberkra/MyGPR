@@ -1,35 +1,44 @@
 # -*- coding: utf-8 -*-
-"""左侧常驻测线树面板（DockPanel 子类：项目 → 分组 → 测线）。
+"""左侧常驻文件树面板（DockPanel 子类：测线分组 + 空间成果 + 项目报告）。
 
 职责边界：
-- 数据唯一来源仍是 ``ProjectController``（经 ProjectChain 扇出，本面板
-  不发起任何后端调用）；
-- 叶子点击 → ``line_selected(str)`` → 复用 ``ProjectChain.on_line_selected``
+- 数据唯一来源仍是各 controller（经 ProjectChain 扇出，本面板不发起任何
+  后端调用）；
+- 节点模型由 ``ui.file_tree.build_tree_model`` 纯函数装配（Provider 层），
+  本面板只渲染 TreeNode、发信号——阶段 2 的「测线｜成果｜文件」分段视图
+  只换装配器，本文件不动；
+- 测线叶子点击 → ``line_selected(str)`` → 复用 ``ProjectChain.on_line_selected``
   现有链路（含切线作废成果预览代数），与项目页测线表同语义；
+- 空间成果/项目报告叶子点击 → ``delivery_focus_requested(kind)`` → 跳成果页；
 - ``set_current_line`` 是同步入口（``_syncing`` 守卫防回环）；
-- **分组行与项目根不可选**（无 ItemIsSelectable）——分组行若能触发预览
+- **分组行不可选**（无 ItemIsSelectable）——分组行若能触发预览
   会推进预览代数造成串台，是成果预览代际竞态的同族风险；
 - busy 只禁叶子点击，收/展开始终可用（长任务中更该允许让出空间）。
 
-壳（头/细条/动画）全部来自 ``DockPanel`` 基类；本类只保留测线树自己的
+壳（头/细条/动画）全部来自 ``DockPanel`` 基类；本类只保留文件树自己的
 三件事：树内容构建、按页展开态记忆（SettingsManager 持久化）、
 细条指示文字 = 当前线 ID。
 """
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QIcon, QPainter, QPixmap
-from PyQt6.QtWidgets import QApplication, QDialog, QTreeWidgetItem
+from PyQt6.QtGui import QBrush, QColor, QIcon, QPainter, QPixmap
+from PyQt6.QtWidgets import (
+    QApplication, QDialog, QHeaderView, QTreeWidgetItem,
+)
 from qfluentwidgets import BodyLabel, MessageBox, TreeWidget
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants
-from ui.line_tree import group_lines, group_stats
+from ui.file_tree import TreeNode, build_tree_model
 from ui.theme_helpers import status_color
 from ui.widgets.context_menus import add_action, make_menu
 from ui.widgets.dock_panel import DockPanel
 
-_ROLE_LINE_ID = Qt.ItemDataRole.UserRole
+_ROLE_PAYLOAD = Qt.ItemDataRole.UserRole        # line → line_id；spatial → result_id；report → package_dir
+_ROLE_KIND = Qt.ItemDataRole.UserRole + 1       # TreeNode.kind
+
+_SUFFIX_BRUSH = QBrush(QColor('#8a8a8a'))       # 行尾角标灰
 
 _HINT_QSS = f'color: #888888; font-size: {constants.FONT_SIZE_BODY}px;'
 
@@ -62,19 +71,25 @@ _DEFAULT_PAGE_COLLAPSED = {
     'homeInterface': True,
     'settingsInterface': True,
 }
-_SETTINGS_KEY = 'line_tree_page_states'
+_SETTINGS_KEY = 'file_tree_page_states'
+# 旧版设置键：仅作读取回退（老用户的按页记忆不丢），写入只写新键
+_LEGACY_SETTINGS_KEY = 'line_tree_page_states'
 
 
-class LineTreePanel(DockPanel):
-    """项目 → 分组 → 测线 的常驻导航树（可收成细条）。"""
+class FileTreePanel(DockPanel):
+    """测线 + 空间成果 + 项目报告 的常驻导航树（可收成细条）。"""
 
     line_selected = pyqtSignal(str)
     line_process_requested = pyqtSignal(str)
     line_delete_requested = pyqtSignal(list)
+    # 空间成果/项目报告叶子点击 → 跳成果页（参数为 kind：'spatial'/'report'）
+    delivery_focus_requested = pyqtSignal(str)
 
     def __init__(self, parent=None) -> None:
-        super().__init__('测线树', constants.LINE_TREE_PANEL_WIDTH, parent)
+        super().__init__('文件树', constants.FILE_TREE_PANEL_WIDTH, parent)
         self._lines: list = []
+        self._spatial_results: list = []
+        self._reports: list = []
         self._line_id_by_item: dict = {}
         self._syncing = False
         self._busy = False
@@ -91,6 +106,11 @@ class LineTreePanel(DockPanel):
         self._tree = TreeWidget(self._expanded_view)
         self._tree.setHeaderHidden(True)
         self._tree.setTextElideMode(Qt.TextElideMode.ElideRight)
+        # 第二列：行尾角标（灰字右对齐，ResizeToContents 紧贴右缘）
+        self._tree.setColumnCount(2)
+        header = self._tree.header()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self._tree.itemClicked.connect(self._on_item_clicked)
         self._tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._tree.customContextMenuRequested.connect(self._on_context_menu)
@@ -107,24 +127,38 @@ class LineTreePanel(DockPanel):
         """注入共享 SettingsManager（与页面同一约定：共享实例是唯一写者）。"""
         self._settings = settings
         saved = settings.get(_SETTINGS_KEY) if settings else None
+        if not isinstance(saved, dict) or not saved:
+            # 向后兼容：新键无值时回读旧版 'line_tree_page_states'
+            saved = settings.get(_LEGACY_SETTINGS_KEY) if settings else None
         if isinstance(saved, dict) and saved:
             states = dict(_DEFAULT_PAGE_COLLAPSED)
             states.update({str(k): bool(v) for k, v in saved.items()})
             self._page_states = states
 
     def set_project_info(self, summary) -> None:
-        """项目上下文切换；None = 无项目（整面板显式空态并隐藏）。"""
+        """项目上下文切换；None = 无项目（面板常驻，显示"未打开项目"空态）。"""
         name = str(getattr(summary, 'name', '') or '') if summary else ''
         self._project_label.setText(name or '未打开项目')
-        self.setVisible(bool(summary))
         if not summary:
             self._lines = []
+            self._spatial_results = []
+            self._reports = []
             self._current_line_id = ''
-            self._rebuild()
+        self._rebuild()
 
     def set_lines(self, lines: list) -> None:
         """重建树；保留当前选中（展开态新建组默认全开）。"""
         self._lines = list(lines or [])
+        self._rebuild()
+
+    def set_spatial_results(self, results: list) -> None:
+        """空间成果列表（DeliveryController.spatial_results_updated 扇出）。"""
+        self._spatial_results = list(results or [])
+        self._rebuild()
+
+    def set_reports(self, packages: list) -> None:
+        """项目报告列表（DeliveryController.report_list_updated 扇出）。"""
+        self._reports = list(packages or [])
         self._rebuild()
 
     def set_current_line(self, line_id: str) -> None:
@@ -151,6 +185,11 @@ class LineTreePanel(DockPanel):
         self.set_collapsed(bool(self._page_states.get(page, True)),
                            animate=False)
 
+    def toggle_panel(self) -> None:
+        """窗口级入口（页签条右端按钮 / Ctrl+B）：与头部收起钮同一路径，
+        按页记忆并持久化。"""
+        self._on_toggle_clicked()
+
     # ------------------------------------------------------------ DockPanel 钩子
     def strip_text(self) -> str:
         return self._current_line_id
@@ -170,7 +209,8 @@ class LineTreePanel(DockPanel):
     def _on_view_state_changed(self) -> None:
         if self._collapsed:
             return
-        if not self._lines:
+        has_content = bool(self._lines or self._spatial_results or self._reports)
+        if not has_content:
             self._tree.hide()
             has_project = self._project_label.text() != '未打开项目'
             self._empty_label.setVisible(has_project)
@@ -183,20 +223,14 @@ class LineTreePanel(DockPanel):
         self._tree.clear()
         self._line_id_by_item.clear()
 
-        if not self._lines:
+        model = build_tree_model(
+            self._lines, self._spatial_results, self._reports)
+        if not model:
             self._apply_view_state()
             return
 
-        for key, bucket in group_lines(self._lines):
-            if not key:
-                # 平铺：测线直接做顶层节点
-                for line in bucket:
-                    self._tree.addTopLevelItem(self._make_leaf(line))
-                continue
-            group_item = self._make_group(key, bucket)
-            self._tree.addTopLevelItem(group_item)
-            for line in bucket:
-                group_item.addChild(self._make_leaf(line))
+        for node in model:
+            self._add_node(None, node)
 
         # 新建组默认展开（一期不保留折叠记忆，避免重建时组全收起）
         for item in self._top_items():
@@ -208,29 +242,34 @@ class LineTreePanel(DockPanel):
         return [self._tree.topLevelItem(i)
                 for i in range(self._tree.topLevelItemCount())]
 
-    def _make_group(self, key: str, bucket: list) -> QTreeWidgetItem:
-        node = QTreeWidgetItem([f'{key}   ({group_stats(bucket)})'])
-        node.setFlags(Qt.ItemFlag.ItemIsEnabled)  # 不可选，仅展开
-        return node
-
-    def _make_leaf(self, line) -> QTreeWidgetItem:
-        line_id = str(getattr(line, 'line_id', '') or '')
-        status = str(getattr(line, 'processing_status', '') or '未处理')
-        name = str(getattr(line, 'name', '') or '')
-        length = float(getattr(line, 'length_m', 0.0) or 0.0)
-        updated = str(getattr(line, 'updated_at', '') or '')[:10]
-        text = line_id if name in ('', line_id) else f'{line_id} · {name}'
-        node = QTreeWidgetItem([text])
-        node.setIcon(0, _status_icon(status))
-        tip_lines = [f'状态：{status}']
-        if length > 0:
-            tip_lines.append(f'长度：{length:.1f} m')
-        if updated:
-            tip_lines.append(f'更新：{updated}')
-        node.setToolTip(0, '\n'.join(tip_lines))
-        node.setData(0, _ROLE_LINE_ID, line_id)
-        self._line_id_by_item[line_id] = node
-        return node
+    def _add_node(self, parent_item, node: TreeNode) -> None:
+        item = QTreeWidgetItem()
+        item.setText(0, node.text)
+        if node.suffix:
+            item.setText(1, node.suffix)
+            item.setForeground(1, _SUFFIX_BRUSH)
+            item.setTextAlignment(
+                1, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        if node.tooltip:
+            item.setToolTip(0, node.tooltip)
+        item.setData(0, _ROLE_KIND, node.kind)
+        if node.kind == 'group':
+            item.setFlags(Qt.ItemFlag.ItemIsEnabled)  # 不可选，仅展开
+        else:
+            item.setData(0, _ROLE_PAYLOAD, node.payload)
+            if node.kind == 'line':
+                item.setIcon(0, _status_icon(node.icon))
+                self._line_id_by_item[node.payload] = item
+            elif node.kind == 'spatial':
+                item.setIcon(0, FIF.GLOBE.icon())
+            elif node.kind == 'report':
+                item.setIcon(0, FIF.DOCUMENT.icon())
+        if parent_item is None:
+            self._tree.addTopLevelItem(item)
+        else:
+            parent_item.addChild(item)
+        for child in node.children:
+            self._add_node(item, child)
 
     def _select_leaf(self, line_id: str) -> None:
         node = self._line_id_by_item.get(str(line_id or ''))
@@ -242,10 +281,13 @@ class LineTreePanel(DockPanel):
     def _on_item_clicked(self, item, _column: int) -> None:
         if self._syncing or self._busy:
             return
-        line_id = item.data(0, _ROLE_LINE_ID)
-        if line_id:
-            self._current_line_id = str(line_id)
-            self.line_selected.emit(str(line_id))
+        kind = item.data(0, _ROLE_KIND)
+        payload = item.data(0, _ROLE_PAYLOAD)
+        if kind == 'line' and payload:
+            self._current_line_id = str(payload)
+            self.line_selected.emit(str(payload))
+        elif kind in ('spatial', 'report'):
+            self.delivery_focus_requested.emit(str(kind))
 
     # ------------------------------------------------------------ 右键菜单
     def _on_context_menu(self, pos) -> None:
@@ -258,7 +300,10 @@ class LineTreePanel(DockPanel):
         item = self._tree.itemAt(pos)
         if item is None:
             return
-        line_id = item.data(0, _ROLE_LINE_ID)
+        # 仅测线叶子出菜单；分组行/成果/报告叶子的交互走单击
+        if item.data(0, _ROLE_KIND) != 'line':
+            return
+        line_id = item.data(0, _ROLE_PAYLOAD)
         if not line_id:
             return
         line_id = str(line_id)

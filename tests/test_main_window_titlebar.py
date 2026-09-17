@@ -26,25 +26,30 @@ def window(qapp, monkeypatch):
                  'ProcessingController', 'InterpretationController',
                  'DeliveryController'):
         monkeypatch.setattr(mw, name, None)
-    # 测线树打桩为裸 QWidget：本测试只验标题栏 z-order，不需要树；
+    # 文件树打桩为裸 QWidget：本测试只验标题栏 z-order，不需要树；
     # 且 offscreen 下 qfluentwidgets TreeWidget 与其他用例的树实例
     # 交替走原生窗口生命周期会触发库级 access violation（同
-    # tests/test_line_tree.py fixture 注释记载的库级缺陷）
+    # tests/test_file_tree.py fixture 注释记载的库级缺陷）
     from PyQt6.QtCore import pyqtSignal
     from PyQt6.QtWidgets import QWidget
 
-    class _LineTreeStub(QWidget):
-        """主窗口/接线器对测线树面板的全部调用点的 no-op 桩。"""
+    class _FileTreeStub(QWidget):
+        """主窗口/接线器对文件树面板的全部调用点的 no-op 桩。"""
         line_selected = pyqtSignal(str)
         line_process_requested = pyqtSignal(str)
         line_delete_requested = pyqtSignal(list)
+        delivery_focus_requested = pyqtSignal(str)
 
         def set_settings_manager(self, _settings):
             pass
         def apply_page(self, _name):
             pass
+        def set_spatial_results(self, _results):
+            pass
+        def set_reports(self, _packages):
+            pass
 
-    monkeypatch.setattr(mw, 'LineTreePanel', _LineTreeStub)
+    monkeypatch.setattr(mw, 'FileTreePanel', _FileTreeStub)
     w = mw.MyGPRMainWindow()
     w.show()
     qapp.processEvents()

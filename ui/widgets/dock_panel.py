@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """DockPanel — 统一坞面板基类（左坞/右坞共用的一套"面板语言"）。
 
-解决的问题：此前测线树（面板头收起钮）、日志/任务（窗口边缘独立折叠长条）、
+解决的问题：此前文件树（面板头收起钮）、日志/任务（窗口边缘独立折叠长条）、
 方法库（页面内固定卡片）是三套互不相干的面板习语，开关散落各处。本基类
 把它们收敛为一种语言：
 
@@ -12,7 +12,7 @@
 - **统一的动画**：QVariantAnimation + OutCubic 220ms，走
   ``ui.motion.animations_enabled()`` 无障碍总闸；
 - **开关唯一入口**：``set_collapsed()`` / ``toggle()``；子类可覆写
-  ``_on_toggle_clicked()`` 加入状态持久化（如测线树的按页记忆）。
+  ``_on_toggle_clicked()`` 加入状态持久化（如文件树的按页记忆）。
 
 子类契约：内容加进 ``self.body_layout()``；需要感知收/放时覆写
 ``_on_view_state_changed()``。属性名 ``_expanded_view/_strip_view/
@@ -127,7 +127,7 @@ class DockPanel(QWidget):
         return self._title_text
 
     def _on_view_state_changed(self) -> None:
-        """收/放后视图微调（子类覆写：如测线树树/空态切换）。"""
+        """收/放后视图微调（子类覆写：如文件树的树/空态切换）。"""
 
     def _on_toggle_clicked(self) -> None:
         """开关点击入口（子类覆写以加入持久化，最后调用 toggle()）。"""

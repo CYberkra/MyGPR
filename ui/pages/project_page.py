@@ -397,7 +397,7 @@ class ProjectPage(QWidget):
     def select_line(self, line_id: str) -> bool:
         """按 line_id 选中并触发预览；未找到返回 False。
 
-        程序化选中（测线树/空间页反向同步）不再次回发 line_selected——
+        程序化选中（文件树/空间页反向同步）不再次回发 line_selected——
         选中来源已经走过完整的选择链路，回发会重复预览刷新。
         """
         line_id = str(line_id or '')

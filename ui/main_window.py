@@ -11,7 +11,7 @@ PlaceholderPage（QLabel '页面建设中' 居中），controller / 面板为 No
 import logging
 
 from PyQt6.QtCore import (
-    Qt, QTimer, pyqtSignal,
+    Qt, QSize, QTimer, pyqtSignal,
 )
 from PyQt6.QtGui import QIcon, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (
 from qfluentwidgets import (
     FluentIcon as FIF, FluentWindow, InfoBar, InfoBarPosition,
     LineEdit, NavigationItemPosition, PrimaryPushButton, PushButton,
-    SplashScreen, isDarkTheme,
+    SplashScreen, TransparentToolButton, isDarkTheme,
 )
 
 from ui import constants, file_dialogs
@@ -29,7 +29,7 @@ from ui.page_coordinator import PageCoordinator
 from ui.logger_config import setup_logger
 from ui.settings_manager import SettingsManager
 from ui.theme_helpers import apply_theme
-from ui.widgets.line_tree_panel import LineTreePanel
+from ui.widgets.file_tree_panel import FileTreePanel
 from ui.widgets.segment_tabs import SlimSegment
 
 logger = setup_logger('mygpr_window', 'logs/mygpr_window.log', level=logging.DEBUG)
@@ -215,15 +215,15 @@ class MyGPRMainWindow(FluentWindow):
             self.pages[object_name] = page
 
     def _build_ui(self) -> None:
-        """顶部横排页签 + 左坞测线树 + 底部输出面板（OutputPanel：日志/任务）。
+        """顶部横排页签 + 左坞文件树 + 底部输出面板（OutputPanel：日志/任务）。
 
         根布局由 FluentWindow 的 ``导航 | widgetLayout`` 两层改为
-        ``导航(隐藏) | 右列[ 页签条 / 内容行(widgetLayout: 测线树|页面) / OutputPanel ]``。
+        ``导航(隐藏) | 右列[ 页签条 / 内容行(widgetLayout: 文件树|页面) / OutputPanel ]``。
         """
         # 竖导航退役：隐藏 FluentWindow 自带 NavigationInterface。addSubInterface
         # 仍经它注册路由（_onCurrentInterfaceChanged/qrouter 保持自洽），
         # switchTo 只动 stackedWidget，不依赖导航可见性；页签改用顶部横排
-        # Pivot（qfluentwidgets 现成 Fluent 组件），左列整列让给测线树。
+        # Pivot（qfluentwidgets 现成 Fluent 组件），左列整列让给文件树。
         self.navigationInterface.hide()
 
         # 底部输出面板：日志/任务（常驻头部栏 + 可收展内容区，状态记忆）
@@ -232,7 +232,7 @@ class MyGPRMainWindow(FluentWindow):
             self.output_panel.set_settings_manager(self.settings)
 
         # 右列容器：页签条（内含标题栏 48px 净空）/ 竖向 QSplitter[
-        # 内容行(widgetLayout: 测线树|页面，stretch 1) / 输出面板（高度可拖）]
+        # 内容行(widgetLayout: 文件树|页面，stretch 1) / 输出面板（高度可拖）]
         self._right_area = QWidget(self)
         right_col = QVBoxLayout(self._right_area)
         right_col.setContentsMargins(0, 0, 0, 0)
@@ -268,14 +268,14 @@ class MyGPRMainWindow(FluentWindow):
         # 吞掉（曾表现为"三个按钮点了没反应"）。标题栏必须重新抬到最顶层。
         self.titleBar.raise_()
 
-        # 左侧常驻测线树（页签条 | 测线树 | 页面）；
+        # 左侧常驻文件树（页签条 | 文件树 | 页面），面板常驻；
+        # 未打开项目时显示空态而不是整树消失（入口通用性）。
         # 注意插 widgetLayout（页签条已承担标题栏净空），不是 hBoxLayout
         # （后者从窗口最顶开始，会把面板顶进标题栏）。
         # 宽度由面板自管（展开 232 / 细条 18），切页感知经 stackedWidget.currentChanged
-        self._line_tree_panel = LineTreePanel(self)
-        self._line_tree_panel.set_settings_manager(self.settings)
-        self._line_tree_panel.hide()
-        self.widgetLayout.insertWidget(0, self._line_tree_panel, 0)
+        self._file_tree_panel = FileTreePanel(self)
+        self._file_tree_panel.set_settings_manager(self.settings)
+        self.widgetLayout.insertWidget(0, self._file_tree_panel, 0)
         self.stackedWidget.currentChanged.connect(self._on_page_switched)
         # currentChanged 不为"启动即所在的初始页"触发，补一次初始页应用，
         # 否则初始页（主页）在打开项目前一直停留在面板默认的展开态
@@ -311,6 +311,14 @@ class MyGPRMainWindow(FluentWindow):
         track_layout.addWidget(self._top_nav)
         layout.addWidget(track, 0, Qt.AlignmentFlag.AlignVCenter)
         layout.addStretch(1)
+        # 文件树全局入口（方案 B：页签条右端图标钮，Ctrl+B；窗口级面板开关，
+        # 任何页面可达）。透明图标钮与日志面板工具条同一美术语言。
+        self._file_tree_btn = TransparentToolButton(FIF.LAYOUT, bar)
+        self._file_tree_btn.setIconSize(QSize(14, 14))
+        self._file_tree_btn.setToolTip('文件树 (Ctrl+B)')
+        self._file_tree_btn.setFixedSize(28, 28)
+        self._file_tree_btn.clicked.connect(self._toggle_file_tree)
+        layout.addWidget(self._file_tree_btn, 0, Qt.AlignmentFlag.AlignVCenter)
         self._apply_top_nav_style()
         # 初始选中第一个页面（与 addSubInterface 的初始 stack 页一致）
         if self._nav_specs:
@@ -389,12 +397,18 @@ class MyGPRMainWindow(FluentWindow):
                               self._v_splitter.sizes()[1])
             self.settings.save()
 
+    def _toggle_file_tree(self) -> None:
+        """页签条右端钮 / Ctrl+B：收/展文件树（面板按页记忆持久化）。"""
+        panel = getattr(self, '_file_tree_panel', None)
+        if panel is not None:
+            panel.toggle_panel()
+
     def _page(self, object_name: str):
         """按 objectName 取页面（占位页返回原样，调用方自行判接口）。"""
         return self.pages.get(object_name)
 
     def _setup_global_shortcuts(self) -> None:
-        """全局快捷键：Ctrl+1~8 切换页签，Ctrl+J 收/展输出面板，F1 显示快捷键清单。"""
+        """全局快捷键：Ctrl+1~8 切页签，Ctrl+B 文件树，Ctrl+J 输出面板，F1 清单。"""
         self._page_shortcuts = [
             ('Ctrl+1', 'homeInterface', '主页'),
             ('Ctrl+2', 'projectInterface', '项目'),
@@ -413,6 +427,9 @@ class MyGPRMainWindow(FluentWindow):
             self._panel_toggle = QShortcut(QKeySequence('Ctrl+J'), self)
             self._panel_toggle.setContext(Qt.ShortcutContext.WindowShortcut)
             self._panel_toggle.activated.connect(self.output_panel.toggle_panel)
+        self._file_tree_toggle = QShortcut(QKeySequence('Ctrl+B'), self)
+        self._file_tree_toggle.setContext(Qt.ShortcutContext.WindowShortcut)
+        self._file_tree_toggle.activated.connect(self._toggle_file_tree)
         self._shortcuts_help = QShortcut(QKeySequence("F1"), self)
         self._shortcuts_help.setContext(Qt.ShortcutContext.WindowShortcut)
         self._shortcuts_help.activated.connect(self._show_shortcuts_dialog)
@@ -700,14 +717,14 @@ class MyGPRMainWindow(FluentWindow):
             self.switchTo(page)
 
     def _on_page_switched(self, index: int) -> None:
-        """页面切换 → 顶部页签选中态同步 + 测线树按该页记忆的展开态收/放。"""
+        """页面切换 → 顶部页签选中态同步 + 文件树按该页记忆的展开态收/放。"""
         widget = self.stackedWidget.widget(index)
         name = str(widget.objectName() or '') if widget is not None else ''
         top_nav = getattr(self, '_top_nav', None)
         if name and top_nav is not None:
             top_nav.setCurrentItem(name)
-        if name and self._line_tree_panel is not None:
-            self._line_tree_panel.apply_page(name)
+        if name and self._file_tree_panel is not None:
+            self._file_tree_panel.apply_page(name)
 
     def _show_shortcuts_dialog(self) -> None:
         """F1：弹出当前支持的快捷键清单。"""
@@ -721,6 +738,7 @@ class MyGPRMainWindow(FluentWindow):
         for seq, _obj, title in self._page_shortcuts:
             rows.append(f'<li><b>{seq}</b>：切换到{title}</li>')
         rows.extend([
+            '<li><b>Ctrl+B</b>：收起/展开左侧文件树</li>',
             '<li><b>Ctrl+J</b>：收起/展开底部输出面板（日志/任务）</li>',
             '<li><b>Ctrl+R</b>：处理页运行处理链</li>',
             '<li><b>Ctrl+L</b>：处理页加载测线数据</li>',
