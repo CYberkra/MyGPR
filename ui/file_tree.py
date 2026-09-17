@@ -72,8 +72,8 @@ def group_stats(lines: Sequence[Any]) -> str:
 
 # ---------------------------------------------------------------- 节点模型（Provider 层）
 # 文件树面板只渲染 TreeNode、发信号；节点由本模块纯函数装配。
-# 「测线｜成果｜文件」分段视图 = 各视图一个装配器：
-# build_tree_model（测线）/ build_artifacts_model（成果）/ 文件视图待阶段 3。
+# 「测线｜成果｜文件」分段视图：build_tree_model（测线）/
+# build_artifacts_model（成果）/ build_files_model（文件，单层懒加载）。
 
 
 @dataclass(frozen=True)
@@ -86,6 +86,8 @@ class TreeNode:
     - ``artifact`` 处理成果叶子，payload = artifact_id，aux = line_id
     - ``spatial``  空间成果叶子，payload = result_id
     - ``report``   项目报告叶子，payload = package_dir
+    - ``dir``      目录（文件视图），payload = 绝对路径，children 为空表示待懒加载
+    - ``file``     文件（文件视图），payload = 绝对路径，suffix = 大小
     icon 为语义键（success/info/disabled，供状态点查表），仅 line 用。
     suffix 为行尾灰色角标（第二列右对齐小字）。
     """
@@ -244,3 +246,58 @@ def build_artifacts_model(artifacts: Sequence[Any],
             suffix=f'{len(pkgs)} 份',
             children=tuple(_report_node(p) for p in pkgs)))
     return nodes
+
+
+# ---------------------------------------------------------------- 文件视图
+# 项目根目录只读浏览（os.scandir 单层扫描，面板在展开目录时逐层懒加载）。
+
+# 项目根下的内部实现条目（任何深度同名都隐藏）
+HIDDEN_ENTRY_NAMES = frozenset({
+    'cache', 'metadata', '.transactions', '.trash',
+    'catalog.sqlite', 'catalog.sqlite-wal', 'catalog.sqlite-shm',
+})
+
+
+def _human_size(size: int) -> str:
+    value = float(size)
+    for unit in ('B', 'KB', 'MB', 'GB'):
+        if value < 1024 or unit == 'GB':
+            return f'{value:.0f} {unit}' if unit == 'B' else f'{value:.1f} {unit}'
+        value /= 1024
+    return f'{size} B'
+
+
+def build_files_model(dir_path: Any) -> list[TreeNode]:
+    """单层目录扫描 → 节点列表（目录在前，各自按名称排序；忽略内部条目）。
+
+    - ``dir`` 节点 payload = 目录绝对路径，无 children（面板展开时懒加载）；
+    - ``file`` 节点 payload = 文件绝对路径，suffix = 人类可读大小；
+    - 无权限/路径不存在返回空列表。
+    """
+    path = str(dir_path or '')
+    if not path:
+        return []
+    try:
+        entries = [e for e in os.scandir(path)
+                   if e.name not in HIDDEN_ENTRY_NAMES]
+    except OSError:
+        return []
+    dirs: list[TreeNode] = []
+    files: list[TreeNode] = []
+    for entry in entries:
+        try:
+            is_dir = entry.is_dir(follow_symlinks=False)
+            stat = entry.stat(follow_symlinks=False)
+        except OSError:
+            continue
+        if is_dir:
+            dirs.append(TreeNode(
+                key=f'dir:{entry.path}', kind='dir', text=entry.name,
+                payload=entry.path, tooltip=entry.path))
+        else:
+            files.append(TreeNode(
+                key=f'file:{entry.path}', kind='file', text=entry.name,
+                payload=entry.path, suffix=_human_size(stat.st_size),
+                tooltip=entry.path))
+    by_name = lambda n: n.text.lower()  # noqa: E731
+    return sorted(dirs, key=by_name) + sorted(files, key=by_name)

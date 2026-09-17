@@ -15,8 +15,8 @@ pytest.importorskip("PyQt6")
 from PyQt6.QtCore import Qt  # noqa: E402
 
 from ui.file_tree import (  # noqa: E402
-    build_artifacts_model, build_tree_model, group_lines, group_stats,
-    line_suffix,
+    build_artifacts_model, build_files_model, build_tree_model, group_lines,
+    group_stats, line_suffix,
 )
 
 
@@ -147,6 +147,28 @@ def test_build_artifacts_model_omits_empty_sections():
     assert nodes[0].children[0].kind == 'spatial'
     assert nodes[0].children[0].payload == 'SR1'
     assert nodes[0].children[0].text == '剖面图 v2'
+
+
+# ------------------------------------------------ 文件视图（纯函数单层扫描）
+def test_build_files_model_filters_internal_and_sorts(tmp_path):
+    for name in ('raw', 'cache', 'metadata', '.trash', '.transactions'):
+        (tmp_path / name).mkdir()
+    (tmp_path / 'catalog.sqlite').write_text('x', encoding='utf-8')
+    (tmp_path / 'catalog.sqlite-wal').write_text('x', encoding='utf-8')
+    (tmp_path / 'project.json').write_text('{}', encoding='utf-8')
+    (tmp_path / 'a.dat').write_bytes(b'x' * 2048)
+
+    nodes = build_files_model(tmp_path)
+    names = [n.text for n in nodes]
+    assert names == ['raw', 'a.dat', 'project.json']  # 目录在前 + 名称排序
+    assert nodes[0].kind == 'dir' and nodes[0].children == ()
+    assert nodes[1].kind == 'file' and nodes[1].suffix == '2.0 KB'
+    assert nodes[1].payload == str(tmp_path / 'a.dat')
+
+
+def test_build_files_model_bad_path_returns_empty(tmp_path):
+    assert build_files_model(tmp_path / 'nonexistent') == []
+    assert build_files_model('') == []
 
 
 # ---------------------------------------------------------------- 面板行为
@@ -307,12 +329,72 @@ def test_set_artifacts_signature_dedup_skips_rebuild(qapp, panel):
     assert _find_by_kind(panel._tree, 'artifact') is not leaf
 
 
-def test_files_view_shows_placeholder(qapp, panel):
-    panel.set_project_info(types.SimpleNamespace(name='测试1'))
-    panel.set_lines([_line('L01', '2026-09-16T01:00:00')])
+def test_files_view_shows_project_root(qapp, panel, tmp_path):
+    """文件视图：有项目根则显示文件浏览树，无项目显示空态文案。"""
+    (tmp_path / 'raw').mkdir()
+    (tmp_path / 'note.txt').write_text('x', encoding='utf-8')
+    panel.set_project_info(
+        types.SimpleNamespace(name='测试1', root_path=str(tmp_path)))
     panel._set_view('files', remember=False)
+    assert not panel._tree.isHidden()
+    names = [panel._tree.topLevelItem(i).text(0)
+             for i in range(panel._tree.topLevelItemCount())]
+    assert names == ['raw', 'note.txt']  # 目录在前
+    # 无项目：空态文案
+    panel.set_project_info(None)
     assert panel._tree.isHidden()
-    assert panel._empty_label.text() == '文件视图将在后续版本提供'
+    assert panel._empty_label.text() == '打开项目后在此浏览项目文件'
+
+
+def test_files_view_lazy_expands_directory(qapp, panel, tmp_path):
+    """目录带占位行，首次展开时替换为真实子层（懒加载）。"""
+    sub = tmp_path / 'data'
+    sub.mkdir()
+    (sub / 'a.dat').write_text('x', encoding='utf-8')
+    (sub / 'cache').mkdir()  # 内部目录即使嵌套也过滤
+    panel.set_project_info(
+        types.SimpleNamespace(name='测试1', root_path=str(tmp_path)))
+    panel._set_view('files', remember=False)
+    dir_item = panel._tree.topLevelItem(0)
+    assert dir_item.text(0) == 'data'
+    assert dir_item.childCount() == 1  # 占位行
+    assert dir_item.child(0).data(0, _KIND_ROLE) == 'placeholder'
+    panel._on_item_expanded(dir_item)
+    assert dir_item.childCount() == 1
+    assert dir_item.child(0).text(0) == 'a.dat'
+    assert dir_item.child(0).data(0, _KIND_ROLE) == 'file'
+
+
+def test_files_view_double_click_file_opens(qapp, panel, tmp_path,
+                                            monkeypatch):
+    f = tmp_path / 'a.dat'
+    f.write_text('x', encoding='utf-8')
+    panel.set_project_info(
+        types.SimpleNamespace(name='测试1', root_path=str(tmp_path)))
+    panel._set_view('files', remember=False)
+    opened = []
+    monkeypatch.setattr(
+        'ui.widgets.file_tree_panel.QDesktopServices.openUrl',
+        lambda url: opened.append(url))
+    panel._on_item_double_clicked(panel._tree.topLevelItem(0), 0)
+    assert len(opened) == 1
+
+
+def test_files_view_context_menu_on_file(qapp, panel, tmp_path, monkeypatch):
+    from PyQt6.QtCore import QPoint
+    from qfluentwidgets import RoundMenu
+    f = tmp_path / 'a.dat'
+    f.write_text('x', encoding='utf-8')
+    panel.set_project_info(
+        types.SimpleNamespace(name='测试1', root_path=str(tmp_path)))
+    panel._set_view('files', remember=False)
+    shown = []
+    monkeypatch.setattr(RoundMenu, 'exec',
+                        lambda self, *a, **k: shown.append(1))
+    monkeypatch.setattr(panel._tree, 'itemAt',
+                        lambda p: panel._tree.topLevelItem(0))
+    panel._on_context_menu(QPoint(5, 5))
+    assert len(shown) == 1
 
 
 def test_tree_shown_with_only_spatial_results(qapp, panel):

@@ -1,14 +1,16 @@
 # -*- coding: utf-8 -*-
-"""左侧常驻文件树面板（DockPanel 子类：测线分组 + 空间成果 + 项目报告）。
+"""左侧常驻文件树面板（DockPanel 子类，顶部分段：测线｜成果｜文件）。
 
 职责边界：
 - 数据唯一来源仍是各 controller（经 ProjectChain 扇出，本面板不发起任何
   后端调用）；
-- 节点模型由 ``ui.file_tree.build_tree_model`` 纯函数装配（Provider 层），
-  本面板只渲染 TreeNode、发信号——阶段 2 的「测线｜成果｜文件」分段视图
-  只换装配器，本文件不动；
+- 测线/成果视图的节点模型由 ``ui.file_tree`` 纯函数装配（Provider 层），
+  本面板只渲染 TreeNode、发信号；文件视图由 ``ProjectFilesView``
+  （QFileSystemModel）自管，随项目根切换；
 - 测线叶子点击 → ``line_selected(str)`` → 复用 ``ProjectChain.on_line_selected``
   现有链路（含切线作废成果预览代数），与项目页测线表同语义；
+- 成果叶子点击 → ``artifact_focus_requested(line_id, artifact_id)`` →
+  换线（如需）+ 跳处理页选中预览；
 - 空间成果/项目报告叶子点击 → ``delivery_focus_requested(kind)`` → 跳成果页；
 - ``set_current_line`` 是同步入口（``_syncing`` 守卫防回环）；
 - **分组行不可选**（无 ItemIsSelectable）——分组行若能触发预览
@@ -16,13 +18,15 @@
 - busy 只禁叶子点击，收/展开始终可用（长任务中更该允许让出空间）。
 
 壳（头/细条/动画）全部来自 ``DockPanel`` 基类；本类只保留文件树自己的
-三件事：树内容构建、按页展开态记忆（SettingsManager 持久化）、
-细条指示文字 = 当前线 ID。
+三件事：视图切换与内容构建、按页×按视图展开态记忆（SettingsManager
+持久化）、细条指示文字 = 当前线 ID。
 """
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QBrush, QColor, QIcon, QPainter, QPixmap
+import os
+
+from PyQt6.QtCore import Qt, QUrl, pyqtSignal
+from PyQt6.QtGui import QBrush, QColor, QDesktopServices, QIcon, QPainter, QPixmap
 from PyQt6.QtWidgets import (
     QApplication, QDialog, QHeaderView, QTreeWidgetItem,
 )
@@ -30,7 +34,9 @@ from qfluentwidgets import BodyLabel, MessageBox, TreeWidget
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants
-from ui.file_tree import TreeNode, build_artifacts_model, build_tree_model
+from ui.file_tree import (
+    TreeNode, build_artifacts_model, build_files_model, build_tree_model,
+)
 from ui.theme_helpers import status_color
 from ui.widgets.context_menus import add_action, make_menu
 from ui.widgets.dock_panel import DockPanel
@@ -84,7 +90,7 @@ _VIEW_SETTINGS_KEY = 'file_tree_current_view'
 _EMPTY_TEXT = {
     'lines': '尚未导入测线',
     'artifacts': '尚无成果',
-    'files': '文件视图将在后续版本提供',
+    'files': '打开项目后在此浏览项目文件',
 }
 
 
@@ -139,9 +145,12 @@ class FileTreePanel(DockPanel):
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self._tree.itemClicked.connect(self._on_item_clicked)
+        self._tree.itemDoubleClicked.connect(self._on_item_double_clicked)
+        self._tree.itemExpanded.connect(self._on_item_expanded)
         self._tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._tree.customContextMenuRequested.connect(self._on_context_menu)
         self.body_layout().addWidget(self._tree, 1)
+        self._project_root = ''
 
         self._empty_label = BodyLabel(_EMPTY_TEXT[_DEFAULT_VIEW])
         self._empty_label.setStyleSheet(_HINT_QSS)
@@ -178,6 +187,8 @@ class FileTreePanel(DockPanel):
         """项目上下文切换；None = 无项目（面板常驻，显示"未打开项目"空态）。"""
         name = str(getattr(summary, 'name', '') or '') if summary else ''
         self._project_label.setText(name or '未打开项目')
+        self._project_root = str(getattr(summary, 'root_path', '') or '') \
+            if summary else ''
         if not summary:
             self._lines = []
             self._artifacts = []
@@ -306,13 +317,12 @@ class FileTreePanel(DockPanel):
         elif self._current_view == 'artifacts':
             has_content = bool(
                 self._artifacts or self._spatial_results or self._reports)
-        else:  # files：占位视图，始终显示空态文案
-            has_content = False
+        else:  # files：有项目根即显示浏览树
+            has_content = bool(self._project_root)
         if not has_content:
             self._tree.hide()
-            has_project = self._project_label.text() != '未打开项目'
-            self._empty_label.setVisible(
-                has_project or self._current_view == 'files')
+            has_project = bool(self._project_root)
+            self._empty_label.setVisible(has_project)
             return
         self._empty_label.hide()
         self._tree.show()
@@ -327,8 +337,8 @@ class FileTreePanel(DockPanel):
         elif self._current_view == 'artifacts':
             model = build_artifacts_model(
                 self._artifacts, self._spatial_results, self._reports)
-        else:  # files：占位视图（阶段 3 接 QFileSystemModel）
-            model = []
+        else:  # files：项目根单层扫描，目录展开时懒加载子层
+            model = build_files_model(self._project_root)
         if not model:
             self._apply_view_state()
             return
@@ -336,9 +346,10 @@ class FileTreePanel(DockPanel):
         for node in model:
             self._add_node(None, node)
 
-        # 新建组默认展开（一期不保留折叠记忆，避免重建时组全收起）
+        # 分组行默认展开（文件视图的目录不自动展开——子层走懒加载）
         for item in self._top_items():
-            item.setExpanded(True)
+            if item.data(0, _ROLE_KIND) == 'group':
+                item.setExpanded(True)
         self._select_leaf(self._current_line_id)
         self._apply_view_state()
 
@@ -370,12 +381,33 @@ class FileTreePanel(DockPanel):
                 item.setIcon(0, FIF.GLOBE.icon())
             elif node.kind == 'report':
                 item.setIcon(0, FIF.DOCUMENT.icon())
+            elif node.kind == 'dir':
+                item.setIcon(0, FIF.FOLDER.icon())
+            elif node.kind == 'file':
+                item.setIcon(0, FIF.DOCUMENT.icon())
         if parent_item is None:
             self._tree.addTopLevelItem(item)
         else:
             parent_item.addChild(item)
         for child in node.children:
             self._add_node(item, child)
+        # 目录无 children = 子层未加载：放占位行让展开箭头出现
+        if node.kind == 'dir' and not node.children:
+            placeholder = QTreeWidgetItem()
+            placeholder.setData(0, _ROLE_KIND, 'placeholder')
+            placeholder.setText(0, '…')
+            item.addChild(placeholder)
+
+    def _on_item_expanded(self, item) -> None:
+        """目录首次展开 → 就地扫描子层并替换占位行（懒加载）。"""
+        if item.data(0, _ROLE_KIND) != 'dir':
+            return
+        if item.childCount() != 1 or \
+                item.child(0).data(0, _ROLE_KIND) != 'placeholder':
+            return
+        item.removeChild(item.child(0))
+        for node in build_files_model(item.data(0, _ROLE_PAYLOAD)):
+            self._add_node(item, node)
 
     def _select_leaf(self, line_id: str) -> None:
         node = self._line_id_by_item.get(str(line_id or ''))
@@ -398,19 +430,32 @@ class FileTreePanel(DockPanel):
         elif kind in ('spatial', 'report'):
             self.delivery_focus_requested.emit(str(kind))
 
+    def _on_item_double_clicked(self, item, _column: int) -> None:
+        """文件双击 → 系统默认程序打开（目录双击保留默认展开/收起）。"""
+        if self._busy:
+            return
+        if item.data(0, _ROLE_KIND) == 'file':
+            path = str(item.data(0, _ROLE_PAYLOAD) or '')
+            if path:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
     # ------------------------------------------------------------ 右键菜单
     def _on_context_menu(self, pos) -> None:
-        """叶子右键：先选中该线（与项目页表格右键即选中同语义），再弹菜单。
+        """测线叶子右键：先选中该线（与项目页表格右键即选中同语义），再弹菜单。
 
-        分组行 / 空白处 / busy 中不出菜单。
+        分组行 / 空白处 / busy 中不出菜单；目录/文件走系统级菜单。
         """
         if self._busy:
             return
         item = self._tree.itemAt(pos)
         if item is None:
             return
+        kind = item.data(0, _ROLE_KIND)
+        if kind in ('dir', 'file'):
+            self._on_file_context_menu(item, pos)
+            return
         # 仅测线叶子出菜单；分组行/成果/报告叶子的交互走单击
-        if item.data(0, _ROLE_KIND) != 'line':
+        if kind != 'line':
             return
         line_id = item.data(0, _ROLE_PAYLOAD)
         if not line_id:
@@ -430,6 +475,23 @@ class FileTreePanel(DockPanel):
         menu.addSeparator()
         add_action(menu, FIF.COPY, '复制测线号',
                    lambda: QApplication.clipboard().setText(line_id))
+        menu.exec(self._tree.viewport().mapToGlobal(pos))
+
+    def _on_file_context_menu(self, item, pos) -> None:
+        """目录/文件右键：打开 / 在资源管理器中显示 / 复制路径（只读浏览，
+        文件管理交给系统，不绕过后端事务与回收站机制）。"""
+        path = str(item.data(0, _ROLE_PAYLOAD) or '')
+        if not path:
+            return
+        menu = make_menu(parent=self._tree)
+        add_action(menu, FIF.DOCUMENT, '打开',
+                   lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(path)))
+        add_action(menu, FIF.FOLDER, '在资源管理器中显示',
+                   lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(
+                       path if os.path.isdir(path) else os.path.dirname(path))))
+        menu.addSeparator()
+        add_action(menu, FIF.COPY, '复制路径',
+                   lambda: QApplication.clipboard().setText(path))
         menu.exec(self._tree.viewport().mapToGlobal(pos))
 
     def _confirm_delete(self, line_id: str) -> None:
