@@ -39,10 +39,13 @@ def window(qapp, monkeypatch):
         line_process_requested = pyqtSignal(str)
         line_delete_requested = pyqtSignal(list)
         delivery_focus_requested = pyqtSignal(str)
+        artifact_focus_requested = pyqtSignal(str, str)
 
         def set_settings_manager(self, _settings):
             pass
         def apply_page(self, _name):
+            pass
+        def set_artifacts(self, _artifacts):
             pass
         def set_spatial_results(self, _results):
             pass

@@ -72,8 +72,8 @@ def group_stats(lines: Sequence[Any]) -> str:
 
 # ---------------------------------------------------------------- 节点模型（Provider 层）
 # 文件树面板只渲染 TreeNode、发信号；节点由本模块纯函数装配。
-# 阶段 2 的「测线｜成果｜文件」分段视图 = 换掉本函数的不同装配器，
-# 面板渲染与交互不动。
+# 「测线｜成果｜文件」分段视图 = 各视图一个装配器：
+# build_tree_model（测线）/ build_artifacts_model（成果）/ 文件视图待阶段 3。
 
 
 @dataclass(frozen=True)
@@ -81,10 +81,11 @@ class TreeNode:
     """文件树节点（纯数据）。
 
     kind:
-    - ``group``   分组行（不可选，仅展开）
-    - ``line``    测线叶子，payload = line_id
-    - ``spatial`` 空间成果叶子，payload = result_id
-    - ``report``  项目报告叶子，payload = package_dir
+    - ``group``    分组行（不可选，仅展开）
+    - ``line``     测线叶子，payload = line_id
+    - ``artifact`` 处理成果叶子，payload = artifact_id，aux = line_id
+    - ``spatial``  空间成果叶子，payload = result_id
+    - ``report``   项目报告叶子，payload = package_dir
     icon 为语义键（success/info/disabled，供状态点查表），仅 line 用。
     suffix 为行尾灰色角标（第二列右对齐小字）。
     """
@@ -95,6 +96,7 @@ class TreeNode:
     suffix: str = ''
     icon: str = ''
     tooltip: str = ''
+    aux: str = ''
     children: tuple = field(default_factory=tuple)
 
 
@@ -163,11 +165,10 @@ def _report_node(package: Any) -> TreeNode:
 
 def build_tree_model(lines: Sequence[Any], spatial_results: Sequence[Any] = (),
                      reports: Sequence[Any] = ()) -> list[TreeNode]:
-    """装配整棵树的节点模型（测线分组 + 空间成果 + 项目报告）。
+    """测线视图装配器：测线按日期分组（沿用 :func:`group_lines` 规则）。
 
-    - 测线区沿用 :func:`group_lines` 的日期分组/平铺规则；
-    - 空间成果/项目报告为空时不产生分组节点（保持树干净）；
-    - 空间成果按创建时间倒序，报告按生成时间倒序。
+    空间成果/项目报告已移入「成果」视图（:func:`build_artifacts_model`），
+    本函数保留 spatial/reports 形参仅为旧调用签名兼容，传入即忽略。
     """
     nodes: list[TreeNode] = []
     for key, bucket in group_lines(lines):
@@ -178,6 +179,52 @@ def build_tree_model(lines: Sequence[Any], spatial_results: Sequence[Any] = (),
             nodes.append(TreeNode(
                 key=f'group:{key}', kind='group', text=key,
                 suffix=group_stats(bucket), children=children))
+    return nodes
+
+
+def _artifact_node(artifact: Any) -> TreeNode:
+    artifact_id = str(getattr(artifact, 'artifact_id', '') or '')
+    line_id = str(getattr(artifact, 'line_id', '') or '')
+    name = str(getattr(artifact, 'name', '') or artifact_id)
+    method = str(getattr(artifact, 'method_name', '') or
+                 getattr(artifact, 'method_id', '') or '')
+    created = str(getattr(artifact, 'created_at', '') or '')[:16].replace('T', ' ')
+    shape = getattr(artifact, 'shape', ()) or ()
+    tip = [f'测线：{line_id}']
+    if method:
+        tip.append(f'方法：{method}')
+    if created:
+        tip.append(f'创建：{created}')
+    if shape:
+        tip.append(f'形状：{"×".join(str(v) for v in shape)} '
+                   f'{getattr(artifact, "dtype", "") or ""}'.strip())
+    return TreeNode(
+        key=f'artifact:{artifact_id}', kind='artifact', text=name,
+        payload=artifact_id, aux=line_id, suffix=method,
+        tooltip='\n'.join(tip))
+
+
+def build_artifacts_model(artifacts: Sequence[Any],
+                          spatial_results: Sequence[Any] = (),
+                          reports: Sequence[Any] = ()) -> list[TreeNode]:
+    """成果视图装配器：处理成果按测线分组平铺 + 空间成果 + 项目报告。
+
+    - 处理成果：按 ``line_id`` 升序分组（组标题=测线号），组内按创建时间
+      倒序（最新在前）；无成果/无空间/无报告的分组不产生节点；
+    - 空间成果按创建时间倒序，报告按生成时间倒序。
+    """
+    nodes: list[TreeNode] = []
+    by_line: dict[str, list] = {}
+    for art in artifacts or []:
+        by_line.setdefault(str(getattr(art, 'line_id', '') or ''), []).append(art)
+    for line_id in sorted(by_line):
+        bucket = sorted(
+            by_line[line_id],
+            key=lambda a: str(getattr(a, 'created_at', '') or ''), reverse=True)
+        nodes.append(TreeNode(
+            key=f'group:line-artifacts:{line_id}', kind='group', text=line_id,
+            suffix=f'{len(bucket)} 项',
+            children=tuple(_artifact_node(a) for a in bucket)))
 
     spatial = sorted(
         (r for r in spatial_results or []),

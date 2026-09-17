@@ -15,7 +15,8 @@ pytest.importorskip("PyQt6")
 from PyQt6.QtCore import Qt  # noqa: E402
 
 from ui.file_tree import (  # noqa: E402
-    build_tree_model, group_lines, group_stats, line_suffix,
+    build_artifacts_model, build_tree_model, group_lines, group_stats,
+    line_suffix,
 )
 
 
@@ -96,21 +97,34 @@ def test_build_tree_model_groups_lines_and_suffixes():
     assert group.children[1].suffix == ''
 
 
-def test_build_tree_model_omits_empty_sections():
-    # 无空间成果/报告时不产生对应分组节点
-    nodes = build_tree_model([_line('L01', '2026-09-16T01:00:00')])
-    assert all(n.text not in ('空间成果', '项目报告') for n in nodes)
-    # 只有成果无测线：只有成果组
-    nodes = build_tree_model([], spatial_results=[_spatial()])
-    assert [n.text for n in nodes] == ['空间成果']
-    assert nodes[0].children[0].kind == 'spatial'
-    assert nodes[0].children[0].payload == 'SR1'
-    assert nodes[0].children[0].text == '剖面图 v2'
+def _artifact(artifact_id='A1', line_id='L01', name='去直流',
+              method_name='dewow', created_at='2026-09-16T10:00:00',
+              shape=(100, 500), dtype='float32'):
+    return types.SimpleNamespace(
+        artifact_id=artifact_id, line_id=line_id, name=name,
+        method_name=method_name, method_id=method_name,
+        created_at=created_at, shape=shape, dtype=dtype)
 
 
-def test_build_tree_model_spatial_sorted_desc_and_reports():
-    nodes = build_tree_model(
-        [],
+def test_build_artifacts_model_groups_by_line_desc():
+    nodes = build_artifacts_model([
+        _artifact('A1', 'L02', created_at='2026-09-15T10:00:00'),
+        _artifact('A2', 'L01'),
+        _artifact('A3', 'L02', created_at='2026-09-16T11:00:00'),
+    ])
+    assert [n.text for n in nodes] == ['L01', 'L02']  # 测线组升序
+    assert nodes[0].suffix == '1 项'
+    assert nodes[1].suffix == '2 项'
+    # 组内按创建时间倒序
+    assert [c.payload for c in nodes[1].children] == ['A3', 'A1']
+    leaf = nodes[1].children[0]
+    assert leaf.kind == 'artifact' and leaf.aux == 'L02'
+    assert leaf.suffix == 'dewow'  # 行尾角标=方法名
+
+
+def test_build_artifacts_model_includes_spatial_and_reports():
+    nodes = build_artifacts_model(
+        [_artifact()],
         spatial_results=[
             _spatial('SR1', created_at='2026-09-15T10:00:00'),
             _spatial('SR2', created_at='2026-09-16T10:00:00'),
@@ -126,6 +140,15 @@ def test_build_tree_model_spatial_sorted_desc_and_reports():
     assert report_group.children[0].suffix == '2026-09-16'
 
 
+def test_build_artifacts_model_omits_empty_sections():
+    assert build_artifacts_model([]) == []
+    nodes = build_artifacts_model([], spatial_results=[_spatial()])
+    assert [n.text for n in nodes] == ['空间成果']
+    assert nodes[0].children[0].kind == 'spatial'
+    assert nodes[0].children[0].payload == 'SR1'
+    assert nodes[0].children[0].text == '剖面图 v2'
+
+
 # ---------------------------------------------------------------- 面板行为
 _PANEL_HOLDER: dict = {}
 
@@ -133,7 +156,7 @@ _PANEL_HOLDER: dict = {}
 @pytest.fixture
 def panel(qapp):
     from PyQt6.QtWidgets import QWidget
-    from ui.widgets.file_tree_panel import _DEFAULT_PAGE_COLLAPSED, FileTreePanel
+    from ui.widgets.file_tree_panel import FileTreePanel
 
     # 全模块共享一个面板实例、逐用例复位，而不是每用例新建/销毁：
     # offscreen 平台下 qfluentwidgets TreeWidget 反复走原生窗口生命周期
@@ -148,9 +171,15 @@ def panel(qapp):
     # 复位到初始态（等价于新建面板）
     p.set_busy(False)
     p.set_settings_manager(None)
-    p._page_states = dict(_DEFAULT_PAGE_COLLAPSED)
+    p._page_states = {}
     p._current_page = ''
-    p.set_project_info(None)
+    # 视图分段复位到「测线」（阻断信号避免触发持久化路径）
+    p._view_segment.blockSignals(True)
+    p._view_segment.setCurrentItem('lines')
+    p._view_segment.blockSignals(False)
+    p._current_view = 'lines'
+    p._empty_label.setText('尚未导入测线')
+    p.set_project_info(None)   # 同时清空测线/成果/空间/报告与签名
     p.set_lines([])
     p._current_line_id = ''
     p._update_strip_text()
@@ -233,6 +262,7 @@ def _find_by_kind(tree, kind):
 
 def test_spatial_and_report_leaves_render_and_click_goto_delivery(qapp, panel):
     panel.set_project_info(types.SimpleNamespace(name='测试1'))
+    panel._set_view('artifacts', remember=False)  # 空间/报告组在「成果」视图
     panel.set_lines([_line('L01', '2026-09-16T01:00:00')])
     panel.set_spatial_results([_spatial()])
     panel.set_reports([_report()])
@@ -251,9 +281,44 @@ def test_spatial_and_report_leaves_render_and_click_goto_delivery(qapp, panel):
     assert lines_got == []  # 成果/报告点击不得触发换线
 
 
-def test_tree_shown_with_only_spatial_results(qapp, panel):
-    # 无测线但有成果：树可见（空态只看三类数据全空）
+def test_artifact_leaf_click_emits_focus_with_line(qapp, panel):
     panel.set_project_info(types.SimpleNamespace(name='测试1'))
+    panel._set_view('artifacts', remember=False)
+    panel.set_artifacts([_artifact('A9', 'L02')])
+    leaf = _find_by_kind(panel._tree, 'artifact')
+    assert leaf is not None
+    assert leaf.text(0) == '去直流' and leaf.text(1) == 'dewow'
+    got, lines_got = [], []
+    panel.artifact_focus_requested.connect(lambda *a: got.append(a))
+    panel.line_selected.connect(lines_got.append)
+    panel._on_item_clicked(leaf, 0)
+    assert got == [('L02', 'A9')]
+    assert lines_got == []  # 换线由链路决定，面板不直接发
+
+
+def test_set_artifacts_signature_dedup_skips_rebuild(qapp, panel):
+    panel.set_project_info(types.SimpleNamespace(name='测试1'))
+    panel._set_view('artifacts', remember=False)
+    panel.set_artifacts([_artifact('A1')])
+    leaf = _find_by_kind(panel._tree, 'artifact')
+    panel.set_artifacts([_artifact('A1')])  # 同签名：不重建
+    assert _find_by_kind(panel._tree, 'artifact') is leaf
+    panel.set_artifacts([_artifact('A1'), _artifact('A2')])  # 变了才重建
+    assert _find_by_kind(panel._tree, 'artifact') is not leaf
+
+
+def test_files_view_shows_placeholder(qapp, panel):
+    panel.set_project_info(types.SimpleNamespace(name='测试1'))
+    panel.set_lines([_line('L01', '2026-09-16T01:00:00')])
+    panel._set_view('files', remember=False)
+    assert panel._tree.isHidden()
+    assert panel._empty_label.text() == '文件视图将在后续版本提供'
+
+
+def test_tree_shown_with_only_spatial_results(qapp, panel):
+    # 成果视图：无处理成果但有空间成果时树可见
+    panel.set_project_info(types.SimpleNamespace(name='测试1'))
+    panel._set_view('artifacts', remember=False)
     panel.set_lines([])
     panel.set_spatial_results([_spatial()])
     assert not panel._tree.isHidden()
@@ -272,6 +337,7 @@ def test_context_menu_suppressed_for_spatial_leaf(qapp, panel, monkeypatch):
     from PyQt6.QtCore import QPoint
     from qfluentwidgets import RoundMenu
     panel.set_project_info(types.SimpleNamespace(name='测试1'))
+    panel._set_view('artifacts', remember=False)
     panel.set_spatial_results([_spatial()])
     shown = []
     monkeypatch.setattr(RoundMenu, 'exec',
@@ -325,7 +391,32 @@ def test_manual_toggle_is_remembered_per_page_and_persisted(qapp, panel):
     assert panel._collapsed
     panel.apply_page('projectInterface')
     assert panel._collapsed  # 项目页记忆被手动覆盖
-    assert settings.get('file_tree_page_states')['projectInterface'] is True
+    saved = settings.get('file_tree_page_states')
+    assert saved['projectInterface']['lines'] is True  # 二维格式
+
+
+def test_collapse_memory_is_per_page_and_view(qapp, panel):
+    """同一页面不同视图各自记忆收起态（按页×按视图二维）。"""
+    settings = _FakeSettings()
+    panel.set_settings_manager(settings)
+    panel.apply_page('projectInterface')
+    panel._set_view('artifacts', remember=False)
+    panel._remember_current(True)   # 项目页×成果视图：收起
+    panel._set_view('lines', remember=False)
+    assert not panel._collapsed     # 项目页×测线视图：默认展开，不受影响
+    panel._set_view('artifacts', remember=False)
+    assert panel._collapsed         # 切回成果视图恢复收起
+    saved = settings.get('file_tree_page_states')
+    assert saved['projectInterface']['artifacts'] is True
+
+
+def test_settings_legacy_flat_format_broadcasts_to_all_views(qapp, panel):
+    """旧版一维设置 {page: bool} 读取时广播到全部视图。"""
+    settings = _FakeSettings()
+    settings.set('file_tree_page_states', {'projectInterface': True})
+    panel.set_settings_manager(settings)
+    assert panel._collapsed_for('projectInterface', 'lines') is True
+    assert panel._collapsed_for('projectInterface', 'artifacts') is True
 
 
 def test_strip_text_updates_on_line_switch_while_collapsed(qapp, panel):

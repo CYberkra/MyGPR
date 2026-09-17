@@ -29,6 +29,7 @@ class ProjectChain:
         self._co = coordinator
         self.current_line_id = ''         # 当前测线（项目/处理/解释页共用）
         self.pending_select_line_id = ''  # 导入完成后要选中的测线
+        self.pending_focus_artifact = ''  # 文件树点成果：待选中预览的 artifact_id
 
     # ============================================================ 信号注册
     def connect_all(self) -> None:
@@ -71,6 +72,9 @@ class ProjectChain:
             # 空间成果/项目报告叶子点击 → 跳成果页
             tree.delivery_focus_requested.connect(
                 lambda _kind: co.goto_page('deliveryInterface'))
+            # 成果叶子点击 → 换线（如需）+ 跳处理页选中预览
+            tree.artifact_focus_requested.connect(
+                self.on_artifact_focus_requested)
 
         # ---------------- 空间信息页：设为当前测线（测线归属项目域）
         spatial.current_line_requested.connect(self.on_spatial_current_line)
@@ -100,6 +104,8 @@ class ProjectChain:
             pc.busy_changed.connect(project.set_busy)
             if tree is not None:
                 pc.busy_changed.connect(tree.set_busy)
+                # 文件树「成果」视图：全项目成果列表（与按线的 artifacts_updated 互补）
+                pc.all_artifacts_updated.connect(tree.set_artifacts)
 
         dc = co.delivery_controller
         if dc is not None:
@@ -143,6 +149,7 @@ class ProjectChain:
         # 空间信息页：项目打开后加载空间轨迹
         if co.project_controller is not None:
             co.project_controller.load_spatial_tracks()
+            co.project_controller.refresh_all_artifacts()  # 文件树「成果」视图
         # A→B 直切：清空空间页残留的 A 项目深度切片与勾选态，
         # 否则非空 payload 守卫会压制 B 项目首次进入深度段的预览请求。
         spatial = co.page('spatialInterface')
@@ -302,6 +309,18 @@ class ProjectChain:
         project.set_artifacts(artifacts)
         processing.set_artifacts(artifacts)
         interpretation.set_artifacts(artifacts)
+        # 文件树「成果」视图跟随刷新（面板按 artifact_id 签名去重，不换内容不重建）
+        if co.project_controller is not None:
+            co.project_controller.refresh_all_artifacts()
+        # 文件树点成果的跨线场景：该线成果列表到达后完成选中 + 预览
+        pending = self.pending_focus_artifact
+        if pending:
+            if processing.select_artifact(pending):
+                self.pending_focus_artifact = ''
+                if co.project_controller is not None:
+                    co.project_controller.preview_artifact(
+                        self.current_line_id, pending)
+                return
         processing_chain = co.processing
         if processing_chain.preview_newest_artifact:
             processing_chain.preview_newest_artifact = False
@@ -316,6 +335,30 @@ class ProjectChain:
     def on_artifact_preview_requested(self, line_id: str, artifact_id: str) -> None:
         if self._co.project_controller is not None and self._co.require_project():
             self._co.project_controller.preview_artifact(str(line_id), str(artifact_id))
+
+    def on_artifact_focus_requested(self, line_id: str, artifact_id: str) -> None:
+        """文件树「成果」叶子点击 → 换线（如需）+ 跳处理页选中并预览该成果。
+
+        跨线时该线成果列表未到，select_artifact 会落空：记下
+        ``pending_focus_artifact``，由 on_artifacts_updated 在列表到达后
+        完成选中与预览（与导入后 pending_select_line_id 同一异步模式）。
+        """
+        line_id = str(line_id or '')
+        artifact_id = str(artifact_id or '')
+        co = self._co
+        if not artifact_id or co.project_controller is None \
+                or not co.require_project():
+            return
+        self.pending_focus_artifact = artifact_id
+        if line_id and line_id != self.current_line_id:
+            self.on_line_selected(line_id)
+        co.goto_page('processingInterface')
+        processing = co.page('processingInterface')
+        if processing.select_artifact(artifact_id):
+            # 同线且列表已在：直接预览，无需等刷新
+            self.pending_focus_artifact = ''
+            co.project_controller.preview_artifact(
+                line_id or self.current_line_id, artifact_id)
 
     def on_dataset_preview(self, bundle) -> None:
         """原始数据预览 → 主页 / 项目页 / 处理页（原始）/ 解释页剖面。"""

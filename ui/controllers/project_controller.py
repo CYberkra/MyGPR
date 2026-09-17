@@ -31,6 +31,7 @@ class ProjectController(QObject):
     open_failed = pyqtSignal(str)
     lines_updated = pyqtSignal(list)             # list[ProjectLine]
     artifacts_updated = pyqtSignal(str, list)    # line_id, list[ProjectArtifact]
+    all_artifacts_updated = pyqtSignal(list)     # 全项目 list[ProjectArtifact]（文件树成果视图）
     dataset_preview_ready = pyqtSignal(object)   # PreviewBundle (raw data)
     artifact_preview_ready = pyqtSignal(str, object)  # artifact_id, PreviewBundle
     preflight_ready = pyqtSignal(object)         # ImportPreflight
@@ -206,6 +207,18 @@ class ProjectController(QObject):
         run_command(
             _RefreshArtifactsCommand(self, project_id, line_id),
             name="mygpr-artifacts-refresh",
+        )
+
+    def refresh_all_artifacts(self) -> None:
+        """全项目成果列表（文件树「成果」视图数据源；line_id=None 一次取全）。"""
+        backend = self._backend()
+        project_id = self.current_project_id
+        if backend is None or project_id is None:
+            return
+
+        run_command(
+            _RefreshAllArtifactsCommand(self, project_id),
+            name="mygpr-all-artifacts-refresh",
         )
 
     # ------------------------------------------------------------------
@@ -626,6 +639,29 @@ class _RefreshArtifactsCommand:
             c.log_message.emit(f"刷新成果列表失败：{friendly_error_message(exc)}")
         else:
             c.artifacts_updated.emit(self._line_id, artifacts)
+
+
+class _RefreshAllArtifactsCommand:
+    __slots__ = ("_controller", "_project_id")
+
+    def __init__(self, controller: ProjectController, project_id: str) -> None:
+        self._controller = controller
+        self._project_id = project_id
+
+    def execute(self) -> None:
+        c = self._controller
+        backend = c._backend()
+        if backend is None:
+            return
+        try:
+            artifacts = list(backend.projects.list_artifacts(
+                self._project_id, None))
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.exception("刷新全项目成果列表失败")
+            c.log_message.emit(
+                f"刷新全项目成果列表失败：{friendly_error_message(exc)}")
+        else:
+            c.all_artifacts_updated.emit(artifacts)
 
 
 class _LoadSpatialTracksCommand:
