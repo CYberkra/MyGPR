@@ -62,6 +62,13 @@ class ProjectChain:
         if pc0 is not None:
             pc0.line_source_path_ready.connect(project.set_line_source_path)
 
+        # ---------------- 左侧常驻测线树（与项目页测线表同一信号语义）
+        tree = co.line_tree()
+        if tree is not None:
+            tree.line_selected.connect(self.on_line_selected)
+            tree.line_process_requested.connect(self.on_line_process_requested)
+            tree.line_delete_requested.connect(self.on_line_delete_requested)
+
         # ---------------- 空间信息页：设为当前测线（测线归属项目域）
         spatial.current_line_requested.connect(self.on_spatial_current_line)
 
@@ -88,6 +95,8 @@ class ProjectChain:
             pc.artifact_descendants_ready.connect(
                 self.on_artifact_descendants_ready)
             pc.busy_changed.connect(project.set_busy)
+            if tree is not None:
+                pc.busy_changed.connect(tree.set_busy)
 
         dc = co.delivery_controller
         if dc is not None:
@@ -111,6 +120,8 @@ class ProjectChain:
         project = co.page('projectInterface')
         home.set_current_project(summary)
         project.set_project_info(summary)
+        if co.line_tree() is not None:
+            co.line_tree().set_project_info(summary)
         root = str(getattr(summary, 'root_path', '') or '')
         if root:
             co.settings.add_recent_project(root)
@@ -144,6 +155,8 @@ class ProjectChain:
         home.set_current_project(None)
         home.set_preview_bundle(None)
         project.set_project_info(None)
+        if co.line_tree() is not None:
+            co.line_tree().set_project_info(None)
         project.set_lines([])
         project.set_artifacts([])
         project.set_preview_bundle(None)
@@ -172,10 +185,12 @@ class ProjectChain:
 
     # ============================================================ 测线 / 成果 / 预览
     def update_line_labels(self) -> None:
-        """当前测线标签：处理页 / 解释页共用。"""
+        """当前测线标签：处理页 / 解释页 / 测线树共用。"""
         co = self._co
         co.page('processingInterface').set_line_label(self.current_line_id)
         co.page('interpretationInterface').set_line_label(self.current_line_id)
+        if co.line_tree() is not None:
+            co.line_tree().set_current_line(self.current_line_id)
 
     def on_lines_updated(self, lines: list) -> None:
         """lines_updated → 项目页测线表（自动选中首行）+ 成果页/空间页测线多选。"""
@@ -209,6 +224,8 @@ class ProjectChain:
         processing.set_lines(lines)
         delivery.set_lines(lines)
         spatial.set_lines(lines)
+        if co.line_tree() is not None:
+            co.line_tree().set_lines(lines)
         # 测线集合变化后空间轨迹同步重载（导入/同步完成均触发 lines_updated）
         if co.project_controller is not None:
             co.project_controller.load_spatial_tracks()
@@ -232,10 +249,18 @@ class ProjectChain:
             # 在飞速度分析回调带旧测线，会被 line 守卫丢弃；
             # 同步失效 token 并复位解释页，避免新测线永久停留在"拟合中"
             co.processing.velocity_token = None
+            # 在飞成果预览同理作废，防旧测线成果渲染进新测线"处理结果"；
+            # 成果预览代数与测线预览独立，同测线重复选中不受影响
+            if co.project_controller is not None:
+                co.project_controller.invalidate_artifact_previews()
             interpretation = co.page('interpretationInterface')
             interpretation.set_velocity_failed('')  # 空串 = 状态重置，非失败
         self.current_line_id = line_id
         self.update_line_labels()
+        # 反向同步项目页测线表选中（select_line 内部抑止回发，无双倍预览）
+        project = co.page('projectInterface')
+        if project is not None and hasattr(project, 'select_line'):
+            project.select_line(line_id)
         if co.project_controller is not None:
             co.project_controller.preview_line(line_id)
             co.project_controller.refresh_artifacts(line_id)

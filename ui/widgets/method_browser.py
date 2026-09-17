@@ -15,12 +15,8 @@ from PyQt6.QtWidgets import (QApplication, QHBoxLayout, QTreeWidget,
 from qfluentwidgets import LineEdit, themeColor
 from qfluentwidgets import FluentIcon as FIF
 
-from ui.theme_helpers import status_color
+from ui.theme_helpers import BADGE_QSS, status_color
 from ui.widgets.context_menus import add_action, make_menu
-
-_BADGE_QSS = ('QLabel { padding: 2px 10px; border-radius: 10px; '
-              'font-size: 12px; font-weight: bold; '
-              'color: #ffffff; background-color: %s; }')
 
 
 def _tag_badge_bg(tag: str) -> str:
@@ -34,7 +30,7 @@ def _tag_badge_bg(tag: str) -> str:
 
 def _make_badge(tag: str) -> QLabel:
     badge = QLabel(tag)
-    badge.setStyleSheet(_BADGE_QSS % _tag_badge_bg(tag))
+    badge.setStyleSheet(BADGE_QSS % _tag_badge_bg(tag))
     return badge
 
 
@@ -136,7 +132,7 @@ class MethodBrowser(QWidget):
         """主题切换：重建徽章底色——「推荐」的 themeColor() 是构建时快照，
         主窗口主题切换遍历（findChildren + apply_theme）会调到本方法。"""
         for badge, tag in self._badges:
-            badge.setStyleSheet(_BADGE_QSS % _tag_badge_bg(tag))
+            badge.setStyleSheet(BADGE_QSS % _tag_badge_bg(tag))
 
     # ------------------------------------------------------------- 信号
     def _method_id_of(self, item):

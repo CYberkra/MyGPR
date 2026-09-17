@@ -55,6 +55,10 @@ class PageCoordinator:
     def goto_page(self, object_name: str) -> None:
         self._win._goto_page(object_name)
 
+    def line_tree(self):
+        """左侧常驻测线树面板（窗口组装时创建；offscreen 冒烟可能无）。"""
+        return getattr(self._win, '_line_tree_panel', None)
+
     def show_new_project_dialog(self) -> None:
         self._win._show_new_project_dialog()
 
@@ -117,8 +121,8 @@ class PageCoordinator:
         return self._win.settings
 
     @property
-    def log_panel(self):
-        return self._win.log_panel
+    def output_panel(self):
+        return self._win.output_panel
 
     @property
     def log_signal(self):

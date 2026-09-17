@@ -4,7 +4,8 @@
 三栏 QHBoxLayout（模式照抄 processing_page）：
 - 左栏 ScrollArea 固定 320px（可折叠）：卡片"测线"（多选勾选列表 + 颜色块）、
   卡片"底图"（瓦图源 ComboBox + 预下载按钮 + 进度）、卡片"投影信息"
-- 中栏 stretch：SegmentedWidget 切换"平面地图 / 高程剖面 / 三维视图 / 深度切片"
+- 中栏 stretch：卡片"空间视图"（标题与 SlimSegment 同行 header，切换
+  "平面地图 / 高程剖面 / 三维视图 / 深度切片"）
   + QStackedWidget（MapView / 高程剖面 PlotWidget / Trajectory3DView /
   DepthSliceView + 深度滑条 + 存为图层按钮）
 - 右栏 ScrollArea 固定 340px（可折叠）：卡片"测线详情" + "设为当前测线"
@@ -24,23 +25,23 @@ from PyQt6.QtWidgets import (
 )
 from qfluentwidgets import (CaptionLabel, ComboBox, DoubleSpinBox,
                             PrimaryPushButton, PushButton,
-                            SegmentedWidget, Slider, SwitchButton)
+                            Slider, SwitchButton)
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants, file_dialogs
 from ui.geo_utils import coverage_statistics, format_distance
 from ui.page_scaffold import (PanelStateMixin, make_card, make_scroll_column,
-                              rebuild_check_list)
+                              make_segment_card, rebuild_check_list)
 from ui.theme_helpers import status_color
 from ui.widgets.collapsible_panel import CollapsiblePanel
 from ui.widgets.elevation_profile_view import ElevationProfileView
 from ui.widgets.local_dem import load_xyz_grid
 from ui.widgets.map_tiles import BASEMAP_LAYERS, DEFAULT_TILE_SOURCE
 from ui.widgets.map_view import MapView
-from ui.widgets import make_page_title
 from ui.widgets.depth_slice_view import DepthSliceView
+from ui.widgets.segment_tabs import SlimSegment
 from ui.widgets.trajectory_3d_view import Trajectory3DView
-# 中栏分段（SegmentedWidget routeKey）
+# 中栏分段（SlimSegment routeKey）
 _SEG_MAP = 'planMap'
 _SEG_PROFILE = 'elevationProfile'
 _SEG_3D = 'trajectory3d'
@@ -242,16 +243,15 @@ class SpatialPage(PanelStateMixin, QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(*constants.PAGE_MARGINS)
         root.setSpacing(constants.PAGE_SPACING)
-        root.addWidget(make_page_title('空间信息'))
 
         columns = QHBoxLayout()
         columns.setSpacing(constants.PAGE_SPACING)
         root.addLayout(columns, 1)
 
         # ---------------- 左栏（展开 320px，可折叠）
-        left_scroll, left_layout = make_scroll_column(320)
+        left_scroll, left_layout = make_scroll_column(constants.SIDE_TOOL_WIDTH)
         left_panel = CollapsiblePanel(
-            'left', expand_width=320, collapse_width=40, parent=self)
+            'left', expand_width=constants.SIDE_TOOL_WIDTH, collapse_width=40, parent=self)
         left_panel.set_content_widget(left_scroll)
         columns.addWidget(left_panel)
         self._left_panel = left_panel
@@ -369,10 +369,9 @@ class SpatialPage(PanelStateMixin, QWidget):
         middle_layout.setSpacing(constants.PAGE_SPACING)
         columns.addWidget(middle, 1)
 
-        view_card, view_layout = make_card('空间视图')
-        seg_row = QHBoxLayout()
-        seg_row.setSpacing(constants.CARD_SPACING)
-        self._view_segment = SegmentedWidget(view_card)
+        # header 单行化：标题居左 + 视图切换瘦页签居右（make_segment_card
+        # 范式），中栏图像区省出一整行。
+        self._view_segment = SlimSegment(self)
         self._view_segment.addItem(
             _SEG_MAP, '平面地图', onClick=lambda: self._switch_view(_SEG_MAP))
         self._view_segment.addItem(
@@ -382,19 +381,18 @@ class SpatialPage(PanelStateMixin, QWidget):
         self._view_segment.addItem(
             _SEG_DEPTH, '深度切片', onClick=lambda: self._switch_view(_SEG_DEPTH))
         self._view_segment.setCurrentItem(_SEG_MAP)
-        seg_row.addWidget(self._view_segment)
-        seg_row.addStretch(1)
-        view_layout.addLayout(seg_row)
+        view_card, view_layout = make_segment_card(
+            '空间视图', self._view_segment, parent=self)
 
         self._view_stack = QStackedWidget(view_card)
         self._map_view = MapView(view_card)
-        self._map_view.setMinimumHeight(300)
+        self._map_view.setMinimumHeight(constants.PREVIEW_MIN_HEIGHT)
         self._profile_view = ElevationProfileView(view_card)
-        self._profile_view.setMinimumHeight(300)
+        self._profile_view.setMinimumHeight(constants.PREVIEW_MIN_HEIGHT)
         self._3d_view = Trajectory3DView(view_card)
-        self._3d_view.setMinimumHeight(300)
+        self._3d_view.setMinimumHeight(constants.PREVIEW_MIN_HEIGHT)
         self._depth_view = DepthSliceView(view_card)
-        self._depth_view.setMinimumHeight(300)
+        self._depth_view.setMinimumHeight(constants.PREVIEW_MIN_HEIGHT)
         self._view_stack.addWidget(self._map_view)
         self._view_stack.addWidget(self._profile_view)
         self._view_stack.addWidget(self._3d_view)
@@ -419,9 +417,9 @@ class SpatialPage(PanelStateMixin, QWidget):
         middle_layout.addWidget(view_card, 1)
 
         # ---------------- 右栏（展开 340px，可折叠）
-        right_scroll, right_layout = make_scroll_column(340)
+        right_scroll, right_layout = make_scroll_column(constants.SIDE_FORM_WIDTH)
         right_panel = CollapsiblePanel(
-            'right', expand_width=340, collapse_width=40, parent=self)
+            'right', expand_width=constants.SIDE_FORM_WIDTH, collapse_width=40, parent=self)
         right_panel.set_content_widget(right_scroll)
         columns.addWidget(right_panel)
         self._right_panel = right_panel

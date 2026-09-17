@@ -3,8 +3,8 @@
 
 三栏 QHBoxLayout：
 - 左栏 ScrollArea 固定 320px：卡片"方法库"（MethodBrowser）
-- 中栏 stretch：卡片"数据预览"（SegmentedWidget 原始数据/处理结果 + BScanView
-  + colormap ComboBox + p_low/p_high + 刷新色阶 + 加载测线数据）+ 进度条（初始隐藏）
+- 中栏 stretch：卡片"数据预览"（标题与 SlimSegment 原始数据/处理结果同行
+  header + BScanView + colormap ComboBox + p_low/p_high + 刷新色阶）+ 进度条（初始隐藏）
 - 右栏 ScrollArea 固定 340px：卡片"处理链"（PipelineList + 添加所选方法）、
   卡片"参数设置"（ParamForm + 应用到选中步骤）、卡片"执行"（输入数据选择
   支持从某个成果继续处理 + 结果名 + 运行/取消）、卡片"AutoTune 自动调参"
@@ -20,7 +20,6 @@ from PyQt6.QtWidgets import (QHBoxLayout, QVBoxLayout, QWidget)
 from qfluentwidgets import (
     CaptionLabel, ComboBox, DoubleSpinBox, InfoBar,
     InfoBarPosition, LineEdit, PrimaryPushButton, ProgressBar, PushButton,
-    SegmentedWidget,
 )
 from qfluentwidgets import FluentIcon as FIF
 
@@ -28,12 +27,13 @@ from ui.desktop_backend_facade import compute_display_levels
 from ui import constants
 from ui.motion import animate_progress
 from ui.page_scaffold import (PanelStateMixin, make_card, make_form_row,
-                              make_scroll_column, refill_combo)
-from ui.widgets import (BScanView, CollapsiblePanel, make_page_title, MethodBrowser, ParamForm,
-                        PipelineList, clear_invalid,
+                              make_scroll_column, make_segment_card,
+                              refill_combo)
+from ui.widgets import (BScanView, CollapsiblePanel, MethodBrowser, ParamForm,
+                        PipelineList, SlimSegment, clear_invalid,
     make_separator,)
 
-# 预览分段（SegmentedWidget routeKey）
+# 预览分段（SlimSegment routeKey）
 _SEG_ORIGINAL = 'originalData'
 _SEG_RESULT = 'processResult'
 
@@ -81,16 +81,15 @@ class ProcessingPage(PanelStateMixin, QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(*constants.PAGE_MARGINS)
         root.setSpacing(constants.PAGE_SPACING)
-        root.addWidget(make_page_title('处理工作台'))
 
         columns = QHBoxLayout()
         columns.setSpacing(constants.PAGE_SPACING)
         root.addLayout(columns, 1)
 
-        # ---------------- 左栏（展开 320px，可折叠；滚动栏宽须与面板展开宽一致）
-        left_scroll, left_layout = make_scroll_column(320)
+        # ---------------- 左栏（展开 SIDE_TOOL_WIDTH px，可折叠；滚动栏宽须与面板展开宽一致）
+        left_scroll, left_layout = make_scroll_column(constants.SIDE_TOOL_WIDTH)
         left_panel = CollapsiblePanel(
-            'left', expand_width=320, collapse_width=40, parent=self)
+            'left', expand_width=constants.SIDE_TOOL_WIDTH, collapse_width=40, parent=self)
         left_panel.set_content_widget(left_scroll)
         columns.addWidget(left_panel)
         self._left_panel = left_panel
@@ -109,12 +108,9 @@ class ProcessingPage(PanelStateMixin, QWidget):
         middle_layout.setSpacing(constants.PAGE_SPACING)
         columns.addWidget(middle, 1)
 
-        preview_card, preview_layout = make_card('数据预览')
-        # 顶行拆两行，避免一行内控件挤压叠字：
-        #   行1 = 原始/结果分段 + 加载按钮；行2 = 测线 / 成果 下拉
-        seg_row = QHBoxLayout()
-        seg_row.setSpacing(constants.CARD_SPACING)
-        self._preview_segment = SegmentedWidget(preview_card)
+        # header 单行化：标题居左 + 原始/结果瘦页签居右（make_segment_card
+        # 范式）；选择器行（测线 / 成果 下拉）保持第二行。
+        self._preview_segment = SlimSegment(self)
         self._preview_segment.addItem(
             _SEG_ORIGINAL, '原始数据',
             onClick=lambda: self._show_bundle(_SEG_ORIGINAL))
@@ -122,9 +118,8 @@ class ProcessingPage(PanelStateMixin, QWidget):
             _SEG_RESULT, '处理结果',
             onClick=lambda: self._show_bundle(_SEG_RESULT))
         self._preview_segment.setCurrentItem(_SEG_ORIGINAL)
-        seg_row.addWidget(self._preview_segment)
-        seg_row.addStretch(1)
-        preview_layout.addLayout(seg_row)
+        preview_card, preview_layout = make_segment_card(
+            '数据预览', self._preview_segment, parent=self)
 
         sel_row = QHBoxLayout()
         sel_row.setSpacing(constants.CARD_SPACING)
@@ -144,7 +139,7 @@ class ProcessingPage(PanelStateMixin, QWidget):
         preview_layout.addLayout(sel_row)
 
         self._bscan = BScanView(preview_card)
-        self._bscan.setMinimumHeight(300)
+        self._bscan.setMinimumHeight(constants.PREVIEW_MIN_HEIGHT)
         preview_layout.addWidget(self._bscan, 1)
 
         # 色阶工具行：控件用前缀代替独立标签、收窄最小宽，保证窄屏
@@ -199,10 +194,10 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._progress_row_widget.setVisible(False)
         middle_layout.addWidget(self._progress_row_widget)
 
-        # ---------------- 右栏（展开 340px，可折叠；滚动栏宽须与面板展开宽一致）
-        right_scroll, right_layout = make_scroll_column(340)
+        # ---------------- 右栏（展开 SIDE_FORM_WIDTH px，可折叠；滚动栏宽须与面板展开宽一致）
+        right_scroll, right_layout = make_scroll_column(constants.SIDE_FORM_WIDTH)
         right_panel = CollapsiblePanel(
-            'right', expand_width=340, collapse_width=40, parent=self)
+            'right', expand_width=constants.SIDE_FORM_WIDTH, collapse_width=40, parent=self)
         right_panel.set_content_widget(right_scroll)
         columns.addWidget(right_panel)
         self._right_panel = right_panel

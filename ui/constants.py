@@ -18,7 +18,8 @@ WINDOW_WIDTH = 1450
 WINDOW_HEIGHT = 850
 WINDOW_MIN_WIDTH = 1200
 WINDOW_MIN_HEIGHT = 700
-NAV_EXPAND_WIDTH = 200
+# 顶部横排页签条（Pivot，替代竖导航；竖导航已退役，NAV_EXPAND_WIDTH 随之移除）
+NAV_TOP_BAR_HEIGHT = 36
 SPLASH_DURATION_MS = 600
 
 # 右侧全局折叠面板（style_spec §2.5）
@@ -28,14 +29,41 @@ PANEL_ANIM_DURATION_MS = 220
 FOLD_BUTTON_WIDTH = 18
 FOLD_BUTTON_HEIGHT = 60
 
+# 左侧常驻测线树面板（主窗口 widgetLayout 内容区首位插入，顶部页签条之下全高）
+LINE_TREE_PANEL_WIDTH = 232
+LINE_TREE_HEADER_HEIGHT = 44
+
+# 底部输出面板（OutputPanel：日志/任务，横贯页面区下方）
+OUTPUT_PANEL_HEIGHT = 160
+OUTPUT_PANEL_HEADER_HEIGHT = 34
+
+# DockPanel 统一细条宽度（左右坞共用；LINE_TREE_COLLAPSED_WIDTH 保留别名）
+DOCK_COLLAPSED_WIDTH = 18
+LINE_TREE_COLLAPSED_WIDTH = DOCK_COLLAPSED_WIDTH
+
 # ---------------------------------------------------------------- 字体 / 间距
 FONT_FAMILY = 'Microsoft YaHei'
+# 字号层级（原来 9/10/12 散落在 page_scaffold / separators / project_page 等处
+# 各自字面量，收敛为三级：辅助说明 < 正文/标签 < 分区标题）。
+FONT_SIZE_CAPTION = 9    # 辅助说明、图表轴刻度
+FONT_SIZE_BODY = 10      # 正文与表单标签（全局默认，见 app_qt.py）
+FONT_SIZE_SECTION = 12   # 卡片/分组标题（配 Bold）
 PAGE_SPACING = 15
 PAGE_MARGINS = (20, 20, 20, 20)
 CARD_SPACING = 10
 CARD_MARGINS = (15, 15, 15, 15)
 PANEL_SPACING = 6
 PANEL_MARGINS = (6, 6, 6, 6)
+
+# ---------------------------------------------------------------- 页面骨架（布局统一轮）
+# 侧栏宽度两档：工具栏（方法库/测线列表/标注工具）与表单栏（参数/导入/项目信息）。
+# 历史上 320/340/400/460 各页各值，统一后一律经 CollapsiblePanel 可折叠。
+SIDE_TOOL_WIDTH = 320
+SIDE_FORM_WIDTH = 360
+# 单列表单页（设置/交付）限宽居中列：宽屏下卡片不再全宽拉满留右侧空带
+FORM_COLUMN_MAX_WIDTH = 760
+# 预览区（B-Scan/地图等主视图）最小高度统一档；解释页主画布例外（工作区，更高）
+PREVIEW_MIN_HEIGHT = 300
 
 # ---------------------------------------------------------------- 状态色（style_spec §1.2）
 # 浅色值 + 深色变体（(浅色, 深色) 成对）。深色变体沿用 LOG_COLOR_* 的
@@ -102,6 +130,16 @@ CHART_TRACK_COLORS = ('#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
 CHART_TRACK_DEFAULT = CHART_TRACK_COLORS[0]
 # 解释标注高亮（SPEC §6.6：pick/overlay 琥珀 #fbbf24）
 CHART_OVERLAY_COLOR = '#fbbf24'
+
+# pyqtgraph 轴刻度与网格（图表观感统一单源）
+# 刻度字号比正文 10pt 略小是图表惯例；负值 tickLength 让刻度朝内、
+# 配合 stopAxisAtTick 使轴线止于首尾刻度，不悬空。
+CHART_TICK_FONT_SIZE = FONT_SIZE_CAPTION
+CHART_TICK_LENGTH = -4
+# 网格仅供曲线类视图（AScan / 高程剖面）开启；图像类（B-Scan / 深度切片）
+# 套网格会盖住数据，由 style_plot_item(grid=) 控制。
+CHART_GRID_ALPHA_LIGHT = 0.28
+CHART_GRID_ALPHA_DARK = 0.18    # 深底网格更淡，避免抢过数据
 
 # ---------------------------------------------------------------- 日志文件（style_spec §5.4）
 DEFAULT_LOG_MAX_BYTES = 10 * 1024 * 1024   # 10MB

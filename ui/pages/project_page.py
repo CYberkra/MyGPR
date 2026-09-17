@@ -27,24 +27,23 @@ sync_requested payload：{'line_id', 'paths': {'rtk', 'imu', 'altimeter', 'trace
 import os
 
 from PyQt6.QtCore import Qt, QSettings, QUrl, pyqtSignal
-from PyQt6.QtGui import (QBrush, QColor, QDesktopServices, QFont,
-                         QKeySequence, QShortcut)
+from PyQt6.QtGui import QBrush, QColor, QDesktopServices, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
-    QApplication, QDialog, QHBoxLayout, QHeaderView,
+    QApplication, QDialog, QHBoxLayout, QHeaderView, QSplitter,
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
     BodyLabel, CaptionLabel, CardWidget, DoubleSpinBox, InfoBar,
     InfoBarPosition, LineEdit, MessageBox, PrimaryPushButton, PushButton,
-    ScrollArea, SubtitleLabel, ToolButton,
+    ToolButton,
 )
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants, file_dialogs
-from ui.page_scaffold import (make_card, make_form_row,
-                              style_transparent_scroll)
+from ui.page_scaffold import make_card, make_form_row, make_scroll_column
 from ui.theme_helpers import status_color
-from ui.widgets import BScanView, clear_invalid, mark_invalid, validate_non_empty, make_separator
+from ui.widgets import (BScanView, CollapsiblePanel, clear_invalid,
+                        make_separator, mark_invalid, validate_non_empty)
 from ui.widgets.context_menus import add_action, make_menu
 
 # 导入文件对话框过滤器：通过 DesktopBackendFacade 获取（SPEC §6.3）
@@ -97,6 +96,7 @@ class ProjectPage(QWidget):
         self._artifacts = []        # list[ProjectArtifact]
         self._current_line_id = ''
         self._filling_table = False
+        self._syncing_selection = False  # select_line 程序化选中时抑止回发 line_selected
         self._source_path_cache: dict[str, str | None] = {}  # line_id → 源文件路径（异步回包缓存）
         self._sm = None                     # 共享 SettingsManager（主窗口注入）
 
@@ -104,12 +104,9 @@ class ProjectPage(QWidget):
         root.setContentsMargins(*constants.PAGE_MARGINS)
         root.setSpacing(constants.PAGE_SPACING)
 
-        # 页头：标题居左 + 无项目提示居右，单行紧凑排布，不再独占两行纵向空间
+        # 页头：无项目提示居右（页内大标题已由顶部页签条承担，不再重复）
         header_row = QHBoxLayout()
         header_row.setSpacing(constants.CARD_SPACING)
-        title = SubtitleLabel('项目管理', self)
-        title.setFont(QFont(constants.FONT_FAMILY, 12, QFont.Weight.Bold))
-        header_row.addWidget(title)
         header_row.addStretch(1)
 
         # 无项目提示（SPEC §7：未打开项目时操作按钮禁用并提示）
@@ -130,23 +127,20 @@ class ProjectPage(QWidget):
 
         self._update_action_state()
 
-    # ============================================================ 左列（固定 460px ScrollArea）
-    def _build_left_column(self) -> ScrollArea:
-        scroll = ScrollArea(self)
-        style_transparent_scroll(scroll)
-        scroll.setFixedWidth(460)
-        container = QWidget(scroll)
-        container.setStyleSheet('background-color: transparent;')
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(0, 0, 6, 0)
-        layout.setSpacing(constants.PAGE_SPACING)
+    # ============================================================ 左列（CollapsiblePanel + 固定宽滚动栏）
+    def _build_left_column(self) -> CollapsiblePanel:
+        """左栏：项目信息 / 导入测线 / 传感器同步，可折叠（展开宽 SIDE_FORM_WIDTH）。"""
+        scroll, layout = make_scroll_column(constants.SIDE_FORM_WIDTH)
+        panel = CollapsiblePanel(
+            'left', expand_width=constants.SIDE_FORM_WIDTH,
+            collapse_width=40, parent=self)
+        panel.set_content_widget(scroll)
 
-        layout.addWidget(self._build_info_card(container))
-        layout.addWidget(self._build_import_card(container))
-        layout.addWidget(self._build_sync_card(container))
+        layout.addWidget(self._build_info_card(panel))
+        layout.addWidget(self._build_import_card(panel))
+        layout.addWidget(self._build_sync_card(panel))
         layout.addStretch(1)
-        scroll.setWidget(container)
-        return scroll
+        return panel
 
     def _build_info_card(self, parent) -> CardWidget:
         """卡片1"项目信息"：名称/编号/位置/操作员/设备型号/坐标系/高程基准 只读 + 关闭项目。"""
@@ -264,10 +258,12 @@ class ProjectPage(QWidget):
                                        trailing_stretch=False))
         return edit
 
-    # ============================================================ 右侧（stretch）
+    # ============================================================ 右侧（QSplitter 纵向三卡，stretch）
     def _build_right_column(self) -> QVBoxLayout:
         layout = QVBoxLayout()
         layout.setSpacing(constants.PAGE_SPACING)
+        splitter = QSplitter(Qt.Orientation.Vertical, self)
+        splitter.setChildrenCollapsible(False)
 
         # 卡片"测线列表"
         lines_card, lines_layout = make_card('测线列表')
@@ -284,7 +280,7 @@ class ProjectPage(QWidget):
         header = self._lines_table.horizontalHeader()
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         header.sectionResized.connect(self._save_lines_column_widths)
-        self._fit_table_height(self._lines_table, min_h=96, max_h=200)
+        self._lines_table.setMinimumHeight(120)
         self._lines_table.itemSelectionChanged.connect(
             self._on_line_selection_changed)
         self._lines_table.itemDoubleClicked.connect(
@@ -298,7 +294,7 @@ class ProjectPage(QWidget):
         self._lines_table.customContextMenuRequested.connect(
             self._on_lines_context_menu)
         lines_layout.addWidget(self._lines_table)
-        layout.addWidget(lines_card)
+        splitter.addWidget(lines_card)
 
         # 卡片"处理成果(Artifact)"
         art_card, art_layout = make_card('处理成果(Artifact)')
@@ -318,7 +314,7 @@ class ProjectPage(QWidget):
         art_header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
         self._artifacts_table.setColumnWidth(5, 56)
         art_header.sectionResized.connect(self._save_artifacts_column_widths)
-        self._fit_table_height(self._artifacts_table, min_h=84, max_h=160)
+        self._artifacts_table.setMinimumHeight(120)
         self._artifacts_table.itemDoubleClicked.connect(
             lambda _item: self._emit_artifact_preview())
         self._artifacts_table.setContextMenuPolicy(
@@ -332,32 +328,21 @@ class ProjectPage(QWidget):
         art_btn_row.addStretch(1)
         art_btn_row.addWidget(self.preview_artifact_btn)
         art_layout.addLayout(art_btn_row)
-        layout.addWidget(art_card)
+        splitter.addWidget(art_card)
 
-        # 卡片"数据预览"（占满剩余空间，B-Scan 默认近似方形，保证完整显示）
+        # 卡片"数据预览"（吃掉剩余空间，B-Scan 完整显示）
         preview_card, preview_layout = make_card('数据预览')
         self._bscan = BScanView(preview_card)
-        self._bscan.setMinimumHeight(260)
+        self._bscan.setMinimumHeight(constants.PREVIEW_MIN_HEIGHT)
         preview_layout.addWidget(self._bscan, 1)
-        layout.addWidget(preview_card, 1)
+        splitter.addWidget(preview_card)
+
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 0)
+        splitter.setStretchFactor(2, 1)
+        splitter.setSizes([160, 140, 400])
+        layout.addWidget(splitter, 1)
         return layout
-
-    @staticmethod
-    def _fit_table_height(table, min_h: int, max_h: int) -> None:
-        """按内容行数收缩表格高度，把剩余空间让给下方数据预览。
-
-        行数少时表格不再占满固定高度（避免大面积空白把预览挤出可视区）；
-        行数超过 max_h 时表格内部滚动。
-        """
-        rows = table.rowCount()
-        header_h = table.horizontalHeader().height() or 30
-        if rows <= 0:
-            content_h = header_h + 52          # 空表：表头 + 提示区
-        else:
-            row_h = table.rowHeight(0) or 28
-            content_h = header_h + rows * row_h + 6
-        content_h += table.frameWidth() * 2
-        table.setFixedHeight(max(min_h, min(max_h, content_h)))
 
     # ============================================================ 公共接口（主窗口喂数据）
     def set_project_info(self, summary) -> None:
@@ -403,7 +388,6 @@ class ProjectPage(QWidget):
         finally:
             self._filling_table = False
         self._restore_column_widths(self._lines_table, 'lines')
-        self._fit_table_height(self._lines_table, min_h=96, max_h=200)
         # 不再自动选中首行：由主窗口在 _on_lines_updated 中按需恢复/设置当前测线，
         # 避免刷新时先跳到首行再跳回，导致结果预览和 InfoBar 闪烁错位。
         if not self._lines:
@@ -411,11 +395,20 @@ class ProjectPage(QWidget):
             self.set_artifacts([])
 
     def select_line(self, line_id: str) -> bool:
-        """按 line_id 选中并触发预览；未找到返回 False。"""
+        """按 line_id 选中并触发预览；未找到返回 False。
+
+        程序化选中（测线树/空间页反向同步）不再次回发 line_selected——
+        选中来源已经走过完整的选择链路，回发会重复预览刷新。
+        """
         line_id = str(line_id or '')
         for idx, line in enumerate(self._lines):
             if str(getattr(line, 'line_id', '') or '') == line_id:
-                self._lines_table.selectRow(idx)
+                self._syncing_selection = True
+                try:
+                    self._lines_table.selectRow(idx)
+                finally:
+                    self._syncing_selection = False
+                self._current_line_id = line_id
                 return True
         return False
 
@@ -431,7 +424,6 @@ class ProjectPage(QWidget):
             placeholder.setForeground(QBrush(QColor(status_color('disabled'))))
             self._artifacts_table.setItem(0, 0, placeholder)
             self._artifacts_table.setSpan(0, 0, 1, 6)
-            self._fit_table_height(self._artifacts_table, min_h=84, max_h=160)
             return
         for artifact in self._artifacts:
             row = self._artifacts_table.rowCount()
@@ -457,7 +449,6 @@ class ProjectPage(QWidget):
             for col, text in enumerate(values):
                 self._artifacts_table.setItem(row, col, QTableWidgetItem(text))
         self._restore_column_widths(self._artifacts_table, 'artifacts')
-        self._fit_table_height(self._artifacts_table, min_h=84, max_h=160)
 
     def set_preflight_result(self, text: str, ok: bool) -> None:
         """预检结果区：ok 绿色 / 失败红色。"""
@@ -626,6 +617,9 @@ class ProjectPage(QWidget):
     def _on_line_selection_changed(self) -> None:
         if self._filling_table:
             self._current_line_id = ''
+            return
+        if self._syncing_selection:
+            # 程序化选中（select_line）：不回发，当前线由 select_line 维护
             return
         row = self._lines_table.currentRow()
         if row < 0 or row >= len(self._lines):

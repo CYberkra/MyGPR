@@ -22,9 +22,8 @@ from qfluentwidgets import (
 
 from ui import constants, file_dialogs
 from ui.page_scaffold import (make_card, make_form_row,
-                              style_transparent_scroll)
+                              style_transparent_scroll, wrap_centered)
 from ui.theme_helpers import status_color
-from ui.widgets import make_page_title
 
 _FALLBACK_VERSION = '0.9.38'
 _AUTHOR = '邸建豪 袁林 詹萍'
@@ -58,15 +57,13 @@ class SettingsPage(ScrollArea):
         root.setContentsMargins(*constants.PAGE_MARGINS)
         root.setSpacing(constants.PAGE_SPACING)
 
-        root.addWidget(make_page_title('系统设置'))
-
         root.addWidget(self._build_general_card(container))
         root.addWidget(self._build_processing_card(container))
         root.addWidget(self._build_storage_card(container))
         root.addWidget(self._build_about_card(container))
         root.addStretch(1)
 
-        self.setWidget(container)
+        self.setWidget(wrap_centered(container, constants.FORM_COLUMN_MAX_WIDTH))
 
     # ============================================================ 卡片构建
     def _build_general_card(self, parent):

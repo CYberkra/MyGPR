@@ -16,7 +16,7 @@ from qfluentwidgets import CaptionLabel, ProgressBar, PushButton, ScrollArea
 
 from ui.motion import animate_badge_color, animate_progress
 from ui.page_scaffold import style_transparent_scroll
-from ui.theme_helpers import status_color
+from ui.theme_helpers import BADGE_QSS, status_color
 
 _STATUS_TEXT = {
     'queued': '排队',
@@ -37,10 +37,6 @@ _STATUS_COLOR_KEY = {
 
 _ACTIVE_STATUSES = ('queued', 'running')
 
-_BADGE_QSS = ('QLabel { padding: 2px 10px; border-radius: 10px; '
-              'font-size: 12px; font-weight: bold; '
-              'color: #ffffff; background-color: %s; }')
-
 _EMPTY_LABEL_QSS = 'color: %s; font-size: 13px;'
 
 
@@ -51,13 +47,13 @@ def _status_badge_color(status: str) -> str:
 
 def _make_status_badge(status: str) -> QLabel:
     badge = QLabel(_STATUS_TEXT.get(status, status))
-    badge.setStyleSheet(_BADGE_QSS % _status_badge_color(status))
+    badge.setStyleSheet(BADGE_QSS % _status_badge_color(status))
     return badge
 
 
 def _restyle_status_badge(badge: QLabel, status: str) -> None:
     """不换文字只按状态重刷徽章配色（主题切换路径用，无渐变动画）。"""
-    badge.setStyleSheet(_BADGE_QSS % _status_badge_color(status))
+    badge.setStyleSheet(BADGE_QSS % _status_badge_color(status))
 
 
 class JobTable(QWidget):
@@ -173,7 +169,7 @@ class JobTable(QWidget):
             match = re.search(r'background-color:\s*(#[0-9a-fA-F]{6})',
                               badge.styleSheet())
             start_hex = match.group(1) if match else _status_badge_color(status)
-            animate_badge_color(badge, _BADGE_QSS, start_hex, end_hex)
+            animate_badge_color(badge, BADGE_QSS, start_hex, end_hex)
         item = self._table.item(row, self._COL_STATUS)
         if item is not None:
             item.setData(Qt.ItemDataRole.UserRole, status)
@@ -306,7 +302,7 @@ class MiniJobList(QWidget):
         badge = entry['badge']
         end_hex = _status_badge_color(status)
         badge.setText(_STATUS_TEXT.get(status, status))
-        animate_badge_color(badge, _BADGE_QSS, old_hex, end_hex)
+        animate_badge_color(badge, BADGE_QSS, old_hex, end_hex)
         entry['cancel'].setEnabled(status in _ACTIVE_STATUSES)
         self._refresh_visibility()
 

@@ -2,12 +2,15 @@
 """JobHub — 任务事件统一分发 的子接线器。
 
 域归属（PageCoordinator 拆分的三段之一）：JobBridge 三个任务信号
-（progress/status/completed）对 JobTable / LogPanel.mini_jobs /
+（progress/status/completed）对 JobTable / OutputPanel.mini_jobs /
 HomePage.mini_jobs 三视图的同构扇出，以及任务取消、终态清理（prune）。
 
 三个视图实现同一协议（upsert_job/set_status/update_progress/
 remove_inactive），本类是唯一分发点；运行态（已知任务、导入/空间成果
 任务集合）的本类是唯一所有者。
+
+历史语义：任务中心页 JobTable 保留终态行（"清理已完成"手动清理）；
+两个迷你视图只显示活动任务，终态即移除。
 
 本模块不得创建 QWidget（与 controllers 同一纪律）。
 """
@@ -25,15 +28,15 @@ class JobHub:
 
     # ============================================================ 信号注册
     def connect_all(self) -> None:
-        """任务域接线：任务页 / 日志面板 / 主页迷你任务列表。"""
+        """任务域接线：任务页 / 输出面板 / 主页迷你任务列表。"""
         co = self._co
         jobs = co.page('jobsInterface')
         jobs.cancel_requested.connect(self.on_cancel)
         jobs.prune_requested.connect(self.on_prune_jobs)
 
-        log_panel = co.log_panel
-        if log_panel is not None:
-            log_panel.cancel_job_requested.connect(self.on_cancel)
+        output_panel = co.output_panel
+        if output_panel is not None:
+            output_panel.cancel_job_requested.connect(self.on_cancel)
 
         home_jobs = co.page('homeInterface').mini_jobs()
         if home_jobs is not None:
@@ -41,12 +44,25 @@ class JobHub:
 
     # ============================================================ 视图扇出
     def _views(self) -> tuple:
-        """(JobTable, LogPanel.mini_jobs, HomePage.mini_jobs)（None 已过滤）。"""
+        """(JobTable, OutputPanel.mini_jobs, HomePage.mini_jobs)（None 已过滤）。"""
         co = self._co
         views = [co.page('jobsInterface').job_table()]
-        log_panel = co.log_panel
-        if log_panel is not None:
-            views.append(log_panel.mini_jobs())
+        output_panel = co.output_panel
+        if output_panel is not None:
+            views.append(output_panel.mini_jobs())
+        views.append(co.page('homeInterface').mini_jobs())
+        return tuple(v for v in views if v is not None)
+
+    def _mini_views(self) -> tuple:
+        """只显示活动任务的迷你视图（OutputPanel + 主页；None 已过滤）。
+
+        终态自动移除只扇出到这里——任务中心页 JobTable 保留历史。
+        """
+        co = self._co
+        views = []
+        output_panel = co.output_panel
+        if output_panel is not None:
+            views.append(output_panel.mini_jobs())
         views.append(co.page('homeInterface').mini_jobs())
         return tuple(v for v in views if v is not None)
 
@@ -68,7 +84,7 @@ class JobHub:
         for view in self._views():
             view.set_status(job_id, str(status))
         if str(status) in ('completed', 'failed', 'cancelled'):
-            for view in self._views():
+            for view in self._mini_views():
                 view.remove_inactive()
 
     def on_progress(self, job_id: str, completed: int, total: int,

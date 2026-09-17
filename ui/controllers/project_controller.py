@@ -51,6 +51,11 @@ class ProjectController(QObject):
         # 预览代数：每次发起新预览自增，worker 回包时若代数已过期则丢弃，
         # 防止快速切换测线时旧预览覆盖新预览。
         self._preview_generation = 0
+        # 成果预览代数：与测线/深度预览独立计数（不同预览域互不失效）。
+        # 共享计数会让处理链运行完成后的自动成果预览被并发的测线预览
+        # （refresh_lines → 表格重选 → on_line_selected）作废，预览区
+        # 停留在"暂无数据"。
+        self._artifact_preview_generation = 0
         # 深度切片预览代数：与数据/成果预览独立计数（不同预览域互不失效）。
         self._depth_preview_generation = 0
         # 当前预览中的成果 id（删除该成果时需清空各页预览）
@@ -98,6 +103,7 @@ class ProjectController(QObject):
         # 新建项目同样切换项目上下文，使旧项目在途预览回包过期。
         self._depth_preview_generation += 1
         self._preview_generation += 1
+        self._artifact_preview_generation += 1
         self._set_busy(True)
         run_command(
             _CreateProjectCommand(self, root, name, dict(meta or {})),
@@ -112,6 +118,7 @@ class ProjectController(QObject):
         # 回包代数与新项目相同，不推进则门卫会放行旧 payload）。
         self._depth_preview_generation += 1
         self._preview_generation += 1
+        self._artifact_preview_generation += 1
         self._set_busy(True)
         run_command(
             _OpenProjectCommand(self, root),
@@ -128,6 +135,7 @@ class ProjectController(QObject):
         # 关闭前使在途预览回包过期，防止旧项目 payload 渲染进后续视图。
         self._depth_preview_generation += 1
         self._preview_generation += 1
+        self._artifact_preview_generation += 1
         self._set_busy(True)
         run_command(
             _CloseProjectCommand(self, project_id),
@@ -137,6 +145,14 @@ class ProjectController(QObject):
     def invalidate_depth_previews(self) -> None:
         """使在途深度预览回包过期（项目关闭/测线变更等场景调用）。"""
         self._depth_preview_generation += 1
+
+    def invalidate_artifact_previews(self) -> None:
+        """使在途成果预览回包过期（切换测线/项目上下文等场景调用）。
+
+        切换测线后在飞的旧测线成果预览不得渲染进新测线的"处理结果"
+        分段；同测线重复选中（测线表重建重选）则不得作废在飞预览。
+        """
+        self._artifact_preview_generation += 1
 
     @property
     def depth_preview_generation(self) -> int:
@@ -228,10 +244,11 @@ class ProjectController(QObject):
         line_id = str(line_id)
         artifact_id = str(artifact_id)
         self._current_preview_artifact_id = artifact_id
-        self._preview_generation += 1
+        self._artifact_preview_generation += 1
 
         run_command(
-            _PreviewArtifactCommand(self, project_id, line_id, artifact_id, self._preview_generation),
+            _PreviewArtifactCommand(self, project_id, line_id, artifact_id,
+                                    self._artifact_preview_generation),
             name="mygpr-artifact-preview",
         )
 
@@ -487,6 +504,7 @@ class _CreateProjectCommand:
             # 与 _OpenProjectCommand 同理：项目上下文切换时刻推进代数。
             c._depth_preview_generation += 1
             c._preview_generation += 1
+            c._artifact_preview_generation += 1
             c._current = summary
             c.log_message.emit(f"项目已创建：{summary.name}")
             c.project_opened.emit(summary)
@@ -526,6 +544,7 @@ class _OpenProjectCommand:
             # 不在此推进则门卫会放行旧项目 payload。
             c._depth_preview_generation += 1
             c._preview_generation += 1
+            c._artifact_preview_generation += 1
             c._current = summary
             c.log_message.emit(f"项目已打开：{summary.name}")
             c.project_opened.emit(summary)
@@ -558,6 +577,7 @@ class _CloseProjectCommand:
             # 项目上下文清除时刻再次推进，确保 in-flight 回包全部过期。
             c._depth_preview_generation += 1
             c._preview_generation += 1
+            c._artifact_preview_generation += 1
             c._current = None
             c.log_message.emit("项目已关闭")
             c.project_closed.emit()
@@ -714,7 +734,7 @@ class _PreviewArtifactCommand:
             _LOGGER.exception("成果预览失败")
             c.log_message.emit(f"成果预览失败：{friendly_error_message(exc)}")
         else:
-            if c._preview_generation != self._generation:
+            if c._artifact_preview_generation != self._generation:
                 return
             c.artifact_preview_ready.emit(self._artifact_id, bundle)
 

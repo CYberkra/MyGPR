@@ -10,7 +10,7 @@
 4. B-scan：显示模式切换才重置视野，新数据保持用户缩放；十字读数文本
    30ms 节流（首次即时，连续移动合并刷新）；
 5. 地图：同指纹轨迹转换走缓存（切底图往返不重复做 GCJ-02 逐点转换）；
-6. LogPanel：日志块数上限 5000，超出丢弃最旧；
+6. OutputPanel：日志块数上限 5000，超出丢弃最旧；
 7. 深度切片：ColorBarItem 色标存在且 levels 与值域同步，主题切换不炸。
 
 截图证据输出到 output/ux_polish_verify/（该目录已被 .gitignore 忽略）。
@@ -364,9 +364,9 @@ def verify_map_cache() -> None:
 
 # ---------------------------------------------------------------- 6. 日志上界
 def verify_log_cap() -> None:
-    from ui.widgets.log_panel import LogPanel
+    from ui.widgets.output_panel import OutputPanel
 
-    panel = LogPanel()
+    panel = OutputPanel()
     panel.resize(400, 500)
     panel.show()
     _settle()
@@ -378,6 +378,7 @@ def verify_log_cap() -> None:
     blocks = panel._log_edit.document().blockCount()
     assert blocks <= 5000, f'超出上限后块数应被截断, got {blocks}'
     assert blocks > 4000, '截断不应误伤正常日志'
+    assert len(panel._entries) == 5000, '结构化存储同样 capped 到 5000'
     panel.close()
     print('log cap PASSED')
 

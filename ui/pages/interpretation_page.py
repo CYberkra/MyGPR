@@ -8,10 +8,12 @@
 - 主区左（stretch）：剖面标注卡片 = BScanView（pick 模式，点击追加点；
   overlay #fbbf24）。pick/overlay 均为原始数据坐标（BScanView 内部完成
   降采样坐标换算），与后端编辑会话坐标系一致。
-- 主区右（固定 320px）：
-    标注点列表卡片 = 表格(#/道/采样点/时间ns/估计深度m) + 删除选中/清空；
-    深度换算卡片 = 介电常数 εr（默认 9.0），深度 = ½·c·t/√εr。
-- 底部信息条：点数 / 会话状态。
+- 主区右（可折叠侧栏，展开 SIDE_TOOL_WIDTH px）：
+    标注点列表卡片 = 表格(#/道/采样点/时间ns/估计深度m) + 点数计数 +
+    删除选中/清空（计数与按钮同行：计数居左、按钮居右）；
+    深度换算卡片 = 介电常数 εr（默认 9.0），深度 = ½·c·t/√εr；
+    速度分析卡片 = 绕射双曲线拟合（Phase 2.1）。
+- 底部信息条（横条卡片：card_title「标注信息」+ 点数 / 会话状态）。
 
 页面纯展示 + 发信号：内部维护当前点列，pick 点击追加并发 points_changed；
 删除/清空同样通过 points_changed → 控制器 replace_points 写回会话。
@@ -32,9 +34,10 @@ from qfluentwidgets import (
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants
-from ui.page_scaffold import card_title, make_card, refill_combo
+from ui.page_scaffold import (card_title, make_card, make_scroll_column,
+                              refill_combo)
 from ui.theme_helpers import status_color
-from ui.widgets import BScanView, make_page_title, make_separator
+from ui.widgets import BScanView, CollapsiblePanel, make_separator
 
 _OVERLAY_COLOR = constants.CHART_OVERLAY_COLOR   # 标注散点颜色（SPEC §6.6）
 _C_M_PER_NS = 0.29979        # 真空光速 c (m/ns)
@@ -70,7 +73,6 @@ class InterpretationPage(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(*constants.PAGE_MARGINS)
         root.setSpacing(constants.PAGE_SPACING)
-        root.addWidget(make_page_title('界面解释标注'))
         root.addWidget(self._build_tool_card())
 
         body = QHBoxLayout()
@@ -152,26 +154,15 @@ class InterpretationPage(QWidget):
         return card
 
     def _build_side_column(self) -> QWidget:
-        """右列（固定 320px）：标注点列表 + 深度换算。"""
-        column = QWidget(self)
-        layout = QVBoxLayout(column)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(constants.PAGE_SPACING)
-        column.setFixedWidth(320)
+        """右栏（展开 SIDE_TOOL_WIDTH px，可折叠）：标注点列表 + 深度换算 + 速度分析。"""
+        scroll, layout = make_scroll_column(constants.SIDE_TOOL_WIDTH)
+        panel = CollapsiblePanel(
+            'right', expand_width=constants.SIDE_TOOL_WIDTH, collapse_width=40,
+            parent=self)
+        panel.set_content_widget(scroll)
 
         # ---------------- 标注点列表
-        points_card = CardWidget(column)
-        points_layout = QVBoxLayout(points_card)
-        points_layout.setContentsMargins(*constants.CARD_MARGINS)
-        points_layout.setSpacing(constants.CARD_SPACING)
-        header_row = QHBoxLayout()
-        header_row.addWidget(card_title('标注点列表'))
-        header_row.addStretch(1)
-        self._points_count_label = CaptionLabel('0 个点', points_card)
-        self._points_count_label.setStyleSheet(
-            'color: %s; font-size: 11px;' % status_color('disabled'))
-        header_row.addWidget(self._points_count_label)
-        points_layout.addLayout(header_row)
+        points_card, points_layout = make_card('标注点列表')
 
         self._points_table = QTableWidget(0, 5, points_card)
         self._points_table.setHorizontalHeaderLabels(
@@ -188,19 +179,25 @@ class InterpretationPage(QWidget):
         self._points_table.setMinimumHeight(180)
         points_layout.addWidget(self._points_table, 1)
 
+        # 点数计数与删除/清空同行：计数居左，按钮居右
         btn_row = QHBoxLayout()
         btn_row.setSpacing(constants.CARD_SPACING)
+        self._points_count_label = CaptionLabel('0 个点', points_card)
+        self._points_count_label.setStyleSheet(
+            'color: %s; font-size: 11px;' % status_color('disabled'))
+        btn_row.addWidget(self._points_count_label)
+        btn_row.addStretch(1)
         self._remove_point_btn = PushButton('删除选中', points_card, FIF.DELETE)
         self._remove_point_btn.setToolTip('删除列表中选中的标注点')
         self._clear_points_btn = PushButton('清空', points_card)
         self._clear_points_btn.setToolTip('清空全部标注点')
-        btn_row.addWidget(self._remove_point_btn, 1)
-        btn_row.addWidget(self._clear_points_btn, 1)
+        btn_row.addWidget(self._remove_point_btn)
+        btn_row.addWidget(self._clear_points_btn)
         points_layout.addLayout(btn_row)
         layout.addWidget(points_card, 1)
 
         # ---------------- 深度换算
-        depth_card, depth_layout = make_card('深度换算', parent=column)
+        depth_card, depth_layout = make_card('深度换算')
         diel_row = QHBoxLayout()
         diel_row.setSpacing(constants.CARD_SPACING)
         diel_label = CaptionLabel('介电常数 εr:', depth_card)
@@ -224,7 +221,7 @@ class InterpretationPage(QWidget):
         layout.addWidget(depth_card)
 
         # ---------------- 速度分析（Phase 2.1）
-        velocity_card, velocity_layout = make_card('速度分析', parent=column)
+        velocity_card, velocity_layout = make_card('速度分析')
         self._velocity_btn = PushButton('拟合速度模型', velocity_card)
         self._velocity_btn.setToolTip(
             '用当前标注点拟合绕射双曲线：t² = A·x² + B·x + C ⇒ v = 2/√A\n'
@@ -235,14 +232,16 @@ class InterpretationPage(QWidget):
         self._velocity_result_label.setWordWrap(True)
         velocity_layout.addWidget(self._velocity_result_label)
         layout.addWidget(velocity_card)
-        return column
+        layout.addStretch(1)
+        return panel
 
     def _build_info_bar(self) -> CardWidget:
-        """底部信息条：点数 / 会话状态。"""
+        """底部信息条（横条卡片）：标题 + 点数 / 会话状态。"""
         card = CardWidget(self)
         layout = QHBoxLayout(card)
         layout.setContentsMargins(*constants.CARD_MARGINS)
         layout.setSpacing(constants.CARD_SPACING)
+        layout.addWidget(card_title('标注信息'))
         self._info_label = CaptionLabel('标注点数: 0 | 会话状态: 未打开会话',
                                         card)
         layout.addWidget(self._info_label, 1)

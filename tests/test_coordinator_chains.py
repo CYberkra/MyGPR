@@ -94,7 +94,7 @@ class _StubBridge:
 
 def _make_window(*, bridge=None, with_views=True):
     jobs_view = _StubView()
-    log_view = _StubView()
+    panel_view = _StubView()
     home_view = _StubView()
 
     jobs_page = _StubPage(
@@ -103,8 +103,8 @@ def _make_window(*, bridge=None, with_views=True):
     home_page = _StubPage(
         mini_jobs=lambda: home_view if with_views else None,
     )
-    log_panel = _StubPage(
-        mini_jobs=lambda: log_view if with_views else None,
+    output_panel = _StubPage(
+        mini_jobs=lambda: panel_view if with_views else None,
         cancel_job_requested=_FakeSignal(),
     )
     pages = {
@@ -128,7 +128,7 @@ def _make_window(*, bridge=None, with_views=True):
             self.interpretation_controller = None
             self.delivery_controller = None
             self.backend_controller = None
-            self.log_panel = log_panel
+            self.output_panel = output_panel
             self.settings = None
             self._pages = pages
             self._bridge = bridge
@@ -164,7 +164,7 @@ def _make_window(*, bridge=None, with_views=True):
             return self._bridge
 
     window = _StubWindow()
-    return window, pages, (jobs_view, log_view, home_view)
+    return window, pages, (jobs_view, panel_view, home_view)
 
 
 # ============================================================ JobHub 同构扇出
@@ -181,14 +181,17 @@ class TestJobHubFanOut:
             assert ('upsert_job', 'JOB-9', '导入测线 L01') in view.calls
             assert ('set_status', 'JOB-9', 'running') in view.calls
 
-    def test_terminal_status_prunes_inactive_on_all_views(self):
+    def test_terminal_status_prunes_inactive_on_mini_views_only(self):
+        """终态自动清理只扇出到迷你视图；任务中心页 JobTable 保留历史行。"""
         window, _pages, views = _make_window()
         hub = PageCoordinator(window).jobs
+        jobs_view, panel_view, home_view = views
 
         hub.on_status('JOB-9', 'completed')
 
-        for view in views:
-            assert ('remove_inactive',) in view.calls
+        assert ('remove_inactive',) not in jobs_view.calls
+        assert ('remove_inactive',) in panel_view.calls
+        assert ('remove_inactive',) in home_view.calls
 
     def test_non_terminal_status_does_not_prune(self):
         window, _pages, views = _make_window()

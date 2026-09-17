@@ -55,4 +55,5 @@ class AScanView(GraphicsViewBase, QWidget):
         self._dark = bool(dark)
         self._plot.setBackground('k' if dark else 'w')
         self._curve.setPen(pg.mkPen('w' if dark else 'b', width=2))
-        style_plot_item(self._plot_item, dark)
+        # AScan 是单道波形曲线，淡网格有助于读数（图像类视图不适用）
+        style_plot_item(self._plot_item, dark, grid=True)

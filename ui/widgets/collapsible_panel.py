@@ -5,8 +5,8 @@
 折叠按钮为沿面板边缘的纵向长条（chevron 图标 + 主题色淡底），
 展开/折叠时都容易发现；折叠后按钮铺满整个窄条。
 
-与全局 LogPanel 的折叠动画风格保持一致：
-- QPropertyAnimation(maximumWidth) 220ms OutCubic
+与底部 OutputPanel 的收展动画风格保持一致：
+- QPropertyAnimation 220ms OutCubic
 - 主题色淡底 + hover 加深
 """
 

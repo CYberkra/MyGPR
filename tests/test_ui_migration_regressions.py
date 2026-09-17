@@ -64,7 +64,7 @@ def test_coordinator_line_state_attribute_exists() -> None:
         interpretation_controller = None
         delivery_controller = None
         settings = None
-        log_panel = None
+        output_panel = None
 
         def _page(self, name):
             return None

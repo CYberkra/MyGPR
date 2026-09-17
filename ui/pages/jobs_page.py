@@ -1,17 +1,18 @@
 # -*- coding: utf-8 -*-
 """JobsPage — 任务中心（SPEC §6.8）。
 
-标题 '任务中心'；顶部按钮行 PushButton('清理已完成') + JobTable(stretch)。
+卡内：按钮行 PushButton('清理已完成') + JobTable(stretch)。
 页面为 JobTable 的薄包装：暴露 job_table() 访问器，
 转发 cancel_requested，并在清理时发 prune_requested。
 """
 
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
-from qfluentwidgets import CardWidget, PushButton
+from qfluentwidgets import PushButton
 
 from ui import constants
-from ui.widgets import JobTable, make_page_title
+from ui.page_scaffold import make_card
+from ui.widgets import JobTable
 
 
 class JobsPage(QWidget):
@@ -30,12 +31,8 @@ class JobsPage(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(*constants.PAGE_MARGINS)
         root.setSpacing(constants.PAGE_SPACING)
-        root.addWidget(make_page_title('任务中心'))
 
-        card = CardWidget(self)
-        card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(*constants.CARD_MARGINS)
-        card_layout.setSpacing(constants.CARD_SPACING)
+        card, card_layout = make_card('任务记录', parent=self)
 
         button_row = QHBoxLayout()
         button_row.setSpacing(constants.CARD_SPACING)

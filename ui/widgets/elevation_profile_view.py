@@ -60,7 +60,8 @@ class ElevationProfileView(pg.PlotWidget):
         """深色 bg 'k'/文字 'w'；浅色 bg 'w'/文字 'k'；轴 pen/textPen/标签/图例同步。"""
         self._dark = bool(dark)
         self.setBackground('k' if dark else 'w')
-        fg = style_plot_item(self._plot_item, dark)
+        # 高程剖面是折线曲线，淡网格有助于读数（图像类视图不适用）
+        fg = style_plot_item(self._plot_item, dark, grid=True)
         # 已有图例的条目文字颜色不随主题更新，逐条同步
         legend = self._plot_item.legend
         if legend is not None:

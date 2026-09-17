@@ -4,6 +4,7 @@
 
 把 8 个页面里逐字复制的小工厂收敛到这一处纯 Qt 帮助函数（无业务逻辑）：
 ``make_card``/``card_title``（原 6 份 _create_card/_make_card）、
+``make_segment_card``（子标签卡片：标题与 SlimSegment 同行 header）、
 ``make_scroll_column``（原 2 份 + 散落的透明 QScrollArea QSS）、
 ``make_form_row``（标签 minWidth=100 + 控件 + stretch 约 30 处）、
 ``refill_combo``（下拉重建-保持选择，userData 驱动）、
@@ -21,8 +22,8 @@ from qfluentwidgets import CaptionLabel, CardWidget, ScrollArea, SubtitleLabel
 from ui import constants
 
 __all__ = [
-    'make_card', 'card_title', 'style_transparent_scroll',
-    'make_scroll_column', 'make_form_row',
+    'make_card', 'make_segment_card', 'card_title', 'style_transparent_scroll',
+    'make_scroll_column', 'wrap_centered', 'make_form_row',
     'refill_combo', 'rebuild_check_list', 'PanelStateMixin',
 ]
 
@@ -35,7 +36,8 @@ def card_title(text: str) -> SubtitleLabel:
     私有 ``_card_title``。
     """
     label = SubtitleLabel(text)
-    label.setFont(QFont(constants.FONT_FAMILY, 10, QFont.Weight.Bold))
+    label.setFont(QFont(constants.FONT_FAMILY, constants.FONT_SIZE_BODY,
+            QFont.Weight.Bold))
     return label
 
 
@@ -52,6 +54,28 @@ def make_card(title: str, *, parent=None) -> tuple:
     layout.setContentsMargins(*constants.CARD_MARGINS)
     layout.setSpacing(constants.CARD_SPACING)
     layout.addWidget(card_title(title))
+    return card, layout
+
+
+def make_segment_card(title: str, segment: QWidget, *, parent=None) -> tuple:
+    """子标签卡片范式：单行 header（标题居左 + 瘦页签居右）+ 内容区。
+
+    与 :func:`make_card` 同构，返回 ``(card, layout)``；差别是标题与
+    ``segment``（SlimSegment）挤进同一行 header（Win11 设置页惯例），
+    不再「标题一行 + 页签一行」双 header 浪费中栏垂直空间。
+
+    ``segment`` 可先以页面为父创建，加入卡片布局时 Qt 自动重挂父。
+    用于 processing「数据预览」、spatial「空间视图」两卡。
+    """
+    card = CardWidget(parent)
+    layout = QVBoxLayout(card)
+    layout.setContentsMargins(*constants.CARD_MARGINS)
+    layout.setSpacing(constants.CARD_SPACING)
+    header = QHBoxLayout()
+    header.addWidget(card_title(title), 0, Qt.AlignmentFlag.AlignVCenter)
+    header.addStretch(1)
+    header.addWidget(segment, 0, Qt.AlignmentFlag.AlignVCenter)
+    layout.addLayout(header)
     return card, layout
 
 
@@ -93,6 +117,25 @@ def make_scroll_column(width: int, *, parent=None,
     layout.setSpacing(constants.PAGE_SPACING)
     scroll.setWidget(content)
     return scroll, layout
+
+
+def wrap_centered(content: QWidget,
+                  max_width: int = constants.FORM_COLUMN_MAX_WIDTH) -> QWidget:
+    """限宽居中列：把内容 widget 包一层，宽屏下居中且不超过 ``max_width``。
+
+    用于设置/交付等单列卡片页——卡片全宽拉满时表单左对齐、右侧留出
+    大片空白；限宽居中后各窗宽下阅读节奏一致（网页设置页惯例）。
+    """
+    content.setMaximumWidth(max_width)
+    wrapper = QWidget()
+    wrapper.setStyleSheet('background-color: transparent;')
+    row = QHBoxLayout(wrapper)
+    row.setContentsMargins(0, 0, 0, 0)
+    row.setSpacing(0)
+    row.addStretch(1)
+    row.addWidget(content)
+    row.addStretch(1)
+    return wrapper
 
 
 # ---------------------------------------------------------------- 表单行

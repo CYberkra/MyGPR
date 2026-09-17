@@ -27,9 +27,9 @@ from qfluentwidgets import (
 
 from ui import constants, file_dialogs
 from ui.page_scaffold import (make_card, make_form_row, rebuild_check_list,
-                              style_transparent_scroll)
+                              style_transparent_scroll, wrap_centered)
 from ui.theme_helpers import status_color
-from ui.widgets import (clear_invalid, make_page_title, make_separator, mark_invalid,
+from ui.widgets import (clear_invalid, make_separator, mark_invalid,
                         validate_non_empty)
 
 # 报告结果字段（鸭子类型：dict 键或对象属性）
@@ -84,12 +84,10 @@ class DeliveryPage(QWidget):
         root = QVBoxLayout(content)
         root.setContentsMargins(*constants.PAGE_MARGINS)
         root.setSpacing(constants.PAGE_SPACING)
-        scroll.setWidget(content)
+        scroll.setWidget(wrap_centered(content, constants.FORM_COLUMN_MAX_WIDTH))
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(scroll)
-
-        root.addWidget(make_page_title('成果与交付'))
 
         # ---------------- 卡片1：空间成果
         spatial_card, spatial_layout = make_card('空间成果', parent=self)
@@ -103,7 +101,6 @@ class DeliveryPage(QWidget):
         spatial_layout.addWidget(lines_label)
         self._lines_list = QListWidget(spatial_card)
         self._lines_list.setMinimumHeight(120)
-        self._lines_list.setMaximumHeight(180)
         spatial_layout.addWidget(self._lines_list)
         # 空态引导：无测线时列表藏起、提示占位
         self._lines_empty_hint = CaptionLabel(

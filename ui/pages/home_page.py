@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """HomePage — 主页工作台（SPEC §6.2）。
 
 纯展示 + 发信号：不直接调 controller/backend。
@@ -10,7 +11,7 @@
 import_line_requested / goto_page(str)。
 
 布局（v0.9.38 重设计）：
-- 左栏固定 ~400px：当前项目（含快速操作按钮组）+ 最近任务
+- 左栏固定 SIDE_TOOL_WIDTH（320px，布局统一轮档位）：当前项目（含快速操作按钮组）+ 最近任务
 - 右栏 stretch：数据预览（B-Scan 默认近似方形显示，符合雷达剖面习惯）
 """
 
@@ -25,7 +26,7 @@ from qfluentwidgets import FluentIcon as FIF
 from ui import constants
 from ui.page_scaffold import make_card, style_transparent_scroll
 from ui.theme_helpers import badge_colors, status_color
-from ui.widgets import BScanView, MiniJobList, make_page_title, make_separator
+from ui.widgets import BScanView, MiniJobList, make_separator
 
 _BADGE_QSS = ('QLabel { padding: 2px 10px; border-radius: 10px; '
               'font-size: 12px; font-weight: bold; '
@@ -59,9 +60,6 @@ class HomePage(ScrollArea):
         root.setContentsMargins(*constants.PAGE_MARGINS)
         root.setSpacing(constants.PAGE_SPACING)
 
-        # 页面大标题（SPEC §1：SubtitleLabel 12pt Bold 居中，五页统一）
-        root.addWidget(make_page_title('MyGPR 探地雷达数据处理工作台'))
-
         # 主体两栏：左栏（项目+任务）/ 右栏（预览）
         body = QHBoxLayout()
         body.setSpacing(constants.PAGE_SPACING)
@@ -73,7 +71,7 @@ class HomePage(ScrollArea):
         left.addWidget(self._build_jobs_card(container), 1)
         left_widget = QWidget(container)
         left_widget.setLayout(left)
-        left_widget.setFixedWidth(400)
+        left_widget.setFixedWidth(constants.SIDE_TOOL_WIDTH)
         left_widget.setStyleSheet('background-color: transparent;')
         body.addWidget(left_widget, 0)
 
@@ -166,7 +164,7 @@ class HomePage(ScrollArea):
         """"数据预览"卡：BScanView（默认近似方形）+ 色标 ComboBox。"""
         card, layout = make_card('数据预览')
         self._bscan = BScanView(card)
-        self._bscan.setMinimumHeight(320)
+        self._bscan.setMinimumHeight(constants.PREVIEW_MIN_HEIGHT)
         layout.addWidget(self._bscan, 1)
 
         row = QHBoxLayout()

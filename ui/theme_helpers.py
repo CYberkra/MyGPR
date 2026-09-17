@@ -171,6 +171,18 @@ def badge_colors(key: str) -> tuple:
     return dark if isDarkTheme() else light
 
 
+# 药丸徽章 QSS 模板（任务中心状态徽章与方法浏览器标签徽章原各抄一份，
+# 逐字相同，收敛到此处单源）。%s 占位为底色，文字恒为白（深底彩底方案）。
+BADGE_QSS = ('QLabel { padding: 2px 10px; border-radius: 10px; '
+             'font-size: 12px; font-weight: bold; '
+             'color: #ffffff; background-color: %s; }')
+
+
+def badge_qss(bg: str) -> str:
+    """药丸徽章样式（白字 + 指定底色）。"""
+    return BADGE_QSS % bg
+
+
 def native_views_qss(dark: bool) -> str:
     """原生控件（表格/列表/树/表头）随主题换肤的应用级 QSS。
 
@@ -218,6 +230,10 @@ def apply_theme(theme: str) -> None:
     setTheme(Theme.DARK if dark else Theme.LIGHT)
     pg.setConfigOption('background', 'k' if dark else 'w')
     pg.setConfigOption('foreground', 'w' if dark else 'k')
+    # 抗锯齿（pyqtgraph 默认关闭）：曲线与文字边缘明显更平滑。该 hint 作用于
+    # GraphicsView 的矢量绘制，B-Scan 等 ImageItem 走图像绘制路径不受影响，
+    # 但多 GB 真实数据下的实际帧率仍需在 Windows 目标机验收。
+    pg.setConfigOption('antialias', True)
     # 原生控件（表格/列表/下拉框等）显式跟随应用主题，不受系统深浅模式影响
     app = QApplication.instance()
     if app is not None:

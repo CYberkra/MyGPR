@@ -47,6 +47,12 @@ A bounded, downsampled view of a dataset or artifact for display in the UI. Neve
 ### 地表与直达干扰（Surface and Direct-wave Interference）
 本项目希望抑制的地表反射、天线直达及空中耦合等非地下目标成分。它们不等同于所有水平相干回波；地下层状界面的反射也可能呈水平形态。
 
+### 项目处理目标（Processing Objective）
+当前项目希望在处理结果中优先辨认的地下信息。默认关注通用地下结构，也可偏重层状界面或局部异常；它表达调查目的，不是对地下物体类别的自动识别结论。
+
+### 自动处理基准（Auto-processing Baseline）
+自动处理每次重新出发的固定数据版本，可以是原始数据或独立前处理产物。它不随当前显示的处理结果改变，重复自动处理不在上一次结果上累积加工。
+
 ## Unresolved / Pending Clarification
 
 - **Artifact vs Result**: code uses both terms; the business distinction is not yet confirmed.
