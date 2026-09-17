@@ -47,6 +47,14 @@ BENCHMARK_SCENARIOS: dict[str, dict[str, Any]] = {
         "label": "五项运动误差基准",
         "goal": "验证高度、横向、速度、姿态与周期性振动背景误差可被客观度量。",
     },
+    "deconv_sparse": {
+        "label": "混合相位反褶积基准",
+        "goal": "验证反褶积的脉冲化能力与反射率恢复。",
+    },
+    "inverse_q": {
+        "label": "Inverse-Q 衰减补偿基准",
+        "goal": "验证 constant-Q 深部能量补偿与增益钳制遵守。",
+    },
 }
 
 
@@ -381,6 +389,75 @@ def _build_motion_compensation_fixture(seed: int) -> tuple[np.ndarray, dict[str,
     }
 
 
+def _build_deconv_sparse_fixture(seed: int) -> tuple[np.ndarray, dict[str, Any]]:
+    """稀疏反射率 + 90° 混合相位子波 + 噪声; 留反射率参考。"""
+    from scipy.signal import hilbert as _hb
+
+    rng = np.random.default_rng(seed)
+    samples, traces = 400, 30
+    total_time_ns = 560.0
+    dt_ns = total_time_ns / (samples - 1)
+    reflectivity = np.zeros((samples, traces), dtype=np.float64)
+    rows = rng.integers(40, samples - 40, size=traces * 4)
+    cols = rng.integers(0, traces, size=traces * 4)
+    signs = rng.choice([-1.0, 1.0], size=traces * 4)
+    for r, c, s in zip(rows, cols, signs):
+        reflectivity[r, c] += s * rng.uniform(0.5, 1.0)
+    t = np.arange(samples, dtype=np.float64)
+    ricker = (1.0 - 2.0 * ((t - 100.0) / 12.0) ** 2) * np.exp(
+        -(((t - 100.0) / 12.0) ** 2)
+    )
+    mixed_phase = np.imag(_hb(ricker))  # 90° 旋转 → 混合相位
+    clean = np.zeros_like(reflectivity)
+    for c in range(traces):
+        clean[:, c] = np.convolve(reflectivity[:, c], mixed_phase, mode="same")
+    noisy = clean + 0.02 * rng.normal(size=clean.shape)
+    meta = _base_header_info(samples, traces, total_time_ns=total_time_ns)
+    meta["clean_reference"] = clean
+    meta["reflectivity_reference"] = reflectivity
+    meta["time_step_ns"] = dt_ns
+    return noisy, meta
+def _build_inverse_q_fixture(seed: int) -> tuple[np.ndarray, dict[str, Any]]:
+    """constant-Q 衰减合成剖面 (Q=40); 验证深部补偿与钳制遵守。"""
+    rng = np.random.default_rng(seed)
+    samples, traces = 256, 96
+    total_time_ns = 360.0
+    dt_ns = total_time_ns / (samples - 1)
+    q_true = 40.0
+    t = np.arange(samples, dtype=np.float64)[:, None] * dt_ns
+    freqs = np.fft.rfftfreq(samples, d=dt_ns * 1e-9)
+    data = np.zeros((samples, traces), dtype=np.float64)
+    for c in range(traces):
+        center = 40.0 + 1.2 * c
+        pulse = (1.0 - 2.0 * ((t[:, 0] - center) / 14.0) ** 2) * np.exp(
+            -((t[:, 0] - center) / 14.0) ** 2
+        )
+        data[:, c] = pulse + 0.04 * rng.normal(0.0, 1.0, samples)
+    spectrum = np.fft.rfft(data, axis=0)
+    t_s = np.arange(samples, dtype=np.float64)[:, None] * dt_ns * 1e-9
+    f_ref = 0.5 * float(freqs[-1])
+    rows = t_s * freqs[None, :]
+    attenuation = np.exp(-np.pi * rows / q_true) * np.exp(
+        -1j * 2.0 * rows / q_true * np.log(np.maximum(freqs / f_ref, 1e-30))[None, :]
+    )
+    k_idx = np.arange(spectrum.shape[0], dtype=np.float64)
+    out = np.empty_like(data)
+    for start in range(0, samples, 32):
+        stop = min(samples, start + 32)
+        n_block = np.arange(start, stop)[:, None]
+        basis = np.exp(1j * 2.0 * np.pi * n_block * k_idx[None, :] / samples)
+        weights = attenuation[start:stop] * basis
+        out[start:stop] = 2.0 * np.real(weights @ spectrum) / samples
+        out[start:stop] -= (
+            np.real(attenuation[start:stop, 0][:, None] * spectrum[0][None, :]) / samples
+        )
+    out += 0.008 * rng.normal(size=out.shape)
+    meta = _base_header_info(samples, traces, total_time_ns=total_time_ns)
+    meta["time_step_ns"] = dt_ns
+    meta["q_true"] = q_true
+    return out, meta
+
+
 BENCHMARK_SAMPLES: dict[str, BenchmarkSampleSpec] = {
     "zero_time_reference": BenchmarkSampleSpec(
         sample_id="zero_time_reference",
@@ -447,6 +524,26 @@ BENCHMARK_SAMPLES: dict[str, BenchmarkSampleSpec] = {
         ),
         tags=("synthetic", "motion", "uav", "benchmark"),
         builder=_build_motion_compensation_fixture,
+    ),
+    "deconv_sparse_reference": BenchmarkSampleSpec(
+        sample_id="deconv_sparse_reference",
+        scenario="deconv_sparse",
+        title="混合相位反褶积基准样本",
+        description="稀疏反射率经 90° 混合相位子波卷积的合成样本, 留反射率参考。",
+        default_methods=("mixed_phase_deconvolution",),
+        focus_metrics=("per_trace_correlation_lift", "kurtosis"),
+        tags=("synthetic", "deconvolution", "mixed_phase"),
+        builder=_build_deconv_sparse_fixture,
+    ),
+    "inverse_q_reference": BenchmarkSampleSpec(
+        sample_id="inverse_q_reference",
+        scenario="inverse_q",
+        title="Inverse-Q 衰减补偿基准样本",
+        description="constant-Q (Q=40) 前向衰减的合成样本, 验证深部补偿与增益钳制。",
+        default_methods=("inverse_q",),
+        focus_metrics=("deep_energy_gain", "gain_limit_compliance"),
+        tags=("synthetic", "inverse_q", "attenuation"),
+        builder=_build_inverse_q_fixture,
     ),
 }
 

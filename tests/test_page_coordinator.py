@@ -62,7 +62,7 @@ def _make_window(*, project_id="P-001", line_id="L02", has_project=True):
             self.interpretation_controller = None
             self.delivery_controller = None
             self.backend_controller = None
-            self.log_panel = _StubPage()
+            self.output_panel = _StubPage()
 
             self._pages = pages
 
@@ -101,6 +101,8 @@ def test_line_selected_updates_state_and_triggers_preview():
 
     assert coordinator._current_line_id == "L03"
     assert window.project_controller.calls == [
+        # 切换测线先作废在飞成果预览（防旧测线成果串台），再预览+刷新
+        ("invalidate_artifact_previews", ()),
         ("preview_line", ("L03",)),
         ("refresh_artifacts", ("L03",)),
     ]

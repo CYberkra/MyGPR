@@ -32,12 +32,6 @@ METHOD_METADATA = {
         "visibility": "hidden",
         "display_name": "坏道质量控制",
     },
-    "equidistant_trace_resample": {
-        "category": "quality_control",
-        "maturity": "stable",
-        "visibility": "hidden",
-        "display_name": "等距道重采样",
-    },
     "agcGain": {
         "category": "gain",
         "maturity": "stable",
@@ -121,12 +115,6 @@ METHOD_METADATA = {
         "maturity": "experimental",
         "visibility": "public",
         "display_name": "Wavelet 2D 去噪",
-    },
-    "wavelet_svd": {
-        "category": "denoising",
-        "maturity": "experimental",
-        "visibility": "public",
-        "display_name": "Wavelet-SVD 复合去噪",
     },
     "hilbert_envelope": {
         "category": "attribute_analysis",
@@ -219,13 +207,23 @@ METHOD_METADATA = {
         "visibility": "public",
         "display_name": "RTM 反向时间迁移",
     },
+    "mixed_phase_deconvolution": {
+        "category": "denoising",
+        "maturity": "experimental",
+        "visibility": "public",
+        "display_name": "混合相位反褶积",
+    },
+    "inverse_q": {
+        "category": "filtering",
+        "maturity": "experimental",
+        "visibility": "public",
+        "display_name": "Inverse-Q 衰减补偿",
+    },
 }
-
 PREFERRED_METHOD_ORDER = [
     "set_zero_time",
     "time_cut",
     "trace_qc",
-    "equidistant_trace_resample",
     "dewow",
     "subtracting_average_2D",
     "median_background_2D",
@@ -244,7 +242,6 @@ PREFERRED_METHOD_ORDER = [
     "trace_savgol_filter",
     "svd_subspace",
     "wavelet_2d",
-    "wavelet_svd",
     "hilbert_envelope",
     "running_average_2D",
     "motion_compensation_vibration",
@@ -255,6 +252,8 @@ PREFERRED_METHOD_ORDER = [
     "motion_compensation_v2",
     "stolt_migration",
     "kirchhoff_migration",
+    "inverse_q",
+    "mixed_phase_deconvolution",
     "rtm_migration",
     "time_to_depth",
 ]
@@ -267,7 +266,6 @@ METHOD_TAGS = {
     "set_zero_time": "推荐",
     "time_cut": "备选",
     "trace_qc": "备选",
-    "equidistant_trace_resample": "备选",
     "energy_decay_gain": "推荐",
     "amplitude_scale": "备选",
     "svd_bg": "备选",
@@ -276,7 +274,6 @@ METHOD_TAGS = {
     "hankel_svd": "实验",
     "svd_subspace": "实验",
     "wavelet_2d": "实验",
-    "wavelet_svd": "实验",
     "hilbert_envelope": "推荐",
     "stolt_migration": "实验",
     "kirchhoff_migration": "实验",
@@ -291,6 +288,8 @@ METHOD_TAGS = {
     "motion_compensation_attitude": "实验",
     "motion_compensation_vibration": "实验",
     "motion_compensation_v2": "推荐",
+    "mixed_phase_deconvolution": "实验",
+    "inverse_q": "实验",
 }
 
 METHOD_CATEGORY_LABELS = {
@@ -314,7 +313,6 @@ AUTO_TUNE_STAGE_BY_METHOD = {
     "set_zero_time": "zero_time",
     "time_cut": "preprocess",
     "trace_qc": "preprocess",
-    "equidistant_trace_resample": "preprocess",
     "dewow": "drift",
     "subtracting_average_2D": "background",
     "median_background_2D": "background",
@@ -333,7 +331,6 @@ AUTO_TUNE_STAGE_BY_METHOD = {
     "trace_savgol_filter": "denoise",
     "svd_subspace": "denoise",
     "wavelet_2d": "denoise",
-    "wavelet_svd": "denoise",
     "motion_compensation_height": "motion_comp",
     "motion_compensation_speed": "motion_comp",
     "trajectory_smoothing": "motion_comp",
@@ -341,6 +338,8 @@ AUTO_TUNE_STAGE_BY_METHOD = {
     "motion_compensation_vibration": "artifact",
     "motion_compensation_v2": "motion_comp",
     "rtm_migration": "migration",
+    "mixed_phase_deconvolution": "denoise",
+    "inverse_q": "frequency",
 }
 
 METHOD_DISPLAY_NAMES = {key: value["display_name"] for key, value in METHOD_METADATA.items()}

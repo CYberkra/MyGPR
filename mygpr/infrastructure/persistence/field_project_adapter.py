@@ -26,6 +26,8 @@ from mygpr.application.jobs.context import ExecutionContext
 from mygpr.infrastructure.persistence.interpretation_adapter import InterpretationPersistenceMixin
 from mygpr.infrastructure.persistence.intermediate_cleanup import IntermediateCleanupMixin
 from mygpr.infrastructure.persistence.spatial_adapter import SpatialPersistenceMixin
+from mygpr.infrastructure.persistence.velocity_adapter import VelocityPersistenceMixin
+from mygpr.infrastructure.persistence.grid_adapter import GridPersistenceMixin
 from mygpr.application.project.ports import ProjectRepositoryPort, ProjectSessionPort
 from mygpr.domain.reporting.models import ReportPackage
 from mygpr.domain.acquisition.models import ProjectSensorSyncResult, SensorSyncSettings
@@ -40,6 +42,7 @@ from mygpr.domain.project.models import (
     ProjectRestore,
     ProjectSummary,
     ProjectMetadata, LineQualityIssue, LineQualityReport, SourceFileStatus, LineDeleteResult,
+    ArtifactDeleteResult,
     BatchImportItemResult, BatchImportSummary,
 )
 
@@ -133,7 +136,8 @@ def _artifact(record: ProcessingArtifactRecord) -> ProjectArtifact:
 
 
 class LegacyFieldProjectSession(
-    InterpretationPersistenceMixin, IntermediateCleanupMixin, SpatialPersistenceMixin, ProjectSessionPort
+    InterpretationPersistenceMixin, IntermediateCleanupMixin, SpatialPersistenceMixin,
+    VelocityPersistenceMixin, GridPersistenceMixin, ProjectSessionPort
 ):
     """One open project; concrete storage objects remain private to this adapter."""
 
@@ -206,6 +210,38 @@ class LegacyFieldProjectSession(
         with self._lock:
             result = delete_project_line(self._store, validate_line_id(line_id), reason=reason)
         return LineDeleteResult(result.line_id, result.line_name, tuple(result.deleted_paths), result.remaining_line_count)
+
+    def delete_artifacts(
+        self, line_id: str, artifact_ids: Sequence[str], *, reason: str
+    ) -> ArtifactDeleteResult:
+        """Delete processing artifacts (sidecar files) into the project trash."""
+        from mygpr.infrastructure.persistence.artifact_delete import (
+            delete_artifacts_with_trash,
+        )
+
+        with self._lock:
+            summary = delete_artifacts_with_trash(
+                self._store, validate_line_id(line_id), list(artifact_ids),
+                reason=reason,
+            )
+        return ArtifactDeleteResult(
+            line_id=str(summary["line_id"]),
+            deleted_artifact_ids=tuple(summary["deleted_artifact_ids"]),  # type: ignore[arg-type]
+            trash_dir=str(summary["trash_dir"]),
+            remaining_artifact_count=int(summary["remaining_artifact_count"]),  # type: ignore[arg-type]
+        )
+
+    def list_artifact_descendants(
+        self, line_id: str, artifact_id: str
+    ) -> tuple[str, ...]:
+        """Return artifact_id plus its transitive children (read-only)."""
+        from mygpr.infrastructure.persistence.artifact_delete import (
+            collect_artifact_descendants,
+        )
+
+        with self._lock:
+            records = index_processing_artifacts(self._store.root, validate_line_id(line_id))
+        return collect_artifact_descendants(records, artifact_id)
 
     def batch_import_lines(self, sources: Sequence[Path], *, context: ExecutionContext) -> BatchImportSummary:
         def progress(current: int, total: int, item: Any) -> None:

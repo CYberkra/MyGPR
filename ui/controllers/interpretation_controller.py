@@ -117,17 +117,20 @@ class InterpretationController(QObject):
         )
 
     def close_session(self) -> None:
+        """异步关闭标注会话（fire-and-forget）。
+
+        主窗口 closeEvent / 关闭项目链都不等待结果：先本地失效 session_id，
+        实际 close 放到 worker 线程，成败只记日志。
+        """
         backend = self._backend()
         session_id = self._session_id
         self._session_id = None
         if backend is None or session_id is None:
             return
-        try:
-            backend.interpretation_edit.close_session(session_id)
-        except Exception as exc:  # noqa: BLE001
-            self.log_message.emit(f"关闭标注会话失败：{friendly_error_message(exc)}")
-        else:
-            self.log_message.emit("标注会话已关闭")
+        run_command(
+            _CloseSessionCommand(self, session_id),
+            name="mygpr-interpretation-close",
+        )
 
 
 # ------------------------------------------------------------------
@@ -242,6 +245,30 @@ class _SaveSessionCommand:
             c.saved.emit("标注已保存")
         finally:
             c._end_busy()
+
+
+class _CloseSessionCommand:
+    """worker 线程关闭标注会话；成败经 log_message 回 GUI 线程。"""
+
+    __slots__ = ("_controller", "_session_id")
+
+    def __init__(self, controller: InterpretationController,
+                 session_id: str) -> None:
+        self._controller = controller
+        self._session_id = session_id
+
+    def execute(self) -> None:
+        c = self._controller
+        backend = c._backend()
+        if backend is None:
+            return
+        try:
+            backend.interpretation_edit.close_session(self._session_id)
+        except Exception as exc:  # noqa: BLE001
+            c.log_message.emit(
+                f"关闭标注会话失败：{friendly_error_message(exc)}")
+        else:
+            c.log_message.emit("标注会话已关闭")
 
 
 __all__ = ["InterpretationController"]

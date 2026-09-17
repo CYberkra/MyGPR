@@ -5,31 +5,32 @@
     _init_window → _create_controllers → _create_pages
     → _build_ui → _connect_signals → _init_state
 
-页面 / 控制器 / LogPanel 均以 try/except 导入：缺失时页面降级为
-PlaceholderPage（QLabel '页面建设中' 居中），controller 为 None（connect 判空）。
+页面 / 控制器 / OutputPanel 均以 try/except 导入：缺失时页面降级为
+PlaceholderPage（QLabel '页面建设中' 居中），controller / 面板为 None（connect 判空）。
 """
-import datetime
 import logging
 
 from PyQt6.QtCore import (
-    QEasingCurve, QPropertyAnimation, Qt, QTimer, pyqtSignal,
+    Qt, QSize, QTimer, pyqtSignal,
 )
 from PyQt6.QtGui import QIcon, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
-    QDialog, QFormLayout, QHBoxLayout, QLabel, QPushButton, QStackedWidget,
-    QTextBrowser, QTextEdit, QToolButton, QVBoxLayout, QWidget,
+    QDialog, QFormLayout, QHBoxLayout, QLabel, QPushButton, QSplitter,
+    QTextBrowser, QToolButton, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
-    CardWidget, FluentIcon as FIF, FluentWindow, InfoBar, InfoBarPosition,
+    FluentIcon as FIF, FluentWindow, InfoBar, InfoBarPosition,
     LineEdit, NavigationItemPosition, PrimaryPushButton, PushButton,
-    SegmentedWidget, SplashScreen,
+    SplashScreen, TransparentToolButton, isDarkTheme,
 )
 
 from ui import constants, file_dialogs
 from ui.page_coordinator import PageCoordinator
 from ui.logger_config import setup_logger
 from ui.settings_manager import SettingsManager
-from ui.theme_helpers import apply_theme, log_panel_qss
+from ui.theme_helpers import apply_theme
+from ui.widgets.file_tree_panel import FileTreePanel
+from ui.widgets.segment_tabs import SlimSegment
 
 logger = setup_logger('mygpr_window', 'logs/mygpr_window.log', level=logging.DEBUG)
 
@@ -72,8 +73,8 @@ ProcessingController = _import_controller_class('ProcessingController')
 InterpretationController = _import_controller_class('InterpretationController')
 DeliveryController = _import_controller_class('DeliveryController')
 
-# ------------------------------------------------------------ LogPanel（[A2] 提供，缺失用内置回退）
-LogPanel = _import_page_class('ui.widgets.log_panel', 'LogPanel')
+# ------------------------------------------------------------ OutputPanel（底部输出面板，缺失为 None）
+OutputPanel = _import_page_class('ui.widgets.output_panel', 'OutputPanel')
 
 
 class PlaceholderPage(QWidget):
@@ -89,96 +90,6 @@ class PlaceholderPage(QWidget):
             self.setToolTip(title)
 
 
-class _FallbackLogPanel(CardWidget):
-    """LogPanel 内置回退（A2 交付前使用）。
-
-    CardWidget 容器 max 380/min 0，margins 6/spacing 6；
-    顶部 SegmentedWidget('日志','任务') + QStackedWidget；
-    日志 tab：QTextEdit 只读 + 按钮行('清空' 60px)。
-    """
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setMinimumWidth(0)
-        self.setMaximumWidth(constants.PANEL_MAX_WIDTH)
-        self.setMinimumHeight(constants.PANEL_MIN_HEIGHT)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(*constants.PANEL_MARGINS)
-        layout.setSpacing(constants.PANEL_SPACING)
-
-        self.segmented = SegmentedWidget(self)
-        # 文本密集面板：即时切换（OpacityAni 对 QTextEdit 逐帧重栅格化卡顿、
-        # 回切闪白，见 LogPanel 注释）。
-        self.stacked = QStackedWidget(self)
-        self.stacked.setMinimumWidth(364)
-
-        # 日志 tab
-        log_tab = QWidget(self)
-        log_layout = QVBoxLayout(log_tab)
-        log_layout.setContentsMargins(0, 0, 0, 0)
-        log_layout.setSpacing(constants.PANEL_SPACING)
-        self.log_text = QTextEdit(self)
-        self.log_text.setReadOnly(True)
-        self.log_text.setStyleSheet(log_panel_qss('terminal'))
-        btn_row = QHBoxLayout()
-        self.clear_btn = PushButton('清空', self)
-        self.clear_btn.setFixedWidth(60)
-        self.clear_btn.clicked.connect(self.log_text.clear)
-        btn_row.addWidget(self.clear_btn)
-        btn_row.addStretch(1)
-        log_layout.addWidget(self.log_text, 1)
-        log_layout.addLayout(btn_row)
-
-        # 任务 tab（A2 MiniJobList 交付前为占位）
-        jobs_tab = QWidget(self)
-        jobs_layout = QVBoxLayout(jobs_tab)
-        jobs_layout.setContentsMargins(0, 0, 0, 0)
-        jobs_label = QLabel('暂无任务', jobs_tab)
-        jobs_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        jobs_layout.addWidget(jobs_label)
-
-        log_tab.setObjectName('logTab')
-        jobs_tab.setObjectName('jobsTab')
-        self.stacked.addWidget(log_tab)
-        self.stacked.addWidget(jobs_tab)
-        self.segmented.addItem('logTab', '日志',
-                               onClick=lambda: self.stacked.setCurrentWidget(log_tab))
-        self.segmented.addItem('jobsTab', '任务',
-                               onClick=lambda: self.stacked.setCurrentWidget(jobs_tab))
-        self.segmented.setCurrentItem('logTab')
-
-        layout.addWidget(self.segmented)
-        layout.addWidget(self.stacked, 1)
-
-    # ------------------------------------------------------------ 对外接口（与 A2 LogPanel 对齐）
-    def append_log(self, msg: str) -> None:
-        """自动加 [HH:MM:SS] 前缀 + 级别着色 + 滚到底（style_spec §2.5）。"""
-        timestamp = datetime.datetime.now().strftime('%H:%M:%S')
-        color = None
-        if any(k in msg for k in ('ERROR', '失败', '错误')):
-            color = constants.LOG_COLOR_ERROR     # #ff5c5c
-        elif any(k in msg for k in ('WARNING', '警告')):
-            color = constants.LOG_COLOR_WARNING   # #ffb84d
-        elif any(k in msg for k in ('SUCCESS', '成功', '完成')):
-            color = constants.LOG_COLOR_SUCCESS   # #34d97b
-        elif 'INFO' in msg:
-            color = constants.LOG_COLOR_INFO      # #5b9dff
-        text = f'[{timestamp}] {msg}'
-        if color:
-            text = f'<span style="color:{color}">{text}</span>'
-        self.log_text.append(text)
-        scrollbar = self.log_text.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
-
-    def mini_jobs(self):
-        return None
-
-    def apply_theme(self, dark: bool) -> None:
-        """日志框随主题换肤（style_spec §2.5：深色 #1e1e1e / 浅色 #f5f5f5）。"""
-        self.log_text.setStyleSheet(log_panel_qss('dark' if dark else 'light'))
-
-
 class MyGPRMainWindow(FluentWindow):
     """主窗口组装器（SPEC §6.1）。"""
 
@@ -189,7 +100,6 @@ class MyGPRMainWindow(FluentWindow):
         self.settings = settings or SettingsManager()
         self.spacing = constants.PAGE_SPACING
         self._restoring_settings = False
-        self._panel_animating = False
         self.pages = {}             # objectName -> page widget
 
         # ---- 窗口自身状态 ----
@@ -222,6 +132,10 @@ class MyGPRMainWindow(FluentWindow):
     # ============================================================ 组装
     def _init_window(self) -> None:
         self.setWindowTitle(constants.APP_NAME)
+        # 切页零动画：库默认 PopUpAni 是新页从 76px 下方滑入（"上下跳变"）；
+        # 透明度淡入方案对重页面（B-Scan/表格）要整页离屏渲染，切换时卡顿。
+        # 苹果系专业工具（System Settings/Xcode）与 VS Code 均为瞬时切换。
+        self.stackedWidget.setAnimationEnabled(False)
         # 禁用 Mica 亚克力背景：Win11 24H2 上浅色 Mica Backdrop 渲染失效，
         # 会导致标题栏/导航栏整片透明、透出桌面（浅色主题"基本不可用"的根因）。
         # 禁用后窗口自行绘制实色背景（浅 #f0f4f9 / 深 #202020），
@@ -241,8 +155,15 @@ class MyGPRMainWindow(FluentWindow):
                     min(constants.WINDOW_HEIGHT, max_h))
         self.setMinimumSize(min(constants.WINDOW_MIN_WIDTH, max_w),
                             min(constants.WINDOW_MIN_HEIGHT, max_h))
+        # Windows 默认级联放置会把新窗口不断往右下推；窗口接近屏宽时
+        # 右缘会伸出屏幕，屏外部分不渲染（整块黑），看起来像"界面被压缩"。
+        # 显式居中到可用桌面，保证窗口完整落在屏内。
+        if available is not None and available.width() > 0:
+            frame = self.frameGeometry()
+            frame.moveCenter(available.center())
+            self.move(frame.topLeft())
         self.setWindowIcon(QIcon(constants.APP_ICON_PATH))
-        self.navigationInterface.setExpandWidth(constants.NAV_EXPAND_WIDTH)
+        # 竖导航已隐藏（顶部横排 Pivot 页签替代），不再配置展开宽度
 
         # 开屏画面：图标 256×256，删除关闭按钮，600ms 后关闭
         self.splashScreen = SplashScreen(QIcon(constants.APP_ICON_PATH), self)
@@ -282,47 +203,212 @@ class MyGPRMainWindow(FluentWindow):
             ('settingsInterface', SettingsPage, FIF.SETTING, '设置',
              NavigationItemPosition.BOTTOM),
         ]
+        self._nav_specs = [(name, text) for name, _cls, _icon, text, _pos in page_specs]
         for object_name, page_class, icon, text, position in page_specs:
             page = page_class(self) if page_class else PlaceholderPage(text, self)
+            # 注入共享 SettingsManager：页面不再各自构造实例，避免读-改-写
+            # 互相覆盖（共享实例是唯一写者）
+            if hasattr(page, 'set_settings_manager'):
+                page.set_settings_manager(self.settings)
             page.setObjectName(object_name)
             self.addSubInterface(page, icon, text, position=position)
             self.pages[object_name] = page
 
     def _build_ui(self) -> None:
-        """右侧全局可折叠面板（折叠按钮 + LogPanel 承载）。"""
-        # 折叠按钮：chevron 图标 + 主题色淡底长条（与 CollapsiblePanel 统一视觉）
-        from ui.widgets import collapse_button_qss
-        self.fold_button = PushButton('', self)
-        self.fold_button.setFixedSize(constants.FOLD_BUTTON_WIDTH,
-                                      constants.FOLD_BUTTON_HEIGHT)
-        self.fold_button.setIcon(FIF.CHEVRON_RIGHT_MED.icon())
-        self.fold_button.setToolTip('收起右侧面板')
-        self.fold_button.setStyleSheet(collapse_button_qss())
-        self.fold_button.clicked.connect(self._toggle_panel)
+        """顶部横排页签 + 左坞文件树 + 底部输出面板（OutputPanel：日志/任务）。
 
-        # 面板容器：LogPanel（A2）或内置回退
-        self.log_panel = LogPanel(self) if LogPanel else _FallbackLogPanel(self)
-        self.log_panel.setMinimumWidth(0)
-        self.log_panel.setMaximumWidth(constants.PANEL_MAX_WIDTH)
-        self.log_panel.setMinimumHeight(constants.PANEL_MIN_HEIGHT)
+        根布局由 FluentWindow 的 ``导航 | widgetLayout`` 两层改为
+        ``导航(隐藏) | 右列[ 页签条 / 内容行(widgetLayout: 文件树|页面) / OutputPanel ]``。
+        """
+        # 竖导航退役：隐藏 FluentWindow 自带 NavigationInterface。addSubInterface
+        # 仍经它注册路由（_onCurrentInterfaceChanged/qrouter 保持自洽），
+        # switchTo 只动 stackedWidget，不依赖导航可见性；页签改用顶部横排
+        # Pivot（qfluentwidgets 现成 Fluent 组件），左列整列让给文件树。
+        self.navigationInterface.hide()
 
-        # 追加到 FluentWindow 根布局（导航 | 页面 | 折叠钮 | 面板）
-        self.hBoxLayout.addWidget(self.fold_button, 0, Qt.AlignmentFlag.AlignVCenter)
-        self.hBoxLayout.addWidget(self.log_panel)
+        # 底部输出面板：日志/任务（常驻头部栏 + 可收展内容区，状态记忆）
+        self.output_panel = OutputPanel(self) if OutputPanel else None
+        if self.output_panel is not None and hasattr(self.output_panel, 'set_settings_manager'):
+            self.output_panel.set_settings_manager(self.settings)
 
-        # 折叠动画：maximumWidth 220ms OutCubic 0↔380
-        self.panel_animation = QPropertyAnimation(self.log_panel, b'maximumWidth', self)
-        self.panel_animation.setDuration(constants.PANEL_ANIM_DURATION_MS)
-        self.panel_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self.panel_animation.finished.connect(self._on_panel_animation_finished)
-        self._panel_collapsed = False
+        # 右列容器：页签条（内含标题栏 48px 净空）/ 竖向 QSplitter[
+        # 内容行(widgetLayout: 文件树|页面，stretch 1) / 输出面板（高度可拖）]
+        self._right_area = QWidget(self)
+        right_col = QVBoxLayout(self._right_area)
+        right_col.setContentsMargins(0, 0, 0, 0)
+        right_col.setSpacing(0)
+        self.hBoxLayout.removeItem(self.widgetLayout)
+        right_col.addWidget(self._create_top_nav_bar())
+        # 标题栏净空由页签条承担，内容行不再预留顶部 48px
+        self.widgetLayout.setContentsMargins(0, 0, 0, 0)
+        # QSplitter 只收 widget，把内容行 layout 包进宿主 widget
+        content_host = QWidget(self)
+        host_col = QVBoxLayout(content_host)
+        host_col.setContentsMargins(0, 0, 0, 0)
+        host_col.setSpacing(0)
+        host_col.addLayout(self.widgetLayout, 1)
+        self._v_splitter = QSplitter(Qt.Orientation.Vertical, self)
+        self._v_splitter.setChildrenCollapsible(False)
+        self._v_splitter.addWidget(content_host)
+        if self.output_panel is not None:
+            self._v_splitter.addWidget(self.output_panel)
+            self._v_splitter.setStretchFactor(0, 1)
+            self._v_splitter.setStretchFactor(1, 0)
+            self.output_panel.sig_open_toggled.connect(
+                self._on_output_open_toggled)
+            self._v_splitter.splitterMoved.connect(
+                self._on_output_splitter_moved)
+            # 几何就绪后恢复上次拖出的面板高度
+            QTimer.singleShot(0, self._restore_output_panel_height)
+        right_col.addWidget(self._v_splitter, 1)
+        self.hBoxLayout.addWidget(self._right_area, 1)
+        # _right_area 是有实体的全高 widget（顶部 48px 标题栏留白由
+        # widgetLayout 的 margin 承担，不在它身上），又创建于 titleBar 之后，
+        # z-order 压过标题栏右半——最小化/最大化/关闭按钮的鼠标事件会被它
+        # 吞掉（曾表现为"三个按钮点了没反应"）。标题栏必须重新抬到最顶层。
+        self.titleBar.raise_()
+
+        # 左侧常驻文件树（页签条 | 文件树 | 页面），面板常驻；
+        # 未打开项目时显示空态而不是整树消失（入口通用性）。
+        # 注意插 widgetLayout（页签条已承担标题栏净空），不是 hBoxLayout
+        # （后者从窗口最顶开始，会把面板顶进标题栏）。
+        # 宽度由面板自管（展开 232 / 细条 18），切页感知经 stackedWidget.currentChanged
+        self._file_tree_panel = FileTreePanel(self)
+        self._file_tree_panel.set_settings_manager(self.settings)
+        self.widgetLayout.insertWidget(0, self._file_tree_panel, 0)
+        self.stackedWidget.currentChanged.connect(self._on_page_switched)
+        # currentChanged 不为"启动即所在的初始页"触发，补一次初始页应用，
+        # 否则初始页（主页）在打开项目前一直停留在面板默认的展开态
+        self._on_page_switched(self.stackedWidget.currentIndex())
+
+    def _create_top_nav_bar(self) -> QWidget:
+        """顶部横排页签条：SlimSegment 药丸分段（与日志/任务、处理页预览同款控件）
+        套圆角轨道，外加标题栏净空。
+
+        与 Pivot 同属一套信号语义（SegmentedWidget 继承 Pivot）：
+        setCurrentItem 与 currentItemChanged 双向同步 stack 页面——点击页签
+        → switchTo；程序化 switchTo（快捷键/主页快捷操作/冒烟脚本）
+        → _on_page_switched 回写选中态。两侧 setter 均在状态不变时提前返回，
+        信号环自然终止。
+        """
+        bar = QWidget(self)
+        bar.setObjectName('topNavBar')
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(16, 48, 16, 0)
+        bar.setFixedHeight(48 + constants.NAV_TOP_BAR_HEIGHT)
+        self._top_nav_bar = bar
+        # 药丸轨道：圆角浅底容器把 8 个分段收拢成一个控件（示意图方案 B）
+        track = QWidget(bar)
+        track.setObjectName('topNavTrack')
+        track_layout = QHBoxLayout(track)
+        track_layout.setContentsMargins(4, 4, 4, 4)
+        track_layout.setSpacing(0)
+        self._top_nav_track = track
+        self._top_nav = SlimSegment(track)
+        for object_name, text in self._nav_specs:
+            self._top_nav.addItem(object_name, text)
+        self._top_nav.currentItemChanged.connect(self._on_top_nav_changed)
+        track_layout.addWidget(self._top_nav)
+        layout.addWidget(track, 0, Qt.AlignmentFlag.AlignVCenter)
+        layout.addStretch(1)
+        # 文件树全局入口（方案 B：页签条右端图标钮，Ctrl+B；窗口级面板开关，
+        # 任何页面可达）。透明图标钮与日志面板工具条同一美术语言。
+        self._file_tree_btn = TransparentToolButton(FIF.LAYOUT, bar)
+        self._file_tree_btn.setIconSize(QSize(14, 14))
+        self._file_tree_btn.setToolTip('文件树 (Ctrl+B)')
+        self._file_tree_btn.setFixedSize(28, 28)
+        self._file_tree_btn.clicked.connect(self._toggle_file_tree)
+        layout.addWidget(self._file_tree_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+        self._apply_top_nav_style()
+        # 初始选中第一个页面（与 addSubInterface 的初始 stack 页一致）
+        if self._nav_specs:
+            self._top_nav.setCurrentItem(self._nav_specs[0][0])
+        return bar
+
+    def _on_top_nav_changed(self, route_key: str) -> None:
+        page = self.pages.get(str(route_key))
+        if page is not None and self.stackedWidget.currentWidget() is not page:
+            self.switchTo(page)
+
+    def _apply_top_nav_style(self) -> None:
+        """页签条底部分隔线 + 药丸轨道底色，深浅主题跟随。"""
+        dark = isDarkTheme()
+        line = 'rgba(255, 255, 255, 0.10)' if dark else 'rgba(0, 0, 0, 0.07)'
+        track = 'rgba(255, 255, 255, 0.06)' if dark else 'rgba(0, 0, 0, 0.05)'
+        if getattr(self, '_top_nav_bar', None) is not None:
+            self._top_nav_bar.setStyleSheet(
+                f'#topNavBar {{ border-bottom: 1px solid {line}; }}'
+                f'#topNavTrack {{ background: {track}; border-radius: 15px; }}')
+
+    def resizeEvent(self, e) -> None:
+        super().resizeEvent(e)
+        # FluentWindow.resizeEvent 为竖导航收起钮把标题栏右移 46px；竖导航
+        # 已隐藏，标题栏拉满全宽（横排页签在其下方行，不重叠）。
+        self.titleBar.move(0, 0)
+        self.titleBar.resize(self.width(), self.titleBar.height())
+
+    # ------------------------------------------------------------ 输出面板高度（竖向 QSplitter）
+    def _output_panel_target_height(self) -> int:
+        """展开态目标高度：用户上次拖出的值（settings），否则常量默认。"""
+        default = (constants.OUTPUT_PANEL_HEIGHT
+                   + constants.OUTPUT_PANEL_HEADER_HEIGHT)
+        saved = self.settings.get('output_panel_height') if self.settings else None
+        try:
+            return max(80, int(saved)) if saved else default
+        except (TypeError, ValueError):
+            return default
+
+    def _set_output_panel_height(self, target: int) -> None:
+        """把 splitter 下格调整到 target，上格吃掉余量（保下限防挤没）。"""
+        total = sum(self._v_splitter.sizes()) or self._v_splitter.height()
+        if total <= 0:
+            return
+        target = min(target, max(120, total - 200))
+        self._v_splitter.setSizes([max(200, total - target), target])
+
+    def _restore_output_panel_height(self) -> None:
+        """启动恢复：按开合态把 splitter 下格设为展开高/头部栏高。"""
+        if self.output_panel is None:
+            return
+        if sum(self._v_splitter.sizes()) <= 0:
+            # 构造函数末尾几何尚未分配，事件循环起来后重试一次
+            QTimer.singleShot(100, self._restore_output_panel_height)
+            return
+        if self.output_panel.is_open():
+            self._set_output_panel_height(self._output_panel_target_height())
+        else:
+            self._set_output_panel_height(
+                constants.OUTPUT_PANEL_HEADER_HEIGHT + 2)
+
+    def _on_output_open_toggled(self, open_: bool) -> None:
+        """输出面板收/展：下格在「展开高 ↔ 仅头部栏」间切换。"""
+        if open_:
+            self._set_output_panel_height(self._output_panel_target_height())
+        else:
+            self._set_output_panel_height(
+                constants.OUTPUT_PANEL_HEADER_HEIGHT + 2)
+
+    def _on_output_splitter_moved(self, _pos: int, _index: int) -> None:
+        """用户拖拽改变面板高度 → 记忆（仅展开态；收起时下格是头部栏高）。"""
+        if self.output_panel is None or not self.output_panel.is_open():
+            return
+        if self.settings is not None:
+            self.settings.set('output_panel_height',
+                              self._v_splitter.sizes()[1])
+            self.settings.save()
+
+    def _toggle_file_tree(self) -> None:
+        """页签条右端钮 / Ctrl+B：收/展文件树（面板按页记忆持久化）。"""
+        panel = getattr(self, '_file_tree_panel', None)
+        if panel is not None:
+            panel.toggle_panel()
 
     def _page(self, object_name: str):
         """按 objectName 取页面（占位页返回原样，调用方自行判接口）。"""
         return self.pages.get(object_name)
 
     def _setup_global_shortcuts(self) -> None:
-        """全局快捷键：Ctrl+1~8 切换页签，F1 显示快捷键清单。"""
+        """全局快捷键：Ctrl+1~8 切页签，Ctrl+B 文件树，Ctrl+J 输出面板，F1 清单。"""
         self._page_shortcuts = [
             ('Ctrl+1', 'homeInterface', '主页'),
             ('Ctrl+2', 'projectInterface', '项目'),
@@ -337,6 +423,13 @@ class MyGPRMainWindow(FluentWindow):
             sc = QShortcut(QKeySequence(seq), self)
             sc.setContext(Qt.ShortcutContext.WindowShortcut)
             sc.activated.connect(lambda checked=False, on=obj_name: self._goto_page(on))
+        if self.output_panel is not None:
+            self._panel_toggle = QShortcut(QKeySequence('Ctrl+J'), self)
+            self._panel_toggle.setContext(Qt.ShortcutContext.WindowShortcut)
+            self._panel_toggle.activated.connect(self.output_panel.toggle_panel)
+        self._file_tree_toggle = QShortcut(QKeySequence('Ctrl+B'), self)
+        self._file_tree_toggle.setContext(Qt.ShortcutContext.WindowShortcut)
+        self._file_tree_toggle.activated.connect(self._toggle_file_tree)
         self._shortcuts_help = QShortcut(QKeySequence("F1"), self)
         self._shortcuts_help.setContext(Qt.ShortcutContext.WindowShortcut)
         self._shortcuts_help.activated.connect(self._show_shortcuts_dialog)
@@ -382,12 +475,6 @@ class MyGPRMainWindow(FluentWindow):
         if hasattr(settings_page, 'load_settings'):
             settings_page.load_settings(self.settings.get_all())
 
-        # 恢复全局日志面板折叠状态
-        if bool(self.settings.get('log_panel_collapsed', True)):
-            self._panel_collapsed = True
-            self.log_panel.hide()
-            self._set_fold_button_look(collapsed=True)
-
         # 后端就绪门控：除主页/设置外页面禁用，backend_ready 后 enable
         if self.backend_controller is not None:
             self._set_backend_ready(False)
@@ -399,83 +486,42 @@ class MyGPRMainWindow(FluentWindow):
 
         self.log_message('INFO MyGPR 探地雷达数据处理软件启动成功')
 
-    # ============================================================ 右侧面板
-    def _toggle_panel(self) -> None:
-        """折叠/展开右侧面板（220ms OutCubic，动画防重入）。"""
-        if self._panel_animating:
-            return
-        self._panel_animating = True
-        self.panel_animation.stop()
-        if self._panel_collapsed:
-            # 展开：0 → 380
-            self.log_panel.setMaximumWidth(0)
-            self.log_panel.show()
-            self.panel_animation.setStartValue(0)
-            self.panel_animation.setEndValue(constants.PANEL_MAX_WIDTH)
-        else:
-            # 收起：380 → 0，完成后 hide() 并复位 maximumWidth
-            self.panel_animation.setStartValue(constants.PANEL_MAX_WIDTH)
-            self.panel_animation.setEndValue(0)
-        self.panel_animation.start()
-
-    def _on_panel_animation_finished(self) -> None:
-        self._panel_animating = False
-        if self._panel_collapsed:
-            # 本次是展开完成
-            self._panel_collapsed = False
-            self._set_fold_button_look(collapsed=False)
-        else:
-            # 本次是收起完成：hide 并复位 maximumWidth
-            self._panel_collapsed = True
-            self.log_panel.hide()
-            self.log_panel.setMaximumWidth(constants.PANEL_MAX_WIDTH)
-            self._set_fold_button_look(collapsed=True)
-        self.settings.set('log_panel_collapsed', self._panel_collapsed)
-        self.settings.save()
-
-    def _set_fold_button_look(self, collapsed: bool) -> None:
-        """全局日志面板折叠按钮的图标与提示随状态切换。"""
-        from ui.widgets import chevron_left_icon
-        if collapsed:
-            self.fold_button.setIcon(chevron_left_icon())
-            self.fold_button.setToolTip('展开右侧面板')
-        else:
-            self.fold_button.setIcon(FIF.CHEVRON_RIGHT_MED.icon())
-            self.fold_button.setToolTip('收起右侧面板')
-
     # ============================================================ 日志 / 主题 / 后端门控
     def log_message(self, msg: str) -> None:
-        """统一日志入口（三级通道之一：右侧日志面板）。"""
+        """统一日志入口（三级通道之一：底部输出面板日志 tab）。"""
         self._log_signal.emit(msg)
 
     def _on_log_message(self, msg: str) -> None:
-        if hasattr(self.log_panel, 'append_log'):
-            self.log_panel.append_log(msg)
+        if self.output_panel is not None:
+            self.output_panel.append_log(msg)
 
     def _on_theme_changed(self, theme: str) -> None:
-        """主题切换槽：setTheme + LogPanel 换肤 + 各 View.apply_theme + pg 背景。"""
+        """主题切换槽：setTheme + 输出面板换肤 + 各 View.apply_theme + 全量重绘。
+
+        全窗控件单轮遍历同时完成 update() 与 apply_theme（原两轮 findChildren
+        遍历在视图树大时构成重绘风暴）；页面/视图树运行期基本不变，
+        无缓存列表的需求，单轮已够。
+        """
         dark = str(theme) == constants.THEME_DARK
         apply_theme(theme)
         # qfluentwidgets 1.11 的 CardWidget 等纯 paintEvent 控件在主题切换时
         # 不会自动触发重绘（浅色底 + 深色文字的"半套主题"问题），这里强制
         # 全量 update()，保证深浅主题即时、完整地生效。
+        # 日志框换肤：浅深主题都跟随——全宽面板下浅主题配深底大色块过于突兀
+        if self.output_panel is not None:
+            self.output_panel.apply_theme(dark)
+        self._apply_top_nav_style()
+        # 单轮遍历：重绘 + 主题应用一次完成（所有 BScanView/AScanView 等
+        # 鸭子类型实现 apply_theme 的控件；output_panel 已在上文单独换肤）
         for widget in self.findChildren(QWidget):
             widget.update()
-        self.update()
-        # 日志框换肤（style_spec §2.5）：启动回放浅色主题时保留初始 #2b2b2b 深底
-        if not self._restoring_settings or dark:
-            if hasattr(self.log_panel, 'apply_theme'):
-                self.log_panel.apply_theme(dark)
-            elif hasattr(self.log_panel, 'set_theme'):
-                self.log_panel.set_theme(theme)
-        # 所有 BScanView/AScanView（鸭子类型，A2 交付后自动生效）
-        for widget in self.findChildren(QWidget):
             apply_fn = getattr(widget, 'apply_theme', None)
-            if callable(apply_fn) and widget is not self.log_panel:
+            if callable(apply_fn) and widget is not self.output_panel:
                 try:
                     apply_fn(dark)
                 except Exception as e:
                     logger.debug('apply_theme 调用失败: %s', e)
+        self.update()
         # 设置页主题 ComboBox 回写（blockSignals 防循环）
         settings_page = self._page('settingsInterface')
         if hasattr(settings_page, 'set_theme_text'):
@@ -670,6 +716,16 @@ class MyGPRMainWindow(FluentWindow):
         if page is not None:
             self.switchTo(page)
 
+    def _on_page_switched(self, index: int) -> None:
+        """页面切换 → 顶部页签选中态同步 + 文件树按该页记忆的展开态收/放。"""
+        widget = self.stackedWidget.widget(index)
+        name = str(widget.objectName() or '') if widget is not None else ''
+        top_nav = getattr(self, '_top_nav', None)
+        if name and top_nav is not None:
+            top_nav.setCurrentItem(name)
+        if name and self._file_tree_panel is not None:
+            self._file_tree_panel.apply_page(name)
+
     def _show_shortcuts_dialog(self) -> None:
         """F1：弹出当前支持的快捷键清单。"""
         dialog = QDialog(self)
@@ -682,6 +738,8 @@ class MyGPRMainWindow(FluentWindow):
         for seq, _obj, title in self._page_shortcuts:
             rows.append(f'<li><b>{seq}</b>：切换到{title}</li>')
         rows.extend([
+            '<li><b>Ctrl+B</b>：收起/展开左侧文件树</li>',
+            '<li><b>Ctrl+J</b>：收起/展开底部输出面板（日志/任务）</li>',
             '<li><b>Ctrl+R</b>：处理页运行处理链</li>',
             '<li><b>Ctrl+L</b>：处理页加载测线数据</li>',
             '<li><b>Delete</b>：处理链删除选中步骤 / 项目页删除选中测线</li>',

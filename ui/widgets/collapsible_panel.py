@@ -5,8 +5,8 @@
 折叠按钮为沿面板边缘的纵向长条（chevron 图标 + 主题色淡底），
 展开/折叠时都容易发现；折叠后按钮铺满整个窄条。
 
-与全局 LogPanel 的折叠动画风格保持一致：
-- QPropertyAnimation(maximumWidth) 220ms OutCubic
+与底部 OutputPanel 的收展动画风格保持一致：
+- QPropertyAnimation 220ms OutCubic
 - 主题色淡底 + hover 加深
 """
 
@@ -107,6 +107,17 @@ class CollapsiblePanel(QWidget):
     # ------------------------------------------------------------ 状态
     def is_collapsed(self) -> bool:
         return self._collapsed
+
+    def expand_width(self) -> int:
+        """展开态目标栏宽（窄窗自动折叠策略计算用）。"""
+        return self._expand_width
+
+    def footprint_width(self) -> int:
+        """当前状态占用的栏宽：折叠 = collapse_width，展开 = expand_width。
+
+        解析式布局计算用（不读几何，避免 resizeEvent 里子控件几何滞后一帧）。
+        """
+        return self._collapse_width if self._collapsed else self._expand_width
 
     def set_collapsed(self, collapsed: bool, animate: bool = True) -> None:
         """折叠或展开面板。"""

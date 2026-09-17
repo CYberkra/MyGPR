@@ -3,8 +3,8 @@
 
 三栏 QHBoxLayout：
 - 左栏 ScrollArea 固定 320px：卡片"方法库"（MethodBrowser）
-- 中栏 stretch：卡片"数据预览"（SegmentedWidget 原始数据/处理结果 + BScanView
-  + colormap ComboBox + p_low/p_high + 刷新色阶 + 加载测线数据）+ 进度条（初始隐藏）
+- 中栏 stretch：卡片"数据预览"（标题与 SlimSegment 原始数据/处理结果同行
+  header + BScanView + colormap ComboBox + p_low/p_high + 刷新色阶）+ 进度条（初始隐藏）
 - 右栏 ScrollArea 固定 340px：卡片"处理链"（PipelineList + 添加所选方法）、
   卡片"参数设置"（ParamForm + 应用到选中步骤）、卡片"执行"（输入数据选择
   支持从某个成果继续处理 + 结果名 + 运行/取消）、卡片"AutoTune 自动调参"
@@ -15,68 +15,30 @@
 """
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont, QKeySequence, QShortcut
+from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (QHBoxLayout, QVBoxLayout, QWidget)
 from qfluentwidgets import (
-    CaptionLabel, CardWidget, ComboBox, DoubleSpinBox, InfoBar,
+    CaptionLabel, ComboBox, DoubleSpinBox, InfoBar,
     InfoBarPosition, LineEdit, PrimaryPushButton, ProgressBar, PushButton,
-    ScrollArea, SegmentedWidget, SubtitleLabel,
 )
 from qfluentwidgets import FluentIcon as FIF
 
 from ui.desktop_backend_facade import compute_display_levels
 from ui import constants
 from ui.motion import animate_progress
-from ui.widgets import (BScanView, CollapsiblePanel, make_page_title, MethodBrowser, ParamForm,
-                        PipelineList, clear_invalid,
+from ui.page_scaffold import (PanelStateMixin, make_card, make_form_row,
+                              make_scroll_column, make_segment_card,
+                              refill_combo)
+from ui.widgets import (BScanView, CollapsiblePanel, MethodBrowser, ParamForm,
+                        PipelineList, SlimSegment, clear_invalid,
     make_separator,)
 
-# 预览分段（SegmentedWidget routeKey）
+# 预览分段（SlimSegment routeKey）
 _SEG_ORIGINAL = 'originalData'
 _SEG_RESULT = 'processResult'
 
 
-def _card_title(text: str) -> SubtitleLabel:
-    """卡片标题：SubtitleLabel 微软雅黑 10pt Bold（SPEC §1）。"""
-    label = SubtitleLabel(text)
-    label.setFont(QFont(constants.FONT_FAMILY, 10, QFont.Weight.Bold))
-    return label
-
-
-def _make_card(title: str) -> tuple:
-    """卡片范式：CardWidget + QVBoxLayout spacing=10 margins=(15,15,15,15)，
-    首行 SubtitleLabel 卡片标题。返回 (card, layout)。"""
-    card = CardWidget()
-    layout = QVBoxLayout(card)
-    layout.setContentsMargins(*constants.CARD_MARGINS)
-    layout.setSpacing(constants.CARD_SPACING)
-    layout.addWidget(_card_title(title))
-    return card, layout
-
-
-def _make_scroll_column(width: int) -> tuple:
-    """固定宽滚动栏：ScrollArea(固定 width，透明、隐藏横向滚动条) +
-    内容 widget(固定 width-16，透明) + 内容 QVBoxLayout(spacing=15)。
-    返回 (scroll_area, content_layout)。"""
-    scroll = ScrollArea()
-    scroll.setFixedWidth(width)
-    scroll.setWidgetResizable(True)
-    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-    scroll.setStyleSheet(
-        'QScrollArea { background-color: transparent; border: none; }')
-    content = QWidget(scroll)
-    content.setFixedWidth(width - 16)
-    content.setObjectName('pageScrollContent')
-    content.setStyleSheet(
-        'QWidget#pageScrollContent { background-color: transparent; }')
-    layout = QVBoxLayout(content)
-    layout.setContentsMargins(0, 0, 0, 0)
-    layout.setSpacing(constants.PAGE_SPACING)
-    scroll.setWidget(content)
-    return scroll, layout
-
-
-class ProcessingPage(QWidget):
+class ProcessingPage(PanelStateMixin, QWidget):
     """处理工作台页面。"""
 
     run_requested = pyqtSignal(dict)            # current_pipeline() 载荷（含 steps）
@@ -87,6 +49,8 @@ class ProcessingPage(QWidget):
     # 批量处理（B4）UI 已按用户决策暂时屏蔽（2026-09-02）：卡片、信号与
     # 接线整体撤下；后端 run_pipeline_batch 契约保留，恢复时重建本页卡片
     # 并回接 page_coordinator._on_batch_run_requested 即可。
+
+    _PANEL_STATE_PREFIX = 'processing'
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -100,66 +64,37 @@ class ProcessingPage(QWidget):
         self._autotune_result = None    # (method_id, dict)
         self._autotune_running = False  # AutoTune 运行中（防重复提交）
         self._selected_method_id = ''   # 方法库当前选中方法
-        self._line_ids: list[str] = []  # 与 _line_combo 逐项对应的 line_id
-        self._artifact_ids: list[str] = []  # 与 _artifact_combo 逐项对应的 artifact_id
+        self._sm = None                 # 共享 SettingsManager（主窗口注入，唯一写者）
 
         self._build_ui()
         self._connect_internal()
         self._restore_panel_state()
 
-    # ============================================================ 面板状态
-    def panel_states(self) -> dict:
-        """当前左右面板折叠状态。"""
-        return {
-            'left': self._left_panel.is_collapsed(),
-            'right': self._right_panel.is_collapsed(),
-        }
-
-    def set_panel_collapsed(self, *, left: bool = None, right: bool = None,
-                            animate: bool = True) -> None:
-        """设置左右面板折叠状态。"""
-        if left is not None:
-            self._left_panel.set_collapsed(bool(left), animate=animate)
-        if right is not None:
-            self._right_panel.set_collapsed(bool(right), animate=animate)
-
-    def _restore_panel_state(self) -> None:
-        """从 SettingsManager 恢复折叠状态。"""
-        from ui.settings_manager import SettingsManager
-        sm = SettingsManager()
-        self._left_panel.set_collapsed(
-            bool(sm.get('processing_left_collapsed', False)), animate=False)
-        self._right_panel.set_collapsed(
-            bool(sm.get('processing_right_collapsed', False)), animate=False)
-
-    def _save_panel_state(self) -> None:
-        """把当前折叠状态写回 SettingsManager。"""
-        from ui.settings_manager import SettingsManager
-        sm = SettingsManager()
-        sm.set('processing_left_collapsed', self._left_panel.is_collapsed())
-        sm.set('processing_right_collapsed', self._right_panel.is_collapsed())
-        sm.save()
+    # ============================================================ 设置注入
+    def set_settings_manager(self, sm) -> None:
+        """注入主窗口共享的 SettingsManager（唯一写者）并恢复折叠状态。"""
+        self._sm = sm
+        self._restore_panel_state()
 
     # ============================================================ UI 构建
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
         root.setContentsMargins(*constants.PAGE_MARGINS)
         root.setSpacing(constants.PAGE_SPACING)
-        root.addWidget(make_page_title('处理工作台'))
 
         columns = QHBoxLayout()
         columns.setSpacing(constants.PAGE_SPACING)
         root.addLayout(columns, 1)
 
-        # ---------------- 左栏（展开 320px，可折叠；滚动栏宽须与面板展开宽一致）
-        left_scroll, left_layout = _make_scroll_column(320)
+        # ---------------- 左栏（展开 SIDE_TOOL_WIDTH px，可折叠；滚动栏宽须与面板展开宽一致）
+        left_scroll, left_layout = make_scroll_column(constants.SIDE_TOOL_WIDTH)
         left_panel = CollapsiblePanel(
-            'left', expand_width=320, collapse_width=40, parent=self)
+            'left', expand_width=constants.SIDE_TOOL_WIDTH, collapse_width=40, parent=self)
         left_panel.set_content_widget(left_scroll)
         columns.addWidget(left_panel)
         self._left_panel = left_panel
 
-        methods_card, methods_layout = _make_card('方法库')
+        methods_card, methods_layout = make_card('方法库')
         self._method_browser = MethodBrowser(methods_card)
         self._method_browser.setMinimumHeight(320)
         methods_layout.addWidget(self._method_browser, 1)
@@ -173,12 +108,9 @@ class ProcessingPage(QWidget):
         middle_layout.setSpacing(constants.PAGE_SPACING)
         columns.addWidget(middle, 1)
 
-        preview_card, preview_layout = _make_card('数据预览')
-        # 顶行拆两行，避免一行内控件挤压叠字：
-        #   行1 = 原始/结果分段 + 加载按钮；行2 = 测线 / 成果 下拉
-        seg_row = QHBoxLayout()
-        seg_row.setSpacing(constants.CARD_SPACING)
-        self._preview_segment = SegmentedWidget(preview_card)
+        # header 单行化：标题居左 + 原始/结果瘦页签居右（make_segment_card
+        # 范式）；选择器行（测线 / 成果 下拉）保持第二行。
+        self._preview_segment = SlimSegment(self)
         self._preview_segment.addItem(
             _SEG_ORIGINAL, '原始数据',
             onClick=lambda: self._show_bundle(_SEG_ORIGINAL))
@@ -186,9 +118,8 @@ class ProcessingPage(QWidget):
             _SEG_RESULT, '处理结果',
             onClick=lambda: self._show_bundle(_SEG_RESULT))
         self._preview_segment.setCurrentItem(_SEG_ORIGINAL)
-        seg_row.addWidget(self._preview_segment)
-        seg_row.addStretch(1)
-        preview_layout.addLayout(seg_row)
+        preview_card, preview_layout = make_segment_card(
+            '数据预览', self._preview_segment, parent=self)
 
         sel_row = QHBoxLayout()
         sel_row.setSpacing(constants.CARD_SPACING)
@@ -208,7 +139,7 @@ class ProcessingPage(QWidget):
         preview_layout.addLayout(sel_row)
 
         self._bscan = BScanView(preview_card)
-        self._bscan.setMinimumHeight(300)
+        self._bscan.setMinimumHeight(constants.PREVIEW_MIN_HEIGHT)
         preview_layout.addWidget(self._bscan, 1)
 
         # 色阶工具行：控件用前缀代替独立标签、收窄最小宽，保证窄屏
@@ -263,15 +194,15 @@ class ProcessingPage(QWidget):
         self._progress_row_widget.setVisible(False)
         middle_layout.addWidget(self._progress_row_widget)
 
-        # ---------------- 右栏（展开 340px，可折叠；滚动栏宽须与面板展开宽一致）
-        right_scroll, right_layout = _make_scroll_column(340)
+        # ---------------- 右栏（展开 SIDE_FORM_WIDTH px，可折叠；滚动栏宽须与面板展开宽一致）
+        right_scroll, right_layout = make_scroll_column(constants.SIDE_FORM_WIDTH)
         right_panel = CollapsiblePanel(
-            'right', expand_width=340, collapse_width=40, parent=self)
+            'right', expand_width=constants.SIDE_FORM_WIDTH, collapse_width=40, parent=self)
         right_panel.set_content_widget(right_scroll)
         columns.addWidget(right_panel)
         self._right_panel = right_panel
 
-        pipeline_card, pipeline_layout = _make_card('处理链')
+        pipeline_card, pipeline_layout = make_card('处理链')
         self._pipeline_list = PipelineList(pipeline_card)
         self._pipeline_list.setMinimumHeight(200)
         pipeline_layout.addWidget(self._pipeline_list, 1)
@@ -280,33 +211,23 @@ class ProcessingPage(QWidget):
         pipeline_layout.addWidget(self._add_method_btn)
         right_layout.addWidget(pipeline_card, 1)
 
-        param_card, param_layout = _make_card('参数设置')
+        param_card, param_layout = make_card('参数设置')
         self._param_form = ParamForm(param_card)
         param_layout.addWidget(self._param_form, 1)
         right_layout.addWidget(param_card, 1)
 
-        exec_card, exec_layout = _make_card('执行')
-        input_row = QHBoxLayout()
-        input_row.setSpacing(constants.CARD_SPACING)
-        input_label = CaptionLabel('输入数据:', exec_card)
-        input_label.setMinimumWidth(100)
-        input_row.addWidget(input_label)
+        exec_card, exec_layout = make_card('执行')
         self._input_combo = ComboBox(exec_card)
         self._input_combo.addItem('原始数据')
         self._input_combo.setToolTip(
             '处理链的输入：默认从原始数据开始；选择某个成果则在该成果基础上继续处理')
-        input_row.addWidget(self._input_combo, 1)
-        exec_layout.addLayout(input_row)
-        name_row = QHBoxLayout()
-        name_row.setSpacing(constants.CARD_SPACING)
-        name_label = CaptionLabel('结果名称:', exec_card)
-        name_label.setMinimumWidth(100)
-        name_row.addWidget(name_label)
+        exec_layout.addLayout(make_form_row(
+            '输入数据:', self._input_combo, parent=exec_card))
         self._result_name_edit = LineEdit(exec_card)
         self._result_name_edit.setPlaceholderText('例如: 增益处理后结果')
         self._result_name_edit.setToolTip('处理成果保存名称')
-        name_row.addWidget(self._result_name_edit, 1)
-        exec_layout.addLayout(name_row)
+        exec_layout.addLayout(make_form_row(
+            '结果名称:', self._result_name_edit, parent=exec_card))
         run_row = QHBoxLayout()
         run_row.setSpacing(constants.CARD_SPACING)
         self._run_btn = PrimaryPushButton('运行处理链', exec_card, FIF.PLAY)
@@ -319,15 +240,10 @@ class ProcessingPage(QWidget):
         exec_layout.addLayout(run_row)
         right_layout.addWidget(exec_card)
 
-        autotune_card, autotune_layout = _make_card('AutoTune 自动调参')
-        method_row = QHBoxLayout()
-        method_row.setSpacing(constants.CARD_SPACING)
-        method_label = CaptionLabel('当前方法:', autotune_card)
-        method_label.setMinimumWidth(100)
-        method_row.addWidget(method_label)
+        autotune_card, autotune_layout = make_card('AutoTune 自动调参')
         self._autotune_method_label = CaptionLabel('--', autotune_card)
-        method_row.addWidget(self._autotune_method_label, 1)
-        autotune_layout.addLayout(method_row)
+        autotune_layout.addLayout(make_form_row(
+            '当前方法:', self._autotune_method_label, parent=autotune_card))
         self._autotune_btn = PushButton('开始调参', autotune_card)
         self._autotune_btn.setToolTip('对左侧选中的方法自动搜索最优参数')
         self._autotune_btn.setEnabled(False)
@@ -378,9 +294,11 @@ class ProcessingPage(QWidget):
         self._run_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
         self._run_shortcut.activated.connect(self._on_run_clicked)
 
-        # 面板折叠状态持久化
-        self._left_panel.sig_collapsed.connect(self._save_panel_state)
-        self._right_panel.sig_collapsed.connect(self._save_panel_state)
+        # 面板折叠：状态持久化 + 窄窗自动折叠痕迹清理（尊重手动选择）
+        self._left_panel.sig_collapsed.connect(
+            lambda collapsed: self._on_side_panel_collapsed('left', collapsed))
+        self._right_panel.sig_collapsed.connect(
+            lambda collapsed: self._on_side_panel_collapsed('right', collapsed))
 
     # ============================================================ 公共接口（供主窗口接线）
     def set_methods(self, methods: list) -> None:
@@ -457,19 +375,12 @@ class ProcessingPage(QWidget):
 
     def set_lines(self, lines: list) -> None:
         """测线列表 → 处理页测线选择下拉。"""
-        # 从显示文本解析 line_id（兼容 qfluentwidgets ComboBox 不保存 userData）
-        previous_id = self._line_ids[self._line_combo.currentIndex()] if self._line_combo.currentIndex() >= 0 else ''
-        self._line_combo.blockSignals(True)
-        self._line_combo.clear()
-        self._line_ids = []
-        for line in lines or []:
-            line_id = str(getattr(line, 'line_id', '') or '')
-            name = str(getattr(line, 'name', '') or '')
-            display = f"{line_id} {name}".strip()
-            self._line_combo.addItem(display or line_id)
-            self._line_ids.append(line_id)
-        self._line_combo.blockSignals(False)
-        self._set_line_combo_without_emit(previous_id)
+        refill_combo(
+            self._line_combo, lines or [],
+            lambda line: f"{getattr(line, 'line_id', '') or ''} "
+                         f"{getattr(line, 'name', '') or ''}".strip(),
+            lambda line: str(getattr(line, 'line_id', '') or ''),
+            previous_data=self._line_combo.currentData())
 
     def set_artifacts(self, artifacts: list) -> None:
         """成果列表 → 处理页成果选择下拉与执行卡输入数据下拉。
@@ -478,82 +389,58 @@ class ProcessingPage(QWidget):
         无有效选择时静默落到最新一条。自动预览由主窗口
         _preview_newest_artifact 路径统一负责，避免双重预览。
         """
-        previous_id = ''
-        idx = self._artifact_combo.currentIndex()
-        if 0 <= idx < len(self._artifact_ids):
-            previous_id = self._artifact_ids[idx]
+        def _artifact_id(art) -> str:
+            return str(getattr(art, 'artifact_id', '') or '')
 
-        self._artifact_combo.blockSignals(True)
-        self._input_combo.blockSignals(True)
-        self._artifact_combo.clear()
-        self._input_combo.clear()
-        self._artifact_ids = []
-        self._input_combo.addItem('原始数据')   # 索引 0 = 从原始数据开始
-        for art in artifacts or []:
-            artifact_id = str(getattr(art, 'artifact_id', '') or '')
+        def _display(art) -> str:
             name = str(getattr(art, 'name', '') or '')
             created = str(getattr(art, 'created_at', '') or '')
-            display = f"{name}  {created}".strip()
-            self._artifact_combo.addItem(display or artifact_id)
-            self._input_combo.addItem(f'成果: {display or artifact_id}')
-            self._artifact_ids.append(artifact_id)
+            return f"{name}  {created}".strip() or _artifact_id(art)
 
-        # 保持旧选择；否则默认最新一条
-        try:
-            keep = self._artifact_ids.index(previous_id) if previous_id else -1
-        except ValueError:
-            keep = -1
-        if keep < 0 and self._artifact_ids:
-            keep = 0
-        if keep >= 0:
-            self._artifact_combo.setCurrentIndex(keep)
-            self._input_combo.setCurrentIndex(keep + 1)
-        else:
-            self._input_combo.setCurrentIndex(0)
-        self._artifact_combo.blockSignals(False)
-        self._input_combo.blockSignals(False)
+        refill_combo(
+            self._artifact_combo, artifacts or [],
+            _display, _artifact_id,
+            previous_data=self._artifact_combo.currentData())
+        refill_combo(
+            self._input_combo, artifacts or [],
+            lambda art: f'成果: {_display(art)}', _artifact_id,
+            previous_data=self._input_combo.currentData(),
+            prepend=(('原始数据', ''),))   # 索引 0 = 从原始数据开始
 
     def select_artifact(self, artifact_id: str) -> bool:
         """静默选中指定成果（不发射 artifact_selected，供主窗口自动预览时同步）。"""
-        artifact_id = str(artifact_id or '')
-        try:
-            idx = self._artifact_ids.index(artifact_id)
-        except ValueError:
+        index = self._artifact_combo.findData(str(artifact_id or ''))
+        if index < 0:
             return False
         self._artifact_combo.blockSignals(True)
-        self._artifact_combo.setCurrentIndex(idx)
+        self._artifact_combo.setCurrentIndex(index)
         self._artifact_combo.blockSignals(False)
         return True
 
     def _set_line_combo_without_emit(self, line_id: str) -> None:
-        line_id = str(line_id or '')
-        try:
-            idx = self._line_ids.index(line_id)
-        except ValueError:
-            idx = 0 if self._line_ids else -1
-        if idx >= 0:
+        index = self._line_combo.findData(str(line_id or ''))
+        if index < 0:
+            index = 0 if self._line_combo.count() else -1
+        if index >= 0:
             self._line_combo.blockSignals(True)
-            self._line_combo.setCurrentIndex(idx)
+            self._line_combo.setCurrentIndex(index)
             self._line_combo.blockSignals(False)
 
     def _on_line_combo_changed(self, index: int) -> None:
-        if 0 <= index < len(self._line_ids):
-            self.line_changed.emit(self._line_ids[index])
+        if index >= 0:
+            self.line_changed.emit(str(self._line_combo.itemData(index) or ''))
 
     def _on_artifact_combo_changed(self, index: int) -> None:
-        if 0 <= index < len(self._artifact_ids):
-            self.artifact_selected.emit(self._artifact_ids[index])
+        if index >= 0:
+            self.artifact_selected.emit(
+                str(self._artifact_combo.itemData(index) or ''))
 
     def current_pipeline(self) -> dict:
         """当前处理链定义：{"steps", "result_name", "input_artifact_id"}。"""
-        input_idx = self._input_combo.currentIndex()
-        input_artifact_id = (
-            self._artifact_ids[input_idx - 1]
-            if 1 <= input_idx <= len(self._artifact_ids) else '')
         return {
             'steps': self._pipeline_list.steps(),
             'result_name': self._result_name_edit.text().strip(),
-            'input_artifact_id': input_artifact_id,
+            'input_artifact_id': self._input_artifact_id(),
         }
 
     # ============================================================ 内部逻辑
@@ -688,11 +575,9 @@ class ProcessingPage(QWidget):
 
     def _input_artifact_id(self) -> str:
         """输入数据下拉当前选中的 artifact_id（''=原始数据）。"""
-        idx = self._input_combo.currentIndex()
-        if idx <= 0:
+        if self._input_combo.currentIndex() <= 0:
             return ''
-        artifact_idx = idx - 1
-        return self._artifact_ids[artifact_idx] if 0 <= artifact_idx < len(self._artifact_ids) else ''
+        return str(self._input_combo.currentData() or '')
 
     def _on_adopt_params(self) -> None:
         if self._autotune_result is None:
@@ -718,7 +603,7 @@ class ProcessingPage(QWidget):
             merged.update(best)
             steps[target]['params'] = merged
             self._pipeline_list.set_steps(steps)
-            self._pipeline_list._list.setCurrentRow(target)
+            self._pipeline_list.select_step(target)
             self._pipeline_list.sig_changed.emit()
         else:
             self._param_form.set_values(best)

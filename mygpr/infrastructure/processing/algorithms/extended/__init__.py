@@ -7,14 +7,15 @@ import numpy as np
 
 from .amplitude import method_amplitude_scale
 from .ccbs import method_ccbs
+from .deconvolution import method_mixed_phase_deconvolution
 from .depth import method_time_to_depth
 from .energy_gain import method_energy_decay_gain
-from .equidistant import method_equidistant_trace_resample
 from .hilbert import method_hilbert_envelope
+from .inverse_q import method_inverse_q
 from .median_background import method_median_background_2d
 from .time_cut import method_time_cut
 from .trace_qc import method_trace_qc
-from .wavelet import method_wavelet_2d, method_wavelet_svd
+from .wavelet import method_wavelet_2d
 
 ExtendedFunction = Callable[..., tuple[np.ndarray, dict[str, Any]]]
 
@@ -45,9 +46,6 @@ def native_trace_qc(data: Any, params: dict[str, Any]):
     return _execute(method_trace_qc, data, params)
 
 
-def native_equidistant_trace_resample(data: Any, params: dict[str, Any]):
-    return _execute(method_equidistant_trace_resample, data, params)
-
 
 def native_energy_decay_gain(data: Any, params: dict[str, Any]):
     return _execute(method_energy_decay_gain, data, params)
@@ -63,10 +61,6 @@ def native_median_background(data: Any, params: dict[str, Any]):
 
 def native_wavelet_2d(data: Any, params: dict[str, Any]):
     return _execute(method_wavelet_2d, data, params)
-
-
-def native_wavelet_svd(data: Any, params: dict[str, Any]):
-    return _execute(method_wavelet_svd, data, params)
 
 
 def native_hilbert_envelope(data: Any, params: dict[str, Any]):
@@ -93,6 +87,14 @@ def native_time_to_depth(data: Any, params: dict[str, Any]):
         },
     )
     return output, resolved
+
+
+def native_mixed_phase_deconvolution(data: Any, params: dict[str, Any]):
+    return _execute(method_mixed_phase_deconvolution, data, params)
+
+
+def native_inverse_q(data: Any, params: dict[str, Any]):
+    return _execute(method_inverse_q, data, params)
 
 
 __all__ = [name for name in globals() if name.startswith("native_")]

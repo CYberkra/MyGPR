@@ -6,7 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import uuid
+import re
 from pathlib import Path
 from typing import Any, Callable
 
@@ -15,7 +15,7 @@ import numpy as np
 
 from core.gpr_data_model import GPRDataSet, time_to_depth_axis
 from core.hdf5_array_proxy import HDF5ArrayProxy
-from core.storage_primitives import atomic_output_path, fsync_file, utc_now
+from core.storage_primitives import atomic_output_path, fsync_directory, fsync_file, utc_now
 
 LINE_CONTAINER_SCHEMA = "mygpr.line_container.v1"
 RAW_MATRIX_PATH = "/raw/bscan"
@@ -23,7 +23,6 @@ RAW_DISTANCE_PATH = "/raw/distance_m"
 RAW_TIME_PATH = "/raw/time_ns"
 RAW_DEPTH_PATH = "/raw/depth_m"
 PROCESSING_ROOT = "/processing/artifacts"
-STAGING_ROOT = "/_staging"
 
 
 def _json(value: Any) -> str:
@@ -205,7 +204,9 @@ def write_raw_dataset(
 
 def load_raw_dataset(path: str | Path, *, line_id: str) -> GPRDataSet:
     source = Path(path).resolve()
-    with h5py.File(source, "r", libver="latest", swmr=True) as handle:
+    # 只读消费者且写路径走原子替换（读到的要么旧要么新），不开 SWMR：
+    # SWMR reader 对截断损坏文件会无限期等待（复现实证），预览路径必须快失败
+    with h5py.File(source, "r", libver="latest") as handle:
         raw = handle["raw"]
         metadata_raw = raw.attrs.get("metadata_json", "{}")
         if isinstance(metadata_raw, bytes):
@@ -232,6 +233,89 @@ def load_raw_dataset(path: str | Path, *, line_id: str) -> GPRDataSet:
     )
 
 
+def _verify_written_artifact(path: Path, artifact_id: str, digest: str,
+                             shape: tuple[int, ...], dtype: np.dtype) -> None:
+    """Re-open a freshly written container and validate the committed artifact.
+
+    fletcher32 chunks are checksum-verified by HDF5 on read, so touching a
+    sample block detects torn metadata as well as silent data corruption
+    (the "bad version number for layout message" failure mode seen when an
+    in-place ``r+`` write is interrupted).  Raises RuntimeError on any
+    mismatch so the caller can discard the temporary file.
+    """
+    final_path = f"{PROCESSING_ROOT}/{artifact_id}"
+    with h5py.File(path, "r", libver="latest") as handle:
+        if final_path not in handle:
+            raise RuntimeError(f"写回验证失败：{final_path} 不存在")
+        group = handle[final_path]
+        dataset = group["bscan"]
+        if tuple(dataset.shape) != tuple(shape):
+            raise RuntimeError(
+                f"写回验证失败：形状 {dataset.shape} != 预期 {shape}")
+        if dataset.dtype != dtype:
+            raise RuntimeError(
+                f"写回验证失败：dtype {dataset.dtype} != 预期 {dtype}")
+        dataset[shape[0] // 2, 0:1]  # fletcher32-verified read of one row
+        if str(group.attrs.get("status", "")) != "committed":
+            raise RuntimeError("写回验证失败：artifact 状态不是 committed")
+        written = _load_json_attr(group, "manifest_json").get("output_data_sha256", "")
+        if digest and written != digest:
+            raise RuntimeError("写回验证失败：sha256 摘要不匹配")
+
+
+ARTIFACT_ID_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,160}")
+
+
+def _validate_artifact_id(artifact_id: str) -> str:
+    """Enforce the artifact-id charset shared with the field project adapter.
+
+    artifact_id 直接成为 sidecar 文件名与 HDF5 组名；拒绝空串、路径分隔符
+    与 ``..`` 等路径逃逸形态（规则与 field_project_adapter 现行校验一致）。
+    """
+    text = str(artifact_id or "")
+    if ARTIFACT_ID_PATTERN.fullmatch(text) is None:
+        raise ValueError(f"非法 artifact_id：{text!r}")
+    return text
+
+
+def artifacts_dir_path(path: str | Path) -> Path:
+    """Return the per-line sidecar directory sibling to a line container.
+
+    ``data/lines/L01.h5`` → ``data/lines/L01.artifacts/``。与 backend 的
+    ``line_artifacts_dir`` 必须解析到同一目录（写路径与 delete/move 共享约定）。
+    """
+    container = Path(path).resolve()
+    return container.parent / f"{container.stem}.artifacts"
+
+
+def locate_processing_artifact(path: str | Path, artifact_id: str) -> tuple[Path, str]:
+    """Locate an artifact's backing file (dual-read: sidecar first, legacy next).
+
+    过渡期兼容两种布局：sidecar ``<stem>.artifacts/<artifact_id>.h5`` 优先，
+    其次旧容器内嵌组 ``/processing/artifacts/<artifact_id>``。两处均做可读
+    探测（能打开且含 ``bscan``）：sidecar 损坏时回退容器，容器打不开时不
+    影响有效 sidecar；两处均不可读才抛 FileNotFoundError。
+    返回 ``(file_path, dataset_path)``。
+    """
+    _validate_artifact_id(artifact_id)
+    source = Path(path).resolve()
+    group_path = f"{PROCESSING_ROOT}/{artifact_id}"
+    sidecar = artifacts_dir_path(source) / f"{artifact_id}.h5"
+    if sidecar.is_file():
+        try:
+            with h5py.File(sidecar, "r", libver="latest", swmr=True) as handle:
+                if f"{group_path}/bscan" in handle:
+                    return sidecar, f"{group_path}/bscan"
+        except (OSError, RuntimeError, TypeError, ValueError, KeyError):
+            pass
+    if source.is_file():
+        try:
+            with h5py.File(source, "r", libver="latest", swmr=True) as handle:
+                if f"{group_path}/bscan" in handle:
+                    return source, f"{group_path}/bscan"
+        except (OSError, RuntimeError, TypeError, ValueError, KeyError):
+            pass
+    raise FileNotFoundError(f"Processing artifact not found: {artifact_id}")
 def write_processing_artifact(
     path: str | Path,
     *,
@@ -242,27 +326,42 @@ def write_processing_artifact(
     cancel_requested=None,
     progress_callback=None,
 ) -> dict[str, Any]:
+    """Commit a processing artifact as a per-artifact sidecar file.
+
+    成品矩阵不再写回测线容器（旧实现 copy2 整容器 + ``r+`` 原地改写，保存
+    耗时 O(N×容器大小)，且中断曾损坏容器元数据导致整条测线不可读）。现改
+    为写入容器同目录 sidecar ``<stem>.artifacts/<artifact_id>.h5``：文件内
+    直接建立最终组名 ``/processing/artifacts/<artifact_id>/bscan``，经
+    ``atomic_output_path`` 整文件原子发布。容器本体一个字节不动——任何时刻
+    中断都绝不影响已提交数据；读取方经 ``locate_processing_artifact`` 双读，
+    旧容器内嵌组继续可用，不迁移不重写。
+
+    Sidecar 内部布局与旧容器内嵌布局逐字段一致，``dataset_path`` 字符串
+    （URI 的 dataset 部分）完全不变；result 新增 ``h5_file`` 记录实际落盘
+    文件（绝对路径），供 backend 把 catalog/URI 的 file 部分指向 sidecar。
+    """
+    _validate_artifact_id(artifact_id)
     source = Path(path).resolve()
     if not source.exists():
         raise FileNotFoundError(source)
-    staging_id = uuid.uuid4().hex
-    staging_path = f"{STAGING_ROOT}/processing_{staging_id}"
     final_path = f"{PROCESSING_ROOT}/{artifact_id}"
+    if processing_artifact_exists(source, artifact_id):
+        raise FileExistsError(f"Processing artifact already exists: {artifact_id}")
+    sidecar = artifacts_dir_path(source) / f"{artifact_id}.h5"
     result: dict[str, Any]
-    with h5py.File(source, "r+", libver="latest") as handle:
-        if final_path in handle:
-            raise FileExistsError(f"Processing artifact already exists: {artifact_id}")
-        staging = handle.require_group(staging_path)
-        try:
+    with atomic_output_path(sidecar, suffix=".h5.artifact.tmp") as temporary:
+        temporary = Path(temporary)
+        with h5py.File(temporary, "w", libver="latest") as handle:
+            group = handle.require_group(PROCESSING_ROOT).require_group(artifact_id)
             dataset, digest = _write_matrix(
-                staging,
+                group,
                 "bscan",
                 matrix,
                 cancel_requested=cancel_requested,
                 progress_callback=progress_callback,
             )
-            staged_manifest = dict(manifest)
-            staged_manifest.update(
+            committed = dict(manifest)
+            committed.update(
                 artifact_id=artifact_id,
                 dataset_path=f"{final_path}/bscan",
                 output_data_sha256=digest,
@@ -270,14 +369,9 @@ def write_processing_artifact(
                 output_dtype=str(dataset.dtype),
                 committed_at=utc_now(),
             )
-            staging.attrs["manifest_json"] = _json(staged_manifest)
-            staging.attrs["params_json"] = _json(params)
-            staging.attrs["status"] = "staged"
-            handle.flush()
-            handle.move(staging_path, final_path)
-            final = handle[final_path]
-            final.attrs["status"] = "committed"
-            handle.attrs["updated_at"] = utc_now()
+            group.attrs["manifest_json"] = _json(committed)
+            group.attrs["params_json"] = _json(params)
+            group.attrs["status"] = "committed"
             handle.flush()
             result = {
                 "artifact_id": artifact_id,
@@ -285,38 +379,60 @@ def write_processing_artifact(
                 "shape": list(dataset.shape),
                 "dtype": str(dataset.dtype),
                 "sha256": digest,
-                "manifest": staged_manifest,
+                "manifest": committed,
+                "h5_file": str(sidecar),
             }
-        except (OSError, RuntimeError, TypeError, ValueError, KeyError):
-            if staging_path in handle:
-                del handle[staging_path]
-                handle.flush()
-            raise
-    fsync_file(source)
+        _verify_written_artifact(
+            temporary, artifact_id, result["sha256"],
+            tuple(result["shape"]), np.dtype(result["dtype"]))
     return result
 
 def delete_processing_artifact(path: str | Path, artifact_id: str) -> bool:
-    """Remove an uncommitted/orphan processing group after catalog failure."""
+    """Remove an artifact from the legacy container group and/or its sidecar.
+
+    容器仅在确认存在内嵌组时才以 ``r+`` 打开（sidecar-only 场景容器零接触）；
+    sidecar 直接 unlink 后 fsync 所在目录。二者任一删除成功即返回 True。
+    """
+    _validate_artifact_id(artifact_id)
     source = Path(path).resolve()
-    if not source.exists():
-        return False
     group_path = f"{PROCESSING_ROOT}/{artifact_id}"
     deleted = False
-    with h5py.File(source, "r+", libver="latest") as handle:
-        if group_path in handle:
-            del handle[group_path]
-            handle.attrs["updated_at"] = utc_now()
-            handle.flush()
-            deleted = True
-    if deleted:
-        fsync_file(source)
+    if source.is_file():
+        present = False
+        try:
+            with h5py.File(source, "r", libver="latest", swmr=True) as handle:
+                present = group_path in handle
+        except (OSError, RuntimeError, TypeError, ValueError, KeyError):
+            present = False
+        if present:
+            with h5py.File(source, "r+", libver="latest") as handle:
+                if group_path in handle:
+                    del handle[group_path]
+                    handle.attrs["updated_at"] = utc_now()
+                    handle.flush()
+                    deleted = True
+            fsync_file(source)
+    sidecar = artifacts_dir_path(source) / f"{artifact_id}.h5"
+    if sidecar.is_file():
+        sidecar.unlink()
+        fsync_directory(sidecar.parent)
+        deleted = True
     return deleted
 
 def processing_artifact_exists(path: str | Path, artifact_id: str) -> bool:
+    _validate_artifact_id(artifact_id)
     source = Path(path).resolve()
-    if not source.exists():
-        return False
     group_path = f"{PROCESSING_ROOT}/{artifact_id}"
+    sidecar = artifacts_dir_path(source) / f"{artifact_id}.h5"
+    if sidecar.is_file():
+        try:
+            with h5py.File(sidecar, "r", libver="latest", swmr=True) as handle:
+                if f"{group_path}/bscan" in handle:
+                    return True
+        except (OSError, RuntimeError, TypeError, ValueError, KeyError):
+            pass
+    if not source.is_file():
+        return False
     try:
         with h5py.File(source, "r", libver="latest", swmr=True) as handle:
             return group_path in handle and f"{group_path}/bscan" in handle
@@ -343,8 +459,9 @@ def read_raw_metadata(path: str | Path) -> dict[str, Any]:
 
 def read_processing_artifact_record(path: str | Path, artifact_id: str) -> dict[str, Any]:
     source = Path(path).resolve()
+    artifact_file, _dataset_path = locate_processing_artifact(source, artifact_id)
     group_path = f"{PROCESSING_ROOT}/{artifact_id}"
-    with h5py.File(source, "r", libver="latest", swmr=True) as handle:
+    with h5py.File(artifact_file, "r", libver="latest", swmr=True) as handle:
         group = handle[group_path]
         dataset = group["bscan"]
         manifest = _load_json_attr(group, "manifest_json")
@@ -358,6 +475,7 @@ def read_processing_artifact_record(path: str | Path, artifact_id: str) -> dict[
             "manifest": manifest,
             "params": params,
             "status": str(group.attrs.get("status") or ""),
+            "h5_file": str(artifact_file),
         }
 
 
@@ -394,17 +512,26 @@ def compute_dataset_sha256(
 
 def list_processing_artifact_ids(path: str | Path) -> list[str]:
     source = Path(path).resolve()
-    if not source.exists():
-        return []
-    with h5py.File(source, "r", libver="latest", swmr=True) as handle:
-        group = handle.get(PROCESSING_ROOT)
-        return sorted(str(name) for name in group.keys()) if group is not None else []
+    found: set[str] = set()
+    if source.is_file():
+        try:
+            with h5py.File(source, "r", libver="latest", swmr=True) as handle:
+                group = handle.get(PROCESSING_ROOT)
+                if group is not None:
+                    found.update(str(name) for name in group.keys())
+        except (OSError, RuntimeError, TypeError, ValueError, KeyError):
+            pass
+    sidecar_dir = artifacts_dir_path(source)
+    if sidecar_dir.is_dir():
+        found.update(item.stem for item in sidecar_dir.glob("*.h5") if item.is_file())
+    return sorted(found)
 
 
 def read_processing_manifest(path: str | Path, artifact_id: str) -> dict[str, Any]:
     source = Path(path).resolve()
+    artifact_file, _dataset_path = locate_processing_artifact(source, artifact_id)
     group_path = f"{PROCESSING_ROOT}/{artifact_id}"
-    with h5py.File(source, "r", libver="latest", swmr=True) as handle:
+    with h5py.File(artifact_file, "r", libver="latest", swmr=True) as handle:
         group = handle[group_path]
         raw = group.attrs.get("manifest_json", "{}")
     if isinstance(raw, bytes):
@@ -417,9 +544,9 @@ def read_processing_manifest(path: str | Path, artifact_id: str) -> dict[str, An
 
 def load_processing_dataset(path: str | Path, *, artifact_id: str, raw_dataset: GPRDataSet | None = None) -> GPRDataSet:
     source = Path(path).resolve()
-    dataset_path = f"{PROCESSING_ROOT}/{artifact_id}/bscan"
+    artifact_file, dataset_path = locate_processing_artifact(source, artifact_id)
     manifest = read_processing_manifest(source, artifact_id)
-    proxy = HDF5ArrayProxy(source, dataset_path)
+    proxy = HDF5ArrayProxy(artifact_file, dataset_path)
     input_meta = manifest.get("input_dataset") if isinstance(manifest.get("input_dataset"), dict) else {}
     if raw_dataset is not None:
         distance = raw_dataset.distance_axis_m
@@ -428,13 +555,30 @@ def load_processing_dataset(path: str | Path, *, artifact_id: str, raw_dataset: 
         dielectric = raw_dataset.dielectric_constant
         time_window = raw_dataset.time_window_ns
     else:
-        with h5py.File(source, "r", libver="latest", swmr=True) as handle:
-            raw = handle["raw"]
-            distance = np.asarray(raw["distance_m"][...], dtype=np.float32)
-            time_axis = np.asarray(raw["time_ns"][...], dtype=np.float32)
-            depth = np.asarray(raw["depth_m"][...], dtype=np.float32)
+        # 轴永远来自容器 raw 组（sidecar 不携带轴）；容器缺失或无 raw 组时
+        # 退回 manifest input_meta 默认值，distance 由下方按输出形状重建。
+        distance = time_axis = depth = None
+        try:
+            with h5py.File(source, "r", libver="latest", swmr=True) as handle:
+                if "raw" in handle:
+                    raw = handle["raw"]
+                    if "distance_m" in raw:
+                        distance = np.asarray(raw["distance_m"][...], dtype=np.float32)
+                    if "time_ns" in raw:
+                        time_axis = np.asarray(raw["time_ns"][...], dtype=np.float32)
+                    if "depth_m" in raw:
+                        depth = np.asarray(raw["depth_m"][...], dtype=np.float32)
+        except (OSError, RuntimeError, TypeError, ValueError, KeyError):
+            pass
         dielectric = float(input_meta.get("dielectric_constant") or 9.0)
-        time_window = float(input_meta.get("time_window_ns") or (time_axis[-1] if time_axis.size else 250.0))
+        time_window = float(input_meta.get("time_window_ns")
+                            or (time_axis[-1] if time_axis is not None and time_axis.size else 250.0))
+        if distance is None:
+            distance = np.zeros(0, dtype=np.float32)
+        if time_axis is None:
+            time_axis = np.zeros(0, dtype=np.float32)
+        if depth is None:
+            depth = np.zeros(0, dtype=np.float32)
     # P1-1：优先用 manifest 持久化的输出 header 重建物理轴（形状变更方法如
     # time_cut/set_zero_time 会改变时间窗与零点，否则二次处理/成像按原始时窗算错）。
     output_header = manifest.get("output_header") if isinstance(manifest.get("output_header"), dict) else {}
@@ -494,11 +638,15 @@ __all__ = [
     "LINE_CONTAINER_SCHEMA",
     "PROCESSING_ROOT",
     "RAW_MATRIX_PATH",
+    "artifacts_dir_path",
     "choose_chunk_shape",
     "compute_dataset_sha256",
+    "delete_processing_artifact",
     "initialize_line_container",
+    "list_processing_artifact_ids",
     "load_processing_dataset",
     "load_raw_dataset",
+    "locate_processing_artifact",
     "processing_artifact_exists",
     "read_processing_artifact_record",
     "read_processing_manifest",
@@ -506,6 +654,4 @@ __all__ = [
     "validate_line_container",
     "write_processing_artifact",
     "write_raw_dataset",
-    "delete_processing_artifact",
-    "list_processing_artifact_ids",
 ]

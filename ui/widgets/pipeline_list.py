@@ -114,6 +114,15 @@ class PipelineList(QWidget):
                  'params': dict(s['params']), 'enabled': s['enabled']}
                 for s in self._steps]
 
+    def count(self) -> int:
+        """处理链步骤数。"""
+        return len(self._steps)
+
+    def select_step(self, index: int) -> None:
+        """选中指定步骤行（效果同用户点选，发 sig_step_selected 刷新参数表单）。"""
+        if 0 <= index < self._list.count():
+            self._list.setCurrentRow(index)
+
     def add_step(self, method_id: str, label: str, params: dict) -> None:
         self._steps.append({'method_id': method_id, 'label': label,
                             'params': dict(params or {}), 'enabled': True})

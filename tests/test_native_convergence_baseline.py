@@ -9,7 +9,7 @@
    （native 输出被 SHA-256 摘要钉死）、``bitwise_kernel``（与历史 CPU kernel
    逐位一致）或 ``determinism_contract``（实验性方法，仅要求确定性）。
    ``test_equivalence_evidence_covers_all_native_methods`` 保证 36 个方法
-   无一遗漏；本文件同时为证据最少的 wavelet_2d / wavelet_svd 补上直接对比。
+   无一遗漏；本文件同时为证据最少的 wavelet_2d 补上直接对比。
 
 2. 描述符等价矩阵 —— ``descriptor_baseline.json`` 钉死 Composite 目录当前
    对全部 36 个方法的输出（中文 display_name、category、visibility、
@@ -93,11 +93,9 @@ EQUIVALENCE_EVIDENCE: dict[str, tuple[str, str]] = {
     "hankel_svd": ("direct_comparison", "test_native_global_processing.py"),
     # 本文件 —— 直接对比（阶段 0 补齐的缺口）
     "wavelet_2d": ("direct_comparison", "test_native_convergence_baseline.py"),
-    "wavelet_svd": ("direct_comparison", "test_native_convergence_baseline.py"),
     # tests/test_native_extended_processing.py — golden 摘要
     "time_cut": ("golden_digest", "test_native_extended_processing.py"),
     "trace_qc": ("golden_digest", "test_native_extended_processing.py"),
-    "equidistant_trace_resample": ("golden_digest", "test_native_extended_processing.py"),
     "energy_decay_gain": ("golden_digest", "test_native_extended_processing.py"),
     "amplitude_scale": ("golden_digest", "test_native_extended_processing.py"),
     "median_background_2D": ("golden_digest", "test_native_extended_processing.py"),
@@ -114,6 +112,9 @@ EQUIVALENCE_EVIDENCE: dict[str, tuple[str, str]] = {
     # tests/test_native_migration_imaging.py
     "kirchhoff_migration": ("bitwise_kernel", "test_native_migration_imaging.py"),
     "rtm_migration": ("determinism_contract", "test_native_migration_imaging.py"),
+    # tests/test_deconv_inverse_q.py — determinism/契约（experimental，无 legacy 对照）
+    "mixed_phase_deconvolution": ("determinism_contract", "test_deconv_inverse_q.py"),
+    "inverse_q": ("determinism_contract", "test_deconv_inverse_q.py"),
 }
 
 
@@ -141,18 +142,6 @@ def test_equivalence_evidence_covers_all_native_methods() -> None:
                 "wavelet": "db4",
                 "levels": 2,
                 "threshold": 0.12,
-                "threshold_strategy": "mad_universal",
-                "threshold_mode": "soft",
-            },
-        ),
-        (
-            "wavelet_svd",
-            {
-                "wavelet": "db4",
-                "levels": 3,
-                "threshold": 0.08,
-                "rank_start": 1,
-                "rank_end": 6,
                 "threshold_strategy": "mad_universal",
                 "threshold_mode": "soft",
             },

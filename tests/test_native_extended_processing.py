@@ -51,11 +51,6 @@ CASES = {
         (72, 26),
         "64403af46f6db9bb501f0af5470742f2bb6729fa1e3d55c5b81b736c296ab16d",
     ),
-    "equidistant_trace_resample": (
-        {"spacing_m": 0.1},
-        (72, 29),
-        "6790294870ec13eb21a32b4ba03a353cef3fadd1e04c2e6cac6e6ca9928c0c00",
-    ),
     "energy_decay_gain": (
         {
             "strength": 0.8,

@@ -122,7 +122,9 @@ def _run_kirchhoff_cpu(
     )
 
     kir_profile = _assemble_kir_profile(shot_results, nx_matrix, length_m, depth, dx)
-    migrated = _postprocess_kir_profile(kir_profile, weight=weight)
+    migrated = _postprocess_kir_profile(
+        kir_profile, weight=weight, cancel_checker=cancel_checker
+    )
     imaging_shape = (int(migrated.shape[0]), int(migrated.shape[1]))
     display_migrated = np.array(migrated, copy=True)
     output_migrated = np.array(migrated, copy=True)

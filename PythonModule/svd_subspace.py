@@ -10,8 +10,8 @@ from scipy.linalg import svd
 
 def method_svd_subspace(
     data: np.ndarray,
-    rank_start: int = 2,
-    rank_end: int = 40,
+    rank_start: int = 1,
+    rank_end: int = 2,
     **kwargs: object,
 ) -> tuple[np.ndarray, dict[str, object]]:
     """Reconstruct data using a selected SVD singular-value subspace.

@@ -15,7 +15,10 @@ import re
 from PyQt6.QtGui import QValidator
 from qfluentwidgets import ComboBox as FluentComboBox
 
-_INVALID_STYLE = 'border: 1px solid #ef4444; border-radius: 5px;'
+from ui import constants
+
+# 错误态红框：语义色单源（原为裸 #ef4444，与 constants 状态色重复）
+_INVALID_STYLE = f'border: 1px solid {constants.COLOR_ERROR}; border-radius: 5px;'
 
 _HOSTNAME_RE = re.compile(
     r'^(?=.{1,253}$)([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)*'

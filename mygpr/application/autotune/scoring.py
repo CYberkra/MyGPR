@@ -40,14 +40,24 @@ def _score_zero_time(
     zero_idx = int(params.get("_zero_idx", params.get("_backup_samples", 0)))
     detector = str(params.get("_detector", "threshold"))
     threshold = float(params.get("_threshold", 0.05) or 0.05)
+    time_step_ns = _resolve_time_step_ns(before.shape[0], header_info)
+    # run#16 仪器修正: set_zero_time 成功执行后波形上移 shift_samples 行 (basic.py
+    # 契约: result[:-shift] = arr[shift:]), 原参考零位内容落到 zero_idx - shift 行。
+    # after 侧指标必须在【新零位】测量——旧实现固定在原零位, 对正确零化反而测到
+    # 被拉上来的首波能量 (pre_zero≈0.8 → 重罚), 奖励不作为、惩罚教科书正确行为。
+    # before 侧保持原零位 (配对语义)。shift 缺失时按 set_zero_time 契约成功执行
+    # 后新零恒为第 0 行回退, 与 benchmark _score_task run#15 修正同一口径。
+    shift = int(round(float(params.get("new_zero_time", 0.0)) / max(time_step_ns, 1.0e-6)))
+    shift = max(0, shift)
+    after_zero_idx = max(0, zero_idx - shift)
     before_pre = pre_zero_energy_ratio(before, zero_idx)
-    after_pre = pre_zero_energy_ratio(after, zero_idx)
+    after_pre = pre_zero_energy_ratio(after, after_zero_idx)
     after_std = first_break_std(
         after,
         method=detector if detector != "manual" else "threshold",
         threshold=max(threshold, 0.03),
     )
-    sharpness = first_break_sharpness(after, max(1, zero_idx))
+    sharpness = first_break_sharpness(after, max(1, after_zero_idx))
     sharp_norm = sharpness / max(float(np.mean(np.abs(after))), 1.0e-6)
     std_norm = after_std / max(float(before.shape[0]), 1.0)
 
@@ -55,14 +65,9 @@ def _score_zero_time(
         "pre_zero_regression": max(0.0, after_pre - before_pre) * 4.0,
         "large_shift": max(
             0.0,
-            params.get("new_zero_time", 0.0)
-            - _resolve_time_step_ns(before.shape[0], header_info)
-            * before.shape[0]
-            * 0.2,
+            params.get("new_zero_time", 0.0) - time_step_ns * before.shape[0] * 0.2,
         )
-        / max(
-            _resolve_time_step_ns(before.shape[0], header_info) * before.shape[0], 1.0
-        ),
+        / max(time_step_ns * before.shape[0], 1.0),
     }
     score = (
         -3.2 * after_pre - 1.8 * std_norm + 1.6 * sharp_norm - sum(penalties.values())
@@ -71,10 +76,11 @@ def _score_zero_time(
         "pre_zero_energy_ratio": float(after_pre),
         "first_break_std": float(after_std),
         "first_break_sharpness": float(sharp_norm),
+        "after_zero_idx": float(after_zero_idx),
     }
     reason = (
         f"零时前能量={after_pre:.4f}，首波离散度={after_std:.2f}，锐度={sharp_norm:.3f}；"
-        f"检测={detector}，回退样本={zero_idx}。"
+        f"检测={detector}，回退样本={zero_idx}，新零位={after_zero_idx}。"
     )
     return TrialScore(
         score=float(score), metrics=metrics, penalties=penalties, reason=reason

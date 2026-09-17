@@ -57,9 +57,28 @@ def method_dewow_native(data: Any, params: dict[str, Any]) -> tuple[np.ndarray, 
 def method_zero_time(data: Any, params: dict[str, Any]) -> tuple[np.ndarray, dict[str, Any]]:
     arr, warnings = ensure_matrix(data)
     new_zero = as_float(params.get("new_zero_time"), 5.0)
+    if not np.isfinite(new_zero) or new_zero <= 0.0:
+        meta = {
+            "method": "set_zero_time",
+            "new_zero_time": new_zero,
+            "shift_samples": 0,
+            "time_step_s": 0.0,
+        }
+        return normalize_output("set_zero_time", arr, meta, warnings)
     step_s = as_float(params.get("time_step_s"), 0.0)
     if step_s <= 0.0:
-        step_s = 48.0e-9 / max(1, arr.shape[0])
+        header = dict(params.get("_header_info") or params.get("header_info") or {})
+        total_time_ns = as_float(header.get("total_time_ns"), 0.0)
+        if total_time_ns <= 0.0:
+            total_time_ns = as_float(header.get("time_window_ns"), 0.0)
+        if total_time_ns > 0.0:
+            step_s = total_time_ns * 1.0e-9 / max(1, arr.shape[0])
+    if step_s <= 0.0:
+        raise ValueError(
+            "set_zero_time 缺少时间基准：无法把 new_zero_time 映射到采样点。"
+            "请提供 time_step_s 参数，或传入含 total_time_ns/time_window_ns 的 "
+            "header_info（旧版按 48ns 采样间隔猜测步长的静默回退已移除）。"
+        )
     shift = int(max(0.0, new_zero) / max(step_s * 1.0e9, 1.0e-12))
     shift = max(0, min(shift, arr.shape[0] - 1))
     result = np.zeros(arr.shape, dtype=np.float32)

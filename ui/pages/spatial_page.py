@@ -4,150 +4,51 @@
 三栏 QHBoxLayout（模式照抄 processing_page）：
 - 左栏 ScrollArea 固定 320px（可折叠）：卡片"测线"（多选勾选列表 + 颜色块）、
   卡片"底图"（瓦图源 ComboBox + 预下载按钮 + 进度）、卡片"投影信息"
-- 中栏 stretch：SegmentedWidget 切换"平面地图 / 高程剖面 / 三维视图"
-  + QStackedWidget（MapView / 高程剖面 PlotWidget / Trajectory3DView）
+- 中栏 stretch：卡片"空间视图"（标题与 SlimSegment 同行 header，切换
+  "平面地图 / 高程剖面 / 三维视图 / 深度切片"）
+  + QStackedWidget（MapView / 高程剖面 PlotWidget / Trajectory3DView /
+  DepthSliceView + 深度滑条 + 存为图层按钮）
 - 右栏 ScrollArea 固定 340px（可折叠）：卡片"测线详情" + "设为当前测线"
 
 页面纯展示 + 发信号，不直接调 controller/backend。
 """
 from __future__ import annotations
 
+import math
 import os
 
 import numpy as np
-import pyqtgraph as pg
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QIcon, QPixmap
+from PyQt6.QtCore import QObject, QRunnable, Qt, QThreadPool, QTimer, pyqtSignal
+from PyQt6.QtGui import QColor, QIcon, QPixmap
 from PyQt6.QtWidgets import (
-    QHBoxLayout, QListWidget, QListWidgetItem, QStackedWidget, QVBoxLayout, QWidget,
+    QHBoxLayout, QListWidget, QStackedWidget, QVBoxLayout, QWidget,
 )
-from qfluentwidgets import (CaptionLabel, CardWidget, ComboBox, DoubleSpinBox,
-                            PrimaryPushButton, PushButton, ScrollArea,
-                            SegmentedWidget, SubtitleLabel, SwitchButton)
+from qfluentwidgets import (CaptionLabel, ComboBox, DoubleSpinBox,
+                            PrimaryPushButton, PushButton,
+                            Slider, SwitchButton)
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants, file_dialogs
-from ui.settings_manager import SettingsManager
+from ui.geo_utils import coverage_statistics, format_distance
+from ui.page_scaffold import (PanelStateMixin, make_card, make_scroll_column,
+                              make_segment_card, rebuild_check_list)
+from ui.theme_helpers import status_color
 from ui.widgets.collapsible_panel import CollapsiblePanel
+from ui.widgets.elevation_profile_view import ElevationProfileView
 from ui.widgets.local_dem import load_xyz_grid
 from ui.widgets.map_tiles import BASEMAP_LAYERS, DEFAULT_TILE_SOURCE
 from ui.widgets.map_view import MapView
-from ui.widgets import make_page_title
+from ui.widgets.depth_slice_view import DepthSliceView
+from ui.widgets.segment_tabs import SlimSegment
 from ui.widgets.trajectory_3d_view import Trajectory3DView
-
-# 中栏分段（SegmentedWidget routeKey）
+# 中栏分段（SlimSegment routeKey）
 _SEG_MAP = 'planMap'
 _SEG_PROFILE = 'elevationProfile'
 _SEG_3D = 'trajectory3d'
+_SEG_DEPTH = 'depthSlice'
 
 # 测线颜色循环（matplotlib tab10）
 _TRACK_COLORS = constants.CHART_TRACK_COLORS
-
-
-def _coverage_statistics(tracks: list) -> dict[str, object]:
-    """Return project coverage figures derived solely from spatial tracks.
-
-    Spatial tracks normally use projected metre coordinates.  Geographic
-    longitude/latitude tracks are also accepted by the spatial adapter, so
-    those are measured with a small haversine calculation instead of treating
-    degrees as metres.  Invalid coordinates are ignored without preventing
-    the rest of a project's coverage summary from rendering.
-    """
-    track_count = 0
-    point_count = 0
-    segment_count = 0
-    length_m = 0.0
-
-    for track in tracks or []:
-        points: list[tuple[float, float]] = []
-        for point in getattr(track, 'points', ()) or ():
-            try:
-                x = float(getattr(point, 'x', float('nan')))
-                y = float(getattr(point, 'y', float('nan')))
-            except (TypeError, ValueError):
-                continue
-            if np.isfinite(x) and np.isfinite(y):
-                points.append((x, y))
-
-        if not points:
-            continue
-        track_count += 1
-        point_count += len(points)
-
-        # SpatialPersistenceMixin labels longitude/latitude tracks EPSG:4326.
-        # Only use coordinate magnitudes as a legacy fallback when the CRS is
-        # missing: local metre coordinates can legitimately be near (0, 0).
-        crs = str(getattr(track, 'coordinate_system', '') or '').lower()
-        geographic = (
-            '4326' in crs or '4490' in crs or 'wgs84' in crs
-            or 'geographic' in crs or '经纬' in crs
-            or (not crs and all(abs(x) <= 180.0 and abs(y) <= 90.0
-                               for x, y in points))
-        )
-        for (x0, y0), (x1, y1) in zip(points, points[1:]):
-            segment_count += 1
-            if geographic:
-                lat0, lat1 = np.radians((y0, y1))
-                dlat = lat1 - lat0
-                dlon = np.radians(x1 - x0)
-                a = (np.sin(dlat / 2.0) ** 2
-                     + np.cos(lat0) * np.cos(lat1) * np.sin(dlon / 2.0) ** 2)
-                length_m += 6_371_008.8 * 2.0 * np.arctan2(
-                    np.sqrt(a), np.sqrt(max(0.0, 1.0 - a)))
-            else:
-                length_m += float(np.hypot(x1 - x0, y1 - y0))
-
-    return {
-        'track_count': track_count,
-        'point_count': point_count,
-        'segment_count': segment_count,
-        'length_m': length_m,
-    }
-
-
-def _format_distance(distance_m: float) -> str:
-    """Format a distance compactly for the spatial coverage card."""
-    if distance_m >= 1000.0:
-        return f'{distance_m / 1000.0:.2f} km'
-    return f'{distance_m:.0f} m'
-
-
-def _card_title(text: str) -> SubtitleLabel:
-    """卡片标题：SubtitleLabel 微软雅黑 10pt Bold（SPEC §1）。"""
-    label = SubtitleLabel(text)
-    label.setFont(QFont(constants.FONT_FAMILY, 10, QFont.Weight.Bold))
-    return label
-
-
-def _make_card(title: str) -> tuple:
-    """卡片范式：CardWidget + QVBoxLayout，首行卡片标题。返回 (card, layout)。"""
-    card = CardWidget()
-    layout = QVBoxLayout(card)
-    layout.setContentsMargins(*constants.CARD_MARGINS)
-    layout.setSpacing(constants.CARD_SPACING)
-    layout.addWidget(_card_title(title))
-    return card, layout
-
-
-def _make_scroll_column(width: int) -> tuple:
-    """固定宽滚动栏：ScrollArea(固定 width) + 内容 widget + QVBoxLayout。
-    返回 (scroll_area, content_layout)。"""
-    scroll = ScrollArea()
-    scroll.setFixedWidth(width)
-    scroll.setWidgetResizable(True)
-    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-    scroll.setStyleSheet(
-        'QScrollArea { background-color: transparent; border: none; }')
-    content = QWidget(scroll)
-    content.setFixedWidth(width - 16)
-    content.setObjectName('pageScrollContent')
-    content.setStyleSheet(
-        'QWidget#pageScrollContent { background-color: transparent; }')
-    layout = QVBoxLayout(content)
-    layout.setContentsMargins(0, 0, 0, 0)
-    layout.setSpacing(constants.PAGE_SPACING)
-    scroll.setWidget(content)
-    return scroll, layout
 
 
 def _color_icon(hex_color: str) -> QIcon:
@@ -157,72 +58,43 @@ def _color_icon(hex_color: str) -> QIcon:
     return QIcon(pixmap)
 
 
-class ElevationProfileView(pg.PlotWidget):
-    """高程剖面：选中测线的里程-高程曲线（里程由相邻点距离累积）。"""
+# ------------------------------------------------------------ 本地 DEM 异步加载
+# XYZ 格网解析（大文件整读 + numpy 格网还原）离开 GUI 线程，结果信号回主线程
+# 再喂三维视图（参照 ui/widgets/trajectory_3d_view.py 的 QThreadPool worker 模式）。
+class _DemLoadSignals(QObject):
+    """QRunnable 无法自带信号，用独立 QObject 回主线程。"""
 
-    def __init__(self, parent=None) -> None:
-        super().__init__(parent)
-        self._plot_item = self.getPlotItem()
-        self._plot_item.setLabel('bottom', '里程', units='m')
-        self._plot_item.setLabel('left', '高程', units='m')
-        self._plot_item.showGrid(x=True, y=True, alpha=0.3)
-        from qfluentwidgets import isDarkTheme
-        self.apply_theme(isDarkTheme())
+    # generation, dem(dict|None), path, error（''=成功）
+    finished = pyqtSignal(int, object, str, str)
 
-    def set_tracks(self, tracks, colors: dict) -> None:
-        """重绘选中测线的里程-高程曲线。"""
-        self._plot_item.clear()
-        legend = self._plot_item.legend
-        if legend is not None:
-            legend.clear()
+
+class _DemLoadWorker(QRunnable):
+    """后台线程解析 XYZ 格网；解析失败带回错误文本由主线程决定提示。"""
+
+    def __init__(self, generation: int, path: str, signals: _DemLoadSignals) -> None:
+        super().__init__()
+        self._generation = int(generation)
+        self._path = path
+        self._signals = signals
+
+    def run(self) -> None:
+        try:
+            dem = load_xyz_grid(self._path)
+        except (OSError, ValueError) as exc:
+            self._signals.finished.emit(self._generation, None, self._path, str(exc))
         else:
-            legend = self._plot_item.addLegend(
-                offset=(8, 8),
-                labelTextColor='w' if self._dark else 'k')
-        colors = dict(colors or {})
-        for track in tracks or []:
-            points = list(getattr(track, 'points', ()) or ())
-            if len(points) < 2:
-                continue
-            xs = np.asarray([float(getattr(p, 'x', 0.0)) for p in points])
-            ys = np.asarray([float(getattr(p, 'y', 0.0)) for p in points])
-            zs = np.asarray([float(getattr(p, 'elevation_m', 0.0)) for p in points])
-            finite = np.isfinite(xs) & np.isfinite(ys) & np.isfinite(zs)
-            if np.count_nonzero(finite) < 2:
-                continue
-            steps = np.hypot(np.diff(xs[finite]), np.diff(ys[finite]))
-            mileage = np.concatenate(([0.0], np.cumsum(steps)))
-            line_id = str(getattr(track, 'line_id', '') or '')
-            name = str(getattr(track, 'name', '') or line_id)
-            pen = pg.mkPen(QColor(colors.get(line_id, constants.CHART_TRACK_DEFAULT)), width=2)
-            self._plot_item.plot(mileage, zs[finite], pen=pen, name=name)
-
-    def apply_theme(self, dark: bool) -> None:
-        """深色 bg 'k'/文字 'w'；浅色 bg 'w'/文字 'k'；轴 pen/textPen/标签/图例同步。"""
-        self._dark = bool(dark)
-        bg = 'k' if dark else 'w'
-        fg = 'w' if dark else 'k'
-        self.setBackground(bg)
-        # 不能用 QColor(fg)：Qt 颜色名不含 'w'/'k'，非法色会变黑导致深色下轴字不可见
-        pen = pg.mkPen(fg)
-        for name in ('bottom', 'left'):
-            axis = self._plot_item.getAxis(name)
-            axis.setPen(pen)
-            axis.setTextPen(pen)
-            # 轴标题（里程/高程）是独立 label，不随 textPen 变色，需显式同步
-            axis.setLabel(text=axis.labelText, color=fg)
-        # 已有图例的条目文字颜色不随主题更新，逐条同步
-        legend = self._plot_item.legend
-        if legend is not None:
-            for _sample, label in legend.items:
-                label.setText(label.text, color=fg)
+            self._signals.finished.emit(self._generation, dem, self._path, '')
 
 
-class SpatialPage(QWidget):
+class SpatialPage(PanelStateMixin, QWidget):
     """空间信息页面。"""
 
     current_line_requested = pyqtSignal(str)    # 设为当前测线（line_id）
     basemap_prefetch_requested = pyqtSignal()   # 预下载当前区域（页面内部已处理，供外部观测）
+    depth_preview_requested = pyqtSignal(list)          # 深度切片预览（勾选 line_ids）
+    save_depth_layer_requested = pyqtSignal(list, float)  # 存为图层（line_ids, cell_size_m）
+
+    _PANEL_STATE_PREFIX = 'spatial'
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -236,32 +108,46 @@ class SpatialPage(QWidget):
         self._dem_base_text = ''              # 本地 DEM 标签基础文本（覆盖提示拼接用）
         self._terrain_mode = 'online'         # 三维地形来源：online / estimated / local_dem
         self._restoring_terrain = False       # 恢复/程序化设置地形来源下拉时屏蔽信号
+        self._depth_payload_line_ids = []     # 深度切片预览请求的 line_ids（存图层回发用）
+        self._depth_cell_size_m = 1.0         # 深度切片网格 cell_size_m（存图层回发用）
+        self._sm = None                       # 共享 SettingsManager（主窗口注入，唯一写者）
+        self._dem_pool = QThreadPool(self)    # 本地 DEM 解析（大文件不冻结 GUI 线程）
+        self._dem_pool.setMaxThreadCount(1)
+        self._dem_load_signals = _DemLoadSignals(self)
+        self._dem_load_signals.finished.connect(self._on_dem_loaded)
+        self._dem_load_generation = 0         # DEM 加载代次（旧任务回包丢弃）
+        self._pending_dem_auto = False        # 在途 DEM 加载是否启动自动加载（失败处理不同）
 
         self._build_ui()
         self._connect_internal()
         self._restore_state()
 
+    # ============================================================ 设置注入
+    def set_settings_manager(self, sm) -> None:
+        """注入主窗口共享的 SettingsManager 并恢复页面状态。
+
+        页面不再自行构造 SettingsManager：两页相继 save 曾互相覆盖
+        （各自写"构造时快照合并后的全量 dict"），共享实例成为唯一写者后
+        读-改-写竞态消除。未注入时页面保持默认状态、不写盘。
+        """
+        self._sm = sm
+        self._restore_state()
+
+    def _persist_setting(self, key: str, value) -> None:
+        """写设置：共享实例为唯一写者；未注入（如单元测试）时静默跳过。"""
+        sm = self._sm
+        if sm is None:
+            return
+        sm.set(key, value)
+        sm.save()
+
     # ============================================================ 面板状态
-    def panel_states(self) -> dict:
-        return {
-            'left': self._left_panel.is_collapsed(),
-            'right': self._right_panel.is_collapsed(),
-        }
-
-    def set_panel_collapsed(self, *, left: bool = None, right: bool = None,
-                            animate: bool = True) -> None:
-        if left is not None:
-            self._left_panel.set_collapsed(bool(left), animate=animate)
-        if right is not None:
-            self._right_panel.set_collapsed(bool(right), animate=animate)
-
     def _restore_state(self) -> None:
-        """恢复折叠状态 + 底图源选择。"""
-        sm = SettingsManager()
-        self._left_panel.set_collapsed(
-            bool(sm.get('spatial_left_collapsed', False)), animate=False)
-        self._right_panel.set_collapsed(
-            bool(sm.get('spatial_right_collapsed', False)), animate=False)
+        """恢复折叠状态 + 底图源选择（共享实例注入后生效；未注入不读盘）。"""
+        self._restore_panel_state()
+        sm = self._sm
+        if sm is None:
+            return
         source = str(sm.get('spatial_basemap_source', DEFAULT_TILE_SOURCE))
         if source not in BASEMAP_LAYERS:
             source = DEFAULT_TILE_SOURCE
@@ -273,7 +159,7 @@ class SpatialPage(QWidget):
             self._map_view.set_source(source)
         finally:
             self._restoring_basemap = False
-        self._auto_load_dem(sm)
+        self._auto_load_dem()
         mode = str(sm.get('spatial_terrain_source', 'online') or 'online')
         if mode not in ('online', 'estimated', 'local_dem'):
             mode = 'online'
@@ -293,29 +179,50 @@ class SpatialPage(QWidget):
             self._restoring_terrain = False
         self._3d_view.set_terrain_source(mode)
         if persist:
-            sm = SettingsManager()
-            sm.set('spatial_terrain_source', mode)
-            sm.save()
+            self._persist_setting('spatial_terrain_source', mode)
 
-    def _auto_load_dem(self, sm: SettingsManager) -> None:
+    def _auto_load_dem(self) -> None:
         """启动自动加载上次导入的本地 DEM（默认在线下载，无需任何操作）。
 
         文件已被移动/删除或解析失败时清除记录，静默回退在线下载。
+        解析在工作线程执行（大 DEM 不冻结启动），结果回主线程应用。
         """
+        sm = self._sm
+        if sm is None:
+            return
         path = str(sm.get('spatial_local_dem', '') or '')
         if not path:
             return
-        dem = None
-        if os.path.isfile(path):
-            try:
-                dem = load_xyz_grid(path)
-            except (OSError, ValueError):
-                dem = None
+        if not os.path.isfile(path):
+            self._persist_setting('spatial_local_dem', '')
+            return
+        self._start_dem_load(path, auto=True)
+
+    def _start_dem_load(self, path: str, *, auto: bool) -> None:
+        """把 XYZ 格网解析交给工作线程；auto=启动自动加载（失败静默清记录）。
+
+        代次守卫：快速连续导入/自动加载时，旧任务的回包直接丢弃。
+        """
+        self._dem_load_generation += 1
+        self._pending_dem_auto = auto
+        self._dem_pool.start(_DemLoadWorker(
+            self._dem_load_generation, path, self._dem_load_signals))
+
+    def _on_dem_loaded(self, generation: int, dem, path: str, error: str) -> None:
+        """DEM 解析回包（GUI 线程）：应用格网或按来源处理失败。"""
+        if generation != self._dem_load_generation:
+            return
         if dem is None:
-            sm.set('spatial_local_dem', '')
-            sm.save()
+            if self._pending_dem_auto:
+                # 自动加载失败：清除记录，静默回退在线下载（原同步语义）
+                self._persist_setting('spatial_local_dem', '')
+            else:
+                self._3d_dem_label.setText(f'导入失败：{error}')
             return
         self._apply_local_dem(dem, path)
+        if not self._pending_dem_auto:
+            self._set_terrain_mode('local_dem')
+            self._persist_setting('spatial_local_dem', path)
 
     def _apply_local_dem(self, dem: dict, path: str) -> None:
         """应用本地 DEM 到三维视图并更新卡片显示。"""
@@ -331,38 +238,39 @@ class SpatialPage(QWidget):
         base = self._dem_base_text or '未导入本地 DEM'
         self._3d_dem_label.setText(f'{base}；{text}' if text else base)
 
-    def _save_panel_state(self) -> None:
-        sm = SettingsManager()
-        sm.set('spatial_left_collapsed', self._left_panel.is_collapsed())
-        sm.set('spatial_right_collapsed', self._right_panel.is_collapsed())
-        sm.save()
-
     # ============================================================ UI 构建
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
         root.setContentsMargins(*constants.PAGE_MARGINS)
         root.setSpacing(constants.PAGE_SPACING)
-        root.addWidget(make_page_title('空间信息'))
 
         columns = QHBoxLayout()
         columns.setSpacing(constants.PAGE_SPACING)
         root.addLayout(columns, 1)
 
         # ---------------- 左栏（展开 320px，可折叠）
-        left_scroll, left_layout = _make_scroll_column(320)
+        left_scroll, left_layout = make_scroll_column(constants.SIDE_TOOL_WIDTH)
         left_panel = CollapsiblePanel(
-            'left', expand_width=320, collapse_width=40, parent=self)
+            'left', expand_width=constants.SIDE_TOOL_WIDTH, collapse_width=40, parent=self)
         left_panel.set_content_widget(left_scroll)
         columns.addWidget(left_panel)
         self._left_panel = left_panel
 
-        lines_card, lines_layout = _make_card('测线')
+        lines_card, lines_layout = make_card('测线')
         self._line_list = QListWidget(lines_card)
         self._line_list.setMinimumHeight(180)
         lines_layout.addWidget(self._line_list, 1)
+        # 空态引导：无测线时列表藏起、提示占位（参照 home_page 空项目做法）
+        self._lines_empty_hint = CaptionLabel(
+            '暂无测线，请先在项目管理页导入', lines_card)
+        self._lines_empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._lines_empty_hint.setStyleSheet(
+            'color: %s; font-size: 11px;' % status_color('disabled'))
+        lines_layout.addWidget(self._lines_empty_hint, 1)
+        self._line_list.setVisible(False)
         left_layout.addWidget(lines_card, 1)
 
-        basemap_card, basemap_layout = _make_card('底图')
+        basemap_card, basemap_layout = make_card('底图')
         source_row = QHBoxLayout()
         source_row.setSpacing(constants.CARD_SPACING)
         source_label = CaptionLabel('来源:', basemap_card)
@@ -380,13 +288,13 @@ class SpatialPage(QWidget):
         basemap_layout.addWidget(self._prefetch_label)
         left_layout.addWidget(basemap_card)
 
-        crs_card, crs_layout = _make_card('投影信息')
+        crs_card, crs_layout = make_card('投影信息')
         self._crs_label = CaptionLabel('暂无轨迹数据', crs_card)
         self._crs_label.setWordWrap(True)
         crs_layout.addWidget(self._crs_label)
         left_layout.addWidget(crs_card)
 
-        view3d_card, view3d_layout = _make_card('三维显示')
+        view3d_card, view3d_layout = make_card('三维显示')
         exag_row = QHBoxLayout()
         exag_row.setSpacing(constants.CARD_SPACING)
         exag_label = CaptionLabel('垂直夸张:', view3d_card)
@@ -461,43 +369,62 @@ class SpatialPage(QWidget):
         middle_layout.setSpacing(constants.PAGE_SPACING)
         columns.addWidget(middle, 1)
 
-        view_card, view_layout = _make_card('空间视图')
-        seg_row = QHBoxLayout()
-        seg_row.setSpacing(constants.CARD_SPACING)
-        self._view_segment = SegmentedWidget(view_card)
+        # header 单行化：标题居左 + 视图切换瘦页签居右（make_segment_card
+        # 范式），中栏图像区省出一整行。
+        self._view_segment = SlimSegment(self)
         self._view_segment.addItem(
             _SEG_MAP, '平面地图', onClick=lambda: self._switch_view(_SEG_MAP))
         self._view_segment.addItem(
             _SEG_PROFILE, '高程剖面', onClick=lambda: self._switch_view(_SEG_PROFILE))
         self._view_segment.addItem(
             _SEG_3D, '三维视图', onClick=lambda: self._switch_view(_SEG_3D))
+        self._view_segment.addItem(
+            _SEG_DEPTH, '深度切片', onClick=lambda: self._switch_view(_SEG_DEPTH))
         self._view_segment.setCurrentItem(_SEG_MAP)
-        seg_row.addWidget(self._view_segment)
-        seg_row.addStretch(1)
-        view_layout.addLayout(seg_row)
+        view_card, view_layout = make_segment_card(
+            '空间视图', self._view_segment, parent=self)
 
         self._view_stack = QStackedWidget(view_card)
         self._map_view = MapView(view_card)
-        self._map_view.setMinimumHeight(300)
+        self._map_view.setMinimumHeight(constants.PREVIEW_MIN_HEIGHT)
         self._profile_view = ElevationProfileView(view_card)
-        self._profile_view.setMinimumHeight(300)
+        self._profile_view.setMinimumHeight(constants.PREVIEW_MIN_HEIGHT)
         self._3d_view = Trajectory3DView(view_card)
-        self._3d_view.setMinimumHeight(300)
+        self._3d_view.setMinimumHeight(constants.PREVIEW_MIN_HEIGHT)
+        self._depth_view = DepthSliceView(view_card)
+        self._depth_view.setMinimumHeight(constants.PREVIEW_MIN_HEIGHT)
         self._view_stack.addWidget(self._map_view)
         self._view_stack.addWidget(self._profile_view)
         self._view_stack.addWidget(self._3d_view)
+        self._view_stack.addWidget(self._depth_view)
         view_layout.addWidget(self._view_stack, 1)
+
+        # 深度切片控制行：深度滑条（0.01m 步进，整数 ×100 映射）+ 数值 + 存为图层
+        depth_row = QHBoxLayout()
+        depth_row.setSpacing(constants.CARD_SPACING)
+        self._depth_slider = Slider(Qt.Orientation.Horizontal, view_card)
+        self._depth_slider.setRange(0, 0)
+        self._depth_slider.setValue(0)
+        self._depth_value_label = CaptionLabel('深度: --', view_card)
+        self._depth_value_label.setMinimumWidth(96)
+        self._depth_save_btn = PushButton('存为图层', view_card)
+        self._depth_save_btn.setEnabled(False)
+        depth_row.addWidget(CaptionLabel('切片深度', view_card))
+        depth_row.addWidget(self._depth_slider, 1)
+        depth_row.addWidget(self._depth_value_label)
+        depth_row.addWidget(self._depth_save_btn)
+        view_layout.addLayout(depth_row)
         middle_layout.addWidget(view_card, 1)
 
         # ---------------- 右栏（展开 340px，可折叠）
-        right_scroll, right_layout = _make_scroll_column(340)
+        right_scroll, right_layout = make_scroll_column(constants.SIDE_FORM_WIDTH)
         right_panel = CollapsiblePanel(
-            'right', expand_width=340, collapse_width=40, parent=self)
+            'right', expand_width=constants.SIDE_FORM_WIDTH, collapse_width=40, parent=self)
         right_panel.set_content_widget(right_scroll)
         columns.addWidget(right_panel)
         self._right_panel = right_panel
 
-        detail_card, detail_layout = _make_card('测线详情')
+        detail_card, detail_layout = make_card('测线详情')
         self._detail_labels = {}
         for key, title in (('name', '名称'), ('traces', '道数'),
                            ('elevation', '高程范围'), ('rtk', 'RTK状态'),
@@ -517,7 +444,7 @@ class SpatialPage(QWidget):
         self._set_current_btn.setEnabled(False)
         detail_layout.addWidget(self._set_current_btn)
 
-        coverage_card, coverage_layout = _make_card('项目覆盖统计')
+        coverage_card, coverage_layout = make_card('项目覆盖统计')
         self._coverage_labels = {}
         for key, title in (('tracks', '含轨迹测线'), ('points', '轨迹点数'),
                            ('length', '总里程'), ('spacing', '平均点距')):
@@ -555,13 +482,17 @@ class SpatialPage(QWidget):
             self._3d_view.set_track_drape)
         self._3d_imagery_switch.checkedChanged.connect(
             self._3d_view.set_imagery_enabled)
-        self._3d_dem_btn.clicked.connect(self._on_import_dem_clicked)
-        self._3d_dem_clear_btn.clicked.connect(self._on_clear_dem_clicked)
         self._3d_terrain_combo.currentIndexChanged.connect(
             self._on_terrain_source_changed)
+        self._3d_dem_btn.clicked.connect(self._on_import_dem_clicked)
+        self._3d_dem_clear_btn.clicked.connect(self._on_clear_dem_clicked)
         self._3d_view.local_dem_notice.connect(self._on_dem_notice)
-        self._left_panel.sig_collapsed.connect(self._save_panel_state)
-        self._right_panel.sig_collapsed.connect(self._save_panel_state)
+        self._depth_slider.valueChanged.connect(self._on_depth_slider_changed)
+        self._depth_save_btn.clicked.connect(self._on_save_depth_layer_clicked)
+        self._left_panel.sig_collapsed.connect(
+            lambda collapsed: self._on_side_panel_collapsed('left', collapsed))
+        self._right_panel.sig_collapsed.connect(
+            lambda collapsed: self._on_side_panel_collapsed('right', collapsed))
 
     # ============================================================ 公共接口（供主窗口接线）
     def set_tracks(self, tracks: list) -> None:
@@ -577,26 +508,20 @@ class SpatialPage(QWidget):
             self._colors[line_id] = _TRACK_COLORS[index % len(_TRACK_COLORS)]
 
         # 重建勾选列表（默认全选，保持已有勾选状态）
-        previous_checked = {}
-        for row in range(self._line_list.count()):
-            item = self._line_list.item(row)
-            previous_checked[str(item.data(Qt.ItemDataRole.UserRole) or '')] = (
-                item.checkState() == Qt.CheckState.Checked)
-        self._line_list.blockSignals(True)
-        self._line_list.clear()
-        for track in self._tracks:
-            line_id = str(getattr(track, 'line_id', '') or '')
-            if not line_id:
-                continue
-            name = str(getattr(track, 'name', '') or line_id)
-            item = QListWidgetItem(_color_icon(self._colors[line_id]), name)
-            item.setData(Qt.ItemDataRole.UserRole, line_id)
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            checked = previous_checked.get(line_id, True)
-            item.setCheckState(
-                Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
-            self._line_list.addItem(item)
-        self._line_list.blockSignals(False)
+        rebuild_check_list(
+            self._line_list, self._tracks,
+            key_fn=lambda track: str(getattr(track, 'line_id', '') or ''),
+            text_fn=lambda track: (
+                str(getattr(track, 'name', '') or '')
+                or str(getattr(track, 'line_id', '') or '')),
+            default_checked=True,
+            icon_fn=lambda track: _color_icon(
+                self._colors[str(getattr(track, 'line_id', '') or '')]))
+
+        # 空态显隐：有测线显示勾选列表，无测线显示引导文案
+        has_lines = self._line_list.count() > 0
+        self._line_list.setVisible(has_lines)
+        self._lines_empty_hint.setVisible(not has_lines)
 
         self._refresh_views()
         self._refresh_crs_card()
@@ -614,11 +539,61 @@ class SpatialPage(QWidget):
                 self._lines_by_id[line_id] = line
         self._refresh_detail()
 
+    def set_depth_grid(self, payload: dict, line_ids: list,
+                       cell_size_m: float) -> None:
+        """接收界面深度切片预览 payload（interface_depth_preview 返回值）。
+
+        line_ids/cell_size_m 为发起预览时的请求参数，"存为图层"时原样回发。
+        载入视图 + 滑条范围（0.01m 步进，整数 ×100 映射）+ 默认切片取
+        深度范围中值；有数据后启用"存为图层"。
+        """
+        matrix = payload.get('matrix') if isinstance(payload, dict) else None
+        if matrix is None:
+            self.clear_depth_grid()
+            return
+        self._depth_payload_line_ids = [str(x) for x in line_ids or []]
+        self._depth_cell_size_m = float(cell_size_m or 1.0)
+        cell = self._depth_cell_size_m
+        self._depth_view.set_grid(
+            matrix,
+            x_origin_m=float(payload.get('x_origin_m') or 0.0),
+            y_origin_m=float(payload.get('y_origin_m') or 0.0),
+            cell_size_m=cell,
+            attribute=str(payload.get('attribute') or '界面深度切片'))
+        dmin = float(payload.get('depth_min_m'))
+        dmax = float(payload.get('depth_max_m'))
+        if not (math.isfinite(dmin) and math.isfinite(dmax)):
+            self.clear_depth_grid()
+            return
+        lo, hi = int(round(dmin * 100.0)), int(round(dmax * 100.0))
+        if hi <= lo:
+            hi = lo + 1
+        self._depth_slider.blockSignals(True)
+        self._depth_slider.setRange(lo, hi)
+        self._depth_slider.setValue((lo + hi) // 2)
+        self._depth_slider.blockSignals(False)
+        self._on_depth_slider_changed((lo + hi) // 2)
+        self._depth_save_btn.setEnabled(True)
+
+    def clear_depth_grid(self) -> None:
+        """清空深度切片视图与控制状态（预览失败/项目切换时）。"""
+        self._depth_payload_line_ids = []
+        self._depth_view.clear_grid()
+        self._depth_slider.blockSignals(True)
+        self._depth_slider.setRange(0, 0)
+        self._depth_slider.setValue(0)
+        self._depth_slider.blockSignals(False)
+        self._depth_value_label.setText('深度: --')
+        self._depth_save_btn.setEnabled(False)
+
     def apply_theme(self, dark: bool) -> None:
-        """主题切换转发：地图 / 剖面 / 三维视图。"""
+        """主题切换转发：地图 / 剖面 / 三维视图 / 深度切片 + 空态提示色。"""
         self._map_view.apply_theme(dark)
         self._profile_view.apply_theme(dark)
         self._3d_view.apply_theme(dark)
+        self._depth_view.apply_theme(dark)
+        self._lines_empty_hint.setStyleSheet(
+            'color: %s; font-size: 11px;' % status_color('disabled'))
 
     # ============================================================ 内部逻辑
     def _selected_line_id(self) -> str:
@@ -637,15 +612,22 @@ class SpatialPage(QWidget):
 
     def _switch_view(self, route_key: str) -> None:
         widget = {_SEG_MAP: self._map_view, _SEG_PROFILE: self._profile_view,
-                  _SEG_3D: self._3d_view}.get(route_key, self._map_view)
+                  _SEG_3D: self._3d_view, _SEG_DEPTH: self._depth_view}.get(
+            route_key, self._map_view)
         self._view_stack.setCurrentWidget(widget)
+        if route_key == _SEG_DEPTH and not self._depth_payload_line_ids:
+            # 首次切到深度切片段：自动以当前勾选测线请求一次预览
+            checked = [str(t.line_id) for t in self._checked_tracks()]
+            if checked:
+                self.depth_preview_requested.emit(checked)
 
     def _refresh_views(self) -> None:
-        """勾选集合变化 → 三个视图同步重绘。"""
+        """勾选集合变化 → 四个视图同步重绘。"""
         tracks = self._checked_tracks()
         self._map_view.set_tracks(tracks, self._colors)
         self._profile_view.set_tracks(tracks, self._colors)
         self._3d_view.set_tracks(tracks, self._colors)
+        self._depth_view.set_tracks(tracks, self._colors)
 
     def _refresh_crs_card(self) -> None:
         """投影信息卡：坐标系 / EPSG / 数据来源（按轨迹摘要汇总）。"""
@@ -697,15 +679,15 @@ class SpatialPage(QWidget):
 
     def _refresh_coverage_statistics(self) -> None:
         """Update the frontend-only project coverage summary from all tracks."""
-        statistics = _coverage_statistics(self._tracks)
+        statistics = coverage_statistics(self._tracks)
         labels = self._coverage_labels
         labels['tracks'].setText(f"{statistics['track_count']} 条")
         labels['points'].setText(f"{statistics['point_count']:,} 个")
-        labels['length'].setText(_format_distance(float(statistics['length_m'])))
+        labels['length'].setText(format_distance(float(statistics['length_m'])))
         segments = int(statistics['segment_count'])
         if segments:
             spacing = float(statistics['length_m']) / segments
-            labels['spacing'].setText(_format_distance(spacing))
+            labels['spacing'].setText(format_distance(spacing))
         else:
             labels['spacing'].setText('--')
 
@@ -721,9 +703,7 @@ class SpatialPage(QWidget):
             return
         source = str(self._basemap_combo.itemData(index) or DEFAULT_TILE_SOURCE)
         self._map_view.set_source(source)
-        sm = SettingsManager()
-        sm.set('spatial_basemap_source', source)
-        sm.save()
+        self._persist_setting('spatial_basemap_source', source)
 
     def _on_prefetch_clicked(self) -> None:
         # 优先按测线包围盒下载对应地理区域；无已配准轨迹回退当前视野
@@ -753,22 +733,14 @@ class SpatialPage(QWidget):
         """导入本地 DEM（XYZ 格网）：三维地形改用本地高程，免在线下载。
 
         路径记入设置，之后启动自动加载，无需重复导入。
+        解析在工作线程执行，回包后切到 local_dem 并持久化路径。
         """
         path, _selected = file_dialogs.getOpenFileName(
             self, '选择本地 DEM 格网文件', '',
             'DEM 格网 (*.xyz *.csv *.txt);;所有文件 (*)')
         if not path:
             return
-        try:
-            dem = load_xyz_grid(path)
-        except (OSError, ValueError) as exc:
-            self._3d_dem_label.setText(f'导入失败：{exc}')
-            return
-        self._apply_local_dem(dem, path)
-        self._set_terrain_mode('local_dem')
-        sm = SettingsManager()
-        sm.set('spatial_local_dem', path)
-        sm.save()
+        self._start_dem_load(path, auto=False)
 
     def _on_clear_dem_clicked(self) -> None:
         """清除本地 DEM：三维地形回退在线高程瓦片，并删除设置记录。"""
@@ -779,9 +751,7 @@ class SpatialPage(QWidget):
         self._3d_dem_clear_btn.setEnabled(False)
         if self._terrain_mode == 'local_dem':
             self._set_terrain_mode('online')
-        sm = SettingsManager()
-        sm.set('spatial_local_dem', '')
-        sm.save()
+        self._persist_setting('spatial_local_dem', '')
 
     def _auto_prefetch_tracks(self) -> None:
         """轨迹加载后自动下载测线所在地理区域（按 包围盒+瓦图源 去重）。
@@ -819,3 +789,17 @@ class SpatialPage(QWidget):
         line_id = self._selected_line_id()
         if line_id:
             self.current_line_requested.emit(line_id)
+
+    def _on_depth_slider_changed(self, value: int) -> None:
+        """滑条（0.01m 步进整数）→ 等值线 level + 数值标签。"""
+        depth_m = value / 100.0
+        self._depth_value_label.setText(f'深度: {depth_m:.2f} m')
+        self._depth_view.set_isoline(depth_m)
+
+    def _on_save_depth_layer_clicked(self) -> None:
+        """存为图层：发信号（line_ids, cell_size_m），页面不调 backend。"""
+        line_ids = list(self._depth_payload_line_ids)
+        if not line_ids or self._depth_view.value_range() is None:
+            return
+        self.save_depth_layer_requested.emit(
+            line_ids, float(self._depth_cell_size_m))

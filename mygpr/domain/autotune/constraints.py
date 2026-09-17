@@ -130,18 +130,8 @@ def constrain_auto_tune_params(
                 maximum=2,
                 reason="savgol_derivative_limit",
             )
-    elif method_key in {"svd_subspace", "wavelet_svd"}:
+    elif method_key in {"svd_subspace"}:
         _clamp_rank_interval(method_key, effective, warnings, rank_limit=min_dim)
-        if method_key == "wavelet_svd":
-            _clamp_int_param(
-                method_key,
-                effective,
-                warnings,
-                parameter="levels",
-                minimum=1,
-                maximum=_wavelet_level_limit(n_samples, n_traces),
-                reason="wavelet_level_limit",
-            )
     elif method_key == "hankel_svd":
         _clamp_int_param(
             method_key,

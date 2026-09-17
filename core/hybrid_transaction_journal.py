@@ -191,6 +191,26 @@ class HybridArtifactTransactionJournal:
         )
         return action
 
+    def _artifact_relative_path(self, record: dict[str, Any], payload: dict[str, Any], container: Path) -> str:
+        """Resolve the artifact file path for catalog registration.
+
+        Sidecar 写入后 ``record["h5_file"]`` 记录实际落盘文件；崩溃恢复
+        （roll_forward）据此把 catalog ``h5_path`` 指向 sidecar。旧 payload
+        的 ``h5_path`` 是项目相对路径（legacy 布局），直接原样沿用，不经过
+        CWD 锚定的 ``resolve()``。
+        """
+        h5_file = record.get("h5_file")
+        if h5_file:
+            resolved = Path(str(h5_file)).resolve()
+            try:
+                return resolved.relative_to(self.project_root).as_posix()
+            except ValueError:
+                return resolved.as_posix()
+        fallback = str(payload.get("h5_path") or container.relative_to(self.project_root).as_posix())
+        if Path(fallback).is_absolute():
+            return Path(fallback).as_posix()
+        return fallback
+
     def _roll_forward(self, payload: dict[str, Any], catalog: Any, container: Path) -> None:
         artifact_id = str(payload["artifact_id"])
         line_id = str(payload["line_id"])
@@ -212,7 +232,7 @@ class HybridArtifactTransactionJournal:
                 "artifact_role": manifest.get("artifact_role") or "processing_result",
                 "branch_id": branch_id,
                 "parent_artifact_id": parent_id,
-                "h5_path": str(payload.get("h5_path") or container.relative_to(self.project_root).as_posix()),
+                "h5_path": self._artifact_relative_path(record, payload, container),
                 "dataset_path": record["dataset_path"],
                 "status": manifest.get("status") or "success",
                 "dtype": record["dtype"],

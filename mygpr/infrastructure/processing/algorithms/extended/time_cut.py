@@ -29,6 +29,9 @@ def method_time_cut(
         keep_range: keep samples from ``time_start_ns`` to ``time_end_ns``.
 
     ``time_end_ns=0`` means "bottom of profile", so the default is a no-op.
+    A no-op requires no time basis and leaves the chained header untouched;
+    a real cut without any time basis raises ``ValueError`` (the former
+    samples-as-ns silent fallback is removed).
     """
 
     arr = np.asarray(data, dtype=np.float32)
@@ -44,10 +47,35 @@ def method_time_cut(
             "time_cut mode 必须是 remove_below、remove_above 或 keep_range"
         )
 
+    time_start_value = to_float(time_start_ns, default=0.0)
+    time_end_value = to_float(time_end_ns, default=0.0)
+    if resolved_mode == "remove_below":
+        requests_cut = time_end_value > 0.0
+    elif resolved_mode == "remove_above":
+        requests_cut = time_start_value > 0.0
+    else:  # keep_range
+        requests_cut = time_start_value > 0.0 or time_end_value > 0.0
+    if not requests_cut:
+        # Documented no-op: nothing to cut, so no time basis is required.
+        # The header must NOT be updated here — the old samples-as-ns
+        # total_time_ns leaked into the chained header and poisoned
+        # downstream time windows (audit report 2026-09-05 §3.3).
+        result = arr.astype(np.float32, copy=True)
+        return result, {
+            "method": "time_cut",
+            "mode": resolved_mode,
+            "time_start_ns": float(time_start_value),
+            "time_end_ns": float(time_end_value),
+            "time_start_idx": 0,
+            "time_end_idx": int(samples),
+            "input_samples": int(samples),
+            "output_samples": int(result.shape[0]),
+        }
     total_ns = _resolve_total_time_ns(
         samples,
         time_window_ns=time_window_ns,
         time_step_s=time_step_s,
+        header_info=kwargs.get("header_info"),
     )
     start_idx = _time_to_index(
         time_start_ns,
@@ -55,8 +83,6 @@ def method_time_cut(
         total_time_ns=total_ns,
         rounding="floor",
     )
-    time_start_value = to_float(time_start_ns, default=0.0)
-    time_end_value = to_float(time_end_ns, default=0.0)
     end_idx = (
         samples
         if time_end_value <= 0.0
@@ -105,7 +131,20 @@ def _resolve_total_time_ns(
     *,
     time_window_ns: float | None,
     time_step_s: float | None,
+    header_info: dict[str, Any] | None = None,
 ) -> float:
+    """Resolve the total two-way travel time basis in nanoseconds.
+
+    Resolution order:
+        1. explicit ``time_window_ns`` parameter
+        2. explicit ``time_step_s`` parameter (``step * 1e9 * samples``)
+        3. ``header_info["total_time_ns"]`` / ``header_info["time_window_ns"]``
+           (injected by ``extended/_runtime_kwargs`` on the native path)
+
+    Missing a time basis is a hard error: silently treating the sample
+    count as nanoseconds produced dimensionally wrong crops ("samples-as-ns"
+    fallback, audit report 2026-09-05 §3.3).
+    """
     try:
         total_ns = to_float(time_window_ns, default=0.0)
     except (TypeError, ValueError):
@@ -118,7 +157,20 @@ def _resolve_total_time_ns(
         step_s = 0.0
     if step_s > 0.0:
         return step_s * 1.0e9 * float(samples)
-    return float(samples)
+    if isinstance(header_info, dict):
+        for key in ("total_time_ns", "time_window_ns"):
+            try:
+                header_ns = to_float(header_info.get(key), default=0.0)
+            except (TypeError, ValueError):
+                header_ns = 0.0
+            if header_ns > 0.0:
+                return header_ns
+    raise ValueError(
+        "time_cut 缺少时间基准：无法把 time_start_ns/time_end_ns 映射到采样"
+        "点。请提供 time_window_ns 或 time_step_s 参数，或传入含 "
+        "total_time_ns/time_window_ns 的 header_info（旧版把采样点数当 ns "
+        "使用的静默回退已移除）。"
+    )
 
 
 def _time_to_index(

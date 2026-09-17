@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QVBoxLayout, QWidget
 
 from ui.widgets.ascan_view import AScanView
@@ -13,6 +13,8 @@ from ui.widgets.ascan_view import AScanView
 
 class AScanPopup(QWidget):
     """单道波形跟随浮窗：show_trace 更新曲线与标题，close 隐藏不销毁。"""
+
+    closed = pyqtSignal()   # 用户关闭浮窗（仅隐藏）时发出，宿主同步菜单勾选态
 
     def __init__(self, parent=None):
         super().__init__(
@@ -43,4 +45,5 @@ class AScanPopup(QWidget):
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt 命名
         # 关闭=隐藏，实例复用；通知宿主同步菜单勾选态
         self.hide()
+        self.closed.emit()
         event.accept()

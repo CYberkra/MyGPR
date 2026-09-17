@@ -203,6 +203,10 @@ class HybridProjectStorageBackend(ProjectStorageBackend):
     def line_container_relative_path(self, line_id: str) -> str:
         return self.line_container_path(line_id).relative_to(self.root).as_posix()
 
+    def line_artifacts_dir(self, line_id: str) -> Path:
+        safe_line_id = validate_line_id(line_id)
+        return self.line_container_path(safe_line_id).with_suffix(".artifacts")
+
     def save_raw_dataset(self, line_id: str, dataset: GPRDataSet, *, cancel_requested=None, progress_callback=None) -> tuple[Path, str]:
         result = write_raw_dataset(
             self.line_container_path(line_id), dataset,
@@ -254,6 +258,11 @@ class HybridProjectStorageBackend(ProjectStorageBackend):
                 cancel_requested=cancel_requested,
                 progress_callback=progress_callback,
             )
+            artifact_file = Path(result["h5_file"])
+            try:
+                artifact_relative = artifact_file.relative_to(self.root).as_posix()
+            except ValueError:
+                artifact_relative = artifact_file.as_posix()
             transaction.update(
                 "hdf5_committed",
                 dataset_path=result["dataset_path"],
@@ -268,7 +277,7 @@ class HybridProjectStorageBackend(ProjectStorageBackend):
                     artifact_id=artifact_id,
                     branch_id=branch_id,
                     parent_artifact_id=resolved_parent,
-                    h5_path=relative,
+                    h5_path=artifact_relative,
                     params=params,
                     result=result,
                 )
@@ -281,8 +290,8 @@ class HybridProjectStorageBackend(ProjectStorageBackend):
         assert result is not None
         return {
             **result,
-            "h5_path": relative,
-            "data_uri": make_h5_uri(relative, result["dataset_path"]),
+            "h5_path": artifact_relative,
+            "data_uri": make_h5_uri(artifact_relative, result["dataset_path"]),
             "parent_artifact_id": resolved_parent,
             "branch_id": branch_id,
         }

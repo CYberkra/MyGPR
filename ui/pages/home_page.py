@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """HomePage — 主页工作台（SPEC §6.2）。
 
 纯展示 + 发信号：不直接调 controller/backend。
@@ -10,42 +11,32 @@
 import_line_requested / goto_page(str)。
 
 布局（v0.9.38 重设计）：
-- 左栏固定 ~400px：当前项目（含快速操作按钮组）+ 最近任务
+- 左栏固定 SIDE_TOOL_WIDTH（320px，布局统一轮档位）：当前项目（含快速操作按钮组）+ 最近任务
 - 右栏 stretch：数据预览（B-Scan 默认近似方形显示，符合雷达剖面习惯）
 """
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 from qfluentwidgets import (
-    BodyLabel, CaptionLabel, CardWidget, ComboBox, PrimaryPushButton,
-    PushButton, ScrollArea, SubtitleLabel, TitleLabel,
+    BodyLabel, CaptionLabel, ComboBox, PrimaryPushButton,
+    PushButton, ScrollArea,
 )
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants
+from ui.page_scaffold import make_card, style_transparent_scroll
+from ui.theme_helpers import badge_colors, status_color
 from ui.widgets import BScanView, MiniJobList, make_separator
 
-
-# ------------------------------------------------------------ 小工厂（卡片范式逐字 SPEC §1）
-def _create_card(title: str) -> tuple:
-    """卡片范式：CardWidget + QVBoxLayout(spacing=10, margins=15)，首行 SubtitleLabel 10pt Bold。"""
-    card = CardWidget()
-    layout = QVBoxLayout(card)
-    layout.setContentsMargins(*constants.CARD_MARGINS)
-    layout.setSpacing(constants.CARD_SPACING)
-    header = SubtitleLabel(title, card)
-    header.setFont(QFont(constants.FONT_FAMILY, 10, QFont.Weight.Bold))
-    layout.addWidget(header)
-    return card, layout
+_BADGE_QSS = ('QLabel { padding: 2px 10px; border-radius: 10px; '
+              'font-size: 12px; font-weight: bold; '
+              'color: %s; background-color: %s; }')
 
 
-def _make_badge(text: str, fg: str, bg: str) -> QLabel:
-    """徽章 QSS 逐字 SPEC §1。"""
+def _make_badge(text: str, color_key: str) -> QLabel:
+    """状态药丸徽章（SPEC §1 模板）：配色随主题（badge_colors 查表）。"""
     badge = QLabel(text)
-    badge.setStyleSheet(
-        'QLabel { padding: 2px 10px; border-radius: 10px; font-size: 12px; '
-        'font-weight: bold; color: %s; background-color: %s; }' % (fg, bg))
+    badge.setStyleSheet(_BADGE_QSS % badge_colors(color_key))
     return badge
 
 
@@ -61,21 +52,13 @@ class HomePage(ScrollArea):
         super().__init__(parent)
         self._summary = None
 
-        self.setWidgetResizable(True)
-        self.setStyleSheet(
-            'QScrollArea { background-color: transparent; border: none; }')
+        style_transparent_scroll(self)
 
         container = QWidget(self)
         container.setStyleSheet('background-color: transparent;')
         root = QVBoxLayout(container)
         root.setContentsMargins(*constants.PAGE_MARGINS)
         root.setSpacing(constants.PAGE_SPACING)
-
-        # 页面大标题：TitleLabel 微软雅黑 11pt Bold 居中（SPEC §1）
-        title = TitleLabel('MyGPR 探地雷达数据处理工作台', container)
-        title.setFont(QFont(constants.FONT_FAMILY, 11, QFont.Weight.Bold))
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        root.addWidget(title)
 
         # 主体两栏：左栏（项目+任务）/ 右栏（预览）
         body = QHBoxLayout()
@@ -88,7 +71,7 @@ class HomePage(ScrollArea):
         left.addWidget(self._build_jobs_card(container), 1)
         left_widget = QWidget(container)
         left_widget.setLayout(left)
-        left_widget.setFixedWidth(400)
+        left_widget.setFixedWidth(constants.SIDE_TOOL_WIDTH)
         left_widget.setStyleSheet('background-color: transparent;')
         body.addWidget(left_widget, 0)
 
@@ -98,9 +81,9 @@ class HomePage(ScrollArea):
         self.set_current_project(None)
 
     # ============================================================ 卡片构建
-    def _build_project_card(self, parent) -> CardWidget:
+    def _build_project_card(self, parent):
         """"当前项目"卡：项目信息 + 快速操作按钮（合并为一张卡，减少纵向堆叠）。"""
-        card, layout = _create_card('当前项目')
+        card, layout = make_card('当前项目')
 
         # 空态
         self._empty_widget = QWidget(card)
@@ -110,7 +93,8 @@ class HomePage(ScrollArea):
         empty_label = BodyLabel('尚未打开项目', self._empty_widget)
         empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hint = CaptionLabel('请通过下方「快速操作」新建或打开项目', self._empty_widget)
-        hint.setStyleSheet('color: %s; font-size: 11px;' % constants.COLOR_DISABLED)
+        hint.setStyleSheet('color: %s; font-size: 11px;'
+                           % status_color('disabled'))
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty_layout.addWidget(empty_label)
         empty_layout.addWidget(hint)
@@ -125,10 +109,10 @@ class HomePage(ScrollArea):
         self._proj_path = self._add_info_row(info_layout, '路径:')
         self._proj_lines = self._add_info_row(info_layout, '测线数:')
         self._proj_backend = self._add_info_row(info_layout, '存储后端:')
+        self._proj_badge = _make_badge('--', 'neutral')
         status_row = QHBoxLayout()
         status_label = CaptionLabel('状态:', self._info_widget)
         status_label.setMinimumWidth(100)
-        self._proj_badge = _make_badge('--', '#9ca3af', '#f3f4f6')
         status_row.addWidget(status_label)
         status_row.addWidget(self._proj_badge)
         status_row.addStretch(1)
@@ -176,11 +160,11 @@ class HomePage(ScrollArea):
         layout.addLayout(row)
         return value
 
-    def _build_preview_card(self, parent) -> CardWidget:
+    def _build_preview_card(self, parent):
         """"数据预览"卡：BScanView（默认近似方形）+ 色标 ComboBox。"""
-        card, layout = _create_card('数据预览')
+        card, layout = make_card('数据预览')
         self._bscan = BScanView(card)
-        self._bscan.setMinimumHeight(320)
+        self._bscan.setMinimumHeight(constants.PREVIEW_MIN_HEIGHT)
         layout.addWidget(self._bscan, 1)
 
         row = QHBoxLayout()
@@ -199,9 +183,9 @@ class HomePage(ScrollArea):
         layout.addLayout(row)
         return card
 
-    def _build_jobs_card(self, parent) -> CardWidget:
+    def _build_jobs_card(self, parent):
         """"最近任务"卡：内嵌 MiniJobList。"""
-        card, layout = _create_card('最近任务')
+        card, layout = make_card('最近任务')
         self._mini_jobs = MiniJobList(card)
         self._mini_jobs.setMinimumHeight(120)
         layout.addWidget(self._mini_jobs, 1)
@@ -224,14 +208,9 @@ class HomePage(ScrollArea):
         read_only = bool(getattr(summary, 'read_only', False))
         status = str(getattr(summary, 'status', '') or '').strip()
         badge_text = status or ('只读' if read_only else '已打开')
-        if read_only:
-            fg, bg = constants.COLOR_WARNING, '#fffbeb'
-        else:
-            fg, bg = constants.COLOR_SUCCESS, '#f0fdf4'
         self._proj_badge.setText(badge_text)
         self._proj_badge.setStyleSheet(
-            'QLabel { padding: 2px 10px; border-radius: 10px; font-size: 12px; '
-            'font-weight: bold; color: %s; background-color: %s; }' % (fg, bg))
+            _BADGE_QSS % badge_colors('warning' if read_only else 'success'))
 
     def set_preview_bundle(self, bundle) -> None:
         """PreviewBundle（鸭子类型）或 None（清空）。"""

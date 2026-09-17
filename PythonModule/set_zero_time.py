@@ -22,7 +22,10 @@ def _resolve_time_step_s(ny: int, time_step_s: float | None) -> float:
         value = to_float(time_step_s, default=0.0)
         if value > 0:
             return value
-    return 48e-9 / max(1, int(ny))
+    raise ValueError(
+        "set_zero_time 缺少时间基准：无法把 new_zero_time 映射到采样点。"
+        "请提供 time_step_s 参数（旧版按 48ns 采样间隔猜测步长的静默回退已移除）。"
+    )
 
 
 def _apply_zero_time_shift(
@@ -40,12 +43,14 @@ def _apply_zero_time_shift(
     if ny == 0 or nx == 0:
         raise ValueError(f"输入数据维度为0: shape={arr.shape}")
 
-    step_s = _resolve_time_step_s(ny, time_step_s)
-    step_ns = step_s * 1e9
-
     zero_time_value = to_float_or_none(new_zero_time)
     if zero_time_value is None:
         raise ValueError("new_zero_time must be numeric")
+    if zero_time_value <= 0:
+        return arr.astype(np.float32, copy=True), 0, 0.0
+
+    step_s = _resolve_time_step_s(ny, time_step_s)
+    step_ns = step_s * 1e9
     shift_samples = int(max(0.0, zero_time_value) / max(step_ns, 1.0e-12))
     shift_samples = max(0, min(shift_samples, ny - 1))
 

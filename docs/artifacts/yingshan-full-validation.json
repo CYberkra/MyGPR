@@ -1,0 +1,73 @@
+{
+  "schema": "mygpr.yingshan_full_validation.v1",
+  "status": "passed",
+  "files": {
+    "Line3origin(36).csv": {
+      "line_id": "3",
+      "sha256": "048d4fd0a709a8841dac13d3aa1ca571fe6372f6ac1e2e7312b029fe6c1b475f",
+      "size_bytes": 46948191,
+      "headers": [
+        "Number of Samples = 501,,,,",
+        "Time windows (ns) = 700,,,,",
+        "Number of Traces = 1813,,,,",
+        "Trace interval (m) = 0.08537,,,,"
+      ]
+    },
+    "Line6origin(36).csv": {
+      "line_id": "6",
+      "sha256": "70be52fc095076ca8ad09e1c4aa8e1ccc71d4ac408fc09d98459053c5d669589",
+      "size_bytes": 48223598,
+      "headers": [
+        "Number of Samples = 501,,",
+        "Time windows (ns) = 700,,",
+        "Number of Traces = 1661,",
+        "Trace interval (m) = 0.09347,,"
+      ]
+    },
+    "Line7origin(36).csv": {
+      "line_id": "7",
+      "sha256": "f687e739fd31a77678234d539d7a090cbebbac695aae5ae94f39b8a8c8c6f747",
+      "size_bytes": 46813602,
+      "headers": [
+        "Number of Samples = 501,,",
+        "Time windows (ns) = 700,,",
+        "Number of Traces = 1654,,",
+        "Trace interval (m) = 0.09427,,"
+      ]
+    },
+    "Line9origin(36).csv": {
+      "line_id": "9",
+      "sha256": "655f72f99de4cbcb22b1b9be64dc8ebdf2f156accbe9b27729c6862f6b1e172d",
+      "size_bytes": 68794423,
+      "headers": [
+        "Number of Samples = 501,,",
+        "Time windows (ns) = 700,,",
+        "Number of Traces = 2378,,",
+        "Trace interval (m) = 0.09093,,"
+      ]
+    },
+    "LineL1origin(36).csv": {
+      "line_id": "L1",
+      "sha256": "f523cf169ce1d958244a2be6a2046f383d3e8f241c514b633a8afde8443d5819",
+      "size_bytes": 54764223,
+      "headers": [
+        "Number of Samples = 501,,",
+        "Time windows (ns) = 700,,",
+        "Number of Traces = 1950,,",
+        "Trace interval (m) = 0.09526,,"
+      ]
+    },
+    "LineX1origin(36).csv": {
+      "line_id": "X1",
+      "sha256": "31c813ccead18d1f3615d8a410b2a1abc831e611e1a81ae8900f6714c9ec53bc",
+      "size_bytes": 24014207,
+      "headers": [
+        "Number of Samples = 501,,,,",
+        "Time windows (ns) = 700,,,,",
+        "Number of Traces = 938,,,,",
+        "Trace interval (m) = 0.09339,,,,"
+      ]
+    }
+  },
+  "errors": []
+}

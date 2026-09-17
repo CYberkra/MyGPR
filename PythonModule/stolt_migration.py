@@ -68,8 +68,10 @@ def method_stolt_migration(data, dx=0.05, dt=0.1, v=0.10, pad_x=1, pad_t=1, **kw
     pad_x = max(0, int(pad_x))
     pad_t = max(0, int(pad_t))
 
-    jacobian_power = float(kwargs.get("stolt_jacobian_power", 0.05))
-    obliquity_power = float(kwargs.get("stolt_obliquity_power", 0.05))
+    # 与 native 路径（global_spectral.py）保持一致的教科书默认：
+    # obliquity=1.0（完整 kz/kmag 幅度校正），jacobian=0（与 obliquity 同形，避免重复滤波）。
+    jacobian_power = float(kwargs.get("stolt_jacobian_power", 0.0))
+    obliquity_power = float(kwargs.get("stolt_obliquity_power", 1.0))
     mask_softness = float(kwargs.get("stolt_mask_softness", 0.03))
     kz_smooth = max(1, int(kwargs.get("stolt_kz_smooth", 3)))
     depth_gain = float(kwargs.get("stolt_depth_gain", 0.0))

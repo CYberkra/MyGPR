@@ -1,13 +1,9 @@
-"""Focused tests for the frontend-only SpatialPage coverage summary."""
+"""Focused tests for the frontend-only coverage summary (ui.geo_utils)."""
 from __future__ import annotations
 
 from types import SimpleNamespace
 
-import pytest
-
-pytest.importorskip('PyQt6')
-
-from ui.pages.spatial_page import _coverage_statistics, _format_distance  # noqa: E402
+from ui.geo_utils import coverage_statistics, format_distance
 
 
 def _track(points, coordinate_system='EPSG:32648'):
@@ -18,7 +14,7 @@ def _track(points, coordinate_system='EPSG:32648'):
 
 
 def test_coverage_statistics_sums_projected_track_lengths() -> None:
-    statistics = _coverage_statistics([
+    statistics = coverage_statistics([
         _track(((0, 0), (3, 4), (3, 8))),
         _track(((10, 10),)),
     ])
@@ -32,7 +28,7 @@ def test_coverage_statistics_sums_projected_track_lengths() -> None:
 
 
 def test_coverage_statistics_uses_geographic_distance_and_ignores_invalid_points() -> None:
-    statistics = _coverage_statistics([
+    statistics = coverage_statistics([
         _track(((120.0, 30.0), (120.0, 30.01)), 'EPSG:4326'),
         _track(((float('nan'), 0.0),)),
     ])
@@ -44,5 +40,5 @@ def test_coverage_statistics_uses_geographic_distance_and_ignores_invalid_points
 
 
 def test_distance_format_switches_to_kilometres() -> None:
-    assert _format_distance(999.4) == '999 m'
-    assert _format_distance(1_250.0) == '1.25 km'
+    assert format_distance(999.4) == '999 m'
+    assert format_distance(1_250.0) == '1.25 km'

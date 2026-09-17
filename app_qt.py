@@ -216,7 +216,7 @@ def main() -> int:
     # 配合 theme_helpers.apply_theme 的显式 palette，深浅主题在所有
     # Windows 机器上表现一致。
     app.setStyle('fusion')
-    app.setFont(QFont(constants.FONT_FAMILY, 10))
+    app.setFont(QFont(constants.FONT_FAMILY, constants.FONT_SIZE_BODY))
     setTheme(Theme.LIGHT)   # 默认浅色（跟随师兄），窗口内按设置回放
 
     window = MyGPRMainWindow()

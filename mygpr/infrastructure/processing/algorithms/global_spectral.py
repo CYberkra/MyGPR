@@ -192,7 +192,7 @@ def method_svd_subspace_native(
     arr, warnings = ensure_matrix(data)
     max_rank = min(arr.shape)
     rank_start = max(1, as_int(params.get("rank_start"), 1))
-    rank_end = min(max_rank, max(rank_start, as_int(params.get("rank_end"), 20)))
+    rank_end = min(max_rank, max(rank_start, as_int(params.get("rank_end"), 2)))
     factors = leading_svd(arr, rank_end, params)
     start = min(rank_start - 1, factors.effective_rank)
     end = min(rank_end, factors.effective_rank)
@@ -326,8 +326,11 @@ def method_stolt_migration_native(
         raise ValueError("dx, dt and v must be positive")
     pad_x = max(0, as_int(params.get("pad_x"), 1))
     pad_t = max(0, as_int(params.get("pad_t"), 1))
-    jacobian_power = as_float(params.get("stolt_jacobian_power"), 0.05)
-    obliquity_power = as_float(params.get("stolt_obliquity_power"), 0.05)
+    # 教科书 Stolt 倾角/斜射因子 kz/kmag（Margrave/Yilmaz）：jacobian 幂次为 0 时
+    # obliquity=1.0 才是完整幅度校正；jacobian 与 obliquity 同形（kz/omega ∝ obliquity），
+    # 二者同时开启会重复施加同一倾角滤波，故 jacobian 默认保持关闭。
+    jacobian_power = as_float(params.get("stolt_jacobian_power"), 0.0)
+    obliquity_power = as_float(params.get("stolt_obliquity_power"), 1.0)
     mask_softness = max(1.0e-4, as_float(params.get("stolt_mask_softness"), 0.03))
     kz_smooth = max(1, as_int(params.get("stolt_kz_smooth"), 3))
     depth_gain = max(0.0, as_float(params.get("stolt_depth_gain"), 0.0))
@@ -468,7 +471,7 @@ def file_svd_subspace_native(
     block_rows: int,
 ) -> dict[str, Any]:
     rank_start = max(1, as_int(params.get("rank_start"), 1))
-    rank_end = min(min(source.shape), max(rank_start, as_int(params.get("rank_end"), 20)))
+    rank_end = min(min(source.shape), max(rank_start, as_int(params.get("rank_end"), 2)))
     factors = leading_svd(source, rank_end, {**params, "_execution_context": context})
     start = min(rank_start - 1, factors.effective_rank)
     end = min(rank_end, factors.effective_rank)

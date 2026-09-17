@@ -131,7 +131,6 @@ def prepare_runtime_params(
     if needs_motion_runtime or method_id in {
         "kirchhoff_migration",
         "trace_qc",
-        "equidistant_trace_resample",
     }:
         _inject_runtime_metadata_context(
             runtime_params,

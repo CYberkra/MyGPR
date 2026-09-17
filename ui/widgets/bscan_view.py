@@ -18,8 +18,8 @@ sample_axis 时显示物理量，降采样数据附"原始约 N"），右键菜�
 （代价：右键拖拽框选缩放失效，由菜单缩放项补偿）。
 """
 
-from PyQt6.QtCore import Qt, QDateTime, pyqtSignal
-from PyQt6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout, QWidget
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
 from enum import Enum
 
@@ -27,9 +27,11 @@ import pyqtgraph as pg
 from PyQt6.QtWidgets import QLabel
 from qfluentwidgets import FluentIcon as FIF, PushButton
 
-from ui import constants, file_dialogs
-from ui.widgets.context_menus import (add_action, add_checkable_submenu,
-                                      make_menu)
+from ui import constants
+from ui.theme_helpers import control_palette
+from ui.widgets.context_menus import (RoundMenu, add_action,
+                                      add_checkable_submenu, make_menu)
+from ui.widgets.pg_view_base import GraphicsViewBase, style_plot_item
 
 
 class BScanDisplayMode(Enum):
@@ -38,6 +40,23 @@ class BScanDisplayMode(Enum):
     GRAYSCALE = 'grayscale'
     WIGGLE = 'wiggle'          # 变面积：正半轴填充
     WAVEFORM = 'waveform'      # 波形叠加：正负对称双线
+
+
+def _downsample_map_index(view_index: int, view_count: int,
+                          data_count: int) -> int:
+    """显示坐标索引 → 原始数据索引（strided 降采样近似线性映射）。
+
+    读数"原始约 N"标注与 pick/overlay 坐标换算共用本函数，避免双实现漂移。
+    """
+    return int(round(view_index * (data_count - 1)
+                     / max(view_count - 1, 1)))
+
+
+def _downsample_map_index_inverse(data_index, view_count: int,
+                                  data_count: int):
+    """原始数据索引 → 显示坐标（_downsample_map_index 的逆映射）。"""
+    return (data_index * max(view_count - 1, 1)
+            / max(data_count - 1, 1))
 
 
 def format_crosshair_readout(trace: int, sample: int, shape: tuple,
@@ -56,7 +75,7 @@ def format_crosshair_readout(trace: int, sample: int, shape: tuple,
     n_traces, n_samples = shape
     lines = [f'道 {trace + 1}']
     if trace_count and trace_count != n_traces:
-        approx = int(round(trace * (trace_count - 1) / max(n_traces - 1, 1)))
+        approx = _downsample_map_index(trace, n_traces, trace_count)
         lines[0] += f'（原始约 {approx + 1}）'
     if trace_axis_m is not None and 0 <= trace < len(trace_axis_m):
         lines.append(f'距起点 {float(trace_axis_m[trace]):.3g} m')
@@ -66,16 +85,18 @@ def format_crosshair_readout(trace: int, sample: int, shape: tuple,
     else:
         text = f'采样 {sample + 1}'
         if sample_count and sample_count != n_samples:
-            approx = int(round(sample * (sample_count - 1)
-                               / max(n_samples - 1, 1)))
+            approx = _downsample_map_index(sample, n_samples, sample_count)
             text += f'（原始约 {approx + 1}）'
         lines.append(text)
     lines.append(f'幅值 {amplitude:.4g}')
     return '\n'.join(lines)
 
 
-class BScanView(QWidget):
+class BScanView(GraphicsViewBase, QWidget):
     """B-Scan 剖面图像视图。
+
+    缩放/导出/轴主题继承 GraphicsViewBase（pg_view_base）；
+    比例策略（方形/铺满/1:1）与十字光标等为本类专属。
 
     信号:
         sig_point_picked(int, int): pick 模式下鼠标点击发射 (trace_index, sample_index)，
@@ -112,6 +133,7 @@ class BScanView(QWidget):
 
         self._glw = pg.GraphicsLayoutWidget(self)
         self._plot = self._glw.addPlot(row=0, col=0, title='B-Scan图像')
+        self._plot_item = self._plot   # GraphicsViewBase 约定属性
         self._plot.setLabel('bottom', '道数')
         self._plot.setLabel('left', '采样点')
         self._plot.invertY(True)
@@ -165,6 +187,13 @@ class BScanView(QWidget):
         self._readout.setAttribute(
             Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._readout.hide()
+        # 读数文本 30ms 节流：移动中十字线即时跟手（setPos 便宜），
+        # 文本 setText/adjustSize 触发布局合并到定时器刷新（首次出现即时）。
+        self._readout_timer = QTimer(self)
+        self._readout_timer.setSingleShot(True)
+        self._readout_timer.setInterval(30)
+        self._readout_timer.timeout.connect(self._flush_crosshair_readout)
+        self._pending_readout = None   # (trace, sample, amplitude)
 
         self._glw.scene().sigMouseClicked.connect(self._on_mouse_clicked)
         self._glw.scene().sigMouseMoved.connect(self._on_mouse_moved)
@@ -214,14 +243,13 @@ class BScanView(QWidget):
         layout.addStretch(1)
         return layout
 
-    # ------------------------------------------------------------------ 缩放
-    def zoom_in(self) -> None:
-        """放大 20%。"""
-        self._plot.vb.scaleBy((1.2, 1.2))
+    # ------------------------------------------------------------------ 缩放 / 导出
+    def _export_grab_target(self):
+        """PNG 导出/复制抓取目标：图形画布（不含工具条）。"""
+        return self._glw
 
-    def zoom_out(self) -> None:
-        """缩小 20%。"""
-        self._plot.vb.scaleBy((1.0 / 1.2, 1.0 / 1.2))
+    def _fit_view(self) -> None:
+        self.fit_to_data()
 
     def fit_to_data(self) -> None:
         """自适应窗口：显示全部数据（解除纵横锁定，拉伸铺满）。"""
@@ -319,9 +347,10 @@ class BScanView(QWidget):
             self._fit_current_mode()
         if self._colorbar is not None:
             self._colorbar.setLevels((float(vmin), float(vmax)))
-        # 非灰度模式下保持当前显示模式连续（Phase1 1.2）
+        # 非灰度模式下按当前显示模式重渲染波形；新数据到达保持用户视野，
+        # 不重置缩放（reset_view=False，模式切换才重置）
         if self.display_mode is not BScanDisplayMode.GRAYSCALE:
-            self.set_display_mode(self.display_mode)
+            self._apply_display_mode(self.display_mode, reset_view=False)
         self._plot.setTitle(title or 'B-Scan图像')
         self._plot.setLabel('bottom', x_label)
         self._plot.setLabel('left', y_label)
@@ -361,7 +390,7 @@ class BScanView(QWidget):
         ascan_action.setChecked(self._ascan_follow)
         ascan_action.triggered.connect(self.set_ascan_follow)
         menu.addAction(ascan_action)
-        mode_submenu = menu.addMenu('显示模式')
+        mode_submenu = RoundMenu('显示模式', menu)
         for mode in BScanDisplayMode:
             mode_label = {
                 BScanDisplayMode.GRAYSCALE: '灰度',
@@ -374,27 +403,15 @@ class BScanView(QWidget):
             act.triggered.connect(
                 lambda _checked=False, m=mode: self.set_display_mode(m))
             mode_submenu.addAction(act)
+        menu.addMenu(mode_submenu)
         menu.addSeparator()
         add_action(menu, FIF.COPY, '复制图像', self._copy_image,
                    enabled=self._image_shape is not None)
-        add_action(menu, FIF.SAVE, '导出 PNG…', self._export_png,
+        add_action(menu, FIF.SAVE, '导出 PNG…',
+                   lambda: self.export_png(
+                       title=self._plot.titleLabel.text, prefix='bscan'),
                    enabled=self._image_shape is not None)
         menu.exec(event.screenPos().toPoint())
-
-    def _copy_image(self) -> None:
-        """视图内容复制到剪贴板。"""
-        QApplication.clipboard().setPixmap(self._glw.grab())
-
-    def _export_png(self) -> None:
-        """视图内容导出 PNG（默认文件名含标题与时间戳）。"""
-        import re
-        title = re.sub(r'[\\/:*?"<>|\s]+', '_', self._plot.titleLabel.text)
-        stamp = QDateTime.currentDateTime().toString('yyyyMMdd_HHmmss')
-        path, _selected = file_dialogs.getSaveFileName(
-            self, '导出 B-Scan 图像', f'bscan_{title}_{stamp}.png',
-            'PNG 图片 (*.png)')
-        if path:
-            self._glw.grab().save(path, 'PNG')
 
     # ------------------------------------------------------------------ 交互
     def set_pick_enabled(self, enabled: bool) -> None:
@@ -407,12 +424,20 @@ class BScanView(QWidget):
             self._hide_crosshair()
 
     def set_display_mode(self, mode) -> None:
-        """切换灰度/变面积/波形叠加三态；共用同一坐标变换与色标（Phase1 1.2）。"""
+        """切换灰度/变面积/波形叠加三态；模式切换时重置视野（用户主动切换）。"""
         if isinstance(mode, str):
             mode = BScanDisplayMode(mode)
         if not isinstance(mode, BScanDisplayMode):
             raise ValueError(f'未知显示模式: {mode!r}')
         self.display_mode = mode
+        self._apply_display_mode(mode, reset_view=True)
+
+    def _apply_display_mode(self, mode, *, reset_view: bool) -> None:
+        """应用显示模式；reset_view 仅用户切换模式时为 True。
+
+        set_matrix 新数据到达时以 reset_view=False 重渲染波形，保持用户
+        当前缩放/视野（原实现无条件 autoRange，新数据会冲掉手动缩放）。
+        """
         img = self._image_item.image
         if img is None:
             return
@@ -427,9 +452,11 @@ class BScanView(QWidget):
             self._image_item.show()
         self._render_wiggle(img,
                             filled=(mode is BScanDisplayMode.WIGGLE),
-                            symmetric=(mode is BScanDisplayMode.WAVEFORM))
+                            symmetric=(mode is BScanDisplayMode.WAVEFORM),
+                            reset_view=reset_view)
 
-    def _render_wiggle(self, img, *, filled: bool, symmetric: bool) -> None:
+    def _render_wiggle(self, img, *, filled: bool, symmetric: bool,
+                       reset_view: bool = False) -> None:
         """变面积/波形叠加：pg.arrayToQPath C 层批量构建（向量化，非逐道循环）。
 
         填充（变面积）用每道"上升沿正包络+基线回程"闭合；波形叠加为
@@ -492,7 +519,8 @@ class BScanView(QWidget):
         self._wiggle_item.setPen(pg.mkPen(QColor(*rgb).darker(140), width=1))
         self._wiggle_item.setBrush(fill if filled else pg.mkBrush(None))
         self._wiggle_item.show()
-        self._plot.getViewBox().autoRange()
+        if reset_view:
+            self._plot.getViewBox().autoRange()
 
     def set_ascan_follow(self, enabled: bool) -> None:
         """开关"A-scan 波形跟随"：懒创建浮窗并同步 pick 模式（Phase1 1.1）。"""
@@ -502,28 +530,22 @@ class BScanView(QWidget):
         if enabled:
             if self._ascan_popup is None:
                 self._ascan_popup = AScanPopup(self.window())
+                self._ascan_popup.closed.connect(self._on_ascan_popup_closed)
             self._ascan_popup.show()
             self.set_pick_enabled(True)
         elif self._ascan_popup is not None:
             self._ascan_popup.hide()
 
-    def _emit_point_picked(self, trace: int, sample: int) -> None:
-        """统一 pick 发射口：跟随浮窗消费 + 原信号照常发出。"""
-        if (self._ascan_follow and self._ascan_popup is not None
-                and self._image_shape is not None):
-            import numpy as np
+    def _on_ascan_popup_closed(self) -> None:
+        """浮窗被用户关闭（仅隐藏、实例复用）：回落跟随标志。
 
-            image = np.asarray(self._image_item.image)
-            if 0 <= trace < image.shape[1]:
-                dist = (self._trace_axis_m[trace]
-                        if self._trace_axis_m is not None
-                        and trace < len(self._trace_axis_m) else None)
-                self._ascan_popup.show_trace(
-                    image[:, trace], trace_index=trace, distance_m=dist)
-        self.sig_point_picked.emit(trace, sample)
+        与菜单取消勾选同效——不动 pick 模式（set_ascan_follow(False)
+        同样只隐藏浮窗），仅让下次右键菜单的勾选态与浮窗实际状态一致。
+        """
+        self._ascan_follow = False
 
     def _on_mouse_moved(self, pos) -> None:
-        """鼠标在图像区移动：十字线跟手 + 左下角读数浮层。"""
+        """鼠标在图像区移动：十字线跟手 + 左下角读数浮层（文本 30ms 合并刷新）。"""
         if not self._crosshair_on or self._image_shape is None:
             self._hide_crosshair()
             return
@@ -541,7 +563,22 @@ class BScanView(QWidget):
         self._hline.setPos(sample + 0.5)
         self._vline.setVisible(True)
         self._hline.setVisible(True)
-        amplitude = float(self._image_item.image[sample, trace])
+        self._pending_readout = (trace, sample,
+                                 float(self._image_item.image[sample, trace]))
+        if self._readout.isVisible():
+            if not self._readout_timer.isActive():
+                self._readout_timer.start()
+        else:
+            self._flush_crosshair_readout()   # 首次出现即时，不等节流
+        self._readout.setVisible(True)
+
+    def _flush_crosshair_readout(self) -> None:
+        """节流刷新读数文本 + 浮层定位（_readout_timer 与首次出现共用）。"""
+        pending = self._pending_readout
+        if pending is None:
+            return
+        self._pending_readout = None
+        trace, sample, amplitude = pending
         self._readout.setText(format_crosshair_readout(
             trace, sample, self._image_shape, amplitude,
             trace_axis_m=self._trace_axis_m,
@@ -549,10 +586,11 @@ class BScanView(QWidget):
             sample_axis_label=self._sample_axis_label,
             trace_count=self._trace_count,
             sample_count=self._sample_count))
-        self._readout.setVisible(True)
         self._position_readout()
 
     def _hide_crosshair(self) -> None:
+        self._readout_timer.stop()
+        self._pending_readout = None
         self._vline.setVisible(False)
         self._hline.setVisible(False)
         self._readout.hide()
@@ -569,7 +607,8 @@ class BScanView(QWidget):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        self._position_readout()
+        if self._readout.isVisible():
+            self._position_readout()
 
     def set_overlay_points(self, points, color: str = constants.CHART_OVERLAY_COLOR) -> None:
         """解释页标注散点：points 为 [(trace, sample), ...]（原始数据坐标系）。
@@ -592,9 +631,9 @@ class BScanView(QWidget):
         n_traces, n_samples = self._image_shape
         t, s = int(trace), int(sample)
         if self._trace_count and self._trace_count != n_traces:
-            t = int(round(t * (self._trace_count - 1) / max(n_traces - 1, 1)))
+            t = _downsample_map_index(t, n_traces, self._trace_count)
         if self._sample_count and self._sample_count != n_samples:
-            s = int(round(s * (self._sample_count - 1) / max(n_samples - 1, 1)))
+            s = _downsample_map_index(s, n_samples, self._sample_count)
         return t, s
 
     def _data_to_view(self, trace, sample) -> tuple:
@@ -604,9 +643,9 @@ class BScanView(QWidget):
         n_traces, n_samples = self._image_shape
         t, s = float(trace), float(sample)
         if self._trace_count and self._trace_count != n_traces:
-            t = t * max(n_traces - 1, 1) / max(self._trace_count - 1, 1)
+            t = _downsample_map_index_inverse(t, n_traces, self._trace_count)
         if self._sample_count and self._sample_count != n_samples:
-            s = s * max(n_samples - 1, 1) / max(self._sample_count - 1, 1)
+            s = _downsample_map_index_inverse(s, n_samples, self._sample_count)
         return t, s
 
     def _on_mouse_clicked(self, event) -> None:
@@ -625,11 +664,31 @@ class BScanView(QWidget):
         trace, sample = int(view_point.x()), int(view_point.y())
         n_traces, n_samples = self._image_shape
         if 0 <= trace < n_traces and 0 <= sample < n_samples:
-            # 统一发射原始数据坐标：预览可能降采样，后端会话在原始坐标系工作
+            # sig_point_picked 契约是原始数据坐标：预览可能降采样，
+            # 后端会话（界面标注/双曲线拾取）全部在原始坐标系工作。
             data_trace, data_sample = self._view_to_data(trace, sample)
-            # 跟随浮窗用显示坐标列（与当前预览一致）；原信号用原始坐标
-            self._emit_point_picked(trace, sample)
-            del data_trace, data_sample
+            self._emit_point_picked(data_trace, data_sample, view_trace=trace)
+
+    def _emit_point_picked(self, trace: int, sample: int, *, view_trace: int | None = None) -> None:
+        """统一 pick 发射口：跟随浮窗消费 + 原信号照常发出。
+
+        trace/sample 为原始数据坐标（信号契约）；view_trace 是点击处的
+        显示坐标道号——跟随浮窗画的波形取自当前预览矩阵，必须用显示
+        索引取列，否则降采样预览下波形与十字线错位。
+        """
+        if (self._ascan_follow and self._ascan_popup is not None
+                and self._image_shape is not None):
+            import numpy as np
+
+            image = np.asarray(self._image_item.image)
+            display_trace = self._image_shape[0] - 1 if view_trace is None else int(view_trace)
+            if 0 <= display_trace < image.shape[1]:
+                dist = (self._trace_axis_m[display_trace]
+                        if self._trace_axis_m is not None
+                        and display_trace < len(self._trace_axis_m) else None)
+                self._ascan_popup.show_trace(
+                    image[:, display_trace], trace_index=display_trace, distance_m=dist)
+        self.sig_point_picked.emit(trace, sample)
 
     # ------------------------------------------------------------------ 其它
     def clear(self) -> None:
@@ -641,47 +700,38 @@ class BScanView(QWidget):
         self._plot.setTitle('暂无数据 — 请先在项目页导入测线')
 
     def apply_theme(self, dark: bool) -> None:
-        """深色 bg 'k'/文字 'w'；浅色 bg 'w'/文字 'k'；轴 pen/textPen/标签同步。"""
-        bg = 'k' if dark else 'w'
-        fg = 'w' if dark else 'k'
-        self._glw.setBackground(bg)
-        surface = '#000000' if dark else '#ffffff'
-        self._toolbar.setStyleSheet(
-            f'QWidget#bscanToolbar {{ background-color: {surface}; }}')
-        # 工具条按钮：紧凑尺寸保留，颜色随主题（硬编码浅色会在深色下突兀）
-        border = '#5a5a5a' if dark else '#d9d9d9'
-        hover = '#3d3d3d' if dark else '#f0f0f0'
-        button_bg = '#2d2d2d' if dark else '#ffffff'
-        button_text = '#f0f0f0' if dark else '#202020'
-        btn_qss = (
-            f'PushButton {{ background-color: {button_bg}; color: {button_text}; '
-            f'border: 1px solid {border}; border-radius: 4px; '
-            f'padding: 2px 8px; font-size: 11px; }}'
-            f'PushButton:hover {{ background-color: {hover}; }}'
-        )
-        for btn in getattr(self, '_toolbar_buttons', ()):
-            btn.setStyleSheet(btn_qss)
-        # 注意不能用 QColor(fg)：Qt 颜色名不含 'w'/'k'，QColor('w') 非法会变黑，
-        # 深色主题下轴刻度黑底黑字不可见；pg.mkPen 支持 'w'/'k' 简写
-        pen = pg.mkPen(fg)
-        for name in ('bottom', 'left'):
-            axis = self._plot.getAxis(name)
-            axis.setPen(pen)
-            axis.setTextPen(pen)
-            # 刻度文字由 textPen 控制，但轴标题（道数/采样点）是独立 label，
-            # 不随 textPen 变色，需显式同步，否则深色主题下标题隐身
-            axis.setLabel(text=axis.labelText, color=fg)
-        title_item = self._plot.titleLabel
-        title_item.setText(title_item.text, color=fg)
-        if self._colorbar is not None:
-            caxis = self._colorbar.axis
-            caxis.setPen(pen)
-            caxis.setTextPen(pen)
-            if getattr(caxis, 'labelText', ''):
-                caxis.setLabel(text=caxis.labelText, color=fg)
+        """深色 bg 'k'/文字 'w'；浅色 bg 'w'/文字 'k'；轴/色标/工具条/十字光标同步。
+
+        轴 pen/textPen/标签/标题走 pg_view_base.style_plot_item 统一循环；
+        工具条按钮等控件配色走 control_palette 单源。
+        """
+        self._dark = bool(dark)
+        palette = control_palette(dark)
+        self._glw.setBackground(palette['plot_bg'])
+        style_plot_item(
+            self._plot, dark,
+            colorbar_axis=(self._colorbar.axis
+                           if self._colorbar is not None else None))
+        self._refresh_control_palette(dark)
         # 十字光标：深色主题黄 / 浅色主题深红（图像与白底上均醒目）
         crosshair_pen = pg.mkPen(
             '#ffe135' if dark else '#c8000a',
             style=Qt.PenStyle.DashLine, width=1)
         self._vline.setPen(crosshair_pen)
         self._hline.setPen(crosshair_pen)
+
+    def _refresh_control_palette(self, dark: bool) -> None:
+        """工具条按钮配色（control_palette 单源，主题切换时重刷）。"""
+        palette = control_palette(dark)
+        self._toolbar.setStyleSheet(
+            f'QWidget#bscanToolbar {{ background-color: {palette["surface"]}; }}')
+        # 工具条按钮：紧凑尺寸保留，颜色随主题（硬编码浅色会在深色下突兀）
+        btn_qss = (
+            f'PushButton {{ background-color: {palette["button_bg"]}; '
+            f'color: {palette["button_text"]}; '
+            f'border: 1px solid {palette["border"]}; border-radius: 4px; '
+            f'padding: 2px 8px; font-size: 11px; }}'
+            f'PushButton:hover {{ background-color: {palette["hover"]}; }}'
+        )
+        for btn in getattr(self, '_toolbar_buttons', ()):
+            btn.setStyleSheet(btn_qss)

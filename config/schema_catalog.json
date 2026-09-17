@@ -757,6 +757,25 @@
       "references": [
         "mygpr/infrastructure/persistence/intermediate_cleanup.py"
       ]
+    },
+    {
+      "schema": "mygpr.velocity_analysis_evidence.v1",
+      "owner": "spatial-backend",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "mygpr/application/velocity/evidence.py"
+      ]
+    },
+    {
+      "schema": "mygpr.line_groups.v1",
+      "owner": "spatial-backend",
+      "mutable": true,
+      "migration_policy": "whole-file replace via atomic write; bump schema version on structural change",
+      "references": [
+        "mygpr/domain/grid/models.py",
+        "mygpr/infrastructure/persistence/grid_adapter.py"
+      ]
     }
   ]
 }

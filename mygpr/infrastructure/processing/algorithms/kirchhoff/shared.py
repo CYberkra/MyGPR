@@ -6,6 +6,7 @@ backends.
 """
 from __future__ import annotations
 
+import hashlib
 import math
 
 import numpy as np
@@ -193,6 +194,12 @@ def _setup_grid(length_m, depth, freq, time_window_ns, num_cal):
     return factor, nx_matrix, nt_matrix, nz_matrix, dx, dt_s
 
 
+# Travel-time table cache: keyed by (nz, nx, dx, slowness-model content hash).
+# Bounded to a few entries so long batch runs cannot accumulate tables.
+_TRAVEL_TIME_CACHE: dict[tuple[int, int, str], np.ndarray] = {}
+_TRAVEL_TIME_CACHE_LIMIT = 4
+
+
 def _compute_travel_time(
     velocity_model: np.ndarray,
     nz: int,
@@ -202,10 +209,27 @@ def _compute_travel_time(
     *,
     cancel_checker=None,
 ):
-    """Compute travel-time table using 2D time-to-depth conversion."""
+    """Compute travel-time table using 2D time-to-depth conversion.
+
+    Results are cached per ``(nz, nx, dx, velocity-model fingerprint)``:
+    migration of consecutive traces/lines on the same grid (typical for
+    batch and interactive re-runs) skips the expensive ``_time2d`` eikonal
+    sweep. The fingerprint is a content hash of the (rounded) slowness
+    model so any velocity field change invalidates the entry; cache entries
+    are read-only and shared across CPU/GPU backends within the process.
+    """
+    model = np.ascontiguousarray(velocity_model, dtype=np.float64)
+    fingerprint = hashlib.sha1(
+        np.round(model.T, 12).tobytes() + b"|dx=" + repr(float(dx)).encode()
+    ).hexdigest()
+    cache_key = (int(nz), int(nx), fingerprint)
+    cached = _TRAVEL_TIME_CACHE.get(cache_key)
+    if cached is not None:
+        return cached.copy()
+
     # CaGPR uses velocity in m/ns for UI parameters, but Time2d expects
     # slowness derived from m/s.
-    slowness = 1.0 / (velocity_model.T * 1.0e9)
+    slowness = 1.0 / (model.T * 1.0e9)
     fs_z = 6
     fs_x = 6
     fs = _fstar(fs_z, fs_x)
@@ -226,7 +250,10 @@ def _compute_travel_time(
     travel_time = _time2d(
         S, [1, src_x], dx, nz, nx, fs_z, fs_x, fs, cancel_checker=cancel_checker
     )
-    return travel_time
+    _TRAVEL_TIME_CACHE[cache_key] = travel_time
+    if len(_TRAVEL_TIME_CACHE) > _TRAVEL_TIME_CACHE_LIMIT:
+        _TRAVEL_TIME_CACHE.pop(next(iter(_TRAVEL_TIME_CACHE)))
+    return travel_time.copy()
 
 
 def _run_kirchhoff_stack(
@@ -299,26 +326,50 @@ def _assemble_kir_profile(
     return np.asarray(kir_profile, dtype=np.float64)
 
 
-def _postprocess_kir_profile(kir_profile: np.ndarray, weight: float) -> np.ndarray:
+def _postprocess_kir_profile(
+    kir_profile: np.ndarray,
+    weight: float,
+    max_iter: int = 100,
+    eps: float = 1.0e-4,
+    cancel_checker=None,
+) -> np.ndarray:
     data_min = float(np.min(kir_profile))
     data_max = float(np.max(kir_profile))
     denom = max(data_max - data_min, 1e-12)
     normalized = 2.0 * ((kir_profile - data_min) / denom) - 1.0
     normalized = _higher_order_laplace_filter(normalized, order=1)
     if weight > 0:
-        normalized = _denoise_tv_bregman(normalized, weight, max_iter=1000, eps=1e-6)
+        normalized = _denoise_tv_bregman(
+            normalized,
+            weight,
+            max_iter=max_iter,
+            eps=eps,
+            cancel_checker=cancel_checker,
+        )
     return np.asarray(normalized, dtype=np.float64)
 
 
-def _higher_order_laplace_filter(data: np.ndarray, order: int = 1) -> np.ndarray:
-    del order
-    filtered = np.array(data, copy=True)
-    return ndimage.laplace(filtered)
-
-
 def _denoise_tv_bregman(
-    image: np.ndarray, lamda: float, max_iter: int = 100, eps: float = 1.0e-4
+    image: np.ndarray,
+    lamda: float,
+    max_iter: int = 100,
+    eps: float = 1.0e-4,
+    *,
+    cancel_checker=None,
 ) -> np.ndarray:
+    """Canonical split-Bregman isotropic TV denoising (reference implementation).
+
+    The u-subproblem is solved by a Jacobi sweep: the four-neighbour Laplacian
+    term and the Bregman flux stay inside the ``lamda`` bracket while the
+    data-fidelity term stays outside, and the dual shrinkage threshold equals
+    ``lamda``. The input is pre-normalised by ``max(|f|max, 1)`` so the
+    iteration stays bounded for every ``lamda > 0``. (The previous CPU
+    formulation folded the data term into the ``lamda`` bracket with a unit
+    shrinkage threshold — diverging geometrically, masked by a final min-max
+    renormalisation.) The GPU kernels mirror this recurrence with periodic
+    (``roll``) instead of symmetric boundaries.
+    """
+
     lamda = float(lamda)
     if lamda <= 0:
         return np.array(image, copy=True)
@@ -327,10 +378,10 @@ def _denoise_tv_bregman(
     if not np.isfinite(original).all():
         original = np.nan_to_num(original, nan=0.0, posinf=0.0, neginf=0.0)
 
-    orig_min = float(np.min(original))
-    orig_max = float(np.max(original))
+    scale = max(float(np.max(np.abs(original))), 1.0)
+    normalized = original / scale
 
-    image_3d = _atleast_3d(original)
+    image_3d = _atleast_3d(normalized)
     rows, cols, _dims = image_3d.shape
     image_padded = np.pad(image_3d, [(1, 1), (1, 1), (0, 0)], mode="symmetric")
 
@@ -339,24 +390,25 @@ def _denoise_tv_bregman(
     bx = np.zeros_like(image_padded)
     by = np.zeros_like(image_padded)
 
-    mu = 1.0
     norm_factor = 1.0 + 4.0 * lamda
-    lamda2 = lamda
 
-    for _ in range(max_iter):
-        u_prev = image_padded[1:-1, 1:-1, :]
-
-        ux = image_padded[1 : rows + 1, 2 : cols + 2, :] - u_prev
-        uy = image_padded[2 : rows + 2, 1 : cols + 1, :] - u_prev
+    for iteration in range(max_iter):
+        if (
+            cancel_checker is not None
+            and iteration % 32 == 0
+            and bool(cancel_checker())
+        ):
+            raise Exception("用户已取消（Kirchhoff迁移TV去噪）")
+        u = image_padded[1 : rows + 1, 1 : cols + 1, :]
 
         u_new = (
-            lamda
+            image_3d
+            + lamda
             * (
                 image_padded[2 : rows + 2, 1 : cols + 1, :]
                 + image_padded[0:rows, 1 : cols + 1, :]
                 + image_padded[1 : rows + 1, 2 : cols + 2, :]
                 + image_padded[1 : rows + 1, 0:cols, :]
-                + image_3d
                 + dx[1 : rows + 1, 0:cols, :]
                 - dx[1 : rows + 1, 1 : cols + 1, :]
                 + dy[0:rows, 1 : cols + 1, :]
@@ -366,24 +418,24 @@ def _denoise_tv_bregman(
                 - by[0:rows, 1 : cols + 1, :]
                 + by[1 : rows + 1, 1 : cols + 1, :]
             )
-            / norm_factor
-        )
+        ) / norm_factor
 
+        delta = float(np.max(np.abs(u_new - u)))
         image_padded[1 : rows + 1, 1 : cols + 1, :] = u_new
         image_padded = _fill_boundary(image_padded)
-
-        residual = np.linalg.norm(
-            u_new.ravel() - u_prev.ravel()
-        ) + lamda2 * np.linalg.norm(u_prev.ravel())
-        if residual < eps:
+        if delta < eps:
             break
+
+        ux = image_padded[1 : rows + 1, 2 : cols + 2, :] - u_new
+        uy = image_padded[2 : rows + 2, 1 : cols + 1, :] - u_new
 
         tx = ux + bx[1 : rows + 1, 1 : cols + 1, :]
         ty = uy + by[1 : rows + 1, 1 : cols + 1, :]
-        s = np.sqrt(tx**2 + ty**2) + 1.0e-6
+        s = np.hypot(tx, ty)
+        factor = lamda / (lamda + s)
 
-        dx_new = (mu * s * tx) / (mu * s + 1.0)
-        dy_new = (mu * s * ty) / (mu * s + 1.0)
+        dx_new = tx * factor
+        dy_new = ty * factor
 
         bx[1 : rows + 1, 1 : cols + 1, :] = (
             bx[1 : rows + 1, 1 : cols + 1, :] + ux - dx_new
@@ -395,14 +447,16 @@ def _denoise_tv_bregman(
         dx[1 : rows + 1, 1 : cols + 1, :] = dx_new
         dy[1 : rows + 1, 1 : cols + 1, :] = dy_new
 
-    padded_min = float(np.min(image_padded))
-    padded_max = float(np.max(image_padded))
-    denom = max(padded_max - padded_min, 1.0e-12)
-    out_normalized = (image_padded[1:-1, 1:-1, :] - padded_min) / denom
-    out = out_normalized * (orig_max - orig_min) + orig_min
-    return out[:, :, 0]
+    out = image_padded[1:-1, 1:-1, :] * scale
+    if out.shape[2] == 1:
+        return out[:, :, 0]
+    return out
 
 
+def _higher_order_laplace_filter(data: np.ndarray, order: int = 1) -> np.ndarray:
+    del order
+    filtered = np.array(data, copy=True)
+    return ndimage.laplace(filtered)
 def _atleast_3d(image: np.ndarray) -> np.ndarray:
     if image.ndim < 3:
         return image[..., np.newaxis]

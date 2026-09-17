@@ -9,6 +9,7 @@ from typing import Sequence
 from mygpr.application.jobs.context import ExecutionContext
 from mygpr.application.project.service import ProjectService
 from mygpr.domain.project.models import (
+    ArtifactDeleteResult,
     BatchImportSummary,
     LineDeleteResult,
     LineQualityReport,
@@ -119,6 +120,26 @@ class ProjectMaintenanceService:
         reason: str = "用户删除测线",
     ) -> LineDeleteResult:
         return self._projects._session(project_id).delete_line(line_id, reason=reason)
+
+    def list_artifact_descendants(
+        self,
+        project_id: str,
+        line_id: str,
+        artifact_id: str,
+    ) -> tuple[str, ...]:
+        return self._projects._session(project_id).list_artifact_descendants(line_id, artifact_id)
+
+    def delete_artifacts(
+        self,
+        project_id: str,
+        line_id: str,
+        artifact_ids: Sequence[str],
+        *,
+        reason: str = "用户删除成果",
+    ) -> ArtifactDeleteResult:
+        return self._projects._session(project_id).delete_artifacts(
+            line_id, artifact_ids, reason=reason
+        )
 
     def batch_import_lines(
         self,

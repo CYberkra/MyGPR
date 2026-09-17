@@ -12,7 +12,7 @@ All commands below assume this directory is the working directory.
 ## Repo Map
 
 - `app_qt.py` — GUI 入口（DPI PassThrough、`--smoke` 离屏截图）。
-- `ui/` — Qt 前端：`main_window.py` 纯组装器 + `page_coordinator.py` 跨页信号链接线器+ `pages/`（七页）+ `widgets/` + `controllers/` + `desktop_backend_facade.py`（ui→core 统一通道）。
+- `ui/` — Qt 前端：`main_window.py` 纯组装器 + `page_coordinator.py` 跨页信号链薄门面（委派 `coordinator_project.py` / `coordinator_processing.py` / `coordinator_jobs.py` 三个域子接线器）+ `dialogs.py`（接线器许可的唯一对话框模块）+ `geo_utils.py`（覆盖统计纯函数）+ `pages/`（七页）+ `widgets/` + `controllers/` + `desktop_backend_facade.py`（ui→core 统一通道）。
 - `mygpr/` — 后端分层：interfaces / application / domain / infrastructure。
 - `core/` — 遗留内核（仍活跃），由 mygpr infrastructure 适配器调用。
 - `PythonModule/` — 算法包装器；经方法注册表动态加载，静态 grep 不到引用≠死代码。
@@ -32,7 +32,7 @@ python -m pytest tests/ -q
 ## Hard Rules
 
 - 不在 `main` 上直接提交；功能分支开发，PR 合并。
-- 长任务走 controller `run_worker` + JobBridge，工作线程不得直接碰 Qt 控件。
+- 长任务走 controller `run_command`（daemon 线程 + `_XxxCommand`）+ JobBridge，跨线程通知走 pyqtSignal；工作线程与 UI 线程互不越界。
 - 大文件用 mmap/分块 I/O；文件写隐藏临时文件后原子替换。
 - Windows：只读句柄 `os.fsync` 会失败，统一用 `core/storage_primitives.py` 的 `fsync_file()`。
 - 删除任何 `PythonModule`/`scripts` 文件前，先对照 `core/method_registry_metadata.py` 与 `config/schema_catalog.json`。

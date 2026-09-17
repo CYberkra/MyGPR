@@ -169,7 +169,9 @@ def _run_kirchhoff_gpu(
 
     # 保持和 2026-04-09(kir) / CaGPR 一致：GPU 主链完成后回到 CPU 做同一套后处理。
     migrated = _postprocess_kir_profile(
-        cp.asnumpy(kir_profile).astype(np.float64, copy=False), weight=weight
+        cp.asnumpy(kir_profile).astype(np.float64, copy=False),
+        weight=weight,
+        cancel_checker=cancel_checker,
     )
 
     timings["postprocess"] = (time.perf_counter() - t0) * 1000
@@ -557,15 +559,25 @@ def _denoise_tv_bregman_gpu_fast(
     for iter_num in range(max_iter):
         u_old = u.copy()
 
-        # Update u
-        ux = cp.roll(u, -1, axis=1) - u
-        uy = cp.roll(u, -1, axis=0) - u
-
         dxx = dx - bx
         dyy = dy - by
 
-        numerator = normalized + lamda * (
-            cp.roll(dxx, 1, axis=1) - dxx + cp.roll(dyy, 1, axis=0) - dyy
+        # Canonical Jacobi sweep: four-neighbour Laplacian + Bregman flux in
+        # the lamda bracket, data term outside. Mirrors the CPU reference
+        # (shared._denoise_tv_bregman); periodic boundaries via roll.
+        numerator = (
+            normalized
+            + lamda
+            * (
+                cp.roll(u, 1, axis=0)
+                + cp.roll(u, -1, axis=0)
+                + cp.roll(u, 1, axis=1)
+                + cp.roll(u, -1, axis=1)
+                + cp.roll(dxx, 1, axis=1)
+                - dxx
+                + cp.roll(dyy, 1, axis=0)
+                - dyy
+            )
         )
         denominator = 1.0 + 4.0 * lamda
         u = numerator / denominator
@@ -621,15 +633,25 @@ def _denoise_tv_bregman_gpu(
     for _ in range(max_iter):
         u_old = u.copy()
 
-        # Update u
-        ux = cp.roll(u, -1, axis=1) - u
-        uy = cp.roll(u, -1, axis=0) - u
-
         dxx = dx - bx
         dyy = dy - by
 
-        numerator = normalized + lamda * (
-            cp.roll(dxx, 1, axis=1) - dxx + cp.roll(dyy, 1, axis=0) - dyy
+        # Canonical Jacobi sweep: four-neighbour Laplacian + Bregman flux in
+        # the lamda bracket, data term outside. Mirrors the CPU reference
+        # (shared._denoise_tv_bregman); periodic boundaries via roll.
+        numerator = (
+            normalized
+            + lamda
+            * (
+                cp.roll(u, 1, axis=0)
+                + cp.roll(u, -1, axis=0)
+                + cp.roll(u, 1, axis=1)
+                + cp.roll(u, -1, axis=1)
+                + cp.roll(dxx, 1, axis=1)
+                - dxx
+                + cp.roll(dyy, 1, axis=0)
+                - dyy
+            )
         )
         denominator = 1.0 + 4.0 * lamda
         u = numerator / denominator

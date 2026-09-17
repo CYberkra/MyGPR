@@ -35,10 +35,12 @@ from mygpr.infrastructure.processing.native_adapter import (
 _BRIDGE_EXECUTOR = NativeProcessingExecutor()
 
 
-# Keep trace-count-changing operations out of the legacy field workbench.  The
-# method remains available through the backend processing catalog, where callers
+# Trace-count-changing methods are kept out of the legacy field workbench;
+# they remain available through the backend processing catalog, where callers
 # must explicitly accept the new geometry and trace metadata contract.
-HIDDEN_FIELD_METHOD_IDS: set[str] = {"equidistant_trace_resample"}
+# Currently empty: equidistant_trace_resample was removed (merged into
+# motion_compensation_speed). Add method ids here to hide them again.
+HIDDEN_FIELD_METHOD_IDS: set[str] = set()
 
 
 COMPATIBILITY_CHECK_METHOD_IDS = [
@@ -72,7 +74,6 @@ METHOD_CATEGORY_OVERRIDES = {
     "time_cut": "校正预处理",
     "trace_qc": "校正预处理",
     "dewow": "校正预处理",
-    "equidistant_trace_resample": "校正预处理",
     "subtracting_average_2D": "背景抑制",
     "median_background_2D": "背景抑制",
     "running_average_2D": "背景抑制",
@@ -81,6 +82,7 @@ METHOD_CATEGORY_OVERRIDES = {
     "fk_filter": "背景抑制",
     "ccbs": "背景抑制",
     "frequency_filter_1d": "频率滤波",
+    "inverse_q": "频率滤波",
     "compensatingGain": "增益补偿",
     "agcGain": "增益补偿",
     "sec_gain": "增益补偿",
@@ -91,7 +93,7 @@ METHOD_CATEGORY_OVERRIDES = {
     "hankel_svd": "去噪增强",
     "svd_subspace": "去噪增强",
     "wavelet_2d": "去噪增强",
-    "wavelet_svd": "去噪增强",
+    "mixed_phase_deconvolution": "去噪增强",
     "hilbert_envelope": "去噪增强",
     "trajectory_smoothing": "运动补偿",
     "motion_compensation_speed": "运动补偿",
@@ -110,7 +112,6 @@ METHOD_DISPLAY_NAMES = {
     "time_cut": "时间窗裁剪",
     "trace_qc": "坏道质检",
     "dewow": "去低频漂移 dewow",
-    "equidistant_trace_resample": "等距道重采样（改变道数）",
     "subtracting_average_2D": "平均背景去除",
     "median_background_2D": "中值背景去除",
     "running_average_2D": "尖锐杂波抑制",
@@ -129,7 +130,6 @@ METHOD_DISPLAY_NAMES = {
     "hankel_svd": "Hankel-SVD 去噪",
     "svd_subspace": "SVD 子空间处理",
     "wavelet_2d": "二维小波去噪",
-    "wavelet_svd": "小波-SVD 去噪",
     "hilbert_envelope": "Hilbert 包络",
     "trajectory_smoothing": "轨迹平滑",
     "motion_compensation_speed": "速度补偿",
@@ -140,6 +140,8 @@ METHOD_DISPLAY_NAMES = {
     "stolt_migration": "Stolt 偏移",
     "kirchhoff_migration": "Kirchhoff 偏移",
     "time_to_depth": "时间-深度转换",
+    "mixed_phase_deconvolution": "混合相位反褶积",
+    "inverse_q": "Inverse-Q 衰减补偿",
 }
 
 

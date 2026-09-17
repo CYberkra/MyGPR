@@ -5,7 +5,12 @@
 MyGPR 是面向 GPR / UAV-GPR 野外勘探项目的桌面软件，PyQt6 + qfluentwidgets。
 流程：项目建档 → 测线导入与预检 → 雷达/RTK/IMU 同步 → 测线处理 → 界面标注 → 空间成果 → 成果报告。
 
-主界面七个导航页：`主页 / 项目管理 / 处理工作台 / 界面解释 / 成果交付 / 任务中心 / 设置`。
+主界面八个页签（顶部横排 SlimSegment 药丸分段，竖导航已退役）：`主页 / 项目 / 处理 / 解释 / 空间信息 / 成果 / 任务 / 设置`。
+
+页面骨架统一约定（布局统一轮）：页内不再放大标题（页签条已标明当前页）；侧栏一律
+`CollapsiblePanel + make_scroll_column`，宽度两档 `SIDE_TOOL_WIDTH=320` / `SIDE_FORM_WIDTH=360`；
+设置/交付等单列表单页经 `wrap_centered` 限宽 760 居中；底部 OutputPanel 高度由主窗口
+竖向 QSplitter 拖拽分配（收展瞬时）。
 
 ## 运行与测试
 
@@ -23,11 +28,16 @@ python cli_batch.py --help             # 无头批处理入口
 ```text
 app_qt.py                      # GUI 入口（DPI PassThrough、主题、--smoke）
 ui/                            # PyQt6 前端
-  main_window.py               # FluentWindow 纯组装器（页面/导航/主题/面板/快捷键/后端门控）
-  page_coordinator.py          # 跨页业务信号链 + 运行态（单链可独立测试）
+  main_window.py               # FluentWindow 纯组装器（页面/顶部 SlimSegment 页签/主题/竖向 QSplitter 面板/快捷键/后端门控）
+  page_coordinator.py          # 跨页信号链薄门面（窗口服务接口 + 三段委派）
+  coordinator_project.py       #   └ ProjectChain：项目/测线/成果/导入/删除链
+  coordinator_processing.py    #   └ ProcessingChain：处理/AutoTune/速度/深度切片/解释
+  coordinator_jobs.py          #   └ JobHub：任务事件三视图同构扇出、取消/清理
+  dialogs.py                   # 接线器/controllers 许可的唯一对话框模块（函数式 API）
+  geo_utils.py                 # 覆盖统计纯函数（haversine，无 Qt 依赖）
   desktop_backend_facade.py    # ui→core/domain/application 统一导入通道（架构门禁例外）
-  pages/                       # 七个页面，纯展示 + 发信号
-  widgets/                     # BScanView / CollapsiblePanel / LogPanel 等
+  pages/                       # 八个页面，纯展示 + 发信号
+  widgets/                     # BScanView / CollapsiblePanel / OutputPanel 等
   controllers/                 # Qt 控制器：run_worker 后台线程 + 信号回主线程
 mygpr/                         # 后端分层（新代码走这里）
   interfaces/backend.py        # MyGPRBackend.create_default()

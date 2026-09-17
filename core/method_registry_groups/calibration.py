@@ -131,11 +131,12 @@ PROCESSING_METHODS_CALIBRATION = {
                 },
                 {
                     "name": "spike_zscore",
-                    "label": "Spike z-score",
+                    "label": "Spike z-score (0=off)",
                     "type": "float",
-                    "default": 0.0,
+                    "default": 6.0,
                     "min": 0.0,
                     "max": 1000.0,
+                    "tooltip": "MAD 稳健 z-score 尖峰检测阈值；0 关闭检测，推荐 6（稳健边界）。",
                 },
                 {
                     "name": "manual_trace_indices",
@@ -143,23 +144,6 @@ PROCESSING_METHODS_CALIBRATION = {
                     "type": "str",
                     "default": "",
                     "tooltip": "可填 3,8-12 这类 0-based 道号；留空则只用阈值检测。",
-                },
-            ],
-        },
-    "equidistant_trace_resample": {
-            "name": "2.3 equidistant_trace_resample (uniform trace spacing)",
-            "type": "local",
-            "module": "equidistant_trace_resample",
-            "func": method_equidistant_trace_resample,
-            "params": [
-                {
-                    "name": "spacing_m",
-                    "label": "Spacing (m, 0=median)",
-                    "type": "float",
-                    "default": 0.0,
-                    "min": 0.0,
-                    "max": 100000.0,
-                    "tooltip": "目标道间距；0 表示使用当前 trace_distance_m 的中位间距。",
                 },
             ],
         },
