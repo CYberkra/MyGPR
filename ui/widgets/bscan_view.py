@@ -29,9 +29,36 @@ from qfluentwidgets import FluentIcon as FIF, PushButton
 
 from ui import constants
 from ui.theme_helpers import control_palette
+from ui.widgets._colormap_data import COLORMAP_DATA
 from ui.widgets.context_menus import (RoundMenu, add_action,
                                       add_checkable_submenu, make_menu)
 from ui.widgets.pg_view_base import GraphicsViewBase, style_plot_item
+
+# 色标缓存：名 → ColorMap（数据查表重建，进程内只构建一次）
+_COLORMAP_CACHE = {}
+
+
+def _lookup_colormap(name: str):
+    """按名取 ColorMap：优先查预采样数据（零 matplotlib import）。
+
+    getFromMatplotlib 首次调用会触发 matplotlib 全量 import（实测 ~0.9s），
+    主页预览卡构造期即命中，是冷启动大头。九项 SPEC 色标由
+    scripts/gen_colormap_data.py 离线采样为 _colormap_data.py，重建结果
+    与 getFromMatplotlib 逐点一致（1024 点采样最大通道差 0，脚本自验）。
+    数据缺失的色标（新增未重跑生成脚本）回落原路径，正确性不受影响。
+    """
+    cmap = _COLORMAP_CACHE.get(name)
+    if cmap is not None:
+        return cmap
+    entry = COLORMAP_DATA.get(name)
+    if entry is not None:
+        cmap = pg.colormap.ColorMap(pos=entry[0], color=entry[1], name=name)
+    else:
+        cmap = pg.colormap.getFromMatplotlib(name)
+    if cmap is not None:
+        cmap.name = name
+        _COLORMAP_CACHE[name] = cmap
+    return cmap
 
 
 class BScanDisplayMode(Enum):
@@ -358,7 +385,7 @@ class BScanView(GraphicsViewBase, QWidget):
     def set_colormap(self, name: str) -> None:
         """按 matplotlib 名取 LUT（九项见 SPEC §1，默认 seismic）。"""
         self._cmap_name = str(name)
-        self._cmap = pg.colormap.getFromMatplotlib(name)
+        self._cmap = _lookup_colormap(str(name))
         self._image_item.setColorMap(self._cmap)
         if self._colorbar is not None:
             self._colorbar.setColorMap(self._cmap)

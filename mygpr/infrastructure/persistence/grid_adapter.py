@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from core.coordinate_projection import ProjectionError, resolve_projection_spec
-from core.gis_layers import GISLayerStore
 
 _LINE_GROUPS_PATH = "grid/line_groups.json"
 
@@ -37,12 +36,18 @@ class GridPersistenceMixin:
             f"tolerance={data.get('tolerance_m', '?')}m")
 
     def list_gis_layers(self) -> Sequence[Mapping[str, Any]]:
+        # 惰性导入：gis_layers 顶部拉起 rasterio/fiona/pyproj（importtime
+        # 实测 ~0.65s），仅 GIS 图层操作需要，启动路径不应加载。
+        from core.gis_layers import GISLayerStore
+
         store = GISLayerStore(self._store.root)
         return [asdict(record) for record in store.list_layers()]
 
     def import_grid_layer(
         self, geojson_path: Path, *, name: str, role: str
     ) -> Mapping[str, Any]:
+        from core.gis_layers import GISLayerStore
+
         store = GISLayerStore(self._store.root)
         crs_name = self._grid_crs_name()
         record = store.import_layer(
