@@ -10,8 +10,6 @@
 from __future__ import annotations
 
 import numpy as np
-from scipy.cluster.hierarchy import fcluster, linkage
-from scipy.spatial.distance import pdist
 
 from mygpr.domain.grid.errors import GridAnalysisError
 from mygpr.domain.grid.models import LineGroup, TrackGrouping
@@ -63,6 +61,10 @@ def group_tracks(tracks: list[SpatialTrack], *, tolerance_m: float) -> TrackGrou
             f"轨迹代表点坐标含 NaN/Inf: {', '.join(bad)}。",
             hint="确认测线轨迹已完成投影（rtk_status=已投影）。",
         )
+
+    # 惰性导入：避免启动链拉起 scipy 栈（scipy.cluster + scipy.spatial ~0.5s）
+    from scipy.cluster.hierarchy import fcluster, linkage
+    from scipy.spatial.distance import pdist
 
     distances = pdist(pts)
     labels = (

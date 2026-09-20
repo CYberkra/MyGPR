@@ -17,8 +17,6 @@ from __future__ import annotations
 
 from typing import Any, FrozenSet
 
-from core.methods_registry import PROCESSING_METHODS, get_auto_tune_stage
-
 # 旧 LegacyProcessingCatalog 视为全局变换的方法（native 侧不标 global_transform
 # 的实现需保留该能力标记，见任务 F 收敛基线 fixture）。
 _LEGACY_GLOBAL_TRANSFORM_METHODS = frozenset(
@@ -31,7 +29,14 @@ def legacy_overlay(method_id: str) -> dict[str, Any]:
 
     等价于旧 ``LegacyProcessingCatalog.get()`` 中从 ``PROCESSING_METHODS``
     派生的字段；``capabilities`` 为 legacy 视角额外标记的能力集合。
+
+    core.methods_registry 惰性导入：本模块处于后端启动 import 链
+    （backend → native_adapter → 本模块），顶层 import 注册表会把
+    全部算法实现连带 scipy 拉进启动路径（~1.1s）；元数据只在目录
+    构建/执行时需要，移入函数内首次使用处。
     """
+    from core.methods_registry import PROCESSING_METHODS, get_auto_tune_stage
+
     raw = PROCESSING_METHODS.get(str(method_id)) or {}
     stage = get_auto_tune_stage(str(method_id))
     auto_tune_enabled = bool(raw.get("auto_tune_enabled", False))

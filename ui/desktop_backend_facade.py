@@ -35,7 +35,6 @@ from core.method_registry_metadata import (
     METHOD_TAGS,
     PREFERRED_METHOD_ORDER,
 )
-from core.methods_registry import PROCESSING_METHODS
 from mygpr.domain.acquisition.models import SensorSyncSettings
 from mygpr.domain.processing.models import PipelineDefinition, PipelineStep
 
@@ -175,10 +174,18 @@ def method_catalog() -> tuple[UiMethodEntry, ...]:
 
     Each entry is built by merging the raw registry descriptor with
     display metadata from ``core.method_registry_metadata``.
+
+    注册表两级惰性构建（v0.9.38）：本模块被各页面顶层 import，而方法目录
+    只需元数据（名称/参数 schema/分类等）——经 ``method_metadata_records``
+    取元数据级记录，不触发算法实现与 scipy 导入；仅引擎执行路径按需构建
+    完整 ``PROCESSING_METHODS``。
     """
+    from core.methods_registry import method_metadata_records
+
+    records = method_metadata_records()
     order = {method_id: index for index, method_id in enumerate(PREFERRED_METHOD_ORDER)}
     items: list[UiMethodEntry] = []
-    for method_id, raw in PROCESSING_METHODS.items():
+    for method_id, raw in records.items():
         meta = METHOD_METADATA.get(method_id, {})
         category = str(meta.get("category") or raw.get("category") or "experimental")
         tag = METHOD_TAGS.get(method_id)
