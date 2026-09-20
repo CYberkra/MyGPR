@@ -43,6 +43,7 @@ class ProjectController(QObject):
     depth_save_failed = pyqtSignal(str)                    # message
     artifact_descendants_ready = pyqtSignal(str, list, dict)  # line_id, 后代闭包, {artifact_id: 名称}
     line_source_path_ready = pyqtSignal(str, object)          # line_id, 源文件路径|None
+    backend_not_ready = pyqtSignal()                          # _backend() 兜底：后端未就绪（接线层弹 InfoBar）
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -80,6 +81,7 @@ class ProjectController(QObject):
         backend = getattr(controller, "backend", None) if controller is not None else None
         if backend is None:
             self.log_message.emit("后端尚未就绪，请稍后再试")
+            self.backend_not_ready.emit()
         return backend
 
     def _job_bridge(self):

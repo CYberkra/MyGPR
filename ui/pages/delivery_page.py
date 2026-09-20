@@ -13,17 +13,18 @@
 
 import os
 
-from PyQt6.QtCore import Qt, QUrl, pyqtSignal
+from PyQt6.QtCore import Qt, QSize, QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
-    QDialog, QHBoxLayout, QHeaderView, QListWidget,
+    QApplication, QDialog, QHBoxLayout, QHeaderView, QListWidget,
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
     CaptionLabel, CheckBox, InfoBar, InfoBarPosition, LineEdit,
     MessageBox, PrimaryPushButton, PushButton, ScrollArea, SpinBox,
-    StrongBodyLabel,
+    StrongBodyLabel, TransparentToolButton,
 )
+from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants, file_dialogs
 from ui.page_scaffold import (make_card, make_form_row, rebuild_check_list,
@@ -31,6 +32,7 @@ from ui.page_scaffold import (make_card, make_form_row, rebuild_check_list,
 from ui.theme_helpers import status_color
 from ui.widgets import (clear_invalid, make_separator, mark_invalid,
                         validate_non_empty)
+from ui.widgets.context_menus import add_action, make_menu
 
 # 报告结果字段（鸭子类型：dict 键或对象属性）
 _REPORT_FIELDS = (
@@ -63,11 +65,14 @@ class DeliveryPage(QWidget):
     report_requested = pyqtSignal(dict)    # {'package_name': str}
     backup_requested = pyqtSignal(dict)    # {'destination_dir': str, 'incremental': bool, 'retention_keep': int|None}
     restore_requested = pyqtSignal(str)    # 备份归档路径
+    set_current_spatial_requested = pyqtSignal(str)  # 空间成果 result_id
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._busy = False
         self._report_dir = ''
+        self._report_paths = {}     # key -> 生成产物路径（打开文件按钮用）
+        self._spatial_results = []  # 最近一次 set_spatial_results 的原始数据
         self._build_ui()
         self._connect_internal()
 
@@ -124,9 +129,24 @@ class DeliveryPage(QWidget):
         self._spatial_table.verticalHeader().setVisible(False)
         self._spatial_table.setEditTriggers(
             QTableWidget.EditTrigger.NoEditTriggers)
+        self._spatial_table.setSelectionBehavior(
+            QTableWidget.SelectionBehavior.SelectRows)
+        self._spatial_table.setSelectionMode(
+            QTableWidget.SelectionMode.SingleSelection)
         self._spatial_table.horizontalHeader().setSectionResizeMode(
             0, QHeaderView.ResizeMode.Stretch)
         self._spatial_table.setMinimumHeight(140)
+        # 双击/Enter = 设为当前成果；右键 = 更多操作（复制名称/ID）
+        self._spatial_table.itemDoubleClicked.connect(
+            lambda _item: self._activate_spatial_row(
+                self._spatial_table.currentRow()))
+        self._spatial_table.activated.connect(
+            lambda _index: self._activate_spatial_row(
+                self._spatial_table.currentRow()))
+        self._spatial_table.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu)
+        self._spatial_table.customContextMenuRequested.connect(
+            self._on_spatial_context_menu)
         spatial_layout.addWidget(self._spatial_table)
         root.addWidget(spatial_card)
 
@@ -145,13 +165,23 @@ class DeliveryPage(QWidget):
         report_layout.addWidget(make_separator())
 
         self._report_path_labels = {}
+        self._report_open_btns = {}
         for key, caption in _REPORT_FIELDS:
             value = CaptionLabel('--', report_card)
             value.setStyleSheet(
                 'color: %s; font-size: 11px;' % status_color('disabled'))
+            open_btn = TransparentToolButton(FIF.DOCUMENT, report_card)
+            open_btn.setIconSize(QSize(14, 14))
+            open_btn.setFixedSize(24, 24)
+            open_btn.setToolTip('打开该文件')
+            open_btn.setEnabled(False)
+            open_btn.clicked.connect(
+                lambda _checked=False, k=key: self._on_open_file(k))
             report_layout.addLayout(make_form_row(
-                caption, value, parent=report_card, trailing_stretch=False))
+                caption, value, open_btn, parent=report_card,
+                trailing_stretch=False))
             self._report_path_labels[key] = value
+            self._report_open_btns[key] = open_btn
         open_row = QHBoxLayout()
         open_row.addStretch(1)
         self._open_dir_btn = PushButton('打开目录', report_card)
@@ -196,10 +226,10 @@ class DeliveryPage(QWidget):
 
     # ============================================================ 公共接口（供主窗口接线）
     def set_spatial_results(self, results: list) -> None:
-        """空间成果列表 → 结果表格（名称/测线数/创建时间）。"""
-        results = list(results or [])
-        self._spatial_table.setRowCount(len(results))
-        for row, item in enumerate(results):
+        """空间成果列表 → 结果表格（名称/测线数/创建时间）；原始数据留存供行操作。"""
+        self._spatial_results = list(results or [])
+        self._spatial_table.setRowCount(len(self._spatial_results))
+        for row, item in enumerate(self._spatial_results):
             name = str(_get(item, 'name', '') or _get(item, 'title', ''))
             line_ids = _get(item, 'line_ids', None)
             if line_ids is None:
@@ -208,7 +238,9 @@ class DeliveryPage(QWidget):
                 n_lines = len(line_ids)
             created = str(_get(item, 'created_at', '')
                           or _get(item, 'created', '') or '--')
-            self._spatial_table.setItem(row, 0, QTableWidgetItem(name))
+            name_item = QTableWidgetItem(name)
+            name_item.setToolTip('双击设为当前成果，右键更多操作')
+            self._spatial_table.setItem(row, 0, name_item)
             self._spatial_table.setItem(row, 1, QTableWidgetItem(str(n_lines)))
             self._spatial_table.setItem(row, 2, QTableWidgetItem(created))
 
@@ -219,6 +251,9 @@ class DeliveryPage(QWidget):
             path = str(_get(result, key, '') or '')
             label = self._report_path_labels[key]
             label.setText(path if path else '--')
+            label.setToolTip(path or '')
+            self._report_paths[key] = path
+            self._report_open_btns[key].setEnabled(bool(path))
             has_path = has_path or bool(path)
         report_dir = ''
         for key in _REPORT_DIR_KEYS:
@@ -312,6 +347,52 @@ class DeliveryPage(QWidget):
     def _on_open_dir(self) -> None:
         if self._report_dir:
             QDesktopServices.openUrl(QUrl.fromLocalFile(self._report_dir))
+
+    def _on_open_file(self, key: str) -> None:
+        """单个产物路径的"打开文件"按钮。"""
+        path = self._report_paths.get(key, '')
+        if path:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
+    # ---------------- 空间成果表：行操作（双击/Enter = 设为当前成果）
+    def _spatial_row_data(self, row: int):
+        if 0 <= row < len(self._spatial_results):
+            return self._spatial_results[row]
+        return None
+
+    def _activate_spatial_row(self, row: int) -> None:
+        item = self._spatial_row_data(row)
+        if item is None or self._busy:
+            return
+        result_id = str(_get(item, 'result_id', '') or _get(item, 'id', ''))
+        if result_id:
+            self.set_current_spatial_requested.emit(result_id)
+
+    def _on_spatial_context_menu(self, pos) -> None:
+        """空间成果行右键：设为当前成果 / 复制名称 / 复制成果 ID。"""
+        row = self._spatial_table.rowAt(pos.y())
+        item = self._spatial_row_data(row)
+        if item is None:
+            return
+        menu = self._build_spatial_menu(item, row)
+        menu.exec(self._spatial_table.viewport().mapToGlobal(pos))
+
+    def _build_spatial_menu(self, item, row: int):
+        """构造空间成果右键菜单（与 exec 分离，便于测试检查动作）。"""
+        name = str(_get(item, 'name', '') or _get(item, 'title', ''))
+        result_id = str(_get(item, 'result_id', '') or _get(item, 'id', ''))
+        menu = make_menu(parent=self._spatial_table)
+        add_action(menu, FIF.ACCEPT, '设为当前成果',
+                   lambda: self._activate_spatial_row(row),
+                   enabled=bool(result_id) and not self._busy)
+        menu.addSeparator()
+        add_action(menu, FIF.COPY, '复制名称',
+                   lambda: QApplication.clipboard().setText(name),
+                   enabled=bool(name))
+        add_action(menu, FIF.COPY, '复制成果 ID',
+                   lambda: QApplication.clipboard().setText(result_id),
+                   enabled=bool(result_id))
+        return menu
 
     def _on_backup_clicked(self) -> None:
         if self._busy:

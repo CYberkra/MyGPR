@@ -8,8 +8,8 @@ failed 失败 / cancelled 已取消。
 
 import re
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (QHBoxLayout, QHeaderView, QLabel,
+from PyQt6.QtCore import QEvent, Qt, pyqtSignal
+from PyQt6.QtWidgets import (QApplication, QHBoxLayout, QHeaderView, QLabel,
                              QStackedLayout, QTableWidget, QTableWidgetItem,
                              QVBoxLayout, QWidget)
 from qfluentwidgets import CaptionLabel, ProgressBar, PushButton, ScrollArea
@@ -17,6 +17,7 @@ from qfluentwidgets import CaptionLabel, ProgressBar, PushButton, ScrollArea
 from ui.motion import animate_badge_color, animate_progress
 from ui.page_scaffold import style_transparent_scroll
 from ui.theme_helpers import BADGE_QSS, status_color
+from ui.widgets.context_menus import FIF, add_action, make_menu
 
 _STATUS_TEXT = {
     'queued': '排队',
@@ -76,6 +77,10 @@ class JobTable(QWidget):
             QTableWidget.EditTrigger.NoEditTriggers)
         self._table.setSelectionBehavior(
             QTableWidget.SelectionBehavior.SelectRows)
+        self._table.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu)
+        self._table.customContextMenuRequested.connect(
+            self._on_context_menu)
         header = self._table.horizontalHeader()
         header.setSectionResizeMode(self._COL_TITLE,
                                     QHeaderView.ResizeMode.Stretch)
@@ -92,6 +97,7 @@ class JobTable(QWidget):
         empty_label.setStyleSheet(
             _EMPTY_LABEL_QSS % status_color('disabled'))
         empty_layout.addWidget(empty_label)
+        self._empty_label = empty_label
         self._stack = QStackedLayout()
         self._stack.addWidget(empty_page)   # index 0 = 空态
         self._stack.addWidget(self._table)  # index 1 = 表格
@@ -116,7 +122,9 @@ class JobTable(QWidget):
         row = self._table.rowCount()
         self._table.insertRow(row)
         self._rows[job_id] = row
-        self._table.setItem(row, self._COL_TITLE, QTableWidgetItem(title))
+        title_item = QTableWidgetItem(title)
+        title_item.setToolTip(title)
+        self._table.setItem(row, self._COL_TITLE, title_item)
         self._update_empty_state()
 
         badge = _make_status_badge('queued')
@@ -155,7 +163,9 @@ class JobTable(QWidget):
             bar.setRange(0, 100)
             animate_progress(bar, int(completed))
         bar.setVisible(True)
-        self._table.item(row, self._COL_MESSAGE).setText(message or '')
+        message_item = self._table.item(row, self._COL_MESSAGE)
+        message_item.setText(message or '')
+        message_item.setToolTip(message or '')
 
     def set_status(self, job_id: str, status: str) -> None:
         row = self._rows.get(job_id)
@@ -205,16 +215,73 @@ class JobTable(QWidget):
         """与 MiniJobList 同构的清理接口：JobHub 对三视图统一分发用。"""
         self.clear_finished()
 
+    def active_job_ids(self) -> list[str]:
+        """仍在排队/运行的任务 id 列表（主窗口退出前检查用）。"""
+        return [job_id for job_id, row in self._rows.items()
+                if self._status_of(row) in _ACTIVE_STATUSES]
+
+    def focus_job(self, job_id: str) -> None:
+        """选中并滚动到指定任务行（迷你任务列表点击定位用）。"""
+        row = self._rows.get(str(job_id))
+        if row is None:
+            return
+        self._table.selectRow(row)
+        item = self._table.item(row, self._COL_TITLE)
+        if item is not None:
+            self._table.scrollToItem(item)
+
     # ------------------------------------------------------------- 内部
     def _status_of(self, row):
         item = self._table.item(row, self._COL_STATUS)
         return item.data(Qt.ItemDataRole.UserRole) if item else None
 
+    def _job_id_of(self, row: int):
+        for job_id, r in self._rows.items():
+            if r == row:
+                return job_id
+        return None
+
+    def _copy_text(self, text: str) -> None:
+        if text:
+            QApplication.clipboard().setText(text)
+
+    def _on_context_menu(self, pos) -> None:
+        """任务行右键：复制标题/消息（失败任务可复制错误信息）、取消、清理。"""
+        row = self._table.rowAt(pos.y())
+        job_id = self._job_id_of(row) if row >= 0 else None
+        menu = self._build_context_menu(job_id, row)
+        menu.exec(self._table.viewport().mapToGlobal(pos))
+
+    def _build_context_menu(self, job_id, row: int):
+        """构造右键菜单（与 exec 分离，便于测试检查动作）。"""
+        menu = make_menu(parent=self._table)
+        if job_id is not None:
+            title_item = self._table.item(row, self._COL_TITLE)
+            message_item = self._table.item(row, self._COL_MESSAGE)
+            title = title_item.text() if title_item is not None else ''
+            message = message_item.text() if message_item is not None else ''
+            add_action(menu, FIF.COPY, '复制标题',
+                       lambda: self._copy_text(title))
+            add_action(menu, FIF.COPY, '复制消息',
+                       lambda: self._copy_text(message),
+                       enabled=bool(message))
+            add_action(menu, FIF.CANCEL, '取消任务',
+                       lambda: self.cancel_requested.emit(job_id),
+                       enabled=self._status_of(row) in _ACTIVE_STATUSES)
+            menu.addSeparator()
+        add_action(menu, FIF.DELETE, '清理已完成', self.clear_finished)
+        return menu
+
 
 class MiniJobList(QWidget):
-    """右侧折叠面板"任务"tab：仅显示活动任务（标题 + 进度条 + 状态）。"""
+    """右侧折叠面板"任务"tab：仅显示活动任务（标题 + 进度条 + 状态）。
+
+    任务行可点击（除取消按钮外的区域）：发 ``job_clicked``，由接线器
+    跳任务页并定位该任务（JobTable.focus_job）。
+    """
 
     cancel_requested = pyqtSignal(str)
+    job_clicked = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -247,6 +314,10 @@ class MiniJobList(QWidget):
             entry['title_label'].setText(title)
             return
         row_widget = QWidget(self._container)
+        # 行可点击：跳任务页定位；取消按钮自行消费点击，不走这里
+        row_widget.setCursor(Qt.CursorShape.PointingHandCursor)
+        row_widget.setToolTip('点击跳转到任务中心')
+        row_widget.installEventFilter(self)
         lay = QVBoxLayout(row_widget)
         lay.setContentsMargins(4, 4, 4, 4)
         lay.setSpacing(4)
@@ -321,6 +392,16 @@ class MiniJobList(QWidget):
             _restyle_status_badge(entry['badge'], entry['status'])
 
     # ------------------------------------------------------------- 内部
+    def eventFilter(self, watched, event):
+        """任务行左键点击 → job_clicked（取消按钮自行消费，不到这里）。"""
+        if (event.type() == QEvent.Type.MouseButtonRelease
+                and event.button() == Qt.MouseButton.LeftButton):
+            for job_id, entry in self._jobs.items():
+                if entry['widget'] is watched:
+                    self.job_clicked.emit(job_id)
+                    break
+        return super().eventFilter(watched, event)
+
     def _remove_row(self, job_id):
         entry = self._jobs.pop(job_id, None)
         if entry is None:

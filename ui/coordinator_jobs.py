@@ -16,6 +16,21 @@ remove_inactive），本类是唯一分发点；运行态（已知任务、导�
 """
 from __future__ import annotations
 
+import time
+
+# 任务取消确认阈值：刚提交的任务直接取消（误触代价低），已运行超过
+# 该时长的任务先弹确认框（误触中断数小时计算，代价高）。
+CANCEL_CONFIRM_AFTER_S = 30.0
+
+
+def _ask_cancel_dialog(parent, title: str, elapsed_s: float) -> bool:
+    """长任务取消确认框（对话框在 ui.dialogs；包装成模块级函数便于无 Qt 打桩）。
+
+    返回 True = 用户确认取消。
+    """
+    from ui.dialogs import ask_cancel_job
+    return ask_cancel_job(parent, title, elapsed_s)
+
 
 class JobHub:
     """任务事件分发枢纽；纯 Python 接线类，构造时拿 PageCoordinator 门面。"""
@@ -25,6 +40,8 @@ class JobHub:
         self.known_job_ids: set[str] = set()   # 已 upsert 到任务控件的任务
         self.import_job_ids: set[str] = set()  # 测线导入/传感器同步任务（完成后刷新测线）
         self.spatial_job_ids: set[str] = set()  # 空间成果任务（完成后刷新空间成果表）
+        # job_id → 首次出现时刻（monotonic 秒）：取消确认框的"已运行时长"依据
+        self._job_first_seen: dict[str, float] = {}
 
     # ============================================================ 信号注册
     def connect_all(self) -> None:
@@ -37,10 +54,21 @@ class JobHub:
         output_panel = co.output_panel
         if output_panel is not None:
             output_panel.cancel_job_requested.connect(self.on_cancel)
+            mini = output_panel.mini_jobs()
+            if mini is not None:
+                mini.job_clicked.connect(self.on_mini_job_clicked)
 
         home_jobs = co.page('homeInterface').mini_jobs()
         if home_jobs is not None:
             home_jobs.cancel_requested.connect(self.on_cancel)
+            home_jobs.job_clicked.connect(self.on_mini_job_clicked)
+
+    # ============================================================ 迷你列表点击定位
+    def on_mini_job_clicked(self, job_id: str) -> None:
+        """迷你任务列表行点击 → 跳任务中心页并选中定位该任务。"""
+        co = self._co
+        co.goto_page('jobsInterface')
+        co.page('jobsInterface').job_table().focus_job(str(job_id))
 
     # ============================================================ 视图扇出
     def _views(self) -> tuple:
@@ -70,6 +98,7 @@ class JobHub:
         if job_id in self.known_job_ids:
             return
         self.known_job_ids.add(job_id)
+        self._job_first_seen.setdefault(job_id, time.monotonic())
         title = job_id
         bridge = self._co.job_bridge()
         if bridge is not None:
@@ -101,6 +130,7 @@ class JobHub:
                      result) -> None:
         co = self._co
         job_id = str(job_id)
+        self._job_first_seen.pop(job_id, None)   # 首现时刻只服务活动任务
         if success:
             co.log_message(
                 f'SUCCESS 任务 {job_id[:8]}… 完成：{message}')
@@ -128,14 +158,31 @@ class JobHub:
 
     # ============================================================ 取消 / 清理
     def on_cancel(self, job_id: str) -> None:
+        """取消任务：长任务先确认（dialogs），取消失败显式反馈（不再一律
+        宣称"已请求取消"——backend 侧任务可能已结束/不存在）。"""
         bridge = self._co.job_bridge()
-        if bridge is not None:
-            job_id = str(job_id)
-            if job_id and job_id == self._co.processing.processing_job_id:
-                # 从任务页/日志面板取消处理任务同样按"已取消"提示，而非失败
-                self._co.processing.processing_cancel_requested = True
-            bridge.cancel(job_id)
-            self._co.log_message(f'INFO 已请求取消任务 {job_id[:8]}…')
+        if bridge is None:
+            return
+        job_id = str(job_id)
+        if not job_id:
+            return
+        title = bridge.titles().get(job_id) or f'{job_id[:8]}…'
+        seen = self._job_first_seen.get(job_id)
+        elapsed = time.monotonic() - seen if seen is not None else 0.0
+        if elapsed >= CANCEL_CONFIRM_AFTER_S:
+            if not _ask_cancel_dialog(self._co.page('jobsInterface'),
+                                      title, elapsed):
+                return
+        if job_id == self._co.processing.processing_job_id:
+            # 从任务页/日志面板取消处理任务同样按"已取消"提示，而非失败
+            self._co.processing.processing_cancel_requested = True
+        if bridge.cancel(job_id) is False:
+            # 显式 False = 后端拒绝（任务已结束/不存在）；None 视为旧实现成功
+            self._co.log_message(f'INFO 任务 {title} 已结束，无需取消')
+            self._co.infobar('warning', '任务中心',
+                             f'任务「{title}」无法取消（可能已结束）')
+            return
+        self._co.log_message(f'INFO 已请求取消任务 {job_id[:8]}…')
 
     def on_prune_jobs(self) -> None:
         """清理已完成任务：BackendController.prune_jobs（工作线程，不阻塞 UI）。"""

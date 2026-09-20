@@ -591,3 +591,53 @@ def test_confirm_delete_emits_line_ids_on_accept(qapp, panel, monkeypatch):
     panel.line_delete_requested.connect(got.append)
     panel._confirm_delete('L01')
     assert got == [['L01']]
+
+
+def test_double_click_line_emits_process_request(qapp, panel):
+    """测线叶子双击 → line_process_requested（跳处理页，与项目页双击同语义）。"""
+    panel.set_project_info(types.SimpleNamespace(name='测试1'))
+    panel.set_lines([_line('L01', '2026-09-16T01:00:00')])
+    got = []
+    panel.line_process_requested.connect(got.append)
+    panel._on_item_double_clicked(panel._line_id_by_item['L01'], 0)
+    assert got == ['L01']
+
+
+def test_files_view_refresh_rescans_root(qapp, panel, tmp_path):
+    """F5 路径：文件视图整体重扫，磁盘上新出现的文件应出现。"""
+    panel.set_project_info(
+        types.SimpleNamespace(name='测试1', root_path=str(tmp_path)))
+    panel._set_view('files', remember=False)
+    assert panel._tree.topLevelItemCount() == 0
+    (tmp_path / 'new.dat').write_text('x', encoding='utf-8')
+    panel._refresh_current_view()
+    names = [panel._tree.topLevelItem(i).text(0)
+             for i in range(panel._tree.topLevelItemCount())]
+    assert names == ['new.dat']
+
+
+def test_refresh_current_view_ignores_other_views(qapp, panel):
+    """测线/成果视图数据由 controller 扇出，F5 不触发本地重建。"""
+    panel.set_project_info(types.SimpleNamespace(name='测试1'))
+    panel.set_lines([_line('L01', '2026-09-16T01:00:00')])
+    before = panel._tree.topLevelItem(0)
+    panel._refresh_current_view()
+    assert panel._tree.topLevelItem(0) is before  # 未重建
+
+
+def test_refresh_dir_replaces_children(qapp, panel, tmp_path):
+    """目录右键「刷新此目录」：就地重扫子层并替换旧子项。"""
+    sub = tmp_path / 'data'
+    sub.mkdir()
+    (sub / 'a.dat').write_text('x', encoding='utf-8')
+    panel.set_project_info(
+        types.SimpleNamespace(name='测试1', root_path=str(tmp_path)))
+    panel._set_view('files', remember=False)
+    dir_item = panel._tree.topLevelItem(0)
+    panel._on_item_expanded(dir_item)  # 懒加载出 a.dat
+    assert dir_item.childCount() == 1
+    (sub / 'b.dat').write_text('x', encoding='utf-8')
+    panel._refresh_dir(dir_item)
+    names = [dir_item.child(i).text(0) for i in range(dir_item.childCount())]
+    assert names == ['a.dat', 'b.dat']
+    assert dir_item.isExpanded()

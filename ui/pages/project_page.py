@@ -285,6 +285,11 @@ class ProjectPage(QWidget):
             self._on_line_selection_changed)
         self._lines_table.itemDoubleClicked.connect(
             self._emit_line_process_request)
+        # Enter 与双击同义：打开/定位主操作（全站约定）
+        self._lines_table.activated.connect(
+            lambda index: self._emit_line_process_request(
+                self._lines_table.item(index.row(), 0)
+                if index.isValid() else None))
         self._delete_lines_shortcut = QShortcut(
             QKeySequence(QKeySequence.StandardKey.Delete), self._lines_table,
             context=Qt.ShortcutContext.WidgetWithChildrenShortcut)
@@ -317,6 +322,8 @@ class ProjectPage(QWidget):
         self._artifacts_table.setMinimumHeight(120)
         self._artifacts_table.itemDoubleClicked.connect(
             lambda _item: self._emit_artifact_preview())
+        self._artifacts_table.activated.connect(
+            lambda _index: self._emit_artifact_preview())
         self._artifacts_table.setContextMenuPolicy(
             Qt.ContextMenuPolicy.CustomContextMenu)
         self._artifacts_table.customContextMenuRequested.connect(

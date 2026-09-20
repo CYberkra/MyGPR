@@ -261,9 +261,11 @@ class ProcessingPage(PanelStateMixin, QWidget):
 
     # ============================================================ 内部接线
     def _connect_internal(self) -> None:
-        # 方法库 → 选中方法（AutoTune 目标）/ 双击添加 / 按钮添加
+        # 方法库 → 选中方法（AutoTune 目标）/ 双击添加 / 按钮添加 / 拖入插入
         self._method_browser.sig_method_selected.connect(self._on_method_selected)
         self._method_browser.sig_add_requested.connect(self._add_method_to_pipeline)
+        self._pipeline_list.sig_method_drop_requested.connect(
+            self._insert_method_to_pipeline)
         self._add_method_btn.clicked.connect(self._on_add_selected_method)
 
         # 处理链 ↔ 参数表单
@@ -510,12 +512,20 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._add_method_to_pipeline(method_id)
 
     def _add_method_to_pipeline(self, method_id: str) -> None:
+        self._insert_method_to_pipeline(method_id, None)
+
+    def _insert_method_to_pipeline(self, method_id: str,
+                                   index=None) -> None:
+        """添加方法到处理链；index=None 追加末尾，否则插入到指定行。"""
         method = self._methods_by_id.get(method_id, {})
         label = method.get('display_name') or method.get('name') or method_id
         params = {item.get('name'): item.get('default')
                   for item in (method.get('parameter_schema') or [])
                   if item.get('name') is not None}
-        self._pipeline_list.add_step(method_id, label, params)
+        if index is None:
+            self._pipeline_list.add_step(method_id, label, params)
+        else:
+            self._pipeline_list.insert_step(index, method_id, label, params)
 
     # ---------------- 处理链 ↔ 参数表单
     def _on_step_selected(self, index: int) -> None:

@@ -84,6 +84,8 @@ class ProjectChain:
         delivery.report_requested.connect(self.on_report_requested)
         delivery.backup_requested.connect(self.on_backup_requested)
         delivery.restore_requested.connect(self.on_restore_requested)
+        delivery.set_current_spatial_requested.connect(
+            self.on_set_current_spatial_requested)
 
         # ---------------- 项目控制器 → 本链 / 页面
         pc = co.project_controller
@@ -102,6 +104,8 @@ class ProjectChain:
             pc.artifact_descendants_ready.connect(
                 self.on_artifact_descendants_ready)
             pc.busy_changed.connect(project.set_busy)
+            # 后端未就绪兜底：controller 原本只写日志（"点了没反应"），这里补 InfoBar
+            pc.backend_not_ready.connect(self.on_backend_not_ready)
             if tree is not None:
                 pc.busy_changed.connect(tree.set_busy)
                 # 文件树「成果」视图：全项目成果列表（与按线的 artifacts_updated 互补）
@@ -111,10 +115,18 @@ class ProjectChain:
         if dc is not None:
             dc.spatial_results_updated.connect(delivery.set_spatial_results)
             dc.report_generated.connect(self.on_report_generated)
+            dc.spatial_current_changed.connect(self.on_spatial_current_changed)
+            # 交付任务在飞态 → 禁用成果页四个操作按钮（防重复提交）
+            dc.busy_changed.connect(delivery.set_busy)
+            dc.backend_not_ready.connect(self.on_backend_not_ready)
             if tree is not None:
                 # 文件树「空间成果 / 项目报告」组与成果页同一数据源
                 dc.spatial_results_updated.connect(tree.set_spatial_results)
                 dc.report_list_updated.connect(tree.set_reports)
+
+    def on_backend_not_ready(self) -> None:
+        """controller 兜底"后端尚未就绪"→ 显式 InfoBar（原先只进日志面板）。"""
+        self._co.infobar('warning', '提示', '后端尚未就绪，请稍后再试')
 
     # ============================================================ 项目生命周期
     def on_close_project_requested(self) -> None:
@@ -511,6 +523,17 @@ class ProjectChain:
         project_id = self._co.current_project_id()
         if project_id and self._co.delivery_controller is not None:
             self._co.delivery_controller.refresh_reports(project_id)
+
+    def on_set_current_spatial_requested(self, result_id: str) -> None:
+        """成果页空间成果表双击/右键「设为当前成果」。"""
+        if self._co.delivery_controller is None or not self._co.require_project():
+            return
+        self._co.delivery_controller.set_current_spatial(
+            self._co.current_project_id(), str(result_id))
+
+    def on_spatial_current_changed(self, result_id: str) -> None:
+        """设为当前成果成功：用户反馈（成果页双击语义的主操作）。"""
+        self._co.infobar('success', '空间成果', '已设为当前空间成果')
 
     def on_backup_requested(self, options: dict) -> None:
         if self._co.delivery_controller is None or not self._co.require_project():

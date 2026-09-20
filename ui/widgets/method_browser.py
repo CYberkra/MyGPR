@@ -6,17 +6,20 @@ UI：顶部搜索 LineEdit（占位"搜索方法…"，实时过滤）→ 分类
 重建，避免构建时快照过期）/ 备选 = disabled 灰 / 实验 = warning 琥珀，
 QSS 用 SPEC §1 徽章模板。tooltip 显示 method_id 与参数数。
 双击发 sig_add_requested；单击选中发 sig_method_selected。
+叶子可左键拖出（METHOD_MIME 载荷 = method_id）→ 拖到处理链任意位置插入。
 右键菜单（RoundMenu）：添加到处理链（等同双击）/ 复制方法名。
 """
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (QApplication, QHBoxLayout, QTreeWidget,
-                             QTreeWidgetItem, QVBoxLayout, QWidget, QLabel)
+from PyQt6.QtCore import QMimeData, Qt, pyqtSignal
+from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QHBoxLayout,
+                             QTreeWidget, QTreeWidgetItem, QVBoxLayout,
+                             QWidget, QLabel)
 from qfluentwidgets import LineEdit, themeColor
 from qfluentwidgets import FluentIcon as FIF
 
 from ui.theme_helpers import BADGE_QSS, status_color
 from ui.widgets.context_menus import add_action, make_menu
+from ui.widgets.pipeline_list import METHOD_MIME
 
 
 def _tag_badge_bg(tag: str) -> str:
@@ -34,6 +37,21 @@ def _make_badge(tag: str) -> QLabel:
     return badge
 
 
+class _MethodTree(QTreeWidget):
+    """方法树：仅叶子（方法）可拖出，载荷 = method_id（METHOD_MIME）。"""
+
+    def mimeData(self, items) -> QMimeData:
+        mime = QMimeData()
+        for item in items:
+            if item.parent() is None:
+                continue   # 分类行不可拖
+            method_id = item.data(0, Qt.ItemDataRole.UserRole)
+            if method_id:
+                mime.setData(METHOD_MIME, str(method_id).encode('utf-8'))
+                break
+        return mime
+
+
 class MethodBrowser(QWidget):
     """方法库浏览器。"""
 
@@ -49,9 +67,12 @@ class MethodBrowser(QWidget):
         self._search.setPlaceholderText('搜索方法…')
         self._search.textChanged.connect(self._apply_filter)
 
-        self._tree = QTreeWidget(self)
+        self._tree = _MethodTree(self)
         self._tree.setHeaderHidden(True)
         self._tree.setColumnCount(1)
+        # 拖出到处理链；本树不接收任何落下
+        self._tree.setDragDropMode(QAbstractItemView.DragDropMode.DragOnly)
+        self._tree.setDefaultDropAction(Qt.DropAction.CopyAction)
         self._tree.currentItemChanged.connect(self._on_current_changed)
         self._tree.itemDoubleClicked.connect(self._on_double_clicked)
         self._tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -83,10 +104,13 @@ class MethodBrowser(QWidget):
 
         for cat in order:
             top = QTreeWidgetItem([cat])
-            top.setFlags(top.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+            top.setFlags(top.flags() & ~Qt.ItemFlag.ItemIsSelectable
+                         & ~Qt.ItemFlag.ItemIsDragEnabled
+                         & ~Qt.ItemFlag.ItemIsDropEnabled)
             self._tree.addTopLevelItem(top)
             for m in groups[cat]:
                 child = QTreeWidgetItem([''])
+                child.setFlags(child.flags() & ~Qt.ItemFlag.ItemIsDropEnabled)
                 child.setData(0, Qt.ItemDataRole.UserRole,
                               m.get('method_id', ''))
                 child.setData(0, Qt.ItemDataRole.UserRole + 1,

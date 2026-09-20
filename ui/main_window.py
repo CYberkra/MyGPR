@@ -20,8 +20,8 @@ from PyQt6.QtWidgets import (
 )
 from qfluentwidgets import (
     FluentIcon as FIF, FluentWindow, InfoBar, InfoBarPosition,
-    LineEdit, NavigationItemPosition, PrimaryPushButton, PushButton,
-    SplashScreen, TransparentToolButton, isDarkTheme,
+    LineEdit, MessageBox, NavigationItemPosition, PrimaryPushButton,
+    PushButton, SplashScreen, TransparentToolButton, isDarkTheme,
 )
 
 from ui import constants, file_dialogs
@@ -741,9 +741,12 @@ class MyGPRMainWindow(FluentWindow):
             '<li><b>Ctrl+B</b>：收起/展开左侧文件树</li>',
             '<li><b>Ctrl+J</b>：收起/展开底部输出面板（日志/任务）</li>',
             '<li><b>Ctrl+R</b>：处理页运行处理链</li>',
-            '<li><b>Ctrl+L</b>：处理页加载测线数据</li>',
-            '<li><b>Delete</b>：处理链删除选中步骤 / 项目页删除选中测线</li>',
-            '</ul><p>提示：处理链步骤行支持右键菜单（上移/下移/删除）。</p>',
+            '<li><b>Ctrl+↑ / Ctrl+↓</b>：处理链上移/下移选中步骤</li>',
+            '<li><b>Ctrl+Z</b>：处理链撤销最近一次删除步骤</li>',
+            '<li><b>F5</b>：文件树「文件」视图刷新</li>',
+            '<li><b>Delete</b>：处理链删除选中步骤 / 项目页删除选中测线 / 解译页删除选中标注点</li>',
+            '</ul><p>提示：处理链步骤行支持右键菜单（上移/下移/删除/撤销删除）'
+            '与拖拽重排；表格行双击 = 打开/定位主操作。</p>',
         ])
         text.setHtml(''.join(rows))
         layout.addWidget(text)
@@ -791,7 +794,32 @@ class MyGPRMainWindow(FluentWindow):
         return getattr(self.backend_controller, 'job_bridge', None)
 
     # ============================================================ 关闭
+    def _active_job_ids(self) -> list[str]:
+        """任务中心表中排队/运行中的任务 id（退出前确认用；页面缺失为空）。"""
+        jobs_page = self._page('jobsInterface')
+        getter = getattr(jobs_page, 'job_table', None)
+        if not callable(getter):
+            return []
+        table = getter()
+        if table is None or not hasattr(table, 'active_job_ids'):
+            return []
+        return list(table.active_job_ids())
+
     def closeEvent(self, event) -> None:
+        # 0) 有活动任务时先确认：退出会中断任务、丢失未完成的计算结果
+        active_jobs = self._active_job_ids()
+        if active_jobs:
+            box = MessageBox(
+                '有任务正在运行',
+                f'还有 {len(active_jobs)} 个任务在排队或运行中。\n'
+                '退出会中断这些任务，未完成的计算结果会丢失。确认退出？',
+                self,
+            )
+            box.yesButton.setText('退出')
+            box.cancelButton.setText('取消')
+            if box.exec() != QDialog.DialogCode.Accepted:
+                event.ignore()
+                return
         # 1) 先关解释标注会话（可能涉及后端会话资源）
         if self.interpretation_controller is not None:
             try:

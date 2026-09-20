@@ -9,6 +9,7 @@
   （QFileSystemModel）自管，随项目根切换；
 - 测线叶子点击 → ``line_selected(str)`` → 复用 ``ProjectChain.on_line_selected``
   现有链路（含切线作废成果预览代数），与项目页测线表同语义；
+  双击 → ``line_process_requested``（选中并跳处理页，与项目页双击同语义）；
 - 成果叶子点击 → ``artifact_focus_requested(line_id, artifact_id)`` →
   换线（如需）+ 跳处理页选中预览；
 - 空间成果/项目报告叶子点击 → ``delivery_focus_requested(kind)`` → 跳成果页；
@@ -26,7 +27,10 @@ from __future__ import annotations
 import os
 
 from PyQt6.QtCore import Qt, QUrl, pyqtSignal
-from PyQt6.QtGui import QBrush, QColor, QDesktopServices, QIcon, QPainter, QPixmap
+from PyQt6.QtGui import (
+    QBrush, QColor, QDesktopServices, QIcon, QKeySequence, QPainter, QPixmap,
+    QShortcut,
+)
 from PyQt6.QtWidgets import (
     QApplication, QDialog, QHeaderView, QTreeWidgetItem,
 )
@@ -149,6 +153,11 @@ class FileTreePanel(DockPanel):
         self._tree.itemExpanded.connect(self._on_item_expanded)
         self._tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._tree.customContextMenuRequested.connect(self._on_context_menu)
+        # F5 刷新文件视图（无 FS 实时监视，手动刷新是补偿路径）
+        self._refresh_shortcut = QShortcut(
+            QKeySequence(QKeySequence.StandardKey.Refresh), self._tree,
+            context=Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self._refresh_shortcut.activated.connect(self._refresh_current_view)
         self.body_layout().addWidget(self._tree, 1)
         self._project_root = ''
 
@@ -431,13 +440,33 @@ class FileTreePanel(DockPanel):
             self.delivery_focus_requested.emit(str(kind))
 
     def _on_item_double_clicked(self, item, _column: int) -> None:
-        """文件双击 → 系统默认程序打开（目录双击保留默认展开/收起）。"""
+        """测线双击 = 选中并跳处理页；文件双击 → 系统默认程序打开
+        （目录双击保留默认展开/收起）。"""
         if self._busy:
             return
-        if item.data(0, _ROLE_KIND) == 'file':
+        kind = item.data(0, _ROLE_KIND)
+        if kind == 'line':
+            payload = str(item.data(0, _ROLE_PAYLOAD) or '')
+            if payload:
+                self.line_process_requested.emit(payload)
+        elif kind == 'file':
             path = str(item.data(0, _ROLE_PAYLOAD) or '')
             if path:
                 QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
+    # ------------------------------------------------------------ 刷新
+    def _refresh_current_view(self) -> None:
+        """F5：文件视图整体重扫（测线/成果数据由 controller 扇出，无需本地刷）。"""
+        if self._busy or self._current_view != 'files':
+            return
+        self._rebuild()
+
+    def _refresh_dir(self, item) -> None:
+        """就地重扫目录子层（替换现有子项，保持展开）。"""
+        item.takeChildren()
+        for node in build_files_model(item.data(0, _ROLE_PAYLOAD)):
+            self._add_node(item, node)
+        item.setExpanded(True)
 
     # ------------------------------------------------------------ 右键菜单
     def _on_context_menu(self, pos) -> None:
@@ -449,6 +478,11 @@ class FileTreePanel(DockPanel):
             return
         item = self._tree.itemAt(pos)
         if item is None:
+            # 文件视图空白处：整体重扫（F5 的菜单等价路径）
+            if self._current_view == 'files' and self._project_root:
+                menu = make_menu(parent=self._tree)
+                add_action(menu, FIF.SYNC, '刷新', self._refresh_current_view)
+                menu.exec(self._tree.viewport().mapToGlobal(pos))
             return
         kind = item.data(0, _ROLE_KIND)
         if kind in ('dir', 'file'):
@@ -478,12 +512,17 @@ class FileTreePanel(DockPanel):
         menu.exec(self._tree.viewport().mapToGlobal(pos))
 
     def _on_file_context_menu(self, item, pos) -> None:
-        """目录/文件右键：打开 / 在资源管理器中显示 / 复制路径（只读浏览，
-        文件管理交给系统，不绕过后端事务与回收站机制）。"""
+        """目录/文件右键：目录多一项「刷新此目录」（就地重扫）；打开 /
+        在资源管理器中显示 / 复制路径（只读浏览，文件管理交给系统，
+        不绕过后端事务与回收站机制）。"""
         path = str(item.data(0, _ROLE_PAYLOAD) or '')
         if not path:
             return
         menu = make_menu(parent=self._tree)
+        if os.path.isdir(path):
+            add_action(menu, FIF.SYNC, '刷新此目录',
+                       lambda: self._refresh_dir(item))
+            menu.addSeparator()
         add_action(menu, FIF.DOCUMENT, '打开',
                    lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(path)))
         add_action(menu, FIF.FOLDER, '在资源管理器中显示',

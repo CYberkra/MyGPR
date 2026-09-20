@@ -23,6 +23,7 @@
 import math
 
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QAbstractItemView, QHBoxLayout, QHeaderView, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget,
@@ -177,6 +178,12 @@ class InterpretationPage(QWidget):
         table_header = self._points_table.horizontalHeader()
         table_header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self._points_table.setMinimumHeight(180)
+        # Delete 键删除选中点（与处理链/项目页测线表同约定）
+        self._delete_point_shortcut = QShortcut(
+            QKeySequence(QKeySequence.StandardKey.Delete), self._points_table,
+            context=Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self._delete_point_shortcut.activated.connect(
+            self._on_remove_selected_point)
         points_layout.addWidget(self._points_table, 1)
 
         # 点数计数与删除/清空同行：计数居左，按钮居右
@@ -188,7 +195,7 @@ class InterpretationPage(QWidget):
         btn_row.addWidget(self._points_count_label)
         btn_row.addStretch(1)
         self._remove_point_btn = PushButton('删除选中', points_card, FIF.DELETE)
-        self._remove_point_btn.setToolTip('删除列表中选中的标注点')
+        self._remove_point_btn.setToolTip('删除列表中选中的标注点 (Delete)')
         self._clear_points_btn = PushButton('清空', points_card)
         self._clear_points_btn.setToolTip('清空全部标注点')
         btn_row.addWidget(self._remove_point_btn)
