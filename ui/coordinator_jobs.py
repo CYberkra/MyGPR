@@ -57,11 +57,13 @@ class JobHub:
             mini = output_panel.mini_jobs()
             if mini is not None:
                 mini.job_clicked.connect(self.on_mini_job_clicked)
+                mini.open_job_center_requested.connect(self.on_open_job_center)
 
         home_jobs = co.page('homeInterface').mini_jobs()
         if home_jobs is not None:
             home_jobs.cancel_requested.connect(self.on_cancel)
             home_jobs.job_clicked.connect(self.on_mini_job_clicked)
+            home_jobs.open_job_center_requested.connect(self.on_open_job_center)
 
     # ============================================================ 迷你列表点击定位
     def on_mini_job_clicked(self, job_id: str) -> None:
@@ -69,6 +71,10 @@ class JobHub:
         co = self._co
         co.goto_page('jobsInterface')
         co.page('jobsInterface').job_table().focus_job(str(job_id))
+
+    def on_open_job_center(self) -> None:
+        """迷你列表右键空白区「打开任务中心」→ 仅跳页不定位。"""
+        self._co.goto_page('jobsInterface')
 
     # ============================================================ 视图扇出
     def _views(self) -> tuple:

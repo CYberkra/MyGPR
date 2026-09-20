@@ -180,6 +180,11 @@ class DeliveryPage(QWidget):
             report_layout.addLayout(make_form_row(
                 caption, value, open_btn, parent=report_card,
                 trailing_stretch=False))
+            # 路径标签右键 = 打开文件 / 打开所在目录 / 复制路径
+            value.setContextMenuPolicy(
+                Qt.ContextMenuPolicy.CustomContextMenu)
+            value.customContextMenuRequested.connect(
+                lambda _pos, k=key: self._on_report_label_context_menu(k, _pos))
             self._report_path_labels[key] = value
             self._report_open_btns[key] = open_btn
         open_row = QHBoxLayout()
@@ -251,7 +256,8 @@ class DeliveryPage(QWidget):
             path = str(_get(result, key, '') or '')
             label = self._report_path_labels[key]
             label.setText(path if path else '--')
-            label.setToolTip(path or '')
+            label.setToolTip(
+                '%s\n右键：打开文件 / 复制路径' % path if path else '')
             self._report_paths[key] = path
             self._report_open_btns[key].setEnabled(bool(path))
             has_path = has_path or bool(path)
@@ -353,6 +359,36 @@ class DeliveryPage(QWidget):
         path = self._report_paths.get(key, '')
         if path:
             QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
+    def _open_containing_dir(self, key: str) -> None:
+        """在文件管理器中打开产物所在目录。"""
+        path = self._report_paths.get(key, '')
+        if path:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(
+                os.path.dirname(path) or '.'))
+
+    def _on_report_label_context_menu(self, key: str, pos) -> None:
+        """报告产物路径标签右键；无产物时不弹全禁用菜单。"""
+        if not self._report_paths.get(key, ''):
+            return
+        menu = self._build_report_menu(key)
+        menu.exec(self._report_path_labels[key].mapToGlobal(pos))
+
+    def _build_report_menu(self, key: str):
+        """构造产物路径右键菜单（与 exec 分离，便于测试检查动作）。"""
+        path = self._report_paths.get(key, '')
+        menu = make_menu(parent=self._report_path_labels[key])
+        add_action(menu, FIF.DOCUMENT, '打开文件',
+                   lambda: self._on_open_file(key),
+                   enabled=bool(path))
+        add_action(menu, FIF.FOLDER, '打开所在目录',
+                   lambda: self._open_containing_dir(key),
+                   enabled=bool(path))
+        menu.addSeparator()
+        add_action(menu, FIF.COPY, '复制路径',
+                   lambda: QApplication.clipboard().setText(path),
+                   enabled=bool(path))
+        return menu
 
     # ---------------- 空间成果表：行操作（双击/Enter = 设为当前成果）
     def _spatial_row_data(self, row: int):

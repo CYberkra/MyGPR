@@ -282,6 +282,8 @@ class MiniJobList(QWidget):
 
     cancel_requested = pyqtSignal(str)
     job_clicked = pyqtSignal(str)
+    # 空白区右键「打开任务中心」→ 仅跳页不定位（JobHub.on_open_job_center）
+    open_job_center_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -302,6 +304,10 @@ class MiniJobList(QWidget):
         self._box.addWidget(self._empty_label)
         self._box.addStretch(1)
         self._scroll.setWidget(self._container)
+
+        # 右键：任务行上 = 打开任务中心/复制标题/取消；空白区 = 打开任务中心
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._on_context_menu)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -408,6 +414,44 @@ class MiniJobList(QWidget):
             return
         self._box.removeWidget(entry['widget'])
         entry['widget'].deleteLater()
+
+    # ------------------------------------------------------------- 右键菜单
+    def _on_context_menu(self, pos) -> None:
+        """迷你列表右键：行上走任务动作，空白区只留「打开任务中心」。"""
+        menu = self._build_context_menu(self._job_id_at(pos))
+        menu.exec(self.mapToGlobal(pos))
+
+    def _job_id_at(self, pos):
+        """pos（本控件坐标）命中的任务行 id；空白区返回 None。"""
+        container_pos = self._container.mapFrom(self, pos)
+        for job_id, entry in self._jobs.items():
+            widget = entry['widget']
+            if widget.isVisible() and widget.geometry().contains(container_pos):
+                return job_id
+        return None
+
+    def _build_context_menu(self, job_id):
+        """构造右键菜单（与 exec 分离，便于测试检查动作）。
+
+        行上：打开任务中心（定位该任务）/ 复制标题 / 取消；
+        空白区：仅「打开任务中心」（仅跳页，走 open_job_center_requested）。
+        """
+        menu = make_menu(parent=self)
+        if job_id is not None:
+            entry = self._jobs[job_id]
+            add_action(menu, FIF.LINK, '打开任务中心',
+                       lambda: self.job_clicked.emit(job_id))
+            add_action(
+                menu, FIF.COPY, '复制任务标题',
+                lambda: QApplication.clipboard().setText(
+                    entry['title_label'].text()))
+            add_action(menu, FIF.CANCEL, '取消任务',
+                       lambda: self.cancel_requested.emit(job_id),
+                       enabled=entry['status'] in _ACTIVE_STATUSES)
+        else:
+            add_action(menu, FIF.LINK, '打开任务中心',
+                       self.open_job_center_requested.emit)
+        return menu
 
     def _refresh_visibility(self):
         """仅显示活动任务；无活动任务时显示空态占位。"""
