@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 pytest.importorskip("PyQt6")
 
 from PyQt6.QtCore import Qt  # noqa: E402
+from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 from ui.file_tree import (  # noqa: E402
     build_artifacts_model, build_files_model, build_tree_model, group_lines,
@@ -415,7 +416,8 @@ def test_line_leaf_shows_suffix_in_second_column(qapp, panel):
     assert leaf.text(1) == '成果✓ 标2'
 
 
-def test_context_menu_suppressed_for_spatial_leaf(qapp, panel, monkeypatch):
+def test_context_menu_on_spatial_leaf_shows_menu(qapp, panel, monkeypatch):
+    """成果视图叶子右键出菜单并选中（右键交互扩充批次补齐，此前静默无菜单）。"""
     from PyQt6.QtCore import QPoint
     from qfluentwidgets import RoundMenu
     panel.set_project_info(types.SimpleNamespace(name='测试1'))
@@ -427,7 +429,8 @@ def test_context_menu_suppressed_for_spatial_leaf(qapp, panel, monkeypatch):
     spatial = _find_by_kind(panel._tree, 'spatial')
     monkeypatch.setattr(panel._tree, 'itemAt', lambda p: spatial)
     panel._on_context_menu(QPoint(5, 5))
-    assert shown == []
+    assert shown == [1]
+    assert panel._tree.currentItem() is spatial
 
 
 # ------------------------------------------------ 细条态与页面记忆
@@ -539,8 +542,8 @@ def test_apply_theme_rebuilds_keeps_selection(qapp, panel):
     assert not leaf.icon(0).isNull()
 
 
-def test_context_menu_suppressed_for_blank_group_and_busy(qapp, panel,
-                                                          monkeypatch):
+def test_context_menu_blank_group_and_busy(qapp, panel, monkeypatch):
+    """空白处（测线视图、树有内容）= 全部展开/收起；分组行/busy 不出菜单。"""
     from PyQt6.QtCore import QPoint
     from qfluentwidgets import RoundMenu
     panel.set_project_info(types.SimpleNamespace(name='测试1'))
@@ -551,14 +554,131 @@ def test_context_menu_suppressed_for_blank_group_and_busy(qapp, panel,
     pos = QPoint(5, 5)
     monkeypatch.setattr(panel._tree, 'itemAt', lambda p: None)  # 空白
     panel._on_context_menu(pos)
+    assert shown == [1]   # 测线视图空白：全部展开/收起
+    shown.clear()
     monkeypatch.setattr(panel._tree, 'itemAt',
                         lambda p: panel._tree.topLevelItem(0))  # 分组行
     panel._on_context_menu(pos)
+    assert shown == []
     monkeypatch.setattr(panel._tree, 'itemAt',
                         lambda p: panel._line_id_by_item['L01'])
-    panel.set_busy(True)  # busy
+    panel.set_busy(True)  # busy：整树禁用
     panel._on_context_menu(pos)
     assert shown == []
+
+
+def test_blank_menu_expand_collapse_actions(qapp, panel):
+    """测线视图空白菜单动作：全部展开/收起且真实生效。"""
+    panel.set_project_info(types.SimpleNamespace(name='测试1'))
+    panel.set_lines([_line('L01', '2026-09-16T01:00:00')])
+    panel._tree.collapseAll()
+    menu = panel._build_blank_menu()
+    actions = {a.text(): a for a in menu.actions() if a.text()}
+    assert set(actions) == {'全部展开', '全部收起'}
+    actions['全部展开'].trigger()
+    assert panel._tree.topLevelItem(0).isExpanded()
+
+
+def test_blank_menu_files_view_without_root_is_empty(qapp, panel):
+    """文件视图无项目根：空白菜单为空（不弹出）。"""
+    panel._set_view('files', remember=False)
+    assert panel._build_blank_menu().isEmpty()
+
+
+def test_artifact_leaf_menu_actions(qapp, panel):
+    """处理成果叶子菜单：查看跳转（带测线）+ 复制名称/ID。"""
+    panel.set_project_info(types.SimpleNamespace(name='测试1'))
+    panel._set_view('artifacts', remember=False)
+    panel.set_artifacts([_artifact('A9', 'L02', name='去直流')])
+    leaf = _find_by_kind(panel._tree, 'artifact')
+    menu = panel._build_artifact_menu('A9', 'L02', leaf.text(0))
+    actions = {a.text(): a for a in menu.actions() if a.text()}
+    assert set(actions) == {'在处理页查看', '复制成果名称', '复制成果 ID'}
+    assert actions['在处理页查看'].isEnabled()
+    focused = []
+    panel.artifact_focus_requested.connect(
+        lambda line_id, artifact_id: focused.append((line_id, artifact_id)))
+    actions['在处理页查看'].trigger()
+    assert focused == [('L02', 'A9')]
+    actions['复制成果 ID'].trigger()
+    assert QApplication.clipboard().text() == 'A9'
+
+
+def test_artifact_menu_view_disabled_without_line(qapp, panel):
+    """成果缺所属测线：'在处理页查看' 禁用（避免空 line_id 请求）。"""
+    menu = panel._build_artifact_menu('A9', '', '去直流')
+    actions = {a.text(): a for a in menu.actions() if a.text()}
+    assert not actions['在处理页查看'].isEnabled()
+    assert actions['复制成果 ID'].isEnabled()
+
+
+def test_spatial_leaf_menu_actions(qapp, panel):
+    """空间成果叶子菜单：前往成果页 + 复制名称/ID。"""
+    panel.set_project_info(types.SimpleNamespace(name='测试1'))
+    panel._set_view('artifacts', remember=False)
+    panel.set_spatial_results([_spatial('SR1', name='剖面图')])
+    leaf = _find_by_kind(panel._tree, 'spatial')
+    menu = panel._build_spatial_menu('SR1', leaf.text(0))
+    actions = {a.text(): a for a in menu.actions() if a.text()}
+    assert set(actions) == {'前往成果页', '复制成果名称', '复制成果 ID'}
+    got = []
+    panel.delivery_focus_requested.connect(got.append)
+    actions['前往成果页'].trigger()
+    assert got == ['spatial']
+    actions['复制成果 ID'].trigger()
+    assert QApplication.clipboard().text() == 'SR1'
+
+
+def test_report_leaf_menu_actions(qapp, panel, tmp_path, monkeypatch):
+    """项目报告叶子菜单：打开目录（现存门控）/前往成果页/复制路径。"""
+    real_dir = tmp_path / 'r20260920'
+    real_dir.mkdir()
+    opened = []
+    monkeypatch.setattr(
+        'ui.widgets.file_tree_panel.QDesktopServices.openUrl',
+        lambda url: opened.append(url))
+    panel.set_project_info(types.SimpleNamespace(name='测试1'))
+    panel._set_view('artifacts', remember=False)
+    panel.set_reports([_report(package_dir=str(real_dir))])
+    leaf = _find_by_kind(panel._tree, 'report')
+    menu = panel._build_report_menu(str(real_dir))
+    actions = {a.text(): a for a in menu.actions() if a.text()}
+    assert set(actions) == {'打开报告目录', '前往成果页', '复制路径'}
+    assert actions['打开报告目录'].isEnabled()
+    actions['打开报告目录'].trigger()
+    assert Path(opened[0].toLocalFile()) == real_dir  # QUrl 规范化正斜杠
+    got = []
+    panel.delivery_focus_requested.connect(got.append)
+    actions['前往成果页'].trigger()
+    assert got == ['report']
+    actions['复制路径'].trigger()
+    assert QApplication.clipboard().text() == str(real_dir)
+
+
+def test_report_menu_open_disabled_when_dir_missing(qapp, panel):
+    """报告目录已被外部删除：'打开报告目录' 禁用，其余动作可用。"""
+    menu = panel._build_report_menu(str(Path('Z:/no/such/dir')))
+    actions = {a.text(): a for a in menu.actions() if a.text()}
+    assert not actions['打开报告目录'].isEnabled()
+    assert actions['前往成果页'].isEnabled()
+
+
+def test_context_menu_on_artifact_leaf_selects_and_shows(qapp, panel,
+                                                         monkeypatch):
+    """处理成果叶子右键：选中该节点并弹菜单（分派正向路径）。"""
+    from PyQt6.QtCore import QPoint
+    from qfluentwidgets import RoundMenu
+    panel.set_project_info(types.SimpleNamespace(name='测试1'))
+    panel._set_view('artifacts', remember=False)
+    panel.set_artifacts([_artifact('A9', 'L02')])
+    shown = []
+    monkeypatch.setattr(RoundMenu, 'exec',
+                        lambda self, *a, **k: shown.append(1))
+    leaf = _find_by_kind(panel._tree, 'artifact')
+    monkeypatch.setattr(panel._tree, 'itemAt', lambda p: leaf)
+    panel._on_context_menu(QPoint(5, 5))
+    assert shown == [1]
+    assert panel._tree.currentItem() is leaf
 
 
 def test_context_menu_on_leaf_selects_shows_and_emits(qapp, panel,
@@ -591,3 +711,53 @@ def test_confirm_delete_emits_line_ids_on_accept(qapp, panel, monkeypatch):
     panel.line_delete_requested.connect(got.append)
     panel._confirm_delete('L01')
     assert got == [['L01']]
+
+
+def test_double_click_line_emits_process_request(qapp, panel):
+    """测线叶子双击 → line_process_requested（跳处理页，与项目页双击同语义）。"""
+    panel.set_project_info(types.SimpleNamespace(name='测试1'))
+    panel.set_lines([_line('L01', '2026-09-16T01:00:00')])
+    got = []
+    panel.line_process_requested.connect(got.append)
+    panel._on_item_double_clicked(panel._line_id_by_item['L01'], 0)
+    assert got == ['L01']
+
+
+def test_files_view_refresh_rescans_root(qapp, panel, tmp_path):
+    """F5 路径：文件视图整体重扫，磁盘上新出现的文件应出现。"""
+    panel.set_project_info(
+        types.SimpleNamespace(name='测试1', root_path=str(tmp_path)))
+    panel._set_view('files', remember=False)
+    assert panel._tree.topLevelItemCount() == 0
+    (tmp_path / 'new.dat').write_text('x', encoding='utf-8')
+    panel._refresh_current_view()
+    names = [panel._tree.topLevelItem(i).text(0)
+             for i in range(panel._tree.topLevelItemCount())]
+    assert names == ['new.dat']
+
+
+def test_refresh_current_view_ignores_other_views(qapp, panel):
+    """测线/成果视图数据由 controller 扇出，F5 不触发本地重建。"""
+    panel.set_project_info(types.SimpleNamespace(name='测试1'))
+    panel.set_lines([_line('L01', '2026-09-16T01:00:00')])
+    before = panel._tree.topLevelItem(0)
+    panel._refresh_current_view()
+    assert panel._tree.topLevelItem(0) is before  # 未重建
+
+
+def test_refresh_dir_replaces_children(qapp, panel, tmp_path):
+    """目录右键「刷新此目录」：就地重扫子层并替换旧子项。"""
+    sub = tmp_path / 'data'
+    sub.mkdir()
+    (sub / 'a.dat').write_text('x', encoding='utf-8')
+    panel.set_project_info(
+        types.SimpleNamespace(name='测试1', root_path=str(tmp_path)))
+    panel._set_view('files', remember=False)
+    dir_item = panel._tree.topLevelItem(0)
+    panel._on_item_expanded(dir_item)  # 懒加载出 a.dat
+    assert dir_item.childCount() == 1
+    (sub / 'b.dat').write_text('x', encoding='utf-8')
+    panel._refresh_dir(dir_item)
+    names = [dir_item.child(i).text(0) for i in range(dir_item.childCount())]
+    assert names == ['a.dat', 'b.dat']
+    assert dir_item.isExpanded()

@@ -155,12 +155,19 @@ class JobBridge(QObject):
             self._threads[job_id] = thread
         thread.start()
 
-    def cancel(self, job_id: str) -> None:
-        """Cooperatively cancel a watched job (watcher exits at terminal)."""
+    def cancel(self, job_id: str) -> bool:
+        """Cooperatively cancel a watched job (watcher exits at terminal).
+
+        Returns True when the cancel request reached the backend; False when
+        the job is already gone/finished — callers surface that instead of
+        unconditionally claiming "已请求取消".
+        """
         try:
             self._backend.jobs.cancel(str(job_id))
         except (KeyError, RuntimeError) as exc:
             _LOGGER.warning("job cancel failed for %s: %s", job_id, exc)
+            return False
+        return True
 
     def titles(self) -> dict[str, str]:
         with self._lock:

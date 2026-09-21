@@ -61,6 +61,7 @@ class ProcessingController(QObject):
     velocity_submitted = pyqtSignal(str, str)   # job_id, token
     velocity_finished = pyqtSignal(str, str, str, dict)  # token, project_id, line_id, {evidence, ...}
     velocity_failed = pyqtSignal(str, str, str, str)     # token, project_id, line_id, message
+    backend_not_ready = pyqtSignal()                     # _backend() 兜底：后端未就绪（接线层弹 InfoBar）
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -76,6 +77,7 @@ class ProcessingController(QObject):
         backend = getattr(controller, "backend", None) if controller is not None else None
         if backend is None:
             self.log_message.emit("后端尚未就绪，请稍后再试")
+            self.backend_not_ready.emit()
         return backend
 
     def _job_bridge(self):

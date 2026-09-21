@@ -29,7 +29,7 @@
 from collections import deque
 from datetime import datetime
 
-from PyQt6.QtCore import QSize, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QHBoxLayout, QSizePolicy, QStackedWidget, QTextEdit, QVBoxLayout, QWidget,
 )
@@ -41,6 +41,7 @@ from qfluentwidgets import FluentIcon as FIF
 from ui import constants, file_dialogs
 from ui.theme_helpers import log_panel_qss, status_color
 
+from .context_menus import add_action, make_menu
 from .job_widgets import MiniJobList
 from .segment_tabs import SlimSegment
 from .separators import make_h_separator
@@ -155,6 +156,11 @@ class OutputPanel(QWidget):
         self._log_edit.setStyleSheet(log_panel_qss('light'))  # 主题在启动时立即覆盖
         self._log_edit.document().setMaximumBlockCount(5000)
         self._log_edit.verticalScrollBar().valueChanged.connect(self._on_scroll)
+        # 右键 = 复制 / 全选 / 清空 / 导出（替代 Qt 原生英文菜单，统一 Fluent 风格）
+        self._log_edit.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu)
+        self._log_edit.customContextMenuRequested.connect(
+            self._on_log_context_menu)
 
         self._mini_jobs = MiniJobList(self)
         self._mini_jobs.cancel_requested.connect(self.cancel_job_requested)
@@ -308,6 +314,23 @@ class OutputPanel(QWidget):
         self.sig_open_toggled.emit(open_)
 
     # ============================================================ 其他
+    def _on_log_context_menu(self, pos) -> None:
+        """日志区右键：复制 / 全选 / 清空 / 导出。"""
+        menu = self._build_log_menu()
+        menu.exec(self._log_edit.viewport().mapToGlobal(pos))
+
+    def _build_log_menu(self):
+        """构造日志区右键菜单（与 exec 分离，便于测试检查动作）。"""
+        menu = make_menu(parent=self._log_edit)
+        add_action(menu, FIF.COPY, '复制',
+                   self._log_edit.copy,
+                   enabled=self._log_edit.textCursor().hasSelection())
+        add_action(menu, None, '全选', self._log_edit.selectAll)
+        menu.addSeparator()
+        add_action(menu, FIF.DELETE, '清空日志', self.clear_log)
+        add_action(menu, FIF.SAVE, '导出日志到文件', self._export_log)
+        return menu
+
     def _export_log(self) -> None:
         """全部日志（不过滤）保存为 .txt 纯文本。"""
         path, _selected = file_dialogs.getSaveFileName(

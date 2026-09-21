@@ -76,6 +76,8 @@ class ProcessingChain:
             prc.autotune_failed.connect(self.on_autotune_failed)
             prc.velocity_finished.connect(self.on_velocity_finished)
             prc.velocity_failed.connect(self.on_velocity_failed)
+            # 后端未就绪兜底：controller 原本只写日志（"点了没反应"），这里补 InfoBar
+            prc.backend_not_ready.connect(self.on_backend_not_ready)
 
         # ---------------- 解释控制器 → 本链 / 解释页
         ic = co.interpretation_controller
@@ -85,6 +87,7 @@ class ProcessingChain:
             ic.session_failed.connect(self.on_session_failed)
             ic.saved.connect(self.on_annotation_saved)
             ic.busy_changed.connect(interpretation.set_busy)
+            ic.backend_not_ready.connect(self.on_backend_not_ready)
 
         # ---------------- 项目控制器：深度切片回包（代数门卫在本链）
         pc = co.project_controller
@@ -97,6 +100,10 @@ class ProcessingChain:
     def on_methods_loaded(self, methods: list) -> None:
         """方法库 → 处理页 MethodBrowser。"""
         self._co.page('processingInterface').set_methods(methods)
+
+    def on_backend_not_ready(self) -> None:
+        """controller 兜底"后端尚未就绪"→ 显式 InfoBar（原先只进日志面板）。"""
+        self._co.infobar('warning', '提示', '后端尚未就绪，请稍后再试')
 
     def on_processing_line_changed(self, line_id: str) -> None:
         """处理页测线下拉变化 → 同步为当前测线并刷新原始数据/成果列表。"""
@@ -142,8 +149,12 @@ class ProcessingChain:
     def on_processing_cancel(self) -> None:
         bridge = self._co.job_bridge()
         if bridge is not None and self.processing_job_id:
+            if bridge.cancel(self.processing_job_id) is False:
+                # 任务已结束/不存在：不置取消标记（避免吞掉真实终态语义）
+                self._co.infobar('warning', '处理链',
+                                 '处理任务已结束，无需取消')
+                return
             self.processing_cancel_requested = True
-            bridge.cancel(self.processing_job_id)
             self._co.log_message(
                 f'INFO 已请求取消处理任务 {self.processing_job_id}')
 

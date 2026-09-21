@@ -9,13 +9,16 @@
   （QFileSystemModel）自管，随项目根切换；
 - 测线叶子点击 → ``line_selected(str)`` → 复用 ``ProjectChain.on_line_selected``
   现有链路（含切线作废成果预览代数），与项目页测线表同语义；
+  双击 → ``line_process_requested``（选中并跳处理页，与项目页双击同语义）；
 - 成果叶子点击 → ``artifact_focus_requested(line_id, artifact_id)`` →
   换线（如需）+ 跳处理页选中预览；
 - 空间成果/项目报告叶子点击 → ``delivery_focus_requested(kind)`` → 跳成果页；
 - ``set_current_line`` 是同步入口（``_syncing`` 守卫防回环）；
 - **分组行不可选**（无 ItemIsSelectable）——分组行若能触发预览
   会推进预览代数造成串台，是成果预览代际竞态的同族风险；
-- busy 只禁叶子点击，收/展开始终可用（长任务中更该允许让出空间）。
+- busy 只禁叶子点击，收/展开始终可用（长任务中更该允许让出空间）；
+- 右键菜单：测线叶子 / 成果视图叶子（处理成果·空间成果·项目报告）/
+  目录与文件 / 空白区（全部展开收起·刷新）各有菜单，动作与单击同语义。
 
 壳（头/细条/动画）全部来自 ``DockPanel`` 基类；本类只保留文件树自己的
 三件事：视图切换与内容构建、按页×按视图展开态记忆（SettingsManager
@@ -26,7 +29,10 @@ from __future__ import annotations
 import os
 
 from PyQt6.QtCore import Qt, QUrl, pyqtSignal
-from PyQt6.QtGui import QBrush, QColor, QDesktopServices, QIcon, QPainter, QPixmap
+from PyQt6.QtGui import (
+    QBrush, QColor, QDesktopServices, QIcon, QKeySequence, QPainter, QPixmap,
+    QShortcut,
+)
 from PyQt6.QtWidgets import (
     QApplication, QDialog, QHeaderView, QTreeWidgetItem,
 )
@@ -149,6 +155,11 @@ class FileTreePanel(DockPanel):
         self._tree.itemExpanded.connect(self._on_item_expanded)
         self._tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._tree.customContextMenuRequested.connect(self._on_context_menu)
+        # F5 刷新文件视图（无 FS 实时监视，手动刷新是补偿路径）
+        self._refresh_shortcut = QShortcut(
+            QKeySequence(QKeySequence.StandardKey.Refresh), self._tree,
+            context=Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self._refresh_shortcut.activated.connect(self._refresh_current_view)
         self.body_layout().addWidget(self._tree, 1)
         self._project_root = ''
 
@@ -431,30 +442,58 @@ class FileTreePanel(DockPanel):
             self.delivery_focus_requested.emit(str(kind))
 
     def _on_item_double_clicked(self, item, _column: int) -> None:
-        """文件双击 → 系统默认程序打开（目录双击保留默认展开/收起）。"""
+        """测线双击 = 选中并跳处理页；文件双击 → 系统默认程序打开
+        （目录双击保留默认展开/收起）。"""
         if self._busy:
             return
-        if item.data(0, _ROLE_KIND) == 'file':
+        kind = item.data(0, _ROLE_KIND)
+        if kind == 'line':
+            payload = str(item.data(0, _ROLE_PAYLOAD) or '')
+            if payload:
+                self.line_process_requested.emit(payload)
+        elif kind == 'file':
             path = str(item.data(0, _ROLE_PAYLOAD) or '')
             if path:
                 QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
+    # ------------------------------------------------------------ 刷新
+    def _refresh_current_view(self) -> None:
+        """F5：文件视图整体重扫（测线/成果数据由 controller 扇出，无需本地刷）。"""
+        if self._busy or self._current_view != 'files':
+            return
+        self._rebuild()
+
+    def _refresh_dir(self, item) -> None:
+        """就地重扫目录子层（替换现有子项，保持展开）。"""
+        item.takeChildren()
+        for node in build_files_model(item.data(0, _ROLE_PAYLOAD)):
+            self._add_node(item, node)
+        item.setExpanded(True)
+
     # ------------------------------------------------------------ 右键菜单
     def _on_context_menu(self, pos) -> None:
-        """测线叶子右键：先选中该线（与项目页表格右键即选中同语义），再弹菜单。
+        """树节点右键分发：测线叶子 / 成果视图叶子 / 目录与文件各有菜单。
 
-        分组行 / 空白处 / busy 中不出菜单；目录/文件走系统级菜单。
+        分组行不出菜单；空白处按视图出「全部展开/收起」（测线/成果，
+        树有内容时）或「刷新」（文件视图有项目根时）；busy 中整树已禁用，
+        不出菜单。右击即先选中（与项目页表格右键同语义）。
         """
         if self._busy:
             return
         item = self._tree.itemAt(pos)
         if item is None:
+            menu = self._build_blank_menu()
+            if not menu.isEmpty():
+                menu.exec(self._tree.viewport().mapToGlobal(pos))
             return
         kind = item.data(0, _ROLE_KIND)
         if kind in ('dir', 'file'):
             self._on_file_context_menu(item, pos)
             return
-        # 仅测线叶子出菜单；分组行/成果/报告叶子的交互走单击
+        if kind in ('artifact', 'spatial', 'report'):
+            self._on_artifact_context_menu(item, pos, str(kind))
+            return
+        # 测线视图仅测线叶子出菜单；分组行交互走单击
         if kind != 'line':
             return
         line_id = item.data(0, _ROLE_PAYLOAD)
@@ -478,12 +517,17 @@ class FileTreePanel(DockPanel):
         menu.exec(self._tree.viewport().mapToGlobal(pos))
 
     def _on_file_context_menu(self, item, pos) -> None:
-        """目录/文件右键：打开 / 在资源管理器中显示 / 复制路径（只读浏览，
-        文件管理交给系统，不绕过后端事务与回收站机制）。"""
+        """目录/文件右键：目录多一项「刷新此目录」（就地重扫）；打开 /
+        在资源管理器中显示 / 复制路径（只读浏览，文件管理交给系统，
+        不绕过后端事务与回收站机制）。"""
         path = str(item.data(0, _ROLE_PAYLOAD) or '')
         if not path:
             return
         menu = make_menu(parent=self._tree)
+        if os.path.isdir(path):
+            add_action(menu, FIF.SYNC, '刷新此目录',
+                       lambda: self._refresh_dir(item))
+            menu.addSeparator()
         add_action(menu, FIF.DOCUMENT, '打开',
                    lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(path)))
         add_action(menu, FIF.FOLDER, '在资源管理器中显示',
@@ -493,6 +537,82 @@ class FileTreePanel(DockPanel):
         add_action(menu, FIF.COPY, '复制路径',
                    lambda: QApplication.clipboard().setText(path))
         menu.exec(self._tree.viewport().mapToGlobal(pos))
+
+    def _build_blank_menu(self):
+        """空白区右键菜单（与 exec 分离，便于测试检查动作）。
+
+        文件视图 = 刷新（F5 等价路径，需有项目根）；测线/成果视图 =
+        全部展开/收起（树有内容时才有意义）。
+        """
+        menu = make_menu(parent=self._tree)
+        if self._current_view == 'files':
+            if self._project_root:
+                add_action(menu, FIF.SYNC, '刷新', self._refresh_current_view)
+        elif self._tree.topLevelItemCount() > 0:
+            add_action(menu, None, '全部展开', self._tree.expandAll)
+            add_action(menu, None, '全部收起', self._tree.collapseAll)
+        return menu
+
+    def _on_artifact_context_menu(self, item, pos, kind: str) -> None:
+        """成果视图叶子右键：先选中该节点（与单击同语义前置），再弹菜单。"""
+        payload = str(item.data(0, _ROLE_PAYLOAD) or '')
+        if not payload:
+            return
+        self._tree.setCurrentItem(item)
+        name = item.text(0)
+        if kind == 'artifact':
+            menu = self._build_artifact_menu(
+                payload, str(item.data(0, _ROLE_AUX) or ''), name)
+        elif kind == 'spatial':
+            menu = self._build_spatial_menu(payload, name)
+        else:
+            menu = self._build_report_menu(payload)
+        menu.exec(self._tree.viewport().mapToGlobal(pos))
+
+    def _build_artifact_menu(self, artifact_id: str, line_id: str, name: str):
+        """处理成果叶子菜单（与 exec 分离，便于测试检查动作）。"""
+        menu = make_menu(parent=self._tree)
+        add_action(menu, FIF.DEVELOPER_TOOLS, '在处理页查看',
+                   lambda: self.artifact_focus_requested.emit(line_id,
+                                                              artifact_id),
+                   enabled=bool(line_id))
+        menu.addSeparator()
+        add_action(menu, FIF.COPY, '复制成果名称',
+                   lambda: QApplication.clipboard().setText(name),
+                   enabled=bool(name))
+        add_action(menu, FIF.COPY, '复制成果 ID',
+                   lambda: QApplication.clipboard().setText(artifact_id))
+        return menu
+
+    def _build_spatial_menu(self, result_id: str, name: str):
+        """空间成果叶子菜单（与 exec 分离，便于测试检查动作）。"""
+        menu = make_menu(parent=self._tree)
+        add_action(menu, FIF.GLOBE, '前往成果页',
+                   lambda: self.delivery_focus_requested.emit('spatial'))
+        menu.addSeparator()
+        add_action(menu, FIF.COPY, '复制成果名称',
+                   lambda: QApplication.clipboard().setText(name),
+                   enabled=bool(name))
+        add_action(menu, FIF.COPY, '复制成果 ID',
+                   lambda: QApplication.clipboard().setText(result_id))
+        return menu
+
+    def _build_report_menu(self, package_dir: str):
+        """项目报告叶子菜单（与 exec 分离，便于测试检查动作）。
+
+        「打开报告目录」按目录现存与否门控（报告可能被外部删除）。
+        """
+        menu = make_menu(parent=self._tree)
+        add_action(menu, FIF.FOLDER, '打开报告目录',
+                   lambda: QDesktopServices.openUrl(
+                       QUrl.fromLocalFile(package_dir)),
+                   enabled=os.path.isdir(package_dir))
+        add_action(menu, FIF.DOCUMENT, '前往成果页',
+                   lambda: self.delivery_focus_requested.emit('report'))
+        menu.addSeparator()
+        add_action(menu, FIF.COPY, '复制路径',
+                   lambda: QApplication.clipboard().setText(package_dir))
+        return menu
 
     def _confirm_delete(self, line_id: str) -> None:
         box = MessageBox(

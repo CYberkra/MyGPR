@@ -23,6 +23,7 @@ class InterpretationController(QObject):
     session_failed = pyqtSignal(str)
     saved = pyqtSignal(str)                # message
     busy_changed = pyqtSignal(bool)
+    backend_not_ready = pyqtSignal()       # _backend() 兜底：后端未就绪（接线层弹 InfoBar）
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -42,6 +43,7 @@ class InterpretationController(QObject):
         backend = getattr(controller, "backend", None) if controller is not None else None
         if backend is None:
             self.log_message.emit("后端尚未就绪，请稍后再试")
+            self.backend_not_ready.emit()
         return backend
 
     def _set_busy(self, value: bool) -> None:

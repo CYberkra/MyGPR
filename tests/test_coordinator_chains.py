@@ -19,6 +19,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from ui import coordinator_jobs  # noqa: E402
 from ui.page_coordinator import PageCoordinator  # noqa: E402
 
 # ui.dialogs 依赖 PyQt6/qfluentwidgets/pyqtgraph；缺失时仅跳过删除链用例
@@ -81,15 +82,17 @@ class _StubPage:
 
 
 class _StubBridge:
-    def __init__(self) -> None:
+    def __init__(self, cancel_result=None) -> None:
         self.cancelled: list[str] = []
         self._titles: dict[str, str] = {}
+        self._cancel_result = cancel_result  # None=旧语义成功；False=后端拒绝
 
     def titles(self) -> dict[str, str]:
         return dict(self._titles)
 
-    def cancel(self, job_id: str) -> None:
+    def cancel(self, job_id: str):
         self.cancelled.append(str(job_id))
+        return self._cancel_result
 
 
 def _make_window(*, bridge=None, with_views=True):
@@ -270,6 +273,85 @@ class TestJobHubFanOut:
 
         assert coordinator.processing.processing_cancel_requested is True
         assert bridge.cancelled == ['JOB-RUN']
+
+    def test_cancel_long_running_requires_confirmation(self, monkeypatch):
+        """已运行超阈值的任务：确认框拒绝 → 不发取消请求。"""
+        import time as _time
+        bridge = _StubBridge()
+        window, _pages, _views = _make_window(bridge=bridge)
+        coordinator = PageCoordinator(window)
+        hub = coordinator.jobs
+        asked: list[tuple] = []
+
+        def _fake_dialog(parent, title, elapsed):
+            asked.append((title, elapsed))
+            return False
+
+        monkeypatch.setattr(coordinator_jobs, '_ask_cancel_dialog', _fake_dialog)
+        hub._upsert('JOB-LONG')
+        hub._job_first_seen['JOB-LONG'] = (
+            _time.monotonic() - (coordinator_jobs.CANCEL_CONFIRM_AFTER_S + 5))
+
+        hub.on_cancel('JOB-LONG')
+
+        assert asked and asked[0][1] > coordinator_jobs.CANCEL_CONFIRM_AFTER_S
+        assert bridge.cancelled == []          # 用户拒绝 → 未发取消
+        assert coordinator.processing.processing_cancel_requested is False
+
+    def test_cancel_long_running_confirmed_cancels(self, monkeypatch):
+        """长任务确认框点"取消任务"→ 取消请求照发。"""
+        import time as _time
+        bridge = _StubBridge()
+        window, _pages, _views = _make_window(bridge=bridge)
+        coordinator = PageCoordinator(window)
+        hub = coordinator.jobs
+        monkeypatch.setattr(
+            coordinator_jobs, '_ask_cancel_dialog',
+            lambda parent, title, elapsed: True)
+        hub._upsert('JOB-LONG2')
+        hub._job_first_seen['JOB-LONG2'] = (
+            _time.monotonic() - (coordinator_jobs.CANCEL_CONFIRM_AFTER_S + 5))
+
+        hub.on_cancel('JOB-LONG2')
+
+        assert bridge.cancelled == ['JOB-LONG2']
+
+    def test_cancel_short_job_skips_confirmation(self, monkeypatch):
+        """刚提交的任务（无首现时刻）：不弹确认框直接取消。"""
+        asked: list = []
+        monkeypatch.setattr(
+            coordinator_jobs, '_ask_cancel_dialog',
+            lambda *a: asked.append(1) or True)
+        bridge = _StubBridge()
+        window, _pages, _views = _make_window(bridge=bridge)
+        hub = PageCoordinator(window).jobs
+
+        hub.on_cancel('JOB-NEW')
+
+        assert asked == []                     # 未弹确认
+        assert bridge.cancelled == ['JOB-NEW']
+
+    def test_cancel_rejected_by_backend_shows_warning(self, monkeypatch):
+        """bridge.cancel 显式 False（任务已结束/不存在）→ 警告而非宣称已取消。"""
+        bridge = _StubBridge(cancel_result=False)
+        window, _pages, _views = _make_window(bridge=bridge)
+        hub = PageCoordinator(window).jobs
+
+        hub.on_cancel('JOB-GONE')
+
+        assert window.infobars and window.infobars[0][0] == 'warning'
+        assert not any('已请求取消' in log for log in window.logs)
+
+    def test_cancel_legacy_bridge_none_result_still_ok(self):
+        """旧 bridge.cancel 返回 None（无返回值）→ 按成功路径，不弹警告。"""
+        bridge = _StubBridge(cancel_result=None)
+        window, _pages, _views = _make_window(bridge=bridge)
+        hub = PageCoordinator(window).jobs
+
+        hub.on_cancel('JOB-X')
+
+        assert window.infobars == []
+        assert any('已请求取消' in log for log in window.logs)
 
     def test_views_filter_none_widgets(self):
         window, _pages, _views = _make_window(with_views=False)

@@ -23,8 +23,9 @@
 import math
 
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QHBoxLayout, QHeaderView, QTableWidget,
+    QAbstractItemView, QApplication, QHBoxLayout, QHeaderView, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
@@ -38,6 +39,7 @@ from ui.page_scaffold import (card_title, make_card, make_scroll_column,
                               refill_combo)
 from ui.theme_helpers import status_color
 from ui.widgets import BScanView, CollapsiblePanel, make_separator
+from ui.widgets.context_menus import add_action, make_menu
 
 _OVERLAY_COLOR = constants.CHART_OVERLAY_COLOR   # 标注散点颜色（SPEC §6.6）
 _C_M_PER_NS = 0.29979        # 真空光速 c (m/ns)
@@ -177,6 +179,17 @@ class InterpretationPage(QWidget):
         table_header = self._points_table.horizontalHeader()
         table_header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self._points_table.setMinimumHeight(180)
+        # Delete 键删除选中点（与处理链/项目页测线表同约定）
+        self._delete_point_shortcut = QShortcut(
+            QKeySequence(QKeySequence.StandardKey.Delete), self._points_table,
+            context=Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self._delete_point_shortcut.activated.connect(
+            self._on_remove_selected_point)
+        # 右键 = 复制该点信息 / 删除选中点 / 清空全部（与按钮、Delete 键同约定）
+        self._points_table.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu)
+        self._points_table.customContextMenuRequested.connect(
+            self._on_points_context_menu)
         points_layout.addWidget(self._points_table, 1)
 
         # 点数计数与删除/清空同行：计数居左，按钮居右
@@ -188,7 +201,7 @@ class InterpretationPage(QWidget):
         btn_row.addWidget(self._points_count_label)
         btn_row.addStretch(1)
         self._remove_point_btn = PushButton('删除选中', points_card, FIF.DELETE)
-        self._remove_point_btn.setToolTip('删除列表中选中的标注点')
+        self._remove_point_btn.setToolTip('删除列表中选中的标注点 (Delete)')
         self._clear_points_btn = PushButton('清空', points_card)
         self._clear_points_btn.setToolTip('清空全部标注点')
         btn_row.addWidget(self._remove_point_btn)
@@ -398,6 +411,39 @@ class InterpretationPage(QWidget):
                 item.setText(str(r + 1))
         self._points_count_label.setText('%d 个点' % len(self._points))
         self._emit_points_updated(table_updated=True)
+
+    def _on_points_context_menu(self, pos) -> None:
+        """标注点表右键：右击行先选中（与 Delete 键同一目标行语义）再弹菜单。"""
+        row = self._points_table.rowAt(pos.y())
+        if 0 <= row < len(self._points):
+            self._points_table.selectRow(row)
+        menu = self._build_points_menu(row)
+        menu.exec(self._points_table.viewport().mapToGlobal(pos))
+
+    def _build_points_menu(self, row: int):
+        """构造标注点右键菜单（与 exec 分离，便于测试检查动作）。
+
+        编辑动作与「删除选中/清空」按钮同门控：会话已打开且不在忙态。
+        """
+        menu = make_menu(parent=self._points_table)
+        editable = self._session_active and not self._busy
+        has_row = 0 <= row < len(self._points)
+        if has_row:
+            trace, sample = self._points[row]
+            summary = '道 %d, 采样点 %d' % (trace + 1, sample + 1)
+            time_ns = self._sample_time_ns(sample)
+            if time_ns is not None:
+                summary += ', %.2f ns' % time_ns
+            add_action(menu, FIF.COPY, '复制该点信息',
+                       lambda: QApplication.clipboard().setText(summary))
+            menu.addSeparator()
+        add_action(menu, FIF.DELETE, '删除选中点',
+                   self._on_remove_selected_point,
+                   enabled=editable and has_row)
+        add_action(menu, FIF.DELETE, '清空全部',
+                   self._on_clear_points,
+                   enabled=editable and bool(self._points))
+        return menu
 
     def _on_clear_points(self) -> None:
         """清空全部标注点。"""
