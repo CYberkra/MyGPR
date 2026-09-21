@@ -32,6 +32,7 @@ from ui.theme_helpers import control_palette
 from ui.widgets._colormap_data import COLORMAP_DATA
 from ui.widgets.context_menus import (RoundMenu, add_action,
                                       add_checkable_submenu, make_menu)
+from ui.widgets.empty_state import EmptyStateOverlay
 from ui.widgets.pg_view_base import GraphicsViewBase, style_plot_item
 
 # 色标缓存：名 → ColorMap（数据查表重建，进程内只构建一次）
@@ -159,7 +160,10 @@ class BScanView(GraphicsViewBase, QWidget):
         self._wiggle_item = None
 
         self._glw = pg.GraphicsLayoutWidget(self)
-        self._plot = self._glw.addPlot(row=0, col=0, title='B-Scan图像')
+        # 图内标题只承载数据身份（bundle.title，如"测线 L3"）；通用名称
+        # "B-Scan图像"由卡头承担，不再双标题（评审 P1-4）。
+        self._plot = self._glw.addPlot(row=0, col=0)
+        self._export_title = ''   # PNG 导出文件名用（数据身份，随数据更新）
         self._plot_item = self._plot   # GraphicsViewBase 约定属性
         self._plot.setLabel('bottom', '道数')
         self._plot.setLabel('left', '采样点')
@@ -208,7 +212,8 @@ class BScanView(GraphicsViewBase, QWidget):
         self._readout.setStyleSheet(
             'QLabel { background-color: rgba(0, 0, 0, 150); '
             'color: white; border-radius: 4px; padding: 6px 10px; '
-            'font-size: 12px; line-height: 1.5; }')
+            f'font-size: {constants.FONT_SIZE_SECONDARY}pt; '
+            'line-height: 1.5; }')
         self._readout.setWordWrap(False)
         self._readout.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
         self._readout.setAttribute(
@@ -221,6 +226,11 @@ class BScanView(GraphicsViewBase, QWidget):
         self._readout_timer.setInterval(30)
         self._readout_timer.timeout.connect(self._flush_crosshair_readout)
         self._pending_readout = None   # (trace, sample, amplitude)
+
+        # 空态引导浮层（评审 P0-1）：初始无数据即显示，数据到达隐藏
+        self._empty_overlay = EmptyStateOverlay(
+            self._glw, icon=FIF.PHOTO, title='暂无数据',
+            hint='导入测线并选择数据后，此处预览雷达 B-Scan 剖面')
 
         self._glw.scene().sigMouseClicked.connect(self._on_mouse_clicked)
         self._glw.scene().sigMouseMoved.connect(self._on_mouse_moved)
@@ -329,7 +339,7 @@ class BScanView(GraphicsViewBase, QWidget):
         """接收 PreviewBundle（鸭子类型，不 import core.gui_rendering）。"""
         self.set_matrix(
             bundle.matrix, bundle.vmin, bundle.vmax,
-            title=getattr(bundle, 'title', '') or 'B-Scan图像',
+            title=str(getattr(bundle, 'title', '') or ''),
             x_label=getattr(bundle, 'x_label', '道数'),
             y_label=getattr(bundle, 'y_label', '采样点'),
         )
@@ -378,9 +388,12 @@ class BScanView(GraphicsViewBase, QWidget):
         # 不重置缩放（reset_view=False，模式切换才重置）
         if self.display_mode is not BScanDisplayMode.GRAYSCALE:
             self._apply_display_mode(self.display_mode, reset_view=False)
-        self._plot.setTitle(title or 'B-Scan图像')
+        # 图内标题只留数据身份（如"测线 L3"）；空标题时 pyqtgraph 自动隐藏
+        self._export_title = str(title or '')
+        self._plot.setTitle(self._export_title)
         self._plot.setLabel('bottom', x_label)
         self._plot.setLabel('left', y_label)
+        self._empty_overlay.setVisible(False)
 
     def set_colormap(self, name: str) -> None:
         """按 matplotlib 名取 LUT（九项见 SPEC §1，默认 seismic）。"""
@@ -436,7 +449,7 @@ class BScanView(GraphicsViewBase, QWidget):
                    enabled=self._image_shape is not None)
         add_action(menu, FIF.SAVE, '导出 PNG…',
                    lambda: self.export_png(
-                       title=self._plot.titleLabel.text, prefix='bscan'),
+                       title=self._export_title, prefix='bscan'),
                    enabled=self._image_shape is not None)
         menu.exec(event.screenPos().toPoint())
 
@@ -723,8 +736,10 @@ class BScanView(GraphicsViewBase, QWidget):
         self._scatter.setData([])
         self._image_shape = None
         self._hide_crosshair()
-        # P2-5：空态引导文案，替代只剩坐标轴
-        self._plot.setTitle('暂无数据 — 请先在项目页导入测线')
+        # 空态引导浮层（评审 P0-1）：替代原"只剩坐标轴 + 图内标题文案"
+        self._export_title = ''
+        self._plot.setTitle('')
+        self._empty_overlay.setVisible(True)
 
     def apply_theme(self, dark: bool) -> None:
         """深色 bg 'k'/文字 'w'；浅色 bg 'w'/文字 'k'；轴/色标/工具条/十字光标同步。
@@ -757,7 +772,8 @@ class BScanView(GraphicsViewBase, QWidget):
             f'PushButton {{ background-color: {palette["button_bg"]}; '
             f'color: {palette["button_text"]}; '
             f'border: 1px solid {palette["border"]}; border-radius: 4px; '
-            f'padding: 2px 8px; font-size: 11px; }}'
+            f'padding: 2px 8px; '
+            f'font-size: {constants.FONT_SIZE_SECONDARY}pt; }}'
             f'PushButton:hover {{ background-color: {palette["hover"]}; }}'
         )
         for btn in getattr(self, '_toolbar_buttons', ()):

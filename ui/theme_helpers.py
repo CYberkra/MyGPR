@@ -8,13 +8,18 @@
   ``view.setGraphicsEffect(None)`` 去阴影、
   给 ``#comboListWidget`` 加实色 1px 边框（深色 ``rgb(100,100,100)`` / 浅色 ``rgb(200,200,200)``）。
 """
+from typing import TYPE_CHECKING
+
 import pyqtgraph as pg
-from PyQt6.QtGui import QColor, QPalette
+from PyQt6.QtGui import QColor, QFont, QPalette
 from PyQt6.QtWidgets import QApplication, QStyleFactory
 from qfluentwidgets import Theme, isDarkTheme, setTheme
 from qfluentwidgets.components.widgets.combo_box import ComboBoxMenu
 
 from ui import constants
+
+if TYPE_CHECKING:
+    from PyQt6.QtWidgets import QLabel   # 仅 make_badge 返回注解用
 
 _combo_patch_applied = False
 _light_palette = None
@@ -61,7 +66,7 @@ def _get_dark_palette() -> QPalette:
         base = QColor(30, 30, 30)
         text = QColor(230, 230, 230)
         disabled = QColor(127, 127, 127)
-        highlight = QColor(0, 150, 136)
+        highlight = QColor(constants.ACCENT_SOLID)
         p.setColor(QPalette.ColorRole.Window, window)
         p.setColor(QPalette.ColorRole.WindowText, text)
         p.setColor(QPalette.ColorRole.Base, base)
@@ -120,7 +125,8 @@ def control_palette(dark: bool) -> dict:
     - 浮动覆盖层（地图图例/缩放面板/坐标读出）：``panel_bg``/
       ``panel_border``/``text``；
     - 原生 item view（QTableWidget 等 QSS）：``table_base``/``table_text``/
-      ``table_border``/``table_header_bg``/``table_grid``。
+      ``table_border``/``table_header_bg``/``table_grid``/``selection``；
+    - 顶部页签条（主窗口）：``nav_line``/``nav_track``。
     """
     if dark:
         return {
@@ -133,7 +139,9 @@ def control_palette(dark: bool) -> dict:
             'text': '#f0f0f0',
             'table_base': '#1e1e1e', 'table_text': '#e6e6e6',
             'table_border': '#3c3c3c', 'table_header_bg': '#2d2d2d',
-            'table_grid': '#3c3c3c',
+            'table_grid': '#3c3c3c', 'selection': constants.ACCENT_SOLID,
+            'nav_line': 'rgba(255, 255, 255, 0.10)',
+            'nav_track': 'rgba(255, 255, 255, 0.06)',
         }
     return {
         'plot_bg': 'w', 'plot_fg': 'k',
@@ -145,18 +153,61 @@ def control_palette(dark: bool) -> dict:
         'text': '#202020',
         'table_base': '#ffffff', 'table_text': '#1a1a1a',
         'table_border': '#d9d9d9', 'table_header_bg': '#f5f5f5',
-        'table_grid': '#e5e5e5',
+        'table_grid': '#e5e5e5', 'selection': constants.ACCENT_SOLID,
+        'nav_line': 'rgba(0, 0, 0, 0.07)',
+        'nav_track': 'rgba(0, 0, 0, 0.05)',
     }
 
 
 def status_color(key: str) -> str:
-    """语义状态文字色（随主题查表）：success/warning/error/info/disabled。
+    """语义状态文字色（随主题查表）：success/warning/error/info/secondary/disabled。
 
     新代码置文字色一律走本函数，勿直接用 constants.COLOR_* 裸常量
-    （深色主题下固定浅灰/浅色值对比度不足或刺眼）。
+    （深色主题下固定浅灰/浅色值对比度不足或刺眼）。hint/次要说明用
+    ``'secondary'``（WCAG AA 达标），``'disabled'`` 仅限真禁用控件。
     """
     light, dark = constants.STATUS_COLORS[key]
     return dark if isDarkTheme() else light
+
+
+def accent_color() -> str:
+    """强调色（随主题）：选中态文字/线条/链接用；实色块底用 ACCENT_SOLID。"""
+    light, dark = constants.ACCENT
+    return dark if isDarkTheme() else light
+
+
+def hint_qss(key: str = 'secondary') -> str:
+    """辅助说明文字 QSS 单源：语义色 + SECONDARY 字号（随主题查表）。
+
+    供 :func:`ui.page_scaffold.make_hint` 与运行期动态改色的 hint 使用；
+    主题切换后须重设（HintLabel.apply_theme 已自动处理）。
+    """
+    return (f'color: {status_color(key)}; '
+            f'font-size: {constants.FONT_SIZE_SECONDARY}pt;')
+
+
+def ui_font(size_pt: int, weight: 'QFont.Weight | None' = None) -> QFont:
+    """带回退链的 UI 字体工厂（P2-5）。
+
+    QFont 单值构造只认 ``FONT_FAMILY`` 首选族，Windows 缺该族时直接落到
+    Qt 自动替换；显式 ``setFamilies`` 让 Qt 按 token 栈逐族匹配。新代码
+    一律经本工厂创建字体，勿再手写 ``QFont(constants.FONT_FAMILY, ...)``。
+    """
+    font = QFont(constants.FONT_FAMILY, size_pt)
+    font.setFamilies(list(constants.FONT_FAMILY_STACK))
+    if weight is not None:
+        font.setWeight(weight)
+    return font
+
+
+def font_families_qss() -> str:
+    """QSS ``font-family`` 值单源：token 栈加引号 + ``sans-serif`` 关键字兜底。
+
+    CSS 关键字不加引号；族名含空格必须带引号。dock_panel 等手写 QSS
+    的场景一律引用本函数，勿再写死单族。
+    """
+    quoted = ', '.join(f'"{name}"' for name in constants.FONT_FAMILY_STACK)
+    return f'{quoted}, sans-serif'
 
 
 def badge_colors(key: str) -> tuple:
@@ -171,16 +222,34 @@ def badge_colors(key: str) -> tuple:
     return dark if isDarkTheme() else light
 
 
-# 药丸徽章 QSS 模板（任务中心状态徽章与方法浏览器标签徽章原各抄一份，
-# 逐字相同，收敛到此处单源）。%s 占位为底色，文字恒为白（深底彩底方案）。
-BADGE_QSS = ('QLabel { padding: 2px 10px; border-radius: 10px; '
-             'font-size: 12px; font-weight: bold; '
-             'color: #ffffff; background-color: %s; }')
+# 药丸徽章 QSS 模板（单源，两种变体）：
+# - BADGE_QSS：白字 + 实色彩底（任务中心/方法浏览器；单 %s 占位底色，
+#   ui.motion.animate_badge_color 依赖该单占位做正则回填，勿改双占位）；
+# - BADGE_QSS_PAIR：彩字 + 淡彩底（随 badge_colors 色对，浅色主题用）。
+# 字号统一 FONT_SIZE_SECONDARY（9pt = 原 12px 等值）。
+_BADGE_QSS_BODY = ('QLabel { padding: 2px 10px; border-radius: 10px; '
+                   f'font-size: {constants.FONT_SIZE_SECONDARY}pt; '
+                   'font-weight: bold; ')
+BADGE_QSS = _BADGE_QSS_BODY + 'color: #ffffff; background-color: %s; }'
+BADGE_QSS_PAIR = _BADGE_QSS_BODY + 'color: %s; background-color: %s; }'
 
 
 def badge_qss(bg: str) -> str:
-    """药丸徽章样式（白字 + 指定底色）。"""
+    """药丸徽章样式（白字 + 指定实色底，单占位模板）。"""
     return BADGE_QSS % bg
+
+
+def badge_qss_pair(text_color: str, bg: str) -> str:
+    """药丸徽章样式（彩字淡底变体，配 badge_colors() 色对）。"""
+    return BADGE_QSS_PAIR % (text_color, bg)
+
+
+def make_badge(text: str, color_key: str) -> 'QLabel':
+    """状态药丸徽章（浅色彩字淡底 / 深色白字彩底，随主题查表）。"""
+    from PyQt6.QtWidgets import QLabel
+    badge = QLabel(text)
+    badge.setStyleSheet(badge_qss_pair(*badge_colors(color_key)))
+    return badge
 
 
 def native_views_qss(dark: bool) -> str:
@@ -198,12 +267,13 @@ def native_views_qss(dark: bool) -> str:
     border = palette['table_border']
     header_bg = palette['table_header_bg']
     grid = palette['table_grid']
+    selection = palette['selection']
     return (
         'QTableWidget, QTableView, QListWidget, QListView, QTreeWidget,'
         ' QTreeView {'
         f' background-color: {base}; color: {text};'
         f' border: 1px solid {border}; gridline-color: {grid};'
-        ' selection-background-color: #009688; selection-color: #ffffff;'
+        f' selection-background-color: {selection}; selection-color: #ffffff;'
         ' }'
         'QHeaderView::section {'
         f' background-color: {header_bg}; color: {text};'
@@ -273,7 +343,7 @@ def log_panel_qss(variant: str = 'terminal') -> str:
         ' border-radius: 4px;'
         ' padding: 5px;'
         " font-family: 'Consolas', 'Courier New', monospace;"
-        ' font-size: 11px;'
+        f' font-size: {constants.FONT_SIZE_SECONDARY}pt;'
         ' }'
     )
 

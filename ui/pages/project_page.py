@@ -33,14 +33,15 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
-    BodyLabel, CaptionLabel, CardWidget, DoubleSpinBox, InfoBar,
+    BodyLabel, CardWidget, DoubleSpinBox, InfoBar,
     InfoBarPosition, LineEdit, MessageBox, PrimaryPushButton, PushButton,
     ToolButton,
 )
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants, file_dialogs
-from ui.page_scaffold import make_card, make_form_row, make_scroll_column
+from ui.page_scaffold import (make_card, make_form_row, make_hint,
+                              make_scroll_column)
 from ui.theme_helpers import status_color
 from ui.widgets import (BScanView, CollapsiblePanel, clear_invalid,
                         make_separator, mark_invalid, validate_non_empty)
@@ -110,10 +111,9 @@ class ProjectPage(QWidget):
         header_row.addStretch(1)
 
         # 无项目提示（SPEC §7：未打开项目时操作按钮禁用并提示）
-        self._no_project_hint = CaptionLabel(
-            '尚未打开项目 —— 请先在主页打开或新建项目', self)
-        self._no_project_hint.setStyleSheet(
-            'color: %s; font-size: 11px;' % status_color('warning'))
+        self._no_project_hint = make_hint(
+            '尚未打开项目 —— 请先在主页打开或新建项目', parent=self,
+            key='warning')
         self._no_project_hint.setAlignment(
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         header_row.addWidget(self._no_project_hint)
@@ -207,10 +207,8 @@ class ProjectPage(QWidget):
 
         # 预检结果 CaptionLabel 区
         layout.addWidget(make_separator())
-        self._preflight_label = CaptionLabel('预检结果将显示在此处', card)
+        self._preflight_label = make_hint('预检结果将显示在此处', parent=card)
         self._preflight_label.setWordWrap(True)
-        self._preflight_label.setStyleSheet(
-            'color: %s; font-size: 11px;' % status_color('disabled'))
         self._preflight_label.setMinimumHeight(34)
         layout.addWidget(self._preflight_label)
         return card
@@ -232,9 +230,9 @@ class ProjectPage(QWidget):
                                            trailing_stretch=False))
             self._sensor_edits[key] = edit
 
-        hint = CaptionLabel('同步目标测线 = 右侧测线列表当前选中行（未选中时使用上方测线号）', card)
-        hint.setStyleSheet('color: %s; font-size: 11px;'
-                           % status_color('disabled'))
+        hint = make_hint(
+            '同步目标测线 = 右侧测线列表当前选中行（未选中时使用上方测线号）',
+            parent=card)
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
@@ -453,9 +451,7 @@ class ProjectPage(QWidget):
     def set_preflight_result(self, text: str, ok: bool) -> None:
         """预检结果区：ok 绿色 / 失败红色。"""
         self._preflight_label.setText(str(text or ''))
-        color = status_color('success' if ok else 'error')
-        self._preflight_label.setStyleSheet(
-            'color: %s; font-size: 11px;' % color)
+        self._preflight_label.set_hint_key('success' if ok else 'error')
 
     def set_preview_bundle(self, bundle) -> None:
         """PreviewBundle（鸭子类型）或 None（清空）。"""
@@ -538,8 +534,7 @@ class ProjectPage(QWidget):
         }
         if preflight:
             self._preflight_label.setText('预检中…')
-            self._preflight_label.setStyleSheet(
-                'color: %s; font-size: 11px;' % status_color('info'))
+            self._preflight_label.set_hint_key('info')
         self.import_requested.emit(payload)
 
     def _emit_sync_request(self) -> None:

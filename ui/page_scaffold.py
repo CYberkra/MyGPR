@@ -20,10 +20,12 @@ from PyQt6.QtWidgets import (QHBoxLayout, QListWidgetItem, QVBoxLayout, QWidget)
 from qfluentwidgets import CaptionLabel, CardWidget, ScrollArea, SubtitleLabel
 
 from ui import constants
+from ui.theme_helpers import hint_qss, ui_font
 
 __all__ = [
     'make_card', 'make_segment_card', 'card_title', 'style_transparent_scroll',
     'make_scroll_column', 'wrap_centered', 'make_form_row',
+    'HintLabel', 'make_hint',
     'refill_combo', 'rebuild_check_list', 'PanelStateMixin',
 ]
 
@@ -36,47 +38,45 @@ def card_title(text: str) -> SubtitleLabel:
     私有 ``_card_title``。
     """
     label = SubtitleLabel(text)
-    label.setFont(QFont(constants.FONT_FAMILY, constants.FONT_SIZE_BODY,
-            QFont.Weight.Bold))
+    label.setFont(ui_font(constants.FONT_SIZE_BODY, QFont.Weight.Bold))
     return label
 
 
-def make_card(title: str, *, parent=None) -> tuple:
+def make_card(title: str, *, parent=None, header_action: QWidget | None = None) -> tuple:
     """卡片范式（SPEC §1）：CardWidget + QVBoxLayout(margins=15, spacing=10)，
     首行 10pt Bold 卡片标题。返回 ``(card, layout)``。
 
     收敛自 home/settings/project 的 ``_create_card`` 与
     processing/spatial 的 ``_make_card``、delivery 的方法版
     ``_make_card``（其 ``CardWidget(self)`` 父参数经 ``parent=`` 传入）。
+
+    ``header_action`` 可选：主操作控件进卡头行右侧（「页签卡 header 放
+    动作」模式，P2-3），不再在卡体里孤悬一行；控件可先以页面为父创建，
+    加入 header 时 Qt 自动重挂父。
     """
     card = CardWidget(parent)
     layout = QVBoxLayout(card)
     layout.setContentsMargins(*constants.CARD_MARGINS)
     layout.setSpacing(constants.CARD_SPACING)
-    layout.addWidget(card_title(title))
+    if header_action is None:
+        layout.addWidget(card_title(title))
+    else:
+        header = QHBoxLayout()
+        header.addWidget(card_title(title), 0, Qt.AlignmentFlag.AlignVCenter)
+        header.addStretch(1)
+        header.addWidget(header_action, 0, Qt.AlignmentFlag.AlignVCenter)
+        layout.addLayout(header)
     return card, layout
 
 
 def make_segment_card(title: str, segment: QWidget, *, parent=None) -> tuple:
     """子标签卡片范式：单行 header（标题居左 + 瘦页签居右）+ 内容区。
 
-    与 :func:`make_card` 同构，返回 ``(card, layout)``；差别是标题与
-    ``segment``（SlimSegment）挤进同一行 header（Win11 设置页惯例），
-    不再「标题一行 + 页签一行」双 header 浪费中栏垂直空间。
-
-    ``segment`` 可先以页面为父创建，加入卡片布局时 Qt 自动重挂父。
-    用于 processing「数据预览」、spatial「空间视图」两卡。
+    即 ``make_card`` 的 ``header_action=segment`` 特例（Win11 设置页惯例），
+    不再「标题一行 + 页签一行」双 header 浪费中栏垂直空间。返回值与
+    :func:`make_card` 同构 ``(card, layout)``。
     """
-    card = CardWidget(parent)
-    layout = QVBoxLayout(card)
-    layout.setContentsMargins(*constants.CARD_MARGINS)
-    layout.setSpacing(constants.CARD_SPACING)
-    header = QHBoxLayout()
-    header.addWidget(card_title(title), 0, Qt.AlignmentFlag.AlignVCenter)
-    header.addStretch(1)
-    header.addWidget(segment, 0, Qt.AlignmentFlag.AlignVCenter)
-    layout.addLayout(header)
-    return card, layout
+    return make_card(title, parent=parent, header_action=segment)
 
 
 # ---------------------------------------------------------------- 透明滚动栏
@@ -139,12 +139,17 @@ def wrap_centered(content: QWidget,
 
 
 # ---------------------------------------------------------------- 表单行
-def make_form_row(label_text: str, field, *extra, label_min_width: int = 100,
+def make_form_row(label_text: str, field, *extra,
+                  label_min_width: int = constants.FORM_LABEL_MIN_WIDTH,
                   parent=None, trailing_stretch: bool = True) -> QHBoxLayout:
-    """表单行：CaptionLabel(minWidth=100) + 控件(stretch) + 扩展控件 + stretch。
+    """表单行：CaptionLabel(minWidth=FORM_LABEL_MIN_WIDTH) + 控件(stretch)
+    + 扩展控件 + stretch。
 
     收敛 settings/project/delivery/home 等页逐字重复的
-    「标签(minWidth=100)+控件+stretch」样板。返回行布局（供 addLayout）。
+    「标签(minWidth)+控件+stretch」样板。返回行布局（供 addLayout）。
+
+    标签列统一最小宽（112，容纳六汉字+冒号）：跨卡片/跨页面的值列
+    起点对齐（原各处 minWidth=100 散值）。
 
     :param extra: 行尾附加控件（如「浏览」按钮、提示标签）；
     :param trailing_stretch: 行尾是否加 stretch（以按钮收尾的行传 False）。
@@ -159,6 +164,48 @@ def make_form_row(label_text: str, field, *extra, label_min_width: int = 100,
     if trailing_stretch:
         row.addStretch(1)
     return row
+
+
+# ---------------------------------------------------------------- 提示文字
+class HintLabel(CaptionLabel):
+    """辅助说明标签（hint）：secondary 色 + SECONDARY 字号，WCAG AA 达标。
+
+    颜色语义经 :func:`ui.theme_helpers.hint_qss` 随主题查表；主窗口主题
+    切换遍历（findChildren + apply_theme 鸭子类型）自动重刷，页面无需
+    在 apply_theme 里手动重设样式（spatial 等页的手工重刷随之删除）。
+
+    运行期需要改语义色（如预检结果 success/error）时调
+    :meth:`set_hint_key`，勿再手拼 QSS。
+    """
+
+    def __init__(self, text: str = '', parent=None, key: str = 'secondary'):
+        # 走 FluentLabelBase 单参 (parent) 分支再 setText：其 (text, parent)
+        # 分支内部会 self.__init__(parent) 重入子类构造（递归直到 TypeError）
+        super().__init__(parent)
+        self.setText(str(text))
+        self._hint_key = str(key)
+        self.setStyleSheet(hint_qss(self._hint_key))
+
+    def set_hint_key(self, key: str) -> None:
+        """切换语义色键（secondary/success/warning/error/info…）并重刷。"""
+        self._hint_key = str(key)
+        self.setStyleSheet(hint_qss(self._hint_key))
+
+    def hint_key(self) -> str:
+        return self._hint_key
+
+    def apply_theme(self, dark: bool) -> None:
+        """主题切换重刷（主窗口全量遍历鸭子类型调用）。"""
+        self.setStyleSheet(hint_qss(self._hint_key))
+
+
+def make_hint(text: str, *, parent=None, key: str = 'secondary') -> HintLabel:
+    """辅助说明文字工厂（原 6 页逐字重复的 'color:%s;font-size:11px' 样板）。
+
+    :param key: 语义色键，默认 ``'secondary'``（AA 达标灰）；
+        语义状态提示传 success/warning/error/info。
+    """
+    return HintLabel(text, parent, key)
 
 
 # ---------------------------------------------------------------- 下拉/勾选列表

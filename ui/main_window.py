@@ -28,11 +28,26 @@ from ui import constants, file_dialogs
 from ui.page_coordinator import PageCoordinator
 from ui.logger_config import setup_logger
 from ui.settings_manager import SettingsManager
-from ui.theme_helpers import apply_theme
+from ui.theme_helpers import apply_theme, control_palette
 from ui.widgets.file_tree_panel import FileTreePanel
 from ui.widgets.segment_tabs import SlimSegment
 
 logger = setup_logger('mygpr_window', 'logs/mygpr_window.log', level=logging.DEBUG)
+
+# 上格宿主最小高：splitter 分配下限（页签条 36 + 页面区保底 ~260）。
+# 不覆写时 minimumSizeHint 透传 QStackedWidget 的「所有页最大 min」
+# （实测 835px > splitter 总高），QSplitter 永远把下格 OutputPanel 压到
+# 自身最小——表现为输出面板拖不动/一拖就消失、页面区视觉补位；且布局
+# 常驻溢出态，任何页面数据刷新引发的 min 抖动都会造成整窗闪动。
+_CONTENT_HOST_MIN_H = 300
+
+
+class _PageHostWidget(QWidget):
+    """内容行宿主：min hint 不透传页面栈全页最大值（不可见页不钳制布局）。"""
+
+    def minimumSizeHint(self):   # Qt 虚函数命名（CamelCase 是 Qt 约定，非本仓风格）
+        return QSize(0, _CONTENT_HOST_MIN_H)
+
 
 # ------------------------------------------------------------ 页面（[A4]/[A5] 提供，缺失降级占位）
 def _import_page_class(module_path: str, class_name: str):
@@ -292,7 +307,10 @@ class MyGPRMainWindow(FluentWindow):
         # 标题栏净空由页签条承担，内容行不再预留顶部 48px
         self.widgetLayout.setContentsMargins(0, 0, 0, 0)
         # QSplitter 只收 widget，把内容行 layout 包进宿主 widget
-        content_host = QWidget(self)
+        # （_PageHostWidget：min hint 固定 300，见类注释——透传全页最大
+        # min 会导致输出面板被 QSplitter 压死，问题 1/2 同根因）
+        content_host = _PageHostWidget(self)
+        content_host.setMinimumHeight(_CONTENT_HOST_MIN_H)
         host_col = QVBoxLayout(content_host)
         host_col.setContentsMargins(0, 0, 0, 0)
         host_col.setSpacing(0)
@@ -359,16 +377,25 @@ class MyGPRMainWindow(FluentWindow):
             self._top_nav.addItem(object_name, text)
         self._top_nav.currentItemChanged.connect(self._on_top_nav_changed)
         track_layout.addWidget(self._top_nav)
+        # 药丸居中（评审 P1-5）：两侧对称 stretch，消除"重心偏左、
+        # 右半条空白"的失衡感
+        layout.addStretch(1)
         layout.addWidget(track, 0, Qt.AlignmentFlag.AlignVCenter)
         layout.addStretch(1)
-        # 文件树全局入口（方案 B：页签条右端图标钮，Ctrl+B；窗口级面板开关，
-        # 任何页面可达）。透明图标钮与日志面板工具条同一美术语言。
+        # 右端双开关：文件树 (Ctrl+B) / 输出面板 (Ctrl+J)，快捷键入口对等曝光
         self._file_tree_btn = TransparentToolButton(FIF.LAYOUT, bar)
         self._file_tree_btn.setIconSize(QSize(14, 14))
         self._file_tree_btn.setToolTip('文件树 (Ctrl+B)')
         self._file_tree_btn.setFixedSize(28, 28)
         self._file_tree_btn.clicked.connect(self._toggle_file_tree)
         layout.addWidget(self._file_tree_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+        self._output_btn = TransparentToolButton(FIF.CODE, bar)
+        self._output_btn.setIconSize(QSize(14, 14))
+        self._output_btn.setToolTip('输出面板：日志 / 任务 (Ctrl+J)')
+        self._output_btn.setFixedSize(28, 28)
+        if self.output_panel is not None:
+            self._output_btn.clicked.connect(self.output_panel.toggle_panel)
+        layout.addWidget(self._output_btn, 0, Qt.AlignmentFlag.AlignVCenter)
         self._apply_top_nav_style()
         # 初始选中第一个页面（与 addSubInterface 的初始 stack 页一致）
         if self._nav_specs:
@@ -385,10 +412,10 @@ class MyGPRMainWindow(FluentWindow):
             self.switchTo(page)
 
     def _apply_top_nav_style(self) -> None:
-        """页签条底部分隔线 + 药丸轨道底色，深浅主题跟随。"""
-        dark = isDarkTheme()
-        line = 'rgba(255, 255, 255, 0.10)' if dark else 'rgba(0, 0, 0, 0.07)'
-        track = 'rgba(255, 255, 255, 0.06)' if dark else 'rgba(0, 0, 0, 0.05)'
+        """页签条底部分隔线 + 药丸轨道底色，深浅主题跟随（control_palette 单源）。"""
+        pal = control_palette(isDarkTheme())
+        line = pal['nav_line']
+        track = pal['nav_track']
         if getattr(self, '_top_nav_bar', None) is not None:
             self._top_nav_bar.setStyleSheet(
                 f'#topNavBar {{ border-bottom: 1px solid {line}; }}'
@@ -413,12 +440,20 @@ class MyGPRMainWindow(FluentWindow):
             return default
 
     def _set_output_panel_height(self, target: int) -> None:
-        """把 splitter 下格调整到 target，上格吃掉余量（保下限防挤没）。"""
+        """把 splitter 下格调整到 target，上格吃掉余量（保下限防挤没）。
+
+        收/展会 ``setVisible`` 切换下格 min hint（37 ↔ 97），其触发的
+        child invalidate 会在事件循环里让 QSplitter 按 stretch 重算、
+        把这里的显式分配洗掉（下格 stretch=0 被压回 min）——故事件循环
+        排空后再重申一次分配。
+        """
         total = sum(self._v_splitter.sizes()) or self._v_splitter.height()
         if total <= 0:
             return
         target = min(target, max(120, total - 200))
-        self._v_splitter.setSizes([max(200, total - target), target])
+        sizes = [max(200, total - target), target]
+        self._v_splitter.setSizes(sizes)
+        QTimer.singleShot(0, lambda: self._v_splitter.setSizes(sizes))
 
     def _restore_output_panel_height(self) -> None:
         """启动恢复：按开合态把 splitter 下格设为展开高/头部栏高。"""
@@ -443,8 +478,16 @@ class MyGPRMainWindow(FluentWindow):
                 constants.OUTPUT_PANEL_HEADER_HEIGHT + 2)
 
     def _on_output_splitter_moved(self, _pos: int, _index: int) -> None:
-        """用户拖拽改变面板高度 → 记忆（仅展开态；收起时下格是头部栏高）。"""
-        if self.output_panel is None or not self.output_panel.is_open():
+        """用户拖拽改变面板高度 → 记忆（仅展开态；收起时下格是头部栏高）。
+
+        收起态拖 handle = 用户想要更高面板：内容区恢复显示，高度以用户
+        拖出的为准（本面板 min hint 恒定，显隐切换不会洗掉当前分配）。
+        """
+        if self.output_panel is None:
+            return
+        if not self.output_panel.is_open():
+            if self._v_splitter.sizes()[1] > constants.OUTPUT_PANEL_HEADER_HEIGHT + 8:
+                self.output_panel.set_open(True)
             return
         if self.settings is not None:
             self.settings.set('output_panel_height',

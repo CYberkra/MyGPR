@@ -30,6 +30,13 @@ class ProjectChain:
         self.current_line_id = ''         # 当前测线（项目/处理/解释页共用）
         self.pending_select_line_id = ''  # 导入完成后要选中的测线
         self.pending_focus_artifact = ''  # 文件树点成果：待选中预览的 artifact_id
+        # 空间轨迹加载去重（见 on_project_opened / on_lines_updated）：
+        # 一次「打开项目」里两个槽都要"确保轨迹已加载"，此前各发一次
+        # ``load_spatial_tracks()``，导致同一份轨迹被后端完整解析两遍
+        # （实测 570–695 ms/次，是 open 链路最大的单项命令成本）。
+        self._spatial_reload_pending = False
+        # 上次真正发起重载时的测线集合；集合变化才需要重新解析轨迹
+        self._spatial_reload_line_ids: tuple[str, ...] | None = None
 
     # ============================================================ 信号注册
     def connect_all(self) -> None:
@@ -147,8 +154,13 @@ class ProjectChain:
             co.delivery_controller.refresh_spatial(project_id)
             co.delivery_controller.refresh_reports(project_id)
         # 空间信息页：项目打开后加载空间轨迹
+        #
+        # 去重（性能，见 __init__ 注释）：这里只**记意图**，不直接发起。
+        # ``refresh_lines()`` 刚在上面被 controller 发起，其回包
+        # ``on_lines_updated`` 紧随其后到达，由它统一发起一次加载。
+        self._spatial_reload_pending = True
+        self._spatial_reload_line_ids = None
         if co.project_controller is not None:
-            co.project_controller.load_spatial_tracks()
             co.project_controller.refresh_all_artifacts()  # 文件树「成果」视图
         # A→B 直切：清空空间页残留的 A 项目深度切片与勾选态，
         # 否则非空 payload 守卫会压制 B 项目首次进入深度段的预览请求。
@@ -162,6 +174,10 @@ class ProjectChain:
         """project_closed → 清空各页项目态并恢复无项目门控。"""
         co = self._co
         self.current_line_id = ''
+        # 关闭项目即重置轨迹去重态：否则重新打开**同一个**项目时，测线集合
+        # 与上次相同 → 会被误判为"无需重载"，空间页停在空轨迹。
+        self._spatial_reload_pending = False
+        self._spatial_reload_line_ids = None
         home = co.page('homeInterface')
         project = co.page('projectInterface')
         processing = co.page('processingInterface')
@@ -241,9 +257,20 @@ class ProjectChain:
         spatial.set_lines(lines)
         if co.file_tree() is not None:
             co.file_tree().set_lines(lines)
-        # 测线集合变化后空间轨迹同步重载（导入/同步完成均触发 lines_updated）
+        # 测线集合变化后空间轨迹同步重载（导入/同步完成均触发 lines_updated）。
+        #
+        # 去重（性能）：本槽在一次「打开项目」里紧随 on_project_opened 到达，
+        # 此时测线集合并未变化，重跑一遍只是把同一份轨迹再解析一次
+        # （570–695 ms）。故只在"确有待加载意图"或"测线集合与上次不同"
+        # 时才真正发起——后者覆盖导入 / 同步完成等真实变更场景。
         if co.project_controller is not None:
-            co.project_controller.load_spatial_tracks()
+            line_ids = tuple(
+                str(getattr(line, 'line_id', '') or '') for line in (lines or ()))
+            if self._spatial_reload_pending \
+                    or line_ids != self._spatial_reload_line_ids:
+                self._spatial_reload_line_ids = line_ids
+                co.project_controller.load_spatial_tracks()
+            self._spatial_reload_pending = False
         valid_ids = [str(getattr(line, 'line_id', '') or '') for line in lines]
         if self.current_line_id not in valid_ids:
             self.current_line_id = valid_ids[0] if valid_ids else ''

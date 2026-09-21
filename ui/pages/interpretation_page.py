@@ -34,9 +34,8 @@ from qfluentwidgets import (
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants
-from ui.page_scaffold import (card_title, make_card, make_scroll_column,
-                              refill_combo)
-from ui.theme_helpers import status_color
+from ui.page_scaffold import (card_title, make_card, make_hint,
+                              make_scroll_column, refill_combo)
 from ui.widgets import BScanView, CollapsiblePanel, make_separator
 
 _OVERLAY_COLOR = constants.CHART_OVERLAY_COLOR   # 标注散点颜色（SPEC §6.6）
@@ -110,9 +109,7 @@ class InterpretationPage(QWidget):
         row1.addStretch(1)
         status_label = CaptionLabel('状态:', card)
         row1.addWidget(status_label)
-        self._session_status_label = CaptionLabel('未打开会话', card)
-        self._session_status_label.setStyleSheet(
-            'color: %s; font-size: 11px;' % status_color('disabled'))
+        self._session_status_label = make_hint('未打开会话', parent=card)
         row1.addWidget(self._session_status_label)
         layout.addLayout(row1)
 
@@ -137,9 +134,7 @@ class InterpretationPage(QWidget):
         self._save_btn.setToolTip('保存当前标注点列到项目')
         row2.addWidget(self._save_btn)
         row2.addStretch(1)
-        hint = CaptionLabel('提示：在剖面图上左键点击拾取标注点', card)
-        hint.setStyleSheet(
-            'color: %s; font-size: 11px;' % status_color('disabled'))
+        hint = make_hint('提示：在剖面图上左键点击拾取标注点', parent=card)
         row2.addWidget(hint)
         layout.addLayout(row2)
         return card
@@ -182,9 +177,7 @@ class InterpretationPage(QWidget):
         # 点数计数与删除/清空同行：计数居左，按钮居右
         btn_row = QHBoxLayout()
         btn_row.setSpacing(constants.CARD_SPACING)
-        self._points_count_label = CaptionLabel('0 个点', points_card)
-        self._points_count_label.setStyleSheet(
-            'color: %s; font-size: 11px;' % status_color('disabled'))
+        self._points_count_label = make_hint('0 个点', parent=points_card)
         btn_row.addWidget(self._points_count_label)
         btn_row.addStretch(1)
         self._remove_point_btn = PushButton('删除选中', points_card, FIF.DELETE)
@@ -212,11 +205,9 @@ class InterpretationPage(QWidget):
             '常见介质：空气≈1，干砂≈3-5，湿砂≈20-30，水≈81')
         diel_row.addWidget(self._dielectric_spin, 1)
         depth_layout.addLayout(diel_row)
-        formula_hint = CaptionLabel('深度 = ½ · c · t / √εr（c = 0.30 m/ns）',
-                                    depth_card)
+        formula_hint = make_hint('深度 = ½ · c · t / √εr（c = 0.30 m/ns）',
+                                 parent=depth_card)
         formula_hint.setWordWrap(True)
-        formula_hint.setStyleSheet(
-            'color: %s; font-size: 11px;' % status_color('disabled'))
         depth_layout.addWidget(formula_hint)
         layout.addWidget(depth_card)
 

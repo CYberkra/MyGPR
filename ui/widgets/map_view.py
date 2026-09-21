@@ -33,6 +33,7 @@ from ui import constants
 from ui.desktop_backend_facade import tile_cache_dir
 from ui.theme_helpers import control_palette
 from ui.widgets.context_menus import add_action, make_menu
+from ui.widgets.empty_state import EmptyStateOverlay
 from ui.widgets.pg_view_base import GraphicsViewBase
 from ui.widgets.map_tiles import (DEFAULT_TILE_SOURCE, TILE_SOURCE_MAX_ZOOM,
                                   TILE_SOURCES, WORLD_SIZE_M,
@@ -443,6 +444,11 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
         self.scene().sigMouseMoved.connect(self._on_mouse_moved)
 
         # ---------------- 浮动覆盖层（子控件，resizeEvent 中定位） ----------------
+        # 全幅空态引导（评审 P0-1）：先于其他浮层创建，图例/缩放钮保持其上
+        self._empty_overlay = EmptyStateOverlay(
+            self, icon=FIF.GLOBE, title='暂无测线',
+            hint='打开含定位信息的测线后，此处显示底图与航迹')
+
         # 左上：测线图例（色块 + 名称），set_tracks 时重建
         self._legend = QFrame(self)
         self._legend.setObjectName('mapLegend')
@@ -566,6 +572,8 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
         self._raw_tracks = list(tracks or [])
         self._track_colors = dict(colors or {})
         self._render_tracks()
+        # 空态引导：无任何测线时显示（评审 P0-1）
+        self._empty_overlay.setVisible(not self._raw_tracks)
 
     def _render_tracks(self) -> None:
         """按当前底图坐标系（WGS84 / GCJ-02）转换并绘制测线。"""
