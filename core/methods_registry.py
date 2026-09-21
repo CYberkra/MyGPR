@@ -22,7 +22,7 @@ import 期不再为整个算法栈付费。
 from __future__ import annotations
 
 import importlib.util
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from core.algorithm_specs import AlgorithmCatalog
 from core.method_registry_metadata import (
@@ -38,6 +38,14 @@ from core.method_registry_metadata import (
 # import（连带 pywt 与整个算法栈）；find_spec 只查存在性不执行模块。
 # 语义差异仅在"pywt 存在但 import 即崩"的损坏环境，可接受。
 HAS_PYWAVELETS = importlib.util.find_spec("pywt") is not None
+
+# 惰性导出契约：PROCESSING_METHODS / ALGORITHM_CATALOG 由 _build_registry()
+# 在首次访问时写入 globals()，运行期经 PEP 562 __getattr__ 取得。此处仅声明
+# 类型——纯注解不产生运行期绑定（故 __getattr__ 仍会触发），同时让静态检查
+# 与类型检查器能看见这两个名字（否则 __all__ 里的名字会被判 F822 未定义）。
+if TYPE_CHECKING:
+    PROCESSING_METHODS: dict[str, Any]
+    ALGORITHM_CATALOG: AlgorithmCatalog
 
 # Methods whose legacy implementation is hardcoded in ProcessingEngine._run_legacy_adapter.
 # For these, ``func`` must remain non-callable so the engine dispatches to the
