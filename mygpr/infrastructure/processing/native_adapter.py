@@ -18,8 +18,18 @@ from mygpr.domain.processing.models import (
     ProcessingResult,
     ResourceEstimate,
 )
-from mygpr.infrastructure.processing.algorithms.methods import NATIVE_ALGORITHMS
 from mygpr.infrastructure.processing.metadata_bridge import legacy_overlay
+
+
+def _native_algorithms() -> dict:
+    """惰性获取 NATIVE_ALGORITHMS。
+
+    其定义模块顶层拉起全部算法实现 → scipy（importtime 实测 ~1.1s），
+    而本模块处于后端启动 import 链（backend → 本模块）；目录/执行均
+    只在运行时访问算法表，移入首次使用处。
+    """
+    from mygpr.infrastructure.processing.algorithms.methods import NATIVE_ALGORITHMS
+    return NATIVE_ALGORITHMS
 
 
 class NativeProcessingCatalog(ProcessingCatalogPort):
@@ -32,7 +42,7 @@ class NativeProcessingCatalog(ProcessingCatalogPort):
     """
 
     def get(self, method_id: str) -> ProcessingMethodDescriptor | None:
-        algorithm = NATIVE_ALGORITHMS.get(str(method_id))
+        algorithm = _native_algorithms().get(str(method_id))
         if algorithm is None:
             return None
         overlay = legacy_overlay(str(method_id))
@@ -63,7 +73,7 @@ class NativeProcessingCatalog(ProcessingCatalogPort):
 
     def list(self, *, public_only: bool = False) -> Sequence[ProcessingMethodDescriptor]:
         descriptors: list[ProcessingMethodDescriptor] = []
-        for method_id in NATIVE_ALGORITHMS:
+        for method_id in _native_algorithms():
             if public_only and legacy_overlay(str(method_id))["visibility"] != "public":
                 continue
             descriptor = self.get(method_id)
@@ -99,14 +109,14 @@ class NativeProcessingExecutor(ProcessingExecutorPort):
     """Execute migrated methods without importing ``core.processing_engine``."""
 
     def supports(self, method_id: str) -> bool:
-        return str(method_id) in NATIVE_ALGORITHMS
+        return str(method_id) in _native_algorithms()
 
     def execute(
         self,
         request: ProcessingRequest,
         context: ExecutionContext | None = None,
     ) -> ProcessingResult:
-        algorithm = NATIVE_ALGORITHMS.get(request.method_id)
+        algorithm = _native_algorithms().get(request.method_id)
         if algorithm is None:
             raise KeyError(f"native processing method not found: {request.method_id}")
         execution_context = context or ExecutionContext.null()
@@ -144,7 +154,7 @@ class NativeProcessingExecutor(ProcessingExecutorPort):
         )
 
     def estimate(self, request: ProcessingRequest) -> ResourceEstimate:
-        algorithm = NATIVE_ALGORITHMS.get(request.method_id)
+        algorithm = _native_algorithms().get(request.method_id)
         if algorithm is None:
             raise KeyError(f"native processing method not found: {request.method_id}")
         if algorithm.resource_estimator is not None:

@@ -54,6 +54,13 @@ def window(qapp, monkeypatch):
 
     monkeypatch.setattr(mw, 'FileTreePanel', _FileTreeStub)
     w = mw.MyGPRMainWindow()
+    w.ensure_pages_ready()   # 非首屏页为预热构造，测试需显式确保全部就位
+    # 开屏画面是与主窗口同位的独立 frameless 窗口（自带一套 TitleBar），
+    # SPLASH_DURATION_MS(600ms) 未到时 QApplication.widgetAt 会命中它而不是
+    # 主窗口按钮。构造提速把 __init__ 压到 600ms 以内后这个竞态在快机器上
+    # 稳定复现（Linux offscreen 首挂）。本测试只验主窗口标题栏 z-order，
+    # 显式关闭开屏以去掉时间依赖。
+    w.splashScreen.close()
     w.show()
     qapp.processEvents()
     yield w

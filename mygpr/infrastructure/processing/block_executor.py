@@ -6,7 +6,7 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -22,10 +22,18 @@ from mygpr.domain.processing.models import (
     ProcessingStepRecord,
     ResourceEstimate,
 )
-from mygpr.infrastructure.processing.algorithms.methods import NATIVE_ALGORITHMS, NativeAlgorithm
+if TYPE_CHECKING:
+    from mygpr.infrastructure.processing.algorithms.methods import NativeAlgorithm
 
 DEFAULT_BLOCK_BYTES = 64 * 1024 * 1024
 MIN_FREE_RESERVE = 128 * 1024 * 1024
+
+
+def _native_algorithms() -> dict:
+    """Lazy accessor — importing NATIVE_ALGORITHMS pulls the scipy stack (~1.1s at startup)."""
+    from mygpr.infrastructure.processing.algorithms.methods import NATIVE_ALGORITHMS
+
+    return NATIVE_ALGORITHMS
 
 
 class InsufficientProcessingStorage(RuntimeError):
@@ -43,7 +51,7 @@ class FileBackedBlockPipelineExecutor(BlockPipelineExecutorPort):
     def supports(self, pipeline: PipelineDefinition) -> bool:
         enabled = [step for step in pipeline.steps if step.enabled]
         return bool(enabled) and all(
-            (algorithm := NATIVE_ALGORITHMS.get(step.method_id)) is not None
+            (algorithm := _native_algorithms().get(step.method_id)) is not None
             and algorithm.supports_file_backed
             and algorithm.supports_block_params(dict(step.params))
             for step in enabled
@@ -59,7 +67,7 @@ class FileBackedBlockPipelineExecutor(BlockPipelineExecutorPort):
             )
         source_bytes = int(np.prod(shape, dtype=np.int64)) * max(1, np.dtype(dtype).itemsize)
         normalized_bytes = int(np.prod(shape, dtype=np.int64)) * np.dtype(np.float32).itemsize
-        enabled = [NATIVE_ALGORITHMS[step.method_id] for step in pipeline.steps if step.enabled]
+        enabled = [_native_algorithms()[step.method_id] for step in pipeline.steps if step.enabled]
         minimum_block = max(
             shape[0] * np.dtype(np.float64).itemsize if item.block_axis == "columns"
             else shape[1] * np.dtype(np.float64).itemsize
@@ -139,7 +147,7 @@ class FileBackedBlockPipelineExecutor(BlockPipelineExecutorPort):
         records: list[ProcessingStepRecord] = []
         current_header = dict(header_info or {})
         for index, step in enumerate(enabled, start=1):
-            algorithm = NATIVE_ALGORITHMS[step.method_id]
+            algorithm = _native_algorithms()[step.method_id]
             next_path = workspace / f"step-{index:03d}.f32"
             next_matrix, metadata = self._execute_step(
                 current, next_path, algorithm, dict(step.params), current_header,

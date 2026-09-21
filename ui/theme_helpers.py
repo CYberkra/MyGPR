@@ -218,15 +218,28 @@ def native_views_qss(dark: bool) -> str:
     )
 
 
+# 已应用主题状态（None = 尚未应用）。启动链 main() 在窗口树为空时先
+# apply_theme 一次（palette/QSS 成本极低），MyGPRMainWindow._init_state
+# 回放同主题时经此状态短路——旧行为重复 setTheme + app.setStyleSheet 会
+# 对已建好的几百个控件 re-polish（实测 ~1.1s，是启动耗时大头之一）。
+_applied_dark: bool | None = None
+
+
 def apply_theme(theme: str) -> None:
     """应用主题：setTheme + pyqtgraph 背景同步（'k'/'w'）+ palette + 原生控件 QSS。
 
+    幂等：目标主题与已应用主题一致时直接返回（重复的全局样式重算对大
+    控件树是秒级开销）。需要强制重放时先置 ``theme_helpers._applied_dark = None``。
+
     :param theme: ``'浅色主题'`` / ``'深色主题'``（也接受 ``Theme`` 枚举）。
     """
+    global _applied_dark
     if isinstance(theme, Theme):
         dark = theme == Theme.DARK
     else:
         dark = str(theme) == constants.THEME_DARK
+    if _applied_dark is not None and dark == _applied_dark:
+        return
     setTheme(Theme.DARK if dark else Theme.LIGHT)
     pg.setConfigOption('background', 'k' if dark else 'w')
     pg.setConfigOption('foreground', 'w' if dark else 'k')
@@ -239,6 +252,7 @@ def apply_theme(theme: str) -> None:
     if app is not None:
         app.setPalette(_get_dark_palette() if dark else _get_light_palette())
         app.setStyleSheet(native_views_qss(dark))
+    _applied_dark = dark
 
 
 def log_panel_qss(variant: str = 'terminal') -> str:

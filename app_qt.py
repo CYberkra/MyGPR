@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """MyGPR Qt 前端入口（SPEC §0/§8）。
 
-启动流程：QApplication → setTheme(Theme.LIGHT) → SplashScreen(600ms) → MyGPRMainWindow
+启动流程：QApplication → apply_theme(设置主题，树空时零成本) → MyGPRMainWindow（SplashScreen 600ms）
 
 ``--smoke``：offscreen 验收模式——3 秒后将主窗口及各导航页截图保存到
 系统临时目录下的 ``mygpr_shots/``（可由 ``MYGPR_SMOKE_SHOTS_DIR`` 覆盖），
@@ -41,6 +41,8 @@ from core.observability import (configure_structured_logging,
                                 install_global_exception_hooks)
 from ui import constants
 from ui.main_window import MyGPRMainWindow, PlaceholderPage
+from ui.settings_manager import SettingsManager
+from ui.theme_helpers import apply_theme
 
 # Keep smoke artifacts outside the installation directory and avoid the
 # POSIX-only /tmp path when validating Windows packages.  CI can override it.
@@ -105,6 +107,8 @@ def _run_smoke(window: MyGPRMainWindow) -> None:
     """
     os.makedirs(SMOKE_SHOTS_DIR, exist_ok=True)
     app = QApplication.instance()
+    # 页面为首屏后空闲预热构造（启动提速），断言前需确保全部就位
+    window.ensure_pages_ready()
     saved = []
     errors = []
 
@@ -114,9 +118,9 @@ def _run_smoke(window: MyGPRMainWindow) -> None:
         'jobsInterface', 'settingsInterface',
     ]
 
-    # 1) 页面数量与命名
+    # 1) 页面数量与命名（集合比较：非首屏页为空闲预热构造，插入顺序不等于页签顺序）
     actual_names = list(window.pages.keys())
-    if actual_names != expected_names:
+    if sorted(actual_names) != sorted(expected_names):
         errors.append(
             f'页面列表不匹配: expected={expected_names}, actual={actual_names}')
 
@@ -187,7 +191,7 @@ def main() -> int:
         from PyQt6.QtCore import Qt
         from PyQt6.QtGui import QFont, QGuiApplication
         from PyQt6.QtWidgets import QApplication
-        from qfluentwidgets import setTheme, Theme
+        import qfluentwidgets  # noqa: F401 — 依赖在位检测（依赖缺失给出安装提示）
     except ImportError as exc:
         print(
             "ERROR: MyGPR GUI dependencies are not installed.\n"
@@ -217,9 +221,15 @@ def main() -> int:
     # Windows 机器上表现一致。
     app.setStyle('fusion')
     app.setFont(QFont(constants.FONT_FAMILY, constants.FONT_SIZE_BODY))
-    setTheme(Theme.LIGHT)   # 默认浅色（跟随师兄），窗口内按设置回放
+    # 主题一次性提前应用：在窗口树尚空时 setTheme+palette+QSS 几乎零成本，
+    # 页面控件直接在最终主题下创建。旧链是 main 先 setTheme(LIGHT)、
+    # MyGPRMainWindow._init_state 再全量回放——两遍全局样式重算，其中
+    # app.setStyleSheet 要对已建好的几百个控件 re-polish（实测 ~1.1s）。
+    # 回放侧经 theme_helpers.apply_theme 的幂等短路自动跳过重复。
+    settings = SettingsManager()
+    apply_theme(settings.get('theme', constants.THEME_LIGHT))
 
-    window = MyGPRMainWindow()
+    window = MyGPRMainWindow(settings=settings)
     window.show()
 
     if args.smoke:

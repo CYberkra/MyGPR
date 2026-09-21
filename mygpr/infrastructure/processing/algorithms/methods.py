@@ -1,4 +1,11 @@
-"""Native algorithm registry and execution characteristics."""
+"""Native algorithm registry and execution characteristics.
+
+v0.9.38 启动性能：NATIVE_ALGORITHMS 是注册表元数据（参数 schema、auto-tune
+家族、资源系数等）的事实源，启动期 UI 目录构建只需要元数据，不需要实现函数。
+算法实现模块（basic/extended/frequency/...）顶层拉起 scipy 栈（importtime
+实测 ~1.1s），因此所有实现引用改为 ``_lazy(模块, 属性)`` 惰性解析——首次
+调用时才导入实现模块，元数据构建保持零 scipy。
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -6,58 +13,46 @@ from typing import Any, Callable
 
 import numpy as np
 
-from mygpr.infrastructure.processing.algorithms.basic import (
-    method_agc,
-    method_compensating_gain,
-    method_dewow_native,
-    method_remove_background,
-    method_running_average,
-    method_sec_gain_native,
-    method_sliding_background,
-    method_trace_median,
-    method_trace_savgol,
-    method_zero_time,
-)
-from mygpr.infrastructure.processing.algorithms.extended import (
-    native_amplitude_scale,
-    native_ccbs,
-    native_energy_decay_gain,
-    native_hilbert_envelope,
-    native_inverse_q,
-    native_median_background,
-    native_mixed_phase_deconvolution,
-    native_time_cut,
-    native_time_to_depth,
-    native_trace_qc,
-    native_wavelet_2d,
-)
-from mygpr.infrastructure.processing.algorithms.frequency import method_frequency_filter
-from mygpr.infrastructure.processing.algorithms.global_spectral import (
-    file_svd_background_native,
-    file_svd_subspace_native,
-    method_fk_filter_native,
-    method_stolt_migration_native,
-    method_svd_background_native,
-    method_svd_subspace_native,
-)
-from mygpr.infrastructure.processing.algorithms.hankel_mssa import method_hankel_svd_native
-from mygpr.infrastructure.processing.algorithms.kirchhoff import (
-    estimate_kirchhoff_resources,
-    method_kirchhoff_migration_native,
-)
-from mygpr.infrastructure.processing.algorithms.rtm import (
-    estimate_rtm_resources,
-    method_rtm_migration_native,
-)
-from mygpr.infrastructure.processing.algorithms.rpca import method_rpca_background_native
-from mygpr.infrastructure.processing.algorithms.motion import (
-    native_motion_attitude,
-    native_motion_height,
-    native_motion_speed,
-    native_motion_v2,
-    native_motion_vibration,
-    native_trajectory_smoothing,
-)
+
+class _LazyCallable:
+    """(module, attr) 形式的惰性算法实现引用。
+
+    首次调用时导入目标模块并缓存真实函数；``__module__`` 返回目标模块路径，
+    供 methods_registry 由 ``func.__module__`` 推导展示模块名。
+    """
+
+    __slots__ = ("_module", "_attr", "_cached")
+
+    def __init__(self, module: str, attr: str) -> None:
+        self._module = module
+        self._attr = attr
+        self._cached: Any = None
+
+    def _resolve(self) -> Any:
+        if self._cached is None:
+            import importlib
+
+            self._cached = getattr(importlib.import_module(self._module), self._attr)
+        return self._cached
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        return self._resolve()(*args, **kwargs)
+
+    @property
+    def __module__(self) -> str:
+        return self._module
+
+    def __repr__(self) -> str:
+        return f"_LazyCallable({self._module}:{self._attr})"
+
+
+_ALG = "mygpr.infrastructure.processing.algorithms"
+
+
+def _lazy(module: str, attr: str) -> Any:
+    """惰性引用 ``module.attr`` 形式的算法实现（见模块 docstring）。"""
+    return _LazyCallable(module, attr)
+
 
 AlgorithmFunction = Callable[[Any, dict[str, Any]], tuple[np.ndarray, dict[str, Any]]]
 GlobalFileFunction = Callable[[Any, Any, dict[str, Any], Any, int], dict[str, Any]]
@@ -111,49 +106,49 @@ def _schema(**items: Any) -> dict[str, Any]:
 
 NATIVE_ALGORITHMS: dict[str, NativeAlgorithm] = {
     "time_cut": NativeAlgorithm(
-        "time_cut", "Time-window crop", "preprocess", native_time_cut, "loaded_global",
+        "time_cut", "Time-window crop", "preprocess", _lazy(f"{_ALG}.extended", "native_time_cut"), "loaded_global",
         implementation_version="native-extended-1.0",
         parameter_schema=_schema(mode={"type": "str", "default": "remove_below"}, time_start_ns={"type": "float", "default": 0.0}, time_end_ns={"type": "float", "default": 0.0}),
         memory_multiplier=2.0, temporary_multiplier=1.0, relative_cost="low",
     ),
     "trace_qc": NativeAlgorithm(
-        "trace_qc", "Trace quality control", "preprocess", native_trace_qc, "loaded_global",
+        "trace_qc", "Trace quality control", "preprocess", _lazy(f"{_ALG}.extended", "native_trace_qc"), "loaded_global",
         implementation_version="native-extended-1.0",
         parameter_schema=_schema(mode={"type": "str", "default": "mark"}, empty_rms_threshold={"type": "float", "default": 0.0}, spike_zscore={"type": "float", "default": 6.0, "min": 0.0}, manual_trace_indices={"type": "str", "default": ""}),
         memory_multiplier=3.0, temporary_multiplier=1.0, relative_cost="low",
     ),
     "energy_decay_gain": NativeAlgorithm(
-        "energy_decay_gain", "Robust energy-decay gain", "gain", native_energy_decay_gain, "loaded_global",
+        "energy_decay_gain", "Robust energy-decay gain", "gain", _lazy(f"{_ALG}.extended", "native_energy_decay_gain"), "loaded_global",
         implementation_version="native-extended-1.0", auto_tune_family="gain", auto_tune_stage="gain",
         parameter_schema=_schema(strength={"type": "float", "default": 1.0}, smoothing_samples={"type": "int", "default": 31, "min": 1}, min_gain={"type": "float", "default": 0.5}, max_gain={"type": "float", "default": 8.0}, floor_ratio={"type": "float", "default": 0.05}),
         memory_multiplier=3.0, temporary_multiplier=1.0, relative_cost="medium",
     ),
     "amplitude_scale": NativeAlgorithm(
-        "amplitude_scale", "Amplitude scaling", "gain", native_amplitude_scale, "loaded_global",
+        "amplitude_scale", "Amplitude scaling", "gain", _lazy(f"{_ALG}.extended", "native_amplitude_scale"), "loaded_global",
         implementation_version="native-extended-1.0",
         parameter_schema=_schema(mode={"type": "str", "default": "constant"}, scale={"type": "float", "default": 1.0}, target={"type": "float", "default": 1.0}),
         memory_multiplier=2.0, temporary_multiplier=1.0, relative_cost="low",
     ),
     "median_background_2D": NativeAlgorithm(
-        "median_background_2D", "Median background suppression", "background", native_median_background, "rows",
+        "median_background_2D", "Median background suppression", "background", _lazy(f"{_ALG}.extended", "native_median_background"), "rows",
         implementation_version="native-extended-1.0", auto_tune_family="background", auto_tune_stage="background",
         parameter_schema=_schema(ntraces={"type": "int", "default": 51, "min": 1}, time_start_ns={"type": "float", "default": 0.0}, time_end_ns={"type": "float", "default": 0.0}),
         memory_multiplier=4.0, temporary_multiplier=1.0, relative_cost="medium",
     ),
     "wavelet_2d": NativeAlgorithm(
-        "wavelet_2d", "2D wavelet denoising", "denoise", native_wavelet_2d, "global",
+        "wavelet_2d", "2D wavelet denoising", "denoise", _lazy(f"{_ALG}.extended", "native_wavelet_2d"), "global",
         implementation_version="native-extended-1.0", auto_tune_family="denoise", auto_tune_stage="denoise",
         parameter_schema=_schema(wavelet={"type": "str", "default": "db4"}, levels={"type": "int", "default": 2, "min": 1}, threshold={"type": "float", "default": 1.0, "min": 0.0, "max": 1.0}, threshold_strategy={"type": "str", "default": "mad_universal"}),
         memory_multiplier=8.0, temporary_multiplier=3.0, relative_cost="high",
     ),
     "hilbert_envelope": NativeAlgorithm(
-        "hilbert_envelope", "Hilbert envelope", "attribute", native_hilbert_envelope, "columns",
+        "hilbert_envelope", "Hilbert envelope", "attribute", _lazy(f"{_ALG}.extended", "native_hilbert_envelope"), "columns",
         implementation_version="native-extended-1.0",
         parameter_schema=_schema(normalize={"type": "bool", "default": False}, log_compress={"type": "bool", "default": False}),
         memory_multiplier=4.0, temporary_multiplier=1.0, relative_cost="medium",
     ),
     "ccbs": NativeAlgorithm(
-        "ccbs", "Cross-correlation background subtraction", "background", native_ccbs, "loaded_global",
+        "ccbs", "Cross-correlation background subtraction", "background", _lazy(f"{_ALG}.extended", "native_ccbs"), "loaded_global",
         implementation_version="native-extended-1.0",
         parameter_schema=_schema(
             use_custom_ref={"type": "bool", "default": False},
@@ -162,77 +157,77 @@ NATIVE_ALGORITHMS: dict[str, NativeAlgorithm] = {
         memory_multiplier=5.0, temporary_multiplier=1.0, relative_cost="medium",
     ),
     "time_to_depth": NativeAlgorithm(
-        "time_to_depth", "Time-to-depth conversion", "migration", native_time_to_depth, "loaded_global",
+        "time_to_depth", "Time-to-depth conversion", "migration", _lazy(f"{_ALG}.extended", "native_time_to_depth"), "loaded_global",
         implementation_version="native-extended-1.0",
         parameter_schema=_schema(dt={"type": "float", "default": 0.1}, v={"type": "float", "default": 0.1}, dz={"type": "float", "default": 0.02}),
         memory_multiplier=4.0, temporary_multiplier=2.0, relative_cost="medium",
     ),
     "compensatingGain": NativeAlgorithm(
-        "compensatingGain", "Manual gain compensation", "gain", method_compensating_gain, "columns",
+        "compensatingGain", "Manual gain compensation", "gain", _lazy(f"{_ALG}.basic", "method_compensating_gain"), "columns",
         auto_tune_family="gain", parameter_schema=_schema(gain_min={"type": "float", "default": 1.0}, gain_max={"type": "float", "default": 6.0}),
     ),
     "dewow": NativeAlgorithm(
-        "dewow", "Low-frequency drift correction", "baseline", method_dewow_native, "columns",
+        "dewow", "Low-frequency drift correction", "baseline", _lazy(f"{_ALG}.basic", "method_dewow_native"), "columns",
         auto_tune_family="drift", parameter_schema=_schema(window={"type": "int", "default": 23, "min": 1}),
     ),
     "set_zero_time": NativeAlgorithm(
-        "set_zero_time", "Zero-time correction", "baseline", method_zero_time, "columns",
+        "set_zero_time", "Zero-time correction", "baseline", _lazy(f"{_ALG}.basic", "method_zero_time"), "columns",
         auto_tune_family="zero_time", parameter_schema=_schema(new_zero_time={"type": "float", "default": 5.0, "min": 0.0}),
     ),
     "agcGain": NativeAlgorithm(
-        "agcGain", "Automatic gain control", "gain", method_agc, "columns",
+        "agcGain", "Automatic gain control", "gain", _lazy(f"{_ALG}.basic", "method_agc"), "columns",
         auto_tune_family="gain", parameter_schema=_schema(window={"type": "int", "default": 11, "min": 1}),
     ),
     "sec_gain": NativeAlgorithm(
-        "sec_gain", "SEC gain", "gain", method_sec_gain_native, "columns",
+        "sec_gain", "SEC gain", "gain", _lazy(f"{_ALG}.basic", "method_sec_gain_native"), "columns",
         auto_tune_family="gain", parameter_schema=_schema(gain_min={"type": "float", "default": 1.0}, gain_max={"type": "float", "default": 6.0}, power={"type": "float", "default": 1.0}),
     ),
     "subtracting_average_2D": NativeAlgorithm(
-        "subtracting_average_2D", "Mean-trace background suppression", "background", method_remove_background, "rows",
+        "subtracting_average_2D", "Mean-trace background suppression", "background", _lazy(f"{_ALG}.basic", "method_remove_background"), "rows",
         auto_tune_family="background", parameter_schema=_schema(ntraces={"type": "int", "default": 501, "min": 1}),
     ),
     "running_average_2D": NativeAlgorithm(
-        "running_average_2D", "Trace running average", "denoise", method_running_average, "rows",
+        "running_average_2D", "Trace running average", "denoise", _lazy(f"{_ALG}.basic", "method_running_average"), "rows",
         auto_tune_family="impulse", parameter_schema=_schema(ntraces={"type": "int", "default": 9, "min": 1}),
     ),
     "sliding_avg": NativeAlgorithm(
-        "sliding_avg", "Sliding-average background suppression", "background", method_sliding_background, "rows",
+        "sliding_avg", "Sliding-average background suppression", "background", _lazy(f"{_ALG}.basic", "method_sliding_background"), "rows",
         auto_tune_family="background", parameter_schema=_schema(window_size={"type": "int", "default": 10, "min": 1}, axis={"type": "int", "default": 1}),
     ),
     "frequency_filter_1d": NativeAlgorithm(
-        "frequency_filter_1d", "Frequency filter", "filter", method_frequency_filter, "columns",
+        "frequency_filter_1d", "Frequency filter", "filter", _lazy(f"{_ALG}.frequency", "method_frequency_filter"), "columns",
         auto_tune_family="frequency", parameter_schema=_schema(filter_type={"type": "str", "default": "bandpass"}, low_freq_mhz={"type": "float", "default": 10.0}, high_freq_mhz={"type": "float", "default": 800.0}, taper_ratio={"type": "float", "default": 0.0, "min": 0.0, "max": 0.5}),
     ),
     "trace_median_filter": NativeAlgorithm(
-        "trace_median_filter", "Trace median filter", "denoise", method_trace_median, "rows",
+        "trace_median_filter", "Trace median filter", "denoise", _lazy(f"{_ALG}.basic", "method_trace_median"), "rows",
         auto_tune_family="denoise", parameter_schema=_schema(window_traces={"type": "int", "default": 5, "min": 1}),
     ),
     "trace_savgol_filter": NativeAlgorithm(
-        "trace_savgol_filter", "Trace Savitzky-Golay filter", "denoise", method_trace_savgol, "rows",
+        "trace_savgol_filter", "Trace Savitzky-Golay filter", "denoise", _lazy(f"{_ALG}.basic", "method_trace_savgol"), "rows",
         auto_tune_family="denoise", parameter_schema=_schema(window_traces={"type": "int", "default": 7, "min": 1}, polyorder={"type": "int", "default": 2}),
     ),
     "svd_bg": NativeAlgorithm(
-        "svd_bg", "SVD background removal", "background", method_svd_background_native, "global",
+        "svd_bg", "SVD background removal", "background", _lazy(f"{_ALG}.global_spectral", "method_svd_background_native"), "global",
         implementation_version="native-global-1.0", auto_tune_family="background",
         parameter_schema=_schema(rank={"type": "int", "default": 1, "min": 1}, solver={"type": "str", "default": "auto"}),
         memory_multiplier=3.5, temporary_multiplier=2.0, relative_cost="high",
-        file_function=file_svd_background_native,
+        file_function=_lazy(f"{_ALG}.global_spectral", "file_svd_background_native"),
     ),
     "svd_subspace": NativeAlgorithm(
-        "svd_subspace", "SVD subspace reconstruction", "denoise", method_svd_subspace_native, "global",
+        "svd_subspace", "SVD subspace reconstruction", "denoise", _lazy(f"{_ALG}.global_spectral", "method_svd_subspace_native"), "global",
         implementation_version="native-global-1.0", auto_tune_family="denoise",
         parameter_schema=_schema(rank_start={"type": "int", "default": 1, "min": 1}, rank_end={"type": "int", "default": 2, "min": 1}, solver={"type": "str", "default": "auto"}),
         memory_multiplier=3.5, temporary_multiplier=2.0, relative_cost="high",
-        file_function=file_svd_subspace_native,
+        file_function=_lazy(f"{_ALG}.global_spectral", "file_svd_subspace_native"),
     ),
     "fk_filter": NativeAlgorithm(
-        "fk_filter", "F-K cone filter", "filter", method_fk_filter_native, "global",
+        "fk_filter", "F-K cone filter", "filter", _lazy(f"{_ALG}.global_spectral", "method_fk_filter_native"), "global",
         implementation_version="native-global-1.0", auto_tune_family="fk", auto_tune_stage="frequency",
         parameter_schema=_schema(angle_low={"type": "float", "default": 10.0}, angle_high={"type": "float", "default": 65.0}, taper_width={"type": "float", "default": 5.0}),
         memory_multiplier=7.0, temporary_multiplier=2.0, relative_cost="high",
     ),
     "stolt_migration": NativeAlgorithm(
-        "stolt_migration", "Stolt migration", "migration", method_stolt_migration_native, "global",
+        "stolt_migration", "Stolt migration", "migration", _lazy(f"{_ALG}.global_spectral", "method_stolt_migration_native"), "global",
         implementation_version="native-global-1.0",
         parameter_schema=_schema(dx={"type": "float", "default": 0.05}, dt={"type": "float", "default": 0.1}, v={"type": "float", "default": 0.10}, pad_x={"type": "int", "default": 1}, pad_t={"type": "int", "default": 1},
                                  stolt_jacobian_power={"type": "float", "default": 0.0, "min": 0.0, "max": 1.0},
@@ -241,7 +236,7 @@ NATIVE_ALGORITHMS: dict[str, NativeAlgorithm] = {
     ),
     "motion_compensation_height": NativeAlgorithm(
         "motion_compensation_height", "Height motion compensation", "motion_compensation",
-        native_motion_height, "loaded_global", implementation_version="native-motion-2.0",
+        _lazy(f"{_ALG}.motion", "native_motion_height"), "loaded_global", implementation_version="native-motion-2.0",
         auto_tune_family="motion_comp", auto_tune_stage="motion_comp",
         parameter_schema=_schema(
             reference_height_mode={"type": "str", "default": "mean"},
@@ -255,21 +250,21 @@ NATIVE_ALGORITHMS: dict[str, NativeAlgorithm] = {
     ),
     "motion_compensation_speed": NativeAlgorithm(
         "motion_compensation_speed", "Equal-distance trace resampling", "motion_compensation",
-        native_motion_speed, "loaded_global", implementation_version="native-motion-2.0",
+        _lazy(f"{_ALG}.motion", "native_motion_speed"), "loaded_global", implementation_version="native-motion-2.0",
         auto_tune_family="motion_comp", auto_tune_stage="motion_comp",
         parameter_schema=_schema(spacing_m={"type": "float", "default": 0.0, "min": 0.0}),
         memory_multiplier=4.0, temporary_multiplier=2.0, relative_cost="medium",
     ),
     "trajectory_smoothing": NativeAlgorithm(
         "trajectory_smoothing", "Trajectory smoothing", "motion_compensation",
-        native_trajectory_smoothing, "loaded_global", implementation_version="native-motion-2.0",
+        _lazy(f"{_ALG}.motion", "native_trajectory_smoothing"), "loaded_global", implementation_version="native-motion-2.0",
         auto_tune_family="motion_comp", auto_tune_stage="motion_comp",
         parameter_schema=_schema(method={"type": "str", "default": "savgol"}, window_length={"type": "int", "default": 21, "min": 3}, polyorder={"type": "int", "default": 3, "min": 1}),
         memory_multiplier=2.0, temporary_multiplier=1.0, relative_cost="low",
     ),
     "motion_compensation_attitude": NativeAlgorithm(
         "motion_compensation_attitude", "Attitude/APC correction", "motion_compensation",
-        native_motion_attitude, "loaded_global", implementation_version="native-motion-2.0",
+        _lazy(f"{_ALG}.motion", "native_motion_attitude"), "loaded_global", implementation_version="native-motion-2.0",
         auto_tune_family="motion_comp", auto_tune_stage="motion_comp",
         parameter_schema=_schema(
             apc_offset_x_m={"type": "float", "default": 0.0},
@@ -281,7 +276,7 @@ NATIVE_ALGORITHMS: dict[str, NativeAlgorithm] = {
     ),
     "motion_compensation_vibration": NativeAlgorithm(
         "motion_compensation_vibration", "Vibration suppression", "motion_compensation",
-        native_motion_vibration, "loaded_global", implementation_version="native-motion-2.0",
+        _lazy(f"{_ALG}.motion", "native_motion_vibration"), "loaded_global", implementation_version="native-motion-2.0",
         auto_tune_family="denoise", auto_tune_stage="artifact",
         parameter_schema=_schema(
             smooth_window={"type": "int", "default": 9, "min": 1},
@@ -294,7 +289,7 @@ NATIVE_ALGORITHMS: dict[str, NativeAlgorithm] = {
     ),
     "motion_compensation_v2": NativeAlgorithm(
         "motion_compensation_v2", "Unified motion compensation V2", "motion_compensation",
-        native_motion_v2, "loaded_global", implementation_version="native-motion-2.0",
+        _lazy(f"{_ALG}.motion", "native_motion_v2"), "loaded_global", implementation_version="native-motion-2.0",
         auto_tune_family="motion_comp", auto_tune_stage="motion_comp",
         parameter_schema=_schema(
             height_reference_mode={"type": "str", "default": "mean"},
@@ -317,7 +312,7 @@ NATIVE_ALGORITHMS: dict[str, NativeAlgorithm] = {
     ),
     "kirchhoff_migration": NativeAlgorithm(
         "kirchhoff_migration", "Kirchhoff migration", "migration",
-        method_kirchhoff_migration_native, "loaded_global",
+        _lazy(f"{_ALG}.kirchhoff", "method_kirchhoff_migration_native"), "loaded_global",
         implementation_version="native-kirchhoff-2.0",
         parameter_schema=_schema(
             freq={"type": "float", "default": 5.0e7, "min": 1.0},
@@ -334,11 +329,11 @@ NATIVE_ALGORITHMS: dict[str, NativeAlgorithm] = {
             allow_gpu_runtime_fallback={"type": "bool", "default": True},
         ),
         memory_multiplier=12.0, temporary_multiplier=2.0, relative_cost="very_high",
-        resource_estimator=estimate_kirchhoff_resources,
+        resource_estimator=_lazy(f"{_ALG}.kirchhoff", "estimate_kirchhoff_resources"),
     ),
     "rtm_migration": NativeAlgorithm(
         "rtm_migration", "Experimental RTM migration", "migration",
-        method_rtm_migration_native, "loaded_global",
+        _lazy(f"{_ALG}.rtm", "method_rtm_migration_native"), "loaded_global",
         implementation_version="experimental-rtm-1.0",
         parameter_schema=_schema(
             time_window_ns={"type": "float", "default": 0.0, "min": 0.0},
@@ -363,22 +358,22 @@ NATIVE_ALGORITHMS: dict[str, NativeAlgorithm] = {
             normalize={"type": "bool", "default": False},
         ),
         memory_multiplier=8.0, temporary_multiplier=1.0, relative_cost="very_high",
-        resource_estimator=estimate_rtm_resources,
+        resource_estimator=_lazy(f"{_ALG}.rtm", "estimate_rtm_resources"),
     ),
     "hankel_svd": NativeAlgorithm(
-        "hankel_svd", "Hankel SVD / V-MSSA", "denoise", method_hankel_svd_native, "global",
+        "hankel_svd", "Hankel SVD / V-MSSA", "denoise", _lazy(f"{_ALG}.hankel_mssa", "method_hankel_svd_native"), "global",
         implementation_version="native-global-1.0", auto_tune_family="denoise",
         parameter_schema=_schema(window_length={"type": "int", "default": 0, "min": 0}, rank={"type": "int", "default": 0, "min": 0}, aggressiveness={"type": "float", "default": 0.5}),
         memory_multiplier=10.0, temporary_multiplier=2.0, relative_cost="very_high",
     ),
     "rpca_background": NativeAlgorithm(
-        "rpca_background", "Robust PCA background suppression", "background", method_rpca_background_native, "global",
+        "rpca_background", "Robust PCA background suppression", "background", _lazy(f"{_ALG}.rpca", "method_rpca_background_native"), "global",
         implementation_version="native-global-1.0",
         parameter_schema=_schema(lam={"type": "float", "default": 0.08}, mu={"type": "float", "default": 0.0}, max_iter={"type": "int", "default": 120}, tol={"type": "float", "default": 1e-6}),
         memory_multiplier=9.0, temporary_multiplier=3.0, relative_cost="very_high",
     ),
     "mixed_phase_deconvolution": NativeAlgorithm(
-        "mixed_phase_deconvolution", "混合相位反褶积 (Schmelzbach 2015)", "denoise", native_mixed_phase_deconvolution, "loaded_global",
+        "mixed_phase_deconvolution", "混合相位反褶积 (Schmelzbach 2015)", "denoise", _lazy(f"{_ALG}.extended", "native_mixed_phase_deconvolution"), "loaded_global",
         implementation_version="native-extended-1.0", auto_tune_family="denoise", auto_tune_stage="denoise",
         parameter_schema=_schema(
             operator_length={"type": "int", "default": 35, "min": 5},
@@ -392,7 +387,7 @@ NATIVE_ALGORITHMS: dict[str, NativeAlgorithm] = {
         memory_multiplier=4.0, temporary_multiplier=1.0, relative_cost="medium",
     ),
     "inverse_q": NativeAlgorithm(
-        "inverse_q", "Inverse-Q 衰减补偿 (Wang 2002)", "filter", native_inverse_q, "loaded_global",
+        "inverse_q", "Inverse-Q 衰减补偿 (Wang 2002)", "filter", _lazy(f"{_ALG}.extended", "native_inverse_q"), "loaded_global",
         implementation_version="native-extended-1.0", auto_tune_family="filter", auto_tune_stage="frequency",
         parameter_schema=_schema(
             q_value={"type": "float", "default": 50.0, "min": 1.0},

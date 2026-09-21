@@ -95,6 +95,11 @@ class MyGPRMainWindow(FluentWindow):
 
     _log_signal = pyqtSignal(str)   # 类级信号：跨线程日志安全转发
 
+    # 首屏构造的页面（其余延后到首帧渲染后空闲分片预热，见 _warmup_next_page）。
+    # home = 初始可见页；settings = 接线/状态回放必需（_connect_signals 取
+    # theme_changed、_init_state 回放开局设置）。
+    FIRST_PAINT_PAGES = ('homeInterface', 'settingsInterface')
+
     def __init__(self, settings: SettingsManager = None, parent=None):
         super().__init__(parent)
         self.settings = settings or SettingsManager()
@@ -115,8 +120,10 @@ class MyGPRMainWindow(FluentWindow):
         self._setup_global_shortcuts()
         self._connect_signals()
         self._init_state()
-        # 注入设置值到页面（设置页更改后下次启动生效）
-        self._inject_page_settings()
+        # 注入设置值到页面（设置页更改后下次启动生效）——依赖 project/spatial，
+        # 二者属延后页，实际注入发生在预热收尾 _finish_warmup()。
+        # 首屏后空闲分片构造剩余页面（启动提速：把 6 个非首屏页的构造挪出首帧）
+        self._start_warmup()
 
     def _inject_page_settings(self) -> None:
         """注入设置页保存的默认值到各页面控件（非信号驱动，首次启动 / 重启生效）。"""
@@ -204,15 +211,58 @@ class MyGPRMainWindow(FluentWindow):
              NavigationItemPosition.BOTTOM),
         ]
         self._nav_specs = [(name, text) for name, _cls, _icon, text, _pos in page_specs]
-        for object_name, page_class, icon, text, position in page_specs:
-            page = page_class(self) if page_class else PlaceholderPage(text, self)
-            # 注入共享 SettingsManager：页面不再各自构造实例，避免读-改-写
-            # 互相覆盖（共享实例是唯一写者）
-            if hasattr(page, 'set_settings_manager'):
-                page.set_settings_manager(self.settings)
-            page.setObjectName(object_name)
-            self.addSubInterface(page, icon, text, position=position)
-            self.pages[object_name] = page
+        # 首屏只构造 FIRST_PAINT_PAGES；其余登记到 _deferred_specs，首帧后
+        # 由 QTimer.singleShot(0) 每帧构造一个（见 _warmup_next_page）。
+        self._deferred_specs: list = []
+        self._pages_warmed = False
+        for spec in page_specs:
+            if spec[0] in self.FIRST_PAINT_PAGES:
+                self._register_page(*spec)
+            else:
+                self._deferred_specs.append(spec)
+
+    def _register_page(self, object_name, page_class, icon, text, position) -> None:
+        """构造单个页面并注册路由 / 注入共享 SettingsManager。"""
+        page = page_class(self) if page_class else PlaceholderPage(text, self)
+        # 注入共享 SettingsManager：页面不再各自构造实例，避免读-改-写
+        # 互相覆盖（共享实例是唯一写者）
+        if hasattr(page, 'set_settings_manager'):
+            page.set_settings_manager(self.settings)
+        page.setObjectName(object_name)
+        self.addSubInterface(page, icon, text, position=position)
+        self.pages[object_name] = page
+
+    # ---------------------------------------------------------- 首屏后预热
+    def _start_warmup(self) -> None:
+        """首帧渲染后开始分片构造剩余页面（每帧一个，避免一次性长阻塞）。"""
+        QTimer.singleShot(0, self._warmup_next_page)
+
+    def _warmup_next_page(self) -> None:
+        if not self._deferred_specs:
+            self._finish_warmup()
+            return
+        self._register_page(*self._deferred_specs.pop(0))
+        QTimer.singleShot(0, self._warmup_next_page)
+
+    def _finish_warmup(self) -> None:
+        """全部页面就位后的收尾（幂等）：跨页接线 + 设置注入 + 后端门控补齐。"""
+        if self._pages_warmed:
+            return
+        self._pages_warmed = True
+        # 跨页业务信号链需要 8 页全部存在，因此延后到此处（接线代码本身不改）
+        self.page_coordinator.connect_all()
+        self._inject_page_settings()
+        if not self._backend_ready:
+            # 预热期间后端可能仍未就绪：补齐延后页的禁用态
+            for object_name, page in self.pages.items():
+                if object_name not in self.FIRST_PAINT_PAGES:
+                    page.setEnabled(False)
+
+    def ensure_pages_ready(self) -> None:
+        """同步构造全部剩余页面并完成收尾接线（预热竞态兜底 / 测试 / 冒烟）。"""
+        while self._deferred_specs:
+            self._register_page(*self._deferred_specs.pop(0))
+        self._finish_warmup()
 
     def _build_ui(self) -> None:
         """顶部横排页签 + 左坞文件树 + 底部输出面板（OutputPanel：日志/任务）。
@@ -327,6 +377,10 @@ class MyGPRMainWindow(FluentWindow):
 
     def _on_top_nav_changed(self, route_key: str) -> None:
         page = self.pages.get(str(route_key))
+        if page is None and self._deferred_specs:
+            # 预热未完成就点页签：同步构造（与 _goto_page 同一兜底）
+            self.ensure_pages_ready()
+            page = self.pages.get(str(route_key))
         if page is not None and self.stackedWidget.currentWidget() is not page:
             self.switchTo(page)
 
@@ -460,7 +514,7 @@ class MyGPRMainWindow(FluentWindow):
             settings_page.theme_changed.connect(self._on_theme_changed)
 
         # ---------------- 跨页业务信号链（项目/测线/导入/处理/解释/成果/任务）
-        self.page_coordinator.connect_all()
+        # 延后到预热收尾：connect_all() 需要 8 页全部存在（见 _finish_warmup）
 
     def _init_state(self) -> None:
         # 恢复主题设置（回放期间抑制副作用）
@@ -713,6 +767,10 @@ class MyGPRMainWindow(FluentWindow):
     def _goto_page(self, object_name: str) -> None:
         """按 objectName 切导航页（HomePage.goto_page / 快速操作）。"""
         page = self.pages.get(str(object_name))
+        if page is None and self._deferred_specs:
+            # 预热未完成就切到延后页：立即同步构造全部剩余页面，避免空白页
+            self.ensure_pages_ready()
+            page = self.pages.get(str(object_name))
         if page is not None:
             self.switchTo(page)
 

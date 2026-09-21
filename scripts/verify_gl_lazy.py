@@ -23,10 +23,13 @@ from ui.widgets.trajectory_3d_view import Trajectory3DView  # noqa: E402
 
 view = Trajectory3DView()
 
-if tv_mod._gl is None:
+gl, _ = tv_mod._gl_state()          # 惰性访问器（缺 PyOpenGL 时为 None）
+
+if gl is None:
     # 无 PyOpenGL：验证降级路径不崩
     assert view._gl_view is None
-    assert view._fallback_label is not None
+    # 降级提示也是惰性的：构造期不建，首次需要 GL 且不可用时才建
+    assert view._fallback_label is None
     view.apply_theme(True)
     view.set_vertical_exaggeration(2.0)
     view.set_track_drape(True)
@@ -38,9 +41,10 @@ if tv_mod._gl is None:
         points=tuple(SimpleNamespace(x=float(x), y=0.0, elevation_m=5.0)
                      for x in range(5)))
     view.set_tracks([track], {'L01': '#ff0000'})
+    assert view._fallback_label is not None, '首次需要 GL 且不可用 → 建降级提示'
     print('DEGRADED PATH OK (no PyOpenGL)')
 else:
-    GLViewWidget = tv_mod._gl.GLViewWidget
+    GLViewWidget = gl.GLViewWidget
     # 1) 构造后：无 GLViewWidget 子对象（惰性未触发）
     assert view._gl_view is None
     assert view.findChildren(GLViewWidget) == [], 'GLViewWidget 应惰性创建'

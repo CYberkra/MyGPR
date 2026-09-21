@@ -7,7 +7,6 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 import numpy as np
-from scipy.ndimage import uniform_filter1d
 
 from mygpr.domain.common.scalars import to_int
 
@@ -71,6 +70,7 @@ def _paired_rmse(dx: np.ndarray, dy: np.ndarray) -> float:
 
 def build_saliency_map(data: np.ndarray) -> np.ndarray:
     """Build a lightweight saliency map from amplitude and gradient energy."""
+    from scipy.ndimage import uniform_filter1d  # 惰性导入：避免启动链拉起 scipy 栈
     arr = _as_clean_2d(data)
     grad = _gradient_energy(arr)
     abs_norm = _normalized_abs(arr)
@@ -83,6 +83,8 @@ def auto_roi_bounds(data: np.ndarray, padding_ratio: float = 0.12) -> dict[str, 
     arr = _as_clean_2d(data)
     n_samples, n_traces = arr.shape
     saliency = build_saliency_map(arr)
+
+    from scipy.ndimage import uniform_filter1d  # 惰性导入：避免启动链拉起 scipy 栈
 
     row_score = uniform_filter1d(
         np.mean(saliency, axis=1), size=max(5, n_samples // 24), mode="nearest"
@@ -207,6 +209,8 @@ def estimate_depth_attenuation_curve(data: np.ndarray) -> np.ndarray:
     window = max(5, min(len(rms) // 20, 41))
     if window % 2 == 0:
         window += 1
+    from scipy.ndimage import uniform_filter1d  # 惰性导入：避免启动链拉起 scipy 栈
+
     return uniform_filter1d(rms, size=window, mode="nearest")
 
 
@@ -263,6 +267,8 @@ def detect_first_break_indices(
     search_end = max(4, min(n_samples, int(np.ceil(n_samples * float(search_ratio)))))
     abs_norm = _normalized_abs(arr)
     gradient_norm = _normalized_abs(np.diff(arr, axis=0, prepend=arr[[0], :]))
+    from scipy.ndimage import uniform_filter1d  # 惰性导入：避免启动链拉起 scipy 栈
+
     smooth_env = uniform_filter1d(abs_norm, size=5, axis=0, mode="nearest")
 
     threshold = float(np.clip(threshold, 1.0e-4, 0.95))
