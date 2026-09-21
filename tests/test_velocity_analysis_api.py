@@ -177,7 +177,6 @@ def test_velocity_analysis_api_npz_writeback(tmp_path: Path) -> None:
         assert stored["body"]["z0_m"] == pytest.approx(0.5, abs=0.1)
         assert stored["body"]["pick_count"] == 5
 
-        after = backend.projects.get_dataset_info(project_id, "L01")
         # 深度轴与 ε 同源重算：z = t·c/(2√ε)
         dataset = backend.projects.read_dataset(project_id, "L01")
         depth = np.asarray(dataset.header_info["depth_axis_m"], dtype=np.float64)

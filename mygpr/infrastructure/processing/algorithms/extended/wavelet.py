@@ -9,10 +9,6 @@ from typing import Any
 
 import numpy as np
 
-from mygpr.infrastructure.processing.algorithms.global_spectral import (
-    method_svd_subspace_native,
-)
-
 MAD_NORMALIZER = 0.6745
 DEFAULT_THRESHOLD_STRATEGY = "mad_universal"
 LEGACY_THRESHOLD_STRATEGY = "global_fraction"

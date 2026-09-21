@@ -21,11 +21,9 @@ from mygpr.application.autotune.candidate_generators import (
     _build_sec_gain_candidates,
     _build_subspace_rank_end_candidates,
     _build_zero_time_candidates,
-    _sanitize_float_candidates,
-    _sanitize_int_candidates,
 )
 from mygpr.application.autotune.context import _get_search_plan
-from mygpr.application.autotune.utils import _dedupe_candidates, _trim_numeric_candidates
+from mygpr.application.autotune.utils import _dedupe_candidates
 from mygpr.domain.autotune.models import AutoTuneContext
 
 

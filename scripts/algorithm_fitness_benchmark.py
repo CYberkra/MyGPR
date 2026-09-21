@@ -19,7 +19,6 @@ import math
 import os
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 
@@ -110,7 +109,6 @@ def scene_qc_outliers() -> tuple[np.ndarray, dict]:
 
     data, meta = generate_benchmark_sample("zero_time_reference")
     rng = np.random.default_rng(20260906)
-    n = data.shape[1]
     dead_idx = [3, 17, 41, 58]
     spike_idx = [9, 30, 66]
     for j in dead_idx:
@@ -622,7 +620,6 @@ def _score_task(scene, method, before, after, out, meta, res_meta, warnings) -> 
             dt = d["dt_ns"]
             row0 = int(round(t0 / dt))
             apex = after[max(row0 - 6, 0) : row0 + 7, vc]
-            apex_before = before[max(row0 - 6, 0) : row0 + 6 + 1, vc]
             # 聚焦: 顶点列能量集中度 (apex 能量 / 全域能量)
             e_all = float(np.mean(after**2))
             e_apex = float(np.mean(apex**2))
@@ -782,12 +779,6 @@ def _run_single(scene, method):
         "npy_path": npy_path,
         "data_noop": bool(np.array_equal(out, before)),
     }
-
-    if as_json:
-        sys.stdout.write(json.dumps({"scene": scene, "method": method, **r}) + "\n")
-    else:
-        print(json.dumps({"scene": scene, "method": method, **r}))
-    return 0
 
 
 def _worker_mode(scene, method, as_json: bool) -> int:
