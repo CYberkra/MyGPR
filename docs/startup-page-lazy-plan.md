@@ -308,3 +308,162 @@ Chrome / VS Code / JetBrains / Office 都把冷启动当 **SLO** 管：
   或推上游。
 - **不为 2% 的收益引入行为分支**（替身的 `listener()` 降级路径即此类）。
 - **不拿单次 importtime 当收益证据**——见 7 节反证。
+
+---
+
+## 9. B 档可行性研究（2026-09-21）
+
+A/C 两档落地、启动从 7.1 s 压到约 2.0 s 之后，回头评估原计划的 B 档（真正的按需构造）。
+结论：**完整 B 档不做；只建议做 B′ 最小版**。
+
+### 9.1 结论摘要
+
+| 项 | 完整 B 档（按需构造 + 接线订阅式改造） | B′ 最小版（仅页面模块 import 惰性化） |
+|---|---|---|
+| 首帧收益 | 0 ms（构造成本已被 C 档移入空闲帧） | **约 90 ms**（上界 ~175 ms） |
+| 总工作量收益 | 跳过"从未访问"的页，最多 ~464 ms 空闲 CPU | 同上，但不需要为此改接线 |
+| 新增代价 | 首次交互期 **数百毫秒同步卡顿** | 无（成本仍在空闲帧） |
+| 新增风险面 | 状态回放、None 崩溃、竞态窗口扩至整个会话 | 基本无（构造时机不变） |
+| 改动面 | 61 个页面访问点 + 三个子接线器重构 | `main_window._import_page_class` 一个函数 |
+
+**判定：收益已被 C 档提前兑现，剩下的部分不足以抵消风险。**
+
+### 9.2 接线现状：扇出是横切的，不是按页的
+
+三个子接线器在 `connect_all()` 里静态取页（缺页即 `AttributeError`）：
+
+| 子接线器 | connect_all 静态取页 |
+|---|---|
+| `ProjectChain` | home, project, spatial, delivery |
+| `ProcessingChain` | processing, interpretation, spatial |
+| `JobHub` | home, jobs |
+
+但这只是静态要求。真正决定"按需"能否省钱的是**运行期扇出**——用 ast 提取三个文件里
+每个方法触达的页面（`output/dep_graph.py`）：
+
+| 处理器 | 触达页面 |
+|---|---|
+| `ProjectChain.on_lines_updated` | **project, delivery, spatial, processing**（4 页，全部无条件） |
+| `ProjectChain.on_project_opened` | home, project, spatial +（经 `update_line_labels`→）interpretation, processing（**5 页**） |
+| `ProjectChain.on_line_selected` | interpretation, processing, project |
+| `ProjectChain.on_dataset_preview` | home, interpretation, processing, project |
+| `ProcessingChain.on_*` | 集中在 processing / interpretation / spatial |
+| `JobHub._views` | jobs + home（外加 `on_progress`→processing） |
+
+**工作流闭包**：`打开项目 → 选中测线` 两个动作内，8 个页面全部被强制实例化。所谓
+"按需"在真实工作流里等于"两个动作内全建完"，只是把成本从空闲帧挪到了用户点击的那一帧。
+
+### 9.3 成本账：真正可省的只有约 90 ms
+
+**构造成本**（延后 6 页，真实窗口父级，两次采样 n=2）：
+
+| 页 | 采样 1 | 采样 2 |
+|---|---|---|
+| ProjectPage | 118.0 | 88.9 |
+| ProcessingPage | 115.0 | 75.4 |
+| InterpretationPage | 66.9 | 89.9 |
+| SpatialPage | 124.3 | 141.8 |
+| DeliveryPage | 34.1 | 24.4 |
+| JobsPage | 6.0 | 3.4 |
+| **合计** | **464.4 ms** | **423.8 ms** |
+
+这笔钱 **C 档已经付过了**——它现在落在空闲帧里，不在首帧关键路径上。
+
+**import 成本**：关键在于"延后某页能省多少"必须用**阻断该页后的模块差集**来算，不能用
+"该页的 import 增量"——后者会把与别处共享的模块也算进去。这是本项目第 3 次踩到同一个
+首因归因陷阱（前两次：data_context 冤案、darkdetect）。
+
+实测（`output/it_runner.py` + `output/diff_it.py`，两轮 importtime 求差集）：
+
+- 阻断 `spatial_page` → 23 个模块消失，其 self 耗时合计 **90.8 ms**；
+  两轮 self 总计差 176.7 ms（含跨轮噪声），故可信区间 **约 90 ms，上界 ~175 ms**。
+- 阻断全部 6 个延后页 → 端到端 A/B（n=3 交替）baseline 中位 1004 ms vs lazy 1066 ms，
+  **差值落在噪声内**；`h5py` 在 lazy 档**仍然被导入**（来自 `core/*`，与页面无关）。
+  即除 spatial 外，其余 5 页几乎没有独占重依赖。
+- 单依赖复核：`import PIL(+Image)` 中位 42.0 ms（n=7），`defusedxml` ≈ 0 ms。
+
+所以：**延后页面模块 import 的全部收益 ≈ 90 ms，且只来自 spatial 页的 PIL / map_tiles 栈。**
+
+### 9.4 鲁棒性风险（四条硬伤）
+
+**R1 — 缺页即崩溃，且与仓库既有纪律冲突**
+`main_window._page()` 返回 `self.pages.get(name)`，缺页返回 `None`。三个子接线器共
+**61 个 `co.page()` 访问点**（38/17/6），全部无条件解引用，没有一处判空。要么改成
+"缺页即构造"（`require_page()`），要么到处加判空——但仓库在 `page_coordinator.connect_job_bridge`
+里明确写着"显式属性访问：槽位被改名/移走时立刻 AttributeError 暴露，而不是 hasattr 探测
+静默跳过（那次事故：load_methods 不执行 → 方法库为空）"。加判空正是被明令禁止的形态。
+
+**R2 — 状态回放：最难、且无现成机制**（决定性风险）
+全仓 grep 无 replay / catch-up 机制。以 `JobHub._upsert` 为例：
+
+```python
+def _upsert(self, job_id: str) -> None:
+    if job_id in self.known_job_ids:
+        return          # ← 一次性守卫
+    self.known_job_ids.add(job_id)
+    for view in self._views():
+        view.upsert_job(job_id, title)
+```
+
+任务页若在任务跑过之后才构造，`known_job_ids` 已含这些 id → 直接 return → **新的 JobTable
+永久缺行，且无任何自愈路径**。同理：project 页延后 → 测线表/成果表空；processing 页延后 →
+方法库空——后者正是 R1 里那次历史事故的**同构形态**。每个延后页都要配一条补播路径，
+即 6 页 × 多个状态持有者，这是 B 档真正的成本大头。
+
+**R3 — 竞态窗口从 6 帧扩大到整个会话**
+`_on_backend_ready` 里调 `connect_job_bridge(bridge)`，与页面构造/预热**没有任何同步关系**；
+JobBridge 信号一到就走 `JobHub.on_status → _views() → co.page('jobsInterface').job_table()`。
+C 档下这个窗口只有预热那 6 个空闲帧，且启动期无任务在跑，实际风险为 0；B 档下该窗口
+**覆盖整个会话**，变成真实崩溃面。
+
+**R4 — 测试契约**
+`test_page_coordinator.py` / `test_coordinator_chains.py` / `test_ui_migration_regressions.py` /
+`test_page_controls_wired.py` 约 800 行钉住现有接线契约；`app_qt --smoke` 断言 8 页齐全且无
+PlaceholderPage。B 档需要引入新的占位类型并系统性调整这些断言。
+
+### 9.5 B′ 最小版（建议做，收益约 90 ms，零接线改动）
+
+只改 `main_window._import_page_class`：把 8 个页面模块的 import 从"模块导入期"挪到
+"页面构造时"。因为 C 档已经把延后页的构造放在空闲帧，PIL / map_tiles 栈会随之在空闲帧
+加载，首帧少付约 90 ms。
+
+- 不改接线、不引入状态回放、不动测试契约；
+- 风险点仅一个：`_import_page_class` 当前在导入失败时降级为占位页，惰性化后降级时机
+  从"启动期"变成"构造时"，`--smoke` 的"无 PlaceholderPage"断言需在 `ensure_pages_ready()`
+  之后判定（冒烟已调用）。
+
+### 9.6 真正的下一棒不在页面
+
+`import ui.main_window` 的 self 耗时合计 ~1887 ms，按顶层包：
+
+| 顶层包 | self ms | 占比 |
+|---|---|---|
+| darkdetect | 405.3 | 19.9%（第 7 节已结案，端到端净收益仅 22–58 ms） |
+| mygpr | 184.2 | 9.1% |
+| qfluentwidgets | 177.7 | 8.7% |
+| pyqtgraph | 174.3 | 8.6% |
+| numpy | 163.4 | 8.0% |
+| ui | 135.6 | 6.7% |
+| PyQt6 | 122.1 | 6.0% |
+| core | 115.1 | 5.7% |
+| h5py | 79.2 | 3.9% |
+| pyproj | 53.3 | 2.6% |
+
+页面只占 `ui` 的一部分。两条具体线索：
+
+- **pyqtgraph 174 ms 被钉死在关键路径**：`ui/theme_helpers.py:11` 顶层 `import pyqtgraph as pg`，
+  而全文件只在 `apply_theme()` 里用 3 次 `pg.setConfigOption`。可改为"首次建图时才应用 pg 配色"，
+  把 174 ms 随空闲帧挪走（注意：单纯挪到 `apply_theme` 内部只是改标签，不省钱——
+  `apply_theme` 本身在启动早期就被调用）。
+- **pyproj 53 ms**：`ui/widgets/proj_safe.py` 与 `core/*` 已多为函数级惰性，需确认剩余
+  顶层入口。
+
+### 9.7 方法论沉淀
+
+- **首因归因陷阱（第 3 次）**：一次性开销被 100% 记在首个触发者名下。判定"延后 X 能省多少"
+  必须用**阻断 X 后的差集**，不能用"X 的 import 增量"。本项目已三次栽在这个坑上
+  （data_context、darkdetect、本次页面依赖）。
+- **Git Bash heredoc 会污染反斜杠**：本次实测 `cat > f <<'EOF'` 里的 `\s` → `/s`、`\n` → `/n`，
+  导致正则静默无匹配、注入代码 SyntaxError。**落脚本一律用 Write 工具**，不要走 heredoc。
+- **本机噪声 ±200 ms**：小于 100 ms 的收益无法用端到端 A/B 证明，必须换更敏感的方法
+  （importtime 差集 / 子进程隔离单依赖计时）。
