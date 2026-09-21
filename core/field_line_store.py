@@ -7,6 +7,7 @@ from __future__ import annotations
 import shutil
 import uuid
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -26,6 +27,16 @@ from core.field_data_quality import LineDataQualityReport, evaluate_line_data_qu
 
 class FieldLineStoreMixin:
     """Manage measurement-line records and normalized raw artifacts."""
+
+    # 宿主类（FieldProjectStore）注入的状态与能力：mixin 只声明契约、不持有
+    # 状态。纯类级注解，不产生实例属性，零运行时影响；此前 mypy 因缺声明
+    # 在本文件上报 51 个 attr-defined 错误。
+    root: Any
+    storage: Any
+    manifest: Any
+    write_json: Any
+    save_manifest: Any
+    append_log: Any
 
     @staticmethod
     def _safe_line_id(line_id: str) -> str:

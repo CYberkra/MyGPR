@@ -16,6 +16,12 @@ from mygpr.domain.velocity.errors import VelocityAnalysisError
 from mygpr.domain.velocity.models import HyperbolaFit, VelocityPick
 
 _MIN_PICKS = 3
+# z0² 的"数值噪声"判据（相对 x0²+z0² 的量级）。lstsq 对退化数据（z0=0 的
+# V 形）给出的 z0² 是 ~1e-15 量级的残差而非精确 0，开方后仍留下 ~3e-8 m
+# 的伪深度；残差偏负时又会被当成"非物理"直接抛错——同一份数据在两个方向
+# 上都不稳定（CI 上 Linux/Windows 的 BLAS 差异即表现为同一残差 2.98e-08）。
+# 落在该相对阈值内的 z0²（正或负）一律视为顶点深度 0（地表绕射）。
+_Z0_SQ_REL_EPS = 1e-12
 
 
 def fit_hyperbola(picks: list[VelocityPick]) -> HyperbolaFit:
@@ -57,12 +63,14 @@ def fit_hyperbola(picks: list[VelocityPick]) -> HyperbolaFit:
     x0_m = -b_coef / (2.0 * a_coef)
     # C = A·(x0² + z0²)  ⇒  z0² = C/A - x0² = C/A - B²/(4A²)
     z0_sq = c_coef / a_coef - x0_m * x0_m
-    if z0_sq < 0.0:
+    scale = c_coef / a_coef            # = x0² + z0²，判阈值用的相对尺度
+    noise_floor = _Z0_SQ_REL_EPS * abs(scale)
+    if z0_sq < -noise_floor:
         raise VelocityAnalysisError(
             f"拟合顶点深度平方为负（z0²={z0_sq:.3e}），几何上不可能。",
             hint="拾取点应覆盖双曲线顶点附近；远离顶点的拾取会低估 z0。",
         )
-    z0_m = float(np.sqrt(max(z0_sq, 0.0)))
+    z0_m = 0.0 if z0_sq < noise_floor else float(np.sqrt(z0_sq))
 
     # 拟合优度：对原始 t（非线性模型）计算，RMSE/R² 语义直观
     t_model = (2.0 / v_m_ns) * np.sqrt((x - x0_m) ** 2 + z0_m ** 2)

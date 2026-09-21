@@ -16,7 +16,7 @@ import tempfile
 import numpy as np
 
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Sequence
 
 from mygpr.application.project.service import ProjectService
 from mygpr.domain.grid.clustering import group_tracks

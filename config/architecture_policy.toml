@@ -126,8 +126,9 @@ path_prefix = "mygpr/infrastructure/persistence/field_project_adapter.py"
 allowed_local_import_prefixes = ["core"]
 owner = "project-backend"
 remove_after = "1.1.0"
-reason = "Adapter wraps the verified hybrid FieldProjectStore."
+reason = "Adapter wraps the verified hybrid FieldProjectStore. LegacyFieldProjectSession 现 616 行（超默认 600 上限）；按会话生命周期 / 查询 / 写入三个方向拆分解前，以 max_class_lines=650 封顶，拆前不得再增长。"
 max_function_lines = 100
+max_class_lines = 650
 
 [[migration_exceptions]]
 path_prefix = "mygpr/infrastructure/acquisition/legacy_adapter.py"
