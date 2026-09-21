@@ -30,9 +30,9 @@ from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants, file_dialogs
 from ui.geo_utils import coverage_statistics, format_distance
-from ui.page_scaffold import (PanelStateMixin, make_card, make_scroll_column,
-                              make_segment_card, rebuild_check_list)
-from ui.theme_helpers import status_color
+from ui.page_scaffold import (PanelStateMixin, make_card, make_hint,
+                              make_scroll_column, make_segment_card,
+                              rebuild_check_list)
 from ui.widgets.collapsible_panel import CollapsiblePanel
 from ui.widgets.elevation_profile_view import ElevationProfileView
 from ui.widgets.local_dem import load_xyz_grid
@@ -261,11 +261,9 @@ class SpatialPage(PanelStateMixin, QWidget):
         self._line_list.setMinimumHeight(180)
         lines_layout.addWidget(self._line_list, 1)
         # 空态引导：无测线时列表藏起、提示占位（参照 home_page 空项目做法）
-        self._lines_empty_hint = CaptionLabel(
-            '暂无测线，请先在项目管理页导入', lines_card)
+        self._lines_empty_hint = make_hint('暂无测线，请先在项目管理页导入',
+                                           parent=lines_card)
         self._lines_empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._lines_empty_hint.setStyleSheet(
-            'color: %s; font-size: 11px;' % status_color('disabled'))
         lines_layout.addWidget(self._lines_empty_hint, 1)
         self._line_list.setVisible(False)
         left_layout.addWidget(lines_card, 1)
@@ -592,8 +590,7 @@ class SpatialPage(PanelStateMixin, QWidget):
         self._profile_view.apply_theme(dark)
         self._3d_view.apply_theme(dark)
         self._depth_view.apply_theme(dark)
-        self._lines_empty_hint.setStyleSheet(
-            'color: %s; font-size: 11px;' % status_color('disabled'))
+        # 空态 hint 颜色由 HintLabel.apply_theme 随主题自刷，无需手工重设
 
     # ============================================================ 内部逻辑
     def _selected_line_id(self) -> str:

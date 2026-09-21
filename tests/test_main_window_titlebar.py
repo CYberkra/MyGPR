@@ -79,3 +79,55 @@ def test_titlebar_buttons_receive_mouse(window):
             f'{type(hit).__name__ if hit is not None else None}，'
             '不在 titleBar 内——标题栏被遮挡，鼠标点击将被吞'
         )
+
+
+class TestOutputPanelSplitter:
+    """输出面板 QSplitter 分配回归（问题：面板拖不动/一拖就消失）。
+
+    根因：上格宿主 min hint 透传 QStackedWidget「所有页最大 min」（实测
+    835 > splitter 总高），QSplitter 永远把下格压到自身最小；且下格 min
+    hint 随收/展变化（37↔97）触发 invalidate 重算洗掉显式分配。
+    修复：_PageHostWidget 覆写 min hint 固定 300 + OutputPanel content
+    min 归零（面板 min hint 恒定）。
+    """
+
+    def test_content_host_min_hint_is_capped(self, window):
+        """上格宿主 min hint 必须是固定上限，而非页面栈全页最大 min。"""
+        import ui.main_window as mw
+        host = window._v_splitter.widget(0)
+        assert host.minimumSizeHint().height() == mw._CONTENT_HOST_MIN_H
+        stacked_min = window.stackedWidget.minimumSizeHint().height()
+        assert stacked_min > host.minimumSizeHint().height(), (
+            '页面栈全页最大 min 应大于宿主上限，否则覆写无意义')
+
+    def test_output_panel_min_hint_stable_across_toggle(self, window):
+        """收/展切换时面板 min hint 恒定（invalidate 重算才不会洗掉分配）。"""
+        panel = window.output_panel
+        h_open = panel.minimumSizeHint().height()
+        panel.set_open(False)
+        h_closed = panel.minimumSizeHint().height()
+        panel.set_open(True)
+        h_reopen = panel.minimumSizeHint().height()
+        assert h_open == h_closed == h_reopen, (
+            f'min hint 随开合变化：open={h_open} closed={h_closed} '
+            f'reopen={h_reopen}')
+
+    def test_output_panel_height_assignable_and_sticky(self, window, qapp):
+        """setSizes 显式分配下格高度必须生效且在事件排空后保持。"""
+        from PyQt6.QtCore import QTimer
+        panel = window.output_panel
+        panel.set_open(True)
+        sp = window._v_splitter
+        total = sum(sp.sizes())
+        sp.setSizes([total - 260, 260])
+        qapp.processEvents()
+        assert sp.sizes()[1] >= 240, f'显式分配被驳回: {sp.sizes()}'
+
+        sticky = []
+        QTimer.singleShot(30, lambda: sticky.append(sp.sizes()[1]))
+        # processEvents 不等 timer；processEvents + sleep 交替让 30ms 计时器到期
+        for _ in range(10):
+            qapp.processEvents()
+            qapp.thread().msleep(15)
+        assert sticky and sticky[0] >= 240, (
+            f'事件排空后高度丢失（重算洗掉）: {sticky}')

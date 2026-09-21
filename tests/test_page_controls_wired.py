@@ -286,6 +286,40 @@ class TestDeliverySetLinesPreservesChecks:
                 == Qt.CheckState.Unchecked)
 
 
+# ============================================================ DeliveryPage 主操作门控（P2-3）
+class TestDeliveryHeaderActionGating:
+    """P2-3：生成空间成果入卡头 + 无测线禁用；打开目录 hint 联动。"""
+
+    def test_spatial_btn_gated_by_lines(self, qapp):
+        from ui.pages.delivery_page import DeliveryPage
+        page = DeliveryPage()
+        assert not page._spatial_btn.isEnabled()   # 初始无测线 → 禁用
+        page.set_lines([SimpleNamespace(line_id='L01', name='L01')])
+        assert page._spatial_btn.isEnabled()       # 导入测线后点亮
+        page.set_lines([])
+        assert not page._spatial_btn.isEnabled()   # 测线清空后回落禁用
+
+    def test_busy_respects_line_gate(self, qapp):
+        from ui.pages.delivery_page import DeliveryPage
+        page = DeliveryPage()
+        page.set_lines([SimpleNamespace(line_id='L01', name='L01')])
+        page.set_busy(True)
+        assert not page._spatial_btn.isEnabled()   # 忙态压过门控
+        page.set_busy(False)
+        assert page._spatial_btn.isEnabled()       # 解忙后恢复且不误启用空态
+
+    def test_open_dir_hint_follows_report_result(self, qapp):
+        from ui.pages.delivery_page import DeliveryPage
+        page = DeliveryPage()
+        # 初始无报告包：hint 可见（isHidden 只看自身显式状态，不受父链影响）
+        assert not page._open_dir_hint.isHidden()
+        page.set_report_result(SimpleNamespace(
+            pdf_path='D:/out/report/a.pdf', html_path='', xlsx_path='',
+            delivery_zip_path=''))
+        assert page._open_dir_btn.isEnabled()      # 有点击目标 → 按钮点亮
+        assert page._open_dir_hint.isHidden()      # 前置条件已满足 → hint 收起
+
+
 # ============================================================ AScanPopup ↔ BScanView
 class TestAscanPopupClosedSync:
     """修复 5：用户关闭浮窗后宿主菜单勾选态失同步。"""

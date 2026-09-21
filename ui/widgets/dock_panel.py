@@ -27,6 +27,7 @@ from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants
 from ui.motion import animations_enabled
+from ui.theme_helpers import font_families_qss
 
 _HINT_QSS = f'color: #888888; font-size: {constants.FONT_SIZE_BODY}px;'
 
@@ -60,7 +61,7 @@ class DockPanel(QWidget):
         self._head_layout.setSpacing(4)
         self._title_label = QLabel(self._title_text)
         self._title_label.setStyleSheet(
-            f'font-family: "{constants.FONT_FAMILY}"; '
+            f'font-family: {font_families_qss()}; '
             f'font-size: {constants.FONT_SIZE_SECTION}px; font-weight: bold;')
         self._head_layout.addWidget(self._title_label)
         self._head_layout.addStretch(1)
@@ -94,7 +95,7 @@ class DockPanel(QWidget):
         strip_layout.addWidget(self._expand_btn, 0, Qt.AlignmentFlag.AlignHCenter)
         self._strip_line_label = QLabel('')
         self._strip_line_label.setStyleSheet(
-            f'font-family: "{constants.FONT_FAMILY}"; '
+            f'font-family: {font_families_qss()}; '
             f'font-size: {constants.FONT_SIZE_BODY}px; color: #0F6E56;')
         self._strip_line_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         strip_layout.addWidget(self._strip_line_label, 0,

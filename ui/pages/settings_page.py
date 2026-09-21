@@ -21,9 +21,8 @@ from qfluentwidgets import (
 )
 
 from ui import constants, file_dialogs
-from ui.page_scaffold import (make_card, make_form_row,
+from ui.page_scaffold import (make_card, make_form_row, make_hint,
                               style_transparent_scroll, wrap_centered)
-from ui.theme_helpers import status_color
 
 _FALLBACK_VERSION = '0.9.38'
 _AUTHOR = '邸建豪 袁林 詹萍'
@@ -109,9 +108,7 @@ class SettingsPage(ScrollArea):
         self._workers_spin.setRange(1, 8)
         self._workers_spin.setValue(constants.MAX_WORKERS)
         self._workers_spin.setMinimumWidth(120)
-        hint = CaptionLabel('（重启后生效）', card)
-        hint.setStyleSheet('color: %s; font-size: 11px;'
-                           % status_color('disabled'))
+        hint = make_hint('（重启后生效）', parent=card)
         layout.addLayout(make_form_row('并行工作线程数:', self._workers_spin,
                                        hint, parent=card))
         return card

@@ -24,11 +24,13 @@ from qfluentwidgets import (
     MessageBox, PrimaryPushButton, PushButton, ScrollArea, SpinBox,
     StrongBodyLabel,
 )
+from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants, file_dialogs
-from ui.page_scaffold import (make_card, make_form_row, rebuild_check_list,
-                              style_transparent_scroll, wrap_centered)
-from ui.theme_helpers import status_color
+from ui.page_scaffold import (make_card, make_form_row, make_hint,
+                              rebuild_check_list, style_transparent_scroll,
+                              wrap_centered)
+from ui.widgets import EmptyStateOverlay
 from ui.widgets import (clear_invalid, make_separator, mark_invalid,
                         validate_non_empty)
 
@@ -89,8 +91,13 @@ class DeliveryPage(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(scroll)
 
-        # ---------------- 卡片1：空间成果
-        spatial_card, spatial_layout = make_card('空间成果', parent=self)
+        # ---------------- 卡片1：空间成果（主操作进卡头行，P2-3）
+        self._spatial_btn = PrimaryPushButton('生成空间成果', self)
+        # 未就绪门控：无测线时禁用，set_lines 导入测线后点亮
+        self._spatial_btn.setEnabled(False)
+        self._spatial_btn.setToolTip('导入测线后可用')
+        spatial_card, spatial_layout = make_card(
+            '空间成果', parent=self, header_action=self._spatial_btn)
         self._spatial_name_edit = LineEdit(spatial_card)
         self._spatial_name_edit.setPlaceholderText('例如：全场剖面拼接成果')
         spatial_layout.addLayout(make_form_row(
@@ -102,20 +109,14 @@ class DeliveryPage(QWidget):
         self._lines_list = QListWidget(spatial_card)
         self._lines_list.setMinimumHeight(120)
         spatial_layout.addWidget(self._lines_list)
-        # 空态引导：无测线时列表藏起、提示占位
-        self._lines_empty_hint = CaptionLabel(
-            '暂无测线，请先在项目管理页导入', spatial_card)
+        # 空态引导：无测线时列表藏起、提示占位（同时说明点亮前置条件）
+        self._lines_empty_hint = make_hint(
+            '暂无测线——在项目管理页导入测线后，这里可勾选并生成空间成果',
+            parent=spatial_card)
         self._lines_empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._lines_empty_hint.setStyleSheet(
-            'color: %s; font-size: 11px;' % status_color('disabled'))
         spatial_layout.addWidget(self._lines_empty_hint)
         self._lines_list.setVisible(False)
 
-        self._spatial_btn = PrimaryPushButton('生成空间成果', spatial_card)
-        spatial_btn_row = QHBoxLayout()
-        spatial_btn_row.addStretch(1)
-        spatial_btn_row.addWidget(self._spatial_btn)
-        spatial_layout.addLayout(spatial_btn_row)
         spatial_layout.addWidget(make_separator())
 
         self._spatial_table = QTableWidget(0, 3, spatial_card)
@@ -128,31 +129,35 @@ class DeliveryPage(QWidget):
             0, QHeaderView.ResizeMode.Stretch)
         self._spatial_table.setMinimumHeight(140)
         spatial_layout.addWidget(self._spatial_table)
+        # 空态引导浮层（评审 P0-1）：无成果时盖在表格上
+        self._spatial_empty = EmptyStateOverlay(
+            self._spatial_table, icon=FIF.SEND, title='暂无空间成果',
+            hint='勾选测线并生成空间成果后，结果会列在这里')
         root.addWidget(spatial_card)
 
-        # ---------------- 卡片2：项目报告
-        report_card, report_layout = make_card('项目报告', parent=self)
+        # ---------------- 卡片2：项目报告（主操作进卡头行，P2-3）
+        self._report_btn = PrimaryPushButton('生成报告包', self)
+        report_card, report_layout = make_card(
+            '项目报告', parent=self, header_action=self._report_btn)
         self._report_name_edit = LineEdit(report_card)
         self._report_name_edit.setPlaceholderText('可空，留空使用默认包名')
         report_layout.addLayout(make_form_row(
             '报告包名:', self._report_name_edit, parent=report_card,
             trailing_stretch=False))
-        self._report_btn = PrimaryPushButton('生成报告包', report_card)
-        report_btn_row = QHBoxLayout()
-        report_btn_row.addStretch(1)
-        report_btn_row.addWidget(self._report_btn)
-        report_layout.addLayout(report_btn_row)
         report_layout.addWidget(make_separator())
 
         self._report_path_labels = {}
         for key, caption in _REPORT_FIELDS:
-            value = CaptionLabel('--', report_card)
-            value.setStyleSheet(
-                'color: %s; font-size: 11px;' % status_color('disabled'))
+            value = make_hint('--', parent=report_card)
             report_layout.addLayout(make_form_row(
                 caption, value, parent=report_card, trailing_stretch=False))
             self._report_path_labels[key] = value
+        # 「打开目录」未就绪（无报告包）时禁用 + 前置条件 hint（P2-3）
         open_row = QHBoxLayout()
+        open_row.setSpacing(constants.CARD_SPACING)
+        self._open_dir_hint = make_hint('生成报告包后，可在此打开输出目录',
+                                        parent=report_card)
+        open_row.addWidget(self._open_dir_hint)
         open_row.addStretch(1)
         self._open_dir_btn = PushButton('打开目录', report_card)
         self._open_dir_btn.setEnabled(False)
@@ -198,6 +203,7 @@ class DeliveryPage(QWidget):
     def set_spatial_results(self, results: list) -> None:
         """空间成果列表 → 结果表格（名称/测线数/创建时间）。"""
         results = list(results or [])
+        self._spatial_empty.setVisible(not results)
         self._spatial_table.setRowCount(len(results))
         for row, item in enumerate(results):
             name = str(_get(item, 'name', '') or _get(item, 'title', ''))
@@ -234,6 +240,8 @@ class DeliveryPage(QWidget):
                     break
         self._report_dir = report_dir
         self._open_dir_btn.setEnabled(bool(report_dir))
+        # 未就绪 hint：有报告包后隐藏（按钮同时点亮）
+        self._open_dir_hint.setVisible(not report_dir)
         if has_path:
             InfoBar.success(title='项目报告', content='报告包已生成',
                             orient=Qt.Orientation.Horizontal, isClosable=True,
@@ -243,9 +251,14 @@ class DeliveryPage(QWidget):
     def set_busy(self, busy: bool) -> None:
         """忙态：禁用全部操作按钮。"""
         self._busy = bool(busy)
-        for btn in (self._spatial_btn, self._report_btn,
-                    self._backup_btn, self._restore_btn):
+        for btn in (self._report_btn, self._backup_btn, self._restore_btn):
             btn.setEnabled(not self._busy)
+        self._update_spatial_btn_enabled()
+
+    def _update_spatial_btn_enabled(self) -> None:
+        """「生成空间成果」双门控：非忙态且有可选测线（P2-3 未就绪禁用）。"""
+        self._spatial_btn.setEnabled(
+            not self._busy and self._lines_list.count() > 0)
 
     def selected_line_ids(self) -> list:
         """当前勾选的测线 id 列表。"""
@@ -279,6 +292,7 @@ class DeliveryPage(QWidget):
         has_lines = self._lines_list.count() > 0
         self._lines_list.setVisible(has_lines)
         self._lines_empty_hint.setVisible(not has_lines)
+        self._update_spatial_btn_enabled()
 
     # ============================================================ 内部逻辑
     def _on_spatial_clicked(self) -> None:

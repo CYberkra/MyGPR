@@ -9,6 +9,7 @@ from .ascan_view import AScanView
 from .bscan_view import BScanView
 from .collapsible_panel import (CollapsiblePanel, chevron_left_icon,
                                 collapse_button_qss)
+from .empty_state import EmptyStateOverlay
 from .job_widgets import JobTable, MiniJobList
 from .output_panel import OutputPanel
 from .method_browser import MethodBrowser
@@ -30,6 +31,7 @@ __all__ = [
     'MiniJobList',
     'OutputPanel',
     'SlimSegment',
+    'EmptyStateOverlay',
     'CollapsiblePanel',
     'chevron_left_icon',
     'collapse_button_qss',

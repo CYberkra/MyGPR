@@ -42,18 +42,35 @@ DOCK_COLLAPSED_WIDTH = 18
 FILE_TREE_COLLAPSED_WIDTH = DOCK_COLLAPSED_WIDTH
 
 # ---------------------------------------------------------------- 字体 / 间距
-FONT_FAMILY = 'Microsoft YaHei'
-# 字号层级（原来 9/10/12 散落在 page_scaffold / separators / project_page 等处
-# 各自字面量，收敛为三级：辅助说明 < 正文/标签 < 分区标题）。
+# 字体回退链（P2-5）：YaHei UI 的数字/拉丁字形比 YaHei 更紧凑，与数值密集的
+# GPR 数据更搭；PingFang SC / Noto Sans SC 兜底 macOS / Linux（Windows 上
+# 查不到自动跳过，无副作用）。QFont 走 setFamilies 栈（theme_helpers.ui_font），
+# QSS 走 font_families_qss() 的逗号串（追加 sans-serif 关键字兜底）。
+FONT_FAMILY_STACK = ('Microsoft YaHei UI', 'Microsoft YaHei',
+                     'PingFang SC', 'Noto Sans SC')
+FONT_FAMILY = FONT_FAMILY_STACK[0]   # 兼容别名：QFont 单值构造等场景
+# 字号层级（唯一来源，QSS 一律引用 token、禁止 px 字面量）：
+# 辅助说明（图表轴刻度）= 徽章/hint < 正文/表单标签 < 分区标题 < 页级标题。
+# 注：1pt = 4/3 px @96dpi，9pt 即 12px——原 11px/12px/13px px 字面量已全部
+# 收敛到 SECONDARY/BODY 档（11px→9pt 提升可读性，12px→9pt 等值，13px→10pt）。
 FONT_SIZE_CAPTION = 9    # 辅助说明、图表轴刻度
+FONT_SIZE_SECONDARY = 9  # hint / 徽章 / 次要说明（QSS 用，随主题查色）
 FONT_SIZE_BODY = 10      # 正文与表单标签（全局默认，见 app_qt.py）
 FONT_SIZE_SECTION = 12   # 卡片/分组标题（配 Bold）
-PAGE_SPACING = 15
-PAGE_MARGINS = (20, 20, 20, 20)
-CARD_SPACING = 10
-CARD_MARGINS = (15, 15, 15, 15)
-PANEL_SPACING = 6
-PANEL_MARGINS = (6, 6, 6, 6)
+FONT_SIZE_TITLE = 14     # 页级大标题（预留）
+
+# 间距 4pt 网格（唯一刻度；布局一律取档位值，不再自造奇数间距）。
+SPACE_1 = 4
+SPACE_2 = 8
+SPACE_3 = 12
+SPACE_4 = 16
+SPACE_6 = 24
+PAGE_SPACING = SPACE_4           # 16（原 15）
+PAGE_MARGINS = (SPACE_6,) * 2 + (SPACE_6,) * 2   # 24（原 20）
+CARD_SPACING = SPACE_3           # 12（原 10）
+CARD_MARGINS = (SPACE_4,) * 2 + (SPACE_4,) * 2   # 16（原 15）
+PANEL_SPACING = SPACE_2          # 8（原 6）
+PANEL_MARGINS = (SPACE_2,) * 2 + (SPACE_2,) * 2  # 8（原 6）
 
 # ---------------------------------------------------------------- 页面骨架（布局统一轮）
 # 侧栏宽度两档：工具栏（方法库/测线列表/标注工具）与表单栏（参数/导入/项目信息）。
@@ -62,6 +79,8 @@ SIDE_TOOL_WIDTH = 320
 SIDE_FORM_WIDTH = 360
 # 单列表单页（设置/交付）限宽居中列：宽屏下卡片不再全宽拉满留右侧空带
 FORM_COLUMN_MAX_WIDTH = 760
+# 表单行标签列统一最小宽（容纳六个汉字+冒号）：跨卡片值列起点对齐
+FORM_LABEL_MIN_WIDTH = 112
 # 预览区（B-Scan/地图等主视图）最小高度统一档；解释页主画布例外（工作区，更高）
 PREVIEW_MIN_HEIGHT = 300
 
@@ -70,13 +89,22 @@ PREVIEW_MIN_HEIGHT = 300
 # "同色相高亮度"原则（#2b2b2b 系深底对比度）；新代码须经
 # ui.theme_helpers.status_color()/badge_colors() 按主题查表，
 # 以下裸常量仅作兼容别名保留。
+# secondary：辅助说明/hint 专用（浅 #6b7280 对白底 4.84:1、深 #a8b0bd 对
+# #202020 7.4:1，均达 WCAG AA 4.5:1）；disabled 仅限真禁用控件文字。
 STATUS_COLORS = {
     'success': ('#22c55e', '#34d97b'),
     'warning': ('#f59e0b', '#ffb84d'),
     'error': ('#ef4444', '#ff5c5c'),
     'info': ('#3b82f6', '#5b9dff'),
+    'secondary': ('#6b7280', '#a8b0bd'),
     'disabled': ('#9ca3af', '#9ca3af'),
 }
+
+# 强调色（选中态/主操作/链接）。浅色沿用品牌 teal；深色取高亮度变体供
+# 文字/线条使用。ACCENT_SOLID 为双主题同值的实色块用法（表格选中底等），
+# 与 qfluentwidgets 默认主题色对表。
+ACCENT = ('#009688', '#2dd4bf')
+ACCENT_SOLID = '#009688'
 
 COLOR_SUCCESS = STATUS_COLORS['success'][0]
 COLOR_WARNING = STATUS_COLORS['warning'][0]

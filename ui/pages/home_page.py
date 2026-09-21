@@ -16,7 +16,7 @@ import_line_requested / goto_page(str)。
 """
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel, CaptionLabel, ComboBox, PrimaryPushButton,
     PushButton, ScrollArea,
@@ -24,20 +24,9 @@ from qfluentwidgets import (
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants
-from ui.page_scaffold import make_card, style_transparent_scroll
-from ui.theme_helpers import badge_colors, status_color
+from ui.page_scaffold import make_card, make_hint, style_transparent_scroll
+from ui.theme_helpers import badge_colors, badge_qss_pair, make_badge
 from ui.widgets import BScanView, MiniJobList, make_separator
-
-_BADGE_QSS = ('QLabel { padding: 2px 10px; border-radius: 10px; '
-              'font-size: 12px; font-weight: bold; '
-              'color: %s; background-color: %s; }')
-
-
-def _make_badge(text: str, color_key: str) -> QLabel:
-    """状态药丸徽章（SPEC §1 模板）：配色随主题（badge_colors 查表）。"""
-    badge = QLabel(text)
-    badge.setStyleSheet(_BADGE_QSS % badge_colors(color_key))
-    return badge
 
 
 class HomePage(ScrollArea):
@@ -92,9 +81,8 @@ class HomePage(ScrollArea):
         empty_layout.setSpacing(6)
         empty_label = BodyLabel('尚未打开项目', self._empty_widget)
         empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hint = CaptionLabel('请通过下方「快速操作」新建或打开项目', self._empty_widget)
-        hint.setStyleSheet('color: %s; font-size: 11px;'
-                           % status_color('disabled'))
+        hint = make_hint('请通过下方「快速操作」新建或打开项目',
+                         parent=self._empty_widget)
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty_layout.addWidget(empty_label)
         empty_layout.addWidget(hint)
@@ -109,10 +97,10 @@ class HomePage(ScrollArea):
         self._proj_path = self._add_info_row(info_layout, '路径:')
         self._proj_lines = self._add_info_row(info_layout, '测线数:')
         self._proj_backend = self._add_info_row(info_layout, '存储后端:')
-        self._proj_badge = _make_badge('--', 'neutral')
+        self._proj_badge = make_badge('--', 'neutral')
         status_row = QHBoxLayout()
         status_label = CaptionLabel('状态:', self._info_widget)
-        status_label.setMinimumWidth(100)
+        status_label.setMinimumWidth(constants.FORM_LABEL_MIN_WIDTH)
         status_row.addWidget(status_label)
         status_row.addWidget(self._proj_badge)
         status_row.addStretch(1)
@@ -122,7 +110,9 @@ class HomePage(ScrollArea):
         # 快速操作（2×2 网格，窄栏下不拥挤）
         layout.addWidget(make_separator())
         actions_title = CaptionLabel('快速操作', card)
-        actions_title.setStyleSheet('font-size: 11px; font-weight: bold;')
+        actions_title.setStyleSheet(
+            f'font-size: {constants.FONT_SIZE_SECONDARY}pt; '
+            'font-weight: bold;')
         layout.addWidget(actions_title)
 
         self.new_btn = PrimaryPushButton('新建项目', card, FIF.ADD)
@@ -151,7 +141,7 @@ class HomePage(ScrollArea):
     def _add_info_row(self, layout: QVBoxLayout, label_text: str) -> BodyLabel:
         row = QHBoxLayout()
         label = CaptionLabel(label_text)
-        label.setMinimumWidth(100)
+        label.setMinimumWidth(constants.FORM_LABEL_MIN_WIDTH)
         value = BodyLabel('--')
         value.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -169,7 +159,7 @@ class HomePage(ScrollArea):
 
         row = QHBoxLayout()
         label = CaptionLabel('B-Scan颜色映射:', card)
-        label.setMinimumWidth(100)
+        label.setMinimumWidth(constants.FORM_LABEL_MIN_WIDTH)
         self._cmap_combo = ComboBox(card)
         self._cmap_combo.addItems(constants.COLORMAPS)
         self._cmap_combo.setCurrentText(constants.DEFAULT_COLORMAP)
@@ -210,7 +200,7 @@ class HomePage(ScrollArea):
         badge_text = status or ('只读' if read_only else '已打开')
         self._proj_badge.setText(badge_text)
         self._proj_badge.setStyleSheet(
-            _BADGE_QSS % badge_colors('warning' if read_only else 'success'))
+            badge_qss_pair(*badge_colors('warning' if read_only else 'success')))
 
     def set_preview_bundle(self, bundle) -> None:
         """PreviewBundle（鸭子类型）或 None（清空）。"""

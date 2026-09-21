@@ -17,11 +17,11 @@ import re
 
 import pyqtgraph as pg
 from PyQt6.QtCore import QDateTime
-from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QApplication
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants, file_dialogs
+from ui.theme_helpers import ui_font
 from ui.widgets.context_menus import add_action
 
 __all__ = ['ZOOM_STEP', 'style_plot_item', 'GraphicsViewBase']
@@ -52,7 +52,7 @@ def style_plot_item(plot_item: pg.PlotItem, dark: bool, *,
     """
     fg = 'w' if dark else 'k'
     pen = pg.mkPen(fg)
-    tick_font = QFont(constants.FONT_FAMILY, constants.CHART_TICK_FONT_SIZE)
+    tick_font = ui_font(constants.CHART_TICK_FONT_SIZE)
     for name in ('bottom', 'left'):
         axis = plot_item.getAxis(name)
         axis.setPen(pen)

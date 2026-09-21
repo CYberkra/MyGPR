@@ -162,8 +162,12 @@ class OutputPanel(QWidget):
         self._content = QStackedWidget(self)
         self._content.addWidget(self._log_edit)
         self._content.addWidget(self._mini_jobs)
-        # 高度交给主窗口竖向 QSplitter 拖拽分配，这里只保下限
-        self._content.setMinimumHeight(60)
+        # 高度交给主窗口竖向 QSplitter 拖拽分配。min 必须为 0：本面板的
+        # minimumSizeHint 随收/展显隐变化（37 ↔ 97+）会让 QSplitter 在
+        # invalidate 重算时按 stretch 把显式分配洗掉（下格 stretch=0 被
+        # 压回 min，表现为展开后只剩一条、拖出的高度丢失）；min 恒定后
+        # 重算的 clamp 无操作，分配得以保持。
+        self._content.setMinimumHeight(0)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -216,6 +220,21 @@ class OutputPanel(QWidget):
     def toggle_panel(self) -> None:
         """Ctrl+J：收/展切换。"""
         self._set_open(not self._open)
+
+    def set_open(self, open_: bool) -> None:
+        """按目标态开合（主窗口收起态拖拽联动用，不动高度分配）。"""
+        self._set_open(bool(open_))
+
+    def minimumSizeHint(self):   # noqa: N802（Qt 虚函数命名）
+        """min hint 恒定 = 头部栏（收/展不变化）。
+
+        QStackedWidget 的 min hint 会透传当前页（QTextEdit ~80px），随
+        显隐变化让 QSplitter 在 invalidate 重算时按 stretch 洗掉用户
+        拖出的高度（下格 stretch=0 被压回 min）。恒定后重算 clamp 无
+        操作；显式 setMinimumHeight 压不住 minimumSizeHint() 虚函数链，
+        必须覆写本方法。
+        """
+        return QSize(0, constants.OUTPUT_PANEL_HEADER_HEIGHT + 2)
 
     def apply_theme(self, dark: bool) -> None:
         """主题换肤：日志底/字色与级别着色一起跟随（全宽面板下深底大色块过重）。"""

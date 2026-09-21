@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (QHBoxLayout, QHeaderView, QLabel,
 from qfluentwidgets import CaptionLabel, ProgressBar, PushButton, ScrollArea
 
 from ui.motion import animate_badge_color, animate_progress
-from ui.page_scaffold import style_transparent_scroll
+from ui.page_scaffold import HintLabel, style_transparent_scroll
 from ui.theme_helpers import BADGE_QSS, status_color
 
 _STATUS_TEXT = {
@@ -36,8 +36,6 @@ _STATUS_COLOR_KEY = {
 }
 
 _ACTIVE_STATUSES = ('queued', 'running')
-
-_EMPTY_LABEL_QSS = 'color: %s; font-size: 13px;'
 
 
 def _status_badge_color(status: str) -> str:
@@ -87,11 +85,9 @@ class JobTable(QWidget):
         # P2-6：无任务时空态占位（QStackedLayout 切换，避免纯空白）
         empty_page = QWidget(self)
         empty_layout = QVBoxLayout(empty_page)
-        empty_label = CaptionLabel('暂无任务', empty_page)
-        empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        empty_label.setStyleSheet(
-            _EMPTY_LABEL_QSS % status_color('disabled'))
-        empty_layout.addWidget(empty_label)
+        self._empty_label = HintLabel('暂无任务', empty_page)
+        self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_layout.addWidget(self._empty_label)
         self._stack = QStackedLayout()
         self._stack.addWidget(empty_page)   # index 0 = 空态
         self._stack.addWidget(self._table)  # index 1 = 表格
@@ -102,9 +98,7 @@ class JobTable(QWidget):
         self._stack.setCurrentIndex(0 if not self._rows else 1)
 
     def apply_theme(self, dark: bool) -> None:
-        """主题切换：徽章与空态占位文字色按新主题重刷（主窗口遍历调用）。"""
-        self._empty_label.setStyleSheet(
-            _EMPTY_LABEL_QSS % status_color('disabled'))
+        """主题切换：徽章配色按新主题重刷（空态 HintLabel 自刷，主窗口遍历调用）。"""
         for job_id, badge in self._badges.items():
             _restyle_status_badge(badge, self._status_of(self._rows[job_id]))
 
@@ -228,10 +222,8 @@ class MiniJobList(QWidget):
         self._box.setContentsMargins(0, 0, 0, 0)
         self._box.setSpacing(6)
         # P2-6：无活动任务时空态占位
-        self._empty_label = CaptionLabel('暂无任务', self._container)
+        self._empty_label = HintLabel('暂无任务', self._container)
         self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._empty_label.setStyleSheet(
-            _EMPTY_LABEL_QSS % status_color('disabled'))
         self._box.addWidget(self._empty_label)
         self._box.addStretch(1)
         self._scroll.setWidget(self._container)
@@ -314,9 +306,7 @@ class MiniJobList(QWidget):
         self._refresh_visibility()
 
     def apply_theme(self, dark: bool) -> None:
-        """主题切换：徽章与空态占位文字色按新主题重刷（主窗口遍历调用）。"""
-        self._empty_label.setStyleSheet(
-            _EMPTY_LABEL_QSS % status_color('disabled'))
+        """主题切换：徽章配色按新主题重刷（空态 HintLabel 自刷，主窗口遍历调用）。"""
         for entry in self._jobs.values():
             _restyle_status_badge(entry['badge'], entry['status'])
 

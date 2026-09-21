@@ -42,7 +42,7 @@ from core.observability import (configure_structured_logging,
 from ui import constants
 from ui.main_window import MyGPRMainWindow, PlaceholderPage
 from ui.settings_manager import SettingsManager
-from ui.theme_helpers import apply_theme
+from ui.theme_helpers import apply_theme, ui_font
 
 # Keep smoke artifacts outside the installation directory and avoid the
 # POSIX-only /tmp path when validating Windows packages.  CI can override it.
@@ -189,7 +189,7 @@ def _run_smoke(window: MyGPRMainWindow) -> None:
 def main() -> int:
     try:
         from PyQt6.QtCore import Qt
-        from PyQt6.QtGui import QFont, QGuiApplication
+        from PyQt6.QtGui import QGuiApplication
         from PyQt6.QtWidgets import QApplication
         import qfluentwidgets  # noqa: F401 — 依赖在位检测（依赖缺失给出安装提示）
     except ImportError as exc:
@@ -220,7 +220,7 @@ def main() -> int:
     # 配合 theme_helpers.apply_theme 的显式 palette，深浅主题在所有
     # Windows 机器上表现一致。
     app.setStyle('fusion')
-    app.setFont(QFont(constants.FONT_FAMILY, constants.FONT_SIZE_BODY))
+    app.setFont(ui_font(constants.FONT_SIZE_BODY))
     # 主题一次性提前应用：在窗口树尚空时 setTheme+palette+QSS 几乎零成本，
     # 页面控件直接在最终主题下创建。旧链是 main 先 setTheme(LIGHT)、
     # MyGPRMainWindow._init_state 再全量回放——两遍全局样式重算，其中
