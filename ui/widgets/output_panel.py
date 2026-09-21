@@ -225,7 +225,7 @@ class OutputPanel(QWidget):
         """按目标态开合（主窗口收起态拖拽联动用，不动高度分配）。"""
         self._set_open(bool(open_))
 
-    def minimumSizeHint(self):   # noqa: N802（Qt 虚函数命名）
+    def minimumSizeHint(self):   # Qt 虚函数命名（CamelCase 是 Qt 约定，非本仓风格）
         """min hint 恒定 = 头部栏（收/展不变化）。
 
         QStackedWidget 的 min hint 会透传当前页（QTextEdit ~80px），随

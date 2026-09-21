@@ -361,3 +361,97 @@ class TestArtifactDeleteChain:
         project.on_artifact_descendants_ready('L01', [], {})
 
         assert asked == []  # 空闭包不弹确认框
+
+
+# ====================================================== 空间轨迹加载去重
+class TestSpatialTrackLoadDedupe:
+    """``load_spatial_tracks`` 在一次「打开项目」里必须只发起一次。
+
+    回归背景（问题 1「打开项目后整窗闪一下」的贡献项）：
+    ``on_project_opened`` 与 ``on_lines_updated`` 都调
+    ``load_spatial_tracks()``，于是同一份轨迹被后端 worker **完整解析
+    两遍**——实测该命令 570–695 ms/次，是 open 链路最大的单项成本。
+    连续两次 ≥1.1 s 的主线程外占用让后端线程池持续争抢磁盘，主线程的
+    重绘帧被推后，用户看到的就是整窗闪一下。
+
+    去重引入了"该加载却没加载"的风险，故四个场景一并钉住。
+    """
+
+    @staticmethod
+    def _lines(*ids):
+        page = _StubPage()
+        return [
+            type('_Line', (), {'line_id': lid})() for lid in ids
+        ], page
+
+    @staticmethod
+    def _summary():
+        # root_path 留空：跳过 add_recent_project（本测试只关心轨迹加载去重，
+        # _StubWindow.settings 为 None，不必为无关分支搭桩）
+        return type('_Summary', (), {
+            'name': 'probe', 'root_path': '', 'read_only': False})()
+
+    def _harness(self):
+        window, _pages, _views = _make_window()
+        loads: list[int] = []
+        window.project_controller = _StubPage(
+            load_spatial_tracks=lambda: loads.append(1),
+            refresh_all_artifacts=lambda: None,
+            refresh_spatial=lambda *_a: None,
+            refresh_reports=lambda *_a: None,
+        )
+        window.delivery_controller = _StubPage()
+        return PageCoordinator(window).project, loads
+
+    def test_open_project_loads_tracks_exactly_once(self):
+        project, loads = self._harness()
+        lines, _ = self._lines('L01', 'L02', 'L03')
+
+        project.on_project_opened(self._summary())
+        project.on_lines_updated(lines)
+
+        assert len(loads) == 1, (
+            f'一次打开项目应只加载一次轨迹，实际 {len(loads)} 次')
+
+    def test_unchanged_line_set_does_not_reload(self):
+        project, loads = self._harness()
+        lines, _ = self._lines('L01', 'L02')
+
+        project.on_project_opened(self._summary())
+        project.on_lines_updated(lines)
+        loads.clear()
+
+        project.on_lines_updated(lines)      # 同一集合重复刷新
+
+        assert loads == [], '测线集合未变时不应重新解析轨迹'
+
+    def test_changed_line_set_reloads(self):
+        project, loads = self._harness()
+        lines, _ = self._lines('L01', 'L02')
+
+        project.on_project_opened(self._summary())
+        project.on_lines_updated(lines)
+        loads.clear()
+
+        project.on_lines_updated(lines + self._lines('L03')[0])
+
+        assert len(loads) == 1, '导入新测线（集合变化）必须重新加载轨迹'
+
+    def test_reopening_same_project_reloads(self):
+        """关闭后重开同一项目：集合与上次相同，去重态必须已重置。
+
+        否则会误判为"无需重载"，空间页停在空轨迹（静默数据缺失，
+        比多花 600ms 严重得多）。
+        """
+        project, loads = self._harness()
+        lines, _ = self._lines('L01', 'L02', 'L03')
+
+        project.on_project_opened(self._summary())
+        project.on_lines_updated(lines)
+        project.on_project_closed()
+        loads.clear()
+
+        project.on_project_opened(self._summary())
+        project.on_lines_updated(lines)
+
+        assert len(loads) == 1, '重开同一项目必须重新加载轨迹'

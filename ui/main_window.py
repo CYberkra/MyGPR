@@ -45,7 +45,7 @@ _CONTENT_HOST_MIN_H = 300
 class _PageHostWidget(QWidget):
     """内容行宿主：min hint 不透传页面栈全页最大值（不可见页不钳制布局）。"""
 
-    def minimumSizeHint(self):   # noqa: N802（Qt 虚函数命名）
+    def minimumSizeHint(self):   # Qt 虚函数命名（CamelCase 是 Qt 约定，非本仓风格）
         return QSize(0, _CONTENT_HOST_MIN_H)
 
 

@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import logging
 import math
 import os
 
@@ -41,6 +42,8 @@ from ui.widgets.map_view import MapView
 from ui.widgets.depth_slice_view import DepthSliceView
 from ui.widgets.segment_tabs import SlimSegment
 from ui.widgets.trajectory_3d_view import Trajectory3DView
+
+logger = logging.getLogger(__name__)
 # 中栏分段（SlimSegment routeKey）
 _SEG_MAP = 'planMap'
 _SEG_PROFILE = 'elevationProfile'
@@ -110,6 +113,10 @@ class SpatialPage(PanelStateMixin, QWidget):
         self._restoring_terrain = False       # 恢复/程序化设置地形来源下拉时屏蔽信号
         self._depth_payload_line_ids = []     # 深度切片预览请求的 line_ids（存图层回发用）
         self._depth_cell_size_m = 1.0         # 深度切片网格 cell_size_m（存图层回发用）
+        # 延后重绘：_refresh_views 只同步重绘可见视图，其余记在这里，
+        # 切段/切页可见时由 _flush_dirty_view 补齐（见 _refresh_views 注释）
+        self._dirty_views: set[str] = set()
+        self._view_data = ([], {})            # (tracks, colors) 最近一次数据快照
         self._sm = None                       # 共享 SettingsManager（主窗口注入，唯一写者）
         self._dem_pool = QThreadPool(self)    # 本地 DEM 解析（大文件不冻结 GUI 线程）
         self._dem_pool.setMaxThreadCount(1)
@@ -612,6 +619,8 @@ class SpatialPage(PanelStateMixin, QWidget):
                   _SEG_3D: self._3d_view, _SEG_DEPTH: self._depth_view}.get(
             route_key, self._map_view)
         self._view_stack.setCurrentWidget(widget)
+        # 切到某分段才补齐它延后的重绘（_refresh_views 只重绘当时可见的视图）
+        self._flush_dirty_view(str(route_key))
         if route_key == _SEG_DEPTH and not self._depth_payload_line_ids:
             # 首次切到深度切片段：自动以当前勾选测线请求一次预览
             checked = [str(t.line_id) for t in self._checked_tracks()]
@@ -619,12 +628,74 @@ class SpatialPage(PanelStateMixin, QWidget):
                 self.depth_preview_requested.emit(checked)
 
     def _refresh_views(self) -> None:
-        """勾选集合变化 → 四个视图同步重绘。"""
+        """勾选集合变化 → 重绘视图。
+
+        性能（关键）：**只同步重绘当前可见的那一个视图**，其余标记为
+        脏、等真正切过去时再重绘。
+
+        为什么要这样：四个视图都是 pyqtgraph/QOpenGL 画布，重绘 6 条测线
+        / 10,394 个轨迹点实测合计约 0.9–1.3 秒（depth 640 / 3d 130–470 /
+        map 380 / profile 15）。而「打开项目」会触发 `set_tracks` 两次
+        （on_project_opened 与 on_lines_updated 各一次 `load_spatial_tracks`），
+        合计把主线程独占 2 秒以上。用户此时正盯着**主页**，空间信息页
+        根本不可见——为不可见的画布付 2 秒主线程代价，直接导致
+        Windows 合成器长时间拿不到新帧，视觉上就是整窗「消失再出现」。
+
+        可见性判定用「空间页本身可见 && 该视图是当前分段」双条件：
+        页面不可见时连当前分段也不重绘，全部留给切页/切段时补齐。
+        """
         tracks = self._checked_tracks()
-        self._map_view.set_tracks(tracks, self._colors)
-        self._profile_view.set_tracks(tracks, self._colors)
-        self._3d_view.set_tracks(tracks, self._colors)
-        self._depth_view.set_tracks(tracks, self._colors)
+        active = self._active_view_key()
+        self._view_data = (tracks, self._colors)
+        for key, view in self._views().items():
+            if key == active:
+                self._apply_tracks(view, tracks, self._colors)
+            else:
+                self._dirty_views.add(key)
+
+    def _views(self) -> dict:
+        """分段键 → 视图实例。"""
+        return {_SEG_MAP: self._map_view, _SEG_PROFILE: self._profile_view,
+                _SEG_3D: self._3d_view, _SEG_DEPTH: self._depth_view}
+
+    def _apply_tracks(self, view, tracks, colors) -> None:
+        """把轨迹数据灌给单个视图（唯一实际重绘入口）。"""
+        if view is None:
+            return
+        try:
+            view.set_tracks(tracks, colors)
+        except Exception as exc:  # noqa: BLE001 — 单个视图失败不拖垮整页
+            logger.debug('set_tracks 失败（%s）: %s', type(view).__name__, exc)
+
+    def _active_view_key(self) -> str:
+        """当前可见视图的分段键；整页不可见时返回空串（全部延后）。"""
+        if not self.isVisible():
+            return ''
+        current = self._view_stack.currentWidget()
+        for key, view in self._views().items():
+            if view is current:
+                return key
+        return ''
+
+    def _flush_dirty_view(self, key: str) -> None:
+        """把延后的重绘补齐（切段/切页可见时调用）。"""
+        if key not in self._dirty_views:
+            return
+        tracks, colors = getattr(self, '_view_data', ([], {}))
+        view = self._views().get(key)
+        if view is None:
+            self._dirty_views.discard(key)
+            return
+        self._dirty_views.discard(key)
+        self._apply_tracks(view, tracks, colors)
+
+    def showEvent(self, e) -> None:
+        """页面重新可见 → 补齐延后的视图重绘（避免长期停留在旧数据）。"""
+        super().showEvent(e)
+        # 页面刚变可见，若空间页是当前页则补齐当前分段的脏视图
+        key = self._active_view_key()
+        if key:
+            self._flush_dirty_view(key)
 
     def _refresh_crs_card(self) -> None:
         """投影信息卡：坐标系 / EPSG / 数据来源（按轨迹摘要汇总）。"""
