@@ -54,6 +54,7 @@ def window(qapp, monkeypatch):
 
     monkeypatch.setattr(mw, 'FileTreePanel', _FileTreeStub)
     w = mw.MyGPRMainWindow()
+    w.ensure_pages_ready()   # 非首屏页为预热构造，测试需显式确保全部就位
     w.show()
     qapp.processEvents()
     yield w

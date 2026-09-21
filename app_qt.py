@@ -107,6 +107,8 @@ def _run_smoke(window: MyGPRMainWindow) -> None:
     """
     os.makedirs(SMOKE_SHOTS_DIR, exist_ok=True)
     app = QApplication.instance()
+    # 页面为首屏后空闲预热构造（启动提速），断言前需确保全部就位
+    window.ensure_pages_ready()
     saved = []
     errors = []
 
@@ -116,9 +118,9 @@ def _run_smoke(window: MyGPRMainWindow) -> None:
         'jobsInterface', 'settingsInterface',
     ]
 
-    # 1) 页面数量与命名
+    # 1) 页面数量与命名（集合比较：非首屏页为空闲预热构造，插入顺序不等于页签顺序）
     actual_names = list(window.pages.keys())
-    if actual_names != expected_names:
+    if sorted(actual_names) != sorted(expected_names):
         errors.append(
             f'页面列表不匹配: expected={expected_names}, actual={actual_names}')
 
