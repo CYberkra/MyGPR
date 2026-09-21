@@ -12,6 +12,15 @@
       ]
     },
     {
+      "schema": "mygpr.artifact_trash.v1",
+      "owner": "project-storage",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "mygpr/infrastructure/persistence/artifact_delete.py"
+      ]
+    },
+    {
       "schema": "mygpr.autotune.preference_audit.v1",
       "owner": "autotune",
       "mutable": false,

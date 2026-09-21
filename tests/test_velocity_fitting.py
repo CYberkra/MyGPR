@@ -76,6 +76,39 @@ class TestFitHyperbolaValidation:
         with pytest.raises(VelocityAnalysisError):
             fit_hyperbola(picks)
 
+    def test_z0_squared_within_numerical_noise_is_zero(self, monkeypatch):
+        """z0² 落在数值噪声量级（正或负）→ 顶点深度判 0，不抛错。
+
+        CI 上 Linux / Windows 的 BLAS 差异会让退化（z0=0）数据解出 ~1e-15
+        量级的 z0² 残差：为正时开方留下 ~3e-8 m 的伪深度，为负时又被当作
+        "非物理"抛错——同一份数据两个方向都不稳定。这里注入系数绕开 BLAS
+        差异，锁住 clamp 语义本身。
+        """
+        x_m = np.array([0.0, 1.0, 2.0, 3.0, 4.0])
+        picks = [VelocityPick(i, i, x, 1.0) for i, x in enumerate(x_m)]
+        injected = {'delta': 8.9e-16}   # A=1,B=-4 → x0=2；C=4+delta ⇒ z0²=delta
+
+        def _fake_lstsq(_design, _rhs, rcond=None):
+            return (np.array([1.0, -4.0, 4.0 + injected['delta']]),
+                    None, None, None)
+
+        monkeypatch.setattr(np.linalg, 'lstsq', _fake_lstsq)
+        assert fit_hyperbola(picks).z0_m == 0.0      # 正噪声：不留伪深度
+        injected['delta'] = -8.9e-16
+        assert fit_hyperbola(picks).z0_m == 0.0      # 负噪声：不当非物理抛错
+
+    def test_z0_squared_clearly_negative_still_raises(self, monkeypatch):
+        """明确为负的 z0²（远超噪声量级）仍然必须报错。"""
+        x_m = np.array([0.0, 1.0, 2.0, 3.0, 4.0])
+        picks = [VelocityPick(i, i, x, 1.0) for i, x in enumerate(x_m)]
+
+        def _fake_lstsq(_design, _rhs, rcond=None):
+            return (np.array([1.0, -4.0, 3.0]), None, None, None)   # z0² = -1
+
+        monkeypatch.setattr(np.linalg, 'lstsq', _fake_lstsq)
+        with pytest.raises(VelocityAnalysisError):
+            fit_hyperbola(picks)
+
     def test_negative_depth_clamped_reported(self):
         # 拟合出 z0² < 0（几何上不可能）→ 报错而非静默取虚数
         x_m = np.array([0.0, 1.0, 2.0, 3.0, 4.0])

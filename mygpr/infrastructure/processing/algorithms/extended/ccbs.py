@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import numpy as np
+from typing import Any
 
 _EPSILON = 1.0e-10
 
