@@ -48,12 +48,28 @@ from ui.widgets.terrain_tiles import (decode_terrarium, interpolate_scatter,
                                       terrarium_cache_path,
                                       terrarium_url, tile_grid_for_bbox)
 
-try:
-    import pyqtgraph.opengl as _gl
-    from PyQt6.QtGui import QVector3D as _Vector
-except Exception:  # noqa: BLE001 - PyOpenGL 缺失等任意导入失败 → 降级
-    _gl = None
-    _Vector = None
+_GL_STATE: dict = {}
+
+
+def _gl_state() -> tuple:
+    """惰性导入 pyqtgraph.opengl，返回 (gl 模块, QVector3D)；失败为 (None, None)。
+
+    原先的模块级 try-import 会在**导入本模块时**就拉起 pyqtgraph.opengl
+    （含 PyOpenGL / OpenGL 绑定，实测 ~360 ms），而本模块由空间信息页顶层引入，
+    于是每个用户开局都要为"可能永远不打开的三维分段"付费。改为首次真正需要
+    GL 时才导入，结果缓存在 _GL_STATE，重复调用零成本。
+
+    降级语义与原先完全一致：PyOpenGL 缺失或任何导入失败 → (None, None)，
+    由调用方走 fallback（QLabel 提示 / 直接返回不渲染）。
+    """
+    if not _GL_STATE:
+        try:
+            import pyqtgraph.opengl as gl
+            from PyQt6.QtGui import QVector3D as vector
+        except Exception:  # noqa: BLE001 - PyOpenGL 缺失等任意导入失败 → 降级
+            gl, vector = None, None
+        _GL_STATE['gl'], _GL_STATE['vec'] = gl, vector
+    return _GL_STATE['gl'], _GL_STATE['vec']
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -333,11 +349,16 @@ class Trajectory3DView(QWidget):
         self._theme_dark = False         # 主题缓存：GL 未建时先记住，创建时应用
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
-        if _gl is None:
-            # 无 PyOpenGL：降级 QLabel，不影响页面其余部分（lazy 语义不改变此分支）
-            self._fallback_label = QLabel('三维视图需要 PyOpenGL', self)
-            self._fallback_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            layout.addWidget(self._fallback_label, 1)
+        # 注意：此处**不再**探测 pyqtgraph.opengl。降级提示改为惰性创建
+        # （见 _ensure_fallback_label），否则惰性导入白做——__init__ 就会立刻付费。
+
+    def _ensure_fallback_label(self) -> None:
+        """无 PyOpenGL 时的降级提示；惰性创建，只在首次需要 GL 且不可用才建。"""
+        if self._fallback_label is not None:
+            return
+        self._fallback_label = QLabel('三维视图需要 PyOpenGL', self)
+        self._fallback_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.layout().addWidget(self._fallback_label, 1)
 
     def _ensure_gl_view(self) -> bool:
         """首次需要显示 3D 内容时创建 GLViewWidget 与地形线程池。
@@ -349,12 +370,14 @@ class Trajectory3DView(QWidget):
         """
         if self._gl_view is not None:
             return True
-        if _gl is None:
+        gl, _ = _gl_state()
+        if gl is None:
+            self._ensure_fallback_label()
             return False
         layout = self.layout()
-        self._gl_view = _gl.GLViewWidget(self)
+        self._gl_view = gl.GLViewWidget(self)
         self._gl_view.setBackgroundColor('k' if self._theme_dark else 'w')
-        self._grid = _gl.GLGridItem()
+        self._grid = gl.GLGridItem()
         self._grid.setSize(500.0, 500.0)
         self._grid.setSpacing(20.0, 20.0)
         self._gl_view.addItem(self._grid)
@@ -509,7 +532,8 @@ class Trajectory3DView(QWidget):
         self._grid.setVisible(self._terrain_item is None)
         self._gl_view.setCameraPosition(
             distance=max(extent * 2.5, 100.0), elevation=30.0, azimuth=45.0)
-        self._gl_view.opts['center'] = _Vector(0.0, 0.0, 0.0)
+        _, vec = _gl_state()
+        self._gl_view.opts['center'] = vec(0.0, 0.0, 0.0)
 
     def _show_context_menu(self, pos) -> None:
         if not self._ensure_gl_view():
@@ -697,7 +721,8 @@ class Trajectory3DView(QWidget):
         """地形网格就绪：留存 payload 并重建场景（过期代次直接丢弃）。"""
         if generation != self._terrain_generation or not payload:
             return
-        if self._gl_view is None or _gl is None or self._origin is None:
+        gl, _ = _gl_state()
+        if self._gl_view is None or gl is None or self._origin is None:
             return
         self._terrain_payload = payload
         self._render_lines()     # 贴地模式此刻起有 DEM 可采样
@@ -732,6 +757,7 @@ class Trajectory3DView(QWidget):
         """按当前模式（原始高程 / 贴地 + 垂直夸张）重建测线 GL 项。"""
         if self._gl_view is None or self._origin is None:
             return
+        gl, _ = _gl_state()
         for item in self._line_items:
             self._gl_view.removeItem(item)
         self._line_items = []
@@ -750,7 +776,7 @@ class Trajectory3DView(QWidget):
                 # 与地形同一夸张变换（关于 DEM 均值），贴地间距随夸张同步
                 local = local.copy()
                 local[:, 2] = (zt - dem_mean) * self._exag
-            item = _gl.GLLinePlotItem(
+            item = gl.GLLinePlotItem(
                 pos=local, color=color, width=2.0,
                 antialias=True, mode='line_strip',
                 # 默认 'additive' 不写深度：地形后画会把贴地线整个覆盖
@@ -763,7 +789,8 @@ class Trajectory3DView(QWidget):
     def _render_terrain(self) -> None:
         """按当前夸张系数 / 贴地模式 / 影像开关重建地形 GL 项。"""
         payload = self._terrain_payload
-        if (payload is None or self._gl_view is None or _gl is None
+        gl, _ = _gl_state()
+        if (payload is None or self._gl_view is None or gl is None
                 or self._origin is None):
             return
         try:
@@ -824,7 +851,7 @@ class Trajectory3DView(QWidget):
             self._clear_terrain()
             _register_terrain_shader()
             # z/colors 转置为 (len(x), len(y))：pyqtgraph 期望 x 为第一维
-            item = _gl.GLSurfacePlotItem(
+            item = gl.GLSurfacePlotItem(
                 x=x, y=y,
                 z=np.ascontiguousarray(z_disp.T),
                 colors=np.ascontiguousarray(
