@@ -286,6 +286,22 @@ Chrome / VS Code / JetBrains / Office 都把冷启动当 **SLO** 管：
 > 通过（含无 PyOpenGL 降级路径）、`page_cost_probe` spatial 页 import 361→56 ms、
 > 导入期 `sys.modules` 确认无 `pyqtgraph.opengl` / `OpenGL.*`。
 
+> **收尾（2026-09-21 晚，已合并进 main）**：PR #17 合并，CI 5/5 全绿。本机复测两次
+> 采样 1959 / 2144 ms（各分段同步上浮约 10%，属负载波动）——**启动耗时是分布不是
+> 标量**，对外口径取"约 2.0 s（原 7.1 s，−70%~−72%）"。
+>
+> 合并前必须先修的既有 CI 红灯单独成 PR #18（fix/ci-green）。**修完 #18 之后 #17 才
+> 第一次真正跑到 ruff 与 gui-linux**，随即暴露两处本 PR 引入的回归（已修）：
+> ① `methods_registry.py` 的 `PROCESSING_METHODS` / `ALGORITHM_CATALOG` 因惰性化改走
+> `__getattr__` 而在 `__all__` 里被判 F822 未定义——用 `TYPE_CHECKING` 类型声明修，
+> 纯注解不产生运行期绑定；② 标题栏 z-order 测试的开屏竞态——开屏（自带 TitleBar 的
+> 独立 frameless 窗口）600 ms 后才关，**构造提速把 `__init__` 压到 600 ms 以内**，
+> `widgetAt` 就改命中开屏的 TitleBar，"越快越容易挂"，只在快机器/Linux 复现。
+>
+> **教训**：先修 CI 再合功能分支是对的——否则红灯掩盖红灯，本 PR 会带着两处真回归
+> 进 main。反向教训是性能优化会让**时间依赖型测试**翻转，提速后需专门复查依赖墙钟
+> 的断言。
+
 ### 8.5 不该做的事（工业界的负面清单）
 
 - **不猴子补丁第三方库**（本节 darkdetect 就是现成反例）。要改就 fork/vendor 并写明，
