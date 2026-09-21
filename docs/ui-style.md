@@ -42,6 +42,20 @@ FONT_FAMILY = FONT_FAMILY_STACK[0]   # 兼容别名
 | `PANEL_MARGINS` / `PANEL_SPACING` | 8 / 8 | 折叠面板内距 / 行距 |
 | `FORM_LABEL_MIN_WIDTH` | 112 | 表单行标签列统一最小宽（跨卡值列对齐） |
 
+## 3b. 工具钮尺寸
+
+| Token | 值 | 用途 |
+|---|---|---|
+| `TOOL_BTN_ICON` | `(14, 14)` | 图标像素边长（工具条/坞面板/顶栏图标钮共用） |
+| `TOOL_BTN_SIZE` | `(28, 28)` | 方形图标钮（工具条、流水线行按钮） |
+| `TOOL_BTN_COMPACT` | `(28, 24)` | 窄条内图标钮（垂直空间紧张时，如 B-Scan 工具条） |
+| `BTN_HEIGHT` | `28` | 带文字按钮的保底高度（`setMinimumHeight`） |
+
+规则：纯图标钮一律 `setFixedSize(*constants.TOOL_BTN_*)`，图标 `setIconSize(QSize(*constants.TOOL_BTN_ICON))`；
+带文字钮用 `setMinimumHeight(BTN_HEIGHT)` 保行高、宽度随内容。原散落的
+28×28 / 28×24 / 30×30 / 24×24 已收敛（2026-09-21）。**新增工具钮不得自造尺寸**；
+B-Scan 工具条的「+/-」已由文字钮改图标钮（`FIF.ZOOM_IN/OUT`），与其他视图一致。
+
 ## 4. 语义色（随主题查表，禁用裸常量）
 
 文字色一律走 `theme_helpers.status_color(key)`，徽章走 `badge_colors(key)`
@@ -62,6 +76,14 @@ FONT_FAMILY = FONT_FAMILY_STACK[0]   # 兼容别名
 - **空态**：`ui/widgets/empty_state.py` 的 `EmptyStateOverlay(host, icon=,
   title=, hint=)` 盖在画布/表格上，数据到达即隐藏。文案模式
   「〔什么数据〕+〔会出现在这里〕」，不写「暂无数据」死胡同文案。
+  已接入：B-Scan、平面地图、成果表、A-Scan、高程剖面、深度切片、
+  三维轨迹（共 7 处）。**新增数据视图必须接入**；浮层 host 取被覆盖的
+  画布控件（`.isVisible()` 会带祖先链，探针断言请用
+  `isVisibleTo(overlay.parentWidget())`）。
+- **pyqtgraph 网格**：仅曲线类视图（A-Scan / 高程剖面）`grid=True`，
+  图像类（B-Scan / 深度切片）保持 False。透明度由 `style_plot_item`
+  统一按主题取 `CHART_GRID_ALPHA_LIGHT/DARK`，**视图内不得写死 alpha**。
+  轴 pen/textPen/标签/标题/色标轴亦由它统一，视图只负责背景与曲线色。
 - **hint**：`make_hint(text, parent=, key='secondary')`；运行期改色用
   `HintLabel.set_hint_key(key)`，勿手工 setStyleSheet。
 - **徽章**：`make_badge(text, key)`；QSS 模板单源 `BADGE_QSS`（单占位，
@@ -87,7 +109,9 @@ FONT_FAMILY = FONT_FAMILY_STACK[0]   # 兼容别名
       `setStyleSheet("color: #...")` 手写色
 - [ ] 表单行用 `make_form_row()`（标签列 112px 自动对齐）
 - [ ] 卡片用 `make_card()`；主操作在卡头 `header_action`，不孤悬
+- [ ] 工具钮尺寸取自 `TOOL_BTN_*` / `BTN_HEIGHT`，无自造 `setFixedSize(N, N)`
 - [ ] 画布/表格空态有 `EmptyStateOverlay`，文案含前置条件说明
+- [ ] pyqtgraph 视图网格走 `style_plot_item(grid=)`，无写死 alpha
 - [ ] 随主题变色的控件实现 `apply_theme(dark)`，颜色查表不自持
 - [ ] 回归：`pytest tests/ -q` 全绿 +
       `QT_QPA_PLATFORM=offscreen python app_qt.py --smoke` 9 图无布局位移

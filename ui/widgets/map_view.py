@@ -27,7 +27,7 @@ from PyQt6.QtCore import QObject, QRectF, QRunnable, Qt, QThreadPool, pyqtSignal
 from PyQt6.QtGui import QColor, QImage
 from PyQt6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 from qfluentwidgets import FluentIcon as FIF
-from qfluentwidgets import ToolButton
+from qfluentwidgets import ToolButton, isDarkTheme
 
 from ui import constants
 from ui.desktop_backend_facade import tile_cache_dir
@@ -438,8 +438,12 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
         self._track_summaries: list[dict] = []
         self._track_colors: dict = {}
         self._raw_tracks: list = []
-        self._dark = False
-        self.setBackground('w')
+        # 主题：构造期即按当前主题取色，勿写死 False。
+        # 惰性预热的页面（空间信息页等）在窗口 _init_state 之后才构建，
+        # 拿不到那次全量 apply_theme 遍历；若构造期写死浅色，这些页面
+        # 在深色主题下会留下白底画布（实测 MapView 白底 + 深色浮层）。
+        self._dark = bool(isDarkTheme())
+        self.setBackground('k' if self._dark else 'w')
         self.scene().sigMouseClicked.connect(self._on_mouse_clicked)
         self.scene().sigMouseMoved.connect(self._on_mouse_moved)
 
@@ -469,7 +473,7 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
                 (FIF.ZOOM_OUT, '缩小', self.zoom_out),
                 (FIF.FIT_PAGE, '适应全部测线', self.fit_to_tracks)):
             btn = ToolButton(icon, self._zoom_panel)
-            btn.setFixedSize(30, 30)
+            btn.setFixedSize(*constants.TOOL_BTN_SIZE)
             btn.setToolTip(tip)
             btn.clicked.connect(slot)
             zoom_layout.addWidget(btn)

@@ -27,9 +27,12 @@ from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants
 from ui.motion import animations_enabled
-from ui.theme_helpers import font_families_qss
+from ui.theme_helpers import accent_color, font_families_qss
 
-_HINT_QSS = f'color: #888888; font-size: {constants.FONT_SIZE_BODY}px;'
+# 标题字号（pt，与 constants 的五档口径一致）。历史上这里写 px，
+# 使 SECTION(12) 实际渲染成 12px≈9pt，比设计意图小 25%。
+_TITLE_FONT_SIZE = constants.FONT_SIZE_SECTION
+_STRIP_FONT_SIZE = constants.FONT_SIZE_BODY
 
 
 class DockPanel(QWidget):
@@ -62,14 +65,14 @@ class DockPanel(QWidget):
         self._title_label = QLabel(self._title_text)
         self._title_label.setStyleSheet(
             f'font-family: {font_families_qss()}; '
-            f'font-size: {constants.FONT_SIZE_SECTION}px; font-weight: bold;')
+            f'font-size: {_TITLE_FONT_SIZE}pt; font-weight: bold;')
         self._head_layout.addWidget(self._title_label)
         self._head_layout.addStretch(1)
         self._header_widget: QWidget | None = None
         # 透明图标钮：与底部输出面板（日志/任务工具条）同一美术语言——
         # 平时无底色无边框，悬停才显底；14px 图标与全软件工具钮一致
         self._collapse_btn = TransparentToolButton(FIF.LEFT_ARROW, header)
-        self._collapse_btn.setIconSize(QSize(14, 14))
+        self._collapse_btn.setIconSize(QSize(*constants.TOOL_BTN_ICON))
         self._collapse_btn.setToolTip('收起为细条（点击细条可展开）')
         self._collapse_btn.setFixedSize(24, 24)
         self._collapse_btn.clicked.connect(self._on_toggle_clicked)
@@ -88,15 +91,12 @@ class DockPanel(QWidget):
         strip_layout.setContentsMargins(0, 0, 0, 4)
         strip_layout.setSpacing(2)
         self._expand_btn = TransparentToolButton(FIF.CHEVRON_RIGHT, self._strip_view)
-        self._expand_btn.setIconSize(QSize(12, 12))
+        self._expand_btn.setIconSize(QSize(*constants.TOOL_BTN_ICON))
         self._expand_btn.setToolTip('展开面板')
         self._expand_btn.setFixedSize(18, 24)
         self._expand_btn.clicked.connect(self._on_toggle_clicked)
         strip_layout.addWidget(self._expand_btn, 0, Qt.AlignmentFlag.AlignHCenter)
         self._strip_line_label = QLabel('')
-        self._strip_line_label.setStyleSheet(
-            f'font-family: {font_families_qss()}; '
-            f'font-size: {constants.FONT_SIZE_BODY}px; color: #0F6E56;')
         self._strip_line_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         strip_layout.addWidget(self._strip_line_label, 0,
                                Qt.AlignmentFlag.AlignHCenter)
@@ -107,6 +107,33 @@ class DockPanel(QWidget):
         self._strip_view.hide()
         self._strip_line_label.hide()
         self.setFixedWidth(self._expanded_width)
+        # 只设自身控件的初始配色，**不**调 self.apply_theme()：子类会在
+        # apply_theme 里触碰自己尚未构造的属性（如 FileTreePanel 的
+        # _project_label），基类构造期调用会 AttributeError。子类负责在
+        # __init__ 完成后自行 apply_theme。
+        self._apply_own_theme()
+
+    # ------------------------------------------------------------ 主题
+    def _apply_own_theme(self) -> None:
+        """刷本基类自有控件的配色（不含子类扩展）。"""
+        self._title_label.setStyleSheet(
+            f'font-family: {font_families_qss()}; '
+            f'font-size: {_TITLE_FONT_SIZE}pt; font-weight: bold;')
+        self._strip_line_label.setStyleSheet(
+            f'font-family: {font_families_qss()}; '
+            f'font-size: {_STRIP_FONT_SIZE}pt; color: {accent_color()};')
+
+    def apply_theme(self, dark: bool) -> None:
+        """标题与细条指示文字随主题重刷（主窗口 findChildren 遍历调用）。
+
+        细条文字用 :func:`accent_color` 而非写死色：强调色在深色主题下切到
+        高亮度变体（``#2dd4bf``），写死浅色主题的 ``#0F6E56`` 在深底上只有
+        约 3.2:1，低于 WCAG AA 的 4.5:1。
+
+        子类覆写时应调用 ``super().apply_theme(dark)`` 并追加自身逻辑。
+        """
+        self._dark = bool(dark)
+        self._apply_own_theme()
 
     # ------------------------------------------------------------ 布局接口
     def body_layout(self) -> QVBoxLayout:

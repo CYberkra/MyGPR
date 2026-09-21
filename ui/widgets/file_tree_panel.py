@@ -32,12 +32,13 @@ from PyQt6.QtWidgets import (
 )
 from qfluentwidgets import BodyLabel, MessageBox, TreeWidget
 from qfluentwidgets import FluentIcon as FIF
+from qfluentwidgets import isDarkTheme
 
 from ui import constants
 from ui.file_tree import (
     TreeNode, build_artifacts_model, build_files_model, build_tree_model,
 )
-from ui.theme_helpers import status_color
+from ui.theme_helpers import hint_qss, status_color
 from ui.widgets.context_menus import add_action, make_menu
 from ui.widgets.dock_panel import DockPanel
 from ui.widgets.segment_tabs import SlimSegment
@@ -47,8 +48,6 @@ _ROLE_KIND = Qt.ItemDataRole.UserRole + 1       # TreeNode.kind
 _ROLE_AUX = Qt.ItemDataRole.UserRole + 2        # artifact → 所属 line_id
 
 _SUFFIX_BRUSH = QBrush(QColor('#8a8a8a'))       # 行尾角标灰
-
-_HINT_QSS = f'color: #888888; font-size: {constants.FONT_SIZE_BODY}px;'
 
 
 def _status_key(status: str) -> str:
@@ -123,7 +122,7 @@ class FileTreePanel(DockPanel):
 
         # ---------------- 主体：项目名 + 分段 + 树 + 空态
         self._project_label = BodyLabel('未打开项目')
-        self._project_label.setStyleSheet(_HINT_QSS)
+        self._project_label.setStyleSheet(hint_qss('secondary'))
         self.body_layout().addWidget(self._project_label)
 
         # 视图分段（与顶部页签/输出面板同款 SlimSegment 药丸）
@@ -153,10 +152,13 @@ class FileTreePanel(DockPanel):
         self._project_root = ''
 
         self._empty_label = BodyLabel(_EMPTY_TEXT[_DEFAULT_VIEW])
-        self._empty_label.setStyleSheet(_HINT_QSS)
+        self._empty_label.setStyleSheet(hint_qss('secondary'))
         self.body_layout().addWidget(self._empty_label)
         self._tree.hide()
         self._empty_label.hide()
+        # 构造完成后刷一次主题（基类构造期不能调 apply_theme——那时本类
+        # 的 _project_label/_empty_label 尚未创建）。
+        self.apply_theme(isDarkTheme())
 
     # ------------------------------------------------ 页面协议（链路喂数据）
     def set_settings_manager(self, settings) -> None:
@@ -506,6 +508,14 @@ class FileTreePanel(DockPanel):
             self.line_delete_requested.emit([line_id])
 
     # ------------------------------------------------------------ 主题
-    def apply_theme(self, _dark: bool) -> None:
-        """主题切换 → 重建树刷新状态圆点色（主窗口 findChildren 统一调度）。"""
+    def apply_theme(self, dark: bool) -> None:
+        """主题切换 → 重刷 hint 文字色 + 重建树刷新状态圆点色。
+
+        主窗口 findChildren 统一调度。两个 hint label 的颜色经
+        :func:`hint_qss` 随主题查表——历史实现用模块级常量写死 ``#888888``，
+        深色底上对比度约 3.5:1 不达 WCAG AA，且模块常量不参与重刷。
+        """
+        super().apply_theme(dark)
+        self._project_label.setStyleSheet(hint_qss('secondary'))
+        self._empty_label.setStyleSheet(hint_qss('secondary'))
         self._rebuild()

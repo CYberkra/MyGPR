@@ -18,15 +18,17 @@ import pyqtgraph as pg
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QTransform
 
+from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import isDarkTheme
 
+from ui import constants
+from ui.widgets.empty_state import EmptyStateOverlay
 from ui.widgets.pg_view_base import GraphicsViewBase, style_plot_item
 
 __all__ = ["DepthSliceView"]
 
 _ISOLINE_PEN_DARK = (255, 210, 90)
 _ISOLINE_PEN_LIGHT = (176, 108, 0)
-
 
 class DepthSliceView(GraphicsViewBase, pg.PlotWidget):
     """平面标量场视图：色块网格 + 等值线 + 测线轨迹叠加。
@@ -40,7 +42,8 @@ class DepthSliceView(GraphicsViewBase, pg.PlotWidget):
         self._plot_item = self.getPlotItem()
         self._plot_item.setLabel('bottom', '东向坐标', units='m')
         self._plot_item.setLabel('left', '北向坐标', units='m')
-        self._plot_item.showGrid(x=True, y=True, alpha=0.3)
+        # 网格透明度在 apply_theme 里按主题取 token（浅 0.28 / 深 0.18）：
+        # 构造期写死 0.3 会让深色主题的网格明显抢过数据。
         self._plot_item.setAspectLocked(True)
         self._image = pg.ImageItem(axisOrder='row-major')
         self._plot_item.addItem(self._image)
@@ -71,6 +74,11 @@ class DepthSliceView(GraphicsViewBase, pg.PlotWidget):
         # 关闭 pyqtgraph 原生英文右键菜单，右键由统一 RoundMenu 接管
         self._plot_item.vb.setMenuEnabled(False)
         self.scene().sigMouseClicked.connect(self._on_mouse_clicked)
+
+        # 空态引导浮层：零网格/零轨迹时替代"只剩坐标轴"的空画布
+        self._empty_overlay = EmptyStateOverlay(
+            self, icon=FIF.PHOTO, title='暂无深度切片',
+            hint='请求深度预览或勾选测线后，此处显示切片场与航迹')
         self.apply_theme(isDarkTheme())
 
     # ------------------------------------------------------------ 网格
@@ -119,6 +127,7 @@ class DepthSliceView(GraphicsViewBase, pg.PlotWidget):
         self._grid_extent = (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
         self._plot_item.setTitle(attribute or None)
         self._auto_range()
+        self._sync_empty_state()
 
     def clear_grid(self) -> None:
         """清空网格与等值线（轨迹保留，由 set_tracks 单独管理）。"""
@@ -128,6 +137,12 @@ class DepthSliceView(GraphicsViewBase, pg.PlotWidget):
         self._grid_extent = None
         self._plot_item.setTitle(None)
         self._colorbar.setLevels((0.0, 1.0))
+        self._sync_empty_state()
+
+    def _sync_empty_state(self) -> None:
+        """空态浮层可见性 = 无网格且无轨迹。"""
+        has_tracks = self._track_xy is not None and self._track_xy.size > 0
+        self._empty_overlay.setVisible(self._matrix is None and not has_tracks)
 
     def value_range(self) -> tuple[float, float] | None:
         """当前矩阵的 (min, max)，无有效数据时 None（供滑条定界）。"""
@@ -196,6 +211,7 @@ class DepthSliceView(GraphicsViewBase, pg.PlotWidget):
 
         self._sync_track_scatters(groups)
         self._auto_range()
+        self._sync_empty_state()
 
     def _sync_track_scatters(self, groups) -> None:
         """按颜色分组增量同步散点 item（复用池，避免反复 add/remove）。"""
@@ -226,6 +242,7 @@ class DepthSliceView(GraphicsViewBase, pg.PlotWidget):
             item.setData(x=[], y=[])
             item.setVisible(False)
         self._track_xy = None
+        self._sync_empty_state()
 
     # ------------------------------------------------------------ 内部
     def _auto_range(self) -> None:
@@ -280,11 +297,16 @@ class DepthSliceView(GraphicsViewBase, pg.PlotWidget):
     def apply_theme(self, dark: bool) -> None:
         """深色 bg 'k'/文字 'w'；浅色 bg 'w'/文字 'k'（与剖面视图一致）。
 
-        轴/标题/色标轴统一走 style_plot_item（色标轴随主题同步）。
+        轴/标题/色标轴统一走 style_plot_item（色标轴随主题同步）；
+        网格透明度随主题取 token（深底用更淡的值避免抢过数据）。
         """
         self._dark = bool(dark)
         self.setBackground('k' if dark else 'w')
         style_plot_item(self._plot_item, dark,
                         colorbar_axis=self._colorbar.axis)
+        self._plot_item.showGrid(
+            x=True, y=True,
+            alpha=(constants.CHART_GRID_ALPHA_DARK if dark
+                   else constants.CHART_GRID_ALPHA_LIGHT))
         self._isocurve.setPen(pg.mkPen(
             _ISOLINE_PEN_DARK if dark else _ISOLINE_PEN_LIGHT, width=2))

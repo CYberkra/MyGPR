@@ -120,19 +120,24 @@ class CollapsiblePanel(QWidget):
         return self._collapse_width if self._collapsed else self._expand_width
 
     def set_collapsed(self, collapsed: bool, animate: bool = True) -> None:
-        """折叠或展开面板。"""
+        """折叠或展开面板。
+
+        动画进行中再次点击**不丢弃**：旧实现 `if self._animating: return`
+        会把用户的第二次点击静默吃掉（快速连点只有第一次生效）。改为停止
+        当前动画、以「当前实际最大宽度」为新起点续跑到目标，视觉上是平滑
+        换向而非跳变。
+        """
         collapsed = bool(collapsed)
         if self._collapsed == collapsed and not self._animating:
-            return
-        if self._animating:
             return
 
         self._animating = True
         self._collapsed = collapsed
 
         target = self._collapse_width if collapsed else self._expand_width
-        current = self.maximumWidth()
+        # 停表后从当前宽度续跑（maximumWidth 即为动画实时值）
         self._animation.stop()
+        current = self.maximumWidth()
         self._animation.setStartValue(current)
         self._animation.setEndValue(target)
 
@@ -142,7 +147,8 @@ class CollapsiblePanel(QWidget):
 
         if collapsed:
             self._content.setVisible(False)
-            self._update_button_icon()
+
+        self._update_button_icon()
 
         if animate:
             self._animation.start()
@@ -156,10 +162,16 @@ class CollapsiblePanel(QWidget):
 
     # ------------------------------------------------------------ 内部
     def _on_animation_finished(self) -> None:
+        # stop() 也会发 finished（Qt 语义），续跑场景下会误清 _animating，
+        # 故仅当确实跑到终点（宽度 == 目标）才收尾。
+        target = (self._collapse_width if self._collapsed
+                  else self._expand_width)
+        if self.maximumWidth() != target:
+            return
         self._animating = False
         if not self._collapsed:
             self._content.setVisible(True)
-            self._update_button_icon()
+        self._update_button_icon()
         self.sig_collapsed.emit(self._collapsed)
 
     def _update_button_icon(self) -> None:

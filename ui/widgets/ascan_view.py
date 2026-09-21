@@ -7,9 +7,11 @@ pen 宽 2、Y 范围 min-0.1 ~ max+0.1、轴标签 bottom='采样点' / left='�
 """
 
 from PyQt6.QtWidgets import QVBoxLayout, QWidget
+from qfluentwidgets import FluentIcon as FIF
 
 import pyqtgraph as pg
 
+from ui.widgets.empty_state import EmptyStateOverlay
 from ui.widgets.pg_view_base import GraphicsViewBase, style_plot_item
 
 
@@ -28,6 +30,12 @@ class AScanView(GraphicsViewBase, QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._plot)
+
+        # 空态引导浮层：零数据时替代"只剩坐标轴"的空画布
+        self._empty_overlay = EmptyStateOverlay(
+            self._plot, icon=FIF.PHOTO, title='暂无波形',
+            hint='在测线上选取一道数据后，此处显示 A-Scan 时域波形')
+
         self.apply_theme(False)
 
     def set_trace(self, samples, *, title="A-Scan时域波形") -> None:
@@ -46,9 +54,11 @@ class AScanView(GraphicsViewBase, QWidget):
         y_max = float(np.nanmax(data)) + 0.1
         self._plot.setYRange(y_min, y_max)
         self._plot.setXRange(0, max(data.size - 1, 1))
+        self._empty_overlay.setVisible(False)
 
     def clear(self) -> None:
         self._curve.setData([], [])
+        self._empty_overlay.setVisible(True)
 
     def apply_theme(self, dark: bool) -> None:
         """深色 bg 'k'/曲线 'w'；浅色 bg 'w'/曲线 'b'；轴 pen/textPen/标签/标题同步。"""

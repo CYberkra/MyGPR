@@ -298,17 +298,24 @@ _applied_dark: bool | None = None
 def apply_theme(theme: str) -> None:
     """应用主题：setTheme + pyqtgraph 背景同步（'k'/'w'）+ palette + 原生控件 QSS。
 
-    幂等：目标主题与已应用主题一致时直接返回（重复的全局样式重算对大
-    控件树是秒级开销）。需要强制重放时先置 ``theme_helpers._applied_dark = None``。
+    幂等：目标主题与已应用主题一致、**且 qfluentwidgets 当前实际主题也一致**
+    时直接返回（重复的全局样式重算对大控件树是秒级开销）。需要强制重放时
+    先置 ``theme_helpers._applied_dark = None``。
 
-    :param theme: ``'浅色主题'`` / ``'深色主题'``（也接受 ``Theme`` 枚举）。
+    为什么短路要同时校验 ``isDarkTheme()``：``_applied_dark`` 只记录「本函数
+    上次把主题设成了什么」，无法反映外部对主题的改动。第三方代码（或历史
+    脚本）直接调 ``qfluentwidgets.setTheme()`` 后，``_applied_dark`` 会与实际
+    状态脱节；此时若只信 ``_applied_dark``，本函数会误判为「已经是目标主题」
+    而跳过，导致 palette / pyqtgraph 背景 / 原生控件 QSS 全部停留在旧主题。
+    这是一种静默失效——界面看起来"应用了主题"，实际三层基础设施没跟上。
     """
     global _applied_dark
     if isinstance(theme, Theme):
         dark = theme == Theme.DARK
     else:
         dark = str(theme) == constants.THEME_DARK
-    if _applied_dark is not None and dark == _applied_dark:
+    if _applied_dark is not None and dark == _applied_dark \
+            and isDarkTheme() == dark:
         return
     setTheme(Theme.DARK if dark else Theme.LIGHT)
     pg.setConfigOption('background', 'k' if dark else 'w')

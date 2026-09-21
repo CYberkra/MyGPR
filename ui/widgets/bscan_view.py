@@ -25,7 +25,7 @@ from enum import Enum
 
 import pyqtgraph as pg
 from PyQt6.QtWidgets import QLabel
-from qfluentwidgets import FluentIcon as FIF, PushButton
+from qfluentwidgets import FluentIcon as FIF, PushButton, ToolButton
 
 from ui import constants
 from ui.theme_helpers import control_palette
@@ -243,33 +243,33 @@ class BScanView(GraphicsViewBase, QWidget):
         layout.setContentsMargins(0, 0, 0, 4)
         layout.setSpacing(4)
 
-        self._zoom_in_btn = PushButton('+', self)
+        self._zoom_in_btn = ToolButton(FIF.ZOOM_IN, self)
         self._zoom_in_btn.setToolTip('放大')
-        self._zoom_in_btn.setFixedSize(28, 24)
+        self._zoom_in_btn.setFixedSize(*constants.TOOL_BTN_COMPACT)
         self._zoom_in_btn.clicked.connect(self.zoom_in)
         layout.addWidget(self._zoom_in_btn)
 
-        self._zoom_out_btn = PushButton('-', self)
+        self._zoom_out_btn = ToolButton(FIF.ZOOM_OUT, self)
         self._zoom_out_btn.setToolTip('缩小')
-        self._zoom_out_btn.setFixedSize(28, 24)
+        self._zoom_out_btn.setFixedSize(*constants.TOOL_BTN_COMPACT)
         self._zoom_out_btn.clicked.connect(self.zoom_out)
         layout.addWidget(self._zoom_out_btn)
 
         self._fit_btn = PushButton('自适应', self)
         self._fit_btn.setToolTip('拉伸铺满窗口')
-        self._fit_btn.setMinimumHeight(24)
+        self._fit_btn.setMinimumHeight(constants.BTN_HEIGHT)
         self._fit_btn.clicked.connect(self.fit_to_data)
         layout.addWidget(self._fit_btn)
 
         self._square_btn = PushButton('方形', self)
         self._square_btn.setToolTip('图像整体按近似正方形显示（B-Scan 常用比例）')
-        self._square_btn.setMinimumHeight(24)
+        self._square_btn.setMinimumHeight(constants.BTN_HEIGHT)
         self._square_btn.clicked.connect(self.fit_square)
         layout.addWidget(self._square_btn)
 
         self._one_to_one_btn = PushButton('1:1', self)
         self._one_to_one_btn.setToolTip('像素 1:1 显示（一道 = 一采样点等宽等高）')
-        self._one_to_one_btn.setMinimumHeight(24)
+        self._one_to_one_btn.setMinimumHeight(constants.BTN_HEIGHT)
         self._one_to_one_btn.clicked.connect(self.reset_1to1)
         layout.addWidget(self._one_to_one_btn)
 
