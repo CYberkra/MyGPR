@@ -8,6 +8,8 @@
   ``view.setGraphicsEffect(None)`` 去阴影、
   给 ``#comboListWidget`` 加实色 1px 边框（深色 ``rgb(100,100,100)`` / 浅色 ``rgb(200,200,200)``）。
 """
+from typing import TYPE_CHECKING
+
 import pyqtgraph as pg
 from PyQt6.QtGui import QColor, QFont, QPalette
 from PyQt6.QtWidgets import QApplication, QStyleFactory
@@ -15,6 +17,9 @@ from qfluentwidgets import Theme, isDarkTheme, setTheme
 from qfluentwidgets.components.widgets.combo_box import ComboBoxMenu
 
 from ui import constants
+
+if TYPE_CHECKING:
+    from PyQt6.QtWidgets import QLabel   # 仅 make_badge 返回注解用
 
 _combo_patch_applied = False
 _light_palette = None

@@ -16,7 +16,7 @@ import os
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
-    BodyLabel, CaptionLabel, CheckBox, ComboBox, DoubleSpinBox,
+    BodyLabel, CheckBox, ComboBox, DoubleSpinBox,
     LineEdit, PushButton, ScrollArea, SpinBox,
 )
 

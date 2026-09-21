@@ -12,7 +12,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (QHBoxLayout, QHeaderView, QLabel,
                              QStackedLayout, QTableWidget, QTableWidgetItem,
                              QVBoxLayout, QWidget)
-from qfluentwidgets import CaptionLabel, ProgressBar, PushButton, ScrollArea
+from qfluentwidgets import ProgressBar, PushButton, ScrollArea
 
 from ui.motion import animate_badge_color, animate_progress
 from ui.page_scaffold import HintLabel, style_transparent_scroll
