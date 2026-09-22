@@ -275,15 +275,40 @@ class MyGPRMainWindow(FluentWindow):
             self._wire_bscan_expand(view)
 
     def _connect_bscan_signals(self, view) -> None:
-        """把用户操作（而非恢复动作）接到设置写盘。"""
+        """把用户操作（而非恢复动作）接到设置写盘。
+
+        ⚠️ 必须**同时回写设置页控件**（``_mirror_bscan_setting``）：设置页的
+        ComboBox/SpinBox 是 B-Scan 偏好的第二份副本，而 ``closeEvent`` 会把
+        ``settings_page.settings()`` 整体回写设置文件。若工具条改了偏好却不
+        同步到设置页，关窗时就会被那份**过期的默认值**覆盖掉——表现为「在
+        工具条切了方形，重开又变回铺满」。这是排查过的真实缺陷，别只写盘。
+        """
         view.sig_aspect_changed.connect(
-            lambda mode: self._persist_setting('bscan_aspect_mode', str(mode)))
+            lambda mode: self._mirror_bscan_setting('bscan_aspect_mode', str(mode)))
         view.sig_x_axis_changed.connect(
-            lambda mode: self._persist_setting('bscan_x_axis', str(mode)))
+            lambda mode: self._mirror_bscan_setting('bscan_x_axis', str(mode)))
         view.sig_y_axis_changed.connect(
-            lambda mode: self._persist_setting('bscan_y_axis', str(mode)))
+            lambda mode: self._mirror_bscan_setting('bscan_y_axis', str(mode)))
         view.sig_levels_changed.connect(
-            lambda low, high: self._persist_bscan_levels(low, high))
+            lambda low, high: self._mirror_bscan_levels(low, high))
+
+    def _mirror_bscan_setting(self, key: str, value) -> None:
+        """写盘 + 把设置页控件同步到同一值（避免关窗回写覆盖用户选择）。"""
+        self._persist_setting(key, value)
+        self._sync_settings_page_bscan({key: value})
+
+    def _mirror_bscan_levels(self, low: float, high: float) -> None:
+        """色阶两键一并写盘与同步（避免中途崩溃留下 low > high）。"""
+        self._persist_bscan_levels(low, high)
+        self._sync_settings_page_bscan({
+            'bscan_p_low': float(low), 'bscan_p_high': float(high)})
+
+    def _sync_settings_page_bscan(self, values: dict) -> None:
+        """把 B-Scan 偏好同步进设置页控件（blockSignals 防信号回环）。"""
+        settings_page = self._page('settingsInterface')
+        syncer = getattr(settings_page, 'sync_bscan_view_settings', None)
+        if callable(syncer):
+            syncer(values)
 
     def _wire_bscan_expand(self, view) -> None:
         """「⤢ 铺满」：只有能折叠侧栏的页面才露出该钮，并接上折叠动作。"""

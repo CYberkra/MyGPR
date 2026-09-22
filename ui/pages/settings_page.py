@@ -280,6 +280,45 @@ class SettingsPage(ScrollArea):
             'bscan_p_high': float(self._bscan_p_high_spin.value()),
         }
 
+    def sync_bscan_view_settings(self, values: dict) -> None:
+        """把外部（B-Scan 工具条/右键菜单）改的偏好同步进本页控件。
+
+        **为什么必须有这个方法**：``MyGPRMainWindow.closeEvent`` 会把
+        ``self.settings()`` 整体回写设置文件，而本页控件是 B-Scan 偏好的第二
+        份副本。用户在 B-Scan 工具条上切成方形后，若不同步到这里，关窗时就会
+        被本页过期的默认值覆盖——表现为「切了比例，重开又变回去」。
+        """
+        values = dict(values or {})
+        combos = (
+            (self._bscan_aspect_combo, 'bscan_aspect_mode'),
+            (self._bscan_x_axis_combo, 'bscan_x_axis'),
+            (self._bscan_y_axis_combo, 'bscan_y_axis'),
+        )
+        spins = (
+            (self._bscan_p_low_spin, 'bscan_p_low'),
+            (self._bscan_p_high_spin, 'bscan_p_high'),
+        )
+        touched = [w for w, key in combos if key in values]
+        touched += [w for w, key in spins if key in values]
+        self._loading_settings = True
+        for widget in touched:
+            widget.blockSignals(True)
+        try:
+            for combo, key in combos:
+                if key in values:
+                    current = str(combo.currentData())
+                    self._select_by_data(combo, values[key], current)
+            for spin, key in spins:
+                if key in values:
+                    try:
+                        spin.setValue(float(values[key]))
+                    except (TypeError, ValueError):
+                        continue        # 坏值：该项保持现状
+        finally:
+            for widget in touched:
+                widget.blockSignals(False)
+            self._loading_settings = False
+
     def settings(self) -> dict:
         """当前控件值（键与 DEFAULT_SETTINGS 对齐）。"""
         values = {
