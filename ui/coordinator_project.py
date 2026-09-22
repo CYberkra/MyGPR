@@ -190,7 +190,6 @@ class ProjectChain:
             co.file_tree().set_project_info(None)
         project.set_lines([])
         project.set_artifacts([])
-        project.set_preview_bundle(None)
         processing.set_line_label('')
         processing.set_original_bundle(None)
         processing.set_result_bundle(None)
@@ -388,19 +387,21 @@ class ProjectChain:
                 line_id or self.current_line_id, artifact_id)
 
     def on_dataset_preview(self, bundle) -> None:
-        """原始数据预览 → 主页 / 项目页 / 处理页（原始）/ 解释页剖面。"""
+        """原始数据预览 → 主页 / 处理页（原始）/ 解释页剖面。
+
+        项目页不再接收 B-Scan 预览（2026-09-22 移除，见 ProjectPage 模块
+        文档）：该页右列三卡纵向分割后预览区只有 ~198px 高，B-Scan 必被
+        压扁；查看请走处理页/解释页。
+        """
         co = self._co
         co.page('homeInterface').set_preview_bundle(bundle)
-        co.page('projectInterface').set_preview_bundle(bundle)
         co.page('processingInterface').set_original_bundle(bundle)
         co.page('interpretationInterface').set_bundle(bundle)
 
     def on_artifact_preview(self, artifact_id: str, bundle) -> None:
-        """成果预览 → 项目页预览 + 处理页（处理结果）。"""
+        """成果预览 → 处理页（处理结果）。"""
         co = self._co
-        project = co.page('projectInterface')
         processing = co.page('processingInterface')
-        project.set_preview_bundle(bundle)
         processing.set_result_bundle(bundle)
         processing_chain = co.processing
         if processing_chain.show_run_completion_notice:
@@ -410,10 +411,8 @@ class ProjectChain:
             processing.show_result_segment()
 
     def on_preview_invalidated(self) -> None:
-        """当前预览的成果已被删除 → 清空项目页/处理页的成果预览。"""
-        project = self._co.page('projectInterface')
+        """当前预览的成果已被删除 → 清空处理页的成果预览。"""
         processing = self._co.page('processingInterface')
-        project.set_preview_bundle(None)
         processing.set_result_bundle(None)
 
     def on_line_delete_requested(self, line_ids: list[str]) -> None:
