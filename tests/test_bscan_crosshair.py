@@ -104,15 +104,34 @@ class TestCrosshairWidget:
         view = BScanView()
         view.apply_theme(True)
         assert '#000000' in view._toolbar.styleSheet()
+        # 轴单位钮的"当前生效"态用强调色高亮（覆盖调色板 QSS），其余按钮
+        # 必须是调色板文本色——两类都要覆盖，否则会漏掉高亮那几枚
+        accent_buttons = (view._y_sample_btn, view._y_elevation_btn,
+                          view._x_trace_btn, view._x_distance_btn)
+        aspect_buttons = (view._fit_btn, view._square_btn,
+                          view._one_to_one_btn)
         for button in view._toolbar_buttons:
+            if button in accent_buttons or button in aspect_buttons:
+                continue
             assert '#2d2d2d' in button.styleSheet()
             assert '#f0f0f0' in button.styleSheet()
+        # 当前生效的那几枚是高亮态（未生效/置灰的为空样式）
+        assert 'color:' in view._y_sample_btn.styleSheet()
+        assert 'color:' in view._x_trace_btn.styleSheet()
+        assert 'color:' in view._fit_btn.styleSheet()
+        assert view._y_elevation_btn.styleSheet() == ''      # 无高程 → 未生效
+        assert view._x_distance_btn.styleSheet() == ''       # 无里程 → 未生效
 
         view.apply_theme(False)
         assert '#ffffff' in view._toolbar.styleSheet()
         for button in view._toolbar_buttons:
+            if button in accent_buttons or button in aspect_buttons:
+                continue
             assert '#ffffff' in button.styleSheet()
             assert '#202020' in button.styleSheet()
+        # 主题切换后高亮随强调色重刷（不能还是旧主题的色）
+        assert 'color:' in view._fit_btn.styleSheet()
+        assert 'color:' in view._y_sample_btn.styleSheet()
 
 
 class TestPreviewCoordinateMapping:

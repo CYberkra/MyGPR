@@ -16,6 +16,7 @@ from ui.desktop_backend_facade import (
     SensorSyncSettings,
     build_preview_bundle,
     resample_trace_vector,
+    time_to_depth_axis,
 )
 from ui.controllers.backend_controller import friendly_error_message, run_command
 
@@ -304,6 +305,7 @@ class ProjectController(QObject):
         total_samples: int = 0,
         total_traces: int = 0,
         trace_elevation_m: Any = None,
+        dielectric_constant: float = 0.0,
     ) -> Any:
         """从 read_window 结果构建预览 bundle。
 
@@ -312,13 +314,20 @@ class ProjectController(QObject):
 
         ``trace_elevation_m`` 为**全分辨率**逐道地面高程（m）；取值时用与矩阵
         窗口相同的 ``trace_indices`` 抽样，保证每一列的高程与该道严格对齐。
+
+        ``dielectric_constant`` 非空时把走时轴换算成深度轴（m）一并带上：
+        海拔纵轴 = 地面高程 − 深度，必须要有米制深度才能得到海拔；缺失则
+        预览只有走时纵轴，视图侧把「海拔」钮置灰。
         """
         time_axis_ns = None
         distance_axis_m = None
         elevation_axis_m = None
+        depth_axis_m = None
         if sample_indices is not None and total_samples > 0:
             base = np.linspace(0.0, float(time_window_ns), int(total_samples), dtype=np.float32)
             time_axis_ns = base[np.asarray(sample_indices, dtype=np.int64)]
+            if float(dielectric_constant or 0.0) > 0.0:
+                depth_axis_m = time_to_depth_axis(time_axis_ns, dielectric_constant)
         if trace_indices is not None and total_traces > 0:
             index = np.asarray(trace_indices, dtype=np.int64)
             base = np.linspace(0.0, float(length_m or max(int(total_traces) - 1, 1)), int(total_traces), dtype=np.float32)
@@ -332,6 +341,7 @@ class ProjectController(QObject):
             time_axis_ns=time_axis_ns,
             distance_axis_m=distance_axis_m,
             trace_elevation_m=elevation_axis_m,
+            depth_axis_m=depth_axis_m,
         )
 
     @staticmethod
@@ -763,6 +773,8 @@ class _PreviewLineCommand:
                 sample_indices=sample_idx, trace_indices=trace_idx,
                 total_samples=info.shape[0], total_traces=info.shape[1],
                 trace_elevation_m=elevation,
+                dielectric_constant=float(getattr(
+                    info, 'dielectric_constant', 0.0) or 0.0),
             )
         except Exception as exc:  # noqa: BLE001
             _LOGGER.exception("数据预览失败")
@@ -812,6 +824,8 @@ class _PreviewArtifactCommand:
                 sample_indices=sample_idx, trace_indices=trace_idx,
                 total_samples=info.shape[0], total_traces=info.shape[1],
                 trace_elevation_m=elevation,
+                dielectric_constant=float(getattr(
+                    info, 'dielectric_constant', 0.0) or 0.0),
             )
         except Exception as exc:  # noqa: BLE001
             _LOGGER.exception("成果预览失败")

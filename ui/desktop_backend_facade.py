@@ -25,7 +25,7 @@ from mygpr.application.jobs.models import JobEventType, JobResultSummary  # noqa
 # ---------------------------------------------------------------------------
 # Backend imports (the only place in ui/ that touches core/mygpr directly)
 # ---------------------------------------------------------------------------
-from core.gpr_data_model import GPRDataSet
+from core.gpr_data_model import GPRDataSet, time_to_depth_axis
 from core.gui_rendering import align_trace_vector, bundle_from_dataset, compute_levels
 from core.gpr_format_registry import supported_file_dialog_filter
 from core.app_paths import get_tile_cache_dir
@@ -45,6 +45,7 @@ __all__ = [
     "PipelineDefinition",
     "PipelineStep",
     "SensorSyncSettings",
+    "time_to_depth_axis",
 ]
 
 _LOGGER = logging.getLogger(__name__)
@@ -80,6 +81,7 @@ def build_preview_bundle(
     p_high: float = 98.0,
     time_window_ns: float = 250.0,
     trace_elevation_m: Any = None,
+    depth_axis_m: Any = None,
 ) -> Any:
     """Build a :class:`PreviewBundle` from raw array data.
 
@@ -88,6 +90,11 @@ def build_preview_bundle(
     ``GPRDataSet``.  ``time_window_ns`` 必须为真实测线时窗（P1-5），否则
     预览纵轴物理刻度错误。``trace_elevation_m`` 为逐道地面高程（m），缺失
     时 bundle 不带高程、视图侧据此禁用海拔纵轴。
+
+    ``depth_axis_m`` 为「地表以下深度（m）」，与 time_axis_ns 等长；海拔纵轴
+    由「地面高程 − 深度」得到，因此需要显式给出（默认缺失时
+    ``GPRDataSet`` 会用默认介电常数 9.0 兜底换算，与真实介电常数不符，
+    故要求调用方用真实介电常数算好后传入）。
     """
     sample_count = int(getattr(matrix, "shape", (0,))[0])
     trace_count = int(getattr(matrix, "shape", (0, 1))[1])
@@ -97,7 +104,7 @@ def build_preview_bundle(
         matrix=matrix,
         distance_axis_m=distance_axis_m if distance_axis_m is not None else [],
         time_axis_ns=time_axis_ns if time_axis_ns is not None else [],
-        depth_axis_m=[],
+        depth_axis_m=[] if depth_axis_m is None else depth_axis_m,
         sample_count=sample_count,
         trace_count=trace_count,
         time_window_ns=time_window_ns,

@@ -50,6 +50,7 @@ class PreviewBundle:
     sample_axis: np.ndarray | None = None    # optional time/depth axis (downsampled)
     sample_axis_label: str = ""
     trace_elevation_m: np.ndarray | None = None  # 逐道地面高程 (m, downsampled)
+    depth_axis_m: np.ndarray | None = None   # 与 sample_axis 等长的**深度**轴 (m)
 
     def __post_init__(self) -> None:
         matrix = np.asarray(self.matrix, dtype=np.float32)
@@ -60,7 +61,7 @@ class PreviewBundle:
         object.__setattr__(self, "vmax", float(self.vmax))
         object.__setattr__(self, "sample_count", max(0, int(self.sample_count)))
         object.__setattr__(self, "trace_count", max(0, int(self.trace_count)))
-        for name in ("trace_axis_m", "sample_axis"):
+        for name in ("trace_axis_m", "sample_axis", "depth_axis_m"):
             axis = getattr(self, name)
             if axis is not None:
                 object.__setattr__(self, name, np.asarray(axis, dtype=np.float64))
@@ -177,6 +178,7 @@ def make_preview_bundle(
     sample_axis: Any = None,
     sample_axis_label: str = "",
     trace_elevation_m: Any = None,
+    depth_axis_m: Any = None,
     max_samples: int = _MAX_PREVIEW_SAMPLES,
     max_traces: int = _MAX_PREVIEW_TRACES,
 ) -> PreviewBundle:
@@ -201,6 +203,7 @@ def make_preview_bundle(
         trace_elevation_m=_downsample_axis(
             align_trace_vector(trace_elevation_m, trace_count), col_step, preview.shape[1]
         ),
+        depth_axis_m=_downsample_axis(depth_axis_m, row_step, preview.shape[0]),
     )
 
 
@@ -291,6 +294,15 @@ def bundle_from_dataset(dataset: Any, **kw: Any) -> PreviewBundle:
         sample_axis = _dataset_axis(dataset, "depth_axis_m")
         sample_axis_label = "深度 (m)" if sample_axis is not None else ""
 
+    # 深度轴：海拔纵轴要用「地表以下米数」才能由"地面高程 − 深度"得海拔，
+    # 而 sample_axis 通常是双程走时(ns)，二者不可混用。数据集自带 depth_axis_m
+    # 时直接用；只有纯深度数据（无走时轴）时 sample_axis 本身就是深度。
+    depth_axis = kw.pop("depth_axis_m", None)
+    if depth_axis is None:
+        depth_axis = _dataset_axis(dataset, "depth_axis_m")
+    if depth_axis is None and sample_axis_label == "深度 (m)":
+        depth_axis = sample_axis
+
     title = kw.pop("title", "") or str(getattr(dataset, "line_id", "") or "")
     elevation = kw.pop("trace_elevation_m", None)
     if elevation is None:
@@ -316,6 +328,7 @@ def bundle_from_dataset(dataset: Any, **kw: Any) -> PreviewBundle:
         sample_axis=_downsample_axis(sample_axis, row_step, preview.shape[0]),
         sample_axis_label=sample_axis_label if sample_axis is not None else "",
         trace_elevation_m=_downsample_axis(elevation, col_step, preview.shape[1]),
+        depth_axis_m=_downsample_axis(depth_axis, row_step, preview.shape[0]),
     )
 
 
