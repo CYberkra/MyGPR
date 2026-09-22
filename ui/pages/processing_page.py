@@ -15,7 +15,9 @@
   切换显示），原始+成果齐→自动变 0 号位原始 | 1 号位成果同屏对比；
 - single：固定单视图，分段控件切换显示原始数据 / 处理结果（历史行为）；
 - dual：固定左右并排双视图，分段控件此时决定色阶刷新焦点；
-- quad：固定 2×2 四宫格，0/1 号位与 dual 相同，2/3 号位留空占位。
+- quad：固定 2×2 四宫格，0/1 号位与 dual 相同，2/3 号位留空占位；
+- free：自由窗口（Windows 视窗式）——两个可拖动/缩放/最大化的子窗口
+  （0 号位原始数据、1 号位处理结果），右键空白处平铺/层叠/重置。
 
 页面纯展示 + 发信号，不直接调 controller/backend。
 内部联动：PipelineList.sig_step_selected → ParamForm 载入该步骤参数；
@@ -334,9 +336,9 @@ class ProcessingPage(PanelStateMixin, QWidget):
     def set_original_bundle(self, bundle) -> None:
         """原始数据预览 bundle。
 
-        auto 模式下面板数先按 bundle 数量重解析；dual/quad 下 0 号位固定
-        显示原始数据，无论分段停在哪一侧都要重发；single 下仅当分段选中
-        "原始数据"时刷新。
+        auto 模式下面板数先按 bundle 数量重解析；dual/quad/free 下 0 号位
+        固定显示原始数据，无论分段停在哪一侧都要重发；single 下仅当分段
+        选中"原始数据"时刷新。
         """
         self._original_bundle = bundle
         self._sync_auto_layout()
@@ -485,7 +487,7 @@ class ProcessingPage(PanelStateMixin, QWidget):
 
     # ---------------- 预览分发（BScanContainer 多视图）
     def _shows_both_panels(self) -> bool:
-        """当前实际布局是否同屏展示原始与成果两侧（dual/quad）。"""
+        """当前实际布局是否同屏展示原始与成果两侧（dual/quad/free）。"""
         return self._bscan_container.effective_mode() != LAYOUT_SINGLE
 
     def _sync_auto_layout(self) -> None:
@@ -513,7 +515,7 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._set_panel_data(self._bscan_container.primary_view(), bundle)
 
     def _distribute_bundles(self) -> None:
-        """dual/quad：0 号位固定原始数据、1 号位固定处理结果，其余留空。
+        """dual/quad/free：0 号位固定原始数据、1 号位固定处理结果，其余留空。
 
         按 views() 实际数量分发——不许用 view_at(2/3) 凑数：dual 模式下
         view_at 越界会回落面板 0，随后 clear() 把刚填的原始数据清掉。
@@ -545,7 +547,7 @@ class ProcessingPage(PanelStateMixin, QWidget):
     def _refresh_levels(self) -> None:
         """按 p_low/p_high 百分位重算显示色阶。
 
-        single：只算分段选中的 bundle；dual/quad：0/1 号位各用各的
+        single：只算分段选中的 bundle；dual/quad/free：0/1 号位各用各的
         bundle 分别重算（两侧数据不同，共享色阶会压暗一侧对比）。
         """
         p_low = float(self._p_low_spin.value())

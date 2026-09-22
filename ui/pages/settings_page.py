@@ -164,11 +164,13 @@ class SettingsPage(ScrollArea):
         self._bscan_layout_combo.addItem('单视图', userData='single')
         self._bscan_layout_combo.addItem('双视图对比（原始 | 成果）', userData='dual')
         self._bscan_layout_combo.addItem('四宫格', userData='quad')
+        self._bscan_layout_combo.addItem('自由窗口（可拖动）', userData='free')
         self._bscan_layout_combo.setMinimumWidth(180)
         self._bscan_layout_combo.setToolTip(
             '自动：只有原始数据时显示一个画布，处理结果出来后自动变成左右'
-            '对比；后三项为固定布局，不随数据增减。四宫格下排两个画布留作'
-            '后续历史成果对比。')
+            '对比；其余为固定布局，不随数据增减。自由窗口下两个画布可像 '
+            'Windows 窗口一样拖动、缩放、最大化，右键空白处可平铺/层叠/'
+            '重置。四宫格下排两个画布留作后续历史成果对比。')
         self._bscan_layout_combo.currentIndexChanged.connect(
             self._emit_bscan_changed)
         layout.addLayout(make_form_row('预览布局:', self._bscan_layout_combo,

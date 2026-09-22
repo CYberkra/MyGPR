@@ -32,7 +32,7 @@ DEFAULT_SETTINGS = {
     'bscan_x_axis': 'trace',
     'bscan_y_axis': 'sample',
     # B-Scan 预览布局（BScanContainer）：auto 面板数自动跟随数据（默认）/
-    # single 单视图 / dual 双视图对比 / quad 四宫格
+    # single 单视图 / dual 双视图对比 / quad 四宫格 / free 自由窗口（可拖动）
     'bscan_layout_mode': 'auto',
     # B-Scan 显示色阶（低/高百分位，只影响显示不影响数据）
     'bscan_p_low': 2.0,

@@ -26,12 +26,14 @@ import pytest  # noqa: E402
 
 pytest.importorskip("PyQt6")  # 后端 CI（无 Qt）自动跳过
 
+from PyQt6.QtCore import Qt  # noqa: E402
 from ui.pages.processing_page import ProcessingPage  # noqa: E402
 from ui.pages.settings_page import SettingsPage  # noqa: E402
 from ui.widgets import (  # noqa: E402
     BScanContainer,
     LAYOUT_AUTO,
     LAYOUT_DUAL,
+    LAYOUT_FREE,
     LAYOUT_MODES,
     LAYOUT_QUAD,
     LAYOUT_SINGLE,
@@ -67,6 +69,8 @@ class TestContainerLayout:
         assert len(container.views()) == 2
         container.set_layout_mode(LAYOUT_QUAD, notify=False)
         assert len(container.views()) == 4
+        container.set_layout_mode(LAYOUT_FREE, notify=False)
+        assert len(container.views()) == 2
 
     def test_switch_emits_signal_once(self, container):
         got = []
@@ -118,10 +122,90 @@ class TestContainerLayout:
         assert container.view_at(99) is container.primary_view()
 
     def test_all_views_spans_pages(self, container):
-        assert len(container.all_views()) == 1 + 2 + 4
+        assert len(container.all_views()) == 1 + 2 + 4 + 2
 
     def test_modes_constant(self):
-        assert LAYOUT_MODES == ('auto', 'single', 'dual', 'quad')
+        assert LAYOUT_MODES == ('auto', 'single', 'dual', 'quad', 'free')
+
+
+class TestFreeLayout:
+    """自由窗口模式（Windows 视窗式）：实体布局契约 + 摆放控制。
+
+    窗位固定 0=原始数据、1=处理结果（与 dual 分发语义一致），摆位自由；
+    free 只能手动选，auto 解析永远不出自由窗口。
+    """
+
+    @pytest.fixture
+    def container(self, qapp):
+        return BScanContainer()
+
+    def test_free_is_entity_mode(self, container):
+        got = []
+        container.sig_layout_changed.connect(got.append)
+        container.set_layout_mode(LAYOUT_FREE)
+        assert got == [LAYOUT_FREE]
+        assert container.layout_mode() == LAYOUT_FREE
+        assert container.effective_mode() == LAYOUT_FREE
+        assert len(container.views()) == 2
+
+    def test_auto_never_resolves_to_free(self, container):
+        """auto 只映射 single/dual/quad：数据驱动不进入自由窗口。"""
+        container.set_layout_mode(LAYOUT_AUTO, notify=False)
+        for count in (1, 2, 4):
+            container.resolve_auto(count)
+            assert container.effective_mode() != LAYOUT_FREE
+
+    def test_invalid_mode_after_free_falls_back(self, container):
+        """坏值回落 auto 且保留实际页（与 dual 同一容错语义）。"""
+        container.set_layout_mode(LAYOUT_FREE, notify=False)
+        container.set_layout_mode('bogus', notify=False)
+        assert container.layout_mode() == LAYOUT_AUTO
+        assert container.effective_mode() == LAYOUT_FREE
+
+    def test_views_fixed_order_matches_windows(self, container):
+        """views() 顺序 = 窗口标题顺序（原始→成果），与拖动摆位无关。"""
+        container.set_layout_mode(LAYOUT_FREE, notify=False)
+        subs = container._mdi.subWindowList()
+        assert subs[0].windowTitle() == '原始数据'
+        assert subs[1].windowTitle() == '处理结果'
+        assert container.view_at(0) is container.views()[0]
+        assert container.view_at(1) is container.views()[1]
+
+    def test_arrange_actions_keep_views_contract(self, container):
+        """平铺/层叠/重置都是摆位操作，不动 views() 契约。"""
+        container.set_layout_mode(LAYOUT_FREE, notify=False)
+        views = container.views()
+        container.arrange_tile()
+        container.arrange_cascade()
+        container.reset_free_layout()
+        assert container.views()[0] is views[0]
+        assert container.views()[1] is views[1]
+
+    def test_windows_have_no_close_button(self, container):
+        """flags 不含关闭/最小化 hint（最大化保留）。
+
+        注意：实测 Qt 对 SubWindow 标题栏仍可能画出 ✕（不受 hint 约束），
+        所以常驻契约由 test_close_is_intercepted 的关闭拦截兜底。
+        """
+        container.set_layout_mode(LAYOUT_FREE, notify=False)
+        for sub in container._mdi.subWindowList():
+            flags = sub.windowFlags()
+            assert not (flags & Qt.WindowType.WindowCloseButtonHint)
+            assert not (flags & Qt.WindowType.WindowMinimizeButtonHint)
+            assert flags & Qt.WindowType.WindowMaximizeButtonHint
+
+    def test_close_is_intercepted(self, container, qapp):
+        """关闭拦截：close() 被拒绝，面板保持可见、views() 契约不动。"""
+        container.show()
+        container.set_layout_mode(LAYOUT_FREE, notify=False)
+        qapp.processEvents()
+        subs = container._mdi.subWindowList()
+        assert subs[0].isVisible()          # 前置：free 页已显示
+        assert subs[0].close() is False
+        qapp.processEvents()
+        assert subs[0].isVisible()
+        assert len(container.views()) == 2
+        container.hide()
 
 
 _LSEG_ORIGINAL = 'originalData'
@@ -192,6 +276,31 @@ class TestProcessingPageDistribution:
         page.set_original_bundle(_bundle(1))
         assert container.view_at(0)._matrix is not None
         assert container.view_at(1)._matrix is None
+
+    def test_free_pins_original_and_result(self, page, container):
+        """自由窗口：0 号窗固定原始、1 号窗固定成果（语义同 dual）。"""
+        container.set_layout_mode(LAYOUT_FREE, notify=False)
+        page.set_original_bundle(_bundle(1))
+        page.set_result_bundle(_bundle(2))
+        assert page._shows_both_panels() is True
+        assert container.view_at(0)._matrix.max() == 1.0
+        assert container.view_at(1)._matrix.max() == 2.0
+
+    def test_free_missing_result_clears_side(self, page, container):
+        container.set_layout_mode(LAYOUT_FREE, notify=False)
+        page.set_original_bundle(_bundle(1))
+        assert container.view_at(0)._matrix is not None
+        assert container.view_at(1)._matrix is None
+
+    def test_switch_dual_to_free_keeps_data(self, page, container):
+        """dual ↔ free 切换：数据跟着分发走，窗位顺序不变。"""
+        container.set_layout_mode(LAYOUT_DUAL, notify=False)
+        page.set_original_bundle(_bundle(1))
+        page.set_result_bundle(_bundle(2))
+        container.set_layout_mode(LAYOUT_FREE, notify=False)
+        page._on_layout_changed(LAYOUT_FREE)
+        assert container.view_at(0)._matrix.max() == 1.0
+        assert container.view_at(1)._matrix.max() == 2.0
 
     def test_quad_reserved_slots_empty(self, page, container):
         container.set_layout_mode(LAYOUT_QUAD, notify=False)
@@ -320,6 +429,13 @@ class TestSettingsLayoutMode:
         settings_page.bscan_view_changed.connect(lambda: got.append(1))
         settings_page.load_settings({'bscan_layout_mode': 'dual'})
         assert settings_page.bscan_view_settings()['bscan_layout_mode'] == 'dual'
+        assert got == []
+
+    def test_load_free_silently(self, settings_page):
+        got = []
+        settings_page.bscan_view_changed.connect(lambda: got.append(1))
+        settings_page.load_settings({'bscan_layout_mode': 'free'})
+        assert settings_page.bscan_view_settings()['bscan_layout_mode'] == 'free'
         assert got == []
 
     def test_user_change_emits(self, settings_page):

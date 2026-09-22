@@ -276,7 +276,8 @@ class MyGPRMainWindow(FluentWindow):
             self._wire_bscan_expand(view)
         # 容器级偏好：预览布局（面板集合随布局变，轴/比例/色阶已逐面板恢复）
         layout_mode = self._setting_choice(
-            'bscan_layout_mode', ('auto', 'single', 'dual', 'quad'), 'auto')
+            'bscan_layout_mode', ('auto', 'single', 'dual', 'quad', 'free'),
+            'auto')
         for container in self._iter_bscan_containers(page):
             container.set_layout_mode(layout_mode, notify=False)
             container.sig_layout_changed.connect(lambda mode:
