@@ -4,10 +4,17 @@
 三栏 QHBoxLayout：
 - 左栏 ScrollArea 固定 320px：卡片"方法库"（MethodBrowser）
 - 中栏 stretch：卡片"数据预览"（标题与 SlimSegment 原始数据/处理结果同行
-  header + BScanView + colormap ComboBox + p_low/p_high + 刷新色阶）+ 进度条（初始隐藏）
+  header + BScanContainer 多视图 + colormap ComboBox + p_low/p_high +
+  刷新色阶）+ 进度条（初始隐藏）
 - 右栏 ScrollArea 固定 340px：卡片"处理链"（PipelineList + 添加所选方法）、
   卡片"参数设置"（ParamForm + 应用到选中步骤）、卡片"执行"（输入数据选择
   支持从某个成果继续处理 + 结果名 + 运行/取消）、卡片"AutoTune 自动调参"
+
+预览布局（BScanContainer，Phase 2）：
+- single：单视图，分段控件切换显示原始数据 / 处理结果（历史行为）；
+- dual：左右并排双视图，0 号位固定原始数据、1 号位固定处理结果，
+  「原始 | 成果」同屏对比，分段控件此时决定色阶刷新焦点；
+- quad：2×2 四宫格，0/1 号位与 dual 相同，2/3 号位留空占位。
 
 页面纯展示 + 发信号，不直接调 controller/backend。
 内部联动：PipelineList.sig_step_selected → ParamForm 载入该步骤参数；
@@ -29,9 +36,10 @@ from ui.motion import animate_progress
 from ui.page_scaffold import (PanelStateMixin, make_card, make_form_row,
                               make_scroll_column, make_segment_card,
                               refill_combo)
-from ui.widgets import (BScanView, CollapsiblePanel, MethodBrowser, ParamForm,
-                        PipelineList, SlimSegment, clear_invalid,
-    make_separator,)
+from ui.widgets import (BScanContainer, BScanView, CollapsiblePanel,
+                        MethodBrowser, ParamForm, PipelineList, SlimSegment,
+                        clear_invalid, make_separator)
+from ui.widgets.bscan_container import LAYOUT_SINGLE
 
 # 预览分段（SlimSegment routeKey）
 _SEG_ORIGINAL = 'originalData'
@@ -138,9 +146,9 @@ class ProcessingPage(PanelStateMixin, QWidget):
         sel_row.addWidget(self._artifact_combo, 1)
         preview_layout.addLayout(sel_row)
 
-        self._bscan = BScanView(preview_card)
-        self._bscan.setMinimumHeight(constants.PREVIEW_MIN_HEIGHT)
-        preview_layout.addWidget(self._bscan, 1)
+        self._bscan_container = BScanContainer(preview_card)
+        self._bscan_container.setMinimumHeight(constants.PREVIEW_MIN_HEIGHT)
+        preview_layout.addWidget(self._bscan_container, 1)
 
         # 色阶工具行：控件用前缀代替独立标签、收窄最小宽，保证窄屏
         # （左右栏均展开）时整行不被裁切。
@@ -273,13 +281,17 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._param_form.sig_changed.connect(self._auto_write_params_to_selected)
 
         # 预览
-        self._cmap_combo.currentTextChanged.connect(self._bscan.set_colormap)
-        # 反向同步：B-scan 右键菜单改色标 → ComboBox 跟随（防两处状态不一致）
-        self._bscan.sig_colormap_changed.connect(
-            self._cmap_combo.setCurrentText)
+        # 色标：ComboBox → 广播到容器全部面板；任一面板右键改色标 →
+        # ComboBox 跟随（set_colormap 不发 sig_colormap_changed，无回环）。
+        self._cmap_combo.currentTextChanged.connect(self._apply_colormap)
+        for view in self._bscan_container.all_views():
+            view.sig_colormap_changed.connect(
+                self._cmap_combo.setCurrentText)
         self._refresh_levels_btn.clicked.connect(self._refresh_levels)
         self._line_combo.currentIndexChanged.connect(self._on_line_combo_changed)
         self._artifact_combo.currentIndexChanged.connect(self._on_artifact_combo_changed)
+        # 布局切换：新面板是空白实例，重广播色标并重新分发 bundle
+        self._bscan_container.sig_layout_changed.connect(self._on_layout_changed)
 
         # 执行
         self._run_btn.clicked.connect(self._on_run_clicked)
@@ -319,15 +331,23 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._method_browser.set_methods(self._methods)
 
     def set_original_bundle(self, bundle) -> None:
-        """原始数据预览 bundle。"""
+        """原始数据预览 bundle。
+
+        dual/quad 下 0 号位固定显示原始数据，无论分段停在哪一侧都要重发；
+        single 下仅当分段选中"原始数据"时刷新。
+        """
         self._original_bundle = bundle
-        if self._current_segment() == _SEG_ORIGINAL:
+        if self._shows_both_panels():
+            self._distribute_bundles()
+        elif self._current_segment() == _SEG_ORIGINAL:
             self._show_bundle(_SEG_ORIGINAL)
 
     def set_result_bundle(self, bundle) -> None:
-        """处理结果预览 bundle。"""
+        """处理结果预览 bundle（分发语义同 set_original_bundle）。"""
         self._result_bundle = bundle
-        if self._current_segment() == _SEG_RESULT:
+        if self._shows_both_panels():
+            self._distribute_bundles()
+        elif self._current_segment() == _SEG_RESULT:
             self._show_bundle(_SEG_RESULT)
 
     def show_result_segment(self) -> None:
@@ -459,25 +479,56 @@ class ProcessingPage(PanelStateMixin, QWidget):
         item = self._preview_segment.currentItem()
         return item.property('routeKey') if item is not None else _SEG_ORIGINAL
 
+    # ---------------- 预览分发（BScanContainer 多视图）
+    def _shows_both_panels(self) -> bool:
+        """当前布局是否同屏展示原始与成果两侧（dual/quad）。"""
+        return self._bscan_container.layout_mode() != LAYOUT_SINGLE
+
     def _show_bundle(self, which: str) -> None:
+        """分段切换 / bundle 到达的统一入口（按布局分发）。"""
+        if self._shows_both_panels():
+            self._distribute_bundles()
+            return
         bundle = (self._original_bundle if which == _SEG_ORIGINAL
                   else self._result_bundle)
+        self._set_panel_data(self._bscan_container.primary_view(), bundle)
+
+    def _distribute_bundles(self) -> None:
+        """dual/quad：0 号位固定原始数据、1 号位固定处理结果，其余留空。
+
+        按 views() 实际数量分发——不许用 view_at(2/3) 凑数：dual 模式下
+        view_at 越界会回落面板 0，随后 clear() 把刚填的原始数据清掉。
+        """
+        views = self._bscan_container.views()
+        bundles = [self._original_bundle, self._result_bundle]
+        bundles += [None] * (len(views) - len(bundles))
+        for view, bundle in zip(views, bundles):
+            self._set_panel_data(view, bundle)
+
+    @staticmethod
+    def _set_panel_data(view: BScanView, bundle) -> None:
+        """单面板数据写入：None → 清空显示空态。"""
         if bundle is None:
-            self._bscan.clear()
+            view.clear()
             return
-        self._bscan.set_bundle(bundle)
+        view.set_bundle(bundle)
+
+    def _on_layout_changed(self, _mode: str) -> None:
+        """布局切换后新面板是空白实例：重广播色标并重新分发 bundle。"""
+        self._apply_colormap(self._cmap_combo.currentText())
+        self._show_bundle(self._current_segment())
+
+    def _apply_colormap(self, name: str) -> None:
+        """色标广播到容器当前布局下的全部面板。"""
+        for view in self._bscan_container.views():
+            view.set_colormap(name)
 
     def _refresh_levels(self) -> None:
-        """按 p_low/p_high 百分比重算当前 bundle 的显示色阶。"""
-        bundle = (self._original_bundle
-                  if self._current_segment() == _SEG_ORIGINAL
-                  else self._result_bundle)
-        if bundle is None:
-            InfoBar.info(title='数据预览', content='当前没有可刷新的预览数据',
-                         orient=Qt.Orientation.Horizontal, isClosable=True,
-                         position=InfoBarPosition.TOP, duration=2000,
-                         parent=self)
-            return
+        """按 p_low/p_high 百分位重算显示色阶。
+
+        single：只算分段选中的 bundle；dual/quad：0/1 号位各用各的
+        bundle 分别重算（两侧数据不同，共享色阶会压暗一侧对比）。
+        """
         p_low = float(self._p_low_spin.value())
         p_high = float(self._p_high_spin.value())
         if p_low >= p_high:
@@ -486,12 +537,32 @@ class ProcessingPage(PanelStateMixin, QWidget):
                             position=InfoBarPosition.TOP, duration=3000,
                             parent=self)
             return
-        vmin, vmax = compute_display_levels(bundle.matrix, p_low=p_low, p_high=p_high)
-        self._bscan.set_matrix(
-            bundle.matrix, vmin, vmax,
-            title=getattr(bundle, 'title', ''),
-            x_label=getattr(bundle, 'x_label', '道数'),
-            y_label=getattr(bundle, 'y_label', '采样点'))
+        if self._shows_both_panels():
+            targets = [
+                (self._bscan_container.view_at(0), self._original_bundle),
+                (self._bscan_container.view_at(1), self._result_bundle),
+            ]
+        else:
+            bundle = (self._original_bundle
+                      if self._current_segment() == _SEG_ORIGINAL
+                      else self._result_bundle)
+            targets = [(self._bscan_container.primary_view(), bundle)]
+        targets = [(view, bundle) for view, bundle in targets
+                   if bundle is not None]
+        if not targets:
+            InfoBar.info(title='数据预览', content='当前没有可刷新的预览数据',
+                         orient=Qt.Orientation.Horizontal, isClosable=True,
+                         position=InfoBarPosition.TOP, duration=2000,
+                         parent=self)
+            return
+        for view, bundle in targets:
+            vmin, vmax = compute_display_levels(bundle.matrix, p_low=p_low,
+                                                p_high=p_high)
+            view.set_matrix(
+                bundle.matrix, vmin, vmax,
+                title=getattr(bundle, 'title', ''),
+                x_label=getattr(bundle, 'x_label', '道数'),
+                y_label=getattr(bundle, 'y_label', '采样点'))
 
     # ---------------- 方法库
     def _on_method_selected(self, method_id: str) -> None:

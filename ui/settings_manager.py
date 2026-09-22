@@ -31,6 +31,8 @@ DEFAULT_SETTINGS = {
     # B-Scan 轴单位：横轴 trace 道数（默认）/ distance 距离(m)；纵轴 sample 采样轴 / elevation 海拔(m)
     'bscan_x_axis': 'trace',
     'bscan_y_axis': 'sample',
+    # B-Scan 预览布局（BScanContainer）：single 单视图 / dual 双视图对比 / quad 四宫格
+    'bscan_layout_mode': 'single',
     # B-Scan 显示色阶（低/高百分位，只影响显示不影响数据）
     'bscan_p_low': 2.0,
     'bscan_p_high': 98.0,

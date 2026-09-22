@@ -29,6 +29,7 @@ from ui.page_coordinator import PageCoordinator
 from ui.logger_config import setup_logger
 from ui.settings_manager import SettingsManager
 from ui.theme_helpers import apply_theme, control_palette
+from ui.widgets.bscan_container import BScanContainer
 from ui.widgets.bscan_view import BScanView
 from ui.widgets.file_tree_panel import FileTreePanel
 from ui.widgets.segment_tabs import SlimSegment
@@ -273,6 +274,18 @@ class MyGPRMainWindow(FluentWindow):
                                     saver=self._save_fullscreen_geometry)
             self._connect_bscan_signals(view)
             self._wire_bscan_expand(view)
+        # 容器级偏好：预览布局（面板集合随布局变，轴/比例/色阶已逐面板恢复）
+        layout_mode = self._setting_choice(
+            'bscan_layout_mode', ('single', 'dual', 'quad'), 'single')
+        for container in self._iter_bscan_containers(page):
+            container.set_layout_mode(layout_mode, notify=False)
+            container.sig_layout_changed.connect(lambda mode:
+                self._mirror_bscan_setting('bscan_layout_mode', str(mode)))
+
+    @staticmethod
+    def _iter_bscan_containers(page):
+        """页面里全部 BScanContainer（哑组件，偏好按容器整体恢复/持久化）。"""
+        yield from page.findChildren(BScanContainer)
 
     def _connect_bscan_signals(self, view) -> None:
         """把用户操作（而非恢复动作）接到设置写盘。
@@ -332,6 +345,11 @@ class MyGPRMainWindow(FluentWindow):
         for page in list(self.pages.values()):
             yield from page.findChildren(BScanView)
 
+    def _iter_all_bscan_containers(self):
+        """全部页面里的 BScanContainer（设置页统一下发布局模式用）。"""
+        for page in list(self.pages.values()):
+            yield from page.findChildren(BScanContainer)
+
     def _on_settings_bscan_changed(self) -> None:
         """设置页改了 B-Scan 视图项：即时下发到所有视图并写盘（无需重启）。"""
         settings_page = self._page('settingsInterface')
@@ -348,6 +366,8 @@ class MyGPRMainWindow(FluentWindow):
                                 notify=False)
             view.set_display_levels(values['bscan_p_low'],
                                     values['bscan_p_high'], notify=False)
+        for container in self._iter_all_bscan_containers():
+            container.set_layout_mode(values['bscan_layout_mode'], notify=False)
 
     def _setting_levels(self) -> tuple[float, float]:
         """读色阶百分位；非法值回落 BScanView 默认（2 / 98）。"""

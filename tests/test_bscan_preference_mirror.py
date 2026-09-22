@@ -42,7 +42,7 @@ from ui.pages.settings_page import SettingsPage  # noqa: E402
 from ui.settings_manager import SettingsManager  # noqa: E402
 
 _BSCAN_KEYS = ('bscan_aspect_mode', 'bscan_x_axis', 'bscan_y_axis',
-               'bscan_p_low', 'bscan_p_high')
+               'bscan_layout_mode', 'bscan_p_low', 'bscan_p_high')
 
 
 def _read_disk(store: str) -> dict:
@@ -115,6 +115,7 @@ class TestSettingsPageMirror:
             'bscan_aspect_mode': 'cell',
             'bscan_x_axis': 'distance',
             'bscan_y_axis': 'elevation',
+            'bscan_layout_mode': 'dual',
             'bscan_p_low': 6.0,
             'bscan_p_high': 94.0,
         }

@@ -159,6 +159,19 @@ class SettingsPage(ScrollArea):
         layout.addLayout(make_form_row('纵轴单位:', self._bscan_y_axis_combo,
                                        parent=card))
 
+        self._bscan_layout_combo = ComboBox(card)
+        self._bscan_layout_combo.addItem('单视图', userData='single')
+        self._bscan_layout_combo.addItem('双视图对比（原始 | 成果）', userData='dual')
+        self._bscan_layout_combo.addItem('四宫格', userData='quad')
+        self._bscan_layout_combo.setMinimumWidth(180)
+        self._bscan_layout_combo.setToolTip(
+            '处理页数据预览的面板布局：双视图把原始数据与处理结果并排同屏'
+            '对比；四宫格本期 0/1 号位与双视图相同，2/3 号位留作后续扩展。')
+        self._bscan_layout_combo.currentIndexChanged.connect(
+            self._emit_bscan_changed)
+        layout.addLayout(make_form_row('预览布局:', self._bscan_layout_combo,
+                                       parent=card))
+
         self._bscan_p_low_spin = DoubleSpinBox(card)
         self._bscan_p_high_spin = DoubleSpinBox(card)
         for spin, value in ((self._bscan_p_low_spin, 2.0),
@@ -233,8 +246,8 @@ class SettingsPage(ScrollArea):
         widgets = (self._theme_combo, self._dielectric_spin,
                    self._workers_spin, self._root_edit, self._prefetch_check,
                    self._bscan_aspect_combo, self._bscan_x_axis_combo,
-                   self._bscan_y_axis_combo, self._bscan_p_low_spin,
-                   self._bscan_p_high_spin)
+                   self._bscan_y_axis_combo, self._bscan_layout_combo,
+                   self._bscan_p_low_spin, self._bscan_p_high_spin)
         self._loading_settings = True
         for widget in widgets:
             widget.blockSignals(True)
@@ -255,6 +268,8 @@ class SettingsPage(ScrollArea):
                                  data.get('bscan_x_axis'), 'trace')
             self._select_by_data(self._bscan_y_axis_combo,
                                  data.get('bscan_y_axis'), 'sample')
+            self._select_by_data(self._bscan_layout_combo,
+                                 data.get('bscan_layout_mode'), 'single')
             low, high = _levels_or_default(data)
             self._bscan_p_low_spin.setValue(low)
             self._bscan_p_high_spin.setValue(high)
@@ -276,6 +291,7 @@ class SettingsPage(ScrollArea):
             'bscan_aspect_mode': str(self._bscan_aspect_combo.currentData()),
             'bscan_x_axis': str(self._bscan_x_axis_combo.currentData()),
             'bscan_y_axis': str(self._bscan_y_axis_combo.currentData()),
+            'bscan_layout_mode': str(self._bscan_layout_combo.currentData()),
             'bscan_p_low': float(self._bscan_p_low_spin.value()),
             'bscan_p_high': float(self._bscan_p_high_spin.value()),
         }
@@ -293,6 +309,7 @@ class SettingsPage(ScrollArea):
             (self._bscan_aspect_combo, 'bscan_aspect_mode'),
             (self._bscan_x_axis_combo, 'bscan_x_axis'),
             (self._bscan_y_axis_combo, 'bscan_y_axis'),
+            (self._bscan_layout_combo, 'bscan_layout_mode'),
         )
         spins = (
             (self._bscan_p_low_spin, 'bscan_p_low'),
