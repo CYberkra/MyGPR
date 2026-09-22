@@ -8,21 +8,27 @@
 - autoLevels=False + 显式 levels=(vmin, vmax)
 - ColorBarItem 随行同步
 
-轴单位（Phase1 能力包）：显示坐标始终是**索引**（x=列号、y=行号），
-横轴 道↔距离、纵轴 采样轴↔海拔 全部在 AxisItem 的刻度文本层换算
-（见 ui/widgets/bscan_axes.py），pick/overlay/降采样换算不受影响。
-海拔 = 逐道地面高程 − 深度，因地形起伏而逐道不同；纵轴刻度以参考高程
-（有限值均值）为基准，精确值由十字光标按当前道给出。
+轴单位（Phase1 能力包）：横轴 道↔距离 在 AxisItem 刻度文本层换算（索引
+坐标系不动）；纵轴 采样轴↔海拔 是**两种不同的显示网格**——
+- 采样轴模式：显示坐标 = 数据索引（x=道、y=采样点），与 pick/overlay/
+  降采样换算的既有约定一致；
+- 海拔模式：整幅剖面经 :func:`bscan_axes.build_elevation_view` 重采样到
+  **共享绝对海拔网格**（每道按自己的地面高程下移，海拔 = 逐道地面高程 −
+  深度），顶边即真实地貌，地表以上 NaN → 透明留白。此模式下显示纵坐标
+  是「海拔网格行号」，_view_to_data/_data_to_view 负责行号↔采样点换算。
+海拔 warp 带「同一份数据只算一次」缓存，且只作用于显示层，原始数据零变异。
 
 十字光标读数：鼠标在图像区移动时显示十字线 + 左下角读数浮层
 （道号/距起点/纵轴物理值/幅值；PreviewBundle 带 trace_axis_m /
 sample_axis 时显示物理量，降采样数据附"原始约 N"），右键菜单可开关。
 
-右键菜单（RoundMenu）：缩放组 / 回到全览 / 色标子菜单 / 十字光标 /
-A-scan 跟随 / 显示模式 / 色阶设置 / 复制 / 导出 PNG。
+右键菜单（RoundMenu）：缩放组（放大/缩小/回到全览/方形/1:1/全屏）/
+轴单位子菜单 / 色标子菜单 / 十字光标 / A-scan 跟随 / 显示模式 / 色阶设置 /
+复制 / 导出 PNG。工具条只保留高频操作（缩放 + 铺满/全屏），轴单位与
+比例策略走设置页与右键菜单。
 接入时已 vb.setMenuEnabled(False) 关闭 pyqtgraph 原生英文菜单
 （代价：右键拖拽框选缩放失效，由菜单缩放项补偿），并隐藏 pyqtgraph
-自带的「A」自适应钮（其功能由工具条「自适应」与菜单「回到全览」承担）。
+自带的「A」自适应钮（其功能由右键菜单「回到全览」承担）。
 """
 
 import math
@@ -34,21 +40,19 @@ from enum import Enum
 
 import pyqtgraph as pg
 from PyQt6.QtWidgets import QLabel
-from qfluentwidgets import FluentIcon as FIF, PushButton, ToolButton
+from qfluentwidgets import FluentIcon as FIF, ToolButton
 
 from ui import constants
 from ui.desktop_backend_facade import compute_display_levels
-from ui.theme_helpers import accent_color, control_palette
+from ui.theme_helpers import control_palette
 from ui.widgets._colormap_data import COLORMAP_DATA
 from ui.widgets.bscan_axes import (
     X_AXIS_MODES,
     Y_AXIS_MODES,
-    ELEVATION_UNAVAILABLE_HINT,
     IndexAxis,
+    build_elevation_view,
     distance_available,
     distance_tick_strings,
-    elevation_at,
-    elevation_available,
     elevation_tick_strings,
     sample_unit_label,
 )
@@ -144,38 +148,35 @@ def format_crosshair_readout(trace: int, sample: int, shape: tuple,
                              trace_axis_m=None, sample_axis=None,
                              sample_axis_label: str = '',
                              trace_count: int = 0,
-                             sample_count: int = 0,
-                             ground_elevation_m=None,
-                             depth_axis_m=None) -> str:
+                             sample_count: int = 0) -> str:
     """十字光标读数文本（纯函数，便于测试）。
 
-    trace/sample 为显示坐标（0 基）；shape=(n_traces, n_samples)。
-    trace_axis_m/sample_axis 为与显示矩阵等长的物理轴（None 跳过）。
+    trace/sample 为显示坐标（0 基）；shape=(n_traces, n_display_rows)。
+    trace_axis_m/sample_axis 为与显示矩阵等长的物理轴（None 跳过）——
+    海拔模式下调用方传共享海拔轴 + '海拔 (m)' 标签，纵轴读数即为海拔。
     trace_count/sample_count 为原始（未降采样）数量，与显示数不同
     时追加"（原始约 N）"（strided 降采样近似线性映射）。
-    ground_elevation_m + depth_axis_m 齐备时纵轴读数改为海拔（m）——
-    调用方只在用户切到海拔纵轴时才传这两个参数。
     """
-    n_traces, n_samples = shape
+    n_traces, n_rows = shape
     lines = [f'道 {trace + 1}']
     if trace_count and trace_count != n_traces:
         approx = _downsample_map_index(trace, n_traces, trace_count)
         lines[0] += f'（原始约 {approx + 1}）'
     if trace_axis_m is not None and 0 <= trace < len(trace_axis_m):
         lines.append(f'距起点 {float(trace_axis_m[trace]):.3g} m')
-    elevation = elevation_at(ground_elevation_m, depth_axis_m, trace, sample)
-    if elevation is not None:
-        lines.append(f'海拔 {elevation:.4g} m')
-    elif sample_axis is not None and 0 <= sample < len(sample_axis):
+    if sample_axis is not None and 0 <= sample < len(sample_axis):
         label = sample_axis_label or '纵轴'
         lines.append(f'{label} {float(sample_axis[sample]):.4g}')
     else:
         text = f'采样 {sample + 1}'
-        if sample_count and sample_count != n_samples:
-            approx = _downsample_map_index(sample, n_samples, sample_count)
+        if sample_count and sample_count != n_rows:
+            approx = _downsample_map_index(sample, n_rows, sample_count)
             text += f'（原始约 {approx + 1}）'
         lines.append(text)
-    lines.append(f'幅值 {amplitude:.4g}')
+    if amplitude is None or not math.isfinite(float(amplitude)):
+        lines.append('幅值 —')       # 海拔模式地表以上是 NaN（留白区）
+    else:
+        lines.append(f'幅值 {float(amplitude):.4g}')
     return '\n'.join(lines)
 
 
@@ -252,8 +253,7 @@ class BScanView(GraphicsViewBase, QWidget):
 
         self._glw.scene().sigMouseClicked.connect(self._on_mouse_clicked)
         self._glw.scene().sigMouseMoved.connect(self._on_mouse_moved)
-        # 工具条按钮的当前生效态（构造期就同步一次，不等首次点击）
-        self._sync_aspect_buttons(self._aspect_mode)
+        # 工具条只剩图标钮，无需构造期同步文字钮状态
         self._refresh_axis_state()
         from qfluentwidgets import isDarkTheme
         self.apply_theme(isDarkTheme())
@@ -268,6 +268,10 @@ class BScanView(GraphicsViewBase, QWidget):
         self._sample_count = 0
         self._ground_elevation_m = None   # 逐道地面高程（m，显示网格）
         self._depth_axis_m = None         # 地表以下深度（m，显示网格）
+        # 海拔模式状态：当前显示的是否是 warp 后的矩阵 + 其海拔轴
+        self._showing_elevation = False
+        self._elev_axis = None            # 降序海拔轴（行 r ↔ elev_axis[r]）
+        self._elev_cache = None           # (matrix, ground, depth, warped, axis)
 
     def _init_plot(self, with_colorbar: bool) -> None:
         """图形区：ImageItem 预分配复用 + 十字线 + 色标 + overlay 散点。"""
@@ -349,10 +353,11 @@ class BScanView(GraphicsViewBase, QWidget):
         layout.addWidget(self._glw, 1)
 
     def _build_toolbar(self) -> QHBoxLayout:
-        """缩放 / 轴单位 / 比例 / 视图范围 工具条（顺序即使用频率）。
+        """精简工具条（用户评审：轴单位/比例属低频操作，不占常驻空间）。
 
-        每类一组，组间加一点间距以便肉眼分组；所有文字钮走
-        ``_toolbar_button``（尺寸/配色统一，见 _refresh_control_palette）。
+        只保留高频操作：缩放 + 铺满/全屏。轴单位（道/距离、采样/海拔）在
+        设置页与右键菜单，比例策略（自适应/方形/1:1）同样在右键菜单与
+        设置页——能力不丢，只是不常驻。
         """
         layout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 4)
@@ -360,22 +365,10 @@ class BScanView(GraphicsViewBase, QWidget):
 
         self._add_zoom_group(layout)
         layout.addSpacing(8)
-        self._add_axis_group(layout)
-        layout.addSpacing(8)
-        self._add_aspect_group(layout)
-        layout.addSpacing(8)
         self._add_viewport_group(layout)
 
-        self.sig_aspect_changed.connect(self._sync_aspect_buttons)
         layout.addStretch(1)
         return layout
-
-    def _toolbar_button(self, text: str, layout: QHBoxLayout) -> PushButton:
-        """工具条文字钮（小号，-background 走 control_palette 单源）。"""
-        btn = PushButton(text, self)
-        btn.setMinimumHeight(constants.TOOL_BTN_COMPACT[1] + 4)
-        layout.addWidget(btn)
-        return btn
 
     def _add_zoom_group(self, layout: QHBoxLayout) -> None:
         """缩放组：缩小 / 放大（图标钮）。"""
@@ -390,44 +383,6 @@ class BScanView(GraphicsViewBase, QWidget):
         self._zoom_out_btn.setFixedSize(*constants.TOOL_BTN_COMPACT)
         self._zoom_out_btn.clicked.connect(self.zoom_out)
         layout.addWidget(self._zoom_out_btn)
-
-    def _add_axis_group(self, layout: QHBoxLayout) -> None:
-        """轴单位组：纵轴（当前采样单位 | 海拔）+ 横轴（道 | 距离）。"""
-        self._y_sample_btn = self._toolbar_button('采样点', layout)
-        self._y_sample_btn.clicked.connect(
-            lambda: self.set_y_axis_mode('sample', notify=True))
-        self._y_elevation_btn = self._toolbar_button('海拔', layout)
-        self._y_elevation_btn.clicked.connect(
-            lambda: self.set_y_axis_mode('elevation', notify=True))
-
-        self._x_trace_btn = self._toolbar_button('道', layout)
-        self._x_trace_btn.clicked.connect(
-            lambda: self.set_x_axis_mode('trace', notify=True))
-        self._x_distance_btn = self._toolbar_button('距离', layout)
-        self._x_distance_btn.clicked.connect(
-            lambda: self.set_x_axis_mode('distance', notify=True))
-
-    def _add_aspect_group(self, layout: QHBoxLayout) -> None:
-        """比例组：自适应（拉伸铺满）/ 方形 / 1:1。"""
-        self._fit_btn = PushButton('自适应', self)
-        self._fit_btn.setToolTip('拉伸铺满窗口（默认，不浪费画布且几乎不畸变）')
-        self._fit_btn.setMinimumHeight(constants.BTN_HEIGHT)
-        self._fit_btn.clicked.connect(self.fit_to_data)
-        layout.addWidget(self._fit_btn)
-
-        self._square_btn = PushButton('方形', self)
-        self._square_btn.setToolTip(
-            '整个数据盒锁成正方形（会把 4:1 的剖面压成 1:1，形状失真；'
-            '仅在与旧图对照时使用）')
-        self._square_btn.setMinimumHeight(constants.BTN_HEIGHT)
-        self._square_btn.clicked.connect(self.fit_square)
-        layout.addWidget(self._square_btn)
-
-        self._one_to_one_btn = PushButton('1:1', self)
-        self._one_to_one_btn.setToolTip('像素 1:1 显示（一道 = 一采样点等宽等高）')
-        self._one_to_one_btn.setMinimumHeight(constants.BTN_HEIGHT)
-        self._one_to_one_btn.clicked.connect(self.reset_1to1)
-        layout.addWidget(self._one_to_one_btn)
 
     def _add_viewport_group(self, layout: QHBoxLayout) -> None:
         """画布范围组：铺满（宿主页面折叠侧栏）/ 全屏（独立窗口展开）。"""
@@ -444,21 +399,7 @@ class BScanView(GraphicsViewBase, QWidget):
         self._fullscreen_btn.clicked.connect(self.toggle_fullscreen)
         layout.addWidget(self._fullscreen_btn)
 
-        self._toolbar_buttons = (self._zoom_in_btn, self._zoom_out_btn,
-                                 self._fit_btn, self._square_btn,
-                                 self._one_to_one_btn, self._y_sample_btn,
-                                 self._y_elevation_btn, self._x_trace_btn,
-                                 self._x_distance_btn)
-
-    def _sync_aspect_buttons(self, mode: str) -> None:
-        """按当前比例模式高亮对应按钮（三选一）。"""
-        pairs = (('free', self._fit_btn), ('square', self._square_btn),
-                 ('cell', self._one_to_one_btn))
-        for key, btn in pairs:
-            active = key == mode
-            btn.setStyleSheet(
-                f'font-weight: bold; color: {accent_color()};' if active
-                else '')
+        self._toolbar_buttons = (self._zoom_in_btn, self._zoom_out_btn)
 
     # ------------------------------------------------------------------ 轴单位
     def x_axis_mode(self) -> str:
@@ -470,8 +411,13 @@ class BScanView(GraphicsViewBase, QWidget):
         return self._y_axis
 
     def effective_y_axis_mode(self) -> str:
-        """实际生效的纵轴单位：偏好是海拔但数据不支持时回落 'sample'。"""
-        if self._y_axis == 'elevation' and not self.elevation_available():
+        """实际生效的纵轴单位：偏好是海拔但 warp 没成立时回落 'sample'。
+
+        以 ``_showing_elevation``（当前显示的是否是海拔网格矩阵）为准，
+        而不是重新检查数据可用性——warp 是一次性结论，重查既慢又可能与
+        已显示内容不一致。
+        """
+        if self._y_axis == 'elevation' and not self._showing_elevation:
             return 'sample'
         return self._y_axis
 
@@ -482,13 +428,16 @@ class BScanView(GraphicsViewBase, QWidget):
         return distance_available(self._trace_axis_m, self._image_shape[0])
 
     def elevation_available(self) -> bool:
-        """纵轴能否切成海拔：逐道地面高程与深度轴需同时齐备。"""
-        if self._image_shape is None:
+        """纵轴能否切成海拔：逐道地面高程（与道数等长）+ 深度轴齐备。"""
+        if self._matrix is None:
             return False
-        n_traces, n_samples = self._image_shape
-        return elevation_available(
-            self._ground_elevation_m, self._depth_axis_m,
-            n_traces, n_samples)
+        if self._showing_elevation:
+            return True
+        if self._ground_elevation_m is None or self._depth_axis_m is None:
+            return False
+        if not len(self._depth_axis_m):
+            return False
+        return len(self._ground_elevation_m) >= self._matrix.shape[1]
 
     def set_x_axis_mode(self, mode: str, *, notify: bool = False) -> None:
         """切换横轴单位（'trace' / 'distance'）；无里程轴时拒绝切到距离。
@@ -506,10 +455,11 @@ class BScanView(GraphicsViewBase, QWidget):
             self.sig_x_axis_changed.emit(mode)
 
     def set_y_axis_mode(self, mode: str, *, notify: bool = False) -> None:
-        """切换纵轴单位（'sample' / 'elevation'）；无地面高程时拒绝海拔。
+        """切换纵轴单位（'sample' / 'elevation'）；数据不支持时不接受海拔。
 
-        偏好会被记下来：即使当前数据不支持海拔，换到支持的数据后在
-        ``set_bundle`` 里自动恢复（不必用户再点一次）。
+        接受后由 ``_apply_axis_modes`` 完成真正的换图（整幅 warp 到共享
+        海拔网格）。偏好语义不变：只有当前数据确实不支持时才拒绝，
+        支持与否由 ``elevation_available`` 判定。
         """
         if mode not in Y_AXIS_MODES:
             return
@@ -527,14 +477,20 @@ class BScanView(GraphicsViewBase, QWidget):
         self.set_y_axis_mode(y_mode, notify=notify)
 
     def _apply_axis_modes(self) -> None:
-        """按当前单位刷新轴标签、按钮态与刻度文本（切换/来数据共用）。"""
+        """按当前单位刷新显示矩阵、轴标签与刻度文本（切换/来数据共用）。"""
+        swapped = self._refresh_elevation_image()
         self._plot.setLabel('bottom', self._bottom_label())
         self._plot.setLabel('left', self._left_label())
         self._refresh_axis_state()
+        if swapped:
+            # 显示网格变了（海拔模式行数 ≠ 采样数）：按当前比例策略重铺，
+            # 且波形纵坐标映射变了（行号↔海拔），非灰度模式要按新网格重画
+            self._fit_current_mode()
+            if self.display_mode is not BScanDisplayMode.GRAYSCALE:
+                self._apply_display_mode(self.display_mode, reset_view=False)
 
     def _refresh_axis_state(self) -> None:
-        """只刷按钮态与刻度画面（标签保持调用方/set_bundle 的既有结论）。"""
-        self._sync_axis_buttons()
+        """刷新刻度画面（轴标签保持调用方/set_bundle 的既有结论）。"""
         self._bottom_axis.invalidate()
         self._left_axis.invalidate()
 
@@ -548,35 +504,6 @@ class BScanView(GraphicsViewBase, QWidget):
             return '海拔 (m)'
         return self._sample_axis_label or '采样点'
 
-    def _sync_axis_buttons(self) -> None:
-        """刷新四枚轴单位钮：文字、可用态（含 tooltip）、当前生效高亮。"""
-        y_mode = self.effective_y_axis_mode()
-        x_mode = self._x_axis
-        self._y_sample_btn.setText(sample_unit_label(self._sample_axis_label))
-        self._update_axis_button(
-            self._y_sample_btn, y_mode == 'sample', True,
-            '纵轴按采集物理量显示（时间 ns / 深度 m，随数据而定）')
-        self._update_axis_button(
-            self._y_elevation_btn, y_mode == 'elevation',
-            self.elevation_available(),
-            '纵轴按海拔显示（地面高程 − 深度）'
-            if self.elevation_available() else ELEVATION_UNAVAILABLE_HINT)
-        have_distance = self.distance_available()
-        self._update_axis_button(
-            self._x_trace_btn, x_mode == 'trace', True, '横轴按道号显示')
-        self._update_axis_button(
-            self._x_distance_btn, x_mode == 'distance', have_distance,
-            '横轴按沿测线里程显示'
-            if have_distance else '本条数据缺少逐道里程（轨迹/道间距），无法按距离显示')
-
-    def _update_axis_button(self, btn, active: bool, enabled: bool,
-                            tooltip: str) -> None:
-        """单枚轴单位钮的三态外观：高亮（当前生效）/ 置灰 / 普通。"""
-        btn.setEnabled(bool(enabled))
-        btn.setToolTip(str(tooltip))
-        btn.setStyleSheet(
-            f'font-weight: bold; color: {accent_color()};' if active else '')
-
     def _convert_bottom_ticks(self, values, scale, spacing):
         """横轴刻度换算：距离模式换算成里程，否则回落默认（道索引）。"""
         if self._x_axis != 'distance':
@@ -584,11 +511,10 @@ class BScanView(GraphicsViewBase, QWidget):
         return distance_tick_strings(values, self._trace_axis_m)
 
     def _convert_left_ticks(self, values, scale, spacing):
-        """纵轴刻度换算：海拔模式换算成「参考高程 − 深度」，否则回落默认。"""
-        if self.effective_y_axis_mode() != 'elevation':
+        """纵轴刻度换算：海拔模式行号直接查共享海拔轴，否则回落默认。"""
+        if not self._showing_elevation:
             return None
-        return elevation_tick_strings(
-            values, self._ground_elevation_m, self._depth_axis_m)
+        return elevation_tick_strings(values, self._elev_axis)
 
     # ------------------------------------------------------------------ 缩放 / 导出
     def _export_grab_target(self):
@@ -709,6 +635,11 @@ class BScanView(GraphicsViewBase, QWidget):
         samples) 约定；本控件输入约定为 (samples, traces)，若再 .T 会
         使 x/y 轴互换，与 x_label=道数 / y_label=采样点 及
         sig_point_picked(trace, sample) 契约矛盾，故按契约语义实现。）
+
+        本函数只送**原始（未变形）矩阵**上屏：海拔 warp 的原料（逐道高程/
+        深度轴）由 set_bundle 在本函数之后才赋值，故海拔模式的换图统一由
+        _apply_axis_modes → _refresh_elevation_image 兜底（set_bundle 末尾
+        必然调用），这里不重复做。
         """
         import numpy as np
 
@@ -717,18 +648,20 @@ class BScanView(GraphicsViewBase, QWidget):
             raise ValueError('B-Scan 矩阵必须是二维 (samples, traces)')
         view = mat  # 零拷贝；row-major 下 y=采样(行)、x=道(列)
         self._matrix = view
-        new_shape = (view.shape[1], view.shape[0])  # (traces, samples)
-        shape_changed = new_shape != self._image_shape
-        self._image_shape = new_shape
         # 直接 set_matrix 的调用方没有物理轴元数据，读数退回索引显示
         self._trace_axis_m = None
         self._sample_axis = None
         self._sample_axis_label = ''
         self._trace_count = 0
         self._sample_count = 0
-        # 无 bundle 元数据 → 无物理轴：海拔/距离两钮随之置灰
+        # 无 bundle 元数据 → 无物理轴：海拔/距离不可用（回落采样轴显示）
         self._ground_elevation_m = None
         self._depth_axis_m = None
+        self._showing_elevation = False
+        self._elev_axis = None
+        new_shape = (view.shape[1], view.shape[0])   # (traces, samples)
+        shape_changed = new_shape != self._image_shape
+        self._image_shape = new_shape
         self._image_item.setImage(view, autoLevels=False,
                                   levels=(float(vmin), float(vmax)))
         if shape_changed:
@@ -752,6 +685,55 @@ class BScanView(GraphicsViewBase, QWidget):
         # 数据换了 → 轴可用性与刻度都要重算（单位切换不动，标签由调用方给定）
         self._refresh_axis_state()
         self._empty_overlay.setVisible(False)
+
+    def _resolve_display_target(self) -> tuple:
+        """按纵轴偏好解析应显示的矩阵：海拔偏好且可 warp → (warped, axis)。"""
+        if self._y_axis == 'elevation':
+            warped, axis = self._warped_elevation()
+            if warped is not None:
+                return warped, axis
+        return self._matrix, None
+
+    def _warped_elevation(self) -> tuple:
+        """海拔 warp（缓存：同一份数据/高程/深度只算一次，按对象身份判重）。
+
+        缓存键用对象身份而不是 id()：id 在对象被回收后可能被新对象复用，
+        身份比较（is）则绝对可靠。换线/换数据时身份必然变化，缓存自动失效。
+        """
+        if self._matrix is None:
+            return None, None
+        cache = self._elev_cache
+        if (cache is not None
+                and cache[0] is self._matrix
+                and cache[1] is self._ground_elevation_m
+                and cache[2] is self._depth_axis_m):
+            return cache[3], cache[4]
+        warped, axis = build_elevation_view(
+            self._matrix, self._ground_elevation_m, self._depth_axis_m)
+        self._elev_cache = (self._matrix, self._ground_elevation_m,
+                            self._depth_axis_m, warped, axis)
+        return warped, axis
+
+    def _refresh_elevation_image(self) -> bool:
+        """按纵轴偏好换显示矩阵（海拔↔采样轴切换共用）。返回是否换图。"""
+        if self._matrix is None:
+            return False
+        want = self._y_axis == 'elevation'
+        target, elev_axis = None, None
+        if want:
+            target, elev_axis = self._resolve_display_target()
+            if target is self._matrix:
+                want = False          # 数据不支持，回落采样轴显示
+        if want == self._showing_elevation:
+            return False
+        if not want:
+            target, elev_axis = self._matrix, None
+        levels = self._image_item.levels
+        self._image_item.setImage(target, autoLevels=False, levels=levels)
+        self._showing_elevation = want
+        self._elev_axis = elev_axis
+        self._image_shape = (target.shape[1], target.shape[0])
+        return True
 
     def set_colormap(self, name: str) -> None:
         """按 matplotlib 名取 LUT（九项见 SPEC §1，默认 seismic）。"""
@@ -925,7 +907,7 @@ class BScanView(GraphicsViewBase, QWidget):
         add_action(menu, FIF.FULL_SCREEN, '全屏浏览', self.enter_fullscreen)
 
     def _add_menu_axes(self, menu) -> None:
-        """轴单位组：与工具条同源（两侧入口一致，避免"工具条能切菜单不能"）。"""
+        """轴单位组：工具条精简后这里是切换主入口（另一处是设置页）。"""
         x_menu = RoundMenu('横轴单位', menu)
         for mode, label in (('trace', '道数'), ('distance', '距离 (m)')):
             x_menu.addAction(self._axis_menu_action(
@@ -1006,9 +988,12 @@ class BScanView(GraphicsViewBase, QWidget):
 
         set_matrix 新数据到达时以 reset_view=False 重渲染波形，保持用户
         当前缩放/视野（原实现无条件 autoRange，新数据会冲掉手动缩放）。
+        波形数据源固定用未变形的 ``_matrix``：海拔模式下 ImageItem 里是
+        warp 后的矩阵，直接取列会把波形纵向重采样；正确做法是值取原
+        矩阵、纵坐标按海拔映射（见 _render_wiggle 的 y_context）。
         """
         img = self._image_item.image
-        if img is None:
+        if img is None or self._matrix is None:
             return
         if mode is BScanDisplayMode.GRAYSCALE:
             if self._wiggle_item is not None:
@@ -1019,22 +1004,37 @@ class BScanView(GraphicsViewBase, QWidget):
             self._image_item.hide()
         else:
             self._image_item.show()
-        self._render_wiggle(img,
+        self._render_wiggle(self._matrix,
                             filled=(mode is BScanDisplayMode.WIGGLE),
                             symmetric=(mode is BScanDisplayMode.WAVEFORM),
-                            reset_view=reset_view)
+                            reset_view=reset_view,
+                            y_context=self._wiggle_y_context())
 
-    def _render_wiggle(self, img, *, filled: bool, symmetric: bool,
-                       reset_view: bool = False) -> None:
+    def _wiggle_y_context(self):
+        """海拔模式下波形的纵坐标映射参数；采样轴模式返回 None。
+
+        返回 ``(elev_axis, ground, depth)``：波形每一点的纵坐标 =
+        (最高海拔 − (该道地面高程 − 深度)) / 行距，即海拔网格行号——
+        每道波形从自己的地面高程处起画，随地形起伏。
+        """
+        if not self._showing_elevation or self._elev_axis is None:
+            return None
+        return self._elev_axis, self._ground_elevation_m, self._depth_axis_m
+
+    def _render_wiggle(self, data, *, filled: bool, symmetric: bool,
+                       reset_view: bool = False, y_context=None) -> None:
         """变面积/波形叠加：pg.arrayToQPath C 层批量构建（向量化，非逐道循环）。
 
         填充（变面积）用每道"上升沿正包络+基线回程"闭合；波形叠加为
         全波形双线。connect 数组在每道末尾断开，避免跨道连线。
+
+        :param y_context: None → 纵坐标 = 采样点行号（采样轴模式）；
+            (elev_axis, ground, depth) → 纵坐标 = 海拔网格行号（海拔模式）。
         """
         import numpy as np
         from PyQt6.QtGui import QColor
 
-        data = np.asarray(img, dtype=np.float64)
+        data = np.asarray(data, dtype=np.float64)
         n_samples, n_traces = data.shape
         levels = self._image_item.levels
         if levels is None or len(levels) < 2 or levels[0] == levels[1]:
@@ -1056,12 +1056,11 @@ class BScanView(GraphicsViewBase, QWidget):
             xs = bases[None, :] + np.maximum(amp, 0.0)
         else:
             xs = bases[None, :] + amp
+        ys_col, ys_bottom = self._wiggle_y_arrays(
+            n_samples, n_samples_ds, step, n_traces, y_context)
         # 坐标序列：道1全部点 → 道1基线回程点 → 道2... （每道 2 段闭合）
-        ys_col = np.arange(n_samples_ds, dtype=np.float64)[:, None] * step
         xs_t = np.concatenate([xs, bases[None, :]], axis=0)      # (n_ds+1, traces)
-        ys_t = np.concatenate(
-            [np.repeat(ys_col, n_traces, axis=1),
-             np.full((1, n_traces), float(n_samples - 1))], axis=0)
+        ys_t = np.concatenate([ys_col, ys_bottom[None, :]], axis=0)
         # 列优先展开为点序列，connect=0 断开道间
         x_flat = xs_t.T.ravel()
         y_flat = ys_t.T.ravel()
@@ -1090,6 +1089,39 @@ class BScanView(GraphicsViewBase, QWidget):
         self._wiggle_item.show()
         if reset_view:
             self._plot.getViewBox().autoRange()
+
+    def _wiggle_y_arrays(self, n_samples: int, n_samples_ds: int,
+                         step: int, n_traces: int, y_context):
+        """波形的纵坐标数组（降采样后每点一行号 + 每道基线回程行号）。
+
+        采样轴模式：行号 = 降采样索引 × 步距，基线回程 = 最深采样行。
+        海拔模式：行号 = (最高海拔 − (地面高程 − 深度)) / 行距，每道
+        各自从自己的地面高程起画（地形起伏直接体现在波形起点上）。
+        """
+        import numpy as np
+
+        if y_context is None:
+            ys_col = np.repeat(
+                np.arange(n_samples_ds, dtype=np.float64)[:, None] * step,
+                n_traces, axis=1)
+            ys_bottom = np.full(n_traces, float(n_samples - 1))
+            return ys_col, ys_bottom
+        elev_axis, ground, depth = y_context
+        top = float(elev_axis[0])
+        step_m = (top - float(elev_axis[-1])) / max(len(elev_axis) - 1, 1)
+        if step_m <= 0:
+            ys_col = np.zeros((n_samples_ds, n_traces), dtype=np.float64)
+            return ys_col, np.zeros(n_traces, dtype=np.float64)
+        sample_idx = np.clip(
+            np.arange(n_samples_ds, dtype=np.float64) * step,
+            0, len(depth) - 1)
+        d = np.asarray(depth, dtype=np.float64)[sample_idx.astype(np.int64)]
+        g = np.asarray(ground, dtype=np.float64)[:n_traces]
+        # 行号 = (top − (ground − depth)) / step_m；depth ≥ 0 → 行号 ≥ 0，
+        # 且 top = 最高地面 → 任何道的最浅点行号也不会越出网格顶。
+        ys_col = (top - g[None, :] + d[:, None]) / step_m
+        ys_bottom = (top - g + float(depth[-1])) / step_m
+        return ys_col, ys_bottom
 
     def set_ascan_follow(self, enabled: bool) -> None:
         """开关"A-scan 波形跟随"：懒创建浮窗并同步 pick 模式（Phase1 1.1）。"""
@@ -1148,20 +1180,17 @@ class BScanView(GraphicsViewBase, QWidget):
             return
         self._pending_readout = None
         trace, sample, amplitude = pending
+        # 海拔模式下纵轴读数 = 行号直查共享海拔轴（显示坐标已是行号）
+        showing_elevation = self._showing_elevation
         self._readout.setText(format_crosshair_readout(
             trace, sample, self._image_shape, amplitude,
             trace_axis_m=self._trace_axis_m,
-            sample_axis=self._sample_axis,
-            sample_axis_label=self._sample_axis_label,
+            sample_axis=(self._elev_axis if showing_elevation
+                         else self._sample_axis),
+            sample_axis_label=('海拔 (m)' if showing_elevation
+                               else self._sample_axis_label),
             trace_count=self._trace_count,
-            sample_count=self._sample_count,
-            # 仅海拔模式下传：读数改为"地面高程 − 深度"的逐道精确值
-            ground_elevation_m=(self._ground_elevation_m
-                                if self.effective_y_axis_mode() == 'elevation'
-                                else None),
-            depth_axis_m=(self._depth_axis_m
-                          if self.effective_y_axis_mode() == 'elevation'
-                          else None)))
+            sample_count=self._sample_count))
         self._position_readout()
 
     def _hide_crosshair(self) -> None:
@@ -1200,29 +1229,75 @@ class BScanView(GraphicsViewBase, QWidget):
     def _view_to_data(self, trace: int, sample: int) -> tuple:
         """显示坐标 → 原始数据坐标（strided 降采样近似线性映射）。
 
+        采样轴模式：y 显示坐标 = 采样点索引（降采样时线性映射回原始）。
+        海拔模式：y 显示坐标 = 海拔网格行号 → 该道地面高程处的深度 →
+        深度轴查表得采样点（行号越界夹取；地表以上/最深处以下夹到端点）。
         无物理轴元数据（直接 set_matrix）或未降采样时为恒等映射。
         """
         if self._image_shape is None:
             return int(trace), int(sample)
-        n_traces, n_samples = self._image_shape
-        t, s = int(trace), int(sample)
+        n_traces, n_rows = self._image_shape
+        t, r = int(trace), int(sample)
+        r = max(0, min(n_rows - 1, r))
+        if self._showing_elevation:
+            s = self._row_to_sample(t, r)
+        else:
+            s = r
+            if self._sample_count and self._sample_count != n_rows:
+                s = _downsample_map_index(s, n_rows, self._sample_count)
         if self._trace_count and self._trace_count != n_traces:
             t = _downsample_map_index(t, n_traces, self._trace_count)
-        if self._sample_count and self._sample_count != n_samples:
-            s = _downsample_map_index(s, n_samples, self._sample_count)
         return t, s
 
+    def _row_to_sample(self, trace_display: int, row: int) -> int:
+        """海拔网格行 → 采样点索引（该道地面高程 − 行海拔 = 深度 → 查深度轴）。"""
+        import numpy as np
+
+        ground, depth = self._ground_elevation_m, self._depth_axis_m
+        if ground is None or depth is None or self._elev_axis is None:
+            return 0
+        if not len(depth) or not len(ground):
+            return 0
+        ti = max(0, min(len(ground) - 1, int(trace_display)))
+        ri = max(0, min(len(self._elev_axis) - 1, int(row)))
+        depth_at_row = float(ground[ti]) - float(self._elev_axis[ri])
+        idx = int(np.searchsorted(np.asarray(depth, dtype=np.float64),
+                                  depth_at_row))
+        return max(0, min(len(depth) - 1, idx))
+
     def _data_to_view(self, trace, sample) -> tuple:
-        """原始数据坐标 → 显示坐标（_view_to_data 的逆映射）。"""
+        """原始数据坐标 → 显示坐标（_view_to_data 的逆映射）。
+
+        海拔模式下返回行号（浮点，overlay 散点可落在行间）。
+        """
         if self._image_shape is None:
             return float(trace), float(sample)
-        n_traces, n_samples = self._image_shape
+        n_traces, n_rows = self._image_shape
         t, s = float(trace), float(sample)
         if self._trace_count and self._trace_count != n_traces:
             t = _downsample_map_index_inverse(t, n_traces, self._trace_count)
-        if self._sample_count and self._sample_count != n_samples:
-            s = _downsample_map_index_inverse(s, n_samples, self._sample_count)
-        return t, s
+        if self._showing_elevation:
+            r = self._sample_to_row(t, s)
+        else:
+            r = s
+            if self._sample_count and self._sample_count != n_rows:
+                r = _downsample_map_index_inverse(s, n_rows, self._sample_count)
+        return t, r
+
+    def _sample_to_row(self, trace_display: float, sample_display: float) -> float:
+        """采样点 → 海拔网格行（浮点）：行 = (最高海拔 − 该点海拔) / 行距。"""
+        ground, depth, elev = (self._ground_elevation_m,
+                               self._depth_axis_m, self._elev_axis)
+        if ground is None or depth is None or elev is None or len(elev) < 2:
+            return float(sample_display)
+        ti = max(0, min(len(ground) - 1, int(round(trace_display))))
+        si = max(0, min(len(depth) - 1, int(round(sample_display))))
+        elevation = float(ground[ti]) - float(depth[si])
+        top = float(elev[0])
+        step = (top - float(elev[-1])) / (len(elev) - 1)
+        if step <= 0:
+            return 0.0
+        return (top - elevation) / step
 
     def _on_mouse_clicked(self, event) -> None:
         if event.button() == Qt.MouseButton.RightButton:
@@ -1256,7 +1331,13 @@ class BScanView(GraphicsViewBase, QWidget):
                 and self._image_shape is not None):
             import numpy as np
 
-            image = np.asarray(self._image_item.image)
+            # 波形取自未变形的预览矩阵：海拔模式下 ImageItem 里是 warp 后
+            # 的列（纵向重采样过），不是原始 A-scan，弹窗必须用 _matrix。
+            image = self._matrix
+            if image is None:
+                self.sig_point_picked.emit(trace, sample)
+                return
+            image = np.asarray(image)
             display_trace = self._image_shape[0] - 1 if view_trace is None else int(view_trace)
             if 0 <= display_trace < image.shape[1]:
                 dist = (self._trace_axis_m[display_trace]
@@ -1272,6 +1353,9 @@ class BScanView(GraphicsViewBase, QWidget):
         self._scatter.setData([])
         self._image_shape = None
         self._matrix = None
+        self._showing_elevation = False
+        self._elev_axis = None
+        self._elev_cache = None
         self._hide_crosshair()
         # 空态引导浮层（评审 P0-1）：替代原"只剩坐标轴 + 图内标题文案"
         self._export_title = ''
@@ -1316,7 +1400,3 @@ class BScanView(GraphicsViewBase, QWidget):
         )
         for btn in getattr(self, '_toolbar_buttons', ()):
             btn.setStyleSheet(btn_qss)
-        # 轴单位钮的"当前生效"高亮用的是强调色（随主题变），
-        # 上面这轮 btn_qss 已把高亮盖掉，需要重新套一次轴钮样式
-        self._sync_axis_buttons()
-        self._sync_aspect_buttons(self._aspect_mode)

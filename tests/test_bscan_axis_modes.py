@@ -3,15 +3,16 @@
 
 设计要点（改动即回归，本文件逐条锁定）：
 
-1. **显示坐标系永远是索引**。x/y 仍是列号/行号，物理量只在
-   ``IndexAxis.tickStrings`` 里换算。这样 pick/overlay/降采样换算
-   （test_bscan_pick_coordinates.py）全部不受影响。
-2. **海拔 = 逐道地面高程 − 该道下方深度**，因此需要两份原料同时齐备：
-   ``trace_elevation_m``（数据层已交付）与 ``depth_axis_m``（本阶段新增，
-   因为 sample_axis 通常是双程走时 ns，不是米）。任一缺失 → 海拔钮置灰 +
-   tooltip，且切不过去。
-3. **纵轴刻度以参考高程为基准**（有限值均值）：纵轴刻度只有一维，而地形
-   起伏时「同一行对应什么海拔」逐道不同；精确值由十字光标按当前道给出。
+1. **两种纵轴 = 两种显示网格**。采样轴/距离模式下显示坐标是索引（x=列、
+   y=采样行），物理量只在 ``IndexAxis.tickStrings`` 里换算；海拔模式是
+   **整幅剖面重采样到共享绝对海拔网格**（见 test_bscan_elevation_warp.py），
+   显示 y 变成「海拔网格行号」。pick/overlay/降采样换算在两种模式下分别
+   由 BScanView 的坐标映射兜底（test_bscan_pick_coordinates.py）。
+2. **海拔 = 逐道地面高程 − 该道下方深度**，需要两份原料同时齐备：
+   ``trace_elevation_m``（数据层已交付）与 ``depth_axis_m``。任一缺失 →
+   海拔切不过去（右键菜单/设置页该项不可用）。
+3. 切换偏好与数据能力解耦：数据不支持时切不过去，但偏好记住，
+   换到支持的数据后自动生效。
 4. pyqtgraph 0.14 的空刻度崩溃（轴条 2px 时 ``min(map(min, tickPositions))``
    抛 ValueError）已由 ``IndexAxis.tickValues`` 过滤空刻度级兜住——旧版
    BScanView 同样会抛，属既有问题，本文件守住不再复发。
@@ -31,10 +32,8 @@ from ui.widgets.bscan_axes import (  # noqa: E402
     IndexAxis,
     distance_available,
     distance_tick_strings,
-    elevation_at,
     elevation_available,
     elevation_tick_strings,
-    reference_elevation,
     sample_unit_label,
     tick_index,
 )
@@ -94,20 +93,11 @@ class TestTickIndex:
         assert tick_index(3.7, 0) == 0
 
 
-class TestUnitLabelAndReference:
+class TestUnitLabel:
     def test_unit_label_from_bundle_label(self):
         assert sample_unit_label('时间 (ns)') == '时间'
         assert sample_unit_label('深度 (m)') == '深度'
         assert sample_unit_label('') == '采样点'
-
-    def test_reference_is_mean_of_finite(self):
-        assert reference_elevation([1.0, 2.0, 3.0]) == pytest.approx(2.0)
-        assert reference_elevation([1.0, float('nan'), 3.0]) == pytest.approx(2.0)
-
-    def test_reference_none_when_unusable(self):
-        assert reference_elevation(None) is None
-        assert reference_elevation([]) is None
-        assert reference_elevation([float('nan')]) is None
 
 
 class TestAvailability:
@@ -137,34 +127,16 @@ class TestTickStrings:
         assert distance_tick_strings([0.0], None) is None
         assert distance_tick_strings([0.0], np.empty(0)) is None
 
-    def test_elevation_uses_reference_minus_depth(self):
-        base = float(np.mean(_ELEVATION))
-        texts = elevation_tick_strings([0.0, 10.0], _ELEVATION, _DEPTH)
-        # 刻度文本按刻度可读性只保留 4 位有效数字，容差按此给
-        assert float(texts[0]) == pytest.approx(base - float(_DEPTH[0]), abs=0.05)
-        assert float(texts[1]) == pytest.approx(base - float(_DEPTH[10]), abs=0.05)
-        # pyqtgraph 的 y 轴已 invertY，行号增大 → 深度增大 → 海拔变小
-        assert float(texts[0]) > float(texts[1])
+    def test_elevation_reads_shared_axis(self):
+        """海拔刻度 = 行号直查共享海拔轴（降序：行号增大海拔变小）。"""
+        axis = np.array([500.0, 499.0, 498.0, 497.0])
+        texts = elevation_tick_strings([0.0, 3.0], axis)
+        assert float(texts[0]) == pytest.approx(500.0)
+        assert float(texts[1]) == pytest.approx(497.0)
 
     def test_elevation_none_when_axis_missing(self):
-        assert elevation_tick_strings([0.0], None, _DEPTH) is None
-        assert elevation_tick_strings([0.0], _ELEVATION, None) is None
-
-
-class TestElevationAt:
-    """十字光标用的逐道精确海拔（与纵轴刻度的参考基准无关）。"""
-
-    def test_values_per_trace(self):
-        got = elevation_at(_ELEVATION, _DEPTH, 0, 10)
-        assert got == pytest.approx(float(_ELEVATION[0]) - float(_DEPTH[10]))
-
-    def test_out_of_range_is_none(self):
-        assert elevation_at(_ELEVATION, _DEPTH, 999, 0) is None
-        assert elevation_at(_ELEVATION, _DEPTH, 0, -1) is None
-
-    def test_missing_axis_is_none(self):
-        assert elevation_at(None, _DEPTH, 0, 0) is None
-        assert elevation_at(_ELEVATION, None, 0, 0) is None
+        assert elevation_tick_strings([0.0], None) is None
+        assert elevation_tick_strings([0.0], np.empty(0)) is None
 
 
 # ============================================================ 视图层
@@ -182,8 +154,8 @@ class TestAxisModeAvailability:
     def test_elevation_disabled_without_data(self, view):
         feed(view, elevation=False)
         assert not view.elevation_available()
-        assert not view._y_elevation_btn.isEnabled()
-        assert view._y_elevation_btn.toolTip()   # 置灰时必须说明原因
+        view.set_y_axis_mode('elevation', notify=True)
+        assert view.effective_y_axis_mode() == 'sample'   # 切不过去
 
     def test_elevation_switch_rejected_without_data(self, view):
         feed(view, elevation=False)
@@ -198,12 +170,12 @@ class TestAxisModeAvailability:
     def test_elevation_enabled_with_full_data(self, view):
         feed(view)
         assert view.elevation_available()
-        assert view._y_elevation_btn.isEnabled()
 
     def test_distance_disabled_without_mileage(self, view):
         feed(view, distance=False)
         assert not view.distance_available()
-        assert not view._x_distance_btn.isEnabled()
+        view.set_x_axis_mode('distance', notify=True)
+        assert view.x_axis_mode() == 'trace'
 
     def test_distance_switch_rejected_without_mileage(self, view):
         feed(view, distance=False)
@@ -238,7 +210,6 @@ class TestAxisModeSwitch:
     def test_sample_label_follows_bundle_unit(self, view):
         feed(view)
         assert view._plot.getAxis('left').labelText == '时间 (ns)'
-        assert view._y_sample_btn.text() == '时间'
 
     def test_illegal_mode_is_noop(self, view):
         feed(view)
@@ -321,16 +292,17 @@ class TestAxisModeSignal:
 
 
 class TestCrosshairElevation:
-    def test_readout_shows_elevation_in_elevation_mode(self):
+    def test_readout_shows_elevation_via_axis(self):
+        """海拔读数 = 行号直查海拔轴（调用方传 elev_axis + 海拔标签）。"""
+        axis = np.linspace(500.0, 450.0, 51)   # 降序海拔轴
         text = format_crosshair_readout(
-            0, 10, (_TRACES, _SAMPLES), 1.0,
-            ground_elevation_m=_ELEVATION, depth_axis_m=_DEPTH)
-        expected = float(_ELEVATION[0]) - float(_DEPTH[10])
-        assert '海拔' in text
-        assert f'{expected:.4g}' in text
+            0, 10, (_TRACES, len(axis)), 1.0,
+            sample_axis=axis, sample_axis_label='海拔 (m)')
+        assert '海拔 (m)' in text
+        assert f'{float(axis[10]):.4g}' in text
 
     def test_readout_without_elevation_args_unchanged(self):
-        """不传海拔原料时读数保持原样（采样轴分支不被扰动）。"""
+        """采样轴模式下读数保持原样（不出现海拔字样）。"""
         text = format_crosshair_readout(
             0, 10, (_TRACES, _SAMPLES), 1.0,
             sample_axis=np.linspace(0.0, 250.0, _SAMPLES),
@@ -338,11 +310,15 @@ class TestCrosshairElevation:
         assert '海拔' not in text
         assert '时间' in text or '纵轴' in text
 
-    def test_view_passes_elevation_only_in_elevation_mode(self, view):
+    def test_readout_nan_amplitude_shows_dash(self):
+        """海拔模式地表以上是 NaN（留白），幅值显示占位符而不是 nan。"""
+        text = format_crosshair_readout(0, 0, (_TRACES, 10), float('nan'))
+        assert '幅值 —' in text
+        assert 'nan' not in text
+
+    def test_view_switches_readout_axis_by_mode(self, view):
         feed(view)
         view._image_shape = (_TRACES, _SAMPLES)
-        view._ground_elevation_m = _ELEVATION
-        view._depth_axis_m = _DEPTH
         view._pending_readout = (0, 10, 1.0)
         view._flush_crosshair_readout()
         assert '海拔' not in view._readout.text()
