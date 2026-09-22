@@ -8,6 +8,7 @@
   ``view.setGraphicsEffect(None)`` 去阴影、
   给 ``#comboListWidget`` 加实色 1px 边框（深色 ``rgb(100,100,100)`` / 浅色 ``rgb(200,200,200)``）。
 """
+import gc
 from typing import TYPE_CHECKING
 
 import pyqtgraph as pg
@@ -317,6 +318,17 @@ def apply_theme(theme: str) -> None:
     if _applied_dark is not None and dark == _applied_dark \
             and isDarkTheme() == dark:
         return
+    # 先收一次垃圾：qfluentwidgets 的 updateStyleSheet 用
+    # `list(styleSheetManager.items())` 遍历内部 WeakKeyDictionary，而
+    # `items()` 是直通该字典的迭代器视图——若在展开它的过程中某个已销毁
+    # 控件的弱引用键恰好被 GC 回收，就会抛
+    #   RuntimeError: dictionary changed size during iteration
+    # （CPython 3.13 上更易命中，CI gui-linux-offscreen 全量跑时偶发，
+    #  见 tests/test_main_window_titlebar.py 的 setup 报错）。
+    # 这里主动 gc.collect() 把"已死未回收"的键提前清掉，让库的遍历过程
+    # 不再因 GC 抖动而改字典；本函数本就是秒级重算路径，一次 collect 的
+    # 开销可忽略。
+    gc.collect()
     setTheme(Theme.DARK if dark else Theme.LIGHT)
     pg.setConfigOption('background', 'k' if dark else 'w')
     pg.setConfigOption('foreground', 'w' if dark else 'k')
