@@ -12,13 +12,39 @@ from typing import Any
 import numpy as np
 from PyQt6.QtCore import QObject, pyqtSignal
 
-from ui.desktop_backend_facade import SensorSyncSettings, build_preview_bundle
+from ui.desktop_backend_facade import (
+    SensorSyncSettings,
+    build_preview_bundle,
+    resample_trace_vector,
+)
 from ui.controllers.backend_controller import friendly_error_message, run_command
 
 _LOGGER = logging.getLogger(__name__)
 
 _PREVIEW_MAX_SAMPLES = 900
 _PREVIEW_MAX_TRACES = 1800
+
+
+def _sample_trace_vector(series: Any, index: np.ndarray, total_traces: int) -> np.ndarray | None:
+    """按与矩阵窗口相同的道索引抽样逐道序列。
+
+    ``series`` 是全分辨率逐道序列（可能点数≠道数，例如 RTK 对齐后重采样过）。
+    点数不等时先重采样到道网格，再用同样的 ``index`` 抽样，保证每个预览列
+    的高程与该道严格对应；无数据时返回 ``None``。
+    """
+    if series is None:
+        return None
+    array = np.asarray(series, dtype=np.float64).ravel()
+    if array.size == 0 or index.size == 0 or total_traces <= 0:
+        return None
+    if array.size != total_traces:
+        resampled = resample_trace_vector(series, int(total_traces))
+        if resampled is None:
+            return None
+        array = np.asarray(resampled, dtype=np.float64).ravel()
+    if index.max() >= array.size:
+        return None
+    return np.ascontiguousarray(array[index])
 
 
 class ProjectController(QObject):
@@ -277,20 +303,27 @@ class ProjectController(QObject):
         trace_indices: Any = None,
         total_samples: int = 0,
         total_traces: int = 0,
+        trace_elevation_m: Any = None,
     ) -> Any:
         """从 read_window 结果构建预览 bundle。
 
         P1-5：透传真实 time_window_ns 与通过 sample/trace_indices 重建的物理轴，
         避免所有页面预览纵轴硬编码 250ns 导致刻度错误。
+
+        ``trace_elevation_m`` 为**全分辨率**逐道地面高程（m）；取值时用与矩阵
+        窗口相同的 ``trace_indices`` 抽样，保证每一列的高程与该道严格对齐。
         """
         time_axis_ns = None
         distance_axis_m = None
+        elevation_axis_m = None
         if sample_indices is not None and total_samples > 0:
             base = np.linspace(0.0, float(time_window_ns), int(total_samples), dtype=np.float32)
             time_axis_ns = base[np.asarray(sample_indices, dtype=np.int64)]
         if trace_indices is not None and total_traces > 0:
+            index = np.asarray(trace_indices, dtype=np.int64)
             base = np.linspace(0.0, float(length_m or max(int(total_traces) - 1, 1)), int(total_traces), dtype=np.float32)
-            distance_axis_m = base[np.asarray(trace_indices, dtype=np.int64)]
+            distance_axis_m = base[index]
+            elevation_axis_m = _sample_trace_vector(trace_elevation_m, index, int(total_traces))
         return build_preview_bundle(
             line_id=line_id,
             matrix=np.asarray(matrix, dtype=np.float32),
@@ -298,7 +331,17 @@ class ProjectController(QObject):
             time_window_ns=float(time_window_ns),
             time_axis_ns=time_axis_ns,
             distance_axis_m=distance_axis_m,
+            trace_elevation_m=elevation_axis_m,
         )
+
+    @staticmethod
+    def _line_elevation(backend: Any, project_id: str, line_id: str) -> Any:
+        """查询逐道地面高程；失败只降级（无海拔纵轴），不让整个预览失败。"""
+        try:
+            return backend.projects.line_trace_elevation(project_id, line_id)
+        except Exception:  # noqa: BLE001 - 高程是视图增强项，缺了仍要出图
+            _LOGGER.debug("读取测线 %s 高程失败，预览降级为无海拔纵轴", line_id, exc_info=True)
+            return None
 
     # ------------------------------------------------------------------
     def preflight_import(self, source: str, line_id: str, dielectric: float) -> None:
@@ -713,11 +756,13 @@ class _PreviewLineCommand:
                 max_samples=_PREVIEW_MAX_SAMPLES,
                 max_traces=_PREVIEW_MAX_TRACES,
             )
+            elevation = c._line_elevation(backend, self._project_id, self._line_id)
             bundle = c._bundle_from_window(
                 matrix, self._line_id, title=f"测线 {self._line_id}",
                 time_window_ns=info.time_window_ns, length_m=info.length_m,
                 sample_indices=sample_idx, trace_indices=trace_idx,
                 total_samples=info.shape[0], total_traces=info.shape[1],
+                trace_elevation_m=elevation,
             )
         except Exception as exc:  # noqa: BLE001
             _LOGGER.exception("数据预览失败")
@@ -760,11 +805,13 @@ class _PreviewArtifactCommand:
                 max_samples=_PREVIEW_MAX_SAMPLES,
                 max_traces=_PREVIEW_MAX_TRACES,
             )
+            elevation = c._line_elevation(backend, self._project_id, self._line_id)
             bundle = c._bundle_from_window(
                 matrix, self._line_id, title=f"成果 {self._artifact_id}",
                 time_window_ns=info.time_window_ns, length_m=info.length_m,
                 sample_indices=sample_idx, trace_indices=trace_idx,
                 total_samples=info.shape[0], total_traces=info.shape[1],
+                trace_elevation_m=elevation,
             )
         except Exception as exc:  # noqa: BLE001
             _LOGGER.exception("成果预览失败")

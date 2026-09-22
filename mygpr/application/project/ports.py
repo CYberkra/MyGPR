@@ -107,6 +107,8 @@ class ProjectSessionPort(Protocol):
 
     def read_trace_metadata(self, line_id: str) -> Mapping[str, np.ndarray]: ...
 
+    def line_trace_elevation(self, line_id: str) -> np.ndarray | None: ...
+
     def iter_dataset_blocks(
         self,
         line_id: str,

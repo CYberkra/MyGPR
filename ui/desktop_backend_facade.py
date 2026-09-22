@@ -26,7 +26,7 @@ from mygpr.application.jobs.models import JobEventType, JobResultSummary  # noqa
 # Backend imports (the only place in ui/ that touches core/mygpr directly)
 # ---------------------------------------------------------------------------
 from core.gpr_data_model import GPRDataSet
-from core.gui_rendering import bundle_from_dataset, compute_levels
+from core.gui_rendering import align_trace_vector, bundle_from_dataset, compute_levels
 from core.gpr_format_registry import supported_file_dialog_filter
 from core.app_paths import get_tile_cache_dir
 from core.method_registry_metadata import (
@@ -64,6 +64,11 @@ def compute_display_levels(
     return compute_levels(matrix, p_low=p_low, p_high=p_high)
 
 
+def resample_trace_vector(series: Any, trace_count: int) -> Any:
+    """Resample a per-trace series onto the trace grid; ``None`` when unusable."""
+    return align_trace_vector(series, trace_count)
+
+
 def build_preview_bundle(
     line_id: str,
     matrix: Any,
@@ -74,13 +79,15 @@ def build_preview_bundle(
     p_low: float = 2.0,
     p_high: float = 98.0,
     time_window_ns: float = 250.0,
+    trace_elevation_m: Any = None,
 ) -> Any:
     """Build a :class:`PreviewBundle` from raw array data.
 
     Constructs a minimal ``GPRDataSet``-like object internally and forwards
     to ``core.gui_rendering.bundle_from_dataset``.  The UI never sees
     ``GPRDataSet``.  ``time_window_ns`` 必须为真实测线时窗（P1-5），否则
-    预览纵轴物理刻度错误。
+    预览纵轴物理刻度错误。``trace_elevation_m`` 为逐道地面高程（m），缺失
+    时 bundle 不带高程、视图侧据此禁用海拔纵轴。
     """
     sample_count = int(getattr(matrix, "shape", (0,))[0])
     trace_count = int(getattr(matrix, "shape", (0, 1))[1])
@@ -95,7 +102,13 @@ def build_preview_bundle(
         trace_count=trace_count,
         time_window_ns=time_window_ns,
     )
-    return bundle_from_dataset(dataset, title=title, p_low=p_low, p_high=p_high)
+    return bundle_from_dataset(
+        dataset,
+        title=title,
+        p_low=p_low,
+        p_high=p_high,
+        trace_elevation_m=trace_elevation_m,
+    )
 
 
 def file_dialog_filter() -> str:
@@ -249,6 +262,7 @@ __all__ = [
     # wrapped functions
     "compute_display_levels",
     "build_preview_bundle",
+    "resample_trace_vector",
     "file_dialog_filter",
     "tile_cache_dir",
     "method_catalog",

@@ -288,6 +288,11 @@ class ProjectService:
             for key, value in self._session(project_id).read_trace_metadata(line_id).items()
         }
 
+    def line_trace_elevation(self, project_id: str, line_id: str) -> np.ndarray | None:
+        """逐道地面高程（m）；该测线无高程数据时返回 ``None``。"""
+        series = self._session(project_id).line_trace_elevation(line_id)
+        return None if series is None else np.array(series, dtype=np.float64, copy=True)
+
     def iter_dataset_blocks(
         self,
         project_id: str,
