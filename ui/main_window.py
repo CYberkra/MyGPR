@@ -288,12 +288,20 @@ class MyGPRMainWindow(FluentWindow):
         if self._pages_warmed:
             return
         self._pages_warmed = True
+        # 清空预热队列：ensure_pages_ready 已同步构造完所有页，此时若还有
+        # QTimer.singleShot(0, _warmup_next_page) 留在事件队列里，它会在下面
+        # 遍历 pages 期间的嵌套事件循环中执行 _register_page → self.pages[...]
+        # 写入，触发「dictionary changed size during iteration」（CI Linux
+        # offscreen 上表现为 test_main_window_titlebar 偶发 ERROR）。
+        self._deferred_specs.clear()
         # 跨页业务信号链需要 8 页全部存在，因此延后到此处（接线代码本身不改）
         self.page_coordinator.connect_all()
         self._inject_page_settings()
         if not self._backend_ready:
             # 预热期间后端可能仍未就绪：补齐延后页的禁用态
-            for object_name, page in self.pages.items():
+            # 遍历用 list() 快照：setEnabled 会走 Qt 事件/布局，理论上可能
+            # 重入本方法或被其它路径改 pages；快照让遍历对字典变更免疫。
+            for object_name, page in list(self.pages.items()):
                 if object_name not in self.FIRST_PAINT_PAGES:
                     page.setEnabled(False)
 
@@ -654,7 +662,10 @@ class MyGPRMainWindow(FluentWindow):
     def _set_backend_ready(self, ready: bool) -> None:
         """后端未就绪时禁用除主页/设置外的页面，就绪后恢复。"""
         self._backend_ready = bool(ready)
-        for object_name, page in self.pages.items():
+        # list() 快照：本方法可能在预热期间被后端就绪回调触发，此时
+        # _warmup_next_page 仍会往 pages 里加页 —— 直接遍历原字典会在
+        # 嵌套事件循环中抛「dictionary changed size during iteration」。
+        for object_name, page in list(self.pages.items()):
             if object_name in ('homeInterface', 'settingsInterface'):
                 continue
             page.setEnabled(ready)
