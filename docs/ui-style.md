@@ -84,6 +84,21 @@ B-Scan 工具条的「+/-」已由文字钮改图标钮（`FIF.ZOOM_IN/OUT`）�
   图像类（B-Scan / 深度切片）保持 False。透明度由 `style_plot_item`
   统一按主题取 `CHART_GRID_ALPHA_LIGHT/DARK`，**视图内不得写死 alpha**。
   轴 pen/textPen/标签/标题/色标轴亦由它统一，视图只负责背景与曲线色。
+- **B-Scan 显示比例**（2026-09-22 定案，`BScanView`）：默认 **`free` 拉伸铺满**。
+  三种模式实测（900×1800 数据、1100×560 画布）：
+
+  | 模式 | 数据占画布 | x/y 拉伸比 | 说明 |
+  |---|---|---|---|
+  | `free`（默认） | 85.9% | 1.09 | 铺满且几乎不畸变 |
+  | `cell` | 93.7% | — | 数据格 1:1，按采样间隔等比 |
+  | `square` | 43.3% | 0.50 | 把 4:1 剖面压成 1:1，两侧各留大片空白 |
+
+  **`square` 不是「保真」**——它无视数据自身长宽比强行拉方，在占空与形状
+  两项都最差，仅保留供与旧图对照。用户手动切换经 `sig_aspect_changed` →
+  `main_window._persist_aspect_mode` 写入 `bscan_aspect_mode` 跨会话记住；
+  恢复阶段必须 `set_aspect_mode(mode, notify=False)`，否则「读设置→写设置」
+  回环。数据到达时的 `_fit_current_mode` 属数据驱动重排，同样 `notify=False`。
+  回归防护见 `tests/test_bscan_aspect.py`。
 - **hint**：`make_hint(text, parent=, key='secondary')`；运行期改色用
   `HintLabel.set_hint_key(key)`，勿手工 setStyleSheet。
 - **徽章**：`make_badge(text, key)`；QSS 模板单源 `BADGE_QSS`（单占位，

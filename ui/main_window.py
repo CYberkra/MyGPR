@@ -29,6 +29,7 @@ from ui.page_coordinator import PageCoordinator
 from ui.logger_config import setup_logger
 from ui.settings_manager import SettingsManager
 from ui.theme_helpers import apply_theme, control_palette
+from ui.widgets.bscan_view import BScanView
 from ui.widgets.file_tree_panel import FileTreePanel
 from ui.widgets.segment_tabs import SlimSegment
 
@@ -243,9 +244,32 @@ class MyGPRMainWindow(FluentWindow):
         # 互相覆盖（共享实例是唯一写者）
         if hasattr(page, 'set_settings_manager'):
             page.set_settings_manager(self.settings)
+        # B-Scan 显示比例：四页都有 BScanView，统一在此恢复/持久化，
+        # 避免在四个页面里各写一遍（漏一个就是"某页记不住"）
+        self._wire_bscan_aspect(page)
         page.setObjectName(object_name)
         self.addSubInterface(page, icon, text, position=position)
         self.pages[object_name] = page
+
+    def _wire_bscan_aspect(self, page) -> None:
+        """把页面内所有 BScanView 的比例模式接到持久化设置（跨会话记住）。"""
+        key = 'bscan_aspect_mode'
+        views = page.findChildren(BScanView)
+        if not views:
+            return
+        saved = str(self.settings.get(key, 'free') or 'free')
+        if saved not in ('free', 'square', 'cell'):
+            saved = 'free'
+        for view in views:
+            # 恢复阶段 notify=False：避免"读设置 → 写设置"回环
+            view.set_aspect_mode(saved, notify=False)
+            view.sig_aspect_changed.connect(
+                lambda mode, k=key: self._persist_aspect_mode(k, mode))
+
+    def _persist_aspect_mode(self, key: str, mode: str) -> None:
+        """用户切换 B-Scan 比例后写盘（共享 SettingsManager 唯一写者）。"""
+        self.settings.set(key, str(mode))
+        self.settings.save()
 
     # ---------------------------------------------------------- 首屏后预热
     def _start_warmup(self) -> None:

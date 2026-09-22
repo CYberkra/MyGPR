@@ -28,7 +28,7 @@ from PyQt6.QtWidgets import QLabel
 from qfluentwidgets import FluentIcon as FIF, PushButton, ToolButton
 
 from ui import constants
-from ui.theme_helpers import control_palette
+from ui.theme_helpers import accent_color, control_palette
 from ui.widgets._colormap_data import COLORMAP_DATA
 from ui.widgets.context_menus import (RoundMenu, add_action,
                                       add_checkable_submenu, make_menu)
@@ -134,16 +134,21 @@ class BScanView(GraphicsViewBase, QWidget):
 
     sig_point_picked = pyqtSignal(int, int)
     sig_colormap_changed = pyqtSignal(str)
+    # 用户手动切换显示比例时发射（'free'/'square'/'cell'），页面据此持久化
+    sig_aspect_changed = pyqtSignal(str)
 
     def __init__(self, parent=None, *, with_colorbar: bool = True,
-                 default_aspect: str = 'square'):
+                 default_aspect: str = 'free'):
         super().__init__(parent)
         self._pick_enabled = False
         self._image_shape = None  # (traces, samples) 显示坐标系尺寸
-        # 显示比例策略：'square' 近似方形（默认，B-Scan 习惯比例）/
-        # 'free' 拉伸铺满 / 'cell' 数据格 1:1
+        # 显示比例策略：'free' 拉伸铺满（默认——实测占空比 85.9%，x/y 拉伸比
+        # 1.09 几乎不畸变）/ 'square' 数据盒锁正方形（占空比仅 43.3%，且把
+        # 4:1 的真实剖面压成 1:1、双曲线形状失真）/ 'cell' 数据格 1:1。
+        # 旧默认 'square' 是"B-Scan 习惯比例"的想当然，实测两项指标都最差，
+        # 2026-09-22 改默认为 'free'；方形仍保留在工具条/右键菜单随时可切。
         self._aspect_mode = default_aspect if default_aspect in (
-            'square', 'free', 'cell') else 'square'
+            'square', 'free', 'cell') else 'free'
         self._cmap_name = constants.DEFAULT_COLORMAP
         # 十字光标读数状态（PreviewBundle 物理轴元数据）
         self._crosshair_on = True
@@ -234,6 +239,8 @@ class BScanView(GraphicsViewBase, QWidget):
 
         self._glw.scene().sigMouseClicked.connect(self._on_mouse_clicked)
         self._glw.scene().sigMouseMoved.connect(self._on_mouse_moved)
+        # 工具条按钮的当前生效态（构造期就同步一次，不等首次点击）
+        self._sync_aspect_buttons(self._aspect_mode)
         from qfluentwidgets import isDarkTheme
         self.apply_theme(isDarkTheme())
 
@@ -256,13 +263,15 @@ class BScanView(GraphicsViewBase, QWidget):
         layout.addWidget(self._zoom_out_btn)
 
         self._fit_btn = PushButton('自适应', self)
-        self._fit_btn.setToolTip('拉伸铺满窗口')
+        self._fit_btn.setToolTip('拉伸铺满窗口（默认，不浪费画布且几乎不畸变）')
         self._fit_btn.setMinimumHeight(constants.BTN_HEIGHT)
         self._fit_btn.clicked.connect(self.fit_to_data)
         layout.addWidget(self._fit_btn)
 
         self._square_btn = PushButton('方形', self)
-        self._square_btn.setToolTip('图像整体按近似正方形显示（B-Scan 常用比例）')
+        self._square_btn.setToolTip(
+            '整个数据盒锁成正方形（会把 4:1 的剖面压成 1:1，形状失真；'
+            '仅在与旧图对照时使用）')
         self._square_btn.setMinimumHeight(constants.BTN_HEIGHT)
         self._square_btn.clicked.connect(self.fit_square)
         layout.addWidget(self._square_btn)
@@ -276,9 +285,21 @@ class BScanView(GraphicsViewBase, QWidget):
         self._toolbar_buttons = (self._zoom_in_btn, self._zoom_out_btn,
                                  self._fit_btn, self._square_btn,
                                  self._one_to_one_btn)
+        # 比例按钮的"当前生效"态：加粗 + 强调色，一眼看出现在是哪种
+        self.sig_aspect_changed.connect(self._sync_aspect_buttons)
 
         layout.addStretch(1)
         return layout
+
+    def _sync_aspect_buttons(self, mode: str) -> None:
+        """按当前比例模式高亮对应按钮（三选一）。"""
+        pairs = (('free', self._fit_btn), ('square', self._square_btn),
+                 ('cell', self._one_to_one_btn))
+        for key, btn in pairs:
+            active = key == mode
+            btn.setStyleSheet(
+                f'font-weight: bold; color: {accent_color()};' if active
+                else '')
 
     # ------------------------------------------------------------------ 缩放 / 导出
     def _export_grab_target(self):
@@ -288,51 +309,84 @@ class BScanView(GraphicsViewBase, QWidget):
     def _fit_view(self) -> None:
         self.fit_to_data()
 
-    def fit_to_data(self) -> None:
+    def aspect_mode(self) -> str:
+        """当前比例策略：'free' / 'square' / 'cell'。"""
+        return self._aspect_mode
+
+    def set_aspect_mode(self, mode: str, *, notify: bool = False) -> None:
+        """按名切换比例策略（外部恢复持久化设置用）。
+
+        :param notify: True 时发 sig_aspect_changed（供页面写回设置）；
+            恢复阶段应传 False，避免"读设置→写设置"回环。
+        """
+        if mode == 'free':
+            self.fit_to_data(notify=notify)
+        elif mode == 'cell':
+            self.reset_1to1(notify=notify)
+        elif mode == 'square':
+            self.fit_square(notify=notify)
+
+    def fit_to_data(self, *, notify: bool = True) -> None:
         """自适应窗口：显示全部数据（解除纵横锁定，拉伸铺满）。"""
         self._aspect_mode = 'free'
         self._plot.vb.setAspectLocked(False)
         self._plot.vb.autoRange()
+        if notify:
+            self.sig_aspect_changed.emit('free')
 
-    def fit_square(self) -> None:
+    def fit_square(self, *, notify: bool = True) -> None:
         """近似方形显示：锁定纵横比，使数据包围盒在屏幕上接近正方形。
 
         pyqtgraph setAspectLocked 的 ratio 是「一个 x 单位在屏幕上的宽度 /
         一个 y 单位在屏幕上的高度」。数据盒宽 n_traces、高 n_samples，
         要让它显示为正方形：n_traces * ratio = n_samples → ratio = 高/宽。
+
+        注意：本模式会把整个数据盒拉成正方形，与数据自身的长宽比无关——
+        真实的 4:1 剖面会被横向压缩 4 倍，双曲线形状失真。仅作对照用，
+        默认已改为 'free'（见 __init__ 注释）。
         """
         self._aspect_mode = 'square'
         if self._image_shape is None:
             self._plot.vb.setAspectLocked(False)
             self._plot.vb.autoRange()
-            return
-        n_traces, n_samples = self._image_shape
-        vb = self._plot.vb
-        vb.setAspectLocked(False)
-        vb.setRange(xRange=(0, n_traces), yRange=(0, n_samples), padding=0.02)
-        vb.setAspectLocked(True, ratio=float(n_samples) / max(float(n_traces), 1.0))
+        else:
+            n_traces, n_samples = self._image_shape
+            vb = self._plot.vb
+            vb.setAspectLocked(False)
+            vb.setRange(xRange=(0, n_traces), yRange=(0, n_samples),
+                        padding=0.02)
+            vb.setAspectLocked(
+                True, ratio=float(n_samples) / max(float(n_traces), 1.0))
+        if notify:
+            self.sig_aspect_changed.emit('square')
 
-    def reset_1to1(self) -> None:
+    def reset_1to1(self, *, notify: bool = True) -> None:
         """恢复像素 1:1 显示（x/y 轴等比例）。"""
         self._aspect_mode = 'cell'
         if self._image_shape is None:
             self._plot.vb.setAspectLocked(False)
             self._plot.vb.autoRange()
-            return
-        n_traces, n_samples = self._image_shape
-        self._plot.vb.setRange(
-            xRange=(0, n_traces), yRange=(0, n_samples), padding=0.0)
-        self._plot.vb.setAspectLocked(True, ratio=1.0)
+        else:
+            n_traces, n_samples = self._image_shape
+            self._plot.vb.setRange(
+                xRange=(0, n_traces), yRange=(0, n_samples), padding=0.0)
+            self._plot.vb.setAspectLocked(True, ratio=1.0)
+        if notify:
+            self.sig_aspect_changed.emit('cell')
 
     def _fit_current_mode(self) -> None:
-        """按当前比例策略铺满视野（新数据到达时调用，不重置用户选择）。"""
-        if self._aspect_mode == 'free':
-            self._plot.vb.setAspectLocked(False)
-            self._plot.vb.autoRange()
-        elif self._aspect_mode == 'cell':
-            self.reset_1to1()
+        """按当前比例策略铺满视野（新数据到达时调用，不重置用户选择）。
+
+        notify=False：这是数据驱动重排，不是用户切换，不该触发持久化。
+        """
+        # 注意三个分支都直接置 _aspect_mode 后铺满，不重复发信号
+        mode = self._aspect_mode
+        if mode == 'free':
+            self.fit_to_data(notify=False)
+        elif mode == 'cell':
+            self.reset_1to1(notify=False)
         else:
-            self.fit_square()
+            self.fit_square(notify=False)
 
     # ------------------------------------------------------------------ 数据
     def set_bundle(self, bundle) -> None:

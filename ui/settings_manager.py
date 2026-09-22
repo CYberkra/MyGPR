@@ -26,6 +26,8 @@ DEFAULT_SETTINGS = {
     'processing_right_collapsed': False,                 # 处理页右栏折叠状态
     'output_panel_open': False,                          # 底部输出面板默认收起（用者自开）
     'output_panel_active_tab': 'log',                    # 输出面板当前页签：log / jobs
+    # B-Scan 显示比例：free 拉伸铺满（默认）/ square 数据盒正方形 / cell 数据格1:1
+    'bscan_aspect_mode': 'free',                         # 用户切换后跨会话记住（见 BScanView）
     'spatial_basemap_source': 'gaode_img',               # 空间页底图源（与 map_tiles.DEFAULT_TILE_SOURCE 一致）
     'spatial_terrain_source': 'online',                  # 三维地形来源：online / estimated / local_dem
     'spatial_left_collapsed': False,                     # 空间页左栏折叠状态
