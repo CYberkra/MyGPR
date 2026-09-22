@@ -29,6 +29,18 @@ _AUTHOR = '邸建豪 袁林 詹萍'
 _COPYRIGHT = '© 2025 MyGPR 保留所有权利'
 
 
+def _levels_or_default(data: dict) -> tuple[float, float]:
+    """从设置字典取色阶百分位；缺失/非法回落 2 / 98（与视图默认一致）。"""
+    try:
+        low = float(data.get('bscan_p_low', 2.0))
+        high = float(data.get('bscan_p_high', 98.0))
+    except (TypeError, ValueError):
+        return 2.0, 98.0
+    if not 0.0 <= low < high <= 100.0:
+        return 2.0, 98.0
+    return low, high
+
+
 def _read_version() -> str:
     """版本读仓库根 VERSION 文件，缺失/异常回退 0.9.38（SPEC §6.4）。"""
     try:
@@ -42,13 +54,17 @@ def _read_version() -> str:
 
 
 class SettingsPage(ScrollArea):
-    """系统设置：通用设置 / 处理设置 / 存储 / 关于。"""
+    """系统设置：通用设置 / B-Scan 视图 / 处理设置 / 存储 / 关于。"""
 
     theme_changed = pyqtSignal(str)
+    # B-Scan 视图设置变化（比例/轴单位/色阶）；主窗口据此统一下发并写盘
+    bscan_view_changed = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         style_transparent_scroll(self)
+        # 回放设置期间抑制 bscan_view_changed（否则「读设置→写设置」回环）
+        self._loading_settings = False
 
         container = QWidget(self)
         container.setStyleSheet('background-color: transparent;')
@@ -57,6 +73,7 @@ class SettingsPage(ScrollArea):
         root.setSpacing(constants.PAGE_SPACING)
 
         root.addWidget(self._build_general_card(container))
+        root.addWidget(self._build_bscan_card(container))
         root.addWidget(self._build_processing_card(container))
         root.addWidget(self._build_storage_card(container))
         root.addWidget(self._build_about_card(container))
@@ -101,6 +118,74 @@ class SettingsPage(ScrollArea):
         # 这两个设置项已从 UI 移除，避免「设置了没反应」伤信任；待消费端统一接入后再恢复。
         return card
 
+    def _build_bscan_card(self, parent):
+        """卡片2"B-Scan 视图"：比例 / 横纵轴单位 / 色阶（即时生效并跨会话记住）。
+
+        这几项在 BScanView 工具条与右键菜单里都能改，此处只是把「习惯」集中
+        可查；改动即时应用到本会话所有 B-Scan（发 ``bscan_view_changed``，
+        由主窗口下发），不必重启。
+        """
+        card, layout = make_card('B-Scan 视图')
+
+        self._bscan_aspect_combo = ComboBox(card)
+        for label, key in (('拉伸铺满（推荐）', 'free'),
+                           ('数据盒正方形', 'square'),
+                           ('数据格 1:1', 'cell')):
+            self._bscan_aspect_combo.addItem(label, userData=key)
+        self._bscan_aspect_combo.setMinimumWidth(180)
+        self._bscan_aspect_combo.currentIndexChanged.connect(
+            self._emit_bscan_changed)
+        layout.addLayout(make_form_row('显示比例:', self._bscan_aspect_combo,
+                                       parent=card))
+
+        self._bscan_x_axis_combo = ComboBox(card)
+        self._bscan_x_axis_combo.addItem('道号', userData='trace')
+        self._bscan_x_axis_combo.addItem('距离 (m)', userData='distance')
+        self._bscan_x_axis_combo.setMinimumWidth(180)
+        self._bscan_x_axis_combo.currentIndexChanged.connect(
+            self._emit_bscan_changed)
+        layout.addLayout(make_form_row('横轴单位:', self._bscan_x_axis_combo,
+                                       parent=card))
+
+        self._bscan_y_axis_combo = ComboBox(card)
+        self._bscan_y_axis_combo.addItem('采样轴（时间/深度）', userData='sample')
+        self._bscan_y_axis_combo.addItem('海拔 (m)', userData='elevation')
+        self._bscan_y_axis_combo.setMinimumWidth(180)
+        self._bscan_y_axis_combo.setToolTip(
+            '海拔需要测线带逐道地面高程与介电常数；数据不具备时该视图会自动'
+            '回落为采样轴（工具条上的「海拔」钮也处于置灰态）。')
+        self._bscan_y_axis_combo.currentIndexChanged.connect(
+            self._emit_bscan_changed)
+        layout.addLayout(make_form_row('纵轴单位:', self._bscan_y_axis_combo,
+                                       parent=card))
+
+        self._bscan_p_low_spin = DoubleSpinBox(card)
+        self._bscan_p_high_spin = DoubleSpinBox(card)
+        for spin, value in ((self._bscan_p_low_spin, 2.0),
+                            (self._bscan_p_high_spin, 98.0)):
+            spin.setRange(0.0, 100.0)
+            spin.setDecimals(1)
+            spin.setSingleStep(0.5)
+            spin.setValue(value)
+            spin.setMinimumWidth(110)
+            spin.valueChanged.connect(self._emit_bscan_changed)
+        layout.addLayout(make_form_row(
+            '色阶低/高百分位:', self._bscan_p_low_spin, self._bscan_p_high_spin,
+            parent=card, trailing_stretch=False))
+        layout.addWidget(make_hint(
+            '色阶只影响显示的明暗对比，不改动数据；B-Scan 上右键「色阶设置…」'
+            '可只改单个视图。', parent=card))
+        return card
+
+    def _emit_bscan_changed(self) -> None:
+        """任一 B-Scan 视图设置变化 → 通知主窗口下发到本会话所有视图。
+
+        写盘由主窗口统一做（共享 SettingsManager 唯一写者），页面只发信号。
+        """
+        if self._loading_settings:
+            return
+        self.bscan_view_changed.emit()
+
     def _build_processing_card(self, parent):
         """卡片2"处理设置"：并行工作线程数 SpinBox(1-8, 默认 2)（重启生效提示）。"""
         card, layout = make_card('处理设置')
@@ -143,10 +228,14 @@ class SettingsPage(ScrollArea):
 
     # ============================================================ 公共接口
     def load_settings(self, data: dict) -> None:
-        """回放设置到控件（blockSignals，不触发 theme_changed）。未知键忽略。"""
+        """回放设置到控件（blockSignals，不触发 theme_changed / bscan 变更）。"""
         data = dict(data or {})
         widgets = (self._theme_combo, self._dielectric_spin,
-                   self._workers_spin, self._root_edit, self._prefetch_check)
+                   self._workers_spin, self._root_edit, self._prefetch_check,
+                   self._bscan_aspect_combo, self._bscan_x_axis_combo,
+                   self._bscan_y_axis_combo, self._bscan_p_low_spin,
+                   self._bscan_p_high_spin)
+        self._loading_settings = True
         for widget in widgets:
             widget.blockSignals(True)
         try:
@@ -160,13 +249,79 @@ class SettingsPage(ScrollArea):
                 str(data.get('project_root', constants.DEFAULT_PROJECT_ROOT)))
             self._prefetch_check.setChecked(bool(data.get(
                 'auto_prefetch_basemap', True)))
+            self._select_by_data(self._bscan_aspect_combo,
+                                 data.get('bscan_aspect_mode'), 'free')
+            self._select_by_data(self._bscan_x_axis_combo,
+                                 data.get('bscan_x_axis'), 'trace')
+            self._select_by_data(self._bscan_y_axis_combo,
+                                 data.get('bscan_y_axis'), 'sample')
+            low, high = _levels_or_default(data)
+            self._bscan_p_low_spin.setValue(low)
+            self._bscan_p_high_spin.setValue(high)
         finally:
             for widget in widgets:
                 widget.blockSignals(False)
+            self._loading_settings = False
+
+    @staticmethod
+    def _select_by_data(combo, value, fallback: str) -> None:
+        """按 userData 选中；未知值回落默认项（坏设置不该让下拉框空白）。"""
+        wanted = str(value or fallback)
+        index = combo.findData(wanted)
+        combo.setCurrentIndex(index if index >= 0 else combo.findData(fallback))
+
+    def bscan_view_settings(self) -> dict:
+        """B-Scan 视图设置（主窗口下发 + 写盘用；键与 DEFAULT_SETTINGS 对齐）。"""
+        return {
+            'bscan_aspect_mode': str(self._bscan_aspect_combo.currentData()),
+            'bscan_x_axis': str(self._bscan_x_axis_combo.currentData()),
+            'bscan_y_axis': str(self._bscan_y_axis_combo.currentData()),
+            'bscan_p_low': float(self._bscan_p_low_spin.value()),
+            'bscan_p_high': float(self._bscan_p_high_spin.value()),
+        }
+
+    def sync_bscan_view_settings(self, values: dict) -> None:
+        """把外部（B-Scan 工具条/右键菜单）改的偏好同步进本页控件。
+
+        **为什么必须有这个方法**：``MyGPRMainWindow.closeEvent`` 会把
+        ``self.settings()`` 整体回写设置文件，而本页控件是 B-Scan 偏好的第二
+        份副本。用户在 B-Scan 工具条上切成方形后，若不同步到这里，关窗时就会
+        被本页过期的默认值覆盖——表现为「切了比例，重开又变回去」。
+        """
+        values = dict(values or {})
+        combos = (
+            (self._bscan_aspect_combo, 'bscan_aspect_mode'),
+            (self._bscan_x_axis_combo, 'bscan_x_axis'),
+            (self._bscan_y_axis_combo, 'bscan_y_axis'),
+        )
+        spins = (
+            (self._bscan_p_low_spin, 'bscan_p_low'),
+            (self._bscan_p_high_spin, 'bscan_p_high'),
+        )
+        touched = [w for w, key in combos if key in values]
+        touched += [w for w, key in spins if key in values]
+        self._loading_settings = True
+        for widget in touched:
+            widget.blockSignals(True)
+        try:
+            for combo, key in combos:
+                if key in values:
+                    current = str(combo.currentData())
+                    self._select_by_data(combo, values[key], current)
+            for spin, key in spins:
+                if key in values:
+                    try:
+                        spin.setValue(float(values[key]))
+                    except (TypeError, ValueError):
+                        continue        # 坏值：该项保持现状
+        finally:
+            for widget in touched:
+                widget.blockSignals(False)
+            self._loading_settings = False
 
     def settings(self) -> dict:
         """当前控件值（键与 DEFAULT_SETTINGS 对齐）。"""
-        return {
+        values = {
             'theme': self._theme_combo.currentText(),
             'default_dielectric': float(self._dielectric_spin.value()),
             'max_workers': int(self._workers_spin.value()),
@@ -174,6 +329,8 @@ class SettingsPage(ScrollArea):
                             or constants.DEFAULT_PROJECT_ROOT,
             'auto_prefetch_basemap': bool(self._prefetch_check.isChecked()),
         }
+        values.update(self.bscan_view_settings())
+        return values
 
     def set_theme_text(self, text: str) -> None:
         """主窗口主题切换后回写主题 ComboBox（blockSignals 防循环）。"""

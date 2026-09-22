@@ -28,6 +28,14 @@ DEFAULT_SETTINGS = {
     'output_panel_active_tab': 'log',                    # 输出面板当前页签：log / jobs
     # B-Scan 显示比例：free 拉伸铺满（默认）/ square 数据盒正方形 / cell 数据格1:1
     'bscan_aspect_mode': 'free',                         # 用户切换后跨会话记住（见 BScanView）
+    # B-Scan 轴单位：横轴 trace 道数（默认）/ distance 距离(m)；纵轴 sample 采样轴 / elevation 海拔(m)
+    'bscan_x_axis': 'trace',
+    'bscan_y_axis': 'sample',
+    # B-Scan 显示色阶（低/高百分位，只影响显示不影响数据）
+    'bscan_p_low': 2.0,
+    'bscan_p_high': 98.0,
+    # B-Scan 全屏独立窗口几何（Qt saveGeometry 的 base64），空串=未存过
+    'bscan_fullscreen_geometry': '',
     'spatial_basemap_source': 'gaode_img',               # 空间页底图源（与 map_tiles.DEFAULT_TILE_SOURCE 一致）
     'spatial_terrain_source': 'online',                  # 三维地形来源：online / estimated / local_dem
     'spatial_left_collapsed': False,                     # 空间页左栏折叠状态

@@ -301,6 +301,17 @@ class ProcessingPage(PanelStateMixin, QWidget):
             lambda collapsed: self._on_side_panel_collapsed('right', collapsed))
 
     # ============================================================ 公共接口（供主窗口接线）
+    def toggle_side_panels(self) -> None:
+        """B-Scan 工具条「⤢ 铺满」：两栏都收起则展开、否则全部收起。
+
+        语义按「用户此刻想干什么」定：只要还有一栏占着宽度，就继续收；
+        已全部收起时点一次恢复原状（此时按钮实际是个开关，符合直觉）。
+        """
+        collapse = not (self._left_panel.is_collapsed()
+                        and self._right_panel.is_collapsed())
+        self._left_panel.set_collapsed(collapse)
+        self._right_panel.set_collapsed(collapse)
+
     def set_methods(self, methods: list) -> None:
         """方法列表 → MethodBrowser（结构见 ProcessingController.methods_loaded）。"""
         self._methods = [dict(m) for m in (methods or [])]

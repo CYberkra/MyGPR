@@ -8,8 +8,44 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 
 from core.field_project_models import validate_line_id
+from core.gui_rendering import align_trace_vector
 from core.spatial_result_versions import SpatialResultVersionService
 from mygpr.domain.spatial.models import SpatialResult, SpatialTrack, SpatialTrackPoint
+
+_TRACE_ALTITUDE_KEYS = ("local_z_m", "elevation_m", "altitude_m", "z")
+_FLIGHT_HEIGHT_KEYS = ("flight_height_m", "height_agl_m", "agl_m")
+
+
+def _metadata_ground_elevation(metadata: Mapping[str, Any]) -> np.ndarray | None:
+    """从 trace metadata 提取逐道地面高程；两者缺一返回 ``None``。"""
+    def first(*names: str) -> np.ndarray | None:
+        for name in names:
+            if name in metadata:
+                return np.asarray(metadata[name], dtype=np.float64).ravel()
+        return None
+
+    ground = first("ground_elevation_m")
+    if ground is not None:
+        return _fill_gaps(ground)
+    altitude = first(*_TRACE_ALTITUDE_KEYS)
+    flight_height = first(*_FLIGHT_HEIGHT_KEYS)
+    if altitude is None or flight_height is None:
+        return None
+    size = min(altitude.size, flight_height.size)
+    return _fill_gaps(altitude[:size] - flight_height[:size])
+
+
+def _fill_gaps(values: np.ndarray) -> np.ndarray | None:
+    """用邻近有效值线性填补逐道序列中的 NaN/Inf；全无效返回 ``None``。"""
+    finite = np.isfinite(values)
+    if not finite.any():
+        return None
+    if not finite.all():
+        holes = np.flatnonzero(~finite)
+        values = values.copy()
+        values[holes] = np.interp(holes, np.flatnonzero(finite), values[finite])
+    return values
+
 
 def _spatial_record(value: Any) -> SpatialResult:
     return SpatialResult(
@@ -102,6 +138,42 @@ class SpatialPersistenceMixin:
         crs = next((str(p.coordinate_system) for p in trajectory.points
                     if p.coordinate_system), coordinate_system)
         return SpatialTrack(line.line_id, line.name, points, crs, "trajectory file")
+
+    def line_trace_elevation(self, line_id: str) -> np.ndarray | None:
+        """逐道地面高程（m）；数据不足返回 ``None``。
+
+        与 :func:`ui.widgets.trajectory_3d_view._point_ground_z` 同一套语义：
+        优先 ``ground_elevation_m``，否则「轨迹海拔 − 离地高度」，两者都要求
+        实际存在——缺离地高度时不伪造（否则把天线海拔当成地面高程）。
+        """
+        safe = validate_line_id(line_id)
+        series = _metadata_ground_elevation(dict(self.read_trace_metadata(safe)))
+        if series is None:
+            series = self._trajectory_ground_elevation(safe)
+        if series is None:
+            return None
+        count = int(getattr(self.get_line(safe), "trace_count", 0) or 0)
+        return align_trace_vector(series, count)
+
+    def _trajectory_ground_elevation(self, line_id: str) -> np.ndarray | None:
+        try:
+            trajectory = self._store.load_trajectory(line_id)
+        except Exception:  # noqa: BLE001 - 无轨迹文件 → 该测线无高程
+            return None
+        points = list(trajectory.points)
+        if not points:
+            return None
+        size = max(
+            (int(point.trace_index) for point in points if point.trace_index >= 0),
+            default=len(points) - 1,
+        ) + 1
+        values = np.full(max(size, 1), np.nan, dtype=np.float64)
+        for fallback_index, point in enumerate(points):
+            index = int(point.trace_index) if 0 <= point.trace_index < size else fallback_index
+            if not (np.isfinite(point.z) and np.isfinite(point.flight_height_m)):
+                continue
+            values[index] = float(point.z) - float(point.flight_height_m)
+        return _fill_gaps(values)
 
     def list_spatial_results(self) -> Sequence[SpatialResult]:
         with self._lock:

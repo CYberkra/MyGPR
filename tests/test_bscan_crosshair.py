@@ -104,6 +104,8 @@ class TestCrosshairWidget:
         view = BScanView()
         view.apply_theme(True)
         assert '#000000' in view._toolbar.styleSheet()
+        # 工具条精简后只剩图标钮（缩放/铺满/全屏），全部吃调色板 QSS
+        assert view._toolbar_buttons, '工具条不应为空'
         for button in view._toolbar_buttons:
             assert '#2d2d2d' in button.styleSheet()
             assert '#f0f0f0' in button.styleSheet()

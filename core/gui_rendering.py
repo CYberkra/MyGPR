@@ -49,6 +49,8 @@ class PreviewBundle:
     trace_axis_m: np.ndarray | None = None   # optional distance axis (downsampled)
     sample_axis: np.ndarray | None = None    # optional time/depth axis (downsampled)
     sample_axis_label: str = ""
+    trace_elevation_m: np.ndarray | None = None  # 逐道地面高程 (m, downsampled)
+    depth_axis_m: np.ndarray | None = None   # 与 sample_axis 等长的**深度**轴 (m)
 
     def __post_init__(self) -> None:
         matrix = np.asarray(self.matrix, dtype=np.float32)
@@ -59,10 +61,34 @@ class PreviewBundle:
         object.__setattr__(self, "vmax", float(self.vmax))
         object.__setattr__(self, "sample_count", max(0, int(self.sample_count)))
         object.__setattr__(self, "trace_count", max(0, int(self.trace_count)))
-        for name in ("trace_axis_m", "sample_axis"):
+        for name in ("trace_axis_m", "sample_axis", "depth_axis_m"):
             axis = getattr(self, name)
             if axis is not None:
                 object.__setattr__(self, name, np.asarray(axis, dtype=np.float64))
+        if self.trace_elevation_m is not None:
+            aligned = align_trace_vector(self.trace_elevation_m, matrix.shape[1])
+            object.__setattr__(self, "trace_elevation_m", aligned)
+
+
+def align_trace_vector(series: Any, trace_count: int) -> np.ndarray | None:
+    """Coerce a per-trace series to a float64 vector of ``trace_count`` entries.
+
+    轨迹点数可能与道数不等（RTK 对齐后会抽/补点），此函数把逐道序列线性
+    重采样到道数网格上；点数为 0 或无法构成插值区间时返回 ``None``（视为
+    「无高程数据」，UI 据此禁用海拔纵轴）。
+    """
+    if series is None:
+        return None
+    array = np.asarray(series, dtype=np.float64).ravel()
+    target = max(0, int(trace_count))
+    if array.size == 0 or target == 0:
+        return None
+    if array.size == target:
+        return np.ascontiguousarray(array)
+    if array.size < 2:
+        return None
+    source = np.linspace(0.0, 1.0, array.size)
+    return np.ascontiguousarray(np.interp(np.linspace(0.0, 1.0, target), source, array))
 
 
 def colormap_names() -> list[str]:
@@ -151,6 +177,8 @@ def make_preview_bundle(
     trace_axis_m: Any = None,
     sample_axis: Any = None,
     sample_axis_label: str = "",
+    trace_elevation_m: Any = None,
+    depth_axis_m: Any = None,
     max_samples: int = _MAX_PREVIEW_SAMPLES,
     max_traces: int = _MAX_PREVIEW_TRACES,
 ) -> PreviewBundle:
@@ -172,6 +200,10 @@ def make_preview_bundle(
         trace_axis_m=_downsample_axis(trace_axis_m, col_step, preview.shape[1]),
         sample_axis=_downsample_axis(sample_axis, row_step, preview.shape[0]),
         sample_axis_label=str(sample_axis_label or ""),
+        trace_elevation_m=_downsample_axis(
+            align_trace_vector(trace_elevation_m, trace_count), col_step, preview.shape[1]
+        ),
+        depth_axis_m=_downsample_axis(depth_axis_m, row_step, preview.shape[0]),
     )
 
 
@@ -184,6 +216,55 @@ def _dataset_axis(dataset: Any, *names: str) -> np.ndarray | None:
         if array.ndim == 1 and array.size:
             return array
     return None
+
+
+def _metadata_mapping(dataset: Any) -> dict[str, Any]:
+    metadata = getattr(dataset, "metadata", None)
+    return dict(metadata) if isinstance(metadata, dict) else {}
+
+
+def _dataset_elevation(dataset: Any, trace_count: int) -> np.ndarray | None:
+    """Resolve per-trace ground elevation (m) from a ``GPRDataSet``-like object.
+
+    取值顺序（均为逐道「地面」高程，非天线海拔）：
+
+    1. 数据集现有属性/字典里的 ``ground_elevation_m``；
+    2. 航空 metadata 的 ``trajectory_rows``：``elevation`` 字段本身就是地面
+       高程（与该 CSV 第 3 列的语义一致——**不是**天线海拔，见下）。
+
+    ⚠️ 语义已实测确认（`output/probes_archive/_probe_column3_semantics.py`）：
+    MyGPR 航空堆叠 CSV 第 3 列是**地面高程**，第 5 列是离地飞行高度。判据是
+    交叉测线：Line9 与 Line3 在 43 个交叉点（间距 ≤2 m）上第 3 列仅差
+    **0.10 m**，而两条航次的离地高度相差 **3.18 m**——若第 3 列是天线海拔，
+    同一地面点上的两条航次必然相差 3.18 m 而不是 0.10 m。
+    因此这里**不要**再做 ``elevation - height_m``，那会把全线高程系统性
+    压低约 9.5 m（营山 Line9：真值 ~442.7 m vs 误算 ~433.2 m）。
+
+    取不到返回 ``None``，由 UI 据此禁用海拔纵轴。
+    """
+    direct = _dataset_axis(dataset, "ground_elevation_m", "trace_elevation_m")
+    if direct is not None:
+        return align_trace_vector(direct, trace_count)
+    metadata = _metadata_mapping(dataset)
+    series = metadata.get("ground_elevation_m")
+    if series is not None:
+        return align_trace_vector(series, trace_count)
+    rows = metadata.get("trajectory_rows")
+    if not rows:
+        return None
+    values: list[float] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        raw = row.get("elevation", row.get("elevation_m"))
+        try:
+            value = float(raw)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            continue
+        values.append(value)
+    if not values:
+        return None
+    return align_trace_vector(values, trace_count)
 
 
 def bundle_from_dataset(dataset: Any, **kw: Any) -> PreviewBundle:
@@ -213,7 +294,21 @@ def bundle_from_dataset(dataset: Any, **kw: Any) -> PreviewBundle:
         sample_axis = _dataset_axis(dataset, "depth_axis_m")
         sample_axis_label = "深度 (m)" if sample_axis is not None else ""
 
+    # 深度轴：海拔纵轴要用「地表以下米数」才能由"地面高程 − 深度"得海拔，
+    # 而 sample_axis 通常是双程走时(ns)，二者不可混用。数据集自带 depth_axis_m
+    # 时直接用；只有纯深度数据（无走时轴）时 sample_axis 本身就是深度。
+    depth_axis = kw.pop("depth_axis_m", None)
+    if depth_axis is None:
+        depth_axis = _dataset_axis(dataset, "depth_axis_m")
+    if depth_axis is None and sample_axis_label == "深度 (m)":
+        depth_axis = sample_axis
+
     title = kw.pop("title", "") or str(getattr(dataset, "line_id", "") or "")
+    elevation = kw.pop("trace_elevation_m", None)
+    if elevation is None:
+        elevation = _dataset_elevation(dataset, trace_count)
+    else:
+        elevation = align_trace_vector(elevation, trace_count)
     vmin, vmax = compute_levels(
         preview,
         p_low=float(kw.pop("p_low", 2.0)),
@@ -232,6 +327,8 @@ def bundle_from_dataset(dataset: Any, **kw: Any) -> PreviewBundle:
         trace_axis_m=_downsample_axis(trace_axis, col_step, preview.shape[1]),
         sample_axis=_downsample_axis(sample_axis, row_step, preview.shape[0]),
         sample_axis_label=sample_axis_label if sample_axis is not None else "",
+        trace_elevation_m=_downsample_axis(elevation, col_step, preview.shape[1]),
+        depth_axis_m=_downsample_axis(depth_axis, row_step, preview.shape[0]),
     )
 
 
@@ -239,6 +336,7 @@ __all__ = [
     "COLORMAPS",
     "DEFAULT_COLORMAP",
     "PreviewBundle",
+    "align_trace_vector",
     "bundle_from_dataset",
     "colormap_names",
     "compute_levels",

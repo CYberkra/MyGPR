@@ -500,6 +500,13 @@ class SpatialPage(PanelStateMixin, QWidget):
             lambda collapsed: self._on_side_panel_collapsed('right', collapsed))
 
     # ============================================================ 公共接口（供主窗口接线）
+    def toggle_side_panels(self) -> None:
+        """B-Scan 工具条「⤢ 铺满」：两栏都收起则展开、否则全部收起。"""
+        collapse = not (self._left_panel.is_collapsed()
+                        and self._right_panel.is_collapsed())
+        self._left_panel.set_collapsed(collapse)
+        self._right_panel.set_collapsed(collapse)
+
     def set_tracks(self, tracks: list) -> None:
         """空间轨迹列表（SpatialTrack，鸭子类型取属性）。"""
         self._tracks = list(tracks or [])
