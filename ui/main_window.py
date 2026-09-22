@@ -276,7 +276,7 @@ class MyGPRMainWindow(FluentWindow):
             self._wire_bscan_expand(view)
         # 容器级偏好：预览布局（面板集合随布局变，轴/比例/色阶已逐面板恢复）
         layout_mode = self._setting_choice(
-            'bscan_layout_mode', ('single', 'dual', 'quad'), 'single')
+            'bscan_layout_mode', ('auto', 'single', 'dual', 'quad'), 'auto')
         for container in self._iter_bscan_containers(page):
             container.set_layout_mode(layout_mode, notify=False)
             container.sig_layout_changed.connect(lambda mode:
@@ -367,7 +367,9 @@ class MyGPRMainWindow(FluentWindow):
             view.set_display_levels(values['bscan_p_low'],
                                     values['bscan_p_high'], notify=False)
         for container in self._iter_all_bscan_containers():
-            container.set_layout_mode(values['bscan_layout_mode'], notify=False)
+            # notify=True：切到/切出 auto 时页面要重分发数据。由此触发的
+            # sig_layout_changed 会把同值写回设置（幂等），无行为副作用。
+            container.set_layout_mode(values['bscan_layout_mode'], notify=True)
 
     def _setting_levels(self) -> tuple[float, float]:
         """读色阶百分位；非法值回落 BScanView 默认（2 / 98）。"""

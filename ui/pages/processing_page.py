@@ -11,10 +11,11 @@
   支持从某个成果继续处理 + 结果名 + 运行/取消）、卡片"AutoTune 自动调参"
 
 预览布局（BScanContainer，Phase 2）：
-- single：单视图，分段控件切换显示原始数据 / 处理结果（历史行为）；
-- dual：左右并排双视图，0 号位固定原始数据、1 号位固定处理结果，
-  「原始 | 成果」同屏对比，分段控件此时决定色阶刷新焦点；
-- quad：2×2 四宫格，0/1 号位与 dual 相同，2/3 号位留空占位。
+- auto（默认）：面板数自动跟随数据——只有原始数据→单视图（分段控件
+  切换显示），原始+成果齐→自动变 0 号位原始 | 1 号位成果同屏对比；
+- single：固定单视图，分段控件切换显示原始数据 / 处理结果（历史行为）；
+- dual：固定左右并排双视图，分段控件此时决定色阶刷新焦点；
+- quad：固定 2×2 四宫格，0/1 号位与 dual 相同，2/3 号位留空占位。
 
 页面纯展示 + 发信号，不直接调 controller/backend。
 内部联动：PipelineList.sig_step_selected → ParamForm 载入该步骤参数；
@@ -39,7 +40,7 @@ from ui.page_scaffold import (PanelStateMixin, make_card, make_form_row,
 from ui.widgets import (BScanContainer, BScanView, CollapsiblePanel,
                         MethodBrowser, ParamForm, PipelineList, SlimSegment,
                         clear_invalid, make_separator)
-from ui.widgets.bscan_container import LAYOUT_SINGLE
+from ui.widgets.bscan_container import LAYOUT_AUTO, LAYOUT_SINGLE
 
 # 预览分段（SlimSegment routeKey）
 _SEG_ORIGINAL = 'originalData'
@@ -333,10 +334,12 @@ class ProcessingPage(PanelStateMixin, QWidget):
     def set_original_bundle(self, bundle) -> None:
         """原始数据预览 bundle。
 
-        dual/quad 下 0 号位固定显示原始数据，无论分段停在哪一侧都要重发；
-        single 下仅当分段选中"原始数据"时刷新。
+        auto 模式下面板数先按 bundle 数量重解析；dual/quad 下 0 号位固定
+        显示原始数据，无论分段停在哪一侧都要重发；single 下仅当分段选中
+        "原始数据"时刷新。
         """
         self._original_bundle = bundle
+        self._sync_auto_layout()
         if self._shows_both_panels():
             self._distribute_bundles()
         elif self._current_segment() == _SEG_ORIGINAL:
@@ -345,6 +348,7 @@ class ProcessingPage(PanelStateMixin, QWidget):
     def set_result_bundle(self, bundle) -> None:
         """处理结果预览 bundle（分发语义同 set_original_bundle）。"""
         self._result_bundle = bundle
+        self._sync_auto_layout()
         if self._shows_both_panels():
             self._distribute_bundles()
         elif self._current_segment() == _SEG_RESULT:
@@ -481,11 +485,26 @@ class ProcessingPage(PanelStateMixin, QWidget):
 
     # ---------------- 预览分发（BScanContainer 多视图）
     def _shows_both_panels(self) -> bool:
-        """当前布局是否同屏展示原始与成果两侧（dual/quad）。"""
-        return self._bscan_container.layout_mode() != LAYOUT_SINGLE
+        """当前实际布局是否同屏展示原始与成果两侧（dual/quad）。"""
+        return self._bscan_container.effective_mode() != LAYOUT_SINGLE
+
+    def _sync_auto_layout(self) -> None:
+        """auto 模式：面板数自动跟随 bundle 数量（1→单视图，2→左右对比）。
+
+        实体模式（手动固定）下是空操作。解析换了页后新面板是空白实例，
+        先重广播色标；bundle 分发由调用方随后的 _show_bundle/
+        _distribute_bundles 完成。
+        """
+        if self._bscan_container.layout_mode() != LAYOUT_AUTO:
+            return
+        count = 2 if (self._original_bundle is not None
+                      and self._result_bundle is not None) else 1
+        if self._bscan_container.resolve_auto(count):
+            self._apply_colormap(self._cmap_combo.currentText())
 
     def _show_bundle(self, which: str) -> None:
         """分段切换 / bundle 到达的统一入口（按布局分发）。"""
+        self._sync_auto_layout()
         if self._shows_both_panels():
             self._distribute_bundles()
             return

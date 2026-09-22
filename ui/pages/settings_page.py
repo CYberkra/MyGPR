@@ -160,13 +160,15 @@ class SettingsPage(ScrollArea):
                                        parent=card))
 
         self._bscan_layout_combo = ComboBox(card)
+        self._bscan_layout_combo.addItem('自动（跟随数据）', userData='auto')
         self._bscan_layout_combo.addItem('单视图', userData='single')
         self._bscan_layout_combo.addItem('双视图对比（原始 | 成果）', userData='dual')
         self._bscan_layout_combo.addItem('四宫格', userData='quad')
         self._bscan_layout_combo.setMinimumWidth(180)
         self._bscan_layout_combo.setToolTip(
-            '处理页数据预览的面板布局：双视图把原始数据与处理结果并排同屏'
-            '对比；四宫格本期 0/1 号位与双视图相同，2/3 号位留作后续扩展。')
+            '自动：只有原始数据时显示一个画布，处理结果出来后自动变成左右'
+            '对比；后三项为固定布局，不随数据增减。四宫格下排两个画布留作'
+            '后续历史成果对比。')
         self._bscan_layout_combo.currentIndexChanged.connect(
             self._emit_bscan_changed)
         layout.addLayout(make_form_row('预览布局:', self._bscan_layout_combo,
@@ -269,7 +271,7 @@ class SettingsPage(ScrollArea):
             self._select_by_data(self._bscan_y_axis_combo,
                                  data.get('bscan_y_axis'), 'sample')
             self._select_by_data(self._bscan_layout_combo,
-                                 data.get('bscan_layout_mode'), 'single')
+                                 data.get('bscan_layout_mode'), 'auto')
             low, high = _levels_or_default(data)
             self._bscan_p_low_spin.setValue(low)
             self._bscan_p_high_spin.setValue(high)
