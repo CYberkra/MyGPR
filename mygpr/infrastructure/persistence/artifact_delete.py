@@ -140,27 +140,18 @@ def collect_artifact_descendants(
     return tuple(ordered)
 
 
-def delete_artifacts_with_trash(
-    store: "FieldProjectStore",
+def _resolve_delete_closure(
+    root: Path,
     line_id: str,
     artifact_ids: list[str] | tuple[str, ...],
-    *,
-    reason: str = "用户删除成果",
-) -> dict[str, object]:
-    """Move artifacts (and only their sidecar files) into the project trash.
+) -> list[str]:
+    """Expand the requested ids into a full descendant closure (root first).
 
-    预检（零变异）→ 全部通过后逐个移动 + catalog 删行 → 写 trash_manifest。
-    返回 dict 摘要（adapter 层再转 DTO）。
+    未知 id 直接报错（整批拒绝语义由此保证）。
     """
-    store.assert_writable()
-    safe_line_id = validate_line_id(line_id)
-    if not artifact_ids:
-        raise FieldProjectOperationError("未选择要删除的成果")
-    root = store.root.resolve()
-
-    records = index_processing_artifacts(root, safe_line_id)
-    by_id = {record.artifact_id: record for record in records}
-    unknown = [aid for aid in artifact_ids if aid not in by_id]
+    records = index_processing_artifacts(root, line_id)
+    known = {record.artifact_id for record in records}
+    unknown = [aid for aid in artifact_ids if aid not in known]
     if unknown:
         raise FieldProjectOperationError(
             f"未找到处理成果：{', '.join(unknown[:4])}"
@@ -173,15 +164,22 @@ def delete_artifacts_with_trash(
             if descendant not in seen:
                 seen.add(descendant)
                 full_ids.append(descendant)
+    return full_ids
 
-    # 预检：判定每条的落盘形态（sidecar / inline），全部可删才继续。
-    # 这里只做只读探测，不产生任何副作用——任一不可删即整批拒绝。
-    container = store.storage.line_container_path(safe_line_id)
+
+def _classify_delete_targets(
+    container: Path,
+    full_ids: list[str],
+) -> dict[str, "_ArtifactTarget"]:
+    """Pre-flight: classify every target as sidecar / inline, zero mutation.
+
+    只做只读探测，不产生任何副作用——任一不可删即整批拒绝，
+    避免出现"半删"状态（部分成果已移入回收站、部分还在）。
+    """
     sidecar_dir = artifacts_dir_path(container)
     targets: dict[str, _ArtifactTarget] = {}
     for aid in full_ids:
-        candidate = sidecar_dir / f"{aid}.h5"
-        if candidate.is_file():
+        if (sidecar_dir / f"{aid}.h5").is_file():
             targets[aid] = _ArtifactTarget(aid, STORAGE_MODE_SIDECAR, container)
             continue
         try:
@@ -195,34 +193,73 @@ def delete_artifacts_with_trash(
         raise FieldProjectOperationError(
             f"成果 {aid} 的数据文件缺失，无法删除；整批操作已取消。"
         )
+    return targets
 
-    # 提交阶段：trash 目录 → 移/导出文件 → 删 catalog 行。
+
+def _trash_one_artifact(
+    target: "_ArtifactTarget",
+    sidecar_dir: Path,
+    trash_root: Path,
+) -> tuple[str, str]:
+    """Move (sidecar) or export-then-remove (inline) one artifact into the trash.
+
+    返回 ``(形态, 记录进 manifest 的原位置字符串)``。
+    """
+    aid = target.artifact_id
+    destination = trash_root / f"{aid}.h5"
+    if target.storage_mode == STORAGE_MODE_SIDECAR:
+        source = sidecar_dir / f"{aid}.h5"
+        shutil.move(str(source), str(destination))
+        return STORAGE_MODE_SIDECAR, source.as_posix()
+    # 内嵌形态：先导出成回收站里的独立文件（保证可恢复），再删容器组。
+    # 导出失败意味着容器里读不出该组——此时抛错中止，已处理的条目保持原样
+    # （catalog 尚未删行），用户可重试；不静默丢数据。
+    if not _export_inline_group(target.container, aid, destination):
+        raise FieldProjectOperationError(
+            f"成果 {aid} 位于旧版内嵌存储但无法导出（容器可能已损坏），"
+            f"已中止；先前条目未做修改，请手工检查 {target.container}。"
+        )
+    _delete_inline_group(target.container, aid)
+    return STORAGE_MODE_INLINE, f"{target.container.as_posix()}::{PROCESSING_ROOT}/{aid}"
+
+
+def delete_artifacts_with_trash(
+    store: "FieldProjectStore",
+    line_id: str,
+    artifact_ids: list[str] | tuple[str, ...],
+    *,
+    reason: str = "用户删除成果",
+) -> dict[str, object]:
+    """Move artifacts into the project trash (sidecar file or legacy inline group).
+
+    预检（零变异）→ 全部通过后逐个移动/导出 + catalog 删行 → 写 trash_manifest。
+    返回 dict 摘要（adapter 层再转 DTO）。
+    """
+    store.assert_writable()
+    safe_line_id = validate_line_id(line_id)
+    if not artifact_ids:
+        raise FieldProjectOperationError("未选择要删除的成果")
+    root = store.root.resolve()
+
+    full_ids = _resolve_delete_closure(root, safe_line_id, artifact_ids)
+    container = store.storage.line_container_path(safe_line_id)
+    sidecar_dir = artifacts_dir_path(container)
+    targets = _classify_delete_targets(container, full_ids)
+
+    # 提交阶段：建 trash 目录 → 逐条移/导出 → 删 catalog 行。
     stamp = utc_now().replace(":", "").replace("+", "_")
     root_label = str(artifact_ids[0]).replace("/", "_")[:32]
     trash_root = root / ".trash" / "artifacts" / f"{stamp}_{root_label}"
     trash_root.mkdir(parents=True, exist_ok=False)
+    catalog = store.storage.catalog
     moved: list[str] = []
     modes: dict[str, str] = {}
-    catalog = store.storage.catalog
+    # 深度先删：catalog.delete_artifact 把 branch head 回退到被删行的 parent，
+    # 先删父会留下指向已删除父的悬空 head。
     for aid in reversed(full_ids):
-        target_meta = targets[aid]
-        destination = trash_root / f"{aid}.h5"
-        if target_meta.storage_mode == STORAGE_MODE_SIDECAR:
-            source = sidecar_dir / f"{aid}.h5"
-            shutil.move(str(source), str(destination))
-            moved.append(source.as_posix())
-        else:
-            # 内嵌形态：先导出成回收站里的独立文件（保证可恢复），再删容器组。
-            # 导出失败意味着容器里读不出该组——此时中止，已处理的条目保持原样
-            # （catalog 尚未删行），用户可重试；不静默丢数据。
-            if not _export_inline_group(target_meta.container, aid, destination):
-                raise FieldProjectOperationError(
-                    f"成果 {aid} 位于旧版内嵌存储但无法导出（容器可能已损坏），"
-                    f"已中止；先前条目未做修改，请手工检查 {target_meta.container}。"
-                )
-            _delete_inline_group(target_meta.container, aid)
-            moved.append(f"{target_meta.container.as_posix()}::{PROCESSING_ROOT}/{aid}")
-        modes[aid] = target_meta.storage_mode
+        mode, origin = _trash_one_artifact(targets[aid], sidecar_dir, trash_root)
+        moved.append(origin)
+        modes[aid] = mode
         catalog.delete_artifact(aid)
 
     atomic_write_json(trash_root / "trash_manifest.json", {
@@ -243,9 +280,10 @@ def delete_artifacts_with_trash(
         f"inline={sum(1 for m in modes.values() if m == STORAGE_MODE_INLINE)}, "
         f"reason={reason}, trash={trash_root}"
     )
+    deleted = set(full_ids)
     remaining = [
         record for record in index_processing_artifacts(root, safe_line_id)
-        if record.artifact_id not in seen
+        if record.artifact_id not in deleted
     ]
     return {
         "line_id": safe_line_id,
