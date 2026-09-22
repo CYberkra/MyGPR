@@ -38,7 +38,13 @@ from ui.widgets.bscan_axes import (  # noqa: E402
     sample_unit_label,
     tick_index,
 )
-from ui.widgets.bscan_view import BScanView, format_crosshair_readout  # noqa: E402
+from ui.desktop_backend_facade import compute_display_levels  # noqa: E402
+from ui.widgets.bscan_view import (  # noqa: E402
+    DEFAULT_P_HIGH,
+    DEFAULT_P_LOW,
+    BScanView,
+    format_crosshair_readout,
+)
 
 _TRACES, _SAMPLES = 120, 200
 _EPS = 9.0
@@ -351,6 +357,43 @@ class TestAutoScaleButtonHidden:
 
     def test_hidden(self, view):
         assert view._plot.buttonsHidden is True
+
+
+class TestLevelsPreferenceSurvivesNoData:
+    """色阶偏好与渲染分离：无数据时必须「记下偏好」，有数据后自动生效。
+
+    ``set_display_levels`` 在无矩阵时算不出 vmin/vmax，但百分位本身是纯状态。
+    跨会话恢复恰好发生在主窗构造期（此时还没有数据），若整体放弃，用户存的
+    5/95 会被静默丢掉，直到他手动再设一次。
+    """
+
+    def test_preference_remembered_without_data(self, view):
+        assert view.display_levels() == (DEFAULT_P_LOW, DEFAULT_P_HIGH)
+        applied = view.set_display_levels(5.0, 95.0, notify=True)
+        assert applied is False, '无数据时不该声称已重算渲染'
+        assert view.display_levels() == (5.0, 95.0), '但偏好必须记下'
+
+    def test_preference_applied_when_data_arrives(self, view):
+        import numpy as np
+
+        view.set_display_levels(5.0, 95.0)
+        matrix = np.random.default_rng(0).random((60, 40)).astype('float32')
+        view.set_matrix(matrix, 0.0, 1.0)
+        vmin, vmax = view._image_item.levels
+        expected = compute_display_levels(matrix, p_low=5.0, p_high=95.0)
+        assert (float(vmin), float(vmax)) == pytest.approx(tuple(expected))
+
+    def test_illegal_levels_rejected_and_keep_previous(self, view):
+        view.set_display_levels(5.0, 95.0)
+        assert view.set_display_levels(50.0, 50.0) is False
+        assert view.display_levels() == (5.0, 95.0), '非法值不得污染现有偏好'
+
+    def test_notify_still_emitted_without_data(self, view):
+        """偏好变了就是变了，宿主该写盘——与能否渲染无关。"""
+        seen = []
+        view.sig_levels_changed.connect(lambda low, high: seen.append((low, high)))
+        view.set_display_levels(4.0, 96.0, notify=True)
+        assert seen == [(4.0, 96.0)]
 
 
 class TestPyqtgraphEmptyTickGuard:

@@ -734,8 +734,12 @@ class BScanView(GraphicsViewBase, QWidget):
         if shape_changed:
             # 新数据尺寸变化时按当前比例策略铺满视野，避免换测线后图像跑出可视区
             self._fit_current_mode()
+        # 色阶偏好（可能是跨会话恢复或用户在无数据时设的）应用到新数据上：
+        # 优先于调用方给的 vmin/vmax，因为那只是数据的默认裁切。
+        # 注意下面还会统一重渲染一次波形，故这里让它跳过重绘（见参数注释）。
+        self._apply_levels_to_render(redraw_waveform=False)
         if self._colorbar is not None:
-            self._colorbar.setLevels((float(vmin), float(vmax)))
+            self._colorbar.setLevels(self._image_item.levels)
         # 非灰度模式下按当前显示模式重渲染波形；新数据到达保持用户视野，
         # 不重置缩放（reset_view=False，模式切换才重置）
         if self.display_mode is not BScanDisplayMode.GRAYSCALE:
@@ -764,25 +768,44 @@ class BScanView(GraphicsViewBase, QWidget):
     def set_display_levels(self, p_low, p_high, *, notify: bool = False) -> bool:
         """按百分位重算并应用显示色阶（只改显示，不动数据）。
 
+        **偏好与渲染分离**：百分位本身是纯状态，永远记下来；只有「算 vmin/vmax
+        并推给 ImageItem」这一步需要数据。跨会话恢复发生在**还没有数据**的
+        时刻（主窗构造期），若此时整体放弃，用户存的 5/95 会被静默丢掉、
+        直到他手动再设一次——`set_matrix` 会用 `_p_low/_p_high` 重算，
+        所以这里记下来就够。
+
         :param notify: True 时发 sig_levels_changed（供宿主写回设置）；
             恢复持久化阶段传 False。
-        :return: 是否真的更新了（无数据 / 百分位非法时返回 False）
+        :return: 是否真的重算了渲染（无数据时返回 False，但偏好已记下）
         """
         normalised = _normalise_levels((p_low, p_high))
-        if normalised is None or self._matrix is None:
+        if normalised is None:
             return False
         low, high = normalised
-        vmin, vmax = compute_display_levels(self._matrix, p_low=low, p_high=high)
         self._p_low, self._p_high = low, high
+        self._apply_levels_to_render()
+        if notify:
+            self.sig_levels_changed.emit(low, high)
+        return self._matrix is not None
+
+    def _apply_levels_to_render(self, *, redraw_waveform: bool = True) -> None:
+        """把当前 ``_p_low/_p_high`` 换算成 vmin/vmax 推到图像与色标（无数据则跳过）。
+
+        :param redraw_waveform: 波形模式的振幅归一取自 levels，故色阶变了一般要
+            重绘；但 ``set_matrix`` 会在随后统一重绘一次，传 False 避免同一帧
+            画两遍（波形重绘是整幅遍历，不便宜）。
+        """
+        if self._matrix is None:
+            return
+        vmin, vmax = compute_display_levels(
+            self._matrix, p_low=self._p_low, p_high=self._p_high)
         self._image_item.setLevels((float(vmin), float(vmax)))
         if self._colorbar is not None:
             self._colorbar.setLevels((float(vmin), float(vmax)))
-        if self.display_mode is not BScanDisplayMode.GRAYSCALE:
+        if (redraw_waveform
+                and self.display_mode is not BScanDisplayMode.GRAYSCALE):
             # 波形模式的振幅归一取自 levels，色阶变了要按新 levels 重画
             self._apply_display_mode(self.display_mode, reset_view=False)
-        if notify:
-            self.sig_levels_changed.emit(low, high)
-        return True
 
     def _edit_levels(self) -> None:
         """右键「色阶设置…」：弹窗取低/高百分位后应用。"""
