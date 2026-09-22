@@ -50,6 +50,20 @@ _ROLE_AUX = Qt.ItemDataRole.UserRole + 2        # artifact → 所属 line_id
 _SUFFIX_BRUSH = QBrush(QColor('#8a8a8a'))       # 行尾角标灰
 
 
+def suffix_column_width(view_width: int, widest_suffix_px: int) -> int:
+    """角标列（第二列）宽度：内容宽 + 留白，且不超过视口宽的 _SUFFIX_MAX_RATIO。
+
+    抽成纯函数以便无布局单测（offscreen 下把面板 show 出来拿真实布局会引入
+    库级 access violation，见 tests/test_file_tree.py 的 fixture 注释）。
+    名称列是 Stretch、吃掉全部余量，所以角标列越窄名称列越宽——深层节点
+    （分组→测线→成果）才不会退化成只显示两三个字。
+    """
+    if view_width <= 0 or widest_suffix_px <= 0:
+        return 0
+    return max(0, min(widest_suffix_px + _SUFFIX_PAD,
+                      int(view_width * _SUFFIX_MAX_RATIO)))
+
+
 def _status_key(status: str) -> str:
     """processing_status → status_color 语义键（与 field_project_status
     的"完成"判定同规则）：已完成=success / 已导入=info / 其余=disabled。"""
@@ -91,6 +105,15 @@ _EMPTY_TEXT = {
     'artifacts': '尚无成果',
     'files': '打开项目后在此浏览项目文件',
 }
+
+# 角标列（第二列）宽度策略 —— 见 :meth:`FileTreePanel._apply_suffix_width`。
+# 实测（offscreen，面板 232px / 视口 215px）：Qt6 的 QHeaderView 默认
+# stretchLastSection=True，即便第二列设为 ResizeToContents 也会被拉伸到与
+# 名称列平分（108 / 107）；再叠加每级 20px 缩进 + 状态圆点图标，深层节点
+# 的实际文字绘制区只剩约两个汉字宽——即线上"文件树只能显示两个字"。
+# 因此：关掉末列拉伸，角标列按内容宽定宽并封顶，名称列 Stretch 吃余量。
+_SUFFIX_MAX_RATIO = 0.38   # 角标列最多占视口宽的比例（名称列始终拿大头）
+_SUFFIX_PAD = 8            # 角标文字两侧留白
 
 
 class FileTreePanel(DockPanel):
@@ -137,12 +160,22 @@ class FileTreePanel(DockPanel):
 
         self._tree = TreeWidget(self._expanded_view)
         self._tree.setHeaderHidden(True)
-        self._tree.setTextElideMode(Qt.TextElideMode.ElideRight)
-        # 第二列：行尾角标（灰字右对齐，ResizeToContents 紧贴右缘）
+        # 中间省略：测线/成果名往往是「前缀稳定 + 尾部分辨」（如
+        # L09_processed_20260802_160259_972694），右侧省略会把唯一有分辨力的
+        # 尾部切掉；同宽下中间省略保留头尾，可读性更好。
+        self._tree.setTextElideMode(Qt.TextElideMode.ElideMiddle)
+        # 缩进 20 → 14：三层树（分组→测线→成果）下每层省 6px，深层节点能多
+        # 显示约一个字。qfluentwidgets 的分支点击热区按 level*indentation+20
+        # 计算（level 0 恒为 20..30），不受影响。
+        self._tree.setIndentation(14)
+        # 第二列：行尾角标（灰字右对齐，定宽 + 封顶，宽度由 _apply_suffix_width
+        # 按内容算；不用 ResizeToContents——末列拉伸会把它顶到与名称列平分）
         self._tree.setColumnCount(2)
         header = self._tree.header()
+        header.setStretchLastSection(False)
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        self._suffixes: set = set()   # 当前树用到的角标文本（去重，定宽时量宽）
         self._tree.itemClicked.connect(self._on_item_clicked)
         self._tree.itemDoubleClicked.connect(self._on_item_double_clicked)
         self._tree.itemExpanded.connect(self._on_item_expanded)
@@ -333,6 +366,7 @@ class FileTreePanel(DockPanel):
     def _rebuild(self) -> None:
         self._tree.clear()
         self._line_id_by_item.clear()
+        self._suffixes.clear()
 
         if self._current_view == 'lines':
             model = build_tree_model(self._lines)
@@ -352,8 +386,37 @@ class FileTreePanel(DockPanel):
         for item in self._top_items():
             if item.data(0, _ROLE_KIND) == 'group':
                 item.setExpanded(True)
+        self._apply_suffix_width()
         self._select_leaf(self._current_line_id)
         self._apply_view_state()
+
+    def _apply_suffix_width(self) -> None:
+        """角标列定宽：内容宽 + 留白，且不超过视口宽的 _SUFFIX_MAX_RATIO。
+
+        名称列（col0）为 Stretch，自动吃掉余量——这是"显示不全"修复的
+        另一半：只关末列拉伸还不够，长角标（如 16 字符时间戳）按内容定宽
+        会反向把名称列压到 20px，必须封顶。
+        """
+        viewport_w = self._tree.viewport().width()
+        if viewport_w <= 0:      # 尚未布局（构造期/隐藏态）
+            return
+        # 去重后量宽：不用 sizeHintForColumn（后者含缩进开销，实测把 192px
+        # 的角标算成 238px），也不在建树时量（那时字体可能还没定型）
+        fm = self._tree.fontMetrics()
+        widest = max((fm.horizontalAdvance(s) for s in self._suffixes),
+                     default=0)
+        self._tree.setColumnWidth(1, suffix_column_width(viewport_w, widest))
+
+    def resizeEvent(self, event) -> None:  # Qt 虚函数命名（CamelCase）
+        """面板宽度变化 → 角标列封顶值随之变化，需重算（名称列同步得余量）。"""
+        super().resizeEvent(event)
+        self._apply_suffix_width()
+
+    def showEvent(self, event) -> None:  # Qt 虚函数命名（CamelCase）
+        """首次显示时字体度量才定型（构造期量得 31px vs 显示后 72px），
+        此时按真实度量重算——否则角标列会按未定型字体永久偏窄。"""
+        super().showEvent(event)
+        self._apply_suffix_width()
 
     def _top_items(self) -> list:
         return [self._tree.topLevelItem(i)
@@ -367,6 +430,9 @@ class FileTreePanel(DockPanel):
             item.setForeground(1, _SUFFIX_BRUSH)
             item.setTextAlignment(
                 1, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            # 量宽推迟到 _apply_suffix_width：此处可能早于首次布局，字体尚未
+            # 定型（实测构造期量得 31px、显示后 72px），此刻算会永久偏窄。
+            self._suffixes.add(node.suffix)
         if node.tooltip:
             item.setToolTip(0, node.tooltip)
         item.setData(0, _ROLE_KIND, node.kind)
@@ -410,6 +476,7 @@ class FileTreePanel(DockPanel):
         item.removeChild(item.child(0))
         for node in build_files_model(item.data(0, _ROLE_PAYLOAD)):
             self._add_node(item, node)
+        self._apply_suffix_width()   # 懒加载出的角标可能比原有的更宽
 
     def _select_leaf(self, line_id: str) -> None:
         node = self._line_id_by_item.get(str(line_id or ''))
