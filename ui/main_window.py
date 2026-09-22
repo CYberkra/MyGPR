@@ -29,6 +29,7 @@ from ui.page_coordinator import PageCoordinator
 from ui.logger_config import setup_logger
 from ui.settings_manager import SettingsManager
 from ui.theme_helpers import apply_theme, control_palette
+from ui.widgets.bscan_view import BScanView
 from ui.widgets.file_tree_panel import FileTreePanel
 from ui.widgets.segment_tabs import SlimSegment
 
@@ -243,9 +244,32 @@ class MyGPRMainWindow(FluentWindow):
         # 互相覆盖（共享实例是唯一写者）
         if hasattr(page, 'set_settings_manager'):
             page.set_settings_manager(self.settings)
+        # B-Scan 显示比例：四页都有 BScanView，统一在此恢复/持久化，
+        # 避免在四个页面里各写一遍（漏一个就是"某页记不住"）
+        self._wire_bscan_aspect(page)
         page.setObjectName(object_name)
         self.addSubInterface(page, icon, text, position=position)
         self.pages[object_name] = page
+
+    def _wire_bscan_aspect(self, page) -> None:
+        """把页面内所有 BScanView 的比例模式接到持久化设置（跨会话记住）。"""
+        key = 'bscan_aspect_mode'
+        views = page.findChildren(BScanView)
+        if not views:
+            return
+        saved = str(self.settings.get(key, 'free') or 'free')
+        if saved not in ('free', 'square', 'cell'):
+            saved = 'free'
+        for view in views:
+            # 恢复阶段 notify=False：避免"读设置 → 写设置"回环
+            view.set_aspect_mode(saved, notify=False)
+            view.sig_aspect_changed.connect(
+                lambda mode, k=key: self._persist_aspect_mode(k, mode))
+
+    def _persist_aspect_mode(self, key: str, mode: str) -> None:
+        """用户切换 B-Scan 比例后写盘（共享 SettingsManager 唯一写者）。"""
+        self.settings.set(key, str(mode))
+        self.settings.save()
 
     # ---------------------------------------------------------- 首屏后预热
     def _start_warmup(self) -> None:
@@ -264,12 +288,20 @@ class MyGPRMainWindow(FluentWindow):
         if self._pages_warmed:
             return
         self._pages_warmed = True
+        # 清空预热队列：ensure_pages_ready 已同步构造完所有页，此时若还有
+        # QTimer.singleShot(0, _warmup_next_page) 留在事件队列里，它会在下面
+        # 遍历 pages 期间的嵌套事件循环中执行 _register_page → self.pages[...]
+        # 写入，触发「dictionary changed size during iteration」（CI Linux
+        # offscreen 上表现为 test_main_window_titlebar 偶发 ERROR）。
+        self._deferred_specs.clear()
         # 跨页业务信号链需要 8 页全部存在，因此延后到此处（接线代码本身不改）
         self.page_coordinator.connect_all()
         self._inject_page_settings()
         if not self._backend_ready:
             # 预热期间后端可能仍未就绪：补齐延后页的禁用态
-            for object_name, page in self.pages.items():
+            # 遍历用 list() 快照：setEnabled 会走 Qt 事件/布局，理论上可能
+            # 重入本方法或被其它路径改 pages；快照让遍历对字典变更免疫。
+            for object_name, page in list(self.pages.items()):
                 if object_name not in self.FIRST_PAINT_PAGES:
                     page.setEnabled(False)
 
@@ -384,15 +416,15 @@ class MyGPRMainWindow(FluentWindow):
         layout.addStretch(1)
         # 右端双开关：文件树 (Ctrl+B) / 输出面板 (Ctrl+J)，快捷键入口对等曝光
         self._file_tree_btn = TransparentToolButton(FIF.LAYOUT, bar)
-        self._file_tree_btn.setIconSize(QSize(14, 14))
+        self._file_tree_btn.setIconSize(QSize(*constants.TOOL_BTN_ICON))
         self._file_tree_btn.setToolTip('文件树 (Ctrl+B)')
-        self._file_tree_btn.setFixedSize(28, 28)
+        self._file_tree_btn.setFixedSize(*constants.TOOL_BTN_SIZE)
         self._file_tree_btn.clicked.connect(self._toggle_file_tree)
         layout.addWidget(self._file_tree_btn, 0, Qt.AlignmentFlag.AlignVCenter)
         self._output_btn = TransparentToolButton(FIF.CODE, bar)
-        self._output_btn.setIconSize(QSize(14, 14))
+        self._output_btn.setIconSize(QSize(*constants.TOOL_BTN_ICON))
         self._output_btn.setToolTip('输出面板：日志 / 任务 (Ctrl+J)')
-        self._output_btn.setFixedSize(28, 28)
+        self._output_btn.setFixedSize(*constants.TOOL_BTN_SIZE)
         if self.output_panel is not None:
             self._output_btn.clicked.connect(self.output_panel.toggle_panel)
         layout.addWidget(self._output_btn, 0, Qt.AlignmentFlag.AlignVCenter)
@@ -630,7 +662,10 @@ class MyGPRMainWindow(FluentWindow):
     def _set_backend_ready(self, ready: bool) -> None:
         """后端未就绪时禁用除主页/设置外的页面，就绪后恢复。"""
         self._backend_ready = bool(ready)
-        for object_name, page in self.pages.items():
+        # list() 快照：本方法可能在预热期间被后端就绪回调触发，此时
+        # _warmup_next_page 仍会往 pages 里加页 —— 直接遍历原字典会在
+        # 嵌套事件循环中抛「dictionary changed size during iteration」。
+        for object_name, page in list(self.pages.items()):
             if object_name in ('homeInterface', 'settingsInterface'):
                 continue
             page.setEnabled(ready)

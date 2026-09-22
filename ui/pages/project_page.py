@@ -6,8 +6,13 @@
 - set_lines(list[ProjectLine])：刷新测线表
 - set_artifacts(list[ProjectArtifact])：刷新成果表
 - set_preflight_result(text, ok)：预检结果区
-- set_preview_bundle(bundle|None)：数据预览
 - set_busy(bool)：禁用操作按钮
+
+**本页不做 B-Scan 预览**（2026-09-22 移除）：右列三卡纵向分割后，预览区
+只得到 ~198px 卡片高，B-Scan 绘图区仅 262px（每采样 0.291px，为可读阈值
+的 65%），结构上无法放好看——数据 900 采样时需 405px 绘图区，缺口 259px，
+而两张表最多让出 135px。查看 B-Scan 请用处理页（绘图区 418px）或解释页
+（绘图区 382px），两者均达标。项目页回归"纯管理"定位。
 
 信号：import_requested(dict) / sync_requested(dict) /
 line_selected(str) / line_process_requested(str) /
@@ -16,7 +21,7 @@ artifact_preview_requested(str, str)。
 右键菜单（RoundMenu）：测线表 = 处理该测线（跳转处理页，双击同效）/
 复制数据文件路径 / 打开数据所在文件夹 /
 复制测线号（路径为 controller 异步查询回包缓存，set_line_source_path 喂入）；
-成果表 = 预览所选（双击同效）。
+成果表 = 预览所选（双击同效，跳转处理页查看）。
 
 import_requested payload：{'preflight': bool, 'source', 'line_id', 'name', 'dielectric'}
 （'预检' 按钮 preflight=True → ProjectController.preflight_import；
@@ -43,7 +48,7 @@ from ui import constants, file_dialogs
 from ui.page_scaffold import (make_card, make_form_row, make_hint,
                               make_scroll_column)
 from ui.theme_helpers import status_color
-from ui.widgets import (BScanView, CollapsiblePanel, clear_invalid,
+from ui.widgets import (CollapsiblePanel, clear_invalid,
                         make_separator, mark_invalid, validate_non_empty)
 from ui.widgets.context_menus import add_action, make_menu
 
@@ -321,24 +326,26 @@ class ProjectPage(QWidget):
             self._on_artifacts_context_menu)
         art_layout.addWidget(self._artifacts_table)
         art_btn_row = QHBoxLayout()
-        self.preview_artifact_btn = PushButton('预览所选', art_card)
+        # 本页已无 B-Scan 预览（见模块文档），按钮实为"跳到处理页去看"，
+        # 故文案明确去处，避免用户以为就地会弹图。
+        self.preview_artifact_btn = PushButton('在处理页查看', art_card)
+        self.preview_artifact_btn.setToolTip('跳到处理页并载入该成果的 B-Scan 预览')
         self.preview_artifact_btn.clicked.connect(self._emit_artifact_preview)
         art_btn_row.addStretch(1)
         art_btn_row.addWidget(self.preview_artifact_btn)
         art_layout.addLayout(art_btn_row)
         splitter.addWidget(art_card)
 
-        # 卡片"数据预览"（吃掉剩余空间，B-Scan 完整显示）
-        preview_card, preview_layout = make_card('数据预览')
-        self._bscan = BScanView(preview_card)
-        self._bscan.setMinimumHeight(constants.PREVIEW_MIN_HEIGHT)
-        preview_layout.addWidget(self._bscan, 1)
-        splitter.addWidget(preview_card)
-
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 0)
-        splitter.setStretchFactor(2, 1)
-        splitter.setSizes([160, 140, 400])
+        # 本页不再放 B-Scan 预览（2026-09-22 移除）：三卡纵向分割后预览区
+        # 只有 ~198px 卡片高、绘图区 262px（每采样 0.291px，仅为可读阈值
+        # 0.45px 的 65%），B-Scan 在其中必然被压扁——数据 900 采样需 405px
+        # 绘图区，缺口 259px，而两张表最多让出 135px，靠挤压无解。
+        # 看 B-Scan 请用处理页（绘图区 418px）/ 解释页（382px），均达标；
+        # 本页回归"纯管理"定位，空间留给两张表。
+        # 两卡各占一半，用户可拖动调整。
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([290, 290])
         layout.addWidget(splitter, 1)
         return layout
 
@@ -452,13 +459,6 @@ class ProjectPage(QWidget):
         """预检结果区：ok 绿色 / 失败红色。"""
         self._preflight_label.setText(str(text or ''))
         self._preflight_label.set_hint_key('success' if ok else 'error')
-
-    def set_preview_bundle(self, bundle) -> None:
-        """PreviewBundle（鸭子类型）或 None（清空）。"""
-        if bundle is None:
-            self._bscan.clear()
-        else:
-            self._bscan.set_bundle(bundle)
 
     def set_busy(self, busy: bool) -> None:
         """控制器 busy 状态 → 禁用操作按钮。"""
@@ -604,7 +604,8 @@ class ProjectPage(QWidget):
             return
         self._artifacts_table.selectRow(row)
         menu = make_menu(self)
-        add_action(menu, FIF.VIEW, '预览所选', self._emit_artifact_preview)
+        add_action(menu, FIF.VIEW, '在处理页查看',
+                   self._emit_artifact_preview)
         add_action(menu, FIF.DELETE, '删除所选成果',
                    self._on_artifacts_context_delete)
         menu.exec(self._artifacts_table.viewport().mapToGlobal(pos))

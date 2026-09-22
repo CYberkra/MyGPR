@@ -8,6 +8,7 @@
   ``view.setGraphicsEffect(None)`` 去阴影、
   给 ``#comboListWidget`` 加实色 1px 边框（深色 ``rgb(100,100,100)`` / 浅色 ``rgb(200,200,200)``）。
 """
+import gc
 from typing import TYPE_CHECKING
 
 import pyqtgraph as pg
@@ -298,18 +299,36 @@ _applied_dark: bool | None = None
 def apply_theme(theme: str) -> None:
     """应用主题：setTheme + pyqtgraph 背景同步（'k'/'w'）+ palette + 原生控件 QSS。
 
-    幂等：目标主题与已应用主题一致时直接返回（重复的全局样式重算对大
-    控件树是秒级开销）。需要强制重放时先置 ``theme_helpers._applied_dark = None``。
+    幂等：目标主题与已应用主题一致、**且 qfluentwidgets 当前实际主题也一致**
+    时直接返回（重复的全局样式重算对大控件树是秒级开销）。需要强制重放时
+    先置 ``theme_helpers._applied_dark = None``。
 
-    :param theme: ``'浅色主题'`` / ``'深色主题'``（也接受 ``Theme`` 枚举）。
+    为什么短路要同时校验 ``isDarkTheme()``：``_applied_dark`` 只记录「本函数
+    上次把主题设成了什么」，无法反映外部对主题的改动。第三方代码（或历史
+    脚本）直接调 ``qfluentwidgets.setTheme()`` 后，``_applied_dark`` 会与实际
+    状态脱节；此时若只信 ``_applied_dark``，本函数会误判为「已经是目标主题」
+    而跳过，导致 palette / pyqtgraph 背景 / 原生控件 QSS 全部停留在旧主题。
+    这是一种静默失效——界面看起来"应用了主题"，实际三层基础设施没跟上。
     """
     global _applied_dark
     if isinstance(theme, Theme):
         dark = theme == Theme.DARK
     else:
         dark = str(theme) == constants.THEME_DARK
-    if _applied_dark is not None and dark == _applied_dark:
+    if _applied_dark is not None and dark == _applied_dark \
+            and isDarkTheme() == dark:
         return
+    # 先收一次垃圾：qfluentwidgets 的 updateStyleSheet 用
+    # `list(styleSheetManager.items())` 遍历内部 WeakKeyDictionary，而
+    # `items()` 是直通该字典的迭代器视图——若在展开它的过程中某个已销毁
+    # 控件的弱引用键恰好被 GC 回收，就会抛
+    #   RuntimeError: dictionary changed size during iteration
+    # （CPython 3.13 上更易命中，CI gui-linux-offscreen 全量跑时偶发，
+    #  见 tests/test_main_window_titlebar.py 的 setup 报错）。
+    # 这里主动 gc.collect() 把"已死未回收"的键提前清掉，让库的遍历过程
+    # 不再因 GC 抖动而改字典；本函数本就是秒级重算路径，一次 collect 的
+    # 开销可忽略。
+    gc.collect()
     setTheme(Theme.DARK if dark else Theme.LIGHT)
     pg.setConfigOption('background', 'k' if dark else 'w')
     pg.setConfigOption('foreground', 'w' if dark else 'k')

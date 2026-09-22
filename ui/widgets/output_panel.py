@@ -135,7 +135,7 @@ class OutputPanel(QWidget):
         self._tool_stacked.addWidget(jobs_bar)
 
         self._fold_btn = TransparentToolButton(FIF.DOWN, self)
-        self._fold_btn.setIconSize(QSize(14, 14))
+        self._fold_btn.setIconSize(QSize(*constants.TOOL_BTN_ICON))
         self._fold_btn.setToolTip('收起面板')
         self._fold_btn.clicked.connect(lambda: self._set_open(not self._open))
 

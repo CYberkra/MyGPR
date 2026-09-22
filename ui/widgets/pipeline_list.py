@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (QHBoxLayout, QLabel, QListWidget,
 from qfluentwidgets import CheckBox, TransparentToolButton
 from qfluentwidgets import FluentIcon as FIF
 
+from ui import constants
 from ui.widgets.context_menus import add_action, make_menu
 
 
@@ -59,7 +60,7 @@ class _StepRow(QWidget):
         self.del_btn = TransparentToolButton(FIF.DELETE, self)
         for btn, tip in ((self.up_btn, '上移'), (self.down_btn, '下移'),
                          (self.del_btn, '删除')):
-            btn.setFixedSize(28, 28)
+            btn.setFixedSize(*constants.TOOL_BTN_SIZE)
             btn.setToolTip(tip)
 
         row = QHBoxLayout(self)

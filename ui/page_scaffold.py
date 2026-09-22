@@ -420,3 +420,23 @@ class PanelStateMixin:
         finally:
             self._left_panel.blockSignals(False)
             self._right_panel.blockSignals(False)
+
+    # ------------------------------------------------------------ 通用设置读写
+    def _persist_setting(self, key: str, value) -> None:
+        """写单个设置项：共享实例为唯一写者；未注入（单元测试）时静默跳过。
+
+        各页曾各自复制这段逻辑；收敛到 mixin 单源，避免"某页忘了判 None"
+        或"某页忘了 save"这类不一致。
+        """
+        sm = self._sm
+        if sm is None:
+            return
+        sm.set(key, value)
+        sm.save()
+
+    def _restore_setting(self, key: str, default=None):
+        """读单个设置项；未注入时返回 default（不读盘）。"""
+        sm = self._sm
+        if sm is None:
+            return default
+        return sm.get(key, default)

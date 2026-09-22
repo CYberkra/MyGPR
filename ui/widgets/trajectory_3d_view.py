@@ -35,9 +35,11 @@ from PIL import Image
 from PyQt6.QtCore import QObject, QRunnable, Qt, QThreadPool, pyqtSignal
 from PyQt6.QtWidgets import QLabel, QVBoxLayout, QWidget
 from qfluentwidgets import FluentIcon as FIF
+from qfluentwidgets import isDarkTheme
 
 from ui.desktop_backend_facade import tile_cache_dir
 from ui.widgets.context_menus import add_action, make_menu
+from ui.widgets.empty_state import EmptyStateOverlay
 from ui.widgets.local_dem import dem_covers_bbox
 from ui.widgets.map_tiles import (TILE_SOURCE_MAX_ZOOM, WORLD_SIZE_M,
                                   extract_epsg, lonlat_to_tile, tile_url,
@@ -346,9 +348,17 @@ class Trajectory3DView(QWidget):
         self._terrain_src = None         # (epsg, terrain_bbox) 供本地 DEM 变更后重建地形
         self._terrain_source = 'online'  # 地形来源：online / local_dem / estimated
         self._ground_points = None       # 测线估算地面散点 (n,3) 显示坐标，z=地表高程
-        self._theme_dark = False         # 主题缓存：GL 未建时先记住，创建时应用
+        # 主题缓存：GL 未建时先记住，惰性创建时应用。构造期按**当前主题**
+        # 取初值——惰性预热的页面在窗口 _init_state 之后才构建，拿不到那次
+        # 全量 apply_theme 遍历，写死 False 会让三维视图在深色下留白底。
+        self._theme_dark = bool(isDarkTheme())
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
+        # 空态引导浮层：无测线时覆盖容器，set_tracks 有数据即隐藏。
+        # 先于 GL 视图创建（惰性），故 host = self；位于降级 QLabel 之上。
+        self._empty_overlay = EmptyStateOverlay(
+            self, icon=FIF.GLOBE, title='暂无三维轨迹',
+            hint='勾选带定位信息的测线后，此处显示三维航迹与地形')
         # 注意：此处**不再**探测 pyqtgraph.opengl。降级提示改为惰性创建
         # （见 _ensure_fallback_label），否则惰性导入白做——__init__ 就会立刻付费。
 
@@ -359,6 +369,9 @@ class Trajectory3DView(QWidget):
         self._fallback_label = QLabel('三维视图需要 PyOpenGL', self)
         self._fallback_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.layout().addWidget(self._fallback_label, 1)
+        # 降级提示已是明确文案，空态浮层退场，避免两条提示叠字
+        self._empty_overlay.setVisible(False)
+        self._fallback_label.raise_()
 
     def _ensure_gl_view(self) -> bool:
         """首次需要显示 3D 内容时创建 GLViewWidget 与地形线程池。
@@ -431,6 +444,8 @@ class Trajectory3DView(QWidget):
             if epsg is None:
                 epsg = extract_epsg(getattr(track, 'coordinate_system', ''))
         if not arrays:
+            # 无有效测线 → 回到空态（并清掉可能残留的 GL 内容）
+            self._clear_tracks_content()
             return
 
         # 坐标系启发：无 EPSG 且数值像经纬度 → 按 EPSG:4326
@@ -469,6 +484,7 @@ class Trajectory3DView(QWidget):
                          float(np.abs((xyz - origin)[:, :2]).max()), 1.0)
         self._terrain_payload = None
         self._render_lines()
+        self._empty_overlay.setVisible(False)
 
         # 网格随数据范围调整，相机距离/中心自动适配
         self._extent = extent
@@ -477,6 +493,19 @@ class Trajectory3DView(QWidget):
         # 坐标系可识别 → 后台构建真实地形
         self._terrain_src = (epsg, terrain_bbox) if terrain_bbox is not None else None
         self._start_terrain_build()
+
+    def _clear_tracks_content(self) -> None:
+        """清空场景中的测线/地形并回到空态（无有效测线时调用）。"""
+        if self._gl_view is not None:
+            for item in self._line_items:
+                self._gl_view.removeItem(item)
+            self._clear_terrain()
+        self._line_items = []
+        self._track_data = []
+        self._ground_points = None
+        self._terrain_payload = None
+        self._terrain_generation += 1   # 使进行中的地形任务失效
+        self._empty_overlay.setVisible(True)
 
     def set_terrain_source(self, mode: str) -> None:
         """地形来源：'online' 在线下载 / 'local_dem' 本地 DEM /
