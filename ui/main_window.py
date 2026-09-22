@@ -296,6 +296,11 @@ class MyGPRMainWindow(FluentWindow):
         self._deferred_specs.clear()
         # 跨页业务信号链需要 8 页全部存在，因此延后到此处（接线代码本身不改）
         self.page_coordinator.connect_all()
+        # 后端先于本收尾就绪的场景：_on_backend_ready 当时因接线未完成而跳过
+        # load_methods（methods_loaded 发出时还没有接收者）→ 这里补加载。
+        # 反向时序（后端后就绪）由 _on_backend_ready 正常加载，二者恰好互斥不重复。
+        if self._backend_ready and self.processing_controller is not None:
+            self.processing_controller.load_methods()
         self._inject_page_settings()
         if not self._backend_ready:
             # 预热期间后端可能仍未就绪：补齐延后页的禁用态
@@ -716,7 +721,10 @@ class MyGPRMainWindow(FluentWindow):
             # 而非 hasattr 探测静默跳过（历史事故：load_methods 不执行 → 方法库为空）。
             if self.page_coordinator is not None:
                 self.page_coordinator.connect_job_bridge(bridge)
-        if self.processing_controller is not None:
+        if self.processing_controller is not None and self._pages_warmed:
+            # 仅在预热收尾（connect_all 已接通 methods_loaded → 方法库）后加载。
+            # 后端就绪若先于收尾，信号会发进空气（历史事故同款：方法库空白），
+            # 由 _finish_warmup 接线完成后补加载，见下。
             self.processing_controller.load_methods()
 
     # ============================================================ 项目对话框（窗口 UI）

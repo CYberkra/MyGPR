@@ -18,6 +18,9 @@ from ui.file_tree import (  # noqa: E402
     build_artifacts_model, build_files_model, build_tree_model, group_lines,
     group_stats, line_suffix,
 )
+from ui.widgets.file_tree_panel import (  # noqa: E402
+    _SUFFIX_MAX_RATIO, _SUFFIX_PAD, suffix_column_width,
+)
 
 
 def _line(line_id, updated_at='', length_m=0.0, status='', processed_result='',
@@ -591,3 +594,86 @@ def test_confirm_delete_emits_line_ids_on_accept(qapp, panel, monkeypatch):
     panel.line_delete_requested.connect(got.append)
     panel._confirm_delete('L01')
     assert got == [['L01']]
+
+
+# ---------------------------------------------------------------- 名称列宽度
+class TestNameColumnWidth:
+    """文件树「只能显示两个字」回归（名称列被角标列挤没）。
+
+    根因（offscreen 实测，面板 232px / 视口 215px）：Qt6 的 QHeaderView
+    默认 ``stretchLastSection=True``，即便第二列（角标）设为
+    ResizeToContents 也会被拉伸到与名称列平分（108 / 107）；再叠加每级
+    缩进 + 状态圆点，深层节点实际只剩约两个汉字的绘制宽度。
+    修复：关末列拉伸 + 角标列按内容定宽并封顶（名称列 Stretch 吃余量）。
+
+    注：这里刻意不把面板 show 出来取真实布局——实测那样做会让进程退出时
+    触发本模块 fixture 注释记载的 offscreen access violation（6 次约 1 次），
+    改为「纯函数定策略 + setColumnWidth 打桩验证调用值」。
+    """
+
+    # ---------------------------------------------------------- 结构不变量
+    def test_last_section_stretch_disabled(self, panel):
+        """末列拉伸必须关闭——开启时角标列会被拉到与名称列平分。"""
+        assert panel._tree.header().stretchLastSection() is False
+
+    def test_suffix_column_is_fixed_mode(self, panel):
+        """角标列必须是定宽：ResizeToContents 会把名称列反向压没。"""
+        from PyQt6.QtWidgets import QHeaderView
+        assert panel._tree.header().sectionResizeMode(1) ==             QHeaderView.ResizeMode.Fixed
+
+    # ---------------------------------------------------------- 定宽策略（纯函数）
+    def test_width_is_zero_without_viewport_or_suffix(self):
+        assert suffix_column_width(0, 100) == 0
+        assert suffix_column_width(215, 0) == 0
+
+    def test_short_suffix_uses_content_width(self):
+        assert suffix_column_width(215, 72) == 72 + _SUFFIX_PAD
+
+    def test_long_suffix_is_capped(self):
+        """长角标（如 16 字符时间戳 192px）封顶，不吞掉名称列。"""
+        assert suffix_column_width(215, 192) == int(215 * _SUFFIX_MAX_RATIO)
+        assert suffix_column_width(215, 192) < 192, '封顶未生效'
+
+    def test_cap_scales_with_viewport(self):
+        assert suffix_column_width(160, 999) < suffix_column_width(215, 999)
+
+    def test_name_column_keeps_majority(self):
+        """名称列 = 视口余量，任何角标下都拿大头（旧实现仅约 50%）。"""
+        for widest in (0, 40, 72, 132, 192, 999):
+            col1 = suffix_column_width(215, widest)
+            assert 215 - col1 >= int(215 * 0.6), (
+                f'角标 {widest}px 时名称列只剩 {215 - col1}/215')
+
+    # ---------------------------------------------------------- 面板接线
+    def test_apply_suffix_width_sets_capped_width(self, panel, monkeypatch):
+        """_apply_suffix_width 必须按视口宽封顶后写给第二列。"""
+        panel.set_lines([_line('L01', '2026-09-16T01:00:00', 98.0, '已处理'),
+                         _line('L02', '2026-09-16T02:00:00', 98.0, '已处理')])
+        calls = []
+        monkeypatch.setattr(panel._tree, 'setColumnWidth',
+                            lambda col, w: calls.append((col, w)))
+        # 隐藏态视口宽恒为默认的 95px，打桩成真实布局下的值
+        monkeypatch.setattr(panel._tree.viewport(), 'width', lambda: 215)
+        panel._apply_suffix_width()
+        assert calls, '未设置角标列宽'
+        col, width = calls[-1]
+        assert col == 1
+        assert width == suffix_column_width(215, max(
+            panel._tree.fontMetrics().horizontalAdvance(s)
+            for s in panel._suffixes))
+
+    def test_long_suffix_does_not_squeeze_name_column(self, panel,
+                                                      monkeypatch):
+        """16 字符时间戳角标下仍封顶（ResizeToContents 会把名称列压到 20px）。"""
+        panel.set_artifacts([
+            types.SimpleNamespace(
+                artifact_id=f'A{i:03d}', line_id=f'L{i:02d}', name=f'A{i:03d}',
+                method_name='', created_at='2026-09-16T12:00:00', shape=(1, 2))
+            for i in range(1, 4)])
+        calls = []
+        monkeypatch.setattr(panel._tree, 'setColumnWidth',
+                            lambda col, w: calls.append((col, w)))
+        monkeypatch.setattr(panel._tree.viewport(), 'width', lambda: 215)
+        panel._apply_suffix_width()
+        assert calls[-1][1] <= int(215 * _SUFFIX_MAX_RATIO), (
+            f'长角标未封顶：{calls[-1][1]}')
