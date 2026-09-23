@@ -10,6 +10,8 @@
 2. **processing 页分发语义**：single 下分段控件切换原始/成果（历史行为）；
    dual/quad 下 0 号位固定原始数据、1 号位固定处理结果，分段控件只决定
    色阶刷新焦点；新 bundle 到达时无论分段停在哪侧都要更新对应面板。
+   auto 采用**粘性布局**：对比长出后成果清空不收回（空态占位），
+   原始数据清空才重置（布局稳定优先，见 _sync_auto_layout）。
 3. **布局模式持久化**：``bscan_layout_mode`` 设置键走设置页
    ComboBox（load 不发信号 / 用户改动发 bscan_view_changed / sync 回写
    不发信号），坏值回落 single。
@@ -249,6 +251,7 @@ def _reset_page(page) -> None:
     c._stack.setCurrentIndex(0)
     page._original_bundle = None
     page._result_bundle = None
+    page._auto_sticky_dual = False    # 粘性属于宿主页，必须一并重置
     page._preview_segment.setCurrentItem(_LSEG_ORIGINAL)
 
 
@@ -406,12 +409,56 @@ class TestAutoLayoutFollowsData:
         assert container.view_at(0)._matrix.max() == 1.0
         assert container.view_at(1)._matrix.max() == 2.0
 
-    def test_result_removal_shrinks_to_single(self, page, container):
+    def test_result_removal_keeps_dual(self, page, container):
+        """粘性 auto：成果被删只清成果位，对比布局**不**收回。
+
+        布局稳定优先——用户正在看图时布局不跳变（旧版缩回单视图已废弃）。
+        """
+        page.set_original_bundle(_bundle(1))
+        page.set_result_bundle(_bundle(2))
+        assert container.effective_mode() == LAYOUT_DUAL
+        page.set_result_bundle(None)
+        assert container.effective_mode() == LAYOUT_DUAL
+        assert container.view_at(0)._matrix.max() == 1.0
+        assert container.view_at(1)._matrix is None
+
+    def test_sticky_dual_refills_on_new_result(self, page, container):
+        """粘住后新成果到达：直接填入 1 号位，布局不再抖动。"""
         page.set_original_bundle(_bundle(1))
         page.set_result_bundle(_bundle(2))
         page.set_result_bundle(None)
+        page.set_result_bundle(_bundle(3))
+        assert container.effective_mode() == LAYOUT_DUAL
+        assert container.view_at(1)._matrix.max() == 3.0
+
+    def test_sticky_dual_survives_line_switch(self, page, container):
+        """换测线语义（成果清空→原始换新→成果空→新成果到达）布局不抖。"""
+        page.set_original_bundle(_bundle(1))
+        page.set_result_bundle(_bundle(2))
+        page.set_result_bundle(None)          # on_line_selected 清成果残留
+        page.set_original_bundle(_bundle(9))  # 新测线原始数据
+        assert container.effective_mode() == LAYOUT_DUAL
+        assert container.view_at(0)._matrix.max() == 9.0
+        assert container.view_at(1)._matrix is None
+        page.set_result_bundle(_bundle(8))    # 自动预览新测线最新成果
+        assert container.view_at(1)._matrix.max() == 8.0
+
+    def test_original_cleared_resets_sticky(self, page, container):
+        """上下文重置（切项目：两 bundle 都清）→ 回单视图且粘性失效。
+
+        之后再选测线（只有原始、无成果）保持单视图，不提前分屏；
+        对比条件再次满足（成果到达）才长出。
+        """
+        page.set_original_bundle(_bundle(1))
+        page.set_result_bundle(_bundle(2))
+        assert container.effective_mode() == LAYOUT_DUAL
+        page.set_result_bundle(None)      # 切项目双清（coordinator 语义）
+        page.set_original_bundle(None)
         assert container.effective_mode() == LAYOUT_SINGLE
-        assert container.primary_view()._matrix.max() == 1.0
+        page.set_original_bundle(_bundle(1))
+        assert container.effective_mode() == LAYOUT_SINGLE
+        page.set_result_bundle(_bundle(2))
+        assert container.effective_mode() == LAYOUT_DUAL
 
     def test_new_dual_panel_gets_colormap(self, page, container):
         """长出第二面板时色标同步跟上（新面板不是空白配色）。"""

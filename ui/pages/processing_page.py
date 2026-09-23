@@ -69,6 +69,7 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._methods_by_id = {}
         self._original_bundle = None
         self._result_bundle = None
+        self._auto_sticky_dual = False    # 粘性 auto：见 _sync_auto_layout
         self._running = False
         self._job_id = ''
         self._selected_step = -1
@@ -336,9 +337,10 @@ class ProcessingPage(PanelStateMixin, QWidget):
     def set_original_bundle(self, bundle) -> None:
         """原始数据预览 bundle。
 
-        auto 模式下面板数先按 bundle 数量重解析；dual/quad/free 下 0 号位
-        固定显示原始数据，无论分段停在哪一侧都要重发；single 下仅当分段
-        选中"原始数据"时刷新。
+        auto 模式下先走粘性布局解析（见 _sync_auto_layout：原始数据是
+        对比锚，锚没了粘性重置）；dual/quad/free 下 0 号位固定显示原始
+        数据，无论分段停在哪一侧都要重发；single 下仅当分段选中
+        "原始数据"时刷新。
         """
         self._original_bundle = bundle
         self._sync_auto_layout()
@@ -348,7 +350,11 @@ class ProcessingPage(PanelStateMixin, QWidget):
             self._show_bundle(_SEG_ORIGINAL)
 
     def set_result_bundle(self, bundle) -> None:
-        """处理结果预览 bundle（分发语义同 set_original_bundle）。"""
+        """处理结果预览 bundle（分发语义同 set_original_bundle）。
+
+        auto 模式下成果到达长出对比布局并粘住；bundle=None（删除/换线）
+        只清成果位数据，**不**收回布局——看图时布局不跳变。
+        """
         self._result_bundle = bundle
         self._sync_auto_layout()
         if self._shows_both_panels():
@@ -491,17 +497,27 @@ class ProcessingPage(PanelStateMixin, QWidget):
         return self._bscan_container.effective_mode() != LAYOUT_SINGLE
 
     def _sync_auto_layout(self) -> None:
-        """auto 模式：面板数自动跟随 bundle 数量（1→单视图，2→左右对比）。
+        """auto 模式：布局稳定优先（粘性），面板只"长出"不"收回"。
 
+        - 对比条件首次满足（原始+成果同时在场）→ 长出左右对比并粘住；
+        - 成果被删 / 换测线清空 → **保持对比布局**，成果位显示空态——
+          用户正在看图时布局绝不跳变；随后新成果到达直接填入；
+        - 原始数据也没了（切项目等上下文清空）→ 重置粘性回单视图。
+
+        旧版按 bundle 数量实时解析：成果清空即缩回、自动预览到达再长出，
+        一次换测线布局抖动两次，观察被打断——已废弃。
         实体模式（手动固定）下是空操作。解析换了页后新面板是空白实例，
         先重广播色标；bundle 分发由调用方随后的 _show_bundle/
         _distribute_bundles 完成。
         """
         if self._bscan_container.layout_mode() != LAYOUT_AUTO:
             return
-        count = 2 if (self._original_bundle is not None
-                      and self._result_bundle is not None) else 1
-        if self._bscan_container.resolve_auto(count):
+        if self._original_bundle is None:
+            self._auto_sticky_dual = False
+        elif self._result_bundle is not None:
+            self._auto_sticky_dual = True
+        if self._bscan_container.resolve_auto(
+                2 if self._auto_sticky_dual else 1):
             self._apply_colormap(self._cmap_combo.currentText())
 
     def _show_bundle(self, which: str) -> None:
