@@ -27,6 +27,8 @@ import pytest  # noqa: E402
 pytest.importorskip("PyQt6")  # 后端 CI（无 Qt）自动跳过
 
 from PyQt6.QtCore import Qt  # noqa: E402
+from PyQt6.QtTest import QTest  # noqa: E402
+from PyQt6.QtWidgets import QStackedWidget, QWidget  # noqa: E402
 from ui.pages.processing_page import ProcessingPage  # noqa: E402
 from ui.pages.settings_page import SettingsPage  # noqa: E402
 from ui.widgets import (  # noqa: E402
@@ -206,6 +208,29 @@ class TestFreeLayout:
         assert subs[0].isVisible()
         assert len(container.views()) == 2
         container.hide()
+
+    def test_first_tile_deferred_until_page_shown(self, container, qapp):
+        """启动恢复时页面藏在 QStackedWidget 里：首次平铺推迟到真实显示。
+
+        回归：此前 _enter_free_once 在隐藏页 ~100×30 的占位视口上就消耗了
+        「只平铺一次」标志，用户切到该页时窗口缩在左上角（~140×130）。
+        修复后守卫拦下隐藏期平铺，MDI 的 Show/Resize 到达真实尺寸再补。
+        """
+        stack = QStackedWidget()
+        stack.addWidget(QWidget())          # 0 号：占位页（模拟其他页面）
+        stack.addWidget(container)          # 1 号：容器页，启动时藏在后面
+        container.set_layout_mode(LAYOUT_FREE, notify=False)
+        qapp.processEvents()                # 隐藏态的 singleShot：守卫应拦下
+        stack.resize(900, 620)
+        stack.show()
+        stack.setCurrentIndex(0)
+        qapp.processEvents()
+        subs = container._mdi.subWindowList()
+        assert subs[0].width() < 200        # 隐藏页上未提前平铺到真实尺寸
+        stack.setCurrentIndex(1)            # 切到容器页：MDI 拿到真实尺寸
+        QTest.qWait(50)                     # Show/Resize → singleShot → tile
+        assert subs[0].width() >= 300
+        assert subs[1].width() >= 300
 
 
 _LSEG_ORIGINAL = 'originalData'

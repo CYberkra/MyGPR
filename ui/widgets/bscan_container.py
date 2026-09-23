@@ -46,6 +46,10 @@ _MODE_INDEX = {LAYOUT_SINGLE: 0, LAYOUT_DUAL: 1, LAYOUT_QUAD: 2, LAYOUT_FREE: 3}
 # 1 号位=处理结果；views() 契约依赖该顺序，与用户拖动摆位无关）。
 _FREE_WINDOW_TITLES = ('原始数据', '处理结果')
 
+# 首次平铺的视口宽度下限：QStackedWidget 隐藏页给 MDI 的占位宽度约 100，
+# 低于该值说明真实布局尚未发生，首次平铺应推迟（见 _enter_free_once）。
+_FREE_MIN_VIEWPORT_WIDTH = 200
+
 
 class BScanContainer(QWidget):
     """B-Scan 多面板容器：布局切换 + 面板访问，不做数据路由。"""
@@ -57,6 +61,9 @@ class BScanContainer(QWidget):
         self._mode = LAYOUT_AUTO             # 用户/设置层的偏好值
         self._effective = LAYOUT_SINGLE      # auto 解析后实际摆的页
         self._pages = {}                     # entity mode -> list[BScanView]
+        # 提前建：_build_free_page 给 MDI 装 eventFilter 后，构造期事件
+        # 就会进 eventFilter，此时该标志必须已存在（防 AttributeError）。
+        self._free_arranged = False
 
         self._stack = QStackedWidget(self)
         self._stack.addWidget(self._build_flow_page(LAYOUT_SINGLE, 1))
@@ -114,6 +121,7 @@ class BScanContainer(QWidget):
         self._mdi = QMdiArea(page)
         self._mdi.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._mdi.customContextMenuRequested.connect(self._show_free_menu)
+        self._mdi.installEventFilter(self)  # Show/Resize 驱动首次平铺重试
         outer.addWidget(self._mdi)
         views = []
         for title in _FREE_WINDOW_TITLES:
@@ -132,22 +140,32 @@ class BScanContainer(QWidget):
             sub.installEventFilter(self)   # 关闭拦截见 eventFilter
             views.append(view)
         self._pages[LAYOUT_FREE] = views
-        self._free_arranged = False
         return page
 
     def eventFilter(self, obj, event) -> bool:
-        """自由窗口常驻契约：拦下子窗口的关闭事件。
+        """自由窗口常驻契约 + 首次平铺时机驱动。
 
-        Qt 对 SubWindow 型标题栏的关闭钮渲染不完全受 WindowCloseButtonHint
-        约束（实测 offscreen 下 ✕ 仍会画出），而 close() 会把面板**隐藏**——
-        此后数据还在往看不见的画布里流，破坏 views() 契约。这里统一拒绝：
-        两个窗位是常驻视图（与 dual 面板不可关闭同一语义）。
+        其一，拦下子窗口的关闭事件：Qt 对 SubWindow 型标题栏的关闭钮渲染
+        不完全受 WindowCloseButtonHint 约束（实测 offscreen 下 ✕ 仍会画出），
+        而 close() 会把面板**隐藏**——此后数据还在往看不见的画布里流，
+        破坏 views() 契约。这里统一拒绝：两个窗位是常驻视图（与 dual
+        面板不可关闭同一语义）。
+
+        其二，MDI 区的 Show/Resize 触发首次平铺重试：启动恢复时容器页面
+        藏在 QStackedWidget 里，等切到真实页面、MDI 拿到实际尺寸后再平铺
+        （见 _enter_free_once 的时机守卫）。
         """
-        if (event.type() == QEvent.Type.Close
+        et = event.type()
+        if (et == QEvent.Type.Close
                 and isinstance(obj, QMdiSubWindow)
                 and obj.widget() in self._pages.get(LAYOUT_FREE, ())):
             event.ignore()
             return True
+        if (obj is self._mdi and not self._free_arranged
+                and et in (QEvent.Type.Show, QEvent.Type.Resize)):
+            # 能不能平铺由 _enter_free_once 的守卫判断；这里排一拍延迟，
+            # 等布局系统把视口尺寸收敛完。
+            QTimer.singleShot(0, self._enter_free_once)
         return super().eventFilter(obj, event)
 
     # ------------------------------------------------ 自由窗口摆放控制
@@ -157,8 +175,17 @@ class BScanContainer(QWidget):
         构建时 MDI 区还没参与布局（尺寸未定），直接 addSubWindow 会挤在
         左上角；等事件循环铺完再平铺。只做一次，之后跨模式切换保留用户
         拖出来的摆位。
+
+        时机守卫：启动恢复时容器页面可能还藏在 QStackedWidget 里（实测
+        隐藏页的 MDI 视口只有 ~100×30 占位尺寸），此刻平铺会把窗口钉死
+        在左上角，用户切过来只看到缩成一团的小窗。视口不可见或过窄时
+        **不**消耗「只平铺一次」标志，留给 eventFilter 的 Show/Resize
+        事件重试。
         """
         if self._free_arranged or self._effective != LAYOUT_FREE:
+            return
+        if (not self._mdi.isVisible()
+                or self._mdi.viewport().width() < _FREE_MIN_VIEWPORT_WIDTH):
             return
         self._free_arranged = True
         self._mdi.tileSubWindows()
