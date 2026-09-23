@@ -82,6 +82,11 @@ class ProjectChain:
             # 成果叶子点击 → 换线（如需）+ 跳处理页选中预览
             tree.artifact_focus_requested.connect(
                 self.on_artifact_focus_requested)
+            # 成果叶子右键「删除成果」→ 与项目页同一删除链路
+            # （异步查后代闭包 → 级联确认框 → 回收站）
+            tree.artifact_delete_requested.connect(
+                lambda line_id, artifact_id:
+                self.on_artifact_delete_requested(line_id, [artifact_id]))
 
         # ---------------- 空间信息页：设为当前测线（测线归属项目域）
         spatial.current_line_requested.connect(self.on_spatial_current_line)

@@ -585,6 +585,58 @@ def test_context_menu_on_leaf_selects_shows_and_emits(qapp, panel,
     assert panel._tree.currentItem() is leaf
 
 
+def test_artifact_context_menu_shows_and_selects_without_emitting(
+        qapp, panel, monkeypatch):
+    """成果叶子右键：弹菜单 + 右键即选中；菜单项点击前不发任何信号。"""
+    from PyQt6.QtCore import QPoint
+    from qfluentwidgets import RoundMenu
+    panel.set_project_info(types.SimpleNamespace(name='测试1'))
+    panel._set_view('artifacts', remember=False)
+    panel.set_artifacts([_artifact('A9', 'L02')])
+    leaf = _find_by_kind(panel._tree, 'artifact')
+    assert leaf is not None
+    shown = []
+    monkeypatch.setattr(RoundMenu, 'exec',
+                        lambda self, *a, **k: shown.append(1))
+    monkeypatch.setattr(panel._tree, 'itemAt', lambda p: leaf)
+    focus_got, delete_got = [], []
+    panel.artifact_focus_requested.connect(lambda *a: focus_got.append(a))
+    panel.artifact_delete_requested.connect(lambda *a: delete_got.append(a))
+    panel._on_context_menu(QPoint(5, 5))
+    assert len(shown) == 1
+    assert panel._tree.currentItem() is leaf  # 右键即选中（与测线同语义）
+    assert focus_got == [] and delete_got == []  # 信号只在点菜单项时发
+
+
+def test_artifact_context_menu_actions_emit_focus_delete_copy(
+        qapp, panel, monkeypatch):
+    """菜单项：添加到显示 / 删除成果… / 复制成果号 各自发信号或写剪贴板。"""
+    from PyQt6.QtCore import QPoint
+    from PyQt6.QtWidgets import QApplication
+    from qfluentwidgets import RoundMenu
+    panel.set_project_info(types.SimpleNamespace(name='测试1'))
+    panel._set_view('artifacts', remember=False)
+    panel.set_artifacts([_artifact('A9', 'L02')])
+    leaf = _find_by_kind(panel._tree, 'artifact')
+    monkeypatch.setattr(RoundMenu, 'exec', lambda self, *a, **k: None)
+    monkeypatch.setattr(panel._tree, 'itemAt', lambda p: leaf)
+    # 捕获 add_action 挂进菜单的 slot，逐个触发模拟点击菜单项
+    actions: list = []
+    monkeypatch.setattr(
+        'ui.widgets.file_tree_panel.add_action',
+        lambda menu, icon, text, slot, **k: actions.append((str(text), slot)))
+    panel._on_context_menu(QPoint(5, 5))
+    assert [t for t, _ in actions] == ['添加到显示', '删除成果…', '复制成果号']
+    focus_got, delete_got = [], []
+    panel.artifact_focus_requested.connect(lambda *a: focus_got.append(a))
+    panel.artifact_delete_requested.connect(lambda *a: delete_got.append(a))
+    for _text, slot in actions:
+        slot()
+    assert focus_got == [('L02', 'A9')]   # 与单击同语义（换线如需+跳预览）
+    assert delete_got == [('L02', 'A9')]  # 面板不弹确认框，直接交删除链路
+    assert QApplication.clipboard().text() == 'A9'
+
+
 def test_confirm_delete_emits_line_ids_on_accept(qapp, panel, monkeypatch):
     from PyQt6.QtWidgets import QDialog
     from qfluentwidgets import MessageBox
