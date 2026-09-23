@@ -22,10 +22,11 @@
 （道号/距起点/纵轴物理值/幅值；PreviewBundle 带 trace_axis_m /
 sample_axis 时显示物理量，降采样数据附"原始约 N"），右键菜单可开关。
 
-右键菜单（RoundMenu）：缩放组（放大/缩小/回到全览/方形/1:1/全屏）/
+右键菜单（RoundMenu）：缩放组（放大/缩小/回到全览/方形/1:1/全屏/铺满）/
 轴单位子菜单 / 色标子菜单 / 十字光标 / A-scan 跟随 / 显示模式 / 色阶设置 /
-复制 / 导出 PNG。工具条只保留高频操作（缩放 + 铺满/全屏），轴单位与
-比例策略走设置页与右键菜单。
+复制 / 导出 PNG。工具条已退役（2026-09-23：4 钮与右键菜单完全重复），
+全屏保留为图内左上角悬浮钮，铺满走右键菜单，轴单位与比例策略走设置页
+与右键菜单。
 接入时已 vb.setMenuEnabled(False) 关闭 pyqtgraph 原生英文菜单
 （代价：右键拖拽框选缩放失效，由菜单缩放项补偿），并隐藏 pyqtgraph
 自带的「A」自适应钮（其功能由右键菜单「回到全览」承担）。
@@ -35,7 +36,7 @@ import math
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QVBoxLayout, QWidget
 
 from enum import Enum
 
@@ -216,7 +217,7 @@ class BScanView(GraphicsViewBase, QWidget):
         # 1.09 几乎不畸变）/ 'square' 数据盒锁正方形（占空比仅 43.3%，且把
         # 4:1 的真实剖面压成 1:1、双曲线形状失真）/ 'cell' 数据格 1:1。
         # 旧默认 'square' 是"B-Scan 习惯比例"的想当然，实测两项指标都最差，
-        # 2026-09-22 改默认为 'free'；方形仍保留在工具条/右键菜单随时可切。
+        # 2026-09-22 改默认为 'free'；方形仍保留在右键菜单随时可切。
         self._aspect_mode = default_aspect if default_aspect in (
             'square', 'free', 'cell') else 'free'
         self._cmap_name = constants.DEFAULT_COLORMAP
@@ -245,7 +246,7 @@ class BScanView(GraphicsViewBase, QWidget):
 
         self._init_plot(with_colorbar)
         self._init_readout_overlay()
-        self._init_toolbar_and_layout()
+        self._init_layout()
 
         # 空态引导浮层（评审 P0-1）：初始无数据即显示，数据到达隐藏
         self._empty_overlay = EmptyStateOverlay(
@@ -254,7 +255,6 @@ class BScanView(GraphicsViewBase, QWidget):
 
         self._glw.scene().sigMouseClicked.connect(self._on_mouse_clicked)
         self._glw.scene().sigMouseMoved.connect(self._on_mouse_moved)
-        # 工具条只剩图标钮，无需构造期同步文字钮状态
         self._refresh_axis_state()
         from qfluentwidgets import isDarkTheme
         self.apply_theme(isDarkTheme())
@@ -290,8 +290,8 @@ class BScanView(GraphicsViewBase, QWidget):
         self._plot.setLabel('left', '采样点')
         self._plot.invertY(True)
         self._plot.setMouseEnabled(x=True, y=True)
-        # pyqtgraph 自带的「A」自适应钮（英文语境的 autoscaling）由工具条
-        # 「自适应」与右键菜单「回到全览」取代，这里直接隐藏避免两套入口
+        # pyqtgraph 自带的「A」自适应钮（英文语境的 autoscaling）由右键
+        # 菜单「回到全览」取代，这里直接隐藏避免两套入口
         self._plot.hideButtons()
         # 关闭 pyqtgraph 原生英文右键菜单（右拖框选缩放随之失效，
         # 缩放操作由自定义 RoundMenu 提供）
@@ -366,64 +366,25 @@ class BScanView(GraphicsViewBase, QWidget):
         self._readout_timer.timeout.connect(self._flush_crosshair_readout)
         self._pending_readout = None   # (trace, sample, amplitude)
 
-    def _init_toolbar_and_layout(self) -> None:
-        """工具条 + 图形区上下叠放（工具条在上，不占画布左侧空间）。"""
+    def _init_layout(self) -> None:
+        """图形区占满整控件（工具条已退役，能力分流右键菜单/悬浮钮）。
+
+        2026-09-23 评审：工具条 4 钮与右键菜单缩放组完全重复，每视图
+        常驻吃一行 ~40px（dual/quad/free 多画布时成倍）——缩放走右键
+        与滚轮，「铺满」并入右键菜单；全屏高频，保留为图内左上角悬浮
+        钮（与左下读数浮层对称，不与居中图内标题、右侧色标冲突）。
+        """
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        self._toolbar = QWidget(self)
-        self._toolbar.setObjectName('bscanToolbar')
-        self._toolbar.setLayout(self._build_toolbar())
-        layout.addWidget(self._toolbar)
         layout.addWidget(self._glw, 1)
-
-    def _build_toolbar(self) -> QHBoxLayout:
-        """精简工具条（用户评审：轴单位/比例属低频操作，不占常驻空间）。
-
-        只保留高频操作：缩放 + 铺满/全屏。轴单位（道/距离、采样/海拔）在
-        设置页与右键菜单，比例策略（自适应/方形/1:1）同样在右键菜单与
-        设置页——能力不丢，只是不常驻。
-        """
-        layout = QHBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 4)
-        layout.setSpacing(4)
-
-        self._add_zoom_group(layout)
-        layout.addSpacing(8)
-        self._add_viewport_group(layout)
-
-        layout.addStretch(1)
-        return layout
-
-    def _add_zoom_group(self, layout: QHBoxLayout) -> None:
-        """缩放组：缩小 / 放大（图标钮）。"""
-        self._zoom_in_btn = ToolButton(FIF.ZOOM_IN, self)
-        self._zoom_in_btn.setToolTip('放大')
-        self._zoom_in_btn.setFixedSize(*constants.TOOL_BTN_COMPACT)
-        self._zoom_in_btn.clicked.connect(self.zoom_in)
-        layout.addWidget(self._zoom_in_btn)
-
-        self._zoom_out_btn = ToolButton(FIF.ZOOM_OUT, self)
-        self._zoom_out_btn.setToolTip('缩小')
-        self._zoom_out_btn.setFixedSize(*constants.TOOL_BTN_COMPACT)
-        self._zoom_out_btn.clicked.connect(self.zoom_out)
-        layout.addWidget(self._zoom_out_btn)
-
-    def _add_viewport_group(self, layout: QHBoxLayout) -> None:
-        """画布范围组：铺满（宿主页面折叠侧栏）/ 全屏（独立窗口展开）。"""
-        self._expand_btn = ToolButton(FIF.VIEW, self)
-        self._expand_btn.setToolTip('铺满：收起所在页面的侧栏，把画布放到最大')
-        self._expand_btn.setFixedSize(*constants.TOOL_BTN_COMPACT)
-        self._expand_btn.clicked.connect(self.request_expand)
-        self._expand_btn.setVisible(False)   # 未接管到宿主页前不露脸
-        layout.addWidget(self._expand_btn)
 
         self._fullscreen_btn = ToolButton(FIF.FULL_SCREEN, self)
         self._fullscreen_btn.setToolTip('全屏：在独立窗口中展开（Esc 退出）')
         self._fullscreen_btn.setFixedSize(*constants.TOOL_BTN_COMPACT)
         self._fullscreen_btn.clicked.connect(self.toggle_fullscreen)
-        layout.addWidget(self._fullscreen_btn)
-
-        self._toolbar_buttons = (self._zoom_in_btn, self._zoom_out_btn)
+        self._fullscreen_btn.move(6, 6)
+        self._fullscreen_btn.raise_()
+        self._fullscreen_btn.show()
 
     # ------------------------------------------------------------------ 轴单位
     def x_axis_mode(self) -> str:
@@ -542,7 +503,7 @@ class BScanView(GraphicsViewBase, QWidget):
 
     # ------------------------------------------------------------------ 缩放 / 导出
     def _export_grab_target(self):
-        """PNG 导出/复制抓取目标：图形画布（不含工具条）。"""
+        """PNG 导出/复制抓取目标：图形画布（不含悬浮钮与读数浮层）。"""
         return self._glw
 
     def _fit_view(self) -> None:
@@ -831,9 +792,8 @@ class BScanView(GraphicsViewBase, QWidget):
 
     # ------------------------------------------------------------------ 视图范围
     def set_expand_enabled(self, enabled: bool) -> None:
-        """由宿主页决定是否露出「铺满」钮（页面能折叠侧栏才有意义）。"""
+        """由宿主页决定右键是否露「铺满窗口」（页面能折叠侧栏才有意义）。"""
         self._expand_enabled = bool(enabled)
-        self._expand_btn.setVisible(self._expand_enabled)
 
     def set_geometry_store(self, loader=None, saver=None) -> None:
         """注入全屏窗口几何的读写回调（view 自己不碰文件/设置）。
@@ -923,13 +883,20 @@ class BScanView(GraphicsViewBase, QWidget):
         menu.exec(event.screenPos().toPoint())
 
     def _add_menu_zoom(self, menu) -> None:
-        """缩放与视野组：缩放 / 回到全览 / 比例 / 全屏。"""
+        """缩放与视野组：缩放 / 回到全览 / 比例 / 全屏 / 铺满。
+
+        「铺满」（收起页面侧栏）只在宿主页接管后出现——原工具条按钮
+        退役后，这里是除快捷语义外的唯一入口。
+        """
         add_action(menu, FIF.ZOOM_IN, '放大', self.zoom_in)
         add_action(menu, FIF.ZOOM_OUT, '缩小', self.zoom_out)
         add_action(menu, FIF.FIT_PAGE, '回到全览（铺满窗口）', self.fit_to_data)
         add_action(menu, None, '方形显示', self.fit_square)
         add_action(menu, None, '1:1（数据格等比）', self.reset_1to1)
         add_action(menu, FIF.FULL_SCREEN, '全屏浏览', self.enter_fullscreen)
+        if self._expand_enabled:
+            add_action(menu, FIF.VIEW, '铺满（收起页面侧栏）',
+                       self.request_expand)
 
     def _add_menu_axes(self, menu) -> None:
         """轴单位组：工具条精简后这里是切换主入口（另一处是设置页）。"""
@@ -1389,10 +1356,10 @@ class BScanView(GraphicsViewBase, QWidget):
         self._empty_overlay.setVisible(True)
 
     def apply_theme(self, dark: bool) -> None:
-        """深色 bg 'k'/文字 'w'；浅色 bg 'w'/文字 'k'；轴/色标/工具条/十字光标同步。
+        """深色 bg 'k'/文字 'w'；浅色 bg 'w'/文字 'k'；轴/色标/悬浮钮/十字光标同步。
 
         轴 pen/textPen/标签/标题走 pg_view_base.style_plot_item 统一循环；
-        工具条按钮等控件配色走 control_palette 单源。
+        悬浮钮等控件配色走 control_palette 单源。
         """
         self._dark = bool(dark)
         palette = control_palette(dark)
@@ -1410,11 +1377,9 @@ class BScanView(GraphicsViewBase, QWidget):
         self._hline.setPen(crosshair_pen)
 
     def _refresh_control_palette(self, dark: bool) -> None:
-        """工具条按钮配色（control_palette 单源，主题切换时重刷）。"""
+        """悬浮钮配色（control_palette 单源，主题切换时重刷）。"""
         palette = control_palette(dark)
-        self._toolbar.setStyleSheet(
-            f'QWidget#bscanToolbar {{ background-color: {palette["surface"]}; }}')
-        # 工具条按钮：紧凑尺寸保留，颜色随主题（硬编码浅色会在深色下突兀）
+        # 悬浮钮：紧凑尺寸保留，颜色随主题（硬编码浅色会在深色下突兀）
         btn_qss = (
             f'PushButton {{ background-color: {palette["button_bg"]}; '
             f'color: {palette["button_text"]}; '
@@ -1423,5 +1388,4 @@ class BScanView(GraphicsViewBase, QWidget):
             f'font-size: {constants.FONT_SIZE_SECONDARY}pt; }}'
             f'PushButton:hover {{ background-color: {palette["hover"]}; }}'
         )
-        for btn in getattr(self, '_toolbar_buttons', ()):
-            btn.setStyleSheet(btn_qss)
+        self._fullscreen_btn.setStyleSheet(btn_qss)

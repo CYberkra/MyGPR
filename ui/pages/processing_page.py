@@ -24,6 +24,8 @@
 "应用到选中步骤"按钮 → 表单值写回选中步骤。
 """
 
+from datetime import datetime
+
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (QHBoxLayout, QVBoxLayout, QWidget)
@@ -33,7 +35,6 @@ from qfluentwidgets import (
 )
 from qfluentwidgets import FluentIcon as FIF
 
-from ui.desktop_backend_facade import compute_display_levels
 from ui import constants
 from ui.motion import animate_progress
 from ui.page_scaffold import (PanelStateMixin, make_card, make_form_row,
@@ -47,6 +48,21 @@ from ui.widgets.bscan_container import LAYOUT_AUTO, LAYOUT_SINGLE
 # 预览分段（SlimSegment routeKey）
 _SEG_ORIGINAL = 'originalData'
 _SEG_RESULT = 'processResult'
+
+
+def _short_timestamp(raw: str) -> str:
+    """'2026-09-22T14:36:50' → '09-22 14:36'；空串/解析失败回落原文。
+
+    成果下拉宽度有限，ISO 全时间戳必然截断（截断的时间不可读），
+    短格式保住「同测线多次处理」的区分信息。
+    """
+    text = str(raw or '').strip()
+    if not text:
+        return ''
+    try:
+        return datetime.fromisoformat(text).strftime('%m-%d %H:%M')
+    except ValueError:
+        return text
 
 
 class ProcessingPage(PanelStateMixin, QWidget):
@@ -135,19 +151,16 @@ class ProcessingPage(PanelStateMixin, QWidget):
 
         sel_row = QHBoxLayout()
         sel_row.setSpacing(constants.CARD_SPACING)
-        line_label = CaptionLabel('当前测线:', preview_card)
-        sel_row.addWidget(line_label)
+        # 无前置标签：下拉内容自明（测线短号 / 「处理结果_」前缀成果名），
+        # tooltip 承担语义说明；stretch 因子按文本长度分配。
         self._line_combo = ComboBox(preview_card)
         self._line_combo.setMinimumWidth(130)
-        self._line_combo.setToolTip('在处理页直接切换当前测线')
+        self._line_combo.setToolTip('当前测线：在处理页直接切换')
         sel_row.addWidget(self._line_combo, 1)
-
-        art_label = CaptionLabel('成果:', preview_card)
-        sel_row.addWidget(art_label)
         self._artifact_combo = ComboBox(preview_card)
         self._artifact_combo.setMinimumWidth(150)
         self._artifact_combo.setToolTip('选择该测线历次处理结果进行预览')
-        sel_row.addWidget(self._artifact_combo, 1)
+        sel_row.addWidget(self._artifact_combo, 2)
         preview_layout.addLayout(sel_row)
 
         self._bscan_container = BScanContainer(preview_card)
@@ -171,7 +184,9 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._p_low_spin.setRange(0.0, 100.0)
         self._p_low_spin.setDecimals(1)
         self._p_low_spin.setSingleStep(0.5)
-        self._p_low_spin.setValue(0.0)
+        # GPR 幅值长尾分布：0–100% 全动态范围会让直达波吃掉色阶、弱层理
+        # 全白——默认 2/98 百分位裁剪，弱信号结构开图即可见。
+        self._p_low_spin.setValue(2.0)
         self._p_low_spin.setPrefix('低% ')
         self._p_low_spin.setMinimumWidth(76)
         self._p_low_spin.setToolTip('色阶下限百分位')
@@ -180,14 +195,11 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._p_high_spin.setRange(0.0, 100.0)
         self._p_high_spin.setDecimals(1)
         self._p_high_spin.setSingleStep(0.5)
-        self._p_high_spin.setValue(100.0)
+        self._p_high_spin.setValue(98.0)
         self._p_high_spin.setPrefix('高% ')
         self._p_high_spin.setMinimumWidth(76)
-        self._p_high_spin.setToolTip('色阶上限百分位')
+        self._p_high_spin.setToolTip('色阶上限百分位（改值即生效）')
         tool_row.addWidget(self._p_high_spin)
-        self._refresh_levels_btn = PushButton('刷新色阶', preview_card)
-        self._refresh_levels_btn.setToolTip('按当前百分位重新计算色阶')
-        tool_row.addWidget(self._refresh_levels_btn)
         preview_layout.addLayout(tool_row)
         middle_layout.addWidget(preview_card, 1)
 
@@ -291,7 +303,9 @@ class ProcessingPage(PanelStateMixin, QWidget):
         for view in self._bscan_container.all_views():
             view.sig_colormap_changed.connect(
                 self._cmap_combo.setCurrentText)
-        self._refresh_levels_btn.clicked.connect(self._refresh_levels)
+        # 色阶百分位改值即生效（B1 范式，原「刷新色阶」按钮已退役）
+        self._p_low_spin.valueChanged.connect(self._refresh_levels)
+        self._p_high_spin.valueChanged.connect(self._refresh_levels)
         self._line_combo.currentIndexChanged.connect(self._on_line_combo_changed)
         self._artifact_combo.currentIndexChanged.connect(self._on_artifact_combo_changed)
         # 布局切换：新面板是空白实例，重广播色标并重新分发 bundle
@@ -417,11 +431,21 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._set_line_combo_without_emit(str(text or ''))
 
     def set_lines(self, lines: list) -> None:
-        """测线列表 → 处理页测线选择下拉。"""
+        """测线列表 → 处理页测线选择下拉。
+
+        显示去重：name 缺失或与 line_id 相同时只显示 line_id
+        （否则出现「L01 L01」式拼接重复）。
+        """
+
+        def _line_display(line) -> str:
+            line_id = str(getattr(line, 'line_id', '') or '').strip()
+            name = str(getattr(line, 'name', '') or '').strip()
+            if not name or name == line_id:
+                return line_id
+            return f"{line_id} {name}"
+
         refill_combo(
-            self._line_combo, lines or [],
-            lambda line: f"{getattr(line, 'line_id', '') or ''} "
-                         f"{getattr(line, 'name', '') or ''}".strip(),
+            self._line_combo, lines or [], _line_display,
             lambda line: str(getattr(line, 'line_id', '') or ''),
             previous_data=self._line_combo.currentData())
 
@@ -437,8 +461,10 @@ class ProcessingPage(PanelStateMixin, QWidget):
 
         def _display(art) -> str:
             name = str(getattr(art, 'name', '') or '')
-            created = str(getattr(art, 'created_at', '') or '')
-            return f"{name}  {created}".strip() or _artifact_id(art)
+            created = _short_timestamp(
+                str(getattr(art, 'created_at', '') or ''))
+            text = f"{name} · {created}" if created else name
+            return text or _artifact_id(art)
 
         refill_combo(
             self._artifact_combo, artifacts or [],
@@ -542,13 +568,26 @@ class ProcessingPage(PanelStateMixin, QWidget):
         for view, bundle in zip(views, bundles):
             self._set_panel_data(view, bundle)
 
-    @staticmethod
-    def _set_panel_data(view: BScanView, bundle) -> None:
-        """单面板数据写入：None → 清空显示空态。"""
+    def _set_panel_data(self, view: BScanView, bundle) -> None:
+        """单面板数据写入：None → 清空空态；有数据 → 套页面百分位色阶。
+
+        色阶只经视图偏好生效（set_display_levels → 视图内部按当前矩阵
+        重算渲染）——view.set_matrix 收到的 vmin/vmax 只是默认裁切，会被
+        视图自身 _p_low/_p_high 覆盖（构造默认 2/98），页面不得自行另算
+        一套。此处同步保证页面 spin 是本页色阶的唯一状态源。
+        """
         if bundle is None:
             view.clear()
             return
         view.set_bundle(bundle)
+        self._sync_view_levels(view)
+
+    def _sync_view_levels(self, view: BScanView) -> None:
+        """页面 spin 的百分位 → 视图偏好（渲染由视图内部统一完成）。"""
+        p_low = float(self._p_low_spin.value())
+        p_high = float(self._p_high_spin.value())
+        if p_low < p_high:
+            view.set_display_levels(p_low, p_high, notify=False)
 
     def _on_layout_changed(self, _mode: str) -> None:
         """布局切换后新面板是空白实例：重广播色标并重新分发 bundle。"""
@@ -561,45 +600,21 @@ class ProcessingPage(PanelStateMixin, QWidget):
             view.set_colormap(name)
 
     def _refresh_levels(self) -> None:
-        """按 p_low/p_high 百分位重算显示色阶。
+        """spinbox 改值即生效：页面百分位写入在场视图并重算渲染。
 
-        single：只算分段选中的 bundle；dual/quad/free：0/1 号位各用各的
-        bundle 分别重算（两侧数据不同，共享色阶会压暗一侧对比）。
+        dual/quad/free 下 0/1 号位同套页面值（视图各自按自己的矩阵重算，
+        天然独立）；低≥高静默忽略——自动路径无按钮，弹窗只添乱。
         """
         p_low = float(self._p_low_spin.value())
         p_high = float(self._p_high_spin.value())
         if p_low >= p_high:
-            InfoBar.warning(title='数据预览', content='低百分比必须小于高百分比',
-                            orient=Qt.Orientation.Horizontal, isClosable=True,
-                            position=InfoBarPosition.TOP, duration=3000,
-                            parent=self)
             return
         if self._shows_both_panels():
-            targets = [
-                (self._bscan_container.view_at(0), self._original_bundle),
-                (self._bscan_container.view_at(1), self._result_bundle),
-            ]
+            views = [self._bscan_container.view_at(i) for i in (0, 1)]
         else:
-            bundle = (self._original_bundle
-                      if self._current_segment() == _SEG_ORIGINAL
-                      else self._result_bundle)
-            targets = [(self._bscan_container.primary_view(), bundle)]
-        targets = [(view, bundle) for view, bundle in targets
-                   if bundle is not None]
-        if not targets:
-            InfoBar.info(title='数据预览', content='当前没有可刷新的预览数据',
-                         orient=Qt.Orientation.Horizontal, isClosable=True,
-                         position=InfoBarPosition.TOP, duration=2000,
-                         parent=self)
-            return
-        for view, bundle in targets:
-            vmin, vmax = compute_display_levels(bundle.matrix, p_low=p_low,
-                                                p_high=p_high)
-            view.set_matrix(
-                bundle.matrix, vmin, vmax,
-                title=getattr(bundle, 'title', ''),
-                x_label=getattr(bundle, 'x_label', '道数'),
-                y_label=getattr(bundle, 'y_label', '采样点'))
+            views = [self._bscan_container.primary_view()]
+        for view in views:
+            view.set_display_levels(p_low, p_high, notify=False)
 
     # ---------------- 方法库
     def _on_method_selected(self, method_id: str) -> None:
