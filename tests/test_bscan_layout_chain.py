@@ -119,10 +119,11 @@ def test_free_layout_full_chain(qapp):
         assert _read_disk(store).get('bscan_aspect_mode') == 'cell'
         assert settings_page._bscan_aspect_combo.currentData() == 'cell'
 
-        # 5. 色标广播到 free 两窗
-        proc._cmap_combo.setCurrentText('gray')
+        # 5. 设置页改色标映射 → 全量下发 + 写盘（页面色标 ComboBox 已退役）
+        settings_page._bscan_cmap_combo.setCurrentText('gray')
         _settle(qapp)
         assert all(v._cmap_name == 'gray' for v in free_views)
+        assert _read_disk(store).get('bscan_colormap') == 'gray'
 
         # 6. 关窗跨会话
         window.close()
@@ -148,6 +149,8 @@ def test_free_layout_full_chain(qapp):
         assert container2.effective_mode() == 'free'
         assert len(views2) == 2
         assert all(v.aspect_mode() == 'cell' for v in views2)
+        # 色标映射也真恢复（处理页工具行退役后唯一状态源是设置）
+        assert all(v._cmap_name == 'gray' for v in views2)
     finally:
         try:
             window2.close()

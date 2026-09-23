@@ -256,8 +256,9 @@ class MyGPRMainWindow(FluentWindow):
     def _wire_bscan_preferences(self, page) -> None:
         """把页面内所有 BScanView 的显示偏好接到持久化设置（跨会话记住）。
 
-        覆盖：比例模式 / 横纵轴单位 / 色阶百分位 / 色标显隐 / 全屏窗口几何。
-        恢复阶段一律 ``notify=False``，否则形成「读设置 → 写设置」回环。
+        覆盖：比例模式 / 横纵轴单位 / 色标映射 / 色阶百分位 / 色标显隐 /
+        全屏窗口几何。恢复阶段一律 ``notify=False``，否则形成「读设置 →
+        写设置」回环。
         """
         views = page.findChildren(BScanView)
         if not views:
@@ -267,9 +268,13 @@ class MyGPRMainWindow(FluentWindow):
         y_axis = self._setting_choice('bscan_y_axis', ('sample', 'elevation'), 'sample')
         p_low, p_high = self._setting_levels()
         colorbar_visible = self._setting_flag('bscan_colorbar_visible', True)
+        cmap = self._setting_choice('bscan_colormap',
+                                    tuple(constants.COLORMAPS),
+                                    constants.DEFAULT_COLORMAP)
         for view in views:
             view.set_aspect_mode(aspect, notify=False)
             view.set_axis_modes(x_axis, y_axis, notify=False)
+            view.set_colormap(cmap)
             view.set_display_levels(p_low, p_high, notify=False)
             view.set_colorbar_visible(colorbar_visible, notify=False)
             view.set_geometry_store(loader=self._load_fullscreen_geometry,
@@ -311,6 +316,8 @@ class MyGPRMainWindow(FluentWindow):
             lambda mode: self._mirror_bscan_setting('bscan_x_axis', str(mode)))
         view.sig_y_axis_changed.connect(
             lambda mode: self._mirror_bscan_setting('bscan_y_axis', str(mode)))
+        view.sig_colormap_changed.connect(
+            lambda name: self._mirror_bscan_setting('bscan_colormap', str(name)))
         view.sig_levels_changed.connect(
             lambda low, high: self._mirror_bscan_levels(low, high))
         view.sig_colorbar_visible_changed.connect(
@@ -388,6 +395,8 @@ class MyGPRMainWindow(FluentWindow):
             view.set_aspect_mode(values['bscan_aspect_mode'], notify=False)
             view.set_axis_modes(values['bscan_x_axis'], values['bscan_y_axis'],
                                 notify=False)
+            view.set_colormap(str(values.get(
+                'bscan_colormap', constants.DEFAULT_COLORMAP)))
             view.set_display_levels(values['bscan_p_low'],
                                     values['bscan_p_high'], notify=False)
             view.set_colorbar_visible(

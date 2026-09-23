@@ -191,7 +191,7 @@ class BScanView(GraphicsViewBase, QWidget):
     信号:
         sig_point_picked(int, int): pick 模式下鼠标点击发射 (trace_index, sample_index)，
             统一为原始数据坐标（预览降采样时已换算）。
-        sig_colormap_changed(str): 右键菜单切换色标时发射（页面同步 ComboBox 用）。
+        sig_colormap_changed(str): 右键菜单切换色标时发射（宿主写回设置用）。
     """
 
     sig_point_picked = pyqtSignal(int, int)

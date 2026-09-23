@@ -41,6 +41,8 @@ DEFAULT_SETTINGS = {
     'bscan_p_high': 98.0,
     # B-Scan 右侧色标条显隐（隐藏后其宽度归还画布；右键菜单也可切）
     'bscan_colorbar_visible': True,
+    # B-Scan 色标映射（设置页统一选；单视图微调走 B-Scan 右键色标子菜单）
+    'bscan_colormap': 'seismic',
     # B-Scan 全屏独立窗口几何（Qt saveGeometry 的 base64），空串=未存过
     'bscan_fullscreen_geometry': '',
     'spatial_basemap_source': 'gaode_img',               # 空间页底图源（与 map_tiles.DEFAULT_TILE_SOURCE 一致）

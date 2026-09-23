@@ -303,12 +303,12 @@ def _reset_page(page) -> None:
     page._result_bundle = None
     page._auto_sticky_dual = False    # 粘性属于宿主页，必须一并重置
     page._preview_segment.setCurrentItem(_LSEG_ORIGINAL)
-    # 色阶百分位归位（blockSignals 防触发刷新——此时无 bundle 无所谓，
-    # 但保持「重置不发副作用」的语义）
-    for spin, value in ((page._p_low_spin, 2.0), (page._p_high_spin, 98.0)):
-        spin.blockSignals(True)
-        spin.setValue(value)
-        spin.blockSignals(False)
+    # 视图级显示偏好归位（module 级 page fixture 跨测试残留；覆盖全部
+    # 布局页的面板。set_colormap/set_display_levels 均不发信号）
+    for view in c.all_views():
+        view.set_colormap('seismic')
+        view.set_display_levels(2.0, 98.0, notify=False)
+        view.set_colorbar_visible(True, notify=False)
 
 
 @pytest.fixture(scope="module")
@@ -404,53 +404,40 @@ class TestProcessingPageDistribution:
         page._on_layout_changed(LAYOUT_SINGLE)
         assert container.primary_view()._matrix.max() == 2.0
 
-    def test_layout_switch_broadcasts_colormap(self, page, container):
-        page._cmap_combo.setCurrentText('gray')
+    def test_layout_switch_panels_keep_own_colormap(self, page, container):
+        """布局切换不重置配色：各面板色标是自己的偏好（启动期统一恢复），
+        页面不再持有 ComboBox 做广播。"""
+        container.set_layout_mode(LAYOUT_DUAL, notify=False)
+        container.view_at(0).set_colormap('gray')
+        container.set_layout_mode(LAYOUT_SINGLE, notify=False)
         container.set_layout_mode(LAYOUT_DUAL, notify=False)
         page._on_layout_changed(LAYOUT_DUAL)
-        assert all(v._cmap_name == 'gray' for v in container.views())
+        assert container.view_at(0)._cmap_name == 'gray'    # 自己的偏好还在
+        assert container.view_at(1)._cmap_name == 'seismic'  # 兄弟不被带偏
 
-    def test_colormap_broadcast_all_panels(self, page, container):
+    def test_panel_colormap_change_is_per_view(self, page, container):
+        """右键改色标只影响当前视图（aspect/axis 同款语义，不广播兄弟）。"""
         container.set_layout_mode(LAYOUT_DUAL, notify=False)
-        page._cmap_combo.setCurrentText('gray')
-        assert all(v._cmap_name == 'gray' for v in container.views())
+        container.view_at(0).set_colormap('viridis')
+        assert container.view_at(0)._cmap_name == 'viridis'
+        assert container.view_at(1)._cmap_name == 'seismic'
 
-    def test_panel_colormap_change_syncs_combo(self, page, container):
-        """面板右键改色标 → ComboBox 跟随（反向同步不回环）。"""
-        container.view_at(0).sig_colormap_changed.emit('seismic')
-        assert page._cmap_combo.currentText() == 'seismic'
+    def test_levels_row_removed_from_page(self, page):
+        """色阶工具行已收容进设置页：页面不再持有任何色标/色阶状态源。"""
+        for attr in ('_cmap_combo', '_p_low_spin', '_p_high_spin',
+                     '_apply_colormap', '_refresh_levels',
+                     '_sync_view_levels'):
+            assert not hasattr(page, attr), f'{attr} 应已退役'
 
-    def test_refresh_levels_both_sides(self, page, container):
-        """dual 下改百分位即生效（无按钮）：两侧视图偏好同步更新。"""
-        container.set_layout_mode(LAYOUT_DUAL, notify=False)
-        page.set_original_bundle(_bundle(1))
-        page.set_result_bundle(_bundle(2))
-        page._p_low_spin.setValue(5.0)
-        page._p_high_spin.setValue(95.0)
-        assert container.view_at(0)._p_low == pytest.approx(5.0)
-        assert container.view_at(1)._p_high == pytest.approx(95.0)
-
-    def test_refresh_levels_invalid_range_is_silent_noop(self, page, container):
-        """低≥高自动路径静默忽略（无按钮，弹窗只添乱），视图偏好不动。"""
-        page.set_original_bundle(_bundle(1))
-        page._p_low_spin.setValue(5.0)     # 5 < 98 正常生效
-        view = container.primary_view()
-        before = view._p_low
-        page._p_high_spin.setValue(4.0)    # 5 >= 4 → 静默忽略
-        assert view._p_low == pytest.approx(before)
-
-    def test_new_bundle_applies_page_percentile(self, page, container):
-        """新数据到达自动套页面百分位（默认 2/98），无需手动刷新。"""
-        for spin, value in ((page._p_low_spin, 2.0),
-                            (page._p_high_spin, 98.0)):
-            spin.setValue(value)           # module 级 page，spin 值先归位
+    def test_new_bundle_keeps_view_level_preference(self, page, container):
+        """新数据到达不重置视图色阶偏好：_p_low/_p_high 是视图自己的状态，
+        set_matrix 的 vmin/vmax 只是默认裁切。"""
         page.set_original_bundle(_bundle(1))
         view = container.primary_view()
-        assert view._p_low == pytest.approx(2.0)
-        assert view._p_high == pytest.approx(98.0)
-        page._p_low_spin.setValue(10.0)
-        page.set_original_bundle(_bundle(3))   # 换数据再次到达仍跟随页面值
-        assert view._p_low == pytest.approx(10.0)
+        view.set_display_levels(5.0, 95.0, notify=False)
+        page.set_original_bundle(_bundle(3))   # 换数据再次到达仍保留偏好
+        assert view._p_low == pytest.approx(5.0)
+        assert view._p_high == pytest.approx(95.0)
 
     def test_line_display_dedup(self, page):
         """测线下拉去重：name 缺失或与 line_id 相同时只显示 line_id。"""
@@ -542,12 +529,13 @@ class TestAutoLayoutFollowsData:
         page.set_result_bundle(_bundle(2))
         assert container.effective_mode() == LAYOUT_DUAL
 
-    def test_new_dual_panel_gets_colormap(self, page, container):
-        """长出第二面板时色标同步跟上（新面板不是空白配色）。"""
+    def test_auto_grow_panels_keep_defaults(self, page, container):
+        """auto 长出第二面板：页面不再干预配色（uniform 默认来自启动期
+        主窗统一恢复，真实链路见 test_bscan_layout_chain）。"""
         page.set_original_bundle(_bundle(1))
-        page._cmap_combo.setCurrentText('gray')
         page.set_result_bundle(_bundle(2))
-        assert all(v._cmap_name == 'gray' for v in container.views())
+        assert container.effective_mode() == LAYOUT_DUAL
+        assert all(v._cmap_name == 'seismic' for v in container.views())
 
     def test_manual_layout_overrides_auto(self, page, container):
         """手动固定 dual 后，只有一份 bundle 也保持两框（另一框空态）。"""

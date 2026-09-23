@@ -119,11 +119,12 @@ class SettingsPage(ScrollArea):
         return card
 
     def _build_bscan_card(self, parent):
-        """卡片2"B-Scan 视图"：比例 / 横纵轴单位 / 色阶 / 色标显隐（即时生效并跨会话记住）。
+        """卡片2"B-Scan 视图"：比例 / 横纵轴单位 / 色标映射 / 色阶 / 色标显隐
+        （即时生效并跨会话记住）。
 
-        这几项在 BScanView 工具条与右键菜单里都能改，此处只是把「习惯」集中
-        可查；改动即时应用到本会话所有 B-Scan（发 ``bscan_view_changed``，
-        由主窗口下发），不必重启。
+        处理页的色阶工具行已收容进本卡（2026-09-23）；这几项在 BScanView
+        右键菜单里也能改，此处只是把「习惯」集中可查；改动即时应用到本会话
+        所有 B-Scan（发 ``bscan_view_changed``，由主窗口下发），不必重启。
         """
         card, layout = make_card('B-Scan 视图')
 
@@ -177,6 +178,18 @@ class SettingsPage(ScrollArea):
             self._emit_bscan_changed)
         layout.addLayout(make_form_row('预览布局:', self._bscan_layout_combo,
                                        parent=card))
+
+        self._bscan_cmap_combo = ComboBox(card)
+        self._bscan_cmap_combo.addItems(constants.COLORMAPS)
+        self._bscan_cmap_combo.setCurrentText(constants.DEFAULT_COLORMAP)
+        self._bscan_cmap_combo.setMinimumWidth(180)
+        self._bscan_cmap_combo.setToolTip(
+            'B-Scan 剖面配色，改动即时应用到本会话所有 B-Scan；'
+            '单视图微调可在 B-Scan 上右键色标子菜单切换。')
+        self._bscan_cmap_combo.currentTextChanged.connect(
+            self._emit_bscan_changed)
+        layout.addLayout(make_form_row('色标映射:',
+                                       self._bscan_cmap_combo, parent=card))
 
         self._bscan_p_low_spin = DoubleSpinBox(card)
         self._bscan_p_high_spin = DoubleSpinBox(card)
@@ -265,6 +278,7 @@ class SettingsPage(ScrollArea):
                    self._workers_spin, self._root_edit, self._prefetch_check,
                    self._bscan_aspect_combo, self._bscan_x_axis_combo,
                    self._bscan_y_axis_combo, self._bscan_layout_combo,
+                   self._bscan_cmap_combo,
                    self._bscan_p_low_spin, self._bscan_p_high_spin,
                    self._bscan_colorbar_check)
         self._loading_settings = True
@@ -289,6 +303,11 @@ class SettingsPage(ScrollArea):
                                  data.get('bscan_y_axis'), 'sample')
             self._select_by_data(self._bscan_layout_combo,
                                  data.get('bscan_layout_mode'), 'auto')
+            cmap = str(data.get('bscan_colormap',
+                                constants.DEFAULT_COLORMAP))
+            self._bscan_cmap_combo.setCurrentText(
+                cmap if cmap in constants.COLORMAPS
+                else constants.DEFAULT_COLORMAP)
             low, high = _levels_or_default(data)
             self._bscan_p_low_spin.setValue(low)
             self._bscan_p_high_spin.setValue(high)
@@ -313,6 +332,7 @@ class SettingsPage(ScrollArea):
             'bscan_x_axis': str(self._bscan_x_axis_combo.currentData()),
             'bscan_y_axis': str(self._bscan_y_axis_combo.currentData()),
             'bscan_layout_mode': str(self._bscan_layout_combo.currentData()),
+            'bscan_colormap': str(self._bscan_cmap_combo.currentText()),
             'bscan_p_low': float(self._bscan_p_low_spin.value()),
             'bscan_p_high': float(self._bscan_p_high_spin.value()),
             'bscan_colorbar_visible': bool(
@@ -334,6 +354,7 @@ class SettingsPage(ScrollArea):
             (self._bscan_y_axis_combo, 'bscan_y_axis'),
             (self._bscan_layout_combo, 'bscan_layout_mode'),
         )
+        cmap_combo = ((self._bscan_cmap_combo, 'bscan_colormap'),)
         spins = (
             (self._bscan_p_low_spin, 'bscan_p_low'),
             (self._bscan_p_high_spin, 'bscan_p_high'),
@@ -342,6 +363,7 @@ class SettingsPage(ScrollArea):
             (self._bscan_colorbar_check, 'bscan_colorbar_visible'),
         )
         touched = [w for w, key in combos if key in values]
+        touched += [w for w, key in cmap_combo if key in values]
         touched += [w for w, key in spins if key in values]
         touched += [w for w, key in checks if key in values]
         self._loading_settings = True
@@ -352,6 +374,13 @@ class SettingsPage(ScrollArea):
                 if key in values:
                     current = str(combo.currentData())
                     self._select_by_data(combo, values[key], current)
+            for combo, key in cmap_combo:
+                if key in values:
+                    text = str(values[key])
+                    # 坏值回落默认配色（下拉不能空白，同 _select_by_data 精神）
+                    combo.setCurrentText(
+                        text if text in constants.COLORMAPS
+                        else constants.DEFAULT_COLORMAP)
             for spin, key in spins:
                 if key in values:
                     try:

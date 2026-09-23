@@ -30,7 +30,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (QHBoxLayout, QVBoxLayout, QWidget)
 from qfluentwidgets import (
-    CaptionLabel, ComboBox, DoubleSpinBox, InfoBar,
+    CaptionLabel, ComboBox, InfoBar,
     InfoBarPosition, LineEdit, PrimaryPushButton, ProgressBar, PushButton,
 )
 from qfluentwidgets import FluentIcon as FIF
@@ -167,40 +167,9 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._bscan_container.setMinimumHeight(constants.PREVIEW_MIN_HEIGHT)
         preview_layout.addWidget(self._bscan_container, 1)
 
-        # 色阶工具行：控件用前缀代替独立标签、收窄最小宽，保证窄屏
-        # （左右栏均展开）时整行不被裁切。
-        tool_row = QHBoxLayout()
-        tool_row.setSpacing(constants.CARD_SPACING)
-        cmap_label = CaptionLabel('色阶:', preview_card)
-        tool_row.addWidget(cmap_label)
-        self._cmap_combo = ComboBox(preview_card)
-        self._cmap_combo.addItems(constants.COLORMAPS)
-        self._cmap_combo.setCurrentText(constants.DEFAULT_COLORMAP)
-        self._cmap_combo.setMinimumWidth(90)
-        self._cmap_combo.setToolTip('选择 B-scan 色标')
-        tool_row.addWidget(self._cmap_combo)
-        tool_row.addStretch(1)
-        self._p_low_spin = DoubleSpinBox(preview_card)
-        self._p_low_spin.setRange(0.0, 100.0)
-        self._p_low_spin.setDecimals(1)
-        self._p_low_spin.setSingleStep(0.5)
-        # GPR 幅值长尾分布：0–100% 全动态范围会让直达波吃掉色阶、弱层理
-        # 全白——默认 2/98 百分位裁剪，弱信号结构开图即可见。
-        self._p_low_spin.setValue(2.0)
-        self._p_low_spin.setPrefix('低% ')
-        self._p_low_spin.setMinimumWidth(76)
-        self._p_low_spin.setToolTip('色阶下限百分位')
-        tool_row.addWidget(self._p_low_spin)
-        self._p_high_spin = DoubleSpinBox(preview_card)
-        self._p_high_spin.setRange(0.0, 100.0)
-        self._p_high_spin.setDecimals(1)
-        self._p_high_spin.setSingleStep(0.5)
-        self._p_high_spin.setValue(98.0)
-        self._p_high_spin.setPrefix('高% ')
-        self._p_high_spin.setMinimumWidth(76)
-        self._p_high_spin.setToolTip('色阶上限百分位（改值即生效）')
-        tool_row.addWidget(self._p_high_spin)
-        preview_layout.addLayout(tool_row)
+        # 色阶工具行已退役（2026-09-23）：色标映射与色阶百分位收容进设置页
+        # 「B-Scan 视图」卡（改值全量下发并持久化），单视图微调走 B-Scan
+        # 右键菜单（色标子菜单 / 色阶设置…）——页面不再持有第二份状态源。
         middle_layout.addWidget(preview_card, 1)
 
         # 进度条 + 进度消息（初始隐藏）
@@ -297,15 +266,8 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._param_form.sig_changed.connect(self._auto_write_params_to_selected)
 
         # 预览
-        # 色标：ComboBox → 广播到容器全部面板；任一面板右键改色标 →
-        # ComboBox 跟随（set_colormap 不发 sig_colormap_changed，无回环）。
-        self._cmap_combo.currentTextChanged.connect(self._apply_colormap)
-        for view in self._bscan_container.all_views():
-            view.sig_colormap_changed.connect(
-                self._cmap_combo.setCurrentText)
-        # 色阶百分位改值即生效（B1 范式，原「刷新色阶」按钮已退役）
-        self._p_low_spin.valueChanged.connect(self._refresh_levels)
-        self._p_high_spin.valueChanged.connect(self._refresh_levels)
+        # 色标/色阶控件已收容进设置页（B-Scan 视图卡）与右键菜单；页面
+        # 不再持有副本，视图偏好由主窗启动期统一恢复、用户操作镜像写回。
         self._line_combo.currentIndexChanged.connect(self._on_line_combo_changed)
         self._artifact_combo.currentIndexChanged.connect(self._on_artifact_combo_changed)
         # 布局切换：新面板是空白实例，重广播色标并重新分发 bundle
@@ -532,9 +494,9 @@ class ProcessingPage(PanelStateMixin, QWidget):
 
         旧版按 bundle 数量实时解析：成果清空即缩回、自动预览到达再长出，
         一次换测线布局抖动两次，观察被打断——已废弃。
-        实体模式（手动固定）下是空操作。解析换了页后新面板是空白实例，
-        先重广播色标；bundle 分发由调用方随后的 _show_bundle/
-        _distribute_bundles 完成。
+        实体模式（手动固定）下是空操作。解析换了页后 bundle 分发由调用方
+        随后的 _show_bundle/_distribute_bundles 完成（各面板显示偏好由
+        主窗启动期统一恢复，页面无需重广播）。
         """
         if self._bscan_container.layout_mode() != LAYOUT_AUTO:
             return
@@ -542,9 +504,7 @@ class ProcessingPage(PanelStateMixin, QWidget):
             self._auto_sticky_dual = False
         elif self._result_bundle is not None:
             self._auto_sticky_dual = True
-        if self._bscan_container.resolve_auto(
-                2 if self._auto_sticky_dual else 1):
-            self._apply_colormap(self._cmap_combo.currentText())
+        self._bscan_container.resolve_auto(2 if self._auto_sticky_dual else 1)
 
     def _show_bundle(self, which: str) -> None:
         """分段切换 / bundle 到达的统一入口（按布局分发）。"""
@@ -569,52 +529,21 @@ class ProcessingPage(PanelStateMixin, QWidget):
             self._set_panel_data(view, bundle)
 
     def _set_panel_data(self, view: BScanView, bundle) -> None:
-        """单面板数据写入：None → 清空空态；有数据 → 套页面百分位色阶。
+        """单面板数据写入：None → 清空空态；有数据 → 交给视图偏好。
 
-        色阶只经视图偏好生效（set_display_levels → 视图内部按当前矩阵
-        重算渲染）——view.set_matrix 收到的 vmin/vmax 只是默认裁切，会被
-        视图自身 _p_low/_p_high 覆盖（构造默认 2/98），页面不得自行另算
-        一套。此处同步保证页面 spin 是本页色阶的唯一状态源。
+        色阶只由视图偏好决定（构造默认 2/98，启动期主窗从设置恢复）：
+        view.set_matrix 收到的 vmin/vmax 只是默认裁切，会被视图自身
+        _p_low/_p_high 覆盖——页面不再另持一份色阶状态源。
         """
         if bundle is None:
             view.clear()
             return
         view.set_bundle(bundle)
-        self._sync_view_levels(view)
-
-    def _sync_view_levels(self, view: BScanView) -> None:
-        """页面 spin 的百分位 → 视图偏好（渲染由视图内部统一完成）。"""
-        p_low = float(self._p_low_spin.value())
-        p_high = float(self._p_high_spin.value())
-        if p_low < p_high:
-            view.set_display_levels(p_low, p_high, notify=False)
 
     def _on_layout_changed(self, _mode: str) -> None:
-        """布局切换后新面板是空白实例：重广播色标并重新分发 bundle。"""
-        self._apply_colormap(self._cmap_combo.currentText())
+        """布局切换：重新分发 bundle（各面板显示偏好启动期已统一恢复、
+        后续由设置页/右键各自维护，页面无需重广播）。"""
         self._show_bundle(self._current_segment())
-
-    def _apply_colormap(self, name: str) -> None:
-        """色标广播到容器当前布局下的全部面板。"""
-        for view in self._bscan_container.views():
-            view.set_colormap(name)
-
-    def _refresh_levels(self) -> None:
-        """spinbox 改值即生效：页面百分位写入在场视图并重算渲染。
-
-        dual/quad/free 下 0/1 号位同套页面值（视图各自按自己的矩阵重算，
-        天然独立）；低≥高静默忽略——自动路径无按钮，弹窗只添乱。
-        """
-        p_low = float(self._p_low_spin.value())
-        p_high = float(self._p_high_spin.value())
-        if p_low >= p_high:
-            return
-        if self._shows_both_panels():
-            views = [self._bscan_container.view_at(i) for i in (0, 1)]
-        else:
-            views = [self._bscan_container.primary_view()]
-        for view in views:
-            view.set_display_levels(p_low, p_high, notify=False)
 
     # ---------------- 方法库
     def _on_method_selected(self, method_id: str) -> None:

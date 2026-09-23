@@ -117,6 +117,14 @@ class TestSettingsPageMirror:
         page.sync_bscan_view_settings({'bscan_colorbar_visible': True})
         assert page._bscan_colorbar_check.isChecked() is True
 
+    def test_colormap_combo_is_applied(self, page):
+        """色标映射（处理页工具行收容而来）：同步进下拉 + 坏值回落默认。"""
+        page.load_settings({'bscan_colormap': 'seismic'})
+        page.sync_bscan_view_settings({'bscan_colormap': 'gray'})
+        assert page._bscan_cmap_combo.currentText() == 'gray'
+        page.sync_bscan_view_settings({'bscan_colormap': 'not-a-cmap'})
+        assert page._bscan_cmap_combo.currentText() == 'seismic'
+
     def test_round_trip_through_settings(self, page):
         """同步后 settings() 必须原样回读出同步值——closeEvent 靠的就是它。"""
         page.load_settings(dict.fromkeys(_BSCAN_KEYS))
@@ -125,6 +133,7 @@ class TestSettingsPageMirror:
             'bscan_x_axis': 'distance',
             'bscan_y_axis': 'elevation',
             'bscan_layout_mode': 'dual',
+            'bscan_colormap': 'viridis',
             'bscan_p_low': 6.0,
             'bscan_p_high': 94.0,
             'bscan_colorbar_visible': False,
