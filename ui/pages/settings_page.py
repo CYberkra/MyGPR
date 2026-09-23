@@ -16,7 +16,7 @@ import os
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
-    BodyLabel, CheckBox, ComboBox, DoubleSpinBox,
+    BodyLabel, CheckBox, ComboBox, DoubleSpinBox, StrongBodyLabel,
     LineEdit, PushButton, ScrollArea, SpinBox,
 )
 
@@ -127,6 +127,7 @@ class SettingsPage(ScrollArea):
         所有 B-Scan（发 ``bscan_view_changed``，由主窗口下发），不必重启。
         """
         card, layout = make_card('B-Scan 视图')
+        layout.addWidget(self._section_header('坐标与布局', card))
 
         self._bscan_aspect_combo = ComboBox(card)
         for label, key in (('拉伸铺满（推荐）', 'free'),
@@ -178,6 +179,8 @@ class SettingsPage(ScrollArea):
             self._emit_bscan_changed)
         layout.addLayout(make_form_row('预览布局:', self._bscan_layout_combo,
                                        parent=card))
+
+        layout.addWidget(self._section_header('外观与增益', card))
 
         self._bscan_cmap_combo = ComboBox(card)
         self._bscan_cmap_combo.addItems(constants.COLORMAPS)
@@ -247,6 +250,13 @@ class SettingsPage(ScrollArea):
             '色阶只影响显示的明暗对比，不改动数据；B-Scan 上右键「色阶设置…」'
             '可只改单个视图。', parent=card))
         return card
+
+    @staticmethod
+    def _section_header(text: str, parent) -> StrongBodyLabel:
+        """卡内小节标题（八行控件一卡到底时给扫读锚点，纯布局不改接线）。"""
+        label = StrongBodyLabel(text, parent)
+        label.setContentsMargins(0, 8, 0, 2)
+        return label
 
     def _emit_bscan_changed(self) -> None:
         """任一 B-Scan 视图设置变化 → 通知主窗口下发到本会话所有视图。
