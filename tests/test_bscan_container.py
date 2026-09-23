@@ -429,6 +429,18 @@ class TestProcessingPageDistribution:
                      '_sync_view_levels'):
             assert not hasattr(page, attr), f'{attr} 应已退役'
 
+    def test_home_colormap_row_removed(self, qapp):
+        """主页色标行同款退役（2026-09-23 审计）：它是游离于持久化体系
+        外的第三份状态源——combo 改值不写盘、启动恢复后显示 stale。"""
+        from ui.pages.home_page import HomePage
+        home = HomePage()
+        try:
+            assert not hasattr(home, '_cmap_combo')
+            for attr in ('colormap', 'set_colormap'):
+                assert not hasattr(home, attr), f'{attr} 死访问器应已删'
+        finally:
+            home.close()
+
     def test_new_bundle_keeps_view_level_preference(self, page, container):
         """新数据到达不重置视图色阶偏好：_p_low/_p_high 是视图自己的状态，
         set_matrix 的 vmin/vmax 只是默认裁切。"""
