@@ -43,10 +43,14 @@ DEFAULT_SETTINGS = {
     'bscan_colorbar_visible': True,
     # B-Scan 色标映射（设置页统一选；单视图微调走 B-Scan 右键色标子菜单）
     'bscan_colormap': 'seismic',
-    # B-Scan 显示增益：off 关闭 / sec SEC 补偿（扩散+指数吸收，显示域不写数据）
+    # B-Scan 显示增益：off 关闭 / sec SEC 补偿（扩散+指数吸收）/ tvg TVG 补偿
+    # （幂次曲线滑条调参，显示域不写数据）
     'bscan_gain_mode': 'off',
     # SEC 衰减补偿系数（dB/采样轴单位：深度轴为 dB/m，时间轴为 dB/ns）
     'bscan_gain_alpha': 0.2,
+    # TVG 深端总增益（dB，浅端恒 0 增益）与曲线弯度幂次（1 线性，>1 集中深部）
+    'bscan_tvg_db': 24.0,
+    'bscan_tvg_power': 1.0,
     # B-Scan 全屏独立窗口几何（Qt saveGeometry 的 base64），空串=未存过
     'bscan_fullscreen_geometry': '',
     'spatial_basemap_source': 'gaode_img',               # 空间页底图源（与 map_tiles.DEFAULT_TILE_SOURCE 一致）

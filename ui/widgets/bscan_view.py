@@ -205,8 +205,10 @@ class BScanView(GraphicsViewBase, QWidget):
     sig_levels_changed = pyqtSignal(float, float)
     # 用户手动切换色标显隐时发射，供宿主写回设置
     sig_colorbar_visible_changed = pyqtSignal(bool)
-    # 用户手动切换显示增益（'off'/'sec'）时发射，供宿主写回设置
+    # 用户手动切换显示增益（'off'/'sec'/'tvg'）时发射，供宿主写回设置
     sig_gain_changed = pyqtSignal(str)
+    # TVG 参数（总增益 dB、弯度幂次）经滑条面板调整后持久化（关闭面板时发一次）
+    sig_gain_params_changed = pyqtSignal(float, float)
     # 工具条「⤢ 铺满」：本视图不认识页面布局，交给宿主页面折叠侧栏
     sig_expand_requested = pyqtSignal()
 
@@ -235,11 +237,14 @@ class BScanView(GraphicsViewBase, QWidget):
         # 色标显隐偏好：与色标对象解耦（with_colorbar=False 的视图无色标，
         # 偏好仍记录，构造处若支持可后续兑现）
         self._colorbar_visible = True
-        # 显示增益（SEC）：显示域逐行缩放（扩散∝d + 指数吸收补偿），
-        # raw 一个字节不动；增益后矩阵按 (矩阵身份, α) 缓存复用
+        # 显示增益（SEC/TVG）：显示域逐行缩放（raw 一个字节不动）；增益后
+        # 矩阵按 (矩阵身份, 模式+参数) 缓存复用。TVG 参数经滑条面板调整
         self._gain_mode = 'off'
         self._gain_alpha = 0.2
+        self._gain_db = 24.0        # TVG 深端总增益（dB）
+        self._gain_power = 1.0      # TVG 曲线弯度（幂次：1 线性，>1 集中深部）
         self._gain_cache = None
+        self._tvg_dialog = None     # 滑条面板（懒创建，随视图销毁）
         # 「⤢ 铺满」只有接到了宿主页（能折叠侧栏）才有意义，默认隐藏该钮
         self._expand_enabled = False
         # 全屏宿主（懒创建）+ 几何持久化回调（主窗口注入，避免 view 碰文件）
@@ -814,32 +819,47 @@ class BScanView(GraphicsViewBase, QWidget):
 
     # ------------------------------------------------------------------ 显示增益
     def gain_mode(self) -> str:
-        """当前显示增益模式：'off' / 'sec'。"""
+        """当前显示增益模式：'off' / 'sec' / 'tvg'。"""
         return self._gain_mode
 
     def set_gain(self, mode: str, *, alpha: float | None = None,
+                 db: float | None = None, power: float | None = None,
                  notify: bool = False) -> None:
         """切换显示增益；显示域逐行缩放，raw 一个字节不动。
 
-        :param mode: 'off' 关闭 / 'sec' SEC 补偿（扩散∝深度 + 指数吸收）。
+        :param mode: 'off' 关闭 / 'sec' SEC 补偿（扩散∝深度 + 指数吸收）/
+            'tvg' TVG 补偿（用户滑条调参的幂次曲线）。
         :param alpha: SEC 衰减补偿系数（dB/采样轴单位：深度轴为 dB/m，
             时间轴为 dB/ns）；None 保持现值。
-        :param notify: True 时发 sig_gain_changed（供宿主写回设置）；
-            恢复持久化阶段传 False。
+        :param db: TVG 深端总增益（dB，浅端恒为 0 增益）；None 保持现值。
+        :param power: TVG 曲线弯度幂次（1 线性，>1 增益集中深部）；None 保持。
+        :param notify: True 时发 sig_gain_changed（TVG 另发
+            sig_gain_params_changed 供宿主持久化参数）；恢复持久化阶段
+            传 False。
         """
         mode = str(mode)
-        if mode not in ('off', 'sec'):
+        if mode not in ('off', 'sec', 'tvg'):
             raise ValueError(f'未知增益模式: {mode!r}')
         changed = (mode != self._gain_mode
-                   or (alpha is not None and float(alpha) != self._gain_alpha))
+                   or (alpha is not None and float(alpha) != self._gain_alpha)
+                   or (db is not None and float(db) != self._gain_db)
+                   or (power is not None
+                       and float(power) != self._gain_power))
         self._gain_mode = mode
         if alpha is not None:
             self._gain_alpha = float(alpha)
+        if db is not None:
+            self._gain_db = float(db)
+        if power is not None:
+            self._gain_power = float(power)
         if changed:
             self._gain_cache = None
             self._refresh_gain_render()
         if notify:
             self.sig_gain_changed.emit(self._gain_mode)
+            if mode == 'tvg':
+                self.sig_gain_params_changed.emit(self._gain_db,
+                                                  self._gain_power)
 
     def _refresh_gain_render(self) -> None:
         """增益变了：按当前解析目标整体换图 + 重算色阶/波形。
@@ -859,23 +879,45 @@ class BScanView(GraphicsViewBase, QWidget):
         self._apply_levels_to_render()
 
     def _gain_applied(self, mat):
-        """显示域增益变换：off 原样返回（零拷贝）；sec 返回逐行缩放结果。
+        """显示域增益变换：off 原样返回（零拷贝）；sec/tvg 返回逐行缩放结果。
 
-        缓存按 (矩阵身份, α) 判重——与海拔 warp 缓存同一纪律（身份比较，
-        不用 id()）。增益关闭时必须原样返回以保持「零拷贝 + 身份不变」
-        语义（海拔 warp 缓存、回落判定都依赖它）。
+        缓存按 (矩阵身份, 模式+参数) 判重——与海拔 warp 缓存同一纪律
+        （身份比较，不用 id()）。增益关闭时必须原样返回以保持「零拷贝 +
+        身份不变」语义（海拔 warp 缓存、回落判定都依赖它）。
         """
         if mat is None or self._gain_mode == 'off':
             return mat
         cache = self._gain_cache
         if (cache is not None and cache[0] is mat
-                and cache[1] == self._gain_alpha):
-            return cache[2]
+                and cache[1] == self._gain_mode
+                and cache[2] == self._gain_alpha
+                and cache[3] == self._gain_db
+                and cache[4] == self._gain_power):
+            return cache[5]
         import numpy as np
-        gain = self._sec_row_gain(mat.shape[0])
+        if self._gain_mode == 'sec':
+            gain = self._sec_row_gain(mat.shape[0])
+        else:
+            gain = self._tvg_row_gain(mat.shape[0])
         out = np.asarray(mat) * gain[:, None]
-        self._gain_cache = (mat, self._gain_alpha, out)
+        self._gain_cache = (mat, self._gain_mode, self._gain_alpha,
+                            self._gain_db, self._gain_power, out)
         return out
+
+    def _phys_depth_axis(self, n_rows: int):
+        """物理采样轴（米/纳秒）；无轴/长度不符/含 NaN 时返回 None。
+
+        返回原数组（不拷贝），浅端归零与归一化由各增益曲线自行处理。
+        """
+        import numpy as np
+        axis = self._sample_axis
+        if axis is None:
+            return None
+        arr = np.asarray(axis, dtype=np.float64)
+        if (arr.ndim == 1 and arr.size == n_rows
+                and np.isfinite(arr).all() and n_rows >= 2):
+            return arr
+        return None
 
     def _sec_row_gain(self, n_rows: int):
         """SEC 行增益曲线（长度 n_rows，浅→深单调放大）。
@@ -887,18 +929,50 @@ class BScanView(GraphicsViewBase, QWidget):
         总增益限幅 1000×（60 dB）防深部噪声底被抬满。
         """
         import numpy as np
-        axis = self._sample_axis
-        d = None
-        if axis is not None:
-            arr = np.asarray(axis, dtype=np.float64)
-            if (arr.ndim == 1 and arr.size == n_rows
-                    and np.isfinite(arr).all()):
-                d = np.abs(arr - arr[0])     # 浅端归零（兼容升/降序轴）
-        if d is None or n_rows < 2:
+        arr = self._phys_depth_axis(n_rows)
+        if arr is not None:
+            d = np.abs(arr - arr[0])     # 浅端归零（兼容升/降序轴）
+        else:
             d = np.arange(n_rows, dtype=np.float64)
         d0 = max(float(np.ptp(d)) * 0.02, 1e-6)
         gain = ((d + d0) / d0) * np.power(10.0, self._gain_alpha * d / 20.0)
         return np.clip(gain, 1.0, 1000.0)
+
+    def _tvg_row_gain(self, n_rows: int):
+        """TVG 行增益曲线：g(u) = 10^(db·u^power / 20)，u 为归一化深度。
+
+        u∈[0,1]（浅端 0、深端 1，取物理轴，无轴退行号）；浅端恒 1×，
+        深端恰为 10^(db/20)。power=1 线性递增，>1 增益向深部集中，
+        <1 向浅部集中（滑条范围限 0.3~3.0）。限幅同 SEC（1000×）。
+        """
+        import numpy as np
+        arr = self._phys_depth_axis(n_rows)
+        if arr is not None:
+            span = float(np.ptp(arr))
+            u = (np.abs(arr - arr[0]) / span) if span > 0 else \
+                np.linspace(0.0, 1.0, n_rows)
+        else:
+            u = (np.arange(n_rows, dtype=np.float64) / max(n_rows - 1, 1))
+        power = min(max(self._gain_power, 0.1), 10.0)
+        gain = np.power(10.0, self._gain_db * np.power(u, power) / 20.0)
+        return np.clip(gain, 1.0, 1000.0)
+
+    def _on_gain_menu(self, mode: str) -> None:
+        """右键「显示增益」子菜单动作：切模式；选 TVG 时弹滑条面板。"""
+        self.set_gain(mode, notify=True)
+        if mode == 'tvg':
+            self._open_tvg_dialog()
+
+    def _open_tvg_dialog(self) -> None:
+        """打开 TVG 滑条面板（非模态，随视图销毁；重复调用只唤起）。"""
+        if self._tvg_dialog is not None:
+            self._tvg_dialog.show()
+            self._tvg_dialog.raise_()
+            self._tvg_dialog.activateWindow()
+            return
+        from ui.widgets.bscan_tvg_dialog import TvgGainDialog
+        self._tvg_dialog = TvgGainDialog(self)
+        self._tvg_dialog.show()
 
     def set_colorbar_visible(self, visible: bool, *, notify: bool = False) -> None:
         """切换右侧色标条的显示；隐藏后其宽度完整归还画布。
@@ -1107,12 +1181,13 @@ class BScanView(GraphicsViewBase, QWidget):
             mode_submenu.addAction(act)
         menu.addMenu(mode_submenu)
         gain_submenu = RoundMenu('显示增益', menu)
-        for mode, label in (('off', '关闭'), ('sec', 'SEC 补偿')):
+        for mode, label in (('off', '关闭'), ('sec', 'SEC 补偿'),
+                            ('tvg', 'TVG 补偿（滑条调参）')):
             act = Action(label)
             act.setCheckable(True)
             act.setChecked(self._gain_mode == mode)
             act.triggered.connect(
-                lambda _checked=False, m=mode: self.set_gain(m, notify=True))
+                lambda _checked=False, m=mode: self._on_gain_menu(m))
             gain_submenu.addAction(act)
         menu.addMenu(gain_submenu)
 

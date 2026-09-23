@@ -126,6 +126,57 @@ class TestSecGainOnView:
         finally:
             view.close()
 
+    def test_tvg_changes_display_keeps_raw(self, qapp):
+        view, matrix = _make_view(qapp)
+        try:
+            view.set_gain('tvg', db=36.0, power=1.0)
+            shown = np.asarray(view._image_item.image, dtype=np.float64)
+            raw = np.asarray(view._matrix, dtype=np.float64)
+            assert not np.allclose(shown, raw)
+            np.testing.assert_allclose(view._matrix, matrix)   # raw 零变异
+        finally:
+            view.close()
+
+    def test_tvg_curve_shape(self, qapp):
+        """g(0)=1、单调升、深端恰为 10^(db/20)、限幅 1000×。"""
+        view, _ = _make_view(qapp)
+        try:
+            view.set_gain('tvg', db=36.0, power=1.0)
+            gain = view._tvg_row_gain(200)
+            assert gain.shape == (200,)
+            assert gain[0] == pytest.approx(1.0)
+            assert (np.diff(gain) >= 0).all()
+            assert gain[-1] == pytest.approx(10.0 ** (36.0 / 20.0))
+            assert gain.max() <= 1000.0
+        finally:
+            view.close()
+
+    def test_tvg_power_concentrates_gain_deep(self, qapp):
+        """power>1 时同深度的中段增益应低于线性（增益向深部集中）。"""
+        view, _ = _make_view(qapp)
+        try:
+            view.set_gain('tvg', db=36.0, power=1.0)
+            linear = view._tvg_row_gain(200)
+            view.set_gain('tvg', db=36.0, power=2.0)
+            curved = view._tvg_row_gain(200)
+            assert curved[100] < linear[100]          # 中段被压低
+            assert curved[-1] == pytest.approx(linear[-1])   # 深端不变
+        finally:
+            view.close()
+
+    def test_tvg_params_notify_emits_signal(self, qapp):
+        view, _ = _make_view(qapp)
+        try:
+            got = []
+            view.sig_gain_params_changed.connect(
+                lambda db, power: got.append((float(db), float(power))))
+            view.set_gain('tvg', db=30.0, power=1.5, notify=True)
+            assert got == [(30.0, 1.5)]
+            view.set_gain('tvg', db=40.0, power=1.5)   # notify=False 不发
+            assert got == [(30.0, 1.5)]
+        finally:
+            view.close()
+
     def test_sec_curve_shape(self, qapp):
         """曲线浅端=1、单调升、限幅 1000×：物理近似的硬边界。"""
         view, _ = _make_view(qapp)
@@ -158,7 +209,7 @@ class TestGainMenuEntry:
             submenu = self._gain_submenu(view)
             assert submenu is not None
             texts = {a.text(): a for a in submenu.actions()}
-            assert set(texts) == {'关闭', 'SEC 补偿'}
+            assert set(texts) == {'关闭', 'SEC 补偿', 'TVG 补偿（滑条调参）'}
             assert texts['关闭'].isChecked() is True
             assert texts['SEC 补偿'].isChecked() is False
         finally:
@@ -172,5 +223,73 @@ class TestGainMenuEntry:
             texts = {a.text(): a for a in self._gain_submenu(view).actions()}
             assert texts['SEC 补偿'].isChecked() is True
             assert texts['关闭'].isChecked() is False
+        finally:
+            view.close()
+
+
+class TestTvgDialog:
+    """滑条面板：右键选 TVG 弹出、拖动实时生效、关闭持久化一次。"""
+
+    def test_menu_tvg_opens_dialog_and_sets_mode(self, qapp):
+        view, _ = _make_view(qapp)
+        try:
+            view._on_gain_menu('tvg')
+            assert view.gain_mode() == 'tvg'
+            assert view._tvg_dialog is not None
+            assert view._tvg_dialog.isVisible()
+            dialog = view._tvg_dialog
+            view._on_gain_menu('tvg')                 # 重复调用唤起同一实例
+            assert view._tvg_dialog is dialog
+        finally:
+            view.close()
+
+    def test_slider_drag_applies_live_without_persist(self, qapp):
+        view, _ = _make_view(qapp)
+        try:
+            view._on_gain_menu('tvg')
+            dialog = view._tvg_dialog
+            got = []
+            view.sig_gain_params_changed.connect(
+                lambda db, power: got.append((db, power)))
+            dialog._db_slider.setValue(360)          # 36.0 dB
+            qapp.processEvents()
+            assert view._gain_db == pytest.approx(36.0)
+            assert got == []                          # 拖动不写盘
+            before = np.asarray(view._image_item.image, dtype=np.float64)
+            dialog._db_slider.setValue(120)          # 12.0 dB
+            qapp.processEvents()
+            after = np.asarray(view._image_item.image, dtype=np.float64)
+            assert not np.allclose(before, after)     # 实时改渲染
+        finally:
+            view.close()
+
+    def test_dialog_close_persists_once(self, qapp):
+        view, _ = _make_view(qapp)
+        try:
+            view._on_gain_menu('tvg')
+            dialog = view._tvg_dialog
+            got = []
+            view.sig_gain_params_changed.connect(
+                lambda db, power: got.append((float(db), float(power))))
+            dialog._db_slider.setValue(300)          # 30.0 dB
+            dialog.close()
+            qapp.processEvents()
+            assert got == [(30.0, pytest.approx(1.0))]   # 关面板发一次
+        finally:
+            view.close()
+
+    def test_dialog_stays_dead_after_mode_switched_away(self, qapp):
+        """面板开着时右键切到 SEC：滑条改动失效，关面板不改回 TVG。"""
+        view, _ = _make_view(qapp)
+        try:
+            view._on_gain_menu('tvg')
+            dialog = view._tvg_dialog
+            view.set_gain('sec', notify=True)        # 用户切走
+            dialog._db_slider.setValue(400)
+            qapp.processEvents()
+            assert view.gain_mode() == 'sec'          # 不被滑条改回
+            dialog.close()
+            qapp.processEvents()
+            assert view.gain_mode() == 'sec'
         finally:
             view.close()

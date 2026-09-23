@@ -209,11 +209,12 @@ class SettingsPage(ScrollArea):
         self._bscan_gain_combo.addItem('关闭', userData='off')
         self._bscan_gain_combo.addItem('SEC 补偿（扩散+指数吸收）',
                                        userData='sec')
+        self._bscan_gain_combo.addItem('TVG 补偿（滑条调参）', userData='tvg')
         self._bscan_gain_combo.setMinimumWidth(200)
         self._bscan_gain_combo.setToolTip(
-            'SEC 显示增益：按深度补偿球面扩散与介质吸收，深部弱信号开图'
-            '即可见；只在显示域逐行缩放，不改动存储数据。单视图切换可在 '
-            'B-Scan 上右键「显示增益」。')
+            'SEC：按深度补偿球面扩散与介质吸收，物理口径一键即用。TVG：'
+            '幂次曲线，选后在 B-Scan 上右键「显示增益」弹出滑条面板调参'
+            '（拖动实时生效）。两者都只在显示域逐行缩放，不改动存储数据。')
         self._bscan_gain_combo.currentIndexChanged.connect(
             self._emit_bscan_changed)
         self._bscan_gain_alpha_spin = DoubleSpinBox(card)

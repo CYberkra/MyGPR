@@ -271,19 +271,22 @@ class MyGPRMainWindow(FluentWindow):
         cmap = self._setting_choice('bscan_colormap',
                                     tuple(constants.COLORMAPS),
                                     constants.DEFAULT_COLORMAP)
-        gain_mode = self._setting_choice('bscan_gain_mode', ('off', 'sec'), 'off')
+        gain_mode = self._setting_choice('bscan_gain_mode',
+                                         ('off', 'sec', 'tvg'), 'off')
         try:
             gain_alpha = float(self.settings.get('bscan_gain_alpha', 0.2))
         except (TypeError, ValueError):
             gain_alpha = 0.2
         gain_alpha = min(max(gain_alpha, 0.0), 20.0)
+        tvg_db, tvg_power = self._setting_tvg_params()
         for view in views:
             view.set_aspect_mode(aspect, notify=False)
             view.set_axis_modes(x_axis, y_axis, notify=False)
             view.set_colormap(cmap)
             view.set_display_levels(p_low, p_high, notify=False)
             view.set_colorbar_visible(colorbar_visible, notify=False)
-            view.set_gain(gain_mode, alpha=gain_alpha, notify=False)
+            view.set_gain(gain_mode, alpha=gain_alpha,
+                          db=tvg_db, power=tvg_power, notify=False)
             view.set_geometry_store(loader=self._load_fullscreen_geometry,
                                     saver=self._save_fullscreen_geometry)
             self._connect_bscan_signals(view)
@@ -333,6 +336,7 @@ class MyGPRMainWindow(FluentWindow):
         view.sig_gain_changed.connect(
             lambda mode: self._mirror_bscan_setting('bscan_gain_mode',
                                                     str(mode)))
+        view.sig_gain_params_changed.connect(self._mirror_bscan_tvg_params)
 
     def _mirror_bscan_setting(self, key: str, value) -> None:
         """写盘 + 把设置页控件同步到同一值（避免关窗回写覆盖用户选择）。"""
@@ -415,9 +419,10 @@ class MyGPRMainWindow(FluentWindow):
                 gain_alpha = float(values.get('bscan_gain_alpha', 0.2))
             except (TypeError, ValueError):
                 gain_alpha = 0.2
+            tvg_db, tvg_power = self._setting_tvg_params()
             view.set_gain(str(values.get('bscan_gain_mode', 'off')),
                           alpha=min(max(gain_alpha, 0.0), 20.0),
-                          notify=False)
+                          db=tvg_db, power=tvg_power, notify=False)
         for container in self._iter_all_bscan_containers():
             # notify=True：切到/切出 auto 时页面要重分发数据。由此触发的
             # sig_layout_changed 会把同值写回设置（幂等），无行为副作用。
@@ -438,6 +443,27 @@ class MyGPRMainWindow(FluentWindow):
         """用户操作触发的一次写盘（共享 SettingsManager 唯一写者）。"""
         self.settings.set(key, value)
         self.settings.save()
+
+    def _setting_tvg_params(self) -> tuple[float, float]:
+        """读 TVG 参数（dB/弯度）；坏值回落默认，弯度夹到曲线安全区间。"""
+        try:
+            db = float(self.settings.get('bscan_tvg_db', 24.0))
+        except (TypeError, ValueError):
+            db = 24.0
+        try:
+            power = float(self.settings.get('bscan_tvg_power', 1.0))
+        except (TypeError, ValueError):
+            power = 1.0
+        return min(max(db, 0.0), 60.0), min(max(power, 0.3), 3.0)
+
+    def _mirror_bscan_tvg_params(self, db: float, power: float) -> None:
+        """TVG 滑条面板关闭时的参数持久化（两个键各一次写盘，幂等）。
+
+        这两个键不进设置页控件（滑条面板是唯一调参入口），closeEvent 的
+        整体回写是**合并语义**（只覆盖设置页认识的键），不冲突。
+        """
+        self._persist_setting('bscan_tvg_db', float(db))
+        self._persist_setting('bscan_tvg_power', float(power))
 
     def _persist_bscan_levels(self, low: float, high: float) -> None:
         """色阶两个键必须同一次写盘，否则中途崩溃会留下 low>high 的坏状态。"""
