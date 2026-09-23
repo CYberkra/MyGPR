@@ -541,24 +541,6 @@ class ProcessingPage(PanelStateMixin, QWidget):
         bundles += [None] * (len(views) - len(bundles))
         for view, bundle in zip(views, bundles):
             self._set_panel_data(view, bundle)
-        self._update_free_window_titles(bundles)
-
-    def _update_free_window_titles(self, bundles: list) -> None:
-        """free 子窗口标题带数据名（CaGPR 式），一眼辨窗。
-
-        0 号窗「测线 L3 · 原始数据」、1 号窗直接用成果 bundle 的 title
-        （「成果 R2」）；bundle 缺席回落固定标题。对 dual/quad 无副作用
-        （标题只渲染在 free 的 MDI 标题栏上）。
-        """
-        if len(bundles) < 2:
-            return
-        origin = (str(getattr(bundles[0], 'title', ''))
-                  if bundles[0] is not None else '')
-        result = (str(getattr(bundles[1], 'title', ''))
-                  if bundles[1] is not None else '')
-        self._bscan_container.set_free_titles(
-            f'{origin} · 原始数据' if origin else '',
-            result)
 
     @staticmethod
     def _set_panel_data(view: BScanView, bundle) -> None:

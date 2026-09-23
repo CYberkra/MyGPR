@@ -280,6 +280,12 @@ class MyGPRMainWindow(FluentWindow):
             'auto')
         for container in self._iter_bscan_containers(page):
             container.set_layout_mode(layout_mode, notify=False)
+            # free 分屏占比：跨会话记忆（隐藏态恢复也成立，setSizes 是
+            # 相对权重语义，无需等真实显示时机）
+            container.set_split_state_store(
+                loader=self._load_free_split_state,
+                saver=self._save_free_split_state)
+            container.restore_free_split()
             container.sig_layout_changed.connect(lambda mode:
                 self._mirror_bscan_setting('bscan_layout_mode', str(mode)))
 
@@ -411,6 +417,18 @@ class MyGPRMainWindow(FluentWindow):
             return
         payload = bytes(blob.toBase64().data()).decode('ascii')
         self._persist_setting('bscan_fullscreen_geometry', payload)
+
+    def _load_free_split_state(self):
+        """回放 B-Scan 自由分屏占比（'750,250' 千分比文本）；空走均分。"""
+        raw = str(self.settings.get('bscan_free_split', '') or '')
+        return raw or None
+
+    def _save_free_split_state(self, text) -> None:
+        """把占比文本（'750,250'）存入 JSON 设置（空值不覆盖旧值）。"""
+        text = str(text or '')
+        if not text:
+            return
+        self._persist_setting('bscan_free_split', text)
 
     # ---------------------------------------------------------- 首屏后预热
     def _start_warmup(self) -> None:

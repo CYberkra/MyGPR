@@ -12,9 +12,13 @@
 - ``dual``：固定左右并排双视图（处理页「原始 | 成果」同屏对比）；
 - ``quad``：固定 2×2 四宫格（0/1 号位与 dual 相同，2/3 号位留空占位，
   后续接入历史成果对比；auto 模式因数据源不足不会自动触发）；
-- ``free``：**自由窗口**（参考 Windows 视窗）——预览区里两个可拖动 /
-  缩放 / 最大化的子窗口（0 号位=原始数据、1 号位=处理结果），右键空白处
-  可平铺 / 层叠 / 重置；手动模式，不参与 auto 解析。
+- ``free``：**自由分屏**（QSplitter，2026-09-23 由 QMdiArea 迁移而来）——
+  两个画布占满全部空间、拖中间分割条调占比，右键可重置；占比跨会话
+  记忆（宿主经 :meth:`set_split_state_store` 注入读写回调）。格位固定
+  0=原始数据、1=处理结果；单图放大走 BScanView 已有的独立全屏。手动
+  模式，不参与 auto 解析。选型理由：MDI 子窗标题栏/边框每窗吃 ~24px
+  且拖出一套关闭拦截/平铺时机的防御逻辑，而"叠放窗口"对剖面对比无
+  实际意义（叠住的图不可读）。
 
 职责边界（哑组件）：
 
@@ -25,9 +29,9 @@
   容器不重复做；主题同理（BScanView 构造自刷 + 全局换肤覆盖）。
 """
 
-from PyQt6.QtCore import QEvent, Qt, QTimer, pyqtSignal
-from PyQt6.QtWidgets import (QGridLayout, QHBoxLayout, QMdiArea, QMdiSubWindow,
-                             QMenu, QStackedWidget, QVBoxLayout, QWidget)
+from PyQt6.QtCore import QEvent, Qt, pyqtSignal
+from PyQt6.QtWidgets import (QGridLayout, QHBoxLayout, QMenu, QSplitter,
+                             QStackedWidget, QVBoxLayout, QWidget)
 
 from ui import constants
 from ui.widgets.bscan_view import BScanView
@@ -45,14 +49,6 @@ LAYOUT_ENTITY_MODES = (LAYOUT_SINGLE, LAYOUT_DUAL, LAYOUT_QUAD, LAYOUT_FREE)
 
 _MODE_INDEX = {LAYOUT_SINGLE: 0, LAYOUT_DUAL: 1, LAYOUT_QUAD: 2, LAYOUT_FREE: 3}
 
-# 自由窗口页的两个固定窗位（与 dual 的分发语义一致：0 号位=原始数据、
-# 1 号位=处理结果；views() 契约依赖该顺序，与用户拖动摆位无关）。
-_FREE_WINDOW_TITLES = ('原始数据', '处理结果')
-
-# 首次平铺的视口宽度下限：QStackedWidget 隐藏页给 MDI 的占位宽度约 100，
-# 低于该值说明真实布局尚未发生，首次平铺应推迟（见 _enter_free_once）。
-_FREE_MIN_VIEWPORT_WIDTH = 200
-
 
 class BScanContainer(QWidget):
     """B-Scan 多面板容器：布局切换 + 面板访问，不做数据路由。"""
@@ -64,9 +60,14 @@ class BScanContainer(QWidget):
         self._mode = LAYOUT_AUTO             # 用户/设置层的偏好值
         self._effective = LAYOUT_SINGLE      # auto 解析后实际摆的页
         self._pages = {}                     # entity mode -> list[BScanView]
-        # 提前建：_build_free_page 给 MDI 装 eventFilter 后，构造期事件
-        # 就会进 eventFilter，此时该标志必须已存在（防 AttributeError）。
-        self._free_arranged = False
+        # 分屏占比持久化回调（主窗口经 set_split_state_store 注入；
+        # 提前初始化防接线前 splitterMoved 落到未定义属性）。
+        self._split_loader = None
+        self._split_saver = None
+        # 当前认可的分屏比例（千分比整数，[750, 250] = 3:1）。QSplitter
+        # 自身 resize 时按 stretch 因子重排（默认全 0 → 均分），会丢掉
+        # 用户拖出的占比——由 eventFilter 在每次 resize 时重放本值。
+        self._split_ratio = [1, 1]
 
         self._stack = QStackedWidget(self)
         self._stack.addWidget(self._build_flow_page(LAYOUT_SINGLE, 1))
@@ -111,123 +112,130 @@ class BScanContainer(QWidget):
         return page
 
     def _build_free_page(self) -> QWidget:
-        """自由窗口页（参考 Windows 视窗）：QMdiArea 承载两个子窗口。
+        """自由分屏页：QSplitter 承载两个常驻画布，拖分割条调占比。
 
-        窗位固定 0=原始数据、1=处理结果（与 dual 分发语义一致）；摆位自由：
-        拖标题栏移动、拖边缘缩放、标题栏最大化，右键空白处平铺/层叠/重置。
-        去掉关闭与最小化钮——面板是常驻视图，views() 契约依赖两个窗口
-        始终在场（关掉会破坏数据分发）。
+        格位固定 0=原始数据、1=处理结果（与 dual 分发语义一致，views()
+        契约依赖该顺序）；childrenCollapsible(False) 保证拖到头也不把
+        一格挤没。旧 QMdiArea 方案（标题栏/边框 + 关闭拦截 + 平铺时机
+        守卫）已退役——单图放大由 BScanView 的独立全屏承担。
         """
         page = QWidget(self)
         outer = QVBoxLayout(page)
         outer.setContentsMargins(0, 0, 0, 0)
-        self._mdi = QMdiArea(page)
-        self._mdi.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self._mdi.customContextMenuRequested.connect(self._show_free_menu)
-        self._mdi.installEventFilter(self)  # Show/Resize 驱动首次平铺重试
-        outer.addWidget(self._mdi)
+        self._splitter = QSplitter(Qt.Orientation.Horizontal, page)
+        self._splitter.setChildrenCollapsible(False)
+        self._splitter.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu)
+        self._splitter.customContextMenuRequested.connect(
+            self._show_free_menu)
+        self._splitter.installEventFilter(self)   # Resize → 重放认可比例
         views = []
-        for title in _FREE_WINDOW_TITLES:
-            sub = QMdiSubWindow(self._mdi)
-            sub.setWindowTitle(title)
-            sub.setToolTip('常驻画布：0 号窗显示原始数据、1 号窗显示处理结果；'
-                           '可拖动标题栏/边缘自由摆放，右键空白处可平铺/层叠/重置')
-            sub.setWindowFlags(
-                Qt.WindowType.SubWindow
-                | Qt.WindowType.CustomizeWindowHint
-                | Qt.WindowType.WindowTitleHint
-                | Qt.WindowType.WindowMaximizeButtonHint)
-            view = BScanView(sub)
-            sub.setWidget(view)
-            self._mdi.addSubWindow(sub)
-            sub.installEventFilter(self)   # 关闭拦截见 eventFilter
+        for _ in range(2):
+            view = BScanView(self._splitter)
+            self._splitter.addWidget(view)
             views.append(view)
+        self._splitter.setSizes([1, 1])    # setSizes 是相对权重：即均分
+        self._splitter.splitterMoved.connect(self._on_split_moved)
+        outer.addWidget(self._splitter)
         self._pages[LAYOUT_FREE] = views
         return page
 
     def eventFilter(self, obj, event) -> bool:
-        """自由窗口常驻契约 + 首次平铺时机驱动。
+        """分屏区真实宽度变化 → 重放认可比例（见 __init__ 的 _split_ratio）。
 
-        其一，拦下子窗口的关闭事件：Qt 对 SubWindow 型标题栏的关闭钮渲染
-        不完全受 WindowCloseButtonHint 约束（实测 offscreen 下 ✕ 仍会画出），
-        而 close() 会把面板**隐藏**——此后数据还在往看不见的画布里流，
-        破坏 views() 契约。这里统一拒绝：两个窗位是常驻视图（与 dual
-        面板不可关闭同一语义）。
-
-        其二，MDI 区的 Show/Resize 触发首次平铺重试：启动恢复时容器页面
-        藏在 QStackedWidget 里，等切到真实页面、MDI 拿到实际尺寸后再平铺
-        （见 _enter_free_once 的时机守卫）。
+        QSplitter resize 默认按 stretch 因子重排（全 0 → 均分），restoreState
+        的绝对尺寸同样会被重排冲掉（offscreen 实测）。每次 resize 重放当前
+        认可比例：用户拖动更新认可值，程序性 setSizes 不发 splitterMoved，
+        无回环。
         """
-        et = event.type()
-        if (et == QEvent.Type.Close
-                and isinstance(obj, QMdiSubWindow)
-                and obj.widget() in self._pages.get(LAYOUT_FREE, ())):
-            event.ignore()
-            return True
-        if (obj is self._mdi and not self._free_arranged
-                and et in (QEvent.Type.Show, QEvent.Type.Resize)):
-            # 能不能平铺由 _enter_free_once 的守卫判断；这里排一拍延迟，
-            # 等布局系统把视口尺寸收敛完。
-            QTimer.singleShot(0, self._enter_free_once)
+        if obj is self._splitter and event.type() == QEvent.Type.Resize:
+            self._apply_split_ratio()
         return super().eventFilter(obj, event)
 
-    # ------------------------------------------------ 自由窗口摆放控制
-    def _enter_free_once(self) -> None:
-        """首次进入自由布局时平铺一次，给两个窗口合理初始摆位。
-
-        构建时 MDI 区还没参与布局（尺寸未定），直接 addSubWindow 会挤在
-        左上角；等事件循环铺完再平铺。只做一次，之后跨模式切换保留用户
-        拖出来的摆位。
-
-        时机守卫：启动恢复时容器页面可能还藏在 QStackedWidget 里（实测
-        隐藏页的 MDI 视口只有 ~100×30 占位尺寸），此刻平铺会把窗口钉死
-        在左上角，用户切过来只看到缩成一团的小窗。视口不可见或过窄时
-        **不**消耗「只平铺一次」标志，留给 eventFilter 的 Show/Resize
-        事件重试。
-        """
-        if self._free_arranged or self._effective != LAYOUT_FREE:
-            return
-        if (not self._mdi.isVisible()
-                or self._mdi.viewport().width() < _FREE_MIN_VIEWPORT_WIDTH):
-            return
-        self._free_arranged = True
-        self._mdi.tileSubWindows()
-
+    # ------------------------------------------------ 自由分屏占比控制
     def _show_free_menu(self, pos) -> None:
-        """自由布局区右键菜单：平铺 / 层叠 / 重置。"""
-        menu = QMenu(self._mdi)
-        menu.addAction('平铺窗口', self.arrange_tile)
-        menu.addAction('层叠窗口', self.arrange_cascade)
-        menu.addSeparator()
-        menu.addAction('重置默认布局', self.reset_free_layout)
-        menu.exec(self._mdi.mapToGlobal(pos))
+        """自由分屏区右键菜单：重置占比（回到均分）。"""
+        menu = QMenu(self._splitter)
+        menu.addAction('重置分屏占比', self.reset_free_split)
+        menu.exec(self._splitter.mapToGlobal(pos))
 
-    def arrange_tile(self) -> None:
-        """全部自由窗口平铺铺满自由区。"""
-        self._mdi.tileSubWindows()
+    def reset_free_split(self) -> None:
+        """重置分屏占比：两格均分（与新占比一同持久化）。"""
+        self._split_ratio = [1, 1]
+        self._apply_split_ratio()
+        self._save_split_ratio()
 
-    def arrange_cascade(self) -> None:
-        """全部自由窗口层叠摆放。"""
-        self._mdi.cascadeSubWindows()
+    def _apply_split_ratio(self) -> None:
+        """按当前分屏区宽度把认可比例换算成绝对尺寸下发。
 
-    def reset_free_layout(self) -> None:
-        """重置自由摆位：退出最大化后平铺（回到默认左右各半）。"""
-        for sub in self._mdi.subWindowList():
-            sub.showNormal()
-        self._mdi.tileSubWindows()
-
-    def set_free_titles(self, original: str, result: str) -> None:
-        """自由窗口两窗标题动态化（宿主分发数据时调用，CaGPR 式）。
-
-        标题是纯展示：不影响 views() 顺序、窗位与分发语义；空值回落
-        固定标题（「原始数据」/「处理结果」）。子窗口按创建顺序取
-        （0=原始、1=成果），与 activation order 无关。
+        QSplitter.setSizes 的值是 **sizeHint** 语义（qGeomCalc）：sum <
+        实际长度时多余空间被 stretch（全 0 → 均分）吃掉——实测下发自
+        [3, 1] 会得到均分；sum ≥ 长度才按 hint 比例分配。故必须按当前
+        长度换算后再下发。
         """
-        subs = self._mdi.subWindowList()
-        if len(subs) < 2:
+        sp = self._splitter
+        length = (sp.width() if sp.orientation() == Qt.Orientation.Horizontal
+                  else sp.height())
+        ratio = self._split_ratio
+        denom = sum(ratio) or 1
+        sp.setSizes([max(1, round(w * length / denom)) for w in ratio])
+
+    def set_split_state_store(self, loader=None, saver=None) -> None:
+        """注入分屏占比持久化回调（主窗口接线；容器不碰文件/设置）。
+
+        占比格式为千分比整数文本（``'750,250'`` = 3:1）。
+
+        :param loader: ``() -> str | None``，回放历史占比；
+        :param saver:  ``(str) -> None``，占比变化（拖动/重置）时保存。
+        """
+        self._split_loader = loader
+        self._split_saver = saver
+
+    def restore_free_split(self) -> bool:
+        """回放历史分屏占比（主窗口接线时调用一次）。是否恢复成功。
+
+        恢复只更新认可比例：分屏区可见时立即生效；启动期藏在
+        QStackedWidget 里则由首次真实 resize 经 eventFilter 重放——
+        无需专门的显示时机守卫。
+        """
+        loader = self._split_loader
+        if loader is None:
+            return False
+        try:
+            raw = loader()
+        except Exception:  # noqa: BLE001 - 坏设置不让预览空白
+            return False
+        parts = str(raw or '').replace(' ', '').split(',')
+        if len(parts) != 2:
+            return False
+        try:
+            w0, w1 = int(float(parts[0])), int(float(parts[1]))
+        except (ValueError, OverflowError):
+            return False
+        if w0 <= 0 or w1 <= 0:
+            return False
+        self._split_ratio = [w0, w1]
+        self._apply_split_ratio()
+        return True
+
+    def _on_split_moved(self, _pos: int, _index: int) -> None:
+        """用户拖动分割条（程序性 setSizes/重放不发此信号）。"""
+        sizes = self._splitter.sizes()
+        total = sum(sizes)
+        if len(sizes) != 2 or total <= 0:
             return
-        subs[0].setWindowTitle(str(original or '') or _FREE_WINDOW_TITLES[0])
-        subs[1].setWindowTitle(str(result or '') or _FREE_WINDOW_TITLES[1])
+        self._split_ratio = [max(1, round(sizes[0] * 1000 / total)),
+                             max(1, round(sizes[1] * 1000 / total))]
+        self._save_split_ratio()
+
+    def _save_split_ratio(self) -> None:
+        if self._split_saver is None:
+            return
+        try:
+            ratio = self._split_ratio
+            self._split_saver(f'{ratio[0]},{ratio[1]}')
+        except Exception:  # noqa: BLE001 - 存占比失败不该报错给用户
+            pass
 
     # ------------------------------------------------------------ 布局模式
     def layout_mode(self) -> str:
@@ -255,9 +263,6 @@ class BScanContainer(QWidget):
         if mode in _MODE_INDEX:
             self._effective = mode
             self._stack.setCurrentIndex(_MODE_INDEX[mode])
-            if mode == LAYOUT_FREE:
-                # MDI 区此刻可能还没参与布局，等事件循环铺完再摆初始位
-                QTimer.singleShot(0, self._enter_free_once)
         if notify:
             self.sig_layout_changed.emit(mode)
 

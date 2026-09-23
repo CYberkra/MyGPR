@@ -8,8 +8,8 @@
    PreviewBundle，切换布局后新面板空白，页面须监听 ``sig_layout_changed``
    重新分发（见 ProcessingPage._on_layout_changed）。
 2. **processing 页分发语义**：single 下分段控件切换原始/成果（历史行为）；
-   dual/quad 下 0 号位固定原始数据、1 号位固定处理结果，分段控件只决定
-   色阶刷新焦点；新 bundle 到达时无论分段停在哪侧都要更新对应面板。
+   dual/quad/free 下 0 号位固定原始数据、1 号位固定处理结果，分段控件只
+   决定色阶刷新焦点；新 bundle 到达时无论分段停在哪侧都要更新对应面板。
    auto 采用**粘性布局**：对比长出后成果清空不收回（空态占位），
    原始数据清空才重置（布局稳定优先，见 _sync_auto_layout）。
 3. **布局模式持久化**：``bscan_layout_mode`` 设置键走设置页
@@ -28,8 +28,6 @@ import pytest  # noqa: E402
 
 pytest.importorskip("PyQt6")  # 后端 CI（无 Qt）自动跳过
 
-from PyQt6.QtCore import Qt  # noqa: E402
-from PyQt6.QtTest import QTest  # noqa: E402
 from PyQt6.QtWidgets import QStackedWidget, QWidget  # noqa: E402
 from ui.pages.processing_page import ProcessingPage  # noqa: E402
 from ui.pages.settings_page import SettingsPage  # noqa: E402
@@ -133,10 +131,10 @@ class TestContainerLayout:
 
 
 class TestFreeLayout:
-    """自由窗口模式（Windows 视窗式）：实体布局契约 + 摆放控制。
+    """自由分屏模式（QSplitter）：实体布局契约 + 占比控制。
 
-    窗位固定 0=原始数据、1=处理结果（与 dual 分发语义一致），摆位自由；
-    free 只能手动选，auto 解析永远不出自由窗口。
+    格位固定 0=原始数据、1=处理结果（与 dual 分发语义一致），占比拖动
+    自由；free 只能手动选，auto 解析永远不出自由分屏。
     """
 
     @pytest.fixture
@@ -153,7 +151,7 @@ class TestFreeLayout:
         assert len(container.views()) == 2
 
     def test_auto_never_resolves_to_free(self, container):
-        """auto 只映射 single/dual/quad：数据驱动不进入自由窗口。"""
+        """auto 只映射 single/dual/quad：数据驱动不进入自由分屏。"""
         container.set_layout_mode(LAYOUT_AUTO, notify=False)
         for count in (1, 2, 4):
             container.resolve_auto(count)
@@ -166,88 +164,125 @@ class TestFreeLayout:
         assert container.layout_mode() == LAYOUT_AUTO
         assert container.effective_mode() == LAYOUT_FREE
 
-    def test_views_fixed_order_matches_windows(self, container):
-        """views() 顺序 = 窗口标题顺序（原始→成果），与拖动摆位无关。"""
+    def test_views_fixed_order_matches_slots(self, container):
+        """views() 顺序 = 分割器格位顺序（0=原始、1=成果），与占比无关。"""
         container.set_layout_mode(LAYOUT_FREE, notify=False)
-        subs = container._mdi.subWindowList()
-        assert subs[0].windowTitle() == '原始数据'
-        assert subs[1].windowTitle() == '处理结果'
+        splitter = container._splitter
         assert container.view_at(0) is container.views()[0]
         assert container.view_at(1) is container.views()[1]
+        assert splitter.widget(0) is container.views()[0]
+        assert splitter.widget(1) is container.views()[1]
+        assert not splitter.childrenCollapsible()  # 拖到头不挤没格位
 
-    def test_arrange_actions_keep_views_contract(self, container):
-        """平铺/层叠/重置都是摆位操作，不动 views() 契约。"""
+    def test_reset_split_keeps_views_contract(self, container):
+        """重置占比是纯摆位操作，不动 views() 契约。"""
         container.set_layout_mode(LAYOUT_FREE, notify=False)
         views = container.views()
-        container.arrange_tile()
-        container.arrange_cascade()
-        container.reset_free_layout()
+        container._splitter.setSizes([3, 1])
+        container.reset_free_split()
+        sizes = container._splitter.sizes()
+        assert abs(sizes[0] - sizes[1]) <= 2   # 回均分
         assert container.views()[0] is views[0]
         assert container.views()[1] is views[1]
 
-    def test_windows_have_no_close_button(self, container):
-        """flags 不含关闭/最小化 hint（最大化保留）。
+    def test_split_moved_saves_state(self, container, qapp):
+        """用户拖动分割条 → 认可比例更新 + saver 收千分比文本。
 
-        注意：实测 Qt 对 SubWindow 标题栏仍可能画出 ✕（不受 hint 约束），
-        所以常驻契约由 test_close_is_intercepted 的关闭拦截兜底。
+        拖动发生在真实宽度下（隐藏态 sizes 无意义），先 show 再模拟回调。
         """
-        container.set_layout_mode(LAYOUT_FREE, notify=False)
-        for sub in container._mdi.subWindowList():
-            flags = sub.windowFlags()
-            assert not (flags & Qt.WindowType.WindowCloseButtonHint)
-            assert not (flags & Qt.WindowType.WindowMinimizeButtonHint)
-            assert flags & Qt.WindowType.WindowMaximizeButtonHint
-
-    def test_set_free_titles_dynamic_and_fallback(self, container):
-        """标题动态化（CaGPR 式）：宿主喂数据名，空值回落固定标题。
-
-        标题是纯展示：views() 顺序与窗位对象不受影响。
-        """
-        container.set_layout_mode(LAYOUT_FREE, notify=False)
-        subs = container._mdi.subWindowList()
-        container.set_free_titles('测线 L3 · 原始数据', '成果 R2')
-        assert subs[0].windowTitle() == '测线 L3 · 原始数据'
-        assert subs[1].windowTitle() == '成果 R2'
-        assert container.view_at(0) is container.views()[0]   # 契约不动
-        container.set_free_titles('', '')
-        assert subs[0].windowTitle() == '原始数据'
-        assert subs[1].windowTitle() == '处理结果'
-
-    def test_close_is_intercepted(self, container, qapp):
-        """关闭拦截：close() 被拒绝，面板保持可见、views() 契约不动。"""
-        container.show()
-        container.set_layout_mode(LAYOUT_FREE, notify=False)
+        saved = []
+        container.set_split_state_store(loader=None, saver=saved.append)
+        container.set_layout_mode(LAYOUT_FREE, notify=False)  # 切到分屏页
+        stack = QStackedWidget()
+        stack.addWidget(QWidget())
+        stack.addWidget(container)
+        stack.resize(800, 600)
+        stack.show()
+        stack.setCurrentIndex(1)
         qapp.processEvents()
-        subs = container._mdi.subWindowList()
-        assert subs[0].isVisible()          # 前置：free 页已显示
-        assert subs[0].close() is False
-        qapp.processEvents()
-        assert subs[0].isVisible()
-        assert len(container.views()) == 2
+        # setSizes 是 sizeHint 语义（sum ≥ 实际长度才按比例分配），
+        # 下发千分比绝对值模拟用户拖到 3:1 后的状态
+        container._splitter.setSizes([750, 250])
+        container._on_split_moved(0, 0)        # 模拟拖动回调
+        assert saved[-1] == '750,250'
+        assert container._split_ratio == [750, 250]
         container.hide()
 
-    def test_first_tile_deferred_until_page_shown(self, container, qapp):
-        """启动恢复时页面藏在 QStackedWidget 里：首次平铺推迟到真实显示。
+    def test_restore_without_loader_is_noop(self, container):
+        container.set_split_state_store(loader=None, saver=None)
+        assert container.restore_free_split() is False
 
-        回归：此前 _enter_free_once 在隐藏页 ~100×30 的占位视口上就消耗了
-        「只平铺一次」标志，用户切到该页时窗口缩在左上角（~140×130）。
-        修复后守卫拦下隐藏期平铺，MDI 的 Show/Resize 到达真实尺寸再补。
+    def test_restore_bad_value_is_noop(self, container):
+        """坏占比文本（缺逗号/负值/非数字）一律拒绝，保持均分。"""
+        for bad in ('junk', '750', '750,abc', '750,-250', '0,1000', None):
+            container.set_split_state_store(loader=lambda b=bad: b,
+                                            saver=None)
+            assert container.restore_free_split() is False, bad
+        assert container._split_ratio == [1, 1]
+
+    def test_split_state_roundtrip(self, container, qapp):
+        """占比跨实例记忆：真实宽度下存出 → 隐藏态恢复 → 显示后重现。
+
+        QSplitter 自身 resize 按 stretch 重排会丢比例（offscreen 实测），
+        容器以「认可比例 + Resize 重放」对抗之；本测试锁定完整链路。
+        """
+        holder = {}
+        # A：真实宽度下拖动 → 认可 '750,250' 并存盘
+        container.set_layout_mode(LAYOUT_FREE, notify=False)  # 切到分屏页
+        container.set_split_state_store(
+            loader=lambda: None, saver=lambda t: holder.update(t=t))
+        stack = QStackedWidget()
+        stack.addWidget(QWidget())
+        stack.addWidget(container)
+        stack.resize(800, 600)
+        stack.show()
+        stack.setCurrentIndex(1)
+        qapp.processEvents()
+        container._splitter.setSizes([750, 250])   # sizeHint 语义：见上
+        container._on_split_moved(0, 0)
+        assert holder.get('t') == '750,250'
+        container.hide()
+
+        # B：新实例隐藏态恢复 → 显示时经 Resize 重放重现比例
+        fresh = BScanContainer()
+        fresh.set_layout_mode(LAYOUT_FREE, notify=False)
+        fresh.set_split_state_store(loader=lambda: holder.get('t'), saver=None)
+        assert fresh.restore_free_split() is True
+        assert fresh._split_ratio == [750, 250]
+        stack2 = QStackedWidget()
+        stack2.addWidget(QWidget())
+        stack2.addWidget(fresh)
+        stack2.resize(800, 600)
+        stack2.show()
+        stack2.setCurrentIndex(1)
+        qapp.processEvents()
+        sizes = fresh._splitter.sizes()
+        assert len(sizes) == 2
+        assert sizes[0] > sizes[1] * 2         # 3:1 比例在真实宽度下重现
+        fresh.hide()
+
+    def test_hidden_page_free_splits_evenly_when_shown(self, container,
+                                                       qapp):
+        """启动恢复藏在 QStackedWidget：切到容器页后两格自然均分。
+
+        splitter 布局系统天然按比例分配，无 MDI 版「隐藏页平铺把窗口
+        钉在角落」的时机问题（回归防护）。
         """
         stack = QStackedWidget()
-        stack.addWidget(QWidget())          # 0 号：占位页（模拟其他页面）
-        stack.addWidget(container)          # 1 号：容器页，启动时藏在后面
+        stack.addWidget(QWidget())           # 0 号：占位页（模拟其他页面）
+        stack.addWidget(container)           # 1 号：容器页，启动时藏在后面
         container.set_layout_mode(LAYOUT_FREE, notify=False)
-        qapp.processEvents()                # 隐藏态的 singleShot：守卫应拦下
         stack.resize(900, 620)
         stack.show()
         stack.setCurrentIndex(0)
+        qapp.processEvents()                 # 隐藏态：无需任何守卫动作
+        stack.setCurrentIndex(1)             # 切到容器页
         qapp.processEvents()
-        subs = container._mdi.subWindowList()
-        assert subs[0].width() < 200        # 隐藏页上未提前平铺到真实尺寸
-        stack.setCurrentIndex(1)            # 切到容器页：MDI 拿到真实尺寸
-        QTest.qWait(50)                     # Show/Resize → singleShot → tile
-        assert subs[0].width() >= 300
-        assert subs[1].width() >= 300
+        sizes = container._splitter.sizes()
+        assert len(sizes) == 2
+        assert min(sizes) >= 300             # 两格铺满，无角落小窗
+        assert abs(sizes[0] - sizes[1]) <= 2
+        container.hide()
 
 
 _LSEG_ORIGINAL = 'originalData'
@@ -321,7 +356,7 @@ class TestProcessingPageDistribution:
         assert container.view_at(1)._matrix is None
 
     def test_free_pins_original_and_result(self, page, container):
-        """自由窗口：0 号窗固定原始、1 号窗固定成果（语义同 dual）。"""
+        """自由分屏：0 号格固定原始、1 号格固定成果（语义同 dual）。"""
         container.set_layout_mode(LAYOUT_FREE, notify=False)
         page.set_original_bundle(_bundle(1))
         page.set_result_bundle(_bundle(2))
@@ -334,17 +369,6 @@ class TestProcessingPageDistribution:
         page.set_original_bundle(_bundle(1))
         assert container.view_at(0)._matrix is not None
         assert container.view_at(1)._matrix is None
-
-    def test_free_titles_follow_bundles(self, page, container):
-        """free 窗标题跟数据走：分发带 bundle.title，成果清空回落固定标题。"""
-        container.set_layout_mode(LAYOUT_FREE, notify=False)
-        page.set_original_bundle(_bundle(1))
-        page.set_result_bundle(_bundle(2))
-        subs = container._mdi.subWindowList()
-        assert subs[0].windowTitle() == 'b1 · 原始数据'
-        assert subs[1].windowTitle() == 'b2'
-        page.set_result_bundle(None)
-        assert subs[1].windowTitle() == '处理结果'
 
     def test_switch_dual_to_free_keeps_data(self, page, container):
         """dual ↔ free 切换：数据跟着分发走，窗位顺序不变。"""

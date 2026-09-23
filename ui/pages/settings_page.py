@@ -164,15 +164,15 @@ class SettingsPage(ScrollArea):
         self._bscan_layout_combo.addItem('单视图', userData='single')
         self._bscan_layout_combo.addItem('双视图对比（原始 | 成果）', userData='dual')
         self._bscan_layout_combo.addItem('四宫格', userData='quad')
-        self._bscan_layout_combo.addItem('自由窗口（可拖动）', userData='free')
+        self._bscan_layout_combo.addItem('自由分屏（占比可调）', userData='free')
         self._bscan_layout_combo.setMinimumWidth(180)
         self._bscan_layout_combo.setToolTip(
             '自动：只有原始数据时显示一个画布，处理结果出来后自动变成左右'
             '对比并保持——成果被删或换测线时对比布局不收回（成果位显示'
             '空态），重新选测线后恢复单画布。其余为固定布局，不随数据增减。'
-            '自由窗口下两个画布可像 Windows 窗口一样拖动、缩放、最大化，'
-            '右键空白处可平铺/层叠/重置。四宫格下排两个画布留作后续历史'
-            '成果对比。')
+            '自由分屏下拖动中间分割条调整两画布占比（跨会话记住），右键'
+            '可重置；单画布放大走视图上的全屏钮。四宫格下排两个画布留作'
+            '后续历史成果对比。')
         self._bscan_layout_combo.currentIndexChanged.connect(
             self._emit_bscan_changed)
         layout.addLayout(make_form_row('预览布局:', self._bscan_layout_combo,
