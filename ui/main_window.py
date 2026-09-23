@@ -271,12 +271,19 @@ class MyGPRMainWindow(FluentWindow):
         cmap = self._setting_choice('bscan_colormap',
                                     tuple(constants.COLORMAPS),
                                     constants.DEFAULT_COLORMAP)
+        gain_mode = self._setting_choice('bscan_gain_mode', ('off', 'sec'), 'off')
+        try:
+            gain_alpha = float(self.settings.get('bscan_gain_alpha', 0.2))
+        except (TypeError, ValueError):
+            gain_alpha = 0.2
+        gain_alpha = min(max(gain_alpha, 0.0), 20.0)
         for view in views:
             view.set_aspect_mode(aspect, notify=False)
             view.set_axis_modes(x_axis, y_axis, notify=False)
             view.set_colormap(cmap)
             view.set_display_levels(p_low, p_high, notify=False)
             view.set_colorbar_visible(colorbar_visible, notify=False)
+            view.set_gain(gain_mode, alpha=gain_alpha, notify=False)
             view.set_geometry_store(loader=self._load_fullscreen_geometry,
                                     saver=self._save_fullscreen_geometry)
             self._connect_bscan_signals(view)
@@ -323,6 +330,9 @@ class MyGPRMainWindow(FluentWindow):
         view.sig_colorbar_visible_changed.connect(
             lambda visible: self._mirror_bscan_setting(
                 'bscan_colorbar_visible', bool(visible)))
+        view.sig_gain_changed.connect(
+            lambda mode: self._mirror_bscan_setting('bscan_gain_mode',
+                                                    str(mode)))
 
     def _mirror_bscan_setting(self, key: str, value) -> None:
         """写盘 + 把设置页控件同步到同一值（避免关窗回写覆盖用户选择）。"""
@@ -401,6 +411,13 @@ class MyGPRMainWindow(FluentWindow):
                                     values['bscan_p_high'], notify=False)
             view.set_colorbar_visible(
                 bool(values.get('bscan_colorbar_visible', True)), notify=False)
+            try:
+                gain_alpha = float(values.get('bscan_gain_alpha', 0.2))
+            except (TypeError, ValueError):
+                gain_alpha = 0.2
+            view.set_gain(str(values.get('bscan_gain_mode', 'off')),
+                          alpha=min(max(gain_alpha, 0.0), 20.0),
+                          notify=False)
         for container in self._iter_all_bscan_containers():
             # notify=True：切到/切出 auto 时页面要重分发数据。由此触发的
             # sig_layout_changed 会把同值写回设置（幂等），无行为副作用。

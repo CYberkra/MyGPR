@@ -173,10 +173,11 @@ class TestElevationImageSwap:
 
     def test_warp_is_cached_per_data(self, view):
         switch_elevation(view)
-        first = view._warped_elevation()[0]
+        src = view._gain_applied(view._matrix)   # 增益是 warp 的原料（off=原样）
+        first = view._warped_elevation(src)[0]
         view.set_y_axis_mode('sample')
         switch_elevation(view)
-        assert view._warped_elevation()[0] is first       # 同数据不重算
+        assert view._warped_elevation(src)[0] is first   # 同数据不重算
 
 
 class TestElevationCoordinates:

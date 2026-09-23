@@ -304,11 +304,12 @@ def _reset_page(page) -> None:
     page._auto_sticky_dual = False    # 粘性属于宿主页，必须一并重置
     page._preview_segment.setCurrentItem(_LSEG_ORIGINAL)
     # 视图级显示偏好归位（module 级 page fixture 跨测试残留；覆盖全部
-    # 布局页的面板。set_colormap/set_display_levels 均不发信号）
+    # 布局页的面板。set_colormap/set_display_levels/set_gain 均不发信号）
     for view in c.all_views():
         view.set_colormap('seismic')
         view.set_display_levels(2.0, 98.0, notify=False)
         view.set_colorbar_visible(True, notify=False)
+        view.set_gain('off', notify=False)
 
 
 @pytest.fixture(scope="module")

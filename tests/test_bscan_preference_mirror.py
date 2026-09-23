@@ -125,6 +125,20 @@ class TestSettingsPageMirror:
         page.sync_bscan_view_settings({'bscan_colormap': 'not-a-cmap'})
         assert page._bscan_cmap_combo.currentText() == 'seismic'
 
+    def test_gain_settings_are_applied(self, page):
+        """显示增益：模式/系数同步进控件；坏模式回落当前项（combo 既有
+        语义，同 test_unknown_value_falls_back_to_current），坏系数保持。"""
+        page.load_settings({'bscan_gain_mode': 'off',
+                            'bscan_gain_alpha': 0.2})
+        page.sync_bscan_view_settings({'bscan_gain_mode': 'sec',
+                                       'bscan_gain_alpha': 1.5})
+        assert page._bscan_gain_combo.currentData() == 'sec'
+        assert page._bscan_gain_alpha_spin.value() == pytest.approx(1.5)
+        page.sync_bscan_view_settings({'bscan_gain_mode': 'nonsense',
+                                       'bscan_gain_alpha': 'junk'})
+        assert page._bscan_gain_combo.currentData() == 'sec'   # 回落当前项
+        assert page._bscan_gain_alpha_spin.value() == pytest.approx(1.5)
+
     def test_round_trip_through_settings(self, page):
         """同步后 settings() 必须原样回读出同步值——closeEvent 靠的就是它。"""
         page.load_settings(dict.fromkeys(_BSCAN_KEYS))
@@ -136,6 +150,8 @@ class TestSettingsPageMirror:
             'bscan_colormap': 'viridis',
             'bscan_p_low': 6.0,
             'bscan_p_high': 94.0,
+            'bscan_gain_mode': 'sec',
+            'bscan_gain_alpha': 1.5,
             'bscan_colorbar_visible': False,
         }
         page.sync_bscan_view_settings(wanted)
@@ -164,6 +180,7 @@ class TestCloseEventDoesNotRevertUserChoice:
         ('bscan_aspect_mode', 'fit_square', 'square'),
         ('bscan_p_low', 'levels', 6.0),
         ('bscan_colorbar_visible', 'colorbar_toggle', False),
+        ('bscan_gain_mode', 'gain_sec', 'sec'),
     ])
     def test_preference_survives_close(self, qapp, key, setter, value):
         import numpy as np
@@ -192,6 +209,8 @@ class TestCloseEventDoesNotRevertUserChoice:
                 views[0].fit_square()
             elif setter == 'colorbar_toggle':
                 views[0].set_colorbar_visible(False, notify=True)
+            elif setter == 'gain_sec':
+                views[0].set_gain('sec', notify=True)
             else:
                 # set_display_levels 无数据时直接返回 False（不发信号），
                 # 故必须先喂一帧矩阵——这也顺带锁住「无数据不改色阶」。
@@ -206,6 +225,8 @@ class TestCloseEventDoesNotRevertUserChoice:
                 assert page._bscan_aspect_combo.currentData() == 'square'
             elif setter == 'colorbar_toggle':
                 assert page._bscan_colorbar_check.isChecked() is False
+            elif setter == 'gain_sec':
+                assert page._bscan_gain_combo.currentData() == 'sec'
             else:
                 assert page._bscan_p_low_spin.value() == pytest.approx(6.0)
 

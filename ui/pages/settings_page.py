@@ -205,6 +205,32 @@ class SettingsPage(ScrollArea):
             '色阶低/高百分位:', self._bscan_p_low_spin, self._bscan_p_high_spin,
             parent=card, trailing_stretch=False))
 
+        self._bscan_gain_combo = ComboBox(card)
+        self._bscan_gain_combo.addItem('关闭', userData='off')
+        self._bscan_gain_combo.addItem('SEC 补偿（扩散+指数吸收）',
+                                       userData='sec')
+        self._bscan_gain_combo.setMinimumWidth(200)
+        self._bscan_gain_combo.setToolTip(
+            'SEC 显示增益：按深度补偿球面扩散与介质吸收，深部弱信号开图'
+            '即可见；只在显示域逐行缩放，不改动存储数据。单视图切换可在 '
+            'B-Scan 上右键「显示增益」。')
+        self._bscan_gain_combo.currentIndexChanged.connect(
+            self._emit_bscan_changed)
+        self._bscan_gain_alpha_spin = DoubleSpinBox(card)
+        self._bscan_gain_alpha_spin.setRange(0.0, 20.0)
+        self._bscan_gain_alpha_spin.setDecimals(2)
+        self._bscan_gain_alpha_spin.setSingleStep(0.1)
+        self._bscan_gain_alpha_spin.setValue(0.2)
+        self._bscan_gain_alpha_spin.setMinimumWidth(90)
+        self._bscan_gain_alpha_spin.setToolTip(
+            'SEC 衰减补偿系数（dB/采样轴单位：深度轴为 dB/m，时间轴为 '
+            'dB/ns）。偏大致使深部噪声抬满时调小，或配合收窄色阶百分位。')
+        self._bscan_gain_alpha_spin.valueChanged.connect(
+            self._emit_bscan_changed)
+        layout.addLayout(make_form_row(
+            '显示增益:', self._bscan_gain_combo, self._bscan_gain_alpha_spin,
+            parent=card, trailing_stretch=False))
+
         self._bscan_colorbar_check = CheckBox('显示色标', card)
         self._bscan_colorbar_check.setChecked(True)
         self._bscan_colorbar_check.setToolTip(
@@ -280,6 +306,7 @@ class SettingsPage(ScrollArea):
                    self._bscan_y_axis_combo, self._bscan_layout_combo,
                    self._bscan_cmap_combo,
                    self._bscan_p_low_spin, self._bscan_p_high_spin,
+                   self._bscan_gain_combo, self._bscan_gain_alpha_spin,
                    self._bscan_colorbar_check)
         self._loading_settings = True
         for widget in widgets:
@@ -311,6 +338,13 @@ class SettingsPage(ScrollArea):
             low, high = _levels_or_default(data)
             self._bscan_p_low_spin.setValue(low)
             self._bscan_p_high_spin.setValue(high)
+            self._select_by_data(self._bscan_gain_combo,
+                                 data.get('bscan_gain_mode'), 'off')
+            try:
+                self._bscan_gain_alpha_spin.setValue(float(
+                    data.get('bscan_gain_alpha', 0.2)))
+            except (TypeError, ValueError):
+                pass        # 坏值：保持默认（同 spin 同步的容错口径）
             self._bscan_colorbar_check.setChecked(bool(
                 data.get('bscan_colorbar_visible', True)))
         finally:
@@ -335,6 +369,8 @@ class SettingsPage(ScrollArea):
             'bscan_colormap': str(self._bscan_cmap_combo.currentText()),
             'bscan_p_low': float(self._bscan_p_low_spin.value()),
             'bscan_p_high': float(self._bscan_p_high_spin.value()),
+            'bscan_gain_mode': str(self._bscan_gain_combo.currentData()),
+            'bscan_gain_alpha': float(self._bscan_gain_alpha_spin.value()),
             'bscan_colorbar_visible': bool(
                 self._bscan_colorbar_check.isChecked()),
         }
@@ -353,11 +389,13 @@ class SettingsPage(ScrollArea):
             (self._bscan_x_axis_combo, 'bscan_x_axis'),
             (self._bscan_y_axis_combo, 'bscan_y_axis'),
             (self._bscan_layout_combo, 'bscan_layout_mode'),
+            (self._bscan_gain_combo, 'bscan_gain_mode'),
         )
         cmap_combo = ((self._bscan_cmap_combo, 'bscan_colormap'),)
         spins = (
             (self._bscan_p_low_spin, 'bscan_p_low'),
             (self._bscan_p_high_spin, 'bscan_p_high'),
+            (self._bscan_gain_alpha_spin, 'bscan_gain_alpha'),
         )
         checks = (
             (self._bscan_colorbar_check, 'bscan_colorbar_visible'),

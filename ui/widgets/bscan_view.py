@@ -205,6 +205,8 @@ class BScanView(GraphicsViewBase, QWidget):
     sig_levels_changed = pyqtSignal(float, float)
     # 用户手动切换色标显隐时发射，供宿主写回设置
     sig_colorbar_visible_changed = pyqtSignal(bool)
+    # 用户手动切换显示增益（'off'/'sec'）时发射，供宿主写回设置
+    sig_gain_changed = pyqtSignal(str)
     # 工具条「⤢ 铺满」：本视图不认识页面布局，交给宿主页面折叠侧栏
     sig_expand_requested = pyqtSignal()
 
@@ -233,6 +235,11 @@ class BScanView(GraphicsViewBase, QWidget):
         # 色标显隐偏好：与色标对象解耦（with_colorbar=False 的视图无色标，
         # 偏好仍记录，构造处若支持可后续兑现）
         self._colorbar_visible = True
+        # 显示增益（SEC）：显示域逐行缩放（扩散∝d + 指数吸收补偿），
+        # raw 一个字节不动；增益后矩阵按 (矩阵身份, α) 缓存复用
+        self._gain_mode = 'off'
+        self._gain_alpha = 0.2
+        self._gain_cache = None
         # 「⤢ 铺满」只有接到了宿主页（能折叠侧栏）才有意义，默认隐藏该钮
         self._expand_enabled = False
         # 全屏宿主（懒创建）+ 几何持久化回调（主窗口注入，避免 view 碰文件）
@@ -614,6 +621,11 @@ class BScanView(GraphicsViewBase, QWidget):
         self._depth_axis_m = getattr(bundle, 'depth_axis_m', None)
         # 数据换了 → 轴可用性可能变（偏好若是海拔，新的数据支持则自动恢复）
         self._apply_axis_modes()
+        # 增益开启时 set_matrix 阶段只能用行号近似曲线（物理轴此刻才就位），
+        # 按物理轴补一次整体重渲染；海拔路径已在 _refresh_elevation_image
+        # 内通过 _resolve_display_target 拿到增益后目标，无需重复。
+        if self._gain_mode != 'off' and not self._showing_elevation:
+            self._refresh_gain_render()
 
     def set_matrix(self, matrix, vmin, vmax, *,
                    title="", x_label="道数", y_label="采样点") -> None:
@@ -626,7 +638,8 @@ class BScanView(GraphicsViewBase, QWidget):
         使 x/y 轴互换，与 x_label=道数 / y_label=采样点 及
         sig_point_picked(trace, sample) 契约矛盾，故按契约语义实现。）
 
-        本函数只送**原始（未变形）矩阵**上屏：海拔 warp 的原料（逐道高程/
+        本函数只送**原始（未变形）矩阵**的增益视图上屏（_matrix 本体保留
+        raw，供十字读数/波形/海拔 warp 使用）：海拔 warp 的原料（逐道高程/
         深度轴）由 set_bundle 在本函数之后才赋值，故海拔模式的换图统一由
         _apply_axis_modes → _refresh_elevation_image 兜底（set_bundle 末尾
         必然调用），这里不重复做。
@@ -652,7 +665,10 @@ class BScanView(GraphicsViewBase, QWidget):
         new_shape = (view.shape[1], view.shape[0])   # (traces, samples)
         shape_changed = new_shape != self._image_shape
         self._image_shape = new_shape
-        self._image_item.setImage(view, autoLevels=False,
+        # 上屏的是增益后矩阵（_matrix 保留 raw 供读数/波形/海拔 warp）；
+        # 此刻物理轴元数据尚未由 set_bundle 赋值，增益曲线先行退行号——
+        # set_bundle 末尾在增益开启时会按物理轴整体重渲染一次。
+        self._image_item.setImage(self._gain_applied(view), autoLevels=False,
                                   levels=(float(vmin), float(vmax)))
         if shape_changed:
             # 新数据尺寸变化时按当前比例策略铺满视野，避免换测线后图像跑出可视区
@@ -678,30 +694,39 @@ class BScanView(GraphicsViewBase, QWidget):
         self._empty_overlay.setVisible(False)
 
     def _resolve_display_target(self) -> tuple:
-        """按纵轴偏好解析应显示的矩阵：海拔偏好且可 warp → (warped, axis)。"""
+        """按纵轴偏好解析应显示的矩阵：海拔偏好且可 warp → (warped, axis)。
+
+        增益是显示链第一级：先对 raw 矩阵逐行缩放（每个采样点拿到自己
+        深度的精确增益），海拔 warp 的原料即增益后矩阵——warp 的逐列
+        线性重采样不破坏行增益语义。增益关闭时 src 即 raw（零拷贝）。
+        """
+        src = self._gain_applied(self._matrix)
         if self._y_axis == 'elevation':
-            warped, axis = self._warped_elevation()
+            warped, axis = self._warped_elevation(src)
             if warped is not None:
                 return warped, axis
-        return self._matrix, None
+        return src, None
 
-    def _warped_elevation(self) -> tuple:
+    def _warped_elevation(self, src) -> tuple:
         """海拔 warp（缓存：同一份数据/高程/深度只算一次，按对象身份判重）。
 
         缓存键用对象身份而不是 id()：id 在对象被回收后可能被新对象复用，
-        身份比较（is）则绝对可靠。换线/换数据时身份必然变化，缓存自动失效。
+        身份比较（is）则绝对可靠。增益开关/参数变化会生成新的 src 对象
+        （身份必变），warp 缓存随之自动失效重算。
+
+        :param src: 增益后矩阵（见 _resolve_display_target）。
         """
-        if self._matrix is None:
+        if src is None:
             return None, None
         cache = self._elev_cache
         if (cache is not None
-                and cache[0] is self._matrix
+                and cache[0] is src
                 and cache[1] is self._ground_elevation_m
                 and cache[2] is self._depth_axis_m):
             return cache[3], cache[4]
         warped, axis = build_elevation_view(
-            self._matrix, self._ground_elevation_m, self._depth_axis_m)
-        self._elev_cache = (self._matrix, self._ground_elevation_m,
+            src, self._ground_elevation_m, self._depth_axis_m)
+        self._elev_cache = (src, self._ground_elevation_m,
                             self._depth_axis_m, warped, axis)
         return warped, axis
 
@@ -713,7 +738,7 @@ class BScanView(GraphicsViewBase, QWidget):
         target, elev_axis = None, None
         if want:
             target, elev_axis = self._resolve_display_target()
-            if target is self._matrix:
+            if elev_axis is None:
                 want = False          # 数据不支持，回落采样轴显示
         if want == self._showing_elevation:
             return False
@@ -770,8 +795,11 @@ class BScanView(GraphicsViewBase, QWidget):
         """
         if self._matrix is None:
             return
+        # 色阶在**增益后**矩阵上取百分位：增益与百分位正交（增益纵向拉平、
+        # 百分位横向裁剪），顺序为先增益、再取百分位
         vmin, vmax = compute_display_levels(
-            self._matrix, p_low=self._p_low, p_high=self._p_high)
+            self._gain_applied(self._matrix),
+            p_low=self._p_low, p_high=self._p_high)
         self._image_item.setLevels((float(vmin), float(vmax)))
         if self._colorbar is not None:
             self._colorbar.setLevels((float(vmin), float(vmax)))
@@ -783,6 +811,94 @@ class BScanView(GraphicsViewBase, QWidget):
     def colorbar_visible(self) -> bool:
         """色标显隐偏好（与色标对象是否存在解耦）。"""
         return self._colorbar_visible
+
+    # ------------------------------------------------------------------ 显示增益
+    def gain_mode(self) -> str:
+        """当前显示增益模式：'off' / 'sec'。"""
+        return self._gain_mode
+
+    def set_gain(self, mode: str, *, alpha: float | None = None,
+                 notify: bool = False) -> None:
+        """切换显示增益；显示域逐行缩放，raw 一个字节不动。
+
+        :param mode: 'off' 关闭 / 'sec' SEC 补偿（扩散∝深度 + 指数吸收）。
+        :param alpha: SEC 衰减补偿系数（dB/采样轴单位：深度轴为 dB/m，
+            时间轴为 dB/ns）；None 保持现值。
+        :param notify: True 时发 sig_gain_changed（供宿主写回设置）；
+            恢复持久化阶段传 False。
+        """
+        mode = str(mode)
+        if mode not in ('off', 'sec'):
+            raise ValueError(f'未知增益模式: {mode!r}')
+        changed = (mode != self._gain_mode
+                   or (alpha is not None and float(alpha) != self._gain_alpha))
+        self._gain_mode = mode
+        if alpha is not None:
+            self._gain_alpha = float(alpha)
+        if changed:
+            self._gain_cache = None
+            self._refresh_gain_render()
+        if notify:
+            self.sig_gain_changed.emit(self._gain_mode)
+
+    def _refresh_gain_render(self) -> None:
+        """增益变了：按当前解析目标整体换图 + 重算色阶/波形。
+
+        与 _refresh_elevation_image 的差异：无论海拔状态是否变化都要换图
+        （增益改的是像素值本身），色阶随增益后矩阵重算（见
+        _apply_levels_to_render）。
+        """
+        if self._matrix is None:
+            return
+        target, elev_axis = self._resolve_display_target()
+        levels = self._image_item.levels
+        self._image_item.setImage(target, autoLevels=False, levels=levels)
+        self._showing_elevation = elev_axis is not None
+        self._elev_axis = elev_axis
+        self._image_shape = (target.shape[1], target.shape[0])
+        self._apply_levels_to_render()
+
+    def _gain_applied(self, mat):
+        """显示域增益变换：off 原样返回（零拷贝）；sec 返回逐行缩放结果。
+
+        缓存按 (矩阵身份, α) 判重——与海拔 warp 缓存同一纪律（身份比较，
+        不用 id()）。增益关闭时必须原样返回以保持「零拷贝 + 身份不变」
+        语义（海拔 warp 缓存、回落判定都依赖它）。
+        """
+        if mat is None or self._gain_mode == 'off':
+            return mat
+        cache = self._gain_cache
+        if (cache is not None and cache[0] is mat
+                and cache[1] == self._gain_alpha):
+            return cache[2]
+        import numpy as np
+        gain = self._sec_row_gain(mat.shape[0])
+        out = np.asarray(mat) * gain[:, None]
+        self._gain_cache = (mat, self._gain_alpha, out)
+        return out
+
+    def _sec_row_gain(self, n_rows: int):
+        """SEC 行增益曲线（长度 n_rows，浅→深单调放大）。
+
+        g(d) = (d + d0)/d0 × 10^(α·d/20)：扩散项 ∝ 深度（1/r 幅值补偿）
+        + 指数吸收补偿。d 取物理采样轴（米/纳秒，α 单位跟随轴）；无轴或
+        轴长不符时退行号（set_matrix 阶段物理轴尚未就位的近似，set_bundle
+        末尾会按物理轴重渲染）。浅端参考 d0 取轴量程 2% 防 1/r 发散；
+        总增益限幅 1000×（60 dB）防深部噪声底被抬满。
+        """
+        import numpy as np
+        axis = self._sample_axis
+        d = None
+        if axis is not None:
+            arr = np.asarray(axis, dtype=np.float64)
+            if (arr.ndim == 1 and arr.size == n_rows
+                    and np.isfinite(arr).all()):
+                d = np.abs(arr - arr[0])     # 浅端归零（兼容升/降序轴）
+        if d is None or n_rows < 2:
+            d = np.arange(n_rows, dtype=np.float64)
+        d0 = max(float(np.ptp(d)) * 0.02, 1e-6)
+        gain = ((d + d0) / d0) * np.power(10.0, self._gain_alpha * d / 20.0)
+        return np.clip(gain, 1.0, 1000.0)
 
     def set_colorbar_visible(self, visible: bool, *, notify: bool = False) -> None:
         """切换右侧色标条的显示；隐藏后其宽度完整归还画布。
@@ -990,6 +1106,15 @@ class BScanView(GraphicsViewBase, QWidget):
                 lambda _checked=False, m=mode: self.set_display_mode(m))
             mode_submenu.addAction(act)
         menu.addMenu(mode_submenu)
+        gain_submenu = RoundMenu('显示增益', menu)
+        for mode, label in (('off', '关闭'), ('sec', 'SEC 补偿')):
+            act = Action(label)
+            act.setCheckable(True)
+            act.setChecked(self._gain_mode == mode)
+            act.triggered.connect(
+                lambda _checked=False, m=mode: self.set_gain(m, notify=True))
+            gain_submenu.addAction(act)
+        menu.addMenu(gain_submenu)
 
     # ------------------------------------------------------------------ 交互
     def set_pick_enabled(self, enabled: bool) -> None:
@@ -1015,9 +1140,10 @@ class BScanView(GraphicsViewBase, QWidget):
 
         set_matrix 新数据到达时以 reset_view=False 重渲染波形，保持用户
         当前缩放/视野（原实现无条件 autoRange，新数据会冲掉手动缩放）。
-        波形数据源固定用未变形的 ``_matrix``：海拔模式下 ImageItem 里是
-        warp 后的矩阵，直接取列会把波形纵向重采样；正确做法是值取原
-        矩阵、纵坐标按海拔映射（见 _render_wiggle 的 y_context）。
+        波形数据源固定用未变形的 ``_matrix``（套显示增益，与灰度图一致）：
+        海拔模式下 ImageItem 里是 warp 后的矩阵，直接取列会把波形纵向
+        重采样；正确做法是值取原矩阵（增益后）、纵坐标按海拔映射
+        （见 _render_wiggle 的 y_context）。
         """
         img = self._image_item.image
         if img is None or self._matrix is None:
@@ -1031,7 +1157,7 @@ class BScanView(GraphicsViewBase, QWidget):
             self._image_item.hide()
         else:
             self._image_item.show()
-        self._render_wiggle(self._matrix,
+        self._render_wiggle(self._gain_applied(self._matrix),
                             filled=(mode is BScanDisplayMode.WIGGLE),
                             symmetric=(mode is BScanDisplayMode.WAVEFORM),
                             reset_view=reset_view,
