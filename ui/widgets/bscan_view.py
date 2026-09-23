@@ -203,6 +203,8 @@ class BScanView(GraphicsViewBase, QWidget):
     sig_y_axis_changed = pyqtSignal(str)
     # 用户手动改色阶（低/高百分位）时发射，供宿主写回设置
     sig_levels_changed = pyqtSignal(float, float)
+    # 用户手动切换色标显隐时发射，供宿主写回设置
+    sig_colorbar_visible_changed = pyqtSignal(bool)
     # 工具条「⤢ 铺满」：本视图不认识页面布局，交给宿主页面折叠侧栏
     sig_expand_requested = pyqtSignal()
 
@@ -228,6 +230,9 @@ class BScanView(GraphicsViewBase, QWidget):
         # 显示动态范围（百分位裁切）：右键「色阶设置」可改，不改数据
         self._p_low, self._p_high = _restored_levels(default_levels)
         self._matrix = None               # 当前显示矩阵（供重算色阶/刷新用）
+        # 色标显隐偏好：与色标对象解耦（with_colorbar=False 的视图无色标，
+        # 偏好仍记录，构造处若支持可后续兑现）
+        self._colorbar_visible = True
         # 「⤢ 铺满」只有接到了宿主页（能折叠侧栏）才有意义，默认隐藏该钮
         self._expand_enabled = False
         # 全屏宿主（懒创建）+ 几何持久化回调（主窗口注入，避免 view 碰文件）
@@ -775,6 +780,28 @@ class BScanView(GraphicsViewBase, QWidget):
             # 波形模式的振幅归一取自 levels，色阶变了要按新 levels 重画
             self._apply_display_mode(self.display_mode, reset_view=False)
 
+    def colorbar_visible(self) -> bool:
+        """色标显隐偏好（与色标对象是否存在解耦）。"""
+        return self._colorbar_visible
+
+    def set_colorbar_visible(self, visible: bool, *, notify: bool = False) -> None:
+        """切换右侧色标条的显示；隐藏后其宽度完整归还画布。
+
+        探针实证（``_probe_colorbar_toggle.py``）：ColorBarItem 插在 plot
+        右列，纯 ``setVisible`` 即可——隐藏后 vb.width 644→716（72px 完整
+        归还），再显示恢复 644，免动 GraphicsLayout。with_colorbar=False
+        构造的视图没有色标对象，此调用只记偏好不动渲染。
+
+        :param notify: True 时发 sig_colorbar_visible_changed（供宿主写回
+            设置）；恢复持久化阶段传 False。
+        """
+        visible = bool(visible)
+        self._colorbar_visible = visible
+        if self._colorbar is not None:
+            self._colorbar.setVisible(visible)
+        if notify:
+            self.sig_colorbar_visible_changed.emit(visible)
+
     def _edit_levels(self) -> None:
         """右键「色阶设置…」：弹窗取低/高百分位后应用。"""
         dialog = LevelsDialog(self.window(), self._p_low, self._p_high)
@@ -929,7 +956,7 @@ class BScanView(GraphicsViewBase, QWidget):
         return act
 
     def _add_menu_toggles(self, menu) -> None:
-        """交互开关组：十字光标 / A-scan 跟随 / 显示模式。"""
+        """交互开关组：十字光标 / A-scan 跟随 / 色标显隐 / 显示模式。"""
         from qfluentwidgets import Action
         crosshair_action = Action('十字光标读数')
         crosshair_action.setCheckable(True)
@@ -941,6 +968,14 @@ class BScanView(GraphicsViewBase, QWidget):
         ascan_action.setChecked(self._ascan_follow)
         ascan_action.triggered.connect(self.set_ascan_follow)
         menu.addAction(ascan_action)
+        if self._colorbar is not None:
+            colorbar_action = Action('显示色标')
+            colorbar_action.setCheckable(True)
+            colorbar_action.setChecked(self._colorbar_visible)
+            colorbar_action.triggered.connect(
+                lambda checked=False: self.set_colorbar_visible(
+                    checked, notify=True))
+            menu.addAction(colorbar_action)
         mode_submenu = RoundMenu('显示模式', menu)
         for mode in BScanDisplayMode:
             mode_label = {

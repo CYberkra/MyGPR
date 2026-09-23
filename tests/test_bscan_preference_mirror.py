@@ -108,6 +108,15 @@ class TestSettingsPageMirror:
         page.sync_bscan_view_settings({'bscan_p_low': 'not-a-number'})
         assert page._bscan_p_low_spin.value() == pytest.approx(4.0)
 
+    def test_colorbar_check_is_applied_and_round_trips(self, page):
+        """色标显隐：同步进勾选框 + settings() 回读一致（closeEvent 路径）。"""
+        page.load_settings({'bscan_colorbar_visible': True})
+        page.sync_bscan_view_settings({'bscan_colorbar_visible': False})
+        assert page._bscan_colorbar_check.isChecked() is False
+        assert page.bscan_view_settings()['bscan_colorbar_visible'] is False
+        page.sync_bscan_view_settings({'bscan_colorbar_visible': True})
+        assert page._bscan_colorbar_check.isChecked() is True
+
     def test_round_trip_through_settings(self, page):
         """同步后 settings() 必须原样回读出同步值——closeEvent 靠的就是它。"""
         page.load_settings(dict.fromkeys(_BSCAN_KEYS))
@@ -118,6 +127,7 @@ class TestSettingsPageMirror:
             'bscan_layout_mode': 'dual',
             'bscan_p_low': 6.0,
             'bscan_p_high': 94.0,
+            'bscan_colorbar_visible': False,
         }
         page.sync_bscan_view_settings(wanted)
         assert page.bscan_view_settings() == wanted
@@ -144,6 +154,7 @@ class TestCloseEventDoesNotRevertUserChoice:
     @pytest.mark.parametrize('key, setter, value', [
         ('bscan_aspect_mode', 'fit_square', 'square'),
         ('bscan_p_low', 'levels', 6.0),
+        ('bscan_colorbar_visible', 'colorbar_toggle', False),
     ])
     def test_preference_survives_close(self, qapp, key, setter, value):
         import numpy as np
@@ -170,6 +181,8 @@ class TestCloseEventDoesNotRevertUserChoice:
 
             if setter == 'fit_square':
                 views[0].fit_square()
+            elif setter == 'colorbar_toggle':
+                views[0].set_colorbar_visible(False, notify=True)
             else:
                 # set_display_levels 无数据时直接返回 False（不发信号），
                 # 故必须先喂一帧矩阵——这也顺带锁住「无数据不改色阶」。
@@ -182,6 +195,8 @@ class TestCloseEventDoesNotRevertUserChoice:
             page = window._page('settingsInterface')
             if setter == 'fit_square':
                 assert page._bscan_aspect_combo.currentData() == 'square'
+            elif setter == 'colorbar_toggle':
+                assert page._bscan_colorbar_check.isChecked() is False
             else:
                 assert page._bscan_p_low_spin.value() == pytest.approx(6.0)
 

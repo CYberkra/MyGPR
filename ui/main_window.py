@@ -256,8 +256,8 @@ class MyGPRMainWindow(FluentWindow):
     def _wire_bscan_preferences(self, page) -> None:
         """把页面内所有 BScanView 的显示偏好接到持久化设置（跨会话记住）。
 
-        覆盖：比例模式 / 横纵轴单位 / 色阶百分位 / 全屏窗口几何。恢复阶段
-        一律 ``notify=False``，否则形成「读设置 → 写设置」回环。
+        覆盖：比例模式 / 横纵轴单位 / 色阶百分位 / 色标显隐 / 全屏窗口几何。
+        恢复阶段一律 ``notify=False``，否则形成「读设置 → 写设置」回环。
         """
         views = page.findChildren(BScanView)
         if not views:
@@ -266,10 +266,12 @@ class MyGPRMainWindow(FluentWindow):
         x_axis = self._setting_choice('bscan_x_axis', ('trace', 'distance'), 'trace')
         y_axis = self._setting_choice('bscan_y_axis', ('sample', 'elevation'), 'sample')
         p_low, p_high = self._setting_levels()
+        colorbar_visible = self._setting_flag('bscan_colorbar_visible', True)
         for view in views:
             view.set_aspect_mode(aspect, notify=False)
             view.set_axis_modes(x_axis, y_axis, notify=False)
             view.set_display_levels(p_low, p_high, notify=False)
+            view.set_colorbar_visible(colorbar_visible, notify=False)
             view.set_geometry_store(loader=self._load_fullscreen_geometry,
                                     saver=self._save_fullscreen_geometry)
             self._connect_bscan_signals(view)
@@ -311,6 +313,9 @@ class MyGPRMainWindow(FluentWindow):
             lambda mode: self._mirror_bscan_setting('bscan_y_axis', str(mode)))
         view.sig_levels_changed.connect(
             lambda low, high: self._mirror_bscan_levels(low, high))
+        view.sig_colorbar_visible_changed.connect(
+            lambda visible: self._mirror_bscan_setting(
+                'bscan_colorbar_visible', bool(visible)))
 
     def _mirror_bscan_setting(self, key: str, value) -> None:
         """写盘 + 把设置页控件同步到同一值（避免关窗回写覆盖用户选择）。"""
@@ -347,6 +352,18 @@ class MyGPRMainWindow(FluentWindow):
         value = str(self.settings.get(key, fallback) or fallback)
         return value if value in allowed else fallback
 
+    def _setting_flag(self, key: str, fallback: bool) -> bool:
+        """读布尔型设置：兼容 JSON bool 与 'true'/'false' 文本，坏值回落。"""
+        value = self.settings.get(key, fallback)
+        if isinstance(value, bool):
+            return value
+        text = str(value).strip().lower()
+        if text in ('true', '1', 'yes'):
+            return True
+        if text in ('false', '0', 'no'):
+            return False
+        return fallback
+
     def _iter_bscan_views(self):
         """本会话所有 BScanView（含尚未构造的延迟页之外的已建页面）。"""
         for page in list(self.pages.values()):
@@ -373,6 +390,8 @@ class MyGPRMainWindow(FluentWindow):
                                 notify=False)
             view.set_display_levels(values['bscan_p_low'],
                                     values['bscan_p_high'], notify=False)
+            view.set_colorbar_visible(
+                bool(values.get('bscan_colorbar_visible', True)), notify=False)
         for container in self._iter_all_bscan_containers():
             # notify=True：切到/切出 auto 时页面要重分发数据。由此触发的
             # sig_layout_changed 会把同值写回设置（幂等），无行为副作用。

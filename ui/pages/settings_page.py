@@ -119,7 +119,7 @@ class SettingsPage(ScrollArea):
         return card
 
     def _build_bscan_card(self, parent):
-        """卡片2"B-Scan 视图"：比例 / 横纵轴单位 / 色阶（即时生效并跨会话记住）。
+        """卡片2"B-Scan 视图"：比例 / 横纵轴单位 / 色阶 / 色标显隐（即时生效并跨会话记住）。
 
         这几项在 BScanView 工具条与右键菜单里都能改，此处只是把「习惯」集中
         可查；改动即时应用到本会话所有 B-Scan（发 ``bscan_view_changed``，
@@ -191,6 +191,18 @@ class SettingsPage(ScrollArea):
         layout.addLayout(make_form_row(
             '色阶低/高百分位:', self._bscan_p_low_spin, self._bscan_p_high_spin,
             parent=card, trailing_stretch=False))
+
+        self._bscan_colorbar_check = CheckBox('显示色标', card)
+        self._bscan_colorbar_check.setChecked(True)
+        self._bscan_colorbar_check.setToolTip(
+            '取消勾选后隐藏 B-Scan 右侧色标条，其宽度归还画布；也可在'
+            ' B-Scan 上右键「显示色标」只切当前视图（跨会话记住）。')
+        self._bscan_colorbar_check.toggled.connect(self._emit_bscan_changed)
+        colorbar_row = QHBoxLayout()
+        colorbar_row.addWidget(self._bscan_colorbar_check)
+        colorbar_row.addStretch(1)
+        layout.addLayout(colorbar_row)
+
         layout.addWidget(make_hint(
             '色阶只影响显示的明暗对比，不改动数据；B-Scan 上右键「色阶设置…」'
             '可只改单个视图。', parent=card))
@@ -253,7 +265,8 @@ class SettingsPage(ScrollArea):
                    self._workers_spin, self._root_edit, self._prefetch_check,
                    self._bscan_aspect_combo, self._bscan_x_axis_combo,
                    self._bscan_y_axis_combo, self._bscan_layout_combo,
-                   self._bscan_p_low_spin, self._bscan_p_high_spin)
+                   self._bscan_p_low_spin, self._bscan_p_high_spin,
+                   self._bscan_colorbar_check)
         self._loading_settings = True
         for widget in widgets:
             widget.blockSignals(True)
@@ -279,6 +292,8 @@ class SettingsPage(ScrollArea):
             low, high = _levels_or_default(data)
             self._bscan_p_low_spin.setValue(low)
             self._bscan_p_high_spin.setValue(high)
+            self._bscan_colorbar_check.setChecked(bool(
+                data.get('bscan_colorbar_visible', True)))
         finally:
             for widget in widgets:
                 widget.blockSignals(False)
@@ -300,6 +315,8 @@ class SettingsPage(ScrollArea):
             'bscan_layout_mode': str(self._bscan_layout_combo.currentData()),
             'bscan_p_low': float(self._bscan_p_low_spin.value()),
             'bscan_p_high': float(self._bscan_p_high_spin.value()),
+            'bscan_colorbar_visible': bool(
+                self._bscan_colorbar_check.isChecked()),
         }
 
     def sync_bscan_view_settings(self, values: dict) -> None:
@@ -321,8 +338,12 @@ class SettingsPage(ScrollArea):
             (self._bscan_p_low_spin, 'bscan_p_low'),
             (self._bscan_p_high_spin, 'bscan_p_high'),
         )
+        checks = (
+            (self._bscan_colorbar_check, 'bscan_colorbar_visible'),
+        )
         touched = [w for w, key in combos if key in values]
         touched += [w for w, key in spins if key in values]
+        touched += [w for w, key in checks if key in values]
         self._loading_settings = True
         for widget in touched:
             widget.blockSignals(True)
@@ -337,6 +358,9 @@ class SettingsPage(ScrollArea):
                         spin.setValue(float(values[key]))
                     except (TypeError, ValueError):
                         continue        # 坏值：该项保持现状
+            for check, key in checks:
+                if key in values:
+                    check.setChecked(bool(values[key]))
         finally:
             for widget in touched:
                 widget.blockSignals(False)
