@@ -216,6 +216,19 @@ class BScanContainer(QWidget):
             sub.showNormal()
         self._mdi.tileSubWindows()
 
+    def set_free_titles(self, original: str, result: str) -> None:
+        """自由窗口两窗标题动态化（宿主分发数据时调用，CaGPR 式）。
+
+        标题是纯展示：不影响 views() 顺序、窗位与分发语义；空值回落
+        固定标题（「原始数据」/「处理结果」）。子窗口按创建顺序取
+        （0=原始、1=成果），与 activation order 无关。
+        """
+        subs = self._mdi.subWindowList()
+        if len(subs) < 2:
+            return
+        subs[0].setWindowTitle(str(original or '') or _FREE_WINDOW_TITLES[0])
+        subs[1].setWindowTitle(str(result or '') or _FREE_WINDOW_TITLES[1])
+
     # ------------------------------------------------------------ 布局模式
     def layout_mode(self) -> str:
         """设置层的偏好值（可能是 auto；实体布局见 effective_mode）。"""

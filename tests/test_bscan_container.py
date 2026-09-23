@@ -198,6 +198,21 @@ class TestFreeLayout:
             assert not (flags & Qt.WindowType.WindowMinimizeButtonHint)
             assert flags & Qt.WindowType.WindowMaximizeButtonHint
 
+    def test_set_free_titles_dynamic_and_fallback(self, container):
+        """标题动态化（CaGPR 式）：宿主喂数据名，空值回落固定标题。
+
+        标题是纯展示：views() 顺序与窗位对象不受影响。
+        """
+        container.set_layout_mode(LAYOUT_FREE, notify=False)
+        subs = container._mdi.subWindowList()
+        container.set_free_titles('测线 L3 · 原始数据', '成果 R2')
+        assert subs[0].windowTitle() == '测线 L3 · 原始数据'
+        assert subs[1].windowTitle() == '成果 R2'
+        assert container.view_at(0) is container.views()[0]   # 契约不动
+        container.set_free_titles('', '')
+        assert subs[0].windowTitle() == '原始数据'
+        assert subs[1].windowTitle() == '处理结果'
+
     def test_close_is_intercepted(self, container, qapp):
         """关闭拦截：close() 被拒绝，面板保持可见、views() 契约不动。"""
         container.show()
@@ -319,6 +334,17 @@ class TestProcessingPageDistribution:
         page.set_original_bundle(_bundle(1))
         assert container.view_at(0)._matrix is not None
         assert container.view_at(1)._matrix is None
+
+    def test_free_titles_follow_bundles(self, page, container):
+        """free 窗标题跟数据走：分发带 bundle.title，成果清空回落固定标题。"""
+        container.set_layout_mode(LAYOUT_FREE, notify=False)
+        page.set_original_bundle(_bundle(1))
+        page.set_result_bundle(_bundle(2))
+        subs = container._mdi.subWindowList()
+        assert subs[0].windowTitle() == 'b1 · 原始数据'
+        assert subs[1].windowTitle() == 'b2'
+        page.set_result_bundle(None)
+        assert subs[1].windowTitle() == '处理结果'
 
     def test_switch_dual_to_free_keeps_data(self, page, container):
         """dual ↔ free 切换：数据跟着分发走，窗位顺序不变。"""
