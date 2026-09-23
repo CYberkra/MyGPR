@@ -34,6 +34,7 @@ sample_axis 时显示物理量，降采样数据附"原始约 N"），右键菜�
 import math
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
 from enum import Enum
@@ -310,9 +311,13 @@ class BScanView(GraphicsViewBase, QWidget):
 
         self._colorbar = None
         if with_colorbar:
-            self._colorbar = pg.ColorBarItem(label='幅度', interactive=False)
+            # 瘦身：去掉竖排「幅度」label、刻度 7pt 小字——值条语义自明
+            # （幅度由上下文与读数浮层表达），每图省 ~25px 宽还给画布。
+            self._colorbar = pg.ColorBarItem(interactive=False)
             self._colorbar.setImageItem(self._image_item,
                                         insert_in=self._plot)
+            self._colorbar.axis.setStyle(
+                tickFont=QFont(constants.FONT_FAMILY, 7))
 
         # overlay 标注散点（解释页）
         self._scatter = pg.ScatterPlotItem(
@@ -320,6 +325,25 @@ class BScanView(GraphicsViewBase, QWidget):
             brush=pg.mkBrush(constants.CHART_OVERLAY_COLOR))
         self._plot.addItem(self._scatter)
         self.set_colormap('seismic')
+
+    @staticmethod
+    def _compact_title_html(title: str) -> str:
+        """图内标题 8pt 小字 + 超长截短（空间瘦身双保险）。
+
+        - 8pt：标题行高约减半（pyqtgraph 默认字号太占纵向）；
+        - 截短：**title 会参与 PlotItem 布局的列最小宽**（实测每字符
+          ~4px @8pt），长成果名会把右侧色标列推出视口（444px 卡上
+          30 字符即出界，实探针）；截到 20 字符（保头尾，中略）后
+          窄栏双图也稳。空标题时 pyqtgraph 自动隐藏。
+        """
+        text = str(title or '')
+        if not text:
+            return ''
+        if len(text) > 20:
+            text = text[:12] + '…' + text[-7:]
+        text = (text.replace('&', '&amp;')
+                .replace('<', '&lt;').replace('>', '&gt;'))
+        return f'<span style="font-size:8pt">{text}</span>'
 
     def _init_readout_overlay(self) -> None:
         """十字光标读数浮层（左下角，半透明底白字，深浅主题通用）。"""
@@ -677,9 +701,10 @@ class BScanView(GraphicsViewBase, QWidget):
         # 不重置缩放（reset_view=False，模式切换才重置）
         if self.display_mode is not BScanDisplayMode.GRAYSCALE:
             self._apply_display_mode(self.display_mode, reset_view=False)
-        # 图内标题只留数据身份（如"测线 L3"）；空标题时 pyqtgraph 自动隐藏
+        # 图内标题只留数据身份（如"测线 L3"）；空标题时 pyqtgraph 自动隐藏。
+        # 8pt 小字（空间瘦身）：身份保留、标题行高约减半，默认字号太占纵向。
         self._export_title = str(title or '')
-        self._plot.setTitle(self._export_title)
+        self._plot.setTitle(self._compact_title_html(self._export_title))
         self._plot.setLabel('bottom', x_label)
         self._plot.setLabel('left', y_label)
         # 数据换了 → 轴可用性与刻度都要重算（单位切换不动，标签由调用方给定）
