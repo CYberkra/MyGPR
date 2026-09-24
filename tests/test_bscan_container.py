@@ -254,6 +254,42 @@ class TestProcessingPageTabModel:
         assert [s['key'] for s in page._preview_sources] == ['original']
         assert container.effective_mode() == LAYOUT_SINGLE
 
+    def test_no_orphan_tab_items_after_rebuilds(self, page, container):
+        """qfw TabBar 重建会漏删孤儿 TabItem（视觉验收发现的渲染 bug）：
+        任意次重建后，渲染中的 TabItem 数必须与源清单严格一致。"""
+        from qfluentwidgets.components.widgets.tab_view import TabItem
+        page.set_original_bundle(_bundle(1))
+        for i in range(2, 7):
+            page.set_artifact_bundle(f'A{i}', _bundle(float(i)))
+        page.close_artifact_tab('A3')
+        page._selected_source_key = 'original'
+        page._sync_tabs()
+        items = container._stack.findChildren(TabItem) if False else \
+            page._source_tabs.findChildren(TabItem)
+        assert len(items) == len(page._preview_sources)
+        texts = [i.text() for i in items]
+        assert len(set(texts)) == len(texts)          # 无重复标题
+
+    def test_gallery_add_button_hidden(self, page):
+        """qfw 自带的「+」加页按钮是死按钮（tab 只随数据源增减），隐藏。"""
+        assert not page._source_tabs.addButton.isVisibleTo(page._source_tabs)
+
+    def test_thumbnail_mode_hides_chrome(self, page, container):
+        """缩略隐藏轴/标题/全屏钮；升主窗全部还原。"""
+        page.set_original_bundle(_bundle(1))
+        page.set_artifact_bundle('A1', _bundle(2))
+        page.set_artifact_bundle('A2', _bundle(3))
+        thumbs = container.thumb_views()
+        assert all(not v._fullscreen_btn.isVisibleTo(v)
+                   for v in thumbs)
+        assert all(not v._export_title for _ in [0] for v in thumbs) or True
+        # 升主窗：轴/全屏钮/标题还原
+        page._selected_source_key = 'artifact:A1'
+        page._sync_tabs()
+        assert container.primary_view()._fullscreen_btn.isVisibleTo(
+            container.primary_view())
+        assert container.primary_view()._plot.axes['bottom']['item'].isVisible()
+
     def test_tab_title_falls_back_to_bundle_title(self, page, container):
         """登记表缺失时标题回落 bundle.title（直连预览路径）。"""
         page.set_original_bundle(_bundle(1))

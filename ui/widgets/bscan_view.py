@@ -1029,6 +1029,21 @@ class BScanView(GraphicsViewBase, QWidget):
         """当前是否处于独立窗口展开态。"""
         return self._fullscreen is not None and self._fullscreen.isVisible()
 
+    def set_thumbnail_mode(self, on: bool) -> None:
+        """缩略模式（主辅布局的导航格）：隐藏轴/图内标题/全屏钮。
+
+        缩略格只承担"认出这是哪个源 + 点击升主窗"两个职责，完整轴系在
+        170px 宽里挤成噪音。升主窗时以同调用还原（轴重现、标题按
+        ``_export_title`` 重挂、全屏钮回归）。
+        """
+        for axis in ('bottom', 'left'):
+            (self._plot.hideAxis if on else self._plot.showAxis)(axis)
+        self._fullscreen_btn.setVisible(not on)
+        if on:
+            self._plot.setTitle(None)      # pyqtgraph 隐藏标题的唯一方式
+        elif self._export_title:
+            self._plot.setTitle(self._compact_title_html(self._export_title))
+
     def toggle_fullscreen(self) -> None:
         """进出独立窗口展开（重复调用即切换）。"""
         if self.is_fullscreen():

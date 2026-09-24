@@ -34,6 +34,7 @@ from qfluentwidgets import (
     CaptionLabel, ComboBox, InfoBar, TabBar,
     InfoBarPosition, LineEdit, PrimaryPushButton, ProgressBar, PushButton,
 )
+from qfluentwidgets.components.widgets.tab_view import TabItem
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants
@@ -148,6 +149,9 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._source_tabs = TabBar(self)
         self._source_tabs.setTabsClosable(True)
         self._source_tabs.setMovable(True)
+        # qfw 自带的「+」加页按钮：本页 tab 只随数据源增减，按钮无功能，
+        # 留着只会诱导误点（死按钮）
+        self._source_tabs.setAddButtonVisible(False)
         preview_card, preview_layout = make_card('数据预览')
         tab_row = QHBoxLayout()
         tab_row.setSpacing(constants.CARD_SPACING)
@@ -437,7 +441,24 @@ class ProcessingPage(PanelStateMixin, QWidget):
         if index >= 0:
             bar.setCurrentIndex(index)
         bar.blockSignals(False)
+        self._purge_orphan_tab_items()
         self._redistribute()
+
+    def _purge_orphan_tab_items(self) -> None:
+        """清扫 qfw TabBar 的孤儿 TabItem（视觉验收发现的真 bug）。
+
+        qfw ``removeTab`` 依赖 ``deleteLater`` 销毁旧 TabItem，但在本页的
+        blockSignals+closable 重建路径下孤儿会逃逸销毁——每次重建残留一个
+        首位同名 item，累积后渲染成"tab 重复/碎片墙"（截图实证：4 源渲染
+        出 7+ 个 tab）。按对象身份比对：不在 ``bar.items`` 里的即为孤儿 →
+        setParent(None) 立即脱离显示 + deleteLater 兜底销毁。
+        """
+        bar = self._source_tabs
+        live = {id(item) for item in bar.items}
+        for item in bar.findChildren(TabItem):
+            if id(item) not in live:
+                item.setParent(None)
+                item.deleteLater()
 
     def _on_tab_selected(self, index: int) -> None:
         """选中 tab：更新焦点 key；越出主区（>4）的换入末位主面板。"""
@@ -479,29 +500,37 @@ class ProcessingPage(PanelStateMixin, QWidget):
         container = self._bscan_container
         count = min(len(self._preview_sources), MAX_PANELS)
         container.resolve_auto(count)
-        if container.effective_mode() == LAYOUT_FOCUS:
+        focus = container.effective_mode() == LAYOUT_FOCUS
+        if focus:
             selected = self._preview_sources[self._selected_source_index()]
-            self._bind_source(container.primary_view(), selected)
+            self._bind_source(container.primary_view(), selected, thumb=False)
             others = [s for s in self._preview_sources
                       if s['key'] != selected['key']][:_MAX_THUMBS]
             for view, source in zip(container.thumb_views(), others):
-                self._bind_source(view, source)
+                self._bind_source(view, source, thumb=True)
         else:
             for index in range(count):
                 self._bind_source(container.view_at(index),
-                                  self._preview_sources[index])
+                                  self._preview_sources[index], thumb=False)
         self._sync_thumb_activation()
         self._update_readability_hint()
         extra = len(self._preview_sources) - MAX_PANELS
         self._gallery_btn.setText(f'总览墙 +{extra}' if extra > 0
                                   else '总览墙')
 
-    def _bind_source(self, view, source) -> None:
-        """单面板绑定：有 bundle 直接送，缺则清空并发懒加载请求。"""
+    def _bind_source(self, view, source, *, thumb: bool = False) -> None:
+        """单面板绑定：有 bundle 直接送，缺则清空并发懒加载请求。
+
+        ``thumb`` 决定视图形态（缩略隐藏轴/标题/全屏钮）；升主窗/降缩略
+        都经本函数重设形态，轴与全屏钮随角色还原。
+        """
+        view.set_thumbnail_mode(thumb)
         if source['bundle'] is not None:
             view.set_bundle(source['bundle'])
+            view.set_thumbnail_mode(thumb)
             return
         view.clear()
+        view.set_thumbnail_mode(thumb)
         artifact_id = str(source.get('artifact_id') or '')
         if artifact_id:
             self.artifact_preview_requested.emit(artifact_id)
