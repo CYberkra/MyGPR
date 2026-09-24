@@ -31,11 +31,9 @@ DEFAULT_SETTINGS = {
     # B-Scan 轴单位：横轴 trace 道数（默认）/ distance 距离(m)；纵轴 sample 采样轴 / elevation 海拔(m)
     'bscan_x_axis': 'trace',
     'bscan_y_axis': 'sample',
-    # B-Scan 预览布局（BScanContainer）：auto 面板数自动跟随数据（默认）/
-    # single 单视图 / dual 双视图对比 / quad 四宫格 / free 自由分屏（占比可调）
-    'bscan_layout_mode': 'auto',
-    # B-Scan 自由分屏占比（千分比文本 '750,250'），空串=未存过
-    'bscan_free_split': '',
+    # B-Scan 预览布局已退役（2026-09-24 tab 模型：窗口数=打开的 tab 数，
+    # 自动排布；旧设置文件里的 bscan_layout_mode/bscan_free_split 键
+    # 读取后闲置，不再消费）
     # B-Scan 显示色阶（低/高百分位，只影响显示不影响数据）
     'bscan_p_low': 2.0,
     'bscan_p_high': 98.0,

@@ -10,14 +10,15 @@
   卡片"参数设置"（ParamForm + 应用到选中步骤）、卡片"执行"（输入数据选择
   支持从某个成果继续处理 + 结果名 + 运行/取消）、卡片"AutoTune 自动调参"
 
-预览布局（BScanContainer，Phase 2）：
-- auto（默认）：面板数自动跟随数据——只有原始数据→单视图（分段控件
-  切换显示），原始+成果齐→自动变 0 号位原始 | 1 号位成果同屏对比；
-- single：固定单视图，分段控件切换显示原始数据 / 处理结果（历史行为）；
-- dual：固定左右并排双视图，分段控件此时决定色阶刷新焦点；
-- quad：固定 2×2 四宫格，0/1 号位与 dual 相同，2/3 号位留空占位；
-- free：自由窗口（Windows 视窗式）——两个可拖动/缩放/最大化的子窗口
-  （0 号位原始数据、1 号位处理结果），右键空白处平铺/层叠/重置。
+预览区（tab 模型，2026-09-24）：胶囊 TabBar = 打开的数据源清单——
+- 原始数据固定首 tab 不可关；运行链的每步中间成果（B7 落盘的
+  intermediate artifact）与最终成果跑完自动开 tab，标题 = 算法名
+  （method_id），末位挂 ✓；tab 可关、可拖排序；
+- **tab 即窗口**：窗口数 = min(tab 数, 4) 自动排布（1→单窗 2→左右
+  3-4→2×2），>4 主区留前 4、全部进总览墙；选中的 tab 总在主区；
+- bundle 懒加载：可见面板缺 bundle 时发 artifact_preview_requested，
+  协调器接 project_controller.preview_artifact 异步回填
+  set_artifact_bundle。
 
 页面纯展示 + 发信号，不直接调 controller/backend。
 内部联动：PipelineList.sig_step_selected → ParamForm 载入该步骤参数；
@@ -30,7 +31,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (QHBoxLayout, QVBoxLayout, QWidget)
 from qfluentwidgets import (
-    CaptionLabel, ComboBox, InfoBar,
+    CaptionLabel, ComboBox, InfoBar, TabBar,
     InfoBarPosition, LineEdit, PrimaryPushButton, ProgressBar, PushButton,
 )
 from qfluentwidgets import FluentIcon as FIF
@@ -38,16 +39,10 @@ from qfluentwidgets import FluentIcon as FIF
 from ui import constants
 from ui.motion import animate_progress
 from ui.page_scaffold import (PanelStateMixin, make_card, make_form_row,
-                              make_scroll_column, make_segment_card,
-                              refill_combo)
-from ui.widgets import (BScanContainer, BScanView, CollapsiblePanel,
-                        MethodBrowser, ParamForm, PipelineList, SlimSegment,
+                              make_scroll_column, refill_combo)
+from ui.widgets import (BScanContainer, CollapsiblePanel,
+                        MethodBrowser, ParamForm, PipelineList, MAX_PANELS,
                         clear_invalid, make_separator)
-from ui.widgets.bscan_container import LAYOUT_AUTO, LAYOUT_SINGLE
-
-# 预览分段（SlimSegment routeKey）
-_SEG_ORIGINAL = 'originalData'
-_SEG_RESULT = 'processResult'
 
 
 def _short_timestamp(raw: str) -> str:
@@ -73,6 +68,9 @@ class ProcessingPage(PanelStateMixin, QWidget):
     autotune_requested = pyqtSignal(str, dict, str)  # method_id, params_hint, input_artifact_id
     line_changed = pyqtSignal(str)              # 处理页测线选择变化
     artifact_selected = pyqtSignal(str)         # 处理页成果选择变化
+    # tab 模型懒加载：可见面板缺 bundle → 请求预览该成果（协调器接
+    # project_controller.preview_artifact，异步回填 set_artifact_bundle）
+    artifact_preview_requested = pyqtSignal(str)
     # 批量处理（B4）UI 已按用户决策暂时屏蔽（2026-09-02）：卡片、信号与
     # 接线整体撤下；后端 run_pipeline_batch 契约保留，恢复时重建本页卡片
     # 并回接 page_coordinator._on_batch_run_requested 即可。
@@ -83,9 +81,13 @@ class ProcessingPage(PanelStateMixin, QWidget):
         super().__init__(parent)
         self._methods = []
         self._methods_by_id = {}
-        self._original_bundle = None
-        self._result_bundle = None
-        self._auto_sticky_dual = False    # 粘性 auto：见 _sync_auto_layout
+        # tab 模型（2026-09-24）：打开的数据源 = 画布窗口，tab 数决定面板
+        # 数（1→单窗 2→左右 3-4→2×2，>4 主区留前 4、其余总览墙）。
+        self._preview_sources = []        # [{key,title,bundle,artifact_id,closable,is_final}]
+        self._selected_source_key = 'original'
+        self._opened_run_groups = set()   # 已自动展开的 run_group_id（每组一次）
+        self._artifacts_by_id = {}        # artifact_id -> ProjectArtifact
+        self._gallery = None              # 总览墙（懒创建，随主页销毁）
         self._running = False
         self._job_id = ''
         self._selected_step = -1
@@ -136,18 +138,23 @@ class ProcessingPage(PanelStateMixin, QWidget):
         middle_layout.setSpacing(constants.PAGE_SPACING)
         columns.addWidget(middle, 1)
 
-        # header 单行化：标题居左 + 原始/结果瘦页签居右（make_segment_card
-        # 范式）；选择器行（测线 / 成果 下拉）保持第二行。
-        self._preview_segment = SlimSegment(self)
-        self._preview_segment.addItem(
-            _SEG_ORIGINAL, '原始数据',
-            onClick=lambda: self._show_bundle(_SEG_ORIGINAL))
-        self._preview_segment.addItem(
-            _SEG_RESULT, '处理结果',
-            onClick=lambda: self._show_bundle(_SEG_RESULT))
-        self._preview_segment.setCurrentItem(_SEG_ORIGINAL)
-        preview_card, preview_layout = make_segment_card(
-            '数据预览', self._preview_segment, parent=self)
+        # tab 模型：胶囊 TabBar = 打开的数据源清单（原始数据固定首 tab
+        # 不可关；步骤/成果 tab 可关、可拖排序）；tab 数决定画布窗口数。
+        self._source_tabs = TabBar(self)
+        self._source_tabs.setTabsClosable(True)
+        self._source_tabs.setMovable(True)
+        preview_card, preview_layout = make_card('数据预览')
+        tab_row = QHBoxLayout()
+        tab_row.setSpacing(constants.CARD_SPACING)
+        tab_row.addWidget(self._source_tabs, 1)
+        self._gallery_btn = PushButton('总览墙', self)
+        self._gallery_btn.setFixedWidth(72)
+        self._gallery_btn.setToolTip(
+            '弹出总览墙：网格展示全部打开的数据源，点格子的标题把该源'
+            '送回主区（tab 数超过 4 时跑完链会自动弹一次）。')
+        self._gallery_btn.clicked.connect(self._open_gallery)
+        tab_row.addWidget(self._gallery_btn)
+        preview_layout.addLayout(tab_row)
 
         sel_row = QHBoxLayout()
         sel_row.setSpacing(constants.CARD_SPACING)
@@ -166,6 +173,9 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._bscan_container = BScanContainer(preview_card)
         self._bscan_container.setMinimumHeight(constants.PREVIEW_MIN_HEIGHT)
         preview_layout.addWidget(self._bscan_container, 1)
+        # 原始数据锚点 tab（须在容器就位后建：_sync_tabs 会走 resolve_auto）
+        self._ensure_original_source()
+        self._sync_tabs()
 
         # 色阶工具行已退役（2026-09-23）：色标映射与色阶百分位收容进设置页
         # 「B-Scan 视图」卡（改值全量下发并持久化），单视图微调走 B-Scan
@@ -270,8 +280,9 @@ class ProcessingPage(PanelStateMixin, QWidget):
         # 不再持有副本，视图偏好由主窗启动期统一恢复、用户操作镜像写回。
         self._line_combo.currentIndexChanged.connect(self._on_line_combo_changed)
         self._artifact_combo.currentIndexChanged.connect(self._on_artifact_combo_changed)
-        # 布局切换：新面板是空白实例，重广播色标并重新分发 bundle
-        self._bscan_container.sig_layout_changed.connect(self._on_layout_changed)
+        # tab 模型：关闭 / 选中 → 源清单变更 → 重排画布面板
+        self._source_tabs.tabCloseRequested.connect(self._on_tab_close)
+        self._source_tabs.currentChanged.connect(self._on_tab_selected)
 
         # 执行
         self._run_btn.clicked.connect(self._on_run_clicked)
@@ -311,38 +322,159 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._method_browser.set_methods(self._methods)
 
     def set_original_bundle(self, bundle) -> None:
-        """原始数据预览 bundle。
-
-        auto 模式下先走粘性布局解析（见 _sync_auto_layout：原始数据是
-        对比锚，锚没了粘性重置）；dual/quad/free 下 0 号位固定显示原始
-        数据，无论分段停在哪一侧都要重发；single 下仅当分段选中
-        "原始数据"时刷新。
-        """
+        """原始数据预览 bundle → 固定首 tab（不可关；换测线即换内容）。"""
         self._original_bundle = bundle
-        self._sync_auto_layout()
-        if self._shows_both_panels():
-            self._distribute_bundles()
-        elif self._current_segment() == _SEG_ORIGINAL:
-            self._show_bundle(_SEG_ORIGINAL)
+        self._ensure_original_source()
+        for source in self._preview_sources:
+            if source['key'] == 'original':
+                source['bundle'] = bundle
+        self._redistribute()
 
-    def set_result_bundle(self, bundle) -> None:
-        """处理结果预览 bundle（分发语义同 set_original_bundle）。
+    def set_artifact_bundle(self, artifact_id: str, bundle) -> None:
+        """成果/步骤预览 bundle → 打开（或更新）对应的 artifact tab。
 
-        auto 模式下成果到达长出对比布局并粘住；bundle=None（删除/换线）
-        只清成果位数据，**不**收回布局——看图时布局不跳变。
+        tab 已开 → 换内容；未开 → 新建（标题=算法名，取本页成果登记表
+        的 method_id，缺省回落 bundle.title）。bundle 异步到达时对应
+        面板已在 _redistribute 里绑定/清空过，这里补齐后重分发。
         """
-        self._result_bundle = bundle
-        self._sync_auto_layout()
-        if self._shows_both_panels():
-            self._distribute_bundles()
-        elif self._current_segment() == _SEG_RESULT:
-            self._show_bundle(_SEG_RESULT)
+        key = f'artifact:{artifact_id}'
+        for source in self._preview_sources:
+            if source['key'] == key:
+                source['bundle'] = bundle
+                if bundle is not None and getattr(bundle, 'title', ''):
+                    source['title'] = str(bundle.title)
+                self._redistribute()
+                return
+        title = self._artifact_title(artifact_id, bundle)
+        self._preview_sources.append({
+            'key': key, 'title': title, 'bundle': bundle,
+            'artifact_id': str(artifact_id), 'closable': True,
+            'is_final': False})
+        self._selected_source_key = key
+        self._sync_tabs()
 
-    def show_result_segment(self) -> None:
-        """切换到"处理结果"预览分段（运行完成后自动展示新成果）。"""
-        self._preview_segment.setCurrentItem(_SEG_RESULT)
-        if self._current_segment() == _SEG_RESULT:
-            self._show_bundle(_SEG_RESULT)
+    def close_artifact_tab(self, artifact_id: str) -> None:
+        """外部删除成果 → 关闭其 tab（原始 tab 永不受影响）。"""
+        key = f'artifact:{artifact_id}'
+        for index, source in enumerate(self._preview_sources):
+            if source['key'] == key:
+                self._on_tab_close(index)
+                return
+
+    def close_all_artifact_tabs(self) -> None:
+        """换测线/清上下文：关闭全部成果/步骤 tab（原始锚点保留换内容）。"""
+        self._preview_sources = [s for s in self._preview_sources
+                                 if s['key'] == 'original']
+        self._selected_source_key = 'original'
+        self._sync_tabs()
+
+    def show_latest_result(self) -> None:
+        """跑完链后自动选中末位 tab（= 最终结果）；>4 源自动弹总览墙。"""
+        if self._preview_sources:
+            self._selected_source_key = self._preview_sources[-1]['key']
+            self._sync_tabs()
+            if len(self._preview_sources) > MAX_PANELS:
+                self._open_gallery()
+
+    def _open_gallery(self) -> None:
+        """总览墙（非模态）：每次打开重建内容（源清单 ≤16，成本可忽略）。"""
+        from ui.widgets.bscan_gallery import BScanGallery
+        self._gallery = BScanGallery(self)
+        self._gallery.show()
+
+    def on_gallery_pick(self, key: str) -> None:
+        """总览墙点格子：选中该源（可见性规则把它换入主面板）。"""
+        self._selected_source_key = key
+        self._ensure_selected_visible()
+
+    # -------------------------------------------------- tab 模型（源清单）
+    def _ensure_original_source(self) -> None:
+        """原始数据是 tab 条的锚点：固定首 tab、不可关。"""
+        if not any(s['key'] == 'original' for s in self._preview_sources):
+            self._preview_sources.insert(0, {
+                'key': 'original', 'title': '原始数据', 'bundle': None,
+                'artifact_id': '', 'closable': False, 'is_final': False})
+
+    def _artifact_title(self, artifact_id: str, bundle) -> str:
+        """tab 标题 = 算法名（成果登记表的 method_id），缺省回落 bundle 标题。"""
+        art = self._artifacts_by_id.get(str(artifact_id or ''))
+        method = str(getattr(art, 'method_id', '') or '') if art else ''
+        if method:
+            return method
+        return str(getattr(bundle, 'title', '') or '') or '处理结果'
+
+    def _selected_source_index(self) -> int:
+        for index, source in enumerate(self._preview_sources):
+            if source['key'] == self._selected_source_key:
+                return index
+        return 0 if self._preview_sources else -1
+
+    def _sync_tabs(self) -> None:
+        """TabBar 与源清单整体对齐（条目少，重建成本可忽略）。
+
+        blockSignals 包住重建：addTab/removeTab 触发的 currentChanged
+        不能中途跑 _on_tab_selected（会改选中态引发重入）。
+        """
+        bar = self._source_tabs
+        bar.blockSignals(True)
+        while bar.count():
+            bar.removeTab(bar.count() - 1)
+        for source in self._preview_sources:
+            suffix = ' ✓' if source.get('is_final') else ''
+            bar.addTab(source['key'], source['title'] + suffix)
+        index = self._selected_source_index()
+        if index >= 0:
+            bar.setCurrentIndex(index)
+        bar.blockSignals(False)
+        self._redistribute()
+
+    def _on_tab_selected(self, index: int) -> None:
+        """选中 tab：更新焦点 key；越出主区（>4）的换入末位主面板。"""
+        if not (0 <= index < len(self._preview_sources)):
+            return
+        self._selected_source_key = self._preview_sources[index]['key']
+        self._ensure_selected_visible()
+
+    def _ensure_selected_visible(self) -> None:
+        """可见性规则（锁定稿）：选中的 tab 总在主区——超出前 4 的换入
+        末位主面板位置（其余 tab 留在总览墙）。"""
+        index = self._selected_source_index()
+        visible = min(len(self._preview_sources), 4)
+        if visible and 0 <= index >= visible:
+            source = self._preview_sources.pop(index)
+            self._preview_sources.insert(visible - 1, source)
+            self._sync_tabs()
+
+    def _on_tab_close(self, index: int) -> None:
+        """关闭 tab = 从会话移除该源（原始数据是锚点，不可关）。"""
+        if not (0 <= index < len(self._preview_sources)):
+            return
+        source = self._preview_sources[index]
+        if not source['closable']:
+            return
+        del self._preview_sources[index]
+        if self._selected_source_key == source['key']:
+            self._selected_source_key = 'original'
+        self._sync_tabs()
+
+    def _redistribute(self) -> None:
+        """tab 序 → 面板绑定：面板数 = min(源数, 4)。
+
+        源带 bundle → 直接 set_bundle；缺 bundle 的可见面板（懒加载）
+        清空后发 artifact_preview_requested，异步回填 set_artifact_bundle。
+        """
+        count = min(len(self._preview_sources), 4)
+        self._bscan_container.resolve_auto(count)
+        for index in range(count):
+            source = self._preview_sources[index]
+            view = self._bscan_container.view_at(index)
+            if source['bundle'] is not None:
+                view.set_bundle(source['bundle'])
+                continue
+            view.clear()
+            artifact_id = str(source.get('artifact_id') or '')
+            if artifact_id:
+                self.artifact_preview_requested.emit(artifact_id)
 
     def set_running(self, running: bool, job_id: str = '') -> None:
         """运行态切换：运行按钮/取消按钮互斥 + 进度条显隐。"""
@@ -437,6 +569,57 @@ class ProcessingPage(PanelStateMixin, QWidget):
             lambda art: f'成果: {_display(art)}', _artifact_id,
             previous_data=self._input_combo.currentData(),
             prepend=(('原始数据', ''),))   # 索引 0 = 从原始数据开始
+        # tab 模型：登记表（标题解析用）+ 最新 run_group 自动展开步骤 tab
+        self._artifacts_by_id = {
+            _artifact_id(art): art for art in (artifacts or [])
+            if _artifact_id(art)}
+        self._auto_open_newest_run_group()
+
+    def _auto_open_newest_run_group(self) -> None:
+        """最新 run_group 的步骤/最终成果自动开 tab（每组只开一次）。
+
+        B7：链的每步中间成果已落盘（artifact_kind=intermediate，
+        run_group_id 归组，run_step_index 编号），步骤 tab 直接复用
+        artifact 预览链路——懒加载（可见面板触发
+        artifact_preview_requested），内存不持有全尺寸矩阵。
+        标题 = 算法名（method_id），末位（最终成果）挂 ✓ 徽标。
+        """
+        groups = {}
+        for artifact_id, art in self._artifacts_by_id.items():
+            params = (getattr(art, 'manifest', {}) or {}).get('params') or {}
+            group = str(params.get('run_group_id') or '')
+            if not group:
+                continue
+            info = groups.setdefault(group, {'created': '', 'members': []})
+            info['members'].append((
+                int(params.get('run_step_index') or 0),
+                str(params.get('artifact_kind') or ''),
+                artifact_id, art))
+            created = str(getattr(art, 'created_at', '') or '')
+            info['created'] = max(info['created'], created)
+        if not groups:
+            return
+        newest = max(groups, key=lambda g: groups[g]['created'])
+        if newest in self._opened_run_groups:
+            return
+        self._opened_run_groups.add(newest)
+        self._ensure_original_source()
+        members = sorted(groups[newest]['members'],
+                         key=lambda m: (m[0], m[1] != 'processing'))
+        for _, kind, artifact_id, art in members:
+            key = f'artifact:{artifact_id}'
+            if any(s['key'] == key for s in self._preview_sources):
+                continue
+            title = (str(getattr(art, 'method_id', '') or '')
+                     or str(getattr(art, 'name', '') or '') or '处理结果')
+            self._preview_sources.append({
+                'key': key, 'title': title, 'bundle': None,
+                'artifact_id': artifact_id, 'closable': True,
+                'is_final': kind == 'processing'})
+        # 跑完自动选中末位 tab（= 最终结果）
+        if self._preview_sources:
+            self._selected_source_key = self._preview_sources[-1]['key']
+        self._sync_tabs()
 
     def select_artifact(self, artifact_id: str) -> bool:
         """静默选中指定成果（不发射 artifact_selected，供主窗口自动预览时同步）。"""
@@ -475,75 +658,7 @@ class ProcessingPage(PanelStateMixin, QWidget):
         }
 
     # ============================================================ 内部逻辑
-    def _current_segment(self) -> str:
-        item = self._preview_segment.currentItem()
-        return item.property('routeKey') if item is not None else _SEG_ORIGINAL
-
-    # ---------------- 预览分发（BScanContainer 多视图）
-    def _shows_both_panels(self) -> bool:
-        """当前实际布局是否同屏展示原始与成果两侧（dual/quad/free）。"""
-        return self._bscan_container.effective_mode() != LAYOUT_SINGLE
-
-    def _sync_auto_layout(self) -> None:
-        """auto 模式：布局稳定优先（粘性），面板只"长出"不"收回"。
-
-        - 对比条件首次满足（原始+成果同时在场）→ 长出左右对比并粘住；
-        - 成果被删 / 换测线清空 → **保持对比布局**，成果位显示空态——
-          用户正在看图时布局绝不跳变；随后新成果到达直接填入；
-        - 原始数据也没了（切项目等上下文清空）→ 重置粘性回单视图。
-
-        旧版按 bundle 数量实时解析：成果清空即缩回、自动预览到达再长出，
-        一次换测线布局抖动两次，观察被打断——已废弃。
-        实体模式（手动固定）下是空操作。解析换了页后 bundle 分发由调用方
-        随后的 _show_bundle/_distribute_bundles 完成（各面板显示偏好由
-        主窗启动期统一恢复，页面无需重广播）。
-        """
-        if self._bscan_container.layout_mode() != LAYOUT_AUTO:
-            return
-        if self._original_bundle is None:
-            self._auto_sticky_dual = False
-        elif self._result_bundle is not None:
-            self._auto_sticky_dual = True
-        self._bscan_container.resolve_auto(2 if self._auto_sticky_dual else 1)
-
-    def _show_bundle(self, which: str) -> None:
-        """分段切换 / bundle 到达的统一入口（按布局分发）。"""
-        self._sync_auto_layout()
-        if self._shows_both_panels():
-            self._distribute_bundles()
-            return
-        bundle = (self._original_bundle if which == _SEG_ORIGINAL
-                  else self._result_bundle)
-        self._set_panel_data(self._bscan_container.primary_view(), bundle)
-
-    def _distribute_bundles(self) -> None:
-        """dual/quad/free：0 号位固定原始数据、1 号位固定处理结果，其余留空。
-
-        按 views() 实际数量分发——不许用 view_at(2/3) 凑数：dual 模式下
-        view_at 越界会回落面板 0，随后 clear() 把刚填的原始数据清掉。
-        """
-        views = self._bscan_container.views()
-        bundles = [self._original_bundle, self._result_bundle]
-        bundles += [None] * (len(views) - len(bundles))
-        for view, bundle in zip(views, bundles):
-            self._set_panel_data(view, bundle)
-
-    def _set_panel_data(self, view: BScanView, bundle) -> None:
-        """单面板数据写入：None → 清空空态；有数据 → 交给视图偏好。
-
-        色阶只由视图偏好决定（构造默认 2/98，启动期主窗从设置恢复）：
-        view.set_matrix 收到的 vmin/vmax 只是默认裁切，会被视图自身
-        _p_low/_p_high 覆盖——页面不再另持一份色阶状态源。
-        """
-        if bundle is None:
-            view.clear()
-            return
-        view.set_bundle(bundle)
-
-    def _on_layout_changed(self, _mode: str) -> None:
-        """布局切换：重新分发 bundle（各面板显示偏好启动期已统一恢复、
-        后续由设置页/右键各自维护，页面无需重广播）。"""
-        self._show_bundle(self._current_segment())
+    # ---------------- 预览分发（tab 模型：见 set_original_bundle / _redistribute）
 
     # ---------------- 方法库
     def _on_method_selected(self, method_id: str) -> None:

@@ -7,8 +7,8 @@ StrictComboBox。
 
 from .ascan_view import AScanView
 from .bscan_container import (BScanContainer, LAYOUT_AUTO, LAYOUT_DUAL,
-                              LAYOUT_FREE, LAYOUT_MODES, LAYOUT_QUAD,
-                              LAYOUT_SINGLE)
+                              LAYOUT_MODES, LAYOUT_QUAD, LAYOUT_SINGLE,
+                              MAX_PANELS)
 from .bscan_view import BScanView
 from .collapsible_panel import (CollapsiblePanel, chevron_left_icon,
                                 collapse_button_qss)
@@ -31,7 +31,7 @@ __all__ = [
     'LAYOUT_SINGLE',
     'LAYOUT_DUAL',
     'LAYOUT_QUAD',
-    'LAYOUT_FREE',
+    'MAX_PANELS',
     'LAYOUT_MODES',
     'AScanView',
     'ParamForm',

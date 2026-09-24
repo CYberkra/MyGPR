@@ -197,7 +197,7 @@ class ProjectChain:
         project.set_artifacts([])
         processing.set_line_label('')
         processing.set_original_bundle(None)
-        processing.set_result_bundle(None)
+        processing.close_all_artifact_tabs()
         co.processing.velocity_token = None  # 关闭项目即失效当前提交代，迟到回调全部丢弃
         interpretation.set_session_active(False)
         interpretation.set_line_label('')
@@ -289,9 +289,9 @@ class ProjectChain:
             return
         co = self._co
         if line_id != self.current_line_id:
-            # 切换测线：清掉处理页"处理结果"分段里上一条测线的残留预览
+            # 切换测线：关闭上一条测线的成果/步骤 tab（原始锚点保留换内容）
             processing = co.page('processingInterface')
-            processing.set_result_bundle(None)
+            processing.close_all_artifact_tabs()
             # 在飞速度分析回调带旧测线，会被 line 守卫丢弃；
             # 同步失效 token 并复位解释页，避免新测线永久停留在"拟合中"
             co.processing.velocity_token = None
@@ -404,21 +404,21 @@ class ProjectChain:
         co.page('interpretationInterface').set_bundle(bundle)
 
     def on_artifact_preview(self, artifact_id: str, bundle) -> None:
-        """成果预览 → 处理页（处理结果）。"""
+        """成果预览 → 处理页对应 tab（tab 模型：artifact_id 定位数据源）。"""
         co = self._co
         processing = co.page('processingInterface')
-        processing.set_result_bundle(bundle)
+        processing.set_artifact_bundle(str(artifact_id), bundle)
         processing_chain = co.processing
         if processing_chain.show_run_completion_notice:
             processing_chain.show_run_completion_notice = False
             co.infobar('success', '处理完成', '已更新处理结果预览')
-            # P1-4：运行完成自动切到"处理结果"分段，避免提示与画面矛盾
-            processing.show_result_segment()
+            # 跑完自动选中末位 tab（= 最终结果），避免提示与画面矛盾
+            processing.show_latest_result()
 
-    def on_preview_invalidated(self) -> None:
-        """当前预览的成果已被删除 → 清空处理页的成果预览。"""
+    def on_preview_invalidated(self, artifact_id: str = '') -> None:
+        """当前预览的成果已被删除 → 关闭其 tab（窗口数随 tab 收敛）。"""
         processing = self._co.page('processingInterface')
-        processing.set_result_bundle(None)
+        processing.close_artifact_tab(str(artifact_id or ''))
 
     def on_line_delete_requested(self, line_ids: list[str]) -> None:
         """项目页删除所选测线（页面已弹确认框）→ 交给 ProjectController。"""

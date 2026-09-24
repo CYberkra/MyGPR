@@ -46,6 +46,9 @@ class ProcessingChain:
         processing.line_changed.connect(self.on_processing_line_changed)
         processing.artifact_selected.connect(
             self.on_processing_artifact_selected)
+        # tab 模型懒加载：可见面板缺 bundle → 按需预览（异步回填）
+        processing.artifact_preview_requested.connect(
+            self.on_step_preview_requested)
 
         # ---------------- 解释页（SPEC §6.6）
         interpretation.open_session_requested.connect(
@@ -108,6 +111,16 @@ class ProcessingChain:
 
     def on_processing_artifact_selected(self, artifact_id: str) -> None:
         """处理页成果下拉变化 → 预览所选处理结果。"""
+        line_id = self._co.require_line()
+        if line_id and artifact_id and self._co.project_controller is not None:
+            self._co.project_controller.preview_artifact(line_id, str(artifact_id))
+
+    def on_step_preview_requested(self, artifact_id: str) -> None:
+        """tab 模型懒加载：可见面板缺 bundle → 按需预览该成果。
+
+        异步回填走 on_artifact_preview → set_artifact_bundle，与手选
+        成果同一条链路（generation 守卫天然防串线）。
+        """
         line_id = self._co.require_line()
         if line_id and artifact_id and self._co.project_controller is not None:
             self._co.project_controller.preview_artifact(line_id, str(artifact_id))

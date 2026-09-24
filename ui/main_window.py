@@ -29,7 +29,6 @@ from ui.page_coordinator import PageCoordinator
 from ui.logger_config import setup_logger
 from ui.settings_manager import SettingsManager
 from ui.theme_helpers import apply_theme, control_palette
-from ui.widgets.bscan_container import BScanContainer
 from ui.widgets.bscan_view import BScanView
 from ui.widgets.file_tree_panel import FileTreePanel
 from ui.widgets.segment_tabs import SlimSegment
@@ -291,25 +290,8 @@ class MyGPRMainWindow(FluentWindow):
                                     saver=self._save_fullscreen_geometry)
             self._connect_bscan_signals(view)
             self._wire_bscan_expand(view)
-        # 容器级偏好：预览布局（面板集合随布局变，轴/比例/色阶已逐面板恢复）
-        layout_mode = self._setting_choice(
-            'bscan_layout_mode', ('auto', 'single', 'dual', 'quad', 'free'),
-            'auto')
-        for container in self._iter_bscan_containers(page):
-            container.set_layout_mode(layout_mode, notify=False)
-            # free 分屏占比：跨会话记忆（隐藏态恢复也成立，setSizes 是
-            # 相对权重语义，无需等真实显示时机）
-            container.set_split_state_store(
-                loader=self._load_free_split_state,
-                saver=self._save_free_split_state)
-            container.restore_free_split()
-            container.sig_layout_changed.connect(lambda mode:
-                self._mirror_bscan_setting('bscan_layout_mode', str(mode)))
-
-    @staticmethod
-    def _iter_bscan_containers(page):
-        """页面里全部 BScanContainer（哑组件，偏好按容器整体恢复/持久化）。"""
-        yield from page.findChildren(BScanContainer)
+        # 面板数由处理页 tab 模型驱动（tab 数 → resolve_auto），容器级
+        # 布局偏好已随 free/手动档位一并退役（2026-09-24）。
 
     def _connect_bscan_signals(self, view) -> None:
         """把用户操作（而非恢复动作）接到设置写盘。
@@ -390,11 +372,6 @@ class MyGPRMainWindow(FluentWindow):
         for page in list(self.pages.values()):
             yield from page.findChildren(BScanView)
 
-    def _iter_all_bscan_containers(self):
-        """全部页面里的 BScanContainer（设置页统一下发布局模式用）。"""
-        for page in list(self.pages.values()):
-            yield from page.findChildren(BScanContainer)
-
     def _on_settings_bscan_changed(self) -> None:
         """设置页改了 B-Scan 视图项：即时下发到所有视图并写盘（无需重启）。"""
         settings_page = self._page('settingsInterface')
@@ -423,10 +400,7 @@ class MyGPRMainWindow(FluentWindow):
             view.set_gain(str(values.get('bscan_gain_mode', 'off')),
                           alpha=min(max(gain_alpha, 0.0), 20.0),
                           db=tvg_db, power=tvg_power, notify=False)
-        for container in self._iter_all_bscan_containers():
-            # notify=True：切到/切出 auto 时页面要重分发数据。由此触发的
-            # sig_layout_changed 会把同值写回设置（幂等），无行为副作用。
-            container.set_layout_mode(values['bscan_layout_mode'], notify=True)
+        # 面板数由处理页 tab 模型驱动，容器布局设置已退役（2026-09-24）
 
     def _setting_levels(self) -> tuple[float, float]:
         """读色阶百分位；非法值回落 BScanView 默认（2 / 98）。"""
@@ -488,18 +462,6 @@ class MyGPRMainWindow(FluentWindow):
             return
         payload = bytes(blob.toBase64().data()).decode('ascii')
         self._persist_setting('bscan_fullscreen_geometry', payload)
-
-    def _load_free_split_state(self):
-        """回放 B-Scan 自由分屏占比（'750,250' 千分比文本）；空走均分。"""
-        raw = str(self.settings.get('bscan_free_split', '') or '')
-        return raw or None
-
-    def _save_free_split_state(self, text) -> None:
-        """把占比文本（'750,250'）存入 JSON 设置（空值不覆盖旧值）。"""
-        text = str(text or '')
-        if not text:
-            return
-        self._persist_setting('bscan_free_split', text)
 
     # ---------------------------------------------------------- 首屏后预热
     def _start_warmup(self) -> None:

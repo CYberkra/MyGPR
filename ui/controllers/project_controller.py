@@ -63,7 +63,7 @@ class ProjectController(QObject):
     artifact_preview_ready = pyqtSignal(str, object)  # artifact_id, PreviewBundle
     preflight_ready = pyqtSignal(object)         # ImportPreflight
     preflight_failed = pyqtSignal(str)           # 导入预检失败消息
-    preview_invalidated = pyqtSignal()           # 预览中的成果已被删除
+    preview_invalidated = pyqtSignal(str)        # 预览中的成果已被删除（携带成果 id）
     spatial_tracks_ready = pyqtSignal(list)      # list[SpatialTrack]
     depth_preview_ready = pyqtSignal(object, list, float, int)  # payload, line_ids, cell_size_m, generation
     depth_layer_saved = pyqtSignal(str, list, float)       # job_id, line_ids, cell_size_m
@@ -940,8 +940,9 @@ class _DeleteArtifactsCommand:
             c.log_message.emit(
                 f"已删除 {len(deleted)} 个成果（含级联），已移入项目回收站")
             if c._current_preview_artifact_id in deleted:
+                victim = c._current_preview_artifact_id
                 c._current_preview_artifact_id = ''
-                c.preview_invalidated.emit()
+                c.preview_invalidated.emit(victim)
         finally:
             c._set_busy(False)
             try:

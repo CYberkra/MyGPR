@@ -161,24 +161,6 @@ class SettingsPage(ScrollArea):
         layout.addLayout(make_form_row('纵轴单位:', self._bscan_y_axis_combo,
                                        parent=card))
 
-        self._bscan_layout_combo = ComboBox(card)
-        self._bscan_layout_combo.addItem('自动（跟随数据）', userData='auto')
-        self._bscan_layout_combo.addItem('单视图', userData='single')
-        self._bscan_layout_combo.addItem('双视图对比（原始 | 成果）', userData='dual')
-        self._bscan_layout_combo.addItem('四宫格', userData='quad')
-        self._bscan_layout_combo.addItem('自由分屏（占比可调）', userData='free')
-        self._bscan_layout_combo.setMinimumWidth(180)
-        self._bscan_layout_combo.setToolTip(
-            '自动：只有原始数据时显示一个画布，处理结果出来后自动变成左右'
-            '对比并保持——成果被删或换测线时对比布局不收回（成果位显示'
-            '空态），重新选测线后恢复单画布。其余为固定布局，不随数据增减。'
-            '自由分屏下拖动中间分割条调整两画布占比（跨会话记住），右键'
-            '可重置；单画布放大走视图上的全屏钮。四宫格下排两个画布留作'
-            '后续历史成果对比。')
-        self._bscan_layout_combo.currentIndexChanged.connect(
-            self._emit_bscan_changed)
-        layout.addLayout(make_form_row('预览布局:', self._bscan_layout_combo,
-                                       parent=card))
 
         layout.addWidget(self._section_header('外观与增益', card))
 
@@ -314,7 +296,7 @@ class SettingsPage(ScrollArea):
         widgets = (self._theme_combo, self._dielectric_spin,
                    self._workers_spin, self._root_edit, self._prefetch_check,
                    self._bscan_aspect_combo, self._bscan_x_axis_combo,
-                   self._bscan_y_axis_combo, self._bscan_layout_combo,
+                   self._bscan_y_axis_combo,
                    self._bscan_cmap_combo,
                    self._bscan_p_low_spin, self._bscan_p_high_spin,
                    self._bscan_gain_combo, self._bscan_gain_alpha_spin,
@@ -339,8 +321,6 @@ class SettingsPage(ScrollArea):
                                  data.get('bscan_x_axis'), 'trace')
             self._select_by_data(self._bscan_y_axis_combo,
                                  data.get('bscan_y_axis'), 'sample')
-            self._select_by_data(self._bscan_layout_combo,
-                                 data.get('bscan_layout_mode'), 'auto')
             cmap = str(data.get('bscan_colormap',
                                 constants.DEFAULT_COLORMAP))
             self._bscan_cmap_combo.setCurrentText(
@@ -376,7 +356,6 @@ class SettingsPage(ScrollArea):
             'bscan_aspect_mode': str(self._bscan_aspect_combo.currentData()),
             'bscan_x_axis': str(self._bscan_x_axis_combo.currentData()),
             'bscan_y_axis': str(self._bscan_y_axis_combo.currentData()),
-            'bscan_layout_mode': str(self._bscan_layout_combo.currentData()),
             'bscan_colormap': str(self._bscan_cmap_combo.currentText()),
             'bscan_p_low': float(self._bscan_p_low_spin.value()),
             'bscan_p_high': float(self._bscan_p_high_spin.value()),
@@ -399,7 +378,6 @@ class SettingsPage(ScrollArea):
             (self._bscan_aspect_combo, 'bscan_aspect_mode'),
             (self._bscan_x_axis_combo, 'bscan_x_axis'),
             (self._bscan_y_axis_combo, 'bscan_y_axis'),
-            (self._bscan_layout_combo, 'bscan_layout_mode'),
             (self._bscan_gain_combo, 'bscan_gain_mode'),
         )
         cmap_combo = ((self._bscan_cmap_combo, 'bscan_colormap'),)
