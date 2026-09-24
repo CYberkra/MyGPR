@@ -15,7 +15,7 @@ import pytest  # noqa: E402
 
 pytest.importorskip("PyQt6")  # 后端 CI（无 Qt）自动跳过
 
-from PyQt6.QtCore import QPointF, Qt  # noqa: E402
+from PyQt6.QtCore import QPointF  # noqa: E402
 from PyQt6.QtWidgets import QAbstractItemView  # noqa: E402
 from ui.widgets.pipeline_list import PipelineList  # noqa: E402
 
