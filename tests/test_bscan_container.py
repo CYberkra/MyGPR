@@ -473,6 +473,28 @@ class TestRunGroupAutoOpen:
             created_at='2026-09-24T08:00:00')])
         assert [s['key'] for s in page._preview_sources] == ['original']
 
+    def test_field_flat_manifest_group_opens(self, page, container):
+        """field/文件系统路径：manifest 顶层携带 run_group_id（无 params
+        嵌套、无 run_step_index）→ 同样展开步骤 tab（按落盘时间排序）。
+        这是真机视觉验收抓到的字段形态不匹配 bug 的回归锁。"""
+        page.set_artifacts([
+            SimpleNamespace(
+                artifact_id='F1', name='run_bandpass', method_id='bandpass',
+                created_at='2026-09-24T10:02:00',
+                manifest={'artifact_kind': 'processing',
+                          'run_group_id': 'G9'}),
+            SimpleNamespace(
+                artifact_id='F0', name='run 步骤1_dewow', method_id='dewow',
+                created_at='2026-09-24T10:01:00',
+                manifest={'artifact_kind': 'intermediate',
+                          'run_group_id': 'G9'}),
+        ])
+        keys = [s['key'] for s in page._preview_sources]
+        assert keys == ['original', 'artifact:F0', 'artifact:F1']
+        finals = [s for s in page._preview_sources if s.get('is_final')]
+        assert finals and finals[0]['key'] == 'artifact:F1'
+        assert page._selected_source_key == 'artifact:F1'
+
     def test_lazy_visible_panel_requests_preview(self, page, container):
         """自动展开的步骤 tab 无 bundle → 可见面板发懒加载请求。"""
         got = []

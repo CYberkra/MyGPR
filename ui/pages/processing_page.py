@@ -675,18 +675,36 @@ class ProcessingPage(PanelStateMixin, QWidget):
             if _artifact_id(art)}
         self._auto_open_newest_run_group()
 
+    def _run_group_params(self, art) -> dict:
+        """成果的归组参数，兼容两种 manifest 形态。
+
+        - catalog/sqlite 路径：manifest.params.{run_group_id,...}（嵌套）；
+        - field/文件系统路径：ProjectArtifact.manifest = 索引记录 to_dict()，
+          run_group_id / artifact_kind 在**顶层**且没有 run_step_index
+          （2026-09-24 视觉验收发现的真因：按嵌套格式读取永远为空，
+          步骤 tab 不展开）。
+        """
+        manifest = getattr(art, 'manifest', None) or {}
+        if not isinstance(manifest, dict):
+            return {}
+        nested = manifest.get('params')
+        if isinstance(nested, dict):
+            return nested
+        return manifest
+
     def _auto_open_newest_run_group(self) -> None:
         """最新 run_group 的步骤/最终成果自动开 tab（每组只开一次）。
 
         B7：链的每步中间成果已落盘（artifact_kind=intermediate，
-        run_group_id 归组，run_step_index 编号），步骤 tab 直接复用
-        artifact 预览链路——懒加载（可见面板触发
-        artifact_preview_requested），内存不持有全尺寸矩阵。
-        标题 = 算法名（method_id），末位（最终成果）挂 ✓ 徽标。
+        run_group_id 归组）。步骤 tab 直接复用 artifact 预览链路——
+        懒加载（可见面板触发 artifact_preview_requested），内存不持有
+        全尺寸矩阵。标题 = 算法名（method_id），末位（最终成果）挂 ✓。
+        排序：优先 run_step_index（catalog 路径），缺失（field 路径）
+        按 created_at 升序——B7 逐步落盘天然按步序递增，最终成果最后。
         """
         groups = {}
         for artifact_id, art in self._artifacts_by_id.items():
-            params = (getattr(art, 'manifest', {}) or {}).get('params') or {}
+            params = self._run_group_params(art)
             group = str(params.get('run_group_id') or '')
             if not group:
                 continue
@@ -694,6 +712,7 @@ class ProcessingPage(PanelStateMixin, QWidget):
             info['members'].append((
                 int(params.get('run_step_index') or 0),
                 str(params.get('artifact_kind') or ''),
+                str(getattr(art, 'created_at', '') or ''),
                 artifact_id, art))
             created = str(getattr(art, 'created_at', '') or '')
             info['created'] = max(info['created'], created)
@@ -704,9 +723,11 @@ class ProcessingPage(PanelStateMixin, QWidget):
             return
         self._opened_run_groups.add(newest)
         self._ensure_original_source()
+        # catalog 路径有 run_step_index；field 路径缺失（全 0）时按落盘
+        # 时间升序回退（B7 逐步保存天然按步序递增）。最终成果恒排末位。
         members = sorted(groups[newest]['members'],
-                         key=lambda m: (m[0], m[1] != 'processing'))
-        for _, kind, artifact_id, art in members:
+                         key=lambda m: (m[1] == 'processing', m[0], m[2]))
+        for _, kind, _created, artifact_id, art in members:
             key = f'artifact:{artifact_id}'
             if any(s['key'] == key for s in self._preview_sources):
                 continue
