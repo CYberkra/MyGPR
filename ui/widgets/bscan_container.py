@@ -4,10 +4,15 @@
 在同一个预览卡里按面板数摆放 1 / 2 / 3 / 4 个 :class:`BScanView`：
 
 - 面板数由宿主页面经 :meth:`resolve_auto` 喂入（tab 模型：打开的数据源
-  数 = 面板数，1→单窗、2→左右、3-4→2×2；>4 主区留前 4，其余进总览墙）；
-  quad 页在 n=3 时隐藏 4 号面板。容器保持哑组件，只认喂进来的面板数；
-- ``single``/``dual``/``quad``：预建实体页（历史上由布局档位手动选择，
+  数 = 面板数）；1→单窗、2→左右、**≥3→主辅**（主窗 + n−1 个纵向缩略，
+  最多 3 个；>4 主区留 4，其余进总览墙）。容器保持哑组件，只认喂进来的
+  面板数；
+- ``single``/``dual``/``focus``：预建实体页（历史上由布局档位手动选择，
   2026-09-24 起 auto=唯一策略，实体页仅作内部实现细节保留）。
+
+为什么主辅取代 2×2（2026-09-24）：B-Scan 是竖长条剖面，2×2 把它切方块
+→ 纵向像素/采样点跌破 0.45px 可读性红线；主辅让主窗保留全部高度，
+其余源降级为导航用缩略（点缩略即升为主窗）。
 
 职责边界（哑组件）：
 
@@ -22,7 +27,7 @@
 """
 
 from PyQt6.QtCore import pyqtSignal
-from PyQt6.QtWidgets import QGridLayout, QHBoxLayout, QStackedWidget, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QStackedWidget, QVBoxLayout, QWidget
 
 from ui import constants
 from ui.widgets.bscan_view import BScanView
@@ -30,12 +35,15 @@ from ui.widgets.bscan_view import BScanView
 LAYOUT_AUTO = 'auto'
 LAYOUT_SINGLE = 'single'
 LAYOUT_DUAL = 'dual'
-LAYOUT_QUAD = 'quad'
-# auto 是唯一策略（面板数随 tab 数解析），single/dual/quad 是内部实体页。
-LAYOUT_MODES = (LAYOUT_AUTO, LAYOUT_SINGLE, LAYOUT_DUAL, LAYOUT_QUAD)
+LAYOUT_FOCUS = 'focus'      # 主窗 + 纵向缩略列（取代 2×2 四宫格）
+# auto 是唯一策略（面板数随 tab 数解析），single/dual/focus 是内部实体页。
+LAYOUT_MODES = (LAYOUT_AUTO, LAYOUT_SINGLE, LAYOUT_DUAL, LAYOUT_FOCUS)
 
-_MODE_INDEX = {LAYOUT_SINGLE: 0, LAYOUT_DUAL: 1, LAYOUT_QUAD: 2}
-MAX_PANELS = 4
+_MODE_INDEX = {LAYOUT_SINGLE: 0, LAYOUT_DUAL: 1, LAYOUT_FOCUS: 2}
+MAX_PANELS = 4              # 主区最多 1 主窗 + 3 缩略
+_MAX_THUMBS = MAX_PANELS - 1
+_PRIMARY_STRETCH = 68       # 主窗占比（%），缩略列取剩余
+_THUMB_STRETCH = 100 - _PRIMARY_STRETCH
 
 
 class BScanContainer(QWidget):
@@ -51,7 +59,7 @@ class BScanContainer(QWidget):
         self._stack = QStackedWidget(self)
         self._stack.addWidget(self._build_flow_page(LAYOUT_SINGLE, 1))
         self._stack.addWidget(self._build_flow_page(LAYOUT_DUAL, 2))
-        self._stack.addWidget(self._build_quad_page())
+        self._stack.addWidget(self._build_focus_page())
         self._stack.setCurrentIndex(_MODE_INDEX[self._effective])
 
         layout = QVBoxLayout(self)
@@ -74,19 +82,29 @@ class BScanContainer(QWidget):
         self._pages[mode] = views
         return page
 
-    def _build_quad_page(self) -> QWidget:
-        """四宫格 2×2。"""
+    def _build_focus_page(self) -> QWidget:
+        """主辅布局：主窗（左侧，占 PRIVATE_RATIO%）+ 右侧纵向缩略列（3 格）。
+
+        B-Scan 剖面是竖长条——2×2 网格会把它切方块，纵向采样点被压到
+        可读性红线以下（绘图区高/采样数 ≥0.45px）。主辅布局让主窗保留
+        全部高度，其余源降级为纯导航用的缩略图（点击可升为主窗）。
+        """
         page = QWidget(self)
-        grid = QGridLayout(page)
-        grid.setContentsMargins(0, 0, 0, 0)
-        grid.setSpacing(constants.PANEL_SPACING)
+        outer = QHBoxLayout(page)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(constants.PANEL_SPACING)
         views = []
-        for row in range(2):
-            for col in range(2):
-                view = BScanView(page)
-                grid.addWidget(view, row, col)
-                views.append(view)
-        self._pages[LAYOUT_QUAD] = views
+        primary = BScanView(page)
+        outer.addWidget(primary, _PRIMARY_STRETCH)
+        views.append(primary)
+        side = QVBoxLayout()
+        side.setSpacing(constants.PANEL_SPACING)
+        for _ in range(_MAX_THUMBS):
+            thumb = BScanView(page, with_colorbar=False)
+            side.addWidget(thumb, 1)
+            views.append(thumb)
+        outer.addLayout(side, _THUMB_STRETCH)
+        self._pages[LAYOUT_FOCUS] = views
         return page
 
     # （free 自由分屏已于 2026-09-24 随 tab 模型退役：窗口数自动排布后，
@@ -100,7 +118,7 @@ class BScanContainer(QWidget):
     def resolve_auto(self, panel_count: int) -> bool:
         """按打开的数据源数解析实际布局；返回是否换了页/可见性。
 
-        1 → single；2 → dual；3-4 → quad（quad 在 n=3 时隐藏 4 号面板）。
+        1 → single；2 → dual；≥3 → focus（主窗 + n−1 个缩略，最多 3 个）。
         panel_count 由宿主按 tab 数喂入，夹取到 [1, MAX_PANELS]。
         """
         n = max(1, min(int(panel_count), MAX_PANELS))
@@ -109,17 +127,26 @@ class BScanContainer(QWidget):
         elif n == 2:
             wanted = LAYOUT_DUAL
         else:
-            wanted = LAYOUT_QUAD
+            wanted = LAYOUT_FOCUS
         changed = wanted != self._effective
         if changed:
             self._effective = wanted
             self._stack.setCurrentIndex(_MODE_INDEX[wanted])
-        # quad 页可见面板数（n=3 → 隐藏 4 号；n=4 → 全显）
-        if wanted == LAYOUT_QUAD:
-            quad_views = self._pages[LAYOUT_QUAD]
-            for index, view in enumerate(quad_views):
+        # focus 页缩略数（n=3 → 2 个缩略；n=4 → 3 个）
+        if wanted == LAYOUT_FOCUS:
+            focus_views = self._pages[LAYOUT_FOCUS]
+            for index, view in enumerate(focus_views):
                 view.setVisible(index < n)
         return changed
+
+    def thumb_views(self) -> list:
+        """focus 页的缩略面板（已按可见性过滤，顺序 = 源清单后续项）。"""
+        if self._effective != LAYOUT_FOCUS:
+            return []
+        # isVisibleTo 而非 isVisible：容器藏在 QStackedWidget 或测试里未
+        # 显示时，isVisible() 一律为假，会把全部缩略判成不可见。
+        return [v for v in self._pages[LAYOUT_FOCUS][1:]
+                if v.isVisibleTo(self)]
 
     # ------------------------------------------------------------ 面板访问
     def all_views(self) -> list:

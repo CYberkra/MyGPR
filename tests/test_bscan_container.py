@@ -31,8 +31,8 @@ from ui.pages.processing_page import ProcessingPage  # noqa: E402
 from ui.widgets import (  # noqa: E402
     BScanContainer,
     LAYOUT_DUAL,
+    LAYOUT_FOCUS,
     LAYOUT_MODES,
-    LAYOUT_QUAD,
     LAYOUT_SINGLE,
     MAX_PANELS,
 )
@@ -78,7 +78,7 @@ class TestContainerPanels:
         assert container.effective_mode() == LAYOUT_DUAL
         assert container.resolve_auto(4) is True
         assert len(container.views()) == 4
-        assert container.effective_mode() == LAYOUT_QUAD
+        assert container.effective_mode() == LAYOUT_FOCUS
         assert container.resolve_auto(1) is True
         assert len(container.views()) == 1
 
@@ -93,14 +93,21 @@ class TestContainerPanels:
         assert container.resolve_auto(0) is True
         assert container.effective_mode() == LAYOUT_SINGLE
 
-    def test_quad_hides_panels_beyond_count(self, container, qapp):
-        """n=3 → quad 显示 3 面板、4 号隐藏；n=4 恢复。"""
+    def test_focus_hides_thumbs_beyond_count(self, container, qapp):
+        """n=3 → 主窗 + 2 缩略（第 4 格隐藏）；n=4 → 3 缩略全显。"""
         container.resolve_auto(3)
         for index in range(3):
             assert container.view_at(index).isVisibleTo(container)
         assert not container.view_at(3).isVisibleTo(container)
+        assert len(container.thumb_views()) == 2
         container.resolve_auto(4)
         assert container.view_at(3).isVisibleTo(container)
+        assert len(container.thumb_views()) == 3
+
+    def test_thumb_views_empty_unless_focus(self, container):
+        assert container.thumb_views() == []
+        container.resolve_auto(2)
+        assert container.thumb_views() == []
 
     def test_resolve_auto_does_not_emit_signal(self, container):
         """数据驱动的重排不是用户偏好变化：绝不发持久化镜像信号。"""
@@ -123,7 +130,7 @@ class TestContainerPanels:
         assert len(container.all_views()) == 1 + 2 + 4
 
     def test_modes_constant(self):
-        assert LAYOUT_MODES == ('auto', 'single', 'dual', 'quad')
+        assert LAYOUT_MODES == ('auto', 'single', 'dual', 'focus')
 
 
 _LSEG_ORIGINAL = 'originalData'
@@ -208,7 +215,7 @@ class TestProcessingPageTabModel:
         page.set_original_bundle(_bundle(1))
         page.set_artifact_bundle('A1', _bundle(2))
         page.set_artifact_bundle('A2', _bundle(3))
-        assert container.effective_mode() == LAYOUT_QUAD or True
+        assert container.effective_mode() == LAYOUT_FOCUS or True
         page.close_artifact_tab('A2')
         assert len([s for s in page._preview_sources
                     if s['key'] != 'original']) == 1
@@ -300,6 +307,76 @@ class TestProcessingPageTabModel:
         assert '2026-09-22T14:36' not in text
 
 
+class TestFocusLayout:
+    """主辅布局：主窗 = 选中源，缩略列导航，点缩略升主窗，可读性守护。"""
+
+    @pytest.fixture
+    def container(self, page):
+        _reset_page(page)
+        return page._bscan_container
+
+    def test_three_sources_enter_focus(self, page, container):
+        page.set_original_bundle(_bundle(1))
+        page.set_artifact_bundle('A1', _bundle(2))
+        page.set_artifact_bundle('A2', _bundle(3))
+        assert container.effective_mode() == LAYOUT_FOCUS
+        assert len(container.thumb_views()) == 2
+
+    def test_primary_shows_selected_source(self, page, container):
+        """主窗 = 选中源：切 tab 即换主窗内容（缩略跟着重排）。"""
+        page.set_original_bundle(_bundle(1))
+        page.set_artifact_bundle('A1', _bundle(2))
+        page.set_artifact_bundle('A2', _bundle(3))
+        page._selected_source_key = 'original'
+        page._sync_tabs()
+        assert container.primary_view()._matrix.max() == 1.0
+        page._selected_source_key = 'artifact:A2'
+        page._sync_tabs()
+        assert container.primary_view()._matrix.max() == 3.0
+
+    def test_thumbs_show_other_sources(self, page, container):
+        page.set_original_bundle(_bundle(1))
+        page.set_artifact_bundle('A1', _bundle(2))
+        page.set_artifact_bundle('A2', _bundle(3))
+        page._selected_source_key = 'original'
+        page._sync_tabs()
+        thumbs = container.thumb_views()
+        assert [v._matrix.max() for v in thumbs if v._matrix is not None] \
+            == [2.0, 3.0]
+
+    def test_overflow_badge_counts_hidden_sources(self, page, container):
+        page.set_original_bundle(_bundle(1))
+        for i in range(2, 8):                     # 7 源 → 主区 4 + 溢出 3
+            page.set_artifact_bundle(f'A{i}', _bundle(float(i)))
+        assert page._gallery_btn.text() == '总览墙 +3'
+        page.close_all_artifact_tabs()
+        assert page._gallery_btn.text() == '总览墙'
+
+    def test_readability_hint_toggles_by_height(self, page, container, qapp):
+        """画布高/采样数 <0.45 → 提示可见；给足高度即隐藏（零纵向开销）。
+
+        高度用 setFixedHeight 控制：直接 resize 子控件会被布局重算覆盖。
+        测完必须解锁，否则共享 page fixture 的高度会被钉死。
+        """
+        page.set_original_bundle(_bundle(1))      # _bundle 为 8 采样
+        page.show()
+        page.resize(1200, 900)
+        try:
+            container.setFixedHeight(8)           # 1.0px/采样 → 达标
+            qapp.processEvents()
+            page._update_readability_hint()
+            assert not page._readability_label.isVisible()
+            container.setFixedHeight(2)           # 0.25px/采样 → 破线
+            qapp.processEvents()
+            page._update_readability_hint()
+            assert page._readability_label.isVisible()
+            assert '0.25' in page._readability_label.text()
+        finally:
+            container.setMinimumHeight(0)
+            container.setMaximumHeight(16777215)
+            page.hide()
+
+
 class TestRunGroupAutoOpen:
     """跑完链自动展开最新 run_group 的步骤 tab（B7 intermediate 成果）。"""
 
@@ -325,7 +402,7 @@ class TestRunGroupAutoOpen:
         # 跑完自动选中末位（= 最终结果）
         assert page._selected_source_key == 'artifact:F1'
         # 面板数 = min(4 源, 4)
-        assert container.effective_mode() == LAYOUT_QUAD
+        assert container.effective_mode() == LAYOUT_FOCUS
 
     def test_each_group_opens_once(self, page, container):
         """同一 run_group 重复刷新不重复开 tab（_opened_run_groups 守卫）。"""

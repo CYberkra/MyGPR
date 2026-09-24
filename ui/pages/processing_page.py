@@ -27,7 +27,7 @@
 
 from datetime import datetime
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (QHBoxLayout, QVBoxLayout, QWidget)
 from qfluentwidgets import (
@@ -40,9 +40,13 @@ from ui import constants
 from ui.motion import animate_progress
 from ui.page_scaffold import (PanelStateMixin, make_card, make_form_row,
                               make_scroll_column, refill_combo)
-from ui.widgets import (BScanContainer, CollapsiblePanel,
+from ui.widgets import (BScanContainer, CollapsiblePanel, LAYOUT_FOCUS,
                         MethodBrowser, ParamForm, PipelineList, MAX_PANELS,
                         clear_invalid, make_separator)
+
+
+_MAX_THUMBS = 3              # 缩略列容量（= MAX_PANELS - 1，含主窗共 4 面板）
+_READABILITY_MIN_RATIO = 0.45  # 可读性红线：绘图区高 / 采样数（px/采样）
 
 
 def _short_timestamp(raw: str) -> str:
@@ -88,6 +92,7 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._opened_run_groups = set()   # 已自动展开的 run_group_id（每组一次）
         self._artifacts_by_id = {}        # artifact_id -> ProjectArtifact
         self._gallery = None              # 总览墙（懒创建，随主页销毁）
+        self._thumb_views_bound = []      # 已装点击提升的缩略面板
         self._running = False
         self._job_id = ''
         self._selected_step = -1
@@ -154,6 +159,12 @@ class ProcessingPage(PanelStateMixin, QWidget):
             '送回主区（tab 数超过 4 时跑完链会自动弹一次）。')
         self._gallery_btn.clicked.connect(self._open_gallery)
         tab_row.addWidget(self._gallery_btn)
+        self._readability_label = CaptionLabel('', self)
+        self._readability_label.setToolTip(
+            '画布纵向像素不足以呈现全部采样点（低于 0.45px/采样）：'
+            '收起两侧栏（⤢ 铺满）或全屏浏览可获得更高纵向密度。')
+        self._readability_label.setVisible(False)
+        tab_row.addWidget(self._readability_label)
         preview_layout.addLayout(tab_row)
 
         sel_row = QHBoxLayout()
@@ -458,23 +469,83 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._sync_tabs()
 
     def _redistribute(self) -> None:
-        """tab 序 → 面板绑定：面板数 = min(源数, 4)。
+        """tab 序/选中态 → 面板绑定：面板数 = min(源数, 4)。
 
-        源带 bundle → 直接 set_bundle；缺 bundle 的可见面板（懒加载）
-        清空后发 artifact_preview_requested，异步回填 set_artifact_bundle。
+        - single/dual：按 tab 序依次绑定；
+        - focus（≥3 源）：**主窗 = 选中源**，其余源按 tab 序进缩略列
+          （最多 3 个；再多的进总览墙，tab 行挂「+N」徽标）；
+        - 缺 bundle 的可见面板（懒加载）清空后发 artifact_preview_requested。
         """
-        count = min(len(self._preview_sources), 4)
-        self._bscan_container.resolve_auto(count)
-        for index in range(count):
-            source = self._preview_sources[index]
-            view = self._bscan_container.view_at(index)
-            if source['bundle'] is not None:
-                view.set_bundle(source['bundle'])
-                continue
-            view.clear()
-            artifact_id = str(source.get('artifact_id') or '')
-            if artifact_id:
-                self.artifact_preview_requested.emit(artifact_id)
+        container = self._bscan_container
+        count = min(len(self._preview_sources), MAX_PANELS)
+        container.resolve_auto(count)
+        if container.effective_mode() == LAYOUT_FOCUS:
+            selected = self._preview_sources[self._selected_source_index()]
+            self._bind_source(container.primary_view(), selected)
+            others = [s for s in self._preview_sources
+                      if s['key'] != selected['key']][:_MAX_THUMBS]
+            for view, source in zip(container.thumb_views(), others):
+                self._bind_source(view, source)
+        else:
+            for index in range(count):
+                self._bind_source(container.view_at(index),
+                                  self._preview_sources[index])
+        self._sync_thumb_activation()
+        self._update_readability_hint()
+        extra = len(self._preview_sources) - MAX_PANELS
+        self._gallery_btn.setText(f'总览墙 +{extra}' if extra > 0
+                                  else '总览墙')
+
+    def _bind_source(self, view, source) -> None:
+        """单面板绑定：有 bundle 直接送，缺则清空并发懒加载请求。"""
+        if source['bundle'] is not None:
+            view.set_bundle(source['bundle'])
+            return
+        view.clear()
+        artifact_id = str(source.get('artifact_id') or '')
+        if artifact_id:
+            self.artifact_preview_requested.emit(artifact_id)
+
+    def _sync_thumb_activation(self) -> None:
+        """缩略升主窗：给当前缩略面板装上点击提升（同一批只装一次）。"""
+        thumbs = self._bscan_container.thumb_views()
+        if self._thumb_views_bound == thumbs:
+            return
+        for view in self._thumb_views_bound:
+            try:
+                view.removeEventFilter(self)
+            except RuntimeError:      # 视图已被 Qt 销毁（C++ 侧已删）
+                pass
+        for view in thumbs:
+            view.installEventFilter(self)
+        self._thumb_views_bound = list(thumbs)
+
+    def _update_readability_hint(self) -> None:
+        """可读性守护：绘图区高/采样数 < 0.45px 时提示（挂 tab 行右侧，
+        不占纵向预算——画布本来就是最缺高度的那一块）。"""
+        view = self._bscan_container.primary_view()
+        samples = int(getattr(view, '_sample_count', 0) or 0)
+        height = self._bscan_container.height()
+        ratio = (height / samples) if samples > 0 else 0.0
+        show = bool(samples) and ratio < _READABILITY_MIN_RATIO
+        self._readability_label.setVisible(show)
+        if show:
+            self._readability_label.setText(
+                f'画布偏矮（{ratio:.2f}px/采样）· 建议 ⤢ 铺满或全屏浏览')
+
+    def eventFilter(self, obj, event) -> bool:
+        """缩略面板点击 → 把该源升为主窗（选中态即主窗，见 _redistribute）。"""
+        if (event.type() == QEvent.Type.MouseButtonRelease
+                and obj in self._thumb_views_bound):
+            selected = self._preview_sources[self._selected_source_index()]
+            others = [s for s in self._preview_sources
+                      if s['key'] != selected['key']][:_MAX_THUMBS]
+            for index, view in enumerate(self._thumb_views_bound):
+                if view is obj and index < len(others):
+                    self._selected_source_key = others[index]['key']
+                    self._sync_tabs()
+                    return True
+        return super().eventFilter(obj, event)
 
     def set_running(self, running: bool, job_id: str = '') -> None:
         """运行态切换：运行按钮/取消按钮互斥 + 进度条显隐。"""
