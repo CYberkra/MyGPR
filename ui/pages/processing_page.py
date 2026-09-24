@@ -157,7 +157,7 @@ class ProcessingPage(PanelStateMixin, QWidget):
         tab_row.setSpacing(constants.CARD_SPACING)
         tab_row.addWidget(self._source_tabs, 1)
         self._gallery_btn = PushButton('总览墙', self)
-        self._gallery_btn.setFixedWidth(72)
+        self._gallery_btn.setMinimumWidth(60)   # 溢出徽标 +N 需自适应宽
         self._gallery_btn.setToolTip(
             '弹出总览墙：网格展示全部打开的数据源，点格子的标题把该源'
             '送回主区（tab 数超过 4 时跑完链会自动弹一次）。')

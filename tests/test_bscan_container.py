@@ -297,6 +297,12 @@ class TestProcessingPageTabModel:
         titles = [s['title'] for s in page._preview_sources]
         assert titles[-1] == 'b2'
 
+    def test_title_html_has_explicit_theme_color(self, page):
+        """图内标题必须显式主题色：无 color 时富文本用调色板文字色，
+        浅色主题下 GraphicsView 内呈白字白底隐形（视觉验收实抓）。"""
+        html = page._bscan_container.primary_view()._compact_title_html('X')
+        assert 'color:#' in html
+
     def test_levels_row_removed_from_page(self, page):
         """色阶工具行已收容进设置页：页面不再持有任何色标/色阶状态源。"""
         for attr in ('_cmap_combo', '_p_low_spin', '_p_high_spin',

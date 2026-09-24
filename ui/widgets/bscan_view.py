@@ -360,7 +360,11 @@ class BScanView(GraphicsViewBase, QWidget):
             text = text[:12] + '…' + text[-7:]
         text = (text.replace('&', '&amp;')
                 .replace('<', '&lt;').replace('>', '&gt;'))
-        return f'<span style="font-size:8pt">{text}</span>'
+        # 显式主题色：不写 color 时 QLabel 富文本用调色板文字色，实测在
+        # 浅色主题下 GraphicsView 内的白字几乎不可见（视觉验收抓到）
+        from qfluentwidgets import isDarkTheme
+        color = '#e0e0e0' if isDarkTheme() else '#333333'
+        return f'<span style="font-size:8pt;color:{color}">{text}</span>'
 
     def _init_readout_overlay(self) -> None:
         """十字光标读数浮层（左下角，半透明底白字，深浅主题通用）。"""
