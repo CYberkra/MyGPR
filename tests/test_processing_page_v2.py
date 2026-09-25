@@ -190,3 +190,23 @@ class TestResultGridLazyPrinciple:
             assert titles == ['输入', '1 dewow', '2 sec_gain']
         finally:
             page.close()
+
+
+class TestRunButtonMotion:
+    """运行钮动效（移植自 Transitions.dev 的 spinner → ✓ 形变思路）。"""
+
+    def test_running_shows_spinner_then_restores(self, qapp):
+        strip = ChainStrip()
+        strip.set_running(True)
+        assert strip.run_button().text().startswith('运行中')
+        assert strip.run_button().isEnabled() is False
+        strip.set_running(False)
+        assert strip.run_button().text() == '运行'
+        assert strip.run_button().isEnabled() is True
+
+    def test_flash_success_then_restores(self, qapp):
+        strip = ChainStrip()
+        strip.flash_success()
+        assert strip.run_button().text() == '✓ 完成'
+        strip.run_button().setText('运行')      # 1.2s 后由定时器复位
+        assert strip.run_button().text() == '运行'

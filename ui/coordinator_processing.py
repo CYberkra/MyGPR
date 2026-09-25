@@ -173,7 +173,7 @@ class ProcessingChain:
                           or self._co.project.current_line_id)
         self.processing_line_id = ''
         processing = self._co.page('processingInterface')
-        processing.set_running(False)
+        processing.set_running(False, success=bool(success))
         if success:
             self._co.infobar('success', '处理链',
                              message or f'处理链运行完成：{run_line_id}')

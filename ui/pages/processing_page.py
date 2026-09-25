@@ -670,13 +670,21 @@ class ProcessingPage(PanelStateMixin, QWidget):
                     return True
         return super().eventFilter(obj, event)
 
-    def set_running(self, running: bool, job_id: str = '') -> None:
-        """运行态切换：运行按钮/取消按钮互斥 + 进度条显隐。"""
+    def set_running(self, running: bool, job_id: str = '',
+                    success: bool | None = None) -> None:
+        """运行态切换：运行按钮/取消按钮互斥 + 进度条显隐。
+
+        ``success=True``（运行正常结束）时顶部链条的运行钮闪一次 ✓。
+        """
         self._running = bool(running)
         self._job_id = job_id or ''
         self._run_btn.setEnabled(not self._running)
         self._cancel_btn.setEnabled(self._running)
         self._progress_row_widget.setVisible(self._running)
+        # v2：顶部链条的运行钮同步进入 spinner 态（结束回到「运行」）
+        self._chain_strip.set_running(self._running)
+        if not self._running and success:
+            self._chain_strip.flash_success()
         if self._running:
             self._progress_bar.setValue(0)
             self._progress_label.setText('')

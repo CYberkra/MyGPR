@@ -12,7 +12,7 @@
 
 ChainStrip 只做展示与手势，**步骤数据仍由宿主页维护**（这里不存 steps）。
 """
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (QAbstractItemView, QHBoxLayout, QLabel,
                              QListWidget, QListWidgetItem, QSizePolicy,
                              QWidget)
@@ -120,6 +120,9 @@ class ChainStrip(QWidget):
         self._add_btn.clicked.connect(self.sig_add_requested)
         self._run_btn = PrimaryPushButton('运行', self)
         self._run_btn.setFixedWidth(76)
+        self._spin_timer = QTimer(self)
+        self._spin_timer.setInterval(320)
+        self._spin_timer.timeout.connect(self._tick_spin)
         self._run_btn.setToolTip('按当前处理链运行（Ctrl+R）；改算法/参数后需运行才更新结果')
 
         row = QHBoxLayout(self)
@@ -132,6 +135,32 @@ class ChainStrip(QWidget):
     def run_button(self):
         """运行钮：由宿主页接线（Ctrl+R 与此处同一入口）。"""
         return self._run_btn
+
+    # -------------------------------------------------- 运行钮：spinner → ✓
+    def set_running(self, running: bool) -> None:
+        """运行态：按钮转 spinner（点动画），结束回到「运行」。
+
+        动效移植自 Transitions.dev 的「Spinner to check morph」思路——
+        Qt 侧用轻量点动画代替旋转指示（避免引入新控件）。
+        """
+        if running:
+            self._run_btn.setEnabled(False)
+            self._run_btn.setText('运行中·')
+            self._spin_phase = 0
+            self._spin_timer.start(320)
+        else:
+            self._spin_timer.stop()
+            self._run_btn.setEnabled(True)
+            self._run_btn.setText('运行')
+
+    def flash_success(self) -> None:
+        """运行成功：按钮短暂变 ✓ 完成，再回到「运行」（明确的结果反馈）。"""
+        self._run_btn.setText('✓ 完成')
+        QTimer.singleShot(1200, lambda: self._run_btn.setText('运行'))
+
+    def _tick_spin(self) -> None:
+        self._spin_phase = (getattr(self, '_spin_phase', 0) + 1) % 3
+        self._run_btn.setText('运行中' + '·' * (self._spin_phase + 1))
 
     # ---------------------------------------------------------------- 数据
     def set_input_widget(self, widget) -> None:
