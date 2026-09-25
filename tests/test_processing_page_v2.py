@@ -210,3 +210,26 @@ class TestRunButtonMotion:
         assert strip.run_button().text() == '✓ 完成'
         strip.run_button().setText('运行')      # 1.2s 后由定时器复位
         assert strip.run_button().text() == '运行'
+
+
+class TestSkeletonReveal:
+    """结果卡骨架 → 出图交叉淡入（动效移植①）。"""
+
+    def test_new_card_shows_skeleton(self, grid):
+        grid.set_slots([{'key': 'k0', 'title': '输入', 'enabled': True}])
+        card = grid.cards()[0]
+        assert card._skeleton.isVisibleTo(card)
+        assert card._view_effect.opacity() == 0.0
+
+    def test_bundle_reveals_and_hides_skeleton(self, grid):
+        grid.set_slots([{'key': 'k0', 'title': '输入', 'enabled': True}])
+        card = grid.cards()[0]
+        grid.set_bundle('k0', _bundle(2))
+        assert card._fade_in.state() == card._fade_in.State.Running
+        assert card._fade_out.state() == card._fade_out.State.Running
+
+    def test_placeholder_card_has_no_skeleton(self, grid):
+        grid.set_slots([{'key': 'k0', 'title': '1 带通', 'enabled': False}])
+        card = grid.cards()[0]
+        assert card.view is None
+        assert not hasattr(card, '_skeleton')

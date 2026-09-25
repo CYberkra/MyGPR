@@ -13,9 +13,10 @@
 """
 import math
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel,
-                             QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
+from PyQt6.QtCore import (QPropertyAnimation, Qt, pyqtSignal)
+from PyQt6.QtWidgets import (QFrame, QGraphicsOpacityEffect,
+                             QGridLayout, QHBoxLayout, QLabel, QScrollArea,
+                             QSizePolicy, QVBoxLayout, QWidget)
 from qfluentwidgets import FluentIcon as FIF, ToolButton
 
 from ui.widgets.bscan_view import BScanView
@@ -24,6 +25,54 @@ from ui.widgets.empty_state import EmptyStateOverlay
 _CELL_MIN_HEIGHT = 320
 _GRID_SPACING = 16
 _MAX_COLUMNS = 3
+
+
+class _Skeleton(QWidget):
+    """结果卡骨架：预览未回填时的微光占位（动效移植①）。
+
+    移植 Transitions.dev 的「Skeleton loader and reveal」思路——Qt 侧用
+    不透明度脉冲 + 横向扫光条（QPropertyAnimation）近似 shimmer，不引入
+    新依赖；出图后与画布做交叉淡入（skeleton 淡出 / 画布淡入）。
+    """
+
+    def __init__(self, host=None):
+        super().__init__(host)
+        from PyQt6.QtCore import QPropertyAnimation, QRect
+        from PyQt6.QtGui import QColor, QPainter
+        self._QPropertyAnimation = QPropertyAnimation
+        self._QRect = QRect
+        self._QColor = QColor
+        self._QPainter = QPainter
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._shimmer_x = -0.35
+        self._anim = QPropertyAnimation(self, b'geometry')
+        self._anim.setDuration(1400)
+        self._anim.setLoopCount(-1)
+        self._anim.setStartValue(0)
+        self._anim.setEndValue(1000)
+        self._anim.valueChanged.connect(lambda _v: self.update())
+
+    def showEvent(self, event) -> None:
+        if self._anim.state() != self._anim.State.Running:
+            self._anim.start()
+        super().showEvent(event)
+
+    def hideEvent(self, event) -> None:
+        self._anim.stop()
+        super().hideEvent(event)
+
+    def paintEvent(self, event) -> None:
+        painter = self._QPainter(self)
+        painter.setRenderHint(self._QPainter.RenderHint.Antialiasing)
+        rect = self.rect()
+        painter.fillRect(rect, self._QColor(150, 150, 150, 26))
+        # 扫光条：按动画进度在卡宽上平移
+        progress = (self._anim.currentValue() or 0) / 1000.0
+        width = max(rect.width() * 0.35, 40)
+        x = rect.left() + (rect.width() + width) * progress - width
+        band = self._QRect(int(x), rect.top(), int(width), rect.height())
+        painter.fillRect(band, self._QColor(200, 200, 200, 34))
+        painter.end()
 
 
 class _ResultCard(QFrame):
@@ -82,15 +131,39 @@ class _ResultCard(QFrame):
             body.addWidget(hint, 1)
         else:
             self.view = BScanView(self)
+            self._skeleton = _Skeleton(self.view)
+            self._skeleton.setGeometry(self.view.rect())
+            self._skeleton.show()          # 建卡即占位：等预览回填
+            # 画布透明度效果（出图时淡入，与骨架交叉）
+            self._view_effect = QGraphicsOpacityEffect(self.view)
+            self._view_effect.setOpacity(0.0)
+            self.view.setGraphicsEffect(self._view_effect)
             body.addWidget(self.view, 1)
+            self._fade_out = QPropertyAnimation(self._skeleton, b'windowOpacity')
+            self._fade_out.setDuration(240)
+            self._fade_out.setStartValue(1.0)
+            self._fade_out.setEndValue(0.0)
+            self._fade_out.finished.connect(self._skeleton.hide)
+            self._fade_in = QPropertyAnimation(self._view_effect, b'opacity')
+            self._fade_in.setDuration(240)
+            self._fade_in.setStartValue(0.0)
+            self._fade_in.setEndValue(1.0)
 
     def set_bundle(self, bundle) -> None:
         if self.view is None:
             return
         if bundle is None:
-            self.view.clear()       # 尚无输入数据 → 空态
-        else:
-            self.view.set_bundle(bundle)
+            self.view.clear()       # 尚无输入数据 → 空态（骨架继续占位）
+            return
+        self.view.set_bundle(bundle)
+        self._reveal()
+
+    def _reveal(self) -> None:
+        """出图：骨架淡出 + 画布淡入（交叉淡入，避免「空白→突然有图」）。"""
+        if self._skeleton.isHidden():
+            return
+        self._fade_out.start()
+        self._fade_in.start()
 
     def clear(self) -> None:
         if self.view is not None:
