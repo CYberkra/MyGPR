@@ -208,8 +208,11 @@ class TestProcessingPageTabModel:
         page._preview_sources.append({
             'key': 'artifact:A9', 'title': 'sec_gain', 'bundle': None,
             'artifact_id': 'A9', 'closable': True, 'is_final': False})
+        # 旧 tab 模型在 v2 默认隐藏（懒加载让位给结果网格）——显式显示再验
+        page._preview_card.setVisible(True)
         page._sync_tabs()
         assert got == ['A9']
+        page._preview_card.setVisible(False)
 
     def test_close_tab_shrinks_windows(self, page, container):
         page.set_original_bundle(_bundle(1))
@@ -401,21 +404,24 @@ class TestFocusLayout:
         测完必须解锁，否则共享 page fixture 的高度会被钉死。
         """
         page.set_original_bundle(_bundle(1))      # _bundle 为 8 采样
+        # 旧预览卡在 v2 默认隐藏 → 显式显示才能让几何（固定高）生效
+        page._preview_card.setVisible(True)
         page.show()
         page.resize(1200, 900)
         try:
             container.setFixedHeight(8)           # 1.0px/采样 → 达标
             qapp.processEvents()
             page._update_readability_hint()
-            assert not page._readability_label.isVisible()
+            assert not page._readability_label.isVisibleTo(page)
             container.setFixedHeight(2)           # 0.25px/采样 → 破线
             qapp.processEvents()
             page._update_readability_hint()
-            assert page._readability_label.isVisible()
+            assert page._readability_label.isVisibleTo(page)
             assert '0.25' in page._readability_label.text()
         finally:
             container.setMinimumHeight(0)
             container.setMaximumHeight(16777215)
+            page._preview_card.setVisible(False)
             page.hide()
 
 

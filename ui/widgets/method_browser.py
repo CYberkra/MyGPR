@@ -72,7 +72,7 @@ class MethodBrowser(QWidget):
         self._empty = EmptyStateOverlay(
             self._tree, icon=FIF.LIBRARY, title='暂无方法',
             hint='方法库加载后按分类显示在此')
-        self._empty.setVisible(False)
+        self._empty.setVisible(True)   # 初始无方法即引导（set_methods 接管）
 
     def set_methods(self, methods) -> None:
         """methods: [{method_id,name,display_name,category,category_label,

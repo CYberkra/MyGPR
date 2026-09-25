@@ -41,11 +41,14 @@ from ui import constants
 from ui.motion import animate_progress
 from ui.page_scaffold import (PanelStateMixin, make_card, make_form_row,
                               make_scroll_column, refill_combo)
+from ui.widgets.bscan_result_grid import ResultGrid
+from ui.widgets.chain_strip import ChainStrip
 from ui.widgets import (BScanContainer, CollapsiblePanel, LAYOUT_FOCUS,
                         MethodBrowser, ParamForm, PipelineList, MAX_PANELS,
                         clear_invalid, make_separator)
 
 
+_INPUT_KEY = 'input'         # 结果网格的「输入」槽位 key
 _MAX_THUMBS = 3              # 缩略列容量（= MAX_PANELS - 1，含主窗共 4 面板）
 _READABILITY_MIN_RATIO = 0.45  # 可读性红线：绘图区高 / 采样数（px/采样）
 
@@ -94,6 +97,7 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._artifacts_by_id = {}        # artifact_id -> ProjectArtifact
         self._gallery = None              # 总览墙（懒创建，随主页销毁）
         self._thumb_views_bound = []      # 已装点击提升的缩略面板
+        self._step_artifact_ids = {}      # v2：步骤序号 → 该步 intermediate 成果 id
         self._running = False
         self._job_id = ''
         self._selected_step = -1
@@ -152,7 +156,30 @@ class ProcessingPage(PanelStateMixin, QWidget):
         # qfw 自带的「+」加页按钮：本页 tab 只随数据源增减，按钮无功能，
         # 留着只会诱导误点（死按钮）
         self._source_tabs.setAddButtonVisible(False)
+        # ---------------- v2 主区：上链条 / 下结果网格（旧预览卡隐藏，代码保留）
+        self._line_combo = ComboBox(middle)
+        self._line_combo.setMinimumWidth(130)
+        self._line_combo.setToolTip('当前测线：在处理页直接切换')
+        self._artifact_combo = ComboBox(middle)
+        self._artifact_combo.setMinimumWidth(150)
+        self._artifact_combo.setToolTip('选择该测线历次处理结果作为输入')
+        input_row = QWidget(middle)
+        input_layout = QHBoxLayout(input_row)
+        input_layout.setContentsMargins(0, 0, 0, 0)
+        input_layout.setSpacing(constants.CARD_SPACING)
+        input_layout.addWidget(self._line_combo)
+        input_layout.addWidget(self._artifact_combo)
+
+        self._chain_strip = ChainStrip(middle)
+        self._chain_strip.set_input_widget(input_row)
+        middle_layout.addWidget(self._chain_strip)
+
+        self._result_grid = ResultGrid(middle)
+        middle_layout.addWidget(self._result_grid, 1)
+
         preview_card, preview_layout = make_card('数据预览')
+        self._preview_card = preview_card
+        preview_card.setVisible(False)      # v2 隐藏（tab 模型待确认后退役）
         tab_row = QHBoxLayout()
         tab_row.setSpacing(constants.CARD_SPACING)
         tab_row.addWidget(self._source_tabs, 1)
@@ -170,20 +197,6 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._readability_label.setVisible(False)
         tab_row.addWidget(self._readability_label)
         preview_layout.addLayout(tab_row)
-
-        sel_row = QHBoxLayout()
-        sel_row.setSpacing(constants.CARD_SPACING)
-        # 无前置标签：下拉内容自明（测线短号 / 「处理结果_」前缀成果名），
-        # tooltip 承担语义说明；stretch 因子按文本长度分配。
-        self._line_combo = ComboBox(preview_card)
-        self._line_combo.setMinimumWidth(130)
-        self._line_combo.setToolTip('当前测线：在处理页直接切换')
-        sel_row.addWidget(self._line_combo, 1)
-        self._artifact_combo = ComboBox(preview_card)
-        self._artifact_combo.setMinimumWidth(150)
-        self._artifact_combo.setToolTip('选择该测线历次处理结果进行预览')
-        sel_row.addWidget(self._artifact_combo, 2)
-        preview_layout.addLayout(sel_row)
 
         self._bscan_container = BScanContainer(preview_card)
         self._bscan_container.setMinimumHeight(constants.PREVIEW_MIN_HEIGHT)
@@ -275,6 +288,12 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._adopt_params_btn.setEnabled(False)
         autotune_layout.addWidget(self._adopt_params_btn)
         right_layout.addWidget(autotune_card)
+        # v2：参数 / 执行 / 自动调参移入左栏（处理链改由顶部 chip 条承担，
+        # 右栏整体隐藏——PipelineList 仍作为步骤数据源留在右栏内，代码不删）
+        left_layout.addWidget(param_card)
+        left_layout.addWidget(exec_card)
+        left_layout.addWidget(autotune_card)
+        self._right_panel.setVisible(False)
         right_layout.addStretch(1)
 
     # ============================================================ 内部接线
@@ -295,9 +314,18 @@ class ProcessingPage(PanelStateMixin, QWidget):
         # 不再持有副本，视图偏好由主窗启动期统一恢复、用户操作镜像写回。
         self._line_combo.currentIndexChanged.connect(self._on_line_combo_changed)
         self._artifact_combo.currentIndexChanged.connect(self._on_artifact_combo_changed)
-        # tab 模型：关闭 / 选中 → 源清单变更 → 重排画布面板
+        # tab 模型：关闭 / 选中 → 源清单变更 → 重排画布面板（v2 暂隐藏）
         self._source_tabs.tabCloseRequested.connect(self._on_tab_close)
         self._source_tabs.currentChanged.connect(self._on_tab_selected)
+        # v2：顶部 chip 条 ↔ 处理链（PipelineList 仍是步骤数据源）
+        self._chain_strip.sig_step_selected.connect(self._on_chain_step_selected)
+        self._chain_strip.sig_step_toggled.connect(self._on_chain_step_toggled)
+        self._chain_strip.sig_step_removed.connect(self._on_chain_step_removed)
+        self._chain_strip.sig_step_moved.connect(self._on_chain_step_moved)
+        self._chain_strip.sig_add_requested.connect(self._on_add_selected_method)
+        self._chain_strip.run_button().clicked.connect(self._on_run_clicked)
+        self._pipeline_list.sig_changed.connect(self._refresh_chain_and_results)
+        self._refresh_chain_and_results()
 
         # 执行
         self._run_btn.clicked.connect(self._on_run_clicked)
@@ -339,6 +367,7 @@ class ProcessingPage(PanelStateMixin, QWidget):
     def set_original_bundle(self, bundle) -> None:
         """原始数据预览 bundle → 固定首 tab（不可关；换测线即换内容）。"""
         self._original_bundle = bundle
+        self._result_grid.set_bundle(_INPUT_KEY, bundle)
         self._ensure_original_source()
         for source in self._preview_sources:
             if source['key'] == 'original':
@@ -353,6 +382,10 @@ class ProcessingPage(PanelStateMixin, QWidget):
         面板已在 _redistribute 里绑定/清空过，这里补齐后重分发。
         """
         key = f'artifact:{artifact_id}'
+        # v2：同 bundle 回填到结果网格的对应步骤格（旧 tab 模型并存）
+        for index, step_aid in (self._step_artifact_ids or {}).items():
+            if step_aid == artifact_id:
+                self._result_grid.set_bundle(f'step:{index}', bundle)
         for source in self._preview_sources:
             if source['key'] == key:
                 source['bundle'] = bundle
@@ -396,6 +429,65 @@ class ProcessingPage(PanelStateMixin, QWidget):
         from ui.widgets.bscan_gallery import BScanGallery
         self._gallery = BScanGallery(self)
         self._gallery.show()
+
+    # ------------------------------------------------ v2：链条 ↔ 处理链
+    def _on_chain_step_selected(self, index: int) -> None:
+        """选 chip → 参数区跟随该步骤（参数表单已接 sig_step_selected）。"""
+        if index >= 0:
+            self._pipeline_list.select_step(index)
+
+    def _on_chain_step_toggled(self, index: int, enabled: bool) -> None:
+        """启用/禁用：与当前状态不同才翻转（PipelineList 内置翻转语义）。"""
+        steps = self._pipeline_list.steps()
+        if 0 <= index < len(steps) and steps[index]['enabled'] != enabled:
+            self._pipeline_list._toggle_enabled(index)
+
+    def _on_chain_step_removed(self, index: int) -> None:
+        self._pipeline_list._remove_step(index)
+
+    def _on_chain_step_moved(self, source: int, target: int) -> None:
+        """chip 拖拽落点 → 步骤换位（target 为插入位语义）。"""
+        self._pipeline_list._move_step_to(source, target)
+
+    def _refresh_chain_and_results(self) -> None:
+        """上面怎么排，下面就按同序铺格。
+
+        网格数据源优先级：已运行 → run_group 成员（运行事实，标题=算法名）；
+        未运行 → 当前链步骤占位（空态「点运行后生成」）。禁用的步骤留
+        置灰占位卡（1:1 对应，不占画布）。
+        """
+        steps = self._pipeline_list.steps()
+        self._chain_strip.set_steps(steps)
+        members = self._newest_run_members()
+        if members:
+            slots = [{'key': _INPUT_KEY, 'title': '输入', 'enabled': True}]
+            for i, (_s, kind, _c, artifact_id, art) in enumerate(members):
+                method = (str(getattr(art, 'method_id', '') or '')
+                          or str(getattr(art, 'name', '') or ''))
+                slots.append({'key': f'step:{i}', 'title': f'{i + 1} {method}',
+                              'enabled': True})
+            self._step_artifact_ids = {
+                i: artifact_id
+                for i, (_s, _k, _c, artifact_id, _a) in enumerate(members)}
+        else:
+            slots = [{'key': _INPUT_KEY, 'title': '输入', 'enabled': True}]
+            for i, step in enumerate(steps):
+                slots.append({
+                    'key': f'step:{i}',
+                    'title': f'{i + 1} {step.get("label") or step.get("method_id", "")}',
+                    'enabled': bool(step.get('enabled', True))})
+            self._step_artifact_ids = {}
+        self._result_grid.set_slots(slots)
+        # set_slots 会重建卡片 → 输入卡的 bundle 需重喂（原始 bundle
+        # 存在源清单的 original 槽位里）
+        original = next((src['bundle'] for src in self._preview_sources
+                         if src['key'] == 'original'), None)
+        self._result_grid.set_bundle(_INPUT_KEY, original)
+
+    def _request_step_previews(self) -> None:
+        """按步骤顺序请求各步结果（异步回填，generation 守卫防串线）。"""
+        for _index, artifact_id in sorted(self._step_artifact_ids.items()):
+            self.artifact_preview_requested.emit(artifact_id)
 
     def on_gallery_pick(self, key: str) -> None:
         """总览墙点格子：选中该源（可见性规则把它换入主面板）。"""
@@ -532,7 +624,8 @@ class ProcessingPage(PanelStateMixin, QWidget):
         view.clear()
         view.set_thumbnail_mode(thumb)
         artifact_id = str(source.get('artifact_id') or '')
-        if artifact_id:
+        if artifact_id and self._preview_card is not None \
+                and self._preview_card.isVisibleTo(self):
             self.artifact_preview_requested.emit(artifact_id)
 
     def _sync_thumb_activation(self) -> None:
@@ -692,6 +785,33 @@ class ProcessingPage(PanelStateMixin, QWidget):
             return nested
         return manifest
 
+    def _newest_run_members(self) -> list:
+        """最新 run_group 的成员（已按步序排序；无则空表）。
+
+        元素：(kind, created, artifact_id, art)。结果网格与步骤 tab 共用
+        ——「上面怎么排，下面就按同序看各步结果」以运行事实（B7 落盘）
+        为准，而非当前链定义（用户可能已改链）。
+        """
+        groups = {}
+        for artifact_id, art in self._artifacts_by_id.items():
+            params = self._run_group_params(art)
+            group = str(params.get('run_group_id') or '')
+            if not group:
+                continue
+            info = groups.setdefault(group, {'created': '', 'members': []})
+            info['members'].append((
+                int(params.get('run_step_index') or 0),
+                str(params.get('artifact_kind') or ''),
+                str(getattr(art, 'created_at', '') or ''),
+                artifact_id, art))
+            created = str(getattr(art, 'created_at', '') or '')
+            info['created'] = max(info['created'], created)
+        if not groups:
+            return []
+        newest = max(groups, key=lambda g: groups[g]['created'])
+        return sorted(groups[newest]['members'],
+                      key=lambda m: (m[1] == 'processing', m[0], m[2]))
+
     def _auto_open_newest_run_group(self) -> None:
         """最新 run_group 的步骤/最终成果自动开 tab（每组只开一次）。
 
@@ -727,6 +847,9 @@ class ProcessingPage(PanelStateMixin, QWidget):
         # 时间升序回退（B7 逐步保存天然按步序递增）。最终成果恒排末位。
         members = sorted(groups[newest]['members'],
                          key=lambda m: (m[1] == 'processing', m[0], m[2]))
+        self._step_artifact_ids = {
+            index: artifact_id
+            for index, (_s, _k, _c, artifact_id, _a) in enumerate(members)}
         for _, kind, _created, artifact_id, art in members:
             key = f'artifact:{artifact_id}'
             if any(s['key'] == key for s in self._preview_sources):
@@ -741,6 +864,8 @@ class ProcessingPage(PanelStateMixin, QWidget):
         if self._preview_sources:
             self._selected_source_key = self._preview_sources[-1]['key']
         self._sync_tabs()
+        self._refresh_chain_and_results()
+        self._request_step_previews()
 
     def select_artifact(self, artifact_id: str) -> bool:
         """静默选中指定成果（不发射 artifact_selected，供主窗口自动预览时同步）。"""
