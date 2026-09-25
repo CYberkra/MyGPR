@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel,
 from qfluentwidgets import FluentIcon as FIF, ToolButton
 
 from ui.widgets.bscan_view import BScanView
+from ui.widgets.empty_state import EmptyStateOverlay
 
 _CELL_MIN_HEIGHT = 320
 _GRID_SPACING = 16
@@ -128,6 +129,12 @@ class ResultGrid(QWidget):
         outer.addWidget(self._scroll)
         self._scroll.setWidget(self._body)
 
+        # 运行前不摆空画布：只给一句引导（有数据才建 B-Scan 视图）
+        self._empty = EmptyStateOverlay(
+            self, icon=None, title='暂无结果',
+            hint='选择测线后显示输入数据；点「运行」后按步骤显示各步结果')
+        self._empty.setVisible(True)
+
     # ---------------------------------------------------------------- 槽位
     def set_slots(self, slots) -> None:
         """slots: [{key, title, enabled}]（宿主页为数据源；这里只铺卡）。"""
@@ -137,6 +144,7 @@ class ResultGrid(QWidget):
             card.deleteLater()
         self._cards = []
         self._keys = {}
+        self._empty.setVisible(not (slots or []))
         for spec in (slots or []):
             card = _ResultCard(
                 spec['key'], spec.get('title', ''),

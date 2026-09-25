@@ -366,12 +366,14 @@ class ProcessingPage(PanelStateMixin, QWidget):
 
     def set_original_bundle(self, bundle) -> None:
         """原始数据预览 bundle → 固定首 tab（不可关；换测线即换内容）。"""
-        self._original_bundle = bundle
-        self._result_grid.set_bundle(_INPUT_KEY, bundle)
+        # v2：输入数据到位才建输入卡（未运行不摆各步的空画布）
         self._ensure_original_source()
         for source in self._preview_sources:
             if source['key'] == 'original':
                 source['bundle'] = bundle
+        self._result_grid.set_bundle(_INPUT_KEY, bundle)
+        if not self._result_grid.cards():
+            self._refresh_chain_and_results()
         self._redistribute()
 
     def set_artifact_bundle(self, artifact_id: str, bundle) -> None:
@@ -470,12 +472,11 @@ class ProcessingPage(PanelStateMixin, QWidget):
                 i: artifact_id
                 for i, (_s, _k, _c, artifact_id, _a) in enumerate(members)}
         else:
-            slots = [{'key': _INPUT_KEY, 'title': '输入', 'enabled': True}]
-            for i, step in enumerate(steps):
-                slots.append({
-                    'key': f'step:{i}',
-                    'title': f'{i + 1} {step.get("label") or step.get("method_id", "")}',
-                    'enabled': bool(step.get('enabled', True))})
+            # 未运行：不摆各步的空画布——只有输入数据真的到位才建输入卡
+            original = next((src['bundle'] for src in self._preview_sources
+                             if src['key'] == 'original'), None)
+            slots = ([{'key': _INPUT_KEY, 'title': '输入', 'enabled': True}]
+                     if original is not None else [])
             self._step_artifact_ids = {}
         self._result_grid.set_slots(slots)
         # set_slots 会重建卡片 → 输入卡的 bundle 需重喂（原始 bundle

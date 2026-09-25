@@ -15,6 +15,7 @@ import pytest  # noqa: E402
 pytest.importorskip("PyQt6")  # 后端 CI（无 Qt）自动跳过
 
 from PyQt6.QtCore import QPointF  # noqa: E402
+from ui.pages.processing_page import ProcessingPage  # noqa: E402
 from ui.widgets.bscan_result_grid import ResultGrid  # noqa: E402
 from ui.widgets.chain_strip import ChainStrip  # noqa: E402
 
@@ -33,6 +34,11 @@ class _FakeDropEvent:
 
     def accept(self):
         self.accepted = True
+
+
+@pytest.fixture
+def grid(qapp):
+    return ResultGrid()
 
 
 class TestChainStrip:
@@ -78,10 +84,6 @@ class TestChainStrip:
 
 
 class TestResultGridColumns:
-    @pytest.fixture
-    def grid(self, qapp):
-        return ResultGrid()
-
     def _slots(self, n: int, *, disabled=()):
         return [{'key': f'k{i}', 'title': f'{i}', 'enabled': i not in disabled}
                 for i in range(n)]
@@ -130,3 +132,61 @@ class TestResultGridColumns:
         grid.set_slots(self._slots(2))
         assert len(grid.cards()) == 2
         assert self._geometry(grid) == [(0, 0), (0, 1)]
+
+
+def _bundle(tag: float, samples: int = 8, traces: int = 6):
+    """鸭子类型 PreviewBundle（矩阵全为 tag）。"""
+    import numpy as np
+    from types import SimpleNamespace
+    return SimpleNamespace(
+        matrix=np.full((samples, traces), float(tag), dtype=np.float32),
+        vmin=0.0, vmax=float(tag), title=f'b{tag}', x_label='道数',
+        y_label='采样点', trace_axis_m=None, sample_axis=None,
+        sample_axis_label='', trace_count=traces, sample_count=samples,
+        trace_elevation_m=None, depth_axis_m=None)
+
+
+class TestResultGridLazyPrinciple:
+    """有数据才建画布：运行前不摆空 B-Scan 窗口。"""
+
+    def test_no_slots_shows_hint_only(self, grid):
+        assert grid.cards() == []
+        assert grid._empty.isVisibleTo(grid)
+
+    def test_slots_hide_hint(self, grid):
+        grid.set_slots([{'key': 'k0', 'title': '输入', 'enabled': True}])
+        assert not grid._empty.isVisibleTo(grid)
+        assert len(grid.cards()) == 1
+
+    def test_page_before_run_builds_no_step_cards(self, qapp):
+        page = ProcessingPage()
+        try:
+            page._refresh_chain_and_results()
+            assert page._result_grid.cards() == []      # 未选测线：零画布
+            page.set_original_bundle(_bundle(1))
+            assert len(page._result_grid.cards()) == 1  # 只有输入（有数据）
+            titles = [c.title_label.text() for c in page._result_grid.cards()]
+            assert titles == ['输入']
+        finally:
+            page.close()
+
+    def test_page_after_run_builds_step_cards(self, qapp):
+        page = ProcessingPage()
+        try:
+            page.set_original_bundle(_bundle(1))
+            page.set_artifacts([
+                __import__('types').SimpleNamespace(
+                    artifact_id='S1', line_id='L01', name='run 步骤1_dewow',
+                    method_id='dewow', created_at='2026-09-25T10:01:00',
+                    manifest={'params': {'artifact_kind': 'intermediate',
+                                         'run_group_id': 'G1'}}),
+                __import__('types').SimpleNamespace(
+                    artifact_id='F1', line_id='L01', name='run_sec',
+                    method_id='sec_gain', created_at='2026-09-25T10:02:00',
+                    manifest={'params': {'artifact_kind': 'processing',
+                                         'run_group_id': 'G1'}}),
+            ])
+            titles = [c.title_label.text() for c in page._result_grid.cards()]
+            assert titles == ['输入', '1 dewow', '2 sec_gain']
+        finally:
+            page.close()
