@@ -20,6 +20,7 @@ from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants
 from ui.widgets.context_menus import add_action, make_menu
+from ui.widgets.empty_state import EmptyStateOverlay
 
 
 class _ElidedLabel(QLabel):
@@ -114,6 +115,11 @@ class PipelineList(QWidget):
             context=Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self._delete_shortcut.activated.connect(
             lambda: self._remove_step(self._list.currentRow()))
+        # 处理链空态浮层（终态④）：无步骤时给引导，替代整片空白
+        self._empty = EmptyStateOverlay(
+            self._list, icon=None, title='处理链为空',
+            hint='从左侧方法库添加算法步骤（可拖拽排序）')
+        self._empty.setVisible(True)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -181,6 +187,7 @@ class PipelineList(QWidget):
             self._list.addItem(item)
             self._list.setItemWidget(item, row)
         self._list.blockSignals(False)
+        self._empty.setVisible(not self._steps)
         if select is not None and 0 <= select < self._list.count():
             self._list.setCurrentRow(select)
         elif self._list.count() == 0:

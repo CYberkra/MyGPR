@@ -17,6 +17,7 @@ from qfluentwidgets import FluentIcon as FIF
 
 from ui.theme_helpers import BADGE_QSS, status_color
 from ui.widgets.context_menus import add_action, make_menu
+from ui.widgets.empty_state import EmptyStateOverlay
 
 
 def _tag_badge_bg(tag: str) -> str:
@@ -63,12 +64,22 @@ class MethodBrowser(QWidget):
         layout.addWidget(self._search)
         layout.addWidget(self._tree, 1)
 
+        self._init_empty_state()
+
     # ------------------------------------------------------------- 数据
+    def _init_empty_state(self) -> None:
+        """方法库空态浮层：后端未返回方法列表时给引导（终态④）。"""
+        self._empty = EmptyStateOverlay(
+            self._tree, icon=FIF.LIBRARY, title='暂无方法',
+            hint='方法库加载后按分类显示在此')
+        self._empty.setVisible(False)
+
     def set_methods(self, methods) -> None:
         """methods: [{method_id,name,display_name,category,category_label,
                      tags(list[str]),parameter_schema(list[dict]),...}]"""
         self._methods = [dict(m) for m in (methods or [])]
         self._rebuild_tree()
+        self._empty.setVisible(not self._methods)
 
     def _rebuild_tree(self):
         self._tree.clear()

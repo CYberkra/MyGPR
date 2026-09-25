@@ -81,6 +81,15 @@ class TestDragReorder:
         assert widget.steps()[1]['method_id'] == 'm2'
         assert got == []
 
+    def test_empty_overlay_toggles_with_steps(self, widget, qapp):
+        """空态浮层：无步骤显示引导，加步骤即隐藏，删光再回来。"""
+        widget.set_steps([])
+        assert widget._empty.isVisibleTo(widget._list)
+        widget.add_step('m1', '算法1', {})
+        assert not widget._empty.isVisibleTo(widget._list)
+        widget._remove_step(0)
+        assert widget._empty.isVisibleTo(widget._list)
+
     def test_row_widgets_survive_reorder(self, widget):
         """重排后每行仍带可用的行控件（enable 框勾选态跟数据走）。"""
         widget._steps[0]['enabled'] = False
