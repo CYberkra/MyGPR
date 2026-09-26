@@ -6,6 +6,9 @@ StrictComboBox。
 """
 
 from .ascan_view import AScanView
+from .bscan_container import (BScanContainer, LAYOUT_AUTO, LAYOUT_DUAL,
+                              LAYOUT_MODES, LAYOUT_FOCUS, LAYOUT_SINGLE,
+                              MAX_PANELS)
 from .bscan_view import BScanView
 from .collapsible_panel import (CollapsiblePanel, chevron_left_icon,
                                 collapse_button_qss)
@@ -23,6 +26,13 @@ from .validators import (FunctionValidator, StrictComboBox, clear_invalid,
 
 __all__ = [
     'BScanView',
+    'BScanContainer',
+    'LAYOUT_AUTO',
+    'LAYOUT_SINGLE',
+    'LAYOUT_DUAL',
+    'LAYOUT_FOCUS',
+    'MAX_PANELS',
+    'LAYOUT_MODES',
     'AScanView',
     'ParamForm',
     'MethodBrowser',

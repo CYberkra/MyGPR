@@ -173,10 +173,11 @@ class TestElevationImageSwap:
 
     def test_warp_is_cached_per_data(self, view):
         switch_elevation(view)
-        first = view._warped_elevation()[0]
+        src = view._gain_applied(view._matrix)   # 增益是 warp 的原料（off=原样）
+        first = view._warped_elevation(src)[0]
         view.set_y_axis_mode('sample')
         switch_elevation(view)
-        assert view._warped_elevation()[0] is first       # 同数据不重算
+        assert view._warped_elevation(src)[0] is first   # 同数据不重算
 
 
 class TestElevationCoordinates:
@@ -233,16 +234,17 @@ class TestElevationWiggle:
 
 
 class TestToolbarTrim:
-    """工具条精简（用户评审）：轴单位/比例属低频，收进设置页与右键菜单。"""
+    """工具条退役（2026-09-23 评审）：4 钮与右键菜单缩放组完全重复。"""
 
-    def test_toolbar_keeps_zoom_and_viewport_only(self, view):
-        assert view._toolbar_buttons == (view._zoom_in_btn, view._zoom_out_btn)
-
-    def test_low_frequency_buttons_removed(self, view):
-        for name in ('_fit_btn', '_square_btn', '_one_to_one_btn',
+    def test_toolbar_removed_fullscreen_button_floats(self, view):
+        assert not hasattr(view, '_toolbar')
+        assert not hasattr(view, '_toolbar_buttons')
+        for name in ('_zoom_in_btn', '_zoom_out_btn', '_expand_btn',
+                     '_fit_btn', '_square_btn', '_one_to_one_btn',
                      '_y_sample_btn', '_y_elevation_btn',
                      '_x_trace_btn', '_x_distance_btn'):
-            assert not hasattr(view, name), f'{name} 应已从工具条移除'
+            assert not hasattr(view, name), f'{name} 应已退役'
+        assert view._fullscreen_btn.parent() is view   # 悬浮画布左上角
 
     def test_capabilities_survive_in_context_menu(self, view):
         """删掉的是入口不是能力：右键菜单仍能切比例与轴单位。"""
@@ -252,3 +254,11 @@ class TestToolbarTrim:
         assert view.aspect_mode() == 'free'
         switch_elevation(view)
         assert view.y_axis_mode() == 'elevation'
+
+    def test_expand_survives_as_context_menu_capability(self, view):
+        """铺满钮退役后能力保留：宿主接管后仍可请求收起页面侧栏。"""
+        got = []
+        view.sig_expand_requested.connect(lambda: got.append(True))
+        view.set_expand_enabled(True)
+        view.request_expand()
+        assert got == [True]

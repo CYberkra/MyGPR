@@ -98,23 +98,18 @@ class TestCrosshairWidget:
         assert not view._vline.isVisible()
         assert view._readout.isHidden()
 
-    def test_theme_styles_the_toolbar_surface_and_button_text(self, qapp):
+    def test_theme_styles_the_floating_fullscreen_button(self, qapp):
         from ui.widgets.bscan_view import BScanView
 
         view = BScanView()
         view.apply_theme(True)
-        assert '#000000' in view._toolbar.styleSheet()
-        # 工具条精简后只剩图标钮（缩放/铺满/全屏），全部吃调色板 QSS
-        assert view._toolbar_buttons, '工具条不应为空'
-        for button in view._toolbar_buttons:
-            assert '#2d2d2d' in button.styleSheet()
-            assert '#f0f0f0' in button.styleSheet()
+        # 工具条退役后，图内悬浮全屏钮是唯一常驻控件，仍吃调色板 QSS
+        assert '#2d2d2d' in view._fullscreen_btn.styleSheet()
+        assert '#f0f0f0' in view._fullscreen_btn.styleSheet()
 
         view.apply_theme(False)
-        assert '#ffffff' in view._toolbar.styleSheet()
-        for button in view._toolbar_buttons:
-            assert '#ffffff' in button.styleSheet()
-            assert '#202020' in button.styleSheet()
+        assert '#ffffff' in view._fullscreen_btn.styleSheet()
+        assert '#202020' in view._fullscreen_btn.styleSheet()
 
 
 class TestPreviewCoordinateMapping:

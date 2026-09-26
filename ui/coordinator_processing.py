@@ -46,6 +46,9 @@ class ProcessingChain:
         processing.line_changed.connect(self.on_processing_line_changed)
         processing.artifact_selected.connect(
             self.on_processing_artifact_selected)
+        # tab 模型懒加载：可见面板缺 bundle → 按需预览（异步回填）
+        processing.artifact_preview_requested.connect(
+            self.on_step_preview_requested)
 
         # ---------------- 解释页（SPEC §6.6）
         interpretation.open_session_requested.connect(
@@ -112,6 +115,16 @@ class ProcessingChain:
         if line_id and artifact_id and self._co.project_controller is not None:
             self._co.project_controller.preview_artifact(line_id, str(artifact_id))
 
+    def on_step_preview_requested(self, artifact_id: str) -> None:
+        """tab 模型懒加载：可见面板缺 bundle → 按需预览该成果。
+
+        异步回填走 on_artifact_preview → set_artifact_bundle，与手选
+        成果同一条链路（generation 守卫天然防串线）。
+        """
+        line_id = self._co.require_line()
+        if line_id and artifact_id and self._co.project_controller is not None:
+            self._co.project_controller.preview_artifact(line_id, str(artifact_id))
+
     def on_run_requested(self, payload: dict) -> None:
         """run_requested(dict) → run_pipeline（含结果名回退与链式输入）。"""
         if self._co.processing_controller is None:
@@ -160,7 +173,7 @@ class ProcessingChain:
                           or self._co.project.current_line_id)
         self.processing_line_id = ''
         processing = self._co.page('processingInterface')
-        processing.set_running(False)
+        processing.set_running(False, success=bool(success))
         if success:
             self._co.infobar('success', '处理链',
                              message or f'处理链运行完成：{run_line_id}')

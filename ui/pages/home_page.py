@@ -18,7 +18,7 @@ import_line_requested / goto_page(str)。
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
-    BodyLabel, CaptionLabel, ComboBox, PrimaryPushButton,
+    BodyLabel, CaptionLabel, PrimaryPushButton,
     PushButton, ScrollArea,
 )
 from qfluentwidgets import FluentIcon as FIF
@@ -151,26 +151,16 @@ class HomePage(ScrollArea):
         return value
 
     def _build_preview_card(self, parent):
-        """"数据预览"卡：BScanView（默认近似方形）+ 色标 ComboBox。"""
+        """"数据预览"卡：BScanView（默认近似方形）。
+
+        色标行已退役（2026-09-23 审计）：主页 combo 是游离于持久化体系外
+        的第三份状态源（不写盘、启动恢复后显示 stale）。色标切换走 B-Scan
+        右键色标子菜单（写盘+同步设置页），全局入口在设置页 B-Scan 卡。
+        """
         card, layout = make_card('数据预览')
         self._bscan = BScanView(card)
         self._bscan.setMinimumHeight(constants.PREVIEW_MIN_HEIGHT)
         layout.addWidget(self._bscan, 1)
-
-        row = QHBoxLayout()
-        label = CaptionLabel('B-Scan颜色映射:', card)
-        label.setMinimumWidth(constants.FORM_LABEL_MIN_WIDTH)
-        self._cmap_combo = ComboBox(card)
-        self._cmap_combo.addItems(constants.COLORMAPS)
-        self._cmap_combo.setCurrentText(constants.DEFAULT_COLORMAP)
-        self._cmap_combo.setMinimumWidth(120)
-        self._cmap_combo.currentTextChanged.connect(self._bscan.set_colormap)
-        # 反向同步：右键菜单改色标 → ComboBox 跟随
-        self._bscan.sig_colormap_changed.connect(self._cmap_combo.setCurrentText)
-        row.addWidget(label)
-        row.addWidget(self._cmap_combo)
-        row.addStretch(1)
-        layout.addLayout(row)
         return card
 
     def _build_jobs_card(self, parent):
@@ -212,15 +202,6 @@ class HomePage(ScrollArea):
     def mini_jobs(self) -> MiniJobList:
         """内嵌 MiniJobList 访问器（JobBridge 信号由主窗口接入）。"""
         return self._mini_jobs
-
-    def colormap(self) -> str:
-        """当前颜色映射名（供主窗口持久化）。"""
-        return self._cmap_combo.currentText()
-
-    def set_colormap(self, name: str) -> None:
-        """设置颜色映射（ComboBox 与 BScanView 同步）。"""
-        self._cmap_combo.setCurrentText(name)
-        self._bscan.set_colormap(name)
 
 
 __all__ = ['HomePage']

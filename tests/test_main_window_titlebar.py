@@ -40,6 +40,7 @@ def window(qapp, monkeypatch):
         line_delete_requested = pyqtSignal(list)
         delivery_focus_requested = pyqtSignal(str)
         artifact_focus_requested = pyqtSignal(str, str)
+        artifact_delete_requested = pyqtSignal(str, str)
 
         def set_settings_manager(self, _settings):
             pass
