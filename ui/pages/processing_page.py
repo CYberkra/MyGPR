@@ -169,7 +169,9 @@ class ProcessingPage(PanelStateMixin, QWidget):
         input_layout.setContentsMargins(0, 0, 0, 0)
         input_layout.setSpacing(constants.CARD_SPACING)
         input_layout.addWidget(self._line_combo)
-        input_layout.addWidget(self._artifact_combo)
+        # v2.2：成果下拉删除（「从成果继续处理」走左栏执行卡的「输入数据」
+        # 下拉）；对象保留隐藏，coordinator 的静默选中接线不受影响
+        self._artifact_combo.setVisible(False)
 
         self._chain_strip = ChainStrip(middle)
         self._chain_strip.set_input_widget(input_row)
@@ -513,9 +515,8 @@ class ProcessingPage(PanelStateMixin, QWidget):
             self._chain_strip.set_dirty(True)
 
     def _selected_step_index(self) -> int:
-        """当前选中的步骤索引（-1 = 输入 / 未选）。"""
-        row = self._chain_strip._list.currentRow()
-        return row - 1
+        """当前选中的步骤索引（-1 = 未选）。"""
+        return self._chain_strip._list.currentRow()
 
     def _on_card_selected(self, key: str) -> None:
         """点结果卡 → 选中对应 chip（与链式条双向同步）。"""

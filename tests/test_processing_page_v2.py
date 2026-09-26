@@ -56,14 +56,16 @@ class TestChainStrip:
                      {'label': '带通', 'enabled': False}])
         return w
 
-    def test_chips_are_input_plus_steps(self, strip):
-        """输入 chip 固定首位 + 每步一个 chip。"""
-        assert strip._list.count() == 4
+    def test_chips_match_steps(self, strip):
+        """v2.2：无「输入」chip——每个步骤一个 chip（测线=首 chip 由
+        宿主注入，不在 list 内）。"""
+        assert strip._list.count() == 3
 
-    def test_selection_offsets_input_chip(self, strip):
+    def test_selection_maps_directly(self, strip):
+        """v2.2：row 即步骤索引（无输入 chip 偏移）。"""
         got = []
         strip.sig_step_selected.connect(got.append)
-        strip._list.setCurrentRow(2)          # 第 2 个步骤
+        strip._list.setCurrentRow(1)
         assert got == [1]
 
     def test_toggle_and_remove_signals(self, strip):
@@ -75,18 +77,20 @@ class TestChainStrip:
         assert toggled == [(1, False)]
         assert removed == [0]
 
-    def test_drop_event_maps_to_step_indices(self, strip):
+    def test_drop_event_maps_to_step_indices(self, strip, qapp):
         got = []
+        strip.show()                          # 几何需真实布局
+        qapp.processEvents()
         strip.sig_step_moved.connect(lambda s, t: got.append((s, t)))
-        strip._list.setCurrentRow(1)          # 步骤 0
-        item = strip._list.item(3)            # 步骤 2（+1 偏移）
+        strip._list.setCurrentRow(0)          # 步骤 0
+        item = strip._list.item(2)            # 步骤 2
         rect = strip._list.visualItemRect(item)
         strip._list_drop_event(_FakeDropEvent(rect.left() + 2, rect.center().y()))
         assert got and got[0][0] == 0         # 源 = 步骤 0
 
     def test_select_step_moves_highlight(self, strip):
         strip.select_step(2)
-        assert strip._list.currentRow() == 3
+        assert strip._list.currentRow() == 2
 
 
 class TestResultGridColumns:
@@ -234,11 +238,23 @@ class TestRunButtonMotion:
         assert strip.run_button().isEnabled() is True
 
     def test_flash_success_then_restores(self, qapp):
+        """成功反馈为「完成」文字——全应用不出现勾形元素（用户定案）。"""
         strip = ChainStrip()
         strip.flash_success()
-        assert strip.run_button().text() == '✓ 完成'
+        assert strip.run_button().text() == '完成'
+        assert '✓' not in strip.run_button().text()
         strip.run_button().setText('运行')      # 1.2s 后由定时器复位
         assert strip.run_button().text() == '运行'
+
+    def test_dot_toggle_is_round_not_check(self, qapp):
+        """启用开关 = 圆点（非勾形图标）：点击发 toggle 信号。"""
+        strip = ChainStrip()
+        strip.set_steps([{'label': 'a', 'enabled': True}])
+        toggled = []
+        strip.sig_step_toggled.connect(lambda i, e: toggled.append((i, e)))
+        chip = strip._list.itemWidget(strip._list.item(0))
+        chip.dot_btn.click()
+        assert toggled == [(0, False)]
 
 
 class TestSkeletonReveal:
@@ -281,7 +297,7 @@ class TestChainSlidingPill:
                          {'label': 'SEC 增益', 'enabled': True}])
         strip.select_step(0)
         strip.select_step(1)                      # 第二次选中 → 走动画
-        target = strip._list.visualItemRect(strip._list.item(2))
+        target = strip._list.visualItemRect(strip._list.item(1))
         assert strip._pill_anim.endValue().x() == target.x()
 
     def test_pill_hidden_when_no_row(self, qapp):
@@ -381,7 +397,7 @@ class TestChainAlternativePaths:
         strip._list.setFocus()
         qapp.processEvents()
         QTest.keyClick(strip._list, Qt.Key.Key_Delete)
-        assert strip._list.count() == 3            # 输入 + 2 步
+        assert strip._list.count() == 2            # 剩 2 步
         assert [s['label'] for s in strip._steps] == ['a', 'c']
 
     def test_context_menu_actions(self, qapp):

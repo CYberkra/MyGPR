@@ -76,7 +76,7 @@ class TestUserPathRegression:
         assert len(page._result_grid.cards()) == 1
         assert page._result_grid.cards()[0] is input_card
         assert not page._chain_strip._dirty_label.isVisibleTo(page._chain_strip)
-        assert page._chain_strip._list.count() == 4
+        assert page._chain_strip._list.count() == 3
 
         # 3-4. 运行完成：按序出图 + 脏清除
         _run_and_feed(page, 'G1', [('R1', 'dewow'), ('R2', 'sec_gain'),

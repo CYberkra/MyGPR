@@ -19,6 +19,7 @@ from PyQt6.QtCore import (QEasingCurve, QPropertyAnimation, Qt,
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (QAbstractItemView, QHBoxLayout, QLabel,
                              QListWidget, QListWidgetItem, QWidget)
+from PyQt6.QtWidgets import QPushButton
 from qfluentwidgets import (CaptionLabel, FluentIcon as FIF,
                             PrimaryPushButton, ToolButton)
 
@@ -51,13 +52,15 @@ class _Chip(QWidget):
         self.name = QLabel(short, self)
         self.name.setMaximumWidth(self._MAX_NAME_PX)
         row.addWidget(self.name)
-        self.dot_btn = ToolButton(FIF.ACCEPT, self)
-        self.dot_btn.setFixedSize(14, 14)
-        self.dot_btn.setCheckable(True)
-        self.dot_btn.setChecked(enabled)
+        # 启用开关 = 圆点（绿=启用/灰=禁用）——不用 ✓ 形图标（用户定案：
+        # 全应用不出现勾形元素，避免与「运行」产生歧义）
+        self.dot_btn = QPushButton(self)
+        self.dot_btn.setFixedSize(12, 12)
+        self.dot_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.dot_btn.setToolTip('启用 / 禁用该步骤')
         self.dot_btn.clicked.connect(
             lambda _c=False, i=index: host._on_dot_clicked(i))
+        self._set_dot_visual(enabled)
         row.addWidget(self.dot_btn)
         self.del_btn = ToolButton(FIF.CLOSE, self)
         self.del_btn.setFixedSize(14, 14)
@@ -69,7 +72,16 @@ class _Chip(QWidget):
         self.del_btn.setVisible(False)
         self.set_enabled_visual(enabled)
 
+    def _set_dot_visual(self, enabled: bool) -> None:
+        self.dot_btn.setStyleSheet(
+            'QPushButton{background:#7CC464;border:none;border-radius:6px;}'
+            'QPushButton:hover{background:#8FD478;}'
+            if enabled else
+            'QPushButton{background:#5A5A56;border:none;border-radius:6px;}'
+            'QPushButton:hover{background:#6A6A66;}')
+
     def set_enabled_visual(self, enabled: bool) -> None:
+        self._set_dot_visual(enabled)
         self.name.setStyleSheet('color:#8A8A85' if not enabled else '')
         self.setStyleSheet(
             '#chip{background:rgba(128,128,128,0.16);'
@@ -136,7 +148,7 @@ class ChainStrip(QWidget):
             QKeySequence(QKeySequence.StandardKey.Delete), self._list,
             context=Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self._delete_shortcut.activated.connect(
-            lambda: self._on_chip_deleted(self._list.currentRow() - 1))
+            lambda: self._on_chip_deleted(self._list.currentRow()))
         # 深浅主题下与卡片底色融合；选中高亮交给滑动胶囊（Qt 默认蓝块弃用）
         self._list.setStyleSheet(
             'QListWidget{background:transparent;border:none;}'
@@ -227,8 +239,8 @@ class ChainStrip(QWidget):
         self._dirty_label.setVisible(bool(dirty))
 
     def flash_success(self) -> None:
-        """运行成功：按钮短暂变 ✓ 完成，再回到「运行」（明确的结果反馈）。"""
-        self._run_btn.setText('✓ 完成')
+        """运行成功：按钮短暂变「完成」（不带勾），再回到「运行」。"""
+        self._run_btn.setText('完成')
         QTimer.singleShot(1200, lambda: self._run_btn.setText('运行'))
 
     def _tick_spin(self) -> None:
@@ -248,15 +260,14 @@ class ChainStrip(QWidget):
         self._rebuild()
 
     def _rebuild(self) -> None:
-        prev = self._list.currentRow() - 1
+        prev = self._list.currentRow()
         self._list.blockSignals(True)
         self._list.clear()
-        self._add_chip(-1, '输入', True)
         for i, step in enumerate(self._steps):
             self._add_chip(i, f'{i + 1} {step["label"]}', step['enabled'])
         self._list.blockSignals(False)
         if 0 <= prev < len(self._steps):
-            self._list.setCurrentRow(prev + 1)
+            self._list.setCurrentRow(prev)
         if self._list.currentRow() >= 0:
             self._move_pill(self._list.currentRow())
 
@@ -270,7 +281,7 @@ class ChainStrip(QWidget):
     # ------------------------------------------------------------ 手势回调
     def _on_current_row(self, row: int) -> None:
         self._move_pill(row)
-        self.sig_step_selected.emit(row - 1)     # 0 号是输入 chip
+        self.sig_step_selected.emit(row)         # row 即步骤索引
 
     def _on_dot_clicked(self, index: int) -> None:
         if 0 <= index < len(self._steps):
@@ -283,10 +294,8 @@ class ChainStrip(QWidget):
     # -------------------------------------------------- 右键菜单（替代路径）
     def _on_context_menu(self, pos) -> None:
         row = self._list.rowAt(pos.y())
-        if row < 1:                          # 0 号是输入 chip，无操作
-            return
-        index = row - 1
-        if index >= len(self._steps):
+        index = row                          # row 即步骤索引
+        if index < 0 or index >= len(self._steps):
             return
         self._list.setCurrentRow(row)
         self._move_pill(row)
@@ -313,13 +322,13 @@ class ChainStrip(QWidget):
 
     def _list_drop_event(self, event) -> None:
         """落点重排：源=当前选中 chip，目标按落点左右半决定插入位。"""
-        source = self._list.currentRow() - 1        # 换算成步骤索引
+        source = self._list.currentRow()            # row 即步骤索引
         if source < 0 or source >= len(self._steps):
             return
-        target = self._list.indexAt(event.position().toPoint()).row() - 1
+        target = self._list.indexAt(event.position().toPoint()).row()
         if target < 0:
-            target = len(self._steps)
-        item = self._list.item(max(target + 1, 0))
+            target = len(self._steps) - 1
+        item = self._list.item(target)
         if item is not None:
             rect = self._list.visualItemRect(item)
             if event.position().toPoint().x() > rect.center().x():
@@ -331,8 +340,8 @@ class ChainStrip(QWidget):
         self.sig_step_moved.emit(source, target)
 
     def select_step(self, index: int) -> None:
-        """外部选中某步骤（参数区跟随，效果同用户点 chip）。"""
-        row = index + 1 if 0 <= index < len(self._steps) else 0
+        """外部选中某步骤（参数区跟随，效果同用户点 chip）；-1 = 无选中。"""
+        row = index if 0 <= index < len(self._steps) else -1
         self._list.blockSignals(True)
         self._list.setCurrentRow(row)
         self._list.blockSignals(False)
