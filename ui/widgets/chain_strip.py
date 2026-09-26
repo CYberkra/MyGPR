@@ -15,27 +15,36 @@ ChainStrip 只做展示与手势，**步骤数据仍由宿主页维护**（这�
 from PyQt6.QtCore import (QEasingCurve, QPropertyAnimation, Qt,
                           QTimer, pyqtSignal)
 from PyQt6.QtWidgets import (QAbstractItemView, QHBoxLayout, QLabel,
-                             QListWidget, QListWidgetItem, QSizePolicy,
-                             QWidget)
+                             QListWidget, QListWidgetItem, QWidget)
 from qfluentwidgets import FluentIcon as FIF, PrimaryPushButton, ToolButton
 
 from ui import constants
 
 
 class _Chip(QWidget):
-    """单个步骤 chip：算法名（常显）+ 启用圆点 / ✕（hover 才显）。"""
+    """单个步骤 chip：胶囊造型，算法名（常显）+ 启用圆点 / ✕（hover 显）。
+
+    名称精简：目录显示名常带英文后缀（如「零时校正 (Dewow)」），chip 上
+    只保留中文名（tooltip 保留全名）——长名省略号截断，不顶出滚动条。
+    """
+
+    _MAX_NAME_PX = 132
 
     def __init__(self, index: int, label: str, enabled: bool, host,
                  parent=None):
         super().__init__(parent)
         self.index = index                  # -1 = 输入 chip
         self._host = host
+        self.setObjectName('chip')
+        # 普通 QWidget 子类必须开这个才会绘制样式表背景（否则 chip 无胶囊底）
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setToolTip(label)
         row = QHBoxLayout(self)
-        row.setContentsMargins(10, 3, 6, 3)
+        row.setContentsMargins(12, 4, 8, 4)
         row.setSpacing(4)
-        self.name = QLabel(label, self)
-        self.name.setSizePolicy(QSizePolicy.Policy.Preferred,
-                                QSizePolicy.Policy.Preferred)
+        short = label.split('（')[0].split(' (')[0].strip() or label
+        self.name = QLabel(short, self)
+        self.name.setMaximumWidth(self._MAX_NAME_PX)
         row.addWidget(self.name)
         self.dot_btn = ToolButton(FIF.ACCEPT, self)
         self.dot_btn.setFixedSize(14, 14)
@@ -56,12 +65,13 @@ class _Chip(QWidget):
         self.set_enabled_visual(enabled)
 
     def set_enabled_visual(self, enabled: bool) -> None:
-        op = self.name.graphicsEffect()
         self.name.setStyleSheet('color:#8A8A85' if not enabled else '')
         self.setStyleSheet(
-            'background:transparent' if enabled
-            else 'background:rgba(128,128,128,0.18); border-radius:11px')
-        _ = op
+            '#chip{background:rgba(128,128,128,0.16);'
+            'border:1px solid rgba(128,128,128,0.22);border-radius:14px}'
+            if enabled else
+            '#chip{background:rgba(128,128,128,0.08);'
+            'border:1px dashed rgba(128,128,128,0.30);border-radius:14px}')
 
     def enterEvent(self, event) -> None:
         if self.index >= 0:                 # 输入 chip 无操作
@@ -102,7 +112,7 @@ class ChainStrip(QWidget):
         self._list.setFlow(QListWidget.Flow.LeftToRight)
         self._list.setWrapping(False)
         self._list.setSpacing(8)
-        self._list.setFixedHeight(34)
+        self._list.setFixedHeight(38)
         self._list.setSelectionMode(
             QAbstractItemView.SelectionMode.SingleSelection)
         self._list.setDragDropMode(
@@ -110,9 +120,15 @@ class ChainStrip(QWidget):
         self._list.setDefaultDropAction(Qt.DropAction.MoveAction)
         self._list.setVerticalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        # 深浅主题下都与卡片底色融合（QListWidget 默认亮底在深色主题突兀）
-        self._list.setStyleSheet('QListWidget{background:transparent;'
-                                 'border:none}')
+        self._list.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # 深浅主题下与卡片底色融合；选中高亮交给滑动胶囊（Qt 默认蓝块弃用）
+        self._list.setStyleSheet(
+            'QListWidget{background:transparent;border:none;}'
+            'QListWidget::item{background:transparent;border:none;}'
+            'QListWidget::item:selected{background:transparent;'
+            'border:none;color:palette(window-text);}'
+            'QListWidget::item:hover{background:transparent;}')
         self._list.currentRowChanged.connect(self._on_current_row)
 
         self._add_btn = ToolButton(FIF.ADD, self)

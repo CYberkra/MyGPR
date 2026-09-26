@@ -323,6 +323,8 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._chain_strip.sig_step_removed.connect(self._on_chain_step_removed)
         self._chain_strip.sig_step_moved.connect(self._on_chain_step_moved)
         self._chain_strip.sig_add_requested.connect(self._on_add_selected_method)
+        # 反向：处理链选中（程序化）也同步 chip 条高亮
+        self._pipeline_list.sig_step_selected.connect(self._chain_strip.select_step)
         self._chain_strip.run_button().clicked.connect(self._on_run_clicked)
         self._pipeline_list.sig_changed.connect(self._refresh_chain_and_results)
         self._refresh_chain_and_results()
@@ -434,9 +436,14 @@ class ProcessingPage(PanelStateMixin, QWidget):
 
     # ------------------------------------------------ v2：链条 ↔ 处理链
     def _on_chain_step_selected(self, index: int) -> None:
-        """选 chip → 参数区跟随该步骤（参数表单已接 sig_step_selected）。"""
+        """选 chip → 参数区跟随该步骤（参数表单已接 sig_step_selected）。
+
+        双向同步：PipelineList 选中也回写 chip 条（select_step 内部
+        blockSignals，不会循环）。
+        """
         if index >= 0:
             self._pipeline_list.select_step(index)
+        self._chain_strip.select_step(index)
 
     def _on_chain_step_toggled(self, index: int, enabled: bool) -> None:
         """启用/禁用：与当前状态不同才翻转（PipelineList 内置翻转语义）。"""
