@@ -98,6 +98,7 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._gallery = None              # 总览墙（懒创建，随主页销毁）
         self._thumb_views_bound = []      # 已装点击提升的缩略面板
         self._step_artifact_ids = {}      # v2：步骤序号 → 该步 intermediate 成果 id
+        self._results_stale = False       # v2：链/参数已改但结果未重算
         self._running = False
         self._job_id = ''
         self._selected_step = -1
@@ -330,6 +331,7 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._pipeline_list.sig_step_selected.connect(self._chain_strip.select_step)
         self._chain_strip.run_button().clicked.connect(self._on_run_clicked)
         self._pipeline_list.sig_changed.connect(self._refresh_chain_and_results)
+        self._pipeline_list.sig_changed.connect(self._mark_results_stale)
         self._refresh_chain_and_results()
 
         # 执行
@@ -480,7 +482,8 @@ class ProcessingPage(PanelStateMixin, QWidget):
                 method = (str(getattr(art, 'method_id', '') or '')
                           or str(getattr(art, 'name', '') or ''))
                 slots.append({'key': f'step:{i}', 'title': f'{i + 1} {method}',
-                              'enabled': True})
+                              'enabled': True,
+                              'final': i == len(members) - 1})
             self._step_artifact_ids = {
                 i: artifact_id
                 for i, (_s, _k, _c, artifact_id, _a) in enumerate(members)}
@@ -501,6 +504,14 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._result_grid.set_selected(
             _INPUT_KEY if self._selected_step_index() < 0
             else f'step:{self._selected_step_index()}')
+        self._chain_strip.set_dirty(
+            bool(self._step_artifact_ids) and self._results_stale)
+
+    def _mark_results_stale(self) -> None:
+        """链/参数变更且已有运行结果 → 结果过期（琥珀提示，运行后清除）。"""
+        if self._step_artifact_ids:
+            self._results_stale = True
+            self._chain_strip.set_dirty(True)
 
     def _selected_step_index(self) -> int:
         """当前选中的步骤索引（-1 = 输入 / 未选）。"""
@@ -905,6 +916,7 @@ class ProcessingPage(PanelStateMixin, QWidget):
         if self._preview_sources:
             self._selected_source_key = self._preview_sources[-1]['key']
         self._sync_tabs()
+        self._results_stale = False
         self._refresh_chain_and_results()
         self._request_step_previews()
 

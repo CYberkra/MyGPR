@@ -16,7 +16,8 @@ from PyQt6.QtCore import (QEasingCurve, QPropertyAnimation, Qt,
                           QTimer, pyqtSignal)
 from PyQt6.QtWidgets import (QAbstractItemView, QHBoxLayout, QLabel,
                              QListWidget, QListWidgetItem, QWidget)
-from qfluentwidgets import FluentIcon as FIF, PrimaryPushButton, ToolButton
+from qfluentwidgets import (CaptionLabel, FluentIcon as FIF,
+                            PrimaryPushButton, ToolButton)
 
 from ui import constants
 
@@ -135,6 +136,9 @@ class ChainStrip(QWidget):
         self._add_btn.setFixedSize(22, 22)
         self._add_btn.setToolTip('添加所选算法（＋）')
         self._add_btn.clicked.connect(self.sig_add_requested)
+        self._dirty_label = CaptionLabel('已修改 · 点运行更新', self)
+        self._dirty_label.setStyleSheet('color:#E0A83A')
+        self._dirty_label.setVisible(False)
         self._run_btn = PrimaryPushButton('运行', self)
         self._run_btn.setFixedWidth(76)
         self._spin_timer = QTimer(self)
@@ -146,6 +150,7 @@ class ChainStrip(QWidget):
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(constants.CARD_SPACING)
         row.addWidget(self._list, 1)
+        row.addWidget(self._dirty_label)
         row.addWidget(self._add_btn)
         row.addWidget(self._run_btn)
         self._init_pill()
@@ -202,6 +207,10 @@ class ChainStrip(QWidget):
             self._spin_timer.stop()
             self._run_btn.setEnabled(True)
             self._run_btn.setText('运行')
+
+    def set_dirty(self, dirty: bool) -> None:
+        """链/参数已改但结果未重算：琥珀色提示（运行后清除）。"""
+        self._dirty_label.setVisible(bool(dirty))
 
     def flash_success(self) -> None:
         """运行成功：按钮短暂变 ✓ 完成，再回到「运行」（明确的结果反馈）。"""

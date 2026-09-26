@@ -90,7 +90,7 @@ class _ResultCard(QFrame):
     _NORMAL_QSS = '#resultCard{border:2px solid transparent;border-radius:6px}'
 
     def __init__(self, key: str, title: str, *, placeholder: bool = False,
-                 parent=None):
+                 final: bool = False, parent=None):
         super().__init__(parent)
         self.key = key
         self._placeholder = placeholder
@@ -113,7 +113,16 @@ class _ResultCard(QFrame):
         self.title_label.setStyleSheet(
             'color:#8A8A85' if placeholder else '')
         head.addWidget(self.title_label)
+        self.final_label = QLabel('✓', self)
+        self.final_label.setStyleSheet('color:#7CC464')
+        self.final_label.setToolTip('最终结果')
+        self.final_label.setVisible(False)
+        head.addWidget(self.final_label)
         head.addStretch(1)
+        self.range_label = QLabel('', self)
+        self.range_label.setStyleSheet('color:#8A8A85')
+        self.range_label.setVisible(False)
+        head.addWidget(self.range_label)
         self.expand_btn = ToolButton(FIF.FULL_SCREEN, self)
         self.expand_btn.setFixedSize(20, 20)
         self.expand_btn.setToolTip('放大 / 全屏浏览该结果')
@@ -128,6 +137,7 @@ class _ResultCard(QFrame):
         head.addWidget(self.compare_btn)
         self.expand_btn.setVisible(False)
         self.compare_btn.setVisible(False)
+        self.final_label.setVisible(final)
 
         body = QVBoxLayout(self)
         body.setContentsMargins(4, 2, 4, 4)
@@ -165,8 +175,13 @@ class _ResultCard(QFrame):
             return
         if bundle is None:
             self.view.clear()       # 尚无输入数据 → 空态（骨架继续占位）
+            self.range_label.setVisible(False)
             return
         self.view.set_bundle(bundle)
+        vmin = float(getattr(bundle, 'vmin', 0.0) or 0.0)
+        vmax = float(getattr(bundle, 'vmax', 0.0) or 0.0)
+        self.range_label.setText(f'{vmin:.3g} ~ {vmax:.3g}')
+        self.range_label.setVisible(True)
         self._reveal()
 
     def _reveal(self) -> None:
@@ -244,6 +259,7 @@ class ResultGrid(QWidget):
             card = _ResultCard(
                 spec['key'], spec.get('title', ''),
                 placeholder=not bool(spec.get('enabled', True)),
+                final=bool(spec.get('final', False)),
                 parent=self._body)
             card.sig_clicked.connect(self.sig_card_selected)
             self._cards.append(card)

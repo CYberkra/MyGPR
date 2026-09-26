@@ -282,3 +282,63 @@ class TestChainSlidingPill:
         strip = ChainStrip()
         strip._move_pill(-1)
         assert strip._pill.isHidden()
+
+
+class TestStatusSemantics:
+    """状态与反馈：最终结果 ✓ / 选中卡幅值范围 / 改动提示。"""
+
+    def test_final_card_shows_check(self, qapp):
+        page = ProcessingPage()
+        try:
+            page.set_original_bundle(_bundle(1))
+            page.set_artifacts([
+                __import__('types').SimpleNamespace(
+                    artifact_id='S1', line_id='L01', name='run 步骤1_dewow',
+                    method_id='dewow', created_at='2026-09-26T10:01:00',
+                    manifest={'params': {'artifact_kind': 'intermediate',
+                                         'run_group_id': 'G1'}}),
+                __import__('types').SimpleNamespace(
+                    artifact_id='F1', line_id='L01', name='run_agc',
+                    method_id='agc', created_at='2026-09-26T10:02:00',
+                    manifest={'params': {'artifact_kind': 'processing',
+                                         'run_group_id': 'G1'}}),
+            ])
+            cards = page._result_grid.cards()
+            states = [c.final_label.isVisibleTo(c) for c in cards]
+            assert states == [False, False, True]   # 末位（最终结果）✓
+        finally:
+            page.close()
+
+    def test_range_label_after_bundle(self, grid):
+        grid.set_slots([{'key': 'k0', 'title': '输入', 'enabled': True}])
+        card = grid.cards()[0]
+        grid.set_bundle('k0', _bundle(2))
+        assert card.range_label.isVisibleTo(card)
+        assert '2' in card.range_label.text()
+
+    def test_chain_dirty_label_toggles(self, qapp):
+        strip = ChainStrip()
+        assert not strip._dirty_label.isVisibleTo(strip)
+        strip.set_dirty(True)
+        assert strip._dirty_label.isVisibleTo(strip)
+        strip.set_dirty(False)
+        assert not strip._dirty_label.isVisibleTo(strip)
+
+    def test_page_marks_stale_after_chain_change(self, qapp):
+        page = ProcessingPage()
+        try:
+            page.set_original_bundle(_bundle(1))
+            page.set_artifacts([
+                __import__('types').SimpleNamespace(
+                    artifact_id='F1', line_id='L01', name='run_agc',
+                    method_id='agc', created_at='2026-09-26T10:02:00',
+                    manifest={'params': {'artifact_kind': 'processing',
+                                         'run_group_id': 'G1'}}),
+            ])
+            assert page._step_artifact_ids              # 有运行结果
+            page._chain_strip.set_dirty(False)
+            page._pipeline_list.add_step('agc', '自动增益控制 (AGC)', {})
+            assert page._results_stale is True
+            assert page._chain_strip._dirty_label.isVisibleTo(page._chain_strip)
+        finally:
+            page.close()
