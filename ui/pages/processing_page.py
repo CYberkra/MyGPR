@@ -482,8 +482,7 @@ class ProcessingPage(PanelStateMixin, QWidget):
                 method = (str(getattr(art, 'method_id', '') or '')
                           or str(getattr(art, 'name', '') or ''))
                 slots.append({'key': f'step:{i}', 'title': f'{i + 1} {method}',
-                              'enabled': True,
-                              'final': i == len(members) - 1})
+                              'enabled': True})
             self._step_artifact_ids = {
                 i: artifact_id
                 for i, (_s, _k, _c, artifact_id, _a) in enumerate(members)}

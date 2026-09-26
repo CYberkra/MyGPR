@@ -41,6 +41,11 @@ def grid(qapp):
     return ResultGrid()
 
 
+def _slots(n: int, *, disabled=()):
+    return [{'key': f'k{i}', 'title': f'{i}', 'enabled': i not in disabled}
+            for i in range(n)]
+
+
 class TestChainStrip:
     @pytest.fixture
     def strip(self, qapp):
@@ -100,30 +105,30 @@ class TestResultGridColumns:
         return out
 
     def test_one_slot_full_width(self, grid):
-        grid.set_slots(self._slots(1))
+        grid.set_slots(_slots(1))
         assert self._geometry(grid) == [(0, 0)]
 
     def test_two_slots_side_by_side(self, grid):
-        grid.set_slots(self._slots(2))
+        grid.set_slots(_slots(2))
         assert self._geometry(grid) == [(0, 0), (0, 1)]
 
     def test_three_slots_two_columns(self, grid):
         """N≥2 → 两列大图（v2.1 弃用三列）。"""
-        grid.set_slots(self._slots(3))
+        grid.set_slots(_slots(3))
         assert self._geometry(grid) == [(0, 0), (0, 1), (1, 0)]
 
     def test_four_slots_two_by_two(self, grid):
-        grid.set_slots(self._slots(4))
+        grid.set_slots(_slots(4))
         assert self._geometry(grid) == [(0, 0), (0, 1), (1, 0), (1, 1)]
 
     def test_six_slots_two_columns_three_rows(self, grid):
-        grid.set_slots(self._slots(6))
+        grid.set_slots(_slots(6))
         assert self._geometry(grid) == [(0, 0), (0, 1),
                                        (1, 0), (1, 1),
                                        (2, 0), (2, 1)]
 
     def test_disabled_step_is_placeholder(self, grid):
-        grid.set_slots(self._slots(3, disabled=(1,)))
+        grid.set_slots(_slots(3, disabled=(1,)))
         cards = grid.cards()
         assert cards[1]._placeholder is True
         assert cards[1].view is None           # 不占画布
@@ -131,12 +136,12 @@ class TestResultGridColumns:
 
     def test_grid_cards_have_no_colorbar(self, grid):
         """网格卡无色标——坐标/色标不挤占绘图区（看色标走放大/全屏）。"""
-        grid.set_slots(self._slots(2))
+        grid.set_slots(_slots(2))
         for card in grid.cards():
             assert card.view._colorbar is None
 
     def test_set_selected_highlights_one_card(self, grid):
-        grid.set_slots(self._slots(3))
+        grid.set_slots(_slots(3))
         grid.set_selected('k1')
         styles = [c.styleSheet() for c in grid.cards()]
         assert 'rgba(90,156,216' in styles[1]
@@ -145,14 +150,14 @@ class TestResultGridColumns:
 
     def test_card_click_forwards_key(self, grid):
         got = []
-        grid.set_slots(self._slots(3))
+        grid.set_slots(_slots(3))
         grid.sig_card_selected.connect(got.append)
         grid.cards()[1].sig_clicked.emit('k1')     # 卡内鼠标路径的等价触发
         assert got == ['k1']
 
     def test_slots_reduce_removes_old_cards(self, grid):
-        grid.set_slots(self._slots(4))
-        grid.set_slots(self._slots(2))
+        grid.set_slots(_slots(4))
+        grid.set_slots(_slots(2))
         assert len(grid.cards()) == 2
         assert self._geometry(grid) == [(0, 0), (0, 1)]
 
@@ -287,27 +292,39 @@ class TestChainSlidingPill:
 class TestStatusSemantics:
     """状态与反馈：最终结果 ✓ / 选中卡幅值范围 / 改动提示。"""
 
-    def test_final_card_shows_check(self, qapp):
+    def test_no_check_gimmick_on_cards(self, qapp):
+        """撤掉「最终结果 ✓」：用户未要求、形似死按钮（真机反馈撤案）。"""
         page = ProcessingPage()
         try:
             page.set_original_bundle(_bundle(1))
             page.set_artifacts([
-                __import__('types').SimpleNamespace(
-                    artifact_id='S1', line_id='L01', name='run 步骤1_dewow',
-                    method_id='dewow', created_at='2026-09-26T10:01:00',
-                    manifest={'params': {'artifact_kind': 'intermediate',
-                                         'run_group_id': 'G1'}}),
                 __import__('types').SimpleNamespace(
                     artifact_id='F1', line_id='L01', name='run_agc',
                     method_id='agc', created_at='2026-09-26T10:02:00',
                     manifest={'params': {'artifact_kind': 'processing',
                                          'run_group_id': 'G1'}}),
             ])
-            cards = page._result_grid.cards()
-            states = [c.final_label.isVisibleTo(c) for c in cards]
-            assert states == [False, False, True]   # 末位（最终结果）✓
+            for card in page._result_grid.cards():
+                assert not hasattr(card, 'final_label')
         finally:
             page.close()
+
+    def test_diff_update_reuses_cards(self, grid):
+        """key 未变的卡必须原地复用（同一实例）——整排重建会清空画面。"""
+        grid.set_slots(_slots(3))
+        before = [id(c) for c in grid.cards()]
+        grid.set_slots(_slots(3))
+        assert [id(c) for c in grid.cards()] == before
+
+    def test_bundle_survives_slots_rebuild(self, grid):
+        """已出图的卡在槽位重建后不得回到骨架（真机「消失几秒」回归锁）。"""
+        grid.set_slots(_slots(2))
+        grid.set_bundle('k0', _bundle(2))
+        card = grid.cards()[0]
+        matrix_before = card.view._matrix
+        grid.set_slots(_slots(2))
+        assert grid.cards()[0] is card               # 同一实例
+        assert card.view._matrix is matrix_before    # 画面未丢
 
     def test_range_label_after_bundle(self, grid):
         grid.set_slots([{'key': 'k0', 'title': '输入', 'enabled': True}])

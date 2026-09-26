@@ -90,7 +90,7 @@ class _ResultCard(QFrame):
     _NORMAL_QSS = '#resultCard{border:2px solid transparent;border-radius:6px}'
 
     def __init__(self, key: str, title: str, *, placeholder: bool = False,
-                 final: bool = False, parent=None):
+                 parent=None):
         super().__init__(parent)
         self.key = key
         self._placeholder = placeholder
@@ -113,11 +113,6 @@ class _ResultCard(QFrame):
         self.title_label.setStyleSheet(
             'color:#8A8A85' if placeholder else '')
         head.addWidget(self.title_label)
-        self.final_label = QLabel('✓', self)
-        self.final_label.setStyleSheet('color:#7CC464')
-        self.final_label.setToolTip('最终结果')
-        self.final_label.setVisible(False)
-        head.addWidget(self.final_label)
         self.range_label = QLabel('', self)
         self.range_label.setStyleSheet('color:#8A8A85')
         self.range_label.setVisible(False)
@@ -137,7 +132,6 @@ class _ResultCard(QFrame):
         head.addWidget(self.compare_btn)
         self.expand_btn.setVisible(False)
         self.compare_btn.setVisible(False)
-        self.final_label.setVisible(final)
 
         body = QVBoxLayout(self)
         body.setContentsMargins(4, 2, 4, 4)
@@ -195,6 +189,9 @@ class _ResultCard(QFrame):
         if self.view is not None:
             self.view.clear()
 
+    def set_title(self, title: str) -> None:
+        self.title_label.setText(title)
+
     def set_selected(self, selected: bool) -> None:
         """选中高亮：与链条 chip 同步（描边 2px 主题蓝）。"""
         self.setStyleSheet(self._SEL_QSS if selected else self._NORMAL_QSS)
@@ -247,23 +244,37 @@ class ResultGrid(QWidget):
 
     # ---------------------------------------------------------------- 槽位
     def set_slots(self, slots) -> None:
-        """slots: [{key, title, enabled}]（宿主页为数据源；这里只铺卡）。"""
-        for card in self._cards:
-            self._grid.removeWidget(card)
-            card.setParent(None)
-            card.deleteLater()
-        self._cards = []
-        self._keys = {}
-        self._empty.setVisible(not (slots or []))
+        """slots: [{key, title, enabled}]（宿主页为数据源；这里只铺卡）。
+
+        **差量更新**：key 与占位态都未变的卡**原地复用**（bundle 与视图
+        状态保留）——整排重建会让已有画面清空→骨架重现，用户可感为
+        「原始 B-Scan 消失几秒」（真机反馈，2026-09-26）。
+        """
+        new_cards: list = []
+        reused = set()
         for spec in (slots or []):
-            card = _ResultCard(
-                spec['key'], spec.get('title', ''),
-                placeholder=not bool(spec.get('enabled', True)),
-                final=bool(spec.get('final', False)),
-                parent=self._body)
-            card.sig_clicked.connect(self.sig_card_selected)
-            self._cards.append(card)
-            self._keys[spec['key']] = card
+            key = spec['key']
+            placeholder = not bool(spec.get('enabled', True))
+            card = self._keys.get(key)
+            if card is not None and card._placeholder == placeholder:
+                card.set_title(spec.get('title', ''))
+                reused.add(id(card))
+            else:
+                card = _ResultCard(
+                    key, spec.get('title', ''), placeholder=placeholder,
+                    parent=self._body)
+                card.sig_clicked.connect(self.sig_card_selected)
+            new_cards.append(card)
+        # 移除不再存在的槽位卡
+        keep = {id(c) for c in new_cards}
+        for old in self._cards:
+            if id(old) not in keep:
+                self._grid.removeWidget(old)
+                old.setParent(None)
+                old.deleteLater()
+        self._cards = new_cards
+        self._keys = {c.key: c for c in new_cards}
+        self._empty.setVisible(not self._cards)
         self._reflow()
 
     def _reflow(self) -> None:
