@@ -1,12 +1,15 @@
 # -*- coding: utf-8 -*-
 """ResultGrid — 结果网格（处理页 v2 主区下半）。
 
-设计（2026-09-25 v2）：
-- 一屏看多步：列数 = ``N≤3 → N``，``N≥4 → min(⌈√N⌉, 3)``
-  （2 张横排 / 3 张三列 / 4 张两行两列 / 6 张三列两行）；
-- 单元间距 16（8pt 栅格），**单元最小高 320**——行数多时纵向滚动，
-  绝不把剖面压破 0.45px/采样可读性红线；
-- 卡头**极简**：序号 + 算法名，⤢ 图标 hover 才显（常驻噪音更少）；
+设计（2026-09-26 v2.1，用户定稿）：
+- **两列大图**：``N=1 → 全幅``，``N≥2 → 2 列``——单格更大，剖面更可读
+  （2026-09-26 弃用三列规则）；
+- 网格卡**无色标**（``BScanView(with_colorbar=False)``），坐标/色标不再
+  挤占绘图区；看色标与精读走放大 / 全屏；
+- 单元间距 16（8pt 栅格），**单元最小高 320**——行数多时纵向滚动；
+- 卡头**极简**：序号 + 算法名，⤢ 图标 hover 才显；
+- **选中同步高亮**：点卡 → 发 :attr:`sig_card_selected`；宿主调
+  :meth:`set_selected` 高亮对应卡（与链条 chip 双向同步）；
 - 禁用步骤 → 虚线占位卡（保留 1:1 对应，不占画布）。
 
 网格只认「槽位」（key/title/enabled），数据由宿主页按 key 回填。
@@ -24,7 +27,7 @@ from ui.widgets.empty_state import EmptyStateOverlay
 
 _CELL_MIN_HEIGHT = 320
 _GRID_SPACING = 16
-_MAX_COLUMNS = 3
+_MAX_COLUMNS = 2
 
 
 class _Skeleton(QWidget):
@@ -80,6 +83,11 @@ class _ResultCard(QFrame):
 
     sig_expand_requested = pyqtSignal(str)   # slot key
     sig_compare_requested = pyqtSignal(str)  # slot key（P2 接线）
+    sig_clicked = pyqtSignal(str)            # 点卡 → 宿主选中对应步骤
+
+    _SEL_QSS = ('#resultCard{border:2px solid rgba(90,156,216,0.85);'
+                'border-radius:6px}')
+    _NORMAL_QSS = '#resultCard{border:2px solid transparent;border-radius:6px}'
 
     def __init__(self, key: str, title: str, *, placeholder: bool = False,
                  parent=None):
@@ -87,7 +95,9 @@ class _ResultCard(QFrame):
         self.key = key
         self._placeholder = placeholder
         self.setObjectName('resultCard')
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setStyleSheet(self._NORMAL_QSS)
         self.setMinimumHeight(_CELL_MIN_HEIGHT)
         self.setSizePolicy(QSizePolicy.Policy.Expanding,
                            QSizePolicy.Policy.Expanding)
@@ -130,7 +140,8 @@ class _ResultCard(QFrame):
             hint.setStyleSheet('color:#8A8A85')
             body.addWidget(hint, 1)
         else:
-            self.view = BScanView(self)
+            # 网格卡无色标：坐标/色标不挤占绘图区（看色标走放大/全屏）
+            self.view = BScanView(self, with_colorbar=False)
             self._skeleton = _Skeleton(self.view)
             self._skeleton.setGeometry(self.view.rect())
             self._skeleton.show()          # 建卡即占位：等预览回填
@@ -169,6 +180,15 @@ class _ResultCard(QFrame):
         if self.view is not None:
             self.view.clear()
 
+    def set_selected(self, selected: bool) -> None:
+        """选中高亮：与链条 chip 同步（描边 2px 主题蓝）。"""
+        self.setStyleSheet(self._SEL_QSS if selected else self._NORMAL_QSS)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.sig_clicked.emit(self.key)
+        super().mousePressEvent(event)
+
     def enterEvent(self, event) -> None:
         if not self._placeholder:
             self.expand_btn.setVisible(True)
@@ -183,6 +203,8 @@ class _ResultCard(QFrame):
 
 class ResultGrid(QWidget):
     """结果网格：按槽位铺卡片，列数自适应，纵向可滚。"""
+
+    sig_card_selected = pyqtSignal(str)  # 点卡 → 宿主选中对应步骤
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -223,6 +245,7 @@ class ResultGrid(QWidget):
                 spec['key'], spec.get('title', ''),
                 placeholder=not bool(spec.get('enabled', True)),
                 parent=self._body)
+            card.sig_clicked.connect(self.sig_card_selected)
             self._cards.append(card)
             self._keys[spec['key']] = card
         self._reflow()
@@ -242,6 +265,11 @@ class ResultGrid(QWidget):
             int(math.ceil(math.sqrt(n))), _MAX_COLUMNS)
         for index, card in enumerate(self._cards):
             self._grid.addWidget(card, index // cols, index % cols)
+
+    def set_selected(self, key: str) -> None:
+        """高亮指定槽位卡，其余恢复常规描边。"""
+        for card_key, card in self._keys.items():
+            card.set_selected(card_key == key)
 
     def set_bundle(self, key: str, bundle) -> None:
         card = self._keys.get(key)

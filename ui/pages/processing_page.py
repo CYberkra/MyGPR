@@ -263,6 +263,9 @@ class ProcessingPage(PanelStateMixin, QWidget):
         run_row.setSpacing(constants.CARD_SPACING)
         self._run_btn = PrimaryPushButton('运行处理链', exec_card, FIF.PLAY)
         self._run_btn.setToolTip('执行右侧处理链（Ctrl+R）')
+        # v2：运行入口统一到顶部链条（此按钮保留对象供 set_running 驱动，
+        # 不再显示，消除「左栏运行 / 顶部运行」双入口）
+        self._run_btn.setVisible(False)
         self._cancel_btn = PushButton('取消', exec_card)
         self._cancel_btn.setToolTip('取消正在运行的处理任务')
         self._cancel_btn.setEnabled(False)
@@ -444,6 +447,9 @@ class ProcessingPage(PanelStateMixin, QWidget):
         if index >= 0:
             self._pipeline_list.select_step(index)
         self._chain_strip.select_step(index)
+        # 选中节点与结果图同步高亮
+        self._result_grid.set_selected(
+            _INPUT_KEY if index < 0 else f'step:{index}')
 
     def _on_chain_step_toggled(self, index: int, enabled: bool) -> None:
         """启用/禁用：与当前状态不同才翻转（PipelineList 内置翻转语义）。"""
@@ -486,11 +492,30 @@ class ProcessingPage(PanelStateMixin, QWidget):
                      if original is not None else [])
             self._step_artifact_ids = {}
         self._result_grid.set_slots(slots)
+        self._result_grid.sig_card_selected.connect(self._on_card_selected)
         # set_slots 会重建卡片 → 输入卡的 bundle 需重喂（原始 bundle
         # 存在源清单的 original 槽位里）
         original = next((src['bundle'] for src in self._preview_sources
                          if src['key'] == 'original'), None)
         self._result_grid.set_bundle(_INPUT_KEY, original)
+        self._result_grid.set_selected(
+            _INPUT_KEY if self._selected_step_index() < 0
+            else f'step:{self._selected_step_index()}')
+
+    def _selected_step_index(self) -> int:
+        """当前选中的步骤索引（-1 = 输入 / 未选）。"""
+        row = self._chain_strip._list.currentRow()
+        return row - 1
+
+    def _on_card_selected(self, key: str) -> None:
+        """点结果卡 → 选中对应 chip（与链式条双向同步）。"""
+        if key == _INPUT_KEY:
+            self._chain_strip.select_step(-1)
+            self._result_grid.set_selected(_INPUT_KEY)
+            return
+        index = int(key.split(':', 1)[1])
+        self._chain_strip.select_step(index)
+        self._pipeline_list.select_step(index)
 
     def _request_step_previews(self) -> None:
         """按步骤顺序请求各步结果（异步回填，generation 守卫防串线）。"""

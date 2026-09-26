@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """处理页 v2 组件契约：ChainStrip 手势 + ResultGrid 列数规则。
 
-列数规则（用户拍板）：N≤3 → N 列；N≥4 → min(⌈√N⌉, 3)
-（2 张横排 / 3 张三列 / 4 张两行两列 / 6 张三列两行）。
+列数规则（2026-09-26 v2.1 定稿）：N=1 → 全幅；N≥2 → 两列大图
+（弃用三列规则）；网格卡无色标；点卡与链条 chip 双向同步高亮。
 """
 from __future__ import annotations
 
@@ -107,18 +107,20 @@ class TestResultGridColumns:
         grid.set_slots(self._slots(2))
         assert self._geometry(grid) == [(0, 0), (0, 1)]
 
-    def test_three_slots_one_row(self, grid):
+    def test_three_slots_two_columns(self, grid):
+        """N≥2 → 两列大图（v2.1 弃用三列）。"""
         grid.set_slots(self._slots(3))
-        assert self._geometry(grid) == [(0, 0), (0, 1), (0, 2)]
+        assert self._geometry(grid) == [(0, 0), (0, 1), (1, 0)]
 
     def test_four_slots_two_by_two(self, grid):
         grid.set_slots(self._slots(4))
         assert self._geometry(grid) == [(0, 0), (0, 1), (1, 0), (1, 1)]
 
-    def test_six_slots_three_columns(self, grid):
+    def test_six_slots_two_columns_three_rows(self, grid):
         grid.set_slots(self._slots(6))
-        assert self._geometry(grid) == [(0, 0), (0, 1), (0, 2),
-                                       (1, 0), (1, 1), (1, 2)]
+        assert self._geometry(grid) == [(0, 0), (0, 1),
+                                       (1, 0), (1, 1),
+                                       (2, 0), (2, 1)]
 
     def test_disabled_step_is_placeholder(self, grid):
         grid.set_slots(self._slots(3, disabled=(1,)))
@@ -126,6 +128,27 @@ class TestResultGridColumns:
         assert cards[1]._placeholder is True
         assert cards[1].view is None           # 不占画布
         assert cards[0].view is not None
+
+    def test_grid_cards_have_no_colorbar(self, grid):
+        """网格卡无色标——坐标/色标不挤占绘图区（看色标走放大/全屏）。"""
+        grid.set_slots(self._slots(2))
+        for card in grid.cards():
+            assert card.view._colorbar is None
+
+    def test_set_selected_highlights_one_card(self, grid):
+        grid.set_slots(self._slots(3))
+        grid.set_selected('k1')
+        styles = [c.styleSheet() for c in grid.cards()]
+        assert 'rgba(90,156,216' in styles[1]
+        assert 'rgba(90,156,216' not in styles[0]
+        assert 'rgba(90,156,216' not in styles[2]
+
+    def test_card_click_forwards_key(self, grid):
+        got = []
+        grid.set_slots(self._slots(3))
+        grid.sig_card_selected.connect(got.append)
+        grid.cards()[1].sig_clicked.emit('k1')     # 卡内鼠标路径的等价触发
+        assert got == ['k1']
 
     def test_slots_reduce_removes_old_cards(self, grid):
         grid.set_slots(self._slots(4))
