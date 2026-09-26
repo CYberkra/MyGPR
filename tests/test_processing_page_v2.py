@@ -233,3 +233,29 @@ class TestSkeletonReveal:
         card = grid.cards()[0]
         assert card.view is None
         assert not hasattr(card, '_skeleton')
+
+
+class TestChainSlidingPill:
+    """链条选中滑动胶囊（动效移植②，来自 BeUI Tabs 思路）。"""
+
+    def test_pill_appears_on_selection(self, qapp):
+        strip = ChainStrip()
+        strip.set_steps([{'label': '去直达波', 'enabled': True},
+                         {'label': 'SEC 增益', 'enabled': True}])
+        assert strip._pill.isHidden()
+        strip.select_step(0)
+        assert strip._pill.isVisibleTo(strip)
+
+    def test_pill_slides_to_selected_chip(self, qapp):
+        strip = ChainStrip()
+        strip.set_steps([{'label': '去直达波', 'enabled': True},
+                         {'label': 'SEC 增益', 'enabled': True}])
+        strip.select_step(0)
+        strip.select_step(1)                      # 第二次选中 → 走动画
+        target = strip._list.visualItemRect(strip._list.item(2))
+        assert strip._pill_anim.endValue().x() == target.x()
+
+    def test_pill_hidden_when_no_row(self, qapp):
+        strip = ChainStrip()
+        strip._move_pill(-1)
+        assert strip._pill.isHidden()

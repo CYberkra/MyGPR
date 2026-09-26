@@ -12,7 +12,8 @@
 
 ChainStrip 只做展示与手势，**步骤数据仍由宿主页维护**（这里不存 steps）。
 """
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import (QEasingCurve, QPropertyAnimation, Qt,
+                          QTimer, pyqtSignal)
 from PyQt6.QtWidgets import (QAbstractItemView, QHBoxLayout, QLabel,
                              QListWidget, QListWidgetItem, QSizePolicy,
                              QWidget)
@@ -131,10 +132,43 @@ class ChainStrip(QWidget):
         row.addWidget(self._list, 1)
         row.addWidget(self._add_btn)
         row.addWidget(self._run_btn)
+        self._init_pill()
 
     def run_button(self):
         """运行钮：由宿主页接线（Ctrl+R 与此处同一入口）。"""
         return self._run_btn
+
+    # ------------------------------------------- 选中指示条（滑动胶囊）
+    def _init_pill(self) -> None:
+        """选中 chip 的滑动指示胶囊（动效移植②，来自 BeUI「Tabs」思路）。
+
+        半透明覆盖层 + geometry 动画（180ms OutCubic）；不吃鼠标事件，
+        位于 chip 之下（lower）以免盖住文字。
+        """
+        self._pill = QWidget(self._list.viewport())
+        self._pill.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._pill.setStyleSheet('background:rgba(0,120,212,0.20);'
+                                 'border-radius:11px')
+        self._pill.hide()
+        self._pill_anim = QPropertyAnimation(self._pill, b'geometry')
+        self._pill_anim.setDuration(180)
+        self._pill_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+    def _move_pill(self, row: int) -> None:
+        item = self._list.item(row)
+        rect = self._list.visualItemRect(item) if item is not None else None
+        if rect is None or not rect.isValid():
+            self._pill.hide()
+            return
+        if self._pill.isHidden():
+            self._pill.setGeometry(rect)
+            self._pill.show()
+            self._pill.lower()
+            return
+        self._pill_anim.stop()
+        self._pill_anim.setStartValue(self._pill.geometry())
+        self._pill_anim.setEndValue(rect)
+        self._pill_anim.start()
 
     # -------------------------------------------------- 运行钮：spinner → ✓
     def set_running(self, running: bool) -> None:
@@ -184,6 +218,8 @@ class ChainStrip(QWidget):
         self._list.blockSignals(False)
         if 0 <= prev < len(self._steps):
             self._list.setCurrentRow(prev + 1)
+        if self._list.currentRow() >= 0:
+            self._move_pill(self._list.currentRow())
 
     def _add_chip(self, index: int, label: str, enabled: bool) -> None:
         item = QListWidgetItem()
@@ -194,6 +230,7 @@ class ChainStrip(QWidget):
 
     # ------------------------------------------------------------ 手势回调
     def _on_current_row(self, row: int) -> None:
+        self._move_pill(row)
         self.sig_step_selected.emit(row - 1)     # 0 号是输入 chip
 
     def _on_dot_clicked(self, index: int) -> None:
@@ -225,7 +262,8 @@ class ChainStrip(QWidget):
 
     def select_step(self, index: int) -> None:
         """外部选中某步骤（参数区跟随，效果同用户点 chip）。"""
+        row = index + 1 if 0 <= index < len(self._steps) else 0
         self._list.blockSignals(True)
-        self._list.setCurrentRow(index + 1 if 0 <= index < len(self._steps)
-                                 else 0)
+        self._list.setCurrentRow(row)
         self._list.blockSignals(False)
+        self._move_pill(row)
