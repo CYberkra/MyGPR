@@ -256,7 +256,7 @@ class ProcessingPage(PanelStateMixin, QWidget):
         exec_layout.addLayout(make_form_row(
             '输入数据:', self._input_combo, parent=exec_card))
         self._result_name_edit = LineEdit(exec_card)
-        self._result_name_edit.setPlaceholderText('例如: 增益处理后结果')
+        self._result_name_edit.setPlaceholderText('例如：增益处理后结果…')
         self._result_name_edit.setToolTip('处理成果保存名称')
         exec_layout.addLayout(make_form_row(
             '结果名称:', self._result_name_edit, parent=exec_card))
