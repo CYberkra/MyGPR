@@ -18,6 +18,7 @@ from PyQt6.QtCore import QPointF  # noqa: E402
 from ui.pages.processing_page import ProcessingPage  # noqa: E402
 from ui.widgets.bscan_result_grid import ResultGrid  # noqa: E402
 from ui.widgets.chain_strip import ChainStrip  # noqa: E402
+from ui.widgets.context_menus import make_menu  # noqa: E402
 
 
 class _FakeDropEvent:
@@ -359,3 +360,61 @@ class TestStatusSemantics:
             assert page._chain_strip._dirty_label.isVisibleTo(page._chain_strip)
         finally:
             page.close()
+
+
+class TestChainAlternativePaths:
+    """拖拽的替代路径（guidelines：拖拽需有点击/键盘替代）。"""
+
+    def test_delete_key_removes_selected_step(self, qapp):
+        """Delete 键发信号；数据由宿主页改（本测试模拟宿主回写）。"""
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtTest import QTest
+        strip = ChainStrip()
+        steps = [{'label': 'a', 'enabled': True},
+                 {'label': 'b', 'enabled': True},
+                 {'label': 'c', 'enabled': True}]
+        strip.set_steps(steps)
+        strip.sig_step_removed.connect(
+            lambda i: strip.set_steps(steps[:i] + steps[i + 1:]))
+        strip.show()                       # 快捷键需活动窗口才触发
+        strip.select_step(1)
+        strip._list.setFocus()
+        qapp.processEvents()
+        QTest.keyClick(strip._list, Qt.Key.Key_Delete)
+        assert strip._list.count() == 3            # 输入 + 2 步
+        assert [s['label'] for s in strip._steps] == ['a', 'c']
+
+    def test_context_menu_actions(self, qapp):
+        strip = ChainStrip()
+        strip.set_steps([{'label': 'a', 'enabled': True},
+                         {'label': 'b', 'enabled': True},
+                         {'label': 'c', 'enabled': True}])
+        moved, toggled, removed = [], [], []
+        strip.sig_step_moved.connect(lambda s, t: moved.append((s, t)))
+        strip.sig_step_toggled.connect(lambda i, e: toggled.append((i, e)))
+        strip.sig_step_removed.connect(removed.append)
+        def filled(idx):
+            menu = make_menu(strip)                # 每次全新菜单，防动作残留
+            strip._fill_step_menu(menu, idx)
+            return menu
+        menu = filled(1)
+        texts = [a.text() for a in menu.actions() if a.text()]
+        assert texts == ['上移', '下移', '禁用', '删除']
+        # 触发「上移」：步骤 1 → 插入位 0
+        for a in menu.actions():
+            if a.text() == '上移':
+                a.trigger()
+                break
+        assert moved == [(1, 0)]
+        # 触发「禁用」
+        for a in filled(1).actions():
+            if a.text() == '禁用':
+                a.trigger()
+                break
+        assert toggled == [(1, False)]
+        # 触发「删除」
+        for a in filled(2).actions():
+            if a.text() == '删除':
+                a.trigger()
+                break
+        assert removed == [2]

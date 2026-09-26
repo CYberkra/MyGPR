@@ -8,18 +8,22 @@
 - 拖拽排序：启用 InternalMove 拿拖拽视觉，落点由 _ChipList.dropEvent
   委托宿主接管（不调 Qt 默认实现——挪 item 会丢 setItemWidget 行控件，
   与 PipelineList 同款坑）；
+- **手势替代路径**（guidelines：拖拽需有点击/键盘替代）：右键菜单
+  （上移/下移/启用-禁用/删除）+ Delete 键删当前 chip；
 - 「输入」chip 固定在首位、不可拖不可删。
 
 ChainStrip 只做展示与手势，**步骤数据仍由宿主页维护**（这里不存 steps）。
 """
 from PyQt6.QtCore import (QEasingCurve, QPropertyAnimation, Qt,
                           QTimer, pyqtSignal)
+from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (QAbstractItemView, QHBoxLayout, QLabel,
                              QListWidget, QListWidgetItem, QWidget)
 from qfluentwidgets import (CaptionLabel, FluentIcon as FIF,
                             PrimaryPushButton, ToolButton)
 
 from ui import constants
+from ui.widgets.context_menus import add_action, make_menu
 
 
 class _Chip(QWidget):
@@ -123,6 +127,16 @@ class ChainStrip(QWidget):
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._list.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # 手势替代路径：右键菜单 + Delete 键（guidelines 要求拖拽必须有
+        # 点击/键盘替代——PipelineList 的等价能力随右栏隐藏后在此补齐）
+        self._list.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu)
+        self._list.customContextMenuRequested.connect(self._on_context_menu)
+        self._delete_shortcut = QShortcut(
+            QKeySequence(QKeySequence.StandardKey.Delete), self._list,
+            context=Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self._delete_shortcut.activated.connect(
+            lambda: self._on_chip_deleted(self._list.currentRow() - 1))
         # 深浅主题下与卡片底色融合；选中高亮交给滑动胶囊（Qt 默认蓝块弃用）
         self._list.setStyleSheet(
             'QListWidget{background:transparent;border:none;}'
@@ -265,6 +279,37 @@ class ChainStrip(QWidget):
     def _on_chip_deleted(self, index: int) -> None:
         if 0 <= index < len(self._steps):
             self.sig_step_removed.emit(index)
+
+    # -------------------------------------------------- 右键菜单（替代路径）
+    def _on_context_menu(self, pos) -> None:
+        row = self._list.rowAt(pos.y())
+        if row < 1:                          # 0 号是输入 chip，无操作
+            return
+        index = row - 1
+        if index >= len(self._steps):
+            return
+        self._list.setCurrentRow(row)
+        self._move_pill(row)
+        menu = make_menu(self)
+        self._fill_step_menu(menu, index)
+        menu.exec(self._list.viewport().mapToGlobal(pos))
+
+    def _fill_step_menu(self, menu, index: int) -> None:
+        """单步右键菜单动作（与 PipelineList 等价；供测试直接驱动）。"""
+        enabled = bool(self._steps[index]['enabled'])
+        add_action(menu, FIF.UP, '上移',
+                   lambda: self.sig_step_moved.emit(index, index - 1),
+                   enabled=index > 0)
+        add_action(menu, FIF.DOWN, '下移',
+                   lambda: self.sig_step_moved.emit(index, index + 2),
+                   enabled=index < len(self._steps) - 1)
+        menu.addSeparator()
+        add_action(menu, FIF.ACCEPT if enabled else FIF.CANCEL,
+                   '禁用' if enabled else '启用',
+                   lambda: self.sig_step_toggled.emit(index, not enabled))
+        menu.addSeparator()
+        add_action(menu, FIF.DELETE, '删除',
+                   lambda: self.sig_step_removed.emit(index))
 
     def _list_drop_event(self, event) -> None:
         """落点重排：源=当前选中 chip，目标按落点左右半决定插入位。"""
