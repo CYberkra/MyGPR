@@ -297,7 +297,11 @@ _applied_dark: bool | None = None
 
 
 def apply_theme(theme: str) -> None:
-    """应用主题：setTheme + pyqtgraph 背景同步（'k'/'w'）+ palette + 原生控件 QSS。
+    """应用主题：setTheme + 强调色统一 + pyqtgraph 背景同步（'k'/'w'）+ palette + 原生控件 QSS。
+
+    强调色：qfluentwidgets 默认是青绿（#009FAA），折叠柄/徽章/主按钮
+    全在用——与科学仪器的克制诉求不符（用户真机目检点名），统一替换为
+    沉稳蓝（Tailwind blue-500），与链条滑动胶囊、选中描边同族。
 
     幂等：目标主题与已应用主题一致、**且 qfluentwidgets 当前实际主题也一致**
     时直接返回（重复的全局样式重算对大控件树是秒级开销）。需要强制重放时
@@ -330,6 +334,9 @@ def apply_theme(theme: str) -> None:
     # 开销可忽略。
     gc.collect()
     setTheme(Theme.DARK if dark else Theme.LIGHT)
+    from qfluentwidgets import setThemeColor
+    from PyQt6.QtGui import QColor
+    setThemeColor(QColor('#3B82F6'))
     pg.setConfigOption('background', 'k' if dark else 'w')
     pg.setConfigOption('foreground', 'w' if dark else 'k')
     # 抗锯齿（pyqtgraph 默认关闭）：曲线与文字边缘明显更平滑。该 hint 作用于
