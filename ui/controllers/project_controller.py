@@ -52,6 +52,7 @@ class ProjectController(QObject):
     """Mediates project open/close/import/preview between UI and backend."""
 
     log_message = pyqtSignal(str)
+    preview_failed = pyqtSignal(str)              # 成果预览失败（消息）
     busy_changed = pyqtSignal(bool)
     project_opened = pyqtSignal(object)          # ProjectSummary
     project_closed = pyqtSignal()
@@ -829,7 +830,10 @@ class _PreviewArtifactCommand:
             )
         except Exception as exc:  # noqa: BLE001
             _LOGGER.exception("成果预览失败")
-            c.log_message.emit(f"成果预览失败：{friendly_error_message(exc)}")
+            reason = friendly_error_message(exc)
+            c.log_message.emit(f"成果预览失败：{reason}")
+            # 失败必须可见（真机反馈：结果卡只剩骨架却不知道为什么）
+            c.preview_failed.emit(f'{reason}（成果 {self._artifact_id}）')
         else:
             if c._artifact_preview_generation != self._generation:
                 return

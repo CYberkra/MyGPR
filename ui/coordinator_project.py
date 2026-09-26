@@ -105,6 +105,8 @@ class ProjectChain:
             pc.open_failed.connect(self.on_open_failed)
             pc.lines_updated.connect(self.on_lines_updated)
             pc.artifacts_updated.connect(self.on_artifacts_updated)
+            pc.preview_failed.connect(
+                lambda msg: self._co.infobar('error', '成果预览失败', msg))
             pc.dataset_preview_ready.connect(self.on_dataset_preview)
             pc.artifact_preview_ready.connect(self.on_artifact_preview)
             pc.preview_invalidated.connect(self.on_preview_invalidated)
