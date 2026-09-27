@@ -119,11 +119,14 @@ class ProcessingChain:
         """tab 模型懒加载：可见面板缺 bundle → 按需预览该成果。
 
         异步回填走 on_artifact_preview → set_artifact_bundle，与手选
-        成果同一条链路（generation 守卫天然防串线）。
+        成果同一条链路；步骤批量预览挂 strict_generation=False——按
+        artifact_id 寻址回填各自槽位，不共用"最新代数"守卫（并发互相
+        踩：先完成的被后提交的静默丢弃，真机骨架挂死根因之一）。
         """
         line_id = self._co.require_line()
         if line_id and artifact_id and self._co.project_controller is not None:
-            self._co.project_controller.preview_artifact(line_id, str(artifact_id))
+            self._co.project_controller.preview_artifact(
+                line_id, str(artifact_id), strict_generation=False)
 
     def on_run_requested(self, payload: dict) -> None:
         """run_requested(dict) → run_pipeline（含结果名回退与链式输入）。"""

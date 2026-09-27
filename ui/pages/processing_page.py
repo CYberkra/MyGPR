@@ -100,6 +100,8 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._thumb_views_bound = []      # 已装点击提升的缩略面板
         self._step_artifact_ids = {}      # v2：步骤序号 → 该步 intermediate 成果 id
         self._results_stale = False       # v2：链/参数已改但结果未重算
+        self._echoed_group = ''           # 已回显链的 run_group（防重复回填）
+        self._preview_requested = set()   # 已发出预览请求的 artifact_id（幂等）
         self._expand_all = True           # v2.3：结果区「全部步骤」开关
         self._running = False
         self._job_id = ''
@@ -390,6 +392,9 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._result_grid.set_bundle(_INPUT_KEY, bundle)
         if not self._result_grid.cards():
             self._refresh_chain_and_results()
+        # 测线就绪（require_line 此刻必有效）：补发打开项目早期被吞的
+        # 步骤预览请求（骨架挂死根因，2026-09-27 真机截图）
+        self._request_step_previews()
         self._redistribute()
 
     def set_artifact_bundle(self, artifact_id: str, bundle) -> None:
@@ -483,9 +488,22 @@ class ProcessingPage(PanelStateMixin, QWidget):
         置灰占位卡（1:1 对应，不占画布）。
         """
         steps = self._pipeline_list.steps()
-        self._chain_strip.set_steps(steps)
-        members = self._newest_run_members()
+        group_id, members = self._newest_run_members()
         if members:
+            # 测线上下文切换（run_group 变化，打开项目/切测线）→ 把该组
+            # 的步骤序列回显为当前链：上下一致（真机反馈「下面有结果
+            # 上面没链，很诡异」）。同一组内不重复回填（尊重用户编辑）。
+            # set_steps 不发 sig_changed，无回环。
+            if group_id != self._echoed_group:
+                self._preview_requested.clear()   # 新上下文：预览全部重发
+                self._pipeline_list.set_steps([
+                    {'method_id': str(getattr(art, 'method_id', '') or ''),
+                     'label': str(getattr(art, 'method_id', '') or ''),
+                     'params': {}, 'enabled': True}
+                    for (_s, _k, _c, _aid, art) in members
+                     if str(getattr(art, 'method_id', '') or '')])
+                steps = self._pipeline_list.steps()
+                self._echoed_group = group_id
             # 「全部步骤」开关关闭 → 只铺输入 + 最终结果（P3 就地版）
             shown = (set(range(len(members))) if self._expand_all
                      else {len(members) - 1})
@@ -507,6 +525,8 @@ class ProcessingPage(PanelStateMixin, QWidget):
             slots = ([{'key': _INPUT_KEY, 'title': '输入', 'enabled': True}]
                      if original is not None else [])
             self._step_artifact_ids = {}
+        # 统一回显（在可能的链回填之后，steps 才是最新值）
+        self._chain_strip.set_steps(steps)
         self._result_grid.set_slots(slots)
         # set_slots 会重建卡片 → 输入卡的 bundle 需重喂（原始 bundle
         # 存在源清单的 original 槽位里）
@@ -518,6 +538,9 @@ class ProcessingPage(PanelStateMixin, QWidget):
             else f'step:{self._selected_step_index()}')
         self._chain_strip.set_dirty(
             bool(self._step_artifact_ids) and self._results_stale)
+        if members:
+            # 组切换/重建后卡片 bundle 已丢 → 幂等补发未回填的预览请求
+            self._request_step_previews()
 
     def _mark_results_stale(self) -> None:
         """链/参数变更且已有运行结果 → 结果过期（琥珀提示，运行后清除）。"""
@@ -551,8 +574,22 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._pipeline_list.select_step(index)
 
     def _request_step_previews(self) -> None:
-        """按步骤顺序请求各步结果（异步回填，generation 守卫防串线）。"""
+        """按步骤顺序请求各步结果（异步回填，generation 守卫防串线）。
+
+        幂等：已发出请求（``_preview_requested``）或已回填的步骤不重复
+        请求——打开项目早期测线未就绪时请求会被 require_line 吞掉，测线
+        bundle 到达后由 set_original_bundle 重发补齐（真机骨架挂死根因）；
+        组切换（run_group 变化）时由 _refresh_chain_and_results 清标记。
+        """
         for _index, artifact_id in sorted(self._step_artifact_ids.items()):
+            if artifact_id in self._preview_requested:
+                continue                  # 已请求过，不重复加载
+            key = f'artifact:{artifact_id}'
+            source = next((s for s in self._preview_sources
+                           if s['key'] == key), None)
+            if source is not None and source['bundle'] is not None:
+                continue                  # 已回填，不重复加载
+            self._preview_requested.add(artifact_id)
             self.artifact_preview_requested.emit(artifact_id)
 
     def on_gallery_pick(self, key: str) -> None:
@@ -862,8 +899,8 @@ class ProcessingPage(PanelStateMixin, QWidget):
             return nested
         return manifest
 
-    def _newest_run_members(self) -> list:
-        """最新 run_group 的成员（已按步序排序；无则空表）。
+    def _newest_run_members(self) -> tuple[str, list]:
+        """最新 run_group 的成员（已按步序排序；无则 ('', [])）。
 
         元素：(kind, created, artifact_id, art)。结果网格与步骤 tab 共用
         ——「上面怎么排，下面就按同序看各步结果」以运行事实（B7 落盘）
@@ -884,10 +921,11 @@ class ProcessingPage(PanelStateMixin, QWidget):
             created = str(getattr(art, 'created_at', '') or '')
             info['created'] = max(info['created'], created)
         if not groups:
-            return []
+            return '', []
         newest = max(groups, key=lambda g: groups[g]['created'])
-        return sorted(groups[newest]['members'],
-                      key=lambda m: (m[1] == 'processing', m[0], m[2]))
+        members = sorted(groups[newest]['members'],
+                         key=lambda m: (m[1] == 'processing', m[0], m[2]))
+        return newest, members
 
     def _auto_open_newest_run_group(self) -> None:
         """最新 run_group 的步骤/最终成果自动开 tab（每组只开一次）。

@@ -155,3 +155,83 @@ def test_auto_open_tabs_from_real_manifest(tmp_path, qapp, backend):
         assert len(artifact_keys) == 2               # 1 中间 + 1 最终
     finally:
         _destroy_page(page, qapp)
+
+
+def test_history_run_replay_on_line_open(tmp_path, qapp, backend):
+    """真机反馈场景：打开项目/切测线后「下面有历史结果、上面链为空」
+    + 骨架挂死。真后端两条测线各跑一条链，模拟真实时序：
+    成果列表先到（组切换 → 链回显）→ 批量预览（宽松代数）→ 全部回填。
+    """
+    from mygpr.domain.processing.models import PipelineDefinition, PipelineStep
+    project = backend.projects.create_project(tmp_path / 'proj', name='e2e2')
+    pid = project.project_id
+    rng = np.random.default_rng(11)
+    for line_id, seed in (('L01', 1), ('L02', 2)):
+        matrix = np.cumsum(rng.normal(0, 0.4, size=(96, 200)),
+                           axis=0).astype(np.float32)
+        backend.projects.save_line_dataset(
+            pid, line_id, matrix, name=line_id,
+            length_m=40.0, time_window_ns=400.0)
+    pipelines = {
+        'L01': PipelineDefinition(name='r1', steps=(
+            PipelineStep('dewow', {'window': 23}),
+            PipelineStep('sec_gain', {'gain_min': 1.0, 'gain_max': 6.0,
+                                      'power': 1.0}))),
+        'L02': PipelineDefinition(name='r2', steps=(
+            PipelineStep('subtracting_average_2D', {'ntraces': 16}),)),
+    }
+    for line_id, pipeline in pipelines.items():
+        job = backend.submit_project_pipeline(pid, line_id, pipeline,
+                                              result_name=f'run-{line_id}')
+        snap = backend.jobs.wait(job, timeout=120)
+        assert snap.status.name == 'COMPLETED', snap.error_message
+
+    _PrevCmd, _Refresh, ProjectController, ProcessingPage = _imports()
+    page = ProcessingPage()
+    try:
+        pc = ProjectController()
+        pc._backend_controller = _BackendHost(backend)
+        # 页面预览请求 → 真加载命令（宽松代数，模拟协调器接线）
+        def _serve(artifact_id):
+            _PrevCmd(pc, pid, 'L02', artifact_id,
+                     pc._artifact_preview_generation,
+                     check_generation=False).execute()
+        ready = {}
+        pc.artifact_preview_ready.connect(
+            lambda aid, bundle: (ready.update(aid=aid, bundle=bundle),
+                                 page.set_artifact_bundle(aid, bundle)))
+        page.artifact_preview_requested.connect(_serve)
+
+        # ---- 用户切到 L02：成果列表到达 ----
+        arts_l02 = list(backend.projects.list_artifacts(pid, 'L02'))
+        page.set_artifacts(arts_l02)
+        chips = [s['method_id'] for s in page._pipeline_list.steps()]
+        assert chips == ['subtracting_average_2D'], (
+            f'链未回显历史 run：{chips}')
+        keys = [c.key for c in page._result_grid.cards()]
+        assert keys == ['input', 'step:0']
+        qapp.processEvents()
+        assert ready, '骨架未回填（批量预览被代数守卫丢弃）'
+        card = page._result_grid.card('step:0')
+        assert card.view._matrix is not None            # 出图
+
+        # ---- 切回 L01：链跟随新测线的历史 run（2 步）----
+        arts_l01 = list(backend.projects.list_artifacts(pid, 'L01'))
+        page.artifact_preview_requested.disconnect(_serve)
+
+        def _serve_l01(artifact_id):
+            _PrevCmd(pc, pid, 'L01', artifact_id,
+                     pc._artifact_preview_generation,
+                     check_generation=False).execute()
+        page.artifact_preview_requested.connect(_serve_l01)
+        page.set_artifacts(arts_l01)
+        chips = [s['method_id'] for s in page._pipeline_list.steps()]
+        assert chips == ['dewow', 'sec_gain'], f'切线后链未跟随：{chips}'
+        keys = [c.key for c in page._result_grid.cards()]
+        assert keys == ['input', 'step:0', 'step:1']
+        qapp.processEvents()
+        for key in ('step:0', 'step:1'):
+            card = page._result_grid.card(key)
+            assert card.view._matrix is not None, f'{key} 骨架未回填'
+    finally:
+        _destroy_page(page, qapp)
