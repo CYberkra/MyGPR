@@ -255,6 +255,7 @@ class ResultGrid(QWidget):
         self._view_mode = VIEW_ALL
         self._selected_key = None
         self._shared_scale = False
+        self._colorbar_pref = True    # 与 settings 默认一致；下发/恢复时校正
         self._body = QWidget(self)
         self._grid = QGridLayout(self._body)
         self._grid.setContentsMargins(0, 0, 0, 0)
@@ -323,6 +324,9 @@ class ResultGrid(QWidget):
                     key, spec.get('title', ''), placeholder=placeholder,
                     parent=self._body)
                 card.sig_clicked.connect(self.sig_card_selected)
+                if card.view is not None and not self._colorbar_pref:
+                    # 新卡继承色标偏好（False=不建色标对象，窄卡）
+                    card.view.set_colorbar_visible(False)
             new_cards.append(card)
         # 移除不再存在的槽位卡
         keep = {id(c) for c in new_cards}
@@ -428,6 +432,13 @@ class ResultGrid(QWidget):
         self._apply_view_mode()
 
     # ------------------------------------------------------------ 统一色标
+    def set_colorbar_pref(self, visible: bool) -> None:
+        """色标显隐偏好（设置页下发）：广播到现有卡，新建卡继承。"""
+        self._colorbar_pref = bool(visible)
+        for card in self._cards:
+            if card.view is not None:
+                card.view.set_colorbar_visible(self._colorbar_pref)
+
     def set_shared_scale(self, shared: bool) -> None:
         """统一色标开关：全组卡共用全局 [vmin, vmax]（display 层覆盖）。"""
         self._shared_scale = bool(shared)

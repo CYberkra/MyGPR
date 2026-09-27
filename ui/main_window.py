@@ -260,6 +260,11 @@ class MyGPRMainWindow(FluentWindow):
         写设置」回环。
         """
         views = page.findChildren(BScanView)
+        proc = self.pages.get('processingInterface')
+        if proc is not None and hasattr(proc, 'set_colorbar_pref'):
+            # 网格卡新建于恢复之后：偏好状态须同步给网格（新卡继承）
+            proc.set_colorbar_pref(
+                self._setting_flag('bscan_colorbar_visible', True))
         if not views:
             return
         aspect = self._setting_choice('bscan_aspect_mode', ('free', 'square', 'cell'), 'free')
@@ -400,6 +405,10 @@ class MyGPRMainWindow(FluentWindow):
             view.set_gain(str(values.get('bscan_gain_mode', 'off')),
                           alpha=min(max(gain_alpha, 0.0), 20.0),
                           db=tvg_db, power=tvg_power, notify=False)
+        proc = self.pages.get('processingInterface')
+        if proc is not None and hasattr(proc, 'set_colorbar_pref'):
+            proc.set_colorbar_pref(
+                bool(values.get('bscan_colorbar_visible', True)))
         # 面板数由处理页 tab 模型驱动，容器布局设置已退役（2026-09-24）
 
     def _setting_levels(self) -> tuple[float, float]:

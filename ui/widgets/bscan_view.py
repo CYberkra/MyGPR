@@ -230,6 +230,18 @@ class BScanView(BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteracti
             size=8, pen=None,
             brush=pg.mkBrush(constants.CHART_OVERLAY_COLOR))
         self._plot.addItem(self._scatter)
+
+    def _ensure_colorbar(self) -> None:
+        """动态补建色标（美术打磨后网格卡 with_colorbar=False，兑现
+        「偏好仍记录，构造处若支持可后续兑现」的口子）：设置下发
+        ``显示色标=True`` 时在位创建，插在 plot 右列（72px，与静态
+        构造同位）。无数据也可建（ImageItem 构造期即存在）。"""
+        if self._colorbar is not None:
+            return
+        self._colorbar = pg.ColorBarItem(interactive=False)
+        self._colorbar.setImageItem(self._image_item, insert_in=self._plot)
+        self._colorbar.axis.setStyle(tickFont=QFont(constants.FONT_FAMILY, 7))
+        self._colorbar.setVisible(self._colorbar_visible)
         self.set_colormap('seismic')
 
     @staticmethod

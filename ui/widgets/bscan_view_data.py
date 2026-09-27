@@ -481,6 +481,11 @@ class BScanViewDataMixin:
         """
         visible = bool(visible)
         self._colorbar_visible = visible
+        if visible and self._colorbar is None:
+            # 网格卡（with_colorbar=False）兑现色标偏好：动态补建色标
+            # （2026-09-27，此前只记偏好不动渲染 = 设置页「显示色标」
+            # 对 v2 结果网格失效的真机反馈）
+            self._ensure_colorbar()
         if self._colorbar is not None:
             self._colorbar.setVisible(visible)
         if notify:

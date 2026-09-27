@@ -673,3 +673,46 @@ class TestSingleViewGeometry:
         assert grid._grid.columnStretch(1) == 1
         widths = [c.width() for c in grid.cards()]
         assert all(abs(w - widths[0]) <= 2 for w in widths)   # 均分
+
+
+class TestColorbarPrefOnGrid:
+    """设置页「显示色标」对 v2 结果网格生效（真机反馈开关失效）。
+
+    网格卡 with_colorbar=False 构造；偏好 True 下发 → 动态补建色标；
+    新建卡继承偏好状态。
+    """
+
+    def test_set_colorbar_visible_creates_colorbar(self, grid, qapp):
+        grid.set_slots(_slots(2))
+        card = grid.cards()[0]
+        assert card.view._colorbar is None            # 初始无色标（窄卡）
+        card.view.set_colorbar_visible(True)
+        assert card.view._colorbar is not None        # 动态补建
+        assert card.view._colorbar.isVisible()
+        card.view.set_colorbar_visible(False)
+        assert not card.view._colorbar.isVisible()    # 再关=隐藏不销毁
+
+    def test_pref_broadcasts_to_cards(self, grid):
+        grid.set_slots(_slots(2))
+        grid.set_bundle('k0', _bundle(1))
+        grid.set_colorbar_pref(True)
+        states = [c.view._colorbar_visible for c in grid.cards()]
+        assert states == [True, True]
+        grid.set_colorbar_pref(False)
+        states = [c.view._colorbar_visible for c in grid.cards()]
+        assert states == [False, False]
+
+    def test_new_cards_inherit_pref(self, grid):
+        grid.set_colorbar_pref(True)
+        grid.set_slots(_slots(2))                     # 偏好 True 后新建
+        assert all(c.view._colorbar_visible for c in grid.cards())
+
+    def test_page_forwards_pref(self, qapp):
+        page = ProcessingPage()
+        try:
+            page.set_colorbar_pref(False)
+            assert page._result_grid._colorbar_pref is False
+            page.set_colorbar_pref(True)
+            assert page._result_grid._colorbar_pref is True
+        finally:
+            page.close()

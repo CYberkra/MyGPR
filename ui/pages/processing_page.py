@@ -548,6 +548,10 @@ class ProcessingPage(PanelStateMixin, QWidget):
             # 组切换/重建后卡片 bundle 已丢 → 幂等补发未回填的预览请求
             self._request_step_previews()
 
+    def set_colorbar_pref(self, visible: bool) -> None:
+        """设置页「显示色标」下发 → 结果网格（真机反馈：开关失效）。"""
+        self._result_grid.set_colorbar_pref(visible)
+
     def _mark_results_stale(self) -> None:
         """链/参数变更且已有运行结果 → 结果过期（琥珀提示，运行后清除）。"""
         if self._step_artifact_ids:
