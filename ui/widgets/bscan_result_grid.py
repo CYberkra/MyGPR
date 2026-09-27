@@ -75,20 +75,32 @@ class _Skeleton(QWidget):
         super().showEvent(event)
 
     def hideEvent(self, event) -> None:
-        self._anim.stop()
+        try:
+            self._anim.stop()
+        except RuntimeError:      # C++ 对象已随宿主销毁（teardown 竞态）
+            pass
         super().hideEvent(event)
 
     def paintEvent(self, event) -> None:
         painter = self._QPainter(self)
         painter.setRenderHint(self._QPainter.RenderHint.Antialiasing)
         rect = self.rect()
-        painter.fillRect(rect, self._QColor(150, 150, 150, 26))
+        # 美术打磨 E：配色随主题（深色深灰微光 / 浅色浅灰微光），
+        # 不再固定灰值（浅色卡片上刺白、深色卡片上刺灰）
+        from qfluentwidgets import isDarkTheme
+        if isDarkTheme():
+            base_color, band_color = (self._QColor(52, 54, 60, 90),
+                                      self._QColor(78, 82, 92, 70))
+        else:
+            base_color, band_color = (self._QColor(228, 230, 235, 90),
+                                      self._QColor(210, 214, 222, 80))
+        painter.fillRect(rect, base_color)
         # 扫光条：按动画进度在卡宽上平移
         progress = (self._anim.currentValue() or 0) / 1000.0
         width = max(rect.width() * 0.35, 40)
         x = rect.left() + (rect.width() + width) * progress - width
         band = self._QRect(int(x), rect.top(), int(width), rect.height())
-        painter.fillRect(band, self._QColor(200, 200, 200, 34))
+        painter.fillRect(band, band_color)
         painter.end()
 
 
@@ -100,7 +112,7 @@ class _ResultCard(QFrame):
     sig_clicked = pyqtSignal(str)            # 点卡 → 宿主选中对应步骤
 
     _SEL_QSS = ('#resultCard{border:2px solid rgba(90,156,216,0.85);'
-                'border-radius:6px}')
+                'background:rgba(59,130,246,0.06);border-radius:6px}')
     _NORMAL_QSS = '#resultCard{border:2px solid transparent;border-radius:6px}'
 
     def __init__(self, key: str, title: str, *, placeholder: bool = False,
@@ -160,6 +172,8 @@ class _ResultCard(QFrame):
         else:
             # 网格卡无色标：坐标/色标不挤占绘图区（看色标走放大/全屏）
             self.view = BScanView(self, with_colorbar=False)
+            # 美术打磨 B：卡头已是唯一信息源，图内标题移除（绘图面积+）
+            self.view.set_title_visible(False)
             self._skeleton = _Skeleton(self.view)
             self._skeleton.setGeometry(self.view.rect())
             self._skeleton.show()          # 建卡即占位：等预览回填

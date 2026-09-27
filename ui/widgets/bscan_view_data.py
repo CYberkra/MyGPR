@@ -79,7 +79,8 @@ class BScanViewDataMixin:
         """接收 PreviewBundle（鸭子类型，不 import core.gui_rendering）。"""
         self.set_matrix(
             bundle.matrix, bundle.vmin, bundle.vmax,
-            title=str(getattr(bundle, 'title', '') or ''),
+            title=(str(getattr(bundle, 'title', '') or '')
+                   if self._title_visible else ''),
             x_label=getattr(bundle, 'x_label', '道数'),
             y_label=getattr(bundle, 'y_label', '采样点'),
         )
@@ -235,6 +236,12 @@ class BScanViewDataMixin:
     def display_levels(self) -> tuple[float, float]:
         """当前显示动态范围的百分位 ``(low, high)``。"""
         return self._p_low, self._p_high
+
+    def set_title_visible(self, visible: bool) -> None:
+        """图内标题显隐（美术打磨 B）：网格卡关闭、放大/全屏保持开启。"""
+        self._title_visible = bool(visible)
+        if not visible:
+            self._plot.setTitle(None)
 
     def set_display_levels(self, p_low, p_high, *, notify: bool = False) -> bool:
         """按百分位重算并应用显示色阶（只改显示，不动数据）。

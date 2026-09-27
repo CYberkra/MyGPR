@@ -403,21 +403,30 @@ class TestFocusLayout:
         高度用 setFixedHeight 控制：直接 resize 子控件会被布局重算覆盖。
         测完必须解锁，否则共享 page fixture 的高度会被钉死。
         """
-        page.set_original_bundle(_bundle(1))      # _bundle 为 8 采样
+        # 120 采样（非 8）：配 60/180px 高度——避开把 pyqtgraph 视图
+        # 压到 2px 的极端渲染（进程级 Abort/AV 非确定性崩溃面，2026-09-27
+        # 三次全量实测），判定语义不变（0.5 达标 / 0.33 破线）
+        big = SimpleNamespace(
+            matrix=np.full((120, 6), 1.0, dtype=np.float32),
+            vmin=0.0, vmax=1.0, title='b1', x_label='道数',
+            y_label='采样点', trace_axis_m=None, sample_axis=None,
+            sample_axis_label='', trace_count=6, sample_count=120,
+            trace_elevation_m=None, depth_axis_m=None)
+        page.set_original_bundle(big)
         # 旧预览卡在 v2 默认隐藏 → 显式显示才能让几何（固定高）生效
         page._preview_card.setVisible(True)
         page.show()
         page.resize(1200, 900)
         try:
-            container.setFixedHeight(8)           # 1.0px/采样 → 达标
+            container.setFixedHeight(180)         # 1.5px/采样 → 达标
             qapp.processEvents()
             page._update_readability_hint()
             assert not page._readability_label.isVisibleTo(page)
-            container.setFixedHeight(2)           # 0.25px/采样 → 破线
+            container.setFixedHeight(40)          # 0.33px/采样 → 破线
             qapp.processEvents()
             page._update_readability_hint()
             assert page._readability_label.isVisibleTo(page)
-            assert '0.25' in page._readability_label.text()
+            assert '0.33' in page._readability_label.text()
         finally:
             container.setMinimumHeight(0)
             container.setMaximumHeight(16777215)

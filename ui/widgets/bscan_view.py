@@ -117,6 +117,9 @@ class BScanView(BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteracti
         # 显示动态范围（百分位裁切）：右键「色阶设置」可改，不改数据
         self._p_low, self._p_high = _restored_levels(default_levels)
         self._matrix = None               # 当前显示矩阵（供重算色阶/刷新用）
+        # 图内标题开关：结果网格卡关闭（卡头已是唯一信息源，图内标题
+        # 重复且占绘图面积，2026-09-27 美术打磨 B）；放大/全屏保持显示
+        self._title_visible = True
         # 绝对色阶覆盖（统一色标模式用）：非 None 时 _apply_levels_to_render
         # 直接用它、跳过百分位换算——多卡共用同一 [vmin, vmax] 才可横向比较
         self._levels_override = None

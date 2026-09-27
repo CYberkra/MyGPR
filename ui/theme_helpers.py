@@ -318,7 +318,10 @@ def apply_theme(theme: str) -> None:
     if isinstance(theme, Theme):
         dark = theme == Theme.DARK
     else:
-        dark = str(theme) == constants.THEME_DARK
+        # 主题字符串协议兼容：应用层传中文（'深色主题'），脚本/测试曾传
+        # 'dark'——此前静默判 False 走浅色（真机"深色主题"从未生效过的坑）
+        t = str(theme).strip()
+        dark = t in ('dark', '深色主题', '深色')
     if _applied_dark is not None and dark == _applied_dark \
             and isDarkTheme() == dark:
         return
@@ -337,8 +340,10 @@ def apply_theme(theme: str) -> None:
     from qfluentwidgets import setThemeColor
     from PyQt6.QtGui import QColor
     setThemeColor(QColor('#3B82F6'))
-    pg.setConfigOption('background', 'k' if dark else 'w')
-    pg.setConfigOption('foreground', 'w' if dark else 'k')
+    # 美术打磨 A（2026-09-27）：绘图区背景融入主题——深色近黑蓝调 /
+    # 浅色纸白，替代纯 'k'/'w'（灰圈显旧）；前景同步降一档对比
+    pg.setConfigOption('background', '#141822' if dark else '#f7f8fa')
+    pg.setConfigOption('foreground', '#c8ccd4' if dark else '#33383f')
     # 抗锯齿（pyqtgraph 默认关闭）：曲线与文字边缘明显更平滑。该 hint 作用于
     # GraphicsView 的矢量绘制，B-Scan 等 ImageItem 走图像绘制路径不受影响，
     # 但多 GB 真实数据下的实际帧率仍需在 Windows 目标机验收。
