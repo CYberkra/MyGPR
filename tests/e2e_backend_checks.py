@@ -388,8 +388,8 @@ def test_full_user_journey_processing_page(tmp_path, qapp, backend):
 
 def ready_bundle(aid, pc, pid, line_id):
     """真加载该成果的预览 bundle（与 _PreviewArtifactCommand 同路径）。"""
-    info = pc._backend().projects.get_artifact_dataset_info(pid, line_id, aid)
-    matrix, s_idx, t_idx = pc._backend().projects.read_artifact_window(
+    pc._backend().projects.get_artifact_dataset_info(pid, line_id, aid)
+    matrix, _s_idx, _t_idx = pc._backend().projects.read_artifact_window(
         pid, line_id, aid, max_samples=512, max_traces=512)
     from types import SimpleNamespace
     return SimpleNamespace(
