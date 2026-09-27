@@ -379,6 +379,91 @@ class TestStatusSemantics:
             page.close()
 
 
+class TestStaleSelectionDecoupling:
+    """结果过期（链已改未重算）时解除 chip↔卡片索引联动。
+
+    旧 run 的卡片索引对不上新链（删/移步骤后整体移位），继续按索引
+    联动会高亮错位的卡（真机走查：chip 亮 bandpass 卡亮 sec_gain）。
+    """
+
+    @staticmethod
+    def _page_with_run(qapp):
+        from types import SimpleNamespace
+        page = ProcessingPage()
+        page.set_original_bundle(_bundle(1))
+        page.set_artifacts([
+            SimpleNamespace(
+                artifact_id='F1', line_id='L01', name='run_agc',
+                method_id='agc', created_at='2026-09-26T10:02:00',
+                manifest={'params': {'artifact_kind': 'processing',
+                                     'run_group_id': 'G1'}}),
+        ])
+        assert page._step_artifact_ids
+        assert page._results_stale is False
+        return page
+
+    def test_fresh_results_keep_selection_sync(self, qapp):
+        """结果与链一致：chip 选中照常映射到卡片高亮（回归锁）。"""
+        page = self._page_with_run(qapp)
+        try:
+            page._on_chain_step_selected(0)
+            assert page._result_grid._selected_key == 'step:0'
+        finally:
+            page.close()
+
+    def test_stale_chip_click_does_not_highlight_card(self, qapp):
+        page = self._page_with_run(qapp)
+        try:
+            page._on_chain_step_selected(0)
+            page._pipeline_list.add_step('agc', '自动增益控制 (AGC)', {})
+            assert page._results_stale is True
+            page._on_chain_step_selected(1)
+            assert page._result_grid._selected_key is None
+        finally:
+            page.close()
+
+    def test_stale_card_click_does_not_write_back_chip(self, qapp):
+        page = self._page_with_run(qapp)
+        try:
+            page._chain_strip.select_step(-1)
+            page._pipeline_list.add_step('agc', '自动增益控制 (AGC)', {})
+            page._chain_strip.select_step(-1)
+            page._on_card_selected('step:0')
+            assert page._result_grid._selected_key == 'step:0'  # 卡片本身亮
+            assert page._chain_strip._list.currentRow() == -1   # 不回写 chip
+        finally:
+            page.close()
+
+    def test_stale_refresh_clears_highlight(self, qapp):
+        page = self._page_with_run(qapp)
+        try:
+            page._on_chain_step_selected(0)
+            page._pipeline_list.add_step('agc', '自动增益控制 (AGC)', {})
+            page._refresh_chain_and_results()
+            assert page._result_grid._selected_key is None
+        finally:
+            page.close()
+
+
+class TestParamEmptyHint:
+    """参数卡空态：表单无字段时显示引导文案（真机走查遗留项）。"""
+
+    def test_hint_toggles_with_form_schema(self, qapp):
+        page = ProcessingPage()
+        try:
+            parent = page._param_empty_hint.parentWidget()
+            assert page._param_empty_hint.isVisibleTo(parent)
+            page._methods_by_id['agc'] = {'parameter_schema': [
+                {'name': 'window', 'label': '窗口', 'type': 'int',
+                 'default': 5, 'min': 1, 'max': 100}]}
+            page._pipeline_list.add_step('agc', 'AGC', {})
+            assert not page._param_empty_hint.isVisibleTo(parent)
+            page._pipeline_list._list.setCurrentRow(-1)
+            assert page._param_empty_hint.isVisibleTo(parent)
+        finally:
+            page.close()
+
+
 class TestChainAlternativePaths:
     """拖拽的替代路径（guidelines：拖拽需有点击/键盘替代）。"""
 

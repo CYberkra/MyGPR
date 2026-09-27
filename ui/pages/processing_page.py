@@ -250,6 +250,11 @@ class ProcessingPage(PanelStateMixin, QWidget):
         right_layout.addWidget(pipeline_card, 1)
 
         param_card, param_layout = make_card('参数设置')
+        # 空态引导：未选步骤/方法无参数时表单区空白一片（真机走查遗留项）
+        self._param_empty_hint = CaptionLabel('选中处理链步骤后在此调参',
+                                              param_card)
+        self._param_empty_hint.setStyleSheet('color: gray;')
+        param_layout.addWidget(self._param_empty_hint)
         self._param_form = ParamForm(param_card)
         param_layout.addWidget(self._param_form, 1)
         right_layout.addWidget(param_card, 1)
@@ -336,8 +341,10 @@ class ProcessingPage(PanelStateMixin, QWidget):
         # 反向：处理链选中（程序化）也同步 chip 条高亮
         self._pipeline_list.sig_step_selected.connect(self._chain_strip.select_step)
         self._chain_strip.run_button().clicked.connect(self._on_run_clicked)
-        self._pipeline_list.sig_changed.connect(self._refresh_chain_and_results)
+        # 顺序敏感：先置脏再重铺——refresh 依赖 stale 标志决定是否解除
+        # 选中联动（反序会在 stale=False 时照旧映射旧 run 卡片索引）
         self._pipeline_list.sig_changed.connect(self._mark_results_stale)
+        self._pipeline_list.sig_changed.connect(self._refresh_chain_and_results)
         # 结果区头部开关：全部步骤（关=只铺输入+最终结果）；点卡选步骤
         # （connect 只做一次——放 _refresh 里会随每次刷新重复连接）
         self._result_grid.sig_expand_all_changed.connect(
@@ -469,9 +476,12 @@ class ProcessingPage(PanelStateMixin, QWidget):
         if index >= 0:
             self._pipeline_list.select_step(index)
         self._chain_strip.select_step(index)
-        # 选中节点与结果图同步高亮
-        self._result_grid.set_selected(
-            _INPUT_KEY if index < 0 else f'step:{index}')
+        # 选中节点与结果图同步高亮——仅当结果与当前链一致（未过期）。
+        # 链已改未重算时卡片是旧 run 的事实，索引与新链脱钩，联动必错位
+        # （真机走查：删步骤后 chip 高亮 bandpass 而卡片高亮 sec_gain）。
+        if not self._results_stale:
+            self._result_grid.set_selected(
+                _INPUT_KEY if index < 0 else f'step:{index}')
 
     def _on_chain_step_toggled(self, index: int, enabled: bool) -> None:
         """启用/禁用：与当前状态不同才翻转（PipelineList 内置翻转语义）。"""
@@ -539,9 +549,14 @@ class ProcessingPage(PanelStateMixin, QWidget):
         original = next((src['bundle'] for src in self._preview_sources
                          if src['key'] == 'original'), None)
         self._result_grid.set_bundle(_INPUT_KEY, original)
-        self._result_grid.set_selected(
-            _INPUT_KEY if self._selected_step_index() < 0
-            else f'step:{self._selected_step_index()}')
+        # 选中回显：结果与链一致时按 chip 选中位映射；过期则解除高亮
+        # （卡片索引属于旧 run，映射必错位），重跑后自动恢复联动
+        if self._results_stale:
+            self._result_grid.set_selected(None)
+        else:
+            self._result_grid.set_selected(
+                _INPUT_KEY if self._selected_step_index() < 0
+                else f'step:{self._selected_step_index()}')
         self._chain_strip.set_dirty(
             bool(self._step_artifact_ids) and self._results_stale)
         if members:
@@ -573,11 +588,13 @@ class ProcessingPage(PanelStateMixin, QWidget):
 
         ``grid.set_selected`` 必须显式调：chip 条的程序化选中不发回环
         信号，且 single/compare 视图模式的可见卡由它驱动（v2.3 走查
-        抓到的接缝）。
+        抓到的接缝）。结果过期时只高亮卡片本身，不回写 chip——旧 run
+        的卡片索引对不上新链（同 _on_chain_step_selected）。
         """
         self._result_grid.set_selected(key)
-        if key == _INPUT_KEY:
-            self._chain_strip.select_step(-1)
+        if self._results_stale or key == _INPUT_KEY:
+            if not self._results_stale:
+                self._chain_strip.select_step(-1)
             return
         index = int(key.split(':', 1)[1])
         self._chain_strip.select_step(index)
@@ -1078,6 +1095,7 @@ class ProcessingPage(PanelStateMixin, QWidget):
         steps = self._pipeline_list.steps()
         if not (0 <= self._selected_step < len(steps)):
             self._param_form.clear()
+            self._sync_param_empty_hint()
             return
         step = steps[self._selected_step]
         method = self._methods_by_id.get(step.get('method_id', ''), {})
@@ -1088,6 +1106,11 @@ class ProcessingPage(PanelStateMixin, QWidget):
         else:
             # 无 schema：保持表单为空
             self._param_form.clear()
+        self._sync_param_empty_hint()
+
+    def _sync_param_empty_hint(self) -> None:
+        """表单无字段 → 显示空态引导（参数卡不再留白）。"""
+        self._param_empty_hint.setVisible(not self._param_form._schema)
 
     def _auto_write_params_to_selected(self) -> None:
         """参数表单值变化 → 自动写入选中步骤（B1：改值即生效，无按钮）。

@@ -280,11 +280,16 @@ class ResultGrid(QWidget):
         self._mode_seg.currentItemChanged.connect(self.set_view_mode)
         head.addWidget(self._mode_seg)
         head.addStretch(1)
+        # qfw SwitchButton 的坑：toggle 时 _updateText 用 onText/offText
+        # 覆写主标签（默认 onText='On'）——勾选后冒出尾随 "On"。让两者
+        # 恒等于标签文本：标签固定、永不出 On/Off（minimal-text）。
         self._scale_switch = SwitchButton('统一色标', self)
+        self._scale_switch.setOnText('统一色标')
         self._scale_switch.setChecked(False)
         self._scale_switch.checkedChanged.connect(self.set_shared_scale)
         head.addWidget(self._scale_switch)
         self._expand_switch = SwitchButton('全部步骤', self)
+        self._expand_switch.setOnText('全部步骤')
         self._expand_switch.setChecked(True)
         self._expand_switch.checkedChanged.connect(self.sig_expand_all_changed)
         head.addWidget(self._expand_switch)
