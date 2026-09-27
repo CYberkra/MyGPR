@@ -25,6 +25,7 @@
 "应用到选中步骤"按钮 → 表单值写回选中步骤。
 """
 
+from collections.abc import Mapping
 from datetime import datetime
 
 from PyQt6.QtCore import QEvent, Qt, pyqtSignal
@@ -851,7 +852,10 @@ class ProcessingPage(PanelStateMixin, QWidget):
           步骤 tab 不展开）。
         """
         manifest = getattr(art, 'manifest', None) or {}
-        if not isinstance(manifest, dict):
+        # 真 manifest 是 types.MappingProxyType（后端冻结数据的只读视图，
+        # 2026-09-27 真机 e2e 实锤）——按 dict 判会把全部真实成果拒掉，
+        # run_group 取空 → 结果卡一个不铺（"运行完没反应"的真根因）
+        if not isinstance(manifest, Mapping):
             return {}
         nested = manifest.get('params')
         if isinstance(nested, dict):
