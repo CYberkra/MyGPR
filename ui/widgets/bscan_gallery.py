@@ -1,9 +1,13 @@
 # -*- coding: utf-8 -*-
-"""BScanGallery — 总览墙：全部打开数据源的滚动网格画廊。
+"""BScanGallery — 总览墙：当前上下文数据源的滚动网格画廊。
 
 定位是**总览工具而非精读工具**（格内像素密度低于 0.45px/采样红线）：
-跑完链且 tab 数 >4 时自动弹一次，平时经 tab 栏「总览墙」按钮唤起；
-点格子的标题按钮把该源送回主区并关闭画廊。非模态、随宿主页销毁。
+跑完链且格数 >4 时自动弹一次，平时经结果区「总览墙」按钮唤起；点格子
+的标题把该源送回主区并关闭画廊。非模态、随宿主页销毁。
+
+2026-09-27：数据源由宿主**显式传入**（原始 + 当前 run_group 各步，与
+结果网格一致）——不再遍历 page._preview_sources 全量（历史积累会把
+几天前的成果混进当次结果，真机截图反馈）。
 """
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QDialog, QGridLayout, QScrollArea, QVBoxLayout, QWidget
@@ -18,7 +22,7 @@ _COLUMNS = 3
 class BScanGallery(QDialog):
     """总览墙：每格一个迷你 B-Scan（无色标、轻量），标题即拾取按钮。"""
 
-    def __init__(self, page) -> None:
+    def __init__(self, page, sources=None) -> None:
         super().__init__(page)
         self._page = page
         self.setWindowTitle('总览墙 — 打开的数据源')
@@ -32,7 +36,7 @@ class BScanGallery(QDialog):
         grid.setContentsMargins(12, 12, 12, 12)
         grid.setSpacing(10)
 
-        for index, source in enumerate(page._preview_sources):
+        for index, source in enumerate(sources or []):
             row, col = divmod(index, _COLUMNS)
             pick = PushButton(source['title'], content)
             pick.clicked.connect(

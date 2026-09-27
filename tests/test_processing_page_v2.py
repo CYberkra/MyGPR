@@ -17,6 +17,7 @@ pytest.importorskip("PyQt6")  # 后端 CI（无 Qt）自动跳过
 from PyQt6.QtCore import QPointF  # noqa: E402
 from ui.pages.processing_page import ProcessingPage  # noqa: E402
 from ui.widgets.bscan_result_grid import ResultGrid  # noqa: E402
+from qfluentwidgets import PushButton  # noqa: E402
 from ui.widgets.chain_strip import ChainStrip  # noqa: E402
 from ui.widgets.context_menus import make_menu  # noqa: E402
 
@@ -584,3 +585,52 @@ class TestExpandAllToggle:
 
     def test_grid_default_switch_on(self, grid):
         assert grid._expand_switch.isChecked() is True
+
+
+class TestGalleryContextFilter:
+    """总览墙只显示当前上下文（真机反馈：跑一步蹦出一屏几天前的成果）。"""
+
+    @staticmethod
+    def _artifacts():
+        from types import SimpleNamespace
+        return [
+            SimpleNamespace(
+                artifact_id='OLD1', line_id='L09', name='run_old1',
+                method_id='dewow', created_at='2026-09-23T10:07:12',
+                manifest={'params': {'artifact_kind': 'intermediate',
+                                     'run_group_id': 'G_OLD'}}),
+            SimpleNamespace(
+                artifact_id='NEW1', line_id='L09', name='run_new1',
+                method_id='set_zero_time', created_at='2026-09-27T15:20:06',
+                manifest={'params': {'artifact_kind': 'processing',
+                                     'run_group_id': 'G_NEW'}}),
+        ]
+
+    def test_group_switch_drops_old_tabs(self, qapp):
+        """组切换：上一组的 artifact tab 移除，只保留原始锚点。"""
+        page = ProcessingPage()
+        try:
+            page.set_original_bundle(_bundle(1))
+            page.set_artifacts(self._artifacts())     # 最新组 = G_NEW
+            keys = [s['key'] for s in page._preview_sources]
+            assert 'artifact:OLD1' not in keys        # 旧组 tab 不残留
+            assert 'artifact:NEW1' in keys
+        finally:
+            page.close()
+
+    def test_gallery_shows_current_context_only(self, qapp):
+        """总览墙数据源 = 原始 + 当前 run_group（历史成果不混入）。"""
+        page = ProcessingPage()
+        try:
+            page.set_original_bundle(_bundle(1))
+            page.set_artifacts(self._artifacts())
+            page._open_gallery()
+            gallery = page._gallery
+            titles = [g.text() for g in gallery.findChildren(PushButton)]
+            assert any('原始数据' in t for t in titles)
+            assert any('set_zero_time' in t for t in titles)
+            assert not any('dewow' in t for t in titles), (
+                f'历史组成果混入总览墙：{titles}')
+            gallery.close()
+        finally:
+            page.close()

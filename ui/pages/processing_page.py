@@ -448,9 +448,15 @@ class ProcessingPage(PanelStateMixin, QWidget):
                 self._open_gallery()
 
     def _open_gallery(self) -> None:
-        """总览墙（非模态）：每次打开重建内容（源清单 ≤16，成本可忽略）。"""
+        """总览墙（非模态）：只显示**当前上下文**——原始数据 + 本次
+        run_group 各步（与结果网格一致）。历史上打开过的旧组成果不再
+        展示（真机反馈：跑一步蹦出一屏几天前的结果）；历史成果经成果
+        下拉/文件树按需预览。"""
         from ui.widgets.bscan_gallery import BScanGallery
-        self._gallery = BScanGallery(self)
+        keep = {'original'} | {
+            f'artifact:{aid}' for aid in self._step_artifact_ids.values()}
+        sources = [s for s in self._preview_sources if s['key'] in keep]
+        self._gallery = BScanGallery(self, sources)
         self._gallery.show()
 
     # ------------------------------------------------ v2：链条 ↔ 处理链
@@ -958,6 +964,11 @@ class ProcessingPage(PanelStateMixin, QWidget):
             return
         self._opened_run_groups.add(newest)
         self._ensure_original_source()
+        # 组切换：上一组（及更早）的 artifact tab 一并移除，只保留原始
+        # 锚点——tab 行已隐藏（v2），旧组 tab 不会再被用户关闭，只会
+        # 在总览墙无限堆积（真机截图：一堆几天前的成果混着新结果）
+        self._preview_sources = [
+            s for s in self._preview_sources if s['key'] == 'original']
         # catalog 路径有 run_step_index；field 路径缺失（全 0）时按落盘
         # 时间升序回退（B7 逐步保存天然按步序递增）。最终成果恒排末位。
         members = sorted(groups[newest]['members'],
