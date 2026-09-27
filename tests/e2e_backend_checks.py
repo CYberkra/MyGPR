@@ -18,6 +18,8 @@ run_group 永远取空 → 结果卡一个不铺。此前的页面级测试喂�
 """
 import gc
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
@@ -235,3 +237,164 @@ def test_history_run_replay_on_line_open(tmp_path, qapp, backend):
             assert card.view._matrix is not None, f'{key} 骨架未回填'
     finally:
         _destroy_page(page, qapp)
+
+
+def test_full_user_journey_processing_page(tmp_path, qapp, backend):
+    """全用户旅程：加算法 → 选步骤改参 → 运行 → 禁用/删除/排序 →
+    再运行 → 视图模式/统一色标/全部步骤开关 → 测线下拉文本。
+    任一环异常即失败（处理页前端全覆盖）。"""
+    from mygpr.domain.processing.models import PipelineDefinition, PipelineStep
+
+    project = backend.projects.create_project(tmp_path / 'proj', name='journey')
+    pid = project.project_id
+    rng = np.random.default_rng(21)
+    matrix = np.cumsum(rng.normal(0, 0.4, size=(128, 256)),
+                       axis=0).astype(np.float32)
+    backend.projects.save_line_dataset(pid, 'L01', matrix, name='L01',
+                                       length_m=50.0, time_window_ns=400.0)
+
+    _PrevCmd, _Refresh, ProjectController, ProcessingPage = _imports()
+    page = ProcessingPage()
+    try:
+        pc = ProjectController()
+        pc._backend_controller = _BackendHost(backend)
+
+        # ---- 测线列表到达：下拉文本必须可见（真机空白下拉回归） ----
+        lines = list(backend.projects.list_lines(pid))
+        page.set_lines(lines)
+        assert page._line_combo.count() == 1
+        assert page._line_combo.currentText() == 'L01', (
+            f'测线下拉文本为空（真机空白下拉）：'
+            f'{page._line_combo.currentText()!r}')
+
+        # ---- 原始数据到位：输入卡 ----
+        def _mk_bundle(tag, vmin=0.0):
+            return SimpleNamespace(
+                matrix=np.full((128, 256), float(tag), dtype=np.float32),
+                vmin=float(vmin), vmax=float(tag), title='t', x_label='x',
+                y_label='y', trace_axis_m=None, sample_axis=None,
+                sample_axis_label='', trace_count=256, sample_count=128,
+                trace_elevation_m=None, depth_axis_m=None)
+
+        page.set_original_bundle(_mk_bundle(0.3))
+        assert [c.key for c in page._result_grid.cards()] == ['input']
+
+        # ---- 方法库到达 + 走真实添加路径（参数模板来自
+        # parameter_schema 的 default——绕过它塞错参数会让运行 FAILED，
+        # e2e 首轮即复现该用户风险路径）----
+        page.set_methods([
+            {'method_id': 'dewow', 'name': '零时校正',
+             'display_name': '零时校正 (Dewow)',
+             'parameter_schema': [{'name': 'window', 'default': 21}]},
+            {'method_id': 'sec_gain', 'name': 'SEC增益',
+             'display_name': 'SEC 增益 (AGC)',
+             'parameter_schema': [{'name': 'gain_min', 'default': 1.0},
+                                  {'name': 'gain_max', 'default': 6.0},
+                                  {'name': 'power', 'default': 1.0}]},
+        ])
+        for mid in ('dewow', 'sec_gain'):
+            page._add_method_to_pipeline(mid)
+        chips = [s['method_id'] for s in page._pipeline_list.steps()]
+        assert chips == ['dewow', 'sec_gain']
+        assert page._pipeline_list.steps()[0]['params'] == {'window': 21}
+        assert page._pipeline_list.steps()[1]['params'] == {
+            'gain_min': 1.0, 'gain_max': 6.0, 'power': 1.0}
+        assert len(page._chain_strip._steps) == 2
+
+        # ---- 选中步骤 1 → 参数区跟随（有内容）----
+        page._chain_strip.select_step(1)
+        qapp.processEvents()
+        assert page._chain_strip._list.currentRow() == 1
+
+        # ---- 禁用步骤 0：链置灰（未运行不铺步骤卡——懒建原则）；
+        # 后端提交时过滤禁用步（processing_service if step.enabled）----
+        page._pipeline_list._toggle_enabled(0)
+        qapp.processEvents()
+        assert page._pipeline_list.steps()[0]['enabled'] is False
+        assert page._chain_strip._steps[0]['enabled'] is False
+        page._pipeline_list._toggle_enabled(0)
+        qapp.processEvents()
+        assert page._pipeline_list.steps()[0]['enabled'] is True
+
+        # ---- 第一次运行（捕获 run_requested → 真提交）----
+        jobs = []
+
+        def _submit(payload):
+            steps = [PipelineStep(s['method_id'], dict(s.get('params') or {}))
+                     for s in payload['steps']]
+            pipe = PipelineDefinition(name='journey', steps=tuple(steps))
+            jobs.append(backend.submit_project_pipeline(
+                pid, 'L01', pipe, result_name='journey-1'))
+
+        page.run_requested.connect(_submit)
+        page._on_run_clicked()
+        assert jobs, '运行未提交'
+        for job in jobs:
+            assert backend.jobs.wait(job, timeout=120).status.name == 'COMPLETED'
+
+        # ---- 刷新 → 结果按序铺卡 + 出图（批量预览宽松代数）----
+        pc.artifact_preview_ready.connect(
+            lambda aid, b: page.set_artifact_bundle(aid, b))
+        got = {}
+        pc.artifacts_updated.connect(lambda lid, a: got.update(a=list(a)))
+        _Refresh(pc, pid, 'L01').execute()
+        page.set_artifacts(list(got['a']))
+        keys = [c.key for c in page._result_grid.cards()]
+        assert keys == ['input', 'step:0', 'step:1']
+        # 全部回填（骨架消失）
+        for key in ('step:0', 'step:1'):
+            aid = page._step_artifact_ids[int(key.split(':')[1])]
+            _PrevCmd(pc, pid, 'L01', aid,
+                                    pc._artifact_preview_generation,
+                                    check_generation=False).execute()
+            page.set_artifact_bundle(aid, ready_bundle(aid, pc, pid, 'L01'))
+        for key in ('step:0', 'step:1'):
+            assert page._result_grid.card(key).view._matrix is not None, key
+
+        # ---- 改参数 → 脏提示；视图/开关交互 ----
+        page._mark_results_stale()
+        assert page._chain_strip._dirty_label.isVisibleTo(page._chain_strip)
+        page._result_grid.set_shared_scale(True)
+        page._result_grid.set_view_mode('single')
+        page.set_colorbar_pref(True)
+        page._result_grid.set_view_mode('all')
+        page._on_expand_all_changed(False)
+        qapp.processEvents()
+        assert [c.key for c in page._result_grid.cards()] == ['input', 'step:1']
+        page._on_expand_all_changed(True)
+
+        # ---- 删除步骤 + 排序（链定义编辑）----
+        # (1,0)=sec_gain 插到最前（(0,1) 是原位 noop 语义，返回 False）
+        assert page._pipeline_list._move_step_to(1, 0) is True
+        qapp.processEvents()
+        page._pipeline_list._remove_step(1)
+        assert len(page._pipeline_list.steps()) == 1
+
+        # ---- 第二次运行（新组覆盖显示）----
+        page._on_run_clicked()
+        for job in jobs[1:]:
+            assert backend.jobs.wait(job, timeout=120).status.name == 'COMPLETED'
+        got2 = {}
+        pc.artifacts_updated.connect(lambda lid, a: got2.update(a=list(a)))
+        _Refresh(pc, pid, 'L01').execute()
+        page.set_artifacts(list(got2['a']))
+        assert page._result_grid.cards(), '第二次运行后无结果卡'
+
+        # ---- 测线下拉在全程后仍有文本（refresh_lines 后空白回归）----
+        assert page._line_combo.currentText() != '', '测线下拉文本为空'
+    finally:
+        _destroy_page(page, qapp)
+
+
+def ready_bundle(aid, pc, pid, line_id):
+    """真加载该成果的预览 bundle（与 _PreviewArtifactCommand 同路径）。"""
+    info = pc._backend().projects.get_artifact_dataset_info(pid, line_id, aid)
+    matrix, s_idx, t_idx = pc._backend().projects.read_artifact_window(
+        pid, line_id, aid, max_samples=512, max_traces=512)
+    from types import SimpleNamespace
+    return SimpleNamespace(
+        matrix=matrix, vmin=float(matrix.min()), vmax=float(matrix.max()),
+        title=f'成果 {aid}', x_label='道数', y_label='走时 (ns)',
+        trace_axis_m=None, sample_axis=None, sample_axis_label='',
+        trace_count=int(matrix.shape[1]), sample_count=int(matrix.shape[0]),
+        trace_elevation_m=None, depth_axis_m=None)
