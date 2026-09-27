@@ -634,3 +634,42 @@ class TestGalleryContextFilter:
             gallery.close()
         finally:
             page.close()
+
+
+class TestSingleViewGeometry:
+    """单步视图几何：可见卡必须占满结果区宽（真机反馈「只有半个窗口」）。
+
+    根因：QGridLayout 空列不自动回收 + 列 stretch 跨重排残留——
+    修：重排前清列拉伸 + 单步卡跨满最大列数（itemPos span=2）。
+    """
+
+    def test_visible_card_spans_full_width(self, grid, qapp):
+        grid.resize(900, 600)
+        grid.show()
+        qapp.processEvents()
+        qapp.processEvents()
+        grid.set_slots(_slots(2))
+        grid.set_selected('k0')
+        grid.set_view_mode('single')
+        qapp.processEvents()
+        qapp.processEvents()
+        visible = [c for c in grid.cards() if c.isVisibleTo(grid)]
+        assert [c.key for c in visible] == ['k0']
+        assert visible[0].width() >= 0.95 * grid._body.width()
+        idx = grid._grid.indexOf(visible[0])
+        assert grid._grid.getItemPosition(idx)[3] == 2   # columnSpan=2
+
+    def test_switch_back_to_all_two_columns(self, grid, qapp):
+        grid.resize(900, 600)
+        grid.show()
+        qapp.processEvents()
+        qapp.processEvents()
+        grid.set_slots(_slots(2))
+        grid.set_view_mode('single')
+        grid.set_view_mode('all')
+        qapp.processEvents()
+        qapp.processEvents()
+        assert grid._grid.columnStretch(0) == 1
+        assert grid._grid.columnStretch(1) == 1
+        widths = [c.width() for c in grid.cards()]
+        assert all(abs(w - widths[0]) <= 2 for w in widths)   # 均分

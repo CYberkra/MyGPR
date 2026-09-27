@@ -382,6 +382,11 @@ class ResultGrid(QWidget):
                 if widget is not None:
                     self._grid.removeWidget(widget)
         n = len(visible)
+        # 列拉伸先全清：QGridLayout 的 setColumnStretch 会**跨重排残留**
+        # （从两列切单步，空列仍按旧 stretch 分走一半宽——真机反馈
+        # 「单步结果只是半个窗口」）
+        for col in range(_MAX_COLUMNS + 1):
+            self._grid.setColumnStretch(col, 0)
         if n == 0:
             return
         if self._view_mode == VIEW_ALL:
@@ -394,7 +399,12 @@ class ResultGrid(QWidget):
             cols, min_h = 1, _CELL_MIN_HEIGHT_LARGE
         for index, card in enumerate(visible):
             card.setMinimumHeight(min_h)
-            self._grid.addWidget(card, index // cols, index % cols)
+            if self._view_mode == VIEW_SINGLE:
+                # 全幅：跨满最大列数——QGridLayout 的空列不会自动回收
+                # （即使 stretch 清零仍参与分配，卡只占半窗，真机反馈）
+                self._grid.addWidget(card, 0, 0, 1, _MAX_COLUMNS)
+            else:
+                self._grid.addWidget(card, index // cols, index % cols)
         # 列均分：QGridLayout 默认按 sizeHint 分配，compare 左卡会被挤扁
         for col in range(cols):
             self._grid.setColumnStretch(col, 1)
