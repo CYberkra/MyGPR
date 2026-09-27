@@ -99,6 +99,7 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._thumb_views_bound = []      # 已装点击提升的缩略面板
         self._step_artifact_ids = {}      # v2：步骤序号 → 该步 intermediate 成果 id
         self._results_stale = False       # v2：链/参数已改但结果未重算
+        self._expand_all = True           # v2.3：结果区「全部步骤」开关
         self._running = False
         self._job_id = ''
         self._selected_step = -1
@@ -334,6 +335,11 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._chain_strip.run_button().clicked.connect(self._on_run_clicked)
         self._pipeline_list.sig_changed.connect(self._refresh_chain_and_results)
         self._pipeline_list.sig_changed.connect(self._mark_results_stale)
+        # 结果区头部开关：全部步骤（关=只铺输入+最终结果）；点卡选步骤
+        # （connect 只做一次——放 _refresh 里会随每次刷新重复连接）
+        self._result_grid.sig_expand_all_changed.connect(
+            self._on_expand_all_changed)
+        self._result_grid.sig_card_selected.connect(self._on_card_selected)
         self._refresh_chain_and_results()
 
         # 执行
@@ -479,8 +485,13 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._chain_strip.set_steps(steps)
         members = self._newest_run_members()
         if members:
+            # 「全部步骤」开关关闭 → 只铺输入 + 最终结果（P3 就地版）
+            shown = (set(range(len(members))) if self._expand_all
+                     else {len(members) - 1})
             slots = [{'key': _INPUT_KEY, 'title': '输入', 'enabled': True}]
             for i, (_s, kind, _c, artifact_id, art) in enumerate(members):
+                if i not in shown:
+                    continue
                 method = (str(getattr(art, 'method_id', '') or '')
                           or str(getattr(art, 'name', '') or ''))
                 slots.append({'key': f'step:{i}', 'title': f'{i + 1} {method}',
@@ -496,7 +507,6 @@ class ProcessingPage(PanelStateMixin, QWidget):
                      if original is not None else [])
             self._step_artifact_ids = {}
         self._result_grid.set_slots(slots)
-        self._result_grid.sig_card_selected.connect(self._on_card_selected)
         # set_slots 会重建卡片 → 输入卡的 bundle 需重喂（原始 bundle
         # 存在源清单的 original 槽位里）
         original = next((src['bundle'] for src in self._preview_sources
@@ -514,15 +524,26 @@ class ProcessingPage(PanelStateMixin, QWidget):
             self._results_stale = True
             self._chain_strip.set_dirty(True)
 
+    def _on_expand_all_changed(self, expand_all: bool) -> None:
+        """「全部步骤」开关：关=只铺输入+最终结果（P3 设置的就地版）。"""
+        self._expand_all = bool(expand_all)
+        if self._step_artifact_ids:          # 有运行结果才需要重铺
+            self._refresh_chain_and_results()
+
     def _selected_step_index(self) -> int:
         """当前选中的步骤索引（-1 = 未选）。"""
         return self._chain_strip._list.currentRow()
 
     def _on_card_selected(self, key: str) -> None:
-        """点结果卡 → 选中对应 chip（与链式条双向同步）。"""
+        """点结果卡 → 选中对应 chip（与链式条双向同步）。
+
+        ``grid.set_selected`` 必须显式调：chip 条的程序化选中不发回环
+        信号，且 single/compare 视图模式的可见卡由它驱动（v2.3 走查
+        抓到的接缝）。
+        """
+        self._result_grid.set_selected(key)
         if key == _INPUT_KEY:
             self._chain_strip.select_step(-1)
-            self._result_grid.set_selected(_INPUT_KEY)
             return
         index = int(key.split(':', 1)[1])
         self._chain_strip.select_step(index)

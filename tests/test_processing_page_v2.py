@@ -434,3 +434,153 @@ class TestChainAlternativePaths:
                 a.trigger()
                 break
         assert removed == [2]
+
+
+class TestViewModes:
+    """三种视图模式（2026-09-27 v2.3，参考用户设计稿）。"""
+
+    def test_all_mode_shows_every_card(self, grid):
+        grid.set_slots(_slots(4))
+        grid.set_view_mode('all')
+        assert all(c.isVisibleTo(grid) for c in grid.cards())
+
+    def test_single_mode_shows_selected_only(self, grid, qapp):
+        grid.show()
+        qapp.processEvents()
+        grid.set_slots(_slots(4))
+        grid.set_selected('k2')
+        grid.set_view_mode('single')
+        visible = [c.key for c in grid.cards() if c.isVisibleTo(grid)]
+        assert visible == ['k2']
+
+    def test_single_mode_without_selection_shows_last(self, grid, qapp):
+        grid.show()
+        qapp.processEvents()
+        grid.set_slots(_slots(3))
+        grid.set_view_mode('single')
+        visible = [c.key for c in grid.cards() if c.isVisibleTo(grid)]
+        assert visible == ['k2']
+
+    def test_compare_mode_shows_prev_and_selected(self, grid, qapp):
+        grid.show()
+        qapp.processEvents()
+        grid.set_slots(_slots(4))
+        grid.set_selected('k2')
+        grid.set_view_mode('compare')
+        visible = [c.key for c in grid.cards() if c.isVisibleTo(grid)]
+        assert visible == ['k1', 'k2']
+
+    def test_compare_mode_selected_input_shows_first_pair(self, grid, qapp):
+        grid.show()
+        qapp.processEvents()
+        grid.set_slots(_slots(3))
+        grid.set_selected('k0')
+        grid.set_view_mode('compare')
+        visible = [c.key for c in grid.cards() if c.isVisibleTo(grid)]
+        assert visible == ['k0', 'k1']
+
+    def test_mode_switch_back_restores_all(self, grid, qapp):
+        grid.show()
+        qapp.processEvents()
+        grid.set_slots(_slots(4))
+        grid.set_view_mode('single')
+        grid.set_view_mode('all')
+        assert all(c.isVisibleTo(grid) for c in grid.cards())
+
+    def test_large_min_height_in_focus_modes(self, grid):
+        grid.set_slots(_slots(2))
+        grid.set_view_mode('single')
+        visible = [c for c in grid.cards() if c.isVisibleTo(grid)]
+        assert visible[0].minimumHeight() > 320   # 只有可见卡提档
+        grid.set_view_mode('all')
+        assert grid.cards()[0].minimumHeight() == 320
+
+    def test_selection_follows_in_single_mode(self, grid, qapp):
+        """single 模式下改选 → 可见卡跟着换（选中驱动）。"""
+        grid.show()
+        qapp.processEvents()
+        grid.set_slots(_slots(3))
+        grid.set_view_mode('single')
+        grid.set_selected('k0')
+        visible = [c.key for c in grid.cards() if c.isVisibleTo(grid)]
+        assert visible == ['k0']
+
+
+class TestSharedScale:
+    """统一色标：全组卡共用全局 [vmin, vmax]（display 层覆盖，raw 不动）。"""
+
+    def test_override_applies_global_range(self, grid):
+        grid.set_slots(_slots(2))
+        grid.set_bundle('k0', _bundle(0.5))    # 范围 0 ~ 0.5
+        grid.set_bundle('k1', _bundle(1.5))    # 范围 0 ~ 1.5
+        grid.set_shared_scale(True)
+        for card in grid.cards():
+            assert card.view._levels_override == (0.0, 1.5)
+        grid.set_shared_scale(False)
+        for card in grid.cards():
+            assert card.view._levels_override is None
+
+    def test_new_bundle_rescales_in_shared_mode(self, grid):
+        grid.set_slots(_slots(2))
+        grid.set_bundle('k0', _bundle(0.5))
+        grid.set_shared_scale(True)
+        grid.set_bundle('k1', _bundle(2.0))    # 新卡入组 → 全局范围扩大
+        for card in grid.cards():
+            assert card.view._levels_override == (0.0, 2.0)
+
+    def test_placeholder_card_skipped(self, grid):
+        grid.set_slots(_slots(2, disabled=(1,)))
+        grid.set_bundle('k0', _bundle(0.5))
+        grid.set_shared_scale(True)
+        assert grid.cards()[1].view is None    # 占位卡无视图，不崩
+
+
+class TestExpandAllToggle:
+    """「全部步骤」开关：关=只铺输入 + 最终结果（P3 就地版）。"""
+
+    @staticmethod
+    def _page_with_run(qapp):
+        from types import SimpleNamespace
+        page = ProcessingPage()
+        page.set_original_bundle(_bundle(1))
+        page.set_artifacts([
+            SimpleNamespace(
+                artifact_id='S1', line_id='L01', name='run 步骤1_dewow',
+                method_id='dewow', created_at='2026-09-27T10:01:00',
+                manifest={'params': {'artifact_kind': 'intermediate',
+                                     'run_group_id': 'G1'}}),
+            SimpleNamespace(
+                artifact_id='S2', line_id='L01', name='run 步骤2_agc',
+                method_id='agc', created_at='2026-09-27T10:02:00',
+                manifest={'params': {'artifact_kind': 'intermediate',
+                                     'run_group_id': 'G1'}}),
+            SimpleNamespace(
+                artifact_id='F1', line_id='L01', name='run_bandpass',
+                method_id='bandpass', created_at='2026-09-27T10:03:00',
+                manifest={'params': {'artifact_kind': 'processing',
+                                     'run_group_id': 'G1'}}),
+        ])
+        return page
+
+    def test_default_expands_all(self, qapp):
+        page = self._page_with_run(qapp)
+        try:
+            keys = [c.key for c in page._result_grid.cards()]
+            assert keys == ['input', 'step:0', 'step:1', 'step:2']
+        finally:
+            page.close()
+
+    def test_off_shows_input_and_final_only(self, qapp):
+        page = self._page_with_run(qapp)
+        try:
+            page._on_expand_all_changed(False)
+            keys = [c.key for c in page._result_grid.cards()]
+            assert keys == ['input', 'step:2']
+            page._on_expand_all_changed(True)
+            keys = [c.key for c in page._result_grid.cards()]
+            assert keys == ['input', 'step:0', 'step:1', 'step:2']
+        finally:
+            page.close()
+
+    def test_grid_default_switch_on(self, grid):
+        assert grid._expand_switch.isChecked() is True

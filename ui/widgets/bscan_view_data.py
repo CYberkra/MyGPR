@@ -259,6 +259,24 @@ class BScanViewDataMixin:
             self.sig_levels_changed.emit(low, high)
         return self._matrix is not None
 
+    def set_levels_override(self, levels) -> bool:
+        """设置/清除绝对色阶覆盖（统一色标模式；不碰 raw 与百分位偏好）。
+
+        :param levels: ``(vmin, vmax)`` 或 ``None``（清除，回到百分位）。
+        :return: 是否真的重算了渲染（无数据时只记状态）。
+        """
+        if levels is None:
+            self._levels_override = None
+        else:
+            lo, hi = float(levels[0]), float(levels[1])
+            if not (math.isfinite(lo) and math.isfinite(hi)):
+                return False
+            if hi <= lo:                      # 退化范围给最小可分辨跨度
+                hi = lo + 1e-12
+            self._levels_override = (lo, hi)
+        self._apply_levels_to_render()
+        return self._matrix is not None
+
     def _apply_levels_to_render(self, *, redraw_waveform: bool = True) -> None:
         """把当前 ``_p_low/_p_high`` 换算成 vmin/vmax 推到图像与色标（无数据则跳过）。
 
@@ -268,11 +286,16 @@ class BScanViewDataMixin:
         """
         if self._matrix is None:
             return
-        # 色阶在**增益后**矩阵上取百分位：增益与百分位正交（增益纵向拉平、
-        # 百分位横向裁剪），顺序为先增益、再取百分位
-        vmin, vmax = compute_display_levels(
-            self._gain_applied(self._matrix),
-            p_low=self._p_low, p_high=self._p_high)
+        if self._levels_override is not None:
+            # 统一色标模式：宿主算好的全局 [vmin, vmax] 直接上屏（display
+            # 层覆盖，raw 与百分位偏好均不动；清除覆盖后自动回到百分位）
+            vmin, vmax = self._levels_override
+        else:
+            # 色阶在**增益后**矩阵上取百分位：增益与百分位正交（增益纵向拉平、
+            # 百分位横向裁剪），顺序为先增益、再取百分位
+            vmin, vmax = compute_display_levels(
+                self._gain_applied(self._matrix),
+                p_low=self._p_low, p_high=self._p_high)
         self._image_item.setLevels((float(vmin), float(vmax)))
         if self._colorbar is not None:
             self._colorbar.setLevels((float(vmin), float(vmax)))

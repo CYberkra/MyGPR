@@ -172,6 +172,11 @@ def main() -> int:
         print(f'[visual-smoke] FAILED: missing {missing}')
         return 2
     print(f'[visual-smoke] OK: {len(produced)} screenshots')
+    # 工作已全部完成 → 跳过 Python 关停析构：qfw 组件（SegmentedWidget
+    # 等）的 C++ 对象在解释器 shutdown 时销毁顺序不定，会段错误污染
+    # 退出码（139），CI 会误判失败。os._exit 绕过 teardown，产物已落盘。
+    sys.stdout.flush()
+    os._exit(0)
     return 0
 
 

@@ -1,15 +1,23 @@
 # -*- coding: utf-8 -*-
 """ResultGrid — 结果网格（处理页 v2 主区下半）。
 
-设计（2026-09-26 v2.1，用户定稿）：
-- **两列大图**：``N=1 → 全幅``，``N≥2 → 2 列``——单格更大，剖面更可读
-  （2026-09-26 弃用三列规则）；
-- 网格卡**无色标**（``BScanView(with_colorbar=False)``），坐标/色标不再
-  挤占绘图区；看色标与精读走放大 / 全屏；
-- 单元间距 16（8pt 栅格），**单元最小高 320**——行数多时纵向滚动；
-- 卡头**极简**：序号 + 算法名，⤢ 图标 hover 才显；
-- **选中同步高亮**：点卡 → 发 :attr:`sig_card_selected`；宿主调
-  :meth:`set_selected` 高亮对应卡（与链条 chip 双向同步）；
+设计（2026-09-27 v2.3，参考用户设计稿定稿）：
+- **两列大图**：``N=1 → 全幅``，``N≥2 → 2 列``；
+- **三种视图模式**（结果区头部切换，选中卡驱动）：
+  - ``all`` 全部步骤：现有网格；
+  - ``compare`` 前后对比：相邻两张（选中步与其前一步，选中输入则为
+    输入+第 1 步）并排大图；
+  - ``single`` 单步结果：只显示选中卡全幅大图；
+- 网格卡**无色标**（``BScanView(with_colorbar=False)``）；
+- **统一色标**开关：开启时全组结果共用同一 [vmin, vmax]（经
+  ``BScanView.set_levels_override``，display 层覆盖，raw 不动）——
+  增益前后横向可比；
+- **全部步骤**开关：关闭时只铺「输入 + 最终结果」（P3 设置的就地版），
+  经 :attr:`sig_expand_all_changed` 通知宿主过滤槽位；
+- 单元间距 16（8pt 栅格），单元最小高 320（single/compare 大图档 460）；
+- 卡头极简：序号 + 算法名 + 幅值范围，⤢ hover 才显；
+- **选中同步高亮**：点卡 → :attr:`sig_card_selected`；宿主调
+  :meth:`set_selected`（与链条 chip 双向同步）；
 - 禁用步骤 → 虚线占位卡（保留 1:1 对应，不占画布）。
 
 网格只认「槽位」（key/title/enabled），数据由宿主页按 key 回填。
@@ -20,14 +28,20 @@ from PyQt6.QtCore import (QPropertyAnimation, Qt, pyqtSignal)
 from PyQt6.QtWidgets import (QFrame, QGraphicsOpacityEffect,
                              QGridLayout, QHBoxLayout, QLabel, QScrollArea,
                              QSizePolicy, QVBoxLayout, QWidget)
-from qfluentwidgets import FluentIcon as FIF, ToolButton
+from qfluentwidgets import (CaptionLabel, FluentIcon as FIF, SegmentedWidget,
+                            SwitchButton, ToolButton)
 
 from ui.widgets.bscan_view import BScanView
 from ui.widgets.empty_state import EmptyStateOverlay
 
 _CELL_MIN_HEIGHT = 320
+_CELL_MIN_HEIGHT_LARGE = 460
 _GRID_SPACING = 16
 _MAX_COLUMNS = 2
+
+VIEW_ALL = 'all'
+VIEW_COMPARE = 'compare'
+VIEW_SINGLE = 'single'
 
 
 class _Skeleton(QWidget):
@@ -214,14 +228,19 @@ class _ResultCard(QFrame):
 
 
 class ResultGrid(QWidget):
-    """结果网格：按槽位铺卡片，列数自适应，纵向可滚。"""
+    """结果网格：按槽位铺卡片，列数自适应，纵向可滚；支持三种视图模式。"""
 
-    sig_card_selected = pyqtSignal(str)  # 点卡 → 宿主选中对应步骤
+    sig_card_selected = pyqtSignal(str)      # 点卡 → 宿主选中对应步骤
+    sig_expand_all_changed = pyqtSignal(bool)  # 「全部步骤」开关 → 宿主过滤槽位
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._cards = []                 # 顺序 = 槽位顺序
         self._keys = {}                  # key → card
+        self._bundles = {}               # key → 原始 bundle（统一色标的全局范围原料）
+        self._view_mode = VIEW_ALL
+        self._selected_key = None
+        self._shared_scale = False
         self._body = QWidget(self)
         self._grid = QGridLayout(self._body)
         self._grid.setContentsMargins(0, 0, 0, 0)
@@ -231,8 +250,34 @@ class ResultGrid(QWidget):
         self._scroll.setWidgetResizable(True)
         self._scroll.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        # ---- 结果区头部：幅数 + 视图模式 + 统一色标/全部步骤开关 ----
+        head = QHBoxLayout()
+        head.setContentsMargins(0, 0, 0, 0)
+        head.setSpacing(10)
+        self._count_label = CaptionLabel('结果', self)
+        head.addWidget(self._count_label)
+        self._mode_seg = SegmentedWidget(self)
+        for key, text in ((VIEW_ALL, '全部步骤'), (VIEW_COMPARE, '前后对比'),
+                          (VIEW_SINGLE, '单步结果')):
+            self._mode_seg.addItem(routeKey=key, text=text)
+        self._mode_seg.setCurrentItem(VIEW_ALL)
+        self._mode_seg.currentItemChanged.connect(self.set_view_mode)
+        head.addWidget(self._mode_seg)
+        head.addStretch(1)
+        self._scale_switch = SwitchButton('统一色标', self)
+        self._scale_switch.setChecked(False)
+        self._scale_switch.checkedChanged.connect(self.set_shared_scale)
+        head.addWidget(self._scale_switch)
+        self._expand_switch = SwitchButton('全部步骤', self)
+        self._expand_switch.setChecked(True)
+        self._expand_switch.checkedChanged.connect(self.sig_expand_all_changed)
+        head.addWidget(self._expand_switch)
+
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(6)
+        outer.addLayout(head)
         outer.addWidget(self._scroll)
         self._scroll.setWidget(self._body)
 
@@ -274,34 +319,142 @@ class ResultGrid(QWidget):
                 old.deleteLater()
         self._cards = new_cards
         self._keys = {c.key: c for c in new_cards}
+        # 同步 bundle 缓存：移除消失槽位（统一色标的全局范围只算现存的）
+        live = set(self._keys)
+        for stale in set(self._bundles) - live:
+            del self._bundles[stale]
+        self._count_label.setText(f'结果 {len(new_cards)} 幅')
         self._empty.setVisible(not self._cards)
-        self._reflow()
+        self._apply_view_mode()
 
-    def _reflow(self) -> None:
-        """列数规则 + 落格（占位卡同样占一格，保持 1:1）。"""
+    # ------------------------------------------------------------ 视图模式
+    def set_view_mode(self, mode: str) -> None:
+        """切换视图模式（all / compare / single）；重排可见卡。"""
+        if mode not in (VIEW_ALL, VIEW_COMPARE, VIEW_SINGLE):
+            return
+        if mode == self._view_mode:
+            return
+        self._view_mode = mode
+        # 程序化切换同步 segmented 选中态（已是当前项时信号不重发，无回环）
+        self._mode_seg.setCurrentItem(mode)
+        self._apply_view_mode()
+
+    def view_mode(self) -> str:
+        return self._view_mode
+
+    def _visible_cards(self) -> list:
+        """当前模式下应显示的卡（有序）；隐藏其余。"""
+        cards = self._cards
+        if self._view_mode == VIEW_SINGLE:
+            sel = self._keys.get(self._selected_key)
+            chosen = [sel] if sel is not None else cards[-1:]
+        elif self._view_mode == VIEW_COMPARE:
+            if len(cards) >= 2:
+                index = self._index_of(self._selected_key)
+                if index <= 0:            # 未选 / 选中输入 → 输入+第 1 步
+                    pair = [cards[0], cards[1]]
+                else:
+                    pair = [cards[index - 1], cards[index]]
+                chosen = pair
+            else:
+                chosen = list(cards)
+        else:
+            chosen = cards
+        for card in cards:
+            card.setVisible(card in chosen)
+        return chosen
+
+    def _index_of(self, key) -> int:
+        if key is None:
+            return -1
+        for index, card in enumerate(self._cards):
+            if card.key == key:
+                return index
+        return -1
+
+    def _apply_view_mode(self) -> None:
+        """按当前模式重排可见卡（single/compare 用大图档高度）。"""
+        visible = self._visible_cards()
         while self._grid.count():
             item = self._grid.takeAt(0)
             if item is not None:
                 widget = item.widget()
                 if widget is not None:
                     self._grid.removeWidget(widget)
-        n = len(self._cards)
+        n = len(visible)
         if n == 0:
             return
-        cols = n if n <= _MAX_COLUMNS else min(
-            int(math.ceil(math.sqrt(n))), _MAX_COLUMNS)
-        for index, card in enumerate(self._cards):
+        if self._view_mode == VIEW_ALL:
+            cols = n if n <= _MAX_COLUMNS else min(
+                int(math.ceil(math.sqrt(n))), _MAX_COLUMNS)
+            min_h = _CELL_MIN_HEIGHT
+        elif self._view_mode == VIEW_COMPARE:
+            cols, min_h = 2, _CELL_MIN_HEIGHT_LARGE
+        else:                                 # single：全幅
+            cols, min_h = 1, _CELL_MIN_HEIGHT_LARGE
+        for index, card in enumerate(visible):
+            card.setMinimumHeight(min_h)
             self._grid.addWidget(card, index // cols, index % cols)
+        # 列均分：QGridLayout 默认按 sizeHint 分配，compare 左卡会被挤扁
+        for col in range(cols):
+            self._grid.setColumnStretch(col, 1)
+
+    def _reflow(self) -> None:
+        """兼容旧入口：差量更新后统一走视图模式重排。"""
+        self._apply_view_mode()
+
+    # ------------------------------------------------------------ 统一色标
+    def set_shared_scale(self, shared: bool) -> None:
+        """统一色标开关：全组卡共用全局 [vmin, vmax]（display 层覆盖）。"""
+        self._shared_scale = bool(shared)
+        for card in self._cards:
+            self._apply_scale_to_card(card)
+
+    def shared_scale(self) -> bool:
+        return self._shared_scale
+
+    def _apply_scale_to_card(self, card) -> None:
+        if card.view is None:
+            return
+        if not self._shared_scale:
+            card.view.set_levels_override(None)
+            return
+        glo = self._global_range()
+        if glo is not None:
+            card.view.set_levels_override(glo)
+
+    def _global_range(self):
+        """现存 bundle 的全局 [vmin, vmax]；无可算数据返回 None。"""
+        los, his = [], []
+        for bundle in self._bundles.values():
+            if bundle is None or getattr(bundle, 'matrix', None) is None:
+                continue
+            los.append(float(getattr(bundle, 'vmin', 0.0) or 0.0))
+            his.append(float(getattr(bundle, 'vmax', 0.0) or 0.0))
+        if not los:
+            return None
+        lo, hi = min(los), max(his)
+        if hi <= lo:
+            hi = lo + 1e-12
+        return (lo, hi)
 
     def set_selected(self, key: str) -> None:
-        """高亮指定槽位卡，其余恢复常规描边。"""
+        """高亮指定槽位卡；single/compare 模式下选中驱动可见卡。"""
+        self._selected_key = key
         for card_key, card in self._keys.items():
             card.set_selected(card_key == key)
+        if self._view_mode != VIEW_ALL:
+            self._apply_view_mode()
 
     def set_bundle(self, key: str, bundle) -> None:
+        self._bundles[key] = bundle
         card = self._keys.get(key)
         if card is not None:
             card.set_bundle(bundle)
+        if self._shared_scale:
+            # 新数据可能扩大全局范围 → 全组重推（保持横向可比）
+            for other in self._cards:
+                self._apply_scale_to_card(other)
 
     def clear_all(self) -> None:
         for card in self._cards:
