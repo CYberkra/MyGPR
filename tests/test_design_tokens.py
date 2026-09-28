@@ -11,8 +11,11 @@ from __future__ import annotations
 
 import pytest
 
-from ui.design_tokens import (DURATION, RADIUS, color, duration, palette,
-                              radius, rgba, tokens)
+pytest.importorskip("PyQt6")     # 后端 CI（无 Qt）自动跳过，见 tests/conftest.py
+pytest.importorskip("pyqtgraph")
+
+from ui.design_tokens import (  # noqa: E402  - 须在 importorskip 之后
+    DURATION, RADIUS, color, duration, palette, radius, rgba, tokens)
 
 pytestmark = pytest.mark.filterwarnings('ignore::DeprecationWarning')
 
