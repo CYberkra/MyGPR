@@ -35,6 +35,12 @@ from ui.widgets.bscan_view import BScanView
 from ui.widgets.empty_state import EmptyStateOverlay
 
 _CELL_MIN_HEIGHT = 320
+
+
+def _muted_text() -> str:
+    """次级文字色（设计令牌单源；勿再写旧的固定灰字面量）。"""
+    from ui.design_tokens import color
+    return color('text_muted')
 _CELL_MIN_HEIGHT_LARGE = 460
 _GRID_SPACING = 16
 _MAX_COLUMNS = 2
@@ -111,9 +117,20 @@ class _ResultCard(QFrame):
     sig_compare_requested = pyqtSignal(str)  # slot key（P2 接线）
     sig_clicked = pyqtSignal(str)            # 点卡 → 宿主选中对应步骤
 
-    _SEL_QSS = ('#resultCard{border:2px solid rgba(90,156,216,0.85);'
-                'background:rgba(59,130,246,0.06);border-radius:6px}')
-    _NORMAL_QSS = '#resultCard{border:2px solid transparent;border-radius:6px}'
+    # 选中/常态 QSS 改为运行时按主题生成（类属性在导入期定死，换主题后
+    # 描边色不会更新）；色值一律走设计令牌，勿再写死 rgba 字面量。
+    @staticmethod
+    def _sel_qss() -> str:
+        from ui.design_tokens import radius, rgba
+        return (f'#resultCard{{border:2px solid {rgba("primary", 0.85)};'
+                f'background:{rgba("primary", 0.06)};'
+                f'border-radius:{radius("md")}px}}')
+
+    @staticmethod
+    def _normal_qss() -> str:
+        from ui.design_tokens import radius
+        return (f'#resultCard{{border:2px solid transparent;'
+                f'border-radius:{radius("md")}px}}')
 
     def __init__(self, key: str, title: str, *, placeholder: bool = False,
                  parent=None):
@@ -123,24 +140,27 @@ class _ResultCard(QFrame):
         self.setObjectName('resultCard')
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setFrameShape(QFrame.Shape.NoFrame)
-        self.setStyleSheet(self._NORMAL_QSS)
+        self.setStyleSheet(self._normal_qss())
         self.setMinimumHeight(_CELL_MIN_HEIGHT)
         self.setSizePolicy(QSizePolicy.Policy.Expanding,
                            QSizePolicy.Policy.Expanding)
-        self.setStyleSheet(
-            '#resultCard{background:transparent}' if not placeholder else
-            '#resultCard{border:1px dashed rgba(140,140,140,0.55);'
-            'border-radius:6px}')
+        if placeholder:
+            from ui.design_tokens import radius, rgba
+            self.setStyleSheet(
+                f'#resultCard{{border:1px dashed {rgba("border_strong", 0.55)};'
+                f'border-radius:{radius("md")}px}}')
+        else:
+            self.setStyleSheet('#resultCard{background:transparent}')
 
         head = QHBoxLayout()
         head.setContentsMargins(0, 0, 0, 0)
         head.setSpacing(6)
         self.title_label = QLabel(title, self)
         self.title_label.setStyleSheet(
-            'color:#8A8A85' if placeholder else '')
+            f'color:{_muted_text()}' if placeholder else '')
         head.addWidget(self.title_label)
         self.range_label = QLabel('', self)
-        self.range_label.setStyleSheet('color:#8A8A85')
+        self.range_label.setStyleSheet(f'color:{_muted_text()}')
         self.range_label.setVisible(False)
         head.addWidget(self.range_label)
         head.addStretch(1)
@@ -167,7 +187,7 @@ class _ResultCard(QFrame):
             self.view = None
             hint = QLabel('已禁用（未参与本次运行）', self)
             hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            hint.setStyleSheet('color:#8A8A85')
+            hint.setStyleSheet(f'color:{_muted_text()}')
             body.addWidget(hint, 1)
         else:
             # 网格卡无色标：坐标/色标不挤占绘图区（看色标走放大/全屏）
@@ -221,8 +241,8 @@ class _ResultCard(QFrame):
         self.title_label.setText(title)
 
     def set_selected(self, selected: bool) -> None:
-        """选中高亮：与链条 chip 同步（描边 2px 主题蓝）。"""
-        self.setStyleSheet(self._SEL_QSS if selected else self._NORMAL_QSS)
+        """选中高亮：与链条 chip 同步（描边 2px primary 令牌色）。"""
+        self.setStyleSheet(self._sel_qss() if selected else self._normal_qss())
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:

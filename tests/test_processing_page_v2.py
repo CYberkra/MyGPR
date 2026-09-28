@@ -147,12 +147,16 @@ class TestResultGridColumns:
             assert card.view._colorbar is None
 
     def test_set_selected_highlights_one_card(self, grid):
+        """选中卡用选中 QSS（色值走令牌，断言不绑具体字面量）。"""
         grid.set_slots(_slots(3))
+        card_cls = type(grid.cards()[0])
+        sel_qss = card_cls._sel_qss()
+        normal_qss = card_cls._normal_qss()
         grid.set_selected('k1')
         styles = [c.styleSheet() for c in grid.cards()]
-        assert 'rgba(90,156,216' in styles[1]
-        assert 'rgba(90,156,216' not in styles[0]
-        assert 'rgba(90,156,216' not in styles[2]
+        assert styles[1] == sel_qss
+        assert styles[0] == normal_qss
+        assert styles[2] == normal_qss
 
     def test_card_click_forwards_key(self, grid):
         got = []

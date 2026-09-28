@@ -128,7 +128,16 @@ def control_palette(dark: bool) -> dict:
     - 原生 item view（QTableWidget 等 QSS）：``table_base``/``table_text``/
       ``table_border``/``table_header_bg``/``table_grid``/``selection``；
     - 顶部页签条（主窗口）：``nav_line``/``nav_track``。
+
+    实现已上移至 :mod:`ui.design_tokens`（视觉数值的唯一事实来源），此处
+    仅转发，保持旧调用方零改动。
     """
+    from ui.design_tokens import palette
+    return palette(dark)
+
+
+def _legacy_control_palette(dark: bool) -> dict:
+    """原实现（保留供对照与回归测试），新代码请用 design_tokens。"""
     if dark:
         return {
             'plot_bg': 'k', 'plot_fg': 'w',

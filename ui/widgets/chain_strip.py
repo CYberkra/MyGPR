@@ -27,6 +27,25 @@ from ui import constants
 from ui.widgets.context_menus import add_action, make_menu
 
 
+def _muted_text() -> str:
+    """次级文字色（设计令牌单源）。"""
+    from ui.design_tokens import color
+    return color('text_muted')
+
+
+def _chip_qss(enabled: bool) -> str:
+    """chip 胶囊 QSS（启用实线 / 禁用虚线），色值全部走设计令牌。"""
+    from ui.design_tokens import radius, rgba
+    r = radius('pill') // 2          # chip 胶囊用 14px（pill 的一半高度语义）
+    if enabled:
+        return (f'#chip{{background:{rgba("border_default", 0.16)};'
+                f'border:1px solid {rgba("border_default", 0.22)};'
+                f'border-radius:{r}px}}')
+    return (f'#chip{{background:{rgba("border_default", 0.08)};'
+            f'border:1px dashed {rgba("border_default", 0.30)};'
+            f'border-radius:{r}px}}')
+
+
 class _Chip(QWidget):
     """单个步骤 chip：胶囊造型，算法名（常显）+ 启用圆点 / ✕（hover 显）。
 
@@ -82,13 +101,8 @@ class _Chip(QWidget):
 
     def set_enabled_visual(self, enabled: bool) -> None:
         self._set_dot_visual(enabled)
-        self.name.setStyleSheet('color:#8A8A85' if not enabled else '')
-        self.setStyleSheet(
-            '#chip{background:rgba(128,128,128,0.16);'
-            'border:1px solid rgba(128,128,128,0.22);border-radius:14px}'
-            if enabled else
-            '#chip{background:rgba(128,128,128,0.08);'
-            'border:1px dashed rgba(128,128,128,0.30);border-radius:14px}')
+        self.name.setStyleSheet(f'color:{_muted_text()}' if not enabled else '')
+        self.setStyleSheet(_chip_qss(enabled))
 
     def enterEvent(self, event) -> None:
         if self.index >= 0:                 # 输入 chip 无操作
@@ -163,7 +177,8 @@ class ChainStrip(QWidget):
         self._add_btn.setToolTip('添加所选算法（＋）')
         self._add_btn.clicked.connect(self.sig_add_requested)
         self._dirty_label = CaptionLabel('已修改 · 点运行更新', self)
-        self._dirty_label.setStyleSheet('color:#E0A83A')
+        from ui.design_tokens import color
+        self._dirty_label.setStyleSheet(f'color:{color("warning")}')
         self._dirty_label.setVisible(False)
         self._run_btn = PrimaryPushButton('运行', self)
         self._run_btn.setFixedWidth(76)
@@ -194,8 +209,12 @@ class ChainStrip(QWidget):
         """
         self._pill = QWidget(self._list.viewport())
         self._pill.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self._pill.setStyleSheet('background:rgba(0,120,212,0.20);'
-                                 'border-radius:11px')
+        from ui.design_tokens import radius, rgba
+        # 原为硬编码的旧 Windows 蓝（与 primary 令牌漂移）→ 统一到
+        # primary，改强调色只需改令牌一处
+        self._pill.setStyleSheet(
+            f'background:{rgba("primary", 0.20)};'
+            f'border-radius:{radius("pill") // 2}px')
         self._pill.hide()
         self._pill_anim = QPropertyAnimation(self._pill, b'geometry')
         self._pill_anim.setDuration(180)
