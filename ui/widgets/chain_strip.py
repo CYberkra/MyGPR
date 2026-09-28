@@ -34,12 +34,20 @@ def _muted_text() -> str:
 
 
 def _chip_qss(enabled: bool) -> str:
-    """chip 胶囊 QSS（启用实线 / 禁用虚线），色值全部走设计令牌。"""
+    """chip 胶囊 QSS（启用实线 / 禁用虚线 + hover 反馈），色值走令牌。
+
+    状态矩阵：default / hover（描边转 primary 淡色，预示可点）/ selected
+    （由滑动胶囊承担，不在此表）/ disabled（虚线 + 次级文字，真不可点由
+    信号宿主保证）。
+    """
     from ui.design_tokens import radius, rgba
     r = radius('pill') // 2          # chip 胶囊用 14px（pill 的一半高度语义）
     if enabled:
         return (f'#chip{{background:{rgba("border_default", 0.16)};'
                 f'border:1px solid {rgba("border_default", 0.22)};'
+                f'border-radius:{r}px}}'
+                f'#chip:hover{{border:1px solid {rgba("primary", 0.45)};'
+                f'background:{rgba("primary", 0.08)};'
                 f'border-radius:{r}px}}')
     return (f'#chip{{background:{rgba("border_default", 0.08)};'
             f'border:1px dashed {rgba("border_default", 0.30)};'
@@ -74,7 +82,7 @@ class _Chip(QWidget):
         # 启用开关 = 圆点（绿=启用/灰=禁用）——不用 ✓ 形图标（用户定案：
         # 全应用不出现勾形元素，避免与「运行」产生歧义）
         self.dot_btn = QPushButton(self)
-        self.dot_btn.setFixedSize(12, 12)
+        self.dot_btn.setFixedSize(18, 18)
         self.dot_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.dot_btn.setToolTip('启用 / 禁用该步骤')
         self.dot_btn.clicked.connect(
@@ -82,7 +90,7 @@ class _Chip(QWidget):
         self._set_dot_visual(enabled)
         row.addWidget(self.dot_btn)
         self.del_btn = ToolButton(FIF.CLOSE, self)
-        self.del_btn.setFixedSize(14, 14)
+        self.del_btn.setFixedSize(18, 18)
         self.del_btn.setToolTip('删除该步骤')
         self.del_btn.clicked.connect(
             lambda _c=False, i=index: host._on_chip_deleted(i))
@@ -173,7 +181,7 @@ class ChainStrip(QWidget):
         self._list.currentRowChanged.connect(self._on_current_row)
 
         self._add_btn = ToolButton(FIF.ADD, self)
-        self._add_btn.setFixedSize(22, 22)
+        self._add_btn.setFixedSize(24, 24)
         self._add_btn.setToolTip('添加所选算法（＋）')
         self._add_btn.clicked.connect(self.sig_add_requested)
         self._dirty_label = CaptionLabel('已修改 · 点运行更新', self)

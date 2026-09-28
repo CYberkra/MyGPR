@@ -128,9 +128,13 @@ class _ResultCard(QFrame):
 
     @staticmethod
     def _normal_qss() -> str:
-        from ui.design_tokens import radius
+        from ui.design_tokens import radius, rgba
+        # 常态含 hover 态（淡 primary 描边 + 微底）：鼠标悬停可点性反馈，
+        # 选中态优先（set_selected 时整表替换，hover 规则不叠加）
         return (f'#resultCard{{border:2px solid transparent;'
-                f'border-radius:{radius("md")}px}}')
+                f'border-radius:{radius("md")}px}}'
+                f'#resultCard:hover{{border:2px solid {rgba("primary", 0.35)};'
+                f'background:{rgba("primary", 0.03)}}}')
 
     def __init__(self, key: str, title: str, *, placeholder: bool = False,
                  parent=None):
@@ -165,13 +169,13 @@ class _ResultCard(QFrame):
         head.addWidget(self.range_label)
         head.addStretch(1)
         self.expand_btn = ToolButton(FIF.FULL_SCREEN, self)
-        self.expand_btn.setFixedSize(20, 20)
+        self.expand_btn.setFixedSize(24, 24)
         self.expand_btn.setToolTip('放大 / 全屏浏览该结果')
         self.expand_btn.clicked.connect(
             lambda: self.sig_expand_requested.emit(self.key))
         head.addWidget(self.expand_btn)
         self.compare_btn = ToolButton(FIF.VIEW, self)
-        self.compare_btn.setFixedSize(20, 20)
+        self.compare_btn.setFixedSize(24, 24)
         self.compare_btn.setToolTip('与上一张结果并排对比')
         self.compare_btn.clicked.connect(
             lambda: self.sig_compare_requested.emit(self.key))

@@ -107,6 +107,64 @@ class TestControlPaletteForwarding:
             assert expected <= set(palette(dark))
 
 
+class TestStatusContrastAA:
+    """浅色主题状态文字对比度整改防线（原值实测仅 2.15–3.76:1）。"""
+
+    def test_status_light_colors_meet_aa_on_white(self):
+        from ui import constants
+        for key in ('success', 'warning', 'error', 'info'):
+            light = constants.STATUS_COLORS[key][0]
+            assert _contrast(light, '#ffffff') >= 4.4, key
+
+    def test_badge_light_text_meets_aa_on_tint(self):
+        from ui import constants
+        for key in ('success', 'warning', 'error', 'info'):
+            fg, bg = constants.BADGE_COLOR_SETS[key][0]
+            assert _contrast(fg, bg) >= 4.4, key
+
+    def test_click_targets_not_tiny(self):
+        """图标钮 ≥ 24px（卡 hover 钮 / chip 添加钮）；chip 内小钮 ≥ 18px。"""
+        from pathlib import Path
+        repo = Path(__file__).resolve().parents[1]
+        grid = (repo / 'ui/widgets/bscan_result_grid.py').read_text(
+            encoding='utf-8')
+        assert 'setFixedSize(24, 24)' in grid
+        assert 'setFixedSize(20, 20)' not in grid
+        strip = (repo / 'ui/widgets/chain_strip.py').read_text(
+            encoding='utf-8')
+        assert 'setFixedSize(12, 12)' not in strip
+        assert 'setFixedSize(14, 14)' not in strip
+        assert 'setFixedSize(18, 18)' in strip
+        assert 'setFixedSize(24, 24)' in strip
+
+
+class TestComponentStateMatrix:
+    """八状态矩阵落地防线：hover 态存在且色值走令牌（docs/design）。"""
+
+    def test_result_card_normal_qss_contains_hover(self):
+        from ui.widgets.bscan_result_grid import _ResultCard
+        qss = _ResultCard._normal_qss()
+        assert ':hover' in qss
+        assert 'transparent' in qss          # 常态无描边
+
+    def test_chip_hover_only_when_enabled(self):
+        from ui.widgets.chain_strip import _chip_qss
+        assert ':hover' in _chip_qss(True)
+        # 禁用态不给可点性预示（无 hover 反馈）
+        assert ':hover' not in _chip_qss(False)
+        assert 'dashed' in _chip_qss(False)  # 虚线 = 禁用形态
+
+    def test_hover_uses_primary_token_not_literal(self):
+        """hover 描边必须是 primary 派生 rgba，不允许写死旧色值。"""
+        from ui.design_tokens import tokens
+        from ui.widgets.bscan_result_grid import _ResultCard
+        from ui.widgets.chain_strip import _chip_qss
+        primary = tokens(False)['primary'].lstrip('#')
+        rgb = ', '.join(str(int(primary[i:i + 2], 16)) for i in (0, 2, 4))
+        assert rgb in _ResultCard._normal_qss()
+        assert rgb in _chip_qss(True)
+
+
 class TestNoHardcodedAccentInWidgets:
     """回归锁：widget 层不得再出现强调色/中性灰的硬编码字面量。"""
 
