@@ -14,7 +14,7 @@
 | hover | 淡 primary 描边 0.35 + 微底 0.03（QSS `:hover`） | ✅ 本轮新增 |
 | active/pressed | 点击即选中（sig_clicked），无独立按压态 | 设计取舍：点选语义由选中态承担 |
 | selected | primary 0.85 描边 + 0.06 淡底 | 已有（令牌化） |
-| focus-visible | 键盘焦点环 | ⏳ backlog：卡片网格暂无 Tab 导航，做网格键盘导航时一并补 |
+| focus-visible | 2px border_focus 描边（QSS `:focus`）+ Tab 可达 + Enter/Space 选中 | ✅ 已实现 |
 | disabled | N/A（结果卡无禁用语义） | — |
 | loading | 骨架屏 `_Skeleton` + 交叉淡入 `_reveal`（预留尺寸防跳动） | 已有 |
 | error | 预览失败由宿主 InfoBar 反馈；卡片保持骨架 | 已有 |
@@ -29,7 +29,7 @@
 | selected | 滑动胶囊（primary 0.20 淡底，QPropertyAnimation） | 已有（令牌化） |
 | disabled | 虚线描边 0.30 + 淡底 0.08 + 次级文字；圆点置灰； | 已有 |
 |            | 「真不可点」由信号宿主 `sig_step_toggled` 语义保证 | |
-| focus-visible | 列表键盘导航焦点环 | ⏳ backlog：同上，随链条键盘导航补 |
+| focus-visible | 列表 `:focus` 描边环（上下键导航由 QListWidget 承担，当前行由胶囊指示） | ✅ 已实现 |
 | loading | N/A（运行中反馈由运行按钮承担） | — |
 | error/empty | N/A | — |
 
@@ -52,6 +52,5 @@
 
 ## Backlog（后续做）
 
-- 结果卡网格与 chip 链的 **Tab 键盘导航** + focus-visible 环（做时顺带
-  验证焦点顺序 = 视觉顺序）。
+- 焦点顺序走查（Tab 顺序 = 视觉顺序的逐页验证）。
 - 错误态卡片内联提示（当前错误只走 InfoBar，刷新后无残留痕迹）。

@@ -82,8 +82,6 @@ _STATUS_KEYS = ('success', 'warning', 'error', 'info')
 # ============================================================ 非颜色令牌
 RADIUS = {'none': 0, 'sm': 4, 'md': 6, 'lg': 8, 'xl': 12, 'pill': 9999}
 DURATION = {'fast': 150, 'normal': 300, 'slow': 500}      # ms
-SPACE = {1: constants.SPACE_1, 2: constants.SPACE_2, 3: constants.SPACE_3,
-         4: constants.SPACE_4, 6: constants.SPACE_6}
 
 
 def tokens(dark: bool) -> dict[str, str]:
@@ -134,14 +132,13 @@ def duration(name: str = 'normal') -> int:
     return DURATION[name]
 
 
-def focus_ring_qss(dark: bool | None = None) -> str:
-    """键盘焦点可见环（2px 实线 + 2px 偏移，WCAG 2.4.7 / 3:1）。
+def focus_border(dark: bool | None = None) -> str:
+    """键盘焦点环的描边（2px border_focus，WCAG 2.4.7 / 非文本 ≥3:1）。
 
-    QSS 的 ``outline`` 支持有限，这里用 border + padding 近似（描边色取
-    border_focus，对比度对底 ≥ 3:1）。
+    组件用 QSS ``#id:focus{border:2px solid <本值>}`` 挂载——Qt 的
+    ``outline`` 支持有限，直接用 border 更稳（见 _ResultCard._normal_qss）。
     """
-    return (f'border: 2px solid {color("border_focus", dark)}; '
-            f'padding: 2px;')
+    return color('border_focus', dark)
 
 
 # ============================================================ 3. 组件层
@@ -184,4 +181,4 @@ def palette(dark: bool) -> dict[str, Any]:
 
 
 __all__ = ['tokens', 'color', 'rgba', 'radius', 'duration',
-           'focus_ring_qss', 'palette', 'RADIUS', 'DURATION', 'SPACE']
+           'focus_border', 'palette', 'RADIUS', 'DURATION']

@@ -136,38 +136,6 @@ def control_palette(dark: bool) -> dict:
     return palette(dark)
 
 
-def _legacy_control_palette(dark: bool) -> dict:
-    """原实现（保留供对照与回归测试），新代码请用 design_tokens。"""
-    if dark:
-        return {
-            'plot_bg': 'k', 'plot_fg': 'w',
-            'surface': '#000000', 'border': '#5a5a5a',
-            'hover': '#3d3d3d', 'button_bg': '#2d2d2d',
-            'button_text': '#f0f0f0',
-            'panel_bg': 'rgba(32,32,32,200)',
-            'panel_border': 'rgba(255,255,255,45)',
-            'text': '#f0f0f0',
-            'table_base': '#1e1e1e', 'table_text': '#e6e6e6',
-            'table_border': '#3c3c3c', 'table_header_bg': '#2d2d2d',
-            'table_grid': '#3c3c3c', 'selection': constants.ACCENT_SOLID,
-            'nav_line': 'rgba(255, 255, 255, 0.10)',
-            'nav_track': 'rgba(255, 255, 255, 0.06)',
-        }
-    return {
-        'plot_bg': 'w', 'plot_fg': 'k',
-        'surface': '#ffffff', 'border': '#d9d9d9',
-        'hover': '#f0f0f0', 'button_bg': '#ffffff',
-        'button_text': '#202020',
-        'panel_bg': 'rgba(255,255,255,220)',
-        'panel_border': 'rgba(0,0,0,45)',
-        'text': '#202020',
-        'table_base': '#ffffff', 'table_text': '#1a1a1a',
-        'table_border': '#d9d9d9', 'table_header_bg': '#f5f5f5',
-        'table_grid': '#e5e5e5', 'selection': constants.ACCENT_SOLID,
-        'nav_line': 'rgba(0, 0, 0, 0.07)',
-        'nav_track': 'rgba(0, 0, 0, 0.05)',
-    }
-
 
 def status_color(key: str) -> str:
     """语义状态文字色（随主题查表）：success/warning/error/info/secondary/disabled。

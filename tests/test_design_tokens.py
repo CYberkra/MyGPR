@@ -110,6 +110,38 @@ class TestControlPaletteForwarding:
             assert expected <= set(palette(dark))
 
 
+class TestKeyboardReachable:
+    """键盘可达性（WCAG 2.1.1 / 2.4.7）：焦点环 + Enter/Space 激活。"""
+
+    def test_result_card_is_tab_reachable(self, qapp):
+        from PyQt6.QtCore import Qt
+        from ui.widgets.bscan_result_grid import _ResultCard
+        card = _ResultCard('k0', '输入')
+        assert card.focusPolicy() == Qt.FocusPolicy.StrongFocus
+
+    def test_result_card_has_focus_ring(self):
+        from ui.widgets.bscan_result_grid import _ResultCard
+        assert ':focus' in _ResultCard._normal_qss()
+
+    def test_result_card_enter_emits_selected(self, qapp):
+        from PyQt6.QtCore import QEvent, Qt
+        from PyQt6.QtGui import QKeyEvent
+        from ui.widgets.bscan_result_grid import _ResultCard
+        card = _ResultCard('k0', '输入')
+        got = []
+        card.sig_clicked.connect(got.append)
+        ev = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Return,
+                       Qt.KeyboardModifier.NoModifier)
+        card.keyPressEvent(ev)
+        assert got == ['k0']
+        assert ev.isAccepted()
+
+    def test_chip_list_has_focus_ring(self, qapp):
+        from ui.widgets.chain_strip import ChainStrip
+        strip = ChainStrip()
+        assert ':focus' in strip._list.styleSheet()
+
+
 class TestStatusContrastAA:
     """浅色主题状态文字对比度整改防线（原值实测仅 2.15–3.76:1）。"""
 

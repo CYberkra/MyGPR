@@ -131,9 +131,13 @@ class _ResultCard(QFrame):
         from ui.design_tokens import radius, rgba
         # 常态含 hover 态（淡 primary 描边 + 微底）：鼠标悬停可点性反馈，
         # 选中态优先（set_selected 时整表替换，hover 规则不叠加）
+        from ui.design_tokens import color
         return (f'#resultCard{{border:2px solid transparent;'
                 f'border-radius:{radius("md")}px}}'
                 f'#resultCard:hover{{border:2px solid {rgba("primary", 0.35)};'
+                f'background:{rgba("primary", 0.03)}}}'
+                # 键盘焦点可见（WCAG 2.4.7）：2px border_focus 环
+                f'#resultCard:focus{{border:2px solid {color("border_focus")};'
                 f'background:{rgba("primary", 0.03)}}}')
 
     def __init__(self, key: str, title: str, *, placeholder: bool = False,
@@ -144,6 +148,8 @@ class _ResultCard(QFrame):
         self.setObjectName('resultCard')
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setFrameShape(QFrame.Shape.NoFrame)
+        # 键盘可达：Tab 可达 + Enter/Space 选中（见 keyPressEvent）
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setStyleSheet(self._normal_qss())
         self.setMinimumHeight(_CELL_MIN_HEIGHT)
         self.setSizePolicy(QSizePolicy.Policy.Expanding,
@@ -252,6 +258,24 @@ class _ResultCard(QFrame):
         if event.button() == Qt.MouseButton.LeftButton:
             self.sig_clicked.emit(self.key)
         super().mousePressEvent(event)
+
+    def keyPressEvent(self, event) -> None:
+        """键盘激活：Enter / Space 等价于点击（WCAG 2.1.1 键盘可达）。
+
+        焦点时操作钮常显，否则键盘用户无法触达 hover 才出现的按钮。
+        """
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter,
+                           Qt.Key.Key_Space):
+            self.sig_clicked.emit(self.key)
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def focusInEvent(self, event) -> None:
+        if not self._placeholder:
+            self.expand_btn.setVisible(True)
+            self.compare_btn.setVisible(True)
+        super().focusInEvent(event)
 
     def enterEvent(self, event) -> None:
         if not self._placeholder:

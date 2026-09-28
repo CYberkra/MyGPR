@@ -172,12 +172,17 @@ class ChainStrip(QWidget):
         self._delete_shortcut.activated.connect(
             lambda: self._on_chip_deleted(self._list.currentRow()))
         # 深浅主题下与卡片底色融合；选中高亮交给滑动胶囊（Qt 默认蓝块弃用）
+        from ui.design_tokens import color
         self._list.setStyleSheet(
             'QListWidget{background:transparent;border:none;}'
             'QListWidget::item{background:transparent;border:none;}'
             'QListWidget::item:selected{background:transparent;'
             'border:none;color:palette(window-text);}'
-            'QListWidget::item:hover{background:transparent;}')
+            'QListWidget::item:hover{background:transparent;}'
+            # 键盘焦点可见（WCAG 2.4.7）：当前行由滑动胶囊指示，列表自身
+            # 再给一圈 focus 环，Tab 进来时知道焦点在哪
+            f'QListWidget:focus{{border:1px solid {color("border_focus")};'
+            f'border-radius:4px;}}')
         self._list.currentRowChanged.connect(self._on_current_row)
 
         self._add_btn = ToolButton(FIF.ADD, self)
