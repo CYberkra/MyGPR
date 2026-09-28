@@ -13,7 +13,7 @@
 | default | 2px 透明描边（占位防跳动） | 本轮令牌化 |
 | hover | 淡 primary 描边 0.35 + 微底 0.03（QSS `:hover`） | ✅ 本轮新增 |
 | active/pressed | 点击即选中（sig_clicked），无独立按压态 | 设计取舍：点选语义由选中态承担 |
-| selected | primary 0.85 描边 + 0.06 淡底 | 已有（令牌化） |
+| selected | 仅 primary 0.85 描边，**背景保持原样**（真机反馈：淡底会让 B-Scan 周边泛色，干扰剖面判读） | 已有（2026-09-28 去底） |
 | focus-visible | 2px border_focus 描边（QSS `:focus`）+ Tab 可达 + Enter/Space 选中 | ✅ 已实现 |
 | disabled | N/A（结果卡无禁用语义） | — |
 | loading | 骨架屏 `_Skeleton` + 交叉淡入 `_reveal`（预留尺寸防跳动） | 已有 |

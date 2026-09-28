@@ -121,9 +121,13 @@ class _ResultCard(QFrame):
     # 描边色不会更新）；色值一律走设计令牌，勿再写死 rgba 字面量。
     @staticmethod
     def _sel_qss() -> str:
+        """选中态 = 仅 2px primary 描边，背景保持原样。
+
+        真机反馈：浅色下 6% 淡底会让 B-Scan 周边泛蓝——剖面色彩是判读
+        依据，环境色污染影响解译，故选中只动描边不动底色。
+        """
         from ui.design_tokens import radius, rgba
         return (f'#resultCard{{border:2px solid {rgba("primary", 0.85)};'
-                f'background:{rgba("primary", 0.06)};'
                 f'border-radius:{radius("md")}px}}')
 
     @staticmethod
