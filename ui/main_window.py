@@ -9,6 +9,7 @@
 PlaceholderPage（QLabel '页面建设中' 居中），controller / 面板为 None（connect 判空）。
 """
 import logging
+from pathlib import Path
 
 from PyQt6.QtCore import (
     Qt, QSize, QTimer, pyqtSignal,
@@ -529,6 +530,28 @@ class MyGPRMainWindow(FluentWindow):
             for object_name, page in list(self.pages.items()):
                 if object_name not in self.FIRST_PAINT_PAGES:
                     page.setEnabled(False)
+        # 两个就绪时机的汇合点：接线完成且后端可用 → 恢复上次项目。
+        # 后端后就绪场景由 _on_backend_ready 末尾再调一次（幂等）。
+        self._restore_last_project()
+
+    def _restore_last_project(self) -> None:
+        """启动自动恢复上次打开的项目（记忆需求，幂等）。
+
+        取 recent_projects 首条且目录仍存在才恢复——目录被移走时静默
+        跳过（不弹错误，首次体验优先）。open_project 异步执行，回包
+        经 project_opened 走既有刷新链路（主页/项目页/文件树/成果页）。
+        """
+        if getattr(self, '_last_project_restored', False):
+            return
+        if not (self._backend_ready and self.project_controller is not None):
+            return
+        self._last_project_restored = True
+        recents = self.settings.get('recent_projects') or []
+        for root in recents:
+            root = str(root or '')
+            if root and Path(root).is_dir():
+                self.project_controller.open_project(root)
+                return
 
     def ensure_pages_ready(self) -> None:
         """同步构造全部剩余页面并完成收尾接线（预热竞态兜底 / 测试 / 冒烟）。"""
@@ -954,6 +977,8 @@ class MyGPRMainWindow(FluentWindow):
             # 后端就绪若先于收尾，信号会发进空气（历史事故同款：方法库空白），
             # 由 _finish_warmup 接线完成后补加载，见下。
             self.processing_controller.load_methods()
+        # 后端后就绪场景：接线若已完成则此刻恢复上次项目（幂等，先到先得）
+        self._restore_last_project()
 
     # ============================================================ 项目对话框（窗口 UI）
     def _show_new_project_dialog(self) -> None:

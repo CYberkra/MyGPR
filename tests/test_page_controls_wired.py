@@ -318,6 +318,93 @@ class TestJobsPruneButtonGating:
         assert not page._prune_btn.isEnabled()
 
 
+class TestMethodBrowserTagless:
+    """方法库行内「推荐/备选/实验」徽章已按需求移除。"""
+
+    def test_no_badge_rendered(self, qapp):
+        from PyQt6.QtWidgets import QLabel
+        from ui.widgets.method_browser import MethodBrowser
+        b = MethodBrowser()
+        b.set_methods([{'method_id': 'agc', 'name': 'AGC',
+                        'category_label': '增益',
+                        'tags': ['推荐', '备选', '实验'],
+                        'parameter_schema': []}])
+        texts = [lab.text() for lab in b.findChildren(QLabel)]
+        assert '推荐' not in texts and '备选' not in texts \
+            and '实验' not in texts
+
+    def test_methods_still_listed(self, qapp):
+        from ui.widgets.method_browser import MethodBrowser
+        b = MethodBrowser()
+        b.set_methods([{'method_id': 'agc', 'name': 'AGC',
+                        'category_label': '增益', 'tags': ['推荐'],
+                        'parameter_schema': []}])
+        assert b._tree.topLevelItemCount() == 1
+
+
+class TestRestoreLastProject:
+    """启动自动恢复上次项目：取 recents 首条且目录存在才恢复，幂等。"""
+
+    @staticmethod
+    def _make_window(settings):
+        try:
+            from ui.main_window import MyGPRMainWindow
+        except Exception:                                   # noqa: BLE001
+            return None
+        try:
+            return MyGPRMainWindow(settings=settings)
+        except Exception:                                   # noqa: BLE001
+            return None
+
+    def test_restores_most_recent_existing(self, qapp, tmp_path):
+        from types import SimpleNamespace
+        from ui.settings_manager import SettingsManager
+        sm = SettingsManager(str(tmp_path / 'settings.json'))
+        win = self._make_window(sm)
+        if win is None:
+            pytest.skip('MainWindow 在本环境不可用')
+        try:
+            existing = tmp_path / 'proj-a'
+            existing.mkdir()
+            sm.set('recent_projects', [str(existing), 'Z:/不存在的目录'])
+            calls = []
+            import unittest.mock as mock
+            with mock.patch.object(win, 'project_controller',
+                                   SimpleNamespace(
+                                       open_project=lambda r: calls.append(r)),
+                                   create=True):
+                win._backend_ready = True
+                win._last_project_restored = False
+                win._restore_last_project()
+                assert calls == [str(existing)]   # 首条存在目录被恢复
+                win._restore_last_project()       # 幂等
+                assert calls == [str(existing)]
+        finally:
+            win.close()
+
+    def test_missing_dir_skips_silently(self, qapp, tmp_path):
+        from types import SimpleNamespace
+        from ui.settings_manager import SettingsManager
+        sm = SettingsManager(str(tmp_path / 'settings.json'))
+        win = self._make_window(sm)
+        if win is None:
+            pytest.skip('MainWindow 在本环境不可用')
+        try:
+            sm.set('recent_projects', ['Z:/不存在的目录'])
+            calls = []
+            import unittest.mock as mock
+            with mock.patch.object(win, 'project_controller',
+                                   SimpleNamespace(
+                                       open_project=lambda r: calls.append(r)),
+                                   create=True):
+                win._backend_ready = True
+                win._last_project_restored = False
+                win._restore_last_project()
+                assert calls == []               # 目录不存在 → 静默跳过
+        finally:
+            win.close()
+
+
 # ============================================================ 空间页接线
 class TestSpatialPageControlsWired:
     """SpatialPage 全部命名交互控件的接线防线。"""

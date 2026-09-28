@@ -115,6 +115,7 @@ class _ResultCard(QFrame):
 
     sig_expand_requested = pyqtSignal(str)   # slot key
     sig_compare_requested = pyqtSignal(str)  # slot key（P2 接线）
+    sig_close_requested = pyqtSignal(str)    # 卡片 × → 宿主关闭该 B-Scan 窗口
     sig_clicked = pyqtSignal(str)            # 点卡 → 宿主选中对应步骤
 
     # 选中/常态 QSS 改为运行时按主题生成（类属性在导入期定死，换主题后
@@ -190,8 +191,15 @@ class _ResultCard(QFrame):
         self.compare_btn.clicked.connect(
             lambda: self.sig_compare_requested.emit(self.key))
         head.addWidget(self.compare_btn)
+        self.close_btn = ToolButton(FIF.CLOSE, self)
+        self.close_btn.setFixedSize(24, 24)
+        self.close_btn.setToolTip('关闭该 B-Scan 窗口（重跑后恢复）')
+        self.close_btn.clicked.connect(
+            lambda: self.sig_close_requested.emit(self.key))
+        head.addWidget(self.close_btn)
         self.expand_btn.setVisible(False)
         self.compare_btn.setVisible(False)
+        self.close_btn.setVisible(False)
 
         body = QVBoxLayout(self)
         body.setContentsMargins(4, 2, 4, 4)
@@ -279,12 +287,14 @@ class _ResultCard(QFrame):
         if not self._placeholder:
             self.expand_btn.setVisible(True)
             self.compare_btn.setVisible(True)
+            self.close_btn.setVisible(True)
         super().focusInEvent(event)
 
     def enterEvent(self, event) -> None:
         if not self._placeholder:
             self.expand_btn.setVisible(True)
             self.compare_btn.setVisible(True)
+            self.close_btn.setVisible(True)
         super().enterEvent(event)
 
     def leaveEvent(self, event) -> None:
@@ -297,6 +307,7 @@ class ResultGrid(QWidget):
     """结果网格：按槽位铺卡片，列数自适应，纵向可滚；支持三种视图模式。"""
 
     sig_card_selected = pyqtSignal(str)      # 点卡 → 宿主选中对应步骤
+    sig_card_close_requested = pyqtSignal(str)  # 卡片 × → 宿主关闭该 B-Scan 窗口
     sig_expand_all_changed = pyqtSignal(bool)  # 「全部步骤」开关 → 宿主过滤槽位
 
     def __init__(self, parent=None):
@@ -387,6 +398,8 @@ class ResultGrid(QWidget):
                     self._on_card_expand_requested)
                 card.sig_compare_requested.connect(
                     self._on_card_compare_requested)
+                card.sig_close_requested.connect(
+                    self.sig_card_close_requested)
                 if card.view is not None and not self._colorbar_pref:
                     # 新卡继承色标偏好（False=不建色标对象，窄卡）
                     card.view.set_colorbar_visible(False)

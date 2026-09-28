@@ -449,6 +449,67 @@ class TestStaleSelectionDecoupling:
             page.close()
 
 
+class TestCardClose:
+    """结果卡 × = 关闭该 B-Scan 窗口（网格移除，重跑恢复；输入卡不可关）。"""
+
+    @staticmethod
+    def _page_with_run(qapp):
+        from types import SimpleNamespace
+        page = ProcessingPage()
+        page.set_original_bundle(_bundle(1))
+        page.set_artifacts([
+            SimpleNamespace(
+                artifact_id='F1', line_id='L01', name='run_agc',
+                method_id='agc', created_at='2026-09-28T10:02:00',
+                manifest={'params': {'artifact_kind': 'processing',
+                                     'run_group_id': 'G1'}}),
+        ])
+        return page
+
+    def test_close_btn_forwards_key(self, qapp):
+        page = self._page_with_run(qapp)
+        try:
+            got = []
+            page._result_grid.sig_card_close_requested.connect(got.append)
+            page._result_grid.cards()[1].close_btn.click()
+            assert got == ['step:0']
+        finally:
+            page.close()
+
+    def test_close_removes_slot_until_rerun(self, qapp):
+        page = self._page_with_run(qapp)
+        try:
+            page._on_card_close_requested('step:0')
+            keys = [c.key for c in page._result_grid.cards()]
+            assert keys == ['input']           # 结果卡被移除
+            # 同 run_group 的成果刷新不算重跑：窗口保持关闭
+            page.set_artifacts([__import__('types').SimpleNamespace(
+                artifact_id='F1', line_id='L01', name='run_agc',
+                method_id='agc', created_at='2026-09-28T10:02:00',
+                manifest={'params': {'artifact_kind': 'processing',
+                                     'run_group_id': 'G1'}})])
+            assert [c.key for c in page._result_grid.cards()] == ['input']
+            # 新 run_group（新一轮运行）→ 全部窗口恢复
+            page.set_artifacts([__import__('types').SimpleNamespace(
+                artifact_id='F2', line_id='L01', name='run_agc2',
+                method_id='agc', created_at='2026-09-28T11:00:00',
+                manifest={'params': {'artifact_kind': 'processing',
+                                     'run_group_id': 'G2'}})])
+            keys = [c.key for c in page._result_grid.cards()]
+            assert keys == ['input', 'step:0']  # 重跑恢复
+        finally:
+            page.close()
+
+    def test_input_card_not_closable(self, qapp):
+        page = self._page_with_run(qapp)
+        try:
+            page._on_card_close_requested('input')
+            assert not page._closed_slots
+            assert len(page._result_grid.cards()) == 2
+        finally:
+            page.close()
+
+
 class TestParamEmptyHint:
     """参数卡空态：表单无字段时显示引导文案（真机走查遗留项）。"""
 

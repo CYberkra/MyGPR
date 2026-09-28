@@ -100,6 +100,7 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._thumb_views_bound = []      # 已装点击提升的缩略面板
         self._step_artifact_ids = {}      # v2：步骤序号 → 该步 intermediate 成果 id
         self._results_stale = False       # v2：链/参数已改但结果未重算
+        self._closed_slots = set()        # 用户 × 掉的结果卡（重跑后清空恢复）
         self._echoed_group = ''           # 已回显链的 run_group（防重复回填）
         self._preview_requested = set()   # 已发出预览请求的 artifact_id（幂等）
         self._expand_all = True           # v2.3：结果区「全部步骤」开关
@@ -353,6 +354,8 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._result_grid.sig_expand_all_changed.connect(
             self._on_expand_all_changed)
         self._result_grid.sig_card_selected.connect(self._on_card_selected)
+        self._result_grid.sig_card_close_requested.connect(
+            self._on_card_close_requested)
         self._refresh_chain_and_results()
 
         # 执行
@@ -528,7 +531,7 @@ class ProcessingPage(PanelStateMixin, QWidget):
                      else {len(members) - 1})
             slots = [{'key': _INPUT_KEY, 'title': '输入', 'enabled': True}]
             for i, (_s, kind, _c, artifact_id, art) in enumerate(members):
-                if i not in shown:
+                if i not in shown or f'step:{i}' in self._closed_slots:
                     continue
                 method = (str(getattr(art, 'method_id', '') or '')
                           or str(getattr(art, 'name', '') or ''))
@@ -569,6 +572,16 @@ class ProcessingPage(PanelStateMixin, QWidget):
     def set_colorbar_pref(self, visible: bool) -> None:
         """设置页「显示色标」下发 → 结果网格（真机反馈：开关失效）。"""
         self._result_grid.set_colorbar_pref(visible)
+
+    def _on_card_close_requested(self, key: str) -> None:
+        """卡片 × → 关闭该 B-Scan 窗口（从网格移除；重跑后恢复）。
+
+        输入卡是锚点不可关（同 tab 语义）；run_group 数据不动。
+        """
+        if key == _INPUT_KEY or key in self._closed_slots:
+            return
+        self._closed_slots.add(key)
+        self._refresh_chain_and_results()
 
     def _on_input_combo_changed(self, _index: int = 0) -> None:
         """切换处理链输入 → 已有结果与该输入不再对应 → 标过期。
@@ -1023,6 +1036,7 @@ class ProcessingPage(PanelStateMixin, QWidget):
             self._selected_source_key = self._preview_sources[-1]['key']
         self._sync_tabs()
         self._results_stale = False
+        self._closed_slots.clear()   # 新一轮运行：恢复全部窗口
         self._refresh_chain_and_results()
         self._request_step_previews()
 
