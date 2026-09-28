@@ -15,7 +15,7 @@ pytest.importorskip("PyQt6")     # 后端 CI（无 Qt）自动跳过，见 tests
 pytest.importorskip("pyqtgraph")
 
 from ui.design_tokens import (  # noqa: E402  - 须在 importorskip 之后
-    DURATION, RADIUS, color, duration, palette, radius, rgba, tokens)
+    DURATION, RADIUS, duration, palette, radius, rgba, tokens)
 
 pytestmark = pytest.mark.filterwarnings('ignore::DeprecationWarning')
 
