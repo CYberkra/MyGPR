@@ -80,6 +80,244 @@ def _named_interactive_widgets(page) -> list[tuple[str, object]]:
     return found
 
 
+# ============================================================ 全页通用防线
+# 用户反馈「很多按键点击没实际效果」→ 新增跨页防线：离散选择类控件
+# （按钮 / 开关 / 下拉）必须有接收者。纯数值编辑器（LineEdit/SpinBox/
+# Slider）的值在提交/运行时读取，不强制接线。
+_DISCRETE = (QAbstractButton, QComboBox)
+_CANDIDATE_SIGNALS = ('clicked', 'toggled', 'stateChanged', 'checkedChanged',
+                      'currentIndexChanged', 'currentTextChanged')
+# 值控件：选择结果由显式的动作按钮在提交时读取（如「打开标注会话」读取
+# 数据下拉、「备份当前项目」读取增量勾选），本身不需要即时信号接收者。
+_VALUE_ONLY = {
+    'InterpretationPage._artifact_combo',
+    'DeliveryPage._incremental_check',
+}
+
+
+def _discrete_widgets(page) -> list[tuple[str, object, list[object]]]:
+    """页面属性命名的离散控件：(属性名, 控件, 候选信号列表)。"""
+    out = []
+    for name, value in vars(page).items():
+        if not name.startswith('_'):
+            continue
+        if not isinstance(value, _DISCRETE) and not hasattr(
+                value, 'checkedChanged'):
+            continue                      # 数值编辑器：值在提交时读取
+        signals = [getattr(value, s) for s in _CANDIDATE_SIGNALS
+                   if hasattr(value, s)]
+        if signals:
+            out.append((name, value, signals))
+    return out
+
+
+class TestAllPagesDiscreteControlsWired:
+    """跨页防线：按钮 / 开关 / 下拉至少 1 个接收者（点了必须有反应）。"""
+
+    @staticmethod
+    def _pages():
+        from ui.pages.delivery_page import DeliveryPage
+        from ui.pages.home_page import HomePage
+        from ui.pages.interpretation_page import InterpretationPage
+        from ui.pages.jobs_page import JobsPage
+        from ui.pages.processing_page import ProcessingPage
+        from ui.pages.project_page import ProjectPage
+        from ui.pages.settings_page import SettingsPage
+        from ui.pages.spatial_page import SpatialPage
+        return (HomePage, ProjectPage, ProcessingPage, InterpretationPage,
+                SpatialPage, JobsPage, DeliveryPage, SettingsPage)
+
+    def test_every_discrete_control_has_receiver(self, qapp):
+        unwired = []
+        for cls in self._pages():
+            try:
+                page = cls()
+            except Exception as exc:                        # noqa: BLE001
+                unwired.append(f'{cls.__name__}: 构造失败 {exc!r}')
+                continue
+            try:
+                for name, widget, signals in _discrete_widgets(page):
+                    key = f'{cls.__name__}.{name}'
+                    if key in _VALUE_ONLY:
+                        continue
+                    if all(widget.receivers(sig) < 1 for sig in signals):
+                        unwired.append(key)
+            finally:
+                page.close()
+        assert not unwired, f'离散控件未接线: {unwired}'
+
+
+# ============================================================ 设置页通用项落盘
+class TestSettingsGeneralPersist:
+    """通用设置项（介电/线程数/根目录/预下载）此前无连接 → 改了不落盘。"""
+
+    @staticmethod
+    def _page(qapp):
+        from ui.pages.settings_page import SettingsPage
+        return SettingsPage()
+
+    def test_prefetch_check_emits_general_changed(self, qapp):
+        page = self._page(qapp)
+        assert page._prefetch_check.receivers(
+            page._prefetch_check.toggled) >= 1
+        hits = []
+        page.general_changed.connect(lambda: hits.append(1))
+        page._prefetch_check.setChecked(True)   # 默认未勾 → 勾选才状态变化
+        assert hits, '勾「自动预下载」必须通知主窗口写盘'
+
+    def test_other_general_controls_wired(self, qapp):
+        page = self._page(qapp)
+        assert page._dielectric_spin.receivers(
+            page._dielectric_spin.valueChanged) >= 1
+        assert page._workers_spin.receivers(
+            page._workers_spin.valueChanged) >= 1
+        assert page._root_edit.receivers(page._root_edit.textChanged) >= 1
+
+    def test_load_settings_does_not_emit(self, qapp):
+        """回放设置期间不得触发 general_changed（否则读→写回环）。"""
+        page = self._page(qapp)
+        hits = []
+        page.general_changed.connect(lambda: hits.append(1))
+        page.load_settings({'auto_prefetch_basemap': False,
+                            'default_dielectric': 9.5,
+                            'max_workers': 4,
+                            'project_root': 'D:/x'})
+        assert hits == []
+        assert page._prefetch_check.isChecked() is False
+
+
+class TestMainWindowPersistsGeneralSettings:
+    """真主窗闭环：勾「自动预下载」必须落盘并下发给空间页。"""
+
+    @staticmethod
+    def _make_window(settings):
+        try:
+            from ui.main_window import MyGPRMainWindow
+        except Exception:                                   # noqa: BLE001
+            return None
+        try:
+            return MyGPRMainWindow(settings=settings)
+        except Exception:                                   # noqa: BLE001
+            return None
+
+    def test_prefetch_toggle_persists_and_reaches_spatial(self, qapp, tmp_path):
+        from ui.settings_manager import SettingsManager
+        path = tmp_path / 'settings.json'
+        sm = SettingsManager(str(path))
+        win = self._make_window(sm)
+        if win is None:
+            pytest.skip('MainWindow 在本环境不可用')
+        try:
+            page = win._page('settingsInterface')
+            page._prefetch_check.setChecked(True)
+            assert sm.get('auto_prefetch_basemap') is True
+            assert 'auto_prefetch_basemap' in __import__('json').loads(
+                path.read_text(encoding='utf-8'))
+            ensure = getattr(win, 'ensure_pages_ready', None)
+            if callable(ensure):
+                ensure()                      # 空间页是延迟构造页
+            spatial = win._page('spatialInterface')
+            if spatial is not None:
+                assert spatial._auto_prefetch_enabled is True
+        finally:
+            win.close()
+
+
+# ============================================================ 结果卡 hover 操作钮
+class TestResultCardHoverActions:
+    """结果卡 hover 的「放大 / 并排对比」此前信号无人接收。"""
+
+    def test_compare_switches_view_mode_and_selection(self, qapp):
+        from ui.widgets.bscan_result_grid import ResultGrid, VIEW_COMPARE
+        grid = ResultGrid()
+        grid.set_slots([{'key': 'k0', 'title': '输入', 'enabled': True},
+                        {'key': 'k1', 'title': '1 dewow', 'enabled': True},
+                        {'key': 'k2', 'title': '2 agc', 'enabled': True}])
+        grid.cards()[2].compare_btn.click()
+        assert grid.view_mode() == VIEW_COMPARE
+        assert grid._selected_key == 'k2'
+
+    def test_expand_calls_fullscreen(self, qapp, monkeypatch):
+        from ui.widgets.bscan_result_grid import ResultGrid
+        grid = ResultGrid()
+        grid.set_slots([{'key': 'k0', 'title': '输入', 'enabled': True}])
+        called = []
+        card = grid.cards()[0]
+        monkeypatch.setattr(card.view, 'toggle_fullscreen',
+                            lambda: called.append(1), raising=False)
+        card.expand_btn.click()
+        assert called == [1]
+
+    def test_hover_buttons_have_receivers(self, qapp):
+        from ui.widgets.bscan_result_grid import ResultGrid
+        grid = ResultGrid()
+        grid.set_slots([{'key': 'k0', 'title': '输入', 'enabled': True}])
+        card = grid.cards()[0]
+        assert card.expand_btn.receivers(card.expand_btn.clicked) >= 1
+        assert card.compare_btn.receivers(card.compare_btn.clicked) >= 1
+
+
+# ============================================================ 处理页「输入数据」
+class TestProcessingInputCombo:
+    """「输入数据」下拉此前无任何连接 → 切了没反应。"""
+
+    def test_input_combo_wired_and_marks_stale(self, qapp):
+        from types import SimpleNamespace
+        from ui.pages.processing_page import ProcessingPage
+        page = ProcessingPage()
+        try:
+            assert page._input_combo.receivers(
+                page._input_combo.currentIndexChanged) >= 1
+            import numpy as np
+            page.set_original_bundle(SimpleNamespace(
+                matrix=np.zeros((8, 6), dtype='float32'),
+                vmin=0.0, vmax=1.0, title='t', x_label='x',
+                y_label='y', trace_axis_m=None, sample_axis=None,
+                sample_axis_label='', trace_count=6, sample_count=8,
+                trace_elevation_m=None, depth_axis_m=None))
+            page.set_artifacts([
+                SimpleNamespace(
+                    artifact_id='F1', line_id='L01', name='run_agc',
+                    method_id='agc', created_at='2026-09-28T10:00:00',
+                    manifest={'params': {'artifact_kind': 'processing',
+                                         'run_group_id': 'G1'}}),
+            ])
+            assert page._results_stale is False
+            page._input_combo.blockSignals(False)
+            page._input_combo.setCurrentIndex(1)      # 切到「成果: …」
+            assert page._results_stale is True        # 结果转为过期
+        finally:
+            page.close()
+
+
+# ============================================================ 任务页清理按钮可用态
+class TestJobsPruneButtonGating:
+    """无可清理任务时「清理已完成」禁用（此前空表点了没反应）。"""
+
+    def _page(self, qapp):
+        from ui.pages.jobs_page import JobsPage
+        return JobsPage()
+
+    def test_disabled_when_nothing_finished(self, qapp):
+        page = self._page(qapp)
+        assert not page._prune_btn.isEnabled()
+        page._job_table.upsert_job('j1', 'j1')
+        assert not page._prune_btn.isEnabled()      # 仅排队中 → 仍禁用
+
+    def test_enabled_after_job_finished(self, qapp):
+        page = self._page(qapp)
+        page._job_table.upsert_job('j1', 'j1')
+        page._job_table.set_status('j1', 'completed')
+        assert page._prune_btn.isEnabled()
+
+    def test_disabled_again_after_prune(self, qapp):
+        page = self._page(qapp)
+        page._job_table.upsert_job('j1', 'j1')
+        page._job_table.set_status('j1', 'completed')
+        page._prune_btn.click()
+        assert not page._prune_btn.isEnabled()
+
+
 # ============================================================ 空间页接线
 class TestSpatialPageControlsWired:
     """SpatialPage 全部命名交互控件的接线防线。"""

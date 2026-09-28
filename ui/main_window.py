@@ -411,6 +411,25 @@ class MyGPRMainWindow(FluentWindow):
                 bool(values.get('bscan_colorbar_visible', True)))
         # 面板数由处理页 tab 模型驱动，容器布局设置已退役（2026-09-24）
 
+    def _on_settings_general_changed(self) -> None:
+        """设置页通用项变化：采集 → 写盘 → 重新注入各页。
+
+        介电常数 / 并行线程数 / 项目根目录 / 自动预下载底图此前无任何
+        连接，改完既不落盘也不下发（真机：勾「自动预下载」毫无反应）。
+        主题不走这里——由 theme_changed 单独处理，避免重复套用。
+        """
+        settings_page = self._page('settingsInterface')
+        getter = getattr(settings_page, 'settings', None)
+        if not callable(getter) or self.settings is None:
+            return
+        values = getter()
+        for key in ('default_dielectric', 'max_workers', 'project_root',
+                    'auto_prefetch_basemap'):
+            if key in values:
+                self.settings.set(key, values[key])
+        self.settings.save()
+        self._inject_page_settings()
+
     def _setting_levels(self) -> tuple[float, float]:
         """读色阶百分位；非法值回落 BScanView 默认（2 / 98）。"""
         try:
@@ -796,6 +815,11 @@ class MyGPRMainWindow(FluentWindow):
         if hasattr(settings_page, 'bscan_view_changed'):
             settings_page.bscan_view_changed.connect(
                 self._on_settings_bscan_changed)
+        # 通用项（介电常数 / 线程数 / 项目根目录 / 自动预下载底图）：此前
+        # 无此接线 → 改了不写盘也不下发（真机反馈「设置页按钮没效果」）
+        if hasattr(settings_page, 'general_changed'):
+            settings_page.general_changed.connect(
+                self._on_settings_general_changed)
 
         # ---------------- 跨页业务信号链（项目/测线/导入/处理/解释/成果/任务）
         # 延后到预热收尾：connect_all() 需要 8 页全部存在（见 _finish_warmup）

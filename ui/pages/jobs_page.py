@@ -37,6 +37,7 @@ class JobsPage(QWidget):
         button_row = QHBoxLayout()
         button_row.setSpacing(constants.CARD_SPACING)
         self._prune_btn = PushButton('清理已完成', card)
+        self._prune_btn.setToolTip('清除已完成/失败的任务行')
         button_row.addWidget(self._prune_btn)
         button_row.addStretch(1)
         card_layout.addLayout(button_row)
@@ -49,6 +50,9 @@ class JobsPage(QWidget):
     def _connect_internal(self) -> None:
         self._job_table.cancel_requested.connect(self.cancel_requested)
         self._prune_btn.clicked.connect(self._on_prune_clicked)
+        # 没有终态任务时按钮禁用：否则点了没反应（空表/全是运行中）
+        self._job_table.rows_changed.connect(self._sync_prune_enabled)
+        self._sync_prune_enabled()
 
     # ============================================================ 公共接口（供主窗口接线）
     def job_table(self) -> JobTable:
@@ -56,6 +60,12 @@ class JobsPage(QWidget):
         return self._job_table
 
     # ============================================================ 内部逻辑
+    def _sync_prune_enabled(self) -> None:
+        """按终态任务数同步「清理已完成」可用态（无可清理 → 禁用）。"""
+        counter = getattr(self._job_table, 'finished_count', None)
+        count = int(counter()) if callable(counter) else 0
+        self._prune_btn.setEnabled(count > 0)
+
     def _on_prune_clicked(self) -> None:
         """清理已完成：本地移除终态行并发 prune_requested。"""
         self._job_table.clear_finished()

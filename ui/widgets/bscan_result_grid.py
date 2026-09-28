@@ -152,7 +152,7 @@ class _ResultCard(QFrame):
         head.addWidget(self.expand_btn)
         self.compare_btn = ToolButton(FIF.VIEW, self)
         self.compare_btn.setFixedSize(20, 20)
-        self.compare_btn.setToolTip('与另一张结果并排对比（P2 接线）')
+        self.compare_btn.setToolTip('与上一张结果并排对比')
         self.compare_btn.clicked.connect(
             lambda: self.sig_compare_requested.emit(self.key))
         head.addWidget(self.compare_btn)
@@ -329,6 +329,12 @@ class ResultGrid(QWidget):
                     key, spec.get('title', ''), placeholder=placeholder,
                     parent=self._body)
                 card.sig_clicked.connect(self.sig_card_selected)
+                # hover 操作钮此前无人接收（点了没反应）：放大→全屏浏览，
+                # 对比→切「前后对比」视图并选中该结果
+                card.sig_expand_requested.connect(
+                    self._on_card_expand_requested)
+                card.sig_compare_requested.connect(
+                    self._on_card_compare_requested)
                 if card.view is not None and not self._colorbar_pref:
                     # 新卡继承色标偏好（False=不建色标对象，窄卡）
                     card.view.set_colorbar_visible(False)
@@ -485,6 +491,22 @@ class ResultGrid(QWidget):
             card.set_selected(card_key == key)
         if self._view_mode != VIEW_ALL:
             self._apply_view_mode()
+
+    def _on_card_expand_requested(self, key: str) -> None:
+        """卡片 hover「放大」→ 该结果全屏浏览（此前信号无人接收）。"""
+        card = self._keys.get(key)
+        view = getattr(card, 'view', None) if card is not None else None
+        toggler = getattr(view, 'toggle_fullscreen', None)
+        if callable(toggler):
+            toggler()
+
+    def _on_card_compare_requested(self, key: str) -> None:
+        """卡片 hover「并排对比」→ 切前后对比视图并选中该结果。
+
+        选中驱动 compare 模式的可见对（前一张 + 本张），故不另造对比窗。
+        """
+        self.set_view_mode(VIEW_COMPARE)
+        self.set_selected(key)
 
     def set_bundle(self, key: str, bundle) -> None:
         self._bundles[key] = bundle

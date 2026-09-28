@@ -59,6 +59,9 @@ class SettingsPage(ScrollArea):
     theme_changed = pyqtSignal(str)
     # B-Scan 视图设置变化（比例/轴单位/色阶）；主窗口据此统一下发并写盘
     bscan_view_changed = pyqtSignal()
+    # 通用项变化（介电常数 / 并行线程数 / 项目根目录 / 自动预下载底图）：
+    # 此前这四项没有任何连接 → 改了既不写盘也不下发（「点了没效果」）。
+    general_changed = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -102,6 +105,7 @@ class SettingsPage(ScrollArea):
         self._dielectric_spin.setSingleStep(0.5)
         self._dielectric_spin.setValue(constants.DEFAULT_DIELECTRIC)
         self._dielectric_spin.setMinimumWidth(120)
+        self._dielectric_spin.valueChanged.connect(self._emit_general_changed)
         layout.addLayout(make_form_row('默认介电常数:', self._dielectric_spin,
                                        parent=card))
 
@@ -109,6 +113,7 @@ class SettingsPage(ScrollArea):
         prefetch_row = QHBoxLayout()
         self._prefetch_check = CheckBox('自动预下载测线区域底图', card)
         self._prefetch_check.setToolTip('空间页加载轨迹后自动下载当地底图瓦片；关掉可避免自动联网。')
+        self._prefetch_check.toggled.connect(self._emit_general_changed)
         prefetch_row.addWidget(self._prefetch_check)
         prefetch_row.addStretch(1)
         layout.addLayout(prefetch_row)
@@ -249,6 +254,16 @@ class SettingsPage(ScrollArea):
             return
         self.bscan_view_changed.emit()
 
+    def _emit_general_changed(self) -> None:
+        """通用设置项变化 → 通知主窗口写盘并下发（介电常数 / 预下载等）。
+
+        与 bscan_view_changed 分开：通用项不涉 B-Scan 视图重绘，主窗口
+        走「采集全量设置 → 保存 → 重新注入各页」的路径。
+        """
+        if self._loading_settings:
+            return
+        self.general_changed.emit()
+
     def _build_processing_card(self, parent):
         """卡片2"处理设置"：并行工作线程数 SpinBox(1-8, 默认 2)（重启生效提示）。"""
         card, layout = make_card('处理设置')
@@ -256,6 +271,7 @@ class SettingsPage(ScrollArea):
         self._workers_spin.setRange(1, 8)
         self._workers_spin.setValue(constants.MAX_WORKERS)
         self._workers_spin.setMinimumWidth(120)
+        self._workers_spin.valueChanged.connect(self._emit_general_changed)
         hint = make_hint('（重启后生效）', parent=card)
         layout.addLayout(make_form_row('并行工作线程数:', self._workers_spin,
                                        hint, parent=card))
@@ -267,6 +283,7 @@ class SettingsPage(ScrollArea):
         self._root_edit = LineEdit(card)
         self._root_edit.setText(constants.DEFAULT_PROJECT_ROOT)
         self._root_edit.setMinimumWidth(300)
+        self._root_edit.textChanged.connect(self._emit_general_changed)
         browse_btn = PushButton('浏览', card)
         browse_btn.setFixedWidth(70)
         browse_btn.clicked.connect(self._browse_project_root)

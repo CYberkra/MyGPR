@@ -329,6 +329,9 @@ class ProcessingPage(PanelStateMixin, QWidget):
         # 不再持有副本，视图偏好由主窗启动期统一恢复、用户操作镜像写回。
         self._line_combo.currentIndexChanged.connect(self._on_line_combo_changed)
         self._artifact_combo.currentIndexChanged.connect(self._on_artifact_combo_changed)
+        # 「输入数据」此前无任何连接 → 切了没反应（只在下次运行静默生效），
+        # 改为标记结果过期，给出「已修改 · 点运行更新」的可见反馈
+        self._input_combo.currentIndexChanged.connect(self._on_input_combo_changed)
         # tab 模型：关闭 / 选中 → 源清单变更 → 重排画布面板（v2 暂隐藏）
         self._source_tabs.tabCloseRequested.connect(self._on_tab_close)
         self._source_tabs.currentChanged.connect(self._on_tab_selected)
@@ -566,6 +569,14 @@ class ProcessingPage(PanelStateMixin, QWidget):
     def set_colorbar_pref(self, visible: bool) -> None:
         """设置页「显示色标」下发 → 结果网格（真机反馈：开关失效）。"""
         self._result_grid.set_colorbar_pref(visible)
+
+    def _on_input_combo_changed(self, _index: int = 0) -> None:
+        """切换处理链输入 → 已有结果与该输入不再对应 → 标过期。
+
+        refill_combo 全程 blockSignals，故只有用户主动切换才触发；已有
+        运行结果时点运行才更新（与改链同口径）。
+        """
+        self._mark_results_stale()
 
     def _mark_results_stale(self) -> None:
         """链/参数变更且已有运行结果 → 结果过期（琥珀提示，运行后清除）。"""
