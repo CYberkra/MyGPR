@@ -55,6 +55,13 @@ def make_card(title: str, *, parent=None, header_action: QWidget | None = None) 
     加入 header 时 Qt 自动重挂父。
     """
     card = CardWidget(parent)
+    # 美术打磨 C（2026-09-27）：CardWidget 深色主题下实测渲染白底，
+    # 与深色主区割裂（真平台截图）——显式主题底色：深 #2d2e32 /
+    # 浅 #ffffff，双主题卡片层次一致
+    from qfluentwidgets import isDarkTheme
+    from PyQt6.QtGui import QColor
+    card.setBackgroundColor(
+        QColor('#2d2e32') if isDarkTheme() else QColor('#ffffff'))
     layout = QVBoxLayout(card)
     layout.setContentsMargins(*constants.CARD_MARGINS)
     layout.setSpacing(constants.CARD_SPACING)

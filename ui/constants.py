@@ -102,10 +102,14 @@ PREVIEW_MIN_HEIGHT = 300
 # secondary：辅助说明/hint 专用（浅 #6b7280 对白底 4.84:1、深 #a8b0bd 对
 # #202020 7.4:1，均达 WCAG AA 4.5:1）；disabled 仅限真禁用控件文字。
 STATUS_COLORS = {
-    'success': ('#22c55e', '#34d97b'),
-    'warning': ('#f59e0b', '#ffb84d'),
-    'error': ('#ef4444', '#ff5c5c'),
-    'info': ('#3b82f6', '#5b9dff'),
+    # 浅色档已按 WCAG AA 提深（原 #22c55e/#f59e0b 对白底实测仅 2.28 / 2.15:1，
+    # 连非文本 3:1 都不达）——新值对白底与徽章淡底均 ≥ 4.4:1（实测见
+    # tests/test_design_tokens.py::TestContrastMeasured）。深色档同色相高
+    # 亮度，原本达标，不动。
+    'success': ('#15803d', '#34d97b'),
+    'warning': ('#b45309', '#ffb84d'),
+    'error': ('#dc2626', '#ff5c5c'),
+    'info': ('#2563eb', '#5b9dff'),
     'secondary': ('#6b7280', '#a8b0bd'),
     'disabled': ('#9ca3af', '#9ca3af'),
 }
@@ -125,10 +129,12 @@ COLOR_DISABLED = STATUS_COLORS['disabled'][0]
 # 徽章配色对（文字色, 底色）：浅色 = 彩字淡底（style_spec §1.2 逐字值）；
 # 深色 = 白字彩底（参照任务中心徽章的双主题安全做法，淡底在深底上刺眼）。
 BADGE_COLOR_SETS = {
-    'success': (('#22c55e', '#f0fdf4'), ('#ffffff', '#15803d')),
-    'warning': (('#f59e0b', '#fffbeb'), ('#ffffff', '#b45309')),
-    'info': (('#3b82f6', '#eff6ff'), ('#ffffff', '#1d4ed8')),
-    'error': (('#ef4444', '#fef2f2'), ('#ffffff', '#b91c1c')),
+    # 浅色彩字与 STATUS_COLORS 浅色档同步提深（WCAG AA，见上注释）；
+    # 彩字对其淡底实测 ≥ 4.4:1。
+    'success': (('#15803d', '#f0fdf4'), ('#ffffff', '#15803d')),
+    'warning': (('#b45309', '#fffbeb'), ('#ffffff', '#b45309')),
+    'info': (('#2563eb', '#eff6ff'), ('#ffffff', '#1d4ed8')),
+    'error': (('#dc2626', '#fef2f2'), ('#ffffff', '#b91c1c')),
     'neutral': (('#9ca3af', '#f3f4f6'), ('#e5e7eb', '#4b5563')),
 }
 

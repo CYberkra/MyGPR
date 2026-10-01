@@ -5,18 +5,22 @@
 
 右键菜单（RoundMenu）：上移 / 下移 / 启用-禁用切换 / 删除，
 与行内小按钮等价（小按钮难发现的补偿路径）；Delete 键删除当前行。
+拖拽排序（2026-09-24）：按住行拖到目标位置（上/下半区分插入点），
+落点重排由 _StepListWidget.dropEvent 委托宿主接管——不调 Qt 的
+InternalMove 默认实现（它挪 item 会丢/错位 setItemWidget 行控件）。
 """
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
-from PyQt6.QtWidgets import (QHBoxLayout, QLabel, QListWidget,
-                             QListWidgetItem, QSizePolicy, QVBoxLayout,
-                             QWidget)
+from PyQt6.QtWidgets import (QAbstractItemView, QHBoxLayout, QLabel,
+                             QListWidget, QListWidgetItem, QSizePolicy,
+                             QVBoxLayout, QWidget)
 from qfluentwidgets import CheckBox, TransparentToolButton
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants
 from ui.widgets.context_menus import add_action, make_menu
+from ui.widgets.empty_state import EmptyStateOverlay
 
 
 class _ElidedLabel(QLabel):
@@ -41,6 +45,18 @@ class _ElidedLabel(QLabel):
             self._full_text, Qt.TextElideMode.ElideRight,
             max(self.width() - 4, 10))
         super().setText(elided)
+
+
+class _StepListWidget(QListWidget):
+    """处理链列表：dropEvent 委托宿主接管（绕开 Qt InternalMove 的
+    itemWidget 丢失坑，见 PipelineList.__init__）。"""
+
+    def __init__(self, host, parent=None):
+        super().__init__(parent)
+        self._host = host
+
+    def dropEvent(self, event) -> None:
+        self._host._list_drop_event(event)
 
 
 class _StepRow(QWidget):
@@ -83,15 +99,27 @@ class PipelineList(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._steps = []
-        self._list = QListWidget(self)
+        self._list = _StepListWidget(self, self)
         self._list.currentRowChanged.connect(self._on_row_changed)
         self._list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._list.customContextMenuRequested.connect(self._on_context_menu)
+        # 拖拽排序：启用 InternalMove 拿到拖拽视觉，落点重排由
+        # dropEvent 自己接管——**不调 super().dropEvent()**，避免 Qt 的
+        # InternalMove 挪 item 后 setItemWidget 行控件错位/丢失（经典坑；
+        # 我们的数据源是 _steps，重排后整体重建行即可）。
+        self._list.setDragDropMode(
+            QAbstractItemView.DragDropMode.InternalMove)
+        self._list.setDefaultDropAction(Qt.DropAction.MoveAction)
         self._delete_shortcut = QShortcut(
             QKeySequence(QKeySequence.StandardKey.Delete), self._list,
             context=Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self._delete_shortcut.activated.connect(
             lambda: self._remove_step(self._list.currentRow()))
+        # 处理链空态浮层（终态④）：无步骤时给引导，替代整片空白
+        self._empty = EmptyStateOverlay(
+            self._list, icon=None, title='处理链为空',
+            hint='从左侧方法库添加算法步骤（可拖拽排序）')
+        self._empty.setVisible(True)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -159,6 +187,7 @@ class PipelineList(QWidget):
             self._list.addItem(item)
             self._list.setItemWidget(item, row)
         self._list.blockSignals(False)
+        self._empty.setVisible(not self._steps)
         if select is not None and 0 <= select < self._list.count():
             self._list.setCurrentRow(select)
         elif self._list.count() == 0:
@@ -211,6 +240,42 @@ class PipelineList(QWidget):
             self._steps[target], self._steps[idx]
         self._rebuild(select=target)
         self.sig_changed.emit()
+
+    def _list_drop_event(self, event) -> None:
+        """拖拽排序落点：源 = 当前选中行，目标 = 落点行（上/下半区分插入
+        位置）。重排走 _steps 数据源整体重建，绕开 Qt InternalMove 挪
+        item 导致的 setItemWidget 行控件丢失。"""
+        source = self._list.currentRow()
+        if source < 0 or source >= len(self._steps):
+            return
+        target = self._list.indexAt(event.position().toPoint()).row()
+        if target < 0:
+            target = len(self._steps) - 1
+        item = self._list.item(target)
+        if item is not None:
+            rect = self._list.visualItemRect(item)
+            if event.position().toPoint().y() > rect.center().y():
+                target = min(target + 1, len(self._steps))
+        if target in (source, source + 1):
+            return                      # 没有位移
+        event.setDropAction(Qt.DropAction.IgnoreAction)
+        event.accept()
+        self._move_step_to(source, target)
+
+    def _move_step_to(self, source: int, target: int) -> bool:
+        """把第 source 步挪到插入位 target（目标行语义），重建并广播。"""
+        if not (0 <= source < len(self._steps)):
+            return False
+        if not (0 <= target <= len(self._steps)):
+            return False
+        if target in (source, source + 1):
+            return False
+        step = self._steps.pop(source)
+        insert_at = target - 1 if target > source else target
+        self._steps.insert(insert_at, step)
+        self._rebuild(select=insert_at)
+        self.sig_changed.emit()
+        return True
 
     def _remove_step(self, idx):
         if not (0 <= idx < len(self._steps)):

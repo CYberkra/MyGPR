@@ -63,6 +63,14 @@ def pytest_configure(config) -> None:
     os.environ.setdefault("MYGPR_LOG_DIR", str(Path(os.environ["MYGPR_RUNTIME_ROOT"]) / "logs"))
 
 
+_EXIT_STATUS = 0
+
+
+def pytest_sessionfinish(session, exitstatus) -> None:
+    global _EXIT_STATUS
+    _EXIT_STATUS = int(exitstatus)
+
+
 def pytest_unconfigure(config) -> None:
     global _RUNTIME_ROOT
     if _RUNTIME_ROOT is not None:
@@ -74,6 +82,13 @@ def pytest_unconfigure(config) -> None:
         if os.environ.get("MYGPR_LOG_DIR") == log_root:
             os.environ.pop("MYGPR_LOG_DIR", None)
         _RUNTIME_ROOT = None
+    # 强制干净退出：Qt（qfluentwidgets/pyqtgraph）C++ 对象在解释器
+    # shutdown 时析构顺序不定，段错误污染退出码（Linux CI exit 139、
+    # Windows 冒烟同族；2026-09-27）。所有测试已在 sessionfinish 前跑完，
+    # 临时目录也已清理——os._exit 跳过 teardown 只损失 GC，退出码保真。
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(_EXIT_STATUS)
 
 
 @pytest.fixture(scope="session")

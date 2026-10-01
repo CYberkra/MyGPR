@@ -1,10 +1,8 @@
 """MethodBrowser — 处理方法分类浏览控件（SPEC §5.4）。
 
 UI：顶部搜索 LineEdit（占位"搜索方法…"，实时过滤）→ 分类 QTreeWidget
-（一级 = category_label，二级 = display_name + 标签徽章）。
-徽章：白字彩底、随主题刷新——推荐 = 运行时 themeColor()（经 apply_theme
-重建，避免构建时快照过期）/ 备选 = disabled 灰 / 实验 = warning 琥珀，
-QSS 用 SPEC §1 徽章模板。tooltip 显示 method_id 与参数数。
+（一级 = category_label，二级 = display_name）。
+tooltip 显示 method_id 与参数数。
 双击发 sig_add_requested；单击选中发 sig_method_selected。
 右键菜单（RoundMenu）：添加到处理链（等同双击）/ 复制方法名。
 """
@@ -12,26 +10,11 @@ QSS 用 SPEC §1 徽章模板。tooltip 显示 method_id 与参数数。
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (QApplication, QHBoxLayout, QTreeWidget,
                              QTreeWidgetItem, QVBoxLayout, QWidget, QLabel)
-from qfluentwidgets import LineEdit, themeColor
+from qfluentwidgets import LineEdit
 from qfluentwidgets import FluentIcon as FIF
 
-from ui.theme_helpers import BADGE_QSS, status_color
 from ui.widgets.context_menus import add_action, make_menu
-
-
-def _tag_badge_bg(tag: str) -> str:
-    """标签徽章底色（随主题）：推荐 = 当前主题色（构建后经 apply_theme 刷新）。"""
-    if tag == '推荐':
-        return themeColor().name()
-    if tag == '实验':
-        return status_color('warning')
-    return status_color('disabled')   # 备选 / 未知标签
-
-
-def _make_badge(tag: str) -> QLabel:
-    badge = QLabel(tag)
-    badge.setStyleSheet(BADGE_QSS % _tag_badge_bg(tag))
-    return badge
+from ui.widgets.empty_state import EmptyStateOverlay
 
 
 class MethodBrowser(QWidget):
@@ -43,7 +26,6 @@ class MethodBrowser(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._methods = []
-        self._badges = []   # (badge QLabel, tag)：主题切换时重刷底色
 
         self._search = LineEdit(self)
         self._search.setPlaceholderText('搜索方法…')
@@ -63,12 +45,22 @@ class MethodBrowser(QWidget):
         layout.addWidget(self._search)
         layout.addWidget(self._tree, 1)
 
+        self._init_empty_state()
+
     # ------------------------------------------------------------- 数据
+    def _init_empty_state(self) -> None:
+        """方法库空态浮层：后端未返回方法列表时给引导（终态④）。"""
+        self._empty = EmptyStateOverlay(
+            self._tree, icon=FIF.LIBRARY, title='暂无方法',
+            hint='方法库加载后按分类显示在此')
+        self._empty.setVisible(True)   # 初始无方法即引导（set_methods 接管）
+
     def set_methods(self, methods) -> None:
         """methods: [{method_id,name,display_name,category,category_label,
                      tags(list[str]),parameter_schema(list[dict]),...}]"""
         self._methods = [dict(m) for m in (methods or [])]
         self._rebuild_tree()
+        self._empty.setVisible(not self._methods)
 
     def _rebuild_tree(self):
         self._tree.clear()
@@ -103,10 +95,6 @@ class MethodBrowser(QWidget):
                 name_label = QLabel(m.get('display_name') or m.get('name', ''),
                                     row_widget)
                 row.addWidget(name_label, 1)
-                for tag in (m.get('tags') or []):
-                    badge = _make_badge(str(tag))
-                    self._badges.append((badge, str(tag)))
-                    row.addWidget(badge)
                 self._tree.setItemWidget(child, 0, row_widget)
             top.setExpanded(True)
 
@@ -129,10 +117,7 @@ class MethodBrowser(QWidget):
             top.setHidden(visible_children == 0)
 
     def apply_theme(self, dark: bool) -> None:
-        """主题切换：重建徽章底色——「推荐」的 themeColor() 是构建时快照，
-        主窗口主题切换遍历（findChildren + apply_theme）会调到本方法。"""
-        for badge, tag in self._badges:
-            badge.setStyleSheet(BADGE_QSS % _tag_badge_bg(tag))
+        """主题切换钩子（主窗遍历调用）。标签徽章已按需求移除，无操作。"""
 
     # ------------------------------------------------------------- 信号
     def _method_id_of(self, item):

@@ -52,6 +52,7 @@ class ProjectController(QObject):
     """Mediates project open/close/import/preview between UI and backend."""
 
     log_message = pyqtSignal(str)
+    preview_failed = pyqtSignal(str)              # 成果预览失败（消息）
     busy_changed = pyqtSignal(bool)
     project_opened = pyqtSignal(object)          # ProjectSummary
     project_closed = pyqtSignal()
@@ -63,7 +64,7 @@ class ProjectController(QObject):
     artifact_preview_ready = pyqtSignal(str, object)  # artifact_id, PreviewBundle
     preflight_ready = pyqtSignal(object)         # ImportPreflight
     preflight_failed = pyqtSignal(str)           # 导入预检失败消息
-    preview_invalidated = pyqtSignal()           # 预览中的成果已被删除
+    preview_invalidated = pyqtSignal(str)        # 预览中的成果已被删除（携带成果 id）
     spatial_tracks_ready = pyqtSignal(list)      # list[SpatialTrack]
     depth_preview_ready = pyqtSignal(object, list, float, int)  # payload, line_ids, cell_size_m, generation
     depth_layer_saved = pyqtSignal(str, list, float)       # job_id, line_ids, cell_size_m
@@ -276,7 +277,15 @@ class ProjectController(QObject):
             name="mygpr-line-preview",
         )
 
-    def preview_artifact(self, line_id: str, artifact_id: str) -> None:
+    def preview_artifact(self, line_id: str, artifact_id: str,
+                         *, strict_generation: bool = True) -> None:
+        """加载成果预览。
+
+        ``strict_generation=False``（步骤批量预览用）：不挂"最新代数"
+        守卫——批量并发提交时各请求按 artifact_id 寻址回填各自槽位，
+        旧包填旧格无害；若仍共用代数守卫，先完成的请求会被后提交的
+        静默丢弃（真机骨架挂死根因之一，2026-09-27）。
+        """
         backend = self._backend()
         project_id = self._project_id_or_warn()
         if backend is None or project_id is None:
@@ -284,11 +293,13 @@ class ProjectController(QObject):
         line_id = str(line_id)
         artifact_id = str(artifact_id)
         self._current_preview_artifact_id = artifact_id
-        self._artifact_preview_generation += 1
+        if strict_generation:
+            self._artifact_preview_generation += 1
 
         run_command(
             _PreviewArtifactCommand(self, project_id, line_id, artifact_id,
-                                    self._artifact_preview_generation),
+                                    self._artifact_preview_generation,
+                                    check_generation=strict_generation),
             name="mygpr-artifact-preview",
         )
 
@@ -786,7 +797,8 @@ class _PreviewLineCommand:
 
 
 class _PreviewArtifactCommand:
-    __slots__ = ("_controller", "_project_id", "_line_id", "_artifact_id", "_generation")
+    __slots__ = ("_controller", "_project_id", "_line_id", "_artifact_id",
+                 "_generation", "_check_generation")
 
     def __init__(
         self,
@@ -795,12 +807,14 @@ class _PreviewArtifactCommand:
         line_id: str,
         artifact_id: str,
         generation: int,
+        check_generation: bool = True,
     ) -> None:
         self._controller = controller
         self._project_id = project_id
         self._line_id = line_id
         self._artifact_id = artifact_id
         self._generation = generation
+        self._check_generation = check_generation
 
     def execute(self) -> None:
         c = self._controller
@@ -829,9 +843,13 @@ class _PreviewArtifactCommand:
             )
         except Exception as exc:  # noqa: BLE001
             _LOGGER.exception("成果预览失败")
-            c.log_message.emit(f"成果预览失败：{friendly_error_message(exc)}")
+            reason = friendly_error_message(exc)
+            c.log_message.emit(f"成果预览失败：{reason}")
+            # 失败必须可见（真机反馈：结果卡只剩骨架却不知道为什么）
+            c.preview_failed.emit(f'{reason}（成果 {self._artifact_id}）')
         else:
-            if c._artifact_preview_generation != self._generation:
+            if self._check_generation and (
+                    c._artifact_preview_generation != self._generation):
                 return
             c.artifact_preview_ready.emit(self._artifact_id, bundle)
 
@@ -940,8 +958,9 @@ class _DeleteArtifactsCommand:
             c.log_message.emit(
                 f"已删除 {len(deleted)} 个成果（含级联），已移入项目回收站")
             if c._current_preview_artifact_id in deleted:
+                victim = c._current_preview_artifact_id
                 c._current_preview_artifact_id = ''
-                c.preview_invalidated.emit()
+                c.preview_invalidated.emit(victim)
         finally:
             c._set_busy(False)
             try:

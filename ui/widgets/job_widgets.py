@@ -58,8 +58,15 @@ class JobTable(QWidget):
     """任务中心表格：列 = 标题 / 状态徽章 / 进度条 / 消息 / 操作(取消)。"""
 
     cancel_requested = pyqtSignal(str)
+    # 行数/状态变化（宿主据此同步「清理已完成」的可用态：空表点了没反应）
+    rows_changed = pyqtSignal()
 
     _COL_TITLE, _COL_STATUS, _COL_PROGRESS, _COL_MESSAGE, _COL_ACTION = range(5)
+
+    def finished_count(self) -> int:
+        """终态（非活动）任务行数。"""
+        return sum(1 for row in self._rows.values()
+                   if self._status_of(row) not in _ACTIVE_STATUSES)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -135,6 +142,7 @@ class JobTable(QWidget):
             lambda _checked=False, jid=job_id: self.cancel_requested.emit(jid))
         self._table.setCellWidget(row, self._COL_ACTION, cancel_btn)
         self._badges[job_id] = badge
+        self.rows_changed.emit()
 
     def update_progress(self, job_id: str, completed: int, total: int,
                         message: str) -> None:
@@ -171,6 +179,7 @@ class JobTable(QWidget):
         bar.setVisible(status == 'running')
         cancel_btn = self._table.cellWidget(row, self._COL_ACTION)
         cancel_btn.setEnabled(status in _ACTIVE_STATUSES)
+        self.rows_changed.emit()
 
     def clear_finished(self) -> None:
         """移除终态行（供"清理已完成"按钮）。
@@ -194,6 +203,7 @@ class JobTable(QWidget):
         self._rows = {job_id: index for index, (job_id, _old) in
                       enumerate(survivors)}
         self._update_empty_state()
+        self.rows_changed.emit()
 
     def remove_inactive(self) -> None:
         """与 MiniJobList 同构的清理接口：JobHub 对三视图统一分发用。"""

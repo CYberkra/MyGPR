@@ -128,36 +128,13 @@ def control_palette(dark: bool) -> dict:
     - 原生 item view（QTableWidget 等 QSS）：``table_base``/``table_text``/
       ``table_border``/``table_header_bg``/``table_grid``/``selection``；
     - 顶部页签条（主窗口）：``nav_line``/``nav_track``。
+
+    实现已上移至 :mod:`ui.design_tokens`（视觉数值的唯一事实来源），此处
+    仅转发，保持旧调用方零改动。
     """
-    if dark:
-        return {
-            'plot_bg': 'k', 'plot_fg': 'w',
-            'surface': '#000000', 'border': '#5a5a5a',
-            'hover': '#3d3d3d', 'button_bg': '#2d2d2d',
-            'button_text': '#f0f0f0',
-            'panel_bg': 'rgba(32,32,32,200)',
-            'panel_border': 'rgba(255,255,255,45)',
-            'text': '#f0f0f0',
-            'table_base': '#1e1e1e', 'table_text': '#e6e6e6',
-            'table_border': '#3c3c3c', 'table_header_bg': '#2d2d2d',
-            'table_grid': '#3c3c3c', 'selection': constants.ACCENT_SOLID,
-            'nav_line': 'rgba(255, 255, 255, 0.10)',
-            'nav_track': 'rgba(255, 255, 255, 0.06)',
-        }
-    return {
-        'plot_bg': 'w', 'plot_fg': 'k',
-        'surface': '#ffffff', 'border': '#d9d9d9',
-        'hover': '#f0f0f0', 'button_bg': '#ffffff',
-        'button_text': '#202020',
-        'panel_bg': 'rgba(255,255,255,220)',
-        'panel_border': 'rgba(0,0,0,45)',
-        'text': '#202020',
-        'table_base': '#ffffff', 'table_text': '#1a1a1a',
-        'table_border': '#d9d9d9', 'table_header_bg': '#f5f5f5',
-        'table_grid': '#e5e5e5', 'selection': constants.ACCENT_SOLID,
-        'nav_line': 'rgba(0, 0, 0, 0.07)',
-        'nav_track': 'rgba(0, 0, 0, 0.05)',
-    }
+    from ui.design_tokens import palette
+    return palette(dark)
+
 
 
 def status_color(key: str) -> str:
@@ -297,7 +274,11 @@ _applied_dark: bool | None = None
 
 
 def apply_theme(theme: str) -> None:
-    """应用主题：setTheme + pyqtgraph 背景同步（'k'/'w'）+ palette + 原生控件 QSS。
+    """应用主题：setTheme + 强调色统一 + pyqtgraph 背景同步（'k'/'w'）+ palette + 原生控件 QSS。
+
+    强调色：qfluentwidgets 默认是青绿（#009FAA），折叠柄/徽章/主按钮
+    全在用——与科学仪器的克制诉求不符（用户真机目检点名），统一替换为
+    沉稳蓝（Tailwind blue-500），与链条滑动胶囊、选中描边同族。
 
     幂等：目标主题与已应用主题一致、**且 qfluentwidgets 当前实际主题也一致**
     时直接返回（重复的全局样式重算对大控件树是秒级开销）。需要强制重放时
@@ -314,7 +295,10 @@ def apply_theme(theme: str) -> None:
     if isinstance(theme, Theme):
         dark = theme == Theme.DARK
     else:
-        dark = str(theme) == constants.THEME_DARK
+        # 主题字符串协议兼容：应用层传中文（'深色主题'），脚本/测试曾传
+        # 'dark'——此前静默判 False 走浅色（真机"深色主题"从未生效过的坑）
+        t = str(theme).strip()
+        dark = t in ('dark', '深色主题', '深色')
     if _applied_dark is not None and dark == _applied_dark \
             and isDarkTheme() == dark:
         return
@@ -330,8 +314,13 @@ def apply_theme(theme: str) -> None:
     # 开销可忽略。
     gc.collect()
     setTheme(Theme.DARK if dark else Theme.LIGHT)
-    pg.setConfigOption('background', 'k' if dark else 'w')
-    pg.setConfigOption('foreground', 'w' if dark else 'k')
+    from qfluentwidgets import setThemeColor
+    from PyQt6.QtGui import QColor
+    setThemeColor(QColor('#3B82F6'))
+    # 美术打磨 A（2026-09-27）：绘图区背景融入主题——深色近黑蓝调 /
+    # 浅色纸白，替代纯 'k'/'w'（灰圈显旧）；前景同步降一档对比
+    pg.setConfigOption('background', '#141822' if dark else '#f7f8fa')
+    pg.setConfigOption('foreground', '#c8ccd4' if dark else '#33383f')
     # 抗锯齿（pyqtgraph 默认关闭）：曲线与文字边缘明显更平滑。该 hint 作用于
     # GraphicsView 的矢量绘制，B-Scan 等 ImageItem 走图像绘制路径不受影响，
     # 但多 GB 真实数据下的实际帧率仍需在 Windows 目标机验收。

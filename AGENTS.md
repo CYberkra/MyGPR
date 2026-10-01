@@ -41,3 +41,21 @@ python -m pytest tests/ -q
 
 - 大型原始数据、完整报告输出、GUI 截图不进 Git。
 - 需要评审的小证据文件放入 `docs/artifacts/` 随提交一起推送。
+
+## 研发技能路由
+
+按任务使用下列技能；首次应用先读对应 `SKILL.md`，不要求用户每次点名。
+安装位置、验证入口和证据标准见 [研发技能工作流](docs/agents/development-skills.md)。
+
+| 任务 | 使用技能 |
+| --- | --- |
+| PyQt 界面设计、布局与操作流程 | `frontend-design-polish`；实际桌面交互验收时用 `windows-desktop-e2e` |
+| GPR 导入、处理算法、参数、异常 B-scan、GUI/CLI 一致性 | `mygpr-processing-validation`；需要回归测试时用 `python-testing` |
+| 缺陷、失败测试、卡顿、串图、异步竞态 | `superpowers:systematic-debugging`，先复现和定位，再修复 |
+| 编写或维护 Python 测试 | `python-testing`；桌面端到端操作使用 `windows-desktop-e2e` |
+| 跨层接口或较大模块重构 | `codebase-design`，遵循现有架构约束 |
+
+- 每次只加载与当前任务相关的技能；同名/同用途技能选一份，不叠加多个开发流程。
+- 用户要求“仅计划/仅设计”时，只交付相应文档，不因技能流程擅自实施。
+- 通用技能中的框架示例、固定覆盖率目标、默认参数及旧路径须先核对当前项目；不能直接当成项目事实或新增硬门槛。
+- 科学验证看数据和可复现结果；离屏测试、截图、合成数据不能代替真实数据验证或 Windows 桌面验收。

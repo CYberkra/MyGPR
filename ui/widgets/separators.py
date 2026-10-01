@@ -17,12 +17,18 @@ from PyQt6.QtWidgets import QFrame
 __all__ = ['make_h_separator', 'make_separator']
 
 
+def _separator_qss(alpha: int) -> str:
+    """分隔线色：中性描边令牌的半透明形式（alpha 为 0–255 旧口径）。"""
+    from ui.design_tokens import rgba
+    return f'color: {rgba("border_default", int(alpha) / 255.0)};'
+
+
 def make_h_separator(*, alpha: int = 90) -> QFrame:
     """水平分隔线：QFrame.HLine + Sunken + 半透明中性灰（随主题自适应）。"""
     line = QFrame()
     line.setFrameShape(QFrame.Shape.HLine)
     line.setFrameShadow(QFrame.Shadow.Sunken)
-    line.setStyleSheet(f'color: rgba(128, 128, 128, {int(alpha)});')
+    line.setStyleSheet(_separator_qss(alpha))
     return line
 
 
@@ -34,5 +40,5 @@ def make_separator(vertical: bool = False, *, alpha: int = 90) -> QFrame:
     line = QFrame()
     line.setFrameShape(QFrame.Shape.VLine if vertical else QFrame.Shape.HLine)
     line.setFrameShadow(QFrame.Shadow.Sunken)
-    line.setStyleSheet(f'color: rgba(128, 128, 128, {int(alpha)});')
+    line.setStyleSheet(_separator_qss(alpha))
     return line

@@ -124,6 +124,9 @@ class FileTreePanel(DockPanel):
     line_delete_requested = pyqtSignal(list)
     # 成果叶子点击 → 换线（如需）+ 跳处理页选中预览（line_id, artifact_id）
     artifact_focus_requested = pyqtSignal(str, str)
+    # 成果叶子右键「删除成果」→ 复用项目页删除链路（后代闭包级联确认 +
+    # 回收站语义），面板自身不弹确认框
+    artifact_delete_requested = pyqtSignal(str, str)
     # 空间成果/项目报告叶子点击 → 跳成果页（参数为 kind：'spatial'/'report'）
     delivery_focus_requested = pyqtSignal(str)
 
@@ -523,7 +526,10 @@ class FileTreePanel(DockPanel):
         if kind in ('dir', 'file'):
             self._on_file_context_menu(item, pos)
             return
-        # 仅测线叶子出菜单；分组行/成果/报告叶子的交互走单击
+        if kind == 'artifact':
+            self._on_artifact_context_menu(item, pos)
+            return
+        # 仅测线/成果叶子出菜单；分组行/报告叶子的交互走单击
         if kind != 'line':
             return
         line_id = item.data(0, _ROLE_PAYLOAD)
@@ -544,6 +550,31 @@ class FileTreePanel(DockPanel):
         menu.addSeparator()
         add_action(menu, FIF.COPY, '复制测线号',
                    lambda: QApplication.clipboard().setText(line_id))
+        menu.exec(self._tree.viewport().mapToGlobal(pos))
+
+    def _on_artifact_context_menu(self, item, pos) -> None:
+        """成果叶子右键：添加到显示 / 删除成果 / 复制成果号。
+
+        「添加到显示」与单击同语义（artifact_focus_requested：换线如需 +
+        跳处理页选中并载入 B-Scan 对比显示）；「删除」发信号复用项目页
+        删除链路（异步查后代闭包 → 级联确认框 → 回收站），面板自身不弹
+        确认框、不做预检。
+        """
+        artifact_id = str(item.data(0, _ROLE_PAYLOAD) or '')
+        line_id = str(item.data(0, _ROLE_AUX) or '')
+        if not artifact_id:
+            return
+        self._tree.setCurrentItem(item)
+        menu = make_menu(parent=self._tree)
+        add_action(menu, FIF.VIEW, '添加到显示',
+                   lambda: self.artifact_focus_requested.emit(
+                       line_id, artifact_id))
+        add_action(menu, FIF.DELETE, '删除成果…',
+                   lambda: self.artifact_delete_requested.emit(
+                       line_id, artifact_id))
+        menu.addSeparator()
+        add_action(menu, FIF.COPY, '复制成果号',
+                   lambda: QApplication.clipboard().setText(artifact_id))
         menu.exec(self._tree.viewport().mapToGlobal(pos))
 
     def _on_file_context_menu(self, item, pos) -> None:
