@@ -27,7 +27,7 @@ from mygpr.domain.processing.workbench import (
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
 
 def _bounded_indices(size: int, maximum: int) -> np.ndarray:

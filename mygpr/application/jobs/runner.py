@@ -43,7 +43,7 @@ class JobRunnerClosedError(MyGPRError):
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
 
 def _estimate_object_bytes(value: Any, seen: set[int] | None = None) -> int:

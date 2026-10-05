@@ -35,6 +35,7 @@ allowed_local_import_prefixes = ["mygpr.infrastructure.processing.algorithms.met
 owner = "processing-backend"
 remove_after = "1.1.0"
 reason = "NATIVE_ALGORITHMS 单一事实来源暂以懒加载方式进入 legacy registry；1.1.0 前改端口/延迟注入。"
+expiry_action = "warn"
 
 [[migration_exceptions]]
 path_prefix = "core/evidence_export.py"
@@ -42,6 +43,7 @@ allowed_local_import_prefixes = ["mygpr.domain", "mygpr.infrastructure.processin
 owner = "processing-backend"
 remove_after = "1.1.0"
 reason = "证据导出与 UI/cli_batch 共用 native 执行路径（P1-1 步骤 1 收敛）；随 processing_engine 兼容壳化一并复查。"
+expiry_action = "warn"
 
 [[migration_exceptions]]
 path_prefix = "core/field_processing_bridge.py"
@@ -49,6 +51,7 @@ allowed_local_import_prefixes = ["mygpr.domain", "mygpr.infrastructure.processin
 owner = "processing-backend"
 remove_after = "1.1.0"
 reason = "数据集级执行桥与证据 manifest 契约保留，内部执行已切 native（P1-1 步骤 2）；1.1.0 前评估随 processing_engine 退役。"
+expiry_action = "warn"
 
 [[migration_exceptions]]
 path_prefix = "ui/constants.py"
@@ -56,6 +59,7 @@ allowed_local_import_prefixes = ["core.app_paths"]
 owner = "qt-ui"
 remove_after = "1.1.0"
 reason = "ui/constants.LOG_DIR 委托 core.app_paths 统一日志根目录，消除 Windows 下 GUI/core 日志分家。"
+expiry_action = "warn"
 
 [[migration_exceptions]]
 path_prefix = "ui/desktop_backend_facade.py"
@@ -64,6 +68,7 @@ owner = "qt-ui"
 remove_after = "1.0.0"
 reason = "Facade concentrates all ui→core/ui→domain/ui→application imports; other ui/ modules must route through it."
 max_function_lines = 100
+expiry_action = "warn"
 
 [path_policy]
 forbid_sys_path_mutation_under = ["core", "mygpr", "cli_batch.py"]
@@ -82,6 +87,16 @@ max_class_lines = 600
 max_function_lines = 100
 forbid_silent_exception_handlers = true
 
+# 迁移豁免的到期兑现。每条 [[migration_exceptions]] 的 `remove_after` 是一个
+# 承诺：遗留路径只是被「借」到那个版本为止。enabled=true 时门禁会比对
+# pyproject.toml 的当前 version —— 过期条目不再沉默，必须按 expiry_action 处理：
+#   fail         门禁失败（删掉豁免与遗留路径，或带新 expiry_action 重新登记）
+#   warn         只报告（用于首次灰度，让门禁先"说话"再"咬人"）
+#   extend:<ver> 在记录上延期到 <ver>，且必须 > 原 remove_after
+# 缺省是 warn。设 enabled=false 可整体关闭（不建议：等于退回"承诺不兑现"）。
+[migration_expiry]
+enabled = true
+
 [[migration_exceptions]]
 path_prefix = "mygpr/application/autotune"
 allowed_local_import_prefixes = []
@@ -89,6 +104,7 @@ owner = "autotune"
 remove_after = "1.0.0"
 reason = "Verified historical AutoTune scoring functions are being decomposed behind application ports."
 max_function_lines = 450
+expiry_action = "warn"
 
 [[migration_exceptions]]
 path_prefix = "mygpr/application/autotune/legacy_engine.py"
@@ -97,6 +113,7 @@ owner = "autotune"
 remove_after = "1.0.0"
 reason = "Default-composition bridge retained for historical function-style imports."
 max_function_lines = 100
+expiry_action = "warn"
 
 [[migration_exceptions]]
 path_prefix = "mygpr/infrastructure/processing/metadata_bridge.py"
@@ -105,6 +122,7 @@ owner = "processing-backend"
 remove_after = "1.0.0"
 reason = "Convergence single-point bridge: native catalog reads display metadata from core single source (task F candidate 2)."
 max_function_lines = 100
+expiry_action = "warn"
 
 [[migration_exceptions]]
 path_prefix = "mygpr/domain/autotune/constraints.py"
@@ -113,6 +131,7 @@ owner = "autotune"
 remove_after = "1.0.0"
 reason = "Method-specific constraint handlers are preserved pending decomposition."
 max_function_lines = 200
+expiry_action = "warn"
 
 [[migration_exceptions]]
 path_prefix = "mygpr/infrastructure/persistence/intermediate_cleanup.py"
@@ -120,6 +139,7 @@ allowed_local_import_prefixes = ["core.hdf5_line_container", "core.security_path
 owner = "processing-backend"
 remove_after = "1.0.0"
 reason = "Persistence cleanup mixin over hybrid storage; inherits adapter conventions."
+expiry_action = "warn"
 
 [[migration_exceptions]]
 path_prefix = "mygpr/infrastructure/persistence/field_project_adapter.py"
@@ -127,6 +147,7 @@ allowed_local_import_prefixes = ["core"]
 owner = "project-backend"
 remove_after = "1.1.0"
 reason = "Adapter wraps the verified hybrid FieldProjectStore. LegacyFieldProjectSession 现 616 行（超默认 600 上限）；按会话生命周期 / 查询 / 写入三个方向拆分解前，以 max_class_lines=650 封顶，拆前不得再增长。"
+expiry_action = "warn"
 max_function_lines = 100
 max_class_lines = 650
 
@@ -136,6 +157,7 @@ allowed_local_import_prefixes = ["core"]
 owner = "acquisition-backend"
 remove_after = "1.1.0"
 reason = "Adapter wraps verified import and sensor synchronization kernels."
+expiry_action = "warn"
 max_function_lines = 100
 
 [[migration_exceptions]]
@@ -144,6 +166,7 @@ allowed_local_import_prefixes = []
 owner = "migration-imaging-backend"
 remove_after = "1.1.0"
 reason = "Numerical functions remain intact to preserve regression behavior."
+expiry_action = "warn"
 max_function_lines = 300
 
 [[migration_exceptions]]
@@ -152,6 +175,7 @@ allowed_local_import_prefixes = []
 owner = "motion-compensation-backend"
 remove_after = "1.1.0"
 reason = "Numerical functions remain intact for exact regression."
+expiry_action = "warn"
 max_function_lines = 450
 
 [[migration_exceptions]]
@@ -160,6 +184,7 @@ allowed_local_import_prefixes = []
 owner = "processing-backend"
 remove_after = "1.1.0"
 reason = "Numerical functions remain intact to preserve regression behavior; sibling algorithm packages kirchhoff/motion are exempted on the same grounds."
+expiry_action = "warn"
 max_function_lines = 150
 
 [[migration_exceptions]]
@@ -168,6 +193,7 @@ allowed_local_import_prefixes = ["core"]
 owner = "interpretation-backend"
 remove_after = "1.1.0"
 reason = "Persistence adapter reuses verified project-store serialization."
+expiry_action = "warn"
 max_function_lines = 100
 
 [[migration_exceptions]]
@@ -176,6 +202,7 @@ allowed_local_import_prefixes = ["core"]
 owner = "spatial-backend"
 remove_after = "1.1.0"
 reason = "Persistence adapter reuses the verified spatial result store."
+expiry_action = "warn"
 max_function_lines = 100
 
 [[migration_exceptions]]
@@ -184,6 +211,7 @@ allowed_local_import_prefixes = ["core"]
 owner = "spatial-backend"
 remove_after = "1.1.0"
 reason = "Persistence adapter reuses the verified field line store for velocity model write-back."
+expiry_action = "warn"
 max_function_lines = 100
 
 [[migration_exceptions]]
@@ -192,6 +220,7 @@ allowed_local_import_prefixes = ["core"]
 owner = "spatial-backend"
 remove_after = "1.1.0"
 reason = "Persistence adapter reuses coordinate projection and GIS layer store for grid outputs."
+expiry_action = "warn"
 max_function_lines = 100
 
 [[migration_exceptions]]
@@ -200,4 +229,5 @@ allowed_local_import_prefixes = ["core.field_project_errors", "core.field_projec
 owner = "processing-backend"
 remove_after = "1.1.0"
 reason = "Persistence adapter over hybrid artifact storage; inherits adapter conventions from its field_project_adapter / intermediate_cleanup siblings."
+expiry_action = "warn"
 max_function_lines = 100

@@ -90,7 +90,7 @@ class TestAspectSignal:
         import numpy as np
         seen = []
         view.sig_aspect_changed.connect(seen.append)
-        view.set_matrix(np.random.rand(80, 160).astype('float32'), 0.0, 1.0)
+        view.set_matrix(np.random.default_rng(0).random((80, 160)).astype('float32'), 0.0, 1.0)
         assert seen == []
         assert view.aspect_mode() == 'free'
 

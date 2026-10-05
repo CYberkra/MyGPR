@@ -37,7 +37,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
 
 def _atomic_write_json(path: Path, payload: Any) -> None:

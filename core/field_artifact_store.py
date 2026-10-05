@@ -7,7 +7,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -112,7 +112,10 @@ class FieldArtifactStoreMixin:
         if len(shape) != 2 or not all(v > 0 for v in shape):
             raise ValueError(f"处理结果必须是非空二维矩阵，当前 shape={shape!r}")
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        # UTC so that artifact_id sorts chronologically in the artifact index
+        # (core/processing_artifact_index.py orders records by it); a local
+        # stamp would misorder across timezones and DST boundaries.
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
         artifact_id = f"{safe_line_id}_processed_{timestamp}"
         paths = _artifact_paths(self.root, safe_line_id, timestamp, artifact_id)
         saved_at = local_now()

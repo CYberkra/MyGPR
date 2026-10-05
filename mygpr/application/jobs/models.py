@@ -154,7 +154,7 @@ class JobEvent:
             job_id=str(job_id),
             event_type=event_type,
             sequence=int(sequence),
-            timestamp_utc=datetime.now(timezone.utc).isoformat(),
+            timestamp_utc=datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
             message=str(message),
             completed=max(0, int(completed)),
             total=max(0, int(total)),

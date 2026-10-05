@@ -11,7 +11,7 @@ anchored to the raw B-scan trace/sample coordinate system.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Iterable
 
 import numpy as np
@@ -27,7 +27,8 @@ VISIBILITY_NO_INTERFACE = np.uint8(3)
 
 
 def _now() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    """UTC millisecond stamp for interface annotation created_at/updated_at."""
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
 
 @dataclass(frozen=True, order=True)

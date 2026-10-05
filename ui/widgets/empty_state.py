@@ -2,9 +2,8 @@
 """EmptyStateOverlay — 画布空态引导浮层（评审 P0-1 统一组件）。
 
 数据类视图（B-Scan / 地图 / 成果表）零数据时原本只剩空画布或孤立表头，
-无任何引导。本组件以浮层覆盖在宿主控件之上：图标 + 主句 + 副句（+
-可选行动按钮），随宿主 resize 自动铺满，主题切换自刷新（主窗口遍历的
-鸭子类型 ``apply_theme``）。
+无任何引导。本组件以浮层覆盖在宿主控件之上：图标 + 主句 + 副句，随宿主
+resize 自动铺满，主题切换自刷新（主窗口遍历的鸭子类型 ``apply_theme``）。
 
 用法::
 
@@ -14,13 +13,13 @@
     # 数据到达时隐藏：
     self._empty.setVisible(False)
 
-浮层不接管宿主生命周期（宿主即父控件）；无行动按钮时鼠标事件穿透，
-不挡宿主右键菜单等交互。
+浮层不接管宿主生命周期（宿主即父控件），且始终鼠标事件穿透，不挡宿主
+右键菜单等交互。
 """
-from PyQt6.QtCore import QEvent, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, Qt
 from PyQt6.QtGui import QColor
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
-from qfluentwidgets import BodyLabel, CaptionLabel, PushButton
+from PyQt6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from qfluentwidgets import BodyLabel, CaptionLabel
 from qfluentwidgets import FluentIconBase
 from qfluentwidgets import isDarkTheme
 
@@ -32,19 +31,20 @@ _ICON_SIZE = 40
 
 
 class EmptyStateOverlay(QWidget):
-    """画布空态浮层：图标 + 主句 + 副句 + 可选行动按钮。
+    """画布空态浮层：图标 + 主句 + 副句。
 
     :param host: 被覆盖的宿主控件（画布/表格），浮层随其 resize 铺满；
     :param icon: FluentIconBase（以 secondary 色着色）或 None；
     :param title: 主句（一句话说清「什么数据会出现在这里」）；
-    :param hint: 副句（可选，说明前置条件）；
-    :param action_text: 行动按钮文案（可选，点击发 :attr:`sig_action`）。
+    :param hint: 副句（可选，说明前置条件）。
+
+    早期版本带一个可选行动按钮（``action_text`` + ``sig_action``），但全部
+    10 处调用点都不传按钮文案，该分支始终不可达，已移除。需要「引导用户去
+    某处操作」时，请由宿主页面自己放按钮——浮层刻意保持鼠标穿透。
     """
 
-    sig_action = pyqtSignal()
-
     def __init__(self, host: QWidget, *, icon: FluentIconBase | None,
-                 title: str, hint: str = '', action_text: str = ''):
+                 title: str, hint: str = ''):
         super().__init__(host)
         self._icon_base = icon
 
@@ -68,21 +68,10 @@ class EmptyStateOverlay(QWidget):
             self._hint_label.setWordWrap(True)
             layout.addWidget(self._hint_label)
 
-        self._action_btn = None
-        if action_text:
-            self._action_btn = PushButton(str(action_text), self)
-            self._action_btn.clicked.connect(self.sig_action.emit)
-            btn_row = QHBoxLayout()
-            btn_row.addStretch(1)
-            btn_row.addWidget(self._action_btn)
-            btn_row.addStretch(1)
-            layout.addLayout(btn_row)
-
         layout.addStretch(1)
 
-        # 无行动按钮时鼠标穿透：不挡宿主右键菜单 / 滚轮等交互
-        if self._action_btn is None:
-            self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        # 浮层始终鼠标穿透：不挡宿主右键菜单 / 滚轮等交互
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
         host.installEventFilter(self)
         self.setGeometry(host.rect())
