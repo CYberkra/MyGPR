@@ -483,7 +483,14 @@ class InterpretationEditService:
             "sha256": hashes,
         }
         manifest_path = destination / "manifest.json"
-        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        # 原子发布：manifest 之后立即被 _sha256 读取并写进包摘要，中断留下
+        # 的半截 JSON 会让「读回→ 校验 → 使用」链条拿到错内容。序列化参数
+        # （ensure_ascii/indent）与既有 manifest 保持逐字节一致。
+        from mygpr.infrastructure.persistence.durable_write import default_durable_write
+        default_durable_write().write_text(
+            manifest_path,
+            json.dumps(manifest, ensure_ascii=False, indent=2),
+        )
         files["manifest"] = str(manifest_path)
         hashes["manifest"] = _sha256(manifest_path)
         return InterpretationLabelPackage(

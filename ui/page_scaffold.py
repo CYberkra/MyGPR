@@ -24,10 +24,15 @@ from ui.theme_helpers import hint_qss, ui_font
 
 __all__ = [
     'make_card', 'make_segment_card', 'card_title', 'style_transparent_scroll',
-    'make_scroll_column', 'wrap_centered', 'make_form_row',
+    'make_scroll_column', 'make_collapsible_column', 'wrap_centered',
+    'make_form_row',
     'HintLabel', 'make_hint',
     'refill_combo', 'rebuild_check_list', 'PanelStateMixin',
 ]
+
+# 折叠态侧栏宽度：折叠后只留折叠按钮的贴边长条（CollapsiblePanel 默认同值，
+# 各页此前6 处显式传 40 —— 收敛到本常量）。
+SIDE_COLLAPSE_WIDTH = 40
 
 
 # ---------------------------------------------------------------- 卡片
@@ -124,6 +129,28 @@ def make_scroll_column(width: int, *, parent=None,
     layout.setSpacing(constants.PAGE_SPACING)
     scroll.setWidget(content)
     return scroll, layout
+
+
+def make_collapsible_column(side: str, width: int, *, parent=None,
+                            collapse_width: int = SIDE_COLLAPSE_WIDTH) -> tuple:
+    """可折叠侧栏脚手架：:func:`make_scroll_column` + ``CollapsiblePanel``
+    绑定的三连（建滚动栏 → 建面板 → ``set_content_widget``）。
+
+    返回 ``(panel, content_layout)``——内容布局直接进卡片，不再暴露
+    ``scroll``（调用方 6 处无一用过它）。
+
+    收敛自 processing/spatial/project/interpretation 四页 6 处逐字重复的
+    「左/右栏 = 固定宽滚动栏 + 可折叠面板」。**滚动栏宽必须与面板展开宽
+    严格相等**（content 宽 = ``width - 16`` 见 :func:`make_scroll_column`）：
+    不等则折叠动画过程中内容区与面板边框出现 16px 错位。
+    """
+    from ui.widgets.collapsible_panel import CollapsiblePanel
+
+    scroll, layout = make_scroll_column(width, parent=parent)
+    panel = CollapsiblePanel(side, expand_width=width,
+                             collapse_width=collapse_width, parent=parent)
+    panel.set_content_widget(scroll)
+    return panel, layout
 
 
 def wrap_centered(content: QWidget,

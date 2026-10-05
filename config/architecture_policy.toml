@@ -115,6 +115,52 @@ reason = "Default-composition bridge retained for historical function-style impo
 max_function_lines = 100
 expiry_action = "warn"
 
+# ---- DurableWritePort 默认接线（同legacy_engine 的 default-composition 桥）----
+# 目标态：composition root（mygpr/interfaces/backend.py）注入 DurableWritePort，
+# application 只声明 Protocol。当前 5 处函数级延迟解析是过渡写法——它们把
+# 「本层不该知道 infrastructure」的耦合点收敛成了 5 个可搜的窄 import，
+# 而不是散落 5 份各自复刻的落盘实现（其中 grid/service.py 那份完全没有
+# fsync）。到期前应随application 服务构造化一并改为显式注入。
+[[migration_exceptions]]
+path_prefix = "mygpr/application/autotune/evidence.py"
+allowed_local_import_prefixes = ["mygpr.infrastructure.persistence.durable_write"]
+owner = "autotune"
+remove_after = "1.1.0"
+reason = "DurableWritePort default-composition bridge; 目标态是构造注入（同 legacy_engine.py 模式）。"
+expiry_action = "warn"
+
+[[migration_exceptions]]
+path_prefix = "mygpr/application/grid/service.py"
+allowed_local_import_prefixes = ["mygpr.infrastructure.persistence.durable_write"]
+owner = "grid"
+remove_after = "1.1.0"
+reason = "DurableWritePort default-composition bridge; write_grid_geojson 已支持显式 writer 注入，None 分支仅为纯函数测试兜底。"
+expiry_action = "warn"
+
+[[migration_exceptions]]
+path_prefix = "mygpr/application/interpretation/edit_service.py"
+allowed_local_import_prefixes = ["mygpr.infrastructure.persistence.durable_write"]
+owner = "interpretation"
+remove_after = "1.1.0"
+reason = "DurableWritePort default-composition bridge; manifest 写后立即被_sha256 读取，故必须走原子发布。"
+expiry_action = "warn"
+
+[[migration_exceptions]]
+path_prefix = "mygpr/application/processing/analysis_service.py"
+allowed_local_import_prefixes = ["mygpr.infrastructure.persistence.durable_write"]
+owner = "processing-backend"
+remove_after = "1.1.0"
+reason = "DurableWritePort default-composition bridge; 成果包 manifest 是自描述索引，半截文件会让整包加载失败。"
+expiry_action = "warn"
+
+[[migration_exceptions]]
+path_prefix = "mygpr/application/processing/workbench_service.py"
+allowed_local_import_prefixes = ["mygpr.infrastructure.persistence.durable_write"]
+owner = "processing-backend"
+remove_after = "1.1.0"
+reason = "DurableWritePort default-composition bridge; 替换本地复刻的 _atomic_write_json（该复刻的 docstring 曾自认待收敛）。"
+expiry_action = "warn"
+
 [[migration_exceptions]]
 path_prefix = "mygpr/infrastructure/processing/metadata_bridge.py"
 allowed_local_import_prefixes = ["core.methods_registry", "core.method_registry_metadata"]
@@ -139,6 +185,14 @@ allowed_local_import_prefixes = ["core.hdf5_line_container", "core.security_path
 owner = "processing-backend"
 remove_after = "1.0.0"
 reason = "Persistence cleanup mixin over hybrid storage; inherits adapter conventions."
+expiry_action = "warn"
+
+[[migration_exceptions]]
+path_prefix = "mygpr/infrastructure/persistence/durable_write.py"
+allowed_local_import_prefixes = ["core"]
+owner = "processing-backend"
+remove_after = "1.1.0"
+reason = "DurableWritePort 的唯一实现：把 application 的落盘契约绑到 core.storage_primitives 这一权威原子写实现（唯一有文件 fsync + 目录 fsync 的那一份）。刻意不复制实现——复制会把 durability 纪律再分叉一次，正是本次要消除的问题。与 intermediate_cleanup.py 同一模式（infrastructure 适配器导入 core）。"
 expiry_action = "warn"
 
 [[migration_exceptions]]

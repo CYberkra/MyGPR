@@ -5,8 +5,13 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import sys
 from pathlib import Path
 from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _gate import RatchetGate, add_write_baseline_flag, read_baseline, write_baseline  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 BASELINE = ROOT / "config/debt_baseline.json"
@@ -103,22 +108,6 @@ def metrics() -> dict[str, int]:
     return result
 
 
-def _read_metrics(path: Path, field: str = "metrics") -> dict[str, int]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    values = payload.get(field) or {}
-    return {str(key): int(value) for key, value in dict(values).items()}
-
-
-def evaluate_budget(current: dict[str, int], baseline: dict[str, int]) -> list[str]:
-    errors: list[str] = []
-    for key in sorted(ENFORCED):
-        value = current.get(key)
-        limit = baseline.get(key)
-        if value is not None and limit is not None and value > limit:
-            errors.append(f"{key}: {value} > baseline {limit}")
-    return errors
-
-
 def target_gaps(current: dict[str, int], target: dict[str, int]) -> dict[str, int]:
     return {
         key: max(0, int(current.get(key, 0)) - int(target[key]))
@@ -126,18 +115,31 @@ def target_gaps(current: dict[str, int], target: dict[str, int]) -> dict[str, in
     }
 
 
+def build_gates(current: dict[str, int], baseline: dict[str, int]) -> list[RatchetGate]:
+    """只对ENFORCED 里的键组棘轮；baseline 缺的键记missing_ok（不阻断）。
+
+    与原 ``evaluate_budget`` 语义一致：``value is not None and limit is not
+    None`` 才比较——即 baseline 未记录的指标既不算通过也不算失败，只是
+    不在棘轮覆盖内。
+    """
+    return [
+        RatchetGate(name=key, current=int(current.get(key, 0)),
+                    baseline=baseline.get(key), missing_ok=True)
+        for key in sorted(ENFORCED)
+    ]
+
+
 def _write_current_baseline(current: dict[str, int]) -> None:
-    payload = {
+    write_baseline(BASELINE, {
         "schema": "mygpr.debt_baseline.v1",
         "policy": "release-ratchet; values may decrease but may not increase",
         "metrics": current,
-    }
-    BASELINE.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    })
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--write-baseline", action="store_true")
+    add_write_baseline_flag(parser)
     parser.add_argument("--strict-target", action="store_true")
     args = parser.parse_args()
 
@@ -145,9 +147,11 @@ def main() -> int:
     if args.write_baseline:
         _write_current_baseline(current)
 
-    baseline = _read_metrics(BASELINE)
-    target = _read_metrics(REDUCTION_TARGET, "target_metrics") if REDUCTION_TARGET.exists() else {}
-    errors = evaluate_budget(current, baseline)
+    baseline = read_baseline(BASELINE)
+    target = read_baseline(REDUCTION_TARGET, field_name="target_metrics") \
+        if REDUCTION_TARGET.exists() else {}
+    gates = build_gates(current, baseline)
+    errors = [text for gate in gates if (text := gate.violation())]
     gaps = target_gaps(current, target)
     result: dict[str, Any] = {
         "current": current,
@@ -156,6 +160,8 @@ def main() -> int:
         "target_gaps": gaps,
     }
     print(json.dumps(result, ensure_ascii=False, indent=2))
+    for gate in gates:
+        print(gate.report())
     if errors:
         print("\n".join(errors))
         return 1

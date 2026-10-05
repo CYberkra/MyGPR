@@ -34,9 +34,10 @@ from qfluentwidgets import (
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants
-from ui.page_scaffold import (card_title, make_card, make_hint,
-                              make_scroll_column, refill_combo)
-from ui.widgets import BScanView, CollapsiblePanel, make_separator
+from ui.page_scaffold import (card_title, make_card,
+                              make_collapsible_column, make_hint,
+                              refill_combo)
+from ui.widgets import BScanView, make_separator
 
 _OVERLAY_COLOR = constants.CHART_OVERLAY_COLOR   # 标注散点颜色（SPEC §6.6）
 _C_M_PER_NS = 0.29979        # 真空光速 c (m/ns)
@@ -150,11 +151,8 @@ class InterpretationPage(QWidget):
 
     def _build_side_column(self) -> QWidget:
         """右栏（展开 SIDE_TOOL_WIDTH px，可折叠）：标注点列表 + 深度换算 + 速度分析。"""
-        scroll, layout = make_scroll_column(constants.SIDE_TOOL_WIDTH)
-        panel = CollapsiblePanel(
-            'right', expand_width=constants.SIDE_TOOL_WIDTH, collapse_width=40,
-            parent=self)
-        panel.set_content_widget(scroll)
+        panel, layout = make_collapsible_column(
+            'right', constants.SIDE_TOOL_WIDTH, parent=self)
 
         # ---------------- 标注点列表
         points_card, points_layout = make_card('标注点列表')

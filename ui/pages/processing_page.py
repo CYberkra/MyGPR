@@ -40,11 +40,12 @@ from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants
 from ui.motion import animate_progress
-from ui.page_scaffold import (PanelStateMixin, make_card, make_form_row,
-                              make_scroll_column, refill_combo)
+from ui.page_scaffold import (PanelStateMixin, make_card,
+                              make_collapsible_column, make_form_row,
+                              refill_combo)
 from ui.widgets.bscan_result_grid import ResultGrid
 from ui.widgets.chain_strip import ChainStrip
-from ui.widgets import (BScanContainer, CollapsiblePanel, LAYOUT_FOCUS,
+from ui.widgets import (BScanContainer, LAYOUT_FOCUS,
                         MethodBrowser, ParamForm, PipelineList, MAX_PANELS,
                         clear_invalid, make_separator)
 
@@ -133,12 +134,9 @@ class ProcessingPage(PanelStateMixin, QWidget):
         root.addLayout(columns, 1)
 
         # ---------------- 左栏（展开 SIDE_TOOL_WIDTH px，可折叠；滚动栏宽须与面板展开宽一致）
-        left_scroll, left_layout = make_scroll_column(constants.SIDE_TOOL_WIDTH)
-        left_panel = CollapsiblePanel(
-            'left', expand_width=constants.SIDE_TOOL_WIDTH, collapse_width=40, parent=self)
-        left_panel.set_content_widget(left_scroll)
-        columns.addWidget(left_panel)
-        self._left_panel = left_panel
+        self._left_panel, left_layout = make_collapsible_column(
+            'left', constants.SIDE_TOOL_WIDTH, parent=self)
+        columns.addWidget(self._left_panel)
 
         methods_card, methods_layout = make_card('方法库')
         self._method_browser = MethodBrowser(methods_card)
@@ -234,12 +232,9 @@ class ProcessingPage(PanelStateMixin, QWidget):
         middle_layout.addWidget(self._progress_row_widget)
 
         # ---------------- 右栏（展开 SIDE_FORM_WIDTH px，可折叠；滚动栏宽须与面板展开宽一致）
-        right_scroll, right_layout = make_scroll_column(constants.SIDE_FORM_WIDTH)
-        right_panel = CollapsiblePanel(
-            'right', expand_width=constants.SIDE_FORM_WIDTH, collapse_width=40, parent=self)
-        right_panel.set_content_widget(right_scroll)
-        columns.addWidget(right_panel)
-        self._right_panel = right_panel
+        self._right_panel, right_layout = make_collapsible_column(
+            'right', constants.SIDE_FORM_WIDTH, parent=self)
+        columns.addWidget(self._right_panel)
 
         pipeline_card, pipeline_layout = make_card('处理链')
         self._pipeline_list = PipelineList(pipeline_card)

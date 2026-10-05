@@ -31,10 +31,10 @@ from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants, file_dialogs
 from ui.geo_utils import coverage_statistics, format_distance
-from ui.page_scaffold import (PanelStateMixin, make_card, make_hint,
-                              make_scroll_column, make_segment_card,
+from ui.page_scaffold import (PanelStateMixin, make_card,
+                              make_collapsible_column, make_hint,
+                              make_segment_card,
                               rebuild_check_list)
-from ui.widgets.collapsible_panel import CollapsiblePanel
 from ui.widgets.elevation_profile_view import ElevationProfileView
 from ui.widgets.local_dem import load_xyz_grid
 from ui.widgets.map_tiles import BASEMAP_LAYERS, DEFAULT_TILE_SOURCE
@@ -256,12 +256,9 @@ class SpatialPage(PanelStateMixin, QWidget):
         root.addLayout(columns, 1)
 
         # ---------------- 左栏（展开 320px，可折叠）
-        left_scroll, left_layout = make_scroll_column(constants.SIDE_TOOL_WIDTH)
-        left_panel = CollapsiblePanel(
-            'left', expand_width=constants.SIDE_TOOL_WIDTH, collapse_width=40, parent=self)
-        left_panel.set_content_widget(left_scroll)
-        columns.addWidget(left_panel)
-        self._left_panel = left_panel
+        self._left_panel, left_layout = make_collapsible_column(
+            'left', constants.SIDE_TOOL_WIDTH, parent=self)
+        columns.addWidget(self._left_panel)
 
         lines_card, lines_layout = make_card('测线')
         self._line_list = QListWidget(lines_card)
@@ -422,12 +419,9 @@ class SpatialPage(PanelStateMixin, QWidget):
         middle_layout.addWidget(view_card, 1)
 
         # ---------------- 右栏（展开 340px，可折叠）
-        right_scroll, right_layout = make_scroll_column(constants.SIDE_FORM_WIDTH)
-        right_panel = CollapsiblePanel(
-            'right', expand_width=constants.SIDE_FORM_WIDTH, collapse_width=40, parent=self)
-        right_panel.set_content_widget(right_scroll)
-        columns.addWidget(right_panel)
-        self._right_panel = right_panel
+        self._right_panel, right_layout = make_collapsible_column(
+            'right', constants.SIDE_FORM_WIDTH, parent=self)
+        columns.addWidget(self._right_panel)
 
         detail_card, detail_layout = make_card('测线详情')
         self._detail_labels = {}
