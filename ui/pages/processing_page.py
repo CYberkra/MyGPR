@@ -133,7 +133,12 @@ class ProcessingPage(PanelStateMixin, QWidget):
         columns.setSpacing(constants.PAGE_SPACING)
         root.addLayout(columns, 1)
 
-        # ---------------- 左栏（展开 SIDE_TOOL_WIDTH px，可折叠；滚动栏宽须与面板展开宽一致）
+        self._build_left_column(columns)
+        self._build_middle_column(columns)
+        self._build_right_column(columns)
+
+    def _build_left_column(self, columns: QHBoxLayout) -> None:
+        """左栏（展开 SIDE_TOOL_WIDTH px，可折叠；滚动栏宽须与面板展开宽一致）。"""
         self._left_panel, left_layout = make_collapsible_column(
             'left', constants.SIDE_TOOL_WIDTH, parent=self)
         columns.addWidget(self._left_panel)
@@ -145,7 +150,8 @@ class ProcessingPage(PanelStateMixin, QWidget):
         # 卡片占满左栏全部可用高度，不再在底部留空白
         left_layout.addWidget(methods_card, 1)
 
-        # ---------------- 中栏（stretch）
+    def _build_middle_column(self, columns: QHBoxLayout) -> None:
+        """中栏（stretch）：tab 模型主区 = 上链条 / 下结果网格 + 进度条。"""
         middle = QWidget(self)
         middle_layout = QVBoxLayout(middle)
         middle_layout.setContentsMargins(0, 0, 0, 0)
@@ -231,7 +237,12 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._progress_row_widget.setVisible(False)
         middle_layout.addWidget(self._progress_row_widget)
 
-        # ---------------- 右栏（展开 SIDE_FORM_WIDTH px，可折叠；滚动栏宽须与面板展开宽一致）
+    def _build_right_column(self, columns: QHBoxLayout) -> None:
+        """右栏（展开 SIDE_FORM_WIDTH px，可折叠；滚动栏宽须与面板展开宽一致）。
+
+        v2：参数 / 执行 / 自动调参三卡已移入左栏，本栏整体隐藏——但
+        ``PipelineList`` 仍作步骤数据源留在栏内，故代码不删。
+        """
         self._right_panel, right_layout = make_collapsible_column(
             'right', constants.SIDE_FORM_WIDTH, parent=self)
         columns.addWidget(self._right_panel)
@@ -300,7 +311,11 @@ class ProcessingPage(PanelStateMixin, QWidget):
         autotune_layout.addWidget(self._adopt_params_btn)
         right_layout.addWidget(autotune_card)
         # v2：参数 / 执行 / 自动调参移入左栏（处理链改由顶部 chip 条承担，
-        # 右栏整体隐藏——PipelineList 仍作为步骤数据源留在右栏内，代码不删）
+        # 右栏整体隐藏——PipelineList 仍作为步骤数据源留在右栏内，代码不删）。
+        # 这三张卡在此处建、也在此 Reparent 进左栏：保持与 v2 迁移前完全
+        # 相同的父子关系（左栏 _content 内），避免 Qt 在跨 layout 搬运时
+        # 触发隐式几何重排。
+        left_layout = self._left_panel.content_widget().layout()
         left_layout.addWidget(param_card)
         left_layout.addWidget(exec_card)
         left_layout.addWidget(autotune_card)

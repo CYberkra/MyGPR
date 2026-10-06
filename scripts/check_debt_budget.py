@@ -115,25 +115,50 @@ def target_gaps(current: dict[str, int], target: dict[str, int]) -> dict[str, in
     }
 
 
-def build_gates(current: dict[str, int], baseline: dict[str, int]) -> list[RatchetGate]:
+def build_gates(current: dict[str, int], baseline: dict[str, int],
+                tolerances: dict[str, float] | None = None) -> list[RatchetGate]:
     """只对ENFORCED 里的键组棘轮；baseline 缺的键记missing_ok（不阻断）。
 
-    与原 ``evaluate_budget`` 语义一致：``value is not None and limit is not
+    与原 ``evaluate_budget`` 语义一致——``value is not None and limit is not
     None`` 才比较——即 baseline 未记录的指标既不算通过也不算失败，只是
     不在棘轮覆盖内。
+
+    ``tolerances`` 来自 baseline 文件的 ``tolerances`` 段：收紧 baseline 到
+    current 附近后，零余量会让「顺手多写一个 101 行函数」直接红 CI。给几个
+    百分点的余量吸收正常波动，同时保留「不可涨」的方向性——限额仍远低于
+    旧 baseline（如 functions_over_100_lines 124 → 46）。
     """
+    tolerances = tolerances or {}
     return [
         RatchetGate(name=key, current=int(current.get(key, 0)),
-                    baseline=baseline.get(key), missing_ok=True)
+                    baseline=baseline.get(key),
+                    tolerance=float(tolerances.get(key, 0.0)),
+                    missing_ok=True)
         for key in sorted(ENFORCED)
     ]
 
 
+def _read_tolerances() -> dict[str, float]:
+    """读 baseline 文件的 ``tolerances`` 段（缺项即 0，即零余量）。"""
+    if not BASELINE.exists():
+        return {}
+    payload = json.loads(BASELINE.read_text(encoding="utf-8"))
+    return {str(key): float(value)
+            for key, value in dict(payload.get("tolerances") or {}).items()}
+
+
 def _write_current_baseline(current: dict[str, int]) -> None:
+    """把当前实测值写为新 baseline，**保留**既有 tolerances 段。
+
+    收紧时不能顺手把容差清零——``--write-baseline`` 顾的是数值，容差是
+    独立的策略选择，清掉会让日常开发被零余量卡住。
+    """
+    tolerances = _read_tolerances()
     write_baseline(BASELINE, {
         "schema": "mygpr.debt_baseline.v1",
         "policy": "release-ratchet; values may decrease but may not increase",
         "metrics": current,
+        "tolerances": tolerances,
     })
 
 
@@ -148,14 +173,16 @@ def main() -> int:
         _write_current_baseline(current)
 
     baseline = read_baseline(BASELINE)
+    tolerances = _read_tolerances()
     target = read_baseline(REDUCTION_TARGET, field_name="target_metrics") \
         if REDUCTION_TARGET.exists() else {}
-    gates = build_gates(current, baseline)
+    gates = build_gates(current, baseline, tolerances)
     errors = [text for gate in gates if (text := gate.violation())]
     gaps = target_gaps(current, target)
     result: dict[str, Any] = {
         "current": current,
         "release_baseline": baseline,
+        "tolerances": tolerances,
         "reduction_target": target,
         "target_gaps": gaps,
     }

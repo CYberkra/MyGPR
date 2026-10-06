@@ -132,6 +132,12 @@ class SettingsPage(ScrollArea):
         所有 B-Scan（发 ``bscan_view_changed``，由主窗口下发），不必重启。
         """
         card, layout = make_card('B-Scan 视图')
+        self._build_bscan_axis_section(layout, card)
+        self._build_bscan_appearance_section(layout, card)
+        return card
+
+    def _build_bscan_axis_section(self, layout, card) -> None:
+        """「坐标与布局」小节：显示比例 + 横纵轴单位。"""
         layout.addWidget(self._section_header('坐标与布局', card))
 
         self._bscan_aspect_combo = ComboBox(card)
@@ -166,7 +172,13 @@ class SettingsPage(ScrollArea):
         layout.addLayout(make_form_row('纵轴单位:', self._bscan_y_axis_combo,
                                        parent=card))
 
+    def _build_bscan_appearance_section(self, layout, card) -> None:
+        """「外观与增益」小节：色标映射 / 色阶百分位 / 显示增益 / 色标显隐。
 
+        与 :meth:`_build_bscan_axis_section` 分开是因为这是两批语义不同的
+        控件——前者决定「坐标怎么读」，后者决定「像素怎么上色」；增益的
+        tooltip 也只对后者成立。
+        """
         layout.addWidget(self._section_header('外观与增益', card))
 
         self._bscan_cmap_combo = ComboBox(card)
@@ -236,7 +248,6 @@ class SettingsPage(ScrollArea):
         layout.addWidget(make_hint(
             '色阶只影响显示的明暗对比，不改动数据；B-Scan 上右键「色阶设置…」'
             '可只改单个视图。', parent=card))
-        return card
 
     @staticmethod
     def _section_header(text: str, parent) -> StrongBodyLabel:

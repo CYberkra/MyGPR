@@ -255,7 +255,12 @@ class SpatialPage(PanelStateMixin, QWidget):
         columns.setSpacing(constants.PAGE_SPACING)
         root.addLayout(columns, 1)
 
-        # ---------------- 左栏（展开 320px，可折叠）
+        self._build_left_column(columns)
+        self._build_middle_column(columns)
+        self._build_right_column(columns)
+
+    def _build_left_column(self, columns: QHBoxLayout) -> None:
+        """左栏（展开 320px，可折叠）：测线列表 / 底图 / 投影信息 / 三维显示。"""
         self._left_panel, left_layout = make_collapsible_column(
             'left', constants.SIDE_TOOL_WIDTH, parent=self)
         columns.addWidget(self._left_panel)
@@ -295,7 +300,16 @@ class SpatialPage(PanelStateMixin, QWidget):
         self._crs_label.setWordWrap(True)
         crs_layout.addWidget(self._crs_label)
         left_layout.addWidget(crs_card)
+        left_layout.addWidget(self._build_view3d_card())
+        left_layout.addStretch(1)
 
+    def _build_view3d_card(self) -> QWidget:
+        """左栏「三维显示」卡：垂直夸张 / 贴地 / 影像 / 地形来源 / 本地 DEM。
+
+        单独成方法而非并入 :meth:`_build_left_column`——它一行行堆的是五组
+        独立设置（各有 tooltip 解释），混进左栏装配流里会把「摆控件」这件
+        机械事淹没。
+        """
         view3d_card, view3d_layout = make_card('三维显示')
         exag_row = QHBoxLayout()
         exag_row.setSpacing(constants.CARD_SPACING)
@@ -361,10 +375,10 @@ class SpatialPage(PanelStateMixin, QWidget):
         self._3d_dem_label = CaptionLabel('未导入（在线下载高程）', view3d_card)
         self._3d_dem_label.setWordWrap(True)
         view3d_layout.addWidget(self._3d_dem_label)
-        left_layout.addWidget(view3d_card)
-        left_layout.addStretch(1)
+        return view3d_card
 
-        # ---------------- 中栏（stretch）
+    def _build_middle_column(self, columns: QHBoxLayout) -> None:
+        """中栏（stretch）：视图切换段控件 + 四视图栈 + 深度切片控制行。"""
         middle = QWidget(self)
         middle_layout = QVBoxLayout(middle)
         middle_layout.setContentsMargins(0, 0, 0, 0)
@@ -418,7 +432,11 @@ class SpatialPage(PanelStateMixin, QWidget):
         view_layout.addLayout(depth_row)
         middle_layout.addWidget(view_card, 1)
 
-        # ---------------- 右栏（展开 340px，可折叠）
+    def _build_right_column(self, columns: QHBoxLayout) -> None:
+        """右栏（展开 340px，可折叠）：测线详情 + 项目覆盖统计。
+
+        两张信息卡各占一半高度——避免详情卡内容短时下方留出视觉断裂的空白。
+        """
         self._right_panel, right_layout = make_collapsible_column(
             'right', constants.SIDE_FORM_WIDTH, parent=self)
         columns.addWidget(self._right_panel)
@@ -466,7 +484,6 @@ class SpatialPage(PanelStateMixin, QWidget):
         # avoids a visually disconnected blank area below a short detail card.
         right_layout.addWidget(detail_card, 1)
         right_layout.addWidget(coverage_card, 1)
-
     # ============================================================ 内部接线
     def _connect_internal(self) -> None:
         self._line_list.itemChanged.connect(self._on_line_check_changed)
