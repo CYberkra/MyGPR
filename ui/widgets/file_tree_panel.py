@@ -5,8 +5,9 @@
 - 数据唯一来源仍是各 controller（经 ProjectChain 扇出，本面板不发起任何
   后端调用）；
 - 整棵树由 ``ui.file_tree.build_project_model`` 纯函数装配（Provider 层）：
-  测线/成果/文件是三个一级分类节点（不可选），各自挂原有子模型——测线按
-  日期分组、成果按测线分组、文件为项目根目录树（目录展开时逐层懒加载）；
+  测线/成果/文件是三个一级分类节点（不可选），各自挂原有子模型——测线
+  平铺（line_id 升序）、成果按测线分组、文件为项目根目录树（目录展开时
+  逐层懒加载）；
 - 空分类折叠且 ``(0)`` 计数自明（无独立空态文案）；有内容的分类默认展开；
 - 测线叶子点击 → ``line_selected(str)`` → 复用 ``ProjectChain.on_line_selected``
   现有链路（含切线作废成果预览代数），与项目页测线表同语义；
@@ -20,7 +21,8 @@
 
 壳（头/细条/动画）全部来自 ``DockPanel`` 基类；本类只保留文件树自己的
 三件事：内容构建、按页展开态记忆（SettingsManager 持久化，一维
-``{page: collapsed}``，读取兼容旧二维格式）、细条指示文字 = 当前线 ID。
+``{page: collapsed}``，读取兼容旧二维格式）、重建时按 key 快照恢复
+折叠态（数据刷新/主题切换不冲掉用户手动折叠的分类）。
 """
 from __future__ import annotations
 
@@ -46,6 +48,7 @@ from ui.widgets.dock_panel import DockPanel
 _ROLE_PAYLOAD = Qt.ItemDataRole.UserRole        # line → line_id；artifact → artifact_id；spatial → result_id；report → package_dir
 _ROLE_KIND = Qt.ItemDataRole.UserRole + 1       # TreeNode.kind
 _ROLE_AUX = Qt.ItemDataRole.UserRole + 2        # artifact → 所属 line_id
+_ROLE_KEY = Qt.ItemDataRole.UserRole + 3        # TreeNode.key（重建快照展开态用）
 
 _SUFFIX_BRUSH = QBrush(QColor('#8a8a8a'))       # 行尾角标灰
 
@@ -324,7 +327,48 @@ class FileTreePanel(DockPanel):
         self._tree.setVisible(self._has_project)
         self._filler.setVisible(not self._has_project)
 
+    def _expanded_keys(self) -> set:
+        """当前树中展开且有子节点的节点 key 集合（重建前快照）。"""
+        keys: set = set()
+
+        def _walk(item) -> None:
+            if item.isExpanded() and item.childCount() > 0:
+                key = item.data(0, _ROLE_KEY)
+                if key:
+                    keys.add(key)
+            for i in range(item.childCount()):
+                _walk(item.child(i))
+
+        for item in self._top_items():
+            _walk(item)
+        return keys
+
+    def _empty_category_keys(self) -> set:
+        """当前为空的分类/分组 key 集合：这类节点首次长出内容时应默认
+        展开（「新内容到达」事件，不能因快照里没有它而被压住折叠）。"""
+        keys: set = set()
+
+        def _walk(item) -> None:
+            if item.data(0, _ROLE_KIND) in ('category', 'group') \
+                    and item.childCount() == 0:
+                key = item.data(0, _ROLE_KEY)
+                if key:
+                    keys.add(key)
+            for i in range(item.childCount()):
+                _walk(item.child(i))
+
+        for item in self._top_items():
+            _walk(item)
+        return keys
+
     def _rebuild(self) -> None:
+        # 快照展开态：数据刷新（打开工程/处理完成回灌成果/主题切换重建）
+        # 不应冲掉用户手动折叠的分类。树为空 = 首次构建，走默认展开规则。
+        snapshot = None
+        empty_keys: set = set()
+        if self._tree.topLevelItemCount():
+            snapshot = self._expanded_keys()
+            empty_keys = self._empty_category_keys()
         self._tree.clear()
         self._line_id_by_item.clear()
         self._suffixes.clear()
@@ -340,18 +384,25 @@ class FileTreePanel(DockPanel):
         for node in model:
             self._add_node(None, node)
 
-        # 分类/分组行有内容才默认展开（文件视图的目录不自动展开——
-        # 子层走懒加载；空分类折叠，(0) 计数自明）。分组行现在位于
-        # 分类下一层，必须递归展开，否则测线日期分组默认折叠（回归）。
-        def _expand_groups(item) -> None:
-            if item.data(0, _ROLE_KIND) in ('category', 'group') \
-                    and item.childCount() > 0:
-                item.setExpanded(True)
-            for i in range(item.childCount()):
-                _expand_groups(item.child(i))
-
-        for item in self._top_items():
-            _expand_groups(item)
+        # 展开策略：无快照（首次构建）→ 分类/分组有内容就默认展开，
+        # 空分类折叠（(0) 计数自明），目录不自动展开（子层走懒加载）。
+        # 有快照 → 按快照恢复；空分类首次长出内容（key ∈ empty_keys）
+        # 仍默认展开。目录恢复展开会触发懒加载替换占位行，新子节点
+        # 继续入栈，深层展开态也能恢复（worklist 而非递归的原因）。
+        work = list(self._top_items())
+        while work:
+            item = work.pop()
+            kind = item.data(0, _ROLE_KIND)
+            key = item.data(0, _ROLE_KEY)
+            if item.childCount() > 0 and not item.isExpanded():
+                if kind in ('category', 'group'):
+                    if snapshot is None or key in snapshot \
+                            or key in empty_keys:
+                        item.setExpanded(True)
+                elif kind == 'dir' and snapshot and key in snapshot:
+                    item.setExpanded(True)
+            work.extend(item.child(i)
+                        for i in range(item.childCount()))
         self._apply_suffix_width()
         self._select_leaf(self._current_line_id)
         self._apply_view_state()
@@ -401,6 +452,7 @@ class FileTreePanel(DockPanel):
             self._suffixes.add(node.suffix)
         if node.tooltip:
             item.setToolTip(0, node.tooltip)
+        item.setData(0, _ROLE_KEY, node.key)
         item.setData(0, _ROLE_KIND, node.kind)
         if node.kind in ('group', 'category'):
             item.setFlags(Qt.ItemFlag.ItemIsEnabled)  # 不可选，仅展开

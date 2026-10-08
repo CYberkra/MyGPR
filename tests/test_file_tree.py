@@ -12,7 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 pytest.importorskip("PyQt6")
 
-from PyQt6.QtCore import Qt  # noqa: E402
+from PyQt6.QtCore import QEvent, QPointF, Qt  # noqa: E402
+from PyQt6.QtGui import QMouseEvent  # noqa: E402
 
 from ui.file_tree import (  # noqa: E402
     build_artifacts_model, build_files_model, build_project_model,
@@ -526,6 +527,49 @@ def test_strip_text_blank_while_collapsed(qapp, panel):
     panel.set_current_line('L09')
     assert panel._strip_line_label.text() == ''
     assert panel._strip_line_label.isHidden()
+
+
+def _strip_press_event() -> QMouseEvent:
+    return QMouseEvent(
+        QEvent.Type.MouseButtonPress, QPointF(9, 100), QPointF(9, 100),
+        Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier)
+
+
+def test_strip_click_anywhere_expands(qapp, panel):
+    """收起细条整条可点（兑现收起钮 tooltip 的「点击细条可展开」）。"""
+    panel.set_project_info(types.SimpleNamespace(name='测试1'))
+    panel.set_collapsed(True, animate=False)
+    assert panel.is_collapsed()
+    assert panel.eventFilter(panel._strip_view, _strip_press_event()) is True
+    assert not panel.is_collapsed()
+    # 展开态下细条隐藏，过滤器不响应
+    assert panel.eventFilter(panel._strip_view, _strip_press_event()) is False
+
+
+def test_rebuild_preserves_user_collapsed_category(qapp, panel):
+    """数据刷新不冲掉用户手动折叠的分类（按 key 快照恢复）。"""
+    panel.set_project_info(types.SimpleNamespace(name='测试1'))
+    panel.set_lines([_line('L01', '2026-09-16T01:00:00')])
+    panel.set_artifacts([_artifact('A1', 'L01')])
+    tree = panel._tree
+    assert tree.topLevelItem(1).isExpanded()   # 空分类首次长出内容 → 展开
+    tree.topLevelItem(1).setExpanded(False)    # 用户手动折叠「成果」
+    panel.set_lines([_line('L01', '2026-09-16T01:00:00')])
+    assert not tree.topLevelItem(1).isExpanded()   # 刷新不冲掉折叠态
+    assert tree.topLevelItem(0).isExpanded()       # 未动过的分类保持展开
+    panel.set_artifacts([_artifact('A1', 'L01'), _artifact('A2', 'L01')])
+    assert not tree.topLevelItem(1).isExpanded()   # 新成果到达也不强制展开
+
+
+def test_rebuild_first_build_defaults(qapp, panel):
+    """首次构建（树为空，无快照）：有内容的分类默认展开，空分类折叠。"""
+    panel.set_project_info(types.SimpleNamespace(name='测试1'))
+    panel.set_lines([_line('L01', '2026-09-16T01:00:00')])
+    tree = panel._tree
+    assert tree.topLevelItem(0).isExpanded()      # 测线（有内容）
+    assert not tree.topLevelItem(1).isExpanded()  # 成果（空，(0) 自明）
+    assert not tree.topLevelItem(2).isExpanded()  # 文件（空）
 
 
 # ------------------------------------------------ 状态圆点与右键菜单

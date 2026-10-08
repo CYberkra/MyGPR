@@ -20,7 +20,7 @@ _strip_line_label/_collapsed`` 为既有测试约定，勿改名。
 """
 from __future__ import annotations
 
-from PyQt6.QtCore import QEasingCurve, Qt, QSize, QVariantAnimation, pyqtSignal
+from PyQt6.QtCore import QEasingCurve, QEvent, Qt, QSize, QVariantAnimation, pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 from qfluentwidgets import TransparentToolButton
 from qfluentwidgets import FluentIcon as FIF
@@ -87,6 +87,11 @@ class DockPanel(QWidget):
 
         # ---------------- 细条态视图（展开钮 + 竖排指示）
         self._strip_view = QWidget(self)
+        # 整条可点：兑现收起钮 tooltip 的「点击细条可展开」承诺，命中
+        # 区域从 18×24 的 chevron 扩到整条（18px 宽 × 全高）。手型光标
+        # 提示可点；chevron 按钮自身接收点击，不经过滤器、不会双重触发
+        self._strip_view.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._strip_view.installEventFilter(self)
         strip_layout = QVBoxLayout(self._strip_view)
         strip_layout.setContentsMargins(0, 0, 0, 4)
         strip_layout.setSpacing(2)
@@ -156,6 +161,17 @@ class DockPanel(QWidget):
 
     def _on_view_state_changed(self) -> None:
         """收/放后视图微调（子类覆写：如文件树的树/空态切换）。"""
+
+    def eventFilter(self, obj, event) -> bool:
+        """细条整条可点：点击细条空白区 = 点展开钮（走子类
+        ``_on_toggle_clicked``，保留按页记忆等持久化路径）。仅在收起态
+        响应；展开态下细条隐藏，事件不会到达。"""
+        if obj is self._strip_view \
+                and self._collapsed \
+                and event.type() == QEvent.Type.MouseButtonPress:
+            self._on_toggle_clicked()
+            return True
+        return super().eventFilter(obj, event)
 
     def _on_toggle_clicked(self) -> None:
         """开关点击入口（子类覆写以加入持久化，最后调用 toggle()）。"""
