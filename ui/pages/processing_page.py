@@ -176,6 +176,8 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._line_combo = ComboBox(middle)
         self._line_combo.setMinimumWidth(130)
         self._line_combo.setToolTip('当前测线：在处理页直接切换')
+        # 空态占位（深查 P3）：无测线时原样一个白框，看不出用途
+        self._line_combo.setPlaceholderText('选择测线')
         self._artifact_combo = ComboBox(middle)
         self._artifact_combo.setMinimumWidth(150)
         self._artifact_combo.setToolTip('选择该测线历次处理结果作为输入')
@@ -243,7 +245,7 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._progress_bar = ProgressBar(middle)
         self._progress_bar.setRange(0, 100)
         self._progress_bar.setValue(0)
-        progress_row.addWidget(self._progress_bar, 1)
+        progress_row.addWidget(self._progress_bar, 3)
         self._progress_label = CaptionLabel('', middle)
         self._progress_label.setMinimumWidth(0)
         progress_row.addWidget(self._progress_label, 1)
@@ -557,11 +559,11 @@ class ProcessingPage(PanelStateMixin, QWidget):
             if group_id != self._echoed_group:
                 self._preview_requested.clear()   # 新上下文：预览全部重发
                 self._pipeline_list.set_steps([
-                    {'method_id': str(getattr(art, 'method_id', '') or ''),
-                     'label': str(getattr(art, 'method_id', '') or ''),
+                    {'method_id': mid,
+                     'label': self._display_name(mid),
                      'params': {}, 'enabled': True}
                     for (_s, _k, _c, _aid, art) in members
-                     if str(getattr(art, 'method_id', '') or '')])
+                     if (mid := str(getattr(art, 'method_id', '') or ''))])
                 steps = self._pipeline_list.steps()
                 self._echoed_group = group_id
             # 「全部步骤」开关关闭 → 只铺输入 + 最终结果（P3 就地版）
@@ -571,9 +573,10 @@ class ProcessingPage(PanelStateMixin, QWidget):
             for i, (_s, kind, _c, artifact_id, art) in enumerate(members):
                 if i not in shown or f'step:{i}' in self._closed_slots:
                     continue
-                method = (str(getattr(art, 'method_id', '') or '')
-                          or str(getattr(art, 'name', '') or ''))
-                slots.append({'key': f'step:{i}', 'title': f'{i + 1} {method}',
+                mid = str(getattr(art, 'method_id', '') or '')
+                label = (self._display_name(mid) if mid
+                         else str(getattr(art, 'name', '') or ''))
+                slots.append({'key': f'step:{i}', 'title': f'{i + 1} {label}',
                               'enabled': True})
             self._step_artifact_ids = {
                 i: artifact_id
@@ -868,20 +871,29 @@ class ProcessingPage(PanelStateMixin, QWidget):
                     success: bool | None = None) -> None:
         """运行态切换：运行按钮/取消按钮互斥 + 进度条显隐。
 
-        ``success=True``（运行正常结束）时顶部链条的运行钮闪一次 ✓。
+        ``success=True``（运行正常结束）时顶部链条的运行钮闪一次「完成」。
         """
         self._running = bool(running)
         self._job_id = job_id or ''
         self._run_btn.setEnabled(not self._running)
         self._cancel_btn.setEnabled(self._running)
         self._progress_row_widget.setVisible(self._running)
-        # v2：顶部链条的运行钮同步进入 spinner 态（结束回到「运行」）
+        # v2：顶部链条的运行钮同步翻转——运行中即「取消」（就近可达，
+        # 2026-10-09 深查 P2）
         self._chain_strip.set_running(self._running)
-        if not self._running and success:
-            self._chain_strip.flash_success()
         if self._running:
+            # 运行中不显示「已修改·点运行更新」——正在更新中，琥珀标签
+            # 与取消钮并存是矛盾信息（深查 P2）
+            self._chain_strip.set_dirty(False)
             self._progress_bar.setValue(0)
             self._progress_label.setText('')
+        else:
+            if success:
+                self._chain_strip.flash_success()
+            # 取消路径：链已改而结果未重算，恢复琥珀提示；完成路径由
+            # _refresh_chain_and_results 按新结果重设，此处幂等
+            if self._results_stale and self._step_artifact_ids:
+                self._chain_strip.set_dirty(True)
 
     def set_progress(self, completed: int, total: int, message: str) -> None:
         """进度更新：total>0 按比例，否则按百分数；message 显示在进度条右侧。"""
@@ -1007,10 +1019,22 @@ class ProcessingPage(PanelStateMixin, QWidget):
             return nested
         return manifest
 
+    def _display_name(self, method_id: str) -> str:
+        """method_id → 中文显示名（方法库未登记时回退 method_id）。
+
+        链 chip / 结果卡标题统一走这里（2026-10-09 深查 P2）：回显路径
+        原样显示 method_id，与方法库的中文显示名混拼——同一页面两套命名。
+        """
+        if not method_id:
+            return method_id
+        method = self._methods_by_id.get(method_id) or {}
+        return str(method.get('display_name') or method_id)
+
     def _newest_run_members(self) -> tuple[str, list]:
         """最新 run_group 的成员（已按步序排序；无则 ('', [])）。
 
-        元素：(kind, created, artifact_id, art)。结果网格与步骤 tab 共用
+        元素：(step, kind, created, artifact_id, art) 五元组（调用方按
+        步序解包）。结果网格与步骤 tab 共用
         ——「上面怎么排，下面就按同序看各步结果」以运行事实（B7 落盘）
         为准，而非当前链定义（用户可能已改链）。
         """
@@ -1082,8 +1106,9 @@ class ProcessingPage(PanelStateMixin, QWidget):
             key = f'artifact:{artifact_id}'
             if any(s['key'] == key for s in self._preview_sources):
                 continue
-            title = (str(getattr(art, 'method_id', '') or '')
-                     or str(getattr(art, 'name', '') or '') or '处理结果')
+            mid = str(getattr(art, 'method_id', '') or '')
+            title = (self._display_name(mid) if mid
+                     else str(getattr(art, 'name', '') or '') or '处理结果')
             self._preview_sources.append({
                 'key': key, 'title': title, 'bundle': None,
                 'artifact_id': artifact_id, 'closable': True,
@@ -1208,6 +1233,9 @@ class ProcessingPage(PanelStateMixin, QWidget):
     # ---------------- 执行
     def _on_run_clicked(self) -> None:
         if self._running:
+            # 运行钮就近翻转（2026-10-09 深查 P2）：同一位置点击 = 取消，
+            # 不再让用户到可能收起的左栏执行卡里找取消钮
+            self.cancel_requested.emit()
             return
         steps = self._pipeline_list.steps()
         if not steps:

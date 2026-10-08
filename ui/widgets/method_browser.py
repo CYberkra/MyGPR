@@ -90,9 +90,10 @@ class MethodBrowser(QWidget):
                               m.get('method_id', ''))
                 child.setData(0, Qt.ItemDataRole.UserRole + 1,
                               m.get('display_name') or m.get('name', ''))
-                n_params = len(m.get('parameter_schema') or [])
-                child.setToolTip(0, '方法ID: %s\n参数数: %d'
-                                    % (m.get('method_id', ''), n_params))
+                # tooltip 给全名（列表宽不够时悬停可读）；原「方法ID/参数数」
+                # 是开发者视角字样（2026-10-09 深查 P3）
+                child.setToolTip(0, str(m.get('display_name')
+                                        or m.get('name', '')))
                 top.addChild(child)
 
                 row_widget = QWidget(self._tree)
@@ -158,8 +159,11 @@ class MethodBrowser(QWidget):
         add_action(menu, FIF.ADD, '添加到处理链',
                    lambda: self.sig_add_requested.emit(mid))
         menu.addSeparator()
+        # 复制的是用户看到的名字（display_name）——原复制 method_id
+        # 是开发者视角，粘贴出来对不上界面字样（2026-10-09 深查 P3）
+        display = str(item.data(0, Qt.ItemDataRole.UserRole + 1) or mid)
         add_action(menu, FIF.COPY, '复制方法名',
-                   lambda: QApplication.clipboard().setText(mid))
+                   lambda: QApplication.clipboard().setText(display))
         menu.exec(self._tree.viewport().mapToGlobal(pos))
 
     def current_method_id(self):

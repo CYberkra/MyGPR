@@ -433,6 +433,11 @@ class ResultGrid(QWidget):
             del self._bundles[stale]
         self._count_label.setText(f'结果 {len(new_cards)} 幅')
         self._empty.setVisible(not self._cards)
+        # 空态收起运行后才有的开关（progressive disclosure，2026-10-09 深查）：
+        # 没有结果时「统一色标/中间步骤」无从谈起，摆着只会引误点
+        has_cards = bool(self._cards)
+        self._scale_switch.setVisible(has_cards)
+        self._expand_switch.setVisible(has_cards)
         self._apply_view_mode()
 
     # ------------------------------------------------------------ 视图模式

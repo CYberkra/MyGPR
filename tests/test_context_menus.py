@@ -15,7 +15,11 @@ pytest.importorskip("PyQt6")  # 后端 CI（无 Qt）自动跳过，见 tests/co
 
 @pytest.fixture(scope='module')
 def qapp():
-    yield qapp
+    """模块级 QApplication（原 `yield qapp` 自引用返回函数对象——无应用
+    实例时 BScanView 构造挂死、异步回包不派发，单文件跑必炸）。"""
+    from PyQt6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    yield app
 
 
 # ------------------------------------------------------------------ line_source_path
@@ -46,7 +50,7 @@ class TestLineSourcePath:
         assert lid == line_id
         return path
 
-    def test_roundtrip(self, tmp_path):
+    def test_roundtrip(self, qapp, tmp_path):
         manifest = tmp_path / 'raw' / 'L01' / 'import_manifest.json'
         manifest.parent.mkdir(parents=True)
         manifest.write_text(json.dumps(
@@ -55,18 +59,18 @@ class TestLineSourcePath:
         controller = self._controller(tmp_path)
         assert self._resolve(controller, 'L01') == 'D:/data/营山/L01.csv'
 
-    def test_missing_manifest_returns_none(self, tmp_path):
+    def test_missing_manifest_returns_none(self, qapp, tmp_path):
         controller = self._controller(tmp_path)
         assert self._resolve(controller, 'L99') is None
 
-    def test_invalid_json_returns_none(self, tmp_path):
+    def test_invalid_json_returns_none(self, qapp, tmp_path):
         manifest = tmp_path / 'raw' / 'L01' / 'import_manifest.json'
         manifest.parent.mkdir(parents=True)
         manifest.write_text('{not json', encoding='utf-8')
         controller = self._controller(tmp_path)
         assert self._resolve(controller, 'L01') is None
 
-    def test_empty_source_path_returns_none(self, tmp_path):
+    def test_empty_source_path_returns_none(self, qapp, tmp_path):
         manifest = tmp_path / 'raw' / 'L01' / 'import_manifest.json'
         manifest.parent.mkdir(parents=True)
         manifest.write_text(json.dumps({'line_id': 'L01', 'source_path': ''}),
@@ -130,7 +134,8 @@ def test_map_view_fit_to_tracks_uses_summaries(qapp):
     from ui.widgets.map_view import MapView
     view = MapView()
     view._track_summaries = [
-        {'xs': np.array([0.0, 1000.0]), 'ys': np.array([0.0, 500.0])}]
+        {'xs': np.array([0.0, 1000.0]), 'ys': np.array([0.0, 500.0]),
+         'mapped': True}]   # fit_to_tracks 只统计已配准轨迹（map_view 有意过滤）
     view.fit_to_tracks()
     rect = view._plot.vb.viewRect()
     assert rect.width() >= 1000.0 and rect.height() >= 500.0
