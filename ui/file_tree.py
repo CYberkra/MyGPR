@@ -301,3 +301,30 @@ def build_files_model(dir_path: Any) -> list[TreeNode]:
                 tooltip=entry.path))
     by_name = lambda n: n.text.lower()  # noqa: E731
     return sorted(dirs, key=by_name) + sorted(files, key=by_name)
+
+
+# ---------------------------------------------------------------- 项目总树
+def build_project_model(lines: Sequence[Any], artifacts: Sequence[Any],
+                        spatial_results: Sequence[Any] = (),
+                        reports: Sequence[Any] = (),
+                        files_root: Any = None) -> list[TreeNode]:
+    """单棵三分类树（真树形）：测线 / 成果 / 文件 作为一级节点常驻。
+
+    取代旧「顶部分段切换三视图」结构。分类行 ``kind='category'``，
+    ``suffix`` = 该类条目数——空分类折叠后 ``(0)`` 计数自明，不再需要
+    「尚无成果」之类的空态文案；有内容的分类由面板默认展开。
+    文件分类仅在给出 ``files_root``（项目根）时参与计数与子节点
+    （单层扫描，子目录沿用面板懒加载）。
+    """
+    file_nodes = build_files_model(files_root) if files_root else []
+    categories = (
+        ('测线', len(lines), build_tree_model(lines)),
+        ('成果', len(artifacts) + len(spatial_results) + len(reports),
+         build_artifacts_model(artifacts, spatial_results, reports)),
+        ('文件', len(file_nodes), file_nodes),
+    )
+    return [
+        TreeNode(key=f'category:{name}', kind='category', text=name,
+                 suffix=str(count), children=tuple(children))
+        for name, count, children in categories
+    ]
