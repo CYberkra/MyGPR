@@ -40,8 +40,18 @@ def create_app() -> object:
 
     必须先设``QT_QPA_PLATFORM`` 再建QApplication：环境变量在QApplication
     构造时读取，之后设置无效。返回 QApplication 实例（已有则复用）。
+
+    字体（2026-10-09）：offscreen 插件用 FreeType 精简字体库，默认从
+    ``QT_QPA_FONTDIR``（未设置时≈exe 目录）扫描字体——venv 里没有字体
+    文件，中文全部渲染成豆腐块（□）。指向系统字体目录恢复中英文渲染
+    （A/B 实证见 ``output/probes_archive/_font_test_*.png``）；目录不存在
+    （非 Windows）时保持 Qt 默认行为。
     """
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    if not os.environ.get('QT_QPA_FONTDIR'):
+        win_fonts = Path(os.environ.get('WINDIR', r'C:\Windows')) / 'Fonts'
+        if win_fonts.is_dir():
+            os.environ['QT_QPA_FONTDIR'] = str(win_fonts)
     ensure_repo_on_path()
     from PyQt6.QtWidgets import QApplication
     return QApplication.instance() or QApplication(sys.argv)
