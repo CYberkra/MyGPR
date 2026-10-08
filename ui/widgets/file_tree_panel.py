@@ -285,7 +285,8 @@ class FileTreePanel(DockPanel):
 
     # ------------------------------------------------------------ DockPanel 钩子
     def strip_text(self) -> str:
-        return self._current_line_id
+        # 收起细条不显示竖排文字：左坞仅此一面板，线号/面板名无辨识价值
+        return ''
 
     def _on_toggle_clicked(self) -> None:
         # 手动切换：立即按当前页记忆并持久化

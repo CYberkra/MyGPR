@@ -7,8 +7,8 @@
 
 - **统一的头**：标题 + 右上角收起钮（唯一开关）；`set_header_widget()` 允许
   用自定义控件替换标题（右坞放"日志/任务"页签）；
-- **统一的收起态**：18px 细条 + 竖排内容指示（子类经 ``strip_text()`` 提供，
-  如当前线名/当前页签名）+ 展开钮；
+- **统一的收起态**：18px 细条 + 竖排内容指示（子类经 ``strip_text()``
+  提供，如右坞当前页签名；返回空串则不显示文字，如文件树细条）+ 展开钮；
 - **统一的动画**：QVariantAnimation + OutCubic 220ms，走
   ``ui.motion.animations_enabled()`` 无障碍总闸；
 - **开关唯一入口**：``set_collapsed()`` / ``toggle()``；子类可覆写
@@ -151,7 +151,7 @@ class DockPanel(QWidget):
 
     # ------------------------------------------------------------ 子类钩子
     def strip_text(self) -> str:
-        """细条竖排指示文字（子类覆写：当前线名/当前页签名…）。"""
+        """细条竖排指示文字（子类覆写）；返回空串 = 细条不显示文字。"""
         return self._title_text
 
     def _on_view_state_changed(self) -> None:
@@ -192,7 +192,6 @@ class DockPanel(QWidget):
         self._strip_view.setVisible(self._collapsed)
         if self._collapsed:
             self._update_strip_text()
-            self._strip_line_label.setVisible(True)
             if sync_width:
                 self.setFixedWidth(constants.DOCK_COLLAPSED_WIDTH)
         else:
@@ -203,7 +202,8 @@ class DockPanel(QWidget):
 
     def _update_strip_text(self) -> None:
         text = self.strip_text()[:6]
-        self._strip_line_label.setText('\n'.join(text) if text else '—')
+        self._strip_line_label.setText('\n'.join(text) if text else '')
+        self._strip_line_label.setVisible(bool(text))
 
     def _animate_width(self, start_w: int, target_w: int) -> None:
         if self._width_anim is not None:

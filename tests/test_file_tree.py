@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""文件树：分组纯函数 + 面板行为（叶子可选、分组行不可选、同步防回环）。"""
+"""文件树：装配纯函数 + 面板行为（叶子可选、分类行不可选、同步防回环）。"""
 from __future__ import annotations
 
 import sys
@@ -16,7 +16,7 @@ from PyQt6.QtCore import Qt  # noqa: E402
 
 from ui.file_tree import (  # noqa: E402
     build_artifacts_model, build_files_model, build_project_model,
-    build_tree_model, group_lines, group_stats, line_suffix,
+    build_tree_model, line_suffix,
 )
 from ui.widgets.file_tree_panel import (  # noqa: E402
     _SUFFIX_MAX_RATIO, _SUFFIX_PAD, suffix_column_width,
@@ -46,38 +46,6 @@ def _report(package_dir='proj/reports/r20260916',
         file_count=file_count)
 
 
-# ---------------------------------------------------------------- 纯函数
-def test_group_by_date_desc_and_lines_asc():
-    lines = [
-        _line('L09', '2026-09-16T01:20:58'),
-        _line('L01', '2026-09-16T01:00:00'),
-        _line('L05', '2026-09-15T23:10:00'),
-    ]
-    groups = dict(group_lines(lines))
-    assert list(groups) == ['2026-09-16', '2026-09-15']  # 日期倒序
-    assert [ln.line_id for ln in groups['2026-09-16']] == ['L01', 'L09']
-    assert [ln.line_id for ln in groups['2026-09-15']] == ['L05']
-
-
-def test_all_undated_falls_back_to_flat():
-    lines = [_line('L01'), _line('L02')]
-    groups = group_lines(lines)
-    assert groups == [('', lines)]  # 平铺：不产生分组节点
-
-
-def test_partial_undated_joins_ungrouped():
-    lines = [_line('L01', '2026-09-16T01:00:00'), _line('L02')]
-    groups = dict(group_lines(lines))
-    assert set(groups) == {'2026-09-16', '未分组'}
-    assert [ln.line_id for ln in groups['未分组']] == ['L02']
-
-
-def test_group_stats_shows_count_and_length():
-    lines = [_line('L01', length_m=98.4), _line('L02', length_m=50.0)]
-    assert group_stats(lines) == '2 条 · 148 m'
-    assert group_stats([]) == '0 条'
-
-
 # ------------------------------------------------ 节点模型（Provider 纯函数）
 def test_line_suffix_derives_from_line_fields():
     assert line_suffix(_line('L01')) == ''
@@ -87,17 +55,16 @@ def test_line_suffix_derives_from_line_fields():
                              interface_keypoint_count=5)) == '成果✓ 标2 界面✓'
 
 
-def test_build_tree_model_groups_lines_and_suffixes():
+def test_build_tree_model_flat_lines_sorted_by_id():
+    """测线平铺：无分组层，line_id 升序（排序与 updated_at 日期无关）。"""
     nodes = build_tree_model([
-        _line('L01', '2026-09-16T01:00:00', processed_result='r'),
-        _line('L02', '2026-09-16T02:00:00'),
+        _line('L09', '2026-09-16T01:20:58', processed_result='r'),
+        _line('L01', '2026-09-15T23:10:00'),
     ])
-    assert len(nodes) == 1
-    group = nodes[0]
-    assert group.kind == 'group' and group.text == '2026-09-16'
-    assert [c.payload for c in group.children] == ['L01', 'L02']
-    assert group.children[0].suffix == '成果✓'
-    assert group.children[1].suffix == ''
+    assert [n.kind for n in nodes] == ['line', 'line']
+    assert [n.payload for n in nodes] == ['L01', 'L09']
+    assert nodes[1].suffix == '成果✓'
+    assert nodes[0].suffix == ''
 
 
 def _artifact(artifact_id='A1', line_id='L01', name='去直流',
@@ -159,7 +126,7 @@ def test_build_project_model_three_categories_with_counts():
     assert [n.kind for n in nodes] == ['category'] * 3
     assert [n.text for n in nodes] == ['测线', '成果', '文件']
     assert [n.suffix for n in nodes] == ['2', '1', '0']
-    # 无日期测线平铺（不产生分组层）；成果挂原有子模型；
+    # 测线平铺（无分组层）；成果挂原有子模型；
     # 空分类 children 为空（折叠 + (0) 自明）
     assert nodes[0].children[0].kind == 'line'
     assert nodes[1].children[0].kind == 'group'
@@ -257,8 +224,10 @@ def test_panel_builds_leaves_and_selects(qapp, panel):
     lines_cat = tree.topLevelItem(0)
     assert lines_cat.text(0) == '测线'
     assert lines_cat.text(1) == '2'      # 计数角标
-    group = lines_cat.child(0)           # 日期分组
-    assert group.childCount() == 2
+    leaf0 = lines_cat.child(0)           # 平铺：叶子直接挂分类下
+    assert leaf0.text(0).startswith('L01')
+    assert leaf0.childCount() == 0
+    assert lines_cat.child(1).text(0).startswith('L09')
     # 分类行不可选（防预览代数被无关点击推进）
     assert not (lines_cat.flags() & Qt.ItemFlag.ItemIsSelectable)
     # 当前测线高亮
@@ -485,7 +454,7 @@ class _FakeSettings:
         return True
 
 
-def test_collapse_shows_strip_with_current_line(qapp, panel):
+def test_collapse_shows_blank_strip(qapp, panel):
     panel.set_project_info(types.SimpleNamespace(name='测试1'))
     panel.set_lines([_line('L01', '2026-09-16T01:00:00')])
     panel.set_current_line('L01')
@@ -493,7 +462,7 @@ def test_collapse_shows_strip_with_current_line(qapp, panel):
     assert panel.width() <= 20  # 细条
     assert not panel._expanded_view.isVisibleTo(panel)
     assert panel._strip_view.isVisibleTo(panel)
-    assert 'L\n0\n1' in panel._strip_line_label.text()
+    assert panel._strip_line_label.isHidden()  # 竖排文字已删，细条留白
     panel.set_collapsed(False, animate=False)
     assert panel._expanded_view.isVisibleTo(panel)
     assert panel.width() >= 200
@@ -549,12 +518,14 @@ def test_settings_legacy_2d_format_reads_main_view_value(qapp, panel):
     assert panel._collapsed_for('homeInterface') is True
 
 
-def test_strip_text_updates_on_line_switch_while_collapsed(qapp, panel):
+def test_strip_text_blank_while_collapsed(qapp, panel):
+    """收起细条无竖排文字：左坞仅此一面板，线号/面板名无辨识价值。"""
     panel.set_project_info(types.SimpleNamespace(name='测试1'))
     panel.set_lines([_line('L09')])
     panel.set_collapsed(True, animate=False)
     panel.set_current_line('L09')
-    assert 'L\n0\n9' in panel._strip_line_label.text()
+    assert panel._strip_line_label.text() == ''
+    assert panel._strip_line_label.isHidden()
 
 
 # ------------------------------------------------ 状态圆点与右键菜单
