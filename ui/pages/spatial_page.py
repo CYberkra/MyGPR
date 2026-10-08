@@ -34,6 +34,7 @@ from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants, file_dialogs
 from ui.geo_utils import coverage_statistics, format_distance
+from ui.spatial_view_sync import ViewSyncMixin
 from ui.page_scaffold import (PanelStateMixin, make_card,
                               make_collapsible_column, make_hint,
                               make_segment_card,
@@ -93,7 +94,7 @@ class _DemLoadWorker(QRunnable):
             self._signals.finished.emit(self._generation, dem, self._path, '')
 
 
-class SpatialPage(PanelStateMixin, QWidget):
+class SpatialPage(ViewSyncMixin, PanelStateMixin, QWidget):
     """空间信息页面。"""
 
     current_line_requested = pyqtSignal(str)    # 设为当前测线（line_id）
@@ -121,6 +122,8 @@ class SpatialPage(PanelStateMixin, QWidget):
         # 切段/切页可见时由 _flush_dirty_view 补齐（见 _refresh_views 注释）
         self._dirty_views: set[str] = set()
         self._view_data = ([], {})            # (tracks, colors) 最近一次数据快照
+        # 数据指纹去重（数据没变不重复 set_tracks）：状态与方法在 ViewSyncMixin
+        self._init_view_sync()
         self._sm = None                       # 共享 SettingsManager（主窗口注入，唯一写者）
         self._dem_pool = QThreadPool(self)    # 本地 DEM 解析（大文件不冻结 GUI 线程）
         self._dem_pool.setMaxThreadCount(1)
@@ -658,6 +661,8 @@ class SpatialPage(PanelStateMixin, QWidget):
         self._profile_view.apply_theme(dark)
         self._3d_view.apply_theme(dark)
         self._depth_view.apply_theme(dark)
+        # 主题切换会重建视图内部条目，指纹作废：下次刷新必须重新灌数据
+        self._views_applied.clear()
         # 空态 hint 颜色由 HintLabel.apply_theme 随主题自刷，无需手工重设
 
     # ============================================================ 内部逻辑
@@ -681,8 +686,12 @@ class SpatialPage(PanelStateMixin, QWidget):
             route_key, self._map_view)
         self._view_stack.setCurrentWidget(widget)
         self._sync_view_affordances(route_key)
-        # 切到某分段才补齐它延后的重绘（_refresh_views 只重绘当时可见的视图）
-        self._flush_dirty_view(str(route_key))
+        # 切到某分段才补齐它延后的重绘（_refresh_views 只重绘当时可见的视图）。
+        # 延后一拍：先让分段切换 + 控件状态上屏，再执行可能上百毫秒的
+        # set_tracks——同步执行会把「切段」这个动作本身卡成整窗无响应
+        # （三维视图尤甚：GL 全量重建 130–470 ms，2026-10-08 用户反馈
+        # 「每次点三维视图软件都会消失再出来」）。
+        QTimer.singleShot(0, lambda k=str(route_key): self._flush_if_current(k))
         if route_key == _SEG_DEPTH and not self._depth_payload_line_ids:
             # 首次切到深度切片段：自动以当前勾选测线请求一次预览
             checked = [str(t.line_id) for t in self._checked_tracks()]
@@ -723,13 +732,24 @@ class SpatialPage(PanelStateMixin, QWidget):
 
         可见性判定用「空间页本身可见 && 该视图是当前分段」双条件：
         页面不可见时连当前分段也不重绘，全部留给切页/切段时补齐。
+
+        数据指纹去重（2026-10-08）：脏标记从「不在当前分段就记脏」改为
+        「数据指纹和该视图上次成功灌入的一致就不记脏」。没有这层，切段
+        永远触发全量 set_tracks——即使数据一字未变（切走即标脏、切回必
+        重建），三维视图每次都白付 130–470 ms 的 GL 重建 + numpy 变换。
         """
         tracks = self._checked_tracks()
         active = self._active_view_key()
         self._view_data = (tracks, self._colors)
+        fingerprint = self._tracks_fingerprint(tracks, self._colors)
         for key, view in self._views().items():
             if key == active:
-                self._apply_tracks(view, tracks, self._colors)
+                self._apply_tracks_if_changed(
+                    key, view, tracks, self._colors, fingerprint)
+            elif self._views_applied.get(key) == fingerprint:
+                # 该视图已是最新数据：不标脏（若此前被标过则撤销），
+                # 切回时 flush 发现不脏 + 指纹一致，不会再重建
+                self._dirty_views.discard(key)
             else:
                 self._dirty_views.add(key)
 
@@ -737,15 +757,6 @@ class SpatialPage(PanelStateMixin, QWidget):
         """分段键 → 视图实例。"""
         return {_SEG_MAP: self._map_view, _SEG_PROFILE: self._profile_view,
                 _SEG_3D: self._3d_view, _SEG_DEPTH: self._depth_view}
-
-    def _apply_tracks(self, view, tracks, colors) -> None:
-        """把轨迹数据灌给单个视图（唯一实际重绘入口）。"""
-        if view is None:
-            return
-        try:
-            view.set_tracks(tracks, colors)
-        except Exception as exc:  # noqa: BLE001 — 单个视图失败不拖垮整页
-            logger.debug('set_tracks 失败（%s）: %s', type(view).__name__, exc)
 
     def _active_view_key(self) -> str:
         """当前可见视图的分段键；整页不可见时返回空串（全部延后）。"""
@@ -758,24 +769,31 @@ class SpatialPage(PanelStateMixin, QWidget):
         return ''
 
     def _flush_dirty_view(self, key: str) -> None:
-        """把延后的重绘补齐（切段/切页可见时调用）。"""
+        """把延后的重绘补齐（切段/切页可见时调用）。
+
+        走 _apply_tracks_if_changed：若等待期间数据没变（指纹一致），
+        灌入本身会被跳过——切段不再无条件付全量重建的代价。
+        """
         if key not in self._dirty_views:
             return
         tracks, colors = getattr(self, '_view_data', ([], {}))
         view = self._views().get(key)
-        if view is None:
-            self._dirty_views.discard(key)
-            return
         self._dirty_views.discard(key)
-        self._apply_tracks(view, tracks, colors)
+        if view is None:
+            return
+        self._apply_tracks_if_changed(key, view, tracks, colors)
 
     def showEvent(self, e) -> None:
-        """页面重新可见 → 补齐延后的视图重绘（避免长期停留在旧数据）。"""
+        """页面重新可见 → 补齐延后的视图重绘（避免长期停留在旧数据）。
+
+        延后一拍：切页动画/布局先上屏，重绘随后——与 _switch_view 同理，
+        不在 show 事件里同步阻塞主线程。
+        """
         super().showEvent(e)
         # 页面刚变可见，若空间页是当前页则补齐当前分段的脏视图
         key = self._active_view_key()
         if key:
-            self._flush_dirty_view(key)
+            QTimer.singleShot(0, lambda k=str(key): self._flush_if_current(k))
 
     def _refresh_crs_card(self) -> None:
         """投影信息卡：坐标系 / EPSG / 数据来源（按轨迹摘要汇总）。"""

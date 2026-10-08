@@ -41,10 +41,11 @@ from qfluentwidgets import FluentIcon as FIF
 from ui import constants
 from ui.motion import animate_progress
 from ui.page_scaffold import (PanelStateMixin, make_card,
-                              make_collapsible_column, make_form_row,
-                              refill_combo)
+                              make_collapsible_column,
+                              make_form_row, refill_combo)
 from ui.widgets.bscan_result_grid import ResultGrid
 from ui.widgets.chain_strip import ChainStrip
+from ui.widgets.collapsible_card import make_collapsible_card
 from ui.widgets import (BScanContainer, LAYOUT_FOCUS,
                         MethodBrowser, ParamForm, PipelineList, MAX_PANELS,
                         clear_invalid, make_separator)
@@ -149,6 +150,11 @@ class ProcessingPage(PanelStateMixin, QWidget):
         methods_layout.addWidget(self._method_browser, 1)
         # 卡片占满左栏全部可用高度，不再在底部留空白
         left_layout.addWidget(methods_card, 1)
+        # 后续卡片（参数/执行/AutoTune）必须挂进**同一个滚动内容布局**：
+        # 若误挂 CollapsiblePanel.content_widget().layout()，会与 ScrollArea
+        # 成为兄弟——ScrollArea 拿 stretch 1 被三卡挤到 ~97px 视口，方法库
+        # 树整个被裁掉（真机实测：左栏只见标题+搜索框，"看不到方法在哪"）。
+        self._left_cards_layout = left_layout
 
     def _build_middle_column(self, columns: QHBoxLayout) -> None:
         """中栏（stretch）：tab 模型主区 = 上链条 / 下结果网格 + 进度条。"""
@@ -293,7 +299,11 @@ class ProcessingPage(PanelStateMixin, QWidget):
         exec_layout.addLayout(run_row)
         right_layout.addWidget(exec_card)
 
-        autotune_card, autotune_layout = make_card('AutoTune 自动调参')
+        # AutoTune 是低频操作且结果只有"暂无调参结果"占位：默认收起
+        # （CollapsibleCard 收起只隐藏内容区、状态天然保留），把左栏空间
+        # 让给方法库与参数设置。
+        autotune_card, autotune_layout = make_collapsible_card(
+            'AutoTune 自动调参', collapsed=True)
         self._autotune_method_label = CaptionLabel('--', autotune_card)
         autotune_layout.addLayout(make_form_row(
             '当前方法:', self._autotune_method_label, parent=autotune_card))
@@ -312,13 +322,13 @@ class ProcessingPage(PanelStateMixin, QWidget):
         right_layout.addWidget(autotune_card)
         # v2：参数 / 执行 / 自动调参移入左栏（处理链改由顶部 chip 条承担，
         # 右栏整体隐藏——PipelineList 仍作为步骤数据源留在右栏内，代码不删）。
-        # 这三张卡在此处建、也在此 Reparent 进左栏：保持与 v2 迁移前完全
-        # 相同的父子关系（左栏 _content 内），避免 Qt 在跨 layout 搬运时
-        # 触发隐式几何重排。
-        left_layout = self._left_panel.content_widget().layout()
-        left_layout.addWidget(param_card)
-        left_layout.addWidget(exec_card)
-        left_layout.addWidget(autotune_card)
+        # 三卡必须与方法库卡同层（同一 ScrollArea 内容布局，见
+        # _build_left_column 的注释）：旧实现误挂 CollapsiblePanel 内层，
+        # ScrollArea 视口被三卡挤到 97px，方法库树整个被裁掉。
+        left_cards_layout = self._left_cards_layout
+        left_cards_layout.addWidget(param_card)
+        left_cards_layout.addWidget(exec_card)
+        left_cards_layout.addWidget(autotune_card)
         self._right_panel.setVisible(False)
         right_layout.addStretch(1)
 
