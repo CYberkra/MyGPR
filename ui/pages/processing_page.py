@@ -38,7 +38,7 @@ from qfluentwidgets import (
 from qfluentwidgets.components.widgets.tab_view import TabItem
 from qfluentwidgets import FluentIcon as FIF
 
-from ui import constants
+from ui import constants, design_tokens
 from ui.motion import animate_progress
 from ui.page_scaffold import (PanelStateMixin, make_card,
                               make_collapsible_column,
@@ -194,6 +194,15 @@ class ProcessingPage(PanelStateMixin, QWidget):
 
         self._result_grid = ResultGrid(middle)
         middle_layout.addWidget(self._result_grid, 1)
+        # 总览墙手动入口（2026-10-09）：旧入口挂在 v2 隐藏的 preview_card
+        # tab 行里，随卡片一起消失——>4 源自动弹出还在，手动入口却没了。
+        # 挂到结果网格头部（可见时 = 有打开的源），复用同一 _open_gallery。
+        self._grid_gallery_btn = PushButton('总览墙', self)
+        self._grid_gallery_btn.setToolTip(
+            '弹出总览墙：大图网格展示原始数据与本次各步结果。')
+        self._grid_gallery_btn.clicked.connect(self._open_gallery)
+        self._grid_gallery_btn.setVisible(False)
+        self._result_grid.add_header_widget(self._grid_gallery_btn)
 
         preview_card, preview_layout = make_card('数据预览')
         self._preview_card = preview_card
@@ -266,7 +275,10 @@ class ProcessingPage(PanelStateMixin, QWidget):
         # 空态引导：未选步骤/方法无参数时表单区空白一片（真机走查遗留项）
         self._param_empty_hint = CaptionLabel('选中处理链步骤后在此调参',
                                               param_card)
-        self._param_empty_hint.setStyleSheet('color: gray;')
+        # 令牌色（原硬编码 'color: gray' 深色主题对比度存疑）；
+        # apply_theme 里随主题重刷
+        self._param_empty_hint.setStyleSheet(
+            f'color: {design_tokens.color("text_muted")};')
         param_layout.addWidget(self._param_empty_hint)
         self._param_form = ParamForm(param_card)
         param_layout.addWidget(self._param_form, 1)
@@ -304,6 +316,7 @@ class ProcessingPage(PanelStateMixin, QWidget):
         # 让给方法库与参数设置。
         autotune_card, autotune_layout = make_collapsible_card(
             'AutoTune 自动调参', collapsed=True)
+        self._autotune_card = autotune_card   # set_autotune_result 自动展开用
         self._autotune_method_label = CaptionLabel('--', autotune_card)
         autotune_layout.addLayout(make_form_row(
             '当前方法:', self._autotune_method_label, parent=autotune_card))
@@ -326,8 +339,13 @@ class ProcessingPage(PanelStateMixin, QWidget):
         # _build_left_column 的注释）：旧实现误挂 CollapsiblePanel 内层，
         # ScrollArea 视口被三卡挤到 97px，方法库树整个被裁掉。
         left_cards_layout = self._left_cards_layout
-        left_cards_layout.addWidget(param_card)
+        # 卡序（2026-10-09 用户拍板）：执行卡上移到参数设置之前——
+        # 「输入数据/结果名称」是运行前必经配置，排最底时 580 高真机窗口
+        # 完全在视口外（截图实证：只见「执行」标题一条边），而运行按钮在
+        # 右上链条上，配置与执行空间分离。新序：方法库 → 执行 → 参数
+        # 设置 → AutoTune。
         left_cards_layout.addWidget(exec_card)
+        left_cards_layout.addWidget(param_card)
         left_cards_layout.addWidget(autotune_card)
         self._right_panel.setVisible(False)
         right_layout.addStretch(1)
@@ -783,6 +801,9 @@ class ProcessingPage(PanelStateMixin, QWidget):
         extra = len(self._preview_sources) - MAX_PANELS
         self._gallery_btn.setText(f'总览墙 +{extra}' if extra > 0
                                   else '总览墙')
+        # 网格头部的总览墙入口：原始数据之外还有打开的源才显示（空态/
+        # 只有输入时不给一个弹空墙的按钮）
+        self._grid_gallery_btn.setVisible(len(self._preview_sources) > 1)
 
     def _bind_source(self, view, source, *, thumb: bool = False) -> None:
         """单面板绑定：有 bundle 直接送，缺则清空并发懒加载请求。
@@ -876,7 +897,12 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._progress_label.setToolTip(str(message or ''))
 
     def set_autotune_result(self, method_id: str, result: dict) -> None:
-        """AutoTune 结果 {best_params, ...} → CaptionLabel 区 + 暂存最优参数。"""
+        """AutoTune 结果 {best_params, ...} → CaptionLabel 区 + 暂存最优参数。
+
+        结果到达时自动展开 AutoTune 卡（2026-10-09）：调参是异步的，用户
+        常在等待期把默认收起的卡再收上——结果悄悄写进收起的卡里等于没有
+        反馈。展开把「调参完成」变成可见事件。
+        """
         result = dict(result or {})
         self._autotune_result = (method_id, result)
         best = result.get('best_params') or {}
@@ -894,6 +920,17 @@ class ProcessingPage(PanelStateMixin, QWidget):
             lines.append('最优参数: (无)')
         self._autotune_result_label.setText('\n'.join(lines))
         self._adopt_params_btn.setEnabled(bool(best))
+        if self._autotune_card.is_collapsed():
+            self._autotune_card.set_collapsed(False, animate=True)
+
+    def apply_theme(self, dark: bool) -> None:
+        """主题切换：令牌色重刷（主窗鸭子类型派发，见 main_window）。
+
+        链条 chip 的状态点/胶囊由 ChainStrip.apply_theme 自刷；本页只管
+        页内令牌色控件（参数空态提示原为硬编码 gray，深色下对比度存疑）。
+        """
+        self._param_empty_hint.setStyleSheet(
+            f'color: {design_tokens.color("text_muted", dark)};')
 
     def set_line_label(self, text: str) -> None:
         """当前测线标签（同步到测线选择下拉，不触发信号）。"""

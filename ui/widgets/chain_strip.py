@@ -100,12 +100,17 @@ class _Chip(QWidget):
         self.set_enabled_visual(enabled)
 
     def _set_dot_visual(self, enabled: bool) -> None:
+        """状态点走语义令牌（2026-10-09）：原硬编码 #7CC464/#5A5A56 不随
+        主题，绿色也不在设计令牌里（跳色纪律）。
+
+        hover 不再发明第二个绿：细描边环提示可点（18px 小目标的反馈由
+        光标 + 邻近 chip 的 hover 描边共同承担）。
+        """
+        from ui.design_tokens import color
+        bg = color('success') if enabled else color('disabled')
         self.dot_btn.setStyleSheet(
-            'QPushButton{background:#7CC464;border:none;border-radius:6px;}'
-            'QPushButton:hover{background:#8FD478;}'
-            if enabled else
-            'QPushButton{background:#5A5A56;border:none;border-radius:6px;}'
-            'QPushButton:hover{background:#6A6A66;}')
+            f'QPushButton{{background:{bg};border:none;border-radius:6px;}}'
+            f'QPushButton:hover{{border:1px solid {color("border_strong")};}}')
 
     def set_enabled_visual(self, enabled: bool) -> None:
         self._set_dot_visual(enabled)
@@ -172,17 +177,7 @@ class ChainStrip(QWidget):
         self._delete_shortcut.activated.connect(
             lambda: self._on_chip_deleted(self._list.currentRow()))
         # 深浅主题下与卡片底色融合；选中高亮交给滑动胶囊（Qt 默认蓝块弃用）
-        from ui.design_tokens import color
-        self._list.setStyleSheet(
-            'QListWidget{background:transparent;border:none;}'
-            'QListWidget::item{background:transparent;border:none;}'
-            'QListWidget::item:selected{background:transparent;'
-            'border:none;color:palette(window-text);}'
-            'QListWidget::item:hover{background:transparent;}'
-            # 键盘焦点可见（WCAG 2.4.7）：当前行由滑动胶囊指示，列表自身
-            # 再给一圈 focus 环，Tab 进来时知道焦点在哪
-            f'QListWidget:focus{{border:1px solid {color("border_focus")};'
-            f'border-radius:4px;}}')
+        self._apply_list_qss()
         self._list.currentRowChanged.connect(self._on_current_row)
 
         self._add_btn = ToolButton(FIF.ADD, self)
@@ -212,6 +207,42 @@ class ChainStrip(QWidget):
     def run_button(self):
         """运行钮：由宿主页接线（Ctrl+R 与此处同一入口）。"""
         return self._run_btn
+
+    # ------------------------------------------------------------ 主题
+    def _apply_list_qss(self) -> None:
+        """chip 容器底色清零 + 键盘焦点环（令牌随当前主题取值）。"""
+        from ui.design_tokens import color
+        self._list.setStyleSheet(
+            'QListWidget{background:transparent;border:none;}'
+            'QListWidget::item{background:transparent;border:none;}'
+            'QListWidget::item:selected{background:transparent;'
+            'border:none;color:palette(window-text);}'
+            'QListWidget::item:hover{background:transparent;}'
+            # 键盘焦点可见（WCAG 2.4.7）：当前行由滑动胶囊指示，列表自身
+            # 再给一圈 focus 环，Tab 进来时知道焦点在哪
+            f'QListWidget:focus{{border:1px solid {color("border_focus")};'
+            f'border-radius:4px;}}')
+
+    def apply_theme(self, dark: bool) -> None:
+        """主题切换重刷令牌色（主窗鸭子类型派发，见 main_window）。
+
+        chip 的 QSS/状态点在 ``set_enabled_visual`` 时按**当时**主题取
+        令牌——换主题后必须逐 chip 重跑；胶囊、焦点环、脏标记同理。
+        """
+        from ui.design_tokens import color, radius, rgba
+        for i in range(self._list.count()):
+            chip = self._list.itemWidget(self._list.item(i))
+            if chip is None:
+                continue
+            idx = chip.index
+            chip.set_enabled_visual(
+                self._steps[idx]['enabled']
+                if 0 <= idx < len(self._steps) else True)
+        self._dirty_label.setStyleSheet(f'color:{color("warning")}')
+        self._pill.setStyleSheet(
+            f'background:{rgba("primary", 0.20)};'
+            f'border-radius:{radius("pill") // 2}px')
+        self._apply_list_qss()
 
     # ------------------------------------------- 选中指示条（滑动胶囊）
     def _init_pill(self) -> None:

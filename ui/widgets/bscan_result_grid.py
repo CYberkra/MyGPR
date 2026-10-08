@@ -12,7 +12,9 @@
 - **统一色标**开关：开启时全组结果共用同一 [vmin, vmax]（经
   ``BScanView.set_levels_override``，display 层覆盖，raw 不动）——
   增益前后横向可比；
-- **全部步骤**开关：关闭时只铺「输入 + 最终结果」（P3 设置的就地版），
+- **中间步骤**开关（2026-10-09 由「全部步骤」改名：与视图模式 segmented
+  的「全部步骤」项同名不同义，相邻摆放用户无法区分）：关闭时只铺
+  「输入 + 最终结果」（P3 设置的就地版），
   经 :attr:`sig_expand_all_changed` 通知宿主过滤槽位；
 - 单元间距 16（8pt 栅格），单元最小高 320（single/compare 大图档 460）；
 - 卡头极简：序号 + 算法名 + 幅值范围，⤢ hover 才显；
@@ -329,10 +331,11 @@ class ResultGrid(QWidget):
         self._scroll.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
-        # ---- 结果区头部：幅数 + 视图模式 + 统一色标/全部步骤开关 ----
+        # ---- 结果区头部：幅数 + 视图模式 + 统一色标/中间步骤开关 ----
         head = QHBoxLayout()
         head.setContentsMargins(0, 0, 0, 0)
         head.setSpacing(10)
+        self._head = head          # 引用保留：add_header_widget 挂页级控件
         self._count_label = CaptionLabel('结果', self)
         head.addWidget(self._count_label)
         self._mode_seg = SegmentedWidget(self)
@@ -351,8 +354,11 @@ class ResultGrid(QWidget):
         self._scale_switch.setChecked(False)
         self._scale_switch.checkedChanged.connect(self.set_shared_scale)
         head.addWidget(self._scale_switch)
-        self._expand_switch = SwitchButton('全部步骤', self)
-        self._expand_switch.setOnText('全部步骤')
+        # 2026-10-09 由「全部步骤」改名「中间步骤」： segmented 里已有
+        # 一个「全部步骤」（视图模式），同名开关紧挨着属于语义事故——
+        # 本开关只管「铺不铺中间各步的卡」，与视图模式是两回事。
+        self._expand_switch = SwitchButton('中间步骤', self)
+        self._expand_switch.setOnText('中间步骤')
         self._expand_switch.setChecked(True)
         self._expand_switch.checkedChanged.connect(self.sig_expand_all_changed)
         head.addWidget(self._expand_switch)
@@ -371,6 +377,14 @@ class ResultGrid(QWidget):
         self._empty.setVisible(True)
 
     # ---------------------------------------------------------------- 槽位
+    def add_header_widget(self, widget: QWidget) -> None:
+        """把页级控件挂到头部行尾（总览墙入口等）——网格不管其语义。
+
+        头部行现有控件（幅数 / 视图模式 / 两个开关）都属网格自身；页级
+        功能要进头部时经本 API，避免页面直接翻网格内部布局。
+        """
+        self._head.addWidget(widget)
+
     def set_slots(self, slots) -> None:
         """slots: [{key, title, enabled}]（宿主页为数据源；这里只铺卡）。
 
