@@ -302,6 +302,9 @@ class _ResultCard(QFrame):
     def leaveEvent(self, event) -> None:
         self.expand_btn.setVisible(False)
         self.compare_btn.setVisible(False)
+        # ✕ 也要藏（原漏项）：enter 三显 / leave 二藏不对称 → 鼠标扫过
+        # 后每张卡的 ✕ 常显，违背「hover 才显动作钮」（第三轮调研）
+        self.close_btn.setVisible(False)
         super().leaveEvent(event)
 
 

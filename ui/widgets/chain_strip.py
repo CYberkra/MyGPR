@@ -320,11 +320,14 @@ class ChainStrip(QWidget):
 
     # ------------------------------------------------ 运行钮：取消就近翻转
     def _style_overflow_btn(self) -> None:
-        """+N 胶囊样式：表面底 + 描边（令牌取值，apply_theme 重刷）。"""
+        """+N 胶囊样式：左缘渐隐过渡——底下被遮的 chip 文字渐隐入胶囊，
+        不再硬切（半遮字像故障）；色值走令牌，apply_theme 重刷。"""
         from ui.design_tokens import color
+        bg = color('bg_subtle')
         self._overflow_btn.setStyleSheet(
             'QPushButton#overflow_chip{'
-            f'background:{color("bg_subtle")};'
+            'background:qlineargradient(x1:0,y1:0,x2:1,y2:0,'
+            f'stop:0 rgba(0,0,0,0), stop:0.35 {bg}, stop:1 {bg});'
             f'color:{color("text_secondary")};'
             f'border:1px solid {color("border_default")};'
             'border-radius:13px;padding:3px 10px;}'

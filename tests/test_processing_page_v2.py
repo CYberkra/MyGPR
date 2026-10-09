@@ -1217,3 +1217,50 @@ class TestDeepAudit20261009:
             assert page._line_combo._placeholderText == '选择测线'
         finally:
             page.close()
+
+    # ---------------- 第三轮调研（✕ 对称 / 总览墙占位 / +N 渐隐） --------
+    def test_card_close_btn_hides_on_leave(self, qapp):
+        """enter 三显 / leave 三藏对称（原 leaveEvent 漏藏 ✕ → 扫过后常显）。"""
+        from PyQt6.QtCore import QEvent, QPointF
+        from PyQt6.QtGui import QEnterEvent
+
+        from ui.widgets.bscan_result_grid import ResultGrid
+        grid = ResultGrid()
+        try:
+            grid.set_slots([{'key': 'k0', 'title': '输入', 'enabled': True}])
+            card = grid.cards()[0]
+            pos = QPointF(1.0, 1.0)
+            card.enterEvent(QEnterEvent(pos, pos, pos))
+            assert card.close_btn.isVisibleTo(card) is True
+            card.leaveEvent(QEvent(QEvent.Type.Leave))
+            assert card.close_btn.isVisibleTo(card) is False
+            assert card.expand_btn.isVisibleTo(card) is False
+            assert card.compare_btn.isVisibleTo(card) is False
+        finally:
+            grid.deleteLater()
+
+    def test_gallery_placeholder_for_missing_bundle(self, qapp):
+        """bundle 未回填的源显示 muted 占位（原直接跳过 → pyqtgraph 空画布）。"""
+        from PyQt6.QtWidgets import QLabel
+
+        from ui.widgets.bscan_gallery import BScanGallery
+        page = self._page_with_run()
+        try:
+            gallery = BScanGallery(page, [
+                {'key': 'input', 'title': '输入', 'bundle': None}])
+            try:
+                hints = [w for w in gallery.findChildren(QLabel)
+                         if w.text() == '预览尚未生成']
+                assert hints, '空 bundle 源应显示占位而非空画布'
+            finally:
+                gallery.deleteLater()
+        finally:
+            page.close()
+
+    def test_overflow_pill_gradient_fade(self, qapp):
+        """+N 胶囊左缘渐隐（qlineargradient）——半遮 chip 文字不再硬切。"""
+        strip = self._strip()
+        try:
+            assert 'qlineargradient' in strip._overflow_btn.styleSheet()
+        finally:
+            strip.deleteLater()
