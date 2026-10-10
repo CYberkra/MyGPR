@@ -68,14 +68,29 @@ def test_processing_artifact_index_marks_time_to_depth_as_display_compare(tmp_pa
     assert record.axis_transform["kind"] == "time_to_depth"
 
 
-def test_processing_artifact_index_returns_newest_first(tmp_path: Path) -> None:
+def test_processing_artifact_index_returns_newest_first(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """回归：GUI 消费端约定索引 0 = 最新成果。
 
     此前 window_mixins/processing_page 取 artifacts[-1] 而数据源按 created_at DESC
     （最新在前），导致"最新成果"实为最旧、自动预览与二次处理默认输入指错。
     本测试锁定数据源契约：index[0] 必须是最新一条。
+
+    两次写入的 created_at 用受控时钟拉开（毫秒精度），而不是 time.sleep——
+    真实睡眠依赖系统时钟分辨率，慢机或粗粒度时钟下仍会同刻而偶发失败。
     """
-    import time
+    import core.field_artifact_store as artifact_store_module
+
+    stamps = iter([
+        "2026-01-01T00:00:00.000+00:00",
+        "2026-01-01T00:00:01.000+00:00",
+    ])
+
+    def _fixed_now() -> str:
+        return next(stamps)
+
+    monkeypatch.setattr(artifact_store_module, "local_now", _fixed_now)
 
     store = create_test_project(tmp_path / "project")
     dataset = GPRDataSet.synthetic("L03", rows=80, cols=48, length_m=24.0)
@@ -87,7 +102,6 @@ def test_processing_artifact_index_returns_newest_first(tmp_path: Path) -> None:
          "params": {"window": 21}, "manifest": manifest1,
          "input_dataset": dataset.to_metadata()},
     )
-    time.sleep(0.05)  # created_at 毫秒精度，隔开两次写入避免同刻
     output2, manifest2 = run_registered_method(dataset, "time_to_depth", {})
     store.save_processed_line(
         "L03",

@@ -3,11 +3,14 @@
 
 三栏 QHBoxLayout（模式照抄 processing_page）：
 - 左栏 ScrollArea 固定 320px（可折叠）：卡片"测线"（多选勾选列表 + 颜色块）、
-  卡片"底图"（瓦图源 ComboBox + 预下载按钮 + 进度）、卡片"投影信息"
+  卡片"底图"（瓦图源 ComboBox + 预下载按钮 + 进度）、卡片"投影信息"、
+  卡片"三维显示"（**可折叠**，默认收起——六组控件只作用于 Trajectory3DView，
+  切到非三维视图时一行都不生效却占左栏 28.8%，见 ``_build_view3d_card``）
 - 中栏 stretch：卡片"空间视图"（标题与 SlimSegment 同行 header，切换
   "平面地图 / 高程剖面 / 三维视图 / 深度切片"）
   + QStackedWidget（MapView / 高程剖面 PlotWidget / Trajectory3DView /
   DepthSliceView + 深度滑条 + 存为图层按钮）
+  + 深度切片控制行（**仅"深度切片"段可见**，见 ``_sync_view_affordances``）
 - 右栏 ScrollArea 固定 340px（可折叠）：卡片"测线详情" + "设为当前测线"
 
 页面纯展示 + 发信号，不直接调 controller/backend。
@@ -31,11 +34,13 @@ from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants, file_dialogs
 from ui.geo_utils import coverage_statistics, format_distance
-from ui.page_scaffold import (PanelStateMixin, make_card, make_hint,
-                              make_scroll_column, make_segment_card,
+from ui.spatial_view_sync import ViewSyncMixin
+from ui.page_scaffold import (PanelStateMixin, make_card,
+                              make_collapsible_column, make_hint,
+                              make_segment_card,
                               rebuild_check_list)
-from ui.widgets.collapsible_panel import CollapsiblePanel
 from ui.widgets.elevation_profile_view import ElevationProfileView
+from ui.widgets.collapsible_card import make_collapsible_card
 from ui.widgets.local_dem import load_xyz_grid
 from ui.widgets.map_tiles import BASEMAP_LAYERS, DEFAULT_TILE_SOURCE
 from ui.widgets.map_view import MapView
@@ -89,7 +94,7 @@ class _DemLoadWorker(QRunnable):
             self._signals.finished.emit(self._generation, dem, self._path, '')
 
 
-class SpatialPage(PanelStateMixin, QWidget):
+class SpatialPage(ViewSyncMixin, PanelStateMixin, QWidget):
     """空间信息页面。"""
 
     current_line_requested = pyqtSignal(str)    # 设为当前测线（line_id）
@@ -117,6 +122,8 @@ class SpatialPage(PanelStateMixin, QWidget):
         # 切段/切页可见时由 _flush_dirty_view 补齐（见 _refresh_views 注释）
         self._dirty_views: set[str] = set()
         self._view_data = ([], {})            # (tracks, colors) 最近一次数据快照
+        # 数据指纹去重（数据没变不重复 set_tracks）：状态与方法在 ViewSyncMixin
+        self._init_view_sync()
         self._sm = None                       # 共享 SettingsManager（主窗口注入，唯一写者）
         self._dem_pool = QThreadPool(self)    # 本地 DEM 解析（大文件不冻结 GUI 线程）
         self._dem_pool.setMaxThreadCount(1)
@@ -255,13 +262,15 @@ class SpatialPage(PanelStateMixin, QWidget):
         columns.setSpacing(constants.PAGE_SPACING)
         root.addLayout(columns, 1)
 
-        # ---------------- 左栏（展开 320px，可折叠）
-        left_scroll, left_layout = make_scroll_column(constants.SIDE_TOOL_WIDTH)
-        left_panel = CollapsiblePanel(
-            'left', expand_width=constants.SIDE_TOOL_WIDTH, collapse_width=40, parent=self)
-        left_panel.set_content_widget(left_scroll)
-        columns.addWidget(left_panel)
-        self._left_panel = left_panel
+        self._build_left_column(columns)
+        self._build_middle_column(columns)
+        self._build_right_column(columns)
+
+    def _build_left_column(self, columns: QHBoxLayout) -> None:
+        """左栏（展开 320px，可折叠）：测线列表 / 底图 / 投影信息 / 三维显示。"""
+        self._left_panel, left_layout = make_collapsible_column(
+            'left', constants.SIDE_TOOL_WIDTH, parent=self)
+        columns.addWidget(self._left_panel)
 
         lines_card, lines_layout = make_card('测线')
         self._line_list = QListWidget(lines_card)
@@ -298,8 +307,27 @@ class SpatialPage(PanelStateMixin, QWidget):
         self._crs_label.setWordWrap(True)
         crs_layout.addWidget(self._crs_label)
         left_layout.addWidget(crs_card)
+        left_layout.addWidget(self._build_view3d_card())
+        left_layout.addStretch(1)
 
-        view3d_card, view3d_layout = make_card('三维显示')
+    def _build_view3d_card(self) -> QWidget:
+        """左栏「三维显示」卡：垂直夸张 / 贴地 / 影像 / 地形来源 / 本地 DEM。
+
+        单独成方法而非并入 :meth:`_build_left_column`——它一行行堆的是五组
+        独立设置（各有 tooltip 解释），混进左栏装配流里会把「摆控件」这件
+        机械事淹没。
+
+        **可折叠**（2026-10-06）：这五组控件全部只连 ``_3d_view``
+        （见 ``_connect_internal``），在平面地图 / 高程剖面 / 深度切片视图下
+        一行都不生效，却实测占左栏 260px = 28.8%。默认收成一行标题，切到
+        三维视图时自动展开（``_switch_view``），也可手动点标题旁 chevron。
+
+        折叠走 ``setVisible`` 而非重建控件，所以 ``DoubleSpinBox`` 的值与
+        ``SwitchButton`` 的开关态天然保留——不需要额外持久化。
+        """
+        view3d_card, view3d_layout = make_collapsible_card(
+            '三维显示', parent=self, collapsed=True)
+        self._view3d_card = view3d_card
         exag_row = QHBoxLayout()
         exag_row.setSpacing(constants.CARD_SPACING)
         exag_label = CaptionLabel('垂直夸张:', view3d_card)
@@ -364,10 +392,10 @@ class SpatialPage(PanelStateMixin, QWidget):
         self._3d_dem_label = CaptionLabel('未导入（在线下载高程）', view3d_card)
         self._3d_dem_label.setWordWrap(True)
         view3d_layout.addWidget(self._3d_dem_label)
-        left_layout.addWidget(view3d_card)
-        left_layout.addStretch(1)
+        return view3d_card
 
-        # ---------------- 中栏（stretch）
+    def _build_middle_column(self, columns: QHBoxLayout) -> None:
+        """中栏（stretch）：视图切换段控件 + 四视图栈 + 深度切片控制行。"""
         middle = QWidget(self)
         middle_layout = QVBoxLayout(middle)
         middle_layout.setContentsMargins(0, 0, 0, 0)
@@ -405,29 +433,41 @@ class SpatialPage(PanelStateMixin, QWidget):
         view_layout.addWidget(self._view_stack, 1)
 
         # 深度切片控制行：深度滑条（0.01m 步进，整数 ×100 映射）+ 数值 + 存为图层
-        depth_row = QHBoxLayout()
+        # 整行装进一个 QWidget 外壳（``_depth_row_widget``）：裸 QHBoxLayout
+        # 没有 setVisible，无法随视图切换显隐（见 _sync_view_affordances）。
+        self._depth_row_widget = QWidget(view_card)
+        self._depth_row_widget.setObjectName('depthRow')
+        self._depth_row_widget.setStyleSheet(
+            'QWidget#depthRow { background-color: transparent; }')
+        depth_row = QHBoxLayout(self._depth_row_widget)
+        depth_row.setContentsMargins(0, 0, 0, 0)
         depth_row.setSpacing(constants.CARD_SPACING)
-        self._depth_slider = Slider(Qt.Orientation.Horizontal, view_card)
+        self._depth_slider = Slider(Qt.Orientation.Horizontal,
+                                    self._depth_row_widget)
         self._depth_slider.setRange(0, 0)
         self._depth_slider.setValue(0)
-        self._depth_value_label = CaptionLabel('深度: --', view_card)
+        self._depth_value_label = CaptionLabel('深度: --', self._depth_row_widget)
         self._depth_value_label.setMinimumWidth(96)
-        self._depth_save_btn = PushButton('存为图层', view_card)
+        self._depth_save_btn = PushButton('存为图层', self._depth_row_widget)
         self._depth_save_btn.setEnabled(False)
-        depth_row.addWidget(CaptionLabel('切片深度', view_card))
+        depth_row.addWidget(CaptionLabel('切片深度', self._depth_row_widget))
         depth_row.addWidget(self._depth_slider, 1)
         depth_row.addWidget(self._depth_value_label)
         depth_row.addWidget(self._depth_save_btn)
-        view_layout.addLayout(depth_row)
+        view_layout.addWidget(self._depth_row_widget)
+        # 初始态：只有深度切片视图用得到它（默认段是平面地图）
+        self._depth_row_widget.setVisible(False)
         middle_layout.addWidget(view_card, 1)
 
-        # ---------------- 右栏（展开 340px，可折叠）
-        right_scroll, right_layout = make_scroll_column(constants.SIDE_FORM_WIDTH)
-        right_panel = CollapsiblePanel(
-            'right', expand_width=constants.SIDE_FORM_WIDTH, collapse_width=40, parent=self)
-        right_panel.set_content_widget(right_scroll)
-        columns.addWidget(right_panel)
-        self._right_panel = right_panel
+    def _build_right_column(self, columns: QHBoxLayout) -> None:
+        """右栏（展开 340px，可折叠）：测线详情 + 项目覆盖统计。
+
+        两卡按内容高度贴顶排列，空白由末尾 stretch 统一推到栏底（2026-10-06
+        由「各占一半高度」改回，原因见下方注释）。
+        """
+        self._right_panel, right_layout = make_collapsible_column(
+            'right', constants.SIDE_FORM_WIDTH, parent=self)
+        columns.addWidget(self._right_panel)
 
         detail_card, detail_layout = make_card('测线详情')
         self._detail_labels = {}
@@ -468,11 +508,14 @@ class SpatialPage(PanelStateMixin, QWidget):
         coverage_hint.setWordWrap(True)
         coverage_layout.addWidget(coverage_hint)
 
-        # Let the two information cards share the full sidebar height.  This
-        # avoids a visually disconnected blank area below a short detail card.
-        right_layout.addWidget(detail_card, 1)
-        right_layout.addWidget(coverage_card, 1)
-
+        # 两卡按内容高度贴顶排列，空白统一由末尾 stretch 推到栏底。
+        # 此前给两张卡各addWidget(card, 1) 平分高度，实测每卡 443px 而内容
+        # 只有 172 / 147px —— 空白 61% / 67% 且被卡片边框切成两块，视觉上
+        # 比「一整块底部留白」更像断裂（注释里担心的正是这个，但平分高度
+        # 并没有解决它，只是把它均匀复制了两份）。
+        right_layout.addWidget(detail_card)
+        right_layout.addWidget(coverage_card)
+        right_layout.addStretch(1)
     # ============================================================ 内部接线
     def _connect_internal(self) -> None:
         self._line_list.itemChanged.connect(self._on_line_check_changed)
@@ -563,20 +606,34 @@ class SpatialPage(PanelStateMixin, QWidget):
         if matrix is None:
             self.clear_depth_grid()
             return
-        self._depth_payload_line_ids = [str(x) for x in line_ids or []]
-        self._depth_cell_size_m = float(cell_size_m or 1.0)
-        cell = self._depth_cell_size_m
-        self._depth_view.set_grid(
-            matrix,
-            x_origin_m=float(payload.get('x_origin_m') or 0.0),
-            y_origin_m=float(payload.get('y_origin_m') or 0.0),
-            cell_size_m=cell,
-            attribute=str(payload.get('attribute') or '界面深度切片'))
-        dmin = float(payload.get('depth_min_m'))
-        dmax = float(payload.get('depth_max_m'))
-        if not (math.isfinite(dmin) and math.isfinite(dmax)):
+        # ⚠️ **先校验、后落地**（2026-10-07 P0-2修复）。原实现先 set_grid 写入
+        # 视图，再读 depth_min_m/max_m：缺键时 float(None) 抛 TypeError，而
+        # clear_depth_grid 在异常之后 —— 于是留下"矩阵是本次的、滑条 range 与
+        # 存为图层按钮是上一次"的混合态，用户看不出任何异常。
+        # 现在把全部标量解析与校验提到落地之前，任一不合法就整体拒绝。
+        try:
+            dmin = float(payload['depth_min_m'])
+            dmax = float(payload['depth_max_m'])
+            x_origin = float(payload['x_origin_m'])
+            y_origin = float(payload['y_origin_m'])
+            cell = float(cell_size_m or 1.0)
+        except (KeyError, TypeError, ValueError):
             self.clear_depth_grid()
             return
+        if not (math.isfinite(dmin) and math.isfinite(dmax)
+                and math.isfinite(x_origin) and math.isfinite(y_origin)
+                and math.isfinite(cell) and cell > 0.0):
+            self.clear_depth_grid()
+            return
+
+        self._depth_payload_line_ids = [str(x) for x in line_ids or []]
+        self._depth_cell_size_m = cell
+        self._depth_view.set_grid(
+            matrix,
+            x_origin_m=x_origin,
+            y_origin_m=y_origin,
+            cell_size_m=cell,
+            attribute=str(payload.get('attribute') or '界面深度切片'))
         lo, hi = int(round(dmin * 100.0)), int(round(dmax * 100.0))
         if hi <= lo:
             hi = lo + 1
@@ -604,6 +661,8 @@ class SpatialPage(PanelStateMixin, QWidget):
         self._profile_view.apply_theme(dark)
         self._3d_view.apply_theme(dark)
         self._depth_view.apply_theme(dark)
+        # 主题切换会重建视图内部条目，指纹作废：下次刷新必须重新灌数据
+        self._views_applied.clear()
         # 空态 hint 颜色由 HintLabel.apply_theme 随主题自刷，无需手工重设
 
     # ============================================================ 内部逻辑
@@ -626,13 +685,36 @@ class SpatialPage(PanelStateMixin, QWidget):
                   _SEG_3D: self._3d_view, _SEG_DEPTH: self._depth_view}.get(
             route_key, self._map_view)
         self._view_stack.setCurrentWidget(widget)
-        # 切到某分段才补齐它延后的重绘（_refresh_views 只重绘当时可见的视图）
-        self._flush_dirty_view(str(route_key))
+        self._sync_view_affordances(route_key)
+        # 切到某分段才补齐它延后的重绘（_refresh_views 只重绘当时可见的视图）。
+        # 延后一拍：先让分段切换 + 控件状态上屏，再执行可能上百毫秒的
+        # set_tracks——同步执行会把「切段」这个动作本身卡成整窗无响应
+        # （三维视图尤甚：GL 全量重建 130–470 ms，2026-10-08 用户反馈
+        # 「每次点三维视图软件都会消失再出来」）。
+        QTimer.singleShot(0, lambda k=str(route_key): self._flush_if_current(k))
         if route_key == _SEG_DEPTH and not self._depth_payload_line_ids:
             # 首次切到深度切片段：自动以当前勾选测线请求一次预览
             checked = [str(t.line_id) for t in self._checked_tracks()]
             if checked:
                 self.depth_preview_requested.emit(checked)
+
+    def _sync_view_affordances(self, route_key: str) -> None:
+        """切段时同步「只属于某段」的界面附属件（2026-10-06）。
+
+        两处此前恒显，实测都属于「在别的段里操作了但看不到效果」：
+
+        - **深度切片控制行**（滑条 + 深度 + 存为图层）只操作 ``_depth_view``
+          的等值线。在平面地图下拖它，屏幕不会有任何变化。改为仅
+          ``_SEG_DEPTH`` 时可见，其余三段隐藏。
+        - **左栏三维显示卡**（折叠态）只操作 ``_3d_view``。切到三维视图时
+          自动展开——否则用户看到的是一张收起的卡，得先意识到「要展开才能
+          调设置」。切走时**不自动收起**：手动展开查看是主动行为，替他收掉
+          会打断正在做的调参。
+        """
+        is_depth = route_key == _SEG_DEPTH
+        self._depth_row_widget.setVisible(is_depth)
+        if route_key == _SEG_3D and self._view3d_card.is_collapsed():
+            self._view3d_card.set_collapsed(False, animate=True)
 
     def _refresh_views(self) -> None:
         """勾选集合变化 → 重绘视图。
@@ -650,13 +732,24 @@ class SpatialPage(PanelStateMixin, QWidget):
 
         可见性判定用「空间页本身可见 && 该视图是当前分段」双条件：
         页面不可见时连当前分段也不重绘，全部留给切页/切段时补齐。
+
+        数据指纹去重（2026-10-08）：脏标记从「不在当前分段就记脏」改为
+        「数据指纹和该视图上次成功灌入的一致就不记脏」。没有这层，切段
+        永远触发全量 set_tracks——即使数据一字未变（切走即标脏、切回必
+        重建），三维视图每次都白付 130–470 ms 的 GL 重建 + numpy 变换。
         """
         tracks = self._checked_tracks()
         active = self._active_view_key()
         self._view_data = (tracks, self._colors)
+        fingerprint = self._tracks_fingerprint(tracks, self._colors)
         for key, view in self._views().items():
             if key == active:
-                self._apply_tracks(view, tracks, self._colors)
+                self._apply_tracks_if_changed(
+                    key, view, tracks, self._colors, fingerprint)
+            elif self._views_applied.get(key) == fingerprint:
+                # 该视图已是最新数据：不标脏（若此前被标过则撤销），
+                # 切回时 flush 发现不脏 + 指纹一致，不会再重建
+                self._dirty_views.discard(key)
             else:
                 self._dirty_views.add(key)
 
@@ -664,15 +757,6 @@ class SpatialPage(PanelStateMixin, QWidget):
         """分段键 → 视图实例。"""
         return {_SEG_MAP: self._map_view, _SEG_PROFILE: self._profile_view,
                 _SEG_3D: self._3d_view, _SEG_DEPTH: self._depth_view}
-
-    def _apply_tracks(self, view, tracks, colors) -> None:
-        """把轨迹数据灌给单个视图（唯一实际重绘入口）。"""
-        if view is None:
-            return
-        try:
-            view.set_tracks(tracks, colors)
-        except Exception as exc:  # noqa: BLE001 — 单个视图失败不拖垮整页
-            logger.debug('set_tracks 失败（%s）: %s', type(view).__name__, exc)
 
     def _active_view_key(self) -> str:
         """当前可见视图的分段键；整页不可见时返回空串（全部延后）。"""
@@ -685,24 +769,31 @@ class SpatialPage(PanelStateMixin, QWidget):
         return ''
 
     def _flush_dirty_view(self, key: str) -> None:
-        """把延后的重绘补齐（切段/切页可见时调用）。"""
+        """把延后的重绘补齐（切段/切页可见时调用）。
+
+        走 _apply_tracks_if_changed：若等待期间数据没变（指纹一致），
+        灌入本身会被跳过——切段不再无条件付全量重建的代价。
+        """
         if key not in self._dirty_views:
             return
         tracks, colors = getattr(self, '_view_data', ([], {}))
         view = self._views().get(key)
-        if view is None:
-            self._dirty_views.discard(key)
-            return
         self._dirty_views.discard(key)
-        self._apply_tracks(view, tracks, colors)
+        if view is None:
+            return
+        self._apply_tracks_if_changed(key, view, tracks, colors)
 
     def showEvent(self, e) -> None:
-        """页面重新可见 → 补齐延后的视图重绘（避免长期停留在旧数据）。"""
+        """页面重新可见 → 补齐延后的视图重绘（避免长期停留在旧数据）。
+
+        延后一拍：切页动画/布局先上屏，重绘随后——与 _switch_view 同理，
+        不在 show 事件里同步阻塞主线程。
+        """
         super().showEvent(e)
         # 页面刚变可见，若空间页是当前页则补齐当前分段的脏视图
         key = self._active_view_key()
         if key:
-            self._flush_dirty_view(key)
+            QTimer.singleShot(0, lambda k=str(key): self._flush_if_current(k))
 
     def _refresh_crs_card(self) -> None:
         """投影信息卡：坐标系 / EPSG / 数据来源（按轨迹摘要汇总）。"""
@@ -768,7 +859,25 @@ class SpatialPage(PanelStateMixin, QWidget):
 
     # ---------------- 槽
     def _on_line_check_changed(self, _item) -> None:
+        """勾选集合变化 → 重绘视图，并让**深度场失效**（2026-10-07 P0-1）。
+
+        原实现只调 ``_refresh_views()``，而它只做轨迹散点的重绘——既不碰
+        ``_matrix`` / ``_depth_payload_line_ids``，也不重发预览请求。后果是
+        **静默导出错误数据**：填入payload（line_ids=['L1','L2']）→ 取消勾选
+        L2 → 深度视图仍是两条线合成的场，"存为图层"仍回发 ['L1','L2']。
+        异步链本身的代次校验（``_dem_load_generation`` 那套）是对的，缺的
+        是**这条路径根本没接入它**。
+
+        修法：先清掉旧深度场（视图 + payload ids + "存为图层"一并失效，
+        不留上一轮的残影），再以当前勾选重发预览请求。请求回来后仍走
+        ``set_depth_grid`` 的既有校验（见该方法 P0-2 修复）。
+        """
         self._refresh_views()
+        self.clear_depth_grid()
+        checked = [str(t.line_id) for t in self._checked_tracks() if
+                   str(getattr(t, 'line_id', '') or '')]
+        if checked:
+            self.depth_preview_requested.emit(checked)
 
     def _on_line_selected(self, _current, _previous=None) -> None:
         self._refresh_detail()

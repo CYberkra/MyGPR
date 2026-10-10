@@ -27,7 +27,7 @@ from mygpr.domain.processing.workbench import (
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
 
 def _bounded_indices(size: int, maximum: int) -> np.ndarray:
@@ -334,9 +334,12 @@ class ProcessingAnalysisService:
         manifest_sha = hashlib.sha256(canonical).hexdigest()
         manifest["manifest_sha256"] = manifest_sha
         manifest_path = package_dir / "manifest.json"
-        manifest_path.write_text(
+        # 原子发布：该 manifest 是成果包的自描述索引，中断留下的半截 JSON
+        # 会让后续按包加载直接失败。序列化参数与既有 manifest 保持一致。
+        from mygpr.infrastructure.persistence.durable_write import default_durable_write
+        default_durable_write().write_text(
+            manifest_path,
             json.dumps(manifest, ensure_ascii=False, indent=2),
-            encoding="utf-8",
         )
         files.insert(0, str(manifest_path))
         return manifest_path, manifest_sha, files

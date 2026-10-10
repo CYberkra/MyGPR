@@ -3,20 +3,20 @@
 
 构造后不得存在 GLViewWidget 子对象；set_tracks 喂入轨迹后必须已创建；
 GL 未建期间的主题/夸张/贴地/影像/地形来源/DEM 设置不得崩溃。
+
+QApplication 生命周期见 ``scripts/_qtprobe.py``。
 """
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from PyQt6.QtWidgets import QApplication  # noqa: E402
+from _qtprobe import create_app  # noqa: E402
 
-app = QApplication(sys.argv)
+app = create_app()
 
 import ui.widgets.trajectory_3d_view as tv_mod   # noqa: E402
 from ui.widgets.trajectory_3d_view import Trajectory3DView  # noqa: E402

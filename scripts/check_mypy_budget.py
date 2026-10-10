@@ -17,9 +17,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _gate import RatchetGate, add_write_baseline_flag, write_baseline  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 BASELINE = ROOT / "config/mypy_baseline.json"
 TOLERANCE = 0.05
+SCHEMA = "mygpr.mypy_baseline.v1"
 
 
 def count_mypy_errors() -> int:
@@ -42,29 +47,32 @@ def count_mypy_errors() -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--write-baseline", action="store_true")
+    add_write_baseline_flag(parser)
     args = parser.parse_args()
 
     current = count_mypy_errors()
     if args.write_baseline or not BASELINE.exists():
-        payload = {
-            "schema": "mygpr.mypy_baseline.v1",
+        write_baseline(BASELINE, {
+            "schema": SCHEMA,
             "policy": "ratchet; error count may decrease but may not increase",
             "tolerance": TOLERANCE,
             "baseline_errors": current,
-        }
-        BASELINE.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        })
         print(f"mypy baseline written: {current} errors")
         return 0
 
-    baseline = int(json.loads(BASELINE.read_text(encoding="utf-8"))["baseline_errors"])
-    limit = int(baseline * (1 + TOLERANCE))
-    print(f"mypy errors: current={current} baseline={baseline} limit={limit}")
-    if current > limit:
-        print(
-            f"mypy ratchet FAILED: {current} errors exceed baseline {baseline} "
-            "(+5% jitter tolerance). Fix the new type errors instead of raising the baseline."
-        )
+    payload = json.loads(BASELINE.read_text(encoding="utf-8"))
+    if payload.get("schema") != SCHEMA:
+        print(f"mypy ratchet FAILED: unexpected baseline schema {payload.get('schema')!r}")
+        return 1
+    gate = RatchetGate(name="mypy errors", current=current,
+                       baseline=int(payload["baseline_errors"]),
+                       tolerance=float(payload.get("tolerance", TOLERANCE)))
+    print(gate.report())
+    violation = gate.violation()
+    if violation:
+        print(f"mypy ratchet FAILED: {violation}. "
+              "Fix the new type errors instead of raising the baseline.")
         return 1
     print("mypy ratchet: PASS")
     return 0

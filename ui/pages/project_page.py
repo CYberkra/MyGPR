@@ -45,8 +45,8 @@ from qfluentwidgets import (
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants, file_dialogs
-from ui.page_scaffold import (make_card, make_form_row, make_hint,
-                              make_scroll_column)
+from ui.page_scaffold import (make_card, make_collapsible_column,
+                              make_form_row, make_hint)
 from ui.theme_helpers import status_color
 from ui.widgets import (CollapsiblePanel, clear_invalid,
                         make_separator, mark_invalid, validate_non_empty)
@@ -132,14 +132,11 @@ class ProjectPage(QWidget):
 
         self._update_action_state()
 
-    # ============================================================ 左列（CollapsiblePanel + 固定宽滚动栏）
+    # ============================================================ 左列（可折叠面板 + 固定宽滚动栏）
     def _build_left_column(self) -> CollapsiblePanel:
         """左栏：项目信息 / 导入测线 / 传感器同步，可折叠（展开宽 SIDE_FORM_WIDTH）。"""
-        scroll, layout = make_scroll_column(constants.SIDE_FORM_WIDTH)
-        panel = CollapsiblePanel(
-            'left', expand_width=constants.SIDE_FORM_WIDTH,
-            collapse_width=40, parent=self)
-        panel.set_content_widget(scroll)
+        panel, layout = make_collapsible_column(
+            'left', constants.SIDE_FORM_WIDTH, parent=self)
 
         layout.addWidget(self._build_info_card(panel))
         layout.addWidget(self._build_import_card(panel))

@@ -29,6 +29,7 @@ class MethodBrowser(QWidget):
 
         self._search = LineEdit(self)
         self._search.setPlaceholderText('搜索方法…')
+        self._search.setClearButtonEnabled(True)   # 清词不用全选退格
         self._search.textChanged.connect(self._apply_filter)
 
         self._tree = QTreeWidget(self)
@@ -54,6 +55,12 @@ class MethodBrowser(QWidget):
             self._tree, icon=FIF.LIBRARY, title='暂无方法',
             hint='方法库加载后按分类显示在此')
         self._empty.setVisible(True)   # 初始无方法即引导（set_methods 接管）
+        # 搜索无结果浮层（2026-10-09）：过滤全隐藏后树一片空白、无任何
+        # 解释。与「暂无方法」互斥——本浮层仅在方法库非空且有关键词时出现。
+        self._nomatch = EmptyStateOverlay(
+            self._tree, icon=FIF.SEARCH, title='无匹配方法',
+            hint='换个关键词试试')
+        self._nomatch.setVisible(False)
 
     def set_methods(self, methods) -> None:
         """methods: [{method_id,name,display_name,category,category_label,
@@ -83,9 +90,10 @@ class MethodBrowser(QWidget):
                               m.get('method_id', ''))
                 child.setData(0, Qt.ItemDataRole.UserRole + 1,
                               m.get('display_name') or m.get('name', ''))
-                n_params = len(m.get('parameter_schema') or [])
-                child.setToolTip(0, '方法ID: %s\n参数数: %d'
-                                    % (m.get('method_id', ''), n_params))
+                # tooltip 给全名（列表宽不够时悬停可读）；原「方法ID/参数数」
+                # 是开发者视角字样（2026-10-09 深查 P3）
+                child.setToolTip(0, str(m.get('display_name')
+                                        or m.get('name', '')))
                 top.addChild(child)
 
                 row_widget = QWidget(self._tree)
@@ -103,6 +111,7 @@ class MethodBrowser(QWidget):
     # ------------------------------------------------------------- 过滤
     def _apply_filter(self, text):
         needle = (text or '').strip().lower()
+        total_hits = 0
         for i in range(self._tree.topLevelItemCount()):
             top = self._tree.topLevelItem(i)
             visible_children = 0
@@ -115,6 +124,11 @@ class MethodBrowser(QWidget):
                 child.setHidden(not hit)
                 visible_children += int(hit)
             top.setHidden(visible_children == 0)
+            total_hits += visible_children
+        # 有关键词、有方法、但一个都没命中 → 无匹配浮层（空库不叠：
+        # 「暂无方法」引导已覆盖该态）
+        self._nomatch.setVisible(
+            bool(needle) and bool(self._methods) and total_hits == 0)
 
     def apply_theme(self, dark: bool) -> None:
         """主题切换钩子（主窗遍历调用）。标签徽章已按需求移除，无操作。"""
@@ -145,8 +159,11 @@ class MethodBrowser(QWidget):
         add_action(menu, FIF.ADD, '添加到处理链',
                    lambda: self.sig_add_requested.emit(mid))
         menu.addSeparator()
+        # 复制的是用户看到的名字（display_name）——原复制 method_id
+        # 是开发者视角，粘贴出来对不上界面字样（2026-10-09 深查 P3）
+        display = str(item.data(0, Qt.ItemDataRole.UserRole + 1) or mid)
         add_action(menu, FIF.COPY, '复制方法名',
-                   lambda: QApplication.clipboard().setText(mid))
+                   lambda: QApplication.clipboard().setText(display))
         menu.exec(self._tree.viewport().mapToGlobal(pos))
 
     def current_method_id(self):

@@ -25,9 +25,13 @@
        的 ScatterPlotItem 收逐点颜色会逐点建 QBrush 变体（10,394 点 426ms），
        只带单个 QBrush 时 35ms（12×）。
 
-本测试钉住两个契约：
+本测试钉住三个契约：
     - 页面不可见时 ``_refresh_views`` **不**重绘任何视图，只记脏；
-    - 切到某分段时该分段被补齐（且只补一次，补后从脏集合移除）。
+    - 切到某分段时该分段被补齐（且只补一次，补后从脏集合移除）——
+      2026-10-08 起 flush 延后一拍（QTimer.singleShot(0)），断言前需
+      pump 事件循环；
+    - 数据指纹没变时切段/刷新**不**重复 ``set_tracks``（三维视图切回
+      不再全量重建——「每次点三维视图整窗消失数秒」的回归钉）。
 """
 import pytest
 
@@ -76,8 +80,11 @@ class TestDeferredRedraw:
         assert spatial._dirty_views == set(spatial._views()), (
             '四个视图都应标记为脏')
 
-    def test_switch_view_flushes_only_that_segment(self, spatial):
-        """切到某分段 → 只补齐该分段，且补后从脏集合移除。"""
+    def test_switch_view_flushes_only_that_segment(self, spatial, qapp):
+        """切到某分段 → 只补齐该分段，且补后从脏集合移除。
+
+        flush 延后一拍（singleShot(0)）：先 pump 事件循环再断言。
+        """
         from ui.pages import spatial_page as SP
 
         calls = []
@@ -91,6 +98,7 @@ class TestDeferredRedraw:
         assert spatial._dirty_views == set(spatial._views())
 
         spatial._switch_view(SP._SEG_PROFILE)
+        qapp.processEvents()  # 触发延后一拍的 flush
         assert calls == [SP._SEG_PROFILE], (
             f'切到剖面应只补剖面，实际 {calls}')
         assert SP._SEG_PROFILE not in spatial._dirty_views
@@ -99,6 +107,7 @@ class TestDeferredRedraw:
         # 再切一次同一分段不应重复重绘（已不在脏集合）
         calls.clear()
         spatial._switch_view(SP._SEG_PROFILE)
+        qapp.processEvents()
         assert calls == [], '已补齐的分段不应重复重绘'
 
     def test_flush_is_idempotent(self, spatial):
@@ -148,6 +157,136 @@ class TestDeferredRedraw:
         spatial._flush_dirty_view(SP._SEG_MAP)
         assert applied['colors'] == colors
         assert [t.line_id for t in applied['tracks']] == ['L01', 'L02']
+
+
+class TestFingerprintDedup:
+    """数据指纹去重：数据没变就不重复 set_tracks（2026-10-08）。
+
+    回归背景（问题 2「每次点三维视图软件都消失几秒」）：脏标记是
+    「切走就标脏、切回必全量 set_tracks」，即使数据一字未变。三维视图
+    每次白付 GL 全量重建 + numpy 变换 + 4326→Mercator（130–470 ms），
+    主线程阻塞期间 Windows 合成器拿不到新帧 → 整窗「消失再出现」。
+    """
+
+    def test_apply_tracks_if_changed_skips_unchanged_data(
+            self, spatial, qapp):
+        """同数据二次灌入被跳过；数据变化后重新灌入。"""
+        from ui.pages import spatial_page as SP
+
+        view = spatial._views()[SP._SEG_3D]
+        calls = []
+        view.set_tracks = lambda tracks, colors: calls.append(
+            [t.line_id for t in tracks])
+
+        tracks = [_Track('L01'), _Track('L02')]
+        colors = {'L01': '#ff0000', 'L02': '#00ff00'}
+
+        assert spatial._apply_tracks_if_changed(
+            SP._SEG_3D, view, tracks, colors) is True
+        assert len(calls) == 1
+
+        # 同数据再灌：指纹一致，跳过
+        assert spatial._apply_tracks_if_changed(
+            SP._SEG_3D, view, tracks, colors) is False
+        assert len(calls) == 1, '数据没变不应重复 set_tracks'
+
+        # 数据变化（点数变）：重新灌入
+        tracks.append(_Track('L03'))
+        colors['L03'] = '#0000ff'
+        assert spatial._apply_tracks_if_changed(
+            SP._SEG_3D, view, tracks, colors) is True
+        assert len(calls) == 2
+
+    def test_refresh_skips_dirty_mark_when_fingerprint_unchanged(
+            self, spatial):
+        """视图已灌过同数据时，_refresh_views 不再把它标脏。"""
+        from ui.pages import spatial_page as SP
+
+        tracks = [_Track('L01')]
+        spatial._checked_tracks = lambda: tracks
+        spatial._colors = {'L01': '#ff0000'}
+
+        # 手动给 3D 灌一次（成功后记指纹）
+        view = spatial._views()[SP._SEG_3D]
+        view.set_tracks = lambda tracks, colors: None
+        assert spatial._apply_tracks_if_changed(
+            SP._SEG_3D, view, tracks, spatial._colors) is True
+
+        spatial._refresh_views()
+
+        assert SP._SEG_3D not in spatial._dirty_views, (
+            '指纹一致的视图不应被标脏')
+        # 其余未灌过的视图仍标脏
+        assert SP._SEG_MAP in spatial._dirty_views
+        assert SP._SEG_PROFILE in spatial._dirty_views
+
+    def test_switch_back_to_3d_without_data_change_skips_rebuild(
+            self, spatial, qapp):
+        """用户场景全链路：切三维(重建)→切走→刷新(同数据)→切回不重建。"""
+        from ui.pages import spatial_page as SP
+
+        calls = []
+        for key, view in spatial._views().items():
+            if view is None:
+                continue
+            view.set_tracks = (
+                lambda tracks, colors, _k=key: calls.append(_k))
+
+        spatial._refresh_views()                      # 全部标脏
+        spatial._switch_view(SP._SEG_3D)              # 切到三维
+        qapp.processEvents()
+        assert calls == [SP._SEG_3D], '首次切三维应重建一次'
+
+        spatial._switch_view(SP._SEG_PROFILE)         # 切走（刷剖面）
+        qapp.processEvents()
+        assert calls == [SP._SEG_3D, SP._SEG_PROFILE]
+
+        spatial._refresh_views()                      # 数据没变的刷新
+        spatial._switch_view(SP._SEG_3D)              # 再切回三维
+        qapp.processEvents()
+        assert calls == [SP._SEG_3D, SP._SEG_PROFILE], (
+            '数据没变时切回三维不应重建 set_tracks')
+
+    def test_switch_back_to_3d_after_data_change_rebuilds(
+            self, spatial, qapp):
+        """数据真的变了：切回三维必须重建（去重不得挡住真更新）。"""
+        from ui.pages import spatial_page as SP
+
+        tracks = [_Track('L01', 50), _Track('L02', 50)]
+        spatial._checked_tracks = lambda: tracks
+
+        calls = []
+        for key, view in spatial._views().items():
+            if view is None:
+                continue
+            view.set_tracks = (
+                lambda t, c, _k=key: calls.append(_k))
+
+        spatial._refresh_views()
+        spatial._switch_view(SP._SEG_3D)
+        qapp.processEvents()
+        assert calls == [SP._SEG_3D]
+
+        # 勾选集合变化 → 新指纹（点数不同）
+        spatial._checked_tracks = lambda: [tracks[0]]
+        spatial._refresh_views()
+        spatial._switch_view(SP._SEG_3D)
+        qapp.processEvents()
+        assert calls == [SP._SEG_3D, SP._SEG_3D], (
+            '数据变化后切回三维应重建')
+
+    def test_apply_theme_invalidates_fingerprints(self, spatial):
+        """主题切换清空指纹：下次刷新必须重新灌（视图内部条目被重建）。"""
+        from ui.pages import spatial_page as SP
+
+        view = spatial._views()[SP._SEG_3D]
+        view.set_tracks = lambda tracks, colors: None
+        spatial._apply_tracks_if_changed(
+            SP._SEG_3D, view, [_Track('L01')], {})
+
+        spatial.apply_theme(dark=True)
+
+        assert spatial._views_applied == {}, '主题切换后指纹应清空'
 
 
 class TestDepthScatterPool:

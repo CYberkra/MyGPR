@@ -43,7 +43,8 @@ from ui.widgets.empty_state import EmptyStateOverlay
 from ui.widgets.local_dem import dem_covers_bbox
 from ui.widgets.map_tiles import (TILE_SOURCE_MAX_ZOOM, WORLD_SIZE_M,
                                   extract_epsg, lonlat_to_tile, tile_url,
-                                  wgs84_to_gcj02, zoom_for_resolution)
+                                  unique_tmp_path, wgs84_to_gcj02,
+                                  zoom_for_resolution)
 from ui.widgets.terrain_tiles import (decode_terrarium, interpolate_scatter,
                                       mosaic_from_tiles,
                                       sample_bilinear, sample_imagery_pixels,
@@ -197,7 +198,7 @@ class _TerrainWorker(QRunnable):
                         raise OSError(f'HTTP {response.status}')
                     data = response.read()
                 os.makedirs(os.path.dirname(path), exist_ok=True)
-                tmp_path = path + '.tmp'
+                tmp_path = unique_tmp_path(path)
                 with open(tmp_path, 'wb') as fh:
                     fh.write(data)
                 os.replace(tmp_path, path)
@@ -221,7 +222,7 @@ class _TerrainWorker(QRunnable):
                         raise OSError(f'HTTP {response.status}')
                     data = response.read()
                 os.makedirs(os.path.dirname(path), exist_ok=True)
-                tmp_path = path + '.tmp'
+                tmp_path = unique_tmp_path(path)
                 with open(tmp_path, 'wb') as fh:
                     fh.write(data)
                 os.replace(tmp_path, path)
@@ -401,6 +402,34 @@ class Trajectory3DView(QWidget):
         self._terrain_signals.finished.connect(self._on_terrain_finished)
         self._terrain_signals.notice.connect(self.local_dem_notice)
         return True
+
+    def shutdown(self) -> None:
+        """停掉地形线程池并断开回包信号（关闭视图 / 测试 teardown 时调用）。
+
+        与 :meth:`ui.widgets.map_view.TileLayer.shutdown` 同因：``QThreadPool``
+        析构会 ``waitForDone()``，而 ``_TerrainWorker`` 里的两个 ``urlopen``
+        timeout=15 —— 有地形瓦片在途时关闭视图会卡住主线程。
+        """
+        signals = getattr(self, '_terrain_signals', None)
+        pool = getattr(self, '_terrain_pool', None)
+        if signals is not None:
+            try:
+                signals.finished.disconnect(self._on_terrain_finished)
+                signals.notice.disconnect(self.local_dem_notice)
+            except (RuntimeError, TypeError):
+                pass
+        self._terrain_generation += 1   # 立即使在途地形任务失效
+        if pool is not None:
+            pool.clear()
+            pool.waitForDone(3000)
+
+    def __del__(self) -> None:
+        # 与 TileLayer.__del__ 同理：析构阶段不可抛，但不留静默 pass（门禁
+        # 把无说明的 except 计为技术债，真出问题也要有线索）。
+        try:
+            self.shutdown()
+        except Exception as exc:  # noqa: BLE001 — 析构阶段不可抛
+            _LOGGER.debug('Trajectory3DView 析构时 shutdown 失败（%s）', exc)
 
     # ------------------------------------------------------------ 数据
     def set_tracks(self, tracks, colors: dict | None = None) -> None:

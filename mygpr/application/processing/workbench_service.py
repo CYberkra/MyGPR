@@ -6,7 +6,6 @@ from __future__ import annotations
 import copy
 import json
 import logging
-import os
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -17,6 +16,7 @@ from typing import Any, Sequence
 import numpy as np
 
 from mygpr.application.jobs.context import ExecutionContext
+from mygpr.application.persistence_ports import DurableWritePort
 from mygpr.application.processing.analysis_service import ProcessingAnalysisService
 from mygpr.application.processing.service import ProcessingService
 from mygpr.application.project.service import ProjectService
@@ -37,40 +37,19 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
 
-def _atomic_write_json(path: Path, payload: Any) -> None:
-    """镜像 core.storage_primitives.atomic_write_json 的持久化纪律。
+def _durable_writer() -> DurableWritePort:
+    """落盘契约入口：实现位于 infrastructure（core 权威原子写）。
 
-    application 层受架构政策限制不能 import core，故在本地复刻同一套
-    约定：隐藏的唯一临时名（并发写互不踩踏）+ fsync + 原子替换 +
-    目录 fsync。待 application 引入持久化端口后收敛到单一实现。
+    改造前本模块自带一份 ``_atomic_write_json`` 复刻，docstring 自认
+    「待 application 引入持久化端口后收敛到单一实现」——该端口现为
+    ``mygpr.application.persistence_ports.DurableWritePort``。
+    保持为函数级延迟解析：本模块 import 期不得触碰 infrastructure。
     """
-    target = Path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
-    try:
-        with temporary.open("w", encoding="utf-8") as stream:
-            stream.write(json.dumps(payload, ensure_ascii=False, indent=2))
-            stream.flush()
-            # 文件 fsync 失败 = 持久化未落盘：与 core 纪律一致向上传播，
-            # 由调用方决定重试/提示，而非静默吞掉留下"成功"假象。
-            os.fsync(stream.fileno())
-        temporary.replace(target)
-        try:
-            dir_fd = os.open(target.parent, os.O_RDONLY)
-            try:
-                os.fsync(dir_fd)
-            finally:
-                os.close(dir_fd)
-        except OSError:
-            # 目录 fsync 在部分文件系统（FAT/网络挂载）不受支持；文件本体
-            # 已 fsync 且原子替换完成，此处失败只损失目录项即时可见性。
-            _LOGGER.warning("目录 fsync 失败（不影响文件内容持久化）：%s",
-                            target.parent)
-    finally:
-        temporary.unlink(missing_ok=True)
+    from mygpr.infrastructure.persistence.durable_write import default_durable_write
+    return default_durable_write()
 
 
 def _bounded_indices(size: int, maximum: int) -> np.ndarray:
@@ -620,7 +599,7 @@ class ProcessingWorkbenchService:
             ],
         }
         path = self._draft_path(session)
-        _atomic_write_json(path, payload)
+        _durable_writer().write_json(path, payload)
 
     def _load_draft_steps(self, session: _Session) -> list[WorkbenchStep]:
         path = self._draft_path(session)
@@ -668,9 +647,8 @@ class ProcessingWorkbenchService:
         if self._projects.get_summary(project_id).read_only:
             raise PermissionError("read-only project cannot modify processing templates")
         path = self._template_path(project_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
         payload = {"schema": "mygpr.processing_templates.v1", "updated_at": _utc_now(), "templates": list(records)}
-        _atomic_write_json(path, payload)
+        _durable_writer().write_json(path, payload)
 
     @staticmethod
     def _template_from_record(record: dict[str, Any]) -> ProcessingTemplate:

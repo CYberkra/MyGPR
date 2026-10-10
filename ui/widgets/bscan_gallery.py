@@ -10,10 +10,12 @@
 几天前的成果混进当次结果，真机截图反馈）。
 """
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QDialog, QGridLayout, QScrollArea, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import (QDialog, QGridLayout, QLabel, QScrollArea,
+                             QVBoxLayout, QWidget)
 
 from qfluentwidgets import PushButton
 
+from ui.design_tokens import color
 from ui.widgets.bscan_view import BScanView
 
 _COLUMNS = 3
@@ -42,11 +44,23 @@ class BScanGallery(QDialog):
             pick.clicked.connect(
                 lambda _checked=False, key=source['key']: self._pick(key))
             grid.addWidget(pick, row * 2, col)
-            view = BScanView(content, with_colorbar=False)
-            view.setMinimumSize(380, 280)
             if source['bundle'] is not None:
+                view = BScanView(content, with_colorbar=False)
+                view.setMinimumSize(380, 280)
                 view.set_bundle(source['bundle'])
-            grid.addWidget(view, row * 2 + 1, col)
+                grid.addWidget(view, row * 2 + 1, col)
+            else:
+                # 预览异步回填未到（跑完链自动弹画廊与预览回填有时序窗）：
+                # 空画布无骨架无提示像故障 → muted 虚线占位（快照不刷新，
+                # 如实告知"尚未生成"，第三轮调研）
+                hint = QLabel('预览尚未生成', content)
+                hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                hint.setMinimumSize(380, 280)
+                hint.setStyleSheet(
+                    f'color:{color("text_muted")};'
+                    f'border:1px dashed {color("border_default")};'
+                    'border-radius:6px;')
+                grid.addWidget(hint, row * 2 + 1, col)
 
         scroll.setWidget(content)
         outer = QVBoxLayout(self)

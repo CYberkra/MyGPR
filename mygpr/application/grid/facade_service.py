@@ -15,6 +15,7 @@ from mygpr.application.grid.service import (
     write_grid_geojson,
 )
 from mygpr.application.jobs.context import ExecutionContext
+from mygpr.application.persistence_ports import DurableWritePort
 from mygpr.application.project.service import ProjectService
 
 _GRID_LAYER_NAME_MAX = 60
@@ -23,8 +24,13 @@ _GRID_LAYER_NAME_MAX = 60
 class GridService:
     """测线分组与属性网格化入口（供 backend facade 调用）。"""
 
-    def __init__(self, projects: ProjectService) -> None:
+    def __init__(
+        self, projects: ProjectService, *, writer: DurableWritePort | None = None
+    ) -> None:
         self._projects = projects
+        # 落盘契约由 composition root 注入（infrastructure 提供 core 实现）。
+        # 为 None 时 write_grid_geojson 走默认适配器，纯函数测试可零构造。
+        self._writer = writer
 
     def group_lines(
         self, project_id: str, *, tolerance_m: float = DEFAULT_GROUP_TOLERANCE_M,
@@ -52,7 +58,8 @@ class GridService:
         staging_dir.mkdir(parents=True, exist_ok=True)
         attribute = grid.attribute_name
         geojson_path = staging_dir / f"grid_{attribute}_{grid.ncols}x{grid.nrows}.geojson"
-        write_grid_geojson(grid, geojson_path, crs_name=crs_name)
+        write_grid_geojson(grid, geojson_path, crs_name=crs_name,
+                           writer=self._writer)
         try:
             record = self._projects.import_grid_layer(
                 project_id, geojson_path,

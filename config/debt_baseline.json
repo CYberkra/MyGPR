@@ -2,13 +2,21 @@
   "schema": "mygpr.debt_baseline.v1",
   "policy": "release-ratchet; values may decrease but may not increase",
   "metrics": {
-    "python_files": 389,
-    "source_lines": 138159,
-    "broad_exception_handlers": 519,
-    "silent_exception_handlers": 119,
-    "sys_path_mutations": 59,
-    "modules_over_1000_lines": 17,
-    "classes_over_1000_lines": 12,
-    "functions_over_100_lines": 124
+    "python_files": 382,
+    "source_lines": 82070,
+    "broad_exception_handlers": 159,
+    "silent_exception_handlers": 7,
+    "sys_path_mutations": 14,
+    "modules_over_1000_lines": 2,
+    "classes_over_1000_lines": 1,
+    "functions_over_100_lines": 44
+  },
+  "tolerances": {
+    "broad_exception_handlers": 0.05,
+    "silent_exception_handlers": 0.05,
+    "sys_path_mutations": 0.05,
+    "modules_over_1000_lines": 0.05,
+    "classes_over_1000_lines": 0.05,
+    "functions_over_100_lines": 0.05
   }
 }

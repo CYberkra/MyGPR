@@ -233,14 +233,20 @@ class TestResultGridLazyPrinciple:
 class TestRunButtonMotion:
     """运行钮动效（移植自 Transitions.dev 的 spinner → ✓ 形变思路）。"""
 
-    def test_running_shows_spinner_then_restores(self, qapp):
+    def test_running_flips_button_to_cancel(self, qapp):
+        """运行钮就近翻转（2026-10-09 深查 P2）：运行中同位置 = 取消可点，
+        红描边走 error 语义令牌；结束恢复「运行」与 primary 默认样式。
+        """
+        from ui.design_tokens import color
+
         strip = ChainStrip()
         strip.set_running(True)
-        assert strip.run_button().text().startswith('运行中')
-        assert strip.run_button().isEnabled() is False
+        assert strip.run_button().text() == '取消'
+        assert strip.run_button().isEnabled() is True
+        assert color('error') in strip.run_button().styleSheet()
         strip.set_running(False)
         assert strip.run_button().text() == '运行'
-        assert strip.run_button().isEnabled() is True
+        assert strip.run_button().styleSheet() == ''
 
     def test_flash_success_then_restores(self, qapp):
         """成功反馈为「完成」文字——全应用不出现勾形元素（用户定案）。"""
@@ -866,3 +872,395 @@ class TestColorbarPrefOnGrid:
             assert page._result_grid._colorbar_pref is True
         finally:
             page.close()
+
+
+class TestAuditFixes20261009:
+    """处理页审计修复回归（2026-10-09，commit 范围：开关改名/卡序/总览墙
+    入口/AutoTune 展开反馈/主题令牌/搜索无匹配浮层）。"""
+
+    # ---------------- P1-A：「中间步骤」开关改名 ----------------
+    def test_expand_switch_renamed(self, qapp):
+        """结果区头部曾有两个「全部步骤」（视图模式项 + 开关）同名不同义。
+
+        开关改名「中间步骤」后与 segmented 的视图模式彻底区分。
+        """
+        grid = ResultGrid()
+        try:
+            assert grid._expand_switch.text == '中间步骤'
+            assert grid._scale_switch.text == '统一色标'
+        finally:
+            grid.deleteLater()
+
+    # ---------------- P1-B：左栏卡序（执行卡上移） ----------------
+    @staticmethod
+    def _direct_child(widget, layout):
+        while widget is not None:
+            parent = widget.parentWidget()
+            if parent is not None and parent.layout() is layout:
+                return widget
+            widget = parent
+        return None
+
+    def test_exec_card_before_param_card(self, qapp):
+        """执行卡（输入数据/结果名称）上移到参数设置之前。
+
+        旧序排在最底，1105×580 真机窗口下完全在视口外（截图实证：
+        只见「执行」标题一条边），而运行按钮在右上链条上——运行前
+        必经配置不可见。
+        """
+        page = ProcessingPage()
+        try:
+            layout = page._left_cards_layout
+            exec_card = self._direct_child(page._input_combo, layout)
+            param_card = self._direct_child(page._param_form, layout)
+            assert exec_card is not None and param_card is not None
+            assert layout.indexOf(exec_card) < layout.indexOf(param_card), (
+                '左栏卡序应为 方法库 → 执行 → 参数设置 → AutoTune')
+        finally:
+            page.close()
+
+    # ---------------- P2-C：总览墙手动入口（挂结果网格头部） ----------------
+    def test_grid_gallery_entry_visibility(self, qapp):
+        """旧入口随 v2 隐藏的 preview_card 消失；新入口挂网格头部，
+        仅在原始数据之外还有打开的源时可见。"""
+        page = ProcessingPage()
+        try:
+            assert page._grid_gallery_btn.isVisibleTo(page) is False
+            page._preview_sources.append({
+                'key': 'artifact:x', 'title': 'x', 'bundle': None,
+                'artifact_id': 'x', 'closable': True, 'is_final': False})
+            page._redistribute()
+            assert page._grid_gallery_btn.isVisibleTo(page) is True
+        finally:
+            page.close()
+
+    # ---------------- P2-E：AutoTune 结果到达自动展开 ----------------
+    def test_autotune_result_expands_card(self, qapp):
+        """调参是异步的：结果写进默认收起的卡等于没有反馈——到达时展开。"""
+        page = ProcessingPage()
+        try:
+            assert page._autotune_card.is_collapsed() is True
+            page.set_autotune_result('dewow', {'best_params': {'win': 5}})
+            assert page._autotune_card.is_collapsed() is False
+        finally:
+            page.close()
+
+    # ---------------- P2-D：chip 状态点走令牌 ----------------
+    def test_chip_dot_uses_theme_tokens(self, qapp):
+        """原硬编码 #7CC464（绿）/ #5A5A56（灰）不随主题且违反跳色纪律。"""
+        from ui.design_tokens import color
+
+        strip = ChainStrip()
+        strip.set_steps([{'label': '去直流', 'enabled': True},
+                         {'label': 'AGC', 'enabled': False}])
+        try:
+            chip_on = strip._list.itemWidget(strip._list.item(0))
+            chip_off = strip._list.itemWidget(strip._list.item(1))
+            assert color('success') in chip_on.dot_btn.styleSheet()
+            assert color('disabled') in chip_off.dot_btn.styleSheet()
+            assert '#7CC464' not in chip_on.dot_btn.styleSheet()
+        finally:
+            strip.deleteLater()
+
+    def test_page_apply_theme_restyles_hint(self, qapp):
+        """参数空态提示原硬编码 'color: gray'；apply_theme 后须为深色
+        主题的 text_muted 令牌值。"""
+        from ui.design_tokens import color
+
+        page = ProcessingPage()
+        try:
+            page.apply_theme(dark=True)
+            assert color('text_muted', True) in (
+                page._param_empty_hint.styleSheet())
+        finally:
+            page.close()
+
+    def test_chain_strip_apply_theme_restrokes_chips(self, qapp):
+        """主题切换后逐 chip 重刷（set_enabled_visual 按当时主题取令牌）。"""
+        from ui.design_tokens import color
+
+        strip = ChainStrip()
+        strip.set_steps([{'label': 'AGC', 'enabled': False}])
+        try:
+            strip.apply_theme(dark=True)
+            chip = strip._list.itemWidget(strip._list.item(0))
+            assert color('disabled', True) in chip.dot_btn.styleSheet()
+        finally:
+            strip.deleteLater()
+
+    # ---------------- P2-F：搜索无匹配浮层 + 清除按钮 ----------------
+    def test_search_nomatch_overlay(self, qapp):
+        from ui.widgets.method_browser import MethodBrowser
+
+        browser = MethodBrowser()
+        try:
+            browser.set_methods([{
+                'method_id': 'dewow', 'name': 'dewow',
+                'display_name': '去直流滤波', 'category': 'filter',
+                'category_label': '滤波', 'tags': [],
+                'parameter_schema': []}])
+            assert browser._nomatch.isVisibleTo(browser) is False
+
+            browser._apply_filter('不存在的关键词')
+            assert browser._nomatch.isVisibleTo(browser) is True
+            browser._apply_filter('去直流')
+            assert browser._nomatch.isVisibleTo(browser) is False
+            browser._apply_filter('')
+            assert browser._nomatch.isVisibleTo(browser) is False
+            # 空库不叠浮层：「暂无方法」引导已覆盖该态
+            browser.set_methods([])
+            browser._apply_filter('任意词')
+            assert browser._nomatch.isVisibleTo(browser) is False
+            assert browser._search.isClearButtonEnabled() is True
+        finally:
+            browser.deleteLater()
+
+
+class TestDeepAudit20261009:
+    """第二轮深查（工作流走查 + 状态矩阵探针）落地项。"""
+
+    def _strip(self):
+        from ui.widgets.chain_strip import ChainStrip
+        return ChainStrip()
+
+    def _page_with_run(self, display_name=None):
+        """输入 + 单步 run_group（与既有测试同构的鸭子类型成果）。"""
+        from types import SimpleNamespace
+
+        from ui.pages.processing_page import ProcessingPage
+        page = ProcessingPage()
+        if display_name:
+            page.set_methods([{
+                'method_id': 'dewow', 'name': 'dewow',
+                'display_name': display_name, 'category': 'filter',
+                'category_label': '滤波', 'tags': [],
+                'parameter_schema': []}])
+        page.set_original_bundle(_bundle(1))
+        page.set_artifacts([SimpleNamespace(
+            artifact_id='S1', line_id='L01', name='run 步骤1',
+            method_id='dewow', created_at='2026-09-25T10:01:00',
+            manifest={'params': {'artifact_kind': 'intermediate',
+                                 'run_group_id': 'G1'}})])
+        return page
+
+    # ---------------- P1：链 chip 溢出可达（+N 胶囊） ----------------
+    def test_overflow_pill_shown_when_chips_clipped(self, qapp):
+        strip = self._strip()
+        try:
+            strip.resize(360, 40)
+            strip.show()
+            strip.set_steps([{'label': f'm{i}', 'enabled': True}
+                             for i in range(8)])
+            qapp.processEvents()
+            strip._update_overlays()
+            assert strip._overflow_btn.isVisibleTo(strip) is True
+            text = strip._overflow_btn.text()
+            assert text.startswith('+') and text[1:].isdigit()
+            assert 1 <= int(text[1:]) <= 8
+        finally:
+            strip.deleteLater()
+
+    def test_overflow_pill_hidden_when_fits(self, qapp):
+        strip = self._strip()
+        try:
+            strip.resize(900, 40)
+            strip.show()
+            strip.set_steps([{'label': 'a', 'enabled': True}])
+            qapp.processEvents()
+            strip._update_overlays()
+            assert strip._overflow_btn.isVisibleTo(strip) is False
+        finally:
+            strip.deleteLater()
+
+    def test_overflow_menu_builds_one_submenu_per_step(self, qapp):
+        strip = self._strip()
+        try:
+            strip.set_steps([{'label': f'm{i}', 'enabled': i != 1}
+                             for i in range(3)])
+            menu = strip._build_overflow_menu()
+            # 每步骤一个子菜单（builder 显式收藏，qfw 未暴露清单）
+            assert len(menu._step_submenus) == 3
+        finally:
+            strip.deleteLater()
+
+    def test_overflow_menu_select_reaches_hidden_step(self, qapp):
+        """选中动作走 setCurrentRow → sig_step_selected（真实信号路径）。"""
+        strip = self._strip()
+        try:
+            strip.set_steps([{'label': f'm{i}', 'enabled': True}
+                             for i in range(3)])
+            got = []
+            strip.sig_step_selected.connect(got.append)
+            menu = strip._build_overflow_menu()
+            sub = menu._step_submenus[0]
+            sub.actions()[0].trigger()           # 第一项 = 「选中」
+            assert got == [0]
+        finally:
+            strip.deleteLater()
+
+    # ---------------- P2：链空态引导 ----------------
+    def test_empty_chain_shows_hint(self, qapp):
+        strip = self._strip()
+        try:
+            strip.show()
+            strip.set_steps([])
+            qapp.processEvents()
+            assert strip._empty_hint.isVisibleTo(strip) is True
+            strip.set_steps([{'label': 'a', 'enabled': True}])
+            qapp.processEvents()
+            assert strip._empty_hint.isVisibleTo(strip) is False
+        finally:
+            strip.deleteLater()
+
+    # ---------------- P2：运行中清脏标记 / 取消恢复 ----------------
+    def test_running_hides_dirty_and_cancel_restores(self, qapp):
+        page = self._page_with_run()
+        try:
+            page._mark_results_stale()
+            strip = page._chain_strip
+            assert strip._dirty_label.isVisibleTo(strip) is True
+            page.set_running(True)
+            assert strip._dirty_label.isVisibleTo(strip) is False
+            page.set_running(False)              # 取消路径（无 success）
+            assert strip._dirty_label.isVisibleTo(strip) is True
+        finally:
+            page.close()
+
+    def test_run_click_while_running_emits_cancel(self, qapp):
+        page = self._page_with_run()
+        try:
+            got = []
+            page.cancel_requested.connect(lambda: got.append(True))
+            page.set_running(True)
+            page._on_run_clicked()
+            assert got == [True]
+        finally:
+            page.close()
+
+    # ---------------- P2：chip / 卡标题中文显示名 ----------------
+    def test_echo_chain_and_titles_use_display_name(self, qapp):
+        page = self._page_with_run(display_name='去直流滤波')
+        try:
+            titles = [c.title_label.text()
+                      for c in page._result_grid.cards()]
+            assert titles == ['输入', '1 去直流滤波']
+            strip = page._chain_strip
+            labels = [strip._steps[i]['label']
+                      for i in range(strip._list.count())]
+            assert labels == ['去直流滤波']
+        finally:
+            page.close()
+
+    def test_echo_falls_back_to_method_id_without_registry(self, qapp):
+        """方法库未登记（打开旧工程先于方法表到达）→ 回退 method_id。"""
+        page = self._page_with_run()
+        try:
+            titles = [c.title_label.text()
+                      for c in page._result_grid.cards()]
+            assert titles == ['输入', '1 dewow']
+        finally:
+            page.close()
+
+    def test_long_method_name_elided_in_chip(self, qapp):
+        strip = self._strip()
+        try:
+            long_id = 'zero_offset_correction_v2'
+            strip.set_steps([{'label': long_id, 'enabled': True}])
+            chip = strip._list.itemWidget(strip._list.item(0))
+            assert '…' in chip.name.text()
+            assert chip.name.text() != long_id   # 截断有省略号，非硬裁
+        finally:
+            strip.deleteLater()
+
+    # ---------------- P3：flash 竞态 + a11y + 空态开关 ----------------
+    def test_flash_reset_cancelled_by_rerun(self, qapp):
+        strip = self._strip()
+        try:
+            strip.flash_success()
+            assert strip.run_button().text() == '完成'
+            assert strip._flash_timer.isActive() is True
+            strip.set_running(True)      # 1.2s 内重跑 → 复位定时器被取消
+            assert strip._flash_timer.isActive() is False
+            assert strip.run_button().text() == '取消'
+        finally:
+            strip.deleteLater()
+
+    def test_icon_only_buttons_have_accessible_names(self, qapp):
+        strip = self._strip()
+        try:
+            strip.set_steps([{'label': 'a', 'enabled': True}])
+            assert strip._add_btn.accessibleName()
+            chip = strip._list.itemWidget(strip._list.item(0))
+            assert chip.dot_btn.accessibleName()
+            assert chip.del_btn.accessibleName()
+        finally:
+            strip.deleteLater()
+
+    def test_switches_hidden_when_no_slots(self, qapp):
+        from ui.widgets.bscan_result_grid import ResultGrid
+        grid = ResultGrid()
+        try:
+            grid._expand_switch.setVisible(True)
+            grid._scale_switch.setVisible(True)
+            grid.set_slots([])
+            assert grid._expand_switch.isVisibleTo(grid) is False
+            assert grid._scale_switch.isVisibleTo(grid) is False
+            grid.set_slots([{'key': 'k0', 'title': '输入', 'enabled': True}])
+            assert grid._expand_switch.isVisibleTo(grid) is True
+            assert grid._scale_switch.isVisibleTo(grid) is True
+        finally:
+            grid.deleteLater()
+
+    def test_line_combo_placeholder(self, qapp):
+        page = self._page_with_run()
+        try:
+            assert page._line_combo._placeholderText == '选择测线'
+        finally:
+            page.close()
+
+    # ---------------- 第三轮调研（✕ 对称 / 总览墙占位 / +N 渐隐） --------
+    def test_card_close_btn_hides_on_leave(self, qapp):
+        """enter 三显 / leave 三藏对称（原 leaveEvent 漏藏 ✕ → 扫过后常显）。"""
+        from PyQt6.QtCore import QEvent, QPointF
+        from PyQt6.QtGui import QEnterEvent
+
+        from ui.widgets.bscan_result_grid import ResultGrid
+        grid = ResultGrid()
+        try:
+            grid.set_slots([{'key': 'k0', 'title': '输入', 'enabled': True}])
+            card = grid.cards()[0]
+            pos = QPointF(1.0, 1.0)
+            card.enterEvent(QEnterEvent(pos, pos, pos))
+            assert card.close_btn.isVisibleTo(card) is True
+            card.leaveEvent(QEvent(QEvent.Type.Leave))
+            assert card.close_btn.isVisibleTo(card) is False
+            assert card.expand_btn.isVisibleTo(card) is False
+            assert card.compare_btn.isVisibleTo(card) is False
+        finally:
+            grid.deleteLater()
+
+    def test_gallery_placeholder_for_missing_bundle(self, qapp):
+        """bundle 未回填的源显示 muted 占位（原直接跳过 → pyqtgraph 空画布）。"""
+        from PyQt6.QtWidgets import QLabel
+
+        from ui.widgets.bscan_gallery import BScanGallery
+        page = self._page_with_run()
+        try:
+            gallery = BScanGallery(page, [
+                {'key': 'input', 'title': '输入', 'bundle': None}])
+            try:
+                hints = [w for w in gallery.findChildren(QLabel)
+                         if w.text() == '预览尚未生成']
+                assert hints, '空 bundle 源应显示占位而非空画布'
+            finally:
+                gallery.deleteLater()
+        finally:
+            page.close()
+
+    def test_overflow_pill_gradient_fade(self, qapp):
+        """+N 胶囊左缘渐隐（qlineargradient）——半遮 chip 文字不再硬切。"""
+        strip = self._strip()
+        try:
+            assert 'qlineargradient' in strip._overflow_btn.styleSheet()
+        finally:
+            strip.deleteLater()

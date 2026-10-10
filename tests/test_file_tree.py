@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""文件树：分组纯函数 + 面板行为（叶子可选、分组行不可选、同步防回环）。"""
+"""文件树：装配纯函数 + 面板行为（叶子可选、分类行不可选、同步防回环）。"""
 from __future__ import annotations
 
 import sys
@@ -12,11 +12,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 pytest.importorskip("PyQt6")
 
-from PyQt6.QtCore import Qt  # noqa: E402
+from PyQt6.QtCore import QEvent, QPointF, Qt  # noqa: E402
+from PyQt6.QtGui import QMouseEvent  # noqa: E402
 
 from ui.file_tree import (  # noqa: E402
-    build_artifacts_model, build_files_model, build_tree_model, group_lines,
-    group_stats, line_suffix,
+    build_artifacts_model, build_files_model, build_project_model,
+    build_tree_model, line_suffix,
 )
 from ui.widgets.file_tree_panel import (  # noqa: E402
     _SUFFIX_MAX_RATIO, _SUFFIX_PAD, suffix_column_width,
@@ -46,38 +47,6 @@ def _report(package_dir='proj/reports/r20260916',
         file_count=file_count)
 
 
-# ---------------------------------------------------------------- 纯函数
-def test_group_by_date_desc_and_lines_asc():
-    lines = [
-        _line('L09', '2026-09-16T01:20:58'),
-        _line('L01', '2026-09-16T01:00:00'),
-        _line('L05', '2026-09-15T23:10:00'),
-    ]
-    groups = dict(group_lines(lines))
-    assert list(groups) == ['2026-09-16', '2026-09-15']  # 日期倒序
-    assert [ln.line_id for ln in groups['2026-09-16']] == ['L01', 'L09']
-    assert [ln.line_id for ln in groups['2026-09-15']] == ['L05']
-
-
-def test_all_undated_falls_back_to_flat():
-    lines = [_line('L01'), _line('L02')]
-    groups = group_lines(lines)
-    assert groups == [('', lines)]  # 平铺：不产生分组节点
-
-
-def test_partial_undated_joins_ungrouped():
-    lines = [_line('L01', '2026-09-16T01:00:00'), _line('L02')]
-    groups = dict(group_lines(lines))
-    assert set(groups) == {'2026-09-16', '未分组'}
-    assert [ln.line_id for ln in groups['未分组']] == ['L02']
-
-
-def test_group_stats_shows_count_and_length():
-    lines = [_line('L01', length_m=98.4), _line('L02', length_m=50.0)]
-    assert group_stats(lines) == '2 条 · 148 m'
-    assert group_stats([]) == '0 条'
-
-
 # ------------------------------------------------ 节点模型（Provider 纯函数）
 def test_line_suffix_derives_from_line_fields():
     assert line_suffix(_line('L01')) == ''
@@ -87,17 +56,16 @@ def test_line_suffix_derives_from_line_fields():
                              interface_keypoint_count=5)) == '成果✓ 标2 界面✓'
 
 
-def test_build_tree_model_groups_lines_and_suffixes():
+def test_build_tree_model_flat_lines_sorted_by_id():
+    """测线平铺：无分组层，line_id 升序（排序与 updated_at 日期无关）。"""
     nodes = build_tree_model([
-        _line('L01', '2026-09-16T01:00:00', processed_result='r'),
-        _line('L02', '2026-09-16T02:00:00'),
+        _line('L09', '2026-09-16T01:20:58', processed_result='r'),
+        _line('L01', '2026-09-15T23:10:00'),
     ])
-    assert len(nodes) == 1
-    group = nodes[0]
-    assert group.kind == 'group' and group.text == '2026-09-16'
-    assert [c.payload for c in group.children] == ['L01', 'L02']
-    assert group.children[0].suffix == '成果✓'
-    assert group.children[1].suffix == ''
+    assert [n.kind for n in nodes] == ['line', 'line']
+    assert [n.payload for n in nodes] == ['L01', 'L09']
+    assert nodes[1].suffix == '成果✓'
+    assert nodes[0].suffix == ''
 
 
 def _artifact(artifact_id='A1', line_id='L01', name='去直流',
@@ -152,6 +120,38 @@ def test_build_artifacts_model_omits_empty_sections():
     assert nodes[0].children[0].text == '剖面图 v2'
 
 
+# ------------------------------------------------ 项目总树（三分类一级节点）
+def test_build_project_model_three_categories_with_counts():
+    lines = [_line('L01'), _line('L02')]
+    nodes = build_project_model(lines, [_artifact('A1', 'L01')])
+    assert [n.kind for n in nodes] == ['category'] * 3
+    assert [n.text for n in nodes] == ['测线', '成果', '文件']
+    assert [n.suffix for n in nodes] == ['2', '1', '0']
+    # 测线平铺（无分组层）；成果挂原有子模型；
+    # 空分类 children 为空（折叠 + (0) 自明）
+    assert nodes[0].children[0].kind == 'line'
+    assert nodes[1].children[0].kind == 'group'
+    assert nodes[1].children[0].children[0].kind == 'artifact'
+    assert nodes[2].children == ()
+
+
+def test_build_project_model_counts_spatial_reports_and_files(tmp_path):
+    (tmp_path / 'raw').mkdir()
+    (tmp_path / 'a.dat').write_text('x', encoding='utf-8')
+    nodes = build_project_model(
+        [], [], spatial_results=[_spatial()], reports=[_report()],
+        files_root=tmp_path)
+    assert nodes[1].suffix == '2'   # 空间成果 + 项目报告
+    assert nodes[2].suffix == '2'   # 1 目录 + 1 文件
+    assert nodes[2].children[0].kind == 'dir'
+
+
+def test_build_project_model_without_root_omits_files(tmp_path):
+    nodes = build_project_model([], [], files_root=None)
+    assert nodes[2].suffix == '0'
+    assert nodes[2].children == ()
+
+
 # ------------------------------------------------ 文件视图（纯函数单层扫描）
 def test_build_files_model_filters_internal_and_sorts(tmp_path):
     for name in ('raw', 'cache', 'metadata', '.trash', '.transactions'):
@@ -198,12 +198,6 @@ def panel(qapp):
     p.set_settings_manager(None)
     p._page_states = {}
     p._current_page = ''
-    # 视图分段复位到「测线」（阻断信号避免触发持久化路径）
-    p._view_segment.blockSignals(True)
-    p._view_segment.setCurrentItem('lines')
-    p._view_segment.blockSignals(False)
-    p._current_view = 'lines'
-    p._empty_label.setText('尚未导入测线')
     p.set_project_info(None)   # 同时清空测线/成果/空间/报告与签名
     p.set_lines([])
     p._current_line_id = ''
@@ -227,11 +221,16 @@ def test_panel_builds_leaves_and_selects(qapp, panel):
     panel.set_lines([_line('L01', '2026-09-16T01:00:00', 98.0, '已处理'),
                      _line('L09', '2026-09-16T02:00:00')])
     tree = panel._tree
-    assert tree.topLevelItemCount() == 1  # 单一分组
-    group = tree.topLevelItem(0)
-    assert group.childCount() == 2
-    # 分组行不可选（防预览代数被无关点击推进）
-    assert not (group.flags() & Qt.ItemFlag.ItemIsSelectable)
+    assert tree.topLevelItemCount() == 3  # 测线/成果/文件 三分类常驻
+    lines_cat = tree.topLevelItem(0)
+    assert lines_cat.text(0) == '测线'
+    assert lines_cat.text(1) == '2'      # 计数角标
+    leaf0 = lines_cat.child(0)           # 平铺：叶子直接挂分类下
+    assert leaf0.text(0).startswith('L01')
+    assert leaf0.childCount() == 0
+    assert lines_cat.child(1).text(0).startswith('L09')
+    # 分类行不可选（防预览代数被无关点击推进）
+    assert not (lines_cat.flags() & Qt.ItemFlag.ItemIsSelectable)
     # 当前测线高亮
     panel.set_current_line('L09')
     current = tree.currentItem()
@@ -274,20 +273,34 @@ _KIND_ROLE = Qt.ItemDataRole.UserRole + 1
 
 
 def _find_by_kind(tree, kind):
+    """深度优先找第一个指定 kind 的节点（分类→分组→叶子 任意深度）。"""
+    def _walk(item):
+        if item.data(0, _KIND_ROLE) == kind:
+            return item
+        for j in range(item.childCount()):
+            found = _walk(item.child(j))
+            if found is not None:
+                return found
+        return None
+
+    for i in range(tree.topLevelItemCount()):
+        found = _walk(tree.topLevelItem(i))
+        if found is not None:
+            return found
+    return None
+
+
+def _category(tree, name):
+    """按文字取顶层分类行（测线/成果/文件）。"""
     for i in range(tree.topLevelItemCount()):
         top = tree.topLevelItem(i)
-        if top.data(0, _KIND_ROLE) == kind:
+        if top.text(0) == name:
             return top
-        for j in range(top.childCount()):
-            child = top.child(j)
-            if child.data(0, _KIND_ROLE) == kind:
-                return child
     return None
 
 
 def test_spatial_and_report_leaves_render_and_click_goto_delivery(qapp, panel):
     panel.set_project_info(types.SimpleNamespace(name='测试1'))
-    panel._set_view('artifacts', remember=False)  # 空间/报告组在「成果」视图
     panel.set_lines([_line('L01', '2026-09-16T01:00:00')])
     panel.set_spatial_results([_spatial()])
     panel.set_reports([_report()])
@@ -308,7 +321,6 @@ def test_spatial_and_report_leaves_render_and_click_goto_delivery(qapp, panel):
 
 def test_artifact_leaf_click_emits_focus_with_line(qapp, panel):
     panel.set_project_info(types.SimpleNamespace(name='测试1'))
-    panel._set_view('artifacts', remember=False)
     panel.set_artifacts([_artifact('A9', 'L02')])
     leaf = _find_by_kind(panel._tree, 'artifact')
     assert leaf is not None
@@ -323,7 +335,6 @@ def test_artifact_leaf_click_emits_focus_with_line(qapp, panel):
 
 def test_set_artifacts_signature_dedup_skips_rebuild(qapp, panel):
     panel.set_project_info(types.SimpleNamespace(name='测试1'))
-    panel._set_view('artifacts', remember=False)
     panel.set_artifacts([_artifact('A1')])
     leaf = _find_by_kind(panel._tree, 'artifact')
     panel.set_artifacts([_artifact('A1')])  # 同签名：不重建
@@ -333,20 +344,19 @@ def test_set_artifacts_signature_dedup_skips_rebuild(qapp, panel):
 
 
 def test_files_view_shows_project_root(qapp, panel, tmp_path):
-    """文件视图：有项目根则显示文件浏览树，无项目显示空态文案。"""
+    """文件分类：有项目根则挂目录树；无项目时整树隐藏（分类计数自明）。"""
     (tmp_path / 'raw').mkdir()
     (tmp_path / 'note.txt').write_text('x', encoding='utf-8')
     panel.set_project_info(
         types.SimpleNamespace(name='测试1', root_path=str(tmp_path)))
-    panel._set_view('files', remember=False)
-    assert not panel._tree.isHidden()
-    names = [panel._tree.topLevelItem(i).text(0)
-             for i in range(panel._tree.topLevelItemCount())]
+    files_cat = _category(panel._tree, '文件')
+    assert files_cat is not None
+    assert files_cat.text(1) == '2'   # 1 目录 + 1 文件
+    names = [files_cat.child(i).text(0) for i in range(files_cat.childCount())]
     assert names == ['raw', 'note.txt']  # 目录在前
-    # 无项目：空态文案
+    # 无项目：整树隐藏
     panel.set_project_info(None)
     assert panel._tree.isHidden()
-    assert panel._empty_label.text() == '打开项目后在此浏览项目文件'
 
 
 def test_files_view_lazy_expands_directory(qapp, panel, tmp_path):
@@ -357,8 +367,8 @@ def test_files_view_lazy_expands_directory(qapp, panel, tmp_path):
     (sub / 'cache').mkdir()  # 内部目录即使嵌套也过滤
     panel.set_project_info(
         types.SimpleNamespace(name='测试1', root_path=str(tmp_path)))
-    panel._set_view('files', remember=False)
-    dir_item = panel._tree.topLevelItem(0)
+    files_cat = _category(panel._tree, '文件')
+    dir_item = files_cat.child(0)
     assert dir_item.text(0) == 'data'
     assert dir_item.childCount() == 1  # 占位行
     assert dir_item.child(0).data(0, _KIND_ROLE) == 'placeholder'
@@ -374,12 +384,12 @@ def test_files_view_double_click_file_opens(qapp, panel, tmp_path,
     f.write_text('x', encoding='utf-8')
     panel.set_project_info(
         types.SimpleNamespace(name='测试1', root_path=str(tmp_path)))
-    panel._set_view('files', remember=False)
+    files_cat = _category(panel._tree, '文件')
     opened = []
     monkeypatch.setattr(
         'ui.widgets.file_tree_panel.QDesktopServices.openUrl',
         lambda url: opened.append(url))
-    panel._on_item_double_clicked(panel._tree.topLevelItem(0), 0)
+    panel._on_item_double_clicked(files_cat.child(0), 0)
     assert len(opened) == 1
 
 
@@ -390,23 +400,24 @@ def test_files_view_context_menu_on_file(qapp, panel, tmp_path, monkeypatch):
     f.write_text('x', encoding='utf-8')
     panel.set_project_info(
         types.SimpleNamespace(name='测试1', root_path=str(tmp_path)))
-    panel._set_view('files', remember=False)
+    files_cat = _category(panel._tree, '文件')
     shown = []
     monkeypatch.setattr(RoundMenu, 'exec',
                         lambda self, *a, **k: shown.append(1))
-    monkeypatch.setattr(panel._tree, 'itemAt',
-                        lambda p: panel._tree.topLevelItem(0))
+    monkeypatch.setattr(panel._tree, 'itemAt', lambda p: files_cat.child(0))
     panel._on_context_menu(QPoint(5, 5))
     assert len(shown) == 1
 
 
 def test_tree_shown_with_only_spatial_results(qapp, panel):
-    # 成果视图：无处理成果但有空间成果时树可见
+    # 无处理成果但有空间成果：成果分类有子节点、树可见
     panel.set_project_info(types.SimpleNamespace(name='测试1'))
-    panel._set_view('artifacts', remember=False)
     panel.set_lines([])
     panel.set_spatial_results([_spatial()])
     assert not panel._tree.isHidden()
+    artifacts_cat = _category(panel._tree, '成果')
+    assert artifacts_cat.text(1) == '1'
+    assert artifacts_cat.childCount() >= 1
 
 
 def test_line_leaf_shows_suffix_in_second_column(qapp, panel):
@@ -422,7 +433,6 @@ def test_context_menu_suppressed_for_spatial_leaf(qapp, panel, monkeypatch):
     from PyQt6.QtCore import QPoint
     from qfluentwidgets import RoundMenu
     panel.set_project_info(types.SimpleNamespace(name='测试1'))
-    panel._set_view('artifacts', remember=False)
     panel.set_spatial_results([_spatial()])
     shown = []
     monkeypatch.setattr(RoundMenu, 'exec',
@@ -445,7 +455,7 @@ class _FakeSettings:
         return True
 
 
-def test_collapse_shows_strip_with_current_line(qapp, panel):
+def test_collapse_shows_blank_strip(qapp, panel):
     panel.set_project_info(types.SimpleNamespace(name='测试1'))
     panel.set_lines([_line('L01', '2026-09-16T01:00:00')])
     panel.set_current_line('L01')
@@ -453,7 +463,7 @@ def test_collapse_shows_strip_with_current_line(qapp, panel):
     assert panel.width() <= 20  # 细条
     assert not panel._expanded_view.isVisibleTo(panel)
     assert panel._strip_view.isVisibleTo(panel)
-    assert 'L\n0\n1' in panel._strip_line_label.text()
+    assert panel._strip_line_label.isHidden()  # 竖排文字已删，细条留白
     panel.set_collapsed(False, animate=False)
     assert panel._expanded_view.isVisibleTo(panel)
     assert panel.width() >= 200
@@ -477,39 +487,89 @@ def test_manual_toggle_is_remembered_per_page_and_persisted(qapp, panel):
     panel.apply_page('projectInterface')
     assert panel._collapsed  # 项目页记忆被手动覆盖
     saved = settings.get('file_tree_page_states')
-    assert saved['projectInterface']['lines'] is True  # 二维格式
+    assert saved['projectInterface'] is True  # 一维格式 {page: collapsed}
 
 
-def test_collapse_memory_is_per_page_and_view(qapp, panel):
-    """同一页面不同视图各自记忆收起态（按页×按视图二维）。"""
+def test_collapse_memory_is_per_page(qapp, panel):
+    """收起态按页独立记忆（一维 {page: collapsed}）。"""
     settings = _FakeSettings()
     panel.set_settings_manager(settings)
     panel.apply_page('projectInterface')
-    panel._set_view('artifacts', remember=False)
-    panel._remember_current(True)   # 项目页×成果视图：收起
-    panel._set_view('lines', remember=False)
-    assert not panel._collapsed     # 项目页×测线视图：默认展开，不受影响
-    panel._set_view('artifacts', remember=False)
-    assert panel._collapsed         # 切回成果视图恢复收起
+    panel._remember_current(True)   # 项目页：手动收起
+    panel.apply_page('processingInterface')
+    assert panel._collapsed
+    panel.apply_page('projectInterface')
+    assert panel._collapsed         # 项目页记忆被手动覆盖
+    panel._remember_current(False)  # 再手动展开
+    panel.apply_page('processingInterface')
+    panel.apply_page('projectInterface')
+    assert not panel._collapsed
     saved = settings.get('file_tree_page_states')
-    assert saved['projectInterface']['artifacts'] is True
+    assert saved['projectInterface'] is False
 
 
-def test_settings_legacy_flat_format_broadcasts_to_all_views(qapp, panel):
-    """旧版一维设置 {page: bool} 读取时广播到全部视图。"""
+def test_settings_legacy_2d_format_reads_main_view_value(qapp, panel):
+    """旧版二维设置 {page: {view: collapsed}} 读取时取测线视图的值。"""
     settings = _FakeSettings()
-    settings.set('file_tree_page_states', {'projectInterface': True})
+    settings.set('file_tree_page_states',
+                 {'projectInterface': {'lines': False, 'artifacts': True},
+                  'homeInterface': {'artifacts': True}})
     panel.set_settings_manager(settings)
-    assert panel._collapsed_for('projectInterface', 'lines') is True
-    assert panel._collapsed_for('projectInterface', 'artifacts') is True
+    assert panel._collapsed_for('projectInterface') is False
+    assert panel._collapsed_for('homeInterface') is True
 
 
-def test_strip_text_updates_on_line_switch_while_collapsed(qapp, panel):
+def test_strip_text_blank_while_collapsed(qapp, panel):
+    """收起细条无竖排文字：左坞仅此一面板，线号/面板名无辨识价值。"""
     panel.set_project_info(types.SimpleNamespace(name='测试1'))
     panel.set_lines([_line('L09')])
     panel.set_collapsed(True, animate=False)
     panel.set_current_line('L09')
-    assert 'L\n0\n9' in panel._strip_line_label.text()
+    assert panel._strip_line_label.text() == ''
+    assert panel._strip_line_label.isHidden()
+
+
+def _strip_press_event() -> QMouseEvent:
+    return QMouseEvent(
+        QEvent.Type.MouseButtonPress, QPointF(9, 100), QPointF(9, 100),
+        Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier)
+
+
+def test_strip_click_anywhere_expands(qapp, panel):
+    """收起细条整条可点（兑现收起钮 tooltip 的「点击细条可展开」）。"""
+    panel.set_project_info(types.SimpleNamespace(name='测试1'))
+    panel.set_collapsed(True, animate=False)
+    assert panel.is_collapsed()
+    assert panel.eventFilter(panel._strip_view, _strip_press_event()) is True
+    assert not panel.is_collapsed()
+    # 展开态下细条隐藏，过滤器不响应
+    assert panel.eventFilter(panel._strip_view, _strip_press_event()) is False
+
+
+def test_rebuild_preserves_user_collapsed_category(qapp, panel):
+    """数据刷新不冲掉用户手动折叠的分类（按 key 快照恢复）。"""
+    panel.set_project_info(types.SimpleNamespace(name='测试1'))
+    panel.set_lines([_line('L01', '2026-09-16T01:00:00')])
+    panel.set_artifacts([_artifact('A1', 'L01')])
+    tree = panel._tree
+    assert tree.topLevelItem(1).isExpanded()   # 空分类首次长出内容 → 展开
+    tree.topLevelItem(1).setExpanded(False)    # 用户手动折叠「成果」
+    panel.set_lines([_line('L01', '2026-09-16T01:00:00')])
+    assert not tree.topLevelItem(1).isExpanded()   # 刷新不冲掉折叠态
+    assert tree.topLevelItem(0).isExpanded()       # 未动过的分类保持展开
+    panel.set_artifacts([_artifact('A1', 'L01'), _artifact('A2', 'L01')])
+    assert not tree.topLevelItem(1).isExpanded()   # 新成果到达也不强制展开
+
+
+def test_rebuild_first_build_defaults(qapp, panel):
+    """首次构建（树为空，无快照）：有内容的分类默认展开，空分类折叠。"""
+    panel.set_project_info(types.SimpleNamespace(name='测试1'))
+    panel.set_lines([_line('L01', '2026-09-16T01:00:00')])
+    tree = panel._tree
+    assert tree.topLevelItem(0).isExpanded()      # 测线（有内容）
+    assert not tree.topLevelItem(1).isExpanded()  # 成果（空，(0) 自明）
+    assert not tree.topLevelItem(2).isExpanded()  # 文件（空）
 
 
 # ------------------------------------------------ 状态圆点与右键菜单
@@ -555,7 +615,7 @@ def test_context_menu_suppressed_for_blank_group_and_busy(qapp, panel,
     monkeypatch.setattr(panel._tree, 'itemAt', lambda p: None)  # 空白
     panel._on_context_menu(pos)
     monkeypatch.setattr(panel._tree, 'itemAt',
-                        lambda p: panel._tree.topLevelItem(0))  # 分组行
+                        lambda p: panel._tree.topLevelItem(0))  # 分类行
     panel._on_context_menu(pos)
     monkeypatch.setattr(panel._tree, 'itemAt',
                         lambda p: panel._line_id_by_item['L01'])
@@ -591,7 +651,6 @@ def test_artifact_context_menu_shows_and_selects_without_emitting(
     from PyQt6.QtCore import QPoint
     from qfluentwidgets import RoundMenu
     panel.set_project_info(types.SimpleNamespace(name='测试1'))
-    panel._set_view('artifacts', remember=False)
     panel.set_artifacts([_artifact('A9', 'L02')])
     leaf = _find_by_kind(panel._tree, 'artifact')
     assert leaf is not None
@@ -615,7 +674,6 @@ def test_artifact_context_menu_actions_emit_focus_delete_copy(
     from PyQt6.QtWidgets import QApplication
     from qfluentwidgets import RoundMenu
     panel.set_project_info(types.SimpleNamespace(name='测试1'))
-    panel._set_view('artifacts', remember=False)
     panel.set_artifacts([_artifact('A9', 'L02')])
     leaf = _find_by_kind(panel._tree, 'artifact')
     monkeypatch.setattr(RoundMenu, 'exec', lambda self, *a, **k: None)
