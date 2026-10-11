@@ -255,9 +255,16 @@ class InterpretationPage(QWidget):
 
     # ============================================================ 公共接口（供主窗口接线）
     def set_bundle(self, bundle) -> None:
-        """剖面预览 bundle → BScanView；同时缓存时间轴用于深度换算。"""
+        """剖面预览 bundle → BScanView；同时缓存时间轴用于深度换算。
+
+        None = 清空（P0-1：项目直切时协调器在新预览到达前清残留；
+        BScanView.set_bundle 不接受 None，走 clear 等价清空）。
+        """
         self._bundle = bundle
-        self._bscan.set_bundle(bundle)
+        if bundle is None:
+            self._bscan.clear()
+        else:
+            self._bscan.set_bundle(bundle)
         self._refresh_points_table()
 
     def set_line_label(self, text: str) -> None:
