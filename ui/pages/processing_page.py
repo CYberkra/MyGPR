@@ -100,6 +100,7 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._artifacts_by_id = {}        # artifact_id -> ProjectArtifact
         self._gallery = None              # 总览墙（懒创建，随主页销毁）
         self._method_picker = None        # 方法选择弹窗（P0-2 单实例）
+        self._step_editor = None          # 步骤合一编辑弹窗（P0-3，每次新建）
         self._picker_purpose = 'append'   # 选择器分流：append 链尾 / replace 换步
         self._picker_index = -1           # replace 模式的目标步骤索引
         self._thumb_views_bound = []      # 已装点击提升的缩略面板
@@ -385,6 +386,9 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._chain_strip.sig_step_removed.connect(self._on_chain_step_removed)
         self._chain_strip.sig_step_moved.connect(self._on_chain_step_moved)
         self._chain_strip.sig_add_requested.connect(self._open_method_picker)
+        # chip 右键唯一入口（P0-3）：合一编辑弹窗
+        self._chain_strip.sig_step_editor_requested.connect(
+            self._open_step_editor)
         # 反向：处理链选中（程序化）也同步 chip 条高亮
         self._pipeline_list.sig_step_selected.connect(self._chain_strip.select_step)
         self._chain_strip.run_button().clicked.connect(self._on_run_clicked)
@@ -547,6 +551,93 @@ class ProcessingPage(PanelStateMixin, QWidget):
     def _on_chain_step_moved(self, source: int, target: int) -> None:
         """chip 拖拽落点 → 步骤换位（target 为插入位语义）。"""
         self._pipeline_list._move_step_to(source, target)
+
+    # ---------------- 步骤合一编辑弹窗（P0-3，chip 右键唯一入口）
+    def _open_step_editor(self, index: int) -> None:
+        """chip 右键 → 合一弹窗：快照来自 PipelineList（唯一数据源），
+        弹窗只持快照；写回经公开 API + 手动 sig_changed.emit()。"""
+        from ui.widgets.step_editor import StepEditorPopup
+        steps = self._pipeline_list.steps()
+        if not (0 <= index < len(steps)):
+            return
+        step = steps[index]
+        method = self._methods_by_id.get(step.get('method_id', '') or '', {})
+        snapshot = {
+            'title': step.get('label') or step.get('method_id', ''),
+            'method_id': step.get('method_id', ''),
+            'params': dict(step.get('params') or {}),
+            'enabled': bool(step.get('enabled', True)),
+            'is_first': index == 0,
+            'is_last': index == len(steps) - 1,
+            'schema': method.get('parameter_schema') or [],
+        }
+        # 每次新建实例：天然无重复信号连接，关窗即销毁（未应用改动随窗丢弃）
+        self._step_editor = StepEditorPopup(self)
+        self._step_editor.load_snapshot(index, snapshot)
+        self._step_editor.sig_applied.connect(self._on_step_editor_applied)
+        self._step_editor.sig_move_requested.connect(self._on_chain_step_moved)
+        self._step_editor.sig_duplicate_requested.connect(self._duplicate_step)
+        self._step_editor.sig_replace_requested.connect(
+            self._on_step_editor_replace)
+        self._step_editor.sig_remove_requested.connect(
+            self._on_chain_step_removed)
+        self._step_editor.finished.connect(self._on_step_editor_finished)
+        self._step_editor.show()
+
+    def _on_step_editor_finished(self, _result: int) -> None:
+        """弹窗关闭（应用/结构动作/Esc/外部点击任一路径）：引用释放。"""
+        self._step_editor = None
+
+    def _on_step_editor_applied(self, payload: dict) -> None:
+        """「应用」：参数写回（update_step_params 自动 sig_changed →
+        琥珀 hint 点亮）；启停变化走既有 _toggle_enabled（chip 变暗 +
+        运行跳过语义不变，配置保留）。"""
+        payload = dict(payload or {})
+        index = int(payload.get('index', -1))
+        steps = self._pipeline_list.steps()
+        if not (0 <= index < len(steps)):
+            return
+        self._pipeline_list.update_step_params(
+            index, dict(payload.get('params') or {}))
+        enabled = bool(payload.get('enabled', True))
+        if steps[index]['enabled'] != enabled:
+            self._pipeline_list._toggle_enabled(index)
+
+    def _on_step_editor_replace(self, index: int) -> None:
+        """「替换算法」→ 打开方法选择器（purpose='replace'，Q2 定案：
+        纯浏览态不预选当前方法，双击即替换）。"""
+        self._open_method_picker(purpose='replace', index=index)
+
+    def _duplicate_step(self, index: int) -> None:
+        """复制步骤：同算法同参数的相邻副本。set_steps 不发信号 →
+        手动 emit（参照 _on_adopt_params :1293-1295 模式，琥珀 hint 点亮）。"""
+        steps = self._pipeline_list.steps()
+        if not (0 <= index < len(steps)):
+            return
+        copy = dict(steps[index])
+        copy['params'] = dict(steps[index].get('params') or {})
+        steps.insert(index + 1, copy)
+        self._pipeline_list.set_steps(steps)
+        self._pipeline_list.select_step(index + 1)
+        self._pipeline_list.sig_changed.emit()
+
+    def _replace_step_method(self, index: int, method_id: str) -> None:
+        """替换第 index 步的算法：位置不变，参数按新 schema 取默认，
+        恢复启用。set_steps 不发信号 → 手动 emit（琥珀 hint 点亮）。"""
+        steps = self._pipeline_list.steps()
+        if not (0 <= index < len(steps)):
+            return
+        method = self._methods_by_id.get(method_id, {})
+        label = (method.get('display_name') or method.get('name')
+                 or method_id)
+        params = {item.get('name'): item.get('default')
+                  for item in (method.get('parameter_schema') or [])
+                  if item.get('name') is not None}
+        steps[index] = {'method_id': method_id, 'label': label,
+                        'params': params, 'enabled': True}
+        self._pipeline_list.set_steps(steps)
+        self._pipeline_list.select_step(index)   # 选中 → 参数表单重载新 schema
+        self._pipeline_list.sig_changed.emit()
 
     def _refresh_chain_and_results(self) -> None:
         """上面怎么排，下面就按同序铺格。

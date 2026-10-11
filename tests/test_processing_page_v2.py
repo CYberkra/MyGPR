@@ -19,7 +19,6 @@ from ui.pages.processing_page import ProcessingPage  # noqa: E402
 from ui.widgets.bscan_result_grid import ResultGrid  # noqa: E402
 from qfluentwidgets import PushButton  # noqa: E402
 from ui.widgets.chain_strip import ChainStrip  # noqa: E402
-from ui.widgets.context_menus import make_menu  # noqa: E402
 
 
 class _FakeDropEvent:
@@ -557,40 +556,26 @@ class TestChainAlternativePaths:
         assert strip._list.count() == 2            # 剩 2 步
         assert [s['label'] for s in strip._steps] == ['a', 'c']
 
-    def test_context_menu_actions(self, qapp):
+    def test_context_menu_requests_step_editor(self, qapp):
+        """P0-3：右键 chip 不再建菜单——置当前行 + 发 sig_step_editor_requested
+        （合一弹窗唯一入口；启停/排序/复制/替换/删除全在弹窗内完成）。"""
         strip = ChainStrip()
         strip.set_steps([{'label': 'a', 'enabled': True},
                          {'label': 'b', 'enabled': True},
                          {'label': 'c', 'enabled': True}])
-        moved, toggled, removed = [], [], []
-        strip.sig_step_moved.connect(lambda s, t: moved.append((s, t)))
-        strip.sig_step_toggled.connect(lambda i, e: toggled.append((i, e)))
-        strip.sig_step_removed.connect(removed.append)
-        def filled(idx):
-            menu = make_menu(strip)                # 每次全新菜单，防动作残留
-            strip._fill_step_menu(menu, idx)
-            return menu
-        menu = filled(1)
-        texts = [a.text() for a in menu.actions() if a.text()]
-        assert texts == ['上移', '下移', '禁用', '删除']
-        # 触发「上移」：步骤 1 → 插入位 0
-        for a in menu.actions():
-            if a.text() == '上移':
-                a.trigger()
-                break
-        assert moved == [(1, 0)]
-        # 触发「禁用」
-        for a in filled(1).actions():
-            if a.text() == '禁用':
-                a.trigger()
-                break
-        assert toggled == [(1, False)]
-        # 触发「删除」
-        for a in filled(2).actions():
-            if a.text() == '删除':
-                a.trigger()
-                break
-        assert removed == [2]
+        got = []
+        strip.sig_step_editor_requested.connect(got.append)
+        strip.show()                       # 几何需真实布局（rowAt 依赖它）
+        qapp.processEvents()
+        rect = strip._list.visualItemRect(strip._list.item(1))
+        strip._on_context_menu(rect.center())
+        assert got == [1]
+        assert strip._list.currentRow() == 1
+
+    def test_fill_step_menu_removed(self, qapp):
+        """旧四动作右键菜单已删除（动作收敛进合一弹窗，不维护两套入口）。"""
+        strip = ChainStrip()
+        assert not hasattr(strip, '_fill_step_menu')
 
 
 class TestViewModes:
@@ -1095,6 +1080,23 @@ class TestDeepAudit20261009:
             sub = menu._step_submenus[0]
             sub.actions()[0].trigger()           # 第一项 = 「选中」
             assert got == [0]
+        finally:
+            strip.deleteLater()
+
+    def test_overflow_menu_edit_requests_step_editor(self, qapp):
+        """P0-3：子菜单 = 「选中 / 编辑」两项；「编辑」发合一弹窗信号。"""
+        strip = self._strip()
+        try:
+            strip.set_steps([{'label': f'm{i}', 'enabled': True}
+                             for i in range(3)])
+            got = []
+            strip.sig_step_editor_requested.connect(got.append)
+            menu = strip._build_overflow_menu()
+            sub = menu._step_submenus[1]
+            texts = [a.text() for a in sub.actions() if a.text()]
+            assert texts == ['选中', '编辑']
+            sub.actions()[1].trigger()           # 「编辑」→ 合一弹窗
+            assert got == [1]
         finally:
             strip.deleteLater()
 

@@ -14,8 +14,9 @@
 - 拖拽排序：启用 InternalMove 拿拖拽视觉，落点由 _ChipList.dropEvent
   委托宿主接管（不调 Qt 默认实现——挪 item 会丢 setItemWidget 行控件，
   与 PipelineList 同款坑）；
-- **手势替代路径**（guidelines：拖拽需有点击/键盘替代）：右键菜单
-  （上移/下移/启用-禁用/删除）+ Delete 键删当前 chip；
+- **手势替代路径**（guidelines：拖拽需有点击/键盘替代）：右键 chip →
+  合一编辑弹窗（P0-3：启停/排序/复制/替换/参数/删除一处完成）+
+  Delete 键删当前 chip；
 - 「输入」chip 固定在首位、不可拖不可删。
 
 ChainStrip 只做展示与手势，**步骤数据仍由宿主页维护**（这里不存 steps）。
@@ -30,7 +31,7 @@ from qfluentwidgets import (CaptionLabel, FluentIcon as FIF,
                             PrimaryPushButton, RoundMenu, ToolButton)
 
 from ui import constants
-from ui.widgets.context_menus import add_action, make_menu
+from ui.widgets.context_menus import add_action
 
 
 def _muted_text() -> str:
@@ -163,6 +164,8 @@ class ChainStrip(QWidget):
     sig_step_removed = pyqtSignal(int)
     sig_step_moved = pyqtSignal(int, int)   # source → 插入位
     sig_add_requested = pyqtSignal()
+    # chip 右键唯一入口（P0-3 合一弹窗）：步骤索引 → 宿主页弹 StepEditorPopup
+    sig_step_editor_requested = pyqtSignal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -197,8 +200,8 @@ class ChainStrip(QWidget):
 
         self._add_btn = ToolButton(FIF.ADD, self)
         self._add_btn.setFixedSize(24, 24)
-        self._add_btn.setToolTip('添加所选算法（＋）')
-        self._add_btn.setAccessibleName('添加所选算法')
+        self._add_btn.setToolTip('添加处理步骤（弹出方法选择器，双击加入链尾）')
+        self._add_btn.setAccessibleName('添加处理步骤')
         self._add_btn.clicked.connect(self.sig_add_requested)
         self._dirty_label = CaptionLabel('已修改 · 点运行更新', self)
         from ui.design_tokens import color
@@ -418,34 +421,20 @@ class ChainStrip(QWidget):
         if 0 <= index < len(self._steps):
             self.sig_step_removed.emit(index)
 
-    # -------------------------------------------------- 右键菜单（替代路径）
+    # -------------------------------------- 右键（替代路径 → 合一弹窗）
     def _on_context_menu(self, pos) -> None:
-        row = self._list.rowAt(pos.y())
+        """右键 chip → 置当前行 + 发 sig_step_editor_requested（P0-3 合一
+        弹窗唯一入口；旧四动作菜单删除，动作全部收敛进步骤编辑弹窗）。"""
+        # 原 rowAt 系 QListView 不存在的方法（QTableView 才有）——右键即
+        # AttributeError 的潜伏 bug，随本改造一并修正为 itemAt
+        item = self._list.itemAt(pos)
+        row = self._list.row(item) if item is not None else -1
         index = row                          # row 即步骤索引
         if index < 0 or index >= len(self._steps):
             return
         self._list.setCurrentRow(row)
         self._move_pill(row)
-        menu = make_menu(self)
-        self._fill_step_menu(menu, index)
-        menu.exec(self._list.viewport().mapToGlobal(pos))
-
-    def _fill_step_menu(self, menu, index: int) -> None:
-        """单步右键菜单动作（与 PipelineList 等价；供测试直接驱动）。"""
-        enabled = bool(self._steps[index]['enabled'])
-        add_action(menu, FIF.UP, '上移',
-                   lambda: self.sig_step_moved.emit(index, index - 1),
-                   enabled=index > 0)
-        add_action(menu, FIF.DOWN, '下移',
-                   lambda: self.sig_step_moved.emit(index, index + 2),
-                   enabled=index < len(self._steps) - 1)
-        menu.addSeparator()
-        add_action(menu, FIF.ACCEPT if enabled else FIF.CANCEL,
-                   '禁用' if enabled else '启用',
-                   lambda: self.sig_step_toggled.emit(index, not enabled))
-        menu.addSeparator()
-        add_action(menu, FIF.DELETE, '删除',
-                   lambda: self.sig_step_removed.emit(index))
+        self.sig_step_editor_requested.emit(index)
 
     def _list_drop_event(self, event) -> None:
         """落点重排：源=当前选中 chip，目标按落点左右半决定插入位。"""
@@ -519,9 +508,10 @@ class ChainStrip(QWidget):
             self._overflow_btn.rect().bottomLeft()))
 
     def _build_overflow_menu(self) -> RoundMenu:
-        """+N 菜单：每步骤一个子菜单，动作集与右键菜单一致（_fill_step_menu）
-        ——被裁掉的步骤启停/删除/排序与可见 chip 手势等价（guidelines：
-        内容不得因布局不可达）。构建与弹出拆开，便于测试菜单结构。
+        """+N 菜单：每步骤一个子菜单 = 「选中 / 编辑」两项（P0-3 定案 Q3：
+        结构动作全进合一弹窗，不维护两套入口——被裁掉的步骤与可见 chip
+        手势等价可达，guidelines：内容不得因布局不可达）。
+        构建与弹出拆开，便于测试菜单结构。
         """
         menu = RoundMenu(parent=self)
         subs = []
@@ -530,9 +520,14 @@ class ChainStrip(QWidget):
             if not step['enabled']:
                 label += '（已禁用）'
             sub = RoundMenu(label, menu)
+            # triggered 会带 checked 实参：lambda 必须显式吞掉，
+            # 否则 ix 被 False 覆盖（原「选中」对第 0 步以外的步骤
+            # 实际选中第 0 行的潜伏 bug，本次一并修正）
             add_action(sub, FIF.VIEW, '选中',
-                       lambda ix=i: self._list.setCurrentRow(ix))
-            self._fill_step_menu(sub, i)
+                       lambda _checked=False, ix=i: self._list.setCurrentRow(ix))
+            add_action(sub, FIF.EDIT, '编辑',
+                       lambda _checked=False, ix=i:
+                       self.sig_step_editor_requested.emit(ix))
             menu.addMenu(sub)
             subs.append(sub)
         # qfw 未暴露子菜单清单——挂引用供测试访问（menu._step_submenus）
