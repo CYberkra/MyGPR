@@ -66,3 +66,31 @@ class TestSessionGating:
         assert not page._auto_trace_btn.isEnabled()
         page.set_busy(False)
         assert page._auto_trace_btn.isEnabled()
+
+
+class TestSetBundleNoneGuard:
+    """P0-1 配套守卫：协调器项目直切时 set_bundle(None) 清残留——
+    BScanView.set_bundle 不接受 None，必须走 clear 等价清空。"""
+
+    def test_none_bundle_clears_view(self, qapp, monkeypatch):
+        page = InterpretationPage()
+        calls: list = []
+        monkeypatch.setattr(page._bscan, 'clear',
+                            lambda: calls.append('clear'))
+        monkeypatch.setattr(page._bscan, 'set_bundle',
+                            lambda b: calls.append(('set_bundle', b)))
+        page.set_bundle(None)
+        assert calls == ['clear']            # None 只走 clear，不碰 set_bundle
+        assert page._bundle is None
+
+    def test_real_bundle_still_reaches_view(self, qapp, monkeypatch):
+        page = InterpretationPage()
+        calls: list = []
+        monkeypatch.setattr(page._bscan, 'clear',
+                            lambda: calls.append('clear'))
+        monkeypatch.setattr(page._bscan, 'set_bundle',
+                            lambda b: calls.append(('set_bundle', b)))
+        bundle = object()
+        page.set_bundle(bundle)
+        assert calls == [('set_bundle', bundle)]
+        assert page._bundle is bundle

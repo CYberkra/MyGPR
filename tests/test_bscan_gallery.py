@@ -64,8 +64,8 @@ def _press_escape(widget) -> None:
 
 
 class TestDynamicColumns:
-    @pytest.mark.parametrize('n,cols', [(1, 1), (2, 2), (3, 3), (5, 4),
-                                        (8, 4), (12, 4)])
+    @pytest.mark.parametrize('n,cols', [(1, 1), (2, 2), (3, 3), (4, 4),
+                                        (5, 4), (8, 4), (12, 4)])
     def test_columns_for_matrix(self, gallery, n, cols):
         assert BScanGallery._columns_for(n) == cols
 

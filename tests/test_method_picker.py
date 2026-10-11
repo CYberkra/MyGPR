@@ -64,6 +64,29 @@ class TestPickerWindowContract:
         # 过滤复位：全部分类重新可见
         assert picker._browser._tree.topLevelItemCount() == 2
 
+    def test_search_filters_tree_in_realtime(self, picker, qapp):
+        """搜索框输入实时过滤分类树（PRD A2③）：method_id 命中 + 显示名
+        命中 + 清空恢复全量。"""
+        tree = picker._browser._tree
+        top_filter = tree.topLevelItem(0)     # 滤波（dewow）
+        top_gain = tree.topLevelItem(1)       # 增益（agc）
+        picker._browser._search.setText('agc')
+        qapp.processEvents()
+        assert top_gain.isHidden() is False
+        assert top_gain.child(0).isHidden() is False
+        assert top_filter.isHidden() is True    # dewow 不命中 → 整类隐藏
+        # 显示名（中文）命中路径
+        picker._browser._search.setText('去直')
+        qapp.processEvents()
+        assert top_filter.isHidden() is False
+        assert top_filter.child(0).isHidden() is False
+        assert top_gain.isHidden() is True
+        # 清空 → 全量恢复
+        picker._browser._search.setText('')
+        qapp.processEvents()
+        assert top_filter.isHidden() is False
+        assert top_gain.isHidden() is False
+
     def test_show_event_resets_search(self, picker, qapp):
         picker.show()
         qapp.processEvents()
@@ -174,6 +197,21 @@ class TestPagePickerWiring:
             assert page._method_picker is not None
             page._method_picker.close()
             assert page._method_picker is None
+        finally:
+            page.close()
+
+    def test_plus_and_button_open_same_instance(self, qapp):
+        """「+」与「添加方法」弹同一选择器实例（PRD A2⑥：同一实例/同一
+        入口逻辑，二者行为一致）；交替触发不堆叠。"""
+        page = self._page(qapp)
+        try:
+            page._chain_strip.sig_add_requested.emit()
+            first = page._method_picker
+            assert first is not None
+            page._add_method_btn.click()
+            assert page._method_picker is first
+            page._open_method_picker()
+            assert page._method_picker is first
         finally:
             page.close()
 

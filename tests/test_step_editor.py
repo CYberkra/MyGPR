@@ -246,6 +246,34 @@ class TestPageStepEditorWiring:
         finally:
             page.close()
 
+    def test_disable_reenable_preserves_params(self, qapp):
+        """屏蔽 → 应用 → 再启用 → 应用：参数配置全程保留（PRD A3②
+        「屏蔽不丢配置」的往返钉扎）。"""
+        page = _page_with_methods(qapp)
+        try:
+            page._add_method_to_pipeline('dewow')
+            page._pipeline_list.update_step_params(
+                0, {'window': 42, 'gain': 8.0})
+            # 屏蔽（应用）
+            page._open_step_editor(0)
+            page._step_editor._enable_switch.setChecked(False)
+            page._step_editor._apply_btn.click()
+            steps = page._pipeline_list.steps()
+            assert steps[0]['enabled'] is False
+            assert steps[0]['params'] == {'window': 42, 'gain': 8.0}
+            # 重新启用（应用）：弹窗快照里参数仍是屏蔽前的值
+            page._open_step_editor(0)
+            assert page._step_editor._enable_switch.isChecked() is False
+            assert page._step_editor._form.values() == \
+                {'window': 42, 'gain': 8.0}
+            page._step_editor._enable_switch.setChecked(True)
+            page._step_editor._apply_btn.click()
+            steps = page._pipeline_list.steps()
+            assert steps[0]['enabled'] is True
+            assert steps[0]['params'] == {'window': 42, 'gain': 8.0}
+        finally:
+            page.close()
+
     def test_duplicate_step(self, qapp):
         page = _page_with_methods(qapp)
         try:

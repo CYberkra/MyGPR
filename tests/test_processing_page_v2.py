@@ -1083,6 +1083,23 @@ class TestDeepAudit20261009:
         finally:
             strip.deleteLater()
 
+    def test_overflow_menu_select_nonzero_index_not_overridden(self, qapp):
+        """潜伏 bug 钉扎：triggered 信号带 checked=False 首参，lambda 必须
+        显式吞掉——否则 ix 被 False 覆盖，非 0 步的「选中」实际选中第 0 行。"""
+        strip = self._strip()
+        try:
+            strip.set_steps([{'label': f'm{i}', 'enabled': True}
+                             for i in range(3)])
+            got = []
+            strip.sig_step_selected.connect(got.append)
+            menu = strip._build_overflow_menu()
+            sub = menu._step_submenus[2]
+            sub.actions()[0].trigger()           # 第 3 步的「选中」
+            assert strip._list.currentRow() == 2
+            assert got == [2]
+        finally:
+            strip.deleteLater()
+
     def test_overflow_menu_edit_requests_step_editor(self, qapp):
         """P0-3：子菜单 = 「选中 / 编辑」两项；「编辑」发合一弹窗信号。"""
         strip = self._strip()
