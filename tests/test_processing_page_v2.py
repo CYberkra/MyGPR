@@ -17,7 +17,6 @@ pytest.importorskip("PyQt6")  # 后端 CI（无 Qt）自动跳过
 from PyQt6.QtCore import QPointF  # noqa: E402
 from ui.pages.processing_page import ProcessingPage  # noqa: E402
 from ui.widgets.bscan_result_grid import ResultGrid  # noqa: E402
-from qfluentwidgets import PushButton  # noqa: E402
 from ui.widgets.chain_strip import ChainStrip  # noqa: E402
 
 
@@ -767,12 +766,13 @@ class TestGalleryContextFilter:
             page.set_artifacts(self._artifacts())
             page._open_gallery()
             gallery = page._gallery
-            titles = [g.text() for g in gallery.findChildren(PushButton)]
-            assert any('原始数据' in t for t in titles)
-            assert any('set_zero_time' in t for t in titles)
-            assert not any('dewow' in t for t in titles), (
-                f'历史组成果混入总览墙：{titles}')
+            names = [c._name.text() for c in gallery.cards()]
+            assert any('原始数据' in t for t in names)
+            assert any('set_zero_time' in t for t in names)
+            assert not any('dewow' in t for t in names), (
+                f'历史组成果混入总览墙：{names}')
             gallery.close()
+            assert page._gallery is None      # 关闭后引用释放（单实例语义）
         finally:
             page.close()
 
@@ -1248,8 +1248,9 @@ class TestDeepAudit20261009:
         from ui.widgets.bscan_gallery import BScanGallery
         page = self._page_with_run()
         try:
-            gallery = BScanGallery(page, [
-                {'key': 'input', 'title': '输入', 'bundle': None}])
+            gallery = BScanGallery(page)
+            gallery.set_sources(
+                [{'key': 'input', 'title': '输入', 'bundle': None}], 'input')
             try:
                 hints = [w for w in gallery.findChildren(QLabel)
                          if w.text() == '预览尚未生成']

@@ -511,16 +511,37 @@ class ProcessingPage(PanelStateMixin, QWidget):
                 self._open_gallery()
 
     def _open_gallery(self) -> None:
-        """总览墙（非模态）：只显示**当前上下文**——原始数据 + 本次
-        run_group 各步（与结果网格一致）。历史上打开过的旧组成果不再
-        展示（真机反馈：跑一步蹦出一屏几天前的结果）；历史成果经成果
-        下拉/文件树按需预览。"""
+        """总览墙（非模态，单实例）：只显示**当前上下文**——原始数据 +
+        本次 run_group 各步（与结果网格一致）。历史上打开过的旧组成果
+        不再展示（真机反馈：跑一步蹦出一屏几天前的结果）；历史成果经
+        成果下拉/文件树按需预览。
+
+        单实例防堆叠（P1-4）：存活且可见 → set_sources 增量更新 +
+        activateWindow；关窗（任何路径）后经 finished 置引用 None，
+        再开 = 新实例（修旧版每次 new 覆盖引用、旧窗堆叠的 bug）。"""
         from ui.widgets.bscan_gallery import BScanGallery
         keep = {'original'} | {
             f'artifact:{aid}' for aid in self._step_artifact_ids.values()}
         sources = [s for s in self._preview_sources if s['key'] in keep]
-        self._gallery = BScanGallery(self, sources)
+        if self._gallery is not None:
+            try:
+                if self._gallery.isVisible():
+                    self._gallery.set_sources(sources,
+                                              self._selected_source_key)
+                    self._gallery.activateWindow()
+                    self._gallery.raise_()
+                    return
+            except RuntimeError:      # C++ 侧已销毁（teardown 竞态）
+                self._gallery = None
+        self._gallery = BScanGallery(self)
+        self._gallery.sig_pick.connect(self.on_gallery_pick)
+        self._gallery.finished.connect(self._on_gallery_finished)
+        self._gallery.set_sources(sources, self._selected_source_key)
         self._gallery.show()
+
+    def _on_gallery_finished(self, _result: int) -> None:
+        """总览墙关闭（Esc/点卡/任何路径）：引用置 None，再开=新实例。"""
+        self._gallery = None
 
     # ------------------------------------------------ v2：链条 ↔ 处理链
     def _on_chain_step_selected(self, index: int) -> None:
