@@ -224,13 +224,20 @@ class StepEditorPopup(QDialog):
         super().focusOutEvent(event)
 
     def _close_if_focus_left(self) -> None:
-        """复核焦点是否已落到本窗之外；是则关闭（未应用改动随窗丢弃）。"""
-        widget = QApplication.focusWidget()
-        while widget is not None:
-            if widget is self:
-                return
-            widget = widget.parentWidget()
-        self.close()
+        """复核焦点是否已落到本窗之外；是则关闭（未应用改动随窗丢弃）。
+
+        复核由 singleShot 延迟触发：窗可能已被宿主销毁（teardown 竞态），
+        届时 sip 包装器失效——静默丢弃，不得把 RuntimeError 漏进测试/运行期。
+        """
+        try:
+            widget = QApplication.focusWidget()
+            while widget is not None:
+                if widget is self:
+                    return
+                widget = widget.parentWidget()
+            self.close()
+        except RuntimeError:
+            return
 
     # ------------------------------------------------------------ 主题
     def apply_theme(self, dark: bool) -> None:

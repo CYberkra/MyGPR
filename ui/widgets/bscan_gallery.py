@@ -209,6 +209,14 @@ class BScanGallery(QDialog):
 
     def _rebuild(self) -> None:
         for card in self._cards:
+            # 先停错峰淡入动画再销毁：动画运行中目标被删是 Qt 侧
+            # access violation 的经典来源（teardown 竞态）
+            fade = getattr(card, '_fade_anim', None)
+            if fade is not None:
+                try:
+                    fade.stop()
+                except RuntimeError:
+                    pass
             self._grid.removeWidget(card)
             card.setParent(None)
             card.deleteLater()
@@ -255,7 +263,20 @@ class BScanGallery(QDialog):
         anim.setDuration(_FADE_MS)
         anim.setStartValue(0.0)
         anim.setEndValue(1.0)
-        QTimer.singleShot(index * _STAGGER_MS, anim.start)
+        card._fade_anim = anim
+        # singleShot 保留 anim 的引用：卡被提前销毁（关窗/重建）时
+        # start() 落在已删对象上——守卫吞掉 RuntimeError
+        QTimer.singleShot(
+            index * _STAGGER_MS,
+            lambda a=anim: self._safe_start_fade(a))
+
+    @staticmethod
+    def _safe_start_fade(anim: QPropertyAnimation) -> None:
+        """延迟启动淡入；动画/目标已随卡销毁则静默跳过。"""
+        try:
+            anim.start()
+        except RuntimeError:
+            pass
 
     # ------------------------------------------------------------ 事件
     def _on_pick(self, key: str) -> None:
