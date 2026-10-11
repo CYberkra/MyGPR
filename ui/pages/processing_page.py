@@ -99,6 +99,9 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._opened_run_groups = set()   # 已自动展开的 run_group_id（每组一次）
         self._artifacts_by_id = {}        # artifact_id -> ProjectArtifact
         self._gallery = None              # 总览墙（懒创建，随主页销毁）
+        self._method_picker = None        # 方法选择弹窗（P0-2 单实例）
+        self._picker_purpose = 'append'   # 选择器分流：append 链尾 / replace 换步
+        self._picker_index = -1           # replace 模式的目标步骤索引
         self._thumb_views_bound = []      # 已装点击提升的缩略面板
         self._step_artifact_ids = {}      # v2：步骤序号 → 该步 intermediate 成果 id
         self._results_stale = False       # v2：链/参数已改但结果未重算
@@ -268,8 +271,8 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._pipeline_list = PipelineList(pipeline_card)
         self._pipeline_list.setMinimumHeight(200)
         pipeline_layout.addWidget(self._pipeline_list, 1)
-        self._add_method_btn = PushButton('添加所选方法', pipeline_card)
-        self._add_method_btn.setToolTip('将左侧方法库当前选中的方法加入处理链')
+        self._add_method_btn = PushButton('添加方法', pipeline_card)
+        self._add_method_btn.setToolTip('弹出方法选择器，双击条目加入处理链')
         pipeline_layout.addWidget(self._add_method_btn)
         right_layout.addWidget(pipeline_card, 1)
 
@@ -357,7 +360,7 @@ class ProcessingPage(PanelStateMixin, QWidget):
         # 方法库 → 选中方法（AutoTune 目标）/ 双击添加 / 按钮添加
         self._method_browser.sig_method_selected.connect(self._on_method_selected)
         self._method_browser.sig_add_requested.connect(self._add_method_to_pipeline)
-        self._add_method_btn.clicked.connect(self._on_add_selected_method)
+        self._add_method_btn.clicked.connect(self._open_method_picker)
 
         # 处理链 ↔ 参数表单
         self._pipeline_list.sig_step_selected.connect(self._on_step_selected)
@@ -381,7 +384,7 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._chain_strip.sig_step_toggled.connect(self._on_chain_step_toggled)
         self._chain_strip.sig_step_removed.connect(self._on_chain_step_removed)
         self._chain_strip.sig_step_moved.connect(self._on_chain_step_moved)
-        self._chain_strip.sig_add_requested.connect(self._on_add_selected_method)
+        self._chain_strip.sig_add_requested.connect(self._open_method_picker)
         # 反向：处理链选中（程序化）也同步 chip 条高亮
         self._pipeline_list.sig_step_selected.connect(self._chain_strip.select_step)
         self._chain_strip.run_button().clicked.connect(self._on_run_clicked)
@@ -434,6 +437,9 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._methods = [dict(m) for m in (methods or [])]
         self._methods_by_id = {m.get('method_id', ''): m for m in self._methods}
         self._method_browser.set_methods(self._methods)
+        # 选择弹窗与左栏同源（存活实例同步刷新；再开的实例构造时灌入）
+        if self._method_picker is not None:
+            self._method_picker.set_methods(self._methods)
 
     def set_original_bundle(self, bundle) -> None:
         """原始数据预览 bundle → 固定首 tab（不可关；换测线即换内容）。"""
@@ -1178,15 +1184,44 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._autotune_running = bool(running)
         self._update_autotune_enabled()
 
-    def _on_add_selected_method(self) -> None:
-        method_id = self._method_browser.current_method_id()
-        if not method_id:
-            InfoBar.warning(title='处理链', content='请先在方法库中选择方法',
-                            orient=Qt.Orientation.Horizontal, isClosable=True,
-                            position=InfoBarPosition.TOP, duration=3000,
-                            parent=self)
-            return
-        self._add_method_to_pipeline(method_id)
+    # ---------------- 方法选择弹窗（P0-2「+」/「添加方法」统一入口）
+    def _open_method_picker(self, purpose: str = 'append', index: int = -1) -> None:
+        """「+」/「添加方法」统一入口：非模态方法选择器（单实例）。
+
+        purpose='append'：双击条目 → 链尾追加；purpose='replace'：双击
+        条目 → 替换第 index 步（P0-3 编辑弹窗「替换算法」分流口，T03 消费：
+        位置不变、参数按新 schema 取默认）。存活实例唤起并复位状态；
+        关窗后引用置 None，再开 = 新实例 = 状态天然复位。
+        """
+        from ui.widgets.method_picker import MethodPickerDialog
+        self._picker_purpose = str(purpose) if purpose in ('append', 'replace') \
+            else 'append'
+        self._picker_index = int(index) if str(index).lstrip('-').isdigit() else -1
+        if self._method_picker is not None:
+            try:
+                self._method_picker.reset_state()
+                self._method_picker.show()
+                self._method_picker.activateWindow()
+                self._method_picker.raise_()
+                return
+            except RuntimeError:      # C++ 侧已销毁（teardown 竞态）
+                self._method_picker = None
+        self._method_picker = MethodPickerDialog(self)
+        self._method_picker.set_methods(self._methods)
+        self._method_picker.sig_method_chosen.connect(self._on_method_picked)
+        self._method_picker.finished.connect(self._on_method_picker_finished)
+        self._method_picker.show()
+
+    def _on_method_picked(self, method_id: str) -> None:
+        """选择器双击条目：按 purpose 分流（链尾追加 / 就地替换）。"""
+        if self._picker_purpose == 'replace' and self._picker_index >= 0:
+            self._replace_step_method(self._picker_index, method_id)
+        else:
+            self._add_method_to_pipeline(method_id)
+
+    def _on_method_picker_finished(self, _result: int) -> None:
+        """弹窗关闭（Esc/外部点击/任何路径）：引用置 None，再开=新实例。"""
+        self._method_picker = None
 
     def _add_method_to_pipeline(self, method_id: str) -> None:
         method = self._methods_by_id.get(method_id, {})
