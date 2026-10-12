@@ -199,7 +199,19 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
         self.splashScreen = SplashScreen(QIcon(constants.APP_ICON_PATH), self)
         self.splashScreen.titleBar.closeBtn.hide()
         self.splashScreen.show()
-        QTimer.singleShot(constants.SPLASH_DURATION_MS, self.splashScreen.close)
+        self._defer(self.splashScreen.close, constants.SPLASH_DURATION_MS)
+
+    def _defer(self, fn, delay_ms: int = 0) -> None:
+        """owned 单发 QTimer：窗销毁定时器随之销毁，回调不再悬空派发。
+
+        裸 ``QTimer.singleShot`` 的回调会在窗口 deleteLater 后仍被后续
+        processEvents 派发（CI 全量套件确定性段错误的根因之一，同
+        chain_strip._overlay_timer 的教训）。
+        """
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.timeout.connect(fn)
+        timer.start(delay_ms)
 
     def _create_controllers(self) -> None:
         """控制器缺失（A3 未交付）时为 None，connect 时判空。"""
@@ -280,14 +292,14 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
     # ---------------------------------------------------------- 首屏后预热
     def _start_warmup(self) -> None:
         """首帧渲染后开始分片构造剩余页面（每帧一个，避免一次性长阻塞）。"""
-        QTimer.singleShot(0, self._warmup_next_page)
+        self._defer(self._warmup_next_page)
 
     def _warmup_next_page(self) -> None:
         if not self._deferred_specs:
             self._finish_warmup()
             return
         self._register_page(*self._deferred_specs.pop(0))
-        QTimer.singleShot(0, self._warmup_next_page)
+        self._defer(self._warmup_next_page)
 
     def _finish_warmup(self) -> None:
         """全部页面就位后的收尾（幂等）：跨页接线 + 设置注入 + 后端门控补齐。"""
@@ -392,7 +404,7 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
             self._v_splitter.splitterMoved.connect(
                 self._on_output_splitter_moved)
             # 几何就绪后恢复上次拖出的面板高度
-            QTimer.singleShot(0, self._restore_output_panel_height)
+            self._defer(self._restore_output_panel_height)
         right_col.addWidget(self._v_splitter, 1)
         self.hBoxLayout.addWidget(self._right_area, 1)
         # _right_area 是有实体的全高 widget（顶部 48px 标题栏留白由
@@ -518,7 +530,7 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
         target = min(target, max(120, total - 200))
         sizes = [max(200, total - target), target]
         self._v_splitter.setSizes(sizes)
-        QTimer.singleShot(0, lambda: self._v_splitter.setSizes(sizes))
+        self._defer(lambda: self._v_splitter.setSizes(sizes))
 
     def _restore_output_panel_height(self) -> None:
         """启动恢复：按开合态把 splitter 下格设为展开高/头部栏高。"""
@@ -526,7 +538,7 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
             return
         if sum(self._v_splitter.sizes()) <= 0:
             # 构造函数末尾几何尚未分配，事件循环起来后重试一次
-            QTimer.singleShot(100, self._restore_output_panel_height)
+            self._defer(self._restore_output_panel_height, 100)
             return
         if self.output_panel.is_open():
             self._set_output_panel_height(self._output_panel_target_height())

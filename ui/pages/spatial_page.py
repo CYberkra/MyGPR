@@ -583,7 +583,18 @@ class SpatialPage(ViewSyncMixin, PanelStateMixin, QWidget):
         self._refresh_detail()
         self._refresh_coverage_statistics()
         # 轨迹就绪后自动预下载测线所在地理区域（延迟执行，等视图 fit 完成）
-        QTimer.singleShot(800, self._auto_prefetch_tracks)
+        self._defer(self._auto_prefetch_tracks, 800)
+
+    def _defer(self, fn, delay_ms: int = 0) -> None:
+        """owned 单发 QTimer：页销毁定时器随之销毁，回调不再悬空派发。
+
+        裸 ``QTimer.singleShot`` 的回调会在页面 deleteLater 后仍被后续
+        processEvents 派发（同 chain_strip._overlay_timer 的教训）。
+        """
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.timeout.connect(fn)
+        timer.start(delay_ms)
 
     def set_lines(self, lines: list) -> None:
         """测线记录列表（取 line_id/name/rtk_status 等，鸭子类型）。"""
@@ -691,7 +702,7 @@ class SpatialPage(ViewSyncMixin, PanelStateMixin, QWidget):
         # set_tracks——同步执行会把「切段」这个动作本身卡成整窗无响应
         # （三维视图尤甚：GL 全量重建 130–470 ms，2026-10-08 用户反馈
         # 「每次点三维视图软件都会消失再出来」）。
-        QTimer.singleShot(0, lambda k=str(route_key): self._flush_if_current(k))
+        self._defer(lambda k=str(route_key): self._flush_if_current(k))
         if route_key == _SEG_DEPTH and not self._depth_payload_line_ids:
             # 首次切到深度切片段：自动以当前勾选测线请求一次预览
             checked = [str(t.line_id) for t in self._checked_tracks()]
@@ -793,7 +804,7 @@ class SpatialPage(ViewSyncMixin, PanelStateMixin, QWidget):
         # 页面刚变可见，若空间页是当前页则补齐当前分段的脏视图
         key = self._active_view_key()
         if key:
-            QTimer.singleShot(0, lambda k=str(key): self._flush_if_current(k))
+            self._defer(lambda k=str(key): self._flush_if_current(k))
 
     def _refresh_crs_card(self) -> None:
         """投影信息卡：坐标系 / EPSG / 数据来源（按轨迹摘要汇总）。"""

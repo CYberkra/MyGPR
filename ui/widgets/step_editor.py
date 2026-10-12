@@ -48,6 +48,12 @@ class StepEditorPopup(QDialog):
         self._index = -1
         self._schema: list = []
 
+        # 失焦复核走 owned 可停 QTimer：裸 singleShot 的回调会在窗销毁后
+        # 仍被派发（悬空引用），炸下一个 processEvents 的宿主
+        self._focus_timer = QTimer(self)
+        self._focus_timer.setSingleShot(True)
+        self._focus_timer.timeout.connect(self._close_if_focus_left)
+
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 12, 14, 12)
         root.setSpacing(8)
@@ -220,7 +226,7 @@ class StepEditorPopup(QDialog):
     def focusOutEvent(self, event) -> None:  # noqa: N802 - Qt 命名
         # 窗内控件切换时 focusWidget 仍是本窗后代（不误关）；
         # 点到窗外 → 复核一次再关（真机下焦点移交有一拍延迟）
-        QTimer.singleShot(_FOCUS_RECHECK_MS, self._close_if_focus_left)
+        self._focus_timer.start(_FOCUS_RECHECK_MS)
         super().focusOutEvent(event)
 
     def _close_if_focus_left(self) -> None:

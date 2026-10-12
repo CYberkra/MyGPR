@@ -266,9 +266,12 @@ class BScanGallery(QDialog):
         card._fade_anim = anim
         # singleShot 保留 anim 的引用：卡被提前销毁（关窗/重建）时
         # start() 落在已删对象上——守卫吞掉 RuntimeError
-        QTimer.singleShot(
-            index * _STAGGER_MS,
-            lambda a=anim: self._safe_start_fade(a))
+        # 改用 per-card owned QTimer：卡销毁定时器随之销毁，杜绝悬空派发
+        timer = QTimer(card)
+        timer.setSingleShot(True)
+        timer.timeout.connect(lambda a=anim: self._safe_start_fade(a))
+        timer.start(index * _STAGGER_MS)
+        card._fade_timer = timer
 
     @staticmethod
     def _safe_start_fade(anim: QPropertyAnimation) -> None:
