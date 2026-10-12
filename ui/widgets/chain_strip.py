@@ -216,6 +216,12 @@ class ChainStrip(QWidget):
         self._flash_timer.setSingleShot(True)
         self._flash_timer.timeout.connect(
             lambda: self._run_btn.setText('运行'))
+        # 浮层重算同理走可停 QTimer：裸 singleShot(0, ...) 在 strip 被
+        # deleteLater 后回调仍会派发（悬空引用），炸在下一个 processEvents
+        # 的测试/窗口上（CI gui-linux/windows 全量套件确定性段错误根因）
+        self._overlay_timer = QTimer(self)
+        self._overlay_timer.setSingleShot(True)
+        self._overlay_timer.timeout.connect(self._update_overlays)
         # 空链引导（2026-10-09 深查 P2）：空链时列表区一片空白，新用户
         # 不知道从哪开始——浮层文字提示（不挡鼠标，＋ 钮照常可点）
         self._empty_hint = CaptionLabel('从左侧方法库添加算法',
@@ -399,7 +405,7 @@ class ChainStrip(QWidget):
         if self._list.currentRow() >= 0:
             self._move_pill(self._list.currentRow())
         # 布局一拍后重算浮层（此时 visualItemRect 才有效）
-        QTimer.singleShot(0, self._update_overlays)
+        self._overlay_timer.start(0)
 
     def _add_chip(self, index: int, label: str, enabled: bool) -> None:
         item = QListWidgetItem()
@@ -496,11 +502,11 @@ class ChainStrip(QWidget):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        QTimer.singleShot(0, self._update_overlays)
+        self._overlay_timer.start(0)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        QTimer.singleShot(0, self._update_overlays)
+        self._overlay_timer.start(0)
 
     def _on_overflow_menu(self) -> None:
         menu = self._build_overflow_menu()
