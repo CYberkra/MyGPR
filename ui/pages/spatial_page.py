@@ -22,7 +22,7 @@ import math
 import os
 
 import numpy as np
-from PyQt6.QtCore import QObject, QRunnable, Qt, QThreadPool, QTimer, pyqtSignal
+from PyQt6.QtCore import QObject, QRunnable, Qt, QThreadPool, pyqtSignal
 from PyQt6.QtGui import QColor, QIcon, QPixmap
 from PyQt6.QtWidgets import (
     QHBoxLayout, QListWidget, QStackedWidget, QVBoxLayout, QWidget,
@@ -34,6 +34,7 @@ from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants, file_dialogs
 from ui.geo_utils import coverage_statistics, format_distance
+from ui.qt_defer import defer_call
 from ui.spatial_view_sync import ViewSyncMixin
 from ui.page_scaffold import (PanelStateMixin, make_card,
                               make_collapsible_column, make_hint,
@@ -586,15 +587,8 @@ class SpatialPage(ViewSyncMixin, PanelStateMixin, QWidget):
         self._defer(self._auto_prefetch_tracks, 800)
 
     def _defer(self, fn, delay_ms: int = 0) -> None:
-        """owned 单发 QTimer：页销毁定时器随之销毁，回调不再悬空派发。
-
-        裸 ``QTimer.singleShot`` 的回调会在页面 deleteLater 后仍被后续
-        processEvents 派发（同 chain_strip._overlay_timer 的教训）。
-        """
-        timer = QTimer(self)
-        timer.setSingleShot(True)
-        timer.timeout.connect(fn)
-        timer.start(delay_ms)
+        """owned 单发 QTimer（见 ui.qt_defer.defer_call）：页销毁回调失效。"""
+        defer_call(self, fn, delay_ms)
 
     def set_lines(self, lines: list) -> None:
         """测线记录列表（取 line_id/name/rtk_status 等，鸭子类型）。"""
