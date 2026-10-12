@@ -10,8 +10,11 @@
 """
 from __future__ import annotations
 
+import itertools
 import math
+import os
 import re
+import threading
 
 # Web Mercator 常量
 EARTH_RADIUS_M = 6378137.0
@@ -254,6 +257,30 @@ def choose_prefetch_zooms(lon_min: float, lat_min: float,
     return zoom_min, detail_zoom
 
 
+_TMP_COUNTER = itertools.count()
+
+
+def unique_tmp_path(path: str) -> str:
+    """瓦片落盘的**唯一**临时文件路径（pid + 线程 id + 单调序号）。
+
+    不能用固定的 ``<path>.tmp``：``map_view`` 与 ``trajectory_3d_view`` 在源为
+    ``gaode_img`` 时算出**逐字符相同**的缓存路径（两者 ``_cache_root`` 同为
+    ``tile_cache_dir()``），而它们各有一个独立的 ``QThreadPool``（4 线程 /
+    1 线程）。固定临时名会让两个线程 open 同一 tmp 互相截断，
+    ``os.replace`` 把截断的 PNG 落盘——此后**所有会话**读到损坏缓存，
+    该瓦片永久空白（``_failed`` 只在切源 / 重预取时才清）。
+
+    ⚠️ **pid + 线程 id 不够**：同一线程连下两个瓦片时两者完全相同，第二个
+    会截断第一个的 tmp（这正是线程池的常态——一个 worker 串行处理多个瓦片）。
+    必须再加进程内单调序号。
+
+    放本模块而非任一视图：两个视图共用，且 map_tiles 是无 Qt 依赖的纯函数层，
+    便于独立测试。
+    """
+    return (f'{path}.{os.getpid()}.{threading.get_ident()}'
+            f'.{next(_TMP_COUNTER)}.tmp')
+
+
 __all__ = [
     'EARTH_RADIUS_M', 'MAX_LATITUDE', 'WORLD_SIZE_M', 'TILE_SIZE_PX',
     'TILE_SOURCES', 'DEFAULT_TILE_SOURCE', 'TILE_SOURCE_MAX_ZOOM',
@@ -262,5 +289,5 @@ __all__ = [
     'extract_epsg', 'lonlat_to_mercator', 'mercator_to_lonlat',
     'lonlat_to_tile', 'tile_bounds_mercator', 'tile_url',
     'zoom_for_resolution', 'tile_range_for_bbox', 'count_tiles_for_bbox',
-    'choose_prefetch_zooms',
+    'choose_prefetch_zooms', 'unique_tmp_path',
 ]

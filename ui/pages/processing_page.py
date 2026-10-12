@@ -38,13 +38,15 @@ from qfluentwidgets import (
 from qfluentwidgets.components.widgets.tab_view import TabItem
 from qfluentwidgets import FluentIcon as FIF
 
-from ui import constants
+from ui import constants, design_tokens
 from ui.motion import animate_progress
-from ui.page_scaffold import (PanelStateMixin, make_card, make_form_row,
-                              make_scroll_column, refill_combo)
+from ui.page_scaffold import (PanelStateMixin, make_card,
+                              make_collapsible_column,
+                              make_form_row, refill_combo)
 from ui.widgets.bscan_result_grid import ResultGrid
 from ui.widgets.chain_strip import ChainStrip
-from ui.widgets import (BScanContainer, CollapsiblePanel, LAYOUT_FOCUS,
+from ui.widgets.collapsible_card import make_collapsible_card
+from ui.widgets import (BScanContainer, LAYOUT_FOCUS,
                         MethodBrowser, ParamForm, PipelineList, MAX_PANELS,
                         clear_invalid, make_separator)
 
@@ -97,6 +99,10 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._opened_run_groups = set()   # 已自动展开的 run_group_id（每组一次）
         self._artifacts_by_id = {}        # artifact_id -> ProjectArtifact
         self._gallery = None              # 总览墙（懒创建，随主页销毁）
+        self._method_picker = None        # 方法选择弹窗（P0-2 单实例）
+        self._step_editor = None          # 步骤合一编辑弹窗（P0-3，每次新建）
+        self._picker_purpose = 'append'   # 选择器分流：append 链尾 / replace 换步
+        self._picker_index = -1           # replace 模式的目标步骤索引
         self._thumb_views_bound = []      # 已装点击提升的缩略面板
         self._step_artifact_ids = {}      # v2：步骤序号 → 该步 intermediate 成果 id
         self._results_stale = False       # v2：链/参数已改但结果未重算
@@ -132,13 +138,15 @@ class ProcessingPage(PanelStateMixin, QWidget):
         columns.setSpacing(constants.PAGE_SPACING)
         root.addLayout(columns, 1)
 
-        # ---------------- 左栏（展开 SIDE_TOOL_WIDTH px，可折叠；滚动栏宽须与面板展开宽一致）
-        left_scroll, left_layout = make_scroll_column(constants.SIDE_TOOL_WIDTH)
-        left_panel = CollapsiblePanel(
-            'left', expand_width=constants.SIDE_TOOL_WIDTH, collapse_width=40, parent=self)
-        left_panel.set_content_widget(left_scroll)
-        columns.addWidget(left_panel)
-        self._left_panel = left_panel
+        self._build_left_column(columns)
+        self._build_middle_column(columns)
+        self._build_right_column(columns)
+
+    def _build_left_column(self, columns: QHBoxLayout) -> None:
+        """左栏（展开 SIDE_TOOL_WIDTH px，可折叠；滚动栏宽须与面板展开宽一致）。"""
+        self._left_panel, left_layout = make_collapsible_column(
+            'left', constants.SIDE_TOOL_WIDTH, parent=self)
+        columns.addWidget(self._left_panel)
 
         methods_card, methods_layout = make_card('方法库')
         self._method_browser = MethodBrowser(methods_card)
@@ -146,8 +154,14 @@ class ProcessingPage(PanelStateMixin, QWidget):
         methods_layout.addWidget(self._method_browser, 1)
         # 卡片占满左栏全部可用高度，不再在底部留空白
         left_layout.addWidget(methods_card, 1)
+        # 后续卡片（参数/执行/AutoTune）必须挂进**同一个滚动内容布局**：
+        # 若误挂 CollapsiblePanel.content_widget().layout()，会与 ScrollArea
+        # 成为兄弟——ScrollArea 拿 stretch 1 被三卡挤到 ~97px 视口，方法库
+        # 树整个被裁掉（真机实测：左栏只见标题+搜索框，"看不到方法在哪"）。
+        self._left_cards_layout = left_layout
 
-        # ---------------- 中栏（stretch）
+    def _build_middle_column(self, columns: QHBoxLayout) -> None:
+        """中栏（stretch）：tab 模型主区 = 上链条 / 下结果网格 + 进度条。"""
         middle = QWidget(self)
         middle_layout = QVBoxLayout(middle)
         middle_layout.setContentsMargins(0, 0, 0, 0)
@@ -166,6 +180,8 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._line_combo = ComboBox(middle)
         self._line_combo.setMinimumWidth(130)
         self._line_combo.setToolTip('当前测线：在处理页直接切换')
+        # 空态占位（深查 P3）：无测线时原样一个白框，看不出用途
+        self._line_combo.setPlaceholderText('选择测线')
         self._artifact_combo = ComboBox(middle)
         self._artifact_combo.setMinimumWidth(150)
         self._artifact_combo.setToolTip('选择该测线历次处理结果作为输入')
@@ -184,6 +200,15 @@ class ProcessingPage(PanelStateMixin, QWidget):
 
         self._result_grid = ResultGrid(middle)
         middle_layout.addWidget(self._result_grid, 1)
+        # 总览墙手动入口（2026-10-09）：旧入口挂在 v2 隐藏的 preview_card
+        # tab 行里，随卡片一起消失——>4 源自动弹出还在，手动入口却没了。
+        # 挂到结果网格头部（可见时 = 有打开的源），复用同一 _open_gallery。
+        self._grid_gallery_btn = PushButton('总览墙', self)
+        self._grid_gallery_btn.setToolTip(
+            '弹出总览墙：大图网格展示原始数据与本次各步结果。')
+        self._grid_gallery_btn.clicked.connect(self._open_gallery)
+        self._grid_gallery_btn.setVisible(False)
+        self._result_grid.add_header_widget(self._grid_gallery_btn)
 
         preview_card, preview_layout = make_card('数据预览')
         self._preview_card = preview_card
@@ -224,7 +249,7 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._progress_bar = ProgressBar(middle)
         self._progress_bar.setRange(0, 100)
         self._progress_bar.setValue(0)
-        progress_row.addWidget(self._progress_bar, 1)
+        progress_row.addWidget(self._progress_bar, 3)
         self._progress_label = CaptionLabel('', middle)
         self._progress_label.setMinimumWidth(0)
         progress_row.addWidget(self._progress_label, 1)
@@ -233,20 +258,22 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._progress_row_widget.setVisible(False)
         middle_layout.addWidget(self._progress_row_widget)
 
-        # ---------------- 右栏（展开 SIDE_FORM_WIDTH px，可折叠；滚动栏宽须与面板展开宽一致）
-        right_scroll, right_layout = make_scroll_column(constants.SIDE_FORM_WIDTH)
-        right_panel = CollapsiblePanel(
-            'right', expand_width=constants.SIDE_FORM_WIDTH, collapse_width=40, parent=self)
-        right_panel.set_content_widget(right_scroll)
-        columns.addWidget(right_panel)
-        self._right_panel = right_panel
+    def _build_right_column(self, columns: QHBoxLayout) -> None:
+        """右栏（展开 SIDE_FORM_WIDTH px，可折叠；滚动栏宽须与面板展开宽一致）。
+
+        v2：参数 / 执行 / 自动调参三卡已移入左栏，本栏整体隐藏——但
+        ``PipelineList`` 仍作步骤数据源留在栏内，故代码不删。
+        """
+        self._right_panel, right_layout = make_collapsible_column(
+            'right', constants.SIDE_FORM_WIDTH, parent=self)
+        columns.addWidget(self._right_panel)
 
         pipeline_card, pipeline_layout = make_card('处理链')
         self._pipeline_list = PipelineList(pipeline_card)
         self._pipeline_list.setMinimumHeight(200)
         pipeline_layout.addWidget(self._pipeline_list, 1)
-        self._add_method_btn = PushButton('添加所选方法', pipeline_card)
-        self._add_method_btn.setToolTip('将左侧方法库当前选中的方法加入处理链')
+        self._add_method_btn = PushButton('添加方法', pipeline_card)
+        self._add_method_btn.setToolTip('弹出方法选择器，双击条目加入处理链')
         pipeline_layout.addWidget(self._add_method_btn)
         right_layout.addWidget(pipeline_card, 1)
 
@@ -254,7 +281,10 @@ class ProcessingPage(PanelStateMixin, QWidget):
         # 空态引导：未选步骤/方法无参数时表单区空白一片（真机走查遗留项）
         self._param_empty_hint = CaptionLabel('选中处理链步骤后在此调参',
                                               param_card)
-        self._param_empty_hint.setStyleSheet('color: gray;')
+        # 令牌色（原硬编码 'color: gray' 深色主题对比度存疑）；
+        # apply_theme 里随主题重刷
+        self._param_empty_hint.setStyleSheet(
+            f'color: {design_tokens.color("text_muted")};')
         param_layout.addWidget(self._param_empty_hint)
         self._param_form = ParamForm(param_card)
         param_layout.addWidget(self._param_form, 1)
@@ -287,7 +317,12 @@ class ProcessingPage(PanelStateMixin, QWidget):
         exec_layout.addLayout(run_row)
         right_layout.addWidget(exec_card)
 
-        autotune_card, autotune_layout = make_card('AutoTune 自动调参')
+        # AutoTune 是低频操作且结果只有"暂无调参结果"占位：默认收起
+        # （CollapsibleCard 收起只隐藏内容区、状态天然保留），把左栏空间
+        # 让给方法库与参数设置。
+        autotune_card, autotune_layout = make_collapsible_card(
+            'AutoTune 自动调参', collapsed=True)
+        self._autotune_card = autotune_card   # set_autotune_result 自动展开用
         self._autotune_method_label = CaptionLabel('--', autotune_card)
         autotune_layout.addLayout(make_form_row(
             '当前方法:', self._autotune_method_label, parent=autotune_card))
@@ -305,10 +340,19 @@ class ProcessingPage(PanelStateMixin, QWidget):
         autotune_layout.addWidget(self._adopt_params_btn)
         right_layout.addWidget(autotune_card)
         # v2：参数 / 执行 / 自动调参移入左栏（处理链改由顶部 chip 条承担，
-        # 右栏整体隐藏——PipelineList 仍作为步骤数据源留在右栏内，代码不删）
-        left_layout.addWidget(param_card)
-        left_layout.addWidget(exec_card)
-        left_layout.addWidget(autotune_card)
+        # 右栏整体隐藏——PipelineList 仍作为步骤数据源留在右栏内，代码不删）。
+        # 三卡必须与方法库卡同层（同一 ScrollArea 内容布局，见
+        # _build_left_column 的注释）：旧实现误挂 CollapsiblePanel 内层，
+        # ScrollArea 视口被三卡挤到 97px，方法库树整个被裁掉。
+        left_cards_layout = self._left_cards_layout
+        # 卡序（2026-10-09 用户拍板）：执行卡上移到参数设置之前——
+        # 「输入数据/结果名称」是运行前必经配置，排最底时 580 高真机窗口
+        # 完全在视口外（截图实证：只见「执行」标题一条边），而运行按钮在
+        # 右上链条上，配置与执行空间分离。新序：方法库 → 执行 → 参数
+        # 设置 → AutoTune。
+        left_cards_layout.addWidget(exec_card)
+        left_cards_layout.addWidget(param_card)
+        left_cards_layout.addWidget(autotune_card)
         self._right_panel.setVisible(False)
         right_layout.addStretch(1)
 
@@ -317,7 +361,7 @@ class ProcessingPage(PanelStateMixin, QWidget):
         # 方法库 → 选中方法（AutoTune 目标）/ 双击添加 / 按钮添加
         self._method_browser.sig_method_selected.connect(self._on_method_selected)
         self._method_browser.sig_add_requested.connect(self._add_method_to_pipeline)
-        self._add_method_btn.clicked.connect(self._on_add_selected_method)
+        self._add_method_btn.clicked.connect(self._open_method_picker)
 
         # 处理链 ↔ 参数表单
         self._pipeline_list.sig_step_selected.connect(self._on_step_selected)
@@ -341,7 +385,10 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._chain_strip.sig_step_toggled.connect(self._on_chain_step_toggled)
         self._chain_strip.sig_step_removed.connect(self._on_chain_step_removed)
         self._chain_strip.sig_step_moved.connect(self._on_chain_step_moved)
-        self._chain_strip.sig_add_requested.connect(self._on_add_selected_method)
+        self._chain_strip.sig_add_requested.connect(self._open_method_picker)
+        # chip 右键唯一入口（P0-3）：合一编辑弹窗
+        self._chain_strip.sig_step_editor_requested.connect(
+            self._open_step_editor)
         # 反向：处理链选中（程序化）也同步 chip 条高亮
         self._pipeline_list.sig_step_selected.connect(self._chain_strip.select_step)
         self._chain_strip.run_button().clicked.connect(self._on_run_clicked)
@@ -394,6 +441,9 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._methods = [dict(m) for m in (methods or [])]
         self._methods_by_id = {m.get('method_id', ''): m for m in self._methods}
         self._method_browser.set_methods(self._methods)
+        # 选择弹窗与左栏同源（存活实例同步刷新；再开的实例构造时灌入）
+        if self._method_picker is not None:
+            self._method_picker.set_methods(self._methods)
 
     def set_original_bundle(self, bundle) -> None:
         """原始数据预览 bundle → 固定首 tab（不可关；换测线即换内容）。"""
@@ -461,16 +511,37 @@ class ProcessingPage(PanelStateMixin, QWidget):
                 self._open_gallery()
 
     def _open_gallery(self) -> None:
-        """总览墙（非模态）：只显示**当前上下文**——原始数据 + 本次
-        run_group 各步（与结果网格一致）。历史上打开过的旧组成果不再
-        展示（真机反馈：跑一步蹦出一屏几天前的结果）；历史成果经成果
-        下拉/文件树按需预览。"""
+        """总览墙（非模态，单实例）：只显示**当前上下文**——原始数据 +
+        本次 run_group 各步（与结果网格一致）。历史上打开过的旧组成果
+        不再展示（真机反馈：跑一步蹦出一屏几天前的结果）；历史成果经
+        成果下拉/文件树按需预览。
+
+        单实例防堆叠（P1-4）：存活且可见 → set_sources 增量更新 +
+        activateWindow；关窗（任何路径）后经 finished 置引用 None，
+        再开 = 新实例（修旧版每次 new 覆盖引用、旧窗堆叠的 bug）。"""
         from ui.widgets.bscan_gallery import BScanGallery
         keep = {'original'} | {
             f'artifact:{aid}' for aid in self._step_artifact_ids.values()}
         sources = [s for s in self._preview_sources if s['key'] in keep]
-        self._gallery = BScanGallery(self, sources)
+        if self._gallery is not None:
+            try:
+                if self._gallery.isVisible():
+                    self._gallery.set_sources(sources,
+                                              self._selected_source_key)
+                    self._gallery.activateWindow()
+                    self._gallery.raise_()
+                    return
+            except RuntimeError:      # C++ 侧已销毁（teardown 竞态）
+                self._gallery = None
+        self._gallery = BScanGallery(self)
+        self._gallery.sig_pick.connect(self.on_gallery_pick)
+        self._gallery.finished.connect(self._on_gallery_finished)
+        self._gallery.set_sources(sources, self._selected_source_key)
         self._gallery.show()
+
+    def _on_gallery_finished(self, _result: int) -> None:
+        """总览墙关闭（Esc/点卡/任何路径）：引用置 None，再开=新实例。"""
+        self._gallery = None
 
     # ------------------------------------------------ v2：链条 ↔ 处理链
     def _on_chain_step_selected(self, index: int) -> None:
@@ -502,6 +573,93 @@ class ProcessingPage(PanelStateMixin, QWidget):
         """chip 拖拽落点 → 步骤换位（target 为插入位语义）。"""
         self._pipeline_list._move_step_to(source, target)
 
+    # ---------------- 步骤合一编辑弹窗（P0-3，chip 右键唯一入口）
+    def _open_step_editor(self, index: int) -> None:
+        """chip 右键 → 合一弹窗：快照来自 PipelineList（唯一数据源），
+        弹窗只持快照；写回经公开 API + 手动 sig_changed.emit()。"""
+        from ui.widgets.step_editor import StepEditorPopup
+        steps = self._pipeline_list.steps()
+        if not (0 <= index < len(steps)):
+            return
+        step = steps[index]
+        method = self._methods_by_id.get(step.get('method_id', '') or '', {})
+        snapshot = {
+            'title': step.get('label') or step.get('method_id', ''),
+            'method_id': step.get('method_id', ''),
+            'params': dict(step.get('params') or {}),
+            'enabled': bool(step.get('enabled', True)),
+            'is_first': index == 0,
+            'is_last': index == len(steps) - 1,
+            'schema': method.get('parameter_schema') or [],
+        }
+        # 每次新建实例：天然无重复信号连接，关窗即销毁（未应用改动随窗丢弃）
+        self._step_editor = StepEditorPopup(self)
+        self._step_editor.load_snapshot(index, snapshot)
+        self._step_editor.sig_applied.connect(self._on_step_editor_applied)
+        self._step_editor.sig_move_requested.connect(self._on_chain_step_moved)
+        self._step_editor.sig_duplicate_requested.connect(self._duplicate_step)
+        self._step_editor.sig_replace_requested.connect(
+            self._on_step_editor_replace)
+        self._step_editor.sig_remove_requested.connect(
+            self._on_chain_step_removed)
+        self._step_editor.finished.connect(self._on_step_editor_finished)
+        self._step_editor.show()
+
+    def _on_step_editor_finished(self, _result: int) -> None:
+        """弹窗关闭（应用/结构动作/Esc/外部点击任一路径）：引用释放。"""
+        self._step_editor = None
+
+    def _on_step_editor_applied(self, payload: dict) -> None:
+        """「应用」：参数写回（update_step_params 自动 sig_changed →
+        琥珀 hint 点亮）；启停变化走既有 _toggle_enabled（chip 变暗 +
+        运行跳过语义不变，配置保留）。"""
+        payload = dict(payload or {})
+        index = int(payload.get('index', -1))
+        steps = self._pipeline_list.steps()
+        if not (0 <= index < len(steps)):
+            return
+        self._pipeline_list.update_step_params(
+            index, dict(payload.get('params') or {}))
+        enabled = bool(payload.get('enabled', True))
+        if steps[index]['enabled'] != enabled:
+            self._pipeline_list._toggle_enabled(index)
+
+    def _on_step_editor_replace(self, index: int) -> None:
+        """「替换算法」→ 打开方法选择器（purpose='replace'，Q2 定案：
+        纯浏览态不预选当前方法，双击即替换）。"""
+        self._open_method_picker(purpose='replace', index=index)
+
+    def _duplicate_step(self, index: int) -> None:
+        """复制步骤：同算法同参数的相邻副本。set_steps 不发信号 →
+        手动 emit（参照 _on_adopt_params :1293-1295 模式，琥珀 hint 点亮）。"""
+        steps = self._pipeline_list.steps()
+        if not (0 <= index < len(steps)):
+            return
+        copy = dict(steps[index])
+        copy['params'] = dict(steps[index].get('params') or {})
+        steps.insert(index + 1, copy)
+        self._pipeline_list.set_steps(steps)
+        self._pipeline_list.select_step(index + 1)
+        self._pipeline_list.sig_changed.emit()
+
+    def _replace_step_method(self, index: int, method_id: str) -> None:
+        """替换第 index 步的算法：位置不变，参数按新 schema 取默认，
+        恢复启用。set_steps 不发信号 → 手动 emit（琥珀 hint 点亮）。"""
+        steps = self._pipeline_list.steps()
+        if not (0 <= index < len(steps)):
+            return
+        method = self._methods_by_id.get(method_id, {})
+        label = (method.get('display_name') or method.get('name')
+                 or method_id)
+        params = {item.get('name'): item.get('default')
+                  for item in (method.get('parameter_schema') or [])
+                  if item.get('name') is not None}
+        steps[index] = {'method_id': method_id, 'label': label,
+                        'params': params, 'enabled': True}
+        self._pipeline_list.set_steps(steps)
+        self._pipeline_list.select_step(index)   # 选中 → 参数表单重载新 schema
+        self._pipeline_list.sig_changed.emit()
+
     def _refresh_chain_and_results(self) -> None:
         """上面怎么排，下面就按同序铺格。
 
@@ -519,11 +677,11 @@ class ProcessingPage(PanelStateMixin, QWidget):
             if group_id != self._echoed_group:
                 self._preview_requested.clear()   # 新上下文：预览全部重发
                 self._pipeline_list.set_steps([
-                    {'method_id': str(getattr(art, 'method_id', '') or ''),
-                     'label': str(getattr(art, 'method_id', '') or ''),
+                    {'method_id': mid,
+                     'label': self._display_name(mid),
                      'params': {}, 'enabled': True}
                     for (_s, _k, _c, _aid, art) in members
-                     if str(getattr(art, 'method_id', '') or '')])
+                     if (mid := str(getattr(art, 'method_id', '') or ''))])
                 steps = self._pipeline_list.steps()
                 self._echoed_group = group_id
             # 「全部步骤」开关关闭 → 只铺输入 + 最终结果（P3 就地版）
@@ -533,9 +691,10 @@ class ProcessingPage(PanelStateMixin, QWidget):
             for i, (_s, kind, _c, artifact_id, art) in enumerate(members):
                 if i not in shown or f'step:{i}' in self._closed_slots:
                     continue
-                method = (str(getattr(art, 'method_id', '') or '')
-                          or str(getattr(art, 'name', '') or ''))
-                slots.append({'key': f'step:{i}', 'title': f'{i + 1} {method}',
+                mid = str(getattr(art, 'method_id', '') or '')
+                label = (self._display_name(mid) if mid
+                         else str(getattr(art, 'name', '') or ''))
+                slots.append({'key': f'step:{i}', 'title': f'{i + 1} {label}',
                               'enabled': True})
             self._step_artifact_ids = {
                 i: artifact_id
@@ -763,6 +922,9 @@ class ProcessingPage(PanelStateMixin, QWidget):
         extra = len(self._preview_sources) - MAX_PANELS
         self._gallery_btn.setText(f'总览墙 +{extra}' if extra > 0
                                   else '总览墙')
+        # 网格头部的总览墙入口：原始数据之外还有打开的源才显示（空态/
+        # 只有输入时不给一个弹空墙的按钮）
+        self._grid_gallery_btn.setVisible(len(self._preview_sources) > 1)
 
     def _bind_source(self, view, source, *, thumb: bool = False) -> None:
         """单面板绑定：有 bundle 直接送，缺则清空并发懒加载请求。
@@ -827,20 +989,29 @@ class ProcessingPage(PanelStateMixin, QWidget):
                     success: bool | None = None) -> None:
         """运行态切换：运行按钮/取消按钮互斥 + 进度条显隐。
 
-        ``success=True``（运行正常结束）时顶部链条的运行钮闪一次 ✓。
+        ``success=True``（运行正常结束）时顶部链条的运行钮闪一次「完成」。
         """
         self._running = bool(running)
         self._job_id = job_id or ''
         self._run_btn.setEnabled(not self._running)
         self._cancel_btn.setEnabled(self._running)
         self._progress_row_widget.setVisible(self._running)
-        # v2：顶部链条的运行钮同步进入 spinner 态（结束回到「运行」）
+        # v2：顶部链条的运行钮同步翻转——运行中即「取消」（就近可达，
+        # 2026-10-09 深查 P2）
         self._chain_strip.set_running(self._running)
-        if not self._running and success:
-            self._chain_strip.flash_success()
         if self._running:
+            # 运行中不显示「已修改·点运行更新」——正在更新中，琥珀标签
+            # 与取消钮并存是矛盾信息（深查 P2）
+            self._chain_strip.set_dirty(False)
             self._progress_bar.setValue(0)
             self._progress_label.setText('')
+        else:
+            if success:
+                self._chain_strip.flash_success()
+            # 取消路径：链已改而结果未重算，恢复琥珀提示；完成路径由
+            # _refresh_chain_and_results 按新结果重设，此处幂等
+            if self._results_stale and self._step_artifact_ids:
+                self._chain_strip.set_dirty(True)
 
     def set_progress(self, completed: int, total: int, message: str) -> None:
         """进度更新：total>0 按比例，否则按百分数；message 显示在进度条右侧。"""
@@ -856,7 +1027,12 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._progress_label.setToolTip(str(message or ''))
 
     def set_autotune_result(self, method_id: str, result: dict) -> None:
-        """AutoTune 结果 {best_params, ...} → CaptionLabel 区 + 暂存最优参数。"""
+        """AutoTune 结果 {best_params, ...} → CaptionLabel 区 + 暂存最优参数。
+
+        结果到达时自动展开 AutoTune 卡（2026-10-09）：调参是异步的，用户
+        常在等待期把默认收起的卡再收上——结果悄悄写进收起的卡里等于没有
+        反馈。展开把「调参完成」变成可见事件。
+        """
         result = dict(result or {})
         self._autotune_result = (method_id, result)
         best = result.get('best_params') or {}
@@ -874,6 +1050,17 @@ class ProcessingPage(PanelStateMixin, QWidget):
             lines.append('最优参数: (无)')
         self._autotune_result_label.setText('\n'.join(lines))
         self._adopt_params_btn.setEnabled(bool(best))
+        if self._autotune_card.is_collapsed():
+            self._autotune_card.set_collapsed(False, animate=True)
+
+    def apply_theme(self, dark: bool) -> None:
+        """主题切换：令牌色重刷（主窗鸭子类型派发，见 main_window）。
+
+        链条 chip 的状态点/胶囊由 ChainStrip.apply_theme 自刷；本页只管
+        页内令牌色控件（参数空态提示原为硬编码 gray，深色下对比度存疑）。
+        """
+        self._param_empty_hint.setStyleSheet(
+            f'color: {design_tokens.color("text_muted", dark)};')
 
     def set_line_label(self, text: str) -> None:
         """当前测线标签（同步到测线选择下拉，不触发信号）。"""
@@ -950,10 +1137,22 @@ class ProcessingPage(PanelStateMixin, QWidget):
             return nested
         return manifest
 
+    def _display_name(self, method_id: str) -> str:
+        """method_id → 中文显示名（方法库未登记时回退 method_id）。
+
+        链 chip / 结果卡标题统一走这里（2026-10-09 深查 P2）：回显路径
+        原样显示 method_id，与方法库的中文显示名混拼——同一页面两套命名。
+        """
+        if not method_id:
+            return method_id
+        method = self._methods_by_id.get(method_id) or {}
+        return str(method.get('display_name') or method_id)
+
     def _newest_run_members(self) -> tuple[str, list]:
         """最新 run_group 的成员（已按步序排序；无则 ('', [])）。
 
-        元素：(kind, created, artifact_id, art)。结果网格与步骤 tab 共用
+        元素：(step, kind, created, artifact_id, art) 五元组（调用方按
+        步序解包）。结果网格与步骤 tab 共用
         ——「上面怎么排，下面就按同序看各步结果」以运行事实（B7 落盘）
         为准，而非当前链定义（用户可能已改链）。
         """
@@ -1025,8 +1224,9 @@ class ProcessingPage(PanelStateMixin, QWidget):
             key = f'artifact:{artifact_id}'
             if any(s['key'] == key for s in self._preview_sources):
                 continue
-            title = (str(getattr(art, 'method_id', '') or '')
-                     or str(getattr(art, 'name', '') or '') or '处理结果')
+            mid = str(getattr(art, 'method_id', '') or '')
+            title = (self._display_name(mid) if mid
+                     else str(getattr(art, 'name', '') or '') or '处理结果')
             self._preview_sources.append({
                 'key': key, 'title': title, 'bundle': None,
                 'artifact_id': artifact_id, 'closable': True,
@@ -1096,15 +1296,44 @@ class ProcessingPage(PanelStateMixin, QWidget):
         self._autotune_running = bool(running)
         self._update_autotune_enabled()
 
-    def _on_add_selected_method(self) -> None:
-        method_id = self._method_browser.current_method_id()
-        if not method_id:
-            InfoBar.warning(title='处理链', content='请先在方法库中选择方法',
-                            orient=Qt.Orientation.Horizontal, isClosable=True,
-                            position=InfoBarPosition.TOP, duration=3000,
-                            parent=self)
-            return
-        self._add_method_to_pipeline(method_id)
+    # ---------------- 方法选择弹窗（P0-2「+」/「添加方法」统一入口）
+    def _open_method_picker(self, purpose: str = 'append', index: int = -1) -> None:
+        """「+」/「添加方法」统一入口：非模态方法选择器（单实例）。
+
+        purpose='append'：双击条目 → 链尾追加；purpose='replace'：双击
+        条目 → 替换第 index 步（P0-3 编辑弹窗「替换算法」分流口，T03 消费：
+        位置不变、参数按新 schema 取默认）。存活实例唤起并复位状态；
+        关窗后引用置 None，再开 = 新实例 = 状态天然复位。
+        """
+        from ui.widgets.method_picker import MethodPickerDialog
+        self._picker_purpose = str(purpose) if purpose in ('append', 'replace') \
+            else 'append'
+        self._picker_index = int(index) if str(index).lstrip('-').isdigit() else -1
+        if self._method_picker is not None:
+            try:
+                self._method_picker.reset_state()
+                self._method_picker.show()
+                self._method_picker.activateWindow()
+                self._method_picker.raise_()
+                return
+            except RuntimeError:      # C++ 侧已销毁（teardown 竞态）
+                self._method_picker = None
+        self._method_picker = MethodPickerDialog(self)
+        self._method_picker.set_methods(self._methods)
+        self._method_picker.sig_method_chosen.connect(self._on_method_picked)
+        self._method_picker.finished.connect(self._on_method_picker_finished)
+        self._method_picker.show()
+
+    def _on_method_picked(self, method_id: str) -> None:
+        """选择器双击条目：按 purpose 分流（链尾追加 / 就地替换）。"""
+        if self._picker_purpose == 'replace' and self._picker_index >= 0:
+            self._replace_step_method(self._picker_index, method_id)
+        else:
+            self._add_method_to_pipeline(method_id)
+
+    def _on_method_picker_finished(self, _result: int) -> None:
+        """弹窗关闭（Esc/外部点击/任何路径）：引用置 None，再开=新实例。"""
+        self._method_picker = None
 
     def _add_method_to_pipeline(self, method_id: str) -> None:
         method = self._methods_by_id.get(method_id, {})
@@ -1151,6 +1380,9 @@ class ProcessingPage(PanelStateMixin, QWidget):
     # ---------------- 执行
     def _on_run_clicked(self) -> None:
         if self._running:
+            # 运行钮就近翻转（2026-10-09 深查 P2）：同一位置点击 = 取消，
+            # 不再让用户到可能收起的左栏执行卡里找取消钮
+            self.cancel_requested.emit()
             return
         steps = self._pipeline_list.steps()
         if not steps:

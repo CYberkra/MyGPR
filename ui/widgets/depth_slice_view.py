@@ -16,13 +16,14 @@ from __future__ import annotations
 import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QTransform
+from PyQt6.QtGui import QPainterPath, QTransform
 
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import isDarkTheme
 
 from ui import constants
 from ui.widgets.empty_state import EmptyStateOverlay
+from ui.widgets.marching_squares import isoline_paths
 from ui.widgets.pg_view_base import GraphicsViewBase, style_plot_item
 
 __all__ = ["DepthSliceView"]
@@ -118,6 +119,7 @@ class DepthSliceView(GraphicsViewBase, pg.PlotWidget):
         self._image.setLookupTable(self._cmap.getLookupTable())
         self._colorbar.setColorMap(self._cmap)
         self._isocurve.setData(values, level=self._isocurve.level)
+        self._rebuild_isoline()          # 覆盖 IsocurveItem 自己算的伪路径
         self._isocurve.setTransform(transform)
         # 网格覆盖范围含半格边距（cell 中心语义：图像边沿在中心 ± 0.5 cell）
         x0 = float(x_origin_m) - cell / 2.0
@@ -133,6 +135,7 @@ class DepthSliceView(GraphicsViewBase, pg.PlotWidget):
         """清空网格与等值线（轨迹保留，由 set_tracks 单独管理）。"""
         self._image.clear()
         self._isocurve.setData(np.zeros((1, 1)), level=0.0)
+        self._isocurve.path = QPainterPath()   # 显式清，别让 generatePath 复活
         self._matrix = None
         self._grid_extent = None
         self._plot_item.setTitle(None)
@@ -157,11 +160,44 @@ class DepthSliceView(GraphicsViewBase, pg.PlotWidget):
         return float(finite.min()), float(finite.max())
 
     # ------------------------------------------------------------ 等值线
+    def _rebuild_isoline(self) -> None:
+        """按当前 level 重算等值线路径（NaN 感知，见 marching_squares 模块）。
+
+        不用 ``IsocurveItem.setData``：它内部走 pyqtgraph ``fn.isocurve``，
+        那里的 ``mask = data < level`` 会把 NaN 判成"高于 level"侧，于是
+        无数据空洞的边界被当成真实跃变，横穿空洞画出伪等值线。生产矩阵绝大
+        多数格子是 NaN（``grid/service.py:240`` 用 NaN 填空 cell），实测
+        40×40 稀疏场里**100% 的等值线节点落在无数据格内**。
+
+        曾试过"填最近有效值"再喂进去 —— **失败**（稀疏场仍有 98% 节点落在
+        空洞内）：最近邻填充是 Voronoi 式外推，空洞内并不平，照样跨 level。
+        填 ``+inf``/常数也不行——marching squares 只有两态，无法表达
+        "无数据"这个第三态，任何"进算法前消掉 NaN"的做法都只是把伪影挪位置。
+        唯一正确的规则就是逐格判断：四角含非有限值就不画。
+        """
+        if self._matrix is None:
+            self._isocurve.path = None
+            return
+        lines = isoline_paths(self._matrix, float(self._isocurve.level))
+        path = QPainterPath()
+        for line in lines:
+            path.moveTo(*line[0])
+            for pt in line[1:]:
+                path.lineTo(*pt)
+        self._isocurve.path = path
+        self._isocurve.prepareGeometryChange()
+        self._isocurve.update()
+
     def set_isoline(self, value: float) -> None:
-        """切换等值线 level（切片深度，单位 = 场值单位，即米）。"""
+        """切换等值线 level（切片深度，单位 = 场值单位，即米）。
+
+        走 :meth:`_rebuild_isoline` 而不是 ``IsocurveItem.setData``：level 是
+        唯一变量，矩阵没变，重算路径即可（``setData`` 还会顺手把矩阵换掉）。
+        """
         if self._matrix is None:
             return
-        self._isocurve.setData(self._matrix, level=float(value))
+        self._isocurve.level = float(value)
+        self._rebuild_isoline()
 
     def isoline_value(self) -> float | None:
         """当前等值线 level；未设网格时 None。"""

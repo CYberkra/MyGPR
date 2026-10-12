@@ -4,38 +4,28 @@
 
 用途：文档配图需要"用起来的样子"而非空壳页（任务 F 候选 4 taste pass）。
 用法：QT_QPA_PLATFORM=offscreen MYGPR_YINGSHAN_DATA=<数据目录> python scripts/capture_docs_states.py
+
+离屏底座见 ``scripts/_qtprobe.py``。
 """
 from __future__ import annotations
 
 import os
 import sys
-import time
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _qtprobe import ROOT, create_app, wait_backend  # noqa: E402
 
 OUT_DIR = ROOT / 'docs' / 'user' / 'images'
 WINDOW_SIZE = (1450, 850)
 
 
-def _wait_backend(window, app, timeout_ms: int = 10000) -> bool:
-    waited = 0
-    while not window._backend_ready and waited < timeout_ms:
-        app.processEvents()
-        time.sleep(0.1)
-        waited += 100
-    return window._backend_ready
-
-
 def main() -> int:
-    os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
-    from qfluentwidgets import Theme, setTheme
-
+    from ui import constants
     from ui.main_window import MyGPRMainWindow
 
     from PyQt6.QtCore import QTimer
-    from PyQt6.QtWidgets import QApplication
 
     data_dir = os.environ.get('MYGPR_YINGSHAN_DATA')
     if not data_dir or not Path(data_dir).exists():
@@ -43,10 +33,14 @@ def main() -> int:
         return 0
     source = sorted(Path(data_dir).glob('Line*origin(36).csv'))[0]
 
-    app = QApplication.instance() or QApplication(sys.argv)
-    setTheme(Theme.LIGHT)
+    app = create_app()
     window = MyGPRMainWindow()
     window.resize(*WINDOW_SIZE)
+    # 与 capture_docs_screens.py 同走完整主题链路（_on_theme_changed →
+    # apply_theme），不调裸 setTheme()：后者不改 palette / pyqtgraph 背景，
+    # 且随后 _init_state 会按 settings.json 回放主题覆盖掉——这正是
+    # 2026-09-22「深色截图被静默拍成浅色」的成因。
+    window._on_theme_changed(constants.THEME_LIGHT)
     window.show()
     theme_dir = OUT_DIR / 'light'
     theme_dir.mkdir(parents=True, exist_ok=True)
@@ -63,7 +57,7 @@ def main() -> int:
         phase = state['phase']
         state['phase'] += 1
         if phase == 0:
-            assert _wait_backend(window, app), 'backend not ready'
+            assert wait_backend(window, app), 'backend not ready'
             # 建演示项目（走真实 controller，触发全部 UI 状态刷新）
             summary = window.project_controller._backend().projects.create_project(
                 state['project_root'], name='yingshan-demo',

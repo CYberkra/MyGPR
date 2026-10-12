@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import re
 import tomllib
 from collections import defaultdict
 from dataclasses import dataclass
@@ -89,7 +90,93 @@ def _validate_exception_metadata(policy: dict) -> list[str]:
         prefix = str(item.get("path_prefix", ""))
         if prefix and not (ROOT / prefix).exists():
             errors.append(f"migration exception #{index}: path does not exist: {prefix}")
+        action = str(item.get("expiry_action", "warn")).strip()
+        if action and action != "fail" and action != "warn" and not action.startswith("extend:"):
+            errors.append(
+                f"migration exception #{index}: invalid expiry_action {action!r} "
+                "(expected 'fail', 'warn' or 'extend:<version>')"
+            )
     return errors
+
+
+def _version_tuple(raw: str) -> tuple[int, ...] | None:
+    """Parse a dotted version into a comparable tuple; ``None`` when malformed."""
+    parts = str(raw).strip().split(".")
+    if not parts or not all(part.isdigit() for part in parts):
+        return None
+    return tuple(int(part) for part in parts)
+
+
+def _pad(left: tuple[int, ...], right: tuple[int, ...]) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    width = max(len(left), len(right))
+    return left + (0,) * (width - len(left)), right + (0,) * (width - len(right))
+
+
+def current_version() -> tuple[int, ...] | None:
+    text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    match = re.search(r'(?m)^version\s*=\s*"([^"]+)"', text)
+    return _version_tuple(match.group(1)) if match else None
+
+
+def _check_migration_expiry(policy: dict) -> tuple[list[str], list[str]]:
+    """Compare each ``remove_after`` promise against the current version.
+
+    A migration exception is a *dated* promise: it exists so the legacy path can
+    be borrowed temporarily, and it must be redeemed on the recorded release.
+    The metadata check only proves the promise is well-formed; this one proves
+    it is still kept.
+
+    ``expiry_action`` decides what happens once the deadline passes:
+
+    - ``fail``   — the gate fails; the exception must be deleted or re-dated
+    - ``warn``   — reported but the gate passes (used to stage the first release)
+    - ``extend:<version>`` — re-dated on the record, with a mandatory reason
+    """
+    spec = policy.get("migration_expiry", {})
+    if not spec.get("enabled", True):
+        return [], []
+    version = current_version()
+    if version is None:
+        return [], ["[migration-expiry] cannot read current version from pyproject.toml; skipped"]
+
+    errors: list[str] = []
+    warnings: list[str] = []
+    for item in policy.get("migration_exceptions", []):
+        prefix = str(item.get("path_prefix", ""))
+        deadline = _version_tuple(item.get("remove_after", ""))
+        if deadline is None:
+            # Malformed deadlines are already reported by _validate_exception_metadata.
+            continue
+        owner = str(item.get("owner", "")).strip() or "unowned"
+        if version < deadline:
+            continue
+        current, due = _pad(version, deadline)
+        if current == due:
+            continue
+        action = str(item.get("expiry_action", "warn")).strip() or "warn"
+        where = f"{prefix} (owner={owner}, remove_after={item.get('remove_after')})"
+        if action == "fail":
+            errors.append(
+                f"migration exception expired: {where} — deadline reached at version "
+                f"{item.get('remove_after')}, current {version}. "
+                "Delete the exception (and the legacy path it excuses) or bump "
+                "remove_after with a new expiry_action."
+            )
+        elif action.startswith("extend:"):
+            target = _version_tuple(action.split(":", 1)[1])
+            if target is None or target <= due:
+                errors.append(
+                    f"migration exception bad extension: {where} — expiry_action "
+                    f"{action!r} must name a version later than {item.get('remove_after')}"
+                )
+            else:
+                warnings.append(f"migration exception extended to {action.split(':', 1)[1]}: {where}")
+        else:
+            warnings.append(
+                f"migration exception expired (set expiry_action=\"fail\" to enforce): {where} "
+                f"— current version {version}"
+            )
+    return errors, warnings
 
 
 def _local_import_allowed(name: str, allowed: tuple[str, ...]) -> bool:
@@ -323,7 +410,11 @@ def _check_frozen_modules(policy: dict) -> list[str]:
 def main() -> int:
     policy = tomllib.loads(POLICY.read_text(encoding="utf-8"))
     errors: list[str] = []
+    warnings: list[str] = []
     errors.extend(_validate_exception_metadata(policy))
+    expiry_errors, expiry_warnings = _check_migration_expiry(policy)
+    errors.extend(expiry_errors)
+    warnings.extend(expiry_warnings)
     layer_errors, graph = _check_layers(policy)
     errors.extend(layer_errors)
     errors.extend(_check_layer_cycles(graph))
@@ -334,6 +425,8 @@ def main() -> int:
     errors.extend(_check_new_code_quality(policy))
     errors.extend(_check_frozen_modules(policy))
     errors.extend(_check_ui_reverse_dependencies(policy))
+    for message in warnings:
+        print(f"[migration-expiry] WARN {message}")
     if errors:
         print("\n".join(errors))
         return 1

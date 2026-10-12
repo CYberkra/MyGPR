@@ -363,6 +363,70 @@ class TestArtifactDeleteChain:
         assert asked == []  # 空闭包不弹确认框
 
 
+# ====================================================== 项目直切三页清空（P0-1）
+class TestProjectSwitchClearsPreviews:
+    """A→B 直切：on_project_opened 必须与 on_project_closed 对称地清空
+    三页预览（主页 / 处理页原始 / 解释页剖面）。
+
+    回归背景：新建/打开无测线项目时 lines_updated([]) 不触发新预览，
+    旧项目的 B-Scan 会永久残留在三页上。
+    """
+
+    @staticmethod
+    def _summary():
+        return type('_Summary', (), {
+            'name': 'probe', 'root_path': '', 'read_only': False})()
+
+    @staticmethod
+    def _harness():
+        window, pages, _views = _make_window()
+        window.project_controller = _StubPage(
+            refresh_all_artifacts=lambda: None,
+            refresh_spatial=lambda *_a: None,
+            refresh_reports=lambda *_a: None,
+        )
+        window.delivery_controller = _StubPage()
+        return PageCoordinator(window).project, pages
+
+    def test_opened_clears_three_pages(self):
+        project, pages = self._harness()
+
+        project.on_project_opened(self._summary())
+
+        assert ('set_preview_bundle', (None,)) in pages['homeInterface'].calls
+        assert ('set_original_bundle', (None,)) in \
+            pages['processingInterface'].calls
+        assert ('set_bundle', (None,)) in \
+            pages['interpretationInterface'].calls
+
+    def test_closed_clears_previews_unchanged(self):
+        """回归锁：on_project_closed 原有的三页清空语义不变。"""
+        project, pages = self._harness()
+
+        project.on_project_closed()
+
+        assert ('set_preview_bundle', (None,)) in pages['homeInterface'].calls
+        assert ('set_original_bundle', (None,)) in \
+            pages['processingInterface'].calls
+
+    def test_opened_then_lines_updates_previews(self):
+        """清空后新预览正常到达：on_dataset_preview 三页全量刷新。"""
+        project, pages = self._harness()
+        project.on_project_opened(self._summary())
+
+        project.on_dataset_preview(object())
+
+        home_calls = pages['homeInterface'].calls
+        processing_calls = pages['processingInterface'].calls
+        interpretation_calls = pages['interpretationInterface'].calls
+        assert any(name == 'set_preview_bundle' and args != (None,)
+                   for name, args in home_calls)
+        assert any(name == 'set_original_bundle' and args != (None,)
+                   for name, args in processing_calls)
+        assert any(name == 'set_bundle' and args != (None,)
+                   for name, args in interpretation_calls)
+
+
 # ====================================================== 空间轨迹加载去重
 class TestSpatialTrackLoadDedupe:
     """``load_spatial_tracks`` 在一次「打开项目」里必须只发起一次。

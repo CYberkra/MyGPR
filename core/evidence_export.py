@@ -7,7 +7,6 @@ from __future__ import annotations
 import csv
 import json
 import re
-from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -29,6 +28,7 @@ from mygpr.infrastructure.processing.native_adapter import (
     NativeProcessingExecutor,
     prepare_native_params,
 )
+from core.storage_primitives import utc_now
 from core.trace_metadata_utils import resample_bscan_columns_linear
 from core.uav_georeference_3d import (
     build_airborne_georeference_3d_payload,
@@ -207,7 +207,7 @@ def _compact_replay_package(package: dict[str, Any]) -> dict[str, Any]:
         "package_type": package.get("package_type", "mygpr_replay_evidence"),
         "schema_version": int(package.get("schema_version", 1)),
         "storage": package.get("storage", "memory_only_until_user_export"),
-        "exported_at": datetime.now().isoformat(timespec="seconds"),
+        "exported_at": utc_now(),
         "revision": int(package.get("revision", 0)),
         "data_path": package.get("data_path"),
         "original_label": package.get("original_label"),

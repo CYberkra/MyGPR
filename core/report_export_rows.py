@@ -6,7 +6,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -15,7 +15,14 @@ from core.storage_primitives import atomic_output_path
 from core.tabular_security import safe_tabular_value
 
 def _timestamp() -> str:
-    return datetime.now().strftime("%Y%m%d_%H%M%S")
+    """Filesystem-safe UTC stamp for report package directory names.
+
+    Deliberately compact (``%Y%m%d_%H%M%S``) because it becomes a path segment.
+    Uses UTC so package names sort chronologically regardless of where the
+    report was generated; do not use this for record timestamps — those go
+    through :func:`core.storage_primitives.utc_now`.
+    """
+    return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
 def _safe_rel(path: Path, root: Path) -> str:
     try:

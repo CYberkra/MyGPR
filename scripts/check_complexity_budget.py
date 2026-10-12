@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import ast
 import json
+import sys
 from pathlib import Path
 from typing import Iterable, TypedDict
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _gate import RatchetGate, read_baseline  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "config" / "complexity_baseline.json"
@@ -29,6 +34,14 @@ _DECISION_NODES = (
     ast.BoolOp,
     ast.IfExp,
     ast.comprehension,
+)
+
+#: 受棘轮约束的指标（其余仅作参考输出）。
+ENFORCED_METRICS = (
+    "max_decision_points",
+    "functions_over_30",
+    "functions_over_40",
+    "functions_over_60",
 )
 
 
@@ -70,19 +83,18 @@ def collect_complexity(root: Path, roots: Iterable[str]) -> tuple[dict[str, int]
     return metrics, functions
 
 
-def validate_metrics(payload: dict, current: dict[str, int]) -> list[str]:
-    errors: list[str] = []
+def build_gates(current: dict[str, int]) -> list[RatchetGate]:
+    """按 ENFORCED_METRICS 组装棘轮（baseline 缺失即违规，见 RatchetGate）。"""
+    baseline = read_baseline(CONFIG)
+    return [RatchetGate(name=key, current=int(current.get(key, 0)),
+                        baseline=baseline.get(key))
+            for key in ENFORCED_METRICS]
+
+
+def validate_schema(payload: dict) -> list[str]:
     if payload.get("schema") != "mygpr.complexity_baseline.v1":
-        errors.append("invalid complexity baseline schema")
-    baseline = dict(payload.get("metrics") or {})
-    for key in ("max_decision_points", "functions_over_30", "functions_over_40", "functions_over_60"):
-        allowed = int(baseline.get(key, -1))
-        actual = int(current.get(key, 0))
-        if allowed < 0:
-            errors.append(f"missing complexity metric: {key}")
-        elif actual > allowed:
-            errors.append(f"complexity regressed: {key}: {actual} > {allowed}")
-    return errors
+        return ["invalid complexity baseline schema"]
+    return []
 
 
 def main() -> int:
@@ -93,8 +105,12 @@ def main() -> int:
     except (OSError, SyntaxError, UnicodeError) as exc:
         print(f"complexity budget check failed: {exc}")
         return 1
-    errors = validate_metrics(payload, metrics)
+    errors = validate_schema(payload)
+    gates = build_gates(metrics)
+    errors.extend(text for gate in gates if (text := gate.violation()))
     print(json.dumps({"metrics": metrics, "top_functions": functions[:10]}, ensure_ascii=False, indent=2))
+    for gate in gates:
+        print(gate.report())
     if errors:
         print("\n".join(errors))
         return 1

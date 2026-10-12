@@ -43,6 +43,7 @@ from ui.widgets.map_tiles import (DEFAULT_TILE_SOURCE, TILE_SOURCE_MAX_ZOOM,
                                   mercator_to_lonlat, resolve_basemap,
                                   tile_bounds_mercator,
                                   tile_range_for_bbox, tile_url,
+                                  unique_tmp_path,
                                   wgs84_to_gcj02, zoom_for_resolution)
 
 _LOGGER = logging.getLogger(__name__)
@@ -166,9 +167,13 @@ def _track_to_mercator_uncached(track, gcj02: bool = False) -> dict:
 
 
 class _TileWorkerSignals(QObject):
-    """QRunnable 无法自带信号，用独立 QObject 回主线程。"""
+    """QRunnable 无法自带信号，用独立 QObject 回主线程。
 
-    finished = pyqtSignal(int, int, int, str)   # z, x, y, 缓存文件路径（失败为空串）
+    ``source_key`` 必须随回包一起传：切源时旧源的worker 可能才回来，
+    落库前靠它比对当前源（见 :meth:`TileLayer._on_tile_finished`）。
+    """
+
+    finished = pyqtSignal(int, int, int, str, str)   # z, x, y, 缓存路径, 源标识
 
 
 class _TileWorker(QRunnable):
@@ -195,7 +200,7 @@ class _TileWorker(QRunnable):
                         raise OSError(f'HTTP {response.status}')
                     data = response.read()
                 os.makedirs(os.path.dirname(path), exist_ok=True)
-                tmp_path = path + '.tmp'
+                tmp_path = unique_tmp_path(path)
                 with open(tmp_path, 'wb') as fh:
                     fh.write(data)
                 os.replace(tmp_path, path)
@@ -203,7 +208,7 @@ class _TileWorker(QRunnable):
             _LOGGER.debug('瓦片下载失败 %s/%s/%s/%s: %s',
                           self._source_key, z, x, y, exc)
             path = ''
-        self._signals.finished.emit(z, x, y, path)
+        self._signals.finished.emit(z, x, y, path, self._source_key)
 
 
 class TileLayer(pg.GraphicsObject):
@@ -227,18 +232,56 @@ class TileLayer(pg.GraphicsObject):
         self._prefetch_done = 0
         self.setZValue(-100.0)   # 底图压在最底层
 
+    def shutdown(self) -> None:
+        """停掉线程池并断开回包信号（关闭视图 / 测试teardown 时调用）。
+
+        **必须显式做**：``QThreadPool`` 析构时会 ``waitForDone()`` 等所有在途
+        worker，而每个 ``_TileWorker`` 的 ``urlopen`` timeout=10 —— 视图关闭
+        （切页、项目切换、退出）时若有瓦片在途，主线程会被卡住最长 10 秒。
+        实测：``del layer`` 在有在途任务时挂死在 QThreadPool 析构上，
+        faulthandler 栈显示阻塞在 ``waitForDone``。
+
+        ``clear()`` 只清队列，**不打断已在运行的任务**（Qt 文档：正在 run 的
+        QRunnable 会跑完），所以还要 ``waitForDone()`` 让它们安全退出——但
+        此刻队列已空，最长只等当前那一个。
+        """
+        try:
+            self._signals.finished.disconnect(self._on_tile_finished)
+        except (RuntimeError, TypeError):
+            pass   # 从未连接过或已断开
+        self._inflight.clear()
+        self._pool.clear()
+        self._pool.waitForDone(3000)   # 3s 上限：超时就放弃，不无限等
+
+    def __del__(self) -> None:
+        # 兜底：视图被 GC 时（测试 teardown 最常见）也要收线程池，否则解释器
+        # 退出阶段同样卡在 waitForDone。用 logger 而非静默 pass——真出问题时
+        # 得留下线索（且项目门禁把无说明的 except 计为技术债）。
+        try:
+            self.shutdown()
+        except Exception as exc:  # noqa: BLE001 — 析构阶段不可抛
+            _LOGGER.debug('TileLayer 析构时 shutdown 失败（%s）', exc)
+
     # ------------------------------------------------------------ 配置
     def source_key(self) -> str:
         return self._source_key
 
     def set_source(self, source_key: str) -> None:
-        """切换瓦图源：清空内存图与失败集（磁盘缓存按源分目录，互不影响）。"""
+        """切换瓦图源：清空内存图、失败集与**在途队列**（磁盘缓存按源分目录）。
+
+        必须清 ``_inflight``：去重 key 与落库 key 都只有 ``(z, x, y)``（不含源
+        标识），旧源的在途项会让新源对同一瓦片的请求被 ``_enqueue`` 直接挡掉，
+        随后旧源回包把**旧源的图**写进 ``_images`` —— 底图显示错源的图块，
+        且因已落入 ``_images`` 而不再重下。实测：当前源 ``gaode_vec`` 而
+        ``_images`` 里是 ``osm`` 的图。
+        """
         source_key = str(source_key)
         if source_key not in TILE_SOURCES or source_key == self._source_key:
             return
         self._source_key = source_key
         self._images.clear()
         self._failed.clear()
+        self._inflight.clear()
         self.update()
 
     def _cache_path(self, z: int, x: int, y: int) -> str:
@@ -302,9 +345,15 @@ class TileLayer(pg.GraphicsObject):
         self._pool.start(_TileWorker(self._source_key, z, x, y,
                                      self._cache_path(z, x, y), self._signals))
 
-    def _on_tile_finished(self, z: int, x: int, y: int, path: str) -> None:
+    def _on_tile_finished(self, z: int, x: int, y: int, path: str,
+                           source_key: str = '') -> None:
         key = (int(z), int(x), int(y))
+        # 旧源回包丢弃：去重 key 不含源标识，不校验就会把旧源图写进新源 _images。
+        # source_key 为空按「无法判定」处理——放行（保持旧调用方兼容），
+        # 真正的 worker 一定会带上自己的源标识。
         self._inflight.discard(key)
+        if source_key and source_key != self._source_key:
+            return
         image = None
         if path:
             loaded = QImage(path)
@@ -726,9 +775,18 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
         self._layout_overlays()
 
     def fit_to_tracks(self) -> None:
-        """视野自适应到全部轨迹范围（右键菜单"适应全部测线"同用）。"""
+        """视野自适应到全部轨迹范围（右键菜单"适应全部测线"同用）。
+
+        **只统计已配准轨迹**（与 :meth:`tracks_bbox_lonlat` 同）：未配准轨迹的
+        ``xs/ys`` 是原始投影坐标（CGCS2000 3-degree GK 的米量级 1e5~1e6），
+        与已配准的Web Mercator（1e7）混算会把视野撑到1.4e7 m——实测一条
+        1,116 m 的测线被压到视野宽度的 0.01%，用户看到「地图上什么都没有」。
+        全部未配准时**不动视野**（宁可保持原样，也不要跳到世界原点）。
+        """
         all_x, all_y = [], []
         for info in self._track_summaries:
+            if not info.get('mapped'):
+                continue
             xs, ys = info.get('xs'), info.get('ys')
             if xs is None or ys is None or not len(xs):
                 continue

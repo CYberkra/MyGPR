@@ -1,15 +1,22 @@
 # -*- coding: utf-8 -*-
 """ChainStrip — 处理链极简 chip 条（处理页 v2 顶部）。
 
-设计（2026-09-25 v2）：
+设计（2026-09-25 v2；2026-10-09 深查增补）：
 - 一行：``输入 → 算法1 → 算法2 …``，chip 只写**算法名**（序号与位置自明，
   不写「第 N 步/处理链」等冗余字样）；
 - **hover 才显**启用圆点与 ✕（常驻噪音更少），链尾虚线 ＋ 追加；
+- **溢出可达**（2026-10-09 深查 P1）：chip 放不下时右缘浮「+N」胶囊，
+  点击弹全部步骤菜单（每步子菜单 = 选中/启停/上移/下移/删除）——
+  隐藏步骤的手势与右键菜单等价可达（wrapping=False + 滚动条常关的补偿）；
+- **运行钮就近翻转**（2026-10-09 深查 P2）：运行中同位置变「取消」
+  （红描边），结束恢复「运行」——取消与运行视线不跳；进行中反馈由
+  进度行承担（原 spinner 文字动画退役）；
 - 拖拽排序：启用 InternalMove 拿拖拽视觉，落点由 _ChipList.dropEvent
   委托宿主接管（不调 Qt 默认实现——挪 item 会丢 setItemWidget 行控件，
   与 PipelineList 同款坑）；
-- **手势替代路径**（guidelines：拖拽需有点击/键盘替代）：右键菜单
-  （上移/下移/启用-禁用/删除）+ Delete 键删当前 chip；
+- **手势替代路径**（guidelines：拖拽需有点击/键盘替代）：右键 chip →
+  合一编辑弹窗（P0-3：启停/排序/复制/替换/参数/删除一处完成）+
+  Delete 键删当前 chip；
 - 「输入」chip 固定在首位、不可拖不可删。
 
 ChainStrip 只做展示与手势，**步骤数据仍由宿主页维护**（这里不存 steps）。
@@ -21,10 +28,10 @@ from PyQt6.QtWidgets import (QAbstractItemView, QHBoxLayout, QLabel,
                              QListWidget, QListWidgetItem, QWidget)
 from PyQt6.QtWidgets import QPushButton
 from qfluentwidgets import (CaptionLabel, FluentIcon as FIF,
-                            PrimaryPushButton, ToolButton)
+                            PrimaryPushButton, RoundMenu, ToolButton)
 
 from ui import constants
-from ui.widgets.context_menus import add_action, make_menu
+from ui.widgets.context_menus import add_action
 
 
 def _muted_text() -> str:
@@ -76,8 +83,13 @@ class _Chip(QWidget):
         row.setContentsMargins(12, 4, 8, 4)
         row.setSpacing(4)
         short = label.split('（')[0].split(' (')[0].strip() or label
-        self.name = QLabel(short, self)
+        self.name = QLabel(self)
         self.name.setMaximumWidth(self._MAX_NAME_PX)
+        # 省略号截断（2026-10-09 深查 P2）：QLabel 默认硬裁无「…」，截断
+        # 处看着像数据缺失；全名走 chip 级 tooltip（__init__ 已设）
+        fm = self.name.fontMetrics()
+        self.name.setText(fm.elidedText(short, Qt.TextElideMode.ElideRight,
+                                        self._MAX_NAME_PX))
         row.addWidget(self.name)
         # 启用开关 = 圆点（绿=启用/灰=禁用）——不用 ✓ 形图标（用户定案：
         # 全应用不出现勾形元素，避免与「运行」产生歧义）
@@ -85,13 +97,17 @@ class _Chip(QWidget):
         self.dot_btn.setFixedSize(18, 18)
         self.dot_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.dot_btn.setToolTip('启用 / 禁用该步骤')
+        # icon-only 按钮无文字：屏幕阅读器念 accessibleName（2026-10-09 深查）
+        self.dot_btn.setAccessibleName('启用或禁用该步骤')
         self.dot_btn.clicked.connect(
             lambda _c=False, i=index: host._on_dot_clicked(i))
         self._set_dot_visual(enabled)
         row.addWidget(self.dot_btn)
         self.del_btn = ToolButton(FIF.CLOSE, self)
-        self.del_btn.setFixedSize(18, 18)
+        # 20px（原 18）：紧凑 chip 内尽量大的点击目标（深查 P3 复审）
+        self.del_btn.setFixedSize(20, 20)
         self.del_btn.setToolTip('删除该步骤')
+        self.del_btn.setAccessibleName('删除该步骤')
         self.del_btn.clicked.connect(
             lambda _c=False, i=index: host._on_chip_deleted(i))
         row.addWidget(self.del_btn)
@@ -100,12 +116,17 @@ class _Chip(QWidget):
         self.set_enabled_visual(enabled)
 
     def _set_dot_visual(self, enabled: bool) -> None:
+        """状态点走语义令牌（2026-10-09）：原硬编码 #7CC464/#5A5A56 不随
+        主题，绿色也不在设计令牌里（跳色纪律）。
+
+        hover 不再发明第二个绿：细描边环提示可点（18px 小目标的反馈由
+        光标 + 邻近 chip 的 hover 描边共同承担）。
+        """
+        from ui.design_tokens import color
+        bg = color('success') if enabled else color('disabled')
         self.dot_btn.setStyleSheet(
-            'QPushButton{background:#7CC464;border:none;border-radius:6px;}'
-            'QPushButton:hover{background:#8FD478;}'
-            if enabled else
-            'QPushButton{background:#5A5A56;border:none;border-radius:6px;}'
-            'QPushButton:hover{background:#6A6A66;}')
+            f'QPushButton{{background:{bg};border:none;border-radius:6px;}}'
+            f'QPushButton:hover{{border:1px solid {color("border_strong")};}}')
 
     def set_enabled_visual(self, enabled: bool) -> None:
         self._set_dot_visual(enabled)
@@ -143,6 +164,8 @@ class ChainStrip(QWidget):
     sig_step_removed = pyqtSignal(int)
     sig_step_moved = pyqtSignal(int, int)   # source → 插入位
     sig_add_requested = pyqtSignal()
+    # chip 右键唯一入口（P0-3 合一弹窗）：步骤索引 → 宿主页弹 StepEditorPopup
+    sig_step_editor_requested = pyqtSignal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -172,22 +195,13 @@ class ChainStrip(QWidget):
         self._delete_shortcut.activated.connect(
             lambda: self._on_chip_deleted(self._list.currentRow()))
         # 深浅主题下与卡片底色融合；选中高亮交给滑动胶囊（Qt 默认蓝块弃用）
-        from ui.design_tokens import color
-        self._list.setStyleSheet(
-            'QListWidget{background:transparent;border:none;}'
-            'QListWidget::item{background:transparent;border:none;}'
-            'QListWidget::item:selected{background:transparent;'
-            'border:none;color:palette(window-text);}'
-            'QListWidget::item:hover{background:transparent;}'
-            # 键盘焦点可见（WCAG 2.4.7）：当前行由滑动胶囊指示，列表自身
-            # 再给一圈 focus 环，Tab 进来时知道焦点在哪
-            f'QListWidget:focus{{border:1px solid {color("border_focus")};'
-            f'border-radius:4px;}}')
+        self._apply_list_qss()
         self._list.currentRowChanged.connect(self._on_current_row)
 
         self._add_btn = ToolButton(FIF.ADD, self)
         self._add_btn.setFixedSize(24, 24)
-        self._add_btn.setToolTip('添加所选算法（＋）')
+        self._add_btn.setToolTip('添加处理步骤（弹出方法选择器，双击加入链尾）')
+        self._add_btn.setAccessibleName('添加处理步骤')
         self._add_btn.clicked.connect(self.sig_add_requested)
         self._dirty_label = CaptionLabel('已修改 · 点运行更新', self)
         from ui.design_tokens import color
@@ -195,10 +209,36 @@ class ChainStrip(QWidget):
         self._dirty_label.setVisible(False)
         self._run_btn = PrimaryPushButton('运行', self)
         self._run_btn.setFixedWidth(76)
-        self._spin_timer = QTimer(self)
-        self._spin_timer.setInterval(320)
-        self._spin_timer.timeout.connect(self._tick_spin)
         self._run_btn.setToolTip('按当前处理链运行（Ctrl+R）；改算法/参数后需运行才更新结果')
+        # flash 复位用可停的 QTimer——旧裸 singleShot 引用无法取消：1.2s
+        # 内再次点运行会把「取消」态错误复位成「运行」（深查 P3 竞态）
+        self._flash_timer = QTimer(self)
+        self._flash_timer.setSingleShot(True)
+        self._flash_timer.timeout.connect(
+            lambda: self._run_btn.setText('运行'))
+        # 浮层重算同理走可停 QTimer：裸 singleShot(0, ...) 在 strip 被
+        # deleteLater 后回调仍会派发（悬空引用），炸在下一个 processEvents
+        # 的测试/窗口上（CI gui-linux/windows 全量套件确定性段错误根因）
+        self._overlay_timer = QTimer(self)
+        self._overlay_timer.setSingleShot(True)
+        self._overlay_timer.timeout.connect(self._update_overlays)
+        # 空链引导（2026-10-09 深查 P2）：空链时列表区一片空白，新用户
+        # 不知道从哪开始——浮层文字提示（不挡鼠标，＋ 钮照常可点）
+        self._empty_hint = CaptionLabel('从左侧方法库添加算法',
+                                        self._list.viewport())
+        self._empty_hint.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._empty_hint.setStyleSheet(f'color:{color("text_muted")}')
+        self._empty_hint.setVisible(False)
+        # 溢出胶囊（2026-10-09 深查 P1）：浮在列表右缘，放不下的 chip 折叠
+        # 成 +N，点击弹全部步骤菜单。做成视口浮层而非行内控件——不挤占
+        # 本就紧张的 chip 空间（行内加控件会反过来缩小视口，测量振荡）
+        self._overflow_btn = QPushButton(self._list.viewport())
+        self._overflow_btn.setObjectName('overflow_chip')
+        self._overflow_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._overflow_btn.setVisible(False)
+        self._overflow_btn.clicked.connect(self._on_overflow_menu)
+        self._style_overflow_btn()
 
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 0, 0)
@@ -212,6 +252,44 @@ class ChainStrip(QWidget):
     def run_button(self):
         """运行钮：由宿主页接线（Ctrl+R 与此处同一入口）。"""
         return self._run_btn
+
+    # ------------------------------------------------------------ 主题
+    def _apply_list_qss(self) -> None:
+        """chip 容器底色清零 + 键盘焦点环（令牌随当前主题取值）。"""
+        from ui.design_tokens import color
+        self._list.setStyleSheet(
+            'QListWidget{background:transparent;border:none;}'
+            'QListWidget::item{background:transparent;border:none;}'
+            'QListWidget::item:selected{background:transparent;'
+            'border:none;color:palette(window-text);}'
+            'QListWidget::item:hover{background:transparent;}'
+            # 键盘焦点可见（WCAG 2.4.7）：当前行由滑动胶囊指示，列表自身
+            # 再给一圈 focus 环，Tab 进来时知道焦点在哪
+            f'QListWidget:focus{{border:1px solid {color("border_focus")};'
+            f'border-radius:4px;}}')
+
+    def apply_theme(self, dark: bool) -> None:
+        """主题切换重刷令牌色（主窗鸭子类型派发，见 main_window）。
+
+        chip 的 QSS/状态点在 ``set_enabled_visual`` 时按**当时**主题取
+        令牌——换主题后必须逐 chip 重跑；胶囊、焦点环、脏标记同理。
+        """
+        from ui.design_tokens import color, radius, rgba
+        for i in range(self._list.count()):
+            chip = self._list.itemWidget(self._list.item(i))
+            if chip is None:
+                continue
+            idx = chip.index
+            chip.set_enabled_visual(
+                self._steps[idx]['enabled']
+                if 0 <= idx < len(self._steps) else True)
+        self._dirty_label.setStyleSheet(f'color:{color("warning")}')
+        self._empty_hint.setStyleSheet(f'color:{color("text_muted")}')
+        self._style_overflow_btn()
+        self._pill.setStyleSheet(
+            f'background:{rgba("primary", 0.20)};'
+            f'border-radius:{radius("pill") // 2}px')
+        self._apply_list_qss()
 
     # ------------------------------------------- 选中指示条（滑动胶囊）
     def _init_pill(self) -> None:
@@ -249,22 +327,50 @@ class ChainStrip(QWidget):
         self._pill_anim.setEndValue(rect)
         self._pill_anim.start()
 
-    # -------------------------------------------------- 运行钮：spinner → ✓
-    def set_running(self, running: bool) -> None:
-        """运行态：按钮转 spinner（点动画），结束回到「运行」。
+    # ------------------------------------------------ 运行钮：取消就近翻转
+    def _style_overflow_btn(self) -> None:
+        """+N 胶囊样式：左缘渐隐过渡——底下被遮的 chip 文字渐隐入胶囊，
+        不再硬切（半遮字像故障）；色值走令牌，apply_theme 重刷。"""
+        from ui.design_tokens import color
+        bg = color('bg_subtle')
+        self._overflow_btn.setStyleSheet(
+            'QPushButton#overflow_chip{'
+            'background:qlineargradient(x1:0,y1:0,x2:1,y2:0,'
+            f'stop:0 rgba(0,0,0,0), stop:0.35 {bg}, stop:1 {bg});'
+            f'color:{color("text_secondary")};'
+            f'border:1px solid {color("border_default")};'
+            'border-radius:13px;padding:3px 10px;}'
+            'QPushButton#overflow_chip:hover{'
+            f'border:1px solid {color("border_focus")};}}')
 
-        动效移植自 Transitions.dev 的「Spinner to check morph」思路——
-        Qt 侧用轻量点动画代替旋转指示（避免引入新控件）。
+    def set_running(self, running: bool) -> None:
+        """运行态：运行钮**就近翻转**为「取消」（红描边，同一位置）。
+
+        spinner 文字动画退役（2026-10-09 深查）：进行中反馈由进度行承担，
+        按钮专职取消入口——原取消钮在可能收起的左栏执行卡里，与顶部
+        运行钮空间分离（深查实锤的工作流断点）。点击仍走 run_button 的
+        clicked，由宿主页按运行态分流转发为取消。
         """
+        self._flash_timer.stop()
         if running:
-            self._run_btn.setEnabled(False)
-            self._run_btn.setText('运行中·')
-            self._spin_phase = 0
-            self._spin_timer.start(320)
+            from ui.design_tokens import color, rgba
+            self._run_btn.setEnabled(True)
+            self._run_btn.setText('取消')
+            self._run_btn.setToolTip('取消正在运行的处理任务')
+            self._run_btn.setStyleSheet(
+                'PrimaryPushButton{background:transparent;'
+                f'color:{color("error")};'
+                f'border:1px solid {color("error")};border-radius:5px;}}'
+                'PrimaryPushButton:hover{'
+                f'background:{rgba("error", 0.08)};}}'
+                'PrimaryPushButton:pressed{'
+                f'background:{rgba("error", 0.16)};}}')
         else:
-            self._spin_timer.stop()
             self._run_btn.setEnabled(True)
             self._run_btn.setText('运行')
+            self._run_btn.setToolTip('按当前处理链运行（Ctrl+R）；'
+                                     '改算法/参数后需运行才更新结果')
+            self._run_btn.setStyleSheet('')
 
     def set_dirty(self, dirty: bool) -> None:
         """链/参数已改但结果未重算：琥珀色提示（运行后清除）。"""
@@ -273,11 +379,7 @@ class ChainStrip(QWidget):
     def flash_success(self) -> None:
         """运行成功：按钮短暂变「完成」（不带勾），再回到「运行」。"""
         self._run_btn.setText('完成')
-        QTimer.singleShot(1200, lambda: self._run_btn.setText('运行'))
-
-    def _tick_spin(self) -> None:
-        self._spin_phase = (getattr(self, '_spin_phase', 0) + 1) % 3
-        self._run_btn.setText('运行中' + '·' * (self._spin_phase + 1))
+        self._flash_timer.start(1200)
 
     # ---------------------------------------------------------------- 数据
     def set_input_widget(self, widget) -> None:
@@ -302,6 +404,8 @@ class ChainStrip(QWidget):
             self._list.setCurrentRow(prev)
         if self._list.currentRow() >= 0:
             self._move_pill(self._list.currentRow())
+        # 布局一拍后重算浮层（此时 visualItemRect 才有效）
+        self._overlay_timer.start(0)
 
     def _add_chip(self, index: int, label: str, enabled: bool) -> None:
         item = QListWidgetItem()
@@ -323,34 +427,20 @@ class ChainStrip(QWidget):
         if 0 <= index < len(self._steps):
             self.sig_step_removed.emit(index)
 
-    # -------------------------------------------------- 右键菜单（替代路径）
+    # -------------------------------------- 右键（替代路径 → 合一弹窗）
     def _on_context_menu(self, pos) -> None:
-        row = self._list.rowAt(pos.y())
+        """右键 chip → 置当前行 + 发 sig_step_editor_requested（P0-3 合一
+        弹窗唯一入口；旧四动作菜单删除，动作全部收敛进步骤编辑弹窗）。"""
+        # 原 rowAt 系 QListView 不存在的方法（QTableView 才有）——右键即
+        # AttributeError 的潜伏 bug，随本改造一并修正为 itemAt
+        item = self._list.itemAt(pos)
+        row = self._list.row(item) if item is not None else -1
         index = row                          # row 即步骤索引
         if index < 0 or index >= len(self._steps):
             return
         self._list.setCurrentRow(row)
         self._move_pill(row)
-        menu = make_menu(self)
-        self._fill_step_menu(menu, index)
-        menu.exec(self._list.viewport().mapToGlobal(pos))
-
-    def _fill_step_menu(self, menu, index: int) -> None:
-        """单步右键菜单动作（与 PipelineList 等价；供测试直接驱动）。"""
-        enabled = bool(self._steps[index]['enabled'])
-        add_action(menu, FIF.UP, '上移',
-                   lambda: self.sig_step_moved.emit(index, index - 1),
-                   enabled=index > 0)
-        add_action(menu, FIF.DOWN, '下移',
-                   lambda: self.sig_step_moved.emit(index, index + 2),
-                   enabled=index < len(self._steps) - 1)
-        menu.addSeparator()
-        add_action(menu, FIF.ACCEPT if enabled else FIF.CANCEL,
-                   '禁用' if enabled else '启用',
-                   lambda: self.sig_step_toggled.emit(index, not enabled))
-        menu.addSeparator()
-        add_action(menu, FIF.DELETE, '删除',
-                   lambda: self.sig_step_removed.emit(index))
+        self.sig_step_editor_requested.emit(index)
 
     def _list_drop_event(self, event) -> None:
         """落点重排：源=当前选中 chip，目标按落点左右半决定插入位。"""
@@ -378,3 +468,74 @@ class ChainStrip(QWidget):
         self._list.setCurrentRow(row)
         self._list.blockSignals(False)
         self._move_pill(row)
+
+    # --------------------------------------- 浮层：空态提示 + 溢出胶囊
+    def _update_overlays(self) -> None:
+        """重算空态提示与 +N 溢出胶囊（_rebuild / 尺寸变化后调用）。
+
+        溢出判定 = 右缘被视口裁掉的 chip 数（wrapping=False + 滚动条常关，
+        被裁即不可达）——半可见的 chip 也计入，其 ✕/圆点可能已在视口外。
+        """
+        lst = self._list
+        vp = lst.viewport()
+        n = lst.count()
+        self._empty_hint.setVisible(n == 0)
+        hidden = 0
+        if n and vp.width() > 0:
+            for i in range(n):
+                rect = lst.visualItemRect(lst.item(i))
+                if rect.right() > vp.width() - 1:
+                    hidden += 1
+        self._overflow_btn.setVisible(hidden > 0)
+        if hidden:
+            self._overflow_btn.setText(f'+{hidden}')
+            self._overflow_btn.setToolTip(
+                f'共 {n} 个步骤，还有 {hidden} 个未显示')
+            self._overflow_btn.adjustSize()
+            self._overflow_btn.move(
+                max(0, vp.width() - self._overflow_btn.width() - 2),
+                max(0, (vp.height() - self._overflow_btn.height()) // 2))
+            self._overflow_btn.raise_()
+        self._empty_hint.adjustSize()
+        self._empty_hint.move(
+            12, max(0, (vp.height() - self._empty_hint.height()) // 2))
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._overlay_timer.start(0)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._overlay_timer.start(0)
+
+    def _on_overflow_menu(self) -> None:
+        menu = self._build_overflow_menu()
+        menu.exec(self._overflow_btn.mapToGlobal(
+            self._overflow_btn.rect().bottomLeft()))
+
+    def _build_overflow_menu(self) -> RoundMenu:
+        """+N 菜单：每步骤一个子菜单 = 「选中 / 编辑」两项（P0-3 定案 Q3：
+        结构动作全进合一弹窗，不维护两套入口——被裁掉的步骤与可见 chip
+        手势等价可达，guidelines：内容不得因布局不可达）。
+        构建与弹出拆开，便于测试菜单结构。
+        """
+        menu = RoundMenu(parent=self)
+        subs = []
+        for i, step in enumerate(self._steps):
+            label = f'{i + 1} {step["label"]}'
+            if not step['enabled']:
+                label += '（已禁用）'
+            sub = RoundMenu(label, menu)
+            # triggered 会带 checked 实参：lambda 必须显式吞掉，
+            # 否则 ix 被 False 覆盖（原「选中」对第 0 步以外的步骤
+            # 实际选中第 0 行的潜伏 bug，本次一并修正）
+            add_action(sub, FIF.VIEW, '选中',
+                       lambda _checked=False, ix=i: self._list.setCurrentRow(ix))
+            add_action(sub, FIF.EDIT, '编辑',
+                       lambda _checked=False, ix=i:
+                       self.sig_step_editor_requested.emit(ix))
+            menu.addMenu(sub)
+            subs.append(sub)
+        # qfw 未暴露子菜单清单——挂引用供测试访问（menu._step_submenus）
+        menu._step_submenus = subs
+        return menu

@@ -13,7 +13,7 @@ from ui.widgets.bscan_view import BScanView
 @pytest.fixture
 def view(qapp):
     v = BScanView()
-    mat = (np.random.randn(200, 300) * 0.02).astype(np.float32)
+    mat = (np.random.default_rng(0).standard_normal((200, 300)) * 0.02).astype(np.float32)
     v.set_matrix(mat, -0.1, 0.1, title='t')
     return v
 

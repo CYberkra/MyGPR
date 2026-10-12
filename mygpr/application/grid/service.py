@@ -11,13 +11,13 @@ from __future__ import annotations
 
 import json
 import math
-import tempfile
 
 import numpy as np
 
 from pathlib import Path
 from typing import Any, Sequence
 
+from mygpr.application.persistence_ports import DurableWritePort
 from mygpr.application.project.service import ProjectService
 from mygpr.domain.grid.clustering import group_tracks
 from mygpr.domain.grid.errors import GridAnalysisError
@@ -175,26 +175,26 @@ def grid_attribute(request: AttributeGridRequest) -> AttributeGrid:
 
 
 def write_grid_geojson(
-    grid: AttributeGrid, destination: Path, *, crs_name: str
+    grid: AttributeGrid, destination: Path, *, crs_name: str,
+    writer: DurableWritePort | None = None,
 ) -> Path:
-    """把网格写成 GeoJSON（投影坐标），crs 写入 payload。原子性由
-    临时文件 + replace 保证。"""
+    """把网格写成 GeoJSON（投影坐标），crs 写入 payload。
+
+    落盘经``DurableWritePort``（默认实现见
+    ``mygpr.infrastructure.persistence.durable_write``）：临时文件 + fsync +
+    原子替换 + 目录 fsync。改造前这里是独立一份 ``mkstemp`` + replace 且
+    **完全没有 fsync**——同一 application 层内因此存在多种落盘安全等级。
+    ``writer`` 缺省时按契约注入（见 ``GridService.__init__``）；此处保留
+    ``None`` 兜底只为让纯函数在无参环境下仍可测。
+    """
     payload = _grid_geojson_payload(grid)
     if crs_name:
         payload["crs"] = {"type": "name", "properties": {"name": crs_name}}
-    destination = Path(destination)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(
-        prefix=f".{destination.name}.", suffix=".tmp", dir=str(destination.parent))
-    tmp_path = Path(tmp_name)
-    try:
-        with open(fd, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, ensure_ascii=False, separators=(",", ":"))
-        tmp_path.replace(destination)
-    except BaseException:
-        tmp_path.unlink(missing_ok=True)
-        raise
-    return destination
+    text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    if writer is not None:
+        return writer.write_text(Path(destination), text)
+    from mygpr.infrastructure.persistence.durable_write import default_durable_write
+    return default_durable_write().write_text(Path(destination), text)
 
 
 def persist_grouping(

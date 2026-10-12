@@ -1,25 +1,28 @@
 # -*- coding: utf-8 -*-
-"""左侧常驻文件树面板（DockPanel 子类，顶部分段：测线｜成果｜文件）。
+"""左侧常驻文件树面板（DockPanel 子类，单棵真树：测线 / 成果 / 文件 三分类）。
 
 职责边界：
 - 数据唯一来源仍是各 controller（经 ProjectChain 扇出，本面板不发起任何
   后端调用）；
-- 测线/成果视图的节点模型由 ``ui.file_tree`` 纯函数装配（Provider 层），
-  本面板只渲染 TreeNode、发信号；文件视图由 ``ProjectFilesView``
-  （QFileSystemModel）自管，随项目根切换；
+- 整棵树由 ``ui.file_tree.build_project_model`` 纯函数装配（Provider 层）：
+  测线/成果/文件是三个一级分类节点（不可选），各自挂原有子模型——测线
+  平铺（line_id 升序）、成果按测线分组、文件为项目根目录树（目录展开时
+  逐层懒加载）；
+- 空分类折叠且 ``(0)`` 计数自明（无独立空态文案）；有内容的分类默认展开；
 - 测线叶子点击 → ``line_selected(str)`` → 复用 ``ProjectChain.on_line_selected``
   现有链路（含切线作废成果预览代数），与项目页测线表同语义；
 - 成果叶子点击 → ``artifact_focus_requested(line_id, artifact_id)`` →
   换线（如需）+ 跳处理页选中预览；
 - 空间成果/项目报告叶子点击 → ``delivery_focus_requested(kind)`` → 跳成果页；
 - ``set_current_line`` 是同步入口（``_syncing`` 守卫防回环）；
-- **分组行不可选**（无 ItemIsSelectable）——分组行若能触发预览
+- **分类行/分组行不可选**（无 ItemIsSelectable）——分组行若能触发预览
   会推进预览代数造成串台，是成果预览代际竞态的同族风险；
 - busy 只禁叶子点击，收/展开始终可用（长任务中更该允许让出空间）。
 
 壳（头/细条/动画）全部来自 ``DockPanel`` 基类；本类只保留文件树自己的
-三件事：视图切换与内容构建、按页×按视图展开态记忆（SettingsManager
-持久化）、细条指示文字 = 当前线 ID。
+三件事：内容构建、按页展开态记忆（SettingsManager 持久化，一维
+``{page: collapsed}``，读取兼容旧二维格式）、重建时按 key 快照恢复
+折叠态（数据刷新/主题切换不冲掉用户手动折叠的分类）。
 """
 from __future__ import annotations
 
@@ -28,7 +31,7 @@ import os
 from PyQt6.QtCore import Qt, QUrl, pyqtSignal
 from PyQt6.QtGui import QBrush, QColor, QDesktopServices, QIcon, QPainter, QPixmap
 from PyQt6.QtWidgets import (
-    QApplication, QDialog, QHeaderView, QTreeWidgetItem,
+    QApplication, QDialog, QHeaderView, QSizePolicy, QTreeWidgetItem, QWidget,
 )
 from qfluentwidgets import BodyLabel, MessageBox, TreeWidget
 from qfluentwidgets import FluentIcon as FIF
@@ -36,16 +39,16 @@ from qfluentwidgets import isDarkTheme
 
 from ui import constants
 from ui.file_tree import (
-    TreeNode, build_artifacts_model, build_files_model, build_tree_model,
+    TreeNode, build_files_model, build_project_model,
 )
 from ui.theme_helpers import hint_qss, status_color
 from ui.widgets.context_menus import add_action, make_menu
 from ui.widgets.dock_panel import DockPanel
-from ui.widgets.segment_tabs import SlimSegment
 
 _ROLE_PAYLOAD = Qt.ItemDataRole.UserRole        # line → line_id；artifact → artifact_id；spatial → result_id；report → package_dir
 _ROLE_KIND = Qt.ItemDataRole.UserRole + 1       # TreeNode.kind
 _ROLE_AUX = Qt.ItemDataRole.UserRole + 2        # artifact → 所属 line_id
+_ROLE_KEY = Qt.ItemDataRole.UserRole + 3        # TreeNode.key（重建快照展开态用）
 
 _SUFFIX_BRUSH = QBrush(QColor('#8a8a8a'))       # 行尾角标灰
 
@@ -86,10 +89,9 @@ def _status_icon(status: str) -> QIcon:
     painter.end()
     return QIcon(pixmap)
 
-# 分段视图 routeKey（树顶 SlimSegment：测线｜成果｜文件）
-_VIEWS = ('lines', 'artifacts', 'files')
-_DEFAULT_VIEW = 'lines'
-# 各页面默认收起态（True=收起细条）；键缺省按收起处理
+# 按页收起态记忆（True=收起细条）；键缺省按收起处理。
+# 新格式一维 ``{page: collapsed}``；旧版二维 ``{page: {view: collapsed}}``
+# 仅作读取回退（取测线视图的值——主视图语义最接近原意图）。
 _DEFAULT_PAGE_COLLAPSED = {
     'projectInterface': False,   # 项目页=资产管理，展开
     'homeInterface': True,
@@ -98,13 +100,6 @@ _DEFAULT_PAGE_COLLAPSED = {
 _SETTINGS_KEY = 'file_tree_page_states'
 # 旧版设置键：仅作读取回退（老用户的按页记忆不丢），写入只写新键
 _LEGACY_SETTINGS_KEY = 'line_tree_page_states'
-_VIEW_SETTINGS_KEY = 'file_tree_current_view'
-# 各视图空态文案
-_EMPTY_TEXT = {
-    'lines': '尚未导入测线',
-    'artifacts': '尚无成果',
-    'files': '打开项目后在此浏览项目文件',
-}
 
 # 角标列（第二列）宽度策略 —— 见 :meth:`FileTreePanel._apply_suffix_width`。
 # 实测（offscreen，面板 232px / 视口 215px）：Qt6 的 QHeaderView 默认
@@ -117,7 +112,7 @@ _SUFFIX_PAD = 8            # 角标文字两侧留白
 
 
 class FileTreePanel(DockPanel):
-    """测线 + 空间成果 + 项目报告 的常驻导航树（可收成细条）。"""
+    """测线 / 成果 / 文件 三分类常驻导航树（可收成细条）。"""
 
     line_selected = pyqtSignal(str)
     line_process_requested = pyqtSignal(str)
@@ -142,24 +137,18 @@ class FileTreePanel(DockPanel):
         self._busy = False
         self._current_line_id = ''
         self._current_page = ''
-        self._current_view = _DEFAULT_VIEW
-        self._page_states: dict = {}   # {page: {view: collapsed}}
+        self._has_project = False
+        self._page_states: dict = {}   # {page: collapsed}
         self._settings = None
 
-        # ---------------- 主体：项目名 + 分段 + 树 + 空态
+        # ---------------- 主体：项目名 + 三分类树
         self._project_label = BodyLabel('未打开项目')
+        # 垂直 Fixed：树隐藏（无项目）时 label 若被 QVBoxLayout 拉满
+        # 会垂直居中悬在面板中部，必须钉在顶部
+        self._project_label.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         self._project_label.setStyleSheet(hint_qss('secondary'))
         self.body_layout().addWidget(self._project_label)
-
-        # 视图分段（与顶部页签/输出面板同款 SlimSegment 药丸）
-        self._view_segment = SlimSegment(self._expanded_view)
-        self._view_segment.addItem('lines', '测线')
-        self._view_segment.addItem('artifacts', '成果')
-        self._view_segment.addItem('files', '文件')
-        self._view_segment.setCurrentItem(_DEFAULT_VIEW)
-        self._view_segment.currentItemChanged.connect(
-            self._on_view_segment_changed)
-        self.body_layout().addWidget(self._view_segment)
 
         self._tree = TreeWidget(self._expanded_view)
         self._tree.setHeaderHidden(True)
@@ -185,23 +174,27 @@ class FileTreePanel(DockPanel):
         self._tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._tree.customContextMenuRequested.connect(self._on_context_menu)
         self.body_layout().addWidget(self._tree, 1)
+        # 透明占位：QVBoxLayout 中隐藏的 stretch 项会让剩余空间把 Fixed 项
+        # 挤到垂直居中（Qt6 实测）。树隐藏（无项目）时 filler 补位吃掉余量，
+        # 项目名 label 才能钉在顶部。
+        self._filler = QWidget(self._expanded_view)
+        self._filler.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        self._filler.hide()
+        self.body_layout().addWidget(self._filler)
         self._project_root = ''
 
-        self._empty_label = BodyLabel(_EMPTY_TEXT[_DEFAULT_VIEW])
-        self._empty_label.setStyleSheet(hint_qss('secondary'))
-        self.body_layout().addWidget(self._empty_label)
         self._tree.hide()
-        self._empty_label.hide()
         # 构造完成后刷一次主题（基类构造期不能调 apply_theme——那时本类
-        # 的 _project_label/_empty_label 尚未创建）。
+        # 的 _project_label 尚未创建）。
         self.apply_theme(isDarkTheme())
 
     # ------------------------------------------------ 页面协议（链路喂数据）
     def set_settings_manager(self, settings) -> None:
         """注入共享 SettingsManager（与页面同一约定：共享实例是唯一写者）。
 
-        二维记忆格式：``{page: {view: collapsed}}``；读取兼容一维旧格式
-        ``{page: collapsed}``（广播到三个视图）与旧版设置键。
+        一维记忆格式 ``{page: collapsed}``；读取兼容旧版二维格式
+        ``{page: {view: collapsed}}``（取测线视图值）与旧版设置键。
         """
         self._settings = settings
         saved = settings.get(_SETTINGS_KEY) if settings else None
@@ -212,19 +205,20 @@ class FileTreePanel(DockPanel):
             states: dict = {}
             for page, val in saved.items():
                 if isinstance(val, dict):
-                    states[str(page)] = {str(k): bool(v)
-                                         for k, v in val.items()}
-                else:  # 一维旧格式：广播到全部视图
-                    states[str(page)] = {v: bool(val) for v in _VIEWS}
+                    # 旧二维格式：测线是主视图，其收起态最接近原意图
+                    if 'lines' in val:
+                        states[str(page)] = bool(val['lines'])
+                    elif val:
+                        states[str(page)] = bool(next(iter(val.values())))
+                else:
+                    states[str(page)] = bool(val)
             self._page_states = states
-        view = settings.get(_VIEW_SETTINGS_KEY) if settings else None
-        if view in _VIEWS and view != self._current_view:
-            self._set_view(str(view), remember=False)
 
     def set_project_info(self, summary) -> None:
         """项目上下文切换；None = 无项目（面板常驻，显示"未打开项目"空态）。"""
         name = str(getattr(summary, 'name', '') or '') if summary else ''
         self._project_label.setText(name or '未打开项目')
+        self._has_project = summary is not None
         self._project_root = str(getattr(summary, 'root_path', '') or '') \
             if summary else ''
         if not summary:
@@ -281,103 +275,108 @@ class FileTreePanel(DockPanel):
 
     # ------------------------------------------------ 页面记忆（主窗口调）
     def apply_page(self, object_name: str) -> None:
-        """切页时按该页×当前视图记忆的展开态切换（瞬时，不做动画）。"""
+        """切页时按该页记忆的展开态切换（瞬时，不做动画）。"""
         page = str(object_name or '')
         if page:
             self._current_page = page
-        self.set_collapsed(self._collapsed_for(page, self._current_view),
-                           animate=False)
+        self.set_collapsed(self._collapsed_for(page), animate=False)
 
     def toggle_panel(self) -> None:
         """窗口级入口（页签条右端按钮 / Ctrl+B）：与头部收起钮同一路径，
-        按页×视图记忆并持久化。"""
+        按页记忆并持久化。"""
         self._on_toggle_clicked()
 
     # ------------------------------------------------------------ DockPanel 钩子
     def strip_text(self) -> str:
-        return self._current_line_id
+        # 收起细条不显示竖排文字：左坞仅此一面板，线号/面板名无辨识价值
+        return ''
 
     def _on_toggle_clicked(self) -> None:
-        # 手动切换：立即按当前页×当前视图记忆并持久化
+        # 手动切换：立即按当前页记忆并持久化
         self._remember_current(not self._collapsed)
         self.toggle()
 
-    def _collapsed_for(self, page: str, view: str) -> bool:
-        """（页, 视图）→ 记忆的收起态；兼容一维旧值与缺省页。"""
+    def _collapsed_for(self, page: str) -> bool:
+        """页 → 记忆的收起态；兼容旧二维残值与缺省页。"""
         default = _DEFAULT_PAGE_COLLAPSED.get(page, True)
-        views = self._page_states.get(page)
-        if isinstance(views, dict):
-            return bool(views.get(view, default))
-        if isinstance(views, bool):  # 旧格式残值
-            return views
+        val = self._page_states.get(page)
+        if isinstance(val, bool):
+            return val
+        if isinstance(val, dict):  # 旧二维残值：主视图值最接近原意图
+            if 'lines' in val:
+                return bool(val['lines'])
+            if val:
+                return bool(next(iter(val.values())))
         return bool(default)
 
     def _remember_current(self, collapsed: bool) -> None:
         page = self._current_page or 'projectInterface'
-        views = self._page_states.setdefault(page, {})
-        if not isinstance(views, dict):
-            views = {}
-            self._page_states[page] = views
-        views[self._current_view] = bool(collapsed)
+        self._page_states[page] = bool(collapsed)
         if self._settings is not None:
             self._settings.set(_SETTINGS_KEY,
-                               {p: dict(v) for p, v in self._page_states.items()
-                                if isinstance(v, dict)})
+                               {p: v for p, v in self._page_states.items()
+                                if isinstance(v, bool)})
             self._settings.save()
-
-    # ------------------------------------------------------------ 视图分段
-    def _on_view_segment_changed(self, route_key: str) -> None:
-        self._set_view(str(route_key), remember=True)
-
-    def _set_view(self, view: str, remember: bool) -> None:
-        """切换 测线/成果/文件 视图：重建内容 + 恢复该（页, 视图）的收起态。"""
-        if view not in _VIEWS or view == self._current_view:
-            return
-        self._current_view = view
-        if self._view_segment.currentItem() is not None and \
-                self._view_segment.currentRouteKey() != view:
-            self._view_segment.setCurrentItem(view)
-        if remember and self._settings is not None:
-            self._settings.set(_VIEW_SETTINGS_KEY, view)
-            self._settings.save()
-        self._empty_label.setText(_EMPTY_TEXT[view])
-        self._rebuild()
-        # 视图切换瞬时恢复该视图的收起态（与切页同语义）
-        if self._current_page:
-            self.set_collapsed(
-                self._collapsed_for(self._current_page, view), animate=False)
-
-    def _on_view_state_changed(self) -> None:
-        if self._collapsed:
-            return
-        if self._current_view == 'lines':
-            has_content = bool(self._lines)
-        elif self._current_view == 'artifacts':
-            has_content = bool(
-                self._artifacts or self._spatial_results or self._reports)
-        else:  # files：有项目根即显示浏览树
-            has_content = bool(self._project_root)
-        if not has_content:
-            self._tree.hide()
-            has_project = bool(self._project_root)
-            self._empty_label.setVisible(has_project)
-            return
-        self._empty_label.hide()
-        self._tree.show()
 
     # ------------------------------------------------------------ 内部
+    def _on_view_state_changed(self) -> None:
+        """展开态下树常驻显示（有项目时）：空分类折叠 + (0) 计数自明，
+        不再需要「尚无成果」之类的独立空态文案。"""
+        if self._collapsed:
+            return
+        self._tree.setVisible(self._has_project)
+        self._filler.setVisible(not self._has_project)
+
+    def _expanded_keys(self) -> set:
+        """当前树中展开且有子节点的节点 key 集合（重建前快照）。"""
+        keys: set = set()
+
+        def _walk(item) -> None:
+            if item.isExpanded() and item.childCount() > 0:
+                key = item.data(0, _ROLE_KEY)
+                if key:
+                    keys.add(key)
+            for i in range(item.childCount()):
+                _walk(item.child(i))
+
+        for item in self._top_items():
+            _walk(item)
+        return keys
+
+    def _empty_category_keys(self) -> set:
+        """当前为空的分类/分组 key 集合：这类节点首次长出内容时应默认
+        展开（「新内容到达」事件，不能因快照里没有它而被压住折叠）。"""
+        keys: set = set()
+
+        def _walk(item) -> None:
+            if item.data(0, _ROLE_KIND) in ('category', 'group') \
+                    and item.childCount() == 0:
+                key = item.data(0, _ROLE_KEY)
+                if key:
+                    keys.add(key)
+            for i in range(item.childCount()):
+                _walk(item.child(i))
+
+        for item in self._top_items():
+            _walk(item)
+        return keys
+
     def _rebuild(self) -> None:
+        # 快照展开态：数据刷新（打开工程/处理完成回灌成果/主题切换重建）
+        # 不应冲掉用户手动折叠的分类。树为空 = 首次构建，走默认展开规则。
+        snapshot = None
+        empty_keys: set = set()
+        if self._tree.topLevelItemCount():
+            snapshot = self._expanded_keys()
+            empty_keys = self._empty_category_keys()
         self._tree.clear()
         self._line_id_by_item.clear()
         self._suffixes.clear()
 
-        if self._current_view == 'lines':
-            model = build_tree_model(self._lines)
-        elif self._current_view == 'artifacts':
-            model = build_artifacts_model(
-                self._artifacts, self._spatial_results, self._reports)
-        else:  # files：项目根单层扫描，目录展开时懒加载子层
-            model = build_files_model(self._project_root)
+        # 单棵三分类树（测线/成果/文件）；文件子层由面板懒加载
+        model = build_project_model(
+            self._lines, self._artifacts, self._spatial_results,
+            self._reports, self._project_root)
         if not model:
             self._apply_view_state()
             return
@@ -385,10 +384,25 @@ class FileTreePanel(DockPanel):
         for node in model:
             self._add_node(None, node)
 
-        # 分组行默认展开（文件视图的目录不自动展开——子层走懒加载）
-        for item in self._top_items():
-            if item.data(0, _ROLE_KIND) == 'group':
-                item.setExpanded(True)
+        # 展开策略：无快照（首次构建）→ 分类/分组有内容就默认展开，
+        # 空分类折叠（(0) 计数自明），目录不自动展开（子层走懒加载）。
+        # 有快照 → 按快照恢复；空分类首次长出内容（key ∈ empty_keys）
+        # 仍默认展开。目录恢复展开会触发懒加载替换占位行，新子节点
+        # 继续入栈，深层展开态也能恢复（worklist 而非递归的原因）。
+        work = list(self._top_items())
+        while work:
+            item = work.pop()
+            kind = item.data(0, _ROLE_KIND)
+            key = item.data(0, _ROLE_KEY)
+            if item.childCount() > 0 and not item.isExpanded():
+                if kind in ('category', 'group'):
+                    if snapshot is None or key in snapshot \
+                            or key in empty_keys:
+                        item.setExpanded(True)
+                elif kind == 'dir' and snapshot and key in snapshot:
+                    item.setExpanded(True)
+            work.extend(item.child(i)
+                        for i in range(item.childCount()))
         self._apply_suffix_width()
         self._select_leaf(self._current_line_id)
         self._apply_view_state()
@@ -438,8 +452,9 @@ class FileTreePanel(DockPanel):
             self._suffixes.add(node.suffix)
         if node.tooltip:
             item.setToolTip(0, node.tooltip)
+        item.setData(0, _ROLE_KEY, node.key)
         item.setData(0, _ROLE_KIND, node.kind)
-        if node.kind == 'group':
+        if node.kind in ('group', 'category'):
             item.setFlags(Qt.ItemFlag.ItemIsEnabled)  # 不可选，仅展开
         else:
             item.setData(0, _ROLE_PAYLOAD, node.payload)
@@ -609,11 +624,10 @@ class FileTreePanel(DockPanel):
     def apply_theme(self, dark: bool) -> None:
         """主题切换 → 重刷 hint 文字色 + 重建树刷新状态圆点色。
 
-        主窗口 findChildren 统一调度。两个 hint label 的颜色经
+        主窗口 findChildren 统一调度。hint label 的颜色经
         :func:`hint_qss` 随主题查表——历史实现用模块级常量写死 ``#888888``，
         深色底上对比度约 3.5:1 不达 WCAG AA，且模块常量不参与重刷。
         """
         super().apply_theme(dark)
         self._project_label.setStyleSheet(hint_qss('secondary'))
-        self._empty_label.setStyleSheet(hint_qss('secondary'))
         self._rebuild()

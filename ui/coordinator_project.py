@@ -173,6 +173,14 @@ class ProjectChain:
         # 否则非空 payload 守卫会压制 B 项目首次进入深度段的预览请求。
         spatial = co.page('spatialInterface')
         spatial.clear_depth_grid()
+        # A→B 直切：B 项目首条预览回包到达前，清掉 A 项目残留画面，
+        # 与 on_project_closed 的三页清空对称（P0-1）。新建/打开无测线
+        # 项目时 lines_updated([]) 不触发新预览，不清则旧 B-Scan 永久残留。
+        processing = co.page('processingInterface')
+        interpretation = co.page('interpretationInterface')
+        home.set_preview_bundle(None)
+        processing.set_original_bundle(None)
+        interpretation.set_bundle(None)
         name = getattr(summary, 'name', '')
         co.infobar('success', '项目', f'项目已打开：{name}')
         co.log_message(f'SUCCESS 当前项目：{name}（{root}）')

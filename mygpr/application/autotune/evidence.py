@@ -61,15 +61,22 @@ def export_autotune_evidence(
     method_key: str,
     data_shape: tuple[int, int] | None = None,
 ) -> Path:
-    """落盘 AutoTune 证据 JSON；路径父目录自动创建，写入原子语义由调用方保证级别为报告资产。"""
+    """落盘 AutoTune 证据 JSON；路径父目录自动创建。
+
+    经 ``DurableWritePort`` 原子发布：证据 JSON 是报告资产，中断留下的
+    半截文件会被后续读回当成完整证据，故必须走 fsync + 原子替换。
+
+    序列化保留本模块原有的 ``default=str`` 与尾随换行——AutoTune 结果里
+    可能有 numpy 标量/Path 等非 JSON 原生类型，而端口的 ``write_json``
+    走的是 core 的 ``json.dumps`` 默认参数（无 ``default=str``）。
+    """
     evidence = build_autotune_evidence(result, method_key=method_key, data_shape=data_shape)
     out = Path(output_path).expanduser().resolve()
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(
+    from mygpr.infrastructure.persistence.durable_write import default_durable_write
+    return default_durable_write().write_text(
+        out,
         json.dumps(evidence, ensure_ascii=False, indent=2, default=str) + "\n",
-        encoding="utf-8",
     )
-    return out
 
 
 __all__ = [

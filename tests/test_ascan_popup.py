@@ -17,7 +17,7 @@ from ui.widgets.ascan_popup import AScanPopup
 
 def test_popup_shows_trace_and_title(qapp):
     popup = AScanPopup()
-    trace = np.random.randn(501).astype(np.float32)
+    trace = np.random.default_rng(0).standard_normal(501).astype(np.float32)
     popup.show_trace(trace, trace_index=42, distance_m=12.5)
     assert popup._ascan_view is not None
     # 标题含道号

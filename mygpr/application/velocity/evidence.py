@@ -59,7 +59,7 @@ def build_velocity_evidence(
         "schema": VELOCITY_ANALYSIS_EVIDENCE_SCHEMA,
         "line_id": str(line_id),
         "data_shape": [int(v) for v in (dataset_shape or ())],
-        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "created_at": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
         "body": body,
         "body_sha256": compute_velocity_body_digest(body),
     }

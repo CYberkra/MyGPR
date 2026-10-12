@@ -14,32 +14,32 @@
 7. 深度切片：ColorBarItem 色标存在且 levels 与值域同步，主题切换不炸。
 
 截图证据输出到 output/ux_polish_verify/（该目录已被 .gitignore 忽略）。
+
+QApplication 生命周期 / settle / 截图见 ``scripts/_qtprobe.py``——原先本文件
+与 verify_theme_switch.py 各存一份逐字相同的 ``_settle``，2026-10-05 收敛为
+共用实现（``_settle`` 保留为别名，避免改动40+ 处调用点）。
 """
 from __future__ import annotations
 
-import os
 import sys
-import time
 from pathlib import Path
 
-os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _qtprobe import create_app, settle  # noqa: E402
+
+app = create_app()
 
 from PyQt6.QtCore import QPointF, Qt  # noqa: E402
-from PyQt6.QtWidgets import QApplication  # noqa: E402
-
-app = QApplication(sys.argv)
 
 SHOT_DIR = Path(__file__).resolve().parents[1] / 'output' / 'ux_polish_verify'
 SHOT_DIR.mkdir(parents=True, exist_ok=True)
 
 
+# 保留原调用面：40+ 处 ``_settle(...)`` 调用点无需改动。本文件的 app 是
+# 模块级单例，故在此绑成原签名 ``(wait_s)`` 而不是直接别名到 settle。
 def _settle(wait_s: float = 0.3) -> None:
-    """让事件循环真实空转（resize 布局、节流定时器派发）。"""
-    deadline = time.time() + wait_s
-    while time.time() < deadline:
-        app.processEvents()
-        time.sleep(0.01)
+    settle(app, wait_s)
 
 
 def _shot(widget, name: str) -> None:

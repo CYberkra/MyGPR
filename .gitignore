@@ -33,6 +33,11 @@ artifacts/test-results/
 
 # MyGPR specific
 windows_fit_check_*/
+
+# 探针 / 临时脚本 / junit-xml / 截图等一次性产物。
+# 必须忽略：探针常把 sys.path.insert 放在 import 前，一旦被
+# git add -A 强制加入，会成为 CI 唯一看得见的 output/ 文件并爆 E402。
+output/
 *.png
 !docs/user/images/**/*.png
 *.json

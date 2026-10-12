@@ -17,6 +17,9 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
+        with:
+          # diff-coverage 需要 origin/main 才能算增量；浅克隆会让它静默退化为空转。
+          fetch-depth: 0
       - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
@@ -24,25 +27,19 @@ jobs:
       - run: python -m pip install -r requirements-test-backend.txt
       # 门禁脚本会 import core/mygpr，需要以可编辑方式安装包本身
       - run: python -m pip install -e .
-      - run: python scripts/check_python_compile.py
-      - run: python scripts/check_architecture.py
-      - run: python scripts/check_schema_catalog.py
-      - run: python -m ruff check .
-      - run: python scripts/check_mypy_budget.py
-      - run: python scripts/check_debt_budget.py
-      - run: python scripts/check_complexity_budget.py
-      - run: python scripts/check_release_hygiene.py
-      - run: python scripts/check_project_format_compatibility.py
-      - run: python backend_smoke.py
-      - run: python backend_project_smoke.py
-      - run: python -m pytest -q --cov=mygpr --cov=core --cov-report=json:coverage.json
-      - run: python scripts/check_coverage_policy.py coverage.json
+      # 单一入口：清单只在 scripts/run_backend_quality_gate.py 一处维护，
+      # 避免「本地过 CI 也过」这类手工同步漂移。--require-diff 让增量覆盖率
+      # 在浅克隆下也变成显式失败而非静默 PASS。
+      - name: Backend quality gate
+        run: python scripts/run_backend_quality_gate.py --require-diff
       - name: Upload coverage evidence on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: coverage-json
-          path: coverage.json
+          path: |
+            coverage.json
+            diff-coverage-report.json
           if-no-files-found: ignore
 
   # 3.13 已由上方 backend job 覆盖，矩阵只跑 3.12；

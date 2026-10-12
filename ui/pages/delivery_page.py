@@ -91,7 +91,16 @@ class DeliveryPage(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(scroll)
 
-        # ---------------- 卡片1：空间成果（主操作进卡头行，P2-3）
+        # 三张卡各成一个方法：每张是一组独立交付能力（空间成果 / 报告包 /
+        # 备份恢复），各自有主操作、未就绪门控与空态引导，混在一个方法里
+        # 会让「这张卡有哪些控件」只能靠通读 116 行才看得清。
+        self._build_spatial_card(root)
+        self._build_report_card(root)
+        self._build_backup_card(root)
+        root.addStretch(1)
+
+    def _build_spatial_card(self, root: QVBoxLayout) -> None:
+        """卡片1：空间成果（主操作进卡头行，P2-3）。"""
         self._spatial_btn = PrimaryPushButton('生成空间成果', self)
         # 未就绪门控：无测线时禁用，set_lines 导入测线后点亮
         self._spatial_btn.setEnabled(False)
@@ -135,7 +144,8 @@ class DeliveryPage(QWidget):
             hint='勾选测线并生成空间成果后，结果会列在这里')
         root.addWidget(spatial_card)
 
-        # ---------------- 卡片2：项目报告（主操作进卡头行，P2-3）
+    def _build_report_card(self, root: QVBoxLayout) -> None:
+        """卡片2：项目报告（主操作进卡头行，P2-3）。"""
         self._report_btn = PrimaryPushButton('生成报告包', self)
         report_card, report_layout = make_card(
             '项目报告', parent=self, header_action=self._report_btn)
@@ -165,7 +175,8 @@ class DeliveryPage(QWidget):
         report_layout.addLayout(open_row)
         root.addWidget(report_card)
 
-        # ---------------- 卡片3：备份与恢复
+    def _build_backup_card(self, root: QVBoxLayout) -> None:
+        """卡片3：备份与恢复（无主操作按钮：备份/恢复并列，均为低频操作）。"""
         backup_card, backup_layout = make_card('备份与恢复', parent=self)
         backup_row = QHBoxLayout()
         backup_row.setSpacing(constants.CARD_SPACING)
@@ -189,7 +200,6 @@ class DeliveryPage(QWidget):
         options_row.addStretch(1)
         backup_layout.addLayout(options_row)
         root.addWidget(backup_card)
-        root.addStretch(1)
 
     # ============================================================ 内部接线
     def _connect_internal(self) -> None:

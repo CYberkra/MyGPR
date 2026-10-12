@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import hashlib
 import time
-from datetime import datetime
 from dataclasses import dataclass
 from typing import Any
 
@@ -24,6 +23,7 @@ from core.processing_engine import (
     merge_result_header_info,
     merge_result_trace_metadata,
 )
+from core.storage_primitives import utc_now
 from core.trajectory_model import TrajectoryModel
 from mygpr.domain.processing.models import ProcessingRequest
 from mygpr.infrastructure.processing.native_adapter import (
@@ -33,6 +33,15 @@ from mygpr.infrastructure.processing.native_adapter import (
 
 # 与 UI/cli_batch/evidence_export 共用的生产执行路径（P1-1 步骤 2 收敛）。
 _BRIDGE_EXECUTOR = NativeProcessingExecutor()
+
+
+def _manifest_timestamp() -> str:
+    """UTC millisecond stamp for the processing manifest's ``created_at``.
+
+    Consumers (``core/processing_artifact_index.py``) order artifacts by this
+    string, so it must stay UTC with a fixed precision width.
+    """
+    return utc_now()
 
 
 # Trace-count-changing methods are kept out of the legacy field workbench;
@@ -540,7 +549,7 @@ def run_registered_method(
     manifest = {
         "schema": "mygpr.processing_manifest.v2",
         "status": "success",
-        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "created_at": _manifest_timestamp(),
         "artifact_role": artifact_role,
         "axis_transform": axis_transform,
         "engine": "mygpr NativeProcessingExecutor",
