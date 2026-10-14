@@ -15,9 +15,9 @@
 | 项目完整性审计 | 已实现 | `audit_project()` |
 | 备份与恢复 | 已实现 | `backup_project()` / `restore_project()` |
 | 报告导出 | 已实现 | `backend.reporting.generate_package()` |
-| 原始厂商格式统一导入 | 后续阶段 | acquisition ports 尚待迁移 |
-| 测线删除/重命名等全量编辑 | 后续阶段 | 需要补充明确的事务用例 |
-| 处理结果按块流式执行 | 后续阶段 | 当前项目流水线明确物化完整矩阵 |
+| 采集与文件导入 | 部分实现 | `backend.acquisition`；项目入口支持 CSV/TXT/NPY/NPZ/H5/HDF5，厂商二进制向导接入仍待完成 |
+| 测线编辑 | 部分实现 | 测线删除已有事务路径；其他编辑逐项核对公开契约 |
+| 项目流水线按块执行 | 有条件支持 | `save_intermediates=False` 且算法支持分块；全局或保留中间成果的路径可能物化矩阵 |
 
 ## 前端边界
 

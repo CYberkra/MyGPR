@@ -104,8 +104,10 @@ def method_time_cut(
 
     result = arr[cut_start:cut_end, :].astype(np.float32, copy=True)
     kept_duration_ns = total_ns * float(cut_end - cut_start) / float(samples)
-    start_time_ns = total_ns * float(cut_start) / float(samples)
-    end_time_ns = total_ns * float(cut_end) / float(samples)
+    header = kwargs.get("header_info") or {}
+    offset_ns = to_float(header.get("time_cut_offset_ns"), default=0.0)
+    start_time_ns = offset_ns + total_ns * float(cut_start) / float(samples)
+    end_time_ns = offset_ns + total_ns * float(cut_end) / float(samples)
 
     return result, {
         "method": "time_cut",

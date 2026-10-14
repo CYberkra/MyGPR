@@ -93,6 +93,25 @@ def auto_load_data(path: str, **kwargs) -> Dict[str, Any]:
         }
     if suffix in {".npy", ".npz"}:
         return read_numpy_profile(str(path))
+    if suffix in {".h5", ".hdf5"}:
+        from core.acquisition_hdf5 import acquisition_trace_metadata
+        from core.gpr_data_model import load_gpr_dataset
+
+        dataset = load_gpr_dataset(path, length_m=kwargs.get("length_m"),
+                                   dielectric_constant=float(kwargs.get("dielectric_constant", 9.0)))
+        header = dataset.to_metadata()
+        time_step_s = 0.0
+        if dataset.format_name == "cdut-acquisition-hdf5":
+            time_step_s = dataset.time_window_ns * 1e-9 / dataset.sample_count
+        elif dataset.sample_count > 1:
+            time_step_s = float(np.median(np.diff(dataset.time_axis_ns))) * 1e-9
+        header.update(a_scan_length=dataset.sample_count, num_traces=dataset.trace_count,
+                      total_time_ns=dataset.time_window_ns,
+                      time_step_s=time_step_s,
+                      trace_interval_m=0.0, time_axis_ns=dataset.time_axis_ns)
+        return {"data": dataset.matrix, "header_info": header,
+                "trace_metadata": acquisition_trace_metadata(dataset.metadata),
+                "type": "bscan_hdf5", "source": str(path), "path": str(path)}
     if suffix in {".rd3", ".rd7", ".rad"}:
         return read_mala_rd(str(path))
     if suffix in {".iprb", ".iprh"}:

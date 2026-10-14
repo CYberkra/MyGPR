@@ -12,7 +12,7 @@ The data for a single survey line. Each line has a stable identifier (e.g. `L01`
 The raw GPR matrix and its metadata for one line. Loaded via `load_gpr_dataset(line_id)` and accessed in bounded windows via `read_window()`.
 
 ### Artifact
-An immutable processing result produced by running a processing pipeline on a line. Stored under `processed/<line_id>/` with a descriptor, manifest, and params JSON.
+An immutable processing result produced by running a processing pipeline on a line. `processed/<line_id>/` holds descriptors, manifests and params; the hybrid store keeps numerical arrays in per-line HDF5 containers or their artifact sidecars and indexes them in SQLite. See [Hybrid Store](docs/developer/HYBRID_PROJECT_STORE_V1.md).
 
 ### Processing Pipeline
 A sequence of processing steps submitted as a job. Submitted via `submit_project_pipeline()` and watched through the job bridge.
@@ -21,7 +21,7 @@ A sequence of processing steps submitted as a job. Submitted via `submit_project
 An annotation object (e.g. suspected pipe, cavity) placed on a line. Stored as CSV under `targets/<line_id>_targets.csv`. Currently only storage is implemented; the annotation UI page is not yet developed.
 
 ### Interface
-A basal/overburden interface annotation for a line. Stored separately from targets. The interpretation UI controller exists but is not yet fully wired.
+A basal/overburden interface annotation for a line, stored separately from targets. The interpretation page is wired for opening sessions, picking, tracing, snapping, smoothing, undo/redo and saving through `InterpretationController` and `coordinator_processing.py`; a stored annotation can be a draft or confirmed result.
 
 ### Spatial Result
 A derived coordinate export (trajectories, targets, interfaces) aggregated at the project level. Distinct from per-line processing artifacts.

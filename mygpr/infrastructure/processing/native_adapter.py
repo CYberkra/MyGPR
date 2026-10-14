@@ -183,6 +183,10 @@ class NativeProcessingExecutor(ProcessingExecutorPort):
 
 def prepare_native_params(request: ProcessingRequest) -> dict[str, Any]:
     params = dict(request.params or {})
+    if request.method_id in {"rtm_migration", "kirchhoff_migration", "stolt_migration"}:
+        from mygpr.infrastructure.processing.algorithms.common import require_distance_scale
+
+        require_distance_scale(request.header_info, params, key="dx" if request.method_id == "stolt_migration" else "length_m")
     params.setdefault("_header_info", clone_mapping(request.header_info))
     params.setdefault("_trace_metadata", clone_trace_metadata(request.trace_metadata))
     samples = max(1, int(request.data.shape[0]))

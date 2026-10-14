@@ -27,7 +27,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-gui = ["PyQt6>=6.6", "PyQt6-Fluent-Widgets>=1.8", "pyqtgraph>=0.13", "PyOpenGL>=3.1"]
+gui = ["PyQt6==6.11.0", "PyQt6-Qt6==6.11.1", "PyQt6-Fluent-Widgets==1.11.2", "pyqtgraph==0.14.0", "PyOpenGL==3.1.10", "colorlog==6.12.0"]
 gpu = []
 dev = ["pytest==8.4.2", "pytest-timeout==2.3.1", "pytest-cov==7.0.0", "coverage==7.13.3", "hypothesis>=6.130,<7", "mutmut>=3.3,<4", "ruff==0.15.21", "mypy==1.20.2"]
 build = ["build>=1.2,<2", "cyclonedx-bom>=5,<6", "pip-licenses>=5,<6"]

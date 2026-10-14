@@ -29,11 +29,11 @@
 
 ## 前端（v0.9.37 已交付）
 
-- Qt GUI 可用：`app_qt.py` 启动，8 页导航 + 右侧日志面板。
+- Qt GUI 可用：`app_qt.py` 启动，8 页顶部页签 + 底部输出面板。
 - 架构门禁已建立：`ui/` → `core/` 通过 `desktop_backend_facade.py` 统一通道。
 - `MyGPRMainWindow` 已拆分：组装器（`main_window.py`）+ 跨页接线器（`page_coordinator.py`）。
 - **任务 F 候选 1 已完成**（PageCoordinator 重构，commit `193d3a1` + CI 修复 `95ce4b4`/`c7281b6`，RFC #6）。
-- CI 已覆盖：Linux offscreen、Windows GUI、Python 3.11/3.12/3.13、干净安装。
+- CI 已覆盖：Linux offscreen、Windows GUI、Python 3.12/3.13、干净安装。
 
 ## 任务 F（架构优化）后续
 

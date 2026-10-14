@@ -68,6 +68,12 @@ def _load_trace_metadata(store: FieldProjectStore, line_id: str) -> dict[str, np
         return {}
     relative = str(getattr(record, "trace_metadata_path", "") or "").strip()
     if not relative:
+        # Acquisition sensors are already aligned by trace; no timestamp-based
+        # synchronization or optional JSON sidecar is needed to use them.
+        if str(getattr(record, "data_format", "")) == "cdut-acquisition-hdf5":
+            from core.acquisition_hdf5 import acquisition_trace_metadata
+
+            return acquisition_trace_metadata(dict(store.load_gpr_dataset(line_id).metadata or {}))
         return {}
     path = resolve_managed_path(store.root, relative, require_exists=True, require_file=True)
     with np.load(path, allow_pickle=False) as payload:

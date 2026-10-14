@@ -111,6 +111,7 @@ class FieldLineStoreMixin:
         line.updated_at = local_now()
         self.upsert_line(line)
         self.append_log(f"导入测线 {line_id}: {dest.name}, size={line.raw_size_mb:.3f}MB")
+        dataset = None
         try:
             if src.suffix.lower() not in {".csv", ".txt", ".npy", ".npz", ".h5", ".hdf5"}:
                 return self.get_line(line_id)
@@ -199,6 +200,8 @@ class FieldLineStoreMixin:
             self.append_log(f"测线 {line_id} 未归一化为矩阵数据: {exc}")
             raise
         finally:
+            if dataset is not None and isinstance(dataset.matrix, np.memmap):
+                dataset.matrix._mmap.close()
             shutil.rmtree(staging, ignore_errors=True)
 
 

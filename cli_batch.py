@@ -34,7 +34,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # Package/root discovery is handled by Python; do not mutate sys.path.
 from core.benchmark_registry import list_benchmark_sample_ids
 from core.evidence_export import export_motion_compensation_benchmark
-from core.gpr_io import extract_airborne_csv_payload, savecsv, save_image
+from core.gpr_io import auto_load_data, extract_airborne_csv_payload, savecsv, save_image
 from core.processing_engine import (
     merge_result_header_info,
     merge_result_trace_metadata,
@@ -395,10 +395,16 @@ def run_job(job: Dict[str, Any], repo_root: str, output_dir: str) -> Dict[str, A
     job_out_dir = os.path.join(output_dir, jid)
     os.makedirs(job_out_dir, exist_ok=True)
 
-    data, header_info, trace_metadata = load_gpr_csv(
-        abs_input,
-        **_build_sidecar_loader_kwargs(job, repo_root),
-    )
+    if os.path.splitext(abs_input)[1].lower() in {".h5", ".hdf5"}:
+        if _build_sidecar_loader_kwargs(job, repo_root):
+            raise ValueError("HDF5 uses embedded trace metadata; external sensor sidecars require explicit synchronization")
+        payload = auto_load_data(abs_input)
+        data, header_info, trace_metadata = payload["data"], payload["header_info"], payload["trace_metadata"]
+    else:
+        data, header_info, trace_metadata = load_gpr_csv(
+            abs_input,
+            **_build_sidecar_loader_kwargs(job, repo_root),
+        )
     current = data
     current_header_info = merge_result_header_info(header_info, None, current.shape)
     current_trace_metadata = trace_metadata

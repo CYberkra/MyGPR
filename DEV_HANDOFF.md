@@ -1,5 +1,9 @@
 # Backend handoff
 
+Current source-tree instructions: 2026-10-14. Environment and package versions
+are in [README.md](README.md) and [AGENTS.md](AGENTS.md); design history and current
+contract pointers are in the [specification index](docs/superpowers/specs/README.md).
+
 1. Keep `core/` and `mygpr/` free of Qt imports.
 2. A redesigned frontend must call public interfaces/application services rather than storage internals.
 3. Preserve project schemas, artifact lineage and evidence SHA-256 contracts.

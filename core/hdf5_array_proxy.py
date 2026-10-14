@@ -17,10 +17,11 @@ from numpy.lib.mixins import NDArrayOperatorsMixin
 
 
 class HDF5ArrayProxy(NDArrayOperatorsMixin):
-    def __init__(self, file_path: str | Path, dataset_path: str) -> None:
+    def __init__(self, file_path: str | Path, dataset_path: str, *, swmr: bool = True) -> None:
         self.file_path = Path(file_path).resolve()
         self.dataset_path = str(dataset_path)
-        with h5py.File(self.file_path, "r", libver="latest", swmr=True) as handle:
+        self.swmr = bool(swmr)
+        with h5py.File(self.file_path, "r", libver="latest", swmr=self.swmr) as handle:
             dataset = handle[self.dataset_path]
             self.shape = tuple(int(v) for v in dataset.shape)
             self.dtype = np.dtype(dataset.dtype)
@@ -29,7 +30,7 @@ class HDF5ArrayProxy(NDArrayOperatorsMixin):
         self.size = int(np.prod(self.shape, dtype=np.int64))
 
     def __getitem__(self, selection: Any) -> np.ndarray:
-        with h5py.File(self.file_path, "r", libver="latest", swmr=True) as handle:
+        with h5py.File(self.file_path, "r", libver="latest", swmr=self.swmr) as handle:
             return np.asarray(handle[self.dataset_path][selection])
 
     def iter_blocks(
@@ -50,14 +51,14 @@ class HDF5ArrayProxy(NDArrayOperatorsMixin):
             raise ValueError("invalid HDF5 block selection")
         rows_per_block = int(block_rows or (self.chunks[0] if self.chunks else 1024))
         rows_per_block = max(1, rows_per_block)
-        with h5py.File(self.file_path, "r", libver="latest", swmr=True) as handle:
+        with h5py.File(self.file_path, "r", libver="latest", swmr=self.swmr) as handle:
             dataset = handle[self.dataset_path]
             for start in range(row_start, row_end, rows_per_block):
                 end = min(start + rows_per_block, row_end)
                 yield start, end, np.asarray(dataset[start:end, col_start:col_end])
 
     def __array__(self, dtype=None, copy=None) -> np.ndarray:  # NumPy 2 compatible
-        with h5py.File(self.file_path, "r", libver="latest", swmr=True) as handle:
+        with h5py.File(self.file_path, "r", libver="latest", swmr=self.swmr) as handle:
             array = np.asarray(handle[self.dataset_path][...], dtype=dtype)
         if copy:
             return array.copy()

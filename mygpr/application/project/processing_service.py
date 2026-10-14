@@ -30,6 +30,7 @@ class ProjectReadOnlyError(ProjectApplicationError):
 _OUTPUT_HEADER_KEYS = (
     "total_time_ns", "time_window_ns", "time_cut_offset_ns",
     "a_scan_length", "num_traces", "dielectric_constant", "axis_transform",
+    "time_axis_endpoint", "distance_axis_status",
 )
 
 

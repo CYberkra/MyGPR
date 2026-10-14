@@ -26,6 +26,14 @@ def warning(code: str, message: str, method_id: str, **details: Any) -> dict[str
     return {"code": code, "message": message, "method_id": method_id, **details}
 
 
+def require_distance_scale(header: dict[str, Any], params: dict[str, Any], *, key: str = "length_m") -> None:
+    """Require measured geometry when the source explicitly declares it unknown."""
+    if header.get("distance_axis_status") == "unknown":
+        length = as_float(params.get(key), 0.0)
+        if not np.isfinite(length) or length <= 0.0:
+            raise ValueError(f"缺少测距信息：请显式提供实测 {key}，不能把道序号解释为米。")
+
+
 def ensure_matrix(data: Any) -> tuple[np.ndarray, list[dict[str, Any]]]:
     arr = np.asarray(data, dtype=np.float64)
     if arr.ndim != 2 or arr.size == 0:

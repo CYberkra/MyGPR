@@ -20,6 +20,7 @@ from mygpr.infrastructure.processing.algorithms.common import (
     as_int,
     ensure_matrix,
     normalize_output,
+    require_distance_scale,
     warning,
 )
 
@@ -314,6 +315,7 @@ def method_stolt_migration_native(
     data: Any,
     params: dict[str, Any],
 ) -> tuple[np.ndarray, dict[str, Any]]:
+    require_distance_scale(dict(params.get("_header_info") or params.get("header_info") or {}), params, key="dx")
     arr, warnings = ensure_matrix(data)
     arr32 = np.asarray(arr, dtype=np.float32)
     nt, nx = arr32.shape
