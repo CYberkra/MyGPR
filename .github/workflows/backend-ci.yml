@@ -29,9 +29,11 @@ jobs:
       - run: python -m pip install -e .
       # 单一入口：清单只在 scripts/run_backend_quality_gate.py 一处维护，
       # 避免「本地过 CI 也过」这类手工同步漂移。--require-diff 让增量覆盖率
-      # 在浅克隆下也变成显式失败而非静默 PASS。
+      # 在 PR 的浅克隆下也变成显式失败而非静默 PASS。
+      # main push 的 HEAD 与 origin/main 相同，没有增量；仍跑全部质量门禁，
+      # 只在 PR 上要求非空增量，避免成功合并后因空差异误报失败。
       - name: Backend quality gate
-        run: python scripts/run_backend_quality_gate.py --require-diff
+        run: python scripts/run_backend_quality_gate.py ${{ github.event_name == 'pull_request' && '--require-diff' || '' }}
       - name: Upload coverage evidence on failure
         if: failure()
         uses: actions/upload-artifact@v4
