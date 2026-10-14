@@ -116,8 +116,12 @@ class TestOutputPanelSplitter:
     def test_output_panel_height_assignable_and_sticky(self, window, qapp):
         """setSizes 显式分配下格高度必须生效且在事件排空后保持。"""
         from PyQt6.QtCore import QTimer
+        from PyQt6.QtTest import QTest
         panel = window.output_panel
         panel.set_open(True)
+        # 启动/展开会排队恢复保存高度；先处理这些零延迟回调，再模拟
+        # 用户拖动，避免 Linux 事件顺序让恢复值覆盖本测试的显式分配。
+        QTest.qWait(1)
         sp = window._v_splitter
         total = sum(sp.sizes())
         sp.setSizes([total - 260, 260])
