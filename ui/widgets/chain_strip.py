@@ -31,7 +31,7 @@ from qfluentwidgets import (CaptionLabel, FluentIcon as FIF,
                             PrimaryPushButton, RoundMenu, ToolButton)
 
 from ui import constants
-from ui.widgets.context_menus import add_action
+from ui.widgets.context_menus import add_action, make_menu
 
 
 def _muted_text() -> str:
@@ -519,7 +519,7 @@ class ChainStrip(QWidget):
         手势等价可达，guidelines：内容不得因布局不可达）。
         构建与弹出拆开，便于测试菜单结构。
         """
-        menu = RoundMenu(parent=self)
+        menu = make_menu(self)
         subs = []
         for i, step in enumerate(self._steps):
             label = f'{i + 1} {step["label"]}'
