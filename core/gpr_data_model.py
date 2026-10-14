@@ -14,7 +14,8 @@ import csv
 import json
 import re
 import tempfile
-from dataclasses import dataclass, asdict, field
+from copy import deepcopy
+from dataclasses import dataclass, fields, field
 from pathlib import Path
 from typing import Any, Callable
 
@@ -139,13 +140,15 @@ class GPRDataSet:
         return matrix, sample_indices, trace_indices
 
     def to_metadata(self) -> dict[str, Any]:
-        payload = asdict(self)
-        payload.pop("matrix", None)
-        payload.pop("distance_axis_m", None)
-        payload.pop("time_axis_ns", None)
-        payload.pop("depth_axis_m", None)
+        # Exclude numerical buffers before copying: asdict(self) deep-copies
+        # even mmap matrices before the old pop() calls can discard them.
+        buffers = {"matrix", "distance_axis_m", "time_axis_ns", "depth_axis_m"}
+        payload = {item.name: deepcopy(getattr(self, item.name)) for item in fields(self) if item.name not in buffers}
         payload["schema"] = GPR_DATA_SCHEMA
         payload["length_m"] = self.length_m
+        for key in ("distance_axis_status", "time_axis_endpoint", "time_cut_offset_ns"):
+            if key in self.metadata:
+                payload[key] = self.metadata[key]
         return payload
 
     def save_npz(
@@ -588,7 +591,8 @@ def load_gpr_dataset(
             ds.distance_axis_m = length_axis
         if time_axis is not None:
             ds.time_axis_ns = time_axis
-            ds.time_window_ns = float(time_axis[-1]) if len(time_axis) else ds.time_window_ns
+            if stored_meta.get("time_axis_endpoint", True):
+                ds.time_window_ns = float(time_axis[-1]) if len(time_axis) else ds.time_window_ns
         if depth_axis is not None:
             ds.depth_axis_m = depth_axis
         return ds
@@ -596,6 +600,14 @@ def load_gpr_dataset(
         if h5py is None:
             raise RuntimeError("h5py is not available; cannot load HDF5 GPR data")
         with h5py.File(src, "r") as h5:
+            from core.acquisition_hdf5 import inspect_acquisition_hdf5, load_acquisition_hdf5
+
+            acquisition = inspect_acquisition_hdf5(h5)
+            if acquisition is not None:
+                return load_acquisition_hdf5(
+                    h5, acquisition, source=src, line_id=line_id,
+                    length_m=length_m, dielectric_constant=dielectric_constant,
+                )
             for key in ("matrix", "data", "bscan", "radargram"):
                 if key in h5:
                     matrix = h5[key][()]
@@ -672,6 +684,19 @@ def load_gpr_dataset_for_import(
         matrix, axes = load_npz_for_import(src, matrix_path, cancel_requested=cancel_requested, progress_callback=progress_callback)
         fmt = "npz-dataset-chunked"
     elif suffix in {".h5", ".hdf5"}:
+        from core.acquisition_hdf5 import inspect_acquisition_hdf5, load_acquisition_hdf5
+
+        if h5py is None:
+            raise RuntimeError("h5py is not available; cannot load HDF5 GPR data")
+        with h5py.File(src, "r") as h5:
+            acquisition = inspect_acquisition_hdf5(h5)
+            if acquisition is not None:
+                return load_acquisition_hdf5(
+                    h5, acquisition, source=src, line_id=line_id,
+                    length_m=length_m, dielectric_constant=dielectric_constant,
+                    output_npy=matrix_path, cancel_requested=cancel_requested,
+                    progress_callback=progress_callback,
+                )
         matrix = load_hdf5_for_import(src, matrix_path, cancel_requested=cancel_requested, progress_callback=progress_callback)
         fmt = "hdf5-matrix-chunked"
     else:

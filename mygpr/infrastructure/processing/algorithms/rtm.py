@@ -14,7 +14,7 @@ from typing import Any, Callable
 import numpy as np
 
 from mygpr.domain.processing.models import ResourceEstimate
-from mygpr.infrastructure.processing.algorithms.common import ensure_matrix, normalize_output, warning
+from mygpr.infrastructure.processing.algorithms.common import ensure_matrix, normalize_output, warning, require_distance_scale
 
 
 class RTMResourceLimitError(RuntimeError):
@@ -51,6 +51,7 @@ def _optional_positive_float(value: Any, default: float, name: str) -> float:
 def _resolve_geometry(
     shape: tuple[int, int], params: dict[str, Any], header: dict[str, Any]
 ) -> dict[str, float | int]:
+    require_distance_scale(header, params)
     samples, traces = (max(1, int(shape[0])), max(1, int(shape[1])))
     total_time_ns = _positive_float(
         params.get("time_window_ns")

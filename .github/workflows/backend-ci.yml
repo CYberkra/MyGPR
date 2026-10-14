@@ -62,6 +62,8 @@ jobs:
   gui-linux-offscreen:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      MYGPR_SMOKE_SHOTS_DIR: ${{ github.workspace }}/output/ci-smoke
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -105,12 +107,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: gui-smoke-linux
-          path: /tmp/mygpr_shots/
+          path: output/ci-smoke/
           if-no-files-found: ignore
 
   gui-windows:
     runs-on: windows-latest
     timeout-minutes: 20
+    env:
+      MYGPR_SMOKE_SHOTS_DIR: ${{ github.workspace }}/output/ci-smoke
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -126,9 +130,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: gui-smoke-windows
-          # app_qt.py 的 SMOKE_SHOTS_DIR 硬编码 '/tmp/mygpr_shots'，
-          # Windows 上解析为工作区所在盘符根（runner 工作区在 D: 盘）。
-          path: D:/tmp/mygpr_shots/
+          # 与 MYGPR_SMOKE_SHOTS_DIR 使用同一工作区目录，避免依赖系统临时目录或盘符。
+          path: output/ci-smoke/
           if-no-files-found: ignore
 
   clean-install:

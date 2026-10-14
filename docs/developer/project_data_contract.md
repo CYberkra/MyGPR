@@ -1,5 +1,7 @@
 # MyGPR Field Workbench Project Data Contract
 
+> 当前新项目协议以 [Hybrid Store](HYBRID_PROJECT_STORE_V1.md) 为准：`catalog.sqlite` 管理目录与谱系，`data/lines/<line_id>.h5` 及工件 sidecar 保存矩阵，`processed/` 保存描述符与清单。下面保留的是早期 JSON/NPY 兼容布局；其中“当前 UI”“保存处理结果”是历史行为描述，不是现行界面操作指南。现行操作见[用户文档](../user/README.md)。
+
 Round 3 fixes the project data layout used by the 1080P field workbench UI.  The purpose is to make the product shell durable: opening the application, processing a line, editing targets, and exporting spatial coordinates all update project files on disk.
 
 ## Standard project layout

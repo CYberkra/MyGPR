@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 
 from mygpr.domain.processing.models import ResourceEstimate
+from mygpr.infrastructure.processing.algorithms.common import require_distance_scale
 from mygpr.infrastructure.processing.algorithms.kirchhoff.cpu import _run_kirchhoff_cpu
 from mygpr.infrastructure.processing.algorithms.kirchhoff.gpu import _run_kirchhoff_gpu
 from mygpr.infrastructure.processing.algorithms.kirchhoff.shared import _to_float64_2d
@@ -120,6 +121,7 @@ def method_kirchhoff_migration(
     """
     cancel_checker = kwargs.get("cancel_checker")
     header_info = kwargs.get("header_info") or {}
+    require_distance_scale(header_info, {"length_m": length_m})
     trace_metadata = kwargs.get("trace_metadata") or {}
     arr = _to_float64_2d(data)
 

@@ -312,6 +312,7 @@ def prepare_block_params(
     params: dict[str, Any], header: dict[str, Any], shape: tuple[int, int], method_id: str
 ) -> dict[str, Any]:
     runtime = dict(params)
+    runtime.setdefault("_header_info", dict(header))
     total_ns = float(header.get("total_time_ns") or header.get("time_window_ns") or 0.0)
     if total_ns > 0.0:
         step_s = total_ns * 1.0e-9 / max(1, shape[0])

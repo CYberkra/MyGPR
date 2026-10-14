@@ -288,6 +288,8 @@ def bundle_from_dataset(dataset: Any, **kw: Any) -> PreviewBundle:
         preview = downsample_matrix(matrix, max_samples=max_samples, max_traces=max_traces)
 
     trace_axis = _dataset_axis(dataset, "distance_axis_m")
+    if _metadata_mapping(dataset).get("distance_axis_status") == "unknown":
+        trace_axis = None
     sample_axis = _dataset_axis(dataset, "time_axis_ns")
     sample_axis_label = "时间 (ns)"
     if sample_axis is None:

@@ -1,5 +1,8 @@
-PyQt6>=6.6
-PyQt6-Fluent-Widgets>=1.8
-pyqtgraph>=0.13
-PyOpenGL>=3.1
-colorlog>=6.8
+# Desktop baseline verified on Windows / Python 3.12.0, 2026-10-14.
+# Keep aligned with pyproject.toml [project.optional-dependencies].gui.
+PyQt6==6.11.0
+PyQt6-Qt6==6.11.1
+PyQt6-Fluent-Widgets==1.11.2
+pyqtgraph==0.14.0
+PyOpenGL==3.1.10
+colorlog==6.12.0

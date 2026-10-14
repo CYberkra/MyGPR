@@ -19,7 +19,7 @@ CI（`.github/workflows/backend-ci.yml`）对每个 PR / 主分支推送强制�
 | 全量 pytest + 覆盖率 | `backend` job | `pytest --cov=mygpr --cov=core`，随后 `check_coverage_policy.py` 棘轮校验 |
 | 静态检查 | `backend` job | `ruff check .`（零容忍）；mypy 错误数棘轮（`scripts/check_mypy_budget.py`） |
 | 治理预算 | `backend` job | `check_debt_budget.py`（宽异常/静默处理/sys.path/超长模块棘轮）、`check_complexity_budget.py`、`check_release_hygiene.py`、`check_project_format_compatibility.py` |
-| Python 矩阵 | `backend-matrix` | 3.12 / 3.13 全量 pytest（3.11 已移除：钉版 numpy==2.5.1 要求 ≥3.12） |
+| Python 矩阵 | `backend-matrix` | backend job 跑 3.13，backend-matrix 跑 3.12；3.11 不参与 |
 | GUI 冒烟 + pytest | `gui-linux-offscreen` / `gui-windows` | 离屏/原生冒烟截图 + **带 Qt 的全量 pytest**（GUI 用例仅在含 Qt 的 job 执行） |
 | clean-install | `clean-install` | 干净环境 `pip install .` + 契约测试 + `pip wheel` 可构建性 |
 
@@ -35,14 +35,14 @@ CI（`.github/workflows/backend-ci.yml`）对每个 PR / 主分支推送强制�
 
 - **ruff**：零容忍，任何新问题都会让 CI 失败。遗留代码的既定风格差异
   （`scripts/`、`core/` 部分文件）通过 `pyproject.toml` 的 per-file-ignores 显式登记。
-- **mypy**：全库 505 个既有错误登记在 `config/mypy_baseline.json`；
+- **mypy**：既有错误数登记在 `config/mypy_baseline.json`；
   `scripts/check_mypy_budget.py` 只允许减少不允许增加（容差 5%，吸收平台差异）。
 
 ## 4. 测试分层与标记
 
 `pytest.ini` 以 `--strict-markers` 注册 marker。当前实际使用的执行层级：
 `unit`、`integration`、`slow`、`large_data`、`industrial` 及 `tests/industrial/`
-五个子域（acceptance/performance/property/reliability/scientific_validation/static_contract）。
+六个子域（acceptance/performance/property/reliability/scientific_validation/static_contract）。
 
 约定：
 
@@ -60,8 +60,7 @@ CI（`.github/workflows/backend-ci.yml`）对每个 PR / 主分支推送强制�
 - 基于影响图的受影响测试选择（无 `config/test_impact.toml`）；
 - nightly / release 独立工作流；
 - SBOM 生成与许可证扫描（`requirements-build.txt` 中的工具尚未接入任何自动化）；
-- `config/industrial_acceptance_matrix.json` 中列出的现场验收项
-  （磁盘满、断电、外接盘断连、10GB 长跑等）尚无自动化测试。
+- `config/industrial_acceptance_matrix.json` 中列出的真实断电、外接盘断连、10GB 长跑等现场验收仍需实机完成；已有 ENOSPC 注入和事务恢复测试不能替代这些实机证据。
 
 现场与实机验收（DPI、多 GB 数据、真实 RTK/IMU/GPR 同步、错误 CRS 等）属于
 发布后人工验收清单，不由本地门禁替代。

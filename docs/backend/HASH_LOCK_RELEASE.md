@@ -1,15 +1,7 @@
-# Hash-locked release dependencies
+# Hash-locked release dependencies — planned
 
-Commercial release installation must use a platform-native, fully resolved pip lock with archive hashes:
+Status checked 2026-10-14: `constraints/py313-linux.lock` and `constraints/py313-windows.lock` are existing version snapshots without archive hashes. The formerly documented `*-hashed.lock` files, `scripts/check_hash_locked_release.py`, and `MYGPR_REQUIRE_HASH_LOCKS` build gate are absent from the current tree.
 
-- `constraints/py313-linux-hashed.lock`
-- `constraints/py313-windows-hashed.lock`
+For current source installation use [requirements.txt](../../requirements.txt), [GUI requirements](../../requirements-gui.txt), or the matching pyproject extras. Do not claim a hash-verified commercial release based on these version pins.
 
-Generate each file on the matching clean operating system with a resolver such as `pip-compile --generate-hashes`, review it, then run:
-
-```bash
-python scripts/check_hash_locked_release.py --platform linux --required
-python scripts/check_hash_locked_release.py --platform windows --required
-```
-
-Set `MYGPR_REQUIRE_HASH_LOCKS=1` for commercial builds. The build then refuses to fall back to unhashed constraints. Hashes must come from the actual package archives/wheelhouse; they must never be fabricated from installed files or package names.
+A future executable release must generate native-platform locks from the actual package archives, verify them in a clean environment, and add a real enforcement step to the build workflow. Hashes must never be invented from installed files or package names. See [Release process](../developer/RELEASE_PROCESS.md).

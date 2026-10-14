@@ -12,8 +12,8 @@ MyGPR 后续交付包采用语义化版本号：`MAJOR.MINOR.PATCH`。
 
 1. 根目录 `VERSION`。
 2. `CHANGELOG.md` 中新增对应版本条目。
-3. 交付 zip 文件名，例如 `MyGPR_V0.8.38_<tag>.zip`。
-4. 若打包 exe，`gpr_gui.spec` 必须把 `VERSION` 带入发布包。
+3. 交付 zip 文件名，例如 `MyGPR_V<版本号>_<tag>.zip`。
+4. 同时更新 `pyproject.toml`；若重新建立 exe 打包，应将 `VERSION` 带入发布包。当前旧 `gpr_gui.spec` 已删除，见[发布流程](RELEASE_PROCESS.md)。
 5. 修复报告或开发报告中必须写明 base version 和 output version。
 
 ## 默认递增规则
@@ -27,7 +27,7 @@ MyGPR 后续交付包采用语义化版本号：`MAJOR.MINOR.PATCH`。
 运行：
 
 ```bash
-python scripts/check_version_consistency.py --expected 0.8.38
+python scripts/check_version_consistency.py
 ```
 
 或直接运行测试：

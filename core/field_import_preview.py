@@ -268,6 +268,23 @@ def build_import_preflight(
                 shape, dtype = _npz_matrix_shape(src)
                 low = high = 0.0
             else:
+                from core.acquisition_hdf5 import FORMAT_NAME, inspect_acquisition_hdf5
+
+                if h5py is not None:
+                    with h5py.File(src, "r") as handle:
+                        acquisition = inspect_acquisition_hdf5(handle)
+                    if acquisition is not None:
+                        _emit(progress_callback, "inspect_header", size, size)
+                        return ImportPreflightResult(
+                            path=str(src), exists=True, is_file=True, extension=suffix,
+                            format_name=FORMAT_NAME, support="direct", can_import=True,
+                            message="可直接导入；已识别采集 HDF5，道×采样点将转换为采样点×道。",
+                            suggestions=("定位和高度缺失值将保留；未提供道间距时横轴仅表示道序号",
+                                         "请在采集结束后导入；传感器有效值将在后台导入时读取"),
+                            sample_count=acquisition["sample_count"], trace_count=acquisition["trace_count"],
+                            time_window_ns=acquisition["time_window_ns"], dielectric_constant=float(dielectric_constant),
+                            source_kind="CDUT 采集时域 A-Scan", column_summary=f"dtype=float32; 分量={acquisition['store_component']}",
+                        )
                 shape, dtype, dataset_name = _hdf5_matrix_shape(src)
                 low = high = 0.0
                 display_name = f"HDF5:{dataset_name}"

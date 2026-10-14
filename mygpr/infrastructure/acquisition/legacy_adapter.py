@@ -99,17 +99,26 @@ class LegacyAcquisitionReader(AcquisitionReaderPort):
                 and value.ndim == 1
                 and value.size == int(dataset.trace_count)
             }
-            yield AcquisitionDataset(
-                line_id=line_id,
-                data=dataset.matrix,
-                length_m=dataset.length_m,
-                time_window_ns=dataset.time_window_ns,
-                dielectric_constant=dataset.dielectric_constant,
-                format_name=dataset.format_name,
-                source_path=dataset.source_path or str(source),
-                metadata=dict(dataset.metadata),
-                trace_metadata=trace_metadata,
-            )
+            from core.acquisition_hdf5 import acquisition_trace_metadata
+
+            trace_metadata.update(acquisition_trace_metadata(dataset.metadata))
+            try:
+                yield AcquisitionDataset(
+                    line_id=line_id,
+                    data=dataset.matrix,
+                    length_m=dataset.length_m,
+                    time_window_ns=dataset.time_window_ns,
+                    dielectric_constant=dataset.dielectric_constant,
+                    format_name=dataset.format_name,
+                    source_path=dataset.source_path or str(source),
+                    metadata=dict(dataset.metadata),
+                    trace_metadata=trace_metadata,
+                )
+            finally:
+                # The reader owns this temporary map. Windows cannot remove its
+                # staging directory while the mapping is still open.
+                if isinstance(dataset.matrix, np.memmap):
+                    dataset.matrix._mmap.close()
 
 
 class LegacySensorSidecarParser(SensorSidecarParserPort):

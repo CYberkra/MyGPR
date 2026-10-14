@@ -15,10 +15,10 @@ MyGPR 是面向 GPR / UAV-GPR 野外勘探项目的桌面软件，PyQt6 + qfluen
 ## 运行与测试
 
 ```bash
-# 环境：Python 3.12 虚拟环境在 .venv（系统默认 Python 3.10 跑不起来）
+# 支持 Python 3.12–3.13；依赖版本和 Windows 安装命令见 README.md / AGENTS.md
 source .venv/Scripts/activate          # Git Bash
 python app_qt.py                       # 启动 GUI
-QT_QPA_PLATFORM=offscreen python app_qt.py --smoke   # 离屏截图到 /tmp/mygpr_shots/
+QT_QPA_PLATFORM=offscreen python app_qt.py --smoke   # 系统临时目录 mygpr_shots/；MYGPR_SMOKE_SHOTS_DIR 可覆盖
 python -m pytest tests/ -q             # 测试
 python cli_batch.py --help             # 无头批处理入口
 ```
@@ -38,7 +38,7 @@ ui/                            # PyQt6 前端
   desktop_backend_facade.py    # ui→core/domain/application 统一导入通道（架构门禁例外）
   pages/                       # 八个页面，纯展示 + 发信号
   widgets/                     # BScanView / CollapsiblePanel / OutputPanel 等
-  controllers/                 # Qt 控制器：run_worker 后台线程 + 信号回主线程
+  controllers/                 # Qt 控制器：run_command + 命令对象；存量 run_worker；信号回主线程
 mygpr/                         # 后端分层（新代码走这里）
   interfaces/backend.py        # MyGPRBackend.create_default()
   application/                 # acquisition / processing / project / ... 服务
@@ -53,7 +53,7 @@ tests/                         # pytest；sample_data/ 是测试夹具，勿删
 
 ## 工程约束
 
-- 长任务走 controller `run_worker` + JobBridge：协作式取消、阶段进度、信号回主线程；工作线程不得直接碰 Qt 控件。
+- 新长任务走 controller `run_command` + 命令对象和 JobBridge；存量 `run_worker` 仍存在。协作式取消、阶段进度、信号回主线程；工作线程不得直接碰 Qt 控件。
 - 大文件用 mmap/分块 I/O（`core/chunked_gpr_io.py`），不得为预检/显示整体读入 RAM。
 - GPR 存储 float32；文件先写隐藏临时文件再原子替换（`core/storage_primitives.py`）。
 - Windows 注意：只读句柄 `os.fsync` 会抛 Errno 9，统一用 `fsync_file()`（已容忍不支持的平台）。
@@ -68,6 +68,12 @@ python scripts/check_architecture.py
 ```
 
 GUI/DPI、多 GB 真实数据和传感器文件必须在 Windows 目标机验收。
+
+## 文档与规格
+
+- 现行规格入口：[docs/superpowers/specs/README.md](docs/superpowers/specs/README.md)。三页 UI 方案和旧打包说明属于历史记录，不覆盖当前八页实现。
+- 安装依赖以 `requirements.txt` / `requirements-gui.txt` 和 `pyproject.toml` 为准；开发与构建工具分别见对应 requirements 文件。
+- 项目导入范围、CDUT 采集 HDF5 语义见 [数据格式参考](docs/user/reference/数据格式参考.md)。格式注册表里的读取能力与项目向导接入状态分别核验。
 
 ## Agent skills
 

@@ -50,6 +50,13 @@ GPR_FORMAT_SPECS: tuple[GPRFormatSpec, ...] = (
         notes="内部/研究交换格式；必须是二维 B-scan 矩阵。",
     ),
     GPRFormatSpec(
+        key="hdf5_profile",
+        display_name="CDUT acquisition / matrix HDF5",
+        extensions=("h5", "hdf5"),
+        support="native",
+        notes="CDUT traces 道×采样点采集格式，或通用采样点×道二维矩阵。",
+    ),
+    GPRFormatSpec(
         key="mala_rd",
         display_name="MALÅ RD3/RD7 + RAD",
         extensions=("rd3", "rd7", "rad"),

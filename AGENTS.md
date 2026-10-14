@@ -7,12 +7,12 @@ All commands below assume this directory is the working directory.
 
 - PyQt6 + qfluentwidgets desktop app for (UAV-)GPR data processing, v0.9.38.
 - Main entry points: `app_qt.py` (GUI) and `cli_batch.py` (headless batch).
-- 详细架构与工程约束见 `CLAUDE.md`（现行版，2026-07-30 重写）。
+- 架构与工程约束见 [CLAUDE.md](CLAUDE.md)；设计或验收任务先查 [规格索引](docs/superpowers/specs/README.md)，区分现行合同与历史方案。
 
 ## Repo Map
 
 - `app_qt.py` — GUI 入口（DPI PassThrough、`--smoke` 离屏截图）。
-- `ui/` — Qt 前端：`main_window.py` 纯组装器 + `page_coordinator.py` 跨页信号链薄门面（委派 `coordinator_project.py` / `coordinator_processing.py` / `coordinator_jobs.py` 三个域子接线器）+ `dialogs.py`（接线器许可的唯一对话框模块）+ `geo_utils.py`（覆盖统计纯函数）+ `pages/`（七页）+ `widgets/` + `controllers/` + `desktop_backend_facade.py`（ui→core 统一通道）。
+- `ui/` — Qt 前端：`main_window.py` 组装器 + `page_coordinator.py` 跨页信号链薄门面（委派 `coordinator_project.py` / `coordinator_processing.py` / `coordinator_jobs.py`）+ `dialogs.py` + `geo_utils.py` + `pages/`（八页，顶部页签）+ `widgets/` + `controllers/` + `desktop_backend_facade.py`（ui→core 统一通道）。
 - `mygpr/` — 后端分层：interfaces / application / domain / infrastructure。
 - `core/` — 遗留内核（仍活跃），由 mygpr infrastructure 适配器调用。
 - `PythonModule/` — 算法包装器；经方法注册表动态加载，静态 grep 不到引用≠死代码。
@@ -22,12 +22,36 @@ All commands below assume this directory is the working directory.
 
 ## Run / Test
 
+Python 支持 **3.12–3.13**（`pyproject.toml`: `>=3.12,<3.14`）；本机 2026-10-14 核验为 3.12.0。依赖基线：
+
+- 核心：numpy 2.5.1、pandas 2.3.3、scipy 1.18.0、matplotlib 3.11.0、Pillow 12.3.0、h5py 3.16.0、PyYAML 6.0.3、PyWavelets 1.9.0、pyproj 3.7.2、openpyxl 3.1.5、rasterio 1.5.0、fiona 1.10.1、defusedxml 0.7.1。
+- GUI：PyQt6 6.11.0、PyQt6-Qt6 6.11.1、PyQt6-Fluent-Widgets 1.11.2、pyqtgraph 0.14.0、PyOpenGL 3.1.10、colorlog 6.12.0。
+- 核心精确版本在 `requirements.txt`；`requirements-core.txt` 引用它，GUI 在 `requirements-gui.txt`；与 `pyproject.toml` 同步。开发工具按 `requirements-test-backend.txt`，不要用本机 `pip freeze` 覆盖跨平台依赖声明。
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-gui.txt -r requirements-dev.txt
+.\.venv\Scripts\python.exe app_qt.py
+$env:QT_QPA_PLATFORM = 'offscreen'
+.\.venv\Scripts\python.exe app_qt.py --smoke
+.\.venv\Scripts\python.exe -m pytest tests/ -q
+Remove-Item Env:QT_QPA_PLATFORM
+```
+
+Git Bash / Linux：激活对应 `.venv/Scripts/activate` / `.venv/bin/activate` 后使用：
+
 ```bash
-source .venv/Scripts/activate
 python app_qt.py
 QT_QPA_PLATFORM=offscreen python app_qt.py --smoke
 python -m pytest tests/ -q
 ```
+
+截图默认在系统临时目录 `mygpr_shots/`，可用 `MYGPR_SMOKE_SHOTS_DIR` 覆盖。改动依赖时检查 requirements、`pyproject.toml`、README 与本节是否一致，并运行 `python -m pip check`。
+
+## 当前入口边界
+
+- 项目导入：CSV/TXT/NPY/NPZ/H5/HDF5；厂商二进制底层读取器不等于已接通项目导入向导。格式约定见 [数据格式参考](docs/user/reference/数据格式参考.md)。
+- CLI 作业使用显式 `methods`，`recommended_profile` 已移除。
+- 设计 SPEC 在 `docs/superpowers/specs/`；当前无根 `SPEC.md` 或 PyInstaller `.spec`。exe 打包属于待重新建立和验收的发布流程。
 
 ## Hard Rules
 

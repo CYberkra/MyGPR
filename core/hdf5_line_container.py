@@ -582,13 +582,20 @@ def load_processing_dataset(path: str | Path, *, artifact_id: str, raw_dataset: 
     # P1-1：优先用 manifest 持久化的输出 header 重建物理轴（形状变更方法如
     # time_cut/set_zero_time 会改变时间窗与零点，否则二次处理/成像按原始时窗算错）。
     output_header = manifest.get("output_header") if isinstance(manifest.get("output_header"), dict) else {}
+    input_time_window = time_window
     out_time_window = _coerce_float(output_header.get("total_time_ns") or output_header.get("time_window_ns"))
     out_offset = _coerce_float(output_header.get("time_cut_offset_ns")) or 0.0
     if out_time_window and out_time_window > 0:
         time_window = out_time_window
     sample_count = int(getattr(proxy, "shape", (0, 0))[0])
     if output_header and sample_count > 0:
-        time_axis = out_offset + np.linspace(0.0, time_window, sample_count, dtype=np.float32)
+        axes_unchanged = (
+            len(time_axis) == sample_count and time_window == input_time_window
+            and out_offset == float(time_axis[0])
+        )
+        if not axes_unchanged:
+            time_axis = np.linspace(out_offset, out_offset + time_window, sample_count, dtype=np.float32,
+                                    endpoint=bool(output_header.get("time_axis_endpoint", True)))
         depth = time_to_depth_axis(time_axis, dielectric)
         if len(distance) != int(getattr(proxy, "shape", (0, 0))[1]):
             distance = np.linspace(0.0, max(float(int(getattr(proxy, "shape", (0, 0))[1]) - 1), 1.0),
@@ -605,7 +612,8 @@ def load_processing_dataset(path: str | Path, *, artifact_id: str, raw_dataset: 
         time_window_ns=time_window,
         dielectric_constant=dielectric,
         format_name=f"processed-hdf5:{manifest.get('method_id') or artifact_id}",
-        metadata={"processing_manifest": manifest},
+        metadata={"processing_manifest": manifest,
+                  **{key: output_header[key] for key in ("time_axis_endpoint", "distance_axis_status", "time_cut_offset_ns") if key in output_header}},
     )
 
 
