@@ -66,6 +66,12 @@ def window(qapp, monkeypatch):
     qapp.processEvents()
     yield w
     w.close()
+    # FluentWidgets 的全局路由没有注销页面栈的接口；本夹具主动销毁
+    # 窗口前清理它拥有的记录，避免后续用例访问已删除的 StackedWidget。
+    from qfluentwidgets import qrouter
+    stacked = w.stackedWidget
+    qrouter.stackHistories.pop(stacked, None)
+    qrouter.history[:] = [item for item in qrouter.history if item.stacked is not stacked]
     w.deleteLater()
     qapp.processEvents()
 
