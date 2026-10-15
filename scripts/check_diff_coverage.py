@@ -3,9 +3,8 @@
 
 The default base is ``origin/main`` (this repository's trunk). Note that
 ``git diff A...B`` needs the base ref to be present locally, so CI checkouts
-must use ``fetch-depth: 0``; otherwise the diff silently resolves to nothing and
-this gate degrades into a no-op. Use ``--require-diff`` in pull-request CI to
-turn that silent pass into a loud failure.
+must use ``fetch-depth: 0``. ``--require-diff`` requires a valid diff, while
+changes outside the configured coverage sources need no incremental coverage.
 """
 from __future__ import annotations
 
@@ -14,6 +13,7 @@ import json
 from pathlib import Path
 import re
 import subprocess
+import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(?P<start>\d+)(?:,(?P<count>\d+))? @@")
@@ -22,15 +22,18 @@ DEFAULT_BASE = "origin/main"
 
 def _git_changed_lines(base: str, head: str) -> dict[str, set[int]]:
     completed = subprocess.run(
-        ["git", "diff", "--unified=0", "--no-color", f"{base}...{head}", "--", "*.py"],
-        cwd=ROOT, capture_output=True, text=True, check=False,
+        ["git", "-c", "core.quotepath=false", "diff", "--unified=0", "--no-color", f"{base}...{head}", "--", "*.py"],
+        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=False,
     )
     if completed.returncode:
-        return {}
+        raise RuntimeError(completed.stderr.strip() or "git diff failed")
     result: dict[str, set[int]] = {}
     current = ""
     line_no = 0
     for line in completed.stdout.splitlines():
+        if line.startswith("diff --git "):
+            current = ""
+            continue
         if line.startswith("+++ b/"):
             current = line[6:]
             result.setdefault(current, set())
@@ -67,7 +70,7 @@ def main(argv: list[str] | None = None) -> int:
                         help=f"diff base ref (default: {DEFAULT_BASE})")
     parser.add_argument("--head", default="HEAD")
     parser.add_argument("--require-diff", action="store_true",
-                        help="fail when no changed-line map can be derived "
+                        help="fail when a valid changed-line map cannot be derived "
                              "(use in PR CI so a shallow checkout cannot silently pass)")
     args = parser.parse_args(argv)
     policy = json.loads((ROOT / "config/coverage_policy.json").read_text(encoding="utf-8"))
@@ -85,20 +88,26 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
             print(f"{message} — skipping (diff coverage not enforced)")
             return 0
-        changed = _git_changed_lines(args.base, args.head)
-        source = f"git diff {args.base}...{args.head}"
-    if not changed:
-        if args.require_diff:
-            print(f"[diff-coverage] FAILED no changed executable lines derived from {source}")
+        try:
+            changed = _git_changed_lines(args.base, args.head)
+        except RuntimeError as error:
+            print(f"[diff-coverage] FAILED {error}")
             return 1
-        print(f"[diff-coverage] PASS no changed-line map available (source: {source})")
+        source = f"git diff {args.base}...{args.head}"
+    settings = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    roots = settings["tool"]["coverage"]["run"]["source"]
+    changed = {path: lines for path, lines in changed.items()
+               if lines and any(path == root + ".py" or path.startswith(root + "/") for root in roots)}
+    if not changed:
+        print(f"[diff-coverage] PASS no changed lines in configured coverage sources (source: {source})")
         return 0
     total = covered = 0
     details = []
     for path, lines in sorted(changed.items()):
         row = coverage.get("files", {}).get(path)
         if row is None:
-            continue
+            print(f"[diff-coverage] FAILED coverage data missing for changed source {path}")
+            return 1
         executable = set(row.get("executed_lines", [])) | set(row.get("missing_lines", []))
         relevant = lines & executable
         hit = relevant & set(row.get("executed_lines", []))
@@ -109,10 +118,6 @@ def main(argv: list[str] | None = None) -> int:
     report = {"schema": "mygpr.diff_coverage_report.v1", "status": "passed" if percent >= threshold else "failed", "percent": percent, "threshold": threshold, "total": total, "covered": covered, "details": details}
     out = args.coverage_json.with_name("diff-coverage-report.json")
     out.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-    if total == 0 and args.require_diff:
-        print(f"[diff-coverage] FAILED changed files carried no executable lines "
-              f"(source: {source}); cannot judge incremental coverage")
-        return 1
     if percent < threshold:
         print(f"[diff-coverage] FAILED {percent:.2f}% < {threshold:.2f}%")
         for row in details:

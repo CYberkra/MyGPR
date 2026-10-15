@@ -31,7 +31,7 @@ jobs:
       # 避免「本地过 CI 也过」这类手工同步漂移。--require-diff 让增量覆盖率
       # 在 PR 的浅克隆下也变成显式失败而非静默 PASS。
       # main push 的 HEAD 与 origin/main 相同，没有增量；仍跑全部质量门禁，
-      # 只在 PR 上要求非空增量，避免成功合并后因空差异误报失败。
+      # PR 要求可计算的有效 diff；覆盖范围外的文档/打包变更允许无后端增量。
       - name: Backend quality gate
         run: python scripts/run_backend_quality_gate.py ${{ github.event_name == 'pull_request' && '--require-diff' || '' }}
       - name: Upload coverage evidence on failure

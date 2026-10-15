@@ -27,6 +27,7 @@ Python 支持 **3.12–3.13**（`pyproject.toml`: `>=3.12,<3.14`）；本机 202
 - 核心：numpy 2.5.1、pandas 2.3.3、scipy 1.18.0、matplotlib 3.11.0、Pillow 12.3.0、h5py 3.16.0、PyYAML 6.0.3、PyWavelets 1.9.0、pyproj 3.7.2、openpyxl 3.1.5、rasterio 1.5.0、fiona 1.10.1、defusedxml 0.7.1。
 - GUI：PyQt6 6.11.0、PyQt6-Qt6 6.11.1、PyQt6-Fluent-Widgets 1.11.2、pyqtgraph 0.14.0、PyOpenGL 3.1.10、colorlog 6.12.0。
 - 核心精确版本在 `requirements.txt`；`requirements-core.txt` 引用它，GUI 在 `requirements-gui.txt`；与 `pyproject.toml` 同步。开发工具按 `requirements-test-backend.txt`，不要用本机 `pip freeze` 覆盖跨平台依赖声明。
+- Windows 打包：`requirements-windows-build.txt`（PyInstaller 6.22.3、hooks-contrib 2026.8、pip-licenses 5.5.5、cyclonedx-bom 5.5.0），Inno Setup 6.7.3；桌面安装验证额外使用 pywinauto 0.6.9。见 [构建说明](docs/releases/windows-build.md)。
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-gui.txt -r requirements-dev.txt
@@ -51,7 +52,7 @@ python -m pytest tests/ -q
 
 - 项目导入：CSV/TXT/NPY/NPZ/H5/HDF5；厂商二进制底层读取器不等于已接通项目导入向导。格式约定见 [数据格式参考](docs/user/reference/数据格式参考.md)。
 - CLI 作业使用显式 `methods`，`recommended_profile` 已移除。
-- 设计 SPEC 在 `docs/superpowers/specs/`；当前无根 `SPEC.md` 或 PyInstaller `.spec`。exe 打包属于待重新建立和验收的发布流程。
+- 设计 SPEC 在 `docs/superpowers/specs/`；当前无根 `SPEC.md`。Windows 打包配方在 `packaging/windows/MyGPR.spec` 和 `MyGPR.iss`，从不可变源码 ref 构建；禁止移动已发布 tag 或夹带工作区文件。
 
 ## Hard Rules
 

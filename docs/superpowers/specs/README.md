@@ -23,10 +23,12 @@
 
 ## `.spec` 打包文件
 
-当前没有根目录 `SPEC.md`，也没有 PyInstaller `gpr_gui.spec`。后者在 `a9fb92ef`（2026-07-31）清理时删除；查看原件：
+当前没有根目录 `SPEC.md`。旧 PyInstaller `gpr_gui.spec` 在 `a9fb92ef`（2026-07-31）清理时删除；查看原件：
 
 ```bash
 git show a9fb92ef^:gpr_gui.spec
 ```
 
-旧 spec 引用了已不存在的主题和启动资源，不应直接还原后宣称可用。重新建立 exe 打包流程时，应核对当前资源、依赖、VERSION 和 `--smoke` 入口，再在 Windows 实机验证。
+旧 spec 引用了已不存在的主题和启动资源，不应直接还原。现行配方为
+[packaging/windows/MyGPR.spec](../../../packaging/windows/MyGPR.spec)，配合 Inno Setup；
+重建和安装验收见 [Windows 构建说明](../../releases/windows-build.md)。打包 `.spec` 与设计规格是不同文件。

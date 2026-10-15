@@ -5,7 +5,7 @@ PyQt6 + PyQt6-Fluent-Widgets 桌面前端，配分层后端（`mygpr/` 清洁架
 
 > 架构与工程约束：[CLAUDE.md](CLAUDE.md)；当前状态：[CURRENT_STATE.md](CURRENT_STATE.md)；交接规则：[DEV_HANDOFF.md](DEV_HANDOFF.md)；设计规格索引：[specs](docs/superpowers/specs/README.md)。
 
-当前发行版：**v0.10.0**，更新内容和 wheel 安装方式见[发布说明](docs/releases/v0.10.0.md)。
+当前发行版：**v0.10.0**，提供 Windows x64 安装器、源码和 wheel，见[发布说明](docs/releases/v0.10.0.md)。
 
 ## 代码结构
 
@@ -48,6 +48,12 @@ Python **3.12–3.13**（钉版 `numpy==2.5.1` 要求 ≥3.12；CI 矩阵与 `re
 
 ## 安装
 
+Windows 用户可从 [v0.10.0 Release](https://github.com/CYberkra/MyGPR/releases/tag/v0.10.0)
+下载 `MyGPR-0.10.0-Windows-x64-Setup.exe`，直接安装，无需另装 Python。
+适用 Windows 10 1809+ / Windows 11 x64；当前安装器未签名，校验值见 Release 附件。
+
+源码开发与 Python 包安装：
+
 ```powershell
 py -3.12 -m venv .venv         # 也可选择 Python 3.13
 .\.venv\Scripts\Activate.ps1
@@ -79,7 +85,9 @@ RD3/RD7、DT1、DZT、SEG-Y、ENVI、ImpulseRadar 的底层读取器支持有限
 
 ## SPEC 与打包
 
-设计规格仍保存在 [docs/superpowers/specs/](docs/superpowers/specs/README.md)，旧三页设计为历史记录。当前没有根目录 `SPEC.md`。PyInstaller 的 `gpr_gui.spec` 已在 `a9fb92ef`（2026-07-31）删除，历史内容可用 `git show a9fb92ef^:gpr_gui.spec` 查看；当前交付路径是源码 / Python 包，尚无经过本轮验证的 exe 打包流程。
+设计规格仍保存在 [docs/superpowers/specs/](docs/superpowers/specs/README.md)，旧三页设计为历史记录。当前没有根目录 `SPEC.md`。旧 `gpr_gui.spec` 已在 `a9fb92ef` 删除；现行配方为 [packaging/windows/MyGPR.spec](packaging/windows/MyGPR.spec) 和 Inno Setup 安装器。
+
+Windows 构建工具钉版在 [requirements-windows-build.txt](requirements-windows-build.txt)：PyInstaller 6.22.3、hooks-contrib 2026.8、pip-licenses 5.5.5、cyclonedx-bom 5.5.0；Inno Setup 6.7.3。重建、真实安装验证和发布清单见 [Windows 构建说明](docs/releases/windows-build.md)。
 
 ## 二次开发入口
 
