@@ -4,6 +4,9 @@ Windows x64 安装包采用 PyInstaller onedir + Inno Setup，内置 Python、Qt
 目标系统为 Windows 10 1809 及以上 / Windows 11 x64；本轮验证环境为 Windows 11，
 未单独验证 Windows 10 或 ARM64。安装到当前用户目录，无需管理员权限。
 
+这是 MyGPR 处理端的独立安装包。CDUT-UavGPR 总平台的子模块、统一启动器及安装器需分别集成，
+路径与版本对齐见 [平台对接说明](../developer/CDUT_PLATFORM_INTEGRATION.md#发行与启动入口)。
+
 ## 重建
 
 在 Windows x64 的新虚拟环境安装指定发行版 wheel 及构建依赖。

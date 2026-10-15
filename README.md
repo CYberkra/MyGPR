@@ -1,11 +1,21 @@
 # MyGPR 0.10.0
 
-(UAV-)GPR 探地雷达数据处理、解释与 GIS 服务的桌面应用 + 无头后端。
+MyGPR 是 **CDUT-UavGPR 无人机探地雷达平台的数据处理、成像解释与成果交付工作台**，提供桌面应用和无头后端。
 PyQt6 + PyQt6-Fluent-Widgets 桌面前端，配分层后端（`mygpr/` 清洁架构 + `core/` 遗留内核）。
 
 > 架构与工程约束：[CLAUDE.md](CLAUDE.md)；当前状态：[CURRENT_STATE.md](CURRENT_STATE.md)；交接规则：[DEV_HANDOFF.md](DEV_HANDOFF.md)；设计规格索引：[specs](docs/superpowers/specs/README.md)。
 
 当前发行版：**v0.10.0**，提供 Windows x64 安装器、源码和 wheel，见[发布说明](docs/releases/v0.10.0.md)。
+
+## 在总平台中的定位
+
+[CDUT-UavGPR-Controller 主仓库](https://github.com/MuseLinn/CDUT-UavGPR-Controller)
+负责 VNA/SFCW 采集控制、RTK/姿态/高度传感器、机载服务与地面通信；本仓库负责采集数据的
+项目管理、导入与质控、测线处理、B-scan 成像、界面解释、空间成果与报告。
+
+主仓库通过 `MyGPR/` Git 子模块引用本仓库，统一启动器提供采集端、处理端和机载服务端入口。
+本仓库的 Windows 安装包是处理端独立发行版；总平台集成需另行同步子模块版本、启动路径和安装器。
+组件职责、数据语义与待对齐项见 [平台对接说明](docs/developer/CDUT_PLATFORM_INTEGRATION.md)。
 
 ## 代码结构
 
@@ -79,7 +89,7 @@ PowerShell 离屏冒烟：`$env:QT_QPA_PLATFORM='offscreen'; python app_qt.py --
 
 ## 数据导入
 
-项目测线导入入口直接支持 **CSV / TXT / NPY / NPZ / H5 / HDF5**。CDUT 采集 HDF5 会转换道×采样点方向，保留时窗、分量和逐道传感器缺失值；参见[数据格式参考](docs/user/reference/数据格式参考.md)。
+项目测线导入入口直接支持 **CSV / TXT / NPY / NPZ / H5 / HDF5**。CDUT 采集 HDF5 当前支持带 `real` / `magnitude` 标记的已完成文件，会转换道×采样点方向，保留时窗、分量和逐道传感器缺失值；主仓库的 `fdata` 分量和缺少分量标记的历史采集文件仍待适配。详细 schema 见[数据格式参考](docs/user/reference/数据格式参考.md)。
 
 RD3/RD7、DT1、DZT、SEG-Y、ENVI、ImpulseRadar 的底层读取器支持有限子集，但项目导入向导尚未接通这些二进制入口；格式被识别不代表能在向导中直接导入。CLI 批处理输入支持 CSV/TXT 和 H5/HDF5，配置需提供显式 `methods`；`recommended_profile` 已移除。
 

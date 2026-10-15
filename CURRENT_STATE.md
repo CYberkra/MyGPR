@@ -1,8 +1,13 @@
 # Current State — Desktop Qt GUI + headless backend
 
 Version: 0.10.0. Source-tree review: 2026-10-14 (includes acquisition HDF5 compatibility changes).
+Platform integration documentation review: 2026-10-15.
 
 This package now ships both the Qt6 desktop frontend and the headless backend.
+It is the processing, imaging/interpretation and deliverables component of the
+[CDUT-UavGPR platform](https://github.com/MuseLinn/CDUT-UavGPR-Controller).
+Acquisition hardware and airborne/ground communications belong to the parent repository.
+See [integration boundaries and pending alignment](docs/developer/CDUT_PLATFORM_INTEGRATION.md).
 
 - Desktop entry: `app_qt.py` or console script `mygpr`.
 - Backend interfaces: `mygpr/interfaces/` and `config/backend_api_v1.json`.
@@ -32,7 +37,9 @@ mygpr
 - New projects use per-line HDF5 arrays plus a SQLite catalog; legacy project
   layouts remain a compatibility path. See [Hybrid Store](docs/developer/HYBRID_PROJECT_STORE_V1.md).
 - Project imports accept CSV/TXT/NPY/NPZ/H5/HDF5. CDUT acquisition HDF5 retains
-  timing, component and aligned sensor gaps. Vendor binary readers are present
+  timing, component and aligned sensor gaps for completed files marked `real`/`magnitude`.
+  Parent `fdata` and acquisition files without a component marker remain unsupported.
+  Vendor binary readers are present
   but are not wired into the project import wizard.
 - CLI jobs use explicit `methods`; `recommended_profile` has been removed.
 - `config/architecture_policy.toml` now declares `[layers.ui]` with a migration
