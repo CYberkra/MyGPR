@@ -24,7 +24,6 @@ from ui import constants, file_dialogs
 from ui.page_scaffold import (make_card, make_form_row, make_hint,
                               style_transparent_scroll, wrap_centered)
 
-_FALLBACK_VERSION = '0.9.38'
 _AUTHOR = '邸建豪 袁林 詹萍'
 _COPYRIGHT = '© 2025 MyGPR 保留所有权利'
 
@@ -42,15 +41,21 @@ def _levels_or_default(data: dict) -> tuple[float, float]:
 
 
 def _read_version() -> str:
-    """版本读仓库根 VERSION 文件，缺失/异常回退 0.9.38（SPEC §6.4）。"""
+    """源码读 VERSION；wheel 安装读包元数据，无可用信息时显示 unknown。"""
     try:
         root = os.path.dirname(os.path.dirname(os.path.dirname(
             os.path.abspath(__file__))))
-        with open(os.path.join(root, 'VERSION'), 'r', encoding='utf-8') as f:
+        with open(os.path.join(root, 'VERSION'), 'r', encoding='utf-8-sig') as f:
             text = f.read().strip()
-        return text or _FALLBACK_VERSION
+        if text:
+            return text
     except OSError:
-        return _FALLBACK_VERSION
+        pass
+    from importlib.metadata import PackageNotFoundError, version as distribution_version
+    try:
+        return distribution_version('mygpr')
+    except PackageNotFoundError:
+        return 'unknown'
 
 
 class SettingsPage(ScrollArea):
@@ -304,7 +309,7 @@ class SettingsPage(ScrollArea):
         return card
 
     def _build_about_card(self, parent):
-        """卡片4"关于"：版本（VERSION 文件，回退 0.9.38）/ 作者 / 版权。"""
+        """卡片4"关于"：实际源码/安装包版本 / 作者 / 版权。"""
         card, layout = make_card('关于')
         for label_text, value_text in (
                 ('版本:', _read_version()),

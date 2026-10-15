@@ -42,13 +42,16 @@ from core.storage_primitives import atomic_write_text
 def _software_version() -> str:
     version_file = Path(__file__).resolve().parents[1] / "VERSION"
     try:
-        return version_file.read_text(encoding="utf-8").strip()
+        source_version = version_file.read_text(encoding="utf-8-sig").strip()
     except OSError:
-        from importlib.metadata import PackageNotFoundError, version as distribution_version
-        try:
-            return distribution_version("mygpr")
-        except PackageNotFoundError:
-            return "unknown"
+        source_version = ""
+    if source_version:
+        return source_version
+    from importlib.metadata import PackageNotFoundError, version as distribution_version
+    try:
+        return distribution_version("mygpr")
+    except PackageNotFoundError:
+        return "unknown"
 
 
 def _interface_axes_for_line(

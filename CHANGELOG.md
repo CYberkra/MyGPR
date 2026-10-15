@@ -1,5 +1,24 @@
 ## Unreleased
 
+暂无。
+
+## 0.10.0 Acquisition HDF5 & Processing Workbench（2026-10-15）
+
+- 支持 CDUT 采集 HDF5：识别 `/traces`、内嵌传感器与采集属性，分块转置为
+  采样×道矩阵；保留 real/magnitude 分量、缺测值、不含右端点的时间轴和未知距离。
+- 项目、预检和 CLI 接通采集 HDF5；修复裁剪、保存、重开、增益与再次裁剪时的
+  采样间隔及累计时间偏移。未知测距时迁移成像要求显式输入测量距离。
+- 汇总 0.9.38 以来的处理工作台更新：八页顶部导航、多成果 B-scan 视图、
+  A-scan 跟随、灰度/波形显示、地形高程轴和处理链编辑交互。
+- 修复 Qt 菜单销毁顺序导致的原生崩溃、异步任务与文件锁边界、启动及
+  测试夹具生命周期问题；统一 Windows/Linux CI 冒烟截图路径。
+- 同步 Python 3.12–3.13 依赖声明、安装入口、架构/用户说明与 SPEC 索引。
+  历史 PyInstaller spec 不作为现行打包能力。
+- 统一源码、包元数据、当前文档和发布版本；关于页和报告从源码 VERSION 或
+  wheel 元数据读取实际版本，增强一致性检查以阻止后续发版遗漏。
+- 升级提示：旧 CLI `recommended_profile` 配置须改用显式 `methods`；
+  Geotech OKO GPR/GPR2 支持已移除；本版本提供源码和 wheel，不包含 exe 安装器。
+
 - Startup import path: matplotlib (gis_map_export / report figure chain) moved
   out of the GUI import tree (3.75s → 2.97s measured via `-X importtime`);
   report/GIS rendering behavior unchanged.
