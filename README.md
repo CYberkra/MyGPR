@@ -87,7 +87,7 @@ RD3/RD7、DT1、DZT、SEG-Y、ENVI、ImpulseRadar 的底层读取器支持有限
 
 设计规格仍保存在 [docs/superpowers/specs/](docs/superpowers/specs/README.md)，旧三页设计为历史记录。当前没有根目录 `SPEC.md`。旧 `gpr_gui.spec` 已在 `a9fb92ef` 删除；现行配方为 [packaging/windows/MyGPR.spec](packaging/windows/MyGPR.spec) 和 Inno Setup 安装器。
 
-Windows 构建工具钉版在 [requirements-windows-build.txt](requirements-windows-build.txt)：PyInstaller 6.22.3、hooks-contrib 2026.8、pip-licenses 5.5.5、cyclonedx-bom 5.5.0；Inno Setup 6.7.3。重建、真实安装验证和发布清单见 [Windows 构建说明](docs/releases/windows-build.md)。
+Windows 构建使用 Python 3.12.12，工具钉版在 [requirements-windows-build.txt](requirements-windows-build.txt)：PyInstaller 6.22.3、hooks-contrib 2026.8、pip-licenses 5.5.5、cyclonedx-bom 5.5.0；Inno Setup 6.7.3。重建、真实安装验证和发布清单见 [Windows 构建说明](docs/releases/windows-build.md)。
 
 ## 二次开发入口
 

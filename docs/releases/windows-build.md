@@ -6,7 +6,9 @@ Windows x64 安装包采用 PyInstaller onedir + Inno Setup，内置 Python、Qt
 
 ## 重建
 
-在 Windows x64、Python 3.12–3.13 的新虚拟环境安装指定发行版 wheel 及构建依赖：
+在 Windows x64 的新虚拟环境安装指定发行版 wheel 及构建依赖。
+本轮构建解释器为 Python **3.12.12**；3.12 构建需 ≥3.12.12（旧 3.12.0 的冻结 SciPy 导入失败）。
+源码开发支持范围仍为 Python 3.12–3.13。
 
 ```powershell
 py -3.12 -m venv output/windows-build-env
@@ -15,6 +17,8 @@ output/windows-build-env/Scripts/python.exe -m pip install "./mygpr-0.10.0-py3-n
 ```
 
 工具基线：PyInstaller 6.22.3、hooks-contrib 2026.8、Inno Setup 6.7.3。
+冻结阶段使用精简 PATH，拒绝收集构建环境之外的原生 DLL；Qt 运行库固定随 Qt 打包。
+先执行冻结程序的后端检查，通过后才压缩安装器。
 构建脚本只从 `SourceRef` 的 `git archive` 读取应用源码，不夹带工作区未提交内容。
 打包配方独立于应用 tag；不移动既有 tag。结果在 `output/windows-installer-v0.10.0/assets/`。
 修改版本时需同步输出目录、源码 ref 和验证脚本中的预期版本。

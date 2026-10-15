@@ -29,6 +29,8 @@ def main():
     args = parser.parse_args()
     if sys.platform != 'win32' or struct.calcsize('P') != 8:
         raise RuntimeError('Build requires 64-bit Windows Python')
+    if sys.version_info[:2] == (3, 12) and sys.version_info[:3] < (3, 12, 12):
+        raise RuntimeError('Use Python 3.12.12+ for freezing; older compiler/runtime patches fail SciPy imports')
     output = args.output.resolve()
     # Only task-owned output below the repository output tree may be replaced.
     allowed = (ROOT / 'output').resolve()
@@ -106,6 +108,10 @@ def main():
     run([sys.executable, '-m', 'piplicenses', '--format=json', '--with-urls',
          '--output-file', output / 'windows-environment-licenses.json'])
     environment = os.environ.copy()
+    environment.pop('PYTHONPATH', None)
+    environment['PATH'] = os.pathsep.join([str(Path(sys.executable).parent),
+                                          str(Path(os.environ['SystemRoot']) / 'System32'),
+                                          os.environ['SystemRoot']])
     environment.update(MYGPR_FREEZE_SOURCE=str(source), MYGPR_FREEZE_ICON=str(icon),
                        MYGPR_FREEZE_VERSION_INFO=str(version_info))
     run([sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean',
@@ -123,6 +129,11 @@ def main():
                   'build_environment': 'build-environment.json', 'recipe_sha256': recipe_hashes,
                   'pyinstaller': metadata.version('PyInstaller'), 'signed': False}
     (dist / '_internal/windows-build.json').write_text(json.dumps(provenance, indent=2), encoding='utf-8')
+    check_environment = environment.copy()
+    check_environment.update(QT_QPA_PLATFORM='offscreen',
+                             MYGPR_SETTINGS_FILE=str(output / 'build-check/config/settings.json'))
+    run([dist / 'MyGPR.exe', '--package-check', output / 'frozen-build-check.json'],
+        cwd=output, env=check_environment, timeout=120)
     run([args.inno.resolve(), f'/DAppVersion={version}', f'/DDistDir={dist}',
          f'/DOutputDir={output / "assets"}', f'/DIconPath={icon}', RECIPE / 'MyGPR.iss'])
     (output / 'build-provenance.json').write_text(json.dumps(provenance, indent=2), encoding='utf-8')

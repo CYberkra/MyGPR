@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
+import PyQt6
 
 source = Path(os.environ["MYGPR_FREEZE_SOURCE"]).resolve()
 recipe = Path(SPECPATH).resolve()
@@ -38,6 +39,19 @@ a = Analysis(
               "PyQt5", "PySide2", "PySide6"],
     noarchive=False,
 )
+# Pin the redistributable runtime supplied by Qt rather than an older Python
+# installation's copy. The bootloader loads the root copy before runtime hooks.
+qt_bin = Path(PyQt6.__file__).parent / 'Qt6' / 'bin'
+runtime_names = ('VCRUNTIME140.dll', 'VCRUNTIME140_1.dll', 'MSVCP140.dll', 'MSVCP140_1.dll', 'MSVCP140_2.dll')
+a.binaries = [entry for entry in a.binaries if entry[0] not in runtime_names]
+a.binaries += [(name, str(qt_bin / name), 'BINARY') for name in runtime_names]
+# A developer PATH may contain unrelated Poppler/ICU DLLs. Refuse to ship any
+# native dependency from outside the selected Python/venv or Windows itself.
+allowed = [Path(sys.prefix).resolve(), Path(sys.base_prefix).resolve(),
+           Path(os.environ['SystemRoot']).resolve(), source, recipe]
+for name, origin, kind in a.binaries:
+    if not any(Path(origin).resolve().is_relative_to(root) for root in allowed):
+        raise ValueError(f'Native dependency outside the build environment: {name}: {origin}')
 pyz = PYZ(a.pure)
 exe = EXE(
     pyz, a.scripts, [], exclude_binaries=True,

@@ -1,4 +1,4 @@
-# Build in an isolated Windows x64 environment with requirements.txt + requirements-gui.txt.
+# Freeze using Python 3.12.12+ in an isolated Windows x64 environment with the release wheel[gui].
 PyInstaller==6.22.3
 pyinstaller-hooks-contrib==2026.8
 pip-licenses==5.5.5
