@@ -81,6 +81,9 @@ def main():
                 time.sleep(0.5)
             else:
                 raise AssertionError('Settings navigation not exposed by UIA')
+            from pywinauto.mouse import scroll
+            rectangle = window.rectangle()
+            scroll(coords=(rectangle.right - 300, rectangle.top + rectangle.height() // 2), wheel_dist=-20)
             window.child_window(title='0.10.0', control_type='Text').wait('visible', timeout=20)
             window.capture_as_image().save(output / 'installed-settings.png')
             evidence['checks']['native-settings-version'] = '0.10.0'
