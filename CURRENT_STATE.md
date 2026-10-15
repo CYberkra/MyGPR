@@ -44,7 +44,7 @@ mygpr
   [requirements.txt](requirements.txt), and [requirements-gui.txt](requirements-gui.txt).
 - Design specifications remain in [docs/superpowers/specs](docs/superpowers/specs/README.md).
   The July three-page UI is historical. The PyInstaller `gpr_gui.spec` was
-  deleted in `a9fb92ef`; an executable release flow still needs implementation
-  and validation. Source/wheel installation is the current documented route.
+  deleted in `a9fb92ef`; the current Windows installer recipe is
+  `packaging/windows/MyGPR.spec` + Inno Setup. See [build and validation](docs/releases/windows-build.md).
 - Local checks and historical CI do not establish Windows user acceptance or
   physical validation of field results.
