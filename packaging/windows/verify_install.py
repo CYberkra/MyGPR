@@ -43,7 +43,7 @@ def main():
     def run(name, command, *, expected=0, timeout=180):
         result = subprocess.run([str(value) for value in command], cwd=sandbox, env=env,
                                 capture_output=True, timeout=timeout)
-        (output / f'{name}.log').write_bytes(result.stdout + result.stderr)
+        (output / f'{name}.stdout.log').write_bytes(result.stdout + result.stderr)
         evidence['checks'][name] = result.returncode
         print(name, result.returncode, flush=True)
         assert result.returncode == expected, (name, result.returncode)
@@ -99,6 +99,14 @@ def main():
         retained.write_text('preserve this user-created file', encoding='utf-8')
         run('uninstall', [install / 'unins000.exe', '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART',
                           f'/LOG={output / "uninstall.log"}'])
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            uninstall_log = (output / 'uninstall.log').read_text(encoding='utf-8-sig', errors='replace')
+            if not executable.exists() and 'Uninstallation process succeeded.' in uninstall_log:
+                break
+            time.sleep(0.2)
+        else:
+            raise AssertionError('Uninstall did not finish successfully')
         assert not executable.exists()
         assert retained.read_text(encoding='utf-8') == 'preserve this user-created file'
         assert sentinel.read_bytes() == b'MyGPR QA: uninstall must preserve user data'
