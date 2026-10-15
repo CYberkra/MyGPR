@@ -1,4 +1,4 @@
-# MyGPR v0.9.38 — Qt 图形界面使用说明
+# MyGPR v0.10.0 — Qt 图形界面使用说明
 
 完整操作手册见 [用户文档](docs/user/README.md)；精确依赖版本见 [README](README.md)。核查日期：2026-10-14。
 

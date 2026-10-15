@@ -1,9 +1,11 @@
-# MyGPR 0.9.38
+# MyGPR 0.10.0
 
 (UAV-)GPR 探地雷达数据处理、解释与 GIS 服务的桌面应用 + 无头后端。
 PyQt6 + PyQt6-Fluent-Widgets 桌面前端，配分层后端（`mygpr/` 清洁架构 + `core/` 遗留内核）。
 
 > 架构与工程约束：[CLAUDE.md](CLAUDE.md)；当前状态：[CURRENT_STATE.md](CURRENT_STATE.md)；交接规则：[DEV_HANDOFF.md](DEV_HANDOFF.md)；设计规格索引：[specs](docs/superpowers/specs/README.md)。
+
+当前发行版：**v0.10.0**，更新内容和 wheel 安装方式见[发布说明](docs/releases/v0.10.0.md)。
 
 ## 代码结构
 
@@ -24,7 +26,7 @@ PyQt6 + PyQt6-Fluent-Widgets 桌面前端，配分层后端（`mygpr/` 清洁架
 
 Python **3.12–3.13**（钉版 `numpy==2.5.1` 要求 ≥3.12；CI 矩阵与 `requires-python` 已对齐）。
 
-直接依赖基线如下；2026-10-14 本机 Windows `.venv` 为 **Python 3.12.0**，以下核心与 GUI 包均与安装版本一致。这不是最新版包推荐，也不等于重新完成了 Linux/3.13 验收。
+直接依赖基线如下；2026-10-14 本机 Windows `.venv` 为 **Python 3.12.0**，以下核心与 GUI 包均与安装版本一致。发行版的 Python 3.12/3.13 和 GUI 自动检查结果见[发布说明](docs/releases/v0.10.0.md)，依赖清单不作为最新版包推荐。
 
 | 核心包（requirements.txt） | 版本 | GUI 包（requirements-gui.txt） | 版本 |
 | --- | --- | --- | --- |

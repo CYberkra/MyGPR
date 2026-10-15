@@ -1,6 +1,6 @@
 # Current State — Desktop Qt GUI + headless backend
 
-Version: 0.9.38. Source-tree review: 2026-10-14 (includes acquisition HDF5 compatibility changes).
+Version: 0.10.0. Source-tree review: 2026-10-14 (includes acquisition HDF5 compatibility changes).
 
 This package now ships both the Qt6 desktop frontend and the headless backend.
 
