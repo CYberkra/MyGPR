@@ -3,6 +3,7 @@
 ## 项目概述
 
 MyGPR 是面向 GPR / UAV-GPR 野外勘探项目的桌面软件，PyQt6 + qfluentwidgets。
+在 [CDUT-UavGPR 总平台](https://github.com/MuseLinn/CDUT-UavGPR-Controller) 中承担处理、成像解释与成果交付；主仓库负责硬件采集、传感器与机载/地面通信。接口或统一发行变更先查 [平台对接说明](docs/developer/CDUT_PLATFORM_INTEGRATION.md)。
 流程：项目建档 → 测线导入与预检 → 雷达/RTK/IMU 同步 → 测线处理 → 界面标注 → 空间成果 → 成果报告。
 
 主界面八个页签（顶部横排 SlimSegment 药丸分段，竖导航已退役）：`主页 / 项目 / 处理 / 解释 / 空间信息 / 成果 / 任务 / 设置`。
