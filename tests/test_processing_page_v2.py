@@ -182,6 +182,16 @@ def _bundle(tag: float, samples: int = 8, traces: int = 6):
         trace_elevation_m=None, depth_axis_m=None)
 
 
+def _saved_artifact(aid, method, group, step):
+    from types import SimpleNamespace
+    return SimpleNamespace(
+        artifact_id=aid, line_id='L01', name=f'{method} {aid}', method_id=method,
+        created_at='2026-10-16T10:00:00',
+        manifest={'params': {'artifact_kind': 'processing', 'run_group_id': group,
+                             'run_step_index': step, 'lineage_version': 2,
+                             'run_input_artifact_id': '', 'step_input_artifact_id': ''}})
+
+
 class TestResultGridLazyPrinciple:
     """有数据才建画布：运行前不摆空 B-Scan 窗口。"""
 
@@ -194,36 +204,30 @@ class TestResultGridLazyPrinciple:
         assert not grid._empty.isVisibleTo(grid)
         assert len(grid.cards()) == 1
 
-    def test_page_before_run_builds_no_step_cards(self, qapp):
+    def test_page_before_run_opens_only_raw_in_one_group(self, qapp):
         page = ProcessingPage()
         try:
-            page._refresh_chain_and_results()
-            assert page._result_grid.cards() == []      # 未选测线：零画布
+            assert page._workspace.tab_keys() == []
+            assert len(page._workspace.views()) == 1
             page.set_original_bundle(_bundle(1))
-            assert len(page._result_grid.cards()) == 1  # 只有输入（有数据）
-            titles = [c.title_label.text() for c in page._result_grid.cards()]
-            assert titles == ['输入']
+            assert page._workspace.tab_keys() == ['original']
+            assert page._workspace.primary_view()._matrix is page._sources['original']['bundle'].matrix
+            assert page.current_pipeline()['steps'] == []
         finally:
             page.close()
 
-    def test_page_after_run_builds_step_cards(self, qapp):
+    def test_catalog_results_stay_closed_until_explicitly_selected(self, qapp):
         page = ProcessingPage()
         try:
             page.set_original_bundle(_bundle(1))
-            page.set_artifacts([
-                __import__('types').SimpleNamespace(
-                    artifact_id='S1', line_id='L01', name='run 步骤1_dewow',
-                    method_id='dewow', created_at='2026-09-25T10:01:00',
-                    manifest={'params': {'artifact_kind': 'intermediate',
-                                         'run_group_id': 'G1'}}),
-                __import__('types').SimpleNamespace(
-                    artifact_id='F1', line_id='L01', name='run_sec',
-                    method_id='sec_gain', created_at='2026-09-25T10:02:00',
-                    manifest={'params': {'artifact_kind': 'processing',
-                                         'run_group_id': 'G1'}}),
-            ])
-            titles = [c.title_label.text() for c in page._result_grid.cards()]
-            assert titles == ['输入', '1 dewow', '2 sec_gain']
+            page.set_artifacts([_saved_artifact('S1', 'dewow', 'G1', 1),
+                                _saved_artifact('F1', 'sec_gain', 'G1', 2)])
+            assert page._workspace.tab_keys() == ['original']
+            page.select_artifact('S1')
+            page.select_artifact('F1')
+            assert page._workspace.tab_keys() == ['original', 'artifact:S1', 'artifact:F1']
+            assert page.current_pipeline()['input_artifact_id'] == 'F1'
+            assert len(page._workspace.views()) == 1
         finally:
             page.close()
 
@@ -318,20 +322,16 @@ class TestChainSlidingPill:
 class TestStatusSemantics:
     """状态与反馈：最终结果 ✓ / 选中卡幅值范围 / 改动提示。"""
 
-    def test_no_check_gimmick_on_cards(self, qapp):
-        """撤掉「最终结果 ✓」：用户未要求、形似死按钮（真机反馈撤案）。"""
+    def test_saved_result_tab_uses_resource_identity_without_final_gimmick(self, qapp):
         page = ProcessingPage()
         try:
             page.set_original_bundle(_bundle(1))
-            page.set_artifacts([
-                __import__('types').SimpleNamespace(
-                    artifact_id='F1', line_id='L01', name='run_agc',
-                    method_id='agc', created_at='2026-09-26T10:02:00',
-                    manifest={'params': {'artifact_kind': 'processing',
-                                         'run_group_id': 'G1'}}),
-            ])
-            for card in page._result_grid.cards():
-                assert not hasattr(card, 'final_label')
+            page.set_artifacts([_saved_artifact('F1', 'agc', 'G1', 1)])
+            page.select_artifact('F1')
+            bar = page._workspace.tab_bar()
+            assert 'F1' in bar.tabText(bar.currentIndex())
+            assert '✓' not in bar.tabText(bar.currentIndex())
+            assert page.current_pipeline()['steps'] == []
         finally:
             page.close()
 
@@ -367,27 +367,25 @@ class TestStatusSemantics:
         strip.set_dirty(False)
         assert not strip._dirty_label.isVisibleTo(strip)
 
-    def test_page_marks_stale_after_chain_change(self, qapp):
+    def test_draft_edits_preserve_saved_result_and_visible_matrix(self, qapp):
         page = ProcessingPage()
         try:
+            result = _saved_artifact('F1', 'agc', 'G1', 1)
             page.set_original_bundle(_bundle(1))
-            page.set_artifacts([
-                __import__('types').SimpleNamespace(
-                    artifact_id='F1', line_id='L01', name='run_agc',
-                    method_id='agc', created_at='2026-09-26T10:02:00',
-                    manifest={'params': {'artifact_kind': 'processing',
-                                         'run_group_id': 'G1'}}),
-            ])
-            assert page._step_artifact_ids              # 有运行结果
-            page._chain_strip.set_dirty(False)
-            page._pipeline_list.add_step('agc', '自动增益控制 (AGC)', {})
-            assert page._results_stale is True
-            assert page._chain_strip._dirty_label.isVisibleTo(page._chain_strip)
+            page.set_artifacts([result])
+            preview = _bundle(4)
+            page.set_artifact_bundle('F1', preview)
+            page.select_artifact('F1')
+            page._pipeline_list.add_step('dewow', '去直流', {'win': 11})
+            assert page._workspace.primary_view()._matrix is preview.matrix
+            assert page._artifacts_by_id['F1'] is result
+            assert page.current_pipeline()['steps'][0]['method_id'] == 'dewow'
+            assert page.current_pipeline()['input_artifact_id'] == 'F1'
         finally:
             page.close()
 
 
-class TestStaleSelectionDecoupling:
+class TestDraftSelectionIsolation:
     """结果过期（链已改未重算）时解除 chip↔卡片索引联动。
 
     旧 run 的卡片索引对不上新链（删/移步骤后整体移位），继续按索引
@@ -396,65 +394,61 @@ class TestStaleSelectionDecoupling:
 
     @staticmethod
     def _page_with_run(qapp):
-        from types import SimpleNamespace
         page = ProcessingPage()
         page.set_original_bundle(_bundle(1))
-        page.set_artifacts([
-            SimpleNamespace(
-                artifact_id='F1', line_id='L01', name='run_agc',
-                method_id='agc', created_at='2026-09-26T10:02:00',
-                manifest={'params': {'artifact_kind': 'processing',
-                                     'run_group_id': 'G1'}}),
-        ])
-        assert page._step_artifact_ids
-        assert page._results_stale is False
+        page.set_artifacts([_saved_artifact('F1', 'agc', 'G1', 1)])
+        page.select_artifact('F1')
         return page
 
-    def test_fresh_results_keep_selection_sync(self, qapp):
-        """结果与链一致：chip 选中照常映射到卡片高亮（回归锁）。"""
+    def test_selected_saved_result_starts_with_empty_new_steps(self, qapp):
         page = self._page_with_run(qapp)
         try:
-            page._on_chain_step_selected(0)
-            assert page._result_grid._selected_key == 'step:0'
+            assert page.current_pipeline()['steps'] == []
+            assert page.current_pipeline()['input_artifact_id'] == 'F1'
+            assert page._workspace.active_key() == 'artifact:F1'
         finally:
             page.close()
 
-    def test_stale_chip_click_does_not_highlight_card(self, qapp):
+    def test_selecting_draft_step_does_not_change_input(self, qapp):
         page = self._page_with_run(qapp)
         try:
-            page._on_chain_step_selected(0)
-            page._pipeline_list.add_step('agc', '自动增益控制 (AGC)', {})
-            assert page._results_stale is True
-            page._on_chain_step_selected(1)
-            assert page._result_grid._selected_key is None
+            page._pipeline_list.add_step('dewow', '去直流', {})
+            page._pipeline_list.add_step('agc', 'AGC', {})
+            page._pipeline_list.select_step(0)
+            assert page._workspace.active_key() == 'artifact:F1'
+            assert page.current_pipeline()['input_artifact_id'] == 'F1'
+            page._pipeline_list.select_step(1)
+            assert page.current_pipeline()['input_artifact_id'] == 'F1'
         finally:
             page.close()
 
-    def test_stale_card_click_does_not_write_back_chip(self, qapp):
+    def test_switching_saved_result_restores_its_own_draft(self, qapp):
         page = self._page_with_run(qapp)
         try:
-            page._chain_strip.select_step(-1)
-            page._pipeline_list.add_step('agc', '自动增益控制 (AGC)', {})
-            page._chain_strip.select_step(-1)
-            page._on_card_selected('step:0')
-            assert page._result_grid._selected_key == 'step:0'  # 卡片本身亮
-            assert page._chain_strip._list.currentRow() == -1   # 不回写 chip
+            page._pipeline_list.add_step('dewow', '去直流', {'win': 11})
+            page.select_original()
+            assert page.current_pipeline()['steps'] == []
+            page._pipeline_list.add_step('agc', 'AGC', {'window': 7})
+            page.select_artifact('F1')
+            assert page.current_pipeline()['steps'][0]['params'] == {'win': 11}
+            page.select_original()
+            assert page.current_pipeline()['steps'][0]['params'] == {'window': 7}
         finally:
             page.close()
 
-    def test_stale_refresh_clears_highlight(self, qapp):
+    def test_display_change_never_appends_processing_steps(self, qapp):
         page = self._page_with_run(qapp)
         try:
-            page._on_chain_step_selected(0)
-            page._pipeline_list.add_step('agc', '自动增益控制 (AGC)', {})
-            page._refresh_chain_and_results()
-            assert page._result_grid._selected_key is None
+            before = page.current_pipeline()
+            page._set_display_cmap('gray')
+            assert page.current_pipeline() == before
+            assert page._workspace.active_key() == 'artifact:F1'
         finally:
             page.close()
 
 
 class TestCardClose:
-    """结果卡 × = 关闭该 B-Scan 窗口（网格移除，重跑恢复；输入卡不可关）。"""
+    """关闭仅影响视图；原始输入与成果采用相同生命周期。"""
 
     @staticmethod
     def _page_with_run(qapp):
@@ -470,46 +464,41 @@ class TestCardClose:
         ])
         return page
 
-    def test_close_btn_forwards_key(self, qapp):
+    def test_close_btn_forwards_key(self, grid):
+        # Standalone ResultGrid remains a library regression even though the page
+        # now uses BScanWorkspace.
+        grid.set_slots([{'key': 'step:0', 'title': 'AGC', 'enabled': True}])
+        got = []
+        grid.sig_card_close_requested.connect(got.append)
+        grid.cards()[0].close_btn.click()
+        assert got == ['step:0']
+
+    def test_closed_result_stays_closed_after_catalog_and_new_run_refresh(self, qapp):
         page = self._page_with_run(qapp)
         try:
-            got = []
-            page._result_grid.sig_card_close_requested.connect(got.append)
-            page._result_grid.cards()[1].close_btn.click()
-            assert got == ['step:0']
+            page.select_artifact('F1')
+            page.close_artifact_tab('F1')
+            old = _saved_artifact('F1', 'agc', 'G1', 1)
+            page.set_artifacts([old])
+            assert page._workspace.tab_keys() == ['original']
+            page.set_artifacts([old, _saved_artifact('F2', 'agc', 'G2', 1)])
+            assert page._workspace.tab_keys() == ['original']
+            assert {'artifact:F1', 'artifact:F2'} <= set(page._sources)
+            page.select_artifact('F1')
+            assert page.current_pipeline()['input_artifact_id'] == 'F1'
         finally:
             page.close()
 
-    def test_close_removes_slot_until_rerun(self, qapp):
+    def test_raw_tab_closes_and_reopens_without_implicit_replacement(self, qapp):
         page = self._page_with_run(qapp)
         try:
-            page._on_card_close_requested('step:0')
-            keys = [c.key for c in page._result_grid.cards()]
-            assert keys == ['input']           # 结果卡被移除
-            # 同 run_group 的成果刷新不算重跑：窗口保持关闭
-            page.set_artifacts([__import__('types').SimpleNamespace(
-                artifact_id='F1', line_id='L01', name='run_agc',
-                method_id='agc', created_at='2026-09-28T10:02:00',
-                manifest={'params': {'artifact_kind': 'processing',
-                                     'run_group_id': 'G1'}})])
-            assert [c.key for c in page._result_grid.cards()] == ['input']
-            # 新 run_group（新一轮运行）→ 全部窗口恢复
-            page.set_artifacts([__import__('types').SimpleNamespace(
-                artifact_id='F2', line_id='L01', name='run_agc2',
-                method_id='agc', created_at='2026-09-28T11:00:00',
-                manifest={'params': {'artifact_kind': 'processing',
-                                     'run_group_id': 'G2'}})])
-            keys = [c.key for c in page._result_grid.cards()]
-            assert keys == ['input', 'step:0']  # 重跑恢复
-        finally:
-            page.close()
-
-    def test_input_card_not_closable(self, qapp):
-        page = self._page_with_run(qapp)
-        try:
-            page._on_card_close_requested('input')
-            assert not page._closed_slots
-            assert len(page._result_grid.cards()) == 2
+            page._workspace.close_source('original')
+            assert page._workspace.tab_keys() == []
+            assert page._workspace.active_key() == ''
+            assert not page._run_btn.isEnabled()
+            page.select_original()
+            assert page._workspace.tab_keys() == ['original']
+            assert page.current_pipeline()['input_artifact_id'] == ''
         finally:
             page.close()
 
@@ -676,7 +665,7 @@ class TestSharedScale:
         assert grid.cards()[1].view is None    # 占位卡无视图，不崩
 
 
-class TestExpandAllToggle:
+class TestExplicitSourceOpening:
     """「全部步骤」开关：关=只铺输入 + 最终结果（P3 就地版）。"""
 
     @staticmethod
@@ -703,23 +692,23 @@ class TestExpandAllToggle:
         ])
         return page
 
-    def test_default_expands_all(self, qapp):
+    def test_catalog_never_implicitly_expands_all_steps(self, qapp):
         page = self._page_with_run(qapp)
         try:
-            keys = [c.key for c in page._result_grid.cards()]
-            assert keys == ['input', 'step:0', 'step:1', 'step:2']
+            assert page._workspace.tab_keys() == ['original']
+            assert {'artifact:S1', 'artifact:S2', 'artifact:F1'} <= set(page._sources)
+            assert len(page._workspace.views()) == 1
         finally:
             page.close()
 
-    def test_off_shows_input_and_final_only(self, qapp):
+    def test_explicit_open_keeps_every_selected_step_in_single_group(self, qapp):
         page = self._page_with_run(qapp)
         try:
-            page._on_expand_all_changed(False)
-            keys = [c.key for c in page._result_grid.cards()]
-            assert keys == ['input', 'step:2']
-            page._on_expand_all_changed(True)
-            keys = [c.key for c in page._result_grid.cards()]
-            assert keys == ['input', 'step:0', 'step:1', 'step:2']
+            for artifact in ('S1', 'S2', 'F1'):
+                page.select_artifact(artifact)
+            assert page._workspace.tab_keys() == ['original', 'artifact:S1', 'artifact:S2', 'artifact:F1']
+            assert len(page._workspace.views()) == 1
+            assert page.current_pipeline()['input_artifact_id'] == 'F1'
         finally:
             page.close()
 
@@ -727,7 +716,7 @@ class TestExpandAllToggle:
         assert grid._expand_switch.isChecked() is True
 
 
-class TestGalleryContextFilter:
+class TestHistoricalTabsPreserved:
     """总览墙只显示当前上下文（真机反馈：跑一步蹦出一屏几天前的成果）。"""
 
     @staticmethod
@@ -746,33 +735,31 @@ class TestGalleryContextFilter:
                                      'run_group_id': 'G_NEW'}}),
         ]
 
-    def test_group_switch_drops_old_tabs(self, qapp):
-        """组切换：上一组的 artifact tab 移除，只保留原始锚点。"""
+    def test_new_run_catalog_keeps_explicitly_opened_historical_result(self, qapp):
         page = ProcessingPage()
         try:
             page.set_original_bundle(_bundle(1))
-            page.set_artifacts(self._artifacts())     # 最新组 = G_NEW
-            keys = [s['key'] for s in page._preview_sources]
-            assert 'artifact:OLD1' not in keys        # 旧组 tab 不残留
-            assert 'artifact:NEW1' in keys
+            old, new = self._artifacts()
+            page.set_artifacts([old])
+            page.select_artifact('OLD1')
+            page.set_artifacts([old, new])
+            assert page._workspace.tab_keys() == ['original', 'artifact:OLD1']
+            assert page.current_pipeline()['input_artifact_id'] == 'OLD1'
+            page.select_artifact('NEW1')
+            assert page._workspace.tab_keys() == ['original', 'artifact:OLD1', 'artifact:NEW1']
         finally:
             page.close()
 
-    def test_gallery_shows_current_context_only(self, qapp):
-        """总览墙数据源 = 原始 + 当前 run_group（历史成果不混入）。"""
+    def test_multiple_historical_results_do_not_open_gallery_or_auto_split(self, qapp):
         page = ProcessingPage()
         try:
             page.set_original_bundle(_bundle(1))
             page.set_artifacts(self._artifacts())
-            page._open_gallery()
-            gallery = page._gallery
-            names = [c._name.text() for c in gallery.cards()]
-            assert any('原始数据' in t for t in names)
-            assert any('set_zero_time' in t for t in names)
-            assert not any('dewow' in t for t in names), (
-                f'历史组成果混入总览墙：{names}')
-            gallery.close()
-            assert page._gallery is None      # 关闭后引用释放（单实例语义）
+            page.select_artifact('OLD1')
+            page.select_artifact('NEW1')
+            assert len(page._workspace.views()) == 1
+            assert page.findChildren(ResultGrid) == []
+            assert page._workspace.active_key() == 'artifact:NEW1'
         finally:
             page.close()
 
@@ -825,6 +812,7 @@ class TestColorbarPrefOnGrid:
 
     def test_set_colorbar_visible_creates_colorbar(self, grid, qapp):
         grid.set_slots(_slots(2))
+        grid.set_bundle('k0', _bundle(1))  # 色标量程只在有数据时显示
         card = grid.cards()[0]
         assert card.view._colorbar is None            # 初始无色标（窄卡）
         card.view.set_colorbar_visible(True)
@@ -848,13 +836,15 @@ class TestColorbarPrefOnGrid:
         grid.set_slots(_slots(2))                     # 偏好 True 后新建
         assert all(c.view._colorbar_visible for c in grid.cards())
 
-    def test_page_forwards_pref(self, qapp):
+    def test_page_forwards_pref_to_all_workspace_groups(self, qapp):
         page = ProcessingPage()
         try:
+            page.set_original_bundle(_bundle(1))
+            page._workspace.split_source('original', 'right', copy=True)
             page.set_colorbar_pref(False)
-            assert page._result_grid._colorbar_pref is False
+            assert all(not view.colorbar_visible() for view in page._workspace.all_views())
             page.set_colorbar_pref(True)
-            assert page._result_grid._colorbar_pref is True
+            assert all(view.colorbar_visible() for view in page._workspace.all_views())
         finally:
             page.close()
 
@@ -886,36 +876,33 @@ class TestAuditFixes20261009:
             widget = parent
         return None
 
-    def test_exec_card_before_param_card(self, qapp):
-        """执行卡（输入数据/结果名称）上移到参数设置之前。
-
-        旧序排在最底，1105×580 真机窗口下完全在视口外（截图实证：
-        只见「执行」标题一条边），而运行按钮在右上链条上——运行前
-        必经配置不可见。
-        """
+    def test_next_input_and_run_control_remain_above_parameter_tools(self, qapp):
+        from PyQt6.QtCore import QPoint
         page = ProcessingPage()
         try:
-            layout = page._left_cards_layout
-            exec_card = self._direct_child(page._input_combo, layout)
-            param_card = self._direct_child(page._param_form, layout)
-            assert exec_card is not None and param_card is not None
-            assert layout.indexOf(exec_card) < layout.indexOf(param_card), (
-                '左栏卡序应为 方法库 → 执行 → 参数设置 → AutoTune')
+            page.resize(1100, 700)
+            page.set_original_bundle(_bundle(1))
+            page.show()
+            qapp.processEvents()
+            assert '原始输入' in page._input_label.text()
+            assert page._input_label.mapTo(page, QPoint()).y() < page._param_form.mapTo(page, QPoint()).y()
+            assert page._run_btn.isVisibleTo(page)
         finally:
             page.close()
 
     # ---------------- P2-C：总览墙手动入口（挂结果网格头部） ----------------
-    def test_grid_gallery_entry_visibility(self, qapp):
-        """旧入口随 v2 隐藏的 preview_card 消失；新入口挂网格头部，
-        仅在原始数据之外还有打开的源时可见。"""
+    def test_manual_layout_changes_only_views_and_preserves_draft(self, qapp):
         page = ProcessingPage()
         try:
-            assert page._grid_gallery_btn.isVisibleTo(page) is False
-            page._preview_sources.append({
-                'key': 'artifact:x', 'title': 'x', 'bundle': None,
-                'artifact_id': 'x', 'closable': True, 'is_final': False})
-            page._redistribute()
-            assert page._grid_gallery_btn.isVisibleTo(page) is True
+            page.set_original_bundle(_bundle(1))
+            page._pipeline_list.add_step('dewow', '去直流', {'win': 11})
+            before = page.current_pipeline()
+            page._layout_combo.setCurrentIndex(1)
+            assert len(page._workspace.views()) == 2
+            assert page.current_pipeline() == before
+            page._layout_combo.setCurrentIndex(0)
+            assert len(page._workspace.views()) == 1
+            assert page.current_pipeline() == before
         finally:
             page.close()
 
@@ -1132,16 +1119,18 @@ class TestDeepAudit20261009:
             strip.deleteLater()
 
     # ---------------- P2：运行中清脏标记 / 取消恢复 ----------------
-    def test_running_hides_dirty_and_cancel_restores(self, qapp):
+    def test_running_locks_submitted_draft_and_cancel_retains_it(self, qapp):
         page = self._page_with_run()
         try:
-            page._mark_results_stale()
-            strip = page._chain_strip
-            assert strip._dirty_label.isVisibleTo(strip) is True
+            page._pipeline_list.add_step('dewow', '去直流', {'win': 11})
+            before = page.current_pipeline()
             page.set_running(True)
-            assert strip._dirty_label.isVisibleTo(strip) is False
-            page.set_running(False)              # 取消路径（无 success）
-            assert strip._dirty_label.isVisibleTo(strip) is True
+            assert not page._pipeline_list.isEnabled()
+            assert not page._param_form.isEnabled()
+            page.set_running(False)
+            assert page._pipeline_list.isEnabled()
+            assert page._param_form.isEnabled()
+            assert page.current_pipeline() == before
         finally:
             page.close()
 
@@ -1157,26 +1146,25 @@ class TestDeepAudit20261009:
             page.close()
 
     # ---------------- P2：chip / 卡标题中文显示名 ----------------
-    def test_echo_chain_and_titles_use_display_name(self, qapp):
+    def test_browsing_saved_result_does_not_replay_registered_method(self, qapp):
         page = self._page_with_run(display_name='去直流滤波')
         try:
-            titles = [c.title_label.text()
-                      for c in page._result_grid.cards()]
-            assert titles == ['输入', '1 去直流滤波']
-            strip = page._chain_strip
-            labels = [strip._steps[i]['label']
-                      for i in range(strip._list.count())]
-            assert labels == ['去直流滤波']
+            page.select_artifact('S1')
+            assert page.current_pipeline()['steps'] == []
+            assert page.current_pipeline()['input_artifact_id'] == 'S1'
+            page._add_method_to_pipeline('dewow')
+            assert page.current_pipeline()['steps'][0]['label'] == '去直流滤波'
         finally:
             page.close()
 
-    def test_echo_falls_back_to_method_id_without_registry(self, qapp):
-        """方法库未登记（打开旧工程先于方法表到达）→ 回退 method_id。"""
+    def test_new_draft_method_falls_back_to_id_without_registry(self, qapp):
         page = self._page_with_run()
         try:
-            titles = [c.title_label.text()
-                      for c in page._result_grid.cards()]
-            assert titles == ['输入', '1 dewow']
+            page.select_artifact('S1')
+            assert page.current_pipeline()['steps'] == []
+            page._add_method_to_pipeline('dewow')
+            assert page.current_pipeline()['steps'][0]['label'] == 'dewow'
+            assert page.current_pipeline()['input_artifact_id'] == 'S1'
         finally:
             page.close()
 

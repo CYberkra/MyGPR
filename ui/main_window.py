@@ -120,9 +120,9 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
     _log_signal = pyqtSignal(str)   # 类级信号：跨线程日志安全转发
 
     # 首屏构造的页面（其余延后到首帧渲染后空闲分片预热，见 _warmup_next_page）。
-    # home = 初始可见页；settings = 接线/状态回放必需（_connect_signals 取
+    # project = 初始可见工作区；settings = 接线/状态回放必需（_connect_signals 取
     # theme_changed、_init_state 回放开局设置）。
-    FIRST_PAINT_PAGES = ('homeInterface', 'settingsInterface')
+    FIRST_PAINT_PAGES = ('projectInterface', 'settingsInterface')
 
     def __init__(self, settings: SettingsManager = None, parent=None):
         super().__init__(parent)
@@ -221,7 +221,6 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
     def _create_pages(self) -> None:
         page_specs = [
             # objectName, 页面类, 图标, 文本, position
-            ('homeInterface', HomePage, FIF.HOME, '主页', NavigationItemPosition.TOP),
             ('projectInterface', ProjectPage, FIF.FOLDER, '项目', NavigationItemPosition.TOP),
             ('processingInterface', ProcessingPage, FIF.DEVELOPER_TOOLS, '处理',
              NavigationItemPosition.TOP),
@@ -255,9 +254,25 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
         # B-Scan 显示偏好（比例/轴单位/色阶/全屏几何）：四页都有 BScanView，
         # 统一在此恢复与持久化，避免在四个页面里各写一遍（漏一个就是"某页记不住"）
         self._wire_bscan_preferences(page)
+        from ui.widgets.bscan_view import BScanView
+        for view in page.findChildren(BScanView):
+            view.setProperty('mygprPreferencesWired', True)
+        created = getattr(page, 'bscan_view_created', None)
+        if hasattr(created, 'connect'):
+            created.connect(self._wire_new_bscan_view)
         page.setObjectName(object_name)
         self.addSubInterface(page, icon, text, position=position)
         self.pages[object_name] = page
+        if object_name == 'projectInterface' and hasattr(page, 'workspace_state_changed'):
+            page.workspace_state_changed.connect(self._update_workspace_navigation)
+
+    def _wire_new_bscan_view(self, view) -> None:
+        """Future split views inherit global defaults and persist user changes once."""
+        if view.property('mygprPreferencesWired'):
+            return
+        from types import SimpleNamespace
+        self._wire_bscan_preferences(SimpleNamespace(findChildren=lambda _kind: [view]))
+        view.setProperty('mygprPreferencesWired', True)
 
     def _on_settings_general_changed(self) -> None:
         """设置页通用项变化：采集 → 写盘 → 重新注入各页。
@@ -277,6 +292,7 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
                 self.settings.set(key, values[key])
         self.settings.save()
         self._inject_page_settings()
+        self._update_workspace_navigation()
 
     # ---------------------------------------------------------- 首屏后预热
     def _start_warmup(self) -> None:
@@ -301,8 +317,13 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
         # 写入，触发「dictionary changed size during iteration」（CI Linux
         # offscreen 上表现为 test_main_window_titlebar 偶发 ERROR）。
         self._deferred_specs.clear()
-        # 跨页业务信号链需要 8 页全部存在，因此延后到此处（接线代码本身不改）
+        # 跨页业务信号链需要 7 页全部存在，因此延后到此处。
         self.page_coordinator.connect_all()
+        tree = getattr(self, '_file_tree_panel', None)
+        collapsed_signal = getattr(tree, 'collapsed_changed', None)
+        if hasattr(collapsed_signal, 'connect'):
+            collapsed_signal.connect(self._on_file_tree_collapsed_changed)
+            self._on_file_tree_collapsed_changed(tree.is_collapsed())
         # 后端先于本收尾就绪的场景：_on_backend_ready 当时因接线未完成而跳过
         # load_methods（methods_loaded 发出时还没有接收者）→ 这里补加载。
         # 反向时序（后端后就绪）由 _on_backend_ready 正常加载，二者恰好互斥不重复。
@@ -316,6 +337,7 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
             for object_name, page in list(self.pages.items()):
                 if object_name not in self.FIRST_PAINT_PAGES:
                     page.setEnabled(False)
+        self._update_workspace_navigation()
         # 两个就绪时机的汇合点：接线完成且后端可用 → 恢复上次项目。
         # 后端后就绪场景由 _on_backend_ready 末尾再调一次（幂等）。
         self._restore_last_project()
@@ -323,13 +345,13 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
     def _restore_last_project(self) -> None:
         """启动自动恢复上次打开的项目（记忆需求，幂等）。
 
-        取 recent_projects 首条且目录仍存在才恢复——目录被移走时静默
-        跳过（不弹错误，首次体验优先）。open_project 异步执行，回包
-        经 project_opened 走既有刷新链路（主页/项目页/文件树/成果页）。
+        取 recent_projects 首个可访问目录；目录均失效时保留启动内容并
+        显示具体路径。open_project 异步执行，回包走既有项目刷新链路。
         """
         if getattr(self, '_last_project_restored', False):
             return
-        if not (self._backend_ready and self.project_controller is not None):
+        if not (self._backend_ready and self._pages_warmed
+                and self.project_controller is not None):
             return
         self._last_project_restored = True
         recents = self.settings.get('recent_projects') or []
@@ -338,6 +360,12 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
             if root and Path(root).is_dir():
                 self.project_controller.open_project(root)
                 return
+        page_getter = getattr(self, '_page', None)
+        if recents and callable(page_getter):
+            startup = page_getter('homeInterface')
+            setter = getattr(startup, 'set_startup_error', None)
+            if callable(setter):
+                setter(f'无法恢复上次项目：目录不可访问或不存在。\n{recents[0]}')
 
     def ensure_pages_ready(self) -> None:
         """同步构造全部剩余页面并完成收尾接线（预热竞态兜底 / 测试 / 冒烟）。"""
@@ -431,11 +459,11 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
         layout.setContentsMargins(16, 48, 16, 0)
         bar.setFixedHeight(48 + constants.NAV_TOP_BAR_HEIGHT)
         self._top_nav_bar = bar
-        # 药丸轨道：圆角浅底容器把 8 个分段收拢成一个控件（示意图方案 B）
+        # 药丸轨道：圆角浅底容器收拢导航分段。
         track = QWidget(bar)
         track.setObjectName('topNavTrack')
         track_layout = QHBoxLayout(track)
-        track_layout.setContentsMargins(4, 4, 4, 4)
+        track_layout.setContentsMargins(3, 3, 3, 3)
         track_layout.setSpacing(0)
         self._top_nav_track = track
         self._top_nav = SlimSegment(track)
@@ -445,6 +473,12 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
         track_layout.addWidget(self._top_nav)
         # 药丸居中（评审 P1-5）：两侧对称 stretch，消除"重心偏左、
         # 右半条空白"的失衡感
+        self._project_switch_btn = PushButton('选择项目', bar, FIF.FOLDER)
+        self._project_switch_btn.setMaximumWidth(220)
+        self._project_switch_btn.setToolTip('切换项目 / 新建 / 打开 / 关闭')
+        self._project_switch_btn.setAccessibleName('项目切换')
+        self._project_switch_btn.clicked.connect(self._show_project_switch_menu)
+        layout.addWidget(self._project_switch_btn, 0, Qt.AlignmentFlag.AlignVCenter)
         layout.addStretch(1)
         layout.addWidget(track, 0, Qt.AlignmentFlag.AlignVCenter)
         layout.addStretch(1)
@@ -477,15 +511,60 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
         if page is not None and self.stackedWidget.currentWidget() is not page:
             self.switchTo(page)
 
+    def _show_project_switch_menu(self) -> None:
+        project = self._page('projectInterface')
+        if project is None or not hasattr(project, 'startup'):
+            return
+        self._project_menu = project.startup.project_menu(
+            self._project_switch_btn, can_close=project.workspace_state() != 'startup',
+            close_requested=project.close_project_requested.emit)
+        self._project_menu.exec(self._project_switch_btn.mapToGlobal(
+            self._project_switch_btn.rect().bottomLeft()))
+
+    def _update_workspace_navigation(self, _state=None) -> None:
+        nav = getattr(self, '_top_nav', None)
+        project = self._page('projectInterface')
+        if nav is None or project is None or not hasattr(project, 'workspace_state'):
+            return
+        state = project.workspace_state()
+        summary = getattr(project, '_summary', None)
+        switch = getattr(self, '_project_switch_btn', None)
+        if switch is not None:
+            name = str(getattr(summary, 'name', '') or '选择项目')
+            switch.setText(name + '  ⌄')
+            switch.setToolTip(name + '\n切换项目 / 新建 / 打开 / 关闭')
+        tree = getattr(self, '_file_tree_panel', None)
+        if tree is not None:
+            tree.setVisible(state != 'startup')
+        tree_button = getattr(self, '_file_tree_btn', None)
+        current = self.stackedWidget.currentWidget()
+        current_name = current.objectName() if current is not None else ''
+        if tree_button is not None:
+            tree_button.setVisible(current_name != 'processingInterface')
+            tree_button.setEnabled(state != 'startup')
+            tree_button.setToolTip('文件树 (Ctrl+B)' if state != 'startup' else '打开项目后可查看项目资源')
+        for key in ('processingInterface', 'interpretationInterface',
+                    'spatialInterface', 'deliveryInterface'):
+            item = nav.items.get(key)
+            if item is None:
+                continue
+            ready = self._backend_ready or self.backend_controller is None
+            reason = '' if ready and state == 'ledger' else (
+                '后端尚未就绪' if not ready else '请先打开项目' if state == 'startup' else '请先导入测线')
+            item.setEnabled(not reason)
+            item.setToolTip(reason)
+
     def _apply_top_nav_style(self) -> None:
         """页签条底部分隔线 + 药丸轨道底色，深浅主题跟随（control_palette 单源）。"""
         pal = control_palette(isDarkTheme())
         line = pal['nav_line']
         track = pal['nav_track']
+        from ui.design_tokens import color, radius
         if getattr(self, '_top_nav_bar', None) is not None:
             self._top_nav_bar.setStyleSheet(
-                f'#topNavBar {{ border-bottom: 1px solid {line}; }}'
-                f'#topNavTrack {{ background: {track}; border-radius: 15px; }}')
+                f'#topNavBar {{ background: {pal["surface"]}; border-bottom: 1px solid {line}; }}'
+                f'#topNavTrack {{ background: {track}; border: 1px solid {color("border_default")};'
+                f' border-radius: {radius("lg")}px; }}')
 
     def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
@@ -566,14 +645,23 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
         if panel is not None:
             panel.toggle_panel()
 
+    def _on_file_tree_collapsed_changed(self, collapsed: bool) -> None:
+        processing = self._page('processingInterface')
+        setter = getattr(processing, 'set_project_resources_visible', None)
+        if callable(setter):
+            setter(not bool(collapsed))
+
     def _page(self, object_name: str):
         """按 objectName 取页面（占位页返回原样，调用方自行判接口）。"""
+        if object_name == 'homeInterface':
+            project = self.pages.get('projectInterface')
+            return getattr(project, 'startup', project)
         return self.pages.get(object_name)
 
     def _setup_global_shortcuts(self) -> None:
         """全局快捷键：Ctrl+1~8 切页签，Ctrl+B 文件树，Ctrl+J 输出面板，F1 清单。"""
         self._page_shortcuts = [
-            ('Ctrl+1', 'homeInterface', '主页'),
+            ('Ctrl+1', 'projectInterface', '项目'),
             ('Ctrl+2', 'projectInterface', '项目'),
             ('Ctrl+3', 'processingInterface', '处理'),
             ('Ctrl+4', 'interpretationInterface', '解释'),
@@ -631,7 +719,7 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
                 self._on_settings_general_changed)
 
         # ---------------- 跨页业务信号链（项目/测线/导入/处理/解释/成果/任务）
-        # 延后到预热收尾：connect_all() 需要 8 页全部存在（见 _finish_warmup）
+        # 延后到预热收尾：connect_all() 需要全部页面存在（见 _finish_warmup）。
 
     def _init_state(self) -> None:
         # 恢复主题设置（回放期间抑制副作用）
@@ -708,9 +796,10 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
         # _warmup_next_page 仍会往 pages 里加页 —— 直接遍历原字典会在
         # 嵌套事件循环中抛「dictionary changed size during iteration」。
         for object_name, page in list(self.pages.items()):
-            if object_name in ('homeInterface', 'settingsInterface'):
+            if object_name in ('projectInterface', 'settingsInterface'):
                 continue
             page.setEnabled(ready)
+        self._update_workspace_navigation()
         if ready:
             self.log_message('SUCCESS 后端初始化完成')
             logger.info('backend ready')
@@ -758,6 +847,10 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
             # 而非 hasattr 探测静默跳过（历史事故：load_methods 不执行 → 方法库为空）。
             if self.page_coordinator is not None:
                 self.page_coordinator.connect_job_bridge(bridge)
+                bridge.status_changed.connect(self.page_coordinator.project.on_job_status)
+                bridge.job_completed.connect(
+                    lambda job_id, _success, _message, _result:
+                    self.page_coordinator.project.on_job_status(job_id, 'completed'))
         if self.processing_controller is not None and self._pages_warmed:
             # 仅在预热收尾（connect_all 已接通 methods_loaded → 方法库）后加载。
             # 后端就绪若先于收尾，信号会发进空气（历史事故同款：方法库空白），
@@ -769,6 +862,8 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
     # ============================================================ 项目对话框（窗口 UI）
     def _show_new_project_dialog(self) -> None:
         """新建项目对话框：选目录 + 项目名 + 可选元数据 → create_project。"""
+        if not self.page_coordinator.project.can_change_project():
+            return
         if not self._backend_ready:
             self._infobar('warning', '新建项目', '后端尚未就绪，请稍后再试')
             return
@@ -864,6 +959,8 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
 
     def _open_project_dialog(self) -> None:
         """打开项目：目录对话框 → open_project。"""
+        if not self.page_coordinator.project.can_change_project():
+            return
         if not self._backend_ready:
             self._infobar('warning', '打开项目', '后端尚未就绪，请稍后再试')
             return
@@ -891,6 +988,8 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
 
     def _goto_page(self, object_name: str) -> None:
         """按 objectName 切导航页（HomePage.goto_page / 快速操作）。"""
+        if object_name == 'homeInterface':
+            object_name = 'projectInterface'
         page = self.pages.get(str(object_name))
         if page is None and self._deferred_specs:
             # 预热未完成就切到延后页：立即同步构造全部剩余页面，避免空白页
@@ -908,6 +1007,7 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
             top_nav.setCurrentItem(name)
         if name and self._file_tree_panel is not None:
             self._file_tree_panel.apply_page(name)
+        self._update_workspace_navigation()
 
     def _show_shortcuts_dialog(self) -> None:
         """F1：弹出当前支持的快捷键清单。"""

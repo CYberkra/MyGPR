@@ -100,16 +100,17 @@ class TestCrosshairWidget:
 
     def test_theme_styles_the_floating_fullscreen_button(self, qapp):
         from ui.widgets.bscan_view import BScanView
+        from ui.theme_helpers import control_palette
 
         view = BScanView()
         view.apply_theme(True)
         # 工具条退役后，图内悬浮全屏钮是唯一常驻控件，仍吃调色板 QSS
-        assert '#2d2d2d' in view._fullscreen_btn.styleSheet()
-        assert '#f0f0f0' in view._fullscreen_btn.styleSheet()
+        assert control_palette(True)['button_bg'] in view._fullscreen_btn.styleSheet()
+        assert control_palette(True)['button_text'] in view._fullscreen_btn.styleSheet()
 
         view.apply_theme(False)
-        assert '#ffffff' in view._fullscreen_btn.styleSheet()
-        assert '#202020' in view._fullscreen_btn.styleSheet()
+        assert control_palette(False)['button_bg'] in view._fullscreen_btn.styleSheet()
+        assert control_palette(False)['button_text'] in view._fullscreen_btn.styleSheet()
 
 
 class TestPreviewCoordinateMapping:

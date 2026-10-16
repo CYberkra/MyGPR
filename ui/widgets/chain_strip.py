@@ -1,12 +1,11 @@
 # -*- coding: utf-8 -*-
 """ChainStrip — 处理链极简 chip 条（处理页 v2 顶部）。
 
-设计（2026-09-25 v2；2026-10-09 深查增补）：
-- 一行：``输入 → 算法1 → 算法2 …``，chip 只写**算法名**（序号与位置自明，
-  不写「第 N 步/处理链」等冗余字样）；
+设计（2026-09-25 v2；2026-10-16 可交互待执行链）：
+- 一行：输入、算法名与关键参数摘要；完整名称、参数与启停状态走 tooltip；
 - **hover 才显**启用圆点与 ✕（常驻噪音更少），链尾虚线 ＋ 追加；
 - **溢出可达**（2026-10-09 深查 P1）：chip 放不下时右缘浮「+N」胶囊，
-  点击弹全部步骤菜单（每步子菜单 = 选中/启停/上移/下移/删除）——
+  点击弹全部步骤菜单（每步子菜单 = 选中/编辑）——
   隐藏步骤的手势与右键菜单等价可达（wrapping=False + 滚动条常关的补偿）；
 - **运行钮就近翻转**（2026-10-09 深查 P2）：运行中同位置变「取消」
   （红描边），结束恢复「运行」——取消与运行视线不跳；进行中反馈由
@@ -16,15 +15,15 @@
   与 PipelineList 同款坑）；
 - **手势替代路径**（guidelines：拖拽需有点击/键盘替代）：右键 chip →
   合一编辑弹窗（P0-3：启停/排序/复制/替换/参数/删除一处完成）+
-  Delete 键删当前 chip；
+  Delete 键删当前 chip；Shift+F10/Menu 编辑当前 chip；
 - 「输入」chip 固定在首位、不可拖不可删。
 
-ChainStrip 只做展示与手势，**步骤数据仍由宿主页维护**（这里不存 steps）。
+ChainStrip 只缓存展示字段与手势，**处理草稿仍由宿主页维护**。
 """
-from PyQt6.QtCore import (QEasingCurve, QPropertyAnimation, Qt,
+from PyQt6.QtCore import (QEvent, QEasingCurve, QPointF, QPropertyAnimation, Qt,
                           QTimer, pyqtSignal)
-from PyQt6.QtGui import QKeySequence, QShortcut
-from PyQt6.QtWidgets import (QAbstractItemView, QHBoxLayout, QLabel,
+from PyQt6.QtGui import QDrag, QFont, QKeySequence, QMouseEvent, QShortcut
+from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QHBoxLayout, QLabel,
                              QListWidget, QListWidgetItem, QWidget)
 from PyQt6.QtWidgets import QPushButton
 from qfluentwidgets import (CaptionLabel, FluentIcon as FIF,
@@ -40,25 +39,23 @@ def _muted_text() -> str:
     return color('text_muted')
 
 
-def _chip_qss(enabled: bool) -> str:
+def _chip_qss(enabled: bool, selected: bool = False) -> str:
     """chip 胶囊 QSS（启用实线 / 禁用虚线 + hover 反馈），色值走令牌。
 
     状态矩阵：default / hover（描边转 primary 淡色，预示可点）/ selected
     （由滑动胶囊承担，不在此表）/ disabled（虚线 + 次级文字，真不可点由
     信号宿主保证）。
     """
-    from ui.design_tokens import radius, rgba
-    r = radius('pill') // 2          # chip 胶囊用 14px（pill 的一半高度语义）
+    from ui.design_tokens import color, radius, rgba
+    background = rgba('primary', .10) if selected else color('bg_subtle')
+    border = rgba('primary', .65) if selected else rgba('border_default', .65)
+    line = 'solid' if enabled else 'dashed'
+    style = (f'#chip{{background:{background};border:1px {line} {border};'
+             f'border-radius:{radius("lg")}px;}}')
     if enabled:
-        return (f'#chip{{background:{rgba("border_default", 0.16)};'
-                f'border:1px solid {rgba("border_default", 0.22)};'
-                f'border-radius:{r}px}}'
-                f'#chip:hover{{border:1px solid {rgba("primary", 0.45)};'
-                f'background:{rgba("primary", 0.08)};'
-                f'border-radius:{r}px}}')
-    return (f'#chip{{background:{rgba("border_default", 0.08)};'
-            f'border:1px dashed {rgba("border_default", 0.30)};'
-            f'border-radius:{r}px}}')
+        style += (f'#chip:hover{{border-color:{rgba("primary", .55)};'
+                  f'background:{rgba("primary", .07)};}}')
+    return style
 
 
 class _Chip(QWidget):
@@ -71,19 +68,26 @@ class _Chip(QWidget):
     _MAX_NAME_PX = 132
 
     def __init__(self, index: int, label: str, enabled: bool, host,
-                 parent=None):
+                 parent=None, param_summary: str = ''):
         super().__init__(parent)
         self.index = index                  # -1 = 输入 chip
         self._host = host
+        self._selected = False
         self.setObjectName('chip')
+        self.setFixedHeight(28)
         # 普通 QWidget 子类必须开这个才会绘制样式表背景（否则 chip 无胶囊底）
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setToolTip(label)
         row = QHBoxLayout(self)
-        row.setContentsMargins(12, 4, 8, 4)
-        row.setSpacing(4)
+        row.setContentsMargins(10, 3, 6, 3)
+        row.setSpacing(6)
         short = label.split('（')[0].split(' (')[0].strip() or label
         self.name = QLabel(self)
+        name_font = self.name.font()
+        name_font.setWeight(QFont.Weight.DemiBold)
+        self.name.setFont(name_font)
+        self.installEventFilter(host._list)
+        self.name.installEventFilter(host._list)
         self.name.setMaximumWidth(self._MAX_NAME_PX)
         # 省略号截断（2026-10-09 深查 P2）：QLabel 默认硬裁无「…」，截断
         # 处看着像数据缺失；全名走 chip 级 tooltip（__init__ 已设）
@@ -91,6 +95,10 @@ class _Chip(QWidget):
         self.name.setText(fm.elidedText(short, Qt.TextElideMode.ElideRight,
                                         self._MAX_NAME_PX))
         row.addWidget(self.name)
+        self.summary = QLabel(self)
+        self.summary.setMaximumWidth(150)
+        self.summary.installEventFilter(host._list)
+        row.addWidget(self.summary)
         # 启用开关 = 圆点（绿=启用/灰=禁用）——不用 ✓ 形图标（用户定案：
         # 全应用不出现勾形元素，避免与「运行」产生歧义）
         self.dot_btn = QPushButton(self)
@@ -111,8 +119,27 @@ class _Chip(QWidget):
         self.del_btn.clicked.connect(
             lambda _c=False, i=index: host._on_chip_deleted(i))
         row.addWidget(self.del_btn)
+        for button in (self.dot_btn, self.del_btn):
+            policy = button.sizePolicy()
+            policy.setRetainSizeWhenHidden(True)
+            button.setSizePolicy(policy)
         self.dot_btn.setVisible(False)
         self.del_btn.setVisible(False)
+        self.set_enabled_visual(enabled)
+        self.set_content(label, param_summary, enabled)
+
+    def set_content(self, label: str, param_summary: str, enabled: bool) -> None:
+        short = label.split('（')[0].split(' (')[0].strip() or label
+        self.name.setText(self.name.fontMetrics().elidedText(
+            short, Qt.TextElideMode.ElideRight, self._MAX_NAME_PX))
+        self.summary.setText(self.summary.fontMetrics().elidedText(
+            param_summary, Qt.TextElideMode.ElideRight, 150))
+        self.summary.setVisible(bool(param_summary))
+        state = '已启用' if enabled else '已禁用（运行时跳过）'
+        self.setToolTip('\n'.join(p for p in (label, param_summary, state) if p))
+        self.setAccessibleName(self.toolTip().replace('\n', '，'))
+        self.dot_btn.setToolTip('停用该步骤（运行时跳过）' if enabled else '启用该步骤')
+        self.dot_btn.setAccessibleName(self.dot_btn.toolTip())
         self.set_enabled_visual(enabled)
 
     def _set_dot_visual(self, enabled: bool) -> None:
@@ -125,13 +152,22 @@ class _Chip(QWidget):
         from ui.design_tokens import color
         bg = color('success') if enabled else color('disabled')
         self.dot_btn.setStyleSheet(
-            f'QPushButton{{background:{bg};border:none;border-radius:6px;}}'
+            f'QPushButton{{color:{bg};background:transparent;'
+            'border:none;border-radius:4px;font-size:10px;}'
             f'QPushButton:hover{{border:1px solid {color("border_strong")};}}')
+        self.dot_btn.setText('●')
 
     def set_enabled_visual(self, enabled: bool) -> None:
+        from ui.design_tokens import color
         self._set_dot_visual(enabled)
-        self.name.setStyleSheet(f'color:{_muted_text()}' if not enabled else '')
-        self.setStyleSheet(_chip_qss(enabled))
+        self.name.setStyleSheet(f'color:{color("text_primary") if enabled else _muted_text()}')
+        self.summary.setStyleSheet(f'color:{_muted_text()}')
+        self.setStyleSheet(_chip_qss(enabled, self._selected))
+
+    def set_selected_visual(self, selected: bool) -> None:
+        if selected != self._selected:
+            self._selected = selected
+            self.set_enabled_visual(self._host._steps[self.index]['enabled'])
 
     def enterEvent(self, event) -> None:
         if self.index >= 0:                 # 输入 chip 无操作
@@ -151,15 +187,108 @@ class _ChipList(QListWidget):
     def __init__(self, host, parent=None):
         super().__init__(parent)
         self._host = host
+        self._press_source = -1
+        self._press_generation = -1
+        self._drag_active = False
+        self._drop_marker = QWidget(self.viewport())
+        self._drop_marker.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._drop_marker.hide()
+
+    def eventFilter(self, watched, event):
+        # Item widgets otherwise absorb pointer/drag gestures before QListWidget.
+        # Only the chip body and labels forward; action buttons keep their clicks.
+        if event.type() in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseMove,
+                            QEvent.Type.MouseButtonRelease, QEvent.Type.MouseButtonDblClick):
+            pos = watched.mapTo(self.viewport(), event.position().toPoint())
+            forwarded = QMouseEvent(event.type(), QPointF(pos), event.globalPosition(),
+                                    event.button(), event.buttons(), event.modifiers())
+            QApplication.sendEvent(self.viewport(), forwarded)
+            return True
+        if event.type() == QEvent.Type.ContextMenu:
+            self._host._on_context_menu(watched.mapTo(self.viewport(), event.pos()))
+            return True
+        return super().eventFilter(watched, event)
+
+    def mousePressEvent(self, event):
+        self._press_source = -1
+        if self.isEnabled() and event.button() == Qt.MouseButton.LeftButton:
+            self._press_source = self.indexAt(event.position().toPoint()).row()
+            self._press_generation = self._host._display_generation
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        source = self._press_source
+        generation = self._press_generation
+        super().mouseReleaseEvent(event)
+        self._press_source = -1
+        if (self.isEnabled() and event.button() == Qt.MouseButton.LeftButton
+                and generation == self._host._display_generation and source >= 0
+                and self.indexAt(event.position().toPoint()).row() == source):
+            self._host.sig_step_clicked.emit(source)
+
+    def startDrag(self, actions):
+        if (self._press_source < 0 or not self.isEnabled()
+                or self._press_generation != self._host._display_generation):
+            return
+        self.setCurrentRow(self._press_source)
+        self._drag_active = True
+        try:
+            super().startDrag(actions)
+        finally:
+            self._drag_active = False
+            self._press_source = -1
+            self._drop_marker.hide()
+
+    def insertion_point(self, pos):
+        index = self.indexAt(pos).row()
+        if index < 0:
+            if not self.count():
+                return 0
+            first = self.visualItemRect(self.item(0))
+            return 0 if pos.x() < first.left() else self.count()
+        rect = self.visualItemRect(self.item(index))
+        return index + int(pos.x() > rect.center().x())
+
+    def dragMoveEvent(self, event):
+        if (event.source() is not self or self._press_source < 0
+                or self._press_generation != self._host._display_generation):
+            event.ignore()
+            self._drop_marker.hide()
+            return
+        target = self.insertion_point(event.position().toPoint())
+        item = self.item(min(target, self.count() - 1))
+        rect = self.visualItemRect(item)
+        x = rect.left() - 4 if target < self.count() else rect.right() + 4
+        from ui.design_tokens import color
+        self._drop_marker.setStyleSheet(f'background:{color("primary")};border-radius:1px;')
+        self._drop_marker.setGeometry(max(0, min(x, self.viewport().width() - 3)), 4, 3, 30)
+        self._drop_marker.show()
+        self._drop_marker.raise_()
+        event.acceptProposedAction()
+
+    def dragLeaveEvent(self, event):
+        self._drop_marker.hide()
+        super().dragLeaveEvent(event)
+
+    def keyPressEvent(self, event):
+        if (event.key() == Qt.Key.Key_Menu or
+                (event.key() == Qt.Key.Key_F10 and
+                 event.modifiers() & Qt.KeyboardModifier.ShiftModifier)):
+            self._host._request_editor(self.currentRow())
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def dropEvent(self, event) -> None:
-        self._host._list_drop_event(event)
+        self._host._list_drop_event(event, source=self._press_source,
+                                    generation=self._press_generation)
 
 
 class ChainStrip(QWidget):
     """处理链 chip 条 + 追加钮 + 运行钮（运行由宿主页接线）。"""
 
     sig_step_selected = pyqtSignal(int)     # 步骤索引（-1 = 输入/未选）
+    sig_step_clicked = pyqtSignal(int)      # 每次实际单击，包括已选中的步骤
     sig_step_toggled = pyqtSignal(int, bool)
     sig_step_removed = pyqtSignal(int)
     sig_step_moved = pyqtSignal(int, int)   # source → 插入位
@@ -170,10 +299,14 @@ class ChainStrip(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._steps = []
+        self._display_generation = 0
+        self._context = object()
+        self._overflow_menus = []
+        self._input_widget = None
         self._list = _ChipList(self, self)
         self._list.setFlow(QListWidget.Flow.LeftToRight)
         self._list.setWrapping(False)
-        self._list.setSpacing(8)
+        self._list.setSpacing(5)
         self._list.setFixedHeight(38)
         self._list.setSelectionMode(
             QAbstractItemView.SelectionMode.SingleSelection)
@@ -197,6 +330,8 @@ class ChainStrip(QWidget):
         # 深浅主题下与卡片底色融合；选中高亮交给滑动胶囊（Qt 默认蓝块弃用）
         self._apply_list_qss()
         self._list.currentRowChanged.connect(self._on_current_row)
+        self._list.horizontalScrollBar().valueChanged.connect(
+            lambda _value: self._overlay_timer.start(0))
 
         self._add_btn = ToolButton(FIF.ADD, self)
         self._add_btn.setFixedSize(24, 24)
@@ -253,6 +388,15 @@ class ChainStrip(QWidget):
         """运行钮：由宿主页接线（Ctrl+R 与此处同一入口）。"""
         return self._run_btn
 
+    def set_run_button_visible(self, visible: bool) -> None:
+        """Hosts with a shared header action can reclaim the strip's button space."""
+        self._run_btn.setVisible(visible)
+
+    def step_anchor(self, index: int):
+        """Return the current rendered chip for the host's parameter popup."""
+        item = self._list.item(index) if 0 <= index < self._list.count() else None
+        return self._list.itemWidget(item) if item is not None else None
+
     # ------------------------------------------------------------ 主题
     def _apply_list_qss(self) -> None:
         """chip 容器底色清零 + 键盘焦点环（令牌随当前主题取值）。"""
@@ -287,8 +431,8 @@ class ChainStrip(QWidget):
         self._empty_hint.setStyleSheet(f'color:{color("text_muted")}')
         self._style_overflow_btn()
         self._pill.setStyleSheet(
-            f'background:{rgba("primary", 0.20)};'
-            f'border-radius:{radius("pill") // 2}px')
+            f'background:{rgba("primary", 0.08)};'
+            f'border-radius:{radius("lg")}px')
         self._apply_list_qss()
 
     # ------------------------------------------- 选中指示条（滑动胶囊）
@@ -304,14 +448,18 @@ class ChainStrip(QWidget):
         # 原为硬编码的旧 Windows 蓝（与 primary 令牌漂移）→ 统一到
         # primary，改强调色只需改令牌一处
         self._pill.setStyleSheet(
-            f'background:{rgba("primary", 0.20)};'
-            f'border-radius:{radius("pill") // 2}px')
+            f'background:{rgba("primary", 0.08)};'
+            f'border-radius:{radius("lg")}px')
         self._pill.hide()
         self._pill_anim = QPropertyAnimation(self._pill, b'geometry')
         self._pill_anim.setDuration(180)
         self._pill_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
 
     def _move_pill(self, row: int) -> None:
+        for index in range(self._list.count()):
+            chip = self._list.itemWidget(self._list.item(index))
+            if chip is not None:
+                chip.set_selected_visual(index == row)
         item = self._list.item(row)
         rect = self._list.visualItemRect(item) if item is not None else None
         if rect is None or not rect.isValid():
@@ -384,13 +532,55 @@ class ChainStrip(QWidget):
     # ---------------------------------------------------------------- 数据
     def set_input_widget(self, widget) -> None:
         """条首承载「输入」选择（测线 / 成果下拉）——不单独占一行纵向。"""
+        if widget is self._input_widget:
+            return
+        if self._input_widget is not None:
+            self.layout().removeWidget(self._input_widget)
+            self._input_widget.hide()
+        self._input_widget = widget
+        if widget is None:
+            return
         self.layout().insertWidget(0, widget)
 
+    def set_context(self, context) -> None:
+        """Bind gestures to an opaque host draft identity without rebuilding chips."""
+        if context == self._context:
+            return
+        self._context = context
+        self._invalidate_interactions()
+
+    def _invalidate_interactions(self) -> None:
+        self._display_generation += 1
+        if self._list._drag_active:
+            QDrag.cancel()
+        self._list._press_source = -1
+        self._list._drop_marker.hide()
+        for menu in self._overflow_menus:
+            for sub in menu._step_submenus:
+                sub.close()
+            menu.close()
+
     def set_steps(self, steps) -> None:
-        """steps: [{label, enabled}]（宿主页为唯一数据源；这里只渲染）。"""
-        self._steps = [{'label': s.get('label') or s.get('method_id', ''),
-                        'enabled': bool(s.get('enabled', True))}
-                       for s in (steps or [])]
+        """Render {label, enabled, param_summary}; the host owns draft state."""
+        display = [{'label': str(s.get('label') or s.get('method_id', '')),
+                    'enabled': bool(s.get('enabled', True)),
+                    'param_summary': str(s.get('param_summary') or '')}
+                   for s in (steps or [])]
+        if display == self._steps:
+            self._overlay_timer.start(0)
+            return
+        self._invalidate_interactions()
+        self._steps = display
+        # Parameter edits keep item widgets and keyboard focus stable.
+        if self._list.count() == len(display):
+            for i, step in enumerate(display):
+                item = self._list.item(i)
+                chip = self._list.itemWidget(item)
+                chip.set_content(f'{i + 1} {step["label"]}',
+                                 step['param_summary'], step['enabled'])
+                item.setSizeHint(chip.sizeHint())
+            self._overlay_timer.start(0)
+            return
         self._rebuild()
 
     def _rebuild(self) -> None:
@@ -398,7 +588,8 @@ class ChainStrip(QWidget):
         self._list.blockSignals(True)
         self._list.clear()
         for i, step in enumerate(self._steps):
-            self._add_chip(i, f'{i + 1} {step["label"]}', step['enabled'])
+            self._add_chip(i, f'{i + 1} {step["label"]}', step['enabled'],
+                           step['param_summary'])
         self._list.blockSignals(False)
         if 0 <= prev < len(self._steps):
             self._list.setCurrentRow(prev)
@@ -407,9 +598,10 @@ class ChainStrip(QWidget):
         # 布局一拍后重算浮层（此时 visualItemRect 才有效）
         self._overlay_timer.start(0)
 
-    def _add_chip(self, index: int, label: str, enabled: bool) -> None:
+    def _add_chip(self, index: int, label: str, enabled: bool,
+                  param_summary: str = '') -> None:
         item = QListWidgetItem()
-        chip = _Chip(index, label, enabled, self, self._list)
+        chip = _Chip(index, label, enabled, self, self._list, param_summary)
         item.setSizeHint(chip.sizeHint())
         self._list.addItem(item)
         self._list.setItemWidget(item, chip)
@@ -420,11 +612,11 @@ class ChainStrip(QWidget):
         self.sig_step_selected.emit(row)         # row 即步骤索引
 
     def _on_dot_clicked(self, index: int) -> None:
-        if 0 <= index < len(self._steps):
+        if self.isEnabled() and 0 <= index < len(self._steps):
             self.sig_step_toggled.emit(index, not self._steps[index]['enabled'])
 
     def _on_chip_deleted(self, index: int) -> None:
-        if 0 <= index < len(self._steps):
+        if self.isEnabled() and 0 <= index < len(self._steps):
             self.sig_step_removed.emit(index)
 
     # -------------------------------------- 右键（替代路径 → 合一弹窗）
@@ -436,26 +628,33 @@ class ChainStrip(QWidget):
         item = self._list.itemAt(pos)
         row = self._list.row(item) if item is not None else -1
         index = row                          # row 即步骤索引
-        if index < 0 or index >= len(self._steps):
+        self._request_editor(index)
+
+    def _request_editor(self, index: int) -> None:
+        if not self.isEnabled() or index < 0 or index >= len(self._steps):
             return
-        self._list.setCurrentRow(row)
-        self._move_pill(row)
+        self._list.setCurrentRow(index)
+        self._move_pill(index)
         self.sig_step_editor_requested.emit(index)
 
-    def _list_drop_event(self, event) -> None:
-        """落点重排：源=当前选中 chip，目标按落点左右半决定插入位。"""
-        source = self._list.currentRow()            # row 即步骤索引
-        if source < 0 or source >= len(self._steps):
+    def _list_drop_event(self, event, *, source=None, generation=None) -> None:
+        """Emit the pressed source and insertion boundary; never move Qt items."""
+        # Legacy direct callers supply a synthetic event with the selected row.
+        # Real Qt drops always pass the press-captured source from _ChipList.
+        if source is None:
+            source = self._list.currentRow()
+            generation = self._display_generation
+        self._list._drop_marker.hide()
+        if (not self.isEnabled() or source < 0 or source >= len(self._steps)
+                or generation != self._display_generation):
+            if hasattr(event, 'ignore'):
+                event.ignore()
             return
-        target = self._list.indexAt(event.position().toPoint()).row()
-        if target < 0:
-            target = len(self._steps) - 1
-        item = self._list.item(target)
-        if item is not None:
-            rect = self._list.visualItemRect(item)
-            if event.position().toPoint().x() > rect.center().x():
-                target += 1
+        target = self._list.insertion_point(event.position().toPoint())
+        self._list._press_source = -1
         if target in (source, source + 1):
+            if hasattr(event, 'ignore'):
+                event.ignore()
             return
         event.setDropAction(Qt.DropAction.IgnoreAction)
         event.accept()
@@ -467,6 +666,8 @@ class ChainStrip(QWidget):
         self._list.blockSignals(True)
         self._list.setCurrentRow(row)
         self._list.blockSignals(False)
+        if row >= 0:
+            self._list.scrollToItem(self._list.item(row))
         self._move_pill(row)
 
     # --------------------------------------- 浮层：空态提示 + 溢出胶囊
@@ -477,6 +678,7 @@ class ChainStrip(QWidget):
         被裁即不可达）——半可见的 chip 也计入，其 ✕/圆点可能已在视口外。
         """
         lst = self._list
+        self._move_pill(lst.currentRow())
         vp = lst.viewport()
         n = lst.count()
         self._empty_hint.setVisible(n == 0)
@@ -484,7 +686,7 @@ class ChainStrip(QWidget):
         if n and vp.width() > 0:
             for i in range(n):
                 rect = lst.visualItemRect(lst.item(i))
-                if rect.right() > vp.width() - 1:
+                if rect.right() > vp.width() - 1 or rect.left() < 0:
                     hidden += 1
         self._overflow_btn.setVisible(hidden > 0)
         if hidden:
@@ -508,8 +710,17 @@ class ChainStrip(QWidget):
         super().showEvent(event)
         self._overlay_timer.start(0)
 
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.EnabledChange and not self.isEnabled():
+            self._invalidate_interactions()
+
     def _on_overflow_menu(self) -> None:
+        if not self.isEnabled():
+            return
         menu = self._build_overflow_menu()
+        # Fluent exec() returns immediately. make_menu owns disposal after the
+        # close signal and synchronous action dispatch have both completed.
         menu.exec(self._overflow_btn.mapToGlobal(
             self._overflow_btn.rect().bottomLeft()))
 
@@ -520,6 +731,13 @@ class ChainStrip(QWidget):
         构建与弹出拆开，便于测试菜单结构。
         """
         menu = make_menu(self)
+        self._overflow_menus.append(menu)
+        # Drop tracking only after native destruction, never at exec() return.
+        # Capture the list and identity, without retaining self or menu again.
+        def forget_menu(_obj=None, key=id(menu), menus=self._overflow_menus):
+            menus[:] = [existing for existing in menus if id(existing) != key]
+        menu.destroyed.connect(forget_menu)
+        generation = self._display_generation
         subs = []
         for i, step in enumerate(self._steps):
             label = f'{i + 1} {step["label"]}'
@@ -530,12 +748,25 @@ class ChainStrip(QWidget):
             # 否则 ix 被 False 覆盖（原「选中」对第 0 步以外的步骤
             # 实际选中第 0 行的潜伏 bug，本次一并修正）
             add_action(sub, FIF.VIEW, '选中',
-                       lambda _checked=False, ix=i: self._list.setCurrentRow(ix))
+                       lambda _checked=False, ix=i, gen=generation:
+                       self._overflow_action(ix, gen, edit=False))
             add_action(sub, FIF.EDIT, '编辑',
-                       lambda _checked=False, ix=i:
-                       self.sig_step_editor_requested.emit(ix))
+                       lambda _checked=False, ix=i, gen=generation:
+                       self._overflow_action(ix, gen, edit=True))
             menu.addMenu(sub)
             subs.append(sub)
         # qfw 未暴露子菜单清单——挂引用供测试访问（menu._step_submenus）
         menu._step_submenus = subs
         return menu
+
+    def _overflow_action(self, index: int, generation: int, *, edit: bool) -> None:
+        if (not self.isEnabled() or generation != self._display_generation
+                or not 0 <= index < len(self._steps)):
+            return
+        if edit:
+            # The host owns selection while opening the editor. Keep this a
+            # single edit request, as in the existing overflow API contract.
+            self.sig_step_editor_requested.emit(index)
+        else:
+            self._list.setCurrentRow(index)
+            self._list.scrollToItem(self._list.item(index))

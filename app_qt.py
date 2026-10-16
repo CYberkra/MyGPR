@@ -113,7 +113,7 @@ def _run_smoke(window: MyGPRMainWindow) -> None:
     errors = []
 
     expected_names = [
-        'homeInterface', 'projectInterface', 'processingInterface',
+        'projectInterface', 'processingInterface',
         'interpretationInterface', 'spatialInterface', 'deliveryInterface',
         'jobsInterface', 'settingsInterface',
     ]
@@ -165,7 +165,7 @@ def _run_smoke(window: MyGPRMainWindow) -> None:
         window.grab().save(shot_path)
         saved.append(shot_path)
 
-    # 整体窗口（回到主页）
+    # 整体窗口（回到项目工作区）
     if pages:
         window.switchTo(pages[0][1])
         app.processEvents()

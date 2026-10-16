@@ -131,13 +131,17 @@ class ProjectProcessingService:
             not save_intermediates
             and self._processing.supports_block_pipeline(pipeline)
         )
+        run_group_id = uuid.uuid4().hex
+        resolved_branch_id = branch_id or f"{line_id}:{run_group_id}"
         if use_block:
             artifact = self._execute_block_pipeline(
-                project_id, line_id, pipeline, result_name, branch_id, input_artifact_id, execution_context
+                project_id, line_id, pipeline, result_name, resolved_branch_id,
+                input_artifact_id, run_group_id, execution_context,
             )
         else:
             artifact = self._execute_loaded_pipeline(
-                project_id, line_id, pipeline, result_name, branch_id, input_artifact_id, execution_context
+                project_id, line_id, pipeline, result_name, resolved_branch_id,
+                input_artifact_id, run_group_id, save_intermediates, execution_context,
             )
         self._emit_artifact(artifact, execution_context)
         return artifact
@@ -150,6 +154,7 @@ class ProjectProcessingService:
         result_name: str,
         branch_id: str,
         input_artifact_id: str,
+        run_group_id: str,
         context: ExecutionContext,
     ) -> ProjectArtifact:
         context.report_progress(0, 1, "准备分块处理")
@@ -172,6 +177,7 @@ class ProjectProcessingService:
                 result_name,
                 branch_id,
                 input_artifact_id,
+                run_group_id,
                 context.child(1, 2),
             )
 
@@ -192,6 +198,8 @@ class ProjectProcessingService:
         result_name: str,
         branch_id: str,
         input_artifact_id: str,
+        run_group_id: str,
+        save_intermediates: bool,
         context: ExecutionContext,
     ) -> ProjectArtifact:
         context.report_progress(0, 1, "执行资源预检")
@@ -206,7 +214,6 @@ class ProjectProcessingService:
             self._projects.read_artifact_dataset(project_id, line_id, input_artifact_id)
             if input_artifact_id else self._projects.read_dataset(project_id, line_id)
         )
-        run_group_id = uuid.uuid4().hex
         result = self._processing.execute_pipeline(
             source.data,
             pipeline,
@@ -216,61 +223,53 @@ class ProjectProcessingService:
         )
         steps = pipeline_steps(pipeline)
         lineage = loaded_pipeline_lineage(result.step_results, self._processing)
-        final_method = result.step_results[-1].method_id if result.step_results else "pipeline"
-
-        # B7：逐步中间成果落盘（final 之外每步一个 intermediate 成果，
-        # run_group_id 归组；数据可重跑再生，清单哈希保留审计）
+        run_input_sha256 = source_sha256(info)
+        step_input_id = input_artifact_id
+        step_input_sha256 = run_input_sha256
+        final_artifact: ProjectArtifact | None = None
         step_context = context.child(1, 2)
-        for index, step_result in enumerate(result.step_results[:-1], start=1):
-            step_name = f"{result_name or pipeline.name} 步骤{index}_{step_result.method_id}"
-            self._projects.save_processing_artifact(
+        for index, step_result in enumerate(result.step_results, start=1):
+            is_final = index == len(result.step_results)
+            if not is_final and not save_intermediates:
+                continue
+            step_name = (result_name or pipeline.name) if is_final else (
+                f"{result_name or pipeline.name} 步骤{index}_{step_result.method_id}"
+            )
+            final_artifact = self._projects.save_processing_artifact(
                 project_id,
                 line_id,
                 step_result.data,
                 name=step_name,
                 method_id=step_result.method_id,
-                method_name=step_result.method_id,
+                method_name=pipeline.name if is_final else step_result.method_id,
                 params={
                     "pipeline": steps[:index],
                     "lineage": lineage[:index],
                     "execution_mode": "loaded",
                     "parent_artifact_id": input_artifact_id,
                     "output_header": _output_header_summary(step_result.header_info),
-                    "artifact_kind": "intermediate",
+                    "artifact_kind": "processing" if is_final else "intermediate",
                     "run_group_id": run_group_id,
                     "run_step_index": index,
+                    "lineage_version": 2,
+                    "run_input_artifact_id": input_artifact_id,
+                    "step_input_artifact_id": step_input_id,
+                    "run_input_sha256": run_input_sha256,
+                    "step_input_sha256": step_input_sha256,
                 },
                 pipeline=[{**step, "lineage": lineage[i]} for i, step in enumerate(steps[:index])],
-                branch_id=branch_id or f"{line_id}:main",
+                branch_id=branch_id,
                 input_dataset={
                     **source.header_info, "execution_mode": "loaded",
                     "parent_artifact_id": input_artifact_id,
+                    "input_data_sha256": run_input_sha256,
                 },
                 context=step_context,
             )
-
-        return self._projects.save_processing_artifact(
-            project_id,
-            line_id,
-            result.data,
-            name=result_name or pipeline.name,
-            method_id=final_method,
-            method_name=pipeline.name,
-            params={
-                "pipeline": steps, "lineage": lineage, "execution_mode": "loaded",
-                "parent_artifact_id": input_artifact_id,
-                "output_header": _output_header_summary(result.header_info),
-                "artifact_kind": "processing",
-                "run_group_id": run_group_id,
-            },
-            pipeline=[{**step, "lineage": lineage[index]} for index, step in enumerate(steps)],
-            branch_id=branch_id or f"{line_id}:main",
-            input_dataset={
-                **source.header_info, "execution_mode": "loaded",
-                "parent_artifact_id": input_artifact_id,
-            },
-            context=step_context,
-        )
+            step_input_id = final_artifact.artifact_id
+            step_input_sha256 = final_artifact.sha256
+        assert final_artifact is not None  # the processing service rejects empty pipelines
+        return final_artifact
 
     def _save_block_result(
         self,
@@ -282,6 +281,7 @@ class ProjectProcessingService:
         result_name: str,
         branch_id: str,
         input_artifact_id: str,
+        run_group_id: str,
         context: ExecutionContext,
     ) -> ProjectArtifact:
         steps = pipeline_steps(pipeline)
@@ -317,9 +317,17 @@ class ProjectProcessingService:
                 "execution_mode": "file_backed_blocks",
                 "parent_artifact_id": input_artifact_id,
                 "output_header": _output_header_summary(summary.header_info),
+                "artifact_kind": "processing",
+                "run_group_id": run_group_id,
+                "run_step_index": len(summary.step_records),
+                "lineage_version": 2,
+                "run_input_artifact_id": input_artifact_id,
+                "step_input_artifact_id": input_artifact_id,
+                "run_input_sha256": summary.input_sha256,
+                "step_input_sha256": summary.input_sha256,
             },
             pipeline=[{**step, "lineage": lineage[index]} for index, step in enumerate(steps)],
-            branch_id=branch_id or f"{line_id}:main",
+            branch_id=branch_id,
             input_dataset=input_dataset,
             context=context,
         )
@@ -363,6 +371,20 @@ def pipeline_steps(pipeline: PipelineDefinition) -> list[dict[str, Any]]:
         for step in pipeline.steps
         if step.enabled
     ]
+
+
+def source_sha256(info: LineDatasetInfo) -> str:
+    """Read a persisted source digest without materializing or rehashing its matrix."""
+    metadata = dict(info.metadata)
+    while metadata:
+        manifest = metadata.get("processing_manifest")
+        if isinstance(manifest, dict) and manifest.get("output_data_sha256"):
+            return str(manifest["output_data_sha256"])
+        if metadata.get("data_sha256"):
+            return str(metadata["data_sha256"])
+        nested = metadata.get("metadata")
+        metadata = nested if isinstance(nested, dict) else {}
+    return ""
 
 
 def loaded_pipeline_lineage(step_results: list[Any], processing: ProcessingService) -> list[dict[str, Any]]:

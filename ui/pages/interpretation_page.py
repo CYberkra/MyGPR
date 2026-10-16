@@ -24,7 +24,7 @@ import math
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QHBoxLayout, QHeaderView, QTableWidget,
+    QAbstractItemView, QApplication, QHBoxLayout, QHeaderView, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
@@ -38,6 +38,7 @@ from ui.page_scaffold import (card_title, make_card,
                               make_collapsible_column, make_hint,
                               refill_combo)
 from ui.widgets import BScanView, make_separator
+from ui.widgets.object_context_menu import ObjectMenuBinding, object_action, object_menu
 
 _OVERLAY_COLOR = constants.CHART_OVERLAY_COLOR   # 标注散点颜色（SPEC §6.6）
 _C_M_PER_NS = 0.29979        # 真空光速 c (m/ns)
@@ -59,12 +60,14 @@ class InterpretationPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._points = []           # [(trace_index, sample_index), ...] 原始数据坐标
+        self._points_revision = 0
         self._bundle = None         # 当前预览 bundle（取时间轴做深度换算）
         self._busy = False
         self._velocity_running = False  # 提交后到回调前的在飞窗口，防重复提交
         self._session_active = False  # 会话未打开时禁用编辑按钮与 pick
         self._build_ui()
         self._connect_internal()
+        self._points_context = ObjectMenuBinding(self, self._points_table, self._point_menu)
         # 初始即应用"未开会话"禁用态（P1-6），不依赖外部首次调用
         self._update_edit_enabled()
 
@@ -260,6 +263,7 @@ class InterpretationPage(QWidget):
         None = 清空（P0-1：项目直切时协调器在新预览到达前清残留；
         BScanView.set_bundle 不接受 None，走 clear 等价清空）。
         """
+        self._points_context.close()
         self._bundle = bundle
         if bundle is None:
             self._bscan.clear()
@@ -269,6 +273,7 @@ class InterpretationPage(QWidget):
 
     def set_line_label(self, text: str) -> None:
         """当前测线标签（顶部工具卡片）。"""
+        self._points_context.close()
         self._line_label.setText(text or '--')
 
     def set_artifacts(self, artifacts) -> None:
@@ -293,6 +298,8 @@ class InterpretationPage(QWidget):
     def set_points(self, points: list) -> None:
         """整列替换标注点（原始数据坐标）→ overlay（#fbbf24）+ 点列表。"""
         self._points = [(int(t), int(s)) for t, s in (points or [])]
+        self._points_revision += 1
+        self._points_context.close()
         self._bscan.set_overlay_points(self._points, _OVERLAY_COLOR)
         self._refresh_points_table()
         self._refresh_info()
@@ -306,6 +313,9 @@ class InterpretationPage(QWidget):
 
     def set_session_active(self, active: bool) -> None:
         """会话状态：未开会话禁用编辑按钮与 pick（P1-6），避免"点了才报错"。"""
+        if self._session_active != bool(active):
+            self._points_revision += 1
+            self._points_context.close()
         self._session_active = bool(active)
         self._update_edit_enabled()
 
@@ -374,6 +384,7 @@ class InterpretationPage(QWidget):
     def _on_point_picked(self, trace: int, sample: int) -> None:
         """pick 点击追加点（原始数据坐标）→ overlay/列表末行增量插入 + points_changed。"""
         self._points.append((int(trace), int(sample)))
+        self._points_revision += 1
         self._bscan.set_overlay_points(self._points, _OVERLAY_COLOR)
         self._append_points_row(len(self._points) - 1)
         self._refresh_info()
@@ -408,12 +419,63 @@ class InterpretationPage(QWidget):
         table_updated=True 表示调用方已完成表格局部更新（单点删除），
         此处跳过整表重建。
         """
+        self._points_revision += 1
+        self._points_context.close()
         self._bscan.set_overlay_points(self._points, _OVERLAY_COLOR)
         if not table_updated:
             self._refresh_points_table()
         self._refresh_info()
         self._update_edit_enabled()
         self.points_changed.emit(list(self._points))
+
+    def _point_menu(self, pos):
+        """Capture a point/revision, never the table's old current row."""
+        menu = object_menu(self)
+        row = self._points_table.indexAt(pos).row()
+        revision, bundle = self._points_revision, self._bundle
+        source = self._current_artifact_id()
+        line = self._line_label.text()
+        point = self._points[row] if 0 <= row < len(self._points) else None
+
+        def valid():
+            return (revision == self._points_revision and bundle is self._bundle
+                    and source == self._current_artifact_id()
+                    and line == self._line_label.text()
+                    and point is not None and 0 <= row < len(self._points)
+                    and self._points[row] == point)
+
+        if point is not None:
+            values = self._point_row_values(row, *point)
+            text = (f'测线\t{line}\n来源\t{source or "原始输入"}\n原始道索引\t{point[0]}\n原始采样索引\t{point[1]}\n'
+                    + '\t'.join(str(v) for v in values))
+            object_action(menu, 'locate-point', '在图像中定位',
+                          lambda: self._locate_point(point) if valid() else None,
+                          enabled=self._bscan._matrix is not None, reason='尚无可用剖面')
+            object_action(menu, 'copy-point', '复制坐标与属性',
+                          lambda: QApplication.clipboard().setText(text) if valid() else None)
+            menu.addSeparator()
+            enabled = self._session_active and not self._busy
+            reason = '当前忙碌' if self._busy else '请先打开标注会话'
+
+            def remove():
+                if valid() and self._session_active and not self._busy:
+                    self._points_table.selectRow(row)
+                    self._on_remove_selected_point()
+
+            object_action(menu, 'remove-point', '从当前解释移除', remove,
+                          enabled=enabled, reason=reason)
+        else:
+            for command, label, button in (('undo', '撤销', self._undo_btn),
+                                            ('redo', '重做', self._redo_btn),
+                                            ('save-points', '保存标注', self._save_btn)):
+                object_action(menu, command, label, button.click,
+                              enabled=button.isEnabled(), reason='请先打开可编辑标注会话')
+        return menu
+
+    def _locate_point(self, point):
+        trace, sample = self._bscan._data_to_view(*point)
+        self._bscan._plot.vb.setRange(xRange=(trace - 10, trace + 10),
+                                    yRange=(sample - 15, sample + 15), padding=0)
 
     # ---------------- 点列表与深度换算
     def _sample_time_ns(self, sample: int):

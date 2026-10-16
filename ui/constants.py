@@ -117,8 +117,8 @@ STATUS_COLORS = {
 # 强调色（选中态/主操作/链接）。浅色沿用品牌 teal；深色取高亮度变体供
 # 文字/线条使用。ACCENT_SOLID 为双主题同值的实色块用法（表格选中底等），
 # 与 qfluentwidgets 默认主题色对表。
-ACCENT = ('#009688', '#2dd4bf')
-ACCENT_SOLID = '#009688'
+ACCENT = ('#2563eb', '#60a5fa')
+ACCENT_SOLID = '#2563eb'
 
 COLOR_SUCCESS = STATUS_COLORS['success'][0]
 COLOR_WARNING = STATUS_COLORS['warning'][0]

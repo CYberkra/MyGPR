@@ -12,7 +12,8 @@ Project Explorer 平铺列线、无日期分组）相悖，分组层级已移除
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from collections.abc import Mapping
+from dataclasses import dataclass, field, replace
 from typing import Any, Sequence
 
 
@@ -147,6 +148,104 @@ def _artifact_node(artifact: Any) -> TreeNode:
         tooltip='\n'.join(tip))
 
 
+def artifact_parameters(artifact: Any) -> dict:
+    """Read persisted metadata, including immutable manifest mappings."""
+    manifest = getattr(artifact, 'manifest', None) or {}
+    if not isinstance(manifest, Mapping):
+        return {}
+    params = manifest.get('params')
+    return dict(params if isinstance(params, Mapping) else manifest)
+
+
+def artifact_direct_parent(artifact: Any) -> str | None:
+    """An empty id means raw input; None means the direct source is unknown."""
+    params = artifact_parameters(artifact)
+    if params.get('lineage_version') != 2 or 'step_input_artifact_id' not in params:
+        return None
+    return str(params['step_input_artifact_id'] or '')
+
+
+def artifact_step(artifact: Any) -> dict:
+    """Only expose an actual persisted step; never infer it from a name/date."""
+    params = artifact_parameters(artifact)
+    if params.get('lineage_version') != 2:
+        return {}
+    lineage = params.get('lineage') or []
+    if not isinstance(lineage, (list, tuple)):
+        return {}
+    try:
+        index = int(params.get('run_step_index', 0)) - 1
+    except (TypeError, ValueError):
+        return {}
+    if 0 <= index < len(lineage) and isinstance(lineage[index], Mapping):
+        return dict(lineage[index])
+    return {}
+
+
+def build_lineage_model(artifacts: Sequence[Any], line_id: str) -> tuple[TreeNode, ...]:
+    """Saved data forest: raw descendants and explicitly unknown origins.
+
+    Break corrupt cycles conservatively, without guessing an edge or losing data.
+    Build iteratively so long valid processing chains do not exhaust Python's stack.
+    """
+    by_id = {str(getattr(a, 'artifact_id', '')): a for a in artifacts or ()
+             if str(getattr(a, 'line_id', '')) == line_id and getattr(a, 'artifact_id', '')}
+    parents = {aid: artifact_direct_parent(a) for aid, a in by_id.items()}
+    for aid, parent in list(parents.items()):
+        if parent and parent not in by_id:
+            parents[aid] = None
+    checked = set()
+    for start in by_id:
+        path, positions = [], {}
+        node = start
+        while node and node in parents and node not in checked:
+            if node in positions:
+                for cyclic in path[positions[node]:]:
+                    parents[cyclic] = None
+                break
+            positions[node] = len(path)
+            path.append(node)
+            node = parents[node]
+        checked.update(path)
+    children = {aid: [] for aid in by_id}
+    roots, unknown = [], []
+    for aid, parent in parents.items():
+        if parent is None:
+            unknown.append(aid)
+        elif not parent:
+            roots.append(aid)
+        else:
+            children[parent].append(aid)
+    def order(aid):
+        return (str(getattr(by_id[aid], 'created_at', '') or ''), aid)
+    built = {}
+    for root in roots + unknown:
+        work = [(root, False)]
+        while work:
+            aid, ready = work.pop()
+            if ready:
+                node = _artifact_node(by_id[aid])
+                params = artifact_parameters(by_id[aid])
+                group = str(params.get('run_group_id') or '')
+                step = params.get('run_step_index')
+                suffix = f'{group[:6]}.{step}' if group and step else node.suffix
+                built[aid] = replace(node, suffix=suffix,
+                    children=tuple(built[c] for c in sorted(children[aid], key=order)))
+            else:
+                work.append((aid, True))
+                work.extend((c, False) for c in children[aid])
+    raw = TreeNode(key=f'raw:{line_id}', kind='raw', text='原始输入',
+                   payload=line_id, aux=line_id,
+                   children=tuple(built[a] for a in sorted(roots, key=order)))
+    nodes = [raw]
+    if unknown:
+        nodes.append(TreeNode(key=f'unknown:{line_id}', kind='group',
+                    text='历史成果 · 来源待核对',
+                    tooltip='缺少可靠的直接来源记录；可以查看或继续处理，不能推定历史父子关系',
+                    children=tuple(built[a] for a in sorted(unknown, key=order))))
+    return tuple(nodes)
+
+
 def build_artifacts_model(artifacts: Sequence[Any],
                           spatial_results: Sequence[Any] = (),
                           reports: Sequence[Any] = ()) -> list[TreeNode]:
@@ -258,11 +357,13 @@ def build_project_model(lines: Sequence[Any], artifacts: Sequence[Any],
     （单层扫描，子目录沿用面板懒加载）。
     """
     file_nodes = build_files_model(files_root) if files_root else []
+    line_nodes = [replace(node, children=build_lineage_model(artifacts, node.payload))
+                  for node in build_tree_model(lines)]
     categories = (
-        ('测线', len(lines), build_tree_model(lines)),
-        ('成果', len(artifacts) + len(spatial_results) + len(reports),
-         build_artifacts_model(artifacts, spatial_results, reports)),
-        ('文件', len(file_nodes), file_nodes),
+        ('测线', len(lines), line_nodes),
+        ('空间成果', len(spatial_results), [_spatial_node(r) for r in spatial_results]),
+        ('交付成果', len(reports), [_report_node(r) for r in reports]),
+        ('来源与附件', len(file_nodes), file_nodes),
     )
     return [
         TreeNode(key=f'category:{name}', kind='category', text=name,

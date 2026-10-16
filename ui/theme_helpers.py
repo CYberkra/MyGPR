@@ -63,9 +63,11 @@ def _get_dark_palette() -> QPalette:
     global _dark_palette
     if _dark_palette is None:
         p = QPalette()
-        window = QColor(45, 45, 45)
-        base = QColor(30, 30, 30)
-        text = QColor(230, 230, 230)
+        from ui.design_tokens import tokens
+        semantic = tokens(True)
+        window = QColor(semantic['bg_subtle'])
+        base = QColor(semantic['bg_surface'])
+        text = QColor(semantic['text_primary'])
         disabled = QColor(127, 127, 127)
         highlight = QColor(constants.ACCENT_SOLID)
         p.setColor(QPalette.ColorRole.Window, window)
@@ -246,6 +248,8 @@ def native_views_qss(dark: bool) -> str:
     header_bg = palette['table_header_bg']
     grid = palette['table_grid']
     selection = palette['selection']
+    from ui.design_tokens import tokens
+    semantic = tokens(dark)
     return (
         'QTableWidget, QTableView, QListWidget, QListView, QTreeWidget,'
         ' QTreeView {'
@@ -257,11 +261,24 @@ def native_views_qss(dark: bool) -> str:
         f' background-color: {header_bg}; color: {text};'
         ' border: none;'
         f' border-right: 1px solid {grid}; border-bottom: 1px solid {grid};'
-        ' padding: 4px;'
+        ' padding: 6px 8px; font-weight: 500;'
         ' }'
         'QTableCornerButton::section {'
         f' background-color: {header_bg}; border: none;'
         f' border-right: 1px solid {grid}; border-bottom: 1px solid {grid};'
+        ' }'
+        'QTabWidget::pane {'
+        f' border: 1px solid {border}; background: {base};'
+        ' }'
+        'QTabBar::tab {'
+        f' background: {header_bg}; color: {text}; padding: 6px 12px;'
+        ' border: none; border-bottom: 2px solid transparent;'
+        ' }'
+        'QTabBar::tab:selected {'
+        f' background: {base}; border-bottom: 2px solid {semantic["primary"]};'
+        ' }'
+        'QTabBar::tab:disabled {'
+        f' color: {semantic["text_muted"]};'
         ' }'
     )
 
@@ -274,7 +291,7 @@ _applied_dark: bool | None = None
 
 
 def apply_theme(theme: str) -> None:
-    """应用主题：setTheme + 强调色统一 + pyqtgraph 背景同步（'k'/'w'）+ palette + 原生控件 QSS。
+    """应用主题：setTheme + 强调色统一 + pyqtgraph 语义背景 + palette + 原生控件 QSS。
 
     强调色：qfluentwidgets 默认是青绿（#009FAA），折叠柄/徽章/主按钮
     全在用——与科学仪器的克制诉求不符（用户真机目检点名），统一替换为
@@ -316,11 +333,12 @@ def apply_theme(theme: str) -> None:
     setTheme(Theme.DARK if dark else Theme.LIGHT)
     from qfluentwidgets import setThemeColor
     from PyQt6.QtGui import QColor
-    setThemeColor(QColor('#3B82F6'))
+    setThemeColor(QColor(constants.ACCENT_SOLID))
     # 美术打磨 A（2026-09-27）：绘图区背景融入主题——深色近黑蓝调 /
     # 浅色纸白，替代纯 'k'/'w'（灰圈显旧）；前景同步降一档对比
-    pg.setConfigOption('background', '#141822' if dark else '#f7f8fa')
-    pg.setConfigOption('foreground', '#c8ccd4' if dark else '#33383f')
+    plot_palette = control_palette(dark)
+    pg.setConfigOption('background', plot_palette['plot_bg'])
+    pg.setConfigOption('foreground', plot_palette['plot_fg'])
     # 抗锯齿（pyqtgraph 默认关闭）：曲线与文字边缘明显更平滑。该 hint 作用于
     # GraphicsView 的矢量绘制，B-Scan 等 ImageItem 走图像绘制路径不受影响，
     # 但多 GB 真实数据下的实际帧率仍需在 Windows 目标机验收。

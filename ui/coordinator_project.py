@@ -37,6 +37,9 @@ class ProjectChain:
         self._spatial_reload_pending = False
         # 上次真正发起重载时的测线集合；集合变化才需要重新解析轨迹
         self._spatial_reload_line_ids: tuple[str, ...] | None = None
+        self._busy_sources: set[str] = set()
+        self._active_job_ids: set[str] = set()
+        self._restore_line_id = ''
 
     # ============================================================ 信号注册
     def connect_all(self) -> None:
@@ -53,6 +56,16 @@ class ProjectChain:
         home.import_line_requested.connect(
             lambda: co.goto_page('projectInterface'))
         home.goto_page.connect(co.goto_page)
+        recent_signal = getattr(home, 'open_recent_project_requested', None)
+        if hasattr(recent_signal, 'connect'):
+            recent_signal.connect(self.on_open_recent_project)
+        for name, controller in (('project', co.project_controller),
+                                 ('processing', co.processing_controller),
+                                 ('interpretation', co.interpretation_controller),
+                                 ('delivery', co.delivery_controller)):
+            signal = getattr(controller, 'busy_changed', None)
+            if hasattr(signal, 'connect'):
+                signal.connect(lambda busy, source=name: self.set_operation_busy(source, busy))
 
         # ---------------- 项目页（SPEC §6.3）
         project.import_requested.connect(self.on_import_requested)
@@ -131,7 +144,41 @@ class ProjectChain:
                 dc.report_list_updated.connect(tree.set_reports)
 
     # ============================================================ 项目生命周期
+    def set_operation_busy(self, source: str, busy: bool) -> None:
+        if busy:
+            self._busy_sources.add(source)
+        else:
+            self._busy_sources.discard(source)
+
+    def on_job_status(self, job_id: str, status: str) -> None:
+        if str(status) in ('completed', 'failed', 'cancelled'):
+            self._active_job_ids.discard(str(job_id))
+        else:
+            self._active_job_ids.add(str(job_id))
+
+    def can_change_project(self) -> bool:
+        co = self._co
+        active = (self._busy_sources or self._active_job_ids
+                  or co.processing.processing_job_id
+                  or co.jobs.import_job_ids or co.jobs.spatial_job_ids)
+        if active:
+            co.infobar('warning', '项目正在使用中',
+                       '请先等待当前任务完成，或在任务页明确取消后再切换 / 关闭项目。')
+            return False
+        return True
+
+    def on_open_recent_project(self, root: str) -> None:
+        if not self.can_change_project():
+            return
+        if not self._co.backend_ready:
+            self._co.infobar('warning', '打开项目', '后端尚未就绪，请稍后再试')
+            return
+        if self._co.project_controller is not None:
+            self._co.project_controller.open_project(str(root))
+
     def on_close_project_requested(self) -> None:
+        if not self.can_change_project():
+            return
         if self._co.project_controller is not None and self._co.require_project():
             # The edit service keeps an in-memory session bound to this project.
             # Release it before the backend closes the project, otherwise a later
@@ -153,10 +200,22 @@ class ProjectChain:
         if root:
             co.settings.add_recent_project(root)
             co.settings.save()
+        refresh = getattr(home, 'refresh_recents', None)
+        if callable(refresh):
+            refresh()
         self.current_line_id = ''
         self.update_line_labels()
         # 测线列表由 controller 在 project_opened 后自行 refresh_lines
         project_id = co.current_project_id()
+        processing = co.page('processingInterface')
+        context_setter = getattr(processing, 'set_project_context', None)
+        if callable(context_setter):
+            context_setter(str(project_id or ''))
+        settings = getattr(co, 'settings', None)
+        if settings is not None:
+            last_lines = settings.get('ui/project_workspace/last_lines', {})
+            if isinstance(last_lines, dict):
+                self._restore_line_id = str(last_lines.get(str(project_id or root), '') or '')
         if project_id and co.delivery_controller is not None:
             co.delivery_controller.refresh_spatial(project_id)
             co.delivery_controller.refresh_reports(project_id)
@@ -184,11 +243,13 @@ class ProjectChain:
         name = getattr(summary, 'name', '')
         co.infobar('success', '项目', f'项目已打开：{name}')
         co.log_message(f'SUCCESS 当前项目：{name}（{root}）')
+        co.goto_page('projectInterface')
 
     def on_project_closed(self) -> None:
         """project_closed → 清空各页项目态并恢复无项目门控。"""
         co = self._co
         self.current_line_id = ''
+        self._restore_line_id = ''
         # 关闭项目即重置轨迹去重态：否则重新打开**同一个**项目时，测线集合
         # 与上次相同 → 会被误判为"无需重载"，空间页停在空轨迹。
         self._spatial_reload_pending = False
@@ -205,6 +266,9 @@ class ProjectChain:
             co.file_tree().set_project_info(None)
         project.set_lines([])
         project.set_artifacts([])
+        context_setter = getattr(processing, 'set_project_context', None)
+        if callable(context_setter):
+            context_setter('')
         processing.set_line_label('')
         processing.set_original_bundle(None)
         processing.close_all_artifact_tabs()
@@ -223,9 +287,14 @@ class ProjectChain:
         if pc is not None:
             pc.invalidate_depth_previews()
         spatial.clear_depth_grid()
+        co.goto_page('projectInterface')
         co.log_message('INFO 项目已关闭，相关页面恢复未打开项目状态')
 
     def on_open_failed(self, message: str) -> None:
+        home = self._co.page('homeInterface')
+        setter = getattr(home, 'set_startup_error', None)
+        if callable(setter):
+            setter(message)
         self._co.infobar('error', '项目', message)
 
     # ============================================================ 测线 / 成果 / 预览
@@ -246,6 +315,8 @@ class ProjectChain:
         spatial = co.page('spatialInterface')
         processing = co.page('processingInterface')
         project.set_lines(lines)
+        # 先填下拉，再同步新导入测线；旧清单里查不到 L02 时会停在 L01。
+        processing.set_lines(lines)
         # 预热右键菜单"复制路径"缓存：异步查询各测线源文件路径，
         # 回包经 line_source_path_ready → project.set_line_source_path 入缓存
         if co.project_controller is not None:
@@ -261,12 +332,13 @@ class ProjectChain:
             self.pending_select_line_id = ''
         elif lines:
             # 保持用户当前测线；尚未选中时默认首条。
-            target = self.current_line_id or str(
-                getattr(lines[0], 'line_id', '') or '')
+            available = {str(getattr(line, 'line_id', '') or '') for line in lines}
+            restored = self._restore_line_id if self._restore_line_id in available else ''
+            target = self.current_line_id or restored or str(getattr(lines[0], 'line_id', '') or '')
             if target and project.select_line(target):
                 if target != self.current_line_id:
                     self.on_line_selected(target)
-        processing.set_lines(lines)
+        self._restore_line_id = ''
         delivery.set_lines(lines)
         spatial.set_lines(lines)
         if co.file_tree() is not None:
@@ -299,9 +371,7 @@ class ProjectChain:
             return
         co = self._co
         if line_id != self.current_line_id:
-            # 切换测线：关闭上一条测线的成果/步骤 tab（原始锚点保留换内容）
-            processing = co.page('processingInterface')
-            processing.close_all_artifact_tabs()
+            # ProcessingPage saves the full session before switching its context.
             # 在飞速度分析回调带旧测线，会被 line 守卫丢弃；
             # 同步失效 token 并复位解释页，避免新测线永久停留在"拟合中"
             co.processing.velocity_token = None
@@ -312,11 +382,26 @@ class ProjectChain:
             interpretation = co.page('interpretationInterface')
             interpretation.set_velocity_failed('')  # 空串 = 状态重置，非失败
         self.current_line_id = line_id
+        settings = getattr(co, 'settings', None)
+        if settings is not None:
+            last_lines = settings.get('ui/project_workspace/last_lines', {})
+            if not isinstance(last_lines, dict):
+                last_lines = {}
+            last_lines = dict(last_lines)
+            key = str(co.current_project_id() or '')
+            if key:
+                last_lines[key] = line_id
+                settings.set('ui/project_workspace/last_lines', last_lines)
+                settings.save()
         self.update_line_labels()
         # 反向同步项目页测线表选中（select_line 内部抑止回发，无双倍预览）
         project = co.page('projectInterface')
         if project is not None and hasattr(project, 'select_line'):
             project.select_line(line_id)
+        has_session = getattr(co.page('processingInterface'), 'has_line_session', None)
+        resume_setter = getattr(project, 'set_line_resume_available', None)
+        if callable(has_session) and callable(resume_setter):
+            resume_setter(line_id, bool(has_session(line_id)))
         if co.project_controller is not None:
             co.project_controller.preview_line(line_id)
             co.project_controller.refresh_artifacts(line_id)
@@ -374,8 +459,7 @@ class ProjectChain:
                         self.current_line_id, artifact_id)
 
     def on_artifact_preview_requested(self, line_id: str, artifact_id: str) -> None:
-        if self._co.project_controller is not None and self._co.require_project():
-            self._co.project_controller.preview_artifact(str(line_id), str(artifact_id))
+        self.on_artifact_focus_requested(str(line_id), str(artifact_id))
 
     def on_artifact_focus_requested(self, line_id: str, artifact_id: str) -> None:
         """文件树「成果」叶子点击 → 换线（如需）+ 跳处理页选中并预览该成果。
@@ -418,12 +502,6 @@ class ProjectChain:
         co = self._co
         processing = co.page('processingInterface')
         processing.set_artifact_bundle(str(artifact_id), bundle)
-        processing_chain = co.processing
-        if processing_chain.show_run_completion_notice:
-            processing_chain.show_run_completion_notice = False
-            co.infobar('success', '处理完成', '已更新处理结果预览')
-            # 跑完自动选中末位 tab（= 最终结果），避免提示与画面矛盾
-            processing.show_latest_result()
 
     def on_preview_invalidated(self, artifact_id: str = '') -> None:
         """当前预览的成果已被删除 → 关闭其 tab（窗口数随 tab 收敛）。"""

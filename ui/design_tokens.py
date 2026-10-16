@@ -37,42 +37,46 @@ _BLUE = {
 _LIGHT: dict[str, str] = {
     # 背景
     'bg_surface': '#ffffff',
-    'bg_subtle': '#f5f5f5',
-    'bg_muted': '#f0f0f0',
+    'bg_subtle': '#f5f7fa',
+    'bg_muted': '#edf1f6',
+    'plot_background': '#fbfcfe',
+    'plot_foreground': '#455063',
     # 文字（对比度实测见 tests/test_design_tokens.py）
-    'text_primary': '#202020',
-    'text_secondary': '#404040',
-    'text_muted': '#6b7280',      # 白底 4.83:1（WCAG AA 达标）
+    'text_primary': '#202833',
+    'text_secondary': '#455063',
+    'text_muted': '#667184',
     'text_inverse': '#ffffff',
     # 强调（primary 与 qfw 主题色同值，消除多套强调色并存）
-    'primary': _BLUE[500],
-    'primary_hover': _BLUE[600],
-    'primary_active': _BLUE[700],
+    'primary': constants.ACCENT[0],
+    'primary_hover': _BLUE[700],
+    'primary_active': _BLUE[900],
     'primary_subtle': _BLUE[50],
-    'primary_border': _BLUE[500],
+    'primary_border': constants.ACCENT[0],
     # 描边（border_strong 取 gray-500：#9ca3af 对白底实测仅 2.54:1，
     # 不达非文本 3:1，已在令牌层提深一档而非逐组件打补丁）
-    'border_default': '#d9d9d9',
+    'border_default': '#dbe1e8',
     'border_strong': '#6b7280',
     'border_focus': _BLUE[500],
 }
 
 _DARK: dict[str, str] = {
-    'bg_surface': '#000000',
-    'bg_subtle': '#2d2d2d',
-    'bg_muted': '#3d3d3d',
-    'text_primary': '#f0f0f0',
-    'text_secondary': '#d6d6d6',
-    'text_muted': '#a8b0bd',      # #202020 深底 7.4:1（AA 达标）
+    'bg_surface': '#20242b',
+    'bg_subtle': '#282d35',
+    'bg_muted': '#323a45',
+    'plot_background': '#191d24',
+    'plot_foreground': '#c5ccd6',
+    'text_primary': '#edf0f5',
+    'text_secondary': '#c5ccd6',
+    'text_muted': '#9da8b8',
     'text_inverse': '#202020',
     # 暗底需更高明度的同色相（skill 暗色规则）
-    'primary': _BLUE[400],
+    'primary': constants.ACCENT[1],
     'primary_hover': _BLUE[300],
     'primary_active': _BLUE[100],
     'primary_subtle': _BLUE[900],
     'primary_border': _BLUE[400],
-    'border_default': '#5a5a5a',
-    'border_strong': '#9ca3af',
+    'border_default': '#3b4553',
+    'border_strong': '#8491a3',
     'border_focus': _BLUE[400],
 }
 
@@ -151,30 +155,30 @@ def palette(dark: bool) -> dict[str, Any]:
     t = tokens(dark)
     if dark:
         return {
-            'plot_bg': 'k', 'plot_fg': 'w',
-            'surface': t['bg_surface'], 'border': '#5a5a5a',
-            'hover': t['bg_muted'], 'button_bg': '#2d2d2d',
-            'button_text': '#f0f0f0',
+            'plot_bg': t['plot_background'], 'plot_fg': t['plot_foreground'],
+            'surface': t['bg_surface'], 'border': t['border_default'],
+            'hover': t['bg_muted'], 'button_bg': t['bg_subtle'],
+            'button_text': t['text_primary'],
             'panel_bg': 'rgba(32,32,32,200)',
             'panel_border': 'rgba(255,255,255,45)',
-            'text': '#f0f0f0',
-            'table_base': '#1e1e1e', 'table_text': '#e6e6e6',
-            'table_border': '#3c3c3c', 'table_header_bg': '#2d2d2d',
-            'table_grid': '#3c3c3c', 'selection': constants.ACCENT_SOLID,
+            'text': t['text_primary'],
+            'table_base': t['bg_surface'], 'table_text': t['text_primary'],
+            'table_border': t['border_default'], 'table_header_bg': t['bg_subtle'],
+            'table_grid': t['border_default'], 'selection': constants.ACCENT_SOLID,
             'nav_line': 'rgba(255, 255, 255, 0.10)',
             'nav_track': 'rgba(255, 255, 255, 0.06)',
         }
     return {
-        'plot_bg': 'w', 'plot_fg': 'k',
+        'plot_bg': t['plot_background'], 'plot_fg': t['plot_foreground'],
         'surface': t['bg_surface'], 'border': t['border_default'],
         'hover': t['bg_muted'], 'button_bg': '#ffffff',
         'button_text': '#202020',
         'panel_bg': 'rgba(255,255,255,220)',
         'panel_border': 'rgba(0,0,0,45)',
         'text': '#202020',
-        'table_base': '#ffffff', 'table_text': '#1a1a1a',
-        'table_border': '#d9d9d9', 'table_header_bg': '#f5f5f5',
-        'table_grid': '#e5e5e5', 'selection': constants.ACCENT_SOLID,
+        'table_base': t['bg_surface'], 'table_text': t['text_primary'],
+        'table_border': t['border_default'], 'table_header_bg': t['bg_subtle'],
+        'table_grid': t['bg_muted'], 'selection': constants.ACCENT_SOLID,
         'nav_line': 'rgba(0, 0, 0, 0.07)',
         'nav_track': 'rgba(0, 0, 0, 0.05)',
     }

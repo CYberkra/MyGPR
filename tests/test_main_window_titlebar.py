@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 
 @pytest.fixture
-def window(qapp, monkeypatch):
+def window(qapp, monkeypatch, tmp_path):
     import ui.main_window as mw
     # 控制器置 None：不启动后端线程，纯 UI 组装
     for name in ('BackendController', 'ProjectController',
@@ -54,7 +54,9 @@ def window(qapp, monkeypatch):
             pass
 
     monkeypatch.setattr(mw, 'FileTreePanel', _FileTreeStub)
-    w = mw.MyGPRMainWindow()
+    from ui.settings_manager import SettingsManager
+    settings = SettingsManager(str(tmp_path / 'window-settings.json'))
+    w = mw.MyGPRMainWindow(settings=settings)
     w.ensure_pages_ready()   # 非首屏页为预热构造，测试需显式确保全部就位
     # 开屏画面是与主窗口同位的独立 frameless 窗口（自带一套 TitleBar），
     # SPLASH_DURATION_MS(600ms) 未到时 QApplication.widgetAt 会命中它而不是
@@ -86,6 +88,100 @@ def test_titlebar_buttons_receive_mouse(window):
             f'{type(hit).__name__ if hit is not None else None}，'
             '不在 titleBar 内——标题栏被遮挡，鼠标点击将被吞'
         )
+
+
+def test_top_navigation_receives_mouse(window, qapp):
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
+
+    # Data-dependent routes are gated until a project has lines.
+    window._page('projectInterface').set_project_info(type('Summary', (), {'name': 'Test'})())
+    window._page('projectInterface').set_lines([type('Line', (), {'line_id': 'L01'})()])
+    for key in ('projectInterface', 'processingInterface', 'projectInterface'):
+        item = window._top_nav.items[key]
+        hit = QApplication.widgetAt(item.mapToGlobal(item.rect().center()))
+        assert hit is item or item.isAncestorOf(hit), (key, type(hit).__name__)
+        QTest.mouseClick(item, Qt.MouseButton.LeftButton)
+        qapp.processEvents()
+        assert window.stackedWidget.currentWidget() is window.pages[key]
+
+
+def test_project_is_the_only_startup_navigation_entry(window):
+    assert 'homeInterface' not in window._top_nav.items
+    assert window.stackedWidget.count() == 7
+    window._goto_page('homeInterface')
+    assert window.stackedWidget.currentWidget() is window.pages['projectInterface']
+    assert window._page('homeInterface') is window._page('projectInterface').startup
+
+
+def test_empty_workspace_disables_data_navigation_with_reason(window):
+    item = window._top_nav.items['processingInterface']
+    assert not item.isEnabled()
+    assert '项目' in item.toolTip()
+    assert not window._file_tree_panel.isVisible()
+
+
+def test_processing_uses_its_workspace_resource_button(window):
+    from types import SimpleNamespace
+    project = window._page('projectInterface')
+    project.set_project_info(SimpleNamespace(project_id='P1', name='Test'))
+    project.set_lines([SimpleNamespace(line_id='L01')])
+    window._goto_page('processingInterface')
+    assert not window._file_tree_btn.isVisible()
+    window._goto_page('projectInterface')
+    assert window._file_tree_btn.isVisible()
+
+
+def test_future_split_views_receive_preferences_once(window, monkeypatch):
+    from ui.widgets.bscan_view import BScanView
+    view = BScanView(window)
+    wired = []
+    monkeypatch.setattr(window, '_wire_bscan_preferences',
+                        lambda owner: wired.extend(owner.findChildren(BScanView)))
+    processing = window._page('processingInterface')
+    processing.bscan_view_created.emit(view)
+    processing.bscan_view_created.emit(view)
+    assert wired == [view]
+
+
+def test_startup_and_close_use_existing_project_commands(window, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    created = Mock()
+    opened = Mock()
+    monkeypatch.setattr(window, '_show_new_project_dialog', created)
+    monkeypatch.setattr(window, '_open_project_dialog', opened)
+    project = window._page('projectInterface')
+    project.startup.new_btn.click()
+    project.startup.open_btn.click()
+    created.assert_called_once_with()
+    opened.assert_called_once_with()
+    controller = SimpleNamespace(close_current=Mock())
+    monkeypatch.setattr(window, 'project_controller', controller)
+    monkeypatch.setattr(window.page_coordinator, 'require_project', lambda: True)
+    project.close_project_requested.emit()
+    controller.close_current.assert_called_once_with()
+
+
+def test_project_switch_updates_name_even_when_both_projects_are_empty(window):
+    from types import SimpleNamespace
+    page = window._page('projectInterface')
+    page.set_project_info(SimpleNamespace(project_id='A', name='First'))
+    page.set_project_info(SimpleNamespace(project_id='B', name='Second'))
+    assert 'Second' in window._project_switch_btn.text()
+
+
+def test_missing_last_project_leaves_startup_with_specific_reason(window, tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    missing = str(tmp_path / 'moved-project')
+    window.settings.set('recent_projects', [missing])
+    monkeypatch.setattr(window, 'project_controller', SimpleNamespace(open_project=Mock()))
+    window._backend_ready = True
+    window._last_project_restored = False
+    window._restore_last_project()
+    assert window._page('projectInterface').workspace_state() == 'startup'
+    assert missing in window._page('homeInterface')._startup_error.text()
 
 
 class TestOutputPanelSplitter:

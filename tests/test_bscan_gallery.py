@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """BScanGallery 契约（P1-4 重写）：动态列数 1/2/3/4 档、真实缩略图 +
 步序徽章 + 名称、当前卡描边 + 角标、hover 无悬浮按钮、单击设当前并关闭、
-空状态居中、错峰淡入、Esc；页面侧单实例防堆叠与 sig_pick 接线语义。
+空状态居中、错峰淡入、Esc。独立组件保留；2026-10-16 处理页取消结果墙。
 """
 from __future__ import annotations
 
@@ -173,51 +173,63 @@ class TestStaggeredFade:
             assert effect.opacity() == 0.0     # 淡入起点（错峰启动前）
 
 
-class TestPageGallerySingleton:
-    @staticmethod
-    def _page(qapp):
+class TestPageWithoutGallery:
+    """The 2026-10-16 workbench retires both automatic and explicit result walls.
+
+    Independent BScanGallery behavior above remains supported and unchanged.
+    """
+
+    def test_many_results_do_not_construct_a_gallery(self, qapp, monkeypatch):
         from types import SimpleNamespace
-
         from ui.pages.processing_page import ProcessingPage
+
+        constructed = []
+        monkeypatch.setattr(BScanGallery, '__init__',
+                            lambda *args, **kwargs: constructed.append(True))
         page = ProcessingPage()
-        page.set_original_bundle(_bundle())
-        page.set_artifacts([SimpleNamespace(
-            artifact_id='F1', line_id='L01', name='run_agc',
-            method_id='agc', created_at='2026-10-11T10:02:00',
-            manifest={'params': {'artifact_kind': 'processing',
-                                 'run_group_id': 'G1'}})])
-        return page
-
-    def test_repeated_open_is_single_instance(self, qapp):
-        """连续触发打开（头按钮 + 自动弹）只存在单个实例，不堆叠。"""
-        page = self._page(qapp)
         try:
-            page._open_gallery()
-            first = page._gallery
-            assert first is not None and first.isVisible()
-            page._open_gallery()
-            assert page._gallery is first        # 唤起同一实例
-            first.close()
-            assert page._gallery is None          # 关闭后引用释放
-            page._open_gallery()
-            assert page._gallery is not None
-            assert page._gallery is not first     # 再开 = 新实例
+            page.set_original_bundle(_bundle())
+            artifacts = [SimpleNamespace(
+                artifact_id=f'F{i}', line_id='L01', name=f'result{i}',
+                method_id='agc', created_at='2026-10-16T10:02:00',
+                manifest={'params': {'artifact_kind': 'processing',
+                                     'run_group_id': 'G1'}}) for i in range(6)]
+            page.set_artifacts(artifacts)
+            for art in artifacts:
+                page.select_artifact(art.artifact_id)
+            page.show_latest_result()
+            assert constructed == []
+            assert len(page._workspace.views()) == 1
+            assert not hasattr(page, '_open_gallery')
+            assert not hasattr(page, '_gallery_btn')
+            assert page.findChildren(BScanGallery) == []
         finally:
             page.close()
+            page.deleteLater()
 
-    def test_pick_uses_page_semantics(self, qapp):
-        """sig_pick → on_gallery_pick 语义：设当前源（可见性规则换入主区）。"""
-        page = self._page(qapp)
+    def test_catalog_and_preview_updates_preserve_selected_tabs(self, qapp):
+        from types import SimpleNamespace
+        from ui.pages.processing_page import ProcessingPage
+
+        page = ProcessingPage()
         try:
-            page._open_gallery()
-            gallery = page._gallery
-            # 打开后当前源 = 末位（最终成果，show_latest_result 语义）；
-            # 点原始卡 → 当前源换回 original，画廊关闭
-            assert page._selected_source_key != 'original'
-            card = gallery.cards()[0]
-            assert card._key == 'original'
-            card.sig_clicked.emit('original')
-            assert page._selected_source_key == 'original'
-            assert page._gallery is None            # 点卡即关（单实例语义）
+            page.set_original_bundle(_bundle())
+            art = SimpleNamespace(
+                artifact_id='F1', line_id='L01', name='run_agc',
+                method_id='agc', created_at='2026-10-16T10:02:00',
+                manifest={'params': {'artifact_kind': 'processing',
+                                     'run_group_id': 'G1'}})
+            page.set_artifacts([art])
+            page.select_artifact('F1')
+            page.select_original()
+            before = page._workspace.tab_keys()
+            art.name = 'renamed saved result'
+            page.set_artifacts([art])
+            page.set_artifact_bundle('F1', _bundle())
+            assert page._workspace.tab_keys() == before
+            assert page._workspace.active_key() == 'original'
+            assert page._workspace.tab_bar().tabText(1) == art.name
+            assert page.findChildren(BScanGallery) == []
         finally:
             page.close()
+            page.deleteLater()

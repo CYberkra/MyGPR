@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import QApplication
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants, file_dialogs
-from ui.theme_helpers import ui_font
+from ui.theme_helpers import control_palette, ui_font
 from ui.widgets.context_menus import add_action
 
 __all__ = ['ZOOM_STEP', 'style_plot_item', 'GraphicsViewBase']
@@ -34,7 +34,7 @@ def style_plot_item(plot_item: pg.PlotItem, dark: bool, *,
                     colorbar_axis=None, grid: bool = False) -> str:
     """统一轴主题循环：pen/textPen/轴标签/标题同步深浅色，返回前景色名。
 
-    深色 'k' 底 'w' 字 / 浅色 'w' 底 'k' 字（SPEC §1）。轴标题（如
+    前景色来自语义调色板，与画布背景统一。轴标题（如
     道数/采样点）是独立 label，不随 textPen 变色，需显式同步；标题
     （PlotItem titleLabel）同理。
 
@@ -45,12 +45,11 @@ def style_plot_item(plot_item: pg.PlotItem, dark: bool, *,
     :param colorbar_axis: BScanView 色标轴（ColorBarItem.axis）一并同步。
     :param grid: 是否叠加淡网格。仅曲线类视图（AScan / 高程剖面）适用；
         图像类（B-Scan / 深度切片）套网格会盖住数据，保持默认 False。
-    :return: 前景色名 'w'/'k'，供调用方同步曲线/图例等颜色。
+    :return: 前景色值，供调用方同步曲线/图例等颜色。
 
-    注意不能用 ``QColor(fg)``：Qt 颜色名不含 'w'/'k'，非法色会变黑，
-    深色主题下轴字不可见；pg.mkPen 支持 'w'/'k' 简写。
+    使用完整颜色值，Qt 和 pyqtgraph 均可解析；不依赖库特有的颜色名简写。
     """
-    fg = 'w' if dark else 'k'
+    fg = control_palette(dark)['plot_fg']
     pen = pg.mkPen(fg)
     tick_font = ui_font(constants.CHART_TICK_FONT_SIZE)
     for name in ('bottom', 'left'):
@@ -72,6 +71,7 @@ def style_plot_item(plot_item: pg.PlotItem, dark: bool, *,
     if colorbar_axis is not None:
         colorbar_axis.setPen(pen)
         colorbar_axis.setTextPen(pen)
+        colorbar_axis.setTickFont(tick_font)
         if getattr(colorbar_axis, 'labelText', ''):
             colorbar_axis.setLabel(text=colorbar_axis.labelText, color=fg)
     return fg

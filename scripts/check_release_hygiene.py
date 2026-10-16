@@ -34,6 +34,11 @@ def scan(root: Path) -> dict:
     for current, dirnames, filenames in os.walk(root):
         current_path = Path(current)
 
+        # Local reports and installer builds are never part of source releases.
+        # Only prune the root output directory; nested source debris must still fail.
+        if current_path == root and 'output' in dirnames:
+            dirnames.remove('output')
+
         # Do not descend into legitimate local environments or VCS metadata.
         dirnames[:] = [name for name in dirnames if name not in EXCLUDED_DIR_NAMES]
 

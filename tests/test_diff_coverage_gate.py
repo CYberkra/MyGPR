@@ -21,6 +21,18 @@ def test_changed_backend_requires_coverage_evidence(tmp_path):
     assert invoke(tmp_path, {'core/new_reader.py': [1]}, {}) == 1
 
 
+def test_windows_coverage_paths_match_git_paths(tmp_path):
+    assert invoke(tmp_path, {'core/reader.py': [1]},
+                  {r'core\reader.py': {'executed_lines': [1], 'missing_lines': []}}) == 0
+
+
+def test_windows_paths_do_not_bypass_uncovered_line_threshold(tmp_path):
+    assert invoke(tmp_path, {'core/reader.py': [1, 2]},
+                  {r'core\reader.py': {'executed_lines': [1], 'missing_lines': [2]}}) == 1
+    report = json.loads((tmp_path / 'diff-coverage-report.json').read_text(encoding='utf-8'))
+    assert report['total'] == 2 and report['covered'] == 1
+
+
 def test_uncovered_backend_fails_threshold(tmp_path):
     assert invoke(tmp_path, {'core/reader.py': [1, 2]},
                   {'core/reader.py': {'executed_lines': [1], 'missing_lines': [2]}}) == 1

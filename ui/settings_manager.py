@@ -63,7 +63,9 @@ DEFAULT_SETTINGS = {
 class SettingsManager:
     """JSON 文件设置管理（非 QSettings）。构造时自动 ``load()``。"""
 
-    def __init__(self, settings_file: str = constants.SETTINGS_FILE):
+    def __init__(self, settings_file: str | None = None):
+        settings_file = (settings_file or os.environ.get('MYGPR_SETTINGS_FILE')
+                         or constants.SETTINGS_FILE)
         self.settings_file = os.path.abspath(os.path.expanduser(settings_file))
         self._settings = dict(DEFAULT_SETTINGS)
         self.load()

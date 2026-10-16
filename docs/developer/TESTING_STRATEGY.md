@@ -25,6 +25,9 @@ CI（`.github/workflows/backend-ci.yml`）对每个 PR / 主分支推送强制�
 
 本地等价命令：`make gate`（即 `scripts/run_backend_quality_gate.py`，与 CI backend job 同一清单）。
 
+Windows 打包已在 `packaging/windows/build.py` 中自动生成 SBOM 和许可证清单，
+工具基线见 `requirements-windows-build.txt`；常规 PR CI 尚无独立供应链扫描门禁。
+
 ## 2. 覆盖率棘轮
 
 `config/coverage_policy.json` 定义全局与 6 个关键模块的行/分支覆盖率下限。
@@ -59,7 +62,6 @@ CI（`.github/workflows/backend-ci.yml`）对每个 PR / 主分支推送强制�
 
 - 基于影响图的受影响测试选择（无 `config/test_impact.toml`）；
 - nightly / release 独立工作流；
-- SBOM 生成与许可证扫描（`requirements-build.txt` 中的工具尚未接入任何自动化）；
 - `config/industrial_acceptance_matrix.json` 中列出的真实断电、外接盘断连、10GB 长跑等现场验收仍需实机完成；已有 ENOSPC 注入和事务恢复测试不能替代这些实机证据。
 
 现场与实机验收（DPI、多 GB 数据、真实 RTK/IMU/GPR 同步、错误 CRS 等）属于

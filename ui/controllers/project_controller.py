@@ -53,6 +53,8 @@ class ProjectController(QObject):
 
     log_message = pyqtSignal(str)
     preview_failed = pyqtSignal(str)              # 成果预览失败（消息）
+    preview_context_failed = pyqtSignal(str, str, str, str)  # project, line, artifact (empty=raw), message
+    dataset_revision_ready = pyqtSignal(str, str, str)  # project, line, persisted source revision
     busy_changed = pyqtSignal(bool)
     project_opened = pyqtSignal(object)          # ProjectSummary
     project_closed = pyqtSignal()
@@ -85,6 +87,8 @@ class ProjectController(QObject):
         # （refresh_lines → 表格重选 → on_line_selected）作废，预览区
         # 停留在"暂无数据"。
         self._artifact_preview_generation = 0
+        self._artifact_context_generation = 0
+        self._artifact_request_versions: dict[tuple[str, str, str], int] = {}
         # 深度切片预览代数：与数据/成果预览独立计数（不同预览域互不失效）。
         self._depth_preview_generation = 0
         # 当前预览中的成果 id（删除该成果时需清空各页预览）
@@ -132,7 +136,7 @@ class ProjectController(QObject):
         # 新建项目同样切换项目上下文，使旧项目在途预览回包过期。
         self._depth_preview_generation += 1
         self._preview_generation += 1
-        self._artifact_preview_generation += 1
+        self.invalidate_artifact_previews()
         self._set_busy(True)
         run_command(
             _CreateProjectCommand(self, root, name, dict(meta or {})),
@@ -147,7 +151,7 @@ class ProjectController(QObject):
         # 回包代数与新项目相同，不推进则门卫会放行旧 payload）。
         self._depth_preview_generation += 1
         self._preview_generation += 1
-        self._artifact_preview_generation += 1
+        self.invalidate_artifact_previews()
         self._set_busy(True)
         run_command(
             _OpenProjectCommand(self, root),
@@ -164,7 +168,7 @@ class ProjectController(QObject):
         # 关闭前使在途预览回包过期，防止旧项目 payload 渲染进后续视图。
         self._depth_preview_generation += 1
         self._preview_generation += 1
-        self._artifact_preview_generation += 1
+        self.invalidate_artifact_previews()
         self._set_busy(True)
         run_command(
             _CloseProjectCommand(self, project_id),
@@ -182,6 +186,8 @@ class ProjectController(QObject):
         分段；同测线重复选中（测线表重建重选）则不得作废在飞预览。
         """
         self._artifact_preview_generation += 1
+        self._artifact_context_generation += 1
+        self._artifact_request_versions.clear()
 
     @property
     def depth_preview_generation(self) -> int:
@@ -292,6 +298,8 @@ class ProjectController(QObject):
             return
         line_id = str(line_id)
         artifact_id = str(artifact_id)
+        request_key = (str(project_id), line_id, artifact_id)
+        self._artifact_request_versions[request_key] = self._artifact_request_versions.get(request_key, 0) + 1
         self._current_preview_artifact_id = artifact_id
         if strict_generation:
             self._artifact_preview_generation += 1
@@ -581,7 +589,7 @@ class _CreateProjectCommand:
             # 与 _OpenProjectCommand 同理：项目上下文切换时刻推进代数。
             c._depth_preview_generation += 1
             c._preview_generation += 1
-            c._artifact_preview_generation += 1
+            c.invalidate_artifact_previews()
             c._current = summary
             c.log_message.emit(f"项目已创建：{summary.name}")
             c.project_opened.emit(summary)
@@ -621,7 +629,7 @@ class _OpenProjectCommand:
             # 不在此推进则门卫会放行旧项目 payload。
             c._depth_preview_generation += 1
             c._preview_generation += 1
-            c._artifact_preview_generation += 1
+            c.invalidate_artifact_previews()
             c._current = summary
             c.log_message.emit(f"项目已打开：{summary.name}")
             c.project_opened.emit(summary)
@@ -654,7 +662,7 @@ class _CloseProjectCommand:
             # 项目上下文清除时刻再次推进，确保 in-flight 回包全部过期。
             c._depth_preview_generation += 1
             c._preview_generation += 1
-            c._artifact_preview_generation += 1
+            c.invalidate_artifact_previews()
             c._current = None
             c.log_message.emit("项目已关闭")
             c.project_closed.emit()
@@ -789,16 +797,32 @@ class _PreviewLineCommand:
             )
         except Exception as exc:  # noqa: BLE001
             _LOGGER.exception("数据预览失败")
-            c.log_message.emit(f"数据预览失败：{friendly_error_message(exc)}")
-        else:
-            if c._preview_generation != self._generation:
+            if c._preview_generation != self._generation or c.current_project_id != self._project_id:
                 return
+            reason = friendly_error_message(exc)
+            c.log_message.emit(f"数据预览失败：{reason}")
+            c.preview_context_failed.emit(self._project_id, self._line_id, '', reason)
+            c.preview_failed.emit(reason)
+        else:
+            if c._preview_generation != self._generation or c.current_project_id != self._project_id:
+                return
+            metadata = dict(getattr(info, 'metadata', {}) or {})
+            revision = ''
+            while metadata:
+                manifest = metadata.get('processing_manifest')
+                revision = str(metadata.get('data_sha256') or
+                    (manifest.get('output_data_sha256') if isinstance(manifest, dict) else '') or '')
+                if revision:
+                    break
+                nested = metadata.get('metadata')
+                metadata = nested if isinstance(nested, dict) else {}
+            c.dataset_revision_ready.emit(self._project_id, self._line_id, revision)
             c.dataset_preview_ready.emit(bundle)
 
 
 class _PreviewArtifactCommand:
     __slots__ = ("_controller", "_project_id", "_line_id", "_artifact_id",
-                 "_generation", "_check_generation")
+                 "_generation", "_check_generation", "_context_generation", "_request_version")
 
     def __init__(
         self,
@@ -815,6 +839,15 @@ class _PreviewArtifactCommand:
         self._artifact_id = artifact_id
         self._generation = generation
         self._check_generation = check_generation
+        self._context_generation = controller._artifact_context_generation
+        self._request_version = controller._artifact_request_versions.get((project_id, line_id, artifact_id), 0)
+
+    def _current(self):
+        c = self._controller
+        return (c.current_project_id == self._project_id
+                and c._artifact_context_generation == self._context_generation
+                and c._artifact_request_versions.get((self._project_id, self._line_id, self._artifact_id), 0) == self._request_version
+                and (not self._check_generation or c._artifact_preview_generation == self._generation))
 
     def execute(self) -> None:
         c = self._controller
@@ -843,13 +876,15 @@ class _PreviewArtifactCommand:
             )
         except Exception as exc:  # noqa: BLE001
             _LOGGER.exception("成果预览失败")
+            if not self._current():
+                return
             reason = friendly_error_message(exc)
             c.log_message.emit(f"成果预览失败：{reason}")
             # 失败必须可见（真机反馈：结果卡只剩骨架却不知道为什么）
+            c.preview_context_failed.emit(self._project_id, self._line_id, self._artifact_id, reason)
             c.preview_failed.emit(f'{reason}（成果 {self._artifact_id}）')
         else:
-            if self._check_generation and (
-                    c._artifact_preview_generation != self._generation):
+            if not self._current():
                 return
             c.artifact_preview_ready.emit(self._artifact_id, bundle)
 

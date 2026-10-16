@@ -42,8 +42,11 @@ class TestTokenShape:
         assert set(tokens(False)) == set(tokens(True))
 
     def test_primary_is_single_source(self):
-        """强调色只有一处定义：与 qfluentwidgets 主题色 #3b82f6 同值。"""
-        assert tokens(False)['primary'].lower() == '#3b82f6'
+        """工作台强调色、选中底色与全局主题使用同一个常量。"""
+        from ui import constants
+        assert tokens(False)['primary'] == constants.ACCENT_SOLID
+        assert palette(False)['selection'] == constants.ACCENT_SOLID
+        assert _contrast('#ffffff', constants.ACCENT_SOLID) >= 4.5
         # 深色取更高明度同色相（skill 暗色规则），不再是同一个值
         assert tokens(True)['primary'] != tokens(False)['primary']
 

@@ -17,6 +17,7 @@ velocity token）的本类是唯一所有者；当前测线经
 from __future__ import annotations
 
 import uuid
+from copy import deepcopy
 
 
 class ProcessingChain:
@@ -30,6 +31,9 @@ class ProcessingChain:
         self.show_run_completion_notice = False   # 处理完成后提示一次
         self.preview_newest_artifact = False      # 处理完成后自动预览最新成果
         self.velocity_token = None           # 速度分析当前提交代（None = 无在飞提交）
+        self._pending_reconfigure = None
+        self._submission_context = None
+        self._submission_started_job = ''
 
     # ============================================================ 信号注册
     def connect_all(self) -> None:
@@ -49,6 +53,25 @@ class ProcessingChain:
         # tab 模型懒加载：可见面板缺 bundle → 按需预览（异步回填）
         processing.artifact_preview_requested.connect(
             self.on_step_preview_requested)
+        if hasattr(processing, 'artifact_delete_requested'):
+            processing.artifact_delete_requested.connect(co.project.on_artifact_delete_requested)
+        if hasattr(processing, 'artifact_focus_requested'):
+            processing.artifact_focus_requested.connect(co.project.on_artifact_focus_requested)
+        project_page = co.page('projectInterface')
+        if hasattr(processing, 'input_activated') and hasattr(project_page, 'set_line_resume_available'):
+            processing.input_activated.connect(lambda line_id, _aid:
+                project_page.set_line_resume_available(line_id, processing.has_line_session(line_id)))
+        tree = co.file_tree()
+        if tree is not None:
+            if hasattr(processing, 'project_resources_toggled'):
+                processing.project_resources_toggled.connect(
+                    lambda visible: tree.set_collapsed(not visible, animate=False))
+            if hasattr(processing, 'input_activated') and hasattr(tree, 'set_active_source'):
+                processing.input_activated.connect(tree.set_active_source)
+            if hasattr(tree, 'raw_focus_requested'):
+                tree.raw_focus_requested.connect(self.on_original_focus_requested)
+            if hasattr(tree, 'artifact_reconfigure_requested'):
+                tree.artifact_reconfigure_requested.connect(self.on_reconfigure_requested)
 
         # ---------------- 解释页（SPEC §6.6）
         interpretation.open_session_requested.connect(
@@ -74,7 +97,14 @@ class ProcessingChain:
         prc = co.processing_controller
         if prc is not None:
             prc.methods_loaded.connect(self.on_methods_loaded)
-            prc.run_finished.connect(self.on_run_finished)
+            if hasattr(prc, 'run_submitted'):
+                prc.run_submitted.connect(self.on_run_submitted)
+            if hasattr(prc, 'run_context_finished'):
+                prc.run_context_finished.connect(self.on_run_context_finished)
+            else:
+                prc.run_finished.connect(self.on_run_finished)
+            if hasattr(prc, 'run_result_ready'):
+                prc.run_result_ready.connect(processing.set_run_result)
             prc.autotune_finished.connect(self.on_autotune_finished)
             prc.autotune_failed.connect(self.on_autotune_failed)
             prc.velocity_finished.connect(self.on_velocity_finished)
@@ -92,6 +122,16 @@ class ProcessingChain:
         # ---------------- 项目控制器：深度切片回包（代数门卫在本链）
         pc = co.project_controller
         if pc is not None:
+            if hasattr(pc, 'project_opened') and hasattr(processing, 'set_project_read_only'):
+                pc.project_opened.connect(lambda summary:
+                    processing.set_project_read_only(bool(getattr(summary, 'read_only', False))))
+            if hasattr(pc, 'preview_context_failed'):
+                pc.preview_context_failed.connect(processing.set_preview_failure)
+            if hasattr(pc, 'dataset_revision_ready'):
+                pc.dataset_revision_ready.connect(processing.set_original_revision)
+            if hasattr(processing, 'original_preview_requested'):
+                processing.original_preview_requested.connect(self.on_original_preview_requested)
+            pc.artifacts_updated.connect(self._on_reconfigure_artifacts)
             pc.depth_preview_ready.connect(self.on_depth_preview_ready)
             pc.depth_layer_saved.connect(self.on_depth_layer_saved)
             pc.depth_save_failed.connect(self.on_depth_save_failed)
@@ -115,6 +155,31 @@ class ProcessingChain:
         if line_id and artifact_id and self._co.project_controller is not None:
             self._co.project_controller.preview_artifact(line_id, str(artifact_id))
 
+    def on_original_focus_requested(self, line_id: str) -> None:
+        self._co.project.on_line_selected(str(line_id))
+        self._co.goto_page('processingInterface')
+        self._co.page('processingInterface').select_original()
+
+    def on_reconfigure_requested(self, line_id: str, artifact_id: str) -> None:
+        self._pending_reconfigure = (str(line_id), str(artifact_id))
+        self._co.project.on_line_selected(str(line_id))
+        self._co.goto_page('processingInterface')
+        self._try_reconfigure(str(line_id))
+
+    def _on_reconfigure_artifacts(self, line_id: str, _artifacts: list) -> None:
+        self._try_reconfigure(str(line_id))
+
+    def _try_reconfigure(self, line_id: str) -> None:
+        pending = self._pending_reconfigure
+        if pending is None or pending[0] != line_id:
+            return
+        page = self._co.page('processingInterface')
+        if not page.has_artifact(pending[1]):
+            return
+        self._pending_reconfigure = None
+        if not page.reconfigure_artifact(pending[1]):
+            self._co.infobar('warning', '重新配置', '该成果缺少可读取的直接步骤输入，或用户保留了原草稿')
+
     def on_step_preview_requested(self, artifact_id: str) -> None:
         """tab 模型懒加载：可见面板缺 bundle → 按需预览该成果。
 
@@ -128,32 +193,54 @@ class ProcessingChain:
             self._co.project_controller.preview_artifact(
                 line_id, str(artifact_id), strict_generation=False)
 
+    def on_original_preview_requested(self) -> None:
+        line_id = self._co.require_line()
+        if line_id and self._co.project_controller is not None:
+            self._co.project_controller.preview_line(line_id)
+
     def on_run_requested(self, payload: dict) -> None:
         """run_requested(dict) → run_pipeline（含结果名回退与链式输入）。"""
         if self._co.processing_controller is None:
+            return
+        if self.processing_job_id:
+            self._co.infobar('warning', '处理任务', '当前任务运行中，请等待完成或取消')
             return
         line_id = self._co.require_line()
         if not line_id:
             return
         payload = dict(payload or {})
-        steps = list(payload.get('steps') or [])
+        steps = deepcopy(list(payload.get('steps') or []))
         if not steps:
             self._co.infobar('warning', '处理链', '处理链为空，请先添加处理步骤')
             return
         result_name = str(payload.get('result_name') or ''
                           ).strip() or f'处理结果_{line_id}'
         input_artifact_id = str(payload.get('input_artifact_id') or '')
-        job_id = self._co.processing_controller.run_pipeline(
-            self._co.current_project_id(), line_id, {'steps': steps}, result_name,
-            input_artifact_id=input_artifact_id)
-        if job_id:
-            self.processing_job_id = str(job_id)
-            # 快照提交时的测线：运行期间用户可能切换测线，
-            # 完成回调必须回到本条测线刷新成果，而不是"完成那一刻的当前测线"
-            self.processing_line_id = line_id
-            self.processing_cancel_requested = False
-            self.show_run_completion_notice = True
-            self._co.page('processingInterface').set_running(True, str(job_id))
+        self._submission_context = (line_id, input_artifact_id)
+        self._submission_started_job = ''
+        try:
+            job_id = self._co.processing_controller.run_pipeline(
+                self._co.current_project_id(), line_id, {'steps': steps}, result_name,
+                input_artifact_id=input_artifact_id)
+            # Legacy controllers may not publish run_submitted. Do not restart a
+            # job whose immediate completion has already been handled.
+            if job_id and str(job_id) != self._submission_started_job:
+                self.on_run_submitted(str(job_id))
+        finally:
+            self._submission_context = None
+
+    def on_run_submitted(self, job_id: str) -> None:
+        if self._submission_context is None:
+            return
+        line_id, input_artifact_id = self._submission_context
+        self._submission_started_job = self.processing_job_id = str(job_id)
+        self.processing_line_id = line_id
+        self.processing_cancel_requested = False
+        self.show_run_completion_notice = True
+        self._co.page('processingInterface').set_running(True, str(job_id))
+        tree = self._co.file_tree()
+        if tree is not None and hasattr(tree, 'set_processing_input'):
+            tree.set_processing_input(line_id, input_artifact_id, True)
 
     def on_processing_cancel(self) -> None:
         bridge = self._co.job_bridge()
@@ -162,6 +249,11 @@ class ProcessingChain:
             bridge.cancel(self.processing_job_id)
             self._co.log_message(
                 f'INFO 已请求取消处理任务 {self.processing_job_id}')
+
+    def on_run_context_finished(self, job_id: str, success: bool, message: str) -> None:
+        if str(job_id) != self.processing_job_id:
+            return
+        self.on_run_finished(success, message)
 
     def on_run_finished(self, success: bool, message: str) -> None:
         """run_finished → 恢复运行态 + InfoBar + 刷新成果并自动预览。
@@ -177,13 +269,16 @@ class ProcessingChain:
         self.processing_line_id = ''
         processing = self._co.page('processingInterface')
         processing.set_running(False, success=bool(success))
+        self.show_run_completion_notice = False
+        self.preview_newest_artifact = False  # result tabs manage activation from frozen UI context
+        tree = self._co.file_tree()
+        if tree is not None and hasattr(tree, 'set_processing_input'):
+            tree.set_processing_input(run_line_id, '', False)
         if success:
             self._co.infobar('success', '处理链',
                              message or f'处理链运行完成：{run_line_id}')
             if self._co.project_controller is not None and run_line_id:
                 # 只有成果属于当前查看的测线时才自动预览，避免抢走用户视图
-                self.preview_newest_artifact = (
-                    run_line_id == self._co.project.current_line_id)
                 self._co.project_controller.refresh_artifacts(run_line_id)
                 self._co.project_controller.refresh_lines()
         elif cancelled:
