@@ -166,6 +166,7 @@ class BScanViewDataMixin:
         # 数据换了 → 轴可用性与刻度都要重算（单位切换不动，标签由调用方给定）
         self._refresh_axis_state()
         self._empty_overlay.setVisible(False)
+        self._set_axes_visible(True)
 
     def _resolve_display_target(self) -> tuple:
         """按纵轴偏好解析应显示的矩阵：海拔偏好且可 warp → (warped, axis)。
@@ -487,7 +488,7 @@ class BScanViewDataMixin:
             # 对 v2 结果网格失效的真机反馈）
             self._ensure_colorbar()
         if self._colorbar is not None:
-            self._colorbar.setVisible(visible)
+            self._colorbar.setVisible(visible and self._matrix is not None)
         if notify:
             self.sig_colorbar_visible_changed.emit(visible)
 

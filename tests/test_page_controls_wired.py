@@ -258,16 +258,14 @@ class TestResultCardHoverActions:
 
 
 # ============================================================ 处理页「输入数据」
-class TestProcessingInputCombo:
-    """「输入数据」下拉此前无任何连接 → 切了没反应。"""
+class TestProcessingInputTabs:
+    """The selected result is the sole source for the next processing run."""
 
-    def test_input_combo_wired_and_marks_stale(self, qapp):
+    def test_result_tab_changes_next_input_without_replaying_steps(self, qapp):
         from types import SimpleNamespace
         from ui.pages.processing_page import ProcessingPage
         page = ProcessingPage()
         try:
-            assert page._input_combo.receivers(
-                page._input_combo.currentIndexChanged) >= 1
             import numpy as np
             page.set_original_bundle(SimpleNamespace(
                 matrix=np.zeros((8, 6), dtype='float32'),
@@ -282,10 +280,9 @@ class TestProcessingInputCombo:
                     manifest={'params': {'artifact_kind': 'processing',
                                          'run_group_id': 'G1'}}),
             ])
-            assert page._results_stale is False
-            page._input_combo.blockSignals(False)
-            page._input_combo.setCurrentIndex(1)      # 切到「成果: …」
-            assert page._results_stale is True        # 结果转为过期
+            assert page.select_artifact('F1')
+            assert page.current_pipeline()['input_artifact_id'] == 'F1'
+            assert page.current_pipeline()['steps'] == []
         finally:
             page.close()
 
@@ -352,7 +349,9 @@ class TestRestoreLastProject:
         except Exception:                                   # noqa: BLE001
             return None
         try:
-            return MyGPRMainWindow(settings=settings)
+            window = MyGPRMainWindow(settings=settings)
+            window.ensure_pages_ready()
+            return window
         except Exception:                                   # noqa: BLE001
             return None
 
@@ -465,15 +464,17 @@ class TestSharedSettingsManager:
         processing.set_settings_manager(sm)
 
         spatial._persist_setting('spatial_terrain_source', 'estimated')
-        processing._save_panel_state()
+        processing.set_line_label('L01')
+        processing._save_session()
+        sm.save()
 
         # 共享实例：任一侧保存后另一侧的键都还在（旧实现互相覆盖丢键）
         assert sm.get('spatial_terrain_source') == 'estimated'
-        assert 'processing_left_collapsed' in sm.get_all()
+        assert 'processing_workspace_sessions' in sm.get_all()
         data = json.loads((tmp_path / 'settings.json').read_text(
             encoding='utf-8'))
         assert data['spatial_terrain_source'] == 'estimated'
-        assert 'processing_left_collapsed' in data
+        assert 'processing_workspace_sessions' in data
 
     def test_page_without_injected_manager_never_writes(self, qapp, tmp_path):
         """未注入（如单元测试）时页面静默跳过持久化，不读盘不写盘。"""

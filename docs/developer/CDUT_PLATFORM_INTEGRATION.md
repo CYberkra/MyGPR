@@ -46,7 +46,7 @@ MyGPR 当前可读 schema 以 [数据格式参考](../user/reference/数据格�
 
 ## 发行与启动入口
 
-本仓库发布的 `MyGPR-0.10.0-Windows-x64-Setup.exe` 安装处理端 `MyGPR.exe`。
+本仓库发布的 `MyGPR-0.11.0-Windows-x64-Setup.exe` 安装处理端 `MyGPR.exe`。
 源码入口仍为 `app_qt.py`；Python 包还提供 `mygpr` / `mygpr-batch` 命令。
 
 主仓库参考快照中的 [`launcher.py`](https://github.com/MuseLinn/CDUT-UavGPR-Controller/blob/8cf89c2caa9cdd6551efd47e43a8aaa6986df5e0/launcher.py)

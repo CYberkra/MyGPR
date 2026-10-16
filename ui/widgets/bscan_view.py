@@ -41,7 +41,7 @@ import pyqtgraph as pg
 from PyQt6.QtWidgets import QLabel
 from qfluentwidgets import FluentIcon as FIF, ToolButton
 
-from ui import constants
+from ui import constants, design_tokens
 from ui.desktop_backend_facade import compute_display_levels  # noqa: F401  (历史路径，tests 可能经此导入)
 from ui.theme_helpers import control_palette
 from ui.widgets.bscan_axes import (
@@ -158,6 +158,7 @@ class BScanView(BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteracti
         self._empty_overlay = EmptyStateOverlay(
             self._glw, icon=FIF.PHOTO, title='暂无数据',
             hint='导入测线并选择数据后，此处预览雷达 B-Scan 剖面')
+        self._set_axes_visible(False)
 
         self._glw.scene().sigMouseClicked.connect(self._on_mouse_clicked)
         self._glw.scene().sigMouseMoved.connect(self._on_mouse_moved)
@@ -400,6 +401,7 @@ class BScanView(BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteracti
         """刷新刻度画面（轴标签保持调用方/set_bundle 的既有结论）。"""
         self._bottom_axis.invalidate()
         self._left_axis.invalidate()
+        self._set_axes_visible(self._matrix is not None)
 
     def _bottom_label(self) -> str:
         return ('距离 (m)' if self._x_axis == 'distance'
@@ -511,6 +513,12 @@ class BScanView(BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteracti
             self.fit_square(notify=False)
 
     # ------------------------------------------------------------------ 其它
+    def _set_axes_visible(self, visible: bool) -> None:
+        for axis in ('bottom', 'left'):
+            self._plot.showAxis(axis, visible)
+        if self._colorbar is not None:
+            self._colorbar.setVisible(visible and self._colorbar_visible)
+
     def clear(self) -> None:
         self._image_item.clear()
         self._scatter.setData([])
@@ -525,6 +533,7 @@ class BScanView(BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteracti
         self._plot.setTitle('')
         self._refresh_axis_state()
         self._empty_overlay.setVisible(True)
+        self._set_axes_visible(False)
 
     def apply_theme(self, dark: bool) -> None:
         """深色 bg 'k'/文字 'w'；浅色 bg 'w'/文字 'k'；轴/色标/悬浮钮/十字光标同步。
@@ -552,11 +561,12 @@ class BScanView(BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteracti
         palette = control_palette(dark)
         # 悬浮钮：紧凑尺寸保留，颜色随主题（硬编码浅色会在深色下突兀）
         btn_qss = (
-            f'PushButton {{ background-color: {palette["button_bg"]}; '
+            f'ToolButton {{ background-color: {palette["button_bg"]}; '
             f'color: {palette["button_text"]}; '
             f'border: 1px solid {palette["border"]}; border-radius: 4px; '
             f'padding: 2px 8px; '
             f'font-size: {constants.FONT_SIZE_SECONDARY}pt; }}'
-            f'PushButton:hover {{ background-color: {palette["hover"]}; }}'
+            f'ToolButton:hover {{ background-color: {palette["hover"]}; }}'
+            f'ToolButton:focus {{ border: 1px solid {design_tokens.color("border_focus", dark)}; }}'
         )
         self._fullscreen_btn.setStyleSheet(btn_qss)

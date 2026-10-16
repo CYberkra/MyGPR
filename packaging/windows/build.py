@@ -23,7 +23,7 @@ def run(command, **kwargs):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--source-ref', default='v0.10.0')
+    parser.add_argument('--source-ref', default='v0.11.0')
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--inno', required=True, type=Path)
     args = parser.parse_args()

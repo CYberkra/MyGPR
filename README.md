@@ -1,11 +1,11 @@
-# MyGPR 0.10.0
+# MyGPR 0.11.0
 
 MyGPR 是 **CDUT-UavGPR 无人机探地雷达平台的数据处理、成像解释与成果交付工作台**，提供桌面应用和无头后端。
 PyQt6 + PyQt6-Fluent-Widgets 桌面前端，配分层后端（`mygpr/` 清洁架构 + `core/` 遗留内核）。
 
 > 架构与工程约束：[CLAUDE.md](CLAUDE.md)；当前状态：[CURRENT_STATE.md](CURRENT_STATE.md)；交接规则：[DEV_HANDOFF.md](DEV_HANDOFF.md)；设计规格索引：[specs](docs/superpowers/specs/README.md)。
 
-当前发行版：**v0.10.0**，提供 Windows x64 安装器、源码和 wheel，见[发布说明](docs/releases/v0.10.0.md)。
+当前发行版：**v0.11.0**，提供 Windows x64 安装器、源码和 wheel，见[发布说明](docs/releases/v0.11.0.md)。
 
 ## 在总平台中的定位
 
@@ -19,7 +19,7 @@ PyQt6 + PyQt6-Fluent-Widgets 桌面前端，配分层后端（`mygpr/` 清洁架
 
 ## 代码结构
 
-- `ui/`：Qt 前端——`main_window.py` 注册 8 个导航页，`controllers/` 五个 QObject 控制器，
+- `ui/`：Qt 前端——`main_window.py` 注册 7 个导航页（首页并入项目工作区），`controllers/` 五个 QObject 控制器，
   `widgets/` B-scan/AScan/参数表单/地图/3D 轨迹控件；UI→core 唯一通道为 `ui/desktop_backend_facade.py`。
 - `core/`：遗留内核——GPR 数据模型与 IO（mmap/分块）、项目存储、方法注册表、GIS、报告导出。
 - `mygpr/`：分层后端——`interfaces/`（公共 API：`MyGPRBackend.create_default()`）→
@@ -36,7 +36,7 @@ PyQt6 + PyQt6-Fluent-Widgets 桌面前端，配分层后端（`mygpr/` 清洁架
 
 Python **3.12–3.13**（钉版 `numpy==2.5.1` 要求 ≥3.12；CI 矩阵与 `requires-python` 已对齐）。
 
-直接依赖基线如下；2026-10-14 本机 Windows `.venv` 为 **Python 3.12.0**，以下核心与 GUI 包均与安装版本一致。发行版的 Python 3.12/3.13 和 GUI 自动检查结果见[发布说明](docs/releases/v0.10.0.md)，依赖清单不作为最新版包推荐。
+直接依赖基线如下；2026-10-14 本机 Windows `.venv` 为 **Python 3.12.0**，以下核心与 GUI 包均与安装版本一致。发行版的 Python 3.12/3.13 和 GUI 自动检查结果见[发布说明](docs/releases/v0.11.0.md)，依赖清单不作为最新版包推荐。
 
 | 核心包（requirements.txt） | 版本 | GUI 包（requirements-gui.txt） | 版本 |
 | --- | --- | --- | --- |
@@ -58,8 +58,8 @@ Python **3.12–3.13**（钉版 `numpy==2.5.1` 要求 ≥3.12；CI 矩阵与 `re
 
 ## 安装
 
-Windows 用户可从 [v0.10.0 Release](https://github.com/CYberkra/MyGPR/releases/tag/v0.10.0)
-下载 `MyGPR-0.10.0-Windows-x64-Setup.exe`，直接安装，无需另装 Python。
+Windows 用户可从 [v0.11.0 Release](https://github.com/CYberkra/MyGPR/releases/tag/v0.11.0)
+下载 `MyGPR-0.11.0-Windows-x64-Setup.exe`，直接安装，无需另装 Python。
 适用 Windows 10 1809+ / Windows 11 x64；当前安装器未签名，校验值见 Release 附件。
 
 源码开发与 Python 包安装：

@@ -1,57 +1,46 @@
 # -*- coding: utf-8 -*-
-"""左侧常驻文件树面板（DockPanel 子类，单棵真树：测线 / 成果 / 文件 三分类）。
+"""Project navigation: line sources, spatial results, deliveries and attachments.
 
-职责边界：
-- 数据唯一来源仍是各 controller（经 ProjectChain 扇出，本面板不发起任何
-  后端调用）；
-- 整棵树由 ``ui.file_tree.build_project_model`` 纯函数装配（Provider 层）：
-  测线/成果/文件是三个一级分类节点（不可选），各自挂原有子模型——测线
-  平铺（line_id 升序）、成果按测线分组、文件为项目根目录树（目录展开时
-  逐层懒加载）；
-- 空分类折叠且 ``(0)`` 计数自明（无独立空态文案）；有内容的分类默认展开；
-- 测线叶子点击 → ``line_selected(str)`` → 复用 ``ProjectChain.on_line_selected``
-  现有链路（含切线作废成果预览代数），与项目页测线表同语义；
-- 成果叶子点击 → ``artifact_focus_requested(line_id, artifact_id)`` →
-  换线（如需）+ 跳处理页选中预览；
-- 空间成果/项目报告叶子点击 → ``delivery_focus_requested(kind)`` → 跳成果页；
-- ``set_current_line`` 是同步入口（``_syncing`` 守卫防回环）；
-- **分类行/分组行不可选**（无 ItemIsSelectable）——分组行若能触发预览
-  会推进预览代数造成串台，是成果预览代际竞态的同族风险；
-- busy 只禁叶子点击，收/展开始终可用（长任务中更该允许让出空间）。
+Controllers supply cached metadata; this panel never calls the backend. Raw and
+saved artifacts activate through explicit signals. Tree selection, the marked
+processing input and a running task's frozen source are separate identities.
+Opening a context menu or viewing metadata does not activate its target. Running
+tasks protect their source ancestry while other results remain viewable.
 
-壳（头/细条/动画）全部来自 ``DockPanel`` 基类；本类只保留文件树自己的
-三件事：内容构建、按页展开态记忆（SettingsManager 持久化，一维
-``{page: collapsed}``，读取兼容旧二维格式）、重建时按 key 快照恢复
-折叠态（数据刷新/主题切换不冲掉用户手动折叠的分类）。
+DockPanel owns the shell. Page collapse preferences, stable-key expansion
+snapshots, lazy directory loading and bounded suffix width remain local here.
 """
 from __future__ import annotations
 
+import json
 import os
 
-from PyQt6.QtCore import Qt, QUrl, pyqtSignal
-from PyQt6.QtGui import QBrush, QColor, QDesktopServices, QIcon, QPainter, QPixmap
+from PyQt6.QtCore import QEvent, QPoint, QSize, Qt, QUrl, pyqtSignal
+from PyQt6.QtGui import QBrush, QColor, QDesktopServices, QFont, QFontMetrics, QIcon, QKeySequence, QPainter, QPixmap, QShortcut
 from PyQt6.QtWidgets import (
-    QApplication, QDialog, QHeaderView, QSizePolicy, QTreeWidgetItem, QWidget,
+    QApplication, QDialog, QDialogButtonBox, QHeaderView,
+    QSizePolicy, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
-from qfluentwidgets import BodyLabel, MessageBox, TreeWidget
+from qfluentwidgets import BodyLabel, MessageBox, PlainTextEdit, TransparentToolButton, TreeWidget
 from qfluentwidgets import FluentIcon as FIF
-from qfluentwidgets import isDarkTheme
+from qfluentwidgets import isDarkTheme, setCustomStyleSheet
 
 from ui import constants
+from ui.design_tokens import color
 from ui.file_tree import (
-    TreeNode, build_files_model, build_project_model,
+    TreeNode, artifact_direct_parent, artifact_parameters, artifact_step,
+    build_files_model, build_project_model,
 )
-from ui.theme_helpers import hint_qss, status_color
+from ui.theme_helpers import control_palette, hint_qss, status_color
 from ui.widgets.context_menus import add_action, make_menu
 from ui.widgets.dock_panel import DockPanel
+from ui.widgets.fluent_menu_keyboard import FluentMenuKeyboard
 
 _ROLE_PAYLOAD = Qt.ItemDataRole.UserRole        # line → line_id；artifact → artifact_id；spatial → result_id；report → package_dir
 _ROLE_KIND = Qt.ItemDataRole.UserRole + 1       # TreeNode.kind
 _ROLE_AUX = Qt.ItemDataRole.UserRole + 2        # artifact → 所属 line_id
 _ROLE_KEY = Qt.ItemDataRole.UserRole + 3        # TreeNode.key（重建快照展开态用）
-
-_SUFFIX_BRUSH = QBrush(QColor('#8a8a8a'))       # 行尾角标灰
-
+_ROLE_SUFFIX = Qt.ItemDataRole.UserRole + 4     # 原始角标；输入标记不覆盖它
 
 def suffix_column_width(view_width: int, widest_suffix_px: int) -> int:
     """角标列（第二列）宽度：内容宽 + 留白，且不超过视口宽的 _SUFFIX_MAX_RATIO。
@@ -112,13 +101,16 @@ _SUFFIX_PAD = 8            # 角标文字两侧留白
 
 
 class FileTreePanel(DockPanel):
-    """测线 / 成果 / 文件 三分类常驻导航树（可收成细条）。"""
+    """Project source and delivery navigation (collapsible to a narrow strip)."""
 
     line_selected = pyqtSignal(str)
     line_process_requested = pyqtSignal(str)
     line_delete_requested = pyqtSignal(list)
     # 成果叶子点击 → 换线（如需）+ 跳处理页选中预览（line_id, artifact_id）
     artifact_focus_requested = pyqtSignal(str, str)
+    raw_focus_requested = pyqtSignal(str)
+    artifact_reconfigure_requested = pyqtSignal(str, str)
+    source_info_requested = pyqtSignal(str, str)
     # 成果叶子右键「删除成果」→ 复用项目页删除链路（后代闭包级联确认 +
     # 回收站语义），面板自身不弹确认框
     artifact_delete_requested = pyqtSignal(str, str)
@@ -126,7 +118,7 @@ class FileTreePanel(DockPanel):
     delivery_focus_requested = pyqtSignal(str)
 
     def __init__(self, parent=None) -> None:
-        super().__init__('文件树', constants.FILE_TREE_PANEL_WIDTH, parent)
+        super().__init__('项目资源', constants.SIDE_TOOL_WIDTH, parent)
         self._lines: list = []
         self._artifacts: list = []
         self._artifacts_sig: list = []   # set_artifacts 去重签名
@@ -136,12 +128,18 @@ class FileTreePanel(DockPanel):
         self._syncing = False
         self._busy = False
         self._current_line_id = ''
+        self._active_source: tuple[str, str] | None = None
+        self._processing_input: tuple[str, str] | None = None
+        self._project_identity = ''
         self._current_page = ''
         self._has_project = False
         self._page_states: dict = {}   # {page: collapsed}
         self._settings = None
+        self._context_menu = None
+        self._menu_generation = 0
+        self.installEventFilter(self)
 
-        # ---------------- 主体：项目名 + 三分类树
+        # ---------------- 主体：项目名 + 项目资源树
         self._project_label = BodyLabel('未打开项目')
         # 垂直 Fixed：树隐藏（无项目）时 label 若被 QVBoxLayout 拉满
         # 会垂直居中悬在面板中部，必须钉在顶部
@@ -151,7 +149,9 @@ class FileTreePanel(DockPanel):
         self.body_layout().addWidget(self._project_label)
 
         self._tree = TreeWidget(self._expanded_view)
+        self._tree.setObjectName('projectResourceTree')
         self._tree.setHeaderHidden(True)
+        self._tree.setIconSize(QSize(*constants.TOOL_BTN_ICON))
         # 中间省略：测线/成果名往往是「前缀稳定 + 尾部分辨」（如
         # L09_processed_20260802_160259_972694），右侧省略会把唯一有分辨力的
         # 尾部切掉；同宽下中间省略保留头尾，可读性更好。
@@ -173,6 +173,19 @@ class FileTreePanel(DockPanel):
         self._tree.itemExpanded.connect(self._on_item_expanded)
         self._tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._tree.customContextMenuRequested.connect(self._on_context_menu)
+        self._menu_shortcuts = []
+        for sequence in ('Shift+F10', 'Menu'):
+            shortcut = QShortcut(QKeySequence(sequence), self._tree)
+            shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+            shortcut.activated.connect(self._on_keyboard_context)
+            self._menu_shortcuts.append(shortcut)
+        self._more_btn = TransparentToolButton(FIF.MORE, self)
+        self._more_btn.setFixedSize(24, 24)
+        self._more_btn.setIconSize(QSize(*constants.TOOL_BTN_ICON))
+        self._more_btn.setToolTip('项目资源操作（Shift+F10）')
+        self._more_btn.setAccessibleName('项目资源操作')
+        self._more_btn.clicked.connect(self._on_keyboard_context)
+        self._head_layout.insertWidget(self._head_layout.count() - 1, self._more_btn)
         self.body_layout().addWidget(self._tree, 1)
         # 透明占位：QVBoxLayout 中隐藏的 stretch 项会让剩余空间把 Fixed 项
         # 挤到垂直居中（Qt6 实测）。树隐藏（无项目）时 filler 补位吃掉余量，
@@ -221,7 +234,13 @@ class FileTreePanel(DockPanel):
         self._has_project = summary is not None
         self._project_root = str(getattr(summary, 'root_path', '') or '') \
             if summary else ''
-        if not summary:
+        identity = str(getattr(summary, 'project_id', '') or self._project_root or name)
+        changed = identity != self._project_identity
+        if changed or summary is None:
+            self._active_source = None
+            self._processing_input = None
+        self._project_identity = identity
+        if changed or summary is None:
             self._lines = []
             self._artifacts = []
             self._artifacts_sig = []   # 重置去重签名：重开同项目也要重建
@@ -272,6 +291,129 @@ class FileTreePanel(DockPanel):
         """项目控制器 busy → 禁叶子点击；收/展开仍可用。"""
         self._busy = bool(busy)
         self._tree.setEnabled(not self._busy)
+
+    def set_active_source(self, line_id: str, artifact_id: str = '') -> None:
+        """Mark the actual processing input independently of tree selection."""
+        previous = self._active_source
+        self._active_source = (str(line_id), str(artifact_id or '')) if line_id else None
+        self._refresh_input_marker()
+        if previous != self._active_source and self._active_source is not None:
+            line, aid = self._active_source
+            key = f'artifact:{aid}' if aid else f'raw:{line}'
+            for item in self._items():
+                if item.data(0, _ROLE_KEY) == key:
+                    parent = item.parent()
+                    while parent is not None:
+                        parent.setExpanded(True)
+                        parent = parent.parent()
+                    break
+
+    def set_processing_input(self, line_id: str, artifact_id: str = '', running: bool = False) -> None:
+        """Protect a running task's source ancestry; viewing remains available."""
+        previous = self._processing_input
+        self._processing_input = (str(line_id), str(artifact_id or '')) if running and line_id else None
+        self._refresh_processing_placeholder(reveal=previous != self._processing_input)
+
+    def _refresh_processing_placeholder(self, *, reveal: bool = False) -> None:
+        for item in list(self._items()):
+            if item.data(0, _ROLE_KIND) == 'task' and item.parent() is not None:
+                item.parent().takeChild(item.parent().indexOfChild(item))
+        if self._processing_input is None:
+            return
+        line_id, artifact_id = self._processing_input
+        source_key = f'artifact:{artifact_id}' if artifact_id else f'raw:{line_id}'
+        source = next((item for item in self._items()
+                       if item.data(0, _ROLE_KEY) == source_key), None)
+        if source is None:
+            return
+        self._add_node(source, TreeNode(
+            key=f'task:{line_id}:{artifact_id}', kind='task', text='处理中…',
+            tooltip='任务使用此冻结输入；只有成功保存的输出才可打开或继续处理。',
+        ))
+        if reveal:
+            while source is not None:
+                source.setExpanded(True)
+                source = source.parent()
+
+    def _items(self):
+        work = list(reversed(self._top_items()))
+        while work:
+            item = work.pop()
+            yield item
+            work.extend(item.child(index) for index in reversed(range(item.childCount())))
+
+    def _refresh_input_marker(self) -> None:
+        self._suffixes.clear()
+        for item in self._items():
+            kind = item.data(0, _ROLE_KIND)
+            identity = None
+            if kind == 'raw':
+                identity = (str(item.data(0, _ROLE_PAYLOAD) or ''), '')
+            elif kind == 'artifact':
+                identity = (str(item.data(0, _ROLE_AUX) or ''),
+                            str(item.data(0, _ROLE_PAYLOAD) or ''))
+            active = identity is not None and identity == self._active_source
+            suffix = str(item.data(0, _ROLE_SUFFIX) or '')
+            text = ' '.join(part for part in (suffix, '输入' if active else '') if part)
+            item.setText(1, text)
+            item.setForeground(1, QBrush(QColor(color('primary' if active else 'text_muted', self._dark))))
+            item.setTextAlignment(1, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            font = item.font(0)
+            font.setWeight(QFont.Weight.DemiBold if active or kind in ('category', 'line')
+                           else QFont.Weight.Normal)
+            item.setFont(0, font)
+            if kind in ('raw', 'artifact'):
+                item.setForeground(0, QBrush(QColor(color('primary' if active else
+                    ('text_secondary' if kind == 'raw' else 'text_primary'), self._dark))))
+            if text:
+                self._suffixes.add(text)
+        self._apply_suffix_width()
+
+    def _artifact(self, line_id: str, artifact_id: str):
+        return next((artifact for artifact in self._artifacts
+                     if str(getattr(artifact, 'artifact_id', '')) == artifact_id
+                     and str(getattr(artifact, 'line_id', '')) == line_id), None)
+
+    def _delete_blocked(self, line_id: str, artifact_id: str | None = None) -> bool:
+        if self._processing_input is None or self._processing_input[0] != line_id:
+            return False
+        if artifact_id is None:
+            return True
+        current = self._processing_input[1]
+        seen = set()
+        while current and current not in seen:
+            if current == artifact_id:
+                return True
+            seen.add(current)
+            artifact = self._artifact(line_id, current)
+            if artifact is None:
+                break
+            direct = artifact_direct_parent(artifact)
+            current = (direct if direct is not None else
+                       str(getattr(artifact, 'parent_artifact_id', '') or ''))
+        return False
+
+    def _can_reconfigure(self, line_id: str, artifact_id: str) -> bool:
+        artifact = self._artifact(line_id, artifact_id)
+        if artifact is None or not artifact_step(artifact):
+            return False
+        parent = artifact_direct_parent(artifact)
+        if parent is None:
+            return False
+        params = artifact_parameters(artifact)
+        try:
+            index = int(params.get('run_step_index', 0))
+        except (TypeError, ValueError):
+            return False
+        if index == 1:
+            return not parent or self._artifact(line_id, parent) is not None
+        predecessor = self._artifact(line_id, parent)
+        if predecessor is None:
+            return False
+        previous = artifact_parameters(predecessor)
+        return (previous.get('lineage_version') == 2 and bool(params.get('run_group_id'))
+                and previous.get('run_group_id') == params.get('run_group_id')
+                and previous.get('run_step_index') == index - 1)
 
     # ------------------------------------------------ 页面记忆（主窗口调）
     def apply_page(self, object_name: str) -> None:
@@ -328,52 +470,35 @@ class FileTreePanel(DockPanel):
         self._filler.setVisible(not self._has_project)
 
     def _expanded_keys(self) -> set:
-        """当前树中展开且有子节点的节点 key 集合（重建前快照）。"""
-        keys: set = set()
-
-        def _walk(item) -> None:
-            if item.isExpanded() and item.childCount() > 0:
-                key = item.data(0, _ROLE_KEY)
-                if key:
-                    keys.add(key)
-            for i in range(item.childCount()):
-                _walk(item.child(i))
-
-        for item in self._top_items():
-            _walk(item)
-        return keys
+        """Expanded identities, including directories whose lazy scan was empty."""
+        return {item.data(0, _ROLE_KEY) for item in self._items()
+                if item.isExpanded() and item.data(0, _ROLE_KEY)
+                and (item.childCount() > 0 or item.data(0, _ROLE_KIND) == 'dir')}
 
     def _empty_category_keys(self) -> set:
         """当前为空的分类/分组 key 集合：这类节点首次长出内容时应默认
         展开（「新内容到达」事件，不能因快照里没有它而被压住折叠）。"""
-        keys: set = set()
-
-        def _walk(item) -> None:
-            if item.data(0, _ROLE_KIND) in ('category', 'group') \
-                    and item.childCount() == 0:
-                key = item.data(0, _ROLE_KEY)
-                if key:
-                    keys.add(key)
-            for i in range(item.childCount()):
-                _walk(item.child(i))
-
-        for item in self._top_items():
-            _walk(item)
-        return keys
+        return {item.data(0, _ROLE_KEY) for item in self._items()
+                if item.data(0, _ROLE_KIND) in ('category', 'group', 'line', 'raw', 'artifact')
+                and item.childCount() == 0 and item.data(0, _ROLE_KEY)}
 
     def _rebuild(self) -> None:
+        self._close_context_menu()
+        self._menu_generation += 1
         # 快照展开态：数据刷新（打开工程/处理完成回灌成果/主题切换重建）
         # 不应冲掉用户手动折叠的分类。树为空 = 首次构建，走默认展开规则。
         snapshot = None
+        existing_keys: set = set()
         empty_keys: set = set()
         if self._tree.topLevelItemCount():
             snapshot = self._expanded_keys()
             empty_keys = self._empty_category_keys()
+            existing_keys = {item.data(0, _ROLE_KEY) for item in self._items()}
         self._tree.clear()
         self._line_id_by_item.clear()
         self._suffixes.clear()
 
-        # 单棵三分类树（测线/成果/文件）；文件子层由面板懒加载
+        # 测线下挂原始输入与来源树；文件子层由面板懒加载
         model = build_project_model(
             self._lines, self._artifacts, self._spatial_results,
             self._reports, self._project_root)
@@ -385,6 +510,7 @@ class FileTreePanel(DockPanel):
             self._add_node(None, node)
 
         # 展开策略：无快照（首次构建）→ 分类/分组有内容就默认展开，
+        # 来源与附件保持折叠，让真实处理分支优先；用户展开后照常恢复。
         # 空分类折叠（(0) 计数自明），目录不自动展开（子层走懒加载）。
         # 有快照 → 按快照恢复；空分类首次长出内容（key ∈ empty_keys）
         # 仍默认展开。目录恢复展开会触发懒加载替换占位行，新子节点
@@ -395,15 +521,18 @@ class FileTreePanel(DockPanel):
             kind = item.data(0, _ROLE_KIND)
             key = item.data(0, _ROLE_KEY)
             if item.childCount() > 0 and not item.isExpanded():
-                if kind in ('category', 'group'):
-                    if snapshot is None or key in snapshot \
-                            or key in empty_keys:
+                if kind in ('category', 'group', 'line', 'raw', 'artifact'):
+                    if key == 'category:来源与附件':
+                        item.setExpanded(bool(snapshot and key in snapshot))
+                    elif snapshot is None or key in snapshot \
+                            or key in empty_keys or key not in existing_keys:
                         item.setExpanded(True)
                 elif kind == 'dir' and snapshot and key in snapshot:
                     item.setExpanded(True)
             work.extend(item.child(i)
                         for i in range(item.childCount()))
-        self._apply_suffix_width()
+        self._refresh_processing_placeholder()
+        self._refresh_input_marker()
         self._select_leaf(self._current_line_id)
         self._apply_view_state()
 
@@ -419,7 +548,9 @@ class FileTreePanel(DockPanel):
             return
         # 去重后量宽：不用 sizeHintForColumn（后者含缩进开销，实测把 192px
         # 的角标算成 238px），也不在建树时量（那时字体可能还没定型）
-        fm = self._tree.fontMetrics()
+        font = QFont(self._tree.font())
+        font.setPointSize(constants.FONT_SIZE_SECONDARY)
+        fm = QFontMetrics(font)
         widest = max((fm.horizontalAdvance(s) for s in self._suffixes),
                      default=0)
         self._tree.setColumnWidth(1, suffix_column_width(viewport_w, widest))
@@ -440,22 +571,53 @@ class FileTreePanel(DockPanel):
                 for i in range(self._tree.topLevelItemCount())]
 
     def _add_node(self, parent_item, node: TreeNode) -> None:
+        work = [(parent_item, node)]
+        while work:
+            parent, current = work.pop()
+            item = self._add_single_node(parent, current)
+            work.extend((item, child) for child in reversed(current.children))
+
+    def _add_single_node(self, parent_item, node: TreeNode):
         item = QTreeWidgetItem()
         item.setText(0, node.text)
+        item.setSizeHint(0, QSize(0, constants.BTN_HEIGHT))
+        font = self._tree.font()
+        font.setPointSize(constants.FONT_SIZE_SECONDARY if node.kind in ('category', 'task')
+                          else constants.FONT_SIZE_BODY)
+        font.setWeight(QFont.Weight.DemiBold if node.kind in ('category', 'line')
+                       else QFont.Weight.Normal)
+        item.setFont(0, font)
+        suffix_font = QFont(font)
+        suffix_font.setPointSize(constants.FONT_SIZE_SECONDARY)
+        suffix_font.setWeight(QFont.Weight.Normal)
+        item.setFont(1, suffix_font)
+        suffix_brush = QBrush(QColor(color('text_muted', self._dark)))
+        item.setForeground(0, QBrush(QColor(color(
+            'warning' if node.key.startswith('unknown:') else
+            'text_secondary' if node.kind in ('category', 'raw', 'dir', 'file')
+            else 'text_primary', self._dark))))
         if node.suffix:
             item.setText(1, node.suffix)
-            item.setForeground(1, _SUFFIX_BRUSH)
+            item.setForeground(1, suffix_brush)
             item.setTextAlignment(
                 1, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             # 量宽推迟到 _apply_suffix_width：此处可能早于首次布局，字体尚未
             # 定型（实测构造期量得 31px、显示后 72px），此刻算会永久偏窄。
             self._suffixes.add(node.suffix)
-        if node.tooltip:
-            item.setToolTip(0, node.tooltip)
+        # The visible name may elide in a narrow dock; the tooltip retains it.
+        item.setToolTip(0, '\n'.join(part for part in (node.text, node.tooltip) if part))
+        item.setToolTip(1, node.suffix)
         item.setData(0, _ROLE_KEY, node.key)
         item.setData(0, _ROLE_KIND, node.kind)
-        if node.kind in ('group', 'category'):
+        item.setData(0, _ROLE_SUFFIX, node.suffix)
+        if node.kind in ('group', 'category', 'task'):
             item.setFlags(Qt.ItemFlag.ItemIsEnabled)  # 不可选，仅展开
+            if node.kind == 'task':
+                item.setIcon(0, FIF.SYNC.icon())
+                item.setForeground(0, suffix_brush)
+            elif node.kind == 'category':
+                icon = FIF.GLOBE if node.text == '空间成果' else FIF.FOLDER
+                item.setIcon(0, icon.icon(color=color('text_muted', self._dark)))
         else:
             item.setData(0, _ROLE_PAYLOAD, node.payload)
             if node.aux:
@@ -471,18 +633,21 @@ class FileTreePanel(DockPanel):
                 item.setIcon(0, FIF.FOLDER.icon())
             elif node.kind == 'file':
                 item.setIcon(0, FIF.DOCUMENT.icon())
+            elif node.kind == 'raw':
+                item.setIcon(0, FIF.DOCUMENT.icon())
+            elif node.kind == 'artifact':
+                item.setIcon(0, FIF.DEVELOPER_TOOLS.icon())
         if parent_item is None:
             self._tree.addTopLevelItem(item)
         else:
             parent_item.addChild(item)
-        for child in node.children:
-            self._add_node(item, child)
         # 目录无 children = 子层未加载：放占位行让展开箭头出现
         if node.kind == 'dir' and not node.children:
             placeholder = QTreeWidgetItem()
             placeholder.setData(0, _ROLE_KIND, 'placeholder')
             placeholder.setText(0, '…')
             item.addChild(placeholder)
+        return item
 
     def _on_item_expanded(self, item) -> None:
         """目录首次展开 → 就地扫描子层并替换占位行（懒加载）。"""
@@ -511,6 +676,8 @@ class FileTreePanel(DockPanel):
         if kind == 'line' and payload:
             self._current_line_id = str(payload)
             self.line_selected.emit(str(payload))
+        elif kind == 'raw' and payload:
+            self.raw_focus_requested.emit(str(payload))
         elif kind == 'artifact' and payload:
             self.artifact_focus_requested.emit(
                 str(item.data(0, _ROLE_AUX) or ''), str(payload))
@@ -527,22 +694,55 @@ class FileTreePanel(DockPanel):
                 QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
     # ------------------------------------------------------------ 右键菜单
-    def _on_context_menu(self, pos) -> None:
-        """测线叶子右键：先选中该线（与项目页表格右键即选中同语义），再弹菜单。
+    def _close_context_menu(self):
+        if self._context_menu is not None:
+            self._context_menu.close()
+            self._context_menu = None
 
-        分组行 / 空白处 / busy 中不出菜单；目录/文件走系统级菜单。
-        """
+    def _on_keyboard_context(self):
+        item = self._tree.currentItem()
+        position = self._tree.visualItemRect(item).center() if item is not None else QPoint(-1, -1)
+        self._on_context_menu(position)
+
+    def _add_menu_action(self, menu, icon, text, callback, **kwargs):
+        scope = (self._project_identity, self._menu_generation)
+        def guarded():
+            if scope == (self._project_identity, self._menu_generation):
+                callback()
+        return add_action(menu, icon, text, guarded, **kwargs)
+
+    def _show_context_menu(self, menu, position):
+        self._close_context_menu()
+        self._context_menu = menu
+        menu._tree_keyboard = FluentMenuKeyboard(menu)
+        menu.exec(self._tree.viewport().mapToGlobal(position))
+        menu._tree_keyboard.focus_menu(menu)
+
+    def eventFilter(self, watched, event):
+        if watched is self and event.type() == QEvent.Type.Hide:
+            self._close_context_menu()
+        return super().eventFilter(watched, event)
+
+    def _on_context_menu(self, pos) -> None:
+        """Capture the hit identity; opening a menu never changes processing input."""
         if self._busy:
             return
         item = self._tree.itemAt(pos)
         if item is None:
+            self._on_navigation_context_menu(None, pos)
             return
         kind = item.data(0, _ROLE_KIND)
+        if kind in ('category', 'group'):
+            self._on_navigation_context_menu(item, pos)
+            return
         if kind in ('dir', 'file'):
             self._on_file_context_menu(item, pos)
             return
         if kind == 'artifact':
             self._on_artifact_context_menu(item, pos)
+            return
+        if kind == 'raw':
+            self._on_raw_context_menu(item, pos)
             return
         # 仅测线/成果叶子出菜单；分组行/报告叶子的交互走单击
         if kind != 'line':
@@ -552,45 +752,116 @@ class FileTreePanel(DockPanel):
             return
         line_id = str(line_id)
         self._tree.setCurrentItem(item)
-        if line_id != self._current_line_id:
-            self._current_line_id = line_id
-            self.line_selected.emit(line_id)
-        self._update_strip_text()
-
+        blocked = self._delete_blocked(line_id)
         menu = make_menu(parent=self._tree)
-        add_action(menu, FIF.DEVELOPER_TOOLS, '处理该测线',
-                   lambda: self.line_process_requested.emit(line_id))
-        add_action(menu, FIF.DELETE, '删除测线…',
-                   lambda: self._confirm_delete(line_id))
+        self._add_menu_action(menu, FIF.DEVELOPER_TOOLS, '处理该测线',
+                   lambda: self.line_process_requested.emit(line_id), enabled=not blocked)
+        action = self._add_menu_action(menu, FIF.DELETE, '删除测线…',
+                            lambda: self._confirm_delete(line_id), enabled=not blocked)
+        if blocked and action is not None:
+            action.setToolTip('该测线的处理任务正在运行，请先等待结束或取消任务。')
         menu.addSeparator()
-        add_action(menu, FIF.COPY, '复制测线号',
+        self._add_menu_action(menu, FIF.COPY, '复制测线号',
                    lambda: QApplication.clipboard().setText(line_id))
-        menu.exec(self._tree.viewport().mapToGlobal(pos))
+        self._show_context_menu(menu, pos)
 
     def _on_artifact_context_menu(self, item, pos) -> None:
-        """成果叶子右键：添加到显示 / 删除成果 / 复制成果号。
-
-        「添加到显示」与单击同语义（artifact_focus_requested：换线如需 +
-        跳处理页选中并载入 B-Scan 对比显示）；「删除」发信号复用项目页
-        删除链路（异步查后代闭包 → 级联确认框 → 回收站），面板自身不弹
-        确认框、不做预检。
-        """
+        """Capture one saved result for open, reconfigure, info or dependency delete."""
         artifact_id = str(item.data(0, _ROLE_PAYLOAD) or '')
         line_id = str(item.data(0, _ROLE_AUX) or '')
         if not artifact_id:
             return
         self._tree.setCurrentItem(item)
         menu = make_menu(parent=self._tree)
-        add_action(menu, FIF.VIEW, '添加到显示',
+        self._add_menu_action(menu, FIF.VIEW, '打开结果标签',
+                   lambda: self.artifact_focus_requested.emit(line_id, artifact_id))
+        self._add_menu_action(menu, FIF.DEVELOPER_TOOLS, '从此结果继续处理',
                    lambda: self.artifact_focus_requested.emit(
                        line_id, artifact_id))
-        add_action(menu, FIF.DELETE, '删除成果…',
-                   lambda: self.artifact_delete_requested.emit(
-                       line_id, artifact_id))
+        can_reconfigure = self._can_reconfigure(line_id, artifact_id)
+        action = self._add_menu_action(menu, FIF.EDIT, '修改此步参数并另建分支',
+                            lambda: self.artifact_reconfigure_requested.emit(line_id, artifact_id),
+                            enabled=can_reconfigure)
+        if not can_reconfigure and action is not None:
+            action.setToolTip('缺少可靠的直接来源或前置步骤未保存，不能修改单步；可按完整运行配置重新处理。')
+        self._add_menu_action(menu, FIF.INFO, '参数与来源',
+                   lambda: self._show_source_info(line_id, artifact_id))
+        blocked = self._delete_blocked(line_id, artifact_id)
+        action = self._add_menu_action(menu, FIF.DELETE, '删除此结果及依赖成果…',
+                   lambda: self._request_artifact_delete(line_id, artifact_id), enabled=not blocked)
+        if blocked and action is not None:
+            action.setToolTip('运行中的任务依赖此结果，请先等待结束或取消任务。')
         menu.addSeparator()
-        add_action(menu, FIF.COPY, '复制成果号',
+        self._add_menu_action(menu, FIF.COPY, '复制成果号',
                    lambda: QApplication.clipboard().setText(artifact_id))
-        menu.exec(self._tree.viewport().mapToGlobal(pos))
+        self._show_context_menu(menu, pos)
+
+    def _on_raw_context_menu(self, item, pos) -> None:
+        line_id = str(item.data(0, _ROLE_PAYLOAD) or '')
+        if not line_id:
+            return
+        self._tree.setCurrentItem(item)
+        menu = make_menu(parent=self._tree)
+        self._add_menu_action(menu, FIF.VIEW, '打开原始输入',
+                   lambda: self.raw_focus_requested.emit(line_id))
+        self._add_menu_action(menu, FIF.INFO, '参数与来源', lambda: self._show_source_info(line_id, ''))
+        self._show_context_menu(menu, pos)
+
+    def _request_artifact_delete(self, line_id: str, artifact_id: str) -> None:
+        if not self._busy and not self._delete_blocked(line_id, artifact_id):
+            self.artifact_delete_requested.emit(line_id, artifact_id)
+
+    def _on_navigation_context_menu(self, item, pos) -> None:
+        menu = make_menu(parent=self._tree)
+        if item is not None:
+            self._add_menu_action(menu, FIF.FOLDER, '展开此项', lambda: item.setExpanded(True))
+            self._add_menu_action(menu, FIF.FOLDER, '折叠此项', lambda: item.setExpanded(False))
+        else:
+            self._add_menu_action(menu, FIF.FOLDER, '展开测线与成果', self._expand_data_nodes)
+            self._add_menu_action(menu, FIF.FOLDER, '全部折叠', self._tree.collapseAll)
+        self._add_menu_action(menu, FIF.SYNC, '刷新目录视图', self._rebuild)
+        self._show_context_menu(menu, pos)
+
+    def _expand_data_nodes(self) -> None:
+        for item in self._items():
+            if item.data(0, _ROLE_KIND) in ('category', 'group', 'line', 'raw', 'artifact'):
+                item.setExpanded(True)
+
+    def _show_source_info(self, line_id: str, artifact_id: str) -> None:
+        artifact = self._artifact(line_id, artifact_id) if artifact_id else None
+        if artifact_id and artifact is None:
+            return
+        self.source_info_requested.emit(line_id, artifact_id)
+        details = [f'测线：{line_id}', f'数据：{artifact_id or "原始输入"}']
+        if artifact is not None:
+            params = artifact_parameters(artifact)
+            parent = artifact_direct_parent(artifact)
+            details.extend([
+                f'名称：{getattr(artifact, "name", "")}',
+                f'直接输入：{"来源待核对" if parent is None else parent or "原始输入"}',
+                f'形状：{getattr(artifact, "shape", ())}',
+                f'数据类型：{getattr(artifact, "dtype", "") or "未记录"}',
+                f'输出 SHA-256：{getattr(artifact, "sha256", "") or "未记录"}',
+                '', json.dumps(params, ensure_ascii=False, indent=2, default=str),
+            ])
+        else:
+            line = next((line for line in self._lines if str(getattr(line, 'line_id', '')) == line_id), None)
+            details.append(f'源文件：{getattr(line, "raw_path", "") or "项目原始数据"}')
+        dialog = QDialog(self.window() or self)
+        dialog.setWindowTitle('参数与来源')
+        dialog.resize(680, 440)
+        colors = control_palette(isDarkTheme())
+        dialog.setStyleSheet(f'QDialog {{ background: {colors["panel_bg"]}; color: {colors["text"]}; }}')
+        layout = QVBoxLayout(dialog)
+        content = PlainTextEdit(dialog)
+        content.setReadOnly(True)
+        content.setPlainText('\n'.join(details))
+        layout.addWidget(content)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, dialog)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        dialog.exec()
+        dialog.deleteLater()
 
     def _on_file_context_menu(self, item, pos) -> None:
         """目录/文件右键：打开 / 在资源管理器中显示 / 复制路径（只读浏览，
@@ -599,17 +870,19 @@ class FileTreePanel(DockPanel):
         if not path:
             return
         menu = make_menu(parent=self._tree)
-        add_action(menu, FIF.DOCUMENT, '打开',
+        self._add_menu_action(menu, FIF.DOCUMENT, '打开',
                    lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(path)))
-        add_action(menu, FIF.FOLDER, '在资源管理器中显示',
+        self._add_menu_action(menu, FIF.FOLDER, '在资源管理器中显示',
                    lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(
                        path if os.path.isdir(path) else os.path.dirname(path))))
         menu.addSeparator()
-        add_action(menu, FIF.COPY, '复制路径',
+        self._add_menu_action(menu, FIF.COPY, '复制路径',
                    lambda: QApplication.clipboard().setText(path))
-        menu.exec(self._tree.viewport().mapToGlobal(pos))
+        self._show_context_menu(menu, pos)
 
     def _confirm_delete(self, line_id: str) -> None:
+        if self._busy or self._delete_blocked(line_id):
+            return
         box = MessageBox(
             '确认删除测线？',
             f'将删除测线 {line_id}（数据会移入项目 .trash 回收站，可恢复）。',
@@ -617,7 +890,7 @@ class FileTreePanel(DockPanel):
         )
         box.yesButton.setText('删除')
         box.cancelButton.setText('取消')
-        if box.exec() == QDialog.DialogCode.Accepted:
+        if box.exec() == QDialog.DialogCode.Accepted and not self._delete_blocked(line_id):
             self.line_delete_requested.emit([line_id])
 
     # ------------------------------------------------------------ 主题
@@ -629,5 +902,16 @@ class FileTreePanel(DockPanel):
         深色底上对比度约 3.5:1 不达 WCAG AA，且模块常量不参与重刷。
         """
         super().apply_theme(dark)
-        self._project_label.setStyleSheet(hint_qss('secondary'))
+        self._title_label.setStyleSheet(
+            f'font-size: {constants.FONT_SIZE_BODY}pt; font-weight: 600; '
+            f'color: {color("text_primary", dark)};')
+        self._project_label.setStyleSheet(
+            f'font-size: {constants.FONT_SIZE_SECONDARY}pt; '
+            f'color: {color("text_muted", dark)}; '
+            f'padding: {constants.SPACE_1}px 0;')
+        tree_qss = (
+            f'QTreeWidget#projectResourceTree {{ border: none; background: transparent; }}'
+            f'QTreeWidget#projectResourceTree::item {{ height: {constants.BTN_HEIGHT}px; '
+            f'padding-top: 0px; padding-bottom: 0px; margin-top: 0px; margin-bottom: 0px; }}')
+        setCustomStyleSheet(self._tree, tree_qss, tree_qss)
         self._rebuild()

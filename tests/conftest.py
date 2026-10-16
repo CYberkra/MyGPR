@@ -34,6 +34,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 _RUNTIME_ROOT: Path | None = None
+_SETTINGS_OVERRIDE: str | None = None
 
 
 def pytest_configure(config) -> None:
@@ -56,11 +57,15 @@ def pytest_configure(config) -> None:
     }
     for marker, description in marker_docs.items():
         config.addinivalue_line("markers", f"{marker}: {description}")
-    global _RUNTIME_ROOT
+    global _RUNTIME_ROOT, _SETTINGS_OVERRIDE
     if not os.environ.get("MYGPR_RUNTIME_ROOT"):
         _RUNTIME_ROOT = Path(tempfile.mkdtemp(prefix="mygpr-backend-test-runtime-"))
         os.environ["MYGPR_RUNTIME_ROOT"] = str(_RUNTIME_ROOT)
     os.environ.setdefault("MYGPR_LOG_DIR", str(Path(os.environ["MYGPR_RUNTIME_ROOT"]) / "logs"))
+    # GUI tests must never write recent-project/session state to the user's file.
+    if not os.environ.get("MYGPR_SETTINGS_FILE"):
+        _SETTINGS_OVERRIDE = str(Path(os.environ["MYGPR_RUNTIME_ROOT"]) / "settings.json")
+        os.environ["MYGPR_SETTINGS_FILE"] = _SETTINGS_OVERRIDE
 
 
 _EXIT_STATUS = 0
@@ -72,7 +77,11 @@ def pytest_sessionfinish(session, exitstatus) -> None:
 
 
 def pytest_unconfigure(config) -> None:
-    global _RUNTIME_ROOT
+    global _RUNTIME_ROOT, _SETTINGS_OVERRIDE
+    if _SETTINGS_OVERRIDE is not None:
+        if os.environ.get("MYGPR_SETTINGS_FILE") == _SETTINGS_OVERRIDE:
+            os.environ.pop("MYGPR_SETTINGS_FILE", None)
+        _SETTINGS_OVERRIDE = None
     if _RUNTIME_ROOT is not None:
         runtime_text = str(_RUNTIME_ROOT)
         shutil.rmtree(_RUNTIME_ROOT, ignore_errors=True)

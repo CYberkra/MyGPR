@@ -9,35 +9,90 @@ import tempfile
 import time
 
 
-def main():
+SMOKE_PAGES = (
+    'projectInterface', 'processingInterface', 'interpretationInterface',
+    'spatialInterface', 'deliveryInterface', 'jobsInterface', 'settingsInterface',
+)
+UNINSTALL_KEY = (r'Software\Microsoft\Windows\CurrentVersion\Uninstall'
+                 r'\{3B6B778E-9BFA-4D07-B321-3C58D39EAA04}_is1')
+
+
+def parse_args(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument('installer', type=Path)
     parser.add_argument('--hdf5', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
-    args = parser.parse_args()
-    import winreg
-    key = r'Software\Microsoft\Windows\CurrentVersion\Uninstall\{3B6B778E-9BFA-4D07-B321-3C58D39EAA04}_is1'
-    for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
-        for view in (winreg.KEY_WOW64_64KEY, winreg.KEY_WOW64_32KEY):
+    parser.add_argument('--expected-version', required=True,
+                        help='Required installed application, report and About version')
+    return parser.parse_args(argv)
+
+
+def ensure_clean_installation(registry=None):
+    if registry is None:
+        import winreg as registry
+    for hive in (registry.HKEY_CURRENT_USER, registry.HKEY_LOCAL_MACHINE):
+        for view in (registry.KEY_WOW64_64KEY, registry.KEY_WOW64_32KEY):
             try:
-                with winreg.OpenKey(hive, key, 0, winreg.KEY_READ | view):
+                with registry.OpenKey(hive, UNINSTALL_KEY, 0, registry.KEY_READ | view):
                     raise RuntimeError('Existing MyGPR installer registration: run QA in a clean Windows account/VM')
             except FileNotFoundError:
                 pass
+
+
+def verify_package_report(package, expected_version):
+    assert package['frozen'] and package['status'] == 'passed', package
+    versions = package['versions']
+    assert set(versions) == {'distribution', 'report', 'settings'}, versions
+    assert set(versions.values()) == {expected_version}, versions
+    assert package.get('hdf5', {}).get('source_unchanged') is True, package.get('hdf5')
+
+
+def verify_smoke_screenshots(folder):
+    from PIL import Image
+
+    expected = {*(f'page_{page}.png' for page in SMOKE_PAGES), 'window_overall.png'}
+    actual = {path.name for path in folder.glob('*.png')}
+    assert actual == expected, {'missing': sorted(expected - actual), 'unexpected': sorted(actual - expected)}
+    for name in sorted(expected):
+        try:
+            with Image.open(folder / name) as screenshot:
+                assert screenshot.format == 'PNG', name
+                screenshot.verify()
+        except (OSError, SyntaxError) as exc:
+            raise AssertionError(f'Invalid smoke screenshot: {name}') from exc
+    return sorted(expected)
+
+
+def file_sha256(path):
+    with path.open('rb') as handle:
+        return hashlib.file_digest(handle, 'sha256').hexdigest()
+
+
+def main():
+    args = parse_args()
+    # Never replace a user's registered installation, even when /DIR differs.
+    ensure_clean_installation()
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
+    shots_dir = output / 'native-smoke-shots'
+    if any(shots_dir.glob('*.png')):
+        raise RuntimeError('Smoke screenshots already exist: use a fresh QA output directory')
+    source = args.hdf5.resolve()
+    source_before = file_sha256(source)
     sandbox = Path(tempfile.mkdtemp(prefix='MyGPR-installer-QA-'))
     install = sandbox / 'app'
     sentinel = sandbox / 'user-project.h5'
     sentinel.write_bytes(b'MyGPR QA: uninstall must preserve user data')
-    evidence = {'installer_sha256': hashlib.sha256(args.installer.read_bytes()).hexdigest(),
-                'sandbox': str(sandbox), 'checks': {}}
+    evidence = {'installer_sha256': file_sha256(args.installer),
+                'expected_version': args.expected_version,
+                'hdf5_source': str(source), 'hdf5_sha256_before': source_before,
+                'sandbox': str(sandbox), 'checks': {}, 'status': 'failed'}
     env = os.environ.copy()
     env.pop('PYTHONPATH', None)
     env.update(QT_QPA_PLATFORM='windows:darkmode=0', QT_ACCESSIBILITY='1',
                MYGPR_SETTINGS_FILE=str(sandbox / 'config/settings.json'),
                MYGPR_RUNTIME_ROOT=str(sandbox / 'runtime'),
-               MYGPR_SMOKE_SHOTS_DIR=str(output / 'native-smoke-shots'))
+               MYGPR_SMOKE_SHOTS_DIR=str(shots_dir))
     env['PATH'] = os.pathsep.join([str(Path(os.environ['SystemRoot']) / 'System32'), os.environ['SystemRoot']])
 
     def run(name, command, *, expected=0, timeout=180):
@@ -55,15 +110,13 @@ def main():
         executable = install / 'MyGPR.exe'
         assert executable.exists()
         run('installed-package', [executable, '--package-check', output / 'installed-package.json',
-                                  '--hdf5', args.hdf5.resolve()])
+                                  '--hdf5', source])
         package = json.loads((output / 'installed-package.json').read_text(encoding='utf-8'))
-        assert package['frozen'] and package['status'] == 'passed'
-        assert set(package['versions'].values()) == {'0.10.0'}
+        verify_package_report(package, args.expected_version)
         run('negative-package', [executable, '--package-check', output / 'negative-package.json',
                                  '--hdf5', sandbox / 'missing.h5'], expected=1)
         run('native-smoke', [executable, '--smoke'])
-        shots = list((output / 'native-smoke-shots').glob('*.png'))
-        assert len(shots) >= 9, shots
+        evidence['checks']['native-smoke-pages'] = verify_smoke_screenshots(shots_dir)
         run('reinstall', setup)
         from pywinauto import Application
         process = subprocess.Popen([str(executable)], cwd=sandbox, env=env)
@@ -84,9 +137,9 @@ def main():
             from pywinauto.mouse import scroll
             rectangle = window.rectangle()
             scroll(coords=(rectangle.right - 300, rectangle.top + rectangle.height() // 2), wheel_dist=-20)
-            window.child_window(title='0.10.0', control_type='Text').wait('visible', timeout=20)
+            window.child_window(title=args.expected_version, control_type='Text').wait('visible', timeout=20)
             window.capture_as_image().save(output / 'installed-settings.png')
-            evidence['checks']['native-settings-version'] = '0.10.0'
+            evidence['checks']['native-settings-version'] = args.expected_version
             window.close()
             evidence['checks']['native-close'] = process.wait(timeout=30)
             assert evidence['checks']['native-close'] == 0
@@ -111,8 +164,14 @@ def main():
         assert retained.read_text(encoding='utf-8') == 'preserve this user-created file'
         assert sentinel.read_bytes() == b'MyGPR QA: uninstall must preserve user data'
         evidence['checks']['user-data-preserved'] = True
+        assert file_sha256(source) == source_before, 'HDF5 source changed during installer QA'
+        evidence['checks']['hdf5-source-unchanged'] = True
         evidence['status'] = 'passed'
+    except Exception as exc:
+        evidence['error'] = str(exc)
+        raise
     finally:
+        evidence['hdf5_sha256_after'] = file_sha256(source) if source.exists() else None
         (output / 'installer-verification.json').write_text(json.dumps(evidence, indent=2), encoding='utf-8')
 
 

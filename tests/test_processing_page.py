@@ -9,6 +9,38 @@ pytest.importorskip("PyQt6")  # 后端 CI（无 Qt）自动跳过，见 tests/co
 from ui.pages.processing_page import ProcessingPage  # noqa: E402
 
 
+def test_run_shortcut_only_operates_in_processing_page(qapp):
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
+    from PyQt6.QtWidgets import QLineEdit, QStackedWidget
+
+    host = QStackedWidget()
+    other = QLineEdit()
+    page = ProcessingPage()
+    host.addWidget(other)
+    host.addWidget(page)
+    host.resize(1200, 850)
+    host.show()
+    host.activateWindow()
+    cancelled = []
+    page.cancel_requested.connect(lambda: cancelled.append(True))
+    page.set_running(True)
+    try:
+        host.setCurrentWidget(other)
+        other.setFocus()
+        QTest.qWait(1)
+        QTest.keyClick(other, Qt.Key.Key_R, Qt.KeyboardModifier.ControlModifier)
+        assert cancelled == []
+        host.setCurrentWidget(page)
+        page._line_combo.setFocus()
+        QTest.qWait(1)
+        QTest.keyClick(page._line_combo, Qt.Key.Key_R, Qt.KeyboardModifier.ControlModifier)
+        assert cancelled == [True]
+    finally:
+        host.close()
+        host.deleteLater()
+
+
 class TestAutoTuneGate:
     def test_disabled_before_method_selected(self, qapp):
         page = ProcessingPage()

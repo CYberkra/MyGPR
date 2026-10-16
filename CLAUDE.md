@@ -1,4 +1,4 @@
-# MyGPR v0.10.0 — UAV-GPR 基覆界面勘探工作台
+# MyGPR v0.11.0 — UAV-GPR 基覆界面勘探工作台
 
 ## 项目概述
 
@@ -6,7 +6,7 @@ MyGPR 是面向 GPR / UAV-GPR 野外勘探项目的桌面软件，PyQt6 + qfluen
 在 [CDUT-UavGPR 总平台](https://github.com/MuseLinn/CDUT-UavGPR-Controller) 中承担处理、成像解释与成果交付；主仓库负责硬件采集、传感器与机载/地面通信。接口或统一发行变更先查 [平台对接说明](docs/developer/CDUT_PLATFORM_INTEGRATION.md)。
 流程：项目建档 → 测线导入与预检 → 雷达/RTK/IMU 同步 → 测线处理 → 界面标注 → 空间成果 → 成果报告。
 
-主界面八个页签（顶部横排 SlimSegment 药丸分段，竖导航已退役）：`主页 / 项目 / 处理 / 解释 / 空间信息 / 成果 / 任务 / 设置`。
+主界面七个页签（顶部横排 SlimSegment 分段）：`项目 / 处理 / 解释 / 空间信息 / 成果 / 任务 / 设置`。首页启动内容并入项目工作区；旧 `homeInterface` 路由兼容。
 
 页面骨架统一约定（布局统一轮）：页内不再放大标题（页签条已标明当前页）；侧栏一律
 `CollapsiblePanel + make_scroll_column`，宽度两档 `SIDE_TOOL_WIDTH=320` / `SIDE_FORM_WIDTH=360`；
@@ -37,7 +37,7 @@ ui/                            # PyQt6 前端
   dialogs.py                   # 接线器/controllers 许可的唯一对话框模块（函数式 API）
   geo_utils.py                 # 覆盖统计纯函数（haversine，无 Qt 依赖）
   desktop_backend_facade.py    # ui→core/domain/application 统一导入通道（架构门禁例外）
-  pages/                       # 八个页面，纯展示 + 发信号
+  pages/                       # 七个导航页面 + 首页兼容组件，纯展示 + 发信号
   widgets/                     # BScanView / CollapsiblePanel / OutputPanel 等
   controllers/                 # Qt 控制器：run_command + 命令对象；存量 run_worker；信号回主线程
 mygpr/                         # 后端分层（新代码走这里）
@@ -72,7 +72,7 @@ GUI/DPI、多 GB 真实数据和传感器文件必须在 Windows 目标机验收
 
 ## 文档与规格
 
-- 现行规格入口：[docs/superpowers/specs/README.md](docs/superpowers/specs/README.md)。三页 UI 方案和旧打包说明属于历史记录，不覆盖当前八页实现。
+- 现行规格入口：[docs/superpowers/specs/README.md](docs/superpowers/specs/README.md)。三页 UI 方案和旧打包说明属于历史记录；当前工作台合同见 2026-10-16 规格。
 - 安装依赖以 `requirements.txt` / `requirements-gui.txt` 和 `pyproject.toml` 为准；开发与构建工具分别见对应 requirements 文件。
 - 项目导入范围、CDUT 采集 HDF5 语义见 [数据格式参考](docs/user/reference/数据格式参考.md)。格式注册表里的读取能力与项目向导接入状态分别核验。
 

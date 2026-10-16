@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """MethodPickerDialog 契约（P0-2）：非模态 Tool 窗 / 双击连续添加 /
-搜索复位 / Esc / 外部点击关闭；处理页「+」与「添加方法」单实例接线。
+搜索复位 / Esc / 外部点击关闭；处理页添加按钮与替换方法共用单实例。
 
 offscreen 平台下真实焦点移交不可靠（架构共享知识 5.2）：外部点击关闭
 走内部复核函数 ``_close_if_focus_left`` 契约，真机走查补外部点击。
@@ -182,11 +182,20 @@ class TestPagePickerWiring:
         finally:
             page.close()
 
-    def test_chain_strip_add_requests_picker(self, qapp):
+    def test_add_button_reopens_fresh_picker_after_escape(self, qapp):
+        """Retired chain-strip + is replaced by the workbench add button."""
         page = self._page(qapp)
         try:
-            page._chain_strip.sig_add_requested.emit()
-            assert page._method_picker is not None
+            page._add_method_btn.click()
+            first = page._method_picker
+            first._browser.sig_add_requested.emit('dewow')
+            _press_escape(first)
+            assert page._method_picker is None
+            page._add_method_btn.click()
+            assert page._method_picker is not first
+            assert page._method_picker._browser._search.text() == ''
+            page._method_picker._browser.sig_add_requested.emit('agc')
+            assert [s['method_id'] for s in page._pipeline_list.steps()] == ['dewow', 'agc']
         finally:
             page.close()
 
@@ -200,18 +209,18 @@ class TestPagePickerWiring:
         finally:
             page.close()
 
-    def test_plus_and_button_open_same_instance(self, qapp):
-        """「+」与「添加方法」弹同一选择器实例（PRD A2⑥：同一实例/同一
-        入口逻辑，二者行为一致）；交替触发不堆叠。"""
+    def test_replace_picker_reused_by_add_button_returns_to_append(self, qapp):
+        """Button reuses the live picker but switches its intent to append."""
         page = self._page(qapp)
         try:
-            page._chain_strip.sig_add_requested.emit()
+            page._add_method_to_pipeline('dewow')
+            page._open_method_picker(purpose='replace', index=0)
             first = page._method_picker
-            assert first is not None
             page._add_method_btn.click()
             assert page._method_picker is first
-            page._open_method_picker()
-            assert page._method_picker is first
+            first._browser.sig_add_requested.emit('agc')
+            assert [s['method_id'] for s in page._pipeline_list.steps()] == ['dewow', 'agc']
+            assert first.isVisible()
         finally:
             page.close()
 

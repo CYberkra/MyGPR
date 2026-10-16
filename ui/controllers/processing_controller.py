@@ -56,6 +56,8 @@ class ProcessingController(QObject):
     methods_loaded = pyqtSignal(list)       # list[dict], see build_method_dicts
     run_submitted = pyqtSignal(str)         # job_id
     run_finished = pyqtSignal(bool, str)    # success, message
+    run_context_finished = pyqtSignal(str, bool, str)  # submitted job_id, success, message
+    run_result_ready = pyqtSignal(str, str)  # submitted job_id, actual final artifact_id
     autotune_finished = pyqtSignal(str, dict)   # method_id, {best_params, ...}
     autotune_failed = pyqtSignal(str, str)
     velocity_submitted = pyqtSignal(str, str)   # job_id, token
@@ -90,8 +92,6 @@ class ProcessingController(QObject):
         bridge = self._job_bridge()
         if bridge is None:
             return
-        bridge.watch(job_id, title=title)
-
         def _on_done(done_id: str, success: bool, message: str, result: Any) -> None:
             if done_id != job_id:
                 return
@@ -102,6 +102,7 @@ class ProcessingController(QObject):
             callback(success, message, result)
 
         bridge.job_completed.connect(_on_done)
+        bridge.watch(job_id, title=title)
 
     # ------------------------------------------------------------------
     def load_methods(self) -> None:
@@ -163,6 +164,7 @@ class ProcessingController(QObject):
         except Exception as exc:  # noqa: BLE001
             message = friendly_error_message(exc)
             self.log_message.emit(f"处理链定义无效：{message}")
+            self.run_context_finished.emit('', False, message)
             self.run_finished.emit(False, message)
             return None
         try:
@@ -176,14 +178,24 @@ class ProcessingController(QObject):
         except Exception as exc:  # noqa: BLE001
             message = friendly_error_message(exc)
             self.log_message.emit(f"处理链提交失败：{message}")
+            self.run_context_finished.emit('', False, message)
             self.run_finished.emit(False, message)
             return None
         self.log_message.emit(f"处理链已提交：{line_id}（{len(ui_pipeline.steps)} 步）")
         self.run_submitted.emit(job_id)
+        def finished(success, message, result):
+            if success:
+                artifact_id = (result.get('artifact_id', '') if isinstance(result, Mapping)
+                               else getattr(result, 'artifact_id', ''))
+                if artifact_id:
+                    self.run_result_ready.emit(str(job_id), str(artifact_id))
+            self.run_context_finished.emit(str(job_id), success, message)
+            self.run_finished.emit(success, message)
+
         self._watch_with_callback(
             job_id,
             f"处理流水线 {line_id}",
-            lambda success, message, _result: self.run_finished.emit(success, message),
+            finished,
         )
         return job_id
 

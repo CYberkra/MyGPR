@@ -5,7 +5,7 @@ All commands below assume this directory is the working directory.
 
 ## Scope
 
-- PyQt6 + qfluentwidgets desktop app for (UAV-)GPR data processing, v0.10.0.
+- PyQt6 + qfluentwidgets desktop app for (UAV-)GPR data processing, v0.11.0.
 - 平台定位：CDUT-UavGPR 的处理、成像解释与成果交付组件。
 - Main entry points: `app_qt.py` (GUI) and `cli_batch.py` (headless batch).
 - 架构与工程约束见 [CLAUDE.md](CLAUDE.md)；设计或验收任务先查 [规格索引](docs/superpowers/specs/README.md)，区分现行合同与历史方案。
@@ -14,7 +14,7 @@ All commands below assume this directory is the working directory.
 ## Repo Map
 
 - `app_qt.py` — GUI 入口（DPI PassThrough、`--smoke` 离屏截图）。
-- `ui/` — Qt 前端：`main_window.py` 组装器 + `page_coordinator.py` 跨页信号链薄门面（委派 `coordinator_project.py` / `coordinator_processing.py` / `coordinator_jobs.py`）+ `dialogs.py` + `geo_utils.py` + `pages/`（八页，顶部页签）+ `widgets/` + `controllers/` + `desktop_backend_facade.py`（ui→core 统一通道）。
+- `ui/` — Qt 前端：`main_window.py` 组装器 + `page_coordinator.py` 跨页信号链薄门面（委派 `coordinator_project.py` / `coordinator_processing.py` / `coordinator_jobs.py`）+ `dialogs.py` + `geo_utils.py` + `pages/`（七个导航页，首页内容并入项目页）+ `widgets/` + `controllers/` + `desktop_backend_facade.py`（ui→core 统一通道）。
 - `mygpr/` — 后端分层：interfaces / application / domain / infrastructure。
 - `core/` — 遗留内核（仍活跃），由 mygpr infrastructure 适配器调用。
 - `PythonModule/` — 算法包装器；经方法注册表动态加载，静态 grep 不到引用≠死代码。

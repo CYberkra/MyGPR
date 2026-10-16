@@ -16,10 +16,11 @@ Qt.WindowType.Tool + focusOutEvent 后代判断 + Esc；``apply_theme`` 供
 主窗 findChildren 遍历（必须幂等）。
 """
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (QApplication, QDialog, QHBoxLayout, QLabel,
-                             QScrollArea, QVBoxLayout, QWidget)
-from qfluentwidgets import (CaptionLabel, PushButton, SwitchButton,
-                            ToolButton)
+                             QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
+from qfluentwidgets import (CaptionLabel, PrimaryPushButton, PushButton, SwitchButton,
+                            ToolButton, isDarkTheme)
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import design_tokens
@@ -42,8 +43,10 @@ class StepEditorPopup(QDialog):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle('步骤编辑')
+        self.setObjectName('stepEditorPopup')
         self.setModal(False)
         self.setWindowFlag(Qt.WindowType.Tool)      # 不进任务栏，随主窗
+        self.setWindowFlag(Qt.WindowType.FramelessWindowHint)
         self.setFixedWidth(_POPUP_WIDTH)
         self._index = -1
         self._schema: list = []
@@ -55,23 +58,17 @@ class StepEditorPopup(QDialog):
         self._focus_timer.timeout.connect(self._close_if_focus_left)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(14, 12, 14, 12)
-        root.setSpacing(8)
+        root.setContentsMargins(16, 14, 16, 14)
+        root.setSpacing(12)
 
         # ---------------- 顶部：标题 + 启停 pill（常驻开关，非 hover 动作）
-        top_row = QHBoxLayout()
-        top_row.setSpacing(8)
-        self._title_label = QLabel(self)
-        self._title_label.setStyleSheet(
-            f'color: {design_tokens.color("text_primary")};')
-        top_row.addWidget(self._title_label, 1)
+        top_row = self._build_header()
         self._enable_switch = SwitchButton('启用', self)
         # qfw SwitchButton toggle 时用 onText/offText 覆写主标签（默认冒出
         # 尾随 On/Off）——两者恒等于语义文案（minimal-text）
         self._enable_switch.setOnText('启用')
         self._enable_switch.setOffText('屏蔽')
         self._enable_switch.setToolTip('启用 / 屏蔽该步骤（屏蔽 = 运行跳过，不删配置）')
-        top_row.addWidget(self._enable_switch)
         root.addLayout(top_row)
 
         # ---------------- 图标动作栏：全部 tooltip；删除红色警示
@@ -89,6 +86,7 @@ class StepEditorPopup(QDialog):
                     self._replace_btn, self._remove_btn):
             action_row.addWidget(btn)
         action_row.addStretch(1)
+        action_row.addWidget(self._enable_switch)
         root.addLayout(action_row)
         # 动作按钮表：测试直驱用（契约见架构共享知识 5.2）
         self._action_buttons = {
@@ -105,6 +103,7 @@ class StepEditorPopup(QDialog):
         self._scroll = QScrollArea(self)
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._scroll.setMaximumHeight(_PARAM_AREA_MAX_H)
         self._scroll.setWidget(self._form)
         root.addWidget(self._param_hint)
@@ -118,13 +117,36 @@ class StepEditorPopup(QDialog):
         self._reset_btn.clicked.connect(self._on_reset_defaults)
         bottom_row.addWidget(self._reset_btn)
         bottom_row.addStretch(1)
-        self._apply_btn = PushButton('应用', self)
+        self._apply_btn = PrimaryPushButton('应用', self)
         self._apply_btn.setToolTip('写回参数与启停状态（未应用的改动丢弃）')
         self._apply_btn.clicked.connect(self._on_apply)
         bottom_row.addWidget(self._apply_btn)
         root.addLayout(bottom_row)
+        self._reset_btn.setFixedHeight(30)
+        self._apply_btn.setFixedSize(76, 30)
+        self.apply_theme(isDarkTheme())
 
     # ------------------------------------------------------------ 构建
+    def _build_header(self):
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        self._title_label = QLabel(self)
+        self._title_label.setWordWrap(True)
+        self._title_label.setSizePolicy(QSizePolicy.Policy.Expanding,
+                                        QSizePolicy.Policy.Preferred)
+        title_font = self._title_label.font()
+        title_font.setWeight(QFont.Weight.DemiBold)
+        self._title_label.setFont(title_font)
+        self._title_label.setStyleSheet(f'color: {design_tokens.color("text_primary")};')
+        row.addWidget(self._title_label, 1)
+        self._close_btn = ToolButton(FIF.CLOSE, self)
+        self._close_btn.setFixedSize(28, 28)
+        self._close_btn.setToolTip('关闭，不应用更改（Esc）')
+        self._close_btn.setAccessibleName('关闭步骤编辑')
+        self._close_btn.clicked.connect(self.close)
+        row.addWidget(self._close_btn, 0, Qt.AlignmentFlag.AlignTop)
+        return row
+
     def _make_action(self, action: str, icon, tooltip: str, *,
                      danger: bool = False) -> ToolButton:
         """图标动作钮：icon-only 配 accessibleName（屏幕阅读器可念）。"""
@@ -145,6 +167,7 @@ class StepEditorPopup(QDialog):
         ``dark=None`` 跟随当前主题（构造期）；apply_theme 显式传入目标主题。
         """
         error = design_tokens.color('error', dark)
+        btn.setIcon(FIF.DELETE.icon(color=QColor(error)))
         btn.setStyleSheet(
             f'ToolButton{{color:{error};background:transparent;'
             'border:none;border-radius:4px;}'
@@ -168,6 +191,12 @@ class StepEditorPopup(QDialog):
         # 参数表单
         if self._schema:
             self._form.set_schema(self._schema)
+            for label in self._form.findChildren(CaptionLabel):
+                label.setWordWrap(True)
+                label.setMinimumWidth(100)
+                label.setMaximumWidth(140)
+                label.setSizePolicy(QSizePolicy.Policy.Preferred,
+                                    QSizePolicy.Policy.Preferred)
             self._form.set_values(dict(snapshot.get('params') or {}))
         else:
             self._form.clear()
@@ -217,6 +246,14 @@ class StepEditorPopup(QDialog):
         self.close()
 
     # ------------------------------------------------------------ 事件
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt 命名
+        screen = self.screen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            self.setFixedWidth(min(_POPUP_WIDTH, max(300, available.width() - 24)))
+            self.setMaximumHeight(max(200, available.height() - 24))
+        super().showEvent(event)
+
     def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt 命名
         if event.key() == Qt.Key.Key_Escape:
             self.close()
@@ -250,6 +287,19 @@ class StepEditorPopup(QDialog):
         """主题切换重刷令牌色（主窗鸭子类型派发；必须幂等——遍历可能
         命中隐藏弹窗）。qfw 控件随主题自动，这里只重刷自绘样式。"""
         self._style_remove_button(self._remove_btn, dark)
+        self.setStyleSheet(
+            f'QDialog#stepEditorPopup{{background:{design_tokens.color("bg_surface", dark)};'
+            f'border:1px solid {design_tokens.color("border_default", dark)};'
+            f'border-radius:{design_tokens.radius("lg")}px;}}'
+            'QScrollArea{background:transparent;border:0;}'
+            'QScrollArea > QWidget > QWidget{background:transparent;}')
+        tool_style = (
+            'ToolButton{background:transparent;border:0;border-radius:4px;}'
+            f'ToolButton:hover{{background:{design_tokens.color("bg_muted", dark)};}}'
+            f'ToolButton:pressed{{background:{design_tokens.rgba("primary", .12, dark)};}}')
+        for button in (self._close_btn, self._up_btn, self._down_btn,
+                       self._dup_btn, self._replace_btn):
+            button.setStyleSheet(tool_style)
         self._title_label.setStyleSheet(
             f'color: {design_tokens.color("text_primary", dark)};')
         self._param_hint.setStyleSheet(

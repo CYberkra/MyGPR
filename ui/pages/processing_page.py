@@ -1,1017 +1,872 @@
-# -*- coding: utf-8 -*-
-"""ProcessingPage — 处理工作台（SPEC §6.5）。
-
-三栏 QHBoxLayout：
-- 左栏 ScrollArea 固定 320px：卡片"方法库"（MethodBrowser）
-- 中栏 stretch：卡片"数据预览"（标题与 SlimSegment 原始数据/处理结果同行
-  header + BScanContainer 多视图 + colormap ComboBox + p_low/p_high +
-  刷新色阶）+ 进度条（初始隐藏）
-- 右栏 ScrollArea 固定 340px：卡片"处理链"（PipelineList + 添加所选方法）、
-  卡片"参数设置"（ParamForm + 应用到选中步骤）、卡片"执行"（输入数据选择
-  支持从某个成果继续处理 + 结果名 + 运行/取消）、卡片"AutoTune 自动调参"
-
-预览区（tab 模型，2026-09-24）：胶囊 TabBar = 打开的数据源清单——
-- 原始数据固定首 tab 不可关；运行链的每步中间成果（B7 落盘的
-  intermediate artifact）与最终成果跑完自动开 tab，标题 = 算法名
-  （method_id），末位挂 ✓；tab 可关、可拖排序；
-- **tab 即窗口**：窗口数 = min(tab 数, 4) 自动排布（1→单窗 2→左右
-  3-4→2×2），>4 主区留前 4、全部进总览墙；选中的 tab 总在主区；
-- bundle 懒加载：可见面板缺 bundle 时发 artifact_preview_requested，
-  协调器接 project_controller.preview_artifact 异步回填
-  set_artifact_bundle。
-
-页面纯展示 + 发信号，不直接调 controller/backend。
-内部联动：PipelineList.sig_step_selected → ParamForm 载入该步骤参数；
-"应用到选中步骤"按钮 → 表单值写回选中步骤。
-"""
-
+"""Processing workbench: saved result tabs, per-input drafts and frozen submissions."""
 from collections.abc import Mapping
-from datetime import datetime
+from copy import deepcopy
+import json
 
-from PyQt6.QtCore import QEvent, Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
-from PyQt6.QtWidgets import (QHBoxLayout, QVBoxLayout, QWidget)
-from qfluentwidgets import (
-    CaptionLabel, ComboBox, InfoBar, TabBar,
-    InfoBarPosition, LineEdit, PrimaryPushButton, ProgressBar, PushButton,
+from PyQt6.QtWidgets import (
+    QDialog, QHBoxLayout, QScrollArea, QSplitter,
+    QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
-from qfluentwidgets.components.widgets.tab_view import TabItem
+from qfluentwidgets import (
+    CaptionLabel, ComboBox, LineEdit, MessageBox,
+    PrimaryPushButton, ProgressBar, PushButton, TransparentToolButton,
+    isDarkTheme,
+)
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants, design_tokens
+from ui.file_tree import artifact_parameters, artifact_direct_parent, artifact_step, build_lineage_model
 from ui.motion import animate_progress
-from ui.page_scaffold import (PanelStateMixin, make_card,
-                              make_collapsible_column,
-                              make_form_row, refill_combo)
-from ui.widgets.bscan_result_grid import ResultGrid
-from ui.widgets.chain_strip import ChainStrip
+from ui.page_scaffold import make_form_row, refill_combo
+from ui.widgets import ParamForm, PipelineList, clear_invalid, make_separator
+from ui.widgets.bscan_workspace import BScanWorkspace
 from ui.widgets.collapsible_card import make_collapsible_card
-from ui.widgets import (BScanContainer, LAYOUT_FOCUS,
-                        MethodBrowser, ParamForm, PipelineList, MAX_PANELS,
-                        clear_invalid, make_separator)
+from ui.widgets.object_context_menu import ObjectMenuBinding
+from ui.widgets.elided_caption import ElidedCaptionLabel
+from ui.pages.processing_steps import ProcessingSteps
+from ui.pages.processing_menus import ProcessingMenus
+from ui.pages.processing_chain_view import ProcessingChainView
 
 
-_INPUT_KEY = 'input'         # 结果网格的「输入」槽位 key
-_MAX_THUMBS = 3              # 缩略列容量（= MAX_PANELS - 1，含主窗共 4 面板）
-_READABILITY_MIN_RATIO = 0.45  # 可读性红线：绘图区高 / 采样数（px/采样）
-
-
-def _short_timestamp(raw: str) -> str:
-    """'2026-09-22T14:36:50' → '09-22 14:36'；空串/解析失败回落原文。
-
-    成果下拉宽度有限，ISO 全时间戳必然截断（截断的时间不可读），
-    短格式保住「同测线多次处理」的区分信息。
-    """
-    text = str(raw or '').strip()
-    if not text:
-        return ''
-    try:
-        return datetime.fromisoformat(text).strftime('%m-%d %H:%M')
-    except ValueError:
-        return text
-
-
-class ProcessingPage(PanelStateMixin, QWidget):
-    """处理工作台页面。"""
-
-    run_requested = pyqtSignal(dict)            # current_pipeline() 载荷（含 steps）
+class ProcessingPage(ProcessingChainView, ProcessingSteps, ProcessingMenus, QWidget):
+    run_requested = pyqtSignal(dict)
     cancel_requested = pyqtSignal()
-    autotune_requested = pyqtSignal(str, dict, str)  # method_id, params_hint, input_artifact_id
-    line_changed = pyqtSignal(str)              # 处理页测线选择变化
-    artifact_selected = pyqtSignal(str)         # 处理页成果选择变化
-    # tab 模型懒加载：可见面板缺 bundle → 请求预览该成果（协调器接
-    # project_controller.preview_artifact，异步回填 set_artifact_bundle）
+    autotune_requested = pyqtSignal(str, dict, str)
+    line_changed = pyqtSignal(str)
+    artifact_selected = pyqtSignal(str)
     artifact_preview_requested = pyqtSignal(str)
-    # 批量处理（B4）UI 已按用户决策暂时屏蔽（2026-09-02）：卡片、信号与
-    # 接线整体撤下；后端 run_pipeline_batch 契约保留，恢复时重建本页卡片
-    # 并回接 page_coordinator._on_batch_run_requested 即可。
-
-    _PANEL_STATE_PREFIX = 'processing'
+    original_preview_requested = pyqtSignal()
+    artifact_delete_requested = pyqtSignal(str, list)
+    artifact_focus_requested = pyqtSignal(str, str)
+    project_resources_toggled = pyqtSignal(bool)
+    bscan_view_created = pyqtSignal(object)
+    input_activated = pyqtSignal(str, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._methods = []
-        self._methods_by_id = {}
-        # tab 模型（2026-09-24）：打开的数据源 = 画布窗口，tab 数决定面板
-        # 数（1→单窗 2→左右 3-4→2×2，>4 主区留前 4、其余总览墙）。
-        self._preview_sources = []        # [{key,title,bundle,artifact_id,closable,is_final}]
-        self._selected_source_key = 'original'
-        self._opened_run_groups = set()   # 已自动展开的 run_group_id（每组一次）
-        self._artifacts_by_id = {}        # artifact_id -> ProjectArtifact
-        self._gallery = None              # 总览墙（懒创建，随主页销毁）
-        self._method_picker = None        # 方法选择弹窗（P0-2 单实例）
-        self._step_editor = None          # 步骤合一编辑弹窗（P0-3，每次新建）
-        self._picker_purpose = 'append'   # 选择器分流：append 链尾 / replace 换步
-        self._picker_index = -1           # replace 模式的目标步骤索引
-        self._thumb_views_bound = []      # 已装点击提升的缩略面板
-        self._step_artifact_ids = {}      # v2：步骤序号 → 该步 intermediate 成果 id
-        self._results_stale = False       # v2：链/参数已改但结果未重算
-        self._closed_slots = set()        # 用户 × 掉的结果卡（重跑后清空恢复）
-        self._echoed_group = ''           # 已回显链的 run_group（防重复回填）
-        self._preview_requested = set()   # 已发出预览请求的 artifact_id（幂等）
-        self._expand_all = True           # v2.3：结果区「全部步骤」开关
-        self._running = False
-        self._job_id = ''
-        self._selected_step = -1
-        self._autotune_result = None    # (method_id, dict)
-        self._autotune_running = False  # AutoTune 运行中（防重复提交）
-        self._selected_method_id = ''   # 方法库当前选中方法
-        self._sm = None                 # 共享 SettingsManager（主窗口注入，唯一写者）
-
+        self._methods, self._methods_by_id, self._artifacts_by_id = [], {}, {}
+        self._sources = {}
+        self._drafts, self._draft_backups, self._layouts = {}, {}, {}
+        self._project_id, self._line_id, self._selected_source_key = '', '', ''
+        self._selected_revision, self._raw_revision = '', ''
+        self._draft_edit_epoch = 0
+        self._project_read_only = False
+        self._running, self._autotune_running = False, False
+        self._run_snapshot, self._completion_pending = None, None
+        self._completed_artifact = ''
+        self._activation_epoch, self._suspend, self._raw_opened = 0, False, False
+        self._source_selected_this_line = False
+        self._preview_requested = set()
+        self._selected_step, self._selected_method_id = -1, ''
+        self._method_picker, self._step_editor = None, None
+        self._picker_purpose, self._picker_index = 'append', -1
+        self._autotune_result, self._autotune_context = None, None
+        self._sm, self._job_id, self._pending_layout = None, '', None
         self._build_ui()
         self._connect_internal()
-        self._restore_panel_state()
+        self._refresh_ui()
+        self.apply_theme(isDarkTheme())
 
-    # ============================================================ 设置注入
-    def set_settings_manager(self, sm) -> None:
-        """注入主窗口共享的 SettingsManager（唯一写者）并恢复折叠状态。"""
-        self._sm = sm
-        self._restore_panel_state()
-
-    # ============================================================ UI 构建
-    def _build_ui(self) -> None:
+    def _build_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(*constants.PAGE_MARGINS)
-        root.setSpacing(constants.PAGE_SPACING)
-
-        columns = QHBoxLayout()
-        columns.setSpacing(constants.PAGE_SPACING)
-        root.addLayout(columns, 1)
-
-        self._build_left_column(columns)
-        self._build_middle_column(columns)
-        self._build_right_column(columns)
-
-    def _build_left_column(self, columns: QHBoxLayout) -> None:
-        """左栏（展开 SIDE_TOOL_WIDTH px，可折叠；滚动栏宽须与面板展开宽一致）。"""
-        self._left_panel, left_layout = make_collapsible_column(
-            'left', constants.SIDE_TOOL_WIDTH, parent=self)
-        columns.addWidget(self._left_panel)
-
-        methods_card, methods_layout = make_card('方法库')
-        self._method_browser = MethodBrowser(methods_card)
-        self._method_browser.setMinimumHeight(320)
-        methods_layout.addWidget(self._method_browser, 1)
-        # 卡片占满左栏全部可用高度，不再在底部留空白
-        left_layout.addWidget(methods_card, 1)
-        # 后续卡片（参数/执行/AutoTune）必须挂进**同一个滚动内容布局**：
-        # 若误挂 CollapsiblePanel.content_widget().layout()，会与 ScrollArea
-        # 成为兄弟——ScrollArea 拿 stretch 1 被三卡挤到 ~97px 视口，方法库
-        # 树整个被裁掉（真机实测：左栏只见标题+搜索框，"看不到方法在哪"）。
-        self._left_cards_layout = left_layout
-
-    def _build_middle_column(self, columns: QHBoxLayout) -> None:
-        """中栏（stretch）：tab 模型主区 = 上链条 / 下结果网格 + 进度条。"""
-        middle = QWidget(self)
-        middle_layout = QVBoxLayout(middle)
-        middle_layout.setContentsMargins(0, 0, 0, 0)
-        middle_layout.setSpacing(constants.PAGE_SPACING)
-        columns.addWidget(middle, 1)
-
-        # tab 模型：胶囊 TabBar = 打开的数据源清单（原始数据固定首 tab
-        # 不可关；步骤/成果 tab 可关、可拖排序）；tab 数决定画布窗口数。
-        self._source_tabs = TabBar(self)
-        self._source_tabs.setTabsClosable(True)
-        self._source_tabs.setMovable(True)
-        # qfw 自带的「+」加页按钮：本页 tab 只随数据源增减，按钮无功能，
-        # 留着只会诱导误点（死按钮）
-        self._source_tabs.setAddButtonVisible(False)
-        # ---------------- v2 主区：上链条 / 下结果网格（旧预览卡隐藏，代码保留）
-        self._line_combo = ComboBox(middle)
-        self._line_combo.setMinimumWidth(130)
-        self._line_combo.setToolTip('当前测线：在处理页直接切换')
-        # 空态占位（深查 P3）：无测线时原样一个白框，看不出用途
+        root.setContentsMargins(12, 8, 12, 8)
+        root.setSpacing(6)
+        header = QHBoxLayout()
+        header.setSpacing(8)
+        self._resources_btn = TransparentToolButton(FIF.FOLDER, self)
+        self._tools_btn = TransparentToolButton(FIF.DEVELOPER_TOOLS, self)
+        for button, text in ((self._resources_btn, '项目资源'), (self._tools_btn, '处理工具')):
+            button.setCheckable(True)
+            button.setToolTip(text)
+            button.setAccessibleName(text)
+            button.setFixedSize(*constants.TOOL_BTN_SIZE)
+            header.addWidget(button)
+        self._tools_btn.setChecked(True)
+        self._line_combo = ComboBox(self)
         self._line_combo.setPlaceholderText('选择测线')
-        self._artifact_combo = ComboBox(middle)
-        self._artifact_combo.setMinimumWidth(150)
-        self._artifact_combo.setToolTip('选择该测线历次处理结果作为输入')
-        input_row = QWidget(middle)
-        input_layout = QHBoxLayout(input_row)
-        input_layout.setContentsMargins(0, 0, 0, 0)
-        input_layout.setSpacing(constants.CARD_SPACING)
-        input_layout.addWidget(self._line_combo)
-        # v2.2：成果下拉删除（「从成果继续处理」走左栏执行卡的「输入数据」
-        # 下拉）；对象保留隐藏，coordinator 的静默选中接线不受影响
-        self._artifact_combo.setVisible(False)
-
-        self._chain_strip = ChainStrip(middle)
-        self._chain_strip.set_input_widget(input_row)
-        middle_layout.addWidget(self._chain_strip)
-
-        self._result_grid = ResultGrid(middle)
-        middle_layout.addWidget(self._result_grid, 1)
-        # 总览墙手动入口（2026-10-09）：旧入口挂在 v2 隐藏的 preview_card
-        # tab 行里，随卡片一起消失——>4 源自动弹出还在，手动入口却没了。
-        # 挂到结果网格头部（可见时 = 有打开的源），复用同一 _open_gallery。
-        self._grid_gallery_btn = PushButton('总览墙', self)
-        self._grid_gallery_btn.setToolTip(
-            '弹出总览墙：大图网格展示原始数据与本次各步结果。')
-        self._grid_gallery_btn.clicked.connect(self._open_gallery)
-        self._grid_gallery_btn.setVisible(False)
-        self._result_grid.add_header_widget(self._grid_gallery_btn)
-
-        preview_card, preview_layout = make_card('数据预览')
-        self._preview_card = preview_card
-        preview_card.setVisible(False)      # v2 隐藏（tab 模型待确认后退役）
-        tab_row = QHBoxLayout()
-        tab_row.setSpacing(constants.CARD_SPACING)
-        tab_row.addWidget(self._source_tabs, 1)
-        self._gallery_btn = PushButton('总览墙', self)
-        self._gallery_btn.setMinimumWidth(60)   # 溢出徽标 +N 需自适应宽
-        self._gallery_btn.setToolTip(
-            '弹出总览墙：网格展示全部打开的数据源，点格子的标题把该源'
-            '送回主区（tab 数超过 4 时跑完链会自动弹一次）。')
-        self._gallery_btn.clicked.connect(self._open_gallery)
-        tab_row.addWidget(self._gallery_btn)
-        self._readability_label = CaptionLabel('', self)
-        self._readability_label.setToolTip(
-            '画布纵向像素不足以呈现全部采样点（低于 0.45px/采样）：'
-            '收起两侧栏（⤢ 铺满）或全屏浏览可获得更高纵向密度。')
-        self._readability_label.setVisible(False)
-        tab_row.addWidget(self._readability_label)
-        preview_layout.addLayout(tab_row)
-
-        self._bscan_container = BScanContainer(preview_card)
-        self._bscan_container.setMinimumHeight(constants.PREVIEW_MIN_HEIGHT)
-        preview_layout.addWidget(self._bscan_container, 1)
-        # 原始数据锚点 tab（须在容器就位后建：_sync_tabs 会走 resolve_auto）
-        self._ensure_original_source()
-        self._sync_tabs()
-
-        # 色阶工具行已退役（2026-09-23）：色标映射与色阶百分位收容进设置页
-        # 「B-Scan 视图」卡（改值全量下发并持久化），单视图微调走 B-Scan
-        # 右键菜单（色标子菜单 / 色阶设置…）——页面不再持有第二份状态源。
-        middle_layout.addWidget(preview_card, 1)
-
-        # 进度条 + 进度消息（初始隐藏）
-        progress_row = QHBoxLayout()
-        progress_row.setSpacing(constants.CARD_SPACING)
-        self._progress_bar = ProgressBar(middle)
-        self._progress_bar.setRange(0, 100)
-        self._progress_bar.setValue(0)
-        progress_row.addWidget(self._progress_bar, 3)
-        self._progress_label = CaptionLabel('', middle)
-        self._progress_label.setMinimumWidth(0)
-        progress_row.addWidget(self._progress_label, 1)
-        self._progress_row_widget = QWidget(middle)
-        self._progress_row_widget.setLayout(progress_row)
-        self._progress_row_widget.setVisible(False)
-        middle_layout.addWidget(self._progress_row_widget)
-
-    def _build_right_column(self, columns: QHBoxLayout) -> None:
-        """右栏（展开 SIDE_FORM_WIDTH px，可折叠；滚动栏宽须与面板展开宽一致）。
-
-        v2：参数 / 执行 / 自动调参三卡已移入左栏，本栏整体隐藏——但
-        ``PipelineList`` 仍作步骤数据源留在栏内，故代码不删。
-        """
-        self._right_panel, right_layout = make_collapsible_column(
-            'right', constants.SIDE_FORM_WIDTH, parent=self)
-        columns.addWidget(self._right_panel)
-
-        pipeline_card, pipeline_layout = make_card('处理链')
-        self._pipeline_list = PipelineList(pipeline_card)
-        self._pipeline_list.setMinimumHeight(200)
-        pipeline_layout.addWidget(self._pipeline_list, 1)
-        self._add_method_btn = PushButton('添加方法', pipeline_card)
-        self._add_method_btn.setToolTip('弹出方法选择器，双击条目加入处理链')
-        pipeline_layout.addWidget(self._add_method_btn)
-        right_layout.addWidget(pipeline_card, 1)
-
-        param_card, param_layout = make_card('参数设置')
-        # 空态引导：未选步骤/方法无参数时表单区空白一片（真机走查遗留项）
-        self._param_empty_hint = CaptionLabel('选中处理链步骤后在此调参',
-                                              param_card)
-        # 令牌色（原硬编码 'color: gray' 深色主题对比度存疑）；
-        # apply_theme 里随主题重刷
-        self._param_empty_hint.setStyleSheet(
-            f'color: {design_tokens.color("text_muted")};')
-        param_layout.addWidget(self._param_empty_hint)
-        self._param_form = ParamForm(param_card)
-        param_layout.addWidget(self._param_form, 1)
-        right_layout.addWidget(param_card, 1)
-
-        exec_card, exec_layout = make_card('执行')
-        self._input_combo = ComboBox(exec_card)
-        self._input_combo.addItem('原始数据')
-        self._input_combo.setToolTip(
-            '处理链的输入：默认从原始数据开始；选择某个成果则在该成果基础上继续处理')
-        exec_layout.addLayout(make_form_row(
-            '输入数据:', self._input_combo, parent=exec_card))
-        self._result_name_edit = LineEdit(exec_card)
-        self._result_name_edit.setPlaceholderText('例如：增益处理后结果…')
-        self._result_name_edit.setToolTip('处理成果保存名称')
-        exec_layout.addLayout(make_form_row(
-            '结果名称:', self._result_name_edit, parent=exec_card))
-        run_row = QHBoxLayout()
-        run_row.setSpacing(constants.CARD_SPACING)
-        self._run_btn = PrimaryPushButton('运行处理链', exec_card, FIF.PLAY)
-        self._run_btn.setToolTip('执行右侧处理链（Ctrl+R）')
-        # v2：运行入口统一到顶部链条（此按钮保留对象供 set_running 驱动，
-        # 不再显示，消除「左栏运行 / 顶部运行」双入口）
-        self._run_btn.setVisible(False)
-        self._cancel_btn = PushButton('取消', exec_card)
-        self._cancel_btn.setToolTip('取消正在运行的处理任务')
-        self._cancel_btn.setEnabled(False)
-        run_row.addWidget(self._run_btn, 1)
-        run_row.addWidget(self._cancel_btn)
-        exec_layout.addLayout(run_row)
-        right_layout.addWidget(exec_card)
-
-        # AutoTune 是低频操作且结果只有"暂无调参结果"占位：默认收起
-        # （CollapsibleCard 收起只隐藏内容区、状态天然保留），把左栏空间
-        # 让给方法库与参数设置。
-        autotune_card, autotune_layout = make_collapsible_card(
-            'AutoTune 自动调参', collapsed=True)
-        self._autotune_card = autotune_card   # set_autotune_result 自动展开用
-        self._autotune_method_label = CaptionLabel('--', autotune_card)
-        autotune_layout.addLayout(make_form_row(
-            '当前方法:', self._autotune_method_label, parent=autotune_card))
-        self._autotune_btn = PushButton('开始调参', autotune_card)
-        self._autotune_btn.setToolTip('对左侧选中的方法自动搜索最优参数')
-        self._autotune_btn.setEnabled(False)
-        autotune_layout.addWidget(self._autotune_btn)
-        autotune_layout.addWidget(make_separator())
-        self._autotune_result_label = CaptionLabel('暂无调参结果', autotune_card)
+        self._line_combo.setMinimumWidth(100)
+        self._line_combo.setMaximumWidth(160)
+        header.addWidget(self._line_combo)
+        self._input_label = ElidedCaptionLabel(self)
+        self._input_label.setText('下次输入：未选择数据')
+        header.addWidget(self._input_label, 1)
+        self._layout_combo = ComboBox(self)
+        self._layout_combo.addItems(['单组标签', '左右对照', '上下对照', '自定义布局'])
+        self._layout_combo.setToolTip('手动设置视图布局；打开标签不会自动分屏')
+        header.addWidget(self._layout_combo)
+        self._source_path_btn = TransparentToolButton(FIF.HISTORY, self)
+        self._source_path_btn.setCheckable(True)
+        self._source_path_btn.setFixedSize(*constants.TOOL_BTN_SIZE)
+        self._source_path_btn.setToolTip('已完成来源：展开 / 收起')
+        self._source_path_btn.setAccessibleName('已完成来源')
+        self._source_path_btn.toggled.connect(self._sync_chain_view)
+        header.addWidget(self._source_path_btn)
+        self._run_btn = PrimaryPushButton('从此结果运行', self, FIF.PLAY)
+        self._run_btn.setToolTip('使用当前激活结果执行新增步骤（Ctrl+R）')
+        self._cancel_btn = PushButton('取消任务', self, FIF.CANCEL)
+        header.addWidget(self._run_btn)
+        header.addWidget(self._cancel_btn)
+        root.addLayout(header)
+        self._body = QSplitter(Qt.Orientation.Horizontal, self)
+        self._body.setChildrenCollapsible(False)
+        self._tools_panel = QTabWidget(self._body)
+        self._tools_panel.setObjectName('processingTools')
+        self._tools_panel.setMinimumWidth(250)
+        self._tools_panel.setMaximumWidth(360)
+        self._tools_panel.setDocumentMode(True)
+        chain_page = QWidget()
+        chain_layout = QVBoxLayout(chain_page)
+        chain_layout.setContentsMargins(8, 8, 8, 8)
+        chain_layout.setSpacing(8)
+        self._lineage_tree = QTreeWidget(chain_page)
+        self._lineage_tree.setHeaderHidden(True)
+        self._lineage_tree.setIndentation(12)
+        self._lineage_tree.setMinimumHeight(100)
+        self._lineage_tree.setMaximumHeight(160)
+        self._lineage_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        sources_header = QHBoxLayout()
+        sources_header.addWidget(CaptionLabel('数据来源与分支', chain_page), 1)
+        self._lineage_more_btn = TransparentToolButton(FIF.MORE, chain_page)
+        self._lineage_more_btn.setToolTip('来源操作')
+        self._lineage_more_btn.setAccessibleName('来源操作')
+        sources_header.addWidget(self._lineage_more_btn)
+        chain_layout.addLayout(sources_header)
+        chain_layout.addWidget(self._lineage_tree)
+        self._draft_menu_btn = TransparentToolButton(FIF.MORE, chain_page)
+        self._draft_menu_btn.setToolTip('草稿操作')
+        self._draft_menu_btn.setAccessibleName('草稿操作')
+        self._pipeline_list = PipelineList(self)
+        self._pipeline_list.hide()  # Internal step model; the editable chain is its only visible list.
+        self._add_method_btn = PushButton('添加处理步骤', chain_page, FIF.ADD)
+        self._add_method_btn.hide()  # Compatibility command; the visible append action is in the chain.
+        chain_layout.addWidget(make_separator())
+        chain_layout.addWidget(CaptionLabel('参数与调参', chain_page))
+        self._param_empty_hint = CaptionLabel('点击上方算法节点编辑参数', chain_page)
+        self._param_empty_hint.setWordWrap(True)
+        chain_layout.addWidget(self._param_empty_hint)
+        self._param_form = ParamForm(chain_page)
+        chain_layout.addWidget(self._param_form)
+        self._result_name_edit = LineEdit(chain_page)
+        self._result_name_edit.setPlaceholderText('可选，留空自动命名')
+        chain_layout.addLayout(make_form_row('结果名称', self._result_name_edit, parent=chain_page))
+        self._autotune_card, tune = make_collapsible_card('自动调参', collapsed=True)
+        self._autotune_method_label = CaptionLabel('--', self._autotune_card)
+        tune.addWidget(self._autotune_method_label)
+        self._autotune_btn = PushButton('开始调参', self._autotune_card)
+        self._autotune_result_label = CaptionLabel('暂无调参结果', self._autotune_card)
         self._autotune_result_label.setWordWrap(True)
-        autotune_layout.addWidget(self._autotune_result_label)
-        self._adopt_params_btn = PushButton('采用最优参数', autotune_card)
-        self._adopt_params_btn.setToolTip('把调参结果写入处理链当前步骤')
+        self._adopt_params_btn = PushButton('采用最优参数', self._autotune_card)
         self._adopt_params_btn.setEnabled(False)
-        autotune_layout.addWidget(self._adopt_params_btn)
-        right_layout.addWidget(autotune_card)
-        # v2：参数 / 执行 / 自动调参移入左栏（处理链改由顶部 chip 条承担，
-        # 右栏整体隐藏——PipelineList 仍作为步骤数据源留在右栏内，代码不删）。
-        # 三卡必须与方法库卡同层（同一 ScrollArea 内容布局，见
-        # _build_left_column 的注释）：旧实现误挂 CollapsiblePanel 内层，
-        # ScrollArea 视口被三卡挤到 97px，方法库树整个被裁掉。
-        left_cards_layout = self._left_cards_layout
-        # 卡序（2026-10-09 用户拍板）：执行卡上移到参数设置之前——
-        # 「输入数据/结果名称」是运行前必经配置，排最底时 580 高真机窗口
-        # 完全在视口外（截图实证：只见「执行」标题一条边），而运行按钮在
-        # 右上链条上，配置与执行空间分离。新序：方法库 → 执行 → 参数
-        # 设置 → AutoTune。
-        left_cards_layout.addWidget(exec_card)
-        left_cards_layout.addWidget(param_card)
-        left_cards_layout.addWidget(autotune_card)
-        self._right_panel.setVisible(False)
-        right_layout.addStretch(1)
+        tune.addWidget(self._autotune_btn)
+        tune.addWidget(self._autotune_result_label)
+        tune.addWidget(self._adopt_params_btn)
+        chain_layout.addWidget(self._autotune_card)
+        chain_layout.addStretch(1)
+        scroll = QScrollArea(self._tools_panel)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setWidget(chain_page)
+        self._tools_panel.addTab(scroll, '处理')
+        display = QWidget()
+        dl = QVBoxLayout(display)
+        hint = CaptionLabel('仅改变当前视图；不修改数据或处理步骤', display)
+        hint.setWordWrap(True)
+        dl.addWidget(hint)
+        self._display_cmap = ComboBox(display)
+        self._display_cmap.addItems(list(constants.COLORMAPS))
+        dl.addLayout(make_form_row('色图', self._display_cmap, parent=display))
+        fit = PushButton('适应当前视图', display)
+        fit.clicked.connect(lambda: self._workspace.primary_view().fit_to_data())
+        dl.addWidget(fit)
+        dl.addWidget(CaptionLabel('色阶、显示增益、坐标与导出可在画布右键调整', display))
+        dl.addStretch(1)
+        self._tools_panel.addTab(display, '显示')
+        history_page = QWidget()
+        history_layout = QVBoxLayout(history_page)
+        history_layout.setContentsMargins(8, 8, 8, 8)
+        history_header = QHBoxLayout()
+        history_header.addWidget(CaptionLabel('已保存运行', history_page), 1)
+        self._history_more_btn = TransparentToolButton(FIF.MORE, history_page)
+        self._history_more_btn.setToolTip('历史运行操作')
+        self._history_more_btn.setAccessibleName('历史运行操作')
+        history_header.addWidget(self._history_more_btn)
+        history_layout.addLayout(history_header)
+        self._history_tree = QTreeWidget(history_page)
+        self._history_tree.setHeaderHidden(True)
+        self._history_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        history_layout.addWidget(self._history_tree)
+        self._tools_panel.addTab(history_page, '历史')
+        center = QWidget(self._body)
+        main = QVBoxLayout(center)
+        main.setContentsMargins(0, 0, 0, 0)
+        main.setSpacing(4)
+        self._path_label = CaptionLabel('', center)
+        self._path_label.setWordWrap(True)
+        self._path_label.hide()
+        self._build_chain_view(main)
+        self._draft_revision_hint = CaptionLabel('', center)
+        self._draft_revision_hint.setWordWrap(True)
+        main.addWidget(self._draft_revision_hint)
+        preview_status = QHBoxLayout()
+        self._preview_error_label = CaptionLabel('', center)
+        self._preview_error_label.setWordWrap(True)
+        self._preview_retry_btn = PushButton('重试预览', center, FIF.SYNC)
+        self._preview_retry_btn.clicked.connect(lambda: self.retry_preview(self._selected_source_key))
+        preview_status.addWidget(self._preview_error_label, 1)
+        preview_status.addWidget(self._preview_retry_btn)
+        main.addLayout(preview_status)
+        self._workspace = BScanWorkspace(center)
+        self._bscan_container = self._workspace
+        main.addWidget(self._workspace, 1)
+        self._body.setStretchFactor(0, 0)
+        self._body.setStretchFactor(1, 1)
+        self._body.setSizes([300, 850])
+        root.addWidget(self._body, 1)
+        progress = QHBoxLayout()
+        self._progress_bar = ProgressBar(self)
+        self._progress_bar.setRange(0, 100)
+        self._progress_label = CaptionLabel('', self)
+        self._progress_label.setWordWrap(True)
+        progress.addWidget(self._progress_bar, 1)
+        progress.addWidget(self._progress_label, 2)
+        self._progress_row_widget = QWidget(self)
+        self._progress_row_widget.setLayout(progress)
+        self._progress_row_widget.hide()
+        root.addWidget(self._progress_row_widget)
+        self._completion_btn = PushButton('查看新结果', self)
+        self._completion_btn.hide()
+        root.addWidget(self._completion_btn)
 
-    # ============================================================ 内部接线
-    def _connect_internal(self) -> None:
-        # 方法库 → 选中方法（AutoTune 目标）/ 双击添加 / 按钮添加
-        self._method_browser.sig_method_selected.connect(self._on_method_selected)
-        self._method_browser.sig_add_requested.connect(self._add_method_to_pipeline)
-        self._add_method_btn.clicked.connect(self._open_method_picker)
+    def _apply_polish_theme(self, dark):
+        t = design_tokens.tokens(dark)
+        self._tools_panel.setStyleSheet(
+            f'QTabWidget#processingTools::pane {{ border: 1px solid {t["border_default"]};'
+            f' background: {t["bg_surface"]}; border-radius: 6px; }}'
+            f'QTabBar::tab {{ background: transparent; color: {t["text_secondary"]};'
+            ' padding: 6px 12px; border: none; border-bottom: 2px solid transparent; }'
+            f'QTabBar::tab:selected {{ color: {t["text_primary"]};'
+            f' border-bottom: 2px solid {t["primary"]}; }}')
+        self._input_label.setStyleSheet(f'color: {t["text_secondary"]};')
+        self._param_empty_hint.setStyleSheet(f'color: {t["text_muted"]};')
+        self._draft_revision_hint.setStyleSheet(f'color: {t["warning"]};')
+        self._preview_error_label.setStyleSheet(f'color: {t["error"]};')
 
-        # 处理链 ↔ 参数表单
-        self._pipeline_list.sig_step_selected.connect(self._on_step_selected)
-        # 参数表单值变化 → 自动写入选中步骤（任务 F 候选 4 需求确认书 B1：
-        # 删除"应用到选中步骤"按钮，改值即生效，无需额外点击）
-        self._param_form.sig_changed.connect(self._auto_write_params_to_selected)
-
-        # 预览
-        # 色标/色阶控件已收容进设置页（B-Scan 视图卡）与右键菜单；页面
-        # 不再持有副本，视图偏好由主窗启动期统一恢复、用户操作镜像写回。
+    def _connect_internal(self):
+        self._connect_chain_view()
         self._line_combo.currentIndexChanged.connect(self._on_line_combo_changed)
-        self._artifact_combo.currentIndexChanged.connect(self._on_artifact_combo_changed)
-        # 「输入数据」此前无任何连接 → 切了没反应（只在下次运行静默生效），
-        # 改为标记结果过期，给出「已修改 · 点运行更新」的可见反馈
-        self._input_combo.currentIndexChanged.connect(self._on_input_combo_changed)
-        # tab 模型：关闭 / 选中 → 源清单变更 → 重排画布面板（v2 暂隐藏）
-        self._source_tabs.tabCloseRequested.connect(self._on_tab_close)
-        self._source_tabs.currentChanged.connect(self._on_tab_selected)
-        # v2：顶部 chip 条 ↔ 处理链（PipelineList 仍是步骤数据源）
-        self._chain_strip.sig_step_selected.connect(self._on_chain_step_selected)
-        self._chain_strip.sig_step_toggled.connect(self._on_chain_step_toggled)
-        self._chain_strip.sig_step_removed.connect(self._on_chain_step_removed)
-        self._chain_strip.sig_step_moved.connect(self._on_chain_step_moved)
-        self._chain_strip.sig_add_requested.connect(self._open_method_picker)
-        # chip 右键唯一入口（P0-3）：合一编辑弹窗
-        self._chain_strip.sig_step_editor_requested.connect(
-            self._open_step_editor)
-        # 反向：处理链选中（程序化）也同步 chip 条高亮
-        self._pipeline_list.sig_step_selected.connect(self._chain_strip.select_step)
-        self._chain_strip.run_button().clicked.connect(self._on_run_clicked)
-        # 顺序敏感：先置脏再重铺——refresh 依赖 stale 标志决定是否解除
-        # 选中联动（反序会在 stale=False 时照旧映射旧 run 卡片索引）
-        self._pipeline_list.sig_changed.connect(self._mark_results_stale)
-        self._pipeline_list.sig_changed.connect(self._refresh_chain_and_results)
-        # 结果区头部开关：全部步骤（关=只铺输入+最终结果）；点卡选步骤
-        # （connect 只做一次——放 _refresh 里会随每次刷新重复连接）
-        self._result_grid.sig_expand_all_changed.connect(
-            self._on_expand_all_changed)
-        self._result_grid.sig_card_selected.connect(self._on_card_selected)
-        self._result_grid.sig_card_close_requested.connect(
-            self._on_card_close_requested)
-        self._refresh_chain_and_results()
-
-        # 执行
+        self._pipeline_list.sig_step_selected.connect(self._on_step_selected)
+        self._pipeline_list.sig_edit_requested.connect(self._open_step_editor)
+        self._pipeline_list.sig_duplicate_requested.connect(self._duplicate_step)
+        self._pipeline_list.sig_changed.connect(self._draft_changed)
+        self._param_form.sig_changed.connect(self._auto_write_params_to_selected)
+        self._result_name_edit.textChanged.connect(self._draft_changed)
+        self._add_method_btn.clicked.connect(self._open_method_picker)
         self._run_btn.clicked.connect(self._on_run_clicked)
         self._cancel_btn.clicked.connect(self.cancel_requested)
-
-        # AutoTune
+        self._workspace.active_changed.connect(self._activate_source)
+        self._workspace.preview_requested.connect(self._request_preview)
+        self._workspace.source_context_requested.connect(self._show_source_menu)
+        self._workspace.layout_changed.connect(self._sync_layout_label)
+        self._workspace.view_created.connect(self.bscan_view_created)
+        self._tools_btn.toggled.connect(self._toggle_tools)
+        self._resources_btn.toggled.connect(self._toggle_resources)
+        self._layout_combo.currentIndexChanged.connect(self._change_layout)
+        self._lineage_tree.itemClicked.connect(self._open_tree_item)
+        self._history_tree.itemClicked.connect(self._open_tree_item)
+        self._lineage_menu_binding = ObjectMenuBinding(self, self._lineage_tree,
+            lambda pos: self._tree_menu(self._lineage_tree, pos))
+        self._history_menu_binding = ObjectMenuBinding(self, self._history_tree,
+            lambda pos: self._tree_menu(self._history_tree, pos))
+        self._lineage_more_btn.clicked.connect(self._lineage_menu_binding.show_keyboard)
+        self._history_more_btn.clicked.connect(self._history_menu_binding.show_keyboard)
+        self._draft_menu_btn.clicked.connect(self._show_draft_menu)
+        self._display_cmap.currentTextChanged.connect(self._set_display_cmap)
+        self._completion_btn.clicked.connect(self.show_latest_result)
         self._autotune_btn.clicked.connect(self._on_autotune_clicked)
         self._adopt_params_btn.clicked.connect(self._on_adopt_params)
-
-        # 快捷键：运行 / 加载测线
-        self._run_shortcut = QShortcut(QKeySequence("Ctrl+R"), self)
-        self._run_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+        self._run_shortcut = QShortcut(QKeySequence('Ctrl+R'), self)
+        self._run_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self._run_shortcut.activated.connect(self._on_run_clicked)
 
-        # 面板折叠：状态持久化 + 窄窗自动折叠痕迹清理（尊重手动选择）
-        self._left_panel.sig_collapsed.connect(
-            lambda collapsed: self._on_side_panel_collapsed('left', collapsed))
-        self._right_panel.sig_collapsed.connect(
-            lambda collapsed: self._on_side_panel_collapsed('right', collapsed))
+    def _draft_key(self, source=None):
+        key = self._selected_source_key if source is None else source
+        revision = (self._selected_revision if source is None
+                    else str(self._sources.get(key, {}).get('revision') or ''))
+        return (self._project_id, self._line_id, key, revision)
 
-    # ============================================================ 公共接口（供主窗口接线）
-    def toggle_side_panels(self) -> None:
-        """B-Scan 工具条「⤢ 铺满」：两栏都收起则展开、否则全部收起。
+    def _stash_draft(self):
+        if self._suspend or not self._selected_source_key:
+            return
+        self._drafts[self._draft_key()] = deepcopy(self.current_pipeline())
 
-        语义按「用户此刻想干什么」定：只要还有一栏占着宽度，就继续收；
-        已全部收起时点一次恢复原状（此时按钮实际是个开关，符合直觉）。
-        """
-        collapse = not (self._left_panel.is_collapsed()
-                        and self._right_panel.is_collapsed())
-        self._left_panel.set_collapsed(collapse)
-        self._right_panel.set_collapsed(collapse)
+    def _draft_changed(self, *_):
+        if self._suspend:
+            return
+        self._draft_edit_epoch += 1
+        self._stash_draft()
+        self._refresh_ui()
+        self._save_session()
 
-    def set_methods(self, methods: list) -> None:
-        """方法列表 → MethodBrowser（结构见 ProcessingController.methods_loaded）。"""
-        self._methods = [dict(m) for m in (methods or [])]
-        self._methods_by_id = {m.get('method_id', ''): m for m in self._methods}
-        self._method_browser.set_methods(self._methods)
-        # 选择弹窗与左栏同源（存活实例同步刷新；再开的实例构造时灌入）
-        if self._method_picker is not None:
-            self._method_picker.set_methods(self._methods)
+    def _draft_locked(self):
+        return bool(self._running and self._run_snapshot and
+                    self._run_snapshot['key'] == self._draft_key())
 
-    def set_original_bundle(self, bundle) -> None:
-        """原始数据预览 bundle → 固定首 tab（不可关；换测线即换内容）。"""
-        # v2：输入数据到位才建输入卡（未运行不摆各步的空画布）
-        self._ensure_original_source()
-        for source in self._preview_sources:
-            if source['key'] == 'original':
-                source['bundle'] = bundle
-        self._result_grid.set_bundle(_INPUT_KEY, bundle)
-        if not self._result_grid.cards():
-            self._refresh_chain_and_results()
-        # 测线就绪（require_line 此刻必有效）：补发打开项目早期被吞的
-        # 步骤预览请求（骨架挂死根因，2026-09-27 真机截图）
-        self._request_step_previews()
-        self._redistribute()
+    def _activate_source(self, key):
+        if self._suspend:
+            return
+        key = str(key or '')
+        revision = str(self._sources.get(key, {}).get('revision') or '')
+        if key != self._selected_source_key or revision != self._selected_revision:
+            self._stash_draft()
+            self._selected_source_key = key
+            self._selected_revision = revision
+            if key:
+                self._source_selected_this_line = True
+                self._pending_layout = None  # an explicit selection supersedes session restoration
+            self._activation_epoch += 1
+            self._close_chain_popups()
+            draft = self._drafts.get(self._draft_key(), {})
+            self._suspend = True
+            self._pipeline_list.set_steps(deepcopy(draft.get('steps') or []))
+            self._result_name_edit.setText(str(draft.get('result_name') or ''))
+            self._suspend = False
+            self._selected_step = -1
+            self._param_form.clear()
+            if self._pipeline_list.count():
+                self._pipeline_list.select_step(0)
+        self._refresh_ui()
+        self._save_session()
+        self.input_activated.emit(self._line_id if self._selected_source_key else '', self._input_artifact_id())
 
-    def set_artifact_bundle(self, artifact_id: str, bundle) -> None:
-        """成果/步骤预览 bundle → 打开（或更新）对应的 artifact tab。
-
-        tab 已开 → 换内容；未开 → 新建（标题=算法名，取本页成果登记表
-        的 method_id，缺省回落 bundle.title）。bundle 异步到达时对应
-        面板已在 _redistribute 里绑定/清空过，这里补齐后重分发。
-        """
-        key = f'artifact:{artifact_id}'
-        # v2：同 bundle 回填到结果网格的对应步骤格（旧 tab 模型并存）
-        for index, step_aid in (self._step_artifact_ids or {}).items():
-            if step_aid == artifact_id:
-                self._result_grid.set_bundle(f'step:{index}', bundle)
-        for source in self._preview_sources:
-            if source['key'] == key:
-                source['bundle'] = bundle
-                if bundle is not None and getattr(bundle, 'title', ''):
-                    source['title'] = str(bundle.title)
-                self._redistribute()
-                return
-        title = self._artifact_title(artifact_id, bundle)
-        self._preview_sources.append({
-            'key': key, 'title': title, 'bundle': bundle,
-            'artifact_id': str(artifact_id), 'closable': True,
-            'is_final': False})
-        self._selected_source_key = key
-        self._sync_tabs()
-
-    def close_artifact_tab(self, artifact_id: str) -> None:
-        """外部删除成果 → 关闭其 tab（原始 tab 永不受影响）。"""
-        key = f'artifact:{artifact_id}'
-        for index, source in enumerate(self._preview_sources):
-            if source['key'] == key:
-                self._on_tab_close(index)
-                return
-
-    def close_all_artifact_tabs(self) -> None:
-        """换测线/清上下文：关闭全部成果/步骤 tab（原始锚点保留换内容）。"""
-        self._preview_sources = [s for s in self._preview_sources
-                                 if s['key'] == 'original']
-        self._selected_source_key = 'original'
-        self._sync_tabs()
-
-    def show_latest_result(self) -> None:
-        """跑完链后自动选中末位 tab（= 最终结果）；>4 源自动弹总览墙。"""
-        if self._preview_sources:
-            self._selected_source_key = self._preview_sources[-1]['key']
-            self._sync_tabs()
-            if len(self._preview_sources) > MAX_PANELS:
-                self._open_gallery()
-
-    def _open_gallery(self) -> None:
-        """总览墙（非模态，单实例）：只显示**当前上下文**——原始数据 +
-        本次 run_group 各步（与结果网格一致）。历史上打开过的旧组成果
-        不再展示（真机反馈：跑一步蹦出一屏几天前的结果）；历史成果经
-        成果下拉/文件树按需预览。
-
-        单实例防堆叠（P1-4）：存活且可见 → set_sources 增量更新 +
-        activateWindow；关窗（任何路径）后经 finished 置引用 None，
-        再开 = 新实例（修旧版每次 new 覆盖引用、旧窗堆叠的 bug）。"""
-        from ui.widgets.bscan_gallery import BScanGallery
-        keep = {'original'} | {
-            f'artifact:{aid}' for aid in self._step_artifact_ids.values()}
-        sources = [s for s in self._preview_sources if s['key'] in keep]
-        if self._gallery is not None:
-            try:
-                if self._gallery.isVisible():
-                    self._gallery.set_sources(sources,
-                                              self._selected_source_key)
-                    self._gallery.activateWindow()
-                    self._gallery.raise_()
-                    return
-            except RuntimeError:      # C++ 侧已销毁（teardown 竞态）
-                self._gallery = None
-        self._gallery = BScanGallery(self)
-        self._gallery.sig_pick.connect(self.on_gallery_pick)
-        self._gallery.finished.connect(self._on_gallery_finished)
-        self._gallery.set_sources(sources, self._selected_source_key)
-        self._gallery.show()
-
-    def _on_gallery_finished(self, _result: int) -> None:
-        """总览墙关闭（Esc/点卡/任何路径）：引用置 None，再开=新实例。"""
-        self._gallery = None
-
-    # ------------------------------------------------ v2：链条 ↔ 处理链
-    def _on_chain_step_selected(self, index: int) -> None:
-        """选 chip → 参数区跟随该步骤（参数表单已接 sig_step_selected）。
-
-        双向同步：PipelineList 选中也回写 chip 条（select_step 内部
-        blockSignals，不会循环）。
-        """
-        if index >= 0:
-            self._pipeline_list.select_step(index)
-        self._chain_strip.select_step(index)
-        # 选中节点与结果图同步高亮——仅当结果与当前链一致（未过期）。
-        # 链已改未重算时卡片是旧 run 的事实，索引与新链脱钩，联动必错位
-        # （真机走查：删步骤后 chip 高亮 bandpass 而卡片高亮 sec_gain）。
-        if not self._results_stale:
-            self._result_grid.set_selected(
-                _INPUT_KEY if index < 0 else f'step:{index}')
-
-    def _on_chain_step_toggled(self, index: int, enabled: bool) -> None:
-        """启用/禁用：与当前状态不同才翻转（PipelineList 内置翻转语义）。"""
+    def _refresh_ui(self):
+        source = self._sources.get(self._selected_source_key)
+        self._input_label.setText('下次输入：' + (source['title'] if source else '未选择数据'))
         steps = self._pipeline_list.steps()
-        if 0 <= index < len(steps) and steps[index]['enabled'] != enabled:
-            self._pipeline_list._toggle_enabled(index)
-
-    def _on_chain_step_removed(self, index: int) -> None:
-        self._pipeline_list._remove_step(index)
-
-    def _on_chain_step_moved(self, source: int, target: int) -> None:
-        """chip 拖拽落点 → 步骤换位（target 为插入位语义）。"""
-        self._pipeline_list._move_step_to(source, target)
-
-    # ---------------- 步骤合一编辑弹窗（P0-3，chip 右键唯一入口）
-    def _open_step_editor(self, index: int) -> None:
-        """chip 右键 → 合一弹窗：快照来自 PipelineList（唯一数据源），
-        弹窗只持快照；写回经公开 API + 手动 sig_changed.emit()。"""
-        from ui.widgets.step_editor import StepEditorPopup
-        steps = self._pipeline_list.steps()
-        if not (0 <= index < len(steps)):
-            return
-        step = steps[index]
-        method = self._methods_by_id.get(step.get('method_id', '') or '', {})
-        snapshot = {
-            'title': step.get('label') or step.get('method_id', ''),
-            'method_id': step.get('method_id', ''),
-            'params': dict(step.get('params') or {}),
-            'enabled': bool(step.get('enabled', True)),
-            'is_first': index == 0,
-            'is_last': index == len(steps) - 1,
-            'schema': method.get('parameter_schema') or [],
-        }
-        # 每次新建实例：天然无重复信号连接，关窗即销毁（未应用改动随窗丢弃）
-        self._step_editor = StepEditorPopup(self)
-        self._step_editor.load_snapshot(index, snapshot)
-        self._step_editor.sig_applied.connect(self._on_step_editor_applied)
-        self._step_editor.sig_move_requested.connect(self._on_chain_step_moved)
-        self._step_editor.sig_duplicate_requested.connect(self._duplicate_step)
-        self._step_editor.sig_replace_requested.connect(
-            self._on_step_editor_replace)
-        self._step_editor.sig_remove_requested.connect(
-            self._on_chain_step_removed)
-        self._step_editor.finished.connect(self._on_step_editor_finished)
-        self._step_editor.show()
-
-    def _on_step_editor_finished(self, _result: int) -> None:
-        """弹窗关闭（应用/结构动作/Esc/外部点击任一路径）：引用释放。"""
-        self._step_editor = None
-
-    def _on_step_editor_applied(self, payload: dict) -> None:
-        """「应用」：参数写回（update_step_params 自动 sig_changed →
-        琥珀 hint 点亮）；启停变化走既有 _toggle_enabled（chip 变暗 +
-        运行跳过语义不变，配置保留）。"""
-        payload = dict(payload or {})
-        index = int(payload.get('index', -1))
-        steps = self._pipeline_list.steps()
-        if not (0 <= index < len(steps)):
-            return
-        self._pipeline_list.update_step_params(
-            index, dict(payload.get('params') or {}))
-        enabled = bool(payload.get('enabled', True))
-        if steps[index]['enabled'] != enabled:
-            self._pipeline_list._toggle_enabled(index)
-
-    def _on_step_editor_replace(self, index: int) -> None:
-        """「替换算法」→ 打开方法选择器（purpose='replace'，Q2 定案：
-        纯浏览态不预选当前方法，双击即替换）。"""
-        self._open_method_picker(purpose='replace', index=index)
-
-    def _duplicate_step(self, index: int) -> None:
-        """复制步骤：同算法同参数的相邻副本。set_steps 不发信号 →
-        手动 emit（参照 _on_adopt_params :1293-1295 模式，琥珀 hint 点亮）。"""
-        steps = self._pipeline_list.steps()
-        if not (0 <= index < len(steps)):
-            return
-        copy = dict(steps[index])
-        copy['params'] = dict(steps[index].get('params') or {})
-        steps.insert(index + 1, copy)
-        self._pipeline_list.set_steps(steps)
-        self._pipeline_list.select_step(index + 1)
-        self._pipeline_list.sig_changed.emit()
-
-    def _replace_step_method(self, index: int, method_id: str) -> None:
-        """替换第 index 步的算法：位置不变，参数按新 schema 取默认，
-        恢复启用。set_steps 不发信号 → 手动 emit（琥珀 hint 点亮）。"""
-        steps = self._pipeline_list.steps()
-        if not (0 <= index < len(steps)):
-            return
-        method = self._methods_by_id.get(method_id, {})
-        label = (method.get('display_name') or method.get('name')
-                 or method_id)
-        params = {item.get('name'): item.get('default')
-                  for item in (method.get('parameter_schema') or [])
-                  if item.get('name') is not None}
-        steps[index] = {'method_id': method_id, 'label': label,
-                        'params': params, 'enabled': True}
-        self._pipeline_list.set_steps(steps)
-        self._pipeline_list.select_step(index)   # 选中 → 参数表单重载新 schema
-        self._pipeline_list.sig_changed.emit()
-
-    def _refresh_chain_and_results(self) -> None:
-        """上面怎么排，下面就按同序铺格。
-
-        网格数据源优先级：已运行 → run_group 成员（运行事实，标题=算法名）；
-        未运行 → 当前链步骤占位（空态「点运行后生成」）。禁用的步骤留
-        置灰占位卡（1:1 对应，不占画布）。
-        """
-        steps = self._pipeline_list.steps()
-        group_id, members = self._newest_run_members()
-        if members:
-            # 测线上下文切换（run_group 变化，打开项目/切测线）→ 把该组
-            # 的步骤序列回显为当前链：上下一致（真机反馈「下面有结果
-            # 上面没链，很诡异」）。同一组内不重复回填（尊重用户编辑）。
-            # set_steps 不发 sig_changed，无回环。
-            if group_id != self._echoed_group:
-                self._preview_requested.clear()   # 新上下文：预览全部重发
-                self._pipeline_list.set_steps([
-                    {'method_id': mid,
-                     'label': self._display_name(mid),
-                     'params': {}, 'enabled': True}
-                    for (_s, _k, _c, _aid, art) in members
-                     if (mid := str(getattr(art, 'method_id', '') or ''))])
-                steps = self._pipeline_list.steps()
-                self._echoed_group = group_id
-            # 「全部步骤」开关关闭 → 只铺输入 + 最终结果（P3 就地版）
-            shown = (set(range(len(members))) if self._expand_all
-                     else {len(members) - 1})
-            slots = [{'key': _INPUT_KEY, 'title': '输入', 'enabled': True}]
-            for i, (_s, kind, _c, artifact_id, art) in enumerate(members):
-                if i not in shown or f'step:{i}' in self._closed_slots:
-                    continue
-                mid = str(getattr(art, 'method_id', '') or '')
-                label = (self._display_name(mid) if mid
-                         else str(getattr(art, 'name', '') or ''))
-                slots.append({'key': f'step:{i}', 'title': f'{i + 1} {label}',
-                              'enabled': True})
-            self._step_artifact_ids = {
-                i: artifact_id
-                for i, (_s, _k, _c, artifact_id, _a) in enumerate(members)}
-        else:
-            # 未运行：不摆各步的空画布——只有输入数据真的到位才建输入卡
-            original = next((src['bundle'] for src in self._preview_sources
-                             if src['key'] == 'original'), None)
-            slots = ([{'key': _INPUT_KEY, 'title': '输入', 'enabled': True}]
-                     if original is not None else [])
-            self._step_artifact_ids = {}
-        # 统一回显（在可能的链回填之后，steps 才是最新值）
-        self._chain_strip.set_steps(steps)
-        self._result_grid.set_slots(slots)
-        # set_slots 会重建卡片 → 输入卡的 bundle 需重喂（原始 bundle
-        # 存在源清单的 original 槽位里）
-        original = next((src['bundle'] for src in self._preview_sources
-                         if src['key'] == 'original'), None)
-        self._result_grid.set_bundle(_INPUT_KEY, original)
-        # 选中回显：结果与链一致时按 chip 选中位映射；过期则解除高亮
-        # （卡片索引属于旧 run，映射必错位），重跑后自动恢复联动
-        if self._results_stale:
-            self._result_grid.set_selected(None)
-        else:
-            self._result_grid.set_selected(
-                _INPUT_KEY if self._selected_step_index() < 0
-                else f'step:{self._selected_step_index()}')
-        self._chain_strip.set_dirty(
-            bool(self._step_artifact_ids) and self._results_stale)
-        if members:
-            # 组切换/重建后卡片 bundle 已丢 → 幂等补发未回填的预览请求
-            self._request_step_previews()
-
-    def set_colorbar_pref(self, visible: bool) -> None:
-        """设置页「显示色标」下发 → 结果网格（真机反馈：开关失效）。"""
-        self._result_grid.set_colorbar_pref(visible)
-
-    def _on_card_close_requested(self, key: str) -> None:
-        """卡片 × → 关闭该 B-Scan 窗口（从网格移除；重跑后恢复）。
-
-        输入卡是锚点不可关（同 tab 语义）；run_group 数据不动。
-        """
-        if key == _INPUT_KEY or key in self._closed_slots:
-            return
-        self._closed_slots.add(key)
-        self._refresh_chain_and_results()
-
-    def _on_input_combo_changed(self, _index: int = 0) -> None:
-        """切换处理链输入 → 已有结果与该输入不再对应 → 标过期。
-
-        refill_combo 全程 blockSignals，故只有用户主动切换才触发；已有
-        运行结果时点运行才更新（与改链同口径）。
-        """
-        self._mark_results_stale()
-
-    def _mark_results_stale(self) -> None:
-        """链/参数变更且已有运行结果 → 结果过期（琥珀提示，运行后清除）。"""
-        if self._step_artifact_ids:
-            self._results_stale = True
-            self._chain_strip.set_dirty(True)
-
-    def _on_expand_all_changed(self, expand_all: bool) -> None:
-        """「全部步骤」开关：关=只铺输入+最终结果（P3 设置的就地版）。"""
-        self._expand_all = bool(expand_all)
-        if self._step_artifact_ids:          # 有运行结果才需要重铺
-            self._refresh_chain_and_results()
-
-    def _selected_step_index(self) -> int:
-        """当前选中的步骤索引（-1 = 未选）。"""
-        return self._chain_strip._list.currentRow()
-
-    def _on_card_selected(self, key: str) -> None:
-        """点结果卡 → 选中对应 chip（与链式条双向同步）。
-
-        ``grid.set_selected`` 必须显式调：chip 条的程序化选中不发回环
-        信号，且 single/compare 视图模式的可见卡由它驱动（v2.3 走查
-        抓到的接缝）。结果过期时只高亮卡片本身，不回写 chip——旧 run
-        的卡片索引对不上新链（同 _on_chain_step_selected）。
-        """
-        self._result_grid.set_selected(key)
-        if self._results_stale or key == _INPUT_KEY:
-            if not self._results_stale:
-                self._chain_strip.select_step(-1)
-            return
-        index = int(key.split(':', 1)[1])
-        self._chain_strip.select_step(index)
-        self._pipeline_list.select_step(index)
-
-    def _request_step_previews(self) -> None:
-        """按步骤顺序请求各步结果（异步回填，generation 守卫防串线）。
-
-        幂等：已发出请求（``_preview_requested``）或已回填的步骤不重复
-        请求——打开项目早期测线未就绪时请求会被 require_line 吞掉，测线
-        bundle 到达后由 set_original_bundle 重发补齐（真机骨架挂死根因）；
-        组切换（run_group 变化）时由 _refresh_chain_and_results 清标记。
-        """
-        for _index, artifact_id in sorted(self._step_artifact_ids.items()):
-            if artifact_id in self._preview_requested:
-                continue                  # 已请求过，不重复加载
-            key = f'artifact:{artifact_id}'
-            source = next((s for s in self._preview_sources
-                           if s['key'] == key), None)
-            if source is not None and source['bundle'] is not None:
-                continue                  # 已回填，不重复加载
-            self._preview_requested.add(artifact_id)
-            self.artifact_preview_requested.emit(artifact_id)
-
-    def on_gallery_pick(self, key: str) -> None:
-        """总览墙点格子：选中该源（可见性规则把它换入主面板）。"""
-        self._selected_source_key = key
-        self._ensure_selected_visible()
-
-    # -------------------------------------------------- tab 模型（源清单）
-    def _ensure_original_source(self) -> None:
-        """原始数据是 tab 条的锚点：固定首 tab、不可关。"""
-        if not any(s['key'] == 'original' for s in self._preview_sources):
-            self._preview_sources.insert(0, {
-                'key': 'original', 'title': '原始数据', 'bundle': None,
-                'artifact_id': '', 'closable': False, 'is_final': False})
-
-    def _artifact_title(self, artifact_id: str, bundle) -> str:
-        """tab 标题 = 算法名（成果登记表的 method_id），缺省回落 bundle 标题。"""
-        art = self._artifacts_by_id.get(str(artifact_id or ''))
-        method = str(getattr(art, 'method_id', '') or '') if art else ''
-        if method:
-            return method
-        return str(getattr(bundle, 'title', '') or '') or '处理结果'
-
-    def _selected_source_index(self) -> int:
-        for index, source in enumerate(self._preview_sources):
-            if source['key'] == self._selected_source_key:
-                return index
-        return 0 if self._preview_sources else -1
-
-    def _sync_tabs(self) -> None:
-        """TabBar 与源清单整体对齐（条目少，重建成本可忽略）。
-
-        blockSignals 包住重建：addTab/removeTab 触发的 currentChanged
-        不能中途跑 _on_tab_selected（会改选中态引发重入）。
-        """
-        bar = self._source_tabs
-        bar.blockSignals(True)
-        while bar.count():
-            bar.removeTab(bar.count() - 1)
-        for source in self._preview_sources:
-            suffix = ' ✓' if source.get('is_final') else ''
-            bar.addTab(source['key'], source['title'] + suffix)
-        index = self._selected_source_index()
-        if index >= 0:
-            bar.setCurrentIndex(index)
-        bar.blockSignals(False)
-        self._purge_orphan_tab_items()
-        self._redistribute()
-
-    def _purge_orphan_tab_items(self) -> None:
-        """清扫 qfw TabBar 的孤儿 TabItem（视觉验收发现的真 bug）。
-
-        qfw ``removeTab`` 依赖 ``deleteLater`` 销毁旧 TabItem，但在本页的
-        blockSignals+closable 重建路径下孤儿会逃逸销毁——每次重建残留一个
-        首位同名 item，累积后渲染成"tab 重复/碎片墙"（截图实证：4 源渲染
-        出 7+ 个 tab）。按对象身份比对：不在 ``bar.items`` 里的即为孤儿 →
-        setParent(None) 立即脱离显示 + deleteLater 兜底销毁。
-        """
-        bar = self._source_tabs
-        live = {id(item) for item in bar.items}
-        for item in bar.findChildren(TabItem):
-            if id(item) not in live:
-                item.setParent(None)
-                item.deleteLater()
-
-    def _on_tab_selected(self, index: int) -> None:
-        """选中 tab：更新焦点 key；越出主区（>4）的换入末位主面板。"""
-        if not (0 <= index < len(self._preview_sources)):
-            return
-        self._selected_source_key = self._preview_sources[index]['key']
-        self._ensure_selected_visible()
-
-    def _ensure_selected_visible(self) -> None:
-        """可见性规则（锁定稿）：选中的 tab 总在主区——超出前 4 的换入
-        末位主面板位置（其余 tab 留在总览墙）。"""
-        index = self._selected_source_index()
-        visible = min(len(self._preview_sources), 4)
-        if visible and 0 <= index >= visible:
-            source = self._preview_sources.pop(index)
-            self._preview_sources.insert(visible - 1, source)
-            self._sync_tabs()
-
-    def _on_tab_close(self, index: int) -> None:
-        """关闭 tab = 从会话移除该源（原始数据是锚点，不可关）。"""
-        if not (0 <= index < len(self._preview_sources)):
-            return
-        source = self._preview_sources[index]
-        if not source['closable']:
-            return
-        del self._preview_sources[index]
-        if self._selected_source_key == source['key']:
-            self._selected_source_key = 'original'
-        self._sync_tabs()
-
-    def _redistribute(self) -> None:
-        """tab 序/选中态 → 面板绑定：面板数 = min(源数, 4)。
-
-        - single/dual：按 tab 序依次绑定；
-        - focus（≥3 源）：**主窗 = 选中源**，其余源按 tab 序进缩略列
-          （最多 3 个；再多的进总览墙，tab 行挂「+N」徽标）；
-        - 缺 bundle 的可见面板（懒加载）清空后发 artifact_preview_requested。
-        """
-        container = self._bscan_container
-        count = min(len(self._preview_sources), MAX_PANELS)
-        container.resolve_auto(count)
-        focus = container.effective_mode() == LAYOUT_FOCUS
-        if focus:
-            selected = self._preview_sources[self._selected_source_index()]
-            self._bind_source(container.primary_view(), selected, thumb=False)
-            others = [s for s in self._preview_sources
-                      if s['key'] != selected['key']][:_MAX_THUMBS]
-            for view, source in zip(container.thumb_views(), others):
-                self._bind_source(view, source, thumb=True)
-        else:
-            for index in range(count):
-                self._bind_source(container.view_at(index),
-                                  self._preview_sources[index], thumb=False)
-        self._sync_thumb_activation()
-        self._update_readability_hint()
-        extra = len(self._preview_sources) - MAX_PANELS
-        self._gallery_btn.setText(f'总览墙 +{extra}' if extra > 0
-                                  else '总览墙')
-        # 网格头部的总览墙入口：原始数据之外还有打开的源才显示（空态/
-        # 只有输入时不给一个弹空墙的按钮）
-        self._grid_gallery_btn.setVisible(len(self._preview_sources) > 1)
-
-    def _bind_source(self, view, source, *, thumb: bool = False) -> None:
-        """单面板绑定：有 bundle 直接送，缺则清空并发懒加载请求。
-
-        ``thumb`` 决定视图形态（缩略隐藏轴/标题/全屏钮）；升主窗/降缩略
-        都经本函数重设形态，轴与全屏钮随角色还原。
-        """
-        view.set_thumbnail_mode(thumb)
-        if source['bundle'] is not None:
-            view.set_bundle(source['bundle'])
-            view.set_thumbnail_mode(thumb)
-            return
-        view.clear()
-        view.set_thumbnail_mode(thumb)
-        artifact_id = str(source.get('artifact_id') or '')
-        if artifact_id and self._preview_card is not None \
-                and self._preview_card.isVisibleTo(self):
-            self.artifact_preview_requested.emit(artifact_id)
-
-    def _sync_thumb_activation(self) -> None:
-        """缩略升主窗：给当前缩略面板装上点击提升（同一批只装一次）。"""
-        thumbs = self._bscan_container.thumb_views()
-        if self._thumb_views_bound == thumbs:
-            return
-        for view in self._thumb_views_bound:
-            try:
-                view.removeEventFilter(self)
-            except RuntimeError:      # 视图已被 Qt 销毁（C++ 侧已删）
-                pass
-        for view in thumbs:
-            view.installEventFilter(self)
-        self._thumb_views_bound = list(thumbs)
-
-    def _update_readability_hint(self) -> None:
-        """可读性守护：绘图区高/采样数 < 0.45px 时提示（挂 tab 行右侧，
-        不占纵向预算——画布本来就是最缺高度的那一块）。"""
-        view = self._bscan_container.primary_view()
-        samples = int(getattr(view, '_sample_count', 0) or 0)
-        height = self._bscan_container.height()
-        ratio = (height / samples) if samples > 0 else 0.0
-        show = bool(samples) and ratio < _READABILITY_MIN_RATIO
-        self._readability_label.setVisible(show)
-        if show:
-            self._readability_label.setText(
-                f'画布偏矮（{ratio:.2f}px/采样）· 建议 ⤢ 铺满或全屏浏览')
-
-    def eventFilter(self, obj, event) -> bool:
-        """缩略面板点击 → 把该源升为主窗（选中态即主窗，见 _redistribute）。"""
-        if (event.type() == QEvent.Type.MouseButtonRelease
-                and obj in self._thumb_views_bound):
-            selected = self._preview_sources[self._selected_source_index()]
-            others = [s for s in self._preview_sources
-                      if s['key'] != selected['key']][:_MAX_THUMBS]
-            for index, view in enumerate(self._thumb_views_bound):
-                if view is obj and index < len(others):
-                    self._selected_source_key = others[index]['key']
-                    self._sync_tabs()
-                    return True
-        return super().eventFilter(obj, event)
-
-    def set_running(self, running: bool, job_id: str = '',
-                    success: bool | None = None) -> None:
-        """运行态切换：运行按钮/取消按钮互斥 + 进度条显隐。
-
-        ``success=True``（运行正常结束）时顶部链条的运行钮闪一次「完成」。
-        """
-        self._running = bool(running)
-        self._job_id = job_id or ''
-        self._run_btn.setEnabled(not self._running)
+        error = str(source.get('error') or '') if source else ''
+        valid = bool(source and not error and not self._project_read_only
+                     and any(s.get('enabled', True) for s in steps))
+        self._run_btn.setEnabled(valid and not self._running)
+        self._run_btn.setText('任务运行中…' if self._running else '从此结果运行')
+        self._run_btn.setToolTip('项目只读，无法提交处理任务' if self._project_read_only else
+            ('输入读取失败，请重试预览：' + error) if error else
+            '请先选择有效数据并添加启用步骤' if not valid else '使用所选结果执行新增步骤（Ctrl+R）')
+        self._preview_error_label.setText(error)
+        self._preview_error_label.setVisible(bool(error))
+        self._preview_retry_btn.setVisible(bool(error))
+        stale = any(k[:3] == self._draft_key()[:3] and k != self._draft_key()
+                    and value.get('steps') for k, value in self._drafts.items())
+        self._draft_revision_hint.setText('此数据已更换修订；旧修订草稿已失效并隔离保存。当前修订从空草稿开始。' if stale else '')
+        self._draft_revision_hint.setVisible(stale)
+        self._cancel_btn.setVisible(self._running)
         self._cancel_btn.setEnabled(self._running)
-        self._progress_row_widget.setVisible(self._running)
-        # v2：顶部链条的运行钮同步翻转——运行中即「取消」（就近可达，
-        # 2026-10-09 深查 P2）
-        self._chain_strip.set_running(self._running)
-        if self._running:
-            # 运行中不显示「已修改·点运行更新」——正在更新中，琥珀标签
-            # 与取消钮并存是矛盾信息（深查 P2）
-            self._chain_strip.set_dirty(False)
+        locked = self._draft_locked()
+        for widget in (self._pipeline_list, self._param_form, self._add_method_btn, self._result_name_edit):
+            widget.setEnabled(not locked)
+        self._sync_param_empty_hint()
+        self._update_autotune_enabled()
+        self._adopt_params_btn.setEnabled(bool(self._autotune_result) and not locked and
+                                         self._autotune_context == self._draft_key())
+        path, seen, aid = [], set(), self._input_artifact_id()
+        while aid and aid in self._artifacts_by_id and aid not in seen:
+            seen.add(aid)
+            art = self._artifacts_by_id[aid]
+            path.insert(0, str(getattr(art, 'name', '') or aid))
+            parent = artifact_direct_parent(art)
+            if parent is None:
+                path.insert(0, '来源待核对')
+                break
+            aid = parent
+        if self._selected_source_key and (not path or path[0] != '来源待核对'):
+            path.insert(0, '原始输入')
+        self._path_label.setText(' › '.join(path))
+        self._sync_chain_view()
+
+    def _sync_sources(self):
+        self._workspace.set_sources(list(self._sources.values()))
+
+    def set_original_bundle(self, bundle):
+        if bundle is None:
+            self._sources.pop('original', None)
+            self._sync_sources()
+            self._refresh_ui()
+            return
+        self._sources['original'] = {'key': 'original', 'title': '原始输入', 'bundle': bundle,
+                                     'artifact_id': '', 'revision': self._raw_revision}
+        self._preview_requested.discard('original')
+        self._sync_sources()
+        self._maybe_open_initial_raw()
+        self._restore_workspace()
+        self._activate_source(self._workspace.active_key())
+
+    def set_artifact_bundle(self, artifact_id, bundle):
+        key = 'artifact:' + str(artifact_id)
+        if key not in self._sources:
+            return  # late preview from another/deleted context
+        self._sources[key]['bundle'] = bundle
+        self._sources[key].pop('error', None)
+        self._preview_requested.discard(str(artifact_id))
+        self._sync_sources()  # update existing views only; never reopen/activate
+        self._refresh_ui()
+
+    def set_original_revision(self, project_id, line_id, revision):
+        if (str(project_id), str(line_id)) != (self._project_id, self._line_id):
+            return
+        self._raw_revision = str(revision or '')
+
+    def set_preview_failure(self, project_id, line_id, artifact_id, message):
+        """Only the matching saved source owns an asynchronous read failure."""
+        if (str(project_id), str(line_id)) != (self._project_id, self._line_id):
+            return
+        aid = str(artifact_id or '')
+        key = 'artifact:' + aid if aid else 'original'
+        if key not in self._sources:
+            if aid:
+                return
+            self._sources[key] = {'key': key, 'title': '原始输入', 'artifact_id': '',
+                                  'revision': self._raw_revision, 'bundle': None}
+        self._sources[key]['error'] = str(message or '无法读取数据')
+        self._sources[key]['bundle'] = None
+        self._preview_requested.discard(aid or 'original')
+        self._sync_sources()  # error clears the workspace's in-flight request marker
+        if not aid:
+            self._maybe_open_initial_raw()
+        self._refresh_ui()
+
+    def _maybe_open_initial_raw(self):
+        if self._raw_opened:
+            return
+        self._raw_opened = True
+        if (not self._source_selected_this_line and self._pending_layout is None
+                and not self._workspace.tab_keys()):
+            self._workspace.open_source('original')
+
+    def retry_preview(self, key):
+        source = self._sources.get(str(key))
+        if not source or not source.get('error'):
+            return False
+        source.pop('error', None)
+        self._preview_requested.discard(str(source.get('artifact_id') or 'original'))
+        self._sync_sources()
+        self._request_preview(key)  # also works for an inactive source, without activation
+        self._refresh_ui()
+        return True
+
+    def _request_preview(self, key):
+        source = self._sources.get(str(key))
+        aid = str(source.get('artifact_id') or '') if source else ''
+        if aid and aid not in self._preview_requested:
+            self._preview_requested.add(aid)
+            self.artifact_preview_requested.emit(aid)
+        elif source and not aid and 'original' not in self._preview_requested:
+            self._preview_requested.add('original')
+            self.original_preview_requested.emit()
+
+    def set_artifacts(self, artifacts):
+        self._stash_draft()
+        self._artifacts_by_id = {str(a.artifact_id): a for a in artifacts or [] if getattr(a, 'artifact_id', '')}
+        raw = self._sources.get('original')
+        old = self._sources
+        self._sources = {'original': raw} if raw else {}
+        for aid, art in self._artifacts_by_id.items():
+            key = 'artifact:' + aid
+            meta = artifact_parameters(art)
+            group, step = str(meta.get('run_group_id') or ''), meta.get('run_step_index')
+            name = str(getattr(art, 'name', '') or aid)
+            title = f'{name} · {group[:6]}.{step}' if group and step else name
+            revision = str(getattr(art, 'sha256', '') or '')
+            previous = old.get(key, {})
+            changed = bool(previous and previous.get('revision', '') != revision)
+            self._sources[key] = {'key': key, 'title': title, 'artifact_id': aid,
+                                  'revision': revision,
+                                  'bundle': None if changed else previous.get('bundle')}
+            if changed:
+                self._preview_requested.discard(aid)
+                self._sources[key]['error'] = '数据修订已变化，重新加载预览'
+            elif previous.get('error'):
+                self._sources[key]['error'] = previous['error']
+        self._sync_sources()
+        changed_sources = [key for key in self._sources
+                           if old.get(key) and old[key].get('revision', '') != self._sources[key].get('revision', '')]
+        for key in changed_sources:
+            self._sources[key].pop('error', None)
+        if changed_sources:
+            self._sync_sources()
+        self._activate_source(self._workspace.active_key())
+        self._render_trees()
+        self._restore_workspace()
+        pending = self._completion_pending
+        if pending and pending['key'][:2] == (self._project_id, self._line_id):
+            expected = str(pending.get('result_id') or '')
+            candidates = [a for aid, a in self._artifacts_by_id.items()
+                          if (aid == expected if expected else aid not in pending['artifacts']
+                          and artifact_parameters(a).get('run_input_artifact_id') == pending['input_artifact_id'])]
+            if candidates:
+                final = max(candidates, key=lambda a: (str(getattr(a, 'created_at', '')),
+                            int(artifact_parameters(a).get('run_step_index') or 0)))
+                self._completed_artifact = str(final.artifact_id)
+                self._completion_pending = None
+                if pending['activate'] and pending['epoch'] == self._activation_epoch and self._selected_source_key:
+                    self.select_artifact(self._completed_artifact)
+                else:
+                    self._completion_btn.show()
+        self._refresh_ui()
+
+    def _render_trees(self):
+        self._lineage_tree.clear()
+        pending = [(None, node) for node in reversed(build_lineage_model(
+            list(self._artifacts_by_id.values()), self._line_id))]
+        while pending:
+            parent, node = pending.pop()
+            text = node.text + (f' · {node.suffix}' if node.suffix else '')
+            item = QTreeWidgetItem([text])
+            key = 'original' if node.kind == 'raw' else 'artifact:' + node.payload if node.kind == 'artifact' else ''
+            item.setData(0, Qt.ItemDataRole.UserRole, key)
+            item.setToolTip(0, node.tooltip)
+            (parent.addChild if parent else self._lineage_tree.addTopLevelItem)(item)
+            pending.extend((item, child) for child in reversed(node.children))
+            item.setExpanded(node.kind in ('raw', 'group') or bool(key and key == self._selected_source_key))
+        self._history_tree.clear()
+        groups = {}
+        for aid, art in self._artifacts_by_id.items():
+            meta = artifact_parameters(art)
+            group = str(meta.get('run_group_id') or '历史成果 · 来源待核对')
+            groups.setdefault(group, []).append((aid, art))
+        for group, members in groups.items():
+            parent = QTreeWidgetItem([group[:12]])
+            parent.setData(0, Qt.ItemDataRole.UserRole + 1, group)
+            self._history_tree.addTopLevelItem(parent)
+            for aid, art in sorted(members, key=lambda pair: int(artifact_parameters(pair[1]).get('run_step_index') or 0)):
+                item = QTreeWidgetItem([self._sources['artifact:' + aid]['title']])
+                item.setData(0, Qt.ItemDataRole.UserRole, 'artifact:' + aid)
+                parent.addChild(item)
+
+    def _open_tree_item(self, item, _column):
+        key = item.data(0, Qt.ItemDataRole.UserRole)
+        if key:
+            self._workspace.open_source(str(key))
+
+
+    def select_artifact(self, artifact_id):
+        key = 'artifact:' + str(artifact_id)
+        if key not in self._sources:
+            return False
+        self._workspace.open_source(key)
+        return True
+
+    def has_artifact(self, artifact_id):
+        return str(artifact_id) in self._artifacts_by_id
+
+    def select_original(self):
+        if 'original' in self._sources:
+            self._workspace.open_source('original')
+
+    def close_artifact_tab(self, artifact_id):
+        self._workspace.close_source('artifact:' + str(artifact_id))
+
+    def close_all_artifact_tabs(self):
+        self._stash_draft()
+        self._save_session()
+        self._suspend = True
+        for aid in self._artifacts_by_id:
+            self._workspace.close_source('artifact:' + aid)
+        self._suspend = False
+        self._activate_source(self._workspace.active_key())
+
+    def show_latest_result(self):
+        if self._completed_artifact:
+            self.select_artifact(self._completed_artifact)
+            self._completion_btn.hide()
+
+    def set_project_context(self, project_id):
+        project_id = str(project_id or '')
+        if project_id != self._project_id:
+            self._stash_draft()
+            self._save_session()
+            self._switch_line('')
+            self._project_id = project_id
+            self._project_read_only = False
+            self._pending_layout = None
+
+    def set_project_read_only(self, read_only):
+        self._project_read_only = bool(read_only)
+        self._refresh_ui()
+
+    def set_line_label(self, text):
+        line_id = str(text or '')
+        self._set_line_combo_without_emit(line_id)
+        if line_id != self._line_id:
+            self._switch_line(line_id)
+
+    def _switch_line(self, line_id):
+        self._close_chain_popups()
+        self._stash_draft()
+        self._save_session()
+        self._suspend = True
+        self._sources, self._artifacts_by_id = {}, {}
+        self._workspace.set_sources([])
+        self._line_id, self._selected_source_key = str(line_id), ''
+        self._selected_revision, self._raw_revision = '', ''
+        self._pipeline_list.set_steps([])
+        self._result_name_edit.clear()
+        self._param_form.clear()
+        self._preview_requested.clear()
+        self._raw_opened = False
+        self._source_selected_this_line = False
+        self._activation_epoch += 1
+        self._pending_layout = self._layouts.get((self._project_id, self._line_id))
+        self._suspend = False
+        self._render_trees()
+        self._refresh_ui()
+
+    def _input_artifact_id(self):
+        return self._selected_source_key.removeprefix('artifact:') if self._selected_source_key.startswith('artifact:') else ''
+
+    def current_pipeline(self):
+        return {'steps': self._pipeline_list.steps(), 'result_name': self._result_name_edit.text().strip(),
+                'input_artifact_id': self._input_artifact_id()}
+
+    def set_running(self, running, job_id='', success=None):
+        running = bool(running)
+        if running and not self._running:
+            self._stash_draft()
+            self._run_snapshot = {'key': self._draft_key(), 'input_artifact_id': self._input_artifact_id(),
+                'pipeline': deepcopy(self.current_pipeline()), 'epoch': self._activation_epoch,
+                'artifacts': set(self._artifacts_by_id), 'activate': True}
+            if self._step_editor is not None:
+                self._step_editor.close()
             self._progress_bar.setValue(0)
-            self._progress_label.setText('')
-        else:
+            self._progress_label.setText('输入：' + self._input_label.text().removeprefix('下次输入：'))
+        elif not running and self._running and self._run_snapshot:
             if success:
-                self._chain_strip.flash_success()
-            # 取消路径：链已改而结果未重算，恢复琥珀提示；完成路径由
-            # _refresh_chain_and_results 按新结果重设，此处幂等
-            if self._results_stale and self._step_artifact_ids:
-                self._chain_strip.set_dirty(True)
+                snap = self._run_snapshot
+                self._drafts[snap['key']] = {'steps': [], 'result_name': '', 'input_artifact_id': snap['input_artifact_id']}
+                if snap['key'] == self._draft_key():
+                    self._suspend = True
+                    self._pipeline_list.set_steps([])
+                    self._result_name_edit.clear()
+                    self._suspend = False
+                self._completion_pending = dict(snap)
+            self._run_snapshot = None
+        self._running, self._job_id = running, str(job_id or '')
+        self._progress_row_widget.setVisible(running)
+        self._refresh_ui()
+        self._save_session()
+
+    def set_run_result(self, job_id, artifact_id):
+        """Use the job's actual output identity, rather than a newest-result guess."""
+        if self._run_snapshot is not None and str(job_id) == self._job_id:
+            self._run_snapshot['result_id'] = str(artifact_id or '')
+
+    def hideEvent(self, event):
+        if self._run_snapshot:
+            self._run_snapshot['activate'] = False
+        super().hideEvent(event)
+
+    def _on_run_clicked(self):
+        if self._running:
+            self.cancel_requested.emit()
+            return
+        if self._run_btn.isEnabled():
+            clear_invalid(self._result_name_edit)
+            self.run_requested.emit(deepcopy(self.current_pipeline()))
+
+    def reconfigure_artifact(self, artifact_id):
+        art = self._artifacts_by_id.get(str(artifact_id))
+        if art is None:
+            return False
+        parent, step = artifact_direct_parent(art), artifact_step(art)
+        if parent is None or not step:
+            return False
+        if not self.can_reconfigure_artifact(artifact_id):
+            return False
+        source = 'artifact:' + parent if parent else 'original'
+        if source not in self._sources:
+            return False
+        if self._running and self._run_snapshot and self._run_snapshot['key'] == self._draft_key(source):
+            return False
+        method = str(step.get('method_id') or getattr(art, 'method_id', ''))
+        new = [{'method_id': method, 'label': self._display_name(method),
+                'params': deepcopy(step.get('params') or {}), 'enabled': True}]
+        return self._replace_draft(source, new)
+
+    def can_reconfigure_artifact(self, artifact_id):
+        art = self._artifacts_by_id.get(str(artifact_id))
+        if art is None or artifact_direct_parent(art) is None or not artifact_step(art):
+            return False
+        meta = artifact_parameters(art)
+        index = int(meta.get('run_step_index') or 0)
+        if index <= 1:
+            return True
+        previous = self._artifacts_by_id.get(artifact_direct_parent(art))
+        pmeta = artifact_parameters(previous) if previous else {}
+        return (pmeta.get('run_group_id') == meta.get('run_group_id')
+                and int(pmeta.get('run_step_index') or 0) == index - 1)
+
+    def _saved_run(self, group):
+        members = [art for art in self._artifacts_by_id.values()
+                   if artifact_parameters(art).get('run_group_id') == group]
+        if not members:
+            return None
+        final = max(members, key=lambda art: int(artifact_parameters(art).get('run_step_index') or 0))
+        meta = artifact_parameters(final)
+        pipeline = meta.get('pipeline')
+        if (meta.get('lineage_version') != 2 or 'run_input_artifact_id' not in meta
+                or not pipeline or meta.get('artifact_kind') == 'intermediate'):
+            return None
+        source = 'artifact:' + str(meta['run_input_artifact_id']) if meta['run_input_artifact_id'] else 'original'
+        if source not in self._sources or self._sources[source].get('error'):
+            return None
+        if self._running and self._run_snapshot and self._run_snapshot['key'] == self._draft_key(source):
+            return None
+        expected = str(meta.get('run_input_sha256') or '')
+        actual = str(self._sources[source].get('revision') or '')
+        if expected and actual and expected != actual:
+            return None
+        if not isinstance(pipeline, (list, tuple)) or not all(
+                isinstance(step, Mapping) and step.get('method_id') for step in pipeline):
+            return None
+        steps = [{'method_id': str(step['method_id']), 'label': self._display_name(str(step['method_id'])),
+                  'params': deepcopy(dict(step.get('params') or {})), 'enabled': bool(step.get('enabled', True))}
+                 for step in pipeline]
+        return source, steps, members, final
+
+    def reconfigure_run(self, group):
+        """Load the persisted whole run at its frozen input, including final-only runs."""
+        saved = self._saved_run(str(group))
+        return self._replace_draft(saved[0], saved[1]) if saved else False
+
+    def _replace_draft(self, source, steps):
+        if source not in self._sources:
+            return False
+        self._stash_draft()
+        key = self._draft_key(source)
+        old = self._drafts.get(key, {})
+        if old.get('steps'):
+            summary = '\n'.join(f'{i + 1}. {self._display_name(str(step.get("method_id") or ""))} '
+                                + json.dumps(step.get('params') or {}, ensure_ascii=False, default=str)
+                                for i, step in enumerate(steps))
+            box = MessageBox('替换此输入的待执行草稿？',
+                f'输入：{self._sources[source]["title"]}\n已有 {len(old["steps"])} 步；新配置 {len(steps)} 步：\n{summary}\n旧草稿可从草稿菜单恢复。', self.window())
+            box.yesButton.setText('替换并保留备份')
+            if box.exec() != QDialog.DialogCode.Accepted:
+                return False
+            if source not in self._sources or key != self._draft_key(source):
+                return False
+            self._draft_backups.setdefault(key, []).append(deepcopy(old))
+        self._drafts[key] = {'steps': deepcopy(steps), 'result_name': ''}
+        self._workspace.open_source(source)
+        self._suspend = True
+        self._pipeline_list.set_steps(deepcopy(steps))
+        self._result_name_edit.clear()
+        self._suspend = False
+        self._tools_btn.setChecked(True)
+        self._tools_panel.setCurrentIndex(0)
+        if steps:
+            self._pipeline_list.select_step(0)
+        self._draft_changed()
+        return True
+
+
+    def has_line_session(self, line_id):
+        layout = self._layouts.get((self._project_id, str(line_id))) or {}
+        nodes = [layout.get('root') or {}]
+        while nodes:
+            node = nodes.pop()
+            if node.get('type') == 'group' and node.get('tabs'):
+                return True
+            nodes.extend(node.get('children') or [])
+        return False
+
+
+    def _toggle_tools(self, visible):
+        self._tools_panel.setVisible(bool(visible))
+        if visible and self._resources_btn.isChecked():
+            self._resources_btn.setChecked(False)
+
+    def _toggle_resources(self, visible):
+        if visible:
+            self._tools_btn.setChecked(False)
+        self.project_resources_toggled.emit(bool(visible))
+
+    def set_project_resources_visible(self, visible):
+        """Mirror Ctrl+B and page-specific tree state without re-emitting the toggle."""
+        self._resources_btn.blockSignals(True)
+        self._resources_btn.setChecked(bool(visible))
+        self._resources_btn.blockSignals(False)
+        if visible:
+            self._tools_btn.setChecked(False)
+
+    def toggle_side_panels(self):
+        self._tools_btn.setChecked(not self._tools_btn.isChecked())
+
+    def _change_layout(self, index):
+        key = self._workspace.active_key()
+        if index == 0:
+            self._workspace.reset_layout()
+        elif key and index in (1, 2):
+            self._workspace.split_source(key, 'right' if index == 1 else 'bottom', copy=True)
+
+    def _sync_layout_label(self):
+        root = self._workspace.save_layout().get('root') or {}
+        index = 0
+        if root.get('type') == 'split':
+            children = root.get('children') or []
+            index = (1 if root.get('orientation') == 'horizontal' else 2) if (
+                len(children) == 2 and all(child.get('type') == 'group' for child in children)) else 3
+        self._layout_combo.blockSignals(True)
+        self._layout_combo.setCurrentIndex(index)
+        self._layout_combo.blockSignals(False)
+
+    def _set_display_cmap(self, name):
+        if name:
+            self._workspace.primary_view().set_colormap(str(name))
+
+
+    def set_colorbar_pref(self, visible):
+        for view in self._workspace.all_views():
+            view.set_colorbar_visible(bool(visible), notify=False)
+
+    def apply_theme(self, dark):
+        self._apply_polish_theme(dark)
+        self._workspace.apply_theme(dark)
+
+    def set_settings_manager(self, sm):
+        self._sm = sm
+        saved = sm.get('processing_workspace_sessions', {}) if sm else {}
+        if not isinstance(saved, Mapping):
+            return
+        for record in saved.get('drafts', []):
+            if isinstance(record, dict) and len(record.get('key', [])) in (3, 4):
+                key = tuple(record['key'])
+                self._drafts[key if len(key) == 4 else (*key, '')] = record.get('value') or {}
+        for record in saved.get('layouts', []):
+            if isinstance(record, dict) and len(record.get('key', [])) == 2:
+                self._layouts[tuple(record['key'])] = record.get('value') or {}
+
+    def _save_session(self):
+        if self._suspend or not self._line_id:
+            return
+        self._layouts[(self._project_id, self._line_id)] = self._workspace.save_layout()
+        if self._sm is not None:
+            self._sm.set('processing_workspace_sessions', {
+                'drafts': [{'key': list(k), 'value': v} for k, v in self._drafts.items()],
+                'layouts': [{'key': list(k), 'value': v} for k, v in self._layouts.items()]})
+
+    def _restore_workspace(self):
+        if self._pending_layout:
+            wanted = self._pending_layout
+            # Wait until all artifact metadata needed by the saved layout arrives.
+            serialized = json.dumps(wanted, ensure_ascii=False)
+            if 'original' in serialized and 'original' not in self._sources:
+                return
+            if 'artifact:' in serialized and not self._artifacts_by_id:
+                return
+            self._pending_layout = None
+            self._raw_opened = True  # even an intentionally empty saved layout is authoritative
+            self._workspace.restore_layout(wanted)
+
 
     def set_progress(self, completed: int, total: int, message: str) -> None:
         """进度更新：total>0 按比例，否则按百分数；message 显示在进度条右侧。"""
@@ -1025,46 +880,6 @@ class ProcessingPage(PanelStateMixin, QWidget):
                              max(0, min(int(completed), 100)))
         self._progress_label.setText(str(message or ''))
         self._progress_label.setToolTip(str(message or ''))
-
-    def set_autotune_result(self, method_id: str, result: dict) -> None:
-        """AutoTune 结果 {best_params, ...} → CaptionLabel 区 + 暂存最优参数。
-
-        结果到达时自动展开 AutoTune 卡（2026-10-09）：调参是异步的，用户
-        常在等待期把默认收起的卡再收上——结果悄悄写进收起的卡里等于没有
-        反馈。展开把「调参完成」变成可见事件。
-        """
-        result = dict(result or {})
-        self._autotune_result = (method_id, result)
-        best = result.get('best_params') or {}
-        method = self._methods_by_id.get(method_id, {})
-        display = method.get('display_name') or method_id
-        lines = ['方法: %s' % display]
-        if 'score' in result:
-            lines.append('评分: %s' % result.get('score'))
-        if 'metric' in result:
-            lines.append('指标: %s' % result.get('metric'))
-        if best:
-            params_text = ', '.join('%s=%s' % (k, v) for k, v in best.items())
-            lines.append('最优参数: %s' % params_text)
-        else:
-            lines.append('最优参数: (无)')
-        self._autotune_result_label.setText('\n'.join(lines))
-        self._adopt_params_btn.setEnabled(bool(best))
-        if self._autotune_card.is_collapsed():
-            self._autotune_card.set_collapsed(False, animate=True)
-
-    def apply_theme(self, dark: bool) -> None:
-        """主题切换：令牌色重刷（主窗鸭子类型派发，见 main_window）。
-
-        链条 chip 的状态点/胶囊由 ChainStrip.apply_theme 自刷；本页只管
-        页内令牌色控件（参数空态提示原为硬编码 gray，深色下对比度存疑）。
-        """
-        self._param_empty_hint.setStyleSheet(
-            f'color: {design_tokens.color("text_muted", dark)};')
-
-    def set_line_label(self, text: str) -> None:
-        """当前测线标签（同步到测线选择下拉，不触发信号）。"""
-        self._set_line_combo_without_emit(str(text or ''))
 
     def set_lines(self, lines: list) -> None:
         """测线列表 → 处理页测线选择下拉。
@@ -1085,171 +900,6 @@ class ProcessingPage(PanelStateMixin, QWidget):
             lambda line: str(getattr(line, 'line_id', '') or ''),
             previous_data=self._line_combo.currentData())
 
-    def set_artifacts(self, artifacts: list) -> None:
-        """成果列表 → 处理页成果选择下拉与执行卡输入数据下拉。
-
-        保持用户当前选择（仍在列表中则不改动、不发射信号）；
-        无有效选择时静默落到最新一条。自动预览由主窗口
-        _preview_newest_artifact 路径统一负责，避免双重预览。
-        """
-        def _artifact_id(art) -> str:
-            return str(getattr(art, 'artifact_id', '') or '')
-
-        def _display(art) -> str:
-            name = str(getattr(art, 'name', '') or '')
-            created = _short_timestamp(
-                str(getattr(art, 'created_at', '') or ''))
-            text = f"{name} · {created}" if created else name
-            return text or _artifact_id(art)
-
-        refill_combo(
-            self._artifact_combo, artifacts or [],
-            _display, _artifact_id,
-            previous_data=self._artifact_combo.currentData())
-        refill_combo(
-            self._input_combo, artifacts or [],
-            lambda art: f'成果: {_display(art)}', _artifact_id,
-            previous_data=self._input_combo.currentData(),
-            prepend=(('原始数据', ''),))   # 索引 0 = 从原始数据开始
-        # tab 模型：登记表（标题解析用）+ 最新 run_group 自动展开步骤 tab
-        self._artifacts_by_id = {
-            _artifact_id(art): art for art in (artifacts or [])
-            if _artifact_id(art)}
-        self._auto_open_newest_run_group()
-
-    def _run_group_params(self, art) -> dict:
-        """成果的归组参数，兼容两种 manifest 形态。
-
-        - catalog/sqlite 路径：manifest.params.{run_group_id,...}（嵌套）；
-        - field/文件系统路径：ProjectArtifact.manifest = 索引记录 to_dict()，
-          run_group_id / artifact_kind 在**顶层**且没有 run_step_index
-          （2026-09-24 视觉验收发现的真因：按嵌套格式读取永远为空，
-          步骤 tab 不展开）。
-        """
-        manifest = getattr(art, 'manifest', None) or {}
-        # 真 manifest 是 types.MappingProxyType（后端冻结数据的只读视图，
-        # 2026-09-27 真机 e2e 实锤）——按 dict 判会把全部真实成果拒掉，
-        # run_group 取空 → 结果卡一个不铺（"运行完没反应"的真根因）
-        if not isinstance(manifest, Mapping):
-            return {}
-        nested = manifest.get('params')
-        if isinstance(nested, dict):
-            return nested
-        return manifest
-
-    def _display_name(self, method_id: str) -> str:
-        """method_id → 中文显示名（方法库未登记时回退 method_id）。
-
-        链 chip / 结果卡标题统一走这里（2026-10-09 深查 P2）：回显路径
-        原样显示 method_id，与方法库的中文显示名混拼——同一页面两套命名。
-        """
-        if not method_id:
-            return method_id
-        method = self._methods_by_id.get(method_id) or {}
-        return str(method.get('display_name') or method_id)
-
-    def _newest_run_members(self) -> tuple[str, list]:
-        """最新 run_group 的成员（已按步序排序；无则 ('', [])）。
-
-        元素：(step, kind, created, artifact_id, art) 五元组（调用方按
-        步序解包）。结果网格与步骤 tab 共用
-        ——「上面怎么排，下面就按同序看各步结果」以运行事实（B7 落盘）
-        为准，而非当前链定义（用户可能已改链）。
-        """
-        groups = {}
-        for artifact_id, art in self._artifacts_by_id.items():
-            params = self._run_group_params(art)
-            group = str(params.get('run_group_id') or '')
-            if not group:
-                continue
-            info = groups.setdefault(group, {'created': '', 'members': []})
-            info['members'].append((
-                int(params.get('run_step_index') or 0),
-                str(params.get('artifact_kind') or ''),
-                str(getattr(art, 'created_at', '') or ''),
-                artifact_id, art))
-            created = str(getattr(art, 'created_at', '') or '')
-            info['created'] = max(info['created'], created)
-        if not groups:
-            return '', []
-        newest = max(groups, key=lambda g: groups[g]['created'])
-        members = sorted(groups[newest]['members'],
-                         key=lambda m: (m[1] == 'processing', m[0], m[2]))
-        return newest, members
-
-    def _auto_open_newest_run_group(self) -> None:
-        """最新 run_group 的步骤/最终成果自动开 tab（每组只开一次）。
-
-        B7：链的每步中间成果已落盘（artifact_kind=intermediate，
-        run_group_id 归组）。步骤 tab 直接复用 artifact 预览链路——
-        懒加载（可见面板触发 artifact_preview_requested），内存不持有
-        全尺寸矩阵。标题 = 算法名（method_id），末位（最终成果）挂 ✓。
-        排序：优先 run_step_index（catalog 路径），缺失（field 路径）
-        按 created_at 升序——B7 逐步落盘天然按步序递增，最终成果最后。
-        """
-        groups = {}
-        for artifact_id, art in self._artifacts_by_id.items():
-            params = self._run_group_params(art)
-            group = str(params.get('run_group_id') or '')
-            if not group:
-                continue
-            info = groups.setdefault(group, {'created': '', 'members': []})
-            info['members'].append((
-                int(params.get('run_step_index') or 0),
-                str(params.get('artifact_kind') or ''),
-                str(getattr(art, 'created_at', '') or ''),
-                artifact_id, art))
-            created = str(getattr(art, 'created_at', '') or '')
-            info['created'] = max(info['created'], created)
-        if not groups:
-            return
-        newest = max(groups, key=lambda g: groups[g]['created'])
-        if newest in self._opened_run_groups:
-            return
-        self._opened_run_groups.add(newest)
-        self._ensure_original_source()
-        # 组切换：上一组（及更早）的 artifact tab 一并移除，只保留原始
-        # 锚点——tab 行已隐藏（v2），旧组 tab 不会再被用户关闭，只会
-        # 在总览墙无限堆积（真机截图：一堆几天前的成果混着新结果）
-        self._preview_sources = [
-            s for s in self._preview_sources if s['key'] == 'original']
-        # catalog 路径有 run_step_index；field 路径缺失（全 0）时按落盘
-        # 时间升序回退（B7 逐步保存天然按步序递增）。最终成果恒排末位。
-        members = sorted(groups[newest]['members'],
-                         key=lambda m: (m[1] == 'processing', m[0], m[2]))
-        self._step_artifact_ids = {
-            index: artifact_id
-            for index, (_s, _k, _c, artifact_id, _a) in enumerate(members)}
-        for _, kind, _created, artifact_id, art in members:
-            key = f'artifact:{artifact_id}'
-            if any(s['key'] == key for s in self._preview_sources):
-                continue
-            mid = str(getattr(art, 'method_id', '') or '')
-            title = (self._display_name(mid) if mid
-                     else str(getattr(art, 'name', '') or '') or '处理结果')
-            self._preview_sources.append({
-                'key': key, 'title': title, 'bundle': None,
-                'artifact_id': artifact_id, 'closable': True,
-                'is_final': kind == 'processing'})
-        # 跑完自动选中末位 tab（= 最终结果）
-        if self._preview_sources:
-            self._selected_source_key = self._preview_sources[-1]['key']
-        self._sync_tabs()
-        self._results_stale = False
-        self._closed_slots.clear()   # 新一轮运行：恢复全部窗口
-        self._refresh_chain_and_results()
-        self._request_step_previews()
-
-    def select_artifact(self, artifact_id: str) -> bool:
-        """静默选中指定成果（不发射 artifact_selected，供主窗口自动预览时同步）。"""
-        index = self._artifact_combo.findData(str(artifact_id or ''))
-        if index < 0:
-            return False
-        self._artifact_combo.blockSignals(True)
-        self._artifact_combo.setCurrentIndex(index)
-        self._artifact_combo.blockSignals(False)
-        return True
-
     def _set_line_combo_without_emit(self, line_id: str) -> None:
         index = self._line_combo.findData(str(line_id or ''))
         if index < 0:
@@ -1262,187 +912,3 @@ class ProcessingPage(PanelStateMixin, QWidget):
     def _on_line_combo_changed(self, index: int) -> None:
         if index >= 0:
             self.line_changed.emit(str(self._line_combo.itemData(index) or ''))
-
-    def _on_artifact_combo_changed(self, index: int) -> None:
-        if index >= 0:
-            self.artifact_selected.emit(
-                str(self._artifact_combo.itemData(index) or ''))
-
-    def current_pipeline(self) -> dict:
-        """当前处理链定义：{"steps", "result_name", "input_artifact_id"}。"""
-        return {
-            'steps': self._pipeline_list.steps(),
-            'result_name': self._result_name_edit.text().strip(),
-            'input_artifact_id': self._input_artifact_id(),
-        }
-
-    # ============================================================ 内部逻辑
-    # ---------------- 预览分发（tab 模型：见 set_original_bundle / _redistribute）
-
-    # ---------------- 方法库
-    def _on_method_selected(self, method_id: str) -> None:
-        self._selected_method_id = method_id
-        method = self._methods_by_id.get(method_id, {})
-        self._autotune_method_label.setText(
-            method.get('display_name') or method_id or '--')
-        self._update_autotune_enabled()
-
-    def _update_autotune_enabled(self) -> None:
-        self._autotune_btn.setEnabled(
-            bool(self._selected_method_id) and not self._autotune_running)
-
-    def set_autotune_running(self, running: bool) -> None:
-        """AutoTune 运行期间禁用「开始调参」，防重复提交（P2-7）。"""
-        self._autotune_running = bool(running)
-        self._update_autotune_enabled()
-
-    # ---------------- 方法选择弹窗（P0-2「+」/「添加方法」统一入口）
-    def _open_method_picker(self, purpose: str = 'append', index: int = -1) -> None:
-        """「+」/「添加方法」统一入口：非模态方法选择器（单实例）。
-
-        purpose='append'：双击条目 → 链尾追加；purpose='replace'：双击
-        条目 → 替换第 index 步（P0-3 编辑弹窗「替换算法」分流口，T03 消费：
-        位置不变、参数按新 schema 取默认）。存活实例唤起并复位状态；
-        关窗后引用置 None，再开 = 新实例 = 状态天然复位。
-        """
-        from ui.widgets.method_picker import MethodPickerDialog
-        self._picker_purpose = str(purpose) if purpose in ('append', 'replace') \
-            else 'append'
-        self._picker_index = int(index) if str(index).lstrip('-').isdigit() else -1
-        if self._method_picker is not None:
-            try:
-                self._method_picker.reset_state()
-                self._method_picker.show()
-                self._method_picker.activateWindow()
-                self._method_picker.raise_()
-                return
-            except RuntimeError:      # C++ 侧已销毁（teardown 竞态）
-                self._method_picker = None
-        self._method_picker = MethodPickerDialog(self)
-        self._method_picker.set_methods(self._methods)
-        self._method_picker.sig_method_chosen.connect(self._on_method_picked)
-        self._method_picker.finished.connect(self._on_method_picker_finished)
-        self._method_picker.show()
-
-    def _on_method_picked(self, method_id: str) -> None:
-        """选择器双击条目：按 purpose 分流（链尾追加 / 就地替换）。"""
-        if self._picker_purpose == 'replace' and self._picker_index >= 0:
-            self._replace_step_method(self._picker_index, method_id)
-        else:
-            self._add_method_to_pipeline(method_id)
-
-    def _on_method_picker_finished(self, _result: int) -> None:
-        """弹窗关闭（Esc/外部点击/任何路径）：引用置 None，再开=新实例。"""
-        self._method_picker = None
-
-    def _add_method_to_pipeline(self, method_id: str) -> None:
-        method = self._methods_by_id.get(method_id, {})
-        label = method.get('display_name') or method.get('name') or method_id
-        params = {item.get('name'): item.get('default')
-                  for item in (method.get('parameter_schema') or [])
-                  if item.get('name') is not None}
-        self._pipeline_list.add_step(method_id, label, params)
-
-    # ---------------- 处理链 ↔ 参数表单
-    def _on_step_selected(self, index: int) -> None:
-        self._selected_step = index if index >= 0 else -1
-        steps = self._pipeline_list.steps()
-        if not (0 <= self._selected_step < len(steps)):
-            self._param_form.clear()
-            self._sync_param_empty_hint()
-            return
-        step = steps[self._selected_step]
-        method = self._methods_by_id.get(step.get('method_id', ''), {})
-        schema = method.get('parameter_schema') or []
-        if schema:
-            self._param_form.set_schema(schema)
-            self._param_form.set_values(step.get('params') or {})
-        else:
-            # 无 schema：保持表单为空
-            self._param_form.clear()
-        self._sync_param_empty_hint()
-
-    def _sync_param_empty_hint(self) -> None:
-        """表单无字段 → 显示空态引导（参数卡不再留白）。"""
-        self._param_empty_hint.setVisible(not self._param_form._schema)
-
-    def _auto_write_params_to_selected(self) -> None:
-        """参数表单值变化 → 自动写入选中步骤（B1：改值即生效，无按钮）。
-
-        静默写回：表单由本页驱动（set_values 不触发 sig_changed 循环），此处
-        仅处理用户编辑；步骤失效时静默丢弃（选中态变化会重新载入表单）。
-        """
-        if not (0 <= self._selected_step < len(self._pipeline_list.steps())):
-            return
-        self._pipeline_list.update_step_params(self._selected_step,
-                                               self._param_form.values())
-
-    # ---------------- 执行
-    def _on_run_clicked(self) -> None:
-        if self._running:
-            # 运行钮就近翻转（2026-10-09 深查 P2）：同一位置点击 = 取消，
-            # 不再让用户到可能收起的左栏执行卡里找取消钮
-            self.cancel_requested.emit()
-            return
-        steps = self._pipeline_list.steps()
-        if not steps:
-            InfoBar.warning(title='处理链', content='处理链为空，请先添加处理步骤',
-                            orient=Qt.Orientation.Horizontal, isClosable=True,
-                            position=InfoBarPosition.TOP, duration=3000,
-                            parent=self)
-            return
-        clear_invalid(self._result_name_edit)
-        # 结果名可留空：窗口层有默认名回退（处理结果_{line_id}），此处不强填
-        self.run_requested.emit(self.current_pipeline())
-
-    # ---------------- AutoTune
-    def _on_autotune_clicked(self) -> None:
-        method_id = self._selected_method_id
-        if not method_id:
-            InfoBar.warning(title='AutoTune 自动调参',
-                            content='请先在方法库中选择方法',
-                            orient=Qt.Orientation.Horizontal, isClosable=True,
-                            position=InfoBarPosition.TOP, duration=3000,
-                            parent=self)
-            return
-        params_hint = self._param_form.values()
-        self.autotune_requested.emit(method_id, params_hint, self._input_artifact_id())
-
-    def _input_artifact_id(self) -> str:
-        """输入数据下拉当前选中的 artifact_id（''=原始数据）。"""
-        if self._input_combo.currentIndex() <= 0:
-            return ''
-        return str(self._input_combo.currentData() or '')
-
-    def _on_adopt_params(self) -> None:
-        if self._autotune_result is None:
-            return
-        method_id, result = self._autotune_result
-        best = dict(result.get('best_params') or {})
-        if not best:
-            return
-        # 选中步骤与方法一致 → 写回选中步骤；否则写回处理链中第一个同方法
-        # 步骤并选中；处理链中没有同方法步骤时仅载入参数表单
-        steps = self._pipeline_list.steps()
-        target = -1
-        if (0 <= self._selected_step < len(steps)
-                and steps[self._selected_step].get('method_id') == method_id):
-            target = self._selected_step
-        else:
-            for i, step in enumerate(steps):
-                if step.get('method_id') == method_id:
-                    target = i
-                    break
-        if target >= 0:
-            merged = dict(steps[target].get('params') or {})
-            merged.update(best)
-            steps[target]['params'] = merged
-            self._pipeline_list.set_steps(steps)
-            self._pipeline_list.select_step(target)
-            self._pipeline_list.sig_changed.emit()
-        else:
-            self._param_form.set_values(best)
-        InfoBar.success(title='AutoTune 自动调参', content='已采用最优参数',
-                        orient=Qt.Orientation.Horizontal, isClosable=True,
-                        position=InfoBarPosition.TOP, duration=2000,
-                        parent=self)

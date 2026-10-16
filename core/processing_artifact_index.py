@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -47,6 +47,7 @@ class ProcessingArtifactRecord:
     parent_artifact_id: str = ""
     artifact_kind: str = "processing"
     run_group_id: str = ""
+    params: dict[str, Any] = field(default_factory=dict)
 
     @property
     def shape_changed(self) -> bool:
@@ -101,6 +102,9 @@ def _record_from_paths(root: Path, line_id: str, data_path: Path, params_path: P
     nested_manifest = params_payload.get("manifest") if isinstance(params_payload.get("manifest"), dict) else {}
     manifest_payload = _safe_load_json(manifest_path) if manifest_path and manifest_path.exists() else {}
     manifest = {**nested_manifest, **manifest_payload}
+    params = params_payload.get("params")
+    if not isinstance(params, dict):
+        params = manifest.get("params") if isinstance(manifest.get("params"), dict) else {}
     method_id = str(manifest.get("method_id") or params_payload.get("method") or "")
     method_name = str(manifest.get("method_name") or params_payload.get("method_name") or method_id)
     role = str(manifest.get("artifact_role") or manifest.get("role") or "processing_result")
@@ -129,6 +133,9 @@ def _record_from_paths(root: Path, line_id: str, data_path: Path, params_path: P
         save_schema=str(manifest.get("save_schema") or params_payload.get("schema") or ""),
         branch_id=str(manifest.get("branch_id") or params_payload.get("branch_id") or ""),
         parent_artifact_id=str(manifest.get("parent_artifact_id") or params_payload.get("parent_artifact_id") or ""),
+        artifact_kind=str(params.get("artifact_kind") or "processing"),
+        run_group_id=str(params.get("run_group_id") or ""),
+        params=dict(params),
     )
 
 
@@ -176,6 +183,7 @@ def _index_catalog_artifacts(root: Path, line_id: str | None = None) -> list[Pro
             save_schema=str(manifest.get("save_schema") or "mygpr.processing_save.v3"),
             branch_id=str(row.get("branch_id") or manifest.get("branch_id") or ""),
             parent_artifact_id=str(row.get("parent_artifact_id") or manifest.get("parent_artifact_id") or ""),
+            params=dict(params),
         ))
     return records
 

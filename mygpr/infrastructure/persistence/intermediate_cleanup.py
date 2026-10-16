@@ -12,7 +12,7 @@ from core.field_project_models import validate_line_id
 
 
 class IntermediateCleanupMixin:
-    """Delete intermediate artifacts; keep manifest hashes for audit."""
+    """Delete disposable intermediates while retaining explicit saved dependencies."""
 
     def clear_intermediate_artifacts(self, line_id: str | None = None) -> list[dict[str, Any]]:
         from core.hdf5_line_container import delete_processing_artifact
@@ -20,8 +20,21 @@ class IntermediateCleanupMixin:
         safe = validate_line_id(line_id) if line_id else None
         cleaned: list[dict[str, Any]] = []
         with self._lock:
-            for record in index_processing_artifacts(self._store.root, safe):
+            records = index_processing_artifacts(self._store.root, safe)
+            required = {
+                str(record.params.get("step_input_artifact_id") or "")
+                if record.params.get("lineage_version") == 2 else record.parent_artifact_id
+                for record in records
+            }
+            required.update(str(branch.get('head_artifact_id') or '') for branch in
+                            self._store.storage.catalog.list_branches(line_id=safe))
+            for record in records:
                 if record.artifact_kind != "intermediate":
+                    continue
+                # Saved direct inputs, legacy run inputs and branch heads remain
+                # readable. Cleanup must not silently reparent their provenance.
+                # Explicit deletion uses the dependency closure and project trash.
+                if record.artifact_id in required:
                     continue
                 container = self._store.storage.line_container_path(record.line_id)
                 removed = delete_processing_artifact(container, record.artifact_id)

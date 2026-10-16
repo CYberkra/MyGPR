@@ -36,6 +36,7 @@ from ui import constants, file_dialogs
 from ui.geo_utils import coverage_statistics, format_distance
 from ui.qt_defer import defer_call
 from ui.spatial_view_sync import ViewSyncMixin
+from ui.pages.spatial_context_menus import SpatialContextMenuMixin
 from ui.page_scaffold import (PanelStateMixin, make_card,
                               make_collapsible_column, make_hint,
                               make_segment_card,
@@ -95,7 +96,7 @@ class _DemLoadWorker(QRunnable):
             self._signals.finished.emit(self._generation, dem, self._path, '')
 
 
-class SpatialPage(ViewSyncMixin, PanelStateMixin, QWidget):
+class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidget):
     """空间信息页面。"""
 
     current_line_requested = pyqtSignal(str)    # 设为当前测线（line_id）
@@ -519,6 +520,7 @@ class SpatialPage(ViewSyncMixin, PanelStateMixin, QWidget):
         right_layout.addStretch(1)
     # ============================================================ 内部接线
     def _connect_internal(self) -> None:
+        self._bind_line_context(_SEG_MAP)
         self._line_list.itemChanged.connect(self._on_line_check_changed)
         self._line_list.currentItemChanged.connect(self._on_line_selected)
         self._basemap_combo.currentIndexChanged.connect(self._on_basemap_changed)
@@ -553,6 +555,7 @@ class SpatialPage(ViewSyncMixin, PanelStateMixin, QWidget):
 
     def set_tracks(self, tracks: list) -> None:
         """空间轨迹列表（SpatialTrack，鸭子类型取属性）。"""
+        self._line_context.close()
         self._tracks = list(tracks or [])
         self._tracks_by_id = {}
         self._colors = {}

@@ -59,6 +59,19 @@ def _press_escape(widget) -> None:
 
 
 class TestPopupWindowContract:
+    def test_custom_header_close_discards_changes_and_finishes_once(self, popup, qapp):
+        popup.load_snapshot(0, _snapshot())
+        applied, finished = [], []
+        popup.sig_applied.connect(applied.append)
+        popup.finished.connect(finished.append)
+        popup.show()
+        qapp.processEvents()
+        popup._form.set_values({'window': 37})
+        popup._close_btn.click()
+        assert not popup.isVisible()
+        assert applied == []
+        assert len(finished) == 1
+
     def test_non_modal_tool_window(self, popup):
         assert popup.isModal() is False
         assert popup.windowFlags() & Qt.WindowType.Tool
@@ -196,7 +209,7 @@ class TestPageStepEditorWiring:
         page = _page_with_methods(qapp)
         try:
             page._add_method_to_pipeline('dewow')
-            page._chain_strip.sig_step_editor_requested.emit(0)
+            page._pipeline_list.sig_edit_requested.emit(0)
             assert page._step_editor is not None
             assert page._step_editor._title_label.text() == '去直流滤波'
             assert page._step_editor.isVisible()
@@ -230,7 +243,8 @@ class TestPageStepEditorWiring:
             assert steps[0]['enabled'] is False
             assert steps[0]['params'] == {'window': 5, 'gain': 2.0}
             # chip 变暗视觉（虚线 muted）由 sig_changed → _refresh_chain_and_results 重铺
-            assert page._chain_strip._steps[0]['enabled'] is False
+            row = page._pipeline_list._list.itemWidget(page._pipeline_list._list.item(0))
+            assert row.enabled_box.isChecked() is False
         finally:
             page.close()
 

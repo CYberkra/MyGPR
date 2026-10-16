@@ -28,6 +28,7 @@ Design decisions (2026-09-06, user-approved):
 from __future__ import annotations
 
 import shutil
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -106,12 +107,20 @@ if TYPE_CHECKING:  # pragma: no cover - 仅类型标注，避免运行时环
     from core.field_project_store import FieldProjectStore
 
 
+def _dependency_parent(record: ProcessingArtifactRecord) -> str:
+    if record.params.get("lineage_version") == 2:
+        return str(record.params.get("step_input_artifact_id") or "")
+    return str(record.parent_artifact_id or "")
+
+
 def collect_artifact_descendants(
     records: list[ProcessingArtifactRecord],
     root_artifact_id: str,
 ) -> tuple[str, ...]:
     """Return ``root_artifact_id`` plus its transitive children (blood line).
 
+    v2 records use their explicit saved-input edge. Historical records retain
+    the conservative run-input dependency; their step order is never inferred.
     ``records`` 应为该测线的完整成果索引（含 parent_artifact_id）。
     未知 root 直接返回空元组，由调用方决定报错语义。
     """
@@ -119,7 +128,7 @@ def collect_artifact_descendants(
     known: set[str] = set()
     for record in records:
         known.add(record.artifact_id)
-        parent = str(record.parent_artifact_id or "")
+        parent = _dependency_parent(record)
         if parent:
             children.setdefault(parent, []).append(record.artifact_id)
     if root_artifact_id not in known:
@@ -129,9 +138,9 @@ def collect_artifact_descendants(
     # 广度优先收集（根在前、叶在后）；提交阶段必须 reversed() 深度先删——
     # catalog.delete_artifact 把 branch head 回退到被删行的 parent，
     # 先删父会留下指向已删除父的悬空 head。
-    stack = [root_artifact_id]
+    stack = deque([root_artifact_id])
     while stack:
-        current = stack.pop(0)
+        current = stack.popleft()
         if current in seen:
             continue
         seen.add(current)
@@ -164,7 +173,25 @@ def _resolve_delete_closure(
             if descendant not in seen:
                 seen.add(descendant)
                 full_ids.append(descendant)
-    return full_ids
+    # Overlapping user selections may list a leaf before its ancestor. Order
+    # the union by dependencies before reversed() commits any file/catalog move.
+    parents = {record.artifact_id: _dependency_parent(record) for record in records}
+    children: dict[str, list[str]] = {}
+    queue = deque()
+    for aid in full_ids:
+        parent = parents[aid]
+        if parent in seen:
+            children.setdefault(parent, []).append(aid)
+        else:
+            queue.append(aid)
+    ordered: list[str] = []
+    while queue:
+        aid = queue.popleft()
+        ordered.append(aid)
+        queue.extend(children.get(aid, []))
+    if len(ordered) != len(full_ids):
+        raise FieldProjectOperationError("处理成果来源存在循环，已取消删除，请先核对项目谱系。")
+    return ordered
 
 
 def _classify_delete_targets(

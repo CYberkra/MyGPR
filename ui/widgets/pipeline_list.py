@@ -95,6 +95,8 @@ class PipelineList(QWidget):
 
     sig_changed = pyqtSignal()
     sig_step_selected = pyqtSignal(int)   # 当前编辑步索引，-1 无
+    sig_edit_requested = pyqtSignal(int)
+    sig_duplicate_requested = pyqtSignal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -203,6 +205,9 @@ class PipelineList(QWidget):
         self._list.setCurrentRow(row)
         enabled = bool(self._steps[row]['enabled'])
         menu = make_menu(self)
+        add_action(menu, FIF.EDIT, '编辑参数…', lambda: self.sig_edit_requested.emit(row))
+        add_action(menu, FIF.COPY, '复制步骤', lambda: self.sig_duplicate_requested.emit(row))
+        menu.addSeparator()
         add_action(menu, FIF.UP, '上移',
                    lambda: self._move_step(row, -1), enabled=row > 0)
         add_action(menu, FIF.DOWN, '下移',

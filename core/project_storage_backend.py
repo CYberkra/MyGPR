@@ -237,7 +237,10 @@ class HybridProjectStorageBackend(ProjectStorageBackend):
         if not container.exists():
             initialize_line_container(container, project_id=self.manifest.project_id, line_id=line_id)
         self.catalog.ensure_branch(line_id=line_id, branch_id=branch_id, name=branch_id)
-        resolved_parent = parent_artifact_id or self.catalog.branch_head(branch_id)
+        # v2 explicitly freezes the run input, including raw input (empty id).
+        # Historical callers still use the branch-head fallback contract.
+        resolved_parent = (parent_artifact_id if params.get("lineage_version") == 2
+                           else parent_artifact_id or self.catalog.branch_head(branch_id))
         manifest = {**manifest, "branch_id": branch_id, "parent_artifact_id": resolved_parent}
         relative = container.relative_to(self.root).as_posix()
         transaction = self.transaction_journal.begin(

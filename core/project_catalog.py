@@ -308,23 +308,29 @@ class ProjectCatalog:
         """Remove one artifact and restore its branch head to the parent."""
         with self.transaction() as db:
             row = db.execute(
-                "SELECT branch_id,parent_artifact_id FROM artifacts WHERE artifact_id=?",
+                "SELECT parent_artifact_id,params_json FROM artifacts WHERE artifact_id=?",
                 (str(artifact_id),),
             ).fetchone()
             if row is None:
                 return
-            branch_id = str(row["branch_id"] or "")
             parent_id = str(row["parent_artifact_id"] or "")
+            try:
+                params = json.loads(row["params_json"])
+            except (json.JSONDecodeError, TypeError, ValueError):
+                params = {}
+            if isinstance(params, dict) and params.get("lineage_version") == 2:
+                parent_id = str(params.get("step_input_artifact_id") or "")
             db.execute(
                 "UPDATE exports SET source_artifact_id=NULL WHERE source_artifact_id=?",
                 (str(artifact_id),),
             )
-            if branch_id:
-                db.execute(
-                    "UPDATE processing_branches SET head_artifact_id=?,updated_at=? "
-                    "WHERE branch_id=? AND head_artifact_id=?",
-                    (parent_id, utc_now(), branch_id, str(artifact_id)),
-                )
+            # A descendant branch may already have rolled back to this input.
+            # Move every referencing head, including heads on sibling run ids.
+            db.execute(
+                "UPDATE processing_branches SET head_artifact_id=?,updated_at=? "
+                "WHERE head_artifact_id=?",
+                (parent_id, utc_now(), str(artifact_id)),
+            )
             db.execute("DELETE FROM artifacts WHERE artifact_id=?", (str(artifact_id),))
 
     def register_artifact(self, payload: dict[str, Any]) -> None:

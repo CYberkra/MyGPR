@@ -1,7 +1,10 @@
 # Current State — Desktop Qt GUI + headless backend
 
-Version: 0.10.0. Source-tree review: 2026-10-14 (includes acquisition HDF5 compatibility changes).
+Version: 0.11.0. Source-tree review: 2026-10-16 (includes the maintained project and processing workbench).
 Platform integration documentation review: 2026-10-15.
+Source maintenance round: 2026-10-16; see [changes, verification and limits](docs/artifacts/maintenance_20261016.md).
+Workbench redesign: [current UI contract](docs/superpowers/specs/2026-10-16-workbench-redesign.md).
+Visual polish and native workflow evidence: [verification record](docs/artifacts/ui_visual_polish_20261016.md).
 
 This package now ships both the Qt6 desktop frontend and the headless backend.
 It is the processing, imaging/interpretation and deliverables component of the
@@ -31,9 +34,12 @@ mygpr
 ## Architecture status
 
 - `ui/` → `core/` violations have been removed via `ui/desktop_backend_facade.py`.
-- `MyGPRMainWindow` assembles eight pages behind a top tab bar, a project tree,
+- `MyGPRMainWindow` assembles seven pages behind a top tab bar, a project tree,
   and a bottom output panel. `page_coordinator.py` delegates signal wiring to
   `coordinator_project.py`, `coordinator_processing.py`, and `coordinator_jobs.py`.
+- Home and Project share one project workspace. Processing uses manually docked
+  B-scan tab groups; the active saved result is the next input, with separate
+  drafts and versioned direct dependencies for new result branches.
 - New projects use per-line HDF5 arrays plus a SQLite catalog; legacy project
   layouts remain a compatibility path. See [Hybrid Store](docs/developer/HYBRID_PROJECT_STORE_V1.md).
 - Project imports accept CSV/TXT/NPY/NPZ/H5/HDF5. CDUT acquisition HDF5 retains

@@ -12,11 +12,13 @@
 """
 
 import os
+import json
+from collections.abc import Mapping
 
 from PyQt6.QtCore import Qt, QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
-    QDialog, QHBoxLayout, QHeaderView, QListWidget,
+    QApplication, QDialog, QHBoxLayout, QHeaderView, QListWidget,
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
@@ -33,6 +35,7 @@ from ui.page_scaffold import (make_card, make_form_row, make_hint,
 from ui.widgets import EmptyStateOverlay
 from ui.widgets import (clear_invalid, make_separator, mark_invalid,
                         validate_non_empty)
+from ui.widgets.object_context_menu import ObjectMenuBinding, object_action, object_menu, show_details
 
 # 报告结果字段（鸭子类型：dict 键或对象属性）
 _REPORT_FIELDS = (
@@ -70,6 +73,8 @@ class DeliveryPage(QWidget):
         super().__init__(parent)
         self._busy = False
         self._report_dir = ''
+        self._spatial_results = []
+        self._spatial_revision = 0
         self._build_ui()
         self._connect_internal()
 
@@ -203,6 +208,10 @@ class DeliveryPage(QWidget):
 
     # ============================================================ 内部接线
     def _connect_internal(self) -> None:
+        self._spatial_context = ObjectMenuBinding(self, self._spatial_table, self._spatial_result_menu)
+        self._report_contexts = [ObjectMenuBinding(self, label,
+            lambda _pos, key=key: self._report_path_menu(key))
+            for key, label in self._report_path_labels.items()]
         self._spatial_btn.clicked.connect(self._on_spatial_clicked)
         self._report_btn.clicked.connect(self._on_report_clicked)
         self._open_dir_btn.clicked.connect(self._on_open_dir)
@@ -213,6 +222,9 @@ class DeliveryPage(QWidget):
     def set_spatial_results(self, results: list) -> None:
         """空间成果列表 → 结果表格（名称/测线数/创建时间）。"""
         results = list(results or [])
+        self._spatial_context.close()
+        self._spatial_revision += 1
+        self._spatial_results = results
         self._spatial_empty.setVisible(not results)
         self._spatial_table.setRowCount(len(results))
         for row, item in enumerate(results):
@@ -227,9 +239,63 @@ class DeliveryPage(QWidget):
             self._spatial_table.setItem(row, 0, QTableWidgetItem(name))
             self._spatial_table.setItem(row, 1, QTableWidgetItem(str(n_lines)))
             self._spatial_table.setItem(row, 2, QTableWidgetItem(created))
+            self._spatial_table.item(row, 0).setData(
+                Qt.ItemDataRole.UserRole, str(_get(item, 'result_id', '') or _get(item, 'artifact_id', '')))
+
+    def _spatial_result_menu(self, pos):
+        menu = object_menu(self)
+        row = self._spatial_table.indexAt(pos).row()
+        if not 0 <= row < len(self._spatial_results):
+            object_action(menu, 'copy-count', '复制成果数量',
+                          lambda: QApplication.clipboard().setText(str(len(self._spatial_results))))
+            return menu
+        result, revision = self._spatial_results[row], self._spatial_revision
+        result_id = str(_get(result, 'result_id', '') or _get(result, 'artifact_id', ''))
+
+        def valid():
+            return (revision == self._spatial_revision and row < len(self._spatial_results)
+                    and self._spatial_results[row] is result)
+
+        metadata = {}
+        for key in ('result_id', 'name', 'revision', 'status', 'line_ids', 'created_at',
+                    'coordinate_system', 'vertical_datum', 'stale', 'files'):
+            value = _get(result, key, '')
+            metadata[key] = dict(value) if isinstance(value, Mapping) else value
+        text = json.dumps(metadata, ensure_ascii=False, indent=2, default=str)
+        object_action(menu, 'result-details', '参数与来源…',
+                      lambda: show_details(self, '空间成果详情', text) if valid() else None)
+        object_action(menu, 'copy-id', '复制成果标识',
+                      lambda: QApplication.clipboard().setText(result_id) if valid() else None,
+                      enabled=bool(result_id), reason='记录没有稳定成果标识')
+        object_action(menu, 'copy-name', '复制成果名称',
+                      lambda: QApplication.clipboard().setText(str(_get(result, 'name', ''))) if valid() else None)
+        menu.addSeparator()
+        for command, label, reason in (
+            ('open-result', '打开成果', '页面未接通空间成果打开入口'),
+            ('export-result', '导出成果…', '页面未接通空间成果导出入口'),
+            ('delete-result', '删除项目成果…', '页面未接通空间成果删除事务'),
+        ):
+            object_action(menu, command, label, lambda: None, enabled=False, reason=reason)
+        return menu
+
+    def _report_path_menu(self, key):
+        menu = object_menu(self)
+        path = self._report_path_labels[key].text()
+        report_dir = self._report_dir
+        def valid():
+            return self._report_path_labels[key].text() == path and self._report_dir == report_dir
+        object_action(menu, 'copy-path', '复制报告文件路径',
+                      lambda: QApplication.clipboard().setText(path) if valid() else None,
+                      enabled=bool(path and path != '--'), reason='报告文件尚未生成')
+        object_action(menu, 'open-report-directory', '打开报告包目录',
+                      lambda: self._on_open_dir() if valid() else None,
+                      enabled=bool(report_dir), reason='报告包目录尚未生成')
+        return menu
 
     def set_report_result(self, result) -> None:
         """报告包结果（dict 或 ReportPackage 对象）→ 结果区路径 + 打开目录。"""
+        for binding in self._report_contexts:
+            binding.close()
         has_path = False
         for key, _caption in _REPORT_FIELDS:
             path = str(_get(result, key, '') or '')

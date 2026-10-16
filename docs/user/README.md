@@ -9,7 +9,10 @@
 | **查某个细节**（格式矩阵、依赖、文件位置） | [参考手册](reference/index.md) |
 | **理解原理**（证据链、数据安全模型） | [原理解释](explanation/处理证据链与数据安全.md) |
 
-![MyGPR 主界面：已导入营山测线并生成预览](images/light/light_homeInterface_preview.png)
+当前源码采用七页工作台：首页内容已并入项目页，处理页使用可拖动的 B-scan 标签。
+操作规则见 [处理与成果续算](how-to/运行处理与AutoTune.md)。下方截图为已发布 v0.10.0 的历史界面。
+
+![历史界面：已导入营山测线并生成预览](images/light/light_homeInterface_preview.png)
 
 ![深色主题](images/dark/dark_overall.png)
 
