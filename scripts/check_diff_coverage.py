@@ -75,6 +75,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     policy = json.loads((ROOT / "config/coverage_policy.json").read_text(encoding="utf-8"))
     coverage = json.loads(args.coverage_json.read_text(encoding="utf-8"))
+    coverage_files = {name.replace('\\', '/'): row
+                      for name, row in coverage.get('files', {}).items()}
     if args.changed_lines:
         raw = json.loads(args.changed_lines.read_text(encoding="utf-8"))
         changed = {str(path): {int(value) for value in lines} for path, lines in raw.items()}
@@ -104,7 +106,7 @@ def main(argv: list[str] | None = None) -> int:
     total = covered = 0
     details = []
     for path, lines in sorted(changed.items()):
-        row = coverage.get("files", {}).get(path)
+        row = coverage_files.get(path)
         if row is None:
             print(f"[diff-coverage] FAILED coverage data missing for changed source {path}")
             return 1
