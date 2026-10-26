@@ -61,6 +61,14 @@ def getOpenFileName(parent: QWidget | None, caption: str, directory: str,
     return _normalize(path), selected
 
 
+def getOpenFileNames(parent: QWidget | None, caption: str, directory: str,
+                     file_filter: str = '') -> tuple[list[str], str]:
+    """Select one or more existing files, preserving the user's selection order."""
+    paths, selected = QFileDialog.getOpenFileNames(
+        parent, caption, directory, file_filter)
+    return [_normalize(path) for path in paths], selected
+
+
 def getSaveFileName(parent: QWidget | None, caption: str, directory: str,
                     file_filter: str = '', *, confirm_overwrite: bool = True) -> tuple[str, str]:
     """保存文件。返回 (路径, 过滤器)，取消路径为空串。"""

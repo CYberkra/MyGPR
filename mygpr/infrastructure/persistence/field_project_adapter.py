@@ -553,7 +553,16 @@ class LegacyFieldProjectSession(
                 depth_axis_m=np.asarray(dataset.depth_axis_m, dtype=np.float32),
             )
             trace_metadata = _load_trace_metadata(self._store, safe_line)
-            if trace_metadata and any(np.asarray(value).size != dataset.trace_count for value in trace_metadata.values()):
+            offset = header.get("source_trace_offset")
+            if offset is not None:
+                start = int(offset)
+                trace_metadata = {
+                    key: np.array(value[start:start + dataset.trace_count], copy=True)
+                    for key, value in trace_metadata.items()
+                    if np.asarray(value).ndim >= 1
+                    and np.asarray(value).shape[0] > start + dataset.trace_count - 1
+                }
+            elif trace_metadata and any(np.asarray(value).size != dataset.trace_count for value in trace_metadata.values()):
                 trace_metadata = {}
         return ProjectLineData(
             line_id=safe_line, data=matrix, header_info=header, trace_metadata=trace_metadata

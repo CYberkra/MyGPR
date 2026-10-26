@@ -326,7 +326,8 @@ def test_artifact_leaf_click_emits_focus_with_line(qapp, panel):
     panel.set_artifacts([_artifact('A9', 'L02')])
     leaf = _find_by_kind(panel._tree, 'artifact')
     assert leaf is not None
-    assert leaf.text(0) == '去直流' and leaf.text(1) == 'dewow'
+    assert leaf.text(0).startswith('去直流') and leaf.text(1) == 'dewow'
+    assert '记录不完整' in leaf.text(0)
     got, lines_got = [], []
     panel.artifact_focus_requested.connect(lambda *a: got.append(a))
     panel.line_selected.connect(lines_got.append)

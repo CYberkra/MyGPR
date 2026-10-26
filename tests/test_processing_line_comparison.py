@@ -78,8 +78,12 @@ def test_real_drop_splits_and_targets_preview_without_switching_input(page, qapp
     arrays = [view._matrix for view in page._workspace.views()]
     assert arrays[0] is original and np.all(arrays[1] == 2)
     assert 'L02' in page._workspace.tab_bar().tabText(0)
-    assert 'L01' in page._input_label.text()
-    assert not page._run_btn.isEnabled()
+    page.line_changed.connect(page.set_line_label)
+    page._workspace.source_activated_by_user.emit(page._workspace.active_key())
+    page._pipeline_list.add_step('dewow', 'Dewow', {'window': 23})
+    assert page._line_id == 'L02'
+    assert page._selected_source_key == 'original'
+    assert page._run_btn.isEnabled()
 
 
 def test_repeat_drop_reuses_tab_and_center_adds_tab(page):
@@ -242,3 +246,17 @@ def test_run_finishing_does_not_steal_comparison_focus(page):
     assert page._workspace.active_key() == key
     assert page._selected_source_key == 'original'
     assert page._completed_artifact == 'new'
+
+
+def test_cross_line_drop_includes_raw_and_saved_processing_results(page):
+    manager = comparison(page)
+    assert drop(page, 'L02')
+    manager.set_artifacts('L02', [artifact('A')])
+    keys = page._workspace.tab_keys()
+    assert any(key.startswith('compare:') and key.endswith(':raw') for key in keys)
+    assert any(key.startswith('compare:') and key.endswith(':artifact:A') for key in keys)
+    source = next(source for key, source in manager.sources.items() if key.endswith(':artifact:A'))
+    assert source['presentation'].tab_title
+    token = manager.pending[source['key']]
+    manager.deliver_artifact('P', 'L02', 'A', token, bundle(8), '')
+    assert source['bundle'].matrix.max() == 8

@@ -30,6 +30,13 @@ METHOD_METADATA = {
         "display_name": "时间窗裁剪",
         "description": "按指定时间范围裁剪或屏蔽数据，具体行为由裁剪模式决定。 检索别名：time window crop。",
     },
+    "trace_cut": {
+        "category": "time_correction",
+        "maturity": "stable",
+        "visibility": "public",
+        "display_name": "测道裁剪",
+        "description": "按起止道号保留 B-scan 的连续道段，道号从 1 开始且包含起止道；结束道号为 0 时表示最后一道。同步保留对应的逐道元数据。 检索别名：测线裁剪 道裁剪 trace range crop。",
+    },
     "trace_qc": {
         "category": "quality_control",
         "maturity": "stable",
@@ -284,6 +291,7 @@ METHOD_METADATA = {
 PREFERRED_METHOD_ORDER = [
     "set_zero_time",
     "time_cut",
+    "trace_cut",
     "trace_qc",
     "dewow",
     "subtracting_average_2D",
@@ -326,6 +334,7 @@ METHOD_TAGS = {
     "dewow": "推荐",
     "set_zero_time": "推荐",
     "time_cut": "备选",
+    "trace_cut": "备选",
     "trace_qc": "备选",
     "energy_decay_gain": "推荐",
     "amplitude_scale": "备选",

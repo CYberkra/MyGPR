@@ -19,6 +19,7 @@ from PythonModule.kirchhoff_migration import method_kirchhoff_migration as metho
 from PythonModule.stolt_migration import method_stolt_migration as method_stolt_migration  # explicit re-export
 from PythonModule.time_cut import method_time_cut as method_time_cut  # explicit re-export
 from PythonModule.time_to_depth import method_time_to_depth as method_time_to_depth  # explicit re-export
+from PythonModule.trace_cut import method_trace_cut as method_trace_cut  # explicit re-export
 from PythonModule.trace_qc import method_trace_qc as method_trace_qc  # explicit re-export
 from PythonModule.sec_gain import method_sec_gain as method_sec_gain  # explicit re-export
 from PythonModule.sliding_average import method_sliding_average as method_sliding_average  # explicit re-export

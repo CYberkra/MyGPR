@@ -140,7 +140,7 @@ class LegacyProjectStorageBackend(ProjectStorageBackend):
             **manifest,
             "artifact_id": artifact_id,
             "input_dataset": input_dataset,
-            **{key: output_header[key] for key in ("time_axis_endpoint", "time_step_s", "distance_axis_status", "time_cut_offset_ns") if key in output_header},
+            **{key: output_header[key] for key in ("time_axis_endpoint", "time_step_s", "distance_axis_status", "time_cut_offset_ns", "source_trace_offset") if key in output_header},
         }
         dataset = GPRDataSet.from_matrix(
             line_id=safe_line,

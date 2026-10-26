@@ -13,9 +13,11 @@ Qt.WindowType.Tool，不进任务栏、随主窗），内联于处理页（paren
 本窗后代——窗内控件互相切换（搜索框 → 树）焦点仍是本窗后代，不误关；
 点到窗外则 200ms 复核一次再关（真机焦点移交有一拍延迟）。
 """
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtWidgets import QApplication, QDialog, QVBoxLayout, QWidget
+from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer, pyqtSignal
+from PyQt6.QtWidgets import QApplication, QDialog, QHBoxLayout, QVBoxLayout, QWidget
+from qfluentwidgets import BodyLabel, CaptionLabel, SubtitleLabel, isDarkTheme
 
+from ui import design_tokens, motion
 from ui.widgets.method_browser import MethodBrowser
 
 # 外部点击关闭的复核延迟（ms）：焦点移交到外部控件有一拍延迟，
@@ -31,28 +33,46 @@ class MethodPickerDialog(QDialog):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle('添加处理步骤')
+        self.setObjectName('methodPickerDialog')
         self.setModal(False)
         self.setWindowFlag(Qt.WindowType.Tool)      # 不进任务栏，随主窗
-        self.setMinimumSize(360, 420)
-
-        self._browser = MethodBrowser(self)
-        self._browser.sig_add_requested.connect(self._on_add_requested)
+        self.setMinimumSize(520, 560)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(8)
+        layout.setContentsMargins(20, 18, 20, 16)
+        layout.setSpacing(10)
+        header = QHBoxLayout()
+        self._title_label = SubtitleLabel('添加处理步骤', self)
+        self._count_label = CaptionLabel('', self)
+        header.addWidget(self._title_label, 1)
+        header.addWidget(self._count_label)
+        layout.addLayout(header)
+        description = BodyLabel('搜索并按用途选择算法，双击即可加入当前处理链。', self)
+        description.setWordWrap(True)
+        layout.addWidget(description)
+        self._browser = MethodBrowser(self)
+        self._browser.sig_add_requested.connect(self._on_add_requested)
         layout.addWidget(self._browser, 1)
+        self._hint_label = CaptionLabel('双击添加 · 可连续选择 · Esc 关闭', self)
+        self._hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self._hint_label)
 
         # 失焦复核走 owned 可停 QTimer：裸 singleShot 的回调会在窗销毁后
         # 仍被派发（悬空引用），炸下一个 processEvents 的宿主
         self._focus_timer = QTimer(self)
         self._focus_timer.setSingleShot(True)
         self._focus_timer.timeout.connect(self._close_if_focus_left)
+        self._geometry_animation = QPropertyAnimation(self, b'geometry', self)
+        self._geometry_animation.setDuration(180)
+        self._geometry_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.destroyed.connect(self._geometry_animation.stop)
+        self.apply_theme(isDarkTheme())
 
     # ------------------------------------------------------------ 数据
     def set_methods(self, methods: list) -> None:
         """与方法库控件同源的方法清单（结构见 ProcessingPage.set_methods）。"""
         self._browser.set_methods(methods or [])
+        self._count_label.setText(f'{len(methods or [])} 个方法')
 
     # ------------------------------------------------------------ 复位
     def reset_state(self) -> None:
@@ -71,6 +91,12 @@ class MethodPickerDialog(QDialog):
         """每次显示复位状态：关闭再开 = 全新浏览态（PRD 验收④）。"""
         self.reset_state()
         super().showEvent(event)
+        if motion.animations_enabled():
+            final = self.geometry()
+            self._geometry_animation.stop()
+            self._geometry_animation.setStartValue(final.translated(0, 12))
+            self._geometry_animation.setEndValue(final)
+            self._geometry_animation.start()
 
     def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt 命名
         if event.key() == Qt.Key.Key_Escape:
@@ -107,4 +133,16 @@ class MethodPickerDialog(QDialog):
         必须幂等（纯令牌重刷）：遍历可能命中隐藏弹窗。内嵌 MethodBrowser
         的 apply_theme 当前为空操作，透传以保持单一路径。
         """
+        self.setStyleSheet(
+            f'QDialog#methodPickerDialog {{ background: {design_tokens.color("bg_surface", dark)};'
+            f' border: 1px solid {design_tokens.color("border_default", dark)};'
+            f' border-radius: {design_tokens.radius("lg")}px; }}'
+            f'SubtitleLabel {{ color: {design_tokens.color("text_primary", dark)}; }}'
+            f'BodyLabel {{ color: {design_tokens.color("text_secondary", dark)}; }}'
+            f'CaptionLabel {{ color: {design_tokens.color("text_muted", dark)}; }}'
+            f'QTreeWidget {{ color: {design_tokens.color("text_primary", dark)};'
+            f' background: {design_tokens.color("bg_surface", dark)}; border: 0; }}'
+            f'QTreeWidget::item {{ color: {design_tokens.color("text_primary", dark)};'
+            ' background: transparent; }'
+        )
         self._browser.apply_theme(dark)

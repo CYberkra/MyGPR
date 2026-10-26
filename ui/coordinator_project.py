@@ -79,6 +79,8 @@ class ProjectChain:
         project.artifact_delete_requested.connect(
             self.on_artifact_delete_requested)
         project.close_project_requested.connect(self.on_close_project_requested)
+        project.quality_check_requested.connect(self.on_quality_check_requested)
+        project.quality_refresh_requested.connect(self.on_quality_refresh_requested)
         # 测线表右键"复制路径/打开所在文件夹"：异步路径查询回包缓存进页面
         pc0 = co.project_controller
         if pc0 is not None:
@@ -114,6 +116,9 @@ class ProjectChain:
 
         # ---------------- 成果页（SPEC §6.7）
         delivery.spatial_requested.connect(self.on_spatial_requested)
+        delivery.spatial_export_requested.connect(self.on_spatial_export_requested)
+        delivery.spatial_delete_requested.connect(self.on_spatial_delete_requested)
+        delivery.spatial_current_requested.connect(self.on_spatial_current_requested)
         delivery.report_requested.connect(self.on_report_requested)
         delivery.backup_requested.connect(self.on_backup_requested)
         delivery.restore_requested.connect(self.on_restore_requested)
@@ -133,10 +138,13 @@ class ProjectChain:
             pc.preview_invalidated.connect(self.on_preview_invalidated)
             pc.preflight_ready.connect(self.on_preflight_ready)
             pc.preflight_failed.connect(self.on_preflight_failed)
+            pc.quality_reports_ready.connect(project.set_quality_reports)
+            pc.sensor_sync_result_ready.connect(project.set_sensor_sync_result)
             pc.spatial_tracks_ready.connect(spatial.set_tracks)
             pc.artifact_descendants_ready.connect(
                 self.on_artifact_descendants_ready)
             pc.busy_changed.connect(project.set_busy)
+            pc.all_artifacts_updated.connect(delivery.set_artifacts)
             if tree is not None:
                 pc.busy_changed.connect(tree.set_busy)
                 # 文件树「成果」视图：全项目成果列表（与按线的 artifacts_updated 互补）
@@ -147,6 +155,7 @@ class ProjectChain:
             dc.spatial_results_updated.connect(delivery.set_spatial_results)
             dc.report_generated.connect(self.on_report_generated)
             dc.processing_package_generated.connect(self.on_processing_package_generated)
+            dc.report_list_updated.connect(delivery.set_report_packages)
             if tree is not None:
                 # 文件树「空间成果 / 项目报告」组与成果页同一数据源
                 dc.spatial_results_updated.connect(tree.set_spatial_results)
@@ -222,6 +231,7 @@ class ProjectChain:
         if co.file_tree() is not None:
             co.file_tree().set_project_info(summary)
         root = str(getattr(summary, 'root_path', '') or '')
+        co.page('deliveryInterface').set_project_root(root)
         if root:
             co.settings.add_recent_project(root)
             names = co.settings.get('project_display_names', {})
@@ -308,6 +318,7 @@ class ProjectChain:
         co.processing.velocity_token = None  # 关闭项目即失效当前提交代，迟到回调全部丢弃
         interpretation.set_line_label('')
         delivery.set_lines([])
+        delivery.set_project_root('')
         delivery.set_spatial_results([])
         spatial = co.page('spatialInterface')
         spatial.set_tracks([])
@@ -630,6 +641,13 @@ class ProjectChain:
                 line_id,
                 float(payload.get('dielectric', constants.DEFAULT_DIELECTRIC)))
             return
+        sources = [str(item) for item in payload.get('sources') or [] if str(item)]
+        if len(sources) > 1:
+            job_id = self._co.project_controller.import_lines(sources)
+            if job_id:
+                self._co.jobs.import_job_ids.add(str(job_id))
+                self._co.infobar('info', '批量导入', f'已提交 {len(sources)} 个文件；各文件独立预检和导入')
+            return
         job_id = self._co.project_controller.import_line(
             str(payload.get('source', '')),
             line_id,
@@ -639,6 +657,14 @@ class ProjectChain:
             self._co.jobs.import_job_ids.add(str(job_id))
             self.pending_select_line_id = line_id
             self._co.infobar('info', '导入测线', '导入任务已提交，完成后会自动选中该测线')
+
+    def on_quality_check_requested(self, line_id: str) -> None:
+        if self._co.project_controller is not None and self._co.require_project():
+            self._co.project_controller.check_quality(str(line_id or ''))
+
+    def on_quality_refresh_requested(self) -> None:
+        if self._co.project_controller is not None and self._co.require_project():
+            self._co.project_controller.refresh_quality_reports()
 
     def on_preflight_ready(self, result) -> None:
         """preflight_ready → 项目页预检结果区（鸭子类型取字段）。"""
@@ -717,12 +743,36 @@ class ProjectChain:
             self._co.jobs.spatial_job_ids.add(str(job_id))
             self._co.infobar('info', '空间成果', '空间成果任务已提交')
 
+    def on_spatial_export_requested(self, payload: dict) -> None:
+        if self._co.delivery_controller is None or not self._co.require_project():
+            return
+        job_id = self._co.delivery_controller.export_spatial(
+            self._co.current_project_id(), dict(payload or {}))
+        if job_id:
+            self._co.jobs.spatial_job_ids.add(str(job_id))
+            self._co.infobar('info', '空间成果导出', '导出任务已提交')
+
+    def on_spatial_delete_requested(self, result_id: str) -> None:
+        if self._co.delivery_controller is None or not self._co.require_project():
+            return
+        job_id = self._co.delivery_controller.delete_spatial(
+            self._co.current_project_id(), str(result_id))
+        if job_id:
+            self._co.jobs.spatial_job_ids.add(str(job_id))
+
+    def on_spatial_current_requested(self, result_id: str) -> None:
+        if self._co.delivery_controller is not None and self._co.require_project():
+            self._co.delivery_controller.set_spatial_current(
+                self._co.current_project_id(), str(result_id))
+
     def on_report_requested(self, payload: dict) -> None:
         if self._co.delivery_controller is None or not self._co.require_project():
             return
+        payload = dict(payload or {})
         job_id = self._co.delivery_controller.generate_report(
             self._co.current_project_id(),
-            str(dict(payload or {}).get('package_name', '') or ''))
+            str(payload.get('package_name', '') or ''),
+            report_profile=dict(payload.get('report_profile') or {}))
         if job_id:
             self._co.infobar('info', '项目报告', '报告生成任务已提交')
 
@@ -748,16 +798,23 @@ class ProjectChain:
             mode = '增量' if options.get('incremental') else '全量'
             self._co.infobar('info', '项目备份', f'{mode}备份任务已提交 → {dest}')
 
-    def on_restore_requested(self, archive_path: str) -> None:
+    def on_restore_requested(self, payload) -> None:
         co = self._co
         if not co.backend_ready:
             co.infobar('warning', '恢复备份', '后端尚未就绪，请稍后再试')
             return
         if co.delivery_controller is None:
             return
-        dest_root = str(co.settings.get(
+        options = dict(payload) if isinstance(payload, dict) else {'archive_path': str(payload)}
+        archive_path = str(options.get('archive_path') or '')
+        if not archive_path:
+            return
+        dest_root = str(options.get('destination_root') or co.settings.get(
             'project_root', constants.DEFAULT_PROJECT_ROOT))
         job_id = co.delivery_controller.restore_project(
-            str(archive_path), dest_root)
+            archive_path, dest_root,
+            project_dir_name=str(options.get('project_dir_name') or ''),
+            open_after_restore=bool(options.get('open_after_restore', True)),
+        )
         if job_id:
-            co.infobar('info', '恢复备份', f'恢复任务已提交 → {dest_root}')
+            co.infobar('info', '恢复备份', f'恢复为新项目，不覆盖当前项目 → {dest_root}')

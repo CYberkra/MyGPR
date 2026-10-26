@@ -111,6 +111,12 @@ NATIVE_ALGORITHMS: dict[str, NativeAlgorithm] = {
         parameter_schema=_schema(mode={"type": "str", "default": "remove_below"}, time_start_ns={"type": "float", "default": 0.0}, time_end_ns={"type": "float", "default": 0.0}),
         memory_multiplier=2.0, temporary_multiplier=1.0, relative_cost="low",
     ),
+    "trace_cut": NativeAlgorithm(
+        "trace_cut", "Trace-range crop", "preprocess", _lazy(f"{_ALG}.extended", "native_trace_cut"), "loaded_global",
+        implementation_version="native-extended-1.0",
+        parameter_schema=_schema(trace_start={"type": "int", "default": 1, "min": 1}, trace_end={"type": "int", "default": 0, "min": 0}),
+        memory_multiplier=2.0, temporary_multiplier=1.0, relative_cost="low",
+    ),
     "trace_qc": NativeAlgorithm(
         "trace_qc", "Trace quality control", "preprocess", _lazy(f"{_ALG}.extended", "native_trace_qc"), "loaded_global",
         implementation_version="native-extended-1.0",

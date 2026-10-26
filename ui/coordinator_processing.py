@@ -35,6 +35,9 @@ class ProcessingChain:
         self._submission_context = None
         self._submission_started_job = ''
         self._interpretation_snapshot = None
+        self._estimate_token = ''
+        self.batch_job_ids = set()
+        self.batch_errors = []
 
     # ============================================================ 信号注册
     def connect_all(self) -> None:
@@ -46,6 +49,8 @@ class ProcessingChain:
 
         # ---------------- 处理页（SPEC §6.5）
         processing.run_requested.connect(self.on_run_requested)
+        processing.batch_run_requested.connect(self.on_batch_run_requested)
+        processing.estimate_requested.connect(self.on_estimate_requested)
         processing.cancel_requested.connect(self.on_processing_cancel)
         processing.autotune_requested.connect(self.on_autotune_requested)
         processing.line_changed.connect(self.on_processing_line_changed)
@@ -88,6 +93,11 @@ class ProcessingChain:
             interpretation.undo_requested.connect(ic0.undo)
             interpretation.redo_requested.connect(ic0.redo)
             interpretation.save_requested.connect(ic0.save)
+            interpretation.properties_requested.connect(ic0.update_properties)
+            interpretation.zone_requested.connect(ic0.add_zone)
+            interpretation.borehole_save_requested.connect(ic0.save_borehole)
+            interpretation.borehole_compare_requested.connect(ic0.compare_boreholes)
+            interpretation.borehole_refresh_requested.connect(ic0.load_boreholes)
 
         # ---------------- 空间信息页：深度切片域
         spatial.depth_preview_requested.connect(self.on_depth_preview_requested)
@@ -106,6 +116,9 @@ class ProcessingChain:
                 prc.run_finished.connect(self.on_run_finished)
             if hasattr(prc, 'run_result_ready'):
                 prc.run_result_ready.connect(processing.set_run_result)
+            if hasattr(prc, 'estimate_finished'):
+                prc.estimate_finished.connect(self.on_estimate_finished)
+                prc.estimate_failed.connect(self.on_estimate_failed)
             prc.autotune_finished.connect(self.on_autotune_finished)
             prc.autotune_failed.connect(self.on_autotune_failed)
             prc.velocity_finished.connect(self.on_velocity_finished)
@@ -118,6 +131,10 @@ class ProcessingChain:
             ic.session_updated.connect(self.on_session_updated)
             ic.session_failed.connect(self.on_session_failed)
             ic.saved.connect(self.on_annotation_saved)
+            ic.saved_with_status.connect(interpretation.set_saved_status)
+            ic.borehole_comparisons_loaded.connect(interpretation.set_borehole_comparisons)
+            ic.borehole_failed.connect(
+                lambda message: self._co.infobar('error', '钻孔验证', message))
             ic.busy_changed.connect(interpretation.set_busy)
 
         # ---------------- 项目控制器：深度切片回包（代数门卫在本链）
@@ -126,6 +143,10 @@ class ProcessingChain:
             if hasattr(processing, 'comparison_preview_requested') and hasattr(pc, 'preview_comparison_line'):
                 processing.comparison_preview_requested.connect(pc.preview_comparison_line)
                 pc.comparison_preview_ready.connect(processing.set_comparison_preview)
+            processing.comparison_artifacts_requested.connect(pc.load_comparison_artifacts)
+            processing.comparison_artifact_preview_requested.connect(pc.preview_comparison_artifact)
+            pc.comparison_artifacts_ready.connect(processing._comparison.set_artifacts)
+            pc.comparison_artifact_preview_ready.connect(processing._comparison.deliver_artifact)
             if hasattr(pc, 'project_opened') and hasattr(processing, 'set_project_read_only'):
                 pc.project_opened.connect(lambda summary:
                     processing.set_project_read_only(bool(getattr(summary, 'read_only', False))))
@@ -135,6 +156,8 @@ class ProcessingChain:
                 pc.dataset_revision_ready.connect(processing.set_original_revision)
             if hasattr(processing, 'original_preview_requested'):
                 processing.original_preview_requested.connect(self.on_original_preview_requested)
+            interpretation.dielectric_apply_requested.connect(
+                lambda value: pc.apply_dielectric(str(self._co.project.current_line_id), float(value)))
             pc.artifacts_updated.connect(self._on_reconfigure_artifacts)
             pc.depth_preview_ready.connect(self.on_depth_preview_ready)
             pc.depth_layer_saved.connect(self.on_depth_layer_saved)
@@ -228,13 +251,60 @@ class ProcessingChain:
         try:
             job_id = self._co.processing_controller.run_pipeline(
                 self._co.current_project_id(), line_id, {'steps': steps}, result_name,
-                input_artifact_id=input_artifact_id)
+                input_artifact_id=input_artifact_id,
+                save_intermediates=bool(payload.get('save_intermediates', False)))
             # Legacy controllers may not publish run_submitted. Do not restart a
             # job whose immediate completion has already been handled.
             if job_id and str(job_id) != self._submission_started_job:
                 self.on_run_submitted(str(job_id))
         finally:
             self._submission_context = None
+
+    def on_batch_run_requested(self, payload: dict) -> None:
+        if self.processing_job_id or self.batch_job_ids:
+            self._co.infobar('warning', '批量处理', '已有处理任务运行中')
+            return
+        payload = dict(payload or {})
+        line_ids = [str(item) for item in payload.get('line_ids') or [] if str(item)]
+        steps = deepcopy(list(payload.get('steps') or []))
+        if not line_ids or not steps:
+            return
+        result_name = str(payload.get('result_name') or '处理结果').strip()
+        jobs = self._co.processing_controller.run_pipeline_batch(
+            self._co.current_project_id(), line_ids, {'steps': steps}, result_name,
+            input_artifact_ids=dict(payload.get('input_artifact_ids') or {}),
+            save_intermediates=bool(payload.get('save_intermediates', False)),
+        )
+        self.batch_job_ids = set(jobs)
+        self.batch_errors = []
+        self._co.infobar('info', '批量处理', f'已提交 {len(jobs)}/{len(line_ids)} 条测线')
+
+    def on_estimate_requested(self, payload: dict) -> None:
+        line_id = self._co.require_line()
+        if not line_id:
+            return
+        payload = dict(payload or {})
+        self._estimate_token = uuid.uuid4().hex
+        self._estimate_context = (str(self._co.current_project_id()), line_id)
+        self._co.processing_controller.estimate_pipeline(
+            self._estimate_token,
+            self._co.current_project_id(), line_id, payload,
+            input_artifact_id=str(payload.get('input_artifact_id') or ''),
+            save_intermediates=bool(payload.get('save_intermediates', False)),
+        )
+
+    def _estimate_callback_current(self, token):
+        context = getattr(self, '_estimate_context', ('', ''))
+        return (str(token) == self._estimate_token
+                and context == (str(self._co.current_project_id()), str(self._co.project.current_line_id)))
+
+    def on_estimate_finished(self, token, estimate) -> None:
+        if self._estimate_callback_current(token):
+            self._co.page('processingInterface').set_estimate_result(estimate)
+
+    def on_estimate_failed(self, token, message) -> None:
+        if self._estimate_callback_current(token):
+            self._co.page('processingInterface').set_estimate_failed(message)
 
     def on_run_submitted(self, job_id: str) -> None:
         if self._submission_context is None:
@@ -258,7 +328,22 @@ class ProcessingChain:
                 f'INFO 已请求取消处理任务 {self.processing_job_id}')
 
     def on_run_context_finished(self, job_id: str, success: bool, message: str) -> None:
-        if str(job_id) != self.processing_job_id:
+        job_id = str(job_id)
+        if job_id in self.batch_job_ids:
+            self.batch_job_ids.discard(job_id)
+            if not success:
+                self.batch_errors.append(message or job_id)
+            if self._co.project_controller is not None:
+                self._co.project_controller.refresh_artifacts(
+                    str(self._co.project.current_line_id))
+                self._co.project_controller.refresh_lines()
+            if not self.batch_job_ids:
+                if self.batch_errors:
+                    self._co.infobar('warning', '批量处理', f'完成，{len(self.batch_errors)} 条失败；详见任务记录')
+                else:
+                    self._co.infobar('success', '批量处理', '所选测线全部处理完成')
+            return
+        if job_id != self.processing_job_id:
             return
         self.on_run_finished(success, message)
 
@@ -417,6 +502,9 @@ class ProcessingChain:
                       ) or self._co.project.current_line_id
         interpretation.set_session_info(f'会话已打开（{line_id}）')
         interpretation.set_session_active(True)
+        annotation = getattr(snapshot, 'annotation', None)
+        interpretation.set_saved_status(getattr(annotation, 'status', 'draft'))
+        interpretation.set_annotation_metadata(annotation)
         self._co.infobar('success', '界面解释标注', f'标注会话已打开：{line_id}')
         if self._co.project_controller is not None and self._co.project.current_line_id:
             artifact_id = str(getattr(snapshot, 'input_artifact_id', '') or '')
@@ -433,8 +521,9 @@ class ProcessingChain:
         if not self._is_current_interpretation(snapshot):
             return
         self._interpretation_snapshot = snapshot
-        self._co.page('interpretationInterface').set_points(
-            self._snapshot_points(snapshot))
+        page = self._co.page('interpretationInterface')
+        page.set_points(self._snapshot_points(snapshot))
+        page._mark_review_required()
 
     def interpretation_uses_source(self, artifact_id: str) -> bool:
         """Only a live session may receive its artifact; raw is the default."""
@@ -469,12 +558,12 @@ class ProcessingChain:
         self._co.infobar('success', '界面解释标注', message or '标注已保存')
 
     # ============================================================ 深度切片域
-    def on_depth_preview_requested(self, line_ids: list) -> None:
+    def on_depth_preview_requested(self, line_ids: list, cell_size_m: float = 1.0) -> None:
         """空间页切到深度切片段 / 勾选变化 → 请求界面深度预览。"""
         pc = self._co.project_controller
         if pc is None or not self._co.require_project():
             return
-        pc.request_depth_preview(list(line_ids or []))
+        pc.request_depth_preview(list(line_ids or []), float(cell_size_m or 1.0))
 
     def on_depth_preview_ready(self, payload: dict, line_ids: list,
                                cell_size_m: float, generation: int) -> None:

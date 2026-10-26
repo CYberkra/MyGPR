@@ -99,9 +99,10 @@ def test_delivery_result_menu_has_stable_id_and_truthful_unsupported_actions(pag
     menu = page._spatial_result_menu(table.visualItemRect(table.item(0, 0)).center())
     action(menu, 'copy-id').trigger()
     assert QApplication.clipboard().text() == 'surface-v1'
-    for command in ('open-result', 'export-result', 'delete-result'):
-        assert not action(menu, command).isEnabled()
-        assert '未接通' in action(menu, command).text()
+    assert not action(menu, 'open-result').isEnabled()  # 未提供项目根目录时不可打开
+    assert action(menu, 'export-result').isEnabled()
+    assert action(menu, 'delete-result').isEnabled()
+    assert action(menu, 'set-current-result').isEnabled()
     page.set_spatial_results([dict(result_id='surface-v2', name='Other')])
     QApplication.clipboard().setText('unchanged')
     action(menu, 'copy-id').trigger()

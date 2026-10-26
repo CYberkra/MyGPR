@@ -226,6 +226,12 @@ class ProjectSessionPort(Protocol):
 
     def set_current_spatial_result(self, result_id: str) -> None: ...
 
+    def export_spatial_result(
+        self, result_id: str, destination: Path, *, format_name: str
+    ) -> Path: ...
+
+    def delete_spatial_result(self, result_id: str) -> Path: ...
+
     def build_georeference_3d(
         self,
         line_id: str,

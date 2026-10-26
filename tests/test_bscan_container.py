@@ -237,7 +237,7 @@ class TestProcessingPageTabModel:
         page.select_artifact('A1')
         bar = page._workspace.tab_bar()
         assert art.name in bar.tabText(0)
-        assert '低频漂移校正' in bar.tabText(0)
+        assert '去漂移' in bar.tabText(0)
         assert 'G1.1' not in bar.tabText(0)
         assert '结果号：A1' in bar.tabToolTip(0)
         assert 'window' in bar.tabToolTip(0) and '31' in bar.tabToolTip(0)

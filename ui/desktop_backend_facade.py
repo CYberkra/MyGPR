@@ -39,6 +39,7 @@ from core.method_registry_metadata import (
     PREFERRED_METHOD_ORDER,
 )
 from mygpr.domain.acquisition.models import SensorSyncSettings
+from mygpr.domain.interpretation.models import BoreholeRecord, InterpretationZone
 from mygpr.domain.processing.models import PipelineDefinition, PipelineStep
 
 __all__ = [
@@ -148,6 +149,7 @@ def tile_cache_dir() -> str:
 # 常见参数名 → 中文标签（注册表未提供 label 时的显示回退）
 _PARAM_LABELS = {
     "mode": "模式", "time_start_ns": "起始时间 (ns)", "time_end_ns": "结束时间 (ns)",
+    "trace_start": "起始道号（从1开始）", "trace_end": "结束道号（0=末道）",
     "new_zero_time": "新零时刻 (ns)", "window": "窗口长度", "strength": "强度",
     "smoothing_samples": "平滑采样数", "min_gain": "最小增益", "max_gain": "最大增益",
     "floor_ratio": "基底比例", "scale": "缩放系数", "target": "目标值",
@@ -183,7 +185,7 @@ def _extract_parameter_schema(raw: Mapping[str, Any]) -> tuple[dict, ...]:
     - ``params`` 为 list[spec]（core.methods_registry 侧，spec 自带 name）
 
     此前只读 ``parameter_schema`` 键，而 core 注册表实际叫 ``params``，
-    导致 36 个方法的参数 schema 传到 UI 全为空，参数表单无法构建、
+    导致方法的参数 schema 传到 UI 全为空，参数表单无法构建、
     "应用到选中步骤" 永远禁用 —— 本函数即该缺陷的修复点。
     """
     items: list[dict] = []
@@ -304,4 +306,6 @@ __all__ = [
     "validate_display_name",
     "JobEventType",
     "JobResultSummary",
+    "InterpretationZone",
+    "BoreholeRecord",
 ]

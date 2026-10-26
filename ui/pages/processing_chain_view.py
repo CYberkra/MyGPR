@@ -10,13 +10,14 @@ from ui.result_presentation import describe_artifact
 
 class ProcessingChainView:
     def _build_chain_view(self, layout):
-        self._saved_path = SavedSourcePath(self)
-        self._saved_path.source_requested.connect(self._workspace_source_open)
-        layout.addWidget(self._saved_path)
         self._chain_panel = QWidget(self)
+        self._chain_panel.setObjectName('processingChainPanel')
+        self._saved_path = SavedSourcePath(self._chain_panel)
+        self._saved_path.source_requested.connect(self._workspace_source_open)
         row = QHBoxLayout(self._chain_panel)
-        row.setContentsMargins(0, 0, 0, 0)
+        row.setContentsMargins(6, 3, 6, 3)
         row.setSpacing(6)
+        row.addWidget(self._saved_path)
         row.addWidget(CaptionLabel('待执行', self._chain_panel))
         self._chain_strip = ChainStrip(self._chain_panel)
         self._chain_input = CaptionLabel('输入：未选择 →', self._chain_panel)

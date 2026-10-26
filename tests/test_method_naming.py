@@ -21,6 +21,18 @@ def test_catalog_uses_one_name_per_stable_id():
         assert meta['description'].strip()
 
 
+def test_trace_cut_is_available_with_clear_application_parameters():
+    from ui.desktop_backend_facade import method_catalog
+
+    entry = next(item for item in method_catalog() if item.method_id == 'trace_cut')
+    assert entry.display_name == '测道裁剪'
+    assert entry.category == 'time_correction'
+    assert [(item['name'], item['label'], item['default']) for item in entry.parameter_schema] == [
+        ('trace_start', '起始道号（从1开始）', 1),
+        ('trace_end', '结束道号（0=末道）', 0),
+    ]
+
+
 def test_gain_labels_describe_the_existing_curves_instead_of_claiming_sec():
     from core.method_registry_metadata import METHOD_METADATA
 

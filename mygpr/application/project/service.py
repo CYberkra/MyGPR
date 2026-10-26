@@ -527,6 +527,17 @@ class ProjectService(ProjectIdentityServiceMixin):
     def set_current_spatial_result(self, project_id: str, result_id: str) -> None:
         self._session(project_id).set_current_spatial_result(result_id)
 
+    def export_spatial_result(
+        self, project_id: str, result_id: str, destination: str | Path, *,
+        format_name: str = "zip",
+    ) -> Path:
+        return self._session(project_id).export_spatial_result(
+            result_id, Path(destination), format_name=format_name
+        )
+
+    def delete_spatial_result(self, project_id: str, result_id: str) -> Path:
+        return self._session(project_id).delete_spatial_result(result_id)
+
     def build_georeference_3d(
         self,
         project_id: str,

@@ -234,7 +234,7 @@ def test_real_page_cannot_save_old_points_after_line_switch(qapp):
     page.set_points([(3, 4)])
     page.set_session_active(True)
     saved = []
-    page.save_requested.connect(lambda: saved.append(True))
+    page.save_requested.connect(lambda _status: saved.append(True))
     try:
         co.project.on_line_selected('L02')
         page._save_btn.click()

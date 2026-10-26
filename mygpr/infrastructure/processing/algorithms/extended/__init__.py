@@ -14,6 +14,7 @@ from .hilbert import method_hilbert_envelope
 from .inverse_q import method_inverse_q
 from .median_background import method_median_background_2d
 from .time_cut import method_time_cut
+from .trace_cut import method_trace_cut
 from .trace_qc import method_trace_qc
 from .wavelet import method_wavelet_2d
 
@@ -40,6 +41,10 @@ def _execute(function: ExtendedFunction, data: Any, params: dict[str, Any]):
 
 def native_time_cut(data: Any, params: dict[str, Any]):
     return _execute(method_time_cut, data, params)
+
+
+def native_trace_cut(data: Any, params: dict[str, Any]):
+    return _execute(method_trace_cut, data, params)
 
 
 def native_trace_qc(data: Any, params: dict[str, Any]):

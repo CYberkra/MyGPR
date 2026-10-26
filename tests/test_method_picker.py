@@ -55,6 +55,10 @@ class TestPickerWindowContract:
 
     def test_set_methods_forwards_to_browser(self, picker):
         assert len(picker._browser._methods) == 2
+        assert picker._count_label.text() == '2 个方法'
+        assert picker._title_label.text() == '添加处理步骤'
+        assert '双击添加' in picker._hint_label.text()
+        assert picker.minimumWidth() >= 520
 
     def test_reset_state_clears_search(self, picker):
         picker._browser._search.setText('agc')

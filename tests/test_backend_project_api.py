@@ -243,3 +243,71 @@ def test_project_api_processing_artifact_persists_output_axes(tmp_path: Path) ->
         assert header['time_axis_endpoint'] is False
     finally:
         backend.shutdown()
+
+
+def test_project_api_trace_crop_persists_axes_for_followup_processing(tmp_path: Path) -> None:
+    backend = MyGPRBackend.create_default(max_workers=1)
+    try:
+        summary = backend.projects.create_project(tmp_path / "trace-crop", name="Trace crop")
+        source = np.arange(120, dtype=np.float32).reshape(12, 10)
+        backend.projects.save_line_dataset(
+            summary.project_id, "L01", source, name="L01",
+            length_m=9.0, time_window_ns=24.0,
+        )
+        first_job = backend.submit_project_pipeline(
+            summary.project_id,
+            "L01",
+            PipelineDefinition(name="crop", steps=(PipelineStep(
+                "trace_cut", {"trace_start": 3, "trace_end": 6},
+            ),)),
+            result_name="第3至6道",
+        )
+        first = backend.jobs.wait(first_job, timeout=30)
+        assert first.status is JobStatus.COMPLETED, first.error_message
+        first_artifact = first.result
+        reopened = backend.projects.read_artifact_dataset(
+            summary.project_id, "L01", first_artifact.artifact_id,
+        )
+        np.testing.assert_array_equal(reopened.data, source[:, 2:6])
+        assert reopened.header_info["length_m"] == pytest.approx(3.0)
+        np.testing.assert_allclose(reopened.header_info["distance_axis_m"], [0.0, 1.0, 2.0, 3.0])
+        assert reopened.header_info["time_window_ns"] == pytest.approx(24.0)
+        assert reopened.header_info["source_trace_offset"] == 2
+
+        second_job = backend.submit_project_pipeline(
+            summary.project_id,
+            "L01",
+            PipelineDefinition(name="crop again", steps=(PipelineStep(
+                "trace_cut", {"trace_start": 2, "trace_end": 3},
+            ),)),
+            input_artifact_id=first_artifact.artifact_id,
+            result_name="原第4至5道",
+        )
+        second = backend.jobs.wait(second_job, timeout=30)
+        assert second.status is JobStatus.COMPLETED, second.error_message
+        cropped_again = backend.projects.read_artifact_dataset(
+            summary.project_id, "L01", second.result.artifact_id,
+        )
+        np.testing.assert_array_equal(cropped_again.data, source[:, 3:5])
+        assert cropped_again.header_info["length_m"] == pytest.approx(1.0)
+        assert cropped_again.header_info["source_trace_offset"] == 3
+
+        combined_job = backend.submit_project_pipeline(
+            summary.project_id,
+            "L01",
+            PipelineDefinition(name="two crops", steps=(
+                PipelineStep("trace_cut", {"trace_start": 3, "trace_end": 6}),
+                PipelineStep("trace_cut", {"trace_start": 2, "trace_end": 3}),
+            )),
+            result_name="同链连续裁剪",
+        )
+        combined = backend.jobs.wait(combined_job, timeout=30)
+        assert combined.status is JobStatus.COMPLETED, combined.error_message
+        combined_data = backend.projects.read_artifact_dataset(
+            summary.project_id, "L01", combined.result.artifact_id,
+        )
+        np.testing.assert_array_equal(combined_data.data, source[:, 3:5])
+        assert combined_data.header_info["length_m"] == pytest.approx(1.0)
+        assert combined_data.header_info["source_trace_offset"] == 3
+    finally:
+        backend.shutdown()

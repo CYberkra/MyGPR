@@ -3,6 +3,7 @@
 """Spatial-track and versioned-result persistence mixin."""
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 import numpy as np
@@ -215,6 +216,19 @@ class SpatialPersistenceMixin:
         with self._lock:
             self._store.assert_writable()
             SpatialResultVersionService(self._store).set_current(str(result_id))
+
+    def export_spatial_result(
+        self, result_id: str, destination: Path, *, format_name: str
+    ) -> Path:
+        with self._lock:
+            return SpatialResultVersionService(self._store).export_result(
+                str(result_id), Path(destination), format_name=str(format_name)
+            )
+
+    def delete_spatial_result(self, result_id: str) -> Path:
+        with self._lock:
+            self._store.assert_writable()
+            return SpatialResultVersionService(self._store).move_to_recycle_bin(str(result_id))
 
     def build_georeference_3d(
         self,

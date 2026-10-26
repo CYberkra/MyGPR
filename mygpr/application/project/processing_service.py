@@ -31,6 +31,7 @@ _OUTPUT_HEADER_KEYS = (
     "total_time_ns", "time_window_ns", "time_cut_offset_ns",
     "a_scan_length", "num_traces", "dielectric_constant", "axis_transform",
     "time_axis_endpoint", "time_step_s", "distance_axis_status",
+    "track_length_m", "trace_interval_m", "source_trace_offset",
 )
 
 
@@ -92,13 +93,16 @@ class ProjectProcessingService:
         pipeline: PipelineDefinition,
         *,
         input_artifact_id: str = "",
+        save_intermediates: bool = False,
     ) -> ResourceEstimate:
         info = (
             self._projects.get_artifact_dataset_info(project_id, line_id, input_artifact_id)
             if input_artifact_id else self._projects.get_dataset_info(project_id, line_id)
         )
         return self._processing.estimate_pipeline_shape(
-            info.shape, info.dtype, pipeline, header_info=self._header_from_info(info)
+            info.shape, info.dtype, pipeline,
+            allow_chunking=not save_intermediates,
+            header_info=self._header_from_info(info),
         )
 
     def execute_pipeline(

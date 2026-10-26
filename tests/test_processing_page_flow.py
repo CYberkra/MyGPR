@@ -92,7 +92,7 @@ class TestUserPathRegression:
         # 3-4. Staying on the submitted input allows final-result activation.
         _run_and_feed(page, 'G1', [('R1', 'dewow'), ('R2', 'sec_gain'),
                                    ('R3', 'agc')], 10.0)
-        assert workspace.tab_keys() == ['original', 'artifact:R3']
+        assert workspace.tab_keys() == ['original', 'artifact:R1', 'artifact:R2', 'artifact:R3']
         assert page.current_pipeline()['input_artifact_id'] == 'R3'
         assert page.current_pipeline()['steps'] == []
         assert workspace.primary_view() is view
@@ -111,13 +111,16 @@ class TestUserPathRegression:
         # 6. Reordering the new draft preserves the completed run and tabs.
         page._pipeline_list._move_step_to(0, 2)
         assert view._matrix is first_result
-        assert workspace.tab_keys() == ['original', 'artifact:R3']
+        assert workspace.tab_keys() == ['original', 'artifact:R1', 'artifact:R2', 'artifact:R3']
         assert [s['method_id'] for s in page.current_pipeline()['steps']] == ['sec_gain', 'dewow', 'agc']
 
         # 7. The new run extends R3; all old saved results remain catalogued.
         _run_and_feed(page, 'G2', [('T1', 'sec_gain'), ('T2', 'dewow'),
                                    ('T3', 'agc')], 20.0)
-        assert workspace.tab_keys() == ['original', 'artifact:R3', 'artifact:T3']
+        assert workspace.tab_keys() == [
+            'original', 'artifact:R1', 'artifact:R2', 'artifact:R3',
+            'artifact:T1', 'artifact:T2', 'artifact:T3',
+        ]
         assert page.current_pipeline()['input_artifact_id'] == 'T3'
         assert page.current_pipeline()['steps'] == []
         assert set(page._artifacts_by_id) == {'R1', 'R2', 'R3', 'T1', 'T2', 'T3'}

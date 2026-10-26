@@ -144,7 +144,7 @@ def _artifact_node(artifact: Any, artifacts=()) -> TreeNode:
                    f'{getattr(artifact, "dtype", "") or ""}'.strip())
     presentation = describe_artifact(artifact, artifacts)
     return TreeNode(
-        key=f'artifact:{artifact_id}', kind='artifact', text=presentation.title,
+        key=f'artifact:{artifact_id}', kind='artifact', text=presentation.tab_title,
         payload=artifact_id, aux=line_id, suffix=method,
         tooltip=presentation.tooltip+'\n'+'\n'.join(tip))
 

@@ -300,6 +300,24 @@ class MyGPRBackend:
             ),
         )
 
+    def estimate_project_pipeline(
+        self,
+        project_id: str,
+        line_id: str,
+        pipeline: PipelineDefinition,
+        *,
+        input_artifact_id: str = "",
+        save_intermediates: bool = False,
+    ):
+        """Estimate the exact loaded/block execution mode before submission."""
+        return self.project_processing.estimate_pipeline(
+            project_id,
+            line_id,
+            pipeline,
+            input_artifact_id=input_artifact_id,
+            save_intermediates=save_intermediates,
+        )
+
     def submit_project_pipeline(
         self,
         project_id: str,
@@ -454,6 +472,26 @@ class MyGPRBackend:
 
         return self._submit_project_job(
             project_id, title or f"生成空间成果: {name}", operation
+        )
+
+    def submit_spatial_export(
+        self, project_id: str, result_id: str, destination: str | Path, *,
+        format_name: str = "zip", title: str | None = None,
+    ) -> str:
+        return self._submit_project_job(
+            project_id,
+            title or f"导出空间成果: {result_id}",
+            lambda context: self.spatial.export_result(
+                project_id, result_id, destination,
+                format_name=format_name, context=context,
+            ),
+        )
+
+    def submit_spatial_delete(self, project_id: str, result_id: str, *, title: str | None = None) -> str:
+        return self._submit_project_job(
+            project_id,
+            title or f"移除空间成果: {result_id}",
+            lambda _context: self.spatial.delete_result(project_id, result_id),
         )
 
     def build_georeference_3d(

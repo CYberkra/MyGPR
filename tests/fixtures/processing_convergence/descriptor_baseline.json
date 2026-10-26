@@ -1200,6 +1200,34 @@
     },
     "visibility": "public"
   },
+  "trace_cut": {
+    "auto_tune_enabled": false,
+    "auto_tune_family": "",
+    "auto_tune_stage": "",
+    "capabilities": [
+      "cancellable",
+      "global_transform",
+      "loaded_global",
+      "native",
+      "ndarray"
+    ],
+    "category": "time_correction",
+    "implementation_version": "native-extended-1.0",
+    "name": "测道裁剪",
+    "parameter_schema": {
+      "trace_end": {
+        "default": 0,
+        "min": 0,
+        "type": "int"
+      },
+      "trace_start": {
+        "default": 1,
+        "min": 1,
+        "type": "int"
+      }
+    },
+    "visibility": "public"
+  },
   "trace_qc": {
     "auto_tune_enabled": false,
     "auto_tune_family": "",

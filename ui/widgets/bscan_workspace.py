@@ -224,6 +224,7 @@ class _ViewGroup(QWidget):
 
 class BScanWorkspace(QWidget):
     active_changed = pyqtSignal(str)
+    source_activated_by_user = pyqtSignal(str)
     source_closed = pyqtSignal(str)
     preview_requested = pyqtSignal(str)
     source_context_requested = pyqtSignal(str, object)
@@ -331,7 +332,7 @@ class BScanWorkspace(QWidget):
         return group.current_key() if group else ''
 
     def views(self) -> list[BScanView]:
-        return [self._groups[gid].view for gid in self.group_ids()]
+        return [self._groups[gid].view for gid in self.group_ids() if gid in self._groups]
 
     def all_views(self) -> list[BScanView]:
         return self.views()
@@ -370,6 +371,7 @@ class BScanWorkspace(QWidget):
         if index >= 0:
             group.tabs.setCurrentIndex(index)
             self._activate_group(group)
+            self.source_activated_by_user.emit(group.current_key())
 
     def _sync(self):
         if self._active_group not in self._groups:

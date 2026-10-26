@@ -137,6 +137,21 @@ def test_completion_uses_the_submitted_job_result_not_another_newer_run(page):
     assert page.current_pipeline()['input_artifact_id'] == 'mine'
 
 
+def test_completed_run_opens_every_saved_step_and_activates_final(page):
+    page._save_intermediates_check.setChecked(True)
+    page._pipeline_list.add_step('dewow', 'Dewow', {'window': 23})
+    page.set_running(True, 'job')
+    page.set_run_result('job', 'C')
+    page.set_running(False, success=True)
+    page.set_artifacts([
+        artifact('A', step=1, run='R1'),
+        artifact('B', parent='A', step=2, run='R1'),
+        artifact('C', parent='B', step=3, run='R1'),
+    ])
+    assert page._workspace.tab_keys() == ['original', 'artifact:A', 'artifact:B', 'artifact:C']
+    assert page.current_pipeline()['input_artifact_id'] == 'C'
+
+
 def test_final_only_run_cannot_reconfigure_last_step_without_saved_input(page):
     final = artifact('final', step=2)
     final.manifest = {'params': {**dict(final.manifest['params']),
@@ -389,6 +404,17 @@ def test_late_first_raw_preview_never_replaces_a_selected_artifact(qapp, failed)
     value.deleteLater()
 
 
+def test_result_tab_is_compact_and_details_live_in_tooltip_and_menu(page):
+    page.select_artifact('A')
+    bar = page._workspace.tab_bar()
+    assert bar.tabText(bar.currentIndex()) == 'L01｜去漂移'
+    assert 'window' in bar.tabToolTip(bar.currentIndex())
+    assert '23' in bar.tabToolTip(bar.currentIndex())
+    assert not hasattr(page, '_effect_row_widget')
+    menu = page._source_menu('artifact:A')
+    assert any(action.data() == 'source-info' for action in menu.actions())
+
+
 @pytest.mark.parametrize('failed', [False, True])
 def test_late_first_raw_preview_keeps_a_user_closed_workspace_empty(qapp, failed):
     value = ProcessingPage()
@@ -404,3 +430,14 @@ def test_late_first_raw_preview_keeps_a_user_closed_workspace_empty(qapp, failed
     assert value._workspace.active_key() == ''
     value.close()
     value.deleteLater()
+
+
+def test_workspace_views_tolerate_group_removal_during_preference_refresh(qapp):
+    from ui.widgets.bscan_workspace import BScanWorkspace
+
+    workspace = BScanWorkspace()
+    for group_id in workspace.group_ids():
+        del workspace._groups[group_id]
+    assert workspace.views() == []
+    workspace.close()
+    workspace.deleteLater()

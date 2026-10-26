@@ -452,6 +452,7 @@ class ChainStrip(QWidget):
             f'border-radius:{radius("lg")}px')
         self._pill.hide()
         self._pill_anim = QPropertyAnimation(self._pill, b'geometry')
+        self.destroyed.connect(self._pill_anim.stop)
         self._pill_anim.setDuration(180)
         self._pill_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
 

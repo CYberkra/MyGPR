@@ -212,10 +212,11 @@ def test_corrupted_sidecar_falls_back_to_legacy_container_group(tmp_path: Path) 
     matrix = np.ones((32, 24), dtype=np.float32)
     sidecar = artifacts_dir_path(container) / "L01_legacy.h5"
     with h5py.File(container, "r+", libver="latest") as handle:
+        handle["raw"].attrs["committed_at"] = "2026-01-01T00:00:00+00:00"
         group = handle.require_group("processing/artifacts/L01_legacy")
         group.create_dataset("bscan", data=matrix)
         group.attrs["status"] = "committed"
-        group.attrs["manifest_json"] = "{}"
+        group.attrs["manifest_json"] = '{"committed_at": "2026-01-01T00:00:01+00:00"}'
     # 造一个损坏的 sidecar（同名 artifact，截断的字节）
     sidecar.parent.mkdir(parents=True, exist_ok=True)
     sidecar.write_bytes(b"\x89HDF\r\n\x1a\n" + b"\x00" * 64)
@@ -226,7 +227,7 @@ def test_corrupted_sidecar_falls_back_to_legacy_container_group(tmp_path: Path) 
     record = read_processing_artifact_record(container, "L01_legacy")
     assert record["h5_file"] == str(container)
     assert record["status"] == "committed"
-    assert read_processing_manifest(container, "L01_legacy") == {}
+    assert read_processing_manifest(container, "L01_legacy")["committed_at"]
     ds = load_processing_dataset(container, artifact_id="L01_legacy")
     assert np.array_equal(np.asarray(ds.matrix), matrix)
     assert list_processing_artifact_ids(container) == ["L01_legacy"]

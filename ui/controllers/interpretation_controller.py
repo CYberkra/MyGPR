@@ -11,6 +11,7 @@ from typing import Any, Callable
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
 
 from ui.controllers.backend_controller import friendly_error_message, run_command
+from ui.desktop_backend_facade import BoreholeRecord, InterpretationZone
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -40,6 +41,10 @@ class InterpretationController(QObject):
     session_updated = pyqtSignal(object)
     session_failed = pyqtSignal(str)
     saved = pyqtSignal(str)                # message
+    saved_with_status = pyqtSignal(str)
+    boreholes_loaded = pyqtSignal(list)
+    borehole_comparisons_loaded = pyqtSignal(list)
+    borehole_failed = pyqtSignal(str)
     busy_changed = pyqtSignal(bool)
     _completed = pyqtSignal(object)
     _worker_busy = pyqtSignal(int, bool)
@@ -151,6 +156,7 @@ class InterpretationController(QObject):
             self.log_message.emit("标注已保存")
             if self._is_current_context(context):
                 self.saved.emit("标注已保存")
+                self.saved_with_status.emit(str(getattr(snapshot, 'status', 'draft') or 'draft'))
         elif completion.kind == "failed":
             self.log_message.emit(completion.message)
             if self._is_current_context(context):
@@ -208,6 +214,42 @@ class InterpretationController(QObject):
 
     def redo(self) -> None:
         self._run_edit("重做", lambda service, sid: service.redo(sid))
+
+    def update_properties(self, values: dict) -> None:
+        values = dict(values or {})
+
+        def apply(service, session_id):
+            if 'uncertainty_samples' in values:
+                service.set_uncertainty(
+                    session_id, width_samples=float(values['uncertainty_samples']))
+            return service.update_properties(
+                session_id,
+                name=str(values.get('name') or '基覆界面'),
+                note=str(values.get('note') or ''),
+                interface_type=str(values.get('interface_type') or 'basal_interface'),
+                confidence=float(values.get('confidence', 0.8)),
+            )
+
+        self._run_edit("更新解释属性", apply)
+
+    def add_zone(self, values: dict) -> None:
+        values = dict(values or {})
+        self._run_edit(
+            "添加语义区段",
+            lambda service, sid: service.add_zone(sid, InterpretationZone(**values)),
+        )
+
+    def load_boreholes(self) -> None:
+        run_command(_BoreholeCommand(self, 'load'), name='mygpr-boreholes-load')
+
+    def save_borehole(self, values: dict) -> None:
+        run_command(_BoreholeCommand(self, 'save', values), name='mygpr-borehole-save')
+
+    def compare_boreholes(self, threshold_m: float = 1.0) -> None:
+        run_command(
+            _BoreholeCommand(self, 'compare', {'threshold_m': float(threshold_m)}),
+            name='mygpr-boreholes-compare',
+        )
 
     # ------------------------------------------------------------------
     def save(self, status: str = "draft") -> None:
@@ -330,6 +372,40 @@ class _SaveSessionCommand(_SessionCommand):
 
     def _perform(self, service: Any) -> Any:
         return service.save_session(self._context.session_id, status=str(self._status or "draft"))
+
+
+class _BoreholeCommand:
+    __slots__ = ("_controller", "_action", "_values", "_project_id", "_line_id")
+
+    def __init__(self, controller, action, values=None):
+        self._controller = controller
+        self._action = str(action)
+        self._values = dict(values or {})
+        self._project_id = controller._project_id
+        self._line_id = controller._line_id
+
+    def execute(self):
+        c = self._controller
+        backend = c._backend()
+        if backend is None:
+            c.borehole_failed.emit("后端尚未就绪")
+            return
+        service = backend.interpretation
+        try:
+            if self._action == 'save':
+                values = {**self._values, 'line_id': self._line_id}
+                service.save_borehole(self._project_id, BoreholeRecord(**values))
+            if self._action == 'compare':
+                comparisons = service.compare_boreholes(
+                    self._project_id,
+                    self._line_id,
+                    threshold_m=float(self._values.get('threshold_m', 1.0)),
+                )
+                c.borehole_comparisons_loaded.emit(list(comparisons))
+            else:
+                c.boreholes_loaded.emit(list(service.list_boreholes(self._project_id)))
+        except Exception as exc:  # noqa: BLE001
+            c.borehole_failed.emit(friendly_error_message(exc))
 
 
 class _CloseSessionCommand:

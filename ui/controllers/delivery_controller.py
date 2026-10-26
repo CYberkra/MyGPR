@@ -108,7 +108,39 @@ class DeliveryController(QObject):
             ),
         )
 
-    def generate_report(self, project_id: str, package_name: str = "") -> str | None:
+    def export_spatial(self, project_id: str, options: dict) -> str | None:
+        options = dict(options or {})
+        result_id = str(options.get('result_id') or '')
+        destination = str(options.get('destination') or '')
+        if not result_id or not destination:
+            return None
+        return self._submit_and_watch(
+            f"导出空间成果 {result_id}",
+            lambda backend: backend.submit_spatial_export(
+                str(project_id), result_id, destination,
+                format_name=str(options.get('format_name') or 'zip'),
+            ),
+        )
+
+    def delete_spatial(self, project_id: str, result_id: str) -> str | None:
+        def _on_done(success, message, _result):
+            if success:
+                self.refresh_spatial(project_id)
+            else:
+                self.log_message.emit(f"移除空间成果失败：{message}")
+        return self._submit_and_watch(
+            f"移除空间成果 {result_id}",
+            lambda backend: backend.submit_spatial_delete(str(project_id), str(result_id)),
+            on_done=_on_done,
+        )
+
+    def set_spatial_current(self, project_id: str, result_id: str) -> None:
+        run_command(
+            _SpatialCurrentCommand(self, str(project_id), str(result_id)),
+            name='mygpr-spatial-current',
+        )
+
+    def generate_report(self, project_id: str, package_name: str = "", report_profile: dict | None = None) -> str | None:
         context = _DeliveryReadCommand(self, str(project_id))
 
         def _on_done(success: bool, message: str, result: Any) -> None:
@@ -125,6 +157,7 @@ class DeliveryController(QObject):
             lambda backend: backend.submit_project_report(
                 str(project_id),
                 package_name=str(package_name) or None,
+                report_profile=dict(report_profile or {}),
             ),
             on_done=_on_done,
         )
@@ -166,12 +199,15 @@ class DeliveryController(QObject):
             ),
         )
 
-    def restore_project(self, archive_path: str, dest_root: str) -> str | None:
+    def restore_project(self, archive_path: str, dest_root: str, *,
+                        project_dir_name: str = "", open_after_restore: bool = True) -> str | None:
         return self._submit_and_watch(
-            "恢复项目备份",
+            "恢复项目备份为新项目",
             lambda backend: backend.submit_project_restore(
                 str(archive_path),
                 str(dest_root),
+                project_dir_name=str(project_dir_name or "") or None,
+                open_after_restore=bool(open_after_restore),
             ),
         )
 
@@ -214,6 +250,27 @@ class _SpatialRefreshCommand(_DeliveryReadCommand):
             self._publish("log_message", f"刷新空间成果失败：{friendly_error_message(exc)}")
         else:
             self._publish("spatial_results_updated", results)
+
+
+class _SpatialCurrentCommand(_SpatialRefreshCommand):
+    __slots__ = ("_result_id",)
+
+    def __init__(self, controller, project_id, result_id):
+        super().__init__(controller, project_id)
+        self._result_id = str(result_id)
+
+    def execute(self):
+        if not self._context_is_current():
+            return
+        backend = self._controller._backend()
+        if backend is None:
+            return
+        try:
+            backend.spatial.set_current(self._project_id, self._result_id)
+        except Exception as exc:  # noqa: BLE001
+            self._publish("log_message", f"设置当前空间成果失败：{friendly_error_message(exc)}")
+        else:
+            super().execute()
 
 
 class _ReportsRefreshCommand(_DeliveryReadCommand):

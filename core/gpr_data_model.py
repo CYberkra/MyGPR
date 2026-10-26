@@ -146,7 +146,7 @@ class GPRDataSet:
         payload = {item.name: deepcopy(getattr(self, item.name)) for item in fields(self) if item.name not in buffers}
         payload["schema"] = GPR_DATA_SCHEMA
         payload["length_m"] = self.length_m
-        for key in ("distance_axis_status", "time_axis_endpoint", "time_cut_offset_ns", "time_step_s"):
+        for key in ("distance_axis_status", "time_axis_endpoint", "time_cut_offset_ns", "time_step_s", "source_trace_offset"):
             if key in self.metadata:
                 payload[key] = self.metadata[key]
         return payload

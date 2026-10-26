@@ -67,6 +67,21 @@ class TestSessionGating:
         page.set_busy(False)
         assert page._auto_trace_btn.isEnabled()
 
+    def test_confirm_action_emits_confirmed_status(self, qapp):
+        page = InterpretationPage()
+        page.set_session_active(True)
+        statuses = []
+        page.save_requested.connect(statuses.append)
+        page._confirm_btn.click()
+        assert statuses == ['confirmed']
+
+    def test_editing_confirmed_annotation_marks_review_required(self, qapp):
+        page = InterpretationPage()
+        page.set_session_active(True)
+        page.set_saved_status('confirmed')
+        page._on_point_picked(3, 4)
+        assert '需重新确认' in page._session_status_label.text()
+
 
 class TestSetBundleNoneGuard:
     """P0-1 配套守卫：协调器项目直切时 set_bundle(None) 清残留——

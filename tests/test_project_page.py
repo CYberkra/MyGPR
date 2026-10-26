@@ -93,8 +93,12 @@ def test_file_fields_fit_inside_sidebar(qapp):
     page.resize(1200, 650)
     page.show()
     qapp.processEvents()
-    for field in (page.file_edit, *page._sensor_edits.values()):
-        row = field.parentWidget().layout()
-        assert row.minimumSize().width() <= field.parentWidget().width()
+    row = page.file_edit.parentWidget().layout()
+    assert row.minimumSize().width() <= page.file_edit.parentWidget().width()
+    page._sync_dialog.show()
+    qapp.processEvents()
+    assert page._sync_form.minimumSize().width() <= page._sync_dialog.width()
+    for field in page._sensor_edits.values():
+        assert field.width() <= page._sync_form.width()
     assert page.rect().contains(page.import_btn.mapTo(page, page.import_btn.rect().center()))
     page.close()

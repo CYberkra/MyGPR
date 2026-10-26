@@ -1,4 +1,6 @@
 """Trace-aligned sensor availability, shown without implying field accuracy."""
+import json
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QFrame, QGridLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
@@ -58,6 +60,9 @@ class SensorDetailsPanel(QWidget):
         column.addWidget(self._table)
         self._note = self._label(_NOTE)
         column.addWidget(self._note)
+        self._diagnostics_label = self._label('')
+        self._diagnostics_label.hide()
+        column.addWidget(self._diagnostics_label)
         self.set_message('选择测线后可查看传感器完整性。')
         self.apply_theme(False)
 
@@ -147,6 +152,22 @@ class SensorDetailsPanel(QWidget):
             self._separators[index].show()
         self.setAccessibleDescription(summary)
         self.apply_theme(self._dark)
+
+    def set_sync_result(self, result):
+        if result is None:
+            self._diagnostics_label.clear()
+            self._diagnostics_label.hide()
+            return
+        summary = str(getattr(result, 'summary', '') or '')
+        diagnostics = getattr(result, 'diagnostics', {}) or {}
+        config = getattr(result, 'config', {}) or {}
+        text = '同步诊断与本次配置\n' + (summary + '\n' if summary else '')
+        if diagnostics:
+            text += json.dumps(dict(diagnostics), ensure_ascii=False, indent=2, default=str)
+        if config:
+            text += '\n配置\n' + json.dumps(dict(config), ensure_ascii=False, indent=2, default=str)
+        self._diagnostics_label.setText(text.strip())
+        self._diagnostics_label.show()
 
     def text(self) -> str:
         """Plain-text equivalent for accessibility and existing summary consumers."""

@@ -42,11 +42,14 @@ mygpr
   drafts and versioned direct dependencies for new result branches.
 - New projects use per-line HDF5 arrays plus a SQLite catalog; legacy project
   layouts remain a compatibility path. See [Hybrid Store](docs/developer/HYBRID_PROJECT_STORE_V1.md).
-- Project imports accept CSV/TXT/NPY/NPZ/H5/HDF5. CDUT acquisition HDF5 retains
-  timing, component and aligned sensor gaps for completed files marked `real`/`magnitude`.
-  Parent `fdata` and acquisition files without a component marker remain unsupported.
-  Vendor binary readers are present
-  but are not wired into the project import wizard.
+- Project imports accept single or multiple CSV/TXT/NPY/NPZ/H5/HDF5 files and provide an application-side quality center. CDUT acquisition HDF5 retains
+  timing, component and aligned sensor gaps for completed files marked `real`/`mag`/`magnitude`/`fdata`;
+  `fdata` remains explicitly identified as instrument-display sampling. Acquisition files without a component marker remain unsupported.
+  Vendor binary readers are present but are not wired into the project import wizard.
+- The application exposes batch processing with resource estimates, saved-step results by default and optional block-friendly final-only execution,
+  sensor calibration templates, annotation confirmation and borehole checks, spatial exports,
+  configurable report packages, and restore-to-new-project. Processing result tabs show compact
+  processing actions and parameters from persisted lineage rather than opaque result names.
 - CLI jobs use explicit `methods`; `recommended_profile` has been removed.
 - `config/architecture_policy.toml` now declares `[layers.ui]` with a migration
   exception for `desktop_backend_facade.py`.

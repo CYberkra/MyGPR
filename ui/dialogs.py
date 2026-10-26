@@ -123,6 +123,37 @@ def choose_processing_package_path(
     return path
 
 
+def choose_spatial_export_path(parent: QWidget | None, result_id: str) -> tuple[str, str]:
+    from ui import file_dialogs
+
+    filters = (
+        "空间成果包 ZIP (*.zip);;GeoJSON (*.geojson);;CSV (*.csv);;"
+        "KML (*.kml);;GeoPackage (*.gpkg);;Shapefile (*.shp)"
+    )
+    path, selected = file_dialogs.getSaveFileName(
+        parent, "导出空间成果", str(Path.home() / "Documents" / f"{result_id}.zip"),
+        filters, confirm_overwrite=False,
+    )
+    if not path:
+        return "", ""
+    suffix = Path(path).suffix.lower().lstrip('.')
+    if suffix not in {'zip', 'geojson', 'csv', 'kml', 'gpkg', 'shp'}:
+        suffix = next((fmt for fmt in ('geojson', 'csv', 'kml', 'gpkg', 'shp', 'zip')
+                       if fmt in selected.lower()), 'zip')
+    return path, suffix
+
+
+def ask_spatial_delete(parent: QWidget | None, result_id: str) -> bool:
+    box = MessageBox(
+        "移除空间成果",
+        f"将把空间成果 {result_id} 移入项目回收站，不影响测线、处理成果和解释标注。确认继续？",
+        parent.window() if parent is not None else None,
+    )
+    box.yesButton.setText("移入回收站")
+    box.cancelButton.setText("取消")
+    return box.exec() == 1
+
+
 def ask_discard_interpretation(parent: QWidget | None, line_id: str) -> bool:
     """Discard only after explicit consent; cancelling keeps the edit session."""
     box = MessageBox(

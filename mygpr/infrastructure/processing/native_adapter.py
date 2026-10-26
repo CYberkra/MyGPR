@@ -1,7 +1,7 @@
 """Native processing catalog/executor (converged single implementation).
 
 自任务 F 候选 2 收敛起，native 目录/执行器是唯一实现：
-``NATIVE_ALGORITHMS`` 覆盖全部历史方法（36/36），展示元数据经
+``NATIVE_ALGORITHMS`` 覆盖全部历史方法（全部已迁移方法），展示元数据经
 :mod:`metadata_bridge` 取自 core 单一事实来源；旧 Legacy/Composite 适配器已拆除。
 """
 from __future__ import annotations
@@ -38,7 +38,7 @@ def _native_algorithms() -> dict:
 class NativeProcessingCatalog(ProcessingCatalogPort):
     """Catalog for methods migrated from the historical engine.
 
-    ``NATIVE_ALGORITHMS`` 覆盖全部历史方法（36/36）。展示元数据（中文
+    ``NATIVE_ALGORITHMS`` 覆盖全部历史方法（全部已迁移方法）。展示元数据（中文
     display_name、category、visibility、auto_tune_*）经
     :mod:`metadata_bridge` 取自 core 单一事实来源，与旧 Composite 目录输出等价
     （由 ``tests/test_native_convergence_baseline.py`` 的 descriptor 基线断言）。

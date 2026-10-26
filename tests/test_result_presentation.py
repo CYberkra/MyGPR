@@ -105,7 +105,7 @@ def test_resource_tree_uses_same_executed_algorithm_summary(presentation):
     item = artifact("A", ["dewow", "agcGain"])
     expected = presentation(item, [item])
     node = build_lineage_model([item], "L01")[0].children[0]
-    assert node.text == expected.title
+    assert node.text == expected.tab_title
     assert "window" in node.tooltip
 
 
@@ -123,8 +123,65 @@ def test_final_only_result_shows_all_executed_steps_without_inventing_saved_inpu
     assert any("漂移" in b.text() for b in buttons)
     first = next(b for b in buttons if "漂移" in b.text())
     assert not first.isEnabled()  # executed, but its matrix was never saved
-    assert any("AGC" in b.text() and b.isEnabled() for b in buttons)
+    assert any("增益" in b.text() and b.isEnabled() for b in buttons)
     assert "window" in page._workspace.tab_bar().tabToolTip(page._workspace.tab_bar().currentIndex())
     page.close()
     page.deleteLater()
     qapp.processEvents()
+
+
+def test_tab_title_uses_short_processing_actions(presentation):
+    item = artifact("A", ["dewow", "subtracting_average_2D", "agcGain"])
+    result = presentation(item, [item])
+    assert result.tab_title == "L01｜去漂移 → 抑背景 → 增益"
+    assert "低频漂移校正" not in result.tab_title
+
+
+def test_trace_crop_label_stays_short_and_parameters_remain_in_details(presentation):
+    item = artifact("A", ["trace_cut"])
+    item.manifest["params"]["lineage"][0]["params"] = {"trace_start": 21, "trace_end": 120}
+    result = presentation(item, [item])
+    assert result.tab_title == "L01｜测道裁剪"
+    assert "trace_start" not in result.tab_title
+    assert "trace_start" in result.tooltip and "21" in result.tooltip
+
+
+def test_long_chain_tab_title_summarizes_processing_purposes(presentation):
+    item = artifact(
+        "A",
+        ["dewow", "set_zero_time", "subtracting_average_2D", "svd_bg", "agcGain", "time_cut"],
+    )
+    result = presentation(item, [item])
+    assert "时间校正" in result.tab_title
+    assert "低频漂移校正" in result.tab_title
+    assert "背景抑制" in result.tab_title
+    assert "增益与振幅" in result.tab_title
+    assert result.tab_title.endswith("（6步）")
+    assert " → " not in result.tab_title
+
+
+def test_effect_summary_contains_current_run_parameters_and_warnings(presentation):
+    item = artifact("A", ["dewow", "agcGain"])
+    item.manifest["params"]["lineage"][0]["runtime_warnings"] = [
+        {"message": "窗口已限幅"}
+    ]
+    result = presentation(item, [item])
+    assert "去漂移" in result.effect_summary
+    assert "window=41" in result.effect_summary
+    assert "本次新增" in result.run_summary
+    assert "累计2步" in result.run_summary
+    assert result.warning_count == 1
+    assert "窗口已限幅" in result.tooltip
+
+
+def test_custom_name_is_preserved_in_compact_tab_title(presentation):
+    item = artifact("A", ["dewow"], name="洞顶增强")
+    assert presentation(item, [item]).tab_title == "洞顶增强｜去漂移"
+
+
+def test_skipped_step_is_not_presented_as_successful_effect(presentation):
+    item = artifact("A", ["dewow"])
+    item.manifest["params"]["lineage"][0]["metadata"] = {"skipped": True, "reason": "缺少传感器"}
+    result = presentation(item, [item])
+    assert "已跳过" in result.effect_summary
+    assert "缺少传感器" in result.tooltip

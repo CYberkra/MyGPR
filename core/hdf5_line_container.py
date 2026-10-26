@@ -620,7 +620,7 @@ def load_processing_dataset(path: str | Path, *, artifact_id: str, raw_dataset: 
         dielectric_constant=dielectric,
         format_name=f"processed-hdf5:{manifest.get('method_id') or artifact_id}",
         metadata={"processing_manifest": manifest,
-                  **{key: output_header[key] for key in ("time_axis_endpoint", "time_step_s", "distance_axis_status", "time_cut_offset_ns") if key in output_header}},
+                  **{key: output_header[key] for key in ("time_axis_endpoint", "time_step_s", "distance_axis_status", "time_cut_offset_ns", "source_trace_offset") if key in output_header}},
     )
 
 

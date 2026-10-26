@@ -1,6 +1,7 @@
 """Project-scoped spatial use cases."""
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from mygpr.application.jobs.context import ExecutionContext
@@ -42,6 +43,19 @@ class SpatialService:
 
     def set_current(self, project_id: str, result_id: str) -> None:
         self._projects.set_current_spatial_result(project_id, result_id)
+
+    def export_result(
+        self, project_id: str, result_id: str, destination: str | Path, *,
+        format_name: str = "zip", context: ExecutionContext | None = None,
+    ) -> Path:
+        if context is not None:
+            context.raise_if_cancelled()
+        return self._projects.export_spatial_result(
+            project_id, result_id, destination, format_name=format_name
+        )
+
+    def delete_result(self, project_id: str, result_id: str) -> Path:
+        return self._projects.delete_spatial_result(project_id, result_id)
 
     def build_georeference_3d(
         self,
