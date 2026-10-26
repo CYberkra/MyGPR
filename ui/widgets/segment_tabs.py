@@ -16,7 +16,7 @@ from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import QWidget
 from qfluentwidgets import SegmentedWidget, isDarkTheme, setCustomStyleSheet
 
-from ui import constants
+from ui import constants, motion
 
 __all__ = ['SlimSegment']
 
@@ -42,6 +42,19 @@ class SlimSegment(SegmentedWidget):
         if item is not None:
             self.setItemFontSize(_TAB_FONT_PX)
         return item
+
+    def setCurrentItem(self, routeKey):
+        previous_key = self.currentRouteKey()
+        previous_position = self.slideAni.value()
+        super().setCurrentItem(routeKey)
+        if self.currentItem() is None:
+            return
+        if not motion.animations_enabled():
+            self._adjustIndicatorPos()
+        elif previous_key != self.currentRouteKey():
+            # Pivot first snaps to the previous item's logical x. Overwrite
+            # from the on-screen position when selection interrupts a slide.
+            self.slideAni.startAnimation(self.currentIndicatorGeometry(), previous_position)
 
     def paintEvent(self, e):
         QWidget.paintEvent(self, e)   # 跳过库版的指示条/滑块绘制，下面只画滑块

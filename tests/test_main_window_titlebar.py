@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 
 @pytest.fixture
-def window(qapp, monkeypatch, tmp_path):
+def window(qapp, monkeypatch, tmp_path, request):
     import ui.main_window as mw
     # 控制器置 None：不启动后端线程，纯 UI 组装
     for name in ('BackendController', 'ProjectController',
@@ -41,6 +41,7 @@ def window(qapp, monkeypatch, tmp_path):
         delivery_focus_requested = pyqtSignal(str)
         artifact_focus_requested = pyqtSignal(str, str)
         artifact_delete_requested = pyqtSignal(str, str)
+        processing_package_requested = pyqtSignal(str, str)
 
         def set_settings_manager(self, _settings):
             pass
@@ -54,10 +55,17 @@ def window(qapp, monkeypatch, tmp_path):
             pass
 
     monkeypatch.setattr(mw, 'FileTreePanel', _FileTreeStub)
+    warm_pages = getattr(request, 'param', True)
     from ui.settings_manager import SettingsManager
     settings = SettingsManager(str(tmp_path / 'window-settings.json'))
-    w = mw.MyGPRMainWindow(settings=settings)
-    w.ensure_pages_ready()   # 非首屏页为预热构造，测试需显式确保全部就位
+    with monkeypatch.context() as construction:
+        if not warm_pages:
+            # Suppress automatic warmup only during construction; tests may
+            # then exercise the real startup scheduling method explicitly.
+            construction.setattr(mw.MyGPRMainWindow, '_start_warmup', lambda _self: None)
+        w = mw.MyGPRMainWindow(settings=settings)
+    if warm_pages:
+        w.ensure_pages_ready()   # 非首屏页为预热构造，测试需显式确保全部就位
     # 开屏画面是与主窗口同位的独立 frameless 窗口（自带一套 TitleBar），
     # SPLASH_DURATION_MS(600ms) 未到时 QApplication.widgetAt 会命中它而不是
     # 主窗口按钮。构造提速把 __init__ 压到 600ms 以内后这个竞态在快机器上
@@ -90,6 +98,16 @@ def test_titlebar_buttons_receive_mouse(window):
         )
 
 
+def test_cancel_unsaved_annotation_keeps_window_open(window):
+    from unittest.mock import patch
+
+    with patch.object(window.page_coordinator.project, 'confirm_interpretation_close',
+                      return_value=False), patch.object(window.settings, 'save') as save:
+        assert not window.close()
+        assert window.isVisible()
+        save.assert_not_called()
+
+
 def test_top_navigation_receives_mouse(window, qapp):
     from PyQt6.QtCore import Qt
     from PyQt6.QtTest import QTest
@@ -104,6 +122,89 @@ def test_top_navigation_receives_mouse(window, qapp):
         QTest.mouseClick(item, Qt.MouseButton.LeftButton)
         qapp.processEvents()
         assert window.stackedWidget.currentWidget() is window.pages[key]
+
+
+@pytest.mark.parametrize('window', [False], indirect=True)
+def test_early_navigation_imports_and_wires_deferred_pages_once(window, qapp):
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
+    from ui.main_window import PlaceholderPage
+
+    assert set(window.pages) == {'projectInterface', 'settingsInterface'}
+    project = window._page('projectInterface')
+    project.set_project_info(SimpleNamespace(project_id='P', name='Test'))
+    project.set_lines([SimpleNamespace(line_id='L01')])
+    item = window._top_nav.items['processingInterface']
+    assert item.isEnabled()
+    with patch.object(window.page_coordinator, 'connect_all',
+                      wraps=window.page_coordinator.connect_all) as connect:
+        QTest.mouseClick(item, Qt.MouseButton.LeftButton)
+        qapp.processEvents()
+        assert len(window.pages) == 7
+        assert all(not isinstance(page, PlaceholderPage) for page in window.pages.values())
+        assert window.stackedWidget.currentWidget() is window.pages['processingInterface']
+        connect.assert_called_once_with()
+        window.ensure_pages_ready()
+        qapp.processEvents()
+        connect.assert_called_once_with()
+
+
+@pytest.mark.parametrize('window', [False], indirect=True)
+@pytest.mark.parametrize('outcome', ['ready', 'failed'])
+def test_early_navigation_while_backend_pending_does_not_rewire_after_outcome(
+        window, qapp, outcome):
+    from unittest.mock import Mock, patch
+
+    from PyQt6.QtCore import QObject, Qt, pyqtSignal
+    from PyQt6.QtTest import QTest
+    from ui.main_window import PlaceholderPage
+
+    class PendingBackend(QObject):
+        backend_ready = pyqtSignal()
+        backend_failed = pyqtSignal(str)
+
+        def __init__(self, parent):
+            super().__init__(parent)
+            self.job_bridge = None
+            self.shutdown = Mock()
+
+    backend = PendingBackend(window)
+    window.backend_controller = backend
+    backend.backend_ready.connect(window._on_backend_ready)
+    backend.backend_failed.connect(window._on_backend_failed)
+    window._set_backend_ready(False)
+    window._start_warmup()
+    qapp.processEvents()
+    assert set(window.pages) == {'projectInterface', 'settingsInterface'}
+    assert not getattr(window, '_warmup_scheduled', False)
+
+    with patch.object(window.page_coordinator, 'connect_all',
+                      wraps=window.page_coordinator.connect_all) as connect:
+        # Tasks remains navigable while project-dependent pages are gated.
+        item = window._top_nav.items['jobsInterface']
+        assert item.isEnabled()
+        QTest.mouseClick(item, Qt.MouseButton.LeftButton)
+        qapp.processEvents()
+        assert window._pages_warmed
+        assert len(window.pages) == 7
+        assert all(not isinstance(page, PlaceholderPage) for page in window.pages.values())
+        assert window.stackedWidget.currentWidget() is window.pages['jobsInterface']
+        connect.assert_called_once_with()
+
+        if outcome == 'ready':
+            backend.backend_ready.emit()
+        else:
+            backend.backend_failed.emit('controlled initialization failure')
+        qapp.processEvents()
+        window.ensure_pages_ready()
+        qapp.processEvents()
+        connect.assert_called_once_with()
+        assert window._backend_ready is (outcome == 'ready')
+        assert window.stackedWidget.currentWidget() is window.pages['jobsInterface']
+        assert window.pages['jobsInterface'].isEnabled() is (outcome == 'ready')
 
 
 def test_project_is_the_only_startup_navigation_entry(window):

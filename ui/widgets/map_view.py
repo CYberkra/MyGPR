@@ -219,6 +219,7 @@ class TileLayer(pg.GraphicsObject):
     def __init__(self, source_key: str = DEFAULT_TILE_SOURCE,
                  cache_root: str = _TILE_CACHE_ROOT, parent=None) -> None:
         super().__init__(parent)
+        self._closed = False
         self._source_key = source_key if source_key in TILE_SOURCES else DEFAULT_TILE_SOURCE
         self._cache_root = cache_root
         self._images: dict[tuple[int, int, int], QImage] = {}
@@ -235,23 +236,22 @@ class TileLayer(pg.GraphicsObject):
     def shutdown(self) -> None:
         """停掉线程池并断开回包信号（关闭视图 / 测试teardown 时调用）。
 
-        **必须显式做**：``QThreadPool`` 析构时会 ``waitForDone()`` 等所有在途
-        worker，而每个 ``_TileWorker`` 的 ``urlopen`` timeout=10 —— 视图关闭
-        （切页、项目切换、退出）时若有瓦片在途，主线程会被卡住最长 10 秒。
-        实测：``del layer`` 在有在途任务时挂死在 QThreadPool 析构上，
-        faulthandler 栈显示阻塞在 ``waitForDone``。
-
-        ``clear()`` 只清队列，**不打断已在运行的任务**（Qt 文档：正在 run 的
-        QRunnable 会跑完），所以还要 ``waitForDone()`` 让它们安全退出——但
-        此刻队列已空，最长只等当前那一个。
+        先清队列，再通过 Qt 绑定排空在途任务（等待时释放 GIL）。不能在
+        固定等待超时后直接销毁父对象：C++ 线程池析构可能持有 GIL，而
+        Python worker 仍需取得 GIL 才能返回。网络请求沿用原 HTTP 超时；
+        该超时不保证系统 DNS 等待的墙钟上限。
         """
+        if self._closed:
+            return
+        self._closed = True
         try:
             self._signals.finished.disconnect(self._on_tile_finished)
         except (RuntimeError, TypeError):
             pass   # 从未连接过或已断开
         self._inflight.clear()
+        self._prefetch_total = 0
         self._pool.clear()
-        self._pool.waitForDone(3000)   # 3s 上限：超时就放弃，不无限等
+        self._pool.waitForDone()
 
     def __del__(self) -> None:
         # 兜底：视图被 GC 时（测试 teardown 最常见）也要收线程池，否则解释器
@@ -275,6 +275,8 @@ class TileLayer(pg.GraphicsObject):
         且因已落入 ``_images`` 而不再重下。实测：当前源 ``gaode_vec`` 而
         ``_images`` 里是 ``osm`` 的图。
         """
+        if self._closed:
+            return
         source_key = str(source_key)
         if source_key not in TILE_SOURCES or source_key == self._source_key:
             return
@@ -297,6 +299,8 @@ class TileLayer(pg.GraphicsObject):
         return QRectF(-_HALF_WORLD, -_HALF_WORLD, WORLD_SIZE_M, WORLD_SIZE_M)
 
     def paint(self, painter, option, widget=None) -> None:
+        if self._closed:
+            return
         view_box = self.getViewBox()
         if view_box is None:
             return
@@ -338,6 +342,8 @@ class TileLayer(pg.GraphicsObject):
 
     # ------------------------------------------------------------ 下载队列
     def _enqueue(self, z: int, x: int, y: int) -> None:
+        if self._closed:
+            return
         key = (int(z), int(x), int(y))
         if key in self._images or key in self._inflight or key in self._failed:
             return
@@ -347,6 +353,8 @@ class TileLayer(pg.GraphicsObject):
 
     def _on_tile_finished(self, z: int, x: int, y: int, path: str,
                            source_key: str = '') -> None:
+        if self._closed:
+            return
         key = (int(z), int(x), int(y))
         # 旧源回包丢弃：去重 key 不含源标识，不校验就会把旧源图写进新源 _images。
         # source_key 为空按「无法判定」处理——放行（保持旧调用方兼容），
@@ -379,6 +387,8 @@ class TileLayer(pg.GraphicsObject):
         返回入队总瓦片数；report_progress=True 时完成进度经
         prefetch_progress 信号回报（叠加层用 False，避免进度重复计数）。
         """
+        if self._closed:
+            return 0
         view_box = self.getViewBox()
         if view_box is None:
             return 0
@@ -427,6 +437,8 @@ class TileLayer(pg.GraphicsObject):
         返回入队总瓦片数；report_progress=True 时完成进度经
         prefetch_progress 信号回报（叠加层用 False，避免进度重复计数）。
         """
+        if self._closed:
+            return 0
         zoom_min, zoom_max = choose_prefetch_zooms(
             lon_min, lat_min, lon_max, lat_max,
             detail_zoom=detail_zoom, max_tiles=max_tiles)
@@ -474,8 +486,11 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
         # 关闭 pyqtgraph 原生英文右键菜单，右键由自定义 RoundMenu 接管
         self._plot.vb.setMenuEnabled(False)
 
+        self._closed = False
+        self._basemap_enabled = False
         self._basemap_key, base_key, overlay_key = resolve_basemap(source_key)
         self._layer = TileLayer(base_key)
+        self._layer.hide()
         self._layer.prefetch_progress.connect(self.prefetch_progress)
         self._plot.addItem(self._layer)
         # 叠加层（如影像注记）：惰性创建，压在基础层之上、测线之下
@@ -543,11 +558,14 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
         if self._overlay_layer is None:
             self._overlay_layer = TileLayer(overlay_key)
             self._overlay_layer.setZValue(-99.0)
+            self._overlay_layer.hide()
             self._plot.addItem(self._overlay_layer)
         return self._overlay_layer
 
     def set_source(self, source_key: str) -> None:
         """切换底图（BASEMAP_LAYERS 预设 key；兼容直接传瓦图源 key）。"""
+        if self._closed:
+            return
         key, base_key, overlay_key = resolve_basemap(source_key)
         if key == self._basemap_key and (
                 self._overlay_layer is None
@@ -557,7 +575,7 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
         self._layer.set_source(base_key)
         if overlay_key is not None:
             self._ensure_overlay_layer(overlay_key).set_source(overlay_key)
-            self._overlay_layer.setVisible(True)
+            self._overlay_layer.setVisible(self._basemap_enabled)
         elif self._overlay_layer is not None:
             self._overlay_layer.setVisible(False)
         # 底图坐标系可能变化（高德 GCJ-02 ↔ OSM WGS84），测线需重新转换
@@ -566,6 +584,8 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
 
     def prefetch_current_view(self, max_extra_zoom: int = 2) -> int:
         """预下载当前可视区域瓦片（离线包效果），返回基础层入队瓦片数。"""
+        if self._closed or not self._basemap_enabled:
+            return 0
         queued = self._layer.prefetch_current_view(max_extra_zoom)
         if self._overlay_layer is not None and self._overlay_layer.isVisible():
             self._overlay_layer.prefetch_current_view(
@@ -604,6 +624,8 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
     def prefetch_tracks(self, *, detail_zoom: int = 16,
                         max_tiles: int = 400) -> int:
         """按测线包围盒预下载对应地理区域瓦片；无已配准轨迹返回 0。"""
+        if self._closed or not self._basemap_enabled:
+            return 0
         bbox = self.tracks_bbox_lonlat()
         if bbox is None:
             return 0
@@ -622,6 +644,8 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
         tracks: SpatialTrack 列表（鸭子类型取属性）；colors: {line_id: '#rrggbb'}。
         原始轨迹留存：切换底图（WGS84 ↔ GCJ-02）时按新坐标系重新转换渲染。
         """
+        if self._closed:
+            return
         self._raw_tracks = list(tracks or [])
         self._track_colors = dict(colors or {})
         self._render_tracks()
@@ -658,8 +682,23 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
             all_x.append(xs)
             all_y.append(ys)
 
+        self._basemap_enabled = any(info['mapped'] and np.any(
+            np.isfinite(info['xs']) & np.isfinite(info['ys'])) for info in self._track_summaries)
+        self._layer.setVisible(self._basemap_enabled)
+        if self._overlay_layer is not None:
+            overlay_key = resolve_basemap(self._basemap_key)[2]
+            self._overlay_layer.setVisible(self._basemap_enabled and overlay_key is not None)
         self.fit_to_tracks()
         self._rebuild_legend()
+
+    def shutdown(self) -> None:
+        """Drain both base and annotation layers before Qt destroys their pools."""
+        if self._closed:
+            return
+        self._closed = True
+        self._layer.shutdown()
+        if self._overlay_layer is not None:
+            self._overlay_layer.shutdown()
 
     # ------------------------------------------------------------ 浮动覆盖层
     def _fit_view(self) -> None:

@@ -27,15 +27,21 @@ from qfluentwidgets import (
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants, file_dialogs
+from ui.icons import RESULT_DELETE, result_delete_icon
 from ui.page_scaffold import make_card, make_form_row, make_hint
 from ui.pages.project_visuals import (
-    apply_project_theme, configure_ledger_table, make_detail_scroll, style_ledger_items,
+    LineDetailsPanel, apply_project_theme, configure_ledger_table,
+    make_detail_scroll, style_ledger_items,
 )
+from ui.pages.project_preferences import ProjectColumnPreferences
 from ui.theme_helpers import status_color
+from ui.sensor_summary import SensorCompletenessReport
+from ui.widgets.sensor_details_panel import SensorDetailsPanel
 from ui.widgets import (clear_invalid,
                         make_separator, mark_invalid, validate_non_empty)
 from ui.widgets.context_menus import add_action, make_menu
 from ui.pages.home_page import HomePage
+from ui.pages.project_identity_ui import ProjectIdentityUi
 
 # 导入文件对话框过滤器：通过 DesktopBackendFacade 获取（SPEC §6.3）
 try:
@@ -91,7 +97,9 @@ class ProjectPage(QWidget):
         self._filling_table = False
         self._syncing_selection = False  # select_line 程序化选中时抑止回发 line_selected
         self._source_path_cache: dict[str, str | None] = {}  # line_id → 源文件路径（异步回包缓存）
+        self._sensor_summary_cache: dict[str, SensorCompletenessReport | str] = {}
         self._sm = None                     # 共享 SettingsManager（主窗口注入）
+        self._column_preferences = ProjectColumnPreferences()
         self._resume_lines: set[str] = set()
         self._sensor_target_line_id = ''
 
@@ -115,6 +123,7 @@ class ProjectPage(QWidget):
         self._project_heading.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         header_row.addWidget(self._project_heading, 1)
         self.header_import_btn = PrimaryPushButton('导入数据', self._work_widget, FIF.DOWNLOAD)
+        self.header_import_btn.setToolTip('也可将单个 CSV / TXT / NPY / NPZ / H5 / HDF5 文件拖入窗口直接导入')
         self.header_import_btn.clicked.connect(self.show_import_tool)
         header_row.addWidget(self.header_import_btn)
         self.project_more_btn = ToolButton(FIF.MORE, self._work_widget)
@@ -152,6 +161,7 @@ class ProjectPage(QWidget):
         self._sync_dialog = self._tool_dialog('传感器同步', self._build_sync_card)
         self._info_dialog = self._tool_dialog('项目设置', self._build_info_card)
         self.close_btn.hide()  # closing uses the shared project switch menu
+        self._identity = ProjectIdentityUi(self)
         self._update_action_state()
         self.apply_theme(isDarkTheme())
 
@@ -180,6 +190,7 @@ class ProjectPage(QWidget):
 
     def _show_project_tools(self) -> None:
         menu = make_menu(self)
+        self._identity.add_project_actions(menu)
         add_action(menu, FIF.SETTING, '项目设置 / 元数据', self._info_dialog.show)
         add_action(menu, FIF.SEARCH, '导入与预检…', self.show_import_tool, enabled=not self._busy)
         root = str(getattr(self._summary, 'root_path', '') or '')
@@ -386,17 +397,14 @@ class ProjectPage(QWidget):
         info_tab = QWidget(self._detail_tabs)
         info_layout = QVBoxLayout(info_tab)
         info_layout.setContentsMargins(*(constants.SPACE_2,) * 4)
-        self._line_detail = BodyLabel('选择一条测线', info_tab)
-        self._line_detail.setWordWrap(True)
-        self._line_detail.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._line_detail = LineDetailsPanel(info_tab)
         info_layout.addWidget(make_detail_scroll(self._line_detail, info_tab))
         self._detail_tabs.addTab(info_tab, '详情')
         sensors_tab = QWidget(self._detail_tabs)
         sensors_layout = QVBoxLayout(sensors_tab)
         sensors_layout.setContentsMargins(*(constants.SPACE_2,) * 4)
         sensors_layout.setSpacing(constants.SPACE_2)
-        self._sensor_detail = make_hint('选择测线后可查看和同步 RTK / IMU / 高度计数据。', parent=sensors_tab)
-        self._sensor_detail.setWordWrap(True)
+        self._sensor_detail = SensorDetailsPanel(sensors_tab)
         sensors_layout.addWidget(make_detail_scroll(self._sensor_detail, sensors_tab), 1)
         self.sensor_tool_btn = PushButton('传感器同步…', sensors_tab, FIF.SYNC)
         self.sensor_tool_btn.clicked.connect(self.show_sensor_tool)
@@ -491,6 +499,7 @@ class ProjectPage(QWidget):
                 dialog.close()
             self._current_line_id = ''
             self._source_path_cache.clear()
+            self._sensor_summary_cache.clear()
             self._resume_lines.clear()
             self.file_edit.clear()
             self.line_name_edit.clear()
@@ -512,6 +521,7 @@ class ProjectPage(QWidget):
     def set_lines(self, lines: list) -> None:
         """刷新测线表；自动建议下一测线号（UX P2-1）。"""
         self._lines = list(lines or [])
+        self._sensor_summary_cache.clear()
         # 自动建议随连续导入推进；用户改过的测线号保留。
         if self.line_id_edit.text().strip() in ('', self._suggested_line_id):
             suggest = self._suggest_line_id()
@@ -600,7 +610,7 @@ class ProjectPage(QWidget):
                 str(getattr(artifact, 'created_at', '') or '--'),
                 sha[:8] if sha else '--',
             )
-            del_btn = TransparentToolButton(FIF.DELETE)
+            del_btn = TransparentToolButton(RESULT_DELETE)
             del_btn.setIconSize(QSize(*constants.TOOL_BTN_ICON))
             del_btn.setAccessibleName('删除该成果')
             del_btn.setToolTip('删除该成果（移入回收站）')
@@ -692,18 +702,16 @@ class ProjectPage(QWidget):
         if selected is None:
             hint = f'已选 {len(rows)} 条测线 · 可从更多菜单批量删除' if len(rows) > 1 else '选择一条测线以查看详情'
             self._selected_heading.setText(hint)
-            self._line_detail.setText(hint)
-            self._sensor_detail.setText('请先选择一条测线。')
+            self._line_detail.set_message(hint)
+            self._sensor_detail.set_message('请先选择一条测线。')
         else:
             lid = self._current_line_id
             self._selected_heading.setText(str(getattr(selected, 'name', '') or lid))
-            source = self._source_path_cache.get(lid) or '正在查询 / 未记录'
             quality = str(getattr(selected, 'data_quality', '') or '尚未检查')
-            self._line_detail.setText(
-                f'测线号：{lid}\n采样 × 道：{getattr(selected, "sample_count", 0)} × {getattr(selected, "trace_count", 0)}\n'
-                f'数据检查：{quality}\n数据来源：{source}')
-            self._sensor_detail.setText(
-                f'当前测线：{lid}\n传感器文件由同步工具选择。预检和同步状态不代表正式成果验收。')
+            self._line_detail.set_line(
+                lid, getattr(selected, 'sample_count', 0), getattr(selected, 'trace_count', 0),
+                quality, self._source_path_cache.get(lid), source_ready=lid in self._source_path_cache)
+            self._sensor_detail.set_summary(lid, self._sensor_summary_cache.get(lid))
         if getattr(self, '_last_workspace_state', None) != state:
             self._last_workspace_state = state
             self.workspace_state_changed.emit(state)
@@ -711,6 +719,10 @@ class ProjectPage(QWidget):
     def _can_write(self) -> bool:
         return (self._has_project() and not self._busy
                 and not bool(getattr(self._summary, 'read_only', False)))
+
+    def import_dropped_file(self, source: str) -> bool:
+        from ui.file_drop import import_data_file
+        return import_data_file(self, source)
 
     def _browse_import_file(self) -> None:
         path, _selected = file_dialogs.getOpenFileName(
@@ -792,6 +804,20 @@ class ProjectPage(QWidget):
             if line_id == self._current_line_id:
                 self._update_action_state()
 
+    def set_line_sensor_summary(self, line_id: str, text: str) -> None:
+        """Compatibility for text-only summary clients."""
+        self._cache_sensor_summary(line_id, str(text))
+
+    def set_line_sensor_report(self, line_id: str, report: SensorCompletenessReport) -> None:
+        self._cache_sensor_summary(line_id, report)
+
+    def _cache_sensor_summary(self, line_id: str, report: SensorCompletenessReport | str) -> None:
+        if str(line_id) not in {str(getattr(line, 'line_id', '')) for line in self._lines}:
+            return
+        self._sensor_summary_cache[str(line_id)] = report
+        if str(line_id) == self._current_line_id:
+            self._update_action_state()
+
     # ------------------------------------------------------------ 右键菜单
     def _on_lines_context_menu(self, pos) -> None:
         row = self._lines_table.rowAt(pos.y())
@@ -807,6 +833,7 @@ class ProjectPage(QWidget):
         single = len(self._lines_table.selectionModel().selectedRows()) == 1
         add_action(menu, FIF.DEVELOPER_TOOLS, '处理该测线（跳转处理页）',
                    lambda: self.line_process_requested.emit(line_id), enabled=single and not self._busy)
+        self._identity.add_line_rename(menu,line_id,single=single)
         add_action(menu, FIF.SYNC, '传感器同步…', self.show_sensor_tool,
                    enabled=single and self._can_write())
         add_action(menu, FIF.DELETE, '删除所选测线',
@@ -837,7 +864,7 @@ class ProjectPage(QWidget):
         menu = make_menu(self)
         add_action(menu, FIF.VIEW, '在处理页查看',
                    self._emit_artifact_preview)
-        add_action(menu, FIF.DELETE, '删除所选成果',
+        add_action(menu, result_delete_icon(), '删除所选成果',
                    self._on_artifacts_context_delete, enabled=self._can_write())
         menu.exec(self._artifacts_table.viewport().mapToGlobal(pos))
 
@@ -941,7 +968,7 @@ class ProjectPage(QWidget):
             self.line_delete_requested.emit(line_ids)
 
     def _column_widths_key(self, table_name: str) -> str:
-        return f'ui/project_page/{table_name}_column_widths'
+        return self._column_preferences.key(table_name)
 
     def set_settings_manager(self, sm) -> None:
         """注入主窗口共享的 SettingsManager 并重放列宽恢复（含 QSettings 迁移）。"""
@@ -950,50 +977,20 @@ class ProjectPage(QWidget):
         self._restore_column_widths(self._lines_table, 'lines')
         self._restore_column_widths(self._artifacts_table, 'artifacts')
 
-    def _save_lines_column_widths(self) -> None:
-        self._save_column_widths(self._lines_table, 'lines')
+    def _save_lines_column_widths(self, logical_index: int | None = None) -> None:
+        self._save_column_widths(self._lines_table, 'lines', logical_index=logical_index)
 
-    def _save_artifacts_column_widths(self) -> None:
-        self._save_column_widths(self._artifacts_table, 'artifacts')
+    def _save_artifacts_column_widths(self, logical_index: int | None = None) -> None:
+        self._save_column_widths(self._artifacts_table, 'artifacts', logical_index=logical_index)
 
-    def _save_column_widths(self, table: QTableWidget, table_name: str) -> None:
-        header = table.horizontalHeader()
-        widths = [int(header.sectionSize(i)) for i in range(table.columnCount())]
-        sm = self._sm
-        if sm is None:
-            return
-        sm.set(self._column_widths_key(table_name), widths)
-        sm.save()
+    def _save_column_widths(self, table: QTableWidget, table_name: str, *,
+                            logical_index: int | None = None) -> None:
+        self._column_preferences.save(table, table_name, self._sm, QSettings,
+                                      logical_index=logical_index)
 
     def _restore_column_widths(self, table: QTableWidget, table_name: str) -> None:
-        """恢复列宽：优先读共享 SettingsManager；旧版 QSettings 读到即迁移。
-
-        迁移语义：QSettings('MyGPR','MyGPR') 里残留的列宽写入 SettingsManager
-        （JSON list）并清掉旧键；之后新写入只走 SettingsManager。
-        """
-        key = self._column_widths_key(table_name)
-        widths = None
-        legacy = QSettings('MyGPR', 'MyGPR')
-        stored = legacy.value(key)
-        if isinstance(stored, list):
-            widths = [int(w) for w in stored
-                      if isinstance(w, (int, float)) and int(w) > 0]
-            sm = self._sm
-            if sm is not None:
-                sm.set(key, widths)
-                sm.save()
-                legacy.remove(key)
-        elif self._sm is not None:
-            stored = self._sm.get(key)
-            if isinstance(stored, list):
-                widths = [int(w) for w in stored
-                          if isinstance(w, (int, float)) and int(w) > 0]
-        if not widths:
-            return
-        header = table.horizontalHeader()
-        for i, w in enumerate(widths):
-            if 0 <= i < table.columnCount():
-                header.resizeSection(i, w)
+        """恢复列宽；有效旧 QSettings 在成功保存后统一迁移。"""
+        self._column_preferences.restore(table, table_name, self._sm, QSettings)
 
 
 __all__ = ['ProjectPage']

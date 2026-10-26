@@ -28,6 +28,7 @@ from ui import constants
 import logging
 import io
 import os
+from threading import Event
 import urllib.request
 
 import numpy as np
@@ -180,14 +181,36 @@ class _TerrainWorker(QRunnable):
     """
 
     def __init__(self, generation: int, prep: dict,
-                 cache_root: str, signals: _TerrainSignals) -> None:
+                 cache_root: str, signals: _TerrainSignals,
+                 cancel_requested: Event | None = None) -> None:
         super().__init__()
         self._generation = int(generation)
         self._prep = prep            # _prepare_terrain 的预计算结果
         self._cache_root = cache_root
         self._signals = signals
+        self._cancel_requested = cancel_requested if cancel_requested is not None else Event()
+
+    def _fetch_tiles(self, zoom, bounds, fetch):
+        x0, x1, y0, y1 = bounds
+        tiles = {}
+        for tx in range(x0, x1 + 1):
+            for ty in range(y0, y1 + 1):
+                if self._cancel_requested.is_set():
+                    return None
+                block = fetch(zoom, tx, ty)
+                if self._cancel_requested.is_set():
+                    return None
+                if block is not None:
+                    tiles[(tx, ty)] = block
+        return tiles
+
+    def _notice(self, message: str) -> None:
+        if not self._cancel_requested.is_set():
+            self._signals.notice.emit(message)
 
     def _fetch_tile(self, z: int, x: int, y: int) -> np.ndarray | None:
+        if self._cancel_requested.is_set():
+            return None
         path = terrarium_cache_path(self._cache_root, z, x, y)
         try:
             if not os.path.exists(path):
@@ -197,19 +220,24 @@ class _TerrainWorker(QRunnable):
                     if getattr(response, 'status', 200) != 200:
                         raise OSError(f'HTTP {response.status}')
                     data = response.read()
+                if self._cancel_requested.is_set():
+                    return None
                 os.makedirs(os.path.dirname(path), exist_ok=True)
                 tmp_path = unique_tmp_path(path)
                 with open(tmp_path, 'wb') as fh:
                     fh.write(data)
                 os.replace(tmp_path, path)
             with open(path, 'rb') as fh:
-                return decode_terrarium(fh.read())
+                data = fh.read()
+            return None if self._cancel_requested.is_set() else decode_terrarium(data)
         except Exception as exc:  # noqa: BLE001 - 离线/超时静默
             _LOGGER.debug('高程瓦片获取失败 %s/%s/%s: %s', z, x, y, exc)
             return None
 
     def _fetch_imagery_tile(self, z: int, x: int, y: int) -> np.ndarray | None:
         """高德影像瓦片 → (256,256,3) uint8（与 2D 地图共用磁盘缓存目录）。"""
+        if self._cancel_requested.is_set():
+            return None
         path = os.path.join(self._cache_root, 'gaode_img',
                             str(z), str(x), f'{y}.png')
         try:
@@ -221,6 +249,8 @@ class _TerrainWorker(QRunnable):
                     if getattr(response, 'status', 200) != 200:
                         raise OSError(f'HTTP {response.status}')
                     data = response.read()
+                if self._cancel_requested.is_set():
+                    return None
                 os.makedirs(os.path.dirname(path), exist_ok=True)
                 tmp_path = unique_tmp_path(path)
                 with open(tmp_path, 'wb') as fh:
@@ -228,6 +258,8 @@ class _TerrainWorker(QRunnable):
                 os.replace(tmp_path, path)
             with open(path, 'rb') as fh:
                 data = fh.read()
+            if self._cancel_requested.is_set():
+                return None
             image = Image.open(io.BytesIO(data)).convert('RGB')
             if image.size != (256, 256):
                 image = image.resize((256, 256))
@@ -237,6 +269,8 @@ class _TerrainWorker(QRunnable):
             return None
 
     def run(self) -> None:
+        if self._cancel_requested.is_set():
+            return
         payload = None
         try:
             prep = self._prep
@@ -267,22 +301,19 @@ class _TerrainWorker(QRunnable):
                 zoom = prep['zoom']
                 x0, x1, y0, y1 = prep['tile_range']
                 requested = (x1 - x0 + 1) * (y1 - y0 + 1)
-                tiles = {}
-                for tx in range(x0, x1 + 1):
-                    for ty in range(y0, y1 + 1):
-                        block = self._fetch_tile(zoom, tx, ty)
-                        if block is not None:
-                            tiles[(tx, ty)] = block
+                tiles = self._fetch_tiles(zoom, (x0, x1, y0, y1), self._fetch_tile)
+                if tiles is None:
+                    return
                 if not tiles:
-                    self._signals.notice.emit(
+                    self._notice(
                         '在线高程瓦片下载失败（网络不可达或超时），'
                         '已回退为平面网格；检查网络后可在右键菜单切换地形来源')
                 elif len(tiles) < requested:
-                    self._signals.notice.emit(
+                    self._notice(
                         f'在线高程瓦片部分下载失败（{len(tiles)}/{requested}），'
                         '未覆盖区域地形将被填平')
                 else:
-                    self._signals.notice.emit('')
+                    self._notice('')
                 if tiles:
                     elev, xs_m, ys_m = mosaic_from_tiles(tiles, zoom, x0, x1, y0, y1)
                     # 预计算的 Mercator 采样点 → 双线性采样 → 源坐标系规则网格
@@ -299,12 +330,9 @@ class _TerrainWorker(QRunnable):
                 if img_plan:
                     izoom = img_plan['zoom']
                     ix0, ix1, iy0, iy1 = img_plan['tile_range']
-                    itiles = {}
-                    for tx in range(ix0, ix1 + 1):
-                        for ty in range(iy0, iy1 + 1):
-                            block = self._fetch_imagery_tile(izoom, tx, ty)
-                            if block is not None:
-                                itiles[(tx, ty)] = block
+                    itiles = self._fetch_tiles(izoom, (ix0, ix1, iy0, iy1), self._fetch_imagery_tile)
+                    if itiles is None:
+                        return
                     rgb = sample_imagery_pixels(
                         itiles, ix0, iy0, ix1, iy1,
                         img_plan['qpx'], img_plan['qpy'])
@@ -314,10 +342,12 @@ class _TerrainWorker(QRunnable):
         except Exception as exc:  # noqa: BLE001 - 降级平面网格并提示
             _LOGGER.debug('地形构建失败: %s', exc)
             payload = None
-            if self._prep.get('local_dem') is None and self._prep.get('estimate') is None:
-                self._signals.notice.emit(
+            if (not self._cancel_requested.is_set() and self._prep.get('local_dem') is None
+                    and self._prep.get('estimate') is None):
+                self._notice(
                     f'在线地形构建失败（{exc}），已回退为平面网格')
-        self._signals.finished.emit(self._generation, payload)
+        if not self._cancel_requested.is_set():
+            self._signals.finished.emit(self._generation, payload)
 
 
 class Trajectory3DView(QWidget):
@@ -338,6 +368,8 @@ class Trajectory3DView(QWidget):
         self._terrain_pool = None
         self._terrain_signals = None
         self._terrain_generation = 0
+        self._terrain_cancel = Event()
+        self._terrain_shutdown = False
         self._origin = None
         self._extent = 1.0   # set_tracks 记录的数据范围（重置视角用）
         self._track_data: list = []      # (line_id, 颜色, xyz 显示坐标系绝对坐标)
@@ -382,6 +414,8 @@ class Trajectory3DView(QWidget):
         缓存在实例字段，创建后由首个 set_tracks 统一生效。
         返回 False = 无 PyOpenGL（降级路径）。
         """
+        if self._terrain_shutdown:
+            return False
         if self._gl_view is not None:
             return True
         gl, _ = _gl_state()
@@ -410,6 +444,10 @@ class Trajectory3DView(QWidget):
         析构会 ``waitForDone()``，而 ``_TerrainWorker`` 里的两个 ``urlopen``
         timeout=15 —— 有地形瓦片在途时关闭视图会卡住主线程。
         """
+        if self._terrain_shutdown:
+            return
+        self._terrain_shutdown = True
+        self._terrain_cancel.set()
         signals = getattr(self, '_terrain_signals', None)
         pool = getattr(self, '_terrain_pool', None)
         if signals is not None:
@@ -421,7 +459,9 @@ class Trajectory3DView(QWidget):
         self._terrain_generation += 1   # 立即使在途地形任务失效
         if pool is not None:
             pool.clear()
-            pool.waitForDone(3000)
+            # Drain through the Qt binding while it releases the GIL. Leaving
+            # Python QRunnables active for C++ parent destruction can deadlock.
+            pool.waitForDone()
 
     def __del__(self) -> None:
         # 与 TileLayer.__del__ 同理：析构阶段不可抛，但不留静默 pass（门禁
@@ -566,7 +606,7 @@ class Trajectory3DView(QWidget):
 
     def _start_terrain_build(self) -> None:
         """按当前地形源（本地 DEM / 在线瓦片）启动一次后台地形构建。"""
-        if self._terrain_src is None or self._terrain_pool is None:
+        if self._terrain_shutdown or self._terrain_src is None or self._terrain_pool is None:
             return
         epsg, terrain_bbox = self._terrain_src
         # pyproj 坐标换算在 GUI 线程预计算（工作线程碰 PROJ 会段错误），
@@ -575,7 +615,7 @@ class Trajectory3DView(QWidget):
         if prep is not None:
             self._terrain_pool.start(_TerrainWorker(
                 self._terrain_generation, prep,
-                _TERRAIN_CACHE_ROOT, self._terrain_signals))
+                _TERRAIN_CACHE_ROOT, self._terrain_signals, self._terrain_cancel))
 
     # ------------------------------------------------------------ 视角 / 右键菜单
     def _reset_camera(self) -> None:

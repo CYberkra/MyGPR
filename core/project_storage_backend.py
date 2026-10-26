@@ -121,10 +121,10 @@ class LegacyProjectStorageBackend(ProjectStorageBackend):
             if isinstance(manifest.get("output_header"), dict) else {}
         )
         out_time_window = _coerce_float(
-            output_header.get("total_time_ns") or output_header.get("time_window_ns")
+            output_header.get("total_time_ns", output_header.get("time_window_ns"))
         )
         out_offset = _coerce_float(output_header.get("time_cut_offset_ns")) or 0.0
-        if (out_time_window and out_time_window > 0) or (out_time_window == 0 and output_header.get("time_axis_endpoint") is False):
+        if out_time_window is not None and out_time_window >= 0:
             time_window = out_time_window
         else:
             time_window = _coerce_float(
@@ -140,7 +140,7 @@ class LegacyProjectStorageBackend(ProjectStorageBackend):
             **manifest,
             "artifact_id": artifact_id,
             "input_dataset": input_dataset,
-            **{key: output_header[key] for key in ("time_axis_endpoint", "distance_axis_status", "time_cut_offset_ns") if key in output_header},
+            **{key: output_header[key] for key in ("time_axis_endpoint", "time_step_s", "distance_axis_status", "time_cut_offset_ns") if key in output_header},
         }
         dataset = GPRDataSet.from_matrix(
             line_id=safe_line,

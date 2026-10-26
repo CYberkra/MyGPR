@@ -98,24 +98,36 @@ class ProcessingService:
         shape: tuple[int, int],
         dtype: str,
         pipeline: PipelineDefinition,
+        *,
+        allow_chunking: bool = True,
+        header_info: dict[str, Any] | None = None,
     ) -> ResourceEstimate:
-        if self.supports_block_pipeline(pipeline):
+        if allow_chunking and self.supports_block_pipeline(pipeline):
             return self.estimate_block_pipeline(shape, dtype, pipeline)
         base = int(np.prod(shape, dtype=np.int64)) * max(1, np.dtype(dtype).itemsize)
-        multiplier = 3
+        enabled_steps = [step for step in pipeline.steps if step.enabled]
+        # Loaded execution retains every step result until the pipeline returns.
+        # Count those matrices as well as the current operator's workspace.
+        multiplier = max(3, len(enabled_steps) + 2)
+        peak_memory = base * multiplier
+        # One scalar backs this read-only view, regardless of logical matrix size.
+        # The executor's estimators consume shape/dtype/metadata, never values.
+        probe = np.broadcast_to(np.zeros((), dtype=dtype), shape)
         notes: list[str] = ["pipeline requires loaded or global execution"]
-        for step in pipeline.steps:
-            if not step.enabled:
-                continue
+        for index, step in enumerate(enabled_steps):
+            operator = self._executor.estimate(ProcessingRequest(
+                probe, step.method_id, dict(step.params), dict(header_info or {})
+            ))
+            peak_memory = max(peak_memory, index * base + operator.memory_bytes)
             descriptor = self.get_method(step.method_id)
             if "global_transform" in descriptor.capabilities:
-                multiplier = max(multiplier, 8)
+                multiplier = max(multiplier, index + 8)
                 notes.append(f"global transform: {step.method_id}")
             elif step.method_id in {"svd_bg", "svd_subspace", "hankel_svd", "rpca_background"}:
-                multiplier = max(multiplier, 6)
+                multiplier = max(multiplier, index + 6)
                 notes.append(f"high-memory method: {step.method_id}")
         return ResourceEstimate(
-            memory_bytes=base * multiplier,
+            memory_bytes=max(peak_memory, base * multiplier),
             temporary_disk_bytes=base * 2,
             relative_cost="high" if multiplier >= 6 else "medium",
             supports_cancellation=True,

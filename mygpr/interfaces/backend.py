@@ -364,6 +364,16 @@ class MyGPRBackend:
         """Move processing artifacts into the project trash (cascade pre-collected)."""
         return self.projects.delete_artifacts(project_id, line_id, artifact_ids, reason=reason)
 
+    def submit_processing_result_package(
+        self, project_id: str, line_id: str, destination: str, *,
+        artifact_id: str = '', title: str | None = None,
+    ) -> str:
+        """Export saved line results or a confirmed ancestry chain as a ZIP job."""
+        return self._submit_project_job(
+            project_id, title or f'打包处理结果 {line_id}',
+            lambda context: self.projects.export_processing_package(
+                project_id, line_id, destination, artifact_id=artifact_id, context=context))
+
     def submit_project_report(
         self,
         project_id: str,

@@ -15,6 +15,7 @@ import numpy as np
 
 from core.gpr_data_model import GPRDataSet, time_to_depth_axis
 from core.hdf5_array_proxy import HDF5ArrayProxy
+from core.processing_axes import artifact_axes
 from core.storage_primitives import atomic_output_path, fsync_directory, fsync_file, utc_now
 
 LINE_CONTAINER_SCHEMA = "mygpr.line_container.v1"
@@ -226,7 +227,7 @@ def load_raw_dataset(path: str | Path, *, line_id: str) -> GPRDataSet:
         time_axis_ns=time_axis,
         depth_axis_m=depth,
         source_path=str(source),
-        time_window_ns=float(metadata.get("time_window_ns") or (time_axis[-1] if time_axis.size else 250.0)),
+        time_window_ns=float(metadata.get("time_window_ns", float(time_axis[-1] - time_axis[0]) if time_axis.size else 250.0)),
         dielectric_constant=float(metadata.get("dielectric_constant") or 9.0),
         format_name=str(metadata.get("format_name") or "mygpr-hdf5"),
         metadata=metadata,
@@ -579,13 +580,19 @@ def load_processing_dataset(path: str | Path, *, artifact_id: str, raw_dataset: 
             time_axis = np.zeros(0, dtype=np.float32)
         if depth is None:
             depth = np.zeros(0, dtype=np.float32)
+    distance, time_axis, depth = artifact_axes(source, manifest, (distance, time_axis, depth),
+                                            lambda parent: read_processing_manifest(source, parent))
+    dielectric = float(input_meta.get("dielectric_constant") or dielectric)
+    saved_window = _coerce_float(input_meta.get("time_window_ns"))
+    if saved_window is not None and saved_window >= 0:
+        time_window = saved_window
     # P1-1：优先用 manifest 持久化的输出 header 重建物理轴（形状变更方法如
     # time_cut/set_zero_time 会改变时间窗与零点，否则二次处理/成像按原始时窗算错）。
     output_header = manifest.get("output_header") if isinstance(manifest.get("output_header"), dict) else {}
     input_time_window = time_window
-    out_time_window = _coerce_float(output_header.get("total_time_ns") or output_header.get("time_window_ns"))
+    out_time_window = _coerce_float(output_header.get("total_time_ns", output_header.get("time_window_ns")))
     out_offset = _coerce_float(output_header.get("time_cut_offset_ns")) or 0.0
-    if out_time_window and out_time_window > 0:
+    if out_time_window is not None and out_time_window >= 0:
         time_window = out_time_window
     sample_count = int(getattr(proxy, "shape", (0, 0))[0])
     if output_header and sample_count > 0:
@@ -613,7 +620,7 @@ def load_processing_dataset(path: str | Path, *, artifact_id: str, raw_dataset: 
         dielectric_constant=dielectric,
         format_name=f"processed-hdf5:{manifest.get('method_id') or artifact_id}",
         metadata={"processing_manifest": manifest,
-                  **{key: output_header[key] for key in ("time_axis_endpoint", "distance_axis_status", "time_cut_offset_ns") if key in output_header}},
+                  **{key: output_header[key] for key in ("time_axis_endpoint", "time_step_s", "distance_axis_status", "time_cut_offset_ns") if key in output_header}},
     )
 
 

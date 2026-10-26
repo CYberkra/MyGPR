@@ -104,6 +104,7 @@ def test_line_selected_updates_state_and_triggers_preview():
         # 切换测线先作废在飞成果预览（防旧测线成果串台），再预览+刷新
         ("invalidate_artifact_previews", ()),
         ("preview_line", ("L03",)),
+        ("line_sensor_summary", ("L03",)),
         ("refresh_artifacts", ("L03",)),
     ]
     # 处理页/解释页标签同步刷新

@@ -9,12 +9,13 @@
   给 ``#comboListWidget`` 加实色 1px 边框（深色 ``rgb(100,100,100)`` / 浅色 ``rgb(200,200,200)``）。
 """
 import gc
+from functools import wraps
 from typing import TYPE_CHECKING
 
 import pyqtgraph as pg
 from PyQt6.QtGui import QColor, QFont, QPalette
 from PyQt6.QtWidgets import QApplication, QStyleFactory
-from qfluentwidgets import Theme, isDarkTheme, setTheme
+from qfluentwidgets import RoundMenu, Theme, isDarkTheme, setTheme
 from qfluentwidgets.components.widgets.combo_box import ComboBoxMenu
 
 from ui import constants
@@ -25,6 +26,44 @@ if TYPE_CHECKING:
 _combo_patch_applied = False
 _light_palette = None
 _dark_palette = None
+
+
+def patch_round_menu_style_lifetime() -> None:
+    """Keep Fluent's private Fusion base alive through native menu destruction.
+
+    Fluent 1.11.2 creates a parentless style inside RoundMenu.__init__. SIP
+    finalization can delete it before an action whose removal makes the live
+    QMenu query sizeHint again (Qt 6.11). The later menu.style() is a QSS proxy;
+    capture the factory-created base at the original constructor's setStyle.
+    """
+    original_init = RoundMenu.__init__
+    if getattr(original_init, '_mygpr_owned_menu_style', False):
+        return
+
+    @wraps(original_init)
+    def initialize(self, *args, **kwargs):
+        missing = object()
+        previous = self.__dict__.get('setStyle', missing)
+        set_style = self.setStyle
+
+        def set_private_style(style):
+            set_style(style)
+            app = QApplication.instance()
+            if (style is not None and style.parent() is None and style.objectName().lower() == 'fusion'
+                    and (app is None or style is not app.style())):
+                style.setParent(self)
+
+        self.setStyle = set_private_style
+        try:
+            original_init(self, *args, **kwargs)
+        finally:
+            if previous is missing:
+                del self.setStyle
+            else:
+                self.setStyle = previous
+
+    initialize._mygpr_owned_menu_style = True
+    RoundMenu.__init__ = initialize
 
 
 def _get_light_palette() -> QPalette:
@@ -375,4 +414,5 @@ def log_panel_qss(variant: str = 'terminal') -> str:
 
 
 # 模块导入即生效（style_spec §2.9 / §7.4-9）
+patch_round_menu_style_lifetime()
 patch_combo_box_menu()

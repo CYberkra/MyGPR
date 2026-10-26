@@ -68,14 +68,6 @@ def pytest_configure(config) -> None:
         os.environ["MYGPR_SETTINGS_FILE"] = _SETTINGS_OVERRIDE
 
 
-_EXIT_STATUS = 0
-
-
-def pytest_sessionfinish(session, exitstatus) -> None:
-    global _EXIT_STATUS
-    _EXIT_STATUS = int(exitstatus)
-
-
 def pytest_unconfigure(config) -> None:
     global _RUNTIME_ROOT, _SETTINGS_OVERRIDE
     if _SETTINGS_OVERRIDE is not None:
@@ -91,13 +83,9 @@ def pytest_unconfigure(config) -> None:
         if os.environ.get("MYGPR_LOG_DIR") == log_root:
             os.environ.pop("MYGPR_LOG_DIR", None)
         _RUNTIME_ROOT = None
-    # 强制干净退出：Qt（qfluentwidgets/pyqtgraph）C++ 对象在解释器
-    # shutdown 时析构顺序不定，段错误污染退出码（Linux CI exit 139、
-    # Windows 冒烟同族；2026-09-27）。所有测试已在 sessionfinish 前跑完，
-    # 临时目录也已清理——os._exit 跳过 teardown 只损失 GC，退出码保真。
-    sys.stdout.flush()
-    sys.stderr.flush()
-    os._exit(_EXIT_STATUS)
+    # Return to pytest so Python/Qt can release objects and run atexit callbacks.
+    # The previous os._exit path logged native window access violations on
+    # Windows while still reporting exit 0.
 
 
 @pytest.fixture(scope="session")
@@ -113,4 +101,12 @@ def qapp():
     except Exception:  # noqa: BLE001 - 依赖缺失时跳过 GUI 用例
         pytest.skip("PyQt6 未安装，跳过 GUI 测试")
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    return QApplication.instance() or QApplication([])
+    app = QApplication.instance() or QApplication([])
+    # Match app_qt.main: choose Fusion and initialize global palette/QSS before
+    # building any widget tree. Targeted test order must not defer first global
+    # repolish until persistent Fluent tree widgets already exist.
+    app.setStyle('Fusion')
+    from ui import constants
+    from ui.theme_helpers import apply_theme
+    apply_theme(constants.THEME_LIGHT)
+    return app

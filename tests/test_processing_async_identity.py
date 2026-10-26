@@ -155,3 +155,28 @@ def test_coordinator_freezes_submission_before_immediate_watcher_completion(qapp
     assert page.current_pipeline()['input_artifact_id'] == 'actual'
     page.close()
     page.deleteLater()
+
+
+@pytest.mark.parametrize('artifact_id', ['', 'saved-input'])
+def test_autotune_submission_preserves_source_header_and_trace_metadata(qapp, artifact_id):
+    import numpy as np
+    from ui.controllers.processing_controller import _AutotuneSubmitCommand
+
+    bridge = Bridge()
+    dataset = SimpleNamespace(data=np.zeros((32, 8), dtype=np.float32),
+        header_info={'total_time_ns': 512., 'data_context': 'gprmax_impulse'},
+        trace_metadata={'trace_axis_m': np.arange(8, dtype=np.float64)})
+    reads, submissions = [], []
+
+    def read(*args):
+        reads.append(args)
+        return dataset
+
+    controller = ProcessingController()
+    controller.set_backend(SimpleNamespace(backend=SimpleNamespace(
+        projects=SimpleNamespace(read_dataset=read, read_artifact_dataset=read),
+        submit_autotune=lambda *args, **kwargs: submissions.append(kwargs) or 'tune'), job_bridge=bridge))
+    _AutotuneSubmitCommand(controller, 'P', 'L01', 'dewow', {'window': 9}, artifact_id).execute()
+    assert reads == [('P', 'L01', artifact_id) if artifact_id else ('P', 'L01')]
+    assert submissions[0]['header_info'] == dataset.header_info
+    assert np.array_equal(submissions[0]['trace_metadata']['trace_axis_m'], dataset.trace_metadata['trace_axis_m'])

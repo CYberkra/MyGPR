@@ -260,6 +260,17 @@ class TestJobHubFanOut:
 
         assert window.infobars[0][0] == 'error'
 
+    @pytest.mark.parametrize('message', ['cancelled by operator', '任务已取消'])
+    def test_cancelled_completion_keeps_terminal_status_without_failure_notice(self, message):
+        window, _pages, views = _make_window()
+        hub = PageCoordinator(window).jobs
+        hub.on_status('JOB-CANCEL', 'cancelled')
+        hub.on_completed('JOB-CANCEL', False, message, None)
+        for view in views:
+            states = [call[2] for call in view.calls if call[:2] == ('set_status', 'JOB-CANCEL')]
+            assert states[-1] == 'cancelled'
+        assert all(notice[0] != 'error' for notice in window.infobars)
+
     def test_cancel_marks_processing_request(self):
         bridge = _StubBridge()
         window, _pages, _views = _make_window(bridge=bridge)
@@ -410,9 +421,10 @@ class TestProjectSwitchClearsPreviews:
             pages['processingInterface'].calls
 
     def test_opened_then_lines_updates_previews(self):
-        """清空后新预览正常到达：on_dataset_preview 三页全量刷新。"""
+        """选定新测线后预览正常到达：on_dataset_preview 三页全量刷新。"""
         project, pages = self._harness()
         project.on_project_opened(self._summary())
+        project.on_line_selected('L01')
 
         project.on_dataset_preview(object())
 

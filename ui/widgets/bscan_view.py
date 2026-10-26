@@ -27,8 +27,8 @@ sample_axis 时显示物理量，降采样数据附"原始约 N"），右键菜�
 复制 / 导出 PNG。工具条已退役（2026-09-23：4 钮与右键菜单完全重复），
 全屏保留为图内左上角悬浮钮，铺满走右键菜单，轴单位与比例策略走设置页
 与右键菜单。
-接入时已 vb.setMenuEnabled(False) 关闭 pyqtgraph 原生英文菜单
-（代价：右键拖拽框选缩放失效，由菜单缩放项补偿），并隐藏 pyqtgraph
+接入时已 vb.setMenuEnabled(False) 关闭 pyqtgraph 原生英文菜单。
+矩形缩放由右键「框选放大」启用一次性左键拖框，普通拖动仍平移；隐藏 pyqtgraph
 自带的「A」自适应钮（其功能由右键菜单「回到全览」承担）。
 """
 
@@ -54,6 +54,8 @@ from ui.widgets.bscan_axes import (
 )
 from ui.widgets.bscan_view_data import (BScanViewDataMixin, DEFAULT_P_LOW as DEFAULT_P_LOW, DEFAULT_P_HIGH as DEFAULT_P_HIGH, _restored_levels as _restored_levels)
 from ui.widgets.bscan_view_fullscreen import BScanViewFullscreenMixin
+from ui.widgets.bscan_time_window import BScanTimeWindowMixin
+from ui.widgets.bscan_selection import BScanSelectionMixin
 from ui.widgets.bscan_view_interaction import (BScanDisplayMode,
                                                BScanViewInteractionMixin)
 from ui.widgets.bscan_view_interaction import (format_crosshair_readout
@@ -63,7 +65,7 @@ from ui.widgets.pg_view_base import GraphicsViewBase, style_plot_item
 
 
 
-class BScanView(BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteractionMixin, GraphicsViewBase, QWidget):
+class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteractionMixin, GraphicsViewBase, QWidget):
     """B-Scan 剖面图像视图。
 
     缩放/导出/轴主题继承 GraphicsViewBase（pg_view_base）；
@@ -100,6 +102,9 @@ class BScanView(BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteracti
                  default_y_axis: str = 'sample',
                  default_levels: tuple | None = None):
         super().__init__(parent)
+        self._view_time_window = None
+        self._view_selection = None
+        self._selection_follows_levels = True
         self._pick_enabled = False
         self._image_shape = None  # (traces, samples) 显示坐标系尺寸
         # 显示比例策略：'free' 拉伸铺满（默认——实测占空比 85.9%，x/y 拉伸比
@@ -133,6 +138,8 @@ class BScanView(BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteracti
         self._gain_db = 24.0        # TVG 深端总增益（dB）
         self._gain_power = 1.0      # TVG 曲线弯度（幂次：1 线性，>1 集中深部）
         self._gain_cache = None
+        self._envelope_cache = None
+        self._contrast = 1.0
         self._tvg_dialog = None     # 滑条面板（懒创建，随视图销毁）
         # 「⤢ 铺满」只有接到了宿主页（能折叠侧栏）才有意义，默认隐藏该钮
         self._expand_enabled = False
@@ -152,6 +159,7 @@ class BScanView(BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteracti
 
         self._init_plot(with_colorbar)
         self._init_readout_overlay()
+        self._init_selection()
         self._init_layout()
 
         # 空态引导浮层（评审 P0-1）：初始无数据即显示，数据到达隐藏
@@ -200,8 +208,7 @@ class BScanView(BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteracti
         # pyqtgraph 自带的「A」自适应钮（英文语境的 autoscaling）由右键
         # 菜单「回到全览」取代，这里直接隐藏避免两套入口
         self._plot.hideButtons()
-        # 关闭 pyqtgraph 原生英文右键菜单（右拖框选缩放随之失效，
-        # 缩放操作由自定义 RoundMenu 提供）
+        # 关闭英文右键菜单；框选由独立的一次性左键选择器提供。
         self._plot.vb.setMenuEnabled(False)
 
         # 预分配并复用
@@ -373,8 +380,13 @@ class BScanView(BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteracti
             return
         if mode == 'elevation' and not self.elevation_available():
             return
+        changed = mode != self._y_axis
         self._y_axis = mode
+        if changed:
+            self._clear_view_selection()
         self._apply_axis_modes()
+        if changed:
+            self._apply_levels_to_render()
         if notify:
             self.sig_y_axis_changed.emit(mode)
 
@@ -422,6 +434,11 @@ class BScanView(BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteracti
     def _convert_left_ticks(self, values, scale, spacing):
         """纵轴刻度换算：海拔模式行号直接查共享海拔轴，否则回落默认。"""
         if not self._showing_elevation:
+            axis = self._time_axis_for_view()
+            if axis is not None:
+                import numpy as np
+                return [f'{np.interp(value, np.arange(len(axis)) + 0.5, axis):.5g}'
+                        if 0 <= value <= len(axis) else '' for value in values]
             return None
         return elevation_tick_strings(values, self._elev_axis)
 
@@ -449,13 +466,17 @@ class BScanView(BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteracti
             self.reset_1to1(notify=notify)
         elif mode == 'square':
             self.fit_square(notify=notify)
+        self._restore_view_time_window()
 
     def fit_to_data(self, *, notify: bool = True) -> None:
         """自适应窗口：显示全部数据（解除纵横锁定，拉伸铺满）。"""
+        if notify:
+            self._clear_view_selection()
         self._aspect_mode = 'free'
         self._plot.vb.setAspectLocked(False)
         self._plot.vb.autoRange()
         if notify:
+            self._apply_levels_to_render()
             self.sig_aspect_changed.emit('free')
 
     def fit_square(self, *, notify: bool = True) -> None:
@@ -511,6 +532,7 @@ class BScanView(BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteracti
             self.reset_1to1(notify=False)
         else:
             self.fit_square(notify=False)
+        self._restore_view_time_window()
 
     # ------------------------------------------------------------------ 其它
     def _set_axes_visible(self, visible: bool) -> None:
@@ -520,6 +542,7 @@ class BScanView(BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteracti
             self._colorbar.setVisible(visible and self._colorbar_visible)
 
     def clear(self) -> None:
+        self._clear_view_selection()
         self._image_item.clear()
         self._scatter.setData([])
         self._image_shape = None

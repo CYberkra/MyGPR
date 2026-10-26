@@ -1,6 +1,6 @@
 # Current State — Desktop Qt GUI + headless backend
 
-Version: 0.11.0. Source-tree review: 2026-10-16 (includes the maintained project and processing workbench).
+Version: 0.11.4. Source-tree review: 2026-10-16 (includes the maintained project and processing workbench).
 Platform integration documentation review: 2026-10-15.
 Source maintenance round: 2026-10-16; see [changes, verification and limits](docs/artifacts/maintenance_20261016.md).
 Workbench redesign: [current UI contract](docs/superpowers/specs/2026-10-16-workbench-redesign.md).

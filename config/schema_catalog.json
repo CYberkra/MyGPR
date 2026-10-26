@@ -468,6 +468,15 @@
       ]
     },
     {
+      "schema": "mygpr.project_backup.v2",
+      "owner": "project-storage",
+      "mutable": false,
+      "migration_policy": "immutable-evidence",
+      "references": [
+        "core/field_project_backup.py"
+      ]
+    },
+    {
       "schema": "mygpr.project_format_compatibility.v1",
       "owner": "core",
       "mutable": false,
@@ -784,6 +793,24 @@
       "references": [
         "mygpr/domain/grid/models.py",
         "mygpr/infrastructure/persistence/grid_adapter.py"
+      ]
+    },
+    {
+      "schema": "mygpr.processing_result_hdf5.v1",
+      "owner": "project-delivery",
+      "mutable": false,
+      "migration_policy": "new-schema-on-breaking-change",
+      "references": [
+        "mygpr/domain/project/result_package.py"
+      ]
+    },
+    {
+      "schema": "mygpr.processing_result_package.v1",
+      "owner": "project-delivery",
+      "mutable": false,
+      "migration_policy": "new-schema-on-breaking-change",
+      "references": [
+        "mygpr/domain/project/result_package.py"
       ]
     }
   ]

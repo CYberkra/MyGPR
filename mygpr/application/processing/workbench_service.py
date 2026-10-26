@@ -7,11 +7,12 @@ import copy
 import json
 import logging
 import uuid
-from dataclasses import dataclass, field
+from contextlib import contextmanager
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
-from typing import Any, Sequence
+from typing import Any, Iterator, Sequence
 
 import numpy as np
 
@@ -20,6 +21,7 @@ from mygpr.application.persistence_ports import DurableWritePort
 from mygpr.application.processing.analysis_service import ProcessingAnalysisService
 from mygpr.application.processing.service import ProcessingService
 from mygpr.application.project.service import ProjectService
+from mygpr.application.project.processing_service import _output_header_summary
 from mygpr.domain.processing.models import ProcessingRequest
 from mygpr.domain.processing.workbench import (
     DatasetComparison,
@@ -64,7 +66,9 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, np.generic):
         return value.item()
     if isinstance(value, dict):
-        return {str(key): _json_safe(item) for key, item in value.items()}
+        return {str(key): item.tolist() if key in ('distance_axis_m', 'time_axis_ns', 'depth_axis_m')
+                and isinstance(item, np.ndarray) and item.ndim == 1 else _json_safe(item)
+                for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [_json_safe(item) for item in value]
     if isinstance(value, (str, int, float, bool)) or value is None:
@@ -78,11 +82,11 @@ def _clone_steps(steps: Sequence[WorkbenchStep]) -> list[WorkbenchStep]:
             item.step_id,
             item.method_id,
             item.label,
-            dict(item.params),
+            copy.deepcopy(dict(item.params)),
             item.enabled,
             tuple(item.output_shape),
             item.output_dtype,
-            dict(item.metadata),
+            copy.deepcopy(dict(item.metadata)),
         )
         for item in steps
     ]
@@ -227,23 +231,23 @@ class ProcessingWorkbenchService:
     def append_step(
         self, session_id: str, method_id: str, params: dict[str, Any] | None = None, *, label: str = ""
     ) -> WorkbenchSessionSnapshot:
-        session = self._session(session_id)
-        self._checkpoint(session)
-        result = self._execute(session, method_id, params or {})
         descriptor = self._processing.get_method(method_id)
-        step = WorkbenchStep(
-            step_id=f"STEP-{uuid.uuid4().hex[:12]}",
-            method_id=method_id,
-            label=label or descriptor.name,
-            params=dict(result.params),
-            enabled=True,
-            output_shape=tuple(int(value) for value in result.data.shape),
-            output_dtype=str(result.data.dtype),
-            metadata=_json_safe(result.metadata),
-        )
-        session.steps.append(step)
-        self._accept_result(session, result)
-        return self._touch(session)
+        with self._edit_session(session_id, copy_current_data=True) as session:
+            self._checkpoint(session)
+            result = self._execute(session, method_id, params or {})
+            step = WorkbenchStep(
+                step_id=f"STEP-{uuid.uuid4().hex[:12]}",
+                method_id=method_id,
+                label=label or descriptor.name,
+                params=dict(result.params),
+                enabled=True,
+                output_shape=tuple(int(value) for value in result.data.shape),
+                output_dtype=str(result.data.dtype),
+                metadata=_json_safe(result.metadata),
+            )
+            session.steps.append(step)
+            self._accept_result(session, result)
+            return self._touch(session)
 
     def update_step(
         self,
@@ -254,66 +258,65 @@ class ProcessingWorkbenchService:
         enabled: bool | None = None,
         label: str | None = None,
     ) -> WorkbenchSessionSnapshot:
-        session = self._session(session_id)
-        self._validate_index(session, index)
-        self._checkpoint(session)
-        current = session.steps[index]
-        session.steps[index] = WorkbenchStep(
-            step_id=current.step_id,
-            method_id=current.method_id,
-            label=current.label if label is None else label,
-            params=dict(current.params) if params is None else dict(params),
-            enabled=current.enabled if enabled is None else bool(enabled),
-        )
-        self._replay(session)
-        return self._touch(session)
+        with self._edit_session(session_id) as session:
+            self._validate_index(session, index)
+            self._checkpoint(session)
+            current = session.steps[index]
+            session.steps[index] = WorkbenchStep(
+                step_id=current.step_id,
+                method_id=current.method_id,
+                label=current.label if label is None else label,
+                params=dict(current.params) if params is None else dict(params),
+                enabled=current.enabled if enabled is None else bool(enabled),
+            )
+            self._replay(session)
+            return self._touch(session)
 
     def remove_step(self, session_id: str, index: int) -> WorkbenchSessionSnapshot:
-        session = self._session(session_id)
-        self._validate_index(session, index)
-        self._checkpoint(session)
-        session.steps.pop(index)
-        self._replay(session)
-        return self._touch(session)
+        with self._edit_session(session_id) as session:
+            self._validate_index(session, index)
+            self._checkpoint(session)
+            session.steps.pop(index)
+            self._replay(session)
+            return self._touch(session)
 
     def move_step(self, session_id: str, source: int, target: int) -> WorkbenchSessionSnapshot:
-        session = self._session(session_id)
-        self._validate_index(session, source)
-        self._validate_index(session, target)
-        if source == target:
-            return self._snapshot(session)
-        self._checkpoint(session)
-        session.steps.insert(target, session.steps.pop(source))
-        self._replay(session)
-        return self._touch(session)
+        with self._edit_session(session_id) as session:
+            self._validate_index(session, source)
+            self._validate_index(session, target)
+            if source == target:
+                return self._snapshot(session)
+            self._checkpoint(session)
+            session.steps.insert(target, session.steps.pop(source))
+            self._replay(session)
+            return self._touch(session)
 
     def undo(self, session_id: str) -> WorkbenchSessionSnapshot:
-        session = self._session(session_id)
-        if not session.undo_stack:
-            return self._snapshot(session)
-        session.redo_stack.append(_clone_steps(session.steps))
-        session.steps = session.undo_stack.pop()
-        self._replay(session)
-        return self._touch(session)
+        with self._edit_session(session_id) as session:
+            if not session.undo_stack:
+                return self._snapshot(session)
+            session.redo_stack.append(_clone_steps(session.steps))
+            session.steps = session.undo_stack.pop()
+            self._replay(session)
+            return self._touch(session)
 
     def redo(self, session_id: str) -> WorkbenchSessionSnapshot:
-        session = self._session(session_id)
-        if not session.redo_stack:
-            return self._snapshot(session)
-        session.undo_stack.append(_clone_steps(session.steps))
-        session.steps = session.redo_stack.pop()
-        self._replay(session)
-        return self._touch(session)
+        with self._edit_session(session_id) as session:
+            if not session.redo_stack:
+                return self._snapshot(session)
+            session.undo_stack.append(_clone_steps(session.steps))
+            session.steps = session.redo_stack.pop()
+            self._replay(session)
+            return self._touch(session)
 
     def reset(self, session_id: str) -> WorkbenchSessionSnapshot:
-        session = self._session(session_id)
-        if session.steps:
-            self._checkpoint(session)
-        session.steps = []
-        self._restore_original(session)
-        snapshot = self._touch(session)
-        self._clear_draft(session)
-        return snapshot
+        with self._edit_session(session_id) as session:
+            if session.steps:
+                self._checkpoint(session)
+            session.steps = []
+            self._restore_original(session)
+            snapshot = self._touch(session)
+            return snapshot
 
     def analyze_trace(self, session_id: str, trace_index: int) -> SignalAnalysis:
         session = self._session(session_id)
@@ -408,7 +411,8 @@ class ProcessingWorkbenchService:
             name=result_name or session.name,
             method_id=final.method_id,
             method_name=session.name,
-            params={"pipeline": pipeline, "parent_artifact_id": session.input_artifact_id, "interactive_session": True},
+            params={"pipeline": pipeline, "parent_artifact_id": session.input_artifact_id, "interactive_session": True,
+                    "output_header": _output_header_summary(session.current_header)},
             pipeline=pipeline,
             branch_id=branch_id or session.branch_id,
             input_dataset={**_json_safe(session.original_header), "parent_artifact_id": session.input_artifact_id, "execution_mode": "interactive_workbench"},
@@ -460,17 +464,17 @@ class ProcessingWorkbenchService:
         return True
 
     def apply_template(self, session_id: str, template_id: str) -> WorkbenchSessionSnapshot:
-        session = self._session(session_id)
-        template = next((item for item in self.list_templates(session.project_id) if item.template_id == template_id), None)
-        if template is None:
-            raise KeyError(template_id)
-        self._checkpoint(session)
-        session.steps = [
-            WorkbenchStep(f"STEP-{uuid.uuid4().hex[:12]}", item.method_id, item.label, dict(item.params), item.enabled)
-            for item in template.steps
-        ]
-        self._replay(session)
-        return self._touch(session)
+        with self._edit_session(session_id) as session:
+            template = next((item for item in self.list_templates(session.project_id) if item.template_id == template_id), None)
+            if template is None:
+                raise KeyError(template_id)
+            self._checkpoint(session)
+            session.steps = [
+                WorkbenchStep(f"STEP-{uuid.uuid4().hex[:12]}", item.method_id, item.label, dict(item.params), item.enabled)
+                for item in template.steps
+            ]
+            self._replay(session)
+            return self._touch(session)
 
     def _execute(self, session: _Session, method_id: str, params: dict[str, Any]):
         request = ProcessingRequest(
@@ -541,6 +545,26 @@ class ProcessingWorkbenchService:
         if session is None:
             raise KeyError(f"processing session not found: {session_id}")
         return session
+
+    @contextmanager
+    def _edit_session(self, session_id: str, *, copy_current_data: bool = False) -> Iterator[_Session]:
+        """Publish an edit only after processing and atomic draft I/O succeed."""
+        with self._lock:
+            source = self._session(session_id)
+            candidate = replace(
+                source,
+                # Replay/reset restore original data before executing. Only an
+                # append runs directly against the previous current matrix.
+                current_data=np.array(source.current_data, copy=True) if copy_current_data else source.current_data,
+                current_header=copy.deepcopy(source.current_header),
+                current_trace_metadata={key: np.array(value, copy=True) for key, value in source.current_trace_metadata.items()},
+                steps=_clone_steps(source.steps),
+                undo_stack=[_clone_steps(steps) for steps in source.undo_stack],
+                redo_stack=[_clone_steps(steps) for steps in source.redo_stack],
+            )
+            yield candidate
+            if candidate.revision != source.revision:
+                self._sessions[str(session_id)] = candidate
 
     @staticmethod
     def _preview(

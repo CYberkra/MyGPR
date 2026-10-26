@@ -22,9 +22,16 @@ from core.sensor_sync import SensorSyncConfig
 from core.sensor_sync_service import synchronize_project_line_sensors
 from core.security_paths import resolve_managed_path
 from core.project_integrity import ProjectIntegrityAuditor
+from core.project_mutation import project_mutation
+from core.project_identity import (
+    open_relocated_store, validate_relocation_references, rename_project_store, rename_line_record,
+)
 from mygpr.application.jobs.context import ExecutionContext
 from mygpr.infrastructure.persistence.interpretation_adapter import InterpretationPersistenceMixin
 from mygpr.infrastructure.persistence.intermediate_cleanup import IntermediateCleanupMixin
+from mygpr.infrastructure.persistence.processing_package_adapter import ProcessingPackageMixin
+from mygpr.infrastructure.persistence.project_relocation import staged_project_copy
+from mygpr.domain.project.names import display_name
 from mygpr.infrastructure.persistence.spatial_adapter import SpatialPersistenceMixin
 from mygpr.infrastructure.persistence.velocity_adapter import VelocityPersistenceMixin
 from mygpr.infrastructure.persistence.grid_adapter import GridPersistenceMixin
@@ -143,7 +150,7 @@ def _artifact(record: ProcessingArtifactRecord) -> ProjectArtifact:
 
 class LegacyFieldProjectSession(
     InterpretationPersistenceMixin, IntermediateCleanupMixin, SpatialPersistenceMixin,
-    VelocityPersistenceMixin, GridPersistenceMixin, ProjectSessionPort
+    VelocityPersistenceMixin, GridPersistenceMixin, ProcessingPackageMixin, ProjectSessionPort
 ):
     """One open project; concrete storage objects remain private to this adapter."""
 
@@ -179,6 +186,27 @@ class LegacyFieldProjectSession(
         with self._lock:
             update_project_metadata(self._store, **changes)
             return self.get_metadata()
+
+    def rename_project(self, name):
+        name = display_name(name)
+        with self._lock:
+            rename_project_store(self._store,name)
+            return self.summary
+
+    def rename_line(self, line_id, name):
+        name = display_name(name)
+        with self._lock:
+            return _line_record(rename_line_record(self._store,line_id,name))
+
+    def relocate(self, destination, *, context):
+        with self._lock:
+            old = self._store
+            old.assert_writable()
+            validate_relocation_references(old)
+            with staged_project_copy(old, destination, context) as (stage, target):
+                self._store = open_relocated_store(old, stage, target, context.raise_if_cancelled)
+            context.mark_committed()
+            return self.summary
 
     def list_quality_reports(self) -> Sequence[LineQualityReport]:
         with self._lock:
@@ -279,7 +307,7 @@ class LegacyFieldProjectSession(
                 dielectric_constant=dataset.dielectric_constant,
                 source_path=dataset.source_path,
                 format_name=dataset.format_name,
-                metadata=dataset.to_metadata(),
+                metadata=_dataset_metadata_with_axes(dataset),
             )
 
     def import_line_source(
@@ -369,7 +397,10 @@ class LegacyFieldProjectSession(
             format_name=str(metadata.get("format_name") or "backend-api"),
             metadata=dict(metadata),
         )
-        with self._lock:
+        with self._lock, project_mutation(
+            self._store, 'save-line-dataset', files=(self._store.gpr_dataset_path(safe),),
+            trees=(self._store.root / 'raw' / safe,),
+        ):
             try:
                 record = self._store.get_line(safe)
                 record.name = str(name or safe)
@@ -380,7 +411,7 @@ class LegacyFieldProjectSession(
                 safe,
                 dataset,
                 cancel_requested=context.is_cancelled,
-                progress_callback=context.report_progress,
+                progress_callback=lambda first, second, third: _report_legacy_progress(context, first, second, third),
             )
             return _line_record(self._store.get_line(safe))
 
@@ -494,7 +525,7 @@ class LegacyFieldProjectSession(
     ) -> LineDatasetInfo:
         with self._lock:
             safe_line, safe_artifact, dataset = self._artifact_dataset(line_id, artifact_id)
-            metadata = dataset.to_metadata()
+            metadata = _dataset_metadata_with_axes(dataset)
             metadata["artifact_id"] = safe_artifact
             return LineDatasetInfo(
                 line_id=safe_line,
@@ -826,7 +857,16 @@ class LegacyFieldProjectRepository(ProjectRepositoryPort):
 
 
 def _json_safe_mapping(value: Mapping[str, Any]) -> dict[str, Any]:
-    return {str(key): _json_safe_value(item) for key, item in value.items()}
+    return {str(key): item.tolist() if key in _AXIS_FIELDS and isinstance(item, np.ndarray)
+            and item.ndim == 1 else _json_safe_value(item) for key, item in value.items()}
+
+
+_AXIS_FIELDS = ('distance_axis_m', 'time_axis_ns', 'depth_axis_m')
+
+
+def _dataset_metadata_with_axes(dataset):
+    # Only 1D coordinates, never the matrix; block execution keeps bounded I/O.
+    return {**dataset.to_metadata(), **{key: np.asarray(getattr(dataset, key)).tolist() for key in _AXIS_FIELDS}}
 
 
 def _json_safe_value(value: Any) -> Any:

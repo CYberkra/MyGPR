@@ -1,6 +1,6 @@
 # Release process
 
-Reviewed against the source tree on 2026-10-14. Source/wheel installation is supported; an automated executable release pipeline is not currently present.
+Reviewed against the source tree on 2026-10-17. Source/wheel installation and a local Windows installer build/verification workflow are present. Release publishing remains a reviewed GitHub operation; there is no independent automated release workflow in CI.
 
 ## Existing checks and package build
 
@@ -29,8 +29,12 @@ Reviewed against the source tree on 2026-10-14. Source/wheel installation is sup
 The first GitHub Release prepared using this process is [v0.10.0](../releases/v0.10.0.md).
 Existing baseline/rollback tags remain historical references, not release version numbers.
 
-## Work still required for an exe release
+## Windows installer build and verification
 
-The old `gpr_gui.spec` was deleted in `a9fb92ef` (2026-07-31). There is no current PyInstaller spec, isolated four-shard release runner, signing job or hash-lock checker. See the [specification index](../superpowers/specs/README.md).
+The current recipes are `packaging/windows/MyGPR.spec` (PyInstaller onedir) and `MyGPR.iss` (Inno Setup), driven by `build.py` / `build.ps1`. Follow [Windows build instructions](../releases/windows-build.md) for the supported build interpreter and pinned tools. The historical `gpr_gui.spec` deleted in `a9fb92ef` is not the current recipe.
 
-Before distributing an exe, establish and validate resource collection, native dependencies, VERSION inclusion, a supported smoke argument (`--smoke` exists in app_qt.py), dependency-license/SBOM evidence, signatures/checksums, and Windows install/upgrade/rollback/uninstall. These are release requirements, not claims that tools already exist. Build-tool dependencies alone do not implement this workflow.
+Build from an immutable source ref via `git archive` in an isolated environment. The recipe includes VERSION, configuration, dynamic algorithms and package metadata, checks native dependency origins, generates license/SBOM inventories, and runs the frozen backend check before producing the installer. `verify_install.py` checks installation, package/HDF5 evidence, seven-page native smoke, reinstall, displayed version, normal GUI close, uninstall and preservation of user files in an owned QA directory.
+
+Preserve the application commit, recipe hashes, environment inventory, checksums and verification evidence alongside the installer, without overwriting the original source/wheel release manifest. A successful build alone is not installation or industrial acceptance. Current installers are unsigned; signing, independent release CI, and broader upgrade/rollback/system coverage remain separate work. The frozen `--package-check` command uses an explicit process exit and does not establish natural interpreter cleanup; the GUI close and smoke checks are separate evidence.
+
+For a commercial/industrial release, complete the required Windows, CUDA and hardware evidence in `config/industrial_acceptance_matrix.json` before claiming acceptance. Daily source gates and local smoke do not replace that matrix; see [Testing strategy](TESTING_STRATEGY.md).

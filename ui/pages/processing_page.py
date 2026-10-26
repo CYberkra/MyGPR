@@ -28,6 +28,9 @@ from ui.widgets.elided_caption import ElidedCaptionLabel
 from ui.pages.processing_steps import ProcessingSteps
 from ui.pages.processing_menus import ProcessingMenus
 from ui.pages.processing_chain_view import ProcessingChainView
+from ui.pages.processing_comparison import LineComparison
+from ui.widgets.line_drag_combo import LineDragComboBox
+from ui.result_presentation import describe_artifact
 
 
 class ProcessingPage(ProcessingChainView, ProcessingSteps, ProcessingMenus, QWidget):
@@ -43,6 +46,7 @@ class ProcessingPage(ProcessingChainView, ProcessingSteps, ProcessingMenus, QWid
     project_resources_toggled = pyqtSignal(bool)
     bscan_view_created = pyqtSignal(object)
     input_activated = pyqtSignal(str, str)
+    comparison_preview_requested = pyqtSignal(str, str, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -63,8 +67,12 @@ class ProcessingPage(ProcessingChainView, ProcessingSteps, ProcessingMenus, QWid
         self._method_picker, self._step_editor = None, None
         self._picker_purpose, self._picker_index = 'append', -1
         self._autotune_result, self._autotune_context = None, None
+        self._autotune_generation = 0
+        self._autotune_pending_request = None
+        self._autotune_result_generation = None
         self._sm, self._job_id, self._pending_layout = None, '', None
         self._build_ui()
+        self._comparison = LineComparison(self)
         self._connect_internal()
         self._refresh_ui()
         self.apply_theme(isDarkTheme())
@@ -84,7 +92,7 @@ class ProcessingPage(ProcessingChainView, ProcessingSteps, ProcessingMenus, QWid
             button.setFixedSize(*constants.TOOL_BTN_SIZE)
             header.addWidget(button)
         self._tools_btn.setChecked(True)
-        self._line_combo = ComboBox(self)
+        self._line_combo = LineDragComboBox(self)
         self._line_combo.setPlaceholderText('选择测线')
         self._line_combo.setMinimumWidth(100)
         self._line_combo.setMaximumWidth(160)
@@ -98,6 +106,7 @@ class ProcessingPage(ProcessingChainView, ProcessingSteps, ProcessingMenus, QWid
         header.addWidget(self._layout_combo)
         self._source_path_btn = TransparentToolButton(FIF.HISTORY, self)
         self._source_path_btn.setCheckable(True)
+        self._source_path_btn.setChecked(True)
         self._source_path_btn.setFixedSize(*constants.TOOL_BTN_SIZE)
         self._source_path_btn.setToolTip('已完成来源：展开 / 收起')
         self._source_path_btn.setAccessibleName('已完成来源')
@@ -317,6 +326,13 @@ class ProcessingPage(ProcessingChainView, ProcessingSteps, ProcessingMenus, QWid
         if self._suspend:
             return
         key = str(key or '')
+        previous_comparison = self._comparison.active
+        self._comparison.active = key if self._comparison.owns(key) else ''
+        if self._comparison.active:
+            if self._comparison.active != previous_comparison:
+                self._activation_epoch += 1
+            self._refresh_ui()
+            return
         revision = str(self._sources.get(key, {}).get('revision') or '')
         if key != self._selected_source_key or revision != self._selected_revision:
             self._stash_draft()
@@ -366,8 +382,7 @@ class ProcessingPage(ProcessingChainView, ProcessingSteps, ProcessingMenus, QWid
             widget.setEnabled(not locked)
         self._sync_param_empty_hint()
         self._update_autotune_enabled()
-        self._adopt_params_btn.setEnabled(bool(self._autotune_result) and not locked and
-                                         self._autotune_context == self._draft_key())
+        self._adopt_params_btn.setEnabled(self._can_adopt_autotune())
         path, seen, aid = [], set(), self._input_artifact_id()
         while aid and aid in self._artifacts_by_id and aid not in seen:
             seen.add(aid)
@@ -382,9 +397,21 @@ class ProcessingPage(ProcessingChainView, ProcessingSteps, ProcessingMenus, QWid
             path.insert(0, '原始输入')
         self._path_label.setText(' › '.join(path))
         self._sync_chain_view()
+        if self._comparison.active:
+            source = self._comparison.sources[self._comparison.active]
+            self._input_label.setText(f'仅对比：{source["line_id"]}；处理输入仍为 {self._line_id} · '
+                                     + str(self._sources.get(self._selected_source_key, {}).get('title', '未选择')))
+            self._run_btn.setEnabled(False)
+            self._run_btn.setToolTip('此视图仅用于对比；请从标签菜单选择“设为处理输入”或回到处理输入标签')
 
     def _sync_sources(self):
-        self._workspace.set_sources(list(self._sources.values()))
+        sources = [dict(source, title=f'{self._comparison.label(self._line_id)} · 原始输入')
+                   if source['key'] == 'original' and self._line_id else source
+                   for source in self._sources.values()]
+        self._workspace.set_sources(sources + list(self._comparison.sources.values()))
+
+    def set_comparison_preview(self, project_id, line_id, token, bundle, error):
+        self._comparison.deliver(project_id, line_id, token, bundle, error)
 
     def set_original_bundle(self, bundle):
         if bundle is None:
@@ -454,6 +481,11 @@ class ProcessingPage(ProcessingChainView, ProcessingSteps, ProcessingMenus, QWid
         return True
 
     def _request_preview(self, key):
+        if self._suspend:
+            return
+        if self._comparison.owns(key):
+            self._comparison.request(key)
+            return
         source = self._sources.get(str(key))
         aid = str(source.get('artifact_id') or '') if source else ''
         if aid and aid not in self._preview_requested:
@@ -471,14 +503,12 @@ class ProcessingPage(ProcessingChainView, ProcessingSteps, ProcessingMenus, QWid
         self._sources = {'original': raw} if raw else {}
         for aid, art in self._artifacts_by_id.items():
             key = 'artifact:' + aid
-            meta = artifact_parameters(art)
-            group, step = str(meta.get('run_group_id') or ''), meta.get('run_step_index')
-            name = str(getattr(art, 'name', '') or aid)
-            title = f'{name} · {group[:6]}.{step}' if group and step else name
+            presentation = describe_artifact(art, self._artifacts_by_id)
+            title = presentation.title
             revision = str(getattr(art, 'sha256', '') or '')
             previous = old.get(key, {})
             changed = bool(previous and previous.get('revision', '') != revision)
-            self._sources[key] = {'key': key, 'title': title, 'artifact_id': aid,
+            self._sources[key] = {'key': key, 'title': title, 'tooltip': presentation.tooltip, 'artifact_id': aid,
                                   'revision': revision,
                                   'bundle': None if changed else previous.get('bundle')}
             if changed:
@@ -584,6 +614,7 @@ class ProcessingPage(ProcessingChainView, ProcessingSteps, ProcessingMenus, QWid
         if project_id != self._project_id:
             self._stash_draft()
             self._save_session()
+            self._comparison.reset()
             self._switch_line('')
             self._project_id = project_id
             self._project_read_only = False
@@ -605,8 +636,12 @@ class ProcessingPage(ProcessingChainView, ProcessingSteps, ProcessingMenus, QWid
         self._save_session()
         self._suspend = True
         self._sources, self._artifacts_by_id = {}, {}
-        self._workspace.set_sources([])
+        comparing = self._comparison.has_open()
+        if comparing and line_id:
+            self._sources['original'] = dict(key='original', title='原始输入',
+                                              bundle=None, artifact_id='', revision='')
         self._line_id, self._selected_source_key = str(line_id), ''
+        self._sync_sources()
         self._selected_revision, self._raw_revision = '', ''
         self._pipeline_list.set_steps([])
         self._result_name_edit.clear()
@@ -615,9 +650,14 @@ class ProcessingPage(ProcessingChainView, ProcessingSteps, ProcessingMenus, QWid
         self._raw_opened = False
         self._source_selected_this_line = False
         self._activation_epoch += 1
-        self._pending_layout = self._layouts.get((self._project_id, self._line_id))
+        self._pending_layout = None if comparing else self._layouts.get((self._project_id, self._line_id))
         self._suspend = False
         self._render_trees()
+        if comparing and line_id:
+            gid = next((gid for gid in self._workspace.group_ids()
+                        if 'original' in self._workspace.tab_keys(gid)), None)
+            self._workspace.open_source('original', gid)
+            self._activate_source('original')
         self._refresh_ui()
 
     def _input_artifact_id(self):
@@ -848,7 +888,8 @@ class ProcessingPage(ProcessingChainView, ProcessingSteps, ProcessingMenus, QWid
     def _save_session(self):
         if self._suspend or not self._line_id:
             return
-        self._layouts[(self._project_id, self._line_id)] = self._workspace.save_layout()
+        if not self._comparison.has_open():
+            self._layouts[(self._project_id, self._line_id)] = self._workspace.save_layout()
         if self._sm is not None:
             self._sm.set('processing_workspace_sessions', {
                 'drafts': [{'key': list(k), 'value': v} for k, v in self._drafts.items()],
@@ -899,6 +940,7 @@ class ProcessingPage(ProcessingChainView, ProcessingSteps, ProcessingMenus, QWid
             self._line_combo, lines or [], _line_display,
             lambda line: str(getattr(line, 'line_id', '') or ''),
             previous_data=self._line_combo.currentData())
+        self._comparison.set_lines(lines or [])
 
     def _set_line_combo_without_emit(self, line_id: str) -> None:
         index = self._line_combo.findData(str(line_id or ''))

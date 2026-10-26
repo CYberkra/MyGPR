@@ -169,6 +169,9 @@ NATIVE_ALGORITHMS: dict[str, NativeAlgorithm] = {
     "dewow": NativeAlgorithm(
         "dewow", "Low-frequency drift correction", "baseline", _lazy(f"{_ALG}.basic", "method_dewow_native"), "columns",
         auto_tune_family="drift", parameter_schema=_schema(window={"type": "int", "default": 23, "min": 1}),
+        # Float64 input/output, cumulative sums and advanced-index copies overlap.
+        # Allow 16 float32 matrix equivalents, including index/mean workspaces.
+        memory_multiplier=16.0,
     ),
     "set_zero_time": NativeAlgorithm(
         "set_zero_time", "Zero-time correction", "baseline", _lazy(f"{_ALG}.basic", "method_zero_time"), "columns",

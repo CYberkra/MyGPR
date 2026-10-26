@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import csv
+from copy import deepcopy
+import logging
 import shutil
 import uuid
 from dataclasses import asdict
@@ -15,6 +17,8 @@ import numpy as np
 from core.field_project_models import local_now, validate_line_id
 from core.sensor_sync import SensorSyncConfig, save_sensor_sync_result, synchronize_sensor_streams
 from core.sidecar_parsers import parse_sidecar_csv
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def load_trace_timestamps(path: str | Path, *, expected_count: int | None = None) -> np.ndarray:
@@ -52,6 +56,11 @@ def infer_trace_timestamps(dataset: Any) -> np.ndarray | None:
         arr = np.asarray(value, dtype=np.float64).reshape(-1)
         if arr.size == int(dataset.trace_count):
             return arr
+    from core.acquisition_hdf5 import acquisition_trace_metadata
+
+    acquired = acquisition_trace_metadata(metadata).get("trace_timestamp_s")
+    if acquired is not None:
+        return acquired
     start = metadata.get("trace_start_timestamp_s")
     interval = metadata.get("trace_interval_s")
     if start is not None and interval is not None and float(interval) > 0:
@@ -117,6 +126,14 @@ def synchronize_project_line_sensors(
     raw_dir = store.root / "raw" / line_id
     final_dir = raw_dir / "sensors"
     staging = raw_dir / f".sensor_sync_staging_{uuid.uuid4().hex}"
+    previous_manifest = deepcopy(store.manifest)
+    previous_line = store.get_line(line_id)
+    project_manifest_path = store.root / store.MANIFEST_NAME
+    previous_manifest_bytes = project_manifest_path.read_bytes()
+    backup: Path | None = None
+    published = False
+    metadata_attempted = False
+    operation_error: Exception | None = None
     staging.mkdir(parents=True, exist_ok=False)
     try:
         sources_dir = staging / "sources"
@@ -131,7 +148,11 @@ def synchronize_project_line_sensors(
         for role, src in source_paths.items():
             if src is None:
                 continue
-            dest = sources_dir / src.name
+            # Different sensor roles can originate in files with the same name.
+            # Keep each role's original bytes and its own manifest reference.
+            role_dir = sources_dir / role
+            role_dir.mkdir(parents=True, exist_ok=True)
+            dest = role_dir / src.name
             shutil.copy2(src, dest)
             copied_sources[role] = dest.relative_to(staging).as_posix()
         artifacts = save_sensor_sync_result(result, staging, basename=f"{line_id}_sensor_sync")
@@ -147,33 +168,91 @@ def synchronize_project_line_sensors(
             "source_path": str(dataset.source_path),
         }
         manifest_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        check()
-        if final_dir.exists():
-            backup = raw_dir / f"sensors_previous_{local_now().replace(':','-').replace(' ','_')}"
-            final_dir.replace(backup)
-        staging.replace(final_dir)
-    except Exception:
+        with store.session.transaction("synchronize-line-sensors") as transaction:
+            transaction.track(project_manifest_path)
+            try:
+                check()
+                if final_dir.exists():
+                    backup = raw_dir / f"sensors_previous_{uuid.uuid4().hex}"
+                    final_dir.replace(backup)
+                staging.replace(final_dir)
+                published = True
+
+                report(6, 7, "更新项目清单")
+                check()
+                line = deepcopy(previous_line)
+                trajectory_rel = (final_dir / f"{line_id}_sensor_sync_trajectory.csv").relative_to(store.root).as_posix()
+                manifest_rel = (final_dir / f"{line_id}_sensor_sync_manifest.json").relative_to(store.root).as_posix()
+                metadata_rel = (final_dir / f"{line_id}_sensor_sync_trace_metadata.npz").relative_to(store.root).as_posix()
+                line.trajectory_path = trajectory_rel
+                line.sensor_sync_manifest_path = manifest_rel
+                line.trace_metadata_path = metadata_rel
+                fixed = result.diagnostics.fixed_solution_ratio
+                coverage = result.diagnostics.rtk.coverage_ratio
+                line.sensor_sync_status = f"已同步 · RTK覆盖{coverage:.0%} · 固定解{fixed:.0%}"
+                line.rtk_status = "已定位" if coverage >= 0.99 else "部分定位"
+                line.updated_at = local_now()
+                metadata_attempted = True
+                store.upsert_line(line)
+            except Exception as exc:
+                operation_error = exc
+                raise
+    except Exception as exc:
         shutil.rmtree(staging, ignore_errors=True)
+        recovery_errors: list[str] = []
+        failed_dir: Path | None = None
+        if published:
+            failed_dir = raw_dir / f"sensors_failed_{uuid.uuid4().hex}"
+            try:
+                final_dir.replace(failed_dir)
+            except OSError as recovery_exc:
+                recovery_errors.append(f"保留本次成果失败: {recovery_exc}")
+        if backup is not None and backup.exists() and not final_dir.exists():
+            try:
+                # Keep the previous version as recovery evidence even if a later
+                # manifest/catalog compensation also fails.
+                shutil.copytree(backup, final_dir)
+            except OSError as recovery_exc:
+                recovery_errors.append(f"恢复上次同步目录失败: {recovery_exc}")
+        store.manifest = previous_manifest
+        if metadata_attempted and getattr(store.storage, "is_hybrid", False):
+            catalog = store.storage.catalog
+            for restore in (
+                lambda: catalog.upsert_line(previous_line),
+                lambda: catalog.set_meta("project_name", previous_manifest.name),
+                lambda: catalog.set_meta("manifest_revision", str(previous_manifest.revision)),
+            ):
+                try:
+                    restore()
+                except Exception as recovery_exc:
+                    recovery_errors.append(f"恢复上次项目索引失败: {recovery_exc}")
+        try:
+            if project_manifest_path.read_bytes() != previous_manifest_bytes:
+                recovery_errors.append("项目清单文件未恢复到上次版本")
+        except OSError as recovery_exc:
+            recovery_errors.append(f"无法核实项目清单回滚: {recovery_exc}")
+        if operation_error is not None and exc is not operation_error:
+            recovery_errors.append(f"文件事务回滚失败: {exc}")
+        if recovery_errors:
+            raise RuntimeError(
+                f"传感器同步失败且需要恢复；previous={backup}；failed={failed_dir}；"
+                + "；".join(recovery_errors)
+            ) from exc
         raise
 
-    report(6, 7, "更新项目清单")
-    line = store.get_line(line_id)
-    trajectory_rel = (final_dir / f"{line_id}_sensor_sync_trajectory.csv").relative_to(store.root).as_posix()
-    manifest_rel = (final_dir / f"{line_id}_sensor_sync_manifest.json").relative_to(store.root).as_posix()
-    metadata_rel = (final_dir / f"{line_id}_sensor_sync_trace_metadata.npz").relative_to(store.root).as_posix()
-    line.trajectory_path = trajectory_rel
-    line.sensor_sync_manifest_path = manifest_rel
-    line.trace_metadata_path = metadata_rel
-    fixed = result.diagnostics.fixed_solution_ratio
-    coverage = result.diagnostics.rtk.coverage_ratio
-    line.sensor_sync_status = f"已同步 · RTK覆盖{coverage:.0%} · 固定解{fixed:.0%}"
-    line.rtk_status = "已定位" if coverage >= 0.99 else "部分定位"
-    line.updated_at = local_now()
-    store.upsert_line(line)
-    store.append_log(
-        f"传感器同步 {line_id}: coverage={coverage:.3f}, fixed={fixed:.3f}, warnings={len(result.diagnostics.warnings)}"
-    )
-    report(7, 7, "传感器同步完成")
+    # Directory + project metadata are committed. Diagnostics cannot undo them
+    # or turn a completed local operation into a cancellation/IO failure.
+    try:
+        store.append_log(
+            f"传感器同步 {line_id}: coverage={coverage:.3f}, fixed={fixed:.3f}, warnings={len(result.diagnostics.warnings)}"
+        )
+    except Exception:
+        _LOGGER.warning("传感器同步成果已提交，但日志写入失败", exc_info=True)
+    if progress is not None:
+        try:
+            progress(7, 7, "传感器同步成果已提交")
+        except Exception:
+            _LOGGER.warning("传感器同步成果已提交，但完成通知失败", exc_info=True)
     return {
         "line_id": line_id,
         "trajectory_path": trajectory_rel,

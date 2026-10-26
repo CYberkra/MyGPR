@@ -8,18 +8,29 @@ from qfluentwidgets import InfoBar, InfoBarPosition
 class ProcessingSteps:
     """Shared page state remains owned by ProcessingPage; public methods stay inherited."""
 
-    def _display_name(self, method_id):
-        return str(self._methods_by_id.get(method_id, {}).get('display_name') or method_id)
+    def _display_name(self, method_id, fallback=''):
+        method = self._methods_by_id.get(method_id, {})
+        return str(method.get('display_name') or method.get('name') or fallback or method_id)
 
     def set_methods(self, methods):
         self._methods = [dict(m) for m in methods or []]
         self._methods_by_id = {m.get('method_id', ''): m for m in self._methods}
         if self._method_picker is not None:
             self._method_picker.set_methods(self._methods)
+        # 只刷新展示：不重写草稿标签、不改变参数或触发草稿变更。
+        self._sync_chain_view()
+        if self._selected_method_id:
+            self._autotune_method_label.setText(self._display_name(self._selected_method_id))
 
     def set_autotune_result(self, method_id, result):
+        request = self._autotune_pending_request
+        if request is not None and request[2] != method_id:
+            return
         result = dict(result or {})
         self._autotune_result = (method_id, result)
+        self._autotune_result_generation = request[0] if request else None
+        self._autotune_context = request[1] if request else None
+        self._autotune_pending_request = None
         self._autotune_result_label.setText(json.dumps(result, ensure_ascii=False, indent=2, default=str))
         self._autotune_card.set_collapsed(False, animate=False)
         self._refresh_ui()
@@ -58,7 +69,7 @@ class ProcessingSteps:
         step = steps[index]
         method = self._methods_by_id.get(step.get('method_id', '') or '', {})
         snapshot = {
-            'title': step.get('label') or step.get('method_id', ''),
+            'title': self._display_name(step.get('method_id', ''), step.get('label')),
             'method_id': step.get('method_id', ''),
             'params': dict(step.get('params') or {}),
             'enabled': bool(step.get('enabled', True)),
@@ -164,7 +175,7 @@ class ProcessingSteps:
     def set_autotune_running(self, running: bool) -> None:
         """AutoTune 运行期间禁用「开始调参」，防重复提交（P2-7）。"""
         self._autotune_running = bool(running)
-        self._update_autotune_enabled()
+        self._refresh_ui()
 
     def _open_method_picker(self, purpose: str = 'append', index: int = -1) -> None:
         """「+」/「添加方法」统一入口：非模态方法选择器（单实例）。
@@ -273,7 +284,8 @@ class ProcessingSteps:
                                                self._param_form.values())
 
     def _on_autotune_clicked(self) -> None:
-        self._autotune_context = self._draft_key()
+        if self._autotune_running:
+            return
         method_id = self._selected_method_id
         if not method_id:
             InfoBar.warning(title='AutoTune 自动调参',
@@ -282,13 +294,26 @@ class ProcessingSteps:
                             position=InfoBarPosition.TOP, duration=3000,
                             parent=self)
             return
+        # A recommendation owns the input/request which produced it. Starting
+        # another request must not relabel the previous result as its output.
+        self._autotune_generation += 1
+        self._autotune_pending_request = (
+            self._autotune_generation, self._draft_key(), method_id)
+        self._autotune_result, self._autotune_context = None, None
+        self._autotune_result_generation = None
+        self._autotune_result_label.clear()
+        self._refresh_ui()
         params_hint = self._param_form.values()
         self.autotune_requested.emit(method_id, params_hint, self._input_artifact_id())
 
+    def _can_adopt_autotune(self):
+        return bool(self._autotune_result and not self._autotune_running
+                    and not self._draft_locked()
+                    and self._autotune_result_generation == self._autotune_generation
+                    and self._autotune_context == self._draft_key())
+
     def _on_adopt_params(self) -> None:
-        if self._draft_locked() or self._autotune_context != self._draft_key():
-            return
-        if self._autotune_result is None:
+        if not self._can_adopt_autotune():
             return
         method_id, result = self._autotune_result
         best = dict(result.get('best_params') or {})

@@ -62,8 +62,9 @@ def getOpenFileName(parent: QWidget | None, caption: str, directory: str,
 
 
 def getSaveFileName(parent: QWidget | None, caption: str, directory: str,
-                    file_filter: str = '') -> tuple[str, str]:
+                    file_filter: str = '', *, confirm_overwrite: bool = True) -> tuple[str, str]:
     """保存文件。返回 (路径, 过滤器)，取消路径为空串。"""
+    options = QFileDialog.Option(0) if confirm_overwrite else QFileDialog.Option.DontConfirmOverwrite
     path, selected = QFileDialog.getSaveFileName(
-        parent, caption, directory, file_filter)
+        parent, caption, directory, file_filter, options=options)
     return _normalize(path), selected

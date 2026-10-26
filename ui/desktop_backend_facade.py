@@ -21,6 +21,9 @@ from ui.desktop_backend_dtos import (
     UiPipelineStep,
 )
 from mygpr.application.jobs.models import JobEventType, JobResultSummary  # noqa: E402 — re-exported for ui/controllers
+from mygpr.application.jobs.context import ExecutionContext
+from mygpr.application.jobs.cancellation import CancellationTokenSource
+from mygpr.domain.project.names import display_name as validate_display_name
 
 # ---------------------------------------------------------------------------
 # Backend imports (the only place in ui/ that touches core/mygpr directly)
@@ -54,6 +57,20 @@ _LOGGER = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Public wrapped functions
 # ---------------------------------------------------------------------------
+
+def write_settings_json(path: str, settings: Mapping[str, Any]) -> None:
+    """Persist UI preferences using the same durable atomic writer as projects."""
+    import json
+    from core.storage_primitives import atomic_write_text
+
+    atomic_write_text(path, json.dumps(settings, ensure_ascii=False, indent=4, allow_nan=False))
+
+
+def compute_display_envelope(matrix):
+    """Analytic envelope of the current bounded preview, without altering source data."""
+    from core.display_envelope import display_envelope
+    return display_envelope(matrix)
+
 
 def compute_display_levels(
     matrix: Any,
@@ -282,6 +299,9 @@ __all__ = [
     "UiPipelineDefinition",
     "UiJobSnapshot",
     # re-exported enums / lightweight types
+    "ExecutionContext",
+    "CancellationTokenSource",
+    "validate_display_name",
     "JobEventType",
     "JobResultSummary",
 ]

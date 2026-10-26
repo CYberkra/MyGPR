@@ -126,3 +126,78 @@ def test_runner_bounds_large_event_payloads() -> None:
         assert "values" in warning_event.payload["keys"]
     finally:
         runner.shutdown()
+
+
+@pytest.mark.parametrize("eviction", ["forget", "prune"])
+@pytest.mark.parametrize("outcome", ["completed", "failed", "cancelled"])
+def test_terminal_eviction_preserves_pending_project_lease(tmp_path, monkeypatch, eviction, outcome):
+    from types import SimpleNamespace
+    from mygpr.application.jobs.models import JobEventType
+
+    start, published, resume = Event(), Event(), Event()
+
+    class TerminalGateRunner(InMemoryJobRunner):
+        def _emit(self, job_id, event_type, **kwargs):
+            super()._emit(job_id, event_type, **kwargs)
+            if event_type in {JobEventType.COMPLETED, JobEventType.FAILED, JobEventType.CANCELLED}:
+                published.set()
+                assert resume.wait(5)
+
+    backend = MyGPRBackend.create_default(max_workers=1)
+    runner = TerminalGateRunner(max_workers=1)
+    project = backend.projects.create_project(tmp_path / "lease-project", name="lease")
+    lease = backend.projects.acquire_lease(project.project_id)
+
+    def operation(_context):
+        assert start.wait(5)
+        if outcome == "failed":
+            raise ValueError("operation failed")
+        if outcome == "cancelled":
+            from mygpr.application.jobs.cancellation import JobCancelledError
+            raise JobCancelledError("cancelled by operator")
+
+    try:
+        job_id = runner.submit("terminal lease", operation, finalizer=lease.release)
+        start.set()
+        assert published.wait(5)
+        if eviction == "forget":
+            assert not runner.forget(job_id)
+        else:
+            future_time = time.monotonic() + 3601
+            monkeypatch.setattr("mygpr.application.jobs.runner.time", SimpleNamespace(monotonic=lambda: future_time))
+            assert job_id not in runner.prune()
+        assert runner.snapshot(job_id).is_terminal
+        resume.set()
+        runner.shutdown()
+        assert backend.projects.active_lease_count(project.project_id) == 0
+        backend.projects.close_project(project.project_id)
+    finally:
+        start.set()
+        resume.set()
+        runner.shutdown()
+        lease.release()
+        backend.shutdown()
+
+
+def test_forget_waits_for_finalizer_to_finish_not_only_start():
+    start, entered, resume, finished = Event(), Event(), Event(), Event()
+    runner = InMemoryJobRunner(max_workers=1)
+
+    def finalize():
+        entered.set()
+        assert resume.wait(5)
+        finished.set()
+
+    try:
+        job_id = runner.submit("finalizer in flight", lambda _context: start.wait(5), finalizer=finalize)
+        start.set()
+        assert entered.wait(5)
+        assert not runner.forget(job_id)
+        resume.set()
+        assert finished.wait(5)
+        runner.shutdown()
+        assert runner.forget(job_id)
+    finally:
+        start.set()
+        resume.set()
+        runner.shutdown()

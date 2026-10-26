@@ -82,13 +82,14 @@ class PageCoordinator:
         return self._win._job_bridge()
 
     def connect_job_bridge(self, bridge) -> None:
-        """把 JobBridge 三个任务信号接到本接线器的槽（唯一接线点）。
+        """把 JobBridge 进度、状态、处理提示和完成信号接到对应槽（唯一接线点）。
 
         显式属性访问：槽位被改名/移走时立刻 AttributeError 暴露，
         而不是 hasattr 探测静默跳过（那次事故：load_methods 不执行 → 方法库为空）。
         """
         bridge.progress_changed.connect(self._on_job_progress)
         bridge.status_changed.connect(self._on_job_status)
+        bridge.notice_received.connect(self.jobs.on_notice)
         bridge.job_completed.connect(self._on_job_completed)
 
     def current_line_id(self) -> str:

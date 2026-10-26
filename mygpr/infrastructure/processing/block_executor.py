@@ -25,6 +25,9 @@ from mygpr.domain.processing.models import (
 if TYPE_CHECKING:
     from mygpr.infrastructure.processing.algorithms.methods import NativeAlgorithm
 
+from mygpr.domain.processing.warnings import build_processing_step_notice
+from mygpr.domain.processing.timebase import sampling_interval_s
+
 DEFAULT_BLOCK_BYTES = 64 * 1024 * 1024
 MIN_FREE_RESERVE = 128 * 1024 * 1024
 
@@ -80,7 +83,15 @@ class FileBackedBlockPipelineExecutor(BlockPipelineExecutorPort):
             default=0,
         )
         block_peak = max(min(normalized_bytes, self._block_bytes), minimum_block) * 5
-        peak_memory = max(global_peak, block_peak)
+        operator_peak = 0
+        for item in enabled:
+            if item.block_axis not in {"columns", "rows"}:
+                continue
+            complete = shape[0] if item.block_axis == "columns" else shape[1]
+            split = shape[1] if item.block_axis == "columns" else shape[0]
+            width = min(split, self._block_width(complete, item.memory_multiplier))
+            operator_peak = max(operator_peak, int(complete * width * 4 * item.memory_multiplier))
+        peak_memory = max(global_peak, block_peak, operator_peak)
         temp_multiplier = max((float(item.temporary_multiplier) for item in enabled), default=1.0)
         relative_cost = "very_high" if any(item.relative_cost == "very_high" for item in enabled) else (
             "high" if any(item.relative_cost == "high" for item in enabled) else "medium"
@@ -265,7 +276,7 @@ class FileBackedBlockPipelineExecutor(BlockPipelineExecutorPort):
                 close_memmap(output_view)
                 close_memmap(source_view)
         else:
-            spans = self._spans(shape, algorithm.block_axis)
+            spans = self._spans(shape, algorithm.block_axis, algorithm.memory_multiplier)
             for index, (start, end) in enumerate(spans, start=1):
                 context.raise_if_cancelled()
                 source_view = np.memmap(source_path, mode="r", dtype=np.float32, shape=shape)
@@ -294,14 +305,20 @@ class FileBackedBlockPipelineExecutor(BlockPipelineExecutorPort):
         for item in metadata.get("runtime_warnings", []):
             if isinstance(item, dict):
                 context.emit_warning(item)
+        context.emit_warning(build_processing_step_notice(algorithm.method_id, algorithm.name, metadata))
         return np.memmap(output_path, mode="r+", dtype=np.float32, shape=shape), metadata
 
-    def _spans(self, shape: tuple[int, int], axis: str) -> list[tuple[int, int]]:
+    def _block_width(self, complete: int, memory_multiplier: float) -> int:
+        # Keep 25% workspace headroom when an operator exceeds the legacy bound.
+        bytes_per_cell = max(8 * 5, int(np.ceil(4 * memory_multiplier * 1.25)))
+        return max(1, self._block_bytes // max(complete * bytes_per_cell, 1))
+
+    def _spans(self, shape: tuple[int, int], axis: str, memory_multiplier: float = 3.0) -> list[tuple[int, int]]:
         samples, traces = shape
         if axis == "columns":
-            width = max(1, self._block_bytes // max(samples * 8 * 5, 1))
+            width = self._block_width(samples, memory_multiplier)
             return [(start, min(start + width, traces)) for start in range(0, traces, width)]
-        height = max(1, self._block_bytes // max(traces * 8 * 5, 1))
+        height = self._block_width(traces, memory_multiplier)
         return [(start, min(start + height, samples)) for start in range(0, samples, height)]
 
     def _row_block_size(self, shape: tuple[int, int]) -> int:
@@ -314,12 +331,13 @@ def prepare_block_params(
     runtime = dict(params)
     runtime.setdefault("_header_info", dict(header))
     total_ns = float(header.get("total_time_ns") or header.get("time_window_ns") or 0.0)
-    if total_ns > 0.0:
-        step_s = total_ns * 1.0e-9 / max(1, shape[0])
+    step_s = sampling_interval_s(header, int(shape[0]))
+    if step_s > 0.0:
         runtime.setdefault("time_step_s", step_s)
-        runtime.setdefault("time_window_ns", total_ns)
+        if total_ns > 0.0:
+            runtime.setdefault("time_window_ns", total_ns)
         if method_id == "frequency_filter_1d":
-            runtime.setdefault("sample_rate_hz", 1.0 / step_s)
+            runtime.setdefault("sample_rate_hz", 1.0 / float(runtime["time_step_s"]))
     return runtime
 
 

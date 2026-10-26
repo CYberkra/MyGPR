@@ -113,11 +113,13 @@ class HomePage(ScrollArea):
     def set_recent_projects(self, paths) -> None:
         self._recent_paths = list(dict.fromkeys(str(p) for p in paths if p))
         ordered = sorted(self._recent_paths, key=lambda p: p not in self._pinned_paths)
+        names = self._settings.get('project_display_names', {}) if self._settings is not None else {}
+        names = names if isinstance(names, dict) else {}
         self._recent_list.clear()
         for path in ordered:
             available = Path(path).is_dir()
             prefix = '★ ' if path in self._pinned_paths else ''
-            item = QListWidgetItem(f'{prefix}{Path(path).name}\n{path}  ·  {"可打开" if available else "不可用：目录不存在"}')
+            item = QListWidgetItem(f'{prefix}{names.get(path) or Path(path).name}\n{path}  ·  {"可打开" if available else "不可用：目录不存在"}')
             item.setData(Qt.ItemDataRole.UserRole, path)
             item.setToolTip(path)
             self._recent_list.addItem(item)

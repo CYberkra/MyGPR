@@ -12,7 +12,7 @@ from copy import deepcopy
 import json
 from uuid import uuid4
 
-from PyQt6.QtCore import QEvent, QMimeData, QPoint, QRect, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QMimeData, QPoint, QRect, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import QDrag, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication, QHBoxLayout, QLabel, QSplitter, QTabBar, QVBoxLayout, QWidget,
@@ -40,6 +40,8 @@ def _view_state(view: BScanView) -> dict:
         'gain_alpha': view._gain_alpha, 'gain_db': view._gain_db,
         'gain_power': view._gain_power, 'display_mode': view.display_mode.value,
         'crosshair': view._crosshair_on,
+        'local_view': view._view_selection is not None or view._view_time_window is not None,
+        'levels_follow_view': view._selection_follows_levels,
     }
     if view._matrix is not None:
         state['range'] = view._plot.vb.viewRange()
@@ -53,11 +55,16 @@ def _apply_view_state(view: BScanView, state: dict, *, viewport=False) -> None:
         ranges = state.get('range')
         if isinstance(ranges, (list, tuple)) and len(ranges) == 2:
             try:
-                view._plot.vb.setRange(xRange=ranges[0], yRange=ranges[1], padding=0)
+                if state.get('local_view'):
+                    (left, right), (top, bottom) = ranges
+                    view.set_view_selection(QRectF(left, top, right-left, bottom-top))
+                else:
+                    view._plot.vb.setRange(xRange=ranges[0], yRange=ranges[1], padding=0)
             except (TypeError, ValueError, IndexError):
                 pass
         return
     try:
+        view._selection_follows_levels = bool(state.get('levels_follow_view', True))
         view.set_colormap(str(state.get('colormap', view._cmap_name)))
         view.set_display_levels(*state.get('levels', view.display_levels()))
         view.set_aspect_mode(str(state.get('aspect', view.aspect_mode())))
@@ -220,6 +227,7 @@ class BScanWorkspace(QWidget):
     source_closed = pyqtSignal(str)
     preview_requested = pyqtSignal(str)
     source_context_requested = pyqtSignal(str, object)
+    source_input_requested = pyqtSignal(str)
     view_created = pyqtSignal(object)
     layout_changed = pyqtSignal()
 
@@ -371,7 +379,7 @@ class BScanWorkspace(QWidget):
                 source = self._sources.get(key, {})
                 title = str(source.get('title') or key)
                 group.tabs.setTabText(index, title)
-                group.tabs.setTabToolTip(index, f'{title}\n{key}')
+                group.tabs.setTabToolTip(index, str(source.get('tooltip') or f'{title}\n{key}'))
                 group.tabs.setTabIcon(index, FIF.PIN.icon() if key in group.pinned else FIF.PHOTO.icon())
                 group.tabs.sync_close_button(index, key, title)
             self._render(group)
@@ -713,7 +721,9 @@ class BScanWorkspace(QWidget):
             return entry
 
         if valid:
-            add(menu, 'activate', '从此结果继续处理', lambda: self.open_source(key, gid))
+            reference = self._sources[key].get('comparison', False)
+            add(menu, 'activate', '设为处理输入' if reference else '从此结果继续处理',
+                lambda: self.source_input_requested.emit(key) if reference else self.open_source(key, gid))
             pinned = self.is_pinned(key, gid)
             pin = add(menu, 'pin', '取消固定标签' if pinned else '固定标签',
                       lambda: self.set_pinned(key, not pinned, gid))

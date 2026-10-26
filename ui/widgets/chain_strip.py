@@ -29,7 +29,7 @@ from PyQt6.QtWidgets import QPushButton
 from qfluentwidgets import (CaptionLabel, FluentIcon as FIF,
                             PrimaryPushButton, RoundMenu, ToolButton)
 
-from ui import constants
+from ui import constants, motion
 from ui.widgets.context_menus import add_action, make_menu
 
 
@@ -111,11 +111,11 @@ class _Chip(QWidget):
             lambda _c=False, i=index: host._on_dot_clicked(i))
         self._set_dot_visual(enabled)
         row.addWidget(self.dot_btn)
-        self.del_btn = ToolButton(FIF.CLOSE, self)
+        self.del_btn = ToolButton(FIF.REMOVE_FROM, self)
         # 20px（原 18）：紧凑 chip 内尽量大的点击目标（深查 P3 复审）
         self.del_btn.setFixedSize(20, 20)
-        self.del_btn.setToolTip('删除该步骤')
-        self.del_btn.setAccessibleName('删除该步骤')
+        self.del_btn.setToolTip('从处理链移除该步骤')
+        self.del_btn.setAccessibleName('从处理链移除该步骤')
         self.del_btn.clicked.connect(
             lambda _c=False, i=index: host._on_chip_deleted(i))
         row.addWidget(self.del_btn)
@@ -462,15 +462,15 @@ class ChainStrip(QWidget):
                 chip.set_selected_visual(index == row)
         item = self._list.item(row)
         rect = self._list.visualItemRect(item) if item is not None else None
+        self._pill_anim.stop()
         if rect is None or not rect.isValid():
             self._pill.hide()
             return
-        if self._pill.isHidden():
+        if self._pill.isHidden() or not motion.animations_enabled() or not self.isVisible():
             self._pill.setGeometry(rect)
             self._pill.show()
             self._pill.lower()
             return
-        self._pill_anim.stop()
         self._pill_anim.setStartValue(self._pill.geometry())
         self._pill_anim.setEndValue(rect)
         self._pill_anim.start()

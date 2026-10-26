@@ -237,6 +237,9 @@ def test_project_api_processing_artifact_persists_output_axes(tmp_path: Path) ->
         assert time_axis.size == 36, f"时间轴长度应为 36，实际 {time_axis.size}"
         assert float(header.get("time_window_ns") or 0.0) == pytest.approx(250.0, abs=1.0)
         assert float(time_axis[0]) == pytest.approx(250.0, abs=1.0)   # 零点偏移
-        assert float(time_axis[-1]) == pytest.approx(500.0, abs=1.0)  # 终点=新时窗终点
+        # Legacy N-bin windows describe [start, end), so the last retained
+        # sample is before 500ns.  Rescaling it to 500 would change dt.
+        np.testing.assert_allclose(time_axis, 250.0 + np.arange(36) * (500.0 / 72), atol=1e-4)
+        assert header['time_axis_endpoint'] is False
     finally:
         backend.shutdown()

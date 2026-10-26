@@ -102,7 +102,8 @@ def auto_load_data(path: str, **kwargs) -> Dict[str, Any]:
         header = dataset.to_metadata()
         time_step_s = 0.0
         if dataset.format_name == "cdut-acquisition-hdf5":
-            time_step_s = dataset.time_window_ns * 1e-9 / dataset.sample_count
+            divisor = max(1, dataset.sample_count - int(dataset.metadata.get("time_axis_endpoint", False)))
+            time_step_s = dataset.time_window_ns * 1e-9 / divisor
         elif dataset.sample_count > 1:
             time_step_s = float(np.median(np.diff(dataset.time_axis_ns))) * 1e-9
         header.update(a_scan_length=dataset.sample_count, num_traces=dataset.trace_count,

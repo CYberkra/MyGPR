@@ -108,6 +108,7 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._closed = False
         self._tracks = []            # 全量 SpatialTrack
         self._tracks_by_id = {}
         self._lines_by_id = {}       # 测线记录（rtk_status 等）
@@ -219,6 +220,8 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
 
         代次守卫：快速连续导入/自动加载时，旧任务的回包直接丢弃。
         """
+        if self._closed:
+            return
         self._dem_load_generation += 1
         self._pending_dem_auto = auto
         self._dem_pool.start(_DemLoadWorker(
@@ -226,7 +229,7 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
 
     def _on_dem_loaded(self, generation: int, dem, path: str, error: str) -> None:
         """DEM 解析回包（GUI 线程）：应用格网或按来源处理失败。"""
-        if generation != self._dem_load_generation:
+        if self._closed or generation != self._dem_load_generation:
             return
         if dem is None:
             if self._pending_dem_auto:

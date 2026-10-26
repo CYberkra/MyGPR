@@ -34,6 +34,7 @@ from qfluentwidgets import (
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants
+from ui.icons import WorkbenchIcon
 from ui.page_scaffold import (card_title, make_card,
                               make_collapsible_column, make_hint,
                               refill_combo)
@@ -129,8 +130,8 @@ class InterpretationPage(QWidget):
         for btn in (self._auto_trace_btn, self._snap_btn, self._smooth_btn):
             row2.addWidget(btn)
         row2.addWidget(make_separator(vertical=True))
-        self._undo_btn = PushButton('撤销', card, FIF.CANCEL)
-        self._redo_btn = PushButton('重做', card, FIF.SYNC)
+        self._undo_btn = PushButton('撤销', card, WorkbenchIcon.UNDO)
+        self._redo_btn = PushButton('重做', card, WorkbenchIcon.REDO)
         row2.addWidget(self._undo_btn)
         row2.addWidget(self._redo_btn)
         row2.addWidget(make_separator(vertical=True))

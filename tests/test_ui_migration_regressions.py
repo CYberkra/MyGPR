@@ -33,26 +33,29 @@ def test_job_bridge_slot_targets_exist_on_coordinator() -> None:
         )
 
 
-def test_connect_job_bridge_pins_all_three_signals() -> None:
-    """钉住接线类（变异测试曾证明改名槽位后旧 hasattr 写法全绿）：三次 connect 必须发生。"""
+def test_connect_job_bridge_pins_all_four_signals() -> None:
+    """进度、状态、处理提示和完成事件必须连接到真实初始化后的分发槽。"""
     class _FakeSignal:
         def __init__(self, log, name: str) -> None:
             self._log, self._name = log, name
         def connect(self, slot) -> None:
-            self._log.append(self._name)
+            self._log.append((self._name, slot))
 
     class _FakeBridge:
         def __init__(self) -> None:
-            self.connected: list[str] = []
+            self.connected: list[tuple] = []
         def __getattr__(self, name: str):
             return _FakeSignal(self.connected, name)
 
     bridge = _FakeBridge()
-    pc = PageCoordinator.__new__(PageCoordinator)   # 无需 __init__（纯接线方法）
+    pc = PageCoordinator(types.SimpleNamespace())
     pc.connect_job_bridge(bridge)
-    assert bridge.connected == ['progress_changed', 'status_changed', 'job_completed'], (
-        'JobBridge 接线不完整：任务进度/状态/完成信号漏接会导致任务页无反应'
-    )
+    assert bridge.connected == [
+        ('progress_changed', pc._on_job_progress),
+        ('status_changed', pc._on_job_status),
+        ('notice_received', pc.jobs.on_notice),
+        ('job_completed', pc._on_job_completed),
+    ], 'JobBridge 必须把任务进度、状态、处理提示和完成事件接到对应处理槽'
 
 
 def test_coordinator_line_state_attribute_exists() -> None:
@@ -187,6 +190,7 @@ def _build_race_window(monkeypatch):
         delivery_focus_requested = pyqtSignal(str)
         artifact_focus_requested = pyqtSignal(str, str)
         artifact_delete_requested = pyqtSignal(str, str)
+        processing_package_requested = pyqtSignal(str, str)
 
         def set_settings_manager(self, _settings):
             pass

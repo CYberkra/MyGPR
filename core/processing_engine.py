@@ -109,8 +109,9 @@ def prepare_runtime_params(
         if header_info:
             total_time_ns = header_info.get("total_time_ns")
         total_time_value = to_float(total_time_ns, default=0.0)
-        if total_time_value > 0:
-            time_step_s = total_time_value * 1e-9 / samples
+        from mygpr.domain.processing.timebase import sampling_interval_s
+        time_step_s = sampling_interval_s(header_info, samples)
+        if time_step_s > 0:
             runtime_params["time_step_s"] = time_step_s
             if method_id == "frequency_filter_1d":
                 runtime_params.setdefault("sample_rate_hz", 1.0 / time_step_s)

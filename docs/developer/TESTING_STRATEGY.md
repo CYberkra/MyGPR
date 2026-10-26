@@ -64,5 +64,9 @@ Windows 打包已在 `packaging/windows/build.py` 中自动生成 SBOM 和许可
 - nightly / release 独立工作流；
 - `config/industrial_acceptance_matrix.json` 中列出的真实断电、外接盘断连、10GB 长跑等现场验收仍需实机完成；已有 ENOSPC 注入和事务恢复测试不能替代这些实机证据。
 
-现场与实机验收（DPI、多 GB 数据、真实 RTK/IMU/GPR 同步、错误 CRS 等）属于
-发布后人工验收清单，不由本地门禁替代。
+日常源码/PR 门禁用于验证代码和已有自动化合同；通过它们不等于已完成正式工业验收。
+`config/industrial_acceptance_matrix.json` 的 `required_for_commercial_release`
+明确列出商业/工业发布前必须具备的 Windows 故障、CUDA 与硬件在环证据。
+缺少证据时标记为未执行或待验收，不能用离屏截图、合成数据或旧版本结果填充通过状态。
+现场与实机验收（DPI、多 GB 数据、真实 RTK/IMU/GPR 同步、错误 CRS 等）也须按
+目标发布范围在发布前完成对应检查；本地门禁不替代这些证据。

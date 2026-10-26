@@ -54,7 +54,7 @@ def test_motion_compensation_category_exists():
     assert "motion_compensation" in METHOD_CATEGORY_LABELS
     assert METHOD_CATEGORY_LABELS["motion_compensation"] == "运动补偿"
     assert METHOD_METADATA[VIBRATION_METHOD]["category"] == "artifact_suppression"
-    assert METHOD_METADATA[VIBRATION_METHOD]["display_name"] == "周期条带伪影抑制（实验）"
+    assert METHOD_METADATA[VIBRATION_METHOD]["display_name"] == "周期条带伪影抑制"
 
 
 def test_auto_tune_stage_assigned_for_all_motion_methods():

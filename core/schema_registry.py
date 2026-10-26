@@ -122,6 +122,7 @@ class SchemaRegistry:
         family: str,
         write_migrated: bool = True,
         quarantine_root: str | Path | None = None,
+        quarantine_on_error: bool = True,
     ) -> LoadedDocument:
         source = Path(path)
         try:
@@ -130,7 +131,10 @@ class SchemaRegistry:
                 raise TypeError("JSON root must be an object")
             loaded = self.migrate(payload, family=family)
         except (OSError, ValueError, TypeError, SchemaError) as exc:
-            quarantine = self.quarantine(source, quarantine_root=quarantine_root, reason=str(exc))
+            quarantine = (
+                self.quarantine(source, quarantine_root=quarantine_root, reason=str(exc))
+                if quarantine_on_error else None
+            )
             if isinstance(exc, UnsupportedSchemaError):
                 raise
             raise DocumentCorruptionError(

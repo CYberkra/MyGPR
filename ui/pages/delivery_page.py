@@ -61,6 +61,16 @@ def _line_display(line) -> str:
     return '%s (%s)' % (name, line_id) if name != line_id else line_id
 
 
+def _report_output_path(result, key: str) -> str:
+    """Resolve project-relative backend paths while keeping legacy absolutes."""
+    path = str(_get(result, key, '') or '')
+    metadata = _get(result, 'metadata', {})
+    root = str(metadata.get('project_root') or '') if isinstance(metadata, Mapping) else ''
+    if path and root and not os.path.isabs(path):
+        return os.path.normpath(os.path.join(root, path))
+    return path
+
+
 class DeliveryPage(QWidget):
     """成果与交付页面。"""
 
@@ -186,6 +196,8 @@ class DeliveryPage(QWidget):
         backup_row = QHBoxLayout()
         backup_row.setSpacing(constants.CARD_SPACING)
         self._backup_btn = PushButton('备份当前项目', backup_card)
+        self._backup_btn.setToolTip(
+            '创建备份时会完整恢复并校验项目，需要足够容纳完整项目的临时磁盘空间。')
         self._restore_btn = PushButton('从备份恢复', backup_card)
         backup_row.addWidget(self._backup_btn)
         backup_row.addWidget(self._restore_btn)
@@ -200,8 +212,10 @@ class DeliveryPage(QWidget):
         self._retention_spin = SpinBox(backup_card)
         self._retention_spin.setRange(1, 100)
         self._retention_spin.setValue(10)
+        self._retention_spin.setToolTip(
+            '保留最近指定数量的恢复点及其必需增量祖先；实际 ZIP 档案数量可能超过该数量。')
         options_row.addWidget(self._retention_spin)
-        options_row.addWidget(CaptionLabel('个备份'))
+        options_row.addWidget(CaptionLabel('个恢复点'))
         options_row.addStretch(1)
         backup_layout.addLayout(options_row)
         root.addWidget(backup_card)
@@ -298,19 +312,19 @@ class DeliveryPage(QWidget):
             binding.close()
         has_path = False
         for key, _caption in _REPORT_FIELDS:
-            path = str(_get(result, key, '') or '')
+            path = _report_output_path(result, key)
             label = self._report_path_labels[key]
             label.setText(path if path else '--')
             has_path = has_path or bool(path)
         report_dir = ''
         for key in _REPORT_DIR_KEYS:
-            value = str(_get(result, key, '') or '')
+            value = _report_output_path(result, key)
             if value:
                 report_dir = value
                 break
         if not report_dir:
             for key, _caption in _REPORT_FIELDS:
-                path = str(_get(result, key, '') or '')
+                path = _report_output_path(result, key)
                 if path:
                     report_dir = os.path.dirname(path)
                     break

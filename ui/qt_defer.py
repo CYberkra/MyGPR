@@ -8,16 +8,70 @@
 """
 from __future__ import annotations
 
+from functools import partial
+from itertools import count
+import weakref
+
+from PyQt6 import sip
 from PyQt6.QtCore import QObject, QTimer
 
+
+_TOKENS = count()
+_PENDING_CALLS: dict[int, dict] = {}
+
+
+def _release_call(token: int, _object=None) -> None:
+    _PENDING_CALLS.pop(token, None)
+
+
+def _start_call(timer_ref, *args, **kwargs) -> None:
+    timer = timer_ref()
+    if timer is None:
+        raise RuntimeError('Deferred timer is no longer available')
+    state = timer._defer_state
+    _PENDING_CALLS[state['token']] = state
+    try:
+        QTimer.start(timer, *args, **kwargs)
+    except (TypeError, OverflowError, RuntimeError):
+        _release_call(state['token'])
+        raise
+
+
+def _stop_call(timer_ref) -> None:
+    timer = timer_ref()
+    if timer is not None:
+        QTimer.stop(timer)
+        _release_call(timer._defer_state['token'])
+
+
+def _invoke_call(token: int) -> None:
+    state = _PENDING_CALLS.get(token)
+    if state is None:
+        return
+    timer = state['timer']
+    try:
+        state['callback']()
+    finally:
+        # A callback may stop/restart its timer or destroy its host itself.
+        if sip.isdeleted(timer) or not timer.isActive():
+            _release_call(token)
 
 def defer_call(host: QObject, fn, delay_ms: int = 0) -> QTimer:
     """在 ``host`` 下建单发 QTimer，``delay_ms`` 后执行 ``fn``。
 
-    返回定时器本身；宿主销毁时 Qt 父子机制保证回调不再派发。
+    返回定时器本身；stop() 取消保活，start() 可重新排队。除了 Qt 父子
+    生命周期，活动期间也保留 Python 回调，避免 GC 在 deleteLater 派发前
+    清空闭包默认参数。宿主销毁后不再派发。
     """
     timer = QTimer(host)
+    token = next(_TOKENS)
     timer.setSingleShot(True)
-    timer.timeout.connect(fn)
+    timer._defer_state = {'timer': timer, 'callback': fn, 'token': token}
+    # Plain QTimer avoids a Python QObject-subclass destruction cycle. These
+    # wrappers retain only a weak timer reference, including during cancellation.
+    timer.start = partial(_start_call, weakref.ref(timer))
+    timer.stop = partial(_stop_call, weakref.ref(timer))
+    timer.timeout.connect(partial(_invoke_call, token))
+    timer.destroyed.connect(partial(_release_call, token))
     timer.start(delay_ms)
     return timer

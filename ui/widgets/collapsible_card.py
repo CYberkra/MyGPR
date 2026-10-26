@@ -14,13 +14,14 @@
 DoubleSpinBox 的值、SwitchButton 的开关态天然保留，无需另存。
 """
 
-from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, Qt, pyqtSignal
+from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QIcon, QTransform
 from PyQt6.QtWidgets import QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import (CardWidget, FluentIcon as FIF, ToolButton,
                             isDarkTheme)
 
 from ui import constants
+from ui import motion
 from ui.page_scaffold import card_title
 
 __all__ = ['CollapsibleCard', 'make_collapsible_card']
@@ -36,6 +37,28 @@ def _down_chevron() -> QIcon:
     chevron 上下不对称，翻转会得到指向错误的形状）。"""
     pm = FIF.CHEVRON_RIGHT_MED.icon().pixmap(16, 16)
     return QIcon(pm.transformed(QTransform().rotate(90)))
+
+
+class _BodyViewport(QWidget):
+    """Clip the natural content geometry without squeezing its layout."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.content = QWidget(self)
+
+    def sizeHint(self) -> QSize:
+        return self.content.sizeHint().expandedTo(self.content.minimumSizeHint())
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(self.content.minimumSizeHint().width(), 0)
+
+    def resizeEvent(self, event) -> None:
+        layout = self.content.layout()
+        height = self.sizeHint().height()
+        if layout is not None and layout.hasHeightForWidth():
+            height = max(height, layout.totalHeightForWidth(self.width()))
+        self.content.setGeometry(0, 0, self.width(), height)
+        super().resizeEvent(event)
 
 
 class CollapsibleCard(CardWidget):
@@ -83,12 +106,13 @@ class CollapsibleCard(CardWidget):
         header.addWidget(self._toggle_btn, 0, Qt.AlignmentFlag.AlignVCenter)
         root.addLayout(header)
 
-        # 内容区：独立 QWidget 承载，收起时整体隐藏（子控件状态不丢）
-        self._body = QWidget(self)
+        # The outer body clips a naturally sized inner layout. Animating the
+        # layout's own widget would squash flexible controls into overlapping rows.
+        self._body = _BodyViewport(self)
         self._body.setObjectName('collapsibleCardBody')
         self._body.setStyleSheet(
             'QWidget#collapsibleCardBody { background-color: transparent; }')
-        self._body_layout = QVBoxLayout(self._body)
+        self._body_layout = QVBoxLayout(self._body.content)
         self._body_layout.setContentsMargins(0, 0, 0, 0)
         self._body_layout.setSpacing(constants.CARD_SPACING)
         root.addWidget(self._body, 0)
@@ -143,18 +167,20 @@ class CollapsibleCard(CardWidget):
         self._collapsed = collapsed
         target = 0 if collapsed else self.body_height()
         self._animation.stop()
-        self._animation.setStartValue(self._body.maximumHeight())
+        current = self._body.height() if self._body.isVisible() else 0
+        self._animation.setStartValue(current)
         self._animation.setEndValue(target)
-
-        if collapsed:
-            self._body.setVisible(False)
+        # Expanded bodies have an unlimited cap. Tween their real geometry,
+        # keep content visible and let the body clip it until the final state.
+        self._body.setMaximumHeight(current)
+        self._body.setVisible(True)
         # chevron 指示的是「点击后的动作」：收起态给 ›（点开），展开态给 ⌄
         # （点收起）——与 Windows 侧栏 / Win11 设置页的展开器同一约定。
         self._toggle_btn.setIcon(FIF.CHEVRON_RIGHT_MED.icon()
                                  if collapsed else _down_chevron())
         self._toggle_btn.setToolTip('展开' if collapsed else '收起')
 
-        if animate:
+        if animate and motion.animations_enabled() and self.isVisible() and current != target:
             self._animation.start()
         else:
             self._body.setMaximumHeight(target)
@@ -165,15 +191,18 @@ class CollapsibleCard(CardWidget):
 
     # ------------------------------------------------------------ 内部
     def _on_animation_finished(self) -> None:
-        # stop() 也会发 finished（Qt 语义），续跑场景下会误清 _animating
-        if self._body.maximumHeight() != (0 if self._collapsed
-                                          else self.body_height()):
-            return
         self._animating = False
+        self._body.setVisible(not self._collapsed)
         if not self._collapsed:
-            self._body.setVisible(True)
             self._body.setMaximumHeight(_QWIDGETSIZE_MAX)
         self.sig_collapsed.emit(self._collapsed)
+
+    def hideEvent(self, event) -> None:
+        if self._animating:
+            self._animation.stop()
+            self._body.setMaximumHeight(0 if self._collapsed else self.body_height())
+            self._on_animation_finished()
+        super().hideEvent(event)
 
 
 def make_collapsible_card(title: str, *, parent=None,

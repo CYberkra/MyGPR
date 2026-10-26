@@ -34,6 +34,7 @@ class ProcessingChain:
         self._pending_reconfigure = None
         self._submission_context = None
         self._submission_started_job = ''
+        self._interpretation_snapshot = None
 
     # ============================================================ 信号注册
     def connect_all(self) -> None:
@@ -122,6 +123,9 @@ class ProcessingChain:
         # ---------------- 项目控制器：深度切片回包（代数门卫在本链）
         pc = co.project_controller
         if pc is not None:
+            if hasattr(processing, 'comparison_preview_requested') and hasattr(pc, 'preview_comparison_line'):
+                processing.comparison_preview_requested.connect(pc.preview_comparison_line)
+                pc.comparison_preview_ready.connect(processing.set_comparison_preview)
             if hasattr(pc, 'project_opened') and hasattr(processing, 'set_project_read_only'):
                 pc.project_opened.connect(lambda summary:
                     processing.set_project_read_only(bool(getattr(summary, 'read_only', False))))
@@ -146,7 +150,8 @@ class ProcessingChain:
         line_id = str(line_id or '')
         if not line_id or line_id == self._co.project.current_line_id:
             return
-        self._co.project.on_line_selected(line_id)
+        if not self._co.project.on_line_selected(line_id):
+            return
         self._co.infobar('info', '切换测线', f'已切换到 {line_id}')
 
     def on_processing_artifact_selected(self, artifact_id: str) -> None:
@@ -156,13 +161,15 @@ class ProcessingChain:
             self._co.project_controller.preview_artifact(line_id, str(artifact_id))
 
     def on_original_focus_requested(self, line_id: str) -> None:
-        self._co.project.on_line_selected(str(line_id))
+        if not self._co.project.on_line_selected(str(line_id)):
+            return
         self._co.goto_page('processingInterface')
         self._co.page('processingInterface').select_original()
 
     def on_reconfigure_requested(self, line_id: str, artifact_id: str) -> None:
+        if not self._co.project.on_line_selected(str(line_id)):
+            return
         self._pending_reconfigure = (str(line_id), str(artifact_id))
-        self._co.project.on_line_selected(str(line_id))
         self._co.goto_page('processingInterface')
         self._try_reconfigure(str(line_id))
 
@@ -391,14 +398,20 @@ class ProcessingChain:
         if self._co.interpretation_controller is None:
             return
         line_id = self._co.require_line()
-        if line_id:
+        if line_id and self._co.project.confirm_interpretation_close():
             self._co.interpretation_controller.open_session(
                 self._co.current_project_id(), line_id,
                 input_artifact_id=str(artifact_id or ""),
             )
 
     def on_session_opened(self, snapshot) -> None:
+        if not self._is_current_interpretation(snapshot):
+            return
+        self._interpretation_snapshot = snapshot
         interpretation = self._co.page('interpretationInterface')
+        # The previous raw/artifact image belongs to a different edit source.
+        # Keep it empty until this session's source preview arrives.
+        interpretation.set_bundle(None)
         interpretation.set_points(self._snapshot_points(snapshot))
         line_id = str(getattr(snapshot, 'line_id', '') or ''
                       ) or self._co.project.current_line_id
@@ -410,17 +423,41 @@ class ProcessingChain:
             if artifact_id:
                 # 在成果上标注：预览该成果而非原始数据
                 self._co.project_controller.preview_artifact(
-                    self._co.project.current_line_id, artifact_id)
+                    self._co.project.current_line_id, artifact_id,
+                    strict_generation=False)
             else:
                 self._co.project_controller.preview_line(
                     self._co.project.current_line_id)
 
     def on_session_updated(self, snapshot) -> None:
+        if not self._is_current_interpretation(snapshot):
+            return
+        self._interpretation_snapshot = snapshot
         self._co.page('interpretationInterface').set_points(
             self._snapshot_points(snapshot))
 
+    def interpretation_uses_source(self, artifact_id: str) -> bool:
+        """Only a live session may receive its artifact; raw is the default."""
+        snapshot = self._interpretation_snapshot
+        if snapshot is None or not self._is_current_interpretation(snapshot):
+            return not artifact_id
+        return str(getattr(snapshot, 'input_artifact_id', '') or '') == str(artifact_id or '')
+
+    def _is_current_interpretation(self, snapshot) -> bool:
+        """Queued snapshots must match both the current line and live session."""
+        co = self._co
+        if (str(getattr(snapshot, 'project_id', '') or '')
+                != str(co.current_project_id() or '')
+                or str(getattr(snapshot, 'line_id', '') or '')
+                != co.project.current_line_id):
+            return False
+        controller = co.interpretation_controller
+        return controller is not None and controller.is_current_session(snapshot)
+
     def on_session_failed(self, message: str) -> None:
-        self._co.page('interpretationInterface').set_session_active(False)
+        controller = self._co.interpretation_controller
+        self._co.page('interpretationInterface').set_session_active(
+            controller is not None and controller.has_active_session())
         self._co.infobar('error', '界面解释标注', message)
 
     def on_points_changed(self, points: list) -> None:

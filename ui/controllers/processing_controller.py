@@ -268,7 +268,10 @@ class _AutotuneSubmitCommand:
                 dataset = backend.projects.read_dataset(
                     str(self._project_id), str(self._line_id))
             data = np.asarray(dataset.data, dtype=np.float32)
-            kwargs: dict[str, Any] = {}
+            kwargs: dict[str, Any] = {
+                "header_info": dict(dataset.header_info),
+                "trace_metadata": dict(dataset.trace_metadata),
+            }
             if self._params_hint:
                 kwargs["candidate_params"] = [dict(self._params_hint)]
             job_id = backend.submit_autotune(data, self._method_id, **kwargs)

@@ -5,7 +5,7 @@ All commands below assume this directory is the working directory.
 
 ## Scope
 
-- PyQt6 + qfluentwidgets desktop app for (UAV-)GPR data processing, v0.11.0.
+- PyQt6 + qfluentwidgets desktop app for (UAV-)GPR data processing, v0.11.4.
 - 平台定位：CDUT-UavGPR 的处理、成像解释与成果交付组件。
 - Main entry points: `app_qt.py` (GUI) and `cli_batch.py` (headless batch).
 - 架构与工程约束见 [CLAUDE.md](CLAUDE.md)；设计或验收任务先查 [规格索引](docs/superpowers/specs/README.md)，区分现行合同与历史方案。

@@ -10,6 +10,7 @@ from typing import Any
 import numpy as np
 
 from mygpr.domain.common.scalars import to_float
+from mygpr.domain.processing.timebase import snap_sample_index
 
 
 def method_time_cut(
@@ -77,6 +78,14 @@ def method_time_cut(
         time_step_s=time_step_s,
         header_info=kwargs.get("header_info"),
     )
+    header = kwargs.get("header_info") or {}
+    endpoint = bool(header.get("time_axis_endpoint", False))
+    step_ns = total_ns / max(1, samples - 1 if endpoint else samples)
+    if endpoint and to_float(time_step_s, default=0.0) > 0:
+        step_ns = float(time_step_s) * 1e9
+    # Index conversion uses an exclusive boundary one interval after the last
+    # sample, even when the source window explicitly includes its endpoint.
+    total_ns = step_ns * samples
     start_idx = _time_to_index(
         time_start_ns,
         samples=samples,
@@ -103,8 +112,7 @@ def method_time_cut(
         cut_end = max(cut_start + 1, min(end_idx, samples))
 
     result = arr[cut_start:cut_end, :].astype(np.float32, copy=True)
-    kept_duration_ns = total_ns * float(cut_end - cut_start) / float(samples)
-    header = kwargs.get("header_info") or {}
+    kept_duration_ns = step_ns * max(0, cut_end - cut_start - int(endpoint))
     offset_ns = to_float(header.get("time_cut_offset_ns"), default=0.0)
     start_time_ns = offset_ns + total_ns * float(cut_start) / float(samples)
     end_time_ns = offset_ns + total_ns * float(cut_end) / float(samples)
@@ -122,6 +130,9 @@ def method_time_cut(
         "effective_time_end_ns": float(end_time_ns),
         "header_info_updates": {
             "total_time_ns": float(kept_duration_ns),
+            "time_window_ns": float(kept_duration_ns),
+            "time_axis_endpoint": endpoint,
+            "time_step_s": step_ns * 1e-9,
             "a_scan_length": int(result.shape[0]),
             "time_cut_offset_ns": float(start_time_ns),
         },
@@ -188,5 +199,6 @@ def _time_to_index(
         value = 0.0
     ratio = value / max(total_time_ns, 1.0e-12)
     raw = ratio * float(samples)
+    raw = snap_sample_index(raw)
     idx = floor(raw) if rounding == "floor" else ceil(raw)
     return max(0, min(int(idx), samples))

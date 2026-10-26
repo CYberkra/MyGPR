@@ -51,7 +51,8 @@ def _make_status_badge(status: str) -> QLabel:
 
 def _restyle_status_badge(badge: QLabel, status: str) -> None:
     """不换文字只按状态重刷徽章配色（主题切换路径用，无渐变动画）。"""
-    badge.setStyleSheet(BADGE_QSS % _status_badge_color(status))
+    color = _status_badge_color(status)
+    animate_badge_color(badge, BADGE_QSS, color, color)
 
 
 class JobTable(QWidget):

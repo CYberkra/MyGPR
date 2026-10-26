@@ -146,7 +146,7 @@ class GPRDataSet:
         payload = {item.name: deepcopy(getattr(self, item.name)) for item in fields(self) if item.name not in buffers}
         payload["schema"] = GPR_DATA_SCHEMA
         payload["length_m"] = self.length_m
-        for key in ("distance_axis_status", "time_axis_endpoint", "time_cut_offset_ns"):
+        for key in ("distance_axis_status", "time_axis_endpoint", "time_cut_offset_ns", "time_step_s"):
             if key in self.metadata:
                 payload[key] = self.metadata[key]
         return payload
@@ -408,42 +408,66 @@ def detect_mygpr_airborne_sidecar_csv(path: str | Path) -> dict[str, float] | No
     header, _header_lines = _parse_mygpr_sidecar_header(src)
     required = {"sample_count", "time_window_ns", "trace_count", "trace_interval_m"}
     if required.issubset(header):
-        sample_count = int(header["sample_count"])
-        trace_count = int(header["trace_count"])
-        if sample_count > 0 and trace_count > 0:
-            return header
+        _validate_mygpr_sidecar_header(header)
+        return header
     return None
 
 
-def _load_mygpr_airborne_sidecar_csv(path: Path, *, line_id: str, dielectric_constant: float = 9.0) -> GPRDataSet:
+def _validate_mygpr_sidecar_header(header: dict[str, float]) -> None:
+    """Reject declarations that would truncate counts or invent physical axes."""
+    for key in ("sample_count", "trace_count"):
+        value = header[key]
+        if not np.isfinite(value) or value <= 0 or not float(value).is_integer():
+            raise ValueError(f"MyGPR sidecar CSV {key} must be a positive integer")
+    for key in ("time_window_ns", "trace_interval_m"):
+        value = header[key]
+        if not np.isfinite(value) or value < 0:
+            raise ValueError(f"MyGPR sidecar CSV {key} must be finite and nonnegative")
+
+
+def _load_mygpr_airborne_sidecar_csv(path: Path, *, line_id: str, dielectric_constant: float = 9.0,
+                                    cancel_requested=None, progress_callback=None) -> GPRDataSet:
+    from core.chunked_gpr_io import check_cancel, emit_progress
+
+    check_cancel(cancel_requested)
     header, header_lines = _parse_mygpr_sidecar_header(path)
     if not {"sample_count", "time_window_ns", "trace_count", "trace_interval_m"}.issubset(header):
         raise ValueError(f"Not a MyGPR airborne sidecar CSV: {path}")
+    _validate_mygpr_sidecar_header(header)
     sample_count = int(header["sample_count"])
     trace_count = int(header["trace_count"])
     time_window_ns = float(header["time_window_ns"])
     trace_interval_m = float(header["trace_interval_m"])
+    expected = sample_count * trace_count
+    source_bytes = path.stat().st_size
     rows: list[list[float]] = []
     with path.open("r", encoding="utf-8-sig", errors="ignore", newline="") as fh:
         reader = csv.reader(fh)
         for _ in range(header_lines):
             next(reader, None)
-        for row in reader:
+        for index, row in enumerate(reader):
+            if index % 256 == 0:
+                check_cancel(cancel_requested)
+                emit_progress(progress_callback, "parse_csv", fh.buffer.tell(), source_bytes)
+            if not any(str(item).strip() for item in row):
+                continue
+            if len(row) < 4:
+                raise ValueError("MyGPR sidecar CSV data row must contain at least 4 columns")
+            if len(rows) == expected:
+                raise ValueError(f"MyGPR sidecar CSV has excess data rows: expected={expected}, path={path}")
             vals: list[float] = []
             for item in row:
                 try:
                     vals.append(float(str(item).strip()))
                 except (TypeError, ValueError):
                     vals.append(float("nan"))
-            if len(vals) >= 4:
-                rows.append(vals[:6])
-    expected = sample_count * trace_count
+            rows.append(vals[:6])
+    check_cancel(cancel_requested)
+    emit_progress(progress_callback, "parse_csv", source_bytes, source_bytes)
     if len(rows) < expected:
         raise ValueError(
             f"MyGPR sidecar CSV has insufficient data rows: expected={expected}, actual={len(rows)}, path={path}"
         )
-    if len(rows) > expected:
-        rows = rows[:expected]
     data = np.asarray(rows, dtype=np.float32)
     # Raw order in legacy files is trace-major: each trace contributes
     # sample_count consecutive rows. Convert to rows=samples, cols=traces.
@@ -475,6 +499,11 @@ def _load_mygpr_airborne_sidecar_csv(path: Path, *, line_id: str, dielectric_con
     metadata = {
         "source_name": path.name,
         "source_format": "mygpr_airborne_sidecar_csv",
+        # Preserve this reader's existing inclusive linspace interpretation in
+        # processing too. CSV itself does not prove the instrument's endpoint.
+        "time_axis_endpoint": True,
+        "time_step_s": time_window_ns * 1e-9 / max(sample_count - 1, 1),
+        "time_axis_convention": "csv_reader_inclusive_interpretation",
         "header_lines": header_lines,
         "trace_interval_m": trace_interval_m,
         "columns": columns,
@@ -516,6 +545,32 @@ def _load_numeric_csv(path: Path) -> np.ndarray:
     if min_len < 16 or len(rows) < 32:
         raise ValueError(f"CSV numeric content is too small for a B-scan matrix: rows={len(rows)}, cols={min_len}, path={path}")
     return np.asarray([row[:min_len] for row in rows], dtype=np.float32)
+
+
+def _dataset_from_npz(src, line_id, matrix, axes, stored_meta, length_m, dielectric_constant):
+    """Apply the same persisted header and explicit axes to both NPZ readers."""
+    metadata = dict(stored_meta.get('metadata') or {})
+    for key in ('distance_axis_status', 'time_axis_endpoint', 'time_cut_offset_ns', 'time_step_s'):
+        if key in stored_meta:
+            metadata[key] = stored_meta[key]
+    metadata.setdefault('source_name', src.name)
+    staged = isinstance(matrix, np.memmap)
+    if staged:
+        metadata['staging_matrix_path'] = str(matrix.filename)
+    time = axes.get('time_axis_ns')
+    fallback_window = float(time[-1] - time[0]) if time is not None and len(time) else 250.0
+    dataset = GPRDataSet.from_matrix(
+        line_id, matrix, length_m=length_m,
+        time_window_ns=float(stored_meta.get('time_window_ns', fallback_window)),
+        dielectric_constant=float(stored_meta.get('dielectric_constant', dielectric_constant)),
+        source_path=str(src), format_name='npz-dataset-chunked' if staged else 'npz-dataset',
+        metadata=metadata,
+    )
+    for key, values in axes.items():
+        setattr(dataset, key, values)
+    if 'depth_axis_m' not in axes:
+        dataset.depth_axis_m = time_to_depth_axis(dataset.time_axis_ns, dataset.dielectric_constant)
+    return dataset
 
 
 def load_gpr_dataset(
@@ -563,44 +618,23 @@ def load_gpr_dataset(
         matrix = np.load(src, mmap_mode=mmap_mode, allow_pickle=False)
         fmt = "npy-matrix"
     elif suffix == ".npz":
+        from core.chunked_gpr_io import read_npz_metadata
+
         with np.load(src, allow_pickle=False) as npz:
             matrix = np.asarray(npz["matrix"] if "matrix" in npz else npz[npz.files[0]], dtype=np.float32)
-            length_axis = np.asarray(npz["distance_axis_m"], dtype=np.float32) if "distance_axis_m" in npz else None
-            time_axis = np.asarray(npz["time_axis_ns"], dtype=np.float32) if "time_axis_ns" in npz else None
-            depth_axis = np.asarray(npz["depth_axis_m"], dtype=np.float32) if "depth_axis_m" in npz else None
-            # save_npz 把 to_metadata() 序列化为 metadata 成员（0 维 Unicode 数组）；
-            # 读取端必须还原 dielectric_constant 与 metadata（速度分析证据等），
-            # 否则写回测线的 ε 与证据在下次加载时静默丢失。
-            stored_meta: dict[str, Any] = {}
-            if "metadata" in npz:
-                try:
-                    parsed = json.loads(str(npz["metadata"]))
-                    if isinstance(parsed, dict):
-                        stored_meta = parsed
-                except (json.JSONDecodeError, TypeError, ValueError):
-                    stored_meta = {}
-        ds = GPRDataSet.from_matrix(
-            line_id, matrix,
-            length_m=float(length_axis[-1]) if length_axis is not None and len(length_axis) else length_m,
-            time_window_ns=float(stored_meta.get("time_window_ns", 250.0)),
-            dielectric_constant=float(stored_meta.get("dielectric_constant", dielectric_constant)),
-            source_path=str(src), format_name="npz-dataset",
-            metadata=dict(stored_meta.get("metadata") or {"source_name": src.name}),
-        )
-        if length_axis is not None:
-            ds.distance_axis_m = length_axis
-        if time_axis is not None:
-            ds.time_axis_ns = time_axis
-            if stored_meta.get("time_axis_endpoint", True):
-                ds.time_window_ns = float(time_axis[-1]) if len(time_axis) else ds.time_window_ns
-        if depth_axis is not None:
-            ds.depth_axis_m = depth_axis
-        return ds
+            axes = {key: np.asarray(npz[key], dtype=np.float32)
+                    for key in ('distance_axis_m', 'time_axis_ns', 'depth_axis_m') if key in npz}
+            stored_meta = read_npz_metadata(npz)
+        return _dataset_from_npz(src, line_id, matrix, axes, stored_meta, length_m, dielectric_constant)
     elif suffix in {".h5", ".hdf5"}:
         if h5py is None:
             raise RuntimeError("h5py is not available; cannot load HDF5 GPR data")
         with h5py.File(src, "r") as h5:
             from core.acquisition_hdf5 import inspect_acquisition_hdf5, load_acquisition_hdf5
+            from core.processing_result_hdf5 import is_processing_result, load_processing_result
+
+            if is_processing_result(h5):
+                return load_processing_result(h5, source=src, line_id=line_id)
 
             acquisition = inspect_acquisition_hdf5(h5)
             if acquisition is not None:
@@ -653,7 +687,6 @@ def load_gpr_dataset_for_import(
     stage.mkdir(parents=True, exist_ok=True)
     matrix_path = stage / "matrix.npy"
     suffix = src.suffix.lower()
-    axes: dict[str, np.ndarray] = {}
     metadata: dict[str, Any] = {"source_name": src.name, "staging_matrix_path": str(matrix_path)}
     if suffix in {".csv", ".txt"}:
         sidecar_header = detect_mygpr_airborne_sidecar_csv(src)
@@ -661,7 +694,9 @@ def load_gpr_dataset_for_import(
             # The legacy sidecar parser has a special trace-major contract.  It
             # is kept for compatibility; ordinary matrix CSVs use the bounded
             # two-pass path below.
-            ds = _load_mygpr_airborne_sidecar_csv(src, line_id=line_id, dielectric_constant=dielectric_constant)
+            ds = _load_mygpr_airborne_sidecar_csv(
+                src, line_id=line_id, dielectric_constant=dielectric_constant,
+                cancel_requested=cancel_requested, progress_callback=progress_callback)
             if ds.matrix.nbytes >= 64 * 1024 * 1024:
                 mm = np.lib.format.open_memmap(matrix_path, mode="w+", dtype=np.float32, shape=ds.matrix.shape)
                 for start_row in range(0, ds.sample_count, 256):
@@ -681,14 +716,28 @@ def load_gpr_dataset_for_import(
         fmt = "npy-matrix-chunked"
         metadata["source_npy_fast_path"] = bool(np.asarray(matrix).dtype == np.float32)
     elif suffix == ".npz":
-        matrix, axes = load_npz_for_import(src, matrix_path, cancel_requested=cancel_requested, progress_callback=progress_callback)
-        fmt = "npz-dataset-chunked"
+        matrix, axes, stored_meta = load_npz_for_import(
+            src, matrix_path, cancel_requested=cancel_requested, progress_callback=progress_callback)
+        dataset = None
+        try:
+            dataset = _dataset_from_npz(src, line_id, matrix, axes, stored_meta, length_m, dielectric_constant)
+            return dataset
+        finally:
+            if dataset is None:
+                matrix._mmap.close()
+                matrix_path.unlink(missing_ok=True)
     elif suffix in {".h5", ".hdf5"}:
         from core.acquisition_hdf5 import inspect_acquisition_hdf5, load_acquisition_hdf5
 
         if h5py is None:
             raise RuntimeError("h5py is not available; cannot load HDF5 GPR data")
         with h5py.File(src, "r") as h5:
+            from core.processing_result_hdf5 import is_processing_result, load_processing_result
+
+            if is_processing_result(h5):
+                return load_processing_result(
+                    h5, source=src, line_id=line_id, output_npy=matrix_path,
+                    cancel_requested=cancel_requested, progress_callback=progress_callback)
             acquisition = inspect_acquisition_hdf5(h5)
             if acquisition is not None:
                 return load_acquisition_hdf5(
@@ -705,13 +754,6 @@ def load_gpr_dataset_for_import(
         line_id, matrix, length_m=length_m, dielectric_constant=dielectric_constant,
         source_path=str(src), format_name=fmt, metadata=metadata,
     )
-    if "distance_axis_m" in axes:
-        ds.distance_axis_m = axes["distance_axis_m"]
-    if "time_axis_ns" in axes:
-        ds.time_axis_ns = axes["time_axis_ns"]
-        ds.time_window_ns = float(ds.time_axis_ns[-1]) if len(ds.time_axis_ns) else ds.time_window_ns
-    if "depth_axis_m" in axes:
-        ds.depth_axis_m = axes["depth_axis_m"]
     return ds
 
 

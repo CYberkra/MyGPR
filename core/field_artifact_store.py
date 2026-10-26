@@ -129,31 +129,30 @@ class FieldArtifactStoreMixin:
             params=params,
             saved_at=saved_at,
         )
-        storage_result = self._persist_processed_matrix(
-            line_id=safe_line_id,
-            artifact_id=artifact_id,
-            matrix=data,
-            manifest=manifest,
-            collected_params=collected_params,
-            branch_id=branch_id,
-            parent_artifact_id=parent_id,
-            paths=paths,
-            cancel_requested=cancel_requested,
-            progress_callback=progress_callback,
-        )
-        return self._finalize_processed_artifact(
-            line=line,
-            line_id=safe_line_id,
-            artifact_id=artifact_id,
-            shape=shape,
-            saved_at=saved_at,
-            method_id=method_id,
-            method_name=method_name,
-            collected_params=collected_params,
-            input_dataset=manifest.get("input_dataset") or {},
-            paths=paths,
-            storage_result=storage_result,
-        )
+        from core.hdf5_line_container import artifacts_dir_path
+        from core.project_mutation import project_mutation
+
+        files = [path for key, path in paths.items() if key != "line_dir"]
+        files.append(paths["line_dir"] / f"{artifact_id}.npy")
+        if getattr(self.storage, "is_hybrid", False):
+            container = self.storage.line_container_path(safe_line_id)
+            files.append(artifacts_dir_path(container) / f"{artifact_id}.h5")
+            if not container.exists():
+                files.append(container)
+        with project_mutation(self, "save-processed-result", files=files):
+            storage_result = self._persist_processed_matrix(
+                line_id=safe_line_id, artifact_id=artifact_id, matrix=data,
+                manifest=manifest, collected_params=collected_params,
+                branch_id=branch_id, parent_artifact_id=parent_id, paths=paths,
+                cancel_requested=cancel_requested, progress_callback=progress_callback,
+            )
+            return self._finalize_processed_artifact(
+                line=line, line_id=safe_line_id, artifact_id=artifact_id, shape=shape,
+                saved_at=saved_at, method_id=method_id, method_name=method_name,
+                collected_params=collected_params,
+                input_dataset=manifest.get("input_dataset") or {},
+                paths=paths, storage_result=storage_result,
+            )
 
     def _persist_processed_matrix(
         self,

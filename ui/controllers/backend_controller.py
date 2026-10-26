@@ -6,16 +6,20 @@
 ``QThread``; ``JobBridge`` converts the backend's worker-thread job events
 into Qt signals that are safe to consume from the GUI thread.
 """
+from __future__ import annotations
+
 import logging
 import re
 import threading
-from typing import Any, Callable, Protocol
+from typing import TYPE_CHECKING, Any, Callable, Protocol
 
 import numpy as np
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
 from ui.desktop_backend_facade import JobEventType, JobResultSummary, UiJobSnapshot, job_snapshot_from_raw
-from mygpr.interfaces.backend import MyGPRBackend  # noqa: F401 — type-check only
+
+if TYPE_CHECKING:
+    from mygpr.interfaces.backend import MyGPRBackend
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -120,6 +124,7 @@ class JobBridge(QObject):
 
     progress_changed = pyqtSignal(str, int, int, str)   # job_id, completed, total, message
     status_changed = pyqtSignal(str, str)               # job_id, status.value
+    notice_received = pyqtSignal(str, object)          # job_id, structured warning/step outcome
     job_completed = pyqtSignal(str, bool, str, object)  # job_id, success, message, result_or_none
 
     def __init__(self, backend: MyGPRBackend, parent: QObject | None = None) -> None:
@@ -182,12 +187,28 @@ class JobBridge(QObject):
         sequence = 0
         last_status = ""
         terminal_seen = False
+        warning_count = skipped_count = 0
+        notice_sequence = seen_notices = 0
         try:
             while not stop.is_set() and not self._shutdown.is_set():
                 try:
                     events = self._backend.jobs.events(job_id, after_sequence=sequence)
+                    notices, warnings, skipped, notice_total = self._backend.jobs.notice_state(
+                        job_id, after_sequence=notice_sequence)
                 except KeyError:
                     return
+                warning_count = max(warning_count, warnings)
+                skipped_count = max(skipped_count, skipped)
+                lost = notice_total - seen_notices - len(notices)
+                if lost > 0:
+                    self.notice_received.emit(job_id, {
+                        'level': 'warning', 'message': f'{lost}条早期提示超出保留上限；累计警告和跳过数量仍完整。'})
+                seen_notices = notice_total
+                for event in notices:
+                    notice_sequence = max(notice_sequence, int(event.sequence))
+                    payload = dict(event.payload)
+                    payload.setdefault('message', str(event.message))
+                    self.notice_received.emit(job_id, payload)
                 for event in events:
                     sequence = max(sequence, int(event.sequence))
                     if event.event_type is JobEventType.PROGRESS:
@@ -206,9 +227,9 @@ class JobBridge(QObject):
         except Exception:  # pragma: no cover - defensive: never kill a watcher silently
             _LOGGER.exception("job watcher crashed for %s", job_id)
         finally:
-            self._finalize(job_id)
+            self._finalize(job_id, warning_count=warning_count, skipped_count=skipped_count)
 
-    def _finalize(self, job_id: str) -> None:
+    def _finalize(self, job_id: str, *, warning_count: int = 0, skipped_count: int = 0) -> None:
         success = False
         message = ""
         result: Any = None
@@ -222,6 +243,10 @@ class JobBridge(QObject):
             success = status == "completed"
             if success:
                 message = snapshot.message or "任务完成"
+                if skipped_count:
+                    message += f'（{skipped_count}步已跳过，详见日志）'
+                elif warning_count:
+                    message += f'（有{warning_count}条警告，详见日志）'
                 result = extract_small_result(raw_snapshot.result)
             elif status == "cancelled":
                 message = snapshot.message or "任务已取消"
@@ -247,10 +272,16 @@ class _BackendInitWorker(QObject):
     def __init__(self, max_workers: int = 2) -> None:
         super().__init__()
         self._max_workers = int(max(1, max_workers))
+        self._backend: MyGPRBackend | None = None
 
     def run(self) -> None:
         try:
+            # Composition imports services and storage adapters; keep that work
+            # in the init thread, with import failures using the same error path.
+            from mygpr.interfaces.backend import MyGPRBackend
+
             backend = MyGPRBackend.create_default(max_workers=self._max_workers)
+            self._backend = backend
         except Exception as exc:  # noqa: BLE001 - surface any init failure to the GUI
             _LOGGER.exception("backend initialisation failed")
             self.failed.emit(friendly_error_message(exc))
@@ -271,10 +302,11 @@ class BackendController(QObject):
         self.job_bridge: JobBridge | None = None
         self._thread: QThread | None = None
         self._worker: _BackendInitWorker | None = None
+        self._shutting_down = False
 
     def start(self, *, max_workers: int = 2) -> None:
         """Create the backend on a QThread; emits backend_ready/failed."""
-        if self.backend is not None or self._thread is not None:
+        if self._shutting_down or self.backend is not None or self._thread is not None:
             return
         self.log_message.emit("后端初始化中…")
         thread = QThread(self)
@@ -293,7 +325,8 @@ class BackendController(QObject):
 
     @property
     def is_ready(self) -> bool:
-        return self.backend is not None and self.job_bridge is not None
+        return (not self._shutting_down
+                and self.backend is not None and self.job_bridge is not None)
 
     def prune_jobs(self) -> bool:
         """清理全部终态任务记录（工作线程执行，不阻塞 UI）。
@@ -313,12 +346,25 @@ class BackendController(QObject):
 
     def shutdown(self) -> None:
         """Shut the backend down; exceptions are swallowed and logged."""
+        if self._shutting_down:
+            return
+        self._shutting_down = True
+        thread, worker = self._thread, self._worker
+        if thread is not None:
+            # quit() is thread-safe and stops the event loop after the current
+            # init call returns. Waiting only for the queued succeeded->quit
+            # connection would deadlock while the GUI thread is waiting here.
+            thread.quit()
+            thread.wait()
         if self.job_bridge is not None:
             try:
                 self.job_bridge.shutdown()
             except Exception:  # noqa: BLE001
                 _LOGGER.exception("job bridge shutdown failed")
-        backend = self.backend
+        # The worker may have emitted success while its GUI callback is still
+        # queued. Retain that instance so closing during init cannot leak it.
+        backend = self.backend if self.backend is not None else (
+            worker._backend if worker is not None else None)
         if backend is None:
             return
         try:
@@ -330,12 +376,16 @@ class BackendController(QObject):
 
     # ------------------------------------------------------------------
     def _on_backend_created(self, backend: MyGPRBackend) -> None:
+        if self._shutting_down:
+            return
         self.backend = backend
         self.job_bridge = JobBridge(backend, parent=self)
         self.log_message.emit("后端就绪")
         self.backend_ready.emit()
 
     def _on_backend_failed(self, message: str) -> None:
+        if self._shutting_down:
+            return
         self.log_message.emit(f"后端初始化失败：{message}")
         self.backend_failed.emit(message)
 

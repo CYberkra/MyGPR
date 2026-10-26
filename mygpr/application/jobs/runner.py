@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from concurrent.futures import CancelledError, Future, ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, wait
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import dataclass, field, fields, is_dataclass
 from datetime import datetime, timezone
 from threading import RLock
 import logging
@@ -111,6 +111,11 @@ class _MutableJob:
     future: Future[Any] | None = None
     finalizer: JobFinalizer | None = None
     finalizer_called: bool = False
+    finalizer_finished: bool = False
+    notice_events: list[JobEvent] = field(default_factory=list)
+    notice_count: int = 0
+    warning_count: int = 0
+    skipped_step_count: int = 0
 
 
 class InMemoryJobRunner:
@@ -165,14 +170,23 @@ class InMemoryJobRunner:
             created_at_utc=now,
             updated_at_utc=now,
             finalizer=finalizer,
+            finalizer_finished=finalizer is None,
         )
-        with self._lock:
-            self._jobs[job_id] = record
-            self._subscribers[job_id] = []
-            self._events[job_id] = []
-        self._emit(job_id, JobEventType.QUEUED, message=record.title)
         try:
-            future = self._executor.submit(self._run, job_id, operation)
+            # Admission, executor submission and Future binding are one lifecycle
+            # transition. Shutdown must see either no job or a complete Future.
+            with self._lock:
+                if not self._accepting or self._shutdown:
+                    raise JobRunnerClosedError("job runner is not accepting new work")
+                self._jobs[job_id] = record
+                self._subscribers[job_id] = []
+                self._events[job_id] = []
+                self._emit(job_id, JobEventType.QUEUED, message=record.title)
+                future = self._executor.submit(self._run, job_id, operation)
+                record.future = future
+                future.add_done_callback(lambda completed: self._on_future_done(job_id, completed))
+        except JobRunnerClosedError:
+            raise
         except (RuntimeError, TypeError):
             with self._lock:
                 self._jobs.pop(job_id, None)
@@ -181,9 +195,6 @@ class InMemoryJobRunner:
             if finalizer is not None:
                 finalizer()
             raise
-        with self._lock:
-            record.future = future
-        future.add_done_callback(lambda completed: self._on_future_done(job_id, completed))
         return job_id
 
     def subscribe(self, job_id: str, callback: JobSubscriber) -> Callable[[], None]:
@@ -251,6 +262,17 @@ class InMemoryJobRunner:
             self._require(job_id)
             return tuple(event for event in self._events.get(str(job_id), ()) if event.sequence > threshold)
 
+    def notice_state(self, job_id: str, *, after_sequence: int = 0) -> tuple[tuple[JobEvent, ...], int, int, int]:
+        """Bounded notices plus cumulative totals; progress cannot evict notices.
+
+        The notice list uses the existing per-job retention bound. Totals survive
+        notice-list truncation until forget/prune removes the owning job.
+        """
+        with self._lock:
+            record = self._require(job_id)
+            events = tuple(event for event in record.notice_events if event.sequence > after_sequence)
+            return events, record.warning_count, record.skipped_step_count, record.notice_count
+
     def wait(self, job_id: str, timeout: float | None = None) -> JobSnapshot:
         with self._lock:
             future = self._require(job_id).future
@@ -268,11 +290,12 @@ class InMemoryJobRunner:
         if not futures:
             return ()
         _done, pending = wait(futures, timeout=timeout)
-        return tuple(
-            record.job_id
-            for record in self._jobs.values()
-            if record.future in pending and not record.status.is_terminal
-        )
+        with self._lock:
+            return tuple(
+                record.job_id
+                for record in self._jobs.values()
+                if record.future in pending and not record.status.is_terminal
+            )
 
     def release_result(self, job_id: str) -> bool:
         with self._lock:
@@ -289,9 +312,10 @@ class InMemoryJobRunner:
             return True
 
     def forget(self, job_id: str) -> bool:
+        """Evict a terminal job only after its resource finalizer has finished."""
         with self._lock:
             record = self._require(job_id)
-            if not record.status.is_terminal:
+            if not record.status.is_terminal or not record.finalizer_finished:
                 return False
             self._jobs.pop(str(job_id), None)
             self._subscribers.pop(str(job_id), None)
@@ -301,7 +325,8 @@ class InMemoryJobRunner:
     def prune(self) -> tuple[str, ...]:
         now = time.monotonic()
         with self._lock:
-            terminal = [record for record in self._jobs.values() if record.status.is_terminal]
+            terminal = [record for record in self._jobs.values()
+                        if record.status.is_terminal and record.finalizer_finished]
             terminal.sort(key=lambda item: item.terminal_at_monotonic or now)
             remove: set[str] = set()
             ttl = self._retention.terminal_ttl_seconds
@@ -336,11 +361,13 @@ class InMemoryJobRunner:
         if pending and wait:
             return pending
         with self._lock:
-            if self._shutdown:
-                return ()
             self._shutdown = True
         self._executor.shutdown(wait=wait, cancel_futures=cancel_futures)
-        self._event_executor.shutdown(wait=wait, cancel_futures=cancel_futures)
+        if wait:
+            # Worker callbacks have published terminal events before returning.
+            self._event_executor.shutdown(wait=True, cancel_futures=cancel_futures)
+        else:
+            self._shutdown_events_if_idle()
         self.prune()
         return pending
 
@@ -379,7 +406,8 @@ class InMemoryJobRunner:
         try:
             context.raise_if_cancelled()
             result = operation(context)
-            context.raise_if_cancelled()
+            if not context.is_committed:
+                context.raise_if_cancelled()
         except JobCancelledError:
             self._mark_cancelled(job_id, "任务已取消")
             return
@@ -460,14 +488,24 @@ class InMemoryJobRunner:
                 payload=self._bounded_event_payload(payload),
             )
             retained = self._events.setdefault(job_id, [])
+            if event_type is JobEventType.WARNING:
+                original = payload or {}
+                record.notice_count += 1
+                record.warning_count += int(original.get('level', 'warning') != 'info')
+                details = original.get('details')
+                if (original.get('code') == 'processing_step_status'
+                        and isinstance(details, dict) and details.get('execution_status') == 'skipped'):
+                    record.skipped_step_count += 1
+                record.notice_events.append(event)
+                del record.notice_events[:-self._retention.max_events_per_job]
             retained.append(event)
             overflow = len(retained) - self._retention.max_events_per_job
             if overflow > 0:
                 del retained[:overflow]
             callbacks = tuple(self._subscribers.get(job_id, ()))
-        for callback in callbacks:
-            future = self._event_executor.submit(callback, event)
-            future.add_done_callback(lambda completed, current_job_id=job_id: self._log_subscriber_result(current_job_id, completed))
+            for callback in callbacks:
+                future = self._event_executor.submit(callback, event)
+                future.add_done_callback(lambda completed, current_job_id=job_id: self._log_subscriber_result(current_job_id, completed))
 
     def _bounded_event_payload(self, payload: dict[str, Any] | None) -> dict[str, Any]:
         value = dict(payload or {})
@@ -532,20 +570,35 @@ class InMemoryJobRunner:
                             self._subscribers[job_id] = []
         finally:
             self._call_finalizer(job_id)
+            self._shutdown_events_if_idle()
+
+    def _shutdown_events_if_idle(self) -> None:
+        # A nonblocking shutdown keeps the event dispatcher alive until worker
+        # done callbacks have emitted failures/cancellations and released leases.
+        with self._lock:
+            if self._shutdown and all(
+                record.future is not None and record.future.done() and record.finalizer_called
+                for record in self._jobs.values()
+            ):
+                self._event_executor.shutdown(wait=False)
 
     def _call_finalizer(self, job_id: str) -> None:
         finalizer: JobFinalizer | None = None
         with self._lock:
             record = self._jobs.get(str(job_id))
-            if record is not None and not record.finalizer_called:
-                record.finalizer_called = True
-                finalizer = record.finalizer
-                record.finalizer = None
-        if finalizer is not None:
-            try:
+            if record is None or record.finalizer_called:
+                return
+            record.finalizer_called = True
+            finalizer = record.finalizer
+            record.finalizer = None
+        try:
+            if finalizer is not None:
                 finalizer()
-            except (RuntimeError, OSError, ValueError):
-                _LOGGER.exception("job finalizer failed", extra={"job_id": job_id})
+        except (RuntimeError, OSError, ValueError):
+            _LOGGER.exception("job finalizer failed", extra={"job_id": job_id})
+        finally:
+            with self._lock:
+                record.finalizer_finished = True
 
     @staticmethod
     def _log_subscriber_result(job_id: str, future: Future[Any]) -> None:

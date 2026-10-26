@@ -19,6 +19,9 @@ from mygpr.domain.processing.models import (
     ResourceEstimate,
 )
 from mygpr.infrastructure.processing.metadata_bridge import legacy_overlay
+from mygpr.domain.processing.warnings import build_processing_step_notice
+from mygpr.domain.processing.timebase import sampling_interval_s
+from mygpr.domain.common.scalars import to_float
 
 
 def _native_algorithms() -> dict:
@@ -130,6 +133,7 @@ class NativeProcessingExecutor(ProcessingExecutorPort):
         warnings = [dict(item) for item in metadata.get("runtime_warnings", []) if isinstance(item, dict)]
         for item in warnings:
             execution_context.emit_warning(item)
+        execution_context.emit_warning(build_processing_step_notice(request.method_id, algorithm.name, metadata))
         header = clone_mapping(request.header_info)
         header_updates = metadata.get("header_info_updates")
         if isinstance(header_updates, dict):
@@ -190,13 +194,15 @@ def prepare_native_params(request: ProcessingRequest) -> dict[str, Any]:
     params.setdefault("_header_info", clone_mapping(request.header_info))
     params.setdefault("_trace_metadata", clone_trace_metadata(request.trace_metadata))
     samples = max(1, int(request.data.shape[0]))
-    total_time_ns = float(request.header_info.get("total_time_ns") or request.header_info.get("time_window_ns") or 0.0)
-    if total_time_ns > 0.0:
-        step_s = total_time_ns * 1.0e-9 / samples
+    total_time_ns = (to_float(request.header_info.get("total_time_ns"), default=0.0)
+                     or to_float(request.header_info.get("time_window_ns"), default=0.0))
+    step_s = sampling_interval_s(request.header_info, samples)
+    if step_s > 0.0:
         params.setdefault("time_step_s", step_s)
-        params.setdefault("time_window_ns", total_time_ns)
+        if total_time_ns > 0.0:
+            params.setdefault("time_window_ns", total_time_ns)
         if request.method_id == "frequency_filter_1d":
-            params.setdefault("sample_rate_hz", 1.0 / step_s)
+            params.setdefault("sample_rate_hz", 1.0 / float(params["time_step_s"]))
     return params
 
 

@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Field workbench project manifest store for the MyGPR product UI.
-
-The project store is intentionally a small coordinator.  Line data, processed
-artifacts, target CSV files and spatial exports live in separate mixins so new
-product features do not keep expanding this file.
-"""
+"""Field project coordinator; line data, artifacts and exports live in mixins."""
 
 from __future__ import annotations
 
@@ -37,14 +32,12 @@ logger = logging.getLogger(__name__)
 
 class FieldProjectStore(
     FieldLineStoreMixin, FieldInterfaceStoreMixin, FieldProcessingDraftStoreMixin,
-    FieldTargetStoreMixin, FieldSpatialStoreMixin, FieldArtifactStoreMixin,
-    FieldProjectRuntimeStoreMixin,
+    FieldTargetStoreMixin, FieldSpatialStoreMixin, FieldArtifactStoreMixin, FieldProjectRuntimeStoreMixin,
 ):
     """Durable project-manifest coordinator (see ``FieldProjectStoreProtocol``)."""
 
     MANIFEST_NAME = "project.json"
-    DIRECTORIES = (
-        "raw", "processed", "targets", "spatial", "reports",  # compatibility/export surfaces
+    DIRECTORIES = ("raw", "processed", "targets", "spatial", "reports",  # compatibility/export surfaces
         "data/lines", "attachments", "exports", "cache/previews", "cache/staging",
         "logs", "metadata", "backups",
     )
@@ -89,13 +82,16 @@ class FieldProjectStore(
         recover_stale_lock: bool = False,
     ) -> "FieldProjectStore":
         root_path = Path(root).resolve()
-        session = ProjectRepository.open_session(root_path, mode=access_mode, recover_stale=recover_stale_lock)
+        session = ProjectRepository.open_compatible_session(root_path, manifest_name=cls.MANIFEST_NAME,
+            schema_family="mygpr.field_project", mode=access_mode, recover_stale=recover_stale_lock,
+        )
         try:
             loaded = DEFAULT_SCHEMA_REGISTRY.load_path(
                 root_path / cls.MANIFEST_NAME,
                 family="mygpr.field_project",
                 write_migrated=not session.read_only,
                 quarantine_root=root_path / "metadata" / "quarantine",
+                quarantine_on_error=not session.read_only,
             )
             if loaded.read_only and not session.read_only:
                 session.close()
@@ -145,11 +141,17 @@ class FieldProjectStore(
         if vertical_datum.strip():
             manifest.vertical_datum = vertical_datum.strip()
         session = ProjectRepository.open_session(root_path, mode=ProjectAccessMode.WRITE, recover_stale=False)
-        store = cls(root_path, manifest, session=session)
-        store.ensure_structure()
-        store.save_manifest()
-        store.append_log(f"创建项目：{manifest.name}")
-        return store
+        initialized = False
+        try:
+            store = cls(root_path, manifest, session=session)
+            store.ensure_structure()
+            store.save_manifest()
+            store.append_log(f"创建项目：{manifest.name}")
+            initialized = True
+            return store
+        finally:
+            if not initialized:
+                session.close()
 
     def ensure_structure(self, *, recover_transactions: bool = True) -> None:
         self.root.mkdir(parents=True, exist_ok=True)

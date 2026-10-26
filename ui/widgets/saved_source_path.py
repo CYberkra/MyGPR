@@ -72,7 +72,8 @@ class SavedSourcePath(QWidget):
                 key, title, _revision = entry
                 button = _PathButton(title, self)
                 button.setProperty('source_key', key)
-                button.setToolTip(str(title) + '\n已保存结果；点击查看，不重放算法')
+                button.setToolTip(str(title) + ('\n已保存结果；点击查看，不重放算法' if key else
+                    '\n执行记录；该步未单独保存，或来源不完整，不能打开中间结果'))
                 button.setEnabled(bool(key))
                 button.clicked.connect(lambda _checked=False, key=key, gen=generation:
                                        self._open(key, gen))

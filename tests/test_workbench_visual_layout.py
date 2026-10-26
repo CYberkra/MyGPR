@@ -9,13 +9,13 @@ def test_source_path_toggle_only_changes_presentation(page, qapp):  # noqa: F811
     page.select_artifact('B')
     page._add_method_to_pipeline('dewow')
     before = page.current_pipeline()
-    assert not page._saved_path.isVisibleTo(page)
+    assert page._saved_path.isVisibleTo(page)
     page._source_path_btn.click()
     qapp.processEvents()
-    assert page._saved_path.isVisibleTo(page)
+    assert not page._saved_path.isVisibleTo(page)
     assert page.current_pipeline() == before
     page._source_path_btn.click()
-    assert not page._saved_path.isVisibleTo(page)
+    assert page._saved_path.isVisibleTo(page)
     assert page.current_pipeline() == before
 
 

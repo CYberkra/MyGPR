@@ -12,3 +12,5 @@
 - [领域术语](../../CONTEXT.md)；[用户手册](../user/README.md)。
 
 此前索引中的 `terminology_v0.8.74.md`、`field_ui/`、`docs/legacy/research/` 不在当前树中。历史记录从 Git 查询，不再作为可直接打开的现行入口。
+
+- [处理算法展示命名规则](ALGORITHM_NAMING.md)：正式名称、作用说明、旧名检索及兼容约束。

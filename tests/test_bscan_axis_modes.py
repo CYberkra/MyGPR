@@ -232,7 +232,8 @@ class TestAxisModeSwitch:
     def test_converters_fall_back_when_disabled(self, view):
         feed(view)
         assert view._convert_bottom_ticks([0.0], 1.0, 1.0) is None
-        assert view._convert_left_ticks([0.0], 1.0, 1.0) is None
+        # Time-labelled axes now display calibrated time ticks, not sample indices.
+        assert float(view._convert_left_ticks([0.5], 1.0, 1.0)[0]) == pytest.approx(0.0)
 
 
 class TestAxisModePreferencePersistence:
@@ -258,7 +259,8 @@ class TestAxisModePreferencePersistence:
         feed(view, elevation=False)
         assert view.y_axis_mode() == 'elevation'          # 偏好仍在
         assert view.effective_y_axis_mode() == 'sample'   # 但实际回落
-        assert view._convert_left_ticks([0.0, 10.0], 1.0, 10.0) is None
+        # Elevation falls back to the valid time axis, with physical ns ticks.
+        assert float(view._convert_left_ticks([0.5], 1.0, 1.0)[0]) == pytest.approx(0.0)
 
 
 class TestAxisModeSignal:

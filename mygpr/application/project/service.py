@@ -11,8 +11,10 @@ from typing import Any, Iterator, Mapping, Sequence
 import numpy as np
 
 from mygpr.application.jobs.context import ExecutionContext
-from mygpr.domain.common.errors import MyGPRError
+from mygpr.domain.project.result_package import ProcessingResultPackage
 from mygpr.application.project.ports import ProjectRepositoryPort, ProjectSessionPort
+from mygpr.application.project.errors import ProjectApplicationError, ProjectBusyError
+from mygpr.application.project.identity import ProjectIdentityServiceMixin
 from mygpr.domain.reporting.models import ReportPackage
 from mygpr.domain.interpretation.models import (
     BoreholeRecord, InterfaceAnnotation, InterpretationFeature,
@@ -31,19 +33,6 @@ from mygpr.domain.project.models import (
     ProjectSummary,
     ArtifactDeleteResult,
 )
-
-
-class ProjectApplicationError(MyGPRError):
-    """Stable project application failure exposed through Backend API v1."""
-
-    error_code = "MYGPR_PROJECT_ERROR"
-    category = "project"
-
-
-class ProjectBusyError(ProjectApplicationError):
-    """Raised when a project is still leased by queued or running work."""
-
-    error_code = "MYGPR_PROJECT_BUSY"
 
 
 @dataclass(slots=True)
@@ -68,7 +57,7 @@ class ProjectLease:
         self.release()
 
 
-class ProjectService:
+class ProjectService(ProjectIdentityServiceMixin):
     """Own open project sessions without exposing storage implementation objects."""
 
     def __init__(self, repository: ProjectRepositoryPort) -> None:
@@ -76,6 +65,7 @@ class ProjectService:
         self._sessions: dict[str, ProjectSessionPort] = {}
         self._roots: dict[str, str] = {}
         self._lease_counts: dict[str, int] = {}
+        self._maintenance: set[str] = set()
         self._lock = RLock()
 
     def create_project(
@@ -120,6 +110,7 @@ class ProjectService:
         with self._lock:
             existing_id = next((pid for pid, value in self._roots.items() if value == resolved), "")
             if existing_id:
+                self._check_maintenance(existing_id)
                 return self._sessions[existing_id].summary
         session = self._repository.open(
             Path(resolved),
@@ -132,6 +123,9 @@ class ProjectService:
         summary = session.summary
         with self._lock:
             existing = self._sessions.get(summary.project_id)
+            if summary.project_id in self._maintenance:
+                session.close()
+                self._check_maintenance(summary.project_id)
             if existing is not None:
                 session.close()
                 if self._roots[summary.project_id] != summary.root_path:
@@ -147,6 +141,7 @@ class ProjectService:
     def acquire_lease(self, project_id: str) -> ProjectLease:
         normalized = str(project_id)
         with self._lock:
+            self._check_maintenance(normalized)
             if normalized not in self._sessions:
                 raise ProjectApplicationError(f"project is not open: {project_id}")
             self._lease_counts[normalized] = self._lease_counts.get(normalized, 0) + 1
@@ -168,6 +163,7 @@ class ProjectService:
     def close_project(self, project_id: str, *, force: bool = False) -> None:
         normalized = str(project_id)
         with self._lock:
+            self._check_maintenance(normalized)
             leases = self._lease_counts.get(normalized, 0)
             if leases and not force:
                 raise ProjectBusyError(
@@ -181,6 +177,8 @@ class ProjectService:
 
     def close_all(self, *, force: bool = False) -> None:
         with self._lock:
+            if self._maintenance:
+                raise ProjectBusyError('项目正在迁移，请等待迁移完成或取消。')
             busy = {pid: count for pid, count in self._lease_counts.items() if count > 0}
             if busy and not force:
                 details = ", ".join(f"{pid}={count}" for pid, count in sorted(busy.items()))
@@ -576,6 +574,14 @@ class ProjectService:
             deep_hash=deep_hash,
         )
 
+    def export_processing_package(
+        self, project_id: str, line_id: str, destination: str | Path, *,
+        artifact_id: str = '', context: ExecutionContext | None = None,
+    ) -> ProcessingResultPackage:
+        return self._session(project_id).export_processing_package(
+            line_id, Path(destination), artifact_id=artifact_id,
+            context=context or ExecutionContext.null())
+
     def generate_report(
         self,
         project_id: str,
@@ -628,6 +634,7 @@ class ProjectService:
 
     def _session(self, project_id: str) -> ProjectSessionPort:
         with self._lock:
+            self._check_maintenance(project_id)
             session = self._sessions.get(str(project_id))
         if session is None:
             raise ProjectApplicationError(f"project is not open: {project_id}")

@@ -737,7 +737,7 @@ def test_artifact_context_menu_actions_emit_focus_delete_copy(
     panel._on_context_menu(QPoint(5, 5))
     assert [t for t, _ in actions] == [
         '打开结果标签', '从此结果继续处理', '修改此步参数并另建分支',
-        '参数与来源', '删除此结果及依赖成果…', '复制成果号',
+        '参数与来源', '打包到此步的结果…', '删除此结果及依赖成果…', '复制成果号',
     ]
     focus_got, delete_got = [], []
     panel.artifact_focus_requested.connect(lambda *a: focus_got.append(a))

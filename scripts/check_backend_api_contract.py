@@ -27,6 +27,7 @@ PUBLIC_TYPES = (
     "mygpr.domain.project.models.ProjectSummary",
     "mygpr.domain.project.models.ProjectLine",
     "mygpr.domain.project.models.ProjectArtifact",
+    "mygpr.domain.project.result_package.ProcessingResultPackage",
     "mygpr.domain.project.models.ArtifactDeleteResult",
     "mygpr.domain.reporting.models.ReportPackage",
 )
@@ -46,6 +47,7 @@ PUBLIC_METHODS = (
     "submit_sensor_sync",
     "submit_project_pipeline",
     "submit_project_report",
+    "submit_processing_result_package",
     "submit_project_backup",
     "submit_spatial_result",
     "build_georeference_3d",

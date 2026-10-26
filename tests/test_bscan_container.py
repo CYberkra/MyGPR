@@ -230,13 +230,17 @@ class TestProcessingPageTabModel:
 
     def test_registered_artifact_identity_drives_title_and_tooltip(self, page):
         art = _artifact('A1', 'dewow', 'G1', 1)
+        art.manifest['params'].update(lineage_version=2, run_input_artifact_id='',
+            lineage=[{'method_id': 'dewow', 'params': {'window': 31}}])
         page.set_artifacts([art])
         page.set_artifact_bundle('A1', _bundle(2))
         page.select_artifact('A1')
         bar = page._workspace.tab_bar()
         assert art.name in bar.tabText(0)
-        assert 'G1.1' in bar.tabText(0)
-        assert 'artifact:A1' in bar.tabToolTip(0)
+        assert '低频漂移校正' in bar.tabText(0)
+        assert 'G1.1' not in bar.tabText(0)
+        assert '结果号：A1' in bar.tabToolTip(0)
+        assert 'window' in bar.tabToolTip(0) and '31' in bar.tabToolTip(0)
         assert bar.tabText(0) != 'b2'  # bitmap title does not identify saved data
 
     def test_title_html_has_explicit_theme_color(self, page):

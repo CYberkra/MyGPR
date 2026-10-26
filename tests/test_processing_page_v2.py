@@ -304,14 +304,22 @@ class TestChainSlidingPill:
         strip.select_step(0)
         assert strip._pill.isVisibleTo(strip)
 
-    def test_pill_slides_to_selected_chip(self, qapp):
+    def test_pill_slides_to_selected_chip(self, qapp, monkeypatch):
+        from ui import motion
+        monkeypatch.setattr(motion, 'animations_enabled', lambda: True)
         strip = ChainStrip()
         strip.set_steps([{'label': '去直达波', 'enabled': True},
                          {'label': 'SEC 增益', 'enabled': True}])
+        strip.show()
+        qapp.processEvents()
         strip.select_step(0)
         strip.select_step(1)                      # 第二次选中 → 走动画
         target = strip._list.visualItemRect(strip._list.item(1))
         assert strip._pill_anim.endValue().x() == target.x()
+        strip._pill_anim.setCurrentTime(strip._pill_anim.duration())
+        assert strip._pill.geometry() == target
+        strip.close()
+        strip.deleteLater()
 
     def test_pill_hidden_when_no_row(self, qapp):
         strip = ChainStrip()

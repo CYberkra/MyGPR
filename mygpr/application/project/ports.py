@@ -9,6 +9,7 @@ from typing import Any, Iterator, Mapping, Protocol, Sequence
 import numpy as np
 
 from mygpr.application.jobs.context import ExecutionContext
+from mygpr.domain.project.result_package import ProcessingResultPackage
 from mygpr.domain.reporting.models import ReportPackage
 from mygpr.domain.interpretation.models import (
     BoreholeRecord, InterfaceAnnotation, InterpretationFeature,
@@ -38,6 +39,12 @@ class ProjectSessionPort(Protocol):
     def get_metadata(self) -> ProjectMetadata: ...
 
     def update_metadata(self, **changes: str | None) -> ProjectMetadata: ...
+
+    def rename_project(self, name: str) -> ProjectSummary: ...
+
+    def rename_line(self, line_id: str, name: str) -> ProjectLine: ...
+
+    def relocate(self, destination: Path, *, context: ExecutionContext) -> ProjectSummary: ...
 
     def list_quality_reports(self) -> Sequence[LineQualityReport]: ...
 
@@ -254,6 +261,11 @@ class ProjectSessionPort(Protocol):
         staging_min_age_s: float,
         deep_hash: bool,
     ) -> IntegrityReport: ...
+
+    def export_processing_package(
+        self, line_id: str, destination: Path, *, artifact_id: str = '',
+        context: ExecutionContext,
+    ) -> ProcessingResultPackage: ...
 
     def generate_report(
         self,

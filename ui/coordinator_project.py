@@ -40,6 +40,7 @@ class ProjectChain:
         self._busy_sources: set[str] = set()
         self._active_job_ids: set[str] = set()
         self._restore_line_id = ''
+        self._package_context_generation = 0
 
     # ============================================================ 信号注册
     def connect_all(self) -> None:
@@ -82,6 +83,12 @@ class ProjectChain:
         pc0 = co.project_controller
         if pc0 is not None:
             pc0.line_source_path_ready.connect(project.set_line_source_path)
+            report_signal = getattr(pc0, 'line_sensor_report_ready', None)
+            report_setter = getattr(project, 'set_line_sensor_report', None)
+            if hasattr(report_signal, 'connect') and callable(report_setter):
+                report_signal.connect(report_setter)
+            else:
+                pc0.line_sensor_summary_ready.connect(project.set_line_sensor_summary)
 
         # ---------------- 左侧常驻文件树（与项目页测线表同一信号语义）
         tree = co.file_tree()
@@ -89,6 +96,7 @@ class ProjectChain:
             tree.line_selected.connect(self.on_line_selected)
             tree.line_process_requested.connect(self.on_line_process_requested)
             tree.line_delete_requested.connect(self.on_line_delete_requested)
+            tree.processing_package_requested.connect(self.on_processing_package_requested)
             # 空间成果/项目报告叶子点击 → 跳成果页
             tree.delivery_focus_requested.connect(
                 lambda _kind: co.goto_page('deliveryInterface'))
@@ -138,10 +146,15 @@ class ProjectChain:
         if dc is not None:
             dc.spatial_results_updated.connect(delivery.set_spatial_results)
             dc.report_generated.connect(self.on_report_generated)
+            dc.processing_package_generated.connect(self.on_processing_package_generated)
             if tree is not None:
                 # 文件树「空间成果 / 项目报告」组与成果页同一数据源
                 dc.spatial_results_updated.connect(tree.set_spatial_results)
                 dc.report_list_updated.connect(tree.set_reports)
+
+        if hasattr(getattr(project, '_identity', None), 'rename_project_requested') and hasattr(pc, 'identity'):
+            from ui.coordinator_identity import ProjectIdentityChain
+            self._identity = ProjectIdentityChain(self, project, tree)
 
     # ============================================================ 项目生命周期
     def set_operation_busy(self, source: str, busy: bool) -> None:
@@ -165,7 +178,17 @@ class ProjectChain:
             co.infobar('warning', '项目正在使用中',
                        '请先等待当前任务完成，或在任务页明确取消后再切换 / 关闭项目。')
             return False
-        return True
+        return self.confirm_interpretation_close()
+
+    def confirm_interpretation_close(self) -> bool:
+        """Do not silently discard the current annotation while changing context."""
+        controller = getattr(self._co, 'interpretation_controller', None)
+        check = getattr(controller, 'has_unsaved_changes', None)
+        if not callable(check) or check() is not True:
+            return True
+        from ui.dialogs import ask_discard_interpretation
+        return ask_discard_interpretation(
+            self._co.page('interpretationInterface'), self.current_line_id)
 
     def on_open_recent_project(self, root: str) -> None:
         if not self.can_change_project():
@@ -189,7 +212,9 @@ class ProjectChain:
 
     def on_project_opened(self, summary) -> None:
         """project_opened → 主页卡片 + 项目页信息 + 最近项目 + 成果页刷新。"""
+        self._package_context_generation += 1
         co = self._co
+        self._reset_interpretation()
         home = co.page('homeInterface')
         project = co.page('projectInterface')
         home.set_current_project(summary)
@@ -199,6 +224,10 @@ class ProjectChain:
         root = str(getattr(summary, 'root_path', '') or '')
         if root:
             co.settings.add_recent_project(root)
+            names = co.settings.get('project_display_names', {})
+            names = dict(names) if isinstance(names, dict) else {}
+            names[root] = str(getattr(summary, 'name', '') or '')
+            co.settings.set('project_display_names', names)
             co.settings.save()
         refresh = getattr(home, 'refresh_recents', None)
         if callable(refresh):
@@ -216,9 +245,11 @@ class ProjectChain:
             last_lines = settings.get('ui/project_workspace/last_lines', {})
             if isinstance(last_lines, dict):
                 self._restore_line_id = str(last_lines.get(str(project_id or root), '') or '')
-        if project_id and co.delivery_controller is not None:
-            co.delivery_controller.refresh_spatial(project_id)
-            co.delivery_controller.refresh_reports(project_id)
+        if co.delivery_controller is not None:
+            co.delivery_controller.set_project_context(str(project_id or ''))
+            if project_id:
+                co.delivery_controller.refresh_spatial(project_id)
+                co.delivery_controller.refresh_reports(project_id)
         # 空间信息页：项目打开后加载空间轨迹
         #
         # 去重（性能，见 __init__ 注释）：这里只**记意图**，不直接发起。
@@ -236,10 +267,8 @@ class ProjectChain:
         # 与 on_project_closed 的三页清空对称（P0-1）。新建/打开无测线
         # 项目时 lines_updated([]) 不触发新预览，不清则旧 B-Scan 永久残留。
         processing = co.page('processingInterface')
-        interpretation = co.page('interpretationInterface')
         home.set_preview_bundle(None)
         processing.set_original_bundle(None)
-        interpretation.set_bundle(None)
         name = getattr(summary, 'name', '')
         co.infobar('success', '项目', f'项目已打开：{name}')
         co.log_message(f'SUCCESS 当前项目：{name}（{root}）')
@@ -247,7 +276,11 @@ class ProjectChain:
 
     def on_project_closed(self) -> None:
         """project_closed → 清空各页项目态并恢复无项目门控。"""
+        self._package_context_generation += 1
         co = self._co
+        if co.delivery_controller is not None:
+            co.delivery_controller.set_project_context('')
+        self._reset_interpretation()
         self.current_line_id = ''
         self._restore_line_id = ''
         # 关闭项目即重置轨迹去重态：否则重新打开**同一个**项目时，测线集合
@@ -273,11 +306,7 @@ class ProjectChain:
         processing.set_original_bundle(None)
         processing.close_all_artifact_tabs()
         co.processing.velocity_token = None  # 关闭项目即失效当前提交代，迟到回调全部丢弃
-        interpretation.set_session_active(False)
         interpretation.set_line_label('')
-        interpretation.set_session_info('未打开会话')
-        interpretation.set_points([])
-        interpretation.set_velocity_failed('')  # 项目关闭 = 状态重置，非失败
         delivery.set_lines([])
         delivery.set_spatial_results([])
         spatial = co.page('spatialInterface')
@@ -297,6 +326,21 @@ class ProjectChain:
             setter(message)
         self._co.infobar('error', '项目', message)
 
+    def _reset_interpretation(self) -> None:
+        """Invalidate the old edit session before presenting a new data context."""
+        co = self._co
+        controller = getattr(co, 'interpretation_controller', None)
+        if controller is not None:
+            controller.close_session()
+        co.processing.velocity_token = None
+        page = co.page('interpretationInterface')
+        page.set_session_active(False)
+        page.set_session_info('未打开会话')
+        page.set_points([])
+        page.set_bundle(None)
+        page.set_artifacts([])
+        page.set_velocity_failed('')
+
     # ============================================================ 测线 / 成果 / 预览
     def update_line_labels(self) -> None:
         """当前测线标签：处理页 / 解释页 / 文件树共用。"""
@@ -310,6 +354,8 @@ class ProjectChain:
         """lines_updated → 项目页测线表（自动选中首行）+ 成果页/空间页测线多选。"""
         co = self._co
         lines = list(lines or [])
+        available = {str(getattr(line, 'line_id', '') or '') for line in lines}
+        removed_current = bool(self.current_line_id and self.current_line_id not in available)
         project = co.page('projectInterface')
         delivery = co.page('deliveryInterface')
         spatial = co.page('spatialInterface')
@@ -324,20 +370,22 @@ class ProjectChain:
                 lid = str(getattr(line, 'line_id', '') or '')
                 if lid:
                     co.project_controller.line_source_path(lid)
+                    if lid == self.current_line_id:
+                        co.project_controller.line_sensor_summary(lid, int(getattr(line, 'trace_count', 0)))
         # 导入完成后：若记录了目标测线，选中并预览它
         pending = self.pending_select_line_id
         if pending:
             if project.select_line(pending):
-                self.on_line_selected(pending)
+                self.on_line_selected(pending, confirm_discard=not removed_current)
             self.pending_select_line_id = ''
         elif lines:
             # 保持用户当前测线；尚未选中时默认首条。
-            available = {str(getattr(line, 'line_id', '') or '') for line in lines}
             restored = self._restore_line_id if self._restore_line_id in available else ''
-            target = self.current_line_id or restored or str(getattr(lines[0], 'line_id', '') or '')
+            current = self.current_line_id if self.current_line_id in available else ''
+            target = current or restored or str(getattr(lines[0], 'line_id', '') or '')
             if target and project.select_line(target):
                 if target != self.current_line_id:
-                    self.on_line_selected(target)
+                    self.on_line_selected(target, confirm_discard=not removed_current)
         self._restore_line_id = ''
         delivery.set_lines(lines)
         spatial.set_lines(lines)
@@ -359,28 +407,40 @@ class ProjectChain:
             self._spatial_reload_pending = False
         valid_ids = [str(getattr(line, 'line_id', '') or '') for line in lines]
         if self.current_line_id not in valid_ids:
-            self.current_line_id = valid_ids[0] if valid_ids else ''
-            self.update_line_labels()
+            if valid_ids:
+                self.on_line_selected(valid_ids[0], confirm_discard=not removed_current)
+            else:
+                self._reset_interpretation()
+                self.current_line_id = ''
+                self.update_line_labels()
+                if co.project_controller is not None:
+                    co.project_controller.invalidate_artifact_previews()
         if not lines:
             project.set_artifacts([])
+            co.page('homeInterface').set_preview_bundle(None)
+            processing.set_original_bundle(None)
+            processing.set_artifacts([])
 
-    def on_line_selected(self, line_id: str) -> None:
+    def on_line_selected(self, line_id: str, *, confirm_discard: bool = True) -> bool:
         """line_selected → 记录当前测线 + 预览 + 刷新成果列表。"""
         line_id = str(line_id or '')
         if not line_id:
-            return
+            return False
         co = self._co
         if line_id != self.current_line_id:
+            if confirm_discard and not self.confirm_interpretation_close():
+                project = co.page('projectInterface')
+                project.select_line(self.current_line_id)
+                self.update_line_labels()
+                return False
             # ProcessingPage saves the full session before switching its context.
             # 在飞速度分析回调带旧测线，会被 line 守卫丢弃；
             # 同步失效 token 并复位解释页，避免新测线永久停留在"拟合中"
-            co.processing.velocity_token = None
+            self._reset_interpretation()
             # 在飞成果预览同理作废，防旧测线成果渲染进新测线"处理结果"；
             # 成果预览代数与测线预览独立，同测线重复选中不受影响
             if co.project_controller is not None:
                 co.project_controller.invalidate_artifact_previews()
-            interpretation = co.page('interpretationInterface')
-            interpretation.set_velocity_failed('')  # 空串 = 状态重置，非失败
         self.current_line_id = line_id
         settings = getattr(co, 'settings', None)
         if settings is not None:
@@ -404,14 +464,17 @@ class ProjectChain:
             resume_setter(line_id, bool(has_session(line_id)))
         if co.project_controller is not None:
             co.project_controller.preview_line(line_id)
+            co.project_controller.line_sensor_summary(line_id)
             co.project_controller.refresh_artifacts(line_id)
+        return True
 
     def on_line_process_requested(self, line_id: str) -> None:
         """项目页双击测线 → 设为当前测线并加载数据，跳转处理页。"""
         line_id = str(line_id or '')
         if not line_id:
             return
-        self.on_line_selected(line_id)
+        if not self.on_line_selected(line_id):
+            return
         self._co.goto_page('processingInterface')
         self._co.infobar('info', '数据预览', f'正在加载测线 {line_id} …')
 
@@ -420,24 +483,26 @@ class ProjectChain:
         line_id = str(line_id or '')
         if not line_id or line_id == self.current_line_id:
             return
-        self.on_line_selected(line_id)
+        if not self.on_line_selected(line_id):
+            return
         self._co.infobar('success', '空间信息', f'已设为当前测线：{line_id}')
 
     def on_artifacts_updated(self, line_id: str, artifacts: list) -> None:
         """artifacts_updated → 项目页/处理页成果表；处理完成后自动预览最新成果。"""
+        co = self._co
+        # The tree contains every line, including deletion targets other than
+        # the processing input. Refresh it before filtering current-page data.
+        if co.project_controller is not None:
+            co.project_controller.refresh_all_artifacts()
         if str(line_id) != self.current_line_id:
             return
         artifacts = list(artifacts or [])
-        co = self._co
         project = co.page('projectInterface')
         processing = co.page('processingInterface')
         interpretation = co.page('interpretationInterface')
         project.set_artifacts(artifacts)
         processing.set_artifacts(artifacts)
         interpretation.set_artifacts(artifacts)
-        # 文件树「成果」视图跟随刷新（面板按 artifact_id 签名去重，不换内容不重建）
-        if co.project_controller is not None:
-            co.project_controller.refresh_all_artifacts()
         # 文件树点成果的跨线场景：该线成果列表到达后完成选中 + 预览
         pending = self.pending_focus_artifact
         if pending:
@@ -474,9 +539,10 @@ class ProjectChain:
         if not artifact_id or co.project_controller is None \
                 or not co.require_project():
             return
-        self.pending_focus_artifact = artifact_id
         if line_id and line_id != self.current_line_id:
-            self.on_line_selected(line_id)
+            if not self.on_line_selected(line_id):
+                return
+        self.pending_focus_artifact = artifact_id
         co.goto_page('processingInterface')
         processing = co.page('processingInterface')
         if processing.select_artifact(artifact_id):
@@ -493,15 +559,20 @@ class ProjectChain:
         压扁；查看请走处理页/解释页。
         """
         co = self._co
+        if not self.current_line_id:
+            return  # late raw preview after the final line was removed
         co.page('homeInterface').set_preview_bundle(bundle)
         co.page('processingInterface').set_original_bundle(bundle)
-        co.page('interpretationInterface').set_bundle(bundle)
+        if co.processing.interpretation_uses_source(''):
+            co.page('interpretationInterface').set_bundle(bundle)
 
     def on_artifact_preview(self, artifact_id: str, bundle) -> None:
         """成果预览 → 处理页对应 tab（tab 模型：artifact_id 定位数据源）。"""
         co = self._co
         processing = co.page('processingInterface')
         processing.set_artifact_bundle(str(artifact_id), bundle)
+        if co.processing.interpretation_uses_source(str(artifact_id)):
+            co.page('interpretationInterface').set_bundle(bundle)
 
     def on_preview_invalidated(self, artifact_id: str = '') -> None:
         """当前预览的成果已被删除 → 关闭其 tab（窗口数随 tab 收敛）。"""
@@ -603,6 +674,37 @@ class ProjectChain:
             self._co.infobar('info', '传感器同步', '同步任务已提交')
 
     # ============================================================ 成果（交付）域
+    def on_processing_package_requested(self, line_id: str, artifact_id: str = '') -> None:
+        from pathlib import Path
+        from ui.dialogs import choose_processing_package_path
+
+        co = self._co
+        if co.delivery_controller is None or not co.require_project():
+            return
+        project_id = co.current_project_id()
+        generation = self._package_context_generation
+        directory = co.settings.get('ui/processing_package_directory', '')
+        path = choose_processing_package_path(
+            co.page('projectInterface'), str(line_id), artifact_id=str(artifact_id),
+            directory=directory if isinstance(directory, str) else '')
+        # Native dialogs run a nested event loop; closing/reopening invalidates the target.
+        if (not path or co.current_project_id() != project_id
+                or generation != self._package_context_generation):
+            return
+        job_id = co.delivery_controller.export_processing_package(
+            project_id, str(line_id), path, artifact_id=str(artifact_id))
+        if job_id:
+            co.settings.set('ui/processing_package_directory', str(Path(path).parent))
+            co.settings.save()
+            co.infobar('info', '处理结果打包', '已提交；可在任务页查看进度或取消。')
+
+    def on_processing_package_generated(self, result) -> None:
+        warnings = tuple(getattr(result, 'warnings', ()) or ())
+        text = str(result.archive_path)
+        if warnings:
+            text += '\n部分前序步骤未保存，详情见包内 manifest.json。'
+        self._co.infobar('warning' if warnings else 'success', '处理结果包已保存', text)
+
     def on_spatial_requested(self, payload: dict) -> None:
         if self._co.delivery_controller is None or not self._co.require_project():
             return

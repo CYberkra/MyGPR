@@ -37,6 +37,7 @@ class FieldLineStoreMixin:
     write_json: Any
     save_manifest: Any
     append_log: Any
+    assert_writable: Any
 
     @staticmethod
     def _safe_line_id(line_id: str) -> str:
@@ -67,6 +68,22 @@ class FieldLineStoreMixin:
         raise KeyError(line_id)
 
     def import_line_file(
+        self, line_id: str, source: str | Path, *, name: str | None = None,
+        copy_into_project: bool = True, dielectric_constant: float = 9.0,
+        cancel_requested=None, progress_callback=None,
+    ) -> FieldLineRecord:
+        from core.project_mutation import project_mutation
+
+        safe = self._safe_line_id(line_id)
+        with project_mutation(self, "import-line", files=(self.gpr_dataset_path(safe),),
+                              trees=(self.root / "raw" / safe,)):
+            return self._import_line_file(
+                safe, source, name=name, copy_into_project=copy_into_project,
+                dielectric_constant=dielectric_constant, cancel_requested=cancel_requested,
+                progress_callback=progress_callback,
+            )
+
+    def _import_line_file(
         self,
         line_id: str,
         source: str | Path,
@@ -89,6 +106,8 @@ class FieldLineStoreMixin:
         if not src.exists():
             raise FileNotFoundError(src)
         dest = self.root / "raw" / line_id / src.name if copy_into_project else src
+        if copy_into_project and dest == self.trajectory_path(line_id):
+            dest = dest.parent / "sources" / src.name
         staging = self.root / "raw" / line_id / f".import_staging_{uuid.uuid4().hex}"
         if copy_into_project:
             dest.parent.mkdir(parents=True, exist_ok=True)
@@ -96,6 +115,21 @@ class FieldLineStoreMixin:
                 copy_file_chunked(
                     src, dest, cancel_requested=cancel_requested, progress_callback=progress_callback
                 )
+                if src.suffix.lower() in {".h5", ".hdf5"}:
+                    # Keep original SFCW settings with the copied fact source.
+                    # Large raw S21 journals use the same cancellable block copy.
+                    for suffix in (".sfcw.json", ".s21.jsonl"):
+                        companion = src.with_name(src.name + suffix)
+                        copied_companion = dest.with_name(dest.name + suffix)
+                        if companion.exists():
+                            copy_file_chunked(
+                                companion, copied_companion,
+                                cancel_requested=cancel_requested, progress_callback=progress_callback,
+                            )
+                        else:
+                            # A replacement line must not inherit the previous
+                            # acquisition's configuration or raw spectrum.
+                            copied_companion.unlink(missing_ok=True)
         try:
             line = self.get_line(line_id)
         except KeyError:
@@ -109,6 +143,7 @@ class FieldLineStoreMixin:
         line.raw_size_mb = round(size_mb, 3)
         line.processing_status = "已导入"
         line.updated_at = local_now()
+        self._clear_import_navigation(line, dest)
         self.upsert_line(line)
         self.append_log(f"导入测线 {line_id}: {dest.name}, size={line.raw_size_mb:.3f}MB")
         dataset = None
@@ -128,66 +163,8 @@ class FieldLineStoreMixin:
             self.save_gpr_dataset(
                 line_id, dataset, cancel_requested=cancel_requested, progress_callback=progress_callback
             )
-            projection_payload = {"status": "not_applicable"}
-            if trajectory_rows:
-                lon = [float(row.get("longitude", 0.0)) for row in trajectory_rows]
-                lat = [float(row.get("latitude", 0.0)) for row in trajectory_rows]
-                try:
-                    x_values, y_values, projection = project_lonlat_to_xy(
-                        lon, lat, coordinate_system=getattr(self.manifest, "coordinate_system", ""),
-                    )
-                    projection_payload = {
-                        "status": "ok", "coordinate_system": projection.description,
-                        "epsg": projection.epsg, "zone": projection.zone,
-                        "source_epsg": projection.source_epsg, "is_auto": projection.is_auto,
-                    }
-                except ProjectionError as exc:
-                    x_values, y_values = lon, lat
-                    projection_payload = {
-                        "status": "failed",
-                        "coordinate_system": getattr(self.manifest, "coordinate_system", ""),
-                        "error": str(exc),
-                    }
-                    self.append_log(f"测线 {line_id} 坐标投影失败，空间成果将标记为未投影：{exc}")
-                coord_text = str(projection_payload.get("coordinate_system") or "未投影")
-                points = [
-                    TrajectoryPoint(
-                        distance_m=float(row.get("distance_m", 0.0)),
-                        x=float(x_values[idx]), y=float(y_values[idx]),
-                        # CSV 第 3 列 elevation 是地表高程、第 5 列 height_m 是
-                        # 飞行高度（离地）；轨迹海拔 = 地表 + 飞行高度，
-                        # 与 sensor_sync 的 local_z = ground + flight 语义一致
-                        z=float(row.get("elevation", 0.0)) + float(row.get("height_m", 0.0)),
-                        flight_height_m=float(row.get("height_m", 0.0)),
-                        quality="已投影" if projection_payload.get("status") == "ok" else "未投影",
-                        longitude=float(row.get("longitude", 0.0)),
-                        latitude=float(row.get("latitude", 0.0)),
-                        coordinate_system=coord_text,
-                    )
-                    for idx, row in enumerate(trajectory_rows)
-                ]
-                self.save_trajectory(line_id, TrajectoryModel(points))
-                projected_line = self.get_line(line_id)
-                projected_line.rtk_status = "已投影" if projection_payload.get("status") == "ok" else "未投影"
-                self.upsert_line(projected_line)
-            self.write_json(
-                self.root / "raw" / line_id / "import_manifest.json",
-                {
-                    "schema": "mygpr.import_manifest.v2",
-                    "line_id": line_id, "source_path": str(src),
-                    "copied_path": dest.relative_to(self.root).as_posix() if dest.is_relative_to(self.root) else str(dest),
-                    "format_name": dataset.format_name, "sample_count": dataset.sample_count,
-                    "trace_count": dataset.trace_count, "length_m": dataset.length_m,
-                    "time_window_ns": dataset.time_window_ns, "has_trajectory": bool(trajectory_rows),
-                    "projection": projection_payload,
-                    "columns": dataset.metadata.get("columns", []) if isinstance(dataset.metadata, dict) else [],
-                    "storage_mode": (
-                        "hdf5_line_container" if getattr(self.storage, "is_hybrid", False)
-                        else ("memmap_directory" if Path(self.root / self.get_line(line_id).gpr_dataset_path).is_dir() else "npz")
-                    ),
-                    "imported_at": local_now(),
-                },
-            )
+            projection_payload = self._import_line_trajectory(line_id, trajectory_rows)
+            self._write_import_manifest(line_id, src, dest, dataset, trajectory_rows, projection_payload)
             try:
                 self.run_line_quality_check(line_id)
             except Exception as qc_exc:
@@ -204,6 +181,86 @@ class FieldLineStoreMixin:
                 dataset.matrix._mmap.close()
             shutil.rmtree(staging, ignore_errors=True)
 
+
+    def _clear_import_navigation(self, line: FieldLineRecord, import_path: Path) -> None:
+        """Unbind navigation from the replaced acquisition inside its transaction."""
+        line.trajectory_path = ""
+        line.sensor_sync_manifest_path = ""
+        line.trace_metadata_path = ""
+        line.rtk_status = "未定位"
+        line.sensor_sync_status = "未同步"
+        # load_trajectory also supports this historical path without a pointer.
+        legacy_path = self.trajectory_path(line.line_id)
+        if legacy_path != import_path:
+            legacy_path.unlink(missing_ok=True)
+
+
+    def _import_line_trajectory(self, line_id, trajectory_rows):
+        """Persist projected navigation from the normalized import."""
+        projection_payload = {"status": "not_applicable"}
+        if trajectory_rows:
+            lon = [float(row.get("longitude", 0.0)) for row in trajectory_rows]
+            lat = [float(row.get("latitude", 0.0)) for row in trajectory_rows]
+            try:
+                x_values, y_values, projection = project_lonlat_to_xy(
+                    lon, lat, coordinate_system=getattr(self.manifest, "coordinate_system", ""),
+                )
+                projection_payload = {
+                    "status": "ok", "coordinate_system": projection.description,
+                    "epsg": projection.epsg, "zone": projection.zone,
+                    "source_epsg": projection.source_epsg, "is_auto": projection.is_auto,
+                }
+            except ProjectionError as exc:
+                x_values, y_values = lon, lat
+                projection_payload = {
+                    "status": "failed",
+                    "coordinate_system": getattr(self.manifest, "coordinate_system", ""),
+                    "error": str(exc),
+                }
+                self.append_log(f"测线 {line_id} 坐标投影失败，空间成果将标记为未投影：{exc}")
+            coord_text = str(projection_payload.get("coordinate_system") or "未投影")
+            points = [
+                TrajectoryPoint(
+                    distance_m=float(row.get("distance_m", 0.0)),
+                    x=float(x_values[idx]), y=float(y_values[idx]),
+                    # CSV 第 3 列 elevation 是地表高程、第 5 列 height_m 是
+                    # 飞行高度（离地）；轨迹海拔 = 地表 + 飞行高度，
+                    # 与 sensor_sync 的 local_z = ground + flight 语义一致
+                    z=float(row.get("elevation", 0.0)) + float(row.get("height_m", 0.0)),
+                    flight_height_m=float(row.get("height_m", 0.0)),
+                    quality="已投影" if projection_payload.get("status") == "ok" else "未投影",
+                    longitude=float(row.get("longitude", 0.0)),
+                    latitude=float(row.get("latitude", 0.0)),
+                    coordinate_system=coord_text,
+                )
+                for idx, row in enumerate(trajectory_rows)
+            ]
+            self.save_trajectory(line_id, TrajectoryModel(points))
+            projected_line = self.get_line(line_id)
+            projected_line.rtk_status = "已投影" if projection_payload.get("status") == "ok" else "未投影"
+            self.upsert_line(projected_line)
+        return projection_payload
+
+    def _write_import_manifest(self, line_id, src, dest, dataset, trajectory_rows, projection_payload):
+        """Record the fact source and normalization evidence after data commit."""
+        self.write_json(
+            self.root / "raw" / line_id / "import_manifest.json",
+            {
+                "schema": "mygpr.import_manifest.v2",
+                "line_id": line_id, "source_path": str(src),
+                "copied_path": dest.relative_to(self.root).as_posix() if dest.is_relative_to(self.root) else str(dest),
+                "format_name": dataset.format_name, "sample_count": dataset.sample_count,
+                "trace_count": dataset.trace_count, "length_m": dataset.length_m,
+                "time_window_ns": dataset.time_window_ns, "has_trajectory": bool(trajectory_rows),
+                "projection": projection_payload,
+                "columns": dataset.metadata.get("columns", []) if isinstance(dataset.metadata, dict) else [],
+                "storage_mode": (
+                    "hdf5_line_container" if getattr(self.storage, "is_hybrid", False)
+                    else ("memmap_directory" if Path(self.root / self.get_line(line_id).gpr_dataset_path).is_dir() else "npz")
+                ),
+                "imported_at": local_now(),
+            },
+        )
 
     def gpr_dataset_path(self, line_id: str) -> Path:
         line_id = self._safe_line_id(line_id)
@@ -291,6 +348,7 @@ class FieldLineStoreMixin:
         cancel_requested=None,
         progress_callback=None,
     ) -> Path:
+        self.assert_writable()
         line_id = self._safe_line_id(line_id)
         matrix_bytes = int(dataset.matrix.size * np.dtype(dataset.matrix.dtype).itemsize)
         if getattr(self.storage, "is_hybrid", False):
@@ -393,6 +451,8 @@ class FieldLineStoreMixin:
         """
         from core.job_manager import JobCancelled
 
+        self.assert_writable()
+
         def check_cancel() -> None:
             if cancel_requested is not None and cancel_requested():
                 raise JobCancelled("B-scan 方向修正已取消")
@@ -494,6 +554,7 @@ class FieldLineStoreMixin:
         return quality
 
     def save_trajectory(self, line_id: str, trajectory: TrajectoryModel) -> Path:
+        self.assert_writable()
         line_id = self._safe_line_id(line_id)
         path = trajectory.to_csv(self.trajectory_path(line_id))
         try:

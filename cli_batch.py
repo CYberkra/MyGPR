@@ -445,8 +445,8 @@ def run_job(job: Dict[str, Any], repo_root: str, output_dir: str) -> Dict[str, A
                 "step": idx,
                 "key": key,
                 "params": params,
-                "output_csv": os.path.relpath(step_csv, repo_root),
-                "output_png": os.path.relpath(step_png, repo_root),
+                "output_csv": _safe_relpath(step_csv, repo_root),
+                "output_png": _safe_relpath(step_png, repo_root),
                 "shape": list(np.asarray(new_data).shape),
             }
         )
@@ -462,8 +462,8 @@ def run_job(job: Dict[str, Any], repo_root: str, output_dir: str) -> Dict[str, A
         "input": input_path,
         "status": "ok",
         "steps": steps_summary,
-        "final_csv": os.path.relpath(final_csv, repo_root),
-        "final_png": os.path.relpath(final_png, repo_root),
+        "final_csv": _safe_relpath(final_csv, repo_root),
+        "final_png": _safe_relpath(final_png, repo_root),
         "final_shape": list(current.shape),
     }
     return result
@@ -480,8 +480,8 @@ def run_batch(cfg: Dict[str, Any], config_path: str, repo_root: str) -> int:
 
     summary = {
         "started_at": datetime.now().isoformat(timespec="seconds"),
-        "config": os.path.relpath(config_path, repo_root),
-        "output_dir": os.path.relpath(output_dir, repo_root),
+        "config": _safe_relpath(config_path, repo_root),
+        "output_dir": _safe_relpath(output_dir, repo_root),
         "results": [],
     }
 
@@ -520,7 +520,7 @@ def run_batch(cfg: Dict[str, Any], config_path: str, repo_root: str) -> int:
 
     print("\n=== Summary ===")
     print(json.dumps(summary["stats"], ensure_ascii=False))
-    print(f"summary_file: {os.path.relpath(summary_path, repo_root)}")
+    print(f"summary_file: {_safe_relpath(summary_path, repo_root)}")
 
     return 0 if fail_count == 0 else 2
 
@@ -563,6 +563,43 @@ def cmd_run(args) -> int:
     return run_batch(cfg, config_path=args.config, repo_root=repo_root)
 
 
+def _resume_failed_ids(previous: Any) -> List[str]:
+    if not isinstance(previous, dict) or not isinstance(previous.get("results"), list):
+        raise ValueError("summary.results must be a list")
+    failed_ids: List[str] = []
+    for item in previous["results"]:
+        if not isinstance(item, dict) or not isinstance(item.get("status"), str) or not item["status"].strip():
+            raise ValueError("summary results must contain objects with a status")
+        if item["status"].lower() in {"ok", "success"}:
+            continue
+        job_id = str(item.get("job_id") or "").strip()
+        if not job_id or job_id == "<unknown>":
+            raise ValueError("failed summary result has no resumable job_id")
+        failed_ids.append(job_id)
+    if "stats" in previous:
+        stats = previous["stats"]
+        expected = {"ok": len(previous["results"]) - len(failed_ids),
+                    "failed": len(failed_ids), "total": len(previous["results"])}
+        if not isinstance(stats, dict) or any(type(stats.get(key)) is not int or stats[key] != value
+                                             for key, value in expected.items()):
+            raise ValueError("summary.stats does not agree with results")
+    return failed_ids
+
+
+def _resume_jobs(cfg: Any, failed_ids: List[str]) -> List[Dict[str, Any]]:
+    if not isinstance(cfg, dict) or not isinstance(cfg.get("jobs"), list):
+        raise ValueError("original config.jobs must be a list")
+    if any(not isinstance(job, dict) for job in cfg["jobs"]):
+        raise ValueError("original config.jobs must contain objects")
+    failed_set = set(failed_ids)
+    identified = [(str(job.get("id") or os.path.splitext(os.path.basename(str(job.get("input", ""))))[0]), job)
+                  for job in cfg["jobs"]]
+    missing = failed_set - {job_id for job_id, _job in identified}
+    if missing:
+        raise ValueError("failed job ids were not found in the original config: " + ", ".join(sorted(missing)))
+    return [job for job_id, job in identified if job_id in failed_set]
+
+
 def cmd_resume(args) -> int:
     repo_root = os.path.abspath(args.repo_root)
     if not args.summary:
@@ -579,12 +616,11 @@ def cmd_resume(args) -> int:
         print(f"ERROR: failed to read summary JSON: {exc}")
         return 2
 
-    failed_ids = [
-        str(item.get("job_id"))
-        for item in previous.get("results", [])
-        if isinstance(item, dict) and str(item.get("status", "")).lower() not in {"ok", "success"}
-    ]
-    failed_ids = [item for item in failed_ids if item and item != "<unknown>"]
+    try:
+        failed_ids = _resume_failed_ids(previous)
+    except ValueError as exc:
+        print(f"ERROR: invalid summary: {exc}")
+        return 2
     if not failed_ids:
         print("resume: no failed jobs found in summary.")
         return 0
@@ -600,10 +636,10 @@ def cmd_resume(args) -> int:
         print(f"ERROR: failed to load original config: {exc}")
         return 2
 
-    failed_set = set(failed_ids)
-    jobs = [job for job in cfg.get("jobs", []) if str(job.get("id") or os.path.splitext(os.path.basename(str(job.get("input", ""))))[0]) in failed_set]
-    if not jobs:
-        print("ERROR: failed job ids were not found in the original config: " + ", ".join(failed_ids))
+    try:
+        jobs = _resume_jobs(cfg, failed_ids)
+    except ValueError as exc:
+        print(f"ERROR: cannot resume safely: {exc}")
         return 2
 
     output_dir_ref = previous.get("output_dir") or cfg.get("output_dir", "output/cli_batch")
@@ -611,9 +647,9 @@ def cmd_resume(args) -> int:
     os.makedirs(output_dir, exist_ok=True)
     resumed = {
         "started_at": datetime.now().isoformat(timespec="seconds"),
-        "resume_of": os.path.relpath(summary_path, repo_root),
-        "config": os.path.relpath(config_path, repo_root),
-        "output_dir": os.path.relpath(output_dir, repo_root),
+        "resume_of": _safe_relpath(summary_path, repo_root),
+        "config": _safe_relpath(config_path, repo_root),
+        "output_dir": _safe_relpath(output_dir, repo_root),
         "resumed_job_ids": failed_ids,
         "results": [],
     }
@@ -643,7 +679,7 @@ def cmd_resume(args) -> int:
         json.dump(resumed, f, ensure_ascii=False, indent=2)
     print("\n=== Resume Summary ===")
     print(json.dumps(resumed["stats"], ensure_ascii=False))
-    print(f"summary_file: {os.path.relpath(resumed_path, repo_root)}")
+    print(f"summary_file: {_safe_relpath(resumed_path, repo_root)}")
     return 0 if fail_count == 0 else 2
 
 

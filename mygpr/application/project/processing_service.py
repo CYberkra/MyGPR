@@ -30,7 +30,7 @@ class ProjectReadOnlyError(ProjectApplicationError):
 _OUTPUT_HEADER_KEYS = (
     "total_time_ns", "time_window_ns", "time_cut_offset_ns",
     "a_scan_length", "num_traces", "dielectric_constant", "axis_transform",
-    "time_axis_endpoint", "distance_axis_status",
+    "time_axis_endpoint", "time_step_s", "distance_axis_status",
 )
 
 
@@ -97,7 +97,9 @@ class ProjectProcessingService:
             self._projects.get_artifact_dataset_info(project_id, line_id, input_artifact_id)
             if input_artifact_id else self._projects.get_dataset_info(project_id, line_id)
         )
-        return self._processing.estimate_pipeline_shape(info.shape, info.dtype, pipeline)
+        return self._processing.estimate_pipeline_shape(
+            info.shape, info.dtype, pipeline, header_info=self._header_from_info(info)
+        )
 
     def execute_pipeline(
         self,
@@ -207,7 +209,10 @@ class ProjectProcessingService:
             self._projects.get_artifact_dataset_info(project_id, line_id, input_artifact_id)
             if input_artifact_id else self._projects.get_dataset_info(project_id, line_id)
         )
-        estimate = self._processing.estimate_pipeline_shape(info.shape, info.dtype, pipeline)
+        estimate = self._processing.estimate_pipeline_shape(
+            info.shape, info.dtype, pipeline, allow_chunking=False,
+            header_info=self._header_from_info(info),
+        )
         self._processing.validate_estimate(estimate, context=context, operation=pipeline.name)
         context.report_progress(0, 1, "读取项目测线")
         source = (
@@ -252,6 +257,7 @@ class ProjectProcessingService:
                     "run_group_id": run_group_id,
                     "run_step_index": index,
                     "lineage_version": 2,
+                    "result_label": str(result_name or ''),
                     "run_input_artifact_id": input_artifact_id,
                     "step_input_artifact_id": step_input_id,
                     "run_input_sha256": run_input_sha256,
@@ -321,6 +327,7 @@ class ProjectProcessingService:
                 "run_group_id": run_group_id,
                 "run_step_index": len(summary.step_records),
                 "lineage_version": 2,
+                "result_label": str(result_name or ''),
                 "run_input_artifact_id": input_artifact_id,
                 "step_input_artifact_id": input_artifact_id,
                 "run_input_sha256": summary.input_sha256,

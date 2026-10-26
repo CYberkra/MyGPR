@@ -15,6 +15,8 @@ from PyQt6.QtGui import QIcon, QTransform
 from PyQt6.QtWidgets import QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import FluentIcon as FIF, PushButton, themeColor
 
+from ui import motion
+
 _EXPAND_BUTTON_WIDTH = 16
 
 
@@ -58,9 +60,11 @@ class CollapsiblePanel(QWidget):
         self._collapse_width = int(collapse_width)
         self._collapsed = False
         self._animating = False
+        self._animation_minimum_width = None
 
         # 内容容器
         self._content = QWidget(self)
+        self._content_policy = self._content.sizePolicy()
         self._content_layout = QVBoxLayout(self._content)
         self._content_layout.setContentsMargins(0, 0, 0, 0)
         self._content_layout.setSpacing(0)
@@ -91,6 +95,7 @@ class CollapsiblePanel(QWidget):
         self._animation = QPropertyAnimation(self, b'maximumWidth', self)
         self._animation.setDuration(220)
         self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._animation.valueChanged.connect(self._on_width_changed)
         self._animation.finished.connect(self._on_animation_finished)
 
         self.setMaximumWidth(self._expand_width)
@@ -135,9 +140,9 @@ class CollapsiblePanel(QWidget):
         self._collapsed = collapsed
 
         target = self._collapse_width if collapsed else self._expand_width
-        # 停表后从当前宽度续跑（maximumWidth 即为动画实时值）
+        # Stop does not emit finished. Resume from the width actually on screen.
         self._animation.stop()
-        current = self.maximumWidth()
+        current = self.width()
         self._animation.setStartValue(current)
         self._animation.setEndValue(target)
 
@@ -145,12 +150,15 @@ class CollapsiblePanel(QWidget):
         self._collapse_btn.setFixedWidth(
             self._collapse_width - 4 if collapsed else _EXPAND_BUTTON_WIDTH)
 
-        if collapsed:
-            self._content.setVisible(False)
-
         self._update_button_icon()
 
-        if animate:
+        if animate and motion.animations_enabled() and self.isVisible() and current != target:
+            if self._animation_minimum_width is None:
+                self._animation_minimum_width = self.minimumWidth()
+            self._content.setSizePolicy(QSizePolicy.Policy.Ignored,
+                                        self._content_policy.verticalPolicy())
+            self._content.setVisible(True)
+            self.setMinimumWidth(current)
             self._animation.start()
         else:
             self.setMaximumWidth(target)
@@ -161,18 +169,33 @@ class CollapsiblePanel(QWidget):
         self.set_collapsed(not self._collapsed)
 
     # ------------------------------------------------------------ 内部
+    def _on_width_changed(self, value) -> None:
+        if self._animation_minimum_width is not None:
+            # Ignored content must not make the parent layout shrink this panel
+            # straight to the button's sizeHint instead of following the tween.
+            self.setMinimumWidth(int(value))
+
     def _on_animation_finished(self) -> None:
-        # stop() 也会发 finished（Qt 语义），续跑场景下会误清 _animating，
-        # 故仅当确实跑到终点（宽度 == 目标）才收尾。
         target = (self._collapse_width if self._collapsed
                   else self._expand_width)
         if self.maximumWidth() != target:
             return
         self._animating = False
-        if not self._collapsed:
-            self._content.setVisible(True)
+        self._content.setVisible(not self._collapsed)
+        self._content.setSizePolicy(self._content_policy)
+        if self._animation_minimum_width is not None:
+            minimum = self._animation_minimum_width
+            self._animation_minimum_width = None
+            self.setMinimumWidth(minimum)
         self._update_button_icon()
         self.sig_collapsed.emit(self._collapsed)
+
+    def hideEvent(self, event) -> None:
+        if self._animating:
+            self._animation.stop()
+            self.setMaximumWidth(self._collapse_width if self._collapsed else self._expand_width)
+            self._on_animation_finished()
+        super().hideEvent(event)
 
     def _update_button_icon(self) -> None:
         if self._side == 'left':

@@ -15,6 +15,7 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any, Sequence
+from ui.result_presentation import artifact_parameters, describe_artifact
 
 
 # ---------------------------------------------------------------- 节点模型（Provider 层）
@@ -126,10 +127,9 @@ def build_tree_model(lines: Sequence[Any], spatial_results: Sequence[Any] = (),
     return [_line_node(ln) for ln in ordered]
 
 
-def _artifact_node(artifact: Any) -> TreeNode:
+def _artifact_node(artifact: Any, artifacts=()) -> TreeNode:
     artifact_id = str(getattr(artifact, 'artifact_id', '') or '')
     line_id = str(getattr(artifact, 'line_id', '') or '')
-    name = str(getattr(artifact, 'name', '') or artifact_id)
     method = str(getattr(artifact, 'method_name', '') or
                  getattr(artifact, 'method_id', '') or '')
     created = str(getattr(artifact, 'created_at', '') or '')[:16].replace('T', ' ')
@@ -142,19 +142,11 @@ def _artifact_node(artifact: Any) -> TreeNode:
     if shape:
         tip.append(f'形状：{"×".join(str(v) for v in shape)} '
                    f'{getattr(artifact, "dtype", "") or ""}'.strip())
+    presentation = describe_artifact(artifact, artifacts)
     return TreeNode(
-        key=f'artifact:{artifact_id}', kind='artifact', text=name,
+        key=f'artifact:{artifact_id}', kind='artifact', text=presentation.title,
         payload=artifact_id, aux=line_id, suffix=method,
-        tooltip='\n'.join(tip))
-
-
-def artifact_parameters(artifact: Any) -> dict:
-    """Read persisted metadata, including immutable manifest mappings."""
-    manifest = getattr(artifact, 'manifest', None) or {}
-    if not isinstance(manifest, Mapping):
-        return {}
-    params = manifest.get('params')
-    return dict(params if isinstance(params, Mapping) else manifest)
+        tooltip=presentation.tooltip+'\n'+'\n'.join(tip))
 
 
 def artifact_direct_parent(artifact: Any) -> str | None:
@@ -224,7 +216,7 @@ def build_lineage_model(artifacts: Sequence[Any], line_id: str) -> tuple[TreeNod
         while work:
             aid, ready = work.pop()
             if ready:
-                node = _artifact_node(by_id[aid])
+                node = _artifact_node(by_id[aid], by_id)
                 params = artifact_parameters(by_id[aid])
                 group = str(params.get('run_group_id') or '')
                 step = params.get('run_step_index')
@@ -266,7 +258,7 @@ def build_artifacts_model(artifacts: Sequence[Any],
         nodes.append(TreeNode(
             key=f'group:line-artifacts:{line_id}', kind='group', text=line_id,
             suffix=f'{len(bucket)} 项',
-            children=tuple(_artifact_node(a) for a in bucket)))
+            children=tuple(_artifact_node(a, bucket) for a in bucket)))
 
     spatial = sorted(
         (r for r in spatial_results or []),

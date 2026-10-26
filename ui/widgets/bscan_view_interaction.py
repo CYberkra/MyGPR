@@ -28,6 +28,7 @@ class BScanDisplayMode(Enum):
     """B-scan 显示模式（Phase1 1.2）：灰度 / 变面积 / 波形叠加。"""
 
     GRAYSCALE = 'grayscale'
+    ENVELOPE = 'envelope'
     WIGGLE = 'wiggle'          # 变面积：正半轴填充
     WAVEFORM = 'waveform'      # 波形叠加：正负对称双线
 
@@ -94,6 +95,7 @@ class BScanViewInteractionMixin:
     def _show_context_menu(self, event) -> None:
         menu = make_menu(self)
         self._add_menu_zoom(menu)
+        self._add_menu_time_window(menu)
         menu.addSeparator()
         self._add_menu_axes(menu)
         menu.addSeparator()
@@ -117,6 +119,7 @@ class BScanViewInteractionMixin:
         「铺满」（收起页面侧栏）只在宿主页接管后出现——原工具条按钮
         退役后，这里是除快捷语义外的唯一入口。
         """
+        self._add_menu_selection(menu)
         add_action(menu, FIF.ZOOM_IN, '放大', self.zoom_in)
         add_action(menu, FIF.ZOOM_OUT, '缩小', self.zoom_out)
         add_action(menu, FIF.FIT_PAGE, '回到全览（铺满窗口）', self.fit_to_data)
@@ -182,6 +185,7 @@ class BScanViewInteractionMixin:
         for mode in BScanDisplayMode:
             mode_label = {
                 BScanDisplayMode.GRAYSCALE: '灰度',
+                BScanDisplayMode.ENVELOPE: '包络（当前预览 Hilbert）',
                 BScanDisplayMode.WIGGLE: '变面积（Wiggle）',
                 BScanDisplayMode.WAVEFORM: '波形叠加',
             }[mode]
@@ -219,8 +223,15 @@ class BScanViewInteractionMixin:
             mode = BScanDisplayMode(mode)
         if not isinstance(mode, BScanDisplayMode):
             raise ValueError(f'未知显示模式: {mode!r}')
+        saved_time_x = (self._plot.vb.viewRange()[0]
+                        if self._view_time_window is not None or self._view_selection is not None else None)
         self.display_mode = mode
+        self._gain_cache = None
+        self._refresh_gain_render()
         self._apply_display_mode(mode, reset_view=True)
+        if saved_time_x is not None:
+            self._restore_view_time_window()
+            self._plot.vb.setXRange(*saved_time_x, padding=0)
 
     def _apply_display_mode(self, mode, *, reset_view: bool) -> None:
         """应用显示模式；reset_view 仅用户切换模式时为 True。
@@ -235,7 +246,7 @@ class BScanViewInteractionMixin:
         img = self._image_item.image
         if img is None or self._matrix is None:
             return
-        if mode is BScanDisplayMode.GRAYSCALE:
+        if mode in (BScanDisplayMode.GRAYSCALE, BScanDisplayMode.ENVELOPE):
             if self._wiggle_item is not None:
                 self._wiggle_item.hide()
             self._image_item.show()
@@ -385,7 +396,7 @@ class BScanViewInteractionMixin:
 
     def _on_mouse_moved(self, pos) -> None:
         """鼠标在图像区移动：十字线跟手 + 左下角读数浮层（文本 30ms 合并刷新）。"""
-        if not self._crosshair_on or self._image_shape is None:
+        if self._selection_tool.active or not self._crosshair_on or self._image_shape is None:
             self._hide_crosshair()
             return
         if not self._plot.sceneBoundingRect().contains(pos):

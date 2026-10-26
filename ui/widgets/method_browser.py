@@ -2,10 +2,12 @@
 
 UI：顶部搜索 LineEdit（占位"搜索方法…"，实时过滤）→ 分类 QTreeWidget
 （一级 = category_label，二级 = display_name）。
-tooltip 显示 method_id 与参数数。
+tooltip 显示全名、作用说明和检索别名。
 双击发 sig_add_requested；单击选中发 sig_method_selected。
 右键菜单（RoundMenu）：添加到处理链（等同双击）/ 复制方法名。
 """
+
+import unicodedata
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (QApplication, QHBoxLayout, QTreeWidget,
@@ -15,6 +17,10 @@ from qfluentwidgets import FluentIcon as FIF
 
 from ui.widgets.context_menus import add_action, make_menu
 from ui.widgets.empty_state import EmptyStateOverlay
+
+
+def _search_key(value):
+    return ''.join(unicodedata.normalize('NFKC', str(value or '')).casefold().split())
 
 
 class MethodBrowser(QWidget):
@@ -28,7 +34,7 @@ class MethodBrowser(QWidget):
         self._methods = []
 
         self._search = LineEdit(self)
-        self._search.setPlaceholderText('搜索方法…')
+        self._search.setPlaceholderText('搜索算法名称、旧名或缩写…')
         self._search.setClearButtonEnabled(True)   # 清词不用全选退格
         self._search.textChanged.connect(self._apply_filter)
 
@@ -90,10 +96,14 @@ class MethodBrowser(QWidget):
                               m.get('method_id', ''))
                 child.setData(0, Qt.ItemDataRole.UserRole + 1,
                               m.get('display_name') or m.get('name', ''))
-                # tooltip 给全名（列表宽不够时悬停可读）；原「方法ID/参数数」
-                # 是开发者视角字样（2026-10-09 深查 P3）
-                child.setToolTip(0, str(m.get('display_name')
-                                        or m.get('name', '')))
+                # 展示正式名称，说明同时保留旧名和缩写，避免改名后无法检索。
+                name = str(m.get('display_name') or m.get('name') or m.get('method_id') or '')
+                description = str(m.get('description') or '')
+                tooltip = '\n'.join(part for part in (name, description) if part)
+                child.setToolTip(0, tooltip)
+                child.setData(0, Qt.ItemDataRole.UserRole + 2, '\n'.join(
+                    str(part or '') for part in (name, m.get('name'), m.get('method_id'),
+                                                   description, cat)))
                 top.addChild(child)
 
                 row_widget = QWidget(self._tree)
@@ -102,6 +112,9 @@ class MethodBrowser(QWidget):
                 row.setSpacing(6)
                 name_label = QLabel(m.get('display_name') or m.get('name', ''),
                                     row_widget)
+                name_label.setTextFormat(Qt.TextFormat.PlainText)
+                name_label.setToolTip(tooltip)
+                name_label.setAccessibleName(name)
                 row.addWidget(name_label, 1)
                 self._tree.setItemWidget(child, 0, row_widget)
             top.setExpanded(True)
@@ -110,17 +123,15 @@ class MethodBrowser(QWidget):
 
     # ------------------------------------------------------------- 过滤
     def _apply_filter(self, text):
-        needle = (text or '').strip().lower()
+        needle = _search_key(text)
         total_hits = 0
         for i in range(self._tree.topLevelItemCount()):
             top = self._tree.topLevelItem(i)
             visible_children = 0
             for j in range(top.childCount()):
                 child = top.child(j)
-                name = (child.data(0, Qt.ItemDataRole.UserRole + 1) or '')
-                mid = (child.data(0, Qt.ItemDataRole.UserRole) or '')
-                hit = (not needle or needle in name.lower()
-                       or needle in mid.lower())
+                terms = str(child.data(0, Qt.ItemDataRole.UserRole + 2) or '')
+                hit = not needle or needle in _search_key(terms)
                 child.setHidden(not hit)
                 visible_children += int(hit)
             top.setHidden(visible_children == 0)

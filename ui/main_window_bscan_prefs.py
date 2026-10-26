@@ -56,6 +56,7 @@ class BScanPreferenceMixin:
             view.set_aspect_mode(aspect, notify=False)
             view.set_axis_modes(x_axis, y_axis, notify=False)
             view.set_colormap(cmap)
+            view.set_contrast(self.settings.get('bscan_contrast', 1.0))
             view.set_display_levels(p_low, p_high, notify=False)
             view.set_colorbar_visible(colorbar_visible, notify=False)
             view.set_gain(gain_mode, alpha=gain_alpha,
@@ -157,6 +158,7 @@ class BScanPreferenceMixin:
             self.settings.set(key, value)
         self.settings.save()
         for view in self._iter_bscan_views():
+            view.set_contrast(values.get('bscan_contrast', 1.0))
             view.set_aspect_mode(values['bscan_aspect_mode'], notify=False)
             view.set_axis_modes(values['bscan_x_axis'], values['bscan_y_axis'],
                                 notify=False)
