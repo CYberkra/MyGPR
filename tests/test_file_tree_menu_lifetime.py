@@ -2,6 +2,8 @@
 from types import SimpleNamespace as NS
 
 import pytest
+
+pytest.importorskip('PyQt6')
 from PyQt6 import sip
 from PyQt6.QtCore import QCoreApplication, QEvent
 

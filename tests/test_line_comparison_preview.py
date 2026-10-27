@@ -6,6 +6,7 @@ from threading import Thread, get_ident
 import numpy as np
 import pytest
 
+pytest.importorskip('PyQt6')
 from ui.controllers import project_controller as module
 
 

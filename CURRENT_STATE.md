@@ -50,6 +50,10 @@ mygpr
   sensor calibration templates, annotation confirmation and borehole checks, spatial exports,
   configurable report packages, and restore-to-new-project. Processing result tabs show compact
   processing actions and parameters from persisted lineage rather than opaque result names.
+- Processing supports inclusive trace-range cropping with aligned distance and sensor metadata,
+  cross-line raw/result split-screen previews, and continued processing from a selected result.
+  B-scan time axes use readable physical-time intervals; Hilbert envelope is a display-only option
+  unless the corresponding processing method is explicitly run.
 - CLI jobs use explicit `methods`; `recommended_profile` has been removed.
 - `config/architecture_policy.toml` now declares `[layers.ui]` with a migration
   exception for `desktop_backend_facade.py`.

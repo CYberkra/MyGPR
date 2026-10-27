@@ -4,6 +4,8 @@ from time import monotonic
 
 import numpy as np
 import pytest
+
+pytest.importorskip('PyQt6')
 from PyQt6.QtCore import QEvent, QPoint, QPointF, QRectF, Qt
 from PyQt6.QtGui import QMouseEvent
 from PyQt6.QtTest import QTest

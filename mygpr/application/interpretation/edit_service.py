@@ -166,7 +166,7 @@ class InterpretationEditService:
             project_id=project_id,
             line_id=line_id,
             input_artifact_id=input_artifact_id,
-            source_shape=tuple(int(value) for value in info.shape),
+            source_shape=(int(info.shape[0]), int(info.shape[1])),
             initial=current,
             current=current,
             undo_stack=[],

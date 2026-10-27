@@ -11,12 +11,10 @@ import_requested payload：{'preflight': bool, 'source', 'line_id', 'name', 'die
 sync_requested payload：{'line_id', 'paths': {'rtk', 'imu', 'altimeter', 'trace_timestamps'}}
 """
 
-import os
-
 from PyQt6.QtCore import QSize, Qt, QSettings, QUrl, pyqtSignal
 from PyQt6.QtGui import QBrush, QColor, QDesktopServices, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
-    QApplication, QDialog, QHBoxLayout, QSizePolicy, QSplitter,
+    QDialog, QHBoxLayout, QSizePolicy, QSplitter,
     QStackedWidget, QTabWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
@@ -27,7 +25,7 @@ from qfluentwidgets import (
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants, file_dialogs
-from ui.icons import RESULT_DELETE, result_delete_icon
+from ui.icons import RESULT_DELETE
 from ui.page_scaffold import make_card, make_form_row, make_hint
 from ui.pages.project_visuals import (
     LineDetailsPanel, apply_project_theme, configure_ledger_table,
@@ -375,7 +373,7 @@ class ProjectPage(QWidget):
         self._lines_table.setContextMenuPolicy(
             Qt.ContextMenuPolicy.CustomContextMenu)
         self._lines_table.customContextMenuRequested.connect(
-            self._on_lines_context_menu)
+            lambda pos: self._identity.on_lines_context_menu(pos))
         lines_layout.addWidget(self._lines_table)
         splitter.addWidget(lines_card)
 
@@ -444,7 +442,7 @@ class ProjectPage(QWidget):
         self._artifacts_table.setContextMenuPolicy(
             Qt.ContextMenuPolicy.CustomContextMenu)
         self._artifacts_table.customContextMenuRequested.connect(
-            self._on_artifacts_context_menu)
+            lambda pos: self._identity.on_artifacts_context_menu(pos))
         art_layout.addWidget(self._artifacts_table)
         art_btn_row = QHBoxLayout()
         # 本页已无 B-Scan 预览（见模块文档），按钮实为"跳到处理页去看"，
@@ -873,56 +871,6 @@ class ProjectPage(QWidget):
         if str(line_id) == self._current_line_id:
             self._update_action_state()
 
-    # ------------------------------------------------------------ 右键菜单
-    def _on_lines_context_menu(self, pos) -> None:
-        row = self._lines_table.rowAt(pos.y())
-        if row < 0 or row >= len(self._lines):
-            return
-        if not self._lines_table.selectionModel().isRowSelected(row, self._lines_table.rootIndex()):
-            self._lines_table.selectRow(row)
-        line_id = str(getattr(self._lines[row], 'line_id', '') or '')
-        if not line_id:
-            return
-        source = self._source_path_cache.get(line_id)
-        menu = make_menu(self)
-        single = len(self._lines_table.selectionModel().selectedRows()) == 1
-        add_action(menu, FIF.DEVELOPER_TOOLS, '处理该测线（跳转处理页）',
-                   lambda: self.line_process_requested.emit(line_id), enabled=single and not self._busy)
-        self._identity.add_line_rename(menu,line_id,single=single)
-        add_action(menu, FIF.SYNC, '传感器同步…', self.show_sensor_tool,
-                   enabled=single and self._can_write())
-        add_action(menu, FIF.DELETE, '删除所选测线',
-                   self._on_delete_selected_lines, enabled=self._can_write())
-        menu.addSeparator()
-        add_action(menu, FIF.COPY, '复制数据文件路径',
-                   lambda: QApplication.clipboard().setText(source),
-                   enabled=bool(source))
-        add_action(menu, FIF.FOLDER, '打开数据所在文件夹',
-                   lambda: self._open_source_folder(source),
-                   enabled=bool(source))
-        menu.addSeparator()
-        add_action(menu, None, '复制测线号',
-                   lambda: QApplication.clipboard().setText(line_id))
-        menu.exec(self._lines_table.viewport().mapToGlobal(pos))
-
-    @staticmethod
-    def _open_source_folder(source: str) -> None:
-        folder = os.path.dirname(str(source))
-        if folder:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
-
-    def _on_artifacts_context_menu(self, pos) -> None:
-        row = self._artifacts_table.rowAt(pos.y())
-        if row < 0 or row >= len(self._artifacts):
-            return
-        self._artifacts_table.selectRow(row)
-        menu = make_menu(self)
-        add_action(menu, FIF.VIEW, '在处理页查看',
-                   self._emit_artifact_preview)
-        add_action(menu, result_delete_icon(), '删除所选成果',
-                   self._on_artifacts_context_delete, enabled=self._can_write())
-        menu.exec(self._artifacts_table.viewport().mapToGlobal(pos))
-
     def _on_line_selection_changed(self) -> None:
         if self._filling_table:
             self._current_line_id = ''
@@ -985,15 +933,6 @@ class ProjectPage(QWidget):
         if not line_id:
             return
         self.artifact_delete_requested.emit(line_id, [artifact_id])
-
-    def _on_artifacts_context_delete(self) -> None:
-        """右键删除所选成果（级联确认在 coordinator）。"""
-        row = self._artifacts_table.currentRow()
-        if row < 0 or row >= len(self._artifacts):
-            return
-        artifact_id = str(getattr(self._artifacts[row], 'artifact_id', '') or '')
-        if artifact_id:
-            self._on_artifact_delete_clicked(artifact_id)
 
     # ------------------------------------------------------------- 批量删除 / 列宽记忆
     def _on_delete_selected_lines(self) -> None:

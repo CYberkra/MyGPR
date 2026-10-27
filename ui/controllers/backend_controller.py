@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 PROJECT_BUSY_MESSAGE = "项目正被其他任务占用，请稍后重试"
+EXPECTED_BACKEND_ERRORS = (AttributeError, ImportError, OSError, RuntimeError, TypeError, ValueError, KeyError)
 
 
 class WorkerCommand(Protocol):

@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Iterator, Mapping, Protocol, Sequence
+from typing import Any, Iterator, Mapping, Protocol, Sequence, TypedDict
 
 import numpy as np
 
@@ -28,6 +28,16 @@ from mygpr.domain.project.models import (
     ProjectMetadata, LineQualityReport, SourceFileStatus, LineDeleteResult, BatchImportSummary,
     ArtifactDeleteResult,
 )
+
+
+class WindowOptions(TypedDict, total=False):
+    sample_start: int
+    sample_end: int | None
+    trace_start: int
+    trace_end: int | None
+    max_samples: int
+    max_traces: int
+    normalize: bool
 
 
 class ProjectSessionPort(Protocol):
@@ -323,4 +333,4 @@ class ProjectRepositoryPort(Protocol):
     ) -> ProjectRestore: ...
 
 
-__all__ = ["ProjectRepositoryPort", "ProjectSessionPort"]
+__all__ = ["ProjectRepositoryPort", "ProjectSessionPort", "WindowOptions"]

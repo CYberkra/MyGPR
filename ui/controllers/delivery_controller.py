@@ -8,7 +8,7 @@ from typing import Any
 
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
 
-from ui.controllers.backend_controller import friendly_error_message, run_command
+from ui.controllers.backend_controller import EXPECTED_BACKEND_ERRORS, friendly_error_message, run_command
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -64,7 +64,7 @@ class DeliveryController(QObject):
             return None
         try:
             job_id = submit(backend)
-        except Exception as exc:  # noqa: BLE001
+        except EXPECTED_BACKEND_ERRORS as exc:
             self.log_message.emit(f"{title}提交失败：{friendly_error_message(exc)}")
             return None
         self.log_message.emit(f"{title}已提交")
@@ -246,7 +246,7 @@ class _SpatialRefreshCommand(_DeliveryReadCommand):
             return
         try:
             results = list(backend.spatial.list_results(str(self._project_id)))
-        except Exception as exc:  # noqa: BLE001
+        except EXPECTED_BACKEND_ERRORS as exc:
             self._publish("log_message", f"刷新空间成果失败：{friendly_error_message(exc)}")
         else:
             self._publish("spatial_results_updated", results)
@@ -267,7 +267,7 @@ class _SpatialCurrentCommand(_SpatialRefreshCommand):
             return
         try:
             backend.spatial.set_current(self._project_id, self._result_id)
-        except Exception as exc:  # noqa: BLE001
+        except EXPECTED_BACKEND_ERRORS as exc:
             self._publish("log_message", f"设置当前空间成果失败：{friendly_error_message(exc)}")
         else:
             super().execute()
@@ -286,7 +286,7 @@ class _ReportsRefreshCommand(_DeliveryReadCommand):
         try:
             packages = list(
                 backend.projects.list_report_packages(str(self._project_id)))
-        except Exception as exc:  # noqa: BLE001
+        except EXPECTED_BACKEND_ERRORS as exc:
             self._publish("log_message", f"刷新项目报告列表失败：{friendly_error_message(exc)}")
         else:
             self._publish("report_list_updated", packages)

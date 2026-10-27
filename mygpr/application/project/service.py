@@ -12,7 +12,7 @@ import numpy as np
 
 from mygpr.application.jobs.context import ExecutionContext
 from mygpr.domain.project.result_package import ProcessingResultPackage
-from mygpr.application.project.ports import ProjectRepositoryPort, ProjectSessionPort
+from mygpr.application.project.ports import ProjectRepositoryPort, ProjectSessionPort, WindowOptions
 from mygpr.application.project.errors import ProjectApplicationError, ProjectBusyError
 from mygpr.application.project.identity import ProjectIdentityServiceMixin
 from mygpr.domain.reporting.models import ReportPackage
@@ -315,7 +315,7 @@ class ProjectService(ProjectIdentityServiceMixin):
         self,
         project_id: str,
         line_id: str,
-        **kwargs: object,
+        **kwargs: WindowOptions,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         return self._session(project_id).read_window(line_id, **kwargs)
 
@@ -351,7 +351,7 @@ class ProjectService(ProjectIdentityServiceMixin):
         project_id: str,
         line_id: str,
         artifact_id: str,
-        **kwargs: object,
+        **kwargs: WindowOptions,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         return self._session(project_id).read_artifact_window(
             line_id, artifact_id, **kwargs

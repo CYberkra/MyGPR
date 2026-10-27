@@ -56,9 +56,9 @@ from mygpr.domain.project.models import (
 
 def _report_legacy_progress(
     context: ExecutionContext,
-    first: object,
-    second: object,
-    third: object,
+    first: Any,
+    second: Any,
+    third: Any,
 ) -> None:
     """Bridge historical (stage,done,total) and (done,total,message) callbacks."""
     if isinstance(first, str):
@@ -300,7 +300,7 @@ class LegacyFieldProjectSession(
             dataset = self._store.load_gpr_dataset(safe)
             return LineDatasetInfo(
                 line_id=safe,
-                shape=tuple(int(value) for value in dataset.matrix.shape),
+                shape=(int(dataset.matrix.shape[0]), int(dataset.matrix.shape[1])),
                 dtype=str(dataset.matrix.dtype),
                 length_m=dataset.length_m,
                 time_window_ns=dataset.time_window_ns,
@@ -529,7 +529,7 @@ class LegacyFieldProjectSession(
             metadata["artifact_id"] = safe_artifact
             return LineDatasetInfo(
                 line_id=safe_line,
-                shape=tuple(int(value) for value in dataset.matrix.shape),
+                shape=(int(dataset.matrix.shape[0]), int(dataset.matrix.shape[1])),
                 dtype=str(dataset.matrix.dtype),
                 length_m=dataset.length_m,
                 time_window_ns=dataset.time_window_ns,

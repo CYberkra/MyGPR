@@ -1,9 +1,11 @@
 """Use the real Fluent popup and Qt pointer events; only the OS drag loop is stubbed."""
+import pytest
+
+pytest.importorskip('PyQt6')
 from PyQt6 import sip
 from PyQt6.QtCore import QCoreApplication, QEvent, QMimeData, QPointF, Qt
 from PyQt6.QtGui import QMouseEvent
 from PyQt6.QtTest import QTest
-import pytest
 
 from ui.widgets import line_drag_combo as module
 

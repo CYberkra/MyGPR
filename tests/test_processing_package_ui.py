@@ -3,6 +3,8 @@ from types import SimpleNamespace as NS
 from unittest.mock import MagicMock
 
 import pytest
+
+pytest.importorskip('PyQt6')
 from PyQt6.QtCore import QObject, QPoint, pyqtSignal
 
 from ui.coordinator_project import ProjectChain

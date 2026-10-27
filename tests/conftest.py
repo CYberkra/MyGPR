@@ -109,4 +109,7 @@ def qapp():
     from ui import constants
     from ui.theme_helpers import apply_theme
     apply_theme(constants.THEME_LIGHT)
-    return app
+    yield app
+    from PyQt6.QtCore import QCoreApplication, QEvent
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    app.processEvents()

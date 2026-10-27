@@ -2,7 +2,11 @@
 import json
 
 from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QTreeWidgetItem
 from qfluentwidgets import InfoBar, InfoBarPosition
+
+from ui.file_tree import artifact_parameters
+from ui.result_presentation import describe_artifact
 
 
 class ProcessingSteps:
@@ -344,3 +348,109 @@ class ProcessingSteps:
                         orient=Qt.Orientation.Horizontal, isClosable=True,
                         position=InfoBarPosition.TOP, duration=2000,
                         parent=self)
+
+    def set_artifacts(self, artifacts):
+        self._stash_draft()
+        self._artifacts_by_id = {str(a.artifact_id): a for a in artifacts or [] if getattr(a, 'artifact_id', '')}
+        raw = self._sources.get('original')
+        old = self._sources
+        self._sources = {'original': raw} if raw else {}
+        for aid, art in self._artifacts_by_id.items():
+            key = 'artifact:' + aid
+            presentation = describe_artifact(art, self._artifacts_by_id)
+            revision = str(getattr(art, 'sha256', '') or '')
+            previous = old.get(key, {})
+            changed = bool(previous and previous.get('revision', '') != revision)
+            self._sources[key] = {'key': key, 'title': presentation.tab_title,
+                                  'tooltip': presentation.tooltip, 'artifact_id': aid,
+                                  'presentation': presentation,
+                                  'revision': revision,
+                                  'bundle': None if changed else previous.get('bundle')}
+            if changed:
+                self._preview_requested.discard(aid)
+                self._sources[key]['error'] = '数据修订已变化，重新加载预览'
+            elif previous.get('error'):
+                self._sources[key]['error'] = previous['error']
+        self._sync_sources()
+        changed_sources = [key for key in self._sources
+                           if old.get(key) and old[key].get('revision', '') != self._sources[key].get('revision', '')]
+        for key in changed_sources:
+            self._sources[key].pop('error', None)
+        if changed_sources:
+            self._sync_sources()
+        self._activate_source(self._workspace.active_key())
+        self._render_trees()
+        self._restore_workspace()
+        pending = self._completion_pending
+        if pending and pending['key'][:2] == (self._project_id, self._line_id):
+            expected = str(pending.get('result_id') or '')
+            candidates = [a for aid, a in self._artifacts_by_id.items()
+                          if (aid == expected if expected else aid not in pending['artifacts']
+                          and artifact_parameters(a).get('run_input_artifact_id') == pending['input_artifact_id'])]
+            if candidates:
+                final = max(candidates, key=lambda a: (str(getattr(a, 'created_at', '')),
+                            int(artifact_parameters(a).get('run_step_index') or 0)))
+                self._completed_artifact = str(final.artifact_id)
+                self._completion_pending = None
+                if pending['activate'] and pending['epoch'] == self._activation_epoch and self._selected_source_key:
+                    if pending.get('pipeline', {}).get('save_intermediates'):
+                        run_group = str(artifact_parameters(final).get('run_group_id') or '')
+                        members = [a for a in self._artifacts_by_id.values()
+                                   if artifact_parameters(a).get('run_group_id') == run_group]
+                        members.sort(key=lambda a: int(artifact_parameters(a).get('run_step_index') or 0))
+                        for artifact in members:
+                            self._workspace.open_source(f'artifact:{artifact.artifact_id}')
+                    self.select_artifact(self._completed_artifact)
+                else:
+                    self._completion_btn.show()
+        self._refresh_ui()
+
+    def _render_trees(self):
+        from ui.pages import processing_page
+
+        self._lineage_tree.clear()
+        pending = [(None, node) for node in reversed(processing_page.build_lineage_model(
+            list(self._artifacts_by_id.values()), self._line_id))]
+        while pending:
+            parent, node = pending.pop()
+            text = node.text + (f' · {node.suffix}' if node.suffix else '')
+            item = QTreeWidgetItem([text])
+            key = 'original' if node.kind == 'raw' else 'artifact:' + node.payload if node.kind == 'artifact' else ''
+            item.setData(0, Qt.ItemDataRole.UserRole, key)
+            item.setToolTip(0, node.tooltip)
+            (parent.addChild if parent else self._lineage_tree.addTopLevelItem)(item)
+            pending.extend((item, child) for child in reversed(node.children))
+            item.setExpanded(node.kind in ('raw', 'group') or bool(key and key == self._selected_source_key))
+        self._history_tree.clear()
+        groups = {}
+        for aid, art in self._artifacts_by_id.items():
+            meta = artifact_parameters(art)
+            group = str(meta.get('run_group_id') or '历史成果 · 来源待核对')
+            groups.setdefault(group, []).append((aid, art))
+        for group, members in groups.items():
+            parent = QTreeWidgetItem([group[:12]])
+            parent.setData(0, Qt.ItemDataRole.UserRole + 1, group)
+            self._history_tree.addTopLevelItem(parent)
+            for aid, art in sorted(members, key=lambda pair: int(artifact_parameters(pair[1]).get('run_step_index') or 0)):
+                item = QTreeWidgetItem([self._sources['artifact:' + aid]['title']])
+                item.setData(0, Qt.ItemDataRole.UserRole, 'artifact:' + aid)
+                parent.addChild(item)
+
+    def _open_tree_item(self, item, _column):
+        key = item.data(0, Qt.ItemDataRole.UserRole)
+        if key:
+            self._workspace.open_source(str(key))
+
+    def select_artifact(self, artifact_id):
+        key = 'artifact:' + str(artifact_id)
+        if key not in self._sources:
+            return False
+        self._workspace.open_source(key)
+        return True
+
+    def has_artifact(self, artifact_id):
+        return str(artifact_id) in self._artifacts_by_id
+
+    def select_original(self):
+        if 'original' in self._sources:
+            self._workspace.open_source('original')

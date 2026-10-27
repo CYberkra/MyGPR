@@ -4,13 +4,16 @@
 from __future__ import annotations
 
 from pathlib import Path
+from threading import RLock
 from typing import Any, Mapping, Sequence
 
 import numpy as np
 
 from core.field_project_models import validate_line_id
+from core.field_project_store import FieldProjectStore
 from core.gui_rendering import align_trace_vector
 from core.spatial_result_versions import SpatialResultVersionService
+from mygpr.domain.project.models import LineDatasetInfo, ProjectLine
 from mygpr.domain.spatial.models import SpatialResult, SpatialTrack, SpatialTrackPoint
 
 _TRACE_ALTITUDE_KEYS = ("local_z_m", "elevation_m", "altitude_m", "z")
@@ -59,6 +62,15 @@ def _spatial_record(value: Any) -> SpatialResult:
 
 class SpatialPersistenceMixin:
     """Project-session spatial operations using the formal result-version store."""
+
+    _store: FieldProjectStore
+    _lock: RLock
+
+    def list_lines(self) -> Sequence[ProjectLine]: ...
+    def read_trace_metadata(self, line_id: str) -> Mapping[str, np.ndarray]: ...
+    def get_line(self, line_id: str) -> ProjectLine: ...
+    def get_dataset_info(self, line_id: str) -> LineDatasetInfo: ...
+    def _validated_line(self, line_id: str) -> str: ...
 
     def load_spatial_tracks(self) -> Sequence[SpatialTrack]:
         coordinate_system = str(self._store.manifest.coordinate_system or "")

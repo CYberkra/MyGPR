@@ -2,10 +2,12 @@
 from unittest.mock import MagicMock
 from types import SimpleNamespace as NS
 
+import pytest
+
+pytest.importorskip('PyQt6')
 from PyQt6.QtCore import QPoint, QTimer, Qt
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QDialog, QHBoxLayout, QStackedWidget, QVBoxLayout, QWidget
-import pytest
 import numpy as np
 
 from ui import dialogs

@@ -1,6 +1,8 @@
 from types import SimpleNamespace
 import numpy as np
 import pytest
+
+pytest.importorskip('PyQt6')
 from PyQt6.QtCore import QMimeData, QUrl
 
 

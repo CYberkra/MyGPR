@@ -51,3 +51,26 @@ class SpatialContextMenuMixin:
                       enabled=bool(self._tracks) and self._active_view_key() == self._line_menu_map_key,
                       reason='请先切换有轨迹的平面地图')
         return menu
+
+    def _on_set_current_clicked(self) -> None:
+        line_id = self._selected_line_id()
+        if line_id:
+            self.current_line_requested.emit(line_id)
+
+    def _on_depth_slider_changed(self, value: int) -> None:
+        depth_m = value / 100.0
+        self._depth_value_label.setText(f'深度: {depth_m:.2f} m')
+        self._depth_view.set_isoline(depth_m)
+
+    def _on_depth_cell_changed(self, _value):
+        self.clear_depth_grid()
+        checked = [str(t.line_id) for t in self._checked_tracks()]
+        if checked:
+            self.depth_preview_requested.emit(checked, float(self._depth_cell_spin.value()))
+
+    def _on_save_depth_layer_clicked(self) -> None:
+        line_ids = list(self._depth_payload_line_ids)
+        if not line_ids or self._depth_view.value_range() is None:
+            return
+        self.save_depth_layer_requested.emit(
+            line_ids, float(self._depth_cell_spin.value()))

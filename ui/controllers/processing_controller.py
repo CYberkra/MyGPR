@@ -15,7 +15,7 @@ from ui.desktop_backend_facade import (
     pipeline_from_dicts,
     pipeline_to_raw,
 )
-from ui.controllers.backend_controller import friendly_error_message, run_command
+from ui.controllers.backend_controller import EXPECTED_BACKEND_ERRORS, friendly_error_message, run_command
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -114,7 +114,7 @@ class ProcessingController(QObject):
         try:
             entries = method_catalog()
             methods = build_method_dicts(entries)
-        except Exception as exc:  # noqa: BLE001
+        except EXPECTED_BACKEND_ERRORS as exc:
             self.log_message.emit(f"加载方法库失败：{friendly_error_message(exc)}")
         else:
             self.methods_loaded.emit(methods)
@@ -168,7 +168,7 @@ class ProcessingController(QObject):
                 name=str(result_name or dict(pipeline_def or {}).get("name", "")),
             )
             pipeline = pipeline_to_raw(ui_pipeline)
-        except Exception as exc:  # noqa: BLE001
+        except EXPECTED_BACKEND_ERRORS as exc:
             message = friendly_error_message(exc)
             self.log_message.emit(f"处理链定义无效：{message}")
             self.run_context_finished.emit('', False, message)
@@ -183,7 +183,7 @@ class ProcessingController(QObject):
                 input_artifact_id=str(input_artifact_id or ""),
                 save_intermediates=bool(save_intermediates),
             )
-        except Exception as exc:  # noqa: BLE001
+        except EXPECTED_BACKEND_ERRORS as exc:
             message = friendly_error_message(exc)
             self.log_message.emit(f"处理链提交失败：{message}")
             self.run_context_finished.emit('', False, message)
@@ -277,7 +277,7 @@ class _EstimatePipelineCommand:
                 input_artifact_id=self._input_artifact_id,
                 save_intermediates=self._save_intermediates,
             )
-        except Exception as exc:  # noqa: BLE001
+        except EXPECTED_BACKEND_ERRORS as exc:
             c.estimate_failed.emit(self._token, friendly_error_message(exc))
         else:
             c.estimate_finished.emit(self._token, estimate)
@@ -333,7 +333,7 @@ class _AutotuneSubmitCommand:
             if self._params_hint:
                 kwargs["candidate_params"] = [dict(self._params_hint)]
             job_id = backend.submit_autotune(data, self._method_id, **kwargs)
-        except Exception as exc:  # noqa: BLE001
+        except EXPECTED_BACKEND_ERRORS as exc:
             message = friendly_error_message(exc)
             c.log_message.emit(f"自动调参提交失败：{message}")
             c.autotune_failed.emit(self._method_id, message)
@@ -391,7 +391,7 @@ class _VelocitySubmitCommand:
                 self._line_id,
                 [{"trace_index": t, "sample_index": s} for t, s in self._picks],
             )
-        except Exception as exc:  # noqa: BLE001
+        except EXPECTED_BACKEND_ERRORS as exc:
             message = friendly_error_message(exc)
             c.log_message.emit(f"速度分析提交失败：{message}")
             c.velocity_failed.emit(

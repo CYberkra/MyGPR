@@ -1,11 +1,15 @@
 """Small rename/move entry points; this page helper never writes project data."""
 
-from PyQt6.QtCore import QObject, Qt, pyqtSignal
-from PyQt6.QtGui import QKeySequence, QShortcut
+import os
+
+from PyQt6.QtCore import QObject, Qt, QUrl, pyqtSignal
+from PyQt6.QtGui import QDesktopServices, QKeySequence, QShortcut
+from PyQt6.QtWidgets import QApplication
 from qfluentwidgets import FluentIcon as FIF
 
 from ui.dialogs import ask_display_name, ask_project_destination
-from ui.widgets.context_menus import add_action
+from ui.icons import result_delete_icon
+from ui.widgets.context_menus import add_action, make_menu
 
 
 class ProjectIdentityUi(QObject):
@@ -89,3 +93,60 @@ class ProjectIdentityUi(QObject):
         target = ask_project_destination(self.page, str(self.page._summary.root_path))
         if target and project_id == self._project_id() and self._can_write():
             self.relocation_requested.emit(project_id, target)
+
+    def on_lines_context_menu(self, pos) -> None:
+        page = self.page
+        row = page._lines_table.rowAt(pos.y())
+        if row < 0 or row >= len(page._lines):
+            return
+        if not page._lines_table.selectionModel().isRowSelected(row, page._lines_table.rootIndex()):
+            page._lines_table.selectRow(row)
+        line_id = str(getattr(page._lines[row], 'line_id', '') or '')
+        if not line_id:
+            return
+        source = page._source_path_cache.get(line_id)
+        menu = make_menu(page)
+        single = len(page._lines_table.selectionModel().selectedRows()) == 1
+        add_action(menu, FIF.DEVELOPER_TOOLS, '处理该测线（跳转处理页）',
+                   lambda: page.line_process_requested.emit(line_id), enabled=single and not page._busy)
+        self.add_line_rename(menu, line_id, single=single)
+        add_action(menu, FIF.SYNC, '传感器同步…', page.show_sensor_tool,
+                   enabled=single and self._can_write())
+        add_action(menu, FIF.DELETE, '删除所选测线',
+                   page._on_delete_selected_lines, enabled=self._can_write())
+        menu.addSeparator()
+        add_action(menu, FIF.COPY, '复制数据文件路径',
+                   lambda: QApplication.clipboard().setText(source), enabled=bool(source))
+        add_action(menu, FIF.FOLDER, '打开数据所在文件夹',
+                   lambda: self.open_source_folder(source), enabled=bool(source))
+        menu.addSeparator()
+        add_action(menu, None, '复制测线号',
+                   lambda: QApplication.clipboard().setText(line_id))
+        menu.exec(page._lines_table.viewport().mapToGlobal(pos))
+
+    @staticmethod
+    def open_source_folder(source: str) -> None:
+        folder = os.path.dirname(str(source))
+        if folder:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
+
+    def on_artifacts_context_menu(self, pos) -> None:
+        page = self.page
+        row = page._artifacts_table.rowAt(pos.y())
+        if row < 0 or row >= len(page._artifacts):
+            return
+        page._artifacts_table.selectRow(row)
+        menu = make_menu(page)
+        add_action(menu, FIF.VIEW, '在处理页查看', page._emit_artifact_preview)
+        add_action(menu, result_delete_icon(), '删除所选成果',
+                   self.on_artifacts_context_delete, enabled=self._can_write())
+        menu.exec(page._artifacts_table.viewport().mapToGlobal(pos))
+
+    def on_artifacts_context_delete(self) -> None:
+        page = self.page
+        row = page._artifacts_table.currentRow()
+        if row < 0 or row >= len(page._artifacts):
+            return
+        artifact_id = str(getattr(page._artifacts[row], 'artifact_id', '') or '')
+        if artifact_id:
+            page._on_artifact_delete_clicked(artifact_id)
