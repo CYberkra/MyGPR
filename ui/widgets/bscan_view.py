@@ -51,6 +51,7 @@ from ui.widgets.bscan_axes import (
     distance_available,
     distance_tick_strings,
     elevation_tick_strings,
+    physical_time_ticks,
 )
 from ui.widgets.bscan_view_data import (BScanViewDataMixin, DEFAULT_P_LOW as DEFAULT_P_LOW, DEFAULT_P_HIGH as DEFAULT_P_HIGH, _restored_levels as _restored_levels)
 from ui.widgets.bscan_view_fullscreen import BScanViewFullscreenMixin
@@ -196,7 +197,7 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
         # "B-Scan图像"由卡头承担，不再双标题（评审 P1-4）。
         # 横/纵轴换成 IndexAxis：索引坐标不变，只在刻度文本层做单位换算
         self._bottom_axis = IndexAxis('bottom', self._convert_bottom_ticks)
-        self._left_axis = IndexAxis('left', self._convert_left_ticks)
+        self._left_axis = IndexAxis('left', self._convert_left_ticks, self._left_tick_values)
         self._plot = self._glw.addPlot(
             row=0, col=0,
             axisItems={'bottom': self._bottom_axis, 'left': self._left_axis})
@@ -430,6 +431,12 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
         if self._x_axis != 'distance':
             return None
         return distance_tick_strings(values, self._trace_axis_m)
+
+    def _left_tick_values(self, levels, min_val, max_val, _size):
+        axis = self._time_axis_for_view()
+        if axis is None:
+            return None
+        return physical_time_ticks(axis, levels, min_val, max_val)
 
     def _convert_left_ticks(self, values, scale, spacing):
         """纵轴刻度换算：海拔模式行号直接查共享海拔轴，否则回落默认。"""

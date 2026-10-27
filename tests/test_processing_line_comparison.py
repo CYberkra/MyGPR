@@ -3,6 +3,8 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+
+pytest.importorskip('PyQt6')
 from PyQt6.QtCore import QPoint, QPointF, Qt
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent
 from PyQt6.QtWidgets import QApplication
@@ -260,3 +262,14 @@ def test_cross_line_drop_includes_raw_and_saved_processing_results(page):
     token = manager.pending[source['key']]
     manager.deliver_artifact('P', 'L02', 'A', token, bundle(8), '')
     assert source['bundle'].matrix.max() == 8
+
+
+def test_cross_line_artifact_can_become_processing_input(page):
+    manager = comparison(page)
+    assert drop(page, 'L02')
+    manager.set_artifacts('L02', [artifact('A')])
+    key = next(key for key in manager.sources if key.endswith(':artifact:A'))
+    focused = []
+    page.artifact_focus_requested.connect(lambda *args: focused.append(args))
+    assert manager.make_input(key)
+    assert focused == [('L02', 'A')]

@@ -115,6 +115,30 @@ def test_time_ticks_are_physical_ns_not_sample_indices(qapp):
         v.close()
 
 
+def test_full_time_axis_uses_round_ns_tick_positions(qapp):
+    v, _ = make_view(qapp)
+    try:
+        levels = v._left_axis.tickValues(0, 501, 500)
+        major = levels[0][1]
+        times = np.interp(major, np.arange(501) + 0.5, np.linspace(0, 900, 501))
+        assert 200.0 in times
+        assert np.allclose(times / 200.0, np.round(times / 200.0), atol=1e-6)
+    finally:
+        v.close()
+
+
+def test_zoomed_time_axis_keeps_round_ns_ticks(qapp):
+    v, _ = make_view(qapp)
+    try:
+        assert v.set_view_time_window(36, 180)
+        levels = v._left_axis.tickValues(20.5, 100.5, 500)
+        major = levels[0][1]
+        times = np.interp(major, np.arange(501) + 0.5, np.linspace(0, 900, 501))
+        np.testing.assert_allclose(times, [50.0, 100.0, 150.0], atol=1e-6)
+    finally:
+        v.close()
+
+
 def test_custom_dialog_and_internal_refit_keep_selected_time(qapp):
     from PyQt6.QtCore import QTimer
     from ui.widgets.bscan_time_window import TimeWindowDialog

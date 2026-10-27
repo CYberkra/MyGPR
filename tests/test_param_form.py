@@ -80,6 +80,11 @@ class TestParamFormTypes:
         assert form.values()['filter_type'] == 'lowpass'
         assert form.values()['normalize'] is True
 
+    def test_controls_use_consistent_comfortable_metrics(self, qapp):
+        form = _make_form(_SCHEMA[:4])
+        assert form._layout.spacing() == 8
+        assert all(editor.minimumHeight() >= 34 for editor in form._editors.values())
+
 
 class TestParamFormFallback:
     def test_unknown_type_falls_back_without_crash(self, qapp):

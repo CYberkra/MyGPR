@@ -75,7 +75,16 @@ class TestPopupWindowContract:
     def test_non_modal_tool_window(self, popup):
         assert popup.isModal() is False
         assert popup.windowFlags() & Qt.WindowType.Tool
-        assert popup.width() == 380            # Q4 定案宽度
+        assert popup.width() == 420
+
+    def test_fade_respects_windows_animation_setting(self, popup, qapp, monkeypatch):
+        from ui import motion
+
+        monkeypatch.setattr(motion, 'animations_enabled', lambda: False)
+        popup.show()
+        qapp.processEvents()
+        assert popup.windowOpacity() == 1.0
+        assert popup._opacity_animation.state() == popup._opacity_animation.State.Stopped
 
     def test_all_actions_have_tooltips(self, popup):
         for name, btn in popup._action_buttons.items():

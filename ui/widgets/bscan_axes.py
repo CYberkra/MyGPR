@@ -50,6 +50,7 @@ __all__ = [
     'distance_tick_strings',
     'elevation_available',
     'elevation_tick_strings',
+    'physical_time_ticks',
     'sample_unit_label',
     'tick_index',
 ]
@@ -195,6 +196,40 @@ def elevation_tick_strings(values, elev_axis: Any) -> list[str] | None:
             for value in values]
 
 
+def _nice_interval(value: float) -> float:
+    if not math.isfinite(value) or value <= 0:
+        return 0.0
+    magnitude = 10.0 ** math.floor(math.log10(value))
+    candidates = [magnitude, 2.0 * magnitude, 5.0 * magnitude, 10.0 * magnitude]
+    return min(candidates, key=lambda item: abs(math.log(item / value)))
+
+
+def physical_time_ticks(axis: Any, levels: list, min_val: float, max_val: float) -> list | None:
+    values = np.asarray(axis, dtype=np.float64)
+    if values.ndim != 1 or values.size < 2 or not np.all(np.diff(values) > 0):
+        return None
+    row_axis = np.arange(values.size, dtype=np.float64) + 0.5
+    mean_step = float((values[-1] - values[0]) / (values.size - 1))
+    physical_min = float(np.interp(min_val, row_axis, values))
+    physical_max = float(np.interp(max_val, row_axis, values))
+    low, high = sorted((physical_min, physical_max))
+    converted = []
+    for index_step, index_values in levels:
+        if not index_values:
+            continue
+        step = _nice_interval(mean_step * float(index_step))
+        if step <= 0:
+            continue
+        first = math.ceil((low - step * 1e-9) / step) * step
+        tick_times = np.arange(first, high + step * 1e-9, step, dtype=np.float64)
+        positions = np.interp(tick_times, values, row_axis)
+        positions = positions[(positions >= min(min_val, max_val) - 1e-7)
+                              & (positions <= max(min_val, max_val) + 1e-7)]
+        if positions.size:
+            converted.append((step, positions.tolist()))
+    return converted or None
+
+
 class IndexAxis(pg.AxisItem):
     """索引坐标 → 物理单位 的刻度格式化轴（BScanView 横轴/纵轴共用）。
 
@@ -216,13 +251,19 @@ class IndexAxis(pg.AxisItem):
     """
 
     def __init__(self, orientation: str,
-                 converter: Callable[[Any, float, float], list[str] | None]):
+                 converter: Callable[[Any, float, float], list[str] | None],
+                 values_provider: Callable | None = None):
         super().__init__(orientation)
         self._converter = converter
+        self._values_provider = values_provider
 
     def tickValues(self, minVal, maxVal, size):  # noqa: N802, N803 - pyqtgraph 命名
         """父类结果里剔除「空 values」的刻度级（见类 docstring 的崩溃成因）。"""
         levels = super().tickValues(minVal, maxVal, size)
+        if self._values_provider is not None:
+            converted = self._values_provider(levels, minVal, maxVal, size)
+            if converted is not None:
+                return converted
         return [(spacing, values) for spacing, values in levels if values]
 
     def invalidate(self) -> None:

@@ -9,12 +9,14 @@ tooltip 显示全名、作用说明和检索别名。
 
 import unicodedata
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, pyqtSignal
+from PyQt6.QtGui import QBrush, QColor, QFont
 from PyQt6.QtWidgets import (QApplication, QHBoxLayout, QTreeWidget,
                              QTreeWidgetItem, QVBoxLayout, QWidget, QLabel)
 from qfluentwidgets import LineEdit
 from qfluentwidgets import FluentIcon as FIF
 
+from ui import design_tokens
 from ui.widgets.context_menus import add_action, make_menu
 from ui.widgets.empty_state import EmptyStateOverlay
 
@@ -34,13 +36,18 @@ class MethodBrowser(QWidget):
         self._methods = []
 
         self._search = LineEdit(self)
+        self._search.setObjectName('methodSearch')
         self._search.setPlaceholderText('搜索算法名称、旧名或缩写…')
-        self._search.setClearButtonEnabled(True)   # 清词不用全选退格
+        self._search.setClearButtonEnabled(True)
+        self._search.setFixedHeight(36)
         self._search.textChanged.connect(self._apply_filter)
 
         self._tree = QTreeWidget(self)
+        self._tree.setObjectName('methodTree')
         self._tree.setHeaderHidden(True)
         self._tree.setColumnCount(1)
+        self._tree.setIndentation(18)
+        self._tree.setUniformRowHeights(False)
         self._tree.currentItemChanged.connect(self._on_current_changed)
         self._tree.itemDoubleClicked.connect(self._on_double_clicked)
         self._tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -48,7 +55,7 @@ class MethodBrowser(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
+        layout.setSpacing(10)
         layout.addWidget(self._search)
         layout.addWidget(self._tree, 1)
 
@@ -89,14 +96,18 @@ class MethodBrowser(QWidget):
         for cat in order:
             top = QTreeWidgetItem([cat])
             top.setFlags(top.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+            top.setSizeHint(0, QSize(0, 32))
+            font = top.font(0)
+            font.setWeight(QFont.Weight.DemiBold)
+            top.setFont(0, font)
             self._tree.addTopLevelItem(top)
             for m in groups[cat]:
                 child = QTreeWidgetItem([''])
+                child.setSizeHint(0, QSize(0, 38))
                 child.setData(0, Qt.ItemDataRole.UserRole,
                               m.get('method_id', ''))
                 child.setData(0, Qt.ItemDataRole.UserRole + 1,
                               m.get('display_name') or m.get('name', ''))
-                # 展示正式名称，说明同时保留旧名和缩写，避免改名后无法检索。
                 name = str(m.get('display_name') or m.get('name') or m.get('method_id') or '')
                 description = str(m.get('description') or '')
                 tooltip = '\n'.join(part for part in (name, description) if part)
@@ -107,14 +118,16 @@ class MethodBrowser(QWidget):
                 top.addChild(child)
 
                 row_widget = QWidget(self._tree)
+                row_widget.setObjectName('methodRow')
+                row_widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
                 row = QHBoxLayout(row_widget)
-                row.setContentsMargins(0, 0, 0, 0)
+                row.setContentsMargins(6, 0, 6, 0)
                 row.setSpacing(6)
-                name_label = QLabel(m.get('display_name') or m.get('name', ''),
-                                    row_widget)
+                name_label = QLabel(name, row_widget)
                 name_label.setTextFormat(Qt.TextFormat.PlainText)
                 name_label.setToolTip(tooltip)
                 name_label.setAccessibleName(name)
+                name_label.setStyleSheet('background: transparent;')
                 row.addWidget(name_label, 1)
                 self._tree.setItemWidget(child, 0, row_widget)
             top.setExpanded(True)
@@ -142,7 +155,27 @@ class MethodBrowser(QWidget):
             bool(needle) and bool(self._methods) and total_hits == 0)
 
     def apply_theme(self, dark: bool) -> None:
-        """主题切换钩子（主窗遍历调用）。标签徽章已按需求移除，无操作。"""
+        """主题切换钩子（主窗遍历调用）。"""
+        self.setStyleSheet(
+            f'QTreeWidget#methodTree {{ color: {design_tokens.color("text_primary", dark)};'
+            f' background: {design_tokens.color("bg_subtle", dark)};'
+            f' border: 1px solid {design_tokens.color("border_default", dark)};'
+            f' border-radius: {design_tokens.radius("md")}px; padding: 4px; outline: 0; }}'
+            'QTreeWidget::item { padding: 3px 5px; border: 1px solid transparent; border-radius: 3px; }'
+            f'QTreeWidget::item:hover {{ background: {design_tokens.color("bg_muted", dark)}; }}'
+            f'QTreeWidget::item:selected {{ color: {design_tokens.color("text_primary", dark)};'
+            f' background: {design_tokens.color("primary_subtle", dark)};'
+            f' border: 1px solid {design_tokens.color("primary_border", dark)}; }}'
+            'QTreeWidget::branch { background: transparent; }'
+            f'QTreeWidget::branch:selected {{ background: {design_tokens.color("primary_subtle", dark)}; }}'
+            f'QTreeWidget::branch:hover {{ background: {design_tokens.color("bg_muted", dark)}; }}'
+            'QWidget#methodRow { background: transparent; }'
+            f'QWidget#methodRow QLabel {{ color: {design_tokens.color("text_primary", dark)};'
+            ' background: transparent; }'
+        )
+        category_color = QBrush(QColor(design_tokens.color('text_secondary', dark)))
+        for index in range(self._tree.topLevelItemCount()):
+            self._tree.topLevelItem(index).setForeground(0, category_color)
 
     # ------------------------------------------------------------- 信号
     def _method_id_of(self, item):

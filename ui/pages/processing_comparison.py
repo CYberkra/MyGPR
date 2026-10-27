@@ -202,6 +202,10 @@ class LineComparison(QObject):
         if not source or source['line_id'] not in self.lines:
             return False
         line_id = source['line_id']
+        artifact_id = str(source.get('artifact_id') or '')
+        if artifact_id:
+            self.page.artifact_focus_requested.emit(line_id, artifact_id)
+            return True
         if line_id != self.page._line_id:
             self.page.line_changed.emit(line_id)
         if self.page._line_id != line_id:
