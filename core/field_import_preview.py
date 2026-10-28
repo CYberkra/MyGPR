@@ -275,15 +275,36 @@ def build_import_preflight(
                         acquisition = inspect_acquisition_hdf5(handle)
                     if acquisition is not None:
                         _emit(progress_callback, "inspect_header", size, size)
+                        suggestions = ["传感器快照按道保留，缺失值不填零；未提供道间距时横轴仅表示道序号",
+                                       "请在采集结束后导入；传感器有效值将在后台导入时读取"]
+                        if acquisition["time_axis_convention"] == "legacy_window_over_samples":
+                            suggestions.append("文件未声明时间轴端点，沿用时窗/N；定量解释前请核对采集时间轴")
+                        displayed = acquisition["store_component"] == "fdata"
+                        if displayed:
+                            suggestions.append("fdata 为仪器显示采样，保留原值；不等同于复数 S21 或已确认的时域实部")
+                        magnitude = acquisition["store_component"] in ("mag", "magnitude")
+                        if magnitude:
+                            suggestions.append("幅值数据不含原始相位和正负号，不能视为有符号时域实部")
+                        companions = acquisition.get("sfcw_companions", {})
+                        if companions:
+                            if companions["manifest"] == "missing":
+                                suggestions.append("SFCW 原处理配置文件缺失；主波形可导入，原始频率及 ICZT 配置未确认")
+                            else:
+                                suggestions.append("已匹配同测次 SFCW 配置，时间轴采用原 ICZT 含末点约定")
+                            if companions["raw_s21"] == "missing":
+                                suggestions.append("SFCW 原始 S21 伴随文件缺失；可处理主波形，但无法从本文件重算原始频谱")
+                            else:
+                                suggestions.append("检测到原始 S21 伴随文件，本次仅导入主波形，未校验或重算频谱；请保留配套文件")
                         return ImportPreflightResult(
                             path=str(src), exists=True, is_file=True, extension=suffix,
                             format_name=FORMAT_NAME, support="direct", can_import=True,
                             message="可直接导入；已识别采集 HDF5，道×采样点将转换为采样点×道。",
-                            suggestions=("定位和高度缺失值将保留；未提供道间距时横轴仅表示道序号",
-                                         "请在采集结束后导入；传感器有效值将在后台导入时读取"),
+                            suggestions=tuple(suggestions),
                             sample_count=acquisition["sample_count"], trace_count=acquisition["trace_count"],
                             time_window_ns=acquisition["time_window_ns"], dielectric_constant=float(dielectric_constant),
-                            source_kind="CDUT 采集时域 A-Scan", column_summary=f"dtype=float32; 分量={acquisition['store_component']}",
+                            source_kind=("CDUT 仪器显示采样 A-Scan" if displayed else
+                                         "CDUT 采集时域幅值 A-Scan" if magnitude else "CDUT 采集时域实部 A-Scan"),
+                            column_summary=f"dtype=float32; 分量={acquisition['store_component']}",
                         )
                 shape, dtype, dataset_name = _hdf5_matrix_shape(src)
                 low = high = 0.0

@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
+import uuid
 from contextlib import contextmanager
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
@@ -30,6 +32,7 @@ class ProjectCatalog:
     def __init__(self, path: str | Path, *, read_only: bool = False) -> None:
         self.path = Path(path).resolve()
         self.read_only = bool(read_only)
+        self._local = threading.local()
 
     def _connect(self) -> sqlite3.Connection:
         if self.read_only:
@@ -38,26 +41,58 @@ class ProjectCatalog:
         else:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             connection = sqlite3.connect(self.path, timeout=30.0)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys=ON")
-        connection.execute("PRAGMA busy_timeout=30000")
-        if not self.read_only:
-            connection.execute("PRAGMA journal_mode=WAL")
-            connection.execute("PRAGMA synchronous=FULL")
+        try:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA foreign_keys=ON")
+            connection.execute("PRAGMA busy_timeout=30000")
+            if not self.read_only:
+                connection.execute("PRAGMA journal_mode=WAL")
+                connection.execute("PRAGMA synchronous=FULL")
+        except sqlite3.Error:
+            connection.close()
+            raise
         return connection
+
+    @contextmanager
+    def _connection(self) -> Iterator[sqlite3.Connection]:
+        active = getattr(self._local, "connection", None)
+        if active is not None:
+            yield active
+            return
+        connection = self._connect()
+        try:
+            # SQLite's context manager commits/rolls back, but does not close.
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
         if self.read_only:
             raise PermissionError("Project catalog is read-only")
+        active = getattr(self._local, "connection", None)
+        if active is not None:
+            savepoint = "nested_" + uuid.uuid4().hex
+            active.execute(f"SAVEPOINT {savepoint}")
+            try:
+                yield active
+            except BaseException:
+                active.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
+                raise
+            finally:
+                active.execute(f"RELEASE SAVEPOINT {savepoint}")
+            return
         connection = self._connect()
         committed = False
         try:
             connection.execute("BEGIN IMMEDIATE")
+            self._local.connection = connection
             yield connection
             connection.commit()
             committed = True
         finally:
+            self._local.connection = None
             if not committed:
                 connection.rollback()
             connection.close()
@@ -200,7 +235,7 @@ class ProjectCatalog:
 
 
     def list_lines(self) -> list[dict[str, Any]]:
-        with self._connect() as db:
+        with self._connection() as db:
             rows = db.execute("SELECT * FROM lines ORDER BY line_id").fetchall()
         result: list[dict[str, Any]] = []
         for row in rows:
@@ -255,7 +290,7 @@ class ProjectCatalog:
             )
 
     def list_branches(self, *, line_id: str | None = None) -> list[dict[str, Any]]:
-        with self._connect() as db:
+        with self._connection() as db:
             if line_id:
                 rows = db.execute(
                     "SELECT * FROM processing_branches WHERE line_id=? ORDER BY created_at",
@@ -268,7 +303,7 @@ class ProjectCatalog:
         return [dict(row) for row in rows]
 
     def branch_head(self, branch_id: str) -> str:
-        with self._connect() as db:
+        with self._connection() as db:
             row = db.execute(
                 "SELECT head_artifact_id FROM processing_branches WHERE branch_id=?",
                 (str(branch_id),),
@@ -276,7 +311,7 @@ class ProjectCatalog:
         return str(row[0] or "") if row else ""
 
     def get_artifact(self, artifact_id: str) -> dict[str, Any] | None:
-        with self._connect() as db:
+        with self._connection() as db:
             row = db.execute("SELECT * FROM artifacts WHERE artifact_id=?", (str(artifact_id),)).fetchone()
         if row is None:
             return None
@@ -376,7 +411,7 @@ class ProjectCatalog:
             clauses.append("artifact_kind=?")
             values.append(artifact_kind)
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
-        with self._connect() as db:
+        with self._connection() as db:
             rows = db.execute(f"SELECT * FROM artifacts{where} ORDER BY created_at DESC", values).fetchall()
         result = []
         for row in rows:
@@ -408,7 +443,7 @@ class ProjectCatalog:
             )
 
     def list_exports(self, *, export_kind: str | None = None) -> list[dict[str, Any]]:
-        with self._connect() as db:
+        with self._connection() as db:
             if export_kind:
                 rows = db.execute(
                     "SELECT * FROM exports WHERE export_kind=? ORDER BY created_at DESC",
@@ -438,7 +473,7 @@ class ProjectCatalog:
     def checkpoint(self, *, truncate: bool = True) -> None:
         if self.read_only or not self.path.exists():
             return
-        with self._connect() as db:
+        with self._connection() as db:
             mode = "TRUNCATE" if truncate else "PASSIVE"
             db.execute(f"PRAGMA wal_checkpoint({mode})").fetchall()
 
@@ -446,7 +481,7 @@ class ProjectCatalog:
         # 损坏检测是本方法的承诺：文件头损坏导致连接失败时，
         # 必须返回 (False, 原因) 而不是向调用方抛 DatabaseError。
         try:
-            with self._connect() as db:
+            with self._connection() as db:
                 row = db.execute("PRAGMA integrity_check").fetchone()
         except sqlite3.DatabaseError as exc:
             return False, str(exc)

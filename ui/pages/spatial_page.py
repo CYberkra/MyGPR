@@ -101,13 +101,14 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
 
     current_line_requested = pyqtSignal(str)    # 设为当前测线（line_id）
     basemap_prefetch_requested = pyqtSignal()   # 预下载当前区域（页面内部已处理，供外部观测）
-    depth_preview_requested = pyqtSignal(list)          # 深度切片预览（勾选 line_ids）
+    depth_preview_requested = pyqtSignal(list, float)  # line_ids, cell_size_m
     save_depth_layer_requested = pyqtSignal(list, float)  # 存为图层（line_ids, cell_size_m）
 
     _PANEL_STATE_PREFIX = 'spatial'
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._closed = False
         self._tracks = []            # 全量 SpatialTrack
         self._tracks_by_id = {}
         self._lines_by_id = {}       # 测线记录（rtk_status 等）
@@ -219,6 +220,8 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
 
         代次守卫：快速连续导入/自动加载时，旧任务的回包直接丢弃。
         """
+        if self._closed:
+            return
         self._dem_load_generation += 1
         self._pending_dem_auto = auto
         self._dem_pool.start(_DemLoadWorker(
@@ -226,7 +229,7 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
 
     def _on_dem_loaded(self, generation: int, dem, path: str, error: str) -> None:
         """DEM 解析回包（GUI 线程）：应用格网或按来源处理失败。"""
-        if generation != self._dem_load_generation:
+        if self._closed or generation != self._dem_load_generation:
             return
         if dem is None:
             if self._pending_dem_auto:
@@ -414,7 +417,7 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
         self._view_segment.addItem(
             _SEG_3D, '三维视图', onClick=lambda: self._switch_view(_SEG_3D))
         self._view_segment.addItem(
-            _SEG_DEPTH, '深度切片', onClick=lambda: self._switch_view(_SEG_DEPTH))
+            _SEG_DEPTH, '界面深度网格', onClick=lambda: self._switch_view(_SEG_DEPTH))
         self._view_segment.setCurrentItem(_SEG_MAP)
         view_card, view_layout = make_segment_card(
             '空间视图', self._view_segment, parent=self)
@@ -452,7 +455,16 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
         self._depth_value_label.setMinimumWidth(96)
         self._depth_save_btn = PushButton('存为图层', self._depth_row_widget)
         self._depth_save_btn.setEnabled(False)
-        depth_row.addWidget(CaptionLabel('切片深度', self._depth_row_widget))
+        self._depth_cell_spin = DoubleSpinBox(self._depth_row_widget)
+        self._depth_cell_spin.setRange(0.05, 1000.0)
+        self._depth_cell_spin.setDecimals(2)
+        self._depth_cell_spin.setSingleStep(0.25)
+        self._depth_cell_spin.setValue(1.0)
+        self._depth_cell_spin.setSuffix(' m/格')
+        self._depth_cell_spin.setToolTip('界面深度控制点的单元格均值网格；不是雷达振幅 C-scan')
+        depth_row.addWidget(CaptionLabel('格网', self._depth_row_widget))
+        depth_row.addWidget(self._depth_cell_spin)
+        depth_row.addWidget(CaptionLabel('等深线', self._depth_row_widget))
         depth_row.addWidget(self._depth_slider, 1)
         depth_row.addWidget(self._depth_value_label)
         depth_row.addWidget(self._depth_save_btn)
@@ -539,6 +551,7 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
         self._3d_dem_clear_btn.clicked.connect(self._on_clear_dem_clicked)
         self._3d_view.local_dem_notice.connect(self._on_dem_notice)
         self._depth_slider.valueChanged.connect(self._on_depth_slider_changed)
+        self._depth_cell_spin.valueChanged.connect(self._on_depth_cell_changed)
         self._depth_save_btn.clicked.connect(self._on_save_depth_layer_clicked)
         self._left_panel.sig_collapsed.connect(
             lambda collapsed: self._on_side_panel_collapsed('left', collapsed))
@@ -636,6 +649,9 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
 
         self._depth_payload_line_ids = [str(x) for x in line_ids or []]
         self._depth_cell_size_m = cell
+        self._depth_cell_spin.blockSignals(True)
+        self._depth_cell_spin.setValue(cell)
+        self._depth_cell_spin.blockSignals(False)
         self._depth_view.set_grid(
             matrix,
             x_origin_m=x_origin,
@@ -704,7 +720,7 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
             # 首次切到深度切片段：自动以当前勾选测线请求一次预览
             checked = [str(t.line_id) for t in self._checked_tracks()]
             if checked:
-                self.depth_preview_requested.emit(checked)
+                self.depth_preview_requested.emit(checked, float(self._depth_cell_spin.value()))
 
     def _sync_view_affordances(self, route_key: str) -> None:
         """切段时同步「只属于某段」的界面附属件（2026-10-06）。
@@ -885,7 +901,7 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
         checked = [str(t.line_id) for t in self._checked_tracks() if
                    str(getattr(t, 'line_id', '') or '')]
         if checked:
-            self.depth_preview_requested.emit(checked)
+            self.depth_preview_requested.emit(checked, float(self._depth_cell_spin.value()))
 
     def _on_line_selected(self, _current, _previous=None) -> None:
         self._refresh_detail()
@@ -976,22 +992,3 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
             self._prefetch_label.setText(f'预下载完成：{total} 张瓦片')
         else:
             self._prefetch_label.setText(f'正在下载 {done}/{total} 张瓦片…')
-
-    def _on_set_current_clicked(self) -> None:
-        line_id = self._selected_line_id()
-        if line_id:
-            self.current_line_requested.emit(line_id)
-
-    def _on_depth_slider_changed(self, value: int) -> None:
-        """滑条（0.01m 步进整数）→ 等值线 level + 数值标签。"""
-        depth_m = value / 100.0
-        self._depth_value_label.setText(f'深度: {depth_m:.2f} m')
-        self._depth_view.set_isoline(depth_m)
-
-    def _on_save_depth_layer_clicked(self) -> None:
-        """存为图层：发信号（line_ids, cell_size_m），页面不调 backend。"""
-        line_ids = list(self._depth_payload_line_ids)
-        if not line_ids or self._depth_view.value_range() is None:
-            return
-        self.save_depth_layer_requested.emit(
-            line_ids, float(self._depth_cell_size_m))

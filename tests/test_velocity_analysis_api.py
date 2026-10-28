@@ -25,6 +25,7 @@ from mygpr.domain.velocity.models import (
 )
 from mygpr.domain.velocity.fitting import fit_hyperbola
 from mygpr.infrastructure.persistence.velocity_adapter import VelocityPersistenceMixin
+from mygpr.infrastructure.persistence.line_properties_adapter import LinePropertiesMixin
 from mygpr.application.velocity.evidence import (
     build_velocity_evidence,
     compute_velocity_body_digest,
@@ -237,6 +238,7 @@ class _VelocitySessionShim:
 
     save_velocity_model = VelocityPersistenceMixin.save_velocity_model
     load_velocity_model = VelocityPersistenceMixin.load_velocity_model
+    _raw_dataset_with_properties = LinePropertiesMixin._raw_dataset_with_properties
 
 
 

@@ -51,6 +51,11 @@ class PreviewBundle:
     sample_axis_label: str = ""
     trace_elevation_m: np.ndarray | None = None  # 逐道地面高程 (m, downsampled)
     depth_axis_m: np.ndarray | None = None   # 与 sample_axis 等长的**深度**轴 (m)
+    trace_indices: np.ndarray | None = None  # exact full-matrix column per preview column
+    sample_indices: np.ndarray | None = None  # exact full-matrix row per preview row
+    source_trace_ids: np.ndarray | None = None  # acquisition IDs, independent of matrix indices
+    view_reversed: bool = False
+    trace_qc_bad_mask: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         matrix = np.asarray(self.matrix, dtype=np.float32)
@@ -61,6 +66,28 @@ class PreviewBundle:
         object.__setattr__(self, "vmax", float(self.vmax))
         object.__setattr__(self, "sample_count", max(0, int(self.sample_count)))
         object.__setattr__(self, "trace_count", max(0, int(self.trace_count)))
+        if self.trace_qc_bad_mask is not None:
+            mask = np.asarray(self.trace_qc_bad_mask)
+            if mask.shape != (matrix.shape[1],):
+                raise ValueError('invalid trace QC mask')
+            object.__setattr__(self, 'trace_qc_bad_mask', mask.astype(bool))
+        if self.source_trace_ids is not None:
+            ids = np.asarray(self.source_trace_ids)
+            if ids.shape != (matrix.shape[1],) or ids.dtype.kind not in 'iu' or np.any(ids < 0):
+                raise ValueError('invalid source trace IDs')
+            object.__setattr__(self, 'source_trace_ids', ids.astype(np.uint64))
+        for name, size, total in (
+            ("trace_indices", matrix.shape[1], self.trace_count),
+            ("sample_indices", matrix.shape[0], self.sample_count),
+        ):
+            values = getattr(self, name)
+            if values is not None:
+                axis = np.asarray(values, dtype=np.float64)
+                if (axis.shape != (size,) or not np.all(np.isfinite(axis))
+                        or np.any(axis != np.floor(axis)) or np.any(axis < 0)
+                        or np.any(axis >= total) or np.any(np.diff(axis) <= 0)):
+                    raise ValueError(f"invalid preview {name}")
+                object.__setattr__(self, name, axis.astype(np.int64))
         for name in ("trace_axis_m", "sample_axis", "depth_axis_m"):
             axis = getattr(self, name)
             if axis is not None:
@@ -197,6 +224,8 @@ def make_preview_bundle(
         sample_count=sample_count,
         trace_count=trace_count,
         title=str(title or ""),
+        trace_indices=np.arange(0, trace_count, col_step, dtype=np.int64),
+        sample_indices=np.arange(0, sample_count, row_step, dtype=np.int64),
         trace_axis_m=_downsample_axis(trace_axis_m, col_step, preview.shape[1]),
         sample_axis=_downsample_axis(sample_axis, row_step, preview.shape[0]),
         sample_axis_label=str(sample_axis_label or ""),
@@ -290,8 +319,11 @@ def bundle_from_dataset(dataset: Any, **kw: Any) -> PreviewBundle:
     trace_axis = _dataset_axis(dataset, "distance_axis_m")
     if _metadata_mapping(dataset).get("distance_axis_status") == "unknown":
         trace_axis = None
-    sample_axis = _dataset_axis(dataset, "time_axis_ns")
-    sample_axis_label = "时间 (ns)"
+    metadata = _metadata_mapping(dataset)
+    is_depth = bool(metadata.get("is_depth"))
+    is_elevation = bool(metadata.get("is_elevation"))
+    sample_axis = np.asarray(metadata.get("elevation_axis_m"), dtype=np.float64) if is_elevation and metadata.get("elevation_axis_m") is not None else _dataset_axis(dataset, "depth_axis_m" if is_depth else "time_axis_ns")
+    sample_axis_label = "海拔 (m)" if is_elevation else "深度 (m)" if is_depth else "时间 (ns)"
     if sample_axis is None:
         sample_axis = _dataset_axis(dataset, "depth_axis_m")
         sample_axis_label = "深度 (m)" if sample_axis is not None else ""
@@ -302,6 +334,8 @@ def bundle_from_dataset(dataset: Any, **kw: Any) -> PreviewBundle:
     depth_axis = kw.pop("depth_axis_m", None)
     if depth_axis is None:
         depth_axis = _dataset_axis(dataset, "depth_axis_m")
+    if is_elevation:
+        depth_axis = None
     if depth_axis is None and sample_axis_label == "深度 (m)":
         depth_axis = sample_axis
 
@@ -331,6 +365,8 @@ def bundle_from_dataset(dataset: Any, **kw: Any) -> PreviewBundle:
         sample_axis_label=sample_axis_label if sample_axis is not None else "",
         trace_elevation_m=_downsample_axis(elevation, col_step, preview.shape[1]),
         depth_axis_m=_downsample_axis(depth_axis, row_step, preview.shape[0]),
+        trace_indices=np.arange(0, trace_count, col_step, dtype=np.int64),
+        sample_indices=np.arange(0, sample_count, row_step, dtype=np.int64),
     )
 
 

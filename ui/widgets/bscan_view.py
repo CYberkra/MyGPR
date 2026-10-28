@@ -27,16 +27,17 @@ sample_axis 时显示物理量，降采样数据附"原始约 N"），右键菜�
 复制 / 导出 PNG。工具条已退役（2026-09-23：4 钮与右键菜单完全重复），
 全屏保留为图内左上角悬浮钮，铺满走右键菜单，轴单位与比例策略走设置页
 与右键菜单。
-接入时已 vb.setMenuEnabled(False) 关闭 pyqtgraph 原生英文菜单
-（代价：右键拖拽框选缩放失效，由菜单缩放项补偿），并隐藏 pyqtgraph
+接入时已 vb.setMenuEnabled(False) 关闭 pyqtgraph 原生英文菜单。
+矩形缩放由右键「框选放大」启用一次性左键拖框，普通拖动仍平移；隐藏 pyqtgraph
 自带的「A」自适应钮（其功能由右键菜单「回到全览」承担）。
 """
 
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QPainterPath
 from PyQt6.QtWidgets import QVBoxLayout, QWidget
 
+import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtWidgets import QLabel
 from qfluentwidgets import FluentIcon as FIF, ToolButton
@@ -51,9 +52,12 @@ from ui.widgets.bscan_axes import (
     distance_available,
     distance_tick_strings,
     elevation_tick_strings,
+    physical_time_ticks,
 )
 from ui.widgets.bscan_view_data import (BScanViewDataMixin, DEFAULT_P_LOW as DEFAULT_P_LOW, DEFAULT_P_HIGH as DEFAULT_P_HIGH, _restored_levels as _restored_levels)
 from ui.widgets.bscan_view_fullscreen import BScanViewFullscreenMixin
+from ui.widgets.bscan_time_window import BScanTimeWindowMixin
+from ui.widgets.bscan_selection import BScanSelectionMixin
 from ui.widgets.bscan_view_interaction import (BScanDisplayMode,
                                                BScanViewInteractionMixin)
 from ui.widgets.bscan_view_interaction import (format_crosshair_readout
@@ -63,7 +67,7 @@ from ui.widgets.pg_view_base import GraphicsViewBase, style_plot_item
 
 
 
-class BScanView(BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteractionMixin, GraphicsViewBase, QWidget):
+class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteractionMixin, GraphicsViewBase, QWidget):
     """B-Scan 剖面图像视图。
 
     缩放/导出/轴主题继承 GraphicsViewBase（pg_view_base）；
@@ -100,6 +104,9 @@ class BScanView(BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteracti
                  default_y_axis: str = 'sample',
                  default_levels: tuple | None = None):
         super().__init__(parent)
+        self._view_time_window = None
+        self._view_selection = None
+        self._selection_follows_levels = True
         self._pick_enabled = False
         self._image_shape = None  # (traces, samples) 显示坐标系尺寸
         # 显示比例策略：'free' 拉伸铺满（默认——实测占空比 85.9%，x/y 拉伸比
@@ -133,6 +140,8 @@ class BScanView(BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteracti
         self._gain_db = 24.0        # TVG 深端总增益（dB）
         self._gain_power = 1.0      # TVG 曲线弯度（幂次：1 线性，>1 集中深部）
         self._gain_cache = None
+        self._envelope_cache = None
+        self._contrast = 1.0
         self._tvg_dialog = None     # 滑条面板（懒创建，随视图销毁）
         # 「⤢ 铺满」只有接到了宿主页（能折叠侧栏）才有意义，默认隐藏该钮
         self._expand_enabled = False
@@ -152,6 +161,7 @@ class BScanView(BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteracti
 
         self._init_plot(with_colorbar)
         self._init_readout_overlay()
+        self._init_selection()
         self._init_layout()
 
         # 空态引导浮层（评审 P0-1）：初始无数据即显示，数据到达隐藏
@@ -174,6 +184,8 @@ class BScanView(BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteracti
         self._sample_axis_label = ''
         self._trace_count = 0
         self._sample_count = 0
+        self._trace_indices = None
+        self._sample_indices = None
         self._ground_elevation_m = None   # 逐道地面高程（m，显示网格）
         self._depth_axis_m = None         # 地表以下深度（m，显示网格）
         # 海拔模式状态：当前显示的是否是 warp 后的矩阵 + 其海拔轴
@@ -187,8 +199,8 @@ class BScanView(BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteracti
         # 图内标题只承载数据身份（bundle.title，如"测线 L3"）；通用名称
         # "B-Scan图像"由卡头承担，不再双标题（评审 P1-4）。
         # 横/纵轴换成 IndexAxis：索引坐标不变，只在刻度文本层做单位换算
-        self._bottom_axis = IndexAxis('bottom', self._convert_bottom_ticks)
-        self._left_axis = IndexAxis('left', self._convert_left_ticks)
+        self._bottom_axis = IndexAxis('bottom', self._convert_bottom_ticks, self._bottom_tick_values)
+        self._left_axis = IndexAxis('left', self._convert_left_ticks, self._left_tick_values)
         self._plot = self._glw.addPlot(
             row=0, col=0,
             axisItems={'bottom': self._bottom_axis, 'left': self._left_axis})
@@ -200,12 +212,11 @@ class BScanView(BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteracti
         # pyqtgraph 自带的「A」自适应钮（英文语境的 autoscaling）由右键
         # 菜单「回到全览」取代，这里直接隐藏避免两套入口
         self._plot.hideButtons()
-        # 关闭 pyqtgraph 原生英文右键菜单（右拖框选缩放随之失效，
-        # 缩放操作由自定义 RoundMenu 提供）
+        # 关闭英文右键菜单；框选由独立的一次性左键选择器提供。
         self._plot.vb.setMenuEnabled(False)
 
         # 预分配并复用
-        self._image_item = pg.ImageItem(axisOrder='row-major')
+        self._image_item = pg.ImageItem(axisOrder='row-major', autoDownsample=False)
         self._image_item.setLevels((0.0, 1.0))
         self._plot.addItem(self._image_item)
 
@@ -373,8 +384,13 @@ class BScanView(BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteracti
             return
         if mode == 'elevation' and not self.elevation_available():
             return
+        changed = mode != self._y_axis
         self._y_axis = mode
+        if changed:
+            self._clear_view_selection()
         self._apply_axis_modes()
+        if changed:
+            self._apply_levels_to_render()
         if notify:
             self.sig_y_axis_changed.emit(mode)
 
@@ -404,8 +420,30 @@ class BScanView(BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteracti
         self._set_axes_visible(self._matrix is not None)
 
     def _bottom_label(self) -> str:
-        return ('距离 (m)' if self._x_axis == 'distance'
-                and self.distance_available() else '道数')
+        if self._x_axis == 'distance' and self.distance_available():
+            return '距离 (m)'
+        columns = self._image_shape[0] if self._image_shape else 0
+        if self._trace_count > columns > 0:
+            return f'道号（全量 {self._trace_count} 道；预览 {columns} 列）'
+        return '道数'
+
+    def _trace_numbers_for_view(self):
+        columns = self._image_shape[0] if self._image_shape else 0
+        if not columns:
+            return None
+        if self._trace_indices is not None:
+            return np.asarray(self._trace_indices, dtype=np.float64) + 1
+        if self._trace_count > columns > 0:
+            return np.linspace(1, self._trace_count, columns)
+        return None
+
+    def _bottom_tick_values(self, levels, min_val, max_val, _size):
+        if self._x_axis == 'distance':
+            return None
+        axis = self._trace_numbers_for_view()
+        if axis is None:
+            return None
+        return physical_time_ticks(axis, levels, min_val, max_val)
 
     def _left_label(self) -> str:
         """纵轴标签随单位变：采样轴用 bundle 的标签，海拔轴固定带单位。"""
@@ -414,14 +452,41 @@ class BScanView(BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteracti
         return self._sample_axis_label or '采样点'
 
     def _convert_bottom_ticks(self, values, scale, spacing):
-        """横轴刻度换算：距离模式换算成里程，否则回落默认（道索引）。"""
-        if self._x_axis != 'distance':
+        """Keep pixel coordinates internal; label full-input trace numbers."""
+        if self._x_axis == 'distance':
+            return distance_tick_strings(values, self._trace_axis_m)
+        axis = self._trace_numbers_for_view()
+        if axis is None:
             return None
-        return distance_tick_strings(values, self._trace_axis_m)
+        return [f'{np.interp(value, np.arange(len(axis)) + 0.5, axis):.0f}'
+                if 0 <= value <= len(axis) else '' for value in values]
+
+    def _sample_axis_for_ticks(self):
+        if self._matrix is None or self._showing_elevation or self._sample_axis is None:
+            return None
+        label = self._sample_axis_label.lower()
+        if 'ns' not in label and '(m)' not in label.replace(' ', ''):
+            return None
+        axis = np.asarray(self._sample_axis, dtype=float)
+        if (axis.ndim != 1 or len(axis) != self._matrix.shape[0] or len(axis) < 2
+                or not np.isfinite(axis).all() or not (np.all(np.diff(axis) > 0) or np.all(np.diff(axis) < 0))):
+            return None
+        return axis
+
+    def _left_tick_values(self, levels, min_val, max_val, _size):
+        axis = self._sample_axis_for_ticks()
+        if axis is None:
+            return None
+        return physical_time_ticks(axis, levels, min_val, max_val)
 
     def _convert_left_ticks(self, values, scale, spacing):
         """纵轴刻度换算：海拔模式行号直接查共享海拔轴，否则回落默认。"""
         if not self._showing_elevation:
+            axis = self._sample_axis_for_ticks()
+            if axis is not None:
+                import numpy as np
+                return [f'{np.interp(value, np.arange(len(axis)) + 0.5, axis):.5g}'
+                        if 0 <= value <= len(axis) else '' for value in values]
             return None
         return elevation_tick_strings(values, self._elev_axis)
 
@@ -449,13 +514,17 @@ class BScanView(BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteracti
             self.reset_1to1(notify=notify)
         elif mode == 'square':
             self.fit_square(notify=notify)
+        self._restore_view_time_window()
 
     def fit_to_data(self, *, notify: bool = True) -> None:
         """自适应窗口：显示全部数据（解除纵横锁定，拉伸铺满）。"""
+        if notify:
+            self._clear_view_selection()
         self._aspect_mode = 'free'
         self._plot.vb.setAspectLocked(False)
         self._plot.vb.autoRange()
         if notify:
+            self._apply_levels_to_render()
             self.sig_aspect_changed.emit('free')
 
     def fit_square(self, *, notify: bool = True) -> None:
@@ -511,6 +580,7 @@ class BScanView(BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteracti
             self.reset_1to1(notify=False)
         else:
             self.fit_square(notify=False)
+        self._restore_view_time_window()
 
     # ------------------------------------------------------------------ 其它
     def _set_axes_visible(self, visible: bool) -> None:
@@ -520,10 +590,16 @@ class BScanView(BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteracti
             self._colorbar.setVisible(visible and self._colorbar_visible)
 
     def clear(self) -> None:
+        self._clear_view_selection()
         self._image_item.clear()
         self._scatter.setData([])
         self._image_shape = None
         self._matrix = None
+        self._gain_cache = None
+        self._envelope_cache = None
+        if self._wiggle_item is not None:
+            self._wiggle_item.setPath(QPainterPath())
+            self._wiggle_item.hide()
         self._showing_elevation = False
         self._elev_axis = None
         self._elev_cache = None

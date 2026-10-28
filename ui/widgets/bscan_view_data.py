@@ -11,8 +11,9 @@ import math
 
 import numpy as np
 import pyqtgraph as pg
+from qfluentwidgets import InfoBar
 
-from ui.desktop_backend_facade import compute_display_levels
+from ui.desktop_backend_facade import compute_display_levels, compute_display_envelope
 from ui.widgets._colormap_data import COLORMAP_DATA
 from ui.widgets.bscan_axes import build_elevation_view
 from ui.widgets.bscan_levels_dialog import LevelsDialog
@@ -91,6 +92,11 @@ class BScanViewDataMixin:
             getattr(bundle, 'sample_axis_label', '') or '')
         self._trace_count = int(getattr(bundle, 'trace_count', 0) or 0)
         self._sample_count = int(getattr(bundle, 'sample_count', 0) or 0)
+        self._trace_indices = getattr(bundle, 'trace_indices', None)
+        self._source_trace_ids = getattr(bundle, 'source_trace_ids', None)
+        self.set_view_reversed(bool(getattr(bundle, 'view_reversed', False)))
+        self.set_qc_bad_mask(getattr(bundle, 'trace_qc_bad_mask', None))
+        self._sample_indices = getattr(bundle, 'sample_indices', None)
         # 海拔纵轴的两份原料（均已降到显示网格）：逐道地面高程 + 米制深度
         self._ground_elevation_m = getattr(bundle, 'trace_elevation_m', None)
         self._depth_axis_m = getattr(bundle, 'depth_axis_m', None)
@@ -121,9 +127,19 @@ class BScanViewDataMixin:
         """
 
         mat = np.asarray(matrix)
+        self.set_qc_bad_mask(None)
+        if getattr(self, '_qc_focus', None) is not None:
+            self._plot.removeItem(self._qc_focus)
+            self._qc_focus = None
         if mat.ndim != 2:
             raise ValueError('B-Scan 矩阵必须是二维 (samples, traces)')
         view = mat  # 零拷贝；row-major 下 y=采样(行)、x=道(列)
+        self._gain_cache = None
+        self._envelope_cache = None
+        self._elev_cache = None
+        had_time_window = self._view_time_window is not None or self._view_selection is not None
+        self._hide_crosshair()
+        self._clear_view_selection()
         self._matrix = view
         # 直接 set_matrix 的调用方没有物理轴元数据，读数退回索引显示
         self._trace_axis_m = None
@@ -131,6 +147,9 @@ class BScanViewDataMixin:
         self._sample_axis_label = ''
         self._trace_count = 0
         self._sample_count = 0
+        self._trace_indices = None
+        self._source_trace_ids = None
+        self._sample_indices = None
         # 无 bundle 元数据 → 无物理轴：海拔/距离不可用（回落采样轴显示）
         self._ground_elevation_m = None
         self._depth_axis_m = None
@@ -142,9 +161,9 @@ class BScanViewDataMixin:
         # 上屏的是增益后矩阵（_matrix 保留 raw 供读数/波形/海拔 warp）；
         # 此刻物理轴元数据尚未由 set_bundle 赋值，增益曲线先行退行号——
         # set_bundle 末尾在增益开启时会按物理轴整体重渲染一次。
-        self._image_item.setImage(self._gain_applied(view), autoLevels=False,
+        self._image_item.setImage(self._gain_applied(view), autoLevels=False, autoDownsample=False,
                                   levels=(float(vmin), float(vmax)))
-        if shape_changed:
+        if shape_changed or had_time_window:
             # 新数据尺寸变化时按当前比例策略铺满视野，避免换测线后图像跑出可视区
             self._fit_current_mode()
         # 色阶偏好（可能是跨会话恢复或用户在无数据时设的）应用到新数据上：
@@ -199,8 +218,15 @@ class BScanViewDataMixin:
                 and cache[1] is self._ground_elevation_m
                 and cache[2] is self._depth_axis_m):
             return cache[3], cache[4]
-        warped, axis = build_elevation_view(
-            src, self._ground_elevation_m, self._depth_axis_m)
+        try:
+            warped, axis = build_elevation_view(
+                src, self._ground_elevation_m, self._depth_axis_m)
+        except (RuntimeError, MemoryError) as exc:
+            InfoBar.warning(
+                title='无法完整显示海拔剖面',
+                content=f'保留完整采样轴显示，未降低分辨率。{exc}',
+                duration=6000, parent=self.window())
+            warped, axis = None, None
         self._elev_cache = (src, self._ground_elevation_m,
                             self._depth_axis_m, warped, axis)
         return warped, axis
@@ -217,10 +243,11 @@ class BScanViewDataMixin:
                 want = False          # 数据不支持，回落采样轴显示
         if want == self._showing_elevation:
             return False
+        self._hide_crosshair()
         if not want:
-            target, elev_axis = self._matrix, None
+            target, elev_axis = self._gain_applied(self._matrix), None
         levels = self._image_item.levels
-        self._image_item.setImage(target, autoLevels=False, levels=levels)
+        self._image_item.setImage(target, autoLevels=False, autoDownsample=False, levels=levels)
         self._showing_elevation = want
         self._elev_axis = elev_axis
         self._image_shape = (target.shape[1], target.shape[0])
@@ -233,6 +260,15 @@ class BScanViewDataMixin:
         self._image_item.setColorMap(self._cmap)
         if self._colorbar is not None:
             self._colorbar.setColorMap(self._cmap)
+
+    def set_contrast(self, value) -> None:
+        """Narrow display levels by a factor; shared absolute levels keep precedence."""
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            value = 1.0
+        self._contrast = min(3.0, max(0.5, value)) if math.isfinite(value) else 1.0
+        self._apply_levels_to_render()
 
     def display_levels(self) -> tuple[float, float]:
         """当前显示动态范围的百分位 ``(low, high)``。"""
@@ -302,8 +338,14 @@ class BScanViewDataMixin:
             # 色阶在**增益后**矩阵上取百分位：增益与百分位正交（增益纵向拉平、
             # 百分位横向裁剪），顺序为先增益、再取百分位
             vmin, vmax = compute_display_levels(
-                self._gain_applied(self._matrix),
+                self._levels_source_for_view(self._gain_applied(self._matrix)),
                 p_low=self._p_low, p_high=self._p_high)
+            if self.display_mode is BScanDisplayMode.ENVELOPE:
+                vmin, vmax = 0.0, max(float(vmax), 1e-12) / self._contrast
+            else:
+                center = (vmin + vmax) / 2
+                half = (vmax - vmin) / (2 * self._contrast)
+                vmin, vmax = center - half, center + half
         self._image_item.setLevels((float(vmin), float(vmax)))
         if self._colorbar is not None:
             self._colorbar.setLevels((float(vmin), float(vmax)))
@@ -371,7 +413,7 @@ class BScanViewDataMixin:
             return
         target, elev_axis = self._resolve_display_target()
         levels = self._image_item.levels
-        self._image_item.setImage(target, autoLevels=False, levels=levels)
+        self._image_item.setImage(target, autoLevels=False, autoDownsample=False, levels=levels)
         self._showing_elevation = elev_axis is not None
         self._elev_axis = elev_axis
         self._image_shape = (target.shape[1], target.shape[0])
@@ -384,6 +426,10 @@ class BScanViewDataMixin:
         （身份比较，不用 id()）。增益关闭时必须原样返回以保持「零拷贝 +
         身份不变」语义（海拔 warp 缓存、回落判定都依赖它）。
         """
+        if mat is not None and self.display_mode is BScanDisplayMode.ENVELOPE:
+            if self._envelope_cache is None or self._envelope_cache[0] is not mat:
+                self._envelope_cache = (mat, compute_display_envelope(mat))
+            mat = self._envelope_cache[1]
         if mat is None or self._gain_mode == 'off':
             return mat
         cache = self._gain_cache

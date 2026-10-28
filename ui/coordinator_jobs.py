@@ -25,6 +25,8 @@ class JobHub:
         self.known_job_ids: set[str] = set()   # 已 upsert 到任务控件的任务
         self.import_job_ids: set[str] = set()  # 测线导入/传感器同步任务（完成后刷新测线）
         self.spatial_job_ids: set[str] = set()  # 空间成果任务（完成后刷新空间成果表）
+        self._terminal_statuses: dict[str, str] = {}
+        self._progress_counts: dict[str, tuple[int, int]] = {}
 
     # ============================================================ 信号注册
     def connect_all(self) -> None:
@@ -84,6 +86,7 @@ class JobHub:
         for view in self._views():
             view.set_status(job_id, str(status))
         if str(status) in ('completed', 'failed', 'cancelled'):
+            self._terminal_statuses[job_id] = str(status)
             for view in self._mini_views():
                 view.remove_inactive()
 
@@ -91,19 +94,33 @@ class JobHub:
                     message: str) -> None:
         job_id = str(job_id)
         self._upsert(job_id)
+        self._progress_counts[job_id] = (int(completed), int(total))
         for view in self._views():
             view.update_progress(job_id, int(completed), int(total), str(message))
         if job_id == self._co.processing.processing_job_id:
             self._co.page('processingInterface').set_progress(
                 int(completed), int(total), str(message))
 
+    def on_notice(self, job_id: str, payload: dict) -> None:
+        job_id = str(job_id)
+        self._upsert(job_id)
+        message = str(payload.get('message') or payload.get('code') or '处理提示')
+        level = 'INFO' if payload.get('level') == 'info' else 'WARNING'
+        self._co.log_message(f'{level} 任务 {str(job_id)[:8]}… {message}')
+        completed, total = self._progress_counts.get(job_id, (0, 0))
+        for view in self._views():
+            view.update_progress(job_id, completed, total, message)
+
     def on_completed(self, job_id: str, success: bool, message: str,
                      result) -> None:
         co = self._co
         job_id = str(job_id)
+        cancelled = self._terminal_statuses.pop(job_id, '') == 'cancelled'
         if success:
             co.log_message(
                 f'SUCCESS 任务 {job_id[:8]}… 完成：{message}')
+        elif cancelled:
+            co.log_message(f'INFO 任务 {job_id[:8]}… 已取消：{message}')
         else:
             co.log_message(
                 f'WARNING 任务 {job_id[:8]}… 结束：{message}')
@@ -111,8 +128,10 @@ class JobHub:
             if job_id != co.processing.processing_job_id:
                 co.infobar('error', '任务失败',
                            message or '任务执行失败，详见任务页', duration=8000)
-        status = 'completed' if success else 'failed'
+        status = 'cancelled' if cancelled else 'completed' if success else 'failed'
+        completed, total = self._progress_counts.pop(job_id, (0, 0))
         for view in self._views():
+            view.update_progress(job_id, completed, total, str(message))
             view.set_status(job_id, status)
         # 导入/同步完成 → 刷新测线列表
         if job_id in self.import_job_ids:

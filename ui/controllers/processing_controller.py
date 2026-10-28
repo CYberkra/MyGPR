@@ -15,7 +15,7 @@ from ui.desktop_backend_facade import (
     pipeline_from_dicts,
     pipeline_to_raw,
 )
-from ui.controllers.backend_controller import friendly_error_message, run_command
+from ui.controllers.backend_controller import EXPECTED_BACKEND_ERRORS, friendly_error_message, run_command
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -58,6 +58,8 @@ class ProcessingController(QObject):
     run_finished = pyqtSignal(bool, str)    # success, message
     run_context_finished = pyqtSignal(str, bool, str)  # submitted job_id, success, message
     run_result_ready = pyqtSignal(str, str)  # submitted job_id, actual final artifact_id
+    estimate_finished = pyqtSignal(str, object)  # request token, ResourceEstimate
+    estimate_failed = pyqtSignal(str, str)
     autotune_finished = pyqtSignal(str, dict)   # method_id, {best_params, ...}
     autotune_failed = pyqtSignal(str, str)
     velocity_submitted = pyqtSignal(str, str)   # job_id, token
@@ -112,7 +114,7 @@ class ProcessingController(QObject):
         try:
             entries = method_catalog()
             methods = build_method_dicts(entries)
-        except Exception as exc:  # noqa: BLE001
+        except EXPECTED_BACKEND_ERRORS as exc:
             self.log_message.emit(f"加载方法库失败：{friendly_error_message(exc)}")
         else:
             self.methods_loaded.emit(methods)
@@ -127,17 +129,21 @@ class ProcessingController(QObject):
         line_ids: list[str],
         pipeline_def: dict,
         result_name: str,
-        input_artifact_id: str = "",
+        input_artifact_ids: Mapping[str, str] | None = None,
+        save_intermediates: bool = False,
     ) -> list[str]:
-        """批量：每条测线一个独立 job，逐条提交并挂完成回调。"""
+        """批量：每条测线一个独立 job，输入成果按测线显式隔离。"""
         submitted: list[str] = []
+        inputs = dict(input_artifact_ids or {})
         for line_id in line_ids:
+            line_id = str(line_id)
             job_id = self.run_pipeline(
                 project_id,
-                str(line_id),
+                line_id,
                 pipeline_def,
                 f"{result_name}_{line_id}" if result_name else result_name,
-                input_artifact_id=input_artifact_id,
+                input_artifact_id=str(inputs.get(line_id, "")),
+                save_intermediates=save_intermediates,
             )
             if job_id:
                 submitted.append(job_id)
@@ -150,6 +156,7 @@ class ProcessingController(QObject):
         pipeline_def: dict,
         result_name: str,
         input_artifact_id: str = "",
+        save_intermediates: bool = False,
     ) -> str | None:
         backend = self._backend()
         bridge = self._job_bridge()
@@ -161,7 +168,7 @@ class ProcessingController(QObject):
                 name=str(result_name or dict(pipeline_def or {}).get("name", "")),
             )
             pipeline = pipeline_to_raw(ui_pipeline)
-        except Exception as exc:  # noqa: BLE001
+        except EXPECTED_BACKEND_ERRORS as exc:
             message = friendly_error_message(exc)
             self.log_message.emit(f"处理链定义无效：{message}")
             self.run_context_finished.emit('', False, message)
@@ -174,8 +181,9 @@ class ProcessingController(QObject):
                 pipeline,
                 result_name=str(result_name or ""),
                 input_artifact_id=str(input_artifact_id or ""),
+                save_intermediates=bool(save_intermediates),
             )
-        except Exception as exc:  # noqa: BLE001
+        except EXPECTED_BACKEND_ERRORS as exc:
             message = friendly_error_message(exc)
             self.log_message.emit(f"处理链提交失败：{message}")
             self.run_context_finished.emit('', False, message)
@@ -198,6 +206,16 @@ class ProcessingController(QObject):
             finished,
         )
         return job_id
+
+    def estimate_pipeline(self, token, project_id, line_id, pipeline_def: dict,
+                          input_artifact_id: str = "", save_intermediates: bool = False) -> None:
+        run_command(
+            _EstimatePipelineCommand(
+                self, str(token), project_id, line_id, pipeline_def,
+                input_artifact_id, save_intermediates,
+            ),
+            name="mygpr-pipeline-estimate",
+        )
 
     # ------------------------------------------------------------------
     def run_autotune(self, project_id, line_id, method_id: str,
@@ -224,6 +242,46 @@ class ProcessingController(QObject):
 # ------------------------------------------------------------------
 # Worker commands (replaces run_worker closures)
 # ------------------------------------------------------------------
+
+class _EstimatePipelineCommand:
+    __slots__ = (
+        "_controller", "_token", "_project_id", "_line_id", "_pipeline_def",
+        "_input_artifact_id", "_save_intermediates",
+    )
+
+    def __init__(self, controller, token, project_id, line_id, pipeline_def,
+                 input_artifact_id, save_intermediates):
+        self._controller = controller
+        self._token = str(token)
+        self._project_id = str(project_id)
+        self._line_id = str(line_id)
+        self._pipeline_def = dict(pipeline_def or {})
+        self._input_artifact_id = str(input_artifact_id or "")
+        self._save_intermediates = bool(save_intermediates)
+
+    def execute(self):
+        c = self._controller
+        backend = c._backend()
+        if backend is None:
+            c.estimate_failed.emit(self._token, "后端尚未就绪")
+            return
+        try:
+            ui_pipeline = pipeline_from_dicts(
+                list(self._pipeline_def.get("steps") or []),
+                name=str(self._pipeline_def.get("result_name") or "资源预估"),
+            )
+            estimate = backend.estimate_project_pipeline(
+                self._project_id,
+                self._line_id,
+                pipeline_to_raw(ui_pipeline),
+                input_artifact_id=self._input_artifact_id,
+                save_intermediates=self._save_intermediates,
+            )
+        except EXPECTED_BACKEND_ERRORS as exc:
+            c.estimate_failed.emit(self._token, friendly_error_message(exc))
+        else:
+            c.estimate_finished.emit(self._token, estimate)
+
 
 class _AutotuneSubmitCommand:
     __slots__ = (
@@ -268,11 +326,14 @@ class _AutotuneSubmitCommand:
                 dataset = backend.projects.read_dataset(
                     str(self._project_id), str(self._line_id))
             data = np.asarray(dataset.data, dtype=np.float32)
-            kwargs: dict[str, Any] = {}
+            kwargs: dict[str, Any] = {
+                "header_info": dict(dataset.header_info),
+                "trace_metadata": dict(dataset.trace_metadata),
+            }
             if self._params_hint:
                 kwargs["candidate_params"] = [dict(self._params_hint)]
             job_id = backend.submit_autotune(data, self._method_id, **kwargs)
-        except Exception as exc:  # noqa: BLE001
+        except EXPECTED_BACKEND_ERRORS as exc:
             message = friendly_error_message(exc)
             c.log_message.emit(f"自动调参提交失败：{message}")
             c.autotune_failed.emit(self._method_id, message)
@@ -330,7 +391,7 @@ class _VelocitySubmitCommand:
                 self._line_id,
                 [{"trace_index": t, "sample_index": s} for t, s in self._picks],
             )
-        except Exception as exc:  # noqa: BLE001
+        except EXPECTED_BACKEND_ERRORS as exc:
             message = friendly_error_message(exc)
             c.log_message.emit(f"速度分析提交失败：{message}")
             c.velocity_failed.emit(

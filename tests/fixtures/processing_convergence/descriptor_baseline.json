@@ -36,7 +36,7 @@
     ],
     "category": "gain",
     "implementation_version": "native-extended-1.0",
-    "name": "幅值缩放/归一化",
+    "name": "振幅缩放与归一化",
     "parameter_schema": {
       "mode": {
         "default": "constant",
@@ -94,7 +94,7 @@
     ],
     "category": "gain",
     "implementation_version": "native-1.0",
-    "name": "增益补偿",
+    "name": "线性分贝增益",
     "parameter_schema": {
       "gain_max": {
         "default": 6.0,
@@ -121,7 +121,7 @@
     ],
     "category": "drift_correction",
     "implementation_version": "native-1.0",
-    "name": "低频漂移矫正（Dewow）",
+    "name": "低频漂移校正（Dewow）",
     "parameter_schema": {
       "window": {
         "default": 23,
@@ -145,7 +145,7 @@
     ],
     "category": "gain",
     "implementation_version": "native-extended-1.0",
-    "name": "能量衰减增益",
+    "name": "能量衰减补偿增益",
     "parameter_schema": {
       "floor_ratio": {
         "default": 0.05,
@@ -185,7 +185,7 @@
     ],
     "category": "filtering",
     "implementation_version": "native-global-1.0",
-    "name": "F-K 频波数滤波",
+    "name": "频率-波数滤波（F-K）",
     "parameter_schema": {
       "angle_high": {
         "default": 65.0,
@@ -216,7 +216,7 @@
     ],
     "category": "filtering",
     "implementation_version": "native-1.0",
-    "name": "一维频域滤波",
+    "name": "时间轴频域滤波",
     "parameter_schema": {
       "filter_type": {
         "default": "bandpass",
@@ -253,7 +253,7 @@
     ],
     "category": "denoising",
     "implementation_version": "native-global-1.0",
-    "name": "Hankel-SVD 去噪",
+    "name": "汉克尔矩阵去噪（Hankel-SVD）",
     "parameter_schema": {
       "aggressiveness": {
         "default": 0.5,
@@ -285,7 +285,7 @@
     ],
     "category": "attribute_analysis",
     "implementation_version": "native-extended-1.0",
-    "name": "Hilbert 包络",
+    "name": "包络提取（Hilbert）",
     "parameter_schema": {
       "log_compress": {
         "default": false,
@@ -312,7 +312,7 @@
     ],
     "category": "filtering",
     "implementation_version": "native-extended-1.0",
-    "name": "Inverse-Q 衰减补偿",
+    "name": "逆 Q 衰减补偿（Inverse-Q）",
     "parameter_schema": {
       "gain_limit_db": {
         "default": 40.0,
@@ -341,7 +341,7 @@
     ],
     "category": "migration",
     "implementation_version": "native-kirchhoff-2.0",
-    "name": "Kirchhoff 迁移",
+    "name": "Kirchhoff 偏移成像",
     "parameter_schema": {
       "allow_gpu_runtime_fallback": {
         "default": true,
@@ -501,7 +501,7 @@
     ],
     "category": "motion_compensation",
     "implementation_version": "native-motion-2.0",
-    "name": "姿态/APC足迹修正",
+    "name": "姿态与天线足迹校正",
     "parameter_schema": {
       "apc_offset_x_m": {
         "default": 0.0,
@@ -538,7 +538,7 @@
     ],
     "category": "motion_compensation",
     "implementation_version": "native-motion-2.0",
-    "name": "飞行高度归一化",
+    "name": "离地高度补偿",
     "parameter_schema": {
       "compensate_amplitude": {
         "default": true,
@@ -589,7 +589,7 @@
     ],
     "category": "motion_compensation",
     "implementation_version": "native-motion-2.0",
-    "name": "速度误差补偿",
+    "name": "等距道重采样",
     "parameter_schema": {
       "spacing_m": {
         "default": 0.0,
@@ -614,7 +614,7 @@
     ],
     "category": "motion_compensation",
     "implementation_version": "native-motion-2.0",
-    "name": "UAV 运动补偿 V2",
+    "name": "无人机综合运动补偿",
     "parameter_schema": {
       "air_wave_speed_m_per_ns": {
         "default": 0.299792458,
@@ -697,7 +697,7 @@
     ],
     "category": "artifact_suppression",
     "implementation_version": "native-motion-2.0",
-    "name": "周期条带伪影抑制（实验）",
+    "name": "周期条带伪影抑制",
     "parameter_schema": {
       "background_mix": {
         "default": 0.02,
@@ -736,7 +736,7 @@
     ],
     "category": "background_suppression",
     "implementation_version": "native-global-1.0",
-    "name": "RPCA 背景抑制",
+    "name": "鲁棒主成分背景抑制（RPCA）",
     "parameter_schema": {
       "lam": {
         "default": 0.08,
@@ -770,7 +770,7 @@
     ],
     "category": "migration",
     "implementation_version": "experimental-rtm-1.0",
-    "name": "RTM 反向时间迁移",
+    "name": "逆时偏移成像（RTM）",
     "parameter_schema": {
       "boundary_strength": {
         "default": 3.5,
@@ -888,7 +888,7 @@
     ],
     "category": "denoising",
     "implementation_version": "native-1.0",
-    "name": "道向运行平均平滑",
+    "name": "道间滑动平均平滑（Moving Average）",
     "parameter_schema": {
       "ntraces": {
         "default": 9,
@@ -912,7 +912,7 @@
     ],
     "category": "gain",
     "implementation_version": "native-1.0",
-    "name": "SEC 增益",
+    "name": "时间幂函数增益",
     "parameter_schema": {
       "gain_max": {
         "default": 6.0,
@@ -943,7 +943,7 @@
     ],
     "category": "time_correction",
     "implementation_version": "native-1.0",
-    "name": "零时矫正",
+    "name": "零时校正（Time-zero）",
     "parameter_schema": {
       "new_zero_time": {
         "default": 5.0,
@@ -994,7 +994,7 @@
     ],
     "category": "migration",
     "implementation_version": "native-global-1.0",
-    "name": "Stolt 迁移",
+    "name": "Stolt 偏移成像",
     "parameter_schema": {
       "dt": {
         "default": 0.1,
@@ -1069,7 +1069,7 @@
     ],
     "category": "background_suppression",
     "implementation_version": "native-global-1.0",
-    "name": "SVD 背景抑制",
+    "name": "奇异值背景抑制（SVD）",
     "parameter_schema": {
       "rank": {
         "default": 1,
@@ -1097,7 +1097,7 @@
     ],
     "category": "denoising",
     "implementation_version": "native-global-1.0",
-    "name": "SVD 子空间去噪",
+    "name": "奇异值子空间去噪（SVD）",
     "parameter_schema": {
       "rank_end": {
         "default": 2,
@@ -1190,10 +1190,38 @@
     ],
     "category": "denoising",
     "implementation_version": "native-1.0",
-    "name": "道向中值滤波",
+    "name": "道间中值滤波（Median Filter）",
     "parameter_schema": {
       "window_traces": {
         "default": 5,
+        "min": 1,
+        "type": "int"
+      }
+    },
+    "visibility": "public"
+  },
+  "trace_cut": {
+    "auto_tune_enabled": false,
+    "auto_tune_family": "",
+    "auto_tune_stage": "",
+    "capabilities": [
+      "cancellable",
+      "global_transform",
+      "loaded_global",
+      "native",
+      "ndarray"
+    ],
+    "category": "time_correction",
+    "implementation_version": "native-extended-1.0",
+    "name": "测道裁剪",
+    "parameter_schema": {
+      "trace_end": {
+        "default": 0,
+        "min": 0,
+        "type": "int"
+      },
+      "trace_start": {
+        "default": 1,
         "min": 1,
         "type": "int"
       }
@@ -1249,7 +1277,7 @@
     ],
     "category": "denoising",
     "implementation_version": "native-1.0",
-    "name": "道向 Savitzky-Golay 平滑",
+    "name": "道间多项式平滑（Savitzky-Golay）",
     "parameter_schema": {
       "polyorder": {
         "default": 2,
@@ -1311,7 +1339,7 @@
     ],
     "category": "denoising",
     "implementation_version": "native-extended-1.0",
-    "name": "Wavelet 2D 去噪",
+    "name": "二维小波去噪（Wavelet）",
     "parameter_schema": {
       "levels": {
         "default": 2,

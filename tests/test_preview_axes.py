@@ -30,8 +30,17 @@ class TestBundleFromWindow:
         assert bundle.trace_axis_m is not None
         assert float(bundle.trace_axis_m[-1]) == pytest.approx(24.0, abs=0.1)
 
-    def test_defaults_to_250_when_no_axes(self, qapp):
+    def test_missing_axes_remain_unknown(self, qapp):
+        from ui.widgets.bscan_view import BScanView
+
         matrix = np.zeros((10, 5), dtype=np.float32)
         bundle = ProjectController._bundle_from_window(matrix, 'L01', title='t')
-        assert bundle.sample_axis is not None
-        assert float(bundle.sample_axis[-1]) == pytest.approx(250.0, abs=1.0)
+        assert bundle.sample_axis is None
+        assert bundle.trace_axis_m is None
+        view = BScanView()
+        view.set_bundle(bundle)
+        assert view._left_label() == '采样点'
+        assert not view.distance_available()
+        assert not view.time_window_available()
+        assert not view.set_view_time_window(0, 10)
+        view.close()

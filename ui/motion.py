@@ -3,9 +3,9 @@
 
 三条纪律：
 1. **动画闸**：尊重 Windows"在 Windows 中显示动画"辅助功能开关
-   （SPI_GETCLIENTAREAANIMATION）。关闭时所有动效 duration=0、立即落位。
-2. **只动值，不动布局**：进度条用 QVariantAnimation 插值 setValue（合成器
-   缓存，不触发布局重排）；徽章颜色过渡只重写 QSS 字符串（低频操作）。
+   （SPI_GETCLIENTAREAANIMATION）。关闭时本模块管理的动效立即落位。
+2. **只动值，不动布局**：进度条仅由一套 QVariantAnimation 驱动绘制值，
+   不叠加控件内置补间；徽章颜色过渡只更新自身样式。
 3. **短促**：默认 200ms OutCubic，任何动效不超过 400ms——工程工具，
    不要烟花感。
 
@@ -16,6 +16,7 @@ QSS 模板，不引入新样式源。
 from __future__ import annotations
 
 import ctypes
+from ctypes import wintypes
 
 from PyQt6.QtCore import QEasingCurve, QVariantAnimation
 from PyQt6.QtWidgets import QProgressBar, QWidget
@@ -28,10 +29,10 @@ MAX_DURATION_MS = 400
 def animations_enabled() -> bool:
     """读取 Windows 辅助功能动画开关；非 Windows 或读取失败时视为开启。"""
     try:
-        value = ctypes.c_bool(True)
+        value = wintypes.BOOL(True)
         ok = ctypes.windll.user32.SystemParametersInfoW(
             SPI_GETCLIENTAREAANIMATION, 0, ctypes.byref(value), 0)
-        return value.value if ok else True
+        return bool(value.value) if ok else True
     except (AttributeError, OSError):
         return True
 
@@ -48,27 +49,36 @@ def animate_progress(bar: QProgressBar, target: int, *,
     lo, hi = bar.minimum(), bar.maximum()
     target = max(lo, min(hi, target))
     current = bar.value()
+    anim = getattr(bar, '_motion_anim', None)
+    if anim is not None:
+        anim.stop()
+    # Fluent ProgressBar otherwise starts its own 150ms animation on every
+    # setValue call from our tween. Keep one owner and resume the painted value.
+    set_use_ani = getattr(bar, 'setUseAni', None)
+    get_rendered = getattr(bar, 'getVal', None)
+    if callable(set_use_ani) and callable(get_rendered):
+        current = max(lo, min(hi, int(get_rendered())))
+        inner = getattr(bar, 'ani', None)
+        if inner is not None:
+            inner.stop()
+        set_use_ani(False)
     if (not animations_enabled() or target == current
             or hi <= lo):
         bar.setValue(target)
+        set_rendered = getattr(bar, 'setVal', None)
+        if callable(set_rendered):
+            set_rendered(float(target))
         return
-    anim = getattr(bar, '_motion_anim', None)
-    if anim is not None and anim.state() == QVariantAnimation.State.Running:
-        # overwrite="auto"：从当前渲染值续跑，而不是从旧起点跳变
-        current = anim.currentValue()
-        if isinstance(current, (int, float)):
-            current = int(current)
-        anim.stop()
     if anim is None:
         anim = QVariantAnimation(bar)
         anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        # QVariantAnimation 对 float 起止值插值出 float，PyQt6 的
-        # setValue(int) 收到 float 会抛 TypeError（实机 abort）→ 显式转 int。
-        anim.valueChanged.connect(lambda value: bar.setValue(int(value)))
+        # Integer endpoints emit int values; a QObject-bound receiver gives Qt
+        # a destruction context instead of a closure retaining its parent bar.
+        anim.valueChanged.connect(bar.setValue)
         bar._motion_anim = anim
     anim.setDuration(DEFAULT_DURATION_MS)
-    anim.setStartValue(float(current))
-    anim.setEndValue(float(target))
+    anim.setStartValue(int(current))
+    anim.setEndValue(int(target))
     anim.start()
 
 
@@ -93,6 +103,19 @@ def _mix(start: tuple[int, int, int], end: tuple[int, int, int],
                               max(0, min(255, b)))
 
 
+class _BadgeColorAnimation(QVariantAnimation):
+    """Qt owns the callback context; no closure retains the parent badge."""
+
+    def __init__(self, badge) -> None:
+        super().__init__(badge)
+        self.transition = None
+
+    def updateCurrentValue(self, value) -> None:
+        if self.transition is not None and isinstance(value, (int, float)):
+            template, start, end = self.transition
+            self.parent().setStyleSheet(template % _mix(start, end, float(value)))
+
+
 def animate_badge_color(badge, qss_template: str, start_hex: str,
                         end_hex: str) -> None:
     """状态徽章背景色 200ms 渐变（同一 QSS 模板重写，无新样式源）。
@@ -101,22 +124,24 @@ def animate_badge_color(badge, qss_template: str, start_hex: str,
     （QVariantAnimation 以 badge 为 parent），无泄漏。
     """
     start, end = hex_to_rgb(start_hex), hex_to_rgb(end_hex)
+    anim = getattr(badge, '_motion_color_anim', None)
+    previous_color = None
+    if anim is not None:
+        if anim.state() == QVariantAnimation.State.Running:
+            _qss, old_start, old_end = anim.transition
+            previous_color = _mix(old_start, old_end, float(anim.currentValue()))
+        anim.stop()
     if not animations_enabled() or start == end:
         badge.setStyleSheet(qss_template % end_hex)
         return
-    old = getattr(badge, '_motion_color_anim', None)
-    if old is not None:
-        old.stop()
-    anim = QVariantAnimation(badge)
+    if previous_color is not None:
+        start = hex_to_rgb(previous_color)
+    if anim is None:
+        anim = _BadgeColorAnimation(badge)
+        badge._motion_color_anim = anim
+    anim.transition = (qss_template, start, end)
     anim.setDuration(DEFAULT_DURATION_MS)
     anim.setEasingCurve(QEasingCurve.Type.OutCubic)
     anim.setStartValue(0.0)
     anim.setEndValue(1.0)
-    anim.valueChanged.connect(
-        lambda t, b=badge, s=start, e=end, q=qss_template:
-        b.setStyleSheet(q % _mix(s, e, float(t))))
-    badge._motion_color_anim = anim
-    anim.finished.connect(
-        lambda b=badge, e=end_hex, q=qss_template:
-        b.setStyleSheet(q % e))
     anim.start()

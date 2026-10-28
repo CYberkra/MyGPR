@@ -30,7 +30,10 @@ class ProjectReadOnlyError(ProjectApplicationError):
 _OUTPUT_HEADER_KEYS = (
     "total_time_ns", "time_window_ns", "time_cut_offset_ns",
     "a_scan_length", "num_traces", "dielectric_constant", "axis_transform",
-    "time_axis_endpoint", "distance_axis_status",
+    "time_axis_endpoint", "time_step_s", "distance_axis_status",
+    "track_length_m", "trace_interval_m", "source_trace_offset",
+    "time_axis_ns", "depth_axis_m", "distance_axis_m",
+    "is_depth", "is_elevation", "depth_max_m", "depth_step_m", "time_axis_status", "elevation_axis_m",
 )
 
 
@@ -43,6 +46,8 @@ def _output_header_summary(header: dict[str, Any] | None) -> dict[str, Any]:
             continue
         value = header[key]
         if isinstance(value, np.ndarray):
+            if key in ("time_axis_ns", "depth_axis_m", "distance_axis_m", "elevation_axis_m") and value.ndim == 1:
+                out[key] = value.tolist()
             continue
         if isinstance(value, np.generic):
             value = value.item()
@@ -92,12 +97,17 @@ class ProjectProcessingService:
         pipeline: PipelineDefinition,
         *,
         input_artifact_id: str = "",
+        save_intermediates: bool = False,
     ) -> ResourceEstimate:
         info = (
             self._projects.get_artifact_dataset_info(project_id, line_id, input_artifact_id)
             if input_artifact_id else self._projects.get_dataset_info(project_id, line_id)
         )
-        return self._processing.estimate_pipeline_shape(info.shape, info.dtype, pipeline)
+        return self._processing.estimate_pipeline_shape(
+            info.shape, info.dtype, pipeline,
+            allow_chunking=not save_intermediates,
+            header_info=self._header_from_info(info),
+        )
 
     def execute_pipeline(
         self,
@@ -185,7 +195,8 @@ class ProjectProcessingService:
             source,
             pipeline,
             header_info=header,
-            trace_metadata={},
+            trace_metadata=(self._projects.read_artifact_trace_metadata(project_id, line_id, input_artifact_id)
+                            if input_artifact_id else self._projects.read_trace_metadata(project_id, line_id)),
             consumer=save_result,
             context=context.child(0, 2),
         )
@@ -207,7 +218,10 @@ class ProjectProcessingService:
             self._projects.get_artifact_dataset_info(project_id, line_id, input_artifact_id)
             if input_artifact_id else self._projects.get_dataset_info(project_id, line_id)
         )
-        estimate = self._processing.estimate_pipeline_shape(info.shape, info.dtype, pipeline)
+        estimate = self._processing.estimate_pipeline_shape(
+            info.shape, info.dtype, pipeline, allow_chunking=False,
+            header_info=self._header_from_info(info),
+        )
         self._processing.validate_estimate(estimate, context=context, operation=pipeline.name)
         context.report_progress(0, 1, "读取项目测线")
         source = (
@@ -252,6 +266,7 @@ class ProjectProcessingService:
                     "run_group_id": run_group_id,
                     "run_step_index": index,
                     "lineage_version": 2,
+                    "result_label": str(result_name or ''),
                     "run_input_artifact_id": input_artifact_id,
                     "step_input_artifact_id": step_input_id,
                     "run_input_sha256": run_input_sha256,
@@ -265,6 +280,7 @@ class ProjectProcessingService:
                     "input_data_sha256": run_input_sha256,
                 },
                 context=step_context,
+                trace_metadata=step_result.trace_metadata,
             )
             step_input_id = final_artifact.artifact_id
             step_input_sha256 = final_artifact.sha256
@@ -321,6 +337,7 @@ class ProjectProcessingService:
                 "run_group_id": run_group_id,
                 "run_step_index": len(summary.step_records),
                 "lineage_version": 2,
+                "result_label": str(result_name or ''),
                 "run_input_artifact_id": input_artifact_id,
                 "step_input_artifact_id": input_artifact_id,
                 "run_input_sha256": summary.input_sha256,
@@ -330,6 +347,7 @@ class ProjectProcessingService:
             branch_id=branch_id,
             input_dataset=input_dataset,
             context=context,
+            trace_metadata=summary.trace_metadata,
         )
 
     @staticmethod

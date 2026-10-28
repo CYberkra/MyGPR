@@ -8,7 +8,8 @@ import sqlite3
 import re
 import uuid
 from pathlib import Path
-from typing import Any
+from contextlib import AbstractContextManager
+from typing import Any, Sequence
 
 from core.field_project_models import validate_line_id
 from core.storage_primitives import utc_now
@@ -29,6 +30,12 @@ def _branch_slug(name: str) -> str:
 
 class FieldProjectRuntimeStoreMixin:
     """Provide project-size metrics and the project-level catalog facade."""
+
+    def mutation(self, label: str, *, files: Sequence[Path] = (), trees: Sequence[Path] = ()) -> AbstractContextManager[Any]:
+        """Coordinate file/catalog writes through the public project facade."""
+        from core.project_mutation import project_mutation
+
+        return project_mutation(self, label, files=files, trees=trees)
 
     def total_raw_size_mb(self) -> float:
         return sum(line.raw_size_mb for line in self.list_lines())

@@ -26,10 +26,12 @@ Thumbs.db
 
 # Test artifacts
 artifacts/test-results/
+.playwright-mcp/
 .pytest_cache/
 *.rej
 *.orig
 *.output
+*.whl
 
 # MyGPR specific
 windows_fit_check_*/

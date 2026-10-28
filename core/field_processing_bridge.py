@@ -81,6 +81,7 @@ FIELD_CATEGORY_ORDER = [
 METHOD_CATEGORY_OVERRIDES = {
     "set_zero_time": "校正预处理",
     "time_cut": "校正预处理",
+    "trace_cut": "校正预处理",
     "trace_qc": "校正预处理",
     "dewow": "校正预处理",
     "subtracting_average_2D": "背景抑制",
@@ -119,6 +120,7 @@ METHOD_CATEGORY_OVERRIDES = {
 METHOD_DISPLAY_NAMES = {
     "set_zero_time": "零时校正",
     "time_cut": "时间窗裁剪",
+    "trace_cut": "测道裁剪",
     "trace_qc": "坏道质检",
     "dewow": "去低频漂移 dewow",
     "subtracting_average_2D": "平均背景去除",
@@ -160,6 +162,8 @@ PARAM_LABELS = {
     "ntraces": "窗口道数",
     "time_start_ns": "起始时间 ns",
     "time_end_ns": "结束时间 ns",
+    "trace_start": "起始道号（从1开始）",
+    "trace_end": "结束道号（0=末道）",
     "rank": "秩 / 分量数",
     "gain_min": "最小增益",
     "gain_max": "最大增益",

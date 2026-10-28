@@ -180,7 +180,8 @@ class AcquisitionService:
         settings: SensorSyncSettings | None = None,
         context: ExecutionContext | None = None,
     ) -> ProjectSensorSyncResult:
-        return self._projects.synchronize_line_sensors(
+        execution_context = context or ExecutionContext.null()
+        result = self._projects.synchronize_line_sensors(
             project_id,
             line_id,
             rtk_path=rtk_path,
@@ -188,8 +189,10 @@ class AcquisitionService:
             imu_path=imu_path,
             altimeter_path=altimeter_path,
             settings=settings or SensorSyncSettings(),
-            context=context or ExecutionContext.null(),
+            context=execution_context,
         )
+        execution_context.mark_committed()
+        return result
 
     @staticmethod
     def motion_pipeline(profile: MotionCompensationProfile | None = None) -> PipelineDefinition:

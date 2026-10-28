@@ -1,6 +1,6 @@
 """Read-only saved-input navigation; pending algorithm order lives elsewhere."""
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import QHBoxLayout, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QSizePolicy, QWidget
 from qfluentwidgets import CaptionLabel, TransparentPushButton, isDarkTheme
 
 from ui.design_tokens import tokens
@@ -15,6 +15,7 @@ class _PathButton(TransparentPushButton):
         self._full_title = str(title)
         super().__init__(parent=parent)
         self.setText(self._full_title)
+        self.setAccessibleName(self._full_title)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -36,6 +37,7 @@ class SavedSourcePath(QWidget):
         self._generation = 0
         self._buttons = []
         self._menu = None
+        self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
         self._row = QHBoxLayout(self)
         self._row.setContentsMargins(0, 0, 0, 0)
         self._row.setSpacing(3)
@@ -69,10 +71,13 @@ class SavedSourcePath(QWidget):
                 button.clicked.connect(lambda _checked=False, items=tuple(entries), gen=generation:
                                        self._show_all(items, gen))
             else:
-                key, title, _revision = entry
+                key, title, _revision = entry[:3]
+                details = entry[3] if len(entry) > 3 else ''
                 button = _PathButton(title, self)
                 button.setProperty('source_key', key)
-                button.setToolTip(str(title) + '\n已保存结果；点击查看，不重放算法')
+                tooltip = str(title) + (f'\n{details}' if details else '')
+                button.setToolTip(tooltip + ('\n已保存结果；点击查看，不重放算法' if key else
+                    '\n执行记录；该步未单独保存，或来源不完整，不能打开中间结果'))
                 button.setEnabled(bool(key))
                 button.clicked.connect(lambda _checked=False, key=key, gen=generation:
                                        self._open(key, gen))
@@ -80,7 +85,6 @@ class SavedSourcePath(QWidget):
             button.setMinimumWidth(0)
             self._buttons.append(button)
             self._row.addWidget(button)
-        self._row.addStretch(1)
         self.apply_theme(isDarkTheme())
 
     def apply_theme(self, dark):
@@ -105,7 +109,8 @@ class SavedSourcePath(QWidget):
             return
         menu = make_menu(self)
         self._menu = menu
-        for key, title, _revision in entries:
+        for entry in entries:
+            key, title, _revision = entry[:3]
             add_action(menu, None, str(title),
                        lambda _checked=False, key=key: self._open(key, generation), enabled=bool(key))
         menu._keyboard = FluentMenuKeyboard(menu)

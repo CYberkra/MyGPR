@@ -228,7 +228,8 @@ class TestPageWithoutGallery:
             page.set_artifact_bundle('F1', _bundle())
             assert page._workspace.tab_keys() == before
             assert page._workspace.active_key() == 'original'
-            assert page._workspace.tab_bar().tabText(1) == art.name
+            assert page._workspace.tab_bar().tabText(1).startswith(art.name)
+            assert '记录不完整' in page._workspace.tab_bar().tabText(1)
             assert page.findChildren(BScanGallery) == []
         finally:
             page.close()

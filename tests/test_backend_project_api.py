@@ -237,6 +237,161 @@ def test_project_api_processing_artifact_persists_output_axes(tmp_path: Path) ->
         assert time_axis.size == 36, f"时间轴长度应为 36，实际 {time_axis.size}"
         assert float(header.get("time_window_ns") or 0.0) == pytest.approx(250.0, abs=1.0)
         assert float(time_axis[0]) == pytest.approx(250.0, abs=1.0)   # 零点偏移
-        assert float(time_axis[-1]) == pytest.approx(500.0, abs=1.0)  # 终点=新时窗终点
+        # Legacy N-bin windows describe [start, end), so the last retained
+        # sample is before 500ns.  Rescaling it to 500 would change dt.
+        np.testing.assert_allclose(time_axis, 250.0 + np.arange(36) * (500.0 / 72), atol=1e-4)
+        assert header['time_axis_endpoint'] is False
+    finally:
+        backend.shutdown()
+
+
+def test_project_api_trace_crop_persists_axes_for_followup_processing(tmp_path: Path) -> None:
+    backend = MyGPRBackend.create_default(max_workers=1)
+    try:
+        summary = backend.projects.create_project(tmp_path / "trace-crop", name="Trace crop")
+        source = np.arange(120, dtype=np.float32).reshape(12, 10)
+        backend.projects.save_line_dataset(
+            summary.project_id, "L01", source, name="L01",
+            length_m=9.0, time_window_ns=24.0,
+        )
+        first_job = backend.submit_project_pipeline(
+            summary.project_id,
+            "L01",
+            PipelineDefinition(name="crop", steps=(PipelineStep(
+                "trace_cut", {"trace_start": 3, "trace_end": 6},
+            ),)),
+            result_name="第3至6道",
+        )
+        first = backend.jobs.wait(first_job, timeout=30)
+        assert first.status is JobStatus.COMPLETED, first.error_message
+        first_artifact = first.result
+        reopened = backend.projects.read_artifact_dataset(
+            summary.project_id, "L01", first_artifact.artifact_id,
+        )
+        np.testing.assert_array_equal(reopened.data, source[:, 2:6])
+        assert reopened.header_info["length_m"] == pytest.approx(3.0)
+        np.testing.assert_allclose(reopened.header_info["distance_axis_m"], [2.0, 3.0, 4.0, 5.0])
+        assert reopened.header_info["time_window_ns"] == pytest.approx(24.0)
+        assert reopened.header_info["source_trace_offset"] == 2
+
+        second_job = backend.submit_project_pipeline(
+            summary.project_id,
+            "L01",
+            PipelineDefinition(name="crop again", steps=(PipelineStep(
+                "trace_cut", {"trace_start": 2, "trace_end": 3},
+            ),)),
+            input_artifact_id=first_artifact.artifact_id,
+            result_name="原第4至5道",
+        )
+        second = backend.jobs.wait(second_job, timeout=30)
+        assert second.status is JobStatus.COMPLETED, second.error_message
+        cropped_again = backend.projects.read_artifact_dataset(
+            summary.project_id, "L01", second.result.artifact_id,
+        )
+        np.testing.assert_array_equal(cropped_again.data, source[:, 3:5])
+        np.testing.assert_allclose(cropped_again.header_info["distance_axis_m"], [3.0, 4.0])
+        assert cropped_again.header_info["length_m"] == pytest.approx(1.0)
+        assert cropped_again.header_info["source_trace_offset"] == 3
+
+        combined_job = backend.submit_project_pipeline(
+            summary.project_id,
+            "L01",
+            PipelineDefinition(name="two crops", steps=(
+                PipelineStep("trace_cut", {"trace_start": 3, "trace_end": 6}),
+                PipelineStep("trace_cut", {"trace_start": 2, "trace_end": 3}),
+            )),
+            result_name="同链连续裁剪",
+        )
+        combined = backend.jobs.wait(combined_job, timeout=30)
+        assert combined.status is JobStatus.COMPLETED, combined.error_message
+        combined_data = backend.projects.read_artifact_dataset(
+            summary.project_id, "L01", combined.result.artifact_id,
+        )
+        np.testing.assert_array_equal(combined_data.data, source[:, 3:5])
+        assert combined_data.header_info["length_m"] == pytest.approx(1.0)
+        assert combined_data.header_info["source_trace_offset"] == 3
+    finally:
+        backend.shutdown()
+
+
+def test_project_time_cut_continues_from_absolute_saved_axis(tmp_path):
+    backend = MyGPRBackend.create_default(max_workers=1)
+    try:
+        summary = backend.projects.create_project(tmp_path / 'continued-time', name='time')
+        data = np.arange(30 * 4, dtype=np.float32).reshape(30, 4)
+        backend.projects.save_line_dataset(summary.project_id, 'L01', data, time_window_ns=300.)
+        def cut(start, end, parent=''):
+            return backend.project_processing.execute_pipeline(summary.project_id, 'L01',
+                PipelineDefinition(steps=(PipelineStep('time_cut', {'mode': 'keep_range',
+                    'time_start_ns': start, 'time_end_ns': end}),)), input_artifact_id=parent)
+        first = cut(100., 200.)
+        second = cut(120., 160., first.artifact_id)
+        saved = backend.projects.read_artifact_dataset(summary.project_id, 'L01', second.artifact_id)
+        np.testing.assert_array_equal(saved.data, data[12:16])
+        np.testing.assert_allclose(saved.header_info['time_axis_ns'], [120, 130, 140, 150])
+        original = backend.projects.read_artifact_dataset(summary.project_id, 'L01', first.artifact_id)
+        np.testing.assert_allclose(original.header_info['time_axis_ns'], np.arange(100, 200, 10))
+    finally:
+        backend.shutdown()
+
+
+def test_time_cut_reopen_preserves_exact_float32_axis_after_repeated_crops(tmp_path):
+    backend = MyGPRBackend.create_default(max_workers=1)
+    try:
+        project = backend.projects.create_project(tmp_path / 'axis-exact', name='axis')
+        pid = project.project_id
+        data = np.arange(501 * 4, dtype=np.float32).reshape(501, 4)
+        backend.projects.save_line_dataset(pid, 'L01', data, time_window_ns=900,
+                                           metadata={'time_axis_endpoint': True})
+        def cut(start, end, parent=''):
+            return backend.project_processing.execute_pipeline(pid, 'L01',
+                PipelineDefinition(steps=(PipelineStep('time_cut', {'mode': 'keep_range',
+                    'time_start_ns': start, 'time_end_ns': end}),)), input_artifact_id=parent)
+        first = cut(360, 720)
+        first_data = backend.projects.read_artifact_dataset(pid, 'L01', first.artifact_id)
+        original_axis = np.linspace(0, 900, 501, dtype=np.float32)
+        np.testing.assert_array_equal(first_data.header_info['time_axis_ns'], original_axis[200:400])
+        second = cut(396, 504, first.artifact_id)
+        second_data = backend.projects.read_artifact_dataset(pid, 'L01', second.artifact_id)
+        np.testing.assert_array_equal(second_data.header_info['time_axis_ns'], original_axis[220:280])
+        np.testing.assert_array_equal(second_data.data, data[220:280])
+        workbench = backend.processing_workbench
+        session = workbench.open_session(pid, 'L01', input_artifact_id=first.artifact_id, restore_draft=False)
+        workbench.append_step(session.session_id, 'time_cut', {'mode': 'keep_range',
+                              'time_start_ns': 396, 'time_end_ns': 504})
+        saved = workbench.save_session(session.session_id)
+        workbench_data = backend.projects.read_artifact_dataset(pid, 'L01', saved.artifact_id)
+        np.testing.assert_array_equal(workbench_data.header_info['time_axis_ns'], original_axis[220:280])
+        np.testing.assert_array_equal(workbench_data.data, data[220:280])
+    finally:
+        backend.shutdown()
+
+
+def test_trace_crop_and_qc_preserve_absolute_distance_loaded_and_workbench(tmp_path):
+    backend = MyGPRBackend.create_default(max_workers=1)
+    try:
+        project = backend.projects.create_project(tmp_path / 'distance-axis', name='distance')
+        pid = project.project_id
+        data = np.arange(20 * 5, dtype=np.float32).reshape(20, 5)
+        backend.projects.save_line_dataset(pid, 'L01', data, length_m=4., time_window_ns=200.)
+        crop = backend.project_processing.execute_pipeline(pid, 'L01', PipelineDefinition(steps=(
+            PipelineStep('trace_cut', {'trace_start': 2, 'trace_end': 4}),)))
+        cropped = backend.projects.read_artifact_dataset(pid, 'L01', crop.artifact_id)
+        np.testing.assert_array_equal(cropped.header_info['distance_axis_m'], [1., 2., 3.])
+        np.testing.assert_array_equal(cropped.data, data[:, 1:4])
+        qc_params = {'mode': 'remove', 'manual_trace_indices': '1', 'spike_zscore': 0}
+        result = backend.project_processing.execute_pipeline(pid, 'L01', PipelineDefinition(steps=(
+            PipelineStep('trace_qc', qc_params),)), input_artifact_id=crop.artifact_id)
+        removed = backend.projects.read_artifact_dataset(pid, 'L01', result.artifact_id)
+        np.testing.assert_array_equal(removed.header_info['distance_axis_m'], [1., 3.])
+        np.testing.assert_array_equal(removed.data, data[:, [1, 3]])
+        workbench = backend.processing_workbench
+        session = workbench.open_session(pid, 'L01', input_artifact_id=crop.artifact_id, restore_draft=False)
+        workbench.append_step(session.session_id, 'trace_qc', qc_params)
+        result = workbench.save_session(session.session_id)
+        saved = backend.projects.read_artifact_dataset(pid, 'L01', result.artifact_id)
+        np.testing.assert_array_equal(saved.header_info['distance_axis_m'], [1., 3.])
+        np.testing.assert_array_equal(saved.data, data[:, [1, 3]])
+        np.testing.assert_array_equal(saved.header_info['time_axis_ns'], cropped.header_info['time_axis_ns'])
     finally:
         backend.shutdown()

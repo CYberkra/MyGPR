@@ -26,6 +26,7 @@ from qfluentwidgets import (
 )
 
 from ui import constants, file_dialogs
+from ui.icons import WorkbenchIcon
 from ui.main_window_bscan_prefs import BScanPreferenceMixin
 from ui.page_coordinator import PageCoordinator
 from ui.qt_defer import defer_call
@@ -144,10 +145,23 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
         self._setup_global_shortcuts()
         self._connect_signals()
         self._init_state()
+        from PyQt6.QtWidgets import QApplication
+        from ui.file_drop import FileDropFilter
+        self.setAcceptDrops(True)
+        self._file_drop_filter = FileDropFilter(self, self._import_dropped_file)
+        QApplication.instance().installEventFilter(self._file_drop_filter)
         # 注入设置值到页面（设置页更改后下次启动生效）——依赖 project/spatial，
         # 二者属延后页，实际注入发生在预热收尾 _finish_warmup()。
         # 首屏后空闲分片构造剩余页面（启动提速：把 6 个非首屏页的构造挪出首帧）
         self._start_warmup()
+
+    def _import_dropped_file(self, source: str) -> None:
+        project = self._page('projectInterface')
+        if self._backend_ready and project.import_dropped_file(source):
+            self.switchTo(project)
+        else:
+            from qfluentwidgets import InfoBar
+            InfoBar.warning(title='拖入导入', content='请先打开可写项目，并等待当前任务或后端初始化完成。', parent=self)
 
     def _inject_page_settings(self) -> None:
         """注入设置页保存的默认值到各页面控件（非信号驱动，首次启动 / 重启生效）。"""
@@ -296,7 +310,19 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
 
     # ---------------------------------------------------------- 首屏后预热
     def _start_warmup(self) -> None:
-        """首帧渲染后开始分片构造剩余页面（每帧一个，避免一次性长阻塞）。"""
+        """先完成后台初始化，再分片创建页面，避免导入与 Qt 构造争用。"""
+        controller = self.backend_controller
+        if controller is not None and not self._backend_ready:
+            controller.backend_ready.connect(self._schedule_warmup)
+            controller.backend_failed.connect(self._schedule_warmup)
+        else:
+            self._schedule_warmup()
+
+    def _schedule_warmup(self, *_args) -> None:
+        """成功或失败均完成页面注册；提前导航已完成时保持幂等。"""
+        if getattr(self, '_warmup_scheduled', False):
+            return
+        self._warmup_scheduled = True
         defer_call(self, self._warmup_next_page)
 
     def _warmup_next_page(self) -> None:
@@ -483,15 +509,17 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
         layout.addWidget(track, 0, Qt.AlignmentFlag.AlignVCenter)
         layout.addStretch(1)
         # 右端双开关：文件树 (Ctrl+B) / 输出面板 (Ctrl+J)，快捷键入口对等曝光
-        self._file_tree_btn = TransparentToolButton(FIF.LAYOUT, bar)
+        self._file_tree_btn = TransparentToolButton(WorkbenchIcon.DIRECTORY_TREE, bar)
         self._file_tree_btn.setIconSize(QSize(*constants.TOOL_BTN_ICON))
         self._file_tree_btn.setToolTip('文件树 (Ctrl+B)')
+        self._file_tree_btn.setAccessibleName('文件树')
         self._file_tree_btn.setFixedSize(*constants.TOOL_BTN_SIZE)
         self._file_tree_btn.clicked.connect(self._toggle_file_tree)
         layout.addWidget(self._file_tree_btn, 0, Qt.AlignmentFlag.AlignVCenter)
-        self._output_btn = TransparentToolButton(FIF.CODE, bar)
+        self._output_btn = TransparentToolButton(WorkbenchIcon.TASK_LIST, bar)
         self._output_btn.setIconSize(QSize(*constants.TOOL_BTN_ICON))
         self._output_btn.setToolTip('输出面板：日志 / 任务 (Ctrl+J)')
+        self._output_btn.setAccessibleName('输出面板：日志和任务')
         self._output_btn.setFixedSize(*constants.TOOL_BTN_SIZE)
         if self.output_panel is not None:
             self._output_btn.clicked.connect(self.output_panel.toggle_panel)
@@ -1075,6 +1103,9 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
 
     # ============================================================ 关闭
     def closeEvent(self, event) -> None:
+        if not self.page_coordinator.project.confirm_interpretation_close():
+            event.ignore()
+            return
         # 1) 先关解释标注会话（可能涉及后端会话资源）
         if self.interpretation_controller is not None:
             try:
@@ -1090,6 +1121,10 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
             except Exception as e:  # noqa: BLE001
                 logger.warning('设置页状态回写失败（已吞掉）: %s', e)
         self.settings.save()
+        spatial = self._page('spatialInterface')
+        shutdown_spatial = getattr(spatial, 'shutdown', None)
+        if callable(shutdown_spatial):
+            shutdown_spatial()
         # 3) 后端 shutdown
         if self.backend_controller is not None:
             try:

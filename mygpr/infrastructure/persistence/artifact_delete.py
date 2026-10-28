@@ -277,19 +277,16 @@ def delete_artifacts_with_trash(
     stamp = utc_now().replace(":", "").replace("+", "_")
     root_label = str(artifact_ids[0]).replace("/", "_")[:32]
     trash_root = root / ".trash" / "artifacts" / f"{stamp}_{root_label}"
-    trash_root.mkdir(parents=True, exist_ok=False)
     catalog = store.storage.catalog
     moved: list[str] = []
     modes: dict[str, str] = {}
     # 深度先删：catalog.delete_artifact 把 branch head 回退到被删行的 parent，
     # 先删父会留下指向已删除父的悬空 head。
-    for aid in reversed(full_ids):
-        mode, origin = _trash_one_artifact(targets[aid], sidecar_dir, trash_root)
-        moved.append(origin)
-        modes[aid] = mode
-        catalog.delete_artifact(aid)
-
-    atomic_write_json(trash_root / "trash_manifest.json", {
+    files = [sidecar_dir / f"{aid}.h5" for aid in full_ids
+             if targets[aid].storage_mode == STORAGE_MODE_SIDECAR]
+    if any(targets[aid].storage_mode == STORAGE_MODE_INLINE for aid in full_ids):
+        files.append(container)
+    payload = {
         "schema": "mygpr.artifact_trash.v1",
         "line_id": safe_line_id,
         # 形态索引：sidecar 条目搬回 ``<container>.artifacts/``，
@@ -301,7 +298,18 @@ def delete_artifacts_with_trash(
         "trashed_at": utc_now(),
         "container": container.relative_to(root).as_posix(),
         "sidecar_dir": sidecar_dir.relative_to(root).as_posix(),
-    })
+    }
+    with store.mutation("delete-results", files=files, trees=(trash_root,)):
+        trash_root.mkdir(parents=True, exist_ok=False)
+        # Durable intent exists before the first move.  File transaction
+        # backups and the catalog transaction cover the complete closure.
+        atomic_write_json(trash_root / "trash_manifest.json", {**payload, "state": "prepared"})
+        for aid in reversed(full_ids):
+            mode, origin = _trash_one_artifact(targets[aid], sidecar_dir, trash_root)
+            moved.append(origin)
+            modes[aid] = mode
+            catalog.delete_artifact(aid)
+        atomic_write_json(trash_root / "trash_manifest.json", {**payload, "state": "committed"})
     store.append_log(
         f"成果移入回收站 {safe_line_id}: count={len(full_ids)}, "
         f"inline={sum(1 for m in modes.values() if m == STORAGE_MODE_INLINE)}, "

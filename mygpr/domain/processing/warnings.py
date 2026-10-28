@@ -23,6 +23,23 @@ def build_runtime_warning(
     }
 
 
+def build_processing_step_notice(method_id: str, name: str, metadata: dict[str, Any]) -> dict[str, Any]:
+    """Report execution separately from job success; preserve the reason for a no-op."""
+    effective = metadata.get('effective_params')
+    effective = effective if isinstance(effective, dict) else {}
+    skipped = bool(metadata.get('skipped', False) or effective.get('skipped', False))
+    warnings = metadata.get('runtime_warnings') or []
+    warning_reason = next((str(item.get('message', '')) for item in warnings if isinstance(item, dict)), '')
+    reason = str(metadata.get('reason') or effective.get('reason') or warning_reason or '所需输入不可用')
+    status = 'skipped' if skipped else 'executed'
+    outcome = f'已跳过（{reason}）' if skipped else '已执行'
+    if not skipped and metadata.get('runtime_warnings'):
+        outcome += '（有警告，详见日志）'
+    return build_runtime_warning('processing_step_status', f'{name}：{outcome}',
+                                 level='warning' if skipped else 'info',
+                                 method_id=method_id, execution_status=status)
+
+
 def merge_runtime_warnings(*warning_groups: Any) -> list[dict[str, Any]]:
     """Merge multiple warning lists while preserving order and uniqueness."""
     merged: list[dict[str, Any]] = []

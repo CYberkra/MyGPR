@@ -1,4 +1,4 @@
-# MyGPR 0.11.0
+# MyGPR 0.11.4
 
 MyGPR 是 **CDUT-UavGPR 无人机探地雷达平台的数据处理、成像解释与成果交付工作台**，提供桌面应用和无头后端。
 PyQt6 + PyQt6-Fluent-Widgets 桌面前端，配分层后端（`mygpr/` 清洁架构 + `core/` 遗留内核）。

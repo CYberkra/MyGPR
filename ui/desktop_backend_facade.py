@@ -21,6 +21,9 @@ from ui.desktop_backend_dtos import (
     UiPipelineStep,
 )
 from mygpr.application.jobs.models import JobEventType, JobResultSummary  # noqa: E402 — re-exported for ui/controllers
+from mygpr.application.jobs.context import ExecutionContext
+from mygpr.application.jobs.cancellation import CancellationTokenSource
+from mygpr.domain.project.names import display_name as validate_display_name
 
 # ---------------------------------------------------------------------------
 # Backend imports (the only place in ui/ that touches core/mygpr directly)
@@ -36,6 +39,7 @@ from core.method_registry_metadata import (
     PREFERRED_METHOD_ORDER,
 )
 from mygpr.domain.acquisition.models import SensorSyncSettings
+from mygpr.domain.interpretation.models import BoreholeRecord, InterpretationZone
 from mygpr.domain.processing.models import PipelineDefinition, PipelineStep
 
 __all__ = [
@@ -55,6 +59,20 @@ _LOGGER = logging.getLogger(__name__)
 # Public wrapped functions
 # ---------------------------------------------------------------------------
 
+def write_settings_json(path: str, settings: Mapping[str, Any]) -> None:
+    """Persist UI preferences using the same durable atomic writer as projects."""
+    import json
+    from core.storage_primitives import atomic_write_text
+
+    atomic_write_text(path, json.dumps(settings, ensure_ascii=False, indent=4, allow_nan=False))
+
+
+def compute_display_envelope(matrix):
+    """Analytic envelope of the current bounded preview, without altering source data."""
+    from core.display_envelope import display_envelope
+    return display_envelope(matrix)
+
+
 def compute_display_levels(
     matrix: Any,
     *,
@@ -68,6 +86,21 @@ def compute_display_levels(
 def resample_trace_vector(series: Any, trace_count: int) -> Any:
     """Resample a per-trace series onto the trace grid; ``None`` when unusable."""
     return align_trace_vector(series, trace_count)
+
+
+def validate_bscan_display_shape(shape):
+    """Refuse oversized display grids before allocation, without reducing quality."""
+    from mygpr.interfaces.display_resources import validate_full_resolution_bscan
+
+    validate_full_resolution_bscan(shape)
+
+
+def read_full_resolution_bscan(shape, reader, *, cancel_requested=None):
+    """Keep every value with bounded I/O and a file-backed display grid."""
+    from core.full_resolution_preview import read_full_resolution_window
+
+    validate_bscan_display_shape(shape)
+    return read_full_resolution_window(shape, reader, cancel_requested=cancel_requested)
 
 
 def build_preview_bundle(
@@ -115,6 +148,8 @@ def build_preview_bundle(
         p_low=p_low,
         p_high=p_high,
         trace_elevation_m=trace_elevation_m,
+        max_samples=sample_count,
+        max_traces=trace_count,
     )
 
 
@@ -131,6 +166,7 @@ def tile_cache_dir() -> str:
 # 常见参数名 → 中文标签（注册表未提供 label 时的显示回退）
 _PARAM_LABELS = {
     "mode": "模式", "time_start_ns": "起始时间 (ns)", "time_end_ns": "结束时间 (ns)",
+    "trace_start": "起始道号（从1开始）", "trace_end": "结束道号（0=末道）",
     "new_zero_time": "新零时刻 (ns)", "window": "窗口长度", "strength": "强度",
     "smoothing_samples": "平滑采样数", "min_gain": "最小增益", "max_gain": "最大增益",
     "floor_ratio": "基底比例", "scale": "缩放系数", "target": "目标值",
@@ -166,7 +202,7 @@ def _extract_parameter_schema(raw: Mapping[str, Any]) -> tuple[dict, ...]:
     - ``params`` 为 list[spec]（core.methods_registry 侧，spec 自带 name）
 
     此前只读 ``parameter_schema`` 键，而 core 注册表实际叫 ``params``，
-    导致 36 个方法的参数 schema 传到 UI 全为空，参数表单无法构建、
+    导致方法的参数 schema 传到 UI 全为空，参数表单无法构建、
     "应用到选中步骤" 永远禁用 —— 本函数即该缺陷的修复点。
     """
     items: list[dict] = []
@@ -269,6 +305,8 @@ __all__ = [
     # wrapped functions
     "compute_display_levels",
     "build_preview_bundle",
+    "read_full_resolution_bscan",
+    "validate_bscan_display_shape",
     "resample_trace_vector",
     "file_dialog_filter",
     "tile_cache_dir",
@@ -282,6 +320,11 @@ __all__ = [
     "UiPipelineDefinition",
     "UiJobSnapshot",
     # re-exported enums / lightweight types
+    "ExecutionContext",
+    "CancellationTokenSource",
+    "validate_display_name",
     "JobEventType",
     "JobResultSummary",
+    "InterpretationZone",
+    "BoreholeRecord",
 ]

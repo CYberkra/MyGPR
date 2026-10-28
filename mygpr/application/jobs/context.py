@@ -32,6 +32,7 @@ class ExecutionContext:
     metadata: dict[str, Any] = field(default_factory=dict)
     _progress_offset: float = 0.0
     _progress_span: float = 1.0
+    _committed: bool = field(default=False, init=False, repr=False)
 
     @classmethod
     def null(cls) -> "ExecutionContext":
@@ -42,6 +43,15 @@ class ExecutionContext:
 
     def is_cancelled(self) -> bool:
         return self.cancellation_token.is_cancelled
+
+    @property
+    def is_committed(self) -> bool:
+        """Whether this operation has returned its complete persisted result."""
+        return self._committed
+
+    def mark_committed(self) -> None:
+        """Record a completed durable operation without changing cancellation."""
+        self._committed = True
 
     def report_progress(self, completed: int, total: int, message: str = "") -> None:
         total_value = max(1, int(total))

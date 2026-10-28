@@ -4,11 +4,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Iterator, Mapping, Protocol, Sequence
+from typing import Any, Iterator, Mapping, Protocol, Sequence, TypedDict
 
 import numpy as np
 
 from mygpr.application.jobs.context import ExecutionContext
+from mygpr.domain.project.result_package import ProcessingResultPackage
 from mygpr.domain.reporting.models import ReportPackage
 from mygpr.domain.interpretation.models import (
     BoreholeRecord, InterfaceAnnotation, InterpretationFeature,
@@ -29,6 +30,16 @@ from mygpr.domain.project.models import (
 )
 
 
+class WindowOptions(TypedDict, total=False):
+    sample_start: int
+    sample_end: int | None
+    trace_start: int
+    trace_end: int | None
+    max_samples: int
+    max_traces: int
+    normalize: bool
+
+
 class ProjectSessionPort(Protocol):
     @property
     def summary(self) -> ProjectSummary: ...
@@ -38,6 +49,13 @@ class ProjectSessionPort(Protocol):
     def get_metadata(self) -> ProjectMetadata: ...
 
     def update_metadata(self, **changes: str | None) -> ProjectMetadata: ...
+
+    def rename_project(self, name: str) -> ProjectSummary: ...
+
+    def rename_line(self, line_id: str, name: str) -> ProjectLine: ...
+    def update_line_properties(self, line_id: str, length_m: float | None, view_reversed: bool) -> ProjectLine: ...
+
+    def relocate(self, destination: Path, *, context: ExecutionContext) -> ProjectSummary: ...
 
     def list_quality_reports(self) -> Sequence[LineQualityReport]: ...
 
@@ -137,6 +155,8 @@ class ProjectSessionPort(Protocol):
         self, line_id: str, artifact_id: str
     ) -> LineDatasetInfo: ...
 
+    def read_artifact_trace_metadata(self, line_id: str, artifact_id: str) -> Mapping[str, np.ndarray]: ...
+
     def read_artifact_dataset(
         self, line_id: str, artifact_id: str
     ) -> ProjectLineData: ...
@@ -180,6 +200,7 @@ class ProjectSessionPort(Protocol):
         branch_id: str,
         input_dataset: Mapping[str, Any],
         context: ExecutionContext,
+        trace_metadata: Mapping[str, Any] | None = None,
     ) -> ProjectArtifact: ...
 
     def list_artifacts(self, line_id: str | None = None) -> Sequence[ProjectArtifact]: ...
@@ -219,6 +240,12 @@ class ProjectSessionPort(Protocol):
 
     def set_current_spatial_result(self, result_id: str) -> None: ...
 
+    def export_spatial_result(
+        self, result_id: str, destination: Path, *, format_name: str
+    ) -> Path: ...
+
+    def delete_spatial_result(self, result_id: str) -> Path: ...
+
     def build_georeference_3d(
         self,
         line_id: str,
@@ -254,6 +281,11 @@ class ProjectSessionPort(Protocol):
         staging_min_age_s: float,
         deep_hash: bool,
     ) -> IntegrityReport: ...
+
+    def export_processing_package(
+        self, line_id: str, destination: Path, *, artifact_id: str = '',
+        context: ExecutionContext,
+    ) -> ProcessingResultPackage: ...
 
     def generate_report(
         self,
@@ -305,4 +337,4 @@ class ProjectRepositoryPort(Protocol):
     ) -> ProjectRestore: ...
 
 
-__all__ = ["ProjectRepositoryPort", "ProjectSessionPort"]
+__all__ = ["ProjectRepositoryPort", "ProjectSessionPort", "WindowOptions"]

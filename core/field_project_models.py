@@ -104,6 +104,8 @@ class FieldLineRecord:
     line_id: str
     name: str
     length_m: float = 0.0
+    distance_override: str = ""
+    view_reversed: bool = False
     data_quality: str | LineStatus = LineStatus.PENDING
     rtk_status: str = "未定位"
     processing_status: str = "未处理"
@@ -138,6 +140,8 @@ class FieldLineRecord:
             line_id=safe_line_id,
             name=str(payload.get("name") or payload.get("line_id") or ""),
             length_m=float(payload.get("length_m") or 0.0),
+            distance_override=str(payload.get("distance_override") or ""),
+            view_reversed=bool(payload.get("view_reversed", False)),
             data_quality=quality,
             rtk_status=str(payload.get("rtk_status") or "未定位"),
             processing_status=str(payload.get("processing_status") or "未处理"),

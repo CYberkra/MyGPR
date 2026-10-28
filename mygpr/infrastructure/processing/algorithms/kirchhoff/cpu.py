@@ -17,7 +17,7 @@ from mygpr.infrastructure.processing.algorithms.kirchhoff.shared import (
     _postprocess_kir_profile,
     _require_trace_vector,
     _resample_to_input_grid,
-    _resolve_elevation_axis_top_m,
+    _resample_trace_vector,
     _run_kirchhoff_stack,
     _setup_grid,
     _smooth2a,
@@ -85,9 +85,6 @@ def _run_kirchhoff_cpu(
         )
 
     if topo_cor == 2:
-        elevation_axis_top_m = _resolve_elevation_axis_top_m(
-            header_info, trace_metadata, "ground_elevation_m"
-        )
         ground_elevation = _require_trace_vector(
             trace_metadata,
             "ground_elevation_m",
@@ -152,15 +149,16 @@ def _run_kirchhoff_cpu(
         )
 
     if topo_cor == 1:
-        elevation_axis_top_m = _resolve_elevation_axis_top_m(
-            header_info, trace_metadata, "ground_elevation_m"
-        )
+        source_ground = np.asarray(trace_metadata.get("ground_elevation_m", []), dtype=np.float64)
         ground_elevation = _require_trace_vector(
             trace_metadata,
             "ground_elevation_m",
             arr.shape[1],
             "topo_cor=1 需要 ground_elevation_m 航空元数据",
         )
+        if source_ground.shape == (arr.shape[1],) and np.all(np.isfinite(source_ground)):
+            grid_ground = _resample_trace_vector(ground_elevation, output_migrated.shape[1])
+            elevation_axis_top_m = (float(np.max(np.round(grid_ground / dz))) + 1.0) * dz
         display_migrated, pad_rows, _ = _apply_topography_correction_depth(
             display_migrated, ground_elevation, dz, fill_value=np.nan
         )
@@ -200,6 +198,8 @@ def _run_kirchhoff_cpu(
     )
 
     return output.astype(np.float32, copy=False), {
+        "trace_metadata_out": {},
+        "runtime_warnings": ([{"code": "kirchhoff_trace_grid_resampled", "message": "输出道已重采样，原始道 ID 和传感器数据仍保留在原始输入，不能视为与输出逐道对齐。"}] if trace_metadata else []),
         "mapped_params": {
             "freq": freq,
             "depth": depth,

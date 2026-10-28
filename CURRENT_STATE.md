@@ -1,6 +1,6 @@
 # Current State — Desktop Qt GUI + headless backend
 
-Version: 0.11.0. Source-tree review: 2026-10-16 (includes the maintained project and processing workbench).
+Version: 0.11.4. Source-tree review: 2026-10-16 (includes the maintained project and processing workbench).
 Platform integration documentation review: 2026-10-15.
 Source maintenance round: 2026-10-16; see [changes, verification and limits](docs/artifacts/maintenance_20261016.md).
 Workbench redesign: [current UI contract](docs/superpowers/specs/2026-10-16-workbench-redesign.md).
@@ -42,11 +42,18 @@ mygpr
   drafts and versioned direct dependencies for new result branches.
 - New projects use per-line HDF5 arrays plus a SQLite catalog; legacy project
   layouts remain a compatibility path. See [Hybrid Store](docs/developer/HYBRID_PROJECT_STORE_V1.md).
-- Project imports accept CSV/TXT/NPY/NPZ/H5/HDF5. CDUT acquisition HDF5 retains
-  timing, component and aligned sensor gaps for completed files marked `real`/`magnitude`.
-  Parent `fdata` and acquisition files without a component marker remain unsupported.
-  Vendor binary readers are present
-  but are not wired into the project import wizard.
+- Project imports accept single or multiple CSV/TXT/NPY/NPZ/H5/HDF5 files and provide an application-side quality center. CDUT acquisition HDF5 retains
+  timing, component and aligned sensor gaps for completed files marked `real`/`mag`/`magnitude`/`fdata`;
+  `fdata` remains explicitly identified as instrument-display sampling. Acquisition files without a component marker remain unsupported.
+  Vendor binary readers are present but are not wired into the project import wizard.
+- The application exposes batch processing with resource estimates, saved-step results by default and optional block-friendly final-only execution,
+  sensor calibration templates, annotation confirmation and borehole checks, spatial exports,
+  configurable report packages, and restore-to-new-project. Processing result tabs show compact
+  processing actions and parameters from persisted lineage rather than opaque result names.
+- Processing supports inclusive trace-range cropping with aligned distance and sensor metadata,
+  cross-line raw/result split-screen previews, and continued processing from a selected result.
+  B-scan time axes use readable physical-time intervals; Hilbert envelope is a display-only option
+  unless the corresponding processing method is explicitly run.
 - CLI jobs use explicit `methods`; `recommended_profile` has been removed.
 - `config/architecture_policy.toml` now declares `[layers.ui]` with a migration
   exception for `desktop_backend_facade.py`.

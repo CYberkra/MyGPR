@@ -153,3 +153,88 @@ def test_optional_wavelet_backend_is_lazy_and_reports_missing_dependency():
                 header_info=header,
             )
         )
+
+
+def test_trace_cut_keeps_inclusive_trace_range_and_aligned_metadata():
+    data = np.arange(30, dtype=np.float64).reshape(3, 10)
+    metadata = {
+        "trace_index": np.arange(10),
+        "trace_distance_m": np.linspace(2.0, 11.0, 10),
+        "x_m": np.arange(10) * 3,
+        "trace_flags": np.arange(20).reshape(10, 2),
+        "instrument": "demo",
+    }
+    result = NativeProcessingExecutor().execute(
+        ProcessingRequest(
+            data=data,
+            method_id="trace_cut",
+            params={"trace_start": 3, "trace_end": 6},
+            header_info={"source_trace_offset": 4, "track_length_m": 9.0, "total_time_ns": 30.0},
+            trace_metadata=metadata,
+        )
+    )
+
+    np.testing.assert_array_equal(result.data, data[:, 2:6])
+    assert result.data.dtype == np.float32
+    assert result.metadata["trace_start_index"] == 2
+    assert result.metadata["trace_end_index"] == 6
+    assert result.metadata["input_traces"] == 10
+    assert result.metadata["output_traces"] == 4
+    np.testing.assert_array_equal(result.trace_metadata["trace_index"], [2, 3, 4, 5])
+    np.testing.assert_array_equal(result.trace_metadata["x_m"], [6, 9, 12, 15])
+    np.testing.assert_array_equal(
+        result.trace_metadata["trace_flags"], metadata["trace_flags"][2:6]
+    )
+    assert result.trace_metadata["instrument"] == "demo"
+    assert result.header_info["track_length_m"] == pytest.approx(3.0)
+    assert result.header_info["trace_interval_m"] == pytest.approx(1.0)
+    assert result.header_info["source_trace_offset"] == 6
+    assert result.header_info["total_time_ns"] == 30.0
+
+
+def test_trace_cut_supports_single_trace_and_open_ended_default():
+    data = np.arange(20, dtype=np.float32).reshape(2, 10)
+    executor = NativeProcessingExecutor()
+    single = executor.execute(ProcessingRequest(
+        data=data, method_id="trace_cut", params={"trace_start": 4, "trace_end": 4},
+    ))
+    np.testing.assert_array_equal(single.data, data[:, 3:4])
+    complete = executor.execute(ProcessingRequest(
+        data=data, method_id="trace_cut", params={"trace_start": 1, "trace_end": 0},
+    ))
+    np.testing.assert_array_equal(complete.data, data)
+
+
+@pytest.mark.parametrize("params", [
+    {"trace_start": 0, "trace_end": 2},
+    {"trace_start": 4, "trace_end": 2},
+    {"trace_start": 1, "trace_end": 11},
+    {"trace_start": 11, "trace_end": 0},
+])
+def test_trace_cut_rejects_invalid_ranges(params):
+    with pytest.raises(ValueError):
+        NativeProcessingExecutor().execute(ProcessingRequest(
+            data=np.ones((2, 10), dtype=np.float32),
+            method_id="trace_cut",
+            params=params,
+        ))
+
+
+def test_time_cut_rejects_nonuniform_saved_axis():
+    from mygpr.infrastructure.processing.algorithms.extended.time_cut import method_time_cut
+    with pytest.raises(ValueError, match='非均匀'):
+        method_time_cut(np.ones((4, 2), dtype=np.float32), mode='keep_range',
+                        time_start_ns=100, time_end_ns=130,
+                        header_info={'time_window_ns': 40, 'time_axis_ns': [100, 110, 121, 130]})
+
+
+def test_time_cut_absolute_half_open_interval_and_empty_rejection():
+    from mygpr.infrastructure.processing.algorithms.extended.time_cut import method_time_cut
+    data = np.arange(8, dtype=np.float32).reshape(4, 2)
+    header = {'time_axis_ns': [100., 110., 120., 130.]}
+    cut, meta = method_time_cut(data, mode='keep_range', time_start_ns=111,
+                                time_end_ns=130, header_info=header)
+    np.testing.assert_array_equal(cut, data[2:3])
+    assert meta['header_info_updates']['time_cut_offset_ns'] == 120
+    with pytest.raises(ValueError, match='范围'):
+        method_time_cut(data, mode='keep_range', time_start_ns=300, time_end_ns=400, header_info=header)

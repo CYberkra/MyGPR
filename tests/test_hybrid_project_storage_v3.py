@@ -209,6 +209,7 @@ def test_final_catalog_manifest_failure_restores_branch_and_removes_artifact(
     try:
         raw = store.load_gpr_dataset("L01")
         original_register = store.storage.catalog.register_artifact
+        original_branches = store.storage.catalog.list_branches(line_id="L01")
         call_count = 0
 
         def fail_second_registration(payload):
@@ -225,8 +226,7 @@ def test_final_catalog_manifest_failure_restores_branch_and_removes_artifact(
             )
         assert list_processing_artifact_ids(store.storage.line_container_path("L01")) == []
         assert store.storage.catalog.list_artifacts(line_id="L01") == []
-        branch = store.storage.catalog.list_branches(line_id="L01")[0]
-        assert branch["head_artifact_id"] == ""
+        assert store.storage.catalog.list_branches(line_id="L01") == original_branches
     finally:
         store.close()
 

@@ -263,6 +263,10 @@ def read_segy_fixed(path: str | os.PathLike[str]) -> dict[str, Any]:
         raise GPRFormatReadError("SEG-Y 文件过短")
     bin_header = blob[3200:3600]
     sample_interval_us = struct.unpack(">H", bin_header[16:18])[0]
+    if bin_header[300] >= 2:
+        extended = struct.unpack(">d", bin_header[72:80])[0]
+        if extended > 0 and np.isfinite(extended):
+            sample_interval_us = extended
     samples = struct.unpack(">H", bin_header[20:22])[0]
     fmt = struct.unpack(">H", bin_header[24:26])[0]
     if samples <= 0:
@@ -277,15 +281,29 @@ def read_segy_fixed(path: str | os.PathLike[str]) -> dict[str, Any]:
         raise GPRFormatReadError("SEG-Y 未检测到完整 trace")
     data = np.empty((samples, ntr), dtype=np.float32)
     offset = 3600
+    positions = []
+    delays = []
     for idx in range(ntr):
+        trace = blob[offset:offset + 240]
+        scalar = struct.unpack(">h", trace[70:72])[0]
+        factor = scalar if scalar > 0 else 1 / abs(scalar) if scalar < 0 else 1
+        units = struct.unpack(">h", trace[88:90])[0]
+        positions.append(struct.unpack(">i", trace[80:84])[0] * factor if units == 1 else np.nan)
+        time_scalar = struct.unpack(">h", trace[214:216])[0]
+        time_factor = time_scalar if time_scalar > 0 else 1 / abs(time_scalar) if time_scalar < 0 else 1
+        delays.append(struct.unpack(">h", trace[108:110])[0] * time_factor * 1e6)
         start = offset + 240
         end = start + samples * dtype.itemsize
         data[:, idx] = np.frombuffer(blob[start:end], dtype=dtype, count=samples).astype(np.float32, copy=False)
         offset += bytes_per_trace
+    if not np.allclose(delays, delays[0], rtol=0, atol=1e-9):
+        raise GPRFormatReadError("SEG-Y 各道时间起点不一致")
     header = {
         "a_scan_length": int(samples),
         "num_traces": int(ntr),
-        "sample_interval_us": int(sample_interval_us),
+        "sample_interval_us": float(sample_interval_us),
+        "time_axis_ns": np.asarray(delays[0] + np.arange(samples) * sample_interval_us * 1000, dtype=np.float64),
+        "distance_axis_m": np.asarray(positions, dtype=np.float64) if np.all(np.isfinite(positions)) else None,
         "total_time_ns": float(sample_interval_us) * float(samples) * 1000.0,
         "trace_interval_m": 0.0,
         "source": GprReaderFormat.SEGY_FIXED,

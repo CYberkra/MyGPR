@@ -143,6 +143,7 @@ class TestSettingsPageMirror:
         """同步后 settings() 必须原样回读出同步值——closeEvent 靠的就是它。"""
         page.load_settings(dict.fromkeys(_BSCAN_KEYS))
         wanted = {
+            'bscan_contrast': 1.0,
             'bscan_aspect_mode': 'cell',
             'bscan_x_axis': 'distance',
             'bscan_y_axis': 'elevation',

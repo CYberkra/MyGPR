@@ -105,7 +105,10 @@ class FieldArtifactStoreMixin:
         progress_callback=None,
         artifact_kind: str = "processing",
         run_group_id: str = "",
+        trace_metadata=None,
     ) -> tuple[Path, Path]:
+        if trace_metadata and not getattr(self.storage, "is_hybrid", False):
+            raise ValueError("旧项目存储不支持保存逐道元数据，请迁移项目后重试")
         safe_line_id = validate_line_id(line_id)
         line = self.get_line(safe_line_id)
         shape = tuple(int(v) for v in getattr(data, "shape", ()))
@@ -129,31 +132,31 @@ class FieldArtifactStoreMixin:
             params=params,
             saved_at=saved_at,
         )
-        storage_result = self._persist_processed_matrix(
-            line_id=safe_line_id,
-            artifact_id=artifact_id,
-            matrix=data,
-            manifest=manifest,
-            collected_params=collected_params,
-            branch_id=branch_id,
-            parent_artifact_id=parent_id,
-            paths=paths,
-            cancel_requested=cancel_requested,
-            progress_callback=progress_callback,
-        )
-        return self._finalize_processed_artifact(
-            line=line,
-            line_id=safe_line_id,
-            artifact_id=artifact_id,
-            shape=shape,
-            saved_at=saved_at,
-            method_id=method_id,
-            method_name=method_name,
-            collected_params=collected_params,
-            input_dataset=manifest.get("input_dataset") or {},
-            paths=paths,
-            storage_result=storage_result,
-        )
+        from core.hdf5_line_container import artifacts_dir_path
+        from core.project_mutation import project_mutation
+
+        files = [path for key, path in paths.items() if key != "line_dir"]
+        files.append(paths["line_dir"] / f"{artifact_id}.npy")
+        if getattr(self.storage, "is_hybrid", False):
+            container = self.storage.line_container_path(safe_line_id)
+            files.append(artifacts_dir_path(container) / f"{artifact_id}.h5")
+            if not container.exists():
+                files.append(container)
+        with project_mutation(self, "save-processed-result", files=files):
+            storage_result = self._persist_processed_matrix(
+                line_id=safe_line_id, artifact_id=artifact_id, matrix=data,
+                manifest=manifest, collected_params=collected_params,
+                branch_id=branch_id, parent_artifact_id=parent_id, paths=paths,
+                cancel_requested=cancel_requested, progress_callback=progress_callback,
+                trace_metadata=trace_metadata,
+            )
+            return self._finalize_processed_artifact(
+                line=line, line_id=safe_line_id, artifact_id=artifact_id, shape=shape,
+                saved_at=saved_at, method_id=method_id, method_name=method_name,
+                collected_params=collected_params,
+                input_dataset=manifest.get("input_dataset") or {},
+                paths=paths, storage_result=storage_result,
+            )
 
     def _persist_processed_matrix(
         self,
@@ -168,6 +171,7 @@ class FieldArtifactStoreMixin:
         paths: dict[str, Path],
         cancel_requested=None,
         progress_callback=None,
+        trace_metadata=None,
     ) -> dict[str, Any]:
         if getattr(self.storage, "is_hybrid", False):
             result = self.storage.save_processing_artifact(
@@ -180,6 +184,7 @@ class FieldArtifactStoreMixin:
                 parent_artifact_id=parent_artifact_id,
                 cancel_requested=cancel_requested,
                 progress_callback=progress_callback,
+                trace_metadata=trace_metadata,
             )
             full_manifest = dict(result["manifest"])
             full_manifest.update(

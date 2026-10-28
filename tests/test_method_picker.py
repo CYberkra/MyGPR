@@ -55,6 +55,10 @@ class TestPickerWindowContract:
 
     def test_set_methods_forwards_to_browser(self, picker):
         assert len(picker._browser._methods) == 2
+        assert picker._count_label.text() == '2 个方法'
+        assert picker._title_label.text() == '添加处理步骤'
+        assert '双击添加' in picker._hint_label.text()
+        assert picker.minimumWidth() >= 520
 
     def test_reset_state_clears_search(self, picker):
         picker._browser._search.setText('agc')
@@ -146,6 +150,31 @@ class TestPickerChooseFlow:
         picker.sig_method_chosen.connect(got.append)
         picker._browser.sig_add_requested.emit('')
         assert got == []
+
+    def test_selection_updates_details_and_primary_action(self, picker, qapp):
+        got = []
+        picker.sig_method_chosen.connect(got.append)
+        assert picker._add_selected_btn.isEnabled() is False
+        picker.show()
+        qapp.processEvents()
+        item = picker._browser._tree.topLevelItem(0).child(0)
+        picker._browser._tree.setCurrentItem(item)
+        qapp.processEvents()
+        assert picker._selected_name_label.text() == '去直流滤波'
+        assert picker._add_selected_btn.isEnabled() is True
+        picker._add_selected_btn.click()
+        assert got == ['dewow']
+        assert picker.isVisible()
+
+    def test_enter_motion_uses_small_offset(self, picker, qapp, monkeypatch):
+        from ui import motion
+
+        monkeypatch.setattr(motion, 'animations_enabled', lambda: True)
+        picker.show()
+        qapp.processEvents()
+        animation = picker._geometry_animation
+        assert animation.duration() == 180
+        assert abs(animation.endValue().y() - animation.startValue().y()) == 8
 
     def test_apply_theme_is_idempotent(self, picker):
         """主窗 findChildren 遍历可能命中隐藏弹窗：纯令牌重刷无副作用。"""

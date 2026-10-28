@@ -21,7 +21,7 @@ def test_popup_shows_trace_and_title(qapp):
     popup.show_trace(trace, trace_index=42, distance_m=12.5)
     assert popup._ascan_view is not None
     # 标题含道号
-    assert '42' in popup._ascan_view._plot.plotItem.titleLabel.text
+    assert '43' in popup._ascan_view._plot.plotItem.titleLabel.text
 
 
 def test_popup_clear(qapp):

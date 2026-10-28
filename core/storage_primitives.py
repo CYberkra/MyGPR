@@ -14,6 +14,7 @@ import logging
 import os
 import shutil
 import socket
+import sqlite3
 import sys
 import tempfile
 import threading
@@ -104,6 +105,25 @@ def atomic_write_text(path: str | Path, text: str, *, encoding: str = "utf-8") -
 
 def atomic_write_json(path: str | Path, payload: Any) -> Path:
     return atomic_write_text(path, json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=False))
+
+
+def _atomic_copy_file(source: Path, target: Path) -> None:
+    """Copy transaction snapshots with bounded memory, including large HDF5."""
+    with atomic_output_path(target) as temporary:
+        with source.open("rb") as reader, temporary.open("wb") as writer:
+            shutil.copyfileobj(reader, writer, length=1024 * 1024)
+
+
+def _same_file_contents(first: Path, second: Path) -> bool:
+    if not second.is_file() or first.stat().st_size != second.stat().st_size:
+        return False
+    with first.open('rb') as left, second.open('rb') as right:
+        while True:
+            block = left.read(1024 * 1024)
+            if block != right.read(1024 * 1024):
+                return False
+            if not block:
+                return True
 
 
 @contextmanager
@@ -258,6 +278,36 @@ def _windows_process_start_marker(pid: int) -> str:
         kernel32.CloseHandle(handle)
 
 
+@contextmanager
+def _project_lock_file_guard(path: Path):
+    """Serialize lock-file creation/recovery across processes.
+
+    The stable guard file must not be removed: replacing its inode would let
+    contenders lock different files. The OS releases its byte lock on crash.
+    """
+    with path.open("a+b") as stream:
+        if stream.tell() == 0:
+            stream.write(b"\0")
+            stream.flush()
+        stream.seek(0)
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(stream.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            stream.seek(0)
+            if os.name == "nt":
+                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+
+
 @dataclass
 class ProjectLock(AbstractContextManager["ProjectLock"]):
     root: Path
@@ -304,6 +354,10 @@ class ProjectLock(AbstractContextManager["ProjectLock"]):
                 self._held = True
                 self._reentrant = True
                 return self
+            with _project_lock_file_guard(self.root / f"{self.lock_name}.guard"):
+                return self._acquire_lock_file()
+
+    def _acquire_lock_file(self) -> "ProjectLock":
         payload = {
             "schema": "mygpr.project_lock.v2",
             "pid": os.getpid(),
@@ -321,16 +375,12 @@ class ProjectLock(AbstractContextManager["ProjectLock"]):
                 if stale and self.recover_stale:
                     # 陈旧锁的持有者 PID（rename 抢占后用于复核归属）
                     try:
-                        stale_pid = int(json.loads(
-                            self.lock_path.read_text(encoding="utf-8")
-                        ).get("pid") or 0)
-                    except (OSError, ValueError):
+                        stale_payload = json.loads(self.lock_path.read_text(encoding="utf-8"))
+                        stale_pid = int(stale_payload.get("pid") or 0) if isinstance(stale_payload, dict) else 0
+                    except (OSError, ValueError, TypeError):
                         stale_pid = 0
-                    # 原子 rename 抢占恢复权： stale 判定与 unlink 之间存在
-                    # TOCTOU 窗口，若另一实例先恢复并建了新锁，直接 unlink
-                    # 会误删对方的活锁造成双实例写同一项目。rename 到唯一
-                    # 私有名天然互斥——只有 rename 成功的一方有恢复权；
-                    # rename 失败说明锁刚被别人动过，回到 O_EXCL 重试。
+                    # The OS guard serializes current-version contenders across
+                    # the whole recovery/create window; rename alone cannot do so.
                     quarantine = self.lock_path.with_name(
                         f".{self.lock_path.name}.stale.{self.token}")
                     try:
@@ -338,22 +388,19 @@ class ProjectLock(AbstractContextManager["ProjectLock"]):
                     except FileNotFoundError:
                         continue
                     try:
-                        # 二次校验：rename 抢占成功后，读 quarantine 里的
-                        # 锁内容并按 token 复核——确认抢到手的仍是当初
-                        # 判定的陈旧锁（防竞争窗口内原持有者复活重写）。
-                        # 注意不能调 _is_stale()：它读 self.lock_path，
-                        # 而该文件已被 rename 走，恒 FileNotFoundError
-                        # → 恒判 stale（旧实现的恢复权实际失效）。
+                        # Inspect the quarantined file, never the now-vacant
+                        # primary path. A legacy writer may not use the guard.
                         quarantine_payload = json.loads(
                             quarantine.read_text(encoding="utf-8"))
+                        if not isinstance(quarantine_payload, dict):
+                            quarantine_payload = {}
                         if int(quarantine_payload.get("pid") or 0) != stale_pid:
                             # 内容被换过 → 归还锁文件，回 O_EXCL 循环
                             os.replace(quarantine, self.lock_path)
                             continue
-                        self.lock_path.unlink(missing_ok=True)
                         quarantine.unlink(missing_ok=True)
                         continue
-                    except (OSError, ValueError):
+                    except (OSError, ValueError, TypeError):
                         quarantine.unlink(missing_ok=True)
                     continue
                 if self.mode == ProjectAccessMode.AUTO:
@@ -367,11 +414,19 @@ class ProjectLock(AbstractContextManager["ProjectLock"]):
                     return self
                 raise ProjectLockError(f"项目已有写入实例：{self.root}")
             else:
-                with os.fdopen(fd, "w", encoding="utf-8") as stream:
-                    json.dump(payload, stream, ensure_ascii=False, indent=2)
-                    stream.flush()
-                    os.fsync(stream.fileno())
-                fsync_directory(self.root)
+                flushed = False
+                try:
+                    with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                        json.dump(payload, stream, ensure_ascii=False, indent=2)
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    fsync_directory(self.root)
+                    flushed = True
+                finally:
+                    # This O_EXCL-created file is ours and the OS guard is held.
+                    # Leaving a complete live-PID payload would prevent retries.
+                    if not flushed:
+                        self.lock_path.unlink(missing_ok=True)
                 with _PROCESS_LOCK_GUARD:
                     _PROCESS_LOCKS[self.root] = (self.token, 1)
                 self._held = True
@@ -381,6 +436,8 @@ class ProjectLock(AbstractContextManager["ProjectLock"]):
         try:
             payload = json.loads(self.lock_path.read_text(encoding="utf-8"))
         except (OSError, ValueError, TypeError):
+            return True
+        if not isinstance(payload, dict):
             return True
         lock_host = str(payload.get("host") or "")
         # v0.9.27 and earlier lock files had no host field.  Treat those as
@@ -425,12 +482,15 @@ class ProjectLock(AbstractContextManager["ProjectLock"]):
         if remove_file:
             try:
                 payload = json.loads(self.lock_path.read_text(encoding="utf-8"))
-                if payload.get("token") == self.token:
+                if isinstance(payload, dict) and payload.get("token") == self.token:
                     self.lock_path.unlink(missing_ok=True)
                     fsync_directory(self.root)
             except (OSError, ValueError, TypeError):
                 pass
-        self._held = False
+            finally:
+                self._held = False
+        else:
+            self._held = False
 
     def __exit__(self, exc_type, exc, tb) -> None:
         self.release()
@@ -450,6 +510,9 @@ class FileTransaction(AbstractContextManager["FileTransaction"]):
         self.backups = self.stage_root / "before"
         self.journal_path = self.stage_root / "transaction.json"
         self._tracked: dict[Path, bool] = {}
+        self._trees: dict[Path, bool] = {}
+        self._catalog_path: str | None = None
+        self.catalog_commit_key = 'file_transaction:' + self.transaction_id
         self._committed = False
 
     def __enter__(self) -> "FileTransaction":
@@ -464,20 +527,44 @@ class FileTransaction(AbstractContextManager["FileTransaction"]):
         })
         return self
 
+    def bind_catalog(self, path: Path) -> None:
+        self._catalog_path = str(Path(path).resolve().relative_to(self.root))
+        self._write_journal("active")
+
+    def track_tree(self, path: str | Path) -> Path:
+        target = Path(path).resolve()
+        relative = target.relative_to(self.root)
+        if not relative.parts or relative.parts[0] == '.transactions':
+            raise ValueError("不能跟踪整个项目目录")
+        if target in self._trees:
+            return target
+        # Finish all backups before publishing the tree entry.  A failed
+        # snapshot must never make recovery remove untracked original files.
+        for child in sorted(target.rglob("*")):
+            if child.is_file():
+                self.track(child)
+        self._trees[target] = target.exists()
+        self._write_journal("active")
+        return target
+
     def track(self, path: str | Path) -> Path:
         target = Path(path).resolve()
         try:
             relative = target.relative_to(self.root)
         except ValueError as exc:
             raise ValueError("事务只能跟踪项目目录内文件") from exc
+        if not relative.parts or relative.parts[0] == '.transactions':
+            raise ValueError('不能跟踪项目根目录或事务恢复目录')
+        if target.is_dir():
+            raise IsADirectoryError(target)
         if target in self._tracked:
             return target
         existed = target.exists()
-        self._tracked[target] = existed
         if existed and target.is_file():
             backup = self.backups / relative
             backup.parent.mkdir(parents=True, exist_ok=True)
-            atomic_write_bytes(backup, target.read_bytes())
+            _atomic_copy_file(target, backup)
+        self._tracked[target] = existed
         self._write_journal("active")
         return target
 
@@ -492,18 +579,24 @@ class FileTransaction(AbstractContextManager["FileTransaction"]):
                 {"path": str(path.relative_to(self.root)), "existed": existed}
                 for path, existed in self._tracked.items()
             ],
+            "trees": [{"path": str(path.relative_to(self.root)), "existed": existed}
+                      for path, existed in self._trees.items()],
+            "catalog_path": self._catalog_path,
+            "catalog_commit_key": self.catalog_commit_key,
         })
 
     def commit(self) -> None:
-        self._committed = True
         self._write_journal("committed")
+        self._committed = True
 
     def rollback(self) -> None:
+        _remove_created_tree_files(self.root, self._trees, self._tracked)
         for target, existed in reversed(list(self._tracked.items())):
             relative = target.relative_to(self.root)
             backup = self.backups / relative
             if existed and backup.exists():
-                atomic_write_bytes(target, backup.read_bytes())
+                if not _same_file_contents(backup, target):
+                    _atomic_copy_file(backup, target)
             elif not existed:
                 target.unlink(missing_ok=True)
         self._write_journal("rolled_back")
@@ -521,6 +614,73 @@ class FileTransaction(AbstractContextManager["FileTransaction"]):
             # journal and backups remain available for diagnosis/recovery.
             self.rollback()
         self._cleanup()
+
+
+def _remove_created_tree_files(root: Path, trees: dict[Path, bool], tracked: dict[Path, bool]) -> None:
+    for path in (*trees, *tracked):
+        if not path.relative_to(root).parts:
+            raise ValueError("事务不能指向整个项目目录")
+    for tree, existed in trees.items():
+        tree.relative_to(root)
+        for path in sorted(tree.rglob("*"), reverse=True):
+            path.resolve().relative_to(root)
+            if path.is_file() and path.resolve() not in tracked:
+                path.unlink()
+            elif path.is_dir() and not any(path.iterdir()):
+                path.rmdir()
+        if not existed and tree.exists() and not any(tree.iterdir()):
+            tree.rmdir()
+
+
+def _transaction_path(root: Path, relative: Any) -> Path:
+    path = Path(str(relative or ''))
+    if not path.parts or path.is_absolute() or '..' in path.parts:
+        raise ValueError(f"unsafe transaction path: {relative}")
+    resolved = (root / path).resolve()
+    parts = resolved.relative_to(root).parts
+    if not parts or parts[0] == '.transactions':
+        raise ValueError("事务不能指向项目根目录或事务恢复目录")
+    return resolved
+
+
+def _catalog_committed(root: Path, payload: dict[str, Any]) -> bool:
+    path = _transaction_path(root, payload['catalog_path'])
+    key = str(payload.get('catalog_commit_key') or '')
+    if not key:
+        raise ValueError('missing catalog commit key')
+    db = sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=5)
+    try:
+        row = db.execute('SELECT value FROM catalog_meta WHERE key=?', (key,)).fetchone()
+        return bool(row and row[0] == 'committed')
+    finally:
+        db.close()
+
+
+def _restore_transaction_files(root: Path, stage: Path, payload: dict[str, Any]) -> None:
+    files = payload.get('files')
+    trees = payload.get('trees', [])
+    if not isinstance(files, list) or not isinstance(trees, list):
+        raise ValueError('transaction files and trees must be lists')
+    # Validate every path and required backup before the first mutation.
+    targets = [(_transaction_path(root, item.get('path')), bool(item.get('existed')))
+               for item in files]
+    tree_paths = {_transaction_path(root, item.get('path')): bool(item.get('existed'))
+                  for item in trees}
+    backups = {}
+    for target, existed in targets:
+        backup = (stage / 'before' / target.relative_to(root)).resolve()
+        backup.relative_to(stage.resolve())
+        if existed and not backup.is_file():
+            raise FileNotFoundError(f'transaction backup missing: {backup}')
+        backups[target] = backup
+    _remove_created_tree_files(root, tree_paths, dict(targets))
+    for target, existed in reversed(targets):
+        if existed:
+            if not _same_file_contents(backups[target], target):
+                _atomic_copy_file(backups[target], target)
+        else:
+            target.unlink(missing_ok=True)
+            fsync_directory(target.parent)
 
 
 def recover_file_transactions(root: str | Path) -> tuple[dict[str, Any], ...]:
@@ -546,26 +706,12 @@ def recover_file_transactions(root: str | Path) -> tuple[dict[str, Any], ...]:
                 raise ValueError("unsupported file transaction schema")
             transaction_id = str(payload.get("transaction_id") or transaction_id)
             state = str(payload.get("state") or "active")
+            if state not in {'active', 'committed', 'rolled_back'}:
+                raise ValueError(f'unsupported transaction state: {state}')
+            if payload.get('catalog_path'):
+                state = 'committed' if _catalog_committed(project_root, payload) else 'active'
             if state == "active":
-                files = payload.get("files")
-                if not isinstance(files, list):
-                    raise ValueError("transaction files must be a list")
-                for item in reversed(files):
-                    relative = Path(str(item.get("path") or ""))
-                    if relative.is_absolute() or ".." in relative.parts:
-                        raise ValueError(f"unsafe transaction path: {relative}")
-                    target = (project_root / relative).resolve()
-                    target.relative_to(project_root)
-                    existed = bool(item.get("existed"))
-                    backup = (stage_root / "before" / relative).resolve()
-                    backup.relative_to(stage_root.resolve())
-                    if existed:
-                        if not backup.is_file():
-                            raise FileNotFoundError(f"transaction backup missing: {backup}")
-                        atomic_write_bytes(target, backup.read_bytes())
-                    else:
-                        target.unlink(missing_ok=True)
-                        fsync_directory(target.parent)
+                _restore_transaction_files(project_root, stage_root, payload)
                 action = "rolled_back"
             else:
                 action = "cleaned"
@@ -577,7 +723,7 @@ def recover_file_transactions(root: str | Path) -> tuple[dict[str, Any], ...]:
                 "action": action,
                 "state": state,
             })
-        except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
+        except (OSError, ValueError, TypeError, KeyError, AttributeError, sqlite3.Error) as exc:
             results.append({
                 "transaction_id": transaction_id,
                 "success": False,

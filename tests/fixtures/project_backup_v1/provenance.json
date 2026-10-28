@@ -1,0 +1,24 @@
+{
+  "source_ref": "e379a5ef602459fef166539f96d3904e7cd9f76a",
+  "schema": "mygpr.project_backup.v1",
+  "archive_size_bytes": 7403,
+  "archive_sha256": "7ae40a06b39e43371e6a0ab4def76aa5cef8808f69e3b417ba6c84f38162c9c7",
+  "matrix_shape": [
+    3,
+    4
+  ],
+  "matrix_values": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11
+  ]
+}

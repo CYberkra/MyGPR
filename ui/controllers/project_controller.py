@@ -10,21 +10,20 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
 
 from ui.desktop_backend_facade import (
     SensorSyncSettings,
     build_preview_bundle,
+    read_full_resolution_bscan,
     resample_trace_vector,
     time_to_depth_axis,
 )
 from ui.controllers.backend_controller import friendly_error_message, run_command
+from ui.controllers.project_identity_controller import ProjectIdentityController
+from ui.sensor_summary import SensorCompletenessReport, sensor_completeness_report
 
 _LOGGER = logging.getLogger(__name__)
-
-_PREVIEW_MAX_SAMPLES = 900
-_PREVIEW_MAX_TRACES = 1800
-
 
 def _sample_trace_vector(series: Any, index: np.ndarray, total_traces: int) -> np.ndarray | None:
     """按与矩阵窗口相同的道索引抽样逐道序列。
@@ -48,6 +47,25 @@ def _sample_trace_vector(series: Any, index: np.ndarray, total_traces: int) -> n
     return np.ascontiguousarray(array[index])
 
 
+def _preview_trace_values(values, indices, total, *, integer_only=False):
+    if values is None:
+        return None
+    array = np.asarray(values)
+    if array.ndim != 1 or array.size != total or (integer_only and array.dtype.kind not in 'iu'):
+        return None
+    return array[np.asarray(indices, dtype=np.int64)] if indices is not None else array
+
+
+def _preview_sample_axis(metadata, elevation, depth, time):
+    if metadata.get('is_elevation'):
+        return elevation, '海拔 (m)' if elevation is not None else ''
+    if metadata.get('is_depth'):
+        return depth, '深度 (m)' if depth is not None else ''
+    if time is not None:
+        return time, '时间 (ns)'
+    return depth, '深度 (m)' if depth is not None else ''
+
+
 class ProjectController(QObject):
     """Mediates project open/close/import/preview between UI and backend."""
 
@@ -63,9 +81,13 @@ class ProjectController(QObject):
     artifacts_updated = pyqtSignal(str, list)    # line_id, list[ProjectArtifact]
     all_artifacts_updated = pyqtSignal(list)     # 全项目 list[ProjectArtifact]（文件树成果视图）
     dataset_preview_ready = pyqtSignal(object)   # PreviewBundle (raw data)
+    comparison_preview_ready = pyqtSignal(str, str, str, object, str)
+    comparison_artifacts_ready = pyqtSignal(str, str, list)
+    comparison_artifact_preview_ready = pyqtSignal(str, str, str, str, object, str)
     artifact_preview_ready = pyqtSignal(str, object)  # artifact_id, PreviewBundle
     preflight_ready = pyqtSignal(object)         # ImportPreflight
     preflight_failed = pyqtSignal(str)           # 导入预检失败消息
+    quality_reports_ready = pyqtSignal(list)
     preview_invalidated = pyqtSignal(str)        # 预览中的成果已被删除（携带成果 id）
     spatial_tracks_ready = pyqtSignal(list)      # list[SpatialTrack]
     depth_preview_ready = pyqtSignal(object, list, float, int)  # payload, line_ids, cell_size_m, generation
@@ -73,12 +95,21 @@ class ProjectController(QObject):
     depth_save_failed = pyqtSignal(str)                    # message
     artifact_descendants_ready = pyqtSignal(str, list, dict)  # line_id, 后代闭包, {artifact_id: 名称}
     line_source_path_ready = pyqtSignal(str, object)          # line_id, 源文件路径|None
+    line_sensor_summary_ready = pyqtSignal(str, str)         # line_id, compact availability text
+    line_sensor_report_ready = pyqtSignal(str, object)       # line_id, SensorCompletenessReport
+    sensor_sync_result_ready = pyqtSignal(str, object)
+    _project_read_ready = pyqtSignal(object, object)
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
+        self._project_read_ready.connect(self._deliver_project_read)
         self._backend_controller = None
         self._current = None
         self._busy = False
+        self._project_context_generation = 0
+        self._lines_generation = 0
+        self.identity = ProjectIdentityController(self)
+        self._sensor_summary_versions: dict[str, int] = {}
         # 预览代数：每次发起新预览自增，worker 回包时若代数已过期则丢弃，
         # 防止快速切换测线时旧预览覆盖新预览。
         self._preview_generation = 0
@@ -123,6 +154,14 @@ class ProjectController(QObject):
             self._busy = value
             self.busy_changed.emit(value)
 
+    @pyqtSlot(object, object)
+    def _deliver_project_read(self, command, payload) -> None:
+        # This slot runs on the controller's GUI thread. A switch can occur
+        # after the worker emits but before Qt delivers its queued result.
+        if command._context_is_current():
+            signal_name, args = payload
+            getattr(self, signal_name).emit(*args)
+
     def _project_id_or_warn(self) -> str | None:
         project_id = self.current_project_id
         if project_id is None:
@@ -133,6 +172,7 @@ class ProjectController(QObject):
         if self._busy:
             self.log_message.emit("操作进行中，请稍后…")
             return
+        self._project_context_generation += 1
         # 新建项目同样切换项目上下文，使旧项目在途预览回包过期。
         self._depth_preview_generation += 1
         self._preview_generation += 1
@@ -147,6 +187,7 @@ class ProjectController(QObject):
         if self._busy:
             self.log_message.emit("操作进行中，请稍后…")
             return
+        self._project_context_generation += 1
         # 打开/切换项目前使旧项目在途预览回包过期（A→B 直切时 A 的
         # 回包代数与新项目相同，不推进则门卫会放行旧 payload）。
         self._depth_preview_generation += 1
@@ -165,6 +206,7 @@ class ProjectController(QObject):
         if self._busy:
             self.log_message.emit("操作进行中，请稍后…")
             return
+        self._project_context_generation += 1
         # 关闭前使在途预览回包过期，防止旧项目 payload 渲染进后续视图。
         self._depth_preview_generation += 1
         self._preview_generation += 1
@@ -217,6 +259,16 @@ class ProjectController(QObject):
             name="mygpr-line-source-path",
         )
 
+    def line_sensor_summary(self, line_id: str, trace_count: int | None = None) -> None:
+        project_id = self.current_project_id
+        if project_id is None or not line_id:
+            return
+        line_id = str(line_id)
+        version = self._sensor_summary_versions.get(line_id, 0) + 1
+        self._sensor_summary_versions[line_id] = version
+        run_command(_LineSensorSummaryCommand(self, project_id, line_id, trace_count, version),
+                    name='mygpr-line-sensors')
+
     def refresh_lines(self) -> None:
         backend = self._backend()
         project_id = self.current_project_id
@@ -225,7 +277,7 @@ class ProjectController(QObject):
         if project_id is None:
             self.lines_updated.emit([])
             return
-
+        self._lines_generation += 1
         run_command(
             _RefreshLinesCommand(self, project_id),
             name="mygpr-lines-refresh",
@@ -283,6 +335,33 @@ class ProjectController(QObject):
             name="mygpr-line-preview",
         )
 
+    def preview_comparison_line(self, project_id: str, line_id: str, request_id: str) -> None:
+        """Read a bounded reference without advancing the processing preview."""
+        if str(project_id) != self.current_project_id or self._backend() is None:
+            self.comparison_preview_ready.emit(str(project_id), str(line_id), str(request_id),
+                                               None, '项目已切换或后端尚未就绪')
+            return
+        run_command(_PreviewLineCommand(self, str(project_id), str(line_id), 0,
+                                        reference_request=str(request_id)),
+                    name='mygpr-line-comparison')
+
+    def load_comparison_artifacts(self, project_id: str, line_id: str) -> None:
+        if str(project_id) == self.current_project_id:
+            run_command(
+                _ComparisonArtifactsCommand(self, str(project_id), str(line_id)),
+                name='mygpr-comparison-artifacts',
+            )
+
+    def preview_comparison_artifact(self, project_id: str, line_id: str, artifact_id: str, request_id: str) -> None:
+        if str(project_id) == self.current_project_id:
+            run_command(
+                _PreviewArtifactCommand(
+                    self, str(project_id), str(line_id), str(artifact_id), 0, False,
+                    reference_request=str(request_id),
+                ),
+                name='mygpr-comparison-artifact-preview',
+            )
+
     def preview_artifact(self, line_id: str, artifact_id: str,
                          *, strict_generation: bool = True) -> None:
         """加载成果预览。
@@ -325,6 +404,9 @@ class ProjectController(QObject):
         total_traces: int = 0,
         trace_elevation_m: Any = None,
         dielectric_constant: float = 0.0,
+        metadata: Any = None,
+        source_trace_ids: Any = None,
+        trace_qc_bad_mask: Any = None,
     ) -> Any:
         """从 read_window 结果构建预览 bundle。
 
@@ -341,18 +423,41 @@ class ProjectController(QObject):
         time_axis_ns = None
         distance_axis_m = None
         elevation_axis_m = None
+        elevation_grid = None
         depth_axis_m = None
+        metadata = dict(metadata or {})
+        is_elevation = bool(metadata.get('is_elevation'))
+        ids = _preview_trace_values(source_trace_ids, trace_indices, total_traces, integer_only=True)
+        qc_mask = _preview_trace_values(trace_qc_bad_mask, trace_indices, total_traces)
+        def axis(name, indices, size):
+            values = np.asarray(metadata.get(name, []), dtype=np.float64)
+            if values.ndim != 1 or values.size != size or not np.all(np.isfinite(values)):
+                return None
+            return values[np.asarray(indices, dtype=np.int64)] if indices is not None else values
+
+        if is_elevation and (sample_indices is None or total_samples <= 0 or axis('elevation_axis_m', sample_indices, total_samples) is None):
+            raise ValueError('成果缺少有效高程坐标，无法预览')
+
         if sample_indices is not None and total_samples > 0:
-            base = np.linspace(0.0, float(time_window_ns), int(total_samples), dtype=np.float32)
-            time_axis_ns = base[np.asarray(sample_indices, dtype=np.int64)]
-            if float(dielectric_constant or 0.0) > 0.0:
+            time_axis_ns = axis('time_axis_ns', sample_indices, total_samples)
+            depth_axis_m = axis('depth_axis_m', sample_indices, total_samples)
+            elevation_grid = axis('elevation_axis_m', sample_indices, total_samples) if is_elevation else None
+            if time_axis_ns is None and not metadata and time_window_ns > 0:
+                base = np.linspace(0.0, float(time_window_ns), int(total_samples), dtype=np.float32)
+                time_axis_ns = base[np.asarray(sample_indices, dtype=np.int64)]
+            if depth_axis_m is None and time_axis_ns is not None and float(dielectric_constant or 0.0) > 0.0:
                 depth_axis_m = time_to_depth_axis(time_axis_ns, dielectric_constant)
+            if is_elevation:
+                depth_axis_m = None
         if trace_indices is not None and total_traces > 0:
             index = np.asarray(trace_indices, dtype=np.int64)
-            base = np.linspace(0.0, float(length_m or max(int(total_traces) - 1, 1)), int(total_traces), dtype=np.float32)
-            distance_axis_m = base[index]
+            if metadata.get('distance_axis_status') != 'unknown':
+                distance_axis_m = axis('distance_axis_m', index, total_traces)
+                if distance_axis_m is None and not metadata and length_m and length_m > 0:
+                    base = np.linspace(0.0, float(length_m), int(total_traces), dtype=np.float32)
+                    distance_axis_m = base[index]
             elevation_axis_m = _sample_trace_vector(trace_elevation_m, index, int(total_traces))
-        return build_preview_bundle(
+        bundle = build_preview_bundle(
             line_id=line_id,
             matrix=np.asarray(matrix, dtype=np.float32),
             title=title,
@@ -361,6 +466,18 @@ class ProjectController(QObject):
             distance_axis_m=distance_axis_m,
             trace_elevation_m=elevation_axis_m,
             depth_axis_m=depth_axis_m,
+        )
+        sample_axis, sample_axis_label = _preview_sample_axis(metadata, elevation_grid, depth_axis_m, time_axis_ns)
+        return dataclasses.replace(
+            bundle, trace_axis_m=distance_axis_m,
+            sample_axis=sample_axis, sample_axis_label=sample_axis_label,
+            depth_axis_m=depth_axis_m, trace_count=int(total_traces) or bundle.trace_count,
+            sample_count=int(total_samples) or bundle.sample_count,
+            trace_indices=trace_indices if trace_indices is not None else bundle.trace_indices,
+            sample_indices=sample_indices if sample_indices is not None else bundle.sample_indices,
+            source_trace_ids=ids,
+            trace_qc_bad_mask=qc_mask,
+            view_reversed=bool(metadata.get('view_reversed', False)),
         )
 
     @staticmethod
@@ -402,6 +519,65 @@ class ProjectController(QObject):
         bridge.watch(job_id, title=f"导入测线 {line_id}")
         return job_id
 
+    def import_lines(self, sources: list[str]) -> str | None:
+        backend = self._backend()
+        bridge = self._job_bridge()
+        project_id = self._project_id_or_warn()
+        selected = [str(path) for path in sources or [] if str(path)]
+        if backend is None or bridge is None or project_id is None or not selected:
+            return None
+        try:
+            job_id = backend.submit_batch_line_import(project_id, selected)
+        except Exception as exc:  # noqa: BLE001
+            self.log_message.emit(f"批量导入提交失败：{friendly_error_message(exc)}")
+            return None
+        self.log_message.emit(f"批量导入已提交：{len(selected)} 个文件")
+        bridge.watch(job_id, title=f"批量导入 {len(selected)} 个文件")
+        return job_id
+
+    def refresh_quality_reports(self) -> None:
+        project_id = self._project_id_or_warn()
+        if project_id:
+            run_command(_QualityReportsCommand(self, project_id), name="mygpr-quality-reports")
+
+    def check_quality(self, line_id: str = "") -> str | None:
+        backend = self._backend()
+        bridge = self._job_bridge()
+        project_id = self._project_id_or_warn()
+        if backend is None or bridge is None or project_id is None:
+            return None
+        try:
+            job_id = (backend.submit_line_quality_check(project_id, str(line_id))
+                      if line_id else backend.submit_project_quality_check(project_id))
+        except Exception as exc:  # noqa: BLE001
+            self.log_message.emit(f"数据质检提交失败：{friendly_error_message(exc)}")
+            return None
+
+        def _on_done(done_id, success, message, _result):
+            if done_id != job_id:
+                return
+            try:
+                bridge.job_completed.disconnect(_on_done)
+            except TypeError:
+                pass
+            if not success:
+                self.log_message.emit(f"数据质检失败：{message}")
+            if self.current_project_id == project_id:
+                self.refresh_lines()
+                self.refresh_quality_reports()
+
+        bridge.job_completed.connect(_on_done)
+        bridge.watch(job_id, title=f"数据质检 {line_id or '整个项目'}")
+        return job_id
+
+    def apply_dielectric(self, line_id: str, dielectric: float) -> None:
+        project_id = self._project_id_or_warn()
+        if project_id:
+            run_command(
+                _DielectricCommand(self, project_id, str(line_id), float(dielectric)),
+                name='mygpr-dielectric-apply',
+            )
+
     def sync_sensors(self, line_id: str, paths: dict, settings: dict) -> str | None:
         backend = self._backend()
         bridge = self._job_bridge()
@@ -440,6 +616,20 @@ class ProjectController(QObject):
             self.log_message.emit(f"传感器同步提交失败：{friendly_error_message(exc)}")
             return None
         self.log_message.emit(f"传感器同步已提交：{line_id}")
+
+        def _on_done(done_id, success, message, result):
+            if done_id != job_id:
+                return
+            try:
+                bridge.job_completed.disconnect(_on_done)
+            except TypeError:
+                pass
+            if success and self.current_project_id == project_id:
+                self.sensor_sync_result_ready.emit(line_id, result)
+            elif not success:
+                self.log_message.emit(f"传感器同步失败：{message}")
+
+        bridge.job_completed.connect(_on_done)
         bridge.watch(job_id, title=f"传感器同步 {line_id}")
         return job_id
 
@@ -587,6 +777,7 @@ class _CreateProjectCommand:
             c.open_failed.emit(message)
         else:
             # 与 _OpenProjectCommand 同理：项目上下文切换时刻推进代数。
+            c._project_context_generation += 1
             c._depth_preview_generation += 1
             c._preview_generation += 1
             c.invalidate_artifact_previews()
@@ -627,6 +818,7 @@ class _OpenProjectCommand:
             # 项目上下文真正切换的时刻再次推进代数：busy 窗口内发起的
             # 预览请求仍指向旧项目，其回包代数可能与 open 前的推进撞车，
             # 不在此推进则门卫会放行旧项目 payload。
+            c._project_context_generation += 1
             c._depth_preview_generation += 1
             c._preview_generation += 1
             c.invalidate_artifact_previews()
@@ -660,6 +852,7 @@ class _CloseProjectCommand:
             # 与 open/create 成功路径同理：busy 窗口内发起的预览请求
             # 仍指向本项目，close_current 的前置推进可被其自增抵消；
             # 项目上下文清除时刻再次推进，确保 in-flight 回包全部过期。
+            c._project_context_generation += 1
             c._depth_preview_generation += 1
             c._preview_generation += 1
             c.invalidate_artifact_previews()
@@ -670,12 +863,38 @@ class _CloseProjectCommand:
             c._set_busy(False)
 
 
-class _RefreshLinesCommand:
-    __slots__ = ("_controller", "_project_id")
+class _ProjectReadCommand:
+    """Fence project reads independently from line/artifact preview requests."""
+
+    __slots__ = ("_context_generation",)
+    _controller: ProjectController
+    _project_id: str | None
+
+    def __init__(self, controller: ProjectController) -> None:
+        self._context_generation = controller._project_context_generation
+
+    def _context_is_current(self) -> bool:
+        c = self._controller
+        return (c.current_project_id == self._project_id
+                and c._project_context_generation == self._context_generation)
+
+    def _publish(self, signal_name: str, *args) -> None:
+        if self._context_is_current():
+            self._controller._project_read_ready.emit(self, (signal_name, args))
+
+
+class _RefreshLinesCommand(_ProjectReadCommand):
+    __slots__ = ("_controller", "_project_id", "_lines_generation")
 
     def __init__(self, controller: ProjectController, project_id: str) -> None:
+        super().__init__(controller)
         self._controller = controller
         self._project_id = project_id
+        self._lines_generation = controller._lines_generation
+
+    def _context_is_current(self) -> bool:
+        return (super()._context_is_current()
+                and self._lines_generation == self._controller._lines_generation)
 
     def execute(self) -> None:
         c = self._controller
@@ -688,13 +907,60 @@ class _RefreshLinesCommand:
             _LOGGER.exception("刷新测线列表失败")
             c.log_message.emit(f"刷新测线列表失败：{friendly_error_message(exc)}")
         else:
-            c.lines_updated.emit(lines)
+            self._publish("lines_updated", lines)
 
 
-class _RefreshArtifactsCommand:
+class _DielectricCommand:
+    __slots__ = ("_controller", "_project_id", "_line_id", "_dielectric")
+
+    def __init__(self, controller, project_id, line_id, dielectric):
+        self._controller = controller
+        self._project_id = project_id
+        self._line_id = line_id
+        self._dielectric = float(dielectric)
+
+    def execute(self):
+        backend = self._controller._backend()
+        if backend is None or not 1.0 <= self._dielectric <= 81.0:
+            return
+        try:
+            backend.projects.save_velocity_model(
+                self._project_id,
+                self._line_id,
+                0.299792458 / float(np.sqrt(self._dielectric)),
+                evidence={'source': 'manual_dielectric', 'dielectric_constant': self._dielectric},
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._controller.log_message.emit(f"速度模型写回失败：{friendly_error_message(exc)}")
+        else:
+            self._controller.log_message.emit(f"速度模型已写回：{self._line_id}（εr={self._dielectric:g}）")
+
+
+class _QualityReportsCommand(_ProjectReadCommand):
+    __slots__ = ("_controller", "_project_id")
+
+    def __init__(self, controller, project_id):
+        super().__init__(controller)
+        self._controller = controller
+        self._project_id = project_id
+
+    def execute(self):
+        backend = self._controller._backend()
+        if backend is None:
+            return
+        try:
+            reports = list(backend.maintenance.list_quality_reports(self._project_id))
+        except Exception as exc:  # noqa: BLE001
+            self._controller.log_message.emit(f"读取质检报告失败：{friendly_error_message(exc)}")
+        else:
+            self._publish("quality_reports_ready", reports)
+
+
+class _RefreshArtifactsCommand(_ProjectReadCommand):
     __slots__ = ("_controller", "_project_id", "_line_id")
 
     def __init__(self, controller: ProjectController, project_id: str, line_id: str) -> None:
+        super().__init__(controller)
         self._controller = controller
         self._project_id = project_id
         self._line_id = line_id
@@ -710,13 +976,14 @@ class _RefreshArtifactsCommand:
             _LOGGER.exception("刷新成果列表失败")
             c.log_message.emit(f"刷新成果列表失败：{friendly_error_message(exc)}")
         else:
-            c.artifacts_updated.emit(self._line_id, artifacts)
+            self._publish("artifacts_updated", self._line_id, artifacts)
 
 
-class _RefreshAllArtifactsCommand:
+class _RefreshAllArtifactsCommand(_ProjectReadCommand):
     __slots__ = ("_controller", "_project_id")
 
     def __init__(self, controller: ProjectController, project_id: str) -> None:
+        super().__init__(controller)
         self._controller = controller
         self._project_id = project_id
 
@@ -733,13 +1000,14 @@ class _RefreshAllArtifactsCommand:
             c.log_message.emit(
                 f"刷新全项目成果列表失败：{friendly_error_message(exc)}")
         else:
-            c.all_artifacts_updated.emit(artifacts)
+            self._publish("all_artifacts_updated", artifacts)
 
 
-class _LoadSpatialTracksCommand:
+class _LoadSpatialTracksCommand(_ProjectReadCommand):
     __slots__ = ("_controller", "_project_id")
 
     def __init__(self, controller: ProjectController, project_id: str) -> None:
+        super().__init__(controller)
         self._controller = controller
         self._project_id = project_id
 
@@ -754,11 +1022,11 @@ class _LoadSpatialTracksCommand:
             _LOGGER.exception("加载空间轨迹失败")
             c.log_message.emit(f"加载空间轨迹失败：{friendly_error_message(exc)}")
         else:
-            c.spatial_tracks_ready.emit(tracks)
+            self._publish("spatial_tracks_ready", tracks)
 
 
-class _PreviewLineCommand:
-    __slots__ = ("_controller", "_project_id", "_line_id", "_generation")
+class _PreviewLineCommand(_ProjectReadCommand):
+    __slots__ = ("_controller", "_project_id", "_line_id", "_generation", "_reference_request")
 
     def __init__(
         self,
@@ -766,44 +1034,63 @@ class _PreviewLineCommand:
         project_id: str,
         line_id: str,
         generation: int,
+        *, reference_request: str = '',
     ) -> None:
+        super().__init__(controller)
         self._controller = controller
         self._project_id = project_id
         self._line_id = line_id
         self._generation = generation
+        self._reference_request = reference_request
+
+    def _publish_reference(self, bundle, error='') -> None:
+        self._publish('comparison_preview_ready', self._project_id, self._line_id,
+                      self._reference_request, bundle, error)
 
     def execute(self) -> None:
         c = self._controller
         backend = c._backend()
         if backend is None:
+            if self._reference_request:
+                self._publish_reference(None, '后端尚未就绪')
             return
         try:
             info = backend.projects.get_dataset_info(self._project_id, self._line_id)
-            matrix, sample_idx, trace_idx = backend.projects.read_window(
-                self._project_id,
-                self._line_id,
-                max_samples=_PREVIEW_MAX_SAMPLES,
-                max_traces=_PREVIEW_MAX_TRACES,
-            )
+            matrix, sample_idx, trace_idx = read_full_resolution_bscan(
+                info.shape,
+                lambda **window: backend.projects.read_window(
+                    self._project_id, self._line_id, **window),
+                cancel_requested=lambda: not self._context_is_current() or (
+                    not self._reference_request and c._preview_generation != self._generation))
             elevation = c._line_elevation(backend, self._project_id, self._line_id)
+            trace_metadata = backend.projects.read_trace_metadata(self._project_id, self._line_id) or {}
             bundle = c._bundle_from_window(
                 matrix, self._line_id, title=f"测线 {self._line_id}",
                 time_window_ns=info.time_window_ns, length_m=info.length_m,
                 sample_indices=sample_idx, trace_indices=trace_idx,
                 total_samples=info.shape[0], total_traces=info.shape[1],
-                trace_elevation_m=elevation,
+                trace_elevation_m=elevation, metadata=getattr(info, "metadata", None),
+                source_trace_ids=trace_metadata.get('trace_id'),
+                trace_qc_bad_mask=trace_metadata.get('trace_qc_bad_mask'),
                 dielectric_constant=float(getattr(
                     info, 'dielectric_constant', 0.0) or 0.0),
             )
         except Exception as exc:  # noqa: BLE001
+            if not self._context_is_current() or (
+                    not self._reference_request and c._preview_generation != self._generation):
+                return
             _LOGGER.exception("数据预览失败")
-            if c._preview_generation != self._generation or c.current_project_id != self._project_id:
+            if self._reference_request:
+                self._publish_reference(None, friendly_error_message(exc))
                 return
             reason = friendly_error_message(exc)
             c.log_message.emit(f"数据预览失败：{reason}")
             c.preview_context_failed.emit(self._project_id, self._line_id, '', reason)
             c.preview_failed.emit(reason)
         else:
+            if self._reference_request:
+                self._publish_reference(bundle)
+                return
             if c._preview_generation != self._generation or c.current_project_id != self._project_id:
                 return
             metadata = dict(getattr(info, 'metadata', {}) or {})
@@ -820,9 +1107,30 @@ class _PreviewLineCommand:
             c.dataset_preview_ready.emit(bundle)
 
 
+class _ComparisonArtifactsCommand(_ProjectReadCommand):
+    __slots__ = ("_controller", "_project_id", "_line_id")
+
+    def __init__(self, controller, project_id, line_id):
+        super().__init__(controller)
+        self._controller = controller
+        self._project_id = project_id
+        self._line_id = line_id
+
+    def execute(self):
+        backend = self._controller._backend()
+        if backend is None:
+            return
+        try:
+            artifacts = list(backend.projects.list_artifacts(self._project_id, self._line_id))
+        except Exception as exc:  # noqa: BLE001
+            self._controller.log_message.emit(f"读取对比成果失败：{friendly_error_message(exc)}")
+        else:
+            self._publish('comparison_artifacts_ready', self._project_id, self._line_id, artifacts)
+
+
 class _PreviewArtifactCommand:
     __slots__ = ("_controller", "_project_id", "_line_id", "_artifact_id",
-                 "_generation", "_check_generation", "_context_generation", "_request_version")
+                 "_generation", "_check_generation", "_context_generation", "_request_version", "_reference_request")
 
     def __init__(
         self,
@@ -832,6 +1140,7 @@ class _PreviewArtifactCommand:
         artifact_id: str,
         generation: int,
         check_generation: bool = True,
+        reference_request: str = '',
     ) -> None:
         self._controller = controller
         self._project_id = project_id
@@ -839,6 +1148,7 @@ class _PreviewArtifactCommand:
         self._artifact_id = artifact_id
         self._generation = generation
         self._check_generation = check_generation
+        self._reference_request = reference_request
         self._context_generation = controller._artifact_context_generation
         self._request_version = controller._artifact_request_versions.get((project_id, line_id, artifact_id), 0)
 
@@ -857,28 +1167,39 @@ class _PreviewArtifactCommand:
         try:
             info = backend.projects.get_artifact_dataset_info(
                 self._project_id, self._line_id, self._artifact_id)
-            matrix, sample_idx, trace_idx = backend.projects.read_artifact_window(
-                self._project_id,
-                self._line_id,
-                self._artifact_id,
-                max_samples=_PREVIEW_MAX_SAMPLES,
-                max_traces=_PREVIEW_MAX_TRACES,
-            )
-            elevation = c._line_elevation(backend, self._project_id, self._line_id)
+            matrix, sample_idx, trace_idx = read_full_resolution_bscan(
+                info.shape,
+                lambda **window: backend.projects.read_artifact_window(
+                    self._project_id, self._line_id, self._artifact_id, **window),
+                cancel_requested=lambda: not self._current())
+            trace_metadata = backend.projects.read_artifact_trace_metadata(
+                self._project_id, self._line_id, self._artifact_id)
+            raw_info = backend.projects.get_dataset_info(self._project_id, self._line_id)
+            artifact_metadata = dict(getattr(info, 'metadata', None) or {})
+            artifact_metadata['view_reversed'] = bool((getattr(raw_info, 'metadata', None) or {}).get('view_reversed', False))
+            trace_metadata = trace_metadata or {}
+            elevation = trace_metadata.get("ground_elevation_m")
             bundle = c._bundle_from_window(
                 matrix, self._line_id, title=f"成果 {self._artifact_id}",
                 time_window_ns=info.time_window_ns, length_m=info.length_m,
                 sample_indices=sample_idx, trace_indices=trace_idx,
                 total_samples=info.shape[0], total_traces=info.shape[1],
-                trace_elevation_m=elevation,
+                trace_elevation_m=elevation, metadata=artifact_metadata,
+                source_trace_ids=trace_metadata.get('trace_id'),
+                trace_qc_bad_mask=trace_metadata.get('trace_qc_bad_mask'),
                 dielectric_constant=float(getattr(
                     info, 'dielectric_constant', 0.0) or 0.0),
             )
         except Exception as exc:  # noqa: BLE001
-            _LOGGER.exception("成果预览失败")
             if not self._current():
                 return
+            _LOGGER.exception("成果预览失败")
             reason = friendly_error_message(exc)
+            if self._reference_request:
+                c.comparison_artifact_preview_ready.emit(
+                    self._project_id, self._line_id, self._artifact_id,
+                    self._reference_request, None, reason)
+                return
             c.log_message.emit(f"成果预览失败：{reason}")
             # 失败必须可见（真机反馈：结果卡只剩骨架却不知道为什么）
             c.preview_context_failed.emit(self._project_id, self._line_id, self._artifact_id, reason)
@@ -886,7 +1207,12 @@ class _PreviewArtifactCommand:
         else:
             if not self._current():
                 return
-            c.artifact_preview_ready.emit(self._artifact_id, bundle)
+            if self._reference_request:
+                c.comparison_artifact_preview_ready.emit(
+                    self._project_id, self._line_id, self._artifact_id,
+                    self._reference_request, bundle, '')
+            else:
+                c.artifact_preview_ready.emit(self._artifact_id, bundle)
 
 
 class _PreflightImportCommand:
@@ -1050,14 +1376,16 @@ class _DepthPreviewCommand:
                 payload, list(self._line_ids), self._cell_size_m, self._generation)
 
 
-class _LineSourcePathCommand:
+class _LineSourcePathCommand(_ProjectReadCommand):
     """worker 线程读 import_manifest.json 的 source_path（小文件 I/O 离开 UI 线程）。"""
 
-    __slots__ = ("_controller", "_line_id", "_manifest")
+    __slots__ = ("_controller", "_project_id", "_line_id", "_manifest")
 
     def __init__(self, controller: ProjectController, line_id: str,
                  manifest: Path) -> None:
+        super().__init__(controller)
         self._controller = controller
+        self._project_id = controller.current_project_id
         self._line_id = line_id
         self._manifest = manifest
 
@@ -1071,16 +1399,47 @@ class _LineSourcePathCommand:
         if isinstance(payload, dict):
             source = str(payload.get('source_path') or '')
             path = source or None
-        self._controller.line_source_path_ready.emit(self._line_id, path)
+        self._publish("line_source_path_ready", self._line_id, path)
 
 
-class _ArtifactDescendantsCommand:
+class _LineSensorSummaryCommand(_ProjectReadCommand):
+    def __init__(self, controller, project_id, line_id, trace_count, version):
+        super().__init__(controller)
+        self._controller, self._project_id = controller, project_id
+        self._line_id, self._trace_count, self._version = line_id, trace_count, version
+
+    def _context_is_current(self) -> bool:
+        return (super()._context_is_current()
+                and self._controller._sensor_summary_versions.get(self._line_id) == self._version)
+
+    def execute(self) -> None:
+        backend = self._controller._backend()
+        if backend is None or not self._context_is_current():
+            return
+        total = self._trace_count
+        try:
+            if total is None:
+                line = next(item for item in backend.projects.list_lines(self._project_id)
+                            if item.line_id == self._line_id)
+                total = line.trace_count
+            metadata = backend.projects.read_trace_metadata(self._project_id, self._line_id)
+            report = sensor_completeness_report(metadata, total)
+        except Exception as exc:
+            _LOGGER.warning('Sensor summary unavailable for %s: %s', self._line_id, exc)
+            error = f'传感器信息读取失败：{friendly_error_message(exc)}；完整性尚未确认。'
+            report = SensorCompletenessReport(total=int(total or 0), rows=(), error=error)
+        self._publish('line_sensor_summary_ready', self._line_id, report.as_text())
+        self._publish('line_sensor_report_ready', self._line_id, report)
+
+
+class _ArtifactDescendantsCommand(_ProjectReadCommand):
     """worker 线程查询后代闭包 + 成果名称（级联确认框素材）。"""
 
     __slots__ = ("_controller", "_project_id", "_line_id", "_artifact_ids")
 
     def __init__(self, controller: ProjectController, project_id: str,
                  line_id: str, artifact_ids: list[str]) -> None:
+        super().__init__(controller)
         self._controller = controller
         self._project_id = project_id
         self._line_id = line_id
@@ -1116,7 +1475,7 @@ class _ArtifactDescendantsCommand:
                                   or aid[:8])
         except Exception:  # noqa: BLE001 - 名称仅供展示，失败退回 aid 前 8 位
             pass
-        c.artifact_descendants_ready.emit(self._line_id, descendants, names)
+        self._publish("artifact_descendants_ready", self._line_id, descendants, names)
 
 
 __all__ = ["ProjectController"]

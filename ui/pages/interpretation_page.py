@@ -34,6 +34,7 @@ from qfluentwidgets import (
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants
+from ui.icons import WorkbenchIcon
 from ui.page_scaffold import (card_title, make_card,
                               make_collapsible_column, make_hint,
                               refill_combo)
@@ -53,7 +54,13 @@ class InterpretationPage(QWidget):
     smooth_requested = pyqtSignal()
     undo_requested = pyqtSignal()
     redo_requested = pyqtSignal()
-    save_requested = pyqtSignal()
+    save_requested = pyqtSignal(str)
+    properties_requested = pyqtSignal(dict)
+    zone_requested = pyqtSignal(dict)
+    borehole_save_requested = pyqtSignal(dict)
+    borehole_compare_requested = pyqtSignal(float)
+    borehole_refresh_requested = pyqtSignal()
+    dielectric_apply_requested = pyqtSignal(float)
     points_changed = pyqtSignal(list)      # 当前标注点列 [(trace, sample), ...]
     velocity_requested = pyqtSignal(list)  # 拾取点 [(trace, sample), ...] → 速度分析
 
@@ -65,6 +72,7 @@ class InterpretationPage(QWidget):
         self._busy = False
         self._velocity_running = False  # 提交后到回调前的在飞窗口，防重复提交
         self._session_active = False  # 会话未打开时禁用编辑按钮与 pick
+        self._saved_status = 'draft'
         self._build_ui()
         self._connect_internal()
         self._points_context = ObjectMenuBinding(self, self._points_table, self._point_menu)
@@ -129,14 +137,17 @@ class InterpretationPage(QWidget):
         for btn in (self._auto_trace_btn, self._snap_btn, self._smooth_btn):
             row2.addWidget(btn)
         row2.addWidget(make_separator(vertical=True))
-        self._undo_btn = PushButton('撤销', card, FIF.CANCEL)
-        self._redo_btn = PushButton('重做', card, FIF.SYNC)
+        self._undo_btn = PushButton('撤销', card, WorkbenchIcon.UNDO)
+        self._redo_btn = PushButton('重做', card, WorkbenchIcon.REDO)
         row2.addWidget(self._undo_btn)
         row2.addWidget(self._redo_btn)
         row2.addWidget(make_separator(vertical=True))
-        self._save_btn = PrimaryPushButton('保存标注', card, FIF.SAVE)
-        self._save_btn.setToolTip('保存当前标注点列到项目')
+        self._save_btn = PushButton('保存草稿', card, FIF.SAVE)
+        self._save_btn.setToolTip('保存当前标注，不用于正式空间成果')
         row2.addWidget(self._save_btn)
+        self._confirm_btn = PrimaryPushButton('保存并确认', card, FIF.ACCEPT)
+        self._confirm_btn.setToolTip('至少两个有效点；确认后可生成正式空间成果')
+        row2.addWidget(self._confirm_btn)
         row2.addStretch(1)
         hint = make_hint('提示：在剖面图上左键点击拾取标注点', parent=card)
         row2.addWidget(hint)
@@ -189,6 +200,8 @@ class InterpretationPage(QWidget):
         btn_row.addWidget(self._clear_points_btn)
         points_layout.addLayout(btn_row)
         layout.addWidget(points_card, 1)
+        from ui.pages.interpretation_tools import build_interpretation_tools
+        build_interpretation_tools(self, layout)
 
         # ---------------- 深度换算
         depth_card, depth_layout = make_card('深度换算')
@@ -206,10 +219,14 @@ class InterpretationPage(QWidget):
             '常见介质：空气≈1，干砂≈3-5，湿砂≈20-30，水≈81')
         diel_row.addWidget(self._dielectric_spin, 1)
         depth_layout.addLayout(diel_row)
-        formula_hint = make_hint('深度 = ½ · c · t / √εr（c = 0.30 m/ns）',
+        formula_hint = make_hint('深度 = ½ · c · t / √εr；修改数值先只影响当前表格预览',
                                  parent=depth_card)
         formula_hint.setWordWrap(True)
         depth_layout.addWidget(formula_hint)
+        self._dielectric_apply_btn = PushButton('应用到测线速度模型', depth_card)
+        self._dielectric_apply_btn.clicked.connect(
+            lambda: self.dielectric_apply_requested.emit(self._dielectric_spin.value()))
+        depth_layout.addWidget(self._dielectric_apply_btn)
         layout.addWidget(depth_card)
 
         # ---------------- 速度分析（Phase 2.1）
@@ -247,7 +264,8 @@ class InterpretationPage(QWidget):
         self._smooth_btn.clicked.connect(self.smooth_requested)
         self._undo_btn.clicked.connect(self.undo_requested)
         self._redo_btn.clicked.connect(self.redo_requested)
-        self._save_btn.clicked.connect(self.save_requested)
+        self._save_btn.clicked.connect(lambda: self.save_requested.emit('draft'))
+        self._confirm_btn.clicked.connect(lambda: self.save_requested.emit('confirmed'))
         self._bscan.sig_point_picked.connect(self._on_point_picked)
         self._remove_point_btn.clicked.connect(self._on_remove_selected_point)
         self._clear_points_btn.clicked.connect(self._on_clear_points)
@@ -295,6 +313,60 @@ class InterpretationPage(QWidget):
         self._session_status_label.setText(text)
         self._refresh_info()
 
+    def set_saved_status(self, status):
+        self._saved_status = str(status or 'draft')
+        self.set_session_info('已确认' if self._saved_status == 'confirmed' else '草稿已保存')
+
+    def set_annotation_metadata(self, annotation):
+        self._annotation_name.setText(str(getattr(annotation, 'name', '') or ''))
+        self._interface_type.setText(str(
+            (getattr(annotation, 'edit_metadata', {}) or {}).get('interface_type', 'basal_interface')))
+        self._confidence.setValue(float(getattr(annotation, 'confidence', 0.8) or 0.8))
+        self._uncertainty.setValue(float(getattr(annotation, 'uncertainty_samples', 0.0) or 0.0))
+        self._annotation_note.setText(str(getattr(annotation, 'note', '') or ''))
+
+    def _mark_review_required(self):
+        if self._saved_status == 'confirmed':
+            self.set_session_info('已修改，需重新确认')
+
+    def _emit_properties(self):
+        self.properties_requested.emit({
+            'name': self._annotation_name.text().strip(),
+            'interface_type': self._interface_type.text().strip(),
+            'confidence': self._confidence.value(),
+            'uncertainty_samples': self._uncertainty.value(),
+            'note': self._annotation_note.text().strip(),
+        })
+
+    def _emit_zone(self):
+        self.zone_requested.emit({
+            'start_trace': self._zone_start.value(),
+            'end_trace': self._zone_end.value(),
+            'start_sample': self._zone_sample_start.value(),
+            'end_sample': self._zone_sample_end.value(),
+            'kind': self._zone_kind.currentData(),
+            'note': self._zone_note.text().strip(),
+        })
+
+    def _emit_borehole(self):
+        if self._borehole_id.text().strip():
+            self.borehole_save_requested.emit({
+                'borehole_id': self._borehole_id.text().strip(),
+                'name': self._borehole_id.text().strip(),
+                'trace_index': self._borehole_trace.value(),
+                'basal_depth_m': self._borehole_depth.value(),
+            })
+
+    def set_borehole_comparisons(self, comparisons):
+        lines = [
+            f"{getattr(item, 'borehole_id', '')}：实测 {getattr(item, 'measured_depth_m', 0):.3f} m｜"
+            f"解释 {getattr(item, 'interpreted_depth_m', 0):.3f} m｜"
+            f"误差 {getattr(item, 'absolute_error_m', 0):.3f} m｜"
+            f"{'通过' if getattr(item, 'passed', False) else '超限'}"
+            for item in comparisons or []
+        ]
+        self._borehole_result_label.setPlainText('\n'.join(lines) if lines else '暂无钻孔对比结果')
+
     def set_points(self, points: list) -> None:
         """整列替换标注点（原始数据坐标）→ overlay（#fbbf24）+ 点列表。"""
         self._points = [(int(t), int(s)) for t, s in (points or [])]
@@ -333,7 +405,10 @@ class InterpretationPage(QWidget):
     def _update_edit_enabled(self) -> None:
         enabled = self._session_active and not self._busy
         for btn in (self._auto_trace_btn, self._snap_btn, self._smooth_btn,
-                    self._undo_btn, self._redo_btn, self._save_btn,
+                    self._undo_btn, self._redo_btn, self._save_btn, self._confirm_btn,
+                    self._properties_btn, self._zone_btn, self._borehole_save_btn,
+                    self._borehole_compare_btn, self._borehole_refresh_btn,
+                    self._dielectric_apply_btn,
                     self._remove_point_btn, self._clear_points_btn):
             btn.setEnabled(enabled)
         # 速度分析还需 ≥3 个拾取点（双曲线 3 参数拟合下限）且不在飞
@@ -384,6 +459,7 @@ class InterpretationPage(QWidget):
     def _on_point_picked(self, trace: int, sample: int) -> None:
         """pick 点击追加点（原始数据坐标）→ overlay/列表末行增量插入 + points_changed。"""
         self._points.append((int(trace), int(sample)))
+        self._mark_review_required()
         self._points_revision += 1
         self._bscan.set_overlay_points(self._points, _OVERLAY_COLOR)
         self._append_points_row(len(self._points) - 1)
@@ -419,6 +495,7 @@ class InterpretationPage(QWidget):
         table_updated=True 表示调用方已完成表格局部更新（单点删除），
         此处跳过整表重建。
         """
+        self._mark_review_required()
         self._points_revision += 1
         self._points_context.close()
         self._bscan.set_overlay_points(self._points, _OVERLAY_COLOR)

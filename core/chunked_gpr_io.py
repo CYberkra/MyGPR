@@ -36,6 +36,7 @@ LARGE_DATASET_THRESHOLD_BYTES = 64 * 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 128
 MAX_AXIS_BYTES = 256 * 1024 * 1024
 MAX_NPY_HEADER_BYTES = 64 * 1024
+MAX_NPZ_METADATA_BYTES = 4 * 1024 * 1024
 MAX_IMPORT_EXPANDED_BYTES = 512 * 1024 * 1024 * 1024
 MAX_HDF5_OBJECTS = 100_000
 
@@ -220,27 +221,23 @@ def load_npy_for_import(
     """Load/copy an NPY matrix with a file-copy fast path for float32 C arrays."""
     src = Path(path)
     array = np.load(src, mmap_mode="r", allow_pickle=False)
-    if array.ndim != 2:
-        raise ValueError(f"GPR matrix must be 2D, got shape={array.shape!r}")
-    out = Path(output_npy)
-    # NPY files already contain the required header.  A byte-for-byte copy is
-    # both faster and lower-memory than touching every mmap page.
-    if array.dtype == np.float32 and bool(array.flags.c_contiguous):
-        del array
-        copy_file_chunked(
-            src,
-            out,
+    try:
+        if array.ndim != 2:
+            raise ValueError(f"GPR matrix must be 2D, got shape={array.shape!r}")
+        out = Path(output_npy)
+        if array.dtype == np.float32 and bool(array.flags.c_contiguous):
+            array._mmap.close()
+            copy_file_chunked(src, out, cancel_requested=cancel_requested,
+                              progress_callback=progress_callback)
+            return np.load(out, mmap_mode="r+", allow_pickle=False)
+        return _copy_array_rows_to_npy(
+            array, out,
             cancel_requested=cancel_requested,
             progress_callback=progress_callback,
+            stage="convert_npy",
         )
-        return np.load(out, mmap_mode="r+", allow_pickle=False)
-    return _copy_array_rows_to_npy(
-        array,
-        out,
-        cancel_requested=cancel_requested,
-        progress_callback=progress_callback,
-        stage="convert_npy",
-    )
+    finally:
+        array._mmap.close()
 
 
 def _extract_zip_member_chunked(
@@ -310,13 +307,39 @@ def _validated_npz_members(archive: zipfile.ZipFile) -> list[str]:
     return names
 
 
+def read_npz_metadata(npz: Any) -> dict[str, Any]:
+    """Read one bounded JSON scalar without allowing NPY array allocation."""
+    if 'metadata' not in npz:
+        return {}
+    info = npz.zip.getinfo('metadata.npy')
+    if info.file_size > MAX_NPZ_METADATA_BYTES + MAX_NPY_HEADER_BYTES:
+        raise ValueError('NPZ metadata is too large')
+    with npz.zip.open(info) as stream:
+        version = np.lib.format.read_magic(stream)
+        reader = (np.lib.format.read_array_header_1_0 if version == (1, 0)
+                  else np.lib.format.read_array_header_2_0)
+        shape, _fortran, dtype = reader(stream, max_header_size=MAX_NPY_HEADER_BYTES)
+        if dtype.itemsize > MAX_NPZ_METADATA_BYTES:
+            raise ValueError('NPZ metadata is too large')
+        if shape or dtype.kind not in 'US' or not dtype.itemsize:
+            return {}
+        payload = stream.read(dtype.itemsize + 1)
+        if len(payload) != dtype.itemsize:
+            raise ValueError('NPZ metadata payload does not match its scalar header')
+    try:
+        parsed = json.loads(np.frombuffer(payload, dtype=dtype, count=1).item())
+        return parsed if isinstance(parsed, dict) else {}
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return {}
+
+
 def load_npz_for_import(
     path: str | Path,
     output_npy: str | Path,
     *,
     cancel_requested: CancelCheck = None,
     progress_callback: ProgressCallback = None,
-) -> tuple[np.ndarray, dict[str, np.ndarray]]:
+) -> tuple[np.ndarray, dict[str, np.ndarray], dict[str, Any]]:
     """Stream the matrix NPY member out of an NPZ, then mmap it.
 
     Axis arrays are normally tiny relative to the matrix and are loaded through
@@ -324,6 +347,7 @@ def load_npz_for_import(
     """
     src = Path(path)
     out_path = Path(output_npy)
+    matrix = None
     completed = False
     try:
         with zipfile.ZipFile(src, "r") as archive:
@@ -345,6 +369,7 @@ def load_npz_for_import(
             raise ValueError(f"GPR matrix must be a numeric 2D array, got shape={matrix.shape!r}, dtype={matrix.dtype}")
         axes: dict[str, np.ndarray] = {}
         with np.load(src, allow_pickle=False) as npz:
+            metadata = read_npz_metadata(npz)
             for key in ("distance_axis_m", "time_axis_ns", "depth_axis_m"):
                 if key in npz:
                     axis = np.asarray(npz[key], dtype=np.float32)
@@ -352,9 +377,11 @@ def load_npz_for_import(
                         raise ValueError(f"NPZ axis is invalid or too large: {key}, shape={axis.shape}")
                     axes[key] = axis
         completed = True
-        return matrix, axes
+        return matrix, axes, metadata
     finally:
         if not completed:
+            if isinstance(matrix, np.memmap):
+                matrix._mmap.close()
             out_path.unlink(missing_ok=True)
 
 

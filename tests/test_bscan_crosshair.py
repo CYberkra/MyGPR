@@ -48,6 +48,55 @@ class TestFormatReadout:
 
 # ------------------------------------------------------------------ 控件行为
 class TestCrosshairWidget:
+    def _queue_readout(self, view, trace=18, sample=8):
+        from PyQt6.QtCore import QPointF
+        pos = view._plot.vb.mapViewToScene(QPointF(trace + .5, sample + .5))
+        view._on_mouse_moved(pos)
+        view._on_mouse_moved(pos)
+        assert view._pending_readout is not None
+        assert view._readout_timer.isActive()
+
+    def _bundle(self, traces, value):
+        return SimpleNamespace(
+            matrix=np.full((10, traces), value, dtype=np.float32), vmin=0., vmax=100.,
+            trace_count=traces, sample_count=10, trace_indices=np.arange(traces),
+            sample_indices=np.arange(10), trace_elevation_m=np.full(traces, 100.),
+            depth_axis_m=np.arange(10, dtype=float))
+
+    def _assert_readout_cleared(self, view):
+        assert view._pending_readout is None
+        assert not view._readout_timer.isActive()
+        assert not view._vline.isVisible()
+        assert not view._hline.isVisible()
+        assert view._readout.isHidden()
+        view._flush_crosshair_readout()
+
+    @pytest.mark.parametrize('traces', [3, 20])
+    def test_pending_readout_is_discarded_when_bundle_changes(self, qapp, traces):
+        view = self._make_view(qapp)
+        view.set_bundle(self._bundle(20, 1.))
+        qapp.processEvents()
+        self._queue_readout(view)
+        view.set_bundle(self._bundle(traces, 2.))
+        self._assert_readout_cleared(view)
+
+    def test_pending_readout_is_discarded_on_axis_grid_switch(self, qapp):
+        view = self._make_view(qapp)
+        view.set_bundle(self._bundle(20, 1.))
+        qapp.processEvents()
+        self._queue_readout(view)
+        view.set_y_axis_mode('elevation')
+        self._assert_readout_cleared(view)
+        self._queue_readout(view)
+        view.set_y_axis_mode('sample')
+        self._assert_readout_cleared(view)
+
+    def test_clear_discards_pending_readout(self, qapp):
+        view = self._make_view(qapp)
+        self._queue_readout(view)
+        view.clear()
+        self._assert_readout_cleared(view)
+
     def _make_view(self, qapp):
         from ui.widgets.bscan_view import BScanView
         view = BScanView()

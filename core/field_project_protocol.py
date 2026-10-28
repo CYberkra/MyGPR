@@ -10,7 +10,8 @@ composition.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Protocol
+from contextlib import AbstractContextManager
+from typing import Any, Protocol, Sequence
 
 from core.field_project_models import FieldProjectManifest, FieldLineRecord
 from core.project_storage_backend import ProjectStorageBackend
@@ -63,6 +64,7 @@ class FieldProjectStoreProtocol(Protocol):
     def ensure_structure(self, *, recover_transactions: bool = ...) -> None: ...
     def save_manifest(self) -> None: ...
     def assert_writable(self) -> None: ...
+    def mutation(self, label: str, *, files: Sequence[Path] = (), trees: Sequence[Path] = ()) -> AbstractContextManager[Any]: ...
 
     # ------------------------------------------------------------------
     # Line store (FieldLineStoreMixin)

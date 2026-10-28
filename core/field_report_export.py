@@ -36,7 +36,20 @@ from core.report_export_rows import (
 )
 from core.reporting_model import ReportDocument, ReportSection, ReportSealer, ReportSnapshot
 from core.source_file_registry import ensure_full_source_hashes, load_source_registry
+from core.security_paths import safe_relative_path
 from core.storage_primitives import atomic_write_text
+
+
+def _validated_package_name(package_name: str | None) -> str | None:
+    """Report package names are one safe component, never output paths."""
+    if package_name is None or package_name == "":
+        return None
+    name = str(package_name)
+    safe_name = safe_relative_path(name)
+    if (len(safe_name.parts) != 1 or "/" in name or "\\" in name
+            or safe_name.name != name):
+        raise ValueError("报告包名必须是单个安全名称，不能包含目录路径。")
+    return safe_name.name
 
 
 def _software_version() -> str:
@@ -200,7 +213,7 @@ def _prepare_package_directories(
     package_name: str | None,
     spatial_result_id: str,
 ) -> dict[str, Path]:
-    requested_name = package_name or f"report_{_timestamp()}"
+    requested_name = _validated_package_name(package_name) or f"report_{_timestamp()}"
     final_dir = store.root / "reports" / requested_name
     if final_dir.exists() and any(final_dir.iterdir()):
         final_dir = final_dir.parent / f"{final_dir.name}_{uuid.uuid4().hex[:6]}"
@@ -343,6 +356,7 @@ def generate_project_report_package(
     engineering figures, a file audit, and SHA-256 checksums.  The operation is
     cancellation-aware so the UI can run it through the shared Job Manager.
     """
+    package_name = _validated_package_name(package_name)
     from core.job_manager import JobCancelled
 
     def check_cancel() -> None:

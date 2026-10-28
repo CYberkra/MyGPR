@@ -41,7 +41,7 @@ class ParamForm(QWidget):
         super().__init__(parent)
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
-        self._layout.setSpacing(6)
+        self._layout.setSpacing(8)
         self._schema = []
         self._editors = {}          # name -> 编辑器控件（SpinBox/DoubleSpinBox/ComboBox/LineEdit/CheckBox）
         self._advanced_widget = None
@@ -70,13 +70,14 @@ class ParamForm(QWidget):
             self._advanced_btn = PushButton('高级参数', self,
                                             FIF.CHEVRON_RIGHT_MED)
             self._advanced_btn.setCheckable(False)
+            self._advanced_btn.setFixedHeight(32)
             self._advanced_btn.clicked.connect(self._toggle_advanced)
             self._layout.addWidget(self._advanced_btn)
 
             self._advanced_widget = QWidget(self)
             adv_layout = QVBoxLayout(self._advanced_widget)
             adv_layout.setContentsMargins(0, 0, 0, 0)
-            adv_layout.setSpacing(6)
+            adv_layout.setSpacing(8)
             for item in advanced:
                 adv_layout.addLayout(self._build_row(item))
             self._advanced_widget.setVisible(False)
@@ -142,17 +143,18 @@ class ParamForm(QWidget):
         lbl = CaptionLabel(label, self)
         lbl.setMinimumWidth(120)
         lbl.setMaximumWidth(180)
-        lbl.setWordWrap(False)
+        lbl.setWordWrap(True)
         # P2-3：label 悬浮显示参数范围/可选值，避免超限靠 spinbox 静默钳制
         range_tip = self._range_tooltip(item)
         if range_tip:
             lbl.setToolTip(f'{label}\n{range_tip}')
         editor.setMinimumWidth(90)
+        editor.setMinimumHeight(34)
         editor.setSizePolicy(QSizePolicy.Policy.Expanding,
                              QSizePolicy.Policy.Fixed)
         row = QHBoxLayout()
         row.setContentsMargins(0, 2, 0, 2)
-        row.setSpacing(10)
+        row.setSpacing(12)
         row.addWidget(lbl)
         row.addWidget(editor, 1)
         self._editors[name] = editor

@@ -28,6 +28,7 @@ class BScanDisplayMode(Enum):
     """B-scan 显示模式（Phase1 1.2）：灰度 / 变面积 / 波形叠加。"""
 
     GRAYSCALE = 'grayscale'
+    ENVELOPE = 'envelope'
     WIGGLE = 'wiggle'          # 变面积：正半轴填充
     WAVEFORM = 'waveform'      # 波形叠加：正负对称双线
 
@@ -54,7 +55,8 @@ def format_crosshair_readout(trace: int, sample: int, shape: tuple,
                              trace_axis_m=None, sample_axis=None,
                              sample_axis_label: str = '',
                              trace_count: int = 0,
-                             sample_count: int = 0) -> str:
+                             sample_count: int = 0,
+                             trace_indices=None, sample_indices=None, source_trace_ids=None) -> str:
     """十字光标读数文本（纯函数，便于测试）。
 
     trace/sample 为显示坐标（0 基）；shape=(n_traces, n_display_rows)。
@@ -64,8 +66,11 @@ def format_crosshair_readout(trace: int, sample: int, shape: tuple,
     时追加"（原始约 N）"（strided 降采样近似线性映射）。
     """
     n_traces, n_rows = shape
-    lines = [f'道 {trace + 1}']
-    if trace_count and trace_count != n_traces:
+    lines = [f'道 {int(trace_indices[trace]) + 1}' if trace_indices is not None
+             else f'道 {trace + 1}']
+    if source_trace_ids is not None and 0 <= trace < len(source_trace_ids):
+        lines.append(f'采集道 ID {int(source_trace_ids[trace])}')
+    if trace_indices is None and trace_count and trace_count != n_traces:
         approx = _downsample_map_index(trace, n_traces, trace_count)
         lines[0] += f'（原始约 {approx + 1}）'
     if trace_axis_m is not None and 0 <= trace < len(trace_axis_m):
@@ -74,8 +79,9 @@ def format_crosshair_readout(trace: int, sample: int, shape: tuple,
         label = sample_axis_label or '纵轴'
         lines.append(f'{label} {float(sample_axis[sample]):.4g}')
     else:
-        text = f'采样 {sample + 1}'
-        if sample_count and sample_count != n_rows:
+        text = (f'采样 {int(sample_indices[sample]) + 1}' if sample_indices is not None
+                else f'采样 {sample + 1}')
+        if sample_indices is None and sample_count and sample_count != n_rows:
             approx = _downsample_map_index(sample, n_rows, sample_count)
             text += f'（原始约 {approx + 1}）'
         lines.append(text)
@@ -90,10 +96,50 @@ def format_crosshair_readout(trace: int, sample: int, shape: tuple,
 
 class BScanViewInteractionMixin:
 
+    def set_view_reversed(self, reversed_view: bool) -> None:
+        """Reverse only the viewing direction, never the data or coordinates."""
+        self._plot.vb.invertX(bool(reversed_view))
+
+    def set_qc_bad_mask(self, mask) -> bool:
+        import numpy as np
+        import pyqtgraph as pg
+
+        for item in getattr(self, '_qc_marks', []):
+            self._plot.removeItem(item)
+        self._qc_marks = []
+        if mask is None:
+            return True
+        values = np.asarray(mask)
+        if self._matrix is None or values.ndim != 1 or values.size != self._matrix.shape[1]:
+            return False
+        for index in np.flatnonzero(values):
+            item = pg.LinearRegionItem((int(index), int(index) + 1), movable=False,
+                                       brush=pg.mkBrush(255, 80, 40, 65), pen=pg.mkPen(None))
+            item.setZValue(20)
+            self._plot.addItem(item, ignoreBounds=True)
+            self._qc_marks.append(item)
+        return True
+
+    def focus_trace_range(self, start: int, stop: int) -> bool:
+        if self._matrix is None or not 0 <= start < stop <= self._matrix.shape[1]:
+            return False
+        import pyqtgraph as pg
+        previous = getattr(self, '_qc_focus', None)
+        if previous is not None:
+            self._plot.removeItem(previous)
+        self._qc_focus = pg.LinearRegionItem((start, stop), movable=False,
+                                              brush=pg.mkBrush(255, 180, 0, 55),
+                                              pen=pg.mkPen(255, 180, 0, 180))
+        self._qc_focus.setZValue(21)
+        self._plot.addItem(self._qc_focus, ignoreBounds=True)
+        self._plot.vb.setXRange(start, stop, padding=0)
+        return True
+
     # ------------------------------------------------------------------ 右键菜单
     def _show_context_menu(self, event) -> None:
         menu = make_menu(self)
         self._add_menu_zoom(menu)
+        self._add_menu_time_window(menu)
         menu.addSeparator()
         self._add_menu_axes(menu)
         menu.addSeparator()
@@ -117,6 +163,7 @@ class BScanViewInteractionMixin:
         「铺满」（收起页面侧栏）只在宿主页接管后出现——原工具条按钮
         退役后，这里是除快捷语义外的唯一入口。
         """
+        self._add_menu_selection(menu)
         add_action(menu, FIF.ZOOM_IN, '放大', self.zoom_in)
         add_action(menu, FIF.ZOOM_OUT, '缩小', self.zoom_out)
         add_action(menu, FIF.FIT_PAGE, '回到全览（铺满窗口）', self.fit_to_data)
@@ -182,6 +229,7 @@ class BScanViewInteractionMixin:
         for mode in BScanDisplayMode:
             mode_label = {
                 BScanDisplayMode.GRAYSCALE: '灰度',
+                BScanDisplayMode.ENVELOPE: '包络（当前预览 Hilbert）',
                 BScanDisplayMode.WIGGLE: '变面积（Wiggle）',
                 BScanDisplayMode.WAVEFORM: '波形叠加',
             }[mode]
@@ -219,8 +267,15 @@ class BScanViewInteractionMixin:
             mode = BScanDisplayMode(mode)
         if not isinstance(mode, BScanDisplayMode):
             raise ValueError(f'未知显示模式: {mode!r}')
+        saved_time_x = (self._plot.vb.viewRange()[0]
+                        if self._view_time_window is not None or self._view_selection is not None else None)
         self.display_mode = mode
+        self._gain_cache = None
+        self._refresh_gain_render()
         self._apply_display_mode(mode, reset_view=True)
+        if saved_time_x is not None:
+            self._restore_view_time_window()
+            self._plot.vb.setXRange(*saved_time_x, padding=0)
 
     def _apply_display_mode(self, mode, *, reset_view: bool) -> None:
         """应用显示模式；reset_view 仅用户切换模式时为 True。
@@ -235,7 +290,7 @@ class BScanViewInteractionMixin:
         img = self._image_item.image
         if img is None or self._matrix is None:
             return
-        if mode is BScanDisplayMode.GRAYSCALE:
+        if mode in (BScanDisplayMode.GRAYSCALE, BScanDisplayMode.ENVELOPE):
             if self._wiggle_item is not None:
                 self._wiggle_item.hide()
             self._image_item.show()
@@ -279,12 +334,8 @@ class BScanViewInteractionMixin:
         if levels is None or len(levels) < 2 or levels[0] == levels[1]:
             levels = (-1.0, 1.0)
         vmax = max(abs(float(levels[0])), abs(float(levels[1]))) or 1.0
-        # 显示层降采样：波形形态用 ≤500 点/道已足够（峰值包络不失真），
-        # 全样本会让 QPainterPath 剖析+绘制逼近秒级（实测 2000×1000 全点
-        # ~1.1s，500 点 ~40ms）。
-        step = max(1, n_samples // 500)
-        if step > 1:
-            data = data[::step, :]
+        # Every stored sample participates in the waveform path.
+        step = 1
         n_samples_ds = data.shape[0]
         # 振幅归一：每道正峰占相邻道间距的 0.45（Wiggle 惯例不重叠）
         gain = 0.45 / vmax
@@ -385,7 +436,7 @@ class BScanViewInteractionMixin:
 
     def _on_mouse_moved(self, pos) -> None:
         """鼠标在图像区移动：十字线跟手 + 左下角读数浮层（文本 30ms 合并刷新）。"""
-        if not self._crosshair_on or self._image_shape is None:
+        if self._selection_tool.active or not self._crosshair_on or self._image_shape is None:
             self._hide_crosshair()
             return
         if not self._plot.sceneBoundingRect().contains(pos):
@@ -428,7 +479,9 @@ class BScanViewInteractionMixin:
             sample_axis_label=('海拔 (m)' if showing_elevation
                                else self._sample_axis_label),
             trace_count=self._trace_count,
-            sample_count=self._sample_count))
+            sample_count=self._sample_count,
+            trace_indices=self._trace_indices, sample_indices=self._sample_indices,
+            source_trace_ids=self._source_trace_ids))
         self._position_readout()
 
     def _hide_crosshair(self) -> None:
@@ -481,9 +534,13 @@ class BScanViewInteractionMixin:
             s = self._row_to_sample(t, r)
         else:
             s = r
-            if self._sample_count and self._sample_count != n_rows:
-                s = _downsample_map_index(s, n_rows, self._sample_count)
-        if self._trace_count and self._trace_count != n_traces:
+        if self._sample_indices is not None:
+            s = int(self._sample_indices[max(0, min(len(self._sample_indices) - 1, s))])
+        elif not self._showing_elevation and self._sample_count and self._sample_count != n_rows:
+            s = _downsample_map_index(s, n_rows, self._sample_count)
+        if self._trace_indices is not None:
+            t = int(self._trace_indices[max(0, min(len(self._trace_indices) - 1, t))])
+        elif self._trace_count and self._trace_count != n_traces:
             t = _downsample_map_index(t, n_traces, self._trace_count)
         return t, s
 
@@ -511,13 +568,17 @@ class BScanViewInteractionMixin:
             return float(trace), float(sample)
         n_traces, n_rows = self._image_shape
         t, s = float(trace), float(sample)
-        if self._trace_count and self._trace_count != n_traces:
+        if self._trace_indices is not None:
+            t = float(np.interp(t, self._trace_indices, np.arange(len(self._trace_indices))))
+        elif self._trace_count and self._trace_count != n_traces:
             t = _downsample_map_index_inverse(t, n_traces, self._trace_count)
+        if self._sample_indices is not None:
+            s = float(np.interp(s, self._sample_indices, np.arange(len(self._sample_indices))))
         if self._showing_elevation:
             r = self._sample_to_row(t, s)
         else:
             r = s
-            if self._sample_count and self._sample_count != n_rows:
+            if self._sample_indices is None and self._sample_count and self._sample_count != n_rows:
                 r = _downsample_map_index_inverse(s, n_rows, self._sample_count)
         return t, r
 
@@ -581,6 +642,9 @@ class BScanViewInteractionMixin:
                         if self._trace_axis_m is not None
                         and display_trace < len(self._trace_axis_m) else None)
                 self._ascan_popup.show_trace(
-                    image[:, display_trace], trace_index=display_trace, distance_m=dist)
+                    image[:, display_trace],
+                    trace_index=trace if self._trace_indices is not None else display_trace,
+                    distance_m=dist, axis=self._sample_axis,
+                    axis_label=self._sample_axis_label)
         self.sig_point_picked.emit(trace, sample)
 

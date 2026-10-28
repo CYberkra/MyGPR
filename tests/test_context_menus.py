@@ -29,7 +29,7 @@ class TestLineSourcePath:
     def _controller(self, root):
         from ui.controllers.project_controller import ProjectController
         controller = ProjectController()
-        controller._current = SimpleNamespace(root_path=str(root))
+        controller._current = SimpleNamespace(project_id='source-path-project', root_path=str(root))
         return controller
 
     def _resolve(self, controller, line_id, timeout_s=5.0):

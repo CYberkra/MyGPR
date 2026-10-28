@@ -50,6 +50,8 @@ class ProjectLine:
     data_format: str = ""
     raw_size_mb: float = 0.0
     updated_at: str = ""
+    distance_override: str = ""
+    view_reversed: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "line_id", _non_empty(self.line_id, "line_id"))
@@ -206,6 +208,8 @@ class LineQualityIssue:
     code: str
     message: str
     suggestion: str = ""
+    trace_start: int | None = None
+    trace_end: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

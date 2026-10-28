@@ -17,9 +17,8 @@
 
 - **显示层变换，原始数据零变异**——warp 只发生在 BScanView 拿到预览矩阵
   之后，raw 矩阵/存储一字节不动；
-- 性能实测（output/probes_archive/_probe_elevation_resample.py）：预览上限
-  900×1800 约 50ms、全尺寸 1200×3800 约 70ms，为换轴/换线时的一次性成本，
-  且 BScanView 按「同一份数据只算一次」缓存，不进渲染热路径；
+- 保留完整海拔范围与深度采样间隔；分配前检查资源，资源不足时明确拒绝，
+  不截断底部。BScanView 按「同一份数据只算一次」缓存，不进渲染热路径；
 - 退化策略：任一道地面高程非有限 → 该道整列 NaN（无数据，不猜值）；
   深度轴非有限/非递增、或逐道高程全部缺失 → 返回 (None, None)，调用方
   回落采样轴显示。
@@ -40,6 +39,8 @@ from typing import Any, Callable
 import numpy as np
 import pyqtgraph as pg
 
+from ui.desktop_backend_facade import validate_bscan_display_shape
+
 __all__ = [
     'ELEVATION_UNAVAILABLE_HINT',
     'IndexAxis',
@@ -50,6 +51,7 @@ __all__ = [
     'distance_tick_strings',
     'elevation_available',
     'elevation_tick_strings',
+    'physical_time_ticks',
     'sample_unit_label',
     'tick_index',
 ]
@@ -62,11 +64,6 @@ ELEVATION_UNAVAILABLE_HINT = (
     '本条数据缺少逐道地面高程，或缺少可换算为深度的介电常数，'
     '暂时无法按海拔显示纵轴（检查是否已导入/同步 RTK 导航数据）'
 )
-
-# 海拔网格行数上限：防止病态深度轴（极小步距）把内存吃爆。
-# 8192 行 × 2000 道 × 4B = 64MB，已远超任何合理预览规模。
-MAX_ELEVATION_ROWS = 8192
-
 
 def tick_index(value: float, count: int) -> int:
     """轴刻度值（像素边界坐标）→ 数据索引，越界夹到 [0, count-1]。
@@ -88,7 +85,7 @@ def sample_unit_label(sample_axis_label: str) -> str:
     无物理轴（直接 set_matrix）时回落到 ``'采样点'``。
     """
     label = str(sample_axis_label or '')
-    for unit in ('时间', '深度'):
+    for unit in ('时间', '深度', '海拔'):
         if unit in label:
             return unit
     return '采样点'
@@ -112,21 +109,22 @@ def distance_available(trace_axis_m: Any, trace_count: int) -> bool:
 
 def build_elevation_view(matrix: Any, ground_elevation_m: Any,
                          depth_axis_m: Any,
-                         *, max_rows: int = MAX_ELEVATION_ROWS):
+                         *, max_rows: int | None = None):
     """把整幅剖面重采样到共享海拔网格。
 
     :param matrix: (n_samples, n_traces) 预览矩阵（显示网格，未变形）。
     :param ground_elevation_m: 逐道地面高程（m），长度 ≥ n_traces；
         允许个别道非有限（该道输出整列 NaN）。
     :param depth_axis_m: 地表以下深度轴（m，随显示矩阵、严格对应），
-        要求有限；按中位差分视为等距。
+        要求有限、严格递增且等距（容忍浮点量化误差）。
     :return: ``(warped, elev_axis)``；warped 为 (rows, n_traces) float32，
         地表以上/最深处以下为 NaN；elev_axis 为降序海拔轴（行 r ↔
         elev_axis[r]）。输入不足或病态时返回 ``(None, None)``。
 
-    网格行数 = (最高地面 − (最低地面 − 深度跨度)) / 深度步距 + 1，
+    网格覆盖每道实际采样的最高和最低海拔，必要时保留至最高地面，
     即行距恰为一个深度采样间隔——重采样不制造也不丢失纵向分辨率；
-    地形起伏只把网格整体拉长（顶部留白行），夹在 max_rows 内。
+    地形起伏只把网格整体拉长（顶部留白行），不截断底部数据。
+    资源不足或超过调用方显式指定的 max_rows 时拒绝本次变换。
     """
     if matrix is None or ground_elevation_m is None or depth_axis_m is None:
         return None, None
@@ -136,7 +134,8 @@ def build_elevation_view(matrix: Any, ground_elevation_m: Any,
     n_samples, n_traces = mat.shape
     if n_samples < 2 or n_traces < 1:
         return None, None
-    depth = np.asarray(depth_axis_m, dtype=np.float64).ravel()
+    depth_input = np.asarray(depth_axis_m)
+    depth = np.asarray(depth_input, dtype=np.float64).ravel()
     ground = np.asarray(ground_elevation_m, dtype=np.float64).ravel()
     if depth.size < n_samples or ground.size < n_traces:
         return None, None
@@ -144,18 +143,30 @@ def build_elevation_view(matrix: Any, ground_elevation_m: Any,
     ground = ground[:n_traces]
     if not np.all(np.isfinite(depth)):
         return None, None
-    step = float(np.median(np.diff(depth)))
-    if not np.isfinite(step) or step <= 0:
+    diffs = np.diff(depth)
+    step = float((depth[-1] - depth[0]) / (n_samples - 1))
+    if not np.isfinite(step) or step <= 0 or np.any(diffs <= 0):
+        return None, None
+    precision = (np.finfo(depth_input.dtype).eps
+                 if np.issubdtype(depth_input.dtype, np.floating) else np.finfo(np.float64).eps)
+    if depth_input.dtype == np.float64 and np.array_equal(
+            depth, depth.astype(np.float32).astype(np.float64)):
+        precision = np.finfo(np.float32).eps
+    tolerance = max(abs(step) * 1e-6, float(np.max(np.abs(depth))) * precision * 2)
+    if not np.all(np.abs(diffs - step) <= tolerance):
         return None, None
     finite_ground = np.isfinite(ground)
     if not finite_ground.any():
         return None, None
 
-    span = float(depth[-1] - depth[0])
-    top = float(ground[finite_ground].max())
-    bottom = float(ground[finite_ground].min()) - span
+    top_ground = float(ground[finite_ground].max())
+    top = max(top_ground, top_ground - float(depth[0]))
+    bottom = float(ground[finite_ground].min()) - float(depth[-1])
     rows = int(np.ceil((top - bottom) / step)) + 1
-    rows = max(2, min(rows, int(max_rows)))
+    rows = max(2, rows)
+    if max_rows is not None and rows > int(max_rows):
+        raise ValueError(f'完整海拔网格需要 {rows} 行，超过指定上限 {max_rows}；未截断数据')
+    validate_bscan_display_shape((rows, n_traces))
     elev_axis = top - step * np.arange(rows, dtype=np.float64)   # 降序
 
     lo, hi = float(depth[0]), float(depth[-1])
@@ -170,8 +181,10 @@ def build_elevation_view(matrix: Any, ground_elevation_m: Any,
         g = ground[i]
         # 有效行带：lo ≤ g − elev_axis[r] ≤ hi ⇔ 两条边界行号之间的行。
         # 带外（地表以上/最深以下）保持 NaN，无需逐列掩码。
-        first = max(int(math.ceil((top - g + lo) * inv_step)), 0)
-        last = min(int(math.floor((top - g + hi) * inv_step)), rows - 1)
+        # Account only for arithmetic roundoff at grid boundaries, not axis irregularity.
+        boundary_error = 8 * np.finfo(np.float64).eps * max(abs(top), abs(g), abs(lo), abs(hi), 1.0) * inv_step
+        first = max(int(math.ceil((top - g + lo) * inv_step - boundary_error)), 0)
+        last = min(int(math.floor((top - g + hi) * inv_step + boundary_error)), rows - 1)
         if first > last:
             continue
         target_depth = g - elev_axis[first:last + 1]   # 升序，且已落在 [lo, hi]
@@ -195,6 +208,40 @@ def elevation_tick_strings(values, elev_axis: Any) -> list[str] | None:
             for value in values]
 
 
+def _nice_interval(value: float) -> float:
+    if not math.isfinite(value) or value <= 0:
+        return 0.0
+    magnitude = 10.0 ** math.floor(math.log10(value))
+    candidates = [magnitude, 2.0 * magnitude, 5.0 * magnitude, 10.0 * magnitude]
+    return min(candidates, key=lambda item: abs(math.log(item / value)))
+
+
+def physical_time_ticks(axis: Any, levels: list, min_val: float, max_val: float) -> list | None:
+    values = np.asarray(axis, dtype=np.float64)
+    if values.ndim != 1 or values.size < 2 or not (np.all(np.diff(values) > 0) or np.all(np.diff(values) < 0)):
+        return None
+    row_axis = np.arange(values.size, dtype=np.float64) + 0.5
+    mean_step = abs(float((values[-1] - values[0]) / (values.size - 1)))
+    physical_min = float(np.interp(min_val, row_axis, values))
+    physical_max = float(np.interp(max_val, row_axis, values))
+    low, high = sorted((physical_min, physical_max))
+    converted = []
+    for index_step, index_values in levels:
+        if not index_values:
+            continue
+        step = _nice_interval(mean_step * float(index_step))
+        if step <= 0:
+            continue
+        first = math.ceil((low - step * 1e-9) / step) * step
+        tick_times = np.arange(first, high + step * 1e-9, step, dtype=np.float64)
+        positions = np.interp(tick_times, values, row_axis) if values[0] < values[-1] else np.interp(tick_times, values[::-1], row_axis[::-1])
+        positions = positions[(positions >= min(min_val, max_val) - 1e-7)
+                              & (positions <= max(min_val, max_val) + 1e-7)]
+        if positions.size:
+            converted.append((step, positions.tolist()))
+    return converted or None
+
+
 class IndexAxis(pg.AxisItem):
     """索引坐标 → 物理单位 的刻度格式化轴（BScanView 横轴/纵轴共用）。
 
@@ -216,13 +263,19 @@ class IndexAxis(pg.AxisItem):
     """
 
     def __init__(self, orientation: str,
-                 converter: Callable[[Any, float, float], list[str] | None]):
+                 converter: Callable[[Any, float, float], list[str] | None],
+                 values_provider: Callable | None = None):
         super().__init__(orientation)
         self._converter = converter
+        self._values_provider = values_provider
 
     def tickValues(self, minVal, maxVal, size):  # noqa: N802, N803 - pyqtgraph 命名
         """父类结果里剔除「空 values」的刻度级（见类 docstring 的崩溃成因）。"""
         levels = super().tickValues(minVal, maxVal, size)
+        if self._values_provider is not None:
+            converted = self._values_provider(levels, minVal, maxVal, size)
+            if converted is not None:
+                return converted
         return [(spacing, values) for spacing, values in levels if values]
 
     def invalidate(self) -> None:

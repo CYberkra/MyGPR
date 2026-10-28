@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 
+from PyQt6 import sip
 from PyQt6.QtCore import QEvent, QPoint, QSize, Qt, QUrl, pyqtSignal
 from PyQt6.QtGui import QBrush, QColor, QDesktopServices, QFont, QFontMetrics, QIcon, QKeySequence, QPainter, QPixmap, QShortcut
 from PyQt6.QtWidgets import (
@@ -23,9 +24,10 @@ from PyQt6.QtWidgets import (
 )
 from qfluentwidgets import BodyLabel, MessageBox, PlainTextEdit, TransparentToolButton, TreeWidget
 from qfluentwidgets import FluentIcon as FIF
-from qfluentwidgets import isDarkTheme, setCustomStyleSheet
+from qfluentwidgets import Theme, isDarkTheme, setCustomStyleSheet
 
 from ui import constants
+from ui.icons import WorkbenchIcon, result_delete_icon
 from ui.design_tokens import color
 from ui.file_tree import (
     TreeNode, artifact_direct_parent, artifact_parameters, artifact_step,
@@ -106,6 +108,7 @@ class FileTreePanel(DockPanel):
     line_selected = pyqtSignal(str)
     line_process_requested = pyqtSignal(str)
     line_delete_requested = pyqtSignal(list)
+    line_rename_requested = pyqtSignal(str)
     # 成果叶子点击 → 换线（如需）+ 跳处理页选中预览（line_id, artifact_id）
     artifact_focus_requested = pyqtSignal(str, str)
     raw_focus_requested = pyqtSignal(str)
@@ -114,12 +117,17 @@ class FileTreePanel(DockPanel):
     # 成果叶子右键「删除成果」→ 复用项目页删除链路（后代闭包级联确认 +
     # 回收站语义），面板自身不弹确认框
     artifact_delete_requested = pyqtSignal(str, str)
+    processing_package_requested = pyqtSignal(str, str)  # line_id, artifact_id (empty = whole line)
     # 空间成果/项目报告叶子点击 → 跳成果页（参数为 kind：'spatial'/'report'）
     delivery_focus_requested = pyqtSignal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__('项目资源', constants.SIDE_TOOL_WIDTH, parent)
         self._lines: list = []
+        self.rename_allowed = lambda:False
+        self._rename_shortcut = QShortcut(QKeySequence('F2'), self,
+            context=Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self._rename_shortcut.activated.connect(self._rename_current_line)
         self._artifacts: list = []
         self._artifacts_sig: list = []   # set_artifacts 去重签名
         self._spatial_results: list = []
@@ -634,9 +642,11 @@ class FileTreePanel(DockPanel):
             elif node.kind == 'file':
                 item.setIcon(0, FIF.DOCUMENT.icon())
             elif node.kind == 'raw':
-                item.setIcon(0, FIF.DOCUMENT.icon())
+                item.setIcon(0, WorkbenchIcon.WAVEFORM_FILE.icon(
+                    Theme.DARK if self._dark else Theme.LIGHT))
             elif node.kind == 'artifact':
-                item.setIcon(0, FIF.DEVELOPER_TOOLS.icon())
+                item.setIcon(0, WorkbenchIcon.RESULT_CHART.icon(
+                    Theme.DARK if self._dark else Theme.LIGHT))
         if parent_item is None:
             self._tree.addTopLevelItem(item)
         else:
@@ -695,8 +705,12 @@ class FileTreePanel(DockPanel):
 
     # ------------------------------------------------------------ 右键菜单
     def _close_context_menu(self):
-        if self._context_menu is not None:
-            self._context_menu.close()
+        menu, self._context_menu = self._context_menu, None
+        if menu is not None and not sip.isdeleted(menu):
+            menu.close()
+
+    def _forget_context_menu(self, identity):
+        if self._context_menu is not None and id(self._context_menu) == identity:
             self._context_menu = None
 
     def _on_keyboard_context(self):
@@ -714,6 +728,9 @@ class FileTreePanel(DockPanel):
     def _show_context_menu(self, menu, position):
         self._close_context_menu()
         self._context_menu = menu
+        identity = id(menu)
+        menu.closedSignal.connect(lambda: self._forget_context_menu(identity))
+        menu.destroyed.connect(lambda _obj=None: self._forget_context_menu(identity))
         menu._tree_keyboard = FluentMenuKeyboard(menu)
         menu.exec(self._tree.viewport().mapToGlobal(position))
         menu._tree_keyboard.focus_menu(menu)
@@ -756,6 +773,15 @@ class FileTreePanel(DockPanel):
         menu = make_menu(parent=self._tree)
         self._add_menu_action(menu, FIF.DEVELOPER_TOOLS, '处理该测线',
                    lambda: self.line_process_requested.emit(line_id), enabled=not blocked)
+        self._add_menu_action(menu,FIF.EDIT,'重命名测线…',
+            lambda:self.line_rename_requested.emit(line_id) if self.rename_allowed() else None,
+            enabled=self.rename_allowed())
+        has_results = any(str(getattr(a, 'line_id', '')) == line_id
+                          and str(getattr(a, 'status', 'committed')) in ('committed', 'completed', 'success')
+                          for a in self._artifacts)
+        self._add_menu_action(menu, FIF.SAVE, '打包处理结果…',
+                   lambda: self.processing_package_requested.emit(line_id, ''),
+                   enabled=has_results and not blocked)
         action = self._add_menu_action(menu, FIF.DELETE, '删除测线…',
                             lambda: self._confirm_delete(line_id), enabled=not blocked)
         if blocked and action is not None:
@@ -787,7 +813,10 @@ class FileTreePanel(DockPanel):
         self._add_menu_action(menu, FIF.INFO, '参数与来源',
                    lambda: self._show_source_info(line_id, artifact_id))
         blocked = self._delete_blocked(line_id, artifact_id)
-        action = self._add_menu_action(menu, FIF.DELETE, '删除此结果及依赖成果…',
+        self._add_menu_action(menu, FIF.SAVE, '打包到此步的结果…',
+                   lambda: self.processing_package_requested.emit(line_id, artifact_id),
+                   enabled=not blocked)
+        action = self._add_menu_action(menu, result_delete_icon(), '删除此结果及依赖成果…',
                    lambda: self._request_artifact_delete(line_id, artifact_id), enabled=not blocked)
         if blocked and action is not None:
             action.setToolTip('运行中的任务依赖此结果，请先等待结束或取消任务。')
@@ -892,6 +921,12 @@ class FileTreePanel(DockPanel):
         box.cancelButton.setText('取消')
         if box.exec() == QDialog.DialogCode.Accepted and not self._delete_blocked(line_id):
             self.line_delete_requested.emit([line_id])
+
+    def _rename_current_line(self):
+        item=self._tree.currentItem()
+        if (item is not None and len(self._tree.selectedItems())==1 and self.rename_allowed()
+                and item.data(0,_ROLE_KIND)=='line'):
+            self.line_rename_requested.emit(str(item.data(0,_ROLE_PAYLOAD)))
 
     # ------------------------------------------------------------ 主题
     def apply_theme(self, dark: bool) -> None:

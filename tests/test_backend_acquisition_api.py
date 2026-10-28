@@ -11,6 +11,7 @@ from mygpr.domain.acquisition import (
     SensorKind,
     SensorSyncSettings,
 )
+from mygpr.domain.processing.models import PipelineDefinition, PipelineStep
 from mygpr.interfaces.backend import MyGPRBackend
 from mygpr.application.jobs.models import JobStatus
 from tests.qt_import_isolation import assert_qt_imports_unchanged, qt_module_snapshot
@@ -200,5 +201,42 @@ def test_acquisition_jobs_and_motion_pipeline_contract(tmp_path: Path) -> None:
             "motion_compensation_height",
             "motion_compensation_vibration",
         ]
+    finally:
+        backend.shutdown()
+
+
+def test_trace_crop_reopens_with_matching_synchronized_sensor_traces(tmp_path: Path) -> None:
+    source = tmp_path / "crop-line.npy"
+    matrix = np.arange(48 * 4, dtype=np.float32).reshape(48, 4)
+    np.save(source, matrix)
+    trace_path, rtk_path, imu_path = _sensor_files(tmp_path)
+    backend = MyGPRBackend.create_default(max_workers=1)
+    try:
+        project = backend.projects.create_project(tmp_path / "crop-project", name="Crop")
+        backend.acquisition.import_line(project.project_id, source, line_id="L01")
+        backend.acquisition.synchronize_project_line(
+            project.project_id,
+            "L01",
+            rtk_path=rtk_path,
+            trace_timestamps_path=trace_path,
+            imu_path=imu_path,
+            settings=SensorSyncSettings(project_crs="EPSG:32648"),
+        )
+        job = backend.submit_project_pipeline(
+            project.project_id,
+            "L01",
+            PipelineDefinition(name="crop", steps=(PipelineStep(
+                "trace_cut", {"trace_start": 2, "trace_end": 3},
+            ),)),
+        )
+        snapshot = backend.jobs.wait(job, timeout=30)
+        assert snapshot.status is JobStatus.COMPLETED, snapshot.error_message
+        reopened = backend.projects.read_artifact_dataset(
+            project.project_id, "L01", snapshot.result.artifact_id,
+        )
+        np.testing.assert_array_equal(reopened.data, matrix[:, 1:3])
+        np.testing.assert_allclose(reopened.trace_metadata["local_x_m"], [1.0, 2.0])
+        np.testing.assert_allclose(reopened.trace_metadata["trace_timestamp_s"], [101.0, 102.0])
+        assert reopened.trace_metadata["alignment_status"].tolist() == ["aligned", "aligned"]
     finally:
         backend.shutdown()

@@ -21,9 +21,13 @@
     "submit_line_transpose": "(self, project_id: str, line_id: str, *, title: str | None = None) -> str",
     "submit_sensor_sync": "(self, project_id: str, line_id: str, *, rtk_path: str, trace_timestamps_path: str | None = None, imu_path: str | None = None, altimeter_path: str | None = None, settings: SensorSyncSettings | None = None, title: str | None = None) -> str",
     "submit_project_pipeline": "(self, project_id: str, line_id: str, pipeline: PipelineDefinition, *, result_name: str = , branch_id: str = , input_artifact_id: str = , save_intermediates: bool = True, title: str | None = None) -> str",
+    "estimate_project_pipeline": "(self, project_id: str, line_id: str, pipeline: PipelineDefinition, *, input_artifact_id: str = , save_intermediates: bool = False)",
     "submit_project_report": "(self, project_id: str, *, package_name: str | None = None, report_profile: dict[str, Any] | None = None, title: str | None = None) -> str",
+    "submit_processing_result_package": "(self, project_id: str, line_id: str, destination: str, *, artifact_id: str = , title: str | None = None) -> str",
     "submit_project_backup": "(self, project_id: str, destination_dir: str | None = None, *, require_external_device: bool = False, incremental: bool = False, retention_keep: int | None = None, title: str | None = None) -> str",
     "submit_spatial_result": "(self, project_id: str, *, name: str, line_ids: tuple[str, ...] | list[str] | None = None, velocity_m_per_ns: float | None = None, generate_surface: bool = True, title: str | None = None) -> str",
+    "submit_spatial_export": "(self, project_id: str, result_id: str, destination: str | Path, *, format_name: str = zip, title: str | None = None) -> str",
+    "submit_spatial_delete": "(self, project_id: str, result_id: str, *, title: str | None = None) -> str",
     "build_georeference_3d": "(self, project_id: str, line_id: str, *, preview_lod: str = auto, max_preview_traces: int = 240, max_preview_samples: int = 160, title: str | None = None) -> str",
     "submit_velocity_analysis": "(self, project_id: str, line_id: str, picks: Sequence[Mapping[str, Any]], *, apply: bool = True, title: str | None = None) -> str",
     "submit_line_grouping": "(self, project_id: str, *, tolerance_m: float = 20.0, title: str | None = None) -> str",
@@ -190,7 +194,9 @@
         "processing_status",
         "data_format",
         "raw_size_mb",
-        "updated_at"
+        "updated_at",
+        "distance_override",
+        "view_reversed"
       ]
     },
     "mygpr.domain.project.models.ProjectArtifact": {
@@ -210,6 +216,16 @@
         "sha256",
         "created_at",
         "manifest"
+      ]
+    },
+    "mygpr.domain.project.result_package.ProcessingResultPackage": {
+      "kind": "dataclass",
+      "fields": [
+        "archive_path",
+        "line_id",
+        "artifact_ids",
+        "warnings",
+        "verified"
       ]
     },
     "mygpr.domain.project.models.ArtifactDeleteResult": {

@@ -30,12 +30,12 @@ class AScanPopup(QWidget):
         layout.addWidget(self._ascan_view)
 
     def show_trace(self, samples, *, trace_index: int,
-                   distance_m: float | None = None) -> None:
+                   distance_m: float | None = None, axis=None, axis_label='') -> None:
         """显示指定道的波形；标题带道号与里程（有则）。"""
-        title = f'A-Scan 波形 — 道 {trace_index}'
+        title = f'A-Scan 波形 — 道 {trace_index + 1}'
         if distance_m is not None:
             title += f'（{distance_m:.2f} m）'
-        self._ascan_view.set_trace(samples, title=title)
+        self._ascan_view.set_trace(samples, title=title, axis=axis, axis_label=axis_label)
         self.show()
         self.raise_()
 

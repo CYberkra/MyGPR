@@ -189,6 +189,22 @@ class TestAxisModeAvailability:
 
 
 class TestAxisModeSwitch:
+    def test_controller_depth_bundle_displays_physical_ticks(self, view):
+        from ui.controllers.project_controller import ProjectController
+
+        depth = np.linspace(5.04, 19.98, 167)
+        bundle = ProjectController._bundle_from_window(
+            np.zeros((167, 2), dtype=np.float32), 'L01',
+            sample_indices=np.arange(167), total_samples=167,
+            metadata={'depth_axis_m': depth})
+        view.set_bundle(bundle)
+        axis = view._plot.getAxis('left')
+        assert axis.labelText == '深度 (m)'
+        assert [float(s) for s in axis.tickStrings([0.5, 166.5], 1., 1.)] == pytest.approx([5.04, 19.98])
+        assert view._time_axis_for_view() is None
+        levels = view._left_tick_values([(50., [0., 50., 100.])], 0., 167., 400.)
+        assert levels is not None
+
     def test_distance_switch_applies(self, view):
         feed(view)
         view.set_x_axis_mode('distance', notify=True)
@@ -229,10 +245,11 @@ class TestAxisModeSwitch:
         assert float(bottom[-1]) == pytest.approx(30.0, abs=1.0)
         assert float(left[0]) > float(left[1])   # 越深海拔越低
 
-    def test_converters_fall_back_when_disabled(self, view):
+    def test_default_axes_show_input_trace_numbers_and_calibrated_time(self, view):
         feed(view)
-        assert view._convert_bottom_ticks([0.0], 1.0, 1.0) is None
-        assert view._convert_left_ticks([0.0], 1.0, 1.0) is None
+        assert view._convert_bottom_ticks([0.5], 1.0, 1.0) == ['1']
+        # Time-labelled axes now display calibrated time ticks, not sample indices.
+        assert float(view._convert_left_ticks([0.5], 1.0, 1.0)[0]) == pytest.approx(0.0)
 
 
 class TestAxisModePreferencePersistence:
@@ -258,7 +275,8 @@ class TestAxisModePreferencePersistence:
         feed(view, elevation=False)
         assert view.y_axis_mode() == 'elevation'          # 偏好仍在
         assert view.effective_y_axis_mode() == 'sample'   # 但实际回落
-        assert view._convert_left_ticks([0.0, 10.0], 1.0, 10.0) is None
+        # Elevation falls back to the valid time axis, with physical ns ticks.
+        assert float(view._convert_left_ticks([0.5], 1.0, 1.0)[0]) == pytest.approx(0.0)
 
 
 class TestAxisModeSignal:

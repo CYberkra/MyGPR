@@ -26,7 +26,9 @@ def get_output_dir() -> str:
 
 
 def get_logs_dir() -> str:
-    path = os.path.join(get_output_dir(), "logs")
+    override = os.environ.get("MYGPR_LOG_DIR", "").strip()
+    path = (os.path.abspath(os.path.expanduser(os.path.expandvars(override)))
+            if override else os.path.join(get_output_dir(), "logs"))
     os.makedirs(path, exist_ok=True)
     return path
 

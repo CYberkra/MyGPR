@@ -21,9 +21,18 @@ def run(command, **kwargs):
     subprocess.run([str(item) for item in command], check=True, **kwargs)
 
 
+def create_app_icon(source: Path, destination: Path) -> None:
+    """Use the same source-owned logo as the window and splash screen."""
+    from PIL import Image
+
+    with Image.open(source / 'ui/resources/mygpr_logo.png') as image:
+        image.convert('RGBA').save(destination, format='ICO',
+                                   sizes=[(size, size) for size in (16, 24, 32, 48, 64, 128, 256)])
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--source-ref', default='v0.11.0')
+    parser.add_argument('--source-ref', required=True)
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--inno', required=True, type=Path)
     args = parser.parse_args()
@@ -62,16 +71,11 @@ def main():
             if metadata.version(requirement.name) not in requirement.specifier:
                 raise ValueError(f'Build environment does not satisfy {dependency}')
     run([sys.executable, '-m', 'pip', 'check'])
-    from PIL import Image, ImageDraw
     from PyInstaller.utils.win32.versioninfo import (
         FixedFileInfo, StringFileInfo, StringStruct, StringTable, VarFileInfo, VarStruct, VSVersionInfo,
     )
     icon = output / 'MyGPR.ico'
-    logo = Image.new('RGBA', (256, 256), '#0078d4')
-    drawing = ImageDraw.Draw(logo)
-    drawing.line([(24, 128), (64, 128), (88, 48), (120, 208), (152, 80), (184, 128), (232, 128)],
-                 fill='white', width=14, joint='curve')
-    logo.save(icon, sizes=[(size, size) for size in (16, 32, 48, 64, 128, 256)])
+    create_app_icon(source, icon)
     version_tuple = (*map(int, version.split('.')), 0)
     resource = VSVersionInfo(
         ffi=FixedFileInfo(filevers=version_tuple, prodvers=version_tuple,

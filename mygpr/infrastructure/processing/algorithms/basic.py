@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+from mygpr.domain.processing.timebase import snap_sample_index
 from scipy.ndimage import median_filter, uniform_filter1d
 from scipy.signal import savgol_filter
 
@@ -79,7 +80,7 @@ def method_zero_time(data: Any, params: dict[str, Any]) -> tuple[np.ndarray, dic
             "请提供 time_step_s 参数，或传入含 total_time_ns/time_window_ns 的 "
             "header_info（旧版按 48ns 采样间隔猜测步长的静默回退已移除）。"
         )
-    shift = int(max(0.0, new_zero) / max(step_s * 1.0e9, 1.0e-12))
+    shift = int(snap_sample_index(max(0.0, new_zero) / max(step_s * 1.0e9, 1.0e-12)))
     shift = max(0, min(shift, arr.shape[0] - 1))
     result = np.zeros(arr.shape, dtype=np.float32)
     if shift == 0:

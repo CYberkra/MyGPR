@@ -17,7 +17,7 @@ from mygpr.infrastructure.processing.algorithms.kirchhoff.shared import (
     _postprocess_kir_profile,
     _require_trace_vector,
     _resample_to_input_grid,
-    _resolve_elevation_axis_top_m,
+    _resample_trace_vector,
     _ricker,
     _setup_grid,
 )
@@ -104,9 +104,7 @@ def _run_kirchhoff_gpu(
         )
 
     if topo_cor == 2:
-        elevation_axis_top_m = _resolve_elevation_axis_top_m(
-            header_info, trace_metadata, "ground_elevation_m"
-        )
+        elevation_axis_top_m = None  # Pre-correction has no verified shared elevation grid.
         ground_elevation = _require_trace_vector(
             trace_metadata,
             "ground_elevation_m",
@@ -205,15 +203,16 @@ def _run_kirchhoff_gpu(
         )
 
     if topo_cor == 1:
-        elevation_axis_top_m = _resolve_elevation_axis_top_m(
-            header_info, trace_metadata, "ground_elevation_m"
-        )
+        source_ground = np.asarray(trace_metadata.get("ground_elevation_m", []), dtype=np.float64)
         ground_elevation = _require_trace_vector(
             trace_metadata,
             "ground_elevation_m",
             arr.shape[1],
             "topo_cor=1 需要 ground_elevation_m 航空元数据",
         )
+        if source_ground.shape == (arr.shape[1],) and np.all(np.isfinite(source_ground)):
+            grid_ground = _resample_trace_vector(ground_elevation, output_migrated.shape[1])
+            elevation_axis_top_m = (float(np.max(np.round(grid_ground / dz))) + 1.0) * dz
         ground_elevation_gpu = cp.asarray(ground_elevation, dtype=cp.float64)
         display_migrated, pad_rows, _ = _apply_topography_correction_depth_gpu(
             display_migrated, ground_elevation_gpu, dz
@@ -309,6 +308,8 @@ def _run_kirchhoff_gpu(
             **correction_info,
             **{f"time_{k}": v for k, v in timings.items()},
         },
+        "trace_metadata_out": {},
+        "runtime_warnings": ([{"code": "kirchhoff_trace_grid_resampled", "message": "输出道已重采样，原始道 ID 和传感器数据仍保留在原始输入，不能视为与输出逐道对齐。"}] if trace_metadata else []),
         "header_info_updates": header_info_updates,
         "display_data": display_data,
         "display_header_info_updates": display_header_info_updates,
@@ -792,6 +793,6 @@ def _resample_to_input_grid_gpu(migrated, target_shape, dz, dx):
         )
 
     resized = cp.nan_to_num(resized, nan=0.0, posinf=0.0, neginf=0.0)
-    output_dz = float(dz) * src_samples / target_samples
-    output_dx = float(dx) * src_traces / target_traces
+    output_dz = float(dz) * (src_samples - 1) / (target_samples - 1) if src_samples > 1 and target_samples > 1 else 0.0
+    output_dx = float(dx) * (src_traces - 1) / (target_traces - 1) if src_traces > 1 and target_traces > 1 else 0.0
     return resized, output_dz, output_dx

@@ -11,8 +11,10 @@ from typing import Any, Iterator, Mapping, Sequence
 import numpy as np
 
 from mygpr.application.jobs.context import ExecutionContext
-from mygpr.domain.common.errors import MyGPRError
-from mygpr.application.project.ports import ProjectRepositoryPort, ProjectSessionPort
+from mygpr.domain.project.result_package import ProcessingResultPackage
+from mygpr.application.project.ports import ProjectRepositoryPort, ProjectSessionPort, WindowOptions
+from mygpr.application.project.errors import ProjectApplicationError, ProjectBusyError
+from mygpr.application.project.identity import ProjectIdentityServiceMixin
 from mygpr.domain.reporting.models import ReportPackage
 from mygpr.domain.interpretation.models import (
     BoreholeRecord, InterfaceAnnotation, InterpretationFeature,
@@ -31,19 +33,6 @@ from mygpr.domain.project.models import (
     ProjectSummary,
     ArtifactDeleteResult,
 )
-
-
-class ProjectApplicationError(MyGPRError):
-    """Stable project application failure exposed through Backend API v1."""
-
-    error_code = "MYGPR_PROJECT_ERROR"
-    category = "project"
-
-
-class ProjectBusyError(ProjectApplicationError):
-    """Raised when a project is still leased by queued or running work."""
-
-    error_code = "MYGPR_PROJECT_BUSY"
 
 
 @dataclass(slots=True)
@@ -68,7 +57,7 @@ class ProjectLease:
         self.release()
 
 
-class ProjectService:
+class ProjectService(ProjectIdentityServiceMixin):
     """Own open project sessions without exposing storage implementation objects."""
 
     def __init__(self, repository: ProjectRepositoryPort) -> None:
@@ -76,6 +65,7 @@ class ProjectService:
         self._sessions: dict[str, ProjectSessionPort] = {}
         self._roots: dict[str, str] = {}
         self._lease_counts: dict[str, int] = {}
+        self._maintenance: set[str] = set()
         self._lock = RLock()
 
     def create_project(
@@ -120,6 +110,7 @@ class ProjectService:
         with self._lock:
             existing_id = next((pid for pid, value in self._roots.items() if value == resolved), "")
             if existing_id:
+                self._check_maintenance(existing_id)
                 return self._sessions[existing_id].summary
         session = self._repository.open(
             Path(resolved),
@@ -132,6 +123,9 @@ class ProjectService:
         summary = session.summary
         with self._lock:
             existing = self._sessions.get(summary.project_id)
+            if summary.project_id in self._maintenance:
+                session.close()
+                self._check_maintenance(summary.project_id)
             if existing is not None:
                 session.close()
                 if self._roots[summary.project_id] != summary.root_path:
@@ -147,6 +141,7 @@ class ProjectService:
     def acquire_lease(self, project_id: str) -> ProjectLease:
         normalized = str(project_id)
         with self._lock:
+            self._check_maintenance(normalized)
             if normalized not in self._sessions:
                 raise ProjectApplicationError(f"project is not open: {project_id}")
             self._lease_counts[normalized] = self._lease_counts.get(normalized, 0) + 1
@@ -168,6 +163,7 @@ class ProjectService:
     def close_project(self, project_id: str, *, force: bool = False) -> None:
         normalized = str(project_id)
         with self._lock:
+            self._check_maintenance(normalized)
             leases = self._lease_counts.get(normalized, 0)
             if leases and not force:
                 raise ProjectBusyError(
@@ -181,6 +177,8 @@ class ProjectService:
 
     def close_all(self, *, force: bool = False) -> None:
         with self._lock:
+            if self._maintenance:
+                raise ProjectBusyError('项目正在迁移，请等待迁移完成或取消。')
             busy = {pid: count for pid, count in self._lease_counts.items() if count > 0}
             if busy and not force:
                 details = ", ".join(f"{pid}={count}" for pid, count in sorted(busy.items()))
@@ -207,6 +205,9 @@ class ProjectService:
 
     def get_line(self, project_id: str, line_id: str) -> ProjectLine:
         return self._session(project_id).get_line(line_id)
+
+    def update_line_properties(self, project_id: str, line_id: str, length_m: float | None, view_reversed: bool):
+        return self._session(project_id).update_line_properties(line_id, length_m=length_m, view_reversed=view_reversed)
 
     def get_dataset_info(self, project_id: str, line_id: str) -> LineDatasetInfo:
         return self._session(project_id).get_dataset_info(line_id)
@@ -317,7 +318,7 @@ class ProjectService:
         self,
         project_id: str,
         line_id: str,
-        **kwargs: object,
+        **kwargs: WindowOptions,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         return self._session(project_id).read_window(line_id, **kwargs)
 
@@ -325,6 +326,9 @@ class ProjectService:
         self, project_id: str, line_id: str, artifact_id: str
     ) -> LineDatasetInfo:
         return self._session(project_id).get_artifact_dataset_info(line_id, artifact_id)
+
+    def read_artifact_trace_metadata(self, project_id: str, line_id: str, artifact_id: str) -> dict[str, np.ndarray]:
+        return self._session(project_id).read_artifact_trace_metadata(line_id, artifact_id)
 
     def read_artifact_dataset(
         self, project_id: str, line_id: str, artifact_id: str
@@ -353,7 +357,7 @@ class ProjectService:
         project_id: str,
         line_id: str,
         artifact_id: str,
-        **kwargs: object,
+        **kwargs: WindowOptions,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         return self._session(project_id).read_artifact_window(
             line_id, artifact_id, **kwargs
@@ -373,6 +377,7 @@ class ProjectService:
         branch_id: str,
         input_dataset: dict,
         context: ExecutionContext | None = None,
+        trace_metadata: dict | None = None,
     ) -> ProjectArtifact:
         return self._session(project_id).save_processing_artifact(
             line_id,
@@ -385,6 +390,7 @@ class ProjectService:
             branch_id=branch_id,
             input_dataset=input_dataset,
             context=context or ExecutionContext.null(),
+            trace_metadata=trace_metadata,
         )
 
     def list_artifacts(
@@ -427,18 +433,17 @@ class ProjectService:
         line_data = self.read_artifact_dataset(project_id, line_id, artifact_id)
         from mygpr.application.project.segy_export import write_segy
 
+        header = line_data.header_info
+        time_axis = header.get("time_axis_ns")
+        if time_axis is None or header.get("time_axis_status") == "unknown":
+            raise ValueError("成果缺少有效时间轴，无法导出 SEG-Y")
         positions = None
-        trace_metadata = line_data.trace_metadata or {}
-        for key in ("trace_distance_m", "local_x_m", "distance_m"):
-            if key in trace_metadata:
-                positions = np.asarray(trace_metadata[key], dtype=np.float64)
-                break
+        if (header.get("distance_axis_status") != "unknown"
+                and float(header.get("length_m") or 0) > 0):
+            positions = header.get("distance_axis_m")
         return write_segy(
-            destination,
-            line_data.data,
-            line_id=line_id,
-            result_name=artifact_id,
-            trace_positions=positions,
+            destination, line_data.data, time_axis_ns=time_axis,
+            line_id=line_id, result_name=artifact_id, trace_positions=positions,
         )
 
     def clear_intermediate_artifacts(
@@ -529,6 +534,17 @@ class ProjectService:
     def set_current_spatial_result(self, project_id: str, result_id: str) -> None:
         self._session(project_id).set_current_spatial_result(result_id)
 
+    def export_spatial_result(
+        self, project_id: str, result_id: str, destination: str | Path, *,
+        format_name: str = "zip",
+    ) -> Path:
+        return self._session(project_id).export_spatial_result(
+            result_id, Path(destination), format_name=format_name
+        )
+
+    def delete_spatial_result(self, project_id: str, result_id: str) -> Path:
+        return self._session(project_id).delete_spatial_result(result_id)
+
     def build_georeference_3d(
         self,
         project_id: str,
@@ -575,6 +591,14 @@ class ProjectService:
             staging_min_age_s=staging_min_age_s,
             deep_hash=deep_hash,
         )
+
+    def export_processing_package(
+        self, project_id: str, line_id: str, destination: str | Path, *,
+        artifact_id: str = '', context: ExecutionContext | None = None,
+    ) -> ProcessingResultPackage:
+        return self._session(project_id).export_processing_package(
+            line_id, Path(destination), artifact_id=artifact_id,
+            context=context or ExecutionContext.null())
 
     def generate_report(
         self,
@@ -628,6 +652,7 @@ class ProjectService:
 
     def _session(self, project_id: str) -> ProjectSessionPort:
         with self._lock:
+            self._check_maintenance(project_id)
             session = self._sessions.get(str(project_id))
         if session is None:
             raise ProjectApplicationError(f"project is not open: {project_id}")

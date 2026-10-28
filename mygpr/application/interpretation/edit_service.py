@@ -109,17 +109,38 @@ class InterpretationEditService:
         }
         return self._snapshot(session)
 
-    def _data(self, session: _EditSession) -> np.ndarray:
+    def _data(
+        self,
+        session: _EditSession,
+        trace_start: int | None = None,
+        trace_end: int | None = None,
+    ) -> np.ndarray:
+        if trace_start is not None or trace_end is not None:
+            start = max(0, int(trace_start or 0))
+            end = min(session.source_shape[1], int(trace_end or session.source_shape[1]))
+            kwargs = {
+                'sample_start': 0,
+                'sample_end': session.source_shape[0],
+                'trace_start': start,
+                'trace_end': end,
+            }
+            if session.input_artifact_id:
+                window = self._projects.read_artifact_window(
+                    session.project_id, session.line_id, session.input_artifact_id, **kwargs
+                )
+            else:
+                window = self._projects.read_window(session.project_id, session.line_id, **kwargs)
+            return np.asarray(window[0], dtype=np.float32)
         if session.input_artifact_id:
             return np.asarray(
                 self._projects.read_artifact_dataset(
                     session.project_id, session.line_id, session.input_artifact_id
                 ).data,
-                dtype=np.float64,
+                dtype=np.float32,
             )
         return np.asarray(
             self._projects.read_dataset(session.project_id, session.line_id).data,
-            dtype=np.float64,
+            dtype=np.float32,
         )
 
     def open_session(
@@ -145,7 +166,7 @@ class InterpretationEditService:
             project_id=project_id,
             line_id=line_id,
             input_artifact_id=input_artifact_id,
-            source_shape=tuple(int(value) for value in info.shape),
+            source_shape=(int(info.shape[0]), int(info.shape[1])),
             initial=current,
             current=current,
             undo_stack=[],
@@ -250,15 +271,15 @@ class InterpretationEditService:
     def snap_to_signal(self, session_id: str, *, radius_samples: int = 8) -> InterfaceEditSnapshot:
         session = self._session(session_id)
         radius = max(1, int(radius_samples))
-        data = np.abs(self._data(session))
-        max_sample, max_trace = data.shape[0] - 1, data.shape[1] - 1
+        max_sample, max_trace = session.source_shape[0] - 1, session.source_shape[1] - 1
         points: list[InterpretationPoint] = []
         shifts: list[float] = []
         for point in session.current.points:
             trace = int(np.clip(round(point.trace_index), 0, max_trace))
             center = int(np.clip(round(point.sample_index), 0, max_sample))
+            data = np.abs(self._data(session, trace, trace + 1)[:, 0])
             lo, hi = max(0, center - radius), min(max_sample, center + radius)
-            sample = lo + int(np.argmax(data[lo : hi + 1, trace]))
+            sample = lo + int(np.argmax(data[lo : hi + 1]))
             shifts.append(float(sample - point.sample_index))
             points.append(replace(point, sample_index=float(sample), note="信号吸附"))
         return self._record(

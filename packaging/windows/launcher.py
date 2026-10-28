@@ -18,10 +18,9 @@ def package_check(report_path: Path, hdf5_path: Path | None) -> int:
         import fiona
         from core.field_report_export import _software_version
         from mygpr.interfaces.cli.backend_smoke import run_smoke
-        from ui.pages.settings_page import _read_version
 
         versions = {"distribution": importlib.metadata.version("mygpr"),
-                    "report": _software_version(), "settings": _read_version()}
+                    "report": _software_version(), "settings": _software_version()}
         assert len(set(versions.values())) == 1, versions
         report["versions"] = versions
         report["backend"] = run_smoke(include_autotune=True)
@@ -48,15 +47,42 @@ def package_check(report_path: Path, hdf5_path: Path | None) -> int:
                 data = np.asarray(matrix)
                 with h5py.File(hdf5_path, "r") as handle:
                     np.testing.assert_array_equal(data, handle["traces"][:].T)
+                    header = loaded['header_info']
+                    if 'time_axis_endpoint' in handle.attrs:
+                        assert header['time_axis_endpoint'] == bool(handle.attrs['time_axis_endpoint'])
+                    np.testing.assert_allclose(header['total_time_ns'], handle.attrs['time_window_ns'])
+                    divisor = max(1, data.shape[0] - int(header['time_axis_endpoint']))
+                    np.testing.assert_allclose(header['time_step_s'], header['total_time_ns'] * 1e-9 / divisor)
+                    field_names = {
+                        'lon': 'longitude', 'lat': 'latitude', 'alt': 'altitude_m', 'height': 'flight_height_m',
+                        'roll': 'roll_deg', 'pitch': 'pitch_deg', 'yaw': 'yaw_deg',
+                        'ax': 'accel_x_g', 'ay': 'accel_y_g', 'az': 'accel_z_g',
+                        'gx': 'angular_rate_x_dps', 'gy': 'angular_rate_y_dps', 'gz': 'angular_rate_z_dps',
+                        'timestamp_ms': 'timestamp_ms', 'trace_id': 'trace_id',
+                    }
+                    metadata = loaded['trace_metadata']
+                    for source_name, target_name in field_names.items():
+                        field = 'trace_meta/' + source_name
+                        if field in handle:
+                            expected = handle[field][:]
+                            if source_name == 'trace_id':
+                                assert metadata[target_name].dtype == np.dtype('uint64')
+                            else:
+                                expected = np.where(np.isfinite(expected), expected, np.nan)
+                            np.testing.assert_array_equal(metadata[target_name], expected)
+                    if 'timestamp_ms' in metadata:
+                        np.testing.assert_array_equal(metadata['trace_timestamp_s'], metadata['timestamp_ms'] / 1000.)
                 report["hdf5"] = {
                     "shape": list(data.shape),
                     "time_window_ns": loaded["header_info"]["total_time_ns"],
                     "distance_axis_status": loaded["header_info"]["distance_axis_status"],
                     "time_axis_endpoint": loaded["header_info"]["time_axis_endpoint"],
-                    "missing_sensor_values": all(np.isnan(v).all() for v in loaded["trace_metadata"].values()),
+                    "time_step_s": loaded['header_info']['time_step_s'],
+                    "trace_metadata_verified": True,
+                    "missing_sensor_values": all(np.isnan(metadata[name]).all() for name in field_names.values()
+                                                 if name in metadata and name not in ('trace_id', 'timestamp_ms')),
                 }
                 assert report["hdf5"]["distance_axis_status"] == "unknown"
-                assert report["hdf5"]["time_axis_endpoint"] is False
             finally:
                 close = getattr(matrix, "close", None)
                 if close is not None:

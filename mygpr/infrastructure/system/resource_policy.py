@@ -56,6 +56,20 @@ def available_memory_bytes() -> int:
 
         return max(0, int(psutil.virtual_memory().available))
     except ImportError:
+        if os.name == 'nt':
+            import ctypes
+            from ctypes import wintypes
+
+            class MemoryStatus(ctypes.Structure):
+                _fields_ = [('length', wintypes.DWORD), ('load', wintypes.DWORD)] + [
+                    (name, ctypes.c_ulonglong) for name in (
+                        'total', 'available', 'total_page', 'available_page',
+                        'total_virtual', 'available_virtual', 'extended')]
+
+            status = MemoryStatus()
+            status.length = ctypes.sizeof(status)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+                return int(status.available)
         return _sysconf_available_memory()
 
 

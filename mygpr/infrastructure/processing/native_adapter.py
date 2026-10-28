@@ -1,7 +1,7 @@
 """Native processing catalog/executor (converged single implementation).
 
 自任务 F 候选 2 收敛起，native 目录/执行器是唯一实现：
-``NATIVE_ALGORITHMS`` 覆盖全部历史方法（36/36），展示元数据经
+``NATIVE_ALGORITHMS`` 覆盖全部历史方法（全部已迁移方法），展示元数据经
 :mod:`metadata_bridge` 取自 core 单一事实来源；旧 Legacy/Composite 适配器已拆除。
 """
 from __future__ import annotations
@@ -19,6 +19,9 @@ from mygpr.domain.processing.models import (
     ResourceEstimate,
 )
 from mygpr.infrastructure.processing.metadata_bridge import legacy_overlay
+from mygpr.domain.processing.warnings import build_processing_step_notice
+from mygpr.domain.processing.timebase import sampling_interval_s
+from mygpr.domain.common.scalars import to_float
 
 
 def _native_algorithms() -> dict:
@@ -35,7 +38,7 @@ def _native_algorithms() -> dict:
 class NativeProcessingCatalog(ProcessingCatalogPort):
     """Catalog for methods migrated from the historical engine.
 
-    ``NATIVE_ALGORITHMS`` 覆盖全部历史方法（36/36）。展示元数据（中文
+    ``NATIVE_ALGORITHMS`` 覆盖全部历史方法（全部已迁移方法）。展示元数据（中文
     display_name、category、visibility、auto_tune_*）经
     :mod:`metadata_bridge` 取自 core 单一事实来源，与旧 Composite 目录输出等价
     （由 ``tests/test_native_convergence_baseline.py`` 的 descriptor 基线断言）。
@@ -130,6 +133,7 @@ class NativeProcessingExecutor(ProcessingExecutorPort):
         warnings = [dict(item) for item in metadata.get("runtime_warnings", []) if isinstance(item, dict)]
         for item in warnings:
             execution_context.emit_warning(item)
+        execution_context.emit_warning(build_processing_step_notice(request.method_id, algorithm.name, metadata))
         header = clone_mapping(request.header_info)
         header_updates = metadata.get("header_info_updates")
         if isinstance(header_updates, dict):
@@ -182,6 +186,10 @@ class NativeProcessingExecutor(ProcessingExecutorPort):
 
 
 def prepare_native_params(request: ProcessingRequest) -> dict[str, Any]:
+    from mygpr.domain.processing.timebase import require_time_axis
+    require_time_axis(request.method_id, request.header_info)
+    if request.method_id == 'kirchhoff_migration' and int((request.params or {}).get('topo_cor', 0)) == 2:
+        raise ValueError('预地形校正的绝对高程网格尚不可验证，请选择后校正 topo_cor=1')
     params = dict(request.params or {})
     if request.method_id in {"rtm_migration", "kirchhoff_migration", "stolt_migration"}:
         from mygpr.infrastructure.processing.algorithms.common import require_distance_scale
@@ -190,13 +198,15 @@ def prepare_native_params(request: ProcessingRequest) -> dict[str, Any]:
     params.setdefault("_header_info", clone_mapping(request.header_info))
     params.setdefault("_trace_metadata", clone_trace_metadata(request.trace_metadata))
     samples = max(1, int(request.data.shape[0]))
-    total_time_ns = float(request.header_info.get("total_time_ns") or request.header_info.get("time_window_ns") or 0.0)
-    if total_time_ns > 0.0:
-        step_s = total_time_ns * 1.0e-9 / samples
+    total_time_ns = (to_float(request.header_info.get("total_time_ns"), default=0.0)
+                     or to_float(request.header_info.get("time_window_ns"), default=0.0))
+    step_s = sampling_interval_s(request.header_info, samples)
+    if step_s > 0.0:
         params.setdefault("time_step_s", step_s)
-        params.setdefault("time_window_ns", total_time_ns)
+        if total_time_ns > 0.0:
+            params.setdefault("time_window_ns", total_time_ns)
         if request.method_id == "frequency_filter_1d":
-            params.setdefault("sample_rate_hz", 1.0 / step_s)
+            params.setdefault("sample_rate_hz", 1.0 / float(params["time_step_s"]))
     return params
 
 

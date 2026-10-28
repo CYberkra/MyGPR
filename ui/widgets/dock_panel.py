@@ -187,6 +187,8 @@ class DockPanel(QWidget):
     def set_collapsed(self, collapsed: bool, animate: bool = True) -> None:
         """切换展开/细条；animate=False 用于切页/启动等瞬时场景。"""
         collapsed = bool(collapsed)
+        if self._width_anim is not None:
+            self._width_anim.stop()
         if collapsed == self._collapsed:
             self._apply_view_state()
             return
@@ -222,14 +224,15 @@ class DockPanel(QWidget):
         self._strip_line_label.setVisible(bool(text))
 
     def _animate_width(self, start_w: int, target_w: int) -> None:
-        if self._width_anim is not None:
-            self._width_anim.stop()
-        anim = QVariantAnimation(self)
-        anim.setStartValue(float(start_w))
-        anim.setEndValue(float(target_w))
+        anim = self._width_anim
+        if anim is None:
+            anim = QVariantAnimation(self)
+            anim.valueChanged.connect(self.setFixedWidth)
+            self._width_anim = anim
+        else:
+            anim.stop()
+        anim.setStartValue(int(start_w))
+        anim.setEndValue(int(target_w))
         anim.setDuration(constants.PANEL_ANIM_DURATION_MS)
         anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        anim.valueChanged.connect(
-            lambda v: self.setFixedWidth(int(round(float(v)))))
-        self._width_anim = anim
         anim.start()

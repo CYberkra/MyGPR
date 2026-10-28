@@ -70,3 +70,16 @@ def test_backend_pipeline_preserves_lineage_and_metadata() -> None:
         )
     finally:
         backend.shutdown()
+
+
+def test_project_pipeline_estimate_respects_intermediate_storage_mode() -> None:
+    from types import SimpleNamespace
+
+    calls = []
+    facade = SimpleNamespace(project_processing=SimpleNamespace(
+        estimate_pipeline=lambda *args, **kwargs: calls.append((args, kwargs)) or 'estimate'))
+    pipeline = PipelineDefinition(steps=(PipelineStep('dewow', {'window': 9}),))
+    result = MyGPRBackend.estimate_project_pipeline(
+        facade, 'P', 'L01', pipeline, save_intermediates=False)
+    assert result == 'estimate'
+    assert calls[0][1]['save_intermediates'] is False

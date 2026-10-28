@@ -9,6 +9,7 @@ from ui.file_tree import artifact_direct_parent, artifact_parameters
 from ui.widgets.context_menus import make_menu
 from ui.widgets.fluent_menu_keyboard import FluentMenuKeyboard
 from ui.widgets.object_context_menu import object_action, show_details
+from ui.result_presentation import describe_artifact
 
 
 class ProcessingMenus:
@@ -66,6 +67,9 @@ class ProcessingMenus:
         return menu
 
     def _show_source_menu(self, key, pos):
+        if self._comparison.owns(key):
+            self._comparison.show_menu(key, pos)
+            return
         menu = self._source_menu(key)
         menu._object_keyboard = FluentMenuKeyboard(menu)
         menu.exec(pos)
@@ -122,7 +126,8 @@ class ProcessingMenus:
         source = self._sources[key]
         art = self._artifacts_by_id.get(source.get('artifact_id'))
         metadata = artifact_parameters(art) if art else {'source': '原始输入', 'line_id': self._line_id}
-        self._show_details(source['title'], json.dumps(metadata, ensure_ascii=False, indent=2, default=str))
+        summary = describe_artifact(art, self._artifacts_by_id).tooltip+'\n\n完整记录：\n' if art else ''
+        self._show_details(source['title'], summary+json.dumps(metadata, ensure_ascii=False, indent=2, default=str))
 
     def _draft_menu(self):
         menu = make_menu(self)

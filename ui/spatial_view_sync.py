@@ -11,6 +11,7 @@
 - ``_tracks_fingerprint``：把 (tracks, colors) 压成可比较指纹；
 - ``_flush_if_current``：延后一拍的 flush 守卫——定时器触发前用户已
   切走时跳过，维持「只重绘可见视图」的纪律。
+- ``shutdown``：统一结束地图、三维地形和本地 DEM 的视图后台任务。
 
 页面侧（SpatialPage）保留编排层：_refresh_views / _flush_dirty_view /
 _switch_view / showEvent。mixin 通过鸭子类型使用页面的 ``_views()`` /
@@ -32,6 +33,18 @@ class ViewSyncMixin:
     def _init_view_sync(self) -> None:
         # 分段键 -> 上次成功灌入的数据指纹；主题切换时页面侧会 clear()
         self._views_applied: dict[str, tuple] = {}
+
+    def shutdown(self) -> None:
+        """Stop spatial work before Qt begins destroying child thread pools."""
+        if self._closed:
+            return
+        self._closed = True
+        self._dem_load_generation += 1
+        self._dem_load_signals.finished.disconnect(self._on_dem_loaded)
+        self._map_view.shutdown()
+        self._3d_view.shutdown()
+        self._dem_pool.clear()
+        self._dem_pool.waitForDone()
 
     @staticmethod
     def _tracks_fingerprint(tracks, colors) -> tuple:

@@ -30,17 +30,25 @@ from ui.controllers.project_controller import (  # noqa: E402
 class _FakeProjectsApi:
     """最小成果数据集 API：返回确定性小窗口。"""
 
+    def get_dataset_info(self, project_id, line_id):
+        return types.SimpleNamespace(time_window_ns=250.0, length_m=100.0,
+                                     shape=(501, 1950), metadata={})
+
     def get_artifact_dataset_info(self, project_id, line_id, artifact_id):
         return types.SimpleNamespace(
             time_window_ns=250.0, length_m=100.0, shape=(501, 1950))
 
     def read_artifact_window(self, project_id, line_id, artifact_id,
-                             *, max_samples, max_traces):
+                             *, sample_start, sample_end, trace_start, trace_end,
+                             max_samples, max_traces):
         import numpy as np
 
-        ns = list(range(min(int(max_samples), 501)))
-        ts = list(range(min(int(max_traces), 1950)))
+        ns = list(range(sample_start, sample_end))
+        ts = list(range(trace_start, trace_end))
         return np.zeros((len(ns), len(ts)), dtype=np.float32), ns, ts
+
+    def read_artifact_trace_metadata(self, project_id, line_id, artifact_id):
+        return {}
 
 
 def _make_controller(qapp) -> ProjectController:

@@ -17,7 +17,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel, CheckBox, ComboBox, DoubleSpinBox, StrongBodyLabel,
-    LineEdit, PushButton, ScrollArea, SpinBox,
+    LineEdit, PushButton, ScrollArea, SpinBox, Slider,
 )
 
 from ui import constants, file_dialogs
@@ -198,6 +198,26 @@ class SettingsPage(ScrollArea):
         layout.addLayout(make_form_row('色标映射:',
                                        self._bscan_cmap_combo, parent=card))
 
+        self._bscan_contrast_spin = DoubleSpinBox(card)
+        self._bscan_contrast_spin.setRange(0.5, 3.0)
+        self._bscan_contrast_spin.setDecimals(2)
+        self._bscan_contrast_spin.setSingleStep(0.05)
+        self._bscan_contrast_spin.setValue(1.0)
+        self._bscan_contrast_slider = Slider(Qt.Orientation.Horizontal, card)
+        self._bscan_contrast_slider.setRange(50, 300)
+        self._bscan_contrast_slider.setValue(100)
+        self._bscan_contrast_slider.setMinimumWidth(150)
+        self._bscan_contrast_slider.setToolTip('提高数值可增强对比度；只影响显示，统一色标模式保持共同色阶。')
+        self._bscan_contrast_slider.valueChanged.connect(
+            lambda v: self._bscan_contrast_spin.setValue(v / 100))
+        self._bscan_contrast_spin.valueChanged.connect(
+            lambda v: self._bscan_contrast_slider.setValue(round(v * 100)))
+        self._bscan_contrast_spin.valueChanged.connect(self._emit_bscan_changed)
+        self._bscan_contrast_reset = PushButton('恢复默认', card)
+        self._bscan_contrast_reset.clicked.connect(lambda: self._bscan_contrast_spin.setValue(1.0))
+        layout.addLayout(make_form_row('显示对比度:', self._bscan_contrast_slider,
+            self._bscan_contrast_spin, self._bscan_contrast_reset, parent=card))
+
         self._bscan_p_low_spin = DoubleSpinBox(card)
         self._bscan_p_high_spin = DoubleSpinBox(card)
         for spin, value in ((self._bscan_p_low_spin, 2.0),
@@ -330,7 +350,7 @@ class SettingsPage(ScrollArea):
                    self._workers_spin, self._root_edit, self._prefetch_check,
                    self._bscan_aspect_combo, self._bscan_x_axis_combo,
                    self._bscan_y_axis_combo,
-                   self._bscan_cmap_combo,
+                   self._bscan_cmap_combo, self._bscan_contrast_spin,
                    self._bscan_p_low_spin, self._bscan_p_high_spin,
                    self._bscan_gain_combo, self._bscan_gain_alpha_spin,
                    self._bscan_colorbar_check)
@@ -359,6 +379,14 @@ class SettingsPage(ScrollArea):
             self._bscan_cmap_combo.setCurrentText(
                 cmap if cmap in constants.COLORMAPS
                 else constants.DEFAULT_COLORMAP)
+            try:
+                contrast = float(data.get('bscan_contrast', 1.0))
+            except (TypeError, ValueError):
+                contrast = 1.0
+            import math
+            contrast = contrast if math.isfinite(contrast) else 1.0
+            self._bscan_contrast_spin.setValue(contrast)
+            self._bscan_contrast_slider.setValue(round(self._bscan_contrast_spin.value() * 100))
             low, high = _levels_or_default(data)
             self._bscan_p_low_spin.setValue(low)
             self._bscan_p_high_spin.setValue(high)
@@ -389,6 +417,7 @@ class SettingsPage(ScrollArea):
             'bscan_aspect_mode': str(self._bscan_aspect_combo.currentData()),
             'bscan_x_axis': str(self._bscan_x_axis_combo.currentData()),
             'bscan_y_axis': str(self._bscan_y_axis_combo.currentData()),
+            'bscan_contrast': float(self._bscan_contrast_spin.value()),
             'bscan_colormap': str(self._bscan_cmap_combo.currentText()),
             'bscan_p_low': float(self._bscan_p_low_spin.value()),
             'bscan_p_high': float(self._bscan_p_high_spin.value()),
@@ -415,6 +444,7 @@ class SettingsPage(ScrollArea):
         )
         cmap_combo = ((self._bscan_cmap_combo, 'bscan_colormap'),)
         spins = (
+            (self._bscan_contrast_spin, 'bscan_contrast'),
             (self._bscan_p_low_spin, 'bscan_p_low'),
             (self._bscan_p_high_spin, 'bscan_p_high'),
             (self._bscan_gain_alpha_spin, 'bscan_gain_alpha'),
@@ -447,6 +477,7 @@ class SettingsPage(ScrollArea):
                         spin.setValue(float(values[key]))
                     except (TypeError, ValueError):
                         continue        # 坏值：该项保持现状
+            self._bscan_contrast_slider.setValue(round(self._bscan_contrast_spin.value() * 100))
             for check, key in checks:
                 if key in values:
                     check.setChecked(bool(values[key]))

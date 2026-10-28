@@ -8,11 +8,11 @@
    ``direct_comparison``（native 与 legacy 直接对比）、``golden_digest``
    （native 输出被 SHA-256 摘要钉死）、``bitwise_kernel``（与历史 CPU kernel
    逐位一致）或 ``determinism_contract``（实验性方法，仅要求确定性）。
-   ``test_equivalence_evidence_covers_all_native_methods`` 保证 36 个方法
+   ``test_equivalence_evidence_covers_all_native_methods`` 保证 全部已注册方法
    无一遗漏；本文件同时为证据最少的 wavelet_2d 补上直接对比。
 
 2. 描述符等价矩阵 —— ``descriptor_baseline.json`` 钉死 Composite 目录当前
-   对全部 36 个方法的输出（中文 display_name、category、visibility、
+   对全部 全部已注册方法的输出（中文 display_name、category、visibility、
    auto_tune_stage、parameter_schema 合并结果等）。阶段 1 元数据迁移后，
    新目录实现必须逐字段复现这份基线。
 
@@ -93,6 +93,7 @@ EQUIVALENCE_EVIDENCE: dict[str, tuple[str, str]] = {
     "hankel_svd": ("direct_comparison", "test_native_global_processing.py"),
     # 本文件 —— 直接对比（阶段 0 补齐的缺口）
     "wavelet_2d": ("direct_comparison", "test_native_convergence_baseline.py"),
+    "trace_cut": ("direct_comparison", "test_native_convergence_baseline.py"),
     # tests/test_native_extended_processing.py — golden 摘要
     "time_cut": ("golden_digest", "test_native_extended_processing.py"),
     "trace_qc": ("golden_digest", "test_native_extended_processing.py"),
@@ -158,6 +159,17 @@ def test_wavelet_native_matches_legacy_kernel(method_id: str, params: dict) -> N
         method_id=method_id,
         params=params,
         header_info={"total_time_ns": 128.0},
+    )
+    native = NativeProcessingExecutor().execute(request)
+    legacy = _legacy_kernel(request)
+    np.testing.assert_allclose(native.data, legacy, rtol=0.0, atol=0.0)
+
+
+def test_trace_cut_native_matches_compatibility_facade() -> None:
+    request = ProcessingRequest(
+        data=_matrix(),
+        method_id="trace_cut",
+        params={"trace_start": 5, "trace_end": 17},
     )
     native = NativeProcessingExecutor().execute(request)
     legacy = _legacy_kernel(request)

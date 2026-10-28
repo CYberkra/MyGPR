@@ -15,7 +15,9 @@ import numpy as np
 
 from core.gpr_data_model import GPRDataSet, time_to_depth_axis
 from core.hdf5_array_proxy import HDF5ArrayProxy
+from core.processing_axes import artifact_axes
 from core.storage_primitives import atomic_output_path, fsync_directory, fsync_file, utc_now
+from mygpr.domain.project.trace_snapshot import read_trace_snapshot, write_trace_snapshot
 
 LINE_CONTAINER_SCHEMA = "mygpr.line_container.v1"
 RAW_MATRIX_PATH = "/raw/bscan"
@@ -226,7 +228,7 @@ def load_raw_dataset(path: str | Path, *, line_id: str) -> GPRDataSet:
         time_axis_ns=time_axis,
         depth_axis_m=depth,
         source_path=str(source),
-        time_window_ns=float(metadata.get("time_window_ns") or (time_axis[-1] if time_axis.size else 250.0)),
+        time_window_ns=float(metadata.get("time_window_ns", float(time_axis[-1] - time_axis[0]) if time_axis.size else 250.0)),
         dielectric_constant=float(metadata.get("dielectric_constant") or 9.0),
         format_name=str(metadata.get("format_name") or "mygpr-hdf5"),
         metadata=metadata,
@@ -316,6 +318,13 @@ def locate_processing_artifact(path: str | Path, artifact_id: str) -> tuple[Path
         except (OSError, RuntimeError, TypeError, ValueError, KeyError):
             pass
     raise FileNotFoundError(f"Processing artifact not found: {artifact_id}")
+def read_artifact_trace_metadata(path: str | Path, artifact_id: str) -> dict[str, np.ndarray] | None:
+    """Read and verify the immutable per-artifact trace snapshot, if present."""
+    artifact_file, _ = locate_processing_artifact(path, artifact_id)
+    with h5py.File(artifact_file, "r") as handle:
+        return read_trace_snapshot(handle[f"{PROCESSING_ROOT}/{artifact_id}"])
+
+
 def write_processing_artifact(
     path: str | Path,
     *,
@@ -323,6 +332,7 @@ def write_processing_artifact(
     matrix: Any,
     manifest: dict[str, Any],
     params: dict[str, Any],
+    trace_metadata=None,
     cancel_requested=None,
     progress_callback=None,
 ) -> dict[str, Any]:
@@ -360,6 +370,8 @@ def write_processing_artifact(
                 cancel_requested=cancel_requested,
                 progress_callback=progress_callback,
             )
+            if trace_metadata is not None:
+                write_trace_snapshot(group, trace_metadata, dataset.shape[1])
             committed = dict(manifest)
             committed.update(
                 artifact_id=artifact_id,
@@ -542,6 +554,51 @@ def read_processing_manifest(path: str | Path, artifact_id: str) -> dict[str, An
         return {}
 
 
+def _saved_output_axis(header, key, expected):
+    value = header.get(key)
+    if value is None:
+        return None
+    axis = np.asarray(value, dtype=np.float32)
+    if axis.shape != (expected,) or not np.all(np.isfinite(axis)):
+        raise ValueError(f"成果输出坐标轴无效: {key}")
+    return axis
+
+
+def _validate_elevation_axis(header, expected):
+    if not header.get("is_elevation"):
+        return
+    axis = np.asarray(header.get("elevation_axis_m", []), dtype=np.float64)
+    if axis.shape != (expected,) or not np.all(np.isfinite(axis)) or (axis.size > 1 and not np.all(np.diff(axis) < 0)):
+        raise ValueError("成果高程坐标轴无效")
+
+
+def _apply_output_axes(output_header, sample_count, trace_count, time_window,
+                       input_time_window, out_offset, dielectric, distance, time_axis, depth):
+    if output_header and sample_count > 0:
+        saved_time = _saved_output_axis(output_header, "time_axis_ns", sample_count)
+        saved_depth = _saved_output_axis(output_header, "depth_axis_m", sample_count)
+        saved_distance = _saved_output_axis(output_header, "distance_axis_m", trace_count)
+        if saved_time is not None:
+            time_axis = saved_time
+        if saved_depth is not None:
+            depth = saved_depth
+        if saved_distance is not None:
+            distance = saved_distance
+        axes_unchanged = (
+            len(time_axis) == sample_count and time_window == input_time_window
+            and out_offset == float(time_axis[0])
+        )
+        if saved_time is None and not axes_unchanged:
+            time_axis = np.linspace(out_offset, out_offset + time_window, sample_count, dtype=np.float32,
+                                    endpoint=bool(output_header.get("time_axis_endpoint", True)))
+        if saved_depth is None:
+            depth = time_to_depth_axis(time_axis, dielectric)
+        if len(distance) != trace_count:
+            distance = np.linspace(0.0, max(float(trace_count - 1), 1.0),
+                                   trace_count, dtype=np.float32)
+    return distance, time_axis, depth
+
+
 def load_processing_dataset(path: str | Path, *, artifact_id: str, raw_dataset: GPRDataSet | None = None) -> GPRDataSet:
     source = Path(path).resolve()
     artifact_file, dataset_path = locate_processing_artifact(source, artifact_id)
@@ -579,27 +636,27 @@ def load_processing_dataset(path: str | Path, *, artifact_id: str, raw_dataset: 
             time_axis = np.zeros(0, dtype=np.float32)
         if depth is None:
             depth = np.zeros(0, dtype=np.float32)
+    distance, time_axis, depth = artifact_axes(source, manifest, (distance, time_axis, depth),
+                                            lambda parent: read_processing_manifest(source, parent))
+    dielectric = float(input_meta.get("dielectric_constant") or dielectric)
+    saved_window = _coerce_float(input_meta.get("time_window_ns"))
+    if saved_window is not None and saved_window >= 0:
+        time_window = saved_window
     # P1-1：优先用 manifest 持久化的输出 header 重建物理轴（形状变更方法如
     # time_cut/set_zero_time 会改变时间窗与零点，否则二次处理/成像按原始时窗算错）。
     output_header = manifest.get("output_header") if isinstance(manifest.get("output_header"), dict) else {}
     input_time_window = time_window
-    out_time_window = _coerce_float(output_header.get("total_time_ns") or output_header.get("time_window_ns"))
+    out_time_window = _coerce_float(output_header.get("total_time_ns", output_header.get("time_window_ns")))
     out_offset = _coerce_float(output_header.get("time_cut_offset_ns")) or 0.0
-    if out_time_window and out_time_window > 0:
+    if out_time_window is not None and out_time_window >= 0:
         time_window = out_time_window
     sample_count = int(getattr(proxy, "shape", (0, 0))[0])
-    if output_header and sample_count > 0:
-        axes_unchanged = (
-            len(time_axis) == sample_count and time_window == input_time_window
-            and out_offset == float(time_axis[0])
-        )
-        if not axes_unchanged:
-            time_axis = np.linspace(out_offset, out_offset + time_window, sample_count, dtype=np.float32,
-                                    endpoint=bool(output_header.get("time_axis_endpoint", True)))
-        depth = time_to_depth_axis(time_axis, dielectric)
-        if len(distance) != int(getattr(proxy, "shape", (0, 0))[1]):
-            distance = np.linspace(0.0, max(float(int(getattr(proxy, "shape", (0, 0))[1]) - 1), 1.0),
-                                   int(getattr(proxy, "shape", (0, 0))[1]), dtype=np.float32)
+    _validate_elevation_axis(output_header, sample_count)
+    distance, time_axis, depth = _apply_output_axes(
+        output_header, sample_count, int(proxy.shape[1]), time_window,
+        input_time_window, out_offset, dielectric, distance, time_axis, depth)
+    if output_header.get("time_axis_status") == "unknown":
+        time_axis = np.zeros(sample_count, dtype=np.float32)
     # Shape-changing processing nodes may define explicit axes in future.  Until
     # then GPRDataSet rebuilds a mismatched axis rather than returning invalid lengths.
     return GPRDataSet(
@@ -613,7 +670,7 @@ def load_processing_dataset(path: str | Path, *, artifact_id: str, raw_dataset: 
         dielectric_constant=dielectric,
         format_name=f"processed-hdf5:{manifest.get('method_id') or artifact_id}",
         metadata={"processing_manifest": manifest,
-                  **{key: output_header[key] for key in ("time_axis_endpoint", "distance_axis_status", "time_cut_offset_ns") if key in output_header}},
+                  **{key: output_header[key] for key in ("time_axis_endpoint", "time_step_s", "distance_axis_status", "time_cut_offset_ns", "source_trace_offset", "is_depth", "is_elevation", "depth_max_m", "depth_step_m", "time_axis_status", "elevation_axis_m") if key in output_header}},
     )
 
 
