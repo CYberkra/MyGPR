@@ -120,11 +120,23 @@ def test_saved_source_path_shows_only_algorithm_names_and_keeps_parameter_toolti
     page.select_artifact('B')
     buttons = page._saved_path.buttons()
     assert all('w=' not in button.text() for button in buttons)
-    assert any('去漂移' in button.text() for button in buttons)
+    assert any('去漂移' in button.accessibleName() for button in buttons)
     assert any('"window": 23' in button.toolTip() for button in buttons)
     assert page._saved_path.parentWidget() is page._chain_panel
     assert page._saved_path.isVisibleTo(page)
     assert page._chain_strip.isVisibleTo(page)
+
+
+def test_saved_source_path_elision_preserves_accessibility_and_tooltip(page, qapp):
+    page.select_artifact('B')
+    button = next(item for item in page._saved_path.buttons() if '去漂移' in item.accessibleName())
+    title, tooltip = button.accessibleName(), button.toolTip()
+    button.setFixedWidth(30)
+    qapp.processEvents()
+    assert button.text() != title
+    assert button.accessibleName() == title
+    assert button.toolTip() == tooltip and '"window": 23' in tooltip
+    assert 'w=' not in button.text()
 
 
 def test_stale_saved_path_button_cannot_activate_reused_id_in_another_project(page):

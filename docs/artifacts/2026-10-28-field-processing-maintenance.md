@@ -16,6 +16,10 @@ views, selection-driven processing, A-scan tools, and saved-result roundtrips.
   quantization and inconsistent endpoint/relative-time fixtures; the related
   axis suite passed 46 tests with one skip, and the velocity API suite passed 5.
   Off-grid requests retain the absolute half-open interval contract.
+- Linux GUI CI exposed an explicit-original-tab selection regression and a
+  font-dependent elision assertion. The affected four GUI test files passed
+  159 tests after restoring existing-source selection and validating full
+  accessible names/tooltips independently of the truncated visible labels.
 - Windows native Qt verification used a local CDUT streaming H5 with 501 samples
   and 4,751 traces. The retained first 2,000 traces preserved full display
   resolution, and the original file SHA-256 was unchanged.

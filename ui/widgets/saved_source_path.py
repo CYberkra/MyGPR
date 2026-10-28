@@ -15,6 +15,7 @@ class _PathButton(TransparentPushButton):
         self._full_title = str(title)
         super().__init__(parent=parent)
         self.setText(self._full_title)
+        self.setAccessibleName(self._full_title)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

@@ -452,7 +452,7 @@ class ProcessingSteps:
         return str(artifact_id) in self._artifacts_by_id
 
     def select_original(self):
-        if not self._line_id:
+        if not self._line_id and 'original' not in self._sources:
             return False
         # An explicit open overrides a saved empty layout, even before I/O finishes.
         self._pending_layout = None
