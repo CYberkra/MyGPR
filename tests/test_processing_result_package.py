@@ -344,3 +344,45 @@ def test_real_qt_delivery_bridge_completes_export_in_existing_job_system(process
         assert progress
     finally:
         bridge.shutdown()
+
+
+def test_trace_snapshot_survives_qc_and_package_reimport(tmp_path):
+    from tests.test_cdut_streaming_hdf5_import import write_stream
+    source = tmp_path / 'stream.h5'
+    waveform, fields = write_stream(source)
+    with h5py.File(source, 'r+') as handle:
+        handle['trace_meta/trace_id'][:] = np.arange(100, 105, dtype=np.uint64)
+    backend = MyGPRBackend.create_default(max_workers=1)
+    try:
+        project = backend.projects.create_project(tmp_path / 'snapshot-project', name='snapshot')
+        pid = project.project_id
+        backend.projects.import_line_source(pid, 'L01', source)
+        backend.projects.update_line_properties(pid, 'L01', 20., False)
+        crop = backend.project_processing.execute_pipeline(pid, 'L01', PipelineDefinition(steps=(
+            PipelineStep('trace_cut', {'trace_start': 3, 'trace_end': 5}),)))
+        mark = backend.project_processing.execute_pipeline(pid, 'L01', PipelineDefinition(steps=(
+            PipelineStep('trace_qc', {'mode': 'mark', 'manual_trace_indices': '1', 'spike_zscore': 0}),)),
+            input_artifact_id=crop.artifact_id)
+        marked = backend.projects.read_artifact_dataset(pid, 'L01', mark.artifact_id)
+        np.testing.assert_array_equal(marked.trace_metadata['trace_qc_bad_mask'], [0, 1, 0])
+        removed = backend.project_processing.execute_pipeline(pid, 'L01', PipelineDefinition(steps=(
+            PipelineStep('trace_qc', {'mode': 'remove', 'manual_trace_indices': '1', 'spike_zscore': 0}),)),
+            input_artifact_id=crop.artifact_id)
+        data = backend.projects.read_artifact_dataset(pid, 'L01', removed.artifact_id)
+        np.testing.assert_array_equal(data.header_info['distance_axis_m'], [10., 20.])
+        np.testing.assert_array_equal(data.trace_metadata['trace_id'], [102, 104])
+        np.testing.assert_allclose(data.trace_metadata['roll_deg'], [fields['roll'][2], fields['roll'][4]], equal_nan=True)
+        np.testing.assert_array_equal(data.data, waveform[[2, 4]].T)
+        package = export(backend, project, tmp_path / 'snapshot.zip', removed.artifact_id)
+        with zipfile.ZipFile(package.archive_path) as archive:
+            manifest = json.loads(archive.read('manifest.json'))
+            step = next(item for item in manifest['steps'] if item['artifact_id'] == removed.artifact_id)
+            result_path = tmp_path / 'result.h5'
+            result_path.write_bytes(archive.read(step['data']))
+        backend.projects.import_line_source(pid, 'L02', result_path)
+        imported = backend.projects.read_dataset(pid, 'L02')
+        np.testing.assert_array_equal(imported.trace_metadata['trace_id'], [102, 104])
+        np.testing.assert_allclose(imported.trace_metadata['roll_deg'], data.trace_metadata['roll_deg'], equal_nan=True)
+        np.testing.assert_array_equal(imported.trace_metadata['trace_qc_bad_mask'], [0, 0])
+    finally:
+        backend.shutdown()

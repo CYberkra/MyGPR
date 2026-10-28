@@ -30,6 +30,7 @@ class ProjectChain:
         self.current_line_id = ''         # 当前测线（项目/处理/解释页共用）
         self.pending_select_line_id = ''  # 导入完成后要选中的测线
         self.pending_focus_artifact = ''  # 文件树点成果：待选中预览的 artifact_id
+        self._quality_focus = None
         # 空间轨迹加载去重（见 on_project_opened / on_lines_updated）：
         # 一次「打开项目」里两个槽都要"确保轨迹已加载"，此前各发一次
         # ``load_spatial_tracks()``，导致同一份轨迹被后端完整解析两遍
@@ -81,6 +82,7 @@ class ProjectChain:
         project.close_project_requested.connect(self.on_close_project_requested)
         project.quality_check_requested.connect(self.on_quality_check_requested)
         project.quality_refresh_requested.connect(self.on_quality_refresh_requested)
+        project.quality_location_requested.connect(self.on_quality_location_requested)
         # 测线表右键"复制路径/打开所在文件夹"：异步路径查询回包缓存进页面
         pc0 = co.project_controller
         if pc0 is not None:
@@ -134,6 +136,8 @@ class ProjectChain:
             pc.preview_failed.connect(
                 lambda msg: self._co.infobar('error', '成果预览失败', msg))
             pc.dataset_preview_ready.connect(self.on_dataset_preview)
+            if hasattr(pc, "preview_context_failed"):
+                pc.preview_context_failed.connect(self._quality_preview_failed)
             pc.artifact_preview_ready.connect(self.on_artifact_preview)
             pc.preview_invalidated.connect(self.on_preview_invalidated)
             pc.preflight_ready.connect(self.on_preflight_ready)
@@ -222,6 +226,7 @@ class ProjectChain:
     def on_project_opened(self, summary) -> None:
         """project_opened → 主页卡片 + 项目页信息 + 最近项目 + 成果页刷新。"""
         self._package_context_generation += 1
+        self._quality_focus = None
         co = self._co
         self._reset_interpretation()
         home = co.page('homeInterface')
@@ -439,6 +444,7 @@ class ProjectChain:
             return False
         co = self._co
         if line_id != self.current_line_id:
+            self._quality_focus = None
             if confirm_discard and not self.confirm_interpretation_close():
                 project = co.page('projectInterface')
                 project.select_line(self.current_line_id)
@@ -486,6 +492,9 @@ class ProjectChain:
             return
         if not self.on_line_selected(line_id):
             return
+        processing = self._co.page('processingInterface')
+        if not processing.has_line_session(line_id):
+            processing.select_original()
         self._co.goto_page('processingInterface')
         self._co.infobar('info', '数据预览', f'正在加载测线 {line_id} …')
 
@@ -573,7 +582,13 @@ class ProjectChain:
         if not self.current_line_id:
             return  # late raw preview after the final line was removed
         co.page('homeInterface').set_preview_bundle(bundle)
-        co.page('processingInterface').set_original_bundle(bundle)
+        processing = co.page('processingInterface')
+        processing.set_original_bundle(bundle)
+        pending = self._quality_focus
+        if pending and pending[:2] == (str(co.current_project_id()), str(self.current_line_id)):
+            if processing._workspace.open_source('original'):
+                processing._workspace.primary_view().focus_trace_range(pending[2], pending[3])
+            self._quality_focus = None
         if co.processing.interpretation_uses_source(''):
             co.page('interpretationInterface').set_bundle(bundle)
 
@@ -657,6 +672,18 @@ class ProjectChain:
             self._co.jobs.import_job_ids.add(str(job_id))
             self.pending_select_line_id = line_id
             self._co.infobar('info', '导入测线', '导入任务已提交，完成后会自动选中该测线')
+
+    def on_quality_location_requested(self, line_id, start, stop):
+        line_id = str(line_id)
+        if line_id != self.current_line_id and not self.on_line_selected(line_id):
+            return
+        self._quality_focus = (str(self._co.current_project_id()), line_id, int(start), int(stop))
+        self._co.project_controller.preview_line(line_id)
+        self._co.goto_page('processingInterface')
+
+    def _quality_preview_failed(self, project_id, line_id, artifact_id, _message):
+        if not artifact_id and self._quality_focus and self._quality_focus[:2] == (str(project_id), str(line_id)):
+            self._quality_focus = None
 
     def on_quality_check_requested(self, line_id: str) -> None:
         if self._co.project_controller is not None and self._co.require_project():

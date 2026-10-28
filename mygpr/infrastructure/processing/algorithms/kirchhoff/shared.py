@@ -160,8 +160,8 @@ def _resample_to_input_grid(
         )
 
     resized = np.nan_to_num(resized, nan=0.0, posinf=0.0, neginf=0.0)
-    output_dz = float(dz) * src_samples / target_samples
-    output_dx = float(dx) * src_traces / target_traces
+    output_dz = float(dz) * (src_samples - 1) / (target_samples - 1) if src_samples > 1 and target_samples > 1 else 0.0
+    output_dx = float(dx) * (src_traces - 1) / (target_traces - 1) if src_traces > 1 and target_traces > 1 else 0.0
     return np.asarray(resized, dtype=np.float64), output_dz, output_dx
 
 
@@ -789,6 +789,9 @@ def _build_kirchhoff_header_updates(
         "total_time_ns": 0.0,
         "is_depth": topo_cor <= 0,
         "is_elevation": topo_cor > 0,
+        "depth_axis_m": np.arange(samples, dtype=np.float32) * depth_step_m if topo_cor <= 0 else None,
+        "time_axis_ns": None, "time_axis_status": "unknown", "time_step_s": None,
+        "time_window_ns": 0.0, "time_cut_offset_ns": None,
         "depth_step_m": float(depth_step_m),
         "depth_max_m": float(depth_step_m * max(samples - 1, 0)),
         "display_hint": "signed_migration",
@@ -803,7 +806,15 @@ def _build_kirchhoff_header_updates(
         "display_colorbar_label": "信号幅度",
     }
     updates["display_ylabel"] = "高程 (m)" if topo_cor > 0 else "深度 (m)"
+    input_distance = np.asarray((header_info or {}).get("distance_axis_m", []), dtype=np.float64)
+    if ((header_info or {}).get("distance_axis_status") != "unknown" and input_distance.ndim == 1
+            and input_distance.size and np.all(np.isfinite(input_distance)) and trace_interval_m > 0):
+        updates["distance_axis_m"] = input_distance[0] + np.arange(int(output_shape[1]), dtype=np.float64) * trace_interval_m
+    else:
+        updates["distance_axis_m"] = None
+        updates["distance_axis_status"] = "unknown"
     if topo_cor > 0 and elevation_axis_top_m is not None:
+        updates["elevation_axis_m"] = float(elevation_axis_top_m) - np.arange(samples, dtype=np.float64) * depth_step_m
         updates["elevation_top_m"] = float(elevation_axis_top_m)
         updates["elevation_bottom_m"] = float(
             elevation_axis_top_m - depth_step_m * max(samples - 1, 0)

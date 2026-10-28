@@ -218,3 +218,23 @@ def test_trace_cut_rejects_invalid_ranges(params):
             method_id="trace_cut",
             params=params,
         ))
+
+
+def test_time_cut_rejects_nonuniform_saved_axis():
+    from mygpr.infrastructure.processing.algorithms.extended.time_cut import method_time_cut
+    with pytest.raises(ValueError, match='非均匀'):
+        method_time_cut(np.ones((4, 2), dtype=np.float32), mode='keep_range',
+                        time_start_ns=100, time_end_ns=130,
+                        header_info={'time_window_ns': 40, 'time_axis_ns': [100, 110, 121, 130]})
+
+
+def test_time_cut_absolute_half_open_interval_and_empty_rejection():
+    from mygpr.infrastructure.processing.algorithms.extended.time_cut import method_time_cut
+    data = np.arange(8, dtype=np.float32).reshape(4, 2)
+    header = {'time_axis_ns': [100., 110., 120., 130.]}
+    cut, meta = method_time_cut(data, mode='keep_range', time_start_ns=111,
+                                time_end_ns=130, header_info=header)
+    np.testing.assert_array_equal(cut, data[2:3])
+    assert meta['header_info_updates']['time_cut_offset_ns'] == 120
+    with pytest.raises(ValueError, match='范围'):
+        method_time_cut(data, mode='keep_range', time_start_ns=300, time_end_ns=400, header_info=header)

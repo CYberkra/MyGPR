@@ -38,7 +38,7 @@ def _write_json(path, value):
     path.write_text(json.dumps(_json_value(value), ensure_ascii=False, indent=2, allow_nan=False), encoding='utf-8')
 
 
-def _write_h5(path, dataset, artifact, context):
+def _write_h5(path, dataset, artifact, context, trace_metadata=None):
     rows, cols = dataset.matrix.shape
     label = f'导出矩阵：{artifact.name}' if artifact is not None else f'导出原始测线：{dataset.line_id}'
     with h5py.File(path, 'x') as handle:
@@ -61,12 +61,20 @@ def _write_h5(path, dataset, artifact, context):
                 matrix[region] = np.asarray(dataset.matrix[region], dtype=np.float32)
                 completed += 1
                 context.report_progress(completed, total, label)
+        if trace_metadata is not None:
+            from mygpr.domain.project.trace_snapshot import write_trace_snapshot
+            write_trace_snapshot(handle, trace_metadata, cols)
         for key in ('distance_axis_m', 'time_axis_ns', 'depth_axis_m'):
             values = np.asarray(getattr(dataset, key))
             expected = cols if key == 'distance_axis_m' else rows
             if values.ndim != 1 or len(values) != expected or not np.all(np.isfinite(values)):
                 raise ValueError(f'{label}：无效坐标轴 {key}')
             handle.create_dataset(key, data=values)
+        if dataset.metadata.get('is_elevation'):
+            values = np.asarray(dataset.metadata.get('elevation_axis_m', []), dtype=np.float64)
+            if values.shape != (rows,) or not np.all(np.isfinite(values)) or (rows > 1 and not np.all(np.diff(values) < 0)):
+                raise ValueError(f'{label}：无效高程坐标轴')
+            handle.create_dataset('elevation_axis_m', data=values)
 
 
 def _axis_edges(values):
@@ -100,14 +108,16 @@ def _write_preview(path, dataset, artifact, context):
     distance = np.asarray(dataset.distance_axis_m)[traces]
     known = status in ('known', 'measured', 'valid', 'physical', 'provided_length') and _monotone(distance)
     timed = dataset.time_window_ns > 0 and _monotone(time)
+    elevation = np.asarray(dataset.metadata.get('elevation_axis_m', []), dtype=np.float64)
+    is_elevation = bool(dataset.metadata.get('is_elevation')) and elevation.shape == (dataset.sample_count,)
     x_edges = _axis_edges(distance if known else traces)
-    y_edges = _axis_edges(time if timed else samples)
+    y_edges = _axis_edges(elevation[samples] if is_elevation else time if timed else samples)
     image = ax.pcolormesh(x_edges, y_edges, np.ma.masked_invalid(data), shading='flat',
                           cmap='seismic', vmin=-limit, vmax=limit, rasterized=True)
     ax.set_xlim(x_edges[0], x_edges[-1])
     ax.set_ylim(y_edges[-1], y_edges[0])
     ax.set_xlabel('Distance (m)' if known else 'Trace index (0-based)')
-    ax.set_ylabel('Time (ns)' if timed else 'Sample index (0-based)')
+    ax.set_ylabel('Elevation (m)' if is_elevation else 'Time (ns)' if timed else 'Sample index (0-based)')
     ax.set_title(f'{artifact.line_id} / {artifact.artifact_id}')
     figure.colorbar(image, ax=ax, label='Amplitude')
     figure.tight_layout()
@@ -172,7 +182,8 @@ def _publish(archive, destination, context):
 
 
 def export_processing_package(*, project_id, line_id, artifacts, load_dataset, load_raw_dataset,
-                              destination, target, warnings, context: ExecutionContext):
+                              destination, target, warnings, context: ExecutionContext,
+                              load_trace_metadata=None, load_raw_trace_metadata=None):
     destination = Path(destination).expanduser().absolute()
     if destination.suffix.lower() != '.zip':
         destination = destination.with_name(destination.name + '.zip')
@@ -182,7 +193,7 @@ def export_processing_package(*, project_id, line_id, artifacts, load_dataset, l
     manifest = dict(schema=PACKAGE_SCHEMA, project_id=project_id, line_id=line_id,
                     scope='to_step' if target else 'line', target_artifact_id=target,
             created_at=datetime.now(timezone.utc).isoformat(timespec="milliseconds"), warnings=list(warnings), steps=[],
-                    sensor_metadata='No persisted per-step sensor snapshots; source sensors are not substituted.')
+                    sensor_metadata='Per-step snapshots are included when available; source sensors are not substituted.')
     with tempfile.TemporaryDirectory(prefix='.mygpr-package-', dir=destination.parent) as folder:
         stage = Path(folder)
         raw = stage / 'raw'
@@ -191,7 +202,8 @@ def export_processing_package(*, project_id, line_id, artifacts, load_dataset, l
             raw_dataset = load_raw_dataset()
         except (OSError, KeyError, ValueError) as exc:
             raise ValueError(f'无法读取原始测线 {line_id}，请修复数据后重新打包：{exc}') from exc
-        _write_h5(raw / 'data.h5', raw_dataset, None, context.child(0, len(artifacts) + 2))
+        raw_trace = load_raw_trace_metadata() if load_raw_trace_metadata else None
+        _write_h5(raw / 'data.h5', raw_dataset, None, context.child(0, len(artifacts) + 2), raw_trace)
         _write_json(raw / 'source.json', dict(
             kind='project_raw_snapshot', line_id=line_id, metadata=raw_dataset.to_metadata()))
         manifest['raw_input'] = dict(
@@ -204,7 +216,8 @@ def export_processing_package(*, project_id, line_id, artifacts, load_dataset, l
             step.mkdir(parents=True)
             dataset = load_dataset(artifact.artifact_id)
             step_context = context.child(index + 1, len(artifacts) + 2)
-            _write_h5(step / 'data.h5', dataset, artifact, step_context)
+            trace_metadata = load_trace_metadata(artifact.artifact_id) if load_trace_metadata else None
+            _write_h5(step / 'data.h5', dataset, artifact, step_context, trace_metadata)
             _write_preview(step / 'bscan.png', dataset, artifact, step_context)
             _write_json(step / 'parameters.json', artifact.manifest)
             relative = step.relative_to(stage).as_posix()

@@ -15,6 +15,7 @@ class ProjectIdentityChain:
         helper.has_active_tasks = lambda: not self._idle()
         helper.rename_project_requested.connect(self.rename_project)
         helper.rename_line_requested.connect(self.rename_line)
+        helper.properties_requested.connect(self.update_line_properties)
         helper.relocation_requested.connect(self.relocate)
         if tree is not None:
             tree.rename_allowed = lambda: page._can_write() and self._idle()
@@ -48,6 +49,10 @@ class ProjectIdentityChain:
     def rename_line(self, project_id, line_id, name):
         if self._allowed(project_id):
             self.controller.rename_line(project_id, line_id, name)
+
+    def update_line_properties(self, project_id, line_id, length_m, view_reversed):
+        if self._allowed(project_id):
+            self.controller.update_line_properties(project_id, line_id, length_m, view_reversed)
 
     def relocate(self, project_id, destination):
         if self._allowed(project_id) and self.chain.can_change_project():
@@ -107,6 +112,9 @@ class ProjectIdentityChain:
                 self.tree.set_lines(lines)
             if processing is not None:
                 processing.set_lines(lines)
+        elif success and operation == "update_line_properties":
+            if processing is not None:
+                processing.refresh_line_previews(line_id)
         elif success and operation == "relocate_project":
             self._remember(result, old_root)
             self.pc._current = None
@@ -124,9 +132,9 @@ class ProjectIdentityChain:
                 processing._preview_requested.clear()
                 processing._workspace._pending.clear()
                 processing._comparison.restart_pending()
-        title = {"rename_project": "项目改名", "rename_line": "测线改名", "relocate_project": "项目目录迁移"}[operation]
+        title = {"rename_project": "项目改名", "rename_line": "测线改名", "relocate_project": "项目目录迁移", "update_line_properties": "测线属性"}[operation]
         message = (
-            ("新位置已打开，旧目录保留：" + old_root if operation == "relocate_project" else "名称已保存。")
+            ("新位置已打开，旧目录保留：" + old_root if operation == "relocate_project" else "属性已保存。" if operation == "update_line_properties" else "名称已保存。")
             if success
             else error
         )

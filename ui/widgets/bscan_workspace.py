@@ -23,6 +23,8 @@ from ui.design_tokens import color, rgba
 from ui.widgets.fluent_menu_keyboard import FluentMenuKeyboard
 from ui.widgets.bscan_view import BScanView
 from ui.widgets.context_menus import add_action, make_menu
+from ui.widgets.bscan_link import compatible
+from ui.widgets.bscan_workspace_link import BScanWorkspaceLink
 
 
 _MIME = 'application/x-mygpr-bscan-tab'
@@ -222,7 +224,7 @@ class _ViewGroup(QWidget):
             self.states[self.rendered_key] = _view_state(self.view)
 
 
-class BScanWorkspace(QWidget):
+class BScanWorkspace(BScanWorkspaceLink, QWidget):
     active_changed = pyqtSignal(str)
     source_activated_by_user = pyqtSignal(str)
     source_closed = pyqtSignal(str)
@@ -231,6 +233,7 @@ class BScanWorkspace(QWidget):
     source_input_requested = pyqtSignal(str)
     view_created = pyqtSignal(object)
     layout_changed = pyqtSignal()
+    selection_step_requested = pyqtSignal(str, str, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -246,6 +249,9 @@ class BScanWorkspace(QWidget):
         self._last_active = ('', '')
         self._dark = isDarkTheme()
         self._menu = None
+        self._link_enabled = False
+        self._link_busy = False
+        self.selection_step_allowed = None
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(0)
@@ -287,6 +293,8 @@ class BScanWorkspace(QWidget):
             group_id = f'group-{self._counter}'
         group = _ViewGroup(self, group_id)
         self._groups[group_id] = group
+        group.view._plot.vb.sigRangeChanged.connect(lambda *_args: self._link_range(group))
+        group.view._glw.scene().sigMouseMoved.connect(lambda pos: self._link_cursor(group, pos))
         self.view_created.emit(group.view)
         return group
 
@@ -723,6 +731,38 @@ class BScanWorkspace(QWidget):
             return entry
 
         if valid:
+            can_convert = bool(self.selection_step_allowed and self.selection_step_allowed(gid, key))
+            source_snapshot = self._sources[key]
+            selection_snapshot = (QRectF(group.view._view_selection)
+                                  if group.view._view_selection is not None else None)
+
+            def emit_selection(method):
+                current = self._sources.get(key, {})
+                live_group = self._groups.get(gid)
+                if (live_group is not group or current.get('bundle') is not source_snapshot.get('bundle')
+                        or any(current.get(field) != source_snapshot.get(field)
+                               for field in ('project_id', 'line_id', 'revision'))
+                        or group.view._view_selection != selection_snapshot):
+                    return
+                if self.selection_step_allowed and self.selection_step_allowed(gid, key):
+                    self.selection_step_requested.emit(gid, key, method)
+
+            add(menu, 'selection-crop', '框选范围加入测道裁剪' if can_convert else '框选转处理不可用：请选择当前输入并清空已有步骤',
+                lambda: emit_selection('trace_cut'), enabled=can_convert)
+            add(menu, 'selection-qc', '框选范围加入坏道标记',
+                lambda: emit_selection('trace_qc'), enabled=can_convert)
+            can_time = (can_convert and not group.view._showing_elevation
+                        and group.view._sample_axis is not None
+                        and 'ns' in group.view._sample_axis_label.lower())
+            add(menu, 'selection-crop-time', '框选范围加入道与时间裁剪' if can_time else '道与时间裁剪不可用：需要真实时间轴',
+                lambda: emit_selection('trace_cut_time'), enabled=can_time)
+            can_link = (group.view._matrix is not None and any(
+                compatible(group.view, target.view) for target in self._compatible_groups(group)))
+            link = add(menu, 'link-views', '联动同测线视图' if can_link else '联动不可用：需要兼容的来源和物理轴',
+                       self._set_link_enabled,
+                       enabled=can_link or self._link_enabled)
+            link.setCheckable(True)
+            link.setChecked(self._link_enabled)
             reference = self._sources[key].get('comparison', False)
             add(menu, 'activate', '设为处理输入' if reference else '从此结果继续处理',
                 lambda: self.source_input_requested.emit(key) if reference else self.open_source(key, gid))
@@ -943,6 +983,7 @@ class BScanWorkspace(QWidget):
     def hideEvent(self, event):
         self._close_menu()
         self.cancel_drag()
+        self._set_link_enabled(False)
         super().hideEvent(event)
 
 

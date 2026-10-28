@@ -230,6 +230,9 @@ def _rtm_metadata(
         "header_info_updates": {
             "a_scan_length": nz, "num_traces": traces, "is_depth": True, "is_elevation": False,
             "depth_step_m": dz_m, "depth_max_m": dz_m * max(nz - 1, 0),
+            "depth_axis_m": np.arange(nz, dtype=np.float32) * dz_m,
+            "time_axis_ns": None, "time_axis_status": "unknown", "time_step_s": None,
+            "time_window_ns": 0.0, "time_cut_offset_ns": None,
             "trace_interval_m": dx_m, "total_time_ns": 0.0,
             "display_hint": "signed_migration", "display_center_zero": True,
             "display_skip_preprocess": True, "display_title": "Experimental RTM migration profile",

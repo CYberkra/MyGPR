@@ -77,9 +77,29 @@ def native_ccbs(data: Any, params: dict[str, Any]):
 
 
 def native_time_to_depth(data: Any, params: dict[str, Any]):
+    for key, default in (("dt", 0.1), ("v", 0.10), ("dz", 0.02)):
+        value = float(params.get(key, default))
+        if not np.isfinite(value) or value <= 0:
+            raise ValueError(f"时间-深度转换 {key} 必须为正数")
     output, metadata = _execute(method_time_to_depth, data, params)
     output = np.asarray(output, dtype=np.float32)
     resolved = dict(metadata)
+    header = params.get("_header_info", params.get("header_info", {})) or {}
+    source_axis = header.get("time_axis_ns")
+    start = None
+    if source_axis is not None:
+        source_axis = np.asarray(source_axis, dtype=np.float64)
+        if source_axis.shape != (np.shape(data)[0],) or not np.all(np.isfinite(source_axis)):
+            raise ValueError("时间-深度转换输入时间轴无效")
+        start = float(source_axis[0])
+    elif header.get("time_cut_offset_ns") is not None:
+        start = float(header["time_cut_offset_ns"])
+    if start is not None and not np.isfinite(start):
+        raise ValueError("时间-深度转换输入时间起点无效")
+    velocity = float(params.get("v", 0.10))
+    relative_depth = np.linspace(0, float(resolved.get("z_max", 0.0)), output.shape[0])
+    output_time = None if start is None or velocity <= 0 else start + relative_depth * 2.0 / velocity
+    output_depth = None if output_time is None else output_time * velocity / 2.0
     resolved.setdefault(
         "header_info_updates",
         {
@@ -87,8 +107,12 @@ def native_time_to_depth(data: Any, params: dict[str, Any]):
             "num_traces": int(output.shape[1]),
             "is_depth": True,
             "is_elevation": False,
-            "depth_max_m": float(resolved.get("z_max", 0.0)),
+            "depth_max_m": float(output_depth[-1]) if output_depth is not None else float(resolved.get("z_max", 0.0)),
             "total_time_ns": 0.0,
+            "time_axis_ns": output_time,
+            "depth_axis_m": output_depth,
+            "time_step_s": ((float(output_time[-1] - output_time[0]) / (len(output_time) - 1)) * 1e-9
+                            if output_time is not None and len(output_time) > 1 else None),
         },
     )
     return output, resolved

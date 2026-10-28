@@ -7,7 +7,7 @@ from PyQt6.QtGui import QDesktopServices, QKeySequence, QShortcut
 from PyQt6.QtWidgets import QApplication
 from qfluentwidgets import FluentIcon as FIF
 
-from ui.dialogs import ask_display_name, ask_project_destination
+from ui.dialogs import ask_display_name, ask_project_destination, ask_line_properties
 from ui.icons import result_delete_icon
 from ui.widgets.context_menus import add_action, make_menu
 
@@ -16,6 +16,7 @@ class ProjectIdentityUi(QObject):
     rename_project_requested = pyqtSignal(str, str)
     rename_line_requested = pyqtSignal(str, str, str)
     relocation_requested = pyqtSignal(str, str)
+    properties_requested = pyqtSignal(str, str, object, bool)
 
     def __init__(self, page):
         super().__init__(page)
@@ -66,6 +67,17 @@ class ProjectIdentityUi(QObject):
         if name and project_id == self._project_id() and self._can_write():
             self.rename_line_requested.emit(project_id, str(line_id), name)
 
+    def line_properties(self, line_id):
+        if not self._can_write():
+            return
+        line = next((item for item in self.page._lines if str(item.line_id) == str(line_id)), None)
+        if line is None:
+            return
+        project_id = self._project_id()
+        result = ask_line_properties(self.page, line)
+        if result is not None and project_id == self._project_id() and self._can_write():
+            self.properties_requested.emit(project_id, line_id, *result)
+
     def add_project_actions(self, menu):
         project_id = self._project_id()
         def current():
@@ -109,6 +121,8 @@ class ProjectIdentityUi(QObject):
         single = len(page._lines_table.selectionModel().selectedRows()) == 1
         add_action(menu, FIF.DEVELOPER_TOOLS, '处理该测线（跳转处理页）',
                    lambda: page.line_process_requested.emit(line_id), enabled=single and not page._busy)
+        add_action(menu, FIF.EDIT, "测线属性…", lambda: self.line_properties(line_id),
+                   enabled=single and self._can_write())
         self.add_line_rename(menu, line_id, single=single)
         add_action(menu, FIF.SYNC, '传感器同步…', page.show_sensor_tool,
                    enabled=single and self._can_write())

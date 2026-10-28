@@ -43,6 +43,60 @@ def make_matrix() -> np.ndarray:
 
 # ============================================================ 纯函数内核
 class TestBuildElevationView:
+    @pytest.mark.parametrize('start', [10.0, -10.0])
+    def test_nonzero_depth_origin_preserves_all_samples(self, start):
+        depth = np.arange(start, start + 11)
+        matrix = np.arange(22, dtype=np.float32).reshape(11, 2)
+        original = matrix.copy()
+        ground = np.array([100.0, 98.0])
+        warped, axis = build_elevation_view(matrix, ground, depth)
+        for col, elevation in enumerate(ground):
+            for row, value in enumerate(matrix[:, col]):
+                index = np.flatnonzero(np.isclose(axis, elevation - depth[row]))
+                assert index.size == 1
+                assert warped[index[0], col] == pytest.approx(value)
+        np.testing.assert_array_equal(matrix, original)
+
+    @pytest.mark.parametrize('depth', [
+        [0., 1., 2., 4., 5.],
+        [0., 1., 0.5, 3., 4.],
+        [0., 1., 1., 3., 4.],
+    ])
+    def test_irregular_or_nonmonotonic_depth_falls_back(self, depth):
+        assert build_elevation_view(np.ones((5, 2)), [100., 100.], depth) == (None, None)
+
+    def test_float32_quantized_uniform_depth_is_accepted(self):
+        depth = np.linspace(0, 1, 101, dtype=np.float32)
+        warped, axis = build_elevation_view(np.ones((101, 2)), [100., 100.], depth)
+        assert warped is not None
+        assert axis[-1] <= 99.0 + 1e-6
+
+    def test_bundle_float32_depth_promoted_to_float64_is_accepted(self):
+        from ui.controllers.project_controller import ProjectController
+
+        depth = np.linspace(0, 45, 501, dtype=np.float32)
+        matrix = np.ones((501, 2), dtype=np.float32)
+        bundle = ProjectController._bundle_from_window(
+            matrix, 'L01', sample_indices=np.arange(501), total_samples=501,
+            trace_indices=np.arange(2), total_traces=2,
+            trace_elevation_m=np.array([100., 100.]), metadata={'depth_axis_m': depth})
+        assert bundle.depth_axis_m.dtype == np.float64
+        warped, axis = build_elevation_view(bundle.matrix, bundle.trace_elevation_m,
+                                            bundle.depth_axis_m)
+        assert warped is not None
+        assert np.isfinite(warped).all()
+        assert axis[-1] == pytest.approx(55.)
+
+    @pytest.mark.parametrize('start', [0.1, -0.1])
+    def test_decimal_depth_endpoints_are_included(self, start):
+        depth = start + np.arange(11) * 0.1
+        matrix = np.arange(11, dtype=np.float32)[:, None]
+        warped, axis = build_elevation_view(matrix, [100.], depth)
+        for row in (0, 10):
+            index = np.argmin(np.abs(axis - (100. - depth[row])))
+            assert axis[index] == pytest.approx(100. - depth[row])
+            assert warped[index, 0] == pytest.approx(matrix[row, 0])
+
     def test_rows_cover_terrain_and_span(self):
         warped, axis = build_elevation_view(make_matrix(), GROUND, DEPTH)
         assert warped.shape == (SAMPLES + TERRAIN_ROWS, TRACES)
@@ -89,10 +143,9 @@ class TestBuildElevationView:
         assert np.isnan(warped[:, 3]).all()
         assert np.isfinite(warped[:, 0]).any()   # 其余道不受影响
 
-    def test_rows_capped(self):
-        warped, _ = build_elevation_view(make_matrix(), GROUND, DEPTH,
-                                         max_rows=10)
-        assert warped.shape[0] == 10
+    def test_explicit_row_limit_refuses_instead_of_truncating(self):
+        with pytest.raises(ValueError, match='完整海拔网格'):
+            build_elevation_view(make_matrix(), GROUND, DEPTH, max_rows=10)
 
     @pytest.mark.parametrize('ground,depth', [
         (None, DEPTH),
@@ -159,7 +212,10 @@ class TestElevationImageSwap:
         view.set_y_axis_mode('sample')
         assert view._showing_elevation is False
         assert view._image_item.image.shape == (SAMPLES, TRACES)
-        assert view._convert_left_ticks([0.0], 1.0, 1.0) is None
+        ticks = view._convert_left_ticks([0.5, 1.5, 50.5], 1.0, 1.0)
+        assert [float(tick) for tick in ticks] == pytest.approx(DEPTH[[0, 1, 50]])
+        np.testing.assert_array_equal(view._image_item.image, view._raw_matrix_sentinel)
+        np.testing.assert_array_equal(view._matrix, view._raw_matrix_sentinel)
 
     def test_raw_matrix_untouched(self, view):
         """显示层变换零变异：无论怎么切轴，set_bundle 传入的矩阵不变。"""

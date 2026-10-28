@@ -85,6 +85,7 @@ class ProjectPage(QWidget):
     artifact_delete_requested = pyqtSignal(str, list)  # 删除成果（单/批）
     close_project_requested = pyqtSignal()
     quality_check_requested = pyqtSignal(str)
+    quality_location_requested = pyqtSignal(str, int, int)
     quality_refresh_requested = pyqtSignal()
     workspace_state_changed = pyqtSignal(str)
 
@@ -173,6 +174,7 @@ class ProjectPage(QWidget):
             lambda: self.quality_check_requested.emit(''))
         self._quality_dialog.check_line_requested.connect(self.quality_check_requested)
         self._quality_dialog.refresh_requested.connect(self.quality_refresh_requested)
+        self._quality_dialog.locate_requested.connect(self.quality_location_requested)
         self.close_btn.hide()  # closing uses the shared project switch menu
         self._identity = ProjectIdentityUi(self)
         self._update_action_state()
@@ -547,7 +549,7 @@ class ProjectPage(QWidget):
                     str(getattr(line, 'name', '') or '--'),
                     str(getattr(line, 'trace_count', 0)),
                     str(getattr(line, 'sample_count', 0)),
-                    ('%.2f' % float(getattr(line, 'length_m', 0.0) or 0.0)),
+                    ('%.2f' % float(line.length_m) if float(getattr(line, 'length_m', 0) or 0) > 0 else '未知'),
                     str(getattr(line, 'data_quality', '') or '--'),
                     str(getattr(line, 'processing_status', '') or '--'),
                 )

@@ -186,3 +186,51 @@ def ask_artifact_delete(parent: QWidget | None, names: list[str]) -> bool:
     box.yesButton.setText("删除")
     box.cancelButton.setText("取消")
     return box.exec() == 1  # QDialog.DialogCode.Accepted
+
+
+def ask_line_properties(parent, line):
+    """Edit measured line scale without changing sensor positioning or samples."""
+    from PyQt6.QtWidgets import QFormLayout
+    from qfluentwidgets import MessageBoxBase, SubtitleLabel, BodyLabel, CheckBox, ComboBox, DoubleSpinBox
+
+    box = MessageBoxBase(parent.window())
+    box.widget.setMinimumWidth(380)
+    box.viewLayout.addWidget(SubtitleLabel("测线属性", box))
+    box.viewLayout.addWidget(BodyLabel(f"测线 {line.line_id} · {line.trace_count} 道", box))
+    form = QFormLayout()
+    known = CheckBox("已实测", box)
+    known.setChecked(line.distance_override != "unknown" and line.length_m > 0)
+    mode = ComboBox(box)
+    mode.addItems(["测线长度 (m)", "道间距 (m)"])
+    value = DoubleSpinBox(box)
+    value.setDecimals(6)
+    value.setRange(0.000001, 10000000)
+    value.setValue(line.length_m if line.length_m > 0 else 1.0)
+    direction = CheckBox("反向查看", box)
+    direction.setChecked(line.view_reversed)
+    form.addRow("距离状态", known)
+    form.addRow("输入方式", mode)
+    form.addRow("实测值", value)
+    form.addRow("查看方向", direction)
+    box.viewLayout.addLayout(form)
+    note = BodyLabel("实测长度只设置沿线距离，不代表 RTK 定位。原始数据及已有成果保持不变。", box)
+    note.setWordWrap(True)
+    box.viewLayout.addWidget(note)
+    box.yesButton.setText("保存")
+    box.cancelButton.setText("取消")
+    def update_enabled():
+        mode.setEnabled(known.isChecked())
+        value.setEnabled(known.isChecked())
+        box.yesButton.setEnabled(not known.isChecked() or line.trace_count >= 2)
+    def change_mode(index):
+        intervals = max(1, line.trace_count - 1)
+        value.setValue(value.value() / intervals if index == 1 else value.value() * intervals)
+    mode.currentIndexChanged.connect(change_mode)
+    known.toggled.connect(update_enabled)
+    update_enabled()
+    if box.exec() != 1:
+        return None
+    length = None
+    if known.isChecked():
+        length = value.value() * (line.trace_count - 1 if mode.currentIndex() == 1 else 1)
+    return length, direction.isChecked()

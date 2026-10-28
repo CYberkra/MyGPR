@@ -52,7 +52,15 @@ def test_package_check_accepts_valid_axes_and_keeps_trace_identity(tmp_path, mon
             handle.create_dataset('trace_meta/height', data=[2., np.nan, np.inf])
     before = path.read_bytes()
     report_path = tmp_path / 'report.json'
-    assert recipe('launcher').package_check(report_path, path) == 0
+    import builtins
+    real_import = builtins.__import__
+    def reject_ui_version_import(name, *args, **kwargs):
+        if name == 'ui.pages.settings_page':
+            raise ModuleNotFoundError('package check must not import GUI pages')
+        return real_import(name, *args, **kwargs)
+    monkeypatch.setattr(builtins, '__import__', reject_ui_version_import)
+    result = recipe('launcher').package_check(report_path, path)
+    assert result == 0, report_path.read_text(encoding='utf-8')
     report = json.loads(report_path.read_text(encoding='utf-8'))
     assert report['hdf5']['time_axis_endpoint'] is endpoint
     assert report['hdf5']['time_step_s'] == pytest.approx(900e-9 / (501 - int(endpoint)))

@@ -29,6 +29,9 @@ class ProjectIdentityController(QObject):
     def rename_line(self, project_id, line_id, name):
         return self._start("rename_line", project_id, (line_id, name))
 
+    def update_line_properties(self, project_id, line_id, length_m, view_reversed):
+        return self._start("update_line_properties", project_id, (line_id, length_m, view_reversed))
+
     def relocate_project(self, project_id, destination):
         return self._start("relocate_project", project_id, (destination,))
 
@@ -79,9 +82,9 @@ class ProjectIdentityController(QObject):
             pc.current_project_id == request["project_id"] and pc._project_context_generation == request["generation"]
         )
         success = current and not error
-        if success and request["operation"] == "rename_line":
+        if success and request["operation"] in ("rename_line", "update_line_properties"):
             pc.refresh_lines()
-        if success and request["operation"] != "rename_line":
+        if success and request["operation"] not in ("rename_line", "update_line_properties"):
             pc._current = result
         self.pending = None
         try:
@@ -91,7 +94,7 @@ class ProjectIdentityController(QObject):
                 error if current else "项目上下文已经变化，结果未应用到当前页面。",
                 result,
                 request["root"],
-                str(request["args"][0]) if request["operation"] == "rename_line" else "",
+                str(request["args"][0]) if request["operation"] in ("rename_line", "update_line_properties") else "",
             )
         finally:
             pc._set_busy(False)

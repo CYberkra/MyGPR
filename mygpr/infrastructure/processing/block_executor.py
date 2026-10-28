@@ -328,6 +328,8 @@ class FileBackedBlockPipelineExecutor(BlockPipelineExecutorPort):
 def prepare_block_params(
     params: dict[str, Any], header: dict[str, Any], shape: tuple[int, int], method_id: str
 ) -> dict[str, Any]:
+    from mygpr.domain.processing.timebase import require_time_axis
+    require_time_axis(method_id, header)
     runtime = dict(params)
     runtime.setdefault("_header_info", dict(header))
     total_ns = float(header.get("total_time_ns") or header.get("time_window_ns") or 0.0)

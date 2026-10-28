@@ -206,6 +206,9 @@ class ProjectService(ProjectIdentityServiceMixin):
     def get_line(self, project_id: str, line_id: str) -> ProjectLine:
         return self._session(project_id).get_line(line_id)
 
+    def update_line_properties(self, project_id: str, line_id: str, length_m: float | None, view_reversed: bool):
+        return self._session(project_id).update_line_properties(line_id, length_m=length_m, view_reversed=view_reversed)
+
     def get_dataset_info(self, project_id: str, line_id: str) -> LineDatasetInfo:
         return self._session(project_id).get_dataset_info(line_id)
 
@@ -324,6 +327,9 @@ class ProjectService(ProjectIdentityServiceMixin):
     ) -> LineDatasetInfo:
         return self._session(project_id).get_artifact_dataset_info(line_id, artifact_id)
 
+    def read_artifact_trace_metadata(self, project_id: str, line_id: str, artifact_id: str) -> dict[str, np.ndarray]:
+        return self._session(project_id).read_artifact_trace_metadata(line_id, artifact_id)
+
     def read_artifact_dataset(
         self, project_id: str, line_id: str, artifact_id: str
     ) -> ProjectLineData:
@@ -371,6 +377,7 @@ class ProjectService(ProjectIdentityServiceMixin):
         branch_id: str,
         input_dataset: dict,
         context: ExecutionContext | None = None,
+        trace_metadata: dict | None = None,
     ) -> ProjectArtifact:
         return self._session(project_id).save_processing_artifact(
             line_id,
@@ -383,6 +390,7 @@ class ProjectService(ProjectIdentityServiceMixin):
             branch_id=branch_id,
             input_dataset=input_dataset,
             context=context or ExecutionContext.null(),
+            trace_metadata=trace_metadata,
         )
 
     def list_artifacts(
@@ -425,18 +433,17 @@ class ProjectService(ProjectIdentityServiceMixin):
         line_data = self.read_artifact_dataset(project_id, line_id, artifact_id)
         from mygpr.application.project.segy_export import write_segy
 
+        header = line_data.header_info
+        time_axis = header.get("time_axis_ns")
+        if time_axis is None or header.get("time_axis_status") == "unknown":
+            raise ValueError("成果缺少有效时间轴，无法导出 SEG-Y")
         positions = None
-        trace_metadata = line_data.trace_metadata or {}
-        for key in ("trace_distance_m", "local_x_m", "distance_m"):
-            if key in trace_metadata:
-                positions = np.asarray(trace_metadata[key], dtype=np.float64)
-                break
+        if (header.get("distance_axis_status") != "unknown"
+                and float(header.get("length_m") or 0) > 0):
+            positions = header.get("distance_axis_m")
         return write_segy(
-            destination,
-            line_data.data,
-            line_id=line_id,
-            result_name=artifact_id,
-            trace_positions=positions,
+            destination, line_data.data, time_axis_ns=time_axis,
+            line_id=line_id, result_name=artifact_id, trace_positions=positions,
         )
 
     def clear_intermediate_artifacts(

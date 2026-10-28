@@ -18,6 +18,7 @@ def method_trace_qc(
     spike_zscore: float = 6.0,
     manual_trace_indices: str = "",
     trace_metadata: dict[str, np.ndarray] | None = None,
+    header_info: dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     """Mark, mute, or remove bad traces.
@@ -38,6 +39,11 @@ def method_trace_qc(
 
     rms = np.sqrt(np.einsum("ij,ij->j", arr, arr, optimize=True) / arr.shape[0])
     bad_mask = np.zeros(arr.shape[1], dtype=bool)
+    if trace_metadata is not None and "trace_qc_bad_mask" in trace_metadata:
+        previous_mask = np.asarray(trace_metadata["trace_qc_bad_mask"])
+        if previous_mask.shape != (arr.shape[1],):
+            raise ValueError("trace_qc_bad_mask 与当前道数不一致")
+        bad_mask |= previous_mask.astype(bool)
 
     empty_threshold = to_float(empty_rms_threshold, default=0.0)
     if empty_threshold > 0.0:
@@ -54,11 +60,25 @@ def method_trace_qc(
         bad_mask[idx] = True
 
     bad_indices = np.flatnonzero(bad_mask).astype(np.int32)
+    header_updates = {}
     if resolved_mode == "remove":
         keep_mask = ~bad_mask
         if not np.any(keep_mask):
             raise ValueError("trace_qc remove 模式不能删除全部道")
         result = arr[:, keep_mask].astype(np.float32, copy=True)
+        axis = (header_info or {}).get("distance_axis_m")
+        if axis is not None:
+            axis = np.asarray(axis)
+            if axis.shape != (arr.shape[1],):
+                raise ValueError("坏道处理距离轴与当前道数不一致")
+            kept_axis = axis[keep_mask].copy()
+            header_updates["distance_axis_m"] = kept_axis
+            if kept_axis.size and np.all(np.isfinite(kept_axis)):
+                header_updates["track_length_m"] = abs(float(kept_axis[-1] - kept_axis[0]))
+                spacing = np.abs(np.diff(kept_axis.astype(np.float64)))
+                header_updates["trace_interval_m"] = (float(spacing[0]) if spacing.size
+                    and np.allclose(spacing, spacing[0], rtol=1e-6, atol=1e-9) else 0.0)
+        header_updates["source_trace_offset"] = None
         metadata_out = _filter_trace_metadata(trace_metadata or {}, keep_mask)
         metadata_out["trace_qc_bad_mask"] = bad_mask[keep_mask].astype(np.int8)
         meta_key = "trace_metadata_out"
@@ -82,6 +102,7 @@ def method_trace_qc(
         "bad_trace_count": int(bad_indices.size),
         "input_traces": int(arr.shape[1]),
         "output_traces": int(result.shape[1]),
+        "header_info_updates": header_updates,
         meta_key: meta_value,
     }
 
@@ -110,7 +131,9 @@ def _parse_trace_indices(spec: str, trace_count: int) -> list[int]:
                 continue
             if start > end:
                 start, end = end, start
-            indices.update(idx for idx in range(start, end + 1) if 0 <= idx < trace_count)
+            start = max(start, 0)
+            end = min(end, trace_count - 1)
+            indices.update(range(start, end + 1))
             continue
         idx = _parse_integer_token(item)
         if idx is not None and 0 <= idx < trace_count:

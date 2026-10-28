@@ -4,7 +4,6 @@ from types import SimpleNamespace as NS
 import pytest
 
 pytest.importorskip('PyQt6')
-from PyQt6.QtCore import QPoint
 
 
 def test_project_service_delegates_spatial_export_and_recycle():

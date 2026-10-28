@@ -3,7 +3,7 @@
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog, QHBoxLayout, QHeaderView, QPlainTextEdit, QTableWidget,
-    QTableWidgetItem, QVBoxLayout,
+    QTableWidgetItem, QVBoxLayout, QListWidget, QListWidgetItem,
 )
 from qfluentwidgets import ComboBox, PrimaryPushButton, PushButton
 
@@ -14,6 +14,7 @@ class QualityCenterDialog(QDialog):
     check_project_requested = pyqtSignal()
     check_line_requested = pyqtSignal(str)
     refresh_requested = pyqtSignal()
+    locate_requested = pyqtSignal(str, int, int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -52,6 +53,15 @@ class QualityCenterDialog(QDialog):
         self._details = QPlainTextEdit(self)
         self._details.setReadOnly(True)
         layout.addWidget(self._details, 1)
+        self._locations = QListWidget(self)
+        self._locations.setMaximumHeight(120)
+        layout.addWidget(self._locations)
+        self._locate_btn = PushButton('定位所选问题道', self)
+        self._locate_btn.setEnabled(False)
+        layout.addWidget(self._locate_btn)
+        self._locations.currentRowChanged.connect(lambda row: self._locate_btn.setEnabled(row >= 0))
+        self._locations.itemDoubleClicked.connect(lambda _item: self._locate_selected())
+        self._locate_btn.clicked.connect(self._locate_selected)
         self._project_check_btn.clicked.connect(self.check_project_requested)
         self._line_check_btn.clicked.connect(self._check_selected)
         self._refresh_btn.clicked.connect(self.refresh_requested)
@@ -98,6 +108,7 @@ class QualityCenterDialog(QDialog):
         return next((r for r in self._reports if str(getattr(r, 'line_id', '')) == line_id), None)
 
     def _show_selected_details(self):
+        self._locations.clear()
         report = self._selected_report()
         if report is None:
             self._details.setPlainText('选择一条测线查看问题详情。')
@@ -114,6 +125,11 @@ class QualityCenterDialog(QDialog):
         if not issues:
             lines.append('未发现问题。')
         for issue in issues:
+            start, end = getattr(issue, "trace_start", None), getattr(issue, "trace_end", None)
+            if isinstance(start, int) and isinstance(end, int) and 0 <= start < end <= report.trace_count:
+                item = QListWidgetItem(f"道 {start + 1}–{end} · {issue.message}")
+                item.setData(Qt.ItemDataRole.UserRole, (start, end))
+                self._locations.addItem(item)
             lines.extend([
                 f"[{getattr(issue, 'severity', '')}] {getattr(issue, 'code', '')}",
                 str(getattr(issue, 'message', '') or ''),
@@ -121,6 +137,13 @@ class QualityCenterDialog(QDialog):
                 '',
             ])
         self._details.setPlainText('\n'.join(lines))
+
+    def _locate_selected(self):
+        item = self._locations.currentItem()
+        line_id = self.selected_line_id()
+        if item is not None and line_id:
+            start, end = item.data(Qt.ItemDataRole.UserRole)
+            self.locate_requested.emit(line_id, start, end)
 
     def _check_selected(self):
         line_id = self.selected_line_id()

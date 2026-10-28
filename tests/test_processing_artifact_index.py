@@ -149,3 +149,13 @@ def test_legacy_storage_load_processing_artifact(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         store.storage.load_processing_artifact(
             "L03", "L03_processed_doesnotexist_000000_000000")
+
+
+def test_legacy_storage_rejects_trace_snapshot_without_writing(tmp_path: Path) -> None:
+    store = create_test_project(tmp_path / 'legacy')
+    store.storage = LegacyProjectStorageBackend(store.root, store.manifest)
+    with pytest.raises(ValueError, match='逐道元数据'):
+        store.save_processed_line('L03', np.ones((4, 3), dtype=np.float32),
+                                  {'method': 'dewow'},
+                                  trace_metadata={'trace_id': np.arange(3, dtype=np.uint64)})
+    assert not index_processing_artifacts(store.root, 'L03')

@@ -56,7 +56,7 @@ class VelocityPersistenceMixin:
         from core.gpr_data_model import time_to_depth_axis
 
         with self._lock:
-            dataset = self._store.load_gpr_dataset(safe)
+            dataset = self._raw_dataset_with_properties(safe)
             epsilon = float(payload["body"]["dielectric_constant"])
             if not epsilon > 1.0:
                 raise VelocityAnalysisError(
@@ -81,7 +81,7 @@ class VelocityPersistenceMixin:
 
         safe = validate_line_id(line_id)
         with self._lock:
-            dataset = self._store.load_gpr_dataset(safe)
+            dataset = self._raw_dataset_with_properties(safe)
             metadata = dict(getattr(dataset, "metadata", None) or {})
             # to_metadata()（asdict 路径）把用户 metadata 嵌套在 "metadata" 键下：
             # 经存储往返后 velocity_analysis 可能位于顶层或嵌套层，两处都读。

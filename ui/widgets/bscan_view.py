@@ -34,9 +34,10 @@ sample_axis 时显示物理量，降采样数据附"原始约 N"），右键菜�
 
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QPainterPath
 from PyQt6.QtWidgets import QVBoxLayout, QWidget
 
+import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtWidgets import QLabel
 from qfluentwidgets import FluentIcon as FIF, ToolButton
@@ -183,6 +184,8 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
         self._sample_axis_label = ''
         self._trace_count = 0
         self._sample_count = 0
+        self._trace_indices = None
+        self._sample_indices = None
         self._ground_elevation_m = None   # 逐道地面高程（m，显示网格）
         self._depth_axis_m = None         # 地表以下深度（m，显示网格）
         # 海拔模式状态：当前显示的是否是 warp 后的矩阵 + 其海拔轴
@@ -196,7 +199,7 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
         # 图内标题只承载数据身份（bundle.title，如"测线 L3"）；通用名称
         # "B-Scan图像"由卡头承担，不再双标题（评审 P1-4）。
         # 横/纵轴换成 IndexAxis：索引坐标不变，只在刻度文本层做单位换算
-        self._bottom_axis = IndexAxis('bottom', self._convert_bottom_ticks)
+        self._bottom_axis = IndexAxis('bottom', self._convert_bottom_ticks, self._bottom_tick_values)
         self._left_axis = IndexAxis('left', self._convert_left_ticks, self._left_tick_values)
         self._plot = self._glw.addPlot(
             row=0, col=0,
@@ -213,7 +216,7 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
         self._plot.vb.setMenuEnabled(False)
 
         # 预分配并复用
-        self._image_item = pg.ImageItem(axisOrder='row-major')
+        self._image_item = pg.ImageItem(axisOrder='row-major', autoDownsample=False)
         self._image_item.setLevels((0.0, 1.0))
         self._plot.addItem(self._image_item)
 
@@ -417,8 +420,30 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
         self._set_axes_visible(self._matrix is not None)
 
     def _bottom_label(self) -> str:
-        return ('距离 (m)' if self._x_axis == 'distance'
-                and self.distance_available() else '道数')
+        if self._x_axis == 'distance' and self.distance_available():
+            return '距离 (m)'
+        columns = self._image_shape[0] if self._image_shape else 0
+        if self._trace_count > columns > 0:
+            return f'道号（全量 {self._trace_count} 道；预览 {columns} 列）'
+        return '道数'
+
+    def _trace_numbers_for_view(self):
+        columns = self._image_shape[0] if self._image_shape else 0
+        if not columns:
+            return None
+        if self._trace_indices is not None:
+            return np.asarray(self._trace_indices, dtype=np.float64) + 1
+        if self._trace_count > columns > 0:
+            return np.linspace(1, self._trace_count, columns)
+        return None
+
+    def _bottom_tick_values(self, levels, min_val, max_val, _size):
+        if self._x_axis == 'distance':
+            return None
+        axis = self._trace_numbers_for_view()
+        if axis is None:
+            return None
+        return physical_time_ticks(axis, levels, min_val, max_val)
 
     def _left_label(self) -> str:
         """纵轴标签随单位变：采样轴用 bundle 的标签，海拔轴固定带单位。"""
@@ -427,13 +452,29 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
         return self._sample_axis_label or '采样点'
 
     def _convert_bottom_ticks(self, values, scale, spacing):
-        """横轴刻度换算：距离模式换算成里程，否则回落默认（道索引）。"""
-        if self._x_axis != 'distance':
+        """Keep pixel coordinates internal; label full-input trace numbers."""
+        if self._x_axis == 'distance':
+            return distance_tick_strings(values, self._trace_axis_m)
+        axis = self._trace_numbers_for_view()
+        if axis is None:
             return None
-        return distance_tick_strings(values, self._trace_axis_m)
+        return [f'{np.interp(value, np.arange(len(axis)) + 0.5, axis):.0f}'
+                if 0 <= value <= len(axis) else '' for value in values]
+
+    def _sample_axis_for_ticks(self):
+        if self._matrix is None or self._showing_elevation or self._sample_axis is None:
+            return None
+        label = self._sample_axis_label.lower()
+        if 'ns' not in label and '(m)' not in label.replace(' ', ''):
+            return None
+        axis = np.asarray(self._sample_axis, dtype=float)
+        if (axis.ndim != 1 or len(axis) != self._matrix.shape[0] or len(axis) < 2
+                or not np.isfinite(axis).all() or not (np.all(np.diff(axis) > 0) or np.all(np.diff(axis) < 0))):
+            return None
+        return axis
 
     def _left_tick_values(self, levels, min_val, max_val, _size):
-        axis = self._time_axis_for_view()
+        axis = self._sample_axis_for_ticks()
         if axis is None:
             return None
         return physical_time_ticks(axis, levels, min_val, max_val)
@@ -441,7 +482,7 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
     def _convert_left_ticks(self, values, scale, spacing):
         """纵轴刻度换算：海拔模式行号直接查共享海拔轴，否则回落默认。"""
         if not self._showing_elevation:
-            axis = self._time_axis_for_view()
+            axis = self._sample_axis_for_ticks()
             if axis is not None:
                 import numpy as np
                 return [f'{np.interp(value, np.arange(len(axis)) + 0.5, axis):.5g}'
@@ -554,6 +595,11 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
         self._scatter.setData([])
         self._image_shape = None
         self._matrix = None
+        self._gain_cache = None
+        self._envelope_cache = None
+        if self._wiggle_item is not None:
+            self._wiggle_item.setPath(QPainterPath())
+            self._wiggle_item.hide()
         self._showing_elevation = False
         self._elev_axis = None
         self._elev_cache = None

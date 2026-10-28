@@ -17,13 +17,14 @@ def context(qapp, monkeypatch):
     pc._current = NS(project_id="P")
 
     def info(pid, line):
-        return NS(shape=(1000, 4000), time_window_ns=900.0, length_m=80.0)
+        return NS(shape=(8, 6), time_window_ns=900.0, length_m=80.0)
 
     def read(pid, line, **kwargs):
         calls.append((pid, line, kwargs))
-        return np.ones((8, 6)), np.arange(8) * 100, np.arange(6) * 600
+        return np.ones((8, 6)), np.arange(8), np.arange(6)
 
-    pc.set_backend(NS(backend=NS(projects=NS(get_dataset_info=info, read_window=read))))
+    pc.set_backend(NS(backend=NS(projects=NS(get_dataset_info=info, read_window=read,
+                                           read_trace_metadata=lambda *args: {}))))
     monkeypatch.setattr(pc, "_line_elevation", lambda *a: None)
     monkeypatch.setattr(module, "run_command", lambda command, **kw: queued.append(command))
     return pc, queued, calls
@@ -46,7 +47,8 @@ def test_references_survive_other_preview_requests_and_emit_on_gui_thread(contex
     assert [item[1][:3] for item in got] == [("P", "L03", "second"), ("P", "L02", "first")]
     assert all(item[0] == get_ident() for item in got)
     assert not ordinary
-    assert all(c[2] == dict(max_samples=900, max_traces=1800) for c in calls)
+    assert all(c[2] == dict(sample_start=0, sample_end=8, trace_start=0,
+                            trace_end=6, max_samples=8, max_traces=6) for c in calls)
     assert got[0][1][3].matrix.shape == (8, 6)
 
 

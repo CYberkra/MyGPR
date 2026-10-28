@@ -186,6 +186,10 @@ class NativeProcessingExecutor(ProcessingExecutorPort):
 
 
 def prepare_native_params(request: ProcessingRequest) -> dict[str, Any]:
+    from mygpr.domain.processing.timebase import require_time_axis
+    require_time_axis(request.method_id, request.header_info)
+    if request.method_id == 'kirchhoff_migration' and int((request.params or {}).get('topo_cor', 0)) == 2:
+        raise ValueError('预地形校正的绝对高程网格尚不可验证，请选择后校正 topo_cor=1')
     params = dict(request.params or {})
     if request.method_id in {"rtm_migration", "kirchhoff_migration", "stolt_migration"}:
         from mygpr.infrastructure.processing.algorithms.common import require_distance_scale

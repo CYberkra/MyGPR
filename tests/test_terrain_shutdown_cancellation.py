@@ -10,6 +10,8 @@ from unittest.mock import Mock
 import numpy as np
 import pytest
 
+pytest.importorskip('PyQt6')
+
 
 class _Signal:
     def __init__(self):

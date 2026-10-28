@@ -23,31 +23,26 @@ def method_time_cut(
     **kwargs: Any,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     """Crop a B-scan by two-way travel time.
-
     Modes:
         remove_below: keep samples shallower than ``time_end_ns``.
         remove_above: remove samples before ``time_start_ns``.
         keep_range: keep samples from ``time_start_ns`` to ``time_end_ns``.
-
     ``time_end_ns=0`` means "bottom of profile", so the default is a no-op.
     A no-op requires no time basis and leaves the chained header untouched;
     a real cut without any time basis raises ``ValueError`` (the former
     samples-as-ns silent fallback is removed).
     """
-
     arr = np.asarray(data, dtype=np.float32)
     if arr.ndim != 2:
         raise ValueError(f"输入数据必须是2维数组，当前 shape={arr.shape}")
     if arr.shape[0] == 0:
         raise ValueError("输入数据为空")
-
     samples = int(arr.shape[0])
     resolved_mode = str(mode or "remove_below").strip().lower()
     if resolved_mode not in {"remove_below", "remove_above", "keep_range"}:
         raise ValueError(
             "time_cut mode 必须是 remove_below、remove_above 或 keep_range"
         )
-
     time_start_value = to_float(time_start_ns, default=0.0)
     time_end_value = to_float(time_end_ns, default=0.0)
     if resolved_mode == "remove_below":
@@ -72,51 +67,65 @@ def method_time_cut(
             "input_samples": int(samples),
             "output_samples": int(result.shape[0]),
         }
-    total_ns = _resolve_total_time_ns(
-        samples,
-        time_window_ns=time_window_ns,
-        time_step_s=time_step_s,
-        header_info=kwargs.get("header_info"),
-    )
     header = kwargs.get("header_info") or {}
+    source_axis = header.get("time_axis_ns")
+    total_ns = 0.0
+    if source_axis is None:
+        total_ns = _resolve_total_time_ns(
+            samples, time_window_ns=time_window_ns, time_step_s=time_step_s,
+            header_info=header,
+        )
+    offset_ns = to_float(header.get("time_cut_offset_ns"), default=0.0)
+    if source_axis is not None:
+        axis, axis_step = _validate_time_axis(source_axis, samples)
+        offset_ns = float(axis[0])
     endpoint = bool(header.get("time_axis_endpoint", False))
     step_ns = total_ns / max(1, samples - 1 if endpoint else samples)
-    if endpoint and to_float(time_step_s, default=0.0) > 0:
+    if source_axis is not None:
+        step_ns = axis_step
+    elif endpoint and to_float(time_step_s, default=0.0) > 0:
         step_ns = float(time_step_s) * 1e9
     # Index conversion uses an exclusive boundary one interval after the last
     # sample, even when the source window explicitly includes its endpoint.
     total_ns = step_ns * samples
     start_idx = _time_to_index(
-        time_start_ns,
+        max(0.0, time_start_value - offset_ns) if time_start_value > 0 else 0.0,
         samples=samples,
         total_time_ns=total_ns,
-        rounding="floor",
+        rounding="ceil",
     )
     end_idx = (
         samples
         if time_end_value <= 0.0
         else _time_to_index(
-            time_end_value,
+            max(0.0, time_end_value - offset_ns),
             samples=samples,
             total_time_ns=total_ns,
             rounding="ceil",
         )
     )
-
+    if source_axis is not None:
+        start_idx = 0 if time_start_value <= 0 else int(np.searchsorted(axis, time_start_value, side="left"))
+        end_idx = samples if time_end_value <= 0 else int(np.searchsorted(axis, time_end_value, side="left"))
     if resolved_mode == "remove_below":
-        cut_start, cut_end = 0, max(1, min(end_idx, samples))
+        cut_start, cut_end = 0, end_idx
     elif resolved_mode == "remove_above":
-        cut_start, cut_end = min(start_idx, samples - 1), samples
+        cut_start, cut_end = start_idx, samples
     else:
-        cut_start = min(start_idx, samples - 1)
-        cut_end = max(cut_start + 1, min(end_idx, samples))
-
+        cut_start, cut_end = start_idx, end_idx
+    if cut_start >= cut_end:
+        raise ValueError("time_cut 选择范围没有采样点")
     result = arr[cut_start:cut_end, :].astype(np.float32, copy=True)
     kept_duration_ns = step_ns * max(0, cut_end - cut_start - int(endpoint))
-    offset_ns = to_float(header.get("time_cut_offset_ns"), default=0.0)
-    start_time_ns = offset_ns + total_ns * float(cut_start) / float(samples)
-    end_time_ns = offset_ns + total_ns * float(cut_end) / float(samples)
-
+    start_time_ns = float(axis[cut_start]) if source_axis is not None else offset_ns + step_ns * cut_start
+    end_time_ns = (float(axis[cut_end]) if cut_end < samples else float(axis[-1]) + step_ns) if source_axis is not None else offset_ns + step_ns * cut_end
+    axis_updates = {}
+    for key in ("time_axis_ns", "depth_axis_m"):
+        values = header.get(key)
+        if values is not None:
+            vector = np.asarray(values)
+            if vector.shape == (samples,):
+                axis_updates[key] = vector[cut_start:cut_end].copy()
     return result, {
         "method": "time_cut",
         "mode": resolved_mode,
@@ -129,6 +138,7 @@ def method_time_cut(
         "effective_time_start_ns": float(start_time_ns),
         "effective_time_end_ns": float(end_time_ns),
         "header_info_updates": {
+            **axis_updates,
             "total_time_ns": float(kept_duration_ns),
             "time_window_ns": float(kept_duration_ns),
             "time_axis_endpoint": endpoint,
@@ -137,6 +147,21 @@ def method_time_cut(
             "time_cut_offset_ns": float(start_time_ns),
         },
     }
+
+
+def _validate_time_axis(source_axis: Any, samples: int) -> tuple[np.ndarray, float]:
+    source = np.asarray(source_axis)
+    axis = np.asarray(source, dtype=np.float64)
+    if axis.shape != (samples,) or not np.all(np.isfinite(axis)) or samples < 2:
+        raise ValueError("time_cut 时间轴无效")
+    step = (axis[-1] - axis[0]) / (samples - 1)
+    expected = axis[0] + np.arange(samples) * step
+    tolerance = (np.abs(np.spacing(source)).astype(np.float64) * 1.5
+                 if source.dtype.kind == "f" else np.zeros(samples))
+    tolerance += np.finfo(np.float64).eps * np.maximum(np.abs(expected), 1) * 4
+    if step <= 0 or np.any(np.abs(axis - expected) > tolerance):
+        raise ValueError("time_cut 不支持非均匀时间轴")
+    return axis, float(step)
 
 
 def _resolve_total_time_ns(

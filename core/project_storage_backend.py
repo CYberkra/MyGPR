@@ -15,6 +15,8 @@ from core.gpr_data_model import GPRDataSet, time_to_depth_axis
 from core.field_project_models import validate_line_id
 from core.hybrid_transaction_journal import HybridArtifactTransactionJournal
 from core.hdf5_line_container import (
+    _saved_output_axis,
+    _validate_elevation_axis,
     initialize_line_container,
     delete_processing_artifact,
     load_processing_dataset,
@@ -132,6 +134,7 @@ class LegacyProjectStorageBackend(ProjectStorageBackend):
                 or manifest.get("time_window_ns") or 250.0
             ) or 250.0
         sample_count = int(matrix.shape[0])
+        _validate_elevation_axis(output_header, sample_count)
         time_axis = None
         if output_header and sample_count > 0:
             time_axis = np.linspace(out_offset, out_offset + time_window, sample_count, dtype=np.float32,
@@ -140,7 +143,7 @@ class LegacyProjectStorageBackend(ProjectStorageBackend):
             **manifest,
             "artifact_id": artifact_id,
             "input_dataset": input_dataset,
-            **{key: output_header[key] for key in ("time_axis_endpoint", "time_step_s", "distance_axis_status", "time_cut_offset_ns", "source_trace_offset") if key in output_header},
+            **{key: output_header[key] for key in ("time_axis_endpoint", "time_step_s", "distance_axis_status", "time_cut_offset_ns", "source_trace_offset", "is_depth", "is_elevation", "depth_max_m", "depth_step_m", "time_axis_status", "elevation_axis_m") if key in output_header},
         }
         dataset = GPRDataSet.from_matrix(
             line_id=safe_line,
@@ -158,6 +161,18 @@ class LegacyProjectStorageBackend(ProjectStorageBackend):
         if time_axis is not None and len(time_axis) == dataset.sample_count:
             dataset.time_axis_ns = time_axis
             dataset.depth_axis_m = time_to_depth_axis(time_axis, dataset.dielectric_constant)
+        saved_time = _saved_output_axis(output_header, "time_axis_ns", dataset.sample_count)
+        saved_depth = _saved_output_axis(output_header, "depth_axis_m", dataset.sample_count)
+        saved_distance = _saved_output_axis(output_header, "distance_axis_m", dataset.trace_count)
+        if saved_time is not None:
+            dataset.time_axis_ns = saved_time
+            dataset.depth_axis_m = time_to_depth_axis(saved_time, dataset.dielectric_constant)
+        if saved_depth is not None:
+            dataset.depth_axis_m = saved_depth
+        if saved_distance is not None:
+            dataset.distance_axis_m = saved_distance
+        if output_header.get("time_axis_status") == "unknown":
+            dataset.time_axis_ns = np.zeros(dataset.sample_count, dtype=np.float32)
         return dataset
 
 
@@ -232,6 +247,7 @@ class HybridProjectStorageBackend(ProjectStorageBackend):
         parent_artifact_id: str = "",
         cancel_requested=None,
         progress_callback=None,
+        trace_metadata=None,
     ) -> dict[str, Any]:
         container = self.line_container_path(line_id)
         if not container.exists():
@@ -262,6 +278,7 @@ class HybridProjectStorageBackend(ProjectStorageBackend):
                 params=params,
                 cancel_requested=cancel_requested,
                 progress_callback=progress_callback,
+                trace_metadata=trace_metadata,
             )
             artifact_file = Path(result["h5_file"])
             try:

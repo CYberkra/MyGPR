@@ -253,7 +253,7 @@ def test_run_finishing_does_not_steal_comparison_focus(page):
 def test_cross_line_drop_includes_raw_and_saved_processing_results(page):
     manager = comparison(page)
     assert drop(page, 'L02')
-    manager.set_artifacts('L02', [artifact('A')])
+    manager.set_artifacts('P', 'L02', [artifact('A')])
     keys = page._workspace.tab_keys()
     assert any(key.startswith('compare:') and key.endswith(':raw') for key in keys)
     assert any(key.startswith('compare:') and key.endswith(':artifact:A') for key in keys)
@@ -264,10 +264,23 @@ def test_cross_line_drop_includes_raw_and_saved_processing_results(page):
     assert source['bundle'].matrix.max() == 8
 
 
+def test_comparison_artifact_signal_preserves_project_line_and_object_payload(page):
+    from ui.controllers.project_controller import ProjectController
+
+    manager = comparison(page)
+    assert drop(page, 'L02')
+    controller = ProjectController()
+    controller.comparison_artifacts_ready.connect(manager.set_artifacts)
+    controller.comparison_artifacts_ready.emit('P', 'L02', [artifact('A')])
+    assert any(key.endswith(':artifact:A') for key in manager.sources)
+    controller.comparison_artifacts_ready.emit('Q', 'L02', [artifact('STALE')])
+    assert not any(key.endswith(':artifact:STALE') for key in manager.sources)
+
+
 def test_cross_line_artifact_can_become_processing_input(page):
     manager = comparison(page)
     assert drop(page, 'L02')
-    manager.set_artifacts('L02', [artifact('A')])
+    manager.set_artifacts('P', 'L02', [artifact('A')])
     key = next(key for key in manager.sources if key.endswith(':artifact:A'))
     focused = []
     page.artifact_focus_requested.connect(lambda *args: focused.append(args))

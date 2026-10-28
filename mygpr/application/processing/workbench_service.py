@@ -417,6 +417,7 @@ class ProcessingWorkbenchService:
             branch_id=branch_id or session.branch_id,
             input_dataset={**_json_safe(session.original_header), "parent_artifact_id": session.input_artifact_id, "execution_mode": "interactive_workbench"},
             context=ExecutionContext.null(),
+            trace_metadata=session.current_trace_metadata,
         )
         session.undo_stack.clear()
         session.redo_stack.clear()

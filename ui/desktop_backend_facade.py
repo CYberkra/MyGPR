@@ -88,6 +88,21 @@ def resample_trace_vector(series: Any, trace_count: int) -> Any:
     return align_trace_vector(series, trace_count)
 
 
+def validate_bscan_display_shape(shape):
+    """Refuse oversized display grids before allocation, without reducing quality."""
+    from mygpr.interfaces.display_resources import validate_full_resolution_bscan
+
+    validate_full_resolution_bscan(shape)
+
+
+def read_full_resolution_bscan(shape, reader, *, cancel_requested=None):
+    """Keep every value with bounded I/O and a file-backed display grid."""
+    from core.full_resolution_preview import read_full_resolution_window
+
+    validate_bscan_display_shape(shape)
+    return read_full_resolution_window(shape, reader, cancel_requested=cancel_requested)
+
+
 def build_preview_bundle(
     line_id: str,
     matrix: Any,
@@ -133,6 +148,8 @@ def build_preview_bundle(
         p_low=p_low,
         p_high=p_high,
         trace_elevation_m=trace_elevation_m,
+        max_samples=sample_count,
+        max_traces=trace_count,
     )
 
 
@@ -288,6 +305,8 @@ __all__ = [
     # wrapped functions
     "compute_display_levels",
     "build_preview_bundle",
+    "read_full_resolution_bscan",
+    "validate_bscan_display_shape",
     "resample_trace_vector",
     "file_dialog_filter",
     "tile_cache_dir",

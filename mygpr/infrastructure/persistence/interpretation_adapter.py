@@ -389,7 +389,7 @@ class InterpretationPersistenceMixin:
     def depth_at_samples(self, line_id: str, samples: np.ndarray) -> np.ndarray:
         safe = self._validated_line(line_id)
         with self._lock:
-            dataset = self._store.load_gpr_dataset(safe)
+            dataset = self._raw_dataset_with_properties(safe)
             axis = np.asarray(dataset.depth_axis_m, dtype=float)
         if axis.size == 0:
             raise ValueError(f"测线 {safe} 缺少深度轴")

@@ -15,6 +15,7 @@ from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
 from ui.desktop_backend_facade import (
     SensorSyncSettings,
     build_preview_bundle,
+    read_full_resolution_bscan,
     resample_trace_vector,
     time_to_depth_axis,
 )
@@ -23,10 +24,6 @@ from ui.controllers.project_identity_controller import ProjectIdentityController
 from ui.sensor_summary import SensorCompletenessReport, sensor_completeness_report
 
 _LOGGER = logging.getLogger(__name__)
-
-_PREVIEW_MAX_SAMPLES = 900
-_PREVIEW_MAX_TRACES = 1800
-
 
 def _sample_trace_vector(series: Any, index: np.ndarray, total_traces: int) -> np.ndarray | None:
     """按与矩阵窗口相同的道索引抽样逐道序列。
@@ -48,6 +45,25 @@ def _sample_trace_vector(series: Any, index: np.ndarray, total_traces: int) -> n
     if index.max() >= array.size:
         return None
     return np.ascontiguousarray(array[index])
+
+
+def _preview_trace_values(values, indices, total, *, integer_only=False):
+    if values is None:
+        return None
+    array = np.asarray(values)
+    if array.ndim != 1 or array.size != total or (integer_only and array.dtype.kind not in 'iu'):
+        return None
+    return array[np.asarray(indices, dtype=np.int64)] if indices is not None else array
+
+
+def _preview_sample_axis(metadata, elevation, depth, time):
+    if metadata.get('is_elevation'):
+        return elevation, '海拔 (m)' if elevation is not None else ''
+    if metadata.get('is_depth'):
+        return depth, '深度 (m)' if depth is not None else ''
+    if time is not None:
+        return time, '时间 (ns)'
+    return depth, '深度 (m)' if depth is not None else ''
 
 
 class ProjectController(QObject):
@@ -388,6 +404,9 @@ class ProjectController(QObject):
         total_traces: int = 0,
         trace_elevation_m: Any = None,
         dielectric_constant: float = 0.0,
+        metadata: Any = None,
+        source_trace_ids: Any = None,
+        trace_qc_bad_mask: Any = None,
     ) -> Any:
         """从 read_window 结果构建预览 bundle。
 
@@ -404,18 +423,41 @@ class ProjectController(QObject):
         time_axis_ns = None
         distance_axis_m = None
         elevation_axis_m = None
+        elevation_grid = None
         depth_axis_m = None
+        metadata = dict(metadata or {})
+        is_elevation = bool(metadata.get('is_elevation'))
+        ids = _preview_trace_values(source_trace_ids, trace_indices, total_traces, integer_only=True)
+        qc_mask = _preview_trace_values(trace_qc_bad_mask, trace_indices, total_traces)
+        def axis(name, indices, size):
+            values = np.asarray(metadata.get(name, []), dtype=np.float64)
+            if values.ndim != 1 or values.size != size or not np.all(np.isfinite(values)):
+                return None
+            return values[np.asarray(indices, dtype=np.int64)] if indices is not None else values
+
+        if is_elevation and (sample_indices is None or total_samples <= 0 or axis('elevation_axis_m', sample_indices, total_samples) is None):
+            raise ValueError('成果缺少有效高程坐标，无法预览')
+
         if sample_indices is not None and total_samples > 0:
-            base = np.linspace(0.0, float(time_window_ns), int(total_samples), dtype=np.float32)
-            time_axis_ns = base[np.asarray(sample_indices, dtype=np.int64)]
-            if float(dielectric_constant or 0.0) > 0.0:
+            time_axis_ns = axis('time_axis_ns', sample_indices, total_samples)
+            depth_axis_m = axis('depth_axis_m', sample_indices, total_samples)
+            elevation_grid = axis('elevation_axis_m', sample_indices, total_samples) if is_elevation else None
+            if time_axis_ns is None and not metadata and time_window_ns > 0:
+                base = np.linspace(0.0, float(time_window_ns), int(total_samples), dtype=np.float32)
+                time_axis_ns = base[np.asarray(sample_indices, dtype=np.int64)]
+            if depth_axis_m is None and time_axis_ns is not None and float(dielectric_constant or 0.0) > 0.0:
                 depth_axis_m = time_to_depth_axis(time_axis_ns, dielectric_constant)
+            if is_elevation:
+                depth_axis_m = None
         if trace_indices is not None and total_traces > 0:
             index = np.asarray(trace_indices, dtype=np.int64)
-            base = np.linspace(0.0, float(length_m or max(int(total_traces) - 1, 1)), int(total_traces), dtype=np.float32)
-            distance_axis_m = base[index]
+            if metadata.get('distance_axis_status') != 'unknown':
+                distance_axis_m = axis('distance_axis_m', index, total_traces)
+                if distance_axis_m is None and not metadata and length_m and length_m > 0:
+                    base = np.linspace(0.0, float(length_m), int(total_traces), dtype=np.float32)
+                    distance_axis_m = base[index]
             elevation_axis_m = _sample_trace_vector(trace_elevation_m, index, int(total_traces))
-        return build_preview_bundle(
+        bundle = build_preview_bundle(
             line_id=line_id,
             matrix=np.asarray(matrix, dtype=np.float32),
             title=title,
@@ -424,6 +466,18 @@ class ProjectController(QObject):
             distance_axis_m=distance_axis_m,
             trace_elevation_m=elevation_axis_m,
             depth_axis_m=depth_axis_m,
+        )
+        sample_axis, sample_axis_label = _preview_sample_axis(metadata, elevation_grid, depth_axis_m, time_axis_ns)
+        return dataclasses.replace(
+            bundle, trace_axis_m=distance_axis_m,
+            sample_axis=sample_axis, sample_axis_label=sample_axis_label,
+            depth_axis_m=depth_axis_m, trace_count=int(total_traces) or bundle.trace_count,
+            sample_count=int(total_samples) or bundle.sample_count,
+            trace_indices=trace_indices if trace_indices is not None else bundle.trace_indices,
+            sample_indices=sample_indices if sample_indices is not None else bundle.sample_indices,
+            source_trace_ids=ids,
+            trace_qc_bad_mask=qc_mask,
+            view_reversed=bool(metadata.get('view_reversed', False)),
         )
 
     @staticmethod
@@ -1002,28 +1056,32 @@ class _PreviewLineCommand(_ProjectReadCommand):
             return
         try:
             info = backend.projects.get_dataset_info(self._project_id, self._line_id)
-            matrix, sample_idx, trace_idx = backend.projects.read_window(
-                self._project_id,
-                self._line_id,
-                max_samples=_PREVIEW_MAX_SAMPLES,
-                max_traces=_PREVIEW_MAX_TRACES,
-            )
+            matrix, sample_idx, trace_idx = read_full_resolution_bscan(
+                info.shape,
+                lambda **window: backend.projects.read_window(
+                    self._project_id, self._line_id, **window),
+                cancel_requested=lambda: not self._context_is_current() or (
+                    not self._reference_request and c._preview_generation != self._generation))
             elevation = c._line_elevation(backend, self._project_id, self._line_id)
+            trace_metadata = backend.projects.read_trace_metadata(self._project_id, self._line_id) or {}
             bundle = c._bundle_from_window(
                 matrix, self._line_id, title=f"测线 {self._line_id}",
                 time_window_ns=info.time_window_ns, length_m=info.length_m,
                 sample_indices=sample_idx, trace_indices=trace_idx,
                 total_samples=info.shape[0], total_traces=info.shape[1],
-                trace_elevation_m=elevation,
+                trace_elevation_m=elevation, metadata=getattr(info, "metadata", None),
+                source_trace_ids=trace_metadata.get('trace_id'),
+                trace_qc_bad_mask=trace_metadata.get('trace_qc_bad_mask'),
                 dielectric_constant=float(getattr(
                     info, 'dielectric_constant', 0.0) or 0.0),
             )
         except Exception as exc:  # noqa: BLE001
+            if not self._context_is_current() or (
+                    not self._reference_request and c._preview_generation != self._generation):
+                return
             _LOGGER.exception("数据预览失败")
             if self._reference_request:
                 self._publish_reference(None, friendly_error_message(exc))
-                return
-            if c._preview_generation != self._generation or c.current_project_id != self._project_id:
                 return
             reason = friendly_error_message(exc)
             c.log_message.emit(f"数据预览失败：{reason}")
@@ -1109,27 +1167,33 @@ class _PreviewArtifactCommand:
         try:
             info = backend.projects.get_artifact_dataset_info(
                 self._project_id, self._line_id, self._artifact_id)
-            matrix, sample_idx, trace_idx = backend.projects.read_artifact_window(
-                self._project_id,
-                self._line_id,
-                self._artifact_id,
-                max_samples=_PREVIEW_MAX_SAMPLES,
-                max_traces=_PREVIEW_MAX_TRACES,
-            )
-            elevation = c._line_elevation(backend, self._project_id, self._line_id)
+            matrix, sample_idx, trace_idx = read_full_resolution_bscan(
+                info.shape,
+                lambda **window: backend.projects.read_artifact_window(
+                    self._project_id, self._line_id, self._artifact_id, **window),
+                cancel_requested=lambda: not self._current())
+            trace_metadata = backend.projects.read_artifact_trace_metadata(
+                self._project_id, self._line_id, self._artifact_id)
+            raw_info = backend.projects.get_dataset_info(self._project_id, self._line_id)
+            artifact_metadata = dict(getattr(info, 'metadata', None) or {})
+            artifact_metadata['view_reversed'] = bool((getattr(raw_info, 'metadata', None) or {}).get('view_reversed', False))
+            trace_metadata = trace_metadata or {}
+            elevation = trace_metadata.get("ground_elevation_m")
             bundle = c._bundle_from_window(
                 matrix, self._line_id, title=f"成果 {self._artifact_id}",
                 time_window_ns=info.time_window_ns, length_m=info.length_m,
                 sample_indices=sample_idx, trace_indices=trace_idx,
                 total_samples=info.shape[0], total_traces=info.shape[1],
-                trace_elevation_m=elevation,
+                trace_elevation_m=elevation, metadata=artifact_metadata,
+                source_trace_ids=trace_metadata.get('trace_id'),
+                trace_qc_bad_mask=trace_metadata.get('trace_qc_bad_mask'),
                 dielectric_constant=float(getattr(
                     info, 'dielectric_constant', 0.0) or 0.0),
             )
         except Exception as exc:  # noqa: BLE001
-            _LOGGER.exception("成果预览失败")
             if not self._current():
                 return
+            _LOGGER.exception("成果预览失败")
             reason = friendly_error_message(exc)
             if self._reference_request:
                 c.comparison_artifact_preview_ready.emit(

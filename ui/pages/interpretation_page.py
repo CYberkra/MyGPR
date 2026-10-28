@@ -28,7 +28,7 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
-    CaptionLabel, CardWidget, ComboBox, DoubleSpinBox, LineEdit, PrimaryPushButton,
+    CaptionLabel, CardWidget, ComboBox, DoubleSpinBox, PrimaryPushButton,
     PushButton,
 )
 from qfluentwidgets import FluentIcon as FIF
@@ -39,7 +39,6 @@ from ui.page_scaffold import (card_title, make_card,
                               make_collapsible_column, make_hint,
                               refill_combo)
 from ui.widgets import BScanView, make_separator
-from ui.widgets.collapsible_card import make_collapsible_card
 from ui.widgets.object_context_menu import ObjectMenuBinding, object_action, object_menu
 
 _OVERLAY_COLOR = constants.CHART_OVERLAY_COLOR   # 标注散点颜色（SPEC §6.6）

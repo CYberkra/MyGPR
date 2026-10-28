@@ -1,4 +1,5 @@
 """A normal Fluent combo whose popup rows can also be dragged as references."""
+
 from PyQt6.QtCore import QEvent, QObject, Qt, pyqtSignal
 from PyQt6.QtGui import QDrag
 from PyQt6.QtWidgets import QApplication

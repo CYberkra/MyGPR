@@ -48,6 +48,8 @@ class QualityIssue:
     code: str
     message: str
     suggestion: str = ""
+    trace_start: int | None = None
+    trace_end: int | None = None
 
 
 @dataclass(frozen=True)
@@ -73,6 +75,7 @@ class LineDataQualityReport:
     issues: list[QualityIssue] = field(default_factory=list)
     sampled: bool = False
     evaluated_value_count: int = 0
+    source_data_sha256: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -138,20 +141,20 @@ def _orientation_check(dataset: GPRDataSet) -> tuple[str, str, str, QualityIssue
     return DataOrientation.SAMPLES_BY_TRACES, f"方向正常：samples×traces = {rows}×{cols}。", "无需修正。", None
 
 
-def _representative_matrix_sample(matrix: np.ndarray, *, max_values: int = 4_000_000) -> tuple[np.ndarray, bool]:
+def _representative_matrix_sample(matrix: np.ndarray, *, max_values: int = 4_000_000) -> tuple[np.ndarray, bool, np.ndarray]:
     """Return a bounded, deterministic 2-D sample without paging the full mmap."""
     rows, cols = matrix.shape
     if matrix.size <= max_values:
-        return np.asarray(matrix, dtype=np.float32), False
+        return np.asarray(matrix[:, :], dtype=np.float32), False, np.arange(cols)
     ratio = float(np.sqrt(matrix.size / max_values))
     row_step = max(1, int(np.ceil(ratio)))
     col_step = max(1, int(np.ceil(ratio)))
     sampled = np.asarray(matrix[::row_step, ::col_step], dtype=np.float32)
-    return sampled, True
+    return sampled, True, np.arange(0, cols, col_step)
 
 
 def evaluate_line_data_quality(dataset: GPRDataSet, trajectory: TrajectoryModel | None = None) -> LineDataQualityReport:
-    source_matrix = np.asanyarray(dataset.matrix)
+    source_matrix = dataset.matrix
     issues: list[QualityIssue] = []
     sampled = False
     if source_matrix.ndim != 2:
@@ -159,11 +162,23 @@ def evaluate_line_data_quality(dataset: GPRDataSet, trajectory: TrajectoryModel 
         matrix = np.asarray([], dtype=np.float32)
         finite = matrix
     else:
-        matrix, sampled = _representative_matrix_sample(source_matrix)
+        matrix, sampled, trace_indices = _representative_matrix_sample(source_matrix)
         finite_mask = np.isfinite(matrix)
         finite = matrix[finite_mask]
         finite_ratio = float(finite_mask.sum() / matrix.size) if matrix.size else 0.0
         nan_ratio = 1.0 - finite_ratio
+        # Only flag columns where a non-finite value was actually observed;
+        # in sampled scans this is evidence from the sampled rows, not a full scan.
+        bad_columns = np.flatnonzero(~np.all(finite_mask, axis=0))
+        if bad_columns.size:
+            scope = "抽样发现异常值" if sampled else "发现异常值"
+            for col in bad_columns[:100]:
+                trace = int(trace_indices[col])
+                issues.append(QualityIssue("warning", "nonfinite_trace", f"{scope}：道 {trace + 1}。",
+                                           "检查原始数据。", trace, trace + 1))
+            if bad_columns.size > 100:
+                issues.append(QualityIssue("info", "nonfinite_trace_truncated",
+                    f"共发现 {bad_columns.size} 道异常，仅列出前 100 道。"))
         if source_matrix.size == 0:
             issues.append(QualityIssue("error", "empty_matrix", "B-scan 矩阵为空。", "重新导入测线数据。"))
         elif finite_ratio < 0.995:
@@ -202,6 +217,7 @@ def evaluate_line_data_quality(dataset: GPRDataSet, trajectory: TrajectoryModel 
         nan_ratio=float(nan_ratio), finite_ratio=float(finite_ratio), trajectory_points=int(traj_points),
         orientation=orientation, orientation_message=orientation_message, suggested_action=suggested_action, issues=issues,
         sampled=sampled, evaluated_value_count=int(matrix.size),
+        source_data_sha256=str(dataset.metadata.get("data_sha256") or ""),
     )
 
 

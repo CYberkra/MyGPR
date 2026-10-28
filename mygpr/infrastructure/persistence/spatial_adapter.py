@@ -255,7 +255,7 @@ class SpatialPersistenceMixin:
         from core.uav_georeference_3d import build_airborne_georeference_3d_payload
 
         safe = validate_line_id(str(line_id))
-        dataset = self._store.load_gpr_dataset(safe)
+        dataset = self._raw_dataset_with_properties(safe)
         metadata = dict(self.read_trace_metadata(safe))
         payload = build_airborne_georeference_3d_payload(
             np.asarray(dataset.matrix),

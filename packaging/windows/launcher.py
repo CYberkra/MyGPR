@@ -18,10 +18,9 @@ def package_check(report_path: Path, hdf5_path: Path | None) -> int:
         import fiona
         from core.field_report_export import _software_version
         from mygpr.interfaces.cli.backend_smoke import run_smoke
-        from ui.pages.settings_page import _read_version
 
         versions = {"distribution": importlib.metadata.version("mygpr"),
-                    "report": _software_version(), "settings": _read_version()}
+                    "report": _software_version(), "settings": _software_version()}
         assert len(set(versions.values())) == 1, versions
         report["versions"] = versions
         report["backend"] = run_smoke(include_autotune=True)

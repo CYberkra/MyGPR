@@ -15,7 +15,9 @@ from core.field_project_models import FieldLineRecord, validate_line_id
 from core.field_project_operations import update_project_metadata, delete_project_line, batch_import_line_data
 from core.field_project_source_ops import check_project_source_files, relink_project_line_source, export_project_source_manifest_csv
 from core.field_project_store import FieldProjectStore
-from core.gpr_data_model import GPRDataSet
+from core.gpr_data_model import GPRDataSet, time_to_depth_axis
+from core.quality_trace_locations import locate_trace_issues
+from dataclasses import replace
 from core.field_report_export import generate_project_report_package
 from core.processing_artifact_index import ProcessingArtifactRecord, index_processing_artifacts
 from core.sensor_sync import SensorSyncConfig
@@ -28,6 +30,7 @@ from core.project_identity import (
 )
 from mygpr.application.jobs.context import ExecutionContext
 from mygpr.infrastructure.persistence.interpretation_adapter import InterpretationPersistenceMixin
+from mygpr.infrastructure.persistence.line_properties_adapter import LinePropertiesMixin
 from mygpr.infrastructure.persistence.intermediate_cleanup import IntermediateCleanupMixin
 from mygpr.infrastructure.persistence.processing_package_adapter import ProcessingPackageMixin
 from mygpr.infrastructure.persistence.project_relocation import staged_project_copy
@@ -81,6 +84,16 @@ def _load_trace_metadata(store: FieldProjectStore, line_id: str) -> dict[str, np
             from core.acquisition_hdf5 import acquisition_trace_metadata
 
             return acquisition_trace_metadata(dict(store.load_gpr_dataset(line_id).metadata or {}))
+        if str(getattr(record, "data_format", "")) == "mygpr-processing-result-hdf5":
+            import h5py
+            from mygpr.domain.project.trace_snapshot import read_trace_snapshot
+            raw = Path(record.raw_path)
+            source = raw if raw.is_absolute() else resolve_managed_path(store.root, raw, require_exists=True, require_file=True)
+            with h5py.File(source, "r") as handle:
+                result = read_trace_snapshot(handle) or {}
+            if any(value.shape != (int(record.trace_count),) for value in result.values()):
+                raise ValueError("processing result trace metadata length mismatch")
+            return result
         return {}
     path = resolve_managed_path(store.root, relative, require_exists=True, require_file=True)
     with np.load(path, allow_pickle=False) as payload:
@@ -106,6 +119,7 @@ def _line_record(record: FieldLineRecord) -> ProjectLine:
         data_format=record.data_format,
         raw_size_mb=record.raw_size_mb,
         updated_at=record.updated_at,
+        distance_override=record.distance_override, view_reversed=record.view_reversed,
     )
 
 
@@ -118,9 +132,26 @@ def _quality_report(record: Any) -> LineQualityReport:
         amplitude_p995=record.amplitude_p995, nan_ratio=record.nan_ratio, finite_ratio=record.finite_ratio,
         trajectory_points=record.trajectory_points, orientation=str(getattr(record.orientation, "value", record.orientation)),
         orientation_message=record.orientation_message, suggested_action=record.suggested_action,
-        issues=tuple(LineQualityIssue(i.severity, i.code, i.message, i.suggestion) for i in record.issues),
+        issues=tuple(LineQualityIssue(i.severity, i.code, i.message, i.suggestion, i.trace_start, i.trace_end) for i in record.issues),
         sampled=record.sampled, evaluated_value_count=record.evaluated_value_count,
     )
+
+def _quality_with_trace_locations(store, record):
+    report = _quality_report(record)
+    current = store.load_gpr_dataset(report.line_id)
+    digest = str(current.metadata.get("data_sha256") or "")
+    if not digest or digest != getattr(record, "source_data_sha256", ""):
+        issues = tuple(issue for issue in report.issues if issue.trace_start is None)
+        issues += (LineQualityIssue("warning", "quality_revision_unknown",
+                                   "报告与当前数据版本未核对，请重新质检。"),)
+        report = replace(report, issues=issues, status="warning", status_label="警告")
+    locations = locate_trace_issues(_load_trace_metadata(store, report.line_id), current.trace_count)
+    if not locations:
+        return report
+    status = "warning" if report.status == "passed" else report.status
+    label = "警告" if report.status == "passed" else report.status_label
+    return replace(report, issues=report.issues + tuple(locations), status=status, status_label=label)
+
 
 def _source_status(record: Any) -> SourceFileStatus:
     return SourceFileStatus(
@@ -149,7 +180,7 @@ def _artifact(record: ProcessingArtifactRecord) -> ProjectArtifact:
 
 
 class LegacyFieldProjectSession(
-    InterpretationPersistenceMixin, IntermediateCleanupMixin, SpatialPersistenceMixin,
+    LinePropertiesMixin, InterpretationPersistenceMixin, IntermediateCleanupMixin, SpatialPersistenceMixin,
     VelocityPersistenceMixin, GridPersistenceMixin, ProcessingPackageMixin, ProjectSessionPort
 ):
     """One open project; concrete storage objects remain private to this adapter."""
@@ -176,7 +207,6 @@ class LegacyFieldProjectSession(
     def close(self) -> None:
         with self._lock:
             self._store.close()
-
 
     def get_metadata(self) -> ProjectMetadata:
         manifest = self._store.manifest
@@ -210,16 +240,16 @@ class LegacyFieldProjectSession(
 
     def list_quality_reports(self) -> Sequence[LineQualityReport]:
         with self._lock:
-            return tuple(_quality_report(report) for line in self._store.list_lines() if (report := self._store.load_quality_report(line.line_id)) is not None)
+            return tuple(_quality_with_trace_locations(self._store, report) for line in self._store.list_lines() if (report := self._store.load_quality_report(line.line_id)) is not None)
 
     def run_line_quality_check(self, line_id: str) -> LineQualityReport:
         with self._lock:
-            return _quality_report(self._store.run_line_quality_check(validate_line_id(line_id)))
+            return _quality_with_trace_locations(self._store, self._store.run_line_quality_check(validate_line_id(line_id)))
 
     def run_project_quality_check(self, *, context: ExecutionContext) -> Sequence[LineQualityReport]:
         with self._lock:
             reports = self._store.run_project_quality_check(cancel_requested=context.is_cancelled, progress_callback=context.report_progress)
-        return tuple(_quality_report(item) for item in reports)
+        return tuple(_quality_with_trace_locations(self._store, item) for item in reports)
 
     def check_source_files(self, *, context: ExecutionContext) -> Sequence[SourceFileStatus]:
         with self._lock:
@@ -297,7 +327,7 @@ class LegacyFieldProjectSession(
     def get_dataset_info(self, line_id: str) -> LineDatasetInfo:
         safe = validate_line_id(line_id)
         with self._lock:
-            dataset = self._store.load_gpr_dataset(safe)
+            dataset = self._raw_dataset_with_properties(safe)
             return LineDatasetInfo(
                 line_id=safe,
                 shape=(int(dataset.matrix.shape[0]), int(dataset.matrix.shape[1])),
@@ -397,6 +427,9 @@ class LegacyFieldProjectSession(
             format_name=str(metadata.get("format_name") or "backend-api"),
             metadata=dict(metadata),
         )
+        if not bool(metadata.get("time_axis_endpoint", False)):
+            dataset.time_axis_ns = np.linspace(0, time_window_ns, matrix.shape[0], endpoint=False, dtype=np.float32)
+            dataset.depth_axis_m = time_to_depth_axis(dataset.time_axis_ns, dielectric_constant)
         with self._lock, project_mutation(
             self._store, 'save-line-dataset', files=(self._store.gpr_dataset_path(safe),),
             trees=(self._store.root / 'raw' / safe,),
@@ -418,7 +451,7 @@ class LegacyFieldProjectSession(
     def read_dataset(self, line_id: str) -> ProjectLineData:
         safe = validate_line_id(line_id)
         with self._lock:
-            dataset = self._store.load_gpr_dataset(safe)
+            dataset = self._raw_dataset_with_properties(safe)
             matrix = np.asarray(dataset.matrix, dtype=np.float32)
             header = dataset.to_metadata()
             header.update(
@@ -539,6 +572,15 @@ class LegacyFieldProjectSession(
                 metadata=metadata,
             )
 
+    def read_artifact_trace_metadata(self, line_id: str, artifact_id: str) -> dict[str, np.ndarray]:
+        from core.hdf5_line_container import read_artifact_trace_metadata
+        with self._lock:
+            safe_line, safe_artifact, _ = self._artifact_dataset(line_id, artifact_id)
+            if not getattr(self._store.storage, "is_hybrid", False):
+                return {}
+            container = self._store.storage.line_container_path(safe_line)
+            return read_artifact_trace_metadata(container, safe_artifact) or {}
+
     def read_artifact_dataset(
         self, line_id: str, artifact_id: str
     ) -> ProjectLineData:
@@ -552,18 +594,7 @@ class LegacyFieldProjectSession(
                 time_axis_ns=np.asarray(dataset.time_axis_ns, dtype=np.float32),
                 depth_axis_m=np.asarray(dataset.depth_axis_m, dtype=np.float32),
             )
-            trace_metadata = _load_trace_metadata(self._store, safe_line)
-            offset = header.get("source_trace_offset")
-            if offset is not None:
-                start = int(offset)
-                trace_metadata = {
-                    key: np.array(value[start:start + dataset.trace_count], copy=True)
-                    for key, value in trace_metadata.items()
-                    if np.asarray(value).ndim >= 1
-                    and np.asarray(value).shape[0] > start + dataset.trace_count - 1
-                }
-            elif trace_metadata and any(np.asarray(value).size != dataset.trace_count for value in trace_metadata.values()):
-                trace_metadata = {}
+            trace_metadata = self.read_artifact_trace_metadata(safe_line, safe_artifact)
         return ProjectLineData(
             line_id=safe_line, data=matrix, header_info=header, trace_metadata=trace_metadata
         )
@@ -625,6 +656,7 @@ class LegacyFieldProjectSession(
         branch_id: str,
         input_dataset: Mapping[str, Any],
         context: ExecutionContext,
+        trace_metadata: Mapping[str, Any] | None = None,
     ) -> ProjectArtifact:
         safe = validate_line_id(line_id)
         context.raise_if_cancelled()
@@ -635,7 +667,7 @@ class LegacyFieldProjectSession(
             or (input_dataset or {}).get("parent_artifact_id") or ""
         )
         # P1-1：输出 header（含新时间窗/零点/轴含义）持久化到 manifest，供加载时重建物理轴
-        output_header = dict(params.get("output_header") or {})
+        output_header = _validated_output_header(params.get("output_header"), np.shape(data), method_id=method_id)
         payload = {
             "method": method_id,
             "method_name": method_name or name,
@@ -659,6 +691,7 @@ class LegacyFieldProjectSession(
                 payload,
                 cancel_requested=context.is_cancelled,
                 progress_callback=context.report_progress,
+                trace_metadata=trace_metadata,
                 artifact_kind=str((params or {}).get("artifact_kind") or "processing"),
                 run_group_id=str((params or {}).get("run_group_id") or ""),
             )
@@ -673,7 +706,6 @@ class LegacyFieldProjectSession(
         safe = validate_line_id(line_id) if line_id else None
         with self._lock:
             return tuple(_artifact(record) for record in index_processing_artifacts(self._store.root, safe))
-
 
     def _validated_line(self, line_id: str) -> str:
         safe = validate_line_id(line_id)
@@ -865,6 +897,22 @@ class LegacyFieldProjectRepository(ProjectRepositoryPort):
         )
 
 
+def _validated_output_header(header, shape, *, method_id=""):
+    result = dict(header or {})
+    if result.get("is_elevation"):
+        axis = np.asarray(result.get("elevation_axis_m", []), dtype=np.float64)
+        if axis.shape != (shape[0],) or not np.all(np.isfinite(axis)) or (axis.size > 1 and not np.all(np.diff(axis) < 0)):
+            raise ValueError("地形偏移成果缺少有效高程坐标；预校正成果暂不支持绝对高程，请使用后校正并提供完整地面高程")
+    for key, expected in (("time_axis_ns", shape[0]), ("depth_axis_m", shape[0]),
+                          ("distance_axis_m", shape[1])):
+        value = result.get(key)
+        if value is not None and (np.asarray(value).ndim != 1 or len(value) != expected):
+            result.pop(key, None)
+    if method_id == "time_to_depth" and (result.get("time_axis_ns") is None or result.get("depth_axis_m") is None):
+        raise ValueError("时间-深度成果缺少有效输入时间起点，无法保存物理坐标")
+    return result
+
+
 def _json_safe_mapping(value: Mapping[str, Any]) -> dict[str, Any]:
     return {str(key): item.tolist() if key in _AXIS_FIELDS and isinstance(item, np.ndarray)
             and item.ndim == 1 else _json_safe_value(item) for key, item in value.items()}
@@ -875,7 +923,8 @@ _AXIS_FIELDS = ('distance_axis_m', 'time_axis_ns', 'depth_axis_m')
 
 def _dataset_metadata_with_axes(dataset):
     # Only 1D coordinates, never the matrix; block execution keeps bounded I/O.
-    return {**dataset.to_metadata(), **{key: np.asarray(getattr(dataset, key)).tolist() for key in _AXIS_FIELDS}}
+    return {**dataset.to_metadata(), "view_reversed": bool(dataset.metadata.get("view_reversed", False)),
+            **{key: np.asarray(getattr(dataset, key)).tolist() for key in _AXIS_FIELDS}}
 
 
 def _json_safe_value(value: Any) -> Any:

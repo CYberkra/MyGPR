@@ -452,5 +452,13 @@ class ProcessingSteps:
         return str(artifact_id) in self._artifacts_by_id
 
     def select_original(self):
-        if 'original' in self._sources:
-            self._workspace.open_source('original')
+        if not self._line_id:
+            return False
+        # An explicit open overrides a saved empty layout, even before I/O finishes.
+        self._pending_layout = None
+        self._raw_opened = True
+        if 'original' not in self._sources:
+            self._sources['original'] = dict(key='original', title='原始输入',
+                bundle=None, artifact_id='', revision=self._raw_revision)
+            self._sync_sources()
+        return self._workspace.open_source('original')

@@ -121,7 +121,9 @@ class LineComparison(QObject):
             if source['line_id'] == line_id and source.get('artifact_id'):
                 self.page._workspace.open_source(key, group_id)
 
-    def set_artifacts(self, line_id, artifacts):
+    def set_artifacts(self, project_id, line_id, artifacts):
+        if str(project_id) != self.page._project_id:
+            return
         page = self.page
         line_id = str(line_id)
         artifacts = list(artifacts or [])

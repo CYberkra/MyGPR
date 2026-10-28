@@ -41,6 +41,17 @@ def load_processing_result(handle, *, source, line_id, output_npy=None,
     metadata = json.loads(str(handle.attrs.get('metadata_json') or '{}'))
     if not isinstance(metadata, dict):
         raise ValueError('Invalid processing result metadata')
+    if metadata.get('is_elevation'):
+        axis = _dataset(handle, 'elevation_axis_m', 1)
+        values = np.asarray(axis[:], dtype=np.float64)
+        if values.shape != (matrix.shape[0],) or not np.all(np.isfinite(values)) or (values.size > 1 and not np.all(np.diff(values) < 0)):
+            raise ValueError('Invalid processing result elevation axis')
+        saved = metadata.get('elevation_axis_m')
+        if saved is not None:
+            saved = np.asarray(saved, dtype=np.float64)
+            if saved.shape != values.shape or not np.array_equal(saved, values):
+                raise ValueError('Conflicting processing result elevation axes')
+        metadata['elevation_axis_m'] = values.tolist()
     window = float(handle.attrs['time_window_ns'])
     dielectric = float(handle.attrs['dielectric_constant'])
     if not np.isfinite(window) or window < 0 or not np.isfinite(dielectric) or dielectric <= 0:

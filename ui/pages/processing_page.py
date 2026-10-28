@@ -30,10 +30,11 @@ from ui.pages.processing_steps import ProcessingSteps
 from ui.pages.processing_menus import ProcessingMenus
 from ui.pages.processing_chain_view import ProcessingChainView
 from ui.pages.processing_comparison import LineComparison
+from ui.pages.processing_selection import ProcessingSelection
 from ui.widgets.line_drag_combo import LineDragComboBox
 
 
-class ProcessingPage(ProcessingChainView, ProcessingSteps, ProcessingMenus, QWidget):
+class ProcessingPage(ProcessingChainView, ProcessingSteps, ProcessingMenus, ProcessingSelection, QWidget):
     run_requested = pyqtSignal(dict)
     batch_run_requested = pyqtSignal(dict)
     estimate_requested = pyqtSignal(dict)
@@ -300,6 +301,8 @@ class ProcessingPage(ProcessingChainView, ProcessingSteps, ProcessingMenus, QWid
         self._save_intermediates_check.toggled.connect(self._invalidate_estimate)
         self._cancel_btn.clicked.connect(self.cancel_requested)
         self._workspace.active_changed.connect(self._activate_source)
+        self._workspace.selection_step_allowed = self._selection_step_allowed
+        self._workspace.selection_step_requested.connect(self._selection_to_step)
         self._workspace.source_activated_by_user.connect(self._activate_comparison_source)
         self._workspace.preview_requested.connect(self._request_preview)
         self._workspace.source_context_requested.connect(self._show_source_menu)
@@ -441,7 +444,32 @@ class ProcessingPage(ProcessingChainView, ProcessingSteps, ProcessingMenus, QWid
         sources = [dict(source, title=f'{self._comparison.label(self._line_id)} · 原始输入')
                    if source['key'] == 'original' and self._line_id else source
                    for source in self._sources.values()]
-        self._workspace.set_sources(sources + list(self._comparison.sources.values()))
+        sources = [dict(source, project_id=self._project_id, line_id=self._line_id)
+                   for source in sources]
+        comparisons = [dict(source, project_id=self._project_id)
+                       for source in self._comparison.sources.values()]
+        self._workspace.set_sources(sources + comparisons)
+
+    def refresh_line_previews(self, line_id):
+        """Invalidate and reload every cached source for the updated line."""
+        line_id = str(line_id or '')
+        if not line_id or not self._project_id:
+            return
+        keys = []
+        if line_id == self._line_id:
+            for key, source in self._sources.items():
+                source.update(bundle=None, error='')
+                self._preview_requested.discard(str(source.get('artifact_id') or 'original'))
+                keys.append(key)
+        for key, source in self._comparison.sources.items():
+            if source.get('line_id') == line_id:
+                source.update(bundle=None, error='')
+                self._comparison.pending.pop(key, None)
+                keys.append(key)
+        self._workspace._pending.difference_update(keys)
+        self._sync_sources()
+        for key in keys:
+            self._request_preview(key)
 
     def set_comparison_preview(self, project_id, line_id, token, bundle, error):
         self._comparison.deliver(project_id, line_id, token, bundle, error)

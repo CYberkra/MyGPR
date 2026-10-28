@@ -61,7 +61,15 @@ def method_trace_cut(
     else:
         track_length = float(header.get("track_length_m", 0.0) or 0.0)
         interval = float(header.get("trace_interval_m", 0.0) or 0.0)
-    offset = to_int(header.get("source_trace_offset"), default=0) + start
+    prior_offset = header.get("source_trace_offset", 0)
+    offset = None if prior_offset is None else to_int(prior_offset, default=0) + start
+    axis_updates = {}
+    axis = header.get("distance_axis_m")
+    if axis is not None:
+        axis = np.asarray(axis)
+        if axis.shape != (trace_count,):
+            raise ValueError("测道裁剪距离轴与当前道数不一致")
+        axis_updates["distance_axis_m"] = axis[start:last].copy()
     return result, {
         "method": "trace_cut",
         "trace_start": first,
@@ -72,6 +80,7 @@ def method_trace_cut(
         "output_traces": int(result.shape[1]),
         "trace_metadata_out": metadata_out,
         "header_info_updates": {
+            **axis_updates,
             "track_length_m": track_length,
             "trace_interval_m": interval,
             "source_trace_offset": offset,

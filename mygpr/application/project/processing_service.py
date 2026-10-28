@@ -32,6 +32,8 @@ _OUTPUT_HEADER_KEYS = (
     "a_scan_length", "num_traces", "dielectric_constant", "axis_transform",
     "time_axis_endpoint", "time_step_s", "distance_axis_status",
     "track_length_m", "trace_interval_m", "source_trace_offset",
+    "time_axis_ns", "depth_axis_m", "distance_axis_m",
+    "is_depth", "is_elevation", "depth_max_m", "depth_step_m", "time_axis_status", "elevation_axis_m",
 )
 
 
@@ -44,6 +46,8 @@ def _output_header_summary(header: dict[str, Any] | None) -> dict[str, Any]:
             continue
         value = header[key]
         if isinstance(value, np.ndarray):
+            if key in ("time_axis_ns", "depth_axis_m", "distance_axis_m", "elevation_axis_m") and value.ndim == 1:
+                out[key] = value.tolist()
             continue
         if isinstance(value, np.generic):
             value = value.item()
@@ -191,7 +195,8 @@ class ProjectProcessingService:
             source,
             pipeline,
             header_info=header,
-            trace_metadata={},
+            trace_metadata=(self._projects.read_artifact_trace_metadata(project_id, line_id, input_artifact_id)
+                            if input_artifact_id else self._projects.read_trace_metadata(project_id, line_id)),
             consumer=save_result,
             context=context.child(0, 2),
         )
@@ -275,6 +280,7 @@ class ProjectProcessingService:
                     "input_data_sha256": run_input_sha256,
                 },
                 context=step_context,
+                trace_metadata=step_result.trace_metadata,
             )
             step_input_id = final_artifact.artifact_id
             step_input_sha256 = final_artifact.sha256
@@ -341,6 +347,7 @@ class ProjectProcessingService:
             branch_id=branch_id,
             input_dataset=input_dataset,
             context=context,
+            trace_metadata=summary.trace_metadata,
         )
 
     @staticmethod

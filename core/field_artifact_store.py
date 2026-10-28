@@ -105,7 +105,10 @@ class FieldArtifactStoreMixin:
         progress_callback=None,
         artifact_kind: str = "processing",
         run_group_id: str = "",
+        trace_metadata=None,
     ) -> tuple[Path, Path]:
+        if trace_metadata and not getattr(self.storage, "is_hybrid", False):
+            raise ValueError("旧项目存储不支持保存逐道元数据，请迁移项目后重试")
         safe_line_id = validate_line_id(line_id)
         line = self.get_line(safe_line_id)
         shape = tuple(int(v) for v in getattr(data, "shape", ()))
@@ -145,6 +148,7 @@ class FieldArtifactStoreMixin:
                 manifest=manifest, collected_params=collected_params,
                 branch_id=branch_id, parent_artifact_id=parent_id, paths=paths,
                 cancel_requested=cancel_requested, progress_callback=progress_callback,
+                trace_metadata=trace_metadata,
             )
             return self._finalize_processed_artifact(
                 line=line, line_id=safe_line_id, artifact_id=artifact_id, shape=shape,
@@ -167,6 +171,7 @@ class FieldArtifactStoreMixin:
         paths: dict[str, Path],
         cancel_requested=None,
         progress_callback=None,
+        trace_metadata=None,
     ) -> dict[str, Any]:
         if getattr(self.storage, "is_hybrid", False):
             result = self.storage.save_processing_artifact(
@@ -179,6 +184,7 @@ class FieldArtifactStoreMixin:
                 parent_artifact_id=parent_artifact_id,
                 cancel_requested=cancel_requested,
                 progress_callback=progress_callback,
+                trace_metadata=trace_metadata,
             )
             full_manifest = dict(result["manifest"])
             full_manifest.update(
