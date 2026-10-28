@@ -105,8 +105,8 @@ def method_time_cut(
         )
     )
     if source_axis is not None:
-        start_idx = 0 if time_start_value <= 0 else int(np.searchsorted(axis, time_start_value, side="left"))
-        end_idx = samples if time_end_value <= 0 else int(np.searchsorted(axis, time_end_value, side="left"))
+        start_idx = 0 if time_start_value <= 0 else _axis_boundary_index(source_axis, axis, time_start_value)
+        end_idx = samples if time_end_value <= 0 else _axis_boundary_index(source_axis, axis, time_end_value)
     if resolved_mode == "remove_below":
         cut_start, cut_end = 0, end_idx
     elif resolved_mode == "remove_above":
@@ -147,6 +147,16 @@ def method_time_cut(
             "time_cut_offset_ns": float(start_time_ns),
         },
     }
+
+
+def _axis_boundary_index(source_axis: Any, axis: np.ndarray, value: float) -> int:
+    source = np.asarray(source_axis)
+    if source.dtype.kind == "f":
+        rounded = float(np.asarray(value, dtype=source.dtype))
+        index = int(np.searchsorted(axis, rounded, side="left"))
+        if index < len(axis) and axis[index] == rounded:
+            return index
+    return int(np.searchsorted(axis, value, side="left"))
 
 
 def _validate_time_axis(source_axis: Any, samples: int) -> tuple[np.ndarray, float]:

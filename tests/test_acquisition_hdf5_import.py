@@ -300,6 +300,8 @@ def test_acquisition_time_cut_keeps_original_sample_interval(tmp_path, save_inte
     try:
         project = backend.projects.create_project(tmp_path / "project", name="cut sampling")
         backend.projects.import_line_source(project.project_id, "L01", source)
+        source_axis = backend.projects.read_dataset(project.project_id, "L01").header_info["time_axis_ns"]
+        selected = (source_axis >= 180.0) & (source_axis < 450.0)
         steps = (PipelineStep("time_cut", {"mode": "keep_range", "time_start_ns": 180.0, "time_end_ns": 450.0}),
                  PipelineStep("amplitude_scale", {"scale": 2.0}))
         job = backend.submit_project_pipeline(project.project_id, "L01", PipelineDefinition(name="cut", steps=steps),
@@ -307,17 +309,18 @@ def test_acquisition_time_cut_keeps_original_sample_interval(tmp_path, save_inte
         snapshot = backend.jobs.wait(job, timeout=30)
         assert snapshot.status is JobStatus.COMPLETED, snapshot.error_message
         result = backend.projects.read_artifact_dataset(project.project_id, "L01", snapshot.result.artifact_id)
-        np.testing.assert_array_equal(result.data, expected.T[100:251] * 2)
-        np.testing.assert_allclose(result.header_info["time_axis_ns"], np.arange(100, 251) * (900.0 / 501), rtol=1e-6)
+        np.testing.assert_array_equal(result.data, expected.T[selected] * 2)
+        np.testing.assert_array_equal(result.header_info["time_axis_ns"], source_axis[selected])
         second_job = backend.submit_project_pipeline(
             project.project_id, "L01", PipelineDefinition(name="second cut", steps=(
-                PipelineStep("time_cut", {"mode": "remove_above", "time_start_ns": 20.0}),)),
+                PipelineStep("time_cut", {"mode": "remove_above", "time_start_ns": 200.0}),)),
             input_artifact_id=snapshot.result.artifact_id, save_intermediates=save_intermediates,
         )
         second = backend.jobs.wait(second_job, timeout=30)
         assert second.status is JobStatus.COMPLETED, second.error_message
         reloaded = backend.projects.read_artifact_dataset(project.project_id, "L01", second.result.artifact_id)
-        np.testing.assert_array_equal(reloaded.data, expected.T[111:251] * 2)
-        np.testing.assert_allclose(reloaded.header_info["time_axis_ns"], np.arange(111, 251) * (900.0 / 501), rtol=1e-6)
+        selected &= source_axis >= 200.0
+        np.testing.assert_array_equal(reloaded.data, expected.T[selected] * 2)
+        np.testing.assert_array_equal(reloaded.header_info["time_axis_ns"], source_axis[selected])
     finally:
         backend.shutdown()

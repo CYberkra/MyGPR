@@ -204,6 +204,10 @@ def test_endpoint_crop_saved_axis_keeps_input_sampling_interval(project):
     # Mark the normalized fact source explicitly, as acquisition H5 does.
     dataset = store.load_gpr_dataset("L01")
     dataset.metadata["time_axis_endpoint"] = True
+    dataset.metadata["time_step_s"] = 1.8e-9
+    dataset.time_axis_ns = np.linspace(0, 900, 501, dtype=np.float32)
+    from core.gpr_data_model import time_to_depth_axis
+    dataset.depth_axis_m = time_to_depth_axis(dataset.time_axis_ns, dataset.dielectric_constant)
     store.save_gpr_dataset("L01", dataset)
     artifact = backend.project_processing.execute_pipeline(
         pid,
@@ -350,13 +354,17 @@ def test_single_sample_crop_preserves_zero_span_and_interval(project, legacy):
     store = backend.projects._session(pid)._store
     dataset = store.load_gpr_dataset("L01")
     dataset.metadata["time_axis_endpoint"] = True
+    dataset.metadata["time_step_s"] = 1.8e-9
+    dataset.time_axis_ns = np.linspace(0, 900, 501, dtype=np.float32)
+    from core.gpr_data_model import time_to_depth_axis
+    dataset.depth_axis_m = time_to_depth_axis(dataset.time_axis_ns, dataset.dielectric_constant)
     store.save_gpr_dataset("L01", dataset)
     artifact = backend.project_processing.execute_pipeline(
         pid,
         "L01",
         PipelineDefinition(
             name="Single sample",
-            steps=(PipelineStep("time_cut", {"mode": "keep_range", "time_start_ns": 899, "time_end_ns": 900}),),
+            steps=(PipelineStep("time_cut", {"mode": "keep_range", "time_start_ns": 898.2, "time_end_ns": 900}),),
         ),
     )
     reopened = backend.projects.read_artifact_dataset(pid, "L01", artifact.artifact_id)
@@ -424,7 +432,7 @@ raise AssertionError('interruption boundary not reached')
 
 
 @pytest.mark.parametrize(
-    "start,end,expected_start", [(90, 180, 50), (99, 100.8, 55), (180, 360, 100), (89.999999, 180, 49)]
+    "start,end,expected_start", [(90, 180, 50), (99, 100.8, 55), (180, 360, 100), (89.999999, 180, 50)]
 )
 def test_crop_exact_sampling_boundaries_round_trip(project, start, end, expected_start):
     from mygpr.domain.processing.models import PipelineDefinition, PipelineStep
@@ -435,6 +443,10 @@ def test_crop_exact_sampling_boundaries_round_trip(project, start, end, expected
     store = backend.projects._session(pid)._store
     dataset = store.load_gpr_dataset("L01")
     dataset.metadata["time_axis_endpoint"] = True
+    dataset.metadata["time_step_s"] = 1.8e-9
+    dataset.time_axis_ns = np.linspace(0, 900, 501, dtype=np.float32)
+    from core.gpr_data_model import time_to_depth_axis
+    dataset.depth_axis_m = time_to_depth_axis(dataset.time_axis_ns, dataset.dielectric_constant)
     store.save_gpr_dataset("L01", dataset)
     artifact = backend.project_processing.execute_pipeline(
         pid,
@@ -464,3 +476,22 @@ def test_zero_time_exact_sampling_boundary(project, zero, expected):
     )
     assert result.metadata["shift_samples"] == expected
     assert result.data[0, 0] == expected
+
+
+def test_time_cut_float32_grid_boundary_and_off_grid():
+    from mygpr.infrastructure.processing.algorithms.extended.time_cut import method_time_cut
+    axis = np.linspace(0, 900, 501, dtype=np.float32)
+    data = np.arange(501, dtype=np.float32)[:, None]
+    header = {'time_axis_ns': axis, 'time_axis_endpoint': True}
+    rounded, _ = method_time_cut(data, mode='keep_range', time_start_ns=1.8, time_end_ns=5.4, header_info=header)
+    np.testing.assert_array_equal(rounded[:, 0], [1, 2])
+    snapped, _ = method_time_cut(data, mode='keep_range', time_start_ns=5.4, time_end_ns=9.0, header_info=header)
+    np.testing.assert_array_equal(snapped[:, 0], [3, 4])
+    exact, _ = method_time_cut(data, mode='keep_range', time_start_ns=100.8, time_end_ns=104.4, header_info=header)
+    np.testing.assert_array_equal(exact[:, 0], [56, 57])
+    offgrid, _ = method_time_cut(data, mode='keep_range', time_start_ns=100.801, time_end_ns=104.401, header_info=header)
+    np.testing.assert_array_equal(offgrid[:, 0], [57, 58])
+    quantized, _ = method_time_cut(data, mode='keep_range', time_start_ns=898.2, time_end_ns=900, header_info=header)
+    np.testing.assert_array_equal(quantized[:, 0], [499])
+    above, _ = method_time_cut(data, mode='keep_range', time_start_ns=898.201, time_end_ns=900.1, header_info=header)
+    np.testing.assert_array_equal(above[:, 0], [500])
