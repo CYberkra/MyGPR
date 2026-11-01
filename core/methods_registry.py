@@ -67,6 +67,11 @@ def _get_native_algorithms() -> dict[str, Any]:
     return NATIVE_ALGORITHMS
 
 
+def _get_axis_transform(method_id: str) -> str:
+    from mygpr.infrastructure.processing.algorithms.methods import AXIS_TRANSFORM_BY_METHOD
+    return AXIS_TRANSFORM_BY_METHOD[method_id]
+
+
 def _legacy_adapter(native_func: Any) -> Any:
     """Wrap a native ``(data, params)`` callable into ``(data, **kwargs)`` for the legacy engine."""
     def wrapper(data: Any, **kwargs: Any) -> Any:
@@ -86,6 +91,7 @@ def _metadata_records() -> dict[str, dict[str, Any]]:
         processing_methods: dict[str, dict[str, Any]] = {}
         for method_id, algorithm in _get_native_algorithms().items():
             meta = METHOD_METADATA.get(method_id, {})
+            axis_transform = _get_axis_transform(method_id)
 
             # Convert parameter_schema from dict to legacy list-of-dicts format.
             param_schema = algorithm.parameter_schema or {}
@@ -121,6 +127,10 @@ def _metadata_records() -> dict[str, dict[str, Any]]:
                 "maturity": str(meta.get("maturity") or "experimental"),
                 "visibility": str(meta.get("visibility") or "public"),
                 "implementation_version": str(algorithm.implementation_version or "native-1.0"),
+                "axis_transform": axis_transform,
+                "shape_changed": axis_transform != "identity",
+                "output_contract": ("bscan.depth_x_traces" if axis_transform in {"time_to_depth", "migration"}
+                                    else "bscan.samples_x_traces"),
                 "description": str(meta.get("description") or ""),
             }
 
@@ -160,6 +170,7 @@ def _build_registry() -> None:
     processing_methods: dict[str, dict[str, Any]] = {}
     for method_id, algorithm in _get_native_algorithms().items():
         meta = METHOD_METADATA.get(method_id, {})
+        axis_transform = _get_axis_transform(method_id)
 
         # Convert parameter_schema from dict to legacy list-of-dicts format.
         param_schema = algorithm.parameter_schema or {}
@@ -196,6 +207,10 @@ def _build_registry() -> None:
             "maturity": str(meta.get("maturity") or "experimental"),
             "visibility": str(meta.get("visibility") or "public"),
             "implementation_version": str(algorithm.implementation_version or "native-1.0"),
+            "axis_transform": axis_transform,
+            "shape_changed": axis_transform != "identity",
+            "output_contract": ("bscan.depth_x_traces" if axis_transform in {"time_to_depth", "migration"}
+                                else "bscan.samples_x_traces"),
             "description": str(meta.get("description") or ""),
         }
 

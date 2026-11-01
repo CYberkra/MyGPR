@@ -200,6 +200,7 @@ def _extract_parameter_schema(raw: Mapping[str, Any]) -> tuple[dict, ...]:
     兼容两种注册表形态：
     - ``parameter_schema`` 为 dict[name -> spec]（domain/infrastructure 侧）
     - ``params`` 为 list[spec]（core.methods_registry 侧，spec 自带 name）
+    ``visible=False`` 仅保留给旧配置反序列化，不进入参数表单。
 
     此前只读 ``parameter_schema`` 键，而 core 注册表实际叫 ``params``，
     导致方法的参数 schema 传到 UI 全为空，参数表单无法构建、
@@ -219,10 +220,11 @@ def _extract_parameter_schema(raw: Mapping[str, Any]) -> tuple[dict, ...]:
                 entry = dict(item) if isinstance(item, Mapping) else {}
                 entry.setdefault("name", "param_%d" % index)
                 items.append(entry)
-    for entry in items:
+    visible_items = [entry for entry in items if entry.get("visible", True)]
+    for entry in visible_items:
         entry.setdefault("label", _PARAM_LABELS.get(
             str(entry.get("name", "")), str(entry.get("name", ""))))
-    return tuple(items)
+    return tuple(visible_items)
 
 
 def method_catalog() -> tuple[UiMethodEntry, ...]:

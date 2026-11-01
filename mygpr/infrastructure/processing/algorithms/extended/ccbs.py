@@ -7,6 +7,8 @@ from __future__ import annotations
 import numpy as np
 from typing import Any
 
+from ..common import warning
+
 _EPSILON = 1.0e-10
 
 
@@ -100,7 +102,7 @@ def method_ccbs(
     del kwargs
     resolved = reference_wave
     source = "explicit" if resolved is not None else None
-    warnings: list[str] = []
+    warnings: list[dict[str, Any]] = []
     if resolved is None and use_custom_ref:
         metadata_arrays = trace_metadata or {}
         candidate = metadata_arrays.get("reference_wave")
@@ -115,15 +117,18 @@ def method_ccbs(
             resolved = scan[:, index].reshape(-1)
             source = "reference_trace_index"
         else:
-            warnings.append(
-                f"reference_trace_index {index} 超出范围 [0, {trace_count})"
-            )
+            warnings.append(warning(
+                "ccbs_reference_trace_out_of_range",
+                f"reference_trace_index {index} 超出范围 [0, {trace_count})",
+                "ccbs", reference_trace_index=index, trace_count=trace_count,
+            ))
     if resolved is None and use_custom_ref and source is None:
-        warnings.append(
+        warnings.append(warning(
+            "ccbs_reference_fallback",
             "use_custom_ref 已启用但未提供参考波"
-            "（trace_metadata['reference_wave'] 或 reference_trace_index），"
-            "回退为均值参考"
-        )
+            "（trace_metadata['reference_wave'] 或 reference_trace_index），回退为均值参考",
+            "ccbs",
+        ))
     result = apply_ccbs_filter(data, reference_wave=resolved)
     metadata = {
         "method": "CCBS",

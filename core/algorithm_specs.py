@@ -7,6 +7,10 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
 ALGORITHM_API_VERSION = "mygpr.processing_plugin.v1"
+AXIS_TRANSFORMS = frozenset({
+    "identity", "sample_crop", "trace_crop", "trace_resample",
+    "time_to_depth", "migration",
+})
 
 
 @dataclass(frozen=True)
@@ -22,6 +26,7 @@ class AlgorithmSpec:
     research_only: bool = True
     input_contract: str = "bscan.samples_x_traces"
     output_contract: str = "bscan.samples_x_traces"
+    axis_transform: str = "identity"
     preserves_trace_axis: bool = True
     preserves_sample_axis: bool = True
     memory_model: str = "in_memory"
@@ -39,6 +44,8 @@ class AlgorithmSpec:
             raise ValueError(f"Unsupported algorithm API: {self.api_version}")
         if self.maturity not in {"stable", "experimental", "research", "deprecated"}:
             raise ValueError(f"Unsupported maturity: {self.maturity}")
+        if self.axis_transform not in AXIS_TRANSFORMS:
+            raise ValueError(f"Unsupported axis transform: {self.axis_transform}")
         if self.field_approved and (self.research_only or self.visibility != "public"):
             raise ValueError("Field-approved algorithms must be public and not research-only")
         if self.callable is None:
@@ -49,10 +56,9 @@ def spec_from_legacy(algorithm_id: str, record: Mapping[str, Any]) -> AlgorithmS
     maturity = str(record.get("maturity") or "experimental")
     visibility = str(record.get("visibility") or "public")
     field_approved = bool(record.get("field_approved", maturity == "stable" and visibility == "public"))
-    shape_changed = bool(record.get("shape_changed", False))
     axis_transform = str(record.get("axis_transform") or "identity")
-    preserves_trace = not shape_changed and axis_transform not in {"trace_remove", "trace_resample"}
-    preserves_sample = not shape_changed and axis_transform not in {"sample_crop", "time_to_depth"}
+    preserves_trace = axis_transform not in {"trace_crop", "trace_resample"}
+    preserves_sample = axis_transform not in {"sample_crop", "time_to_depth", "migration"}
     function = record.get("func") or record.get("module")
     frequency_values = record.get("validated_frequency_range_mhz")
     frequency_range: tuple[float, float] | None = None
@@ -72,6 +78,7 @@ def spec_from_legacy(algorithm_id: str, record: Mapping[str, Any]) -> AlgorithmS
         research_only=not field_approved,
         input_contract=str(record.get("input_contract") or "bscan.samples_x_traces"),
         output_contract=str(record.get("output_contract") or "bscan.samples_x_traces"),
+        axis_transform=axis_transform,
         preserves_trace_axis=bool(record.get("preserves_trace_axis", preserves_trace)),
         preserves_sample_axis=bool(record.get("preserves_sample_axis", preserves_sample)),
         memory_model=str(record.get("memory_model") or "in_memory"),
@@ -110,4 +117,4 @@ class AlgorithmCatalog:
         return tuple(self._specs.values())
 
 
-__all__ = ["ALGORITHM_API_VERSION", "AlgorithmCatalog", "AlgorithmSpec", "spec_from_legacy"]
+__all__ = ["ALGORITHM_API_VERSION", "AXIS_TRANSFORMS", "AlgorithmCatalog", "AlgorithmSpec", "spec_from_legacy"]

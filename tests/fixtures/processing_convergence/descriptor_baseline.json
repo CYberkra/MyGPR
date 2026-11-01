@@ -370,7 +370,6 @@
         "type": "int"
       },
       "length_m": {
-        "default": 0.0,
         "min": 0.0,
         "type": "float"
       },
@@ -380,7 +379,6 @@
         "type": "int"
       },
       "time_window_ns": {
-        "default": 0.0,
         "min": 0.0,
         "type": "float"
       },
@@ -790,9 +788,9 @@
         "type": "float"
       },
       "depth": {
-        "default": 20.0,
         "min": 0.01,
-        "type": "float"
+        "type": "float",
+        "visible": false
       },
       "depth_m": {
         "default": 20.0,
@@ -805,9 +803,9 @@
         "type": "float"
       },
       "dx": {
-        "default": 0.0,
         "min": 0.0,
-        "type": "float"
+        "type": "float",
+        "visible": false
       },
       "dx_m": {
         "default": 0.0,
@@ -815,9 +813,9 @@
         "type": "float"
       },
       "dz": {
-        "default": 0.0,
         "min": 0.0,
-        "type": "float"
+        "type": "float",
+        "visible": false
       },
       "dz_m": {
         "default": 0.0,
@@ -862,9 +860,9 @@
         "type": "float"
       },
       "v": {
-        "default": 0.1,
         "min": 0.001,
-        "type": "float"
+        "type": "float",
+        "visible": false
       },
       "velocity_m_per_ns": {
         "default": 0.1,
