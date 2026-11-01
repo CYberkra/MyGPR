@@ -154,6 +154,7 @@ class FileTreePanel(DockPanel):
         self._project_label.setSizePolicy(
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         self._project_label.setStyleSheet(hint_qss('secondary'))
+        self._project_label.hide()
         self.body_layout().addWidget(self._project_label)
 
         self._tree = TreeWidget(self._expanded_view)

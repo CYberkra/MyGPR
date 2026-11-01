@@ -165,7 +165,6 @@ def apply_project_theme(page, dark: bool) -> None:
     page._dark = bool(dark)
     heading_qss = (f'font-size: {constants.FONT_SIZE_BODY}pt; font-weight: 600; '
                    f'color: {color("text_primary", dark)};')
-    page._project_heading.setStyleSheet(heading_qss)
     page._selected_heading.setStyleSheet(heading_qss)
     page._line_detail.apply_theme(dark)
     page._sensor_detail.apply_theme(dark)

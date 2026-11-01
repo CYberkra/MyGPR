@@ -42,7 +42,6 @@ class HomePage(ScrollArea):
         title = BodyLabel('开始一个勘探项目', self._content)
         title.setStyleSheet(f'font-size: {constants.FONT_SIZE_TITLE}pt; font-weight: 600;')
         content.addWidget(title)
-        content.addWidget(make_hint('打开已有项目，或新建项目后导入测线。', parent=self._content))
         actions = QHBoxLayout()
         self.open_btn = PrimaryPushButton('打开项目', self._content, FIF.FOLDER)
         self.new_btn = PushButton('新建项目', self._content, FIF.ADD)
@@ -119,7 +118,9 @@ class HomePage(ScrollArea):
         for path in ordered:
             available = Path(path).is_dir()
             prefix = '★ ' if path in self._pinned_paths else ''
-            item = QListWidgetItem(f'{prefix}{names.get(path) or Path(path).name}\n{path}  ·  {"可打开" if available else "不可用：目录不存在"}')
+            status = '' if available else '  ·  不可用：目录不存在'
+            item = QListWidgetItem(
+                f'{prefix}{names.get(path) or Path(path).name}\n{path}{status}')
             item.setData(Qt.ItemDataRole.UserRole, path)
             item.setToolTip(path)
             self._recent_list.addItem(item)

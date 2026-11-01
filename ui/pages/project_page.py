@@ -123,10 +123,11 @@ class ProjectPage(QWidget):
         work.setSpacing(constants.SPACE_3)
         header_row = QHBoxLayout()
         header_row.setSpacing(constants.SPACE_2)
-        self._project_heading = BodyLabel('', self._work_widget)
-        self._project_heading.setWordWrap(True)
-        self._project_heading.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        header_row.addWidget(self._project_heading, 1)
+        self.line_search = LineEdit(self._work_widget)
+        self.line_search.setPlaceholderText('搜索测线')
+        self.line_search.setClearButtonEnabled(True)
+        self.line_search.textChanged.connect(self._filter_lines)
+        header_row.addWidget(self.line_search, 1)
         self.header_import_btn = PrimaryPushButton('导入数据', self._work_widget, FIF.DOWNLOAD)
         self.header_import_btn.setToolTip('可一次选择多个 CSV / TXT / NPY / NPZ / H5 / HDF5 文件导入')
         self.header_import_btn.clicked.connect(self.show_import_tool)
@@ -340,11 +341,6 @@ class ProjectPage(QWidget):
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(constants.SPACE_2)
-        self.line_search = LineEdit(self)
-        self.line_search.setPlaceholderText('搜索测线号或名称')
-        self.line_search.setClearButtonEnabled(True)
-        self.line_search.textChanged.connect(self._filter_lines)
-        layout.addWidget(self.line_search)
         splitter = QSplitter(Qt.Orientation.Vertical, self)
         splitter.setChildrenCollapsible(False)
 
@@ -681,8 +677,8 @@ class ProjectPage(QWidget):
         self._work_stack.setCurrentWidget(self._ledger_widget if state == 'ledger' else self._empty_project)
         self.header_import_btn.setVisible(state == 'ledger')
         self.empty_import_btn.setVisible(state == 'empty')
-        name = str(getattr(self._summary, 'name', '') or '项目')
-        self._project_heading.setText(f'{name} · {len(self._lines)} 条测线')
+        self.line_search.setPlaceholderText(
+            f'搜索 {len(self._lines)} 条测线' if self._lines else '搜索测线')
         enabled = self._has_project() and not self._busy
         self.quality_btn.setEnabled(self._has_project())
         for btn in (self.close_btn, self.preflight_btn):

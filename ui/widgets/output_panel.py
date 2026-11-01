@@ -34,7 +34,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout, QSizePolicy, QStackedWidget, QTextEdit, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
-    CaptionLabel, TransparentToggleToolButton, TransparentToolButton,
+    TransparentToggleToolButton, TransparentToolButton,
 )
 from qfluentwidgets import FluentIcon as FIF
 
@@ -96,7 +96,7 @@ class OutputPanel(QWidget):
         self._tabs = SlimSegment(self)
         self._tabs.addItem('log', '日志',
                            onClick=lambda: self._on_tab_clicked('log'))
-        self._tabs.addItem('jobs', '任务',
+        self._tabs.addItem('jobs', '活动任务',
                            onClick=lambda: self._on_tab_clicked('jobs'))
         self._tabs.setSizePolicy(
             QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
@@ -122,12 +122,9 @@ class OutputPanel(QWidget):
         log_layout.addWidget(export_btn)
         log_layout.addStretch(1)
 
-        # 任务工具条（说明性占位：MiniJobList 只显示活动任务）
         jobs_bar = QWidget(self)
         jobs_layout = QHBoxLayout(jobs_bar)
         jobs_layout.setContentsMargins(0, 0, 0, 0)
-        hint = CaptionLabel('仅显示进行中的任务，完整历史见「任务中心」页', jobs_bar)
-        jobs_layout.addWidget(hint)
         jobs_layout.addStretch(1)
 
         self._tool_stacked = QStackedWidget(self)

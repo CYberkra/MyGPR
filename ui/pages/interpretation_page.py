@@ -4,7 +4,7 @@
 布局（保持既有美术风格：卡片 + 灰白底 + 圆角）：
 - 顶部工具卡片（两行，防叠字）：
     行1 = 测线 / 数据（原始|成果）/ 打开标注会话 + 右侧会话状态
-    行2 = 自动追踪 / 吸附 / 平滑 | 撤销 / 重做 | 保存标注 + 操作提示
+    行2 = 自动追踪 / 吸附 / 平滑 | 撤销 / 重做 | 保存标注
 - 主区左（stretch）：剖面标注卡片 = BScanView（pick 模式，点击追加点；
   overlay #fbbf24）。pick/overlay 均为原始数据坐标（BScanView 内部完成
   降采样坐标换算），与后端编辑会话坐标系一致。
@@ -13,7 +13,6 @@
     删除选中/清空（计数与按钮同行：计数居左、按钮居右）；
     深度换算卡片 = 介电常数 εr（默认 9.0），深度 = ½·c·t/√εr；
     速度分析卡片 = 绕射双曲线拟合（Phase 2.1）。
-- 底部信息条（横条卡片：card_title「标注信息」+ 点数 / 会话状态）。
 
 页面纯展示 + 发信号：内部维护当前点列，pick 点击追加并发 points_changed；
 删除/清空同样通过 points_changed → 控制器 replace_points 写回会话。
@@ -35,8 +34,7 @@ from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants
 from ui.icons import WorkbenchIcon
-from ui.page_scaffold import (card_title, make_card,
-                              make_collapsible_column, make_hint,
+from ui.page_scaffold import (make_card, make_collapsible_column, make_hint,
                               refill_combo)
 from ui.widgets import BScanView, make_separator
 from ui.widgets.object_context_menu import ObjectMenuBinding, object_action, object_menu
@@ -92,11 +90,9 @@ class InterpretationPage(QWidget):
         body.addWidget(self._build_side_column(), 0)
         root.addLayout(body, 1)
 
-        root.addWidget(self._build_info_bar())
-
     def _build_tool_card(self) -> CardWidget:
         """顶部工具卡片：两行布局（行1 会话来源 / 行2 编辑操作）。"""
-        card, layout = make_card('标注工具', parent=self)
+        card, layout = make_card(parent=self)
 
         # ---- 行1：会话来源（测线 / 数据版本 / 打开会话）+ 状态
         row1 = QHBoxLayout()
@@ -116,11 +112,9 @@ class InterpretationPage(QWidget):
         self._artifact_combo.setToolTip('选择标注对象：原始数据或某个处理成果')
         row1.addWidget(self._artifact_combo)
         self._open_session_btn = PushButton('打开标注会话', card, FIF.EDIT)
-        self._open_session_btn.setToolTip('在所选数据上打开标注会话')
+        self._open_session_btn.setToolTip('在所选数据上打开标注会话；打开后在剖面图上左键拾取标注点')
         row1.addWidget(self._open_session_btn)
         row1.addStretch(1)
-        status_label = CaptionLabel('状态:', card)
-        row1.addWidget(status_label)
         self._session_status_label = make_hint('未打开会话', parent=card)
         row1.addWidget(self._session_status_label)
         layout.addLayout(row1)
@@ -149,14 +143,12 @@ class InterpretationPage(QWidget):
         self._confirm_btn.setToolTip('至少两个有效点；确认后可生成正式空间成果')
         row2.addWidget(self._confirm_btn)
         row2.addStretch(1)
-        hint = make_hint('提示：在剖面图上左键点击拾取标注点', parent=card)
-        row2.addWidget(hint)
         layout.addLayout(row2)
         return card
 
     def _build_bscan_card(self) -> CardWidget:
         """剖面标注卡片：BScanView（pick 模式 + overlay）。"""
-        card, layout = make_card('剖面标注', parent=self)
+        card, layout = make_card(parent=self)
         self._bscan = BScanView(card)
         self._bscan.setMinimumHeight(420)
         self._bscan.set_pick_enabled(False)  # 会话打开前禁用 pick（P1-6）
@@ -215,15 +207,12 @@ class InterpretationPage(QWidget):
         self._dielectric_spin.setSingleStep(0.5)
         self._dielectric_spin.setValue(constants.DEFAULT_DIELECTRIC)
         self._dielectric_spin.setToolTip(
-            '介质相对介电常数，用于把双程走时换算成估计深度\n'
+            '深度 = ½ · c · t / √εr\n'
             '常见介质：空气≈1，干砂≈3-5，湿砂≈20-30，水≈81')
         diel_row.addWidget(self._dielectric_spin, 1)
         depth_layout.addLayout(diel_row)
-        formula_hint = make_hint('深度 = ½ · c · t / √εr；修改数值先只影响当前表格预览',
-                                 parent=depth_card)
-        formula_hint.setWordWrap(True)
-        depth_layout.addWidget(formula_hint)
         self._dielectric_apply_btn = PushButton('应用到测线速度模型', depth_card)
+        self._dielectric_apply_btn.setToolTip('修改数值先只更新表格预览；点击后写入测线速度模型')
         self._dielectric_apply_btn.clicked.connect(
             lambda: self.dielectric_apply_requested.emit(self._dielectric_spin.value()))
         depth_layout.addWidget(self._dielectric_apply_btn)
@@ -237,24 +226,12 @@ class InterpretationPage(QWidget):
             '需要 ≥3 个拾取点；结果写回测线速度模型并重算深度轴')
         self._velocity_btn.setEnabled(False)  # 会话打开且点数足够后启用
         velocity_layout.addWidget(self._velocity_btn)
-        self._velocity_result_label = CaptionLabel('尚未拟合', velocity_card)
+        self._velocity_result_label = CaptionLabel('', velocity_card)
         self._velocity_result_label.setWordWrap(True)
         velocity_layout.addWidget(self._velocity_result_label)
         layout.addWidget(velocity_card)
         layout.addStretch(1)
         return panel
-
-    def _build_info_bar(self) -> CardWidget:
-        """底部信息条（横条卡片）：标题 + 点数 / 会话状态。"""
-        card = CardWidget(self)
-        layout = QHBoxLayout(card)
-        layout.setContentsMargins(*constants.CARD_MARGINS)
-        layout.setSpacing(constants.CARD_SPACING)
-        layout.addWidget(card_title('标注信息'))
-        self._info_label = CaptionLabel('标注点数: 0 | 会话状态: 未打开会话',
-                                        card)
-        layout.addWidget(self._info_label, 1)
-        return card
 
     # ============================================================ 内部接线
     def _connect_internal(self) -> None:
@@ -308,10 +285,9 @@ class InterpretationPage(QWidget):
             prepend=(('原始数据', ''),))   # index 0 = 原始数据
 
     def set_session_info(self, text: str) -> None:
-        """会话状态文案（顶部状态 CaptionLabel + 底部信息条）。"""
+        """会话状态文案（顶部状态 CaptionLabel）。"""
         text = text or '未打开会话'
         self._session_status_label.setText(text)
-        self._refresh_info()
 
     def set_saved_status(self, status):
         self._saved_status = str(status or 'draft')
@@ -374,7 +350,6 @@ class InterpretationPage(QWidget):
         self._points_context.close()
         self._bscan.set_overlay_points(self._points, _OVERLAY_COLOR)
         self._refresh_points_table()
-        self._refresh_info()
         self._update_edit_enabled()
 
     def set_busy(self, busy: bool) -> None:
@@ -419,8 +394,7 @@ class InterpretationPage(QWidget):
     def set_velocity_running(self, running: bool) -> None:
         """速度分析在飞态：提交后置 True，完成/失败回调置 False，防重复提交。"""
         self._velocity_running = bool(running)
-        self._velocity_result_label.setText(
-            '拟合中…' if running else '尚未拟合')
+        self._velocity_result_label.setText('拟合中…' if running else '')
         self._update_edit_enabled()
 
     def set_velocity_result(self, line_id: str, result: dict) -> None:
@@ -446,15 +420,11 @@ class InterpretationPage(QWidget):
         self._velocity_result_label.setText('\n'.join(lines))
 
     def set_velocity_failed(self, message: str) -> None:
-        """速度分析失败 → 卡片显示错误。
-
-        空串（或 coordinator 项目关闭重置）→ 恢复「尚未拟合」。
-        两种路径都解除在飞态，防止任务在飞时关项目导致按钮永久禁用。
-        """
+        """速度分析失败 → 卡片显示错误；项目重置时清空结果。"""
         self._velocity_running = False
         self._update_edit_enabled()
         self._velocity_result_label.setText(
-            ('拟合失败: %s' % message) if message else '尚未拟合')
+            ('拟合失败: %s' % message) if message else '')
 
     def _on_point_picked(self, trace: int, sample: int) -> None:
         """pick 点击追加点（原始数据坐标）→ overlay/列表末行增量插入 + points_changed。"""
@@ -463,7 +433,6 @@ class InterpretationPage(QWidget):
         self._points_revision += 1
         self._bscan.set_overlay_points(self._points, _OVERLAY_COLOR)
         self._append_points_row(len(self._points) - 1)
-        self._refresh_info()
         self._update_edit_enabled()
         self.points_changed.emit(list(self._points))
 
@@ -490,7 +459,7 @@ class InterpretationPage(QWidget):
         self._emit_points_updated()
 
     def _emit_points_updated(self, *, table_updated: bool = False) -> None:
-        """点列变更统一出口：overlay + 表格 + 信息条 + 信号。
+        """点列变更统一出口：overlay + 表格 + 信号。
 
         table_updated=True 表示调用方已完成表格局部更新（单点删除），
         此处跳过整表重建。
@@ -501,7 +470,6 @@ class InterpretationPage(QWidget):
         self._bscan.set_overlay_points(self._points, _OVERLAY_COLOR)
         if not table_updated:
             self._refresh_points_table()
-        self._refresh_info()
         self._update_edit_enabled()
         self.points_changed.emit(list(self._points))
 
@@ -620,8 +588,3 @@ class InterpretationPage(QWidget):
                 table.setItem(row, col, item)
         table.blockSignals(False)
         self._points_count_label.setText('%d 个点' % len(self._points))
-
-    def _refresh_info(self) -> None:
-        self._info_label.setText(
-            '标注点数: %d | 会话状态: %s'
-            % (len(self._points), self._session_status_label.text()))

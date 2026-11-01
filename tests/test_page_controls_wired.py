@@ -634,16 +634,16 @@ class TestDeliveryHeaderActionGating:
         page.set_busy(False)
         assert page._spatial_btn.isEnabled()       # 解忙后恢复且不误启用空态
 
-    def test_open_dir_hint_follows_report_result(self, qapp):
+    def test_open_dir_state_follows_report_result(self, qapp):
         from ui.pages.delivery_page import DeliveryPage
         page = DeliveryPage()
-        # 初始无报告包：hint 可见（isHidden 只看自身显式状态，不受父链影响）
-        assert not page._open_dir_hint.isHidden()
+        assert not page._open_dir_btn.isEnabled()
+        assert page._open_dir_btn.toolTip() == '生成报告包后可用'
         page.set_report_result(SimpleNamespace(
             pdf_path='D:/out/report/a.pdf', html_path='', xlsx_path='',
             delivery_zip_path=''))
-        assert page._open_dir_btn.isEnabled()      # 有点击目标 → 按钮点亮
-        assert page._open_dir_hint.isHidden()      # 前置条件已满足 → hint 收起
+        assert page._open_dir_btn.isEnabled()
+        assert page._open_dir_btn.toolTip() == '打开报告包输出目录'
 
 
 # ============================================================ AScanPopup ↔ BScanView

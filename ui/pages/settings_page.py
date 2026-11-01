@@ -21,7 +21,7 @@ from qfluentwidgets import (
 )
 
 from ui import constants, file_dialogs
-from ui.page_scaffold import (make_card, make_form_row, make_hint,
+from ui.page_scaffold import (make_card, make_form_row,
                               style_transparent_scroll, wrap_centered)
 
 _AUTHOR = '邸建豪 袁林 詹萍'
@@ -91,27 +91,15 @@ class SettingsPage(ScrollArea):
 
     # ============================================================ 卡片构建
     def _build_general_card(self, parent):
-        """卡片1"通用设置"：主题 / 默认介电常数 / 默认颜色映射 / 预览下采样上限。"""
-        card, layout = make_card('通用设置')
+        """界面外观与空间底图偏好。"""
+        card, layout = make_card('外观与空间')
 
-        # 界面主题
         self._theme_combo = ComboBox(card)
         self._theme_combo.addItems([constants.THEME_LIGHT, constants.THEME_DARK])
         self._theme_combo.setCurrentText(constants.THEME_LIGHT)
         self._theme_combo.setMinimumWidth(150)
         self._theme_combo.currentTextChanged.connect(self.theme_changed)
         layout.addLayout(make_form_row('界面主题:', self._theme_combo,
-                                       parent=card))
-
-        # 默认介电常数
-        self._dielectric_spin = DoubleSpinBox(card)
-        self._dielectric_spin.setRange(1.0, 81.0)
-        self._dielectric_spin.setDecimals(2)
-        self._dielectric_spin.setSingleStep(0.5)
-        self._dielectric_spin.setValue(constants.DEFAULT_DIELECTRIC)
-        self._dielectric_spin.setMinimumWidth(120)
-        self._dielectric_spin.valueChanged.connect(self._emit_general_changed)
-        layout.addLayout(make_form_row('默认介电常数:', self._dielectric_spin,
                                        parent=card))
 
         # 自动预下载底图（空间页加载轨迹后自动下载瓦片）
@@ -146,7 +134,7 @@ class SettingsPage(ScrollArea):
         layout.addWidget(self._section_header('坐标与布局', card))
 
         self._bscan_aspect_combo = ComboBox(card)
-        for label, key in (('拉伸铺满（推荐）', 'free'),
+        for label, key in (('拉伸铺满', 'free'),
                            ('数据盒正方形', 'square'),
                            ('数据格 1:1', 'cell')):
             self._bscan_aspect_combo.addItem(label, userData=key)
@@ -270,10 +258,6 @@ class SettingsPage(ScrollArea):
         colorbar_row.addStretch(1)
         layout.addLayout(colorbar_row)
 
-        layout.addWidget(make_hint(
-            '色阶只影响显示的明暗对比，不改动数据；B-Scan 上右键「色阶设置…」'
-            '可只改单个视图。', parent=card))
-
     @staticmethod
     def _section_header(text: str, parent) -> StrongBodyLabel:
         """卡内小节标题（八行控件一卡到底时给扫读锚点，纯布局不改接线）。"""
@@ -301,16 +285,25 @@ class SettingsPage(ScrollArea):
         self.general_changed.emit()
 
     def _build_processing_card(self, parent):
-        """卡片2"处理设置"：并行工作线程数 SpinBox(1-8, 默认 2)（重启生效提示）。"""
+        """默认处理参数与并行度。"""
         card, layout = make_card('处理设置')
+        self._dielectric_spin = DoubleSpinBox(card)
+        self._dielectric_spin.setRange(1.0, 81.0)
+        self._dielectric_spin.setDecimals(2)
+        self._dielectric_spin.setSingleStep(0.5)
+        self._dielectric_spin.setValue(constants.DEFAULT_DIELECTRIC)
+        self._dielectric_spin.setMinimumWidth(120)
+        self._dielectric_spin.valueChanged.connect(self._emit_general_changed)
+        layout.addLayout(make_form_row('默认介电常数:', self._dielectric_spin,
+                                       parent=card))
         self._workers_spin = SpinBox(card)
         self._workers_spin.setRange(1, 8)
         self._workers_spin.setValue(constants.MAX_WORKERS)
         self._workers_spin.setMinimumWidth(120)
+        self._workers_spin.setToolTip('重启后生效')
         self._workers_spin.valueChanged.connect(self._emit_general_changed)
-        hint = make_hint('（重启后生效）', parent=card)
-        layout.addLayout(make_form_row('并行工作线程数:', self._workers_spin,
-                                       hint, parent=card))
+        layout.addLayout(make_form_row('并行工作线程数（重启生效）:', self._workers_spin,
+                                       parent=card))
         return card
 
     def _build_storage_card(self, parent):
