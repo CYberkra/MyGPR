@@ -138,8 +138,8 @@ def test_invalid_bound_csv_metadata_cannot_be_applied_to_a_waveform(tmp_path, fa
     path, _ = csv_source(tmp_path)
     session = type(path)(str(path) + ".session.json")
     journal = type(path)(str(path) + ".meta.jsonl")
-    binding = json.loads(session.read_text())
-    rows = [json.loads(s) for s in journal.read_text().splitlines()]
+    binding = json.loads(session.read_text(encoding='utf-8'))
+    rows = [json.loads(s) for s in journal.read_text(encoding='utf-8').splitlines()]
     if fault == "crc":
         rows[0]["samples_crc32"] ^= 1
     elif fault == "identity":
@@ -152,8 +152,8 @@ def test_invalid_bound_csv_metadata_cannot_be_applied_to_a_waveform(tmp_path, fa
         rows[1]["row"] = 1
     else:
         binding["data_file"] = "foreign.csv"
-    session.write_text(json.dumps(binding))
-    journal.write_text("\n".join(json.dumps(r) for r in rows))
+    session.write_text(json.dumps(binding), encoding='utf-8')
+    journal.write_text("\n".join(json.dumps(r) for r in rows), encoding='utf-8')
     with pytest.raises(ValueError):
         load_gpr_dataset(path)
 
@@ -182,14 +182,14 @@ def test_bad_h5_marker_schema_does_not_silently_create_wrong_annotations(tmp_pat
 def test_legacy_json_without_marker_type_is_general_and_foreign_filename_is_ignored(tmp_path):
     path, _ = csv_source(tmp_path, journal=False)
     side = tmp_path / "line7_markers.json"
-    payload = json.loads(side.read_text())
+    payload = json.loads(side.read_text(encoding='utf-8'))
     payload["markers"] = payload["markers"][1:2]
     payload["markers"][0]["marker_id"] = 1
     payload["markers"][0].pop("marker_type")
-    side.write_text(json.dumps(payload))
+    side.write_text(json.dumps(payload), encoding='utf-8')
     assert load_gpr_dataset(path).metadata["acquisition_markers"][0]["marker_type"] == "general"
     payload["data_file"] = "another.csv"
-    side.write_text(json.dumps(payload))
+    side.write_text(json.dumps(payload), encoding='utf-8')
     assert not load_gpr_dataset(path).metadata.get("acquisition_markers")
 
 
@@ -296,7 +296,7 @@ def test_external_reference_replacement_does_not_leave_owned_old_markers(tmp_pat
 def test_all_missing_navigation_stays_unknown_not_a_zero_trajectory(tmp_path):
     path, _ = csv_source(tmp_path)
     journal = type(path)(str(path) + ".meta.jsonl")
-    rows = [json.loads(row) for row in journal.read_text().splitlines()]
+    rows = [json.loads(row) for row in journal.read_text(encoding='utf-8').splitlines()]
     for row in rows:
         for name in FLOATS:
             row[name] = None
@@ -314,7 +314,7 @@ def test_zero_window_csv_stays_unknown_after_save_and_auto_windows_use_samples(t
     from mygpr.infrastructure.processing.native_adapter import NativeProcessingExecutor
 
     path, _ = csv_source(tmp_path)
-    path.write_text(path.read_text().replace("Time windows (ns) = 44", "Time windows (ns) = 0"), encoding="utf-8")
+    path.write_text(path.read_text(encoding='utf-8').replace("Time windows (ns) = 44", "Time windows (ns) = 0"), encoding="utf-8")
     store = FieldProjectStore.create_empty(tmp_path / "unknown", name="unknown time")
     import_line_data(store, path, line_id="L01")
     ds = FieldProjectStore.open(store.root).load_gpr_dataset("L01")
