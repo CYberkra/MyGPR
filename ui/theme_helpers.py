@@ -19,6 +19,7 @@ from qfluentwidgets import RoundMenu, Theme, isDarkTheme, setTheme
 from qfluentwidgets.components.widgets.combo_box import ComboBoxMenu
 
 from ui import constants
+from ui.fluent_style_lifetime import patch_dynamic_style_lifetime
 
 if TYPE_CHECKING:
     from PyQt6.QtWidgets import QLabel   # 仅 make_badge 返回注解用
@@ -448,5 +449,6 @@ def log_panel_qss(variant: str = 'terminal') -> str:
 
 
 # 模块导入即生效（style_spec §2.9 / §7.4-9）
+patch_dynamic_style_lifetime()
 patch_round_menu_style_lifetime()
 patch_combo_box_menu()
