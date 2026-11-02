@@ -186,8 +186,8 @@ def _build_race_window(monkeypatch, settings_path):
                  'ProcessingController', 'InterpretationController',
                  'DeliveryController'):
         monkeypatch.setattr(mw, name, None)
-    # 文件树打桩：同 tests/test_main_window_titlebar.py 注释——offscreen 下
-    # qfluentwidgets TreeWidget 反复构造会触发库级 access violation。
+    # 此处只隔离方法库信号时序；真实资源树与本模块的共享进程生命周期
+    # 由 test_fluent_style_lifetime 中原始短序列回归验证。
     from PyQt6.QtWidgets import QWidget
 
     class _FileTreeStub(QWidget):

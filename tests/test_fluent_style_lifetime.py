@@ -24,6 +24,7 @@ from ui import theme_helpers  # noqa: F401 - install the production patches
 
 ROOT = Path(__file__).resolve().parents[1]
 ALIASES = (command_bar, line_edit, table_view, tree_view)
+WINDOWS_PRIVATE_STYLE = sys.platform == 'win32' and style_sheet.QT_VERSION >= (6, 8, 0)
 
 
 def _dispose(widget, qapp):
@@ -75,6 +76,9 @@ def test_real_fluent_widgets_own_factory_bases_until_native_deletion(qapp, monke
     shared, owner = qapp.style(), qapp.style().parent()
     widget = widget_type()
     try:
+        assert len(created) == (1 if WINDOWS_PRIVATE_STYLE else 0)
+        if WINDOWS_PRIVATE_STYLE:
+            assert created[0] is not None
         for style in created:
             if style is not None:
                 assert style.parent() is widget
@@ -104,8 +108,8 @@ def test_repeated_border_refresh_releases_replaced_private_styles(qapp, monkeypa
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         qapp.processEvents()
         bases = [style for style in created if style is not None]
-        if bases:
-            assert len(bases) == 4
+        assert len(bases) == (4 if WINDOWS_PRIVATE_STYLE else 0)
+        if WINDOWS_PRIVATE_STYLE:
             assert all(sip.isdeleted(style) for style in bases[:-1])
             assert not sip.isdeleted(bases[-1]) and bases[-1].parent() is widget
     finally:
@@ -140,7 +144,7 @@ def test_repeated_popup_refresh_keeps_only_the_current_dynamic_base(qapp, monkey
         qapp.processEvents()
         alive = [style for style in created if style is not None and not sip.isdeleted(style)]
         assert all(style.parent() in (menu, menu.view) for style in alive)
-        assert sum(style.parent() is menu.view for style in alive) <= 1
+        assert sum(style.parent() is menu.view for style in alive) == (1 if WINDOWS_PRIVATE_STYLE else 0)
     finally:
         _dispose(menu, qapp)
         _dispose(editor, qapp)
