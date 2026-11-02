@@ -70,6 +70,12 @@ def test_follow_switch_is_global_persistent_and_preserves_current_viewport(prefe
     np.testing.assert_allclose(first._image_item.levels, compute_display_levels(raw, p_low=2, p_high=98))
     restored = SettingsManager(prefs.settings.settings_file)
     assert restored.get('bscan_levels_follow_view') is False
+    fresh_host = QWidget(preferences[1])
+    fresh_page = SettingsPage(fresh_host)
+    fresh_page.load_settings(restored.get_all())
+    fresh_prefs = Preferences(restored, fresh_host, fresh_page)
+    reopened, _ = add_view((fresh_prefs, fresh_host, fresh_page))
+    assert not reopened.levels_follow_view()
     third, _ = add_view(preferences)
     assert not third.levels_follow_view()
     page._bscan_levels_follow_check.setChecked(True)
@@ -105,9 +111,33 @@ def test_global_follow_switch_does_not_reset_a_sources_display_gain(preferences)
     assert view.gain_mode() == 'tvg' and view._gain_db == 18 and view._gain_power == 1.6
 
 
+def test_follow_change_retains_zoom_on_another_views_temporary_aspect(preferences):
+    _, _, page = preferences
+    first, _ = add_view(preferences)
+    second, _ = add_view(preferences)
+    second.set_aspect_mode('square')
+    first.fit_to_data()
+    second._plot.vb.setRange(xRange=(10, 30), yRange=(10, 40), padding=0)
+    ranges = second._plot.vb.viewRange()
+    page._bscan_levels_follow_check.setChecked(False)
+    assert second._plot.vb.viewRange() == ranges and second.aspect_mode() == 'square'
+
+
+def test_empty_tab_state_applies_global_preferences_instead_of_previous_source_style(preferences):
+    _, _, page = preferences
+    view, _ = add_view(preferences)
+    page._bscan_cmap_combo.setCurrentText('gray')
+    view.set_colormap('seismic')
+    view.restore_display_state({})
+    assert view._cmap_name == 'gray'
+
+
 def test_global_follow_survives_real_source_switching_and_legacy_workspace_state(preferences):
+    from ui.main_window import MyGPRMainWindow
+
     prefs, host, page = preferences
     workspace = BScanWorkspace(host)
+    workspace.view_created.connect(lambda view: MyGPRMainWindow._wire_new_bscan_view(prefs, view))
     prefs._wire_bscan_preferences(host)
     raw = np.arange(24, dtype=np.float32).reshape(4, 6)
     data = SimpleNamespace(matrix=raw, vmin=0., vmax=24.)
@@ -120,6 +150,17 @@ def test_global_follow_survives_real_source_switching_and_legacy_workspace_state
     workspace.open_source('B')
     assert not workspace.primary_view().levels_follow_view()
     assert prefs.settings.get('bscan_levels_follow_view') is False
+    workspace.split_source('B', 'right', copy=True)
+    assert len(workspace.views()) == 2
+    assert all(not view.levels_follow_view() for view in workspace.views())
+    state = workspace.save_layout()
+    for group in state['root']['children']:
+        for tab in group['tabs']:
+            tab['state']['levels_follow_view'] = True
+            tab['state']['colormap'] = 'gray'
+    assert workspace.restore_layout(state)
+    assert all(not view.levels_follow_view() for view in workspace.views())
+    assert all(view._cmap_name == 'seismic' for view in workspace.views())
 
 
 def test_global_update_reaches_fullscreen_and_keeps_shared_levels_locked(preferences, qapp):
@@ -150,6 +191,18 @@ def test_settings_roundtrip_and_external_sync_do_not_emit_or_revert_new_preferen
         assert page.settings()['bscan_qc_marks_visible'] is True
     finally:
         page.deleteLater()
+
+
+def test_display_settings_shortcut_restores_fullscreen_before_navigation(preferences, qapp):
+    prefs, host, _ = preferences
+    view, _ = add_view(preferences)
+    view.enter_fullscreen()
+    qapp.processEvents()
+    view.sig_display_settings_requested.emit()
+    qapp.processEvents()
+    assert not view.is_fullscreen() and view._fullscreen is None
+    assert view.parentWidget() is host
+    assert prefs.opened == ['settingsInterface']
 
 
 def test_canvas_menu_keeps_viewing_actions_and_opens_the_settings_section(preferences, monkeypatch, qapp):

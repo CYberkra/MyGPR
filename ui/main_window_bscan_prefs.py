@@ -14,7 +14,7 @@
 调 ``_on_settings_bscan_changed``（另两处单点入口）。
 """
 
-from weakref import WeakSet
+from weakref import WeakSet, ref
 
 from PyQt6 import sip
 from PyQt6.QtCore import QTimer
@@ -89,7 +89,8 @@ class BScanPreferenceMixin:
         if view in self._bscan_preference_views:
             return
         self._bscan_preference_views.add(view)
-        view.sig_display_settings_requested.connect(self._open_bscan_settings)
+        view_ref = ref(view)
+        view.sig_display_settings_requested.connect(lambda: self._open_bscan_settings(view_ref()))
         view.sig_aspect_changed.connect(
             lambda mode: self._mirror_bscan_setting('bscan_aspect_mode', str(mode)))
         view.sig_x_axis_changed.connect(
@@ -109,10 +110,14 @@ class BScanPreferenceMixin:
         view.sig_gain_params_changed.connect(self._mirror_bscan_tvg_params)
         view.sig_qc_marks_visible_changed.connect(self._on_qc_marks_visible_changed)
 
-    def _open_bscan_settings(self) -> None:
+    def _open_bscan_settings(self, source=None) -> None:
+        if source is not None and not sip.isdeleted(source):
+            source.settle_fullscreen()
         self._goto_page('settingsInterface')
         page = self._page('settingsInterface')
         if page is not None:
+            page.window().raise_()
+            page.window().activateWindow()
             QTimer.singleShot(0, page.focus_bscan_settings)
 
     def _global_bscan_display_state(self) -> dict:
@@ -198,9 +203,10 @@ class BScanPreferenceMixin:
             if 'bscan_contrast' in changed:
                 view.set_contrast(values.get('bscan_contrast', 1.0))
             # Changing a global checkbox must retain wheel/rectangle zoom.
-            if view.aspect_mode() != values['bscan_aspect_mode']:
+            if 'bscan_aspect_mode' in changed and view.aspect_mode() != values['bscan_aspect_mode']:
                 view.set_aspect_mode(values['bscan_aspect_mode'], notify=False)
-            if (view.x_axis_mode(), view.y_axis_mode()) != (values['bscan_x_axis'], values['bscan_y_axis']):
+            if ({'bscan_x_axis', 'bscan_y_axis'} & changed
+                    and (view.x_axis_mode(), view.y_axis_mode()) != (values['bscan_x_axis'], values['bscan_y_axis'])):
                 view.set_axis_modes(values['bscan_x_axis'], values['bscan_y_axis'], notify=False)
             if 'bscan_colormap' in changed:
                 view.set_colormap(str(values.get('bscan_colormap', constants.DEFAULT_COLORMAP)))

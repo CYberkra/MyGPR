@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
     QTabWidget, QTreeWidget, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
-    CaptionLabel, CheckBox, ComboBox, LineEdit, MessageBox,
+    CaptionLabel, CheckBox, LineEdit, MessageBox,
     PrimaryPushButton, ProgressBar, PushButton, TransparentToolButton,
     isDarkTheme,
 )
@@ -202,10 +202,10 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
         self._tools_panel.addTab(scroll, '处理')
         display = QWidget()
         dl = QVBoxLayout(display)
-        self._display_cmap = ComboBox(display)
-        self._display_cmap.addItems(list(constants.COLORMAPS))
-        self._display_cmap.setToolTip('仅改变当前视图配色，不修改数据或处理步骤')
-        dl.addLayout(make_form_row('色图', self._display_cmap, parent=display))
+        self._display_settings_btn = PushButton('全局显示设置…', display)
+        self._display_settings_btn.clicked.connect(
+            lambda: self._workspace.primary_view().sig_display_settings_requested.emit())
+        dl.addWidget(self._display_settings_btn)
         fit = PushButton('适应当前视图', display)
         fit.setToolTip('回到全览；右键可框选、调整时窗或导出，显示偏好集中在设置页。')
         fit.clicked.connect(lambda: self._workspace.primary_view().fit_to_data())
@@ -311,7 +311,6 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
         self._lineage_more_btn.clicked.connect(self._lineage_menu_binding.show_keyboard)
         self._history_more_btn.clicked.connect(self._history_menu_binding.show_keyboard)
         self._draft_menu_btn.clicked.connect(self._show_draft_menu)
-        self._display_cmap.currentTextChanged.connect(self._set_display_cmap)
         self._completion_btn.clicked.connect(self.show_latest_result)
         self._autotune_btn.clicked.connect(self._on_autotune_clicked)
         self._adopt_params_btn.clicked.connect(self._on_adopt_params)
@@ -882,11 +881,6 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
 
     def toggle_side_panels(self):
         self._tools_btn.setChecked(not self._tools_btn.isChecked())
-
-    def _set_display_cmap(self, name):
-        if name:
-            self._workspace.primary_view().set_colormap(str(name))
-
 
     def set_colorbar_pref(self, visible):
         for view in self._workspace.all_views():

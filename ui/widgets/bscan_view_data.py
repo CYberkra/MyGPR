@@ -304,6 +304,8 @@ class BScanViewDataMixin:
 
     def restore_display_state(self, state: dict, *, viewport: bool = False) -> None:
         """Restore a previously exported state; malformed preferences never block data."""
+        if not viewport:
+            state = {**state, **self._global_display_preferences}
         if not state:
             return
         if viewport:
@@ -321,7 +323,6 @@ class BScanViewDataMixin:
             return
         # A line/tab snapshot cannot undo application-wide display preferences.
         # Standalone views retain their existing state roundtrip behavior.
-        state = {**state, **self._global_display_preferences}
         try:
             self.set_colormap(str(state.get('colormap', self._cmap_name)))
             self.set_display_levels(*state.get('levels', self.display_levels()))
