@@ -17,6 +17,8 @@ from ui.desktop_backend_facade import (
     build_preview_bundle,
     read_full_resolution_bscan,
     resample_trace_vector,
+    trace_quality_preview_mask,
+    trace_local_change_preview_mask,
     time_to_depth_axis,
 )
 from ui.controllers.backend_controller import friendly_error_message, run_command
@@ -61,6 +63,8 @@ def _preview_sample_axis(metadata, elevation, depth, time):
         return elevation, '海拔 (m)' if elevation is not None else ''
     if metadata.get('is_depth'):
         return depth, '深度 (m)' if depth is not None else ''
+    if metadata.get('time_axis_status') == 'unknown':
+        return None, ''
     if time is not None:
         return time, '时间 (ns)'
     return depth, '深度 (m)' if depth is not None else ''
@@ -88,6 +92,7 @@ class ProjectController(QObject):
     preflight_ready = pyqtSignal(object)         # ImportPreflight
     preflight_failed = pyqtSignal(str)           # 导入预检失败消息
     quality_reports_ready = pyqtSignal(list)
+    project_metadata_ready = pyqtSignal(object)
     preview_invalidated = pyqtSignal(str)        # 预览中的成果已被删除（携带成果 id）
     spatial_tracks_ready = pyqtSignal(list)      # list[SpatialTrack]
     depth_preview_ready = pyqtSignal(object, list, float, int)  # payload, line_ids, cell_size_m, generation
@@ -407,6 +412,7 @@ class ProjectController(QObject):
         metadata: Any = None,
         source_trace_ids: Any = None,
         trace_qc_bad_mask: Any = None,
+        trace_qc_local_mask: Any = None,
     ) -> Any:
         """从 read_window 结果构建预览 bundle。
 
@@ -429,6 +435,7 @@ class ProjectController(QObject):
         is_elevation = bool(metadata.get('is_elevation'))
         ids = _preview_trace_values(source_trace_ids, trace_indices, total_traces, integer_only=True)
         qc_mask = _preview_trace_values(trace_qc_bad_mask, trace_indices, total_traces)
+        local_mask = _preview_trace_values(trace_qc_local_mask, trace_indices, total_traces)
         def axis(name, indices, size):
             values = np.asarray(metadata.get(name, []), dtype=np.float64)
             if values.ndim != 1 or values.size != size or not np.all(np.isfinite(values)):
@@ -468,6 +475,8 @@ class ProjectController(QObject):
             depth_axis_m=depth_axis_m,
         )
         sample_axis, sample_axis_label = _preview_sample_axis(metadata, elevation_grid, depth_axis_m, time_axis_ns)
+        if metadata.get('time_axis_status') == 'unknown' and not (metadata.get('is_depth') or is_elevation):
+            depth_axis_m = None
         return dataclasses.replace(
             bundle, trace_axis_m=distance_axis_m,
             sample_axis=sample_axis, sample_axis_label=sample_axis_label,
@@ -477,6 +486,7 @@ class ProjectController(QObject):
             sample_indices=sample_indices if sample_indices is not None else bundle.sample_indices,
             source_trace_ids=ids,
             trace_qc_bad_mask=qc_mask,
+            trace_qc_local_mask=local_mask,
             view_reversed=bool(metadata.get('view_reversed', False)),
         )
 
@@ -496,7 +506,8 @@ class ProjectController(QObject):
             name="mygpr-import-preflight",
         )
 
-    def import_line(self, source: str, line_id: str, name: str, dielectric: float) -> str | None:
+    def import_line(self, source: str, line_id: str, name: str, dielectric: float, *,
+                    time_window_ns: float | None = None, trace_interval_m: float | None = None) -> str | None:
         backend = self._backend()
         bridge = self._job_bridge()
         project_id = self._project_id_or_warn()
@@ -510,6 +521,8 @@ class ProjectController(QObject):
                 line_id=line_id,
                 name=str(name or line_id),
                 dielectric_constant=float(dielectric),
+                **({} if time_window_ns is None and trace_interval_m is None else {
+                    'time_window_ns': time_window_ns, 'trace_interval_m': trace_interval_m}),
             )
         except Exception as exc:  # noqa: BLE001
             _LOGGER.exception("测线导入提交失败")
@@ -519,7 +532,7 @@ class ProjectController(QObject):
         bridge.watch(job_id, title=f"导入测线 {line_id}")
         return job_id
 
-    def import_lines(self, sources: list[str]) -> str | None:
+    def import_lines(self, sources: list[str], dielectric: float = 9.0) -> str | None:
         backend = self._backend()
         bridge = self._job_bridge()
         project_id = self._project_id_or_warn()
@@ -527,7 +540,7 @@ class ProjectController(QObject):
         if backend is None or bridge is None or project_id is None or not selected:
             return None
         try:
-            job_id = backend.submit_batch_line_import(project_id, selected)
+            job_id = backend.submit_batch_line_import(project_id, selected, dielectric_constant=float(dielectric))
         except Exception as exc:  # noqa: BLE001
             self.log_message.emit(f"批量导入提交失败：{friendly_error_message(exc)}")
             return None
@@ -539,6 +552,11 @@ class ProjectController(QObject):
         project_id = self._project_id_or_warn()
         if project_id:
             run_command(_QualityReportsCommand(self, project_id), name="mygpr-quality-reports")
+
+    def refresh_project_metadata(self) -> None:
+        project_id = self._project_id_or_warn()
+        if project_id:
+            run_command(_ProjectMetadataCommand(self, project_id), name="mygpr-project-metadata")
 
     def check_quality(self, line_id: str = "") -> str | None:
         backend = self._backend()
@@ -625,6 +643,9 @@ class ProjectController(QObject):
             except TypeError:
                 pass
             if success and self.current_project_id == project_id:
+                diagnostics = getattr(result, 'diagnostics', {}) or {}
+                for warning in diagnostics.get('warnings', []) or []:
+                    self.log_message.emit(f"传感器同步 {line_id} 警告：{warning}")
                 self.sensor_sync_result_ready.emit(line_id, result)
             elif not success:
                 self.log_message.emit(f"传感器同步失败：{message}")
@@ -936,6 +957,25 @@ class _DielectricCommand:
             self._controller.log_message.emit(f"速度模型已写回：{self._line_id}（εr={self._dielectric:g}）")
 
 
+class _ProjectMetadataCommand(_ProjectReadCommand):
+    __slots__ = ("_controller", "_project_id")
+
+    def __init__(self, controller, project_id):
+        super().__init__(controller)
+        self._controller, self._project_id = controller, project_id
+
+    def execute(self):
+        backend = self._controller._backend()
+        if backend is None:
+            return
+        try:
+            metadata = backend.maintenance.get_metadata(self._project_id)
+        except Exception as exc:  # noqa: BLE001
+            self._controller.log_message.emit(f"读取项目元数据失败：{friendly_error_message(exc)}")
+        else:
+            self._publish("project_metadata_ready", metadata)
+
+
 class _QualityReportsCommand(_ProjectReadCommand):
     __slots__ = ("_controller", "_project_id")
 
@@ -1071,10 +1111,17 @@ class _PreviewLineCommand(_ProjectReadCommand):
                 total_samples=info.shape[0], total_traces=info.shape[1],
                 trace_elevation_m=elevation, metadata=getattr(info, "metadata", None),
                 source_trace_ids=trace_metadata.get('trace_id'),
-                trace_qc_bad_mask=trace_metadata.get('trace_qc_bad_mask'),
+                trace_qc_bad_mask=trace_quality_preview_mask(trace_metadata, info.shape[1]),
+                trace_qc_local_mask=trace_local_change_preview_mask(trace_metadata, info.shape[1]),
                 dielectric_constant=float(getattr(
                     info, 'dielectric_constant', 0.0) or 0.0),
             )
+            # These are source-row annotations, not current artifact columns.
+            # Only the normalized raw matrix has an unchanged source-row map.
+            metadata = dict(getattr(info, 'metadata', None) or {})
+            while isinstance(metadata.get('metadata'), dict):
+                metadata = metadata['metadata']
+            bundle = dataclasses.replace(bundle, acquisition_markers=tuple(metadata.get('acquisition_markers', ())))
         except Exception as exc:  # noqa: BLE001
             if not self._context_is_current() or (
                     not self._reference_request and c._preview_generation != self._generation):
@@ -1186,7 +1233,8 @@ class _PreviewArtifactCommand:
                 total_samples=info.shape[0], total_traces=info.shape[1],
                 trace_elevation_m=elevation, metadata=artifact_metadata,
                 source_trace_ids=trace_metadata.get('trace_id'),
-                trace_qc_bad_mask=trace_metadata.get('trace_qc_bad_mask'),
+                trace_qc_bad_mask=trace_quality_preview_mask(trace_metadata, info.shape[1]),
+                trace_qc_local_mask=trace_local_change_preview_mask(trace_metadata, info.shape[1]),
                 dielectric_constant=float(getattr(
                     info, 'dielectric_constant', 0.0) or 0.0),
             )
@@ -1430,6 +1478,13 @@ class _LineSensorSummaryCommand(_ProjectReadCommand):
             report = SensorCompletenessReport(total=int(total or 0), rows=(), error=error)
         self._publish('line_sensor_summary_ready', self._line_id, report.as_text())
         self._publish('line_sensor_report_ready', self._line_id, report)
+        try:
+            reader = getattr(backend.projects, 'read_sensor_sync_result', None)
+            if callable(reader):
+                result = reader(self._project_id, self._line_id)
+                self._publish('sensor_sync_result_ready', self._line_id, result)
+        except Exception as exc:
+            _LOGGER.warning('Sensor sync diagnostics unavailable for %s: %s', self._line_id, exc)
 
 
 class _ArtifactDescendantsCommand(_ProjectReadCommand):

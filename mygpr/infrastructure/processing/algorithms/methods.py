@@ -75,6 +75,9 @@ class NativeAlgorithm:
     relative_cost: str = "low"
     file_function: GlobalFileFunction | None = None
     resource_estimator: ResourceEstimator | None = None
+    # Only for explicitly bounded file_function implementations. Ndarray
+    # estimates continue to include full input/output allocations.
+    file_workspace_bytes: int | None = None
 
     @property
     def supports_chunking(self) -> bool:
@@ -105,6 +108,43 @@ def _schema(**items: Any) -> dict[str, Any]:
 
 
 NATIVE_ALGORITHMS: dict[str, NativeAlgorithm] = {
+    "gaussian_smoothing": NativeAlgorithm(
+        "gaussian_smoothing", "Gaussian smoothing", "denoise",
+        _lazy(f"{_ALG}.image_denoising", "method_gaussian"), "global",
+        implementation_version="native-image-denoise-1.0",
+        file_function=_lazy(f"{_ALG}.image_denoising", "file_gaussian"),
+        file_workspace_bytes=16 * 1024**2,
+        memory_multiplier=4.0,
+        parameter_schema=_schema(
+            sigma_samples={"type": "float", "default": 0.0, "min": 0.0, "max": 32.0, "step": 0.1,
+                           "label": "时间方向 σ（采样点）", "tooltip": "0 表示不平滑时间方向，避免展宽雷达子波。"},
+            sigma_traces={"type": "float", "default": 1.0, "min": 0.0, "max": 32.0, "step": 0.1,
+                          "label": "道间方向 σ（道）", "tooltip": "按道序号平滑，不代表固定米数；大值会模糊细节。"},
+        ),
+    ),
+    "non_local_means": NativeAlgorithm(
+        "non_local_means", "Non-local means denoising", "denoise",
+        _lazy(f"{_ALG}.image_denoising", "method_nlm"), "global",
+        implementation_version="native-image-denoise-1.0",
+        file_function=_lazy(f"{_ALG}.image_denoising", "file_nlm"),
+        file_workspace_bytes=16 * 1024**2,
+        memory_multiplier=8.0, relative_cost="high",
+        parameter_schema=_schema(
+            h_mode={"type": "str", "default": "relative_rms", "label": "强度单位",
+                    "choices": ("relative_rms", "absolute"),
+                    "choice_labels": {"relative_rms": "全局 RMS 倍数", "absolute": "原始振幅单位"}},
+            h={"type": "float", "default": 0.6, "min": 0.0, "label": "滤波强度 h",
+               "tooltip": "越大越平滑，也越可能削弱弱反射；0 为不处理。全局 RMS 模式随输入幅值尺度变化。"},
+            patch_samples={"type": "int", "default": 3, "min": 1, "max": 15, "step": 2,
+                           "label": "相似块高度（奇数采样点）"},
+            patch_traces={"type": "int", "default": 5, "min": 1, "max": 15, "step": 2,
+                          "label": "相似块宽度（奇数道）"},
+            search_samples={"type": "int", "default": 3, "min": 0, "max": 15,
+                            "label": "时间搜索半径（采样点）"},
+            search_traces={"type": "int", "default": 5, "min": 0, "max": 15,
+                           "label": "道间搜索半径（道）"},
+        ),
+    ),
     "time_cut": NativeAlgorithm(
         "time_cut", "Time-window crop", "preprocess", _lazy(f"{_ALG}.extended", "native_time_cut"), "loaded_global",
         implementation_version="native-extended-1.0",
@@ -122,6 +162,22 @@ NATIVE_ALGORITHMS: dict[str, NativeAlgorithm] = {
         implementation_version="native-extended-1.0",
         parameter_schema=_schema(mode={"type": "str", "default": "mark"}, empty_rms_threshold={"type": "float", "default": 0.0}, spike_zscore={"type": "float", "default": 6.0, "min": 0.0}, manual_trace_indices={"type": "str", "default": ""}),
         memory_multiplier=3.0, temporary_multiplier=1.0, relative_cost="low",
+    ),
+    "short_trace_repair": NativeAlgorithm(
+        "short_trace_repair", "Short anomalous trace repair", "preprocess", _lazy(f"{_ALG}.extended", "native_short_trace_repair"), "loaded_global",
+        implementation_version="native-short-trace-2.1",
+        parameter_schema=_schema(
+            mode={"type": "str", "default": "mark", "label": "处理模式", "choices": ("mark", "interpolate"),
+                  "choice_labels": {"mark": "仅标记", "interpolate": "插补修复"},
+                  "tooltip": "仅标记保留原始波形；插补修复替换短异常段，可能覆盖局部真实反射。"},
+            window_mode={"type": "str", "default": "auto", "label": "时窗方案", "choices": ("auto", "manual", "full"),
+                         "choice_labels": {"auto": "自动分窗", "manual": "手动时窗", "full": "旧版全窗（对照）"},
+                         "tooltip": "自动按有效样点三等分；全部窗异常才列跨窗候选，部分窗变化不插补。跨窗也不证明采集坏道。"},
+            window_traces={"type": "int", "default": 31, "min": 3, "max": 301, "label": "局部参考道数（奇数）"},
+            robust_z={"type": "float", "default": 8.0, "min": 0.1, "max": 100.0, "label": "MAD阈值倍数"},
+            max_run_traces={"type": "int", "default": 4, "min": 1, "max": 4, "label": "最长插补段（道）"},
+            time_windows_ns={"type": "str", "default": "", "label": "手动时窗 ns（仅手动）", "tooltip": "仅手动方案生效，如0:100;100:200;250:850。自动方案无需填写；窗须独立，单窗只作局部审阅。"},
+        ), memory_multiplier=4.0, temporary_multiplier=1.0, relative_cost="medium",
     ),
     "energy_decay_gain": NativeAlgorithm(
         "energy_decay_gain", "Robust energy-decay gain", "gain", _lazy(f"{_ALG}.extended", "native_energy_decay_gain"), "loaded_global",
@@ -171,6 +227,16 @@ NATIVE_ALGORITHMS: dict[str, NativeAlgorithm] = {
     "compensatingGain": NativeAlgorithm(
         "compensatingGain", "Manual gain compensation", "gain", _lazy(f"{_ALG}.basic", "method_compensating_gain"), "columns",
         auto_tune_family="gain", parameter_schema=_schema(gain_min={"type": "float", "default": 1.0}, gain_max={"type": "float", "default": 6.0}),
+    ),
+    "manual_gain": NativeAlgorithm(
+        "manual_gain", "Manual curve gain", "gain",
+        _lazy(f"{_ALG}.manual_gain", "method_manual_gain"), "columns",
+        implementation_version="native-manual-gain-1.0",
+        memory_multiplier=8.0,
+        parameter_schema=_schema(nodes={
+            "type": "str", "label": "增益曲线", "editor": "gain_curve",
+            "default": '[{"tau":0.0,"db":0.0},{"tau":0.25,"db":0.0},{"tau":0.5,"db":0.0},{"tau":0.75,"db":0.0},{"tau":1.0,"db":0.0}]',
+        }),
     ),
     "dewow": NativeAlgorithm(
         "dewow", "Low-frequency drift correction", "baseline", _lazy(f"{_ALG}.basic", "method_dewow_native"), "columns",
@@ -333,8 +399,8 @@ NATIVE_ALGORITHMS: dict[str, NativeAlgorithm] = {
             topo_cor={"type": "int", "default": 0},
             hei_cor={"type": "int", "default": 0},
             backend={"type": "str", "default": "auto"},
-            length_m={"type": "float", "default": 0.0, "min": 0.0},
-            time_window_ns={"type": "float", "default": 0.0, "min": 0.0},
+            length_m={"type": "float", "min": 0.0},
+            time_window_ns={"type": "float", "min": 0.0},
             allow_gpu_runtime_fallback={"type": "bool", "default": True},
         ),
         memory_multiplier=12.0, temporary_multiplier=2.0, relative_cost="very_high",
@@ -349,13 +415,13 @@ NATIVE_ALGORITHMS: dict[str, NativeAlgorithm] = {
             dt_ns={"type": "float", "default": 0.1, "min": 1.0e-9},
             length_m={"type": "float", "default": 0.0, "min": 0.0},
             dx_m={"type": "float", "default": 0.0, "min": 0.0},
-            dx={"type": "float", "default": 0.0, "min": 0.0},
-            v={"type": "float", "default": 0.10, "min": 0.001},
+            dx={"type": "float", "min": 0.0, "visible": False},
+            v={"type": "float", "min": 0.001, "visible": False},
             velocity_m_per_ns={"type": "float", "default": 0.10, "min": 0.001},
             depth_m={"type": "float", "default": 20.0, "min": 0.01},
-            depth={"type": "float", "default": 20.0, "min": 0.01},
+            depth={"type": "float", "min": 0.01, "visible": False},
             dz_m={"type": "float", "default": 0.0, "min": 0.0},
-            dz={"type": "float", "default": 0.0, "min": 0.0},
+            dz={"type": "float", "min": 0.0, "visible": False},
             cfl_limit={"type": "float", "default": 0.65, "min": 0.20, "max": 0.70},
             max_grid_elements={"type": "int", "default": 40_000_000, "min": 1},
             max_cell_updates={"type": "int", "default": 1_500_000_000, "min": 1},
@@ -406,3 +472,52 @@ NATIVE_ALGORITHMS: dict[str, NativeAlgorithm] = {
     ),
 
 }
+
+
+AXIS_TRANSFORM_BY_METHOD = {
+    "gaussian_smoothing": "identity",
+    "non_local_means": "identity",
+    "time_cut": "sample_crop",
+    "trace_cut": "trace_crop",
+    "trace_qc": "trace_crop",
+    "short_trace_repair": "identity",
+    "energy_decay_gain": "identity",
+    "amplitude_scale": "identity",
+    "median_background_2D": "identity",
+    "wavelet_2d": "identity",
+    "hilbert_envelope": "identity",
+    "ccbs": "identity",
+    "time_to_depth": "time_to_depth",
+    "compensatingGain": "identity",
+    "manual_gain": "identity",
+    "dewow": "identity",
+    "set_zero_time": "identity",
+    "agcGain": "identity",
+    "sec_gain": "identity",
+    "subtracting_average_2D": "identity",
+    "running_average_2D": "identity",
+    "sliding_avg": "identity",
+    "frequency_filter_1d": "identity",
+    "trace_median_filter": "identity",
+    "trace_savgol_filter": "identity",
+    "svd_bg": "identity",
+    "svd_subspace": "identity",
+    "fk_filter": "identity",
+    "stolt_migration": "migration",
+    "motion_compensation_height": "identity",
+    "motion_compensation_speed": "trace_resample",
+    "trajectory_smoothing": "identity",
+    "motion_compensation_attitude": "identity",
+    "motion_compensation_vibration": "identity",
+    "motion_compensation_v2": "trace_resample",
+    "kirchhoff_migration": "migration",
+    "rtm_migration": "migration",
+    "hankel_svd": "identity",
+    "rpca_background": "identity",
+    "mixed_phase_deconvolution": "identity",
+    "inverse_q": "identity",
+}
+
+_missing_axis_transforms = set(NATIVE_ALGORITHMS) - set(AXIS_TRANSFORM_BY_METHOD)
+if _missing_axis_transforms:
+    raise RuntimeError(f"Missing axis transforms: {sorted(_missing_axis_transforms)}")

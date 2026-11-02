@@ -24,6 +24,8 @@ from pathlib import Path
 
 import numpy as np
 
+from mygpr.infrastructure.processing.algorithms.methods import NATIVE_ALGORITHMS
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -311,6 +313,7 @@ TASKS = [
     # --- 零时/裁剪族 (zero_time fixture) ---
     ("zero_time", "set_zero_time", {"new_zero_time": 18 * 3.665, "time_step_s": 3.665e-9}, "zero"),
     ("zero_time", "time_cut", {"mode": "remove_below", "time_end_ns": 500.0, "time_window_ns": 700.0}, "zero"),
+    ("zero_time", "trace_cut", {"trace_start": 5, "trace_end": 70}, "zero"),
     ("zero_time", "dewow", {}, "zero"),
     # --- 背景抑制族 (drift fixture) ---
     ("drift", "subtracting_average_2D", {"ntraces": 501}, "background"),
@@ -353,6 +356,9 @@ TASKS = [
     ("migration", "kirchhoff_migration", "KIRCHHOFF_SENSIBLE", "migration"),
     ("migration", "rtm_migration", "RTM_PARAMS", "migration"),
 ]
+
+if "short_trace_repair" in NATIVE_ALGORITHMS:
+    TASKS.append(("qc_outliers", "short_trace_repair", {}, "qc"))
 
 FAMILIES = {}
 for _scene, _method, _params, _family in TASKS:
@@ -482,6 +488,18 @@ def _score_task(scene, method, before, after, out, meta, res_meta, warnings) -> 
             comps.append(_clamp01(1.0 - math.sqrt(upper_err / scale) * 5.0))
         detail["rows_after"] = rows_after
 
+    if method == "trace_cut":
+        start = int(res_meta.get("trace_start_index", 0))
+        stop = int(res_meta.get("trace_end_index", before.shape[1]))
+        expected = before[:, start:stop]
+        if after.shape == expected.shape:
+            err = float(np.mean((after - expected) ** 2))
+            scale = float(np.mean(expected**2)) + 1e-12
+            comps.append(_clamp01(1.0 - math.sqrt(err / scale) * 10.0))
+        else:
+            comps.append(0.0)
+        detail.update({"traces_after": int(after.shape[1]), "expected_traces": int(expected.shape[1])})
+
     if method == "dewow":
         q = _quality_snapshot(before, after, meta)
         lfe = q.get("low_freq_energy_reduction") or 0.0
@@ -578,13 +596,14 @@ def _score_task(scene, method, before, after, out, meta, res_meta, warnings) -> 
             comps.append(_clamp01(1.0 - shape_err * 2.0))
             detail.update({"snr_before": snr_b, "snr_after": snr_a})
 
-    if method == "trace_qc":
+    if method in {"trace_qc", "short_trace_repair"}:
         truth = set(meta.get("injected_bad_traces", []))
-        mask = res_meta.get("trace_qc_bad_mask")
+        mask_key = "trace_qc_bad_mask" if method == "trace_qc" else "short_trace_candidate_mask"
+        mask = res_meta.get(mask_key)
         if mask is None:
             updates = res_meta.get("trace_metadata_updates")
             if isinstance(updates, dict):
-                mask = updates.get("trace_qc_bad_mask")
+                mask = updates.get(mask_key)
         if mask is None:
             comps.append(0.0)
             detail["qc_mask_missing"] = True

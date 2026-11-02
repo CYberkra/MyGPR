@@ -131,6 +131,24 @@ def test_closed_terrain_view_cannot_queue_new_work(qapp, monkeypatch):
     view.deleteLater()
 
 
+def test_empty_overlay_is_above_lazily_created_3d_canvas(qapp, monkeypatch):
+    from PyQt6.QtWidgets import QWidget
+    from ui.widgets.trajectory_3d_view import Trajectory3DView
+
+    view = Trajectory3DView()
+    canvas = QWidget(view)
+    view.layout().addWidget(canvas)
+    view._gl_view = canvas
+    monkeypatch.setattr(view, '_clear_terrain', lambda: None)
+    view._empty_overlay.hide()
+    view._clear_tracks_content()
+    siblings = view.children()
+    assert siblings.index(view._empty_overlay) > siblings.index(canvas)
+    view._gl_view = None
+    view.shutdown()
+    view.deleteLater()
+
+
 def test_terrain_shutdown_drains_active_worker_before_native_deletion(tmp_path):
     pytest.importorskip('PyQt6')
     program = '''

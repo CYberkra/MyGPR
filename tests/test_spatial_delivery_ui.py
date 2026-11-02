@@ -37,3 +37,29 @@ def test_delivery_spatial_menu_enables_real_actions(qapp):
     menu.close()
     page.close()
     page.deleteLater()
+
+
+def test_delivery_shows_spatial_warnings_and_missing_surface(qapp):
+    from ui.pages.delivery_page import DeliveryPage
+
+    page = DeliveryPage()
+    page.set_spatial_results([NS(result_id='R1', name='单线', line_ids=('L01',),
+        created_at='2026-10-26', status='generated_with_warnings',
+        files={'profiles_csv': 'profiles.csv', 'interfaces_geojson': 'interfaces.geojson'},
+        summary={'preflight_warnings': ['测线数量不足，连续界面曲面不会生成。']})])
+    status = page._spatial_table.item(0, 3)
+    assert status is not None
+    assert '警告' in status.text()
+    assert '曲面' in status.text()
+    assert '测线数量不足' in status.toolTip()
+
+
+def test_delivery_distinguishes_control_points_from_surface(qapp):
+    from ui.pages.delivery_page import DeliveryPage
+    page = DeliveryPage()
+    page.set_spatial_results([NS(result_id='R1', name='点集', line_ids=('L01',),
+        files={'surface_control_points_geojson': 'surface_control_points.geojson'},
+        options={'surface_generated': False, 'surface_control_points_generated': True})])
+    status = page._spatial_table.item(0, 3).text()
+    assert '控制点' in status and '未生成曲面' in status
+    page.close()

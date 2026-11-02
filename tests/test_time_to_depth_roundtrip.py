@@ -1,8 +1,38 @@
 import numpy as np
 import pytest
+import csv
+from pathlib import Path
 from core.gui_rendering import bundle_from_dataset
 from mygpr.domain.processing.models import PipelineDefinition, PipelineStep
 from mygpr.interfaces.backend import MyGPRBackend
+
+
+def test_processed_annotation_exports_its_own_axes(tmp_path):
+    from mygpr.domain.interpretation.models import InterfaceAnnotation, InterpretationPoint
+    backend = MyGPRBackend.create_default(max_workers=1)
+    try:
+        project = backend.projects.create_project(tmp_path / 'project', name='annotation axes')
+        pid = project.project_id
+        backend.projects.save_line_dataset(pid, 'L01', np.zeros((40, 5), np.float32), length_m=10, time_window_ns=400)
+        cut = backend.project_processing.execute_pipeline(pid, 'L01', PipelineDefinition(steps=(
+            PipelineStep('time_cut', {'mode': 'keep_range', 'time_start_ns': 100, 'time_end_ns': 300}),)))
+        artifact = backend.projects.read_artifact_dataset(pid, 'L01', cut.artifact_id)
+        annotation = InterfaceAnnotation(annotation_id='B-L01', line_id='L01', name='interface', version=1,
+            status='confirmed', processing_result=cut.artifact_id,
+            points=(InterpretationPoint(0, 0), InterpretationPoint(4, 0)))
+        backend.projects.save_interface_annotation(pid, annotation)
+        with (Path(project.root_path) / 'spatial/L01_basal_interface_xy.csv').open(encoding='utf-8-sig', newline='') as fh:
+            row = next(csv.DictReader(fh))
+        assert float(row['time_ns']) == pytest.approx(float(artifact.header_info['time_axis_ns'][0]), abs=1e-5)
+        labels = backend.projects._session(pid)._store.load_basal_interface_labels('L01')
+        assert float(labels['time_gt_ns'][0]) == pytest.approx(float(artifact.header_info['time_axis_ns'][0]), abs=1e-5)
+        assert labels['soft_mask_gt'].shape == artifact.data.shape
+        raw_session = backend.interpretation_edit.open_session(pid, 'L01')
+        assert raw_session.annotation.processing_result == ''
+        assert not raw_session.annotation.points
+        assert raw_session.audit['source_changed'] is True
+    finally:
+        backend.shutdown()
 
 
 @pytest.mark.parametrize('crop', [False, True])

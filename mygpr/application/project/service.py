@@ -57,7 +57,28 @@ class ProjectLease:
         self.release()
 
 
-class ProjectService(ProjectIdentityServiceMixin):
+class ProjectAcquisitionServiceMixin:
+    """Project operations for importing data and reading synchronization results."""
+
+    def import_line_source(
+        self, project_id: str, line_id: str, source: str | Path, *, name: str = "",
+        copy_into_project: bool = True, dielectric_constant: float = 9.0,
+        context: ExecutionContext | None = None, time_window_ns: float | None = None,
+        trace_interval_m: float | None = None,
+    ) -> ProjectLine:
+        axis_options = {} if time_window_ns is None and trace_interval_m is None else {
+            'time_window_ns': time_window_ns, 'trace_interval_m': trace_interval_m}
+        return self._session(project_id).import_line_source(
+            line_id, Path(source).expanduser().resolve(), name=name or line_id,
+            copy_into_project=bool(copy_into_project), dielectric_constant=float(dielectric_constant),
+            context=context or ExecutionContext.null(), **axis_options,
+        )
+
+    def read_sensor_sync_result(self, project_id: str, line_id: str):
+        return self._session(project_id).read_sensor_sync_result(line_id)
+
+
+class ProjectService(ProjectAcquisitionServiceMixin, ProjectIdentityServiceMixin):
     """Own open project sessions without exposing storage implementation objects."""
 
     def __init__(self, repository: ProjectRepositoryPort) -> None:
@@ -211,26 +232,6 @@ class ProjectService(ProjectIdentityServiceMixin):
 
     def get_dataset_info(self, project_id: str, line_id: str) -> LineDatasetInfo:
         return self._session(project_id).get_dataset_info(line_id)
-
-    def import_line_source(
-        self,
-        project_id: str,
-        line_id: str,
-        source: str | Path,
-        *,
-        name: str = "",
-        copy_into_project: bool = True,
-        dielectric_constant: float = 9.0,
-        context: ExecutionContext | None = None,
-    ) -> ProjectLine:
-        return self._session(project_id).import_line_source(
-            line_id,
-            Path(source).expanduser().resolve(),
-            name=name or line_id,
-            copy_into_project=bool(copy_into_project),
-            dielectric_constant=float(dielectric_constant),
-            context=context or ExecutionContext.null(),
-        )
 
     def synchronize_line_sensors(
         self,

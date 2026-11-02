@@ -187,8 +187,8 @@ def test_preview_failure_stays_on_its_source_and_retry_is_available(page):
     assert page._sources['artifact:A']['error'] == '文件无法读取'
     assert 'artifact:A' not in page._workspace._pending
     assert not page._run_btn.isEnabled()
-    assert page._preview_retry_btn.isVisibleTo(page)
-    page._preview_retry_btn.click()
+    assert page._workspace._group().status.retry.isVisibleTo(page)
+    page._workspace._group().status.retry.click()
     assert requested == ['A', 'A']
     assert page.current_pipeline()['input_artifact_id'] == 'A'
     page.set_artifact_bundle('A', bundle())
@@ -303,7 +303,7 @@ def test_raw_revision_isolates_old_draft_and_matching_preview_errors_retry(page)
     retries = []
     page.original_preview_requested.connect(lambda: retries.append(True))
     page.set_preview_failure('', 'L01', '', 'raw read failure')
-    page._preview_retry_btn.click()
+    page._workspace._group().status.retry.click()
     assert retries == [True]
     assert page._workspace.active_key() == 'original'
 
@@ -368,11 +368,10 @@ def test_replace_run_draft_can_cancel_then_restore_the_exact_old_draft(page, mon
     assert page.current_pipeline()['result_name'] == 'my pending result'
 
 
-def test_workspace_split_updates_layout_label_without_rearranging_views(page):
+def test_workspace_split_uses_group_actions_without_top_layout_combo(page):
+    assert not hasattr(page, '_layout_combo')
     page._workspace.split_source('original', 'right', copy=True)
-    assert page._layout_combo.currentText() == '左右对照'
     page._workspace.split_source('original', 'bottom', copy=True)
-    assert page._layout_combo.currentText() == '自定义布局'
     assert len(page._workspace.group_ids()) == 3
 
 

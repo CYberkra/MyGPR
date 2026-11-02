@@ -104,6 +104,8 @@ class AcquisitionService:
         copy_into_project: bool = True,
         dielectric_constant: float = 9.0,
         context: ExecutionContext | None = None,
+        time_window_ns: float | None = None,
+        trace_interval_m: float | None = None,
     ) -> ImportedLineResult:
         execution_context = context or ExecutionContext.null()
         source_path = Path(source).expanduser().resolve()
@@ -115,6 +117,8 @@ class AcquisitionService:
         )
         if not preflight.can_import:
             raise AcquisitionApplicationError(preflight.message)
+        axis_options = {} if time_window_ns is None and trace_interval_m is None else {
+            'time_window_ns': time_window_ns, 'trace_interval_m': trace_interval_m}
         line = self._projects.import_line_source(
             project_id,
             line_id,
@@ -123,6 +127,7 @@ class AcquisitionService:
             copy_into_project=copy_into_project,
             dielectric_constant=float(dielectric_constant),
             context=execution_context.child(1, 2),
+            **axis_options,
         )
         info = self._projects.get_dataset_info(project_id, line_id)
         metadata = dict(info.metadata)

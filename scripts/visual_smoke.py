@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Windows 前端视觉冒烟（visual smoke）——CI 截图验证。
 
-在真平台渲染处理页 v2 的关键场景并输出 PNG 到 ``output/visual_smoke/``，
+在真平台渲染现役处理页标签工作区的关键场景并输出 PNG 到 ``output/visual_smoke/``，
 供 CI 以 workflow artifact 形式上传、人工目检（本项目约定：视觉验收
 优于程序化指标）。**不依赖真实数据**（合成剖面，种子固定，输出确定）。
 
@@ -125,23 +125,23 @@ def _capture(page: ProcessingPage, out: Path, name: str) -> Path:
 
 
 def _scenarios(out: Path) -> list[Path]:
-    """渲染场景清单：v2 空态 / 四步运行后网格 / 选中同步高亮。"""
+    """渲染场景清单：原始输入 / 处理链选中 / 步骤移除。"""
     produced = []
     app = _make_app()
     page = _build_page()
 
-    # 场景 1：运行后六卡网格（输入 + 4 步，2 列大图）
+    # 场景 1：四步处理链与原始 B-scan 标签工作区
     produced.append(_capture(page, out, '01-results-grid-after-run'))
     page.hide()
 
-    # 场景 2：选中第 2 步 → chip 滑动胶囊 + 对应结果卡高亮
+    # 场景 2：选中第 2 步 → chip 滑动胶囊与参数状态同步
     page.show()
     page._pipeline_list.select_step(1)
     app.processEvents()
     produced.append(_capture(page, out, '02-selection-sync'))
     page.hide()
 
-    # 场景 3：关闭全部步骤成果（删步骤 → 只剩输入 + 占位）
+    # 场景 3：删除一个待执行步骤，保留原始 B-scan 工作区
     page._pipeline_list._remove_step(0)
     app.processEvents()
     page.show()

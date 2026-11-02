@@ -24,7 +24,6 @@ from PyQt6.QtWidgets import (
 from qfluentwidgets import (
     CaptionLabel, CheckBox, ComboBox, InfoBar, InfoBarPosition, LineEdit,
     MessageBox, PrimaryPushButton, PushButton, ScrollArea, SpinBox,
-    StrongBodyLabel,
 )
 from qfluentwidgets import FluentIcon as FIF
 
@@ -135,35 +134,31 @@ class DeliveryPage(QWidget):
             '成果名称:', self._spatial_name_edit, parent=spatial_card,
             trailing_stretch=False))
 
-        lines_label = StrongBodyLabel('选择测线（可多选）：', spatial_card)
-        spatial_layout.addWidget(lines_label)
         self._lines_list = QListWidget(spatial_card)
+        self._lines_list.setAccessibleName('选择测线，可多选')
         self._lines_list.setMinimumHeight(120)
         spatial_layout.addWidget(self._lines_list)
-        # 空态引导：无测线时列表藏起、提示占位（同时说明点亮前置条件）
-        self._lines_empty_hint = make_hint(
-            '暂无测线——在项目管理页导入测线后，这里可勾选并生成空间成果',
-            parent=spatial_card)
+        self._lines_empty_hint = make_hint('暂无可选测线', parent=spatial_card)
         self._lines_empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         spatial_layout.addWidget(self._lines_empty_hint)
         self._lines_list.setVisible(False)
 
         spatial_layout.addWidget(make_separator())
 
-        self._spatial_table = QTableWidget(0, 3, spatial_card)
+        self._spatial_table = QTableWidget(0, 4, spatial_card)
         self._spatial_table.setHorizontalHeaderLabels(
-            ['名称', '测线数', '创建时间'])
+            ['名称', '测线数', '创建时间', '状态'])
         self._spatial_table.verticalHeader().setVisible(False)
         self._spatial_table.setEditTriggers(
             QTableWidget.EditTrigger.NoEditTriggers)
         self._spatial_table.horizontalHeader().setSectionResizeMode(
             0, QHeaderView.ResizeMode.Stretch)
+        self._spatial_table.horizontalHeader().setSectionResizeMode(
+            3, QHeaderView.ResizeMode.ResizeToContents)
         self._spatial_table.setMinimumHeight(140)
         spatial_layout.addWidget(self._spatial_table)
-        # 空态引导浮层（评审 P0-1）：无成果时盖在表格上
         self._spatial_empty = EmptyStateOverlay(
-            self._spatial_table, icon=FIF.SEND, title='暂无空间成果',
-            hint='勾选测线并生成空间成果后，结果会列在这里')
+            self._spatial_table, icon=FIF.SEND, title='暂无空间成果')
         root.addWidget(spatial_card)
 
     def _build_report_card(self, root: QVBoxLayout) -> None:
@@ -172,7 +167,7 @@ class DeliveryPage(QWidget):
         report_card, report_layout = make_card(
             '项目报告', parent=self, header_action=self._report_btn)
         self._report_name_edit = LineEdit(report_card)
-        self._report_name_edit.setPlaceholderText('可空，留空使用默认包名')
+        self._report_name_edit.setPlaceholderText('留空自动命名')
         report_layout.addLayout(make_form_row(
             '报告包名:', self._report_name_edit, parent=report_card,
             trailing_stretch=False))
@@ -188,15 +183,12 @@ class DeliveryPage(QWidget):
             report_layout.addLayout(make_form_row(
                 caption, value, parent=report_card, trailing_stretch=False))
             self._report_path_labels[key] = value
-        # 「打开目录」未就绪（无报告包）时禁用 + 前置条件 hint（P2-3）
         open_row = QHBoxLayout()
         open_row.setSpacing(constants.CARD_SPACING)
-        self._open_dir_hint = make_hint('生成报告包后，可在此打开输出目录',
-                                        parent=report_card)
-        open_row.addWidget(self._open_dir_hint)
         open_row.addStretch(1)
         self._open_dir_btn = PushButton('打开目录', report_card)
         self._open_dir_btn.setEnabled(False)
+        self._open_dir_btn.setToolTip('生成报告包后可用')
         open_row.addWidget(self._open_dir_btn)
         report_layout.addLayout(open_row)
         root.addWidget(report_card)
@@ -205,7 +197,8 @@ class DeliveryPage(QWidget):
         """卡片3：备份与恢复（无主操作按钮：备份/恢复并列，均为低频操作）。"""
         backup_card, backup_layout = make_card('备份与恢复', parent=self)
         self._restore_name_edit = LineEdit(backup_card)
-        self._restore_name_edit.setPlaceholderText('恢复后的新项目目录名（留空自动命名，不覆盖当前项目）')
+        self._restore_name_edit.setPlaceholderText('留空自动命名')
+        self._restore_name_edit.setToolTip('恢复为新项目目录，不覆盖当前项目')
         backup_layout.addLayout(make_form_row('恢复目录名', self._restore_name_edit, parent=backup_card))
         backup_row = QHBoxLayout()
         backup_row.setSpacing(constants.CARD_SPACING)
@@ -219,7 +212,8 @@ class DeliveryPage(QWidget):
         backup_layout.addLayout(backup_row)
         options_row = QHBoxLayout()
         options_row.setSpacing(constants.CARD_SPACING)
-        self._incremental_check = CheckBox('增量备份（仅打包相对上次备份的变化）', backup_card)
+        self._incremental_check = CheckBox('增量备份', backup_card)
+        self._incremental_check.setToolTip('仅打包相对上次备份的变化')
         self._incremental_check.setChecked(True)
         options_row.addWidget(self._incremental_check)
         options_row.addWidget(CaptionLabel('保留最近'))
@@ -267,6 +261,19 @@ class DeliveryPage(QWidget):
             self._spatial_table.setItem(row, 0, QTableWidgetItem(name))
             self._spatial_table.setItem(row, 1, QTableWidgetItem(str(n_lines)))
             self._spatial_table.setItem(row, 2, QTableWidgetItem(created))
+            status = str(_get(item, 'status', '') or '')
+            options = _get(item, 'options', {}) or {}
+            files = _get(item, 'files', {}) or {}
+            summary = _get(item, 'summary', {}) or {}
+            warnings = list(summary.get('preflight_warnings', []) or [])
+            text = '带警告' if status == 'generated_with_warnings' or warnings else '已生成'
+            if 'surface_control_points_geojson' in files:
+                text += ' · 已生成曲面控制点'
+            if options.get('surface_generated') is False or (files and 'surface_mesh' not in files):
+                text += ' · 未生成曲面'
+            status_item = QTableWidgetItem(text)
+            status_item.setToolTip('\n'.join(map(str, warnings)))
+            self._spatial_table.setItem(row, 3, status_item)
             self._spatial_table.item(row, 0).setData(
                 Qt.ItemDataRole.UserRole, str(_get(item, 'result_id', '') or _get(item, 'artifact_id', '')))
 
@@ -395,8 +402,8 @@ class DeliveryPage(QWidget):
                     break
         self._report_dir = report_dir
         self._open_dir_btn.setEnabled(bool(report_dir))
-        # 未就绪 hint：有报告包后隐藏（按钮同时点亮）
-        self._open_dir_hint.setVisible(not report_dir)
+        self._open_dir_btn.setToolTip(
+            '打开报告包输出目录' if report_dir else '生成报告包后可用')
         if has_path and notify:
             InfoBar.success(title='项目报告', content='报告包已生成',
                             orient=Qt.Orientation.Horizontal, isClosable=True,

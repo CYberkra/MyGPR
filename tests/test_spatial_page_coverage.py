@@ -42,3 +42,8 @@ def test_coverage_statistics_uses_geographic_distance_and_ignores_invalid_points
 def test_distance_format_switches_to_kilometres() -> None:
     assert format_distance(999.4) == '999 m'
     assert format_distance(1_250.0) == '1.25 km'
+
+
+def test_average_spacing_keeps_submetre_precision() -> None:
+    from ui.geo_utils import format_spacing
+    assert format_spacing(0.551) == '0.551 m'

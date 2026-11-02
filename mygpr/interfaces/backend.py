@@ -233,6 +233,8 @@ class MyGPRBackend:
         copy_into_project: bool = True,
         dielectric_constant: float = 9.0,
         title: str | None = None,
+        time_window_ns: float | None = None,
+        trace_interval_m: float | None = None,
     ) -> str:
         """Import and normalize one measurement line through the shared job system."""
         return self._submit_project_job(
@@ -246,15 +248,17 @@ class MyGPRBackend:
                 copy_into_project=copy_into_project,
                 dielectric_constant=float(dielectric_constant),
                 context=context,
+                **({} if time_window_ns is None and trace_interval_m is None else {
+                    'time_window_ns': time_window_ns, 'trace_interval_m': trace_interval_m}),
             ),
         )
 
 
-    def submit_batch_line_import(self, project_id: str, sources: list[str] | tuple[str, ...], *, title: str | None = None) -> str:
+    def submit_batch_line_import(self, project_id: str, sources: list[str] | tuple[str, ...], *, dielectric_constant: float = 9.0, title: str | None = None) -> str:
         selected = tuple(str(item) for item in sources)
         if not selected:
             raise ValueError("至少选择一个测线文件")
-        return self._submit_project_job(project_id, title or f"批量导入测线: {len(selected)} 个文件", lambda context: self.maintenance.batch_import_lines(project_id, selected, context=context))
+        return self._submit_project_job(project_id, title or f"批量导入测线: {len(selected)} 个文件", lambda context: self.maintenance.batch_import_lines(project_id, selected, dielectric_constant=dielectric_constant, context=context))
 
     def submit_project_quality_check(self, project_id: str, *, title: str | None = None) -> str:
         return self._submit_project_job(project_id, title or "项目数据质检", lambda context: self.maintenance.run_project_quality_check(project_id, context=context))

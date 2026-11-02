@@ -14,11 +14,11 @@ sync_requested payload：{'line_id', 'paths': {'rtk', 'imu', 'altimeter', 'trace
 from PyQt6.QtCore import QSize, Qt, QSettings, QUrl, pyqtSignal
 from PyQt6.QtGui import QBrush, QColor, QDesktopServices, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
-    QDialog, QHBoxLayout, QSizePolicy, QSplitter,
+    QDialog, QHBoxLayout, QScrollArea, QSizePolicy, QSplitter,
     QStackedWidget, QTabWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
-    BodyLabel, CardWidget, DoubleSpinBox, InfoBar,
+    BodyLabel, CardWidget, CheckBox, DoubleSpinBox, InfoBar,
     InfoBarPosition, LineEdit, MessageBox, PrimaryPushButton, PushButton,
     ToolButton, TransparentToolButton, isDarkTheme,
 )
@@ -32,6 +32,7 @@ from ui.pages.project_visuals import (
     make_detail_scroll, style_ledger_items,
 )
 from ui.pages.project_preferences import ProjectColumnPreferences
+from ui.pages.project_line_context import ProjectLineContextMixin
 from ui.pages.project_quality import QualityCenterDialog
 from ui.theme_helpers import status_color
 from ui.sensor_summary import SensorCompletenessReport
@@ -73,7 +74,7 @@ _INFO_FIELDS = (
 )
 
 
-class ProjectPage(QWidget):
+class ProjectPage(ProjectLineContextMixin, QWidget):
     """A project identity, line ledger and a single selected-line context."""
 
     import_requested = pyqtSignal(dict)
@@ -123,10 +124,11 @@ class ProjectPage(QWidget):
         work.setSpacing(constants.SPACE_3)
         header_row = QHBoxLayout()
         header_row.setSpacing(constants.SPACE_2)
-        self._project_heading = BodyLabel('', self._work_widget)
-        self._project_heading.setWordWrap(True)
-        self._project_heading.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        header_row.addWidget(self._project_heading, 1)
+        self.line_search = LineEdit(self._work_widget)
+        self.line_search.setPlaceholderText('搜索测线')
+        self.line_search.setClearButtonEnabled(True)
+        self.line_search.textChanged.connect(self._filter_lines)
+        header_row.addWidget(self.line_search, 1)
         self.header_import_btn = PrimaryPushButton('导入数据', self._work_widget, FIF.DOWNLOAD)
         self.header_import_btn.setToolTip('可一次选择多个 CSV / TXT / NPY / NPZ / H5 / HDF5 文件导入')
         self.header_import_btn.clicked.connect(self.show_import_tool)
@@ -186,7 +188,12 @@ class ProjectPage(QWidget):
         dialog.setMinimumWidth(440)
         dialog.setModal(False)
         layout = QVBoxLayout(dialog)
-        layout.addWidget(builder(dialog))
+        scroll = QScrollArea(dialog)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setWidget(builder(scroll))
+        layout.addWidget(scroll)
+        dialog.resize(700, 600)
         return dialog
 
     def show_import_tool(self) -> None:
@@ -282,6 +289,26 @@ class ProjectPage(QWidget):
         layout.addLayout(make_form_row('介电常数:', self.dielectric_spin,
                                        parent=card))
 
+        axis_hint = make_hint('纯 CSV/TXT/NPY 矩阵不含物理轴：默认时间窗 250 ns、道间距 1 m，定量解释前请核对采集参数。', parent=card)
+        axis_hint.setWordWrap(True)
+        layout.addWidget(axis_hint)
+        self._matrix_axes_check = CheckBox('为纯矩阵输入采集轴参数（单文件）', card)
+        layout.addWidget(self._matrix_axes_check)
+        self._matrix_time_window = DoubleSpinBox(card)
+        self._matrix_time_window.setRange(0.000001, 1000000000.0)
+        self._matrix_time_window.setDecimals(6)
+        self._matrix_time_window.setValue(250.0)
+        self._matrix_time_window.setToolTip('首末采样点的时间跨度，按包含末点的线性时间轴生成。')
+        self._matrix_trace_interval = DoubleSpinBox(card)
+        self._matrix_trace_interval.setRange(0.000001, 10000000.0)
+        self._matrix_trace_interval.setDecimals(6)
+        self._matrix_trace_interval.setValue(1.0)
+        for label, widget in (('首末采样跨度/ns:', self._matrix_time_window),
+                              ('道间距/m:', self._matrix_trace_interval)):
+            widget.setEnabled(False)
+            self._matrix_axes_check.toggled.connect(widget.setEnabled)
+            layout.addLayout(make_form_row(label, widget, parent=card))
+
         # 按钮行：预检 + 导入
         btn_row = QHBoxLayout()
         self.preflight_btn = PushButton('预检', card)
@@ -340,11 +367,6 @@ class ProjectPage(QWidget):
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(constants.SPACE_2)
-        self.line_search = LineEdit(self)
-        self.line_search.setPlaceholderText('搜索测线号或名称')
-        self.line_search.setClearButtonEnabled(True)
-        self.line_search.textChanged.connect(self._filter_lines)
-        layout.addWidget(self.line_search)
         splitter = QSplitter(Qt.Orientation.Vertical, self)
         splitter.setChildrenCollapsible(False)
 
@@ -511,6 +533,8 @@ class ProjectPage(QWidget):
             self._current_line_id = ''
             self._source_path_cache.clear()
             self._sensor_summary_cache.clear()
+            self._sensor_sync_results.clear()
+            self._matrix_axes_check.setChecked(False)
             self._resume_lines.clear()
             self.file_edit.clear()
             self.line_name_edit.clear()
@@ -525,9 +549,17 @@ class ProjectPage(QWidget):
                 value.setText('--')
         else:
             for _label, attr in _INFO_FIELDS:
-                text = str(getattr(summary, attr, '') or '').strip()
-                self._info_values[attr].setText(text or '--')
+                if changed or hasattr(summary, attr):
+                    text = str(getattr(summary, attr, '') or '').strip()
+                    self._info_values[attr].setText(text or '--')
         self._update_action_state()
+
+    def set_project_metadata(self, metadata) -> None:
+        if not self._summary or str(getattr(metadata, 'project_id', '')) != str(getattr(self._summary, 'project_id', '')):
+            return
+        for _label, attr in _INFO_FIELDS:
+            source = self._summary if attr == 'name' else metadata
+            self._info_values[attr].setText(str(getattr(source, attr, '') or '').strip() or '--')
 
     def set_lines(self, lines: list) -> None:
         """刷新测线表；自动建议下一测线号（UX P2-1）。"""
@@ -681,8 +713,8 @@ class ProjectPage(QWidget):
         self._work_stack.setCurrentWidget(self._ledger_widget if state == 'ledger' else self._empty_project)
         self.header_import_btn.setVisible(state == 'ledger')
         self.empty_import_btn.setVisible(state == 'empty')
-        name = str(getattr(self._summary, 'name', '') or '项目')
-        self._project_heading.setText(f'{name} · {len(self._lines)} 条测线')
+        self.line_search.setPlaceholderText(
+            f'搜索 {len(self._lines)} 条测线' if self._lines else '搜索测线')
         enabled = self._has_project() and not self._busy
         self.quality_btn.setEnabled(self._has_project())
         for btn in (self.close_btn, self.preflight_btn):
@@ -742,6 +774,7 @@ class ProjectPage(QWidget):
         paths, _selected = file_dialogs.getOpenFileNames(
             self, '选择一个或多个 GPR 数据文件', '', _GPR_FILE_FILTER)
         if paths:
+            self._matrix_axes_check.setChecked(False)
             self._import_sources = list(paths)
             self.file_edit.setText(paths[0] if len(paths) == 1 else f'已选择 {len(paths)} 个文件')
             self.file_edit.setToolTip('\n'.join(paths))
@@ -751,6 +784,7 @@ class ProjectPage(QWidget):
 
     def _on_import_text_edited(self, text):
         self._import_sources = []
+        self._matrix_axes_check.setChecked(False)
         self.file_edit.setToolTip(text)
         self.line_id_edit.setEnabled(True)
         self.line_name_edit.setEnabled(True)
@@ -789,6 +823,10 @@ class ProjectPage(QWidget):
             InfoBar.warning(title='批量导入', content='批量导入会逐文件预检；单文件详细预检请只选择一个文件',
                             duration=3000, parent=self)
             return
+        if self._matrix_axes_check.isChecked() and len(sources) > 1:
+            InfoBar.warning(title='批量导入', content='手动轴参数目前只支持单文件导入。',
+                            duration=3000, parent=self)
+            return
         line_id = self.line_id_edit.text().strip() or 'L01'
         payload = {
             'preflight': bool(preflight),
@@ -798,6 +836,9 @@ class ProjectPage(QWidget):
             'name': self.line_name_edit.text().strip() or line_id,
             'dielectric': float(self.dielectric_spin.value()),
         }
+        if self._matrix_axes_check.isChecked() and not preflight:
+            payload['time_window_ns'] = float(self._matrix_time_window.value())
+            payload['trace_interval_m'] = float(self._matrix_trace_interval.value())
         if preflight:
             self._preflight_label.setText('预检中…')
             self._preflight_label.set_hint_key('info')
@@ -825,53 +866,6 @@ class ProjectPage(QWidget):
             'paths': paths,
             'settings': self._sync_form.settings(),
         })
-
-    def _sensor_template_key(self):
-        return f"sensor_sync_template:{getattr(self._summary, 'project_id', '')}"
-
-    def _save_sensor_template(self):
-        if self._sm is None or not getattr(self._summary, 'project_id', ''):
-            return
-        self._sm.set(self._sensor_template_key(), self._sync_form.settings())
-        self._sm.save()
-
-    def _apply_sensor_template(self):
-        if self._sm is None:
-            return
-        values = self._sm.get(self._sensor_template_key(), {})
-        if isinstance(values, dict):
-            self._sync_form.set_settings(values)
-
-    def set_line_source_path(self, line_id: str, path) -> None:
-        """主窗口/controller 异步回包：缓存测线源文件路径（右键菜单素材）。
-
-        由 page_coordinator 把 ProjectController.line_source_path_ready
-        接到本方法；查询在 worker 线程完成，右键菜单构建时直接读缓存。
-        """
-        line_id = str(line_id or '')
-        if line_id:
-            self._source_path_cache[line_id] = str(path) if path else None
-            if line_id == self._current_line_id:
-                self._update_action_state()
-
-    def set_line_sensor_summary(self, line_id: str, text: str) -> None:
-        """Compatibility for text-only summary clients."""
-        self._cache_sensor_summary(line_id, str(text))
-
-    def set_line_sensor_report(self, line_id: str, report: SensorCompletenessReport) -> None:
-        self._cache_sensor_summary(line_id, report)
-
-    def set_sensor_sync_result(self, line_id: str, result) -> None:
-        self._sensor_sync_results[str(line_id)] = result
-        if str(line_id) == self._current_line_id:
-            self._update_action_state()
-
-    def _cache_sensor_summary(self, line_id: str, report: SensorCompletenessReport | str) -> None:
-        if str(line_id) not in {str(getattr(line, 'line_id', '')) for line in self._lines}:
-            return
-        self._sensor_summary_cache[str(line_id)] = report
-        if str(line_id) == self._current_line_id:
-            self._update_action_state()
 
     def _on_line_selection_changed(self) -> None:
         if self._filling_table:

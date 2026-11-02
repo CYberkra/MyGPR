@@ -47,17 +47,11 @@ def card_title(text: str) -> SubtitleLabel:
     return label
 
 
-def make_card(title: str, *, parent=None, header_action: QWidget | None = None) -> tuple:
-    """卡片范式（SPEC §1）：CardWidget + QVBoxLayout(margins=15, spacing=10)，
-    首行 10pt Bold 卡片标题。返回 ``(card, layout)``。
+def make_card(title: str = '', *, parent=None, header_action: QWidget | None = None) -> tuple:
+    """卡片范式：可选标题与可选头部动作，返回 ``(card, layout)``。
 
-    收敛自 home/settings/project 的 ``_create_card`` 与
-    processing/spatial 的 ``_make_card``、delivery 的方法版
-    ``_make_card``（其 ``CardWidget(self)`` 父参数经 ``parent=`` 传入）。
-
-    ``header_action`` 可选：主操作控件进卡头行右侧（「页签卡 header 放
-    动作」模式，P2-3），不再在卡体里孤悬一行；控件可先以页面为父创建，
-    加入 header 时 Qt 自动重挂父。
+    空标题不创建占位标签；内容已经能表达用途的单一画布或表格页由此省去
+    重复标题。``header_action`` 仍可独立形成右侧工具行。
     """
     card = CardWidget(parent)
     # 美术打磨 C（2026-09-27）：CardWidget 深色主题下实测渲染白底，
@@ -71,10 +65,12 @@ def make_card(title: str, *, parent=None, header_action: QWidget | None = None) 
     layout.setContentsMargins(*constants.CARD_MARGINS)
     layout.setSpacing(constants.CARD_SPACING)
     if header_action is None:
-        layout.addWidget(card_title(title))
+        if title:
+            layout.addWidget(card_title(title))
     else:
         header = QHBoxLayout()
-        header.addWidget(card_title(title), 0, Qt.AlignmentFlag.AlignVCenter)
+        if title:
+            header.addWidget(card_title(title), 0, Qt.AlignmentFlag.AlignVCenter)
         header.addStretch(1)
         header.addWidget(header_action, 0, Qt.AlignmentFlag.AlignVCenter)
         layout.addLayout(header)

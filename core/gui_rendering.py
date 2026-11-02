@@ -56,6 +56,8 @@ class PreviewBundle:
     source_trace_ids: np.ndarray | None = None  # acquisition IDs, independent of matrix indices
     view_reversed: bool = False
     trace_qc_bad_mask: np.ndarray | None = None
+    trace_qc_local_mask: np.ndarray | None = None
+    acquisition_markers: tuple[dict, ...] = ()  # original file-local 1-based rows; raw preview only
 
     def __post_init__(self) -> None:
         matrix = np.asarray(self.matrix, dtype=np.float32)
@@ -71,6 +73,11 @@ class PreviewBundle:
             if mask.shape != (matrix.shape[1],):
                 raise ValueError('invalid trace QC mask')
             object.__setattr__(self, 'trace_qc_bad_mask', mask.astype(bool))
+        if self.trace_qc_local_mask is not None:
+            mask = np.asarray(self.trace_qc_local_mask)
+            if mask.shape != (matrix.shape[1],):
+                raise ValueError('invalid local change mask')
+            object.__setattr__(self, 'trace_qc_local_mask', mask.astype(bool))
         if self.source_trace_ids is not None:
             ids = np.asarray(self.source_trace_ids)
             if ids.shape != (matrix.shape[1],) or ids.dtype.kind not in 'iu' or np.any(ids < 0):
@@ -327,6 +334,8 @@ def bundle_from_dataset(dataset: Any, **kw: Any) -> PreviewBundle:
     if sample_axis is None:
         sample_axis = _dataset_axis(dataset, "depth_axis_m")
         sample_axis_label = "深度 (m)" if sample_axis is not None else ""
+    if metadata.get('time_axis_status') == 'unknown' and not (is_depth or is_elevation):
+        sample_axis, sample_axis_label = None, ''
 
     # 深度轴：海拔纵轴要用「地表以下米数」才能由"地面高程 − 深度"得海拔，
     # 而 sample_axis 通常是双程走时(ns)，二者不可混用。数据集自带 depth_axis_m
@@ -335,6 +344,8 @@ def bundle_from_dataset(dataset: Any, **kw: Any) -> PreviewBundle:
     if depth_axis is None:
         depth_axis = _dataset_axis(dataset, "depth_axis_m")
     if is_elevation:
+        depth_axis = None
+    if metadata.get('time_axis_status') == 'unknown' and not (is_depth or is_elevation):
         depth_axis = None
     if depth_axis is None and sample_axis_label == "深度 (m)":
         depth_axis = sample_axis

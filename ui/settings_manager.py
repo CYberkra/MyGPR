@@ -43,6 +43,7 @@ DEFAULT_SETTINGS = {
     'bscan_p_high': 98.0,
     # B-Scan 右侧色标条显隐（隐藏后其宽度归还画布；右键菜单也可切）
     'bscan_colorbar_visible': True,
+    'bscan_qc_marks_visible': True,                     # 异常道覆盖标记，仅显示偏好
     # B-Scan 色标映射（设置页统一选；单视图微调走 B-Scan 右键色标子菜单）
     'bscan_colormap': 'seismic',
     # B-Scan 显示增益：off 关闭 / sec SEC 补偿（扩散+指数吸收）/ tvg TVG 补偿

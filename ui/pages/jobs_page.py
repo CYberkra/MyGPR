@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """JobsPage — 任务中心（SPEC §6.8）。
 
-卡内：按钮行 PushButton('清理已完成') + JobTable(stretch)。
+卡内：清理操作 + JobTable(stretch)，不重复页面导航标题。
 页面为 JobTable 的薄包装：暴露 job_table() 访问器，
 转发 cancel_requested，并在清理时发 prune_requested。
 """
@@ -33,7 +33,7 @@ class JobsPage(QWidget):
         root.setContentsMargins(*constants.PAGE_MARGINS)
         root.setSpacing(constants.PAGE_SPACING)
 
-        card, card_layout = make_card('任务记录', parent=self)
+        card, card_layout = make_card(parent=self)
 
         button_row = QHBoxLayout()
         button_row.setSpacing(constants.CARD_SPACING)

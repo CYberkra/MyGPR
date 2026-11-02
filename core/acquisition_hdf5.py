@@ -100,7 +100,8 @@ def acquisition_trace_metadata(metadata: dict) -> dict[str, np.ndarray]:
     nested = metadata.get("metadata")
     if isinstance(nested, dict):
         metadata = nested
-    if metadata.get("source_format") != FORMAT_NAME:
+    from core.cdut_acquisition_import import CSV_FORMAT
+    if metadata.get("source_format") not in {FORMAT_NAME,CSV_FORMAT}:
         return {}
     sensors = metadata.get("trace_meta", {})
     names = {"lon": "longitude", "lat": "latitude", "alt": "altitude_m", "height": "flight_height_m",
@@ -126,7 +127,7 @@ def _hard_object(group, key):
 
 
 def inspect_acquisition_hdf5(handle) -> dict[str, Any] | None:
-    """Recognize and validate the schema without reading dataset payloads."""
+    """Validate headers and bounded markers without reading waveform payloads."""
     fields = ("samples_per_trace", "time_window_ns", "store_component")
     if "traces" not in handle or not any(key in handle.attrs for key in fields):
         return None
@@ -196,6 +197,8 @@ def inspect_acquisition_hdf5(handle) -> dict[str, Any] | None:
         "trace_meta_fields": list(dict.fromkeys(SENSOR_NAMES + tuple(present))),
         **provenance, **domains,
     }
+    from core.cdut_acquisition_import import read_hdf5_markers
+    info['acquisition_markers'] = read_hdf5_markers(handle, int(traces.shape[0]))
     info.update(_sfcw_companions(handle, info))
     return info
 

@@ -10,21 +10,28 @@ from __future__ import annotations
 from contextlib import contextmanager
 from copy import deepcopy
 import json
+import weakref
 from uuid import uuid4
 
-from PyQt6.QtCore import QEvent, QMimeData, QPoint, QRect, QRectF, Qt, pyqtSignal
-from PyQt6.QtGui import QDrag, QKeySequence, QShortcut
-from PyQt6.QtWidgets import (
-    QApplication, QHBoxLayout, QLabel, QSplitter, QTabBar, QVBoxLayout, QWidget,
+from PyQt6.QtCore import (
+    QEasingCurve, QEvent, QMimeData, QPoint, QPropertyAnimation, QRect, QRectF, Qt, pyqtSignal,
 )
-from qfluentwidgets import FluentIcon as FIF, RoundMenu, Theme, ToolButton, isDarkTheme
+from PyQt6.QtGui import QDrag, QIcon, QKeySequence, QShortcut
+from PyQt6.QtWidgets import (
+    QApplication, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QSplitter, QTabBar, QVBoxLayout, QWidget,
+)
+from qfluentwidgets import (
+    FluentIcon as FIF, ProgressBar, PushButton, RoundMenu, Theme, ToolButton, isDarkTheme,
+)
 
+from ui import motion
 from ui.design_tokens import color, rgba
 from ui.widgets.fluent_menu_keyboard import FluentMenuKeyboard
 from ui.widgets.bscan_view import BScanView
 from ui.widgets.context_menus import add_action, make_menu
 from ui.widgets.bscan_link import compatible
 from ui.widgets.bscan_workspace_link import BScanWorkspaceLink
+from ui.widgets.bscan_source_tabs import _SourceTabBar
 
 
 _MIME = 'application/x-mygpr-bscan-tab'
@@ -33,136 +40,53 @@ _EDGE_NAMES = {'left': '左侧', 'right': '右侧', 'top': '上方', 'bottom': '
 
 
 def _view_state(view: BScanView) -> dict:
-    """Small display state only: neither arrays nor bundles enter persistence."""
-    state = {
-        'colormap': view._cmap_name,
-        'levels': list(view.display_levels()), 'aspect': view.aspect_mode(),
-        'x_axis': view.x_axis_mode(), 'y_axis': view.y_axis_mode(),
-        'colorbar': view.colorbar_visible(), 'gain': view.gain_mode(),
-        'gain_alpha': view._gain_alpha, 'gain_db': view._gain_db,
-        'gain_power': view._gain_power, 'display_mode': view.display_mode.value,
-        'crosshair': view._crosshair_on,
-        'local_view': view._view_selection is not None or view._view_time_window is not None,
-        'levels_follow_view': view._selection_follows_levels,
-    }
-    if view._matrix is not None:
-        state['range'] = view._plot.vb.viewRange()
-    return state
+    return view.export_display_state()
 
 
 def _apply_view_state(view: BScanView, state: dict, *, viewport=False) -> None:
-    if not state:
-        return
-    if viewport:
-        ranges = state.get('range')
-        if isinstance(ranges, (list, tuple)) and len(ranges) == 2:
-            try:
-                if state.get('local_view'):
-                    (left, right), (top, bottom) = ranges
-                    view.set_view_selection(QRectF(left, top, right-left, bottom-top))
-                else:
-                    view._plot.vb.setRange(xRange=ranges[0], yRange=ranges[1], padding=0)
-            except (TypeError, ValueError, IndexError):
-                pass
-        return
-    try:
-        view._selection_follows_levels = bool(state.get('levels_follow_view', True))
-        view.set_colormap(str(state.get('colormap', view._cmap_name)))
-        view.set_display_levels(*state.get('levels', view.display_levels()))
-        view.set_aspect_mode(str(state.get('aspect', view.aspect_mode())))
-        view.set_axis_modes(str(state.get('x_axis', view.x_axis_mode())),
-                            str(state.get('y_axis', view.y_axis_mode())))
-        view.set_colorbar_visible(bool(state.get('colorbar', view.colorbar_visible())))
-        view.set_gain(str(state.get('gain', view.gain_mode())),
-                      alpha=float(state.get('gain_alpha', view._gain_alpha)),
-                      db=float(state.get('gain_db', view._gain_db)),
-                      power=float(state.get('gain_power', view._gain_power)))
-        view.set_display_mode(state.get('display_mode', view.display_mode.value))
-        view._toggle_crosshair(bool(state.get('crosshair', True)))
-    except (TypeError, ValueError, KeyError, AttributeError):
-        # A malformed session preference must not prevent the data from opening.
-        pass
+    view.restore_display_state(state, viewport=viewport)
 
 
-class _SourceTabBar(QTabBar):
-    """Real Qt drag source; the workspace handles tab/edge drop destinations."""
-
+class _PreviewStatus:
     def __init__(self, group):
-        super().__init__(group)
-        self.group = group
-        self._press = None
-        self._drag_key = ''
-        self.setObjectName('bscanWorkspaceTabs')
-        self.setDrawBase(False)
-        self.setExpanding(False)
-        self.setElideMode(Qt.TextElideMode.ElideRight)
-        self.setUsesScrollButtons(True)
-        self.setTabsClosable(True)
-        self.setFixedHeight(32)
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setAccessibleName('B-scan 数据标签')
+        self._group = weakref.ref(group)
+        view = group.view
+        self.progress = ProgressBar(view)
+        self.progress.setRange(0, 0)
+        self.progress.setFixedHeight(2)
+        self.progress.hide()
+        self.retry = PushButton('重试预览', view)
+        self.retry.setAccessibleName('重试预览')
+        self.retry.hide()
+        self.retry.clicked.connect(self.retry_current)
+        self.layout()
 
-    def sync_close_button(self, index, key, title):
-        side = QTabBar.ButtonPosition.RightSide
-        button = self.tabButton(index, side)
-        if not isinstance(button, ToolButton) or button.property('source_key') != key:
-            button = ToolButton(FIF.CLOSE, self)
-            button.setProperty('source_key', key)
-            button.setFixedSize(20, 20)
-            button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            button.clicked.connect(lambda _checked=False, key=key: self._close_key(key))
-            self.setTabButton(index, side, button)
-        button.setToolTip(f'关闭 {title}')
-        button.setAccessibleName(f'关闭 {title}')
-        button.setVisible(key not in self.group.pinned)
+    @property
+    def group(self):
+        return self._group()
 
-    def _close_key(self, key):
-        index = self.group.index_of(key)
-        if index >= 0:
-            self.tabCloseRequested.emit(index)
+    def retry_current(self):
+        group = self.group
+        key = group.current_key() if group is not None else ''
+        if key:
+            group.workspace.preview_retry_requested.emit(key)
 
-    def mousePressEvent(self, event):
-        index = self.tabAt(event.position().toPoint())
-        if event.button() == Qt.MouseButton.RightButton:
-            event.accept()  # Opening a context menu never selects its target.
+    def set_state(self, error, loading):
+        self.progress.setVisible(bool(loading))
+        self.retry.setVisible(bool(error))
+        self.layout()
+
+    def layout(self):
+        group = self.group
+        if group is None:
             return
-        if event.button() == Qt.MouseButton.MiddleButton:
-            if index >= 0:
-                self.group.workspace.close_tab(self.tabData(index), self.group.group_id)
-            event.accept()
-            return
-        super().mousePressEvent(event)
-        self._press = event.position().toPoint()
-        self._drag_key = str(self.tabData(index) or '') if index >= 0 else ''
-
-    def mouseMoveEvent(self, event):
-        if (self._press is not None and self._drag_key
-                and event.buttons() & Qt.MouseButton.LeftButton
-                and (event.position().toPoint() - self._press).manhattanLength()
-                >= QApplication.startDragDistance()):
-            key, self._drag_key = self._drag_key, ''
-            self._press = None
-            drag = QDrag(self)
-            drag.setMimeData(self.group.workspace.drag_mime_data(key, self.group.group_id))
-            index = self.group.index_of(key)
-            if index >= 0:
-                drag.setPixmap(self.grab(self.tabRect(index)))
-            drag.exec(Qt.DropAction.MoveAction)
-            self.group.workspace.cancel_drag()
-            return
-        super().mouseMoveEvent(event)
-
-    def mouseReleaseEvent(self, event):
-        self._press = None
-        self._drag_key = ''
-        super().mouseReleaseEvent(event)
-
-    def contextMenuEvent(self, event):
-        index = (self.currentIndex() if event.reason() == event.Reason.Keyboard
-                 else self.tabAt(event.pos()))
-        key = str(self.tabData(index) or '') if index >= 0 else ''
-        self.group.workspace.show_context_menu(self.group.group_id, key, event.globalPos())
-        event.accept()
+        view = group.view
+        self.progress.setGeometry(0, 0, view.width(), 2)
+        self.retry.adjustSize()
+        self.retry.move(max(8, (view.width() - self.retry.width()) // 2),
+                        max(60, int(view.height() * 0.62)))
+        self.progress.raise_()
+        self.retry.raise_()
 
 
 class _ViewGroup(QWidget):
@@ -193,11 +117,19 @@ class _ViewGroup(QWidget):
         layout.setSpacing(0)
         layout.addLayout(header)
         layout.addWidget(self.view, 1)
+        self.status = _PreviewStatus(self)
         self.hint = QLabel(self)
         self.hint.setObjectName('bscanDropHint')
         self.hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.hint.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self.hint.hide()
+        self.hint_effect = QGraphicsOpacityEffect(self.hint)
+        self.hint_effect.setOpacity(0.0)
+        self.hint.setGraphicsEffect(self.hint_effect)
+        self.hint_animation = QPropertyAnimation(self.hint_effect, b'opacity', self)
+        self.hint_animation.setDuration(100)
+        self.hint_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.hint_animation.finished.connect(self._finish_hint_fade)
+        self.set_hint_visible(False)
         self.setFocusProxy(self.tabs)
         self.tabs.currentChanged.connect(lambda _index: workspace._current_changed(self))
         self.tabs.tabBarClicked.connect(lambda index: workspace._tab_clicked(self, index))
@@ -208,6 +140,24 @@ class _ViewGroup(QWidget):
         for child in [self, *self.findChildren(QWidget)]:
             child.setAcceptDrops(True)
             child.installEventFilter(workspace)
+
+    def set_hint_visible(self, visible):
+        self.hint_animation.stop()
+        target = 1.0 if visible else 0.0
+        if not motion.animations_enabled():
+            self.hint_effect.setOpacity(target)
+            self.hint.setVisible(visible)
+            return
+        if visible:
+            self.hint.show()
+            self.hint.raise_()
+        self.hint_animation.setStartValue(self.hint_effect.opacity())
+        self.hint_animation.setEndValue(target)
+        self.hint_animation.start()
+
+    def _finish_hint_fade(self):
+        if self.hint_effect.opacity() <= 0.0:
+            self.hint.hide()
 
     def keys(self):
         return [str(self.tabs.tabData(i)) for i in range(self.tabs.count())]
@@ -229,6 +179,7 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
     source_activated_by_user = pyqtSignal(str)
     source_closed = pyqtSignal(str)
     preview_requested = pyqtSignal(str)
+    preview_retry_requested = pyqtSignal(str)
     source_context_requested = pyqtSignal(str, object)
     source_input_requested = pyqtSignal(str)
     view_created = pyqtSignal(object)
@@ -325,6 +276,11 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
     def _group(self, group_id=None):
         return self._groups.get(group_id or self._active_group)
 
+    @staticmethod
+    def _settle_group_fullscreen(group):
+        if group is not None and group.view._fullscreen is not None:
+            group.view.settle_fullscreen()
+
     def group_widget(self, group_id=None) -> QWidget:
         return self._group(group_id)
 
@@ -354,6 +310,8 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
         group = self._group(group_id)
         if group is None:
             return False
+        if key != group.current_key():
+            self._settle_group_fullscreen(group)
         with self._change():
             group.capture()
             index = group.index_of(key)
@@ -366,6 +324,7 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
 
     def _current_changed(self, group):
         if not self._mutating:
+            self._settle_group_fullscreen(group)
             group.capture()
             self._active_group = group.group_id
             self._sync()
@@ -390,8 +349,9 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
                 title = str(source.get('title') or key)
                 group.tabs.setTabText(index, title)
                 group.tabs.setTabToolTip(index, str(source.get('tooltip') or f'{title}\n{key}'))
-                group.tabs.setTabIcon(index, FIF.PIN.icon() if key in group.pinned else FIF.PHOTO.icon())
+                group.tabs.setTabIcon(index, FIF.PIN.icon() if key in group.pinned else QIcon())
                 group.tabs.sync_close_button(index, key, title)
+            group.tabs.sync_indicator(animate=False)
             self._render(group)
         self.apply_theme(self._dark, refresh_views=False)
         active = (self._active_group, self.active_key())
@@ -404,6 +364,8 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
         key = group.current_key()
         source = self._sources.get(key, {})
         bundle = source.get('bundle')
+        error = str(source.get('error') or '')
+        group.status.set_state(error, bool(key and bundle is None and not error))
         changed = key != group.rendered_key
         if changed or bundle is not group.rendered_bundle or bundle is None:
             if changed:
@@ -416,7 +378,6 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
             else:
                 group.view.clear()
                 empty = group.view._empty_overlay
-                error = str(source.get('error') or '')
                 empty._title_label.setText('预览加载失败' if error else '预览尚未加载' if key else '空工作区')
                 empty._hint_label.setText(error or ('正在请求此数据的 B-scan 预览' if key else
                                                   '从项目树或历史记录打开数据'))
@@ -444,6 +405,8 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
         group = self._group(group_id)
         if group is None or key not in group.keys() or (key in group.pinned and not force):
             return False
+        if key == group.current_key():
+            self._settle_group_fullscreen(group)
         with self._change():
             group.capture()
             index = group.index_of(key)
@@ -530,6 +493,7 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
             return ''
         if len(origin.keys()) == 1 and not copy:
             return origin.group_id  # Moving the only tab cannot leave an empty split.
+        self._settle_group_fullscreen(origin)
         with self._change():
             origin.capture()
             new = self._new_group()
@@ -553,6 +517,9 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
         origin, target = self._group(source_group_id), self._group(target_group_id)
         if origin is None or target is None or key not in origin.keys():
             return False
+        self._settle_group_fullscreen(origin)
+        if target is not origin:
+            self._settle_group_fullscreen(target)
         with self._change():
             origin.capture()
             old_index = origin.index_of(key)
@@ -577,6 +544,7 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
     def _remove_empty(self, group):
         if group.tabs.count() or len(self._groups) == 1:
             return
+        self._settle_group_fullscreen(group)
         parent = group.parentWidget()
         group.view.clear()
         self._groups.pop(group.group_id)
@@ -598,6 +566,8 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
 
     def reset_layout(self) -> None:
         """Merge open tabs, preserving pins/history; never open a catalog item."""
+        for group in self._groups.values():
+            self._settle_group_fullscreen(group)
         active = self.active_key()
         active_state = _view_state(self.primary_view())
         with self._change():
@@ -649,6 +619,8 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
 
         if not isinstance(state, dict) or state.get('version') != 1 or not validate(state.get('root')):
             return False
+        for group in self._groups.values():
+            self._settle_group_fullscreen(group)
         self._close_menu()
         with self._change():
             old_root = self._root
@@ -807,6 +779,8 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
             enabled=bool(self._closed), shortcut='Ctrl+Shift+T')
         add(menu, 'reset-layout', '恢复为单组标签', self.reset_layout,
             enabled=len(self._groups) > 1)
+        menu.addSeparator()
+        menu.addAction(group.view.qc_marks_menu_action(menu))
         menu._workspace_keyboard = FluentMenuKeyboard(menu)
         return menu
 
@@ -867,7 +841,7 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
 
     def _show_hint(self, group, edge, index):
         for other in self._groups.values():
-            other.hint.hide()
+            other.set_hint_visible(False)
         rect = group.rect().adjusted(3, 3, -3, -3)
         if edge == 'tabs':
             x = (group.tabs.tabRect(index).left() if index < group.tabs.count()
@@ -884,7 +858,7 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
                 rect.moveBottom(group.height() - 3)
         group.hint.setText('' if edge == 'tabs' else f'拆分到{_EDGE_NAMES[edge]}' if edge in _EDGES else '移入此视图组')
         group.hint.setGeometry(rect)
-        group.hint.show()
+        group.set_hint_visible(True)
         group.hint.raise_()
 
     def drop_hint_visible(self) -> bool:
@@ -892,7 +866,7 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
 
     def cancel_drag(self):
         for group in self._groups.values():
-            group.hint.hide()
+            group.set_hint_visible(False)
         QDrag.cancel()
 
     def eventFilter(self, watched, event):
@@ -904,6 +878,8 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
             group = group.parentWidget()
         if not isinstance(group, _ViewGroup) or group.group_id not in self._groups:
             return super().eventFilter(watched, event)
+        if event_type == QEvent.Type.Resize and watched is group.view:
+            group.status.layout()
         if (event_type == QEvent.Type.FocusIn and watched is group.tabs
                 and event.reason() in (Qt.FocusReason.TabFocusReason, Qt.FocusReason.BacktabFocusReason,
                                        Qt.FocusReason.ShortcutFocusReason)):
@@ -943,7 +919,7 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
             return True
         if event_type == QEvent.Type.DragLeave:
             for candidate in self._groups.values():
-                candidate.hint.hide()
+                candidate.set_hint_visible(False)
         return super().eventFilter(watched, event)
 
     def apply_theme(self, dark, *, refresh_views=True):
@@ -954,9 +930,10 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
             f'ToolButton:pressed{{background:{rgba("primary", .12, dark)};}}')
         for group in self._groups.values():
             group.more.setStyleSheet(tool_style)
+            group.tabs.set_indicator_color(color('primary', dark))
             for index, key in enumerate(group.keys()):
-                icon = FIF.PIN if key in group.pinned else FIF.PHOTO
-                group.tabs.setTabIcon(index, icon.icon(Theme.DARK if dark else Theme.LIGHT))
+                icon = FIF.PIN.icon(Theme.DARK if dark else Theme.LIGHT) if key in group.pinned else QIcon()
+                group.tabs.setTabIcon(index, icon)
                 close = group.tabs.tabButton(index, QTabBar.ButtonPosition.RightSide)
                 if isinstance(close, ToolButton):
                     close.setStyleSheet(tool_style)
@@ -969,7 +946,7 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
                 'padding:5px 10px;min-width:64px;max-width:220px;border:0;'
                 'border-top-left-radius:6px;border-top-right-radius:6px;}'
                 f'QTabBar#bscanWorkspaceTabs::tab:selected {{background:{color("bg_surface", dark)};color:{color("text_primary", dark)};'
-                f'font-weight:600;border-bottom:2px solid {color("primary", dark)};}}'
+                'font-weight:600;}'
                 f'QTabBar#bscanWorkspaceTabs::tab:!selected:hover {{background:{color("bg_muted", dark)};}}'
                 f'QTabBar#bscanWorkspaceTabs:focus {{border-bottom:1px solid {color("border_focus", dark)};}}'
                 'ToolButton{background:transparent;border:0;border-radius:4px;}'

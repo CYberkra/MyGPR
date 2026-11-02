@@ -370,7 +370,6 @@
         "type": "int"
       },
       "length_m": {
-        "default": 0.0,
         "min": 0.0,
         "type": "float"
       },
@@ -380,7 +379,6 @@
         "type": "int"
       },
       "time_window_ns": {
-        "default": 0.0,
         "min": 0.0,
         "type": "float"
       },
@@ -790,9 +788,9 @@
         "type": "float"
       },
       "depth": {
-        "default": 20.0,
         "min": 0.01,
-        "type": "float"
+        "type": "float",
+        "visible": false
       },
       "depth_m": {
         "default": 20.0,
@@ -805,9 +803,9 @@
         "type": "float"
       },
       "dx": {
-        "default": 0.0,
         "min": 0.0,
-        "type": "float"
+        "type": "float",
+        "visible": false
       },
       "dx_m": {
         "default": 0.0,
@@ -815,9 +813,9 @@
         "type": "float"
       },
       "dz": {
-        "default": 0.0,
         "min": 0.0,
-        "type": "float"
+        "type": "float",
+        "visible": false
       },
       "dz_m": {
         "default": 0.0,
@@ -862,9 +860,9 @@
         "type": "float"
       },
       "v": {
-        "default": 0.1,
         "min": 0.001,
-        "type": "float"
+        "type": "float",
+        "visible": false
       },
       "velocity_m_per_ns": {
         "default": 0.1,
@@ -1362,5 +1360,208 @@
       }
     },
     "visibility": "public"
+  },
+  "short_trace_repair": {
+    "name": "短段异常道修补",
+    "category": "quality_control",
+    "auto_tune_enabled": false,
+    "auto_tune_family": "",
+    "auto_tune_stage": "",
+    "visibility": "public",
+    "parameter_schema": {
+      "mode": {
+        "type": "str",
+        "default": "mark",
+        "label": "处理模式",
+        "choices": [
+          "mark",
+          "interpolate"
+        ],
+        "choice_labels": {
+          "mark": "仅标记",
+          "interpolate": "插补修复"
+        },
+        "tooltip": "仅标记保留原始波形；插补修复替换短异常段，可能覆盖局部真实反射。"
+      },
+      "window_mode": {
+        "type": "str",
+        "default": "auto",
+        "label": "时窗方案",
+        "choices": [
+          "auto",
+          "manual",
+          "full"
+        ],
+        "choice_labels": {
+          "auto": "自动分窗",
+          "manual": "手动时窗",
+          "full": "旧版全窗（对照）"
+        },
+        "tooltip": "自动按有效样点三等分；全部窗异常才列跨窗候选，部分窗变化不插补。跨窗也不证明采集坏道。"
+      },
+      "window_traces": {
+        "type": "int",
+        "default": 31,
+        "min": 3,
+        "max": 301,
+        "label": "局部参考道数（奇数）"
+      },
+      "robust_z": {
+        "type": "float",
+        "default": 8.0,
+        "min": 0.1,
+        "max": 100.0,
+        "label": "MAD阈值倍数"
+      },
+      "max_run_traces": {
+        "type": "int",
+        "default": 4,
+        "min": 1,
+        "max": 4,
+        "label": "最长插补段（道）"
+      },
+      "time_windows_ns": {
+        "type": "str",
+        "default": "",
+        "label": "手动时窗 ns（仅手动）",
+        "tooltip": "仅手动方案生效，如0:100;100:200;250:850。自动方案无需填写；窗须独立，单窗只作局部审阅。"
+      }
+    },
+    "capabilities": [
+      "cancellable",
+      "global_transform",
+      "loaded_global",
+      "native",
+      "ndarray"
+    ],
+    "implementation_version": "native-short-trace-2.1"
+  },
+  "manual_gain": {
+    "name": "手动曲线增益",
+    "category": "gain",
+    "auto_tune_enabled": false,
+    "auto_tune_family": "",
+    "auto_tune_stage": "",
+    "visibility": "public",
+    "parameter_schema": {
+      "nodes": {
+        "type": "str",
+        "label": "增益曲线",
+        "editor": "gain_curve",
+        "default": "[{\"tau\":0.0,\"db\":0.0},{\"tau\":0.25,\"db\":0.0},{\"tau\":0.5,\"db\":0.0},{\"tau\":0.75,\"db\":0.0},{\"tau\":1.0,\"db\":0.0}]"
+      }
+    },
+    "capabilities": [
+      "block-axis-columns",
+      "cancellable",
+      "chunked",
+      "native",
+      "ndarray"
+    ],
+    "implementation_version": "native-manual-gain-1.0"
+  },
+  "gaussian_smoothing": {
+    "name": "高斯平滑（Gaussian）",
+    "category": "denoising",
+    "auto_tune_enabled": false,
+    "auto_tune_family": "",
+    "auto_tune_stage": "",
+    "visibility": "public",
+    "implementation_version": "native-image-denoise-1.0",
+    "parameter_schema": {
+      "sigma_samples": {
+        "type": "float",
+        "default": 0.0,
+        "min": 0.0,
+        "max": 32.0,
+        "step": 0.1,
+        "label": "时间方向 σ（采样点）",
+        "tooltip": "0 表示不平滑时间方向，避免展宽雷达子波。"
+      },
+      "sigma_traces": {
+        "type": "float",
+        "default": 1.0,
+        "min": 0.0,
+        "max": 32.0,
+        "step": 0.1,
+        "label": "道间方向 σ（道）",
+        "tooltip": "按道序号平滑，不代表固定米数；大值会模糊细节。"
+      }
+    },
+    "capabilities": [
+      "cancellable",
+      "file_backed_staging",
+      "global_transform",
+      "native",
+      "ndarray"
+    ]
+  },
+  "non_local_means": {
+    "name": "非局部均值去噪（NLM）",
+    "category": "denoising",
+    "auto_tune_enabled": false,
+    "auto_tune_family": "",
+    "auto_tune_stage": "",
+    "visibility": "public",
+    "implementation_version": "native-image-denoise-1.0",
+    "parameter_schema": {
+      "h_mode": {
+        "type": "str",
+        "default": "relative_rms",
+        "label": "强度单位",
+        "choices": [
+          "relative_rms",
+          "absolute"
+        ],
+        "choice_labels": {
+          "relative_rms": "全局 RMS 倍数",
+          "absolute": "原始振幅单位"
+        }
+      },
+      "h": {
+        "type": "float",
+        "default": 0.6,
+        "min": 0.0,
+        "label": "滤波强度 h",
+        "tooltip": "越大越平滑，也越可能削弱弱反射；0 为不处理。全局 RMS 模式随输入幅值尺度变化。"
+      },
+      "patch_samples": {
+        "type": "int",
+        "default": 3,
+        "min": 1,
+        "max": 15,
+        "step": 2,
+        "label": "相似块高度（奇数采样点）"
+      },
+      "patch_traces": {
+        "type": "int",
+        "default": 5,
+        "min": 1,
+        "max": 15,
+        "step": 2,
+        "label": "相似块宽度（奇数道）"
+      },
+      "search_samples": {
+        "type": "int",
+        "default": 3,
+        "min": 0,
+        "max": 15,
+        "label": "时间搜索半径（采样点）"
+      },
+      "search_traces": {
+        "type": "int",
+        "default": 5,
+        "min": 0,
+        "max": 15,
+        "label": "道间搜索半径（道）"
+      }
+    },
+    "capabilities": [
+      "cancellable",
+      "file_backed_staging",
+      "global_transform",
+      "native",
+      "ndarray"
+    ]
   }
 }

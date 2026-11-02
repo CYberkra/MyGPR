@@ -24,6 +24,12 @@ All commands below assume this directory is the working directory.
 
 ## Run / Test
 
+自动化测试、冒烟和质量门禁默认在 **GitHub Actions** 执行。除非用户在当前任务中明确要求，
+不在本机运行 pytest、`make gate` 或会启动测试的包装脚本；此约定也适用于子代理。
+本机默认只做代码阅读、差异审查、语法与静态检查。增加回归用例后通过 PR CI 或
+定向回归工作流验证，记录提交 SHA、run URL 与结果；未推送的修改不能称为已通过 CI。
+入口与验收边界见 [测试策略](docs/developer/TESTING_STRATEGY.md)。
+
 Python 支持 **3.12–3.13**（`pyproject.toml`: `>=3.12,<3.14`）；本机 2026-10-14 核验为 3.12.0。依赖基线：
 
 - 核心：numpy 2.5.1、pandas 2.3.3、scipy 1.18.0、matplotlib 3.11.0、Pillow 12.3.0、h5py 3.16.0、PyYAML 6.0.3、PyWavelets 1.9.0、pyproj 3.7.2、openpyxl 3.1.5、rasterio 1.5.0、fiona 1.10.1、defusedxml 0.7.1。
@@ -34,18 +40,12 @@ Python 支持 **3.12–3.13**（`pyproject.toml`: `>=3.12,<3.14`）；本机 202
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-gui.txt -r requirements-dev.txt
 .\.venv\Scripts\python.exe app_qt.py
-$env:QT_QPA_PLATFORM = 'offscreen'
-.\.venv\Scripts\python.exe app_qt.py --smoke
-.\.venv\Scripts\python.exe -m pytest tests/ -q
-Remove-Item Env:QT_QPA_PLATFORM
 ```
 
 Git Bash / Linux：激活对应 `.venv/Scripts/activate` / `.venv/bin/activate` 后使用：
 
 ```bash
 python app_qt.py
-QT_QPA_PLATFORM=offscreen python app_qt.py --smoke
-python -m pytest tests/ -q
 ```
 
 截图默认在系统临时目录 `mygpr_shots/`，可用 `MYGPR_SMOKE_SHOTS_DIR` 覆盖。改动依赖时检查 requirements、`pyproject.toml`、README 与本节是否一致，并运行 `python -m pip check`。
@@ -77,8 +77,8 @@ python -m pytest tests/ -q
 | 任务 | 使用技能 |
 | --- | --- |
 | PyQt 界面设计、布局与操作流程 | `frontend-design-polish`；实际桌面交互验收时用 `windows-desktop-e2e` |
-| GPR 导入、处理算法、参数、异常 B-scan、GUI/CLI 一致性 | `mygpr-processing-validation`；需要回归测试时用 `python-testing` |
-| 缺陷、失败测试、卡顿、串图、异步竞态 | `superpowers:systematic-debugging`，先复现和定位，再修复 |
+| GPR 导入、处理算法、参数、异常 B-scan、GUI/CLI 一致性 | `code-context-finder` 定位真实执行链；`python-testing` 编写回归，执行交给 GitHub CI；科学数据约束见研发技能工作流 |
+| 缺陷、失败测试、卡顿、串图、异步竞态 | `engineering-feedback-loop`，保留可在 CI 复现的失败信号，先定位再修复 |
 | 编写或维护 Python 测试 | `python-testing`；桌面端到端操作使用 `windows-desktop-e2e` |
 | 跨层接口或较大模块重构 | `codebase-design`，遵循现有架构约束 |
 

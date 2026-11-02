@@ -42,7 +42,6 @@ class HomePage(ScrollArea):
         title = BodyLabel('开始一个勘探项目', self._content)
         title.setStyleSheet(f'font-size: {constants.FONT_SIZE_TITLE}pt; font-weight: 600;')
         content.addWidget(title)
-        content.addWidget(make_hint('打开已有项目，或新建项目后导入测线。', parent=self._content))
         actions = QHBoxLayout()
         self.open_btn = PrimaryPushButton('打开项目', self._content, FIF.FOLDER)
         self.new_btn = PushButton('新建项目', self._content, FIF.ADD)
@@ -113,18 +112,22 @@ class HomePage(ScrollArea):
     def set_recent_projects(self, paths) -> None:
         self._recent_paths = list(dict.fromkeys(str(p) for p in paths if p))
         ordered = sorted(self._recent_paths, key=lambda p: p not in self._pinned_paths)
-        names = self._settings.get('project_display_names', {}) if self._settings is not None else {}
-        names = names if isinstance(names, dict) else {}
         self._recent_list.clear()
         for path in ordered:
             available = Path(path).is_dir()
             prefix = '★ ' if path in self._pinned_paths else ''
-            item = QListWidgetItem(f'{prefix}{names.get(path) or Path(path).name}\n{path}  ·  {"可打开" if available else "不可用：目录不存在"}')
+            status = '' if available else '  ·  不可用：目录不存在'
+            item = QListWidgetItem(
+                f'{prefix}{self._project_display_name(path)}\n{path}{status}')
             item.setData(Qt.ItemDataRole.UserRole, path)
             item.setToolTip(path)
             self._recent_list.addItem(item)
         self._recent_hint.setVisible(not self._recent_paths)
         self._recent_list.setVisible(bool(self._recent_paths))
+
+    def _project_display_name(self, path: str) -> str:
+        names = self._settings.get('project_display_names', {}) if self._settings is not None else {}
+        return str(names.get(path) or Path(path).name) if isinstance(names, dict) else Path(path).name
 
     def set_startup_error(self, message: str) -> None:
         self._startup_error.setText(str(message or ''))
@@ -175,7 +178,7 @@ class HomePage(ScrollArea):
         if self._recent_paths:
             menu.addSeparator()
         for path in sorted(self._recent_paths, key=lambda p: p not in self._pinned_paths):
-            label = ('★ ' if path in self._pinned_paths else '') + Path(path).name
+            label = ('★ ' if path in self._pinned_paths else '') + self._project_display_name(path)
             if not Path(path).is_dir():
                 label += ' · 不可用'
             action = add_action(menu, FIF.FOLDER, label,

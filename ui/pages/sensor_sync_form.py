@@ -29,6 +29,14 @@ _FIELDS = (
 )
 
 
+class _FocusedWheelSpinBox(DoubleSpinBox):
+    def wheelEvent(self, event):
+        if not self.hasFocus():
+            event.ignore()
+            return
+        super().wheelEvent(event)
+
+
 class SensorSyncForm(QWidget):
     browse_requested = pyqtSignal(str)
     save_template_requested = pyqtSignal()
@@ -52,21 +60,25 @@ class SensorSyncForm(QWidget):
         self._fields = {}
         advanced_card, advanced = make_collapsible_card('高级同步与标定', collapsed=True)
         for key, label, default, decimals in _FIELDS:
-            spin = DoubleSpinBox(advanced_card)
-            spin.setRange(-86400.0 if 'offset' in key or 'delay' in key else 0.0, 86400.0)
+            spin = _FocusedWheelSpinBox(advanced_card)
+            spin.setRange(-86400.0 if 'offset' in key or 'delay' in key or key.startswith('lever_arm_') else 0.0, 86400.0)
             spin.setDecimals(decimals)
             spin.setSingleStep(0.01 if decimals >= 3 else 0.1)
             spin.setValue(default)
             advanced.addLayout(make_form_row(label, spin, parent=advanced_card))
             self._fields[key] = spin
-        extrapolation = CheckBox('允许时间范围外插（谨慎）', advanced_card)
+        extrapolation = CheckBox('范围外允许沿用端点值（受残差阈值限制）', advanced_card)
         advanced.addWidget(extrapolation)
         self._fields['allow_extrapolation'] = extrapolation
         crs = LineEdit(advanced_card)
         crs.setPlaceholderText('留空沿用项目坐标系，例如 EPSG:4547')
+        crs.setToolTip('填写明确的工程投影坐标系，例如 EPSG:4523；项目的笼统名称无法确定分带时，请在此输入实际 EPSG。')
         advanced.addLayout(make_form_row('项目坐标系', crs, parent=advanced_card))
         self._fields['project_crs'] = crs
         layout.addWidget(advanced_card)
+        crs_hint = make_hint('项目未指定分带时，符合条件的经纬度轨迹会自动推断并提示；也可在高级设置中指定实际 EPSG。', parent=self)
+        crs_hint.setWordWrap(True)
+        layout.addWidget(crs_hint)
         hint = make_hint('模板仅保存同步与标定参数，不包含各测线的设备文件路径。', parent=self)
         hint.setWordWrap(True)
         layout.addWidget(hint)

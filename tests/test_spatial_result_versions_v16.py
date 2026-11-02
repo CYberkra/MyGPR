@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import csv
 from pathlib import Path
 
 import numpy as np
@@ -32,8 +33,8 @@ def _project_with_spatial_lines(root: Path, count: int = 3) -> FieldProjectStore
             trace_count=120,
             sample_count=80,
             status="confirmed",
-            source_result_id=f"{line_id}_processed_v1",
-            source_mode="processed",
+            source_result_id=f"{line_id}_raw",
+            source_mode="raw",
         )
         annotation.set_keypoint(0, 42.0 + line_index)
         annotation.set_keypoint(119, 51.0 + line_index)
@@ -65,7 +66,9 @@ def test_spatial_result_version_is_immutable_and_traceable(tmp_path: Path) -> No
 
         assert record.result_id == "basal_surface_v001"
         assert record.summary["line_count"] == 3
-        assert record.options["surface_generated"] is True
+        assert record.options["surface_generated"] is False
+        assert record.options["surface_control_points_generated"] is True
+        assert any('不生成连续曲面' in warning for warning in record.summary['preflight_warnings'])
         assert service.current_result_id() == record.result_id
         result_dir = store.root / "spatial" / "results" / record.result_id
         manifest = json.loads((result_dir / "manifest.json").read_text(encoding="utf-8"))
@@ -79,6 +82,50 @@ def test_spatial_result_version_is_immutable_and_traceable(tmp_path: Path) -> No
         second = service.create_result(name="basal_surface", generate_surface=True)
         assert second.result_id == "basal_surface_v002"
         assert (result_dir / "manifest.json").read_text(encoding="utf-8") == json.dumps(manifest, ensure_ascii=False, indent=2)
+    finally:
+        store.close()
+
+
+def test_ignored_traces_do_not_become_surface_control_points(tmp_path: Path) -> None:
+    store = _project_with_spatial_lines(tmp_path / 'project')
+    try:
+        annotation = store.load_basal_interface_annotation('L01')
+        annotation.set_segment(10, 20, 'ignore')
+        store.save_basal_interface_annotation('L01', annotation)
+        result = SpatialResultVersionService(store).create_result(name='ignore', generate_surface=True)
+        path = store.root / 'spatial' / 'results' / result.result_id / 'surface_control_points.geojson'
+        features = json.loads(path.read_text(encoding='utf-8'))['features']
+        assert not any(f['properties']['line_id'] == 'L01' and 10 <= f['properties']['trace_index'] <= 20 for f in features)
+    finally:
+        store.close()
+
+
+def test_interface_export_uses_ground_elevation(tmp_path: Path) -> None:
+    store = _project_with_spatial_lines(tmp_path / 'project', count=1)
+    try:
+        trajectory = store.load_trajectory('L01')
+        for point in trajectory.points:
+            point.flight_height_m = 2.0
+        store.save_trajectory('L01', trajectory)
+        with store.export_spatial_interface_curve('L01').open(encoding='utf-8-sig', newline='') as fh:
+            row = next(csv.DictReader(fh))
+        assert float(row['surface_z']) == pytest.approx(123.0)
+        assert float(row['interface_z']) == pytest.approx(123.0 - float(row['depth_m']), abs=1e-5)
+    finally:
+        store.close()
+
+
+def test_annotation_rejects_invalid_processed_source_id(tmp_path: Path) -> None:
+    store = _project_with_spatial_lines(tmp_path / 'project', count=1)
+    try:
+        annotation = store.load_basal_interface_annotation('L01')
+        annotation.source_result_id = '../outside'
+        annotation.source_mode = 'processed'
+        with pytest.raises(ValueError, match='来源'):
+            store.save_basal_interface_annotation('L01', annotation)
+        annotation.source_result_id = ''
+        with pytest.raises(ValueError, match='来源'):
+            store.save_basal_interface_annotation('L01', annotation)
     finally:
         store.close()
 
@@ -140,5 +187,139 @@ def test_surface_generation_is_disabled_when_coverage_is_insufficient(tmp_path: 
         record = service.create_result(name="lines_only", generate_surface=True)
         assert record.options["surface_generated"] is False
         assert "surface_control_points_geojson" not in record.files
+    finally:
+        store.close()
+
+
+def test_spatial_result_uses_actual_track_crs_for_generic_project(tmp_path: Path) -> None:
+    store = _project_with_spatial_lines(tmp_path / 'project', count=1)
+    try:
+        store.manifest.coordinate_system = 'CGCS2000 / 3-degree GK'
+        store.save_manifest()
+        record = SpatialResultVersionService(store).create_result(name='actual_crs', generate_surface=False)
+        assert record.coordinate_system == 'EPSG:4547'
+        path = store.root / 'spatial' / 'results' / record.result_id / 'interfaces.geojson'
+        assert json.loads(path.read_text(encoding='utf-8'))['crs']['properties']['name'] == 'EPSG:4547'
+    finally:
+        store.close()
+
+
+def test_spatial_preflight_rejects_mixed_track_crs(tmp_path: Path) -> None:
+    store = _project_with_spatial_lines(tmp_path / 'project', count=2)
+    try:
+        trajectory = store.load_trajectory('L02')
+        for point in trajectory.points:
+            point.coordinate_system = 'EPSG:4523'
+        store.save_trajectory('L02', trajectory)
+        result = SpatialResultVersionService(store).preflight(generate_surface=False)
+        assert not result['passed']
+        assert any('坐标系' in message for message in result['errors'])
+    finally:
+        store.close()
+
+
+def test_spatial_preflight_recognizes_equivalent_projection_labels(tmp_path: Path) -> None:
+    store = _project_with_spatial_lines(tmp_path / 'project', count=1)
+    try:
+        trajectory = store.load_trajectory('L01')
+        for point in trajectory.points:
+            point.coordinate_system = 'CGCS2000 / 3-degree GK CM 114E (EPSG:4547)'
+        store.save_trajectory('L01', trajectory)
+        result = SpatialResultVersionService(store).preflight(generate_surface=False)
+        assert result['passed'], result['errors']
+        assert result['coordinate_system'] == 'EPSG:4547'
+    finally:
+        store.close()
+
+
+@pytest.mark.parametrize('coordinate_system', ['EPSG:4547', 'EPSG:32648'])
+def test_spatial_preflight_accepts_synchronized_wkt_and_epsg_tracks(
+    tmp_path: Path, coordinate_system: str,
+) -> None:
+    from pyproj import CRS
+
+    store = _project_with_spatial_lines(tmp_path / 'project', count=2)
+    try:
+        store.manifest.coordinate_system = coordinate_system
+        store.save_manifest()
+        for line_id, label in (
+            ('L01', coordinate_system),
+            ('L02', CRS.from_user_input(coordinate_system).to_wkt()),
+        ):
+            trajectory = store.load_trajectory(line_id)
+            for point in trajectory.points:
+                point.coordinate_system = label
+            store.save_trajectory(line_id, trajectory)
+        result = SpatialResultVersionService(store).preflight(generate_surface=False)
+        assert result['passed'], result['errors']
+        assert result['coordinate_system'] == coordinate_system
+    finally:
+        store.close()
+
+
+def test_spatial_result_does_not_invent_unknown_track_crs(tmp_path: Path) -> None:
+    store = _project_with_spatial_lines(tmp_path / 'project', count=1)
+    try:
+        store.manifest.coordinate_system = 'CGCS2000 / 3-degree GK'
+        store.save_manifest()
+        trajectory = store.load_trajectory('L01')
+        for point in trajectory.points:
+            point.coordinate_system = ''
+        store.save_trajectory('L01', trajectory)
+        record = SpatialResultVersionService(store).create_result(name='unknown_crs', generate_surface=False)
+        assert record.coordinate_system == ''
+        assert record.status == 'generated_with_warnings'
+        path = store.root / 'spatial' / 'results' / record.result_id / 'interfaces.geojson'
+        assert 'crs' not in json.loads(path.read_text(encoding='utf-8'))
+        with pytest.raises(ValueError, match='坐标系'):
+            SpatialResultVersionService(store).export_result(record.result_id, tmp_path / 'unknown', format_name='kml')
+    finally:
+        store.close()
+
+
+def test_kml_export_converts_projected_coordinates_to_lon_lat(tmp_path: Path) -> None:
+    import xml.etree.ElementTree as ET
+    from pyproj import Transformer
+
+    store = _project_with_spatial_lines(tmp_path / 'project', count=1)
+    try:
+        service = SpatialResultVersionService(store)
+        record = service.create_result(name='kml_crs', generate_surface=False)
+        path = store.root / 'spatial' / 'results' / record.result_id / 'interfaces.geojson'
+        feature = json.loads(path.read_text(encoding='utf-8'))['features'][0]
+        x, y, z = feature['geometry']['coordinates'][0]
+        expected_lon, expected_lat = Transformer.from_crs('EPSG:4547', 'EPSG:4326', always_xy=True).transform(x, y)
+        output = service.export_result(record.result_id, tmp_path / 'result', format_name='kml')
+        element = ET.parse(output).find('.//{http://www.opengis.net/kml/2.2}coordinates')
+        lon, lat, altitude = map(float, element.text.split()[0].split(','))
+        assert lon == pytest.approx(expected_lon)
+        assert lat == pytest.approx(expected_lat)
+        assert altitude == pytest.approx(z)
+    finally:
+        store.close()
+
+
+def test_spatial_provenance_distinguishes_annotation_source_from_latest_result(tmp_path: Path) -> None:
+    store = _project_with_spatial_lines(tmp_path / 'project', count=1)
+    try:
+        annotation = store.load_basal_interface_annotation('L01')
+        annotation.source_result_id = 'L01_raw'
+        annotation.source_mode = 'raw'
+        store.save_basal_interface_annotation('L01', annotation, export_labels=True)
+        line = store.get_line('L01')
+        line.processed_result = 'processing/unrelated_latest.npz'
+        (store.root / line.processed_result).parent.mkdir(parents=True, exist_ok=True)
+        (store.root / line.processed_result).write_bytes(b'unrelated result')
+        store.upsert_line(line)
+        record = SpatialResultVersionService(store).create_result(name='raw_source')
+        result_dir = store.root / 'spatial' / 'results' / record.result_id
+        manifest = json.loads((result_dir / 'manifest.json').read_text(encoding='utf-8'))
+        source = manifest['sources']['line_sources']['L01']
+        assert source['source_result_id'] == 'L01_raw'
+        assert source['processing_result_role'] == 'latest_line_result_context'
+        with (result_dir / 'profiles.csv').open(encoding='utf-8-sig', newline='') as fh:
+            row = next(csv.DictReader(fh))
+        assert row['source_result_id'] == 'L01_raw'
+        assert row['latest_processing_result'] == 'processing/unrelated_latest.npz'
     finally:
         store.close()

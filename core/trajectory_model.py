@@ -124,7 +124,7 @@ class TrajectoryModel:
                 def get_float(*keys: str, default: float = 0.0) -> float:
                     for key in keys:
                         value = row.get(key)
-                        if value not in (None, ""):
+                        if value is not None and value != "":
                             try:
                                 return float(value)
                             except ValueError:
@@ -133,6 +133,10 @@ class TrajectoryModel:
 
                 def get_int(*keys: str, default: int = 0) -> int:
                     return int(round(get_float(*keys, default=float(default))))
+
+                def sensor_float(*keys: str) -> float:
+                    # An explicit empty sensor column is missing, not zero.
+                    return get_float(*keys, default=float('nan') if any(key in row for key in keys) else 0.0)
 
                 d = get_float("distance_m", "mileage", "里程", "distance")
                 x = get_float("x", "X", "x_m", "local_x_m", "东坐标", default=float("nan"))
@@ -148,18 +152,18 @@ class TrajectoryModel:
                         x=x,
                         y=y,
                         z=z,
-                        yaw_deg=get_float("yaw_deg", "yaw", "heading_deg", "航向角"),
+                        yaw_deg=sensor_float("yaw_deg", "yaw", "heading_deg", "航向角"),
                         quality=str(quality),
                         longitude=lon,
                         latitude=lat,
                         coordinate_system=str(coord),
-                        timestamp_s=get_float("timestamp_s", "trace_timestamp_s", "timestamp", "time_s"),
-                        roll_deg=get_float("roll_deg", "roll"),
-                        pitch_deg=get_float("pitch_deg", "pitch"),
+                        timestamp_s=sensor_float("timestamp_s", "trace_timestamp_s", "timestamp", "time_s"),
+                        roll_deg=sensor_float("roll_deg", "roll"),
+                        pitch_deg=sensor_float("pitch_deg", "pitch"),
                         satellites=get_int("satellites", "sat", "num_satellites"),
                         hdop=get_float("hdop"),
                         pdop=get_float("pdop"),
-                        flight_height_m=get_float("flight_height_m", "height_agl_m", "agl_m"),
+                        flight_height_m=sensor_float("flight_height_m", "height_agl_m", "agl_m"),
                         alignment_status=str(row.get("alignment_status") or "aligned"),
                         trace_index=get_int("trace_index", default=row_index),
                     )

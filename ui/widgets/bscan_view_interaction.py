@@ -15,7 +15,7 @@ import math
 
 import numpy as np
 import pyqtgraph as pg
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QEvent, Qt
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants
@@ -96,6 +96,43 @@ def format_crosshair_readout(trace: int, sample: int, shape: tuple,
 
 class BScanViewInteractionMixin:
 
+    def qc_marks_visible(self) -> bool:
+        return self._qc_marks_visible
+
+    def qc_marks_menu_action(self, parent):
+        """Fluent stores one item on each action: give every menu its own proxy."""
+        from PyQt6.QtGui import QIcon
+        from qfluentwidgets import Action
+        action = Action(self._qc_marks_action.text(), parent)
+        action.setObjectName('showAnomalousTraceMarks')
+        action.setData('bscan-qc-marks')
+        action.setCheckable(True)
+        action.setChecked(self._qc_marks_visible)
+        action.setToolTip(self._qc_marks_action.toolTip())
+        # Plain RoundMenu does not paint QAction check states. Render an explicit
+        # check icon while preserving the existing menu style and footprint.
+        def update_indicator(checked):
+            action.setIcon(FIF.ACCEPT.icon() if checked else QIcon())
+        update_indicator(action.isChecked())
+        action.toggled.connect(update_indicator)
+        # A QObject-bound receiver disconnects when the menu-owned proxy dies.
+        self._qc_marks_action.toggled.connect(action.setChecked)
+        action.triggered.connect(lambda visible: self.set_qc_marks_visible(visible, notify=True))
+        return action
+
+    def set_qc_marks_visible(self, visible: bool, *, notify: bool = False) -> None:
+        """Display only: retain data, stored masks, existing items and levels."""
+        visible = bool(visible)
+        changed = visible != self._qc_marks_visible
+        self._qc_marks_visible = visible
+        # Programmatic setChecked emits changed/toggled, never triggered: open
+        # menus stay synchronized without re-entering this display preference.
+        self._qc_marks_action.setChecked(visible)
+        for item in [*getattr(self, '_qc_marks', []), *getattr(self, '_qc_local_marks', [])]:
+            item.setVisible(visible)
+        if changed and notify:
+            self.sig_qc_marks_visible_changed.emit(visible)
+
     def set_view_reversed(self, reversed_view: bool) -> None:
         """Reverse only the viewing direction, never the data or coordinates."""
         self._plot.vb.invertX(bool(reversed_view))
@@ -117,7 +154,28 @@ class BScanViewInteractionMixin:
                                        brush=pg.mkBrush(255, 80, 40, 65), pen=pg.mkPen(None))
             item.setZValue(20)
             self._plot.addItem(item, ignoreBounds=True)
+            item.setVisible(self._qc_marks_visible)
             self._qc_marks.append(item)
+        return True
+
+    def set_qc_local_mask(self, mask) -> bool:
+        import numpy as np
+        import pyqtgraph as pg
+        for item in getattr(self, '_qc_local_marks', []):
+            self._plot.removeItem(item)
+        self._qc_local_marks = []
+        if mask is None:
+            return True
+        values = np.asarray(mask)
+        if self._matrix is None or values.shape != (self._matrix.shape[1],):
+            return False
+        for index in np.flatnonzero(values):
+            item = pg.LinearRegionItem((int(index), int(index)+1), movable=False,
+                                       brush=pg.mkBrush(240, 170, 20, 75), pen=pg.mkPen(None))
+            item.setZValue(19)
+            self._plot.addItem(item, ignoreBounds=True)
+            item.setVisible(self._qc_marks_visible)
+            self._qc_local_marks.append(item)
         return True
 
     def focus_trace_range(self, start: int, stop: int) -> bool:
@@ -158,21 +216,15 @@ class BScanViewInteractionMixin:
         menu.exec(event.screenPos().toPoint())
 
     def _add_menu_zoom(self, menu) -> None:
-        """缩放与视野组：缩放 / 回到全览 / 比例 / 全屏 / 铺满。
-
-        「铺满」（收起页面侧栏）只在宿主页接管后出现——原工具条按钮
-        退役后，这里是除快捷语义外的唯一入口。
-        """
         self._add_menu_selection(menu)
-        add_action(menu, FIF.ZOOM_IN, '放大', self.zoom_in)
-        add_action(menu, FIF.ZOOM_OUT, '缩小', self.zoom_out)
         add_action(menu, FIF.FIT_PAGE, '回到全览（铺满窗口）', self.fit_to_data)
-        add_action(menu, None, '方形显示', self.fit_square)
-        add_action(menu, None, '1:1（数据格等比）', self.reset_1to1)
-        add_action(menu, FIF.FULL_SCREEN, '全屏浏览', self.enter_fullscreen)
-        if self._expand_enabled:
-            add_action(menu, FIF.VIEW, '铺满（收起页面侧栏）',
-                       self.request_expand)
+        add_action(menu, FIF.FULL_SCREEN, '全屏浏览（F11）', self.enter_fullscreen)
+        zoom = RoundMenu('缩放与比例', menu)
+        add_action(zoom, FIF.ZOOM_IN, '放大', self.zoom_in)
+        add_action(zoom, FIF.ZOOM_OUT, '缩小', self.zoom_out)
+        add_action(zoom, None, '方形显示', self.fit_square)
+        add_action(zoom, None, '1:1（数据格等比）', self.reset_1to1)
+        menu.addMenu(zoom)
 
     def _add_menu_axes(self, menu) -> None:
         """轴单位组：工具条精简后这里是切换主入口（另一处是设置页）。"""
@@ -217,6 +269,7 @@ class BScanViewInteractionMixin:
         ascan_action.setChecked(self._ascan_follow)
         ascan_action.triggered.connect(self.set_ascan_follow)
         menu.addAction(ascan_action)
+        menu.addAction(self.qc_marks_menu_action(menu))
         if self._colorbar is not None:
             colorbar_action = Action('显示色标')
             colorbar_action.setCheckable(True)
@@ -419,7 +472,9 @@ class BScanViewInteractionMixin:
         self._ascan_follow = bool(enabled)
         if enabled:
             if self._ascan_popup is None:
-                self._ascan_popup = AScanPopup(self.window())
+                # The view outlives a temporary fullscreen host, including when
+                # the popup is first opened after entering fullscreen.
+                self._ascan_popup = AScanPopup(self)
                 self._ascan_popup.closed.connect(self._on_ascan_popup_closed)
             self._ascan_popup.show()
             self.set_pick_enabled(True)
@@ -497,12 +552,20 @@ class BScanViewInteractionMixin:
         self._readout.move(
             margin, self.height() - self._readout.height() - margin)
 
+    def eventFilter(self, watched, event):
+        if (watched is self._glw and event.type() == QEvent.Type.KeyPress
+                and event.key() == Qt.Key.Key_Escape and self.is_fullscreen()):
+            self._fullscreen._on_escape()
+            return True
+        return super().eventFilter(watched, event)
+
     def leaveEvent(self, event) -> None:
         self._hide_crosshair()
         super().leaveEvent(event)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        self._layout_fullscreen_controls()
         if self._readout.isVisible():
             self._position_readout()
 

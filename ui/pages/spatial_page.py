@@ -6,7 +6,7 @@
   卡片"底图"（瓦图源 ComboBox + 预下载按钮 + 进度）、卡片"投影信息"、
   卡片"三维显示"（**可折叠**，默认收起——六组控件只作用于 Trajectory3DView，
   切到非三维视图时一行都不生效却占左栏 28.8%，见 ``_build_view3d_card``）
-- 中栏 stretch：卡片"空间视图"（标题与 SlimSegment 同行 header，切换
+- 中栏 stretch：无重复标题的视图卡片（SlimSegment 切换
   "平面地图 / 高程剖面 / 三维视图 / 深度切片"）
   + QStackedWidget（MapView / 高程剖面 PlotWidget / Trajectory3DView /
   DepthSliceView + 深度滑条 + 存为图层按钮）
@@ -33,7 +33,7 @@ from qfluentwidgets import (CaptionLabel, ComboBox, DoubleSpinBox,
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants, file_dialogs
-from ui.geo_utils import coverage_statistics, format_distance
+from ui.geo_utils import coverage_statistics, format_distance, format_spacing
 from ui.qt_defer import defer_call
 from ui.spatial_view_sync import ViewSyncMixin
 from ui.pages.spatial_context_menus import SpatialContextMenuMixin
@@ -292,9 +292,6 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
         basemap_card, basemap_layout = make_card('底图')
         source_row = QHBoxLayout()
         source_row.setSpacing(constants.CARD_SPACING)
-        source_label = CaptionLabel('来源:', basemap_card)
-        source_label.setMinimumWidth(40)
-        source_row.addWidget(source_label)
         self._basemap_combo = ComboBox(basemap_card)
         for key, (display, _base, _overlay) in BASEMAP_LAYERS.items():
             self._basemap_combo.addItem(display, userData=key)
@@ -394,7 +391,7 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
         dem_row.addWidget(self._3d_dem_clear_btn)
         dem_row.addStretch(1)
         view3d_layout.addLayout(dem_row)
-        self._3d_dem_label = CaptionLabel('未导入（在线下载高程）', view3d_card)
+        self._3d_dem_label = CaptionLabel('', view3d_card)
         self._3d_dem_label.setWordWrap(True)
         view3d_layout.addWidget(self._3d_dem_label)
         return view3d_card
@@ -407,8 +404,6 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
         middle_layout.setSpacing(constants.PAGE_SPACING)
         columns.addWidget(middle, 1)
 
-        # header 单行化：标题居左 + 视图切换瘦页签居右（make_segment_card
-        # 范式），中栏图像区省出一整行。
         self._view_segment = SlimSegment(self)
         self._view_segment.addItem(
             _SEG_MAP, '平面地图', onClick=lambda: self._switch_view(_SEG_MAP))
@@ -420,7 +415,7 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
             _SEG_DEPTH, '界面深度网格', onClick=lambda: self._switch_view(_SEG_DEPTH))
         self._view_segment.setCurrentItem(_SEG_MAP)
         view_card, view_layout = make_segment_card(
-            '空间视图', self._view_segment, parent=self)
+            '', self._view_segment, parent=self)
 
         self._view_stack = QStackedWidget(view_card)
         self._map_view = MapView(view_card)
@@ -517,11 +512,6 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
             row.addWidget(value_label, 1)
             coverage_layout.addLayout(row)
             self._coverage_labels[key] = value_label
-        coverage_hint = CaptionLabel(
-            '统计仅基于已载入的空间轨迹，不修改项目数据。', coverage_card)
-        coverage_hint.setWordWrap(True)
-        coverage_layout.addWidget(coverage_hint)
-
         # 两卡按内容高度贴顶排列，空白统一由末尾 stretch 推到栏底。
         # 此前给两张卡各addWidget(card, 1) 平分高度，实测每卡 443px 而内容
         # 只有 172 / 147px —— 空白 61% / 67% 且被卡片边框切成两块，视觉上
@@ -877,7 +867,7 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
         segments = int(statistics['segment_count'])
         if segments:
             spacing = float(statistics['length_m']) / segments
-            labels['spacing'].setText(format_distance(spacing))
+            labels['spacing'].setText(format_spacing(spacing))
         else:
             labels['spacing'].setText('--')
 
@@ -954,7 +944,7 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
         """清除本地 DEM：三维地形回退在线高程瓦片，并删除设置记录。"""
         self._3d_view.set_local_dem(None)
         self._dem_base_text = ''
-        self._3d_dem_label.setText('未导入（在线下载高程）')
+        self._3d_dem_label.setText('')
         self._3d_dem_label.setToolTip('')
         self._3d_dem_clear_btn.setEnabled(False)
         if self._terrain_mode == 'local_dem':

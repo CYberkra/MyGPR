@@ -105,3 +105,28 @@ def test_sync_rejects_in_range_samples_when_nearest_time_residual_exceeds_limit(
     assert result.trace_metadata["alignment_status"].tolist() == ["aligned", "rtk_time_residual", "aligned"]
     assert np.isnan(result.trace_metadata["local_x_m"][1])
     assert result.diagnostics.rtk.accepted_ratio == pytest.approx(2 / 3)
+
+
+def test_geographic_project_crs_is_rejected_for_meter_coordinates() -> None:
+    rtk = _rtk_payload()
+    del rtk['local_x_m']
+    del rtk['local_y_m']
+    with pytest.raises(ValueError, match='米'):
+        synchronize_sensor_streams(trace_timestamps_s=np.array([10., 11.]),
+            rtk_payload=rtk, config=SensorSyncConfig(project_crs='EPSG:4326'))
+
+
+@pytest.mark.parametrize('crs', ['EPSG:4326', 'EPSG:2263'])
+def test_non_metric_crs_is_rejected_even_with_local_xy(crs) -> None:
+    with pytest.raises(ValueError, match='米'):
+        synchronize_sensor_streams(trace_timestamps_s=np.array([10., 11.]),
+            rtk_payload=_rtk_payload(), config=SensorSyncConfig(project_crs=crs))
+
+
+def test_extrapolation_does_not_bypass_nearest_residual_limit() -> None:
+    result = synchronize_sensor_streams(trace_timestamps_s=np.array([9.9, 10., 10.5, 12.1]),
+        rtk_payload=_rtk_payload(),
+        config=SensorSyncConfig(allow_extrapolation=True, maximum_nearest_residual_s=0.25))
+    assert np.isfinite(result.trace_metadata['local_x_m'][[0, 1, 3]]).all()
+    assert np.isnan(result.trace_metadata['local_x_m'][2])
+    assert any('端点' in warning for warning in result.diagnostics.warnings)

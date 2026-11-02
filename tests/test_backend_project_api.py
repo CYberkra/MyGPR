@@ -20,6 +20,23 @@ def _data(rows: int = 72, cols: int = 48) -> np.ndarray:
     return (0.08 * y + np.exp(-((y - 0.55 - 0.03 * np.sin(x * 6.28)) ** 2) / 0.003)).astype(np.float32)
 
 
+def test_batch_import_job_preserves_dielectric(tmp_path):
+    backend = MyGPRBackend.create_default(max_workers=1)
+    try:
+        project = backend.projects.create_project(tmp_path / 'project', name='batch')
+        paths = [tmp_path / 'L01.npy', tmp_path / 'L02.npy']
+        for path in paths:
+            np.save(path, np.ones((8, 4), dtype=np.float32))
+        job = backend.submit_batch_line_import(project.project_id, [str(p) for p in paths], dielectric_constant=16)
+        result = backend.jobs.wait(job, timeout=30)
+        assert result.status is JobStatus.COMPLETED, result.error_message
+        assert result.result.succeeded == 2
+        for line in backend.projects.list_lines(project.project_id):
+            assert backend.projects.read_dataset(project.project_id, line.line_id).header_info['dielectric_constant'] == 16
+    finally:
+        backend.shutdown()
+
+
 def test_project_api_create_window_process_audit_backup_restore(tmp_path: Path) -> None:
     backend = MyGPRBackend.create_default(max_workers=1)
     try:
@@ -154,6 +171,29 @@ def test_cancelled_project_artifact_commit_leaves_no_artifact(tmp_path: Path) ->
                 context=context,
             )
         assert backend.projects.list_artifacts(summary.project_id, "L01") == ()
+    finally:
+        backend.shutdown()
+
+
+def test_processing_preserves_qc_warning_and_legacy_star_is_not_shown_as_pass(tmp_path: Path) -> None:
+    backend = MyGPRBackend.create_default(max_workers=1)
+    try:
+        project = backend.projects.create_project(tmp_path / 'qc-project', name='QC')
+        source = tmp_path / 'line.npy'
+        np.save(source, _data(32, 20))
+        backend.acquisition.import_line(project.project_id, source, line_id='L01')
+        session = backend.projects._session(project.project_id)
+        store = session._store
+        report = store.load_quality_report('L01')
+        assert report is not None and report.status_label == '警告'
+        backend.projects.save_processing_artifact(project.project_id, 'L01', _data(32, 20),
+            name='result', method_id='noop', method_name='noop', params={}, pipeline=[],
+            branch_id='L01:main', input_dataset={}, context=ExecutionContext.null())
+        assert store.get_line('L01').data_quality == '警告'
+        legacy = store.get_line('L01')
+        legacy.data_quality = '★★★★★'
+        store.upsert_line(legacy)
+        assert backend.projects.list_lines(project.project_id)[0].data_quality == '警告'
     finally:
         backend.shutdown()
 

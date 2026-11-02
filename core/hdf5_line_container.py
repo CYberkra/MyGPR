@@ -178,6 +178,11 @@ def write_raw_dataset(
                 compression="gzip", compression_opts=1, shuffle=True,
             )
             metadata = dataset.to_metadata()
+            nested_metadata = metadata.get("metadata") or {}
+            timestamps = nested_metadata.pop("trace_timestamp_s", None)
+            if timestamps is not None:
+                raw.create_dataset("trace_timestamp_s", data=np.asarray(timestamps, dtype=np.float64),
+                                   compression="gzip", compression_opts=1, shuffle=True)
             metadata.update(
                 storage_mode="hdf5_line_container",
                 matrix_dataset=RAW_MATRIX_PATH,
@@ -220,6 +225,8 @@ def load_raw_dataset(path: str | Path, *, line_id: str) -> GPRDataSet:
         distance = np.asarray(raw["distance_m"][...], dtype=np.float32)
         time_axis = np.asarray(raw["time_ns"][...], dtype=np.float32)
         depth = np.asarray(raw["depth_m"][...], dtype=np.float32)
+        if "trace_timestamp_s" in raw:
+            metadata["trace_timestamp_s"] = np.asarray(raw["trace_timestamp_s"][...], dtype=np.float64).tolist()
     proxy = HDF5ArrayProxy(source, RAW_MATRIX_PATH)
     return GPRDataSet(
         line_id=line_id,

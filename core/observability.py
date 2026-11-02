@@ -183,7 +183,13 @@ def install_global_exception_hooks(log_dir: str | Path) -> Path:
             native_path = root / "native-crash.log"
             try:
                 _NATIVE_CRASH_STREAM = native_path.open("a", encoding="utf-8")
-                faulthandler.enable(file=_NATIVE_CRASH_STREAM, all_threads=True)
+                # Windows also reports handled SEH/COM exceptions to the
+                # vectored handler, sometimes while another thread owns the
+                # GIL and is changing its frames. Walking that thread can
+                # itself crash CPython; keep the faulting thread's traceback.
+                faulthandler.enable(
+                    file=_NATIVE_CRASH_STREAM, all_threads=sys.platform != "win32"
+                )
             except OSError:
                 _NATIVE_CRASH_STREAM = None
         _HOOK_LOG_DIR = root

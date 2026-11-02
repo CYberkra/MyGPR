@@ -197,6 +197,50 @@ def test_project_rename_updates_recent_name_without_resetting_project(page, qapp
     assert settings["project_display_names"][changed.root_path] == "校园复测"
 
 
+def test_project_rename_updates_switch_menu_and_persisted_recent_name(page, qapp, monkeypatch, tmp_path):
+    from ui.settings_manager import SettingsManager
+    from ui.controllers import project_identity_controller as module
+
+    pc = ProjectController()
+    pc._current = page._summary
+    changed = NS(**{**vars(page._summary), 'name': '校园复测'})
+    pc.set_backend(NS(backend=NS(projects=NS(rename_project=lambda *a: changed))))
+    identity, chain, _, _ = chain_for(page, pc, None)
+    tree_updates = []
+    identity.tree = NS(set_project_info=lambda summary: tree_updates.append(summary.name))
+    navigation_updates = []
+    page.workspace_state_changed.connect(lambda _: navigation_updates.append(page._summary.name))
+    page.set_project_metadata(NS(project_id='P', name='校园', location='成都', coordinate_system='EPSG:4523'))
+    settings = SettingsManager(str(tmp_path / 'settings.json'))
+    identity.co.settings = settings
+    page.startup.set_settings_manager(settings)
+    commands = []
+    monkeypatch.setattr(module, 'run_command', lambda command, **kw: commands.append(command))
+    page._identity.rename_project_requested.emit('P', '校园复测')
+    commands[0].execute()
+    qapp.processEvents()
+    assert page.line_search.placeholderText() == '搜索 1 条测线'
+    assert navigation_updates[-1] == '校园复测'
+    assert tree_updates == ['校园复测']
+    assert page._info_values['location'].text() == '成都'
+    page.set_project_metadata(NS(project_id='P', name='校园', location='成都', coordinate_system='EPSG:4523'))
+    assert page._info_values['name'].text() == '校园复测'
+    assert page.current_line_id() == 'L01'
+    assert page.startup._recent_list.item(0).text().startswith('校园复测\n')
+    menu = page.startup.project_menu(page.empty_import_btn, can_close=True,
+                                     close_requested=page.close_project_requested.emit)
+    action = next(a for a in menu.actions() if a.text() == '校园复测')
+    assert action.toolTip() == changed.root_path
+    opened = []
+    page.startup.open_recent_project_requested.connect(opened.append)
+    action.trigger()
+    assert opened == [changed.root_path]
+    reloaded = SettingsManager(str(tmp_path / 'settings.json'))
+    page.startup.set_settings_manager(reloaded)
+    menu = page.startup.project_menu(page.empty_import_btn, can_close=False, close_requested=lambda: None)
+    assert '校园复测' in [a.text() for a in menu.actions()]
+
+
 def test_relocation_persists_recent_and_pinned_paths_with_new_display_name(page, tmp_path):
     from ui.settings_manager import SettingsManager
 

@@ -75,11 +75,16 @@ class FileBackedBlockPipelineExecutor(BlockPipelineExecutorPort):
             shape[0] * np.dtype(np.float64).itemsize if item.block_axis == "columns"
             else shape[1] * np.dtype(np.float64).itemsize
             if item.block_axis == "rows"
+            else min(normalized_bytes, self._block_bytes)
+            if item.file_function is not None and item.file_workspace_bytes is not None
             else normalized_bytes
             for item in enabled
         )
         global_peak = max(
-            (int(normalized_bytes * item.memory_multiplier) for item in enabled if item.block_axis == "global"),
+            (item.file_workspace_bytes
+             if item.file_function is not None and item.file_workspace_bytes is not None
+             else int(normalized_bytes * item.memory_multiplier)
+             for item in enabled if item.block_axis == "global"),
             default=0,
         )
         block_peak = max(min(normalized_bytes, self._block_bytes), minimum_block) * 5

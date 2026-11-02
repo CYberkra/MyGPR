@@ -6,6 +6,18 @@ from pathlib import Path
 
 from core.coordinate_projection import resolve_projection_spec
 from core.field_project_operations import batch_import_line_data, infer_line_identity_from_filename
+
+
+def test_batch_import_preserves_selected_dielectric(tmp_path):
+    from core.field_project_store import FieldProjectStore
+    import numpy as np
+    sources = [tmp_path / 'L01.npy', tmp_path / 'L02.npy']
+    for path in sources:
+        np.save(path, np.ones((8, 4), dtype=np.float32))
+    with FieldProjectStore.create_empty(tmp_path / 'project', name='batch') as store:
+        summary = batch_import_line_data(store, sources, dielectric_constant=16.0)
+        assert summary.succeeded == 2
+        assert all(store.load_gpr_dataset(item.line_id).dielectric_constant == 16.0 for item in summary.results)
 from core.field_project_store import FieldProjectStore
 
 

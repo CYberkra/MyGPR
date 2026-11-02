@@ -40,6 +40,9 @@ class SensorDetailsPanel(QWidget):
         column.addWidget(self._message)
         self._title = self._label('')
         column.addWidget(self._title)
+        self._warning_label = self._label('')
+        self._warning_label.hide()
+        column.addWidget(self._warning_label)
         self._table = QWidget(self)
         self._grid = QGridLayout(self._table)
         self._grid.setContentsMargins(0, 0, 0, 0)
@@ -155,11 +158,16 @@ class SensorDetailsPanel(QWidget):
 
     def set_sync_result(self, result):
         if result is None:
+            self._warning_label.clear()
+            self._warning_label.hide()
             self._diagnostics_label.clear()
             self._diagnostics_label.hide()
             return
         summary = str(getattr(result, 'summary', '') or '')
         diagnostics = getattr(result, 'diagnostics', {}) or {}
+        warnings = diagnostics.get('warnings', []) or []
+        self._warning_label.setText('同步警告：\n' + '\n'.join(map(str, warnings)) if warnings else '')
+        self._warning_label.setVisible(bool(warnings))
         config = getattr(result, 'config', {}) or {}
         text = '同步诊断与本次配置\n' + (summary + '\n' if summary else '')
         if diagnostics:
@@ -175,6 +183,7 @@ class SensorDetailsPanel(QWidget):
 
     def apply_theme(self, dark: bool):
         self._dark = bool(dark)
+        self._warning_label.setStyleSheet(f'color: {color("warning", dark)}; background: transparent;')
         for label in (*self._headers, self._note):
             label.setFont(ui_font(constants.FONT_SIZE_SECONDARY))
             label.setStyleSheet(f'color: {color("text_muted", dark)}; background: transparent;')

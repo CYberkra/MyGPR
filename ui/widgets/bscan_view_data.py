@@ -96,7 +96,9 @@ class BScanViewDataMixin:
         self._source_trace_ids = getattr(bundle, 'source_trace_ids', None)
         self.set_view_reversed(bool(getattr(bundle, 'view_reversed', False)))
         self.set_qc_bad_mask(getattr(bundle, 'trace_qc_bad_mask', None))
+        self.set_qc_local_mask(getattr(bundle, 'trace_qc_local_mask', None))
         self._sample_indices = getattr(bundle, 'sample_indices', None)
+        self.set_acquisition_markers(getattr(bundle, 'acquisition_markers', ()))
         # 海拔纵轴的两份原料（均已降到显示网格）：逐道地面高程 + 米制深度
         self._ground_elevation_m = getattr(bundle, 'trace_elevation_m', None)
         self._depth_axis_m = getattr(bundle, 'depth_axis_m', None)
@@ -127,7 +129,9 @@ class BScanViewDataMixin:
         """
 
         mat = np.asarray(matrix)
+        self.set_acquisition_markers(())
         self.set_qc_bad_mask(None)
+        self.set_qc_local_mask(None)
         if getattr(self, '_qc_focus', None) is not None:
             self._plot.removeItem(self._qc_focus)
             self._qc_focus = None
@@ -273,6 +277,68 @@ class BScanViewDataMixin:
     def display_levels(self) -> tuple[float, float]:
         """当前显示动态范围的百分位 ``(low, high)``。"""
         return self._p_low, self._p_high
+
+    def export_display_state(self) -> dict:
+        """Export JSON-safe display state without matrix or bundle ownership."""
+        state = {
+            'colormap': self._cmap_name,
+            'levels': list(self.display_levels()),
+            'aspect': self.aspect_mode(),
+            'x_axis': self.x_axis_mode(),
+            'y_axis': self.y_axis_mode(),
+            'colorbar': self.colorbar_visible(),
+            'gain': self.gain_mode(),
+            'gain_alpha': self._gain_alpha,
+            'gain_db': self._gain_db,
+            'gain_power': self._gain_power,
+            'display_mode': self.display_mode.value,
+            'crosshair': self._crosshair_on,
+            'local_view': self._view_selection is not None or self._view_time_window is not None,
+            'levels_follow_view': self._selection_follows_levels,
+            'contrast': self._contrast,
+        }
+        if self._levels_override is not None:
+            state['levels_override'] = list(self._levels_override)
+        if self._matrix is not None:
+            state['range'] = self._plot.vb.viewRange()
+        return state
+
+    def restore_display_state(self, state: dict, *, viewport: bool = False) -> None:
+        """Restore a previously exported state; malformed preferences never block data."""
+        if not state:
+            return
+        if viewport:
+            ranges = state.get('range')
+            if isinstance(ranges, (list, tuple)) and len(ranges) == 2:
+                try:
+                    if state.get('local_view'):
+                        from PyQt6.QtCore import QRectF
+                        (left, right), (top, bottom) = ranges
+                        self.set_view_selection(QRectF(left, top, right-left, bottom-top))
+                    else:
+                        self._plot.vb.setRange(xRange=ranges[0], yRange=ranges[1], padding=0)
+                except (TypeError, ValueError, IndexError):
+                    pass
+            return
+        try:
+            self._selection_follows_levels = bool(state.get('levels_follow_view', True))
+            self.set_colormap(str(state.get('colormap', self._cmap_name)))
+            self.set_display_levels(*state.get('levels', self.display_levels()))
+            self.set_contrast(state.get('contrast', self._contrast))
+            self.set_aspect_mode(str(state.get('aspect', self.aspect_mode())))
+            self.set_axis_modes(str(state.get('x_axis', self.x_axis_mode())),
+                                str(state.get('y_axis', self.y_axis_mode())))
+            self.set_colorbar_visible(bool(state.get('colorbar', self.colorbar_visible())))
+            self.set_gain(str(state.get('gain', self.gain_mode())),
+                          alpha=float(state.get('gain_alpha', self._gain_alpha)),
+                          db=float(state.get('gain_db', self._gain_db)),
+                          power=float(state.get('gain_power', self._gain_power)))
+            if 'levels_override' in state:
+                self.set_levels_override(state['levels_override'])
+            self.set_display_mode(state.get('display_mode', self.display_mode.value))
+            self._toggle_crosshair(bool(state.get('crosshair', True)))
+        except (TypeError, ValueError, KeyError, AttributeError):
+            pass
 
     def set_title_visible(self, visible: bool) -> None:
         """图内标题显隐（美术打磨 B）：网格卡关闭、放大/全屏保持开启。"""

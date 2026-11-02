@@ -213,6 +213,32 @@ def test_layout_roundtrip_retains_nested_split_sizes_tabs_pins_and_view_state(wo
     assert workspace.save_layout()['root'] == state['root']
 
 
+def test_public_display_state_roundtrip_preserves_json_contract(workspace):
+    workspace.set_sources(sources('A'))
+    workspace.open_source('A')
+    view = workspace.primary_view()
+    view.set_colormap('gray')
+    view.set_display_levels(7, 91)
+    view.set_contrast(1.4)
+    view.set_gain('tvg', db=18, power=1.6)
+    view._plot.vb.setRange(xRange=(2, 4), yRange=(1, 6), padding=0)
+    state = json.loads(json.dumps(view.export_display_state()))
+    assert 'matrix' not in state and 'bundle' not in state
+    view.set_colormap('seismic')
+    view.set_display_levels(2, 98)
+    view.set_contrast(1.0)
+    view.set_gain('off')
+    view.restore_display_state(state)
+    view.restore_display_state(state, viewport=True)
+    assert view._cmap_name == 'gray'
+    assert view.display_levels() == (7.0, 91.0)
+    assert view._contrast == 1.4
+    assert view.gain_mode() == 'tvg'
+    assert view._gain_db == 18.0
+    assert view._gain_power == 1.6
+    assert view._plot.vb.viewRange() == [[2.0, 4.0], [1.0, 6.0]]
+
+
 def test_restore_skips_removed_sources_and_does_not_fill_empty_layout(workspace):
     workspace.set_sources(sources('raw', 'A'))
     workspace.open_source('A')
@@ -301,12 +327,18 @@ def test_qt_drop_reorders_tabs_splits_at_edge_and_escape_cancels_hint(workspace,
     assert workspace.drop_hint_visible()
     QApplication.sendEvent(bar, QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Escape,
                                          Qt.KeyboardModifier.NoModifier))
+    for candidate in workspace._groups.values():
+        candidate.hint_animation.setCurrentTime(100)
+    qapp.processEvents()
     assert not workspace.drop_hint_visible()
     assert len(workspace.views()) == 1
     deliver_drag(workspace, group, 'A', first, edge)
     qapp.processEvents()
     assert len(workspace.views()) == 2
     assert workspace.tab_keys(workspace.group_ids()[1]) == ['A']
+    for candidate in workspace._groups.values():
+        candidate.hint_animation.setCurrentTime(100)
+    qapp.processEvents()
     assert not workspace.drop_hint_visible()
 
 

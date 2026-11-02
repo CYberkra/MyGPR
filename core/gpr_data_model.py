@@ -425,6 +425,59 @@ def _validate_mygpr_sidecar_header(header: dict[str, float]) -> None:
             raise ValueError(f"MyGPR sidecar CSV {key} must be finite and nonnegative")
 
 
+def _apply_acquisition_csv_metadata(path, amplitude, metadata, distance_axis_m,
+                                    time_window_ns, trace_interval_m, trace_count, cancel_requested=None):
+    from core.cdut_acquisition_import import CSV_FORMAT, csv_companion_metadata
+    extra = csv_companion_metadata(path, amplitude, cancel_requested=cancel_requested)
+    metadata.update(extra)
+    csv_format = "mygpr-airborne-sidecar-csv"
+    if extra.get('source_format') == CSV_FORMAT:
+        csv_format = CSV_FORMAT
+        metadata['time_axis_status'] = 'known' if time_window_ns > 0 else 'unknown'
+        metadata['csv_navigation_semantics'] = 'journal_platform_altitude'
+        metadata['distance_axis_status'] = 'csv_header_mean_spacing' if trace_interval_m > 0 else 'unknown'
+        # New journal alt is the platform's RTK altitude. Do not reuse the old
+        # sidecar convention that adds flight height to a ground elevation.
+        fields = extra['trace_meta']
+        metadata['trajectory_rows'] = [dict(
+            distance_m=float(distance_axis_m[i]), longitude=fields['lon'][i], latitude=fields['lat'][i],
+            elevation=fields['alt'][i], height_m=fields['height'][i], elevation_role='platform')
+            for i in range(trace_count)]
+        for row in metadata['trajectory_rows']:
+            for name in ('longitude','latitude','elevation','height_m'):
+                if row[name] is None:
+                    row[name] = float('nan')
+        for i, row in enumerate(metadata['trajectory_rows']):
+            stamp = fields['timestamp_ms'][i]
+            row['timestamp_s'] = stamp / 1000. if stamp is not None else float('nan')
+            for source_key, target_key in (('roll', 'roll_deg'), ('pitch', 'pitch_deg'), ('yaw', 'yaw_deg')):
+                value = fields[source_key][i]
+                row[target_key] = value if value is not None else float('nan')
+        if not any(np.isfinite(row['longitude']) and np.isfinite(row['latitude']) for row in metadata['trajectory_rows']):
+            metadata['trajectory_rows'] = []
+    return csv_format
+
+
+def _legacy_csv_trajectory_rows(data, trace_count, sample_count, distance_axis_m,
+                                trace_timestamps, timestamps_valid):
+    # One trajectory point per trace, sampled from the first sample in each trace.
+    trace_rows = data.reshape(trace_count, sample_count, data.shape[1])[:, 0, :]
+    trajectory_rows = []
+    for idx, row in enumerate(trace_rows):
+        trajectory_rows.append(
+            {
+                "distance_m": float(distance_axis_m[idx]),
+                "longitude": float(row[0]),
+                "latitude": float(row[1]),
+                "elevation": float(row[2]),
+                "height_m": float(row[4]) if data.shape[1] > 4 else 0.0,
+                "timestamp_s": trace_timestamps[idx] if timestamps_valid else float(idx),
+                "quality": "未知",
+            }
+        )
+    return trajectory_rows
+
+
 def _load_mygpr_airborne_sidecar_csv(path: Path, *, line_id: str, dielectric_constant: float = 9.0,
                                     cancel_requested=None, progress_callback=None) -> GPRDataSet:
     from core.chunked_gpr_io import check_cancel, emit_progress
@@ -441,6 +494,8 @@ def _load_mygpr_airborne_sidecar_csv(path: Path, *, line_id: str, dielectric_con
     expected = sample_count * trace_count
     source_bytes = path.stat().st_size
     rows: list[list[float]] = []
+    trace_timestamps: list[float] = []
+    timestamps_valid = True
     with path.open("r", encoding="utf-8-sig", errors="ignore", newline="") as fh:
         reader = csv.reader(fh)
         for _ in range(header_lines):
@@ -461,6 +516,11 @@ def _load_mygpr_airborne_sidecar_csv(path: Path, *, line_id: str, dielectric_con
                     vals.append(float(str(item).strip()))
                 except (TypeError, ValueError):
                     vals.append(float("nan"))
+            timestamp = vals[5] if len(vals) > 5 else float('nan')
+            if len(rows) % sample_count == 0:
+                trace_timestamps.append(timestamp)
+            if not np.isfinite(timestamp) or timestamp != trace_timestamps[-1]:
+                timestamps_valid = False
             rows.append(vals[:6])
     check_cancel(cancel_requested)
     emit_progress(progress_callback, "parse_csv", source_bytes, source_bytes)
@@ -476,21 +536,8 @@ def _load_mygpr_airborne_sidecar_csv(path: Path, *, line_id: str, dielectric_con
     distance_axis_m = np.linspace(0.0, length_m, trace_count, dtype=np.float32)
     time_axis_ns = np.linspace(0.0, time_window_ns, sample_count, dtype=np.float32)
     depth_axis_m = time_to_depth_axis(time_axis_ns, dielectric_constant)
-    # One trajectory point per trace, sampled from the first sample in each trace.
-    trace_rows = data.reshape(trace_count, sample_count, data.shape[1])[:, 0, :]
-    trajectory_rows = []
-    for idx, row in enumerate(trace_rows):
-        trajectory_rows.append(
-            {
-                "distance_m": float(distance_axis_m[idx]),
-                "longitude": float(row[0]),
-                "latitude": float(row[1]),
-                "elevation": float(row[2]),
-                "height_m": float(row[4]) if data.shape[1] > 4 else 0.0,
-                "timestamp_s": float(row[5]) if data.shape[1] > 5 else float(idx),
-                "quality": "未知",
-            }
-        )
+    trajectory_rows = _legacy_csv_trajectory_rows(
+        data, trace_count, sample_count, distance_axis_m, trace_timestamps, timestamps_valid)
     columns = ["longitude", "latitude", "elevation_m", "amplitude"]
     if data.shape[1] > 4:
         columns.append("height_m")
@@ -504,6 +551,9 @@ def _load_mygpr_airborne_sidecar_csv(path: Path, *, line_id: str, dielectric_con
         "time_axis_endpoint": True,
         "time_step_s": time_window_ns * 1e-9 / max(sample_count - 1, 1),
         "time_axis_convention": "csv_reader_inclusive_interpretation",
+        "time_axis_status": "known" if time_window_ns > 0 else "unknown",
+        "distance_axis_status": "csv_header_mean_spacing" if trace_interval_m > 0 else "unknown",
+        "csv_navigation_semantics": "legacy_ground_elevation_plus_height_unverified",
         "header_lines": header_lines,
         "trace_interval_m": trace_interval_m,
         "columns": columns,
@@ -511,7 +561,12 @@ def _load_mygpr_airborne_sidecar_csv(path: Path, *, line_id: str, dielectric_con
         "raw_row_count": len(rows),
         "data_column_count": int(data.shape[1]),
     }
-    ds = GPRDataSet(
+    if timestamps_valid and len(trace_timestamps) == trace_count:
+        metadata["trace_timestamp_s"] = trace_timestamps
+        metadata["trace_timestamp_source"] = "airborne_csv_column_6"
+    csv_format = _apply_acquisition_csv_metadata(
+        path, amplitude, metadata, distance_axis_m, time_window_ns, trace_interval_m, trace_count, cancel_requested)
+    return GPRDataSet(
         line_id=line_id,
         matrix=amplitude,
         distance_axis_m=distance_axis_m,
@@ -520,10 +575,9 @@ def _load_mygpr_airborne_sidecar_csv(path: Path, *, line_id: str, dielectric_con
         source_path=str(path),
         time_window_ns=time_window_ns,
         dielectric_constant=dielectric_constant,
-        format_name="mygpr-airborne-sidecar-csv",
+        format_name=csv_format,
         metadata=metadata,
     )
-    return ds
 
 
 def _load_numeric_csv(path: Path) -> np.ndarray:

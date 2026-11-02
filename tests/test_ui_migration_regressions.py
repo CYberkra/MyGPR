@@ -21,7 +21,7 @@ import pytest
 from ui.page_coordinator import PageCoordinator
 
 pytest.importorskip("PyQt6", reason="窗口侧断言需要 PyQt6")
-from PyQt6.QtCore import QObject, pyqtSignal  # noqa: E402
+from PyQt6.QtCore import QCoreApplication, QEvent, QObject, pyqtSignal  # noqa: E402
 from ui.main_window import MyGPRMainWindow  # noqa: E402
 
 
@@ -161,6 +161,7 @@ class _FakeProcessingController(QObject):
     autotune_failed = pyqtSignal(str)
     velocity_finished = pyqtSignal(object)
     velocity_failed = pyqtSignal(str)
+    gain_input_ready = pyqtSignal(str, object, str)
 
     def __init__(self) -> None:
         super().__init__()
@@ -171,16 +172,22 @@ class _FakeProcessingController(QObject):
         self.load_calls += 1
         self.methods_loaded.emit(self.methods)
 
+    def prepare_gain_preview(self, *_args) -> None:
+        raise AssertionError('Method-library warmup must not request a gain preview')
 
-def _build_race_window(monkeypatch):
+    def cancel_gain_preview(self, _token) -> None:
+        raise AssertionError('Method-library warmup has no gain preview to cancel')
+
+
+def _build_race_window(monkeypatch, settings_path):
     """构造真主窗口（控制器置 None 不启后端线程）+ 假处理控制器。"""
     import ui.main_window as mw
     for name in ('BackendController', 'ProjectController',
                  'ProcessingController', 'InterpretationController',
                  'DeliveryController'):
         monkeypatch.setattr(mw, name, None)
-    # 文件树打桩：同 tests/test_main_window_titlebar.py 注释——offscreen 下
-    # qfluentwidgets TreeWidget 反复构造会触发库级 access violation。
+    # 此处只隔离方法库信号时序；真实资源树与本模块的共享进程生命周期
+    # 由 test_fluent_style_lifetime 中原始短序列回归验证。
     from PyQt6.QtWidgets import QWidget
 
     class _FileTreeStub(QWidget):
@@ -204,12 +211,25 @@ def _build_race_window(monkeypatch):
             pass
 
     monkeypatch.setattr(mw, 'FileTreePanel', _FileTreeStub)
-    window = mw.MyGPRMainWindow()
+    from ui.settings_manager import SettingsManager
+    window = mw.MyGPRMainWindow(settings=SettingsManager(str(settings_path)))
     window.splashScreen.close()
     fake = _FakeProcessingController()
     # 接线器经 window.processing_controller 取控制器（property 透传窗口属性）
     window.processing_controller = fake
     return window, fake
+
+
+def _dispose_race_window(window, qapp):
+    from PyQt6 import sip
+
+    assert window.close()
+    window.deleteLater()
+    # processEvents alone does not drain DeferredDelete without an outer exec().
+    # Delete this window while its controller double and page wrappers still live.
+    QCoreApplication.sendPostedEvents(window, QEvent.Type.DeferredDelete)
+    assert sip.isdeleted(window)
+    qapp.processEvents()
 
 
 class TestMethodsLoadedWarmupRace:
@@ -222,9 +242,9 @@ class TestMethodsLoadedWarmupRace:
     """
 
     def test_backend_ready_before_warmup_still_fills_methods(
-            self, monkeypatch, qapp):
+            self, monkeypatch, qapp, tmp_path):
         """后端先就绪：预热收尾必须补加载，方法库最终有内容。"""
-        window, fake = _build_race_window(monkeypatch)
+        window, fake = _build_race_window(monkeypatch, tmp_path / 'settings.json')
         try:
             window._on_backend_ready()      # 后端先到（预热未收尾）
             assert fake.load_calls == 0, (
@@ -237,14 +257,12 @@ class TestMethodsLoadedWarmupRace:
             assert page._methods == fake.methods, (
                 '补加载后处理页方法库必须被填充')
         finally:
-            window.close()
-            window.deleteLater()
-            qapp.processEvents()
+            _dispose_race_window(window, qapp)
 
     def test_backend_ready_after_warmup_loads_exactly_once(
-            self, monkeypatch, qapp):
+            self, monkeypatch, qapp, tmp_path):
         """后端后就绪：走 _on_backend_ready 正常加载，不得与补加载重复。"""
-        window, fake = _build_race_window(monkeypatch)
+        window, fake = _build_race_window(monkeypatch, tmp_path / 'settings.json')
         try:
             window.ensure_pages_ready()
             assert fake.load_calls == 0, '接线完成但未就绪时不应提前加载'
@@ -253,6 +271,4 @@ class TestMethodsLoadedWarmupRace:
                 f'后端后就绪应恰好加载一次，实际 {fake.load_calls}')
             assert window._page('processingInterface')._methods == fake.methods
         finally:
-            window.close()
-            window.deleteLater()
-            qapp.processEvents()
+            _dispose_race_window(window, qapp)

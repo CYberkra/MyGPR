@@ -120,9 +120,9 @@ def method_kirchhoff_migration(
         tuple: (result_array, metadata_dict)
     """
     cancel_checker = kwargs.get("cancel_checker")
-    header_info = kwargs.get("header_info") or {}
+    header_info = kwargs.get("_header_info", kwargs.get("header_info")) or {}
     require_distance_scale(header_info, {"length_m": length_m})
-    trace_metadata = kwargs.get("trace_metadata") or {}
+    trace_metadata = kwargs.get("_trace_metadata", kwargs.get("trace_metadata")) or {}
     arr = _to_float64_2d(data)
 
     freq = float(freq)
@@ -139,9 +139,15 @@ def method_kirchhoff_migration(
         raise ValueError("当前 Kirchhoff 仅支持 topo_cor/hei_cor 取值 0、1 或 2")
 
     if length_m is None:
-        length_m = float(max(arr.shape[1] - 1, 1))
+        length_m = float(
+            header_info.get("length_m") or header_info.get("track_length_m")
+            or max(arr.shape[1] - 1, 1)
+        )
     if time_window_ns is None:
-        time_window_ns = float(max(arr.shape[0], 1))
+        time_window_ns = float(
+            header_info.get("total_time_ns") or header_info.get("time_window_ns")
+            or max(arr.shape[0], 1)
+        )
 
     length_m = float(length_m)
     time_window_ns = float(time_window_ns)

@@ -292,7 +292,6 @@ class FieldArtifactStoreMixin:
             )
         self._write_processing_sidecars(line_id, artifact_id, saved_at, paths, manifest, payload, storage_result)
         line.processing_status = "已完成"
-        line.data_quality = "★★★★★" if line.data_quality not in {"--", ""} else "★★★★☆"
         line.processed_result = (
             paths["descriptor"].relative_to(self.root).as_posix()
             if storage_result["hybrid"] else storage_result["data_reference"]

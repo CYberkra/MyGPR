@@ -7,7 +7,8 @@ from dataclasses import asdict
 import json
 from pathlib import Path
 import re
-from typing import Any, Mapping, Sequence
+from threading import RLock
+from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 import numpy as np
 
@@ -20,6 +21,11 @@ from mygpr.domain.interpretation.models import (
     BoreholeLayer, BoreholeRecord, InterfaceAnnotation, InterpretationFeature,
     InterpretationPoint, InterpretationZone,
 )
+
+if TYPE_CHECKING:
+    from core.field_project_store import FieldProjectStore
+    from core.gpr_data_model import GPRDataSet
+    from mygpr.domain.project.models import LineDatasetInfo
 
 _BOREHOLE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 
@@ -143,6 +149,15 @@ def _interface_from_payload(payload: Mapping[str, Any]) -> InterfaceAnnotation:
 class InterpretationPersistenceMixin:
     """Project-session interpretation operations with validated managed paths."""
 
+    _store: FieldProjectStore
+    _lock: RLock
+
+    if TYPE_CHECKING:
+        def _validated_line(self, line_id: str) -> str: ...
+        def _raw_dataset_with_properties(self, line_id: str) -> GPRDataSet: ...
+        def get_dataset_info(self, line_id: str) -> LineDatasetInfo: ...
+        def get_artifact_dataset_info(self, line_id: str, artifact_id: str) -> LineDatasetInfo: ...
+
     def _interpretation_path(self, line_id: str) -> Path:
         safe = self._validated_line(line_id)
         return resolve_managed_path(
@@ -227,7 +242,9 @@ class InterpretationPersistenceMixin:
 
     def save_interface_annotation(self, annotation: InterfaceAnnotation) -> InterfaceAnnotation:
         safe = self._validated_line(annotation.line_id)
-        info = self.get_dataset_info(safe)
+        source = str(annotation.processing_result or '')
+        info = (self.get_artifact_dataset_info(safe, source)
+                if source and source != f'{safe}_raw' else self.get_dataset_info(safe))
         max_sample = float(info.shape[0] - 1)
         max_trace = float(info.shape[1] - 1)
         for point in annotation.points:
@@ -285,7 +302,7 @@ class InterpretationPersistenceMixin:
             legacy_value = BasalInterfaceAnnotation(
                 line_id=safe, trace_count=int(info.shape[1]), sample_count=int(info.shape[0]),
                 source_result_id=saved.processing_result or f"{safe}_raw",
-                source_mode="processed" if saved.processing_result else "raw",
+                source_mode="processed" if saved.processing_result and saved.processing_result != f"{safe}_raw" else "raw",
                 status=saved.status,
                 version=max(1, saved.version - 1),
                 keypoints=[
@@ -382,7 +399,7 @@ class InterpretationPersistenceMixin:
                 },
             )
             self._append_audit(
-                "borehole_deleted", object_type="borehole", object_id=safe
+                "borehole_deleted", object_type="borehole", object_id=safe, payload={}
             )
         return True
 

@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import shutil
+import json
 import uuid
 from pathlib import Path
 from typing import Any
@@ -70,6 +71,7 @@ class FieldLineStoreMixin:
     def import_line_file(
         self, line_id: str, source: str | Path, *, name: str | None = None,
         copy_into_project: bool = True, dielectric_constant: float = 9.0,
+        time_window_ns: float | None = None, trace_interval_m: float | None = None,
         cancel_requested=None, progress_callback=None,
     ) -> FieldLineRecord:
         from core.project_mutation import project_mutation
@@ -80,8 +82,46 @@ class FieldLineStoreMixin:
             return self._import_line_file(
                 safe, source, name=name, copy_into_project=copy_into_project,
                 dielectric_constant=dielectric_constant, cancel_requested=cancel_requested,
+                time_window_ns=time_window_ns, trace_interval_m=trace_interval_m,
                 progress_callback=progress_callback,
             )
+
+    def _prepare_import_companions(self, line_id, src, dest, copy_into_project, *,
+                                   cancel_requested=None, progress_callback=None):
+        companion_files = []
+        previous_manifest = self.root / "raw" / line_id / "import_manifest.json"
+        from core.cdut_acquisition_import import remove_owned_companions
+        if previous_manifest.is_file():
+            with previous_manifest.open(encoding="utf-8") as stream:
+                previous_import = json.load(stream)
+            companion_files = previous_import.get("acquisition_companion_files", [])
+            if companion_files:
+                owned_parent = (self.root / previous_import['copied_path']).resolve().parent
+                if not owned_parent.is_relative_to(previous_manifest.parent.resolve()):
+                    raise ValueError('项目伴随文件目录越界')
+                if owned_parent != dest.parent.resolve():
+                    # Includes copy -> external-reference replacements. Clean
+                    # owned project copies, never the external source folder.
+                    remove_owned_companions(owned_parent, companion_files)
+                    companion_files = []
+        if copy_into_project:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if src != dest:
+                copy_file_chunked(
+                    src, dest, cancel_requested=cancel_requested, progress_callback=progress_callback
+                )
+                from core.cdut_acquisition_import import copy_acquisition_companions
+
+                companion_files = copy_acquisition_companions(
+                    src, dest, companion_files, copy_file_chunked,
+                    cancel_requested=cancel_requested, progress_callback=progress_callback,
+                )
+        else:
+            # If the reference itself is an existing project copy, retain its
+            # ownership record for safe cleanup on the next replacement.
+            if not dest.is_relative_to(previous_manifest.parent):
+                companion_files = []
+        return companion_files
 
     def _import_line_file(
         self,
@@ -91,6 +131,8 @@ class FieldLineStoreMixin:
         name: str | None = None,
         copy_into_project: bool = True,
         dielectric_constant: float = 9.0,
+        time_window_ns: float | None = None,
+        trace_interval_m: float | None = None,
         cancel_requested=None,
         progress_callback=None,
     ) -> FieldLineRecord:
@@ -109,27 +151,10 @@ class FieldLineStoreMixin:
         if copy_into_project and dest == self.trajectory_path(line_id):
             dest = dest.parent / "sources" / src.name
         staging = self.root / "raw" / line_id / f".import_staging_{uuid.uuid4().hex}"
-        if copy_into_project:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            if src != dest:
-                copy_file_chunked(
-                    src, dest, cancel_requested=cancel_requested, progress_callback=progress_callback
-                )
-                if src.suffix.lower() in {".h5", ".hdf5"}:
-                    # Keep original SFCW settings with the copied fact source.
-                    # Large raw S21 journals use the same cancellable block copy.
-                    for suffix in (".sfcw.json", ".s21.jsonl"):
-                        companion = src.with_name(src.name + suffix)
-                        copied_companion = dest.with_name(dest.name + suffix)
-                        if companion.exists():
-                            copy_file_chunked(
-                                companion, copied_companion,
-                                cancel_requested=cancel_requested, progress_callback=progress_callback,
-                            )
-                        else:
-                            # A replacement line must not inherit the previous
-                            # acquisition's configuration or raw spectrum.
-                            copied_companion.unlink(missing_ok=True)
+        companion_files = self._prepare_import_companions(
+            line_id, src, dest, copy_into_project, cancel_requested=cancel_requested,
+            progress_callback=progress_callback,
+        )
         try:
             line = self.get_line(line_id)
         except KeyError:
@@ -159,7 +184,23 @@ class FieldLineStoreMixin:
                 cancel_requested=cancel_requested,
                 progress_callback=progress_callback,
             )
+            if time_window_ns is not None or trace_interval_m is not None:
+                if dataset.format_name not in {'csv-matrix-chunked', 'npy-matrix-chunked'}:
+                    raise ValueError('手动轴参数仅适用于不含物理轴的纯 CSV/TXT/NPY 矩阵。')
+                if (time_window_ns is None or trace_interval_m is None or
+                    not np.isfinite(time_window_ns) or not np.isfinite(trace_interval_m) or
+                    time_window_ns <= 0 or trace_interval_m <= 0):
+                    raise ValueError('时间窗和道间距必须为有限正数。')
+                dataset.time_window_ns = float(time_window_ns)
+                dataset.time_axis_ns = np.linspace(0, time_window_ns, dataset.sample_count, dtype=np.float32)
+                from core.gpr_data_model import time_to_depth_axis
+                dataset.depth_axis_m = time_to_depth_axis(dataset.time_axis_ns, dataset.dielectric_constant)
+                dataset.distance_axis_m = np.arange(dataset.trace_count, dtype=np.float32) * float(trace_interval_m)
+                dataset.metadata.update(physical_axes_source='user_input', time_axis_endpoint=True,
+                                        time_step_s=float(time_window_ns) * 1e-9 / max(dataset.sample_count - 1, 1),
+                                        trace_interval_m=float(trace_interval_m), distance_axis_status='provided_length')
             trajectory_rows = dataset.metadata.pop("trajectory_rows", None) if isinstance(dataset.metadata, dict) else None
+            dataset.metadata["acquisition_companion_files"] = companion_files
             self.save_gpr_dataset(
                 line_id, dataset, cancel_requested=cancel_requested, progress_callback=progress_callback
             )
@@ -226,8 +267,13 @@ class FieldLineStoreMixin:
                     # CSV 第 3 列 elevation 是地表高程、第 5 列 height_m 是
                     # 飞行高度（离地）；轨迹海拔 = 地表 + 飞行高度，
                     # 与 sensor_sync 的 local_z = ground + flight 语义一致
-                    z=float(row.get("elevation", 0.0)) + float(row.get("height_m", 0.0)),
+                    z=(float(row.get("elevation", 0.0)) if row.get('elevation_role') == 'platform'
+                       else float(row.get("elevation", 0.0)) + float(row.get("height_m", 0.0))),
                     flight_height_m=float(row.get("height_m", 0.0)),
+                    timestamp_s=float(row.get("timestamp_s", float('nan'))),
+                    roll_deg=float(row.get("roll_deg", float('nan'))),
+                    pitch_deg=float(row.get("pitch_deg", float('nan'))),
+                    yaw_deg=float(row.get("yaw_deg", float('nan'))),
                     quality="已投影" if projection_payload.get("status") == "ok" else "未投影",
                     longitude=float(row.get("longitude", 0.0)),
                     latitude=float(row.get("latitude", 0.0)),
@@ -253,6 +299,7 @@ class FieldLineStoreMixin:
                 "trace_count": dataset.trace_count, "length_m": dataset.length_m,
                 "time_window_ns": dataset.time_window_ns, "has_trajectory": bool(trajectory_rows),
                 "projection": projection_payload,
+                "acquisition_companion_files": dataset.metadata.get("acquisition_companion_files", []),
                 "columns": dataset.metadata.get("columns", []) if isinstance(dataset.metadata, dict) else [],
                 "storage_mode": (
                     "hdf5_line_container" if getattr(self.storage, "is_hybrid", False)

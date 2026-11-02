@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import ceil, floor
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 
@@ -20,6 +20,28 @@ def as_float(value: Any, default: float) -> float:
         return float(value)
     except (TypeError, ValueError, OverflowError):
         return float(default)
+
+
+def stored_axis_boundary_index(source_axis: Any, axis: np.ndarray, value: float, *, side: Literal['left', 'right'] = 'left', roundoff_ulps: int = 0) -> int:
+    """Snap only to an actual stored value when rounding to its float dtype.
+
+    Project axes can be float32 while UI bounds are Python doubles. Preserve
+    sample inclusion at the declared boundary without treating indices as ns.
+    """
+    source = np.asarray(source_axis)
+    if source.dtype.kind == 'f':
+        rounded = float(np.asarray(value, dtype=source.dtype))
+        index = int(np.searchsorted(axis, rounded, side='left'))
+        if index < len(axis) and axis[index] == rounded:
+            return int(np.searchsorted(axis, rounded, side=side))
+    if roundoff_ulps and np.isfinite(value):
+        insertion = int(np.searchsorted(axis, value, side='left'))
+        for index in (insertion, insertion - 1):
+            if 0 <= index < len(axis):
+                tolerance = roundoff_ulps * abs(np.spacing(max(abs(value), abs(float(axis[index])))))
+                if abs(float(axis[index]) - value) <= tolerance:
+                    return int(np.searchsorted(axis, axis[index], side=side))
+    return int(np.searchsorted(axis, value, side=side))
 
 
 def warning(code: str, message: str, method_id: str, **details: Any) -> dict[str, Any]:

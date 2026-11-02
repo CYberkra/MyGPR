@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
+
 from core.field_import_preview import build_import_preflight
 from core.field_project_store import FieldProjectStore
 from core.gpr_data_model import detect_mygpr_airborne_sidecar_csv, load_gpr_dataset
+from core.sensor_sync_service import infer_trace_timestamps
 
 
 def test_detect_and_load_legacy_mygpr_sidecar_csv() -> None:
@@ -42,3 +45,32 @@ def test_project_import_normalizes_sidecar_csv(tmp_path: Path) -> None:
     trajectory = project.load_trajectory("L01")
     assert len(trajectory.points) == 180
     assert (project.root / "raw" / "L01" / "import_manifest.json").exists()
+
+
+def test_project_import_preserves_precise_trace_timestamps(tmp_path: Path) -> None:
+    source = tmp_path / 'main.csv'
+    source.write_text(
+        'Number of Samples = 2\nTime windows (ns) = 120\n'
+        'Number of Traces = 2\nTrace interval (m) = 0.5\n'
+        '104,30,700,1,2,1700000000.125\n104,30,700,2,2,1700000000.125\n'
+        '104,30,700,3,2,1700000000.375\n104,30,700,4,2,1700000000.375\n', encoding='utf-8')
+    project = FieldProjectStore.create_empty(tmp_path / 'project', name='timestamp-test')
+    try:
+        project.import_line_file('L01', source)
+        actual = infer_trace_timestamps(project.load_gpr_dataset('L01'))
+        np.testing.assert_array_equal(actual, [1700000000.125, 1700000000.375])
+        dataset = project.load_gpr_dataset('L01')
+        project.save_gpr_dataset('L01', dataset)
+        np.testing.assert_array_equal(infer_trace_timestamps(project.load_gpr_dataset('L01')),
+                                      [1700000000.125, 1700000000.375])
+    finally:
+        project.close()
+
+
+def test_inconsistent_per_sample_timestamps_are_not_used_for_sync(tmp_path: Path) -> None:
+    source = tmp_path / 'main.csv'
+    source.write_text(
+        'Number of Samples = 2\nTime windows (ns) = 120\n'
+        'Number of Traces = 1\nTrace interval (m) = 0.5\n'
+        '104,30,700,1,2,1000.0\n104,30,700,2,2,1000.1\n', encoding='utf-8')
+    assert infer_trace_timestamps(load_gpr_dataset(source, line_id='L01')) is None

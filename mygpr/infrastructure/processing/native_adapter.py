@@ -185,12 +185,24 @@ class NativeProcessingExecutor(ProcessingExecutorPort):
         )
 
 
+def _normalize_rtm_aliases(params: dict[str, Any]) -> None:
+    for alias, canonical in (("dx", "dx_m"), ("v", "velocity_m_per_ns"),
+                             ("depth", "depth_m"), ("dz", "dz_m")):
+        if alias not in params:
+            continue
+        if canonical in params and params[canonical] != params[alias]:
+            raise ValueError(f"{canonical} 与兼容参数 {alias} 的值不一致")
+        params[canonical] = params[alias]
+
+
 def prepare_native_params(request: ProcessingRequest) -> dict[str, Any]:
     from mygpr.domain.processing.timebase import require_time_axis
     require_time_axis(request.method_id, request.header_info)
     if request.method_id == 'kirchhoff_migration' and int((request.params or {}).get('topo_cor', 0)) == 2:
         raise ValueError('预地形校正的绝对高程网格尚不可验证，请选择后校正 topo_cor=1')
     params = dict(request.params or {})
+    if request.method_id == "rtm_migration":
+        _normalize_rtm_aliases(params)
     if request.method_id in {"rtm_migration", "kirchhoff_migration", "stolt_migration"}:
         from mygpr.infrastructure.processing.algorithms.common import require_distance_scale
 

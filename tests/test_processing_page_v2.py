@@ -905,10 +905,10 @@ class TestAuditFixes20261009:
             page.set_original_bundle(_bundle(1))
             page._pipeline_list.add_step('dewow', '去直流', {'win': 11})
             before = page.current_pipeline()
-            page._layout_combo.setCurrentIndex(1)
+            page._workspace.split_source('original', 'right', copy=True)
             assert len(page._workspace.views()) == 2
             assert page.current_pipeline() == before
-            page._layout_combo.setCurrentIndex(0)
+            page._workspace.reset_layout()
             assert len(page._workspace.views()) == 1
             assert page.current_pipeline() == before
         finally:

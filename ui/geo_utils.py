@@ -123,3 +123,8 @@ def format_distance(distance_m: float) -> str:
     if distance_m >= 1000.0:
         return f'{distance_m / 1000.0:.2f} km'
     return f'{distance_m:.0f} m'
+
+
+def format_spacing(distance_m: float) -> str:
+    """Keep useful precision for closely spaced trajectory points."""
+    return f'{distance_m:.3f} m' if distance_m < 1000.0 else format_distance(distance_m)

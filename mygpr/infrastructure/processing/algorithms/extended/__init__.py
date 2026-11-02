@@ -16,6 +16,7 @@ from .median_background import method_median_background_2d
 from .time_cut import method_time_cut
 from .trace_cut import method_trace_cut
 from .trace_qc import method_trace_qc
+from .short_trace_repair import method_short_trace_repair
 from .wavelet import method_wavelet_2d
 
 ExtendedFunction = Callable[..., tuple[np.ndarray, dict[str, Any]]]
@@ -49,6 +50,10 @@ def native_trace_cut(data: Any, params: dict[str, Any]):
 
 def native_trace_qc(data: Any, params: dict[str, Any]):
     return _execute(method_trace_qc, data, params)
+
+
+def native_short_trace_repair(data: Any, params: dict[str, Any]):
+    return _execute(method_short_trace_repair, data, params)
 
 
 
