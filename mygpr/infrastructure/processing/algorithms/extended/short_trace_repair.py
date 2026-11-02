@@ -139,49 +139,7 @@ def _detection_windows(mode: str | None, spec: str, header: dict, samples: int):
     return effective, windows
 
 
-def method_short_trace_repair(
-    data: np.ndarray, mode: str = 'mark', window_traces: int = 31,
-    robust_z: float = 8., time_windows_ns: str = '', max_run_traces: int = 4,
-    window_mode: str | None = None,
-    header_info: dict[str, Any] | None = None,
-    trace_metadata: dict[str, np.ndarray] | None = None,
-    cancel_checker=None, **kwargs: Any,
-) -> tuple[np.ndarray, dict[str, Any]]:
-    """Detect multi-gate outliers and optionally interpolate bounded short runs.
-
-    Arrays use (samples, traces). Auto splits available samples into three
-    nonoverlapping proportions. Manual ns windows require an actual axis.
-    Only explicitly selected interpolate mode alters values. This is not a
-    claim of recovering an unknown reflector at an affected trace.
-    """
-    if np.iscomplexobj(data):
-        raise ValueError('短段异常道修补需要实数时域矩阵，不能隐式丢弃复数分量')
-    arr = np.asarray(data, dtype=np.float32)
-    if arr.ndim != 2 or not arr.shape[0] or arr.shape[1] < 3:
-        raise ValueError('输入必须是非空2维矩阵，且至少有3道')
-    if mode not in {'mark', 'interpolate'}:
-        raise ValueError('mode 必须为 mark 或 interpolate')
-    width = _integer(window_traces, 'window_traces', 3, 301)
-    if width % 2 == 0:
-        raise ValueError('window_traces 必须为奇数')
-    max_run = _integer(max_run_traces, 'max_run_traces', 1, 4)
-    z = float(robust_z)
-    if not np.isfinite(z) or not 0 < z <= 100:
-        raise ValueError('robust_z 必须为0到100之间的有限正数')
-    effective_mode, windows = _detection_windows(window_mode, time_windows_ns, header_info or {}, arr.shape[0])
-    trace_metadata = trace_metadata or {}
-    previous = _saved_mask(trace_metadata, 'short_trace_repaired_mask', arr.shape[1])
-    prior_unresolved = _saved_mask(trace_metadata, 'short_trace_unresolved_mask', arr.shape[1])
-    blocked_anchors = (previous
-        | _saved_mask(trace_metadata, 'trace_qc_bad_mask', arr.shape[1])
-        | prior_unresolved
-        | _saved_mask(trace_metadata, 'short_trace_local_change_mask', arr.shape[1])
-        | _saved_mask(trace_metadata, 'short_trace_zero_mask', arr.shape[1]))
-
-    def poll() -> None:
-        if cancel_checker is not None and cancel_checker():
-            raise JobCancelledError('短段异常道修补已取消')
-
+def _detect_trace_changes(arr, windows, width, z, effective_mode, poll):
     # Whole-trace data facts use every saved sample, independently of selected gates.
     # A quiet/zero time window alone is not a whole-zero trace. No amplitude floor.
     block_rows = max(1, min(64, 1_000_000 // arr.shape[1]))
@@ -225,6 +183,73 @@ def method_short_trace_repair(
     candidates = votes.all(axis=0) if len(windows) >= 2 or effective_mode == 'full' else np.zeros(arr.shape[1], dtype=bool)
     candidates &= ~zero_mask
     local_changes = votes.any(axis=0) & ~candidates & ~zero_mask
+    return zero_mask, candidates, local_changes, diagnostics
+
+
+def _classification_warnings(zero_mask, effective_mode, windows):
+    warnings = []
+    if zero_mask.any():
+        zero_numbers = (np.flatnonzero(zero_mask)[:32] + 1).tolist()
+        shown = ', '.join(map(str, zero_numbers)) + ('…' if zero_mask.sum() > 32 else '')
+        warnings.append({'code': 'short_trace_zero', 'method_id': 'short_trace_repair',
+                         'message': f'输入有{int(zero_mask.sum())}道整道全零（确定数据质量问题），道号：{shown}；'
+                                    '已单独标记；它不同于统计候选或某一时窗安静。端部不外推。',
+                         'trace_numbers': zero_numbers,
+                         'trace_count': int(zero_mask.sum())})
+    if effective_mode == 'full':
+        warnings.append({'code': 'short_trace_full_window', 'method_id': 'short_trace_repair',
+                         'message': '旧版全窗判断仅用于对照，强早波可能主导候选；不构成采集坏道证明。'})
+    elif len(windows) < 2:
+        warnings.append({'code': 'short_trace_local_only', 'method_id': 'short_trace_repair',
+                         'message': '有效样点或独立时窗不足，仅标记局部变化，不进行整道插补。'})
+    return warnings
+
+
+def method_short_trace_repair(
+    data: np.ndarray, mode: str = 'mark', window_traces: int = 31,
+    robust_z: float = 8., time_windows_ns: str = '', max_run_traces: int = 4,
+    window_mode: str | None = None,
+    header_info: dict[str, Any] | None = None,
+    trace_metadata: dict[str, np.ndarray] | None = None,
+    cancel_checker=None, **kwargs: Any,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Detect multi-gate outliers and optionally interpolate bounded short runs.
+
+    Arrays use (samples, traces). Auto splits available samples into three
+    nonoverlapping proportions. Manual ns windows require an actual axis.
+    Only explicitly selected interpolate mode alters values. This is not a
+    claim of recovering an unknown reflector at an affected trace.
+    """
+    if np.iscomplexobj(data):
+        raise ValueError('短段异常道修补需要实数时域矩阵，不能隐式丢弃复数分量')
+    arr = np.asarray(data, dtype=np.float32)
+    if arr.ndim != 2 or not arr.shape[0] or arr.shape[1] < 3:
+        raise ValueError('输入必须是非空2维矩阵，且至少有3道')
+    if mode not in {'mark', 'interpolate'}:
+        raise ValueError('mode 必须为 mark 或 interpolate')
+    width = _integer(window_traces, 'window_traces', 3, 301)
+    if width % 2 == 0:
+        raise ValueError('window_traces 必须为奇数')
+    max_run = _integer(max_run_traces, 'max_run_traces', 1, 4)
+    z = float(robust_z)
+    if not np.isfinite(z) or not 0 < z <= 100:
+        raise ValueError('robust_z 必须为0到100之间的有限正数')
+    effective_mode, windows = _detection_windows(window_mode, time_windows_ns, header_info or {}, arr.shape[0])
+    trace_metadata = trace_metadata or {}
+    previous = _saved_mask(trace_metadata, 'short_trace_repaired_mask', arr.shape[1])
+    prior_unresolved = _saved_mask(trace_metadata, 'short_trace_unresolved_mask', arr.shape[1])
+    blocked_anchors = (previous
+        | _saved_mask(trace_metadata, 'trace_qc_bad_mask', arr.shape[1])
+        | prior_unresolved
+        | _saved_mask(trace_metadata, 'short_trace_local_change_mask', arr.shape[1])
+        | _saved_mask(trace_metadata, 'short_trace_zero_mask', arr.shape[1]))
+
+    def poll() -> None:
+        if cancel_checker is not None and cancel_checker():
+            raise JobCancelledError('短段异常道修补已取消')
+
+    zero_mask, candidates, local_changes, diagnostics = _detect_trace_changes(
+        arr, windows, width, z, effective_mode, poll)
     blocked_anchors |= local_changes
     poll()
     result = arr.copy()
@@ -247,21 +272,7 @@ def method_short_trace_repair(
                             'repairable': eligible, 'repaired': bool(changed),
                             'statistical_candidate_count': int(candidates[first:stop].sum()),
                             'zero_trace_count': int(zero_mask[first:stop].sum())})
-    warnings = []
-    if zero_mask.any():
-        zero_numbers = (np.flatnonzero(zero_mask)[:32] + 1).tolist()
-        shown = ', '.join(map(str, zero_numbers)) + ('…' if zero_mask.sum() > 32 else '')
-        warnings.append({'code': 'short_trace_zero', 'method_id': 'short_trace_repair',
-                         'message': f'输入有{int(zero_mask.sum())}道整道全零（确定数据质量问题），道号：{shown}；'
-                                    '已单独标记；它不同于统计候选或某一时窗安静。端部不外推。',
-                         'trace_numbers': zero_numbers,
-                         'trace_count': int(zero_mask.sum())})
-    if effective_mode == 'full':
-        warnings.append({'code': 'short_trace_full_window', 'method_id': 'short_trace_repair',
-                         'message': '旧版全窗判断仅用于对照，强早波可能主导候选；不构成采集坏道证明。'})
-    elif len(windows) < 2:
-        warnings.append({'code': 'short_trace_local_only', 'method_id': 'short_trace_repair',
-                         'message': '有效样点或独立时窗不足，仅标记局部变化，不进行整道插补。'})
+    warnings = _classification_warnings(zero_mask, effective_mode, windows)
     # A changed gate/threshold must not erase prior unresolved review history.
     # Only an explicit successful repair of that position clears its flag.
     unresolved = (prior_unresolved | repair_targets) & ~repaired

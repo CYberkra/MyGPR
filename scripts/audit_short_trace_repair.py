@@ -55,6 +55,23 @@ def packet(time, center, width=10.):
     u = (time[:,None]-np.asarray(center)[None,:])/width
     return np.where(abs(u)<=4, (1-2*u*u)*np.exp(-u*u),0.).astype(np.float32)
 
+def _plot_controlled_examples(plot_cases, output):
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    fig,axes = plt.subplots(2,3,figsize=(12,6),sharex=True,sharey=True,layout='constrained')
+    for column,(name,original,processed) in enumerate(plot_cases):
+        for row,matrix in enumerate((original,processed)):
+            axes[row,column].imshow(matrix,aspect='auto',extent=[1,129,900,0],cmap='gray',vmin=-.02,vmax=.02)
+            axes[row,column].set_title(name if row==0 else 'After three-gate repair')
+            axes[row,column].set_xlabel('Trace')
+    axes[0,0].set_ylabel('Known target only, time (ns)')
+    axes[1,0].set_ylabel('Output minus known background, ns')
+    fig.suptitle('Controlled examples only: identical amplitude scale; not field truth')
+    fig.savefig(output/'controlled_reflection_counterexamples.png',dpi=160)
+    plt.close(fig)
+
+
 def audit(source: Path, output: Path):
     if output.exists() and any(output.iterdir()):
         raise ValueError('Output must be new/empty')
@@ -135,20 +152,7 @@ def audit(source: Path, output: Path):
             synthetic_fill.append({'case':name,'start_trace':first+1,'length':length,
                 'relative_target_rms_error':float(np.sqrt(np.mean((estimate-truth).astype(float)**2)/np.mean(truth.astype(float)**2))),
                 'max_abs_peak_time_shift_ns':float(abs(shifts).max())})
-    import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-    fig,axes = plt.subplots(2,3,figsize=(12,6),sharex=True,sharey=True,layout='constrained')
-    for column,(name,original,processed) in enumerate(plot_cases):
-        for row,matrix in enumerate((original,processed)):
-            axes[row,column].imshow(matrix,aspect='auto',extent=[1,129,900,0],cmap='gray',vmin=-.02,vmax=.02)
-            axes[row,column].set_title(name if row==0 else 'After three-gate repair')
-            axes[row,column].set_xlabel('Trace')
-    axes[0,0].set_ylabel('Known target only, time (ns)')
-    axes[1,0].set_ylabel('Output minus known background, ns')
-    fig.suptitle('Controlled examples only: identical amplitude scale; not field truth')
-    fig.savefig(output/'controlled_reflection_counterexamples.png',dpi=160)
-    plt.close(fig)
+    _plot_controlled_examples(plot_cases, output)
     after = digest(source)
     assert before == after
     result = {'source':str(source),'source_sha256_unchanged':after,

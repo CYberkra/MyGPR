@@ -53,6 +53,21 @@ def _normalized_crs_label(value: str) -> str:
         return text.upper()
 
 
+def _track_crs_labels(points, crs_labels):
+    track_crs = set()
+    unknown_track_crs = False
+    for point in points:
+        raw_label = str(getattr(point, 'coordinate_system', '') or '')
+        if raw_label not in crs_labels:
+            crs_labels[raw_label] = _normalized_crs_label(raw_label)
+        label = crs_labels[raw_label]
+        if label:
+            track_crs.add(label)
+        else:
+            unknown_track_crs = True
+    return track_crs, unknown_track_crs
+
+
 @dataclass(frozen=True)
 class SpatialResultRecord:
     result_id: str
@@ -182,15 +197,9 @@ class SpatialResultVersionService:
             if trajectory is None or not trajectory.points:
                 warnings.append(f"{line_id}：缺少 RTK/GNSS 轨迹，不能生成空间曲线")
                 continue
-            for point in trajectory.points:
-                raw_label = str(getattr(point, 'coordinate_system', '') or '')
-                if raw_label not in crs_labels:
-                    crs_labels[raw_label] = _normalized_crs_label(raw_label)
-                label = crs_labels[raw_label]
-                if label:
-                    track_crs.add(label)
-                else:
-                    unknown_track_crs = True
+            labels, has_unknown = _track_crs_labels(trajectory.points, crs_labels)
+            track_crs.update(labels)
+            unknown_track_crs |= has_unknown
             located += 1
             if str(getattr(annotation, "status", "draft")) == "confirmed":
                 confirmed += 1

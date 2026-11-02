@@ -22,6 +22,32 @@ from mygpr.infrastructure.processing.native_adapter import NativeProcessingExecu
 from mygpr.interfaces.backend import MyGPRBackend
 
 
+def _verify_package_roundtrips(backend, pid, package, output, raw, marked, mark_data, repaired):
+    roundtrips = []
+    with zipfile.ZipFile(package.archive_path) as archive:
+        manifest = json.loads(archive.read('manifest.json'))
+        entries = [('raw', manifest['raw_input']['data'], raw)]
+        for step in manifest['steps']:
+            expected = mark_data if step['artifact_id'] == marked.artifact_id else repaired
+            entries.append((step['artifact_id'], step['data'], expected))
+        for index, (name, member, expected) in enumerate(entries):
+            destination = output / f'{name}.h5'
+            atomic_write_bytes(destination, archive.read(member))
+            loaded = load_gpr_dataset(destination)
+            np.testing.assert_array_equal(loaded.matrix, expected.data)
+            np.testing.assert_array_equal(loaded.time_axis_ns, expected.header_info['time_axis_ns'])
+            # Core GPRDataSet exposes preview arrays, not processing trace metadata.
+            # Verify masks through the real project reimport/read contract.
+            roundtrip_line = f'L{20 + index}'
+            backend.projects.import_line_source(pid, roundtrip_line, destination)
+            imported = backend.projects.read_dataset(pid, roundtrip_line)
+            for key in ('short_trace_candidate_mask', 'short_trace_repaired_mask', 'short_trace_unresolved_mask'):
+                if key in expected.trace_metadata:
+                    np.testing.assert_array_equal(imported.trace_metadata[key], expected.trace_metadata[key])
+            roundtrips.append({'name': name, 'path': str(destination), 'matrix_time_masks_exact': True})
+    return roundtrips
+
+
 def validate(source: Path, output: Path, time_windows_ns: str, baseline: Path | None = None) -> dict:
     source = source.resolve()
     output = output.resolve()
@@ -89,28 +115,8 @@ def validate(source: Path, output: Path, time_windows_ns: str, baseline: Path | 
             raise RuntimeError(exported.error_message)
         package = exported.result
         assert package.verified
-        roundtrips = []
-        with zipfile.ZipFile(package.archive_path) as archive:
-            manifest = json.loads(archive.read('manifest.json'))
-            entries = [('raw', manifest['raw_input']['data'], raw)]
-            for step in manifest['steps']:
-                expected = mark_data if step['artifact_id'] == marked.artifact_id else repaired
-                entries.append((step['artifact_id'], step['data'], expected))
-            for index, (name, member, expected) in enumerate(entries):
-                destination = output / f'{name}.h5'
-                atomic_write_bytes(destination, archive.read(member))
-                loaded = load_gpr_dataset(destination)
-                np.testing.assert_array_equal(loaded.matrix, expected.data)
-                np.testing.assert_array_equal(loaded.time_axis_ns, expected.header_info['time_axis_ns'])
-                # Core GPRDataSet exposes preview arrays, not processing trace metadata.
-                # Verify masks through the real project reimport/read contract.
-                roundtrip_line = f'L{20 + index}'
-                backend.projects.import_line_source(pid, roundtrip_line, destination)
-                imported = backend.projects.read_dataset(pid, roundtrip_line)
-                for key in ('short_trace_candidate_mask', 'short_trace_repaired_mask', 'short_trace_unresolved_mask'):
-                    if key in expected.trace_metadata:
-                        np.testing.assert_array_equal(imported.trace_metadata[key], expected.trace_metadata[key])
-                roundtrips.append({'name': name, 'path': str(destination), 'matrix_time_masks_exact': True})
+        roundtrips = _verify_package_roundtrips(
+            backend, pid, package, output, raw, marked, mark_data, repaired)
         after = hashlib.sha256(source.read_bytes()).hexdigest()
         assert before == after
         result = {'source': str(source), 'source_sha256_before': before, 'source_sha256_after': after,

@@ -197,6 +197,37 @@ def _hdf5_matrix_shape(path: Path) -> tuple[tuple[int, ...], str, str]:
     return found
 
 
+def _sidecar_preflight(src, suffix, sidecar, dielectric_constant, size, progress_callback):
+    sample_count = int(sidecar["sample_count"])
+    trace_count = int(sidecar["trace_count"])
+    interval = float(sidecar["trace_interval_m"])
+    from core.cdut_acquisition_import import csv_session, marker_sidecars
+
+    identity = csv_session(src, trace_count)
+    markers, _, _ = marker_sidecars(src, trace_count)
+    if identity and not src.with_name(src.name + '.meta.jsonl').is_file():
+        raise ValueError('带测次身份的CSV缺少原始元数据日志')
+    suggestions = ["完整矩阵解析、轨迹提取和质检将在后台导入任务中执行"]
+    if identity:
+        suggestions.append("已识别测次身份；逐道 UUID、道号、波形 CRC 将在后台完整校验，当前并非完整性通过")
+    if not src.with_name(src.name + '.meta.jsonl').is_file():
+        suggestions.append("未提供逐道原始日志：原始道ID、姿态、采集时间不可恢复；第3列仍按旧地表高程解释，平台海拔角色需另行确认")
+    if markers:
+        suggestions.append(f"已识别 {len(markers)} 个采集标记（文件内1基道号；不代表已确认目标）")
+    _emit(progress_callback, "inspect_header", size, size)
+    return ImportPreflightResult(
+        path=str(src), exists=True, is_file=True, extension=suffix,
+        format_name="mygpr-airborne-sidecar-csv", support="direct", can_import=True,
+        message="可直接导入；已由头信息识别为 MyGPR 航空 GPR 主数据。",
+        suggestions=tuple(suggestions),
+        sample_count=sample_count, trace_count=trace_count,
+        length_m=interval * max(trace_count - 1, 1),
+        time_window_ns=float(sidecar["time_window_ns"]), dielectric_constant=float(dielectric_constant),
+        source_kind="MyGPR 航空 GPR 主数据 CSV", has_trajectory=True,
+        column_summary="longitude, latitude, elevation_m, amplitude, height_m, timestamp_s",
+    )
+
+
 def build_import_preflight(
     source: str | Path,
     *,
@@ -224,34 +255,8 @@ def build_import_preflight(
             if suffix in {".csv", ".txt"}:
                 sidecar = detect_mygpr_airborne_sidecar_csv(src)
                 if sidecar is not None:
-                    sample_count = int(sidecar["sample_count"])
-                    trace_count = int(sidecar["trace_count"])
-                    interval = float(sidecar["trace_interval_m"])
-                    from core.cdut_acquisition_import import csv_session, marker_sidecars
-
-                    identity = csv_session(src, trace_count)
-                    markers, _, _ = marker_sidecars(src, trace_count)
-                    if identity and not src.with_name(src.name + '.meta.jsonl').is_file():
-                        raise ValueError('带测次身份的CSV缺少原始元数据日志')
-                    suggestions = ["完整矩阵解析、轨迹提取和质检将在后台导入任务中执行"]
-                    if identity:
-                        suggestions.append("已识别测次身份；逐道 UUID、道号、波形 CRC 将在后台完整校验，当前并非完整性通过")
-                    if not src.with_name(src.name + '.meta.jsonl').is_file():
-                        suggestions.append("未提供逐道原始日志：原始道ID、姿态、采集时间不可恢复；第3列仍按旧地表高程解释，平台海拔角色需另行确认")
-                    if markers:
-                        suggestions.append(f"已识别 {len(markers)} 个采集标记（文件内1基道号；不代表已确认目标）")
-                    _emit(progress_callback, "inspect_header", size, size)
-                    return ImportPreflightResult(
-                        path=str(src), exists=True, is_file=True, extension=suffix,
-                        format_name="mygpr-airborne-sidecar-csv", support="direct", can_import=True,
-                        message="可直接导入；已由头信息识别为 MyGPR 航空 GPR 主数据。",
-                        suggestions=tuple(suggestions),
-                        sample_count=sample_count, trace_count=trace_count,
-                        length_m=interval * max(trace_count - 1, 1),
-                        time_window_ns=float(sidecar["time_window_ns"]), dielectric_constant=float(dielectric_constant),
-                        source_kind="MyGPR 航空 GPR 主数据 CSV", has_trajectory=True,
-                        column_summary="longitude, latitude, elevation_m, amplitude, height_m, timestamp_s",
-                    )
+                    return _sidecar_preflight(
+                        src, suffix, sidecar, dielectric_constant, size, progress_callback)
                 rows, cols, low, high, consumed = _sample_numeric_csv(
                     src, cancel_requested=cancel_requested, progress_callback=progress_callback,
                 )

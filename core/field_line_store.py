@@ -86,34 +86,8 @@ class FieldLineStoreMixin:
                 progress_callback=progress_callback,
             )
 
-    def _import_line_file(
-        self,
-        line_id: str,
-        source: str | Path,
-        *,
-        name: str | None = None,
-        copy_into_project: bool = True,
-        dielectric_constant: float = 9.0,
-        time_window_ns: float | None = None,
-        trace_interval_m: float | None = None,
-        cancel_requested=None,
-        progress_callback=None,
-    ) -> FieldLineRecord:
-        """Import one line with cooperative cancellation and bounded memory.
-
-        Matrix normalization is performed through a project-local staging
-        directory.  The caller's transaction removes the entire raw directory
-        on failure/cancellation, while this method also cleans its own staging
-        artifacts defensively.
-        """
-        line_id = self._safe_line_id(line_id)
-        src = Path(source).resolve()
-        if not src.exists():
-            raise FileNotFoundError(src)
-        dest = self.root / "raw" / line_id / src.name if copy_into_project else src
-        if copy_into_project and dest == self.trajectory_path(line_id):
-            dest = dest.parent / "sources" / src.name
-        staging = self.root / "raw" / line_id / f".import_staging_{uuid.uuid4().hex}"
+    def _prepare_import_companions(self, line_id, src, dest, copy_into_project, *,
+                                   cancel_requested=None, progress_callback=None):
         companion_files = []
         previous_manifest = self.root / "raw" / line_id / "import_manifest.json"
         from core.cdut_acquisition_import import remove_owned_companions
@@ -147,6 +121,40 @@ class FieldLineStoreMixin:
             # ownership record for safe cleanup on the next replacement.
             if not dest.is_relative_to(previous_manifest.parent):
                 companion_files = []
+        return companion_files
+
+    def _import_line_file(
+        self,
+        line_id: str,
+        source: str | Path,
+        *,
+        name: str | None = None,
+        copy_into_project: bool = True,
+        dielectric_constant: float = 9.0,
+        time_window_ns: float | None = None,
+        trace_interval_m: float | None = None,
+        cancel_requested=None,
+        progress_callback=None,
+    ) -> FieldLineRecord:
+        """Import one line with cooperative cancellation and bounded memory.
+
+        Matrix normalization is performed through a project-local staging
+        directory.  The caller's transaction removes the entire raw directory
+        on failure/cancellation, while this method also cleans its own staging
+        artifacts defensively.
+        """
+        line_id = self._safe_line_id(line_id)
+        src = Path(source).resolve()
+        if not src.exists():
+            raise FileNotFoundError(src)
+        dest = self.root / "raw" / line_id / src.name if copy_into_project else src
+        if copy_into_project and dest == self.trajectory_path(line_id):
+            dest = dest.parent / "sources" / src.name
+        staging = self.root / "raw" / line_id / f".import_staging_{uuid.uuid4().hex}"
+        companion_files = self._prepare_import_companions(
+            line_id, src, dest, copy_into_project, cancel_requested=cancel_requested,
+            progress_callback=progress_callback,
+        )
         try:
             line = self.get_line(line_id)
         except KeyError:
