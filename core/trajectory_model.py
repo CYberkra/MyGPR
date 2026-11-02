@@ -124,7 +124,7 @@ class TrajectoryModel:
                 def get_float(*keys: str, default: float = 0.0) -> float:
                     for key in keys:
                         value = row.get(key)
-                        if value not in (None, ""):
+                        if value is not None and value != "":
                             try:
                                 return float(value)
                             except ValueError:

@@ -212,7 +212,9 @@ def csv_companion_metadata(path, matrix, *, cancel_requested=None):
         raise ValueError("CSV元数据日志禁止链接")
     from core.chunked_gpr_io import check_cancel
 
-    fields = {key: [None] * count for key in (*FLOAT_FIELDS, "trace_id")}
+    fields: dict[str, list[float | None]] = {
+        key: [None] * count for key in (*FLOAT_FIELDS, "trace_id")
+    }
     seen = set()
     digest = hashlib.sha256()
     with journal.open("rb") as stream:

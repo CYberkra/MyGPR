@@ -7,7 +7,8 @@ from dataclasses import asdict
 import json
 from pathlib import Path
 import re
-from typing import Any, Mapping, Sequence
+from threading import RLock
+from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 import numpy as np
 
@@ -20,6 +21,11 @@ from mygpr.domain.interpretation.models import (
     BoreholeLayer, BoreholeRecord, InterfaceAnnotation, InterpretationFeature,
     InterpretationPoint, InterpretationZone,
 )
+
+if TYPE_CHECKING:
+    from core.field_project_store import FieldProjectStore
+    from core.gpr_data_model import GPRDataSet
+    from mygpr.domain.project.models import LineDatasetInfo
 
 _BOREHOLE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 
@@ -142,6 +148,15 @@ def _interface_from_payload(payload: Mapping[str, Any]) -> InterfaceAnnotation:
 
 class InterpretationPersistenceMixin:
     """Project-session interpretation operations with validated managed paths."""
+
+    _store: FieldProjectStore
+    _lock: RLock
+
+    if TYPE_CHECKING:
+        def _validated_line(self, line_id: str) -> str: ...
+        def _raw_dataset_with_properties(self, line_id: str) -> GPRDataSet: ...
+        def get_dataset_info(self, line_id: str) -> LineDatasetInfo: ...
+        def get_artifact_dataset_info(self, line_id: str, artifact_id: str) -> LineDatasetInfo: ...
 
     def _interpretation_path(self, line_id: str) -> Path:
         safe = self._validated_line(line_id)
@@ -384,7 +399,7 @@ class InterpretationPersistenceMixin:
                 },
             )
             self._append_audit(
-                "borehole_deleted", object_type="borehole", object_id=safe
+                "borehole_deleted", object_type="borehole", object_id=safe, payload={}
             )
         return True
 

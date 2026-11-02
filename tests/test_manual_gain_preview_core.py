@@ -8,6 +8,7 @@ from mygpr.application.processing.gain_preview import (
     PREFIX_REQUIRING_SAVED_INPUT, prepare_gain_preview,
 )
 from mygpr.domain.processing.models import PipelineDefinition, PipelineStep, ProcessingRequest
+from mygpr.domain.processing.manual_gain import encode_gain_nodes
 from mygpr.infrastructure.processing.algorithms.methods import AXIS_TRANSFORM_BY_METHOD
 from mygpr.infrastructure.processing.native_adapter import NativeProcessingExecutor
 from ui.desktop_backend_facade import evaluate_manual_gain_preview, manual_gain_preview_bundle
@@ -36,7 +37,7 @@ def test_enabled_preceding_steps_match_real_pipeline_and_do_not_save(project):
     nodes = [{"tau": 0, "db": -6}, {"tau": 1, "db": 20}]
     pipeline = PipelineDefinition(steps=tuple(
         [PipelineStep(s["method_id"], s["params"]) for s in prefix if s.get("enabled", True)]
-        + [PipelineStep("manual_gain", {"nodes": nodes})]))
+        + [PipelineStep("manual_gain", {"nodes": encode_gain_nodes(nodes)})]))
     expected = backend.processing.execute_pipeline(source.data, pipeline,
         header_info=source.header_info, trace_metadata=source.trace_metadata)
     actual = evaluate_manual_gain_preview(prepared["matrix"], nodes)
@@ -51,10 +52,19 @@ def test_preparing_saved_result_uses_that_result_not_the_raw_source(project):
     backend, pid, raw = project
     nodes = [{"tau": 0, "db": 20}, {"tau": 1, "db": 20}]
     saved = backend.project_processing.execute_pipeline(pid, "L01", PipelineDefinition(
-        steps=(PipelineStep("manual_gain", {"nodes": nodes}),)))
+        steps=(PipelineStep("manual_gain", {"nodes": encode_gain_nodes(nodes)}),)))
     prepared = prepare_gain_preview(backend.projects, backend.processing, pid, "L01", saved.artifact_id, [])
     np.testing.assert_allclose(prepared["matrix"], raw * 10, rtol=1e-7)
     assert len(backend.projects.list_artifacts(pid, "L01")) == 1
+
+
+def test_preview_restores_the_stored_axis_precision_after_metadata_serialization(project):
+    backend, pid, _ = project
+    prepared = prepare_gain_preview(backend.projects, backend.processing, pid, "L01", "", [])
+    source = backend.projects.read_dataset(pid, "L01")
+    for key in ('time_axis_ns', 'distance_axis_m', 'depth_axis_m'):
+        assert prepared['header'][key].dtype == source.header_info[key].dtype
+        np.testing.assert_array_equal(prepared['header'][key], source.header_info[key])
 
 
 @pytest.mark.parametrize("shape", [(1, 7), (501, 1918)])

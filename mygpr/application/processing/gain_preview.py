@@ -45,6 +45,12 @@ def prepare_gain_preview(projects: ProjectService, processing: ProcessingService
     if expected != info.shape[0]:
         raise ValueError("增益预览输入不完整")
     header = dict(info.metadata)
+    # Dataset-info JSON serializes stored float32 coordinates as Python lists.
+    # Restore the same precision as ProjectLineData before validating a grid;
+    # interpreting those rounded values as float64 invents nonuniform sampling.
+    for key in ('time_axis_ns', 'distance_axis_m', 'depth_axis_m'):
+        if header.get(key) is not None:
+            header[key] = np.asarray(header[key], dtype=np.float32)
     header.setdefault("time_window_ns", info.time_window_ns)
     header.setdefault("length_m", info.length_m)
     trace_metadata = (projects.read_artifact_trace_metadata(project_id, line_id, artifact_id)

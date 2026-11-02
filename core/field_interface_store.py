@@ -270,13 +270,16 @@ class FieldInterfaceStoreMixin:
                     if not np.isfinite(curve[trace]) and not semantics["no_interface_mask"][trace]:
                         continue
                     distance = float(dataset.distance_axis_m[min(trace, len(dataset.distance_axis_m) - 1)])
-                    x = y = surface_z = interface_z = ""
+                    x: float | str = ""
+                    y: float | str = ""
+                    surface_z: float | str = ""
+                    interface_z: float | str = ""
                     if trajectory is not None:
                         point = trajectory.interpolate(distance)
                         x, y = float(point.x), float(point.y)
                         surface_z = float(point.z) - float(point.flight_height_m)
                         if np.isfinite(labels["depth_gt"][trace]):
-                            interface_z = surface_z - float(labels["depth_gt"][trace])
+                            interface_z = float(surface_z) - float(labels["depth_gt"][trace])
                     visibility_code = int(semantics["visibility_gt"][trace])
                     visibility = {0: "unknown", 1: "clear", 2: "weak", 3: "no_interface"}.get(visibility_code, "unknown")
                     writer.writerow({

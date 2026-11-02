@@ -50,7 +50,7 @@ def main(argv: list[str] | None = None) -> int:
     report = ROOT / "output" / "ci-regressions" / "junit.xml"
     report.parent.mkdir(parents=True, exist_ok=True)
     command = [sys.executable, "-m", "pytest", *paths, "-q",
-               f"--junitxml={report}", "--durations=15", "--timeout=120"]
+               f"--junitxml={report}", "--durations=15", "--timeout=120", "--timeout-method=thread"]
     print(f"GitHub focused suite: {args.suite}; {len(paths)} files", flush=True)
     return subprocess.run(command, cwd=ROOT, check=False).returncode
 

@@ -106,6 +106,7 @@ def _execute(source, output, params: dict[str, Any], method: str, context=None, 
     if len(source.shape) != 2 or not source.shape[0] or not source.shape[1]:
         raise ValueError("图像滤波输入必须为非空二维雷达矩阵")
     rows = max(1, min(128, int(rows)))
+    meta: dict[str, Any]
     if method == "gaussian_smoothing":
         sigma = (_number(params, "sigma_samples", 0.0, 0, 32),
                  _number(params, "sigma_traces", 1.0, 0, 32))
