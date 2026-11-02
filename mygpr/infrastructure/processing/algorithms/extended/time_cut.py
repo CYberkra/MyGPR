@@ -11,6 +11,7 @@ import numpy as np
 
 from mygpr.domain.common.scalars import to_float
 from mygpr.domain.processing.timebase import snap_sample_index
+from mygpr.infrastructure.processing.algorithms.common import stored_axis_boundary_index
 
 
 def method_time_cut(
@@ -150,13 +151,7 @@ def method_time_cut(
 
 
 def _axis_boundary_index(source_axis: Any, axis: np.ndarray, value: float) -> int:
-    source = np.asarray(source_axis)
-    if source.dtype.kind == "f":
-        rounded = float(np.asarray(value, dtype=source.dtype))
-        index = int(np.searchsorted(axis, rounded, side="left"))
-        if index < len(axis) and axis[index] == rounded:
-            return index
-    return int(np.searchsorted(axis, value, side="left"))
+    return stored_axis_boundary_index(source_axis, axis, value)
 
 
 def _validate_time_axis(source_axis: Any, samples: int) -> tuple[np.ndarray, float]:

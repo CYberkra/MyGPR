@@ -2,6 +2,21 @@
 from __future__ import annotations
 
 METHOD_METADATA = {
+    "gaussian_smoothing": {
+        "category": "denoising", "maturity": "stable", "visibility": "public",
+        "display_name": "高斯平滑（Gaussian）",
+        "description": "对带符号的雷达矩阵做高斯加权平滑，时间与道间方向分别设置标准差。默认仅平滑道间；平滑会削弱高频细节。不改变矩阵尺寸或坐标轴。检索别名：高斯滤波 Gaussian smoothing blur。",
+    },
+    "non_local_means": {
+        "category": "denoising", "maturity": "stable", "visibility": "public",
+        "display_name": "非局部均值去噪（NLM）",
+        "description": "在搜索邻域内比较二维波形块，按均方差相似度加权平均中心振幅；使用均匀块权重。直接处理带正负的雷达振幅，不转灰度图。强度过大会削弱真实反射，搜索范围越大越慢。检索别名：非局部均值滤波 Non-local Means denoising NLM。",
+    },
+    "manual_gain": {
+        "category": "gain", "maturity": "stable", "visibility": "public",
+        "display_name": "手动曲线增益",
+        "description": "沿当前输入采样范围设置 2～32 个增益节点，在 dB 域分段线性插值后乘入每一道的振幅；规则与采集端手动显示增益一致，此处生成新的处理成果。0%～100% 对应当前输入（裁剪后为保留范围），不会归一化或截幅。检索别名：手动增益 分段增益 manual piecewise gain dB。",
+    },
     "compensatingGain": {
         "category": "gain",
         "maturity": "stable",
@@ -43,6 +58,13 @@ METHOD_METADATA = {
         "visibility": "hidden",
         "display_name": "坏道质量控制",
         "description": "检测低能量道、能量异常道和手动指定道；按模式标记、置零或移除。 检索别名：坏道检测 trace QC。",
+    },
+    "short_trace_repair": {
+        "category": "quality_control",
+        "maturity": "experimental",
+        "visibility": "public",
+        "display_name": "短段异常道修补",
+        "description": "默认自动三分窗，区分局部时窗变化与跨窗异常候选；默认仅标记，局部变化不整道插补。保留手动时窗和旧全窗对照。跨窗也不证明采集坏道，插补可能覆盖真实反射。检索别名：坏道插值 竖纹修补 short trace repair。",
     },
     "agcGain": {
         "category": "gain",
@@ -293,6 +315,7 @@ PREFERRED_METHOD_ORDER = [
     "time_cut",
     "trace_cut",
     "trace_qc",
+    "short_trace_repair",
     "dewow",
     "subtracting_average_2D",
     "median_background_2D",
@@ -305,10 +328,13 @@ PREFERRED_METHOD_ORDER = [
     "energy_decay_gain",
     "amplitude_scale",
     "compensatingGain",
+    "manual_gain",
     "agcGain",
     "hankel_svd",
     "trace_median_filter",
     "trace_savgol_filter",
+    "gaussian_smoothing",
+    "non_local_means",
     "svd_subspace",
     "wavelet_2d",
     "hilbert_envelope",
@@ -328,6 +354,7 @@ PREFERRED_METHOD_ORDER = [
 ]
 
 METHOD_TAGS = {
+    "short_trace_repair": "实验",
     "subtracting_average_2D": "推荐",
     "median_background_2D": "备选",
     "agcGain": "备选",

@@ -524,6 +524,7 @@ def import_line_data(
     *,
     line_id: str | None = None,
     name: str | None = None,
+    dielectric_constant: float = 9.0,
     cancel_requested: Callable[[], bool] | None = None,
     progress_callback: Callable[[str, int, int], None] | None = None,
 ) -> FieldLineRecord:
@@ -539,7 +540,7 @@ def import_line_data(
         shutil.copytree(raw_dir, backup_dir)
     try:
         store.import_line_file(
-            target_line_id, src, name=target_name, copy_into_project=True,
+            target_line_id, src, name=target_name, copy_into_project=True, dielectric_constant=dielectric_constant,
             cancel_requested=cancel_requested, progress_callback=progress_callback,
         )
         line = store.get_line(target_line_id)
@@ -591,6 +592,7 @@ def batch_import_line_data(
     store: FieldProjectStore,
     sources: list[str | Path],
     *,
+    dielectric_constant: float = 9.0,
     progress_callback: Callable[[int, int, BatchImportItemResult], None] | None = None,
     cancel_requested: Callable[[], bool] | None = None,
 ) -> BatchImportSummary:
@@ -633,7 +635,7 @@ def batch_import_line_data(
             # Avoid a redundant whole-file preflight scan for every batch item.
             validate_import_source(src)
             line = import_line_data(
-                store, src, line_id=line_id, name=name, cancel_requested=cancel_requested
+                store, src, line_id=line_id, name=name, dielectric_constant=dielectric_constant, cancel_requested=cancel_requested
             )
             dataset = store.load_gpr_dataset(line.line_id)
             raw_dir = store.root / "raw" / line.line_id

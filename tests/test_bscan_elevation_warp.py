@@ -300,7 +300,7 @@ class TestToolbarTrim:
                      '_y_sample_btn', '_y_elevation_btn',
                      '_x_trace_btn', '_x_distance_btn'):
             assert not hasattr(view, name), f'{name} 应已退役'
-        assert view._fullscreen_btn.parent() is view   # 悬浮画布左上角
+        assert view._fullscreen_btn.parent() is view   # 悬浮画布右上角
 
     def test_capabilities_survive_in_context_menu(self, view):
         """删掉的是入口不是能力：右键菜单仍能切比例与轴单位。"""
@@ -310,11 +310,3 @@ class TestToolbarTrim:
         assert view.aspect_mode() == 'free'
         switch_elevation(view)
         assert view.y_axis_mode() == 'elevation'
-
-    def test_expand_survives_as_context_menu_capability(self, view):
-        """铺满钮退役后能力保留：宿主接管后仍可请求收起页面侧栏。"""
-        got = []
-        view.sig_expand_requested.connect(lambda: got.append(True))
-        view.set_expand_enabled(True)
-        view.request_expand()
-        assert got == [True]

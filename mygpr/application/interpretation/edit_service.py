@@ -157,10 +157,17 @@ class InterpretationEditService:
             info = self._projects.get_artifact_dataset_info(project_id, line_id, input_artifact_id)
         else:
             info = self._projects.get_dataset_info(project_id, line_id)
-        current = replace(
-            annotation,
-            processing_result=input_artifact_id or annotation.processing_result,
-        )
+        previous_source = str(annotation.processing_result or '')
+        if previous_source == f'{line_id}_raw':
+            previous_source = ''
+        # Points are sample indices in their source, not transferable to another
+        # result with a different physical axis.  Keep the saved annotation intact
+        # until the user explicitly saves this new source's draft.
+        if previous_source != input_artifact_id:
+            current = replace(annotation, processing_result=input_artifact_id,
+                              points=(), zones=(), status='draft', confidence=0.0)
+        else:
+            current = replace(annotation, processing_result=input_artifact_id)
         session = _EditSession(
             session_id=f"IES-{uuid.uuid4().hex[:14]}",
             project_id=project_id,
@@ -171,7 +178,8 @@ class InterpretationEditService:
             current=current,
             undo_stack=[],
             redo_stack=[],
-            audit={"opened_at": _utc_now()},
+            audit={"opened_at": _utc_now(),
+                   "source_changed": previous_source != input_artifact_id and bool(annotation.points or annotation.zones)},
         )
         self._sessions[session.session_id] = session
         return self._snapshot(session)

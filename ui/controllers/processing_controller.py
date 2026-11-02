@@ -10,14 +10,48 @@ import numpy as np
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from ui.desktop_backend_facade import (
+    CancellationTokenSource,
+    ExecutionContext,
     UiMethodEntry,
+    manual_gain_preview_bundle,
     method_catalog,
+    prepare_manual_gain_preview,
     pipeline_from_dicts,
     pipeline_to_raw,
 )
 from ui.controllers.backend_controller import EXPECTED_BACKEND_ERRORS, friendly_error_message, run_command
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class _GainInputSignals(QObject):
+    ready = pyqtSignal(str, object, str)
+
+
+def _cancel_gain_inputs(requests):
+    for source in list(requests.values()):
+        source.cancel()
+    requests.clear()
+
+
+class _GainInputCommand:
+    def __init__(self, backend, signals, cancellation, token, project_id, line_id, artifact_id, prefix):
+        self.backend, self.signals, self.cancellation = backend, signals, cancellation
+        self.token, self.project_id, self.line_id = token, project_id, line_id
+        self.artifact_id, self.prefix = artifact_id, prefix
+
+    def execute(self):
+        try:
+            payload = prepare_manual_gain_preview(self.backend, self.project_id, self.line_id,
+                self.artifact_id, self.prefix, ExecutionContext(cancellation_token=self.cancellation.token))
+            payload["bundle"] = manual_gain_preview_bundle(payload.pop("matrix"), payload.pop("header"))
+            error = ""
+        except (*EXPECTED_BACKEND_ERRORS, MemoryError, OverflowError) as exc:
+            payload = None
+            error = ("完整预览内存不足，请先裁剪输入范围" if isinstance(exc, MemoryError)
+                     else friendly_error_message(exc))
+        if not self.cancellation.token.is_cancelled:
+            self.signals.ready.emit(self.token, payload, error)
 
 
 def _schema_to_list(parameter_schema: Mapping[str, Any]) -> list[dict]:
@@ -53,6 +87,7 @@ class ProcessingController(QObject):
     """Method catalog loading, pipeline runs and AutoTune submission."""
 
     log_message = pyqtSignal(str)
+    gain_input_ready = pyqtSignal(str, object, str)
     methods_loaded = pyqtSignal(list)       # list[dict], see build_method_dicts
     run_submitted = pyqtSignal(str)         # job_id
     run_finished = pyqtSignal(bool, str)    # success, message
@@ -69,6 +104,12 @@ class ProcessingController(QObject):
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._backend_controller = None
+        self._gain_preview_requests = {}
+        requests = self._gain_preview_requests
+        self.destroyed.connect(lambda *_: _cancel_gain_inputs(requests))
+        self._gain_input_signals = _GainInputSignals()
+        self._gain_input_signals.ready.connect(self.gain_input_ready)
+        self.gain_input_ready.connect(lambda token, *_: self._gain_preview_requests.pop(token, None))
         self._loading = False
 
     # ------------------------------------------------------------------
@@ -84,6 +125,21 @@ class ProcessingController(QObject):
 
     def _job_bridge(self):
         return getattr(self._backend_controller, "job_bridge", None)
+
+    def prepare_gain_preview(self, token, project_id, line_id, artifact_id, prefix):
+        backend = self._backend()
+        if backend is None:
+            self.gain_input_ready.emit(token, None, "后端尚未就绪，暂时不能预览")
+            return
+        source = CancellationTokenSource()
+        self._gain_preview_requests[token] = source
+        run_command(_GainInputCommand(backend, self._gain_input_signals, source, token,
+                                     project_id, line_id, artifact_id, prefix), name="mygpr-gain-input")
+
+    def cancel_gain_preview(self, token):
+        source = self._gain_preview_requests.pop(token, None)
+        if source is not None:
+            source.cancel()
 
     def _watch_with_callback(
         self,

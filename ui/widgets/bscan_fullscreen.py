@@ -1,43 +1,44 @@
-# -*- coding: utf-8 -*-
-"""FullscreenHost — B-Scan 视图的「独立窗口展开」宿主。
-
-做法不是把画面复制一份（那要同步色标/ levels / 轴单位等一堆状态），而是
-**临时改嫁**：把同一个 QWidget 实例挂到本窗口的布局里，关闭时按原 (父控件,
-布局, 位置, stretch) 原位放回。同一实例意味着所有交互状态（缩放、漫游、
-字号跟随）完全连续，不需要同步。
-
-Esc 关闭；几何写到宿主自己的 QByteArray 由调用方持久化（本项目统一走
-ui.settings_manager 的 JSON，本模块不碰文件）。
-"""
+"""Per-view, interruptible fullscreen transitions with an exact origin slot."""
 from __future__ import annotations
 
-from PyQt6.QtCore import QByteArray, Qt, pyqtSignal
+from PyQt6.QtCore import (
+    QByteArray, QEasingCurve, QPoint, QPropertyAnimation, QRect, Qt, pyqtSignal,
+)
+from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import QBoxLayout, QVBoxLayout, QWidget
+
+from ui.motion import animations_enabled
 
 __all__ = ['FullscreenHost']
 
 
 class FullscreenHost(QWidget):
-    """承载一个 QWidget 的临时独立窗口；take/release 成对使用。"""
-
-    closed = pyqtSignal()   # 窗口关闭（宿主视图已还原原位）后发出
+    closed = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(
-            parent, Qt.WindowType.Window | Qt.WindowType.WindowMaximizeButtonHint)
-        self.setWindowTitle('B-Scan 全屏浏览（Esc 退出）')
+        super().__init__(parent, Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
+        self.setWindowTitle('B-Scan 全屏浏览（Esc 返回）')
+        self.state = 'embedded'
+        self._target_state = ''
         self._guest: QWidget | None = None
         self._guest_parent: QWidget | None = None
         self._guest_layout: QBoxLayout | None = None
         self._guest_index = -1
         self._guest_stretch = 0
+        self._placeholder: QWidget | None = None
+        self._origin_rect = QRect()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+        self._animation = QPropertyAnimation(self, b'geometry', self)
+        self._animation.setDuration(220)
+        self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._animation.finished.connect(self._finish_animation)
+        self._escape_shortcut = QShortcut(QKeySequence('Escape'), self)
+        self._escape_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+        self._escape_shortcut.activated.connect(self._on_escape)
 
-    # ------------------------------------------------------------ 接管 / 还原
     def take(self, guest: QWidget) -> None:
-        """记住 guest 的原位信息后接管它（幂等：重复调用前先 release）。"""
         if self._guest is not None:
             self.release()
         self._guest = guest
@@ -45,6 +46,7 @@ class FullscreenHost(QWidget):
         self._guest_layout = None
         self._guest_index = -1
         self._guest_stretch = 0
+        self._origin_rect = QRect(guest.mapToGlobal(QPoint(0, 0)), guest.size())
         parent = self._guest_parent
         layout = parent.layout() if parent is not None else None
         if isinstance(layout, QBoxLayout):
@@ -53,31 +55,98 @@ class FullscreenHost(QWidget):
                 self._guest_layout = layout
                 self._guest_index = index
                 self._guest_stretch = layout.stretch(index)
+                self._placeholder = QWidget(parent)
+                self._placeholder.setObjectName('bscanFullscreenPlaceholder')
+                self._placeholder.setSizePolicy(guest.sizePolicy())
+                self._placeholder.setMinimumSize(guest.minimumSize())
+                layout.removeWidget(guest)
+                layout.insertWidget(index, self._placeholder, self._guest_stretch)
+                self._placeholder.show()
         self.layout().addWidget(guest)
+        self.setGeometry(self._origin_rect)
         guest.show()
+        guest.destroyed.connect(self._on_guest_destroyed)
+
+    def _on_guest_destroyed(self):
+        self._animation.stop()
+        self._guest = None
+        if self._placeholder is not None:
+            self._placeholder.deleteLater()
+            self._placeholder = None
+        self.state = 'embedded'
+        self.hide()
+        self.deleteLater()
 
     def release(self) -> None:
-        """把 guest 放回原位（父控件 / 布局 / 位置 / stretch）。"""
+        self._animation.stop()
+        self.state = 'embedded'
+        self._target_state = ''
         guest = self._guest
-        if guest is None:
-            return
+        if guest is not None:
+            self.layout().removeWidget(guest)
+            guest.setParent(self._guest_parent)
+            if self._placeholder is not None and self._guest_layout is not None:
+                self._guest_layout.removeWidget(self._placeholder)
+                self._placeholder.deleteLater()
+                self._placeholder = None
+            if self._guest_layout is not None and self._guest_index >= 0:
+                self._guest_layout.insertWidget(self._guest_index, guest, self._guest_stretch)
+            guest.show()
         self._guest = None
-        self.layout().removeWidget(guest)
-        guest.setParent(self._guest_parent)
-        layout = self._guest_layout
-        if layout is not None and self._guest_index >= 0:
-            layout.insertWidget(self._guest_index, guest, self._guest_stretch)
-        guest.show()
         self._guest_layout = None
         self._guest_index = -1
+        self.hide()
 
-    # ------------------------------------------------------------ 几何持久化
+    def expand(self) -> None:
+        if self._guest is None or self.state in ('fullscreen', 'expanding'):
+            return
+        self._animation.stop()
+        screen = self._guest.screen() or self.screen()
+        target = screen.availableGeometry() if screen is not None else self._origin_rect
+        self.state = 'expanding'
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        self._animate_to(target, 'fullscreen')
+
+    def collapse(self) -> None:
+        if self._guest is None or self.state in ('embedded', 'collapsing'):
+            return
+        self._animation.stop()
+        self.state = 'collapsing'
+        self._animate_to(self._embedded_rect(), 'embedded')
+
+    def settle(self) -> None:
+        self.release()
+        self.closed.emit()
+
+    def _embedded_rect(self) -> QRect:
+        if self._placeholder is not None:
+            return QRect(self._placeholder.mapToGlobal(QPoint(0, 0)),
+                         self._placeholder.size())
+        return self._origin_rect
+
+    def _animate_to(self, target: QRect, state: str) -> None:
+        self._target_state = state
+        if not animations_enabled():
+            self.setGeometry(target)
+            self._finish_animation()
+            return
+        self._animation.stop()
+        self._animation.setStartValue(self.geometry())
+        self._animation.setEndValue(target)
+        self._animation.start()
+
+    def _finish_animation(self) -> None:
+        if self._target_state == 'fullscreen':
+            self.state = 'fullscreen'
+        else:
+            self.settle()
+
     def captured_geometry(self) -> QByteArray:
-        """导出当前窗口几何（调用方按需持久化）。"""
         return self.saveGeometry()
 
     def restore_saved_geometry(self, data: QByteArray | bytes | None) -> bool:
-        """回放几何；无历史几何返回 False（调用方据此改为全屏/最大化）。"""
         if data is None:
             return False
         blob = data if isinstance(data, QByteArray) else QByteArray(data)
@@ -85,15 +154,20 @@ class FullscreenHost(QWidget):
             return False
         return bool(self.restoreGeometry(blob))
 
-    # ------------------------------------------------------------ 事件
-    def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt 命名
+    def _on_escape(self) -> None:
+        selector = getattr(self._guest, '_selection_tool', None)
+        if selector is not None and selector.active:
+            selector.cancel()
+        else:
+            self.collapse()
+
+    def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key.Key_Escape:
-            self.close()
+            self._on_escape()
             event.accept()
             return
         super().keyPressEvent(event)
 
-    def closeEvent(self, event) -> None:  # noqa: N802 - Qt 命名
-        self.release()
-        super().closeEvent(event)
-        self.closed.emit()
+    def closeEvent(self, event) -> None:
+        self.settle()
+        event.accept()

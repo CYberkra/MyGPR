@@ -27,5 +27,5 @@ def test_compact_header_keeps_long_input_identity_in_tooltip(page, qapp):  # noq
     assert page._sources['original']['title'] in page._input_label.toolTip()
     assert page._resources_btn.isVisibleTo(page)
     assert page._tools_btn.isVisibleTo(page)
-    assert page._layout_combo.isVisibleTo(page)
+    assert not hasattr(page, '_layout_combo')
     assert page.current_pipeline()['input_artifact_id'] == ''

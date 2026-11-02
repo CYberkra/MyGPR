@@ -149,7 +149,7 @@ def load_numeric_csv_to_memmap(
         cancel_requested=cancel_requested,
         progress_callback=progress_callback,
     )
-    if cols < 16 or rows < 32:
+    if cols < 2 or rows < 32:
         raise ValueError(
             f"CSV numeric content is too small for a B-scan matrix: rows={rows}, cols={cols}, path={path}"
         )

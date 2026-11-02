@@ -14,11 +14,11 @@ sync_requested payload：{'line_id', 'paths': {'rtk', 'imu', 'altimeter', 'trace
 from PyQt6.QtCore import QSize, Qt, QSettings, QUrl, pyqtSignal
 from PyQt6.QtGui import QBrush, QColor, QDesktopServices, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
-    QDialog, QHBoxLayout, QSizePolicy, QSplitter,
+    QDialog, QHBoxLayout, QScrollArea, QSizePolicy, QSplitter,
     QStackedWidget, QTabWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
-    BodyLabel, CardWidget, DoubleSpinBox, InfoBar,
+    BodyLabel, CardWidget, CheckBox, DoubleSpinBox, InfoBar,
     InfoBarPosition, LineEdit, MessageBox, PrimaryPushButton, PushButton,
     ToolButton, TransparentToolButton, isDarkTheme,
 )
@@ -187,7 +187,12 @@ class ProjectPage(QWidget):
         dialog.setMinimumWidth(440)
         dialog.setModal(False)
         layout = QVBoxLayout(dialog)
-        layout.addWidget(builder(dialog))
+        scroll = QScrollArea(dialog)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setWidget(builder(scroll))
+        layout.addWidget(scroll)
+        dialog.resize(700, 600)
         return dialog
 
     def show_import_tool(self) -> None:
@@ -282,6 +287,26 @@ class ProjectPage(QWidget):
         self.dielectric_spin.setMinimumWidth(120)
         layout.addLayout(make_form_row('介电常数:', self.dielectric_spin,
                                        parent=card))
+
+        axis_hint = make_hint('纯 CSV/TXT/NPY 矩阵不含物理轴：默认时间窗 250 ns、道间距 1 m，定量解释前请核对采集参数。', parent=card)
+        axis_hint.setWordWrap(True)
+        layout.addWidget(axis_hint)
+        self._matrix_axes_check = CheckBox('为纯矩阵输入采集轴参数（单文件）', card)
+        layout.addWidget(self._matrix_axes_check)
+        self._matrix_time_window = DoubleSpinBox(card)
+        self._matrix_time_window.setRange(0.000001, 1000000000.0)
+        self._matrix_time_window.setDecimals(6)
+        self._matrix_time_window.setValue(250.0)
+        self._matrix_time_window.setToolTip('首末采样点的时间跨度，按包含末点的线性时间轴生成。')
+        self._matrix_trace_interval = DoubleSpinBox(card)
+        self._matrix_trace_interval.setRange(0.000001, 10000000.0)
+        self._matrix_trace_interval.setDecimals(6)
+        self._matrix_trace_interval.setValue(1.0)
+        for label, widget in (('首末采样跨度/ns:', self._matrix_time_window),
+                              ('道间距/m:', self._matrix_trace_interval)):
+            widget.setEnabled(False)
+            self._matrix_axes_check.toggled.connect(widget.setEnabled)
+            layout.addLayout(make_form_row(label, widget, parent=card))
 
         # 按钮行：预检 + 导入
         btn_row = QHBoxLayout()
@@ -507,6 +532,8 @@ class ProjectPage(QWidget):
             self._current_line_id = ''
             self._source_path_cache.clear()
             self._sensor_summary_cache.clear()
+            self._sensor_sync_results.clear()
+            self._matrix_axes_check.setChecked(False)
             self._resume_lines.clear()
             self.file_edit.clear()
             self.line_name_edit.clear()
@@ -521,9 +548,17 @@ class ProjectPage(QWidget):
                 value.setText('--')
         else:
             for _label, attr in _INFO_FIELDS:
-                text = str(getattr(summary, attr, '') or '').strip()
-                self._info_values[attr].setText(text or '--')
+                if changed or hasattr(summary, attr):
+                    text = str(getattr(summary, attr, '') or '').strip()
+                    self._info_values[attr].setText(text or '--')
         self._update_action_state()
+
+    def set_project_metadata(self, metadata) -> None:
+        if not self._summary or str(getattr(metadata, 'project_id', '')) != str(getattr(self._summary, 'project_id', '')):
+            return
+        for _label, attr in _INFO_FIELDS:
+            source = self._summary if attr == 'name' else metadata
+            self._info_values[attr].setText(str(getattr(source, attr, '') or '').strip() or '--')
 
     def set_lines(self, lines: list) -> None:
         """刷新测线表；自动建议下一测线号（UX P2-1）。"""
@@ -738,6 +773,7 @@ class ProjectPage(QWidget):
         paths, _selected = file_dialogs.getOpenFileNames(
             self, '选择一个或多个 GPR 数据文件', '', _GPR_FILE_FILTER)
         if paths:
+            self._matrix_axes_check.setChecked(False)
             self._import_sources = list(paths)
             self.file_edit.setText(paths[0] if len(paths) == 1 else f'已选择 {len(paths)} 个文件')
             self.file_edit.setToolTip('\n'.join(paths))
@@ -747,6 +783,7 @@ class ProjectPage(QWidget):
 
     def _on_import_text_edited(self, text):
         self._import_sources = []
+        self._matrix_axes_check.setChecked(False)
         self.file_edit.setToolTip(text)
         self.line_id_edit.setEnabled(True)
         self.line_name_edit.setEnabled(True)
@@ -785,6 +822,10 @@ class ProjectPage(QWidget):
             InfoBar.warning(title='批量导入', content='批量导入会逐文件预检；单文件详细预检请只选择一个文件',
                             duration=3000, parent=self)
             return
+        if self._matrix_axes_check.isChecked() and len(sources) > 1:
+            InfoBar.warning(title='批量导入', content='手动轴参数目前只支持单文件导入。',
+                            duration=3000, parent=self)
+            return
         line_id = self.line_id_edit.text().strip() or 'L01'
         payload = {
             'preflight': bool(preflight),
@@ -794,6 +835,9 @@ class ProjectPage(QWidget):
             'name': self.line_name_edit.text().strip() or line_id,
             'dielectric': float(self.dielectric_spin.value()),
         }
+        if self._matrix_axes_check.isChecked() and not preflight:
+            payload['time_window_ns'] = float(self._matrix_time_window.value())
+            payload['trace_interval_m'] = float(self._matrix_trace_interval.value())
         if preflight:
             self._preflight_label.setText('预检中…')
             self._preflight_label.set_hint_key('info')

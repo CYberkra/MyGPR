@@ -145,14 +145,16 @@ class DeliveryPage(QWidget):
 
         spatial_layout.addWidget(make_separator())
 
-        self._spatial_table = QTableWidget(0, 3, spatial_card)
+        self._spatial_table = QTableWidget(0, 4, spatial_card)
         self._spatial_table.setHorizontalHeaderLabels(
-            ['名称', '测线数', '创建时间'])
+            ['名称', '测线数', '创建时间', '状态'])
         self._spatial_table.verticalHeader().setVisible(False)
         self._spatial_table.setEditTriggers(
             QTableWidget.EditTrigger.NoEditTriggers)
         self._spatial_table.horizontalHeader().setSectionResizeMode(
             0, QHeaderView.ResizeMode.Stretch)
+        self._spatial_table.horizontalHeader().setSectionResizeMode(
+            3, QHeaderView.ResizeMode.ResizeToContents)
         self._spatial_table.setMinimumHeight(140)
         spatial_layout.addWidget(self._spatial_table)
         self._spatial_empty = EmptyStateOverlay(
@@ -259,6 +261,19 @@ class DeliveryPage(QWidget):
             self._spatial_table.setItem(row, 0, QTableWidgetItem(name))
             self._spatial_table.setItem(row, 1, QTableWidgetItem(str(n_lines)))
             self._spatial_table.setItem(row, 2, QTableWidgetItem(created))
+            status = str(_get(item, 'status', '') or '')
+            options = _get(item, 'options', {}) or {}
+            files = _get(item, 'files', {}) or {}
+            summary = _get(item, 'summary', {}) or {}
+            warnings = list(summary.get('preflight_warnings', []) or [])
+            text = '带警告' if status == 'generated_with_warnings' or warnings else '已生成'
+            if 'surface_control_points_geojson' in files:
+                text += ' · 已生成曲面控制点'
+            if options.get('surface_generated') is False or (files and 'surface_mesh' not in files):
+                text += ' · 未生成曲面'
+            status_item = QTableWidgetItem(text)
+            status_item.setToolTip('\n'.join(map(str, warnings)))
+            self._spatial_table.setItem(row, 3, status_item)
             self._spatial_table.item(row, 0).setData(
                 Qt.ItemDataRole.UserRole, str(_get(item, 'result_id', '') or _get(item, 'artifact_id', '')))
 

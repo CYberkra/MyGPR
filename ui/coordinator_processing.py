@@ -38,6 +38,8 @@ class ProcessingChain:
         self._estimate_token = ''
         self.batch_job_ids = set()
         self.batch_errors = []
+        self._batch_submitting = False
+        self._batch_pending_completions = []
 
     # ============================================================ 信号注册
     def connect_all(self) -> None:
@@ -107,6 +109,9 @@ class ProcessingChain:
         # ---------------- 处理控制器 → 本链
         prc = co.processing_controller
         if prc is not None:
+            processing.gain_preview_requested.connect(prc.prepare_gain_preview)
+            processing.gain_preview_cancelled.connect(prc.cancel_gain_preview)
+            prc.gain_input_ready.connect(processing.set_gain_preview)
             prc.methods_loaded.connect(self.on_methods_loaded)
             if hasattr(prc, 'run_submitted'):
                 prc.run_submitted.connect(self.on_run_submitted)
@@ -270,14 +275,23 @@ class ProcessingChain:
         if not line_ids or not steps:
             return
         result_name = str(payload.get('result_name') or '处理结果').strip()
-        jobs = self._co.processing_controller.run_pipeline_batch(
-            self._co.current_project_id(), line_ids, {'steps': steps}, result_name,
-            input_artifact_ids=dict(payload.get('input_artifact_ids') or {}),
-            save_intermediates=bool(payload.get('save_intermediates', False)),
-        )
+        self._batch_submitting = True
+        self._batch_pending_completions = []
+        try:
+            jobs = self._co.processing_controller.run_pipeline_batch(
+                self._co.current_project_id(), line_ids, {'steps': steps}, result_name,
+                input_artifact_ids=dict(payload.get('input_artifact_ids') or {}),
+                save_intermediates=bool(payload.get('save_intermediates', False)),
+            )
+        finally:
+            self._batch_submitting = False
         self.batch_job_ids = set(jobs)
-        self.batch_errors = []
-        self._co.infobar('info', '批量处理', f'已提交 {len(jobs)}/{len(line_ids)} 条测线')
+        self.batch_errors = ['提交失败'] * max(0, len(line_ids) - len(jobs))
+        self._co.infobar('warning' if self.batch_errors else 'info', '批量处理',
+                         f'已提交 {len(jobs)}/{len(line_ids)} 条测线')
+        pending, self._batch_pending_completions = self._batch_pending_completions, []
+        for completion in pending:
+            self.on_run_context_finished(*completion)
 
     def on_estimate_requested(self, payload: dict) -> None:
         line_id = self._co.require_line()
@@ -329,6 +343,11 @@ class ProcessingChain:
 
     def on_run_context_finished(self, job_id: str, success: bool, message: str) -> None:
         job_id = str(job_id)
+        if self._batch_submitting and job_id:
+            self._batch_pending_completions.append((job_id, success, message))
+            return
+        if not job_id and self._submission_context is None:
+            return
         if job_id in self.batch_job_ids:
             self.batch_job_ids.discard(job_id)
             if not success:
@@ -505,7 +524,10 @@ class ProcessingChain:
         annotation = getattr(snapshot, 'annotation', None)
         interpretation.set_saved_status(getattr(annotation, 'status', 'draft'))
         interpretation.set_annotation_metadata(annotation)
-        self._co.infobar('success', '界面解释标注', f'标注会话已打开：{line_id}')
+        if dict(getattr(snapshot, 'audit', {}) or {}).get('source_changed'):
+            self._co.infobar('warning', '界面解释标注', '原有标注属于其他数据来源；当前显示新草稿，保存前原标注仍保留。')
+        else:
+            self._co.infobar('success', '界面解释标注', f'标注会话已打开：{line_id}')
         if self._co.project_controller is not None and self._co.project.current_line_id:
             artifact_id = str(getattr(snapshot, 'input_artifact_id', '') or '')
             if artifact_id:

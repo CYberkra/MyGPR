@@ -13,6 +13,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import math
 import re
 import shutil
 import uuid
@@ -27,6 +28,29 @@ from core.storage_uri import is_h5_uri, resolve_h5_uri
 
 SPATIAL_RESULT_SCHEMA = "mygpr.spatial_result.v1"
 SPATIAL_RESULT_INDEX_SCHEMA = "mygpr.spatial_result_index.v1"
+
+
+def _normalized_crs_label(value: str) -> str:
+    text = str(value or '').strip()
+    if not text or '未' in text:
+        return ''
+    try:
+        from pyproj import CRS
+        from pyproj.exceptions import CRSError
+    except ImportError:
+        pass
+    else:
+        try:
+            authority = CRS.from_user_input(text).to_authority()
+            if authority is not None:
+                return f'{authority[0]}:{authority[1]}'.upper()
+        except CRSError:
+            pass  # Human-readable project labels may need the legacy resolver.
+    from core.coordinate_projection import ProjectionError, resolve_projection_spec
+    try:
+        return f'EPSG:{resolve_projection_spec(text).epsg}'
+    except ProjectionError:
+        return text.upper()
 
 
 @dataclass(frozen=True)
@@ -138,6 +162,9 @@ class SpatialResultVersionService:
         usable: list[str] = []
         warnings: list[str] = []
         errors: list[str] = []
+        track_crs: set[str] = set()
+        unknown_track_crs = False
+        crs_labels: dict[str, str] = {}
         located = 0
         confirmed = 0
         for line_id in requested:
@@ -155,6 +182,15 @@ class SpatialResultVersionService:
             if trajectory is None or not trajectory.points:
                 warnings.append(f"{line_id}：缺少 RTK/GNSS 轨迹，不能生成空间曲线")
                 continue
+            for point in trajectory.points:
+                raw_label = str(getattr(point, 'coordinate_system', '') or '')
+                if raw_label not in crs_labels:
+                    crs_labels[raw_label] = _normalized_crs_label(raw_label)
+                label = crs_labels[raw_label]
+                if label:
+                    track_crs.add(label)
+                else:
+                    unknown_track_crs = True
             located += 1
             if str(getattr(annotation, "status", "draft")) == "confirmed":
                 confirmed += 1
@@ -164,17 +200,33 @@ class SpatialResultVersionService:
         if not usable:
             errors.append("没有同时具备界面标注与空间轨迹的测线。")
         coordinate_system = str(getattr(self.project.manifest, "coordinate_system", "") or "")
-        if not coordinate_system or "未" in coordinate_system:
+        generic_crs = not coordinate_system or '未' in coordinate_system or coordinate_system.strip().lower() == 'cgcs2000 / 3-degree gk'
+        if not generic_crs:
+            coordinate_system = _normalized_crs_label(coordinate_system)
+        if len(track_crs) > 1 or (track_crs and not generic_crs and coordinate_system not in track_crs):
+            errors.append('轨迹坐标系不一致，请先统一坐标系后生成空间成果。')
+        if generic_crs:
+            if len(track_crs) == 1 and not unknown_track_crs:
+                coordinate_system = next(iter(track_crs))
+                warnings.append(f'项目坐标系未指定分带，成果采用轨迹坐标系 {coordinate_system}；请核对。')
+            else:
+                coordinate_system = ''
+                if track_crs and unknown_track_crs:
+                    errors.append('部分轨迹坐标系未确认，不能与已指定坐标系的轨迹合并。')
+        if not coordinate_system:
             warnings.append("项目坐标系未完整配置，成果将保留风险标记。")
         surface_allowed = len(usable) >= 3 and _has_spatial_spread(self.project, usable)
+        if generate_surface:
+            warnings.append("当前仅生成曲面控制点，不生成连续曲面。")
         if generate_surface and not surface_allowed:
-            warnings.append("测线数量或空间分布不足，连续界面曲面不会生成。")
+            warnings.append("测线数量或空间分布不足，曲面控制点不会生成。")
         return {
             "schema": "mygpr.spatial_preflight.v1",
             "requested_line_ids": requested,
             "usable_line_ids": usable,
             "located_line_count": located,
             "confirmed_annotation_count": confirmed,
+            "coordinate_system": coordinate_system,
             "surface_requested": bool(generate_surface),
             "surface_allowed": bool(surface_allowed),
             "warnings": warnings,
@@ -219,7 +271,7 @@ class SpatialResultVersionService:
             "result_id", "line_id", "trace_index", "distance_m", "sample_index",
             "time_ns", "depth_m", "x", "y", "surface_z", "interface_z",
             "visibility", "is_no_interface", "is_ignored", "annotation_version",
-            "annotation_status", "processing_result", "trajectory_path",
+            "annotation_status", "source_result_id", "processing_result", "latest_processing_result", "trajectory_path",
         ]
         interface_features: list[dict[str, Any]] = []
         trajectory_features: list[dict[str, Any]] = []
@@ -268,14 +320,18 @@ class SpatialResultVersionService:
                                 "is_ignored": row.get("is_ignored", "0"),
                                 "annotation_version": str(getattr(annotation, "version", "")),
                                 "annotation_status": str(getattr(annotation, "status", "draft")),
+                                "source_result_id": str(getattr(annotation, "source_result_id", "")),
                                 "processing_result": line.processed_result,
+                                "latest_processing_result": line.processed_result,
                                 "trajectory_path": line.trajectory_path,
                             }
                             writer.writerow(enriched)
                             rows.append(enriched)
                             if enriched["x"] not in (None, "") and enriched["y"] not in (None, ""):
                                 point_count += 1
-                                if enriched["is_no_interface"] not in ("1", 1, True) and interface_z is not None:
+                                if (str(enriched["is_no_interface"]).lower() not in ("1", "true")
+                                        and str(enriched["is_ignored"]).lower() not in ("1", "true")
+                                        and interface_z is not None):
                                     surface_features.append(
                                         _point_feature(
                                             float(enriched["x"]), float(enriched["y"]), interface_z,
@@ -305,11 +361,11 @@ class SpatialResultVersionService:
                     source_lines[line_id] = self._line_source_payload(line_id)
             source_fingerprint = _fingerprint_source_payload(source_lines)
             source_state_token = _state_token_from_source_payload(source_lines)
-            _write_geojson(interfaces_path, interface_features, self.project.manifest.coordinate_system)
-            _write_geojson(trajectories_path, trajectory_features, self.project.manifest.coordinate_system)
+            _write_geojson(interfaces_path, interface_features, preflight['coordinate_system'])
+            _write_geojson(trajectories_path, trajectory_features, preflight['coordinate_system'])
             surface_written = bool(generate_surface and preflight["surface_allowed"] and surface_features)
             if surface_written:
-                _write_geojson(surface_path, surface_features, self.project.manifest.coordinate_system)
+                _write_geojson(surface_path, surface_features, preflight['coordinate_system'])
             sources = {
                 "line_sources": source_lines,
                 "source_fingerprint": source_fingerprint,
@@ -322,7 +378,8 @@ class SpatialResultVersionService:
                 "generate_depth_curve": bool(generate_depth_curve),
                 "generate_elevation_curve": bool(generate_elevation_curve),
                 "generate_surface": bool(generate_surface),
-                "surface_generated": surface_written,
+                "surface_generated": False,
+                "surface_control_points_generated": surface_written,
                 "max_extrapolation_distance_m": float(max_extrapolation_distance_m),
                 "max_extrapolation_angle_deg": float(max_extrapolation_angle_deg),
             }
@@ -341,7 +398,7 @@ class SpatialResultVersionService:
                 "revision": revision,
                 "created_at": created_at,
                 "status": "generated_with_warnings" if preflight["warnings"] else "generated",
-                "coordinate_system": str(getattr(self.project.manifest, "coordinate_system", "") or ""),
+                "coordinate_system": preflight['coordinate_system'],
                 "vertical_datum": str(getattr(self.project.manifest, "vertical_datum", "") or ""),
                 "line_ids": usable,
                 "options": options,
@@ -457,6 +514,7 @@ class SpatialResultVersionService:
             "annotation_status": str(getattr(annotation, "status", "draft")),
             "source_result_id": str(getattr(annotation, "source_result_id", "")),
             "processing_result": line.processed_result,
+            "processing_result_role": "latest_line_result_context",
             "trajectory_path": line.trajectory_path,
             "files": {
                 key: {
@@ -717,6 +775,13 @@ def _has_spatial_spread(project: Any, line_ids: list[str]) -> bool:
 
 
 def _geojson_to_kml(source: Path, destination: Path, record: SpatialResultRecord) -> None:
+    if not record.coordinate_system:
+        raise ValueError('空间成果坐标系未确认，无法转换为 KML 经纬度。')
+    try:
+        from pyproj import CRS, Transformer
+        transformer = Transformer.from_crs(CRS.from_user_input(record.coordinate_system), 'EPSG:4326', always_xy=True)
+    except Exception as exc:
+        raise ValueError(f'无法解析空间成果坐标系，不能导出 KML：{record.coordinate_system}') from exc
     payload = json.loads(source.read_text(encoding="utf-8"))
     placemarks: list[str] = []
     for feature in payload.get("features", []):
@@ -725,7 +790,13 @@ def _geojson_to_kml(source: Path, destination: Path, record: SpatialResultRecord
             continue
         props = feature.get("properties") or {}
         coords = geometry.get("coordinates") or []
-        coord_text = " ".join(",".join(str(value) for value in point[:3]) for point in coords)
+        transformed = []
+        for point in coords:
+            lon, lat = transformer.transform(point[0], point[1])
+            if not math.isfinite(lon) or not math.isfinite(lat) or abs(lon) > 180 or abs(lat) > 90:
+                raise ValueError('空间坐标无法转换为有效的 KML 经纬度，请核对坐标系。')
+            transformed.append([lon, lat, *point[2:3]])
+        coord_text = " ".join(",".join(str(value) for value in point) for point in transformed)
         name = str(props.get("segment_id") or props.get("line_id") or "interface")
         placemarks.append(
             f"<Placemark><name>{_xml_escape(name)}</name><description>{_xml_escape(json.dumps(props, ensure_ascii=False))}</description>"

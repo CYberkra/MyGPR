@@ -143,6 +143,7 @@ class ProjectChain:
             pc.preflight_ready.connect(self.on_preflight_ready)
             pc.preflight_failed.connect(self.on_preflight_failed)
             pc.quality_reports_ready.connect(project.set_quality_reports)
+            pc.project_metadata_ready.connect(project.set_project_metadata)
             pc.sensor_sync_result_ready.connect(project.set_sensor_sync_result)
             pc.spatial_tracks_ready.connect(spatial.set_tracks)
             pc.artifact_descendants_ready.connect(
@@ -274,6 +275,7 @@ class ProjectChain:
         self._spatial_reload_line_ids = None
         if co.project_controller is not None:
             co.project_controller.refresh_all_artifacts()  # 文件树「成果」视图
+            co.project_controller.refresh_project_metadata()
         # A→B 直切：清空空间页残留的 A 项目深度切片与勾选态，
         # 否则非空 payload 守卫会压制 B 项目首次进入深度段的预览请求。
         spatial = co.page('spatialInterface')
@@ -658,16 +660,19 @@ class ProjectChain:
             return
         sources = [str(item) for item in payload.get('sources') or [] if str(item)]
         if len(sources) > 1:
-            job_id = self._co.project_controller.import_lines(sources)
+            job_id = self._co.project_controller.import_lines(sources, float(payload.get('dielectric', constants.DEFAULT_DIELECTRIC)))
             if job_id:
                 self._co.jobs.import_job_ids.add(str(job_id))
                 self._co.infobar('info', '批量导入', f'已提交 {len(sources)} 个文件；各文件独立预检和导入')
             return
+        axis_options = ({'time_window_ns': payload['time_window_ns'],
+                         'trace_interval_m': payload['trace_interval_m']}
+                        if 'time_window_ns' in payload and 'trace_interval_m' in payload else {})
         job_id = self._co.project_controller.import_line(
             str(payload.get('source', '')),
             line_id,
             str(payload.get('name', '') or ''),
-            float(payload.get('dielectric', constants.DEFAULT_DIELECTRIC)))
+            float(payload.get('dielectric', constants.DEFAULT_DIELECTRIC)), **axis_options)
         if job_id:
             self._co.jobs.import_job_ids.add(str(job_id))
             self.pending_select_line_id = line_id

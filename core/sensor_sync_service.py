@@ -111,6 +111,32 @@ def synchronize_project_line_sensors(
     cfg = config or SensorSyncConfig(project_crs=str(store.manifest.coordinate_system or ""))
     if not cfg.project_crs:
         cfg.project_crs = str(store.manifest.coordinate_system or "")
+    inferred_crs_warning = ''
+    if cfg.project_crs.strip().lower() == 'cgcs2000 / 3-degree gk':
+        if all(np.isfinite(np.asarray(rtk_payload.get(key, []), dtype=float)).any()
+               for key in ('local_x_m', 'local_y_m')):
+            cfg.project_crs = ''
+            inferred_crs_warning = '输入平面坐标的坐标系未确认；请在高级同步设置中填写实际工程 EPSG。'
+    if cfg.project_crs.strip().lower() == 'cgcs2000 / 3-degree gk':
+        lon = np.asarray(rtk_payload.get('longitude', []), dtype=np.float64)
+        lat = np.asarray(rtk_payload.get('latitude', []), dtype=np.float64)
+        if lon.shape != lat.shape:
+            raise ValueError('RTK 经纬度长度不一致，无法推断坐标系。')
+        valid = np.isfinite(lon) & np.isfinite(lat)
+        valid_lon = lon[valid]
+        valid_lat = lat[valid]
+        if (not valid_lon.size or np.any((valid_lon < 73.5) | (valid_lon > 136.5))
+                or np.any(np.abs(valid_lat) > 90)):
+            raise ValueError('无法从 RTK 经度确定 CGCS2000 分带，请在高级同步设置中填写实际 EPSG。')
+        zones = np.rint(valid_lon / 3.0).astype(int)
+        if np.any((zones < 25) | (zones > 45)) or np.any(zones != zones[0]):
+            raise ValueError('RTK 轨迹跨越 3 度分带，请在高级同步设置中指定工程 EPSG。')
+        if any(line.line_id != line_id and line.trajectory_path for line in store.list_lines()):
+            raise ValueError('项目已有其他定位轨迹，无法自动确定统一分带；请在高级同步设置中指定工程 EPSG。')
+        from core.coordinate_projection import resolve_projection_spec
+        spec = resolve_projection_spec(cfg.project_crs, mean_longitude=float(np.mean(valid_lon)))
+        cfg.project_crs = f'EPSG:{spec.epsg}'
+        inferred_crs_warning = f'项目未指定分带，本次根据 RTK 经度自动选择 {cfg.project_crs}（{spec.zone} 带）；请核对工程坐标系。'
     report(4, 7, "按时间轴同步 RTK/IMU 与雷达道")
     result = synchronize_sensor_streams(
         trace_timestamps_s=trace_t,
@@ -121,6 +147,8 @@ def synchronize_project_line_sensors(
         line_id=line_id,
         trace_distance_hint_m=np.asarray(dataset.distance_axis_m, dtype=np.float64),
     )
+    if inferred_crs_warning:
+        result.diagnostics.warnings.append(inferred_crs_warning)
 
     report(5, 7, "写入同步成果")
     raw_dir = store.root / "raw" / line_id
@@ -189,8 +217,9 @@ def synchronize_project_line_sensors(
                 line.trace_metadata_path = metadata_rel
                 fixed = result.diagnostics.fixed_solution_ratio
                 coverage = result.diagnostics.rtk.coverage_ratio
-                line.sensor_sync_status = f"已同步 · RTK覆盖{coverage:.0%} · 固定解{fixed:.0%}"
-                line.rtk_status = "已定位" if coverage >= 0.99 else "部分定位"
+                accepted = result.diagnostics.rtk.accepted_ratio
+                line.sensor_sync_status = f"已同步 · RTK覆盖{coverage:.0%} · 有效{accepted:.0%} · 固定解{fixed:.0%}"
+                line.rtk_status = "已定位" if accepted >= 0.99 else ("部分定位" if accepted > 0 else "未定位")
                 line.updated_at = local_now()
                 metadata_attempted = True
                 store.upsert_line(line)

@@ -217,3 +217,72 @@ def test_batch_uses_per_line_inputs_and_never_shares_artifact_ids(qapp):
     assert jobs == ['J1', 'J2']
     assert [call[1]['input_artifact_id'] for call in submissions] == ['A1', 'A2']
     assert all(call[1]['save_intermediates'] is True for call in submissions)
+
+
+def test_project_batch_import_propagates_dielectric_to_backend(qapp):
+    from ui.coordinator_project import ProjectChain
+    bridge = Bridge()
+    calls = []
+    controller = ProjectController()
+    controller._current = SimpleNamespace(project_id='P')
+    controller.set_backend(SimpleNamespace(backend=SimpleNamespace(
+        submit_batch_line_import=lambda *args, **kwargs: calls.append((args, kwargs)) or 'J1'), job_bridge=bridge))
+    coordinator = SimpleNamespace(project_controller=controller, require_project=lambda: True,
+        jobs=SimpleNamespace(import_job_ids=set()), infobar=lambda *args: None)
+    ProjectChain(coordinator).on_import_requested({'sources': ['L01.npy', 'L02.npy'], 'dielectric': 16})
+    assert calls == [(('P', ['L01.npy', 'L02.npy']), {'dielectric_constant': 16.0})]
+    assert coordinator.jobs.import_job_ids == {'J1'}
+
+
+def test_batch_partial_submission_does_not_report_full_success(qapp):
+    from ui.coordinator_processing import ProcessingChain
+    notices = []
+    controller = SimpleNamespace(run_pipeline_batch=lambda *args, **kwargs: ['J1'])
+    coordinator = SimpleNamespace(processing_controller=controller, project_controller=None,
+        current_project_id=lambda: 'P', infobar=lambda *args: notices.append(args),
+        project=SimpleNamespace(current_line_id='L01'))
+    chain = ProcessingChain(coordinator)
+    chain.on_batch_run_requested({'line_ids': ['L01', 'L02'], 'steps': [{'method_id': 'dewow'}]})
+    chain.on_run_context_finished('J1', True, '')
+    assert notices[-1][0] == 'warning'
+    assert '1' in notices[-1][2]
+
+
+def test_batch_submission_failure_is_not_treated_as_single_run_completion(qapp):
+    from ui.coordinator_processing import ProcessingChain
+    bridge = Bridge()
+    def submit(project_id, line_id, *args, **kwargs):
+        if line_id == 'L02':
+            raise OSError('submission failed')
+        return 'J1'
+    controller = ProcessingController()
+    controller.set_backend(SimpleNamespace(backend=SimpleNamespace(submit_project_pipeline=submit), job_bridge=bridge))
+    notices = []
+    coordinator = SimpleNamespace(processing_controller=controller, project_controller=None,
+        current_project_id=lambda: 'P', infobar=lambda *args: notices.append(args),
+        project=SimpleNamespace(current_line_id='L01'))
+    chain = ProcessingChain(coordinator)
+    single_completions = []
+    chain.on_run_finished = lambda *args: single_completions.append(args)
+    controller.run_context_finished.connect(chain.on_run_context_finished)
+    chain.on_batch_run_requested({'line_ids': ['L01', 'L02'], 'steps': [{'method_id': 'dewow', 'params': {'window': 5}}]})
+    bridge.job_completed.emit('J1', True, 'complete', {})
+    assert not single_completions
+    assert notices[-1][0] == 'warning'
+    assert '1' in notices[-1][2]
+
+
+def test_batch_immediate_completion_is_not_lost(qapp):
+    from ui.coordinator_processing import ProcessingChain
+    notices = []
+    coordinator = SimpleNamespace(processing_controller=None, project_controller=None,
+        current_project_id=lambda: 'P', infobar=lambda *args: notices.append(args),
+        project=SimpleNamespace(current_line_id='L01'))
+    chain = ProcessingChain(coordinator)
+    def submit(*args, **kwargs):
+        chain.on_run_context_finished('J1', True, '')
+        return ['J1']
+    coordinator.processing_controller = SimpleNamespace(run_pipeline_batch=submit)
+    chain.on_batch_run_requested({'line_ids': ['L01'], 'steps': [{'method_id': 'dewow'}]})
+    assert not chain.batch_job_ids
+    assert notices[-1][0] == 'success'

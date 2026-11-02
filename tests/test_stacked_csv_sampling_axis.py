@@ -70,3 +70,38 @@ def test_project_processing_uses_csv_reader_sampling(tmp_path, save_intermediate
         np.testing.assert_array_equal(restored.header_info['time_axis_ns'], result.header_info['time_axis_ns'])
     finally:
         backend.shutdown()
+
+
+@pytest.mark.parametrize('extension', ['csv', 'npy'])
+@pytest.mark.parametrize('save_intermediates', [True, False])
+def test_plain_matrix_axes_survive_processing_and_project_reopen(tmp_path, extension, save_intermediates):
+    from mygpr.application.jobs.models import JobStatus
+    from mygpr.domain.processing.models import PipelineDefinition, PipelineStep
+    from mygpr.interfaces.backend import MyGPRBackend
+
+    source = tmp_path / f'line.{extension}'
+    matrix = np.arange(40 * 4, dtype=np.float32).reshape(40, 4)
+    if extension == 'npy':
+        np.save(source, matrix)
+    else:
+        np.savetxt(source, matrix, delimiter=',')
+    backend = MyGPRBackend.create_default(max_workers=1)
+    try:
+        project = backend.projects.create_project(tmp_path / 'project', name='Explicit axes')
+        backend.acquisition.import_line(project.project_id, source, line_id='L01',
+                                        time_window_ns=48., trace_interval_m=.25)
+        pipeline = PipelineDefinition(name='filter', steps=(PipelineStep(
+            'frequency_filter_1d', dict(filter_type='lowpass', high_freq_mhz=55.5, taper_ratio=0.)),))
+        job = backend.submit_project_pipeline(project.project_id, 'L01', pipeline,
+                                              save_intermediates=save_intermediates)
+        snapshot = backend.jobs.wait(job, timeout=30)
+        assert snapshot.status is JobStatus.COMPLETED, snapshot.error_message
+        artifact_id = snapshot.result.artifact_id
+        backend.projects.close_project(project.project_id)
+        reopened = backend.projects.open_project(project.root_path)
+        result = backend.projects.read_artifact_dataset(reopened.project_id, 'L01', artifact_id)
+        np.testing.assert_allclose(result.header_info['time_axis_ns'], np.linspace(0, 48, 40), rtol=1e-6)
+        np.testing.assert_allclose(result.header_info['distance_axis_m'], [0, .25, .5, .75])
+        assert result.header_info['time_step_s'] == pytest.approx(48e-9 / 39)
+    finally:
+        backend.shutdown()

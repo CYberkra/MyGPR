@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from mygpr.domain.acquisition import (
     MotionCompensationProfile,
@@ -131,6 +132,107 @@ def test_headless_acquisition_preflight_import_and_sensor_sync(tmp_path: Path) -
         assert motion.status is JobStatus.COMPLETED, motion.error_message
         assert motion.result.method_id == "motion_compensation_v2"
         assert_qt_imports_unchanged(qt_before)
+    finally:
+        backend.shutdown()
+
+
+def test_airborne_import_syncs_using_embedded_trace_times(tmp_path: Path) -> None:
+    samples = Path('sample_data/uav_gpr_motion_v2')
+    backend = MyGPRBackend.create_default(max_workers=1)
+    try:
+        project = backend.projects.create_project(tmp_path / 'project', name='Embedded times',
+                                                  coordinate_system='EPSG:4523')
+        backend.acquisition.import_line(project.project_id, samples / 'main.csv', line_id='L01')
+        result = backend.acquisition.synchronize_project_line(
+            project.project_id, 'L01', rtk_path=samples / 'rtk.csv',
+            imu_path=samples / 'imu.csv', altimeter_path=samples / 'altimeter.csv')
+        restored = backend.projects.read_sensor_sync_result(project.project_id, 'L01')
+        assert restored.diagnostics['warnings'] == result.diagnostics['warnings']
+        data = backend.projects.read_dataset(project.project_id, 'L01')
+        np.testing.assert_allclose(data.trace_metadata['trace_timestamp_s'],
+                                   1000.0 + np.arange(24) * 0.05, rtol=0, atol=1e-9)
+        assert result.diagnostics['rtk']['coverage_ratio'] == 1.0
+    finally:
+        backend.shutdown()
+
+
+def test_plain_matrix_import_uses_explicit_physical_axes(tmp_path: Path) -> None:
+    source = tmp_path / 'plain.npy'
+    np.save(source, np.zeros((40, 4), dtype=np.float32))
+    backend = MyGPRBackend.create_default(max_workers=1)
+    try:
+        project = backend.projects.create_project(tmp_path / 'project', name='Axes')
+        backend.acquisition.import_line(project.project_id, source, line_id='L01',
+                                        time_window_ns=48.0, trace_interval_m=0.25)
+        dataset = backend.projects._session(project.project_id)._store.load_gpr_dataset('L01')
+        np.testing.assert_allclose(dataset.time_axis_ns[[0, -1]], [0, 48])
+        np.testing.assert_allclose(dataset.distance_axis_m, [0, .25, .5, .75])
+        assert dataset.metadata['metadata']['physical_axes_source'] == 'user_input'
+    finally:
+        backend.shutdown()
+
+
+def test_default_project_crs_is_resolved_and_exposed_for_sensor_sync(tmp_path: Path) -> None:
+    samples = Path('sample_data/uav_gpr_motion_v2')
+    backend = MyGPRBackend.create_default(max_workers=1)
+    try:
+        project = backend.projects.create_project(tmp_path / 'project', name='Auto zone')
+        backend.acquisition.import_line(project.project_id, samples / 'main.csv', line_id='L01')
+        result = backend.acquisition.synchronize_project_line(
+            project.project_id, 'L01', rtk_path=samples / 'rtk.csv')
+        assert result.config['project_crs'] == 'EPSG:4523'
+        assert any('自动' in warning and 'EPSG:4523' in warning for warning in result.diagnostics['warnings'])
+        track = backend.projects.load_spatial_tracks(project.project_id)[0]
+        assert track.coordinate_system == 'EPSG:4523'
+    finally:
+        backend.shutdown()
+
+
+def test_default_crs_does_not_relabel_supplied_planar_coordinates(tmp_path: Path) -> None:
+    source = tmp_path / 'line.npy'
+    np.save(source, np.ones((40, 4), dtype=np.float32))
+    trace_path, rtk_path, _ = _sensor_files(tmp_path)
+    backend = MyGPRBackend.create_default(max_workers=1)
+    try:
+        project = backend.projects.create_project(tmp_path / 'project', name='Planar coordinates')
+        backend.acquisition.import_line(project.project_id, source, line_id='L01')
+        result = backend.acquisition.synchronize_project_line(project.project_id, 'L01',
+            rtk_path=rtk_path, trace_timestamps_path=trace_path)
+        assert result.config['project_crs'] == ''
+        assert any('坐标系未确认' in warning for warning in result.diagnostics['warnings'])
+        dataset = backend.projects.read_dataset(project.project_id, 'L01')
+        np.testing.assert_allclose(dataset.trace_metadata['local_x_m'], [0, 1, 2, 3])
+        assert backend.projects.load_spatial_tracks(project.project_id)[0].coordinate_system == '未确认（局部坐标）'
+    finally:
+        backend.shutdown()
+
+
+def test_default_crs_does_not_infer_across_zone_boundaries(tmp_path: Path) -> None:
+    source = tmp_path / 'line.npy'
+    np.save(source, np.ones((40, 4), dtype=np.float32))
+    trace_path, _, _ = _sensor_files(tmp_path)
+    rtk = _write_csv(tmp_path / 'across.csv', [
+        {'timestamp_s': 100, 'longitude': 103, 'latitude': 30},
+        {'timestamp_s': 103, 'longitude': 105, 'latitude': 30},
+    ])
+    backend = MyGPRBackend.create_default(max_workers=1)
+    try:
+        project = backend.projects.create_project(tmp_path / 'project', name='Cross zone')
+        backend.acquisition.import_line(project.project_id, source, line_id='L01')
+        with pytest.raises(ValueError, match='跨越.*EPSG'):
+            backend.acquisition.synchronize_project_line(project.project_id, 'L01',
+                rtk_path=rtk, trace_timestamps_path=trace_path)
+    finally:
+        backend.shutdown()
+
+
+def test_manual_matrix_axes_do_not_override_airborne_file_metadata(tmp_path: Path) -> None:
+    backend = MyGPRBackend.create_default(max_workers=1)
+    try:
+        project = backend.projects.create_project(tmp_path / 'project', name='Axes')
+        with pytest.raises(ValueError, match='纯 CSV/TXT/NPY'):
+            backend.acquisition.import_line(project.project_id, 'sample_data/uav_gpr_motion_v2/main.csv',
+                line_id='L01', time_window_ns=48, trace_interval_m=.25)
     finally:
         backend.shutdown()
 

@@ -35,6 +35,7 @@ _FOCUS_RECHECK_MS = 200       # 外部点击关闭的复核延迟（焦点移交
 class StepEditorPopup(QDialog):
     """单步合一编辑弹窗：启停 pill + 图标动作栏 + 参数表单 + 应用/恢复默认。"""
 
+    gain_preview_requested = pyqtSignal(object)
     sig_applied = pyqtSignal(dict)             # {index, params, enabled}（仅「应用」）
     sig_move_requested = pyqtSignal(int, int)  # index, 插入位（下移 = index+2）
     sig_duplicate_requested = pyqtSignal(int)
@@ -100,6 +101,7 @@ class StepEditorPopup(QDialog):
         self._param_hint.setStyleSheet(
             f'color: {design_tokens.color("text_muted")};')
         self._form = ParamForm(self)
+        self._form.gain_preview_requested.connect(self.gain_preview_requested)
         self._scroll = QScrollArea(self)
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QScrollArea.Shape.NoFrame)

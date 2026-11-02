@@ -304,6 +304,8 @@ class InterpretationPage(QWidget):
     def _mark_review_required(self):
         if self._saved_status == 'confirmed':
             self.set_session_info('已修改，需重新确认')
+        else:
+            self.set_session_info('草稿有未保存的修改')
 
     def _emit_properties(self):
         self.properties_requested.emit({

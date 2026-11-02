@@ -575,6 +575,7 @@ class Trajectory3DView(QWidget):
         self._terrain_payload = None
         self._terrain_generation += 1   # 使进行中的地形任务失效
         self._empty_overlay.setVisible(True)
+        self._empty_overlay.raise_()
 
     def set_terrain_source(self, mode: str) -> None:
         """地形来源：'online' 在线下载 / 'local_dem' 本地 DEM /

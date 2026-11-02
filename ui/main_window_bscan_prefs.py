@@ -14,6 +14,9 @@
 调 ``_on_settings_bscan_changed``（另两处单点入口）。
 """
 
+from weakref import WeakSet
+
+from PyQt6 import sip
 from ui import constants
 from ui.widgets.bscan_view import BScanView
 
@@ -59,12 +62,12 @@ class BScanPreferenceMixin:
             view.set_contrast(self.settings.get('bscan_contrast', 1.0))
             view.set_display_levels(p_low, p_high, notify=False)
             view.set_colorbar_visible(colorbar_visible, notify=False)
+            view.set_qc_marks_visible(self._setting_flag('bscan_qc_marks_visible', True))
             view.set_gain(gain_mode, alpha=gain_alpha,
                           db=tvg_db, power=tvg_power, notify=False)
             view.set_geometry_store(loader=self._load_fullscreen_geometry,
                                     saver=self._save_fullscreen_geometry)
             self._connect_bscan_signals(view)
-            self._wire_bscan_expand(view)
         # 面板数由处理页 tab 模型驱动（tab 数 → resolve_auto），容器级
         # 布局偏好已随 free/手动档位一并退役（2026-09-24）。
 
@@ -94,6 +97,19 @@ class BScanPreferenceMixin:
             lambda mode: self._mirror_bscan_setting('bscan_gain_mode',
                                                     str(mode)))
         view.sig_gain_params_changed.connect(self._mirror_bscan_tvg_params)
+        if not hasattr(self, '_bscan_preference_views'):
+            self._bscan_preference_views = WeakSet()
+        if view not in self._bscan_preference_views:
+            self._bscan_preference_views.add(view)
+            view.sig_qc_marks_visible_changed.connect(self._on_qc_marks_visible_changed)
+
+    def _on_qc_marks_visible_changed(self, visible: bool) -> None:
+        """One remembered display preference; no processing or preview reload."""
+        self._persist_setting('bscan_qc_marks_visible', bool(visible))
+        # Fullscreen temporarily reparents a view out of its page subtree.
+        for view in list(self._bscan_preference_views):
+            if not sip.isdeleted(view):
+                view.set_qc_marks_visible(visible)
 
     def _mirror_bscan_setting(self, key: str, value) -> None:
         """写盘 + 把设置页控件同步到同一值（避免关窗回写覆盖用户选择）。"""
@@ -113,18 +129,6 @@ class BScanPreferenceMixin:
         if callable(syncer):
             syncer(values)
 
-    def _wire_bscan_expand(self, view) -> None:
-        """「⤢ 铺满」：只有能折叠侧栏的页面才露出该钮，并接上折叠动作。"""
-        toggler = getattr(view.parent(), 'toggle_side_panels', None)
-        host = view.parent()
-        while host is not None and not callable(toggler):
-            host = host.parent()
-            toggler = getattr(host, 'toggle_side_panels', None)
-        if not callable(toggler):
-            return
-        view.set_expand_enabled(True)
-        view.sig_expand_requested.connect(toggler)
-
     def _setting_choice(self, key: str, allowed: tuple, fallback: str) -> str:
         """读枚举型设置：越界/损坏一律回落默认（不让坏设置影响出图）。"""
         value = str(self.settings.get(key, fallback) or fallback)
@@ -143,9 +147,11 @@ class BScanPreferenceMixin:
         return fallback
 
     def _iter_bscan_views(self):
-        """本会话所有 BScanView（含尚未构造的延迟页之外的已建页面）。"""
-        for page in list(self.pages.values()):
-            yield from page.findChildren(BScanView)
+        """All wired views, including views temporarily detached to fullscreen."""
+        views = getattr(self, '_bscan_preference_views', ())
+        for view in list(views):
+            if not sip.isdeleted(view):
+                yield view
 
     def _on_settings_bscan_changed(self) -> None:
         """设置页改了 B-Scan 视图项：即时下发到所有视图并写盘（无需重启）。"""

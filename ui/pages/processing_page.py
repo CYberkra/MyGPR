@@ -3,7 +3,7 @@ from collections.abc import Mapping
 from copy import deepcopy
 import json
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QEasingCurve, Qt, QVariantAnimation, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QDialog, QHBoxLayout, QScrollArea, QSplitter,
@@ -19,7 +19,7 @@ from qfluentwidgets import FluentIcon as FIF
 from ui import constants, design_tokens
 from ui.file_tree import artifact_parameters, artifact_direct_parent, artifact_step
 from ui.file_tree import build_lineage_model as build_lineage_model  # explicit re-export
-from ui.motion import animate_progress
+from ui.motion import animate_progress, animations_enabled
 from ui.page_scaffold import make_form_row, refill_combo
 from ui.widgets import ParamForm, PipelineList, clear_invalid, make_separator
 from ui.widgets.bscan_workspace import BScanWorkspace
@@ -31,10 +31,13 @@ from ui.pages.processing_menus import ProcessingMenus
 from ui.pages.processing_chain_view import ProcessingChainView
 from ui.pages.processing_comparison import LineComparison
 from ui.pages.processing_selection import ProcessingSelection
+from ui.pages.processing_gain_preview import ProcessingGainPreview
 from ui.widgets.line_drag_combo import LineDragComboBox
 
 
-class ProcessingPage(ProcessingChainView, ProcessingSteps, ProcessingMenus, ProcessingSelection, QWidget):
+class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps, ProcessingMenus, ProcessingSelection, QWidget):
+    gain_preview_requested = pyqtSignal(str, str, str, str, list)
+    gain_preview_cancelled = pyqtSignal(str)
     run_requested = pyqtSignal(dict)
     batch_run_requested = pyqtSignal(dict)
     estimate_requested = pyqtSignal(dict)
@@ -69,6 +72,7 @@ class ProcessingPage(ProcessingChainView, ProcessingSteps, ProcessingMenus, Proc
         self._activation_epoch, self._suspend, self._raw_opened = 0, False, False
         self._source_selected_this_line = False
         self._preview_requested = set()
+        self._gain_preview_requests = {}
         self._selected_step, self._selected_method_id = -1, ''
         self._method_picker, self._step_editor = None, None
         self._picker_purpose, self._picker_index = 'append', -1
@@ -77,6 +81,8 @@ class ProcessingPage(ProcessingChainView, ProcessingSteps, ProcessingMenus, Proc
         self._autotune_pending_request = None
         self._autotune_result_generation = None
         self._sm, self._job_id, self._pending_layout = None, '', None
+        self._tools_width_animation = None
+        self._tools_expanded_width = 300
         self._build_ui()
         self._comparison = LineComparison(self)
         self._connect_internal()
@@ -106,10 +112,6 @@ class ProcessingPage(ProcessingChainView, ProcessingSteps, ProcessingMenus, Proc
         self._input_label = ElidedCaptionLabel(self)
         self._input_label.setText('输入：未选择数据')
         header.addWidget(self._input_label, 1)
-        self._layout_combo = ComboBox(self)
-        self._layout_combo.addItems(['单组标签', '左右对照', '上下对照', '自定义布局'])
-        self._layout_combo.setToolTip('手动设置视图布局；打开标签不会自动分屏')
-        header.addWidget(self._layout_combo)
         self._source_path_btn = TransparentToolButton(FIF.HISTORY, self)
         self._source_path_btn.setCheckable(True)
         self._source_path_btn.setChecked(True)
@@ -236,14 +238,6 @@ class ProcessingPage(ProcessingChainView, ProcessingSteps, ProcessingMenus, Proc
         self._draft_revision_hint = CaptionLabel('', center)
         self._draft_revision_hint.setWordWrap(True)
         main.addWidget(self._draft_revision_hint)
-        preview_status = QHBoxLayout()
-        self._preview_error_label = CaptionLabel('', center)
-        self._preview_error_label.setWordWrap(True)
-        self._preview_retry_btn = PushButton('重试预览', center, FIF.SYNC)
-        self._preview_retry_btn.clicked.connect(lambda: self.retry_preview(self._selected_source_key))
-        preview_status.addWidget(self._preview_error_label, 1)
-        preview_status.addWidget(self._preview_retry_btn)
-        main.addLayout(preview_status)
         self._workspace = BScanWorkspace(center)
         self._bscan_container = self._workspace
         main.addWidget(self._workspace, 1)
@@ -278,7 +272,6 @@ class ProcessingPage(ProcessingChainView, ProcessingSteps, ProcessingMenus, Proc
         self._input_label.setStyleSheet(f'color: {t["text_secondary"]};')
         self._param_empty_hint.setStyleSheet(f'color: {t["text_muted"]};')
         self._draft_revision_hint.setStyleSheet(f'color: {t["warning"]};')
-        self._preview_error_label.setStyleSheet(f'color: {t["error"]};')
         self._chain_panel.setStyleSheet(
             f'QWidget#processingChainPanel {{ background: {t["bg_subtle"]};'
             f' border: 1px solid {t["border_default"]}; border-radius: 6px; }}')
@@ -291,6 +284,7 @@ class ProcessingPage(ProcessingChainView, ProcessingSteps, ProcessingMenus, Proc
         self._pipeline_list.sig_duplicate_requested.connect(self._duplicate_step)
         self._pipeline_list.sig_changed.connect(self._draft_changed)
         self._param_form.sig_changed.connect(self._auto_write_params_to_selected)
+        self._param_form.gain_preview_requested.connect(self._request_gain_preview)
         self._result_name_edit.textChanged.connect(self._draft_changed)
         self._add_method_btn.clicked.connect(self._open_method_picker)
         self._run_btn.clicked.connect(self._on_run_clicked)
@@ -303,12 +297,11 @@ class ProcessingPage(ProcessingChainView, ProcessingSteps, ProcessingMenus, Proc
         self._workspace.selection_step_requested.connect(self._selection_to_step)
         self._workspace.source_activated_by_user.connect(self._activate_comparison_source)
         self._workspace.preview_requested.connect(self._request_preview)
+        self._workspace.preview_retry_requested.connect(self.retry_preview)
         self._workspace.source_context_requested.connect(self._show_source_menu)
-        self._workspace.layout_changed.connect(self._sync_layout_label)
         self._workspace.view_created.connect(self.bscan_view_created)
         self._tools_btn.toggled.connect(self._toggle_tools)
         self._resources_btn.toggled.connect(self._toggle_resources)
-        self._layout_combo.currentIndexChanged.connect(self._change_layout)
         self._lineage_tree.itemClicked.connect(self._open_tree_item)
         self._history_tree.itemClicked.connect(self._open_tree_item)
         self._lineage_menu_binding = ObjectMenuBinding(self, self._lineage_tree,
@@ -340,6 +333,7 @@ class ProcessingPage(ProcessingChainView, ProcessingSteps, ProcessingMenus, Proc
     def _draft_changed(self, *_):
         if self._suspend:
             return
+        self._invalidate_gain_previews()
         self._draft_edit_epoch += 1
         self._stash_draft()
         self._refresh_ui()
@@ -402,9 +396,6 @@ class ProcessingPage(ProcessingChainView, ProcessingSteps, ProcessingMenus, Proc
         self._run_btn.setToolTip('项目只读，无法提交处理任务' if self._project_read_only else
             ('输入读取失败，请重试预览：' + error) if error else
             '请先选择有效数据并添加启用步骤' if not valid else '使用所选结果执行新增步骤（Ctrl+R）')
-        self._preview_error_label.setText(error)
-        self._preview_error_label.setVisible(bool(error))
-        self._preview_retry_btn.setVisible(bool(error))
         stale = any(k[:3] == self._draft_key()[:3] and k != self._draft_key()
                     and value.get('steps') for k, value in self._drafts.items())
         self._draft_revision_hint.setText('此数据已更换修订；旧修订草稿已失效并隔离保存。当前修订从空草稿开始。' if stale else '')
@@ -455,6 +446,7 @@ class ProcessingPage(ProcessingChainView, ProcessingSteps, ProcessingMenus, Proc
             return
         keys = []
         if line_id == self._line_id:
+            self._close_gain_previews()
             for key, source in self._sources.items():
                 source.update(bundle=None, error='')
                 self._preview_requested.discard(str(source.get('artifact_id') or 'original'))
@@ -499,6 +491,8 @@ class ProcessingPage(ProcessingChainView, ProcessingSteps, ProcessingMenus, Proc
     def set_original_revision(self, project_id, line_id, revision):
         if (str(project_id), str(line_id)) != (self._project_id, self._line_id):
             return
+        if self._raw_revision != str(revision or ''):
+            self._close_gain_previews()
         self._raw_revision = str(revision or '')
 
     def set_preview_failure(self, project_id, line_id, artifact_id, message):
@@ -665,6 +659,11 @@ class ProcessingPage(ProcessingChainView, ProcessingSteps, ProcessingMenus, Proc
     def hideEvent(self, event):
         if self._run_snapshot:
             self._run_snapshot['activate'] = False
+        if self._tools_width_animation is not None:
+            self._tools_width_animation.stop()
+            self._tools_width_animation.deleteLater()
+            self._tools_width_animation = None
+            self._finish_tools_width(self._tools_btn.isChecked(), max(1, sum(self._body.sizes())))
         super().hideEvent(event)
 
     def _on_run_clicked(self):
@@ -820,9 +819,53 @@ class ProcessingPage(ProcessingChainView, ProcessingSteps, ProcessingMenus, Proc
 
 
     def _toggle_tools(self, visible):
-        self._tools_panel.setVisible(bool(visible))
+        visible = bool(visible)
         if visible and self._resources_btn.isChecked():
             self._resources_btn.setChecked(False)
+        if self._tools_width_animation is not None:
+            self._tools_width_animation.stop()
+            self._tools_width_animation.deleteLater()
+            self._tools_width_animation = None
+        sizes = self._body.sizes()
+        total = max(1, sum(sizes))
+        current = self._tools_panel.width() if self._tools_panel.isVisible() else 0
+        if visible:
+            target = self._tools_expanded_width
+            self._tools_panel.setMinimumWidth(0)
+            self._tools_panel.setMaximumWidth(16777215)
+            self._tools_panel.show()
+        else:
+            if current > 0:
+                self._tools_expanded_width = current
+            target = 0
+            self._tools_panel.setMinimumWidth(0)
+            self._tools_panel.setMaximumWidth(16777215)
+        if not animations_enabled() or not self.isVisible() or current == target:
+            self._set_tools_width(target, total)
+            self._finish_tools_width(visible, total)
+            return
+        animation = QVariantAnimation(self)
+        animation.setDuration(180)
+        animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        animation.setStartValue(int(current))
+        animation.setEndValue(int(target))
+        animation.valueChanged.connect(lambda value: self._set_tools_width(int(value), total))
+        animation.finished.connect(lambda: self._finish_tools_width(visible, total))
+        self._tools_width_animation = animation
+        animation.start()
+
+    def _set_tools_width(self, width, total):
+        width = max(0, int(width))
+        self._body.setSizes([width, max(1, total - width)])
+
+    def _finish_tools_width(self, visible, total):
+        self._tools_panel.setVisible(visible)
+        self._tools_panel.setMinimumWidth(250)
+        self._tools_panel.setMaximumWidth(360)
+        self._set_tools_width(self._tools_expanded_width if visible else 0, total)
+        if self._tools_width_animation is not None:
+            self._tools_width_animation.deleteLater()
+            self._tools_width_animation = None
 
     def _toggle_resources(self, visible):
         if visible:
@@ -839,24 +882,6 @@ class ProcessingPage(ProcessingChainView, ProcessingSteps, ProcessingMenus, Proc
 
     def toggle_side_panels(self):
         self._tools_btn.setChecked(not self._tools_btn.isChecked())
-
-    def _change_layout(self, index):
-        key = self._workspace.active_key()
-        if index == 0:
-            self._workspace.reset_layout()
-        elif key and index in (1, 2):
-            self._workspace.split_source(key, 'right' if index == 1 else 'bottom', copy=True)
-
-    def _sync_layout_label(self):
-        root = self._workspace.save_layout().get('root') or {}
-        index = 0
-        if root.get('type') == 'split':
-            children = root.get('children') or []
-            index = (1 if root.get('orientation') == 'horizontal' else 2) if (
-                len(children) == 2 and all(child.get('type') == 'group' for child in children)) else 3
-        self._layout_combo.blockSignals(True)
-        self._layout_combo.setCurrentIndex(index)
-        self._layout_combo.blockSignals(False)
 
     def _set_display_cmap(self, name):
         if name:

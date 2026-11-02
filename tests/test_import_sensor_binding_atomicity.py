@@ -8,6 +8,7 @@ import pytest
 
 from core.field_project_store import FieldProjectStore
 from core.sensor_sync_service import synchronize_project_line_sensors
+from core.sensor_sync import SensorSyncConfig
 from mygpr.infrastructure.persistence.field_project_adapter import _load_trace_metadata
 
 
@@ -53,6 +54,17 @@ def _replacement(tmp_path, kind):
             handle.create_dataset("trace_meta/lat", data=[31., 31.1, 31.2])
             handle.create_dataset("trace_meta/height", data=[10., 11., 12.])
     return source
+
+
+def test_sync_status_distinguishes_coverage_from_accepted_traces(synchronized_line, tmp_path):
+    store = synchronized_line
+    timestamps = tmp_path / 'sparse-timestamps.csv'
+    timestamps.write_text('timestamp_s\n0.5\n0.6\n1.5\n', encoding='utf-8')
+    synchronize_project_line_sensors(store, line_id='L01', rtk_path=tmp_path / 'rtk.csv',
+        trace_timestamps_path=timestamps, config=SensorSyncConfig(maximum_nearest_residual_s=0.1))
+    line = store.get_line('L01')
+    assert line.rtk_status == '未定位'
+    assert '有效0%' in line.sensor_sync_status
 
 
 @pytest.mark.parametrize("kind", ["npy", "hdf5"])

@@ -130,6 +130,25 @@ def test_recent_projects_keep_paths_and_availability(page, tmp_path):
     assert opened == [str(existing)]
 
 
+def test_project_menu_shares_display_names_pins_and_fallbacks(page, tmp_path):
+    from ui.settings_manager import SettingsManager
+
+    renamed = tmp_path / 'old-folder'
+    renamed.mkdir()
+    unavailable = tmp_path / 'missing-folder'
+    settings = SettingsManager(str(tmp_path / 'settings.json'))
+    settings.set('recent_projects', [str(unavailable), str(renamed)])
+    settings.set('pinned_recent_projects', [str(renamed)])
+    settings.set('project_display_names', {str(renamed): '新项目名'})
+    page.set_settings_manager(settings)
+    menu = page.startup.project_menu(page.empty_import_btn, can_close=False, close_requested=lambda: None)
+    actions = [a for a in menu.actions() if a.text()]
+    assert [a.text() for a in actions] == ['新建项目', '打开项目…', '★ 新项目名', 'missing-folder · 不可用']
+    assert page.startup._recent_list.item(0).text().startswith('★ 新项目名\n')
+    assert actions[2].toolTip() == str(renamed)
+    assert actions[3].toolTip() == str(unavailable)
+
+
 def test_changing_line_closes_sensor_tool_and_clears_previous_target_files(page):
     page.set_project_info(SimpleNamespace(project_id='P1', name='Project'))
     page.set_lines([SimpleNamespace(line_id='L01'), SimpleNamespace(line_id='L02')])

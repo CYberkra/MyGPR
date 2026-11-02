@@ -176,6 +176,14 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
 
     # ============================================================ 组装
     def _init_window(self) -> None:
+        # Qt recreates a shown raster HWND when its first QOpenGLWidget arrives.
+        # Reserve the surface type before showing the window; GL imports and
+        # context creation remain lazy, and the main HWND survives first 3D use.
+        from PyQt6.QtWidgets import QApplication
+        if QApplication.platformName() == 'windows':
+            from PyQt6.QtGui import QSurface
+            self.winId()
+            self.windowHandle().setSurfaceType(QSurface.SurfaceType.OpenGLSurface)
         self.setWindowTitle(constants.APP_NAME)
         # 切页零动画：库默认 PopUpAni 是新页从 76px 下方滑入（"上下跳变"）；
         # 透明度淡入方案对重页面（B-Scan/表格）要整页离屏渲染，切换时卡顿。

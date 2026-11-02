@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 import pyqtgraph as pg
 from PyQt6.QtGui import QColor, QFont, QPalette
-from PyQt6.QtWidgets import QApplication, QStyleFactory
+from PyQt6.QtWidgets import QApplication, QAbstractItemView, QStyleFactory, QTabBar, QTabWidget
 from qfluentwidgets import RoundMenu, Theme, isDarkTheme, setTheme
 from qfluentwidgets.components.widgets.combo_box import ComboBoxMenu
 
@@ -272,54 +272,82 @@ def make_badge(text: str, color_key: str) -> 'QLabel':
 
 
 def native_views_qss(dark: bool) -> str:
-    """原生控件（表格/列表/树/表头）随主题换肤的应用级 QSS。
+    """Stable native-view rules; colors resolve from the explicit widget palette.
 
-    之所以用 QSS 而不是 palette：QApplication.setPalette 对已创建的
-    item view 传播不可靠（实测深→浅往返后 QTableWidget 残留深色），
-    而应用级 QSS 立即对所有现存及未来匹配的控件生效。
-    qfluentwidgets 自有控件带控件级 QSS，同优先级下控件级优先，不受影响。
-    配色单源：control_palette(dark)['table_*']。
+    Changing application QSS repolishes every widget, including hidden plots.
+    Keep these rules invariant and refresh only native views on a theme change.
+    Widget-specific QSS retains precedence and is never replaced here.
     """
-    palette = control_palette(dark)
-    base = palette['table_base']
-    text = palette['table_text']
-    border = palette['table_border']
-    header_bg = palette['table_header_bg']
-    grid = palette['table_grid']
-    selection = palette['selection']
-    from ui.design_tokens import tokens
-    semantic = tokens(dark)
+    del dark  # Kept for callers using the historical signature.
     return (
         'QTableWidget, QTableView, QListWidget, QListView, QTreeWidget,'
         ' QTreeView {'
-        f' background-color: {base}; color: {text};'
-        f' border: 1px solid {border}; gridline-color: {grid};'
-        f' selection-background-color: {selection}; selection-color: #ffffff;'
+        ' background-color: palette(base); color: palette(text);'
+        ' border: 1px solid palette(mid); gridline-color: palette(midlight);'
+        ' selection-background-color: palette(highlight); selection-color: #ffffff;'
         ' }'
         'QHeaderView::section {'
-        f' background-color: {header_bg}; color: {text};'
+        ' background-color: palette(alternate-base); color: palette(text);'
         ' border: none;'
-        f' border-right: 1px solid {grid}; border-bottom: 1px solid {grid};'
+        ' border-right: 1px solid palette(midlight); border-bottom: 1px solid palette(midlight);'
         ' padding: 6px 8px; font-weight: 500;'
         ' }'
         'QTableCornerButton::section {'
-        f' background-color: {header_bg}; border: none;'
-        f' border-right: 1px solid {grid}; border-bottom: 1px solid {grid};'
+        ' background-color: palette(alternate-base); border: none;'
+        ' border-right: 1px solid palette(midlight); border-bottom: 1px solid palette(midlight);'
         ' }'
         'QTabWidget::pane {'
-        f' border: 1px solid {border}; background: {base};'
+        ' border: 1px solid palette(mid); background: palette(base);'
         ' }'
         'QTabBar::tab {'
-        f' background: {header_bg}; color: {text}; padding: 6px 12px;'
+        ' background: palette(alternate-base); color: palette(text); padding: 6px 12px;'
         ' border: none; border-bottom: 2px solid transparent;'
         ' }'
         'QTabBar::tab:selected {'
-        f' background: {base}; border-bottom: 2px solid {semantic["primary"]};'
+        ' background: palette(base); border-bottom: 2px solid palette(link);'
         ' }'
         'QTabBar::tab:disabled {'
-        f' color: {semantic["text_muted"]};'
+        ' color: palette(text);'
         ' }'
     )
+
+
+def _native_view_palette(dark: bool) -> QPalette:
+    """Bind native-view roles to the same semantic colors as before."""
+    palette = QPalette(_get_dark_palette() if dark else _get_light_palette())
+    colors = control_palette(dark)
+    from ui.design_tokens import tokens
+    semantic = tokens(dark)
+    for role, value in (
+        (QPalette.ColorRole.Base, colors['table_base']),
+        (QPalette.ColorRole.Text, colors['table_text']),
+        (QPalette.ColorRole.AlternateBase, colors['table_header_bg']),
+        (QPalette.ColorRole.Mid, colors['table_border']),
+        (QPalette.ColorRole.Midlight, colors['table_grid']),
+        (QPalette.ColorRole.Highlight, colors['selection']),
+        (QPalette.ColorRole.Link, semantic['primary']),
+    ):
+        palette.setColor(role, QColor(value))
+    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, QColor(semantic['text_muted']))
+    return palette
+
+
+def _refresh_native_view_palettes(app: QApplication, palette: QPalette) -> None:
+    """QSS caches resolved palettes; refresh only matching native controls.
+
+    Application.setPalette alone leaves existing QSS views in the old colors.
+    Explicit palette + local polish fixes that without reapplying global QSS.
+    New widgets inherit the current application palette and the stable rules.
+    """
+    for widget in app.allWidgets():
+        if (not isinstance(widget, (QAbstractItemView, QTabBar, QTabWidget))
+                and not widget.inherits('QTableCornerButton')):
+            continue
+        widget.setPalette(palette)
+        style = widget.style()
+        style.unpolish(widget)
+        style.polish(widget)
+        widget.update()
 
 
 # 已应用主题状态（None = 尚未应用）。启动链 main() 在窗口树为空时先
@@ -366,13 +394,15 @@ def apply_theme(theme: str) -> None:
     # （CPython 3.13 上更易命中，CI gui-linux-offscreen 全量跑时偶发，
     #  见 tests/test_main_window_titlebar.py 的 setup 报错）。
     # 这里主动 gc.collect() 把"已死未回收"的键提前清掉，让库的遍历过程
-    # 不再因 GC 抖动而改字典；本函数本就是秒级重算路径，一次 collect 的
-    # 开销可忽略。
+    # 不再因 GC 抖动而改字典；保留这一生命周期保护，换肤提速不移除它。
     gc.collect()
-    setTheme(Theme.DARK if dark else Theme.LIGHT)
-    from qfluentwidgets import setThemeColor
+    from qfluentwidgets import qconfig, setThemeColor
     from PyQt6.QtGui import QColor
-    setThemeColor(QColor(constants.ACCENT_SOLID))
+    accent = QColor(constants.ACCENT_SOLID)
+    if qconfig.themeColor.value != accent:
+        setThemeColor(accent, lazy=True)
+    # Hidden Fluent widgets refresh their dirty QSS before their next paint.
+    setTheme(Theme.DARK if dark else Theme.LIGHT, lazy=True)
     # 美术打磨 A（2026-09-27）：绘图区背景融入主题——深色近黑蓝调 /
     # 浅色纸白，替代纯 'k'/'w'（灰圈显旧）；前景同步降一档对比
     plot_palette = control_palette(dark)
@@ -385,8 +415,12 @@ def apply_theme(theme: str) -> None:
     # 原生控件（表格/列表/下拉框等）显式跟随应用主题，不受系统深浅模式影响
     app = QApplication.instance()
     if app is not None:
-        app.setPalette(_get_dark_palette() if dark else _get_light_palette())
-        app.setStyleSheet(native_views_qss(dark))
+        palette = _native_view_palette(dark)
+        app.setPalette(palette)
+        qss = native_views_qss(dark)
+        if app.styleSheet() != qss:
+            app.setStyleSheet(qss)
+        _refresh_native_view_palettes(app, palette)
     _applied_dark = dark
 
 

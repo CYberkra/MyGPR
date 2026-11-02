@@ -33,7 +33,7 @@ from qfluentwidgets import (CaptionLabel, ComboBox, DoubleSpinBox,
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants, file_dialogs
-from ui.geo_utils import coverage_statistics, format_distance
+from ui.geo_utils import coverage_statistics, format_distance, format_spacing
 from ui.qt_defer import defer_call
 from ui.spatial_view_sync import ViewSyncMixin
 from ui.pages.spatial_context_menus import SpatialContextMenuMixin
@@ -867,7 +867,7 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
         segments = int(statistics['segment_count'])
         if segments:
             spacing = float(statistics['length_m']) / segments
-            labels['spacing'].setText(format_distance(spacing))
+            labels['spacing'].setText(format_spacing(spacing))
         else:
             labels['spacing'].setText('--')
 

@@ -152,6 +152,21 @@ def resample_bscan_columns_linear(
     return result
 
 
+def _resample_quality_mask(values, source_distance, target_distance):
+    """Follow the B-scan interpolator's nonzero supports, never round flags."""
+    unique, reverse = np.unique(source_distance[::-1], return_index=True)
+    source_indices = (source_distance.size - 1 - reverse).astype(np.int64)
+    mask = np.asarray(values)[source_indices].astype(bool)
+    if unique.size == 1:
+        return np.full(target_distance.size, mask[0], dtype=np.int8)
+    right = np.clip(np.searchsorted(unique, target_distance, side='left'), 1, unique.size - 1)
+    left = right - 1
+    weight = ((target_distance - unique[left]) / (unique[right] - unique[left])).astype(np.float32)
+    weight[target_distance <= unique[0]] = 0.
+    weight[target_distance >= unique[-1]] = 1.
+    return ((mask[left] & ((1. - weight) > 0)) | (mask[right] & (weight > 0))).astype(np.int8)
+
+
 def resample_trace_metadata(
     trace_metadata: dict[str, np.ndarray],
     *,
@@ -183,6 +198,12 @@ def resample_trace_metadata(
 
     for key, values in trace_metadata.items():
         arr = np.asarray(values)
+        if key in {'trace_qc_bad_mask', 'short_trace_candidate_mask', 'short_trace_repaired_mask',
+                   'short_trace_unresolved_mask', 'short_trace_local_change_mask', 'short_trace_zero_mask'}:
+            if arr.shape != (trace_count,) or arr.dtype.kind not in 'biuf' or not np.isfinite(arr).all():
+                raise ValueError(f"trace_metadata mask '{key}' must be finite and trace-aligned")
+            resampled[key] = _resample_quality_mask(arr, source_distance, target_distance)
+            continue
         if arr.size == 1:
             resampled[key] = arr.copy()
             continue

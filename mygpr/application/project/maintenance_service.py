@@ -146,10 +146,12 @@ class ProjectMaintenanceService:
         project_id: str,
         sources: Sequence[str | Path],
         *,
+        dielectric_constant: float = 9.0,
         context: ExecutionContext | None = None,
     ) -> BatchImportSummary:
         resolved = tuple(Path(item).expanduser().resolve() for item in sources)
         return self._projects._session(project_id).batch_import_lines(
             resolved,
+            dielectric_constant=dielectric_constant,
             context=context or ExecutionContext.null(),
         )

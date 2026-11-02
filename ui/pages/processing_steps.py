@@ -16,6 +16,13 @@ class ProcessingSteps:
         method = self._methods_by_id.get(method_id, {})
         return str(method.get('display_name') or method.get('name') or fallback or method_id)
 
+    @staticmethod
+    def _editor_parameters(step):
+        params = dict(step.get('params') or {})
+        if step.get('method_id') == 'short_trace_repair' and 'window_mode' not in params:
+            params['window_mode'] = 'manual' if str(params.get('time_windows_ns') or '').strip() else 'auto'
+        return params
+
     def set_methods(self, methods):
         self._methods = [dict(m) for m in methods or []]
         self._methods_by_id = {m.get('method_id', ''): m for m in self._methods}
@@ -75,7 +82,7 @@ class ProcessingSteps:
         snapshot = {
             'title': self._display_name(step.get('method_id', ''), step.get('label')),
             'method_id': step.get('method_id', ''),
-            'params': dict(step.get('params') or {}),
+            'params': self._editor_parameters(step),
             'enabled': bool(step.get('enabled', True)),
             'is_first': index == 0,
             'is_last': index == len(steps) - 1,
@@ -92,6 +99,7 @@ class ProcessingSteps:
                     and current_steps[index] == step):
                 callback(*args)
         popup.load_snapshot(index, snapshot)
+        popup.gain_preview_requested.connect(lambda dialog: self._request_gain_preview(dialog, index=index))
         popup.sig_applied.connect(lambda payload: current(self._on_step_editor_applied, payload))
         popup.sig_move_requested.connect(lambda source, target: current(self._on_chain_step_moved, source, target))
         popup.sig_duplicate_requested.connect(lambda value: current(self._duplicate_step, value))
@@ -266,7 +274,7 @@ class ProcessingSteps:
         schema = method.get('parameter_schema') or []
         if schema:
             self._param_form.set_schema(schema)
-            self._param_form.set_values(step.get('params') or {})
+            self._param_form.set_values(self._editor_parameters(step))
         else:
             # 无 schema：保持表单为空
             self._param_form.clear()

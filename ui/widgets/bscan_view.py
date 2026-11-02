@@ -22,11 +22,10 @@
 （道号/距起点/纵轴物理值/幅值；PreviewBundle 带 trace_axis_m /
 sample_axis 时显示物理量，降采样数据附"原始约 N"），右键菜单可开关。
 
-右键菜单（RoundMenu）：缩放组（放大/缩小/回到全览/方形/1:1/全屏/铺满）/
+右键菜单（RoundMenu）：回到全览 / 全屏 / 缩放与比例子菜单 /
 轴单位子菜单 / 色标子菜单 / 十字光标 / A-scan 跟随 / 显示模式 / 色阶设置 /
-复制 / 导出 PNG。工具条已退役（2026-09-23：4 钮与右键菜单完全重复），
-全屏保留为图内左上角悬浮钮，铺满走右键菜单，轴单位与比例策略走设置页
-与右键菜单。
+复制 / 导出 PNG。工具条已退役，全屏保留为图内右上角悬浮钮；全屏时
+替换为回到全览与关闭全屏按钮，轴单位与比例策略走设置页与右键菜单。
 接入时已 vb.setMenuEnabled(False) 关闭 pyqtgraph 原生英文菜单。
 矩形缩放由右键「框选放大」启用一次性左键拖框，普通拖动仍平移；隐藏 pyqtgraph
 自带的「A」自适应钮（其功能由右键菜单「回到全览」承担）。
@@ -34,13 +33,13 @@ sample_axis 时显示物理量，降采样数据附"原始约 N"），右键菜�
 
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QFont, QPainterPath
+from PyQt6.QtGui import QFont, QKeySequence, QPainterPath, QShortcut
 from PyQt6.QtWidgets import QVBoxLayout, QWidget
 
 import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtWidgets import QLabel
-from qfluentwidgets import FluentIcon as FIF, ToolButton
+from qfluentwidgets import Action, FluentIcon as FIF, ToolButton
 
 from ui import constants, design_tokens
 from ui.desktop_backend_facade import compute_display_levels  # noqa: F401  (历史路径，tests 可能经此导入)
@@ -92,12 +91,11 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
     sig_levels_changed = pyqtSignal(float, float)
     # 用户手动切换色标显隐时发射，供宿主写回设置
     sig_colorbar_visible_changed = pyqtSignal(bool)
+    sig_qc_marks_visible_changed = pyqtSignal(bool)
     # 用户手动切换显示增益（'off'/'sec'/'tvg'）时发射，供宿主写回设置
     sig_gain_changed = pyqtSignal(str)
     # TVG 参数（总增益 dB、弯度幂次）经滑条面板调整后持久化（关闭面板时发一次）
     sig_gain_params_changed = pyqtSignal(float, float)
-    # 工具条「⤢ 铺满」：本视图不认识页面布局，交给宿主页面折叠侧栏
-    sig_expand_requested = pyqtSignal()
 
     def __init__(self, parent=None, *, with_colorbar: bool = True,
                  default_aspect: str = 'free', default_x_axis: str = 'trace',
@@ -133,6 +131,7 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
         # 色标显隐偏好：与色标对象解耦（with_colorbar=False 的视图无色标，
         # 偏好仍记录，构造处若支持可后续兑现）
         self._colorbar_visible = True
+        self._qc_marks_visible = True
         # 显示增益（SEC/TVG）：显示域逐行缩放（raw 一个字节不动）；增益后
         # 矩阵按 (矩阵身份, 模式+参数) 缓存复用。TVG 参数经滑条面板调整
         self._gain_mode = 'off'
@@ -143,8 +142,6 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
         self._envelope_cache = None
         self._contrast = 1.0
         self._tvg_dialog = None     # 滑条面板（懒创建，随视图销毁）
-        # 「⤢ 铺满」只有接到了宿主页（能折叠侧栏）才有意义，默认隐藏该钮
-        self._expand_enabled = False
         # 全屏宿主（懒创建）+ 几何持久化回调（主窗口注入，避免 view 碰文件）
         self._fullscreen = None
         self._geometry_loader = None
@@ -196,6 +193,7 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
     def _init_plot(self, with_colorbar: bool) -> None:
         """图形区：ImageItem 预分配复用 + 十字线 + 色标 + overlay 散点。"""
         self._glw = pg.GraphicsLayoutWidget(self)
+        self._glw.installEventFilter(self)
         # 图内标题只承载数据身份（bundle.title，如"测线 L3"）；通用名称
         # "B-Scan图像"由卡头承担，不再双标题（评审 P1-4）。
         # 横/纵轴换成 IndexAxis：索引坐标不变，只在刻度文本层做单位换算
@@ -303,10 +301,7 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
     def _init_layout(self) -> None:
         """图形区占满整控件（工具条已退役，能力分流右键菜单/悬浮钮）。
 
-        2026-09-23 评审：工具条 4 钮与右键菜单缩放组完全重复，每视图
-        常驻吃一行 ~40px（dual/quad/free 多画布时成倍）——缩放走右键
-        与滚轮，「铺满」并入右键菜单；全屏高频，保留为图内左上角悬浮
-        钮（与左下读数浮层对称，不与居中图内标题、右侧色标冲突）。
+        缩放走右键与滚轮；全屏保留为图内右上角悬浮钮，异常道开关留在左上角。
         """
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -316,9 +311,18 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
         self._fullscreen_btn.setToolTip('全屏：在独立窗口中展开（Esc 退出）')
         self._fullscreen_btn.setFixedSize(*constants.TOOL_BTN_COMPACT)
         self._fullscreen_btn.clicked.connect(self.toggle_fullscreen)
-        self._fullscreen_btn.move(6, 6)
+        self._fullscreen_btn.move(max(6, self.width() - self._fullscreen_btn.width() - 10), 10)
         self._fullscreen_btn.raise_()
         self._fullscreen_btn.show()
+        self._qc_marks_action = Action('显示异常道标记', self)
+        self._qc_marks_action.setObjectName('showAnomalousTraceMarks')
+        self._qc_marks_action.setCheckable(True)
+        self._qc_marks_action.setChecked(True)
+        self._qc_marks_action.setToolTip('红：统计候选、历史待审、已插补或输入整道全零；黄：局部时窗变化（不插补）。只控制显示，不重算。')
+        self._qc_marks_action.triggered.connect(lambda visible: self.set_qc_marks_visible(visible, notify=True))
+        self._fullscreen_shortcut = QShortcut(QKeySequence('F11'), self)
+        self._fullscreen_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self._fullscreen_shortcut.activated.connect(self.toggle_fullscreen)
 
     # ------------------------------------------------------------------ 轴单位
     def x_axis_mode(self) -> str:
@@ -590,6 +594,9 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
             self._colorbar.setVisible(visible and self._colorbar_visible)
 
     def clear(self) -> None:
+        self.set_acquisition_markers(())
+        self.set_qc_bad_mask(None)
+        self.set_qc_local_mask(None)
         self._clear_view_selection()
         self._image_item.clear()
         self._scatter.setData([])
@@ -610,6 +617,37 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
         self._refresh_axis_state()
         self._empty_overlay.setVisible(True)
         self._set_axes_visible(False)
+
+    def set_acquisition_markers(self, markers) -> None:
+        """Small hoverable flags on raw data; source records are never edited.
+
+        Preview downsampling approximates horizontal positions between retained
+        columns. The tooltip always gives the exact source row. Keep the last
+        marker at the last pixel when the preview omits the source's final row.
+        """
+        item = getattr(self, '_acquisition_marker_item', None)
+        if item is None:
+            item = pg.ScatterPlotItem(size=12, symbol='t', hoverable=True,
+                                      tip=lambda x, y, data: data)
+            item.setZValue(30)
+            self._plot.addItem(item, ignoreBounds=True)
+            self._acquisition_marker_item = item
+        grid = self._trace_indices
+        if grid is None:
+            grid = np.arange(self._matrix.shape[1]) if self._matrix is not None else np.array([])
+        spots = []
+        if len(grid):
+            colors = {'start': '#35b58a', 'general': '#39a8ed', 'end': '#de79bb'}
+            kinds = {'start': '开始', 'general': '一般', 'end': '结束'}
+            for mark in markers[:200]:
+                row = int(mark['trace_no'])
+                x = float(np.interp(row - 1, grid, np.arange(len(grid)))) + 0.5
+                kind = mark.get('marker_type', 'general')
+                tip = f"采集{kinds.get(kind, '一般')}标记 · 原文件第{row}道\n{mark.get('label', '')}"
+                tip += '\n缩略图位置为显示近似；标记不代表已确认目标'
+                spots.append(dict(pos=(x, 1), brush=colors.get(kind, '#39a8ed'), pen=None, data=tip))
+        item.setData(spots)
+        item.setToolTip(f'采集标记 {len(markers)} 个；最多显示前200个。完整记录保存在源元数据中。' if markers else '')
 
     def apply_theme(self, dark: bool) -> None:
         """深色 bg 'k'/文字 'w'；浅色 bg 'w'/文字 'k'；轴/色标/悬浮钮/十字光标同步。
@@ -646,3 +684,7 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
             f'ToolButton:focus {{ border: 1px solid {design_tokens.color("border_focus", dark)}; }}'
         )
         self._fullscreen_btn.setStyleSheet(btn_qss)
+        for name in ('_fullscreen_fit_btn', '_fullscreen_close_btn'):
+            button = getattr(self, name, None)
+            if button is not None:
+                button.setStyleSheet(btn_qss)

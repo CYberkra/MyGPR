@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 import shutil
 import uuid
 from pathlib import Path
@@ -24,6 +25,21 @@ from core.storage_primitives import atomic_output_path, atomic_write_json
 
 class FieldInterfaceStoreMixin:
     """Store interface JSON, training labels and spatial curve products."""
+
+    def _annotation_dataset(self, line_id: str, annotation: BasalInterfaceAnnotation):
+        raw = self.load_gpr_dataset(line_id)
+        source = str(annotation.source_result_id or '')
+        if annotation.source_mode == 'processed' and not source:
+            raise ValueError('标注缺少处理成果来源编号。')
+        if annotation.source_mode == 'processed' and source and source != f'{line_id}_raw':
+            if not re.fullmatch(r'[A-Za-z0-9._-]{1,160}', source):
+                raise ValueError('标注的处理成果来源编号无效。')
+            dataset = self.storage.load_processing_artifact(line_id, source, raw_dataset=raw)
+        else:
+            dataset = raw
+        if (dataset.sample_count, dataset.trace_count) != (annotation.sample_count, annotation.trace_count):
+            raise ValueError('标注尺寸与其来源数据不一致，无法导出。')
+        return dataset
 
     def interface_annotation_path(self, line_id: str) -> Path:
         safe = validate_line_id(line_id)
@@ -77,6 +93,7 @@ class FieldInterfaceStoreMixin:
             progress_callback(0, 4, "保存标注 JSON")
         annotation.line_id = safe
         annotation.normalize()
+        self._annotation_dataset(safe, annotation)
         annotation.updated_at = local_now()
         current = self.interface_annotation_path(safe)
         if current.exists():
@@ -129,7 +146,7 @@ class FieldInterfaceStoreMixin:
         annotation = annotation or self.load_basal_interface_annotation(safe)
         if annotation is None:
             raise FileNotFoundError(self.interface_annotation_path(safe))
-        dataset = self.load_gpr_dataset(safe)
+        dataset = self._annotation_dataset(safe, annotation)
         labels = annotation.build_1d_labels(
             time_axis_ns=dataset.time_axis_ns,
             depth_axis_m=dataset.depth_axis_m,
@@ -232,7 +249,7 @@ class FieldInterfaceStoreMixin:
         annotation = annotation or self.load_basal_interface_annotation(safe)
         if annotation is None:
             raise FileNotFoundError(self.interface_annotation_path(safe))
-        dataset = self.load_gpr_dataset(safe)
+        dataset = self._annotation_dataset(safe, annotation)
         labels = annotation.build_1d_labels(time_axis_ns=dataset.time_axis_ns, depth_axis_m=dataset.depth_axis_m)
         curve = labels["curve_gt"]
         semantics = annotation.trace_semantics()
@@ -256,7 +273,8 @@ class FieldInterfaceStoreMixin:
                     x = y = surface_z = interface_z = ""
                     if trajectory is not None:
                         point = trajectory.interpolate(distance)
-                        x, y, surface_z = float(point.x), float(point.y), float(point.z)
+                        x, y = float(point.x), float(point.y)
+                        surface_z = float(point.z) - float(point.flight_height_m)
                         if np.isfinite(labels["depth_gt"][trace]):
                             interface_z = surface_z - float(labels["depth_gt"][trace])
                     visibility_code = int(semantics["visibility_gt"][trace])

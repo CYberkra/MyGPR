@@ -137,17 +137,24 @@ def _nearest_values(source_t: np.ndarray, values: np.ndarray | None, trace_t: np
         out[~valid] = str(default)
     return out
 
+def _metric_project_crs(project_crs: str):
+    if Transformer is None or CRS is None:
+        raise RuntimeError("配置了工程 CRS，但 pyproj 不可用。")
+    try:
+        target = CRS.from_user_input(project_crs)
+    except Exception as exc:
+        raise ValueError(f"无法解析工程坐标系：{project_crs}；请在高级同步设置中填写实际投影的 EPSG 代码。") from exc
+    if not target.is_projected or len(target.axis_info) < 2 or any(abs(float(axis.unit_conversion_factor) - 1.0) > 1e-9 for axis in target.axis_info[:2]):
+        raise ValueError("工程坐标系必须是以米为单位的投影坐标系。")
+    return target
+
+
 def _project_lonlat(lon: np.ndarray, lat: np.ndarray, project_crs: str) -> tuple[np.ndarray, np.ndarray, str]:
     valid = np.isfinite(lon) & np.isfinite(lat)
     x: np.ndarray = np.full(lon.size, np.nan, dtype=np.float64)
     y: np.ndarray = np.full(lat.size, np.nan, dtype=np.float64)
     if valid.any() and project_crs:
-        if Transformer is None or CRS is None:
-            raise RuntimeError("配置了工程 CRS，但 pyproj 不可用。")
-        try:
-            target = CRS.from_user_input(project_crs)
-        except Exception as exc:
-            raise ValueError(f"无法解析工程坐标系：{project_crs}") from exc
+        target = _metric_project_crs(project_crs)
         transformer = Transformer.from_crs("EPSG:4326", target, always_xy=True)
         xx, yy = transformer.transform(lon[valid], lat[valid])
         x[valid] = xx
@@ -216,6 +223,8 @@ def synchronize_sensor_streams(
     trace_distance_hint_m: np.ndarray | None = None,
 ) -> SensorSyncResult:
     cfg = config or SensorSyncConfig()
+    if cfg.project_crs:
+        _metric_project_crs(cfg.project_crs)
     radar_clock = ClockDomain.from_value(cfg.radar_clock, default_name="radar")
     trace_t = np.asarray(trace_timestamps_s, dtype=np.float64) * radar_clock.factor_to_seconds() + float(cfg.radar_trigger_delay_s)
     if trace_t.ndim != 1 or trace_t.size == 0:
@@ -245,14 +254,9 @@ def synchronize_sensor_streams(
     imu_residual = _nearest_residual(imu_t, trace_t) if imu_t.size else np.full(trace_t.size, np.inf)
     alt_residual = _nearest_residual(alt_t, trace_t) if alt_t.size else np.full(trace_t.size, np.inf)
     residual_limit = max(float(cfg.maximum_nearest_residual_s), 0.0)
-    if cfg.allow_extrapolation:
-        rtk_valid = np.ones(trace_t.size, dtype=bool)
-        imu_valid = np.ones(trace_t.size, dtype=bool) if imu_t.size else np.zeros(trace_t.size, dtype=bool)
-        alt_valid = np.ones(trace_t.size, dtype=bool) if alt_t.size else np.zeros(trace_t.size, dtype=bool)
-    else:
-        rtk_valid = rtk_cov & (rtk_residual <= residual_limit)
-        imu_valid = imu_cov & (imu_residual <= residual_limit) if imu_t.size else np.zeros(trace_t.size, dtype=bool)
-        alt_valid = alt_cov & (alt_residual <= residual_limit) if alt_t.size else np.zeros(trace_t.size, dtype=bool)
+    rtk_valid = (rtk_cov | cfg.allow_extrapolation) & (rtk_residual <= residual_limit)
+    imu_valid = (imu_cov | cfg.allow_extrapolation) & (imu_residual <= residual_limit) if imu_t.size else np.zeros(trace_t.size, dtype=bool)
+    alt_valid = (alt_cov | cfg.allow_extrapolation) & (alt_residual <= residual_limit) if alt_t.size else np.zeros(trace_t.size, dtype=bool)
 
     lon = _interp_numeric(rtk_t, rtk.get("longitude"), trace_t, rtk_valid)
     lat = _interp_numeric(rtk_t, rtk.get("latitude"), trace_t, rtk_valid)
@@ -378,7 +382,8 @@ def synchronize_sensor_streams(
         },
     )
     if diagnostics.rtk.coverage_ratio < 1.0:
-        diagnostics.warnings.append(f"RTK 仅覆盖 {diagnostics.rtk.coverage_ratio:.1%} 的雷达道，超出区间未静默夹取。")
+        detail = "超出区间且未超残差阈值的道使用端点值。" if cfg.allow_extrapolation else "超出区间未静默夹取。"
+        diagnostics.warnings.append(f"RTK 仅覆盖 {diagnostics.rtk.coverage_ratio:.1%} 的雷达道，{detail}")
     if imu_t.size and diagnostics.imu.coverage_ratio < 1.0:
         diagnostics.warnings.append(f"IMU 仅覆盖 {diagnostics.imu.coverage_ratio:.1%} 的雷达道。")
     if diagnostics.fixed_solution_ratio < 0.9:

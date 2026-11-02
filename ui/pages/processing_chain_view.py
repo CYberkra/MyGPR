@@ -79,6 +79,7 @@ class ProcessingChainView:
         self._saved_path.setVisible(len(path) > 1 and self._source_path_btn.isChecked())
 
     def _close_chain_popups(self):
+        self._close_gain_previews()
         for popup in (self._step_editor, self._method_picker):
             if popup is not None:
                 popup.close()

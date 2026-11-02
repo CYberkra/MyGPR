@@ -73,6 +73,63 @@ def compute_display_envelope(matrix):
     return display_envelope(matrix)
 
 
+def manual_gain_nodes(value=None):
+    """Validated independent node dictionaries for the UI curve editor."""
+    from mygpr.domain.processing.manual_gain import normalize_gain_nodes
+    return normalize_gain_nodes(value)
+
+
+def manual_gain_nodes_json(value=None) -> str:
+    """Serialize only curve parameters into a reproducible processing draft."""
+    from mygpr.domain.processing.manual_gain import encode_gain_nodes
+    return encode_gain_nodes(value)
+
+
+def prepare_manual_gain_preview(backend, project_id, line_id, artifact_id, prefix, context):
+    from mygpr.application.processing.gain_preview import prepare_gain_preview
+    return prepare_gain_preview(backend.projects, backend.processing, project_id, line_id,
+                                artifact_id, prefix, context)
+
+
+def evaluate_manual_gain_preview(matrix, nodes):
+    from mygpr.domain.processing.manual_gain import apply_manual_gain_curve
+    return apply_manual_gain_curve(matrix, nodes)[0]
+
+
+def manual_gain_preview_bundle(matrix, header):
+    """Keep every row/trace; use only the stored, matching physical axes."""
+    import numpy as np
+    from core.gui_rendering import make_preview_bundle
+    def axis(key, count):
+        value = header.get(key)
+        array = np.asarray(value) if value is not None else None
+        return array if array is not None and array.shape == (count,) else None
+    ns, nt = matrix.shape
+    depth, time = axis("depth_axis_m", ns), axis("time_axis_ns", ns)
+    if header.get("is_elevation"):
+        sample, label = axis("elevation_axis_m", ns), "海拔 (m)"
+    elif header.get("is_depth"):
+        sample, label = depth, "深度 (m)"
+    elif header.get("time_axis_status") != "unknown" and time is not None:
+        sample, label = time, "时间 (ns)"
+    else:
+        sample, label = None, "采样点"
+    return make_preview_bundle(matrix, trace_axis_m=axis("distance_axis_m", nt), sample_axis=sample,
+                         sample_axis_label=label, depth_axis_m=depth,
+                         max_samples=ns, max_traces=nt)
+
+
+def trace_quality_preview_mask(metadata, trace_count):
+    """Return the QC/candidate/repaired overlay for the same original trace grid."""
+    from core.quality_trace_locations import trace_quality_preview_mask as combine
+    return combine(metadata, trace_count)
+
+
+def trace_local_change_preview_mask(metadata, trace_count):
+    from core.quality_trace_locations import trace_local_change_preview_mask as combine
+    return combine(metadata, trace_count)
+
+
 def compute_display_levels(
     matrix: Any,
     *,

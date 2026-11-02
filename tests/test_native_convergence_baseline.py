@@ -72,6 +72,9 @@ def _legacy_kernel(request: ProcessingRequest) -> np.ndarray:
 # bitwise_kernel     = 与历史 CPU kernel 逐位一致
 # determinism_contract = 实验性方法，仅要求确定性/预算契约（无 legacy 对照）
 EQUIVALENCE_EVIDENCE: dict[str, tuple[str, str]] = {
+    "gaussian_smoothing": ("direct_comparison", "test_image_denoising.py"),
+    "non_local_means": ("direct_comparison", "test_image_denoising.py"),
+    "manual_gain": ("golden_digest", "test_manual_curve_gain.py"),
     # tests/test_native_processing_backend.py — 直接对比
     "compensatingGain": ("direct_comparison", "test_native_processing_backend.py"),
     "dewow": ("direct_comparison", "test_native_processing_backend.py"),
@@ -97,6 +100,7 @@ EQUIVALENCE_EVIDENCE: dict[str, tuple[str, str]] = {
     # tests/test_native_extended_processing.py — golden 摘要
     "time_cut": ("golden_digest", "test_native_extended_processing.py"),
     "trace_qc": ("golden_digest", "test_native_extended_processing.py"),
+    "short_trace_repair": ("direct_comparison", "test_short_trace_repair.py"),
     "energy_decay_gain": ("golden_digest", "test_native_extended_processing.py"),
     "amplitude_scale": ("golden_digest", "test_native_extended_processing.py"),
     "median_background_2D": ("golden_digest", "test_native_extended_processing.py"),

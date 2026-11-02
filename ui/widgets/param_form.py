@@ -27,8 +27,11 @@ def _schema_signature(schema) -> tuple:
     return tuple(
         (str(item.get('name', '')), str(item.get('label', '')),
          str(item.get('type', 'float')), item.get('min'), item.get('max'),
+         item.get('editor'),
+         item.get('step'), item.get('tooltip'),
          item.get('default'),
-         tuple(str(c) for c in (item.get('choices') or ())))
+         tuple(str(c) for c in (item.get('choices') or ())),
+         tuple(sorted((str(k), str(v)) for k, v in (item.get('choice_labels') or {}).items())))
         for item in (schema or []))
 
 
@@ -36,6 +39,7 @@ class ParamForm(QWidget):
     """处理方法参数表单。任意参数值变化时发射 sig_changed。"""
 
     sig_changed = pyqtSignal()
+    gain_preview_requested = pyqtSignal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -112,18 +116,26 @@ class ParamForm(QWidget):
         pmax = item.get('max')
         default = item.get('default', 0)
 
-        if ptype == 'int':
+        if item.get('editor') == 'gain_curve':
+            from ui.widgets.manual_gain_editor import GainCurveEditor
+            editor = GainCurveEditor(self)
+            editor.setValue(default)
+            editor.previewRequested.connect(self.gain_preview_requested)
+        elif ptype == 'int':
             editor = SpinBox(self)
             editor.setRange(int(pmin) if pmin is not None else -10 ** 9,
                             int(pmax) if pmax is not None else 10 ** 9)
             editor.setValue(int(default if default is not None else 0))
+            editor.setSingleStep(max(1, int(item.get('step', 1))))
         elif ptype == 'str':
             choices = item.get('choices')
             if choices:
                 editor = ComboBox(self)
+                labels = item.get('choice_labels') or {}
                 for choice in choices:
-                    editor.addItem(str(choice))
-                editor.setCurrentText(str(default if default is not None else ''))
+                    value = str(choice)
+                    editor.addItem(str(labels.get(value, value)), userData=value)
+                editor.setCurrentIndex(max(0, editor.findData(str(default))))
             else:
                 editor = LineEdit(self)
                 editor.setText(str(default if default is not None else ''))
@@ -135,10 +147,12 @@ class ParamForm(QWidget):
             editor.setDecimals(6)
             editor.setRange(float(pmin) if pmin is not None else -1e12,
                             float(pmax) if pmax is not None else 1e12)
-            editor.setSingleStep(self._float_step(pmin, pmax))
+            editor.setSingleStep(float(item.get('step', self._float_step(pmin, pmax))))
             editor.setValue(float(default if default is not None else 0.0))
 
         self._connect_change_signal(editor)
+        if item.get('tooltip'):
+            editor.setToolTip(str(item['tooltip']))
 
         lbl = CaptionLabel(label, self)
         lbl.setMinimumWidth(120)
@@ -171,7 +185,8 @@ class ParamForm(QWidget):
             high = str(pmax) if pmax is not None else '+∞'
             return f'范围: [{low}, {high}]'
         if ptype == 'str' and item.get('choices'):
-            return '可选: ' + ', '.join(str(c) for c in item['choices'])
+            labels = item.get('choice_labels') or {}
+            return '可选: ' + '、'.join(str(labels.get(str(c), c)) for c in item['choices'])
         return ''
 
     def _connect_change_signal(self, editor):
@@ -221,7 +236,8 @@ class ParamForm(QWidget):
         if isinstance(editor, CheckBox):
             return editor.isChecked()
         if isinstance(editor, ComboBox):
-            return editor.currentText()
+            value = editor.currentData()
+            return editor.currentText() if value is None else value
         if isinstance(editor, LineEdit):
             return editor.text()
         return editor.value()
@@ -246,10 +262,17 @@ class ParamForm(QWidget):
         实机 380 次循环崩溃即此根因），持久化/恢复的参数可能带 .0，统一钳到
         控件量程后转换。
         """
-        if isinstance(editor, CheckBox):
+        from ui.widgets.manual_gain_editor import GainCurveEditor
+        if isinstance(editor, GainCurveEditor):
+            editor.setValue(value)
+        elif isinstance(editor, CheckBox):
             editor.setChecked(bool(value))
         elif isinstance(editor, ComboBox):
-            editor.setCurrentText(str(value))
+            index = editor.findData(str(value))
+            if index >= 0:
+                editor.setCurrentIndex(index)
+            else:
+                editor.setCurrentText(str(value))
         elif isinstance(editor, LineEdit):
             editor.setText(str(value) if value is not None else '')
         elif isinstance(editor, DoubleSpinBox):

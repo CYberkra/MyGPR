@@ -11,6 +11,39 @@ def _ranges(mask):
     return zip(np.flatnonzero(edges == 1), np.flatnonzero(edges == -1))
 
 
+def trace_quality_preview_mask(metadata, trace_count):
+    """Combine aligned display masks without mutating stored bad-trace state.
+
+    A repaired trace remains visibly auditable, but is not silently added to
+    trace_qc_bad_mask (which subsequent mute/remove operations consume).
+    """
+    combined = np.zeros(trace_count, dtype=bool)
+    found = False
+    for key in ('trace_qc_bad_mask', 'short_trace_candidate_mask', 'short_trace_repaired_mask',
+                'short_trace_unresolved_mask', 'short_trace_zero_mask'):
+        values = np.asarray(metadata.get(key, []))
+        if values.shape == (trace_count,) and values.dtype.kind in 'biuf':
+            combined |= np.isfinite(values) & (values != 0)
+            found = True
+    local = trace_local_change_preview_mask(metadata, trace_count)
+    if local is not None:
+        combined &= ~local
+    return combined if found else None
+
+
+def trace_local_change_preview_mask(metadata, trace_count):
+    """Amber local-review class; history is retained, current red evidence wins."""
+    values = np.asarray(metadata.get('short_trace_local_change_mask', []))
+    if values.shape != (trace_count,) or values.dtype.kind not in 'biuf':
+        return None
+    local = np.isfinite(values) & (values != 0)
+    for key in ('trace_qc_bad_mask', 'short_trace_candidate_mask', 'short_trace_repaired_mask', 'short_trace_zero_mask'):
+        mask = np.asarray(metadata.get(key, []))
+        if mask.shape == (trace_count,) and mask.dtype.kind in 'biuf':
+            local &= ~(np.isfinite(mask) & (mask != 0))
+    return local
+
+
 def locate_trace_issues(metadata, trace_count):
     """Return exact zero-based, half-open trace ranges; absent fields are not inferred."""
     issues = []
@@ -27,6 +60,16 @@ def locate_trace_issues(metadata, trace_count):
     qc = np.asarray(metadata.get('trace_qc_bad_mask', []))
     if qc.shape == (trace_count,):
         append('trace_qc_bad', '已标记坏道', qc.astype(bool))
+    for key, code, label in (
+        ('short_trace_candidate_mask', 'short_trace_candidate', '短段异常候选'),
+        ('short_trace_repaired_mask', 'short_trace_repaired', '已插补道（需对照原始）'),
+        ('short_trace_unresolved_mask', 'short_trace_unresolved', '未插补候选'),
+        ('short_trace_local_change_mask', 'short_trace_local_change', '局部时窗变化（仅审阅，不插补）'),
+        ('short_trace_zero_mask', 'short_trace_zero', '输入整道全零（确定数据质量问题）'),
+    ):
+        values = np.asarray(metadata.get(key, []))
+        if values.shape == (trace_count,):
+            append(code, label, values.astype(bool))
     for key in ('longitude', 'latitude', 'altitude_m', 'flight_height_m', 'roll_deg', 'pitch_deg', 'yaw_deg'):
         values = np.asarray(metadata.get(key, []))
         if values.shape == (trace_count,) and values.dtype.kind in 'fiu':

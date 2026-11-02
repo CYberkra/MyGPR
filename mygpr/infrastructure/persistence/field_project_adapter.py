@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import re
 from threading import RLock
 from typing import Any, Mapping, Sequence
@@ -80,7 +81,7 @@ def _load_trace_metadata(store: FieldProjectStore, line_id: str) -> dict[str, np
     if not relative:
         # Acquisition sensors are already aligned by trace; no timestamp-based
         # synchronization or optional JSON sidecar is needed to use them.
-        if str(getattr(record, "data_format", "")) == "cdut-acquisition-hdf5":
+        if str(getattr(record, "data_format", "")) in {"cdut-acquisition-hdf5", "cdut-acquisition-csv"}:
             from core.acquisition_hdf5 import acquisition_trace_metadata
 
             return acquisition_trace_metadata(dict(store.load_gpr_dataset(line_id).metadata or {}))
@@ -179,8 +180,43 @@ def _artifact(record: ProcessingArtifactRecord) -> ProjectArtifact:
     )
 
 
+class ProjectDataPersistenceMixin:
+    """Read synchronized metadata and normalize legacy line quality labels."""
+
+    def _line_with_quality(self, record: FieldLineRecord) -> ProjectLine:
+        line = _line_record(record)
+        if '★' in line.data_quality or '☆' in line.data_quality:
+            report = self._store.load_quality_report(record.line_id)
+            line = replace(line, data_quality=report.status_label if report else '尚未检查')
+        return line
+
+    def read_trace_metadata(self, line_id: str) -> Mapping[str, np.ndarray]:
+        safe = validate_line_id(line_id)
+        with self._lock:
+            return _load_trace_metadata(self._store, safe)
+
+    def read_sensor_sync_result(self, line_id: str) -> ProjectSensorSyncResult | None:
+        safe = validate_line_id(line_id)
+        with self._lock:
+            line = self._store.get_line(safe)
+            if not line.sensor_sync_manifest_path:
+                return None
+            path = resolve_managed_path(self._store.root, line.sensor_sync_manifest_path,
+                                        require_exists=True, require_file=True)
+            if path.stat().st_size > 4 * 1024 * 1024:
+                raise ValueError('传感器同步清单过大')
+            payload = json.loads(path.read_text(encoding='utf-8'))
+            if payload.get('line_id') != safe:
+                raise ValueError('传感器同步清单测线编号不匹配')
+            return ProjectSensorSyncResult(
+                self._store.manifest.project_id, safe, line.trajectory_path,
+                line.sensor_sync_manifest_path, line.trace_metadata_path,
+                payload.get('diagnostics') or {}, payload.get('config') or {},
+                line.sensor_sync_status)
+
+
 class LegacyFieldProjectSession(
-    LinePropertiesMixin, InterpretationPersistenceMixin, IntermediateCleanupMixin, SpatialPersistenceMixin,
+    ProjectDataPersistenceMixin, LinePropertiesMixin, InterpretationPersistenceMixin, IntermediateCleanupMixin, SpatialPersistenceMixin,
     VelocityPersistenceMixin, GridPersistenceMixin, ProcessingPackageMixin, ProjectSessionPort
 ):
     """One open project; concrete storage objects remain private to this adapter."""
@@ -307,22 +343,22 @@ class LegacyFieldProjectSession(
             records = index_processing_artifacts(self._store.root, validate_line_id(line_id))
         return collect_artifact_descendants(records, artifact_id)
 
-    def batch_import_lines(self, sources: Sequence[Path], *, context: ExecutionContext) -> BatchImportSummary:
+    def batch_import_lines(self, sources: Sequence[Path], *, dielectric_constant: float = 9.0, context: ExecutionContext) -> BatchImportSummary:
         def progress(current: int, total: int, item: Any) -> None:
             context.report_progress(current, total, f"{item.line_id}: {item.message}")
         with self._lock:
-            result = batch_import_line_data(self._store, list(sources), progress_callback=progress, cancel_requested=context.is_cancelled)
+            result = batch_import_line_data(self._store, list(sources), dielectric_constant=dielectric_constant, progress_callback=progress, cancel_requested=context.is_cancelled)
         rows = tuple(BatchImportItemResult(**item.__dict__) for item in result.results)
         return BatchImportSummary(result.total, result.succeeded, result.failed, rows)
 
     def list_lines(self) -> Sequence[ProjectLine]:
         with self._lock:
-            return tuple(_line_record(record) for record in self._store.list_lines())
+            return tuple(self._line_with_quality(record) for record in self._store.list_lines())
 
     def get_line(self, line_id: str) -> ProjectLine:
         safe = validate_line_id(line_id)
         with self._lock:
-            return _line_record(self._store.get_line(safe))
+            return self._line_with_quality(self._store.get_line(safe))
 
     def get_dataset_info(self, line_id: str) -> LineDatasetInfo:
         safe = validate_line_id(line_id)
@@ -349,6 +385,8 @@ class LegacyFieldProjectSession(
         copy_into_project: bool,
         dielectric_constant: float,
         context: ExecutionContext,
+        time_window_ns: float | None = None,
+        trace_interval_m: float | None = None,
     ) -> ProjectLine:
         safe = validate_line_id(line_id)
         context.raise_if_cancelled()
@@ -359,6 +397,7 @@ class LegacyFieldProjectSession(
                 name=name or safe,
                 copy_into_project=bool(copy_into_project),
                 dielectric_constant=float(dielectric_constant),
+                time_window_ns=time_window_ns, trace_interval_m=trace_interval_m,
                 cancel_requested=context.is_cancelled,
                 progress_callback=lambda first, second, third: _report_legacy_progress(context, first, second, third),
             )
@@ -466,11 +505,6 @@ class LegacyFieldProjectSession(
             header_info=header,
             trace_metadata=trace_metadata,
         )
-
-    def read_trace_metadata(self, line_id: str) -> Mapping[str, np.ndarray]:
-        safe = validate_line_id(line_id)
-        with self._lock:
-            return _load_trace_metadata(self._store, safe)
 
     @staticmethod
     def _iter_matrix_blocks(

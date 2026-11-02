@@ -166,21 +166,27 @@ class BScanSelectionMixin:
             self._plot.vb.viewRange()[1], np.arange(len(axis)) + .5, axis))
 
     def _queue_selection_levels(self, *_args):
-        if self._view_selection is not None or self._view_time_window is not None:
+        if self._matrix is None or self._image_shape is None:
+            return
+        # Ordinary wheel zoom/pan is also a viewing range. Do not require a
+        # preceding rectangle or numeric time-window action to enable it.
+        if (self._view_selection is not None or self._view_time_window is not None
+                or (self._selection_follows_levels and self._levels_override is None)):
             self._selection_timer.start()
 
     def _refresh_selection_levels(self):
-        if self._view_selection is None and self._view_time_window is None:
+        if self._matrix is None or self._image_shape is None:
             return
         if self._view_selection is not None:
             (left, right), (top, bottom) = self._plot.vb.viewRange()
             self._view_selection = QRectF(left, top, right-left, bottom-top)
-        self._update_selection_time()
-        self._apply_levels_to_render()
+        if self._view_selection is not None or self._view_time_window is not None:
+            self._update_selection_time()
+        if self._selection_follows_levels and self._levels_override is None:
+            self._apply_levels_to_render()
 
     def _levels_source_for_view(self, full_source):
-        if (not self._selection_follows_levels
-                or (self._view_selection is None and self._view_time_window is None)):
+        if not self._selection_follows_levels:
             return full_source
         source = self._image_item.image
         if source is None:

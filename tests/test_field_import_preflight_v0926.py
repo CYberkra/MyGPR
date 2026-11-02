@@ -30,6 +30,21 @@ def test_npy_preflight_reads_shape_through_mmap_without_materialising_full_matri
     assert updates[-1][1] == updates[-1][2]
 
 
+@pytest.mark.parametrize('extension', ['csv', 'npy'])
+def test_plain_matrix_preflight_discloses_unverified_physical_axes(tmp_path: Path, extension: str) -> None:
+    source = tmp_path / f'plain.{extension}'
+    data = np.ones((32, 16), dtype=np.float32)
+    if extension == 'csv':
+        np.savetxt(source, data, delimiter=',')
+    else:
+        np.save(source, data)
+    result = build_import_preflight(source)
+    text = ' '.join(result.suggestions)
+    assert '250 ns' in text
+    assert '1 m' in text
+    assert '未' in text
+
+
 def test_large_csv_preflight_uses_bounded_sample_and_reports_shape_after_import(tmp_path: Path) -> None:
     source = tmp_path / "large.csv"
     with source.open("w", encoding="utf-8", newline="") as handle:

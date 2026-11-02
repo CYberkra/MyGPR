@@ -227,7 +227,9 @@ class InterpretationPersistenceMixin:
 
     def save_interface_annotation(self, annotation: InterfaceAnnotation) -> InterfaceAnnotation:
         safe = self._validated_line(annotation.line_id)
-        info = self.get_dataset_info(safe)
+        source = str(annotation.processing_result or '')
+        info = (self.get_artifact_dataset_info(safe, source)
+                if source and source != f'{safe}_raw' else self.get_dataset_info(safe))
         max_sample = float(info.shape[0] - 1)
         max_trace = float(info.shape[1] - 1)
         for point in annotation.points:
@@ -285,7 +287,7 @@ class InterpretationPersistenceMixin:
             legacy_value = BasalInterfaceAnnotation(
                 line_id=safe, trace_count=int(info.shape[1]), sample_count=int(info.shape[0]),
                 source_result_id=saved.processing_result or f"{safe}_raw",
-                source_mode="processed" if saved.processing_result else "raw",
+                source_mode="processed" if saved.processing_result and saved.processing_result != f"{safe}_raw" else "raw",
                 status=saved.status,
                 version=max(1, saved.version - 1),
                 keypoints=[

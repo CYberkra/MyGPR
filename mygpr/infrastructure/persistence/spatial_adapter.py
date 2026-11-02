@@ -86,6 +86,10 @@ class SpatialPersistenceMixin:
             y = first("local_y_m", "northing_m", "y")
             source = "projected trace metadata"
             crs = coordinate_system
+            if x is not None and y is not None:
+                synchronized = self.read_sensor_sync_result(line.line_id)
+                if synchronized is not None:
+                    crs = str(synchronized.config.get('project_crs') or '未确认（局部坐标）')
             if x is None or y is None:
                 x = first("longitude", "lon")
                 y = first("latitude", "lat")

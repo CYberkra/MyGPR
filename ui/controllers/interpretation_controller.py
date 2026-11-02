@@ -156,7 +156,8 @@ class InterpretationController(QObject):
             self.log_message.emit("标注已保存")
             if self._is_current_context(context):
                 self.saved.emit("标注已保存")
-                self.saved_with_status.emit(str(getattr(snapshot, 'status', 'draft') or 'draft'))
+                if self._is_current_context(context):
+                    self.saved_with_status.emit(str(getattr(completion.snapshot, 'status', 'draft') or 'draft'))
         elif completion.kind == "failed":
             self.log_message.emit(completion.message)
             if self._is_current_context(context):

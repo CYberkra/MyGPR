@@ -354,3 +354,15 @@ def test_clean_edit_snapshot_clears_dirty_state(harness):
     _execute(queued.pop())
     _drain()
     assert not controller.has_unsaved_changes()
+
+
+@pytest.mark.parametrize("status", ["draft", "confirmed"])
+def test_save_completion_publishes_persisted_annotation_status(harness, status):
+    controller, _, _, _ = harness
+    _open(harness)
+    statuses = []
+    controller.saved_with_status.connect(statuses.append)
+    context = controller._capture_context()
+    saved_annotation = SimpleNamespace(status=status)
+    controller._apply_completion(module._Completion(context, "saved", snapshot=saved_annotation))
+    assert statuses == [status]
