@@ -147,7 +147,10 @@ jobs:
       - run: python -m pip install -r requirements-test-backend.txt
       - name: Windows warmup and teardown regression
         run: python -m pytest tests/test_ui_migration_regressions.py::TestMethodsLoadedWarmupRace -q -x --tb=short --timeout=120 --timeout-method=thread --junitxml=output/ci-tests/windows-warmup.xml
-      - run: python -m pytest tests/ -q -x --tb=short --timeout=120 --timeout-method=thread
+      # This class runs above in a fresh Qt process. Exclude only its duplicate
+      # execution here; every test remains mandatory across the two stages.
+      - name: Full pytest (warmup lifecycle runs in its own process)
+        run: python -m pytest tests/ -q -x --tb=short --timeout=120 --timeout-method=thread --deselect=tests/test_ui_migration_regressions.py::TestMethodsLoadedWarmupRace
       - name: Upload Windows GUI evidence
         if: always()
         uses: actions/upload-artifact@v4
