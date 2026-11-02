@@ -207,7 +207,7 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
         self._display_cmap.setToolTip('仅改变当前视图配色，不修改数据或处理步骤')
         dl.addLayout(make_form_row('色图', self._display_cmap, parent=display))
         fit = PushButton('适应当前视图', display)
-        fit.setToolTip('色阶、显示增益、坐标与导出可在画布右键调整')
+        fit.setToolTip('回到全览；右键可框选、调整时窗或导出，显示偏好集中在设置页。')
         fit.clicked.connect(lambda: self._workspace.primary_view().fit_to_data())
         dl.addWidget(fit)
         dl.addStretch(1)

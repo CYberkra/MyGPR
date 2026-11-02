@@ -780,7 +780,7 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
         add(menu, 'reset-layout', '恢复为单组标签', self.reset_layout,
             enabled=len(self._groups) > 1)
         menu.addSeparator()
-        menu.addAction(group.view.qc_marks_menu_action(menu))
+        group.view.add_display_settings_action(menu)
         menu._workspace_keyboard = FluentMenuKeyboard(menu)
         return menu
 

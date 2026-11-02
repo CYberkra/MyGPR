@@ -19,9 +19,7 @@ from PyQt6.QtCore import QEvent, Qt
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants
-from ui.widgets.bscan_axes import sample_unit_label
-from ui.widgets.context_menus import (RoundMenu, add_action,
-                                      add_checkable_submenu, make_menu)
+from ui.widgets.context_menus import RoundMenu, add_action, make_menu
 
 
 class BScanDisplayMode(Enum):
@@ -199,12 +197,6 @@ class BScanViewInteractionMixin:
         self._add_menu_zoom(menu)
         self._add_menu_time_window(menu)
         menu.addSeparator()
-        self._add_menu_axes(menu)
-        menu.addSeparator()
-        add_checkable_submenu(menu, '色标', constants.COLORMAPS,
-                              self._cmap_name, self._choose_colormap)
-        add_action(menu, None, '色阶设置…', self._edit_levels,
-                   enabled=self._image_shape is not None)
         self._add_menu_toggles(menu)
         menu.addSeparator()
         add_action(menu, FIF.COPY, '复制图像', self._copy_image,
@@ -213,51 +205,25 @@ class BScanViewInteractionMixin:
                    lambda: self.export_png(
                        title=self._export_title, prefix='bscan'),
                    enabled=self._image_shape is not None)
+        menu.addSeparator()
+        self.add_display_settings_action(menu)
         menu.exec(event.screenPos().toPoint())
+
+    def add_display_settings_action(self, menu) -> None:
+        add_action(menu, FIF.SETTING, '显示设置…', self.sig_display_settings_requested.emit,
+                   enabled=bool(self.receivers(self.sig_display_settings_requested)))
 
     def _add_menu_zoom(self, menu) -> None:
         self._add_menu_selection(menu)
         add_action(menu, FIF.FIT_PAGE, '回到全览（铺满窗口）', self.fit_to_data)
         add_action(menu, FIF.FULL_SCREEN, '全屏浏览（F11）', self.enter_fullscreen)
-        zoom = RoundMenu('缩放与比例', menu)
+        zoom = RoundMenu('缩放', menu)
         add_action(zoom, FIF.ZOOM_IN, '放大', self.zoom_in)
         add_action(zoom, FIF.ZOOM_OUT, '缩小', self.zoom_out)
-        add_action(zoom, None, '方形显示', self.fit_square)
-        add_action(zoom, None, '1:1（数据格等比）', self.reset_1to1)
         menu.addMenu(zoom)
 
-    def _add_menu_axes(self, menu) -> None:
-        """轴单位组：工具条精简后这里是切换主入口（另一处是设置页）。"""
-        x_menu = RoundMenu('横轴单位', menu)
-        for mode, label in (('trace', '道数'), ('distance', '距离 (m)')):
-            x_menu.addAction(self._axis_menu_action(
-                label, self._x_axis == mode,
-                mode != 'distance' or self.distance_available(),
-                lambda m=mode: self.set_x_axis_mode(m, notify=True)))
-        menu.addMenu(x_menu)
-        y_menu = RoundMenu('纵轴单位', menu)
-        y_menu.addAction(self._axis_menu_action(
-            sample_unit_label(self._sample_axis_label),
-            self.effective_y_axis_mode() == 'sample', self._image_shape is not None,
-            lambda: self.set_y_axis_mode('sample', notify=True)))
-        y_menu.addAction(self._axis_menu_action(
-            '海拔 (m)', self.effective_y_axis_mode() == 'elevation',
-            self.elevation_available(),
-            lambda: self.set_y_axis_mode('elevation', notify=True)))
-        menu.addMenu(y_menu)
-
-    @staticmethod
-    def _axis_menu_action(label: str, checked: bool, enabled: bool, slot):
-        from qfluentwidgets import Action
-        act = Action(label)
-        act.setCheckable(True)
-        act.setChecked(bool(checked))
-        act.setEnabled(bool(enabled))
-        act.triggered.connect(lambda _checked=False: slot())
-        return act
-
     def _add_menu_toggles(self, menu) -> None:
-        """交互开关组：十字光标 / A-scan 跟随 / 色标显隐 / 显示模式。"""
+        """Frequent inspection tools; persistent display preferences live in Settings."""
         from qfluentwidgets import Action
         crosshair_action = Action('十字光标读数')
         crosshair_action.setCheckable(True)
@@ -269,15 +235,6 @@ class BScanViewInteractionMixin:
         ascan_action.setChecked(self._ascan_follow)
         ascan_action.triggered.connect(self.set_ascan_follow)
         menu.addAction(ascan_action)
-        menu.addAction(self.qc_marks_menu_action(menu))
-        if self._colorbar is not None:
-            colorbar_action = Action('显示色标')
-            colorbar_action.setCheckable(True)
-            colorbar_action.setChecked(self._colorbar_visible)
-            colorbar_action.triggered.connect(
-                lambda checked=False: self.set_colorbar_visible(
-                    checked, notify=True))
-            menu.addAction(colorbar_action)
         mode_submenu = RoundMenu('显示模式', menu)
         for mode in BScanDisplayMode:
             mode_label = {

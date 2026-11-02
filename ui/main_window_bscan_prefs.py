@@ -17,7 +17,9 @@
 from weakref import WeakSet
 
 from PyQt6 import sip
+from PyQt6.QtCore import QTimer
 from ui import constants
+from ui.settings_manager import DEFAULT_SETTINGS
 from ui.widgets.bscan_view import BScanView
 
 
@@ -56,6 +58,8 @@ class BScanPreferenceMixin:
         gain_alpha = min(max(gain_alpha, 0.0), 20.0)
         tvg_db, tvg_power = self._setting_tvg_params()
         for view in views:
+            view.set_global_display_preferences(self._global_bscan_display_state())
+            view.set_levels_follow_view(self._setting_flag('bscan_levels_follow_view', True))
             view.set_aspect_mode(aspect, notify=False)
             view.set_axis_modes(x_axis, y_axis, notify=False)
             view.set_colormap(cmap)
@@ -80,6 +84,12 @@ class BScanPreferenceMixin:
         同步到设置页，关窗时就会被那份**过期的默认值**覆盖掉——表现为「在
         工具条切了方形，重开又变回铺满」。这是排查过的真实缺陷，别只写盘。
         """
+        if not hasattr(self, '_bscan_preference_views'):
+            self._bscan_preference_views = WeakSet()
+        if view in self._bscan_preference_views:
+            return
+        self._bscan_preference_views.add(view)
+        view.sig_display_settings_requested.connect(self._open_bscan_settings)
         view.sig_aspect_changed.connect(
             lambda mode: self._mirror_bscan_setting('bscan_aspect_mode', str(mode)))
         view.sig_x_axis_changed.connect(
@@ -97,15 +107,28 @@ class BScanPreferenceMixin:
             lambda mode: self._mirror_bscan_setting('bscan_gain_mode',
                                                     str(mode)))
         view.sig_gain_params_changed.connect(self._mirror_bscan_tvg_params)
-        if not hasattr(self, '_bscan_preference_views'):
-            self._bscan_preference_views = WeakSet()
-        if view not in self._bscan_preference_views:
-            self._bscan_preference_views.add(view)
-            view.sig_qc_marks_visible_changed.connect(self._on_qc_marks_visible_changed)
+        view.sig_qc_marks_visible_changed.connect(self._on_qc_marks_visible_changed)
+
+    def _open_bscan_settings(self) -> None:
+        self._goto_page('settingsInterface')
+        page = self._page('settingsInterface')
+        if page is not None:
+            QTimer.singleShot(0, page.focus_bscan_settings)
+
+    def _global_bscan_display_state(self) -> dict:
+        """Preferences moved to Settings must not be restored per line/tab."""
+        state = {field: self.settings.get(key, DEFAULT_SETTINGS[key]) for key, field in (
+            ('bscan_aspect_mode', 'aspect'), ('bscan_x_axis', 'x_axis'),
+            ('bscan_y_axis', 'y_axis'), ('bscan_colormap', 'colormap'),
+            ('bscan_colorbar_visible', 'colorbar'), ('bscan_contrast', 'contrast'),
+        )}
+        state['levels'] = list(self._setting_levels())
+        return state
 
     def _on_qc_marks_visible_changed(self, visible: bool) -> None:
         """One remembered display preference; no processing or preview reload."""
         self._persist_setting('bscan_qc_marks_visible', bool(visible))
+        self._sync_settings_page_bscan({'bscan_qc_marks_visible': bool(visible)})
         # Fullscreen temporarily reparents a view out of its page subtree.
         for view in list(self._bscan_preference_views):
             if not sip.isdeleted(view):
@@ -115,12 +138,16 @@ class BScanPreferenceMixin:
         """写盘 + 把设置页控件同步到同一值（避免关窗回写覆盖用户选择）。"""
         self._persist_setting(key, value)
         self._sync_settings_page_bscan({key: value})
+        for view in self._iter_bscan_views():
+            view.set_global_display_preferences(self._global_bscan_display_state())
 
     def _mirror_bscan_levels(self, low: float, high: float) -> None:
         """色阶两键一并写盘与同步（避免中途崩溃留下 low > high）。"""
         self._persist_bscan_levels(low, high)
         self._sync_settings_page_bscan({
             'bscan_p_low': float(low), 'bscan_p_high': float(high)})
+        for view in self._iter_bscan_views():
+            view.set_global_display_preferences(self._global_bscan_display_state())
 
     def _sync_settings_page_bscan(self, values: dict) -> None:
         """把 B-Scan 偏好同步进设置页控件（blockSignals 防信号回环）。"""
@@ -160,28 +187,32 @@ class BScanPreferenceMixin:
         if not callable(getter):
             return
         values = getter()
+        changed = {key for key, value in values.items() if self.settings.get(key) != value}
         for key, value in values.items():
             self.settings.set(key, value)
         self.settings.save()
         for view in self._iter_bscan_views():
-            view.set_contrast(values.get('bscan_contrast', 1.0))
-            view.set_aspect_mode(values['bscan_aspect_mode'], notify=False)
-            view.set_axis_modes(values['bscan_x_axis'], values['bscan_y_axis'],
-                                notify=False)
-            view.set_colormap(str(values.get(
-                'bscan_colormap', constants.DEFAULT_COLORMAP)))
-            view.set_display_levels(values['bscan_p_low'],
-                                    values['bscan_p_high'], notify=False)
-            view.set_colorbar_visible(
-                bool(values.get('bscan_colorbar_visible', True)), notify=False)
-            try:
-                gain_alpha = float(values.get('bscan_gain_alpha', 0.2))
-            except (TypeError, ValueError):
-                gain_alpha = 0.2
-            tvg_db, tvg_power = self._setting_tvg_params()
-            view.set_gain(str(values.get('bscan_gain_mode', 'off')),
-                          alpha=min(max(gain_alpha, 0.0), 20.0),
-                          db=tvg_db, power=tvg_power, notify=False)
+            view.set_global_display_preferences(self._global_bscan_display_state())
+            view.set_levels_follow_view(bool(values.get('bscan_levels_follow_view', True)))
+            view.set_qc_marks_visible(bool(values.get('bscan_qc_marks_visible', True)))
+            if 'bscan_contrast' in changed:
+                view.set_contrast(values.get('bscan_contrast', 1.0))
+            # Changing a global checkbox must retain wheel/rectangle zoom.
+            if view.aspect_mode() != values['bscan_aspect_mode']:
+                view.set_aspect_mode(values['bscan_aspect_mode'], notify=False)
+            if (view.x_axis_mode(), view.y_axis_mode()) != (values['bscan_x_axis'], values['bscan_y_axis']):
+                view.set_axis_modes(values['bscan_x_axis'], values['bscan_y_axis'], notify=False)
+            if 'bscan_colormap' in changed:
+                view.set_colormap(str(values.get('bscan_colormap', constants.DEFAULT_COLORMAP)))
+            if {'bscan_p_low', 'bscan_p_high'} & changed:
+                view.set_display_levels(values['bscan_p_low'], values['bscan_p_high'], notify=False)
+            if 'bscan_colorbar_visible' in changed:
+                view.set_colorbar_visible(bool(values.get('bscan_colorbar_visible', True)), notify=False)
+            if {'bscan_gain_mode', 'bscan_gain_alpha'} & changed:
+                tvg_db, tvg_power = self._setting_tvg_params()
+                view.set_gain(str(values.get('bscan_gain_mode', 'off')),
+                              alpha=float(values.get('bscan_gain_alpha', 0.2)),
+                              db=tvg_db, power=tvg_power, notify=False)
         proc = self.pages.get('processingInterface')
         if proc is not None and hasattr(proc, 'set_colorbar_pref'):
             proc.set_colorbar_pref(
