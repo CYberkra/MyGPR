@@ -179,26 +179,13 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force output/qt-native-diagnosis | Out-Null
-          $module = 'tests/test_ui_migration_regressions.py'
-          $content = 'tests/test_ui_content_simplification.py'
-          $theme = 'tests/test_theme_switch_performance.py'
-          $cases = @(
-            @{name='module'; paths=@($module)},
-            @{name='content'; paths=@($content,$module)},
-            @{name='home'; paths=@("$($content)::test_startup_and_output_panel_drop_repeated_instructions",$module)},
-            @{name='processing'; paths=@("$($content)::test_processing_uses_state_text_instead_of_static_tutorials",$module)},
-            @{name='interpretation'; paths=@("$($content)::test_interpretation_has_one_session_status_and_one_point_count",$module)},
-            @{name='spatial'; paths=@("$($content)::test_spatial_and_jobs_remove_redundant_region_titles",$module)},
-            @{name='delivery'; paths=@("$($content)::test_delivery_uses_controls_as_the_primary_affordance",$module)},
-            @{name='tree'; paths=@("$($content)::test_project_tree_does_not_repeat_global_project_identity",$module)}
-          )
+          $cases = @('baseline', 'owned-style', 'shared-style', 'simple-doubles', 'flush-delete')
           $failed = $false
           foreach ($case in $cases) {
-            Write-Output "[DEBUG-native-qt] sequence=$($case.name)"
-            $casePaths = $case.paths
-            python -m pytest @casePaths -q -s -x --tb=short --timeout=45 --timeout-method=thread "--junitxml=output/qt-native-diagnosis/$($case.name).xml" 2>&1 | Tee-Object "output/qt-native-diagnosis/$($case.name).log"
+            Write-Output "[DEBUG-native-qt] sequence=$case"
+            python scripts/diagnose_native_qt.py $case 2>&1 | Tee-Object "output/qt-native-diagnosis/$case.log"
             $result = $LASTEXITCODE
-            Write-Output "[DEBUG-native-qt] sequence=$($case.name) exit=$result"
+            Write-Output "[DEBUG-native-qt] sequence=$case exit=$result"
             if ($result -ne 0) { $failed = $true }
           }
           if ($failed) { exit 1 }
