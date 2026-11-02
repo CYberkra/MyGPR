@@ -6,6 +6,12 @@ on:
     branches: [main, master]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+env:
+  PYTEST_ADDOPTS: --junitxml=output/ci-tests/junit.xml --durations=20
+
 # 同一 PR/分支的连续推送只保留最新 run，取消仍在排队的过时 run。
 concurrency:
   group: ci-${{ github.ref }}
@@ -34,15 +40,17 @@ jobs:
       # PR 要求可计算的有效 diff；覆盖范围外的文档/打包变更允许无后端增量。
       - name: Backend quality gate
         run: python scripts/run_backend_quality_gate.py ${{ github.event_name == 'pull_request' && '--require-diff' || '' }}
-      - name: Upload coverage evidence on failure
-        if: failure()
+      - name: Upload backend test evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: coverage-json
           path: |
             coverage.json
             diff-coverage-report.json
+            output/ci-tests/
           if-no-files-found: ignore
+          retention-days: 7
 
   # 3.13 已由上方 backend job 覆盖，矩阵只跑 3.12；
   # 3.11 不参与：钉版 numpy==2.5.1 要求 Python >=3.12。
@@ -60,6 +68,14 @@ jobs:
           cache: pip
       - run: python -m pip install -r requirements-test-backend.txt
       - run: python -m pytest -q
+      - name: Upload Python 3.12 test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-python-312-tests
+          path: output/ci-tests/
+          if-no-files-found: ignore
+          retention-days: 7
 
   gui-linux-offscreen:
     runs-on: ubuntu-latest
@@ -104,13 +120,16 @@ jobs:
           else
             exit "$code"
           fi
-      - name: Upload smoke screenshots on failure
-        if: failure()
+      - name: Upload Linux GUI evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: gui-smoke-linux
-          path: output/ci-smoke/
+          path: |
+            output/ci-smoke/
+            output/ci-tests/
           if-no-files-found: ignore
+          retention-days: 7
 
   gui-windows:
     runs-on: windows-latest
@@ -127,14 +146,17 @@ jobs:
       - run: python app_qt.py --smoke
       - run: python -m pip install -r requirements-test-backend.txt
       - run: python -m pytest tests/ -q
-      - name: Upload smoke screenshots on failure
-        if: failure()
+      - name: Upload Windows GUI evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: gui-smoke-windows
           # 与 MYGPR_SMOKE_SHOTS_DIR 使用同一工作区目录，避免依赖系统临时目录或盘符。
-          path: output/ci-smoke/
+          path: |
+            output/ci-smoke/
+            output/ci-tests/
           if-no-files-found: ignore
+          retention-days: 7
 
   clean-install:
     runs-on: ubuntu-latest
@@ -153,3 +175,11 @@ jobs:
       - run: python -m pytest tests/test_version_consistency.py tests/test_spatial_online_basemap_contract.py -q
       # 发布工件可构建性持续验证
       - run: python -m pip wheel . --no-deps -w dist
+      - name: Upload clean-install test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clean-install-tests
+          path: output/ci-tests/
+          if-no-files-found: ignore
+          retention-days: 7

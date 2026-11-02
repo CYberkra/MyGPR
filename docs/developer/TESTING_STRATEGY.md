@@ -2,6 +2,51 @@
 
 适用版本：MyGPR v0.10.0 及后续版本。
 
+## 默认执行位置（2026-11-02）
+
+自动化测试、应用冒烟与完整质量门禁默认在 **GitHub Actions** 执行。
+未经用户在当前任务中明确要求，不在本机运行 pytest、`make gate`、
+`run_backend_quality_gate.py` 或其他会间接执行测试的包装脚本，子代理同样遵守。
+本机默认只做源码阅读、差异审查和静态检查。
+
+代码修改与回归用例先进入功能分支/PR，再核对对应提交的 GitHub run。
+旧提交的绿灯、语法检查或阅读测试代码，都不能作为当前修改已通过的证据。
+未推送的工作区改动标记为“待 CI”，不默认为已验证。
+
+### 定向远端回归
+
+`.github/workflows/focused-regressions.yml` 提供手动入口 **MyGPR focused regressions**：
+
+| suite | 范围 |
+| --- | --- |
+| `bscan` | 普通缩放/平移色阶跟随、框选、查看时窗、显示增益、海拔显示 |
+| `algorithms` | 图像去噪、手动曲线增益、原生算子目录与文件执行 |
+| `processing` | 处理页、处理成果续接、异步身份、参数表单 |
+| `all` | 上述固定集合的去重并集 |
+
+工作流采用 Linux / Windows 托管 runner、Python3.13 和离屏Qt。
+测试选择清单只有 `scripts/run_ci_regressions.py` 一处；输入为固定枚举，
+不把任意测试路径或命令拼进 shell。该入口会拒绝在普通本机环境启动 pytest。
+未列入集合的新增回归需在清单中显式加入；完整门禁仍覆盖全量测试。
+
+GitHub 要求手动工作流文件先存在于默认分支；首次提交该文件的 PR 由已有
+`MyGPR CI` 全量门禁验证，合并后才能从 Actions 中选择 suite 和待测分支。
+例如（占位分支需换成实际已推送分支）：
+
+```powershell
+gh workflow run focused-regressions.yml --repo CYberkra/MyGPR --ref <feature-branch> -f suite=bscan
+gh run list --repo CYberkra/MyGPR --workflow focused-regressions.yml --limit 5
+gh run view <run-id> --repo CYberkra/MyGPR --log-failed
+```
+
+定向回归每个用例超时120秒，job超时15分钟，保留JUnit与耗时信息。
+完整门禁各job也上传JUnit；GUI job同时保留冒烟截图，保留期7天。
+日志始终保留在对应run中；依赖安装失败、超时或取消时可能没有完整JUnit，须如实说明。
+不得把跳过的GUI/真实数据/硬件用例计作执行通过。
+
+参考：[GitHub 手动触发要求](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#defining-inputs-for-manually-triggered-workflows)、
+[工作流证据产物](https://docs.github.com/en/actions/concepts/workflows-and-actions/workflow-artifacts)。
+
 > 历史说明：v0.9.28 时代文档描述过基于 `config/test_impact.toml` 的六级风险门禁
 > （`run_quality_gate.py affected/merge/nightly/release`）。该体系及其脚本
 > 已从当前树中移除，本文描述的是**当前实际存在并强制执行**的门禁。
@@ -23,7 +68,8 @@ CI（`.github/workflows/backend-ci.yml`）对每个 PR / 主分支推送强制�
 | GUI 冒烟 + pytest | `gui-linux-offscreen` / `gui-windows` | 离屏/原生冒烟截图 + **带 Qt 的全量 pytest**（GUI 用例仅在含 Qt 的 job 执行） |
 | clean-install | `clean-install` | 干净环境 `pip install .` + 契约测试 + `pip wheel` 可构建性 |
 
-本地等价命令：`make gate`（即 `scripts/run_backend_quality_gate.py`，与 CI backend job 同一清单）。
+`make gate`（即 `scripts/run_backend_quality_gate.py`）保留为与CI相同的维护入口，
+仅当用户明确要求本机执行时使用，不作为日常默认操作。
 
 Windows 打包已在 `packaging/windows/build.py` 中自动生成 SBOM 和许可证清单，
 工具基线见 `requirements-windows-build.txt`；常规 PR CI 尚无独立供应链扫描门禁。
@@ -69,4 +115,4 @@ Windows 打包已在 `packaging/windows/build.py` 中自动生成 SBOM 和许可
 明确列出商业/工业发布前必须具备的 Windows 故障、CUDA 与硬件在环证据。
 缺少证据时标记为未执行或待验收，不能用离屏截图、合成数据或旧版本结果填充通过状态。
 现场与实机验收（DPI、多 GB 数据、真实 RTK/IMU/GPR 同步、错误 CRS 等）也须按
-目标发布范围在发布前完成对应检查；本地门禁不替代这些证据。
+目标发布范围在发布前完成对应检查；常规CI门禁不替代这些证据。

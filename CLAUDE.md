@@ -15,12 +15,14 @@ MyGPR 是面向 GPR / UAV-GPR 野外勘探项目的桌面软件，PyQt6 + qfluen
 
 ## 运行与测试
 
+自动化测试与冒烟默认由 GitHub Actions 执行；未经用户在当前任务中明确要求，
+不在本机运行 pytest 或会间接启动测试的质量门禁。具体入口与证据要求见
+[测试策略](docs/developer/TESTING_STRATEGY.md)。本机可阅读代码、审查差异及做静态检查。
+
 ```bash
 # 支持 Python 3.12–3.13；依赖版本和 Windows 安装命令见 README.md / AGENTS.md
 source .venv/Scripts/activate          # Git Bash
 python app_qt.py                       # 启动 GUI
-QT_QPA_PLATFORM=offscreen python app_qt.py --smoke   # 系统临时目录 mygpr_shots/；MYGPR_SMOKE_SHOTS_DIR 可覆盖
-python -m pytest tests/ -q             # 测试
 python cli_batch.py --help             # 无头批处理入口
 ```
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Backend quality gate — the single checklist shared by CI and `make gate`.
+"""Backend quality gate — CI checklist, also available through `make gate`.
 
 This module is the **only** place the backend checklist is written down. The
 `backend` job in `.github/workflows/backend-ci.yml` invokes this script as one
@@ -7,8 +7,10 @@ step, so the workflow and `make gate` cannot drift apart — the previous setup
 listed the same 14 commands in both places and silently lost
 `check_backend_api_contract.py` along the way.
 
-`--require-diff` is off by default here because a local run usually has no
-upstream ref to diff against; CI passes it explicitly.
+Default execution belongs on GitHub Actions. A local invocation needs the
+user's explicit request for that task. `--require-diff` is off by default
+because a manually authorized local run may have no upstream ref; CI passes
+it explicitly.
 """
 from __future__ import annotations
 import argparse
