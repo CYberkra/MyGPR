@@ -185,8 +185,12 @@ jobs:
           $cases = @(
             @{name='module'; paths=@($module)},
             @{name='content'; paths=@($content,$module)},
-            @{name='theme'; paths=@($theme,$module)},
-            @{name='theme-content'; paths=@($theme,$content,$module)}
+            @{name='home'; paths=@("$($content)::test_startup_and_output_panel_drop_repeated_instructions",$module)},
+            @{name='processing'; paths=@("$($content)::test_processing_uses_state_text_instead_of_static_tutorials",$module)},
+            @{name='interpretation'; paths=@("$($content)::test_interpretation_has_one_session_status_and_one_point_count",$module)},
+            @{name='spatial'; paths=@("$($content)::test_spatial_and_jobs_remove_redundant_region_titles",$module)},
+            @{name='delivery'; paths=@("$($content)::test_delivery_uses_controls_as_the_primary_affordance",$module)},
+            @{name='tree'; paths=@("$($content)::test_project_tree_does_not_repeat_global_project_identity",$module)}
           )
           $failed = $false
           foreach ($case in $cases) {
