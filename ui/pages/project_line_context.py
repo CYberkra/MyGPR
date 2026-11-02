@@ -49,4 +49,3 @@ class ProjectLineContextMixin:
         values = self._sm.get(self._sensor_template_key(), {})
         if isinstance(values, dict):
             self._sync_form.set_settings(values)
-

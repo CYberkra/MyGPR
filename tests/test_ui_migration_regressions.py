@@ -161,6 +161,7 @@ class _FakeProcessingController(QObject):
     autotune_failed = pyqtSignal(str)
     velocity_finished = pyqtSignal(object)
     velocity_failed = pyqtSignal(str)
+    gain_input_ready = pyqtSignal(str, object, str)
 
     def __init__(self) -> None:
         super().__init__()
@@ -170,6 +171,12 @@ class _FakeProcessingController(QObject):
     def load_methods(self) -> None:
         self.load_calls += 1
         self.methods_loaded.emit(self.methods)
+
+    def prepare_gain_preview(self, *_args) -> None:
+        raise AssertionError('Method-library warmup must not request a gain preview')
+
+    def cancel_gain_preview(self, _token) -> None:
+        raise AssertionError('Method-library warmup has no gain preview to cancel')
 
 
 def _build_race_window(monkeypatch):

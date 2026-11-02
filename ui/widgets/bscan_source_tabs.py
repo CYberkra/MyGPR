@@ -142,5 +142,3 @@ class _SourceTabBar(QTabBar):
         key = str(self.tabData(index) or '') if index >= 0 else ''
         self.group.workspace.show_context_menu(self.group.group_id, key, event.globalPos())
         event.accept()
-
-
