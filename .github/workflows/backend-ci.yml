@@ -163,6 +163,49 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # Temporary root-cause diagnosis; removed after the shared-process regression
+  # is fixed. Every sequence starts with a fresh QApplication process.
+  windows-native-diagnosis:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: python -m pip install -r requirements-test-backend.txt -r requirements-gui.txt
+      - name: Compare short predecessor sequences
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force output/qt-native-diagnosis | Out-Null
+          $module = 'tests/test_ui_migration_regressions.py'
+          $content = 'tests/test_ui_content_simplification.py'
+          $theme = 'tests/test_theme_switch_performance.py'
+          $cases = @(
+            @{name='module'; paths=@($module)},
+            @{name='content'; paths=@($content,$module)},
+            @{name='theme'; paths=@($theme,$module)},
+            @{name='theme-content'; paths=@($theme,$content,$module)}
+          )
+          $failed = $false
+          foreach ($case in $cases) {
+            Write-Output "[DEBUG-native-qt] sequence=$($case.name)"
+            $casePaths = $case.paths
+            python -m pytest @casePaths -q -s -x --tb=short --timeout=45 --timeout-method=thread "--junitxml=output/qt-native-diagnosis/$($case.name).xml" 2>&1 | Tee-Object "output/qt-native-diagnosis/$($case.name).log"
+            $result = $LASTEXITCODE
+            Write-Output "[DEBUG-native-qt] sequence=$($case.name) exit=$result"
+            if ($result -ne 0) { $failed = $true }
+          }
+          if ($failed) { exit 1 }
+      - name: Upload native diagnosis
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-native-diagnosis
+          path: output/qt-native-diagnosis/
+          retention-days: 7
+
   clean-install:
     runs-on: ubuntu-latest
     timeout-minutes: 15
