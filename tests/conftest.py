@@ -113,3 +113,30 @@ def qapp():
     from PyQt6.QtCore import QCoreApplication, QEvent
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     app.processEvents()
+
+
+@pytest.fixture(autouse=True)
+def offline_spatial_downloads(request, monkeypatch):
+    """Ordinary GUI tests never depend on public basemap/terrain servers.
+
+    Showing a spatial page can schedule downloads without an explicit fetch.
+    A later garbage collection may then wait for DNS/socket work inside a Qt
+    pool. Keep the real queue, rendering and shutdown paths while replacing
+    only their external-service workers. Worker cancellation/HTTP tests do not
+    use qapp and retain the real worker with their own controlled transports.
+    Module-local worker doubles can still override these defaults.
+    """
+    if 'qapp' not in request.fixturenames:
+        return
+    from PyQt6.QtCore import QRunnable
+    from ui.widgets import map_view, trajectory_3d_view
+
+    class OfflineWorker(QRunnable):
+        def __init__(self, *_args, **_kwargs):
+            super().__init__()
+
+        def run(self):
+            pass
+
+    monkeypatch.setattr(map_view, '_TileWorker', OfflineWorker)
+    monkeypatch.setattr(trajectory_3d_view, '_TerrainWorker', OfflineWorker)
