@@ -167,7 +167,10 @@ class ParamForm(QWidget):
         if range_tip:
             lbl.setToolTip(f'{label}\n{range_tip}')
         editor.setMinimumWidth(90)
-        editor.setMinimumHeight(34)
+        if isinstance(editor, CheckBox):
+            editor.setFixedHeight(34)
+        else:
+            editor.setMinimumHeight(34)
         editor.setSizePolicy(QSizePolicy.Policy.Expanding,
                              QSizePolicy.Policy.Fixed)
         row = QHBoxLayout()
