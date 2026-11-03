@@ -94,3 +94,67 @@ class TestParamFormFallback:
         # 未知类型不注册编辑器（只读降级行），values() 不包含该键
         assert 'x' not in form._editors
         assert form.values() == {}
+
+
+class TestConditionalParameters:
+    def test_mode_rules_control_visibility_enabled_state_and_payload(self, qapp):
+        from ui.widgets.param_form import ParamForm
+
+        form = ParamForm()
+        form.set_schema([
+            {'name': 'window_mode', 'type': 'str', 'default': 'auto',
+             'choices': ('auto', 'manual', 'full')},
+            {'name': 'mode', 'type': 'str', 'default': 'mark',
+             'choices': ('mark', 'interpolate')},
+            {'name': 'time_windows_ns', 'type': 'str', 'default': '1:2',
+             'visible_when': {'window_mode': 'manual'}},
+            {'name': 'max_run_traces', 'type': 'int', 'default': 4,
+             'enabled_when': {'mode': 'interpolate'}},
+        ])
+        time_editor = form._editors['time_windows_ns']
+        run_editor = form._editors['max_run_traces']
+        assert time_editor.isHidden()
+        assert not run_editor.isEnabled()
+        assert form.values()['time_windows_ns'] == '1:2'
+
+        form.set_values({'window_mode': 'manual', 'mode': 'interpolate'})
+        assert time_editor.isVisibleTo(form)
+        assert run_editor.isEnabled()
+        assert form.values()['max_run_traces'] == 4
+
+    def test_hidden_omit_can_exclude_value_without_deleting_it(self, qapp):
+        from ui.widgets.param_form import ParamForm
+
+        form = ParamForm()
+        form.set_schema([
+            {'name': 'window_mode', 'type': 'str', 'default': 'auto',
+             'choices': ('auto', 'manual')},
+            {'name': 'time_windows_ns', 'type': 'str', 'default': '1:2',
+             'visible_when': {'window_mode': 'manual'}, 'hidden': 'omit'},
+        ])
+        assert 'time_windows_ns' not in form.values()
+        form.set_values({'window_mode': 'manual'})
+        assert form.values()['time_windows_ns'] == '1:2'
+        form.set_values({'window_mode': 'auto'})
+        assert 'time_windows_ns' not in form.values()
+        form.set_values({'window_mode': 'manual'})
+        assert form.values()['time_windows_ns'] == '1:2'
+
+    def test_explicit_advanced_metadata_moves_parameter_out_of_basic_group(self, qapp):
+        from ui.widgets.param_form import ParamForm
+
+        form = ParamForm()
+        form.set_schema([
+            {'name': 'basic', 'type': 'int', 'default': 1},
+            {'name': 'advanced', 'type': 'int', 'default': 2, 'advanced': True},
+        ])
+        assert form._advanced_btn is not None
+        assert form._advanced_widget is not None
+        assert form._advanced_names == {'advanced'}
+
+    def test_condition_rule_changes_rebuild_schema(self, qapp):
+        from ui.widgets.param_form import _schema_signature
+
+        base = [{'name': 'mode', 'type': 'str', 'default': 'auto'}]
+        assert _schema_signature(base) != _schema_signature([
+            {**base[0], 'visible_when': {'mode': 'manual'}}])

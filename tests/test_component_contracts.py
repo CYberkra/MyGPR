@@ -3,6 +3,7 @@ import pytest
 
 pytest.importorskip('PyQt6')
 
+from PyQt6.QtWidgets import QVBoxLayout, QWidget  # noqa: E402
 from ui import constants  # noqa: E402
 
 
@@ -54,3 +55,48 @@ def test_chain_strip_empty_hint_has_a_public_setter(qapp):
     strip.set_empty_hint('＋ 添加处理步骤')
     assert strip._empty_hint.text() == '＋ 添加处理步骤'
     strip.deleteLater()
+
+
+def test_panel_state_supports_single_side_and_priority_order(qapp):
+    from ui.page_scaffold import PanelStateMixin
+    from ui.widgets.collapsible_panel import CollapsiblePanel
+
+    class SingleSidePage(PanelStateMixin, QWidget):
+        _PANEL_STATE_PREFIX = 'test_single'
+        _AUTO_COLLAPSE_ORDER = ('right',)
+
+        def __init__(self):
+            super().__init__()
+            self.setLayout(QVBoxLayout())
+            self._sm = None
+            self._right_panel = CollapsiblePanel(expand_width=320)
+
+    page = SingleSidePage()
+    page.resize(500, 300)
+    page._auto_collapse_side_panels()
+    assert page._right_panel.is_collapsed()
+    assert page.panel_states() == {'right': True}
+    page.deleteLater()
+
+
+def test_spatial_priority_collapses_detail_before_layers(qapp):
+    from ui.page_scaffold import PanelStateMixin
+    from ui.widgets.collapsible_panel import CollapsiblePanel
+
+    class TwoSidePage(PanelStateMixin, QWidget):
+        _PANEL_STATE_PREFIX = 'test_spatial'
+        _AUTO_COLLAPSE_ORDER = ('right', 'left')
+
+        def __init__(self):
+            super().__init__()
+            self.setLayout(QVBoxLayout())
+            self._sm = None
+            self._left_panel = CollapsiblePanel('left', expand_width=320)
+            self._right_panel = CollapsiblePanel('right', expand_width=360)
+
+    page = TwoSidePage()
+    page.resize(800, 300)
+    page._auto_collapse_side_panels()
+    assert page._right_panel.is_collapsed()
+    assert not page._left_panel.is_collapsed()
+    page.deleteLater()

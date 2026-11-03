@@ -105,6 +105,7 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
     save_depth_layer_requested = pyqtSignal(list, float)  # 存为图层（line_ids, cell_size_m）
 
     _PANEL_STATE_PREFIX = 'spatial'
+    _AUTO_COLLAPSE_ORDER = ('right', 'left')
 
     def __init__(self, parent=None):
         super().__init__(parent)

@@ -1418,12 +1418,20 @@
         "default": 4,
         "min": 1,
         "max": 4,
-        "label": "最长插补段（道）"
+        "label": "最长插补段（道）",
+        "advanced": true,
+        "enabled_when": {
+          "mode": "interpolate"
+        }
       },
       "time_windows_ns": {
         "type": "str",
         "default": "",
         "label": "手动时窗 ns（仅手动）",
+        "advanced": true,
+        "visible_when": {
+          "window_mode": "manual"
+        },
         "tooltip": "仅手动方案生效，如0:100;100:200;250:850。自动方案无需填写；窗须独立，单窗只作局部审阅。"
       }
     },
