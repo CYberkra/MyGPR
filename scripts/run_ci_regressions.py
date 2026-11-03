@@ -33,6 +33,8 @@ SUITES = {
         "tests/test_processing_page_v2.py",
         "tests/test_processing_workspace_flow.py",
         "tests/test_processing_async_identity.py",
+        "tests/test_component_contracts.py",
+        "tests/test_design_tokens.py",
         "tests/test_param_form.py",
         "tests/test_manual_gain_editor.py",
         "tests/test_manual_gain_live_preview.py",

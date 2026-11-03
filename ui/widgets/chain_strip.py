@@ -146,7 +146,7 @@ class _Chip(QWidget):
         """状态点走语义令牌（2026-10-09）：原硬编码 #7CC464/#5A5A56 不随
         主题，绿色也不在设计令牌里（跳色纪律）。
 
-        hover 不再发明第二个绿：细描边环提示可点（18px 小目标的反馈由
+        hover 不再发明第二个绿：细描边环提示可点（小目标的反馈由
         光标 + 邻近 chip 的 hover 描边共同承担）。
         """
         from ui.design_tokens import color
@@ -334,7 +334,7 @@ class ChainStrip(QWidget):
             lambda _value: self._overlay_timer.start(0))
 
         self._add_btn = ToolButton(FIF.ADD, self)
-        self._add_btn.setFixedSize(24, 24)
+        self._add_btn.setFixedSize(*constants.TOOL_BTN_SIZE)
         self._add_btn.setToolTip('添加处理步骤（弹出方法选择器，双击加入链尾）')
         self._add_btn.setAccessibleName('添加处理步骤')
         self._add_btn.clicked.connect(self.sig_add_requested)
@@ -391,6 +391,9 @@ class ChainStrip(QWidget):
     def set_run_button_visible(self, visible: bool) -> None:
         """Hosts with a shared header action can reclaim the strip's button space."""
         self._run_btn.setVisible(visible)
+
+    def set_empty_hint(self, text: str) -> None:
+        self._empty_hint.setText(str(text))
 
     def step_anchor(self, index: int):
         """Return the current rendered chip for the host's parameter popup."""

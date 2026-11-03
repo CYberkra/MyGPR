@@ -7,7 +7,7 @@
 
 - **统一的头**：标题 + 右上角收起钮（唯一开关）；`set_header_widget()` 允许
   用自定义控件替换标题（右坞放"日志/任务"页签）；
-- **统一的收起态**：18px 细条 + 竖排内容指示（子类经 ``strip_text()``
+- **统一的收起态**：32px 细条 + 竖排内容指示（子类经 ``strip_text()``
   提供，如右坞当前页签名；返回空串则不显示文字，如文件树细条）+ 展开钮；
 - **统一的动画**：QVariantAnimation + OutCubic 220ms，走
   ``ui.motion.animations_enabled()`` 无障碍总闸；
@@ -74,7 +74,8 @@ class DockPanel(QWidget):
         self._collapse_btn = TransparentToolButton(FIF.LEFT_ARROW, header)
         self._collapse_btn.setIconSize(QSize(*constants.TOOL_BTN_ICON))
         self._collapse_btn.setToolTip('收起为细条（点击细条可展开）')
-        self._collapse_btn.setFixedSize(24, 24)
+        self._collapse_btn.setFixedSize(*constants.TOOL_BTN_SIZE)
+        self._collapse_btn.setAccessibleName('收起面板')
         self._collapse_btn.clicked.connect(self._on_toggle_clicked)
         self._head_layout.addWidget(self._collapse_btn)
         exp_layout.addWidget(header)
@@ -88,7 +89,7 @@ class DockPanel(QWidget):
         # ---------------- 细条态视图（展开钮 + 竖排指示）
         self._strip_view = QWidget(self)
         # 整条可点：兑现收起钮 tooltip 的「点击细条可展开」承诺，命中
-        # 区域从 18×24 的 chevron 扩到整条（18px 宽 × 全高）。手型光标
+        # 区域从紧凑 chevron 扩到整条。手型光标
         # 提示可点；chevron 按钮自身接收点击，不经过滤器、不会双重触发
         self._strip_view.setCursor(Qt.CursorShape.PointingHandCursor)
         self._strip_view.installEventFilter(self)
@@ -98,7 +99,8 @@ class DockPanel(QWidget):
         self._expand_btn = TransparentToolButton(FIF.CHEVRON_RIGHT, self._strip_view)
         self._expand_btn.setIconSize(QSize(*constants.TOOL_BTN_ICON))
         self._expand_btn.setToolTip('展开面板')
-        self._expand_btn.setFixedSize(18, 24)
+        self._expand_btn.setFixedSize(*constants.TOOL_BTN_COMPACT)
+        self._expand_btn.setAccessibleName('展开面板')
         self._expand_btn.clicked.connect(self._on_toggle_clicked)
         strip_layout.addWidget(self._expand_btn, 0, Qt.AlignmentFlag.AlignHCenter)
         self._strip_line_label = QLabel('')

@@ -122,7 +122,7 @@ class FileTreePanel(DockPanel):
     delivery_focus_requested = pyqtSignal(str)
 
     def __init__(self, parent=None) -> None:
-        super().__init__('项目资源', constants.SIDE_TOOL_WIDTH, parent)
+        super().__init__('项目资源', constants.FILE_TREE_PANEL_WIDTH, parent)
         self._lines: list = []
         self.rename_allowed = lambda:False
         self._rename_shortcut = QShortcut(QKeySequence('F2'), self,
@@ -189,7 +189,7 @@ class FileTreePanel(DockPanel):
             shortcut.activated.connect(self._on_keyboard_context)
             self._menu_shortcuts.append(shortcut)
         self._more_btn = TransparentToolButton(FIF.MORE, self)
-        self._more_btn.setFixedSize(24, 24)
+        self._more_btn.setFixedSize(*constants.TOOL_BTN_SIZE)
         self._more_btn.setIconSize(QSize(*constants.TOOL_BTN_ICON))
         self._more_btn.setToolTip('项目资源操作（Shift+F10）')
         self._more_btn.setAccessibleName('项目资源操作')

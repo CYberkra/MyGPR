@@ -37,6 +37,7 @@ _BLUE = {
 _LIGHT: dict[str, str] = {
     # 背景
     'bg_surface': '#ffffff',
+    'surface_card': '#ffffff',
     'bg_subtle': '#f5f7fa',
     'bg_muted': '#edf1f6',
     'plot_background': '#fbfcfe',
@@ -61,6 +62,7 @@ _LIGHT: dict[str, str] = {
 
 _DARK: dict[str, str] = {
     'bg_surface': '#20242b',
+    'surface_card': '#2d2e32',
     'bg_subtle': '#282d35',
     'bg_muted': '#323a45',
     'plot_background': '#191d24',

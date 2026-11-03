@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (QHBoxLayout, QListWidgetItem, QVBoxLayout, QWidget)
 from qfluentwidgets import CaptionLabel, CardWidget, ScrollArea, SubtitleLabel
 
 from ui import constants
+from ui.design_tokens import color
 from ui.theme_helpers import hint_qss, ui_font
 
 __all__ = [
@@ -30,9 +31,8 @@ __all__ = [
     'refill_combo', 'rebuild_check_list', 'PanelStateMixin',
 ]
 
-# 折叠态侧栏宽度：折叠后只留折叠按钮的贴边长条（CollapsiblePanel 默认同值，
-# 各页此前6 处显式传 40 —— 收敛到本常量）。
-SIDE_COLLAPSE_WIDTH = 40
+# 折叠态侧栏与全局 Dock 使用同一宽度和命中区。
+SIDE_COLLAPSE_WIDTH = constants.DOCK_COLLAPSED_WIDTH
 
 
 # ---------------------------------------------------------------- 卡片
@@ -54,13 +54,8 @@ def make_card(title: str = '', *, parent=None, header_action: QWidget | None = N
     重复标题。``header_action`` 仍可独立形成右侧工具行。
     """
     card = CardWidget(parent)
-    # 美术打磨 C（2026-09-27）：CardWidget 深色主题下实测渲染白底，
-    # 与深色主区割裂（真平台截图）——显式主题底色：深 #2d2e32 /
-    # 浅 #ffffff，双主题卡片层次一致
-    from qfluentwidgets import isDarkTheme
     from PyQt6.QtGui import QColor
-    card.setBackgroundColor(
-        QColor('#2d2e32') if isDarkTheme() else QColor('#ffffff'))
+    card.setBackgroundColor(QColor(color('surface_card')))
     layout = QVBoxLayout(card)
     layout.setContentsMargins(*constants.CARD_MARGINS)
     layout.setSpacing(constants.CARD_SPACING)

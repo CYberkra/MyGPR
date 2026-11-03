@@ -17,7 +17,7 @@ from qfluentwidgets import FluentIcon as FIF, PushButton, themeColor
 
 from ui import motion
 
-_EXPAND_BUTTON_WIDTH = 16
+_EXPAND_BUTTON_WIDTH = 20
 
 
 def chevron_left_icon() -> QIcon:
@@ -53,7 +53,7 @@ class CollapsiblePanel(QWidget):
     sig_collapsed = pyqtSignal(bool)
 
     def __init__(self, side: str = 'right', expand_width: int = 400,
-                 collapse_width: int = 40, parent=None):
+                 collapse_width: int = 32, parent=None):
         super().__init__(parent)
         self._side = side if side in ('left', 'right') else 'right'
         self._expand_width = int(expand_width)
@@ -77,6 +77,7 @@ class CollapsiblePanel(QWidget):
         self._collapse_btn.setSizePolicy(
             QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
         self._collapse_btn.setStyleSheet(collapse_button_qss())
+        self._collapse_btn.setAccessibleName('收起面板')
         self._collapse_btn.clicked.connect(self.toggle)
         self._update_button_icon()
 
@@ -207,3 +208,4 @@ class CollapsiblePanel(QWidget):
                 else FIF.CHEVRON_RIGHT_MED.icon()
         self._collapse_btn.setIcon(icon)
         self._collapse_btn.setToolTip('展开面板' if self._collapsed else '收起面板')
+        self._collapse_btn.setAccessibleName('展开面板' if self._collapsed else '收起面板')

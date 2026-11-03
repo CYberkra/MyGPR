@@ -30,7 +30,7 @@ FOLD_BUTTON_WIDTH = 18
 FOLD_BUTTON_HEIGHT = 60
 
 # 左侧常驻文件树面板（主窗口 widgetLayout 内容区首位插入，顶部页签条之下全高）
-FILE_TREE_PANEL_WIDTH = 232
+FILE_TREE_PANEL_WIDTH = 320
 FILE_TREE_HEADER_HEIGHT = 44
 
 # 底部输出面板（OutputPanel：日志/任务，横贯页面区下方）
@@ -38,7 +38,7 @@ OUTPUT_PANEL_HEIGHT = 160
 OUTPUT_PANEL_HEADER_HEIGHT = 34
 
 # DockPanel 统一细条宽度（左右坞共用；FILE_TREE_COLLAPSED_WIDTH 保留别名）
-DOCK_COLLAPSED_WIDTH = 18
+DOCK_COLLAPSED_WIDTH = 32
 FILE_TREE_COLLAPSED_WIDTH = DOCK_COLLAPSED_WIDTH
 
 # ---------------------------------------------------------------- 字体 / 间距
@@ -78,8 +78,8 @@ PANEL_MARGINS = (SPACE_2,) * 2 + (SPACE_2,) * 2  # 8（原 6）
 # 宽度随内容；纯图标钮用方形 TOOL_BTN_SIZE。
 TOOL_BTN_ICON_SIZE = 14          # 图标像素边长（工具铃/折叠钮共用）
 TOOL_BTN_ICON = (TOOL_BTN_ICON_SIZE, TOOL_BTN_ICON_SIZE)   # QSize 形参用
-TOOL_BTN_SIZE = (28, 28)         # 方形图标钮 (w, h)
-TOOL_BTN_COMPACT = (28, 24)      # 窄条内图标钮（垂直空间紧张时）
+TOOL_BTN_SIZE = (36, 36)         # 方形图标钮 (w, h)
+TOOL_BTN_COMPACT = (32, 32)      # 窄条内图标钮（垂直空间紧张时）
 BTN_HEIGHT = 28                  # 带文字按钮的保底高度
 
 # ---------------------------------------------------------------- 页面骨架（布局统一轮）

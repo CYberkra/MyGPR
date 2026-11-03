@@ -33,6 +33,7 @@ from PyQt6.QtWidgets import (QFrame, QGraphicsOpacityEffect,
 from qfluentwidgets import (CaptionLabel, FluentIcon as FIF, SegmentedWidget,
                             SwitchButton, ToolButton)
 
+from ui import constants
 from ui.widgets.bscan_view import BScanView
 from ui.widgets.empty_state import EmptyStateOverlay
 
@@ -182,19 +183,19 @@ class _ResultCard(QFrame):
         head.addWidget(self.range_label)
         head.addStretch(1)
         self.expand_btn = ToolButton(FIF.FULL_SCREEN, self)
-        self.expand_btn.setFixedSize(24, 24)
+        self.expand_btn.setFixedSize(*constants.TOOL_BTN_COMPACT)
         self.expand_btn.setToolTip('放大 / 全屏浏览该结果')
         self.expand_btn.clicked.connect(
             lambda: self.sig_expand_requested.emit(self.key))
         head.addWidget(self.expand_btn)
         self.compare_btn = ToolButton(FIF.VIEW, self)
-        self.compare_btn.setFixedSize(24, 24)
+        self.compare_btn.setFixedSize(*constants.TOOL_BTN_COMPACT)
         self.compare_btn.setToolTip('与上一张结果并排对比')
         self.compare_btn.clicked.connect(
             lambda: self.sig_compare_requested.emit(self.key))
         head.addWidget(self.compare_btn)
         self.close_btn = ToolButton(FIF.CLOSE, self)
-        self.close_btn.setFixedSize(24, 24)
+        self.close_btn.setFixedSize(*constants.TOOL_BTN_COMPACT)
         self.close_btn.setToolTip('关闭该 B-Scan 窗口（重跑后恢复）')
         self.close_btn.clicked.connect(
             lambda: self.sig_close_requested.emit(self.key))

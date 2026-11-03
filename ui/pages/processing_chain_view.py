@@ -23,7 +23,7 @@ class ProcessingChainView:
         self._chain_input = CaptionLabel('输入：未选择 →', self._chain_panel)
         self._chain_input.hide()  # The compact header already identifies the active input.
         self._chain_strip.set_run_button_visible(False)
-        self._chain_strip._empty_hint.setText('＋ 添加处理步骤')
+        self._chain_strip.set_empty_hint('＋ 添加处理步骤')
         row.addWidget(self._chain_strip, 1)
         row.addWidget(self._draft_menu_btn)
         layout.addWidget(self._chain_panel)
