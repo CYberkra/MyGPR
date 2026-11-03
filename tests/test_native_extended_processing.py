@@ -7,6 +7,7 @@ import hashlib
 
 import numpy as np
 import pytest
+from scipy.signal import hilbert
 
 from core.methods_registry import HAS_PYWAVELETS, PROCESSING_METHODS, is_public_method
 from mygpr.domain.processing.models import ProcessingRequest
@@ -80,15 +81,7 @@ CASES = {
     "hilbert_envelope": (
         {"normalize": True, "log_compress": True},
         (72, 29),
-        # FFT（scipy.signal.hilbert）在不同平台 BLAS 下末位浮点有差异，
-        # float32 舍入后字节摘要不同；首个摘要是 Linux CI 的基准，
-        # 其余是已登记的平台等价摘要（Windows / Linux py3.12），
-        # 列表之外的任何摘要仍失败。
-        (
-            "8679b6f07793a70deff673d373874d4290d6fb57ff2a56b001aa55afb936f1e4",
-            "14a9c4194c71b8d8bf59f1d2da0d15c9fae31ae1a26d4eec2378516957bca150",
-            "dcee79c7e0c77b22b6ac6846dd6f30b031af68e9fcc3fa04e33150688cf31e37",
-        ),
+        None,
     ),
     "ccbs": (
         {},
@@ -126,12 +119,21 @@ def test_extended_native_golden_regression(method_id: str):
     assert result.data.shape == expected_shape
     assert result.data.dtype == np.float32
     assert np.isfinite(result.data).all()
-    digest = hashlib.sha256(np.ascontiguousarray(result.data).tobytes()).hexdigest()
-    assert digest in expected_digests, (
-        f"{method_id}: unexpected golden digest {digest!r} "
-        f"(expected one of {expected_digests}); if a platform digest was "
-        "rebaselined deliberately, register it in CASES."
-    )
+    if method_id == "hilbert_envelope":
+        expected = np.abs(hilbert(data, axis=0))
+        if params["normalize"]:
+            expected = expected / max(float(np.max(expected)), 1e-8)
+        if params["log_compress"]:
+            expected = np.log1p(expected)
+        expected = expected.astype(np.float32)
+        np.testing.assert_allclose(result.data, expected, rtol=1e-6, atol=1e-6)
+    else:
+        digest = hashlib.sha256(np.ascontiguousarray(result.data).tobytes()).hexdigest()
+        assert digest in expected_digests, (
+            f"{method_id}: unexpected golden digest {digest!r} "
+            f"(expected one of {expected_digests}); if a platform digest was "
+            "rebaselined deliberately, register it in CASES."
+        )
     assert result.metadata["implementation_version"] == "native-extended-1.0"
 
 
