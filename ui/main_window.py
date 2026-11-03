@@ -790,9 +790,10 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
         if self.output_panel is not None:
             self.output_panel.append_log(msg)
 
-    def _apply_theme_to_widget(self, widget, dark: bool) -> None:
+    @staticmethod
+    def _apply_theme_to_widget(widget, dark: bool, output_panel=None) -> None:
         """Apply one theme pass without also repainting the workspace's children."""
-        if widget is self.output_panel:
+        if widget is output_panel:
             return
         apply_fn = getattr(widget, 'apply_theme', None)
         if not callable(apply_fn):
@@ -814,7 +815,7 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
             self.output_panel.apply_theme(dark)
         self._apply_top_nav_style()
         for widget in self.findChildren(QWidget):
-            self._apply_theme_to_widget(widget, dark)
+            self._apply_theme_to_widget(widget, dark, output_panel=self.output_panel)
         self.update()
         # 设置页主题 ComboBox 回写（blockSignals 防循环）
         settings_page = self._page('settingsInterface')
