@@ -124,7 +124,7 @@ class _ViewGroup(QWidget):
         self.view = BScanView(self)
         self.view.set_title_visible(False)
         self.display_settings.clicked.connect(self.view.sig_display_settings_requested.emit)
-        self.fit_view.clicked.connect(self.view.fit_to_data)
+        self.fit_view.clicked.connect(lambda: self.view.fit_to_data())
         layout = QVBoxLayout(self)
         layout.setContentsMargins(1, 1, 1, 1)
         layout.setSpacing(0)
