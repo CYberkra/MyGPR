@@ -316,6 +316,7 @@ def test_details_open_only_on_demand(picker, qapp):
 def test_enter_adds_current_method(picker, qapp):
     got = []
     picker.sig_method_chosen.connect(got.append)
+    picker.show()
     item = picker._browser._tree.topLevelItem(0).child(0)
     picker._browser._tree.setCurrentItem(item)
     qapp.processEvents()
