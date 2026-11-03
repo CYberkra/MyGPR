@@ -21,7 +21,7 @@ from ui.file_tree import artifact_parameters, artifact_direct_parent, artifact_s
 from ui.file_tree import build_lineage_model as build_lineage_model  # explicit re-export
 from ui.motion import animate_progress, animations_enabled
 from ui.page_scaffold import make_form_row, refill_combo
-from ui.widgets import ParamForm, PipelineList, clear_invalid, make_separator
+from ui.widgets import ParamForm, PipelineList, clear_invalid
 from ui.widgets.bscan_workspace import BScanWorkspace
 from ui.widgets.collapsible_card import make_collapsible_card
 from ui.widgets.object_context_menu import ObjectMenuBinding
@@ -147,7 +147,7 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
         self._lineage_tree.setMaximumHeight(160)
         self._lineage_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         sources_header = QHBoxLayout()
-        sources_header.addWidget(CaptionLabel('数据来源与分支', chain_page), 1)
+        sources_header.addStretch(1)
         self._lineage_more_btn = TransparentToolButton(FIF.MORE, chain_page)
         self._lineage_more_btn.setToolTip('来源操作')
         self._lineage_more_btn.setAccessibleName('来源操作')
@@ -161,8 +161,6 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
         self._pipeline_list.hide()  # Internal step model; the editable chain is its only visible list.
         self._add_method_btn = PushButton('添加处理步骤', chain_page, FIF.ADD)
         self._add_method_btn.hide()  # Compatibility command; the visible append action is in the chain.
-        chain_layout.addWidget(make_separator())
-        chain_layout.addWidget(CaptionLabel('参数与调参', chain_page))
         self._param_empty_hint = CaptionLabel('未选择处理步骤', chain_page)
         self._param_empty_hint.setWordWrap(True)
         chain_layout.addWidget(self._param_empty_hint)
@@ -171,7 +169,7 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
         self._result_name_edit = LineEdit(chain_page)
         self._result_name_edit.setPlaceholderText('可选，留空自动命名')
         chain_layout.addLayout(make_form_row('结果名称', self._result_name_edit, parent=chain_page))
-        self._execution_card, execution = make_collapsible_card('执行与资源', collapsed=False)
+        self._execution_card, execution = make_collapsible_card('执行与资源', collapsed=True)
         self._save_intermediates_check = CheckBox('保存每步中间成果', self._execution_card)
         self._save_intermediates_check.setChecked(True)
         self._save_intermediates_check.setToolTip('默认保存并逐步展示每个处理结果；大测线可关闭以优先分块和降低资源占用')
@@ -200,18 +198,6 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         scroll.setWidget(chain_page)
         self._tools_panel.addTab(scroll, '处理')
-        display = QWidget()
-        dl = QVBoxLayout(display)
-        self._display_settings_btn = PushButton('全局显示设置…', display)
-        self._display_settings_btn.clicked.connect(
-            lambda: self._workspace.primary_view().sig_display_settings_requested.emit())
-        dl.addWidget(self._display_settings_btn)
-        fit = PushButton('适应当前视图', display)
-        fit.setToolTip('回到全览；右键可框选、调整时窗或导出，显示偏好集中在设置页。')
-        fit.clicked.connect(lambda: self._workspace.primary_view().fit_to_data())
-        dl.addWidget(fit)
-        dl.addStretch(1)
-        self._tools_panel.addTab(display, '显示')
         history_page = QWidget()
         history_layout = QVBoxLayout(history_page)
         history_layout.setContentsMargins(8, 8, 8, 8)
@@ -238,6 +224,23 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
         self._draft_revision_hint = CaptionLabel('', center)
         self._draft_revision_hint.setWordWrap(True)
         main.addWidget(self._draft_revision_hint)
+        view_actions = QHBoxLayout()
+        view_actions.setContentsMargins(0, 0, 0, 0)
+        view_actions.addStretch(1)
+        self._display_settings_btn = TransparentToolButton(FIF.SETTING, center)
+        self._display_settings_btn.setFixedSize(*constants.TOOL_BTN_SIZE)
+        self._display_settings_btn.setToolTip('全局显示设置')
+        self._display_settings_btn.setAccessibleName('全局显示设置')
+        self._display_settings_btn.clicked.connect(
+            lambda: self._workspace.primary_view().sig_display_settings_requested.emit())
+        view_actions.addWidget(self._display_settings_btn)
+        self._fit_view_btn = TransparentToolButton(FIF.ZOOM, center)
+        self._fit_view_btn.setFixedSize(*constants.TOOL_BTN_SIZE)
+        self._fit_view_btn.setToolTip('适应当前视图')
+        self._fit_view_btn.setAccessibleName('适应当前视图')
+        self._fit_view_btn.clicked.connect(lambda: self._workspace.primary_view().fit_to_data())
+        view_actions.addWidget(self._fit_view_btn)
+        main.addLayout(view_actions)
         self._workspace = BScanWorkspace(center)
         self._bscan_container = self._workspace
         main.addWidget(self._workspace, 1)
