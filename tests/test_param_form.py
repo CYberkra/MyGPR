@@ -83,12 +83,8 @@ class TestParamFormTypes:
     def test_controls_use_consistent_comfortable_metrics(self, qapp):
         form = _make_form(_SCHEMA[:4])
         assert form._layout.spacing() == 8
-        heights = {
-            name: (type(editor).__name__, editor.minimumHeight(),
-                   editor.maximumHeight(), editor.height())
-            for name, editor in form._editors.items()
-        }
-        assert all(height[1] >= 34 for height in heights.values()), heights
+        heights = {name: editor.height() for name, editor in form._editors.items()}
+        assert all(height >= 34 for height in heights.values()), heights
 
 
 class TestParamFormFallback:
