@@ -56,9 +56,9 @@ class TestPickerWindowContract:
     def test_set_methods_forwards_to_browser(self, picker):
         assert len(picker._browser._methods) == 2
         assert picker._count_label.text() == '2 个方法'
-        assert picker._title_label.text() == '添加处理步骤'
-        assert '双击添加' in picker._hint_label.text()
-        assert picker.minimumWidth() >= 520
+        assert picker._close_btn.toolTip() == '关闭（Esc）'
+        assert picker._add_selected_btn.text() == '添加'
+        assert picker.minimumWidth() >= 480
 
     def test_reset_state_clears_search(self, picker):
         picker._browser._search.setText('agc')
@@ -299,3 +299,47 @@ class TestPagePickerWiring:
             assert done == [(0, 'agc')]
         finally:
             page.close()
+
+
+
+def test_details_open_only_on_demand(picker, qapp):
+    item = picker._browser._tree.topLevelItem(0).child(0)
+    picker._browser._tree.setCurrentItem(item)
+    qapp.processEvents()
+    assert picker._description_label.isHidden()
+    picker._details_btn.click()
+    assert picker._description_label.isVisibleTo(picker)
+    picker.reset_state()
+    assert picker._description_label.isHidden()
+
+
+def test_enter_adds_current_method(picker, qapp):
+    got = []
+    picker.sig_method_chosen.connect(got.append)
+    item = picker._browser._tree.topLevelItem(0).child(0)
+    picker._browser._tree.setCurrentItem(item)
+    qapp.processEvents()
+    event = QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Return,
+                      Qt.KeyboardModifier.NoModifier)
+    picker.keyPressEvent(event)
+    assert got == ['dewow']
+    assert picker.isVisible()
+
+
+def test_anchor_popup_stays_inside_available_screen(qapp):
+    from PyQt6.QtWidgets import QWidget
+
+    anchor = QWidget()
+    anchor.resize(40, 36)
+    available = anchor.screen().availableGeometry()
+    anchor.move(available.right() - 40, available.bottom() - 36)
+    anchor.show()
+    picker = MethodPickerDialog(anchor=anchor)
+    picker.set_methods(_methods())
+    picker.show()
+    qapp.processEvents()
+    assert available.contains(picker.geometry())
+    picker.close()
+    picker.deleteLater()
+    anchor.close()
+    anchor.deleteLater()

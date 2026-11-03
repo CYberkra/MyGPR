@@ -13,16 +13,14 @@ Qt.WindowType.Tool，不进任务栏、随主窗），内联于处理页（paren
 本窗后代——窗内控件互相切换（搜索框 → 树）焦点仍是本窗后代，不误关；
 点到窗外则 200ms 复核一次再关（真机焦点移交有一拍延迟）。
 """
-from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QEasingCurve, QPoint, QPropertyAnimation, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QApplication, QDialog, QHBoxLayout, QVBoxLayout, QWidget
-from qfluentwidgets import (BodyLabel, CaptionLabel, PrimaryPushButton,
-                            SubtitleLabel, isDarkTheme)
+from qfluentwidgets import BodyLabel, CaptionLabel, PrimaryPushButton, ToolButton, isDarkTheme
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import design_tokens, motion
 from ui.widgets.method_browser import MethodBrowser
-from ui.widgets.separators import make_h_separator
 
 # 外部点击关闭的复核延迟（ms）：焦点移交到外部控件有一拍延迟，
 # 立即判定会把「点开 colorbox 子菜单」这类窗内操作误判为失焦
@@ -34,63 +32,64 @@ class MethodPickerDialog(QDialog):
 
     sig_method_chosen = pyqtSignal(str)   # method_id（双击条目）
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None, anchor: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._anchor = anchor
         self.setWindowTitle('添加处理步骤')
         self.setObjectName('methodPickerDialog')
         self.setModal(False)
         self.setWindowFlag(Qt.WindowType.Tool)
-        self.setMinimumSize(600, 560)
-        self.resize(700, 660)
+        self.setMinimumSize(480, 420)
+        self.resize(520, 520)
         self._methods_by_id = {}
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 22, 24, 20)
-        layout.setSpacing(12)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
         header = QHBoxLayout()
-        header.setSpacing(12)
-        self._title_label = SubtitleLabel('添加处理步骤', self)
+        header.setSpacing(8)
         self._count_label = CaptionLabel('', self)
         self._count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._count_label.setFixedHeight(24)
-        header.addWidget(self._title_label, 1)
+        self._close_btn = ToolButton(FIF.CLOSE, self)
+        self._close_btn.setToolTip('关闭（Esc）')
+        self._close_btn.setAccessibleName('关闭算法库')
+        self._close_btn.clicked.connect(self.close)
+        header.addStretch(1)
         header.addWidget(self._count_label)
+        header.addWidget(self._close_btn)
         layout.addLayout(header)
-        description = BodyLabel('按用途查找算法，加入当前处理链。', self)
-        description.setWordWrap(True)
-        layout.addWidget(description)
-        layout.addSpacing(2)
+
         self._browser = MethodBrowser(self)
         self._browser.sig_add_requested.connect(self._on_add_requested)
         self._browser.sig_method_selected.connect(self._on_selection_changed)
         layout.addWidget(self._browser, 1)
-        layout.addSpacing(2)
-        layout.addWidget(make_h_separator(alpha=60))
 
-        details = QVBoxLayout()
-        details.setSpacing(3)
-        self._selected_name_label = BodyLabel('选择一个算法', self)
+        self._selected_name_label = BodyLabel('未选择', self)
         name_font = self._selected_name_label.font()
         name_font.setWeight(QFont.Weight.DemiBold)
         self._selected_name_label.setFont(name_font)
-        self._description_label = CaptionLabel('从上方列表选择后，可查看算法用途并添加。', self)
+        self._description_label = CaptionLabel('', self)
         self._description_label.setWordWrap(True)
-        self._description_label.setMaximumHeight(40)
-        details.addWidget(self._selected_name_label)
-        details.addWidget(self._description_label)
-        layout.addLayout(details)
+        self._description_label.setMaximumHeight(60)
+        self._description_label.hide()
 
-        footer = QHBoxLayout()
-        footer.setSpacing(12)
-        self._hint_label = CaptionLabel('双击添加 · 可连续选择 · Esc 关闭', self)
-        self._hint_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        footer.addWidget(self._hint_label, 1)
-        self._add_selected_btn = PrimaryPushButton('添加所选方法', self, FIF.ADD)
-        self._add_selected_btn.setFixedSize(132, 36)
+        self._details_btn = ToolButton(FIF.INFO, self)
+        self._details_btn.setCheckable(True)
+        self._details_btn.setToolTip('查看／隐藏算法用途')
+        self._details_btn.setAccessibleName('查看算法用途')
+        self._details_btn.toggled.connect(self._sync_details_visibility)
+        self._add_selected_btn = PrimaryPushButton('添加', self, FIF.ADD)
+        self._add_selected_btn.setFixedSize(96, 36)
         self._add_selected_btn.setEnabled(False)
         self._add_selected_btn.clicked.connect(self._add_current_method)
+        footer = QHBoxLayout()
+        footer.setSpacing(8)
+        footer.addWidget(self._selected_name_label, 1)
+        footer.addWidget(self._details_btn)
         footer.addWidget(self._add_selected_btn)
         layout.addLayout(footer)
+        layout.addWidget(self._description_label)
 
         self._focus_timer = QTimer(self)
         self._focus_timer.setSingleShot(True)
@@ -115,9 +114,13 @@ class MethodPickerDialog(QDialog):
 
     # ------------------------------------------------------------ 复位
     def reset_state(self) -> None:
-        """搜索词清空 + 选中复位：树经 _apply_filter('') 回到全展开全可见。"""
+        """清空搜索与选择，仅展开第一组并收起算法详情。"""
         self._browser._search.clear()
         self._browser._tree.setCurrentItem(None)
+        for index in range(self._browser._tree.topLevelItemCount()):
+            self._browser._tree.topLevelItem(index).setExpanded(index == 0)
+        self._details_btn.setChecked(False)
+        self._description_label.hide()
         self._on_selection_changed(None)
 
     # ------------------------------------------------------------ 信号
@@ -129,8 +132,8 @@ class MethodPickerDialog(QDialog):
     def _on_selection_changed(self, method_id) -> None:
         method = self._methods_by_id.get(str(method_id or ''))
         if method is None:
-            self._selected_name_label.setText('选择一个算法')
-            self._description_label.setText('从上方列表选择后，可查看算法用途并添加。')
+            self._selected_name_label.setText('未选择')
+            self._description_label.setText('')
             self._description_label.setToolTip('')
             self._add_selected_btn.setEnabled(False)
             return
@@ -140,17 +143,36 @@ class MethodPickerDialog(QDialog):
         self._description_label.setText(description)
         self._description_label.setToolTip(description)
         self._add_selected_btn.setEnabled(True)
+        self._sync_details_visibility()
+
+    def _sync_details_visibility(self) -> None:
+        self._description_label.setVisible(
+            self._details_btn.isChecked() and bool(self._description_label.text()))
 
     def _add_current_method(self) -> None:
         method_id = self._browser.current_method_id()
         if method_id:
             self._on_add_requested(method_id)
 
+    def _position_near_anchor(self) -> None:
+        if self._anchor is None or not self._anchor.isVisible():
+            return
+        available = self._anchor.screen().availableGeometry()
+        below = self._anchor.mapToGlobal(QPoint(0, self._anchor.height() + 6)).y()
+        y = below if below + self.height() <= available.bottom() else \
+            self._anchor.mapToGlobal(QPoint(0, -self.height() - 6)).y()
+        x = self._anchor.mapToGlobal(QPoint(self._anchor.width() - self.width(), 0)).x()
+        x = max(available.left(), min(x, available.right() - self.width()))
+        y = max(available.top(), min(y, available.bottom() - self.height()))
+        self.move(x, y)
+
     # ------------------------------------------------------------ 事件
     def showEvent(self, event) -> None:  # noqa: N802 - Qt 命名
         """每次显示复位状态：关闭再开 = 全新浏览态（PRD 验收④）。"""
         self.reset_state()
         super().showEvent(event)
+        self._position_near_anchor()
+        self._browser._search.setFocus()
         self._geometry_animation.stop()
         self._opacity_animation.stop()
         if motion.animations_enabled():
@@ -168,6 +190,13 @@ class MethodPickerDialog(QDialog):
     def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt 命名
         if event.key() == Qt.Key.Key_Escape:
             self.close()
+            return
+        if event.key() == Qt.Key.Key_F and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            self._browser._search.setFocus()
+            self._browser._search.selectAll()
+            return
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self._add_current_method()
             return
         super().keyPressEvent(event)
 

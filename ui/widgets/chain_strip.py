@@ -388,6 +388,10 @@ class ChainStrip(QWidget):
         """运行钮：由宿主页接线（Ctrl+R 与此处同一入口）。"""
         return self._run_btn
 
+    def add_button(self):
+        """加号按钮：算法选择器的锚定控件。"""
+        return self._add_btn
+
     def set_run_button_visible(self, visible: bool) -> None:
         """Hosts with a shared header action can reclaim the strip's button space."""
         self._run_btn.setVisible(visible)
