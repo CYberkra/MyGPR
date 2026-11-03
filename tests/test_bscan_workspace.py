@@ -11,7 +11,7 @@ pytest.importorskip('PyQt6')
 
 from PyQt6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, Qt
 from PyQt6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent, QKeyEvent
-from PyQt6.QtTest import QTest
+from PyQt6.QtTest import QTest, QSignalSpy
 from PyQt6.QtWidgets import QApplication, QLineEdit, QSplitter, QTabBar, QVBoxLayout, QWidget
 
 from ui.widgets.bscan_workspace import BScanWorkspace
@@ -378,6 +378,26 @@ def test_clicking_inactive_group_selects_only_clicked_tab_and_more_never_activat
     assert workspace.active_key() == 'raw'
     assert activated == ['raw']
     assert workspace.tab_keys(second) == ['B']
+
+
+def test_split_group_display_and_fit_buttons_target_only_their_own_view(workspace, monkeypatch):
+    workspace.set_sources(sources('A', 'B'))
+    workspace.open_source('A')
+    workspace.open_source('B')
+    first = workspace.group_ids()[0]
+    second = workspace.split_source('B', 'right')
+    first_group, second_group = workspace.group_widget(first), workspace.group_widget(second)
+    fits = {first: [], second: []}
+    monkeypatch.setattr(first_group.view, 'fit_to_data', lambda: fits[first].append(1))
+    monkeypatch.setattr(second_group.view, 'fit_to_data', lambda: fits[second].append(1))
+    second_group.fit_view.click()
+    assert fits[second] == [1]
+    assert fits[first] == []
+    first_spy = QSignalSpy(first_group.view.sig_display_settings_requested)
+    second_spy = QSignalSpy(second_group.view.sig_display_settings_requested)
+    second_group.display_settings.click()
+    assert len(second_spy) == 1
+    assert len(first_spy) == 0
 
 
 def test_merge_duplicate_source_preserves_pin_from_either_view(workspace):

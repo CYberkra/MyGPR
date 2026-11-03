@@ -21,10 +21,11 @@ from PyQt6.QtWidgets import (
     QApplication, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QSplitter, QTabBar, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
-    FluentIcon as FIF, ProgressBar, PushButton, RoundMenu, Theme, ToolButton, isDarkTheme,
+    FluentIcon as FIF, ProgressBar, PushButton, RoundMenu, Theme, ToolButton,
+    TransparentToolButton, isDarkTheme,
 )
 
-from ui import motion
+from ui import constants, motion
 from ui.design_tokens import color, rgba
 from ui.widgets.fluent_menu_keyboard import FluentMenuKeyboard
 from ui.widgets.bscan_view import BScanView
@@ -105,13 +106,25 @@ class _ViewGroup(QWidget):
         self.more.setFixedSize(28, 28)
         self.more.setToolTip('视图组操作')
         self.more.setAccessibleName('视图组操作')
+        self.display_settings = TransparentToolButton(FIF.SETTING, self)
+        self.display_settings.setFixedSize(*constants.TOOL_BTN_SIZE)
+        self.display_settings.setToolTip('全局显示设置')
+        self.display_settings.setAccessibleName('全局显示设置')
+        self.fit_view = TransparentToolButton(FIF.ZOOM, self)
+        self.fit_view.setFixedSize(*constants.TOOL_BTN_SIZE)
+        self.fit_view.setToolTip('适应当前视图')
+        self.fit_view.setAccessibleName('适应当前视图')
         header = QHBoxLayout()
         header.setContentsMargins(2, 0, 2, 0)
         header.setSpacing(2)
         header.addWidget(self.tabs, 1)
+        header.addWidget(self.display_settings)
+        header.addWidget(self.fit_view)
         header.addWidget(self.more)
         self.view = BScanView(self)
         self.view.set_title_visible(False)
+        self.display_settings.clicked.connect(self.view.sig_display_settings_requested.emit)
+        self.fit_view.clicked.connect(self.view.fit_to_data)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(1, 1, 1, 1)
         layout.setSpacing(0)

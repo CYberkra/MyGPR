@@ -42,24 +42,31 @@ def test_processing_uses_state_text_instead_of_static_tutorials(processing_page)
     assert page._autotune_card.is_collapsed()
 
 
-def test_processing_display_and_fit_buttons_above_workspace(processing_page, monkeypatch):  # noqa: F811
+def test_processing_display_and_fit_buttons_live_in_workspace_tab_bar(processing_page, monkeypatch):  # noqa: F811
     from PyQt6.QtCore import QPoint
     from PyQt6.QtTest import QSignalSpy
 
     page = processing_page
-    workspace_top = page._workspace.mapTo(page, QPoint(0, 0)).y()
-    for button, name in ((page._display_settings_btn, '全局显示设置'),
-                         (page._fit_view_btn, '适应当前视图')):
+    assert not hasattr(page, '_display_settings_btn')
+    assert not hasattr(page, '_fit_view_btn')
+    workspace = page._workspace
+    group = workspace.group_widget()
+    for button, name in ((group.display_settings, '全局显示设置'),
+                         (group.fit_view, '适应当前视图')):
         assert button.isVisible()
         assert button.accessibleName() == name
-        assert button.mapTo(page, QPoint(0, 0)).y() < workspace_top
-    spy = QSignalSpy(page._workspace.primary_view().sig_display_settings_requested)
-    page._display_settings_btn.click()
+        assert workspace.isAncestorOf(button)
+        # Same tab-bar row as the group "more" button, ordered before it.
+        assert button.geometry().center().y() == group.more.geometry().center().y()
+        assert button.mapTo(group, QPoint(0, 0)).x() < group.more.mapTo(group, QPoint(0, 0)).x()
+        # Above the group's B-Scan view, not on a separate page-level row.
+        assert button.mapTo(group, QPoint(0, 0)).y() < group.view.mapTo(group, QPoint(0, 0)).y()
+    spy = QSignalSpy(group.view.sig_display_settings_requested)
+    group.display_settings.click()
     assert len(spy) == 1
     calls = []
-    monkeypatch.setattr(page._workspace.primary_view(), 'fit_to_data',
-                        lambda: calls.append(1))
-    page._fit_view_btn.click()
+    monkeypatch.setattr(group.view, 'fit_to_data', lambda: calls.append(1))
+    group.fit_view.click()
     assert calls == [1]
 
 
