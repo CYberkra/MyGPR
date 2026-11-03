@@ -185,6 +185,7 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
     view_created = pyqtSignal(object)
     layout_changed = pyqtSignal()
     selection_step_requested = pyqtSignal(str, str, str)
+    _theme_refresh_children = True
 
     def __init__(self, parent=None):
         super().__init__(parent)

@@ -790,32 +790,31 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
         if self.output_panel is not None:
             self.output_panel.append_log(msg)
 
-    def _on_theme_changed(self, theme: str) -> None:
-        """主题切换槽：setTheme + 输出面板换肤 + 各 View.apply_theme + 全量重绘。
+    def _apply_theme_to_widget(self, widget, dark: bool) -> None:
+        """Apply one theme pass without also repainting the workspace's children."""
+        if widget is self.output_panel:
+            return
+        apply_fn = getattr(widget, 'apply_theme', None)
+        if not callable(apply_fn):
+            widget.update()
+            return
+        try:
+            if getattr(widget, '_theme_refresh_children', False):
+                apply_fn(dark, refresh_views=False)
+            else:
+                apply_fn(dark)
+        except Exception as e:
+            logger.debug('apply_theme 调用失败: %s', e)
 
-        全窗控件单轮遍历同时完成 update() 与 apply_theme（原两轮 findChildren
-        遍历在视图树大时构成重绘风暴）；页面/视图树运行期基本不变，
-        无缓存列表的需求，单轮已够。
-        """
+    def _on_theme_changed(self, theme: str) -> None:
+        """主题切换槽：全窗控件只应用一次主题，避免工作区与子视图重复重绘。"""
         dark = str(theme) == constants.THEME_DARK
         apply_theme(theme)
-        # qfluentwidgets 1.11 的 CardWidget 等纯 paintEvent 控件在主题切换时
-        # 不会自动触发重绘（浅色底 + 深色文字的"半套主题"问题），这里强制
-        # 全量 update()，保证深浅主题即时、完整地生效。
-        # 日志框换肤：浅深主题都跟随——全宽面板下浅主题配深底大色块过于突兀
         if self.output_panel is not None:
             self.output_panel.apply_theme(dark)
         self._apply_top_nav_style()
-        # 单轮遍历：重绘 + 主题应用一次完成（所有 BScanView/AScanView 等
-        # 鸭子类型实现 apply_theme 的控件；output_panel 已在上文单独换肤）
         for widget in self.findChildren(QWidget):
-            widget.update()
-            apply_fn = getattr(widget, 'apply_theme', None)
-            if callable(apply_fn) and widget is not self.output_panel:
-                try:
-                    apply_fn(dark)
-                except Exception as e:
-                    logger.debug('apply_theme 调用失败: %s', e)
+            self._apply_theme_to_widget(widget, dark)
         self.update()
         # 设置页主题 ComboBox 回写（blockSignals 防循环）
         settings_page = self._page('settingsInterface')

@@ -100,3 +100,51 @@ def test_spatial_priority_collapses_detail_before_layers(qapp):
     assert page._right_panel.is_collapsed()
     assert not page._left_panel.is_collapsed()
     page.deleteLater()
+
+
+def test_theme_dispatch_does_not_refresh_workspace_children_twice(qapp):
+    from ui.main_window import MyGPRMainWindow
+
+    window = object.__new__(MyGPRMainWindow)
+    window.output_panel = None
+
+    class Workspace:
+        _theme_refresh_children = True
+
+        def __init__(self):
+            self.calls = []
+
+        def apply_theme(self, dark, *, refresh_views):
+            self.calls.append((dark, refresh_views))
+
+        def update(self):
+            raise AssertionError('themed widgets must not be updated a second time')
+
+    workspace = Workspace()
+    window._apply_theme_to_widget(workspace, True)
+    assert workspace.calls == [(True, False)]
+
+    class View:
+        def __init__(self):
+            self.calls = []
+
+        def apply_theme(self, dark):
+            self.calls.append(dark)
+
+        def update(self):
+            raise AssertionError('themed widgets must not be updated a second time')
+
+    view = View()
+    window._apply_theme_to_widget(view, False)
+    assert view.calls == [False]
+
+    class Card:
+        def __init__(self):
+            self.updates = 0
+
+        def update(self):
+            self.updates += 1
+
+    card = Card()
+    window._apply_theme_to_widget(card, True)
+    assert card.updates == 1
