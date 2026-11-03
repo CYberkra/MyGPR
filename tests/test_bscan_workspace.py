@@ -17,10 +17,11 @@ from PyQt6.QtWidgets import QApplication, QLineEdit, QSplitter, QTabBar, QVBoxLa
 from ui.widgets.bscan_workspace import BScanWorkspace
 
 
-def bundle(value=1):
+def bundle(value=1, acquisition_markers=()):
     return SimpleNamespace(matrix=np.full((8, 6), value, np.float32),
                            vmin=0.0, vmax=float(value), title=str(value),
-                           x_label='道数', y_label='采样点')
+                           x_label='道数', y_label='采样点',
+                           acquisition_markers=acquisition_markers)
 
 
 def sources(*keys):
@@ -398,6 +399,45 @@ def test_split_group_display_and_fit_buttons_target_only_their_own_view(workspac
     second_group.display_settings.click()
     assert len(second_spy) == 1
     assert len(first_spy) == 0
+
+
+def test_acquisition_marker_button_layout_availability_and_toggle(workspace, qapp):
+    group = workspace.group_widget(workspace.group_ids()[0])
+    header = group.display_settings.parentWidget().layout().itemAt(0).layout()
+    assert header.indexOf(group.markers_visibility) == header.indexOf(group.display_settings) - 1
+    qapp.processEvents()
+    assert group.markers_visibility.geometry().center().y() == group.display_settings.geometry().center().y()
+    assert not group.markers_visibility.isEnabled()
+    workspace.set_sources([dict(key='A', title='A', bundle=bundle())])
+    workspace.open_source('A')
+    assert not group.markers_visibility.isEnabled()
+    marked_bundle = bundle(acquisition_markers=({'trace_no': 2, 'marker_type': 'general'},))
+    workspace.set_sources([dict(key='A', title='A', bundle=marked_bundle)])
+    workspace.open_source('A')
+    assert group.markers_visibility.isEnabled()
+    assert group.view._acquisition_marker_item.isVisible()
+    group.markers_visibility.click()
+    assert not group.view._acquisition_marker_item.isVisible()
+    group.markers_visibility.click()
+    assert group.view._acquisition_marker_item.isVisible()
+
+
+def test_split_groups_toggle_acquisition_markers_independently(workspace):
+    marked_bundle = bundle(acquisition_markers=({'trace_no': 2, 'marker_type': 'general'},))
+    workspace.set_sources([dict(key='A', title='A', bundle=marked_bundle)])
+    workspace.open_source('A')
+    workspace.split_source('A', 'right', copy=True)
+    first, second = (workspace.group_widget(group_id) for group_id in workspace.group_ids())
+    assert first.markers_visibility.isEnabled() and second.markers_visibility.isEnabled()
+    first.markers_visibility.click()
+    assert not first.view._acquisition_marker_item.isVisible()
+    assert second.view._acquisition_marker_item.isVisible()
+    second.markers_visibility.click()
+    assert not first.view._acquisition_marker_item.isVisible()
+    assert not second.view._acquisition_marker_item.isVisible()
+    second.markers_visibility.click()
+    assert not first.view._acquisition_marker_item.isVisible()
+    assert second.view._acquisition_marker_item.isVisible()
 
 
 def test_merge_duplicate_source_preserves_pin_from_either_view(workspace):

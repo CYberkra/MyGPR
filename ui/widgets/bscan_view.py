@@ -92,6 +92,7 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
     # 用户手动切换色标显隐时发射，供宿主写回设置
     sig_colorbar_visible_changed = pyqtSignal(bool)
     sig_qc_marks_visible_changed = pyqtSignal(bool)
+    sig_acquisition_markers_availability_changed = pyqtSignal(bool)
     sig_display_settings_requested = pyqtSignal()
     # 用户手动切换显示增益（'off'/'sec'/'tvg'）时发射，供宿主写回设置
     sig_gain_changed = pyqtSignal(str)
@@ -134,6 +135,8 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
         # 偏好仍记录，构造处若支持可后续兑现）
         self._colorbar_visible = True
         self._qc_marks_visible = True
+        self._acquisition_markers_visible = True
+        self._acquisition_markers_available = False
         # 显示增益（SEC/TVG）：显示域逐行缩放（raw 一个字节不动）；增益后
         # 矩阵按 (矩阵身份, 模式+参数) 缓存复用。TVG 参数经滑条面板调整
         self._gain_mode = 'off'
@@ -620,6 +623,12 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
         self._empty_overlay.setVisible(True)
         self._set_axes_visible(False)
 
+    def set_acquisition_markers_visible(self, visible: bool) -> None:
+        self._acquisition_markers_visible = bool(visible)
+        item = getattr(self, '_acquisition_marker_item', None)
+        if item is not None:
+            item.setVisible(self._acquisition_markers_available and self._acquisition_markers_visible)
+
     def set_acquisition_markers(self, markers) -> None:
         """Small hoverable flags on raw data; source records are never edited.
 
@@ -650,6 +659,11 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
                 spots.append(dict(pos=(x, 1), brush=colors.get(kind, '#39a8ed'), pen=None, data=tip))
         item.setData(spots)
         item.setToolTip(f'采集标记 {len(markers)} 个；最多显示前200个。完整记录保存在源元数据中。' if markers else '')
+        available = bool(spots)
+        item.setVisible(available and self._acquisition_markers_visible)
+        if available != self._acquisition_markers_available:
+            self._acquisition_markers_available = available
+            self.sig_acquisition_markers_availability_changed.emit(available)
 
     def apply_theme(self, dark: bool) -> None:
         """深色 bg 'k'/文字 'w'；浅色 bg 'w'/文字 'k'；轴/色标/悬浮钮/十字光标同步。
