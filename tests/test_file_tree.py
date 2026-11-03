@@ -510,7 +510,8 @@ def test_collapse_shows_blank_strip(qapp, panel):
     panel.set_lines([_line('L01', '2026-09-16T01:00:00')])
     panel.set_current_line('L01')
     panel.set_collapsed(True, animate=False)
-    assert panel.width() <= 20  # 细条
+    from ui import constants
+    assert panel.width() == constants.DOCK_COLLAPSED_WIDTH
     assert not panel._expanded_view.isVisibleTo(panel)
     assert panel._strip_view.isVisibleTo(panel)
     assert panel._strip_line_label.isHidden()  # 竖排文字已删，细条留白
