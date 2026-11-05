@@ -1,9 +1,16 @@
 """Project-local line scale and display preference overrides."""
 import json
+from typing import Any
 
 import numpy as np
 
 class LinePropertiesMixin:
+    _store: Any
+    _lock: Any
+    _validated_line: Any
+    _apply_time_window_override: Any
+    get_line: Any
+
     def _legacy_matrix_unscaled(self, record):
         if str(record.data_format or '').split('+')[0] not in {
                 'csv-matrix-chunked', 'npy-matrix-chunked', 'hdf5-matrix-chunked'}:

@@ -211,10 +211,7 @@ class FieldLineStoreMixin:
             )
             projection_payload = self._import_line_trajectory(line_id, trajectory_rows)
             self._write_import_manifest(line_id, src, dest, dataset, trajectory_rows, projection_payload)
-            try:
-                self.run_line_quality_check(line_id)
-            except Exception as qc_exc:
-                self.append_log(f"测线 {line_id} 数据质检失败: {qc_exc}")
+            self._check_imported_line_quality(line_id)
             return self.get_line(line_id)
         except ImportCancelled:
             self.append_log(f"测线 {line_id} 导入已取消，正在回滚。")
@@ -227,6 +224,12 @@ class FieldLineStoreMixin:
                 dataset.matrix._mmap.close()
             shutil.rmtree(staging, ignore_errors=True)
 
+
+    def _check_imported_line_quality(self, line_id: str) -> None:
+        try:
+            self.run_line_quality_check(line_id)
+        except Exception as exc:
+            self.append_log(f"测线 {line_id} 数据质检失败: {exc}")
 
     def _clear_import_navigation(self, line: FieldLineRecord, import_path: Path) -> None:
         """Unbind navigation from the replaced acquisition inside its transaction."""

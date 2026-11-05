@@ -127,7 +127,7 @@ def _resolve_delete_closure(
     # the union by dependencies before reversed() commits any file/catalog move.
     parents = {record.artifact_id: _dependency_parent(record) for record in records}
     children: dict[str, list[str]] = {}
-    queue = deque()
+    queue: deque[str] = deque()
     for aid in full_ids:
         parent = parents[aid]
         if parent in seen:
@@ -177,6 +177,17 @@ def _classify_delete_targets(
     return targets
 
 
+def _validate_artifact_metadata_paths(root: Path, line_id: str, full_ids: list[str]) -> None:
+    for record in index_processing_artifacts(root, line_id):
+        if record.artifact_id not in full_ids:
+            continue
+        for value in (record.params_path, record.manifest_path):
+            if value:
+                path = checked_delete_path(root, root / value)
+                if not path.is_relative_to(root / 'processed' / line_id):
+                    raise FieldProjectOperationError(f'成果元数据不属于当前测线：{path}')
+
+
 def delete_artifacts_permanently(
     store: "FieldProjectStore", line_id: str, artifact_ids: list[str] | tuple[str, ...],
     *, reason: str = "用户删除成果",
@@ -194,9 +205,9 @@ def delete_artifacts_permanently(
     if hybrid:
         targets = _classify_delete_targets(container, full_ids, root)
     else:
-        records = {r.artifact_id: r for r in index_processing_artifacts(root, safe_line_id)}
+        records_by_id = {r.artifact_id: r for r in index_processing_artifacts(root, safe_line_id)}
         targets = {aid: _ArtifactTarget(aid, STORAGE_MODE_FILE,
-                   checked_delete_path(root, root / records[aid].data_path)) for aid in full_ids}
+                   checked_delete_path(root, root / records_by_id[aid].data_path)) for aid in full_ids}
     if any(t.storage_mode == STORAGE_MODE_INLINE for t in targets.values()):
         for source in protected_source_paths(root):
             if source.exists() and container.samefile(source):
@@ -205,15 +216,9 @@ def delete_artifacts_permanently(
     for aid in full_ids:
         delete_journal_path(root, f"artifact-{aid}")
         checked_delete_path(root, sidecar_dir / f"{aid}.h5")
-    for record in index_processing_artifacts(root, safe_line_id):
-        if record.artifact_id not in full_ids:
-            continue
-        for value in (record.params_path, record.manifest_path):
-            if value:
-                path = checked_delete_path(root, root / value)
-                if not path.is_relative_to(root / 'processed' / safe_line_id):
-                    raise FieldProjectOperationError(f'成果元数据不属于当前测线：{path}')
-    deleted, paths = [], []
+    _validate_artifact_metadata_paths(root, safe_line_id, full_ids)
+    deleted: list[str] = []
+    paths: list[str] = []
     try:
         for aid in reversed(full_ids):
             target = targets[aid]

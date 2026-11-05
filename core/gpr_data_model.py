@@ -23,7 +23,7 @@ import numpy as np
 
 try:  # optional, only needed for .h5/.hdf5
     import h5py  # type: ignore
-except Exception:  # pragma: no cover - optional runtime dependency
+except (ImportError, OSError):  # pragma: no cover - optional runtime dependency
     h5py = None
 
 

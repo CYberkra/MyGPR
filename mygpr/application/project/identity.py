@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from contextlib import contextmanager
+from typing import Any
 from mygpr.application.jobs.context import ExecutionContext
 from mygpr.application.project.errors import ProjectBusyError, ProjectApplicationError
 from mygpr.application.project.ports import ProjectSessionPort
@@ -9,6 +10,16 @@ from mygpr.domain.project.models import ProjectLine, ProjectSummary
 
 
 class ProjectIdentityServiceMixin:
+    _lock: Any
+    _maintenance: set[str]
+    _lease_counts: dict[str, int]
+    _roots: dict[str, str]
+    _sessions: dict[str, Any]
+    _session: Any
+    get_summary: Any
+    open_project: Any
+    close_project: Any
+
     def _check_maintenance(self, project_id: str) -> None:
         if str(project_id) in self._maintenance:
             raise ProjectBusyError("项目正在迁移或删除，请等待操作完成。")

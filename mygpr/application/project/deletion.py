@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 from mygpr.application.project.errors import ProjectApplicationError
 
 
@@ -38,6 +39,8 @@ class PermanentDeletionService:
     def _plan(self, session, kind, targets, line_id):
         summary = session.summary
         parents = ()
+        names: tuple[str, ...]
+        records: tuple[Any, ...]
         if kind == 'project':
             names = (summary.name, f'{summary.line_count} 条测线 · MyGPR 产物与导入副本')
             records = (summary, tuple(session.list_lines()), tuple(session.list_artifacts(None)))
@@ -49,25 +52,7 @@ class PermanentDeletionService:
             names = tuple(f'{t} · {by_id[t].name}' for t in targets)
             records = tuple((by_id[t], tuple(session.list_artifacts(t))) for t in targets)
         elif kind == 'artifacts':
-            by_id = {a.artifact_id: a for a in session.list_artifacts(line_id)}
-            closure = dict.fromkeys(aid for t in targets for aid in session.list_artifact_descendants(line_id, t))
-            if not targets or any(t not in by_id for t in targets):
-                raise ProjectApplicationError('成果已变化，请重新选择')
-            targets = tuple(closure)
-            names = tuple(by_id[t].method_name or by_id[t].name or t for t in targets)
-            def parent_of(artifact):
-                params = artifact.manifest.get('params') or {}
-                return str(params.get('step_input_artifact_id') or '') if params.get('lineage_version') == 2 else str(artifact.parent_artifact_id or '')
-            parents = tuple(parent_of(by_id[t]) for t in targets)
-            edges = dict(zip(targets, parents))
-            for target in targets:
-                seen, node = set(), target
-                while node in edges:
-                    if node in seen:
-                        raise ProjectApplicationError('处理成果依赖存在循环，无法删除')
-                    seen.add(node)
-                    node = edges[node]
-            records = tuple(by_id[t] for t in targets)
+            targets, names, records, parents = self._plan_artifacts(session, targets, line_id)
         elif kind == 'spatial':
             by_id = {r.result_id: r for r in session.list_spatial_results()}
             if len(targets) != 1 or targets[0] not in by_id:
@@ -84,6 +69,29 @@ class PermanentDeletionService:
         disk = session.validate_deletion(kind, targets, line_id)
         return DeletionPlan(kind, summary.project_id, summary.root_path, line_id,
                             targets, names, repr((records, disk)), parents)
+
+    def _plan_artifacts(self, session, targets, line_id):
+        by_id = {a.artifact_id: a for a in session.list_artifacts(line_id)}
+        closure = dict.fromkeys(aid for t in targets for aid in session.list_artifact_descendants(line_id, t))
+        if not targets or any(t not in by_id for t in targets):
+            raise ProjectApplicationError('成果已变化，请重新选择')
+        targets = tuple(closure)
+        names = tuple(by_id[t].method_name or by_id[t].name or t for t in targets)
+
+        def parent_of(artifact):
+            params = artifact.manifest.get('params') or {}
+            return str(params.get('step_input_artifact_id') or '') if params.get('lineage_version') == 2 else str(artifact.parent_artifact_id or '')
+
+        parents = tuple(parent_of(by_id[t]) for t in targets)
+        edges = dict(zip(targets, parents))
+        for target in targets:
+            seen, node = set(), target
+            while node in edges:
+                if node in seen:
+                    raise ProjectApplicationError('处理成果依赖存在循环，无法删除')
+                seen.add(node)
+                node = edges[node]
+        return targets, names, tuple(by_id[t] for t in targets), parents
 
     def execute(self, plan: DeletionPlan):
         if plan.kind == 'project':

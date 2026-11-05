@@ -108,7 +108,7 @@ def test_build_artifacts_model_includes_spatial_and_reports():
     assert report_group.children[0].kind == 'report'
     assert report_group.children[0].payload == 'proj/reports/r20260916'
     assert report_group.children[0].text == 'r20260916'
-    assert report_group.children[0].suffix == '2026-09-16'
+    assert '2026-09-16' in report_group.children[0].tooltip
 
 
 def test_build_artifacts_model_omits_empty_sections():

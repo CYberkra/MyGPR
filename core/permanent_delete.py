@@ -5,7 +5,7 @@ import json
 import re
 import shutil
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Any, Callable, Iterable
 
 from core.field_project_errors import FieldProjectOperationError
 from core.storage_primitives import atomic_write_json
@@ -91,7 +91,7 @@ def permanently_delete_paths(
     if internal_sources:
         retained = checked_delete_path(root, root / 'metadata' / 'protected_originals.json')
         atomic_write_json(retained, internal_sources)
-    state = {"schema": "mygpr.permanent_delete.v1", "paths": [p.relative_to(root).as_posix() for p in planned],
+    state: dict[str, Any] = {"schema": "mygpr.permanent_delete.v1", "paths": [p.relative_to(root).as_posix() for p in planned],
              "completed": [], "state": "deleting"}
     if journal.is_file():
         saved = json.loads(journal.read_text(encoding="utf-8"))

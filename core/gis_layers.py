@@ -24,19 +24,19 @@ try:
     import rasterio
     from rasterio.enums import Resampling
     from rasterio.vrt import WarpedVRT
-except Exception:  # pragma: no cover
+except (ImportError, OSError):  # pragma: no cover
     rasterio = None
     Resampling = None
     WarpedVRT = None
 
 try:
     import fiona
-except Exception:  # pragma: no cover
+except (ImportError, OSError):  # pragma: no cover
     fiona = None
 
 try:
     from pyproj import CRS, Transformer
-except Exception:  # pragma: no cover
+except (ImportError, OSError):  # pragma: no cover
     CRS = None
     Transformer = None
 

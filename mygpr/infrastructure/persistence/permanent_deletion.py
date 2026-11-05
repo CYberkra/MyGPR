@@ -1,7 +1,12 @@
 """Managed paths and original-source safety for destructive project operations."""
 
+from typing import Any
+
 
 class PermanentDeletionMixin:
+    _lock: Any
+    _store: Any
+
     def delete_permanently(self) -> str:
         from core.field_project_operations import delete_project_permanently
         with self._lock:

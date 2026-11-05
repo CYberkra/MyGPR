@@ -410,13 +410,7 @@ class ProjectChain:
         processing.set_lines(lines)
         # 预热右键菜单"复制路径"缓存：异步查询各测线源文件路径，
         # 回包经 line_source_path_ready → project.set_line_source_path 入缓存
-        if co.project_controller is not None:
-            for line in lines:
-                lid = str(getattr(line, 'line_id', '') or '')
-                if lid:
-                    co.project_controller.line_source_path(lid)
-                    if lid == self.current_line_id:
-                        co.project_controller.line_sensor_summary(lid, int(getattr(line, 'trace_count', 0)))
+        self._refresh_line_sources(lines)
         # 导入完成后：若记录了目标测线，选中并预览它
         pending = self.pending_select_line_id
         if pending:
@@ -465,6 +459,17 @@ class ProjectChain:
             co.page('homeInterface').set_preview_bundle(None)
             processing.set_original_bundle(None)
             processing.set_artifacts([])
+
+    def _refresh_line_sources(self, lines) -> None:
+        controller = self._co.project_controller
+        if controller is None:
+            return
+        for line in lines:
+            line_id = str(getattr(line, 'line_id', '') or '')
+            if line_id:
+                controller.line_source_path(line_id)
+                if line_id == self.current_line_id:
+                    controller.line_sensor_summary(line_id, int(getattr(line, 'trace_count', 0)))
 
     def on_line_selected(self, line_id: str, *, confirm_discard: bool = True) -> bool:
         """line_selected → 记录当前测线 + 预览 + 刷新成果列表。"""

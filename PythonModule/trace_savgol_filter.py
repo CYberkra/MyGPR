@@ -114,7 +114,7 @@ def method_trace_savgol_filter(
 def _safe_int(value: Any, default: int) -> int:
     try:
         return int(round(float(value)))
-    except Exception:
+    except (TypeError, ValueError, OverflowError):
         return int(default)
 
 
