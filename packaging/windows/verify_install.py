@@ -111,6 +111,10 @@ def main():
         if args.previous_installer:
             run('install-previous', [args.previous_installer.resolve(), *setup[1:]])
             evidence['previous_installer_sha256'] = file_sha256(args.previous_installer)
+            # Capture the verified published package before adding any QA/user files.
+            legacy_files = [f'{file_sha256(path)}|{path.relative_to(install).as_posix()}'
+                            for path in sorted((install / '_internal').rglob('*')) if path.is_file()]
+            (output / 'legacy-managed-files.txt').write_text('\n'.join(legacy_files) + '\n', encoding='utf-8')
             upgrade_settings = sandbox / 'config/settings.json'
             upgrade_settings.parent.mkdir(parents=True, exist_ok=True)
             upgrade_settings.write_text('{"theme": "深色主题", "recent_projects": [], "update_automatic": false}', encoding='utf-8')
@@ -187,6 +191,15 @@ def main():
         evidence['error'] = str(exc)
         raise
     finally:
+        if evidence['status'] != 'passed' and (install / 'unins000.exe').is_file():
+            # This directory and registration were created by this invocation.
+            # Failure must not contaminate the independent native-update case.
+            try:
+                result = subprocess.run([str(install / 'unins000.exe'), '/VERYSILENT',
+                    '/SUPPRESSMSGBOXES', '/NORESTART'], capture_output=True, timeout=120)
+                evidence['checks']['failure-cleanup'] = result.returncode
+            except Exception as cleanup_error:
+                evidence['cleanup_error'] = str(cleanup_error)
         evidence['hdf5_sha256_after'] = file_sha256(source) if source.exists() else None
         (output / 'installer-verification.json').write_text(json.dumps(evidence, indent=2), encoding='utf-8')
 
