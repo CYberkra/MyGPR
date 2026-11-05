@@ -16,8 +16,16 @@
 - [ ] 发布者离线备份正式私钥。文件创建不等于离线备份。
 - [x] 修复初始化失败后的偏好控件及错误提示；GitHub 先复现 6 个失败再验证修复。
 - [x] 增加完整 Windows 包构建、真实 HTTPS 更新器和完整旧版升级的 GitHub 验收入口；执行结果以 PR 和 run 的实际证据为准。
-- [ ] 完成完整安装包与真实更新器验收，记录结果。
+- [x] 完成完整安装包与真实更新器验收：[原生升级验收](https://github.com/CYberkra/MyGPR/actions/runs/42083189676)，6 passed；完整包构建及升级源码为 `cc2c00064187a97a1ce9d4e2c8ab941c7af599f8`。
 - [ ] 正式公网订阅发布。没有这一步不宣称已向用户提供自动更新。
 
 本机只运行语法、Ruff、架构、Schema、类型和治理静态检查。测试只在 GitHub 执行。
 密钥、第三方二进制、安装包与截图不进入 Git。不自动发布 tag 或 Release。
+
+完整验收补充（2026-11-06）：
+- [完整 Windows 构建](https://github.com/CYberkra/MyGPR/actions/runs/42081836896)：正式包及验收旧版包成功。
+- [更新专项](https://github.com/CYberkra/MyGPR/actions/runs/42081826398)：Windows 59 passed；Linux 54 passed、5 Windows-only skipped。
+- [全量 CI](https://github.com/CYberkra/MyGPR/actions/runs/42081836974)：五个门禁全部通过。
+- 完整旧版覆盖升级、真实 HTTPS 更新、稍后、跳过、取消、中断、无效签名拒绝、正常退出和重启通过；合成原始数据、真实项目及处理成果、设置保留。
+- 正式 v0.11.0 的遗留版本信息通过可信旧包哈希清单迁移；修改过的版本信息在覆盖前拒绝安装。
+- 以上结果属于隔离 Windows runner 和合成验收数据。断电恢复、SmartScreen、正式公网订阅及发布者离线密钥备份仍未完成。
