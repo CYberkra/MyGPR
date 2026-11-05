@@ -269,6 +269,7 @@ def exercise_rejections(ui, server, record):
 
 def install_and_relaunch(ui, server, executable, output, version, record):
     from pywinauto import Desktop as WindowsDesktop
+    main_title = ui.main.window_text()
     server.select('valid')
     ui.check()
     wait_for(lambda: ui.button('安装|Install', native=True), 'download signed update').click_input()
@@ -279,7 +280,7 @@ def install_and_relaunch(ui, server, executable, output, version, record):
     assert ui.process.wait(timeout=60) == 0, 'application did not close normally'
 
     def restarted():
-        for window in WindowsDesktop(backend='uia').windows(title_re='^MyGPR.*', visible_only=True):
+        for window in WindowsDesktop(backend='uia').windows(title=main_title, visible_only=True):
             if window.process_id() != ui.process.pid:
                 return window
         return None
@@ -294,6 +295,7 @@ def install_and_relaunch(ui, server, executable, output, version, record):
     assert installed['version'] == version
     live = Desktop.__new__(Desktop)
     live.app, live.main, live.output = app, window, output
+    live.main_handle = wrapper.handle
     live.about()
     window.child_window(title=version, control_type='Text').wait('exists', timeout=30)
     live.capture('installed-version')

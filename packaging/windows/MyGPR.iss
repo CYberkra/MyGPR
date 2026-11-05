@@ -187,7 +187,7 @@ begin
     finally
       FindClose(Found);
     end;
-  end;
+  end else Exit;
   Result := True;
 end;
 
@@ -196,17 +196,33 @@ var
   OldFiles, NewFiles: TArrayOfString;
   Found: TFindRec;
   Name: String;
+  Attributes, ErrorCode: LongWord;
 begin
   Result := '';
   if not LoadMigrationFiles(OldFiles, NewFiles) then begin
     Result := 'Cannot read the package file inventory.';
     Exit;
   end;
-  if FindFirst(ExpandConstant('{app}\_internal\mygpr-*.dist-info'), Found) then begin
+  Attributes := FileAttributes(ExpandConstant('{app}\_internal'));
+  if Attributes = $FFFFFFFF then begin
+    ErrorCode := DLLGetLastError;
+    if (ErrorCode <> 2) and (ErrorCode <> 3) then
+      Result := 'Cannot read the existing installation directory.';
+    Exit;
+  end;
+  if not SafeManagedPath('_internal\') then begin
+    Result := 'Cannot safely inspect the existing installation directory.';
+    Exit;
+  end;
+  { Enumerate all entries so an unreadable directory is not mistaken for no match. }
+  if FindFirst(ExpandConstant('{app}\_internal\*'), Found) then begin
     try
       repeat
         Name := '_internal\' + Found.Name;
-        if ((Found.Attributes and $10) <> 0) and not RecordedDirectory(Name, NewFiles) then begin
+        if ((Found.Attributes and $10) <> 0) and
+           (Pos('mygpr-', Lowercase(Found.Name)) = 1) and
+           (CompareText(Copy(Found.Name, Length(Found.Name) - 9, 10), '.dist-info') = 0) and
+           not RecordedDirectory(Name, NewFiles) then begin
           if not MetadataIsUnmodified(Name, OldFiles) then begin
             Result := 'Existing MyGPR version files were modified: ' + Name + '. Choose a new installation folder.';
             Exit;
@@ -216,7 +232,7 @@ begin
     finally
       FindClose(Found);
     end;
-  end;
+  end else Result := 'Cannot enumerate the existing installation directory.';
 end;
 
 procedure RemoveObsoleteManagedFiles;
