@@ -276,13 +276,14 @@ def install_and_relaunch(ui, server, executable, output, version, record):
                 return window
         return None
 
-    window = wait_for(restarted, 'installed application relaunch', timeout=180)
+    wrapper = wait_for(restarted, 'installed application relaunch', timeout=180)
+    from pywinauto import Application
+    app = Application(backend='uia').connect(process=wrapper.process_id())
+    window = app.window(handle=wrapper.handle)
     window.wait('enabled', timeout=90)
     window.capture_as_image().save(output / 'restarted.png')
     installed = json.loads((executable.parent / '_internal/windows-build.json').read_text(encoding='utf-8'))
     assert installed['version'] == version
-    from pywinauto import Application
-    app = Application(backend='uia').connect(process=window.process_id())
     live = Desktop.__new__(Desktop)
     live.app, live.main, live.output = app, window, output
     live.about()
@@ -301,7 +302,7 @@ def verify_preserved(project, source, expected, hashes, line_id, artifact_id, se
     try:
         opened = backend.projects.open_project(project)
         data = backend.projects.read_dataset(opened.project_id, line_id)
-        np.testing.assert_array_equal(np.asarray(data.matrix), expected)
+        np.testing.assert_array_equal(np.asarray(data.data), expected)
         assert any(item.artifact_id == artifact_id for item in backend.projects.list_artifacts(opened.project_id, line_id))
     finally:
         backend.shutdown()

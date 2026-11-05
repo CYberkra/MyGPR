@@ -12,6 +12,8 @@ on:
       - 'packaging/windows/runtime_hook.py'
       - 'packaging/windows/update_tools.py'
       - 'config/windows_updates.json'
+      - 'ui/resources/mygpr_logo.png'
+      - '.gitignore'
       - 'ui/update_binding.py'
       - 'ui/controllers/update_controller.py'
 
