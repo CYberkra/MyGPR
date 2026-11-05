@@ -78,7 +78,7 @@ class UpdateBinding(QObject):
             self._record_check()
 
     def _record_check(self):
-        self.window.settings.set('update_last_check', datetime.now(timezone.utc).isoformat())
+        self.window.settings.set('update_last_check', datetime.now(timezone.utc).isoformat(timespec='milliseconds'))
         self.window.settings.save()
 
     def automatic_check(self):

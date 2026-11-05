@@ -135,5 +135,5 @@ begin
   if CurStep = ssInstall then RemoveObsoleteManagedFiles;
 end;
 
-; User projects, acquisition files and ~/MyGPR/config are deliberately outside
-; the installer file table. Uninstall removes installed files, not user data.
+{ User projects, acquisition files and ~/MyGPR/config are outside
+  the installer file table. Uninstall removes installed files, not user data. }
