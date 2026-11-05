@@ -14,6 +14,8 @@ Ed25519 更新签名是必需的，无需购买证书。Windows Authenticode 证
 
 将输出的公钥保存到 `windows-ed25519.pub`，并离线备份私钥。私钥不得进入 Git、发布附件或普通 CI 日志。首轮实现不将私钥上传 GitHub。密钥遗失时，已安装版本无法信任新密钥签名的更新，需人工安装新的信任根版本。
 
+正式公钥现已固定在 `config/windows_updates.json`。构建器默认使用该公钥；`-UpdatePublicKeyFile` 是显式覆盖，空文件会被拒绝。私钥仍只保存在发布者账户的仓库外目录。创建文件与限制权限不等于已经完成离线备份。
+
 ## 构建与验收
 
 先提交源码，并把同一提交构建的 wheel 安装到隔离的构建环境。以下 `SourceRef` 使用已经提交的不可变 SHA。完整构建基线见 [Windows 构建](windows-build.md)。
@@ -43,5 +45,19 @@ Ed25519 更新签名是必需的，无需购买证书。Windows Authenticode 证
 先上传安装包、说明、校验和、构建/验收证据，最后让 `appcast.xml` 可访问。稳定订阅为 `https://github.com/CYberkra/MyGPR/releases/latest/download/appcast.xml`。发布流程须验证该地址实际指向目标正式版；发布预览版时不改变 stable latest。启用不可变 Releases 后也必须在最终发布前备齐附件。
 
 现有未带更新器的版本需要用户手动安装一次。首次线上验收还需覆盖：离线、下载中断、篡改载荷、跳过、取消、活动任务和已安装版本的真实升级。常规 Qt CI、真实签名用例和小型安装器夹具各有边界，不能代替这次验收。
+
+## GitHub 完整安装与更新验收
+
+`MyGPR Windows packages` 从不可变提交构建两个完整应用：正式版本，以及仅供验收的 `a1` 旧版本。后者使用独立 localhost HTTPS 订阅，不得发布给用户。GitHub 使用隔离的 Python 3.13 环境；自行采用 3.12 构建时仍要求补丁版至少 3.12.12。
+
+发布者下载 `windows-package-release` 附件，在本机用仓库外私钥签名。只将公开的安装包签名传给后续验收，私钥不离开本机：
+
+```powershell
+gh workflow run focused-regressions.yml --repo CYberkra/MyGPR --ref <feature-branch> -f suite=update_installation -f package_run=<successful-package-run-id> -f installer_signature=<public-ed25519-signature>
+```
+
+该入口只在一次性 Windows runner 上运行。它核对来源分支、构建清单、签名及程序源码是否改变。它验证完整 v0.11.0 安装器覆盖升级，以及完整旧版应用经 WinSparkle 的真实 HTTPS 发现、下载、签名验证、退出、安装、重启。还验证离线、已是最新、稍后、跳过状态保存、下载取消、中断和无效签名。程序重启关闭时必须返回退出码 0。
+
+测试创建小型合成 HDF5、真实 MyGPR 项目和处理成果，检查更新后矩阵值及文件哈希不变，设置仍保留。HTTPS 测试证书只进入一次性 runner 的证书存储并在收尾清理；不会修改发布者电脑的证书设置。它证明隔离环境的完整流程，不证明断电恢复、所有 Windows 版本或正式公网订阅已经发布。
 
 参考：[WinSparkle 接入](https://winsparkle.org/guides/getting-started/)、[更新发布](https://winsparkle.org/guides/publishing-updates/)、[回调顺序](https://winsparkle.org/c-api/callbacks/)、[Inno 签名](https://jrsoftware.org/ishelp/topic_setup_signtool.htm)、[GitHub 不可变 Releases](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)。
