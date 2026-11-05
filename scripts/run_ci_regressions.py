@@ -31,6 +31,9 @@ SUITES = {
     ),
     "processing": (
         "tests/test_file_tree.py",
+        "tests/test_home_page.py",
+        "tests/test_project_workspace.py",
+        "tests/test_page_controls_wired.py",
         "tests/test_processing_page_v2.py",
         "tests/test_processing_workspace_flow.py",
         "tests/test_processing_async_identity.py",
