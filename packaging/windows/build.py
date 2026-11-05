@@ -88,8 +88,12 @@ def main():
         version_tuple = tuple(map(int, update_api['windows_build_version'](version).split('.')))
         if args.update_public_key_file:
             update_public_key = args.update_public_key_file.read_text(encoding='utf-8').strip()
+            if not update_public_key:
+                raise ValueError('The supplied update public key file is empty')
         update_config = source / 'config/windows_updates.json'
         config = json.loads(update_config.read_text(encoding='utf-8'))
+        if not args.update_public_key_file:
+            update_public_key = str(config.get('public_key') or '').strip()
         config.update(public_key=update_public_key, preview_feed=args.preview_feed)
         update_config.write_text(json.dumps(config, indent=2), encoding='utf-8')
         if update_public_key:
