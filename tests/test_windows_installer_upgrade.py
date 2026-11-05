@@ -1,10 +1,12 @@
 """Compile and exercise the real Inno recipe, with tiny package fixtures, on CI."""
 import hashlib
+import ctypes
 import importlib.util
 import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -41,7 +43,8 @@ def test_upgrade_removes_only_unchanged_owned_files_and_uninstall_preserves_user
     Image.new('RGBA', (32, 32), 'blue').save(icon)
     old, new, install = (tmp_path / name for name in ('old', 'new', 'installed'))
     package(old, {'_internal/obsolete.dll': b'old dependency', '_internal/modified.h5': b'packaged test fixture'})
-    package(new, {'_internal/new.dll': b'new dependency'})
+    package(new, {'_internal/new.dll': b'new dependency',
+                  'MyGPR.exe': (Path(os.environ['SystemRoot']) / 'System32/whoami.exe').read_bytes()})
     installers = []
     for version, source in (('0.11.4', old), ('0.11.5', new)):
         subprocess.run([compiler, f'/DAppVersion={version}', f'/DDistDir={source}',
@@ -55,7 +58,30 @@ def test_upgrade_removes_only_unchanged_owned_files_and_uninstall_preserves_user
         user.write_bytes(b'original acquisition must survive')
         modified = install / '_internal/modified.h5'
         modified.write_bytes(b'user changed this file')
-        subprocess.run([str(installers[1]), *options], check=True, capture_output=True, timeout=60)
+        kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_wchar_p]
+        kernel.CreateMutexW.restype = ctypes.c_void_p
+        kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+        mutex = kernel.CreateMutexW(None, False, r'Local\MyGPR.Application')
+        assert mutex
+        log = tmp_path / 'upgrade.log'
+        installer = subprocess.Popen([str(installers[1]), *options, '/MYGPRUPDATE=1', f'/LOG={log}'],
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline:
+                if log.is_file() and 'Waiting for MyGPR to exit before upgrade' in log.read_text(encoding='utf-8-sig', errors='replace'):
+                    break
+                time.sleep(0.05)
+            else:
+                pytest.fail('Installer did not enter the application-exit wait')
+            assert installer.poll() is None
+            assert (install / '_internal/obsolete.dll').exists()
+            assert not (install / '_internal/new.dll').exists()
+        finally:
+            kernel.CloseHandle(mutex)
+        installer.communicate(timeout=60)
+        assert installer.returncode == 0
         assert not (install / '_internal/obsolete.dll').exists()
         assert (install / '_internal/new.dll').read_bytes() == b'new dependency'
         assert user.read_bytes() == b'original acquisition must survive'

@@ -32,6 +32,7 @@ class UpdateController(QObject):
         self._request_lock = threading.Lock()
         self._requests: set[_ShutdownRequest] = set()
         self._busy = False
+        self._checking = False
         self._frozen = False
         self._native_event.connect(self._on_event)
         self._probe.connect(self._on_probe)
@@ -64,6 +65,7 @@ class UpdateController(QObject):
         if self._client is None or self._busy or self._closed.is_set():
             return False
         self._set_busy(True)
+        self._checking = True
         self.status_changed.emit('正在检查更新…')
         try:
             self._client.check(silent=silent)
@@ -134,6 +136,15 @@ class UpdateController(QObject):
     def _on_event(self, generation, event):
         if generation != self._generation or self._closed.is_set():
             return
+        # Approval follows a completed download. A checker error is not a
+        # launch-failure notification in 0.9.4; it must not unlock that window.
+        if self._frozen and event == 'error':
+            return
+        if event in ('available', 'current', 'error'):
+            self._checking = False
+        elif event in ('cancelled', 'dismissed') and self._checking:
+            self.status_changed.emit('正在结束更新检查…')
+            return
         messages = {'error': '更新检查或下载失败，请重试或打开发布页',
                     'available': '发现新版本', 'current': '已是当前渠道的最新版本',
                     'timeout': '暂时无法退出，请稍后重试'}
@@ -145,8 +156,9 @@ class UpdateController(QObject):
             self.status_changed.emit(messages[event])
 
     def stop(self):
-        # Wake callbacks BEFORE joining native workers in cleanup().
+        # Wake callbacks BEFORE native UI cleanup. 0.9.4 does not join checkers.
         self._closed.set()
+        self._checking = False
         with self._request_lock:
             requests = list(self._requests)
         for request in requests:

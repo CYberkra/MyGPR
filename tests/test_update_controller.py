@@ -114,7 +114,7 @@ def test_stop_wakes_waiter_before_native_cleanup_and_stale_callbacks_are_ignored
     ctrl.stop()
 
 
-@pytest.mark.parametrize('event', ['error', 'cancelled', 'timeout'])
+@pytest.mark.parametrize('event', ['cancelled', 'timeout'])
 def test_failure_restores_ui_and_allows_retry(qapp, event):
     ctrl, client, frozen, _ = controller()
     worker = threading.Thread(target=client.callbacks['can_shutdown'])
@@ -122,9 +122,28 @@ def test_failure_restores_ui_and_allows_retry(qapp, event):
     pump(qapp, worker)
     assert ctrl.check() and ctrl.busy
     assert not ctrl.check()
+    client.callbacks['event']('available')
     client.callbacks['event'](event)
     assert not ctrl.busy and frozen == [True, False]
     assert ctrl.check(silent=True) and client.silent
+    ctrl.stop()
+
+
+def test_dismissing_check_does_not_allow_overlapping_workers_or_unlock_install(qapp):
+    ctrl, client, frozen, _ = controller()
+    assert ctrl.check()
+    client.callbacks['event']('dismissed')
+    assert ctrl.busy and not ctrl.check()
+    client.callbacks['event']('error')
+    assert not ctrl.busy and ctrl.check()
+    client.callbacks['event']('available')
+    worker = threading.Thread(target=client.callbacks['can_shutdown'])
+    worker.start()
+    pump(qapp, worker)
+    client.callbacks['event']('error')  # An unrelated late checker cannot revoke launch approval.
+    assert frozen == [True] and ctrl.busy
+    client.callbacks['event']('cancelled')
+    assert frozen == [True, False] and not ctrl.busy
     ctrl.stop()
 
 
@@ -196,4 +215,38 @@ def test_source_environment_and_daily_schedule(qapp):
     binding.automatic_check()
     assert len(checks) == 1
     binding.controller.stop()
+    window.deleteLater()
+
+
+def test_channel_preferences_defer_native_reconfiguration_until_next_process(qapp, monkeypatch, tmp_path):
+    class Window(QWidget):
+        def __init__(self):
+            super().__init__()
+            self.settings = Settings(update_channel='stable', update_automatic=True)
+            self.panel = UpdatePanel(self)
+        def _page(self, name):
+            return SimpleNamespace(update_panel=self.panel)
+    monkeypatch.setattr('ui.update_binding.sys', SimpleNamespace(platform='win32', frozen=True, _MEIPASS=str(tmp_path)))
+    configuration = SimpleNamespace(public_key='pub', preview_feed='https://example.com/preview',
+                                    feed=lambda channel: 'https://example.com/' + channel)
+    monkeypatch.setattr('ui.update_binding.windows_update_configuration', lambda path: configuration)
+    clients = []
+    monkeypatch.setattr('ui.update_binding.windows_update_client', lambda path: clients.append(Client()) or clients[-1])
+    window = Window()
+    binding = UpdateBinding(window)
+    binding._timer.stop()
+    assert len(clients) == 1
+    window.panel.automatic.setChecked(False)
+    assert len(clients) == 1 and not hasattr(clients[0], 'stopped')
+    window.panel.channel.setCurrentIndex(1)
+    assert window.settings.get('update_channel') == 'preview'
+    assert len(clients) == 1 and binding._channel_pending
+    assert not window.panel.check_button.isEnabled()
+    clients[0].callbacks['event']('current')
+    assert '重启' in window.panel.status.text() and not window.panel.check_button.isEnabled()
+    with pytest.raises(RuntimeError):
+        binding.configure()
+    binding.controller.stop()
+    clients[0].callbacks['event']('available')  # delayed native completion after UI cleanup
+    assert '重启' in window.panel.status.text()
     window.deleteLater()

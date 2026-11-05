@@ -72,6 +72,23 @@ begin
   Result := ExpandConstant('{param:MYGPRUPDATE|0}') = '1';
 end;
 
+function InitializeSetup: Boolean;
+var
+  Attempts: Integer;
+begin
+  { WinSparkle launches Setup before requesting a normal application close. }
+  if IsUpdate then begin
+    Log('Waiting for MyGPR to exit before upgrade');
+    Attempts := 0;
+    while CheckForMutexes('Local\MyGPR.Application') and (Attempts < 300) do begin
+      Sleep(100);
+      Attempts := Attempts + 1;
+    end;
+  end;
+  { If still open, the regular AppMutex prompt offers retry/cancel. }
+  Result := True;
+end;
+
 function SafeManagedPath(RelativeName: String): Boolean;
 var
   Parent: String;

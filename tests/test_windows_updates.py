@@ -83,6 +83,7 @@ def native_library(accepted=1):
 
 
 def test_native_abi_callbacks_remain_alive_through_cleanup():
+    from mygpr.infrastructure.updates.winsparkle import _PROCESS_CALLBACKS
     library, events, shutdowns = native_library(), [], []
     client = WinSparkle(Path('not-loaded.dll'), library=library)
     with pytest.raises(RuntimeError):
@@ -106,6 +107,7 @@ def test_native_abi_callbacks_remain_alive_through_cleanup():
     client.cleanup()
     assert library.win_sparkle_cleanup.calls == [()]
     assert len(client._callbacks) == 7
+    assert all(callback in _PROCESS_CALLBACKS for callback in client._callbacks)
 
 
 def test_native_rejected_key_never_initializes():

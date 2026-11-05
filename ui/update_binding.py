@@ -22,10 +22,12 @@ class UpdateBinding(QObject):
         self.window = window
         self.panel = window._page('settingsInterface').update_panel
         self._frozen_windows = []
+        self._active_channel = None
+        self._channel_pending = False
         self.controller = UpdateController(prepare_close=self.prepare_close,
             freeze=self.freeze, close_window=window.close, parent=self)
-        self.controller.status_changed.connect(self.panel.set_status)
-        self.controller.busy_changed.connect(self.panel.set_busy)
+        self.controller.status_changed.connect(self.set_status)
+        self.controller.busy_changed.connect(self.set_busy)
         self.panel.releases_requested.connect(lambda: QDesktopServices.openUrl(QUrl(RELEASES)))
         self.panel.check_requested.connect(self.check)
         self.panel.preferences_changed.connect(self.preferences_changed)
@@ -37,10 +39,13 @@ class UpdateBinding(QObject):
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self.automatic_check)
         QApplication.instance().aboutToQuit.connect(self.controller.stop)
+        window.destroyed.connect(self.controller.stop)
         self.configure()
         self._timer.start(3000)
 
     def configure(self):
+        if self._active_channel is not None:
+            raise RuntimeError('原生更新渠道需要重启后切换')
         self.controller.stop()
         if sys.platform != 'win32' or not getattr(sys, 'frozen', False):
             self.panel.check_button.setEnabled(False)
@@ -60,6 +65,7 @@ class UpdateBinding(QObject):
             self._configuration.feed(channel)
             client = windows_update_client(self._root / 'WinSparkle.dll')
             self.controller.start(client, self._configuration, _read_version(), channel)
+            self._active_channel = channel
             self.panel.set_busy(False)
         except (OSError, ValueError, RuntimeError, AttributeError) as exc:
             self.controller.stop()
@@ -70,11 +76,25 @@ class UpdateBinding(QObject):
         settings = self.window.settings
         settings.set('update_automatic', self.panel.automatic.isChecked())
         settings.set('update_channel', self.panel.channel.currentData())
-        settings.save()
-        self.configure()
+        self._channel_pending = self._active_channel is not None and settings.get('update_channel') != self._active_channel
+        self.set_busy(self.controller.busy)
+        if not settings.save():
+            self.panel.set_status('更新偏好未能保存')
+            return
+        # WinSparkle 0.9.4 UI cleanup leaves checkers alive. Never replace its
+        # global feed/callback configuration while this process is running.
+        self.panel.set_status('重启 MyGPR 后切换更新渠道' if self._channel_pending else '')
+
+    def set_status(self, message):
+        self.panel.set_status('重启 MyGPR 后切换更新渠道' if self._channel_pending else message)
+
+    def set_busy(self, busy):
+        self.panel.set_busy(busy)
+        if self._channel_pending or self._active_channel is None:
+            self.panel.check_button.setEnabled(False)
 
     def check(self):
-        if self.controller.check():
+        if not self._channel_pending and self.controller.check():
             self._record_check()
 
     def _record_check(self):
@@ -82,7 +102,7 @@ class UpdateBinding(QObject):
         self.window.settings.save()
 
     def automatic_check(self):
-        if not self.window.settings.get('update_automatic', True):
+        if self._channel_pending or not self.window.settings.get('update_automatic', True):
             return
         last = self.window.settings.get('update_last_check', '')
         try:

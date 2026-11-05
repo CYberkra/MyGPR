@@ -6,6 +6,10 @@ from pathlib import Path
 from typing import Callable
 from mygpr.infrastructure.updates.configuration import windows_build_version
 
+# 0.9.4 cleanup closes the native UI but does not join UpdateChecker workers.
+# C function pointers must survive delayed network completion until process exit.
+_PROCESS_CALLBACKS: list = []
+
 
 class WinSparkle:
     def __init__(self, dll_path: Path, *, library=None):
@@ -23,6 +27,7 @@ class WinSparkle:
     def _callback(self, name, callback, result_type=None):
         wrapped = ctypes.CFUNCTYPE(result_type)(callback)
         self._callbacks.append(wrapped)  # C holds function pointers, not Python references.
+        _PROCESS_CALLBACKS.append(wrapped)
         self._call('set_' + name + '_callback', [type(wrapped)])(wrapped)
 
     def start(self, *, version: str, public_key: str, feed: str,
@@ -56,4 +61,4 @@ class WinSparkle:
         if self._initialized:
             self._call('cleanup')()
             self._initialized = False
-        # Keep callback references through native cleanup and until object destruction.
+        # References remain in _PROCESS_CALLBACKS after UI cleanup/object destruction.
