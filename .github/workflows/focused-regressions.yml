@@ -91,16 +91,21 @@ jobs:
           "MYGPR_CI_UPDATE_INPUTS=$pwd/output/update-inputs" >> $env:GITHUB_ENV
       - name: Create isolated HTTPS endpoint certificate
         if: inputs.suite == 'update_installation'
+        timeout-minutes: 2
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path output/update-tls -Force | Out-Null
-          $cert = New-SelfSignedCertificate -DnsName 'localhost' -CertStoreLocation 'Cert:/CurrentUser/My' -KeyAlgorithm RSA -KeyLength 2048 -KeyExportPolicy Exportable -NotAfter (Get-Date).AddDays(2)
+          Write-Host 'Creating ephemeral localhost certificate'
+          $created = New-SelfSignedCertificate -DnsName 'localhost' -CertStoreLocation 'Cert:/CurrentUser/My' -KeyAlgorithm RSA -KeyLength 2048 -KeyExportPolicy Exportable -NotAfter (Get-Date).AddDays(2)
+          $cert = Get-Item -LiteralPath "Cert:/CurrentUser/My/$($created.Thumbprint)"
+          "MYGPR_CI_TLS_THUMBPRINT=$($cert.Thumbprint)" >> $env:GITHUB_ENV
           Export-Certificate -Cert $cert -FilePath output/update-tls/server.cer | Out-Null
-          Import-Certificate -FilePath output/update-tls/server.cer -CertStoreLocation 'Cert:/CurrentUser/Root' | Out-Null
+          Write-Host 'Trusting localhost certificate on disposable Windows runner'
+          Import-Certificate -FilePath output/update-tls/server.cer -CertStoreLocation 'Cert:/LocalMachine/Root' | Out-Null
+          Write-Host 'Exporting ephemeral TLS material for local test endpoint'
           [System.IO.File]::WriteAllText("$pwd/output/update-tls/server.pem", $cert.ExportCertificatePem())
           $rsa = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($cert)
           [System.IO.File]::WriteAllText("$pwd/output/update-tls/server.key", $rsa.ExportPkcs8PrivateKeyPem())
-          "MYGPR_CI_TLS_THUMBPRINT=$($cert.Thumbprint)" >> $env:GITHUB_ENV
       - name: Run selected regressions
         shell: bash
         run: python scripts/run_ci_regressions.py --suite "$MYGPR_REGRESSION_SUITE"
@@ -117,7 +122,7 @@ jobs:
         shell: pwsh
         run: |
           if ($env:MYGPR_CI_TLS_THUMBPRINT -match '^[A-Fa-f0-9]{40}$') {
-            Remove-Item -LiteralPath "Cert:/CurrentUser/Root/$env:MYGPR_CI_TLS_THUMBPRINT" -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath "Cert:/LocalMachine/Root/$env:MYGPR_CI_TLS_THUMBPRINT" -ErrorAction SilentlyContinue
             Remove-Item -LiteralPath "Cert:/CurrentUser/My/$env:MYGPR_CI_TLS_THUMBPRINT" -ErrorAction SilentlyContinue
           }
           Remove-Item -LiteralPath output/update-tls/server.key -ErrorAction SilentlyContinue
