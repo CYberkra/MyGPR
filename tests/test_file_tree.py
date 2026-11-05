@@ -310,7 +310,7 @@ def test_spatial_and_report_leaves_render_and_click_goto_delivery(qapp, panel):
     report = _find_by_kind(tree, 'report')
     assert spatial is not None and report is not None
     assert spatial.text(0) == '剖面图 v2'
-    assert spatial.text(1) == '2026-09-16'  # 行尾角标列
+    assert '2026-09-16' in spatial.toolTip(0)
     lines_got, delivery_got = [], []
     panel.line_selected.connect(lines_got.append)
     panel.delivery_focus_requested.connect(delivery_got.append)
@@ -326,8 +326,8 @@ def test_artifact_leaf_click_emits_focus_with_line(qapp, panel):
     panel.set_artifacts([_artifact('A9', 'L02')])
     leaf = _find_by_kind(panel._tree, 'artifact')
     assert leaf is not None
-    assert leaf.text(0).startswith('去直流') and leaf.text(1) == 'dewow'
-    assert '记录不完整' in leaf.text(0)
+    assert leaf.text(0) == '去直流' and leaf.text(1) == ''
+    assert '记录不完整' in leaf.toolTip(0)
     got, lines_got = [], []
     panel.artifact_focus_requested.connect(lambda *a: got.append(a))
     panel.line_selected.connect(lines_got.append)

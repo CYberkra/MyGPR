@@ -140,9 +140,12 @@ def artifact_tree_name(artifact: Any) -> str:
     if step.get('method_id'):
         name = method_name(str(step['method_id']))
         return re.sub(r'\s*[（(][A-Za-z][A-Za-z0-9 ._-]*[）)]$', '', name)
+    saved_name = str(getattr(artifact, 'name', '') or '').strip()
+    if saved_name and not saved_name.startswith(('处理结果', 'Processing pipeline')):
+        return saved_name
     method = str(getattr(artifact, 'method_name', '') or getattr(artifact, 'method_id', '') or '')
     if method and not method.startswith(('处理结果', 'Processing pipeline')):
-        return method
+        return method_name(method)
     return '处理成果'
 
 

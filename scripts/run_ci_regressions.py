@@ -30,6 +30,7 @@ SUITES = {
         "tests/test_native_processing_backend.py",
     ),
     "processing": (
+        "tests/test_file_tree.py",
         "tests/test_processing_page_v2.py",
         "tests/test_processing_workspace_flow.py",
         "tests/test_processing_async_identity.py",
