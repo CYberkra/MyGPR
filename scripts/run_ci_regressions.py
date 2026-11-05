@@ -34,6 +34,8 @@ SUITES = {
         "tests/test_home_page.py",
         "tests/test_project_workspace.py",
         "tests/test_page_controls_wired.py",
+        "tests/test_spatial_delivery_ui.py",
+        "tests/test_startup_project_restore.py",
         "tests/test_processing_page_v2.py",
         "tests/test_processing_workspace_flow.py",
         "tests/test_processing_async_identity.py",
