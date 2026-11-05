@@ -251,3 +251,64 @@ def test_channel_preferences_defer_native_reconfiguration_until_next_process(qap
     clients[0].callbacks['event']('available')  # delayed native completion after UI cleanup
     assert '重启' in window.panel.status.text()
     window.deleteLater()
+
+
+@pytest.fixture
+def unavailable_binding(qapp, monkeypatch, tmp_path, request):
+    class Window(QWidget):
+        def __init__(self):
+            super().__init__()
+            self.settings = Settings(update_channel='stable', update_automatic=True)
+            self.panel = UpdatePanel(self)
+        def _page(self, name):
+            return SimpleNamespace(update_panel=self.panel)
+
+    stage = request.param
+    monkeypatch.setattr('ui.update_binding.sys', SimpleNamespace(platform='win32', frozen=True, _MEIPASS=str(tmp_path)))
+    configuration = SimpleNamespace(public_key='pub', preview_feed='', feed=lambda channel: 'https://example.com/feed')
+    reason = {'configuration': '此安装包尚未配置更新签名公钥',
+              'library': '无法加载 WinSparkle.dll', 'initialization': '更新签名公钥未被验证器接受'}[stage]
+
+    def load(path):
+        if stage == 'configuration':
+            raise ValueError(reason)
+        return configuration
+
+    class FailedClient(Client):
+        def start(self, **kwargs):
+            raise ValueError(reason)
+
+    def client(path):
+        if stage == 'library':
+            raise OSError(reason)
+        return FailedClient()
+
+    monkeypatch.setattr('ui.update_binding.windows_update_configuration', load)
+    monkeypatch.setattr('ui.update_binding.windows_update_client', client)
+    window = Window()
+    binding = UpdateBinding(window)
+    binding._timer.stop()
+    yield window, binding, reason
+    binding.controller.stop()
+    window.deleteLater()
+
+
+@pytest.mark.parametrize('unavailable_binding', ['configuration', 'library', 'initialization'], indirect=True)
+def test_initialization_failure_keeps_all_update_controls_disabled(unavailable_binding):
+    window, binding, reason = unavailable_binding
+    binding.controller.busy_changed.emit(False)  # A later cleanup/idle notification is not availability.
+    assert not window.panel.check_button.isEnabled()
+    assert not window.panel.automatic.isEnabled()
+    assert not window.panel.channel.isEnabled()
+    assert window.panel.releases_button.isEnabled()
+    assert window.panel.status.text() == reason
+
+
+@pytest.mark.parametrize('unavailable_binding', ['configuration', 'library', 'initialization'], indirect=True)
+def test_unavailable_preferences_cannot_erase_failure_reason(unavailable_binding):
+    window, binding, reason = unavailable_binding
+    before = dict(window.settings.values)
+    binding.preferences_changed()  # A queued preference signal can still arrive after failure.
+    binding.set_status('')
+    assert window.panel.status.text() == reason
+    assert window.settings.values == before
