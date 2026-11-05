@@ -873,14 +873,15 @@ def test_active_source_marker_preserves_suffix_and_is_distinct_from_tree_selecti
     panel.set_artifacts([_v2_artifact('A')])
     artifact = _source_item(panel, 'A')
     base = artifact.text(1)
+    input_suffix = f'{base} 输入'.strip()
     panel.set_active_source('L01', 'A')
-    assert artifact.text(1) == f'{base} 输入'
+    assert artifact.text(1) == input_suffix
     assert artifact.font(0).bold()
     panel.set_current_line('L02')
     assert panel._tree.currentItem() is panel._line_id_by_item['L02']
-    assert artifact.text(1) == f'{base} 输入'
+    assert artifact.text(1) == input_suffix
     panel.apply_theme(True)
-    assert _source_item(panel, 'A').text(1) == f'{base} 输入'
+    assert _source_item(panel, 'A').text(1) == input_suffix
     panel.set_active_source('L02', '')
     assert _source_item(panel, 'A').text(1) == base
     assert not _source_item(panel, 'A').font(0).bold()

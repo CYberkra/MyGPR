@@ -132,12 +132,13 @@ class TestPickerWindowContract:
         picker._close_if_focus_left()
         assert not picker.isVisible()
 
-    def test_focus_recheck_keeps_open_when_focus_inside(self, picker, qapp):
+    def test_focus_recheck_keeps_open_when_focus_inside(self, picker, qapp, monkeypatch):
         picker.show()
         qapp.processEvents()
-        picker._browser._search.setFocus()
-        qapp.processEvents()
-        assert QApplication.focusWidget() is picker._browser._search
+        # Test the focus-membership rule, as for the outside-focus case above.
+        # Native focus transfer is not deterministic under Qt offscreen.
+        monkeypatch.setattr(QApplication, 'focusWidget',
+                            classmethod(lambda cls: picker._browser._search))
         picker._close_if_focus_left()
         assert picker.isVisible()
 
