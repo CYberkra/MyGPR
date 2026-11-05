@@ -17,6 +17,7 @@ import threading
 import time
 
 from scripts.publish_windows_update import make_appcast
+from mygpr.infrastructure.updates.configuration import windows_build_version
 
 ROOT = Path(__file__).resolve().parents[2]
 BASE_URL = 'https://localhost:18443'
@@ -243,7 +244,11 @@ def exercise_rejections(ui, server, record):
     ui.check()
     wait_for(lambda: ui.button('跳过|skip', native=True), 'skip version').click_input()
     wait_for(lambda: ui.button('^检查更新$'), 'skipped update')
-    record['skip'] = 'passed'
+    import winreg
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r'Software\MyGPR Project\MyGPR\WinSparkle') as key:
+        skipped, _ = winreg.QueryValueEx(key, 'SkipThisVersion')
+    assert skipped == windows_build_version(server.version)
+    record['skip-version-persisted'] = 'passed'
     for mode in ('cancel', 'interrupted', 'invalid-signature'):
         server.select(mode)
         ui.check()
@@ -289,9 +294,31 @@ def install_and_relaunch(ui, server, executable, output, version, record):
     live.about()
     window.child_window(title=version, control_type='Text').wait('exists', timeout=30)
     live.capture('installed-version')
-    window.close()
-    app.wait_for_process_exit(timeout=60)
+    record['restarted-normal-exit-code'] = close_with_zero_exit(window, app)
     record['signed-download-install-relaunch'] = 'passed'
+
+
+def close_with_zero_exit(window, app):
+    import ctypes
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
+    kernel.OpenProcess.restype = ctypes.c_void_p
+    kernel.GetExitCodeProcess.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
+    kernel.GetExitCodeProcess.restype = ctypes.c_int
+    kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+    handle = kernel.OpenProcess(0x00100000 | 0x1000, False, app.process)
+    if not handle:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        window.close()
+        app.wait_for_process_exit(timeout=60)
+        code = ctypes.c_ulong()
+        if not kernel.GetExitCodeProcess(handle, ctypes.byref(code)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        assert code.value == 0, f'Restarted application exited abnormally: 0x{code.value:08X}'
+        return code.value
+    finally:
+        kernel.CloseHandle(handle)
 
 
 def verify_preserved(project, source, expected, hashes, line_id, artifact_id, settings):

@@ -35,7 +35,9 @@ UninstallDisplayIcon={app}\MyGPR.exe
   #define AppFileVersion AppVersion + ".0"
 #endif
 VersionInfoVersion={#AppFileVersion}
-VersionInfoProductVersion={#AppVersion}
+VersionInfoProductVersion={#AppFileVersion}
+VersionInfoTextVersion={#AppVersion}
+VersionInfoProductTextVersion={#AppVersion}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern

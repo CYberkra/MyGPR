@@ -11,6 +11,7 @@ import time
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+from mygpr.infrastructure.updates.configuration import windows_build_version
 
 
 @pytest.fixture
@@ -46,8 +47,8 @@ def test_upgrade_removes_only_unchanged_owned_files_and_uninstall_preserves_user
     package(new, {'_internal/new.dll': b'new dependency',
                   'MyGPR.exe': (Path(os.environ['SystemRoot']) / 'System32/whoami.exe').read_bytes()})
     installers = []
-    for version, source in (('0.11.4', old), ('0.11.5', new)):
-        subprocess.run([compiler, f'/DAppVersion={version}', f'/DDistDir={source}',
+    for version, source in (('0.11.4a1', old), ('0.11.4', new)):
+        subprocess.run([compiler, f'/DAppVersion={version}', f'/DAppFileVersion={windows_build_version(version)}', f'/DDistDir={source}',
             f'/DOutputDir={tmp_path}', f'/DIconPath={icon}', str(ROOT / 'packaging/windows/MyGPR.iss')],
             check=True, capture_output=True)
         installers.append(tmp_path / f'MyGPR-{version}-Windows-x64-Setup.exe')
