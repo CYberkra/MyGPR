@@ -196,7 +196,8 @@
         "raw_size_mb",
         "updated_at",
         "distance_override",
-        "view_reversed"
+        "view_reversed",
+        "time_window_override_ns"
       ]
     },
     "mygpr.domain.project.models.ProjectArtifact": {

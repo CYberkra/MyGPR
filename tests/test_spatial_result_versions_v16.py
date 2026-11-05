@@ -139,14 +139,14 @@ def test_permanent_spatial_delete_preserves_line_inputs_and_selects_remaining(tm
         service = SpatialResultVersionService(store)
         first = service.create_result(name='surface', generate_surface=False)
         second = service.create_result(name='surface', generate_surface=False)
-        before = store.load_gpr_dataset('L01').data.copy()
+        before = np.asarray(store.load_gpr_dataset('L01').matrix).copy()
         source = store.root / 'spatial' / 'results' / second.result_id
         assert service.current_result_id() == second.result_id
         service.delete_permanently(second.result_id)
         assert not source.exists()
         assert service.current_result_id() == first.result_id
         assert not (store.root / 'spatial' / 'recycle_bin').exists()
-        np.testing.assert_array_equal(store.load_gpr_dataset('L01').data, before)
+        np.testing.assert_array_equal(np.asarray(store.load_gpr_dataset('L01').matrix), before)
         service.delete_permanently(first.result_id)
         assert service.current_result_id() == ''
     finally:

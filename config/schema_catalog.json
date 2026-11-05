@@ -363,6 +363,15 @@
       ]
     },
     {
+      "schema": "mygpr.permanent_delete.v1",
+      "owner": "project-storage",
+      "mutable": true,
+      "migration_policy": "versioned operation journal; unknown versions block deletion and require explicit handling",
+      "references": [
+        "core/permanent_delete.py"
+      ]
+    },
+    {
       "schema": "mygpr.processing_draft.v1",
       "owner": "core",
       "mutable": true,

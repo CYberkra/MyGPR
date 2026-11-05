@@ -227,7 +227,7 @@ def test_velocity_analysis_api_npz_writeback(tmp_path: Path) -> None:
         backend.shutdown()
 
 
-class _VelocitySessionShim:
+class _VelocitySessionShim(LinePropertiesMixin):
     """直接装配 VelocityPersistenceMixin（绕过 facade），锁语义与 LegacyFieldProjectSession 一致。"""
 
     def __init__(self, store: Any) -> None:
