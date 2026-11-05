@@ -43,7 +43,8 @@ def test_upgrade_removes_only_unchanged_owned_files_and_uninstall_preserves_user
     icon = tmp_path / 'app.ico'
     Image.new('RGBA', (32, 32), 'blue').save(icon)
     old, new, install = (tmp_path / name for name in ('old', 'new', 'installed'))
-    package(old, {'_internal/obsolete.dll': b'old dependency', '_internal/modified.h5': b'packaged test fixture'})
+    package(old, {'_internal/obsolete.dll': b'old dependency', '_internal/modified.h5': b'packaged test fixture',
+                  '_internal/mygpr-0.11.4a1.dist-info/METADATA': b'Name: mygpr\nVersion: 0.11.4a1\n'})
     package(new, {'_internal/new.dll': b'new dependency',
                   'MyGPR.exe': (Path(os.environ['SystemRoot']) / 'System32/whoami.exe').read_bytes()})
     installers = []
@@ -84,6 +85,7 @@ def test_upgrade_removes_only_unchanged_owned_files_and_uninstall_preserves_user
         installer.communicate(timeout=60)
         assert installer.returncode == 0
         assert not (install / '_internal/obsolete.dll').exists()
+        assert not (install / '_internal/mygpr-0.11.4a1.dist-info').exists()
         assert (install / '_internal/new.dll').read_bytes() == b'new dependency'
         assert user.read_bytes() == b'original acquisition must survive'
         assert modified.read_bytes() == b'user changed this file'
@@ -93,3 +95,34 @@ def test_upgrade_removes_only_unchanged_owned_files_and_uninstall_preserves_user
             subprocess.run([str(uninstaller), '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'],
                            check=True, capture_output=True, timeout=60)
     assert user.read_bytes() == b'original acquisition must survive'
+
+
+@pytest.mark.parametrize('changed', ['METADATA', 'user-note.txt'])
+def test_upgrade_blocks_modified_or_unknown_obsolete_version_files(compiler, tmp_path, changed):
+    from PIL import Image
+    icon = tmp_path / 'app.ico'
+    Image.new('RGBA', (32, 32), 'blue').save(icon)
+    old, new, install = (tmp_path / name for name in ('old', 'new', 'installed'))
+    relative = '_internal/mygpr-0.11.4a1.dist-info'
+    package(old, {relative + '/METADATA': b'Name: mygpr\nVersion: 0.11.4a1\n'})
+    package(new, {'MyGPR.exe': b'new application; not executed'})
+    installers = []
+    for version, source in (('0.11.4a1', old), ('0.11.4', new)):
+        subprocess.run([compiler, f'/DAppVersion={version}', f'/DAppFileVersion={windows_build_version(version)}',
+            f'/DDistDir={source}', f'/DOutputDir={tmp_path}', f'/DIconPath={icon}',
+            str(ROOT / 'packaging/windows/MyGPR.iss')], check=True, capture_output=True)
+        installers.append(tmp_path / f'MyGPR-{version}-Windows-x64-Setup.exe')
+    options = ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/CURRENTUSER', '/NOICONS', f'/DIR={install}']
+    try:
+        subprocess.run([str(installers[0]), *options], check=True, capture_output=True, timeout=60)
+        modified = install / relative / changed
+        modified.write_bytes(b'user content must survive')
+        result = subprocess.run([str(installers[1]), *options], capture_output=True, timeout=60)
+        assert result.returncode != 0
+        assert modified.read_bytes() == b'user content must survive'
+        assert (install / 'MyGPR.exe').read_bytes() == b'test exe; not executed'
+    finally:
+        uninstaller = install / 'unins000.exe'
+        if uninstaller.is_file():
+            subprocess.run([str(uninstaller), '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'],
+                           check=True, capture_output=True, timeout=60)

@@ -143,6 +143,8 @@ class Desktop:
         self.process, self.output = process, output
         self.main = self.app.window(title_re='^MyGPR.*')
         self.main.wait('visible', timeout=90)
+        self.main_handle = self.main.handle
+        self.main = self.app.window(handle=self.main_handle)
 
     def button(self, expression, *, native=False):
         windows = self.native_windows() if native else [self.main]
@@ -155,7 +157,7 @@ class Desktop:
 
     def native_windows(self):
         return [window for window in self.app.windows() if window.is_visible()
-                and not window.class_name().startswith('Qt')]
+                and window.handle != self.main_handle and not window.class_name().startswith('Qt')]
 
     def about(self):
         from pywinauto.mouse import scroll
@@ -184,7 +186,8 @@ class Desktop:
     def diagnostics(self):
         self.main.print_control_identifiers(filename=str(self.output / 'main-controls.txt'))
         for index, window in enumerate(self.native_windows()):
-            window.print_control_identifiers(filename=str(self.output / f'native-{index}-controls.txt'))
+            self.app.window(handle=window.handle).print_control_identifiers(
+                filename=str(self.output / f'native-{index}-controls.txt'))
         self.capture('diagnostic')
 
 

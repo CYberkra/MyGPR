@@ -116,7 +116,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: regressions-${{ inputs.suite }}-${{ runner.os }}
-          path: output/ci-regressions/
+          path: |
+            output/ci-regressions/
+            !output/ci-regressions/native-update/installed/**
           if-no-files-found: ignore
           retention-days: 7
       - name: Remove isolated HTTPS test certificate
