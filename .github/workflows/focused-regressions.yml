@@ -13,10 +13,20 @@ on:
           - algorithms
           - processing
           - updates
+          - update_installation
           - all
+      package_run:
+        description: Successful Windows packages run ID (update_installation only)
+        type: string
+        default: ''
+      installer_signature:
+        description: Public Ed25519 signature of the release installer (update_installation only)
+        type: string
+        default: ''
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: focused-${{ github.ref }}-${{ inputs.suite }}
@@ -26,14 +36,16 @@ jobs:
   regressions:
     name: ${{ inputs.suite }} / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: ${{ fromJSON(inputs.suite == 'update_installation' && '["windows-latest"]' || '["ubuntu-latest","windows-latest"]') }}
     env:
       QT_QPA_PLATFORM: offscreen
       MYGPR_REGRESSION_SUITE: ${{ inputs.suite }}
+      MYGPR_CI_PACKAGE_RUN: ${{ inputs.package_run }}
+      MYGPR_CI_INSTALLER_SIGNATURE: ${{ inputs.installer_signature }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -55,7 +67,7 @@ jobs:
       - name: Record tested commit
         run: git rev-parse HEAD
       - name: Prepare pinned Windows update tools
-        if: runner.os == 'Windows' && (inputs.suite == 'updates' || inputs.suite == 'all')
+        if: runner.os == 'Windows' && (inputs.suite == 'updates' || inputs.suite == 'all' || inputs.suite == 'update_installation')
         shell: pwsh
         run: |
           python -c "import runpy; from pathlib import Path; runpy.run_path('packaging/windows/update_tools.py')['prepare_winsparkle'](Path('output/update-tools'))"
@@ -63,6 +75,32 @@ jobs:
           $compiler = 'C:/Program Files (x86)/Inno Setup 6/ISCC.exe'
           if (!(Test-Path -LiteralPath $compiler)) { throw 'Windows runner has no Inno Setup compiler' }
           "MYGPR_TEST_INNO=$compiler" >> $env:GITHUB_ENV
+      - name: Download verified full application inputs
+        if: inputs.suite == 'update_installation'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ($env:MYGPR_CI_PACKAGE_RUN -notmatch '^\d+$') { throw 'Expected a numeric Windows packages run ID' }
+          if ($env:MYGPR_CI_INSTALLER_SIGNATURE -notmatch '^[A-Za-z0-9+/]{86}==$') { throw 'Expected an Ed25519 signature' }
+          $run = gh run view $env:MYGPR_CI_PACKAGE_RUN --json conclusion,name,headBranch | ConvertFrom-Json
+          if ($run.name -ne 'MyGPR Windows packages' -or $run.conclusion -ne 'success' -or $run.headBranch -ne $env:GITHUB_REF_NAME) { throw 'Packages must come from a successful build on this branch' }
+          gh run download $env:MYGPR_CI_PACKAGE_RUN --name windows-package-release --dir output/update-inputs/release
+          gh run download $env:MYGPR_CI_PACKAGE_RUN --name windows-package-seed --dir output/update-inputs/seed
+          python -m pip install pywinauto==0.6.9
+          "MYGPR_CI_UPDATE_INPUTS=$pwd/output/update-inputs" >> $env:GITHUB_ENV
+      - name: Create isolated HTTPS endpoint certificate
+        if: inputs.suite == 'update_installation'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path output/update-tls -Force | Out-Null
+          $cert = New-SelfSignedCertificate -DnsName 'localhost' -CertStoreLocation 'Cert:/CurrentUser/My' -KeyAlgorithm RSA -KeyLength 2048 -KeyExportPolicy Exportable -NotAfter (Get-Date).AddDays(2)
+          Export-Certificate -Cert $cert -FilePath output/update-tls/server.cer | Out-Null
+          Import-Certificate -FilePath output/update-tls/server.cer -CertStoreLocation 'Cert:/CurrentUser/Root' | Out-Null
+          [System.IO.File]::WriteAllText("$pwd/output/update-tls/server.pem", $cert.ExportCertificatePem())
+          $rsa = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($cert)
+          [System.IO.File]::WriteAllText("$pwd/output/update-tls/server.key", $rsa.ExportPkcs8PrivateKeyPem())
+          "MYGPR_CI_TLS_THUMBPRINT=$($cert.Thumbprint)" >> $env:GITHUB_ENV
       - name: Run selected regressions
         shell: bash
         run: python scripts/run_ci_regressions.py --suite "$MYGPR_REGRESSION_SUITE"
@@ -74,3 +112,12 @@ jobs:
           path: output/ci-regressions/
           if-no-files-found: ignore
           retention-days: 7
+      - name: Remove isolated HTTPS test certificate
+        if: always() && inputs.suite == 'update_installation'
+        shell: pwsh
+        run: |
+          if ($env:MYGPR_CI_TLS_THUMBPRINT -match '^[A-Fa-f0-9]{40}$') {
+            Remove-Item -LiteralPath "Cert:/CurrentUser/Root/$env:MYGPR_CI_TLS_THUMBPRINT" -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath "Cert:/CurrentUser/My/$env:MYGPR_CI_TLS_THUMBPRINT" -ErrorAction SilentlyContinue
+          }
+          Remove-Item -LiteralPath output/update-tls/server.key -ErrorAction SilentlyContinue

@@ -9,6 +9,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 SUITES = {
+    "update_installation": ("tests/test_windows_update_acceptance.py",),
     "updates": (
         "tests/test_windows_updates.py",
         "tests/test_update_controller.py",
@@ -68,8 +69,9 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("当前提交缺少回归用例：" + ", ".join(missing))
     report = ROOT / "output" / "ci-regressions" / "junit.xml"
     report.parent.mkdir(parents=True, exist_ok=True)
+    timeout = 900 if args.suite == 'update_installation' else 120
     command = [sys.executable, "-m", "pytest", *paths, "-q",
-               f"--junitxml={report}", "--durations=15", "--timeout=120", "--timeout-method=thread"]
+               f"--junitxml={report}", "--durations=15", f"--timeout={timeout}", "--timeout-method=thread"]
     print(f"GitHub focused suite: {args.suite}; {len(paths)} files", flush=True)
     return subprocess.run(command, cwd=ROOT, check=False).returncode
 

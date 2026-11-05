@@ -113,13 +113,13 @@ def main():
             evidence['previous_installer_sha256'] = file_sha256(args.previous_installer)
             upgrade_settings = sandbox / 'config/settings.json'
             upgrade_settings.parent.mkdir(parents=True, exist_ok=True)
-            upgrade_settings.write_text('{"theme": "dark", "recent_projects": []}', encoding='utf-8')
+            upgrade_settings.write_text('{"theme": "深色主题", "recent_projects": [], "update_automatic": false}', encoding='utf-8')
             retained_upgrade = install / 'user-created-before-upgrade.h5'
             retained_upgrade.write_bytes(b'original acquisition sentinel')
         run('install', [*setup, f'/LOG={output / "install.log"}'])
         if args.previous_installer:
             assert retained_upgrade.read_bytes() == b'original acquisition sentinel'
-            assert json.loads(upgrade_settings.read_text(encoding='utf-8'))['theme'] == 'dark'
+            assert json.loads(upgrade_settings.read_text(encoding='utf-8'))['theme'] == '深色主题'
             assert sentinel.read_bytes() == b'MyGPR QA: uninstall must preserve user data'
             assert file_sha256(source) == source_before
             evidence['checks']['upgrade-data-and-settings-preserved'] = True
