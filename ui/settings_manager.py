@@ -26,6 +26,9 @@ DEFAULT_SETTINGS = {
     'project_root': constants.DEFAULT_PROJECT_ROOT,      # ~/Documents/MyGPRProjects
     'recent_projects': [],                               # 最多 10 条
     'pinned_recent_projects': [],                         # 最近项目中的固定项
+    'update_automatic': True,
+    'update_channel': 'stable',
+    'update_last_check': '',
     'processing_left_collapsed': False,                  # 处理页左栏折叠状态
     'processing_right_collapsed': False,                 # 处理页右栏折叠状态
     'output_panel_open': False,                          # 底部输出面板默认收起（用者自开）
@@ -75,6 +78,7 @@ _NUMBER_RANGES = {
     'bscan_tvg_power': (0.3, 3.0),
 }
 _CHOICES = {
+    'update_channel': ('stable', 'preview'),
     'theme': (constants.THEME_LIGHT, constants.THEME_DARK),
     'output_panel_active_tab': ('log', 'jobs'),
     'bscan_aspect_mode': ('free', 'square', 'cell'),

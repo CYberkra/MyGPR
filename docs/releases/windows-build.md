@@ -16,7 +16,7 @@ Windows x64 安装包采用 PyInstaller onedir + Inno Setup，内置 Python、Qt
 ```powershell
 py -3.12 -m venv output/windows-build-env
 output/windows-build-env/Scripts/python.exe -m pip install "./mygpr-0.11.3-py3-none-any.whl[gui]" -r requirements-windows-build.txt
-./packaging/windows/build.ps1 -Python ./output/windows-build-env/Scripts/python.exe -InnoCompiler 'C:/Program Files (x86)/Inno Setup 6/ISCC.exe' -SourceRef v0.11.3
+./packaging/windows/build.ps1 -Python ./output/windows-build-env/Scripts/python.exe -InnoCompiler 'C:/Program Files (x86)/Inno Setup 6/ISCC.exe' -SourceRef v0.11.3 -OutputRoot output/windows-installer-v0.11.3
 ```
 
 工具基线：PyInstaller 6.22.3、hooks-contrib 2026.8、Inno Setup 6.7.3。
@@ -48,5 +48,7 @@ output/windows-build-env/Scripts/python.exe packaging/windows/verify_install.py 
 记录应用提交、配方哈希、构建环境、验证摘要和安装器 SHA256；不覆盖初次发布的源码/wheel 清单。
 安装包包含第三方许可证和完整构建环境包清单（其中含构建/QA 工具，不等于全部都打入应用）。
 当前安装器未作代码签名。
+
+应用内更新的新构建参数、免费 Ed25519 密钥生成、签名订阅与升级验收见 [应用内更新发布](application-updates.md)。
 
 本地维护构建使用当前源码快照的不可变提交，不自动发布远端 tag 或 Release。

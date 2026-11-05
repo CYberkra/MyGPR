@@ -344,6 +344,9 @@ class SettingsPage(ScrollArea):
                 Qt.TextInteractionFlag.TextSelectableByMouse)
             layout.addLayout(make_form_row(label_text, value, parent=card,
                                            trailing_stretch=False))
+        from ui.widgets.update_panel import UpdatePanel
+        self.update_panel = UpdatePanel(card)
+        layout.addWidget(self.update_panel)
         return card
 
     # ============================================================ 公共接口

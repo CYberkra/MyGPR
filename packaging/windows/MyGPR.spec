@@ -11,6 +11,8 @@ recipe = Path(SPECPATH).resolve()
 sys.path.insert(0, str(source))
 hiddenimports = []
 datas = []
+updater = os.environ.get('MYGPR_FREEZE_WINSPARKLE')
+update_binaries = [(str(Path(updater) / 'x64/Release/WinSparkle.dll'), '.')] if updater else []
 for package in ("core", "mygpr", "ui", "PythonModule"):
     hiddenimports.extend(collect_submodules(package))
     datas.extend(collect_data_files(package, include_py_files=False))
@@ -30,7 +32,7 @@ datas.append((os.environ["MYGPR_FREEZE_ICON"], "."))
 a = Analysis(
     [str(recipe / "launcher.py")],
     pathex=[str(source)],
-    binaries=[],
+    binaries=update_binaries,
     datas=datas,
     hiddenimports=sorted(set(hiddenimports)),
     hookspath=[],
@@ -49,6 +51,8 @@ a.binaries += [(name, str(qt_bin / name), 'BINARY') for name in runtime_names]
 # native dependency from outside the selected Python/venv or Windows itself.
 allowed = [Path(sys.prefix).resolve(), Path(sys.base_prefix).resolve(),
            Path(os.environ['SystemRoot']).resolve(), source, recipe]
+if updater:
+    allowed.append(Path(updater).resolve())
 for name, origin, kind in a.binaries:
     if not any(Path(origin).resolve().is_relative_to(root) for root in allowed):
         raise ValueError(f'Native dependency outside the build environment: {name}: {origin}')

@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import runpy
 import shutil
 import struct
 import subprocess
@@ -35,6 +36,9 @@ def main():
     parser.add_argument('--source-ref', required=True)
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--inno', required=True, type=Path)
+    parser.add_argument('--update-public-key-file', type=Path)
+    parser.add_argument('--preview-feed', default='')
+    parser.add_argument('--certificate-thumbprint', default='')
     args = parser.parse_args()
     if sys.platform != 'win32' or struct.calcsize('P') != 8:
         raise RuntimeError('Build requires 64-bit Windows Python')
@@ -76,7 +80,26 @@ def main():
     )
     icon = output / 'MyGPR.ico'
     create_app_icon(source, icon)
-    version_tuple = (*map(int, version.split('.')), 0)
+    update_public_key = ''
+    update_bundle = None
+    update_module = source / 'mygpr/infrastructure/updates/configuration.py'
+    if update_module.is_file():
+        update_api = runpy.run_path(str(update_module))
+        version_tuple = tuple(map(int, update_api['windows_build_version'](version).split('.')))
+        if args.update_public_key_file:
+            update_public_key = args.update_public_key_file.read_text(encoding='utf-8').strip()
+        update_config = source / 'config/windows_updates.json'
+        config = json.loads(update_config.read_text(encoding='utf-8'))
+        config.update(public_key=update_public_key, preview_feed=args.preview_feed)
+        update_config.write_text(json.dumps(config, indent=2), encoding='utf-8')
+        if update_public_key:
+            update_api['UpdateConfiguration'].load(update_config)
+            from update_tools import prepare_winsparkle
+            update_bundle = prepare_winsparkle(output / 'updater')
+    else:
+        if args.update_public_key_file:
+            raise ValueError('This source ref predates application update support')
+        version_tuple = (*map(int, version.split('.')), 0)
     resource = VSVersionInfo(
         ffi=FixedFileInfo(filevers=version_tuple, prodvers=version_tuple,
                           mask=0x3f, flags=0, OS=0x40004, fileType=1, subtype=0, date=(0, 0)),
@@ -113,15 +136,23 @@ def main():
          '--output-file', output / 'windows-environment-licenses.json'])
     environment = os.environ.copy()
     environment.pop('PYTHONPATH', None)
+    environment.pop('MYGPR_FREEZE_WINSPARKLE', None)
     environment['PATH'] = os.pathsep.join([str(Path(sys.executable).parent),
                                           str(Path(os.environ['SystemRoot']) / 'System32'),
                                           os.environ['SystemRoot']])
     environment.update(MYGPR_FREEZE_SOURCE=str(source), MYGPR_FREEZE_ICON=str(icon),
                        MYGPR_FREEZE_VERSION_INFO=str(version_info))
+    if update_bundle:
+        environment['MYGPR_FREEZE_WINSPARKLE'] = str(update_bundle)
     run([sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean',
          '--distpath', output / 'dist', '--workpath', output / 'build', RECIPE / 'MyGPR.spec'],
         cwd=source, env=environment)
     dist = output / 'dist/MyGPR'
+    if update_bundle:
+        for license_name in ('COPYING', 'COPYING.expat'):
+            target = notices / 'WinSparkle' / license_name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(update_bundle / license_name, target)
     shutil.copytree(notices, dist / '_internal/third-party-licenses', dirs_exist_ok=True)
     shutil.copy2(inventory, dist / '_internal/build-environment.json')
     for name in ('windows-build-environment.cdx.json', 'windows-environment-licenses.json'):
@@ -131,15 +162,40 @@ def main():
     provenance = {'version': version, 'application_commit': commit, 'application_ref': args.source_ref,
                   'python': sys.version, 'platform': platform.platform(), 'architecture': platform.machine(),
                   'build_environment': 'build-environment.json', 'recipe_sha256': recipe_hashes,
-                  'pyinstaller': metadata.version('PyInstaller'), 'signed': False}
+                  'pyinstaller': metadata.version('PyInstaller'),
+                  'signed': bool(args.certificate_thumbprint), 'update_public_key': update_public_key}
     (dist / '_internal/windows-build.json').write_text(json.dumps(provenance, indent=2), encoding='utf-8')
     check_environment = environment.copy()
     check_environment.update(QT_QPA_PLATFORM='offscreen',
                              MYGPR_SETTINGS_FILE=str(output / 'build-check/config/settings.json'))
     run([dist / 'MyGPR.exe', '--package-check', output / 'frozen-build-check.json'],
         cwd=output, env=check_environment, timeout=120)
-    run([args.inno.resolve(), f'/DAppVersion={version}', f'/DDistDir={dist}',
-         f'/DOutputDir={output / "assets"}', f'/DIconPath={icon}', RECIPE / 'MyGPR.iss'])
+    signing = []
+    if args.certificate_thumbprint:
+        import re
+        if not re.fullmatch(r'[0-9A-Fa-f]{40}', args.certificate_thumbprint):
+            raise ValueError('Certificate thumbprint must be 40 hexadecimal characters')
+        command = ['signtool.exe', 'sign', '/sha1', args.certificate_thumbprint,
+                   '/fd', 'SHA256', '/td', 'SHA256', '/tr', 'https://timestamp.digicert.com']
+        run([*command, dist / 'MyGPR.exe'])
+        run(['signtool.exe', 'verify', '/pa', dist / 'MyGPR.exe'])
+        signing = ['/DMyGPRSigned', '/SMyGPRSigner=' + subprocess.list2cmdline(command) + ' $f']
+    # Only hashed files shipped by an earlier package can be removed on upgrade.
+    managed = []
+    for path in sorted(dist.rglob('*')):
+        if path.is_file():
+            with path.open('rb') as stream:
+                digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+            managed.append(f'{digest}|{path.relative_to(dist).as_posix()}')
+    (dist / 'mygpr-managed-files.txt').write_text('\n'.join(managed) + '\n', encoding='utf-8')
+    run([args.inno.resolve(), f'/DAppVersion={version}', f'/DAppFileVersion={".".join(map(str, version_tuple))}',
+         f'/DDistDir={dist}', f'/DOutputDir={output / "assets"}', f'/DIconPath={icon}',
+         *signing, RECIPE / 'MyGPR.iss'])
+    installer = output / 'assets' / f'MyGPR-{version}-Windows-x64-Setup.exe'
+    with installer.open('rb') as stream:
+        provenance.update(installer_name=installer.name, installer_sha256=hashlib.file_digest(stream, 'sha256').hexdigest())
+    if signing:
+        run(['signtool.exe', 'verify', '/pa', installer])
     (output / 'build-provenance.json').write_text(json.dumps(provenance, indent=2), encoding='utf-8')
 
 

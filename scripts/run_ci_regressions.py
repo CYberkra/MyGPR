@@ -9,6 +9,12 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 SUITES = {
+    "updates": (
+        "tests/test_windows_updates.py",
+        "tests/test_update_controller.py",
+        "tests/test_windows_update_native.py",
+        "tests/test_windows_installer_upgrade.py",
+    ),
     "bscan": (
         "tests/test_bscan_global_preferences.py",
         "tests/test_bscan_preference_mirror.py",

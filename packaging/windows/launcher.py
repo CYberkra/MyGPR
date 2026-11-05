@@ -100,6 +100,11 @@ def package_check(report_path: Path, hdf5_path: Path | None) -> int:
 
 
 def main() -> int:
+    import importlib.util
+    # The recipe can also rebuild immutable releases predating update support.
+    if importlib.util.find_spec('mygpr.infrastructure.updates') is not None:
+        from mygpr.infrastructure.updates.process_mutex import hold_installer_mutex
+        hold_installer_mutex()
     # Tests may isolate their settings without changing HOME/USERPROFILE or user data.
     settings_file = os.environ.get("MYGPR_SETTINGS_FILE")
     if settings_file:

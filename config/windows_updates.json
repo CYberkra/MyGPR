@@ -1,0 +1,6 @@
+{
+  "schema": "mygpr.windows_updates.v1",
+  "public_key": "",
+  "stable_feed": "https://github.com/CYberkra/MyGPR/releases/latest/download/appcast.xml",
+  "preview_feed": ""
+}

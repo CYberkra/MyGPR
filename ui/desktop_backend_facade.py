@@ -55,6 +55,16 @@ __all__ = [
 _LOGGER = logging.getLogger(__name__)
 
 
+def windows_update_configuration(path):
+    from mygpr.interfaces.updates import update_configuration
+    return update_configuration(path)
+
+
+def windows_update_client(path):
+    from mygpr.interfaces.updates import update_client
+    return update_client(path)
+
+
 # ---------------------------------------------------------------------------
 # Public wrapped functions
 # ---------------------------------------------------------------------------

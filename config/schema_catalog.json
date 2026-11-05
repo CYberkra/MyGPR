@@ -2,6 +2,13 @@
   "schema": "mygpr.schema_catalog.v1",
   "schemas": [
     {
+      "schema": "mygpr.windows_updates.v1",
+      "owner": "application-distribution",
+      "mutable": false,
+      "migration_policy": "new-schema-on-breaking-change; build-owned trust root",
+      "references": ["config/windows_updates.json", "mygpr/infrastructure/updates/configuration.py"]
+    },
+    {
       "schema": "mygpr.artifact_pointer.v1",
       "owner": "project-storage",
       "mutable": false,
