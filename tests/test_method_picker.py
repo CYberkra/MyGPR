@@ -77,6 +77,7 @@ class TestPickerWindowContract:
         picker._browser._search.setText('agc')
         qapp.processEvents()
         assert top_gain.isHidden() is False
+
         assert top_gain.child(0).isHidden() is False
         assert top_filter.isHidden() is True    # dewow 不命中 → 整类隐藏
         # 显示名（中文）命中路径
@@ -90,6 +91,17 @@ class TestPickerWindowContract:
         qapp.processEvents()
         assert top_filter.isHidden() is False
         assert top_gain.isHidden() is False
+
+    def test_search_expands_matches_and_restores_collapsed_categories(self, picker):
+        tree = picker._browser._tree
+        gain = tree.topLevelItem(1)
+        gain.setExpanded(False)
+        picker._browser._search.setText('agc')
+        assert gain.isExpanded()
+        assert picker._count_label.text() == '1 个匹配'
+        picker._browser._search.clear()
+        assert not gain.isExpanded()
+        assert picker._count_label.text() == '2 个方法'
 
     def test_show_event_resets_search(self, picker, qapp):
         picker.show()

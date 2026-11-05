@@ -63,7 +63,9 @@ def ensure_matrix(data: Any) -> tuple[np.ndarray, list[dict[str, Any]]]:
     if np.isfinite(arr).all():
         return arr, []
     finite = np.isfinite(arr)
-    fill = float(np.mean(arr[finite])) if finite.any() else 0.0
+    if not finite.any():
+        raise ValueError('输入数据没有有效数值，无法处理；请检查原始数据和质检结果。')
+    fill = float(np.mean(arr[finite]))
     clean = np.nan_to_num(arr, nan=fill, posinf=fill, neginf=fill)
     return clean, [warning("data_sanitized", "输入数据包含 NaN/Inf，已使用均值填充。", "", fill_value=fill)]
 
@@ -80,7 +82,9 @@ def normalize_output(
     all_warnings = [dict(item) for item in (warnings or [])]
     if not np.isfinite(arr).all():
         finite = np.isfinite(arr)
-        fill = float(np.mean(arr[finite])) if finite.any() else 0.0
+        if not finite.any():
+            raise ValueError('处理结果没有有效数值，无法保存；请检查输入数据和处理参数。')
+        fill = float(np.mean(arr[finite]))
         arr = np.nan_to_num(arr, nan=fill, posinf=fill, neginf=fill)
         all_warnings.append(
             warning("data_sanitized", "输出结果包含 NaN/Inf，已使用均值填充。", method_id, fill_value=fill)

@@ -86,6 +86,73 @@ def test_spatial_result_version_is_immutable_and_traceable(tmp_path: Path) -> No
         store.close()
 
 
+def test_spatial_preflight_rejects_unknown_physical_axes(tmp_path):
+    store = _project_with_spatial_lines(tmp_path / 'project', count=1)
+    try:
+        dataset = store.load_gpr_dataset('L01')
+        dataset.metadata.update(time_axis_status='unknown', distance_axis_status='unknown')
+        store.save_gpr_dataset('L01', dataset)
+        result = SpatialResultVersionService(store).preflight(line_ids=['L01'])
+        assert not result['passed']
+        assert any('距离未知' in warning for warning in result['warnings'])
+    finally:
+        store.close()
+
+
+def test_spatial_preflight_rejects_draft_and_partial_selection(tmp_path):
+    store = _project_with_spatial_lines(tmp_path / 'project', count=2)
+    try:
+        annotation = store.load_basal_interface_annotation('L02')
+        annotation.status = 'draft'
+        store.save_basal_interface_annotation('L02', annotation)
+        service = SpatialResultVersionService(store)
+        result = service.preflight(line_ids=['L01', 'L02'])
+        assert not result['passed']
+        assert result['usable_line_ids'] == ['L01']
+        with pytest.raises(ValueError, match='L02.*草稿'):
+            service.create_result(line_ids=['L01', 'L02'], generate_surface=False)
+        assert not service.list_results()
+        assert service.create_result(line_ids=['L01'], generate_surface=False).summary['line_count'] == 1
+    finally:
+        store.close()
+
+
+def test_spatial_result_becomes_stale_after_time_calibration(tmp_path):
+    store = _project_with_spatial_lines(tmp_path / 'project', count=1)
+    try:
+        service = SpatialResultVersionService(store)
+        result = service.create_result(line_ids=['L01'], generate_surface=False)
+        assert not service.load_result(result.result_id).stale
+        line = store.get_line('L01')
+        line.time_window_override_ns = 100.0
+        store.upsert_line(line)
+        assert service.load_result(result.result_id).stale
+        newer = service.create_result(line_ids=['L01'], generate_surface=False)
+        assert not service.load_result(newer.result_id).stale
+    finally:
+        store.close()
+
+
+def test_permanent_spatial_delete_preserves_line_inputs_and_selects_remaining(tmp_path):
+    store = _project_with_spatial_lines(tmp_path / 'project', count=1)
+    try:
+        service = SpatialResultVersionService(store)
+        first = service.create_result(name='surface', generate_surface=False)
+        second = service.create_result(name='surface', generate_surface=False)
+        before = store.load_gpr_dataset('L01').data.copy()
+        source = store.root / 'spatial' / 'results' / second.result_id
+        assert service.current_result_id() == second.result_id
+        service.delete_permanently(second.result_id)
+        assert not source.exists()
+        assert service.current_result_id() == first.result_id
+        assert not (store.root / 'spatial' / 'recycle_bin').exists()
+        np.testing.assert_array_equal(store.load_gpr_dataset('L01').data, before)
+        service.delete_permanently(first.result_id)
+        assert service.current_result_id() == ''
+    finally:
+        store.close()
+
+
 def test_ignored_traces_do_not_become_surface_control_points(tmp_path: Path) -> None:
     store = _project_with_spatial_lines(tmp_path / 'project')
     try:

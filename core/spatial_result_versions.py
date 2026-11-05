@@ -197,6 +197,17 @@ class SpatialResultVersionService:
             if trajectory is None or not trajectory.points:
                 warnings.append(f"{line_id}：缺少 RTK/GNSS 轨迹，不能生成空间曲线")
                 continue
+            try:
+                dataset = self.project._annotation_dataset(line_id, annotation)
+            except (OSError, ValueError, KeyError) as exc:
+                warnings.append(f"{line_id}：无法读取标注来源：{exc}")
+                continue
+            if dataset.metadata.get('distance_axis_status') == 'unknown':
+                warnings.append(f"{line_id}：测线距离未知，不能定位空间曲线")
+                continue
+            if dataset.metadata.get('time_axis_status') == 'unknown' and not dataset.metadata.get('is_depth'):
+                warnings.append(f"{line_id}：时间轴未知，不能计算界面深度")
+                continue
             labels, has_unknown = _track_crs_labels(trajectory.points, crs_labels)
             track_crs.update(labels)
             unknown_track_crs |= has_unknown
@@ -204,10 +215,13 @@ class SpatialResultVersionService:
             if str(getattr(annotation, "status", "draft")) == "confirmed":
                 confirmed += 1
             else:
-                warnings.append(f"{line_id}：标注仍为草稿")
+                warnings.append(f"{line_id}：标注仍为草稿，请先确认")
+                continue
             usable.append(line_id)
         if not usable:
-            errors.append("没有同时具备界面标注与空间轨迹的测线。")
+            errors.append("没有满足空间成果生成条件的测线。")
+        elif len(usable) != len(requested):
+            errors.append("部分所选测线不满足空间成果生成条件。")
         coordinate_system = str(getattr(self.project.manifest, "coordinate_system", "") or "")
         generic_crs = not coordinate_system or '未' in coordinate_system or coordinate_system.strip().lower() == 'cgcs2000 / 3-degree gk'
         if not generic_crs:
@@ -260,7 +274,11 @@ class SpatialResultVersionService:
         self.project.assert_writable()
         preflight = self.preflight(line_ids=line_ids, generate_surface=generate_surface)
         if not preflight["passed"]:
-            raise ValueError("；".join(preflight["errors"]))
+            prefixes = tuple(f'{line_id}：' for line_id in preflight['requested_line_ids'])
+            details = list(preflight['errors']) + [
+                warning for warning in preflight['warnings'] if warning.startswith(prefixes)
+            ]
+            raise ValueError("；".join(details))
         usable = list(preflight["usable_line_ids"])
         base_name = _slug(name or "basal_surface")
         revision = self._next_revision(base_name)
@@ -479,25 +497,40 @@ class SpatialResultVersionService:
             return _export_with_fiona(resolve_managed_path(result_dir, record.files.get("interfaces_geojson", "interfaces.geojson"), require_file=True), output, fmt, record.coordinate_system)
         raise ValueError(f"Unsupported spatial export format: {format_name}")
 
-    def move_to_recycle_bin(self, result_id: str) -> Path:
+    def delete_permanently(self, result_id: str) -> Path:
+        from core.permanent_delete import delete_journal_path, permanently_delete_paths, protected_source_paths
         self.project.assert_writable()
-        record = self.load_result(result_id)
-        source = self.root / record.result_id
-        recycle = Path(self.project.root) / "spatial" / "recycle_bin"
-        recycle.mkdir(parents=True, exist_ok=True)
-        destination = recycle / f"{record.result_id}_{uuid.uuid4().hex[:8]}"
-        source.replace(destination)
-        if self.current_result_id() == record.result_id:
-            remaining = self.list_results()
-            self._atomic_json(
-                self.index_path,
-                {
+        root = Path(self.project.root).resolve()
+        source = ensure_direct_child(self.root, self.root / str(result_id))
+        if not delete_journal_path(root, f"spatial-{result_id}").exists():
+            self.load_result(result_id)
+        was_current = self.current_result_id() == result_id
+        manifest_path = source / 'manifest.json'
+        manifest = json.loads(manifest_path.read_text(encoding='utf-8')) if manifest_path.is_file() else None
+
+        def finalize():
+            if was_current:
+                remaining = self.list_results()
+                self._atomic_json(self.index_path, {
                     "schema": SPATIAL_RESULT_INDEX_SCHEMA,
                     "current_result_id": remaining[0].result_id if remaining else "",
                     "updated_at": local_now(),
-                },
-            )
-        return destination
+                })
+
+        try:
+            permanently_delete_paths(root, [source], key=f"spatial-{result_id}", finalize=finalize)
+        except Exception:
+            # Keep only the small result registration visible for explicit retry;
+            # deleted GIS/data files are never reconstructed.
+            if manifest is not None and manifest_path.resolve() not in protected_source_paths(root):
+                manifest['status'] = '删除未完成'
+                manifest['files'] = {}
+                self._atomic_json(manifest_path, manifest)
+            raise
+        return source
+
+    # Compatibility only; no recycle directory is created.
+    move_to_recycle_bin = delete_permanently
 
     def _next_revision(self, base_name: str) -> int:
         pattern = re.compile(rf"^{re.escape(base_name)}_v(\d+)$")
@@ -518,7 +551,7 @@ class SpatialResultVersionService:
             "processing_result": _project_path(self.project.root, line.processed_result),
             "processing_params": _project_path(self.project.root, line.params_path),
         }
-        return {
+        payload = {
             "annotation_version": str(getattr(annotation, "version", "")),
             "annotation_status": str(getattr(annotation, "status", "draft")),
             "source_result_id": str(getattr(annotation, "source_result_id", "")),
@@ -535,6 +568,9 @@ class SpatialResultVersionService:
                 for key, path in paths.items() if path is not None and path.exists()
             },
         }
+        if line.time_window_override_ns > 0:
+            payload['time_window_override_ns'] = line.time_window_override_ns
+        return payload
 
     def _current_source_fingerprint(self, line_ids: Iterable[str]) -> str:
         payload: dict[str, Any] = {}
@@ -567,6 +603,8 @@ class SpatialResultVersionService:
                     }
                     for key, path in paths.items() if path is not None and path.exists()
                 }
+                if line.time_window_override_ns > 0:
+                    state[line_id]['time_window_override_ns'] = line.time_window_override_ns
             except Exception as exc:
                 state[str(raw_line_id)] = {"error": str(exc)}
         return hashlib.sha256(
@@ -677,6 +715,8 @@ def _state_token_from_source_payload(payload: dict[str, Any]) -> str:
             }
             for key, item in files.items() if isinstance(item, dict)
         }
+        if line_payload.get('time_window_override_ns'):
+            state[line_id]['time_window_override_ns'] = line_payload['time_window_override_ns']
     return hashlib.sha256(
         json.dumps(state, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()

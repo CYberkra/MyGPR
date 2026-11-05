@@ -1,6 +1,6 @@
 # MyGPR 研发技能工作流
 
-2026-11-02 维护。此文件通过根 AGENTS.md 路由使用；不是运行时插件，不向软件注入算法或 UI 功能。
+2026-11-04 维护。此文件通过根 AGENTS.md 路由使用；不是运行时插件，不向软件注入算法或 UI 功能。
 
 ## 已有安装与选择规则
 
@@ -9,6 +9,11 @@
 | 技能 | 本机来源 | 用途 |
 | --- | --- | --- |
 | frontend-design-polish | `%USERPROFILE%/.codex/skills/frontend-design-polish/SKILL.md` | 科学桌面界面的布局、密度、常用操作和视觉检查 |
+| interface-design | `%USERPROFILE%/.codex/skills/interface-design/SKILL.md` | 跨页信息层级、视觉规范、密度与组件一致性 |
+| design-system | `%USERPROFILE%/.agents/skills/design-system/SKILL.md` | 提取或审计已有视觉规范；Web 示例需适配 QSS/Qt |
+| ui-ux-pro-max | `%USERPROFILE%/.codex/skills/ui-ux-pro-max/SKILL.md` | 配色、字体、可访问性与交互规则的本地专项检索 |
+| click-path-audit | `%USERPROFILE%/.agents/skills/click-path-audit/SKILL.md` | 追踪点击、信号、控制器与异步回调的最终状态 |
+| gh-fix-ci | `%USERPROFILE%/.codex/skills/gh-fix-ci/SKILL.md` | PR 的 GitHub Actions 日志分析、失败定位与同提交复核 |
 | code-context-finder | `%USERPROFILE%/.codex/skills/code-context-finder/SKILL.md` | 注册表、执行器、调用方、轴与元数据合同定位 |
 | engineering-feedback-loop | `%USERPROFILE%/.codex/skills/engineering-feedback-loop/SKILL.md` | 缺陷假设、最小复现与反馈路径；默认把执行交给 CI |
 | windows-desktop-e2e | `%USERPROFILE%/.agents/skills/windows-desktop-e2e/SKILL.md` | pywinauto/UIA 桌面操作测试及失败截图 |
@@ -28,11 +33,22 @@
 
 ### 界面与交互
 
-1. 用 frontend-design-polish 明确用户任务与关键操作路径，先解决操作步骤和空间分配。
+1. 日常 PyQt 布局与实现用 frontend-design-polish；跨页视觉规范与层级设计选 interface-design；提取或审计已有规范可选 design-system。按主任务选一个设计流程，先明确用户任务、关键操作路径和空间分配，不叠加完整流程。
 2. 设计任务给出状态、空白/失败情况、小屏行为及验收条件；只做设计时不改功能代码。
 3. 实施任务复用 PyQt6/qfluentwidgets 与项目控制器，不把网页框架示例直接搬进桌面应用。
 4. 用现有 Qt 测试验证状态和信号；涉及实际点击、弹窗、焦点、滚动、DPI 时再使用 windows-desktop-e2e。
 5. 桌面测试先检查控件 UIA 可访问性。自绘 B-scan/pyqtgraph 可能不能作为普通 UIA 控件操作，结合 Qt 级状态测试与截图/实机检查，不能仅凭技能中的通用 Qt 支持描述宣称可自动操作全部图形。
+
+ui-ux-pro-max 仅在有具体设计疑问时加载，优先使用 `--domain ux/color/typography/chart`
+中的一个域检索。当前版本没有 PyQt 栈，不指定虚构的 `--stack pyqt`，也不默认降级到
+Tailwind/React。触控 44px、16px 正文、mobile-first 等是来源中的场景建议，不能覆盖
+本项目的桌面布局合同；科学图件的轴、单位、振幅与色阶语义始终优先。
+
+使用安装位置中的 `scripts/search.py`，按当前 SKILL.md 的父目录解析绝对路径。
+本机安装已将 Claude 专用变量改为技能目录占位说明；无需设置 `CLAUDE_PLUGIN_ROOT`。
+查询默认不加 `--persist`。需要保留设计结论时更新现行规格及其索引，避免自动生成
+`.interface-design/system.md`、`DESIGN.md` 或 `design-system/*/MASTER.md` 成为重复合同；
+已有这些文件时先读取并核对现行规格，不自动覆盖。
 
 ### 算法和处理链
 
@@ -47,6 +63,15 @@
 - 排错：用 engineering-feedback-loop 建立 CI 可执行的复现 → 收集状态/线程/数据证据 → 验证原因 → 最小修复 → 远端回归。不能仅通过改测试期待值消除失败。
 - 重构：codebase-design 用于划分接口与职责；遵守 ui/controllers、facade、application/domain/infrastructure 的现有边界。不为一个小改动引入多层抽象。
 - 修复期间需要测试时加载 python-testing；测试针对外部行为、错误路径与曾经失败的案例，不为了数值覆盖率添加镜像实现的测试。
+- 操作状态问题用 click-path-audit 追踪：用户操作 → Qt 信号 → 控制器/协调器 → 异步完成或取消 → 页面最终状态。检查后续回调是否覆盖先前状态、旧任务是否写回新测线；不引入示例里的 React 状态库。
+
+### GitHub Actions 排障
+
+1. 用 gh-fix-ci 时先确认 `gh auth status`，再读取指定 PR、失败检查和日志；不因安装技能自动触发工作流。
+2. 记录 PR、head SHA、run URL、失败步骤与原因，区分产品缺陷、用例问题和 CI 环境问题。
+3. 按当前会话已授权范围修复；技能里的确认提示不重复索取已有授权。提交、推送、合并仍按当前用户授权范围执行。
+4. 回归执行遵守本项目的 GitHub Actions 约定。复核修复提交对应的检查；未运行、仍排队或旧 SHA 的成功都不能写成修复已通过。
+5. 此技能负责 CI 排障，不替代真实数据科学验证和 Windows 原生桌面验收。
 
 ## 验证入口
 
@@ -63,12 +88,22 @@
 Windows 原生显示、真实设备和私有实测数据验收须单独安排；未得到当前任务的本机测试授权就保持待验收，
 不为 CI 方便上传用户原始数据。托管 CI 的离屏 Qt 测试不能替代真实显卡/传感器验收。
 
-## 其他候选技能
+## 新增技能的安装来源
 
-已调研 OpenAI 官方 [`gh-fix-ci`](https://github.com/openai/skills/tree/main/skills/.curated/gh-fix-ci)：
-适合定位 PR 的 GitHub Actions 失败、读取日志、修复后核对同一提交的检查。
-它是 CI 排障工具，不是雷达科学验证工具；当前只记录候选，未安装。
-日常工作优先使用上表已有技能，科学数据合同留在项目内维护。
+2026-11-04 经用户授权，用 Codex 自带 skill-installer 安装以下三个技能到用户级目录。
+仅安装选定技能目录，不安装整套插件、hooks 或常驻服务；保留原有技能。
+新技能在安装后的下一轮对话可用，也可用 `$interface-design`、`$gh-fix-ci`、
+`$ui-ux-pro-max` 显式指定。下列为安装时固定的来源，不表示持续自动更新。
+
+| 技能 | 上游仓库与固定提交 | 安装子目录 |
+| --- | --- | --- |
+| interface-design | [Dammyjay93/interface-design @ 2f9be320](https://github.com/Dammyjay93/interface-design/tree/2f9be3206855bcb2d1d0af262c8bae25cba6658d) | `.claude/skills/interface-design` |
+| gh-fix-ci | [openai/skills @ 49f948fa](https://github.com/openai/skills/tree/49f948faa9258a0c61caceaf225e179651397431) | `skills/.curated/gh-fix-ci` |
+| ui-ux-pro-max | [nextlevelbuilder/ui-ux-pro-max-skill @ 713eef51](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill/tree/713eef51b04efc98d6fa565323b495f7c9c89fd4) | `.claude/skills/ui-ux-pro-max` |
+
+每个新增技能目录中的 `INSTALLATION.json` 记录来源、入口 SHA-256 和本地适配。
+ui-ux-pro-max 仅适配命令示例的技能路径并补充 Codex 展示入口，检索脚本和数据库保持上游原样。
+本次未安装 Impeccable；其他技能也不随这三个技能自动升级。
 
 ## 交付证据
 

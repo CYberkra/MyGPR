@@ -116,7 +116,9 @@ def test_startup_commands_are_shared_with_project_menu(page):
     assert requested == ['new', 'open']
 
 
-def test_recent_projects_keep_paths_and_availability(page, tmp_path):
+def test_recent_projects_keep_paths_and_availability(page, tmp_path, monkeypatch):
+    monkeypatch.setattr('ui.controllers.recent_projects_controller.run_command',
+                        lambda command, **kwargs: command.execute())
     existing = tmp_path / 'survey'
     existing.mkdir()
     missing = tmp_path / 'missing'
@@ -130,8 +132,10 @@ def test_recent_projects_keep_paths_and_availability(page, tmp_path):
     assert opened == [str(existing)]
 
 
-def test_project_menu_shares_display_names_pins_and_fallbacks(page, tmp_path):
+def test_project_menu_shares_display_names_pins_and_fallbacks(page, tmp_path, monkeypatch):
     from ui.settings_manager import SettingsManager
+    monkeypatch.setattr('ui.controllers.recent_projects_controller.run_command',
+                        lambda command, **kwargs: command.execute())
 
     renamed = tmp_path / 'old-folder'
     renamed.mkdir()

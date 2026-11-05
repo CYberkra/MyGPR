@@ -171,7 +171,7 @@ class InterpretationPage(PanelStateMixin, QWidget):
 
         self._points_table = QTableWidget(0, 5, points_card)
         self._points_table.setHorizontalHeaderLabels(
-            ['#', '道', '采样点', '时间(ns)', '深度(m)'])
+            ['#', '道', '采样点', '时间(ns)', '估深(m)'])
         self._points_table.verticalHeader().setVisible(False)
         self._points_table.setEditTriggers(
             QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -181,6 +181,8 @@ class InterpretationPage(PanelStateMixin, QWidget):
             QAbstractItemView.SelectionMode.SingleSelection)
         table_header = self._points_table.horizontalHeader()
         table_header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        table_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        table_header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         self._points_table.setMinimumHeight(180)
         points_layout.addWidget(self._points_table, 1)
 
@@ -544,6 +546,8 @@ class InterpretationPage(PanelStateMixin, QWidget):
         """
         bundle = self._bundle
         if bundle is None:
+            return None
+        if 'ns' not in str(getattr(bundle, 'sample_axis_label', '') or '').lower():
             return None
         axis = getattr(bundle, 'sample_axis', None)
         if axis is None or len(axis) < 2:

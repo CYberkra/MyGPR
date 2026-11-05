@@ -12,10 +12,11 @@ Project Explorer 平铺列线、无日期分组）相悖，分组层级已移除
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any, Sequence
-from ui.result_presentation import artifact_parameters, describe_artifact
+from ui.result_presentation import artifact_parameters, describe_artifact, method_name
 
 
 # ---------------------------------------------------------------- 节点模型（Provider 层）
@@ -95,12 +96,14 @@ def _spatial_node(result: Any) -> TreeNode:
     n_lines = len(getattr(result, 'line_ids', ()) or ())
     tip = [f'状态：{getattr(result, "status", "") or "—"}',
            f'测线：{n_lines} 条']
+    if created:
+        tip.append(f'创建日期：{created}')
     if getattr(result, 'stale', False):
         tip.append('已有更新的数据（陈旧）')
     return TreeNode(
         key=f'spatial:{result_id}', kind='spatial',
         text=f'{name} v{revision}' if revision else name,
-        payload=result_id, suffix=created, tooltip='\n'.join(tip))
+        payload=result_id, tooltip='\n'.join(tip))
 
 
 def _report_node(package: Any) -> TreeNode:
@@ -110,8 +113,8 @@ def _report_node(package: Any) -> TreeNode:
     count = int(getattr(package, 'file_count', 0) or 0)
     return TreeNode(
         key=f'report:{package_dir}', kind='report', text=name,
-        payload=package_dir, suffix=generated,
-        tooltip=f'文件：{count} 个\n目录：{package_dir}')
+        payload=package_dir,
+        tooltip=f'文件：{count} 个\n日期：{generated or "—"}\n目录：{package_dir}')
 
 
 def build_tree_model(lines: Sequence[Any], spatial_results: Sequence[Any] = (),
@@ -125,6 +128,22 @@ def build_tree_model(lines: Sequence[Any], spatial_results: Sequence[Any] = (),
         (ln for ln in lines or ()),
         key=lambda ln: str(getattr(ln, 'line_id', '') or ''))
     return [_line_node(ln) for ln in ordered]
+
+
+def artifact_tree_name(artifact: Any) -> str:
+    """Name this saved step; the tree already conveys line and ancestry."""
+    params = artifact_parameters(artifact)
+    label = str(params.get('result_label') or '').strip()
+    if label and not label.startswith(('处理结果', 'Processing pipeline')):
+        return label
+    step = artifact_step(artifact)
+    if step.get('method_id'):
+        name = method_name(str(step['method_id']))
+        return re.sub(r'\s*[（(][A-Za-z][A-Za-z0-9 ._-]*[）)]$', '', name)
+    method = str(getattr(artifact, 'method_name', '') or getattr(artifact, 'method_id', '') or '')
+    if method and not method.startswith(('处理结果', 'Processing pipeline')):
+        return method
+    return '处理成果'
 
 
 def _artifact_node(artifact: Any, artifacts=()) -> TreeNode:
@@ -144,7 +163,7 @@ def _artifact_node(artifact: Any, artifacts=()) -> TreeNode:
                    f'{getattr(artifact, "dtype", "") or ""}'.strip())
     presentation = describe_artifact(artifact, artifacts)
     return TreeNode(
-        key=f'artifact:{artifact_id}', kind='artifact', text=presentation.tab_title,
+        key=f'artifact:{artifact_id}', kind='artifact', text=artifact_tree_name(artifact),
         payload=artifact_id, aux=line_id, suffix=method,
         tooltip=presentation.tooltip+'\n'+'\n'.join(tip))
 
@@ -217,11 +236,7 @@ def build_lineage_model(artifacts: Sequence[Any], line_id: str) -> tuple[TreeNod
             aid, ready = work.pop()
             if ready:
                 node = _artifact_node(by_id[aid], by_id)
-                params = artifact_parameters(by_id[aid])
-                group = str(params.get('run_group_id') or '')
-                step = params.get('run_step_index')
-                suffix = f'{group[:6]}.{step}' if group and step else node.suffix
-                built[aid] = replace(node, suffix=suffix,
+                built[aid] = replace(node, suffix='',
                     children=tuple(built[c] for c in sorted(children[aid], key=order)))
             else:
                 work.append((aid, True))

@@ -76,6 +76,8 @@ class LineDataQualityReport:
     sampled: bool = False
     evaluated_value_count: int = 0
     source_data_sha256: str = ""
+    time_axis_status: str = ""
+    distance_axis_status: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -117,13 +119,15 @@ def _orientation_check(dataset: GPRDataSet) -> tuple[str, str, str, QualityIssue
         return DataOrientation.INVALID, "B-scan 矩阵为空。", "重新导入测线数据。", QualityIssue("error", "empty_matrix", "B-scan 矩阵为空。", "重新导入测线数据。")
     # MyGPR field sidecar convention is rows=samples/time/depth, cols=traces/distance.
     # Typical YingShan lines are around 501 x 2000+; matrix CSVs may be smaller, but
-    # a matrix with many more rows than columns is a strong transposition risk.
-    if rows > max(cols * 2, 128):
+    # A short survey can have more samples than traces. An authoritative
+    # acquisition reader has already normalized its declared source order.
+    declared_order = dataset.metadata.get('source_matrix_order') in {'traces_by_samples', 'samples_by_traces'}
+    if rows > max(cols * 2, 128) and not declared_order:
         issue = QualityIssue(
             "warning",
             "transpose_risk",
-            f"矩阵形态为 {rows}×{cols}，采样点数显著大于道数，存在转置导入风险。",
-            "确认原始 CSV 中行/列含义；必要时使用方向修正入口转置后再处理。",
+            f"矩阵形态为 {rows}×{cols}，请核对采样点与道的方向。",
+            "短测线也可能有较少的道；请依据采集记录确认，必要时再转置。",
         )
         return DataOrientation.TRANSPOSE_RISK, issue.message, issue.suggestion, issue
     if cols < 8:

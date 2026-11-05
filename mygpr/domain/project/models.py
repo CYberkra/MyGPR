@@ -52,6 +52,7 @@ class ProjectLine:
     updated_at: str = ""
     distance_override: str = ""
     view_reversed: bool = False
+    time_window_override_ns: float = 0.0
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "line_id", _non_empty(self.line_id, "line_id"))
@@ -234,6 +235,8 @@ class LineQualityReport:
     issues: tuple[LineQualityIssue, ...] = ()
     sampled: bool = False
     evaluated_value_count: int = 0
+    time_axis_status: str = ""
+    distance_axis_status: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -263,7 +266,7 @@ class LineDeleteResult:
 
 @dataclass(frozen=True, slots=True)
 class ArtifactDeleteResult:
-    """Result of moving processing artifacts into the project trash."""
+    """Permanent deletion result; legacy trash_dir is always empty."""
 
     line_id: str
     deleted_artifact_ids: tuple[str, ...]

@@ -16,6 +16,8 @@
 
 ## 保存的设计记录
 
+- [2026-11-04 永久删除](2026-11-04-deletion-interaction-design.md)：四类永久删除已在工作区接通，保护原始导入源文件；[实施记录](../plans/2026-11-05-permanent-deletion.md)；静态检查通过，回归 CI 与 Windows 原生验收待执行。
+- [2026-11-04 启动页](2026-11-04-startup-page-design.md)：已授权首轮双主题、搜索、固定与选中详情改造；工作区实现及静态检查已完成，CI 与 Windows 原生验收待执行。
 - [2026-09-03 工程化路线图](2026-09-03-engineering-roadmap.md)：分阶段决策与当时状态；未完成项需按当前代码重新核查。
 - [2026-09-06 反卷积 / Inverse-Q](2026-09-06-deconv-inverseq-design.md)。
 - [2026-09-06 幅度 C-scan](2026-09-06-phase4-amplitude-cscan-design.md)。

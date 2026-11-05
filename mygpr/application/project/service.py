@@ -227,8 +227,13 @@ class ProjectService(ProjectAcquisitionServiceMixin, ProjectIdentityServiceMixin
     def get_line(self, project_id: str, line_id: str) -> ProjectLine:
         return self._session(project_id).get_line(line_id)
 
-    def update_line_properties(self, project_id: str, line_id: str, length_m: float | None, view_reversed: bool):
-        return self._session(project_id).update_line_properties(line_id, length_m=length_m, view_reversed=view_reversed)
+    def update_line_properties(self, project_id: str, line_id: str, length_m: float | None,
+                               view_reversed: bool, time_window_ns: float | None = None):
+        session = self._session(project_id)
+        if time_window_ns is None:
+            return session.update_line_properties(line_id, length_m=length_m, view_reversed=view_reversed)
+        return session.update_line_properties(
+            line_id, length_m=length_m, view_reversed=view_reversed, time_window_ns=time_window_ns)
 
     def get_dataset_info(self, project_id: str, line_id: str) -> LineDatasetInfo:
         return self._session(project_id).get_dataset_info(line_id)
@@ -418,10 +423,9 @@ class ProjectService(ProjectAcquisitionServiceMixin, ProjectIdentityServiceMixin
         *,
         reason: str = "用户删除成果",
     ) -> ArtifactDeleteResult:
-        """把处理成果移入项目回收站（级联由调用方经 list_artifact_descendants 确认）。"""
-        return self._session(project_id).delete_artifacts(
-            line_id, artifact_ids, reason=reason
-        )
+        """Permanently delete the confirmed dependency closure."""
+        with self.exclusive_delete(project_id) as session:
+            return session.delete_artifacts(line_id, artifact_ids, reason=reason)
 
     def export_artifact_segy(
         self,
@@ -543,8 +547,9 @@ class ProjectService(ProjectAcquisitionServiceMixin, ProjectIdentityServiceMixin
             result_id, Path(destination), format_name=format_name
         )
 
-    def delete_spatial_result(self, project_id: str, result_id: str) -> Path:
-        return self._session(project_id).delete_spatial_result(result_id)
+    def delete_spatial_result(self, project_id: str, result_id: str, *, task_lease: bool = False) -> Path:
+        with self.exclusive_delete(project_id, task_lease=task_lease) as session:
+            return session.delete_spatial_result(result_id)
 
     def build_georeference_3d(
         self,

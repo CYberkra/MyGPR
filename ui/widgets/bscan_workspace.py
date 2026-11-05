@@ -455,6 +455,15 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
             for gid in list(self.group_ids()):
                 self.close_tab(key, gid, force=True)
 
+    def forget_source(self, key: str) -> None:
+        """Deleted resources cannot be resurrected through closed-tab history."""
+        with self._change():
+            for gid in list(self.group_ids()):
+                self.close_tab(key, gid, force=True, remember=False)
+            self._closed = [entry for entry in self._closed if entry['key'] != key]
+            self._sources.pop(key, None)
+            self._pending.discard(key)
+
     def close_tabs(self, scope='unpinned', key=None, group_id=None) -> None:
         group = self._group(group_id)
         if group is None:

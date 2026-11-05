@@ -223,6 +223,7 @@ class TestJobHubFanOut:
 
         pc_calls = window.project_controller.calls
         assert ('refresh_lines', ()) in pc_calls
+        assert hub._co.project._spatial_reload_pending is True
         hub.import_job_ids.discard('JOB-IMP')  # 不残留
         assert 'JOB-IMP' not in hub.import_job_ids
         for view in views:
@@ -326,12 +327,13 @@ class TestArtifactDeleteChain:
     def test_delete_requested_queries_descendants(self):
         window, _pages, _views = _make_window()
         project = PageCoordinator(window).project
-        window.project_controller = _StubPage()
+        from unittest.mock import MagicMock
+        window.project_controller = MagicMock()
+        project.can_change_project = lambda: True
 
         project.on_artifact_delete_requested('L01', ['a1', 'a2'])
 
-        calls = window.project_controller.calls
-        assert ('get_artifact_descendants', ('L01', ['a1'])) in calls
+        window.project_controller.deletion.request.assert_called_once_with('artifacts', ['a1', 'a2'], line_id='L01')
 
     def test_descendants_confirmed_submits_delete(self, monkeypatch):
         from ui import dialogs

@@ -46,6 +46,18 @@ def test_quality_center_displays_issues_and_filters_failed_lines(qapp):
     dialog.deleteLater()
 
 
+def test_unknown_axes_are_not_displayed_as_numbers(qapp):
+    from ui.pages.project_quality import QualityCenterDialog
+    report = NS(line_id='L01', status='warning', sample_count=256, trace_count=24,
+                time_window_ns=250, length_m=23, time_axis_status='unknown',
+                distance_axis_status='unknown', finite_ratio=1, trajectory_points=0, issues=())
+    dialog = QualityCenterDialog()
+    dialog.set_reports([report])
+    assert dialog._table.item(0, 3).text() == '未知'
+    assert dialog._table.item(0, 4).text() == '未知'
+    dialog.close()
+
+
 def test_trace_issue_locations_use_real_sensor_and_qc_indices():
     import numpy as np
     from core.quality_trace_locations import locate_trace_issues

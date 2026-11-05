@@ -118,41 +118,49 @@ def test_failed_result_save_restores_catalog_head_and_files(project, monkeypatch
     assert after_files == before_files
 
 
-@pytest.mark.parametrize("failure", ["second_move", "catalog", "manifest"])
-def test_failed_batch_delete_restores_whole_selection(project, monkeypatch, failure):
-    from mygpr.infrastructure.persistence import artifact_delete
-
+@pytest.mark.parametrize("failure", ["unlink", "catalog", "journal"])
+def test_permanent_delete_reports_residuals_and_retries(project, monkeypatch, failure):
+    from core import permanent_delete
+    from core.field_project_errors import FieldProjectOperationError
     backend, pid = project
-    backend.projects.save_line_dataset(pid, "L01", np.ones((16, 4), dtype=np.float32), time_window_ns=900)
+    backend.projects.save_line_dataset(pid, "L01", np.ones((16, 4), dtype=np.float32))
     first, second = save_result(backend, pid, "first"), save_result(backend, pid, "second")
     store = backend.projects._session(pid)._store
-    before_rows = store.storage.catalog.list_artifacts(line_id="L01")
-    head = store.storage.catalog.branch_head("L01:main")
-    before_files = {p: p.read_bytes() for p in (store.root / "data").rglob("*.h5")}
-    move = artifact_delete.shutil.move
     calls = []
-
-    def fail_second(source, destination, *args, **kwargs):
-        calls.append(source)
-        if len(calls) == 2:
-            raise PermissionError("result locked")
-        return move(source, destination, *args, **kwargs)
-
-    def fail(*args, **kwargs):
-        raise PermissionError("result locked")
-
-    if failure == "second_move":
-        monkeypatch.setattr(artifact_delete.shutil, "move", fail_second)
-    elif failure == "catalog":
-        monkeypatch.setattr(store.storage.catalog, "delete_artifact", fail)
+    original_unlink = Path.unlink
+    original_catalog = store.storage.catalog.delete_artifact
+    original_json = permanent_delete.atomic_write_json
+    def fail_unlink(path, *args, **kwargs):
+        if path.suffix == '.h5' and not calls:
+            calls.append(True)
+            raise PermissionError('result locked')
+        return original_unlink(path, *args, **kwargs)
+    def fail_catalog(*args, **kwargs):
+        if not calls:
+            calls.append(True)
+            raise PermissionError('result locked')
+        return original_catalog(*args, **kwargs)
+    def fail_json(path, payload):
+        if payload.get('state') == 'metadata_pending' and not calls:
+            calls.append(True)
+            raise PermissionError('result locked')
+        return original_json(path, payload)
+    if failure == 'unlink':
+        monkeypatch.setattr(Path, 'unlink', fail_unlink)
+    elif failure == 'catalog':
+        monkeypatch.setattr(store.storage.catalog, 'delete_artifact', fail_catalog)
     else:
-        monkeypatch.setattr(artifact_delete, "atomic_write_json", fail)
-    with pytest.raises(PermissionError, match="result locked"):
-        backend.projects.delete_artifacts(pid, "L01", [first.artifact_id, second.artifact_id])
-    assert store.storage.catalog.list_artifacts(line_id="L01") == before_rows
-    assert store.storage.catalog.branch_head("L01:main") == head
-    assert {p: p.read_bytes() for p in (store.root / "data").rglob("*.h5")} == before_files
-    assert not list((store.root / ".trash").rglob("*.h5"))
+        monkeypatch.setattr(permanent_delete, 'atomic_write_json', fail_json)
+    with pytest.raises(FieldProjectOperationError, match='未完成'):
+        backend.projects.delete_artifacts(pid, 'L01', [first.artifact_id, second.artifact_id])
+    assert list((store.root / '.delete_operations').glob('*.json'))
+    assert not (store.root / '.trash').exists()
+    monkeypatch.undo()
+    remaining = [a.artifact_id for a in backend.projects.list_artifacts(pid, 'L01')]
+    backend.projects.delete_artifacts(pid, 'L01', remaining)
+    assert backend.projects.list_artifacts(pid, 'L01') == ()
+    assert not list((store.root / '.delete_operations').glob('*.json'))
+    np.testing.assert_array_equal(backend.projects.read_dataset(pid, 'L01').data, np.ones((16, 4)))
 
 
 @pytest.mark.parametrize("endpoint", [True, False])
@@ -222,28 +230,26 @@ def test_endpoint_crop_saved_axis_keeps_input_sampling_interval(project):
     assert float(axis[1] - axis[0]) == pytest.approx(1.8, abs=1e-5)
 
 
-def test_windows_lock_on_second_delete_target_preserves_selection(project):
+def test_windows_locked_delete_reports_partial_completion(project):
     import os
     import h5py
     from core.hdf5_line_container import artifacts_dir_path
-
-    if os.name != "nt":
-        pytest.skip("Windows HDF5 file sharing contract")
+    from core.field_project_errors import FieldProjectOperationError
+    if os.name != 'nt':
+        pytest.skip('Windows HDF5 file sharing contract')
     backend, pid = project
-    backend.projects.save_line_dataset(pid, "L01", np.ones((16, 4), dtype=np.float32), time_window_ns=900)
-    first, second = save_result(backend, pid, "first"), save_result(backend, pid, "second")
+    backend.projects.save_line_dataset(pid, 'L01', np.ones((16, 4), dtype=np.float32))
+    first, second = save_result(backend, pid, 'first'), save_result(backend, pid, 'second')
     store = backend.projects._session(pid)._store
-    path = artifacts_dir_path(store.storage.line_container_path("L01")) / f"{first.artifact_id}.h5"
-    before = store.storage.catalog.list_artifacts(line_id="L01")
-    with h5py.File(path, "r"):
-        with pytest.raises(PermissionError):
-            backend.projects.delete_artifacts(pid, "L01", [first.artifact_id, second.artifact_id])
-    assert store.storage.catalog.list_artifacts(line_id="L01") == before
-    for artifact in (first, second):
-        np.testing.assert_array_equal(
-            backend.projects.read_artifact_dataset(pid, "L01", artifact.artifact_id).data, np.ones((16, 4))
-        )
-    assert not list((store.root / ".transactions").glob("*/transaction.json"))
+    path = artifacts_dir_path(store.storage.line_container_path('L01')) / f'{first.artifact_id}.h5'
+    with h5py.File(path, 'r'):
+        with pytest.raises(FieldProjectOperationError, match='未完成'):
+            backend.projects.delete_artifacts(pid, 'L01', [first.artifact_id, second.artifact_id])
+    assert path.is_file()
+    remaining = [a.artifact_id for a in backend.projects.list_artifacts(pid, 'L01')]
+    backend.projects.delete_artifacts(pid, 'L01', remaining)
+    assert backend.projects.list_artifacts(pid, 'L01') == ()
+    np.testing.assert_array_equal(backend.projects.read_dataset(pid, 'L01').data, np.ones((16, 4)))
 
 
 @pytest.mark.parametrize("boundary", ["before_catalog_commit", "after_catalog_commit"])

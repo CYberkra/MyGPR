@@ -739,13 +739,13 @@ def test_artifact_context_menu_actions_emit_focus_delete_copy(
     panel._on_context_menu(QPoint(5, 5))
     assert [t for t, _ in actions] == [
         '打开结果标签', '从此结果继续处理', '修改此步参数并另建分支',
-        '参数与来源', '打包到此步的结果…', '删除此结果及依赖成果…', '复制成果号',
+        '参数与来源', '打包到此步的结果…', '永久删除此成果及依赖成果…', '复制成果号',
     ]
     focus_got, delete_got = [], []
     panel.artifact_focus_requested.connect(lambda *a: focus_got.append(a))
     panel.artifact_delete_requested.connect(lambda *a: delete_got.append(a))
     for text, slot in actions:
-        if text in ('打开结果标签', '删除此结果及依赖成果…', '复制成果号'):
+        if text in ('打开结果标签', '永久删除此成果及依赖成果…', '复制成果号'):
             slot()
     assert focus_got == [('L02', 'A9')]   # 与单击同语义（换线如需+跳预览）
     assert delete_got == [('L02', 'A9')]  # 面板不弹确认框，直接交删除链路
@@ -772,6 +772,14 @@ def _v2_artifact(aid, parent='', *, run='run001', index=1, line_id='L01'):
                      'implementation_version': 'native-1.0'}] * index,
     }}
     return artifact
+
+
+def test_tree_uses_compact_step_name_and_keeps_custom_labels():
+    from ui.file_tree import artifact_tree_name
+    artifact = _v2_artifact('A1')
+    assert artifact_tree_name(artifact) == '低频漂移校正'
+    artifact.manifest['params']['result_label'] = '现场复核 (A)'
+    assert artifact_tree_name(artifact) == '现场复核 (A)'
 
 
 def _source_item(panel, aid):
@@ -814,7 +822,7 @@ def test_old_project_menu_cannot_delete_reused_ids(panel, monkeypatch):
     panel.set_project_info(types.SimpleNamespace(project_id='second', name='second'))
     panel.set_lines([_line('L01')])
     panel.set_artifacts([_artifact('A1', 'L01')])
-    actions['删除此结果及依赖成果…'].trigger()
+    actions['永久删除此成果及依赖成果…'].trigger()
     assert deleted == []
 
 
@@ -890,9 +898,9 @@ def test_running_input_blocks_ancestor_delete_but_allows_sibling_view(panel, mon
     assert panel._tree.isEnabled()
     actions = _capture_source_menu(panel, monkeypatch, _source_item(panel, aid))
     assert actions['打开结果标签'].isEnabled()
-    assert actions['删除此结果及依赖成果…'].isEnabled() is not blocked
+    assert actions['永久删除此成果及依赖成果…'].isEnabled() is not blocked
     if blocked:
-        assert '运行' in actions['删除此结果及依赖成果…'].toolTip()
+        assert '运行' in actions['永久删除此成果及依赖成果…'].toolTip()
 
 
 def test_running_line_delete_is_disabled_without_blocking_raw_view(panel, monkeypatch):
@@ -900,7 +908,7 @@ def test_running_line_delete_is_disabled_without_blocking_raw_view(panel, monkey
     panel.set_lines([_line('L01')])
     panel.set_processing_input('L01', '', True)
     actions = _capture_source_menu(panel, monkeypatch, panel._line_id_by_item['L01'])
-    assert not actions['删除测线…'].isEnabled()
+    assert not actions['永久删除测线…'].isEnabled()
     assert not actions['处理该测线'].isEnabled()
 
 
@@ -941,7 +949,7 @@ def test_delete_rechecks_task_dependency_when_menu_was_opened_before_task(panel,
     deleted = []
     panel.artifact_delete_requested.connect(lambda *args: deleted.append(args))
     panel.set_processing_input('L01', 'A', True)
-    actions['删除此结果及依赖成果…'].trigger()
+    actions['永久删除此成果及依赖成果…'].trigger()
     assert deleted == []
 
 

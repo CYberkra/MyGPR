@@ -9,7 +9,6 @@
 PlaceholderPage（QLabel '页面建设中' 居中），controller / 面板为 None（connect 判空）。
 """
 import logging
-from pathlib import Path
 
 from PyQt6.QtCore import (
     Qt, QSize, pyqtSignal,
@@ -389,17 +388,10 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
             return
         self._last_project_restored = True
         recents = self.settings.get('recent_projects') or []
-        for root in recents:
-            root = str(root or '')
-            if root and Path(root).is_dir():
-                self.project_controller.open_project(root)
-                return
-        page_getter = getattr(self, '_page', None)
-        if recents and callable(page_getter):
-            startup = page_getter('homeInterface')
-            setter = getattr(startup, 'set_startup_error', None)
-            if callable(setter):
-                setter(f'无法恢复上次项目：目录不可访问或不存在。\n{recents[0]}')
+        startup = self._page('homeInterface')
+        if callable(getattr(startup, 'restore_last_project', None)):
+            startup.set_backend_ready(True)
+            startup.restore_last_project(recents)
 
     def ensure_pages_ready(self) -> None:
         """同步构造全部剩余页面并完成收尾接线（预热竞态兜底 / 测试 / 冒烟）。"""
@@ -563,6 +555,8 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
         if nav is None or project is None or not hasattr(project, 'workspace_state'):
             return
         state = project.workspace_state()
+        ready = self._backend_ready or self.backend_controller is None
+        project.startup.set_backend_ready(ready)
         summary = getattr(project, '_summary', None)
         switch = getattr(self, '_project_switch_btn', None)
         if switch is not None:
@@ -576,7 +570,7 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
         current = self.stackedWidget.currentWidget()
         current_name = current.objectName() if current is not None else ''
         if tree_button is not None:
-            tree_button.setVisible(current_name != 'processingInterface')
+            tree_button.setVisible(state != 'startup' and current_name != 'processingInterface')
             tree_button.setEnabled(state != 'startup')
             tree_button.setToolTip('文件树 (Ctrl+B)' if state != 'startup' else '打开项目后可查看项目资源')
         for key in ('processingInterface', 'interpretationInterface',
@@ -584,7 +578,7 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
             item = nav.items.get(key)
             if item is None:
                 continue
-            ready = self._backend_ready or self.backend_controller is None
+            item.setVisible(state != 'startup')
             reason = '' if ready and state == 'ledger' else (
                 '后端尚未就绪' if not ready else '请先打开项目' if state == 'startup' else '请先导入测线')
             item.setEnabled(not reason)
@@ -898,6 +892,9 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
     # ============================================================ 项目对话框（窗口 UI）
     def _show_new_project_dialog(self) -> None:
         """新建项目对话框：选目录 + 项目名 + 可选元数据 → create_project。"""
+        cancel_restore = getattr(self._page('homeInterface'), 'cancel_pending_restore', None)
+        if callable(cancel_restore):
+            cancel_restore()
         if not self.page_coordinator.project.can_change_project():
             return
         if not self._backend_ready:
@@ -995,6 +992,9 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
 
     def _open_project_dialog(self) -> None:
         """打开项目：目录对话框 → open_project。"""
+        cancel_restore = getattr(self._page('homeInterface'), 'cancel_pending_restore', None)
+        if callable(cancel_restore):
+            cancel_restore()
         if not self.page_coordinator.project.can_change_project():
             return
         if not self._backend_ready:
@@ -1114,6 +1114,9 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
         if not self.page_coordinator.project.confirm_interpretation_close():
             event.ignore()
             return
+        shutdown_startup = getattr(self._page('homeInterface'), 'shutdown', None)
+        if callable(shutdown_startup):
+            shutdown_startup()
         # 1) 先关解释标注会话（可能涉及后端会话资源）
         if self.interpretation_controller is not None:
             try:

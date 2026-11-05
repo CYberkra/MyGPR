@@ -61,6 +61,7 @@ class MethodPickerDialog(QDialog):
         layout.addLayout(header)
 
         self._browser = MethodBrowser(self)
+        self._browser.sig_filter_count.connect(self._on_filter_count)
         self._browser.sig_add_requested.connect(self._on_add_requested)
         self._browser.sig_method_selected.connect(self._on_selection_changed)
         layout.addWidget(self._browser, 1)
@@ -111,6 +112,10 @@ class MethodPickerDialog(QDialog):
         self._browser.set_methods(methods or [])
         self._count_label.setText(f'{len(methods or [])} 个方法')
         self._on_selection_changed(self._browser.current_method_id())
+
+    def _on_filter_count(self, count: int) -> None:
+        suffix = '个匹配' if self._browser._search.text().strip() else '个方法'
+        self._count_label.setText(f'{count} {suffix}')
 
     # ------------------------------------------------------------ 复位
     def reset_state(self) -> None:

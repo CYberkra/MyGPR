@@ -534,7 +534,30 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
             self.original_preview_requested.emit()
 
     def close_artifact_tab(self, artifact_id):
-        self._workspace.close_source('artifact:' + str(artifact_id))
+        self._workspace.forget_source('artifact:' + str(artifact_id))
+
+    def release_deleted_previews(self, plan):
+        """Drop mmap/array references before the deletion worker touches files."""
+        victims = []
+        for key, source in list(self._sources.items()):
+            affected = (plan.kind == 'project' or
+                        (plan.kind == 'lines' and self._line_id in plan.targets) or
+                        (plan.kind == 'artifacts' and source.get('artifact_id') in plan.targets))
+            if affected:
+                source['bundle'] = None
+                victims.append(key)
+        for key, source in list(self._comparison.sources.items()):
+            affected = (plan.kind == 'project' or
+                        (plan.kind == 'lines' and source.get('line_id') in plan.targets) or
+                        (plan.kind == 'artifacts' and source.get('artifact_id') in plan.targets))
+            if affected:
+                self._comparison.sources.pop(key)
+                self._comparison.pending.pop(key, None)
+                victims.append(key)
+        for key in victims:
+            self._workspace.forget_source(key)
+            self._preview_requested.discard(str(self._sources.get(key, {}).get('artifact_id') or 'original'))
+        self._sync_sources()
 
     def close_all_artifact_tabs(self):
         self._stash_draft()

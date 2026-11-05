@@ -33,7 +33,6 @@ from core.source_file_registry import (
     remove_line_source_records,
 )
 from mygpr.domain.common.errors import error_info_from_exception
-from core.storage_primitives import atomic_write_json, utc_now
 from core.field_project_errors import FieldProjectOperationError
 from core.field_project_backup import (
     ProjectBackupResult,
@@ -724,7 +723,8 @@ def _delete_project_local_path(src: Path, project_root: Path, deleted: list[str]
 
 
 def delete_project_line(store: FieldProjectStore, line_id: str, *, reason: str = "用户删除测线") -> LineDeleteResult:
-    """Move one line's project-local artifacts into the project recycle bin."""
+    """Permanently delete one line's owned files; retain shared project files."""
+    from core.permanent_delete import permanently_delete_paths
     store.assert_writable()
     safe_line_id = validate_line_id(line_id)
     lines = store.list_lines()
@@ -732,59 +732,35 @@ def delete_project_line(store: FieldProjectStore, line_id: str, *, reason: str =
     if target_line is None:
         raise FieldProjectOperationError(f"未找到测线：{safe_line_id}")
     project_root = store.root.resolve()
-    stamp = utc_now().replace(":", "").replace("+", "_")
-    trash_root = project_root / ".trash" / "lines" / f"{stamp}_{safe_line_id}"
-    trash_root.mkdir(parents=True, exist_ok=False)
-    moved: list[str] = []
-
-    def move_path(path: Path) -> None:
-        if not path.exists():
-            return
-        source = _ensure_within_project(path, project_root)
-        rel = source.relative_to(project_root)
-        destination = trash_root / rel
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(source), str(destination))
-        moved.append(source.as_posix())
-
-    move_path(store.root / "raw" / safe_line_id)
-    move_path(store.root / "processed" / safe_line_id)
+    paths = [store.root / "raw" / safe_line_id, store.root / "processed" / safe_line_id]
     if getattr(getattr(store, "storage", None), "is_hybrid", False):
-        move_path(store.storage.line_container_path(safe_line_id))
-        move_path(store.storage.line_artifacts_dir(safe_line_id))
-    move_path(store.root / "targets" / f"{safe_line_id}_targets.csv")
+        paths.extend((store.storage.line_container_path(safe_line_id),
+                      store.storage.line_artifacts_dir(safe_line_id)))
+    paths.extend(sorted((store.root / "targets").glob(f"{safe_line_id}_*")))
+    paths.append(store.root / 'targets' / 'history' / safe_line_id)
     spatial_dir = store.root / "spatial"
     if spatial_dir.exists():
-        for path in sorted(spatial_dir.glob(f"{safe_line_id}_*")):
-            move_path(path)
-        move_path(spatial_dir / "project_spatial_coordinates.csv")
-
-    source_records = [record.to_dict() for record in load_source_registry(store) if record.line_id == safe_line_id]
-    remove_line_source_records(store, safe_line_id)
+        paths.extend(sorted(spatial_dir.glob(f"{safe_line_id}_*")))
     remaining = [line for line in lines if line.line_id != safe_line_id]
-    if getattr(getattr(store, "storage", None), "is_hybrid", False):
-        store.storage.catalog.delete_line(safe_line_id)
-    store.manifest.set_lines(remaining)
-    if isinstance(store.manifest.reports, dict):
-        store.manifest.reports.update({
-            "status": "需重新生成",
-            "stale_reason": f"测线 {safe_line_id} 已删除并移入回收站",
-            "updated_at": local_now(),
-        })
-    atomic_write_json(trash_root / "trash_manifest.json", {
-        "schema": "mygpr.line_trash.v1",
-        "line": asdict(target_line),
-        "source_records": source_records,
-        "original_paths": moved,
-        "reason": reason,
-        "trashed_at": utc_now(),
-    })
-    store.save_manifest()
-    store.append_log(f"测线移入回收站 {safe_line_id}: files={len(moved)}, reason={reason}, trash={trash_root}")
+
+    def finalize() -> None:
+        # Only small registration files are transactional, never deleted data.
+        with store.mutation('delete-line-registration', files=(project_root / 'metadata' / 'source_files.json',)):
+            remove_line_source_records(store, safe_line_id)
+            if getattr(getattr(store, "storage", None), "is_hybrid", False):
+                store.storage.catalog.delete_line(safe_line_id)
+            store.manifest.set_lines(remaining)
+            if isinstance(store.manifest.reports, dict):
+                store.manifest.reports.update({"status": "需重新生成",
+                    "stale_reason": f"测线 {safe_line_id} 已删除（永久）", "updated_at": local_now()})
+            store.save_manifest()
+
+    deleted = permanently_delete_paths(project_root, paths, key=f"line-{safe_line_id}", finalize=finalize)
+    store.append_log(f"测线永久删除 {safe_line_id}: files={len(deleted)}, reason={reason}")
     return LineDeleteResult(
         line_id=safe_line_id,
         line_name=target_line.name,
-        deleted_paths=tuple(moved),
+        deleted_paths=deleted,
         remaining_line_count=len(remaining),
     )
 
@@ -795,6 +771,8 @@ def remove_recent_project(project_path: str | Path, *, recent_store: RecentProje
 
 
 def _assert_safe_project_root_for_removal(store: FieldProjectStore) -> Path:
+    if store.root.is_symlink() or store.root.is_junction():
+        raise FieldProjectOperationError(f"拒绝删除链接项目目录：{store.root}")
     root = store.root.resolve()
     manifest = root / PROJECT_MANIFEST_NAME
     if root.is_symlink() or not manifest.is_file() or manifest.is_symlink():
@@ -822,11 +800,15 @@ def delete_project_permanently(
     that folder are not touched.  The function requires a valid project manifest
     in the target directory and refuses obvious unsafe roots.
     """
+    from core.permanent_delete import checked_delete_path, protected_source_paths, delete_project_tree
+    store.assert_writable()
     root = _assert_safe_project_root_for_removal(store)
+    checked_delete_path(root.parent, root)
+    protected_source_paths(root)  # Validate provenance before releasing the session.
     project_name = store.manifest.name
     store.append_log("准备直接删除项目文件夹。")
     store.close()
-    shutil.rmtree(root)
+    delete_project_tree(root)
     removed = (recent_store or RecentProjectsStore()).remove(root)
     return ProjectDeleteResult(
         project_name=project_name,

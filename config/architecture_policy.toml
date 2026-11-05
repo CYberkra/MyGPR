@@ -279,9 +279,17 @@ max_function_lines = 100
 
 [[migration_exceptions]]
 path_prefix = "mygpr/infrastructure/persistence/artifact_delete.py"
-allowed_local_import_prefixes = ["core.field_project_errors", "core.field_project_models", "core.hdf5_line_container", "core.processing_artifact_index", "core.storage_primitives", "core.field_project_store"]
+allowed_local_import_prefixes = ["core.field_project_errors", "core.field_project_models", "core.hdf5_line_container", "core.processing_artifact_index", "core.storage_primitives", "core.field_project_store", "core.permanent_delete"]
 owner = "processing-backend"
 remove_after = "1.1.0"
 reason = "Persistence adapter over hybrid artifact storage; inherits adapter conventions from its field_project_adapter / intermediate_cleanup siblings."
+expiry_action = "warn"
+
+[[migration_exceptions]]
+path_prefix = "mygpr/infrastructure/persistence/permanent_deletion.py"
+allowed_local_import_prefixes = ["core.field_project_operations", "core.permanent_delete"]
+owner = "processing-backend"
+remove_after = "1.1.0"
+reason = "Extracted project deletion persistence adapter; shares the authoritative managed-path and original-source protection implementation with legacy operations."
 expiry_action = "warn"
 max_function_lines = 100

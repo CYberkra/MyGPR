@@ -16,7 +16,7 @@ class ProjectIdentityUi(QObject):
     rename_project_requested = pyqtSignal(str, str)
     rename_line_requested = pyqtSignal(str, str, str)
     relocation_requested = pyqtSignal(str, str)
-    properties_requested = pyqtSignal(str, str, object, bool)
+    properties_requested = pyqtSignal(str, str, object, bool, object)
 
     def __init__(self, page):
         super().__init__(page)

@@ -107,7 +107,8 @@ def _write_preview(path, dataset, artifact, context):
     status = dataset.metadata.get('distance_axis_status', 'unknown')
     distance = np.asarray(dataset.distance_axis_m)[traces]
     known = status in ('known', 'measured', 'valid', 'physical', 'provided_length') and _monotone(distance)
-    timed = dataset.time_window_ns > 0 and _monotone(time)
+    timed = (dataset.metadata.get('time_axis_status') != 'unknown'
+             and dataset.time_window_ns > 0 and _monotone(time))
     elevation = np.asarray(dataset.metadata.get('elevation_axis_m', []), dtype=np.float64)
     is_elevation = bool(dataset.metadata.get('is_elevation')) and elevation.shape == (dataset.sample_count,)
     x_edges = _axis_edges(distance if known else traces)

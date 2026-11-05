@@ -514,7 +514,7 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
         # ---------------- 浮动覆盖层（子控件，resizeEvent 中定位） ----------------
         # 全幅空态引导（评审 P0-1）：先于其他浮层创建，图例/缩放钮保持其上
         self._empty_overlay = EmptyStateOverlay(
-            self, icon=FIF.GLOBE, title='暂无测线',
+            self, icon=FIF.GLOBE, title='暂无定位轨迹',
             hint='打开含定位信息的测线后，此处显示底图与航迹')
 
         # 左上：测线图例（色块 + 名称），set_tracks 时重建

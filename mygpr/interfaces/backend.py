@@ -383,7 +383,7 @@ class MyGPRBackend:
         *,
         reason: str = "用户删除成果",
     ) -> ArtifactDeleteResult:
-        """Move processing artifacts into the project trash (cascade pre-collected)."""
+        """Permanently delete processing artifacts (cascade pre-collected)."""
         return self.projects.delete_artifacts(project_id, line_id, artifact_ids, reason=reason)
 
     def submit_processing_result_package(
@@ -494,8 +494,8 @@ class MyGPRBackend:
     def submit_spatial_delete(self, project_id: str, result_id: str, *, title: str | None = None) -> str:
         return self._submit_project_job(
             project_id,
-            title or f"移除空间成果: {result_id}",
-            lambda _context: self.spatial.delete_result(project_id, result_id),
+            title or f"永久删除空间成果: {result_id}",
+            lambda _context: self.projects.delete_spatial_result(project_id, result_id, task_lease=True),
         )
 
     def build_georeference_3d(

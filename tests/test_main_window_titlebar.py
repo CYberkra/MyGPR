@@ -220,6 +220,10 @@ def test_empty_workspace_disables_data_navigation_with_reason(window):
     assert not item.isEnabled()
     assert '项目' in item.toolTip()
     assert not window._file_tree_panel.isVisible()
+    assert item.isHidden()
+    assert not window._top_nav.items['settingsInterface'].isHidden()
+    assert not window._top_nav.items['jobsInterface'].isHidden()
+    assert window._file_tree_btn.isHidden()
 
 
 def test_processing_uses_its_workspace_resource_button(window):
@@ -227,6 +231,7 @@ def test_processing_uses_its_workspace_resource_button(window):
     project = window._page('projectInterface')
     project.set_project_info(SimpleNamespace(project_id='P1', name='Test'))
     project.set_lines([SimpleNamespace(line_id='L01')])
+    assert not window._top_nav.items['processingInterface'].isHidden()
     window._goto_page('processingInterface')
     assert not window._file_tree_btn.isVisible()
     window._goto_page('projectInterface')
@@ -275,6 +280,8 @@ def test_project_switch_updates_name_even_when_both_projects_are_empty(window):
 def test_missing_last_project_leaves_startup_with_specific_reason(window, tmp_path, monkeypatch):
     from types import SimpleNamespace
     from unittest.mock import Mock
+    monkeypatch.setattr('ui.controllers.recent_projects_controller.run_command',
+                        lambda command, **kwargs: command.execute())
     missing = str(tmp_path / 'moved-project')
     window.settings.set('recent_projects', [missing])
     monkeypatch.setattr(window, 'project_controller', SimpleNamespace(open_project=Mock()))

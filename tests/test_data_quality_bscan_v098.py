@@ -39,6 +39,15 @@ def test_transposed_matrix_risk_is_flagged() -> None:
     assert any(issue.code == "transpose_risk" for issue in report.issues)
 
 
+def test_short_acquisition_with_declared_order_is_not_flagged_as_transposed() -> None:
+    dataset = GPRDataSet.from_matrix('L01', np.zeros((600, 40), dtype=np.float32),
+                                     length_m=20.0, time_window_ns=700.0)
+    dataset.metadata['source_matrix_order'] = 'traces_by_samples'
+    report = evaluate_line_data_quality(dataset, None)
+    assert report.orientation != DataOrientation.TRANSPOSE_RISK
+    assert not any(issue.code == 'transpose_risk' for issue in report.issues)
+
+
 def test_project_quality_check_reports_all_imported_lines(tmp_path: Path) -> None:
     store = FieldProjectStore.create_empty(tmp_path / "project", name="project-qc")
     store.import_line_file("L01", Path("sample_data/gui_sidecar_all_data_main.csv"), name="line-a", copy_into_project=True)

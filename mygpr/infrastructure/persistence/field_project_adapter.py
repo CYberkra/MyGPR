@@ -16,7 +16,7 @@ from core.field_project_models import FieldLineRecord, validate_line_id
 from core.field_project_operations import update_project_metadata, delete_project_line, batch_import_line_data
 from core.field_project_source_ops import check_project_source_files, relink_project_line_source, export_project_source_manifest_csv
 from core.field_project_store import FieldProjectStore
-from core.gpr_data_model import GPRDataSet, time_to_depth_axis
+from core.gpr_data_model import GPRDataSet, apply_time_window_override, time_to_depth_axis
 from core.quality_trace_locations import locate_trace_issues
 from dataclasses import replace
 from core.field_report_export import generate_project_report_package
@@ -36,6 +36,7 @@ from mygpr.infrastructure.persistence.intermediate_cleanup import IntermediateCl
 from mygpr.infrastructure.persistence.processing_package_adapter import ProcessingPackageMixin
 from mygpr.infrastructure.persistence.project_relocation import staged_project_copy
 from mygpr.domain.project.names import display_name
+from mygpr.infrastructure.persistence.permanent_deletion import PermanentDeletionMixin
 from mygpr.infrastructure.persistence.spatial_adapter import SpatialPersistenceMixin
 from mygpr.infrastructure.persistence.velocity_adapter import VelocityPersistenceMixin
 from mygpr.infrastructure.persistence.grid_adapter import GridPersistenceMixin
@@ -121,6 +122,7 @@ def _line_record(record: FieldLineRecord) -> ProjectLine:
         raw_size_mb=record.raw_size_mb,
         updated_at=record.updated_at,
         distance_override=record.distance_override, view_reversed=record.view_reversed,
+        time_window_override_ns=record.time_window_override_ns,
     )
 
 
@@ -135,6 +137,7 @@ def _quality_report(record: Any) -> LineQualityReport:
         orientation_message=record.orientation_message, suggested_action=record.suggested_action,
         issues=tuple(LineQualityIssue(i.severity, i.code, i.message, i.suggestion, i.trace_start, i.trace_end) for i in record.issues),
         sampled=record.sampled, evaluated_value_count=record.evaluated_value_count,
+        time_axis_status=record.time_axis_status, distance_axis_status=record.distance_axis_status,
     )
 
 def _quality_with_trace_locations(store, record):
@@ -183,8 +186,14 @@ def _artifact(record: ProcessingArtifactRecord) -> ProjectArtifact:
 class ProjectDataPersistenceMixin:
     """Read synchronized metadata and normalize legacy line quality labels."""
 
+    _apply_time_window_override = staticmethod(apply_time_window_override)
+
     def _line_with_quality(self, record: FieldLineRecord) -> ProjectLine:
         line = _line_record(record)
+        if not record.distance_override and self._legacy_matrix_unscaled(record):
+            line = replace(line, distance_override='unknown')
+        if line.distance_override == 'unknown':
+            line = replace(line, length_m=0.0)
         if '★' in line.data_quality or '☆' in line.data_quality:
             report = self._store.load_quality_report(record.line_id)
             line = replace(line, data_quality=report.status_label if report else '尚未检查')
@@ -216,6 +225,7 @@ class ProjectDataPersistenceMixin:
 
 
 class LegacyFieldProjectSession(
+    PermanentDeletionMixin,
     ProjectDataPersistenceMixin, LinePropertiesMixin, InterpretationPersistenceMixin, IntermediateCleanupMixin, SpatialPersistenceMixin,
     VelocityPersistenceMixin, GridPersistenceMixin, ProcessingPackageMixin, ProjectSessionPort
 ):
@@ -314,13 +324,13 @@ class LegacyFieldProjectSession(
     def delete_artifacts(
         self, line_id: str, artifact_ids: Sequence[str], *, reason: str
     ) -> ArtifactDeleteResult:
-        """Delete processing artifacts (sidecar files) into the project trash."""
+        """Permanently delete processing artifacts and their descendants."""
         from mygpr.infrastructure.persistence.artifact_delete import (
-            delete_artifacts_with_trash,
+            delete_artifacts_permanently,
         )
 
         with self._lock:
-            summary = delete_artifacts_with_trash(
+            summary = delete_artifacts_permanently(
                 self._store, validate_line_id(line_id), list(artifact_ids),
                 reason=reason,
             )
@@ -585,7 +595,7 @@ class LegacyFieldProjectSession(
         known = {item.artifact_id for item in index_processing_artifacts(self._store.root, safe_line)}
         if safe_artifact not in known:
             raise KeyError(f"unknown artifact {safe_artifact!r} for line {safe_line!r}")
-        return safe_line, safe_artifact, self._store.storage.load_processing_artifact(safe_line, safe_artifact)
+        return safe_line, safe_artifact, self._normalized_artifact_dataset(safe_line, safe_artifact)
 
     def get_artifact_dataset_info(
         self, line_id: str, artifact_id: str

@@ -29,8 +29,8 @@ class ProjectIdentityController(QObject):
     def rename_line(self, project_id, line_id, name):
         return self._start("rename_line", project_id, (line_id, name))
 
-    def update_line_properties(self, project_id, line_id, length_m, view_reversed):
-        return self._start("update_line_properties", project_id, (line_id, length_m, view_reversed))
+    def update_line_properties(self, project_id, line_id, length_m, view_reversed, time_window_ns=None):
+        return self._start("update_line_properties", project_id, (line_id, length_m, view_reversed, time_window_ns))
 
     def relocate_project(self, project_id, destination):
         return self._start("relocate_project", project_id, (destination,))

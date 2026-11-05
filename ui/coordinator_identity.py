@@ -50,9 +50,9 @@ class ProjectIdentityChain:
         if self._allowed(project_id):
             self.controller.rename_line(project_id, line_id, name)
 
-    def update_line_properties(self, project_id, line_id, length_m, view_reversed):
+    def update_line_properties(self, project_id, line_id, length_m, view_reversed, time_window_ns=None):
         if self._allowed(project_id):
-            self.controller.update_line_properties(project_id, line_id, length_m, view_reversed)
+            self.controller.update_line_properties(project_id, line_id, length_m, view_reversed, time_window_ns)
 
     def relocate(self, project_id, destination):
         if self._allowed(project_id) and self.chain.can_change_project():

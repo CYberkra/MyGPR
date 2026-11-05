@@ -233,6 +233,10 @@ class SpatialPersistenceMixin:
             self._store.assert_writable()
             SpatialResultVersionService(self._store).set_current(str(result_id))
 
+    def current_spatial_result_id(self) -> str:
+        with self._lock:
+            return SpatialResultVersionService(self._store).current_result_id()
+
     def export_spatial_result(
         self, result_id: str, destination: Path, *, format_name: str
     ) -> Path:
@@ -244,7 +248,7 @@ class SpatialPersistenceMixin:
     def delete_spatial_result(self, result_id: str) -> Path:
         with self._lock:
             self._store.assert_writable()
-            return SpatialResultVersionService(self._store).move_to_recycle_bin(str(result_id))
+            return SpatialResultVersionService(self._store).delete_permanently(str(result_id))
 
     def build_georeference_3d(
         self,
