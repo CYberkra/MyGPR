@@ -117,12 +117,13 @@ def test_stop_wakes_waiter_before_native_cleanup_and_stale_callbacks_are_ignored
 @pytest.mark.parametrize('event', ['cancelled', 'timeout'])
 def test_failure_restores_ui_and_allows_retry(qapp, event):
     ctrl, client, frozen, _ = controller()
-    worker = threading.Thread(target=client.callbacks['can_shutdown'])
-    worker.start()
-    pump(qapp, worker)
     assert ctrl.check() and ctrl.busy
     assert not ctrl.check()
     client.callbacks['event']('available')
+    worker = threading.Thread(target=client.callbacks['can_shutdown'])
+    worker.start()
+    pump(qapp, worker)
+    assert not ctrl.check()
     client.callbacks['event'](event)
     assert not ctrl.busy and frozen == [True, False]
     assert ctrl.check(silent=True) and client.silent

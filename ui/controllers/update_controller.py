@@ -62,7 +62,7 @@ class UpdateController(QObject):
         self.status_changed.emit('')
 
     def check(self, *, silent=False):
-        if self._client is None or self._busy or self._closed.is_set():
+        if self._client is None or self._busy or self._frozen or self._closed.is_set():
             return False
         self._set_busy(True)
         self._checking = True
