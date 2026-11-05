@@ -24,6 +24,7 @@ class UpdateBinding(QObject):
         self._frozen_windows = []
         self._active_channel = None
         self._channel_pending = False
+        self._unavailable_reason = ''
         self.controller = UpdateController(prepare_close=self.prepare_close,
             freeze=self.freeze, close_window=window.close, parent=self)
         self.controller.status_changed.connect(self.set_status)
@@ -46,12 +47,11 @@ class UpdateBinding(QObject):
     def configure(self):
         if self._active_channel is not None:
             raise RuntimeError('原生更新渠道需要重启后切换')
+        self._unavailable_reason = ''
         self.controller.stop()
         if sys.platform != 'win32' or not getattr(sys, 'frozen', False):
-            self.panel.check_button.setEnabled(False)
-            self.panel.automatic.setEnabled(False)
-            self.panel.channel.setEnabled(False)
-            self.panel.set_status('开发环境：请从发布页获取安装包')
+            self._unavailable_reason = '开发环境：请从发布页获取安装包'
+            self.set_status('')
             return
         try:
             self._configuration = windows_update_configuration(self._root / 'config/windows_updates.json')
@@ -66,13 +66,16 @@ class UpdateBinding(QObject):
             client = windows_update_client(self._root / 'WinSparkle.dll')
             self.controller.start(client, self._configuration, _read_version(), channel)
             self._active_channel = channel
-            self.panel.set_busy(False)
+            self.set_busy(False)
         except (OSError, ValueError, RuntimeError, AttributeError) as exc:
+            self._unavailable_reason = str(exc) or '更新器初始化失败，请从发布页下载安装包'
             self.controller.stop()
-            self.panel.check_button.setEnabled(False)
-            self.panel.set_status(str(exc))
+            self.set_status('')
 
     def preferences_changed(self):
+        if self._active_channel is None:
+            self.set_status('')
+            return
         settings = self.window.settings
         settings.set('update_automatic', self.panel.automatic.isChecked())
         settings.set('update_channel', self.panel.channel.currentData())
@@ -86,10 +89,14 @@ class UpdateBinding(QObject):
         self.panel.set_status('重启 MyGPR 后切换更新渠道' if self._channel_pending else '')
 
     def set_status(self, message):
-        self.panel.set_status('重启 MyGPR 后切换更新渠道' if self._channel_pending else message)
+        self.panel.set_status(self._unavailable_reason or
+                             ('重启 MyGPR 后切换更新渠道' if self._channel_pending else message))
 
     def set_busy(self, busy):
         self.panel.set_busy(busy)
+        if self._active_channel is None:
+            self.panel.automatic.setEnabled(False)
+            self.panel.channel.setEnabled(False)
         if self._channel_pending or self._active_channel is None:
             self.panel.check_button.setEnabled(False)
 
