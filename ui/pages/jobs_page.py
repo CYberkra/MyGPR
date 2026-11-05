@@ -49,7 +49,7 @@ class JobsPage(QWidget):
 
     # ============================================================ 内部接线
     def _connect_internal(self) -> None:
-        self._job_context = ObjectMenuBinding(self, self._job_table._table, self._job_menu)
+        self._job_context = ObjectMenuBinding(self, self._job_table.context_table(), self._job_menu)
         self._job_table.rows_changed.connect(self._job_context.close)
         self._job_table.cancel_requested.connect(self.cancel_requested)
         self._prune_btn.clicked.connect(self._on_prune_clicked)
@@ -76,36 +76,26 @@ class JobsPage(QWidget):
 
     def _job_menu(self, pos):
         menu = object_menu(self)
-        table = self._job_table._table
-        row = table.indexAt(pos).row()
-        job_id = next((jid for jid, index in self._job_table._rows.items() if index == row), '')
-
-        def current_row():
-            return self._job_table._rows.get(job_id)
+        row = self._job_table.context_table().indexAt(pos).row()
+        job_id = self._job_table.job_id_at(row)
 
         if job_id:
-            title = table.item(row, self._job_table._COL_TITLE).text()
-            message = table.item(row, self._job_table._COL_MESSAGE).text()
-            status = str(self._job_table._status_of(row))
+            snapshot = self._job_table.job_snapshot(job_id)
+            title = snapshot['title']
+            message = snapshot['message']
+            status = snapshot['status']
             text = f'任务标识: {job_id}\n标题: {title}\n状态: {status}\n消息: {message}'
             object_action(menu, 'job-details', '详情与当前消息…',
-                          lambda: show_details(self, '任务详情', text) if current_row() is not None else None)
+                          lambda: show_details(self, '任务详情', text))
             object_action(menu, 'copy-id', '复制任务标识',
-                          lambda: QApplication.clipboard().setText(job_id) if current_row() is not None else None)
+                          lambda: QApplication.clipboard().setText(job_id))
             object_action(menu, 'copy-message', '复制当前消息',
-                          lambda: QApplication.clipboard().setText(message) if current_row() is not None else None,
+                          lambda: QApplication.clipboard().setText(message),
                           enabled=bool(message), reason='此任务尚无消息')
-            button = table.cellWidget(row, self._job_table._COL_ACTION)
 
-            def cancel():
-                target = current_row()
-                if target is not None:
-                    current = table.cellWidget(target, self._job_table._COL_ACTION)
-                    if current is not None and current.isEnabled():
-                        current.click()
-
-            object_action(menu, 'cancel-job', '取消任务', cancel,
-                          enabled=bool(button and button.isEnabled()), reason='任务已结束或不可取消')
+            object_action(menu, 'cancel-job', '取消任务',
+                          lambda: self._job_table.cancel_job(job_id),
+                          enabled=self._job_table.can_cancel(job_id), reason='任务已结束或不可取消')
             object_action(menu, 'retry-job', '重试任务', lambda: None,
                           enabled=False, reason='未接通可重放任务合同')
             object_action(menu, 'remove-job', '移除此任务记录', lambda: None,

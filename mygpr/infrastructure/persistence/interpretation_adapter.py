@@ -407,6 +407,8 @@ class InterpretationPersistenceMixin:
         safe = self._validated_line(line_id)
         with self._lock:
             dataset = self._raw_dataset_with_properties(safe)
+            if dataset.metadata.get('time_axis_status') == 'unknown' and not dataset.metadata.get('is_depth'):
+                raise ValueError(f"测线 {safe} 时间轴未知，无法计算深度")
             axis = np.asarray(dataset.depth_axis_m, dtype=float)
         if axis.size == 0:
             raise ValueError(f"测线 {safe} 缺少深度轴")

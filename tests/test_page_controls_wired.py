@@ -340,7 +340,7 @@ class TestMethodBrowserTagless:
 
 
 class TestRestoreLastProject:
-    """启动自动恢复上次项目：取 recents 首条且目录存在才恢复，幂等。"""
+    """启动自动恢复由后台检查选择首个可访问目录，幂等。"""
 
     @staticmethod
     def _make_window(settings):
@@ -355,7 +355,9 @@ class TestRestoreLastProject:
         except Exception:                                   # noqa: BLE001
             return None
 
-    def test_restores_most_recent_existing(self, qapp, tmp_path):
+    def test_restores_most_recent_existing(self, qapp, tmp_path, monkeypatch):
+        monkeypatch.setattr('ui.controllers.recent_projects_controller.run_command',
+                            lambda command, **kwargs: command.execute())
         from types import SimpleNamespace
         from ui.settings_manager import SettingsManager
         sm = SettingsManager(str(tmp_path / 'settings.json'))
@@ -365,7 +367,7 @@ class TestRestoreLastProject:
         try:
             existing = tmp_path / 'proj-a'
             existing.mkdir()
-            sm.set('recent_projects', [str(existing), 'Z:/不存在的目录'])
+            sm.set('recent_projects', [str(existing), str(tmp_path / 'missing')])
             calls = []
             import unittest.mock as mock
             with mock.patch.object(win, 'project_controller',
@@ -381,7 +383,9 @@ class TestRestoreLastProject:
         finally:
             win.close()
 
-    def test_missing_dir_skips_silently(self, qapp, tmp_path):
+    def test_missing_dir_preserves_startup_with_error(self, qapp, tmp_path, monkeypatch):
+        monkeypatch.setattr('ui.controllers.recent_projects_controller.run_command',
+                            lambda command, **kwargs: command.execute())
         from types import SimpleNamespace
         from ui.settings_manager import SettingsManager
         sm = SettingsManager(str(tmp_path / 'settings.json'))
@@ -389,7 +393,8 @@ class TestRestoreLastProject:
         if win is None:
             pytest.skip('MainWindow 在本环境不可用')
         try:
-            sm.set('recent_projects', ['Z:/不存在的目录'])
+            missing = str(tmp_path / 'missing')
+            sm.set('recent_projects', [missing])
             calls = []
             import unittest.mock as mock
             with mock.patch.object(win, 'project_controller',
@@ -399,7 +404,8 @@ class TestRestoreLastProject:
                 win._backend_ready = True
                 win._last_project_restored = False
                 win._restore_last_project()
-                assert calls == []               # 目录不存在 → 静默跳过
+                assert calls == []
+                assert missing in win._page('homeInterface')._startup_error.text()
         finally:
             win.close()
 

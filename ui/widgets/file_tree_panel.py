@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
     QApplication, QDialog, QDialogButtonBox, QHeaderView,
     QSizePolicy, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
-from qfluentwidgets import BodyLabel, MessageBox, PlainTextEdit, TransparentToolButton, TreeWidget
+from qfluentwidgets import BodyLabel, PlainTextEdit, TransparentToolButton, TreeWidget
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import Theme, isDarkTheme, setCustomStyleSheet
 
@@ -115,14 +115,14 @@ class FileTreePanel(DockPanel):
     artifact_reconfigure_requested = pyqtSignal(str, str)
     source_info_requested = pyqtSignal(str, str)
     # 成果叶子右键「删除成果」→ 复用项目页删除链路（后代闭包级联确认 +
-    # 回收站语义），面板自身不弹确认框
+    # 永久删除语义），面板自身不弹确认框
     artifact_delete_requested = pyqtSignal(str, str)
     processing_package_requested = pyqtSignal(str, str)  # line_id, artifact_id (empty = whole line)
     # 空间成果/项目报告叶子点击 → 跳成果页（参数为 kind：'spatial'/'report'）
     delivery_focus_requested = pyqtSignal(str)
 
     def __init__(self, parent=None) -> None:
-        super().__init__('项目资源', constants.SIDE_TOOL_WIDTH, parent)
+        super().__init__('项目资源', constants.FILE_TREE_PANEL_WIDTH, parent)
         self._lines: list = []
         self.rename_allowed = lambda:False
         self._rename_shortcut = QShortcut(QKeySequence('F2'), self,
@@ -189,7 +189,7 @@ class FileTreePanel(DockPanel):
             shortcut.activated.connect(self._on_keyboard_context)
             self._menu_shortcuts.append(shortcut)
         self._more_btn = TransparentToolButton(FIF.MORE, self)
-        self._more_btn.setFixedSize(24, 24)
+        self._more_btn.setFixedSize(*constants.TOOL_BTN_SIZE)
         self._more_btn.setIconSize(QSize(*constants.TOOL_BTN_ICON))
         self._more_btn.setToolTip('项目资源操作（Shift+F10）')
         self._more_btn.setAccessibleName('项目资源操作')
@@ -783,7 +783,7 @@ class FileTreePanel(DockPanel):
         self._add_menu_action(menu, FIF.SAVE, '打包处理结果…',
                    lambda: self.processing_package_requested.emit(line_id, ''),
                    enabled=has_results and not blocked)
-        action = self._add_menu_action(menu, FIF.DELETE, '删除测线…',
+        action = self._add_menu_action(menu, FIF.DELETE, '永久删除测线…',
                             lambda: self._confirm_delete(line_id), enabled=not blocked)
         if blocked and action is not None:
             action.setToolTip('该测线的处理任务正在运行，请先等待结束或取消任务。')
@@ -817,7 +817,7 @@ class FileTreePanel(DockPanel):
         self._add_menu_action(menu, FIF.SAVE, '打包到此步的结果…',
                    lambda: self.processing_package_requested.emit(line_id, artifact_id),
                    enabled=not blocked)
-        action = self._add_menu_action(menu, result_delete_icon(), '删除此结果及依赖成果…',
+        action = self._add_menu_action(menu, result_delete_icon(), '永久删除此成果及依赖成果…',
                    lambda: self._request_artifact_delete(line_id, artifact_id), enabled=not blocked)
         if blocked and action is not None:
             action.setToolTip('运行中的任务依赖此结果，请先等待结束或取消任务。')
@@ -895,7 +895,7 @@ class FileTreePanel(DockPanel):
 
     def _on_file_context_menu(self, item, pos) -> None:
         """目录/文件右键：打开 / 在资源管理器中显示 / 复制路径（只读浏览，
-        文件管理交给系统，不绕过后端事务与回收站机制）。"""
+        文件管理交给系统，不绕过后端范围检查与永久删除机制）。"""
         path = str(item.data(0, _ROLE_PAYLOAD) or '')
         if not path:
             return
@@ -913,15 +913,7 @@ class FileTreePanel(DockPanel):
     def _confirm_delete(self, line_id: str) -> None:
         if self._busy or self._delete_blocked(line_id):
             return
-        box = MessageBox(
-            '确认删除测线？',
-            f'将删除测线 {line_id}（数据会移入项目 .trash 回收站，可恢复）。',
-            self.window() or self,
-        )
-        box.yesButton.setText('删除')
-        box.cancelButton.setText('取消')
-        if box.exec() == QDialog.DialogCode.Accepted and not self._delete_blocked(line_id):
-            self.line_delete_requested.emit([line_id])
+        self.line_delete_requested.emit([line_id])
 
     def _rename_current_line(self):
         item=self._tree.currentItem()

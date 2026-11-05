@@ -9,7 +9,6 @@
 PlaceholderPage（QLabel '页面建设中' 居中），controller / 面板为 None（connect 判空）。
 """
 import logging
-from pathlib import Path
 
 from PyQt6.QtCore import (
     Qt, QSize, pyqtSignal,
@@ -389,17 +388,10 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
             return
         self._last_project_restored = True
         recents = self.settings.get('recent_projects') or []
-        for root in recents:
-            root = str(root or '')
-            if root and Path(root).is_dir():
-                self.project_controller.open_project(root)
-                return
-        page_getter = getattr(self, '_page', None)
-        if recents and callable(page_getter):
-            startup = page_getter('homeInterface')
-            setter = getattr(startup, 'set_startup_error', None)
-            if callable(setter):
-                setter(f'无法恢复上次项目：目录不可访问或不存在。\n{recents[0]}')
+        startup = self._page('homeInterface')
+        if callable(getattr(startup, 'restore_last_project', None)):
+            startup.set_backend_ready(True)
+            startup.restore_last_project(recents)
 
     def ensure_pages_ready(self) -> None:
         """同步构造全部剩余页面并完成收尾接线（预热竞态兜底 / 测试 / 冒烟）。"""
@@ -563,6 +555,8 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
         if nav is None or project is None or not hasattr(project, 'workspace_state'):
             return
         state = project.workspace_state()
+        ready = self._backend_ready or self.backend_controller is None
+        project.startup.set_backend_ready(ready)
         summary = getattr(project, '_summary', None)
         switch = getattr(self, '_project_switch_btn', None)
         if switch is not None:
@@ -576,7 +570,7 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
         current = self.stackedWidget.currentWidget()
         current_name = current.objectName() if current is not None else ''
         if tree_button is not None:
-            tree_button.setVisible(current_name != 'processingInterface')
+            tree_button.setVisible(state != 'startup' and current_name != 'processingInterface')
             tree_button.setEnabled(state != 'startup')
             tree_button.setToolTip('文件树 (Ctrl+B)' if state != 'startup' else '打开项目后可查看项目资源')
         for key in ('processingInterface', 'interpretationInterface',
@@ -584,7 +578,7 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
             item = nav.items.get(key)
             if item is None:
                 continue
-            ready = self._backend_ready or self.backend_controller is None
+            item.setVisible(state != 'startup')
             reason = '' if ready and state == 'ledger' else (
                 '后端尚未就绪' if not ready else '请先打开项目' if state == 'startup' else '请先导入测线')
             item.setEnabled(not reason)
@@ -790,32 +784,32 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
         if self.output_panel is not None:
             self.output_panel.append_log(msg)
 
-    def _on_theme_changed(self, theme: str) -> None:
-        """主题切换槽：setTheme + 输出面板换肤 + 各 View.apply_theme + 全量重绘。
+    @staticmethod
+    def _apply_theme_to_widget(widget, dark: bool, output_panel=None) -> None:
+        """Apply one theme pass without also repainting the workspace's children."""
+        if widget is output_panel:
+            return
+        apply_fn = getattr(widget, 'apply_theme', None)
+        if not callable(apply_fn):
+            widget.update()
+            return
+        try:
+            if getattr(widget, '_theme_refresh_children', False):
+                apply_fn(dark, refresh_views=False)
+            else:
+                apply_fn(dark)
+        except Exception as e:
+            logger.debug('apply_theme 调用失败: %s', e)
 
-        全窗控件单轮遍历同时完成 update() 与 apply_theme（原两轮 findChildren
-        遍历在视图树大时构成重绘风暴）；页面/视图树运行期基本不变，
-        无缓存列表的需求，单轮已够。
-        """
+    def _on_theme_changed(self, theme: str) -> None:
+        """主题切换槽：全窗控件只应用一次主题，避免工作区与子视图重复重绘。"""
         dark = str(theme) == constants.THEME_DARK
         apply_theme(theme)
-        # qfluentwidgets 1.11 的 CardWidget 等纯 paintEvent 控件在主题切换时
-        # 不会自动触发重绘（浅色底 + 深色文字的"半套主题"问题），这里强制
-        # 全量 update()，保证深浅主题即时、完整地生效。
-        # 日志框换肤：浅深主题都跟随——全宽面板下浅主题配深底大色块过于突兀
         if self.output_panel is not None:
             self.output_panel.apply_theme(dark)
         self._apply_top_nav_style()
-        # 单轮遍历：重绘 + 主题应用一次完成（所有 BScanView/AScanView 等
-        # 鸭子类型实现 apply_theme 的控件；output_panel 已在上文单独换肤）
         for widget in self.findChildren(QWidget):
-            widget.update()
-            apply_fn = getattr(widget, 'apply_theme', None)
-            if callable(apply_fn) and widget is not self.output_panel:
-                try:
-                    apply_fn(dark)
-                except Exception as e:
-                    logger.debug('apply_theme 调用失败: %s', e)
+            self._apply_theme_to_widget(widget, dark, output_panel=self.output_panel)
         self.update()
         # 设置页主题 ComboBox 回写（blockSignals 防循环）
         settings_page = self._page('settingsInterface')
@@ -898,6 +892,9 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
     # ============================================================ 项目对话框（窗口 UI）
     def _show_new_project_dialog(self) -> None:
         """新建项目对话框：选目录 + 项目名 + 可选元数据 → create_project。"""
+        cancel_restore = getattr(self._page('homeInterface'), 'cancel_pending_restore', None)
+        if callable(cancel_restore):
+            cancel_restore()
         if not self.page_coordinator.project.can_change_project():
             return
         if not self._backend_ready:
@@ -995,6 +992,9 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
 
     def _open_project_dialog(self) -> None:
         """打开项目：目录对话框 → open_project。"""
+        cancel_restore = getattr(self._page('homeInterface'), 'cancel_pending_restore', None)
+        if callable(cancel_restore):
+            cancel_restore()
         if not self.page_coordinator.project.can_change_project():
             return
         if not self._backend_ready:
@@ -1114,6 +1114,9 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
         if not self.page_coordinator.project.confirm_interpretation_close():
             event.ignore()
             return
+        shutdown_startup = getattr(self._page('homeInterface'), 'shutdown', None)
+        if callable(shutdown_startup):
+            shutdown_startup()
         # 1) 先关解释标注会话（可能涉及后端会话资源）
         if self.interpretation_controller is not None:
             try:

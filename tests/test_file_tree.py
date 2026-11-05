@@ -108,7 +108,7 @@ def test_build_artifacts_model_includes_spatial_and_reports():
     assert report_group.children[0].kind == 'report'
     assert report_group.children[0].payload == 'proj/reports/r20260916'
     assert report_group.children[0].text == 'r20260916'
-    assert report_group.children[0].suffix == '2026-09-16'
+    assert '2026-09-16' in report_group.children[0].tooltip
 
 
 def test_build_artifacts_model_omits_empty_sections():
@@ -310,7 +310,7 @@ def test_spatial_and_report_leaves_render_and_click_goto_delivery(qapp, panel):
     report = _find_by_kind(tree, 'report')
     assert spatial is not None and report is not None
     assert spatial.text(0) == '剖面图 v2'
-    assert spatial.text(1) == '2026-09-16'  # 行尾角标列
+    assert '2026-09-16' in spatial.toolTip(0)
     lines_got, delivery_got = [], []
     panel.line_selected.connect(lines_got.append)
     panel.delivery_focus_requested.connect(delivery_got.append)
@@ -326,8 +326,8 @@ def test_artifact_leaf_click_emits_focus_with_line(qapp, panel):
     panel.set_artifacts([_artifact('A9', 'L02')])
     leaf = _find_by_kind(panel._tree, 'artifact')
     assert leaf is not None
-    assert leaf.text(0).startswith('去直流') and leaf.text(1) == 'dewow'
-    assert '记录不完整' in leaf.text(0)
+    assert leaf.text(0) == '去直流' and leaf.text(1) == ''
+    assert '记录不完整' in leaf.toolTip(0)
     got, lines_got = [], []
     panel.artifact_focus_requested.connect(lambda *a: got.append(a))
     panel.line_selected.connect(lines_got.append)
@@ -510,7 +510,8 @@ def test_collapse_shows_blank_strip(qapp, panel):
     panel.set_lines([_line('L01', '2026-09-16T01:00:00')])
     panel.set_current_line('L01')
     panel.set_collapsed(True, animate=False)
-    assert panel.width() <= 20  # 细条
+    from ui import constants
+    assert panel.width() == constants.DOCK_COLLAPSED_WIDTH
     assert not panel._expanded_view.isVisibleTo(panel)
     assert panel._strip_view.isVisibleTo(panel)
     assert panel._strip_line_label.isHidden()  # 竖排文字已删，细条留白
@@ -738,13 +739,13 @@ def test_artifact_context_menu_actions_emit_focus_delete_copy(
     panel._on_context_menu(QPoint(5, 5))
     assert [t for t, _ in actions] == [
         '打开结果标签', '从此结果继续处理', '修改此步参数并另建分支',
-        '参数与来源', '打包到此步的结果…', '删除此结果及依赖成果…', '复制成果号',
+        '参数与来源', '打包到此步的结果…', '永久删除此成果及依赖成果…', '复制成果号',
     ]
     focus_got, delete_got = [], []
     panel.artifact_focus_requested.connect(lambda *a: focus_got.append(a))
     panel.artifact_delete_requested.connect(lambda *a: delete_got.append(a))
     for text, slot in actions:
-        if text in ('打开结果标签', '删除此结果及依赖成果…', '复制成果号'):
+        if text in ('打开结果标签', '永久删除此成果及依赖成果…', '复制成果号'):
             slot()
     assert focus_got == [('L02', 'A9')]   # 与单击同语义（换线如需+跳预览）
     assert delete_got == [('L02', 'A9')]  # 面板不弹确认框，直接交删除链路
@@ -771,6 +772,14 @@ def _v2_artifact(aid, parent='', *, run='run001', index=1, line_id='L01'):
                      'implementation_version': 'native-1.0'}] * index,
     }}
     return artifact
+
+
+def test_tree_uses_compact_step_name_and_keeps_custom_labels():
+    from ui.file_tree import artifact_tree_name
+    artifact = _v2_artifact('A1')
+    assert artifact_tree_name(artifact) == '低频漂移校正'
+    artifact.manifest['params']['result_label'] = '现场复核 (A)'
+    assert artifact_tree_name(artifact) == '现场复核 (A)'
 
 
 def _source_item(panel, aid):
@@ -813,7 +822,7 @@ def test_old_project_menu_cannot_delete_reused_ids(panel, monkeypatch):
     panel.set_project_info(types.SimpleNamespace(project_id='second', name='second'))
     panel.set_lines([_line('L01')])
     panel.set_artifacts([_artifact('A1', 'L01')])
-    actions['删除此结果及依赖成果…'].trigger()
+    actions['永久删除此成果及依赖成果…'].trigger()
     assert deleted == []
 
 
@@ -864,14 +873,15 @@ def test_active_source_marker_preserves_suffix_and_is_distinct_from_tree_selecti
     panel.set_artifacts([_v2_artifact('A')])
     artifact = _source_item(panel, 'A')
     base = artifact.text(1)
+    input_suffix = f'{base} 输入'.strip()
     panel.set_active_source('L01', 'A')
-    assert artifact.text(1) == f'{base} 输入'
+    assert artifact.text(1) == input_suffix
     assert artifact.font(0).bold()
     panel.set_current_line('L02')
     assert panel._tree.currentItem() is panel._line_id_by_item['L02']
-    assert artifact.text(1) == f'{base} 输入'
+    assert artifact.text(1) == input_suffix
     panel.apply_theme(True)
-    assert _source_item(panel, 'A').text(1) == f'{base} 输入'
+    assert _source_item(panel, 'A').text(1) == input_suffix
     panel.set_active_source('L02', '')
     assert _source_item(panel, 'A').text(1) == base
     assert not _source_item(panel, 'A').font(0).bold()
@@ -889,9 +899,9 @@ def test_running_input_blocks_ancestor_delete_but_allows_sibling_view(panel, mon
     assert panel._tree.isEnabled()
     actions = _capture_source_menu(panel, monkeypatch, _source_item(panel, aid))
     assert actions['打开结果标签'].isEnabled()
-    assert actions['删除此结果及依赖成果…'].isEnabled() is not blocked
+    assert actions['永久删除此成果及依赖成果…'].isEnabled() is not blocked
     if blocked:
-        assert '运行' in actions['删除此结果及依赖成果…'].toolTip()
+        assert '运行' in actions['永久删除此成果及依赖成果…'].toolTip()
 
 
 def test_running_line_delete_is_disabled_without_blocking_raw_view(panel, monkeypatch):
@@ -899,7 +909,7 @@ def test_running_line_delete_is_disabled_without_blocking_raw_view(panel, monkey
     panel.set_lines([_line('L01')])
     panel.set_processing_input('L01', '', True)
     actions = _capture_source_menu(panel, monkeypatch, panel._line_id_by_item['L01'])
-    assert not actions['删除测线…'].isEnabled()
+    assert not actions['永久删除测线…'].isEnabled()
     assert not actions['处理该测线'].isEnabled()
 
 
@@ -940,7 +950,7 @@ def test_delete_rechecks_task_dependency_when_menu_was_opened_before_task(panel,
     deleted = []
     panel.artifact_delete_requested.connect(lambda *args: deleted.append(args))
     panel.set_processing_input('L01', 'A', True)
-    actions['删除此结果及依赖成果…'].trigger()
+    actions['永久删除此成果及依赖成果…'].trigger()
     assert deleted == []
 
 

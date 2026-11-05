@@ -175,8 +175,11 @@ NATIVE_ALGORITHMS: dict[str, NativeAlgorithm] = {
                          "tooltip": "自动按有效样点三等分；全部窗异常才列跨窗候选，部分窗变化不插补。跨窗也不证明采集坏道。"},
             window_traces={"type": "int", "default": 31, "min": 3, "max": 301, "label": "局部参考道数（奇数）"},
             robust_z={"type": "float", "default": 8.0, "min": 0.1, "max": 100.0, "label": "MAD阈值倍数"},
-            max_run_traces={"type": "int", "default": 4, "min": 1, "max": 4, "label": "最长插补段（道）"},
-            time_windows_ns={"type": "str", "default": "", "label": "手动时窗 ns（仅手动）", "tooltip": "仅手动方案生效，如0:100;100:200;250:850。自动方案无需填写；窗须独立，单窗只作局部审阅。"},
+            max_run_traces={"type": "int", "default": 4, "min": 1, "max": 4, "label": "最长插补段（道）",
+                            "advanced": True, "enabled_when": {"mode": "interpolate"}},
+            time_windows_ns={"type": "str", "default": "", "label": "手动时窗 ns（仅手动）", "advanced": True,
+                             "visible_when": {"window_mode": "manual"},
+                             "tooltip": "仅手动方案生效，如0:100;100:200;250:850。自动方案无需填写；窗须独立，单窗只作局部审阅。"},
         ), memory_multiplier=4.0, temporary_multiplier=1.0, relative_cost="medium",
     ),
     "energy_decay_gain": NativeAlgorithm(

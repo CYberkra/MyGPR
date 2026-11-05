@@ -92,6 +92,8 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
     # 用户手动切换色标显隐时发射，供宿主写回设置
     sig_colorbar_visible_changed = pyqtSignal(bool)
     sig_qc_marks_visible_changed = pyqtSignal(bool)
+    sig_acquisition_markers_availability_changed = pyqtSignal(bool)
+    sig_display_settings_requested = pyqtSignal()
     # 用户手动切换显示增益（'off'/'sec'/'tvg'）时发射，供宿主写回设置
     sig_gain_changed = pyqtSignal(str)
     # TVG 参数（总增益 dB、弯度幂次）经滑条面板调整后持久化（关闭面板时发一次）
@@ -105,13 +107,14 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
         self._view_time_window = None
         self._view_selection = None
         self._selection_follows_levels = True
+        self._global_display_preferences = {}
         self._pick_enabled = False
         self._image_shape = None  # (traces, samples) 显示坐标系尺寸
         # 显示比例策略：'free' 拉伸铺满（默认——实测占空比 85.9%，x/y 拉伸比
         # 1.09 几乎不畸变）/ 'square' 数据盒锁正方形（占空比仅 43.3%，且把
         # 4:1 的真实剖面压成 1:1、双曲线形状失真）/ 'cell' 数据格 1:1。
         # 旧默认 'square' 是"B-Scan 习惯比例"的想当然，实测两项指标都最差，
-        # 2026-09-22 改默认为 'free'；方形仍保留在右键菜单随时可切。
+        # 2026-09-22 改默认为 'free'；其他比例可在全局显示设置中选择。
         self._aspect_mode = default_aspect if default_aspect in (
             'square', 'free', 'cell') else 'free'
         self._cmap_name = constants.DEFAULT_COLORMAP
@@ -119,7 +122,7 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
         # 轴单位（Phase1 能力包）：用户偏好 + 海拔换算数据
         self._x_axis = default_x_axis if default_x_axis in X_AXIS_MODES else 'trace'
         self._y_axis = default_y_axis if default_y_axis in Y_AXIS_MODES else 'sample'
-        # 显示动态范围（百分位裁切）：右键「色阶设置」可改，不改数据
+        # 显示动态范围（百分位裁切）：全局显示设置调整，不改数据
         self._p_low, self._p_high = _restored_levels(default_levels)
         self._matrix = None               # 当前显示矩阵（供重算色阶/刷新用）
         # 图内标题开关：结果网格卡关闭（卡头已是唯一信息源，图内标题
@@ -132,6 +135,8 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
         # 偏好仍记录，构造处若支持可后续兑现）
         self._colorbar_visible = True
         self._qc_marks_visible = True
+        self._acquisition_markers_visible = True
+        self._acquisition_markers_available = False
         # 显示增益（SEC/TVG）：显示域逐行缩放（raw 一个字节不动）；增益后
         # 矩阵按 (矩阵身份, 模式+参数) 缓存复用。TVG 参数经滑条面板调整
         self._gain_mode = 'off'
@@ -618,6 +623,12 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
         self._empty_overlay.setVisible(True)
         self._set_axes_visible(False)
 
+    def set_acquisition_markers_visible(self, visible: bool) -> None:
+        self._acquisition_markers_visible = bool(visible)
+        item = getattr(self, '_acquisition_marker_item', None)
+        if item is not None:
+            item.setVisible(self._acquisition_markers_available and self._acquisition_markers_visible)
+
     def set_acquisition_markers(self, markers) -> None:
         """Small hoverable flags on raw data; source records are never edited.
 
@@ -648,6 +659,11 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
                 spots.append(dict(pos=(x, 1), brush=colors.get(kind, '#39a8ed'), pen=None, data=tip))
         item.setData(spots)
         item.setToolTip(f'采集标记 {len(markers)} 个；最多显示前200个。完整记录保存在源元数据中。' if markers else '')
+        available = bool(spots)
+        item.setVisible(available and self._acquisition_markers_visible)
+        if available != self._acquisition_markers_available:
+            self._acquisition_markers_available = available
+            self.sig_acquisition_markers_availability_changed.emit(available)
 
     def apply_theme(self, dark: bool) -> None:
         """深色 bg 'k'/文字 'w'；浅色 bg 'w'/文字 'k'；轴/色标/悬浮钮/十字光标同步。

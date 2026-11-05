@@ -320,13 +320,20 @@ class ProcessingWorkbenchService:
 
     def analyze_trace(self, session_id: str, trace_index: int) -> SignalAnalysis:
         session = self._session(session_id)
+        from mygpr.domain.processing.timebase import sampling_interval_s
+        dt_seconds = sampling_interval_s(session.current_header, session.current_data.shape[0])
+        if dt_seconds <= 0:
+            raise ValueError('时间轴未知，无法计算时间和频率；请先补录采集时间窗。')
         index = min(max(0, int(trace_index)), session.current_data.shape[1] - 1)
         trace = np.asarray(session.current_data[:, index], dtype=np.float64)
         centered = trace - float(np.mean(trace))
         window = np.hanning(trace.size) if trace.size > 1 else np.ones(trace.size)
         spectrum = np.abs(np.fft.rfft(centered * window))
-        time_window_ns = float(session.current_header.get("time_window_ns") or session.current_header.get("total_time_ns") or trace.size)
-        dt_seconds = max(time_window_ns / max(trace.size - 1, 1), 1e-12) * 1e-9
+        source_axis = session.current_header.get('time_axis_ns')
+        axis = np.asarray(source_axis, dtype=np.float64) if source_axis is not None else np.empty(0)
+        if axis.shape != trace.shape or not np.isfinite(axis).all():
+            offset = float(session.current_header.get('time_cut_offset_ns') or 0.0)
+            axis = offset + np.arange(trace.size) * dt_seconds * 1e9
         frequency_mhz = np.fft.rfftfreq(trace.size, d=dt_seconds) / 1e6
         statistics = {
             "minimum": float(np.min(trace)),
@@ -339,7 +346,7 @@ class ProcessingWorkbenchService:
         return SignalAnalysis(
             line_id=session.line_id,
             trace_index=index,
-            sample_axis=np.linspace(0.0, time_window_ns, trace.size),
+            sample_axis=axis,
             amplitude=trace,
             frequency_axis=frequency_mhz,
             magnitude=spectrum,

@@ -57,8 +57,7 @@ def test_continuous_moves_start_work_and_show_completed_frames_before_release(qa
     commands[0].execute()
     assert dialog.preview._result is not None, "latest completed frame must remain visible during dragging"
     assert not dialog.ok_button.isEnabled()
-    QTest.qWait(130)
-    assert len(commands) == 2
+    wait_until(lambda: len(commands) == 2)
     commands[1].execute()
     assert dialog.ok_button.isEnabled()
     np.testing.assert_array_equal(dialog.preview._result,
@@ -72,8 +71,9 @@ def test_replacing_input_drops_a_frame_computed_for_the_old_source(qapp, monkeyp
     monkeypatch.setattr(preview_module, "run_command", lambda command, **kw: commands.append(command))
     dialog = GainCurveDialog()
     dialog.preview.set_input(bundle(), "old")
-    QTest.qWait(130)
-    assert len(commands) == 1
+    # This checks stale-result rejection, not a 130 ms scheduling deadline.
+    # Wait for the real timer event; a loaded Windows CI runner can deliver it late.
+    wait_until(lambda: len(commands) == 1)
     new = bundle(100)
     dialog.preview.set_input(new, "new")
     commands[0].execute()

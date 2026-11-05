@@ -88,8 +88,8 @@ class QualityCenterDialog(QDialog):
                 str(getattr(report, 'line_id', '')),
                 str(getattr(report, 'status_label', '') or getattr(report, 'status', '')),
                 f"{getattr(report, 'sample_count', 0)}×{getattr(report, 'trace_count', 0)}",
-                f"{float(getattr(report, 'time_window_ns', 0) or 0):g}",
-                f"{float(getattr(report, 'length_m', 0) or 0):g}",
+                '未知' if getattr(report, 'time_axis_status', '') == 'unknown' else f"{float(getattr(report, 'time_window_ns', 0) or 0):g}",
+                '未知' if getattr(report, 'distance_axis_status', '') == 'unknown' else f"{float(getattr(report, 'length_m', 0) or 0):g}",
                 f"{float(getattr(report, 'finite_ratio', 0) or 0):.2%}",
                 str(getattr(report, 'trajectory_points', 0)),
             )

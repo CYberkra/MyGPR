@@ -171,6 +171,7 @@ def test_coordinator_prefers_one_report_connection_and_falls_back_for_legacy_pee
     project = _ProtocolStub(page_missing)
     pages = {'projectInterface': project}
     controller = _ProtocolStub(controller_missing)
+    controller.deletion = _ProtocolStub()
     co = _ProtocolStub()
     co.page = lambda name: pages.setdefault(name, _ProtocolStub())
     co.project_controller = controller

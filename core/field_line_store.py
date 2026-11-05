@@ -7,6 +7,7 @@ from __future__ import annotations
 import shutil
 import json
 import uuid
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -161,6 +162,7 @@ class FieldLineStoreMixin:
             line = FieldLineRecord(line_id=line_id, name=name or line_id)
         size_mb = dest.stat().st_size / (1024 * 1024)
         line.name = name or line.name
+        line.time_window_override_ns = 0.0
         line.raw_path = dest.relative_to(self.root).as_posix() if dest.is_relative_to(self.root) else str(dest)
         # Avoid scanning a multi-gigabyte CSV a second time only to populate a
         # decorative row count.  The normalized dataset supplies sample_count.
@@ -185,8 +187,10 @@ class FieldLineStoreMixin:
                 progress_callback=progress_callback,
             )
             if time_window_ns is not None or trace_interval_m is not None:
-                if dataset.format_name not in {'csv-matrix-chunked', 'npy-matrix-chunked'}:
-                    raise ValueError('手动轴参数仅适用于不含物理轴的纯 CSV/TXT/NPY 矩阵。')
+                if dataset.format_name not in {'csv-matrix-chunked', 'npy-matrix-chunked', 'hdf5-matrix-chunked'}:
+                    raise ValueError('手动轴参数仅适用于不含物理轴的纯矩阵文件。')
+                if dataset.sample_count < 2:
+                    raise ValueError('至少需要两个采样点才能设置首末采样跨度。')
                 if (time_window_ns is None or trace_interval_m is None or
                     not np.isfinite(time_window_ns) or not np.isfinite(trace_interval_m) or
                     time_window_ns <= 0 or trace_interval_m <= 0):
@@ -197,6 +201,7 @@ class FieldLineStoreMixin:
                 dataset.depth_axis_m = time_to_depth_axis(dataset.time_axis_ns, dataset.dielectric_constant)
                 dataset.distance_axis_m = np.arange(dataset.trace_count, dtype=np.float32) * float(trace_interval_m)
                 dataset.metadata.update(physical_axes_source='user_input', time_axis_endpoint=True,
+                                        time_axis_status='known',
                                         time_step_s=float(time_window_ns) * 1e-9 / max(dataset.sample_count - 1, 1),
                                         trace_interval_m=float(trace_interval_m), distance_axis_status='provided_length')
             trajectory_rows = dataset.metadata.pop("trajectory_rows", None) if isinstance(dataset.metadata, dict) else None
@@ -206,10 +211,7 @@ class FieldLineStoreMixin:
             )
             projection_payload = self._import_line_trajectory(line_id, trajectory_rows)
             self._write_import_manifest(line_id, src, dest, dataset, trajectory_rows, projection_payload)
-            try:
-                self.run_line_quality_check(line_id)
-            except Exception as qc_exc:
-                self.append_log(f"测线 {line_id} 数据质检失败: {qc_exc}")
+            self._check_imported_line_quality(line_id)
             return self.get_line(line_id)
         except ImportCancelled:
             self.append_log(f"测线 {line_id} 导入已取消，正在回滚。")
@@ -222,6 +224,12 @@ class FieldLineStoreMixin:
                 dataset.matrix._mmap.close()
             shutil.rmtree(staging, ignore_errors=True)
 
+
+    def _check_imported_line_quality(self, line_id: str) -> None:
+        try:
+            self.run_line_quality_check(line_id)
+        except Exception as exc:
+            self.append_log(f"测线 {line_id} 数据质检失败: {exc}")
 
     def _clear_import_navigation(self, line: FieldLineRecord, import_path: Path) -> None:
         """Unbind navigation from the replaced acquisition inside its transaction."""
@@ -352,7 +360,8 @@ class FieldLineStoreMixin:
             return None
         try:
             import json
-            return LineDataQualityReport.from_dict(json.loads(path.read_text(encoding="utf-8")))
+            report = LineDataQualityReport.from_dict(json.loads(path.read_text(encoding="utf-8")))
+            return self._quality_report_axes(line_id, report)
         except Exception:
             return None
 
@@ -364,8 +373,27 @@ class FieldLineStoreMixin:
         except Exception:
             trajectory = None
         report = evaluate_line_data_quality(dataset, trajectory)
+        report = self._quality_report_axes(line_id, report, dataset)
         self.save_quality_report(line_id, report)
         return report
+
+    def _quality_report_axes(self, line_id, report, dataset=None):
+        """Expose current project calibration, never matrix placeholder axes."""
+        dataset = dataset if dataset is not None else self.load_gpr_dataset(line_id)
+        line = self.get_line(line_id)
+        metadata = dataset.metadata or {}
+        matrix = str(line.data_format or '').split('+')[0] in {
+            'csv-matrix-chunked', 'npy-matrix-chunked', 'hdf5-matrix-chunked'}
+        legacy_unknown = (matrix and metadata.get('time_axis_status') != 'known'
+                          and metadata.get('physical_axes_source') != 'user_input')
+        time_known = line.time_window_override_ns > 0 or (metadata.get('time_axis_status') != 'unknown' and not legacy_unknown)
+        distance_known = (line.distance_override == 'measured' or
+                          (line.distance_override != 'unknown' and metadata.get('distance_axis_status') != 'unknown' and not legacy_unknown))
+        return replace(report,
+                       time_window_ns=float(line.time_window_override_ns or dataset.time_window_ns) if time_known else 0.0,
+                       length_m=float(line.length_m if line.distance_override == 'measured' else dataset.length_m) if distance_known else 0.0,
+                       time_axis_status='known' if time_known else 'unknown',
+                       distance_axis_status='known' if distance_known else 'unknown')
 
     def run_project_quality_check(
         self,
@@ -441,6 +469,10 @@ class FieldLineStoreMixin:
         except KeyError:
             line = FieldLineRecord(line_id=line_id, name=line_id)
         line.length_m = round(float(dataset.length_m), 2) if dataset.length_m else line.length_m
+        if dataset.metadata.get('distance_axis_status') == 'unknown':
+            line.distance_override = 'unknown'
+        elif dataset.metadata.get('distance_axis_status') and line.distance_override == 'unknown':
+            line.distance_override = ''
         line.raw_rows = int(dataset.sample_count)
         line.trace_count = int(dataset.trace_count)
         line.raw_size_mb = round(self._path_size(path) / (1024 * 1024), 3)
@@ -449,9 +481,10 @@ class FieldLineStoreMixin:
         line.processing_status = "已导入" if line.processing_status in {"未处理", "未定位", ""} else line.processing_status
         line.updated_at = local_now()
         self.upsert_line(line)
+        length_text = '未知' if dataset.metadata.get('distance_axis_status') == 'unknown' else f'{dataset.length_m:.2f}m'
         self.append_log(
             f"保存归一化 GPR 数据 {line_id}: {dataset.sample_count}×{dataset.trace_count}, "
-            f"length={dataset.length_m:.2f}m, storage={storage_mode}"
+            f"length={length_text}, storage={storage_mode}"
         )
         return path
 

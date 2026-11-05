@@ -136,6 +136,12 @@ class DeliveryPage(QWidget):
 
         self._lines_list = QListWidget(spatial_card)
         self._lines_list.setAccessibleName('选择测线，可多选')
+        self._lines_list.setStyleSheet(
+            'QListWidget::indicator { width: 14px; height: 14px; border-radius: 3px; '
+            'border: 1px solid palette(mid); background-color: palette(base); }'
+            'QListWidget::indicator:checked { border: 1px solid palette(highlight); '
+            'background-color: palette(highlight); }'
+        )
         self._lines_list.setMinimumHeight(120)
         spatial_layout.addWidget(self._lines_list)
         self._lines_empty_hint = make_hint('暂无可选测线', parent=spatial_card)
@@ -314,7 +320,7 @@ class DeliveryPage(QWidget):
         object_action(menu, 'export-result', '导出成果…',
                       lambda: self._export_spatial_result(result_id) if valid() else None,
                       enabled=bool(result_id))
-        object_action(menu, 'delete-result', '移入回收站…',
+        object_action(menu, 'delete-result', '永久删除空间成果…',
                       lambda: self._delete_spatial_result(result_id) if valid() else None,
                       enabled=bool(result_id and not self._busy))
         return menu
@@ -338,9 +344,7 @@ class DeliveryPage(QWidget):
             })
 
     def _delete_spatial_result(self, result_id):
-        from ui.dialogs import ask_spatial_delete
-        if ask_spatial_delete(self, result_id):
-            self.spatial_delete_requested.emit(result_id)
+        self.spatial_delete_requested.emit(result_id)
 
     def _report_path_menu(self, key):
         menu = object_menu(self)

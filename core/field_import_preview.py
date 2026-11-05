@@ -268,7 +268,7 @@ def build_import_preflight(
                     format_name="csv-matrix", support="direct", can_import=True,
                     message="可直接导入；完整行列数将在后台两遍扫描后确定。" if not sampled_all else "可直接导入；数值矩阵抽样通过。",
                     suggestions=("导入任务支持进度、取消和事务回滚",
-                                 "该矩阵未提供物理轴：若未手动指定，暂按时间窗 250 ns、道间距 1 m 显示；定量解释前须核对采集参数。"),
+                                 "该矩阵未提供物理轴；未手动指定时，时间与距离显示为未知。"),
                     sample_count=rows if sampled_all else 0, trace_count=cols if sampled_all else 0,
                     dielectric_constant=float(dielectric_constant), data_min=low, data_max=high,
                     source_kind="二维数值矩阵", has_trajectory=False,
@@ -338,7 +338,7 @@ def build_import_preflight(
                 format_name=display_name, support="direct", can_import=True,
                 message="可直接导入；预检仅读取数组元数据，没有展开完整矩阵。",
                 suggestions=(("完整复制、转换和质检将在统一后台任务中执行",
-                              "该矩阵未提供物理轴：若未手动指定，暂按时间窗 250 ns、道间距 1 m 显示；定量解释前须核对采集参数。")
+                              "该矩阵未提供物理轴；未手动指定时，时间与距离显示为未知。")
                              if suffix == '.npy' else ("完整复制、转换和质检将在统一后台任务中执行",)),
                 sample_count=int(shape[0]), trace_count=int(shape[1]),
                 dielectric_constant=float(dielectric_constant), data_min=low, data_max=high,

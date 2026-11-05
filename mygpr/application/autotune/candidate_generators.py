@@ -105,11 +105,11 @@ def _build_zero_time_candidates(
 
 
 def _resolve_time_step_ns(n_samples: int, header_info: dict[str, Any]) -> float:
-    total_time_ns = header_info.get("total_time_ns") if header_info else None
-    total_time_value = to_float(total_time_ns, default=0.0)
-    if total_time_value > 0:
-        return total_time_value / max(1, int(n_samples))
-    return 48.0 / max(1, int(n_samples))
+    from mygpr.domain.processing.timebase import sampling_interval_s
+    interval = sampling_interval_s(header_info, n_samples)
+    if interval <= 0:
+        raise ValueError('时间轴未知，无法自动估计零时；请先补录采集时间窗。')
+    return interval * 1e9
 
 
 def _agc_window_min(n_samples: int, header_info: dict[str, Any]) -> int:
@@ -339,6 +339,8 @@ def _build_frequency_filter_trials(
     filter_types = list(config.get("filter_type", [])) or [
         str(base_params.get("filter_type", "bandpass"))
     ]
+    if header_info.get('time_axis_status') == 'unknown':
+        raise ValueError('时间轴未知，无法按频率自动调参；请先补录采集时间窗。')
     context_band = frequency_band_from_context(header_info)
     nyquist_mhz = _resolve_nyquist_mhz(data.shape[0], header_info)
     if nyquist_mhz is None or nyquist_mhz <= 0.0:
@@ -427,17 +429,16 @@ def _build_frequency_filter_trials(
 
 
 def _resolve_nyquist_mhz(n_samples: int, header_info: dict[str, Any]) -> float | None:
+    if header_info.get('time_axis_status') == 'unknown':
+        return None
     sample_rate_hz = to_float(header_info.get("sample_rate_hz"), default=0.0)
     if sample_rate_hz > 0.0:
         return float(sample_rate_hz / 2.0e6)
 
-    time_step_s = to_float(header_info.get("time_step_s"), default=0.0)
+    from mygpr.domain.processing.timebase import sampling_interval_s
+    time_step_s = sampling_interval_s(header_info, n_samples)
     if time_step_s > 0.0:
         return float(1.0 / time_step_s / 2.0e6)
-
-    total_time_ns = to_float(header_info.get("total_time_ns"), default=0.0)
-    if total_time_ns > 0.0:
-        return float(max(1, int(n_samples)) / (total_time_ns * 1.0e-9) / 2.0e6)
     return None
 
 

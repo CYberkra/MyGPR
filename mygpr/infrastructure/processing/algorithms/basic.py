@@ -56,6 +56,9 @@ def method_dewow_native(data: Any, params: dict[str, Any]) -> tuple[np.ndarray, 
 
 
 def method_zero_time(data: Any, params: dict[str, Any]) -> tuple[np.ndarray, dict[str, Any]]:
+    from mygpr.domain.processing.timebase import require_time_axis
+
+    require_time_axis('set_zero_time', params.get('_header_info') or params.get('header_info'))
     arr, warnings = ensure_matrix(data)
     new_zero = as_float(params.get("new_zero_time"), 5.0)
     if not np.isfinite(new_zero) or new_zero <= 0.0:

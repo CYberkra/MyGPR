@@ -23,6 +23,8 @@ class ProjectMaintenanceService:
 
     def __init__(self, projects: ProjectService) -> None:
         self._projects = projects
+        from mygpr.application.project.deletion import PermanentDeletionService
+        self.deletion = PermanentDeletionService(projects)
 
     def get_metadata(self, project_id: str) -> ProjectMetadata:
         return self._projects._session(project_id).get_metadata()
@@ -119,7 +121,8 @@ class ProjectMaintenanceService:
         *,
         reason: str = "用户删除测线",
     ) -> LineDeleteResult:
-        return self._projects._session(project_id).delete_line(line_id, reason=reason)
+        with self._projects.exclusive_delete(project_id) as session:
+            return session.delete_line(line_id, reason=reason)
 
     def list_artifact_descendants(
         self,
@@ -137,9 +140,7 @@ class ProjectMaintenanceService:
         *,
         reason: str = "用户删除成果",
     ) -> ArtifactDeleteResult:
-        return self._projects._session(project_id).delete_artifacts(
-            line_id, artifact_ids, reason=reason
-        )
+        return self._projects.delete_artifacts(project_id, line_id, artifact_ids, reason=reason)
 
     def batch_import_lines(
         self,

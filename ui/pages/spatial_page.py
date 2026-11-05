@@ -105,6 +105,7 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
     save_depth_layer_requested = pyqtSignal(list, float)  # 存为图层（line_ids, cell_size_m）
 
     _PANEL_STATE_PREFIX = 'spatial'
+    _AUTO_COLLAPSE_ORDER = ('right', 'left')
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -583,6 +584,8 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
         # 空态显隐：有测线显示勾选列表，无测线显示引导文案
         has_lines = self._line_list.count() > 0
         self._line_list.setVisible(has_lines)
+        self._lines_empty_hint.setText('测线缺少定位轨迹，请先同步传感器' if self._lines_by_id
+                                       else '暂无测线，请先在项目管理页导入')
         self._lines_empty_hint.setVisible(not has_lines)
 
         self._refresh_views()
@@ -603,6 +606,8 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
             line_id = str(getattr(line, 'line_id', '') or '')
             if line_id:
                 self._lines_by_id[line_id] = line
+        self._lines_empty_hint.setText('测线缺少定位轨迹，请先同步传感器' if self._lines_by_id
+                                       else '暂无测线，请先在项目管理页导入')
         self._refresh_detail()
 
     def set_depth_grid(self, payload: dict, line_ids: list,

@@ -17,6 +17,52 @@ from qfluentwidgets import MessageBox
 __all__ = ["ask_artifact_delete", "ask_discard_interpretation", "choose_processing_package_path"]
 
 
+def ask_permanent_delete(parent, plan, *, names=None) -> bool:
+    from PyQt6.QtWidgets import QTreeWidget, QTreeWidgetItem
+    from qfluentwidgets import MessageBoxBase, SubtitleLabel, BodyLabel, setCustomStyleSheet
+
+    nouns = {'project': '项目', 'lines': '测线', 'artifacts': '处理成果', 'spatial': '空间成果'}
+    noun = nouns[plan.kind]
+    box = MessageBoxBase(parent.window())
+    box.widget.setMinimumWidth(460)
+    box.viewLayout.addWidget(SubtitleLabel(f'永久删除{noun}？', box))
+    if plan.kind == 'project':
+        path = BodyLabel(plan.root, box)
+        path.setWordWrap(True)
+        box.viewLayout.addWidget(path)
+    tree = QTreeWidget(box)
+    tree.setHeaderHidden(True)
+    tree.setAccessibleName('将永久删除的对象')
+    names = tuple(plan.names if names is None else names)
+    tree.setFixedHeight(min(240, max(80, 28 * len(names))))
+    items = {key: QTreeWidgetItem([name]) for key, name in zip(plan.targets, names)}
+    for index, (key, item) in enumerate(items.items()):
+        parent_id = plan.parents[index] if index < len(plan.parents) else ''
+        if parent_id in items and parent_id != key:
+            items[parent_id].addChild(item)
+        else:
+            tree.addTopLevelItem(item)
+    for name in names[len(plan.targets):]:
+        tree.addTopLevelItem(QTreeWidgetItem([name]))
+    tree.expandAll()
+    box.viewLayout.addWidget(tree)
+    subjects = {'project': '项目产物和导入副本', 'lines': '测线的项目内数据和成果',
+                'artifacts': '所列处理成果', 'spatial': '所列空间成果'}
+    warning = BodyLabel(f'{subjects[plan.kind]}将永久删除，无法撤销。原始源文件保留。', box)
+    warning.setWordWrap(True)
+    box.viewLayout.addWidget(warning)
+    box.yesButton.setText('永久删除项目' if plan.kind == 'project' else '永久删除')
+    box.yesButton.setObjectName('permanentDeleteConfirm')
+    box.cancelButton.setText('取消')
+    setCustomStyleSheet(box.yesButton,
+        '#permanentDeleteConfirm {background:#b42332;color:white;border:1px solid #b42332;}',
+        '#permanentDeleteConfirm {background:#f08b93;color:#271113;border:1px solid #f08b93;}')
+    box.yesButton.setAutoDefault(False)
+    box.cancelButton.setDefault(True)
+    box.cancelButton.setFocus()
+    return box.exec() == 1
+
+
 def ask_display_name(parent, title, current, *, subject=""):
     from qfluentwidgets import MessageBoxBase, SubtitleLabel, BodyLabel, LineEdit
     from ui.desktop_backend_facade import validate_display_name
@@ -146,10 +192,10 @@ def choose_spatial_export_path(parent: QWidget | None, result_id: str) -> tuple[
 def ask_spatial_delete(parent: QWidget | None, result_id: str) -> bool:
     box = MessageBox(
         "移除空间成果",
-        f"将把空间成果 {result_id} 移入项目回收站，不影响测线、处理成果和解释标注。确认继续？",
+        f"将把空间成果 {result_id} 永久删除；原始导入源文件保留。",
         parent.window() if parent is not None else None,
     )
-    box.yesButton.setText("移入回收站")
+    box.yesButton.setText("永久删除")
     box.cancelButton.setText("取消")
     return box.exec() == 1
 
@@ -171,7 +217,7 @@ def ask_discard_interpretation(parent: QWidget | None, line_id: str) -> bool:
 def ask_artifact_delete(parent: QWidget | None, names: list[str]) -> bool:
     """成果删除级联确认框：列出将删除的成果名（含级联派生成果）。
 
-    数据会移入项目 .trash 回收站（可恢复）。返回 True = 用户确认删除；
+    直接删除 MyGPR 成果文件，原始导入源文件保留。返回 True = 用户确认删除；
     名单为空时直接返回 False（不弹框）。
     """
     names = [str(name) for name in (names or []) if str(name)]
@@ -179,11 +225,11 @@ def ask_artifact_delete(parent: QWidget | None, names: list[str]) -> bool:
         return False
     shown = "\n".join(f"  • {name}" for name in names)
     box = MessageBox(
-        "确认删除成果？",
-        f"将删除 {len(names)} 个成果（含级联派生成果，数据会移入项目 .trash 回收站，可恢复）：\n{shown}\n\n确认继续？",
+        "永久删除成果？",
+        f"将删除 {len(names)} 个成果（含依赖成果，无法撤销，原始源文件保留）：\n{shown}\n\n确认继续？",
         parent.window() if parent is not None else None,
     )
-    box.yesButton.setText("删除")
+    box.yesButton.setText("永久删除")
     box.cancelButton.setText("取消")
     return box.exec() == 1  # QDialog.DialogCode.Accepted
 
@@ -208,12 +254,21 @@ def ask_line_properties(parent, line):
     value.setValue(line.length_m if line.length_m > 0 else 1.0)
     direction = CheckBox("反向查看", box)
     direction.setChecked(line.view_reversed)
+    time_known = CheckBox("补录时间窗", box)
+    time_value = DoubleSpinBox(box)
+    time_value.setDecimals(6)
+    time_value.setRange(0.000001, 10000000)
+    prior_window = float(getattr(line, 'time_window_override_ns', 0) or 0)
+    time_known.setChecked(prior_window > 0)
+    time_value.setValue(prior_window if prior_window > 0 else 250.0)
     form.addRow("距离状态", known)
     form.addRow("输入方式", mode)
     form.addRow("实测值", value)
+    form.addRow("时间轴", time_known)
+    form.addRow("首末采样跨度 (ns)", time_value)
     form.addRow("查看方向", direction)
     box.viewLayout.addLayout(form)
-    note = BodyLabel("实测长度只设置沿线距离，不代表 RTK 定位。原始数据及已有成果保持不变。", box)
+    note = BodyLabel("补录参数用于原始输入和后续处理；已有成果保留原参数。", box)
     note.setWordWrap(True)
     box.viewLayout.addWidget(note)
     box.yesButton.setText("保存")
@@ -221,16 +276,18 @@ def ask_line_properties(parent, line):
     def update_enabled():
         mode.setEnabled(known.isChecked())
         value.setEnabled(known.isChecked())
+        time_value.setEnabled(time_known.isChecked())
         box.yesButton.setEnabled(not known.isChecked() or line.trace_count >= 2)
     def change_mode(index):
         intervals = max(1, line.trace_count - 1)
         value.setValue(value.value() / intervals if index == 1 else value.value() * intervals)
     mode.currentIndexChanged.connect(change_mode)
     known.toggled.connect(update_enabled)
+    time_known.toggled.connect(update_enabled)
     update_enabled()
     if box.exec() != 1:
         return None
     length = None
     if known.isChecked():
         length = value.value() * (line.trace_count - 1 if mode.currentIndex() == 1 else 1)
-    return length, direction.isChecked()
+    return length, direction.isChecked(), time_value.value() if time_known.isChecked() else 0.0

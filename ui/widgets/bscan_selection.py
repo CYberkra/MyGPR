@@ -197,19 +197,20 @@ class BScanSelectionMixin:
         y0, y1 = max(0, math.floor(top+1e-9)), min(height, math.ceil(bottom-1e-9))
         return source[y0:y1, x0:x1] if x1 > x0 and y1 > y0 else np.empty((0, 0))
 
+    def levels_follow_view(self) -> bool:
+        return self._selection_follows_levels
+
+    def set_levels_follow_view(self, enabled: bool) -> None:
+        """Apply the application preference without moving the viewport or data."""
+        enabled = bool(enabled)
+        if enabled != self._selection_follows_levels:
+            self._selection_follows_levels = enabled
+            self._selection_timer.stop()
+            self._apply_levels_to_render()
+
     def _toggle_selection_levels(self, checked):
-        self._selection_follows_levels = bool(checked)
-        self._apply_levels_to_render()
+        self.set_levels_follow_view(checked)
 
     def _add_menu_selection(self, menu):
-        from qfluentwidgets import Action
         from ui.widgets.context_menus import add_action
         add_action(menu, None, '框选放大', self.start_rectangle_zoom, enabled=self._matrix is not None)
-        fixed = self._levels_override is not None
-        label = '色阶跟随查看范围' if not fixed else '色阶跟随查看范围（统一色阶已锁定）'
-        action = Action(label)
-        action.setCheckable(True)
-        action.setChecked(self._selection_follows_levels and not fixed)
-        action.setEnabled(not fixed)
-        action.triggered.connect(self._toggle_selection_levels)
-        menu.addAction(action)

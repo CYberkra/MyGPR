@@ -153,6 +153,8 @@ class TestSettingsPageMirror:
             'bscan_gain_mode': 'sec',
             'bscan_gain_alpha': 1.5,
             'bscan_colorbar_visible': False,
+            'bscan_levels_follow_view': True,
+            'bscan_qc_marks_visible': True,
         }
         page.sync_bscan_view_settings(wanted)
         assert page.bscan_view_settings() == wanted

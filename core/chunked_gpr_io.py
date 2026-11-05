@@ -24,7 +24,7 @@ import numpy as np
 
 try:
     import h5py  # type: ignore
-except Exception:  # pragma: no cover
+except (ImportError, OSError):  # pragma: no cover
     h5py = None
 
 CancelCheck = Callable[[], bool] | None

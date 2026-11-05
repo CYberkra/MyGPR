@@ -23,6 +23,7 @@ from ui.desktop_backend_facade import (
 )
 from ui.controllers.backend_controller import friendly_error_message, run_command
 from ui.controllers.project_identity_controller import ProjectIdentityController
+from ui.controllers.permanent_delete_controller import PermanentDeleteController
 from ui.sensor_summary import SensorCompletenessReport, sensor_completeness_report
 
 _LOGGER = logging.getLogger(__name__)
@@ -113,7 +114,9 @@ class ProjectController(QObject):
         self._busy = False
         self._project_context_generation = 0
         self._lines_generation = 0
+        self._preflight_generation = 0
         self.identity = ProjectIdentityController(self)
+        self.deletion = PermanentDeleteController(self)
         self._sensor_summary_versions: dict[str, int] = {}
         # 预览代数：每次发起新预览自增，worker 回包时若代数已过期则丢弃，
         # 防止快速切换测线时旧预览覆盖新预览。
@@ -501,10 +504,14 @@ class ProjectController(QObject):
 
     # ------------------------------------------------------------------
     def preflight_import(self, source: str, line_id: str, dielectric: float) -> None:
+        self._preflight_generation += 1
         run_command(
-            _PreflightImportCommand(self, source, line_id, dielectric),
+            _PreflightImportCommand(self, source, line_id, dielectric, self._preflight_generation),
             name="mygpr-import-preflight",
         )
+
+    def invalidate_preflight(self, *_args) -> None:
+        self._preflight_generation += 1
 
     def import_line(self, source: str, line_id: str, name: str, dielectric: float, *,
                     time_window_ns: float | None = None, trace_interval_m: float | None = None) -> str | None:
@@ -658,7 +665,7 @@ class ProjectController(QObject):
         """批量删除当前项目中的多条测线（项目页 Delete 键入口）。"""
         backend = self._backend()
         project_id = self._project_id_or_warn()
-        if backend is None or project_id is None:
+        if self._busy or backend is None or project_id is None:
             return
         line_ids = [str(lid) for lid in (line_ids or []) if lid]
         if not line_ids:
@@ -670,10 +677,10 @@ class ProjectController(QObject):
         )
 
     def delete_artifacts(self, line_id: str, artifact_ids: list[str]) -> None:
-        """删除成果（级联名单已由 coordinator 确认）→ 移入项目回收站。"""
+        """删除成果（级联名单已由 coordinator 确认）→ 直接永久删除。"""
         backend = self._backend()
         project_id = self._project_id_or_warn()
-        if backend is None or project_id is None:
+        if self._busy or backend is None or project_id is None:
             return
         ids = [str(a) for a in (artifact_ids or []) if a]
         if not ids or not str(line_id):
@@ -1263,8 +1270,8 @@ class _PreviewArtifactCommand:
                 c.artifact_preview_ready.emit(self._artifact_id, bundle)
 
 
-class _PreflightImportCommand:
-    __slots__ = ("_controller", "_source", "_line_id", "_dielectric")
+class _PreflightImportCommand(_ProjectReadCommand):
+    __slots__ = ("_controller", "_project_id", "_source", "_line_id", "_dielectric", "_generation")
 
     def __init__(
         self,
@@ -1272,17 +1279,24 @@ class _PreflightImportCommand:
         source: str,
         line_id: str,
         dielectric: float,
+        generation: int,
     ) -> None:
+        super().__init__(controller)
         self._controller = controller
+        self._project_id = controller.current_project_id
+        self._generation = generation
         self._source = source
         self._line_id = line_id
         self._dielectric = dielectric
+
+    def _context_is_current(self) -> bool:
+        return super()._context_is_current() and self._generation == self._controller._preflight_generation
 
     def execute(self) -> None:
         c = self._controller
         backend = c._backend()
         if backend is None:
-            c.preflight_failed.emit("后端尚未就绪")
+            self._publish('preflight_failed', "后端尚未就绪")
             return
         try:
             result = backend.acquisition.preflight(
@@ -1294,9 +1308,9 @@ class _PreflightImportCommand:
             _LOGGER.exception("导入预检失败")
             message = friendly_error_message(exc)
             c.log_message.emit(f"导入预检失败：{message}")
-            c.preflight_failed.emit(message)
+            self._publish('preflight_failed', message)
         else:
-            c.preflight_ready.emit(result)
+            self._publish('preflight_ready', result)
 
 
 class _DeleteLinesCommand:
@@ -1334,7 +1348,7 @@ class _DeleteLinesCommand:
 
 
 class _DeleteArtifactsCommand:
-    """worker 线程删除成果（移入回收站）；成功后刷新成果列表。"""
+    """worker 线程永久删除成果；成功后刷新成果列表。"""
 
     __slots__ = ("_controller", "_project_id", "_line_id", "_artifact_ids")
 
@@ -1365,7 +1379,7 @@ class _DeleteArtifactsCommand:
         else:
             deleted = list(result.deleted_artifact_ids)
             c.log_message.emit(
-                f"已删除 {len(deleted)} 个成果（含级联），已移入项目回收站")
+                f"已删除 {len(deleted)} 个成果（含依赖），文件已永久删除")
             if c._current_preview_artifact_id in deleted:
                 victim = c._current_preview_artifact_id
                 c._current_preview_artifact_id = ''

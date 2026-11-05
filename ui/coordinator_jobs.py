@@ -24,6 +24,7 @@ class JobHub:
         self._co = coordinator
         self.known_job_ids: set[str] = set()   # 已 upsert 到任务控件的任务
         self.import_job_ids: set[str] = set()  # 测线导入/传感器同步任务（完成后刷新测线）
+        self.import_forms: dict[str, str] = {}
         self.spatial_job_ids: set[str] = set()  # 空间成果任务（完成后刷新空间成果表）
         self._terminal_statuses: dict[str, str] = {}
         self._progress_counts: dict[str, tuple[int, int]] = {}
@@ -136,7 +137,13 @@ class JobHub:
         # 导入/同步完成 → 刷新测线列表
         if job_id in self.import_job_ids:
             self.import_job_ids.discard(job_id)
+            submitted_source = self.import_forms.pop(job_id, None)
+            if success and submitted_source is not None:
+                failed_sources = [str(item.source) for item in getattr(result, 'results', ())
+                                  if not item.success]
+                co.page('projectInterface').finish_import(submitted_source, failed_sources)
             if success and co.project_controller is not None:
+                co.project.invalidate_spatial_tracks()
                 co.project_controller.refresh_lines()
         # 空间成果完成 → 刷新空间成果表
         if job_id in self.spatial_job_ids:

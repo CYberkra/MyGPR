@@ -228,10 +228,12 @@ def test_project_batch_import_propagates_dielectric_to_backend(qapp):
     controller.set_backend(SimpleNamespace(backend=SimpleNamespace(
         submit_batch_line_import=lambda *args, **kwargs: calls.append((args, kwargs)) or 'J1'), job_bridge=bridge))
     coordinator = SimpleNamespace(project_controller=controller, require_project=lambda: True,
-        jobs=SimpleNamespace(import_job_ids=set()), infobar=lambda *args: None)
+        jobs=SimpleNamespace(import_job_ids=set(), import_forms={}), infobar=lambda *args: None,
+        page=lambda name: SimpleNamespace(file_edit=SimpleNamespace(text=lambda: 'L01.npy; L02.npy')))
     ProjectChain(coordinator).on_import_requested({'sources': ['L01.npy', 'L02.npy'], 'dielectric': 16})
     assert calls == [(('P', ['L01.npy', 'L02.npy']), {'dielectric_constant': 16.0})]
     assert coordinator.jobs.import_job_ids == {'J1'}
+    assert coordinator.jobs.import_forms == {'J1': 'L01.npy; L02.npy'}
 
 
 def test_batch_partial_submission_does_not_report_full_success(qapp):

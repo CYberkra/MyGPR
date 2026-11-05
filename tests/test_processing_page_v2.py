@@ -448,7 +448,7 @@ class TestDraftSelectionIsolation:
         page = self._page_with_run(qapp)
         try:
             before = page.current_pipeline()
-            page._set_display_cmap('gray')
+            page._workspace.primary_view().set_display_mode('envelope')
             assert page.current_pipeline() == before
             assert page._workspace.active_key() == 'artifact:F1'
         finally:

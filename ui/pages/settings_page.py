@@ -120,14 +120,37 @@ class SettingsPage(ScrollArea):
         """卡片2"B-Scan 视图"：比例 / 横纵轴单位 / 色标映射 / 色阶 / 色标显隐
         （即时生效并跨会话记住）。
 
-        处理页的色阶工具行已收容进本卡（2026-09-23）；这几项在 BScanView
-        右键菜单里也能改，此处只是把「习惯」集中可查；改动即时应用到本会话
-        所有 B-Scan（发 ``bscan_view_changed``，由主窗口下发），不必重启。
+        低频显示偏好集中在此；改动即时应用到所有测线与视图并跨会话保存。
         """
         card, layout = make_card('B-Scan 视图')
         self._build_bscan_axis_section(layout, card)
+        self._build_bscan_visibility_section(layout, card)
         self._build_bscan_appearance_section(layout, card)
         return card
+
+    def _build_bscan_visibility_section(self, layout, card) -> None:
+        layout.addWidget(self._section_header('查看与标记', card))
+        self._bscan_levels_follow_check = CheckBox('色阶跟随查看范围（全局）', card)
+        self._bscan_levels_follow_check.setToolTip(
+            '缩放、框选或平移时，按可见数据定标；关闭后按整条测线定标。'
+            '所有测线与视图共用此设置；统一色阶比较时仍保持固定色阶。')
+        self._bscan_colorbar_check = CheckBox('显示色标', card)
+        self._bscan_colorbar_check.setToolTip('统一显示或隐藏各视图右侧的色标条。')
+        self._bscan_qc_marks_check = CheckBox('显示异常道标记', card)
+        self._bscan_qc_marks_check.setToolTip('统一显示或隐藏质检覆盖标记；原始数据与质检结果保留。')
+        for check in (self._bscan_levels_follow_check, self._bscan_colorbar_check,
+                      self._bscan_qc_marks_check):
+            check.setChecked(True)
+            check.toggled.connect(self._emit_bscan_changed)
+            row = QHBoxLayout()
+            row.addWidget(check)
+            row.addStretch(1)
+            layout.addLayout(row)
+
+    def focus_bscan_settings(self) -> None:
+        """Canvas shortcut opens the global viewing preferences directly."""
+        self.ensureWidgetVisible(self._bscan_levels_follow_check, 0, 24)
+        self._bscan_levels_follow_check.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def _build_bscan_axis_section(self, layout, card) -> None:
         """「坐标与布局」小节：显示比例 + 横纵轴单位。"""
@@ -179,8 +202,7 @@ class SettingsPage(ScrollArea):
         self._bscan_cmap_combo.setCurrentText(constants.DEFAULT_COLORMAP)
         self._bscan_cmap_combo.setMinimumWidth(180)
         self._bscan_cmap_combo.setToolTip(
-            'B-Scan 剖面配色，改动即时应用到本会话所有 B-Scan；'
-            '单视图微调可在 B-Scan 上右键色标子菜单切换。')
+            'B-Scan 剖面配色，即时应用到所有测线与视图，并跨会话保存。')
         self._bscan_cmap_combo.currentTextChanged.connect(
             self._emit_bscan_changed)
         layout.addLayout(make_form_row('色标映射:',
@@ -246,17 +268,6 @@ class SettingsPage(ScrollArea):
         layout.addLayout(make_form_row(
             '显示增益:', self._bscan_gain_combo, self._bscan_gain_alpha_spin,
             parent=card, trailing_stretch=False))
-
-        self._bscan_colorbar_check = CheckBox('显示色标', card)
-        self._bscan_colorbar_check.setChecked(True)
-        self._bscan_colorbar_check.setToolTip(
-            '取消勾选后隐藏 B-Scan 右侧色标条，其宽度归还画布；也可在'
-            ' B-Scan 上右键「显示色标」只切当前视图（跨会话记住）。')
-        self._bscan_colorbar_check.toggled.connect(self._emit_bscan_changed)
-        colorbar_row = QHBoxLayout()
-        colorbar_row.addWidget(self._bscan_colorbar_check)
-        colorbar_row.addStretch(1)
-        layout.addLayout(colorbar_row)
 
     @staticmethod
     def _section_header(text: str, parent) -> StrongBodyLabel:
@@ -346,7 +357,8 @@ class SettingsPage(ScrollArea):
                    self._bscan_cmap_combo, self._bscan_contrast_spin,
                    self._bscan_p_low_spin, self._bscan_p_high_spin,
                    self._bscan_gain_combo, self._bscan_gain_alpha_spin,
-                   self._bscan_colorbar_check)
+                   self._bscan_colorbar_check, self._bscan_levels_follow_check,
+                   self._bscan_qc_marks_check)
         self._loading_settings = True
         for widget in widgets:
             widget.blockSignals(True)
@@ -392,6 +404,10 @@ class SettingsPage(ScrollArea):
                 pass        # 坏值：保持默认（同 spin 同步的容错口径）
             self._bscan_colorbar_check.setChecked(bool(
                 data.get('bscan_colorbar_visible', True)))
+            self._bscan_levels_follow_check.setChecked(bool(
+                data.get('bscan_levels_follow_view', True)))
+            self._bscan_qc_marks_check.setChecked(bool(
+                data.get('bscan_qc_marks_visible', True)))
         finally:
             for widget in widgets:
                 widget.blockSignals(False)
@@ -418,6 +434,8 @@ class SettingsPage(ScrollArea):
             'bscan_gain_alpha': float(self._bscan_gain_alpha_spin.value()),
             'bscan_colorbar_visible': bool(
                 self._bscan_colorbar_check.isChecked()),
+            'bscan_levels_follow_view': self._bscan_levels_follow_check.isChecked(),
+            'bscan_qc_marks_visible': self._bscan_qc_marks_check.isChecked(),
         }
 
     def sync_bscan_view_settings(self, values: dict) -> None:
@@ -444,6 +462,8 @@ class SettingsPage(ScrollArea):
         )
         checks = (
             (self._bscan_colorbar_check, 'bscan_colorbar_visible'),
+            (self._bscan_levels_follow_check, 'bscan_levels_follow_view'),
+            (self._bscan_qc_marks_check, 'bscan_qc_marks_visible'),
         )
         touched = [w for w, key in combos if key in values]
         touched += [w for w, key in cmap_combo if key in values]

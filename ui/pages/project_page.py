@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
 )
 from qfluentwidgets import (
     BodyLabel, CardWidget, CheckBox, DoubleSpinBox, InfoBar,
-    InfoBarPosition, LineEdit, MessageBox, PrimaryPushButton, PushButton,
+    InfoBarPosition, LineEdit, PrimaryPushButton, PushButton,
     ToolButton, TransparentToolButton, isDarkTheme,
 )
 from qfluentwidgets import FluentIcon as FIF
@@ -289,7 +289,7 @@ class ProjectPage(ProjectLineContextMixin, QWidget):
         layout.addLayout(make_form_row('介电常数:', self.dielectric_spin,
                                        parent=card))
 
-        axis_hint = make_hint('纯 CSV/TXT/NPY 矩阵不含物理轴：默认时间窗 250 ns、道间距 1 m，定量解释前请核对采集参数。', parent=card)
+        axis_hint = make_hint('纯矩阵不含物理轴；请按采集记录填写参数。', parent=card)
         axis_hint.setWordWrap(True)
         layout.addWidget(axis_hint)
         self._matrix_axes_check = CheckBox('为纯矩阵输入采集轴参数（单文件）', card)
@@ -339,9 +339,6 @@ class ProjectPage(ProjectLineContextMixin, QWidget):
         self._sync_form.save_template_requested.connect(self._save_sensor_template)
         self._sync_form.apply_template_requested.connect(self._apply_sensor_template)
         layout.addWidget(self._sync_form)
-        hint = make_hint('请先在项目台账选择测线，再提交传感器同步', parent=card)
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
         btn_row = QHBoxLayout()
         self.sync_btn = PrimaryPushButton('提交同步', card)
         self.sync_btn.clicked.connect(self._emit_sync_request)
@@ -514,7 +511,7 @@ class ProjectPage(ProjectLineContextMixin, QWidget):
         menu = make_menu(self)
         add_action(menu, FIF.SYNC, '传感器同步…', self.show_sensor_tool,
                    enabled=bool(self._current_line_id) and self._can_write())
-        add_action(menu, FIF.DELETE, '删除所选测线', self._on_delete_selected_lines,
+        add_action(menu, FIF.DELETE, '永久删除所选测线…', self._on_delete_selected_lines,
                    enabled=self._can_write() and bool(self._lines_table.selectionModel().selectedRows()))
         menu.exec(self.line_more_btn.mapToGlobal(self.line_more_btn.rect().bottomLeft()))
 
@@ -581,7 +578,8 @@ class ProjectPage(ProjectLineContextMixin, QWidget):
                     str(getattr(line, 'name', '') or '--'),
                     str(getattr(line, 'trace_count', 0)),
                     str(getattr(line, 'sample_count', 0)),
-                    ('%.2f' % float(line.length_m) if float(getattr(line, 'length_m', 0) or 0) > 0 else '未知'),
+                    ('%.2f' % float(line.length_m) if getattr(line, 'distance_override', '') != 'unknown'
+                     and float(getattr(line, 'length_m', 0) or 0) > 0 else '未知'),
                     str(getattr(line, 'data_quality', '') or '--'),
                     str(getattr(line, 'processing_status', '') or '--'),
                 )
@@ -654,8 +652,8 @@ class ProjectPage(ProjectLineContextMixin, QWidget):
             )
             del_btn = TransparentToolButton(RESULT_DELETE)
             del_btn.setIconSize(QSize(*constants.TOOL_BTN_ICON))
-            del_btn.setAccessibleName('删除该成果')
-            del_btn.setToolTip('删除该成果（移入回收站）')
+            del_btn.setAccessibleName('永久删除该成果')
+            del_btn.setToolTip('永久删除该成果及依赖成果…')
             aid = str(getattr(artifact, 'artifact_id', '') or '')
             del_btn.clicked.connect(
                 lambda _=False, aid_=aid: self._on_artifact_delete_clicked(aid_))
@@ -672,6 +670,22 @@ class ProjectPage(ProjectLineContextMixin, QWidget):
         """预检结果区：ok 绿色 / 失败红色。"""
         self._preflight_label.setText(str(text or ''))
         self._preflight_label.set_hint_key('success' if ok else 'error')
+
+    def finish_import(self, submitted_source: str, failed_sources=()) -> None:
+        if self.file_edit.text() != submitted_source:
+            return
+        if failed_sources:
+            self._import_sources = list(failed_sources)
+            self.file_edit.setText(failed_sources[0] if len(failed_sources) == 1
+                                   else f'已选择 {len(failed_sources)} 个文件')
+            self.file_edit.setToolTip('\n'.join(failed_sources))
+            self.line_id_edit.setEnabled(len(failed_sources) == 1)
+            self.line_name_edit.setEnabled(len(failed_sources) == 1)
+            self.set_preflight_result('部分文件未导入，请检查任务详情后重试。', False)
+            return
+        self.file_edit.clear()
+        self._on_import_text_edited('')
+        self._import_dialog.close()
 
     def set_busy(self, busy: bool) -> None:
         """控制器 busy 状态 → 禁用操作按钮。"""
@@ -781,6 +795,8 @@ class ProjectPage(ProjectLineContextMixin, QWidget):
             self.line_id_edit.setEnabled(len(paths) == 1)
             self.line_name_edit.setEnabled(len(paths) == 1)
             clear_invalid(self.file_edit)
+            self._preflight_label.setText('预检结果将显示在此处')
+            self._preflight_label.set_hint_key('info')
 
     def _on_import_text_edited(self, text):
         self._import_sources = []
@@ -788,6 +804,8 @@ class ProjectPage(ProjectLineContextMixin, QWidget):
         self.file_edit.setToolTip(text)
         self.line_id_edit.setEnabled(True)
         self.line_name_edit.setEnabled(True)
+        self._preflight_label.setText('预检结果将显示在此处')
+        self._preflight_label.set_hint_key('info')
 
     def _suggest_line_id(self) -> str:
         """按现有测线号自动建议下一个（L01→L02→L03…，跳过已占用）。"""
@@ -946,16 +964,7 @@ class ProjectPage(ProjectLineContextMixin, QWidget):
                     line_ids.append(lid)
         if not line_ids:
             return
-        box = MessageBox(
-            '确认删除所选测线？',
-            f'将删除 {len(line_ids)} 条测线（数据会移入项目 .trash 回收站，可恢复）：\n'
-            + '\n'.join(f'  • {lid}' for lid in line_ids),
-            self,
-        )
-        box.yesButton.setText('删除')
-        box.cancelButton.setText('取消')
-        if box.exec() == QDialog.DialogCode.Accepted:
-            self.line_delete_requested.emit(line_ids)
+        self.line_delete_requested.emit(line_ids)
 
     def _column_widths_key(self, table_name: str) -> str:
         return self._column_preferences.key(table_name)

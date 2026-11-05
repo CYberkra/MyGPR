@@ -25,6 +25,54 @@ def test_explicit_settings_path_overrides_environment(tmp_path, monkeypatch):
     assert SettingsManager(str(target)).settings_file == str(target)
 
 
+def test_unreadable_settings_are_preserved_until_reload(tmp_path, monkeypatch):
+    target = tmp_path / 'settings.json'
+    original = '{"extension": "keep"}'
+    target.write_text(original, encoding='utf-8')
+
+    def deny_read(*args, **kwargs):
+        raise PermissionError('settings temporarily unreadable')
+
+    with monkeypatch.context() as blocked:
+        blocked.setattr(module, 'open', deny_read, raising=False)
+        settings = SettingsManager(str(target))
+
+    assert not target.with_suffix('.json.bak').exists()
+    settings.set('bscan_colorbar_visible', False)
+    assert settings.save() is False
+    assert target.read_text(encoding='utf-8') == original
+
+    settings.load()
+    assert settings.get('extension') == 'keep'
+    settings.set('bscan_colorbar_visible', False)
+    assert settings.save()
+    assert SettingsManager(str(target)).get('bscan_colorbar_visible') is False
+
+
+def test_corrupt_settings_require_backup_before_saving(tmp_path, monkeypatch):
+    target = tmp_path / 'settings.json'
+    backup = target.with_suffix('.json.bak')
+    original = '{broken'
+    target.write_text(original, encoding='utf-8')
+    replace = module.os.replace
+
+    def deny_backup(source, destination):
+        if destination == str(backup):
+            raise PermissionError('settings backup temporarily unavailable')
+        return replace(source, destination)
+
+    with monkeypatch.context() as blocked:
+        blocked.setattr(module.os, 'replace', deny_backup)
+        settings = SettingsManager(str(target))
+        assert settings.save() is False
+        assert target.read_text(encoding='utf-8') == original
+
+    settings.load()
+    assert backup.read_text(encoding='utf-8') == original
+    assert settings.save()
+    assert isinstance(json.loads(target.read_text(encoding='utf-8')), dict)
+
+
 @pytest.mark.parametrize('key,bad,expected', [
     ('max_workers', None, 2), ('max_workers', 'not-a-number', 2),
     ('max_workers', float('inf'), 2), ('max_workers', 1000000, 2),

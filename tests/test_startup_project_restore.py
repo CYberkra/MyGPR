@@ -12,9 +12,11 @@ from ui.main_window import MyGPRMainWindow
 @pytest.mark.parametrize('backend_ready,pages_warmed', [(True, False), (False, True)])
 def test_restore_waits_for_both_ready_events(tmp_path, backend_ready, pages_warmed):
     controller = SimpleNamespace(open_project=Mock())
+    startup = SimpleNamespace(restore_last_project=Mock(), set_backend_ready=Mock())
     state = SimpleNamespace(
         _backend_ready=backend_ready, _pages_warmed=pages_warmed,
         project_controller=controller,
+        _page=lambda name: startup,
         settings={'recent_projects': [str(tmp_path)]})
     MyGPRMainWindow._restore_last_project(state)
     controller.open_project.assert_not_called()
@@ -22,4 +24,5 @@ def test_restore_waits_for_both_ready_events(tmp_path, backend_ready, pages_warm
     state._pages_warmed = True
     MyGPRMainWindow._restore_last_project(state)
     MyGPRMainWindow._restore_last_project(state)
-    controller.open_project.assert_called_once_with(str(tmp_path))
+    startup.restore_last_project.assert_called_once_with([str(tmp_path)])
+    controller.open_project.assert_not_called()

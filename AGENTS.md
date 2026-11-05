@@ -69,6 +69,14 @@ python app_qt.py
 - 大型原始数据、完整报告输出、GUI 截图不进 Git。
 - 需要评审的小证据文件放入 `docs/artifacts/` 随提交一起推送。
 
+## 界面设计与删除语义
+
+- Avoid unnecessary secondary labels and descriptions. Let the layout do the explaining.
+- 用布局、层级和控件关系表达用途；仅保留辨认对象、操作后果与异常处理所需的说明。
+- 项目、测线、处理成果、空间成果等实际文件的删除采用直接永久删除，不移入应用或系统回收站，也不提供文件删除后的撤销或恢复承诺。提交前明确对象、实际文件范围及依赖影响。
+- 删除仅作用于 MyGPR 管理的产物和导入副本。最初导入的源数据及传感器源文件必须保留，不因源文件位于项目目录内而扩大删除范围。
+- “关闭视图”“从最近列表移除”“卸载地形”等仅改变界面或引用的操作，保持独立命名，不等同于文件删除；草稿和标注的编辑撤销不受此约束。
+
 ## 研发技能路由
 
 按任务使用下列技能；首次应用先读对应 `SKILL.md`，不要求用户每次点名。
@@ -77,8 +85,12 @@ python app_qt.py
 | 任务 | 使用技能 |
 | --- | --- |
 | PyQt 界面设计、布局与操作流程 | `frontend-design-polish`；实际桌面交互验收时用 `windows-desktop-e2e` |
+| 跨页视觉规范、信息层级与组件一致性 | `interface-design`；提取或审计已有设计规范时可选 `design-system`，按主任务选一份流程 |
+| 配色、字体、焦点或交互规则专项查询 | `ui-ux-pro-max` 按需检索；PyQt 不套用 Web/mobile 栈与尺寸默认值 |
 | GPR 导入、处理算法、参数、异常 B-scan、GUI/CLI 一致性 | `code-context-finder` 定位真实执行链；`python-testing` 编写回归，执行交给 GitHub CI；科学数据约束见研发技能工作流 |
 | 缺陷、失败测试、卡顿、串图、异步竞态 | `engineering-feedback-loop`，保留可在 CI 复现的失败信号，先定位再修复 |
+| 按钮无反馈、切页状态重置、操作后的最终状态错误 | `click-path-audit` 追踪信号、控制器与异步回调的状态变化 |
+| PR 的 GitHub Actions 检查失败 | `gh-fix-ci` 读取失败日志并定位原因，按当前会话授权修复，复核同一提交的 CI |
 | 编写或维护 Python 测试 | `python-testing`；桌面端到端操作使用 `windows-desktop-e2e` |
 | 跨层接口或较大模块重构 | `codebase-design`，遵循现有架构约束 |
 

@@ -33,6 +33,41 @@ def test_processing_uses_state_text_instead_of_static_tutorials(processing_page)
     texts = _label_texts(page)
     assert '仅改变当前视图；不修改数据或处理步骤' not in texts
     assert '色阶、显示增益、坐标与导出可在画布右键调整' not in texts
+    assert '数据来源与分支' not in texts
+    assert '参数与调参' not in texts
+    assert '待执行' not in texts
+    tabs = [page._tools_panel.tabText(i) for i in range(page._tools_panel.count())]
+    assert tabs == ['处理', '历史']
+    assert page._execution_card.is_collapsed()
+    assert page._autotune_card.is_collapsed()
+
+
+def test_processing_display_and_fit_buttons_live_in_workspace_tab_bar(processing_page, monkeypatch):  # noqa: F811
+    from PyQt6.QtCore import QPoint
+    from PyQt6.QtTest import QSignalSpy
+
+    page = processing_page
+    assert not hasattr(page, '_display_settings_btn')
+    assert not hasattr(page, '_fit_view_btn')
+    workspace = page._workspace
+    group = workspace.group_widget()
+    for button, name in ((group.display_settings, '全局显示设置'),
+                         (group.fit_view, '适应当前视图')):
+        assert button.isVisible()
+        assert button.accessibleName() == name
+        assert workspace.isAncestorOf(button)
+        # Same tab-bar row as the group "more" button, ordered before it.
+        assert button.geometry().center().y() == group.more.geometry().center().y()
+        assert button.mapTo(group, QPoint(0, 0)).x() < group.more.mapTo(group, QPoint(0, 0)).x()
+        # Above the group's B-Scan view, not on a separate page-level row.
+        assert button.mapTo(group, QPoint(0, 0)).y() < group.view.mapTo(group, QPoint(0, 0)).y()
+    spy = QSignalSpy(group.view.sig_display_settings_requested)
+    group.display_settings.click()
+    assert len(spy) == 1
+    calls = []
+    monkeypatch.setattr(group.view, 'fit_to_data', lambda: calls.append(1))
+    group.fit_view.click()
+    assert calls == [1]
 
 
 def test_interpretation_has_one_session_status_and_one_point_count(qapp):

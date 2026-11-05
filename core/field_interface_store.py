@@ -37,6 +37,23 @@ class FieldInterfaceStoreMixin:
             dataset = self.storage.load_processing_artifact(line_id, source, raw_dataset=raw)
         else:
             dataset = raw
+        record = self.get_line(line_id)
+        legacy_matrix = (str(record.data_format or '').split('+')[0] in
+                         {'csv-matrix-chunked', 'npy-matrix-chunked', 'hdf5-matrix-chunked'}
+                         and raw.metadata.get('physical_axes_source') != 'user_input'
+                         and raw.metadata.get('time_axis_status') != 'known')
+        if legacy_matrix:
+            dataset.metadata.setdefault('time_axis_status', 'unknown')
+            if record.distance_override != 'measured':
+                dataset.metadata.setdefault('distance_axis_status', 'unknown')
+        if dataset is raw and record.time_window_override_ns > 0:
+            from core.gpr_data_model import apply_time_window_override
+            apply_time_window_override(dataset, record.time_window_override_ns)
+        if record.distance_override == 'measured':
+            dataset.distance_axis_m = np.linspace(0, record.length_m, dataset.trace_count, dtype=np.float32)
+            dataset.metadata['distance_axis_status'] = 'measured'
+        elif record.distance_override == 'unknown':
+            dataset.metadata['distance_axis_status'] = 'unknown'
         if (dataset.sample_count, dataset.trace_count) != (annotation.sample_count, annotation.trace_count):
             raise ValueError('标注尺寸与其来源数据不一致，无法导出。')
         return dataset
@@ -147,10 +164,7 @@ class FieldInterfaceStoreMixin:
         if annotation is None:
             raise FileNotFoundError(self.interface_annotation_path(safe))
         dataset = self._annotation_dataset(safe, annotation)
-        labels = annotation.build_1d_labels(
-            time_axis_ns=dataset.time_axis_ns,
-            depth_axis_m=dataset.depth_axis_m,
-        )
+        labels = self._annotation_physical_labels(annotation, dataset)
         estimated_2d = int(annotation.sample_count * annotation.trace_count * (4 + 1))
         meta = {
             "schema": BASAL_LABEL_SCHEMA,
@@ -250,7 +264,7 @@ class FieldInterfaceStoreMixin:
         if annotation is None:
             raise FileNotFoundError(self.interface_annotation_path(safe))
         dataset = self._annotation_dataset(safe, annotation)
-        labels = annotation.build_1d_labels(time_axis_ns=dataset.time_axis_ns, depth_axis_m=dataset.depth_axis_m)
+        labels = self._annotation_physical_labels(annotation, dataset)
         curve = labels["curve_gt"]
         semantics = annotation.trace_semantics()
         try:
@@ -269,12 +283,13 @@ class FieldInterfaceStoreMixin:
                 for trace in range(annotation.trace_count):
                     if not np.isfinite(curve[trace]) and not semantics["no_interface_mask"][trace]:
                         continue
-                    distance = float(dataset.distance_axis_m[min(trace, len(dataset.distance_axis_m) - 1)])
+                    distance = (float(dataset.distance_axis_m[min(trace, len(dataset.distance_axis_m) - 1)])
+                                if dataset.metadata.get('distance_axis_status') != 'unknown' else None)
                     x: float | str = ""
                     y: float | str = ""
                     surface_z: float | str = ""
                     interface_z: float | str = ""
-                    if trajectory is not None:
+                    if trajectory is not None and distance is not None:
                         point = trajectory.interpolate(distance)
                         x, y = float(point.x), float(point.y)
                         surface_z = float(point.z) - float(point.flight_height_m)
@@ -285,7 +300,7 @@ class FieldInterfaceStoreMixin:
                     writer.writerow({
                         "line_id": safe,
                         "trace_index": trace,
-                        "distance_m": f"{distance:.6f}",
+                        "distance_m": f"{distance:.6f}" if distance is not None else "",
                         "sample_index": f"{float(curve[trace]):.6f}" if np.isfinite(curve[trace]) else "",
                         "time_ns": f"{float(labels['time_gt_ns'][trace]):.6f}" if np.isfinite(labels["time_gt_ns"][trace]) else "",
                         "depth_m": f"{float(labels['depth_gt'][trace]):.6f}" if np.isfinite(labels["depth_gt"][trace]) else "",
@@ -298,6 +313,15 @@ class FieldInterfaceStoreMixin:
                         "is_ignored": int(semantics["ignore_trace_mask"][trace]),
                     })
         return path
+
+    @staticmethod
+    def _annotation_physical_labels(annotation, dataset):
+        known_time = dataset.metadata.get('time_axis_status') != 'unknown'
+        known_depth = known_time or bool(dataset.metadata.get('is_depth'))
+        return annotation.build_1d_labels(
+            time_axis_ns=dataset.time_axis_ns if known_time else None,
+            depth_axis_m=dataset.depth_axis_m if known_depth else None,
+        )
 
     def basal_interface_summary(self, line_id: str) -> dict[str, Any]:
         annotation = self.load_basal_interface_annotation(line_id)

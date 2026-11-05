@@ -4,6 +4,7 @@
 健壮性设计：
 - ``load()`` 文件缺失 → 用默认值；
 - JSON 损坏 → 回退默认并把旧文件改名 ``.bak``；
+- 读取或备份失败 → 保留磁盘文件，成功重新加载前暂停写入；
 - 加载后与 ``DEFAULT_SETTINGS`` 合并（新增键不丢）；
 - ``save()`` 用「临时文件 ``.tmp`` + ``os.replace`` 原子替换」防写一半损坏。
 """
@@ -41,10 +42,11 @@ DEFAULT_SETTINGS = {
     'bscan_contrast': 1.0,
     'bscan_p_low': 2.0,
     'bscan_p_high': 98.0,
-    # B-Scan 右侧色标条显隐（隐藏后其宽度归还画布；右键菜单也可切）
+    'bscan_levels_follow_view': True,                   # 全局色阶范围，切线/标签不覆盖
+    # B-Scan 右侧色标条显隐（隐藏后其宽度归还画布；设置页统一切换）
     'bscan_colorbar_visible': True,
     'bscan_qc_marks_visible': True,                     # 异常道覆盖标记，仅显示偏好
-    # B-Scan 色标映射（设置页统一选；单视图微调走 B-Scan 右键色标子菜单）
+    # B-Scan 色标映射（设置页统一选择）
     'bscan_colormap': 'seismic',
     # B-Scan 显示增益：off 关闭 / sec SEC 补偿（扩散+指数吸收）/ tvg TVG 补偿
     # （幂次曲线滑条调参，显示域不写数据）
@@ -89,27 +91,32 @@ class SettingsManager:
                          or constants.SETTINGS_FILE)
         self.settings_file = os.path.abspath(os.path.expanduser(settings_file))
         self._settings = deepcopy(DEFAULT_SETTINGS)
+        self._save_blocked = False
         self.load()
 
     # ------------------------------------------------------------ 持久化
     def load(self) -> None:
         """加载设置：缺失用默认；损坏回退默认并改名 .bak；与 DEFAULT_SETTINGS 合并。"""
-        if not os.path.exists(self.settings_file):
-            self._settings = deepcopy(DEFAULT_SETTINGS)
-            return
         try:
             with open(self.settings_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             if not isinstance(data, dict):
                 raise ValueError('settings root is not a dict')
-        except (json.JSONDecodeError, ValueError, OSError) as e:
-            logger.warning('设置文件损坏，回退默认值: %s (%s)', self.settings_file, e)
+        except FileNotFoundError:
+            data = {}
+        except OSError as e:
+            self._save_blocked = True
+            logger.warning('无法读取设置文件，暂停保存: %s (%s)', self.settings_file, e)
+            return
+        except ValueError as e:
+            logger.warning('设置文件损坏: %s (%s)', self.settings_file, e)
             try:
                 os.replace(self.settings_file, self.settings_file + '.bak')
             except OSError as be:
-                logger.warning('备份损坏设置文件失败: %s', be)
-            self._settings = deepcopy(DEFAULT_SETTINGS)
-            return
+                self._save_blocked = True
+                logger.warning('备份损坏设置文件失败，暂停保存: %s', be)
+                return
+            data = {}
         # 与 DEFAULT_SETTINGS 合并（新增键不丢）
         merged = deepcopy(DEFAULT_SETTINGS)
         merged.update(data)
@@ -119,9 +126,12 @@ class SettingsManager:
             for key in ('bscan_p_low', 'bscan_p_high'):
                 merged[key] = DEFAULT_SETTINGS[key]
         self._settings = merged
+        self._save_blocked = False
 
     def save(self) -> bool:
         """使用独立隐藏临时文件原子写入，失败时保留上次有效设置。"""
+        if self._save_blocked:
+            return False
         try:
             from ui.desktop_backend_facade import write_settings_json
             write_settings_json(self.settings_file, self._settings)

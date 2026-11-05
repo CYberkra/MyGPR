@@ -99,13 +99,14 @@ def test_legacy_generic_title_does_not_invent_processing(presentation):
     assert not result.steps and not result.complete and "不完整" in result.title
 
 
-def test_resource_tree_uses_same_executed_algorithm_summary(presentation):
+def test_resource_tree_uses_last_method_and_keeps_full_summary(presentation):
     from ui.file_tree import build_lineage_model
 
     item = artifact("A", ["dewow", "agcGain"])
     expected = presentation(item, [item])
     node = build_lineage_model([item], "L01")[0].children[0]
-    assert node.text == expected.tab_title
+    assert node.text == '自动增益控制'
+    assert expected.tooltip in node.tooltip
     assert "window" in node.tooltip
 
 

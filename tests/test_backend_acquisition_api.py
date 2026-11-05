@@ -230,7 +230,7 @@ def test_manual_matrix_axes_do_not_override_airborne_file_metadata(tmp_path: Pat
     backend = MyGPRBackend.create_default(max_workers=1)
     try:
         project = backend.projects.create_project(tmp_path / 'project', name='Axes')
-        with pytest.raises(ValueError, match='纯 CSV/TXT/NPY'):
+        with pytest.raises(ValueError, match='不含物理轴的纯矩阵'):
             backend.acquisition.import_line(project.project_id, 'sample_data/uav_gpr_motion_v2/main.csv',
                 line_id='L01', time_window_ns=48, trace_interval_m=.25)
     finally:

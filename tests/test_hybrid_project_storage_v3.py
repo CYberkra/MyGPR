@@ -136,7 +136,7 @@ def test_export_catalog_and_backup_snapshot_are_consistent(tmp_path: Path) -> No
         store.close()
 
 
-def test_line_delete_moves_hdf5_and_cascades_catalog(tmp_path: Path) -> None:
+def test_line_delete_permanently_removes_hdf5_and_cascades_catalog(tmp_path: Path) -> None:
     store = _hybrid_project(tmp_path / "project")
     try:
         raw = store.load_gpr_dataset("L01")
@@ -151,9 +151,8 @@ def test_line_delete_moves_hdf5_and_cascades_catalog(tmp_path: Path) -> None:
         assert not sidecar_dir.exists()
         assert store.storage.catalog.list_lines() == []
         assert store.storage.catalog.list_artifacts(line_id="L01") == []
-        assert any((store.root / ".trash" / "lines").rglob("L01.h5"))
-        trashed = list((store.root / ".trash" / "lines").rglob("*.h5"))
-        assert len(trashed) >= 2, f"sidecar 未随容器入回收站: {trashed}"
+        assert all(not path.exists() for path in sidecars)
+        assert not (store.root / ".trash" / "lines").exists()
     finally:
         store.close()
 

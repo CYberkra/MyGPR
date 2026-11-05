@@ -116,7 +116,9 @@ def test_startup_commands_are_shared_with_project_menu(page):
     assert requested == ['new', 'open']
 
 
-def test_recent_projects_keep_paths_and_availability(page, tmp_path):
+def test_recent_projects_keep_paths_and_availability(page, tmp_path, monkeypatch):
+    monkeypatch.setattr('ui.controllers.recent_projects_controller.run_command',
+                        lambda command, **kwargs: command.execute())
     existing = tmp_path / 'survey'
     existing.mkdir()
     missing = tmp_path / 'missing'
@@ -130,8 +132,10 @@ def test_recent_projects_keep_paths_and_availability(page, tmp_path):
     assert opened == [str(existing)]
 
 
-def test_project_menu_shares_display_names_pins_and_fallbacks(page, tmp_path):
+def test_project_menu_shares_display_names_pins_and_fallbacks(page, tmp_path, monkeypatch):
     from ui.settings_manager import SettingsManager
+    monkeypatch.setattr('ui.controllers.recent_projects_controller.run_command',
+                        lambda command, **kwargs: command.execute())
 
     renamed = tmp_path / 'old-folder'
     renamed.mkdir()
@@ -179,4 +183,5 @@ def test_removing_recent_record_preserves_project_directory_and_shared_menu_mode
     assert settings.get('pinned_recent_projects') == []
     menu = page.startup.project_menu(page.empty_import_btn, can_close=True,
                                      close_requested=page.close_project_requested.emit)
-    assert [action.text() for action in menu.actions()] == ['新建项目', '打开项目…', '关闭当前项目']
+    assert [action.text() for action in menu.actions()] == [
+        '新建项目', '打开项目…', '关闭当前项目', '永久删除当前项目…']

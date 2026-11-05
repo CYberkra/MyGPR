@@ -294,7 +294,6 @@ class BScanViewDataMixin:
             'display_mode': self.display_mode.value,
             'crosshair': self._crosshair_on,
             'local_view': self._view_selection is not None or self._view_time_window is not None,
-            'levels_follow_view': self._selection_follows_levels,
             'contrast': self._contrast,
         }
         if self._levels_override is not None:
@@ -305,6 +304,8 @@ class BScanViewDataMixin:
 
     def restore_display_state(self, state: dict, *, viewport: bool = False) -> None:
         """Restore a previously exported state; malformed preferences never block data."""
+        if not viewport:
+            state = {**state, **self._global_display_preferences}
         if not state:
             return
         if viewport:
@@ -320,8 +321,9 @@ class BScanViewDataMixin:
                 except (TypeError, ValueError, IndexError):
                     pass
             return
+        # A line/tab snapshot cannot undo application-wide display preferences.
+        # Standalone views retain their existing state roundtrip behavior.
         try:
-            self._selection_follows_levels = bool(state.get('levels_follow_view', True))
             self.set_colormap(str(state.get('colormap', self._cmap_name)))
             self.set_display_levels(*state.get('levels', self.display_levels()))
             self.set_contrast(state.get('contrast', self._contrast))
@@ -339,6 +341,10 @@ class BScanViewDataMixin:
             self._toggle_crosshair(bool(state.get('crosshair', True)))
         except (TypeError, ValueError, KeyError, AttributeError):
             pass
+
+    def set_global_display_preferences(self, state: dict) -> None:
+        """Host-supplied preferences take precedence over old line/tab snapshots."""
+        self._global_display_preferences = dict(state)
 
     def set_title_visible(self, visible: bool) -> None:
         """图内标题显隐（美术打磨 B）：网格卡关闭、放大/全屏保持开启。"""

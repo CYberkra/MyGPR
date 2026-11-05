@@ -61,7 +61,7 @@ class ProcessingMenus:
         if source.get('error'):
             object_action(menu, 'retry-preview', '重试预览', lambda: current(lambda: self.retry_preview(key)))
         if aid:
-            object_action(menu, 'delete-source', '删除此成果及依赖成果…',
+            object_action(menu, 'delete-source', '永久删除此成果及依赖成果…',
                 lambda: current(lambda: self.artifact_delete_requested.emit(target[1], [aid]) if not self._running else None),
                 enabled=not self._running, reason='任务运行中')
         return menu

@@ -10,6 +10,10 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 SUITES = {
     "bscan": (
+        "tests/test_bscan_global_preferences.py",
+        "tests/test_bscan_preference_mirror.py",
+        "tests/test_bscan_qc_visibility.py",
+        "tests/test_bscan_colorbar_toggle.py",
         "tests/test_bscan_viewport_levels.py",
         "tests/test_bscan_rectangle_selection.py",
         "tests/test_bscan_view_time_window.py",
@@ -26,9 +30,18 @@ SUITES = {
         "tests/test_native_processing_backend.py",
     ),
     "processing": (
+        "tests/test_file_tree.py",
+        "tests/test_home_page.py",
+        "tests/test_project_workspace.py",
+        "tests/test_page_controls_wired.py",
+        "tests/test_spatial_delivery_ui.py",
+        "tests/test_startup_project_restore.py",
         "tests/test_processing_page_v2.py",
         "tests/test_processing_workspace_flow.py",
         "tests/test_processing_async_identity.py",
+        "tests/test_method_picker.py",
+        "tests/test_component_contracts.py",
+        "tests/test_design_tokens.py",
         "tests/test_param_form.py",
         "tests/test_manual_gain_editor.py",
         "tests/test_manual_gain_live_preview.py",

@@ -214,7 +214,7 @@ class ProcessingSteps:
                 return
             except RuntimeError:      # C++ 侧已销毁（teardown 竞态）
                 self._method_picker = None
-        picker = MethodPickerDialog(self)
+        picker = MethodPickerDialog(self, anchor=self._chain_strip.add_button())
         self._method_picker = picker
         picker._draft_context = self._draft_key()
         picker._target_epoch = self._draft_edit_epoch

@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
     QTabWidget, QTreeWidget, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
-    CaptionLabel, CheckBox, ComboBox, LineEdit, MessageBox,
+    CaptionLabel, CheckBox, LineEdit, MessageBox,
     PrimaryPushButton, ProgressBar, PushButton, TransparentToolButton,
     isDarkTheme,
 )
@@ -21,7 +21,7 @@ from ui.file_tree import artifact_parameters, artifact_direct_parent, artifact_s
 from ui.file_tree import build_lineage_model as build_lineage_model  # explicit re-export
 from ui.motion import animate_progress, animations_enabled
 from ui.page_scaffold import make_form_row, refill_combo
-from ui.widgets import ParamForm, PipelineList, clear_invalid, make_separator
+from ui.widgets import ParamForm, PipelineList, clear_invalid
 from ui.widgets.bscan_workspace import BScanWorkspace
 from ui.widgets.collapsible_card import make_collapsible_card
 from ui.widgets.object_context_menu import ObjectMenuBinding
@@ -147,7 +147,7 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
         self._lineage_tree.setMaximumHeight(160)
         self._lineage_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         sources_header = QHBoxLayout()
-        sources_header.addWidget(CaptionLabel('数据来源与分支', chain_page), 1)
+        sources_header.addStretch(1)
         self._lineage_more_btn = TransparentToolButton(FIF.MORE, chain_page)
         self._lineage_more_btn.setToolTip('来源操作')
         self._lineage_more_btn.setAccessibleName('来源操作')
@@ -161,8 +161,6 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
         self._pipeline_list.hide()  # Internal step model; the editable chain is its only visible list.
         self._add_method_btn = PushButton('添加处理步骤', chain_page, FIF.ADD)
         self._add_method_btn.hide()  # Compatibility command; the visible append action is in the chain.
-        chain_layout.addWidget(make_separator())
-        chain_layout.addWidget(CaptionLabel('参数与调参', chain_page))
         self._param_empty_hint = CaptionLabel('未选择处理步骤', chain_page)
         self._param_empty_hint.setWordWrap(True)
         chain_layout.addWidget(self._param_empty_hint)
@@ -171,7 +169,7 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
         self._result_name_edit = LineEdit(chain_page)
         self._result_name_edit.setPlaceholderText('可选，留空自动命名')
         chain_layout.addLayout(make_form_row('结果名称', self._result_name_edit, parent=chain_page))
-        self._execution_card, execution = make_collapsible_card('执行与资源', collapsed=False)
+        self._execution_card, execution = make_collapsible_card('执行与资源', collapsed=True)
         self._save_intermediates_check = CheckBox('保存每步中间成果', self._execution_card)
         self._save_intermediates_check.setChecked(True)
         self._save_intermediates_check.setToolTip('默认保存并逐步展示每个处理结果；大测线可关闭以优先分块和降低资源占用')
@@ -200,18 +198,6 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         scroll.setWidget(chain_page)
         self._tools_panel.addTab(scroll, '处理')
-        display = QWidget()
-        dl = QVBoxLayout(display)
-        self._display_cmap = ComboBox(display)
-        self._display_cmap.addItems(list(constants.COLORMAPS))
-        self._display_cmap.setToolTip('仅改变当前视图配色，不修改数据或处理步骤')
-        dl.addLayout(make_form_row('色图', self._display_cmap, parent=display))
-        fit = PushButton('适应当前视图', display)
-        fit.setToolTip('色阶、显示增益、坐标与导出可在画布右键调整')
-        fit.clicked.connect(lambda: self._workspace.primary_view().fit_to_data())
-        dl.addWidget(fit)
-        dl.addStretch(1)
-        self._tools_panel.addTab(display, '显示')
         history_page = QWidget()
         history_layout = QVBoxLayout(history_page)
         history_layout.setContentsMargins(8, 8, 8, 8)
@@ -311,7 +297,6 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
         self._lineage_more_btn.clicked.connect(self._lineage_menu_binding.show_keyboard)
         self._history_more_btn.clicked.connect(self._history_menu_binding.show_keyboard)
         self._draft_menu_btn.clicked.connect(self._show_draft_menu)
-        self._display_cmap.currentTextChanged.connect(self._set_display_cmap)
         self._completion_btn.clicked.connect(self.show_latest_result)
         self._autotune_btn.clicked.connect(self._on_autotune_clicked)
         self._adopt_params_btn.clicked.connect(self._on_adopt_params)
@@ -549,7 +534,30 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
             self.original_preview_requested.emit()
 
     def close_artifact_tab(self, artifact_id):
-        self._workspace.close_source('artifact:' + str(artifact_id))
+        self._workspace.forget_source('artifact:' + str(artifact_id))
+
+    def release_deleted_previews(self, plan):
+        """Drop mmap/array references before the deletion worker touches files."""
+        victims = []
+        for key, source in list(self._sources.items()):
+            affected = (plan.kind == 'project' or
+                        (plan.kind == 'lines' and self._line_id in plan.targets) or
+                        (plan.kind == 'artifacts' and source.get('artifact_id') in plan.targets))
+            if affected:
+                source['bundle'] = None
+                victims.append(key)
+        for key, source in list(self._comparison.sources.items()):
+            affected = (plan.kind == 'project' or
+                        (plan.kind == 'lines' and source.get('line_id') in plan.targets) or
+                        (plan.kind == 'artifacts' and source.get('artifact_id') in plan.targets))
+            if affected:
+                self._comparison.sources.pop(key)
+                self._comparison.pending.pop(key, None)
+                victims.append(key)
+        for key in victims:
+            self._workspace.forget_source(key)
+            self._preview_requested.discard(str(self._sources.get(key, {}).get('artifact_id') or 'original'))
+        self._sync_sources()
 
     def close_all_artifact_tabs(self):
         self._stash_draft()
@@ -882,11 +890,6 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
 
     def toggle_side_panels(self):
         self._tools_btn.setChecked(not self._tools_btn.isChecked())
-
-    def _set_display_cmap(self, name):
-        if name:
-            self._workspace.primary_view().set_colormap(str(name))
-
 
     def set_colorbar_pref(self, visible):
         for view in self._workspace.all_views():

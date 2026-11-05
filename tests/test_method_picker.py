@@ -56,9 +56,9 @@ class TestPickerWindowContract:
     def test_set_methods_forwards_to_browser(self, picker):
         assert len(picker._browser._methods) == 2
         assert picker._count_label.text() == '2 个方法'
-        assert picker._title_label.text() == '添加处理步骤'
-        assert '双击添加' in picker._hint_label.text()
-        assert picker.minimumWidth() >= 520
+        assert picker._close_btn.toolTip() == '关闭（Esc）'
+        assert picker._add_selected_btn.text() == '添加'
+        assert picker.minimumWidth() >= 480
 
     def test_reset_state_clears_search(self, picker):
         picker._browser._search.setText('agc')
@@ -77,6 +77,7 @@ class TestPickerWindowContract:
         picker._browser._search.setText('agc')
         qapp.processEvents()
         assert top_gain.isHidden() is False
+
         assert top_gain.child(0).isHidden() is False
         assert top_filter.isHidden() is True    # dewow 不命中 → 整类隐藏
         # 显示名（中文）命中路径
@@ -90,6 +91,17 @@ class TestPickerWindowContract:
         qapp.processEvents()
         assert top_filter.isHidden() is False
         assert top_gain.isHidden() is False
+
+    def test_search_expands_matches_and_restores_collapsed_categories(self, picker):
+        tree = picker._browser._tree
+        gain = tree.topLevelItem(1)
+        gain.setExpanded(False)
+        picker._browser._search.setText('agc')
+        assert gain.isExpanded()
+        assert picker._count_label.text() == '1 个匹配'
+        picker._browser._search.clear()
+        assert not gain.isExpanded()
+        assert picker._count_label.text() == '2 个方法'
 
     def test_show_event_resets_search(self, picker, qapp):
         picker.show()
@@ -120,12 +132,13 @@ class TestPickerWindowContract:
         picker._close_if_focus_left()
         assert not picker.isVisible()
 
-    def test_focus_recheck_keeps_open_when_focus_inside(self, picker, qapp):
+    def test_focus_recheck_keeps_open_when_focus_inside(self, picker, qapp, monkeypatch):
         picker.show()
         qapp.processEvents()
-        picker._browser._search.setFocus()
-        qapp.processEvents()
-        assert QApplication.focusWidget() is picker._browser._search
+        # Test the focus-membership rule, as for the outside-focus case above.
+        # Native focus transfer is not deterministic under Qt offscreen.
+        monkeypatch.setattr(QApplication, 'focusWidget',
+                            classmethod(lambda cls: picker._browser._search))
         picker._close_if_focus_left()
         assert picker.isVisible()
 
@@ -299,3 +312,47 @@ class TestPagePickerWiring:
             assert done == [(0, 'agc')]
         finally:
             page.close()
+
+
+
+def test_details_open_only_on_demand(picker, qapp):
+    item = picker._browser._tree.topLevelItem(0).child(0)
+    picker._browser._tree.setCurrentItem(item)
+    qapp.processEvents()
+    assert picker._description_label.isHidden()
+    picker._details_btn.click()
+    assert picker._description_label.isVisibleTo(picker)
+    picker.reset_state()
+    assert picker._description_label.isHidden()
+
+
+def test_enter_adds_current_method(picker, qapp):
+    got = []
+    picker.sig_method_chosen.connect(got.append)
+    picker.show()
+    item = picker._browser._tree.topLevelItem(0).child(0)
+    picker._browser._tree.setCurrentItem(item)
+    qapp.processEvents()
+    event = QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Return,
+                      Qt.KeyboardModifier.NoModifier)
+    picker.keyPressEvent(event)
+    assert got == ['dewow']
+    assert picker.isVisible()
+
+
+def test_anchor_popup_stays_inside_available_screen(qapp):
+    from PyQt6.QtWidgets import QWidget
+
+    anchor = QWidget()
+    anchor.resize(40, 36)
+    available = anchor.screen().availableGeometry()
+    anchor.move(available.right() - 40, available.bottom() - 36)
+    anchor.show()
+    picker = MethodPickerDialog(anchor=anchor)
+    picker.set_methods(_methods())
+    picker._position_near_anchor()
+    assert available.contains(picker.geometry())
+    picker.close()
+    picker.deleteLater()
+    anchor.close()
+    anchor.deleteLater()

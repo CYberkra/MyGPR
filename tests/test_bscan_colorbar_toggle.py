@@ -94,8 +94,8 @@ class TestColorbarToggleOnView:
 
 
 # ------------------------------------------------------------------ 右键入口
-class TestColorbarMenuEntry:
-    """右键「交互开关组」必须含 checkable「显示色标」，状态与偏好一致。"""
+class TestColorbarPreferencePlacement:
+    """Colorbar visibility lives in global Settings, not in each canvas menu."""
 
     def _menu_actions(self, **kwargs):
         from qfluentwidgets import RoundMenu
@@ -108,11 +108,9 @@ class TestColorbarMenuEntry:
         view.close()
         return mapping
 
-    def test_menu_action_reflects_state(self, qapp):
+    def test_colorbar_toggle_is_not_a_per_canvas_menu_action(self, qapp):
         actions = self._menu_actions()
-        action = actions['显示色标']
-        assert action.isCheckable()
-        assert action.isChecked() is True
+        assert '显示色标' not in actions
 
     def test_rebuilt_menu_tracks_changed_preference(self, qapp):
         """菜单每次右键都重建，重建后应反映最新偏好。"""
@@ -122,8 +120,8 @@ class TestColorbarMenuEntry:
         view.set_colorbar_visible(False)
         menu = RoundMenu(parent=view)
         view._add_menu_toggles(menu)
-        action = {a.text(): a for a in menu.actions()}['显示色标']
-        assert action.isChecked() is False
+        assert '显示色标' not in {a.text(): a for a in menu.actions()}
+        assert view.colorbar_visible() is False
         menu.close()
         view.close()
 

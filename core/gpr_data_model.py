@@ -23,7 +23,7 @@ import numpy as np
 
 try:  # optional, only needed for .h5/.hdf5
     import h5py  # type: ignore
-except Exception:  # pragma: no cover - optional runtime dependency
+except (ImportError, OSError):  # pragma: no cover - optional runtime dependency
     h5py = None
 
 
@@ -804,6 +804,10 @@ def load_gpr_dataset_for_import(
         fmt = "hdf5-matrix-chunked"
     else:
         raise ValueError(f"Unsupported GPR data format: {src.suffix}")
+    # Matrix-only formats carry no physical calibration.  The numerical
+    # fallback axes are useful internally but must not be presented as data.
+    metadata.update(time_axis_status="unknown",
+                    distance_axis_status="provided_length" if length_m and length_m > 0 else "unknown")
     ds = GPRDataSet.from_matrix(
         line_id, matrix, length_m=length_m, dielectric_constant=dielectric_constant,
         source_path=str(src), format_name=fmt, metadata=metadata,
@@ -811,4 +815,17 @@ def load_gpr_dataset_for_import(
     return ds
 
 
-__all__ = ["GPR_DATA_SCHEMA", "GPRDataSet", "detect_mygpr_airborne_sidecar_csv", "load_gpr_dataset", "load_gpr_dataset_for_import", "time_to_depth_axis"]
+def apply_time_window_override(dataset: GPRDataSet, window_ns: float) -> None:
+    """Apply an explicitly recorded inclusive time window to a raw dataset view."""
+    window_ns = float(window_ns)
+    if not np.isfinite(window_ns) or window_ns <= 0:
+        raise ValueError('时间窗必须为有限正数')
+    dataset.time_window_ns = window_ns
+    dataset.time_axis_ns = np.linspace(0, window_ns, dataset.sample_count, dtype=np.float32)
+    dataset.depth_axis_m = time_to_depth_axis(dataset.time_axis_ns, dataset.dielectric_constant)
+    dataset.metadata.update(time_axis_status='known', physical_axes_source='user_input',
+                            time_axis_endpoint=True,
+                            time_step_s=window_ns * 1e-9 / max(dataset.sample_count - 1, 1))
+
+
+__all__ = ["GPR_DATA_SCHEMA", "GPRDataSet", "apply_time_window_override", "detect_mygpr_airborne_sidecar_csv", "load_gpr_dataset", "load_gpr_dataset_for_import", "time_to_depth_axis"]

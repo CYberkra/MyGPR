@@ -30,10 +30,12 @@ class MethodBrowser(QWidget):
 
     sig_method_selected = pyqtSignal(str)   # method_id
     sig_add_requested = pyqtSignal(str)     # 双击或"添加"按钮
+    sig_filter_count = pyqtSignal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._methods = []
+        self._search_expansion = None
 
         self._search = LineEdit(self)
         self._search.setObjectName('methodSearch')
@@ -84,6 +86,7 @@ class MethodBrowser(QWidget):
 
     def _rebuild_tree(self):
         self._tree.clear()
+        self._search_expansion = None
         groups = {}
         order = []
         for m in self._methods:
@@ -137,6 +140,9 @@ class MethodBrowser(QWidget):
     # ------------------------------------------------------------- 过滤
     def _apply_filter(self, text):
         needle = _search_key(text)
+        if needle and self._search_expansion is None:
+            self._search_expansion = [self._tree.topLevelItem(i).isExpanded()
+                                      for i in range(self._tree.topLevelItemCount())]
         total_hits = 0
         for i in range(self._tree.topLevelItemCount()):
             top = self._tree.topLevelItem(i)
@@ -148,7 +154,14 @@ class MethodBrowser(QWidget):
                 child.setHidden(not hit)
                 visible_children += int(hit)
             top.setHidden(visible_children == 0)
+            if needle and visible_children:
+                top.setExpanded(True)
+            elif not needle and self._search_expansion is not None and i < len(self._search_expansion):
+                top.setExpanded(self._search_expansion[i])
             total_hits += visible_children
+        if not needle:
+            self._search_expansion = None
+        self.sig_filter_count.emit(total_hits)
         # 有关键词、有方法、但一个都没命中 → 无匹配浮层（空库不叠：
         # 「暂无方法」引导已覆盖该态）
         self._nomatch.setVisible(

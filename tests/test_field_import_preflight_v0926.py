@@ -40,9 +40,8 @@ def test_plain_matrix_preflight_discloses_unverified_physical_axes(tmp_path: Pat
         np.save(source, data)
     result = build_import_preflight(source)
     text = ' '.join(result.suggestions)
-    assert '250 ns' in text
-    assert '1 m' in text
-    assert '未' in text
+    assert '未提供物理轴' in text
+    assert '时间与距离显示为未知' in text
 
 
 def test_large_csv_preflight_uses_bounded_sample_and_reports_shape_after_import(tmp_path: Path) -> None:

@@ -22,7 +22,7 @@ def test_checkable_display_menu_hides_only_marks_without_a_permanent_canvas_cont
     qapp.processEvents()
     assert view.findChild(QWidget,'showAnomalousTraceMarks') is None
     menu = make_menu(view)
-    view._add_menu_toggles(menu)
+    menu.addAction(view.qc_marks_menu_action(menu))
     action = next(a for a in menu.actions() if a.text()=='显示异常道标记')
     assert action is not view._qc_marks_action and action.isCheckable() and action.isChecked()
     assert not action.icon().isNull()
@@ -144,7 +144,7 @@ def test_menu_reopen_and_programmatic_preference_updates_keep_check_state(qapp):
     from ui.widgets.context_menus import make_menu
     view = BScanView()
     first = make_menu(view)
-    view._add_menu_toggles(first)
+    first.addAction(view.qc_marks_menu_action(first))
     action = view._qc_marks_action
     assert action.parent() is view
     changed = []
@@ -155,7 +155,7 @@ def test_menu_reopen_and_programmatic_preference_updates_keep_check_state(qapp):
     first.deleteLater()
     qapp.processEvents()
     reopened = make_menu(view)
-    view._add_menu_toggles(reopened)
+    reopened.addAction(view.qc_marks_menu_action(reopened))
     proxy = next(a for a in reopened.actions() if a.text()=='显示异常道标记')
     assert proxy is not action and not proxy.isChecked()
     proxy.trigger()
@@ -170,15 +170,17 @@ def test_existing_workspace_more_menu_exposes_the_same_display_only_action(qapp)
     workspace.set_sources([{'key':'A','title':'A','bundle':original}])
     workspace.open_source('A')
     view = workspace.primary_view()
+    settings = []
+    view.sig_display_settings_requested.connect(lambda: settings.append(True))
     menu = workspace.create_context_menu(key='A')
-    action = next(a for a in menu.actions() if a.text()=='显示异常道标记')
-    assert action is not view._qc_marks_action
+    action = next(a for a in menu.actions() if a.text()=='显示设置…')
+    assert not any(a.text() == '显示异常道标记' for a in menu.actions())
     inputs = []
     workspace.source_input_requested.connect(inputs.append)
     action.trigger()
-    assert not view.qc_marks_visible() and not inputs
+    assert settings == [True] and view.qc_marks_visible() and not inputs
     assert workspace.primary_view() is view
-    assert not any(m.isVisible() for m in view._qc_marks)
+    assert all(m.isVisible() for m in view._qc_marks)
     menu.close()
     workspace.close()
 
@@ -189,7 +191,7 @@ def test_two_live_menus_have_independent_proxies_and_survive_reverse_destruction
     view = BScanView()
     menus=[make_menu(view),make_menu(view)]
     for menu in menus:
-        view._add_menu_toggles(menu)
+        menu.addAction(view.qc_marks_menu_action(menu))
     actions=[next(a for a in menu.actions() if a.text()=='显示异常道标记') for menu in menus]
     assert actions[0] is not actions[1]
     menus[1].deleteLater()

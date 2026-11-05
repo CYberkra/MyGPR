@@ -6,18 +6,19 @@ import pytest
 pytest.importorskip('PyQt6')
 
 
-def test_project_service_delegates_spatial_export_and_recycle():
+def test_project_service_delegates_spatial_export_and_permanent_delete():
     from mygpr.application.project.service import ProjectService
 
     calls = []
     session = NS(
+        summary=NS(read_only=False),
         export_spatial_result=lambda *args, **kwargs: calls.append(('export', args, kwargs)) or 'exported',
-        delete_spatial_result=lambda result_id: calls.append(('delete', result_id)) or 'recycled',
+        delete_spatial_result=lambda result_id: calls.append(('delete', result_id)) or 'deleted',
     )
     service = ProjectService(NS())
     service._sessions['P'] = session
     assert service.export_spatial_result('P', 'R1', 'D:/out.zip', format_name='zip') == 'exported'
-    assert service.delete_spatial_result('P', 'R1') == 'recycled'
+    assert service.delete_spatial_result('P', 'R1') == 'deleted'
     assert calls[0][0] == 'export'
     assert calls[1] == ('delete', 'R1')
 

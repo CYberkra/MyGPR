@@ -126,6 +126,7 @@ class FieldLineRecord:
     interface_status: str = "未开始"
     interface_coverage: float = 0.0
     interface_keypoint_count: int = 0
+    time_window_override_ns: float = 0.0
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "FieldLineRecord":
@@ -141,6 +142,7 @@ class FieldLineRecord:
             name=str(payload.get("name") or payload.get("line_id") or ""),
             length_m=float(payload.get("length_m") or 0.0),
             distance_override=str(payload.get("distance_override") or ""),
+            time_window_override_ns=float(payload.get("time_window_override_ns") or 0.0),
             view_reversed=bool(payload.get("view_reversed", False)),
             data_quality=quality,
             rtk_status=str(payload.get("rtk_status") or "未定位"),

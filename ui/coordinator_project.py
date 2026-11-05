@@ -36,6 +36,7 @@ class ProjectChain:
         # ``load_spatial_tracks()``，导致同一份轨迹被后端完整解析两遍
         # （实测 570–695 ms/次，是 open 链路最大的单项命令成本）。
         self._spatial_reload_pending = False
+        self._spatial_preflight_pending = False
         # 上次真正发起重载时的测线集合；集合变化才需要重新解析轨迹
         self._spatial_reload_line_ids: tuple[str, ...] | None = None
         self._busy_sources: set[str] = set()
@@ -61,6 +62,9 @@ class ProjectChain:
         recent_signal = getattr(home, 'open_recent_project_requested', None)
         if hasattr(recent_signal, 'connect'):
             recent_signal.connect(self.on_open_recent_project)
+        delete_signal = getattr(home, 'project_delete_requested', None)
+        if hasattr(delete_signal, 'connect'):
+            delete_signal.connect(self.on_project_delete_requested)
         for name, controller in (('project', co.project_controller),
                                  ('processing', co.processing_controller),
                                  ('interpretation', co.interpretation_controller),
@@ -71,6 +75,14 @@ class ProjectChain:
 
         # ---------------- 项目页（SPEC §6.3）
         project.import_requested.connect(self.on_import_requested)
+        invalidate = getattr(co.project_controller, 'invalidate_preflight', None)
+        if callable(invalidate):
+            for widget_name, signal_name in (('file_edit', 'textChanged'),
+                                             ('line_id_edit', 'textChanged'),
+                                             ('dielectric_spin', 'valueChanged')):
+                signal = getattr(getattr(project, widget_name, None), signal_name, None)
+                if hasattr(signal, 'connect'):
+                    signal.connect(invalidate)
         project.sync_requested.connect(self.on_sync_requested)
         project.line_selected.connect(self.on_line_selected)
         project.line_process_requested.connect(self.on_line_process_requested)
@@ -108,7 +120,7 @@ class ProjectChain:
             tree.artifact_focus_requested.connect(
                 self.on_artifact_focus_requested)
             # 成果叶子右键「删除成果」→ 与项目页同一删除链路
-            # （异步查后代闭包 → 级联确认框 → 回收站）
+            # （异步范围预检 → 确认 → 永久删除）
             tree.artifact_delete_requested.connect(
                 lambda line_id, artifact_id:
                 self.on_artifact_delete_requested(line_id, [artifact_id]))
@@ -128,6 +140,14 @@ class ProjectChain:
         # ---------------- 项目控制器 → 本链 / 页面
         pc = co.project_controller
         if pc is not None:
+            deletion = getattr(pc, 'deletion', None)
+            if deletion is not None:
+                deletion.confirmation_requested.connect(self.on_deletion_confirmation)
+                deletion.started.connect(self.on_deletion_started)
+                deletion.finished.connect(self.on_deletion_finished)
+            home_busy = getattr(home, 'set_busy', None)
+            if callable(home_busy):
+                pc.busy_changed.connect(home_busy)
             pc.project_opened.connect(self.on_project_opened)
             pc.project_closed.connect(self.on_project_closed)
             pc.open_failed.connect(self.on_open_failed)
@@ -158,6 +178,7 @@ class ProjectChain:
         dc = co.delivery_controller
         if dc is not None:
             dc.spatial_results_updated.connect(delivery.set_spatial_results)
+            dc.spatial_preflight_ready.connect(self.on_spatial_preflight_ready)
             dc.report_generated.connect(self.on_report_generated)
             dc.processing_package_generated.connect(self.on_processing_package_generated)
             dc.report_list_updated.connect(delivery.set_report_packages)
@@ -227,6 +248,7 @@ class ProjectChain:
     def on_project_opened(self, summary) -> None:
         """project_opened → 主页卡片 + 项目页信息 + 最近项目 + 成果页刷新。"""
         self._package_context_generation += 1
+        self._spatial_preflight_pending = False
         self._quality_focus = None
         co = self._co
         self._reset_interpretation()
@@ -294,6 +316,7 @@ class ProjectChain:
     def on_project_closed(self) -> None:
         """project_closed → 清空各页项目态并恢复无项目门控。"""
         self._package_context_generation += 1
+        self._spatial_preflight_pending = False
         co = self._co
         if co.delivery_controller is not None:
             co.delivery_controller.set_project_context('')
@@ -368,6 +391,10 @@ class ProjectChain:
         if co.file_tree() is not None:
             co.file_tree().set_current_line(self.current_line_id)
 
+    def invalidate_spatial_tracks(self) -> None:
+        """A sensor update can change tracks without changing line IDs."""
+        self._spatial_reload_pending = True
+
     def on_lines_updated(self, lines: list) -> None:
         """lines_updated → 项目页测线表（自动选中首行）+ 成果页/空间页测线多选。"""
         co = self._co
@@ -383,13 +410,7 @@ class ProjectChain:
         processing.set_lines(lines)
         # 预热右键菜单"复制路径"缓存：异步查询各测线源文件路径，
         # 回包经 line_source_path_ready → project.set_line_source_path 入缓存
-        if co.project_controller is not None:
-            for line in lines:
-                lid = str(getattr(line, 'line_id', '') or '')
-                if lid:
-                    co.project_controller.line_source_path(lid)
-                    if lid == self.current_line_id:
-                        co.project_controller.line_sensor_summary(lid, int(getattr(line, 'trace_count', 0)))
+        self._refresh_line_sources(lines)
         # 导入完成后：若记录了目标测线，选中并预览它
         pending = self.pending_select_line_id
         if pending:
@@ -438,6 +459,17 @@ class ProjectChain:
             co.page('homeInterface').set_preview_bundle(None)
             processing.set_original_bundle(None)
             processing.set_artifacts([])
+
+    def _refresh_line_sources(self, lines) -> None:
+        controller = self._co.project_controller
+        if controller is None:
+            return
+        for line in lines:
+            line_id = str(getattr(line, 'line_id', '') or '')
+            if line_id:
+                controller.line_source_path(line_id)
+                if line_id == self.current_line_id:
+                    controller.line_sensor_summary(line_id, int(getattr(line, 'trace_count', 0)))
 
     def on_line_selected(self, line_id: str, *, confirm_discard: bool = True) -> bool:
         """line_selected → 记录当前测线 + 预览 + 刷新成果列表。"""
@@ -607,25 +639,58 @@ class ProjectChain:
         processing = self._co.page('processingInterface')
         processing.close_artifact_tab(str(artifact_id or ''))
 
-    def on_line_delete_requested(self, line_ids: list[str]) -> None:
-        """项目页删除所选测线（页面已弹确认框）→ 交给 ProjectController。"""
-        line_ids = [str(lid) for lid in (line_ids or []) if lid]
-        if not line_ids:
-            return
-        if self._co.project_controller is None or not self._co.require_project():
-            return
-        self._co.project_controller.delete_lines(line_ids)
+    def on_project_delete_requested(self, root):
+        if root and self.can_change_project():
+            self._co.project_controller.deletion.request('project', root=str(root))
 
-    def on_artifact_delete_requested(self, line_id: str,
-                                     artifact_ids: list) -> None:
-        """项目页删除成果 → 异步查后代闭包 → 级联确认框 → 提交删除。"""
-        if self._co.project_controller is None or not self._co.require_project():
+    def on_line_delete_requested(self, line_ids):
+        if self._co.require_project() and self.can_change_project():
+            self._co.project_controller.deletion.request('lines', line_ids)
+
+    def on_artifact_delete_requested(self, line_id, artifact_ids):
+        if self._co.require_project() and self.can_change_project():
+            self._co.project_controller.deletion.request('artifacts', artifact_ids, line_id=str(line_id))
+
+    def on_deletion_confirmation(self, plan):
+        from ui.dialogs import ask_permanent_delete
+        names = list(plan.names)
+        tree = self._co.file_tree()
+        if plan.kind == 'artifacts' and tree is not None:
+            from ui.file_tree import artifact_tree_name
+            for index, artifact_id in enumerate(plan.targets):
+                artifact = tree._artifact(plan.line_id, artifact_id)
+                if artifact is not None and index < len(names):
+                    names[index] = artifact_tree_name(artifact)
+        accepted = ask_permanent_delete(self._co.page('projectInterface'), plan, names=names)
+        if accepted and plan.project_id == self._co.current_project_id():
+            affected = (plan.kind == 'project' or
+                        (plan.kind == 'lines' and self.current_line_id in plan.targets) or
+                        (plan.kind == 'artifacts' and plan.line_id == self.current_line_id and
+                         any(self._co.processing.interpretation_uses_source(a) for a in plan.targets)))
+            if affected:
+                self._reset_interpretation()
+        self._co.project_controller.deletion.confirm(plan, accepted)
+
+    def on_deletion_finished(self, plan, success, message):
+        co = self._co
+        co.infobar('success' if success else 'error', '永久删除', message)
+        if plan is None:
             return
-        line_id = str(line_id or '')
-        ids = [str(a) for a in (artifact_ids or []) if a]
-        if not line_id or not ids:
-            return
-        self._co.project_controller.get_artifact_descendants(line_id, ids[:1])
+        if plan.kind == 'project' and success:
+            home = co.page('homeInterface')
+            home._remove_recent(plan.root)
+            names = co.settings.get('project_display_names', {})
+            if isinstance(names, dict) and plan.root in names:
+                names = dict(names)
+                names.pop(plan.root, None)
+                co.settings.set('project_display_names', names)
+                co.settings.save()
+        elif plan.kind == 'spatial':
+            co.delivery_controller.refresh_spatial(plan.project_id)
+
+    def on_deletion_started(self, plan):
+        if plan.project_id == self._co.current_project_id():
+            self._co.page('processingInterface').release_deleted_previews(plan)
 
     def on_artifact_descendants_ready(self, line_id: str,
                                       descendants: list,
@@ -651,6 +716,9 @@ class ProjectChain:
         if self._co.project_controller is None or not self._co.require_project():
             return
         payload = dict(payload or {})
+        if not payload.get('preflight') and self._co.jobs.import_forms:
+            self._co.infobar('warning', '导入进行中', '请等待当前导入完成')
+            return
         line_id = str(payload.get('line_id', '') or 'L01')
         if payload.get('preflight'):
             self._co.project_controller.preflight_import(
@@ -663,6 +731,7 @@ class ProjectChain:
             job_id = self._co.project_controller.import_lines(sources, float(payload.get('dielectric', constants.DEFAULT_DIELECTRIC)))
             if job_id:
                 self._co.jobs.import_job_ids.add(str(job_id))
+                self._co.jobs.import_forms[str(job_id)] = self._co.page('projectInterface').file_edit.text()
                 self._co.infobar('info', '批量导入', f'已提交 {len(sources)} 个文件；各文件独立预检和导入')
             return
         axis_options = ({'time_window_ns': payload['time_window_ns'],
@@ -675,6 +744,7 @@ class ProjectChain:
             float(payload.get('dielectric', constants.DEFAULT_DIELECTRIC)), **axis_options)
         if job_id:
             self._co.jobs.import_job_ids.add(str(job_id))
+            self._co.jobs.import_forms[str(job_id)] = self._co.page('projectInterface').file_edit.text()
             self.pending_select_line_id = line_id
             self._co.infobar('info', '导入测线', '导入任务已提交，完成后会自动选中该测线')
 
@@ -766,7 +836,25 @@ class ProjectChain:
     def on_spatial_requested(self, payload: dict) -> None:
         if self._co.delivery_controller is None or not self._co.require_project():
             return
+        if self._spatial_preflight_pending or self._co.jobs.spatial_job_ids:
+            self._co.infobar('warning', '空间成果', '请等待当前空间任务完成')
+            return
         payload = dict(payload or {})
+        self._spatial_preflight_pending = True
+        self._co.delivery_controller.preflight_spatial(self._co.current_project_id(), payload)
+
+    def on_spatial_preflight_ready(self, payload: dict, result: dict) -> None:
+        self._spatial_preflight_pending = False
+        requested = tuple(result.get('requested_line_ids') or ())
+        usable = tuple(result.get('usable_line_ids') or ())
+        if not result.get('passed') or (requested and set(requested) != set(usable)):
+            selected = tuple(str(item) + '：' for item in (result.get('requested_line_ids') or []))
+            details = list(result.get('errors') or []) + [str(item) for item in result.get('warnings') or []
+                                                        if str(item).startswith(selected)]
+            if result.get('passed'):
+                details.insert(0, '部分测线不满足条件，请处理后重试或取消选择。')
+            self._co.infobar('warning', '无法生成空间成果', '\n'.join(details), duration=10000)
+            return
         job_id = self._co.delivery_controller.create_spatial(
             self._co.current_project_id(),
             str(payload.get('name', '') or '空间成果'),
@@ -784,13 +872,9 @@ class ProjectChain:
             self._co.jobs.spatial_job_ids.add(str(job_id))
             self._co.infobar('info', '空间成果导出', '导出任务已提交')
 
-    def on_spatial_delete_requested(self, result_id: str) -> None:
-        if self._co.delivery_controller is None or not self._co.require_project():
-            return
-        job_id = self._co.delivery_controller.delete_spatial(
-            self._co.current_project_id(), str(result_id))
-        if job_id:
-            self._co.jobs.spatial_job_ids.add(str(job_id))
+    def on_spatial_delete_requested(self, result_id):
+        if self._co.require_project() and self.can_change_project():
+            self._co.project_controller.deletion.request('spatial', [str(result_id)])
 
     def on_spatial_current_requested(self, result_id: str) -> None:
         if self._co.delivery_controller is not None and self._co.require_project():

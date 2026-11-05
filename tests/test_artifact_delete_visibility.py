@@ -64,6 +64,7 @@ def test_confirmed_result_delete_updates_real_tree_and_preserves_raw_lines(qapp,
     from mygpr.domain.processing.models import PipelineDefinition, PipelineStep
     from ui.controllers.project_controller import ProjectController
     from ui.controllers import project_controller as module
+    from ui.controllers import permanent_delete_controller as delete_module
     from ui.widgets.file_tree_panel import FileTreePanel, _ROLE_PAYLOAD
 
     backend = MyGPRBackend.create_default(max_workers=1)
@@ -90,6 +91,7 @@ def test_confirmed_result_delete_updates_real_tree_and_preserves_raw_lines(qapp,
     pc.set_backend(NS(backend=backend, job_bridge=None))
     pc._current = summary  # Same opened session used by the real command objects.
     monkeypatch.setattr(module, 'run_command', lambda command, **kwargs: command.execute())
+    monkeypatch.setattr(delete_module, 'run_command', lambda command, **kwargs: command.execute())
     co = MagicMock()
     co.project_controller = pc
     co.require_project.return_value = True
@@ -98,6 +100,9 @@ def test_confirmed_result_delete_updates_real_tree_and_preserves_raw_lines(qapp,
     co.page.side_effect = lambda name: project if name == 'projectInterface' else other_pages.setdefault(name, MagicMock())
     chain = ProjectChain(co)
     chain.current_line_id = current_line
+    chain.can_change_project = lambda: True
+    pc.deletion.confirmation_requested.connect(chain.on_deletion_confirmation)
+    pc.deletion.finished.connect(chain.on_deletion_finished)
     panel.set_project_info(summary)
     panel.set_lines(list(backend.projects.list_lines(pid)))
     panel.set_artifacts(list(backend.projects.list_artifacts(pid)))
@@ -109,7 +114,8 @@ def test_confirmed_result_delete_updates_real_tree_and_preserves_raw_lines(qapp,
     qapp.processEvents()
     observations = []
     def confirm_temp_result():
-        boxes = host.findChildren(dialogs.MessageBox)
+        from qfluentwidgets import MessageBoxBase
+        boxes = host.findChildren(MessageBoxBase)
         observations.append(any(box.isVisible() for box in boxes))
         for box in boxes:
             box.yesButton.click()  # Only the disposable test project is affected.
@@ -117,7 +123,7 @@ def test_confirmed_result_delete_updates_real_tree_and_preserves_raw_lines(qapp,
         item = next(item for item in panel._items() if item.data(0, _ROLE_PAYLOAD) == saved.artifact_id)
         panel._on_artifact_context_menu(item, QPoint(10, 10))
         menu = panel._context_menu
-        action = next(a for a in menu.actions() if a.text() == '删除此结果及依赖成果…')
+        action = next(a for a in menu.actions() if a.text() == '永久删除此成果及依赖成果…')
         QTimer.singleShot(250, confirm_temp_result)
         QTest.mouseClick(menu.view.viewport(), Qt.MouseButton.LeftButton,
                          pos=menu.view.visualItemRect(action.property('item')).center())

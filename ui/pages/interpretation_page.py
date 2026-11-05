@@ -34,8 +34,8 @@ from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants
 from ui.icons import WorkbenchIcon
-from ui.page_scaffold import (make_card, make_collapsible_column, make_hint,
-                              refill_combo)
+from ui.page_scaffold import (PanelStateMixin, make_card, make_collapsible_column,
+                              make_hint, refill_combo)
 from ui.widgets import BScanView, make_separator
 from ui.widgets.object_context_menu import ObjectMenuBinding, object_action, object_menu
 
@@ -43,8 +43,11 @@ _OVERLAY_COLOR = constants.CHART_OVERLAY_COLOR   # 标注散点颜色（SPEC §6
 _C_M_PER_NS = 0.29979        # 真空光速 c (m/ns)
 
 
-class InterpretationPage(QWidget):
+class InterpretationPage(PanelStateMixin, QWidget):
     """界面解释标注页面。"""
+
+    _PANEL_STATE_PREFIX = 'interpretation'
+    _AUTO_COLLAPSE_ORDER = ('right',)
 
     open_session_requested = pyqtSignal(str)  # artifact_id（''=原始数据）
     auto_trace_requested = pyqtSignal()
@@ -71,11 +74,13 @@ class InterpretationPage(QWidget):
         self._velocity_running = False  # 提交后到回调前的在飞窗口，防重复提交
         self._session_active = False  # 会话未打开时禁用编辑按钮与 pick
         self._saved_status = 'draft'
+        self._sm = None
         self._build_ui()
         self._connect_internal()
         self._points_context = ObjectMenuBinding(self, self._points_table, self._point_menu)
         # 初始即应用"未开会话"禁用态（P1-6），不依赖外部首次调用
         self._update_edit_enabled()
+        self._restore_panel_state()
 
     # ============================================================ UI 构建
     def _build_ui(self) -> None:
@@ -157,15 +162,16 @@ class InterpretationPage(QWidget):
 
     def _build_side_column(self) -> QWidget:
         """右栏（展开 SIDE_TOOL_WIDTH px，可折叠）：标注点列表 + 深度换算 + 速度分析。"""
-        panel, layout = make_collapsible_column(
+        self._right_panel, layout = make_collapsible_column(
             'right', constants.SIDE_TOOL_WIDTH, parent=self)
+        panel = self._right_panel
 
         # ---------------- 标注点列表
         points_card, points_layout = make_card('标注点列表')
 
         self._points_table = QTableWidget(0, 5, points_card)
         self._points_table.setHorizontalHeaderLabels(
-            ['#', '道', '采样点', '时间(ns)', '深度(m)'])
+            ['#', '道', '采样点', '时间(ns)', '估深(m)'])
         self._points_table.verticalHeader().setVisible(False)
         self._points_table.setEditTriggers(
             QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -175,6 +181,8 @@ class InterpretationPage(QWidget):
             QAbstractItemView.SelectionMode.SingleSelection)
         table_header = self._points_table.horizontalHeader()
         table_header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        table_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        table_header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         self._points_table.setMinimumHeight(180)
         points_layout.addWidget(self._points_table, 1)
 
@@ -250,8 +258,14 @@ class InterpretationPage(QWidget):
             lambda _v: self._refresh_points_table())
         self._velocity_btn.clicked.connect(
             lambda: self.velocity_requested.emit(list(self._points)))
+        self._right_panel.sig_collapsed.connect(
+            lambda collapsed: self._on_side_panel_collapsed('right', collapsed))
 
     # ============================================================ 公共接口（供主窗口接线）
+    def set_settings_manager(self, sm) -> None:
+        self._sm = sm
+        self._restore_panel_state()
+
     def set_bundle(self, bundle) -> None:
         """剖面预览 bundle → BScanView；同时缓存时间轴用于深度换算。
 
@@ -532,6 +546,8 @@ class InterpretationPage(QWidget):
         """
         bundle = self._bundle
         if bundle is None:
+            return None
+        if 'ns' not in str(getattr(bundle, 'sample_axis_label', '') or '').lower():
             return None
         axis = getattr(bundle, 'sample_axis', None)
         if axis is None or len(axis) < 2:

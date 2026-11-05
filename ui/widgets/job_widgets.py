@@ -210,6 +210,36 @@ class JobTable(QWidget):
         """与 MiniJobList 同构的清理接口：JobHub 对三视图统一分发用。"""
         self.clear_finished()
 
+    def context_table(self):
+        return self._table
+
+    def job_id_at(self, row: int) -> str:
+        return next((job_id for job_id, index in self._rows.items() if index == row), '')
+
+    def job_snapshot(self, job_id: str) -> dict:
+        row = self._rows.get(job_id)
+        if row is None:
+            return {}
+        title = self._table.item(row, self._COL_TITLE)
+        message = self._table.item(row, self._COL_MESSAGE)
+        return {
+            'job_id': job_id,
+            'title': title.text() if title is not None else '',
+            'message': message.text() if message is not None else '',
+            'status': str(self._status_of(row) or ''),
+        }
+
+    def can_cancel(self, job_id: str) -> bool:
+        row = self._rows.get(job_id)
+        if row is None:
+            return False
+        button = self._table.cellWidget(row, self._COL_ACTION)
+        return bool(button and button.isEnabled())
+
+    def cancel_job(self, job_id: str) -> None:
+        if self.can_cancel(job_id):
+            self.cancel_requested.emit(job_id)
+
     # ------------------------------------------------------------- 内部
     def _status_of(self, row):
         item = self._table.item(row, self._COL_STATUS)

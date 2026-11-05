@@ -4,7 +4,9 @@ schema: [{name, label, type('int'|'float'|'str'|'bool'), default, min, max, choi
 - int → SpinBox；float → DoubleSpinBox（6 位小数，步长合理）
 - str+choices → ComboBox；str → LineEdit；bool → CheckBox
 - 行布局：CaptionLabel(min 100px) + 控件(stretch)
-- >4 个参数时，超出部分折叠进"高级参数"区（默认收起，PushButton 切换显隐）
+- advanced=True 显式归入高级区；未标记时保持前 4 项为基本参数
+- visible_when / enabled_when 支持 {参数: 值或值列表} 条件规则
+- hidden=preserve 保留隐藏参数值（默认），hidden=omit 从 values() 省略
 - set_values 忽略未知键，blockSignals 防循环
 - 无法识别的参数类型降级为只读文本行，不阻断整张表单
 """
@@ -19,19 +21,17 @@ _BASIC_LIMIT = 4
 
 
 def _schema_signature(schema) -> tuple:
-    """schema 结构签名（名称/标签/类型/范围/默认值/可选值）。
-
-    纳入 default 与 choices：只改方法默认值的注册表更新必须触发表单重建，
-    否则旧编辑器默认值静默过期（编辑器初值来自重建时的 default）。
-    """
+    """schema 结构签名，包含分组、默认值和条件显隐规则。"""
     return tuple(
         (str(item.get('name', '')), str(item.get('label', '')),
          str(item.get('type', 'float')), item.get('min'), item.get('max'),
-         item.get('editor'),
-         item.get('step'), item.get('tooltip'),
+         item.get('editor'), item.get('advanced'),
+         item.get('step'), item.get('tooltip'), item.get('hidden'),
          item.get('default'),
          tuple(str(c) for c in (item.get('choices') or ())),
-         tuple(sorted((str(k), str(v)) for k, v in (item.get('choice_labels') or {}).items())))
+         tuple(sorted((str(k), str(v)) for k, v in (item.get('choice_labels') or {}).items())),
+         tuple(sorted((str(k), str(v)) for k, v in (item.get('visible_when') or {}).items())),
+         tuple(sorted((str(k), str(v)) for k, v in (item.get('enabled_when') or {}).items())))
         for item in (schema or []))
 
 
@@ -47,26 +47,29 @@ class ParamForm(QWidget):
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(8)
         self._schema = []
-        self._editors = {}          # name -> 编辑器控件（SpinBox/DoubleSpinBox/ComboBox/LineEdit/CheckBox）
+        self._editors = {}
+        self._row_labels = {}
+        self._advanced_names = set()
         self._advanced_widget = None
         self._advanced_btn = None
         self._advanced_visible = False
 
     # ------------------------------------------------------------- schema
     def set_schema(self, schema) -> None:
-        """重建表单。schema 项: {name,label,type,default,min,max}。
-
-        schema 结构未变（如移动/启停同一方法步骤）时跳过重建，
-        保留编辑器与"高级参数"展开状态，避免闪烁和状态丢失。
-        """
+        """重建表单，保留相同 schema 下的编辑器和高级区展开状态。"""
         schema = [dict(item) for item in (schema or [])]
         if self._editors and _schema_signature(schema) == _schema_signature(self._schema):
             return
         self.clear()
         self._schema = schema
 
-        basic = self._schema[:_BASIC_LIMIT]
-        advanced = self._schema[_BASIC_LIMIT:]
+        if any('advanced' in item for item in self._schema):
+            basic = [item for item in self._schema if not item.get('advanced', False)]
+            advanced = [item for item in self._schema if item.get('advanced', False)]
+        else:
+            basic = self._schema[:_BASIC_LIMIT]
+            advanced = self._schema[_BASIC_LIMIT:]
+        self._advanced_names = {str(item.get('name', '')) for item in advanced}
         for item in basic:
             self._layout.addLayout(self._build_row(item))
 
@@ -88,6 +91,7 @@ class ParamForm(QWidget):
             self._layout.addWidget(self._advanced_widget)
 
         self._layout.addStretch(1)
+        self._sync_conditional_states()
 
     def _build_row(self, item):
         """按参数类型构建编辑行；未知类型/异常降级为只读文本行。"""
@@ -163,7 +167,10 @@ class ParamForm(QWidget):
         if range_tip:
             lbl.setToolTip(f'{label}\n{range_tip}')
         editor.setMinimumWidth(90)
-        editor.setMinimumHeight(34)
+        if isinstance(editor, CheckBox):
+            editor.setFixedHeight(34)
+        else:
+            editor.setMinimumHeight(34)
         editor.setSizePolicy(QSizePolicy.Policy.Expanding,
                              QSizePolicy.Policy.Fixed)
         row = QHBoxLayout()
@@ -172,6 +179,7 @@ class ParamForm(QWidget):
         row.addWidget(lbl)
         row.addWidget(editor, 1)
         self._editors[name] = editor
+        self._row_labels[name] = lbl
         return row
 
     @staticmethod
@@ -189,16 +197,20 @@ class ParamForm(QWidget):
             return '可选: ' + '、'.join(str(labels.get(str(c), c)) for c in item['choices'])
         return ''
 
+    def _on_editor_changed(self, *_args) -> None:
+        self._sync_conditional_states()
+        self.sig_changed.emit()
+
     def _connect_change_signal(self, editor):
         """按控件类型连接变更信号（int/float=valueChanged，str=text，bool=toggled）。"""
         if isinstance(editor, CheckBox):
-            editor.toggled.connect(lambda *_: self.sig_changed.emit())
+            editor.toggled.connect(self._on_editor_changed)
         elif isinstance(editor, ComboBox):
-            editor.currentTextChanged.connect(lambda *_: self.sig_changed.emit())
+            editor.currentTextChanged.connect(self._on_editor_changed)
         elif isinstance(editor, LineEdit):
-            editor.textChanged.connect(lambda *_: self.sig_changed.emit())
+            editor.textChanged.connect(self._on_editor_changed)
         else:
-            editor.valueChanged.connect(lambda *_: self.sig_changed.emit())
+            editor.valueChanged.connect(self._on_editor_changed)
 
     @staticmethod
     def _float_step(pmin, pmax):
@@ -218,14 +230,45 @@ class ParamForm(QWidget):
                 FIF.CHEVRON_DOWN_MED.icon() if self._advanced_visible
                 else FIF.CHEVRON_RIGHT_MED.icon())
 
+    @staticmethod
+    def _rule_matches(rule, values) -> bool:
+        if not rule:
+            return True
+        for name, expected in rule.items():
+            actual = values.get(name)
+            if isinstance(expected, (list, tuple, set, frozenset)):
+                if actual not in expected:
+                    return False
+            elif actual != expected:
+                return False
+        return True
+
+    def _sync_conditional_states(self) -> None:
+        values = self.values()
+        for item in self._schema:
+            name = str(item.get('name', ''))
+            editor = self._editors.get(name)
+            if editor is None:
+                continue
+            visible = self._rule_matches(item.get('visible_when'), values)
+            enabled = visible and self._rule_matches(item.get('enabled_when'), values)
+            editor.setVisible(visible)
+            editor.setEnabled(enabled)
+            label = self._row_labels.get(name)
+            if label is not None:
+                label.setVisible(visible)
+                label.setEnabled(enabled)
+
     # ------------------------------------------------------------- 值存取
     def values(self) -> dict:
-        """{name: value}，未在 schema 的键不出现。"""
+        """返回当前参数；隐藏参数默认保留，hidden=omit 时省略。"""
         out: dict = {}
         for item in self._schema:
             name = item.get('name')
             editor = self._editors.get(name)
             if editor is None:
+                continue
+            if item.get('hidden') == 'omit' and editor.isHidden():
                 continue
             out[name] = self._read_editor(editor)
         return out
@@ -253,6 +296,7 @@ class ParamForm(QWidget):
                 self._set_editor(editor, value)
             finally:
                 editor.blockSignals(False)
+        self._sync_conditional_states()
 
     @staticmethod
     def _set_editor(editor, value):
@@ -290,6 +334,8 @@ class ParamForm(QWidget):
                 self._delete_layout(item.layout())
         self._schema = []
         self._editors = {}
+        self._row_labels = {}
+        self._advanced_names = set()
         self._advanced_widget = None
         self._advanced_btn = None
         self._advanced_visible = False

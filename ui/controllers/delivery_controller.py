@@ -18,6 +18,7 @@ class DeliveryController(QObject):
 
     log_message = pyqtSignal(str)
     spatial_results_updated = pyqtSignal(list)
+    spatial_preflight_ready = pyqtSignal(object, object)
     report_generated = pyqtSignal(object)     # ReportPackage
     processing_package_generated = pyqtSignal(object)
     report_list_updated = pyqtSignal(list)    # [ReportPackage, ...] 全量列表
@@ -107,6 +108,9 @@ class DeliveryController(QObject):
                 line_ids=selected or None,
             ),
         )
+
+    def preflight_spatial(self, project_id: str, payload: dict) -> None:
+        run_command(_SpatialPreflightCommand(self, project_id, payload), name='mygpr-spatial-preflight')
 
     def export_spatial(self, project_id: str, options: dict) -> str | None:
         options = dict(options or {})
@@ -250,6 +254,32 @@ class _SpatialRefreshCommand(_DeliveryReadCommand):
             self._publish("log_message", f"刷新空间成果失败：{friendly_error_message(exc)}")
         else:
             self._publish("spatial_results_updated", results)
+
+
+class _SpatialPreflightCommand(_DeliveryReadCommand):
+    __slots__ = ('_payload',)
+
+    def __init__(self, controller, project_id, payload):
+        super().__init__(controller, project_id)
+        self._payload = dict(payload)
+
+    def execute(self):
+        if not self._context_is_current():
+            return
+        backend = self._controller._backend()
+        if backend is None:
+            self._publish('spatial_preflight_ready', self._payload,
+                          {'passed': False, 'errors': ['后端尚未就绪，请稍后再试']})
+            return
+        try:
+            result = backend.spatial.preflight(
+                self._project_id, line_ids=list(self._payload.get('line_ids') or []) or None)
+        except EXPECTED_BACKEND_ERRORS as exc:
+            result = {'passed': False, 'errors': [friendly_error_message(exc)]}
+        except Exception:
+            _LOGGER.exception('Spatial preflight failed')
+            result = {'passed': False, 'errors': ['空间成果预检失败，请查看日志']}
+        self._publish('spatial_preflight_ready', self._payload, dict(result))
 
 
 class _SpatialCurrentCommand(_SpatialRefreshCommand):

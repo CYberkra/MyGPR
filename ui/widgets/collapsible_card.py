@@ -17,11 +17,11 @@ DoubleSpinBox 的值、SwitchButton 的开关态天然保留，无需另存。
 from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QIcon, QTransform
 from PyQt6.QtWidgets import QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
-from qfluentwidgets import (CardWidget, FluentIcon as FIF, ToolButton,
-                            isDarkTheme)
+from qfluentwidgets import CardWidget, FluentIcon as FIF, ToolButton
 
 from ui import constants
 from ui import motion
+from ui.design_tokens import color
 from ui.page_scaffold import card_title
 
 __all__ = ['CollapsibleCard', 'make_collapsible_card']
@@ -82,8 +82,7 @@ class CollapsibleCard(CardWidget):
         # 主题切换靠主窗口 ``findChildren`` 单轮遍历里的 ``widget.update()``
         # 触发 CardWidget 重读 ``isDarkTheme()``。本类保持同一策略——单点
         # 特例反而会让下一个人以为卡片底色需要手动维护。
-        self.setBackgroundColor(
-            QColor('#2d2e32') if isDarkTheme() else QColor('#ffffff'))
+        self.setBackgroundColor(QColor(color('surface_card')))
 
         self._collapsed = bool(collapsed)
         self._animating = False
@@ -102,6 +101,7 @@ class CollapsibleCard(CardWidget):
         self._toggle_btn = ToolButton(FIF.CHEVRON_RIGHT_MED, self)
         self._toggle_btn.setFixedSize(*constants.TOOL_BTN_SIZE)
         self._toggle_btn.setToolTip('展开' if self._collapsed else '收起')
+        self._toggle_btn.setAccessibleName('展开' if self._collapsed else '收起')
         self._toggle_btn.clicked.connect(self.toggle)
         header.addWidget(self._toggle_btn, 0, Qt.AlignmentFlag.AlignVCenter)
         root.addLayout(header)
@@ -179,6 +179,7 @@ class CollapsibleCard(CardWidget):
         self._toggle_btn.setIcon(FIF.CHEVRON_RIGHT_MED.icon()
                                  if collapsed else _down_chevron())
         self._toggle_btn.setToolTip('展开' if collapsed else '收起')
+        self._toggle_btn.setAccessibleName('展开' if collapsed else '收起')
 
         if animate and motion.animations_enabled() and self.isVisible() and current != target:
             self._animation.start()

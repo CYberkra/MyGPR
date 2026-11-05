@@ -18,7 +18,7 @@ from core.trajectory_model import TrajectoryModel, TrajectoryPoint
 
 try:
     from pyproj import CRS, Transformer
-except Exception:  # pragma: no cover
+except (ImportError, OSError):  # pragma: no cover
     CRS = None
     Transformer = None
 

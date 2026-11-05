@@ -161,19 +161,19 @@ class TestStatusContrastAA:
             assert _contrast(fg, bg) >= 4.4, key
 
     def test_click_targets_not_tiny(self):
-        """图标钮 ≥ 24px（卡 hover 钮 / chip 添加钮）；chip 内小钮 ≥ 18px。"""
+        """卡片辅助钮 ≥ 32px，主要图标钮 ≥ 36px；chip 内小钮 ≥ 18px。"""
         from pathlib import Path
         repo = Path(__file__).resolve().parents[1]
         grid = (repo / 'ui/widgets/bscan_result_grid.py').read_text(
             encoding='utf-8')
-        assert 'setFixedSize(24, 24)' in grid
+        assert 'setFixedSize(*constants.TOOL_BTN_COMPACT)' in grid
         assert 'setFixedSize(20, 20)' not in grid
         strip = (repo / 'ui/widgets/chain_strip.py').read_text(
             encoding='utf-8')
         assert 'setFixedSize(12, 12)' not in strip
         assert 'setFixedSize(14, 14)' not in strip
         assert 'setFixedSize(18, 18)' in strip
-        assert 'setFixedSize(24, 24)' in strip
+        assert 'setFixedSize(*constants.TOOL_BTN_SIZE)' in strip
 
 
 class TestComponentStateMatrix:

@@ -10,7 +10,6 @@ from __future__ import annotations
 from contextlib import contextmanager
 from copy import deepcopy
 import json
-import weakref
 from uuid import uuid4
 
 from PyQt6.QtCore import (
@@ -21,13 +20,15 @@ from PyQt6.QtWidgets import (
     QApplication, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QSplitter, QTabBar, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
-    FluentIcon as FIF, ProgressBar, PushButton, RoundMenu, Theme, ToolButton, isDarkTheme,
+    FluentIcon as FIF, RoundMenu, Theme, ToolButton,
+    TransparentToolButton, isDarkTheme,
 )
 
-from ui import motion
+from ui import constants, motion
 from ui.design_tokens import color, rgba
 from ui.widgets.fluent_menu_keyboard import FluentMenuKeyboard
 from ui.widgets.bscan_view import BScanView
+from ui.widgets.bscan_preview_status import _PreviewStatus
 from ui.widgets.context_menus import add_action, make_menu
 from ui.widgets.bscan_link import compatible
 from ui.widgets.bscan_workspace_link import BScanWorkspaceLink
@@ -47,48 +48,6 @@ def _apply_view_state(view: BScanView, state: dict, *, viewport=False) -> None:
     view.restore_display_state(state, viewport=viewport)
 
 
-class _PreviewStatus:
-    def __init__(self, group):
-        self._group = weakref.ref(group)
-        view = group.view
-        self.progress = ProgressBar(view)
-        self.progress.setRange(0, 0)
-        self.progress.setFixedHeight(2)
-        self.progress.hide()
-        self.retry = PushButton('重试预览', view)
-        self.retry.setAccessibleName('重试预览')
-        self.retry.hide()
-        self.retry.clicked.connect(self.retry_current)
-        self.layout()
-
-    @property
-    def group(self):
-        return self._group()
-
-    def retry_current(self):
-        group = self.group
-        key = group.current_key() if group is not None else ''
-        if key:
-            group.workspace.preview_retry_requested.emit(key)
-
-    def set_state(self, error, loading):
-        self.progress.setVisible(bool(loading))
-        self.retry.setVisible(bool(error))
-        self.layout()
-
-    def layout(self):
-        group = self.group
-        if group is None:
-            return
-        view = group.view
-        self.progress.setGeometry(0, 0, view.width(), 2)
-        self.retry.adjustSize()
-        self.retry.move(max(8, (view.width() - self.retry.width()) // 2),
-                        max(60, int(view.height() * 0.62)))
-        self.progress.raise_()
-        self.retry.raise_()
-
-
 class _ViewGroup(QWidget):
     def __init__(self, workspace, group_id):
         super().__init__(workspace)
@@ -105,13 +64,36 @@ class _ViewGroup(QWidget):
         self.more.setFixedSize(28, 28)
         self.more.setToolTip('视图组操作')
         self.more.setAccessibleName('视图组操作')
+        self.markers_visibility = TransparentToolButton(FIF.VIEW, self)
+        self.markers_visibility.setFixedSize(*constants.TOOL_BTN_SIZE)
+        self.markers_visibility.setCheckable(True)
+        self.markers_visibility.setChecked(True)
+        self.markers_visibility.setEnabled(False)
+        self.markers_visibility.setToolTip('显示／隐藏采集标记')
+        self.markers_visibility.setAccessibleName('显示采集标记')
+        self.display_settings = TransparentToolButton(FIF.SETTING, self)
+        self.display_settings.setFixedSize(*constants.TOOL_BTN_SIZE)
+        self.display_settings.setToolTip('全局显示设置')
+        self.display_settings.setAccessibleName('全局显示设置')
+        self.fit_view = TransparentToolButton(FIF.ZOOM, self)
+        self.fit_view.setFixedSize(*constants.TOOL_BTN_SIZE)
+        self.fit_view.setToolTip('适应当前视图')
+        self.fit_view.setAccessibleName('适应当前视图')
         header = QHBoxLayout()
         header.setContentsMargins(2, 0, 2, 0)
         header.setSpacing(2)
         header.addWidget(self.tabs, 1)
+        header.addWidget(self.markers_visibility)
+        header.addWidget(self.display_settings)
+        header.addWidget(self.fit_view)
         header.addWidget(self.more)
         self.view = BScanView(self)
         self.view.set_title_visible(False)
+        self.markers_visibility.toggled.connect(self.view.set_acquisition_markers_visible)
+        self.view.sig_acquisition_markers_availability_changed.connect(
+            self.markers_visibility.setEnabled)
+        self.display_settings.clicked.connect(self.view.sig_display_settings_requested.emit)
+        self.fit_view.clicked.connect(lambda: self.view.fit_to_data())
         layout = QVBoxLayout(self)
         layout.setContentsMargins(1, 1, 1, 1)
         layout.setSpacing(0)
@@ -185,6 +167,7 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
     view_created = pyqtSignal(object)
     layout_changed = pyqtSignal()
     selection_step_requested = pyqtSignal(str, str, str)
+    _theme_refresh_children = True
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -429,6 +412,15 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
         with self._change():
             for gid in list(self.group_ids()):
                 self.close_tab(key, gid, force=True)
+
+    def forget_source(self, key: str) -> None:
+        """Deleted resources cannot be resurrected through closed-tab history."""
+        with self._change():
+            for gid in list(self.group_ids()):
+                self.close_tab(key, gid, force=True, remember=False)
+            self._closed = [entry for entry in self._closed if entry['key'] != key]
+            self._sources.pop(key, None)
+            self._pending.discard(key)
 
     def close_tabs(self, scope='unpinned', key=None, group_id=None) -> None:
         group = self._group(group_id)
@@ -780,7 +772,7 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
         add(menu, 'reset-layout', '恢复为单组标签', self.reset_layout,
             enabled=len(self._groups) > 1)
         menu.addSeparator()
-        menu.addAction(group.view.qc_marks_menu_action(menu))
+        group.view.add_display_settings_action(menu)
         menu._workspace_keyboard = FluentMenuKeyboard(menu)
         return menu
 

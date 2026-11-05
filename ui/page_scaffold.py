@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (QHBoxLayout, QListWidgetItem, QVBoxLayout, QWidget)
 from qfluentwidgets import CaptionLabel, CardWidget, ScrollArea, SubtitleLabel
 
 from ui import constants
+from ui.design_tokens import color
 from ui.theme_helpers import hint_qss, ui_font
 
 __all__ = [
@@ -30,9 +31,8 @@ __all__ = [
     'refill_combo', 'rebuild_check_list', 'PanelStateMixin',
 ]
 
-# 折叠态侧栏宽度：折叠后只留折叠按钮的贴边长条（CollapsiblePanel 默认同值，
-# 各页此前6 处显式传 40 —— 收敛到本常量）。
-SIDE_COLLAPSE_WIDTH = 40
+# 折叠态侧栏与全局 Dock 使用同一宽度和命中区。
+SIDE_COLLAPSE_WIDTH = constants.DOCK_COLLAPSED_WIDTH
 
 
 # ---------------------------------------------------------------- 卡片
@@ -54,13 +54,8 @@ def make_card(title: str = '', *, parent=None, header_action: QWidget | None = N
     重复标题。``header_action`` 仍可独立形成右侧工具行。
     """
     card = CardWidget(parent)
-    # 美术打磨 C（2026-09-27）：CardWidget 深色主题下实测渲染白底，
-    # 与深色主区割裂（真平台截图）——显式主题底色：深 #2d2e32 /
-    # 浅 #ffffff，双主题卡片层次一致
-    from qfluentwidgets import isDarkTheme
     from PyQt6.QtGui import QColor
-    card.setBackgroundColor(
-        QColor('#2d2e32') if isDarkTheme() else QColor('#ffffff'))
+    card.setBackgroundColor(QColor(color('surface_card')))
     layout = QVBoxLayout(card)
     layout.setContentsMargins(*constants.CARD_MARGINS)
     layout.setSpacing(constants.CARD_SPACING)
@@ -343,6 +338,13 @@ class PanelStateMixin:
     """
 
     _PANEL_STATE_PREFIX = ''
+    _AUTO_COLLAPSE_ORDER = ('left', 'right')
+
+    def _panel_sides(self):
+        for side in self._AUTO_COLLAPSE_ORDER:
+            panel = getattr(self, f'_{side}_panel', None)
+            if panel is not None:
+                yield side, panel
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -350,18 +352,15 @@ class PanelStateMixin:
         self._in_auto_panel_change = False
 
     def panel_states(self) -> dict:
-        """当前左右面板折叠状态。"""
-        return {
-            'left': self._left_panel.is_collapsed(),
-            'right': self._right_panel.is_collapsed(),
-        }
+        """当前实际存在的侧栏折叠状态。"""
+        return {side: panel.is_collapsed() for side, panel in self._panel_sides()}
 
     def set_panel_collapsed(self, *, left: bool = None, right: bool = None,
                             animate: bool = True) -> None:
-        """设置左右面板折叠状态。"""
-        if left is not None:
+        """设置左右面板折叠状态，单侧栏页面可只提供一侧。"""
+        if left is not None and getattr(self, '_left_panel', None) is not None:
             self._left_panel.set_collapsed(bool(left), animate=animate)
-        if right is not None:
+        if right is not None and getattr(self, '_right_panel', None) is not None:
             self._right_panel.set_collapsed(bool(right), animate=animate)
 
     # ------------------------------------------------------------ 窄窗自动折叠
@@ -378,9 +377,8 @@ class PanelStateMixin:
         margins = self.layout().contentsMargins()
         fixed = (margins.left() + margins.right()
                  + 2 * constants.PAGE_SPACING)
-        return (self.width() - fixed
-                - self._left_panel.footprint_width()
-                - self._right_panel.footprint_width())
+        occupied = sum(panel.footprint_width() for _side, panel in self._panel_sides())
+        return self.width() - fixed - occupied
 
     def _auto_panel(self, panel, collapsed: bool) -> None:
         """自动折叠/展开单侧栏：抑制持久化（瞬态布局自适应，不写入设置）。"""
@@ -393,8 +391,7 @@ class PanelStateMixin:
     def _auto_collapse_side_panels(self) -> None:
         """窄窗自动折叠 / 恢复侧栏（策略见类 docstring）。"""
         room = self._middle_available_px()
-        for side, panel in (('left', self._left_panel),
-                            ('right', self._right_panel)):
+        for side, panel in self._panel_sides():
             if panel.is_collapsed():
                 # 展开该侧栏会消耗 expand−collapse 的中栏宽度，
                 # 展开后仍不低于阈值才自动展开，且仅限自动折叠过的。
@@ -430,8 +427,8 @@ class PanelStateMixin:
         if sm is None:
             return
         prefix = self._PANEL_STATE_PREFIX
-        sm.set(f'{prefix}_left_collapsed', self._left_panel.is_collapsed())
-        sm.set(f'{prefix}_right_collapsed', self._right_panel.is_collapsed())
+        for side, panel in self._panel_sides():
+            sm.set(f'{prefix}_{side}_collapsed', panel.is_collapsed())
         sm.save()
 
     def _restore_panel_state(self) -> None:
@@ -440,16 +437,16 @@ class PanelStateMixin:
         if sm is None:
             return
         prefix = self._PANEL_STATE_PREFIX
-        self._left_panel.blockSignals(True)
-        self._right_panel.blockSignals(True)
+        panels = list(self._panel_sides())
+        for _side, panel in panels:
+            panel.blockSignals(True)
         try:
-            self._left_panel.set_collapsed(
-                bool(sm.get(f'{prefix}_left_collapsed', False)), animate=False)
-            self._right_panel.set_collapsed(
-                bool(sm.get(f'{prefix}_right_collapsed', False)), animate=False)
+            for side, panel in panels:
+                panel.set_collapsed(
+                    bool(sm.get(f'{prefix}_{side}_collapsed', False)), animate=False)
         finally:
-            self._left_panel.blockSignals(False)
-            self._right_panel.blockSignals(False)
+            for _side, panel in panels:
+                panel.blockSignals(False)
 
     # ------------------------------------------------------------ 通用设置读写
     def _persist_setting(self, key: str, value) -> None:
