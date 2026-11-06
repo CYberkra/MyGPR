@@ -35,6 +35,7 @@ def show_details(parent, title, text):
     editor.setPlainText(text)
     layout.addWidget(editor)
     buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, parent=dialog)
+    buttons.button(QDialogButtonBox.StandardButton.Close).setText('关闭')
     buttons.rejected.connect(dialog.reject)
     layout.addWidget(buttons)
     dialog.show()
