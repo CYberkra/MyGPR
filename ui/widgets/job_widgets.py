@@ -8,7 +8,7 @@ failed 失败 / cancelled 已取消。
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
-from qfluentwidgets import ProgressBar, PushButton, ScrollArea
+from qfluentwidgets import BodyLabel, ProgressBar, PushButton, ScrollArea
 
 from ui.motion import animate_badge_color, animate_progress
 from ui.page_scaffold import HintLabel, style_transparent_scroll
@@ -92,7 +92,7 @@ class MiniJobList(QWidget):
         lay.setSpacing(4)
 
         top = QHBoxLayout()
-        title_label = QLabel(title, row_widget)
+        title_label = BodyLabel(title, row_widget)
         status_badge = _make_status_badge('queued')
         top.addWidget(title_label, 1)
         top.addWidget(status_badge)
