@@ -658,11 +658,13 @@ class ProjectService(ProjectAcquisitionServiceMixin, ProjectIdentityServiceMixin
         *,
         project_dir_name: str | None = None,
         open_after_restore: bool = True,
+        context: ExecutionContext | None = None,
     ) -> ProjectRestore:
         restored = self._repository.restore(
             Path(archive_path).expanduser().resolve(),
             Path(destination_root).expanduser().resolve(),
             project_dir_name=project_dir_name,
+            context=context or ExecutionContext.null(),
         )
         if open_after_restore:
             self.open_project(restored.project_path)

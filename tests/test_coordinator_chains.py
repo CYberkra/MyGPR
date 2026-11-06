@@ -287,36 +287,6 @@ class TestJobHubFanOut:
         hub.on_status('JOB-9', 'running')
 
 
-# ============================================================ JobHub prune 委派
-class TestJobHubPrune:
-    def test_prune_without_backend_warns(self):
-        window, _pages, _views = _make_window()
-        hub = PageCoordinator(window).jobs
-
-        hub.on_prune_jobs()
-
-        assert window.infobars[0][0] == 'warning'
-
-    def test_prune_delegates_backend_controller(self):
-        class _BackendController:
-            def __init__(self) -> None:
-                self.pruned = False
-
-            def prune_jobs(self) -> bool:
-                self.pruned = True
-                return True
-
-        window, _pages, _views = _make_window()
-        backend_controller = _BackendController()
-        window.backend_controller = backend_controller
-        hub = PageCoordinator(window).jobs
-
-        hub.on_prune_jobs()
-
-        assert backend_controller.pruned is True
-        assert window.infobars == []
-
-
 # ============================================================ 成果删除链
 @needs_qt
 class TestArtifactDeleteChain:

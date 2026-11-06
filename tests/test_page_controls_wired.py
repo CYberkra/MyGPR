@@ -91,7 +91,6 @@ _CANDIDATE_SIGNALS = ('clicked', 'toggled', 'stateChanged', 'checkedChanged',
 # 数据下拉、「备份当前项目」读取增量勾选），本身不需要即时信号接收者。
 _VALUE_ONLY = {
     'InterpretationPage._artifact_combo',
-    'DeliveryPage._incremental_check',
 }
 
 

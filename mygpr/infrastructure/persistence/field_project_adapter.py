@@ -865,6 +865,7 @@ class LegacyFieldProjectSession(
                 incremental=incremental,
                 retention_keep=retention_keep,
             )
+        context.mark_committed()
         return ProjectBackup(
             archive_path=result.archive_path,
             file_count=result.file_count,
@@ -927,12 +928,15 @@ class LegacyFieldProjectRepository(ProjectRepositoryPort):
         destination_root: Path,
         *,
         project_dir_name: str | None,
+        context: ExecutionContext,
     ) -> ProjectRestore:
         result = restore_project_archive(
             archive_path,
             destination_root,
             project_dir_name=project_dir_name,
+            cancel_requested=context.is_cancelled,
         )
+        context.mark_committed()
         return ProjectRestore(
             project_path=result.project_path,
             file_count=result.file_count,

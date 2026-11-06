@@ -56,7 +56,7 @@ def _raise_if_cancelled(cancel_requested: Callable[[], bool] | None) -> None:
     if cancel_requested is not None and cancel_requested():
         from core.job_manager import JobCancelled
 
-        raise JobCancelled("项目备份已取消")
+        raise JobCancelled("项目归档操作已取消")
 
 
 def _sha256_path(path: Path, *, cancel_requested: Callable[[], bool] | None = None) -> str:
@@ -536,6 +536,7 @@ def restore_project_archive(
     *,
     project_dir_name: str | None = None,
     read_only_verify: bool = True,
+    cancel_requested: Callable[[], bool] | None = None,
 ) -> ProjectRestoreResult:
     """Restore a backup as a new project after strict manifest verification.
 
@@ -545,6 +546,7 @@ def restore_project_archive(
     return _restore_project_archive(
         archive_path, destination_root,
         project_dir_name=project_dir_name, read_only_verify=read_only_verify,
+        cancel_requested=cancel_requested,
     )
 
 

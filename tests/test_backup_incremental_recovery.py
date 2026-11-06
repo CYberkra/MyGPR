@@ -120,7 +120,6 @@ def test_cancel_after_final_member_stops_before_verification_io(project, tmp_pat
 
 @pytest.mark.parametrize('stage', ['compression', 'hash_verification', 'restore_verification'])
 def test_mid_block_cancel_stops_remaining_large_member_io(project, tmp_path, monkeypatch, stage):
-    from core import field_project_backup as backup
     block_size = 8 * 1024 * 1024
     (project.root / 'payload.bin').write_bytes(b'x' * (block_size + 1024 * 1024))
     full = backup_project_archive(project, tmp_path / 'backups')
@@ -153,7 +152,7 @@ def test_mid_block_cancel_stops_remaining_large_member_io(project, tmp_path, mon
         monkeypatch.setattr(zipfile.ZipExtFile, 'read', observe_read)
     with pytest.raises(JobCancelled):
         if stage == 'restore_verification':
-            backup._restore_project_archive(full.archive_path, tmp_path / 'restore', cancel_requested=lambda: cancel)
+            restore_project_archive(full.archive_path, tmp_path / 'restore', cancel_requested=lambda: cancel)
         else:
             backup_project_archive(project, tmp_path / 'backups', cancel_requested=lambda: cancel, retention_keep=1)
     assert observed_sizes == [block_size]

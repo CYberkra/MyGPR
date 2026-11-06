@@ -89,12 +89,15 @@ def test_project_api_create_window_process_audit_backup_restore(tmp_path: Path) 
         backup = backend.projects.backup_project(summary.project_id, tmp_path / "backups")
         assert backup.verified
         assert Path(backup.archive_path).is_file()
-        restored = backend.projects.restore_project(
+        restore_job = backend.submit_project_restore(
             backup.archive_path,
-            tmp_path / "restored",
+            str(tmp_path / "restored"),
             project_dir_name="restored_project",
             open_after_restore=False,
         )
+        snapshot = backend.jobs.wait(restore_job, timeout=30)
+        assert snapshot.status is JobStatus.COMPLETED, snapshot.error_message
+        restored = snapshot.result
         assert restored.verified
         assert [item.root_path for item in backend.projects.list_open_projects()] == [summary.root_path]
         with pytest.raises(ProjectApplicationError, match="project id already open"):
