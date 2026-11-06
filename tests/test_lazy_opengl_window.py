@@ -22,11 +22,29 @@ def test_first_gl_view_does_not_hide_or_recreate_main_window(tmp_path):
     script = textwrap.dedent(r'''
         import sys
         from PyQt6.QtCore import QEvent, QObject
+        from PyQt6.QtGui import QOpenGLContext
         from PyQt6.QtWidgets import QApplication
         from ui import constants
         from ui.settings_manager import SettingsManager
         from ui.theme_helpers import apply_theme
         import ui.main_window as mw
+        original_excepthook = sys.excepthook
+        def report_gl_context(exc_type, exc, traceback):
+            try:
+                context = QOpenGLContext.currentContext()
+                if context is None:
+                    print('OpenGL diagnostic: no current Qt context', file=sys.stderr, flush=True)
+                else:
+                    fmt = context.format()
+                    print(f'OpenGL diagnostic: valid={context.isValid()} '
+                          f'version={fmt.majorVersion()}.{fmt.minorVersion()} '
+                          f'profile={fmt.profile().name} renderable={fmt.renderableType().name}',
+                          file=sys.stderr, flush=True)
+            except Exception as diagnostic_error:
+                print(f'OpenGL diagnostic unavailable: {diagnostic_error!r}', file=sys.stderr, flush=True)
+            finally:
+                original_excepthook(exc_type, exc, traceback)
+        sys.excepthook = report_gl_context
         app = QApplication([])
         app.setStyle("Fusion")
         apply_theme(constants.THEME_LIGHT)
