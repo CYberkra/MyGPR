@@ -75,8 +75,6 @@ _INFO_FIELDS = (
 
 
 class ProjectPage(ProjectLineContextMixin, QWidget):
-    """A project identity, line ledger and a single selected-line context."""
-
     import_requested = pyqtSignal(dict)
     sync_requested = pyqtSignal(dict)
     line_selected = pyqtSignal(str)
