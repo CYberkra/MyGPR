@@ -15,6 +15,7 @@ on:
           - updates
           - update_installation
           - windows_stability
+          - windows_high_contrast
           - all
       package_run:
         description: Successful Windows packages run ID (update_installation only)
@@ -41,9 +42,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON((inputs.suite == 'update_installation' || inputs.suite == 'windows_stability') && '["windows-latest"]' || '["ubuntu-latest","windows-latest"]') }}
+        os: ${{ fromJSON((inputs.suite == 'update_installation' || inputs.suite == 'windows_stability' || inputs.suite == 'windows_high_contrast') && '["windows-latest"]' || '["ubuntu-latest","windows-latest"]') }}
     env:
-      QT_QPA_PLATFORM: ${{ inputs.suite == 'windows_stability' && 'windows:darkmode=0' || 'offscreen' }}
+      QT_QPA_PLATFORM: ${{ (inputs.suite == 'windows_stability' || inputs.suite == 'windows_high_contrast') && 'windows:darkmode=0' || 'offscreen' }}
       MYGPR_REGRESSION_SUITE: ${{ inputs.suite }}
       MYGPR_CI_PACKAGE_RUN: ${{ inputs.package_run }}
       MYGPR_CI_INSTALLER_SIGNATURE: ${{ inputs.installer_signature }}
@@ -110,7 +111,7 @@ jobs:
           $rsa = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($cert)
           [System.IO.File]::WriteAllText("$pwd/output/update-tls/server.key", $rsa.ExportPkcs8PrivateKeyPem())
       - name: Run selected regressions
-        if: inputs.suite != 'windows_stability'
+        if: inputs.suite != 'windows_stability' && inputs.suite != 'windows_high_contrast'
         shell: bash
         run: python scripts/run_ci_regressions.py --suite "$MYGPR_REGRESSION_SUITE"
       - name: Repeat Windows native and block execution regressions
@@ -125,6 +126,14 @@ jobs:
             if ($LASTEXITCODE -ne 0) { $failed = $true }
           }
           if ($failed) { exit 1 }
+      - name: Capture native contrast-theme evidence
+        if: inputs.suite == 'windows_high_contrast'
+        shell: pwsh
+        env:
+          MYGPR_HIGH_CONTRAST_CI: '1'
+        run: |
+          New-Item -ItemType Directory -Force output/ci-regressions | Out-Null
+          python -m pytest tests/test_windows_high_contrast_native.py -q --tb=short --timeout=120 --timeout-method=thread --junitxml=output/ci-regressions/high-contrast.xml
       - name: Upload regression evidence
         if: always()
         uses: actions/upload-artifact@v4
