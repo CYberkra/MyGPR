@@ -13,7 +13,8 @@
 
 import os
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QUrl, pyqtSignal
+from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel, CheckBox, ComboBox, DoubleSpinBox, StrongBodyLabel,
@@ -26,6 +27,7 @@ from ui.page_scaffold import (make_card, make_form_row,
 
 _AUTHOR = '邸建豪 袁林 詹萍'
 _COPYRIGHT = '© 2025 MyGPR 保留所有权利'
+_USER_GUIDE_URL = 'https://github.com/CYberkra/MyGPR/blob/main/docs/user/README.md'
 
 
 def _levels_or_default(data: dict) -> tuple[float, float]:
@@ -347,6 +349,9 @@ class SettingsPage(ScrollArea):
         from ui.widgets.update_panel import UpdatePanel
         self.update_panel = UpdatePanel(card)
         layout.addWidget(self.update_panel)
+        guide = PushButton('使用手册', card)
+        guide.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(_USER_GUIDE_URL)))
+        layout.addWidget(guide, alignment=Qt.AlignmentFlag.AlignLeft)
         return card
 
     # ============================================================ 公共接口

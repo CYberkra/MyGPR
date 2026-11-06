@@ -82,6 +82,10 @@ jobs:
             $buildArgs += @('--preview-feed', 'https://localhost:18443/appcast.xml')
           }
           python @buildArgs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($env:MYGPR_PACKAGE_VARIANT -eq 'release') {
+            Copy-Item -Path 'output/release-wheels/*.whl' -Destination 'output/windows-release/assets/'
+          }
       - name: Upload complete package and provenance
         if: always()
         uses: actions/upload-artifact@v4

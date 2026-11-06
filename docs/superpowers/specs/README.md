@@ -1,12 +1,15 @@
 # 设计规格与现行合同索引
 
-核查日期：2026-10-16。这里仍保存设计 SPEC；文件存在或计划打勾不等于当前源码、CI 或实机验收已经达成全部目标。
+本索引按 v0.11.4 区分现行合同和历史设计。发行与安装验证见 [v0.11.4 说明](../../releases/v0.11.4.md)。
 
 ## 现行实现与合同
 
 | 范围 | 入口 |
 | --- | --- |
 | 工作台七页导航、B-scan 标签、成果续算与菜单 | [2026-10-16 现行合同](2026-10-16-workbench-redesign.md) |
+| 项目启动区、搜索和固定最近项目 | [启动页设计](2026-11-04-startup-page-design.md)、[工作台速览](../../../GUI_README.md) |
+| 项目、测线、处理成果和空间成果永久删除 | [删除设计](2026-11-04-deletion-interaction-design.md)、[用户指南](../../user/用户指南.md#6-备份恢复与数据安全) |
+| Windows 安装版验签更新 | [应用内更新设计](2026-11-05-application-updates-design.md)、[发布流程](../../releases/application-updates.md) |
 | 架构、线程与文件写入约束 | [CLAUDE.md](../../../CLAUDE.md)、[AGENTS.md](../../../AGENTS.md) |
 | 当前能力与安装依赖 | [CURRENT_STATE.md](../../../CURRENT_STATE.md)、[README.md](../../../README.md) |
 | 后端 API | [API 说明](../../architecture/BACKEND_API_V1.md)、`config/backend_api_v1.json` |
@@ -16,9 +19,7 @@
 
 ## 保存的设计记录
 
-- [2026-11-05 应用内更新](2026-11-05-application-updates-design.md)：Windows 验签更新、退出握手与发布工具；[实施记录](../plans/2026-11-05-application-updates.md)。正式订阅与首个安装包尚未发布。
-- [2026-11-04 永久删除](2026-11-04-deletion-interaction-design.md)：四类永久删除已在工作区接通，保护原始导入源文件；[实施记录](../plans/2026-11-05-permanent-deletion.md)；静态检查通过，回归 CI 与 Windows 原生验收待执行。
-- [2026-11-04 启动页](2026-11-04-startup-page-design.md)：已授权首轮双主题、搜索、固定与选中详情改造；工作区实现及静态检查已完成，CI 与 Windows 原生验收待执行。
+- 2026-11 实施记录：[应用内更新](../plans/2026-11-05-application-updates.md)、[永久删除](../plans/2026-11-05-permanent-deletion.md)、[启动页](../plans/2026-11-04-startup-page.md)。其中的进度描述是当时快照。
 - [2026-09-03 工程化路线图](2026-09-03-engineering-roadmap.md)：分阶段决策与当时状态；未完成项需按当前代码重新核查。
 - [2026-09-06 反卷积 / Inverse-Q](2026-09-06-deconv-inverseq-design.md)。
 - [2026-09-06 幅度 C-scan](2026-09-06-phase4-amplitude-cscan-design.md)。

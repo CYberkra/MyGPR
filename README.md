@@ -1,11 +1,13 @@
 # MyGPR 0.11.4
 
-MyGPR 是 **CDUT-UavGPR 无人机探地雷达平台的数据处理、成像解释与成果交付工作台**，提供桌面应用和无头后端。
+<img src="ui/resources/mygpr_logo.png" width="96" alt="MyGPR 图标：无人机航测滑坡剖面">
+
+MyGPR 是 **CDUT-UavGPR 无人机探地雷达平台的数据处理、成像解释与成果交付工作台**，面向滑坡等航空探地雷达（AGPR）测区，提供桌面应用和无头后端。
 PyQt6 + PyQt6-Fluent-Widgets 桌面前端，配分层后端（`mygpr/` 清洁架构 + `core/` 遗留内核）。
 
 > 架构与工程约束：[CLAUDE.md](CLAUDE.md)；当前状态：[CURRENT_STATE.md](CURRENT_STATE.md)；交接规则：[DEV_HANDOFF.md](DEV_HANDOFF.md)；设计规格索引：[specs](docs/superpowers/specs/README.md)。
 
-当前发行版：**v0.11.0**，提供 Windows x64 安装器、源码和 wheel，见[发布说明](docs/releases/v0.11.0.md)。
+[下载最新正式版](https://github.com/CYberkra/MyGPR/releases/latest) · [v0.11.4 说明](docs/releases/v0.11.4.md) · [使用手册](docs/user/README.md)
 
 ## 在总平台中的定位
 
@@ -36,7 +38,7 @@ PyQt6 + PyQt6-Fluent-Widgets 桌面前端，配分层后端（`mygpr/` 清洁架
 
 Python **3.12–3.13**（钉版 `numpy==2.5.1` 要求 ≥3.12；CI 矩阵与 `requires-python` 已对齐）。
 
-直接依赖基线如下；2026-10-14 本机 Windows `.venv` 为 **Python 3.12.0**，以下核心与 GUI 包均与安装版本一致。发行版的 Python 3.12/3.13 和 GUI 自动检查结果见[发布说明](docs/releases/v0.11.0.md)，依赖清单不作为最新版包推荐。
+直接依赖基线如下。Windows 安装包内置 Python 和 GUI 依赖，源码及 wheel 依赖由项目清单锁定。
 
 | 核心包（requirements.txt） | 版本 | GUI 包（requirements-gui.txt） | 版本 |
 | --- | --- | --- | --- |
@@ -58,9 +60,9 @@ Python **3.12–3.13**（钉版 `numpy==2.5.1` 要求 ≥3.12；CI 矩阵与 `re
 
 ## 安装
 
-Windows 用户可从 [v0.11.0 Release](https://github.com/CYberkra/MyGPR/releases/tag/v0.11.0)
-下载 `MyGPR-0.11.0-Windows-x64-Setup.exe`，直接安装，无需另装 Python。
-适用 Windows 10 1809+ / Windows 11 x64；当前安装器未签名，校验值见 Release 附件。
+Windows 用户从 [最新正式版](https://github.com/CYberkra/MyGPR/releases/latest) 下载 `MyGPR-<版本>-Windows-x64-Setup.exe`。安装包面向 Windows 10 1809 及以上 / Windows 11 x64，内置 Python 和 Qt，SHA-256 见发行附件。
+
+从未内置更新器的旧版升级时，请手动运行新安装包。v0.11.4 安装版可从 **设置 → 关于 → 检查更新** 获取后续版本。源码及 wheel 用户可在同一位置打开发布页。见 [安装与升级说明](docs/releases/v0.11.4.md)。
 
 源码开发与 Python 包安装：
 
@@ -78,18 +80,13 @@ Linux 使用 `python3.13 -m venv .venv` 和 `source .venv/bin/activate`，随后
 
 ```powershell
 python app_qt.py                                  # 桌面 GUI
-python backend_smoke.py
-python backend_project_smoke.py
-python -m pytest tests/ -q
 ```
 
-PowerShell 离屏冒烟：`$env:QT_QPA_PLATFORM='offscreen'; python app_qt.py --smoke`。截图默认写入系统临时目录的 `mygpr_shots/`，可用 `MYGPR_SMOKE_SHOTS_DIR` 指定。完整质量门禁：`python scripts/run_backend_quality_gate.py`。离屏冒烟不能代替 Windows 实机操作验收。
-
-离屏检查后运行 `Remove-Item Env:QT_QPA_PLATFORM`，恢复正常桌面启动。
+自动化测试、冒烟和质量门禁默认在 GitHub Actions 运行。选择对应工作流及验收入口见 [测试策略](docs/developer/TESTING_STRATEGY.md)。
 
 ## 数据导入
 
-项目测线导入入口直接支持 **CSV / TXT / NPY / NPZ / H5 / HDF5**。CDUT 采集 HDF5 当前支持带 `real` / `magnitude` 标记的已完成文件，会转换道×采样点方向，保留时窗、分量和逐道传感器缺失值；主仓库的 `fdata` 分量和缺少分量标记的历史采集文件仍待适配。详细 schema 见[数据格式参考](docs/user/reference/数据格式参考.md)。
+项目测线导入入口直接支持 **CSV / TXT / NPY / NPZ / H5 / HDF5**。CDUT 采集 HDF5 支持带 `real`、`mag`、`magnitude` 或 `fdata` 标记的已完成文件，保留时窗、分量和逐道传感器缺失值。`fdata` 按仪器显示采样保留。采集 HDF5 须有分量标记。详见 [数据格式参考](docs/user/reference/数据格式参考.md)。
 
 RD3/RD7、DT1、DZT、SEG-Y、ENVI、ImpulseRadar 的底层读取器支持有限子集，但项目导入向导尚未接通这些二进制入口；格式被识别不代表能在向导中直接导入。CLI 批处理输入支持 CSV/TXT 和 H5/HDF5，配置需提供显式 `methods`；`recommended_profile` 已移除。
 
@@ -97,7 +94,7 @@ RD3/RD7、DT1、DZT、SEG-Y、ENVI、ImpulseRadar 的底层读取器支持有限
 
 设计规格仍保存在 [docs/superpowers/specs/](docs/superpowers/specs/README.md)，旧三页设计为历史记录。当前没有根目录 `SPEC.md`。旧 `gpr_gui.spec` 已在 `a9fb92ef` 删除；现行配方为 [packaging/windows/MyGPR.spec](packaging/windows/MyGPR.spec) 和 Inno Setup 安装器。
 
-Windows 构建使用 Python 3.12.12，工具钉版在 [requirements-windows-build.txt](requirements-windows-build.txt)：PyInstaller 6.22.3、hooks-contrib 2026.8、pip-licenses 5.5.5、cyclonedx-bom 5.5.0；Inno Setup 6.7.3。重建、真实安装验证和发布清单见 [Windows 构建说明](docs/releases/windows-build.md)。
+GitHub Windows 构建使用 Python 3.13、PyInstaller 和 Inno Setup。构建依赖见 [requirements-windows-build.txt](requirements-windows-build.txt)，重建和升级验收见 [Windows 构建说明](docs/releases/windows-build.md)。
 
 ## 二次开发入口
 
