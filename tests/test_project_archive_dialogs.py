@@ -1,4 +1,8 @@
 """Project archive dialog state and confirmation."""
+import ctypes
+from ctypes import wintypes
+from types import SimpleNamespace
+
 import pytest
 
 pytest.importorskip('PyQt6')
@@ -8,6 +12,42 @@ from ui import file_dialogs  # noqa: E402
 from ui.project_archive_dialogs import BackupDialog, RestoreDialog  # noqa: E402
 from ui.controllers.delivery_controller import DeliveryController, _ArchiveCheckCommand  # noqa: E402
 from ui.widgets import themed_dialog  # noqa: E402
+
+
+@pytest.mark.parametrize('high_contrast', [False, True])
+def test_caption_respects_contrast_and_releases_system_scheme(monkeypatch, high_contrast):
+    class HighContrast(ctypes.Structure):
+        _fields_ = [('cbSize', wintypes.UINT), ('dwFlags', wintypes.DWORD),
+                    ('lpszDefaultScheme', ctypes.c_void_p)]
+
+    released = []
+    colors = {}
+
+    def system_parameters(_action, _size, pointer, _flags):
+        contrast = ctypes.cast(pointer, ctypes.POINTER(HighContrast)).contents
+        contrast.dwFlags = int(high_contrast)
+        contrast.lpszDefaultScheme = 0x1234
+        return 1
+
+    def local_free(pointer):
+        released.append(pointer)
+
+    def set_attribute(_hwnd, attribute, pointer, _size):
+        colors[attribute] = ctypes.cast(pointer, ctypes.POINTER(wintypes.DWORD)).contents.value
+        return 0
+
+    windll = SimpleNamespace(user32=SimpleNamespace(SystemParametersInfoW=system_parameters),
+                            kernel32=SimpleNamespace(LocalFree=local_free),
+                            dwmapi=SimpleNamespace(DwmSetWindowAttribute=set_attribute))
+    monkeypatch.setattr(themed_dialog.sys, 'platform', 'win32')
+    monkeypatch.setattr(themed_dialog.ctypes, 'windll', windll, raising=False)
+    monkeypatch.setattr(themed_dialog, 'isDarkTheme', lambda: True)
+
+    themed_dialog._apply_caption_theme(SimpleNamespace(winId=lambda: 42))
+
+    assert released == [0x1234]
+    assert colors[35] == (0xFFFFFFFF if high_contrast else 0x00211E1B)
+    assert colors[36] == (0xFFFFFFFF if high_contrast else 0x00F5F5F5)
 
 
 def test_visible_archive_caption_refreshes_on_system_contrast_change(qapp, monkeypatch):

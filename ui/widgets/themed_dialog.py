@@ -15,14 +15,21 @@ def _apply_caption_theme(dialog):
 
         class HighContrast(ctypes.Structure):
             _fields_ = [('cbSize', wintypes.UINT), ('dwFlags', wintypes.DWORD),
-                        ('lpszDefaultScheme', wintypes.LPWSTR)]
+                        ('lpszDefaultScheme', ctypes.c_void_p)]
 
         contrast = HighContrast()
         contrast.cbSize = ctypes.sizeof(contrast)
         user32 = ctypes.windll.user32
         # Do not replace the colors chosen by Windows accessibility themes.
-        if not user32.SystemParametersInfoW(0x0042, contrast.cbSize, ctypes.byref(contrast), 0):
-            return
+        try:
+            if not user32.SystemParametersInfoW(0x0042, contrast.cbSize, ctypes.byref(contrast), 0):
+                return
+        finally:
+            if contrast.lpszDefaultScheme:
+                local_free = ctypes.windll.kernel32.LocalFree
+                local_free.argtypes = [ctypes.c_void_p]
+                local_free.restype = ctypes.c_void_p
+                local_free(contrast.lpszDefaultScheme)
         dark = isDarkTheme() and not (contrast.dwFlags & 1)
         caption = wintypes.DWORD(0x00211e1b if dark else 0xFFFFFFFF)
         text = wintypes.DWORD(0x00F5F5F5 if dark else 0xFFFFFFFF)

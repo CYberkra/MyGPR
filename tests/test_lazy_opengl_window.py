@@ -31,6 +31,21 @@ def test_first_gl_view_does_not_hide_or_recreate_main_window(tmp_path):
         original_excepthook = sys.excepthook
         def report_gl_context(exc_type, exc, traceback):
             try:
+                try:
+                    import ctypes
+                    kernel = ctypes.windll.kernel32
+                    kernel.GetModuleHandleW.argtypes = [ctypes.c_wchar_p]
+                    kernel.GetModuleHandleW.restype = ctypes.c_void_p
+                    kernel.GetProcAddress.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+                    kernel.GetProcAddress.restype = ctypes.c_void_p
+                    for name in ('opengl32.dll', 'opengl32sw.dll'):
+                        module = kernel.GetModuleHandleW(name)
+                        address = kernel.GetProcAddress(module, b'wglGetCurrentContext') if module else None
+                        current = ctypes.WINFUNCTYPE(ctypes.c_void_p)(address)() if address else None
+                        print(f'OpenGL diagnostic: {name} loaded={bool(module)} current={current}',
+                              file=sys.stderr, flush=True)
+                except Exception as wgl_error:
+                    print(f'OpenGL WGL diagnostic unavailable: {wgl_error!r}', file=sys.stderr, flush=True)
                 context = QOpenGLContext.currentContext()
                 if context is None:
                     print('OpenGL diagnostic: no current Qt context', file=sys.stderr, flush=True)
