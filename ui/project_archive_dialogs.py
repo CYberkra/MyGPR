@@ -2,13 +2,14 @@
 from uuid import uuid4
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QDialog, QFormLayout, QHBoxLayout, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QFormLayout, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import BodyLabel, CheckBox, LineEdit, PrimaryPushButton, PushButton, SpinBox
 
 from ui import file_dialogs
+from ui.widgets.themed_dialog import ThemedDialog
 
 
-class _ArchiveDialog(QDialog):
+class _ArchiveDialog(ThemedDialog):
     def __init__(self, title, button_text, directory, parent):
         super().__init__(parent)
         self.setWindowTitle(title)

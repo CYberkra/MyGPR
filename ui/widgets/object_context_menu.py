@@ -2,11 +2,12 @@
 from PyQt6.QtCore import QEvent, QObject, QPoint, Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
-    QDialog, QDialogButtonBox, QPlainTextEdit, QVBoxLayout,
+    QDialogButtonBox, QPlainTextEdit, QVBoxLayout,
 )
 
 from ui.widgets.context_menus import add_action, make_menu
 from ui.widgets.fluent_menu_keyboard import FluentMenuKeyboard
+from ui.widgets.themed_dialog import ThemedDialog
 
 
 def object_menu(parent):
@@ -25,7 +26,7 @@ def object_action(menu, command, text, slot, *, enabled=True, reason=''):
 
 def show_details(parent, title, text):
     """Read-only, copyable details; no nested blocking event loop."""
-    dialog = QDialog(parent)
+    dialog = ThemedDialog(parent)
     dialog.setWindowTitle(title)
     dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
     dialog.resize(520, 340)
