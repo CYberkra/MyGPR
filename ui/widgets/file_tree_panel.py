@@ -118,7 +118,7 @@ class FileTreePanel(DockPanel):
     # 永久删除语义），面板自身不弹确认框
     artifact_delete_requested = pyqtSignal(str, str)
     processing_package_requested = pyqtSignal(str, str)  # line_id, artifact_id (empty = whole line)
-    # 空间成果/项目报告叶子点击 → 跳成果页（参数为 kind：'spatial'/'report'）
+    # 空间成果叶子点击 → 跳成果页。
     delivery_focus_requested = pyqtSignal(str)
 
     def __init__(self, parent=None) -> None:
@@ -692,16 +692,19 @@ class FileTreePanel(DockPanel):
         elif kind == 'artifact' and payload:
             self.artifact_focus_requested.emit(
                 str(item.data(0, _ROLE_AUX) or ''), str(payload))
-        elif kind in ('spatial', 'report'):
+        elif kind == 'spatial':
             self.delivery_focus_requested.emit(str(kind))
 
     def _on_item_double_clicked(self, item, _column: int) -> None:
         """文件双击 → 系统默认程序打开（目录双击保留默认展开/收起）。"""
         if self._busy:
             return
-        if item.data(0, _ROLE_KIND) == 'file':
+        kind = item.data(0, _ROLE_KIND)
+        if kind in ('file', 'report'):
             path = str(item.data(0, _ROLE_PAYLOAD) or '')
-            if path:
+            if kind == 'report' and path and self._project_root:
+                path = os.path.join(self._project_root, path)
+            if path and os.path.isabs(path):
                 QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
     # ------------------------------------------------------------ 右键菜单

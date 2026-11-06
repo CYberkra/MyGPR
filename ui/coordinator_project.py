@@ -113,7 +113,7 @@ class ProjectChain:
             tree.line_process_requested.connect(self.on_line_process_requested)
             tree.line_delete_requested.connect(self.on_line_delete_requested)
             tree.processing_package_requested.connect(self.on_processing_package_requested)
-            # 空间成果/项目报告叶子点击 → 跳成果页
+            # 空间成果叶子点击 → 跳成果页
             tree.delivery_focus_requested.connect(
                 lambda _kind: co.goto_page('deliveryInterface'))
             # 成果叶子点击 → 换线（如需）+ 跳处理页选中预览
@@ -133,9 +133,6 @@ class ProjectChain:
         delivery.spatial_export_requested.connect(self.on_spatial_export_requested)
         delivery.spatial_delete_requested.connect(self.on_spatial_delete_requested)
         delivery.spatial_current_requested.connect(self.on_spatial_current_requested)
-        delivery.report_requested.connect(self.on_report_requested)
-        delivery.backup_requested.connect(self.on_backup_requested)
-        delivery.restore_requested.connect(self.on_restore_requested)
 
         # ---------------- 项目控制器 → 本链 / 页面
         pc = co.project_controller
@@ -169,7 +166,6 @@ class ProjectChain:
             pc.artifact_descendants_ready.connect(
                 self.on_artifact_descendants_ready)
             pc.busy_changed.connect(project.set_busy)
-            pc.all_artifacts_updated.connect(delivery.set_artifacts)
             if tree is not None:
                 pc.busy_changed.connect(tree.set_busy)
                 # 文件树「成果」视图：全项目成果列表（与按线的 artifacts_updated 互补）
@@ -179,11 +175,9 @@ class ProjectChain:
         if dc is not None:
             dc.spatial_results_updated.connect(delivery.set_spatial_results)
             dc.spatial_preflight_ready.connect(self.on_spatial_preflight_ready)
-            dc.report_generated.connect(self.on_report_generated)
             dc.processing_package_generated.connect(self.on_processing_package_generated)
-            dc.report_list_updated.connect(delivery.set_report_packages)
             if tree is not None:
-                # 文件树「空间成果 / 项目报告」组与成果页同一数据源
+                # 文件树空间成果与成果页共用数据源，历史报告可在树中打开。
                 dc.spatial_results_updated.connect(tree.set_spatial_results)
                 dc.report_list_updated.connect(tree.set_reports)
 
@@ -211,7 +205,7 @@ class ProjectChain:
                   or co.jobs.import_job_ids or co.jobs.spatial_job_ids)
         if active:
             co.infobar('warning', '项目正在使用中',
-                       '请先等待当前任务完成，或在任务页明确取消后再切换 / 关闭项目。')
+                       '请先等待当前任务完成，或在底栏任务中取消后再切换 / 关闭项目。')
             return False
         return self.confirm_interpretation_close()
 
@@ -824,7 +818,7 @@ class ProjectChain:
         if job_id:
             co.settings.set('ui/processing_package_directory', str(Path(path).parent))
             co.settings.save()
-            co.infobar('info', '处理结果打包', '已提交；可在任务页查看进度或取消。')
+            co.infobar('info', '处理结果打包', '已提交；可在底栏任务中查看进度或取消。')
 
     def on_processing_package_generated(self, result) -> None:
         warnings = tuple(getattr(result, 'warnings', ()) or ())
@@ -881,24 +875,6 @@ class ProjectChain:
             self._co.delivery_controller.set_spatial_current(
                 self._co.current_project_id(), str(result_id))
 
-    def on_report_requested(self, payload: dict) -> None:
-        if self._co.delivery_controller is None or not self._co.require_project():
-            return
-        payload = dict(payload or {})
-        job_id = self._co.delivery_controller.generate_report(
-            self._co.current_project_id(),
-            str(payload.get('package_name', '') or ''),
-            report_profile=dict(payload.get('report_profile') or {}))
-        if job_id:
-            self._co.infobar('info', '项目报告', '报告生成任务已提交')
-
-    def on_report_generated(self, result) -> None:
-        self._co.page('deliveryInterface').set_report_result(result)
-        # 报告列表刷新（文件树「项目报告」组）；失败仅记日志，不影响主流程
-        project_id = self._co.current_project_id()
-        if project_id and self._co.delivery_controller is not None:
-            self._co.delivery_controller.refresh_reports(project_id)
-
     def on_backup_requested(self, options: dict) -> None:
         if self._co.delivery_controller is None or not self._co.require_project():
             return
@@ -911,8 +887,10 @@ class ProjectChain:
             retention_keep=options.get('retention_keep'),
         )
         if job_id:
-            mode = '增量' if options.get('incremental') else '全量'
-            self._co.infobar('info', '项目备份', f'{mode}备份任务已提交 → {dest}')
+            if self._co.output_panel is not None:
+                self._co.output_panel.show_tasks()
+        else:
+            self._co.infobar('error', '项目备份', '备份任务提交失败，详见日志')
 
     def on_restore_requested(self, payload) -> None:
         co = self._co
@@ -930,7 +908,29 @@ class ProjectChain:
         job_id = co.delivery_controller.restore_project(
             archive_path, dest_root,
             project_dir_name=str(options.get('project_dir_name') or ''),
-            open_after_restore=bool(options.get('open_after_restore', True)),
+            open_after_restore=False,
         )
         if job_id:
-            co.infobar('info', '恢复备份', f'恢复为新项目，不覆盖当前项目 → {dest_root}')
+            if co.output_panel is not None:
+                co.output_panel.show_tasks()
+        else:
+            co.infobar('error', '恢复备份', '恢复任务提交失败，详见日志')
+
+    def archive_task_action(self, result):
+        from pathlib import Path
+
+        from ui.desktop_backend_facade import ProjectBackup, ProjectRestore
+
+        if isinstance(result, ProjectBackup) and result.verified:
+            from PyQt6.QtCore import QUrl
+            from PyQt6.QtGui import QDesktopServices
+
+            directory = str(Path(result.archive_path).parent)
+            return ('打开备份目录', lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(directory)))
+        if isinstance(result, ProjectRestore) and result.verified:
+            return ('打开恢复的项目', lambda: self.open_restored_project(result.project_path))
+        return None
+
+    def open_restored_project(self, path: str) -> None:
+        if self.can_change_project() and self._co.backend_ready:
+            self._co.project_controller.open_project(path, replace_open_identity=True)

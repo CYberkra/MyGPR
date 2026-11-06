@@ -521,6 +521,15 @@ def _extract_verified_member(
             destination.unlink(missing_ok=True)
 
 
+def check_project_backup_chain(archive_path: str | Path) -> None:
+    """Check archive manifests and dependencies without extracting data."""
+    try:
+        with _open_backup_chain(Path(archive_path).expanduser()) as layers:
+            _combined_backup_files(layers)
+    except zipfile.BadZipFile as exc:
+        raise FieldProjectOperationError(f"备份包无法读取：{exc}") from exc
+
+
 def restore_project_archive(
     archive_path: str | Path,
     destination_root: str | Path,

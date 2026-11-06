@@ -11,7 +11,7 @@
     - ``processing`` :class:`ui.coordinator_processing.ProcessingChain`
       处理执行、AutoTune、速度分析、深度切片、B-scan 预览、解释会话；
     - ``jobs``      :class:`ui.coordinator_jobs.JobHub`
-      任务事件对 JobTable/MiniJobList×2 三视图的同构扇出、取消与清理。
+      任务事件分发到底栏和项目启动区。
 
 运行态已显式分给职责所有者（测线→ProjectChain、处理/velocity→
 ProcessingChain、任务集合→JobHub）；本子接线器只经门面公共属性互访，

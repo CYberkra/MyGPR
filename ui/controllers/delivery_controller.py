@@ -22,6 +22,7 @@ class DeliveryController(QObject):
     report_generated = pyqtSignal(object)     # ReportPackage
     processing_package_generated = pyqtSignal(object)
     report_list_updated = pyqtSignal(list)    # [ReportPackage, ...] 全量列表
+    archive_checked = pyqtSignal(str, str)  # request token, error (empty on success)
     _project_read_ready = pyqtSignal(object, object)
 
     def __init__(self, parent: QObject | None = None) -> None:
@@ -185,6 +186,9 @@ class DeliveryController(QObject):
                 str(project_id), str(line_id), str(destination), artifact_id=str(artifact_id)),
             on_done=_on_done)
 
+    def check_backup_archive(self, token: str, path: str) -> None:
+        run_command(_ArchiveCheckCommand(self, token, path), name="mygpr-backup-check")
+
     def backup_project(
         self,
         project_id: str,
@@ -219,6 +223,23 @@ class DeliveryController(QObject):
 # ------------------------------------------------------------------
 # Worker commands (replaces run_worker closures)
 # ------------------------------------------------------------------
+
+class _ArchiveCheckCommand:
+    def __init__(self, controller, token: str, path: str) -> None:
+        self._controller = controller
+        self._token = token
+        self._path = path
+
+    def execute(self) -> None:
+        from ui.desktop_backend_facade import check_project_backup_chain
+
+        error = ""
+        try:
+            check_project_backup_chain(self._path)
+        except EXPECTED_BACKEND_ERRORS as exc:
+            error = friendly_error_message(exc)
+        self._controller.archive_checked.emit(self._token, error)
+
 
 class _DeliveryReadCommand:
     __slots__ = ("_controller", "_project_id", "_context_generation")

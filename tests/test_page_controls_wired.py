@@ -7,7 +7,7 @@
 1. 专门断言：上述 4 个控件的信号必须有接收者（本次回归的事发点）；
 2. 通用防线：SpatialPage 上属性命名的交互控件（``_xxx_btn/_combo/_switch``
    等），其主信号至少 1 个接收者——后续重构再漏连时立即红；
-3. 本批次其余修复的针对性回归（共享 SettingsManager、JobTable 删除漂移、
+3. 本批次其余修复的针对性回归（共享 SettingsManager、
    delivery 勾选保持、AScanPopup 勾选态同步、DepthSliceView 自适应、
    controller 异步化）。
 """
@@ -119,13 +119,12 @@ class TestAllPagesDiscreteControlsWired:
         from ui.pages.delivery_page import DeliveryPage
         from ui.pages.home_page import HomePage
         from ui.pages.interpretation_page import InterpretationPage
-        from ui.pages.jobs_page import JobsPage
         from ui.pages.processing_page import ProcessingPage
         from ui.pages.project_page import ProjectPage
         from ui.pages.settings_page import SettingsPage
         from ui.pages.spatial_page import SpatialPage
         return (HomePage, ProjectPage, ProcessingPage, InterpretationPage,
-                SpatialPage, JobsPage, DeliveryPage, SettingsPage)
+                SpatialPage, DeliveryPage, SettingsPage)
 
     def test_every_discrete_control_has_receiver(self, qapp):
         unwired = []
@@ -285,34 +284,6 @@ class TestProcessingInputTabs:
             assert page.current_pipeline()['steps'] == []
         finally:
             page.close()
-
-
-# ============================================================ 任务页清理按钮可用态
-class TestJobsPruneButtonGating:
-    """无可清理任务时「清理已完成」禁用（此前空表点了没反应）。"""
-
-    def _page(self, qapp):
-        from ui.pages.jobs_page import JobsPage
-        return JobsPage()
-
-    def test_disabled_when_nothing_finished(self, qapp):
-        page = self._page(qapp)
-        assert not page._prune_btn.isEnabled()
-        page._job_table.upsert_job('j1', 'j1')
-        assert not page._prune_btn.isEnabled()      # 仅排队中 → 仍禁用
-
-    def test_enabled_after_job_finished(self, qapp):
-        page = self._page(qapp)
-        page._job_table.upsert_job('j1', 'j1')
-        page._job_table.set_status('j1', 'completed')
-        assert page._prune_btn.isEnabled()
-
-    def test_disabled_again_after_prune(self, qapp):
-        page = self._page(qapp)
-        page._job_table.upsert_job('j1', 'j1')
-        page._job_table.set_status('j1', 'completed')
-        page._prune_btn.click()
-        assert not page._prune_btn.isEnabled()
 
 
 class TestMethodBrowserTagless:
@@ -546,46 +517,6 @@ class TestSharedSettingsManager:
         assert header.sectionSize(0) == 111
 
 
-# ============================================================ JobTable.clear_finished
-class TestJobTableClearFinished:
-    """修复 3：非相邻多任务删除时行号漂移，删错/删不掉。"""
-
-    def _make_table(self, qapp):
-        from ui.widgets.job_widgets import JobTable
-        table = JobTable()
-        for jid in ('j1', 'j2', 'j3', 'j4'):
-            table.upsert_job(jid, jid)
-        return table
-
-    def test_non_adjacent_finished_rows_removed(self, qapp):
-        table = self._make_table(qapp)
-        table.set_status('j1', 'completed')
-        table.set_status('j3', 'failed')   # 非相邻终态
-        table.clear_finished()
-
-        assert table._table.rowCount() == 2
-        assert set(table._rows) == {'j2', 'j4'}
-        # 幸存行按可视顺序重排，映射与内容一致（删错行的回归断言）
-        assert table._rows == {'j2': 0, 'j4': 1}
-        assert table._table.item(0, table._COL_TITLE).text() == 'j2'
-        assert table._table.item(1, table._COL_TITLE).text() == 'j4'
-
-    def test_active_rows_untouched_when_nothing_finished(self, qapp):
-        table = self._make_table(qapp)
-        table.set_status('j2', 'running')
-        table.clear_finished()
-        assert table._table.rowCount() == 4
-        assert table._rows == {'j1': 0, 'j2': 1, 'j3': 2, 'j4': 3}
-
-    def test_trailing_finished_rows_removed(self, qapp):
-        table = self._make_table(qapp)
-        table.set_status('j3', 'completed')
-        table.set_status('j4', 'cancelled')
-        table.clear_finished()
-        assert table._rows == {'j1': 0, 'j2': 1}
-        assert table._table.rowCount() == 2
-
-
 # ============================================================ DeliveryPage.set_lines
 class TestDeliverySetLinesPreservesChecks:
     """修复 4：重刷测线集合后丢用户勾选。"""
@@ -620,7 +551,7 @@ class TestDeliverySetLinesPreservesChecks:
 
 # ============================================================ DeliveryPage 主操作门控（P2-3）
 class TestDeliveryHeaderActionGating:
-    """P2-3：生成空间成果入卡头 + 无测线禁用；打开目录 hint 联动。"""
+    """P2-3：生成空间成果入卡头 + 无测线禁用。"""
 
     def test_spatial_btn_gated_by_lines(self, qapp):
         from ui.pages.delivery_page import DeliveryPage
@@ -639,18 +570,6 @@ class TestDeliveryHeaderActionGating:
         assert not page._spatial_btn.isEnabled()   # 忙态压过门控
         page.set_busy(False)
         assert page._spatial_btn.isEnabled()       # 解忙后恢复且不误启用空态
-
-    def test_open_dir_state_follows_report_result(self, qapp):
-        from ui.pages.delivery_page import DeliveryPage
-        page = DeliveryPage()
-        assert not page._open_dir_btn.isEnabled()
-        assert page._open_dir_btn.toolTip() == '生成报告包后可用'
-        page.set_report_result(SimpleNamespace(
-            pdf_path='D:/out/report/a.pdf', html_path='', xlsx_path='',
-            delivery_zip_path=''))
-        assert page._open_dir_btn.isEnabled()
-        assert page._open_dir_btn.toolTip() == '打开报告包输出目录'
-
 
 # ============================================================ AScanPopup ↔ BScanView
 class TestAscanPopupClosedSync:

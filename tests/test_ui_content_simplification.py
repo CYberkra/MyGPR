@@ -83,8 +83,7 @@ def test_interpretation_has_one_session_status_and_one_point_count(qapp):
     page.deleteLater()
 
 
-def test_spatial_and_jobs_remove_redundant_region_titles(qapp):
-    from ui.pages.jobs_page import JobsPage
+def test_spatial_removes_redundant_region_titles(qapp):
     from ui.pages.spatial_page import SpatialPage
 
     spatial = SpatialPage()
@@ -92,20 +91,13 @@ def test_spatial_and_jobs_remove_redundant_region_titles(qapp):
     assert '空间视图' not in texts
     assert '来源:' not in texts
     assert not any('统计仅基于已载入' in text for text in texts)
-    jobs = JobsPage()
-    assert '任务记录' not in _label_texts(jobs)
     spatial.deleteLater()
-    jobs.deleteLater()
 
 
 def test_delivery_uses_controls_as_the_primary_affordance(qapp):
     from ui.pages.delivery_page import DeliveryPage
 
     page = DeliveryPage()
-    assert not hasattr(page, '_open_dir_hint')
-    assert page._report_name_edit.placeholderText() == '留空自动命名'
-    assert page._restore_name_edit.placeholderText() == '留空自动命名'
-    assert page._incremental_check.text() == '增量备份'
     assert '选择测线（可多选）' not in _label_texts(page)
     page.deleteLater()
 

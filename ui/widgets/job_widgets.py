@@ -1,4 +1,4 @@
-"""JobTable / MiniJobList — 任务状态控件（SPEC §5.6）。
+"""MiniJobList — 任务状态控件（SPEC §5.6）。
 
 状态中文映射：queued 排队 / running 运行中 / completed 已完成 /
 failed 失败 / cancelled 已取消。
@@ -6,12 +6,8 @@ failed 失败 / cancelled 已取消。
 深色取同色相高亮度变体，保证深底对比度）；running 状态显示进度条。
 """
 
-import re
-
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (QHBoxLayout, QHeaderView, QLabel,
-                             QStackedLayout, QTableWidget, QTableWidgetItem,
-                             QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 from qfluentwidgets import ProgressBar, PushButton, ScrollArea
 
 from ui.motion import animate_badge_color, animate_progress
@@ -55,205 +51,16 @@ def _restyle_status_badge(badge: QLabel, status: str) -> None:
     animate_badge_color(badge, BADGE_QSS, color, color)
 
 
-class JobTable(QWidget):
-    """任务中心表格：列 = 标题 / 状态徽章 / 进度条 / 消息 / 操作(取消)。"""
-
-    cancel_requested = pyqtSignal(str)
-    # 行数/状态变化（宿主据此同步「清理已完成」的可用态：空表点了没反应）
-    rows_changed = pyqtSignal()
-
-    _COL_TITLE, _COL_STATUS, _COL_PROGRESS, _COL_MESSAGE, _COL_ACTION = range(5)
-
-    def finished_count(self) -> int:
-        """终态（非活动）任务行数。"""
-        return sum(1 for row in self._rows.values()
-                   if self._status_of(row) not in _ACTIVE_STATUSES)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._rows = {}     # job_id -> row index
-        self._badges = {}   # job_id -> 状态徽章 QLabel（复用，不重建）
-
-        self._table = QTableWidget(0, 5, self)
-        self._table.setHorizontalHeaderLabels(
-            ['标题', '状态', '进度', '消息', '操作'])
-        self._table.verticalHeader().setVisible(False)
-        self._table.setEditTriggers(
-            QTableWidget.EditTrigger.NoEditTriggers)
-        self._table.setSelectionBehavior(
-            QTableWidget.SelectionBehavior.SelectRows)
-        header = self._table.horizontalHeader()
-        header.setSectionResizeMode(self._COL_TITLE,
-                                    QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(self._COL_MESSAGE,
-                                    QHeaderView.ResizeMode.Stretch)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        # P2-6：无任务时空态占位（QStackedLayout 切换，避免纯空白）
-        empty_page = QWidget(self)
-        empty_layout = QVBoxLayout(empty_page)
-        self._empty_label = HintLabel('暂无任务', empty_page)
-        self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        empty_layout.addWidget(self._empty_label)
-        self._stack = QStackedLayout()
-        self._stack.addWidget(empty_page)   # index 0 = 空态
-        self._stack.addWidget(self._table)  # index 1 = 表格
-        layout.addLayout(self._stack)
-
-    def _update_empty_state(self) -> None:
-        """无任务时显示空态占位。"""
-        self._stack.setCurrentIndex(0 if not self._rows else 1)
-
-    def apply_theme(self, dark: bool) -> None:
-        """主题切换：徽章配色按新主题重刷（空态 HintLabel 自刷，主窗口遍历调用）。"""
-        for job_id, badge in self._badges.items():
-            _restyle_status_badge(badge, self._status_of(self._rows[job_id]))
-
-    # ------------------------------------------------------------- 接口
-    def upsert_job(self, job_id: str, title: str) -> None:
-        if job_id in self._rows:
-            self._table.item(self._rows[job_id], self._COL_TITLE).setText(title)
-            return
-        row = self._table.rowCount()
-        self._table.insertRow(row)
-        self._rows[job_id] = row
-        self._table.setItem(row, self._COL_TITLE, QTableWidgetItem(title))
-        self._update_empty_state()
-
-        badge = _make_status_badge('queued')
-        holder = QWidget(self._table)
-        lay = QHBoxLayout(holder)
-        lay.setContentsMargins(4, 2, 4, 2)
-        lay.addWidget(badge)
-        lay.addStretch(1)
-        self._table.setCellWidget(row, self._COL_STATUS, holder)
-        marker = QTableWidgetItem('')
-        marker.setData(Qt.ItemDataRole.UserRole, 'queued')
-        self._table.setItem(row, self._COL_STATUS, marker)
-
-        bar = ProgressBar(self._table)
-        bar.setRange(0, 100)
-        bar.setValue(0)
-        bar.setVisible(False)
-        self._table.setCellWidget(row, self._COL_PROGRESS, bar)
-        self._table.setItem(row, self._COL_MESSAGE, QTableWidgetItem(''))
-        cancel_btn = PushButton('取消', self._table)
-        cancel_btn.clicked.connect(
-            lambda _checked=False, jid=job_id: self.cancel_requested.emit(jid))
-        self._table.setCellWidget(row, self._COL_ACTION, cancel_btn)
-        self._badges[job_id] = badge
-        self.rows_changed.emit()
-
-    def update_progress(self, job_id: str, completed: int, total: int,
-                        message: str) -> None:
-        row = self._rows.get(job_id)
-        if row is None:
-            return
-        bar = self._table.cellWidget(row, self._COL_PROGRESS)
-        if total and total > 0:
-            bar.setRange(0, int(total))
-            animate_progress(bar, min(int(completed), int(total)))
-        else:
-            bar.setRange(0, 100)
-            animate_progress(bar, int(completed))
-        bar.setVisible(True)
-        self._table.item(row, self._COL_MESSAGE).setText(message or '')
-
-    def set_status(self, job_id: str, status: str) -> None:
-        row = self._rows.get(job_id)
-        if row is None:
-            return
-        badge = self._badges.get(job_id)
-        if badge is not None:
-            end_hex = _status_badge_color(status)
-            badge.setText(_STATUS_TEXT.get(status, status))
-            # 从徽章当前背景色渐变到新状态色（qss 模板同源，见 ui.motion）
-            match = re.search(r'background-color:\s*(#[0-9a-fA-F]{6})',
-                              badge.styleSheet())
-            start_hex = match.group(1) if match else _status_badge_color(status)
-            animate_badge_color(badge, BADGE_QSS, start_hex, end_hex)
-        item = self._table.item(row, self._COL_STATUS)
-        if item is not None:
-            item.setData(Qt.ItemDataRole.UserRole, status)
-        bar = self._table.cellWidget(row, self._COL_PROGRESS)
-        bar.setVisible(status == 'running')
-        cancel_btn = self._table.cellWidget(row, self._COL_ACTION)
-        cancel_btn.setEnabled(status in _ACTIVE_STATUSES)
-        self.rows_changed.emit()
-
-    def clear_finished(self) -> None:
-        """移除终态行（供"清理已完成"按钮）。
-
-        先收集要删的行号、按行号倒序 removeRow（倒序保证前排删除
-        不影响后排行号），再按可视顺序重建 _rows 映射——循环中边删边用
-        旧映射会让非相邻多任务的行号漂移，删错/删不掉。
-        """
-        finished = sorted(
-            ((job_id, row) for job_id, row in self._rows.items()
-             if self._status_of(row) not in _ACTIVE_STATUSES),
-            key=lambda pair: pair[1], reverse=True)
-        if not finished:
-            return
-        for job_id, row in finished:
-            self._table.removeRow(row)
-            self._rows.pop(job_id, None)
-            self._badges.pop(job_id, None)
-        # 删除后幸存行的相对顺序不变，按旧行号升序重排即为新行号
-        survivors = sorted(self._rows.items(), key=lambda kv: kv[1])
-        self._rows = {job_id: index for index, (job_id, _old) in
-                      enumerate(survivors)}
-        self._update_empty_state()
-        self.rows_changed.emit()
-
-    def remove_inactive(self) -> None:
-        """与 MiniJobList 同构的清理接口：JobHub 对三视图统一分发用。"""
-        self.clear_finished()
-
-    def context_table(self):
-        return self._table
-
-    def job_id_at(self, row: int) -> str:
-        return next((job_id for job_id, index in self._rows.items() if index == row), '')
-
-    def job_snapshot(self, job_id: str) -> dict:
-        row = self._rows.get(job_id)
-        if row is None:
-            return {}
-        title = self._table.item(row, self._COL_TITLE)
-        message = self._table.item(row, self._COL_MESSAGE)
-        return {
-            'job_id': job_id,
-            'title': title.text() if title is not None else '',
-            'message': message.text() if message is not None else '',
-            'status': str(self._status_of(row) or ''),
-        }
-
-    def can_cancel(self, job_id: str) -> bool:
-        row = self._rows.get(job_id)
-        if row is None:
-            return False
-        button = self._table.cellWidget(row, self._COL_ACTION)
-        return bool(button and button.isEnabled())
-
-    def cancel_job(self, job_id: str) -> None:
-        if self.can_cancel(job_id):
-            self.cancel_requested.emit(job_id)
-
-    # ------------------------------------------------------------- 内部
-    def _status_of(self, row):
-        item = self._table.item(row, self._COL_STATUS)
-        return item.data(Qt.ItemDataRole.UserRole) if item else None
-
-
 class MiniJobList(QWidget):
-    """右侧折叠面板"任务"tab：仅显示活动任务（标题 + 进度条 + 状态）。"""
+    """Compact task rows with optional, bounded completion history."""
 
     cancel_requested = pyqtSignal(str)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, history_limit: int = 0):
         super().__init__(parent)
-        self._jobs = {}   # job_id -> dict(row_widget, bar, status_label, status)
+        self._jobs = {}
+        self._history_limit = history_limit
+        self._recent: dict[str, None] = {}
 
         self._scroll = ScrollArea(self)
         style_transparent_scroll(self._scroll)
@@ -289,6 +96,9 @@ class MiniJobList(QWidget):
         status_badge = _make_status_badge('queued')
         top.addWidget(title_label, 1)
         top.addWidget(status_badge)
+        details = PushButton(row_widget)
+        top.addWidget(details)
+        details.hide()
         lay.addLayout(top)
 
         bottom = QHBoxLayout()
@@ -303,10 +113,10 @@ class MiniJobList(QWidget):
         bottom.addWidget(cancel_btn)
         lay.addLayout(bottom)
 
-        self._box.insertWidget(self._box.count() - 1, row_widget)
+        self._box.insertWidget(self._box.count() - 1 - len(self._recent), row_widget)
         self._jobs[job_id] = {
             'widget': row_widget, 'title_label': title_label,
-            'badge': status_badge, 'bar': bar, 'cancel': cancel_btn,
+            'badge': status_badge, 'bar': bar, 'cancel': cancel_btn, 'details': details,
             'status': 'queued',
         }
         self._refresh_visibility()
@@ -336,13 +146,40 @@ class MiniJobList(QWidget):
         end_hex = _status_badge_color(status)
         badge.setText(_STATUS_TEXT.get(status, status))
         animate_badge_color(badge, BADGE_QSS, old_hex, end_hex)
-        entry['cancel'].setEnabled(status in _ACTIVE_STATUSES)
+        active = status in _ACTIVE_STATUSES
+        entry['cancel'].setEnabled(active)
+        entry['cancel'].setVisible(active)
+        entry['bar'].setVisible(active)
+        self._refresh_visibility()
+
+    def finish_job(self, job_id: str, message: str, action=None) -> None:
+        entry = self._jobs.get(job_id)
+        if entry is None or not self._history_limit or job_id in self._recent:
+            return
+        if entry['status'] == 'failed':
+            from ui.widgets.object_context_menu import show_details
+
+            title = entry['title_label'].text()
+            action = ('详情…', lambda: show_details(self, title, message or '任务执行失败'))
+        if action is not None:
+            label, callback = action
+            button = entry['details']
+            button.setText(label)
+            button.clicked.connect(callback)
+            button.show()
+        self._recent[job_id] = None
+        self._box.removeWidget(entry['widget'])
+        self._box.insertWidget(self._box.count() - len(self._recent), entry['widget'])
+        if len(self._recent) > self._history_limit:
+            oldest = next(iter(self._recent))
+            self._recent.pop(oldest)
+            self._remove_row(oldest)
         self._refresh_visibility()
 
     def remove_inactive(self) -> None:
         """移除终态任务行。"""
         for job_id in [j for j, e in self._jobs.items()
-                       if e['status'] not in _ACTIVE_STATUSES]:
+                       if e['status'] not in _ACTIVE_STATUSES and j not in self._recent]:
             self._remove_row(job_id)
         self._refresh_visibility()
 
@@ -360,10 +197,10 @@ class MiniJobList(QWidget):
         entry['widget'].deleteLater()
 
     def _refresh_visibility(self):
-        """仅显示活动任务；无活动任务时显示空态占位。"""
-        any_active = False
-        for entry in self._jobs.values():
-            active = entry['status'] in _ACTIVE_STATUSES
-            entry['widget'].setVisible(active)
-            any_active = any_active or active
-        self._empty_label.setVisible(not any_active)
+        """Show active rows and retained results."""
+        any_visible = False
+        for job_id, entry in self._jobs.items():
+            visible = entry['status'] in _ACTIVE_STATUSES or job_id in self._recent
+            entry['widget'].setVisible(visible)
+            any_visible = any_visible or visible
+        self._empty_label.setVisible(not any_visible)

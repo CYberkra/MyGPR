@@ -119,6 +119,7 @@ class ProjectService(ProjectAcquisitionServiceMixin, ProjectIdentityServiceMixin
         *,
         read_only: bool = False,
         recover_stale_lock: bool = True,
+        replace_open_identity: bool = False,
     ) -> ProjectSummary:
         """打开项目。
 
@@ -138,9 +139,10 @@ class ProjectService(ProjectAcquisitionServiceMixin, ProjectIdentityServiceMixin
             read_only=bool(read_only),
             recover_stale_lock=bool(recover_stale_lock),
         )
-        return self._register(session)
+        return self._register(session, replace_open_identity=replace_open_identity)
 
-    def _register(self, session: ProjectSessionPort) -> ProjectSummary:
+    def _register(self, session: ProjectSessionPort, *,
+                  replace_open_identity: bool = False) -> ProjectSummary:
         summary = session.summary
         with self._lock:
             existing = self._sessions.get(summary.project_id)
@@ -148,12 +150,22 @@ class ProjectService(ProjectAcquisitionServiceMixin, ProjectIdentityServiceMixin
                 session.close()
                 self._check_maintenance(summary.project_id)
             if existing is not None:
-                session.close()
-                if self._roots[summary.project_id] != summary.root_path:
+                if self._roots[summary.project_id] == summary.root_path:
+                    session.close()
+                    return existing.summary
+                if not replace_open_identity:
+                    session.close()
                     raise ProjectApplicationError(
                         f"project id already open from another root: {summary.project_id}"
                     )
-                return existing.summary
+                if self._lease_counts.get(summary.project_id, 0):
+                    session.close()
+                    raise ProjectBusyError('原项目仍有运行中的任务。')
+                try:
+                    existing.close()
+                except Exception:
+                    session.close()
+                    raise
             self._sessions[summary.project_id] = session
             self._roots[summary.project_id] = summary.root_path
             self._lease_counts.setdefault(summary.project_id, 0)

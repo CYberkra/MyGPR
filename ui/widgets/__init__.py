@@ -1,7 +1,7 @@
 """MyGPR Qt 自定义控件库 [A2]。
 
 导出：BScanView / AScanView / ParamForm / MethodBrowser / PipelineList /
-JobTable / MiniJobList / OutputPanel / SlimSegment / validators 函数与
+MiniJobList / OutputPanel / SlimSegment / validators 函数与
 StrictComboBox。
 """
 
@@ -13,7 +13,7 @@ from .bscan_view import BScanView
 from .collapsible_panel import (CollapsiblePanel, chevron_left_icon,
                                 collapse_button_qss)
 from .empty_state import EmptyStateOverlay
-from .job_widgets import JobTable, MiniJobList
+from .job_widgets import MiniJobList
 from .output_panel import OutputPanel
 from .method_browser import MethodBrowser
 from .param_form import ParamForm
@@ -37,7 +37,6 @@ __all__ = [
     'ParamForm',
     'MethodBrowser',
     'PipelineList',
-    'JobTable',
     'MiniJobList',
     'OutputPanel',
     'SlimSegment',

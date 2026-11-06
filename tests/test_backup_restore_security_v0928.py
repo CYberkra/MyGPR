@@ -3,6 +3,7 @@ import zipfile
 from pathlib import Path
 import pytest
 from core.field_project_operations import FieldProjectOperationError, backup_project_archive, restore_project_archive
+from core.field_project_backup import check_project_backup_chain
 from core.field_project_store import FieldProjectStore
 
 
@@ -86,6 +87,16 @@ def test_incremental_restore_missing_base_fails(tmp_path: Path):
     delta = backup_project_archive(store, backup_dir, incremental=True)
     with zipfile.ZipFile(delta.archive_path, "r") as handle:
         manifest = json.loads(handle.read("backup_manifest.json").decode("utf-8"))
+    check_project_backup_chain(delta.archive_path)
     (backup_dir / manifest["incremental_base_archive"]).unlink()
+    with pytest.raises(FieldProjectOperationError, match=manifest["incremental_base_archive"]):
+        check_project_backup_chain(delta.archive_path)
     with pytest.raises(FieldProjectOperationError, match="基准档案"):
         restore_project_archive(delta.archive_path, tmp_path / "restore")
+
+
+def test_backup_chain_check_rejects_invalid_zip(tmp_path):
+    archive = tmp_path / "invalid.zip"
+    archive.write_text("invalid archive", encoding="utf-8")
+    with pytest.raises(FieldProjectOperationError, match="备份包无法读取"):
+        check_project_backup_chain(archive)

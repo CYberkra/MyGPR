@@ -28,26 +28,6 @@ def test_card_surface_has_a_single_token_source():
     assert tokens(True)['surface_card'] == '#2d2e32'
 
 
-def test_job_table_exposes_safe_row_actions(qapp):
-    from ui.widgets.job_widgets import JobTable
-
-    table = JobTable()
-    table.upsert_job('J1', '处理')
-    assert table.context_table() is not None
-    assert table.job_id_at(0) == 'J1'
-    assert table.job_snapshot('J1')['title'] == '处理'
-    assert table.job_snapshot('J1')['status'] == 'queued'
-    assert table.can_cancel('J1')
-    table.set_status('J1', 'completed')
-    assert not table.can_cancel('J1')
-    table.set_status('J1', 'running')
-    cancelled = []
-    table.cancel_requested.connect(cancelled.append)
-    table.cancel_job('J1')
-    assert cancelled == ['J1']
-    table.deleteLater()
-
-
 def test_chain_strip_empty_hint_has_a_public_setter(qapp):
     from ui.widgets.chain_strip import ChainStrip
 

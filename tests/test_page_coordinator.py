@@ -44,7 +44,6 @@ def _make_window(*, project_id="P-001", line_id="L02", has_project=True):
         "interpretationInterface": _StubPage(),
         "deliveryInterface": _StubPage(),
         "spatialInterface": _StubPage(),
-        "jobsInterface": _StubPage(),
     }
 
     class _StubWindow:

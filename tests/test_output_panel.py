@@ -171,3 +171,25 @@ def test_cancel_job_signal_wiring(qapp, panel):
     panel.cancel_job_requested.connect(got.append)
     panel.mini_jobs().cancel_requested.emit('J1')
     assert got == ['J1']
+
+
+def test_recent_task_results_are_bounded_and_keep_active_cancellation(qapp, panel, monkeypatch):
+    from ui.widgets import object_context_menu
+
+    details = []
+    monkeypatch.setattr(object_context_menu, 'show_details', lambda *_args: details.append(_args[1:]))
+    tasks = panel.mini_jobs()
+    cancelled = []
+    panel.cancel_job_requested.connect(cancelled.append)
+    tasks.upsert_job('running', 'Running')
+    for index in range(13):
+        job_id = str(index)
+        tasks.upsert_job(job_id, f'Task {index}')
+        tasks.set_status(job_id, 'failed' if index == 12 else 'completed')
+        tasks.finish_job(job_id, '目标不可写')
+    assert set(tasks._jobs) == {'running', *(str(index) for index in range(1, 13))}
+    tasks._jobs['12']['details'].click()
+    assert details == [('Task 12', '目标不可写')]
+    tasks._jobs['12']['cancel'].click()
+    tasks._jobs['running']['cancel'].click()
+    assert cancelled == ['running']

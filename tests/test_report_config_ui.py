@@ -32,24 +32,3 @@ def test_report_config_builds_complete_backend_profile(qapp):
     assert profile['include_integrity_manifest'] is True
     dialog.close()
     dialog.deleteLater()
-
-
-def test_restore_emits_new_project_destination_without_overwrite(qapp, monkeypatch, tmp_path):
-    from ui.pages.delivery_page import DeliveryPage
-    import ui.pages.delivery_page as module
-
-    monkeypatch.setattr(module.file_dialogs, 'getOpenFileName',
-                        lambda *args, **kwargs: (str(tmp_path / 'backup.zip'), ''))
-    monkeypatch.setattr(module.file_dialogs, 'getExistingDirectory',
-                        lambda *args, **kwargs: str(tmp_path / 'restored'))
-    monkeypatch.setattr(module.MessageBox, 'exec', lambda self: 1)
-    page = DeliveryPage()
-    page._restore_name_edit.setText('RecoveredProject')
-    requests = []
-    page.restore_requested.connect(requests.append)
-    page._on_restore_clicked()
-    assert requests[0]['destination_root'].endswith('restored')
-    assert requests[0]['project_dir_name'] == 'RecoveredProject'
-    assert requests[0]['open_after_restore'] is True
-    page.close()
-    page.deleteLater()

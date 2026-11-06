@@ -23,7 +23,7 @@
 随主题查表；自动滚动在用户上翻离开底部时自动暂停（toggle 钮同步），滚回
 底部自动恢复。
 
-任务 tab：MiniJobList（仅活动任务；完整历史见任务中心导航页）。
+任务 tab：MiniJobList（活动任务和最近结果）。
 """
 
 from collections import deque
@@ -96,7 +96,7 @@ class OutputPanel(QWidget):
         self._tabs = SlimSegment(self)
         self._tabs.addItem('log', '日志',
                            onClick=lambda: self._on_tab_clicked('log'))
-        self._tabs.addItem('jobs', '活动任务',
+        self._tabs.addItem('jobs', '任务',
                            onClick=lambda: self._on_tab_clicked('jobs'))
         self._tabs.setSizePolicy(
             QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
@@ -153,7 +153,7 @@ class OutputPanel(QWidget):
         self._log_edit.document().setMaximumBlockCount(5000)
         self._log_edit.verticalScrollBar().valueChanged.connect(self._on_scroll)
 
-        self._mini_jobs = MiniJobList(self)
+        self._mini_jobs = MiniJobList(self, history_limit=12)
         self._mini_jobs.cancel_requested.connect(self.cancel_job_requested)
 
         self._content = QStackedWidget(self)
@@ -213,6 +213,10 @@ class OutputPanel(QWidget):
 
     def mini_jobs(self) -> MiniJobList:
         return self._mini_jobs
+
+    def show_tasks(self) -> None:
+        self._activate('jobs')
+        self._set_open(True)
 
     def toggle_panel(self) -> None:
         """Ctrl+J：收/展切换。"""
