@@ -19,7 +19,7 @@ from PyQt6 import sip
 from PyQt6.QtCore import QEvent, QPoint, QSize, Qt, QUrl, pyqtSignal
 from PyQt6.QtGui import QBrush, QColor, QDesktopServices, QFont, QFontMetrics, QIcon, QKeySequence, QPainter, QPixmap, QShortcut
 from PyQt6.QtWidgets import (
-    QApplication, QDialog, QDialogButtonBox, QHeaderView,
+    QApplication, QDialogButtonBox, QHeaderView,
     QSizePolicy, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import BodyLabel, PlainTextEdit, TransparentToolButton, TreeWidget
@@ -37,6 +37,7 @@ from ui.theme_helpers import control_palette, hint_qss, status_color
 from ui.widgets.context_menus import add_action, make_menu
 from ui.widgets.dock_panel import DockPanel
 from ui.widgets.fluent_menu_keyboard import FluentMenuKeyboard
+from ui.widgets.themed_dialog import ThemedDialog
 
 _ROLE_PAYLOAD = Qt.ItemDataRole.UserRole        # line → line_id；artifact → artifact_id；spatial → result_id；report → package_dir
 _ROLE_KIND = Qt.ItemDataRole.UserRole + 1       # TreeNode.kind
@@ -880,7 +881,7 @@ class FileTreePanel(DockPanel):
         else:
             line = next((line for line in self._lines if str(getattr(line, 'line_id', '')) == line_id), None)
             details.append(f'源文件：{getattr(line, "raw_path", "") or "项目原始数据"}')
-        dialog = QDialog(self.window() or self)
+        dialog = ThemedDialog(self.window() or self)
         dialog.setWindowTitle('参数与来源')
         dialog.resize(680, 440)
         colors = control_palette(isDarkTheme())
@@ -891,6 +892,7 @@ class FileTreePanel(DockPanel):
         content.setPlainText('\n'.join(details))
         layout.addWidget(content)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, dialog)
+        buttons.button(QDialogButtonBox.StandardButton.Close).setText('关闭')
         buttons.rejected.connect(dialog.reject)
         layout.addWidget(buttons)
         dialog.exec()
