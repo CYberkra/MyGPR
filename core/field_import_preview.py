@@ -9,6 +9,7 @@ transactional background import job.
 from __future__ import annotations
 
 import csv
+import logging
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +19,8 @@ import numpy as np
 
 from core.gpr_data_model import detect_mygpr_airborne_sidecar_csv
 from core.gpr_format_registry import get_format_spec
+
+_LOGGER = logging.getLogger(__name__)
 
 try:
     import h5py  # type: ignore
@@ -348,6 +351,13 @@ def build_import_preflight(
             from core.job_manager import JobCancelled
             if isinstance(exc, JobCancelled):
                 raise
+            if suffix in ('.h5', '.hdf5') and isinstance(exc, OSError) and 'truncated file' in str(exc).lower():
+                _LOGGER.debug('HDF5 预检发现截断文件：%s', src, exc_info=True)
+                return ImportPreflightResult(
+                    path=str(src), exists=True, is_file=True, extension=suffix,
+                    format_name=display_name, support='direct-failed', can_import=False,
+                    message='HDF5 文件不完整或已损坏，无法完成预检。请确认采集已结束，并重新复制完整文件。',
+                )
             return ImportPreflightResult(
                 path=str(src), exists=True, is_file=True, extension=suffix,
                 format_name=display_name, support="direct-failed", can_import=False,

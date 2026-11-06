@@ -89,6 +89,23 @@ def test_partial_commit_is_not_accepted_as_a_finished_line(tmp_path):
         load_gpr_dataset(path)
 
 
+def test_truncated_hdf5_preflight_explains_incomplete_file(tmp_path):
+    original = tmp_path / 'original.h5'
+    write_stream(original)
+    contents = original.read_bytes()
+    truncated = tmp_path / 'truncated.h5'
+    truncated.write_bytes(contents[:4096])
+
+    preview = build_import_preflight(truncated)
+
+    assert not preview.can_import
+    assert preview.support == 'direct-failed'
+    assert '不完整或已损坏' in preview.message
+    assert '重新复制完整文件' in preview.message
+    assert 'truncated file' not in preview.message
+    assert original.read_bytes() == contents
+
+
 def test_explicit_endpoint_controls_time_axis_and_cli_sampling_interval(tmp_path):
     from core.gpr_io import auto_load_data
     path = tmp_path / 'endpoint.h5'

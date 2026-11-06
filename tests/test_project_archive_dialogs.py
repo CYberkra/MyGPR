@@ -2,11 +2,33 @@
 import pytest
 
 pytest.importorskip('PyQt6')
-from PyQt6.QtCore import QObject, pyqtSignal  # noqa: E402
+from PyQt6.QtCore import QObject, Qt, pyqtSignal  # noqa: E402
+from PyQt6.QtGui import QGuiApplication  # noqa: E402
 
 from ui import file_dialogs  # noqa: E402
 from ui.project_archive_dialogs import BackupDialog, RestoreDialog  # noqa: E402
 from ui.controllers.delivery_controller import DeliveryController, _ArchiveCheckCommand  # noqa: E402
+from ui.widgets import themed_dialog  # noqa: E402
+
+
+def test_visible_archive_caption_refreshes_on_system_contrast_change(qapp, monkeypatch):
+    calls = []
+    monkeypatch.setattr(themed_dialog, '_apply_caption_theme', lambda dialog: calls.append(dialog))
+    dialog = BackupDialog('')
+    try:
+        dialog.show()
+        calls.clear()
+        QGuiApplication.styleHints().accessibility().contrastPreferenceChanged.emit(
+            Qt.ContrastPreference.HighContrast)
+        assert calls == [dialog]
+        dialog.hide()
+        calls.clear()
+        QGuiApplication.styleHints().accessibility().contrastPreferenceChanged.emit(
+            Qt.ContrastPreference.NoPreference)
+        assert calls == []
+    finally:
+        dialog.close()
+        dialog.deleteLater()
 
 
 def test_backup_cleanup_requires_opt_in(qapp, tmp_path, monkeypatch):
