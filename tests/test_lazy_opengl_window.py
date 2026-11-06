@@ -65,15 +65,25 @@ def test_first_gl_view_does_not_hide_or_recreate_main_window(tmp_path):
         window.installEventFilter(watch)
         before = int(window.winId())
         from ui.widgets.trajectory_3d_view import Trajectory3DView
-        # Temporary CI diagnostic: preserve a failing result if Qt left an
-        # error before pyqtgraph's paintGL, instead of silently clearing it.
+        # Temporary CI diagnostic: never clear an error and continue silently.
         from OpenGL import GL
         import pyqtgraph.opengl as gl
+        def check_gl_error(stage):
+            try:
+                error = GL.glGetError()
+            except Exception as exc:
+                raise RuntimeError(f'OpenGL error {stage}: {exc}') from exc
+            if error != GL.GL_NO_ERROR:
+                raise RuntimeError(f'OpenGL error {stage}: {error}')
+        original_initialize_gl = gl.GLViewWidget.initializeGL
+        def check_initialize_gl(widget):
+            check_gl_error('before pyqtgraph initializeGL')
+            original_initialize_gl(widget)
+            check_gl_error('after pyqtgraph initializeGL')
+        gl.GLViewWidget.initializeGL = check_initialize_gl
         original_paint_gl = gl.GLViewWidget.paintGL
         def check_error_before_paint(widget):
-            error = GL.glGetError()
-            if error != GL.GL_NO_ERROR:
-                raise RuntimeError(f'OpenGL error before pyqtgraph paintGL: {error}')
+            check_gl_error('before pyqtgraph paintGL')
             return original_paint_gl(widget)
         gl.GLViewWidget.paintGL = check_error_before_paint
         view = window.pages["spatialInterface"]._3d_view
