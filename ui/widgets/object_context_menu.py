@@ -1,9 +1,8 @@
 """Small Fluent object-menu binding; never attach it to text editors."""
 from PyQt6.QtCore import QEvent, QObject, QPoint, Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
-from PyQt6.QtWidgets import (
-    QDialogButtonBox, QPlainTextEdit, QVBoxLayout,
-)
+from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout
+from qfluentwidgets import PlainTextEdit, PushButton
 
 from ui.widgets.context_menus import add_action, make_menu
 from ui.widgets.fluent_menu_keyboard import FluentMenuKeyboard
@@ -31,14 +30,16 @@ def show_details(parent, title, text):
     dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
     dialog.resize(520, 340)
     layout = QVBoxLayout(dialog)
-    editor = QPlainTextEdit(dialog)
+    editor = PlainTextEdit(dialog)
     editor.setReadOnly(True)
     editor.setPlainText(text)
     layout.addWidget(editor)
-    buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, parent=dialog)
-    buttons.button(QDialogButtonBox.StandardButton.Close).setText('关闭')
-    buttons.rejected.connect(dialog.reject)
-    layout.addWidget(buttons)
+    buttons = QHBoxLayout()
+    buttons.addStretch()
+    close = PushButton('关闭', dialog)
+    close.clicked.connect(dialog.reject)
+    buttons.addWidget(close)
+    layout.addLayout(buttons)
     dialog.show()
     return dialog
 
