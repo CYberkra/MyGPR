@@ -2,7 +2,7 @@
 
 MyGPR 后续交付包采用语义化版本号：`MAJOR.MINOR.PATCH`。
 
-当前维护交付版本为 **0.11.4**（2026-10-24），基于 0.11.0 和随后工作区维护。
+当前维护交付版本为 **0.11.4**，汇总 v0.11.0 之后的维护和 Windows 验签更新。见 [发行说明](../releases/v0.11.4.md)。
 不重置或改写已有版本/tag；后续修复继续递增 PATCH，新功能递增 MINOR。
 
 ## 版本号含义
@@ -16,7 +16,7 @@ MyGPR 后续交付包采用语义化版本号：`MAJOR.MINOR.PATCH`。
 1. 根目录 `VERSION`。
 2. `CHANGELOG.md` 中新增对应版本条目。
 3. 交付 zip 文件名，例如 `MyGPR_V<版本号>_<tag>.zip`。
-4. 同时更新 `pyproject.toml`；若重新建立 exe 打包，应将 `VERSION` 带入发布包。当前旧 `gpr_gui.spec` 已删除，见[发布流程](RELEASE_PROCESS.md)。
+4. 同时更新 `pyproject.toml`。Windows 安装包带入 `VERSION` 和同版本包元数据，见 [发布流程](RELEASE_PROCESS.md)。
 5. 修复报告或开发报告中必须写明 base version 和 output version。
 6. README、AGENTS、CLAUDE、GUI_README、CURRENT_STATE、TODO 的当前版本，
    以及 `config/backend_source_manifest.json`。历史变更记录、设计和审计快照保持原版本。
@@ -42,8 +42,4 @@ MyGPR 后续交付包采用语义化版本号：`MAJOR.MINOR.PATCH`。
 python scripts/check_version_consistency.py
 ```
 
-或直接运行测试：
-
-```bash
-python -m pytest tests/test_version_consistency.py -q
-```
+版本回归测试由 GitHub Actions 的干净安装与后端检查执行。

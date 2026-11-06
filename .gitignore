@@ -41,6 +41,7 @@ windows_fit_check_*/
 # git add -A 强制加入，会成为 CI 唯一看得见的 output/ 文件并爆 E402。
 output/
 *.png
+!ui/resources/mygpr_logo.png
 !docs/user/images/**/*.png
 *.json
 *.npy

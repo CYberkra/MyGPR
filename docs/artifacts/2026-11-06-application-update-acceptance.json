@@ -1,0 +1,64 @@
+{
+  "date": "2026-11-06",
+  "application_commit": "cc2c00064187a97a1ce9d4e2c8ab941c7af599f8",
+  "version": "0.11.4",
+  "installer_sha256": "e34bc0d55ab436483fcc3c5af1a56c06a1ada9fca8ef66b237f62d684d609bca",
+  "environment": "Disposable GitHub Windows runner; complete frozen applications; synthetic HDF5 and real MyGPR project/result",
+  "workflows": {
+    "full_ci": "https://github.com/CYberkra/MyGPR/actions/runs/42081836974",
+    "full_ci_result": "5 gates passed",
+    "packages": "https://github.com/CYberkra/MyGPR/actions/runs/42081836896",
+    "package_result": "release and seed passed",
+    "updates": "https://github.com/CYberkra/MyGPR/actions/runs/42081826398",
+    "update_result": "Windows 59 passed; Linux 54 passed, 5 Windows-only skipped",
+    "complete_upgrade": "https://github.com/CYberkra/MyGPR/actions/runs/42083189676",
+    "complete_upgrade_result": "6 passed, including 2 complete installer/native updater cases"
+  },
+  "native_update": {
+    "offline": "passed",
+    "current": "passed",
+    "postpone": "passed",
+    "skip-version-persisted": "passed",
+    "cancel": "passed",
+    "interrupted": "passed",
+    "invalid-signature": "passed",
+    "restarted-normal-exit-code": 0,
+    "signed-download-install-relaunch": "passed",
+    "settings-project-result-and-original-preserved": "passed"
+  },
+  "legacy_upgrade": {
+    "install-previous": 0,
+    "install": 0,
+    "upgrade-data-and-settings-preserved": true,
+    "installed-package": 0,
+    "negative-package": 1,
+    "native-smoke": 0,
+    "native-smoke-pages": [
+      "page_deliveryInterface.png",
+      "page_interpretationInterface.png",
+      "page_jobsInterface.png",
+      "page_processingInterface.png",
+      "page_projectInterface.png",
+      "page_settingsInterface.png",
+      "page_spatialInterface.png",
+      "window_overall.png"
+    ],
+    "reinstall": 0,
+    "native-settings-version": "0.11.4",
+    "native-close": 0,
+    "uninstall": 0,
+    "user-data-preserved": true,
+    "hdf5-source-unchanged": true
+  },
+  "previous_installer_sha256": "2dd386865850996cd242c01021e4105af21c8483cc5af9e6516d9e731130a72b",
+  "original_hdf5_sha256_before": "f97c5908406423a3007ed0c25ae3d6cb535af73ed8cbd2844fc8fca2ade3137c",
+  "original_hdf5_sha256_after": "f97c5908406423a3007ed0c25ae3d6cb535af73ed8cbd2844fc8fca2ade3137c",
+  "ed25519_signature": "Prepared and verified locally using the repository-pinned formal public key",
+  "public_feed_published": false,
+  "outside_this_acceptance": [
+    "Power loss recovery",
+    "SmartScreen and Authenticode reputation",
+    "Public production feed delivery",
+    "Offline private-key backup"
+  ]
+}

@@ -24,6 +24,8 @@ def parse_args(argv=None):
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--expected-version', required=True,
                         help='Required installed application, report and About version')
+    parser.add_argument('--previous-installer', type=Path,
+                        help='Install this older release first, then verify an in-place upgrade')
     return parser.parse_args(argv)
 
 
@@ -106,7 +108,25 @@ def main():
     setup = [args.installer.resolve(), '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-',
              '/CURRENTUSER', '/NOICONS', f'/DIR={install}']
     try:
+        if args.previous_installer:
+            run('install-previous', [args.previous_installer.resolve(), *setup[1:]])
+            evidence['previous_installer_sha256'] = file_sha256(args.previous_installer)
+            # Capture the verified published package before adding any QA/user files.
+            legacy_files = [f'{file_sha256(path)}|{path.relative_to(install).as_posix()}'
+                            for path in sorted((install / '_internal').rglob('*')) if path.is_file()]
+            (output / 'legacy-managed-files.txt').write_text('\n'.join(legacy_files) + '\n', encoding='utf-8')
+            upgrade_settings = sandbox / 'config/settings.json'
+            upgrade_settings.parent.mkdir(parents=True, exist_ok=True)
+            upgrade_settings.write_text('{"theme": "深色主题", "recent_projects": [], "update_automatic": false}', encoding='utf-8')
+            retained_upgrade = install / 'user-created-before-upgrade.h5'
+            retained_upgrade.write_bytes(b'original acquisition sentinel')
         run('install', [*setup, f'/LOG={output / "install.log"}'])
+        if args.previous_installer:
+            assert retained_upgrade.read_bytes() == b'original acquisition sentinel'
+            assert json.loads(upgrade_settings.read_text(encoding='utf-8'))['theme'] == '深色主题'
+            assert sentinel.read_bytes() == b'MyGPR QA: uninstall must preserve user data'
+            assert file_sha256(source) == source_before
+            evidence['checks']['upgrade-data-and-settings-preserved'] = True
         executable = install / 'MyGPR.exe'
         assert executable.exists()
         run('installed-package', [executable, '--package-check', output / 'installed-package.json',
@@ -171,6 +191,15 @@ def main():
         evidence['error'] = str(exc)
         raise
     finally:
+        if evidence['status'] != 'passed' and (install / 'unins000.exe').is_file():
+            # This directory and registration were created by this invocation.
+            # Failure must not contaminate the independent native-update case.
+            try:
+                result = subprocess.run([str(install / 'unins000.exe'), '/VERYSILENT',
+                    '/SUPPRESSMSGBOXES', '/NORESTART'], capture_output=True, timeout=120)
+                evidence['checks']['failure-cleanup'] = result.returncode
+            except Exception as cleanup_error:
+                evidence['cleanup_error'] = str(cleanup_error)
         evidence['hdf5_sha256_after'] = file_sha256(source) if source.exists() else None
         (output / 'installer-verification.json').write_text(json.dumps(evidence, indent=2), encoding='utf-8')
 

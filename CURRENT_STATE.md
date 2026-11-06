@@ -1,10 +1,6 @@
 # Current State — Desktop Qt GUI + headless backend
 
-Version: 0.11.4. Source-tree review: 2026-10-16 (includes the maintained project and processing workbench).
-Platform integration documentation review: 2026-10-15.
-Source maintenance round: 2026-10-16; see [changes, verification and limits](docs/artifacts/maintenance_20261016.md).
-Workbench redesign: [current UI contract](docs/superpowers/specs/2026-10-16-workbench-redesign.md).
-Visual polish and native workflow evidence: [verification record](docs/artifacts/ui_visual_polish_20261016.md).
+Version: 0.11.4. The [v0.11.4 release notes](docs/releases/v0.11.4.md) describe the installation and upgrade path. The [specification index](docs/superpowers/specs/README.md) distinguishes current contracts from historical design records.
 
 This package now ships both the Qt6 desktop frontend and the headless backend.
 It is the processing, imaging/interpretation and deliverables component of the
@@ -40,6 +36,8 @@ mygpr
 - Home and Project share one project workspace. Processing uses manually docked
   B-scan tab groups; the active saved result is the next input, with separate
   drafts and versioned direct dependencies for new result branches.
+- The project landing page supports searching and pinning recent projects. Projects, lines, processing artifacts and spatial results have permanent deletion with a confirmed scope. Original imported data and sensor source files are protected, including sources within the project directory.
+- The Windows installer includes signed application updates. Settings → About opens the user guide and release downloads. The graphite and honey-apricot icon depicts a UAV surveying a landslide cross-section and is shared by the desktop application and installer.
 - New projects use per-line HDF5 arrays plus a SQLite catalog; legacy project
   layouts remain a compatibility path. See [Hybrid Store](docs/developer/HYBRID_PROJECT_STORE_V1.md).
 - Project imports accept single or multiple CSV/TXT/NPY/NPZ/H5/HDF5 files and provide an application-side quality center. CDUT acquisition HDF5 retains

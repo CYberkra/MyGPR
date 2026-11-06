@@ -375,6 +375,9 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
         # 后端后就绪场景由 _on_backend_ready 末尾再调一次（幂等）。
         self._restore_last_project()
 
+        from ui.update_binding import UpdateBinding
+        self._updates = UpdateBinding(self)
+
     def _restore_last_project(self) -> None:
         """启动自动恢复上次打开的项目（记忆需求，幂等）。
 

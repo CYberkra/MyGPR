@@ -1,14 +1,13 @@
 # Release process
 
-Reviewed against the source tree on 2026-10-17. Source/wheel installation and a local Windows installer build/verification workflow are present. Release publishing remains a reviewed GitHub operation; there is no independent automated release workflow in CI.
+GitHub Actions builds and verifies the source package, wheel, and Windows installer. The publisher signs the installer locally and publishes the reviewed GitHub Release with the signed update feed. See [Application updates](../releases/application-updates.md).
 
 ## Existing checks and package build
 
-1. Use Python 3.12–3.13 and install the runtime, development and build requirement profiles.
-2. Run `python scripts/run_backend_quality_gate.py` (the backend CI checklist), plus the GUI jobs described in [Testing strategy](TESTING_STRATEGY.md).
-3. Check `python scripts/check_version_consistency.py`; VERSION and pyproject.toml must agree.
-4. In a clean build environment run `python -m pip wheel . --wheel-dir dist`. CI checks package installation and wheel construction.
-5. Preserve checks, dependency versions and source revision with the release. Smoke checks do not replace Windows user acceptance.
+1. Run the backend, GUI, and clean-install jobs in GitHub Actions as described in [Testing strategy](TESTING_STRATEGY.md).
+2. Use `python scripts/check_version_consistency.py` for a local static check of VERSION, package metadata, and documentation.
+3. Run **MyGPR Windows packages**. The workflow uses a clean Python 3.13 environment and preserves the wheel used to build the Windows release package.
+4. Record the tested commit, workflow URLs, dependencies, and package hashes with the release.
 
 ## GitHub source/wheel release
 
@@ -17,14 +16,12 @@ Reviewed against the source tree on 2026-10-17. Source/wheel installation and a 
    add a versioned note under `docs/releases/`.
 2. Submit the version change on a `codex/` branch, review it, and merge its PR after all five CI jobs pass.
    Verify the merged main commit's CI before publishing.
-3. Export the exact merged commit with `git archive`; build the wheel from that clean export in an
-   isolated build environment. Do not package local TODO edits, raw input data, output or wheel caches.
+3. Export the exact merged commit with `git archive` and download the wheel built from that commit by GitHub Actions.
 4. Verify the exported version and the wheel's METADATA; install the wheel in an isolated environment
    and check GUI/report version lookup and package entry points outside the source checkout.
 5. Create `MyGPR_V<version>_source.zip`, the wheel, `SHA256SUMS.txt` and `release-manifest.json`.
    Record the exact source commit, dependency versions and successful CI URL. Verify hashes and ZIP integrity.
-6. Create an annotated `v<version>` tag at that merged commit, push the tag, and create the GitHub Release
-   with the reviewed notes and verified assets. Verify the published tag target and downloaded asset hashes.
+6. Prepare a GitHub Release draft targeting that merged commit. Attach the reviewed notes, source archive, wheel, verified installer, manifests, checksums, and `appcast.xml`. Publish after review, then verify the tag target, downloaded hashes, and stable feed URL.
 
 The first GitHub Release prepared using this process is [v0.10.0](../releases/v0.10.0.md).
 Existing baseline/rollback tags remain historical references, not release version numbers.
@@ -35,6 +32,6 @@ The current recipes are `packaging/windows/MyGPR.spec` (PyInstaller onedir) and 
 
 Build from an immutable source ref via `git archive` in an isolated environment. The recipe includes VERSION, configuration, dynamic algorithms and package metadata, checks native dependency origins, generates license/SBOM inventories, and runs the frozen backend check before producing the installer. `verify_install.py` checks installation, package/HDF5 evidence, seven-page native smoke, reinstall, displayed version, normal GUI close, uninstall and preservation of user files in an owned QA directory.
 
-Preserve the application commit, recipe hashes, environment inventory, checksums and verification evidence alongside the installer, without overwriting the original source/wheel release manifest. A successful build alone is not installation or industrial acceptance. Current installers are unsigned; signing, independent release CI, and broader upgrade/rollback/system coverage remain separate work. The frozen `--package-check` command uses an explicit process exit and does not establish natural interpreter cleanup; the GUI close and smoke checks are separate evidence.
+The publisher uses the repository-pinned public key to sign and verify the installer payload with Ed25519. The GitHub **update_installation** regression verifies the complete legacy installer upgrade and the signed HTTPS update through a real Windows installer, with evidence of normal GUI exit and relaunch. Store the application commit, recipe hashes, verification reports, and checksums with the installer. Record Windows Authenticode status separately in the build manifest.
 
 For a commercial/industrial release, complete the required Windows, CUDA and hardware evidence in `config/industrial_acceptance_matrix.json` before claiming acceptance. Daily source gates and local smoke do not replace that matrix; see [Testing strategy](TESTING_STRATEGY.md).

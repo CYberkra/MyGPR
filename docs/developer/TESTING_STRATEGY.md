@@ -22,6 +22,8 @@
 | `bscan` | 普通缩放/平移色阶跟随、框选、查看时窗、显示增益、海拔显示 |
 | `algorithms` | 图像去噪、手动曲线增益、原生算子目录与文件执行 |
 | `processing` | 处理页、处理成果续接、异步身份、参数表单 |
+| `updates` | 更新配置、Qt 退出握手；Windows 官方 EdDSA 工具和真实 Inno 升级小型夹具 |
+| `update_installation` | 单独调度的完整 Windows 安装器、真实 HTTPS 更新器；需成功的包构建 run 和公开签名 |
 | `all` | 上述固定集合的去重并集 |
 
 工作流采用 Linux / Windows 托管 runner、Python3.13 和离屏Qt。
