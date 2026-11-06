@@ -237,7 +237,7 @@ class _ArchiveCheckCommand:
         try:
             check_project_backup_chain(self._path)
         except EXPECTED_BACKEND_ERRORS as exc:
-            error = friendly_error_message(exc)
+            error = str(getattr(exc, "user_message", "") or friendly_error_message(exc))
         self._controller.archive_checked.emit(self._token, error)
 
 

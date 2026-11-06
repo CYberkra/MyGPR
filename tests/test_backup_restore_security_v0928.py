@@ -98,5 +98,7 @@ def test_incremental_restore_missing_base_fails(tmp_path: Path):
 def test_backup_chain_check_rejects_invalid_zip(tmp_path):
     archive = tmp_path / "invalid.zip"
     archive.write_text("invalid archive", encoding="utf-8")
-    with pytest.raises(FieldProjectOperationError, match="备份包无法读取"):
+    with pytest.raises(FieldProjectOperationError, match="备份包无法读取") as error:
         check_project_backup_chain(archive)
+    assert "请选择其他备份包" in error.value.user_message
+    assert "File is not a zip file" not in error.value.user_message

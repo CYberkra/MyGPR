@@ -527,7 +527,7 @@ def check_project_backup_chain(archive_path: str | Path) -> None:
         with _open_backup_chain(Path(archive_path).expanduser()) as layers:
             _combined_backup_files(layers)
     except zipfile.BadZipFile as exc:
-        raise FieldProjectOperationError(f"备份包无法读取：{exc}") from exc
+        raise FieldProjectOperationError("备份包无法读取，文件可能损坏或不是 MyGPR 备份。请选择其他备份包。") from exc
 
 
 def restore_project_archive(

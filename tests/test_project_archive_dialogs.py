@@ -6,6 +6,7 @@ from PyQt6.QtCore import QObject, pyqtSignal  # noqa: E402
 
 from ui import file_dialogs  # noqa: E402
 from ui.project_archive_dialogs import BackupDialog, RestoreDialog  # noqa: E402
+from ui.controllers.delivery_controller import DeliveryController, _ArchiveCheckCommand  # noqa: E402
 
 
 def test_backup_cleanup_requires_opt_in(qapp, tmp_path, monkeypatch):
@@ -45,3 +46,20 @@ def test_restore_requires_latest_archive_check(qapp, tmp_path, monkeypatch):
     checker.archive_checked.emit(checker.token, '')
     assert dialog._submit.isEnabled()
     assert dialog.options()['archive_path'].endswith('second.zip')
+
+
+def test_invalid_archive_shows_actionable_error_and_blocks_restore(qapp, tmp_path, monkeypatch):
+    archive = tmp_path / 'invalid.zip'
+    archive.write_text('not a zip', encoding='utf-8')
+    monkeypatch.setattr(file_dialogs, 'getOpenFileName', lambda *_args: (str(archive), ''))
+    controller = DeliveryController()
+    monkeypatch.setattr(controller, 'check_backup_archive',
+                        lambda token, path: _ArchiveCheckCommand(controller, token, path).execute())
+    dialog = RestoreDialog(str(tmp_path), controller)
+
+    dialog._select_archive()
+
+    assert not dialog._submit.isEnabled()
+    assert '请选择其他备份包' in dialog._status.text()
+    assert 'MYGPR_ERROR' not in dialog._status.text()
+    assert 'File is not a zip file' not in dialog._status.text()
