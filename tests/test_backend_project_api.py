@@ -38,7 +38,7 @@ def test_batch_import_job_preserves_dielectric(tmp_path):
         backend.shutdown()
 
 
-def test_project_api_create_window_process_audit_backup_restore(tmp_path: Path) -> None:
+def test_project_api_create_window_process_audit_backup_restore(tmp_path: Path, monkeypatch) -> None:
     backend = MyGPRBackend.create_default(max_workers=1)
     try:
         summary = backend.projects.create_project(tmp_path / "project", name="Backend Project")
@@ -105,6 +105,16 @@ def test_project_api_create_window_process_audit_backup_restore(tmp_path: Path) 
         with backend.projects.acquire_lease(summary.project_id):
             with pytest.raises(ProjectBusyError):
                 backend.projects.open_project(restored.project_path, replace_open_identity=True)
+        original_session = backend.projects._sessions[summary.project_id]
+
+        def cannot_close():
+            raise OSError("original project could not close")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(original_session, "close", cannot_close)
+            with pytest.raises(OSError, match="original project could not close"):
+                backend.projects.open_project(restored.project_path, replace_open_identity=True)
+        assert [item.root_path for item in backend.projects.list_open_projects()] == [summary.root_path]
         reopened = backend.projects.open_project(restored.project_path, replace_open_identity=True)
         assert reopened.root_path == restored.project_path
         assert Path(summary.root_path, "project.json").is_file()
