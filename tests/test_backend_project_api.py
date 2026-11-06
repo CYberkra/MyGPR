@@ -117,6 +117,7 @@ def test_project_api_create_window_process_audit_backup_restore(tmp_path: Path, 
         assert [item.root_path for item in backend.projects.list_open_projects()] == [summary.root_path]
         reopened = backend.projects.open_project(restored.project_path, replace_open_identity=True)
         assert reopened.root_path == restored.project_path
+        assert not reopened.read_only
         assert Path(summary.root_path, "project.json").is_file()
         assert reopened.project_id == summary.project_id
         assert backend.projects.get_dataset_info(reopened.project_id, "L01").shape == (72, 48)
