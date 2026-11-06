@@ -358,6 +358,14 @@ def build_import_preflight(
                     format_name=display_name, support='direct-failed', can_import=False,
                     message='HDF5 文件不完整或已损坏，无法完成预检。请确认采集已结束，并重新复制完整文件。',
                 )
+            if (suffix in ('.h5', '.hdf5') and isinstance(exc, ValueError)
+                    and 'committed_trace_count does not match traces' in str(exc)):
+                _LOGGER.debug('HDF5 预检发现采集提交计数不一致：%s', src, exc_info=True)
+                return ImportPreflightResult(
+                    path=str(src), exists=True, is_file=True, extension=suffix,
+                    format_name=display_name, support='direct-failed', can_import=False,
+                    message='已提交道数与文件数据不一致，暂无法导入。请确认采集已结束，或先在采集端恢复数据。',
+                )
             return ImportPreflightResult(
                 path=str(src), exists=True, is_file=True, extension=suffix,
                 format_name=display_name, support="direct-failed", can_import=False,

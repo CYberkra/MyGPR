@@ -84,7 +84,11 @@ def test_partial_commit_is_not_accepted_as_a_finished_line(tmp_path):
     write_stream(path, component='real')
     with h5py.File(path, 'r+') as handle:
         handle.attrs['committed_trace_count'] = 4
-    assert not build_import_preflight(path).can_import
+    preview = build_import_preflight(path)
+    assert not preview.can_import
+    assert '已提交道数与文件数据不一致' in preview.message
+    assert '采集端恢复数据' in preview.message
+    assert 'committed_trace_count' not in preview.message
     with pytest.raises(ValueError, match='committed_trace_count'):
         load_gpr_dataset(path)
 
