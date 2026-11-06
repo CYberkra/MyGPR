@@ -30,20 +30,12 @@ def test_native_contrast_theme_captures_workbench_and_backup_dialog(tmp_path):
     user32 = ctypes.windll.user32
     user32.SystemParametersInfoW.argtypes = [wintypes.UINT, wintypes.UINT, ctypes.c_void_p, wintypes.UINT]
     user32.SystemParametersInfoW.restype = wintypes.BOOL
-    free = ctypes.windll.kernel32.LocalFree
-    free.argtypes = [ctypes.c_void_p]
-    free.restype = ctypes.c_void_p
-
     def read_contrast():
         data = HighContrast(ctypes.sizeof(HighContrast), 0, None)
         if not user32.SystemParametersInfoW(0x0042, data.cbSize, ctypes.byref(data), 0):
             raise ctypes.WinError()
-        try:
-            scheme = ctypes.wstring_at(data.lpszDefaultScheme) if data.lpszDefaultScheme else None
-            return int(data.dwFlags), scheme
-        finally:
-            if data.lpszDefaultScheme:
-                free(data.lpszDefaultScheme)
+        scheme = ctypes.wstring_at(data.lpszDefaultScheme) if data.lpszDefaultScheme else None
+        return int(data.dwFlags), scheme
 
     def write_contrast(flags, scheme):
         name = ctypes.create_unicode_buffer(scheme) if scheme else None
