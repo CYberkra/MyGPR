@@ -30,8 +30,12 @@ def test_startup_empty_and_ledger_are_mutually_exclusive(page):
     assert not page._ledger_widget.isVisible()
     assert not page.header_import_btn.isVisible()
     assert page.empty_import_btn.isVisible()
+    assert not page.line_search.isEnabled()
+    assert not page.quality_btn.isEnabled()
     page.set_lines([SimpleNamespace(line_id='L01', name='Line 1')])
     assert page.workspace_state() == 'ledger'
+    assert page.line_search.isEnabled()
+    assert page.quality_btn.isEnabled()
     assert page._ledger_widget.isVisible()
     assert page.header_import_btn.isVisible()
     assert not page.empty_import_btn.isVisible()

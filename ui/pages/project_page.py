@@ -734,7 +734,8 @@ class ProjectPage(ProjectLineContextMixin, QWidget):
         self.line_search.setPlaceholderText(
             f'搜索 {len(self._lines)} 条测线' if self._lines else '搜索测线')
         enabled = self._has_project() and not self._busy
-        self.quality_btn.setEnabled(self._has_project())
+        self.line_search.setEnabled(bool(self._lines))
+        self.quality_btn.setEnabled(self._has_project() and bool(self._lines))
         for btn in (self.close_btn, self.preflight_btn):
             btn.setEnabled(enabled)
         writable = self._can_write()
