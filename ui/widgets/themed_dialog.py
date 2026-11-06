@@ -2,7 +2,7 @@
 import ctypes
 import sys
 
-from PyQt6.QtGui import QGuiApplication
+from PyQt6.QtCore import QEvent
 from PyQt6.QtWidgets import QDialog
 from qfluentwidgets import isDarkTheme, qconfig
 
@@ -41,8 +41,6 @@ class ThemedDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         qconfig.themeChangedFinished.connect(self._update_caption)
-        QGuiApplication.styleHints().accessibility().contrastPreferenceChanged.connect(
-            self._update_caption)
 
     def _update_caption(self, *_args):
         if self.isVisible():
@@ -51,3 +49,8 @@ class ThemedDialog(QDialog):
     def showEvent(self, event):
         super().showEvent(event)
         _apply_caption_theme(self)
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() in (QEvent.Type.PaletteChange, QEvent.Type.ApplicationPaletteChange):
+            self._update_caption()

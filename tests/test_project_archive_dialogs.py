@@ -2,8 +2,7 @@
 import pytest
 
 pytest.importorskip('PyQt6')
-from PyQt6.QtCore import QObject, Qt, pyqtSignal  # noqa: E402
-from PyQt6.QtGui import QGuiApplication  # noqa: E402
+from PyQt6.QtCore import QEvent, QObject, pyqtSignal  # noqa: E402
 
 from ui import file_dialogs  # noqa: E402
 from ui.project_archive_dialogs import BackupDialog, RestoreDialog  # noqa: E402
@@ -18,13 +17,11 @@ def test_visible_archive_caption_refreshes_on_system_contrast_change(qapp, monke
     try:
         dialog.show()
         calls.clear()
-        QGuiApplication.styleHints().accessibility().contrastPreferenceChanged.emit(
-            Qt.ContrastPreference.HighContrast)
+        dialog.changeEvent(QEvent(QEvent.Type.PaletteChange))
         assert calls == [dialog]
         dialog.hide()
         calls.clear()
-        QGuiApplication.styleHints().accessibility().contrastPreferenceChanged.emit(
-            Qt.ContrastPreference.NoPreference)
+        dialog.changeEvent(QEvent(QEvent.Type.PaletteChange))
         assert calls == []
     finally:
         dialog.close()

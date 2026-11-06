@@ -80,10 +80,13 @@ def test_first_gl_view_does_not_hide_or_recreate_main_window(tmp_path):
             check_gl_error('before pyqtgraph initializeGL')
             original_initialize_gl(widget)
             check_gl_error('after pyqtgraph initializeGL')
+            print(f'OpenGL diagnostic: initialized vendor={GL.glGetString(GL.GL_VENDOR)!r} '
+                  f'renderer={GL.glGetString(GL.GL_RENDERER)!r}', file=sys.stderr, flush=True)
         gl.GLViewWidget.initializeGL = check_initialize_gl
         original_paint_gl = gl.GLViewWidget.paintGL
         def check_error_before_paint(widget):
-            check_gl_error('before pyqtgraph paintGL')
+            widget._diagnostic_frame = getattr(widget, '_diagnostic_frame', 0) + 1
+            check_gl_error(f'before pyqtgraph paintGL frame={widget._diagnostic_frame}')
             return original_paint_gl(widget)
         gl.GLViewWidget.paintGL = check_error_before_paint
         view = window.pages["spatialInterface"]._3d_view
