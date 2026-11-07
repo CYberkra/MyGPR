@@ -84,6 +84,30 @@ def compute_display_envelope(matrix):
     return display_envelope(matrix)
 
 
+def prepare_amplitude_sources(tracks, source_ids, component):
+    """Project selected tracks on the GUI thread and retain raw trace indices."""
+    import numpy as np
+    from mygpr.application.spatial.amplitude import AmplitudeSource, LineObservations
+    from mygpr.application.spatial.amplitude_projection import project_observations
+
+    sources, positions = [], []
+    for track in tracks:
+        line_id = str(track.line_id)
+        source = AmplitudeSource(line_id, str(source_ids.get(line_id) or ''), str(component or ''))
+        points = tuple(track.points)
+        if not points:
+            continue
+        sources.append(source)
+        positions.append(LineObservations(
+            source, str(track.coordinate_system),
+            np.array([p.trace_index for p in points], dtype=np.int64),
+            np.array([p.x for p in points], dtype=np.float64),
+            np.array([p.y for p in points], dtype=np.float64), np.zeros(len(points)),
+        ))
+    projected, _crs = project_observations(positions)
+    return tuple(sources), projected
+
+
 def manual_gain_nodes(value=None):
     """Validated independent node dictionaries for the UI curve editor."""
     from mygpr.domain.processing.manual_gain import normalize_gain_nodes

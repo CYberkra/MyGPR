@@ -1,13 +1,13 @@
 """Read full-resolution trace blocks and associate them with measured positions."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Sequence
 
 import numpy as np
 
 from mygpr.application.jobs.context import ExecutionContext
-from mygpr.domain.spatial.amplitude_slice import window_attribute
+from mygpr.domain.spatial.amplitude_slice import AmplitudeGrid, grid_line_values, window_attribute
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +25,16 @@ class LineObservations:
     x: np.ndarray
     y: np.ndarray
     values: np.ndarray
+
+
+@dataclass(frozen=True, slots=True)
+class AmplitudeResult:
+    grid: AmplitudeGrid
+    sources: tuple[AmplitudeSource, ...]
+    coordinate_system: str
+    start_ns: float
+    end_ns: float
+    attribute: str
 
 
 def _trace_ids(metadata, expected: int) -> np.ndarray:
@@ -48,6 +58,7 @@ def collect_observations(
     *,
     attribute: str = 'rms',
     context: ExecutionContext | None = None,
+    positions: Sequence[LineObservations] | None = None,
 ) -> tuple[LineObservations, ...]:
     """Calculate per-trace attributes; coordinates remain in each track CRS.
 
@@ -58,6 +69,7 @@ def collect_observations(
         raise ValueError('请选择测线')
     ctx = context or ExecutionContext.null()
     tracks = {str(track.line_id): track for track in projects.load_spatial_tracks(project_id)}
+    projected = {item.source.line_id: item for item in (positions or ())}
     if len({source.line_id for source in sources}) != len(sources):
         raise ValueError('每条测线只能选择一个输入成果')
     observations = []
@@ -82,9 +94,25 @@ def collect_observations(
         nested = nested if hasattr(nested, 'get') else {}
         stored = str(metadata.get('store_component') or nested.get('store_component') or '').lower()
         aliases = {'magnitude': 'mag'}
+        if not component:
+            component = stored
+        if component not in ('real', 'mag', 'magnitude'):
+            raise ValueError(f'{source.line_id} 的输入分量未确认')
         if stored and aliases.get(stored, stored) != aliases.get(component, component):
             raise ValueError(f'{source.line_id} 的输入分量与存储记录不一致')
-        positions = {int(point.trace_index): (float(point.x), float(point.y)) for point in track.points}
+        source = replace(source, component=component)
+        projected_line = projected.get(source.line_id)
+        if positions is not None and projected_line is None:
+            raise ValueError(f'{source.line_id} 缺少已投影的轨迹')
+        if projected_line is not None:
+            if not (len(projected_line.trace_indices) == len(projected_line.x) == len(projected_line.y)):
+                raise ValueError(f'{source.line_id} 的投影轨迹长度不匹配')
+            position_map = {int(i): (float(x), float(y)) for i, x, y in
+                            zip(projected_line.trace_indices, projected_line.x, projected_line.y)}
+            coordinate_system = projected_line.coordinate_system
+        else:
+            position_map = {int(point.trace_index): (float(point.x), float(point.y)) for point in track.points}
+            coordinate_system = str(track.coordinate_system)
         if artifact:
             original = projects.get_dataset_info(project_id, source.line_id)
             original_ids = _trace_ids(projects.read_trace_metadata(project_id, source.line_id), original.shape[1])
@@ -119,15 +147,38 @@ def collect_observations(
                                           component=component, attribute=attribute)
             for local, value in enumerate(calculated):
                 trace_index = start + local
-                point = positions.get(int(indices[trace_index]))
+                point = position_map.get(int(indices[trace_index]))
                 if point is None or not np.isfinite(point).all():
                     continue
                 selected_indices.append(trace_index)
                 xs.append(point[0])
                 ys.append(point[1])
                 values.append(value)
-        observations.append(LineObservations(source, str(track.coordinate_system),
+        observations.append(LineObservations(source, coordinate_system,
             np.asarray(selected_indices, dtype=np.int64), np.asarray(xs, dtype=np.float64),
             np.asarray(ys, dtype=np.float64), np.asarray(values, dtype=np.float64)))
         ctx.report_progress(source_index + 1, len(sources), f'已处理 {source.line_id}')
     return tuple(observations)
+
+
+def build_amplitude_grid(
+    projects, project_id: str, sources: Sequence[AmplitudeSource],
+    positions: Sequence[LineObservations], start_ns: float, end_ns: float,
+    *, cell_size_m: float, attribute: str = 'rms', context: ExecutionContext | None = None,
+) -> AmplitudeResult:
+    """Create a bounded preview grid from positions projected by the caller."""
+    crs = {str(item.coordinate_system) for item in positions}
+    if len(crs) != 1 or not next(iter(crs)):
+        raise ValueError('参与切片的测线必须使用同一米制坐标系')
+    lines = collect_observations(projects, project_id, sources, start_ns, end_ns,
+                                 attribute=attribute, context=context, positions=positions)
+    if context is not None:
+        context.raise_if_cancelled()
+    grid = grid_line_values(
+        np.concatenate([line.x for line in lines]), np.concatenate([line.y for line in lines]),
+        np.concatenate([line.values for line in lines]),
+        np.concatenate([np.full(len(line.values), line.source.line_id) for line in lines]),
+        cell_size_m=cell_size_m, max_cells=500_000,
+    )
+    return AmplitudeResult(grid, tuple(line.source for line in lines), next(iter(crs)),
+                           float(start_ns), float(end_ns), str(attribute))

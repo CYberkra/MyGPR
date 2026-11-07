@@ -56,6 +56,7 @@ PUBLIC_METHODS = (
     "build_georeference_3d",
     "submit_velocity_analysis",
     "submit_line_grouping",
+    "submit_amplitude_slice",
     "submit_grid_layer",
     "interface_depth_preview",
     "export_artifact_segy",

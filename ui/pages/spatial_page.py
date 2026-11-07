@@ -47,6 +47,7 @@ from ui.widgets.local_dem import load_xyz_grid
 from ui.widgets.map_tiles import BASEMAP_LAYERS, DEFAULT_TILE_SOURCE
 from ui.widgets.map_view import MapView
 from ui.widgets.depth_slice_view import DepthSliceView
+from ui.widgets.amplitude_slice_panel import AmplitudeSlicePanel
 from ui.widgets.segment_tabs import SlimSegment
 from ui.widgets.trajectory_3d_view import Trajectory3DView
 
@@ -56,6 +57,7 @@ _SEG_MAP = 'planMap'
 _SEG_PROFILE = 'elevationProfile'
 _SEG_3D = 'trajectory3d'
 _SEG_DEPTH = 'depthSlice'
+_SEG_AMPLITUDE = 'amplitudeSlice'
 
 # 测线颜色循环（matplotlib tab10）
 _TRACK_COLORS = constants.CHART_TRACK_COLORS
@@ -414,6 +416,8 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
             _SEG_3D, '三维视图', onClick=lambda: self._switch_view(_SEG_3D))
         self._view_segment.addItem(
             _SEG_DEPTH, '界面深度网格', onClick=lambda: self._switch_view(_SEG_DEPTH))
+        self._view_segment.addItem(
+            _SEG_AMPLITUDE, '振幅切片', onClick=lambda: self._switch_view(_SEG_AMPLITUDE))
         self._view_segment.setCurrentItem(_SEG_MAP)
         view_card, view_layout = make_segment_card(
             '', self._view_segment, parent=self)
@@ -427,10 +431,13 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
         self._3d_view.setMinimumHeight(constants.PREVIEW_MIN_HEIGHT)
         self._depth_view = DepthSliceView(view_card)
         self._depth_view.setMinimumHeight(constants.PREVIEW_MIN_HEIGHT)
+        self._amplitude_view = AmplitudeSlicePanel(view_card)
+        self._amplitude_view.setMinimumHeight(constants.PREVIEW_MIN_HEIGHT)
         self._view_stack.addWidget(self._map_view)
         self._view_stack.addWidget(self._profile_view)
         self._view_stack.addWidget(self._3d_view)
         self._view_stack.addWidget(self._depth_view)
+        self._view_stack.addWidget(self._amplitude_view)
         view_layout.addWidget(self._view_stack, 1)
 
         # 深度切片控制行：深度滑条（0.01m 步进，整数 ×100 映射）+ 数值 + 存为图层
@@ -680,6 +687,7 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
         self._profile_view.apply_theme(dark)
         self._3d_view.apply_theme(dark)
         self._depth_view.apply_theme(dark)
+        self._amplitude_view.apply_theme(dark)
         # 主题切换会重建视图内部条目，指纹作废：下次刷新必须重新灌数据
         self._views_applied.clear()
         # 空态 hint 颜色由 HintLabel.apply_theme 随主题自刷，无需手工重设
@@ -701,7 +709,8 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
 
     def _switch_view(self, route_key: str) -> None:
         widget = {_SEG_MAP: self._map_view, _SEG_PROFILE: self._profile_view,
-                  _SEG_3D: self._3d_view, _SEG_DEPTH: self._depth_view}.get(
+                  _SEG_3D: self._3d_view, _SEG_DEPTH: self._depth_view,
+                  _SEG_AMPLITUDE: self._amplitude_view}.get(
             route_key, self._map_view)
         self._view_stack.setCurrentWidget(widget)
         self._sync_view_affordances(route_key)
@@ -775,7 +784,8 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
     def _views(self) -> dict:
         """分段键 → 视图实例。"""
         return {_SEG_MAP: self._map_view, _SEG_PROFILE: self._profile_view,
-                _SEG_3D: self._3d_view, _SEG_DEPTH: self._depth_view}
+                _SEG_3D: self._3d_view, _SEG_DEPTH: self._depth_view,
+                _SEG_AMPLITUDE: self._amplitude_view}
 
     def _active_view_key(self) -> str:
         """当前可见视图的分段键；整页不可见时返回空串（全部延后）。"""

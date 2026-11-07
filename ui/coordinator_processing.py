@@ -145,6 +145,25 @@ class ProcessingChain:
         # ---------------- 项目控制器：深度切片回包（代数门卫在本链）
         pc = co.project_controller
         if pc is not None:
+            amplitude = spatial._amplitude_view
+            amplitude.preview_requested.connect(pc.request_amplitude_preview)
+            amplitude.cancel_requested.connect(pc.cancel_amplitude_preview)
+            pc.amplitude_preview_ready.connect(amplitude.set_result)
+            pc.amplitude_preview_failed.connect(amplitude.set_failure)
+            amplitude.artifacts_requested.connect(
+                lambda line_id: pc.load_comparison_artifacts(str(co.current_project_id() or ''), line_id))
+            pc.comparison_artifacts_ready.connect(
+                lambda project_id, line_id, artifacts: amplitude.set_artifacts(line_id, artifacts)
+                if project_id == str(co.current_project_id() or '') else None)
+            amplitude.bscan_requested.connect(self._on_amplitude_bscan_requested)
+            pc.comparison_preview_ready.connect(
+                lambda project_id, line_id, request_id, bundle, error:
+                amplitude.deliver_bscan(line_id, '', request_id, bundle, error)
+                if project_id == str(co.current_project_id() or '') else None)
+            pc.comparison_artifact_preview_ready.connect(
+                lambda project_id, line_id, artifact_id, request_id, bundle, error:
+                amplitude.deliver_bscan(line_id, artifact_id, request_id, bundle, error)
+                if project_id == str(co.current_project_id() or '') else None)
             if hasattr(processing, 'comparison_preview_requested') and hasattr(pc, 'preview_comparison_line'):
                 processing.comparison_preview_requested.connect(pc.preview_comparison_line)
                 pc.comparison_preview_ready.connect(processing.set_comparison_preview)
@@ -169,6 +188,16 @@ class ProcessingChain:
             pc.depth_save_failed.connect(self.on_depth_save_failed)
 
     # ============================================================ 处理域
+    def _on_amplitude_bscan_requested(self, line_id, artifact_id, request_id):
+        pc = self._co.project_controller
+        project_id = str(self._co.current_project_id() or '')
+        if pc is None or not project_id:
+            return
+        if artifact_id:
+            pc.preview_comparison_artifact(project_id, line_id, artifact_id, request_id)
+        else:
+            pc.preview_comparison_line(project_id, line_id, request_id)
+
     def on_methods_loaded(self, methods: list) -> None:
         """方法库 → 处理页 MethodBrowser。"""
         self._co.page('processingInterface').set_methods(methods)

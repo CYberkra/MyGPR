@@ -1,0 +1,42 @@
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+
+pytest.importorskip('PyQt6')
+
+from mygpr.application.spatial.amplitude import AmplitudeResult, AmplitudeSource, LineObservations
+from mygpr.domain.spatial.amplitude_slice import grid_line_values
+from mygpr.domain.spatial.models import SpatialTrack, SpatialTrackPoint
+from ui.widgets.amplitude_slice_panel import AmplitudeSlicePanel
+
+
+def test_panel_requests_selected_sources_and_disables_during_job(qapp):
+    panel = AmplitudeSlicePanel()
+    requests = []
+    panel.preview_requested.connect(lambda *args: requests.append(args))
+    panel.set_tracks([SpatialTrack('L1', '测线 1', (SpatialTrackPoint(0, 1., 2.),), 'EPSG:32648')], {})
+    panel.set_artifacts('L1', [SimpleNamespace(artifact_id='A', name='处理结果')])
+    panel._source.setCurrentIndex(1)
+    panel._request()
+    assert len(requests) == 1
+    assert requests[0][1] == {'L1': 'A'}
+    assert requests[0][3:5] == (0., 10.)
+    assert not panel._run.isEnabled() and panel._cancel.isEnabled()
+    panel.set_failure('时间轴未知')
+    assert panel._run.isEnabled() and '时间轴' in panel._status.text()
+    panel.close()
+
+
+def test_panel_displays_coverage_and_preserves_fixed_color_levels(qapp):
+    panel = AmplitudeSlicePanel()
+    grid = grid_line_values([0.1, 2.1], [0.1, 0.1], [1., 3.], ['L1', 'L1'], cell_size_m=1.)
+    source = AmplitudeSource('L1', component='mag')
+    positions = (LineObservations(source, 'EPSG:32648', np.array([0, 2]),
+                 np.array([.1, 2.1]), np.array([.1, .1]), np.array([0., 0.])),)
+    panel.set_result(AmplitudeResult(grid, (source,), 'EPSG:32648', 0., 10., 'rms'), positions)
+    assert panel._map._matrix.shape == (1, 3)
+    assert np.isnan(panel._map._matrix[0, 1])
+    assert panel._levels == (1., 3.)
+    assert '0–10 ns' in panel._status.text()
+    panel.close()

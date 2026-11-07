@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from mygpr.application.spatial.amplitude import AmplitudeSource, collect_observations
+from mygpr.application.spatial.amplitude import AmplitudeSource, LineObservations, collect_observations, build_amplitude_grid
 from mygpr.domain.spatial.models import SpatialTrack, SpatialTrackPoint
 
 
@@ -73,3 +73,28 @@ def test_nested_acquisition_metadata_is_enforced():
                                 'metadata': {'store_component': 'fdata'}})
     with pytest.raises(ValueError, match='分量'):
         collect_observations(projects, 'p', [AmplitudeSource('L1', component='real')], 0., 4.)
+
+
+def test_preprojected_positions_remain_aligned_to_original_trace_numbers():
+    source = AmplitudeSource('L1', component='mag')
+    coords = LineObservations(source, 'EPSG:32648', np.array([0, 2]),
+                              np.array([100., 300.]), np.array([200., 400.]), np.zeros(2))
+    result = collect_observations(Projects(), 'p', [source], 0., 4., positions=[coords])
+    np.testing.assert_array_equal(result[0].x, [100., 300.])
+    assert result[0].coordinate_system == 'EPSG:32648'
+
+
+def test_component_can_be_selected_from_declared_acquisition_metadata():
+    result = collect_observations(Projects(), 'p', [AmplitudeSource('L1')], 0., 4.)
+    assert result[0].source.component == 'mag'
+
+
+def test_grid_uses_projected_positions_and_records_actual_source():
+    source = AmplitudeSource('L1')
+    coords = LineObservations(source, 'EPSG:32648', np.array([0, 2]),
+                              np.array([0.1, 2.1]), np.array([0.1, 0.1]), np.zeros(2))
+    result = build_amplitude_grid(Projects(), 'p', [source], [coords], 0., 4., cell_size_m=1.)
+    assert result.coordinate_system == 'EPSG:32648'
+    assert result.sources[0].component == 'mag'
+    np.testing.assert_allclose(result.grid.values[0, [0, 2]], [1., 100.])
+    assert np.isnan(result.grid.values[0, 1])

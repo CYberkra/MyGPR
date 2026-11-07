@@ -82,7 +82,8 @@ def window_attribute(
     return result
 
 
-def grid_line_values(x_m, y_m, values, line_ids, *, cell_size_m: float) -> AmplitudeGrid:
+def grid_line_values(x_m, y_m, values, line_ids, *, cell_size_m: float,
+                     max_cells: int = 4_000_000) -> AmplitudeGrid:
     """Bin observations without interpolation, giving each line equal weight.
 
     Origins are anchored to integer cell boundaries for repeatable binning.
@@ -102,7 +103,7 @@ def grid_line_values(x_m, y_m, values, line_ids, *, cell_size_m: float) -> Ampli
     xi, yi = np.floor(x / cell).astype(np.int64), np.floor(y / cell).astype(np.int64)
     xmin, xmax, ymin, ymax = int(xi.min()), int(xi.max()), int(yi.min()), int(yi.max())
     ncols, nrows = xmax - xmin + 1, ymax - ymin + 1
-    if ncols * nrows > 4_000_000:
+    if ncols * nrows > max_cells:
         raise ValueError('网格过大，请增大网格尺寸')
     # Extent uses all located traces, not just amplitudes available in this
     # particular time window; switching windows must not move the grid.

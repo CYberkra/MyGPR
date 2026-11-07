@@ -20,6 +20,7 @@ from ui.desktop_backend_facade import (
     trace_quality_preview_mask,
     trace_local_change_preview_mask,
     time_to_depth_axis,
+    prepare_amplitude_sources,
 )
 from ui.controllers.backend_controller import friendly_error_message, run_command
 from ui.controllers.project_identity_controller import ProjectIdentityController
@@ -99,6 +100,8 @@ class ProjectController(QObject):
     depth_preview_ready = pyqtSignal(object, list, float, int)  # payload, line_ids, cell_size_m, generation
     depth_layer_saved = pyqtSignal(str, list, float)       # job_id, line_ids, cell_size_m
     depth_save_failed = pyqtSignal(str)                    # message
+    amplitude_preview_ready = pyqtSignal(object, object)   # result, projected positions
+    amplitude_preview_failed = pyqtSignal(str)
     artifact_descendants_ready = pyqtSignal(str, list, dict)  # line_id, 后代闭包, {artifact_id: 名称}
     line_source_path_ready = pyqtSignal(str, object)          # line_id, 源文件路径|None
     line_sensor_summary_ready = pyqtSignal(str, str)         # line_id, compact availability text
@@ -130,6 +133,8 @@ class ProjectController(QObject):
         self._artifact_request_versions: dict[tuple[str, str, str], int] = {}
         # 深度切片预览代数：与数据/成果预览独立计数（不同预览域互不失效）。
         self._depth_preview_generation = 0
+        self._amplitude_generation = 0
+        self._amplitude_job_id = ''
         # 当前预览中的成果 id（删除该成果时需清空各页预览）
         self._current_preview_artifact_id = ''
 
@@ -180,6 +185,7 @@ class ProjectController(QObject):
         if self._busy:
             self.log_message.emit("操作进行中，请稍后…")
             return
+        self.cancel_amplitude_preview()
         self._project_context_generation += 1
         # 新建项目同样切换项目上下文，使旧项目在途预览回包过期。
         self._depth_preview_generation += 1
@@ -195,6 +201,7 @@ class ProjectController(QObject):
         if self._busy:
             self.log_message.emit("操作进行中，请稍后…")
             return
+        self.cancel_amplitude_preview()
         self._project_context_generation += 1
         # 打开/切换项目前使旧项目在途预览回包过期（A→B 直切时 A 的
         # 回包代数与新项目相同，不推进则门卫会放行旧 payload）。
@@ -214,6 +221,7 @@ class ProjectController(QObject):
         if self._busy:
             self.log_message.emit("操作进行中，请稍后…")
             return
+        self.cancel_amplitude_preview()
         self._project_context_generation += 1
         # 关闭前使在途预览回包过期，防止旧项目 payload 渲染进后续视图。
         self._depth_preview_generation += 1
@@ -727,6 +735,53 @@ class ProjectController(QObject):
                                  self._depth_preview_generation),
             name="mygpr-depth-preview",
         )
+
+    def cancel_amplitude_preview(self) -> None:
+        self._amplitude_generation += 1
+        job_id, self._amplitude_job_id = self._amplitude_job_id, ''
+        bridge = self._job_bridge()
+        if job_id and bridge is not None:
+            bridge.cancel(job_id)
+
+    def request_amplitude_preview(self, tracks, source_ids, component, start_ns,
+                                  end_ns, cell_size_m, attribute) -> None:
+        backend, bridge, project_id = self._backend(), self._job_bridge(), self._project_id_or_warn()
+        if backend is None or bridge is None or project_id is None:
+            return
+        self.cancel_amplitude_preview()
+        generation = self._amplitude_generation
+        project_generation = self._project_context_generation
+        try:
+            # PROJ initialization stays in this GUI-thread slot, as in the
+            # existing 3-D terrain pipeline; waveform reading runs in the job.
+            sources, positions = prepare_amplitude_sources(tracks, source_ids, component)
+            job_id = backend.submit_amplitude_slice(
+                project_id, sources, positions, float(start_ns), float(end_ns),
+                cell_size_m=float(cell_size_m), attribute=str(attribute))
+        except Exception as exc:  # noqa: BLE001 - user input / backend admission
+            self.amplitude_preview_failed.emit(friendly_error_message(exc))
+            return
+        self._amplitude_job_id = job_id
+
+        def completed(done_id, success, message, result):
+            if done_id != job_id:
+                return
+            try:
+                bridge.job_completed.disconnect(completed)
+            except TypeError:
+                pass
+            if (generation != self._amplitude_generation or
+                    project_generation != self._project_context_generation or
+                    self.current_project_id != project_id):
+                return
+            self._amplitude_job_id = ''
+            if success and result is not None:
+                self.amplitude_preview_ready.emit(result, positions)
+            else:
+                self.amplitude_preview_failed.emit(message or '振幅切片结果不可用')
+
+        bridge.job_completed.connect(completed)
+        bridge.watch(job_id, title='振幅切片')
 
     def submit_depth_layer(self, line_ids: list[str], cell_size_m: float) -> str | None:
         """提交网格化界面深度图层 job；bridge.watch 后经 depth_layer_saved 回 UI。"""

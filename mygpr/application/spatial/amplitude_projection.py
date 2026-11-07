@@ -18,6 +18,15 @@ def _metric_projected(crs: CRS) -> bool:
         abs(float(axis.unit_conversion_factor) - 1.) < 1e-12 for axis in crs.axis_info[:2]))
 
 
+def validate_metric_crs(value: str) -> None:
+    try:
+        crs = CRS.from_user_input(value)
+    except Exception as exc:
+        raise ValueError('坐标系无效') from exc
+    if not _metric_projected(crs):
+        raise ValueError('目标坐标系必须是米制投影坐标系')
+
+
 def project_observations(
     observations: list[LineObservations] | tuple[LineObservations, ...],
     *, target_crs: str = '',
