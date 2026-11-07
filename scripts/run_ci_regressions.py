@@ -10,6 +10,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 SUITES = {
     "cscan": (
+        "tests/test_uav_t600_model.py",
         "tests/test_amplitude_slice_domain.py",
         "tests/test_amplitude_slice_service.py",
         "tests/test_amplitude_slice_projection.py",

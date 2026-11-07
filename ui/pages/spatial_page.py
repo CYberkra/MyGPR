@@ -365,6 +365,7 @@ class SpatialPage(SpatialAmplitudeMixin, SpatialContextMenuMixin, ViewSyncMixin,
         self._3d_imagery_switch.setChecked(True)
         imagery_row.addWidget(self._3d_imagery_switch, 1)
         view3d_layout.addLayout(imagery_row)
+        self._build_uav_control(view3d_card, view3d_layout)
         terrain_row = QHBoxLayout()
         terrain_row.setSpacing(constants.CARD_SPACING)
         terrain_label = CaptionLabel('地形来源:', view3d_card)

@@ -1,7 +1,7 @@
 """Saved amplitude slices and 3-D time-window navigation for SpatialPage."""
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QHBoxLayout, QWidget
-from qfluentwidgets import CaptionLabel, PushButton, Slider
+from qfluentwidgets import CaptionLabel, PushButton, Slider, SwitchButton
 
 from ui.desktop_backend_facade import prepare_amplitude_sources
 from ui.widgets.curtain_bscan_panel import CurtainBScanPanel
@@ -12,7 +12,21 @@ _SEG_DEPTH = 'depthSlice'
 
 
 class SpatialAmplitudeMixin:
+    def _build_uav_control(self, parent, layout):
+        row = QHBoxLayout()
+        label = CaptionLabel('无人机示意:', parent)
+        label.setMinimumWidth(60)
+        tooltip = 'T600 示意模型放在首条测线起点，按轨迹方向摆放并放大；不表示飞机实际位置或姿态。'
+        label.setToolTip(tooltip)
+        self._3d_uav_switch = SwitchButton(parent)
+        self._3d_uav_switch.setToolTip(tooltip)
+        self._3d_uav_switch.setChecked(True)
+        row.addWidget(label)
+        row.addWidget(self._3d_uav_switch, 1)
+        layout.addLayout(row)
+
     def _connect_curtain_controls(self):
+        self._3d_uav_switch.checkedChanged.connect(self._3d_view.set_uav_visible)
         self._3d_view.curtain_notice.connect(self._on_curtain_notice)
         self._3d_view.curtain_selected.connect(self._amplitude_view.select_curtain)
         self._amplitude_view.curtains_ready.connect(self._set_curtains)

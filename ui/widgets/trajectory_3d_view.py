@@ -43,6 +43,7 @@ from ui.widgets.context_menus import add_action, make_menu
 from ui.widgets.empty_state import EmptyStateOverlay
 from ui.widgets.local_dem import dem_covers_bbox
 from ui.widgets.trajectory_3d_curtains import TrajectoryCurtainsMixin
+from ui.widgets.uav_scene import UAVSceneMixin
 from ui.widgets.map_tiles import (TILE_SOURCE_MAX_ZOOM, WORLD_SIZE_M,
                                   extract_epsg, lonlat_to_tile, tile_url,
                                   unique_tmp_path, wgs84_to_gcj02,
@@ -354,7 +355,7 @@ class _TerrainWorker(QRunnable):
             self._signals.finished.emit(self._generation, payload)
 
 
-class Trajectory3DView(TrajectoryCurtainsMixin, QWidget):
+class Trajectory3DView(TrajectoryCurtainsMixin, UAVSceneMixin, QWidget):
     """三维轨迹视图容器（内部按需创建 GLViewWidget 或降级 QLabel）。"""
 
     # 本地 DEM 覆盖提示：'' = 正常/已清除；非空 = 警告文本（GUI 线程发出）
@@ -393,6 +394,7 @@ class Trajectory3DView(TrajectoryCurtainsMixin, QWidget):
         self._terrain_source = 'online'  # 地形来源：online / local_dem / estimated
         self._ground_points = None       # 测线估算地面散点 (n,3) 显示坐标，z=地表高程
         self._terrain_datum_notice = ''
+        self._init_uav()
         # 主题缓存：GL 未建时先记住，惰性创建时应用。构造期按**当前主题**
         # 取初值——惰性预热的页面在窗口 _init_state 之后才构建，拿不到那次
         # 全量 apply_theme 遍历，写死 False 会让三维视图在深色下留白底。
@@ -571,6 +573,7 @@ class Trajectory3DView(TrajectoryCurtainsMixin, QWidget):
 
         # 网格随数据范围调整，相机距离/中心自动适配
         self._extent = extent
+        self._render_uav()
         self._reset_camera()
 
         # 坐标系可识别 → 后台构建真实地形
@@ -581,6 +584,7 @@ class Trajectory3DView(TrajectoryCurtainsMixin, QWidget):
     def _clear_tracks_content(self) -> None:
         """清空场景中的测线/地形并回到空态（无有效测线时调用）。"""
         if self._gl_view is not None:
+            self._clear_uav()
             self._clear_curtain_items()
             for item in self._line_items:
                 self._gl_view.removeItem(item)
@@ -846,6 +850,7 @@ class Trajectory3DView(TrajectoryCurtainsMixin, QWidget):
         if self._terrain_datum_notice:
             self.local_dem_notice.emit(self._terrain_datum_notice)
         self._render_lines()     # 贴地模式此刻起有 DEM 可采样
+        self._render_uav()
         self._render_terrain()
         self._render_curtains()
 
@@ -871,6 +876,7 @@ class Trajectory3DView(TrajectoryCurtainsMixin, QWidget):
     def _rebuild_scene(self) -> None:
         if self._track_data:
             self._render_lines()
+            self._render_uav()
         if self._terrain_payload is not None:
             self._render_terrain()
         self._render_curtains()
