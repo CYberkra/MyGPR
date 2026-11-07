@@ -762,7 +762,7 @@ class ProjectController(QObject):
             job_id = backend.submit_amplitude_slice(
                 project_id, sources, positions, float(start_ns), float(end_ns),
                 cell_size_m=float(cell_size_m), attribute=str(attribute))
-        except Exception as exc:  # noqa: BLE001 - user input / backend admission
+        except (ValueError, TypeError, RuntimeError, OSError, KeyError) as exc:
             self.amplitude_preview_failed.emit(friendly_error_message(exc))
             return
         self._amplitude_job_id = job_id
@@ -795,7 +795,7 @@ class ProjectController(QObject):
         project_generation = self._project_context_generation
         try:
             job_id = backend.submit_save_amplitude_slice(project_id, result)
-        except Exception as exc:  # noqa: BLE001 - user-facing job admission failure
+        except (ValueError, TypeError, RuntimeError, OSError, KeyError) as exc:
             self.amplitude_save_finished.emit(False, friendly_error_message(exc))
             return
 
@@ -822,7 +822,7 @@ class ProjectController(QObject):
         project_generation = self._project_context_generation
         try:
             job_id = backend.submit_open_amplitude_slice(project_id, str(result_id))
-        except Exception as exc:  # noqa: BLE001 - job admission failure
+        except (ValueError, TypeError, RuntimeError, OSError, KeyError) as exc:
             self.amplitude_open_failed.emit(friendly_error_message(exc))
             return
         self._amplitude_job_id = job_id

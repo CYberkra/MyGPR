@@ -42,6 +42,23 @@ def test_reopening_stale_saved_slice_displays_frozen_grid_without_3d(qapp):
     panel.close()
 
 
+def test_curtain_selection_requests_correct_artifact_and_source_trace(qapp):
+    panel = AmplitudeSlicePanel()
+    track = SpatialTrack('L1', 'Line', (SpatialTrackPoint(0, .1, .1),), 'EPSG:32648')
+    panel.set_tracks([track], {})
+    panel._source_ids['L1'] = 'artifact-1'
+    calls = []
+    panel.bscan_requested.connect(lambda *args: calls.append(args))
+    panel.select_curtain('L1', 'artifact-1', 37, 45.)
+    assert calls[-1][0:2] == ('L1', 'artifact-1')
+    assert panel._selected_source_trace == ('L1', 'artifact-1', 37)
+    assert panel._picked_time_ns == 45.
+    count = len(calls)
+    panel.select_curtain('L1', 'different-artifact', 20, 10.)
+    assert len(calls) == count
+    panel.close()
+
+
 def test_panel_displays_coverage_and_preserves_fixed_color_levels(qapp):
     panel = AmplitudeSlicePanel()
     grid = grid_line_values([0.1, 2.1], [0.1, 0.1], [1., 3.], ['L1', 'L1'], cell_size_m=1.)

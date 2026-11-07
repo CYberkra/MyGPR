@@ -21,7 +21,7 @@ def _metric_projected(crs: CRS) -> bool:
 def validate_metric_crs(value: str) -> None:
     try:
         crs = CRS.from_user_input(value)
-    except Exception as exc:
+    except (ValueError, TypeError, RuntimeError) as exc:
         raise ValueError('坐标系无效') from exc
     if not _metric_projected(crs):
         raise ValueError('目标坐标系必须是米制投影坐标系')
@@ -35,12 +35,12 @@ def project_observations(
         raise ValueError('没有可投影的测线')
     try:
         source_crs = [CRS.from_user_input(item.coordinate_system) for item in observations]
-    except Exception as exc:
+    except (ValueError, TypeError, RuntimeError) as exc:
         raise ValueError('测线坐标系未知或无效，请先确认坐标系') from exc
     if target_crs:
         try:
             target = CRS.from_user_input(target_crs)
-        except Exception as exc:
+        except (ValueError, TypeError, RuntimeError) as exc:
             raise ValueError('目标坐标系无效') from exc
     elif all(crs == source_crs[0] for crs in source_crs) and _metric_projected(source_crs[0]):
         target = source_crs[0]

@@ -102,7 +102,8 @@ class TestDeferredRedraw:
         assert calls == [SP._SEG_PROFILE], (
             f'切到剖面应只补剖面，实际 {calls}')
         assert SP._SEG_PROFILE not in spatial._dirty_views
-        assert len(spatial._dirty_views) == 3
+        assert SP._SEG_AMPLITUDE in spatial._dirty_views
+        assert len(spatial._dirty_views) == len(spatial._views()) - 1
 
         # 再切一次同一分段不应重复重绘（已不在脏集合）
         calls.clear()

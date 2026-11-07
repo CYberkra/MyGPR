@@ -360,6 +360,7 @@ class Trajectory3DView(TrajectoryCurtainsMixin, QWidget):
     # 本地 DEM 覆盖提示：'' = 正常/已清除；非空 = 警告文本（GUI 线程发出）
     local_dem_notice = pyqtSignal(str)
     curtain_notice = pyqtSignal(str)
+    curtain_selected = pyqtSignal(str, str, int, float)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -369,6 +370,8 @@ class Trajectory3DView(TrajectoryCurtainsMixin, QWidget):
         self._grid = None
         self._line_items: list = []
         self._curtain_items: list = []
+        self._curtain_pick_data: list = []
+        self._curtain_press = None
         self._curtain_previews = ()
         self._curtain_window = (0., 0.)
         self._terrain_item = None
@@ -432,6 +435,7 @@ class Trajectory3DView(TrajectoryCurtainsMixin, QWidget):
             return False
         layout = self.layout()
         self._gl_view = gl.GLViewWidget(self)
+        self._gl_view.installEventFilter(self)
         self._gl_view.setBackgroundColor('k' if self._theme_dark else 'w')
         self._grid = gl.GLGridItem()
         self._grid.setSize(500.0, 500.0)

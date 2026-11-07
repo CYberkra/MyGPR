@@ -4,10 +4,12 @@ from __future__ import annotations
 import logging
 
 import numpy as np
+from PyQt6.QtCore import QEvent, Qt
 
 from ui.desktop_backend_facade import build_curtain_geometry
 from ui.widgets.map_tiles import extract_epsg
 from ui.widgets.terrain_tiles import sample_bilinear
+from ui.widgets.curtain_picking import pick_mesh
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -28,6 +30,7 @@ class TrajectoryCurtainsMixin:
             for item in self._curtain_items:
                 self._gl_view.removeItem(item)
         self._curtain_items = []
+        self._curtain_pick_data = []
 
     def _render_curtains(self):
         self._clear_curtain_items()
@@ -87,6 +90,7 @@ class TrajectoryCurtainsMixin:
                                      computeNormals=False, glOptions='opaque')
                 self._gl_view.addItem(item)
                 self._curtain_items.append(item)
+                self._curtain_pick_data.append((preview, mesh.vertices, mesh.faces))
                 drawn += 1
                 center = sum(self._curtain_window) / 2.
                 if preview.time_ns[0] <= center <= preview.time_ns[-1]:
@@ -114,3 +118,34 @@ class TrajectoryCurtainsMixin:
                                  width=3., mode='lines', glOptions='opaque')
         self._gl_view.addItem(item)
         self._curtain_items.append(item)
+
+    def eventFilter(self, watched, event):
+        if watched is self._gl_view and self._curtain_pick_data:
+            if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+                self._curtain_press = event.position()
+            elif event.type() == QEvent.Type.MouseButtonRelease and event.button() == Qt.MouseButton.LeftButton:
+                press = self._curtain_press
+                self._curtain_press = None
+                if press is not None and (event.position() - press).manhattanLength() <= 4:
+                    self._pick_curtain(event.position())
+        return super().eventFilter(watched, event)
+
+    def _pick_curtain(self, point):
+        view = self._gl_view
+        width, height = view.width(), view.height()
+        if width <= 0 or height <= 0:
+            return
+        viewport = view.getViewport()
+        transform = view.projectionMatrix(viewport, viewport) * view.viewMatrix()
+        matrix = np.asarray(transform.copyDataTo(), dtype=float).reshape(4, 4)
+        best = None
+        for preview, vertices, faces in self._curtain_pick_data:
+            found = pick_mesh(vertices, faces, matrix, width, height, (point.x(), point.y()))
+            if found is not None and (best is None or found[0] < best[0]):
+                best = (found[0], preview, found[1])
+        if best is None:
+            return
+        _depth, preview, vertex = best
+        sample, trace = divmod(vertex, preview.matrix.shape[1])
+        self.curtain_selected.emit(preview.source.line_id, preview.source.artifact_id,
+                                   int(preview.trace_indices[trace]), float(preview.time_ns[sample]))
