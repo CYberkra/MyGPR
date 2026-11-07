@@ -9,6 +9,10 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 SUITES = {
+    "cscan": (
+        "tests/test_amplitude_slice_domain.py",
+        "tests/test_amplitude_slice_service.py",
+    ),
     "update_installation": ("tests/test_windows_update_acceptance.py",),
     "updates": (
         "tests/test_windows_updates.py",
