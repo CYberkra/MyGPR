@@ -143,7 +143,7 @@ def test_early_navigation_imports_and_wires_deferred_pages_once(window, qapp):
                       wraps=window.page_coordinator.connect_all) as connect:
         QTest.mouseClick(item, Qt.MouseButton.LeftButton)
         qapp.processEvents()
-        assert len(window.pages) == 7
+        assert len(window.pages) == 6
         assert all(not isinstance(page, PlaceholderPage) for page in window.pages.values())
         assert window.stackedWidget.currentWidget() is window.pages['processingInterface']
         connect.assert_called_once_with()
@@ -158,8 +158,7 @@ def test_early_navigation_while_backend_pending_does_not_rewire_after_outcome(
         window, qapp, outcome):
     from unittest.mock import Mock, patch
 
-    from PyQt6.QtCore import QObject, Qt, pyqtSignal
-    from PyQt6.QtTest import QTest
+    from PyQt6.QtCore import QObject, pyqtSignal
     from ui.main_window import PlaceholderPage
 
     class PendingBackend(QObject):
@@ -183,15 +182,14 @@ def test_early_navigation_while_backend_pending_does_not_rewire_after_outcome(
 
     with patch.object(window.page_coordinator, 'connect_all',
                       wraps=window.page_coordinator.connect_all) as connect:
-        # Tasks remains navigable while project-dependent pages are gated.
-        item = window._top_nav.items['jobsInterface']
-        assert item.isEnabled()
-        QTest.mouseClick(item, Qt.MouseButton.LeftButton)
-        qapp.processEvents()
+        window._tasks_shortcut.activated.emit()
+        assert window.output_panel._current_tab == 'jobs'
+        assert window.output_panel.is_open()
+        assert window.stackedWidget.currentWidget() is window.pages['projectInterface']
+        window.ensure_pages_ready()
         assert window._pages_warmed
-        assert len(window.pages) == 7
+        assert len(window.pages) == 6
         assert all(not isinstance(page, PlaceholderPage) for page in window.pages.values())
-        assert window.stackedWidget.currentWidget() is window.pages['jobsInterface']
         connect.assert_called_once_with()
 
         if outcome == 'ready':
@@ -203,13 +201,12 @@ def test_early_navigation_while_backend_pending_does_not_rewire_after_outcome(
         qapp.processEvents()
         connect.assert_called_once_with()
         assert window._backend_ready is (outcome == 'ready')
-        assert window.stackedWidget.currentWidget() is window.pages['jobsInterface']
-        assert window.pages['jobsInterface'].isEnabled() is (outcome == 'ready')
+        assert window.stackedWidget.currentWidget() is window.pages['projectInterface']
 
 
 def test_project_is_the_only_startup_navigation_entry(window):
     assert 'homeInterface' not in window._top_nav.items
-    assert window.stackedWidget.count() == 7
+    assert window.stackedWidget.count() == 6
     window._goto_page('homeInterface')
     assert window.stackedWidget.currentWidget() is window.pages['projectInterface']
     assert window._page('homeInterface') is window._page('projectInterface').startup
@@ -222,7 +219,7 @@ def test_empty_workspace_disables_data_navigation_with_reason(window):
     assert not window._file_tree_panel.isVisible()
     assert item.isHidden()
     assert not window._top_nav.items['settingsInterface'].isHidden()
-    assert not window._top_nav.items['jobsInterface'].isHidden()
+    assert 'jobsInterface' not in window._top_nav.items
     assert window._file_tree_btn.isHidden()
 
 

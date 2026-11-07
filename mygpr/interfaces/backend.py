@@ -606,6 +606,7 @@ class MyGPRBackend:
                 destination_root,
                 project_dir_name=project_dir_name,
                 open_after_restore=open_after_restore,
+                context=context,
             )
             context.report_progress(2, 2, "项目恢复完成")
             return result

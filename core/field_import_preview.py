@@ -9,6 +9,7 @@ transactional background import job.
 from __future__ import annotations
 
 import csv
+import logging
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +19,8 @@ import numpy as np
 
 from core.gpr_data_model import detect_mygpr_airborne_sidecar_csv
 from core.gpr_format_registry import get_format_spec
+
+_LOGGER = logging.getLogger(__name__)
 
 try:
     import h5py  # type: ignore
@@ -228,6 +231,25 @@ def _sidecar_preflight(src, suffix, sidecar, dielectric_constant, size, progress
     )
 
 
+def _preflight_failure(src: Path, suffix: str, display_name: str, exc: Exception) -> ImportPreflightResult:
+    message = f"文件格式已支持，但轻量预检未通过：{exc}"
+    suggestions = ("确认文件包含非空二维数值矩阵", "必要时先导出为标准 CSV / NPY / NPZ / H5")
+    if suffix in ('.h5', '.hdf5'):
+        if isinstance(exc, OSError) and 'truncated file' in str(exc).lower():
+            _LOGGER.debug('HDF5 预检发现截断文件：%s', src, exc_info=True)
+            message = 'HDF5 文件不完整或已损坏，无法完成预检。请确认采集已结束，并重新复制完整文件。'
+            suggestions = ()
+        elif isinstance(exc, ValueError) and 'committed_trace_count does not match traces' in str(exc):
+            _LOGGER.debug('HDF5 预检发现采集提交计数不一致：%s', src, exc_info=True)
+            message = '已提交道数与文件数据不一致，暂无法导入。请确认采集已结束，或先在采集端恢复数据。'
+            suggestions = ()
+    return ImportPreflightResult(
+        path=str(src), exists=True, is_file=True, extension=suffix,
+        format_name=display_name, support='direct-failed', can_import=False,
+        message=message, suggestions=suggestions,
+    )
+
+
 def build_import_preflight(
     source: str | Path,
     *,
@@ -348,12 +370,7 @@ def build_import_preflight(
             from core.job_manager import JobCancelled
             if isinstance(exc, JobCancelled):
                 raise
-            return ImportPreflightResult(
-                path=str(src), exists=True, is_file=True, extension=suffix,
-                format_name=display_name, support="direct-failed", can_import=False,
-                message=f"文件格式已支持，但轻量预检未通过：{exc}",
-                suggestions=("确认文件包含非空二维数值矩阵", "必要时先导出为标准 CSV / NPY / NPZ / H5"),
-            )
+            return _preflight_failure(src, suffix, display_name, exc)
 
     if spec is not None:
         return ImportPreflightResult(

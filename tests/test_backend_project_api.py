@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from core.field_project_models import FieldProjectManifest
+from mygpr.application.project.service import ProjectApplicationError, ProjectBusyError
 from mygpr.application.jobs.cancellation import CancellationTokenSource, JobCancelledError
 from mygpr.application.jobs.context import ExecutionContext
 from mygpr.application.jobs.models import JobStatus
@@ -37,7 +38,7 @@ def test_batch_import_job_preserves_dielectric(tmp_path):
         backend.shutdown()
 
 
-def test_project_api_create_window_process_audit_backup_restore(tmp_path: Path) -> None:
+def test_project_api_create_window_process_audit_backup_restore(tmp_path: Path, monkeypatch) -> None:
     backend = MyGPRBackend.create_default(max_workers=1)
     try:
         summary = backend.projects.create_project(tmp_path / "project", name="Backend Project")
@@ -88,14 +89,36 @@ def test_project_api_create_window_process_audit_backup_restore(tmp_path: Path) 
         backup = backend.projects.backup_project(summary.project_id, tmp_path / "backups")
         assert backup.verified
         assert Path(backup.archive_path).is_file()
-        backend.projects.close_project(summary.project_id)
-        restored = backend.projects.restore_project(
+        restore_job = backend.submit_project_restore(
             backup.archive_path,
-            tmp_path / "restored",
+            str(tmp_path / "restored"),
             project_dir_name="restored_project",
+            open_after_restore=False,
         )
+        snapshot = backend.jobs.wait(restore_job, timeout=30)
+        assert snapshot.status is JobStatus.COMPLETED, snapshot.error_message
+        restored = snapshot.result
         assert restored.verified
-        reopened = backend.projects.list_open_projects()[0]
+        assert [item.root_path for item in backend.projects.list_open_projects()] == [summary.root_path]
+        with pytest.raises(ProjectApplicationError, match="project id already open"):
+            backend.projects.open_project(restored.project_path)
+        with backend.projects.acquire_lease(summary.project_id):
+            with pytest.raises(ProjectBusyError):
+                backend.projects.open_project(restored.project_path, replace_open_identity=True)
+        original_session = backend.projects._sessions[summary.project_id]
+
+        def cannot_close():
+            raise OSError("original project could not close")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(original_session, "close", cannot_close)
+            with pytest.raises(OSError, match="original project could not close"):
+                backend.projects.open_project(restored.project_path, replace_open_identity=True)
+        assert [item.root_path for item in backend.projects.list_open_projects()] == [summary.root_path]
+        reopened = backend.projects.open_project(restored.project_path, replace_open_identity=True)
+        assert reopened.root_path == restored.project_path
+        assert not reopened.read_only
+        assert Path(summary.root_path, "project.json").is_file()
         assert reopened.project_id == summary.project_id
         assert backend.projects.get_dataset_info(reopened.project_id, "L01").shape == (72, 48)
     finally:

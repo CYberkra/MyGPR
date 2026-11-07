@@ -68,9 +68,12 @@ def _gl_state() -> tuple:
     """
     if not _GL_STATE:
         try:
+            from ui.widgets.opengl_compat import align_windows_opengl
+            align_windows_opengl()
             import pyqtgraph.opengl as gl
             from PyQt6.QtGui import QVector3D as vector
         except Exception:  # noqa: BLE001 - PyOpenGL 缺失等任意导入失败 → 降级
+            _LOGGER.warning('三维视图初始化失败，将使用降级提示', exc_info=True)
             gl, vector = None, None
         _GL_STATE['gl'], _GL_STATE['vec'] = gl, vector
     return _GL_STATE['gl'], _GL_STATE['vec']
@@ -630,7 +633,7 @@ class Trajectory3DView(QWidget):
         # 有地形时网格保持隐藏（旧逻辑：set_tracks 先清地形再显网格，等价）
         self._grid.setVisible(self._terrain_item is None)
         self._gl_view.setCameraPosition(
-            distance=max(extent * 2.5, 100.0), elevation=30.0, azimuth=45.0)
+            distance=max(extent * 2.5, 10.0), elevation=30.0, azimuth=45.0)
         _, vec = _gl_state()
         self._gl_view.opts['center'] = vec(0.0, 0.0, 0.0)
 

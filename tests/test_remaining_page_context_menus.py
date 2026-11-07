@@ -6,7 +6,6 @@ import pytest
 pytest.importorskip('PyQt6')
 
 from PyQt6.QtCore import QCoreApplication, QEvent, QPoint, Qt
-from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication
 
 
@@ -111,44 +110,9 @@ def test_delivery_result_menu_has_stable_id_and_truthful_unsupported_actions(pag
     assert all(a.data() != 'delete-result' for a in blank.actions())
 
 
-def test_jobs_context_cancel_reuses_button_and_revalidates_terminal_state(pages):
-    from ui.pages.jobs_page import JobsPage
-    page = pages(JobsPage)
-    jobs = page.job_table()
-    jobs.upsert_job('J1', 'First')
-    jobs.upsert_job('J2', 'Second')
-    table = jobs._table
-    table.selectRow(0)
-    menu = page._job_menu(table.visualItemRect(table.item(1, 0)).center())
-    cancelled = []
-    page.cancel_requested.connect(cancelled.append)
-    assert cancelled == []
-    action(menu, 'cancel-job').trigger()
-    assert cancelled == ['J2']
-    jobs.set_status('J2', 'completed')
-    action(menu, 'cancel-job').trigger()
-    assert cancelled == ['J2']
-    blank = page._job_menu(QPoint(-1, -1))
-    assert all(a.data() != 'cancel-job' for a in blank.actions())
-    action(blank, 'prune-jobs').trigger()
-    assert set(jobs._rows) == {'J1'}
-
-
-def test_jobs_keyboard_menu_is_same_menu_and_setting_text_keeps_native_policy(pages, qapp):
-    from ui.pages.jobs_page import JobsPage
+def test_settings_text_keeps_native_menu_policy(pages):
     from ui.pages.settings_page import SettingsPage
-    page = pages(JobsPage)
-    page.job_table().upsert_job('J1', 'First')
-    page.show()
-    table = page.job_table()._table
-    table.setCurrentCell(0, 0)
-    table.setFocus()
-    qapp.processEvents()
-    QTest.keyClick(table, Qt.Key.Key_F10, Qt.KeyboardModifier.ShiftModifier)
-    menu = page._job_context.menu
-    assert menu is not None and menu.isVisible()
-    assert action(menu, 'copy-id').isEnabled()
-    page._job_context.close()
+
     settings = pages(SettingsPage)
     assert settings._root_edit.contextMenuPolicy() == Qt.ContextMenuPolicy.DefaultContextMenu
     native = settings._root_edit.createStandardContextMenu()

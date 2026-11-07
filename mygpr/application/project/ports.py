@@ -345,6 +345,7 @@ class ProjectRepositoryPort(Protocol):
         destination_root: Path,
         *,
         project_dir_name: str | None,
+        context: ExecutionContext,
     ) -> ProjectRestore: ...
 
 

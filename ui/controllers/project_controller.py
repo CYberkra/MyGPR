@@ -191,7 +191,7 @@ class ProjectController(QObject):
             name="mygpr-project-create",
         )
 
-    def open_project(self, root: str) -> None:
+    def open_project(self, root: str, *, replace_open_identity: bool = False) -> None:
         if self._busy:
             self.log_message.emit("操作进行中，请稍后…")
             return
@@ -203,7 +203,7 @@ class ProjectController(QObject):
         self.invalidate_artifact_previews()
         self._set_busy(True)
         run_command(
-            _OpenProjectCommand(self, root),
+            _OpenProjectCommand(self, root, replace_open_identity),
             name="mygpr-project-open",
         )
 
@@ -818,11 +818,12 @@ class _CreateProjectCommand:
 
 
 class _OpenProjectCommand:
-    __slots__ = ("_controller", "_root")
+    __slots__ = ("_controller", "_root", "_replace_open_identity")
 
-    def __init__(self, controller: ProjectController, root: str) -> None:
+    def __init__(self, controller: ProjectController, root: str, replace_open_identity: bool = False) -> None:
         self._controller = controller
         self._root = root
+        self._replace_open_identity = replace_open_identity
 
     def execute(self) -> None:
         c = self._controller
@@ -835,8 +836,9 @@ class _OpenProjectCommand:
             # 显式打开项目=人类操作；锁的持有进程已由 _pid_alive 判死时
             # 恢复陈旧锁（默认 False 会让 AUTO 静默降级为只读会话，
             # 处理链写 catalog 时才报 "Project catalog is read-only"）。
+            options = {"replace_open_identity": True} if self._replace_open_identity else {}
             summary = backend.projects.open_project(
-                str(self._root), recover_stale_lock=True)
+                str(self._root), recover_stale_lock=True, **options)
         except Exception as exc:  # noqa: BLE001
             _LOGGER.exception("打开项目失败")
             message = friendly_error_message(exc)

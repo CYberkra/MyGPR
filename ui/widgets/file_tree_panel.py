@@ -19,7 +19,7 @@ from PyQt6 import sip
 from PyQt6.QtCore import QEvent, QPoint, QSize, Qt, QUrl, pyqtSignal
 from PyQt6.QtGui import QBrush, QColor, QDesktopServices, QFont, QFontMetrics, QIcon, QKeySequence, QPainter, QPixmap, QShortcut
 from PyQt6.QtWidgets import (
-    QApplication, QDialog, QDialogButtonBox, QHeaderView,
+    QApplication, QDialogButtonBox, QHeaderView,
     QSizePolicy, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import BodyLabel, PlainTextEdit, TransparentToolButton, TreeWidget
@@ -37,6 +37,7 @@ from ui.theme_helpers import control_palette, hint_qss, status_color
 from ui.widgets.context_menus import add_action, make_menu
 from ui.widgets.dock_panel import DockPanel
 from ui.widgets.fluent_menu_keyboard import FluentMenuKeyboard
+from ui.widgets.themed_dialog import ThemedDialog
 
 _ROLE_PAYLOAD = Qt.ItemDataRole.UserRole        # line → line_id；artifact → artifact_id；spatial → result_id；report → package_dir
 _ROLE_KIND = Qt.ItemDataRole.UserRole + 1       # TreeNode.kind
@@ -118,7 +119,7 @@ class FileTreePanel(DockPanel):
     # 永久删除语义），面板自身不弹确认框
     artifact_delete_requested = pyqtSignal(str, str)
     processing_package_requested = pyqtSignal(str, str)  # line_id, artifact_id (empty = whole line)
-    # 空间成果/项目报告叶子点击 → 跳成果页（参数为 kind：'spatial'/'report'）
+    # 空间成果叶子点击 → 跳成果页。
     delivery_focus_requested = pyqtSignal(str)
 
     def __init__(self, parent=None) -> None:
@@ -692,16 +693,19 @@ class FileTreePanel(DockPanel):
         elif kind == 'artifact' and payload:
             self.artifact_focus_requested.emit(
                 str(item.data(0, _ROLE_AUX) or ''), str(payload))
-        elif kind in ('spatial', 'report'):
+        elif kind == 'spatial':
             self.delivery_focus_requested.emit(str(kind))
 
     def _on_item_double_clicked(self, item, _column: int) -> None:
         """文件双击 → 系统默认程序打开（目录双击保留默认展开/收起）。"""
         if self._busy:
             return
-        if item.data(0, _ROLE_KIND) == 'file':
+        kind = item.data(0, _ROLE_KIND)
+        if kind in ('file', 'report'):
             path = str(item.data(0, _ROLE_PAYLOAD) or '')
-            if path:
+            if kind == 'report' and path and self._project_root:
+                path = os.path.join(self._project_root, path)
+            if path and os.path.isabs(path):
                 QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
     # ------------------------------------------------------------ 右键菜单
@@ -877,7 +881,7 @@ class FileTreePanel(DockPanel):
         else:
             line = next((line for line in self._lines if str(getattr(line, 'line_id', '')) == line_id), None)
             details.append(f'源文件：{getattr(line, "raw_path", "") or "项目原始数据"}')
-        dialog = QDialog(self.window() or self)
+        dialog = ThemedDialog(self.window() or self)
         dialog.setWindowTitle('参数与来源')
         dialog.resize(680, 440)
         colors = control_palette(isDarkTheme())
@@ -888,6 +892,7 @@ class FileTreePanel(DockPanel):
         content.setPlainText('\n'.join(details))
         layout.addWidget(content)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, dialog)
+        buttons.button(QDialogButtonBox.StandardButton.Close).setText('关闭')
         buttons.rejected.connect(dialog.reject)
         layout.addWidget(buttons)
         dialog.exec()

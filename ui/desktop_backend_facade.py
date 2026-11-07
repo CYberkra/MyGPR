@@ -23,6 +23,7 @@ from ui.desktop_backend_dtos import (
 from mygpr.application.jobs.models import JobEventType, JobResultSummary  # noqa: E402 — re-exported for ui/controllers
 from mygpr.application.jobs.context import ExecutionContext
 from mygpr.application.jobs.cancellation import CancellationTokenSource
+from mygpr.domain.project.models import ProjectBackup as ProjectBackup, ProjectRestore as ProjectRestore
 from mygpr.domain.project.names import display_name as validate_display_name
 
 # ---------------------------------------------------------------------------
@@ -397,3 +398,9 @@ __all__ = [
     "InterpretationZone",
     "BoreholeRecord",
 ]
+
+
+def check_project_backup_chain(archive_path: str) -> None:
+    from core.field_project_backup import check_project_backup_chain as check
+
+    check(archive_path)

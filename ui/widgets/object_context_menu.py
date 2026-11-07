@@ -1,12 +1,12 @@
 """Small Fluent object-menu binding; never attach it to text editors."""
 from PyQt6.QtCore import QEvent, QObject, QPoint, Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
-from PyQt6.QtWidgets import (
-    QDialog, QDialogButtonBox, QPlainTextEdit, QVBoxLayout,
-)
+from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout
+from qfluentwidgets import PlainTextEdit, PushButton
 
 from ui.widgets.context_menus import add_action, make_menu
 from ui.widgets.fluent_menu_keyboard import FluentMenuKeyboard
+from ui.widgets.themed_dialog import ThemedDialog
 
 
 def object_menu(parent):
@@ -25,18 +25,21 @@ def object_action(menu, command, text, slot, *, enabled=True, reason=''):
 
 def show_details(parent, title, text):
     """Read-only, copyable details; no nested blocking event loop."""
-    dialog = QDialog(parent)
+    dialog = ThemedDialog(parent)
     dialog.setWindowTitle(title)
     dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
     dialog.resize(520, 340)
     layout = QVBoxLayout(dialog)
-    editor = QPlainTextEdit(dialog)
+    editor = PlainTextEdit(dialog)
     editor.setReadOnly(True)
     editor.setPlainText(text)
     layout.addWidget(editor)
-    buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, parent=dialog)
-    buttons.rejected.connect(dialog.reject)
-    layout.addWidget(buttons)
+    buttons = QHBoxLayout()
+    buttons.addStretch()
+    close = PushButton('关闭', dialog)
+    close.clicked.connect(dialog.reject)
+    buttons.addWidget(close)
+    layout.addLayout(buttons)
     dialog.show()
     return dialog
 

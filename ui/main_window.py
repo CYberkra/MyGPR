@@ -68,7 +68,6 @@ ProcessingPage = _import_page_class('ui.pages.processing_page', 'ProcessingPage'
 InterpretationPage = _import_page_class('ui.pages.interpretation_page', 'InterpretationPage')
 SpatialPage = _import_page_class('ui.pages.spatial_page', 'SpatialPage')
 DeliveryPage = _import_page_class('ui.pages.delivery_page', 'DeliveryPage')
-JobsPage = _import_page_class('ui.pages.jobs_page', 'JobsPage')
 SettingsPage = _import_page_class('ui.pages.settings_page', 'SettingsPage')
 
 # ------------------------------------------------------------ 控制器（[A3] 提供，缺失为 None）
@@ -250,7 +249,6 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
             ('spatialInterface', SpatialPage, FIF.GLOBE, '空间信息',
              NavigationItemPosition.TOP),
             ('deliveryInterface', DeliveryPage, FIF.SEND, '成果', NavigationItemPosition.TOP),
-            ('jobsInterface', JobsPage, FIF.SYNC, '任务', NavigationItemPosition.TOP),
             ('settingsInterface', SettingsPage, FIF.SETTING, '设置',
              NavigationItemPosition.BOTTOM),
         ]
@@ -548,9 +546,37 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
             return
         self._project_menu = project.startup.project_menu(
             self._project_switch_btn, can_close=project.workspace_state() != 'startup',
-            close_requested=project.close_project_requested.emit)
+            close_requested=project.close_project_requested.emit,
+            restore_requested=self._show_restore_dialog)
         self._project_menu.exec(self._project_switch_btn.mapToGlobal(
             self._project_switch_btn.rect().bottomLeft()))
+
+    def _show_backup_dialog(self) -> None:
+        if not self._backend_ready or not self._require_project():
+            return
+        from ui.project_archive_dialogs import BackupDialog
+
+        project_id = self._current_project_id()
+        directory = self.settings.get('project_root', constants.DEFAULT_PROJECT_ROOT)
+        dialog = BackupDialog(directory, self)
+        try:
+            if dialog.exec() == QDialog.DialogCode.Accepted and project_id == self._current_project_id():
+                self.page_coordinator.project.on_backup_requested(dialog.options())
+        finally:
+            dialog.deleteLater()
+
+    def _show_restore_dialog(self) -> None:
+        if not self._backend_ready or self.delivery_controller is None:
+            return
+        from ui.project_archive_dialogs import RestoreDialog
+
+        directory = self.settings.get('project_root', constants.DEFAULT_PROJECT_ROOT)
+        dialog = RestoreDialog(directory, self.delivery_controller, self)
+        try:
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                self.page_coordinator.project.on_restore_requested(dialog.options())
+        finally:
+            dialog.deleteLater()
 
     def _update_workspace_navigation(self, _state=None) -> None:
         nav = getattr(self, '_top_nav', None)
@@ -700,7 +726,6 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
             ('Ctrl+4', 'interpretationInterface', '解释'),
             ('Ctrl+5', 'spatialInterface', '空间信息'),
             ('Ctrl+6', 'deliveryInterface', '成果'),
-            ('Ctrl+7', 'jobsInterface', '任务'),
             ('Ctrl+8', 'settingsInterface', '设置'),
         ]
         for seq, obj_name, _title in self._page_shortcuts:
@@ -708,6 +733,8 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
             sc.setContext(Qt.ShortcutContext.WindowShortcut)
             sc.activated.connect(lambda checked=False, on=obj_name: self._goto_page(on))
         if self.output_panel is not None:
+            self._tasks_shortcut = QShortcut(QKeySequence('Ctrl+7'), self)
+            self._tasks_shortcut.activated.connect(self.output_panel.show_tasks)
             self._panel_toggle = QShortcut(QKeySequence('Ctrl+J'), self)
             self._panel_toggle.setContext(Qt.ShortcutContext.WindowShortcut)
             self._panel_toggle.activated.connect(self.output_panel.toggle_panel)
@@ -723,6 +750,9 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
         self._log_signal.connect(self._on_log_message)
 
         settings_page = self._page('settingsInterface')
+        project = self._page('projectInterface')
+        project.backup_dialog_requested.connect(self._show_backup_dialog)
+        project.restore_dialog_requested.connect(self._show_restore_dialog)
 
         # ---------------- 控制器日志转发（三级通道之一）
         controllers = (self.backend_controller, self.project_controller,
@@ -1061,6 +1091,7 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
             rows.append(f'<li><b>{seq}</b>：切换到{title}</li>')
         rows.extend([
             '<li><b>Ctrl+B</b>：收起/展开左侧文件树</li>',
+            '<li><b>Ctrl+7</b>：展开底栏任务</li>',
             '<li><b>Ctrl+J</b>：收起/展开底部输出面板（日志/任务）</li>',
             '<li><b>Ctrl+R</b>：处理页运行处理链</li>',
             '<li><b>Ctrl+L</b>：处理页加载测线数据</li>',

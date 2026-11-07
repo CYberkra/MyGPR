@@ -451,13 +451,16 @@ class HomePage(ScrollArea):
         menu.closedSignal.connect(self._recent_list.setFocus)
         return menu
 
-    def project_menu(self, trigger, *, can_close: bool, close_requested, enabled: bool = True):
+    def project_menu(self, trigger, *, can_close: bool, close_requested, enabled: bool = True,
+                     restore_requested=None):
         self._cancel_restore()
         self.refresh_recents()
         menu = make_menu(trigger)
         enabled = enabled and self._backend_ready and not self._busy
         add_action(menu, FIF.ADD, '新建项目', lambda: self._request_dialog(True), enabled=enabled)
         add_action(menu, FIF.FOLDER, '打开项目…', lambda: self._request_dialog(False), enabled=enabled)
+        if restore_requested is not None:
+            add_action(menu, FIF.FOLDER, '从备份恢复…', restore_requested, enabled=enabled)
         if self._recent_paths:
             menu.addSeparator()
         for path in sorted(self._recent_paths, key=lambda p: p not in self._pinned_paths):

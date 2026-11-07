@@ -75,8 +75,6 @@ _INFO_FIELDS = (
 
 
 class ProjectPage(ProjectLineContextMixin, QWidget):
-    """A project identity, line ledger and a single selected-line context."""
-
     import_requested = pyqtSignal(dict)
     sync_requested = pyqtSignal(dict)
     line_selected = pyqtSignal(str)
@@ -84,6 +82,8 @@ class ProjectPage(ProjectLineContextMixin, QWidget):
     line_delete_requested = pyqtSignal(list)   # 批量删除所选测线
     artifact_preview_requested = pyqtSignal(str, str)
     artifact_delete_requested = pyqtSignal(str, list)  # 删除成果（单/批）
+    backup_dialog_requested = pyqtSignal()
+    restore_dialog_requested = pyqtSignal()
     close_project_requested = pyqtSignal()
     quality_check_requested = pyqtSignal(str)
     quality_location_requested = pyqtSignal(str, int, int)
@@ -226,6 +226,10 @@ class ProjectPage(ProjectLineContextMixin, QWidget):
         add_action(menu, FIF.SETTING, '项目设置 / 元数据', self._info_dialog.show)
         add_action(menu, FIF.SEARCH, '导入与预检…', self.show_import_tool, enabled=not self._busy)
         root = str(getattr(self._summary, 'root_path', '') or '')
+        add_action(menu, FIF.SAVE, '备份当前项目…', self.backup_dialog_requested.emit,
+                   enabled=bool(root) and not self._busy)
+        add_action(menu, FIF.FOLDER, '从备份恢复…', self.restore_dialog_requested.emit,
+                   enabled=not self._busy)
         add_action(menu, FIF.FOLDER, '打开项目位置',
                    lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(root)), enabled=bool(root))
         menu.exec(self.project_more_btn.mapToGlobal(self.project_more_btn.rect().bottomLeft()))
@@ -730,7 +734,8 @@ class ProjectPage(ProjectLineContextMixin, QWidget):
         self.line_search.setPlaceholderText(
             f'搜索 {len(self._lines)} 条测线' if self._lines else '搜索测线')
         enabled = self._has_project() and not self._busy
-        self.quality_btn.setEnabled(self._has_project())
+        self.line_search.setEnabled(bool(self._lines))
+        self.quality_btn.setEnabled(self._has_project() and bool(self._lines))
         for btn in (self.close_btn, self.preflight_btn):
             btn.setEnabled(enabled)
         writable = self._can_write()

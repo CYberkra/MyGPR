@@ -300,11 +300,11 @@ def _category(tree, name):
     return None
 
 
-def test_spatial_and_report_leaves_render_and_click_goto_delivery(qapp, panel):
-    panel.set_project_info(types.SimpleNamespace(name='测试1'))
+def test_spatial_leaf_navigates_and_legacy_report_opens_its_directory(qapp, panel, tmp_path, monkeypatch):
+    panel.set_project_info(types.SimpleNamespace(name='测试1', root_path=str(tmp_path)))
     panel.set_lines([_line('L01', '2026-09-16T01:00:00')])
     panel.set_spatial_results([_spatial()])
-    panel.set_reports([_report()])
+    panel.set_reports([_report(package_dir='reports/r20260916')])
     tree = panel._tree
     spatial = _find_by_kind(tree, 'spatial')
     report = _find_by_kind(tree, 'report')
@@ -316,7 +316,12 @@ def test_spatial_and_report_leaves_render_and_click_goto_delivery(qapp, panel):
     panel.delivery_focus_requested.connect(delivery_got.append)
     panel._on_item_clicked(spatial, 0)
     panel._on_item_clicked(report, 0)
-    assert delivery_got == ['spatial', 'report']
+    assert delivery_got == ['spatial']
+    opened = []
+    monkeypatch.setattr('ui.widgets.file_tree_panel.QDesktopServices.openUrl',
+                        lambda url: opened.append(url.toLocalFile()))
+    panel._on_item_double_clicked(report, 0)
+    assert opened == [(tmp_path / 'reports' / 'r20260916').as_posix()]
     assert lines_got == []  # 成果/报告点击不得触发换线
 
 
