@@ -39,4 +39,8 @@ def test_panel_displays_coverage_and_preserves_fixed_color_levels(qapp):
     assert np.isnan(panel._map._matrix[0, 1])
     assert panel._levels == (1., 3.)
     assert '0–10 ns' in panel._status.text()
+    assert panel._save.isEnabled()
+    panel._end.setValue(11.)
+    assert not panel._save.isEnabled()
+    assert panel._result is None
     panel.close()

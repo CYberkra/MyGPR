@@ -578,6 +578,15 @@ class MyGPRBackend:
                 cell_size_m=cell_size_m, attribute=attribute, context=context, include_curtains=True),
         )
 
+    def submit_save_amplitude_slice(
+        self, project_id: str, result: Any, *, name: str = '振幅切片', title: str | None = None,
+    ) -> str:
+        """Save a previously computed slice as a versioned spatial result."""
+        return self._submit_project_job(
+            project_id, title or '保存振幅切片',
+            lambda context: self.projects.save_amplitude_result(project_id, result, name=name, context=context),
+        )
+
     def submit_grid_layer(
         self,
         project_id: str,

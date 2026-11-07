@@ -476,6 +476,24 @@ class SpatialResultVersionService:
             finally:
                 tmp.unlink(missing_ok=True)
             return output
+        if fmt in {"tif", "tiff", "geotiff"}:
+            filename = record.files.get("amplitude_geotiff")
+            if not filename:
+                raise ValueError("此空间成果不包含振幅 GeoTIFF")
+            source = resolve_managed_path(result_dir, filename, require_file=True)
+            if output.suffix.lower() not in {".tif", ".tiff"}:
+                output = output.with_suffix(".tif")
+            output.parent.mkdir(parents=True, exist_ok=True)
+            tmp = output.with_name(f".{output.name}.{uuid.uuid4().hex}.tmp")
+            try:
+                shutil.copy2(source, tmp)
+                from core.storage_primitives import fsync_directory, fsync_file
+                fsync_file(tmp)
+                tmp.replace(output)
+                fsync_directory(output.parent)
+            finally:
+                tmp.unlink(missing_ok=True)
+            return output
         mapping = {
             "geojson": record.files.get("interfaces_geojson", "interfaces.geojson"),
             "csv": record.files.get("profiles_csv", "profiles.csv"),

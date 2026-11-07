@@ -153,9 +153,11 @@ class DeliveryPage(QWidget):
             summary = _get(item, 'summary', {}) or {}
             warnings = list(summary.get('preflight_warnings', []) or [])
             text = '带警告' if status == 'generated_with_warnings' or warnings else '已生成'
-            if 'surface_control_points_geojson' in files:
+            if 'amplitude_geotiff' in files:
+                text += ' · 振幅切片'
+            elif 'surface_control_points_geojson' in files:
                 text += ' · 已生成曲面控制点'
-            if options.get('surface_generated') is False or (files and 'surface_mesh' not in files):
+            if 'amplitude_geotiff' not in files and (options.get('surface_generated') is False or (files and 'surface_mesh' not in files)):
                 text += ' · 未生成曲面'
             status_item = QTableWidgetItem(text)
             status_item.setToolTip('\n'.join(map(str, warnings)))
@@ -179,7 +181,7 @@ class DeliveryPage(QWidget):
 
         metadata = {}
         for key in ('result_id', 'name', 'revision', 'status', 'line_ids', 'created_at',
-                    'coordinate_system', 'vertical_datum', 'stale', 'files'):
+                    'coordinate_system', 'vertical_datum', 'stale', 'files', 'options', 'sources'):
             value = _get(result, key, '')
             metadata[key] = dict(value) if isinstance(value, Mapping) else value
         text = json.dumps(metadata, ensure_ascii=False, indent=2, default=str)

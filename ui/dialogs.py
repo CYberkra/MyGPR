@@ -174,7 +174,7 @@ def choose_spatial_export_path(parent: QWidget | None, result_id: str) -> tuple[
 
     filters = (
         "空间成果包 ZIP (*.zip);;GeoJSON (*.geojson);;CSV (*.csv);;"
-        "KML (*.kml);;GeoPackage (*.gpkg);;Shapefile (*.shp)"
+        "KML (*.kml);;GeoPackage (*.gpkg);;Shapefile (*.shp);;GeoTIFF (*.tif)"
     )
     path, selected = file_dialogs.getSaveFileName(
         parent, "导出空间成果", str(Path.home() / "Documents" / f"{result_id}.zip"),
@@ -183,8 +183,8 @@ def choose_spatial_export_path(parent: QWidget | None, result_id: str) -> tuple[
     if not path:
         return "", ""
     suffix = Path(path).suffix.lower().lstrip('.')
-    if suffix not in {'zip', 'geojson', 'csv', 'kml', 'gpkg', 'shp'}:
-        suffix = next((fmt for fmt in ('geojson', 'csv', 'kml', 'gpkg', 'shp', 'zip')
+    if suffix not in {'zip', 'geojson', 'csv', 'kml', 'gpkg', 'shp', 'tif', 'tiff'}:
+        suffix = next((fmt for fmt in ('geojson', 'csv', 'kml', 'gpkg', 'shp', 'geotiff', 'zip')
                        if fmt in selected.lower()), 'zip')
     return path, suffix
 

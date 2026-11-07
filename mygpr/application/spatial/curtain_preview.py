@@ -2,16 +2,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
 from mygpr.application.jobs.context import ExecutionContext
-from mygpr.application.spatial.amplitude import AmplitudeSource, _trace_ids
+from mygpr.application.spatial.amplitude_identity import trace_ids
 
 
 @dataclass(frozen=True, slots=True)
 class CurtainPreview:
-    source: AmplitudeSource
+    source: Any
     coordinate_system: str
     matrix: np.ndarray
     time_ns: np.ndarray
@@ -36,8 +37,8 @@ def read_curtain_previews(projects, project_id, sources, *, context: ExecutionCo
         if artifact:
             info = projects.get_artifact_dataset_info(project_id, source.line_id, source.artifact_id)
             raw_info = projects.get_dataset_info(project_id, source.line_id)
-            raw_ids = _trace_ids(projects.read_trace_metadata(project_id, source.line_id), raw_info.shape[1])
-            ids = _trace_ids(projects.read_artifact_trace_metadata(project_id, source.line_id, source.artifact_id), info.shape[1])
+            raw_ids = trace_ids(projects.read_trace_metadata(project_id, source.line_id), raw_info.shape[1])
+            ids = trace_ids(projects.read_artifact_trace_metadata(project_id, source.line_id, source.artifact_id), info.shape[1])
             raw_by_id = {value: index for index, value in enumerate(raw_ids)}
             source_to_raw = np.array([raw_by_id.get(value, -1) for value in ids], dtype=np.int64)
             if np.any(source_to_raw < 0):

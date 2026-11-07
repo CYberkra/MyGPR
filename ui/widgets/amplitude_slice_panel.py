@@ -20,6 +20,7 @@ class AmplitudeSlicePanel(QWidget):
     bscan_requested = pyqtSignal(str, str, str)
     curtains_ready = pyqtSignal(object, float, float)
     show_3d_requested = pyqtSignal()
+    save_requested = pyqtSignal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -28,6 +29,7 @@ class AmplitudeSlicePanel(QWidget):
         self._artifact_lists = {}
         self._positions = ()
         self._grid = None
+        self._result = None
         self._bundle = None
         self._bscan_request = ''
         self._selected_raw_trace = None  # (line_id, original trace index)
@@ -53,6 +55,8 @@ class AmplitudeSlicePanel(QWidget):
         self._cancel.setEnabled(False)
         self._show_3d = PushButton('三维查看', self)
         self._show_3d.setEnabled(False)
+        self._save = PushButton('保存成果', self)
+        self._save.setEnabled(False)
         for widget in (self._line, self._source, self._component, self._attribute):
             toolbar.addWidget(widget)
         toolbar.addStretch(1)
@@ -60,7 +64,7 @@ class AmplitudeSlicePanel(QWidget):
         parameters = QHBoxLayout()
         for widget in (CaptionLabel('开始', self), self._start, CaptionLabel('结束', self),
                        self._end, CaptionLabel('网格', self), self._cell, self._run,
-                       self._cancel, self._show_3d):
+                       self._cancel, self._show_3d, self._save):
             parameters.addWidget(widget)
         parameters.addStretch(1)
         layout.addLayout(parameters)
@@ -85,10 +89,13 @@ class AmplitudeSlicePanel(QWidget):
         self._run.clicked.connect(self._request)
         self._cancel.clicked.connect(self._cancel_preview)
         self._show_3d.clicked.connect(self.show_3d_requested)
+        self._save.clicked.connect(self._save_result)
         self._attribute.currentIndexChanged.connect(self._reset_levels)
         self._component.currentIndexChanged.connect(self._reset_levels)
         self._start.valueChanged.connect(self._sync_slider)
         self._end.valueChanged.connect(self._sync_slider)
+        for control in (self._start, self._end, self._cell):
+            control.valueChanged.connect(self._invalidate_result)
         self._slider.sliderReleased.connect(self._slider_released)
         self._map.scene().sigMouseClicked.connect(self._map_clicked)
         self._window_band = pg.LinearRegionItem((0, 1), movable=False,
@@ -130,6 +137,8 @@ class AmplitudeSlicePanel(QWidget):
         self._line.blockSignals(False)
         self._positions = ()
         self._grid = None
+        self._result = None
+        self._save.setEnabled(False)
         self._show_3d.setEnabled(False)
         self.curtains_ready.emit((), 0., 0.)
         self._levels = None
@@ -167,6 +176,7 @@ class AmplitudeSlicePanel(QWidget):
         if line_id:
             self._source_ids[line_id] = str(self._source.currentData() or '')
             self._levels = None
+            self._invalidate_result()
             self._request_bscan()
 
     def _request(self):
@@ -192,6 +202,21 @@ class AmplitudeSlicePanel(QWidget):
 
     def _reset_levels(self, *_args):
         self._levels = None
+        self._invalidate_result()
+
+    def _invalidate_result(self, *_args):
+        if self._cancel.isEnabled():
+            self.cancel_requested.emit()
+        self._run.setEnabled(True)
+        self._cancel.setEnabled(False)
+        self._save.setEnabled(False)
+        self._show_3d.setEnabled(False)
+        self._result = None
+        self._grid = None
+        self._positions = ()
+        self._map.clear_grid()
+        self.curtains_ready.emit((), 0., 0.)
+        self._status.setText('参数已更改，请重新生成切片')
 
     def _sync_slider(self, *_args):
         self._slider.setValue(round((self._start.value() + self._end.value()) * 5))
@@ -211,6 +236,8 @@ class AmplitudeSlicePanel(QWidget):
         self._positions = tuple(positions)
         grid = result.grid
         self._grid = grid
+        self._result = result
+        self._save.setEnabled(bool(np.isfinite(grid.values).any()))
         curtains = tuple(getattr(result, 'curtains', ()) or ())
         self._show_3d.setEnabled(bool(curtains))
         self.curtains_ready.emit(curtains, float(result.start_ns), float(result.end_ns))
@@ -231,6 +258,17 @@ class AmplitudeSlicePanel(QWidget):
         self._run.setEnabled(True)
         self._cancel.setEnabled(False)
         self._status.setText(str(message or '切片失败'))
+
+    def set_save_result(self, success, message):
+        self._save.setEnabled(self._result is not None)
+        self._status.setText(str(message or ('成果已保存' if success else '成果保存失败')))
+
+    def _save_result(self):
+        if self._result is None:
+            return
+        self._save.setEnabled(False)
+        self._status.setText('正在保存成果…')
+        self.save_requested.emit(self._result)
 
     def _map_clicked(self, event):
         if event.button() != Qt.MouseButton.LeftButton or not self._positions or self._grid is None:

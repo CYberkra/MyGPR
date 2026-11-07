@@ -40,10 +40,14 @@ class SpatialResult:
     stale: bool = False
     summary: Mapping[str, Any] = field(default_factory=dict)
     files: Mapping[str, str] = field(default_factory=dict)
+    options: Mapping[str, Any] = field(default_factory=dict)
+    sources: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "summary", MappingProxyType(dict(self.summary or {})))
         object.__setattr__(self, "files", MappingProxyType(dict(self.files or {})))
+        object.__setattr__(self, "options", MappingProxyType(dict(self.options or {})))
+        object.__setattr__(self, "sources", MappingProxyType(dict(self.sources or {})))
 
 
 __all__ = ["SpatialResult", "SpatialTrack", "SpatialTrackPoint"]

@@ -57,6 +57,7 @@ def _spatial_record(value: Any) -> SpatialResult:
         status=str(value.status), line_ids=tuple(value.line_ids), created_at=str(value.created_at),
         coordinate_system=str(value.coordinate_system), vertical_datum=str(value.vertical_datum),
         stale=bool(value.stale), summary=dict(value.summary or {}), files=dict(value.files or {}),
+        options=dict(value.options or {}), sources=dict(value.sources or {}),
     )
 
 
@@ -195,6 +196,21 @@ class SpatialPersistenceMixin:
     def list_spatial_results(self) -> Sequence[SpatialResult]:
         with self._lock:
             return tuple(_spatial_record(item) for item in SpatialResultVersionService(self._store).list_results())
+
+    def spatial_source_state_token(self, line_ids: Sequence[str]) -> str:
+        safe = tuple(self._validated_line(value) for value in line_ids)
+        with self._lock:
+            return SpatialResultVersionService(self._store)._current_source_state_token(safe)
+
+    def save_amplitude_result(self, result, *, name: str, context) -> SpatialResult:
+        from core.amplitude_spatial_result import save_amplitude_result
+        with self._lock:
+            self._store.assert_writable()
+            context.raise_if_cancelled()
+            record = save_amplitude_result(SpatialResultVersionService(self._store), result,
+                                           name=name, cancel_requested=context.is_cancelled)
+            context.mark_committed()
+            return _spatial_record(record)
 
     def spatial_preflight(
         self, *, line_ids: Sequence[str] | None, generate_surface: bool

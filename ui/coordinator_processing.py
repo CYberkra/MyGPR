@@ -150,6 +150,9 @@ class ProcessingChain:
             amplitude.cancel_requested.connect(pc.cancel_amplitude_preview)
             pc.amplitude_preview_ready.connect(amplitude.set_result)
             pc.amplitude_preview_failed.connect(amplitude.set_failure)
+            amplitude.save_requested.connect(pc.save_amplitude_slice)
+            pc.amplitude_save_finished.connect(amplitude.set_save_result)
+            pc.amplitude_save_finished.connect(self._on_amplitude_save_finished)
             amplitude.artifacts_requested.connect(
                 lambda line_id: pc.load_comparison_artifacts(str(co.current_project_id() or ''), line_id))
             pc.comparison_artifacts_ready.connect(
@@ -197,6 +200,11 @@ class ProcessingChain:
             pc.preview_comparison_artifact(project_id, line_id, artifact_id, request_id)
         else:
             pc.preview_comparison_line(project_id, line_id, request_id)
+
+    def _on_amplitude_save_finished(self, success, message):
+        project_id = str(self._co.current_project_id() or '')
+        if success and project_id and self._co.delivery_controller is not None:
+            self._co.delivery_controller.refresh_spatial(project_id)
 
     def on_methods_loaded(self, methods: list) -> None:
         """方法库 → 处理页 MethodBrowser。"""

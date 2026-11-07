@@ -102,6 +102,7 @@ class ProjectController(QObject):
     depth_save_failed = pyqtSignal(str)                    # message
     amplitude_preview_ready = pyqtSignal(object, object)   # result, projected positions
     amplitude_preview_failed = pyqtSignal(str)
+    amplitude_save_finished = pyqtSignal(bool, str)
     artifact_descendants_ready = pyqtSignal(str, list, dict)  # line_id, 后代闭包, {artifact_id: 名称}
     line_source_path_ready = pyqtSignal(str, object)          # line_id, 源文件路径|None
     line_sensor_summary_ready = pyqtSignal(str, str)         # line_id, compact availability text
@@ -747,6 +748,7 @@ class ProjectController(QObject):
                                   end_ns, cell_size_m, attribute) -> None:
         backend, bridge, project_id = self._backend(), self._job_bridge(), self._project_id_or_warn()
         if backend is None or bridge is None or project_id is None:
+            self.amplitude_preview_failed.emit('项目或后台任务服务不可用')
             return
         self.cancel_amplitude_preview()
         generation = self._amplitude_generation
@@ -782,6 +784,31 @@ class ProjectController(QObject):
 
         bridge.job_completed.connect(completed)
         bridge.watch(job_id, title='振幅切片')
+
+    def save_amplitude_slice(self, result) -> None:
+        backend, bridge, project_id = self._backend(), self._job_bridge(), self._project_id_or_warn()
+        if backend is None or bridge is None or project_id is None or result is None:
+            self.amplitude_save_finished.emit(False, '项目或后台任务服务不可用')
+            return
+        project_generation = self._project_context_generation
+        try:
+            job_id = backend.submit_save_amplitude_slice(project_id, result)
+        except Exception as exc:  # noqa: BLE001 - user-facing job admission failure
+            self.amplitude_save_finished.emit(False, friendly_error_message(exc))
+            return
+
+        def completed(done_id, success, message, _record):
+            if done_id != job_id:
+                return
+            try:
+                bridge.job_completed.disconnect(completed)
+            except TypeError:
+                pass
+            if project_generation == self._project_context_generation and self.current_project_id == project_id:
+                self.amplitude_save_finished.emit(success, '振幅切片已保存' if success else message)
+
+        bridge.job_completed.connect(completed)
+        bridge.watch(job_id, title='保存振幅切片')
 
     def submit_depth_layer(self, line_ids: list[str], cell_size_m: float) -> str | None:
         """提交网格化界面深度图层 job；bridge.watch 后经 depth_layer_saved 回 UI。"""
