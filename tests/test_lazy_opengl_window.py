@@ -15,7 +15,7 @@ import pytest
 def test_first_gl_view_does_not_hide_or_recreate_main_window(tmp_path, renderer):
     if find_spec("qfluentwidgets") is None or find_spec("OpenGL") is None:
         pytest.skip("Native GUI/OpenGL dependencies are unavailable")
-    environment = dict(os.environ, QT_QPA_PLATFORM="windows:darkmode=0")
+    environment = dict(os.environ, QT_QPA_PLATFORM="windows:darkmode=0", PYTHONFAULTHANDLER="1")
     if renderer == 'software':
         environment['QT_OPENGL'] = 'software'
     for key in ("APPDATA", "LOCALAPPDATA", "TEMP", "TMP"):
@@ -64,6 +64,9 @@ def test_first_gl_view_does_not_hide_or_recreate_main_window(tmp_path, renderer)
                 original_excepthook(exc_type, exc, traceback)
         sys.excepthook = report_gl_context
         app = QApplication([])
+        if __import__('os').environ.get('MYGPR_EXPERIMENTAL_GL') == '1':
+            from tests._experimental_opengl_compat import align_windows_opengl
+            align_windows_opengl()
         app.setStyle("Fusion")
         apply_theme(constants.THEME_LIGHT)
         for name in ("BackendController", "ProjectController", "ProcessingController", "InterpretationController", "DeliveryController"):
@@ -116,8 +119,10 @@ def test_first_gl_view_does_not_hide_or_recreate_main_window(tmp_path, renderer)
         assert view._gl_view.isValid(), "Native OpenGL context was not created"
         assert int(window.winId()) == before, (before, int(window.winId()), events)
         assert not events, events
+        print('OpenGL diagnostic: starting window close', file=sys.stderr, flush=True)
         window.close()
         app.processEvents()
+        print('OpenGL diagnostic: window close completed', file=sys.stderr, flush=True)
     ''')
     result = subprocess.run([sys.executable, "-c", script, str(tmp_path / "settings.json")],
                             env=environment, capture_output=True, text=True, timeout=35)
