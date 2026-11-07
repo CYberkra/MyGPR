@@ -70,17 +70,7 @@ class AmplitudeSlicePanel(QWidget):
             toolbar.addWidget(widget)
         toolbar.addStretch(1)
         layout.addLayout(toolbar)
-        parameters = QHBoxLayout()
-        for widget in (CaptionLabel('开始', self), self._start, CaptionLabel('结束', self),
-                       self._end, CaptionLabel('网格', self), self._cell):
-            parameters.addWidget(widget)
-        parameters.addStretch(1)
-        layout.addLayout(parameters)
-        actions = QHBoxLayout()
-        for widget in (self._run, self._cancel, self._show_3d, self._save):
-            actions.addWidget(widget)
-        actions.addStretch(1)
-        layout.addLayout(actions)
+        self._build_parameter_rows(layout)
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
         self._map = DepthSliceView(splitter)
         self._map._empty_overlay._title_label.setText('暂无振幅切片')
@@ -128,6 +118,19 @@ class AmplitudeSlicePanel(QWidget):
         self._time_marker = pg.InfiniteLine(angle=0, movable=False, pen=pg.mkPen('#397fff', width=1))
         self._time_marker.hide()
         self._bscan._plot.addItem(self._time_marker)
+
+    def _build_parameter_rows(self, layout):
+        parameters = QHBoxLayout()
+        for widget in (CaptionLabel('开始', self), self._start, CaptionLabel('结束', self),
+                       self._end, CaptionLabel('网格', self), self._cell):
+            parameters.addWidget(widget)
+        parameters.addStretch(1)
+        layout.addLayout(parameters)
+        actions = QHBoxLayout()
+        for widget in (self._run, self._cancel, self._show_3d, self._save):
+            actions.addWidget(widget)
+        actions.addStretch(1)
+        layout.addLayout(actions)
 
     def _spin(self, value, suffix, minimum=0.):
         control = DoubleSpinBox(self)
