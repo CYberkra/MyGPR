@@ -76,6 +76,19 @@ def test_nested_acquisition_metadata_is_enforced():
         collect_observations(projects, 'p', [AmplitudeSource('L1', component='real')], 0., 4.)
 
 
+def test_deeply_nested_component_is_detected_and_conflicts_rejected():
+    projects = Projects()
+    projects.get_dataset_info = lambda *args: SimpleNamespace(
+        shape=(4, 3), metadata={'time_axis_ns': [0., 1., 2., 3.],
+                                'metadata': {'metadata': {'store_component': 'mag'}}})
+    assert collect_observations(projects, 'p', [AmplitudeSource('L1')], 0., 4.)[0].source.component == 'mag'
+    projects.get_dataset_info = lambda *args: SimpleNamespace(
+        shape=(4, 3), metadata={'time_axis_ns': [0., 1., 2., 3.], 'store_component': 'real',
+                                'metadata': {'store_component': 'mag'}})
+    with pytest.raises(ValueError, match='分量'):
+        collect_observations(projects, 'p', [AmplitudeSource('L1')], 0., 4.)
+
+
 def test_preprojected_positions_remain_aligned_to_original_trace_numbers():
     source = AmplitudeSource('L1', component='mag')
     coords = LineObservations(source, 'EPSG:32648', np.array([0, 2]),

@@ -5,6 +5,18 @@ import struct
 import numpy as np
 
 
+def metadata_values(metadata, key):
+    """Follow nested storage metadata without guessing values or looping."""
+    values, seen = [], set()
+    while hasattr(metadata, 'get') and id(metadata) not in seen:
+        seen.add(id(metadata))
+        value = metadata.get(key)
+        if value is not None and value != '':
+            values.append(value)
+        metadata = metadata.get('metadata')
+    return values
+
+
 def track_position_fingerprint(track) -> str:
     """Hash the actual ordered trace locations and altitude metadata."""
     digest = hashlib.sha256(str(track.coordinate_system or '').encode('utf-8'))
@@ -26,10 +38,8 @@ def source_digest(projects, project_id, source, info):
         if len(matches) != 1:
             raise ValueError(f'{source.line_id} 的处理成果不存在或不唯一')
         return str(matches[0].sha256 or '')
-    metadata = info.metadata
-    nested = metadata.get('metadata')
-    nested = nested if hasattr(nested, 'get') else {}
-    return str(metadata.get('data_sha256') or nested.get('data_sha256') or '')
+    hashes = metadata_values(info.metadata, 'data_sha256')
+    return str(hashes[0]) if hashes else ''
 
 
 def trace_ids(metadata, expected: int) -> np.ndarray:

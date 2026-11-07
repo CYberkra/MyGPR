@@ -7,7 +7,7 @@ from typing import Sequence
 import numpy as np
 
 from mygpr.application.jobs.context import ExecutionContext
-from mygpr.application.spatial.amplitude_identity import source_digest, trace_ids, track_position_fingerprint
+from mygpr.application.spatial.amplitude_identity import metadata_values, source_digest, trace_ids, track_position_fingerprint
 from mygpr.domain.spatial.amplitude_slice import AmplitudeGrid, grid_line_values, window_attribute
 
 
@@ -77,17 +77,19 @@ def collect_observations(
                 if artifact else projects.get_dataset_info(project_id, source.line_id))
         samples, trace_count = info.shape
         metadata = info.metadata
-        if (metadata.get('time_axis_status') == 'unknown' or metadata.get('is_depth')
+        statuses = metadata_values(metadata, 'time_axis_status')
+        if ((statuses and statuses[0] == 'unknown') or metadata.get('is_depth')
                 or metadata.get('is_elevation')):
             raise ValueError(f'{source.line_id} 没有可确认的时域时间轴')
         axis = np.asarray(metadata.get('time_axis_ns', []), dtype=np.float64)
         if axis.shape != (samples,):
             raise ValueError(f'{source.line_id} 缺少完整时间轴')
         component = str(source.component).lower()
-        nested = metadata.get('metadata')
-        nested = nested if hasattr(nested, 'get') else {}
-        stored = str(metadata.get('store_component') or nested.get('store_component') or '').lower()
         aliases = {'magnitude': 'mag'}
+        declarations = [str(value).lower() for value in metadata_values(metadata, 'store_component')]
+        if len({aliases.get(value, value) for value in declarations}) > 1:
+            raise ValueError(f'{source.line_id} 的输入分量声明相互冲突')
+        stored = declarations[0] if declarations else ''
         if not component:
             component = stored
         if component not in ('real', 'mag', 'magnitude'):
