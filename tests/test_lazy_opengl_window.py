@@ -124,6 +124,7 @@ def test_first_gl_view_does_not_hide_or_recreate_main_window(tmp_path, renderer)
         view.set_tracks([track], {'L01': '#ff0000'})
         app.processEvents()
         assert view._line_items, '3D trajectory was not created'
+        assert view._gl_view.opts['distance'] <= 20.0, 'Short trajectory starts too small to inspect'
         assert not view._gl_view.grabFramebuffer().isNull(), '3D frame was not rendered'
         assert int(window.winId()) == before, (before, int(window.winId()), events)
         assert not events, events

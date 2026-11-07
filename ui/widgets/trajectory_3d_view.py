@@ -633,7 +633,7 @@ class Trajectory3DView(QWidget):
         # 有地形时网格保持隐藏（旧逻辑：set_tracks 先清地形再显网格，等价）
         self._grid.setVisible(self._terrain_item is None)
         self._gl_view.setCameraPosition(
-            distance=max(extent * 2.5, 100.0), elevation=30.0, azimuth=45.0)
+            distance=max(extent * 2.5, 10.0), elevation=30.0, azimuth=45.0)
         _, vec = _gl_state()
         self._gl_view.opts['center'] = vec(0.0, 0.0, 0.0)
 
