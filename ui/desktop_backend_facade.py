@@ -105,6 +105,7 @@ def prepare_amplitude_sources(tracks, source_ids, component, *, target_crs=''):
             np.array([p.x for p in points], dtype=np.float64),
             np.array([p.y for p in points], dtype=np.float64), np.zeros(len(points)),
             track_position_fingerprint(track),
+            tuple(getattr(p, 'trace_id', None) for p in points),
         ))
     projected, _crs = project_observations(positions, target_crs=target_crs)
     return tuple(sources), projected

@@ -18,11 +18,15 @@ class TrajectoryCurtainsMixin:
     def set_curtains(self, previews, start_ns, end_ns):
         self._curtain_previews = tuple(previews or ())
         self._curtain_window = (float(start_ns), float(end_ns))
+        if self._terrain_payload is not None:
+            self._render_terrain()
         self._render_curtains()
 
     def clear_curtains(self):
         self._curtain_previews = ()
         self._clear_curtain_items()
+        if self._terrain_payload is not None:
+            self._render_terrain()
         self.curtain_notice.emit('')
 
     def _clear_curtain_items(self):

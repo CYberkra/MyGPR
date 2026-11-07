@@ -100,6 +100,9 @@ class SpatialPersistenceMixin:
             z = first("local_z_m", "elevation_m", "altitude_m", "height_m", "z")
             fh = first("flight_height_m", "height_agl_m", "agl_m")
             ge = first("ground_elevation_m")
+            trace_ids = np.asarray(metadata.get('trace_id', []))
+            if trace_ids.ndim != 1 or trace_ids.dtype.kind not in 'iu':
+                trace_ids = np.array([], dtype=np.uint64)
             if x is None or y is None:
                 # CSV 导入的测线 trace metadata 常无坐标键，回退到轨迹文件
                 track = self._spatial_track_from_trajectory(line, coordinate_system)
@@ -123,6 +126,7 @@ class SpatialPersistenceMixin:
                     index, float(x[index]), float(y[index]), float(z[index]),
                     flight_height_m=_at(fh, index),
                     ground_elevation_m=_at(ge, index),
+                    trace_id=int(trace_ids[index]) if index < len(trace_ids) else None,
                 )
                 for index in range(count)
                 if np.isfinite(x[index]) and np.isfinite(y[index])

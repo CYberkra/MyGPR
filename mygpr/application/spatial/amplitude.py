@@ -29,6 +29,7 @@ class LineObservations:
     y: np.ndarray
     values: np.ndarray
     source_position_sha256: str = ''
+    source_trace_ids: tuple = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +42,20 @@ class AmplitudeResult:
     attribute: str
     curtains: tuple = ()
     source_state_token: str = ''
+
+
+def _confirmed_component(source, metadata):
+    aliases = {'magnitude': 'mag'}
+    declarations = [str(value).lower() for value in metadata_values(metadata, 'store_component')]
+    if len({aliases.get(value, value) for value in declarations}) > 1:
+        raise ValueError(f'{source.line_id} 的输入分量声明相互冲突')
+    stored = declarations[0] if declarations else ''
+    component = str(source.component).lower() or stored
+    if component not in ('real', 'mag', 'magnitude'):
+        raise ValueError(f'{source.line_id} 的输入分量未确认')
+    if stored and aliases.get(stored, stored) != aliases.get(component, component):
+        raise ValueError(f'{source.line_id} 的输入分量与存储记录不一致')
+    return component
 
 
 def collect_observations(
@@ -84,18 +99,7 @@ def collect_observations(
         axis = np.asarray(metadata.get('time_axis_ns', []), dtype=np.float64)
         if axis.shape != (samples,):
             raise ValueError(f'{source.line_id} 缺少完整时间轴')
-        component = str(source.component).lower()
-        aliases = {'magnitude': 'mag'}
-        declarations = [str(value).lower() for value in metadata_values(metadata, 'store_component')]
-        if len({aliases.get(value, value) for value in declarations}) > 1:
-            raise ValueError(f'{source.line_id} 的输入分量声明相互冲突')
-        stored = declarations[0] if declarations else ''
-        if not component:
-            component = stored
-        if component not in ('real', 'mag', 'magnitude'):
-            raise ValueError(f'{source.line_id} 的输入分量未确认')
-        if stored and aliases.get(stored, stored) != aliases.get(component, component):
-            raise ValueError(f'{source.line_id} 的输入分量与存储记录不一致')
+        component = _confirmed_component(source, metadata)
         source = replace(source, component=component,
                          content_sha256=source_digest(projects, project_id, source, info))
         projected_line = projected.get(source.line_id)

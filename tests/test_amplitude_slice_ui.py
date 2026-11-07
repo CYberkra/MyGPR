@@ -12,6 +12,18 @@ from mygpr.application.spatial.amplitude_saved import LoadedAmplitudeSlice
 from ui.widgets.amplitude_slice_panel import AmplitudeSlicePanel
 
 
+def test_processed_marker_uses_exact_large_trace_id_after_reordering(qapp):
+    panel = AmplitudeSlicePanel()
+    identifier = 2**53 + 1
+    panel._bundle = SimpleNamespace(trace_indices=np.array([0, 1]),
+        source_trace_ids=np.array([identifier + 1, identifier], dtype=np.uint64),
+        sample_axis=None, sample_axis_label='')
+    panel._selected_raw_id = ('L1', identifier)
+    panel._highlight_trace('L1', 'artifact')
+    assert panel._marker_value == 1.5
+    panel.close()
+
+
 def test_panel_requests_selected_sources_and_disables_during_job(qapp):
     panel = AmplitudeSlicePanel()
     requests = []

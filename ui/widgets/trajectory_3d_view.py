@@ -963,6 +963,9 @@ class Trajectory3DView(TrajectoryCurtainsMixin, QWidget):
                     if valid.any():
                         colors[..., :3][valid] = np.clip(
                             img[valid], 0.0, 255.0).astype(np.uint8)
+            showing_curtains = bool(self._curtain_previews)
+            if showing_curtains:
+                colors[..., 3] = 70
             self._clear_terrain()
             _register_terrain_shader()
             # z/colors 转置为 (len(x), len(y))：pyqtgraph 期望 x 为第一维
@@ -971,7 +974,10 @@ class Trajectory3DView(TrajectoryCurtainsMixin, QWidget):
                 z=np.ascontiguousarray(z_disp.T),
                 colors=np.ascontiguousarray(
                     colors.transpose(1, 0, 2), np.uint8),
-                shader=_TERRAIN_SHADER, smooth=True)
+                shader=_TERRAIN_SHADER, smooth=True,
+                glOptions='translucent' if showing_curtains else 'opaque')
+            if showing_curtains:
+                item.setDepthValue(10)
             self._gl_view.addItem(item)
             self._terrain_item = item
             self._grid.setVisible(False)   # 地形就位后隐藏平面网格

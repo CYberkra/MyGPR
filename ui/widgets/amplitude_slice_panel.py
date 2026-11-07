@@ -37,6 +37,7 @@ class AmplitudeSlicePanel(QWidget):
         self._shown_source = None
         self._bscan_request = ''
         self._selected_raw_trace = None  # (line_id, original trace index)
+        self._selected_raw_id = None
         self._selected_source_trace = None  # (line_id, artifact_id, source trace index)
         self._picked_time_ns = None
         self._marker_value = None
@@ -142,6 +143,7 @@ class AmplitudeSlicePanel(QWidget):
             self._shown_source = None
             self._bscan.clear()
             self._selected_raw_trace = None
+            self._selected_raw_id = None
             self._selected_source_trace = None
             self._picked_time_ns = None
             self._trace_marker.hide()
@@ -365,12 +367,14 @@ class AmplitudeSlicePanel(QWidget):
             index = int(np.argmin(d2))
             if not np.isfinite(d2[index]):
                 continue
-            candidate = (float(d2[index]), line.source.line_id, int(line.trace_indices[index]))
+            trace_id = line.source_trace_ids[index] if len(line.source_trace_ids) == len(line.x) else None
+            candidate = (float(d2[index]), line.source.line_id, int(line.trace_indices[index]), trace_id)
             if nearest is None or candidate[0] < nearest[0]:
                 nearest = candidate
         if nearest is None:
             return
         self._selected_raw_trace = (nearest[1], nearest[2])
+        self._selected_raw_id = (nearest[1], nearest[3]) if nearest[3] is not None else None
         self._selected_source_trace = None
         self._picked_time_ns = None
         index = self._line.findData(nearest[1])
@@ -417,6 +421,14 @@ class AmplitudeSlicePanel(QWidget):
         # Until an explicit mapping is supplied, never draw a misleading marker.
         indices = getattr(self._bundle, 'trace_indices', None)
         requested = None
+        source_ids = getattr(self._bundle, 'source_trace_ids', None)
+        if (artifact_id and self._selected_raw_id is not None and self._selected_raw_id[0] == str(line_id)
+                and source_ids is not None):
+            matches = np.flatnonzero(np.asarray(source_ids) == self._selected_raw_id[1])
+            if len(matches) == 1:
+                marker = float(matches[0]) + .5
+                self._trace_marker.setValue(marker)
+                self._trace_marker.show()
         if (self._selected_source_trace is not None
                 and self._selected_source_trace[:2] == (str(line_id), str(artifact_id))):
             requested = self._selected_source_trace[2]
@@ -471,6 +483,7 @@ class AmplitudeSlicePanel(QWidget):
         if str(self._source_ids.get(str(line_id), '')) != str(artifact_id):
             return
         self._selected_raw_trace = None
+        self._selected_raw_id = None
         self._selected_source_trace = (str(line_id), str(artifact_id), int(trace_index))
         self._picked_time_ns = float(time_ns)
         index = self._line.findData(str(line_id))

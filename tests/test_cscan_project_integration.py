@@ -17,6 +17,7 @@ def test_import_slice_save_reopen_delete_preserves_original(tmp_path):
         h5.attrs.update(samples_per_trace=16, time_window_ns=16., store_component='mag')
         h5.create_dataset('traces', data=waveforms, chunks=(1, 16), maxshape=(None, 16))
         meta = h5.create_group('trace_meta')
+        meta.create_dataset('trace_id', data=np.array([2**53 + 1, 2**53 + 2, 2**53 + 3], dtype=np.uint64))
         for key, values in {'lon': [105., 105.00001, 105.00002], 'lat': [30., 30., 30.],
                             'alt': [500., 501., 502.], 'height': [2., 2., 2.]}.items():
             meta.create_dataset(key, data=values)
@@ -27,6 +28,7 @@ def test_import_slice_save_reopen_delete_preserves_original(tmp_path):
         project = backend.projects.create_project(root, name='slice', coordinate_system='EPSG:32648')
         backend.projects.import_line_source(project.project_id, 'L01', source)
         track, = backend.spatial.load_tracks(project.project_id)
+        assert track.points[0].trace_id == 2**53 + 1
         src = AmplitudeSource('L01')
         coords = LineObservations(src, track.coordinate_system,
             np.array([p.trace_index for p in track.points]), np.array([p.x for p in track.points]),

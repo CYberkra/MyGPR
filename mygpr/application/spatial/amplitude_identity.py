@@ -26,6 +26,8 @@ def track_position_fingerprint(track) -> str:
             value = getattr(point, name, None)
             values.append(float(value) if value is not None else float('nan'))
         digest.update(struct.pack('<q5d', int(point.trace_index), *values))
+        trace_id = getattr(point, 'trace_id', None)
+        digest.update(('' if trace_id is None else str(int(trace_id))).encode('ascii') + b'\0')
     return digest.hexdigest()
 
 
