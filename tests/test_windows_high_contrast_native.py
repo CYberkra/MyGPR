@@ -49,6 +49,7 @@ def test_native_contrast_theme_captures_workbench_and_backup_dialog(tmp_path):
     app = QApplication.instance() or QApplication([])
     apply_theme(constants.THEME_DARK)
     window = MyGPRMainWindow(settings=SettingsManager(str(tmp_path / 'settings.json')))
+    original_palette = QPalette(app.palette())
     dialog = None
     output = Path('output/ci-regressions')
     output.mkdir(parents=True, exist_ok=True)
@@ -83,7 +84,9 @@ def test_native_contrast_theme_captures_workbench_and_backup_dialog(tmp_path):
             'Application input text does not follow the Windows contrast theme'
         )
     finally:
+        write_contrast(original_flags, original_scheme)
+        QTest.qWait(500)
         if dialog is not None:
             dialog.close()
         window.close()
-        write_contrast(original_flags, original_scheme)
+    assert app.palette().color(QPalette.ColorRole.Base) == original_palette.color(QPalette.ColorRole.Base)

@@ -143,6 +143,8 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
         self._setup_global_shortcuts()
         self._connect_signals()
         self._init_state()
+        from ui.system_contrast import install_contrast_observer
+        self._contrast_observer = install_contrast_observer(self)
         from PyQt6.QtWidgets import QApplication
         from ui.file_drop import FileDropFilter
         self.setAcceptDrops(True)
@@ -851,6 +853,9 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
         self.settings.set('theme', str(theme))
         if not self._restoring_settings:
             self.settings.save()
+        observer = getattr(self, '_contrast_observer', None)
+        if observer is not None:
+            observer.theme_changed()
 
     def _set_backend_ready(self, ready: bool) -> None:
         """后端未就绪时禁用除主页/设置外的页面，就绪后恢复。"""
@@ -1148,6 +1153,9 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
         if not self.page_coordinator.project.confirm_interpretation_close():
             event.ignore()
             return
+        observer = getattr(self, '_contrast_observer', None)
+        if observer is not None:
+            observer.shutdown()
         shutdown_startup = getattr(self._page('homeInterface'), 'shutdown', None)
         if callable(shutdown_startup):
             shutdown_startup()

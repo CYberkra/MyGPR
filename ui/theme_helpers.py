@@ -285,7 +285,7 @@ def native_views_qss(dark: bool) -> str:
         ' QTreeView {'
         ' background-color: palette(base); color: palette(text);'
         ' border: 1px solid palette(mid); gridline-color: palette(midlight);'
-        ' selection-background-color: palette(highlight); selection-color: #ffffff;'
+        ' selection-background-color: palette(highlight); selection-color: palette(highlighted-text);'
         ' }'
         'QHeaderView::section {'
         ' background-color: palette(alternate-base); color: palette(text);'
