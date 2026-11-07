@@ -88,6 +88,7 @@ def prepare_amplitude_sources(tracks, source_ids, component):
     """Project selected tracks on the GUI thread and retain raw trace indices."""
     import numpy as np
     from mygpr.application.spatial.amplitude import AmplitudeSource, LineObservations
+    from mygpr.application.spatial.amplitude_identity import track_position_fingerprint
     from mygpr.application.spatial.amplitude_projection import project_observations
 
     sources, positions = [], []
@@ -103,6 +104,7 @@ def prepare_amplitude_sources(tracks, source_ids, component):
             np.array([p.trace_index for p in points], dtype=np.int64),
             np.array([p.x for p in points], dtype=np.float64),
             np.array([p.y for p in points], dtype=np.float64), np.zeros(len(points)),
+            track_position_fingerprint(track),
         ))
     projected, _crs = project_observations(positions)
     return tuple(sources), projected

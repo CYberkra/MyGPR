@@ -150,6 +150,7 @@ class ProcessingChain:
             amplitude.cancel_requested.connect(pc.cancel_amplitude_preview)
             pc.amplitude_preview_ready.connect(amplitude.set_result)
             pc.amplitude_preview_failed.connect(amplitude.set_failure)
+            pc.amplitude_preview_failed.connect(spatial.amplitude_preview_failed)
             amplitude.save_requested.connect(pc.save_amplitude_slice)
             pc.amplitude_save_finished.connect(amplitude.set_save_result)
             pc.amplitude_save_finished.connect(self._on_amplitude_save_finished)

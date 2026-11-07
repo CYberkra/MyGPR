@@ -477,6 +477,20 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
         self._curtain_notice = CaptionLabel('', view_card)
         self._curtain_notice.setVisible(False)
         view_layout.addWidget(self._curtain_notice)
+        self._curtain_row = QWidget(view_card)
+        curtain_row = QHBoxLayout(self._curtain_row)
+        curtain_row.setContentsMargins(0, 0, 0, 0)
+        self._curtain_time = CaptionLabel('时间: --', self._curtain_row)
+        self._curtain_slider = Slider(Qt.Orientation.Horizontal, self._curtain_row)
+        self._curtain_slider.setRange(0, 10000)
+        self._curtain_back = PushButton('平面切片', self._curtain_row)
+        curtain_row.addWidget(self._curtain_time)
+        curtain_row.addWidget(self._curtain_slider, 1)
+        curtain_row.addWidget(self._curtain_back)
+        view_layout.addWidget(self._curtain_row)
+        self._curtain_row.setVisible(False)
+        self._has_curtains = False
+        self._curtain_session = False
         middle_layout.addWidget(view_card, 1)
 
     def _build_right_column(self, columns: QHBoxLayout) -> None:
@@ -552,8 +566,13 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
         self._3d_dem_clear_btn.clicked.connect(self._on_clear_dem_clicked)
         self._3d_view.local_dem_notice.connect(self._on_dem_notice)
         self._3d_view.curtain_notice.connect(self._on_curtain_notice)
-        self._amplitude_view.curtains_ready.connect(self._3d_view.set_curtains)
+        self._amplitude_view.curtains_ready.connect(self._set_curtains)
         self._amplitude_view.show_3d_requested.connect(self._show_amplitude_3d)
+        self._curtain_slider.valueChanged.connect(
+            lambda value: self._curtain_time.setText(f'时间: {value / 10:g} ns'))
+        self._curtain_slider.sliderReleased.connect(
+            lambda: self._amplitude_view.set_center_and_request(self._curtain_slider.value() / 10.))
+        self._curtain_back.clicked.connect(self._show_amplitude_2d)
         self._depth_slider.valueChanged.connect(self._on_depth_slider_changed)
         self._depth_cell_spin.valueChanged.connect(self._on_depth_cell_changed)
         self._depth_save_btn.clicked.connect(self._on_save_depth_layer_clicked)
@@ -575,6 +594,7 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
         self._line_context.close()
         self._tracks = list(tracks or [])
         if not self._tracks:
+            self._curtain_session = False
             self._3d_view.clear_curtains()
             self._amplitude_view.set_tracks([], {})
         self._tracks_by_id = {}
@@ -736,12 +756,35 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
                 self.depth_preview_requested.emit(checked, float(self._depth_cell_spin.value()))
 
     def _show_amplitude_3d(self) -> None:
+        self._curtain_session = True
         self._view_segment.setCurrentItem(_SEG_3D)
         self._switch_view(_SEG_3D)
+
+    def _show_amplitude_2d(self) -> None:
+        self._view_segment.setCurrentItem(_SEG_AMPLITUDE)
+        self._switch_view(_SEG_AMPLITUDE)
+
+    def _set_curtains(self, previews, start_ns, end_ns) -> None:
+        self._has_curtains = bool(previews)
+        if self._has_curtains:
+            self._curtain_slider.setMaximum(max(10000, round(float(end_ns) * 15)))
+            self._curtain_slider.setValue(round((float(start_ns) + float(end_ns)) * 5))
+            self._curtain_notice.setText('时间域示意，垂直比例不代表地下深度')
+        elif self._curtain_session:
+            self._curtain_notice.setText('切片已变化，请等待结果或返回平面切片')
+        else:
+            self._curtain_notice.setText('')
+        self._3d_view.set_curtains(previews, start_ns, end_ns)
+        self._sync_view_affordances(self._view_segment.currentRouteKey())
 
     def _on_curtain_notice(self, text: str) -> None:
         self._curtain_notice.setText(str(text))
         self._curtain_notice.setVisible(bool(text) and self._view_stack.currentWidget() is self._3d_view)
+
+    def amplitude_preview_failed(self, message: str) -> None:
+        if self._curtain_session and self._view_stack.currentWidget() is self._3d_view:
+            self._curtain_notice.setText(str(message))
+            self._curtain_notice.setVisible(True)
 
     def _sync_view_affordances(self, route_key: str) -> None:
         """切段时同步「只属于某段」的界面附属件（2026-10-06）。
@@ -759,6 +802,7 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
         is_depth = route_key == _SEG_DEPTH
         self._depth_row_widget.setVisible(is_depth)
         self._curtain_notice.setVisible(route_key == _SEG_3D and bool(self._curtain_notice.text()))
+        self._curtain_row.setVisible(route_key == _SEG_3D and self._curtain_session)
         if route_key == _SEG_3D and self._view3d_card.is_collapsed():
             self._view3d_card.set_collapsed(False, animate=True)
 

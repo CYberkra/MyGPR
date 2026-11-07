@@ -1,5 +1,20 @@
 """Source identity and trace-ID validation for amplitude analysis."""
+import hashlib
+import struct
+
 import numpy as np
+
+
+def track_position_fingerprint(track) -> str:
+    """Hash the actual ordered trace locations and altitude metadata."""
+    digest = hashlib.sha256(str(track.coordinate_system or '').encode('utf-8'))
+    for point in track.points:
+        values = []
+        for name in ('x', 'y', 'elevation_m', 'flight_height_m', 'ground_elevation_m'):
+            value = getattr(point, name, None)
+            values.append(float(value) if value is not None else float('nan'))
+        digest.update(struct.pack('<q5d', int(point.trace_index), *values))
+    return digest.hexdigest()
 
 
 def source_digest(projects, project_id, source, info):

@@ -31,6 +31,7 @@ class AmplitudeSlicePanel(QWidget):
         self._grid = None
         self._result = None
         self._bundle = None
+        self._shown_source = None
         self._bscan_request = ''
         self._selected_raw_trace = None  # (line_id, original trace index)
         self._levels = None
@@ -70,6 +71,11 @@ class AmplitudeSlicePanel(QWidget):
         layout.addLayout(parameters)
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
         self._map = DepthSliceView(splitter)
+        self._map._empty_overlay._title_label.setText('暂无振幅切片')
+        self._map._empty_overlay._hint_label.setText('勾选测线并设置时间窗')
+        self._track_points = pg.ScatterPlotItem(pen=None, brush=pg.mkBrush(105, 105, 105, 140), size=2)
+        self._track_points.setZValue(10)
+        self._map._plot_item.addItem(self._track_points)
         self._bscan = BScanView(splitter)
         splitter.addWidget(self._map)
         splitter.addWidget(self._bscan)
@@ -124,6 +130,8 @@ class AmplitudeSlicePanel(QWidget):
             self._source_ids.clear()
             self._artifact_lists.clear()
             self._bundle = None
+            self._shown_source = None
+            self._bscan.clear()
             self._selected_raw_trace = None
             self._trace_marker.hide()
             self._window_band.hide()
@@ -143,6 +151,7 @@ class AmplitudeSlicePanel(QWidget):
         self.curtains_ready.emit((), 0., 0.)
         self._levels = None
         self._map.clear_grid()
+        self._track_points.clear()
         self._line_changed()
 
     def set_artifacts(self, line_id, artifacts):
@@ -215,10 +224,12 @@ class AmplitudeSlicePanel(QWidget):
         self._grid = None
         self._positions = ()
         self._map.clear_grid()
+        self._track_points.clear()
         self.curtains_ready.emit((), 0., 0.)
         self._status.setText('参数已更改，请重新生成切片')
 
     def _sync_slider(self, *_args):
+        self._slider.setMaximum(max(10000, round(self._end.value() * 15)))
         self._slider.setValue(round((self._start.value() + self._end.value()) * 5))
 
     def _slider_released(self):
@@ -230,12 +241,19 @@ class AmplitudeSlicePanel(QWidget):
         self._end.setValue(center + width / 2.)
         self._request()
 
+    def set_center_and_request(self, value_ns):
+        self._slider.setValue(round(float(value_ns) * 10))
+        self._slider_released()
+
     def set_result(self, result, positions):
         self._run.setEnabled(True)
         self._cancel.setEnabled(False)
         self._positions = tuple(positions)
         grid = result.grid
         self._grid = grid
+        if self._positions:
+            self._track_points.setData(x=np.concatenate([p.x for p in self._positions]),
+                                       y=np.concatenate([p.y for p in self._positions]))
         self._result = result
         self._save.setEnabled(bool(np.isfinite(grid.values).any()))
         curtains = tuple(getattr(result, 'curtains', ()) or ())
@@ -304,12 +322,21 @@ class AmplitudeSlicePanel(QWidget):
         if index != self._line.currentIndex():
             self._line.setCurrentIndex(index)
         else:
-            self._request_bscan()
+            source = (nearest[1], str(self._source_ids.get(nearest[1], '')))
+            if self._bundle is not None and self._shown_source == source:
+                self._highlight_trace(*source)
+            else:
+                self._request_bscan()
 
     def _request_bscan(self):
         line_id = str(self._line.currentData() or '')
         if not line_id:
             return
+        self._bundle = None
+        self._shown_source = None
+        self._bscan.clear()
+        self._trace_marker.hide()
+        self._window_band.hide()
         self._bscan_request = uuid4().hex
         self.bscan_requested.emit(line_id, str(self._source_ids.get(line_id, '')), self._bscan_request)
 
@@ -320,18 +347,22 @@ class AmplitudeSlicePanel(QWidget):
             self._status.setText(str(error or '无法加载剖面'))
             return
         self._bundle = bundle
+        self._shown_source = (str(line_id), str(artifact_id))
         self._bscan.set_bundle(bundle)
+        self._highlight_trace(line_id, artifact_id)
+        self._show_window()
+
+    def _highlight_trace(self, line_id, artifact_id):
         self._trace_marker.hide()
         # Raw track indices are not necessarily artifact indices after processing.
         # Until an explicit mapping is supplied, never draw a misleading marker.
-        indices = getattr(bundle, 'trace_indices', None)
+        indices = getattr(self._bundle, 'trace_indices', None)
         if (not artifact_id and self._selected_raw_trace is not None and indices is not None
                 and self._selected_raw_trace[0] == str(line_id)):
             indices = np.asarray(indices)
             if indices.size:
                 self._trace_marker.setValue(int(np.argmin(np.abs(indices - self._selected_raw_trace[1]))) + 0.5)
                 self._trace_marker.show()
-        self._show_window()
 
     def _show_window(self):
         axis = getattr(self._bundle, 'sample_axis', None) if self._bundle is not None else None

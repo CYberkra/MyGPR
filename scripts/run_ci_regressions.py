@@ -17,6 +17,7 @@ SUITES = {
         "tests/test_cscan_curtain_preview.py",
         "tests/test_cscan_curtain_ui.py",
         "tests/test_cscan_spatial_result.py",
+        "tests/test_cscan_project_integration.py",
         "tests/test_amplitude_slice_ui.py",
     ),
     "update_installation": ("tests/test_windows_update_acceptance.py",),

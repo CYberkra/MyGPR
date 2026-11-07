@@ -50,6 +50,7 @@ def save_amplitude_result(service, result, *, name: str, cancel_requested=None):
             warnings.append(f'{source.line_id}：来源未提供内容哈希')
         source_manifest[source.line_id] = {
             'artifact_id': source.artifact_id, 'component': source.component, 'content_sha256': digest,
+            'position_sha256': str(source.position_sha256 or ''),
         }
     base_name = 'amplitude_slice'
     revision = service._next_revision(base_name)

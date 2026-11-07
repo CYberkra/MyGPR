@@ -5,6 +5,7 @@ import pytest
 
 from mygpr.application.spatial.amplitude import AmplitudeSource, LineObservations, collect_observations, build_amplitude_grid
 from mygpr.domain.spatial.models import SpatialTrack, SpatialTrackPoint
+from mygpr.application.spatial.amplitude_identity import track_position_fingerprint
 
 
 class Projects:
@@ -87,6 +88,17 @@ def test_preprojected_positions_remain_aligned_to_original_trace_numbers():
 def test_component_can_be_selected_from_declared_acquisition_metadata():
     result = collect_observations(Projects(), 'p', [AmplitudeSource('L1')], 0., 4.)
     assert result[0].source.component == 'mag'
+
+
+def test_rejects_projected_positions_from_an_old_track_revision():
+    projects = Projects()
+    src = AmplitudeSource('L1', component='mag')
+    old_hash = track_position_fingerprint(projects.track)
+    coords = LineObservations(src, 'EPSG:32648', np.array([0, 2]),
+                              np.array([10., 30.]), np.array([20., 40.]), np.zeros(2), old_hash)
+    projects.track = SpatialTrack('L1', 'line', (SpatialTrackPoint(0, 99., 20.),), 'EPSG:32648')
+    with pytest.raises(ValueError, match='轨迹已变化'):
+        collect_observations(projects, 'p', [src], 0., 4., positions=[coords])
 
 
 def test_grid_uses_projected_positions_and_records_actual_source():

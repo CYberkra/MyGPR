@@ -7,7 +7,7 @@ from typing import Sequence
 import numpy as np
 
 from mygpr.application.jobs.context import ExecutionContext
-from mygpr.application.spatial.amplitude_identity import source_digest, trace_ids
+from mygpr.application.spatial.amplitude_identity import source_digest, trace_ids, track_position_fingerprint
 from mygpr.domain.spatial.amplitude_slice import AmplitudeGrid, grid_line_values, window_attribute
 
 
@@ -17,6 +17,7 @@ class AmplitudeSource:
     artifact_id: str = ''
     component: str = ''
     content_sha256: str = ''
+    position_sha256: str = ''
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +28,7 @@ class LineObservations:
     x: np.ndarray
     y: np.ndarray
     values: np.ndarray
+    source_position_sha256: str = ''
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +100,10 @@ def collect_observations(
         if positions is not None and projected_line is None:
             raise ValueError(f'{source.line_id} 缺少已投影的轨迹')
         if projected_line is not None:
+            position_digest = track_position_fingerprint(track)
+            if (projected_line.source_position_sha256
+                    and projected_line.source_position_sha256 != position_digest):
+                raise ValueError(f'{source.line_id} 的轨迹已变化，请重新生成切片')
             if not (len(projected_line.trace_indices) == len(projected_line.x) == len(projected_line.y)):
                 raise ValueError(f'{source.line_id} 的投影轨迹长度不匹配')
             position_map = {int(i): (float(x), float(y)) for i, x, y in
@@ -106,6 +112,8 @@ def collect_observations(
         else:
             position_map = {int(point.trace_index): (float(point.x), float(point.y)) for point in track.points}
             coordinate_system = str(track.coordinate_system)
+            position_digest = track_position_fingerprint(track)
+        source = replace(source, position_sha256=position_digest)
         if artifact:
             original = projects.get_dataset_info(project_id, source.line_id)
             original_ids = trace_ids(projects.read_trace_metadata(project_id, source.line_id), original.shape[1])

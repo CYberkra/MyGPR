@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from dataclasses import replace
 from threading import RLock
 from typing import Any, Mapping, Sequence
 
@@ -195,7 +196,24 @@ class SpatialPersistenceMixin:
 
     def list_spatial_results(self) -> Sequence[SpatialResult]:
         with self._lock:
-            return tuple(_spatial_record(item) for item in SpatialResultVersionService(self._store).list_results())
+            values = SpatialResultVersionService(self._store).list_results()
+            results = [_spatial_record(item) for item in values]
+            if any(item.summary.get('kind') == 'amplitude_slice' for item in results):
+                from mygpr.application.spatial.amplitude_identity import track_position_fingerprint
+                tracks = {track.line_id: track for track in self.load_spatial_tracks()}
+                for index, item in enumerate(results):
+                    if item.summary.get('kind') != 'amplitude_slice':
+                        continue
+                    source_lines = item.sources.get('line_sources', {})
+                    stale = item.stale
+                    for line_id, source in source_lines.items():
+                        expected = str(source.get('position_sha256') or '')
+                        track = tracks.get(line_id)
+                        if expected and (track is None or track_position_fingerprint(track) != expected):
+                            stale = True
+                            break
+                    results[index] = replace(item, stale=stale)
+            return tuple(results)
 
     def spatial_source_state_token(self, line_ids: Sequence[str]) -> str:
         safe = tuple(self._validated_line(value) for value in line_ids)
@@ -204,9 +222,16 @@ class SpatialPersistenceMixin:
 
     def save_amplitude_result(self, result, *, name: str, context) -> SpatialResult:
         from core.amplitude_spatial_result import save_amplitude_result
+        from mygpr.application.spatial.amplitude_identity import track_position_fingerprint
         with self._lock:
             self._store.assert_writable()
             context.raise_if_cancelled()
+            tracks = {track.line_id: track for track in self.load_spatial_tracks()}
+            for source in result.sources:
+                track = tracks.get(source.line_id)
+                if track is None or (source.position_sha256 and
+                                     track_position_fingerprint(track) != source.position_sha256):
+                    raise ValueError(f'{source.line_id} 的轨迹已变化，请重新生成切片')
             record = save_amplitude_result(SpatialResultVersionService(self._store), result,
                                            name=name, cancel_requested=context.is_cancelled)
             context.mark_committed()
