@@ -68,6 +68,8 @@ def _gl_state() -> tuple:
     """
     if not _GL_STATE:
         try:
+            from ui.widgets.opengl_compat import align_windows_opengl
+            align_windows_opengl()
             import pyqtgraph.opengl as gl
             from PyQt6.QtGui import QVector3D as vector
         except Exception:  # noqa: BLE001 - PyOpenGL 缺失等任意导入失败 → 降级

@@ -11,10 +11,13 @@ import pytest
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows native surface regression")
-def test_first_gl_view_does_not_hide_or_recreate_main_window(tmp_path):
+@pytest.mark.parametrize('renderer', ['default', 'software'])
+def test_first_gl_view_does_not_hide_or_recreate_main_window(tmp_path, renderer):
     if find_spec("qfluentwidgets") is None or find_spec("OpenGL") is None:
         pytest.skip("Native GUI/OpenGL dependencies are unavailable")
     environment = dict(os.environ, QT_QPA_PLATFORM="windows:darkmode=0")
+    if renderer == 'software':
+        environment['QT_OPENGL'] = 'software'
     for key in ("APPDATA", "LOCALAPPDATA", "TEMP", "TMP"):
         path = tmp_path / key
         path.mkdir()
@@ -79,7 +82,8 @@ def test_first_gl_view_does_not_hide_or_recreate_main_window(tmp_path):
         watch = Watch()
         window.installEventFilter(watch)
         before = int(window.winId())
-        from ui.widgets.trajectory_3d_view import Trajectory3DView
+        from ui.widgets.trajectory_3d_view import _gl_state
+        assert _gl_state()[0] is not None, 'OpenGL compatibility setup failed'
         # Temporary CI diagnostic: never clear an error and continue silently.
         from OpenGL import GL
         import pyqtgraph.opengl as gl
