@@ -392,6 +392,7 @@ class Trajectory3DView(TrajectoryCurtainsMixin, QWidget):
         self._terrain_src = None         # (epsg, terrain_bbox) 供本地 DEM 变更后重建地形
         self._terrain_source = 'online'  # 地形来源：online / local_dem / estimated
         self._ground_points = None       # 测线估算地面散点 (n,3) 显示坐标，z=地表高程
+        self._terrain_datum_notice = ''
         # 主题缓存：GL 未建时先记住，惰性创建时应用。构造期按**当前主题**
         # 取初值——惰性预热的页面在窗口 _init_state 之后才构建，拿不到那次
         # 全量 apply_theme 遍历，写死 False 会让三维视图在深色下留白底。
@@ -497,6 +498,7 @@ class Trajectory3DView(TrajectoryCurtainsMixin, QWidget):
             self._gl_view.removeItem(item)
         self._line_items = []
         self._clear_terrain()
+        self._terrain_datum_notice = ''
         self._terrain_generation += 1   # 立即使上一批地形任务失效
         colors = dict(colors or {})
 
@@ -643,10 +645,11 @@ class Trajectory3DView(TrajectoryCurtainsMixin, QWidget):
         self._grid.setSpacing(grid_size / 20.0, grid_size / 20.0)
         # 有地形时网格保持隐藏（旧逻辑：set_tracks 先清地形再显网格，等价）
         self._grid.setVisible(self._terrain_item is None)
+        curtains = bool(self._curtain_previews)
         self._gl_view.setCameraPosition(
-            distance=max(extent * 2.5, 10.0), elevation=30.0, azimuth=45.0)
+            distance=max(extent * (3.2 if curtains else 2.5), 10.0), elevation=30.0, azimuth=45.0)
         _, vec = _gl_state()
-        self._gl_view.opts['center'] = vec(0.0, 0.0, 0.0)
+        self._gl_view.opts['center'] = vec(0.0, 0.0, -extent * .175 if curtains else 0.0)
 
     def _show_context_menu(self, pos) -> None:
         if not self._ensure_gl_view():
@@ -838,6 +841,10 @@ class Trajectory3DView(TrajectoryCurtainsMixin, QWidget):
         if self._gl_view is None or gl is None or self._origin is None:
             return
         self._terrain_payload = payload
+        from ui.widgets.terrain_alignment import datum_notice
+        self._terrain_datum_notice = datum_notice(payload, self._ground_points, self._extent)
+        if self._terrain_datum_notice:
+            self.local_dem_notice.emit(self._terrain_datum_notice)
         self._render_lines()     # 贴地模式此刻起有 DEM 可采样
         self._render_terrain()
         self._render_curtains()
@@ -878,19 +885,17 @@ class Trajectory3DView(TrajectoryCurtainsMixin, QWidget):
         self._line_items = []
         origin = self._origin
         payload = self._terrain_payload
-        dem_mean = (float(np.mean(payload['z']))
-                    if payload is not None else 0.0)
         for line_id, color, xyz in self._track_data:
             local = xyz - origin
+            local[:, 2] *= self._exag
             if self._drape and payload is not None:
                 zs = sample_bilinear(payload['z'], payload['gx'],
                                      payload['gy'], xyz[:, 0], xyz[:, 1])
                 # 抬升量随数据范围取：2m 在百米级场景下会贴进地表看不见
                 lift = max(self._extent * 0.05, 2.0)
                 zt = np.where(np.isfinite(zs), zs + lift, xyz[:, 2])
-                # 与地形同一夸张变换（关于 DEM 均值），贴地间距随夸张同步
                 local = local.copy()
-                local[:, 2] = (zt - dem_mean) * self._exag
+                local[:, 2] = (zt - origin[2]) * self._exag
             item = gl.GLLinePlotItem(
                 pos=local, color=color, width=2.0,
                 antialias=True, mode='line_strip',
@@ -913,34 +918,9 @@ class Trajectory3DView(TrajectoryCurtainsMixin, QWidget):
             x = np.asarray(payload['gx'], dtype=float) - origin[0]
             y = np.asarray(payload['gy'], dtype=float) - origin[1]
             z = np.asarray(payload['z'], dtype=float)   # (len(gy), len(gx))
-            z_mean = float(np.mean(z))
-            # 垂直夸张：关于 DEM 均值缩放起伏；非贴地模式做高程基准对齐：
-            # GPS 轨迹常为椭球高、DEM 为正常高，存在系统性基准差
-            # （营山实测约 -44m），用测线 footprint 处的中位偏差平移地形，
-            # 保留两侧真实起伏关系（旧"整体下沉到测线以下"会把地形压到
-            # 任意远，轨迹看似悬空，且坡向对比失去意义）
-            z_disp = (z - z_mean) * self._exag
-            if (not self._drape and self._line_items
-                    and payload.get('datum_align', True)):
-                gx = np.asarray(payload['gx'], dtype=float)
-                gy = np.asarray(payload['gy'], dtype=float)
-                offsets = []
-                for _lid, _color, xyz in self._track_data:
-                    under = sample_bilinear(z, gx, gy, xyz[:, 0], xyz[:, 1])
-                    valid = np.isfinite(under)
-                    if np.count_nonzero(valid) >= 8:
-                        offsets.append(float(np.median(xyz[valid, 2] - under[valid])))
-                if offsets:
-                    z_disp = z_disp + float(np.median(np.asarray(offsets)))
-                else:
-                    # DEM 未覆盖测线（离线/局部瓦片缺失）：退回整体下沉，
-                    # 保证 GPS 高程测线不被地形埋住（同旧行为）
-                    line_z_min = min(float(li.pos[:, 2].min())
-                                     for li in self._line_items)
-                    margin = max(self._extent * 0.01, 1.0)
-                    sink = line_z_min - margin - float(z_disp.max())
-                    if sink < 0.0:
-                        z_disp = z_disp + sink
+            # Terrain, trajectories and curtains use the same scene origin.
+            # Do not infer a vertical datum correction from aircraft altitude.
+            z_disp = (z - origin[2]) * self._exag
             # 顶点色兜底：gist_earth 陆地段色表（影像缺失/关闭时用）
             z_min = float(z_disp.min())
             z_span = max(float(z_disp.max()) - z_min, 1e-6)

@@ -24,6 +24,26 @@ def test_processed_marker_uses_exact_large_trace_id_after_reordering(qapp):
     panel.close()
 
 
+def test_time_slider_bounds_preserve_window_inside_all_sources(qapp):
+    panel = AmplitudeSlicePanel()
+    grid = grid_line_values([0.1], [0.1], [1.], ['L1'], cell_size_m=1.)
+    sources = (AmplitudeSource('L1'), AmplitudeSource('L2'))
+    previews = (SimpleNamespace(time_ns=np.array([0., 100.])),
+                SimpleNamespace(time_ns=np.array([5., 90.])))
+    panel._start.setValue(40.)
+    panel._end.setValue(60.)
+    panel.set_result(AmplitudeResult(grid, sources, 'EPSG:32648', 40., 60., 'rms', previews), ())
+    assert panel.center_bounds() == (150, 800)
+    assert (panel._slider.minimum(), panel._slider.maximum()) == (150, 800)
+    assert panel._window_band.orientation == 'horizontal'
+    requested = []
+    panel._request = lambda: requested.append(True)
+    panel.set_center_and_request(200.)
+    assert (panel._start.value(), panel._end.value()) == (70., 90.)
+    assert requested == [True]
+    panel.close()
+
+
 def test_panel_requests_selected_sources_and_disables_during_job(qapp):
     panel = AmplitudeSlicePanel()
     requests = []

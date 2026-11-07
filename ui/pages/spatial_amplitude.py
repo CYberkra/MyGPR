@@ -71,6 +71,7 @@ class SpatialAmplitudeMixin:
             self._right_panel.set_collapsed(False, animate=True)
         self._view_segment.setCurrentItem(_SEG_3D)
         self._switch_view(_SEG_3D)
+        self._3d_view._reset_camera()
 
     def _show_amplitude_2d(self):
         self._view_segment.setCurrentItem(_SEG_AMPLITUDE)
@@ -113,7 +114,10 @@ class SpatialAmplitudeMixin:
     def _set_curtains(self, previews, start_ns, end_ns):
         self._has_curtains = bool(previews)
         if self._has_curtains:
-            self._curtain_slider.setMaximum(max(10000, round(float(end_ns) * 15)))
+            bounds = self._amplitude_view.center_bounds()
+            self._curtain_slider.setEnabled(bounds is not None)
+            if bounds is not None:
+                self._curtain_slider.setRange(*bounds)
             self._curtain_slider.setValue(round((float(start_ns) + float(end_ns)) * 5))
             self._curtain_notice.setText('时间域示意，垂直比例不代表地下深度')
         elif self._curtain_session:

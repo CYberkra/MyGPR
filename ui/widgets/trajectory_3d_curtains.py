@@ -67,12 +67,13 @@ class TrajectoryCurtainsMixin:
                 if epsg == 4326:
                     xyz = _lonlat_xyz_to_mercator(xyz)
                 local = xyz - self._origin
+                local[:, 2] *= self._exag
                 payload = self._terrain_payload
                 if self._drape and payload is not None:
                     zs = sample_bilinear(payload['z'], payload['gx'], payload['gy'], xyz[:, 0], xyz[:, 1])
                     lift = max(self._extent * .05, 2.)
                     zt = np.where(np.isfinite(zs), zs + lift, xyz[:, 2])
-                    local[:, 2] = (zt - float(np.mean(payload['z']))) * self._exag
+                    local[:, 2] = (zt - self._origin[2]) * self._exag
                 axis = np.asarray(preview.time_ns, dtype=float) - tmin
                 mesh = build_curtain_geometry(local[:, 0], local[:, 1], local[:, 2], axis,
                                               preview.matrix, vertical_scale=scale,
@@ -105,6 +106,8 @@ class TrajectoryCurtainsMixin:
                 skipped += 1
                 _LOGGER.warning('三维剖面 %s 无法显示: %s', preview.source.line_id, exc)
         notice = '时间域示意，垂直比例不代表地下深度'
+        if self._terrain_datum_notice:
+            notice += '；' + self._terrain_datum_notice
         if skipped:
             notice += f'；{skipped} 条剖面无法显示，请检查坐标和轨迹'
         if not drawn:

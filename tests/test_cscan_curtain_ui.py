@@ -42,3 +42,42 @@ def test_3d_scene_adds_real_trace_curtain_and_window_marker(qapp, monkeypatch):
     view._gl_view = None
     view.shutdown()
     view.close()
+
+
+def test_bscan_time_band_is_horizontal(qapp):
+    from ui.widgets.curtain_bscan_panel import CurtainBScanPanel
+    panel = CurtainBScanPanel()
+    assert panel._window.orientation == 'horizontal'
+    panel.close()
+
+
+def test_raw_track_uses_shared_vertical_origin_and_exaggeration(qapp, monkeypatch):
+    import ui.widgets.trajectory_3d_view as module
+    objects = []
+    class Scene:
+        def addItem(self, item):
+            objects.append(item)
+        def removeItem(self, item):
+            objects.remove(item)
+    monkeypatch.setattr(module, '_gl_state', lambda: (SimpleNamespace(
+        GLLinePlotItem=lambda **kw: kw), None))
+    view = module.Trajectory3DView()
+    view._gl_view = Scene()
+    view._origin = np.array([0., 0., 100.])
+    view._track_data = [('L1', '#000000', np.array([[0., 0., 103.], [1., 0., 105.]]))]
+    view._exag = 2.
+    view._render_lines()
+    np.testing.assert_allclose(objects[0]['pos'][:, 2], [6., 10.])
+    view._gl_view = None
+    view.shutdown()
+    view.close()
+
+
+def test_vertical_datum_difference_is_reported_not_applied():
+    from ui.widgets.terrain_alignment import datum_notice
+    payload = {'gx': np.array([0., 1.]), 'gy': np.array([0., 1.]),
+               'z': np.full((2, 2), 100.)}
+    points = np.array([[.2, .2, 120.], [.3, .3, 120.], [.4, .4, 120.], [.5, .5, 120.]])
+    notice = datum_notice(payload, points, 20.)
+    assert '+20.0 m' in notice and '未自动平移' in notice
+    np.testing.assert_array_equal(payload['z'], np.full((2, 2), 100.))

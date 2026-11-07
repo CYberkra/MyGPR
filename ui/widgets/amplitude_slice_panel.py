@@ -42,6 +42,7 @@ class AmplitudeSlicePanel(QWidget):
         self._picked_time_ns = None
         self._marker_value = None
         self._levels = None
+        self._time_limits = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         toolbar = QHBoxLayout()
@@ -71,11 +72,15 @@ class AmplitudeSlicePanel(QWidget):
         layout.addLayout(toolbar)
         parameters = QHBoxLayout()
         for widget in (CaptionLabel('开始', self), self._start, CaptionLabel('结束', self),
-                       self._end, CaptionLabel('网格', self), self._cell, self._run,
-                       self._cancel, self._show_3d, self._save):
+                       self._end, CaptionLabel('网格', self), self._cell):
             parameters.addWidget(widget)
         parameters.addStretch(1)
         layout.addLayout(parameters)
+        actions = QHBoxLayout()
+        for widget in (self._run, self._cancel, self._show_3d, self._save):
+            actions.addWidget(widget)
+        actions.addStretch(1)
+        layout.addLayout(actions)
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
         self._map = DepthSliceView(splitter)
         self._map._empty_overlay._title_label.setText('暂无振幅切片')
@@ -93,6 +98,7 @@ class AmplitudeSlicePanel(QWidget):
         self._slider = Slider(Qt.Orientation.Horizontal, self)
         self._slider.setRange(0, 10000)  # tenths of a nanosecond; spins allow longer windows
         self._slider.setValue(50)
+        self._slider.setEnabled(False)
         self._status = CaptionLabel('时间窗：采集时间', self)
         bottom.addWidget(self._status)
         bottom.addWidget(self._slider, 1)
@@ -111,7 +117,7 @@ class AmplitudeSlicePanel(QWidget):
             control.valueChanged.connect(self._invalidate_result)
         self._slider.sliderReleased.connect(self._slider_released)
         self._map.scene().sigMouseClicked.connect(self._map_clicked)
-        self._window_band = pg.LinearRegionItem((0, 1), movable=False,
+        self._window_band = pg.LinearRegionItem((0, 1), orientation='horizontal', movable=False,
                                                 brush=pg.mkBrush(50, 125, 230, 55))
         self._window_band.hide()
         self._bscan._plot.addItem(self._window_band)
@@ -125,6 +131,7 @@ class AmplitudeSlicePanel(QWidget):
 
     def _spin(self, value, suffix, minimum=0.):
         control = DoubleSpinBox(self)
+        control.setMinimumWidth(100)
         control.setRange(minimum, 1_000_000.)
         control.setDecimals(2)
         control.setValue(value)
@@ -133,6 +140,8 @@ class AmplitudeSlicePanel(QWidget):
 
     def set_tracks(self, tracks, _colors):
         self._tracks = list(tracks or ())
+        self._time_limits = None
+        self._slider.setEnabled(False)
         self.cancel_requested.emit()
         self._run.setEnabled(True)
         self._cancel.setEnabled(False)
@@ -246,14 +255,30 @@ class AmplitudeSlicePanel(QWidget):
         self._status.setText('参数已更改，请重新生成切片')
 
     def _sync_slider(self, *_args):
-        self._slider.setMaximum(max(10000, round(self._end.value() * 15)))
+        bounds = self.center_bounds()
+        if bounds is not None:
+            self._slider.setRange(*bounds)
+        self._slider.setEnabled(bounds is not None)
         self._slider.setValue(round((self._start.value() + self._end.value()) * 5))
+
+    def center_bounds(self):
+        if self._time_limits is None:
+            return None
+        half_width = (self._end.value() - self._start.value()) / 2.
+        low, high = self._time_limits
+        first = int(np.ceil((low + half_width) * 10 - 1e-9))
+        last = int(np.floor((high - half_width) * 10 + 1e-9))
+        return (first, last) if half_width > 0 and first <= last else None
 
     def _slider_released(self):
         width = float(self._end.value()) - float(self._start.value())
         if width <= 0:
             return
-        center = max(width / 2., self._slider.value() / 10.)
+        bounds = self.center_bounds()
+        if bounds is None:
+            self._status.setText('时间窗超出各测线的共同时间范围')
+            return
+        center = min(max(self._slider.value(), bounds[0]), bounds[1]) / 10.
         self._start.setValue(center - width / 2.)
         self._end.setValue(center + width / 2.)
         self._request()
@@ -274,6 +299,11 @@ class AmplitudeSlicePanel(QWidget):
         self._result = result
         self._save.setEnabled(bool(np.isfinite(grid.values).any()))
         curtains = tuple(getattr(result, 'curtains', ()) or ())
+        self._time_limits = None
+        if curtains and len(curtains) == len(result.sources):
+            self._time_limits = (max(float(p.time_ns[0]) for p in curtains),
+                                 min(float(p.time_ns[-1]) for p in curtains))
+        self._sync_slider()
         self._show_3d.setEnabled(bool(curtains))
         self.curtains_ready.emit(curtains, float(result.start_ns), float(result.end_ns))
         self._map.set_grid(grid.values, x_origin_m=grid.x_origin_m,

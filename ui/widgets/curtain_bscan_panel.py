@@ -19,7 +19,8 @@ class CurtainBScanPanel(QWidget):
         layout.addWidget(self._line)
         self._bscan = BScanView(self)
         layout.addWidget(self._bscan, 1)
-        self._window = pg.LinearRegionItem((0, 1), movable=False, brush=pg.mkBrush(50, 125, 230, 55))
+        self._window = pg.LinearRegionItem((0, 1), orientation='horizontal', movable=False,
+                                           brush=pg.mkBrush(50, 125, 230, 55))
         self._trace = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen('#397fff', width=1))
         self._time = pg.InfiniteLine(angle=0, movable=False, pen=pg.mkPen('#397fff', width=1))
         self._bscan._plot.addItem(self._window)
