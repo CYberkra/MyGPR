@@ -33,6 +33,7 @@ from qfluentwidgets import (CaptionLabel, ComboBox, DoubleSpinBox,
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants, file_dialogs
+from ui.pages.spatial_amplitude import SpatialAmplitudeMixin
 from ui.geo_utils import coverage_statistics, format_distance, format_spacing
 from ui.qt_defer import defer_call
 from ui.spatial_view_sync import ViewSyncMixin
@@ -47,6 +48,7 @@ from ui.widgets.local_dem import load_xyz_grid
 from ui.widgets.map_tiles import BASEMAP_LAYERS, DEFAULT_TILE_SOURCE
 from ui.widgets.map_view import MapView
 from ui.widgets.depth_slice_view import DepthSliceView
+from ui.widgets.amplitude_slice_panel import AmplitudeSlicePanel
 from ui.widgets.segment_tabs import SlimSegment
 from ui.widgets.trajectory_3d_view import Trajectory3DView
 
@@ -56,6 +58,7 @@ _SEG_MAP = 'planMap'
 _SEG_PROFILE = 'elevationProfile'
 _SEG_3D = 'trajectory3d'
 _SEG_DEPTH = 'depthSlice'
+_SEG_AMPLITUDE = 'amplitudeSlice'
 
 # 测线颜色循环（matplotlib tab10）
 _TRACK_COLORS = constants.CHART_TRACK_COLORS
@@ -96,7 +99,7 @@ class _DemLoadWorker(QRunnable):
             self._signals.finished.emit(self._generation, dem, self._path, '')
 
 
-class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidget):
+class SpatialPage(SpatialAmplitudeMixin, SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidget):
     """空间信息页面。"""
 
     current_line_requested = pyqtSignal(str)    # 设为当前测线（line_id）
@@ -362,6 +365,7 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
         self._3d_imagery_switch.setChecked(True)
         imagery_row.addWidget(self._3d_imagery_switch, 1)
         view3d_layout.addLayout(imagery_row)
+        self._build_uav_control(view3d_card, view3d_layout)
         terrain_row = QHBoxLayout()
         terrain_row.setSpacing(constants.CARD_SPACING)
         terrain_label = CaptionLabel('地形来源:', view3d_card)
@@ -414,6 +418,8 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
             _SEG_3D, '三维视图', onClick=lambda: self._switch_view(_SEG_3D))
         self._view_segment.addItem(
             _SEG_DEPTH, '界面深度网格', onClick=lambda: self._switch_view(_SEG_DEPTH))
+        self._view_segment.addItem(
+            _SEG_AMPLITUDE, '振幅切片', onClick=lambda: self._switch_view(_SEG_AMPLITUDE))
         self._view_segment.setCurrentItem(_SEG_MAP)
         view_card, view_layout = make_segment_card(
             '', self._view_segment, parent=self)
@@ -427,10 +433,13 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
         self._3d_view.setMinimumHeight(constants.PREVIEW_MIN_HEIGHT)
         self._depth_view = DepthSliceView(view_card)
         self._depth_view.setMinimumHeight(constants.PREVIEW_MIN_HEIGHT)
+        self._amplitude_view = AmplitudeSlicePanel(view_card)
+        self._amplitude_view.setMinimumHeight(constants.PREVIEW_MIN_HEIGHT)
         self._view_stack.addWidget(self._map_view)
         self._view_stack.addWidget(self._profile_view)
         self._view_stack.addWidget(self._3d_view)
         self._view_stack.addWidget(self._depth_view)
+        self._view_stack.addWidget(self._amplitude_view)
         view_layout.addWidget(self._view_stack, 1)
 
         # 深度切片控制行：深度滑条（0.01m 步进，整数 ×100 映射）+ 数值 + 存为图层
@@ -467,6 +476,7 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
         view_layout.addWidget(self._depth_row_widget)
         # 初始态：只有深度切片视图用得到它（默认段是平面地图）
         self._depth_row_widget.setVisible(False)
+        self._build_curtain_controls(view_card, view_layout)
         middle_layout.addWidget(view_card, 1)
 
     def _build_right_column(self, columns: QHBoxLayout) -> None:
@@ -520,6 +530,7 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
         # 并没有解决它，只是把它均匀复制了两份）。
         right_layout.addWidget(detail_card)
         right_layout.addWidget(coverage_card)
+        self._build_curtain_details(right_layout, detail_card, coverage_card)
         right_layout.addStretch(1)
     # ============================================================ 内部接线
     def _connect_internal(self) -> None:
@@ -541,6 +552,7 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
         self._3d_dem_btn.clicked.connect(self._on_import_dem_clicked)
         self._3d_dem_clear_btn.clicked.connect(self._on_clear_dem_clicked)
         self._3d_view.local_dem_notice.connect(self._on_dem_notice)
+        self._connect_curtain_controls()
         self._depth_slider.valueChanged.connect(self._on_depth_slider_changed)
         self._depth_cell_spin.valueChanged.connect(self._on_depth_cell_changed)
         self._depth_save_btn.clicked.connect(self._on_save_depth_layer_clicked)
@@ -561,6 +573,10 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
         """空间轨迹列表（SpatialTrack，鸭子类型取属性）。"""
         self._line_context.close()
         self._tracks = list(tracks or [])
+        if not self._tracks:
+            self._curtain_session = False
+            self._3d_view.clear_curtains()
+            self._amplitude_view.set_tracks([], {})
         self._tracks_by_id = {}
         self._colors = {}
         for index, track in enumerate(self._tracks):
@@ -680,6 +696,8 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
         self._profile_view.apply_theme(dark)
         self._3d_view.apply_theme(dark)
         self._depth_view.apply_theme(dark)
+        self._amplitude_view.apply_theme(dark)
+        self._curtain_bscan.apply_theme(dark)
         # 主题切换会重建视图内部条目，指纹作废：下次刷新必须重新灌数据
         self._views_applied.clear()
         # 空态 hint 颜色由 HintLabel.apply_theme 随主题自刷，无需手工重设
@@ -701,7 +719,8 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
 
     def _switch_view(self, route_key: str) -> None:
         widget = {_SEG_MAP: self._map_view, _SEG_PROFILE: self._profile_view,
-                  _SEG_3D: self._3d_view, _SEG_DEPTH: self._depth_view}.get(
+                  _SEG_3D: self._3d_view, _SEG_DEPTH: self._depth_view,
+                  _SEG_AMPLITUDE: self._amplitude_view}.get(
             route_key, self._map_view)
         self._view_stack.setCurrentWidget(widget)
         self._sync_view_affordances(route_key)
@@ -716,24 +735,6 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
             checked = [str(t.line_id) for t in self._checked_tracks()]
             if checked:
                 self.depth_preview_requested.emit(checked, float(self._depth_cell_spin.value()))
-
-    def _sync_view_affordances(self, route_key: str) -> None:
-        """切段时同步「只属于某段」的界面附属件（2026-10-06）。
-
-        两处此前恒显，实测都属于「在别的段里操作了但看不到效果」：
-
-        - **深度切片控制行**（滑条 + 深度 + 存为图层）只操作 ``_depth_view``
-          的等值线。在平面地图下拖它，屏幕不会有任何变化。改为仅
-          ``_SEG_DEPTH`` 时可见，其余三段隐藏。
-        - **左栏三维显示卡**（折叠态）只操作 ``_3d_view``。切到三维视图时
-          自动展开——否则用户看到的是一张收起的卡，得先意识到「要展开才能
-          调设置」。切走时**不自动收起**：手动展开查看是主动行为，替他收掉
-          会打断正在做的调参。
-        """
-        is_depth = route_key == _SEG_DEPTH
-        self._depth_row_widget.setVisible(is_depth)
-        if route_key == _SEG_3D and self._view3d_card.is_collapsed():
-            self._view3d_card.set_collapsed(False, animate=True)
 
     def _refresh_views(self) -> None:
         """勾选集合变化 → 重绘视图。
@@ -775,7 +776,8 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
     def _views(self) -> dict:
         """分段键 → 视图实例。"""
         return {_SEG_MAP: self._map_view, _SEG_PROFILE: self._profile_view,
-                _SEG_3D: self._3d_view, _SEG_DEPTH: self._depth_view}
+                _SEG_3D: self._3d_view, _SEG_DEPTH: self._depth_view,
+                _SEG_AMPLITUDE: self._amplitude_view}
 
     def _active_view_key(self) -> str:
         """当前可见视图的分段键；整页不可见时返回空串（全部延后）。"""

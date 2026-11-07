@@ -9,6 +9,22 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 SUITES = {
+    "cscan": (
+        "tests/test_uav_t600_model.py",
+        "tests/test_amplitude_slice_domain.py",
+        "tests/test_amplitude_slice_service.py",
+        "tests/test_amplitude_slice_projection.py",
+        "tests/test_cscan_curtain_geometry.py",
+        "tests/test_cscan_curtain_preview.py",
+        "tests/test_cscan_curtain_ui.py",
+        "tests/test_cscan_spatial_result.py",
+        "tests/test_cscan_project_integration.py",
+        "tests/test_cscan_controller_flow.py",
+        "tests/test_curtain_picking.py",
+        "tests/test_spatial_delivery_ui.py",
+        "tests/test_spatial_deferred_redraw.py",
+        "tests/test_amplitude_slice_ui.py",
+    ),
     "update_installation": ("tests/test_windows_update_acceptance.py",),
     "updates": (
         "tests/test_windows_updates.py",

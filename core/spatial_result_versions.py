@@ -105,6 +105,16 @@ class SpatialResultRecord:
         )
 
 
+def _infer_track_crs(track_crs, unknown_track_crs, warnings, errors):
+    if len(track_crs) == 1 and not unknown_track_crs:
+        coordinate_system = next(iter(track_crs))
+        warnings.append(f'项目坐标系未指定分带，成果采用轨迹坐标系 {coordinate_system}；请核对。')
+        return coordinate_system
+    if track_crs and unknown_track_crs:
+        errors.append('部分轨迹坐标系未确认，不能与已指定坐标系的轨迹合并。')
+    return ''
+
+
 class SpatialResultVersionService:
     """Create, list, verify and export immutable spatial-result versions."""
 
@@ -229,13 +239,7 @@ class SpatialResultVersionService:
         if len(track_crs) > 1 or (track_crs and not generic_crs and coordinate_system not in track_crs):
             errors.append('轨迹坐标系不一致，请先统一坐标系后生成空间成果。')
         if generic_crs:
-            if len(track_crs) == 1 and not unknown_track_crs:
-                coordinate_system = next(iter(track_crs))
-                warnings.append(f'项目坐标系未指定分带，成果采用轨迹坐标系 {coordinate_system}；请核对。')
-            else:
-                coordinate_system = ''
-                if track_crs and unknown_track_crs:
-                    errors.append('部分轨迹坐标系未确认，不能与已指定坐标系的轨迹合并。')
+            coordinate_system = _infer_track_crs(track_crs, unknown_track_crs, warnings, errors)
         if not coordinate_system:
             warnings.append("项目坐标系未完整配置，成果将保留风险标记。")
         surface_allowed = len(usable) >= 3 and _has_spatial_spread(self.project, usable)
@@ -473,6 +477,24 @@ class SpatialResultVersionService:
                         if path.is_file():
                             archive.write(path, arcname=f"{record.result_id}/{path.relative_to(result_dir).as_posix()}")
                 tmp.replace(output)
+            finally:
+                tmp.unlink(missing_ok=True)
+            return output
+        if fmt in {"tif", "tiff", "geotiff"}:
+            filename = record.files.get("amplitude_geotiff")
+            if not filename:
+                raise ValueError("此空间成果不包含振幅 GeoTIFF")
+            source = resolve_managed_path(result_dir, filename, require_file=True)
+            if output.suffix.lower() not in {".tif", ".tiff"}:
+                output = output.with_suffix(".tif")
+            output.parent.mkdir(parents=True, exist_ok=True)
+            tmp = output.with_name(f".{output.name}.{uuid.uuid4().hex}.tmp")
+            try:
+                shutil.copy2(source, tmp)
+                from core.storage_primitives import fsync_directory, fsync_file
+                fsync_file(tmp)
+                tmp.replace(output)
+                fsync_directory(output.parent)
             finally:
                 tmp.unlink(missing_ok=True)
             return output

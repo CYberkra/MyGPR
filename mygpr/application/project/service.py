@@ -77,6 +77,17 @@ class ProjectAcquisitionServiceMixin:
     def read_sensor_sync_result(self, project_id: str, line_id: str):
         return self._session(project_id).read_sensor_sync_result(line_id)
 
+    def spatial_source_state_token(self, project_id: str, line_ids: Sequence[str]) -> str:
+        return self._session(project_id).spatial_source_state_token(line_ids)
+
+    def save_amplitude_result(self, project_id: str, result, *, name: str,
+                              context: ExecutionContext | None = None) -> SpatialResult:
+        return self._session(project_id).save_amplitude_result(
+            result, name=name, context=context or ExecutionContext.null())
+
+    def load_amplitude_result(self, project_id: str, result_id: str) -> dict[str, Any]:
+        return dict(self._session(project_id).load_amplitude_result(result_id))
+
 
 class ProjectService(ProjectAcquisitionServiceMixin, ProjectIdentityServiceMixin):
     """Own open project sessions without exposing storage implementation objects."""

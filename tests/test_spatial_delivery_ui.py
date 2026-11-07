@@ -64,3 +64,18 @@ def test_delivery_distinguishes_control_points_from_surface(qapp):
     status = page._spatial_table.item(0, 3).text()
     assert '控制点' in status and '未生成曲面' in status
     page.close()
+
+
+def test_delivery_offers_to_open_saved_amplitude_slice(qapp):
+    from ui.pages.delivery_page import DeliveryPage
+    page = DeliveryPage()
+    page.set_spatial_results([NS(result_id='S1', name='切片', line_ids=('L01',),
+        files={'amplitude_geotiff': 'amplitude.tif'}, summary={'kind': 'amplitude_slice'})])
+    rect = page._spatial_table.visualItemRect(page._spatial_table.item(0, 0))
+    menu = page._spatial_result_menu(rect.center())
+    actions = {action.data(): action for action in menu.actions() if action.data()}
+    assert actions['open-amplitude-result'].isEnabled()
+    assert '振幅切片' in page._spatial_table.item(0, 3).text()
+    assert '未生成曲面' not in page._spatial_table.item(0, 3).text()
+    menu.close()
+    page.close()

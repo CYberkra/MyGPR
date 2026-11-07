@@ -42,6 +42,8 @@ from ui.desktop_backend_facade import tile_cache_dir
 from ui.widgets.context_menus import add_action, make_menu
 from ui.widgets.empty_state import EmptyStateOverlay
 from ui.widgets.local_dem import dem_covers_bbox
+from ui.widgets.trajectory_3d_curtains import TrajectoryCurtainsMixin
+from ui.widgets.uav_scene import UAVSceneMixin
 from ui.widgets.map_tiles import (TILE_SOURCE_MAX_ZOOM, WORLD_SIZE_M,
                                   extract_epsg, lonlat_to_tile, tile_url,
                                   unique_tmp_path, wgs84_to_gcj02,
@@ -353,11 +355,13 @@ class _TerrainWorker(QRunnable):
             self._signals.finished.emit(self._generation, payload)
 
 
-class Trajectory3DView(QWidget):
+class Trajectory3DView(TrajectoryCurtainsMixin, UAVSceneMixin, QWidget):
     """三维轨迹视图容器（内部按需创建 GLViewWidget 或降级 QLabel）。"""
 
     # 本地 DEM 覆盖提示：'' = 正常/已清除；非空 = 警告文本（GUI 线程发出）
     local_dem_notice = pyqtSignal(str)
+    curtain_notice = pyqtSignal(str)
+    curtain_selected = pyqtSignal(str, str, int, float)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -366,6 +370,11 @@ class Trajectory3DView(QWidget):
         self._gl_view = None           # 惰性创建：首次需要 3D 内容时才建（见 _ensure_gl_view）
         self._grid = None
         self._line_items: list = []
+        self._curtain_items: list = []
+        self._curtain_pick_data: list = []
+        self._curtain_press = None
+        self._curtain_previews = ()
+        self._curtain_window = (0., 0.)
         self._terrain_item = None
         self._fallback_label = None
         self._terrain_pool = None
@@ -384,6 +393,8 @@ class Trajectory3DView(QWidget):
         self._terrain_src = None         # (epsg, terrain_bbox) 供本地 DEM 变更后重建地形
         self._terrain_source = 'online'  # 地形来源：online / local_dem / estimated
         self._ground_points = None       # 测线估算地面散点 (n,3) 显示坐标，z=地表高程
+        self._terrain_datum_notice = ''
+        self._init_uav()
         # 主题缓存：GL 未建时先记住，惰性创建时应用。构造期按**当前主题**
         # 取初值——惰性预热的页面在窗口 _init_state 之后才构建，拿不到那次
         # 全量 apply_theme 遍历，写死 False 会让三维视图在深色下留白底。
@@ -427,6 +438,7 @@ class Trajectory3DView(QWidget):
             return False
         layout = self.layout()
         self._gl_view = gl.GLViewWidget(self)
+        self._gl_view.installEventFilter(self)
         self._gl_view.setBackgroundColor('k' if self._theme_dark else 'w')
         self._grid = gl.GLGridItem()
         self._grid.setSize(500.0, 500.0)
@@ -488,6 +500,7 @@ class Trajectory3DView(QWidget):
             self._gl_view.removeItem(item)
         self._line_items = []
         self._clear_terrain()
+        self._terrain_datum_notice = ''
         self._terrain_generation += 1   # 立即使上一批地形任务失效
         colors = dict(colors or {})
 
@@ -560,15 +573,19 @@ class Trajectory3DView(QWidget):
 
         # 网格随数据范围调整，相机距离/中心自动适配
         self._extent = extent
+        self._render_uav()
         self._reset_camera()
 
         # 坐标系可识别 → 后台构建真实地形
         self._terrain_src = (epsg, terrain_bbox) if terrain_bbox is not None else None
         self._start_terrain_build()
+        self._render_curtains()
 
     def _clear_tracks_content(self) -> None:
         """清空场景中的测线/地形并回到空态（无有效测线时调用）。"""
         if self._gl_view is not None:
+            self._clear_uav()
+            self._clear_curtain_items()
             for item in self._line_items:
                 self._gl_view.removeItem(item)
             self._clear_terrain()
@@ -632,10 +649,11 @@ class Trajectory3DView(QWidget):
         self._grid.setSpacing(grid_size / 20.0, grid_size / 20.0)
         # 有地形时网格保持隐藏（旧逻辑：set_tracks 先清地形再显网格，等价）
         self._grid.setVisible(self._terrain_item is None)
+        curtains = bool(self._curtain_previews)
         self._gl_view.setCameraPosition(
-            distance=max(extent * 2.5, 10.0), elevation=30.0, azimuth=45.0)
+            distance=max(extent * (3.2 if curtains else 2.5), 10.0), elevation=30.0, azimuth=45.0)
         _, vec = _gl_state()
-        self._gl_view.opts['center'] = vec(0.0, 0.0, 0.0)
+        self._gl_view.opts['center'] = vec(0.0, 0.0, -extent * .175 if curtains else 0.0)
 
     def _show_context_menu(self, pos) -> None:
         if not self._ensure_gl_view():
@@ -827,8 +845,14 @@ class Trajectory3DView(QWidget):
         if self._gl_view is None or gl is None or self._origin is None:
             return
         self._terrain_payload = payload
+        from ui.widgets.terrain_alignment import datum_notice
+        self._terrain_datum_notice = datum_notice(payload, self._ground_points, self._extent)
+        if self._terrain_datum_notice:
+            self.local_dem_notice.emit(self._terrain_datum_notice)
         self._render_lines()     # 贴地模式此刻起有 DEM 可采样
+        self._render_uav()
         self._render_terrain()
+        self._render_curtains()
 
     # ------------------------------------------------------------ 显示模式
     def set_vertical_exaggeration(self, factor: float) -> None:
@@ -852,8 +876,10 @@ class Trajectory3DView(QWidget):
     def _rebuild_scene(self) -> None:
         if self._track_data:
             self._render_lines()
+            self._render_uav()
         if self._terrain_payload is not None:
             self._render_terrain()
+        self._render_curtains()
 
     def _render_lines(self) -> None:
         """按当前模式（原始高程 / 贴地 + 垂直夸张）重建测线 GL 项。"""
@@ -865,19 +891,17 @@ class Trajectory3DView(QWidget):
         self._line_items = []
         origin = self._origin
         payload = self._terrain_payload
-        dem_mean = (float(np.mean(payload['z']))
-                    if payload is not None else 0.0)
         for line_id, color, xyz in self._track_data:
             local = xyz - origin
+            local[:, 2] *= self._exag
             if self._drape and payload is not None:
                 zs = sample_bilinear(payload['z'], payload['gx'],
                                      payload['gy'], xyz[:, 0], xyz[:, 1])
                 # 抬升量随数据范围取：2m 在百米级场景下会贴进地表看不见
                 lift = max(self._extent * 0.05, 2.0)
                 zt = np.where(np.isfinite(zs), zs + lift, xyz[:, 2])
-                # 与地形同一夸张变换（关于 DEM 均值），贴地间距随夸张同步
                 local = local.copy()
-                local[:, 2] = (zt - dem_mean) * self._exag
+                local[:, 2] = (zt - origin[2]) * self._exag
             item = gl.GLLinePlotItem(
                 pos=local, color=color, width=2.0,
                 antialias=True, mode='line_strip',
@@ -900,34 +924,9 @@ class Trajectory3DView(QWidget):
             x = np.asarray(payload['gx'], dtype=float) - origin[0]
             y = np.asarray(payload['gy'], dtype=float) - origin[1]
             z = np.asarray(payload['z'], dtype=float)   # (len(gy), len(gx))
-            z_mean = float(np.mean(z))
-            # 垂直夸张：关于 DEM 均值缩放起伏；非贴地模式做高程基准对齐：
-            # GPS 轨迹常为椭球高、DEM 为正常高，存在系统性基准差
-            # （营山实测约 -44m），用测线 footprint 处的中位偏差平移地形，
-            # 保留两侧真实起伏关系（旧"整体下沉到测线以下"会把地形压到
-            # 任意远，轨迹看似悬空，且坡向对比失去意义）
-            z_disp = (z - z_mean) * self._exag
-            if (not self._drape and self._line_items
-                    and payload.get('datum_align', True)):
-                gx = np.asarray(payload['gx'], dtype=float)
-                gy = np.asarray(payload['gy'], dtype=float)
-                offsets = []
-                for _lid, _color, xyz in self._track_data:
-                    under = sample_bilinear(z, gx, gy, xyz[:, 0], xyz[:, 1])
-                    valid = np.isfinite(under)
-                    if np.count_nonzero(valid) >= 8:
-                        offsets.append(float(np.median(xyz[valid, 2] - under[valid])))
-                if offsets:
-                    z_disp = z_disp + float(np.median(np.asarray(offsets)))
-                else:
-                    # DEM 未覆盖测线（离线/局部瓦片缺失）：退回整体下沉，
-                    # 保证 GPS 高程测线不被地形埋住（同旧行为）
-                    line_z_min = min(float(li.pos[:, 2].min())
-                                     for li in self._line_items)
-                    margin = max(self._extent * 0.01, 1.0)
-                    sink = line_z_min - margin - float(z_disp.max())
-                    if sink < 0.0:
-                        z_disp = z_disp + sink
+            # Terrain, trajectories and curtains use the same scene origin.
+            # Do not infer a vertical datum correction from aircraft altitude.
+            z_disp = (z - origin[2]) * self._exag
             # 顶点色兜底：gist_earth 陆地段色表（影像缺失/关闭时用）
             z_min = float(z_disp.min())
             z_span = max(float(z_disp.max()) - z_min, 1e-6)
@@ -950,6 +949,9 @@ class Trajectory3DView(QWidget):
                     if valid.any():
                         colors[..., :3][valid] = np.clip(
                             img[valid], 0.0, 255.0).astype(np.uint8)
+            showing_curtains = bool(self._curtain_previews)
+            if showing_curtains:
+                colors[..., 3] = 70
             self._clear_terrain()
             _register_terrain_shader()
             # z/colors 转置为 (len(x), len(y))：pyqtgraph 期望 x 为第一维
@@ -958,7 +960,10 @@ class Trajectory3DView(QWidget):
                 z=np.ascontiguousarray(z_disp.T),
                 colors=np.ascontiguousarray(
                     colors.transpose(1, 0, 2), np.uint8),
-                shader=_TERRAIN_SHADER, smooth=True)
+                shader=_TERRAIN_SHADER, smooth=True,
+                glOptions='translucent' if showing_curtains else 'opaque')
+            if showing_curtains:
+                item.setDepthValue(10)
             self._gl_view.addItem(item)
             self._terrain_item = item
             self._grid.setVisible(False)   # 地形就位后隐藏平面网格

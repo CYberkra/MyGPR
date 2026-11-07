@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from dataclasses import replace
 from threading import RLock
 from typing import Any, Mapping, Sequence
 
@@ -57,6 +58,7 @@ def _spatial_record(value: Any) -> SpatialResult:
         status=str(value.status), line_ids=tuple(value.line_ids), created_at=str(value.created_at),
         coordinate_system=str(value.coordinate_system), vertical_datum=str(value.vertical_datum),
         stale=bool(value.stale), summary=dict(value.summary or {}), files=dict(value.files or {}),
+        options=dict(value.options or {}), sources=dict(value.sources or {}),
     )
 
 
@@ -98,6 +100,9 @@ class SpatialPersistenceMixin:
             z = first("local_z_m", "elevation_m", "altitude_m", "height_m", "z")
             fh = first("flight_height_m", "height_agl_m", "agl_m")
             ge = first("ground_elevation_m")
+            trace_ids = np.asarray(metadata.get('trace_id', []))
+            if trace_ids.ndim != 1 or trace_ids.dtype.kind not in 'iu':
+                trace_ids = np.array([], dtype=np.uint64)
             if x is None or y is None:
                 # CSV 导入的测线 trace metadata 常无坐标键，回退到轨迹文件
                 track = self._spatial_track_from_trajectory(line, coordinate_system)
@@ -121,6 +126,7 @@ class SpatialPersistenceMixin:
                     index, float(x[index]), float(y[index]), float(z[index]),
                     flight_height_m=_at(fh, index),
                     ground_elevation_m=_at(ge, index),
+                    trace_id=int(trace_ids[index]) if index < len(trace_ids) else None,
                 )
                 for index in range(count)
                 if np.isfinite(x[index]) and np.isfinite(y[index])
@@ -194,7 +200,67 @@ class SpatialPersistenceMixin:
 
     def list_spatial_results(self) -> Sequence[SpatialResult]:
         with self._lock:
-            return tuple(_spatial_record(item) for item in SpatialResultVersionService(self._store).list_results())
+            values = SpatialResultVersionService(self._store).list_results()
+            results = [_spatial_record(item) for item in values]
+            if any(item.summary.get('kind') == 'amplitude_slice' for item in results):
+                from mygpr.application.spatial.amplitude_identity import metadata_values, track_position_fingerprint
+                tracks = {track.line_id: track for track in self.load_spatial_tracks()}
+                for index, item in enumerate(results):
+                    if item.summary.get('kind') != 'amplitude_slice':
+                        continue
+                    source_lines = item.sources.get('line_sources', {})
+                    stale = item.stale
+                    for line_id, source in source_lines.items():
+                        expected = str(source.get('position_sha256') or '')
+                        track = tracks.get(line_id)
+                        if expected and (track is None or track_position_fingerprint(track) != expected):
+                            stale = True
+                            break
+                        content_digest = str(source.get('content_sha256') or '')
+                        if not content_digest:
+                            continue
+                        artifact_id = str(source.get('artifact_id') or '')
+                        try:
+                            if artifact_id:
+                                matches = [a for a in self.list_artifacts(line_id) if a.artifact_id == artifact_id]
+                                current = str(matches[0].sha256 or '') if len(matches) == 1 else ''
+                            else:
+                                hashes = metadata_values(self.get_dataset_info(line_id).metadata, 'data_sha256')
+                                current = str(hashes[0]) if hashes else ''
+                        except (OSError, ValueError, KeyError):
+                            current = ''
+                        if current != content_digest:
+                            stale = True
+                            break
+                    results[index] = replace(item, stale=stale)
+            return tuple(results)
+
+    def spatial_source_state_token(self, line_ids: Sequence[str]) -> str:
+        safe = tuple(self._validated_line(value) for value in line_ids)
+        with self._lock:
+            return SpatialResultVersionService(self._store)._current_source_state_token(safe)
+
+    def save_amplitude_result(self, result, *, name: str, context) -> SpatialResult:
+        from core.amplitude_spatial_result import save_amplitude_result
+        from mygpr.application.spatial.amplitude_identity import track_position_fingerprint
+        with self._lock:
+            self._store.assert_writable()
+            context.raise_if_cancelled()
+            tracks = {track.line_id: track for track in self.load_spatial_tracks()}
+            for source in result.sources:
+                track = tracks.get(source.line_id)
+                if track is None or (source.position_sha256 and
+                                     track_position_fingerprint(track) != source.position_sha256):
+                    raise ValueError(f'{source.line_id} 的轨迹已变化，请重新生成切片')
+            record = save_amplitude_result(SpatialResultVersionService(self._store), result,
+                                           name=name, cancel_requested=context.is_cancelled)
+            context.mark_committed()
+            return _spatial_record(record)
+
+    def load_amplitude_result(self, result_id: str) -> Mapping[str, Any]:
+        from core.amplitude_spatial_result import load_amplitude_result
+        with self._lock:
+            return load_amplitude_result(SpatialResultVersionService(self._store), result_id)
 
     def spatial_preflight(
         self, *, line_ids: Sequence[str] | None, generate_surface: bool

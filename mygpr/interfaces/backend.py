@@ -24,6 +24,7 @@ from mygpr.application.reporting.service import ReportingService
 from mygpr.application.interpretation.service import InterpretationService
 from mygpr.application.interpretation.edit_service import InterpretationEditService
 from mygpr.application.spatial.service import SpatialService
+from mygpr.interfaces.backend_amplitude import BackendAmplitudeMixin
 from mygpr.domain.processing.models import PipelineDefinition, ProcessingRequest
 from mygpr.application.velocity.service import VelocityAnalysisService
 from mygpr.application.grid.facade_service import (
@@ -70,7 +71,7 @@ class BackendShutdownError(MyGPRError):
 # （惰性派生服务缓存，见 backend_controller 的 _WORKBENCH_SERVICES）。
 # 字段均为服务引用，默认字段相等语义本就不适用。
 @dataclass(slots=True, eq=False)
-class MyGPRBackend:
+class MyGPRBackend(BackendAmplitudeMixin):
     """Backend services exposed to any presentation technology.
 
     No service returned here exposes Qt objects, database connections, h5py
