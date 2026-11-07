@@ -781,6 +781,8 @@ class ProjectController(QObject):
             self._amplitude_job_id = ''
             if success and result is not None:
                 self.amplitude_preview_ready.emit(result, positions)
+            elif success:
+                self.amplitude_preview_failed.emit('切片结果过大，无法显示；请增大网格或减少测线后重试')
             else:
                 self.amplitude_preview_failed.emit(message or '振幅切片结果不可用')
 

@@ -58,3 +58,18 @@ def test_project_switch_discards_queued_slice_result(qapp, monkeypatch):
     controller._project_context_generation += 1
     bridge.job_completed.emit('job', True, '', 'obsolete')
     assert received == []
+
+
+def test_result_too_large_reports_actionable_error(qapp, monkeypatch):
+    import ui.controllers.project_controller as module
+    backend = SimpleNamespace(submit_amplitude_slice=lambda *args, **kw: 'job')
+    bridge = FakeBridge()
+    controller = ProjectController()
+    controller._current = SimpleNamespace(project_id='P')
+    controller._backend_controller = SimpleNamespace(backend=backend, job_bridge=bridge)
+    monkeypatch.setattr(module, 'prepare_amplitude_sources', lambda *a: (('source',), ('positions',)))
+    errors = []
+    controller.amplitude_preview_failed.connect(errors.append)
+    controller.request_amplitude_preview([], {}, '', 0., 1., 1., 'rms')
+    bridge.job_completed.emit('job', True, '任务完成', None)
+    assert errors and '过大' in errors[0] and '网格' in errors[0]
