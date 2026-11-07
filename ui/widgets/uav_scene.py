@@ -49,7 +49,8 @@ class UAVSceneMixin:
             if positioned is None:
                 continue
             self._uav_item = gl.GLMeshItem(vertexes=positioned.astype(np.float32), faces=faces,
-                                           vertexColors=colors, smooth=True, glOptions='opaque')
+                                           vertexColors=colors, smooth=True, computeNormals=False,
+                                           glOptions='opaque')
             self._gl_view.addItem(self._uav_item)
             self._uav_caption.setVisible(True)
             return

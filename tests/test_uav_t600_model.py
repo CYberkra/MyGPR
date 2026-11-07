@@ -13,7 +13,11 @@ def test_t600_mesh_has_finite_triangles_and_colors():
     assert vertices.shape[1] == 3 and faces.shape[1] == 3
     assert len(vertices) == len(colors) and colors.shape[1] == 4
     assert np.isfinite(vertices).all() and faces.min() >= 0 and faces.max() < len(vertices)
-    assert len(vertices) < 5000
+    assert np.isfinite(colors).all() and np.all((0. <= colors) & (colors <= 1.))
+    assert len(vertices) < 2500 and len(faces) < 4000
+    # White pod and graphite rotors must both remain distinguishable.
+    brightness = colors[:, :3].mean(axis=1)
+    assert brightness.min() < .2 and brightness.max() > .7
 
 
 def test_placement_follows_track_direction_and_preserves_z_origin():
@@ -42,6 +46,7 @@ def test_scene_toggle_removes_and_restores_aircraft(qapp, monkeypatch):
     view._track_data = [('L01', '#000', np.array([[0., 0., 1.], [1., 0., 1.]]))]
     view._render_uav()
     assert len(scene.items) == 1 and not view._uav_caption.isHidden()
+    assert scene.items[0]['computeNormals'] is False
     view.set_uav_visible(False)
     assert not scene.items and view._uav_caption.isHidden()
     view.set_uav_visible(True)
