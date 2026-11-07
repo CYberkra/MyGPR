@@ -115,6 +115,16 @@ def test_first_gl_view_does_not_hide_or_recreate_main_window(tmp_path, renderer)
         window.pages["spatialInterface"]._view_stack.setCurrentWidget(view)
         app.processEvents()
         assert view._gl_view.isValid(), "Native OpenGL context was not created"
+        from types import SimpleNamespace
+        track = SimpleNamespace(
+            line_id='L01', coordinate_system='',
+            points=[SimpleNamespace(x=1000.0 + i, y=2000.0 + i, elevation_m=10.0 + i)
+                    for i in range(5)],
+        )
+        view.set_tracks([track], {'L01': '#ff0000'})
+        app.processEvents()
+        assert view._line_items, '3D trajectory was not created'
+        assert not view._gl_view.grabFramebuffer().isNull(), '3D frame was not rendered'
         assert int(window.winId()) == before, (before, int(window.winId()), events)
         assert not events, events
         print('OpenGL diagnostic: starting window close', file=sys.stderr, flush=True)
