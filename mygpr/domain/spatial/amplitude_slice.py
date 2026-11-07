@@ -95,8 +95,8 @@ def grid_line_values(x_m, y_m, values, line_ids, *, cell_size_m: float) -> Ampli
     cell = float(cell_size_m)
     if not np.isfinite(cell) or cell <= 0:
         raise ValueError('网格尺寸必须为正')
-    valid = np.isfinite(x) & np.isfinite(y) & np.isfinite(value) & (lines != '')
-    x, y, value, lines = x[valid], y[valid], value[valid], lines[valid]
+    valid_position = np.isfinite(x) & np.isfinite(y) & (lines != '')
+    x, y, value, lines = x[valid_position], y[valid_position], value[valid_position], lines[valid_position]
     if not len(value):
         raise ValueError('没有同时具备有效坐标和振幅的观测')
     xi, yi = np.floor(x / cell).astype(np.int64), np.floor(y / cell).astype(np.int64)
@@ -104,7 +104,11 @@ def grid_line_values(x_m, y_m, values, line_ids, *, cell_size_m: float) -> Ampli
     ncols, nrows = xmax - xmin + 1, ymax - ymin + 1
     if ncols * nrows > 4_000_000:
         raise ValueError('网格过大，请增大网格尺寸')
-    flat = (ymax - yi) * ncols + (xi - xmin)
+    # Extent uses all located traces, not just amplitudes available in this
+    # particular time window; switching windows must not move the grid.
+    valid_value = np.isfinite(value)
+    flat = ((ymax - yi) * ncols + (xi - xmin))[valid_value]
+    value, lines = value[valid_value], lines[valid_value]
     _, line_codes = np.unique(lines, return_inverse=True)
     pairs = np.rec.fromarrays([flat, line_codes], names='cell,line')
     unique_pairs, pair_indices, pair_counts = np.unique(pairs, return_inverse=True, return_counts=True)

@@ -120,7 +120,7 @@ def collect_observations(
             for local, value in enumerate(calculated):
                 trace_index = start + local
                 point = positions.get(int(indices[trace_index]))
-                if point is None or not np.isfinite(value) or not np.isfinite(point).all():
+                if point is None or not np.isfinite(point).all():
                     continue
                 selected_indices.append(trace_index)
                 xs.append(point[0])

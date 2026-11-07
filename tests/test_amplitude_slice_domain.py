@@ -45,3 +45,10 @@ def test_grid_averages_lines_equally_and_preserves_unobserved_cells():
 def test_grid_rejects_excessive_dimensions():
     with pytest.raises(ValueError, match='网格'):
         grid_line_values([0., 10000.], [0., 10000.], [1., 2.], ['a', 'b'], cell_size_m=1.)
+
+
+def test_grid_extent_does_not_change_when_a_window_has_missing_amplitudes():
+    grid = grid_line_values([0.1, 2.1], [0.1, 0.1], [float('nan'), 2.], ['L1', 'L1'], cell_size_m=1.)
+    assert grid.values.shape == (1, 3)
+    assert np.isnan(grid.values[0, 0])
+    assert grid.values[0, 2] == 2.
