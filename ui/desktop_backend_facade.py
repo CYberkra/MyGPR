@@ -84,7 +84,7 @@ def compute_display_envelope(matrix):
     return display_envelope(matrix)
 
 
-def prepare_amplitude_sources(tracks, source_ids, component):
+def prepare_amplitude_sources(tracks, source_ids, component, *, target_crs=''):
     """Project selected tracks on the GUI thread and retain raw trace indices."""
     import numpy as np
     from mygpr.application.spatial.amplitude import AmplitudeSource, LineObservations
@@ -106,7 +106,7 @@ def prepare_amplitude_sources(tracks, source_ids, component):
             np.array([p.y for p in points], dtype=np.float64), np.zeros(len(points)),
             track_position_fingerprint(track),
         ))
-    projected, _crs = project_observations(positions)
+    projected, _crs = project_observations(positions, target_crs=target_crs)
     return tuple(sources), projected
 
 

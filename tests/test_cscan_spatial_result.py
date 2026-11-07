@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 import rasterio
 
-from core.amplitude_spatial_result import save_amplitude_result
+from core.amplitude_spatial_result import load_amplitude_result, save_amplitude_result
 from core.spatial_result_versions import SpatialResultVersionService
 from mygpr.application.spatial.amplitude import AmplitudeResult, AmplitudeSource
 from mygpr.domain.spatial.amplitude_slice import grid_line_values
@@ -31,6 +31,10 @@ def test_saves_geotiff_nodata_coverage_and_reproducible_manifest(tmp_path, monke
         assert dataset.transform.c == 0. and dataset.transform.f == 1.
     with np.load(output / 'coverage.npz') as coverage:
         np.testing.assert_array_equal(coverage['trace_counts'], [[1, 0, 1]])
+    loaded = load_amplitude_result(service, record.result_id)
+    assert loaded['start_ns'] == 10. and loaded['end_ns'] == 20.
+    assert loaded['sources']['L1']['component'] == 'mag'
+    assert np.isnan(loaded['values'][0, 1])
     exported = service.export_result(record.result_id, tmp_path / 'export.tif', format_name='geotiff')
     assert exported.is_file()
 

@@ -8,6 +8,7 @@ pytest.importorskip('PyQt6')
 from mygpr.application.spatial.amplitude import AmplitudeResult, AmplitudeSource, LineObservations
 from mygpr.domain.spatial.amplitude_slice import grid_line_values
 from mygpr.domain.spatial.models import SpatialTrack, SpatialTrackPoint
+from mygpr.application.spatial.amplitude_saved import LoadedAmplitudeSlice
 from ui.widgets.amplitude_slice_panel import AmplitudeSlicePanel
 
 
@@ -25,6 +26,19 @@ def test_panel_requests_selected_sources_and_disables_during_job(qapp):
     assert not panel._run.isEnabled() and panel._cancel.isEnabled()
     panel.set_failure('时间轴未知')
     assert panel._run.isEnabled() and '时间轴' in panel._status.text()
+    panel.close()
+
+
+def test_reopening_stale_saved_slice_displays_frozen_grid_without_3d(qapp):
+    panel = AmplitudeSlicePanel()
+    grid = grid_line_values([.1], [.1], [2.], ['L1'], cell_size_m=1.)
+    source = AmplitudeSource('L1', component='mag')
+    result = AmplitudeResult(grid, (source,), 'EPSG:32648', 10., 20., 'mean')
+    track = SpatialTrack('L1', 'Line', (SpatialTrackPoint(0, .1, .1),), 'EPSG:32648')
+    panel.show_saved(LoadedAmplitudeSlice(result, 'amplitude_slice_v001', True), [track], {}, ())
+    assert panel._map._matrix[0, 0] == 2.
+    assert not panel._show_3d.isEnabled() and not panel._save.isEnabled()
+    assert '来源已变化' in panel._status.text()
     panel.close()
 
 

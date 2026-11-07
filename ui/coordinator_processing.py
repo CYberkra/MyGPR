@@ -48,6 +48,7 @@ class ProcessingChain:
         processing = co.page('processingInterface')
         interpretation = co.page('interpretationInterface')
         spatial = co.page('spatialInterface')
+        delivery = co.page('deliveryInterface')
 
         # ---------------- 处理页（SPEC §6.5）
         processing.run_requested.connect(self.on_run_requested)
@@ -154,6 +155,10 @@ class ProcessingChain:
             amplitude.save_requested.connect(pc.save_amplitude_slice)
             pc.amplitude_save_finished.connect(amplitude.set_save_result)
             pc.amplitude_save_finished.connect(self._on_amplitude_save_finished)
+            delivery.amplitude_open_requested.connect(pc.open_amplitude_slice)
+            pc.amplitude_opened.connect(self._on_amplitude_opened)
+            pc.amplitude_open_failed.connect(
+                lambda message: co.infobar('error', '打开振幅切片', message))
             amplitude.artifacts_requested.connect(
                 lambda line_id: pc.load_comparison_artifacts(str(co.current_project_id() or ''), line_id))
             pc.comparison_artifacts_ready.connect(
@@ -206,6 +211,10 @@ class ProcessingChain:
         project_id = str(self._co.current_project_id() or '')
         if success and project_id and self._co.delivery_controller is not None:
             self._co.delivery_controller.refresh_spatial(project_id)
+
+    def _on_amplitude_opened(self, loaded):
+        self._co.goto_page('spatialInterface')
+        self._co.page('spatialInterface').show_saved_amplitude(loaded)
 
     def on_methods_loaded(self, methods: list) -> None:
         """方法库 → 处理页 MethodBrowser。"""

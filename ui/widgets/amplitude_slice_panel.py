@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from uuid import uuid4
+from dataclasses import replace
 
 import numpy as np
 import pyqtgraph as pg
@@ -175,8 +176,9 @@ class AmplitudeSlicePanel(QWidget):
         for artifact in self._artifact_lists.get(line_id, ()):
             self._source.addItem(str(artifact.name), userData=str(artifact.artifact_id))
         index = self._source.findData(selected)
-        if index < 0:
-            self._source_ids.pop(line_id, None)
+        if index < 0 and selected:
+            self._source.addItem(f'处理结果 {selected[:8]}', userData=selected)
+            index = self._source.findData(selected)
         self._source.setCurrentIndex(max(index, 0))
         self._source.blockSignals(False)
 
@@ -280,6 +282,44 @@ class AmplitudeSlicePanel(QWidget):
     def set_save_result(self, success, message):
         self._save.setEnabled(self._result is not None)
         self._status.setText(str(message or ('成果已保存' if success else '成果保存失败')))
+
+    def show_saved(self, loaded, tracks, colors, positions, warning=''):
+        result = loaded.result
+        if warning or loaded.stale:
+            result = replace(result, curtains=())
+        self.set_tracks(tracks, colors)
+        self._source_ids = {source.line_id: source.artifact_id for source in result.sources}
+        self._refresh_source()
+        controls = (self._start, self._end, self._cell, self._attribute, self._component)
+        for control in controls:
+            control.blockSignals(True)
+        try:
+            self._start.setValue(result.start_ns)
+            self._end.setValue(result.end_ns)
+            self._cell.setValue(result.grid.cell_size_m)
+            self._attribute.setCurrentIndex(max(0, self._attribute.findData(result.attribute)))
+            components = {source.component for source in result.sources}
+            common = next(iter(components)) if len(components) == 1 else ''
+            self._component.setCurrentIndex(max(0, self._component.findData('mag' if common == 'magnitude' else common)))
+        finally:
+            for control in controls:
+                control.blockSignals(False)
+        self._sync_slider()
+        self.set_result(result, positions)
+        if not loaded.stale and not warning:
+            self._request_bscan()
+        else:
+            self._bscan.clear()
+            self._bundle = None
+            self._trace_marker.hide()
+            self._window_band.hide()
+        if loaded.stale:
+            self._save.setEnabled(False)
+            self._status.setText('来源已变化：显示保存时的切片')
+        elif warning or loaded.warning:
+            self._status.setText(str(warning or loaded.warning))
+        else:
+            self._status.setText(f'已打开 {loaded.result_id}')
 
     def _save_result(self):
         if self._result is None:

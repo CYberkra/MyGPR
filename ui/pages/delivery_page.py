@@ -46,6 +46,7 @@ class DeliveryPage(QWidget):
     spatial_export_requested = pyqtSignal(dict)
     spatial_delete_requested = pyqtSignal(str)
     spatial_current_requested = pyqtSignal(str)
+    amplitude_open_requested = pyqtSignal(str)
     def __init__(self, parent=None):
         super().__init__(parent)
         self._busy = False
@@ -193,6 +194,10 @@ class DeliveryPage(QWidget):
         object_action(menu, 'copy-name', '复制成果名称',
                       lambda: QApplication.clipboard().setText(str(_get(result, 'name', ''))) if valid() else None)
         menu.addSeparator()
+        if 'amplitude_geotiff' in (_get(result, 'files', {}) or {}):
+            object_action(menu, 'open-amplitude-result', '查看振幅切片',
+                          lambda: self.amplitude_open_requested.emit(result_id) if valid() else None,
+                          enabled=bool(result_id))
         object_action(menu, 'set-current-result', '设为当前空间成果',
                       lambda: self.spatial_current_requested.emit(result_id) if valid() else None,
                       enabled=bool(result_id))

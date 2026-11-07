@@ -33,6 +33,7 @@ from qfluentwidgets import (CaptionLabel, ComboBox, DoubleSpinBox,
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants, file_dialogs
+from ui.desktop_backend_facade import prepare_amplitude_sources
 from ui.geo_utils import coverage_statistics, format_distance, format_spacing
 from ui.qt_defer import defer_call
 from ui.spatial_view_sync import ViewSyncMixin
@@ -761,6 +762,40 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
         self._switch_view(_SEG_3D)
 
     def _show_amplitude_2d(self) -> None:
+        self._view_segment.setCurrentItem(_SEG_AMPLITUDE)
+        self._switch_view(_SEG_AMPLITUDE)
+
+    def show_saved_amplitude(self, loaded) -> None:
+        result = loaded.result
+        selected_ids = {source.line_id for source in result.sources}
+        tracks = [track for track in self._tracks if str(track.line_id) in selected_ids]
+        self._line_list.blockSignals(True)
+        try:
+            for row in range(self._line_list.count()):
+                item = self._line_list.item(row)
+                item.setCheckState(Qt.CheckState.Checked if str(item.data(Qt.ItemDataRole.UserRole)) in selected_ids
+                                   else Qt.CheckState.Unchecked)
+        finally:
+            self._line_list.blockSignals(False)
+        self._refresh_views()
+        positions, warning = (), ''
+        if not loaded.stale and len(tracks) == len(selected_ids):
+            try:
+                source_ids = {source.line_id: source.artifact_id for source in result.sources}
+                _sources, positions = prepare_amplitude_sources(
+                    tracks, source_ids, '', target_crs=result.coordinate_system)
+                hashes = {source.line_id: source.position_sha256 for source in result.sources}
+                if any(hashes.get(item.source.line_id) and hashes[item.source.line_id] != item.source_position_sha256
+                       for item in positions):
+                    positions = ()
+                    warning = '轨迹已变化，仅显示保存时的切片'
+            except (ValueError, OSError) as exc:
+                warning = f'已打开保存的切片，轨迹不可用：{exc}'
+        elif not loaded.stale:
+            warning = '部分测线不可用，仅显示保存时的切片'
+        self._amplitude_view.show_saved(loaded, tracks, self._colors, positions, warning)
+        self._views_applied[_SEG_AMPLITUDE] = self._tracks_fingerprint(tracks, self._colors)
+        self._dirty_views.discard(_SEG_AMPLITUDE)
         self._view_segment.setCurrentItem(_SEG_AMPLITUDE)
         self._switch_view(_SEG_AMPLITUDE)
 

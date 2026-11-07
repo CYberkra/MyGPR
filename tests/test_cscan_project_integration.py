@@ -46,6 +46,15 @@ def test_import_slice_save_reopen_delete_preserves_original(tmp_path):
         reopened = backend.projects.open_project(root)
         records = backend.spatial.list_results(reopened.project_id)
         assert any(item.result_id == result_id and 'amplitude_geotiff' in item.files for item in records)
+        opened = backend.jobs.wait(backend.submit_open_amplitude_slice(reopened.project_id, result_id), timeout=60)
+        assert opened.status is JobStatus.COMPLETED, opened.error_message
+        assert not opened.result.stale and len(opened.result.result.curtains) == 1
+        np.testing.assert_allclose(opened.result.result.grid.values, result.grid.values, equal_nan=True)
+        backend.projects.update_line_properties(reopened.project_id, 'L01', length_m=None,
+                                                view_reversed=False, time_window_ns=20.)
+        stale = backend.jobs.wait(backend.submit_open_amplitude_slice(reopened.project_id, result_id), timeout=60)
+        assert stale.status is JobStatus.COMPLETED, stale.error_message
+        assert stale.result.stale and not stale.result.result.curtains
         deleted = backend.jobs.wait(backend.submit_spatial_delete(reopened.project_id, result_id), timeout=60)
         assert deleted.status is JobStatus.COMPLETED, deleted.error_message
         assert not (root / 'spatial' / 'results' / result_id).exists()

@@ -199,7 +199,7 @@ class SpatialPersistenceMixin:
             values = SpatialResultVersionService(self._store).list_results()
             results = [_spatial_record(item) for item in values]
             if any(item.summary.get('kind') == 'amplitude_slice' for item in results):
-                from mygpr.application.spatial.amplitude_identity import track_position_fingerprint
+                from mygpr.application.spatial.amplitude_identity import metadata_values, track_position_fingerprint
                 tracks = {track.line_id: track for track in self.load_spatial_tracks()}
                 for index, item in enumerate(results):
                     if item.summary.get('kind') != 'amplitude_slice':
@@ -210,6 +210,22 @@ class SpatialPersistenceMixin:
                         expected = str(source.get('position_sha256') or '')
                         track = tracks.get(line_id)
                         if expected and (track is None or track_position_fingerprint(track) != expected):
+                            stale = True
+                            break
+                        content_digest = str(source.get('content_sha256') or '')
+                        if not content_digest:
+                            continue
+                        artifact_id = str(source.get('artifact_id') or '')
+                        try:
+                            if artifact_id:
+                                matches = [a for a in self.list_artifacts(line_id) if a.artifact_id == artifact_id]
+                                current = str(matches[0].sha256 or '') if len(matches) == 1 else ''
+                            else:
+                                hashes = metadata_values(self.get_dataset_info(line_id).metadata, 'data_sha256')
+                                current = str(hashes[0]) if hashes else ''
+                        except (OSError, ValueError, KeyError):
+                            current = ''
+                        if current != content_digest:
                             stale = True
                             break
                     results[index] = replace(item, stale=stale)
@@ -236,6 +252,11 @@ class SpatialPersistenceMixin:
                                            name=name, cancel_requested=context.is_cancelled)
             context.mark_committed()
             return _spatial_record(record)
+
+    def load_amplitude_result(self, result_id: str) -> Mapping[str, Any]:
+        from core.amplitude_spatial_result import load_amplitude_result
+        with self._lock:
+            return load_amplitude_result(SpatialResultVersionService(self._store), result_id)
 
     def spatial_preflight(
         self, *, line_ids: Sequence[str] | None, generate_surface: bool

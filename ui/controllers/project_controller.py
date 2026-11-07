@@ -103,6 +103,8 @@ class ProjectController(QObject):
     amplitude_preview_ready = pyqtSignal(object, object)   # result, projected positions
     amplitude_preview_failed = pyqtSignal(str)
     amplitude_save_finished = pyqtSignal(bool, str)
+    amplitude_opened = pyqtSignal(object)
+    amplitude_open_failed = pyqtSignal(str)
     artifact_descendants_ready = pyqtSignal(str, list, dict)  # line_id, 后代闭包, {artifact_id: 名称}
     line_source_path_ready = pyqtSignal(str, object)          # line_id, 源文件路径|None
     line_sensor_summary_ready = pyqtSignal(str, str)         # line_id, compact availability text
@@ -809,6 +811,41 @@ class ProjectController(QObject):
 
         bridge.job_completed.connect(completed)
         bridge.watch(job_id, title='保存振幅切片')
+
+    def open_amplitude_slice(self, result_id: str) -> None:
+        backend, bridge, project_id = self._backend(), self._job_bridge(), self._project_id_or_warn()
+        if backend is None or bridge is None or project_id is None:
+            self.amplitude_open_failed.emit('项目或后台任务服务不可用')
+            return
+        self.cancel_amplitude_preview()
+        generation = self._amplitude_generation
+        project_generation = self._project_context_generation
+        try:
+            job_id = backend.submit_open_amplitude_slice(project_id, str(result_id))
+        except Exception as exc:  # noqa: BLE001 - job admission failure
+            self.amplitude_open_failed.emit(friendly_error_message(exc))
+            return
+        self._amplitude_job_id = job_id
+
+        def completed(done_id, success, message, result):
+            if done_id != job_id:
+                return
+            try:
+                bridge.job_completed.disconnect(completed)
+            except TypeError:
+                pass
+            if (generation != self._amplitude_generation or
+                    project_generation != self._project_context_generation or
+                    self.current_project_id != project_id):
+                return
+            self._amplitude_job_id = ''
+            if success and result is not None:
+                self.amplitude_opened.emit(result)
+            else:
+                self.amplitude_open_failed.emit(message or '无法打开保存的切片')
+
+        bridge.job_completed.connect(completed)
+        bridge.watch(job_id, title='打开振幅切片')
 
     def submit_depth_layer(self, line_ids: list[str], cell_size_m: float) -> str | None:
         """提交网格化界面深度图层 job；bridge.watch 后经 depth_layer_saved 回 UI。"""

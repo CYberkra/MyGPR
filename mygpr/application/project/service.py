@@ -85,6 +85,9 @@ class ProjectAcquisitionServiceMixin:
         return self._session(project_id).save_amplitude_result(
             result, name=name, context=context or ExecutionContext.null())
 
+    def load_amplitude_result(self, project_id: str, result_id: str) -> dict[str, Any]:
+        return dict(self._session(project_id).load_amplitude_result(result_id))
+
 
 class ProjectService(ProjectAcquisitionServiceMixin, ProjectIdentityServiceMixin):
     """Own open project sessions without exposing storage implementation objects."""

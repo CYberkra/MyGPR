@@ -58,6 +58,7 @@ PUBLIC_METHODS = (
     "submit_line_grouping",
     "submit_amplitude_slice",
     "submit_save_amplitude_slice",
+    "submit_open_amplitude_slice",
     "submit_grid_layer",
     "interface_depth_preview",
     "export_artifact_segy",

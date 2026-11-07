@@ -24,8 +24,7 @@ from mygpr.application.reporting.service import ReportingService
 from mygpr.application.interpretation.service import InterpretationService
 from mygpr.application.interpretation.edit_service import InterpretationEditService
 from mygpr.application.spatial.service import SpatialService
-from mygpr.application.spatial.amplitude import AmplitudeSource, LineObservations, build_amplitude_grid
-from mygpr.application.spatial.amplitude_projection import validate_metric_crs
+from mygpr.interfaces.backend_amplitude import BackendAmplitudeMixin
 from mygpr.domain.processing.models import PipelineDefinition, ProcessingRequest
 from mygpr.application.velocity.service import VelocityAnalysisService
 from mygpr.application.grid.facade_service import (
@@ -72,7 +71,7 @@ class BackendShutdownError(MyGPRError):
 # （惰性派生服务缓存，见 backend_controller 的 _WORKBENCH_SERVICES）。
 # 字段均为服务引用，默认字段相等语义本就不适用。
 @dataclass(slots=True, eq=False)
-class MyGPRBackend:
+class MyGPRBackend(BackendAmplitudeMixin):
     """Backend services exposed to any presentation technology.
 
     No service returned here exposes Qt objects, database connections, h5py
@@ -554,37 +553,6 @@ class MyGPRBackend:
             project_id,
             title or "测线分组",
             lambda context: self.grid.group_lines(project_id, tolerance_m=tolerance_m),
-        )
-
-    def submit_amplitude_slice(
-        self, project_id: str, sources: Sequence[AmplitudeSource],
-        positions: Sequence[LineObservations], start_ns: float, end_ns: float, *,
-        cell_size_m: float, attribute: str = 'rms', title: str | None = None,
-    ) -> str:
-        """Run an observation-only time-window amplitude grid as a leased job.
-
-        Positions must already be transformed on the caller thread because
-        PROJ initialization in the desktop worker has proved unreliable.
-        """
-        selected, projected = tuple(sources), tuple(positions)
-        crs = {item.coordinate_system for item in projected}
-        if len(crs) != 1:
-            raise ValueError('所有测线必须使用同一坐标系')
-        validate_metric_crs(next(iter(crs)))
-        return self._submit_project_job(
-            project_id, title or '振幅切片',
-            lambda context: build_amplitude_grid(
-                self.projects, project_id, selected, projected, start_ns, end_ns,
-                cell_size_m=cell_size_m, attribute=attribute, context=context, include_curtains=True),
-        )
-
-    def submit_save_amplitude_slice(
-        self, project_id: str, result: Any, *, name: str = '振幅切片', title: str | None = None,
-    ) -> str:
-        """Save a previously computed slice as a versioned spatial result."""
-        return self._submit_project_job(
-            project_id, title or '保存振幅切片',
-            lambda context: self.projects.save_amplitude_result(project_id, result, name=name, context=context),
         )
 
     def submit_grid_layer(

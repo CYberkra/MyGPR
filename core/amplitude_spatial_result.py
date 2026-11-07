@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import shutil
 import uuid
+import zipfile
 
 import numpy as np
 
 from core.field_project_models import local_now, validate_line_id
 from core.spatial_result_versions import SPATIAL_RESULT_SCHEMA, _check_cancel
 from core.storage_primitives import fsync_directory, fsync_file
+from core.security_paths import resolve_managed_path
 
 
 def save_amplitude_result(service, result, *, name: str, cancel_requested=None):
@@ -101,3 +103,47 @@ def save_amplitude_result(service, result, *, name: str, cancel_requested=None):
     finally:
         if not committed:
             shutil.rmtree(staging, ignore_errors=True)
+
+
+def load_amplitude_result(service, result_id: str):
+    """Read a bounded saved grid and its immutable provenance."""
+    import rasterio
+
+    record = service.load_result(result_id)
+    if record.summary.get('kind') != 'amplitude_slice':
+        raise ValueError('所选空间成果不是振幅切片')
+    directory = service.root / record.result_id
+    raster_path = resolve_managed_path(directory, record.files['amplitude_geotiff'], require_file=True)
+    coverage_path = resolve_managed_path(directory, record.files['coverage'], require_file=True)
+    with rasterio.open(raster_path) as raster:
+        if raster.count != 1 or raster.width * raster.height > 500_000:
+            raise ValueError('保存的振幅网格尺寸无效')
+        transform = raster.transform
+        if (transform.a <= 0 or transform.e >= 0 or abs(transform.b) > 1e-12
+                or abs(transform.d) > 1e-12 or not np.isclose(transform.a, -transform.e)):
+            raise ValueError('保存的振幅网格坐标变换无效')
+        if raster.crs is None or raster.crs != rasterio.crs.CRS.from_user_input(record.coordinate_system):
+            raise ValueError('保存的振幅网格坐标系与记录不一致')
+        values = raster.read(1).astype(np.float64)
+        cell = float(transform.a)
+        x_origin = float(transform.c + cell / 2.)
+        y_origin = float(transform.f - cell / 2.)
+    with zipfile.ZipFile(coverage_path) as archive:
+        members = archive.infolist()
+        if (len(members) != 2 or {m.filename for m in members} != {'trace_counts.npy', 'line_counts.npy'}
+                or any(m.file_size > values.size * 8 + 4096 for m in members)):
+            raise ValueError('保存的覆盖计数文件无效')
+    with np.load(coverage_path, allow_pickle=False) as coverage:
+        trace_counts = coverage['trace_counts']
+        line_counts = coverage['line_counts']
+    if (trace_counts.shape != values.shape or line_counts.shape != values.shape
+            or trace_counts.dtype.kind not in 'iu' or line_counts.dtype.kind not in 'iu'
+            or np.any(trace_counts < 0) or np.any(line_counts < 0)):
+        raise ValueError('保存的覆盖计数与网格不匹配')
+    return {'values': values, 'trace_counts': trace_counts, 'line_counts': line_counts,
+            'x_origin_m': x_origin, 'y_origin_m': y_origin, 'cell_size_m': cell,
+            'coordinate_system': record.coordinate_system, 'start_ns': record.options['time_start_ns'],
+            'end_ns': record.options['time_end_ns'], 'attribute': record.options['attribute'],
+            'sources': dict(record.sources.get('line_sources', {})),
+            'source_state_token': str(record.sources.get('source_state_token') or ''),
+            'stale': bool(record.stale), 'result_id': record.result_id}
