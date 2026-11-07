@@ -3,6 +3,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+pytest.importorskip('PyQt6')
+
 from ui.widgets.uav_t600_model import place_t600, t600_mesh
 
 
@@ -24,7 +26,6 @@ def test_placement_follows_track_direction_and_preserves_z_origin():
 
 
 def test_scene_toggle_removes_and_restores_aircraft(qapp, monkeypatch):
-    pytest.importorskip('PyQt6')
     import ui.widgets.trajectory_3d_view as module
     class Scene:
         def __init__(self):
