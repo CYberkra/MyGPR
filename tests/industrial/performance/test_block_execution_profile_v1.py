@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import faulthandler
+import threading
 
 import numpy as np
 import pytest
@@ -45,8 +47,15 @@ def test_file_backed_project_pipeline_never_materializes_hdf5_proxy(tmp_path: Pa
         assert estimate.temporary_disk_bytes < 64 * 1024 * 1024
         job_id = backend.submit_project_pipeline(
             project.project_id, "L01", pipeline, save_intermediates=False)
-        snapshot = backend.jobs.wait(job_id, timeout=120)
-        assert snapshot.status is JobStatus.COMPLETED, snapshot.error_message
+        # Preserve all thread stacks before the enclosing CI timeout terminates the process.
+        watchdog = threading.Timer(90, faulthandler.dump_traceback)
+        watchdog.daemon = True
+        watchdog.start()
+        try:
+            snapshot = backend.jobs.wait(job_id, timeout=120)
+        finally:
+            watchdog.cancel()
+        assert snapshot.status is JobStatus.COMPLETED, snapshot.to_dict()
         artifact = snapshot.result
         assert artifact.shape == matrix.shape
         assert artifact.sha256

@@ -123,6 +123,12 @@ def test_first_gl_view_does_not_hide_or_recreate_main_window(tmp_path, renderer)
         window.close()
         app.processEvents()
         print('OpenGL diagnostic: window close completed', file=sys.stderr, flush=True)
+        if __import__('os').environ.get('MYGPR_EXPERIMENTAL_GL') == '1':
+            from PyQt6.QtCore import QCoreApplication
+            window.deleteLater()
+            QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+            app.processEvents()
+            print('OpenGL diagnostic: window deleted', file=sys.stderr, flush=True)
     ''')
     result = subprocess.run([sys.executable, "-c", script, str(tmp_path / "settings.json")],
                             env=environment, capture_output=True, text=True, timeout=35)

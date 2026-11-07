@@ -15,6 +15,7 @@ import pytest
 )
 def test_native_contrast_theme_captures_workbench_and_backup_dialog(tmp_path):
     from PyQt6.QtTest import QTest
+    from PyQt6.QtGui import QPalette
     from PyQt6.QtWidgets import QApplication
 
     from ui import constants
@@ -67,6 +68,20 @@ def test_native_contrast_theme_captures_workbench_and_backup_dialog(tmp_path):
         screenshot = screen.grabWindow(0)
         assert not screenshot.isNull()
         assert screenshot.save(str(output / 'windows-high-contrast-workbench.png'))
+        get_color = user32.GetSysColor
+        get_color.argtypes = [ctypes.c_int]
+        get_color.restype = wintypes.DWORD
+
+        def system_rgb(index):
+            color = int(get_color(index))
+            return color & 255, (color >> 8) & 255, (color >> 16) & 255
+
+        assert app.palette().color(QPalette.ColorRole.Base).getRgb()[:3] == system_rgb(5), (
+            'Application input backgrounds do not follow the Windows contrast theme'
+        )
+        assert app.palette().color(QPalette.ColorRole.Text).getRgb()[:3] == system_rgb(8), (
+            'Application input text does not follow the Windows contrast theme'
+        )
     finally:
         if dialog is not None:
             dialog.close()
