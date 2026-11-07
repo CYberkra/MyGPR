@@ -575,7 +575,7 @@ class MyGPRBackend:
             project_id, title or '振幅切片',
             lambda context: build_amplitude_grid(
                 self.projects, project_id, selected, projected, start_ns, end_ns,
-                cell_size_m=cell_size_m, attribute=attribute, context=context),
+                cell_size_m=cell_size_m, attribute=attribute, context=context, include_curtains=True),
         )
 
     def submit_grid_layer(

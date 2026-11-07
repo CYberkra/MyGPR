@@ -13,7 +13,8 @@ class CurtainGeometry:
     values: np.ndarray
 
 
-def curtain_geometry(x, y, anchor_z, vertical_axis, matrix, *, vertical_scale: float) -> CurtainGeometry:
+def curtain_geometry(x, y, anchor_z, vertical_axis, matrix, *, vertical_scale: float,
+                     connected=None) -> CurtainGeometry:
     """Make a triangle mesh with no faces across missing traces or samples.
 
     ``vertical_axis`` is a nonnegative relative sample axis. ``vertical_scale``
@@ -38,6 +39,11 @@ def curtain_geometry(x, y, anchor_z, vertical_axis, matrix, *, vertical_scale: f
     vertices = np.column_stack((xx.ravel(), yy.ravel(), zz.ravel()))
     valid = np.isfinite(xx) & np.isfinite(yy) & np.isfinite(zz) & np.isfinite(data)
     quads = valid[:-1, :-1] & valid[1:, :-1] & valid[:-1, 1:] & valid[1:, 1:]
+    if connected is not None:
+        links = np.asarray(connected, dtype=bool).reshape(-1)
+        if len(links) != cols - 1:
+            raise ValueError('剖面轨迹连接标记形状不一致')
+        quads &= links[None, :]
     row, col = np.nonzero(quads)
     top_left = row * cols + col
     faces = np.empty((len(top_left) * 2, 3), dtype=np.int32)

@@ -35,6 +35,7 @@ class AmplitudeResult:
     start_ns: float
     end_ns: float
     attribute: str
+    curtains: tuple = ()
 
 
 def _trace_ids(metadata, expected: int) -> np.ndarray:
@@ -165,6 +166,7 @@ def build_amplitude_grid(
     projects, project_id: str, sources: Sequence[AmplitudeSource],
     positions: Sequence[LineObservations], start_ns: float, end_ns: float,
     *, cell_size_m: float, attribute: str = 'rms', context: ExecutionContext | None = None,
+    include_curtains: bool = False,
 ) -> AmplitudeResult:
     """Create a bounded preview grid from positions projected by the caller."""
     crs = {str(item.coordinate_system) for item in positions}
@@ -180,5 +182,10 @@ def build_amplitude_grid(
         np.concatenate([np.full(len(line.values), line.source.line_id) for line in lines]),
         cell_size_m=cell_size_m, max_cells=500_000,
     )
-    return AmplitudeResult(grid, tuple(line.source for line in lines), next(iter(crs)),
-                           float(start_ns), float(end_ns), str(attribute))
+    sources_used = tuple(line.source for line in lines)
+    curtains = ()
+    if include_curtains:
+        from mygpr.application.spatial.curtain_preview import read_curtain_previews
+        curtains = read_curtain_previews(projects, project_id, sources_used, context=context)
+    return AmplitudeResult(grid, sources_used, next(iter(crs)),
+                           float(start_ns), float(end_ns), str(attribute), curtains)

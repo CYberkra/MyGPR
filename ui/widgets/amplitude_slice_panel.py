@@ -18,6 +18,8 @@ class AmplitudeSlicePanel(QWidget):
     cancel_requested = pyqtSignal()
     artifacts_requested = pyqtSignal(str)
     bscan_requested = pyqtSignal(str, str, str)
+    curtains_ready = pyqtSignal(object, float, float)
+    show_3d_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -49,13 +51,16 @@ class AmplitudeSlicePanel(QWidget):
         self._run = PushButton('生成切片', self)
         self._cancel = PushButton('取消', self)
         self._cancel.setEnabled(False)
+        self._show_3d = PushButton('三维查看', self)
+        self._show_3d.setEnabled(False)
         for widget in (self._line, self._source, self._component, self._attribute):
             toolbar.addWidget(widget)
         toolbar.addStretch(1)
         layout.addLayout(toolbar)
         parameters = QHBoxLayout()
         for widget in (CaptionLabel('开始', self), self._start, CaptionLabel('结束', self),
-                       self._end, CaptionLabel('网格', self), self._cell, self._run, self._cancel):
+                       self._end, CaptionLabel('网格', self), self._cell, self._run,
+                       self._cancel, self._show_3d):
             parameters.addWidget(widget)
         parameters.addStretch(1)
         layout.addLayout(parameters)
@@ -79,6 +84,7 @@ class AmplitudeSlicePanel(QWidget):
         self._source.currentIndexChanged.connect(self._source_changed)
         self._run.clicked.connect(self._request)
         self._cancel.clicked.connect(self._cancel_preview)
+        self._show_3d.clicked.connect(self.show_3d_requested)
         self._attribute.currentIndexChanged.connect(self._reset_levels)
         self._component.currentIndexChanged.connect(self._reset_levels)
         self._start.valueChanged.connect(self._sync_slider)
@@ -124,6 +130,8 @@ class AmplitudeSlicePanel(QWidget):
         self._line.blockSignals(False)
         self._positions = ()
         self._grid = None
+        self._show_3d.setEnabled(False)
+        self.curtains_ready.emit((), 0., 0.)
         self._levels = None
         self._map.clear_grid()
         self._line_changed()
@@ -203,6 +211,9 @@ class AmplitudeSlicePanel(QWidget):
         self._positions = tuple(positions)
         grid = result.grid
         self._grid = grid
+        curtains = tuple(getattr(result, 'curtains', ()) or ())
+        self._show_3d.setEnabled(bool(curtains))
+        self.curtains_ready.emit(curtains, float(result.start_ns), float(result.end_ns))
         self._map.set_grid(grid.values, x_origin_m=grid.x_origin_m,
                            y_origin_m=grid.y_origin_m, cell_size_m=grid.cell_size_m,
                            attribute=f'{result.attribute.upper()} · {result.coordinate_system}')
@@ -211,7 +222,9 @@ class AmplitudeSlicePanel(QWidget):
         if self._levels is not None and self._levels[0] < self._levels[1]:
             self._map._image.setLevels(self._levels)
             self._map._colorbar.setLevels(self._levels)
-        self._status.setText(f'采集时间 {result.start_ns:g}–{result.end_ns:g} ns')
+        status = (f'采集时间 {result.start_ns:g}–{result.end_ns:g} ns'
+                  if np.isfinite(grid.values).any() else '当前时间窗没有有效振幅')
+        self._status.setText(status)
         self._show_window()
 
     def set_failure(self, message):

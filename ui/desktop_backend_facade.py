@@ -108,6 +108,11 @@ def prepare_amplitude_sources(tracks, source_ids, component):
     return tuple(sources), projected
 
 
+def build_curtain_geometry(x, y, z, axis, matrix, *, vertical_scale, connected):
+    from mygpr.domain.spatial.curtain import curtain_geometry
+    return curtain_geometry(x, y, z, axis, matrix, vertical_scale=vertical_scale, connected=connected)
+
+
 def manual_gain_nodes(value=None):
     """Validated independent node dictionaries for the UI curve editor."""
     from mygpr.domain.processing.manual_gain import normalize_gain_nodes

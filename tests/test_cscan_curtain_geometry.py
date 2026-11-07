@@ -18,6 +18,9 @@ def test_curtain_does_not_bridge_missing_positions_or_samples():
     mesh = curtain_geometry([0., np.nan, 2.], [0., 0., 0.], [0., 0., 0.],
                             [0., 1.], np.ones((2, 3)), vertical_scale=2.)
     assert mesh.faces.shape == (0, 3)
+    mesh = curtain_geometry([0., 1.], [0., 0.], [0., 0.], [0., 1.],
+                            np.ones((2, 2)), vertical_scale=1., connected=[False])
+    assert mesh.faces.shape == (0, 3)
     mesh = curtain_geometry([0., 1.], [0., 0.], [0., 0.],
                             [0., 1.], np.array([[1., 2.], [3., np.nan]]), vertical_scale=1.)
     assert mesh.faces.shape == (0, 3)

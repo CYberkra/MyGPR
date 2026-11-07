@@ -474,6 +474,9 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
         view_layout.addWidget(self._depth_row_widget)
         # 初始态：只有深度切片视图用得到它（默认段是平面地图）
         self._depth_row_widget.setVisible(False)
+        self._curtain_notice = CaptionLabel('', view_card)
+        self._curtain_notice.setVisible(False)
+        view_layout.addWidget(self._curtain_notice)
         middle_layout.addWidget(view_card, 1)
 
     def _build_right_column(self, columns: QHBoxLayout) -> None:
@@ -548,6 +551,9 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
         self._3d_dem_btn.clicked.connect(self._on_import_dem_clicked)
         self._3d_dem_clear_btn.clicked.connect(self._on_clear_dem_clicked)
         self._3d_view.local_dem_notice.connect(self._on_dem_notice)
+        self._3d_view.curtain_notice.connect(self._on_curtain_notice)
+        self._amplitude_view.curtains_ready.connect(self._3d_view.set_curtains)
+        self._amplitude_view.show_3d_requested.connect(self._show_amplitude_3d)
         self._depth_slider.valueChanged.connect(self._on_depth_slider_changed)
         self._depth_cell_spin.valueChanged.connect(self._on_depth_cell_changed)
         self._depth_save_btn.clicked.connect(self._on_save_depth_layer_clicked)
@@ -568,6 +574,9 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
         """空间轨迹列表（SpatialTrack，鸭子类型取属性）。"""
         self._line_context.close()
         self._tracks = list(tracks or [])
+        if not self._tracks:
+            self._3d_view.clear_curtains()
+            self._amplitude_view.set_tracks([], {})
         self._tracks_by_id = {}
         self._colors = {}
         for index, track in enumerate(self._tracks):
@@ -726,6 +735,14 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
             if checked:
                 self.depth_preview_requested.emit(checked, float(self._depth_cell_spin.value()))
 
+    def _show_amplitude_3d(self) -> None:
+        self._view_segment.setCurrentItem(_SEG_3D)
+        self._switch_view(_SEG_3D)
+
+    def _on_curtain_notice(self, text: str) -> None:
+        self._curtain_notice.setText(str(text))
+        self._curtain_notice.setVisible(bool(text) and self._view_stack.currentWidget() is self._3d_view)
+
     def _sync_view_affordances(self, route_key: str) -> None:
         """切段时同步「只属于某段」的界面附属件（2026-10-06）。
 
@@ -741,6 +758,7 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
         """
         is_depth = route_key == _SEG_DEPTH
         self._depth_row_widget.setVisible(is_depth)
+        self._curtain_notice.setVisible(route_key == _SEG_3D and bool(self._curtain_notice.text()))
         if route_key == _SEG_3D and self._view3d_card.is_collapsed():
             self._view3d_card.set_collapsed(False, animate=True)
 

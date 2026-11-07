@@ -42,6 +42,7 @@ from ui.desktop_backend_facade import tile_cache_dir
 from ui.widgets.context_menus import add_action, make_menu
 from ui.widgets.empty_state import EmptyStateOverlay
 from ui.widgets.local_dem import dem_covers_bbox
+from ui.widgets.trajectory_3d_curtains import TrajectoryCurtainsMixin
 from ui.widgets.map_tiles import (TILE_SOURCE_MAX_ZOOM, WORLD_SIZE_M,
                                   extract_epsg, lonlat_to_tile, tile_url,
                                   unique_tmp_path, wgs84_to_gcj02,
@@ -353,11 +354,12 @@ class _TerrainWorker(QRunnable):
             self._signals.finished.emit(self._generation, payload)
 
 
-class Trajectory3DView(QWidget):
+class Trajectory3DView(TrajectoryCurtainsMixin, QWidget):
     """三维轨迹视图容器（内部按需创建 GLViewWidget 或降级 QLabel）。"""
 
     # 本地 DEM 覆盖提示：'' = 正常/已清除；非空 = 警告文本（GUI 线程发出）
     local_dem_notice = pyqtSignal(str)
+    curtain_notice = pyqtSignal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -366,6 +368,9 @@ class Trajectory3DView(QWidget):
         self._gl_view = None           # 惰性创建：首次需要 3D 内容时才建（见 _ensure_gl_view）
         self._grid = None
         self._line_items: list = []
+        self._curtain_items: list = []
+        self._curtain_previews = ()
+        self._curtain_window = (0., 0.)
         self._terrain_item = None
         self._fallback_label = None
         self._terrain_pool = None
@@ -565,10 +570,12 @@ class Trajectory3DView(QWidget):
         # 坐标系可识别 → 后台构建真实地形
         self._terrain_src = (epsg, terrain_bbox) if terrain_bbox is not None else None
         self._start_terrain_build()
+        self._render_curtains()
 
     def _clear_tracks_content(self) -> None:
         """清空场景中的测线/地形并回到空态（无有效测线时调用）。"""
         if self._gl_view is not None:
+            self._clear_curtain_items()
             for item in self._line_items:
                 self._gl_view.removeItem(item)
             self._clear_terrain()
@@ -829,6 +836,7 @@ class Trajectory3DView(QWidget):
         self._terrain_payload = payload
         self._render_lines()     # 贴地模式此刻起有 DEM 可采样
         self._render_terrain()
+        self._render_curtains()
 
     # ------------------------------------------------------------ 显示模式
     def set_vertical_exaggeration(self, factor: float) -> None:
@@ -854,6 +862,7 @@ class Trajectory3DView(QWidget):
             self._render_lines()
         if self._terrain_payload is not None:
             self._render_terrain()
+        self._render_curtains()
 
     def _render_lines(self) -> None:
         """按当前模式（原始高程 / 贴地 + 垂直夸张）重建测线 GL 项。"""
