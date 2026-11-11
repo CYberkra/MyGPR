@@ -182,6 +182,19 @@ class MarkerPins(QWidget):
                 return dict(record)
         return None
 
+    def selected_view_position(self):
+        """选中项的显示坐标 x（列中心，未换算像素）；无选中返回 None。
+
+        供 BScanView 把这一道带进视野 / 切 A-scan，避免下游再按记录
+        反查索引而和浮层内部顺序耦合。
+        """
+        if self._selected is None:
+            return None
+        for record, x in zip(self._records, self._view_x):
+            if self._key(record) == self._selected:
+                return x
+        return None
+
     def select(self, record) -> None:
         """按内容三元组选中（传 None 清空）；不存在的记录等同清空。"""
         key = None if record is None else self._key(record)

@@ -491,8 +491,12 @@ class BScanViewInteractionMixin:
         self._marker_hover_index = index
         pins.set_hover(index)
         if index is None:
+            self.unsetCursor()
             QToolTip.hideText()
         else:
+            # 箭头本身是 WA_TransparentForMouseEvents，不给光标反馈的话
+            # 用户看不出这一排小三角能点（可发现性）。
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
             QToolTip.showText(QCursor.pos(), pins.tooltip(index))
 
     def _handle_marker_click(self, scene_pos) -> bool:
@@ -661,11 +665,14 @@ class BScanViewInteractionMixin:
             if self._plot.sceneBoundingRect().contains(event.scenePos()):
                 self._show_context_menu(event)
             return
-        if not self._pick_enabled or self._image_shape is None:
-            return
         if event.button() != Qt.MouseButton.LeftButton:
             return
+        # 采集标记是只读信息层：点箭头与点拾取模式无关，必须排在
+        # _pick_enabled 判断之前。纯预览页（未开解释会话）也要能选中。
+        # 点空白只清选中，仍把这次点击交回原有 pick 流程。
         if self._handle_marker_click(event.scenePos()):
+            return
+        if not self._pick_enabled or self._image_shape is None:
             return
         pos = event.scenePos()
         if not self._plot.sceneBoundingRect().contains(pos):

@@ -95,6 +95,7 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
     sig_colorbar_visible_changed = pyqtSignal(bool)
     sig_qc_marks_visible_changed = pyqtSignal(bool)
     sig_acquisition_markers_availability_changed = pyqtSignal(bool)
+    sig_acquisition_marker_selected = pyqtSignal(object)
     sig_display_settings_requested = pyqtSignal()
     # 用户手动切换显示增益（'off'/'sec'/'tvg'）时发射，供宿主写回设置
     sig_gain_changed = pyqtSignal(str)
@@ -318,6 +319,7 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
         # 采集标记箭头：挂在 _glw 里的透明浮层，几何严格跟随 ViewBox。
         # 不参与布局，控件与绘图区高度零增量（2026-11-11 替代图内贴顶散点）
         self._marker_pins = MarkerPins(self._glw, self._plot, self._glw)
+        self._marker_pins.sig_selection_changed.connect(self._on_marker_selected)
 
         self._fullscreen_btn = ToolButton(FIF.FULL_SCREEN, self)
         self._fullscreen_btn.setToolTip('全屏：在独立窗口中展开（Esc 退出）')
@@ -679,6 +681,60 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
     def acquisition_marker_tooltip(self, index: int) -> str:
         """第 index 个标记的悬浮说明（道号为源文件行号）。"""
         return self._marker_pins.tooltip(index)
+
+    # ------------------------------------------------------------------ 选中下游
+    def _on_marker_selected(self, record) -> None:
+        """``MarkerPins.sig_selection_changed`` 的订阅者：让选中真的产生作用。
+
+        三件事：对外广播（页面层可据此同步其它面板）、把该道带进视野、
+        A-scan 跟随已开启时把波形切到该道。此前这个信号无人订阅，选中
+        只改箭头自己的画法，属于死 API。
+        """
+        self.sig_acquisition_marker_selected.emit(record)
+        if record is None:
+            return
+        x = self._marker_pins.selected_view_position()
+        if x is None:
+            return
+        self._reveal_marker(x)
+        self._sync_ascan_to_marker(int(x))
+
+    def _reveal_marker(self, x: float) -> None:
+        """把选中的道带进视野中央：只平移、不改缩放。
+
+        已经在中央 60% 区间时不动，避免点一下就无端滑图；标记在视野外
+        或贴着边缘时才会平移（标准 scroll-into-view 行为）。
+        """
+        vb = self._plot.vb
+        xmin, xmax = vb.viewRange()[0]
+        width = xmax - xmin
+        if width <= 0 or abs(x - (xmin + xmax) / 2.0) <= width * 0.30:
+            return
+        vb.setXRange(x - width / 2.0, x + width / 2.0, padding=0.0)
+
+    def _sync_ascan_to_marker(self, display_trace: int) -> None:
+        """A-scan 跟随浮窗已开时，把波形切到选中标记所在的显示列。
+
+        这里刻意不复用 ``_emit_point_picked``：那条路会发
+        ``sig_point_picked``，选中只读标记不该往解释会话里加标注点。
+        """
+        if not (self._ascan_follow and self._ascan_popup is not None
+                and self._matrix is not None):
+            return
+        image = np.asarray(self._matrix)
+        if not (0 <= display_trace < image.shape[1]):
+            return
+        distance = (self._trace_axis_m[display_trace]
+                    if self._trace_axis_m is not None
+                    and display_trace < len(self._trace_axis_m) else None)
+        source_trace = (int(self._trace_indices[display_trace])
+                        if self._trace_indices is not None
+                        and display_trace < len(self._trace_indices)
+                        else display_trace)
+        self._ascan_popup.show_trace(
+            image[:, display_trace], trace_index=source_trace,
+            distance_m=distance, axis=self._sample_axis,
+            axis_label=self._sample_axis_label)
 
     def apply_theme(self, dark: bool) -> None:
         """深色 bg 'k'/文字 'w'；浅色 bg 'w'/文字 'k'；轴/色标/悬浮钮/十字光标同步。

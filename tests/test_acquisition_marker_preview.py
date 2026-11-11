@@ -6,6 +6,7 @@ import pytest
 
 pytest.importorskip("PyQt6")
 from ui.widgets.bscan_view import BScanView
+from PyQt6.QtCore import QPoint
 from PyQt6.QtWidgets import QWidget, QVBoxLayout
 from PyQt6.QtTest import QTest, QSignalSpy
 
@@ -95,3 +96,58 @@ def test_marker_availability_signal_tracks_bundle_and_clear(qapp):
     view.clear()
     assert [event[0] for event in availability] == [True, False, True, False]
     view.close()
+
+
+def test_marker_click_works_without_pick_mode_and_broadcasts_selection(qapp):
+    """纯预览页未开解释会话时点箭头仍可选中，且选中信号对外可见。"""
+    host = QWidget()
+    layout = QVBoxLayout(host)
+    view = BScanView(host)
+    layout.addWidget(view)
+    raw = np.arange(72, dtype=np.float32).reshape(12, 6)
+    view.set_bundle(SimpleNamespace(
+        matrix=raw, vmin=0, vmax=72,
+        acquisition_markers=({"trace_no": 5, "marker_type": "general", "label": "地物 A"},),
+    ))
+    host.resize(850, 450)
+    host.show()
+    qapp.processEvents()
+    assert not view._pick_enabled
+    pins = view._marker_pins
+    px = pins.pixel_positions()[0]
+    scene = view._glw.mapToScene(
+        QPoint(int(pins.x() + px), int(pins.y() + pins.height() - 6)))
+    spy = QSignalSpy(view.sig_acquisition_marker_selected)
+    assert view._handle_marker_click(scene) is True
+    assert len(spy) == 1 and spy[0][0]['trace_no'] == 5
+    assert pins.selected() is not None
+    assert view._handle_marker_click(scene) is True       # 再点一次取消
+    assert pins.selected() is None
+    assert len(spy) == 2 and spy[1][0] is None
+    host.close()
+
+
+def test_marker_selection_reveals_offscreen_trace_without_zoom_change(qapp):
+    """选中视野外的标记会平移过去，但不改变当前缩放宽度。"""
+    host = QWidget()
+    layout = QVBoxLayout(host)
+    view = BScanView(host)
+    layout.addWidget(view)
+    raw = np.arange(72, dtype=np.float32).reshape(12, 6)
+    view.set_bundle(SimpleNamespace(
+        matrix=raw, vmin=0, vmax=72,
+        acquisition_markers=({"trace_no": 5, "marker_type": "general"},),
+    ))
+    host.resize(850, 450)
+    host.show()
+    qapp.processEvents()
+    vb = view._plot.vb
+    orig_min, orig_max = vb.viewRange()[0]
+    width_before = orig_max - orig_min
+    outside = orig_max + width_before
+    view._reveal_marker(outside)          # 视野外的道：平移而非缩放
+    xmin, xmax = vb.viewRange()[0]
+    assert xmax - xmin == pytest.approx(width_before)
+    assert xmin <= outside <= xmax
+    vb.setXRange(orig_min, orig_max, padding=0.0)
+    host.close()
