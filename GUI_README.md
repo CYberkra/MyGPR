@@ -1,6 +1,6 @@
-# MyGPR v0.11.4 — Qt 图形界面使用说明
+# MyGPR v0.11.5 — Qt 图形界面使用说明
 
-界面说明适用于 v0.11.4。Windows 安装包与升级入口见 [发行说明](docs/releases/v0.11.4.md)，完整操作见 [使用手册](docs/user/README.md)。软件内可从 **设置 → 关于 → 使用手册** 打开。
+界面说明适用于 v0.11.5。Windows 安装包与升级入口见 [发行说明](docs/releases/v0.11.5.md)，完整操作见 [使用手册](docs/user/README.md)。软件内可从 **设置 → 关于 → 使用手册** 打开。
 
 ## 环境与启动
 
