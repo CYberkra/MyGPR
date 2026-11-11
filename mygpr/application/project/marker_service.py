@@ -182,11 +182,14 @@ def project_rows(view):
             if source not in mappings:
                 mappings[source] = view.mapping(source)
             projection = project_anchor(record.anchor, mappings[source])
-            position = (f'道 {record.anchor.trace + 1}' if record.anchor else '未定位')
+            position = (f'道 {projection.positions[0] + 1:g}' if projection.positions
+                        else f'来源道 {record.anchor.trace + 1}' if record.anchor else '未定位')
         else:
             projection = _interval_projection(record, view, mappings)
-            position = (f'{record.start.trace + 1}–{record.end.trace + 1} 道'
-                        if record.start and record.end else '采集时间' if record.time_start else '开放范围')
+            position = ('；'.join(f'{a + 1}–{b}' for a, b in projection.spans[:2]) + ' 道'
+                        + (f'（共 {len(projection.spans)} 段）' if len(projection.spans) > 2 else '')
+                        if projection.spans else '无当前道' if projection.status in ('outside', 'empty')
+                        else '采集时间' if record.time_start else '开放范围' if not record.closed else '来源范围')
         status = ('excluded' if record.excluded else 'needs_review'
                   if isinstance(record, EventInterval) and record.review_state == 'needs_review'
                   else projection.status)

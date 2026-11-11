@@ -34,6 +34,8 @@ class BScanMarkerEventsMixin:
                 self._plot.addItem(gap, ignoreBounds=True)
                 self._gap_guides.append(gap)
         self.marker_strip.set_rows(view.rows if view else ())
+        if view and self.marker_strip.selected_id:
+            self.select_event_marker(self.marker_strip.selected_id)
         if view is not None:
             self._marker_pins.hide()
         self.sig_marker_context_changed.emit()

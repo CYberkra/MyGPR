@@ -40,6 +40,11 @@ def test_keep_exclude_commit_exact_columns_and_reopen_mapping(project):
     assert preview['affected_count'] == 4
     assert preview['output_segments'] == ((1, 3), (5, 7))
     artifact = backend.markers.execute(preview, context=ExecutionContext.null())
+    receipt = artifact.manifest['params']
+    assert receipt['lineage_version'] == 2
+    assert receipt['run_step_index'] == len(receipt['lineage']) == 1
+    assert receipt['lineage'][0]['params']['mode'] == 'keep'
+    assert tuple(map(tuple, receipt['lineage'][0]['params']['ranges'])) == tuple(map(tuple, preview['ranges']))
     output = backend.projects.read_artifact_dataset(pid, 'L01', artifact.artifact_id)
     np.testing.assert_array_equal(output.data, matrix[:, [1, 2, 5, 6]])
     np.testing.assert_array_equal(output.header_info['distance_axis_m'], [1, 2, 5, 6])
@@ -48,6 +53,8 @@ def test_keep_exclude_commit_exact_columns_and_reopen_mapping(project):
     projected = backend.markers.view(pid, 'L01', artifact.artifact_id)
     assert projected.rows[0]['projection'].spans == ((0, 2),)
     assert projected.rows[1]['projection'].spans == ((2, 4),)
+    assert projected.rows[0]['position'] == '1–2 道'
+    assert projected.rows[1]['position'] == '3–4 道'
     root = backend.projects.get_summary(pid).root_path
     backend.projects.close_project(pid)
     backend.projects.open_project(root)

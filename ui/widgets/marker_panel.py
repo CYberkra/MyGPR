@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import replace
 from uuid import uuid4
 
-from PyQt6.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel, Qt, pyqtSignal
+from PyQt6.QtCore import QAbstractTableModel, QItemSelectionModel, QModelIndex, QSignalBlocker, QSortFilterProxyModel, Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QAbstractItemView, QComboBox, QFileDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
@@ -158,6 +158,10 @@ class MarkerPanel(QWidget):
             button.setEnabled(bool(view and not view.read_only))
 
     def _populate(self, rows):
+        selected = {row['uid'] for row in self._selected_rows()}
+        current = self.table.currentIndex().data(Qt.ItemDataRole.UserRole)
+        selection = self.table.selectionModel()
+        blocker = QSignalBlocker(selection)
         self.model.set_rows(rows)
         value = self.purpose.currentText()
         self.purpose.blockSignals(True)
@@ -166,6 +170,13 @@ class MarkerPanel(QWidget):
         self.purpose.setCurrentText(value)
         self.purpose.blockSignals(False)
         self._filter()
+        for index, row in enumerate(self.model.rows):
+            mapped = self.proxy.mapFromSource(self.model.index(index, 0))
+            if mapped.isValid() and row['uid'] in selected:
+                selection.select(mapped, QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows)
+            if mapped.isValid() and current and row['uid'] == current['uid']:
+                selection.setCurrentIndex(mapped, QItemSelectionModel.SelectionFlag.NoUpdate)
+        del blocker
         self.message.setText(f'{len(rows)} 条记录')
 
     def _filter(self, *_):
@@ -333,6 +344,7 @@ class MarkerPanel(QWidget):
             box = QMessageBox(QMessageBox.Icon.Question, '确认道范围处理', text,
                               QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel, self)
             box.button(QMessageBox.StandardButton.Ok).setText('运行并生成新成果')
+            box.button(QMessageBox.StandardButton.Cancel).setText('取消')
             if box.exec() == QMessageBox.StandardButton.Ok:
                 self.request('execute', {'preview': result})
         elif action == 'execute':

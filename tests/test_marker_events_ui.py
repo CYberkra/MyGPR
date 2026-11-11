@@ -61,6 +61,30 @@ def test_marker_navigation_uses_artifact_and_rejects_late_raw_preview(qapp):
     assert calls == [('request', 'result-1'), ('open', 'artifact:result-1'), ('select', 'm0')]
 
 
+def test_strip_aligns_with_image_column_after_pan_reverse_and_reparent(qapp):
+    from PyQt6.QtCore import QPoint, QPointF
+    from PyQt6.QtWidgets import QWidget, QVBoxLayout
+    host = QWidget()
+    layout = QVBoxLayout(host)
+    layout.setContentsMargins(137, 20, 35, 20)
+    view = BScanView()
+    layout.addWidget(view)
+    view.set_bundle(replace(make_preview_bundle(np.ones((12, 20), np.float32)), marker_view=marker_view(1)))
+    host.resize(1000, 600)
+    host.show()
+    for reversed_ in (False, True):
+        view.set_view_reversed(reversed_)
+        view._plot.vb.setXRange(2, 15, padding=0)
+        qapp.processEvents()
+        scene = view._image_item.mapToScene(QPointF(7.5, 0))
+        expected = view._glw.viewport().mapToGlobal(view._glw.mapFromScene(scene)).x()
+        strip_x = view.marker_strip.pixel_x(7)
+        actual = view.marker_strip.mapToGlobal(QPoint(round(strip_x), 0)).x()
+        assert abs(actual - expected) <= 1
+        assert view.marker_strip.trace_at(QPoint(round(strip_x), 10)) == 7
+    host.close()
+
+
 def test_ten_thousand_records_search_and_cluster_without_truncation(qapp):
     context = marker_view()
     panel = MarkerPanel()
@@ -86,6 +110,24 @@ def test_ten_thousand_records_search_and_cluster_without_truncation(qapp):
     assert len(view.marker_strip.rows) == 10000
     view.clear()
     assert view._marker_view is None
+    panel.close()
+    view.close()
+
+
+def test_refresh_preserves_selected_identity_and_updated_guides(qapp):
+    context = marker_view(3)
+    panel = MarkerPanel()
+    panel.set_view(context)
+    panel.select_id('m2')
+    updated = replace(context, document=replace(context.document, revision=1))
+    panel.set_view(updated)
+    assert [row['uid'] for row in panel._selected_rows()] == ['m2']
+    view = BScanView()
+    view.set_bundle(replace(make_preview_bundle(np.ones((12, 20), np.float32)), marker_view=context))
+    view.select_event_marker('m2')
+    view.set_marker_view(updated)
+    assert view.marker_strip.selected_id == 'm2'
+    assert len(view._event_guides) == 1
     panel.close()
     view.close()
 

@@ -12,6 +12,13 @@ def draw_marker_strip(ax, payload, dataset):
     mapping = TraceMapping.identity(document.source_id, dataset.trace_count)
     marks, unavailable = [], 0
     distance = np.asarray(dataset.distance_axis_m)
+    # Report datasets carry source metadata, unlike processing bundles which
+    # expose separate header_info / trace_metadata dictionaries.
+    from core.acquisition_hdf5 import acquisition_trace_metadata
+    metadata = dataset.metadata or {}
+    trace = acquisition_trace_metadata(metadata)
+    times = trace.get('trace_timestamp_s', metadata.get('trace_timestamp_s'))
+    confirmed = 'timestamp_ms' in trace or metadata.get('trace_time_basis') == 'UTC'
     for record in document.records:
         if record.excluded:
             continue
@@ -22,9 +29,6 @@ def draw_marker_strip(ax, payload, dataset):
                 unavailable += 1
         elif record.closed:
             try:
-                metadata = dataset.trace_metadata or {}
-                times = metadata.get('trace_timestamp_s')
-                confirmed = 'timestamp_ms' in metadata or dataset.header_info.get('trace_time_basis') == 'UTC'
                 indices = interval_indices(record, mapping, timestamps_s=times, time_basis_confirmed=confirmed)
             except ValueError:
                 unavailable += 1

@@ -113,3 +113,38 @@ def test_selected_result_geometry_follows_disjoint_output_segments():
     rows = project_rows(artifact)
     assert rows[1]['projection'].spans == ((0, 1), (1, 2))
     assert rows[1]['geometry']['parts'] == [[[100., 30.]], [[103., 30.]]]
+
+
+@pytest.mark.parametrize('source,expected', [('utc', 1), ('acquisition', 1), ('unknown', 0), ('rollback', 0), ('empty', 0)])
+def test_report_time_events_require_reliable_trace_clock(source, expected):
+    from datetime import datetime, timezone
+    from core.gpr_data_model import GPRDataSet
+    from core.report_marker_figures import draw_marker_strip
+    from matplotlib import pyplot as plt
+    times = np.array([100., 101., 102., 103.])
+    metadata = {'trace_timestamp_s': times.tolist(), 'trace_time_basis': 'UTC'}
+    if source == 'acquisition':
+        metadata = {'source_format': 'cdut-acquisition-hdf5', 'trace_count': 4,
+                    'trace_meta': {'timestamp_ms': (times * 1000).tolist()}}
+    elif source == 'unknown':
+        metadata.pop('trace_time_basis')
+    elif source == 'rollback':
+        metadata['trace_timestamp_s'] = [100., 102., 101., 103.]
+    low, high = (200., 201.) if source == 'empty' else (101., 102.)
+    doc = MarkerDocument('p', 'L01', 'raw', intervals=(EventInterval(
+        name='时间事件', time_source_id='raw',
+        time_start=datetime.fromtimestamp(low, timezone.utc).isoformat(),
+        time_end=datetime.fromtimestamp(high, timezone.utc).isoformat()),))
+    dataset = GPRDataSet.from_matrix('L01', np.ones((8, 4), dtype=np.float32), length_m=3., metadata=metadata)
+    fig, ax = plt.subplots()
+    ax.set_xlim(0, 3)
+    try:
+        draw_marker_strip(ax, doc.to_dict(), dataset)
+        strip = ax.child_axes[0]
+        assert len(strip.lines) == expected
+        if expected:
+            np.testing.assert_array_equal(strip.lines[0].get_xdata(), [1., 2.])
+        else:
+            assert '1 条未在图中定位' in strip.get_xlabel()
+    finally:
+        plt.close(fig)

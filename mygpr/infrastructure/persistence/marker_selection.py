@@ -8,6 +8,7 @@ from uuid import uuid4
 import numpy as np
 
 from mygpr.domain.markers.mapping import SEGMENT_KEY
+from mygpr.application.project.processing_service import source_sha256
 
 
 def commit_selection(session, view, preview, context):
@@ -32,6 +33,12 @@ def commit_selection(session, view, preview, context):
     if axis is not None:
         header['distance_axis_m'] = np.asarray(axis)[indices].tolist()
     params = {'mode': preview['mode'], 'ranges': preview['ranges']}
+    steps = [{'method_id': 'trace_range_select', 'params': params, 'enabled': True}]
+    lineage = [{'method_id': 'trace_range_select', 'params': params,
+                'metadata': {'selected_count': preview['affected_count'], 'output_segments': preview['output_segments']},
+                'implementation_version': '1', 'output_shape': [info.shape[0], len(indices)],
+                'output_dtype': 'float32', 'runtime_warnings': []}]
+    input_sha = source_sha256(info)
     title = ('保留' if preview['mode'] == 'keep' else '剔除') + '事件区间'
     run_id = uuid4().hex
     with TemporaryDirectory(prefix='mygpr-marker-selection-') as directory:
@@ -50,10 +57,12 @@ def commit_selection(session, view, preview, context):
             artifact = session.save_processing_artifact(
                 line_id, matrix, name=title, method_id='trace_range_select', method_name=title,
                 params={**params, 'marker_selection': preview, 'output_header': header,
+                        'pipeline': steps, 'lineage': lineage, 'execution_mode': 'block',
                         'parent_artifact_id': view.artifact_id, 'run_input_artifact_id': view.artifact_id,
                         'step_input_artifact_id': view.artifact_id, 'run_group_id': run_id,
+                        'run_input_sha256': input_sha, 'step_input_sha256': input_sha,
                         'run_step_index': 1, 'artifact_kind': 'processing', 'lineage_version': 2},
-                pipeline=[{'method_id': 'trace_range_select', 'params': params, 'enabled': True}],
+                pipeline=[{**steps[0], 'lineage': lineage[0]}],
                 branch_id=f'{line_id}:{run_id}', input_dataset=input_header, trace_metadata=trace, context=context)
             context.emit_artifact({'artifact_id': artifact.artifact_id, 'line_id': line_id,
                                    'data_reference': artifact.data_reference})

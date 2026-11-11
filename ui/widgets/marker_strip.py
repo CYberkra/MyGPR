@@ -66,10 +66,14 @@ class MarkerStrip(QWidget):
     def pixel_x(self, trace):
         scene = self.view._plot.vb.mapViewToScene(QPointF(self.display_x(trace), 0))
         point = self.view._glw.mapFromScene(scene)
-        return float(self.mapFrom(self.view._glw, point).x())
+        return float(self._from_viewport(point).x())
+
+    def _from_viewport(self, point):
+        viewport = self.view._glw.viewport()
+        return self.mapFromGlobal(viewport.mapToGlobal(point))
 
     def trace_at(self, pixel):
-        point = self.view._glw.mapFrom(self, pixel)
+        point = self.view._glw.viewport().mapFromGlobal(self.mapToGlobal(pixel))
         scene = self.view._glw.mapToScene(point)
         x = self.view._plot.vb.mapSceneToView(scene).x() - .5
         grid = self.view._trace_indices
@@ -82,8 +86,8 @@ class MarkerStrip(QWidget):
         dark = isDarkTheme()
         painter.fillRect(self.rect(), QColor(color('bg_surface', dark)))
         bounds = self.view._plot.vb.sceneBoundingRect()
-        left = self.mapFrom(self.view._glw, self.view._glw.mapFromScene(bounds.topLeft())).x()
-        right = self.mapFrom(self.view._glw, self.view._glw.mapFromScene(bounds.topRight())).x()
+        left = self._from_viewport(self.view._glw.mapFromScene(bounds.topLeft())).x()
+        right = self._from_viewport(self.view._glw.mapFromScene(bounds.topRight())).x()
         painter.setClipRect(QRectF(left, 0, max(0, right - left), self.height()))
         painter.setPen(QPen(QColor(color('border_default', dark))))
         painter.drawLine(left, 0, right, 0)
