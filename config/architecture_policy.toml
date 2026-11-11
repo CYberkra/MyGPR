@@ -116,6 +116,14 @@ max_function_lines = 100
 expiry_action = "warn"
 
 # ---- DurableWritePort 默认接线（同legacy_engine 的 default-composition 桥）----
+[[migration_exceptions]]
+path_prefix = "mygpr/infrastructure/persistence/marker_adapter.py"
+allowed_local_import_prefixes = ["core.field_project_models", "core.security_paths"]
+owner = "project-markers"
+remove_after = "1.1.0"
+reason = "Marker session mixin shares the existing legacy store's line-ID and managed-path validation; writes remain on its atomic writer."
+expiry_action = "warn"
+
 # 目标态：composition root（mygpr/interfaces/backend.py）注入 DurableWritePort，
 # application 只声明 Protocol。当前 5 处函数级延迟解析是过渡写法——它们把
 # 「本层不该知道 infrastructure」的耦合点收敛成了 5 个可搜的窄 import，
@@ -293,3 +301,11 @@ remove_after = "1.1.0"
 reason = "Extracted project deletion persistence adapter; shares the authoritative managed-path and original-source protection implementation with legacy operations."
 expiry_action = "warn"
 max_function_lines = 100
+
+[[migration_exceptions]]
+path_prefix = "mygpr/infrastructure/persistence/report_adapter.py"
+allowed_local_import_prefixes = ["core.field_report_export"]
+owner = "project-reporting"
+remove_after = "1.1.0"
+reason = "Extracted report orchestration from the legacy session, retaining the verified report transaction."
+expiry_action = "warn"

@@ -39,6 +39,8 @@ class PageCoordinator:
         self.project = ProjectChain(self)
         self.processing = ProcessingChain(self)
         self.jobs = JobHub(self)
+        from ui.coordinator_markers import MarkerChain
+        self.markers = MarkerChain(self)
 
     # ------------------------------------------------------------ 窗口服务接口
     # （鸭子类型，便于假窗口测试；子接线器经门面调用，不直接摸 window 私有）
@@ -136,6 +138,7 @@ class PageCoordinator:
         self.project.connect_all()
         self.processing.connect_all()
         self.jobs.connect_all()
+        self.markers.connect_all()
 
     # ============================================================ JobBridge 槽（门面保留）
     # tests/test_ui_migration_regressions.py 钉住这三个槽位必须存在于门面。

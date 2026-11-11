@@ -99,6 +99,7 @@ class BScanViewDataMixin:
         self.set_qc_local_mask(getattr(bundle, 'trace_qc_local_mask', None))
         self._sample_indices = getattr(bundle, 'sample_indices', None)
         self.set_acquisition_markers(getattr(bundle, 'acquisition_markers', ()))
+        self.set_marker_view(getattr(bundle, 'marker_view', None))
         # 海拔纵轴的两份原料（均已降到显示网格）：逐道地面高程 + 米制深度
         self._ground_elevation_m = getattr(bundle, 'trace_elevation_m', None)
         self._depth_axis_m = getattr(bundle, 'depth_axis_m', None)
@@ -130,6 +131,7 @@ class BScanViewDataMixin:
 
         mat = np.asarray(matrix)
         self.set_acquisition_markers(())
+        self.set_marker_view(None)
         self.set_qc_bad_mask(None)
         self.set_qc_local_mask(None)
         if getattr(self, '_qc_focus', None) is not None:

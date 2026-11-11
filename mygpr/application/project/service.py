@@ -12,6 +12,7 @@ import numpy as np
 
 from mygpr.application.jobs.context import ExecutionContext
 from mygpr.domain.project.result_package import ProcessingResultPackage
+from mygpr.application.project.marker_access import ProjectMarkerAccessMixin
 from mygpr.application.project.ports import ProjectRepositoryPort, ProjectSessionPort, WindowOptions
 from mygpr.application.project.errors import ProjectApplicationError, ProjectBusyError
 from mygpr.application.project.identity import ProjectIdentityServiceMixin
@@ -78,7 +79,7 @@ class ProjectAcquisitionServiceMixin:
         return self._session(project_id).read_sensor_sync_result(line_id)
 
 
-class ProjectService(ProjectAcquisitionServiceMixin, ProjectIdentityServiceMixin):
+class ProjectService(ProjectMarkerAccessMixin, ProjectAcquisitionServiceMixin, ProjectIdentityServiceMixin):
     """Own open project sessions without exposing storage implementation objects."""
 
     def __init__(self, repository: ProjectRepositoryPort) -> None:

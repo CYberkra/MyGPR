@@ -227,6 +227,7 @@ def _write_html_report(path: Path, *, summary: dict[str, Any], lines: list[dict[
 <h2>8. 钻孔对比</h2>{table(['borehole_id','line_id','trace_index','borehole_depth_m','interpreted_depth_m','error_m','absolute_error_m','threshold_m','status'], boreholes)}
 <h2>9. 工程图件</h2>{''.join(f'<figure><img src="../figures/{html.escape(p.name)}"><figcaption>{html.escape(p.stem)}</figcaption></figure>' for p in figure_paths)}
 <h2>附录 A：历史点目标兼容数据</h2>{table(['target_id','line_id','distance_m','depth_m','type','status'], targets)}
+<h2>标记与事件区间</h2>{table(['测线','名称','类型','用途','版本','信息来源','备注'], summary.get('marker_rows', []), limit=len(summary.get('marker_rows', [])))}
 <p class="meta">说明：正式成果以连续基覆界面曲线及其弱可见、忽略、无界面语义为准；历史点目标仅作兼容附录。</p>
 </body></html>"""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -369,6 +370,8 @@ def _write_pdf_report(path: Path, *, summary: dict[str, Any], lines: list[dict[s
         pdf.savefig(fig,bbox_inches="tight"); plt.close(fig)
 
         _table_page(pdf, "测线清单", ["line_id", "name", "length_m", "data_quality", "rtk_status", "sensor_sync_status", "processing_status", "target_count"], lines)
+        for offset in range(0, len(summary.get('marker_rows', [])), 24):
+            _table_page(pdf, '标记与事件区间', ['测线', '名称', '类型', '用途', '版本', '信息来源'], summary['marker_rows'][offset:offset + 24])
         _table_page(pdf, "数据质检", ["line_id", "line_name", "status", "sample_count", "trace_count", "orientation_message"], quality)
         _table_page(pdf, "雷达—RTK—IMU 同步", ["line_id", "status", "rtk_coverage_ratio", "rtk_fixed_ratio", "rtk_max_residual_s", "imu_coverage_ratio", "gap_count", "jump_count", "warning_count"], sensor_sync)
         _table_page(pdf, "处理结果与哈希", ["artifact_id", "line_id", "method_id", "role", "status", "output_shape", "output_data_sha256"], artifacts)

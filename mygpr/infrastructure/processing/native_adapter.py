@@ -124,6 +124,9 @@ class NativeProcessingExecutor(ProcessingExecutorPort):
             raise KeyError(f"native processing method not found: {request.method_id}")
         execution_context = context or ExecutionContext.null()
         execution_context.raise_if_cancelled()
+        from mygpr.domain.markers.continuity import require_continuity
+        from mygpr.infrastructure.processing.marker_mapping import update_mapping
+        require_continuity(request)
         params = prepare_native_params(request)
         params["_execution_context"] = execution_context
         params.setdefault("cancel_checker", execution_context.is_cancelled)
@@ -147,6 +150,7 @@ class NativeProcessingExecutor(ProcessingExecutorPort):
             trace_updates = metadata.get("trace_metadata_updates")
             if isinstance(trace_updates, dict):
                 trace_metadata.update(clone_trace_metadata(trace_updates))
+        update_mapping(request, output, metadata, header, trace_metadata)
         return ProcessingResult(
             data=output,
             method_id=request.method_id,
@@ -208,7 +212,10 @@ def prepare_native_params(request: ProcessingRequest) -> dict[str, Any]:
 
         require_distance_scale(request.header_info, params, key="dx" if request.method_id == "stolt_migration" else "length_m")
     params.setdefault("_header_info", clone_mapping(request.header_info))
-    params.setdefault("_trace_metadata", clone_trace_metadata(request.trace_metadata))
+    from mygpr.domain.markers.mapping import is_mapping_key
+    params.setdefault("_trace_metadata", clone_trace_metadata({
+        key: value for key, value in request.trace_metadata.items() if not is_mapping_key(key)
+    }))
     samples = max(1, int(request.data.shape[0]))
     total_time_ns = (to_float(request.header_info.get("total_time_ns"), default=0.0)
                      or to_float(request.header_info.get("time_window_ns"), default=0.0))

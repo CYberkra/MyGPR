@@ -10,6 +10,7 @@ import numpy as np
 
 from mygpr.application.jobs.context import ExecutionContext
 from mygpr.domain.project.result_package import ProcessingResultPackage
+from mygpr.domain.markers.models import MarkerDocument
 from mygpr.domain.reporting.models import ReportPackage
 from mygpr.domain.interpretation.models import (
     BoreholeRecord, InterfaceAnnotation, InterpretationFeature,
@@ -41,6 +42,16 @@ class WindowOptions(TypedDict, total=False):
 
 
 class ProjectSessionPort(Protocol):
+    def export_markers(self, views, path, format_name): ...
+
+    def select_marker_ranges(self, view, preview, *, context): ...
+
+    def marker_source_id(self, line_id: str) -> str: ...
+
+    def read_markers(self, line_id: str) -> MarkerDocument: ...
+
+    def save_markers(self, document: MarkerDocument, *, expected_revision: int) -> MarkerDocument: ...
+
     @property
     def summary(self) -> ProjectSummary: ...
 

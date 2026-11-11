@@ -107,6 +107,9 @@ class DeliveryPage(QWidget):
         root = QVBoxLayout(content)
         root.setContentsMargins(*constants.PAGE_MARGINS)
         root.setSpacing(constants.PAGE_SPACING)
+        from ui.widgets.marker_browser import MarkerBrowserButton
+        self.marker_browser = MarkerBrowserButton(self)
+        root.addWidget(self.marker_browser)
         scroll.setWidget(wrap_centered(content, constants.FORM_COLUMN_MAX_WIDTH))
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)

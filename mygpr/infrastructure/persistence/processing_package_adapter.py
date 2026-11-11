@@ -14,6 +14,7 @@ class ProcessingPackageMixin:
                 load_raw_dataset=lambda: self._raw_dataset_with_properties(safe_line),
                 load_trace_metadata=lambda aid: self.read_artifact_trace_metadata(safe_line, aid),
                 load_raw_trace_metadata=lambda: self.read_trace_metadata(safe_line),
+                marker_document=self.read_markers(safe_line).to_dict(),
                 destination=destination, target=artifact_id, warnings=warnings, context=context)
             for warning in warnings:
                 context.emit_warning({'code': 'PROCESSING_PACKAGE_INCOMPLETE_LINEAGE', 'message': warning})

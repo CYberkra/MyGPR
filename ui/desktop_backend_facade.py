@@ -41,6 +41,27 @@ from core.method_registry_metadata import (
 from mygpr.domain.acquisition.models import SensorSyncSettings
 from mygpr.domain.interpretation.models import BoreholeRecord, InterpretationZone
 from mygpr.domain.processing.models import PipelineDefinition, PipelineStep
+from mygpr.domain.markers.models import (
+    EventInterval as EventInterval, MarkerAnchor as MarkerAnchor,
+    MarkerRecord as MarkerRecord, PURPOSES as PURPOSES,
+)
+
+
+def marker_rows_for_view(view):
+    from mygpr.application.project.marker_service import project_rows
+    return project_rows(view)
+
+
+def export_marker_views(backend, views, path, format_name):
+    return backend.projects.export_markers(views, path, format_name)
+
+
+def attach_marker_view(backend, bundle, project_id, line_id, artifact_id=''):
+    from dataclasses import replace
+    # Some isolated previews have no project backend (e.g. standalone CSV tools).
+    if not hasattr(backend, 'markers'):
+        return bundle
+    return replace(bundle, marker_view=backend.markers.view(project_id, line_id, artifact_id))
 
 __all__ = [
     "GPRDataSet",

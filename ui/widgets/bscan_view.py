@@ -62,13 +62,13 @@ from ui.widgets.bscan_view_interaction import (BScanDisplayMode,
 from ui.widgets.bscan_view_interaction import (format_crosshair_readout
                                                as format_crosshair_readout)
 from ui.widgets.empty_state import EmptyStateOverlay
-from ui.widgets.marker_pins import MAX_MARKERS as MARKER_RENDER_LIMIT
+from ui.widgets.bscan_marker_events import BScanMarkerEventsMixin
 from ui.widgets.marker_pins import MarkerPins
 from ui.widgets.pg_view_base import GraphicsViewBase, style_plot_item
 
 
 
-class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteractionMixin, GraphicsViewBase, QWidget):
+class BScanView(BScanMarkerEventsMixin, BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteractionMixin, GraphicsViewBase, QWidget):
     """B-Scan 剖面图像视图。
 
     缩放/导出/轴主题继承 GraphicsViewBase（pg_view_base）；
@@ -82,6 +82,8 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
         sig_colormap_changed(str): 右键菜单切换色标时发射（宿主写回设置用）。
     """
 
+    sig_marker_context_changed = pyqtSignal()
+    sig_event_marker_selected = pyqtSignal(str)
     sig_point_picked = pyqtSignal(int, int)
     sig_colormap_changed = pyqtSignal(str)
     # 用户手动切换显示比例时发射（'free'/'square'/'cell'），页面据此持久化
@@ -320,6 +322,7 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
         # 不参与布局，控件与绘图区高度零增量（2026-11-11 替代图内贴顶散点）
         self._marker_pins = MarkerPins(self._glw, self._plot, self._glw)
         self._marker_pins.sig_selection_changed.connect(self._on_marker_selected)
+        self.init_marker_events(layout)
 
         self._fullscreen_btn = ToolButton(FIF.FULL_SCREEN, self)
         self._fullscreen_btn.setToolTip('全屏：在独立窗口中展开（Esc 退出）')
@@ -609,6 +612,7 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
 
     def clear(self) -> None:
         self.set_acquisition_markers(())
+        self.set_marker_view(None)
         self.set_qc_bad_mask(None)
         self.set_qc_local_mask(None)
         self._clear_view_selection()
@@ -634,6 +638,10 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
 
     def set_acquisition_markers_visible(self, visible: bool) -> None:
         self._acquisition_markers_visible = bool(visible)
+        if self._marker_view is not None:
+            self.marker_strip.setVisible(bool(visible) and bool(self.marker_strip.rows))
+            self._marker_pins.hide()
+            return
         self._marker_pins.setVisible(
             self._acquisition_markers_available and self._acquisition_markers_visible)
 
@@ -651,7 +659,7 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
         records, positions = [], []
         if len(grid):
             columns = np.arange(len(grid))
-            for mark in (markers or ())[:MARKER_RENDER_LIMIT]:
+            for mark in (markers or ()):
                 row = int(mark['trace_no'])
                 records.append({
                     'trace_no': row,

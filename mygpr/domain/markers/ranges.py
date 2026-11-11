@@ -1,0 +1,54 @@
+"""Deterministic event selection. Public trace indices are zero-based."""
+from datetime import datetime
+
+import numpy as np
+
+from mygpr.domain.markers.mapping import TraceMapping
+from mygpr.domain.markers.models import EventInterval
+
+
+def interval_indices(interval: EventInterval, mapping: TraceMapping, *,
+                     timestamps_s=None, time_basis_confirmed=False) -> np.ndarray:
+    if interval.excluded or interval.review_state == 'needs_review':
+        raise ValueError('区间已排除或边界变化后尚需复核')
+    if not interval.closed:
+        raise ValueError('区间尚未闭合')
+    count = len(mapping.coordinates)
+    if interval.start and interval.end:
+        source_id = interval.start.source_id
+        if source_id == mapping.target_id:
+            values = np.arange(count, dtype=np.float64)
+        elif source_id == mapping.source_id and mapping.kind != 'unknown':
+            values = mapping.coordinates
+        else:
+            raise ValueError('区间无法映射到当前数据版本')
+        low, high = float(interval.start.trace), float(interval.end.trace)
+    else:
+        if interval.time_source_id and interval.time_source_id not in (mapping.source_id, mapping.target_id):
+            raise ValueError('区间采集时间不属于当前数据版本')
+        values = np.asarray(timestamps_s, dtype=np.float64)
+        if (not time_basis_confirmed or values.shape != (count,)
+                or not np.all(np.isfinite(values)) or np.any(np.diff(values) < 0)):
+            raise ValueError('采集时间缺失、回跳或时间基准未确认，请按道号选择')
+        low = datetime.fromisoformat(interval.time_start).timestamp()
+        high = datetime.fromisoformat(interval.time_end).timestamp()
+    left = values >= low if interval.include_start else values > low
+    right = values <= high if interval.include_end else values < high
+    return np.flatnonzero(left & right)
+
+
+def selection_indices(count: int, groups, mode: str) -> np.ndarray:
+    if mode not in ('keep', 'exclude'):
+        raise ValueError('区间操作必须是 keep 或 exclude')
+    selected = np.zeros(count, dtype=bool)
+    for group in groups:
+        indices = np.asarray(group)
+        if indices.size == 0:
+            continue
+        if indices.ndim != 1 or indices.dtype.kind not in 'iu' or np.any(indices < 0) or np.any(indices >= count):
+            raise ValueError('区间道号越界或格式无效')
+        selected[indices] = True
+    result = np.flatnonzero(selected if mode == 'keep' else ~selected)
+    if not result.size:
+        raise ValueError('不能生成零道成果')
+    return result

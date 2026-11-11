@@ -263,6 +263,9 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
         root = QVBoxLayout(self)
         root.setContentsMargins(*constants.PAGE_MARGINS)
         root.setSpacing(constants.PAGE_SPACING)
+        from ui.widgets.marker_browser import MarkerBrowserButton
+        self.marker_browser = MarkerBrowserButton(self)
+        root.addWidget(self.marker_browser)
 
         columns = QHBoxLayout()
         columns.setSpacing(constants.PAGE_SPACING)
@@ -556,6 +559,23 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
                         and self._right_panel.is_collapsed())
         self._left_panel.set_collapsed(collapse)
         self._right_panel.set_collapsed(collapse)
+
+    def set_marker_rows(self, rows):
+        from ui.widgets.marker_map_overlay import MarkerMapOverlay
+        if not hasattr(self, '_marker_overlay'):
+            self._marker_overlay = MarkerMapOverlay(self._map_view)
+            self._marker_overlay.selected.connect(lambda line_id, uid:
+                self.marker_browser.selection_changed.emit(self.marker_browser.project_id, line_id, uid))
+        self._marker_overlay.set_rows(rows)
+
+    def locate_marker(self, row):
+        self.set_marker_rows([row])
+        if not self._marker_overlay.select(row['uid'], locate=True):
+            self._crs_label.setText('该记录无有效空间位置；保留在标记列表中')
+
+    def select_marker(self, uid):
+        if hasattr(self, '_marker_overlay'):
+            self._marker_overlay.select(uid)
 
     def set_tracks(self, tracks: list) -> None:
         """空间轨迹列表（SpatialTrack，鸭子类型取属性）。"""

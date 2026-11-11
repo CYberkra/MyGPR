@@ -17,7 +17,7 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtGui import QDrag, QIcon, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
-    QApplication, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QSplitter, QTabBar, QVBoxLayout, QWidget,
+    QApplication, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QPushButton, QSplitter, QTabBar, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
     FluentIcon as FIF, RoundMenu, Theme, ToolButton,
@@ -83,7 +83,9 @@ class _ViewGroup(QWidget):
         header.setContentsMargins(2, 0, 2, 0)
         header.setSpacing(2)
         header.addWidget(self.tabs, 1)
-        header.addWidget(self.markers_visibility)
+        self.marker_menu = QPushButton('标记 ▾', self)
+        self.marker_menu.clicked.connect(lambda: workspace.marker_tools.menu(self.view, self.marker_menu.mapToGlobal(QPoint(0, self.marker_menu.height()))))
+        header.addWidget(self.marker_menu)
         header.addWidget(self.display_settings)
         header.addWidget(self.fit_view)
         header.addWidget(self.more)
@@ -189,6 +191,8 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(0)
+        from ui.widgets.marker_workspace_tools import MarkerWorkspaceTools
+        self.marker_tools = MarkerWorkspaceTools(self, self.views, lambda: self._group().view if self._group() else None)
         self._root = self._new_group()
         self._layout.addWidget(self._root)
         self._active_group = self._root.group_id
@@ -227,6 +231,7 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
             group_id = f'group-{self._counter}'
         group = _ViewGroup(self, group_id)
         self._groups[group_id] = group
+        self.marker_tools.connect_view(group.view)
         group.view._plot.vb.sigRangeChanged.connect(lambda *_args: self._link_range(group))
         group.view._glw.scene().sigMouseMoved.connect(lambda pos: self._link_cursor(group, pos))
         self.view_created.emit(group.view)
@@ -341,6 +346,8 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
         if active != self._last_active:
             self._last_active = active
             self.active_changed.emit(active[1])
+        if self.marker_tools.panel:
+            self.marker_tools.sync_view(self._group().view)
         self.layout_changed.emit()
 
     def _render(self, group):

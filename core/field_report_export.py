@@ -349,6 +349,7 @@ def generate_project_report_package(
     report_profile: dict[str, Any] | None = None,
     cancel_checker=None,
     progress_callback=None,
+    marker_documents=None,
 ) -> ReportPackageResult:
     """Generate a formal, auditable engineering delivery package.
 
@@ -370,6 +371,8 @@ def generate_project_report_package(
 
     generated_at = local_now()
     report_profile = dict(report_profile or {})
+    from mygpr.domain.markers.delivery import delivery_rows
+    marker_documents = list(marker_documents or ())
     report_id = str(report_profile.get("report_id") or "")
     template_version = str(report_profile.get("template_version") or "field-industry-v2")
     section_flags = {
@@ -561,6 +564,11 @@ def generate_project_report_package(
         _atomic_write_csv(borehole_csv, ["borehole_id", "line_id", "trace_index", "borehole_depth_m", "interpreted_sample", "interpreted_depth_m", "error_m", "absolute_error_m", "threshold_m", "passed", "status"], borehole_rows)
 
         report(3, 10, "生成工程图件")
+        selected_markers = [doc for doc in marker_documents if doc['line_id'] in {line.line_id for line in lines}]
+        marker_rows = delivery_rows(selected_markers)
+        store.write_json(json_dir / 'markers.json', {'documents': selected_markers})
+        _atomic_write_csv(json_dir / 'markers.csv', ['测线', 'ID', '名称', '类型', '用途', '版本', '信息来源', '备注', '完整记录'], marker_rows)
+        summary['marker_rows'] = marker_rows
         figure_paths = []
         if section_flags["include_bscan_images"] or section_flags["include_spatial_results"]:
             figure_paths = _write_report_figures(
@@ -599,6 +607,7 @@ def generate_project_report_package(
                 ("测线清单", line_rows), ("数据质检", quality_rows), ("传感器同步", sensor_sync_rows),
                 ("基覆界面", interface_rows), ("处理记录", artifact_rows), ("空间成果", spatial_rows),
                 ("GIS图层", gis_rows), ("钻孔对比", borehole_rows), ("历史点目标", target_rows),
+                ("标记与区间", marker_rows),
             ],
         )
 
@@ -651,6 +660,7 @@ def generate_project_report_package(
             generated_at=generated_at,
         )
         document_sections: list[ReportSection] = []
+        document_sections.append(ReportSection('markers', '标记与事件区间', {'documents': selected_markers}))
         if section_flags["include_project_summary"]:
             document_sections.extend((
                 ReportSection("project", "项目概况", project_payload),

@@ -16,6 +16,7 @@ _TYPE_MAP: dict[str, tuple[type, ...]] = {
     "int": (int, np.integer),
     "float": (int, float, np.integer, np.floating),
     "str": (str,),
+    "ranges": (list, tuple),
 }
 
 

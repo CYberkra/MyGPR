@@ -184,7 +184,7 @@ def _publish(archive, destination, context):
 
 def export_processing_package(*, project_id, line_id, artifacts, load_dataset, load_raw_dataset,
                               destination, target, warnings, context: ExecutionContext,
-                              load_trace_metadata=None, load_raw_trace_metadata=None):
+                              load_trace_metadata=None, load_raw_trace_metadata=None, marker_document=None):
     destination = Path(destination).expanduser().absolute()
     if destination.suffix.lower() != '.zip':
         destination = destination.with_name(destination.name + '.zip')
@@ -197,6 +197,9 @@ def export_processing_package(*, project_id, line_id, artifacts, load_dataset, l
                     sensor_metadata='Per-step snapshots are included when available; source sensors are not substituted.')
     with tempfile.TemporaryDirectory(prefix='.mygpr-package-', dir=destination.parent) as folder:
         stage = Path(folder)
+        if marker_document is not None:
+            _write_json(stage / 'markers.json', marker_document)
+            manifest['marker_snapshot'] = {'path': 'markers.json', 'revision': marker_document['revision']}
         raw = stage / 'raw'
         raw.mkdir()
         try:

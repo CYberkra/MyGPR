@@ -57,6 +57,7 @@ class PreviewBundle:
     view_reversed: bool = False
     trace_qc_bad_mask: np.ndarray | None = None
     trace_qc_local_mask: np.ndarray | None = None
+    marker_view: Any = None  # immutable project marker context, with per-result projection
     acquisition_markers: tuple[dict, ...] = ()  # original file-local 1-based rows; raw preview only
 
     def __post_init__(self) -> None:

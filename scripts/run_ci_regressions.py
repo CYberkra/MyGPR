@@ -37,6 +37,9 @@ SUITES = {
         "tests/test_native_processing_backend.py",
     ),
     "processing": (
+        "tests/test_marker_events.py",
+        "tests/test_marker_events_project.py",
+        "tests/test_marker_events_ui.py",
         "tests/test_file_tree.py",
         "tests/test_home_page.py",
         "tests/test_project_workspace.py",

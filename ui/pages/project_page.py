@@ -136,6 +136,9 @@ class ProjectPage(ProjectLineContextMixin, QWidget):
         self.quality_btn = PushButton('数据质检', self._work_widget, FIF.SEARCH)
         self.quality_btn.clicked.connect(self.show_quality_center)
         header_row.addWidget(self.quality_btn)
+        from ui.widgets.marker_browser import MarkerBrowserButton
+        self.marker_browser = MarkerBrowserButton(self._work_widget)
+        header_row.addWidget(self.marker_browser)
         self.project_more_btn = ToolButton(FIF.MORE, self._work_widget)
         self.project_more_btn.setToolTip('项目设置与工具')
         self.project_more_btn.setAccessibleName('项目设置与工具')

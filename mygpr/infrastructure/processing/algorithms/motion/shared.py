@@ -396,6 +396,7 @@ def resample_equal_distance(
         target_trace_distance_m=target_distance,
     )
     return corrected, trace_metadata_out, {
+        'marker_input_distance_m': source_distance.copy(),
         "source_traces": int(source_distance.size),
         "target_traces": int(target_distance.size),
         "spacing_m": float(spacing_m),

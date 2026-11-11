@@ -2,6 +2,11 @@
 from __future__ import annotations
 
 METHOD_METADATA = {
+    "trace_range_select": {
+        "category": "quality_control", "maturity": "stable", "visibility": "hidden",
+        "display_name": "事件区间保留／剔除",
+        "description": "仅按明确的道范围保留或剔除数据，不执行自动异常检测；通过标记区间预览后运行。",
+    },
     "gaussian_smoothing": {
         "category": "denoising", "maturity": "stable", "visibility": "public",
         "display_name": "高斯平滑（Gaussian）",

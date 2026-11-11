@@ -13,6 +13,7 @@ import numpy as np
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
 
 from ui.desktop_backend_facade import (
+    attach_marker_view,
     SensorSyncSettings,
     build_preview_bundle,
     read_full_resolution_bscan,
@@ -1129,6 +1130,7 @@ class _PreviewLineCommand(_ProjectReadCommand):
             while isinstance(metadata.get('metadata'), dict):
                 metadata = metadata['metadata']
             bundle = dataclasses.replace(bundle, acquisition_markers=tuple(metadata.get('acquisition_markers', ())))
+            bundle = attach_marker_view(backend, bundle, self._project_id, self._line_id)
         except Exception as exc:  # noqa: BLE001
             if not self._context_is_current() or (
                     not self._reference_request and c._preview_generation != self._generation):
@@ -1245,6 +1247,7 @@ class _PreviewArtifactCommand:
                 dielectric_constant=float(getattr(
                     info, 'dielectric_constant', 0.0) or 0.0),
             )
+            bundle = attach_marker_view(backend, bundle, self._project_id, self._line_id, self._artifact_id)
         except Exception as exc:  # noqa: BLE001
             if not self._current():
                 return

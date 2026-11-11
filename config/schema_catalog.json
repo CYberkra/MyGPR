@@ -2,6 +2,13 @@
   "schema": "mygpr.schema_catalog.v1",
   "schemas": [
     {
+      "schema": "mygpr.marker_events.v1",
+      "owner": "project-markers",
+      "mutable": true,
+      "migration_policy": "versioned-project-edits; immutable-acquisition-snapshot",
+      "references": ["mygpr/domain/markers/models.py", "mygpr/infrastructure/persistence/marker_adapter.py"]
+    },
+    {
       "schema": "mygpr.windows_updates.v1",
       "owner": "application-distribution",
       "mutable": false,
