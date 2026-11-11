@@ -754,6 +754,7 @@ class BScanView(BScanMarkerEventsMixin, BScanSelectionMixin, BScanTimeWindowMixi
         palette = control_palette(dark)
         self._glw.setBackground(palette['plot_bg'])
         self._marker_pins.set_theme(dark)
+        self.marker_strip.update()
         style_plot_item(
             self._plot, dark,
             colorbar_axis=(self._colorbar.axis

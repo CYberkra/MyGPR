@@ -17,11 +17,11 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtGui import QDrag, QIcon, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
-    QApplication, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QPushButton, QSplitter, QTabBar, QVBoxLayout, QWidget,
+    QApplication, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QSplitter, QTabBar, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
     FluentIcon as FIF, RoundMenu, Theme, ToolButton,
-    TransparentToolButton, isDarkTheme,
+    TransparentPushButton, TransparentToolButton, isDarkTheme,
 )
 
 from ui import constants, motion
@@ -83,7 +83,8 @@ class _ViewGroup(QWidget):
         header.setContentsMargins(2, 0, 2, 0)
         header.setSpacing(2)
         header.addWidget(self.tabs, 1)
-        self.marker_menu = QPushButton('标记 ▾', self)
+        self.marker_menu = TransparentPushButton('标记 ▾', self)
+        self.marker_menu.setFixedHeight(constants.TOOL_BTN_SIZE[1])
         self.marker_menu.clicked.connect(lambda: workspace.marker_tools.menu(self.view, self.marker_menu.mapToGlobal(QPoint(0, self.marker_menu.height()))))
         header.addWidget(self.marker_menu)
         header.addWidget(self.display_settings)

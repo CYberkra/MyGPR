@@ -2,9 +2,11 @@
 from dataclasses import replace
 
 from PyQt6.QtCore import QEvent, QObject, pyqtSignal
-from PyQt6.QtWidgets import QFileDialog, QMenu, QMessageBox
+from PyQt6.QtWidgets import QFileDialog, QMessageBox
 
 from ui.desktop_backend_facade import EventInterval, MarkerRecord, marker_rows_for_view
+from ui.widgets.context_menus import add_action, make_menu
+from ui.widgets.fluent_menu_keyboard import FluentMenuKeyboard
 from ui.widgets.marker_panel import MarkerPanel
 
 
@@ -107,18 +109,20 @@ class MarkerWorkspaceTools(QObject):
         return False
 
     def menu(self, view, position):
-        menu = QMenu(self.host)
-        toggle = menu.addAction('显示标记条')
-        toggle.setCheckable(True)
-        toggle.setChecked(view._acquisition_markers_visible)
-        toggle.toggled.connect(view.set_acquisition_markers_visible)
-        menu.addAction('标记列表', self.show_panel)
+        menu = make_menu(self.host)
+        visible = view._acquisition_markers_visible
+        add_action(menu, None, '隐藏标记条' if visible else '显示标记条',
+                   lambda: view.set_acquisition_markers_visible(not visible))
+        add_action(menu, None, '标记列表', self.show_panel)
         current = view._marker_view
         editable = bool(current and not current.read_only)
-        menu.addAction('新增点标记', lambda: self.show_panel().edit(MarkerRecord(anchor=current.anchor(0)))).setEnabled(editable)
-        menu.addAction('新建区间', view.marker_strip.begin_range).setEnabled(editable)
-        menu.addAction('导出带标记图件', lambda: self.export_figure(view)).setEnabled(bool(current))
+        add_action(menu, None, '新增点标记',
+                   lambda: self.show_panel().edit(MarkerRecord(anchor=current.anchor(0))), enabled=editable)
+        add_action(menu, None, '新建区间', view.marker_strip.begin_range, enabled=editable)
+        add_action(menu, None, '导出带标记图件', lambda: self.export_figure(view), enabled=bool(current))
+        menu._marker_keyboard = FluentMenuKeyboard(menu)
         menu.exec(position)
+        menu._marker_keyboard.focus_menu(menu)
 
     def export_figure(self, view):
         path, _ = QFileDialog.getSaveFileName(self.host, '导出带标记图件', 'markers.png', 'PNG (*.png)')

@@ -28,7 +28,7 @@ from PyQt6.QtWidgets import (
 )
 from qfluentwidgets import (
     CaptionLabel, CardWidget, ComboBox, DoubleSpinBox, PrimaryPushButton,
-    PushButton,
+    PushButton, TransparentPushButton,
 )
 from qfluentwidgets import FluentIcon as FIF
 
@@ -158,10 +158,10 @@ class InterpretationPage(PanelStateMixin, QWidget):
         self._bscan.setMinimumHeight(420)
         self._bscan.set_pick_enabled(False)  # 会话打开前禁用 pick（P1-6）
         from ui.widgets.marker_workspace_tools import MarkerWorkspaceTools
-        from PyQt6.QtWidgets import QPushButton
         self.marker_tools = MarkerWorkspaceTools(self._bscan, lambda: [self._bscan], lambda: self._bscan)
         self.marker_tools.connect_view(self._bscan)
-        markers = QPushButton('标记 ▾', card)
+        markers = TransparentPushButton('标记 ▾', card)
+        markers.setFixedHeight(constants.TOOL_BTN_SIZE[1])
         markers.clicked.connect(lambda: self.marker_tools.menu(self._bscan, markers.mapToGlobal(markers.rect().bottomLeft())))
         layout.addWidget(markers, 0, Qt.AlignmentFlag.AlignRight)
         layout.addWidget(self._bscan, 1)

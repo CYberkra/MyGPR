@@ -7,7 +7,23 @@ from PyQt6.QtGui import QColor, QPainter, QPen
 from PyQt6.QtWidgets import QWidget
 from qfluentwidgets import isDarkTheme
 
-from ui.design_tokens import color
+from ui.constants import FONT_SIZE_SECONDARY
+from ui.design_tokens import tokens
+from ui.theme_helpers import ui_font
+
+
+_PURPOSE_COLOR = {
+    '停车等待': 'warning', '外部干扰': 'error', '目标范围': 'success', '现场操作': 'info',
+}
+_LABEL_INSET = 21
+
+
+def _draw_pill(painter, rect, fill, border):
+    painter.setBrush(QColor(fill))
+    painter.setPen(QPen(QColor(border)))
+    radius = rect.height() / 2
+    painter.drawRoundedRect(rect.adjusted(.5, .5, -.5, -.5), radius, radius)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
 
 
 class MarkerStrip(QWidget):
@@ -63,8 +79,8 @@ class MarkerStrip(QWidget):
             return trace + .5
         return float(np.interp(trace, grid, np.arange(len(grid)))) + .5
 
-    def pixel_x(self, trace):
-        scene = self.view._plot.vb.mapViewToScene(QPointF(self.display_x(trace), 0))
+    def pixel_x(self, trace, *, offset=0.):
+        scene = self.view._plot.vb.mapViewToScene(QPointF(self.display_x(trace) + offset, 0))
         point = self.view._glw.mapFromScene(scene)
         return float(self._from_viewport(point).x())
 
@@ -84,23 +100,29 @@ class MarkerStrip(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        dark = isDarkTheme()
-        painter.fillRect(self.rect(), QColor(color('bg_surface', dark)))
+        painter.setFont(ui_font(FONT_SIZE_SECONDARY))
+        metrics = painter.fontMetrics()
+        theme = tokens(isDarkTheme())
+        painter.fillRect(self.rect(), QColor(theme['bg_surface']))
         bounds = self.view._plot.vb.sceneBoundingRect()
-        left = self._from_viewport(self.view._glw.mapFromScene(bounds.topLeft())).x()
-        right = self._from_viewport(self.view._glw.mapFromScene(bounds.topRight())).x()
-        painter.setClipRect(QRectF(left, 0, max(0, right - left), self.height()))
-        painter.setPen(QPen(QColor(color('border_default', dark))))
-        painter.drawLine(left, 0, right, 0)
         self._hits = []
+        left = max(0, self._from_viewport(self.view._glw.mapFromScene(bounds.topLeft())).x())
+        right = min(self.width(), self._from_viewport(self.view._glw.mapFromScene(bounds.topRight())).x())
+        if right <= left:
+            return
+        painter.setClipRect(QRectF(left, 0, right - left, self.height()))
+        painter.setPen(QPen(QColor(theme['border_default'])))
+        painter.drawLine(left, 0, right, 0)
         items = []
         for row in self.rows:
             if row['record'].excluded:
                 continue
             projection = row['projection']
             spans = projection.spans or tuple((point, point) for point in projection.positions)
+            edge = .5 if projection.spans else 0.
             for start, stop in spans:
-                x1, x2 = self.pixel_x(start), self.pixel_x(max(start, stop - 1))
+                x1 = self.pixel_x(start, offset=-edge)
+                x2 = self.pixel_x(max(start, stop - 1), offset=edge)
                 lo, hi = min(x1, x2), max(x1, x2)
                 if hi < left or lo > right:
                     continue
@@ -111,10 +133,12 @@ class MarkerStrip(QWidget):
         clusters = {}
         entries = []
         for x1, x2, row, interval in items:
-            lo, hi = max(float(left), x1), min(float(right), x2)
-            label_width = min(144, painter.fontMetrics().horizontalAdvance(row['name']) + 14)
-            width = max(24., min(label_width, right - lo), hi - lo)
-            lane = next((i for i in range(2) if all(lo > end or lo + width < begin for begin, end in lanes[i])), None)
+            lo = max(float(left), x1 if interval else x1 - 10)
+            label_width = min(152, max(36, metrics.horizontalAdvance(row['name']) + _LABEL_INSET + 8))
+            width = min(right - left, max(label_width, min(float(right), x2) - lo))
+            lo = min(lo, right - width)
+            lane = next((i for i in range(2) if all(
+                lo >= end + 3 or lo + width + 3 <= begin for begin, end in lanes[i])), None)
             if lane is None:
                 cell = int((lo - left) // 56)
                 clusters.setdefault(cell, []).append(row['uid'])
@@ -124,8 +148,9 @@ class MarkerStrip(QWidget):
             entries.append((rect, x1, x2, row, interval))
         # Reserve cluster space before drawing labels, so a count never obscures
         # half a name. The selected record owns lane zero and remains visible.
-        for cell, ids in clusters.items():
-            rect = QRectF(max(float(left), min(left + cell * 56, right - 52)), 30, 52, 22)
+        for cell, ids in sorted(clusters.items()):
+            width = min(52, right - left)
+            rect = QRectF(min(left + cell * 56, right - width), 30, width, 22)
             overlapping = [(hit, members) for hit, members in self._hits if hit.intersects(rect)]
             for hit, members in overlapping:
                 rect = rect.united(hit)
@@ -138,38 +163,46 @@ class MarkerStrip(QWidget):
         cluster_count = len(self._hits)
         for rect, x1, x2, row, interval in entries:
             self._hits.append((rect, [row['uid']]))
-            token = 'primary' if row['uid'] == self.selected_id else {
-                '停车等待': 'warning', '外部干扰': 'error', '目标范围': 'success',
-                '现场操作': 'info'}.get(row['purpose'], 'text_secondary')
-            ink = QColor(color(token, dark))
-            if row['uid'] == self.selected_id:
-                background = QColor(ink)
-                background.setAlpha(28)
-                painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(background)
-                painter.drawRoundedRect(rect, 4, 4)
-                painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.setPen(QPen(ink, 2 if row['uid'] == self.selected_id else 1))
-            y = rect.center().y()
-            painter.drawLine(QPointF(x1, y - 7), QPointF(x1, y + 7))
-            if interval:
-                painter.drawLine(QPointF(x2, y - 7), QPointF(x2, y + 7))
-                painter.drawLine(QPointF(x1, y + 7), QPointF(x2, y + 7))
-            elif row['projection'].status == 'open':
-                painter.drawText(QPointF(rect.left() + 3, y + 4), '…')
-            painter.setPen(QColor(color('text_primary', dark)))
-            label = painter.fontMetrics().elidedText(row['name'], Qt.TextElideMode.ElideRight, int(rect.width() - 12))
-            painter.drawText(rect.adjusted(5, 0, 0, -2), Qt.AlignmentFlag.AlignVCenter, label)
+            self._draw_marker(painter, theme, rect, x1, x2, row, interval)
         for rect, ids in self._hits[:cluster_count]:
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(color('bg_muted', dark)))
-            painter.drawRoundedRect(rect, 4, 4)
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.setPen(QColor(color('text_primary', dark)))
+            _draw_pill(painter, rect, theme['bg_muted'], theme['border_default'])
+            painter.setPen(QColor(theme['text_secondary']))
             painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, f'+{len(ids)}')
         if self._creating:
-            painter.setPen(QColor(color('primary', dark)))
-            painter.drawText(left + 6, 18, '选择起点' if self._first is None else '选择终点')
+            label = '选择起点' if self._first is None else '选择终点'
+            rect = QRectF(left, 3, min(right - left, metrics.horizontalAdvance(label) + 20), 20)
+            _draw_pill(painter, rect, theme['primary_subtle'], theme['primary_border'])
+            painter.setPen(QColor(theme['text_primary']))
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, label)
+
+    def _draw_marker(self, painter, theme, rect, x1, x2, row, interval):
+        selected = row['uid'] == self.selected_id
+        ink = QColor(theme['primary' if selected else _PURPOSE_COLOR.get(row['purpose'], 'text_secondary')])
+        pill = rect.adjusted(0, 0, 0, -3)
+        fill = theme['primary_subtle' if selected else 'bg_subtle']
+        border = theme['primary_border' if selected else 'border_default']
+        _draw_pill(painter, pill, fill, border)
+        x, y = pill.left() + 11, pill.center().y()
+        painter.setPen(QPen(ink, 1.5, cap=Qt.PenCapStyle.RoundCap))
+        if interval:
+            painter.drawLine(QPointF(x - 4, y), QPointF(x + 4, y))
+            rail_y = rect.bottom() - .5
+            painter.drawLine(QPointF(x1, rail_y), QPointF(x2, rail_y))
+            for endpoint in (x1, x2):
+                painter.drawLine(QPointF(endpoint, rail_y - 3), QPointF(endpoint, rail_y))
+        else:
+            painter.drawLine(QPointF(x1, pill.top() - 2), QPointF(x1, pill.top()))
+            if row['projection'].status == 'open':
+                painter.drawText(QRectF(x - 6, pill.top(), 12, pill.height()), Qt.AlignmentFlag.AlignCenter, '…')
+            else:
+                painter.setBrush(ink)
+                painter.drawEllipse(QPointF(x, y), 2.5, 2.5)
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+        text_rect = pill.adjusted(_LABEL_INSET, 0, -8, 0)
+        if text_rect.width() > 0:
+            label = painter.fontMetrics().elidedText(row['name'], Qt.TextElideMode.ElideRight, int(text_rect.width()))
+            painter.setPen(QColor(theme['text_primary']))
+            painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter, label)
 
     def mousePressEvent(self, event):
         self.setFocus()
