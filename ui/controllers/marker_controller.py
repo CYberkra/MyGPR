@@ -30,7 +30,7 @@ class MarkerController(QObject):
         run_command(_MarkerCommand(self, backend, action, dict(payload)), name='mygpr-markers-' + action)
 
     def _deliver(self, action, payload, result, error):
-        if not error and action in ('save', 'delete'):
+        if not error and action in ('save', 'delete', 'timezone'):
             self.changed.emit(result)
         if not error and action == 'execute':
             bridge = self.backend_controller.job_bridge
@@ -65,6 +65,11 @@ class _MarkerCommand:
                     result = replace(updated, rows=marker_rows_for_view(updated))
             elif action == 'project':
                 result = backend.markers.project_views(payload['project_id'])
+            elif action == 'timezone':
+                view = payload['view']
+                with backend.projects.acquire_lease(view.document.project_id):
+                    backend.maintenance.update_metadata(view.document.project_id, timezone=payload['timezone'])
+                    result = backend.markers.view(view.document.project_id, view.document.line_id, view.artifact_id)
             elif action == 'load':
                 result = backend.markers.view(payload['project_id'], payload['line_id'], payload.get('artifact_id', ''))
             elif action == 'preview':

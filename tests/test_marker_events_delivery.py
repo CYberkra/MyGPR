@@ -98,3 +98,18 @@ def test_report_strip_and_snapshot_include_every_record(tmp_path):
     fig.savefig(destination)
     assert destination.stat().st_size > 0
     plt.close(fig)
+
+
+def test_selected_result_geometry_follows_disjoint_output_segments():
+    from mygpr.domain.markers.mapping import add_source_mapping, SEGMENT_KEY
+    view = geometry_view()
+    header, metadata = dict(view.header), {}
+    add_source_mapping(header, metadata, 'raw', 4)
+    key = header['marker_maps']['raw']['key']
+    header['marker_maps']['raw']['kind'] = 'selection'
+    metadata[key] = np.array([0., 3.])
+    metadata[SEGMENT_KEY] = np.array([0, 1])
+    artifact = replace(view, target_id='artifact:A', artifact_id='A', count=2, header=header, trace_metadata=metadata)
+    rows = project_rows(artifact)
+    assert rows[1]['projection'].spans == ((0, 1), (1, 2))
+    assert rows[1]['geometry']['parts'] == [[[100., 30.]], [[103., 30.]]]

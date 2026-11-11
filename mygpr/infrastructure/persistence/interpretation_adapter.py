@@ -203,6 +203,14 @@ class InterpretationPersistenceMixin:
             "features": [_feature_payload(item) for item in features],
         }
         with self._lock:
+            marker_path = resolve_managed_path(self._store.root, f'metadata/markers/{safe}.json')
+            if marker_path.exists():
+                from mygpr.domain.markers.models import MarkerDocument
+                document = MarkerDocument.from_dict(json.loads(marker_path.read_text(encoding='utf-8')))
+                removed = {item.feature_id for item in self.list_interpretation_features(safe)} - {item.feature_id for item in features}
+                affected = [item.name or item.uid for item in document.records if removed.intersection(item.links)]
+                if affected:
+                    raise ValueError(f'解释对象仍被 {len(affected)} 条标记或区间引用，请先解除关联：' + '、'.join(affected[:5]))
             self._store.write_json(self._interpretation_path(safe), payload)
             self._append_audit(
                 "interpretation_features_replaced", object_type="line", object_id=safe,

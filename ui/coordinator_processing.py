@@ -498,15 +498,17 @@ class ProcessingChain:
                                int(getattr(point, 'sample_index', 0))))
         return result
 
-    def on_open_session_requested(self, artifact_id: str = "") -> None:
+    def on_open_session_requested(self, artifact_id: str = "") -> bool:
         if self._co.interpretation_controller is None:
-            return
+            return False
         line_id = self._co.require_line()
         if line_id and self._co.project.confirm_interpretation_close():
             self._co.interpretation_controller.open_session(
                 self._co.current_project_id(), line_id,
                 input_artifact_id=str(artifact_id or ""),
             )
+            return True
+        return False
 
     def on_session_opened(self, snapshot) -> None:
         if not self._is_current_interpretation(snapshot):

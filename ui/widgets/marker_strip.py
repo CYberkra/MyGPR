@@ -131,8 +131,11 @@ class MarkerStrip(QWidget):
             label = painter.fontMetrics().elidedText(row['name'], Qt.TextElideMode.ElideRight, int(width - 8))
             painter.drawText(rect.adjusted(5, 0, 0, -2), Qt.AlignmentFlag.AlignVCenter, label)
         for cell, ids in clusters.items():
-            ids = list(dict.fromkeys(ids))
             rect = QRectF(left + cell * 32, 30, 32, 23)
+            # Include the lane members covered by the count control; none may become unreachable.
+            covered = [(hit, members) for hit, members in self._hits if hit.intersects(rect)]
+            ids = list(dict.fromkeys([*ids, *(uid for _, members in covered for uid in members)]))
+            self._hits = [(hit, members) for hit, members in self._hits if not hit.intersects(rect)]
             self._hits.insert(0, (rect, ids))
             painter.fillRect(rect, QColor(color('bg_muted', dark)))
             painter.setPen(QColor(color('text_primary', dark)))

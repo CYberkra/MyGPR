@@ -31,8 +31,9 @@ class MarkerWorkspaceTools(QObject):
         current = view._marker_view
         if current:
             cached = self.documents.get((current.document.project_id, current.document.line_id))
-            if cached and cached.source_id == current.document.source_id and cached.revision > current.document.revision:
-                updated = replace(current, document=cached)
+            if cached and cached.source_id == current.document.source_id and (
+                    cached.revision > current.document.revision or cached.timezone != current.timezone):
+                updated = replace(current, document=cached, timezone=cached.timezone)
                 view.set_marker_view(replace(updated, rows=marker_rows_for_view(updated)))
         if self.panel and view is self.active():
             self.panel.set_view(view._marker_view)
@@ -43,12 +44,26 @@ class MarkerWorkspaceTools(QObject):
         for view in self.views():
             self.sync_view(view)
 
+    def refresh_links(self, contexts):
+        contexts = {(item.document.project_id, item.document.line_id): item for item in contexts}
+        for view in self.views():
+            current = view._marker_view
+            key = (current.document.project_id, current.document.line_id) if current else None
+            updated = contexts.get(key)
+            if current and updated and (current.interpretation_links != updated.interpretation_links
+                                       or current.timezone != updated.timezone
+                                       or current.processing_history != updated.processing_history):
+                document = replace(current.document, timezone=updated.timezone)
+                view.set_marker_view(replace(current, interpretation_links=updated.interpretation_links,
+                                             document=document, timezone=updated.timezone,
+                                             processing_history=updated.processing_history))
+
     def show_panel(self):
         if self.panel is None:
             self.panel = MarkerPanel(self.host)
             self.panel.operation.connect(self.operation)
-            self.panel.selected.connect(lambda uid: self.select(uid))
-            self.panel.locate.connect(lambda uid: self.select(uid, locate=True))
+            self.panel.selected.connect(self._panel_selected)
+            self.panel.locate.connect(lambda uid: self._panel_selected(uid, locate=True))
             self.panel.adjust.connect(lambda uid: self.active().marker_strip.begin_adjust(uid))
             self.panel.close_requested.connect(self.hide_panel)
             self.panel.navigate.connect(self.navigate)
@@ -58,6 +73,23 @@ class MarkerWorkspaceTools(QObject):
         self._geometry()
         self.panel.raise_()
         return self.panel
+
+    def _panel_selected(self, uid, *, locate=False):
+        if self._selecting:
+            return
+        row = next((row for row in self.panel.model.rows if row['uid'] == uid), None)
+        if row is None:
+            return
+        context = self.panel._views.get(row['line_id'])
+        if context is None:
+            return
+        active = self.active()
+        if locate and (not active or not active._marker_view or active._marker_view.document.line_id != row['line_id']):
+            self.navigate.emit('processing', row)
+            return
+        pid = context.document.project_id
+        self.select(uid, locate=locate, project_id=pid, line_id=row['line_id'])
+        self.selection_changed.emit(pid, row['line_id'], uid)
 
     def hide_panel(self):
         self.panel.hide()

@@ -43,3 +43,45 @@ def reference_geometry(record, source_id, track, prepared=None):
         return None
     return {'parts': parts, 'crs': track.coordinate_system, 'source': track.source,
             'interval': interval, 'meaning': '沿测线参考范围' if interval else '沿测线参考位置'}
+
+
+def projected_geometry(projection, mapping, track, prepared=None):
+    """Follow retained trajectory samples; interpolate only between adjacent track samples."""
+    if not track or not track.coordinate_system or track.source == 'trajectory file' or mapping.kind == 'unknown':
+        return None
+    indices, points = prepared if prepared is not None else track_index(track)
+    groups = [range(a, b) for a, b in projection.spans] or [(p,) for p in projection.positions]
+    parts = []
+    for group in groups:
+        current = []
+        previous_root = None
+        for position in group:
+            left = int(position)
+            weight = position - left
+            root = float(mapping.coordinates[left] * (1 - weight)
+                         + mapping.coordinates[min(left + 1, len(mapping.coordinates) - 1)] * weight)
+            index = bisect_left(indices, root)
+            xy = None
+            if index < len(indices) and indices[index] == root:
+                xy = [points[index].x, points[index].y]
+            elif 0 < index < len(indices) and indices[index] == indices[index - 1] + 1:
+                weight = root - indices[index - 1]
+                xy = [getattr(points[index - 1], axis) * (1 - weight) + getattr(points[index], axis) * weight
+                      for axis in ('x', 'y')]
+            first = bisect_left(indices, previous_root) if previous_root is not None else index
+            track_gap = any(b != a + 1 for a, b in zip(indices[first:index], indices[first + 1:index + 1]))
+            if xy is None or not all(math.isfinite(v) for v in xy) or track_gap:
+                if current:
+                    parts.append(current)
+                    current = []
+            if xy is not None and all(math.isfinite(v) for v in xy):
+                current.append([float(v) for v in xy])
+            previous_root = root
+        if current:
+            parts.append(current)
+    if not parts:
+        return None
+    interval = bool(projection.spans)
+    return {'parts': parts, 'crs': track.coordinate_system, 'source': track.source,
+            'interval': interval, 'meaning': '沿测线参考范围' if interval else '沿测线参考位置',
+            'position_status': projection.status}

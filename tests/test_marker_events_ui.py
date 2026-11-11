@@ -11,6 +11,7 @@ from mygpr.application.project.marker_service import MarkerView, project_rows
 from mygpr.domain.markers.models import MarkerDocument, MarkerRecord, MarkerAnchor, EventInterval
 from ui.widgets.bscan_view import BScanView
 from ui.widgets.marker_panel import MarkerPanel
+from ui.widgets.marker_editor import MarkerEditor
 
 
 def marker_view(count=10000):
@@ -18,6 +19,42 @@ def marker_view(count=10000):
         MarkerRecord(uid=f'm{i}', name='同名', note=f'备注{i}', anchor=MarkerAnchor('raw:1', i % 20)) for i in range(count)))
     view = MarkerView(doc, 'raw:1', '', 20, {}, {}, (), False, False)
     return replace(view, rows=project_rows(view))
+
+
+def test_editing_time_only_or_open_end_keeps_source_version(qapp):
+    view = marker_view(0)
+    event = EventInterval(time_start='2026-01-01T00:00:00Z', time_end='2026-01-01T00:00:01Z',
+                          time_source_id='raw:previous')
+    editor = MarkerEditor(view, event)
+    editor.note.setPlainText('补充备注')
+    assert editor._draft().time_source_id == 'raw:previous'
+    editor.close()
+    opened = EventInterval(end=MarkerAnchor('raw:previous', 2))
+    editor = MarkerEditor(view, opened)
+    draft = editor._draft()
+    assert draft.start is None and draft.end == opened.end
+    editor.close()
+
+
+def test_marker_navigation_uses_artifact_and_rejects_late_raw_preview(qapp):
+    from types import SimpleNamespace
+    from ui.coordinator_markers import MarkerChain
+    calls = []
+    tools = SimpleNamespace(select=lambda uid, **kw: calls.append(('select', uid)))
+    page = SimpleNamespace(_workspace=SimpleNamespace(
+        open_source=lambda key: calls.append(('open', key)), marker_tools=tools))
+    coordinator = SimpleNamespace(current_project_id=lambda: 'project',
+        project=SimpleNamespace(on_line_selected=lambda line: True,
+            on_artifact_focus_requested=lambda line, aid: calls.append(('request', aid))),
+        goto_page=lambda page: None, page=lambda name: page)
+    chain = MarkerChain(coordinator)
+    chain.navigate('processing', {'line_id': 'L01', 'uid': 'm0', 'artifact_id': 'result-1'})
+    raw = marker_view(1)
+    chain._locate_loaded(SimpleNamespace(marker_view=raw))
+    assert calls == [('request', 'result-1')]
+    result = replace(raw, artifact_id='result-1', target_id='artifact:result-1')
+    chain._locate_loaded(SimpleNamespace(marker_view=result))
+    assert calls == [('request', 'result-1'), ('open', 'result-1'), ('select', 'm0')]
 
 
 def test_ten_thousand_records_search_and_cluster_without_truncation(qapp):

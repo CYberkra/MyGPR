@@ -129,3 +129,61 @@ def test_csv_export_contains_every_duplicate_and_no_raw_changes(project):
     backend.projects.export_markers((view,), tmp_path / 'all.geojson', 'geojson')
     payload = json.loads((tmp_path / 'all.geojson').read_text(encoding='utf-8'))
     assert payload['unlocated_records'] == 3 and not payload['features']
+
+
+def test_interpretation_links_are_validated_and_protect_dependency(project):
+    backend, pid, _, _ = project
+    target = backend.interpretation.add_point(pid, 'L01', trace=3, sample=2, confidence=.7, label='参考目标')
+    view = backend.markers.view(pid, 'L01')
+    assert (target.feature_id, '参考目标') in view.interpretation_links
+    marker = MarkerRecord(name='已知范围', anchor=view.anchor(3), links=(target.feature_id,))
+    backend.markers.edit(view, marker)
+    with pytest.raises(ValueError, match='引用'):
+        backend.interpretation.delete_feature(pid, 'L01', target.feature_id)
+    view = backend.markers.view(pid, 'L01')
+    backend.markers.edit(view, replace(marker, links=()))
+    assert backend.interpretation.delete_feature(pid, 'L01', target.feature_id)
+
+
+def test_readonly_and_invalid_anchor_refuse_mutation(project):
+    backend, pid, _, _ = project
+    view = backend.markers.view(pid, 'L01')
+    with pytest.raises(ValueError, match='只读'):
+        backend.markers.edit(replace(view, read_only=True), MarkerRecord())
+    with pytest.raises(ValueError, match='道号'):
+        backend.markers.edit(view, MarkerRecord(anchor=replace(view.anchor(0), trace=80)))
+
+
+def test_project_timezone_and_processing_receipt_survive_reopen(project):
+    backend, pid, _, _ = project
+    event = save_event(backend, pid, 2, 3)
+    backend.maintenance.update_metadata(pid, timezone='Asia/Shanghai')
+    view = backend.markers.view(pid, 'L01')
+    assert view.timezone == view.document.timezone == 'Asia/Shanghai'
+    preview = backend.markers.preview(view, [event.uid], 'exclude')
+    artifact = backend.markers.execute(preview, context=ExecutionContext.null())
+    current = backend.markers.view(pid, 'L01')
+    backend.markers.edit(current, replace(current.document.intervals[0], note='后续复核'))
+    root = backend.projects.get_summary(pid).root_path
+    backend.projects.close_project(pid)
+    backend.projects.open_project(root)
+    reopened = backend.markers.view(pid, 'L01')
+    assert reopened.timezone == 'Asia/Shanghai'
+    receipt = reopened.processing_history[0]
+    assert receipt['artifact_id'] == artifact.artifact_id
+    assert receipt['selection']['intervals'][0]['note'] == ''
+    from core.field_project_errors import FieldProjectOperationError
+    with pytest.raises(FieldProjectOperationError, match='时区'):
+        backend.maintenance.update_metadata(pid, timezone='invalid/zone')
+    assert backend.projects.get_metadata(pid).timezone == 'Asia/Shanghai'
+
+
+def test_dependency_document_does_not_require_readable_raw_array(project, monkeypatch):
+    backend, pid, _, _ = project
+    event = save_event(backend, pid, 1, 2)
+    session = backend.projects._session(pid)
+    def missing(*args):
+        raise FileNotFoundError('missing raw')
+    monkeypatch.setattr(session, 'get_dataset_info', missing)
+    document = session.read_marker_dependencies('L01')
+    assert document.intervals[0].uid == event.uid

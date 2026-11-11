@@ -15,6 +15,8 @@ class MarkerBrowserButton(QPushButton):
         self.project_id = ''
         self.dialog = None
         self.panel = None
+        self._selecting = False
+        self._selected_id = ''
         self.clicked.connect(self.open_browser)
 
     def open_browser(self):
@@ -35,6 +37,8 @@ class MarkerBrowserButton(QPushButton):
             self.panel.request('project', {'project_id': self.project_id})
 
     def _selected(self, uid):
+        if self._selecting:
+            return
         row = next((row for row in self.panel.model.rows if row['uid'] == uid), None)
         if row:
             self.selection_changed.emit(self.project_id, row['line_id'], uid)
@@ -42,6 +46,19 @@ class MarkerBrowserButton(QPushButton):
     def deliver(self, token, result, error):
         if self.panel:
             self.panel.deliver(token, result, error)
+            if self._selected_id:
+                self.select(self._selected_id)
+
+    def select(self, uid, *, project_id='', line_id=''):
+        if project_id and project_id != self.project_id:
+            return
+        self._selected_id = uid
+        if self.panel and not self._selecting:
+            self._selecting = True
+            try:
+                self.panel.select_id(uid)
+            finally:
+                self._selecting = False
 
     def changed(self, updated):
         if self.panel and self.panel.isVisible() and updated.document.project_id == self.project_id:
@@ -49,6 +66,7 @@ class MarkerBrowserButton(QPushButton):
 
     def set_project(self, project_id):
         self.project_id = project_id
+        self._selected_id = ''
         self.setEnabled(bool(project_id))
         if self.panel:
             self.panel.set_view(None)

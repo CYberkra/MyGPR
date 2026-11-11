@@ -259,7 +259,7 @@ class LegacyFieldProjectSession(
 
     def get_metadata(self) -> ProjectMetadata:
         manifest = self._store.manifest
-        return ProjectMetadata(manifest.project_id, manifest.name, manifest.location, manifest.operator, manifest.project_no, manifest.device_model, manifest.coordinate_system, manifest.vertical_datum)
+        return ProjectMetadata(manifest.project_id, manifest.name, manifest.location, manifest.operator, manifest.project_no, manifest.device_model, manifest.coordinate_system, manifest.vertical_datum, manifest.timezone)
 
     def update_metadata(self, **changes: str | None) -> ProjectMetadata:
         with self._lock:

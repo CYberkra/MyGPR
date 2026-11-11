@@ -8,7 +8,7 @@ from PyQt6.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QAbstractItemView, QComboBox, QFileDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
-    QMenu, QMessageBox, QPushButton, QTableView, QVBoxLayout, QWidget,
+    QInputDialog, QMenu, QMessageBox, QPushButton, QTableView, QVBoxLayout, QWidget,
 )
 
 from ui.desktop_backend_facade import EventInterval, MarkerRecord
@@ -263,7 +263,14 @@ class MarkerPanel(QWidget):
             menu.addAction(title, lambda checked=False, page=page: self.navigate.emit(page, rows[0])).setEnabled(bool(rows))
         for extension in ('json', 'csv', 'geojson'):
             menu.addAction('导出 ' + extension.upper(), lambda checked=False, extension=extension: self.export(extension)).setEnabled(bool(self.view))
+        menu.addAction('项目时区…', self.change_timezone).setEnabled(editable)
         menu.exec(self.table.viewport().mapToGlobal(position))
+
+    def change_timezone(self):
+        value, accepted = QInputDialog.getItem(self, '项目时区', 'IANA 时区',
+            list(dict.fromkeys((self.view.timezone, 'Asia/Shanghai', 'UTC'))), 0, True)
+        if accepted:
+            self.request('timezone', {'view': self.view, 'timezone': value.strip()})
 
     def preview(self, mode):
         rows = self._selected_rows()
@@ -304,7 +311,10 @@ class MarkerPanel(QWidget):
             return
         if action == 'save' and self.editor:
             self.editor.accept()
-        if action in ('save', 'delete'):
+        if action in ('save', 'delete', 'timezone'):
+            if self.scope.currentIndex():
+                self.request('project', {'project_id': result.document.project_id})
+                return
             if self.view and self.view.document.line_id == result.document.line_id and self.view.target_id == result.target_id:
                 self.set_view(result)
         elif action == 'project':

@@ -53,8 +53,8 @@ class PermanentDeletionService:
             records = tuple((by_id[t], tuple(session.list_artifacts(t))) for t in targets)
         elif kind == 'artifacts':
             targets, names, records, parents = self._plan_artifacts(session, targets, line_id)
-            document = session.read_markers(line_id)
-            affected = tuple(item for item in document.records if any(
+            document = session.read_marker_dependencies(line_id)
+            affected = tuple(item for item in (document.records if document else ()) if any(
                 anchor and anchor.source_id in {'artifact:' + uid for uid in targets}
                 for anchor in (getattr(item, 'anchor', None), getattr(item, 'start', None), getattr(item, 'end', None))))
             if affected:

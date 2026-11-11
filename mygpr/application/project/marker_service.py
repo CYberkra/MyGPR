@@ -40,6 +40,7 @@ class MarkerView:
     time_basis_confirmed: bool
     timezone: str = 'UTC'
     interpretation_links: tuple[tuple[str, str], ...] = ()
+    processing_history: tuple[dict, ...] = ()
 
     def mapping(self, source_id):
         return read_mapping(self.header, self.trace_metadata, source_id, self.target_id, self.count)
@@ -94,8 +95,12 @@ class MarkerService:
             links = tuple((item.feature_id, item.label) for item in features)
             if interface is not None:
                 links += ((interface.annotation_id, interface.name),)
+            history = tuple({'artifact_id': artifact.artifact_id, 'created_at': artifact.created_at,
+                             'selection': artifact.manifest['params']['marker_selection']}
+                            for artifact in self.projects.list_artifacts(project_id, line_id)
+                            if artifact.manifest.get('params', {}).get('marker_selection'))
             view = MarkerView(document, target, artifact_id, info.shape[1], header, trace, (),
-                              summary.read_only, reliable, document.timezone, links)
+                              summary.read_only, reliable, document.timezone, links, history)
             return replace(view, rows=project_rows(view))
 
     def project_views(self, project_id):
@@ -111,6 +116,10 @@ class MarkerService:
             for anchor in anchors:
                 if anchor and anchor.source_id == view.target_id and anchor.trace >= view.count:
                     raise ValueError('道号超出当前数据范围')
+                if anchor and anchor.source_id == view.document.source_id and anchor.source_id != view.target_id:
+                    info = self.projects.get_dataset_info(view.document.project_id, view.document.line_id)
+                    if anchor.trace >= info.shape[1]:
+                        raise ValueError('道号超出原始数据范围')
             previous = next((item for item in view.document.records if item.uid == record.uid), None)
             existing = set(previous.links) if previous else set()
             available = {uid for uid, _ in view.interpretation_links}
@@ -159,12 +168,14 @@ class MarkerService:
 
 
 def project_rows(view):
-    from mygpr.domain.markers.geometry import reference_geometry, track_index
+    from mygpr.domain.markers.geometry import reference_geometry, projected_geometry, track_index
     rows = []
     track = view.header.get('_marker_track')
     prepared = track_index(track)
+    raw_mapping = view.mapping(view.document.source_id)
     # Cache each version once; 10,000 records must not copy 10,000 mapping arrays.
     mappings = {}
+    geometries = {}
     for record in view.document.records:
         if isinstance(record, MarkerRecord):
             source = record.anchor.source_id if record.anchor else ''
@@ -179,10 +190,17 @@ def project_rows(view):
         status = ('excluded' if record.excluded else 'needs_review'
                   if isinstance(record, EventInterval) and record.review_state == 'needs_review'
                   else projection.status)
+        geometry_key = (projection, getattr(record, 'anchor', None), getattr(record, 'start', None),
+                        getattr(record, 'end', None), getattr(record, 'include_start', True), getattr(record, 'include_end', True))
+        if geometry_key not in geometries:
+            geometries[geometry_key] = (projected_geometry(projection, raw_mapping, track, prepared)
+                                       if view.artifact_id or (isinstance(record, EventInterval) and record.time_start)
+                                       else reference_geometry(record, view.document.source_id, track, prepared))
         rows.append({'uid': record.uid, 'record': record, 'projection': projection,
                      'name': record.name or f'标记 {record.uid[:8]}', 'purpose': record.purpose,
                      'position': position, 'status': STATUS_LABELS[status], 'line_id': view.document.line_id,
-                     'geometry': reference_geometry(record, view.document.source_id, track, prepared)})
+                     'artifact_id': view.artifact_id, 'target_id': view.target_id,
+                     'geometry': geometries[geometry_key]})
     return tuple(rows)
 
 

@@ -14,7 +14,8 @@ def measurement_details(view, record, projection):
     zone = ZoneInfo(view.timezone)
     marked = getattr(record, 'created_at', '')
     if marked:
-        lines.append('采集端标记时间：' + datetime.fromisoformat(marked).astimezone(zone).isoformat(timespec='milliseconds'))
+        label = '采集端标记时间：' if getattr(record, 'origin', '') == 'acquisition' else '项目记录时间：'
+        lines.append(label + datetime.fromisoformat(marked).astimezone(zone).isoformat(timespec='milliseconds'))
     if getattr(record, 'start_marker_id', '') and getattr(record, 'end_marker_id', ''):
         marks = {item.uid: item for item in view.document.markers}
         a, b = marks.get(record.start_marker_id), marks.get(record.end_marker_id)
@@ -36,4 +37,12 @@ def measurement_details(view, record, projection):
     invalid = set(record.links) - available
     if invalid:
         lines.append('失效解释引用：' + ', '.join(sorted(invalid)))
+    for entry in view.processing_history:
+        selected = entry['selection']
+        snapshot = next((item for item in selected['intervals'] if item['uid'] == record.uid), None)
+        if snapshot:
+            action = '保留' if selected['mode'] == 'keep' else '剔除'
+            lines.append(f"已执行：{action} · 区间版本 {snapshot['revision']} · 成果 {entry['artifact_id']}")
+            ranges = '、'.join(f'{a + 1}–{b}' for a, b in selected['ranges'])
+            lines.append(f"输入：{selected['input_artifact_id'] or '原始数据'} · 道范围 {ranges}")
     return lines

@@ -59,6 +59,17 @@ class MarkerPersistenceMixin:
     def _marker_path(self, line_id: str) -> Path:
         return resolve_managed_path(self._store.root, f'metadata/markers/{validate_line_id(line_id)}.json')
 
+    def read_marker_dependencies(self, line_id: str) -> MarkerDocument | None:
+        """Deletion must inspect saved references even when the raw array is unavailable."""
+        with self._lock:
+            path = self._marker_path(line_id)
+            if not path.exists():
+                return None
+            document = MarkerDocument.from_dict(json.loads(path.read_text(encoding='utf-8')))
+            if document.project_id != self.summary.project_id or document.line_id != line_id:
+                raise ValueError('标记文档与项目或测线不匹配')
+            return document
+
     def read_markers(self, line_id: str) -> MarkerDocument:
         with self._lock:
             safe = validate_line_id(line_id)
@@ -66,6 +77,7 @@ class MarkerPersistenceMixin:
             source_id = self.marker_source_id(safe)
             imported = import_markers(self.summary.project_id, safe, source_id,
                                       metadata_value(info.metadata, 'acquisition_markers', ()))
+            imported = replace(imported, timezone=self._store.manifest.timezone)
             if metadata_value(info.metadata, 'marker_source_orientation_valid') is False:
                 imported = replace(imported, markers=tuple(replace(item, anchor=None) for item in imported.markers))
             path = self._marker_path(safe)
@@ -76,7 +88,8 @@ class MarkerPersistenceMixin:
                 raise ValueError('标记文档与项目或测线不匹配')
             ids = {item.uid for item in document.markers}
             additions = tuple(item for item in imported.markers if item.uid not in ids)
-            return replace(document, source_id=source_id, markers=document.markers + additions)
+            return replace(document, source_id=source_id, markers=document.markers + additions,
+                           timezone=self._store.manifest.timezone)
 
     def save_markers(self, document: MarkerDocument, *, expected_revision: int) -> MarkerDocument:
         with self._lock:

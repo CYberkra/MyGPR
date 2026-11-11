@@ -9,6 +9,7 @@ class MarkerChain:
         self.controller = None
         self._project_token = ''
         self._pending_locate = None
+        self._pending_session_ready = False
 
     def connect_all(self):
         co = self.co
@@ -32,10 +33,14 @@ class MarkerChain:
         self.controller.artifact_saved.connect(self._artifact_saved)
         self.controller.changed.connect(lambda _: self.reload_project())
         self.controller.ready.connect(self._project_ready)
+        if co.interpretation_controller is not None:
+            co.interpretation_controller.saved.connect(lambda _: self.reload_project())
+            co.interpretation_controller.session_opened.connect(self._session_opened)
         co.project_controller.project_opened.connect(lambda summary: self._project(summary.project_id))
         co.project_controller.project_closed.connect(lambda: self._project(''))
         co.project_controller.lines_updated.connect(lambda _: self.reload_project())
         co.project_controller.dataset_preview_ready.connect(self._locate_loaded)
+        co.project_controller.artifact_preview_ready.connect(lambda _, bundle: self._locate_loaded(bundle))
 
     def _project(self, project_id):
         self._project_token = ''
@@ -73,6 +78,8 @@ class MarkerChain:
         for item in self.tools:
             if hasattr(item, 'setText'):
                 item.setText(f'标记 {points} · 区间 {intervals}')
+            elif hasattr(item, 'refresh_links'):
+                item.refresh_links(result)
         self.co.page('spatialInterface').set_marker_rows(tuple(row for view in result for row in view.rows))
 
     def select(self, project_id, line_id, uid):
@@ -85,24 +92,43 @@ class MarkerChain:
 
     def navigate(self, page, row):
         if page in ('processing', 'interpretation'):
-            self._pending_locate = (self.co.current_project_id(), row['line_id'], row['uid'], page)
-            self.co.project.on_line_process_requested(row['line_id'])
+            artifact_id = row.get('artifact_id', '')
+            if not self.co.project.on_line_selected(row['line_id']):
+                return
+            self._pending_locate = (self.co.current_project_id(), row['line_id'], row['uid'], page, artifact_id)
+            if page == 'interpretation':
+                self._pending_session_ready = False
+                if not self.co.processing.on_open_session_requested(artifact_id):
+                    self._pending_locate = None
+            elif artifact_id:
+                self.co.project.on_artifact_focus_requested(row['line_id'], artifact_id)
+            else:
+                self.co.goto_page('processingInterface')
         elif page == 'spatial':
             self.co.goto_page('spatialInterface')
             spatial = self.co.page('spatialInterface')
             spatial.locate_marker(row)
 
+    def _session_opened(self, snapshot):
+        pending = self._pending_locate
+        if pending and pending[3] == 'interpretation':
+            self._pending_session_ready = (pending[:2] == (snapshot.project_id, snapshot.line_id)
+                                           and pending[4] == (snapshot.input_artifact_id or ''))
+
     def _locate_loaded(self, bundle):
         pending = self._pending_locate
         view = getattr(bundle, 'marker_view', None)
-        if not pending or not view or pending[:2] != (view.document.project_id, view.document.line_id):
+        if (not pending or not view or pending[:2] != (view.document.project_id, view.document.line_id)
+                or pending[4] != view.artifact_id):
+            return
+        if pending[3] == 'interpretation' and not self._pending_session_ready:
             return
         self._pending_locate = None
         if pending[0] != self.co.current_project_id():
             return
         page = self.co.page(pending[3] + 'Interface')
         if pending[3] == 'processing':
-            page._workspace.open_source('original')
+            page._workspace.open_source(pending[4] or 'original')
             tools = page._workspace.marker_tools
         else:
             page.set_bundle(bundle)
@@ -114,3 +140,4 @@ class MarkerChain:
         if project_id == self.co.current_project_id():
             self.co.project_controller.refresh_artifacts(line_id)
             self.co.project_controller.refresh_all_artifacts()
+            self.reload_project()

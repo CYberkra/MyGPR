@@ -48,9 +48,11 @@ class MarkerEditor(QDialog):
         if view.target_id != view.document.source_id:
             self.source.addItem('当前成果', view.target_id)
         anchor = record.start if isinstance(record, EventInterval) else record.anchor
-        if anchor and self.source.findData(anchor.source_id) < 0:
-            self.source.addItem('历史来源（当前无法定位）', anchor.source_id)
-        self.source.setCurrentIndex(max(0, self.source.findData(anchor.source_id if anchor else view.target_id)))
+        basis = (record.start or record.end) if isinstance(record, EventInterval) else anchor
+        source_id = basis.source_id if basis else (getattr(record, 'time_source_id', '') or view.target_id)
+        if self.source.findData(source_id) < 0:
+            self.source.addItem('历史来源（当前无法定位）', source_id)
+        self.source.setCurrentIndex(self.source.findData(source_id))
         form.addRow('边界来源', self.source)
         self.start = self._spin(anchor)
         form.addRow('起始道' if isinstance(record, EventInterval) else '道号', self.start)
