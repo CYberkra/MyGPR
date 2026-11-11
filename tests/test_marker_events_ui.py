@@ -118,6 +118,25 @@ def test_ten_thousand_records_search_and_cluster_without_truncation(qapp):
     view.close()
 
 
+def test_marker_strip_returns_space_to_plot_when_one_row_is_enough(qapp):
+    view = BScanView()
+    view.resize(850, 450)
+    view.show()
+    bundle = make_preview_bundle(np.ones((12, 20), np.float32))
+    sparse = marker_view(1)
+    dense = marker_view(21)  # Two records share the first trace.
+    heights = []
+    for context in (sparse, dense, sparse):
+        view.set_bundle(replace(bundle, marker_view=context))
+        qapp.processEvents()
+        view.marker_strip.repaint()
+        qapp.processEvents()
+        heights.append(view.marker_strip.height())
+    assert heights[0] < heights[1]
+    assert heights[2] == heights[0]
+    view.close()
+
+
 def test_refresh_preserves_selected_identity_and_updated_guides(qapp):
     context = marker_view(3)
     panel = MarkerPanel()

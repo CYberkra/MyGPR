@@ -155,6 +155,7 @@ class BScanView(BScanMarkerEventsMixin, BScanSelectionMixin, BScanTimeWindowMixi
         self._tvg_dialog = None     # 滑条面板（懒创建，随视图销毁）
         # 全屏宿主（懒创建）+ 几何持久化回调（主窗口注入，避免 view 碰文件）
         self._fullscreen = None
+        self._thumbnail_mode = False
         self._geometry_loader = None
         self._geometry_saver = None
         # A-scan 波形跟随浮窗（懒创建；Phase1 1.1）
@@ -273,7 +274,7 @@ class BScanView(BScanMarkerEventsMixin, BScanSelectionMixin, BScanTimeWindowMixi
         - 截短：**title 会参与 PlotItem 布局的列最小宽**（实测每字符
           ~4px @8pt），长成果名会把右侧色标列推出视口（444px 卡上
           30 字符即出界，实探针）；截到 20 字符（保头尾，中略）后
-          窄栏双图也稳。空标题时 pyqtgraph 自动隐藏。
+          窄栏双图也稳。调用方将空标题传为 None 以收起标题行。
         """
         text = str(title or '')
         if not text:
@@ -328,9 +329,8 @@ class BScanView(BScanMarkerEventsMixin, BScanSelectionMixin, BScanTimeWindowMixi
         self._fullscreen_btn.setToolTip('全屏：在独立窗口中展开（Esc 退出）')
         self._fullscreen_btn.setFixedSize(*constants.TOOL_BTN_COMPACT)
         self._fullscreen_btn.clicked.connect(self.toggle_fullscreen)
-        self._fullscreen_btn.move(max(6, self.width() - self._fullscreen_btn.width() - 10), 10)
-        self._fullscreen_btn.raise_()
-        self._fullscreen_btn.show()
+        self._plot.vb.sigResized.connect(self._layout_fullscreen_controls)
+        self._layout_fullscreen_controls()
         self._qc_marks_action = Action('显示异常道标记', self)
         self._qc_marks_action.setObjectName('showAnomalousTraceMarks')
         self._qc_marks_action.setCheckable(True)
@@ -543,7 +543,7 @@ class BScanView(BScanMarkerEventsMixin, BScanSelectionMixin, BScanTimeWindowMixi
             self._clear_view_selection()
         self._aspect_mode = 'free'
         self._plot.vb.setAspectLocked(False)
-        self._plot.vb.autoRange()
+        self._plot.vb.autoRange(padding=0)
         if notify:
             self._apply_levels_to_render()
             self.sig_aspect_changed.emit('free')
@@ -631,7 +631,7 @@ class BScanView(BScanMarkerEventsMixin, BScanSelectionMixin, BScanTimeWindowMixi
         self._hide_crosshair()
         # 空态引导浮层（评审 P0-1）：替代原"只剩坐标轴 + 图内标题文案"
         self._export_title = ''
-        self._plot.setTitle('')
+        self._plot.setTitle(None)
         self._refresh_axis_state()
         self._empty_overlay.setVisible(True)
         self._set_axes_visible(False)

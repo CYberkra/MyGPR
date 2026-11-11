@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import numpy as np
-from PyQt6.QtCore import QPointF, QRectF, Qt, pyqtSignal
+from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter, QPen
 from PyQt6.QtWidgets import QWidget
 from qfluentwidgets import isDarkTheme
@@ -16,6 +16,7 @@ _PURPOSE_COLOR = {
     '停车等待': 'warning', '外部干扰': 'error', '目标范围': 'success', '现场操作': 'info',
 }
 _LABEL_INSET = 21
+_LANE_HEIGHT = 26
 
 
 def _draw_pill(painter, rect, fill, border):
@@ -41,7 +42,11 @@ class MarkerStrip(QWidget):
         self._first = None
         self._adjusting = ''
         self._drag_side = None
-        self.setFixedHeight(56)
+        self._strip_height = _LANE_HEIGHT + 2
+        self.setFixedHeight(self._strip_height)
+        self._height_timer = QTimer(self)
+        self._height_timer.setSingleShot(True)
+        self._height_timer.timeout.connect(lambda: self.setFixedHeight(self._strip_height))
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAccessibleName('测线标记条')
         self.setMouseTracking(True)
@@ -144,13 +149,18 @@ class MarkerStrip(QWidget):
                 clusters.setdefault(cell, []).append(row['uid'])
                 continue
             lanes[lane].append((lo, lo + width))
-            rect = QRectF(lo, 3 + lane * 26, width, 23)
+            rect = QRectF(lo, 3 + lane * _LANE_HEIGHT, width, 23)
             entries.append((rect, x1, x2, row, interval))
+        self._strip_height = _LANE_HEIGHT * (2 if lanes[1] or clusters else 1) + 2
+        if self.height() != self._strip_height:
+            # A height change resizes the plot and its ViewBox. Defer it until
+            # painting is done so both lanes keep the same x transform.
+            self._height_timer.start(0)
         # Reserve cluster space before drawing labels, so a count never obscures
         # half a name. The selected record owns lane zero and remains visible.
         for cell, ids in sorted(clusters.items()):
             width = min(52, right - left)
-            rect = QRectF(min(left + cell * 56, right - width), 30, width, 22)
+            rect = QRectF(min(left + cell * 56, right - width), _LANE_HEIGHT + 4, width, 22)
             overlapping = [(hit, members) for hit, members in self._hits if hit.intersects(rect)]
             for hit, members in overlapping:
                 rect = rect.united(hit)

@@ -41,6 +41,31 @@ class TestDefaultAspect:
         assert view.aspect_mode() != 'square', (
             'square 占空比仅 43.3%（free 85.9%），不应作为默认')
 
+    def test_loading_full_view_fits_data_and_collapses_blank_title(self, view, qapp):
+        import numpy as np
+
+        # A restored tab can receive its image before the widget has been laid out.
+        view.set_matrix(np.ones((80, 160), dtype=np.float32), 0., 1., title='')
+        view.resize(760, 420)
+        view.show()
+        qapp.processEvents()
+
+        x_range, y_range = view._plot.vb.viewRange()
+        assert x_range == pytest.approx([0., 160.])
+        assert y_range == pytest.approx([0., 80.])
+        assert not view._plot.titleLabel.isVisible()
+
+    def test_restore_tightens_legacy_full_view_and_keeps_zoom(self, view):
+        import numpy as np
+
+        view.set_matrix(np.ones((80, 160), dtype=np.float32), 0., 1.)
+        view.restore_display_state({'range': [[-16., 176.], [-8., 88.]]}, viewport=True)
+        assert view._plot.vb.viewRange() == [[0., 160.], [0., 80.]]
+
+        zoomed = [[20., 85.], [12., 47.]]
+        view.restore_display_state({'range': zoomed}, viewport=True)
+        assert view._plot.vb.viewRange() == zoomed
+
     def test_explicit_default_respected(self, qapp):
         v = BScanView(default_aspect='square')
         assert v.aspect_mode() == 'square'

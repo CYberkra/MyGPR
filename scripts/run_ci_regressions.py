@@ -17,6 +17,7 @@ SUITES = {
         "tests/test_windows_installer_upgrade.py",
     ),
     "bscan": (
+        "tests/test_bscan_aspect.py",
         "tests/test_bscan_global_preferences.py",
         "tests/test_bscan_preference_mirror.py",
         "tests/test_bscan_qc_visibility.py",

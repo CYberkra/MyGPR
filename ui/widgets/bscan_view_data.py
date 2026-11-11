@@ -183,9 +183,9 @@ class BScanViewDataMixin:
         if self.display_mode is not BScanDisplayMode.GRAYSCALE:
             self._apply_display_mode(self.display_mode, reset_view=False)
         # 图内标题只留数据身份（如"测线 L3"）；空标题时 pyqtgraph 自动隐藏。
-        # 8pt 小字（空间瘦身）：身份保留、标题行高约减半，默认字号太占纵向。
+        # 没有图内标题时用 None 收起标题行，避免在已有来源标签下占用空间。
         self._export_title = str(title or '')
-        self._plot.setTitle(self._compact_title_html(self._export_title))
+        self._plot.setTitle(self._compact_title_html(self._export_title) or None)
         self._plot.setLabel('bottom', x_label)
         self._plot.setLabel('left', y_label)
         # 数据换了 → 轴可用性与刻度都要重算（单位切换不动，标签由调用方给定）
@@ -318,6 +318,8 @@ class BScanViewDataMixin:
                         from PyQt6.QtCore import QRectF
                         (left, right), (top, bottom) = ranges
                         self.set_view_selection(QRectF(left, top, right-left, bottom-top))
+                    elif self._is_legacy_startup_range(ranges):
+                        self.fit_to_data(notify=False)
                     else:
                         self._plot.vb.setRange(xRange=ranges[0], yRange=ranges[1], padding=0)
                 except (TypeError, ValueError, IndexError):
@@ -343,6 +345,13 @@ class BScanViewDataMixin:
             self._toggle_crosshair(bool(state.get('crosshair', True)))
         except (TypeError, ValueError, KeyError, AttributeError):
             pass
+
+    def _is_legacy_startup_range(self, ranges) -> bool:
+        """Recognize the old free-fit snapshot with exactly 10% padding on both axes."""
+        if self.aspect_mode() != 'free' or not self._image_shape:
+            return False
+        bounds = [(-.1 * size, 1.1 * size) for size in self._image_shape]
+        return bool(np.allclose(ranges, bounds, rtol=1e-9, atol=1e-9))
 
     def set_global_display_preferences(self, state: dict) -> None:
         """Host-supplied preferences take precedence over old line/tab snapshots."""
