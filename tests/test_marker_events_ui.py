@@ -60,3 +60,38 @@ def test_open_interval_and_duplicate_points_survive_list_selection(qapp):
     assert panel._selected_rows()[0]['uid'] == 'm2'
     assert context.rows[-1]['status'] == '未闭合'
     panel.close()
+
+
+def test_editor_previews_boundary_inclusion_and_keeps_failed_draft(qapp):
+    from ui.widgets.marker_editor import MarkerEditor
+    context = marker_view(2)
+    event = EventInterval(start=context.anchor(3), end=context.anchor(7))
+    editor = MarkerEditor(context, event)
+    assert '5 道' in editor.range_preview.text()
+    editor.inc_end.setChecked(False)
+    assert '4 道' in editor.range_preview.text()
+    editor.note.setPlainText('保存失败后不能丢失')
+    saved = QSignalSpy(editor.save_requested)
+    editor._save()
+    assert len(saved) == 1 and not saved[0][0].include_end
+    editor.failed('写入失败')
+    assert editor.note.toPlainText() == '保存失败后不能丢失'
+    assert editor.buttons.isEnabled()
+    editor.close()
+
+
+def test_ten_thousand_overlapping_intervals_remain_in_virtualized_cluster(qapp):
+    from ui.widgets.marker_cluster import MarkerCluster
+    context = marker_view(0)
+    document = replace(context.document, intervals=tuple(EventInterval(name=f'区间{i}',
+        start=context.anchor(i % 10), end=context.anchor(i % 10 + 3)) for i in range(10000)))
+    context = replace(context, document=document)
+    rows = project_rows(context)
+    popup = MarkerCluster(rows)
+    assert popup.model.rowCount() == 10000
+    popup._filter('区间9999')
+    assert popup.proxy.rowCount() == 1
+    selected = QSignalSpy(popup.selected)
+    popup._choose(popup.proxy.index(0, 0))
+    assert selected[0][0] == document.intervals[9999].uid
+    popup.close()

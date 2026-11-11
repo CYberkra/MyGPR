@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 from PyQt6.QtCore import QPointF, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter, QPen
-from PyQt6.QtWidgets import QMenu, QWidget
+from PyQt6.QtWidgets import QWidget
 from qfluentwidgets import isDarkTheme
 
 from ui.design_tokens import color
@@ -168,12 +168,11 @@ class MarkerStrip(QWidget):
             if len(ids) == 1:
                 self.selected.emit(ids[0])
             else:
-                menu = QMenu(self)
+                from ui.widgets.marker_cluster import MarkerCluster
                 lookup = {row['uid']: row for row in self.rows}
-                for uid in ids:
-                    menu.addAction(lookup[uid]['name'] + ' · ' + lookup[uid]['position'],
-                                   lambda checked=False, uid=uid: self.selected.emit(uid))
-                menu.exec(event.globalPosition().toPoint())
+                self._cluster = MarkerCluster(tuple(lookup[uid] for uid in ids), self)
+                self._cluster.selected.connect(self.selected)
+                self._cluster.show()
             return
 
     def mouseReleaseEvent(self, event):
@@ -190,6 +189,17 @@ class MarkerStrip(QWidget):
             if rect.contains(event.position()) and len(ids) == 1:
                 self.edit_requested.emit(ids[0])
                 return
+
+    def mouseMoveEvent(self, event):
+        if self._creating or self._adjusting:
+            return
+        for rect, ids in self._hits:
+            if rect.contains(event.position()):
+                row = next((row for row in self.rows if row['uid'] == ids[0]), None)
+                self.setToolTip(f'{len(ids)} 条记录，点击展开' if len(ids) > 1 else
+                               f"{row['name']} · {row['position']} · {row['status']}")
+                return
+        self.setToolTip('')
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:

@@ -199,7 +199,7 @@ class ProjectProcessingService:
         from mygpr.domain.markers.continuity import require_continuity
         for step in pipeline.steps:
             if step.enabled:
-                require_continuity(SimpleNamespace(method_id=step.method_id, trace_metadata=trace_metadata))
+                require_continuity(SimpleNamespace(method_id=step.method_id, trace_metadata=trace_metadata, header_info=header))
         return self._processing.execute_pipeline_blocks(
             source, pipeline, header_info=header, trace_metadata=trace_metadata,
             consumer=save_result,

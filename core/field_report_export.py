@@ -574,6 +574,7 @@ def generate_project_report_package(
             figure_paths = _write_report_figures(
                 store,
                 figures_dir,
+                marker_documents=selected_markers,
                 line_ids={line.line_id for line in lines} if section_flags["include_bscan_images"] else set(),
                 include_plan_map=section_flags["include_spatial_results"] and not selected_line_ids,
                 cancel_checker=cancel_checker,

@@ -5,7 +5,7 @@ from datetime import datetime
 import numpy as np
 import pytest
 
-from mygpr.domain.markers.models import MarkerAnchor, MarkerDocument, EventInterval
+from mygpr.domain.markers.models import MarkerAnchor, MarkerDocument, MarkerRecord, EventInterval
 from mygpr.domain.markers.operations import import_markers, put_record, remove_record
 from mygpr.domain.markers.ranges import interval_indices, selection_indices
 from mygpr.domain.markers.mapping import TraceMapping, project_anchor
@@ -105,3 +105,45 @@ def test_resampling_is_explicit_and_does_not_interpolate_identity():
     assert projection.status == 'interpolated'
     assert projection.positions == (0.5,)
     assert project_anchor(MarkerAnchor('foreign', 1), mapping).status == 'unmapped'
+
+
+def test_time_event_does_not_rebind_replaced_source_or_accept_missing_source():
+    item = EventInterval(time_source_id='old', time_start='2026-11-11T00:00:00Z', time_end='2026-11-11T00:00:01Z')
+    mapping = TraceMapping('old', 'new', np.arange(3), np.zeros(3), 'unknown')
+    for record in (item, replace(item, time_source_id='')):
+        with pytest.raises(ValueError, match='时间'):
+            interval_indices(record, mapping, timestamps_s=np.arange(3), time_basis_confirmed=True)
+
+
+def test_new_names_stay_stable_and_referenced_deletion_is_rejected():
+    doc = put_record(document(), MarkerRecord(anchor=MarkerAnchor('raw:one', 3)))
+    marker = doc.markers[-1]
+    assert marker.name.startswith('标记 ')
+    interval = EventInterval(start=marker.anchor, end=marker.anchor,
+                             start_marker_id=marker.uid, start_marker_revision=marker.revision)
+    doc = put_record(doc, interval)
+    with pytest.raises(ValueError, match='引用'):
+        remove_record(doc, marker.uid)
+    doc = remove_record(doc, interval.uid)
+    assert remove_record(doc, marker.uid).markers == document().markers
+
+
+def test_native_selection_ignores_qc_mask_and_preserves_nonuniform_distances():
+    from mygpr.domain.processing.models import ProcessingRequest
+    from mygpr.infrastructure.processing.native_adapter import NativeProcessingExecutor
+    from mygpr.domain.markers.mapping import SEGMENT_KEY
+    data = np.arange(40, dtype=np.float32).reshape(5, 8)
+    request = ProcessingRequest(data, 'trace_range_select', {'ranges': [[2, 4], [3, 5]], 'mode': 'exclude'},
+        {'distance_axis_m': [0., .5, 1., 1., 2., 4., 5., 8.]},
+        {'bad_trace_mask': np.ones(8, dtype=np.int8)})
+    result = NativeProcessingExecutor().execute(request)
+    np.testing.assert_array_equal(result.data, data[:, [0, 1, 5, 6, 7]])
+    np.testing.assert_array_equal(result.header_info['distance_axis_m'], [0., .5, 4., 5., 8.])
+    np.testing.assert_array_equal(result.trace_metadata[SEGMENT_KEY], [0, 0, 1, 1, 1])
+
+
+@pytest.mark.parametrize('ranges', [[], [[-1, 1]], [[0, 9]], [[1, 1]], [[1., 2]], [[True, 2]]])
+def test_native_selection_rejects_invalid_ranges(ranges):
+    from mygpr.infrastructure.processing.algorithms.extended.trace_range_select import native_trace_range_select
+    with pytest.raises(ValueError):
+        native_trace_range_select(np.ones((4, 8)), {'ranges': ranges})

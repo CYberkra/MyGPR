@@ -84,7 +84,7 @@ def _write_xlsx_report(
     wb.save(tmp)
     tmp.replace(path)
 
-def _write_report_figures(store: Any, figures_dir: Path, *, line_ids: set[str] | None = None, include_plan_map: bool = True, cancel_checker=None, progress_callback=None) -> list[Path]:
+def _write_report_figures(store: Any, figures_dir: Path, *, line_ids: set[str] | None = None, include_plan_map: bool = True, cancel_checker=None, progress_callback=None, marker_documents=()) -> list[Path]:
     import matplotlib
     matplotlib.use("Agg")   # 无头交付：绘图不拉入 Qt backend（Qt-import 隔离红线）
     import matplotlib.pyplot as plt
@@ -148,6 +148,8 @@ def _write_report_figures(store: Any, figures_dir: Path, *, line_ids: set[str] |
             _LOGGER.warning("基覆界面注解加载失败（图件继续生成）：%s", line.line_id)
         ax.set_title(f"{line.line_id} 原始 B-scan 与基覆界面")
         ax.set_xlabel("距离 (m)"); ax.set_ylabel("深度 (m)")
+        from core.report_marker_figures import draw_marker_strip
+        draw_marker_strip(ax, next((doc for doc in marker_documents if doc['line_id'] == line.line_id), None), dataset)
         out=figures_dir/f"{line.line_id}_basal_interface.png"; fig.tight_layout(); fig.savefig(out,bbox_inches="tight"); plt.close(fig); outputs.append(out)
         if progress_callback is not None:
             progress_callback(index, max(len(lines),1), f"生成图件 {line.line_id}")

@@ -38,6 +38,7 @@ SUITES = {
     ),
     "processing": (
         "tests/test_marker_events.py",
+        "tests/test_marker_events_delivery.py",
         "tests/test_marker_events_project.py",
         "tests/test_marker_events_ui.py",
         "tests/test_file_tree.py",
