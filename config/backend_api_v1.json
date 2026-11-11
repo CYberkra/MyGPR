@@ -8,6 +8,7 @@
     "change_error_code_semantics": false
   },
   "facade_methods": {
+    "submit_marker_selection": "(self, preview)",
     "create_default": "(*, max_workers: int = 2) -> \"MyGPRBackend\"",
     "submit_processing": "(self, request: ProcessingRequest, *, title: str | None = None) -> str",
     "submit_pipeline": "(self, data: np.ndarray, pipeline: PipelineDefinition, *, header_info: dict[str, Any] | None = None, trace_metadata: dict[str, np.ndarray] | None = None, title: str | None = None) -> str",

@@ -4,10 +4,10 @@ from __future__ import annotations
 from dataclasses import asdict, replace
 import json
 
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QLineEdit,
-    QPlainTextEdit, QScrollArea, QSpinBox, QVBoxLayout, QWidget,
+    QPlainTextEdit, QScrollArea, QSpinBox, QVBoxLayout, QWidget, QListWidget, QListWidgetItem,
 )
 
 from ui.desktop_backend_facade import EventInterval, MarkerAnchor, MarkerRecord, PURPOSES
@@ -79,8 +79,7 @@ class MarkerEditor(QDialog):
         elif record.origin == 'acquisition':
             self.start.setEnabled(False)
             self.source.setEnabled(False)
-        self.links = QLineEdit(', '.join(record.links), body)
-        self.links.setPlaceholderText('关联解释对象 ID，逗号分隔')
+        self.links = self._links(body)
         form.addRow('解释关联', self.links)
         details = self._details(view, record)
         self.details = QPlainTextEdit(details, body)
@@ -100,6 +99,19 @@ class MarkerEditor(QDialog):
         self.buttons.rejected.connect(self.reject)
         self.buttons.button(QDialogButtonBox.StandardButton.Save).setEnabled(not view.read_only)
         layout.addWidget(self.buttons)
+
+    def _links(self, parent):
+        widget = QListWidget(parent)
+        widget.setMaximumHeight(90)
+        available = dict(self.view.interpretation_links)
+        for uid in self.record.links:
+            available.setdefault(uid, '失效引用 ' + uid)
+        for uid, label in available.items():
+            item = QListWidgetItem(label, widget)
+            item.setData(Qt.ItemDataRole.UserRole, uid)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked if uid in self.record.links else Qt.CheckState.Unchecked)
+        return widget
 
     def _spin(self, anchor):
         widget = QSpinBox(self)
@@ -124,7 +136,8 @@ class MarkerEditor(QDialog):
         try:
             changes = dict(name=self.name.text().strip(), purpose=self.purpose.currentText().strip() or '其他',
                 evidence=self.evidence.currentText().strip(), note=self.note.toPlainText(),
-                excluded=self.excluded.isChecked(), links=tuple(item.strip() for item in self.links.text().split(',') if item.strip()))
+                excluded=self.excluded.isChecked(), links=tuple(self.links.item(i).data(Qt.ItemDataRole.UserRole)
+                    for i in range(self.links.count()) if self.links.item(i).checkState() == Qt.CheckState.Checked))
             if isinstance(self.record, EventInterval):
                 changes.update(start=self._anchor(self.start), end=self._anchor(self.end),
                     include_start=self.inc_start.isChecked(), include_end=self.inc_end.isChecked(),
@@ -176,4 +189,6 @@ class MarkerEditor(QDialog):
             text.extend(['原始采集记录：', json.dumps(record.original, ensure_ascii=False, indent=2)])
         if isinstance(record, EventInterval):
             text.append('边界快照：' + json.dumps(asdict(record), ensure_ascii=False, indent=2))
+        from ui.widgets.marker_details import measurement_details
+        text.extend(measurement_details(view, record, projection))
         return '\n'.join(text)

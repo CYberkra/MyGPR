@@ -107,7 +107,7 @@ def test_discontinuity_blocks_horizontal_algorithms_but_per_trace_gain_preserves
     event = save_event(backend, pid, 3, 4)
     view = backend.markers.view(pid, 'L01')
     artifact = backend.markers.execute(backend.markers.preview(view, [event.uid], 'exclude'), context=ExecutionContext.null())
-    pipeline = PipelineDefinition(name='增益', steps=[PipelineStep('amplitude_scale', {'factor': 2.})])
+    pipeline = PipelineDefinition(name='增益', steps=[PipelineStep('amplitude_scale', {'mode': 'constant', 'scale': 2.})])
     gain = backend.project_processing.execute_pipeline(pid, 'L01', pipeline,
                 input_artifact_id=artifact.artifact_id, save_intermediates=True)
     actual = backend.projects.read_artifact_dataset(pid, 'L01', gain.artifact_id)

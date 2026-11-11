@@ -1571,5 +1571,35 @@
       "native",
       "ndarray"
     ]
+  },
+  "trace_range_select": {
+    "name": "事件区间保留／剔除",
+    "category": "quality_control",
+    "auto_tune_enabled": false,
+    "auto_tune_family": "",
+    "auto_tune_stage": "",
+    "visibility": "hidden",
+    "implementation_version": "native-1.0",
+    "parameter_schema": {
+      "mode": {
+        "type": "str",
+        "default": "keep",
+        "choices": [
+          "keep",
+          "exclude"
+        ]
+      },
+      "ranges": {
+        "type": "ranges",
+        "default": []
+      }
+    },
+    "capabilities": [
+      "cancellable",
+      "global_transform",
+      "loaded_global",
+      "native",
+      "ndarray"
+    ]
   }
 }

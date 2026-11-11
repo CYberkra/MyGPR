@@ -1,10 +1,16 @@
 """Along-track reference geometry only; no subsurface outline or depth."""
 import math
+from bisect import bisect_left
 
 from mygpr.domain.markers.models import EventInterval
 
 
-def reference_geometry(record, source_id, track):
+def track_index(track):
+    points = sorted(track.points, key=lambda point: point.trace_index) if track else ()
+    return tuple(point.trace_index for point in points), points
+
+
+def reference_geometry(record, source_id, track, prepared=None):
     if track is None or not track.coordinate_system or track.source == 'trajectory file':
         # Legacy trajectory files can have inferred ordinal indices. Do not use them as trace anchors.
         return None
@@ -21,7 +27,8 @@ def reference_geometry(record, source_id, track):
     parts: list[list[list[float]]] = []
     current: list[list[float]] = []
     previous = -2
-    for point in track.points:
+    indices, points = prepared if prepared is not None else track_index(track)
+    for point in points[bisect_left(indices, start):bisect_left(indices, stop)]:
         index = point.trace_index
         if not start <= index < stop or not math.isfinite(point.x) or not math.isfinite(point.y):
             continue

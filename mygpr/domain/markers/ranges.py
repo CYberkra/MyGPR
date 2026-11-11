@@ -24,7 +24,8 @@ def interval_indices(interval: EventInterval, mapping: TraceMapping, *,
             raise ValueError('区间无法映射到当前数据版本')
         low, high = float(interval.start.trace), float(interval.end.trace)
     else:
-        if interval.time_source_id and interval.time_source_id not in (mapping.source_id, mapping.target_id):
+        if not interval.time_source_id or (interval.time_source_id != mapping.target_id
+                and (interval.time_source_id != mapping.source_id or mapping.kind == 'unknown')):
             raise ValueError('区间采集时间不属于当前数据版本')
         values = np.asarray(timestamps_s, dtype=np.float64)
         if (not time_basis_confirmed or values.shape != (count,)
@@ -32,9 +33,10 @@ def interval_indices(interval: EventInterval, mapping: TraceMapping, *,
             raise ValueError('采集时间缺失、回跳或时间基准未确认，请按道号选择')
         low = datetime.fromisoformat(interval.time_start).timestamp()
         high = datetime.fromisoformat(interval.time_end).timestamp()
-    left = values >= low if interval.include_start else values > low
-    right = values <= high if interval.include_end else values < high
-    return np.flatnonzero(left & right)
+    # All accepted coordinate arrays are monotonic. Search avoids an O(N) mask per record.
+    left = np.searchsorted(values, low, side='left' if interval.include_start else 'right')
+    right = np.searchsorted(values, high, side='right' if interval.include_end else 'left')
+    return np.arange(left, max(left, right), dtype=np.int64)
 
 
 def selection_indices(count: int, groups, mode: str) -> np.ndarray:

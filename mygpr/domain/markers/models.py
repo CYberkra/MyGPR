@@ -18,7 +18,7 @@ def utc_time(value: str) -> str:
     stamp = datetime.fromisoformat(value.replace('Z', '+00:00'))
     if stamp.tzinfo is None:
         raise ValueError('采集时间必须包含时区')
-    return stamp.astimezone(timezone.utc).isoformat()
+    return stamp.astimezone(timezone.utc).isoformat(timespec='microseconds')
 
 
 def _text(value: str, limit: int, title: str) -> None:
@@ -160,7 +160,9 @@ class MarkerDocument:
         return (*self.markers, *self.intervals)
 
     def to_dict(self) -> dict[str, Any]:
-        return {'schema': MARKER_SCHEMA, **asdict(self)}
+        return {'schema': MARKER_SCHEMA, **asdict(self),
+                'markers': [asdict(item) for item in self.markers],
+                'intervals': [asdict(item) for item in self.intervals]}
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> MarkerDocument:

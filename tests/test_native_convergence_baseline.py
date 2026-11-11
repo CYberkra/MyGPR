@@ -72,6 +72,7 @@ def _legacy_kernel(request: ProcessingRequest) -> np.ndarray:
 # bitwise_kernel     = 与历史 CPU kernel 逐位一致
 # determinism_contract = 实验性方法，仅要求确定性/预算契约（无 legacy 对照）
 EQUIVALENCE_EVIDENCE: dict[str, tuple[str, str]] = {
+    "trace_range_select": ("determinism_contract", "test_marker_events_project.py"),
     "gaussian_smoothing": ("direct_comparison", "test_image_denoising.py"),
     "non_local_means": ("direct_comparison", "test_image_denoising.py"),
     "manual_gain": ("golden_digest", "test_manual_curve_gain.py"),

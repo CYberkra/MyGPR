@@ -20,6 +20,9 @@ class MarkerController(QObject):
         self._completed.connect(self._deliver)
 
     def request(self, action, payload):
+        if action == 'export' and payload['format'] == 'geojson':
+            from ui.widgets.marker_geographic import prepare_geographic_views
+            payload = {**payload, 'views': prepare_geographic_views(payload['views'])}
         backend = getattr(self.backend_controller, 'backend', None)
         if backend is None:
             self.ready.emit(payload['token'], None, '后端尚未就绪')

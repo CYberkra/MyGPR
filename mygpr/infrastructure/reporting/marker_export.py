@@ -38,9 +38,10 @@ def export_views(views, path, format_name):
         count = sum(len(view.rows) for view in views)
         omitted = 0
     elif format_name == 'geojson':
+        from mygpr.domain.markers.geographic import geographic_rows
         features, omitted = [], 0
         for view in views:
-            for row in view.rows:
+            for row in geographic_rows(view.rows, _to_wgs84):
                 feature = geojson_feature(row, view.document.line_id)
                 if feature:
                     features.append(feature)
@@ -58,6 +59,16 @@ def export_views(views, path, format_name):
 def _cell(value):
     text = str(value)
     return "'" + text if text.lstrip().startswith(('=', '+', '-', '@', '\t', '\r')) else text
+
+
+def _to_wgs84(crs, xs, ys):
+    if crs.upper().replace(' ', '') in ('EPSG:4326', 'WGS84', 'WGS1984'):
+        return xs, ys
+    import threading
+    if threading.current_thread() is not threading.main_thread():
+        raise RuntimeError('投影坐标须在主线程转换后导出')
+    from pyproj import Transformer
+    return Transformer.from_crs(crs, 'EPSG:4326', always_xy=True).transform(xs, ys, errcheck=True)
 
 
 def geojson_feature(row, line_id):

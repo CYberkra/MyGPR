@@ -10,6 +10,7 @@
 raw core / domain 类型只在内部翻译后通过 DTO 返回。
 """
 from __future__ import annotations
+from mygpr.domain.markers.geographic import geographic_rows as geographic_rows
 
 import logging
 from typing import Any, Mapping

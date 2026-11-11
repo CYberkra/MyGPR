@@ -20,7 +20,9 @@ def update_mapping(request, output, metadata, header, trace_metadata):
     local = TraceMapping('', '', np.arange(request.data.shape[1], dtype=float),
                          request.trace_metadata.get(SEGMENT_KEY, np.zeros(request.data.shape[1], dtype=np.int64)), 'identity')
     transformed = _transform(local, request, output, metadata, trace_metadata, AXIS_TRANSFORM_BY_METHOD)
-    if transformed is not None:
+    if transformed is not None and (maps or SEGMENT_KEY in request.trace_metadata
+                                     or request.method_id == 'trace_range_select'
+                                     or request.method_id == 'trace_qc' and metadata.get('mode') == 'remove'):
         trace_metadata[SEGMENT_KEY] = transformed.segments.copy()
     updated = {}
     for source_id, descriptor in maps.items():

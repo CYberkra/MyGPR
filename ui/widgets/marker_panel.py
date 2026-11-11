@@ -259,7 +259,7 @@ class MarkerPanel(QWidget):
                 editable and bool(rows) and all(isinstance(row['record'], EventInterval) for row in rows))
         menu.addAction('删除项目记录', self.delete_selected).setEnabled(editable and bool(rows))
         menu.addSeparator()
-        for title, page in [('在处理页查看', 'processing'), ('在空间页定位', 'spatial')]:
+        for title, page in [('在处理页查看', 'processing'), ('在解释页查看', 'interpretation'), ('在空间页定位', 'spatial')]:
             menu.addAction(title, lambda checked=False, page=page: self.navigate.emit(page, rows[0])).setEnabled(bool(rows))
         for extension in ('json', 'csv', 'geojson'):
             menu.addAction('导出 ' + extension.upper(), lambda checked=False, extension=extension: self.export(extension)).setEnabled(bool(self.view))

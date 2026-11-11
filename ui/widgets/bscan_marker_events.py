@@ -2,6 +2,7 @@
 import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtGui import QColor
+from PyQt6.QtCore import Qt
 from qfluentwidgets import isDarkTheme
 
 from ui.design_tokens import color
@@ -12,6 +13,7 @@ class BScanMarkerEventsMixin:
     def init_marker_events(self, layout):
         self._marker_view = None
         self._event_guides = []
+        self._gap_guides = []
         self.marker_strip = MarkerStrip(self)
         layout.addWidget(self.marker_strip)
         self.marker_strip.selected.connect(self.select_event_marker)
@@ -19,6 +21,18 @@ class BScanMarkerEventsMixin:
     def set_marker_view(self, view):
         self._marker_view = view
         self._clear_event_guides()
+        for item in self._gap_guides:
+            self._plot.removeItem(item)
+        self._gap_guides = []
+        if view:
+            segments = view.trace_metadata.get('_marker_segment', ())
+            for index in np.flatnonzero(np.diff(segments) != 0) + 1:
+                x = (self.marker_strip.display_x(index - 1) + self.marker_strip.display_x(index)) / 2
+                gap = pg.InfiniteLine(x, angle=90, movable=False,
+                    pen=pg.mkPen(color('warning', isDarkTheme()), width=2, style=Qt.PenStyle.DashLine))
+                gap.setToolTip('不连续道段边界')
+                self._plot.addItem(gap, ignoreBounds=True)
+                self._gap_guides.append(gap)
         self.marker_strip.set_rows(view.rows if view else ())
         if view is not None:
             self._marker_pins.hide()
@@ -56,4 +70,7 @@ class BScanMarkerEventsMixin:
             x = self.marker_strip.display_x(points[0])
             self._reveal_marker(x)
             self._sync_ascan_to_marker(int(np.floor(x)))
+            if self._ascan_follow and self._ascan_popup is not None:
+                self._ascan_popup.setWindowTitle('A-Scan 当前成果道' +
+                    ('（标记为插值定位，波形为邻近成果列）' if projection.status == 'interpolated' else ''))
         self.sig_event_marker_selected.emit(uid)

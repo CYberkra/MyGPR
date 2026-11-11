@@ -61,7 +61,7 @@ def test_boundary_inclusion(include_start, include_end, expected):
 
 
 def test_no_acquisition_during_wait_does_not_snap_to_neighbour():
-    item = EventInterval(uid='e', time_start='2026-11-11T00:00:02+00:00',
+    item = EventInterval(uid='e', time_source_id='raw', time_start='2026-11-11T00:00:02+00:00',
                          time_end='2026-11-11T00:00:05+00:00')
     origin = datetime.fromisoformat('2026-11-11T00:00:00+00:00').timestamp()
     times = origin + np.array([0, 1, 6], dtype=np.float64)
@@ -73,7 +73,7 @@ def test_no_acquisition_during_wait_does_not_snap_to_neighbour():
 
 
 def test_time_reversal_and_open_interval_refuse_processing():
-    item = EventInterval(uid='e', time_start='2026-11-11T00:00:02Z',
+    item = EventInterval(uid='e', time_source_id='raw', time_start='2026-11-11T00:00:02Z',
                          time_end='2026-11-11T00:00:05Z')
     with pytest.raises(ValueError, match='时间'):
         interval_indices(item, TraceMapping.identity('raw', 3),

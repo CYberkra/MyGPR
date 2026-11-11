@@ -404,9 +404,9 @@ def test_split_group_display_and_fit_buttons_target_only_their_own_view(workspac
 def test_acquisition_marker_button_layout_availability_and_toggle(workspace, qapp):
     group = workspace.group_widget(workspace.group_ids()[0])
     header = group.display_settings.parentWidget().layout().itemAt(0).layout()
-    assert header.indexOf(group.markers_visibility) == header.indexOf(group.display_settings) - 1
+    assert header.indexOf(group.marker_menu) == header.indexOf(group.display_settings) - 1
     qapp.processEvents()
-    assert group.markers_visibility.geometry().center().y() == group.display_settings.geometry().center().y()
+    assert group.marker_menu.geometry().center().y() == group.display_settings.geometry().center().y()
     assert not group.markers_visibility.isEnabled()
     workspace.set_sources([dict(key='A', title='A', bundle=bundle())])
     workspace.open_source('A')

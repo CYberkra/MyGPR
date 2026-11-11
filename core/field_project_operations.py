@@ -738,6 +738,7 @@ def delete_project_line(store: FieldProjectStore, line_id: str, *, reason: str =
                       store.storage.line_artifacts_dir(safe_line_id)))
     paths.extend(sorted((store.root / "targets").glob(f"{safe_line_id}_*")))
     paths.append(store.root / 'targets' / 'history' / safe_line_id)
+    paths.append(store.root / 'metadata' / 'markers' / f'{safe_line_id}.json')
     spatial_dir = store.root / "spatial"
     if spatial_dir.exists():
         paths.extend(sorted(spatial_dir.glob(f"{safe_line_id}_*")))

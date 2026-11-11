@@ -15,7 +15,7 @@ def _public_method_ids() -> set[str]:
 
 def test_every_public_processing_method_has_a_native_backend() -> None:
     public_methods = _public_method_ids()
-    assert public_methods == set(NATIVE_ALGORITHMS) - {'trace_qc', 'rpca_background'}
+    assert public_methods == set(NATIVE_ALGORITHMS) - {'trace_qc', 'rpca_background', 'trace_range_select'}
 
 
 def test_native_executor_supports_the_complete_public_catalog() -> None:

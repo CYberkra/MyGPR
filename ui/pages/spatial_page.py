@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+from ui.pages.spatial_markers import SpatialMarkersMixin
 
 import numpy as np
 from PyQt6.QtCore import QObject, QRunnable, Qt, QThreadPool, pyqtSignal
@@ -96,7 +97,7 @@ class _DemLoadWorker(QRunnable):
             self._signals.finished.emit(self._generation, dem, self._path, '')
 
 
-class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidget):
+class SpatialPage(SpatialMarkersMixin, SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidget):
     """空间信息页面。"""
 
     current_line_requested = pyqtSignal(str)    # 设为当前测线（line_id）
@@ -560,23 +561,6 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
         self._left_panel.set_collapsed(collapse)
         self._right_panel.set_collapsed(collapse)
 
-    def set_marker_rows(self, rows):
-        from ui.widgets.marker_map_overlay import MarkerMapOverlay
-        if not hasattr(self, '_marker_overlay'):
-            self._marker_overlay = MarkerMapOverlay(self._map_view)
-            self._marker_overlay.selected.connect(lambda line_id, uid:
-                self.marker_browser.selection_changed.emit(self.marker_browser.project_id, line_id, uid))
-        self._marker_overlay.set_rows(rows)
-
-    def locate_marker(self, row):
-        self.set_marker_rows([row])
-        if not self._marker_overlay.select(row['uid'], locate=True):
-            self._crs_label.setText('该记录无有效空间位置；保留在标记列表中')
-
-    def select_marker(self, uid):
-        if hasattr(self, '_marker_overlay'):
-            self._marker_overlay.select(uid)
-
     def set_tracks(self, tracks: list) -> None:
         """空间轨迹列表（SpatialTrack，鸭子类型取属性）。"""
         self._line_context.close()
@@ -926,6 +910,8 @@ class SpatialPage(SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidg
             return
         source = str(self._basemap_combo.itemData(index) or DEFAULT_TILE_SOURCE)
         self._map_view.set_source(source)
+        if hasattr(self, '_marker_overlay'):
+            self._marker_overlay.set_rows(self._marker_overlay.rows)
         self._persist_setting('spatial_basemap_source', source)
 
     def _on_prefetch_clicked(self) -> None:

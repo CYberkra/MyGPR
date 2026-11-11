@@ -6,6 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 from uuid import NAMESPACE_URL, uuid5
 from typing import Any
+from collections.abc import Mapping
 
 from core.field_project_models import validate_line_id
 from core.security_paths import resolve_managed_path
@@ -15,7 +16,7 @@ from mygpr.domain.markers.operations import import_markers, validate_transition
 
 def metadata_value(metadata, key, default=None):
     current = metadata
-    while isinstance(current, dict):
+    while isinstance(current, Mapping):
         if key in current:
             return current[key]
         current = current.get('metadata')

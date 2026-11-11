@@ -14,7 +14,8 @@ from mygpr.domain.markers.ranges import interval_indices, selection_indices
 
 
 def metadata_value(metadata, key, default=None):
-    while isinstance(metadata, dict):
+    from collections.abc import Mapping
+    while isinstance(metadata, Mapping):
         if key in metadata:
             return metadata[key]
         metadata = metadata.get('metadata')
@@ -38,6 +39,7 @@ class MarkerView:
     read_only: bool
     time_basis_confirmed: bool
     timezone: str = 'UTC'
+    interpretation_links: tuple[tuple[str, str], ...] = ()
 
     def mapping(self, source_id):
         return read_mapping(self.header, self.trace_metadata, source_id, self.target_id, self.count)
@@ -87,8 +89,13 @@ class MarkerService:
             reliable = bool(utc and times is not None and np.shape(times) == (info.shape[1],)
                             and np.all(np.isfinite(times)) and np.all(np.diff(times) >= 0))
             summary = self.projects.get_summary(project_id)
+            features = self.projects.list_interpretation_features(project_id, line_id)
+            interface = self.projects.load_interface_annotation(project_id, line_id, create=False)
+            links = tuple((item.feature_id, item.label) for item in features)
+            if interface is not None:
+                links += ((interface.annotation_id, interface.name),)
             view = MarkerView(document, target, artifact_id, info.shape[1], header, trace, (),
-                              summary.read_only, reliable, document.timezone)
+                              summary.read_only, reliable, document.timezone, links)
             return replace(view, rows=project_rows(view))
 
     def project_views(self, project_id):
@@ -97,6 +104,18 @@ class MarkerService:
                      for line in self.projects.list_lines(project_id) if line.trace_count > 0)
 
     def edit(self, view, record=None, *, delete_id=''):
+        if view.read_only:
+            raise ValueError('项目只读，不能编辑标记')
+        if record is not None:
+            anchors = (record.start, record.end) if isinstance(record, EventInterval) else (record.anchor,)
+            for anchor in anchors:
+                if anchor and anchor.source_id == view.target_id and anchor.trace >= view.count:
+                    raise ValueError('道号超出当前数据范围')
+            previous = next((item for item in view.document.records if item.uid == record.uid), None)
+            existing = set(previous.links) if previous else set()
+            available = {uid for uid, _ in view.interpretation_links}
+            if set(record.links) - available - existing:
+                raise ValueError('关联解释对象不存在，请重新加载列表')
         document = (remove_record(view.document, delete_id) if delete_id
                     else put_record(view.document, record))
         return self.projects.save_markers(document.project_id, document,
@@ -140,8 +159,10 @@ class MarkerService:
 
 
 def project_rows(view):
-    from mygpr.domain.markers.geometry import reference_geometry
+    from mygpr.domain.markers.geometry import reference_geometry, track_index
     rows = []
+    track = view.header.get('_marker_track')
+    prepared = track_index(track)
     # Cache each version once; 10,000 records must not copy 10,000 mapping arrays.
     mappings = {}
     for record in view.document.records:
@@ -161,7 +182,7 @@ def project_rows(view):
         rows.append({'uid': record.uid, 'record': record, 'projection': projection,
                      'name': record.name or f'标记 {record.uid[:8]}', 'purpose': record.purpose,
                      'position': position, 'status': STATUS_LABELS[status], 'line_id': view.document.line_id,
-                     'geometry': reference_geometry(record, view.document.source_id, view.header.get('_marker_track'))})
+                     'geometry': reference_geometry(record, view.document.source_id, track, prepared)})
     return tuple(rows)
 
 

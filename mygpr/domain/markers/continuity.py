@@ -16,4 +16,10 @@ def require_continuity(request):
     if (segments is not None and np.any(np.diff(segments) != 0)
             and request.method_id not in DISCONTINUOUS_METHODS):
         raise ValueError('当前成果包含不连续道段；此算法不能跨缺口运行，请先选取单个连续区间')
+    if request.method_id in ('fk_filter', 'stolt_migration', 'kirchhoff_migration', 'rtm_migration'):
+        distance = request.trace_metadata.get('trace_distance_m', request.header_info.get('distance_axis_m'))
+        if distance is not None and len(distance) > 1:
+            delta = np.diff(np.asarray(distance, dtype=float))
+            if not np.all(np.isfinite(delta)) or np.any(delta <= 0) or not np.allclose(delta, delta[0], rtol=1e-3, atol=1e-6):
+                raise ValueError('此算法要求连续且等间距的测线；请先核对距离并重采样单个连续区间')
 
