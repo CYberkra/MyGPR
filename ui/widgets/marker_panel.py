@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QInputDialog, QMenu, QMessageBox, QPushButton, QTableView, QVBoxLayout, QWidget,
 )
 
-from ui.desktop_backend_facade import EventInterval, MarkerRecord
+from ui.desktop_backend_facade import EventInterval, MarkerRecord, marker_rows_for_view
 from ui.widgets.marker_editor import MarkerEditor
 
 
@@ -116,7 +116,7 @@ class MarkerPanel(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.verticalHeader().hide()
-        for column, width in enumerate((90, 70, 90, 80)):
+        for column, width in enumerate((72, 55, 92, 80)):
             self.table.setColumnWidth(column, width)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._menu)
@@ -331,6 +331,16 @@ class MarkerPanel(QWidget):
         elif action == 'project':
             if result and self.view is None:
                 self.set_view(result[0])
+            current = next((item for item in result if self.view and
+                            item.document.line_id == self.view.document.line_id), None)
+            if current:
+                # A project-list refresh must also refresh the execution context.
+                # Keeping the previous revision here makes the next preview stale
+                # immediately after a successful save.
+                updated = replace(self.view, document=current.document, timezone=current.timezone,
+                                  interpretation_links=current.interpretation_links,
+                                  processing_history=current.processing_history)
+                self.view = replace(updated, rows=marker_rows_for_view(updated))
             self.scope.blockSignals(True)
             self.scope.setCurrentIndex(1)
             self.scope.blockSignals(False)

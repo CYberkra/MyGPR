@@ -23,7 +23,8 @@ class MarkerBrowserButton(QPushButton):
         if self.dialog is None:
             self.dialog = QDialog(self.window())
             self.dialog.setWindowTitle('项目标记与事件区间')
-            self.dialog.resize(650, 620)
+            available = self.screen().availableGeometry()
+            self.dialog.resize(min(650, available.width() - 32), min(620, available.height() - 48))
             layout = QVBoxLayout(self.dialog)
             self.panel = MarkerPanel(self.dialog)
             layout.addWidget(self.panel)

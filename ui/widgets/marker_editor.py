@@ -22,7 +22,8 @@ class MarkerEditor(QDialog):
         super().__init__(parent)
         self.view, self.record = view, record
         self.setWindowTitle('事件区间' if isinstance(record, EventInterval) else '点标记')
-        self.resize(400, 680)
+        available = self.screen().availableGeometry()
+        self.resize(min(400, available.width() - 32), min(680, available.height() - 48))
         self.setMinimumWidth(360)
         layout = QVBoxLayout(self)
         scroll = QScrollArea(self)

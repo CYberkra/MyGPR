@@ -132,6 +132,24 @@ def test_refresh_preserves_selected_identity_and_updated_guides(qapp):
     view.close()
 
 
+def test_project_list_refresh_uses_saved_revision_for_next_preview(qapp):
+    context = marker_view(2)
+    event = EventInterval(start=context.anchor(0), end=context.anchor(1))
+    context = replace(context, document=replace(context.document, intervals=(event,)))
+    context = replace(context, rows=project_rows(context))
+    panel = MarkerPanel()
+    panel.set_view(context)
+    panel.select_id(event.uid)
+    updated = replace(context, document=replace(context.document, revision=1))
+    panel._requests['refresh'] = ('project', {})
+    panel.deliver('refresh', (updated,), '')
+    calls = QSignalSpy(panel.operation)
+    panel.preview('keep')
+    assert calls[0][1]['view'].document.revision == 1
+    assert calls[0][1]['ids'] == [event.uid]
+    panel.close()
+
+
 def test_open_interval_and_duplicate_points_survive_list_selection(qapp):
     context = marker_view(3)
     doc = replace(context.document, intervals=(EventInterval(start=MarkerAnchor('raw:1', 4)),))
@@ -160,6 +178,20 @@ def test_editor_previews_boundary_inclusion_and_keeps_failed_draft(qapp):
     editor.failed('写入失败')
     assert editor.note.toPlainText() == '保存失败后不能丢失'
     assert editor.buttons.isEnabled()
+    editor.close()
+
+
+def test_editor_keeps_save_buttons_inside_short_high_dpi_screen(qapp, monkeypatch):
+    from types import SimpleNamespace
+    from PyQt6.QtCore import QRect
+    monkeypatch.setattr(MarkerEditor, 'screen', lambda self: SimpleNamespace(availableGeometry=lambda: QRect(0, 0, 800, 480)))
+    context = marker_view(2)
+    editor = MarkerEditor(context, EventInterval(start=context.anchor(0), end=context.anchor(1)))
+    editor.show()
+    qapp.processEvents()
+    assert editor.height() <= 432
+    assert editor.buttons.geometry().bottom() < editor.height()
+    assert editor.buttons.isVisible()
     editor.close()
 
 
