@@ -16,6 +16,8 @@ import math
 import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtCore import QEvent, Qt
+from PyQt6.QtGui import QCursor
+from PyQt6.QtWidgets import QToolTip
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants
@@ -448,6 +450,7 @@ class BScanViewInteractionMixin:
 
     def _on_mouse_moved(self, pos) -> None:
         """鼠标在图像区移动：十字线跟手 + 左下角读数浮层（文本 30ms 合并刷新）。"""
+        self._sync_marker_hover(pos)
         if self._selection_tool.active or not self._crosshair_on or self._image_shape is None:
             self._hide_crosshair()
             return
@@ -473,6 +476,42 @@ class BScanViewInteractionMixin:
         else:
             self._flush_crosshair_readout()   # 首次出现即时，不等节流
         self._readout.setVisible(True)
+
+    def _sync_marker_hover(self, scene_pos) -> None:
+        """标记箭头的悬浮反馈：命中给 tooltip（道号以源文件行为准），移开即收起。
+
+        与十字光标解耦：关掉十字光标后，箭头说明仍可查（标记是只读信息层）。
+        """
+        pins = getattr(self, '_marker_pins', None)
+        if pins is None:
+            return
+        index = pins.hit_test(scene_pos)
+        if index == getattr(self, '_marker_hover_index', None):
+            return
+        self._marker_hover_index = index
+        pins.set_hover(index)
+        if index is None:
+            QToolTip.hideText()
+        else:
+            QToolTip.showText(QCursor.pos(), pins.tooltip(index))
+
+    def _handle_marker_click(self, scene_pos) -> bool:
+        """点中标记箭头时切换选中并吃掉这次点击；点空白只清选中、不拦 pick。
+
+        返回 True 表示这次点击已由标记层消费（不再触发点拾取）。
+        """
+        pins = getattr(self, '_marker_pins', None)
+        if pins is None:
+            return False
+        index = pins.hit_test(scene_pos)
+        if index is None:
+            if pins.selected() is not None:
+                pins.select(None)
+            return False
+        target = pins.record_at(index)
+        same = pins.selected() == target
+        pins.select(None if same else target)
+        return True
 
     def _flush_crosshair_readout(self) -> None:
         """节流刷新读数文本 + 浮层定位（_readout_timer 与首次出现共用）。"""
@@ -625,6 +664,8 @@ class BScanViewInteractionMixin:
         if not self._pick_enabled or self._image_shape is None:
             return
         if event.button() != Qt.MouseButton.LeftButton:
+            return
+        if self._handle_marker_click(event.scenePos()):
             return
         pos = event.scenePos()
         if not self._plot.sceneBoundingRect().contains(pos):

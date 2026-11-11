@@ -30,21 +30,22 @@ def test_raw_marker_positions_tooltips_clear_and_fullscreen(qapp):
     host.show()
     view.set_bundle(bundle)
     qapp.processEvents()
-    points = view._acquisition_marker_item.points()
-    assert len(points) == 1 and points[0].pos().x() == 2.5
-    assert "第5道" in points[0].data() and "地物 A" in points[0].data()
+    assert view.acquisition_marker_count() == 1
+    assert view.acquisition_marker_positions() == [2.5]
+    tooltip = view.acquisition_marker_tooltip(0)
+    assert "第5道" in tooltip and "地物 A" in tooltip
     np.testing.assert_array_equal(view._matrix, raw)
     view.enter_fullscreen()
     QTest.qWait(400)
     qapp.processEvents()
-    assert len(view._acquisition_marker_item.points()) == 1
+    assert view.acquisition_marker_count() == 1
     view.exit_fullscreen()
     view.settle_fullscreen()
     view.set_bundle(SimpleNamespace(matrix=raw, vmin=0, vmax=72))
-    assert len(view._acquisition_marker_item.points()) == 0
+    assert view.acquisition_marker_count() == 0
     view.set_bundle(bundle)
     view.clear()
-    assert len(view._acquisition_marker_item.points()) == 0
+    assert view.acquisition_marker_count() == 0
     view.close()
     host.close()
 
@@ -63,15 +64,15 @@ def test_marker_visibility_toggle_preserves_points_and_matrix(qapp):
     ))
     host.show()
     qapp.processEvents()
-    points = view._acquisition_marker_item.points()
-    assert view._acquisition_marker_item.isVisible()
+    positions = view.acquisition_marker_positions()
+    assert view.acquisition_markers_shown()
     view.set_acquisition_markers_visible(False)
-    assert not view._acquisition_marker_item.isVisible()
-    assert view._acquisition_marker_item.points() == points
+    assert not view.acquisition_markers_shown()
+    assert view.acquisition_marker_positions() == positions
     np.testing.assert_array_equal(view._matrix, raw)
     view.set_acquisition_markers_visible(True)
-    assert view._acquisition_marker_item.isVisible()
-    assert view._acquisition_marker_item.points() == points
+    assert view.acquisition_markers_shown()
+    assert view.acquisition_marker_positions() == positions
     np.testing.assert_array_equal(view._matrix, raw)
     host.close()
 

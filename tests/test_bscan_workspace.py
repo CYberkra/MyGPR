@@ -415,11 +415,11 @@ def test_acquisition_marker_button_layout_availability_and_toggle(workspace, qap
     workspace.set_sources([dict(key='A', title='A', bundle=marked_bundle)])
     workspace.open_source('A')
     assert group.markers_visibility.isEnabled()
-    assert group.view._acquisition_marker_item.isVisible()
+    assert group.view.acquisition_markers_shown()
     group.markers_visibility.click()
-    assert not group.view._acquisition_marker_item.isVisible()
+    assert not group.view.acquisition_markers_shown()
     group.markers_visibility.click()
-    assert group.view._acquisition_marker_item.isVisible()
+    assert group.view.acquisition_markers_shown()
 
 
 def test_split_groups_toggle_acquisition_markers_independently(workspace):
@@ -430,14 +430,14 @@ def test_split_groups_toggle_acquisition_markers_independently(workspace):
     first, second = (workspace.group_widget(group_id) for group_id in workspace.group_ids())
     assert first.markers_visibility.isEnabled() and second.markers_visibility.isEnabled()
     first.markers_visibility.click()
-    assert not first.view._acquisition_marker_item.isVisible()
-    assert second.view._acquisition_marker_item.isVisible()
+    assert not first.view.acquisition_markers_shown()
+    assert second.view.acquisition_markers_shown()
     second.markers_visibility.click()
-    assert not first.view._acquisition_marker_item.isVisible()
-    assert not second.view._acquisition_marker_item.isVisible()
+    assert not first.view.acquisition_markers_shown()
+    assert not second.view.acquisition_markers_shown()
     second.markers_visibility.click()
-    assert not first.view._acquisition_marker_item.isVisible()
-    assert second.view._acquisition_marker_item.isVisible()
+    assert not first.view.acquisition_markers_shown()
+    assert second.view.acquisition_markers_shown()
 
 
 def test_merge_duplicate_source_preserves_pin_from_either_view(workspace):

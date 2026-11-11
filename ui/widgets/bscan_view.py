@@ -62,6 +62,8 @@ from ui.widgets.bscan_view_interaction import (BScanDisplayMode,
 from ui.widgets.bscan_view_interaction import (format_crosshair_readout
                                                as format_crosshair_readout)
 from ui.widgets.empty_state import EmptyStateOverlay
+from ui.widgets.marker_pins import MAX_MARKERS as MARKER_RENDER_LIMIT
+from ui.widgets.marker_pins import MarkerPins
 from ui.widgets.pg_view_base import GraphicsViewBase, style_plot_item
 
 
@@ -137,6 +139,7 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
         self._qc_marks_visible = True
         self._acquisition_markers_visible = True
         self._acquisition_markers_available = False
+        self._marker_hover_index = None      # 悬浮中的标记下标（交互 mixin 用）
         # 显示增益（SEC/TVG）：显示域逐行缩放（raw 一个字节不动）；增益后
         # 矩阵按 (矩阵身份, 模式+参数) 缓存复用。TVG 参数经滑条面板调整
         self._gain_mode = 'off'
@@ -311,6 +314,10 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._glw, 1)
+
+        # 采集标记箭头：挂在 _glw 里的透明浮层，几何严格跟随 ViewBox。
+        # 不参与布局，控件与绘图区高度零增量（2026-11-11 替代图内贴顶散点）
+        self._marker_pins = MarkerPins(self._glw, self._plot, self._glw)
 
         self._fullscreen_btn = ToolButton(FIF.FULL_SCREEN, self)
         self._fullscreen_btn.setToolTip('全屏：在独立窗口中展开（Esc 退出）')
@@ -625,45 +632,53 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
 
     def set_acquisition_markers_visible(self, visible: bool) -> None:
         self._acquisition_markers_visible = bool(visible)
-        item = getattr(self, '_acquisition_marker_item', None)
-        if item is not None:
-            item.setVisible(self._acquisition_markers_available and self._acquisition_markers_visible)
+        self._marker_pins.setVisible(
+            self._acquisition_markers_available and self._acquisition_markers_visible)
 
     def set_acquisition_markers(self, markers) -> None:
-        """Small hoverable flags on raw data; source records are never edited.
+        """把采集标记画到绘图区下沿（只读副本；源记录永不修改）。
 
         Preview downsampling approximates horizontal positions between retained
         columns. The tooltip always gives the exact source row. Keep the last
         marker at the last pixel when the preview omits the source's final row.
         """
-        item = getattr(self, '_acquisition_marker_item', None)
-        if item is None:
-            item = pg.ScatterPlotItem(size=12, symbol='t', hoverable=True,
-                                      tip=lambda x, y, data: data)
-            item.setZValue(30)
-            self._plot.addItem(item, ignoreBounds=True)
-            self._acquisition_marker_item = item
         grid = self._trace_indices
         if grid is None:
-            grid = np.arange(self._matrix.shape[1]) if self._matrix is not None else np.array([])
-        spots = []
+            grid = (np.arange(self._matrix.shape[1])
+                    if self._matrix is not None else np.array([]))
+        records, positions = [], []
         if len(grid):
-            colors = {'start': '#35b58a', 'general': '#39a8ed', 'end': '#de79bb'}
-            kinds = {'start': '开始', 'general': '一般', 'end': '结束'}
-            for mark in markers[:200]:
+            columns = np.arange(len(grid))
+            for mark in (markers or ())[:MARKER_RENDER_LIMIT]:
                 row = int(mark['trace_no'])
-                x = float(np.interp(row - 1, grid, np.arange(len(grid)))) + 0.5
-                kind = mark.get('marker_type', 'general')
-                tip = f"采集{kinds.get(kind, '一般')}标记 · 原文件第{row}道\n{mark.get('label', '')}"
-                tip += '\n缩略图位置为显示近似；标记不代表已确认目标'
-                spots.append(dict(pos=(x, 1), brush=colors.get(kind, '#39a8ed'), pen=None, data=tip))
-        item.setData(spots)
-        item.setToolTip(f'采集标记 {len(markers)} 个；最多显示前200个。完整记录保存在源元数据中。' if markers else '')
-        available = bool(spots)
-        item.setVisible(available and self._acquisition_markers_visible)
+                records.append({
+                    'trace_no': row,
+                    'marker_type': str(mark.get('marker_type', 'general')),
+                    'label': str(mark.get('label', '') or ''),
+                })
+                positions.append(float(np.interp(row - 1, grid, columns)) + 0.5)
+        self._marker_pins.set_markers(records, positions)
+        available = bool(records)
+        self._marker_pins.setVisible(available and self._acquisition_markers_visible)
         if available != self._acquisition_markers_available:
             self._acquisition_markers_available = available
             self.sig_acquisition_markers_availability_changed.emit(available)
+
+    def acquisition_marker_count(self) -> int:
+        """当前渲染的采集标记数量（只读副本计数）。"""
+        return self._marker_pins.marker_count()
+
+    def acquisition_markers_shown(self) -> bool:
+        """标记箭头当前是否可见（有标记且显示开关打开）。"""
+        return self._marker_pins.isVisible()
+
+    def acquisition_marker_positions(self) -> list[float]:
+        """标记的显示坐标 x（列中心）；降采样预览下为近似值。"""
+        return self._marker_pins.view_positions()
+
+    def acquisition_marker_tooltip(self, index: int) -> str:
+        """第 index 个标记的悬浮说明（道号为源文件行号）。"""
+        return self._marker_pins.tooltip(index)
 
     def apply_theme(self, dark: bool) -> None:
         """深色 bg 'k'/文字 'w'；浅色 bg 'w'/文字 'k'；轴/色标/悬浮钮/十字光标同步。
@@ -674,6 +689,7 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
         self._dark = bool(dark)
         palette = control_palette(dark)
         self._glw.setBackground(palette['plot_bg'])
+        self._marker_pins.set_theme(dark)
         style_plot_item(
             self._plot, dark,
             colorbar_axis=(self._colorbar.axis
