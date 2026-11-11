@@ -76,6 +76,6 @@ def marker_style(dark):
         f'QToolButton#markerDisclosure {{border:0; padding:4px 0; color:{text}; font-weight:600;}}'
         f'QToolButton:hover {{background:{color("bg_muted", dark)};}}'
         'QTableView {border:0; background:palette(base); color:palette(text);}'
-        'QTableView::item {padding:4px 6px; border:0;}'
+        'QTableView::item {padding:4px; border:0;}'
         'QHeaderView::section {border:0; border-bottom:1px solid palette(mid); padding:6px 4px;}'
     )

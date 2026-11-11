@@ -104,6 +104,12 @@ class MarkerEditor(QDialog):
         sections.addStretch()
         scroll.setWidget(body)
         layout.addWidget(scroll, 1)
+        self._build_footer(layout)
+        self.apply_theme(isDarkTheme())
+        self._connect_preview()
+
+    def _build_footer(self, layout):
+        """Keep persistence status and actions outside the scrolling form."""
         self.error = QLabel(self)
         self.error.setObjectName('markerSaveError')
         self.error.hide()
@@ -117,10 +123,8 @@ class MarkerEditor(QDialog):
         self.buttons.button(QDialogButtonBox.StandardButton.Cancel).setText('取消')
         self.buttons.accepted.connect(self._save)
         self.buttons.rejected.connect(self.reject)
-        self.buttons.button(QDialogButtonBox.StandardButton.Save).setEnabled(not view.read_only)
+        self.buttons.button(QDialogButtonBox.StandardButton.Save).setEnabled(not self.view.read_only)
         layout.addWidget(self.buttons)
-        self.apply_theme(isDarkTheme())
-        self._connect_preview()
 
     def apply_theme(self, dark):
         self.setStyleSheet(marker_style(dark))

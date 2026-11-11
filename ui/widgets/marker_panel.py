@@ -84,7 +84,8 @@ class MarkerTableView(QTableView):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         width = max(260, self.viewport().width())
-        widths = (int(width * .35), int(width * .19), int(width * .24))
+        weights = (.32, .22, .26) if width < 400 else (.35, .19, .24)
+        widths = tuple(int(width * weight) for weight in weights)
         for column, size in enumerate((*widths, width - sum(widths))):
             self.setColumnWidth(column, size)
 
