@@ -149,6 +149,15 @@ class MarkerPins(QWidget):
         """当前像素 x（未布局或越界时为 0）。"""
         return list(self._px)
 
+    def shown(self) -> bool:
+        """逻辑可见性：只反映「有标记 + 开关打开」，不随祖先窗口是否显示变化。
+
+        ``QWidget.isVisible()`` 在祖先未显示时恒为 False（离屏视图、尚未
+        show 的工作区分页都会这样），用它判定会把「开关是否打开」和
+        「窗口是否已显示」混在一起。
+        """
+        return self.isVisibleTo(self.parentWidget())
+
     def tooltip(self, index: int) -> str:
         """单条标记的悬浮说明（道号以源文件行为准，预览可能降采样）。"""
         record = self._records[index]
@@ -196,7 +205,7 @@ class MarkerPins(QWidget):
 
     def hit_test(self, scene_pos) -> int | None:
         """场景坐标 → 命中的标记下标（命中带贴着绘图区下沿）。"""
-        if not self._records or not self.isVisible():
+        if not self._records or not self.shown():
             return None
         local = self._to_local(scene_pos)
         height = self.height()

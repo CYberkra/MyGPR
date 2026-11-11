@@ -670,7 +670,7 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
 
     def acquisition_markers_shown(self) -> bool:
         """标记箭头当前是否可见（有标记且显示开关打开）。"""
-        return self._marker_pins.isVisible()
+        return self._marker_pins.shown()
 
     def acquisition_marker_positions(self) -> list[float]:
         """标记的显示坐标 x（列中心）；降采样预览下为近似值。"""
