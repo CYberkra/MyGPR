@@ -15,6 +15,7 @@ backend = MyGPRBackend.create_default()
 - `backend.projects`：项目创建、打开、测线数据、完整性、备份和恢复；
 - `backend.project_processing`：读取项目测线、执行流水线并提交处理成果；
 - `backend.reporting`：工程报告包生成；
+- `backend.markers`：点标记与事件区间查询、编辑、投影和确定性选道预览；`submit_marker_selection(preview)` 通过作业系统生成新成果，详见[标记合同](../superpowers/specs/2026-11-11-marker-event-contract.md)；
 - `backend.jobs`：异步执行、进度、取消、警告、成果事件和状态轮询。
 
 公开接口不返回 QWidget、QThread、SQLite connection、h5py Dataset 或算法内部 callable。

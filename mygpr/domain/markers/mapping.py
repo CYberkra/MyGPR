@@ -1,6 +1,7 @@
 """Horizontal location mapping, separate from measured waveforms and device IDs."""
 from dataclasses import dataclass
 from hashlib import sha256
+from functools import cached_property
 
 import numpy as np
 
@@ -65,6 +66,18 @@ class TraceMapping:
     def identity(cls, source_id: str, count: int):
         return cls(source_id, source_id, np.arange(count, dtype=np.float64),
                    np.zeros(count, dtype=np.int64))
+
+    @cached_property
+    def segment_breaks(self):
+        return np.flatnonzero(np.diff(self.segments) != 0) + 1
+
+    def spans(self, start, stop):
+        if start >= stop:
+            return ()
+        breaks = self.segment_breaks
+        first, last = np.searchsorted(breaks, [start, stop], side='left')
+        cuts = [start, *(int(v) for v in breaks[first:last] if v > start), stop]
+        return tuple(zip(cuts[:-1], cuts[1:]))
 
     def select(self, indices, target_id: str = ''):
         indices = np.asarray(indices, dtype=np.int64)

@@ -20,9 +20,12 @@ def draw_marker_strip(ax, payload, dataset):
                 marks.append((float(distance[record.anchor.trace]), float(distance[record.anchor.trace]), record.name))
             else:
                 unavailable += 1
-        elif record.start and record.end:
+        elif record.closed:
             try:
-                indices = interval_indices(record, mapping)
+                metadata = dataset.trace_metadata or {}
+                times = metadata.get('trace_timestamp_s')
+                confirmed = 'timestamp_ms' in metadata or dataset.header_info.get('trace_time_basis') == 'UTC'
+                indices = interval_indices(record, mapping, timestamps_s=times, time_basis_confirmed=confirmed)
             except ValueError:
                 unavailable += 1
                 continue

@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 from dataclasses import asdict, replace
+from datetime import datetime
 import json
+from zoneinfo import ZoneInfo
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
@@ -96,8 +98,10 @@ class MarkerEditor(QDialog):
         self.inc_start.setChecked(record.include_start)
         self.inc_end.setChecked(record.include_end)
         form.addRow(self.inc_start, self.inc_end)
-        self.time_start = QLineEdit(record.time_start, body)
-        self.time_end = QLineEdit(record.time_end, body)
+        def local_time(value):
+            return datetime.fromisoformat(value).astimezone(ZoneInfo(self.view.timezone)).isoformat(timespec='microseconds') if value else ''
+        self.time_start = QLineEdit(local_time(record.time_start), body)
+        self.time_end = QLineEdit(local_time(record.time_end), body)
         for field in (self.time_start, self.time_end):
             field.setPlaceholderText('ISO 8601，含时区；可留空')
         form.addRow('采集时刻起', self.time_start)

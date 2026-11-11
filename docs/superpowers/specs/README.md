@@ -15,6 +15,7 @@
 | 后端 API | [API 说明](../../architecture/BACKEND_API_V1.md)、`config/backend_api_v1.json` |
 | 项目数据与持久化 | [Hybrid Store](../../developer/HYBRID_PROJECT_STORE_V1.md)、[数据协议](../../developer/project_data_contract.md) |
 | 输入格式与采集 HDF5 | [格式参考](../../user/reference/数据格式参考.md) |
+| 点标记、事件区间与显式选道 | [实现合同](2026-11-11-marker-event-contract.md)、[使用指南](../../user/how-to/标记与事件区间.md) |
 | 质量检查与证据范围 | [测试策略](../../developer/TESTING_STRATEGY.md) |
 
 ## 保存的设计记录

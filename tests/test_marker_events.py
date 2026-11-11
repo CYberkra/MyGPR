@@ -147,3 +147,10 @@ def test_native_selection_rejects_invalid_ranges(ranges):
     from mygpr.infrastructure.processing.algorithms.extended.trace_range_select import native_trace_range_select
     with pytest.raises(ValueError):
         native_trace_range_select(np.ones((4, 8)), {'ranges': ranges})
+
+
+@pytest.mark.parametrize('start,stop,expected', [(0, 6, ((0, 2), (2, 5), (5, 6))),
+    (2, 5, ((2, 5),)), (1, 5, ((1, 2), (2, 5))), (3, 3, ())])
+def test_projection_spans_preserve_segment_boundaries_without_selected_array(start, stop, expected):
+    mapping = TraceMapping('raw', 'result', np.arange(6), np.array([0, 0, 1, 1, 1, 2]), 'selection')
+    assert mapping.spans(start, stop) == expected

@@ -128,7 +128,7 @@ class MarkerChain:
             return
         page = self.co.page(pending[3] + 'Interface')
         if pending[3] == 'processing':
-            page._workspace.open_source(pending[4] or 'original')
+            page._workspace.open_source('artifact:' + pending[4] if pending[4] else 'original')
             tools = page._workspace.marker_tools
         else:
             page.set_bundle(bundle)

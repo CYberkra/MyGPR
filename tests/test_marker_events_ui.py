@@ -29,6 +29,10 @@ def test_editing_time_only_or_open_end_keeps_source_version(qapp):
     editor.note.setPlainText('补充备注')
     assert editor._draft().time_source_id == 'raw:previous'
     editor.close()
+    editor = MarkerEditor(replace(view, timezone='Asia/Shanghai'), event)
+    assert editor.time_start.text().startswith('2026-01-01T08:00:00')
+    assert editor._draft().time_start == event.time_start
+    editor.close()
     opened = EventInterval(end=MarkerAnchor('raw:previous', 2))
     editor = MarkerEditor(view, opened)
     draft = editor._draft()
@@ -54,7 +58,7 @@ def test_marker_navigation_uses_artifact_and_rejects_late_raw_preview(qapp):
     assert calls == [('request', 'result-1')]
     result = replace(raw, artifact_id='result-1', target_id='artifact:result-1')
     chain._locate_loaded(SimpleNamespace(marker_view=result))
-    assert calls == [('request', 'result-1'), ('open', 'result-1'), ('select', 'm0')]
+    assert calls == [('request', 'result-1'), ('open', 'artifact:result-1'), ('select', 'm0')]
 
 
 def test_ten_thousand_records_search_and_cluster_without_truncation(qapp):

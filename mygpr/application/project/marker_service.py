@@ -10,7 +10,7 @@ from mygpr.domain.markers.mapping import (
 )
 from mygpr.domain.markers.models import EventInterval, MarkerAnchor, MarkerDocument, MarkerRecord
 from mygpr.domain.markers.operations import put_record, remove_record
-from mygpr.domain.markers.ranges import interval_indices, selection_indices
+from mygpr.domain.markers.ranges import interval_bounds, interval_indices, selection_indices
 
 
 def metadata_value(metadata, key, default=None):
@@ -220,10 +220,10 @@ def _interval_projection(record, view, mappings):
     mapping = mappings[source]
     # Review state affects usability, not the visibility of saved boundaries.
     try:
-        indices = interval_indices(replace(record, excluded=False, review_state='unreviewed'), mapping,
+        left, right = interval_bounds(replace(record, excluded=False, review_state='unreviewed'), mapping,
             timestamps_s=view.trace_metadata.get('trace_timestamp_s'), time_basis_confirmed=view.time_basis_confirmed)
     except ValueError:
         return MarkerProjection('unmapped')
-    status = ('interpolated' if mapping.kind == 'resampled' else 'exact') if indices.size else (
+    status = ('interpolated' if mapping.kind == 'resampled' else 'exact') if left < right else (
         'outside' if record.start else 'empty')
-    return MarkerProjection(status, spans=index_spans(indices, mapping.segments))
+    return MarkerProjection(status, spans=mapping.spans(left, right))

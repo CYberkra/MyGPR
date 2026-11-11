@@ -12,6 +12,7 @@ from mygpr.infrastructure.persistence.durable_write import default_durable_write
 
 def snapshot(views):
     return {'format': 'mygpr-marker-export-1', 'documents': [view.document.to_dict() for view in views],
+            'processing_history': [{'line_id': view.document.line_id, 'receipts': view.processing_history} for view in views],
             'projections': [{'line_id': view.document.line_id, 'target_id': view.target_id,
                 'records': [{'uid': row['uid'], 'projection': asdict(row['projection']),
                              'status': row['status'], 'geometry': row['geometry']} for row in view.rows]}
@@ -26,13 +27,16 @@ def export_views(views, path, format_name):
     elif format_name == 'csv':
         stream = StringIO(newline='')
         writer = csv.writer(stream)
-        writer.writerow(['项目', '测线', '当前来源', 'ID', '名称', '用途', '位置或范围', '状态', '版本', '完整记录JSON', '投影JSON'])
+        writer.writerow(['项目', '测线', '当前来源', 'ID', '名称', '用途', '位置或范围', '状态', '版本', '完整记录JSON', '投影JSON', '处理记录JSON'])
         for view in views:
             for row in view.rows:
                 values = [view.document.project_id, view.document.line_id, view.target_id, row['uid'],
                           row['name'], row['purpose'], row['position'], row['status'], row['record'].revision,
                           json.dumps(asdict(row['record']), ensure_ascii=False, allow_nan=False),
-                          json.dumps(asdict(row['projection']), ensure_ascii=False, allow_nan=False)]
+                          json.dumps(asdict(row['projection']), ensure_ascii=False, allow_nan=False),
+                          json.dumps([entry for entry in view.processing_history if any(
+                              record['uid'] == row['uid'] for record in entry['selection']['intervals'])],
+                              ensure_ascii=False, allow_nan=False)]
                 writer.writerow([_cell(value) for value in values])
         content = '\ufeff' + stream.getvalue()
         count = sum(len(view.rows) for view in views)

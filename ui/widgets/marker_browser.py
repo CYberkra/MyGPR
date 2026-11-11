@@ -31,6 +31,7 @@ class MarkerBrowserButton(QPushButton):
             self.panel.close_requested.connect(self.dialog.hide)
             self.panel.navigate.connect(self.navigate)
             self.panel.selected.connect(self._selected)
+            self.panel.locate.connect(self._locate)
         self.dialog.show()
         self.dialog.raise_()
         if self.project_id:
@@ -42,6 +43,11 @@ class MarkerBrowserButton(QPushButton):
         row = next((row for row in self.panel.model.rows if row['uid'] == uid), None)
         if row:
             self.selection_changed.emit(self.project_id, row['line_id'], uid)
+
+    def _locate(self, uid):
+        row = next((row for row in self.panel.model.rows if row['uid'] == uid), None)
+        if row:
+            self.navigate.emit('processing', row)
 
     def deliver(self, token, result, error):
         if self.panel:

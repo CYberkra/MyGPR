@@ -9,6 +9,14 @@ from mygpr.domain.markers.models import EventInterval
 
 def interval_indices(interval: EventInterval, mapping: TraceMapping, *,
                      timestamps_s=None, time_basis_confirmed=False) -> np.ndarray:
+    left, right = interval_bounds(interval, mapping, timestamps_s=timestamps_s,
+                                  time_basis_confirmed=time_basis_confirmed)
+    return np.arange(left, right, dtype=np.int64)
+
+
+def interval_bounds(interval: EventInterval, mapping: TraceMapping, *,
+                    timestamps_s=None, time_basis_confirmed=False) -> tuple[int, int]:
+    """Resolve two bounds without allocating every selected index during list projection."""
     if interval.excluded or interval.review_state == 'needs_review':
         raise ValueError('区间已排除或边界变化后尚需复核')
     if not interval.closed:
@@ -17,7 +25,9 @@ def interval_indices(interval: EventInterval, mapping: TraceMapping, *,
     if interval.start and interval.end:
         source_id = interval.start.source_id
         if source_id == mapping.target_id:
-            values = np.arange(count, dtype=np.float64)
+            left = min(count, interval.start.trace + (not interval.include_start))
+            right = min(count, interval.end.trace + interval.include_end)
+            return int(left), int(max(left, right))
         elif source_id == mapping.source_id and mapping.kind != 'unknown':
             values = mapping.coordinates
         else:
@@ -36,7 +46,7 @@ def interval_indices(interval: EventInterval, mapping: TraceMapping, *,
     # All accepted coordinate arrays are monotonic. Search avoids an O(N) mask per record.
     left = np.searchsorted(values, low, side='left' if interval.include_start else 'right')
     right = np.searchsorted(values, high, side='right' if interval.include_end else 'left')
-    return np.arange(left, max(left, right), dtype=np.int64)
+    return int(left), int(max(left, right))
 
 
 def selection_indices(count: int, groups, mode: str) -> np.ndarray:
