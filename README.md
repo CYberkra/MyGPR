@@ -1,4 +1,4 @@
-# MyGPR 0.11.4
+# MyGPR 0.11.5
 
 <img src="ui/resources/mygpr_logo.png" width="96" alt="MyGPR 图标：无人机航测滑坡剖面">
 
@@ -7,7 +7,7 @@ PyQt6 + PyQt6-Fluent-Widgets 桌面前端，配分层后端（`mygpr/` 清洁架
 
 > 架构与工程约束：[CLAUDE.md](CLAUDE.md)；当前状态：[CURRENT_STATE.md](CURRENT_STATE.md)；交接规则：[DEV_HANDOFF.md](DEV_HANDOFF.md)；设计规格索引：[specs](docs/superpowers/specs/README.md)。
 
-[下载最新正式版](https://github.com/CYberkra/MyGPR/releases/latest) · [v0.11.4 说明](docs/releases/v0.11.4.md) · [使用手册](docs/user/README.md)
+[下载最新正式版](https://github.com/CYberkra/MyGPR/releases/latest) · [v0.11.5 说明](docs/releases/v0.11.5.md) · [使用手册](docs/user/README.md)
 
 ## 在总平台中的定位
 
@@ -62,7 +62,7 @@ Python **3.12–3.13**（钉版 `numpy==2.5.1` 要求 ≥3.12；CI 矩阵与 `re
 
 Windows 用户从 [最新正式版](https://github.com/CYberkra/MyGPR/releases/latest) 下载 `MyGPR-<版本>-Windows-x64-Setup.exe`。安装包面向 Windows 10 1809 及以上 / Windows 11 x64，内置 Python 和 Qt，SHA-256 见发行附件。
 
-从未内置更新器的旧版升级时，请手动运行新安装包。v0.11.4 安装版可从 **设置 → 关于 → 检查更新** 获取后续版本。源码及 wheel 用户可在同一位置打开发布页。见 [安装与升级说明](docs/releases/v0.11.4.md)。
+从未内置更新器的旧版升级时，请手动运行新安装包。v0.11.5 安装版可从 **设置 → 关于 → 检查更新** 获取后续版本。源码及 wheel 用户可在同一位置打开发布页。见 [安装与升级说明](docs/releases/v0.11.5.md)。
 
 源码开发与 Python 包安装：
 
