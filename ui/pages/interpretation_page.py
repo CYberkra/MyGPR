@@ -155,7 +155,6 @@ class InterpretationPage(PanelStateMixin, QWidget):
         """剖面标注卡片：BScanView（pick 模式 + overlay）。"""
         card, layout = make_card(parent=self)
         self._bscan = BScanView(card)
-        self._bscan.setMinimumHeight(420)
         self._bscan.set_pick_enabled(False)  # 会话打开前禁用 pick（P1-6）
         from ui.widgets.marker_workspace_tools import MarkerWorkspaceTools
         self.marker_tools = MarkerWorkspaceTools(self._bscan, lambda: [self._bscan], lambda: self._bscan)
