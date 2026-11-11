@@ -523,6 +523,7 @@ class ProcessingChain:
                       ) or self._co.project.current_line_id
         interpretation.set_session_info(f'会话已打开（{line_id}）')
         interpretation.set_session_active(True)
+        interpretation.set_session_source(str(getattr(snapshot, 'input_artifact_id', '') or ''))
         annotation = getattr(snapshot, 'annotation', None)
         interpretation.set_saved_status(getattr(annotation, 'status', 'draft'))
         interpretation.set_annotation_metadata(annotation)

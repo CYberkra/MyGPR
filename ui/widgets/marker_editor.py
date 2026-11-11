@@ -8,11 +8,13 @@ from zoneinfo import ZoneInfo
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QLineEdit,
+    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QLineEdit,
     QPlainTextEdit, QScrollArea, QSpinBox, QVBoxLayout, QWidget, QListWidget, QListWidgetItem,
 )
+from qfluentwidgets import isDarkTheme
 
 from ui.desktop_backend_facade import EventInterval, MarkerAnchor, MarkerRecord, PURPOSES
+from ui.widgets.marker_style import MarkerDisclosure, marker_form, marker_style, section_title
 
 
 class MarkerEditor(QDialog):
@@ -21,15 +23,25 @@ class MarkerEditor(QDialog):
     def __init__(self, view, record, parent=None):
         super().__init__(parent)
         self.view, self.record = view, record
+        self.setObjectName('markerEditor')
         self.setWindowTitle('事件区间' if isinstance(record, EventInterval) else '点标记')
         available = self.screen().availableGeometry()
         self.resize(min(400, available.width() - 32), min(680, available.height() - 48))
         self.setMinimumWidth(360)
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 12)
+        layout.setSpacing(12)
         scroll = QScrollArea(self)
+        scroll.setObjectName('markerEditorScroll')
         scroll.setWidgetResizable(True)
         body = QWidget(scroll)
-        form = QFormLayout(body)
+        body.setObjectName('markerEditorBody')
+        sections = QVBoxLayout(body)
+        sections.setContentsMargins(0, 0, 8, 0)
+        sections.setSpacing(16)
+        info = QWidget(body)
+        form = marker_form(info)
+        sections.addWidget(info)
         self.name = QLineEdit(record.name, body)
         self.purpose = QComboBox(body)
         self.purpose.setEditable(True)
@@ -40,12 +52,16 @@ class MarkerEditor(QDialog):
         self.evidence.addItems(['现场记录', '既有资料', '雷达判读', '其他'])
         self.evidence.setCurrentText(record.evidence)
         self.note = QPlainTextEdit(record.note, body)
-        self.note.setMaximumHeight(90)
+        self.note.setFixedHeight(72)
         self.excluded = QCheckBox('排除使用', body)
         self.excluded.setChecked(record.excluded)
         for title, widget in (('名称', self.name), ('用途', self.purpose), ('信息来源', self.evidence),
-                              ('备注', self.note), ('', self.excluded)):
+                              ('备注', self.note)):
             form.addRow(title, widget)
+        sections.addWidget(section_title('范围' if isinstance(record, EventInterval) else '位置', body))
+        bounds = QWidget(body)
+        form = marker_form(bounds)
+        sections.addWidget(bounds)
         self.source = QComboBox(body)
         self.source.addItem('原始采集', view.document.source_id)
         if view.target_id != view.document.source_id:
@@ -56,7 +72,7 @@ class MarkerEditor(QDialog):
         if self.source.findData(source_id) < 0:
             self.source.addItem('历史来源（当前无法定位）', source_id)
         self.source.setCurrentIndex(self.source.findData(source_id))
-        form.addRow('边界来源', self.source)
+        form.addRow('数据来源', self.source)
         self.start = self._spin(anchor)
         form.addRow('起始道' if isinstance(record, EventInterval) else '道号', self.start)
         self.start_ref = self.end_ref = None
@@ -65,27 +81,49 @@ class MarkerEditor(QDialog):
         elif record.origin == 'acquisition':
             self.start.setEnabled(False)
             self.source.setEnabled(False)
-        self.links = self._links(body)
-        form.addRow('解释关联', self.links)
+        if isinstance(record, EventInterval):
+            time = MarkerDisclosure('采集时刻', body, expanded=bool(record.time_start or record.time_end))
+            time.form.addRow('开始', self.time_start)
+            time.form.addRow('结束', self.time_end)
+            sections.addWidget(time)
+        links = MarkerDisclosure('关联解释', body, expanded=bool(record.links))
+        self.links = self._links(links.body)
+        links.form.addRow(self.links)
+        if not self.links.count():
+            links.form.addRow(QLabel('当前测线暂无解释对象', links.body))
+            self.links.hide()
+        sections.addWidget(links)
+        provenance = MarkerDisclosure('来源与记录详情', body)
         details = self._details(view, record)
-        self.details = QPlainTextEdit(details, body)
+        self.details = QPlainTextEdit(details, provenance.body)
         self.details.setReadOnly(True)
         self.details.setMinimumHeight(130)
-        form.addRow('记录详情', self.details)
+        provenance.form.addRow(self.details)
+        sections.addWidget(provenance)
+        sections.addWidget(self.excluded)
+        sections.addStretch()
         scroll.setWidget(body)
         layout.addWidget(scroll, 1)
         self.error = QLabel(self)
+        self.error.setObjectName('markerSaveError')
+        self.error.hide()
         self.error.setWordWrap(True)
         self.error.setAccessibleName('保存状态')
         layout.addWidget(self.error)
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel, self)
         self.buttons.button(QDialogButtonBox.StandardButton.Save).setText('保存')
+        self.buttons.button(QDialogButtonBox.StandardButton.Save).setObjectName('markerSave')
+        self.buttons.button(QDialogButtonBox.StandardButton.Save).setDefault(True)
         self.buttons.button(QDialogButtonBox.StandardButton.Cancel).setText('取消')
         self.buttons.accepted.connect(self._save)
         self.buttons.rejected.connect(self.reject)
         self.buttons.button(QDialogButtonBox.StandardButton.Save).setEnabled(not view.read_only)
         layout.addWidget(self.buttons)
+        self.apply_theme(isDarkTheme())
         self._connect_preview()
+
+    def apply_theme(self, dark):
+        self.setStyleSheet(marker_style(dark))
 
     def _interval_controls(self, form, body, record):
         self.end = self._spin(record.end)
@@ -98,19 +136,23 @@ class MarkerEditor(QDialog):
         self.inc_end = QCheckBox('包含结束道', body)
         self.inc_start.setChecked(record.include_start)
         self.inc_end.setChecked(record.include_end)
-        form.addRow(self.inc_start, self.inc_end)
+        inclusion = QWidget(body)
+        inclusion_layout = QHBoxLayout(inclusion)
+        inclusion_layout.setContentsMargins(0, 0, 0, 0)
+        inclusion_layout.addWidget(self.inc_start)
+        inclusion_layout.addWidget(self.inc_end)
+        form.addRow(inclusion)
         def local_time(value):
             return datetime.fromisoformat(value).astimezone(ZoneInfo(self.view.timezone)).isoformat(timespec='microseconds') if value else ''
         self.time_start = QLineEdit(local_time(record.time_start), body)
         self.time_end = QLineEdit(local_time(record.time_end), body)
         for field in (self.time_start, self.time_end):
             field.setPlaceholderText('ISO 8601，含时区；可留空')
-        form.addRow('采集时刻起', self.time_start)
-        form.addRow('采集时刻止', self.time_end)
         self.review = QCheckBox('已复核当前边界', body)
         self.review.setChecked(record.review_state == 'reviewed')
         form.addRow(self.review)
         self.range_preview = QLabel(body)
+        self.range_preview.setObjectName('markerRangePreview')
         self.range_preview.setWordWrap(True)
         form.addRow(self.range_preview)
 
@@ -195,6 +237,7 @@ class MarkerEditor(QDialog):
             self.failed(str(exc))
             return
         self.error.setText('正在保存…')
+        self.error.show()
         self.buttons.setEnabled(False)
         self.save_requested.emit(record)
 
@@ -214,6 +257,7 @@ class MarkerEditor(QDialog):
     def failed(self, message):
         self.buttons.setEnabled(True)
         self.error.setText(message)
+        self.error.show()
 
     @staticmethod
     def _details(view, record):

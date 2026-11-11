@@ -83,6 +83,7 @@ class MarkerStrip(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         dark = isDarkTheme()
         painter.fillRect(self.rect(), QColor(color('bg_surface', dark)))
         bounds = self.view._plot.vb.sceneBoundingRect()
@@ -108,21 +109,46 @@ class MarkerStrip(QWidget):
         items.sort(key=lambda item: (item[2]['uid'] != self.selected_id, item[0]))
         lanes = [[], []]
         clusters = {}
+        entries = []
         for x1, x2, row, interval in items:
             lo, hi = max(float(left), x1), min(float(right), x2)
-            width = max(24., min(100., right - lo), hi - lo)
+            label_width = min(144, painter.fontMetrics().horizontalAdvance(row['name']) + 14)
+            width = max(24., min(label_width, right - lo), hi - lo)
             lane = next((i for i in range(2) if all(lo > end or lo + width < begin for begin, end in lanes[i])), None)
             if lane is None:
-                cell = int((lo - left) // 32)
+                cell = int((lo - left) // 56)
                 clusters.setdefault(cell, []).append(row['uid'])
                 continue
             lanes[lane].append((lo, lo + width))
             rect = QRectF(lo, 3 + lane * 26, width, 23)
+            entries.append((rect, x1, x2, row, interval))
+        # Reserve cluster space before drawing labels, so a count never obscures
+        # half a name. The selected record owns lane zero and remains visible.
+        for cell, ids in clusters.items():
+            rect = QRectF(max(float(left), min(left + cell * 56, right - 52)), 30, 52, 22)
+            overlapping = [(hit, members) for hit, members in self._hits if hit.intersects(rect)]
+            for hit, members in overlapping:
+                rect = rect.united(hit)
+                ids = [*ids, *members]
+            self._hits = [(hit, members) for hit, members in self._hits if not hit.intersects(rect)]
+            covered = [entry for entry in entries if entry[0].intersects(rect)]
+            ids = list(dict.fromkeys([*ids, *(entry[3]['uid'] for entry in covered)]))
+            entries = [entry for entry in entries if not entry[0].intersects(rect)]
+            self._hits.append((rect, ids))
+        cluster_count = len(self._hits)
+        for rect, x1, x2, row, interval in entries:
             self._hits.append((rect, [row['uid']]))
             token = 'primary' if row['uid'] == self.selected_id else {
                 '停车等待': 'warning', '外部干扰': 'error', '目标范围': 'success',
                 '现场操作': 'info'}.get(row['purpose'], 'text_secondary')
             ink = QColor(color(token, dark))
+            if row['uid'] == self.selected_id:
+                background = QColor(ink)
+                background.setAlpha(28)
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(background)
+                painter.drawRoundedRect(rect, 4, 4)
+                painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.setPen(QPen(ink, 2 if row['uid'] == self.selected_id else 1))
             y = rect.center().y()
             painter.drawLine(QPointF(x1, y - 7), QPointF(x1, y + 7))
@@ -130,18 +156,15 @@ class MarkerStrip(QWidget):
                 painter.drawLine(QPointF(x2, y - 7), QPointF(x2, y + 7))
                 painter.drawLine(QPointF(x1, y + 7), QPointF(x2, y + 7))
             elif row['projection'].status == 'open':
-                painter.drawText(QPointF(lo + 3, y + 4), '…')
+                painter.drawText(QPointF(rect.left() + 3, y + 4), '…')
             painter.setPen(QColor(color('text_primary', dark)))
-            label = painter.fontMetrics().elidedText(row['name'], Qt.TextElideMode.ElideRight, int(width - 8))
+            label = painter.fontMetrics().elidedText(row['name'], Qt.TextElideMode.ElideRight, int(rect.width() - 12))
             painter.drawText(rect.adjusted(5, 0, 0, -2), Qt.AlignmentFlag.AlignVCenter, label)
-        for cell, ids in clusters.items():
-            rect = QRectF(left + cell * 32, 30, 32, 23)
-            # Include the lane members covered by the count control; none may become unreachable.
-            covered = [(hit, members) for hit, members in self._hits if hit.intersects(rect)]
-            ids = list(dict.fromkeys([*ids, *(uid for _, members in covered for uid in members)]))
-            self._hits = [(hit, members) for hit, members in self._hits if not hit.intersects(rect)]
-            self._hits.insert(0, (rect, ids))
-            painter.fillRect(rect, QColor(color('bg_muted', dark)))
+        for rect, ids in self._hits[:cluster_count]:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(color('bg_muted', dark)))
+            painter.drawRoundedRect(rect, 4, 4)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.setPen(QColor(color('text_primary', dark)))
             painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, f'+{len(ids)}')
         if self._creating:
@@ -202,11 +225,13 @@ class MarkerStrip(QWidget):
             return
         for rect, ids in self._hits:
             if rect.contains(event.position()):
+                self.setCursor(Qt.CursorShape.PointingHandCursor)
                 row = next((row for row in self.rows if row['uid'] == ids[0]), None)
                 self.setToolTip(f'{len(ids)} 条记录，点击展开' if len(ids) > 1 else
                                f"{row['name']} · {row['position']} · {row['status']}")
                 return
         self.setToolTip('')
+        self.unsetCursor()
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:

@@ -101,8 +101,12 @@ def test_ten_thousand_records_search_and_cluster_without_truncation(qapp):
     assert len(view.marker_strip.rows) == 10000
     represented = {uid for _, ids in view.marker_strip._hits for uid in ids}
     assert represented == {record.uid for record in context.document.markers}
+    hits = view.marker_strip._hits
+    assert all(not rect.intersects(other) for i, (rect, _) in enumerate(hits) for other, _ in hits[i + 1:])
     picks = QSignalSpy(view.sig_point_picked)
     view.select_event_marker('m9999')
+    qapp.processEvents()
+    assert any(ids == ['m9999'] for _, ids in view.marker_strip._hits)
     assert len(picks) == 0
     assert len(view._event_guides) == 1
     view.set_acquisition_markers_visible(False)
@@ -118,6 +122,11 @@ def test_refresh_preserves_selected_identity_and_updated_guides(qapp):
     context = marker_view(3)
     panel = MarkerPanel()
     panel.set_view(context)
+    panel.resize(650, 500)
+    panel.show()
+    qapp.processEvents()
+    assert sum(panel.table.columnWidth(i) for i in range(4)) == panel.table.viewport().width()
+    assert panel.table.columnWidth(0) > panel.table.columnWidth(3)
     panel.select_id('m2')
     updated = replace(context, document=replace(context.document, revision=1))
     panel.set_view(updated)
@@ -148,6 +157,27 @@ def test_project_list_refresh_uses_saved_revision_for_next_preview(qapp):
     assert calls[0][1]['view'].document.revision == 1
     assert calls[0][1]['ids'] == [event.uid]
     panel.close()
+
+
+def test_marker_navigation_updates_interpretation_source_and_releases_browser(qapp):
+    from types import SimpleNamespace
+    from ui.pages.interpretation_page import InterpretationPage
+    from ui.widgets.marker_browser import MarkerBrowserButton
+    page = InterpretationPage()
+    page.set_session_source('result-1')
+    page.set_artifacts([SimpleNamespace(artifact_id='result-1', name='保留区间')])
+    assert page._current_artifact_id() == 'result-1'
+    page.set_session_source('')
+    assert page._current_artifact_id() == ''
+    browser = MarkerBrowserButton()
+    browser.open_browser()
+    browser.panel.set_view(marker_view(1))
+    navigated = QSignalSpy(browser.navigate)
+    browser._locate('m0')
+    assert not browser.dialog.isVisible()
+    assert navigated[0][0] == 'processing'
+    browser.close()
+    page.close()
 
 
 def test_open_interval_and_duplicate_points_survive_list_selection(qapp):

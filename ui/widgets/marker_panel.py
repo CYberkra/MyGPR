@@ -8,11 +8,13 @@ from PyQt6.QtCore import QAbstractTableModel, QItemSelectionModel, QModelIndex, 
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QAbstractItemView, QComboBox, QFileDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
-    QInputDialog, QMenu, QMessageBox, QPushButton, QTableView, QVBoxLayout, QWidget,
+    QInputDialog, QMenu, QMessageBox, QPushButton, QTableView, QToolButton, QVBoxLayout, QWidget,
 )
+from qfluentwidgets import isDarkTheme
 
 from ui.desktop_backend_facade import EventInterval, MarkerRecord, marker_rows_for_view
 from ui.widgets.marker_editor import MarkerEditor
+from ui.widgets.marker_style import marker_style, section_title
 
 
 class MarkerTableModel(QAbstractTableModel):
@@ -45,7 +47,7 @@ class MarkerTableModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.UserRole:
             return row
         if role == Qt.ItemDataRole.ToolTipRole:
-            return f"{row['name']}\n测线 {row['line_id']}\n{row['record'].note}"
+            return f"{row['name']} · {row['purpose']}\n测线 {row['line_id']} · {row['position']}\n{row['status']}\n{row['record'].note}".rstrip()
         return None
 
 
@@ -66,6 +68,27 @@ class MarkerFilter(QSortFilterProxyModel):
             or (self.status == '可定位' and bool(row['projection'].positions or row['projection'].spans)))
 
 
+class MarkerTableView(QTableView):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.horizontalHeader().setMinimumSectionSize(44)
+        self.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.verticalHeader().hide()
+        self.verticalHeader().setDefaultSectionSize(36)
+        self.setShowGrid(False)
+        self.setWordWrap(False)
+        self.setTextElideMode(Qt.TextElideMode.ElideRight)
+        self.setAlternatingRowColors(True)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        width = max(260, self.viewport().width())
+        widths = (int(width * .35), int(width * .19), int(width * .24))
+        for column, size in enumerate((*widths, width - sum(widths))):
+            self.setColumnWidth(column, size)
+
+
 class MarkerPanel(QWidget):
     operation = pyqtSignal(str, object)
     selected = pyqtSignal(str)
@@ -83,17 +106,25 @@ class MarkerPanel(QWidget):
         self._requests = {}
         self.editor = None
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(8)
         header = QHBoxLayout()
-        self.scope = QComboBox(self)
-        self.scope.addItems(['当前测线', '整个项目'])
-        header.addWidget(self.scope, 1)
-        close = QPushButton('关闭', self)
+        header.addWidget(section_title('标记与区间', self))
+        header.addStretch()
+        close = QToolButton(self)
+        close.setText('×')
+        close.setAccessibleName('关闭标记列表')
+        close.setToolTip('关闭列表')
+        close.setFixedSize(28, 28)
         close.clicked.connect(self.close_requested)
         header.addWidget(close)
         layout.addLayout(header)
+        self.scope = QComboBox(self)
+        self.scope.addItems(['当前测线', '整个项目'])
+        layout.addWidget(self.scope)
         self.search = QLineEdit(self)
         self.search.setPlaceholderText('搜索名称或备注')
+        self.search.setClearButtonEnabled(True)
         layout.addWidget(self.search)
         filters = QHBoxLayout()
         self.kind = QComboBox(self)
@@ -103,21 +134,18 @@ class MarkerPanel(QWidget):
         self.status = QComboBox(self)
         self.status.addItems(['全部状态', '可定位', '已排除'])
         for combo in (self.kind, self.purpose, self.status):
+            combo.setMinimumWidth(0)
+            combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
             filters.addWidget(combo)
             combo.currentIndexChanged.connect(self._filter)
         layout.addLayout(filters)
         self.model = MarkerTableModel(self)
         self.proxy = MarkerFilter(self)
         self.proxy.setSourceModel(self.model)
-        self.table = QTableView(self)
+        self.table = MarkerTableView(self)
         self.table.setModel(self.proxy)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.verticalHeader().hide()
-        for column, width in enumerate((72, 55, 92, 80)):
-            self.table.setColumnWidth(column, width)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._menu)
         self.table.doubleClicked.connect(lambda _: self.edit_selected())
@@ -129,13 +157,17 @@ class MarkerPanel(QWidget):
         more = QPushButton('操作 ▾', self)
         self.new_point.clicked.connect(lambda: self.edit(MarkerRecord(anchor=self.view.anchor(0))) if self.view else None)
         self.new_interval.clicked.connect(self.make_interval)
-        more.clicked.connect(lambda: self._menu(more.mapTo(self.table.viewport(), more.rect().bottomLeft())))
+        more.clicked.connect(lambda: self._menu(self.table.viewport().mapFromGlobal(
+            more.mapToGlobal(more.rect().bottomLeft()))))
         for button in (self.new_point, self.new_interval, more):
             buttons.addWidget(button)
         layout.addLayout(buttons)
         self.message = QLabel(self)
         self.message.setWordWrap(True)
         layout.addWidget(self.message)
+        self.count_label = QLabel(self)
+        self.count_label.setObjectName('markerCount')
+        layout.addWidget(self.count_label)
         self.scope.currentIndexChanged.connect(self._scope)
         self.search.textChanged.connect(self._filter)
         self._shortcuts = []
@@ -144,6 +176,10 @@ class MarkerPanel(QWidget):
             shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
             shortcut.activated.connect(callback)
             self._shortcuts.append(shortcut)
+        self.apply_theme(isDarkTheme())
+
+    def apply_theme(self, dark):
+        self.setStyleSheet(marker_style(dark))
 
     def set_view(self, view):
         if view is self.view:
@@ -177,7 +213,7 @@ class MarkerPanel(QWidget):
             if mapped.isValid() and current and row['uid'] == current['uid']:
                 selection.setCurrentIndex(mapped, QItemSelectionModel.SelectionFlag.NoUpdate)
         del blocker
-        self.message.setText(f'{len(rows)} 条记录')
+        self.message.clear()
 
     def _filter(self, *_):
         self.proxy.query = self.search.text().strip().casefold()
@@ -185,6 +221,8 @@ class MarkerPanel(QWidget):
         self.proxy.purpose = self.purpose.currentText() if self.purpose.currentIndex() > 0 else ''
         self.proxy.status = self.status.currentText() if self.status.currentIndex() else ''
         self.proxy.invalidateFilter()
+        visible, total = self.proxy.rowCount(), self.model.rowCount()
+        self.count_label.setText(f'{total} 条记录' if visible == total else f'{visible} / {total} 条记录')
 
     def _scope(self):
         if not self.view:

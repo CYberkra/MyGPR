@@ -30,7 +30,7 @@ class MarkerBrowserButton(QPushButton):
             layout.addWidget(self.panel)
             self.panel.operation.connect(self.operation)
             self.panel.close_requested.connect(self.dialog.hide)
-            self.panel.navigate.connect(self.navigate)
+            self.panel.navigate.connect(self._navigate)
             self.panel.selected.connect(self._selected)
             self.panel.locate.connect(self._locate)
         self.dialog.show()
@@ -48,7 +48,12 @@ class MarkerBrowserButton(QPushButton):
     def _locate(self, uid):
         row = next((row for row in self.panel.model.rows if row['uid'] == uid), None)
         if row:
-            self.navigate.emit('processing', row)
+            self._navigate('processing', row)
+
+    def _navigate(self, page, row):
+        if self.dialog:
+            self.dialog.hide()
+        self.navigate.emit(page, row)
 
     def deliver(self, token, result, error):
         if self.panel:

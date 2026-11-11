@@ -310,6 +310,14 @@ class InterpretationPage(PanelStateMixin, QWidget):
         text = text or '未打开会话'
         self._session_status_label.setText(text)
 
+    def set_session_source(self, artifact_id: str) -> None:
+        """Reflect an externally opened session in the source selector."""
+        index = self._artifact_combo.findData(artifact_id)
+        if artifact_id and index < 0:
+            self._artifact_combo.addItem(f'成果: {artifact_id}', userData=artifact_id)
+            index = self._artifact_combo.count() - 1
+        self._artifact_combo.setCurrentIndex(max(0, index))
+
     def set_saved_status(self, status):
         self._saved_status = str(status or 'draft')
         self.set_session_info('已确认' if self._saved_status == 'confirmed' else '草稿已保存')
