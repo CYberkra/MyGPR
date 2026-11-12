@@ -142,6 +142,7 @@ class ProcessingMenus:
             if key != self._draft_key() or self._draft_locked() or not self._draft_backups.get(key):
                 return
             backup = self._draft_backups[key].pop()
+            self._reset_step_tools()
             self._suspend = True
             self._pipeline_list.set_steps(deepcopy(backup.get('steps') or []))
             self._result_name_edit.setText(backup.get('result_name') or '')

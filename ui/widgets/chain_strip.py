@@ -386,7 +386,7 @@ class ChainStrip(QWidget):
         return self._run_btn
 
     def add_button(self):
-        """加号按钮：算法选择器的锚定控件。"""
+        """打开算法库的加号按钮。"""
         return self._add_btn
 
     def set_run_button_visible(self, visible: bool) -> None:

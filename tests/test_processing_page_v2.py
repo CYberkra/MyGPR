@@ -921,6 +921,10 @@ class TestAuditFixes20261009:
         page = ProcessingPage()
         try:
             assert page._autotune_card.is_collapsed() is True
+            page.set_line_label('L01')
+            page.set_original_bundle(_bundle(1))
+            page._pipeline_list.add_step('dewow', '去直流', {'win': 3})
+            page._on_autotune_clicked()
             page.set_autotune_result('dewow', {'best_params': {'win': 5}})
             assert page._autotune_card.is_collapsed() is False
         finally:

@@ -399,17 +399,20 @@ class ProcessingChain:
 
     def on_autotune_requested(self, method_id: str, params_hint: dict,
                               input_artifact_id: str = "") -> None:
+        processing = self._co.page('processingInterface')
         if self._co.processing_controller is None:
+            processing.set_autotune_failed(method_id)
             return
         line_id = self._co.require_line()
         if not line_id:
+            processing.set_autotune_failed(method_id)
             return
         self._co.processing_controller.run_autotune(
             self._co.current_project_id(), line_id, str(method_id),
             dict(params_hint or {}),
             input_artifact_id=str(input_artifact_id or ""))
         # P2-7：运行期间禁用"开始调参"，防重复提交
-        self._co.page('processingInterface').set_autotune_running(True)
+        processing.set_autotune_running(True)
         self._co.infobar('info', 'AutoTune 自动调参', f'已提交调参任务：{method_id}')
 
     def on_autotune_finished(self, method_id: str, result: dict) -> None:
@@ -419,7 +422,7 @@ class ProcessingChain:
         self._co.infobar('success', 'AutoTune 自动调参', f'调参完成：{method_id}')
 
     def on_autotune_failed(self, method_id: str, message: str) -> None:
-        self._co.page('processingInterface').set_autotune_running(False)
+        self._co.page('processingInterface').set_autotune_failed(method_id)
         self._co.infobar('error', 'AutoTune 自动调参',
                          f'{method_id}: {message}')
 

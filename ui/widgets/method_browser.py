@@ -10,7 +10,7 @@ tooltip 显示全名、作用说明和检索别名。
 import unicodedata
 
 from PyQt6.QtCore import QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QBrush, QColor, QFont
+from PyQt6.QtGui import QBrush, QColor, QFont, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (QApplication, QHBoxLayout, QTreeWidget,
                              QTreeWidgetItem, QVBoxLayout, QWidget, QLabel)
 from qfluentwidgets import LineEdit
@@ -36,6 +36,7 @@ class MethodBrowser(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._methods = []
+        self._items = {}
         self.add_label = '添加到处理链'
         self._search_expansion = None
 
@@ -54,6 +55,16 @@ class MethodBrowser(QWidget):
         self._tree.setUniformRowHeights(False)
         self._tree.currentItemChanged.connect(self._on_current_changed)
         self._tree.itemDoubleClicked.connect(self._on_double_clicked)
+        self._activate_keys = []
+        for key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            shortcut = QShortcut(QKeySequence(key), self._tree,
+                                 context=Qt.ShortcutContext.WidgetShortcut)
+            shortcut.setAutoRepeat(False)
+            shortcut.activated.connect(self._add_current_method)
+            self._activate_keys.append(shortcut)
+        self._search_down = QShortcut(QKeySequence(Qt.Key.Key_Down), self._search,
+                                      context=Qt.ShortcutContext.WidgetShortcut)
+        self._search_down.activated.connect(self._focus_results)
         self._method_menu = ObjectMenuBinding(self, self._tree, self._context_menu)
 
         layout = QVBoxLayout(self)
@@ -85,8 +96,19 @@ class MethodBrowser(QWidget):
         self._rebuild_tree()
         self._empty.setVisible(not self._methods)
 
+    def focus_search(self):
+        self._search.setFocus()
+        self._search.selectAll()
+
+    def reset_selection(self):
+        self._search.clear()
+        self._tree.setCurrentItem(None)
+        for index in range(self._tree.topLevelItemCount()):
+            self._tree.topLevelItem(index).setExpanded(index == 0)
+
     def _rebuild_tree(self):
         self._tree.clear()
+        self._items = {}
         self._search_expansion = None
         groups = {}
         order = []
@@ -120,6 +142,7 @@ class MethodBrowser(QWidget):
                     str(part or '') for part in (name, m.get('name'), m.get('method_id'),
                                                    description, cat)))
                 top.addChild(child)
+                self._items[m.get('method_id', '')] = child
 
                 row_widget = QWidget(self._tree)
                 row_widget.setObjectName('methodRow')
@@ -162,6 +185,10 @@ class MethodBrowser(QWidget):
             total_hits += visible_children
         if not needle:
             self._search_expansion = None
+        current = self._tree.currentItem()
+        if current is not None and (current.isHidden() or
+                                    (current.parent() is not None and current.parent().isHidden())):
+            self._tree.setCurrentItem(None)
         self.sig_filter_count.emit(total_hits)
         # 有关键词、有方法、但一个都没命中 → 无匹配浮层（空库不叠：
         # 「暂无方法」引导已覆盖该态）
@@ -193,9 +220,28 @@ class MethodBrowser(QWidget):
 
     # ------------------------------------------------------------- 信号
     def _method_id_of(self, item):
-        if item is None or item.parent() is None:
+        if item is None or item.parent() is None or item.isHidden() or item.parent().isHidden():
             return None
         return item.data(0, Qt.ItemDataRole.UserRole)
+
+    def is_method_visible(self, method_id):
+        return bool(self._method_id_of(self._items.get(method_id)))
+
+    def select_method(self, method_id):
+        if self.is_method_visible(method_id):
+            item = self._items[method_id]
+            item.parent().setExpanded(True)
+            self._tree.setCurrentItem(item)
+
+    def _focus_results(self):
+        method_id = self.current_method_id() or next(
+            (key for key in self._items if self.is_method_visible(key)), None)
+        if method_id:
+            self.select_method(method_id)
+            self._tree.setFocus()
+
+    def _add_current_method(self):
+        self._on_double_clicked(self._tree.currentItem(), 0)
 
     def _on_current_changed(self, current, _previous):
         self.sig_method_selected.emit(str(self._method_id_of(current) or ''))
@@ -216,7 +262,7 @@ class MethodBrowser(QWidget):
             return menu
         add_action(menu, FIF.ADD, self.add_label,
                    lambda: self.sig_add_requested.emit(mid)
-                   if any(str(method.get('method_id') or '') == mid for method in self._methods) else None)
+                   if self.is_method_visible(mid) else None)
         menu.addSeparator()
         # 复制的是用户看到的名字（display_name）——原复制 method_id
         # 是开发者视角，粘贴出来对不上界面字样（2026-10-09 深查 P3）

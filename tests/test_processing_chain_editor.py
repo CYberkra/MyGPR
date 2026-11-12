@@ -52,15 +52,14 @@ def test_click_edits_parameters_and_refreshes_summary_without_changing_input(pag
     page._add_method_to_pipeline('dewow')
     qapp.processEvents()
     click_step(page, 0)
-    popup = page._step_editor
-    assert popup is not None and popup.isVisible()
-    popup._form.set_values({'window': 41})
-    popup._apply_btn.click()
+    assert page._param_form.isVisibleTo(page)
+    page._param_form._editors['window'].setValue(41)
+    page._commit_step_btn.click()
     assert page.current_pipeline()['steps'][0]['params'] == {'window': 41}
     assert '41' in page._chain_strip._steps[0]['param_summary']
     assert page.current_pipeline()['input_artifact_id'] == 'A'
     click_step(page, 0)
-    assert page._step_editor is not None
+    assert page._editor_uid == page._pipeline_list.step_uid(0)
 
 
 def test_chain_reorder_changes_pipeline_and_tab_reorder_does_not(page):
@@ -80,11 +79,12 @@ def test_switching_inputs_restores_visible_chain_and_invalidates_old_editor(page
     page._add_method_to_pipeline('dewow')
     qapp.processEvents()
     click_step(page, 0)
-    old = page._step_editor
+    page._param_form._editors['window'].setValue(77)
+    assert page._commit_step_btn.isEnabled()
     page.select_artifact('B')
     assert page._chain_strip._steps == []
     page._add_method_to_pipeline('agc')
-    old.sig_applied.emit({'index': 0, 'params': {'window': 77}, 'enabled': True})
+    page._commit_step_form()
     assert page.current_pipeline()['steps'][0]['params'] == {'window': 9}
     page.select_artifact('A')
     assert page._chain_strip._steps[0]['label'] == 'Dewow'
@@ -156,20 +156,18 @@ def test_line_switch_closes_editor_before_new_preview_arrives(page, qapp):
     page._add_method_to_pipeline('dewow')
     qapp.processEvents()
     click_step(page, 0)
-    popup = page._step_editor
     page.set_line_label('L02')
-    assert not popup.isVisible()
-    assert page._step_editor is None
+    assert page._param_form.isHidden()
+    assert page._editor_uid == ''
 
 
 def test_old_method_picker_cannot_append_to_a_different_source(page):
     page.select_artifact('A')
     page._open_method_picker()
-    old = page._method_picker
     page.select_artifact('B')
-    old.sig_method_chosen.emit('dewow')
+    page._method_browser.sig_add_requested.emit('dewow')
     assert page.current_pipeline()['steps'] == []
-    assert not old.isVisible()
+    assert page._method_browser.isHidden()
 
 
 def test_identical_drafts_still_invalidate_the_old_chain_menu(page):
@@ -180,8 +178,9 @@ def test_identical_drafts_still_invalidate_the_old_chain_menu(page):
     menu = page._chain_strip._build_overflow_menu()
     old_edit = menu._step_submenus[0].menuActions()[1]
     page.select_artifact('B')
+    page._tools_panel.setCurrentIndex(1)
     old_edit.trigger()
-    assert page._step_editor is None
+    assert page._tools_panel.currentIndex() == 1
 
 
 def test_reordering_same_summary_steps_invalidates_old_overflow_menu(page):
@@ -192,16 +191,17 @@ def test_reordering_same_summary_steps_invalidates_old_overflow_menu(page):
     menu = page._chain_strip._build_overflow_menu()
     old_edit = menu._step_submenus[0].menuActions()[1]
     page._pipeline_list._move_step_to(0, 2)
+    page._tools_panel.setCurrentIndex(1)
     old_edit.trigger()
-    assert page._step_editor is None
+    assert page._tools_panel.currentIndex() == 1
 
 
 def test_replace_picker_rejects_a_target_moved_after_opening(page):
     page._add_method_to_pipeline('dewow')
     page._add_method_to_pipeline('agc')
     page._open_method_picker(purpose='replace', index=0)
-    picker = page._method_picker
+    page._method_browser.select_method('dewow')
     page._pipeline_list._move_step_to(0, 2)
     before = page.current_pipeline()
-    picker.sig_method_chosen.emit('dewow')
+    page._commit_step_btn.click()
     assert page.current_pipeline() == before

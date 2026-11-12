@@ -18,11 +18,9 @@ def _bundle():
 
 
 @pytest.fixture
-def page(qapp, monkeypatch):
+def page(qapp):
     from PyQt6.QtCore import QCoreApplication, QEvent
-    from ui.pages import processing_steps
 
-    monkeypatch.setattr(processing_steps.InfoBar, 'success', lambda **_: None)
     widget = ProcessingPage()
     widget.set_project_context('P')
     widget.autotune_requested.connect(lambda *_: widget.set_autotune_running(True))
@@ -95,3 +93,49 @@ def test_completion_keeps_submitted_input_identity_after_navigation(page):
     assert page._adopt_params_btn.isEnabled()
     page._adopt_params_btn.click()
     assert page.current_pipeline()['steps'][0]['params'] == {'win': 99}
+
+
+def test_recommendation_follows_exact_step_after_reorder_and_selection_change(page):
+    _select_line(page, 'L01', 3)
+    page._pipeline_list.add_step('dewow', 'Dewow', {'win': 7})
+    submitted = []
+    page.autotune_requested.connect(lambda *args: submitted.append(args))
+    target = page._pipeline_list.step_uid(1)
+    page._on_autotune_clicked()
+    assert submitted == [('dewow', {'win': 7}, '')]
+    page._pipeline_list._move_step_to(1, 0)
+    page._pipeline_list.select_step(1)
+    _finish(page, 99)
+    assert '应用到当前第 1 步' in page._autotune_result_label.text()
+    page._adopt_params_btn.click()
+    assert page._pipeline_list.step_uid(0) == target
+    assert [step['params']['win'] for step in page.current_pipeline()['steps']] == [99, 3]
+
+
+@pytest.mark.parametrize('edit', ['remove', 'replace', 'params'])
+def test_recommendation_rejects_stale_target_without_same_method_fallback(page, edit):
+    _select_line(page, 'L01', 3)
+    page._pipeline_list.add_step('dewow', 'Dewow', {'win': 7})
+    page._on_autotune_clicked()
+    if edit == 'remove':
+        page._on_chain_step_removed(1)
+    elif edit == 'replace':
+        page._replace_step_method(1, 'dewow', {'win': 7})
+    else:
+        page._pipeline_list.update_step_params(1, {'win': 9})
+    before = page.current_pipeline()
+    _finish(page, 99)
+    assert not page._adopt_params_btn.isEnabled()
+    page._on_adopt_params()
+    assert page.current_pipeline() == before
+
+
+def test_changed_input_revision_blocks_adoption_before_preview_arrives(page):
+    _select_line(page, 'L01', 3)
+    page._on_autotune_clicked()
+    _finish(page, 99)
+    assert page._adopt_params_btn.isEnabled()
+    page.set_original_revision('P', 'L01', 'new revision')
+    assert not page._adopt_params_btn.isEnabled()
+    page._on_adopt_params()
+    assert page.current_pipeline()['steps'][0]['params'] == {'win': 3}
