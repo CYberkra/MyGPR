@@ -118,22 +118,26 @@ def test_ten_thousand_records_search_and_cluster_without_truncation(qapp):
     view.close()
 
 
-def test_marker_strip_returns_space_to_plot_when_one_row_is_enough(qapp):
+def test_marker_strip_shares_axis_title_even_with_overlapping_records(qapp):
     view = BScanView()
     view.resize(850, 450)
     view.show()
     bundle = make_preview_bundle(np.ones((12, 20), np.float32))
-    sparse = marker_view(1)
-    dense = marker_view(21)  # Two records share the first trace.
-    heights = []
-    for context in (sparse, dense, sparse):
-        view.set_bundle(replace(bundle, marker_view=context))
-        qapp.processEvents()
-        view.marker_strip.repaint()
-        qapp.processEvents()
-        heights.append(view.marker_strip.height())
-    assert heights[0] < heights[1]
-    assert heights[2] == heights[0]
+    view.set_bundle(replace(bundle, trace_axis_m=np.arange(20, dtype=float), marker_view=marker_view(21)))
+    view.set_x_axis_mode('distance')
+    view.apply_theme(True)
+    qapp.processEvents()
+
+    assert view._bottom_axis.isVisible()
+    assert not view._bottom_axis.label.isVisible()
+    assert view.marker_strip.accessibleDescription() == '距离 (m)'
+    hits = view.marker_strip._hits
+    assert any(len(ids) > 1 for _, ids in hits)
+    assert len({rect.center().y() for rect, _ in hits}) == 1
+
+    view.set_acquisition_markers_visible(False)
+    assert view.marker_strip.isHidden()
+    assert view._bottom_axis.label.isVisible()
     view.close()
 
 

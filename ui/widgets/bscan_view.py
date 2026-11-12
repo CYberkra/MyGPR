@@ -317,6 +317,7 @@ class BScanView(BScanMarkerEventsMixin, BScanSelectionMixin, BScanTimeWindowMixi
         """
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         layout.addWidget(self._glw, 1)
 
         # 采集标记箭头：挂在 _glw 里的透明浮层，几何严格跟随 ViewBox。
@@ -425,6 +426,7 @@ class BScanView(BScanMarkerEventsMixin, BScanSelectionMixin, BScanTimeWindowMixi
         """按当前单位刷新显示矩阵、轴标签与刻度文本（切换/来数据共用）。"""
         swapped = self._refresh_elevation_image()
         self._plot.setLabel('bottom', self._bottom_label())
+        self.marker_strip.sync_axis_title()
         self._plot.setLabel('left', self._left_label())
         self._refresh_axis_state()
         if swapped:
@@ -639,7 +641,10 @@ class BScanView(BScanMarkerEventsMixin, BScanSelectionMixin, BScanTimeWindowMixi
     def set_acquisition_markers_visible(self, visible: bool) -> None:
         self._acquisition_markers_visible = bool(visible)
         if self._marker_view is not None:
-            self.marker_strip.setVisible(bool(visible) and bool(self.marker_strip.rows))
+            if visible:
+                self.marker_strip.refresh_visibility()
+            else:
+                self.marker_strip.cancel_edit()
             self._marker_pins.hide()
             return
         self._marker_pins.setVisible(
@@ -754,11 +759,11 @@ class BScanView(BScanMarkerEventsMixin, BScanSelectionMixin, BScanTimeWindowMixi
         palette = control_palette(dark)
         self._glw.setBackground(palette['plot_bg'])
         self._marker_pins.set_theme(dark)
-        self.marker_strip.update()
         style_plot_item(
             self._plot, dark,
             colorbar_axis=(self._colorbar.axis
                            if self._colorbar is not None else None))
+        self.marker_strip.sync_axis_title()
         self._refresh_control_palette(dark)
         # 十字光标：深色主题黄 / 浅色主题深红（图像与白底上均醒目）
         crosshair_pen = pg.mkPen(

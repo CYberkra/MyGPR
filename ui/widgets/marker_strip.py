@@ -1,8 +1,8 @@
-"""A two-lane, pixel-clustered annotation strip sharing the B-scan transform."""
+"""Single-row annotations that replace the B-scan's horizontal axis title."""
 from __future__ import annotations
 
 import numpy as np
-from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QPointF, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter, QPen
 from PyQt6.QtWidgets import QWidget
 from qfluentwidgets import isDarkTheme
@@ -16,7 +16,8 @@ _PURPOSE_COLOR = {
     '停车等待': 'warning', '外部干扰': 'error', '目标范围': 'success', '现场操作': 'info',
 }
 _LABEL_INSET = 21
-_LANE_HEIGHT = 26
+_AXIS_ROW_HEIGHT = 25
+_PILL_GAP = 4
 
 
 def _draw_pill(painter, rect, fill, border):
@@ -42,11 +43,7 @@ class MarkerStrip(QWidget):
         self._first = None
         self._adjusting = ''
         self._drag_side = None
-        self._strip_height = _LANE_HEIGHT + 2
-        self.setFixedHeight(self._strip_height)
-        self._height_timer = QTimer(self)
-        self._height_timer.setSingleShot(True)
-        self._height_timer.timeout.connect(lambda: self.setFixedHeight(self._strip_height))
+        self.setFixedHeight(_AXIS_ROW_HEIGHT)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAccessibleName('测线标记条')
         self.setMouseTracking(True)
@@ -56,16 +53,29 @@ class MarkerStrip(QWidget):
 
     def set_rows(self, rows):
         self.rows = tuple(rows)
-        self._first = None
-        self._creating = False
-        self._adjusting = ''
-        self.setVisible(bool(rows) and self.view._acquisition_markers_visible)
+        self.cancel_edit()
+
+    def cancel_edit(self):
+        self._creating, self._first, self._adjusting, self._drag_side = False, None, '', None
+        self.refresh_visibility()
+
+    def refresh_visibility(self):
+        visible = not self.view._thumbnail_mode and bool(
+            self._creating or self._adjusting or (self.rows and self.view._acquisition_markers_visible)
+        )
+        self.setVisible(visible)
+        self.sync_axis_title()
+
+    def sync_axis_title(self):
+        axis = self.view._bottom_axis
+        axis.showLabel(self.isHidden() and bool(axis.labelText or axis.labelUnits))
+        self.setAccessibleDescription(axis.labelText)
         self.update()
 
     def begin_range(self):
         self._creating = True
         self._first = None
-        self.show()
+        self.refresh_visibility()
         self.setFocus()
         self.setToolTip('依次点击起止边界；Esc 取消')
         self.update()
@@ -73,7 +83,7 @@ class MarkerStrip(QWidget):
     def begin_adjust(self, uid):
         self._adjusting = uid
         self.selected_id = uid
-        self.show()
+        self.refresh_visibility()
         self.setFocus()
         self.setToolTip('拖动选中区间边界；Esc 取消')
         self.update()
@@ -108,16 +118,47 @@ class MarkerStrip(QWidget):
         painter.setFont(ui_font(FONT_SIZE_SECONDARY))
         metrics = painter.fontMetrics()
         theme = tokens(isDarkTheme())
-        painter.fillRect(self.rect(), QColor(theme['bg_surface']))
+        painter.fillRect(self.rect(), QColor(theme['plot_background']))
         bounds = self.view._plot.vb.sceneBoundingRect()
         self._hits = []
-        left = max(0, self._from_viewport(self.view._glw.mapFromScene(bounds.topLeft())).x())
+        plot_left = max(0, self._from_viewport(self.view._glw.mapFromScene(bounds.topLeft())).x())
         right = min(self.width(), self._from_viewport(self.view._glw.mapFromScene(bounds.topRight())).x())
+        title = self.view._bottom_axis.labelText.split('（全量', 1)[0]
+        title_width = metrics.horizontalAdvance(title)
+        left = max(plot_left, title_width + 14)
+        painter.setPen(QColor(theme['plot_foreground']))
+        painter.drawText(QRectF(6, 0, title_width, self.height()), Qt.AlignmentFlag.AlignVCenter, title)
         if right <= left:
             return
-        painter.setClipRect(QRectF(left, 0, right - left, self.height()))
-        painter.setPen(QPen(QColor(theme['border_default'])))
-        painter.drawLine(left, 0, right, 0)
+        painter.setClipRect(QRectF(plot_left, 0, right - plot_left, self.height()))
+        if self._creating:
+            label = '选择起点' if self._first is None else '选择终点'
+            rect = QRectF(left, 3, min(right - left, metrics.horizontalAdvance(label) + 20), 19)
+            _draw_pill(painter, rect, theme['primary_subtle'], theme['primary_border'])
+            painter.setPen(QColor(theme['text_primary']))
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, label)
+            if self._first is not None:
+                x = self.pixel_x(self._first)
+                painter.drawLine(QPointF(x, 0), QPointF(x, 4))
+            return
+
+        items = self._visible_items(plot_left, right)
+        entries, overflow = self._pack_items(items, metrics, left, right)
+        if overflow:
+            # Keep a single count on the same row, even for very dense records.
+            width = min(max(36, metrics.horizontalAdvance(f'+{len(items)}') + 14), (right - left) / 2)
+            count_rect = QRectF(right - width, 3, width, 19)
+            entries, overflow = self._pack_items(items, metrics, left, count_rect.left() - _PILL_GAP)
+            if overflow:
+                self._hits.append((count_rect, overflow))
+                _draw_pill(painter, count_rect, theme['bg_muted'], theme['border_default'])
+                painter.setPen(QColor(theme['text_secondary']))
+                painter.drawText(count_rect, Qt.AlignmentFlag.AlignCenter, f'+{len(overflow)}')
+        for rect, anchor, spans, row in reversed(entries):
+            self._hits.append((rect, [row['uid']]))
+            self._draw_marker(painter, theme, rect, anchor, spans, row)
+
+    def _visible_items(self, left, right):
         items = []
         for row in self.rows:
             if row['record'].excluded:
@@ -125,83 +166,52 @@ class MarkerStrip(QWidget):
             projection = row['projection']
             spans = projection.spans or tuple((point, point) for point in projection.positions)
             edge = .5 if projection.spans else 0.
+            visible_spans = []
             for start, stop in spans:
                 x1 = self.pixel_x(start, offset=-edge)
                 x2 = self.pixel_x(max(start, stop - 1), offset=edge)
                 lo, hi = min(x1, x2), max(x1, x2)
-                if hi < left or lo > right:
-                    continue
-                items.append((lo, hi, row, bool(projection.spans)))
-        # Selected records claim a lane first. Remaining collisions become count controls.
-        items.sort(key=lambda item: (item[2]['uid'] != self.selected_id, item[0]))
-        lanes = [[], []]
-        clusters = {}
-        entries = []
-        for x1, x2, row, interval in items:
-            lo = max(float(left), x1 if interval else x1 - 10)
-            label_width = min(152, max(36, metrics.horizontalAdvance(row['name']) + _LABEL_INSET + 8))
-            width = min(right - left, max(label_width, min(float(right), x2) - lo))
-            lo = min(lo, right - width)
-            lane = next((i for i in range(2) if all(
-                lo >= end + 3 or lo + width + 3 <= begin for begin, end in lanes[i])), None)
-            if lane is None:
-                cell = int((lo - left) // 56)
-                clusters.setdefault(cell, []).append(row['uid'])
-                continue
-            lanes[lane].append((lo, lo + width))
-            rect = QRectF(lo, 3 + lane * _LANE_HEIGHT, width, 23)
-            entries.append((rect, x1, x2, row, interval))
-        self._strip_height = _LANE_HEIGHT * (2 if lanes[1] or clusters else 1) + 2
-        if self.height() != self._strip_height:
-            # A height change resizes the plot and its ViewBox. Defer it until
-            # painting is done so both lanes keep the same x transform.
-            self._height_timer.start(0)
-        # Reserve cluster space before drawing labels, so a count never obscures
-        # half a name. The selected record owns lane zero and remains visible.
-        for cell, ids in sorted(clusters.items()):
-            width = min(52, right - left)
-            rect = QRectF(min(left + cell * 56, right - width), _LANE_HEIGHT + 4, width, 22)
-            overlapping = [(hit, members) for hit, members in self._hits if hit.intersects(rect)]
-            for hit, members in overlapping:
-                rect = rect.united(hit)
-                ids = [*ids, *members]
-            self._hits = [(hit, members) for hit, members in self._hits if not hit.intersects(rect)]
-            covered = [entry for entry in entries if entry[0].intersects(rect)]
-            ids = list(dict.fromkeys([*ids, *(entry[3]['uid'] for entry in covered)]))
-            entries = [entry for entry in entries if not entry[0].intersects(rect)]
-            self._hits.append((rect, ids))
-        cluster_count = len(self._hits)
-        for rect, x1, x2, row, interval in entries:
-            self._hits.append((rect, [row['uid']]))
-            self._draw_marker(painter, theme, rect, x1, x2, row, interval)
-        for rect, ids in self._hits[:cluster_count]:
-            _draw_pill(painter, rect, theme['bg_muted'], theme['border_default'])
-            painter.setPen(QColor(theme['text_secondary']))
-            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, f'+{len(ids)}')
-        if self._creating:
-            label = '选择起点' if self._first is None else '选择终点'
-            rect = QRectF(left, 3, min(right - left, metrics.horizontalAdvance(label) + 20), 20)
-            _draw_pill(painter, rect, theme['primary_subtle'], theme['primary_border'])
-            painter.setPen(QColor(theme['text_primary']))
-            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, label)
+                if hi >= left and lo <= right:
+                    visible_spans.append((lo, hi))
+            if visible_spans:
+                lo, hi = visible_spans[0]
+                anchor = (max(left, lo) + min(right, hi)) / 2
+                items.append((anchor, visible_spans if projection.spans else (), row))
+        return sorted(items, key=lambda item: (item[2]['uid'] != self.selected_id, item[0]))
 
-    def _draw_marker(self, painter, theme, rect, x1, x2, row, interval):
+    @staticmethod
+    def _pack_items(items, metrics, left, right):
+        entries = []
+        overflow = []
+        for anchor, spans, row in items:
+            label_width = metrics.horizontalAdvance(row['name']) + _LABEL_INSET + 8
+            width = min(right - left, max(36, min(152, label_width)))
+            x = min(max(left, anchor - width / 2), right - width)
+            rect = QRectF(x, 3, width, 19)
+            padded_rect = rect.adjusted(-_PILL_GAP, 0, _PILL_GAP, 0)
+            if width <= 0 or any(padded_rect.intersects(item[0]) for item in entries):
+                overflow.append(row['uid'])
+            else:
+                entries.append((rect, anchor, spans, row))
+        return entries, overflow
+
+    def _draw_marker(self, painter, theme, pill, anchor, spans, row):
         selected = row['uid'] == self.selected_id
         ink = QColor(theme['primary' if selected else _PURPOSE_COLOR.get(row['purpose'], 'text_secondary')])
-        pill = rect.adjusted(0, 0, 0, -3)
         fill = theme['primary_subtle' if selected else 'bg_subtle']
         border = theme['primary_border' if selected else 'border_default']
         _draw_pill(painter, pill, fill, border)
         x, y = pill.left() + 11, pill.center().y()
         painter.setPen(QPen(ink, 1.5, cap=Qt.PenCapStyle.RoundCap))
-        if interval:
+        if spans:
             painter.drawLine(QPointF(x - 4, y), QPointF(x + 4, y))
-            rail_y = rect.bottom() - .5
-            painter.drawLine(QPointF(x1, rail_y), QPointF(x2, rail_y))
-            for endpoint in (x1, x2):
-                painter.drawLine(QPointF(endpoint, rail_y - 3), QPointF(endpoint, rail_y))
+            rail_y = self.height() - 1
+            for x1, x2 in spans:
+                painter.drawLine(QPointF(x1, rail_y), QPointF(x2, rail_y))
+                for endpoint in (x1, x2):
+                    painter.drawLine(QPointF(endpoint, rail_y - 2), QPointF(endpoint, rail_y))
         else:
-            painter.drawLine(QPointF(x1, pill.top() - 2), QPointF(x1, pill.top()))
+            painter.drawLine(QPointF(anchor, 0), QPointF(pill.center().x(), pill.top()))
             if row['projection'].status == 'open':
                 painter.drawText(QRectF(x - 6, pill.top(), 12, pill.height()), Qt.AlignmentFlag.AlignCenter, '…')
             else:
@@ -224,7 +234,7 @@ class MarkerStrip(QWidget):
                 self._first = trace
             else:
                 first = self._first
-                self._creating, self._first = False, None
+                self.cancel_edit()
                 self.range_created.emit(min(first, trace), max(first, trace), '')
             self.update()
             return
@@ -254,7 +264,7 @@ class MarkerStrip(QWidget):
             value = self.trace_at(event.position().toPoint())
             start, end = (value, end) if first else (start, value)
             uid = self._adjusting
-            self._drag_side, self._adjusting = None, ''
+            self.cancel_edit()
             self.range_created.emit(min(start, end), max(start, end), uid)
 
     def mouseDoubleClickEvent(self, event):
@@ -273,14 +283,13 @@ class MarkerStrip(QWidget):
                 self.setToolTip(f'{len(ids)} 条记录，点击展开' if len(ids) > 1 else
                                f"{row['name']} · {row['position']} · {row['status']}")
                 return
-        self.setToolTip('')
+        title = self.view._bottom_axis.labelText
+        self.setToolTip(title if event.position().x() < 60 else '')
         self.unsetCursor()
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:
-            self._creating, self._first, self._adjusting, self._drag_side = False, None, '', None
-            self.setVisible(bool(self.rows) and self.view._acquisition_markers_visible)
-            self.update()
+            self.cancel_edit()
             event.accept()
         else:
             super().keyPressEvent(event)

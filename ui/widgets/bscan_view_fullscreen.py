@@ -19,6 +19,7 @@ class BScanViewFullscreenMixin:
         self._thumbnail_mode = bool(on)
         for axis in ('bottom', 'left'):
             (self._plot.hideAxis if on else self._plot.showAxis)(axis)
+        self.marker_strip.refresh_visibility()
         if on:
             self._fullscreen_btn.hide()
             for name in ('_fullscreen_fit_btn', '_fullscreen_close_btn'):
