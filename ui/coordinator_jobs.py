@@ -40,7 +40,7 @@ class JobHub:
         self.register_processing(job_id, context)
         self.known_job_ids.add(job_id)
         for view in self._views():
-            view.upsert_job(job_id, f'处理流水线 {context["line_id"]}')
+            view.upsert_job(job_id, self._job_title(job_id, f'处理流水线 {context["line_id"]}'))
             view.update_progress(job_id, 0, 0, str(message))
             view.set_status(job_id, 'failed')
         self._attach_action(job_id, 'failed', None)
@@ -63,7 +63,17 @@ class JobHub:
         if bridge is not None:
             title = bridge.titles().get(job_id) or job_id
         for view in self._views():
-            view.upsert_job(job_id, title)
+            view.upsert_job(job_id, self._job_title(job_id, title))
+
+    def _job_title(self, job_id, title):
+        controller = getattr(self._co, 'project_controller', None)
+        project = getattr(controller, 'current_project', None)
+        owner = self._contexts[job_id].get('project_id')
+        if owner and owner == getattr(project, 'project_id', None):
+            name = str(getattr(project, 'name', '') or '')
+            if name:
+                return f'{title} · {name}'
+        return title
 
     # ============================================================ 任务事件
     def on_status(self, job_id: str, status: str) -> None:
@@ -156,7 +166,7 @@ class JobHub:
             archive = self._field(result, 'archive_path')
             if isinstance(result, Path):
                 archive = str(result)
-            metadata = getattr(result, 'metadata', {})
+            metadata = result.get('metadata') if isinstance(result, Mapping) else getattr(result, 'metadata', None)
             if directory and isinstance(metadata, Mapping) and metadata.get('project_root'):
                 directory = str(Path(metadata['project_root']) / directory)
             if artifact_id and line_id:

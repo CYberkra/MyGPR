@@ -53,6 +53,9 @@ class _StubView:
     def remove_inactive(self) -> None:
         self.calls.append(('remove_inactive',))
 
+    def set_job_action(self, job_id, label):
+        self.calls.append(('set_job_action', job_id, label))
+
 
 class _StubPage:
     """记录方法调用的假页面（鸭子类型，未注入方法返回记录器）。"""
@@ -206,6 +209,24 @@ class TestJobHubFanOut:
         dc_calls = window.delivery_controller.calls
         assert ('refresh_spatial', ('P-001',)) in dc_calls
         assert 'JOB-SPA' not in hub.spatial_job_ids
+
+    def test_completed_processing_opens_exact_result_on_explicit_action(self):
+        from unittest.mock import Mock
+
+        window, _pages, (panel,) = _make_window()
+        coordinator = PageCoordinator(window)
+        hub = coordinator.jobs
+        open_result = Mock()
+        coordinator.project.on_artifact_focus_requested = open_result
+        hub.register_processing('J', {'project_id': 'P-001', 'line_id': 'L02'})
+        hub.on_completed('J', True, '完成', {'artifact_id': 'A2'})
+        assert ('set_job_action', 'J', '查看结果') in panel.calls
+        open_result.assert_not_called()
+        hub.on_job_action('J')
+        open_result.assert_called_once_with('L02', 'A2')
+        window._current_project_id = lambda: 'other'
+        hub.on_job_action('J')
+        assert open_result.call_count == 1
 
     def test_failed_processing_job_does_not_double_infobar(self):
         """处理任务失败由 run_finished 单独弹窗：JobHub 不再重复 error。"""

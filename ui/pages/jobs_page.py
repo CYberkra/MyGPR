@@ -32,7 +32,7 @@ class JobsPage(QWidget):
         self._filter = ComboBox(self)
         self._filter.addItem('活动与失败', userData=('queued', 'running', 'failed'))
         self._filter.addItem('全部任务', userData=None)
-        self._filter.addItem('已完成', userData=('completed', 'cancelled'))
+        self._filter.addItem('已结束', userData=('completed', 'cancelled', 'failed'))
         button_row.addWidget(self._filter)
         button_row.addStretch(1)
         self._prune_btn = PushButton('清理终态记录', self)

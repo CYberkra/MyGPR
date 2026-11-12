@@ -84,6 +84,8 @@ def test_spatial_result_opens_right_sidebar_and_selects_exact_version(qapp):
         assert located == [['L02']]
         assert not page.open_spatial_result('missing')
         assert tools._selected_spatial_id() == 'B'
+        page._spatial_results_btn.click()
+        assert page._spatial_tools_stack.currentWidget() is not tools
     finally:
         page.close()
         page.deleteLater()

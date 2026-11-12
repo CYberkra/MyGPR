@@ -147,7 +147,9 @@ class JobTable(QWidget):
         if before is not None:
             self._rows = {key: index + int(index >= row) for key, index in self._rows.items()}
         self._rows[job_id] = row
-        self._table.setItem(row, self._COL_TITLE, QTableWidgetItem(title))
+        title_item = QTableWidgetItem(title)
+        title_item.setToolTip(title)
+        self._table.setItem(row, self._COL_TITLE, title_item)
         badge = _make_status_badge('queued')
         holder = QWidget(self._table)
         lay = QHBoxLayout(holder)

@@ -219,7 +219,7 @@ class ProcessingController(QObject):
         context = {
             'project_id': str(project_id), 'line_id': str(line_id),
             'input_artifact_id': str(input_artifact_id or ''),
-            'steps': list(dict(pipeline_def or {}).get('steps', [])),
+            'steps': [],
             'result_name': str(result_name or ''),
             'save_intermediates': bool(save_intermediates),
         }
@@ -229,8 +229,9 @@ class ProcessingController(QObject):
             self.pipeline_job_rejected.emit(context, '后端尚未就绪')
             return None
         try:
+            context['steps'] = list(dict(pipeline_def or {}).get('steps', []))
             ui_pipeline = pipeline_from_dicts(
-                list(dict(pipeline_def or {}).get("steps", [])),
+                context['steps'],
                 name=str(result_name or dict(pipeline_def or {}).get("name", "")),
             )
             pipeline = pipeline_to_raw(ui_pipeline)

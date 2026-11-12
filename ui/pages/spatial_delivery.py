@@ -15,7 +15,7 @@ class SpatialDeliveryMixin:
         row.addWidget(self.marker_browser)
         self._spatial_results_btn = PushButton('空间成果', self, FIF.GLOBE)
         self._spatial_results_btn.setCheckable(True)
-        self._spatial_results_btn.toggled.connect(self._show_spatial_delivery)
+        self._spatial_results_btn.clicked.connect(self._show_spatial_delivery)
         row.addWidget(self._spatial_results_btn)
         row.addStretch(1)
         layout.addLayout(row)

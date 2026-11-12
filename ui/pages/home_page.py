@@ -80,9 +80,9 @@ class HomePage(ScrollArea):
         self._action_layout = QBoxLayout(QBoxLayout.Direction.TopToBottom)
         self._action_layout.addWidget(self.open_btn)
         self._action_layout.addWidget(self.new_btn)
-        self._action_layout.addWidget(self.restore_btn)
         self._action_layout.setSpacing(10)
         self._sidebar_layout.addLayout(self._action_layout)
+        self._sidebar_layout.addWidget(self.restore_btn)
         self._filter_layout = QBoxLayout(QBoxLayout.Direction.TopToBottom)
         self.recent_btn = PushButton('最近打开', self._sidebar)
         self.pinned_btn = PushButton('已固定', self._sidebar, FIF.PIN)
@@ -94,7 +94,6 @@ class HomePage(ScrollArea):
         self._sidebar_layout.addSpacing(14)
         self._sidebar_layout.addLayout(self._filter_layout)
         self._sidebar_layout.addStretch(1)
-        # Settings and tasks remain in the native top navigation, once each.
         self._layout.addWidget(self._sidebar)
         for button in (self.open_btn, self.new_btn, self.recent_btn, self.pinned_btn):
             button.setMinimumHeight(38)

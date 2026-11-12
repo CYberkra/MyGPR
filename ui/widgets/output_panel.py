@@ -41,7 +41,6 @@ from qfluentwidgets import FluentIcon as FIF
 from ui import constants, file_dialogs
 from ui.theme_helpers import log_panel_qss, status_color
 
-from ui.pages.jobs_page import JobsPage
 from .segment_tabs import SlimSegment
 from .separators import make_h_separator
 
@@ -153,6 +152,7 @@ class OutputPanel(QWidget):
         self._log_edit.document().setMaximumBlockCount(5000)
         self._log_edit.verticalScrollBar().valueChanged.connect(self._on_scroll)
 
+        from ui.pages.jobs_page import JobsPage
         self.job_controls = JobsPage(self)
         self.job_controls.cancel_requested.connect(self.cancel_job_requested)
         self.job_table().rows_changed.connect(self._update_task_summary)
