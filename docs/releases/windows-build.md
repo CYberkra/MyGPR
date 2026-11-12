@@ -40,7 +40,7 @@ output/windows-build-env/Scripts/python.exe packaging/windows/verify_install.py 
 ```
 
 验证使用独立临时安装目录、设置文件和精简 PATH：安装、后端与 HDF5 检查、失败用例返回码、
-原生 Windows Qt 七页及整体截图冒烟、重新安装、UIA 设置页版本及正常关闭、卸载和用户文件保留。
+原生 Windows Qt 五页及整体截图冒烟、重新安装、UIA 设置页版本及正常关闭、卸载和用户文件保留。
 截图与完整日志留在 output，不提交 Git。该检查不能代替所有设备、系统版本或科学结论验收。
 
 发布附件的 `build-provenance.json`、验收记录和 `WINDOWS-SHA256SUMS.txt` 分别记录构建来源、验证结果与安装器 SHA-256。源码与 wheel 使用独立的校验清单。

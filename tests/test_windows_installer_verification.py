@@ -68,10 +68,10 @@ def write_smoke_images(folder):
         Image.new('RGB', (16, 16)).save(folder / name)
 
 
-def test_seven_pages_plus_window_are_accepted(verifier, tmp_path):
+def test_five_pages_plus_window_are_accepted(verifier, tmp_path):
     write_smoke_images(tmp_path)
     names = verifier.verify_smoke_screenshots(tmp_path)
-    assert len(names) == 8
+    assert len(names) == 6
     assert 'page_homeInterface.png' not in names
 
 

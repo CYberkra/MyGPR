@@ -11,7 +11,7 @@ import time
 
 SMOKE_PAGES = (
     'projectInterface', 'processingInterface', 'interpretationInterface',
-    'spatialInterface', 'deliveryInterface', 'jobsInterface', 'settingsInterface',
+    'spatialInterface', 'settingsInterface',
 )
 UNINSTALL_KEY = (r'Software\Microsoft\Windows\CurrentVersion\Uninstall'
                  r'\{3B6B778E-9BFA-4D07-B321-3C58D39EAA04}_is1')

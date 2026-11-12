@@ -168,8 +168,9 @@ class ProcessingSteps:
             self._can_edit_chain() and step and step['method_id'] and uid not in self._step_edits
             and not self._autotune_running and self._autotune_pending_request is None))
         label = (f'第 {self._selected_step + 1} 步 · {self._display_name(step["method_id"], step["label"])}'
-                 if step else '请先选择处理步骤')
+                 if step else '')
         self._autotune_method_label.setText(label)
+        self._autotune_method_label.setVisible(bool(label))
         self._adopt_params_btn.setEnabled(self._can_adopt_autotune())
         self._autotune_result_label.setText(self._autotune_summary())
 
