@@ -66,8 +66,6 @@ class ProcessingSteps:
         self._pipeline_list._move_step_to(source, target)
 
     def _open_step_editor(self, index: int) -> None:
-        """chip 右键 → 合一弹窗：快照来自 PipelineList（唯一数据源），
-        弹窗只持快照；写回经公开 API + 手动 sig_changed.emit()。"""
         if self._draft_locked():
             return
         from ui.widgets.step_editor import StepEditorPopup
@@ -83,28 +81,23 @@ class ProcessingSteps:
             'title': self._display_name(step.get('method_id', ''), step.get('label')),
             'method_id': step.get('method_id', ''),
             'params': self._editor_parameters(step),
-            'enabled': bool(step.get('enabled', True)),
-            'is_first': index == 0,
-            'is_last': index == len(steps) - 1,
             'schema': method.get('parameter_schema') or [],
         }
         # 每次新建实例：天然无重复信号连接，关窗即销毁（未应用改动随窗丢弃）
         popup = StepEditorPopup(self)
         self._step_editor = popup
         context = self._draft_key()
+        epoch = self._draft_edit_epoch
         def current(callback, *args):
             current_steps = self._pipeline_list.steps()
             if (context == self._draft_key() and not self._draft_locked()
+                    and epoch == self._draft_edit_epoch
                     and self._step_editor is popup and 0 <= index < len(current_steps)
                     and current_steps[index] == step):
                 callback(*args)
         popup.load_snapshot(index, snapshot)
         popup.gain_preview_requested.connect(lambda dialog: self._request_gain_preview(dialog, index=index))
         popup.sig_applied.connect(lambda payload: current(self._on_step_editor_applied, payload))
-        popup.sig_move_requested.connect(lambda source, target: current(self._on_chain_step_moved, source, target))
-        popup.sig_duplicate_requested.connect(lambda value: current(self._duplicate_step, value))
-        popup.sig_replace_requested.connect(lambda value: current(self._on_step_editor_replace, value))
-        popup.sig_remove_requested.connect(lambda value: current(self._on_chain_step_removed, value))
         popup.finished.connect(lambda result: self._on_step_editor_finished(result, popup))
         popup.show()
         self._position_step_editor(popup, index)
@@ -117,9 +110,6 @@ class ProcessingSteps:
             popup.deleteLater()
 
     def _on_step_editor_applied(self, payload: dict) -> None:
-        """「应用」：参数写回（update_step_params 自动 sig_changed →
-        琥珀 hint 点亮）；启停变化走既有 _toggle_enabled（chip 变暗 +
-        运行跳过语义不变，配置保留）。"""
         if self._draft_locked():
             return
         payload = dict(payload or {})
@@ -129,13 +119,9 @@ class ProcessingSteps:
             return
         self._pipeline_list.update_step_params(
             index, dict(payload.get('params') or {}))
-        enabled = bool(payload.get('enabled', True))
-        if steps[index]['enabled'] != enabled:
-            self._pipeline_list._toggle_enabled(index)
 
     def _on_step_editor_replace(self, index: int) -> None:
-        """「替换算法」→ 打开方法选择器（purpose='replace'，Q2 定案：
-        纯浏览态不预选当前方法，双击即替换）。"""
+        """Open the method picker with an explicit replacement confirmation."""
         self._open_method_picker(purpose='replace', index=index)
 
     def _duplicate_step(self, index: int) -> None:
@@ -207,6 +193,7 @@ class ProcessingSteps:
             try:
                 self._method_picker._draft_context = self._draft_key()
                 self._method_picker._target_epoch = self._draft_edit_epoch
+                self._method_picker.set_replacing(self._picker_purpose == 'replace')
                 self._method_picker.reset_state()
                 self._method_picker.show()
                 self._method_picker.activateWindow()
@@ -218,6 +205,7 @@ class ProcessingSteps:
         self._method_picker = picker
         picker._draft_context = self._draft_key()
         picker._target_epoch = self._draft_edit_epoch
+        picker.set_replacing(self._picker_purpose == 'replace')
         picker.set_methods(self._methods)
         def chosen(method_id):
             if picker is self._method_picker and picker._draft_context == self._draft_key():

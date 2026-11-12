@@ -8,11 +8,13 @@ from PyQt6.QtCore import QAbstractTableModel, QItemSelectionModel, QModelIndex, 
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QAbstractItemView, QComboBox, QFileDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
-    QInputDialog, QMenu, QMessageBox, QPushButton, QTableView, QToolButton, QVBoxLayout, QWidget,
+    QMessageBox, QPushButton, QTableView, QToolButton, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import isDarkTheme
 
 from ui.desktop_backend_facade import EventInterval, MarkerRecord, marker_rows_for_view
+from ui.widgets.context_menus import make_menu, show_menu
+from ui.widgets.object_context_menu import ObjectMenuBinding, object_action
 from ui.widgets.marker_editor import MarkerEditor
 from ui.widgets.marker_style import marker_style, section_title
 
@@ -98,9 +100,10 @@ class MarkerPanel(QWidget):
     close_requested = pyqtSignal()
     navigate = pyqtSignal(str, object)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, allow_processing=False):
         super().__init__(parent)
         self.setObjectName('markerListPanel')
+        self.allow_processing = allow_processing
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self.view = None
         self._views = {}
@@ -147,20 +150,22 @@ class MarkerPanel(QWidget):
         self.table.setModel(self.proxy)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.table.customContextMenuRequested.connect(self._menu)
+        self._row_menu = ObjectMenuBinding(self, self.table, self._menu)
         self.table.doubleClicked.connect(lambda _: self.edit_selected())
         self.table.selectionModel().currentRowChanged.connect(self._selection)
         layout.addWidget(self.table, 1)
         buttons = QHBoxLayout()
         self.new_point = QPushButton('新增点', self)
         self.new_interval = QPushButton('新区间', self)
-        more = QPushButton('操作 ▾', self)
-        self.new_point.clicked.connect(lambda: self.edit(MarkerRecord(anchor=self.view.anchor(0))) if self.view else None)
+        self.new_point.clicked.connect(lambda: self.edit(MarkerRecord()) if self.view else None)
         self.new_interval.clicked.connect(self.make_interval)
-        more.clicked.connect(lambda: self._menu(self.table.viewport().mapFromGlobal(
-            more.mapToGlobal(more.rect().bottomLeft()))))
-        for button in (self.new_point, self.new_interval, more):
+        if allow_processing:
+            selection = QPushButton('选道处理 ▾', self)
+            selection.clicked.connect(lambda: self._show_selection_menu(selection))
+            buttons.addWidget(selection)
+        export = QPushButton('导出 ▾', self)
+        export.clicked.connect(lambda: self._show_export_menu(export))
+        for button in (self.new_point, self.new_interval, export):
             buttons.addWidget(button)
         layout.addLayout(buttons)
         self.message = QLabel(self)
@@ -185,6 +190,7 @@ class MarkerPanel(QWidget):
     def set_view(self, view):
         if view is self.view:
             return
+        self._row_menu.close()
         self.view = view
         self._views = {view.document.line_id: view} if view else {}
         self.scope.blockSignals(True)
@@ -295,54 +301,94 @@ class MarkerPanel(QWidget):
         self.edit(record, target)
 
     def _menu(self, position):
-        menu = QMenu(self)
-        rows = self._selected_rows()
-        editable = bool(self.view and not self.view.read_only)
-        menu.addAction('定位', self.locate_selected).setEnabled(bool(rows))
-        menu.addAction('详情', self.edit_selected).setEnabled(bool(rows))
-        menu.addAction('建立区间', self.make_interval).setEnabled(editable)
-        menu.addAction('调整范围', lambda: self.adjust.emit(rows[0]['uid'])).setEnabled(
-            editable and len(rows) == 1 and isinstance(rows[0]['record'], EventInterval))
-        menu.addSeparator()
-        for title, mode in [('保留所选区间', 'keep'), ('剔除所选区间', 'exclude')]:
-            menu.addAction(title, lambda checked=False, mode=mode: self.preview(mode)).setEnabled(
-                editable and bool(rows) and all(isinstance(row['record'], EventInterval) for row in rows))
-        menu.addAction('删除项目记录', self.delete_selected).setEnabled(editable and bool(rows))
-        menu.addSeparator()
+        row = self.table.indexAt(position).data(Qt.ItemDataRole.UserRole)
+        if not row:
+            return make_menu(self)
+        line = row['line_id']
+        context = self._views.get(line)
+        return self.record_menu(row, context, lambda: self._views.get(line) is context)
+
+    def record_menu(self, row, context, current, *, locate=None, adjust=None):
+        menu = make_menu(self)
+        if context is None:
+            return menu
+        uid, record, projection = row['uid'], row['record'], row['projection']
+        editable = not context.read_only
+        positioned = bool(projection.positions or projection.spans) and not record.excluded
+
+        def add(command, title, callback, **kwargs):
+            return object_action(menu, command, title, lambda: callback() if current() else None, **kwargs)
+
+        add('locate-marker', '定位', locate or (lambda: self.locate.emit(uid)),
+            enabled=positioned, reason='当前结果无法定位')
+        add('edit-marker', '编辑…' if editable else '详情…', lambda: self.edit(record, context))
+        if isinstance(record, EventInterval) and (adjust or context is self.view and self.allow_processing):
+            add('adjust-marker', '调整范围', adjust or (lambda: self.adjust.emit(uid)),
+                enabled=editable and positioned, reason='需要可编辑且可定位的区间')
+        if isinstance(record, MarkerRecord) and record.origin == 'acquisition':
+            add('exclude-marker', '恢复使用' if record.excluded else '排除使用',
+                lambda: self.request('save', {'view': context, 'record': replace(record, excluded=not record.excluded)}),
+                enabled=editable, reason='项目只读')
         for title, page in [('在处理页查看', 'processing'), ('在解释页查看', 'interpretation'), ('在空间页定位', 'spatial')]:
-            menu.addAction(title, lambda checked=False, page=page: self.navigate.emit(page, rows[0])).setEnabled(bool(rows))
-        for extension in ('json', 'csv', 'geojson'):
-            menu.addAction('导出 ' + extension.upper(), lambda checked=False, extension=extension: self.export(extension)).setEnabled(bool(self.view))
-        menu.addAction('项目时区…', self.change_timezone).setEnabled(editable)
-        menu.exec(self.table.viewport().mapToGlobal(position))
+            add('open-' + page, title, lambda page=page: self.navigate.emit(page, row),
+                enabled=bool(row['geometry']) if page == 'spatial' else positioned, reason='缺少定位信息')
+        if getattr(record, 'origin', 'project') != 'acquisition':
+            menu.addSeparator()
+            add('delete-marker', '删除项目记录…', lambda: self.delete_record(row, context, current),
+                enabled=editable, reason='项目只读')
+        return menu
 
-    def change_timezone(self):
-        value, accepted = QInputDialog.getItem(self, '项目时区', 'IANA 时区',
-            list(dict.fromkeys((self.view.timezone, 'Asia/Shanghai', 'UTC'))), 0, True)
-        if accepted:
-            self.request('timezone', {'view': self.view, 'timezone': value.strip()})
+    def _show_selection_menu(self, button):
+        menu = make_menu(self)
+        view, rows = self.view, tuple(self._selected_rows())
+        reason = self._selection_reason(view, rows)
+        for title, mode in [('保留所选区间…', 'keep'), ('剔除所选区间…', 'exclude')]:
+            object_action(menu, mode, title,
+                lambda _checked=False, mode=mode: self.preview(mode, rows) if view is self.view else None,
+                enabled=not reason, reason=reason)
+        show_menu(menu, button.mapToGlobal(button.rect().bottomLeft()))
 
-    def preview(self, mode):
-        rows = self._selected_rows()
-        if any(row['line_id'] != self.view.document.line_id for row in rows):
-            self.message.setText('处理范围必须属于当前测线和当前输入成果')
+    @staticmethod
+    def _selection_reason(view, rows):
+        if not view or view.read_only:
+            return '需要可编辑的项目'
+        if not rows or any(not isinstance(row['record'], EventInterval) for row in rows):
+            return '请选择事件区间'
+        if any(row['line_id'] != view.document.line_id or row['target_id'] != view.target_id for row in rows):
+            return '请选择当前输入的区间'
+        if any(row['record'].review_state == 'needs_review' for row in rows):
+            return '边界已变更，区间需复核'
+        if any(not row['record'].closed or row['record'].excluded or not row['projection'].spans for row in rows):
+            return '选择中有开放、已排除或无法映射到道的区间'
+        return ''
+
+    def _show_export_menu(self, button):
+        menu = make_menu(self)
+        views = tuple(self._views.values()) if self.scope.currentIndex() else (self.view,) if self.view else ()
+        scope = '整个项目' if self.scope.currentIndex() else '当前测线'
+        for extension in ('csv', 'json', 'geojson'):
+            object_action(menu, 'export-' + extension, f'{extension.upper()} · {scope}…',
+                lambda _checked=False, ext=extension: self.export(ext, views, scope), enabled=bool(views))
+        show_menu(menu, button.mapToGlobal(button.rect().bottomLeft()))
+
+    def preview(self, mode, rows=None):
+        rows = self._selected_rows() if rows is None else rows
+        reason = self._selection_reason(self.view, rows)
+        if reason:
+            self.message.setText(reason)
             return
         self.request('preview', {'view': self.view, 'ids': [row['uid'] for row in rows], 'mode': mode})
 
-    def delete_selected(self):
-        rows = self._selected_rows()
-        if len(rows) != 1:
-            self.message.setText('每次删除一条项目记录；采集记录请在详情中排除使用')
-            return
-        row = rows[0]
-        if QMessageBox.question(self, '删除标记', f"删除项目记录“{row['name']}”？有依赖时将拒绝删除。") == QMessageBox.StandardButton.Yes:
-            self.request('delete', {'view': self._views[row['line_id']], 'uid': row['uid']})
+    def delete_record(self, row, context, current):
+        answer = QMessageBox.question(self, '删除标记', f"删除项目记录“{row['name']}”？有依赖时将拒绝删除。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel, QMessageBox.StandardButton.Cancel)
+        if answer == QMessageBox.StandardButton.Yes and current():
+            self.request('delete', {'view': context, 'uid': row['uid']})
 
-    def export(self, extension):
-        path, _ = QFileDialog.getSaveFileName(self, '导出标记', f'markers.{extension}', f'{extension.upper()} (*.{extension})')
+    def export(self, extension, views, scope):
+        path, _ = QFileDialog.getSaveFileName(self, '导出标记 · ' + scope, f'markers.{extension}', f'{extension.upper()} (*.{extension})')
         if path:
-            self.request('export', {'views': tuple(self._views.values()) if self.scope.currentIndex() else (self.view,),
-                                    'path': path, 'format': extension})
+            self.request('export', {'views': views, 'path': path, 'format': extension})
 
     def request(self, action, payload):
         token = uuid4().hex

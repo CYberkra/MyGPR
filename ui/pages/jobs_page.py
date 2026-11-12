@@ -37,7 +37,7 @@ class JobsPage(QWidget):
 
         button_row = QHBoxLayout()
         button_row.setSpacing(constants.CARD_SPACING)
-        self._prune_btn = PushButton('清理已完成', card)
+        self._prune_btn = PushButton('清理终态记录', card)
         self._prune_btn.setToolTip('清除已完成/失败的任务行')
         button_row.addWidget(self._prune_btn)
         button_row.addStretch(1)
@@ -96,11 +96,4 @@ class JobsPage(QWidget):
             object_action(menu, 'cancel-job', '取消任务',
                           lambda: self._job_table.cancel_job(job_id),
                           enabled=self._job_table.can_cancel(job_id), reason='任务已结束或不可取消')
-            object_action(menu, 'retry-job', '重试任务', lambda: None,
-                          enabled=False, reason='未接通可重放任务合同')
-            object_action(menu, 'remove-job', '移除此任务记录', lambda: None,
-                          enabled=False, reason='当前仅支持清理全部终态记录')
-            menu.addSeparator()
-        object_action(menu, 'prune-jobs', '清理全部终态任务记录', self._prune_btn.click,
-                      enabled=self._prune_btn.isEnabled(), reason='没有可清理的终态任务')
         return menu

@@ -309,6 +309,8 @@ class TestPagePickerWiring:
             page._replace_step_method = lambda i, m: done.append((i, m))
             page._open_method_picker(purpose='replace', index=0)
             page._method_picker._browser.sig_add_requested.emit('agc')
+            assert done == []
+            page._method_picker._add_selected_btn.click()
             assert done == [(0, 'agc')]
         finally:
             page.close()

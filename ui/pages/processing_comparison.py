@@ -4,8 +4,7 @@ from uuid import uuid4
 
 from PyQt6.QtCore import QMimeData, QObject
 from ui.widgets.bscan_line_drop import BScanLineDrop
-from ui.widgets.context_menus import add_action, make_menu
-from ui.widgets.fluent_menu_keyboard import FluentMenuKeyboard
+from ui.widgets.object_context_menu import object_action
 from ui.result_presentation import describe_artifact
 
 MIME = 'application/x-mygpr-line-reference'
@@ -23,7 +22,6 @@ class LineComparison(QObject):
         page._line_combo.mime_factory = self.mime_for_line
         page._line_combo.drag_finished.connect(self.drop.hide_hints)
         page._workspace.source_closed.connect(self.closed)
-        page._workspace.source_input_requested.connect(self.make_input)
 
     def label(self, line_id):
         return self.lines.get(str(line_id), str(line_id))
@@ -215,14 +213,11 @@ class LineComparison(QObject):
         self.page.select_original()
         return True
 
-    def show_menu(self, key, position):
+    def add_menu_actions(self, menu, key, guard):
         epoch = self.epoch
         def current(callback):
             if self.epoch == epoch and key in self.sources:
-                callback(key)
-        menu = make_menu(self.page)
-        add_action(menu, None, '设为处理输入', lambda: current(self.make_input))
-        add_action(menu, None, '重新加载预览', lambda: current(self.retry))
-        menu._object_keyboard = FluentMenuKeyboard(menu)
-        menu.exec(position)
-        menu._object_keyboard.focus_menu(menu)
+                guard(lambda: callback(key))
+        object_action(menu, 'activate', '设为处理输入', lambda: current(self.make_input))
+        if self.sources[key].get('error'):
+            object_action(menu, 'retry-preview', '重试预览', lambda: current(self.retry))

@@ -140,6 +140,7 @@ class BScanViewDataMixin:
         if mat.ndim != 2:
             raise ValueError('B-Scan 矩阵必须是二维 (samples, traces)')
         view = mat  # 零拷贝；row-major 下 y=采样(行)、x=道(列)
+        self._close_view_menu()
         self._gain_cache = None
         self._envelope_cache = None
         self._elev_cache = None
@@ -319,7 +320,7 @@ class BScanViewDataMixin:
                         (left, right), (top, bottom) = ranges
                         self.set_view_selection(QRectF(left, top, right-left, bottom-top))
                     elif self._is_legacy_startup_range(ranges):
-                        self.fit_to_data(notify=False)
+                        self.fit_all()
                     else:
                         self._plot.vb.setRange(xRange=ranges[0], yRange=ranges[1], padding=0)
                 except (TypeError, ValueError, IndexError):
@@ -580,23 +581,6 @@ class BScanViewDataMixin:
         power = min(max(self._gain_power, 0.1), 10.0)
         gain = np.power(10.0, self._gain_db * np.power(u, power) / 20.0)
         return np.clip(gain, 1.0, 1000.0)
-
-    def _on_gain_menu(self, mode: str) -> None:
-        """右键「显示增益」子菜单动作：切模式；选 TVG 时弹滑条面板。"""
-        self.set_gain(mode, notify=True)
-        if mode == 'tvg':
-            self._open_tvg_dialog()
-
-    def _open_tvg_dialog(self) -> None:
-        """打开 TVG 滑条面板（非模态，随视图销毁；重复调用只唤起）。"""
-        if self._tvg_dialog is not None:
-            self._tvg_dialog.show()
-            self._tvg_dialog.raise_()
-            self._tvg_dialog.activateWindow()
-            return
-        from ui.widgets.bscan_tvg_dialog import TvgGainDialog
-        self._tvg_dialog = TvgGainDialog(self)
-        self._tvg_dialog.show()
 
     def set_colorbar_visible(self, visible: bool, *, notify: bool = False) -> None:
         """切换右侧色标条的显示；隐藏后其宽度完整归还画布。

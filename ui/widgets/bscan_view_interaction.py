@@ -15,13 +15,13 @@ import math
 
 import numpy as np
 import pyqtgraph as pg
-from PyQt6.QtCore import QEvent, Qt
+from PyQt6.QtCore import QEvent, QPoint, Qt
 from PyQt6.QtGui import QCursor
-from PyQt6.QtWidgets import QToolTip
+from PyQt6.QtWidgets import QApplication, QInputDialog, QMessageBox, QToolTip
 from qfluentwidgets import FluentIcon as FIF
 
-from ui import constants
-from ui.widgets.context_menus import RoundMenu, add_action, make_menu
+from ui import constants, file_dialogs
+from ui.widgets.context_menus import RoundMenu, add_action, make_menu, show_menu
 
 
 class BScanDisplayMode(Enum):
@@ -195,34 +195,95 @@ class BScanViewInteractionMixin:
 
     # ------------------------------------------------------------------ 右键菜单
     def _show_context_menu(self, event) -> None:
+        self.show_canvas_menu(event.screenPos().toPoint(),
+                              event.scenePos() if hasattr(event, 'scenePos') else None)
+
+    def show_canvas_menu(self, position=None, scene_pos=None) -> None:
+        if position is None:
+            position = self.mapToGlobal(QPoint(12, 12))
+        self._present_view_menu(self.create_canvas_menu(position, scene_pos), position)
+
+    def create_canvas_menu(self, position, scene_pos=None):
         menu = make_menu(self)
         self._add_menu_zoom(menu)
         self._add_menu_time_window(menu)
+        for build in getattr(self, '_canvas_menu_sections', ()):
+            build(menu, scene_pos)
         menu.addSeparator()
-        self._add_menu_toggles(menu)
-        menu.addSeparator()
+        add_action(menu, FIF.SETTING, '当前图显示…', lambda: self.show_display_menu(position))
         add_action(menu, FIF.COPY, '复制图像', self._copy_image,
                    enabled=self._image_shape is not None)
-        add_action(menu, FIF.SAVE, '导出 PNG…',
-                   lambda: self.export_png(
-                       title=self._export_title, prefix='bscan'),
+        add_action(menu, FIF.SAVE, '导出图件…', self.export_figure,
                    enabled=self._image_shape is not None)
+        return menu
+
+    def show_display_menu(self, position):
+        menu = make_menu(self)
+        self._add_menu_toggles(menu)
         menu.addSeparator()
         self.add_display_settings_action(menu)
-        menu.exec(event.screenPos().toPoint())
+        self._present_view_menu(menu, position)
+
+    def _present_view_menu(self, menu, position):
+        self._close_view_menu()
+        self._view_menu = menu
+        menu.closedSignal.connect(lambda: setattr(self, '_view_menu', None) if self._view_menu is menu else None)
+        show_menu(menu, position)
+
+    def _close_view_menu(self):
+        menu, self._view_menu = self._view_menu, None
+        if menu is not None:
+            menu.close()
+
+    def export_figure(self):
+        matrix, context = self._matrix, self._marker_view
+        if matrix is None:
+            return
+        include = True
+        if self.marker_strip.isVisible() or self._marker_pins.isVisible() or self._event_guides:
+            option, accepted = QInputDialog.getItem(self, '导出图件', '标记显示',
+                ['包含可见标记', '仅图像'], editable=False)
+            if not accepted:
+                return
+            include = option == '包含可见标记'
+        if self._matrix is not matrix or self._marker_view is not context:
+            return
+        pixmap = self._capture_figure(include_markers=include)
+        path, _ = file_dialogs.getSaveFileName(self, '导出图件', 'bscan.png', 'PNG 图片 (*.png)')
+        if path:
+            if self._matrix is not matrix or self._marker_view is not context:
+                QMessageBox.warning(self, '导出失败', '数据已变化，请重新导出当前图件')
+            elif not pixmap.save(path, 'PNG'):
+                QMessageBox.warning(self, '导出失败', '图件未保存，请检查目标路径')
+
+    def _capture_figure(self, *, include_markers):
+        items = [] if include_markers else [self._marker_pins, *self._event_guides]
+        visible = [item for item in items if item.isVisible()]
+        self.marker_strip._capture_title_only = not include_markers
+        for item in visible:
+            item.hide()
+        try:
+            return self.grab() if self.marker_strip.isVisible() else self._glw.grab()
+        finally:
+            self.marker_strip._capture_title_only = False
+            self.marker_strip.update()
+            for item in visible:
+                item.show()
+
+    def _copy_image(self):
+        QApplication.clipboard().setPixmap(self._capture_figure(include_markers=True))
 
     def add_display_settings_action(self, menu) -> None:
-        add_action(menu, FIF.SETTING, '显示设置…', self.sig_display_settings_requested.emit,
+        add_action(menu, FIF.SETTING, '全局 B-scan 设置…', self.sig_display_settings_requested.emit,
                    enabled=bool(self.receivers(self.sig_display_settings_requested)))
 
     def _add_menu_zoom(self, menu) -> None:
         self._add_menu_selection(menu)
-        add_action(menu, FIF.FIT_PAGE, '回到全览（铺满窗口）', self.fit_to_data)
-        add_action(menu, FIF.FULL_SCREEN, '全屏浏览（F11）', self.enter_fullscreen)
-        zoom = RoundMenu('缩放', menu)
-        add_action(zoom, FIF.ZOOM_IN, '放大', self.zoom_in)
-        add_action(zoom, FIF.ZOOM_OUT, '缩小', self.zoom_out)
-        menu.addMenu(zoom)
+        available = self._image_shape is not None
+        add_action(menu, FIF.FIT_PAGE, '适应全图', self.fit_all, enabled=available)
+        fullscreen = self._fullscreen is not None and self._fullscreen.state != 'embedded'
+        add_action(menu, FIF.FULL_SCREEN, '退出全屏' if fullscreen else '全屏浏览（F11）',
+                   self.toggle_fullscreen, enabled=available and not self._thumbnail_mode)
 
     def _add_menu_toggles(self, menu) -> None:
         """Frequent inspection tools; persistent display preferences live in Settings."""
@@ -252,16 +313,6 @@ class BScanViewInteractionMixin:
                 lambda _checked=False, m=mode: self.set_display_mode(m))
             mode_submenu.addAction(act)
         menu.addMenu(mode_submenu)
-        gain_submenu = RoundMenu('显示增益', menu)
-        for mode, label in (('off', '关闭'), ('sec', 'SEC 补偿'),
-                            ('tvg', 'TVG 补偿（滑条调参）')):
-            act = Action(label)
-            act.setCheckable(True)
-            act.setChecked(self._gain_mode == mode)
-            act.triggered.connect(
-                lambda _checked=False, m=mode: self._on_gain_menu(m))
-            gain_submenu.addAction(act)
-        menu.addMenu(gain_submenu)
 
     # ------------------------------------------------------------------ 交互
     def set_pick_enabled(self, enabled: bool) -> None:
@@ -425,7 +476,7 @@ class BScanViewInteractionMixin:
         return ys_col, ys_bottom
 
     def set_ascan_follow(self, enabled: bool) -> None:
-        """开关"A-scan 波形跟随"：懒创建浮窗并同步 pick 模式（Phase1 1.1）。"""
+        """Show the trace reader independently of interpretation picking."""
         from ui.widgets.ascan_popup import AScanPopup
 
         self._ascan_follow = bool(enabled)
@@ -436,7 +487,6 @@ class BScanViewInteractionMixin:
                 self._ascan_popup = AScanPopup(self)
                 self._ascan_popup.closed.connect(self._on_ascan_popup_closed)
             self._ascan_popup.show()
-            self.set_pick_enabled(True)
         elif self._ascan_popup is not None:
             self._ascan_popup.hide()
 
@@ -672,7 +722,7 @@ class BScanViewInteractionMixin:
         # 点空白只清选中，仍把这次点击交回原有 pick 流程。
         if self._handle_marker_click(event.scenePos()):
             return
-        if not self._pick_enabled or self._image_shape is None:
+        if not (self._pick_enabled or self._ascan_follow) or self._image_shape is None:
             return
         pos = event.scenePos()
         if not self._plot.sceneBoundingRect().contains(pos):
@@ -694,15 +744,10 @@ class BScanViewInteractionMixin:
         索引取列，否则降采样预览下波形与十字线错位。
         """
         if (self._ascan_follow and self._ascan_popup is not None
-                and self._image_shape is not None):
-            import numpy as np
-
+                and self._image_shape is not None and self._matrix is not None):
             # 波形取自未变形的预览矩阵：海拔模式下 ImageItem 里是 warp 后
             # 的列（纵向重采样过），不是原始 A-scan，弹窗必须用 _matrix。
             image = self._matrix
-            if image is None:
-                self.sig_point_picked.emit(trace, sample)
-                return
             image = np.asarray(image)
             display_trace = self._image_shape[0] - 1 if view_trace is None else int(view_trace)
             if 0 <= display_trace < image.shape[1]:
@@ -714,5 +759,6 @@ class BScanViewInteractionMixin:
                     trace_index=trace if self._trace_indices is not None else display_trace,
                     distance_m=dist, axis=self._sample_axis,
                     axis_label=self._sample_axis_label)
-        self.sig_point_picked.emit(trace, sample)
+        if self._pick_enabled:
+            self.sig_point_picked.emit(trace, sample)
 

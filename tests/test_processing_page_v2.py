@@ -552,21 +552,22 @@ class TestChainAlternativePaths:
         assert strip._list.count() == 2            # 剩 2 步
         assert [s['label'] for s in strip._steps] == ['a', 'c']
 
-    def test_context_menu_requests_step_editor(self, qapp):
-        """P0-3：右键 chip 不再建菜单——置当前行 + 发 sig_step_editor_requested
-        （合一弹窗唯一入口；启停/排序/复制/替换/删除全在弹窗内完成）。"""
+    def test_context_menu_requires_explicit_step_editor_action(self, qapp):
         strip = ChainStrip()
-        strip.set_steps([{'label': 'a', 'enabled': True},
-                         {'label': 'b', 'enabled': True},
-                         {'label': 'c', 'enabled': True}])
+        strip.set_steps([{'label': '一'}, {'label': '二'}])
+        strip.resize(700, 50)
+        strip.show()
+        qapp.processEvents()
+        strip.select_step(0)
         got = []
         strip.sig_step_editor_requested.connect(got.append)
-        strip.show()                       # 几何需真实布局（rowAt 依赖它）
-        qapp.processEvents()
         rect = strip._list.visualItemRect(strip._list.item(1))
-        strip._on_context_menu(rect.center())
-        assert got == [1]
-        assert strip._list.currentRow() == 1
+        menu = strip._context_menu(rect.center())
+        assert not got and strip._list.currentRow() == 0
+        next(action for action in menu.actions() if action.data() == 'edit-step').trigger()
+        assert got == [1] and strip._list.currentRow() == 0
+        menu.deleteLater()
+        strip.close()
 
     def test_fill_step_menu_removed(self, qapp):
         """旧四动作右键菜单已删除（动作收敛进合一弹窗，不维护两套入口）。"""

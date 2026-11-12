@@ -39,7 +39,7 @@ from ui.sensor_summary import SensorCompletenessReport
 from ui.widgets.sensor_details_panel import SensorDetailsPanel
 from ui.widgets import (clear_invalid,
                         make_separator, mark_invalid, validate_non_empty)
-from ui.widgets.context_menus import add_action, make_menu
+from ui.widgets.context_menus import add_action, make_menu, show_menu
 from ui.pages.home_page import HomePage
 from ui.pages.project_identity_ui import ProjectIdentityUi
 from ui.result_presentation import describe_artifact
@@ -71,6 +71,7 @@ _INFO_FIELDS = (
     ('设备型号:', 'device_model'),
     ('坐标系:', 'coordinate_system'),
     ('高程基准:', 'vertical_datum'),
+    ('项目时区:', 'timezone'),
 )
 
 
@@ -85,6 +86,7 @@ class ProjectPage(ProjectLineContextMixin, QWidget):
     artifact_preview_requested = pyqtSignal(str, str)
     artifact_delete_requested = pyqtSignal(str, list)  # 删除成果（单/批）
     close_project_requested = pyqtSignal()
+    timezone_requested = pyqtSignal(str, str)
     quality_check_requested = pyqtSignal(str)
     quality_location_requested = pyqtSignal(str, int, int)
     quality_refresh_requested = pyqtSignal()
@@ -227,11 +229,12 @@ class ProjectPage(ProjectLineContextMixin, QWidget):
         menu = make_menu(self)
         self._identity.add_project_actions(menu)
         add_action(menu, FIF.SETTING, '项目设置 / 元数据', self._info_dialog.show)
+        add_action(menu, None, '项目时区…', self._identity.edit_timezone, enabled=self._can_write())
         add_action(menu, FIF.SEARCH, '导入与预检…', self.show_import_tool, enabled=not self._busy)
         root = str(getattr(self._summary, 'root_path', '') or '')
         add_action(menu, FIF.FOLDER, '打开项目位置',
                    lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(root)), enabled=bool(root))
-        menu.exec(self.project_more_btn.mapToGlobal(self.project_more_btn.rect().bottomLeft()))
+        show_menu(menu, self.project_more_btn.mapToGlobal(self.project_more_btn.rect().bottomLeft()))
 
     def workspace_state(self) -> str:
         if self._summary is None:
@@ -394,10 +397,6 @@ class ProjectPage(ProjectLineContextMixin, QWidget):
             QKeySequence(QKeySequence.StandardKey.Delete), self._lines_table,
             context=Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self._delete_lines_shortcut.activated.connect(self._on_delete_selected_lines)
-        self._lines_table.setContextMenuPolicy(
-            Qt.ContextMenuPolicy.CustomContextMenu)
-        self._lines_table.customContextMenuRequested.connect(
-            lambda pos: self._identity.on_lines_context_menu(pos))
         lines_layout.addWidget(self._lines_table)
         splitter.addWidget(lines_card)
 
@@ -463,10 +462,6 @@ class ProjectPage(ProjectLineContextMixin, QWidget):
         self._artifacts_table.itemDoubleClicked.connect(
             lambda _item: self._emit_artifact_preview())
         self._artifacts_table.itemSelectionChanged.connect(self._update_action_state)
-        self._artifacts_table.setContextMenuPolicy(
-            Qt.ContextMenuPolicy.CustomContextMenu)
-        self._artifacts_table.customContextMenuRequested.connect(
-            lambda pos: self._identity.on_artifacts_context_menu(pos))
         art_layout.addWidget(self._artifacts_table)
         art_btn_row = QHBoxLayout()
         # 本页已无 B-Scan 预览（见模块文档），按钮实为"跳到处理页去看"，
@@ -516,7 +511,7 @@ class ProjectPage(ProjectLineContextMixin, QWidget):
                    enabled=bool(self._current_line_id) and self._can_write())
         add_action(menu, FIF.DELETE, '永久删除所选测线…', self._on_delete_selected_lines,
                    enabled=self._can_write() and bool(self._lines_table.selectionModel().selectedRows()))
-        menu.exec(self.line_more_btn.mapToGlobal(self.line_more_btn.rect().bottomLeft()))
+        show_menu(menu, self.line_more_btn.mapToGlobal(self.line_more_btn.rect().bottomLeft()))
 
     # ============================================================ 公共接口（主窗口喂数据）
     def set_project_info(self, summary) -> None:

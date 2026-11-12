@@ -39,7 +39,7 @@ from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import isDarkTheme
 
 from ui.desktop_backend_facade import tile_cache_dir
-from ui.widgets.context_menus import add_action, make_menu
+from ui.widgets.context_menus import add_action, make_menu, show_menu
 from ui.widgets.empty_state import EmptyStateOverlay
 from ui.widgets.local_dem import dem_covers_bbox
 from ui.widgets.map_tiles import (TILE_SOURCE_MAX_ZOOM, WORLD_SIZE_M,
@@ -658,7 +658,7 @@ class Trajectory3DView(QWidget):
         menu.addAction(grid_action)
         menu.addSeparator()
         add_action(menu, FIF.SAVE, '导出截图 PNG…', self._export_screenshot)
-        menu.exec(self.mapToGlobal(pos))
+        show_menu(menu, self.mapToGlobal(pos))
 
     def _set_camera_preset(self, preset: str) -> None:
         """视角预设：顶视 / 斜视 45° / 侧视（距离与中心保持不动）。"""

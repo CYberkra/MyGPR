@@ -35,16 +35,24 @@ class ProcessingMenus:
         return artifact_parameters(art)
 
     def _source_menu(self, key):
-        source = self._sources.get(key)
         menu = make_menu(self)
+        self._add_source_actions(menu, key)
+        return menu
+
+    def _add_source_actions(self, menu, key, *, group_id=None, tab_guard=None):
+        source = self._sources.get(key)
         if not source:
-            return menu
+            return
         target = self._draft_key(key)
         def current(callback):
             if key in self._sources and target == self._draft_key(key):
-                callback()
-        object_action(menu, 'continue-source', '从此结果继续处理',
-                      lambda: current(lambda: self._workspace.open_source(key)),
+                if tab_guard is not None:
+                    tab_guard(callback)
+                else:
+                    callback()
+        object_action(menu, 'source-info', '参数与来源…', lambda: current(lambda: self._show_source_info(key)))
+        object_action(menu, 'continue-source', '设为处理输入',
+                      lambda: current(lambda: self._workspace.open_source(key, group_id)),
                       enabled=not source.get('error'), reason='数据读取失败，请重试预览')
         aid = source.get('artifact_id')
         if aid:
@@ -57,23 +65,18 @@ class ProcessingMenus:
             object_action(menu, 'reconfigure-step', '修改此步参数并另建分支…',
                           lambda: current(reconfigure),
                           enabled=self.can_reconfigure_artifact(aid), reason='缺少已保存的直接步骤输入')
-        object_action(menu, 'source-info', '参数与来源…', lambda: current(lambda: self._show_source_info(key)))
         if source.get('error'):
             object_action(menu, 'retry-preview', '重试预览', lambda: current(lambda: self.retry_preview(key)))
-        if aid:
+        if aid and tab_guard is None:
             object_action(menu, 'delete-source', '永久删除此成果及依赖成果…',
                 lambda: current(lambda: self.artifact_delete_requested.emit(target[1], [aid]) if not self._running else None),
                 enabled=not self._running, reason='任务运行中')
-        return menu
 
-    def _show_source_menu(self, key, pos):
+    def _add_tab_source_actions(self, menu, key, group_id, guard):
         if self._comparison.owns(key):
-            self._comparison.show_menu(key, pos)
-            return
-        menu = self._source_menu(key)
-        menu._object_keyboard = FluentMenuKeyboard(menu)
-        menu.exec(pos)
-        menu._object_keyboard.focus_menu(menu)
+            self._comparison.add_menu_actions(menu, key, guard)
+        else:
+            self._add_source_actions(menu, key, group_id=group_id, tab_guard=guard)
 
     def _run_signature(self, group):
         return tuple(sorted((aid, str(getattr(art, 'sha256', '') or ''),
@@ -146,13 +149,10 @@ class ProcessingMenus:
             if self._pipeline_list.count():
                 self._pipeline_list.select_step(0)
             self._draft_changed()
-        object_action(menu, 'add-step', '添加处理步骤…', lambda: current(self._open_method_picker), enabled=not self._draft_locked())
-        object_action(menu, 'edit-step', '编辑选中步骤…', lambda: current(lambda: self._open_step_editor(self._selected_step)),
-                   enabled=not self._draft_locked() and self._selected_step >= 0)
+        object_action(menu, 'copy-draft', '复制待执行配置', lambda: QApplication.clipboard().setText(
+                   json.dumps(self.current_pipeline(), ensure_ascii=False, indent=2)) if key == self._draft_key() else None)
         object_action(menu, 'restore-draft', '恢复此输入的上一个草稿', restore,
                    enabled=not self._draft_locked() and bool(self._draft_backups.get(key)))
-        object_action(menu, 'copy-draft', '复制待执行配置', lambda: current(lambda: QApplication.clipboard().setText(
-                   json.dumps(self.current_pipeline(), ensure_ascii=False, indent=2))))
         stale = [{'revision': k[3], 'draft': value} for k, value in self._drafts.items()
                  if k[:3] == key[:3] and k != key and value.get('steps')]
         if stale:

@@ -32,7 +32,7 @@ from qfluentwidgets import ToolButton, isDarkTheme
 from ui import constants
 from ui.desktop_backend_facade import tile_cache_dir
 from ui.theme_helpers import control_palette
-from ui.widgets.context_menus import add_action, make_menu
+from ui.widgets.context_menus import add_action, make_menu, show_menu
 from ui.widgets.empty_state import EmptyStateOverlay
 from ui.widgets.pg_view_base import GraphicsViewBase
 from ui.widgets.map_tiles import (DEFAULT_TILE_SOURCE, TILE_SOURCE_MAX_ZOOM,
@@ -674,10 +674,13 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
             color = QColor(colors.get(info['line_id'], constants.CHART_TRACK_DEFAULT))
             pen = pg.mkPen(color, width=2)
             line_item = self._plot.plot(xs, ys, pen=pen)
+            line_item.setCurveClickable(True, width=8)
             endpoint_item = pg.ScatterPlotItem(
                 [xs[0], xs[-1]], [ys[0], ys[-1]], symbol='o', size=9,
                 pen=pg.mkPen(color, width=1), brush=pg.mkBrush(color))
             self._plot.addItem(endpoint_item)
+            for item in (line_item, line_item.curve, endpoint_item):
+                item.setData(0, info['line_id'])
             self._track_items.extend([line_item, endpoint_item])
             all_x.append(xs)
             all_y.append(ys)
@@ -813,6 +816,14 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
         super().resizeEvent(event)
         self._layout_overlays()
 
+    def fit_to_line(self, line_id) -> None:
+        self._fit_track_summaries(info for info in self._track_summaries if info['line_id'] == line_id)
+
+    def can_fit_line(self, line_id) -> bool:
+        return any(info['line_id'] == line_id and info['mapped']
+                   and np.any(np.isfinite(info['xs']) & np.isfinite(info['ys']))
+                   for info in self._track_summaries)
+
     def fit_to_tracks(self) -> None:
         """视野自适应到全部轨迹范围（右键菜单"适应全部测线"同用）。
 
@@ -822,8 +833,11 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
         1,116 m 的测线被压到视野宽度的 0.01%，用户看到「地图上什么都没有」。
         全部未配准时**不动视野**（宁可保持原样，也不要跳到世界原点）。
         """
+        self._fit_track_summaries(self._track_summaries)
+
+    def _fit_track_summaries(self, summaries) -> None:
         all_x, all_y = [], []
-        for info in self._track_summaries:
+        for info in summaries:
             if not info.get('mapped'):
                 continue
             xs, ys = info.get('xs'), info.get('ys')
@@ -850,25 +864,35 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
         if not self._plot.sceneBoundingRect().contains(event.scenePos()):
             return
         menu = make_menu(self)
+        add_line_actions = getattr(self, 'add_line_menu_actions', None)
+        if add_line_actions:
+            line_id = next((item.data(0) for item in self.scene().items(event.scenePos()) if item.data(0)), '')
+            if line_id:
+                add_line_actions(menu, line_id)
+                menu.addSeparator()
         add_action(menu, FIF.FIT_PAGE, '适应全部测线', self.fit_to_tracks,
                    enabled=bool(self._track_summaries))
         add_action(menu, FIF.ZOOM_IN, '放大', self.zoom_in)
         add_action(menu, FIF.ZOOM_OUT, '缩小', self.zoom_out)
-        add_action(menu, FIF.DOWNLOAD, '下载当前区域瓦片',
-                   self.prefetch_current_view)
         menu.addSeparator()
-        add_action(menu, FIF.COPY, '复制中心坐标', self._copy_center_lonlat)
+        point = self._plot.vb.mapSceneToView(event.scenePos())
+        coordinate = self._lonlat_text(point)
+        add_action(menu, FIF.COPY, '复制此处坐标（WGS84）',
+                   lambda: QApplication.clipboard().setText(coordinate), enabled=self._basemap_enabled)
         add_action(menu, FIF.SAVE, '导出 PNG…',
                    lambda: self.export_png(prefix='map'))
-        menu.exec(event.screenPos().toPoint())
+        show_menu(menu, event.screenPos().toPoint())
 
     def _copy_center_lonlat(self) -> None:
         """视图中心 → WGS84 经纬度（'纬度,经度'，便于粘贴到奥维等软件对照）。"""
         center = self._plot.vb.viewRect().center()
-        lon, lat = mercator_to_lonlat(center.x(), center.y())
+        QApplication.clipboard().setText(self._lonlat_text(center))
+
+    def _lonlat_text(self, point):
+        lon, lat = mercator_to_lonlat(point.x(), point.y())
         if is_gcj02_source(self._layer.source_key()):
             lon, lat = gcj02_to_wgs84(lon, lat)
-        QApplication.clipboard().setText(f'{lat:.6f},{lon:.6f}')
+        return f'{lat:.6f},{lon:.6f}'
 
     def track_summaries(self) -> list[dict]:
         """最近一次 set_tracks 的坐标转换摘要（投影信息卡用）。"""

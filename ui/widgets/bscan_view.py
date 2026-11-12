@@ -109,6 +109,8 @@ class BScanView(BScanMarkerEventsMixin, BScanSelectionMixin, BScanTimeWindowMixi
                  default_y_axis: str = 'sample',
                  default_levels: tuple | None = None):
         super().__init__(parent)
+        self._canvas_menu_sections = []
+        self._view_menu = None
         self._view_time_window = None
         self._view_selection = None
         self._selection_follows_levels = True
@@ -152,7 +154,6 @@ class BScanView(BScanMarkerEventsMixin, BScanSelectionMixin, BScanTimeWindowMixi
         self._gain_cache = None
         self._envelope_cache = None
         self._contrast = 1.0
-        self._tvg_dialog = None     # 滑条面板（懒创建，随视图销毁）
         # 全屏宿主（懒创建）+ 几何持久化回调（主窗口注入，避免 view 碰文件）
         self._fullscreen = None
         self._thumbnail_mode = False
@@ -341,6 +342,13 @@ class BScanView(BScanMarkerEventsMixin, BScanSelectionMixin, BScanTimeWindowMixi
         self._fullscreen_shortcut = QShortcut(QKeySequence('F11'), self)
         self._fullscreen_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self._fullscreen_shortcut.activated.connect(self.toggle_fullscreen)
+        self._glw.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self._canvas_shortcuts = []
+        for key in ('Shift+F10', 'Menu'):
+            shortcut = QShortcut(QKeySequence(key), self._glw,
+                context=Qt.ShortcutContext.WidgetWithChildrenShortcut)
+            shortcut.activated.connect(self.show_canvas_menu)
+            self._canvas_shortcuts.append(shortcut)
 
     # ------------------------------------------------------------------ 轴单位
     def x_axis_mode(self) -> str:
@@ -519,7 +527,15 @@ class BScanView(BScanMarkerEventsMixin, BScanSelectionMixin, BScanTimeWindowMixi
         return self._glw
 
     def _fit_view(self) -> None:
-        self.fit_to_data()
+        self.fit_all()
+
+    def fit_all(self) -> None:
+        """Restore the full viewport with its current display aspect policy."""
+        if self._image_shape is None:
+            return
+        self._clear_view_selection()
+        self._fit_current_mode()
+        self._apply_levels_to_render()
 
     def aspect_mode(self) -> str:
         """当前比例策略：'free' / 'square' / 'cell'。"""
@@ -613,6 +629,7 @@ class BScanView(BScanMarkerEventsMixin, BScanSelectionMixin, BScanTimeWindowMixi
             self._colorbar.setVisible(visible and self._colorbar_visible)
 
     def clear(self) -> None:
+        self._close_view_menu()
         self.set_acquisition_markers(())
         self.set_marker_view(None)
         self.set_qc_bad_mask(None)

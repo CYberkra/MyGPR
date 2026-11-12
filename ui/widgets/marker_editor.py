@@ -228,6 +228,8 @@ class MarkerEditor(QDialog):
                 raise ValueError('道号边界与纯时间事件请分别记录；纯时间事件的道号设为“未设置”')
         elif self.record.origin != 'acquisition':
             changes['anchor'] = self._anchor(self.start)
+            if changes['anchor'] is None and self.record.anchor is None:
+                raise ValueError('请输入点标记的道号')
         record = replace(self.record, **changes)
         anchors = (record.start, record.end) if isinstance(record, EventInterval) else (record.anchor,)
         if any(anchor and anchor.source_id == self.view.target_id and anchor.trace >= self.view.count for anchor in anchors):

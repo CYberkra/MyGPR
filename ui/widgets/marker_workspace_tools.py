@@ -2,11 +2,9 @@
 from dataclasses import replace
 
 from PyQt6.QtCore import QEvent, QObject, pyqtSignal
-from PyQt6.QtWidgets import QFileDialog, QMessageBox
 
 from ui.desktop_backend_facade import EventInterval, MarkerRecord, marker_rows_for_view
-from ui.widgets.context_menus import add_action, make_menu
-from ui.widgets.fluent_menu_keyboard import FluentMenuKeyboard
+from ui.widgets.context_menus import add_action, make_menu, show_menu
 from ui.widgets.marker_panel import MarkerPanel
 
 
@@ -15,8 +13,9 @@ class MarkerWorkspaceTools(QObject):
     selection_changed = pyqtSignal(str, str, str)
     navigate = pyqtSignal(str, object)
 
-    def __init__(self, host, views, active):
+    def __init__(self, host, views, active, *, allow_processing=False):
         super().__init__(host)
+        self.allow_processing = allow_processing
         self.host, self.views, self.active = host, views, active
         self.panel = None
         self.documents = {}
@@ -27,7 +26,9 @@ class MarkerWorkspaceTools(QObject):
         view.sig_marker_context_changed.connect(lambda: self.sync_view(view))
         view.sig_event_marker_selected.connect(lambda uid: self._selected(view, uid))
         view.marker_strip.edit_requested.connect(lambda uid: self.edit_id(view, uid))
+        view.marker_strip.menu_requested.connect(lambda uid, pos: self.record_menu(view, uid, pos))
         view.marker_strip.range_created.connect(lambda a, b, uid: self.range_created(view, a, b, uid))
+        view._canvas_menu_sections.append(lambda menu, pos: self.add_canvas_action(menu, view, pos))
 
     def sync_view(self, view):
         current = view._marker_view
@@ -60,16 +61,19 @@ class MarkerWorkspaceTools(QObject):
                                              document=document, timezone=updated.timezone,
                                              processing_history=updated.processing_history))
 
-    def show_panel(self):
+    def _ensure_panel(self):
         if self.panel is None:
-            self.panel = MarkerPanel(self.host)
+            self.panel = MarkerPanel(self.host, allow_processing=self.allow_processing)
             self.panel.operation.connect(self.operation)
             self.panel.selected.connect(self._panel_selected)
             self.panel.locate.connect(lambda uid: self._panel_selected(uid, locate=True))
             self.panel.adjust.connect(lambda uid: self.active().marker_strip.begin_adjust(uid))
             self.panel.close_requested.connect(self.hide_panel)
             self.panel.navigate.connect(self.navigate)
-        view = self.active()
+
+    def show_panel(self, view=None):
+        self._ensure_panel()
+        view = view or self.active()
         self.panel.set_view(view._marker_view if view else None)
         self.panel.show()
         self._geometry()
@@ -110,24 +114,47 @@ class MarkerWorkspaceTools(QObject):
 
     def menu(self, view, position):
         menu = make_menu(self.host)
-        visible = view._acquisition_markers_visible
-        add_action(menu, None, '隐藏标记条' if visible else '显示标记条',
-                   lambda: view.set_acquisition_markers_visible(not visible))
-        add_action(menu, None, '标记列表', self.show_panel)
+        visibility = add_action(menu, None, '显示标记条', view.set_acquisition_markers_visible)
+        visibility.setCheckable(True)
+        visibility.setChecked(view._acquisition_markers_visible)
+        add_action(menu, None, '打开标记列表', lambda: self.show_panel(view))
         current = view._marker_view
         editable = bool(current and not current.read_only)
-        add_action(menu, None, '新增点标记',
-                   lambda: self.show_panel().edit(MarkerRecord(anchor=current.anchor(0))), enabled=editable)
-        add_action(menu, None, '新建区间', view.marker_strip.begin_range, enabled=editable)
-        add_action(menu, None, '导出带标记图件', lambda: self.export_figure(view), enabled=bool(current))
-        menu._marker_keyboard = FluentMenuKeyboard(menu)
-        menu.exec(position)
-        menu._marker_keyboard.focus_menu(menu)
+        add_action(menu, None, '新增点标记…', lambda: self._create_point(view, current), enabled=editable)
+        add_action(menu, None, '新建区间…', lambda: view.marker_strip.begin_range()
+                   if current is view._marker_view else None, enabled=editable)
+        show_menu(menu, position)
 
-    def export_figure(self, view):
-        path, _ = QFileDialog.getSaveFileName(self.host, '导出带标记图件', 'markers.png', 'PNG (*.png)')
-        if path and not view.grab().save(path, 'PNG'):
-            QMessageBox.warning(self.host, '导出失败', '图件未保存，请检查目标路径')
+    def _create_point(self, view, context, trace=None):
+        if context is not None and view._marker_view is context and not context.read_only:
+            self.show_panel(view).edit(MarkerRecord(anchor=context.anchor(trace) if trace is not None else None), context)
+
+    def add_canvas_action(self, menu, view, position):
+        context = view._marker_view
+        if not context or view._image_shape is None:
+            return
+        trace = None
+        if position is not None:
+            point = view._plot.vb.mapSceneToView(position)
+            x, y = point.x(), point.y()
+            width, height = view._image_shape
+            if not (0 <= x < width and 0 <= y < height):
+                return
+            trace = int(view._trace_indices[int(x)]) if view._trace_indices is not None else int(x)
+            if not 0 <= trace < context.count:
+                return
+        add_action(menu, None, '在此道新增点标记…' if trace is not None else '新增点标记…',
+                   lambda: self._create_point(view, context, trace), enabled=not context.read_only)
+
+    def record_menu(self, view, uid, position):
+        context = view._marker_view
+        row = next((item for item in context.rows if item['uid'] == uid), None) if context else None
+        if row:
+            self._ensure_panel()
+            menu = self.panel.record_menu(row, context, lambda: view._marker_view is context,
+                locate=lambda: view.select_event_marker(uid, locate=True),
+                adjust=lambda: view.marker_strip.begin_adjust(uid))
+            show_menu(menu, position)
 
     def _selected(self, view, uid):
         if self._selecting or not view._marker_view:

@@ -31,6 +31,7 @@ def _draw_pill(painter, rect, fill, border):
 class MarkerStrip(QWidget):
     selected = pyqtSignal(str)
     edit_requested = pyqtSignal(str)
+    menu_requested = pyqtSignal(str, object)
     range_created = pyqtSignal(int, int, str)
 
     def __init__(self, view):
@@ -39,6 +40,7 @@ class MarkerStrip(QWidget):
         self.rows = ()
         self.selected_id = ''
         self._hits = []
+        self._capture_title_only = False
         self._creating = False
         self._first = None
         self._adjusting = ''
@@ -128,7 +130,7 @@ class MarkerStrip(QWidget):
         left = max(plot_left, title_width + 14)
         painter.setPen(QColor(theme['plot_foreground']))
         painter.drawText(QRectF(6, 0, title_width, self.height()), Qt.AlignmentFlag.AlignVCenter, title)
-        if right <= left:
+        if right <= left or self._capture_title_only:
             return
         painter.setClipRect(QRectF(plot_left, 0, right - plot_left, self.height()))
         if self._creating:
@@ -225,9 +227,9 @@ class MarkerStrip(QWidget):
             painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter, label)
 
     def mousePressEvent(self, event):
-        self.setFocus()
         if event.button() != Qt.MouseButton.LeftButton:
             return
+        self.setFocus()
         if self._creating:
             trace = self.trace_at(event.position().toPoint())
             if self._first is None:
@@ -268,10 +270,24 @@ class MarkerStrip(QWidget):
             self.range_created.emit(min(start, end), max(start, end), uid)
 
     def mouseDoubleClickEvent(self, event):
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
         for rect, ids in self._hits:
             if rect.contains(event.position()) and len(ids) == 1:
                 self.edit_requested.emit(ids[0])
                 return
+
+    def contextMenuEvent(self, event):
+        if self._creating or self._adjusting:
+            self.cancel_edit()
+        elif event.reason() == event.Reason.Keyboard and self.selected_id:
+            self.menu_requested.emit(self.selected_id, self.mapToGlobal(self.rect().center()))
+        else:
+            for rect, ids in self._hits:
+                if len(ids) == 1 and rect.contains(event.pos()):
+                    self.menu_requested.emit(ids[0], event.globalPos())
+                    break
+        event.accept()
 
     def mouseMoveEvent(self, event):
         if self._creating or self._adjusting:

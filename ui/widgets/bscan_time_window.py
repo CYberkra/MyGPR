@@ -104,9 +104,11 @@ class BScanTimeWindowMixin:
         axis = self._time_axis_for_view()
         if axis is None:
             return
+        matrix, sample_axis = self._matrix, self._sample_axis
         bounds = (float(axis[0]), float(axis[-1]))
         dialog = TimeWindowDialog(self, bounds, self._view_time_window or bounds)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
+        if (dialog.exec() == QDialog.DialogCode.Accepted
+                and self._matrix is matrix and self._sample_axis is sample_axis):
             self.set_view_time_window(
                 max(bounds[0], dialog.start_spin.value()), min(bounds[1], dialog.end_spin.value())
             )

@@ -284,7 +284,7 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
         self._workspace.source_activated_by_user.connect(self._activate_comparison_source)
         self._workspace.preview_requested.connect(self._request_preview)
         self._workspace.preview_retry_requested.connect(self.retry_preview)
-        self._workspace.source_context_requested.connect(self._show_source_menu)
+        self._workspace.source_menu_actions = self._add_tab_source_actions
         self._workspace.view_created.connect(self.bscan_view_created)
         self._tools_btn.toggled.connect(self._toggle_tools)
         self._resources_btn.toggled.connect(self._toggle_resources)

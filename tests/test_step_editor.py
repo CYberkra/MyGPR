@@ -52,6 +52,15 @@ def popup(qapp):
     w.deleteLater()
 
 
+def _trigger_step_command(page, index, command):
+    from ui.widgets.context_menus import make_menu
+
+    menu = make_menu(page)
+    page._chain_strip._add_step_commands(menu, index)
+    next(action for action in menu.actions() if action.data() == command).trigger()
+    menu.deleteLater()
+
+
 def _press_escape(widget) -> None:
     event = QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Escape,
                       Qt.KeyboardModifier.NoModifier)
@@ -86,37 +95,19 @@ class TestPopupWindowContract:
         assert popup.windowOpacity() == 1.0
         assert popup._opacity_animation.state() == popup._opacity_animation.State.Stopped
 
-    def test_all_actions_have_tooltips(self, popup):
-        for name, btn in popup._action_buttons.items():
-            assert btn.toolTip(), f'{name} 动作缺少 tooltip'
-        assert popup._enable_switch.toolTip()
-
-    def test_remove_button_is_danger_red(self, popup):
-        """删除红色警示：error 令牌（不跳色铁律），随主题重刷。"""
-        from ui.design_tokens import color
-
-        assert color('error') in popup._remove_btn.styleSheet()
-        popup.apply_theme(True)
-        assert color('error', True) in popup._remove_btn.styleSheet()
+    def test_parameter_actions_have_tooltips(self, popup):
+        for button in (popup._close_btn, popup._apply_btn, popup._reset_btn):
+            assert button.toolTip()
 
 
 class TestSnapshotLoad:
-    def test_load_snapshot_fills_form_and_switch(self, popup):
+    def test_load_snapshot_fills_form(self, popup):
         popup.load_snapshot(1, _snapshot(enabled=False))
         assert popup._index == 1
         assert popup._title_label.text() == '去直流滤波'
-        assert popup._enable_switch.isChecked() is False
         assert popup._form.values() == {'window': 9, 'gain': 3.5}
         assert popup._scroll.isVisibleTo(popup) is True
         assert popup._param_hint.isVisibleTo(popup) is False
-
-    def test_first_step_disables_up_last_disables_down(self, popup):
-        popup.load_snapshot(0, _snapshot(is_first=True))
-        assert popup._up_btn.isEnabled() is False
-        assert popup._down_btn.isEnabled() is True
-        popup.load_snapshot(2, _snapshot(is_last=True))
-        assert popup._up_btn.isEnabled() is True
-        assert popup._down_btn.isEnabled() is False
 
     def test_empty_schema_shows_hint(self, popup):
         popup.load_snapshot(0, _snapshot(schema=[]))
@@ -134,8 +125,7 @@ class TestApplyAndDiscard:
         # 弹窗内改参数 + 切 pill：只有「应用」写回
         popup._form.set_values({'window': 21})
         popup._apply_btn.click()
-        assert got == [{'index': 1, 'params': {'window': 21, 'gain': 3.5},
-                        'enabled': False}]
+        assert got == [{'index': 1, 'params': {'window': 21, 'gain': 3.5}}]
         assert not popup.isVisible()
 
     def test_reset_defaults_restores_schema_defaults(self, popup):
@@ -145,9 +135,8 @@ class TestApplyAndDiscard:
 
     def test_discard_on_close_emits_nothing(self, popup, qapp):
         """Esc 关闭：未应用改动随窗丢弃（数据从未离开弹窗）。"""
-        applied, moved = [], []
+        applied = []
         popup.sig_applied.connect(applied.append)
-        popup.sig_move_requested.connect(lambda *a: moved.append(a))
         popup.load_snapshot(1, _snapshot())
         popup.show()
         qapp.processEvents()
@@ -155,7 +144,6 @@ class TestApplyAndDiscard:
         _press_escape(popup)
         assert not popup.isVisible()
         assert applied == []
-        assert moved == []
 
     def test_param_area_scrolls_when_tall(self, popup):
         """参数超区高：区内滚动，窗体高度不爆炸（Q4 定案 320px）。"""
@@ -168,23 +156,6 @@ class TestApplyAndDiscard:
 
 
 class TestStructuralActions:
-    @pytest.mark.parametrize('action,signal,args', [
-        ('up', 'sig_move_requested', (1, 0)),
-        ('down', 'sig_move_requested', (1, 3)),
-        ('duplicate', 'sig_duplicate_requested', (1,)),
-        ('replace', 'sig_replace_requested', (1,)),
-        ('remove', 'sig_remove_requested', (1,)),
-    ])
-    def test_action_emits_and_closes(self, popup, qapp, action, signal, args):
-        got = []
-        getattr(popup, signal).connect(lambda *a: got.append(a))
-        popup.load_snapshot(1, _snapshot())
-        popup.show()
-        qapp.processEvents()
-        popup._action_buttons[action].click()
-        assert got == [args]
-        assert not popup.isVisible()          # 结构动作即发即关
-
     def test_focus_recheck_closes_when_focus_left(self, popup, qapp,
                                                   monkeypatch):
         popup.show()
@@ -245,9 +216,7 @@ class TestPageStepEditorWiring:
         page = _page_with_methods(qapp)
         try:
             page._add_method_to_pipeline('dewow')
-            page._open_step_editor(0)
-            page._step_editor._enable_switch.setChecked(False)
-            page._step_editor._apply_btn.click()
+            _trigger_step_command(page, 0, 'toggle-step')
             steps = page._pipeline_list.steps()
             assert steps[0]['enabled'] is False
             assert steps[0]['params'] == {'window': 5, 'gain': 2.0}
@@ -278,19 +247,16 @@ class TestPageStepEditorWiring:
             page._pipeline_list.update_step_params(
                 0, {'window': 42, 'gain': 8.0})
             # 屏蔽（应用）
-            page._open_step_editor(0)
-            page._step_editor._enable_switch.setChecked(False)
-            page._step_editor._apply_btn.click()
+            _trigger_step_command(page, 0, 'toggle-step')
             steps = page._pipeline_list.steps()
             assert steps[0]['enabled'] is False
             assert steps[0]['params'] == {'window': 42, 'gain': 8.0}
             # 重新启用（应用）：弹窗快照里参数仍是屏蔽前的值
             page._open_step_editor(0)
-            assert page._step_editor._enable_switch.isChecked() is False
             assert page._step_editor._form.values() == \
                 {'window': 42, 'gain': 8.0}
-            page._step_editor._enable_switch.setChecked(True)
-            page._step_editor._apply_btn.click()
+            page._step_editor.close()
+            _trigger_step_command(page, 0, 'toggle-step')
             steps = page._pipeline_list.steps()
             assert steps[0]['enabled'] is True
             assert steps[0]['params'] == {'window': 42, 'gain': 8.0}
@@ -333,13 +299,13 @@ class TestPageStepEditorWiring:
         page = _page_with_methods(qapp)
         try:
             page._add_method_to_pipeline('dewow')
-            page._open_step_editor(0)
-            page._step_editor._action_buttons['replace'].click()
+            _trigger_step_command(page, 0, 'replace-step')
             assert page._method_picker is not None
             assert page._picker_purpose == 'replace'
             assert page._picker_index == 0
             # 双击选择器 → 就地替换
             page._method_picker._browser.sig_add_requested.emit('agc')
+            page._method_picker._add_selected_btn.click()
             assert [s['method_id']
                     for s in page._pipeline_list.steps()] == ['agc']
         finally:
@@ -350,8 +316,7 @@ class TestPageStepEditorWiring:
         try:
             page._add_method_to_pipeline('dewow')
             page._add_method_to_pipeline('agc')
-            page._open_step_editor(0)
-            page._step_editor._action_buttons['remove'].click()
+            _trigger_step_command(page, 0, 'remove-step')
             assert [s['method_id']
                     for s in page._pipeline_list.steps()] == ['agc']
         finally:
@@ -362,8 +327,7 @@ class TestPageStepEditorWiring:
         try:
             page._add_method_to_pipeline('dewow')
             page._add_method_to_pipeline('agc')
-            page._open_step_editor(0)
-            page._step_editor._action_buttons['down'].click()   # 插入位 2
+            _trigger_step_command(page, 0, 'move-down')   # 插入位 2
             assert [s['method_id']
                     for s in page._pipeline_list.steps()] == ['agc', 'dewow']
         finally:

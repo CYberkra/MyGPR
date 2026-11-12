@@ -5,8 +5,7 @@ from PyQt6.QtWidgets import (
     QDialog, QDialogButtonBox, QPlainTextEdit, QVBoxLayout,
 )
 
-from ui.widgets.context_menus import add_action, make_menu
-from ui.widgets.fluent_menu_keyboard import FluentMenuKeyboard
+from ui.widgets.context_menus import add_action, make_menu, show_menu
 
 
 def object_menu(parent):
@@ -47,6 +46,7 @@ class ObjectMenuBinding(QObject):
     def __init__(self, page, target, builder):
         super().__init__(page)
         self.target, self.builder = target, builder
+        self.viewport = target.viewport() if hasattr(target, 'viewport') else target
         self.menu = None
         if target.focusPolicy() == Qt.FocusPolicy.NoFocus:
             target.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -59,22 +59,28 @@ class ObjectMenuBinding(QObject):
             shortcut.activated.connect(self.show_keyboard)
             self.shortcuts.append(shortcut)
         target.installEventFilter(self)
+        if self.viewport is not target:
+            self.viewport.installEventFilter(self)
         page.installEventFilter(self)
 
     def show_keyboard(self):
         item = self.target.currentItem() if hasattr(self.target, 'currentItem') else None
-        position = self.target.visualItemRect(item).center() if item is not None else QPoint(-1, -1)
+        position = QPoint(-1, -1)
+        if item is not None:
+            position = self.target.visualItemRect(item).center()
+        elif hasattr(self.target, 'currentIndex') and self.target.currentIndex().isValid():
+            position = self.target.visualRect(self.target.currentIndex()).center()
         self.show(position)
 
     def show(self, position):
         self.close()
         menu = self.builder(position)
+        if not menu.actions() and not menu._subMenus:
+            menu.deleteLater()
+            return
         self.menu = menu
-        menu._object_keyboard = FluentMenuKeyboard(menu)
-        menu.closedSignal.connect(lambda: setattr(self, 'menu', None))
-        viewport = self.target.viewport() if hasattr(self.target, 'viewport') else self.target
-        menu.exec(viewport.mapToGlobal(position if position.x() >= 0 else QPoint(8, 8)))
-        menu._object_keyboard.focus_menu(menu)
+        menu.closedSignal.connect(lambda: setattr(self, 'menu', None) if self.menu is menu else None)
+        show_menu(menu, self.viewport.mapToGlobal(position if position.x() >= 0 else QPoint(8, 8)))
 
     def close(self):
         if self.menu is not None:
@@ -82,6 +88,11 @@ class ObjectMenuBinding(QObject):
             self.menu = None
 
     def eventFilter(self, watched, event):
-        if event.type() == QEvent.Type.Hide:
+        kind = event.type()
+        if kind == QEvent.Type.Hide:
             self.close()
+        if (self.viewport is not self.target and watched is self.viewport
+                and kind in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease)
+                and event.button() == Qt.MouseButton.RightButton):
+            return True
         return super().eventFilter(watched, event)

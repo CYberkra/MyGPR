@@ -99,6 +99,17 @@ def add_action(menu: RoundMenu, icon, text: str, slot, *,
     return action
 
 
+def show_menu(menu: RoundMenu, position) -> None:
+    from ui.widgets.fluent_menu_keyboard import FluentMenuKeyboard
+
+    if not menu.actions() and not menu._subMenus:
+        menu.deleteLater()
+        return
+    keyboard = menu._menu_keyboard = FluentMenuKeyboard(menu)
+    menu.exec(position)
+    keyboard.focus_menu(menu)
+
+
 def add_checkable_submenu(menu: RoundMenu, title: str, items,
                           current: str, on_chosen) -> RoundMenu:
     """添加单选风格子菜单：items 为名称列表，current 打勾。
@@ -117,5 +128,5 @@ def add_checkable_submenu(menu: RoundMenu, title: str, items,
     return submenu
 
 
-__all__ = ['FIF', 'Action', 'RoundMenu', 'make_menu', 'add_action',
+__all__ = ['FIF', 'Action', 'RoundMenu', 'make_menu', 'add_action', 'show_menu',
            'add_checkable_submenu']

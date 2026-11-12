@@ -20,6 +20,7 @@
 
 ## 保存的设计记录
 
+- [2026-11-12 设置、菜单与弹层整理方案](2026-11-12-command-surfaces-design.md)（设计稿）。
 - 2026-11 实施记录：[应用内更新](../plans/2026-11-05-application-updates.md)、[永久删除](../plans/2026-11-05-permanent-deletion.md)、[启动页](../plans/2026-11-04-startup-page.md)。其中的进度描述是当时快照。
 - [2026-09-03 工程化路线图](2026-09-03-engineering-roadmap.md)：分阶段决策与当时状态；未完成项需按当前代码重新核查。
 - [2026-09-06 反卷积 / Inverse-Q](2026-09-06-deconv-inverseq-design.md)。

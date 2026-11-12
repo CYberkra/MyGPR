@@ -70,6 +70,10 @@ class _MarkerCommand:
                 with backend.projects.acquire_lease(view.document.project_id):
                     backend.maintenance.update_metadata(view.document.project_id, timezone=payload['timezone'])
                     result = backend.markers.view(view.document.project_id, view.document.line_id, view.artifact_id)
+            elif action == 'project-timezone':
+                project_id = payload['project_id']
+                with backend.projects.acquire_lease(project_id):
+                    result = backend.maintenance.update_metadata(project_id, timezone=payload['timezone'])
             elif action == 'load':
                 result = backend.markers.view(payload['project_id'], payload['line_id'], payload.get('artifact_id', ''))
             elif action == 'preview':

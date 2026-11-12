@@ -8,6 +8,7 @@ class MarkerChain:
         self.tools = []
         self.controller = None
         self._project_token = ''
+        self._timezone_token = ''
         self._pending_locate = None
         self._pending_session_ready = False
 
@@ -33,6 +34,10 @@ class MarkerChain:
         self.controller.artifact_saved.connect(self._artifact_saved)
         self.controller.changed.connect(lambda _: self.reload_project())
         self.controller.ready.connect(self._project_ready)
+        project_page = co.page('projectInterface')
+        if hasattr(project_page, 'timezone_requested'):
+            project_page.timezone_requested.connect(self._change_timezone)
+            self.controller.ready.connect(self._timezone_ready)
         if co.interpretation_controller is not None:
             co.interpretation_controller.saved.connect(lambda _: self.reload_project())
             co.interpretation_controller.session_opened.connect(self._session_opened)
@@ -44,6 +49,7 @@ class MarkerChain:
 
     def _project(self, project_id):
         self._project_token = ''
+        self._timezone_token = ''
         self._pending_locate = None
         for item in self.tools:
             if hasattr(item, 'set_project'):
@@ -58,6 +64,23 @@ class MarkerChain:
         spatial = self.co.page('spatialInterface')
         if hasattr(spatial, 'set_marker_rows'):
             spatial.set_marker_rows(())
+
+    def _change_timezone(self, project_id, timezone):
+        if self._timezone_token or project_id != self.co.current_project_id():
+            return
+        self._timezone_token = uuid4().hex
+        self.controller.request('project-timezone', {'token': self._timezone_token,
+                                'project_id': project_id, 'timezone': timezone})
+
+    def _timezone_ready(self, token, result, error):
+        if token != self._timezone_token:
+            return
+        self._timezone_token = ''
+        if error:
+            self.co.infobar('error', '项目时区', error)
+        else:
+            self.co.project_controller.refresh_project_metadata()
+            self.reload_project()
 
     def reload_project(self):
         project_id = self.co.current_project_id()

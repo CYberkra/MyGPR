@@ -32,6 +32,8 @@ class ProcessingChainView:
         strip.sig_step_selected.connect(self._pipeline_list.select_step)
         strip.sig_step_clicked.connect(self._on_chain_chip_clicked)
         strip.sig_step_editor_requested.connect(self._open_step_editor)
+        strip.sig_step_duplicate_requested.connect(self._duplicate_step)
+        strip.sig_step_replace_requested.connect(self._on_step_editor_replace)
         strip.sig_step_toggled.connect(self._on_chain_step_toggled)
         strip.sig_step_removed.connect(self._on_chain_step_removed)
         strip.sig_step_moved.connect(self._on_chain_step_moved)

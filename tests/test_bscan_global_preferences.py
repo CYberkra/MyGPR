@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 pytest.importorskip('PyQt6')
-from PyQt6.QtCore import QCoreApplication, QEvent, QPointF
+from PyQt6.QtCore import QCoreApplication, QEvent, QPointF, QRectF
 from PyQt6.QtWidgets import QWidget
 
 from ui.desktop_backend_facade import compute_display_levels
@@ -223,8 +223,36 @@ def test_canvas_menu_keeps_viewing_actions_and_opens_the_settings_section(prefer
     monkeypatch.setattr(page, 'focus_bscan_settings', lambda: focused.append(True))
     view._show_context_menu(SimpleNamespace(screenPos=lambda: QPointF(20, 20)))
     actions = {action.text(): action for action in menus[0].actions()}
-    assert {'框选放大', '回到全览（铺满窗口）', '复制图像', '导出 PNG…', '显示设置…'} <= actions.keys()
+    assert {'框选放大', '适应全图', '复制图像', '导出图件…', '当前图显示…'} <= actions.keys()
     assert not {'色阶跟随查看范围', '色阶设置…', '显示色标', '显示异常道标记'} & actions.keys()
-    actions['显示设置…'].trigger()
+    actions['当前图显示…'].trigger()
+    settings = next(action for action in menus[1].actions() if action.text() == '全局 B-scan 设置…')
+    settings.trigger()
     qapp.processEvents()
     assert prefs.opened == ['settingsInterface'] and focused == [True]
+
+
+def test_fit_all_preserves_aspect_and_does_not_write_preferences(preferences):
+    prefs, _, _ = preferences
+    view, _ = add_view(preferences)
+    view.set_aspect_mode('square', notify=True)
+    view.set_view_selection(QRectF(5, 5, 20, 30))
+    signals = []
+    view.sig_aspect_changed.connect(signals.append)
+    view.fit_all()
+    assert view.aspect_mode() == prefs.settings.get('bscan_aspect_mode') == 'square'
+    assert view._view_selection is None and signals == []
+
+
+def test_global_tvg_parameters_reach_views_and_win_over_saved_tabs(preferences):
+    prefs, _, page = preferences
+    first, _ = add_view(preferences)
+    second, _ = add_view(preferences)
+    old = first.export_display_state()
+    page._bscan_gain_combo.setCurrentIndex(page._bscan_gain_combo.findData('tvg'))
+    page._bscan_tvg_db_spin.setValue(36)
+    page._bscan_tvg_power_spin.setValue(1.8)
+    first.restore_display_state(old)
+    for view in (first, second):
+        assert view.gain_mode() == 'tvg' and view._gain_db == 36 and view._gain_power == 1.8
+    assert prefs.settings.get('bscan_tvg_db') == 36

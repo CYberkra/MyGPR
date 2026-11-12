@@ -304,6 +304,8 @@ class SpatialPage(SpatialMarkersMixin, SpatialContextMenuMixin, ViewSyncMixin, P
         basemap_layout.addLayout(source_row)
         self._prefetch_btn = PushButton('预下载测线区域', basemap_card, FIF.DOWNLOAD)
         basemap_layout.addWidget(self._prefetch_btn)
+        self._prefetch_view_btn = PushButton('预下载当前视野', basemap_card)
+        basemap_layout.addWidget(self._prefetch_view_btn)
         self._prefetch_label = CaptionLabel('', basemap_card)
         self._prefetch_label.setWordWrap(True)
         basemap_layout.addWidget(self._prefetch_label)
@@ -532,6 +534,7 @@ class SpatialPage(SpatialMarkersMixin, SpatialContextMenuMixin, ViewSyncMixin, P
         self._line_list.currentItemChanged.connect(self._on_line_selected)
         self._basemap_combo.currentIndexChanged.connect(self._on_basemap_changed)
         self._prefetch_btn.clicked.connect(self._on_prefetch_clicked)
+        self._prefetch_view_btn.clicked.connect(self._on_prefetch_view_clicked)
         self._map_view.prefetch_progress.connect(self._on_prefetch_progress)
         self._set_current_btn.clicked.connect(self._on_set_current_clicked)
         self._3d_exag_spin.valueChanged.connect(
@@ -915,10 +918,10 @@ class SpatialPage(SpatialMarkersMixin, SpatialContextMenuMixin, ViewSyncMixin, P
         self._persist_setting('spatial_basemap_source', source)
 
     def _on_prefetch_clicked(self) -> None:
-        # 优先按测线包围盒下载对应地理区域；无已配准轨迹回退当前视野
+        if self._map_view.tracks_bbox_lonlat() is None:
+            self._prefetch_label.setText('当前测线缺少已配准轨迹')
+            return
         queued = self._map_view.prefetch_tracks()
-        if queued == 0 and self._map_view.tracks_bbox_lonlat() is None:
-            queued = self._map_view.prefetch_current_view(max_extra_zoom=2)
         if queued > 0:
             self._prefetch_label.setText(f'正在下载 {queued} 张瓦片…')
         else:

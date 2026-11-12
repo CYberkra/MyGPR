@@ -187,8 +187,10 @@ def test_disabling_link_hides_crosshair_and_closing_workspace_disables(qapp):
     workspace.split_source('a', 'right', copy=True)
     workspace.show()
     qapp.processEvents()
+    from ui.widgets.context_menus import make_menu
+
     group = workspace.group_widget()
-    menu = workspace.create_context_menu(group.group_id, 'a')
+    menu = workspace._populate_group_menu(make_menu(workspace), group)
     action = next(item for item in menu.actions() if item.data() == 'link-views')
     action.trigger()
     assert workspace._link_enabled
@@ -244,7 +246,7 @@ def test_refresh_line_previews_invalidates_all_same_line_sources(qapp):
     qapp.processEvents()
 
 
-@pytest.mark.parametrize('command', ['selection-crop', 'selection-qc', 'selection-crop-time'])
+@pytest.mark.parametrize('command', ['trace_cut', 'trace_qc', 'trace_cut_time'])
 def test_stale_selection_menu_cannot_apply_to_new_revision(qapp, command):
     from PyQt6.QtCore import QRectF
     from types import SimpleNamespace
@@ -257,8 +259,11 @@ def test_stale_selection_menu_cannot_apply_to_new_revision(qapp, command):
                                           sample_axis=np.arange(4.), sample_axis_label='时间 (ns)'))
     group = page._workspace.group_widget()
     group.view.set_view_selection(QRectF(1, 0, 2, 4))
-    menu = page._workspace.create_context_menu(group.group_id, 'original')
-    action = next(a for a in menu.actions() if a.data() == command)
+    from PyQt6.QtCore import QPoint
+
+    menu = group.view.create_canvas_menu(QPoint())
+    selection_menu = next(sub for sub in menu._subMenus if sub.title() == '将框选加入处理草稿')
+    action = next(a for a in selection_menu.actions() if a.data() == command)
     assert action.isEnabled()
     page.set_original_revision('P', 'L', 'new')
     page.set_original_bundle(PreviewBundle(np.ones((4, 5)), -1, 1, 4, 5))

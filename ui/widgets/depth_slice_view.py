@@ -321,13 +321,13 @@ class DepthSliceView(GraphicsViewBase, pg.PlotWidget):
         if not self._plot_item.sceneBoundingRect().contains(event.scenePos()):
             return
         from qfluentwidgets import FluentIcon as FIF
-        from ui.widgets.context_menus import add_action, make_menu
+        from ui.widgets.context_menus import add_action, make_menu, show_menu
         menu = make_menu(self)
         add_action(menu, FIF.ZOOM_IN, '放大', self.zoom_in)
         add_action(menu, FIF.ZOOM_OUT, '缩小', self.zoom_out)
         self._add_standard_menu_actions(menu, can_export=self._matrix is not None,
                                         export_prefix='depth_slice')
-        menu.exec(event.screenPos().toPoint())
+        show_menu(menu, event.screenPos().toPoint())
 
     # ------------------------------------------------------------ 主题
     def apply_theme(self, dark: bool) -> None:

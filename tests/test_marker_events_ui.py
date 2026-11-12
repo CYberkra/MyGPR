@@ -182,6 +182,34 @@ def test_project_list_refresh_uses_saved_revision_for_next_preview(qapp):
     panel.close()
 
 
+def test_marker_menu_uses_hit_record_and_refuses_outdated_view(qapp):
+    from PyQt6.QtCore import QPoint
+
+    panel = MarkerPanel()
+    context = marker_view(2)
+    points = context.document.markers
+    panel.set_view(context)
+    panel.resize(400, 500)
+    panel.show()
+    qapp.processEvents()
+    panel.select_id(points[0].uid)
+    located = QSignalSpy(panel.locate)
+    pos = panel.table.visualRect(panel.proxy.index(1, 0)).center()
+    menu = panel._menu(pos)
+    action = next(action for action in menu.actions() if action.data() == 'locate-marker')
+    action.trigger()
+    assert located[0] == [points[1].uid]
+    assert panel._selected_rows()[0]['uid'] == points[0].uid
+    blank = panel._menu(QPoint(-1, -1))
+    assert not blank.actions()
+    panel.set_view(replace(context, document=replace(context.document, revision=1)))
+    action.trigger()
+    assert len(located) == 1
+    blank.deleteLater()
+    menu.deleteLater()
+    panel.close()
+
+
 def test_marker_navigation_updates_interpretation_source_and_releases_browser(qapp):
     from types import SimpleNamespace
     from ui.pages.interpretation_page import InterpretationPage

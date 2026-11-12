@@ -70,10 +70,10 @@ class BScanViewFullscreenMixin:
             return
         self._fullscreen_fit_btn = ToolButton(FIF.FIT_PAGE, self)
         self._fullscreen_fit_btn.setFixedSize(*constants.TOOL_BTN_COMPACT)
-        self._fullscreen_fit_btn.setToolTip('回到全览')
-        self._fullscreen_fit_btn.setAccessibleName('回到全览')
+        self._fullscreen_fit_btn.setToolTip('适应全图')
+        self._fullscreen_fit_btn.setAccessibleName('适应全图')
         self._fullscreen_fit_btn.setStyleSheet(self._fullscreen_btn.styleSheet())
-        self._fullscreen_fit_btn.clicked.connect(self.fit_to_data)
+        self._fullscreen_fit_btn.clicked.connect(self.fit_all)
         self._fullscreen_close_btn = ToolButton(FIF.CLOSE, self)
         self._fullscreen_close_btn.setFixedSize(*constants.TOOL_BTN_COMPACT)
         self._fullscreen_close_btn.setToolTip('关闭全屏并返回原视图（Esc）')
@@ -102,7 +102,7 @@ class BScanViewFullscreenMixin:
 
     def _move_companions_to_host(self) -> None:
         self._fullscreen_companions = []
-        for name in ('_ascan_popup', '_tvg_dialog'):
+        for name in ('_ascan_popup',):
             widget = getattr(self, name, None)
             if widget is None:
                 continue

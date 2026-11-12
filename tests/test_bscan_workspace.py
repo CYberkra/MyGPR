@@ -256,13 +256,20 @@ def test_tab_context_menu_never_activates_target_and_delegates_business_actions(
     workspace.set_sources(sources('raw', 'A'))
     workspace.open_source('raw')
     workspace.open_source('A')
+    from ui.widgets.object_context_menu import object_action
+
     requests = []
-    workspace.source_context_requested.connect(lambda *args: requests.append(args))
-    menu = workspace.create_context_menu(key='raw', global_pos=QPoint(81, 92))
+
+    def add_source_actions(menu, key, group_id, guard):
+        object_action(menu, 'source-info', '参数与来源…', lambda: guard(lambda: requests.append((group_id, key))))
+
+    workspace.source_menu_actions = add_source_actions
+    menu = workspace.create_context_menu(key='raw')
     assert workspace.active_key() == 'A'
-    action(menu, 'source-context').trigger()
-    assert requests == [('raw', QPoint(81, 92))]
+    action(menu, 'source-info').trigger()
+    assert requests == [(workspace.group_ids()[0], 'raw')]
     assert workspace.active_key() == 'A'
+    assert not any(a.data() in ('link-views', 'reset-layout') for a in menu.actions())
     action(menu, 'pin').trigger()
     pinned_menu = workspace.create_context_menu(key='raw')
     assert not action(pinned_menu, 'close').isEnabled()

@@ -42,6 +42,8 @@ class MethodPickerDialog(QDialog):
         self.setMinimumSize(480, 420)
         self.resize(520, 520)
         self._methods_by_id = {}
+        self._replacing = False
+        self._selected_method_id = ''
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
@@ -128,14 +130,23 @@ class MethodPickerDialog(QDialog):
         self._description_label.hide()
         self._on_selection_changed(None)
 
+    def set_replacing(self, replacing: bool) -> None:
+        self._replacing = bool(replacing)
+        self._browser.add_label = '选择此方法' if replacing else '添加到处理链'
+        self._add_selected_btn.setText('确认替换' if replacing else '添加')
+        self.setWindowTitle('替换处理方法' if replacing else '添加处理步骤')
+
     # ------------------------------------------------------------ 信号
     def _on_add_requested(self, method_id: str) -> None:
         """双击条目：转发选中方法，**不关窗**（连续添加，PRD Q1 定案）。"""
-        if method_id:
+        if self._replacing:
+            self._on_selection_changed(method_id)
+        elif method_id:
             self.sig_method_chosen.emit(str(method_id))
 
     def _on_selection_changed(self, method_id) -> None:
         method = self._methods_by_id.get(str(method_id or ''))
+        self._selected_method_id = str(method_id) if method is not None else ''
         if method is None:
             self._selected_name_label.setText('未选择')
             self._description_label.setText('')
@@ -155,9 +166,8 @@ class MethodPickerDialog(QDialog):
             self._details_btn.isChecked() and bool(self._description_label.text()))
 
     def _add_current_method(self) -> None:
-        method_id = self._browser.current_method_id()
-        if method_id:
-            self._on_add_requested(method_id)
+        if self._selected_method_id:
+            self.sig_method_chosen.emit(self._selected_method_id)
 
     def _position_near_anchor(self) -> None:
         if self._anchor is None or not self._anchor.isVisible():

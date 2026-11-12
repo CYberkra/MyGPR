@@ -19,6 +19,7 @@ from qfluentwidgets import FluentIcon as FIF
 from ui import design_tokens
 from ui.widgets.context_menus import add_action, make_menu
 from ui.widgets.empty_state import EmptyStateOverlay
+from ui.widgets.object_context_menu import ObjectMenuBinding
 
 
 def _search_key(value):
@@ -35,6 +36,7 @@ class MethodBrowser(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._methods = []
+        self.add_label = '添加到处理链'
         self._search_expansion = None
 
         self._search = LineEdit(self)
@@ -52,8 +54,7 @@ class MethodBrowser(QWidget):
         self._tree.setUniformRowHeights(False)
         self._tree.currentItemChanged.connect(self._on_current_changed)
         self._tree.itemDoubleClicked.connect(self._on_double_clicked)
-        self._tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self._tree.customContextMenuRequested.connect(self._on_context_menu)
+        self._method_menu = ObjectMenuBinding(self, self._tree, self._context_menu)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -207,21 +208,24 @@ class MethodBrowser(QWidget):
             self.sig_add_requested.emit(mid)
 
     def _on_context_menu(self, pos) -> None:
+        self._method_menu.show(pos)
+
+    def _context_menu(self, pos):
         item = self._tree.itemAt(pos)
         mid = self._method_id_of(item)
-        if not mid:
-            return
-        self._tree.setCurrentItem(item)
         menu = make_menu(self)
-        add_action(menu, FIF.ADD, '添加到处理链',
-                   lambda: self.sig_add_requested.emit(mid))
+        if not mid:
+            return menu
+        add_action(menu, FIF.ADD, self.add_label,
+                   lambda: self.sig_add_requested.emit(mid)
+                   if any(str(method.get('method_id') or '') == mid for method in self._methods) else None)
         menu.addSeparator()
         # 复制的是用户看到的名字（display_name）——原复制 method_id
         # 是开发者视角，粘贴出来对不上界面字样（2026-10-09 深查 P3）
         display = str(item.data(0, Qt.ItemDataRole.UserRole + 1) or mid)
         add_action(menu, FIF.COPY, '复制方法名',
                    lambda: QApplication.clipboard().setText(display))
-        menu.exec(self._tree.viewport().mapToGlobal(pos))
+        return menu
 
     def current_method_id(self):
         """当前选中方法 id（无则 None），供"添加所选方法"按钮使用。"""
