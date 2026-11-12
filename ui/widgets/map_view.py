@@ -681,7 +681,7 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
                 pen=pg.mkPen(color, width=1), brush=pg.mkBrush(color))
             self._plot.addItem(endpoint_item)
             for item in (line_item, line_item.curve, endpoint_item):
-                item.setData(0, info['line_id'])
+                item._context_line_id = info['line_id']
             self._track_items.extend([line_item, endpoint_item])
             all_x.append(xs)
             all_y.append(ys)
@@ -870,7 +870,8 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
         menu = make_menu(self)
         add_line_actions = getattr(self, 'add_line_menu_actions', None)
         if add_line_actions and scene_pos is not None:
-            line_id = next((item.data(0) for item in self.scene().items(scene_pos) if item.data(0)), '')
+            line_id = next((line for item in self.scene().items(scene_pos)
+                            if (line := getattr(item, '_context_line_id', ''))), '')
             if line_id:
                 add_line_actions(menu, line_id)
                 menu.addSeparator()

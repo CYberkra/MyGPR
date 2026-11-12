@@ -50,6 +50,7 @@ SUITES = {
         "tests/test_project_workspace.py",
         "tests/test_page_controls_wired.py",
         "tests/test_spatial_delivery_ui.py",
+        "tests/test_spatial_shutdown_lifecycle.py",
         "tests/test_startup_project_restore.py",
         "tests/test_processing_page_v2.py",
         "tests/test_processing_workspace_flow.py",
