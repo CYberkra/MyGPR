@@ -55,6 +55,7 @@ SUITES = {
         "tests/test_output_panel.py",
         "tests/test_coordinator_chains.py",
         "tests/test_main_window_titlebar.py",
+        "tests/test_qt_shutdown.py",
         "tests/test_spatial_shutdown_lifecycle.py",
         "tests/test_startup_project_restore.py",
         "tests/test_processing_page_v2.py",

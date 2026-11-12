@@ -29,12 +29,16 @@ raise SystemExit(status)
                             cwd=root, env=env, capture_output=True, text=True, timeout=45)
     output = result.stdout + result.stderr
     assert result.returncode == 0, output
-    assert '[smoke] OK, 8 screenshots' in result.stdout, output
+    assert '[smoke] OK, 6 screenshots' in result.stdout, output
     assert 'gui-smoke-returned 0' in result.stdout, output
     assert 'gui-smoke-atexit' in result.stdout, output
     assert 'fatal exception' not in output.lower(), output
     assert 'fatal python error' not in output.lower(), output
-    assert len(list((tmp_path / 'shots').glob('*.png'))) == 8
+    assert {path.name for path in (tmp_path / 'shots').glob('*.png')} == {
+        'page_projectInterface.png', 'page_processingInterface.png',
+        'page_interpretationInterface.png', 'page_spatialInterface.png',
+        'page_settingsInterface.png', 'window_overall.png',
+    }
 
 
 def test_qt_pytest_runtime_returns_and_runs_atexit(tmp_path):
