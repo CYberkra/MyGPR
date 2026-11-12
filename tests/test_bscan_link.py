@@ -266,6 +266,8 @@ def test_stale_selection_menu_cannot_apply_to_new_revision(qapp, command):
     action = next(a for a in selection_menu.actions() if a.data() == command)
     assert action.isEnabled()
     page.set_original_revision('P', 'L', 'new')
+    action.trigger()
+    assert not page._pipeline_list.steps()
     page.set_original_bundle(PreviewBundle(np.ones((4, 5)), -1, 1, 4, 5))
     group.view.set_view_selection(QRectF(2, 0, 2, 4))
     action.trigger()

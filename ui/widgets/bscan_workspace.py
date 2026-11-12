@@ -789,6 +789,7 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
             return
         gid, key = group.group_id, group.current_key()
         bundle = group.rendered_bundle
+        revision = self._sources.get(key, {}).get('revision')
         selection = QRectF(view._view_selection)
         submenu = RoundMenu('将框选加入处理草稿', menu)
         allowed = self.selection_step_allowed(gid, key)
@@ -800,6 +801,7 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
             def submit(method=method, requires_time=requires_time):
                 if (self._groups.get(gid) is group and group.current_key() == key
                         and group.rendered_bundle is bundle and view._view_selection == selection
+                        and self._sources.get(key, {}).get('revision') == revision
                         and self.selection_step_allowed(gid, key)
                         and (not requires_time or view.time_window_available())):
                     self.selection_step_requested.emit(gid, key, method)
