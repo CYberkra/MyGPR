@@ -39,6 +39,8 @@ class ProcessingSteps:
         self._sync_chain_view()
         if self._picker_context is None:
             self._show_selected_step()
+        else:
+            self._on_library_selection(self._method_browser.current_method_id())
         self._sync_autotune()
 
     def _on_chain_step_toggled(self, index: int, enabled: bool) -> None:

@@ -141,3 +141,18 @@ def test_metadata_only_refresh_invalidates_a_prepared_gain_input(page, monkeypat
     page.refresh_line_previews("L01")
     assert not page._gain_preview_requests
     assert dialog.preview._cancelled.is_set()
+
+
+def test_gain_library_preview_uses_append_position_and_rejects_old_selection(page):
+    requested, cancelled = [], []
+    page.gain_preview_requested.connect(lambda *args: requested.append(args))
+    page.gain_preview_cancelled.connect(cancelled.append)
+    page._open_method_picker()
+    page._method_browser.select_method("manual_gain")
+    dialog = GainCurveDialog(parent=page)
+    page._request_gain_preview(dialog)
+    token, _, _, _, prefix = requested[0]
+    assert [step["method_id"] for step in prefix] == ["dewow", "manual_gain"]
+    page._method_browser.select_method("dewow")
+    assert cancelled == [token]
+    assert not page._gain_preview_requests

@@ -121,3 +121,4 @@ def test_refresh_live_library_preserves_filter_but_clears_removed_selection(page
     assert browser._search.text() == 'dewow'
     assert browser.current_method_id() is None
     assert not page._commit_step_btn.isEnabled()
+    assert page._param_form.isHidden()
