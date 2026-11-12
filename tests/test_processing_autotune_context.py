@@ -54,7 +54,8 @@ def test_new_request_clears_previous_inputs_recommendation(page):
     assert not page._adopt_params_btn.isEnabled()
     page._result_name_edit.setText('L02 result')
     assert not page._adopt_params_btn.isEnabled()
-    assert page._autotune_result_label.text() == ''
+    assert page._autotune_result is None
+    assert page._autotune_result_label.text().startswith('正在评估 L02')
     # The action itself must also reject an obsolete recommendation.
     page._on_adopt_params()
     assert page.current_pipeline()['steps'][0]['params'] == {'win': 7}

@@ -1148,14 +1148,17 @@ class TestDeepAudit20261009:
         finally:
             page.close()
 
-    def test_run_click_while_running_emits_cancel(self, qapp):
+    def test_running_task_requires_explicit_cancel(self, qapp):
         page = self._page_with_run()
         try:
-            got = []
-            page.cancel_requested.connect(lambda: got.append(True))
+            cancelled, submitted = [], []
+            page.cancel_requested.connect(lambda: cancelled.append(True))
+            page.run_requested.connect(submitted.append)
             page.set_running(True)
             page._on_run_clicked()
-            assert got == [True]
+            assert not submitted and not cancelled
+            page._cancel_btn.click()
+            assert cancelled == [True]
         finally:
             page.close()
 
