@@ -7,11 +7,12 @@ from uuid import uuid4
 from PyQt6.QtCore import QAbstractTableModel, QItemSelectionModel, QModelIndex, QSignalBlocker, QSortFilterProxyModel, Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QComboBox, QFileDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
+    QAbstractItemView, QComboBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
     QMessageBox, QPushButton, QTableView, QToolButton, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import isDarkTheme
 
+from ui import file_dialogs
 from ui.desktop_backend_facade import EventInterval, MarkerRecord, marker_rows_for_view
 from ui.widgets.context_menus import make_menu, show_menu
 from ui.widgets.object_context_menu import ObjectMenuBinding, object_action
@@ -104,6 +105,7 @@ class MarkerPanel(QWidget):
         super().__init__(parent)
         self.setObjectName('markerListPanel')
         self.allow_processing = allow_processing
+        self.processing_source = None
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self.view = None
         self._views = {}
@@ -159,6 +161,7 @@ class MarkerPanel(QWidget):
         self.new_interval = QPushButton('新区间', self)
         self.new_point.clicked.connect(lambda: self.edit(MarkerRecord()) if self.view else None)
         self.new_interval.clicked.connect(self.make_interval)
+        self.table.selectionModel().selectionChanged.connect(self._sync_interval_label)
         if allow_processing:
             selection = QPushButton('选道处理 ▾', self)
             selection.clicked.connect(lambda: self._show_selection_menu(selection))
@@ -220,6 +223,7 @@ class MarkerPanel(QWidget):
             if mapped.isValid() and current and row['uid'] == current['uid']:
                 selection.setCurrentIndex(mapped, QItemSelectionModel.SelectionFlag.NoUpdate)
         del blocker
+        self._sync_interval_label()
         self.message.clear()
 
     def _filter(self, *_):
@@ -241,6 +245,11 @@ class MarkerPanel(QWidget):
 
     def _selected_rows(self):
         return [index.data(Qt.ItemDataRole.UserRole) for index in self.table.selectionModel().selectedRows()]
+
+    def _sync_interval_label(self, *_):
+        rows = self._selected_rows()
+        two_points = len(rows) == 2 and all(isinstance(row['record'], MarkerRecord) for row in rows)
+        self.new_interval.setText('建立区间' if two_points else '新区间')
 
     def select_id(self, uid):
         for index, row in enumerate(self.model.rows):
@@ -282,6 +291,8 @@ class MarkerPanel(QWidget):
             return
         rows = self._selected_rows()
         points = [row['record'] for row in rows if isinstance(row['record'], MarkerRecord)]
+        if len(rows) != 2:
+            points = []
         target = self.view
         if len(points) == 2:
             if len({row['line_id'] for row in rows}) != 1:
@@ -348,10 +359,14 @@ class MarkerPanel(QWidget):
                 enabled=not reason, reason=reason)
         show_menu(menu, button.mapToGlobal(button.rect().bottomLeft()))
 
-    @staticmethod
-    def _selection_reason(view, rows):
+    def _selection_reason(self, view, rows):
         if not view or view.read_only:
             return '需要可编辑的项目'
+        if self.processing_source is not None:
+            active = self.processing_source()
+            if active is None or (active.document.project_id, active.document.line_id, active.target_id) != (
+                    view.document.project_id, view.document.line_id, view.target_id):
+                return '请先将该成果设为处理输入'
         if not rows or any(not isinstance(row['record'], EventInterval) for row in rows):
             return '请选择事件区间'
         if any(row['line_id'] != view.document.line_id or row['target_id'] != view.target_id for row in rows):
@@ -386,7 +401,7 @@ class MarkerPanel(QWidget):
             self.request('delete', {'view': context, 'uid': row['uid']})
 
     def export(self, extension, views, scope):
-        path, _ = QFileDialog.getSaveFileName(self, '导出标记 · ' + scope, f'markers.{extension}', f'{extension.upper()} (*.{extension})')
+        path, _ = file_dialogs.getSaveFileName(self, '导出标记 · ' + scope, f'markers.{extension}', f'{extension.upper()} (*.{extension})')
         if path:
             self.request('export', {'views': views, 'path': path, 'format': extension})
 
@@ -400,6 +415,8 @@ class MarkerPanel(QWidget):
         if pending is None:
             return
         action, payload = pending
+        if action == 'preview' and payload['view'] is not self.view:
+            return
         if error:
             self.message.setText(error)
             if action == 'save' and self.editor:
@@ -407,7 +424,7 @@ class MarkerPanel(QWidget):
             return
         if action == 'save' and self.editor:
             self.editor.accept()
-        if action in ('save', 'delete', 'timezone'):
+        if action in ('save', 'delete'):
             if self.scope.currentIndex():
                 self.request('project', {'project_id': result.document.project_id})
                 return
@@ -440,7 +457,7 @@ class MarkerPanel(QWidget):
                               QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel, self)
             box.button(QMessageBox.StandardButton.Ok).setText('运行并生成新成果')
             box.button(QMessageBox.StandardButton.Cancel).setText('取消')
-            if box.exec() == QMessageBox.StandardButton.Ok:
+            if box.exec() == QMessageBox.StandardButton.Ok and payload['view'] is self.view:
                 self.request('execute', {'preview': result})
         elif action == 'execute':
             self.message.setText('已提交任务：' + str(result))

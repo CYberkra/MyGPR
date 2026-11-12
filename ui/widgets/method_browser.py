@@ -198,9 +198,7 @@ class MethodBrowser(QWidget):
         return item.data(0, Qt.ItemDataRole.UserRole)
 
     def _on_current_changed(self, current, _previous):
-        mid = self._method_id_of(current)
-        if mid:
-            self.sig_method_selected.emit(mid)
+        self.sig_method_selected.emit(str(self._method_id_of(current) or ''))
 
     def _on_double_clicked(self, item, _column):
         mid = self._method_id_of(item)

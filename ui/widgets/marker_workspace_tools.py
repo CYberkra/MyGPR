@@ -64,12 +64,18 @@ class MarkerWorkspaceTools(QObject):
     def _ensure_panel(self):
         if self.panel is None:
             self.panel = MarkerPanel(self.host, allow_processing=self.allow_processing)
+            if self.allow_processing:
+                self.panel.processing_source = self._active_marker_view
             self.panel.operation.connect(self.operation)
             self.panel.selected.connect(self._panel_selected)
             self.panel.locate.connect(lambda uid: self._panel_selected(uid, locate=True))
             self.panel.adjust.connect(lambda uid: self.active().marker_strip.begin_adjust(uid))
             self.panel.close_requested.connect(self.hide_panel)
             self.panel.navigate.connect(self.navigate)
+
+    def _active_marker_view(self):
+        view = self.active()
+        return view._marker_view if view else None
 
     def show_panel(self, view=None):
         self._ensure_panel()

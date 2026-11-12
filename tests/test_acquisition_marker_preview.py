@@ -143,11 +143,16 @@ def test_marker_selection_reveals_offscreen_trace_without_zoom_change(qapp):
     qapp.processEvents()
     vb = view._plot.vb
     orig_min, orig_max = vb.viewRange()[0]
+    view._reveal_marker(0.5)
+    assert vb.viewRange()[0] == pytest.approx((orig_min, orig_max))
+    vb.setXRange(0, 2, padding=0)
+    orig_min, orig_max = vb.viewRange()[0]
     width_before = orig_max - orig_min
-    outside = orig_max + width_before
+    outside = 5.5
     view._reveal_marker(outside)          # 视野外的道：平移而非缩放
     xmin, xmax = vb.viewRange()[0]
     assert xmax - xmin == pytest.approx(width_before)
     assert xmin <= outside <= xmax
+    assert xmax <= 6
     vb.setXRange(orig_min, orig_max, padding=0.0)
     host.close()

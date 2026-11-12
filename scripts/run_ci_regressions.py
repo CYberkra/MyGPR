@@ -31,6 +31,7 @@ SUITES = {
         "tests/test_bscan_ascan_follow.py",
         "tests/test_bscan_link.py",
         "tests/test_bscan_workspace.py",
+        "tests/test_acquisition_marker_preview.py",
     ),
     "algorithms": (
         "tests/test_image_denoising.py",

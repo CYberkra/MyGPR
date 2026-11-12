@@ -730,17 +730,19 @@ class BScanView(BScanMarkerEventsMixin, BScanSelectionMixin, BScanTimeWindowMixi
         self._sync_ascan_to_marker(int(x))
 
     def _reveal_marker(self, x: float) -> None:
-        """把选中的道带进视野中央：只平移、不改缩放。
-
-        已经在中央 60% 区间时不动，避免点一下就无端滑图；标记在视野外
-        或贴着边缘时才会平移（标准 scroll-into-view 行为）。
-        """
+        """Bring an offscreen trace into the viewport without blank margins."""
+        if self._image_shape is None:
+            return
         vb = self._plot.vb
         xmin, xmax = vb.viewRange()[0]
         width = xmax - xmin
-        if width <= 0 or abs(x - (xmin + xmax) / 2.0) <= width * 0.30:
+        if width <= 0 or xmin <= x <= xmax:
             return
-        vb.setXRange(x - width / 2.0, x + width / 2.0, padding=0.0)
+        traces = self._image_shape[0]
+        if not 0 <= x <= traces:
+            return
+        left = min(max(0., x - width / 2), max(0., traces - width))
+        vb.setXRange(left, left + width, padding=0.)
 
     def _sync_ascan_to_marker(self, display_trace: int) -> None:
         """A-scan 跟随浮窗已开时，把波形切到选中标记所在的显示列。
