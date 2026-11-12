@@ -11,7 +11,7 @@ pytest.importorskip('PyQt6')
 
 from PyQt6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, Qt
 from PyQt6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent, QKeyEvent
-from PyQt6.QtTest import QTest, QSignalSpy
+from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication, QLineEdit, QSplitter, QTabBar, QVBoxLayout, QWidget
 
 from ui.widgets.bscan_workspace import BScanWorkspace
@@ -396,16 +396,16 @@ def test_split_group_display_and_fit_buttons_target_only_their_own_view(workspac
     second = workspace.split_source('B', 'right')
     first_group, second_group = workspace.group_widget(first), workspace.group_widget(second)
     fits = {first: [], second: []}
-    monkeypatch.setattr(first_group.view, 'fit_to_data', lambda: fits[first].append(1))
-    monkeypatch.setattr(second_group.view, 'fit_to_data', lambda: fits[second].append(1))
+    monkeypatch.setattr(first_group.view, 'fit_all', lambda: fits[first].append(1))
+    monkeypatch.setattr(second_group.view, 'fit_all', lambda: fits[second].append(1))
     second_group.fit_view.click()
     assert fits[second] == [1]
     assert fits[first] == []
-    first_spy = QSignalSpy(first_group.view.sig_display_settings_requested)
-    second_spy = QSignalSpy(second_group.view.sig_display_settings_requested)
+    opened = []
+    monkeypatch.setattr(first_group.view, 'show_display_menu', lambda _pos: opened.append(first))
+    monkeypatch.setattr(second_group.view, 'show_display_menu', lambda _pos: opened.append(second))
     second_group.display_settings.click()
-    assert len(second_spy) == 1
-    assert len(first_spy) == 0
+    assert opened == [second]
 
 
 def test_acquisition_marker_button_layout_availability_and_toggle(workspace, qapp):
@@ -486,7 +486,7 @@ def test_fluent_menu_keyboard_opens_submenu_and_executes_split(workspace, qapp):
     QTest.keyClick(menu.view, Qt.Key.Key_Down)  # pin
     QTest.keyClick(menu.view, Qt.Key.Key_Down)  # arrange submenu
     QTest.keyClick(menu.view, Qt.Key.Key_Right)
-    submenu = next(m for m in menu._subMenus if m.title() == '排列与拆分')
+    submenu = next(m for m in menu._subMenus if m.title() == '分组布局')
     assert submenu.isVisible()
     QTest.keyClick(submenu.view, Qt.Key.Key_Down)  # split right
     QTest.keyClick(submenu.view, Qt.Key.Key_Return)

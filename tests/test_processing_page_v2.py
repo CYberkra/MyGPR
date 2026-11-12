@@ -1097,7 +1097,7 @@ class TestDeepAudit20261009:
             strip.deleteLater()
 
     def test_overflow_menu_edit_requests_step_editor(self, qapp):
-        """P0-3：子菜单 = 「选中 / 编辑」两项；「编辑」发合一弹窗信号。"""
+        """An overflow step exposes the same commands as its visible chip."""
         strip = self._strip()
         try:
             strip.set_steps([{'label': f'm{i}', 'enabled': True}
@@ -1106,9 +1106,10 @@ class TestDeepAudit20261009:
             strip.sig_step_editor_requested.connect(got.append)
             menu = strip._build_overflow_menu()
             sub = menu._step_submenus[1]
-            texts = [a.text() for a in sub.actions() if a.text()]
-            assert texts == ['选中', '编辑']
-            sub.actions()[1].trigger()           # 「编辑」→ 合一弹窗
+            commands = {a.data(): a for a in sub.actions() if a.data()}
+            assert set(commands) == {'edit-step', 'toggle-step', 'copy-step', 'move-up',
+                                     'move-down', 'replace-step', 'remove-step'}
+            commands['edit-step'].trigger()
             assert got == [1]
         finally:
             strip.deleteLater()

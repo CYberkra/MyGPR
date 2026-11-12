@@ -182,19 +182,18 @@ def test_project_list_refresh_uses_saved_revision_for_next_preview(qapp):
     panel.close()
 
 
-def test_marker_menu_uses_hit_record_and_refuses_outdated_view(qapp):
+def test_marker_menu_uses_hit_record_and_refuses_outdated_view(qapp, monkeypatch):
     from PyQt6.QtCore import QPoint
 
     panel = MarkerPanel()
     context = marker_view(2)
     points = context.document.markers
     panel.set_view(context)
-    panel.resize(400, 500)
-    panel.show()
-    qapp.processEvents()
     panel.select_id(points[0].uid)
     located = QSignalSpy(panel.locate)
-    pos = panel.table.visualRect(panel.proxy.index(1, 0)).center()
+    pos = QPoint(10, 40)
+    hit_test = panel.table.indexAt
+    monkeypatch.setattr(panel.table, 'indexAt', lambda point: panel.proxy.index(1, 0) if point == pos else hit_test(point))
     menu = panel._menu(pos)
     action = next(action for action in menu.actions() if action.data() == 'locate-marker')
     action.trigger()

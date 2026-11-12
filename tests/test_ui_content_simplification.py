@@ -44,15 +44,14 @@ def test_processing_uses_state_text_instead_of_static_tutorials(processing_page)
 
 def test_processing_display_and_fit_buttons_live_in_workspace_tab_bar(processing_page, monkeypatch):  # noqa: F811
     from PyQt6.QtCore import QPoint
-    from PyQt6.QtTest import QSignalSpy
 
     page = processing_page
     assert not hasattr(page, '_display_settings_btn')
     assert not hasattr(page, '_fit_view_btn')
     workspace = page._workspace
     group = workspace.group_widget()
-    for button, name in ((group.display_settings, '全局显示设置'),
-                         (group.fit_view, '适应当前视图')):
+    for button, name in ((group.display_settings, '当前图显示'),
+                         (group.fit_view, '适应全图')):
         assert button.isVisible()
         assert button.accessibleName() == name
         assert workspace.isAncestorOf(button)
@@ -61,11 +60,12 @@ def test_processing_display_and_fit_buttons_live_in_workspace_tab_bar(processing
         assert button.mapTo(group, QPoint(0, 0)).x() < group.more.mapTo(group, QPoint(0, 0)).x()
         # Above the group's B-Scan view, not on a separate page-level row.
         assert button.mapTo(group, QPoint(0, 0)).y() < group.view.mapTo(group, QPoint(0, 0)).y()
-    spy = QSignalSpy(group.view.sig_display_settings_requested)
+    shown = []
+    monkeypatch.setattr(group.view, 'show_display_menu', shown.append)
     group.display_settings.click()
-    assert len(spy) == 1
+    assert len(shown) == 1
     calls = []
-    monkeypatch.setattr(group.view, 'fit_to_data', lambda: calls.append(1))
+    monkeypatch.setattr(group.view, 'fit_all', lambda: calls.append(1))
     group.fit_view.click()
     assert calls == [1]
 

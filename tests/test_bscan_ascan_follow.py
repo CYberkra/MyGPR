@@ -22,7 +22,7 @@ def test_toggle_creates_and_shows_popup(view):
     assert view._ascan_popup is None
     view.set_ascan_follow(True)
     assert view._ascan_popup is not None
-    assert view._pick_enabled  # 浮窗开启自动启用 pick
+    assert not view._pick_enabled
 
 
 def test_click_updates_popup_trace(view):

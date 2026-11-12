@@ -96,7 +96,7 @@ class _ViewGroup(QWidget):
             self.markers_visibility.setEnabled)
         self.display_settings.clicked.connect(lambda: self.view.show_display_menu(
             self.display_settings.mapToGlobal(self.display_settings.rect().bottomLeft())))
-        self.fit_view.clicked.connect(self.view.fit_all)
+        self.fit_view.clicked.connect(lambda: self.view.fit_all())
         layout = QVBoxLayout(self)
         layout.setContentsMargins(1, 1, 1, 1)
         layout.setSpacing(0)
