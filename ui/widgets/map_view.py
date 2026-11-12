@@ -32,7 +32,7 @@ from qfluentwidgets import ToolButton, isDarkTheme
 from ui import constants
 from ui.desktop_backend_facade import tile_cache_dir
 from ui.theme_helpers import control_palette
-from ui.widgets.context_menus import add_action, make_menu, show_menu
+from ui.widgets.context_menus import add_action, bind_menu_keys, make_menu, show_menu
 from ui.widgets.empty_state import EmptyStateOverlay
 from ui.widgets.pg_view_base import GraphicsViewBase
 from ui.widgets.map_tiles import (DEFAULT_TILE_SOURCE, TILE_SOURCE_MAX_ZOOM,
@@ -509,6 +509,7 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
         self._dark = bool(isDarkTheme())
         self.setBackground('k' if self._dark else 'w')
         self.scene().sigMouseClicked.connect(self._on_mouse_clicked)
+        self._menu_shortcuts = bind_menu_keys(self, self._show_map_menu)
         self.scene().sigMouseMoved.connect(self._on_mouse_moved)
 
         # ---------------- 浮动覆盖层（子控件，resizeEvent 中定位） ----------------
@@ -863,10 +864,13 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
             return
         if not self._plot.sceneBoundingRect().contains(event.scenePos()):
             return
+        self._show_map_menu(event.screenPos().toPoint(), event.scenePos())
+
+    def _show_map_menu(self, position=None, scene_pos=None):
         menu = make_menu(self)
         add_line_actions = getattr(self, 'add_line_menu_actions', None)
-        if add_line_actions:
-            line_id = next((item.data(0) for item in self.scene().items(event.scenePos()) if item.data(0)), '')
+        if add_line_actions and scene_pos is not None:
+            line_id = next((item.data(0) for item in self.scene().items(scene_pos) if item.data(0)), '')
             if line_id:
                 add_line_actions(menu, line_id)
                 menu.addSeparator()
@@ -875,13 +879,14 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
         add_action(menu, FIF.ZOOM_IN, '放大', self.zoom_in)
         add_action(menu, FIF.ZOOM_OUT, '缩小', self.zoom_out)
         menu.addSeparator()
-        point = self._plot.vb.mapSceneToView(event.scenePos())
+        point = self._plot.vb.mapSceneToView(scene_pos) if scene_pos is not None else self._plot.vb.viewRect().center()
         coordinate = self._lonlat_text(point)
-        add_action(menu, FIF.COPY, '复制此处坐标（WGS84）',
+        label = '复制此处坐标（WGS84）' if scene_pos is not None else '复制中心坐标（WGS84）'
+        add_action(menu, FIF.COPY, label,
                    lambda: QApplication.clipboard().setText(coordinate), enabled=self._basemap_enabled)
         add_action(menu, FIF.SAVE, '导出 PNG…',
                    lambda: self.export_png(prefix='map'))
-        show_menu(menu, event.screenPos().toPoint())
+        show_menu(menu, position if position is not None else self.mapToGlobal(self.rect().center()))
 
     def _copy_center_lonlat(self) -> None:
         """视图中心 → WGS84 经纬度（'纬度,经度'，便于粘贴到奥维等软件对照）。"""

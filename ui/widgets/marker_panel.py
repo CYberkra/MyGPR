@@ -14,7 +14,7 @@ from qfluentwidgets import isDarkTheme
 
 from ui import file_dialogs
 from ui.desktop_backend_facade import EventInterval, MarkerRecord, marker_rows_for_view
-from ui.widgets.context_menus import make_menu, show_menu
+from ui.widgets.context_menus import RoundMenu, make_menu, show_menu
 from ui.widgets.object_context_menu import ObjectMenuBinding, object_action
 from ui.widgets.marker_editor import MarkerEditor
 from ui.widgets.marker_style import marker_style, section_title
@@ -381,10 +381,33 @@ class MarkerPanel(QWidget):
         menu = make_menu(self)
         views = tuple(self._views.values()) if self.scope.currentIndex() else (self.view,) if self.view else ()
         scope = '整个项目' if self.scope.currentIndex() else '当前测线'
+        self._add_export_formats(menu, views, scope)
+        if 0 < self.proxy.rowCount() < self.model.rowCount():
+            filtered = RoundMenu('当前筛选结果', menu)
+            self._add_export_formats(filtered, self._filtered_views(views), '当前筛选结果')
+            menu.addMenu(filtered)
+        show_menu(menu, button.mapToGlobal(button.rect().bottomLeft()))
+
+    def _add_export_formats(self, menu, views, scope):
         for extension in ('csv', 'json', 'geojson'):
             object_action(menu, 'export-' + extension, f'{extension.upper()} · {scope}…',
                 lambda _checked=False, ext=extension: self.export(ext, views, scope), enabled=bool(views))
-        show_menu(menu, button.mapToGlobal(button.rect().bottomLeft()))
+
+    def _filtered_views(self, views):
+        by_line = {}
+        for index in range(self.proxy.rowCount()):
+            row = self.proxy.index(index, 0).data(Qt.ItemDataRole.UserRole)
+            by_line.setdefault(row['line_id'], set()).add(row['uid'])
+        result = []
+        for view in views:
+            ids = by_line.get(view.document.line_id)
+            if not ids:
+                continue
+            document = replace(view.document,
+                markers=tuple(record for record in view.document.markers if record.uid in ids),
+                intervals=tuple(record for record in view.document.intervals if record.uid in ids))
+            result.append(replace(view, document=document, rows=tuple(row for row in view.rows if row['uid'] in ids)))
+        return tuple(result)
 
     def preview(self, mode, rows=None):
         rows = self._selected_rows() if rows is None else rows

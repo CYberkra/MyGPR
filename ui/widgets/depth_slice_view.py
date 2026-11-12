@@ -22,6 +22,7 @@ from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import isDarkTheme
 
 from ui import constants
+from ui.widgets.context_menus import add_action, bind_menu_keys, make_menu, show_menu
 from ui.widgets.empty_state import EmptyStateOverlay
 from ui.widgets.marching_squares import isoline_paths
 from ui.widgets.pg_view_base import GraphicsViewBase, style_plot_item
@@ -75,6 +76,7 @@ class DepthSliceView(GraphicsViewBase, pg.PlotWidget):
         # 关闭 pyqtgraph 原生英文右键菜单，右键由统一 RoundMenu 接管
         self._plot_item.vb.setMenuEnabled(False)
         self.scene().sigMouseClicked.connect(self._on_mouse_clicked)
+        self._menu_shortcuts = bind_menu_keys(self, self._show_view_menu)
 
         # 空态引导浮层：零网格/零轨迹时替代"只剩坐标轴"的空画布
         self._empty_overlay = EmptyStateOverlay(
@@ -320,14 +322,15 @@ class DepthSliceView(GraphicsViewBase, pg.PlotWidget):
             return
         if not self._plot_item.sceneBoundingRect().contains(event.scenePos()):
             return
-        from qfluentwidgets import FluentIcon as FIF
-        from ui.widgets.context_menus import add_action, make_menu, show_menu
+        self._show_view_menu(event.screenPos().toPoint())
+
+    def _show_view_menu(self, position=None):
         menu = make_menu(self)
         add_action(menu, FIF.ZOOM_IN, '放大', self.zoom_in)
         add_action(menu, FIF.ZOOM_OUT, '缩小', self.zoom_out)
         self._add_standard_menu_actions(menu, can_export=self._matrix is not None,
                                         export_prefix='depth_slice')
-        show_menu(menu, event.screenPos().toPoint())
+        show_menu(menu, position if position is not None else self.mapToGlobal(self.rect().center()))
 
     # ------------------------------------------------------------ 主题
     def apply_theme(self, dark: bool) -> None:

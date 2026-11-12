@@ -63,6 +63,7 @@ from ui.widgets.bscan_view_interaction import (format_crosshair_readout
                                                as format_crosshair_readout)
 from ui.widgets.empty_state import EmptyStateOverlay
 from ui.widgets.bscan_marker_events import BScanMarkerEventsMixin
+from ui.widgets.context_menus import bind_menu_keys
 from ui.widgets.marker_pins import MarkerPins
 from ui.widgets.pg_view_base import GraphicsViewBase, style_plot_item
 
@@ -343,12 +344,7 @@ class BScanView(BScanMarkerEventsMixin, BScanSelectionMixin, BScanTimeWindowMixi
         self._fullscreen_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self._fullscreen_shortcut.activated.connect(self.toggle_fullscreen)
         self._glw.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self._canvas_shortcuts = []
-        for key in ('Shift+F10', 'Menu'):
-            shortcut = QShortcut(QKeySequence(key), self._glw,
-                context=Qt.ShortcutContext.WidgetWithChildrenShortcut)
-            shortcut.activated.connect(self.show_canvas_menu)
-            self._canvas_shortcuts.append(shortcut)
+        self._canvas_shortcuts = bind_menu_keys(self._glw, self.show_canvas_menu)
 
     # ------------------------------------------------------------------ 轴单位
     def x_axis_mode(self) -> str:

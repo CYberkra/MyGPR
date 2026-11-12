@@ -209,6 +209,19 @@ def test_marker_menu_uses_hit_record_and_refuses_outdated_view(qapp, monkeypatch
     panel.close()
 
 
+def test_filtered_marker_export_freezes_the_same_rows_and_document_records(qapp):
+    panel = MarkerPanel()
+    context = marker_view(3)
+    panel.set_view(context)
+    panel.search.setText('备注1')
+    filtered, = panel._filtered_views((context,))
+    panel.search.clear()
+    assert [row['uid'] for row in filtered.rows] == ['m1']
+    assert [record.uid for record in filtered.document.records] == ['m1']
+    assert len(context.document.records) == 3
+    panel.close()
+
+
 def test_marker_navigation_updates_interpretation_source_and_releases_browser(qapp):
     from types import SimpleNamespace
     from ui.pages.interpretation_page import InterpretationPage

@@ -7,6 +7,8 @@
 """
 from __future__ import annotations
 
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QKeySequence, QShortcut
 from qfluentwidgets import Action, RoundMenu
 from qfluentwidgets import FluentIcon as FIF
 
@@ -110,6 +112,15 @@ def show_menu(menu: RoundMenu, position) -> None:
     keyboard.focus_menu(menu)
 
 
+def bind_menu_keys(target, callback):
+    shortcuts = []
+    for key in ('Shift+F10', 'Menu'):
+        shortcut = QShortcut(QKeySequence(key), target, context=Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        shortcut.activated.connect(callback)
+        shortcuts.append(shortcut)
+    return shortcuts
+
+
 def add_checkable_submenu(menu: RoundMenu, title: str, items,
                           current: str, on_chosen) -> RoundMenu:
     """添加单选风格子菜单：items 为名称列表，current 打勾。
@@ -128,5 +139,5 @@ def add_checkable_submenu(menu: RoundMenu, title: str, items,
     return submenu
 
 
-__all__ = ['FIF', 'Action', 'RoundMenu', 'make_menu', 'add_action', 'show_menu',
+__all__ = ['FIF', 'Action', 'RoundMenu', 'make_menu', 'add_action', 'show_menu', 'bind_menu_keys',
            'add_checkable_submenu']

@@ -126,6 +126,12 @@ class _ViewGroup(QWidget):
             child.setAcceptDrops(True)
             child.installEventFilter(workspace)
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        compact = event.size().width() < 280
+        self.display_settings.setVisible(not compact)
+        self.fit_view.setVisible(not compact)
+
     def set_hint_visible(self, visible):
         self.hint_animation.stop()
         target = 1.0 if visible else 0.0
@@ -769,6 +775,12 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
         object_action(menu, 'reopen', '重新打开已关闭标签', self.reopen_closed, enabled=bool(self._closed))
         object_action(menu, 'reset-layout', '恢复为单组标签', self.reset_layout,
                       enabled=len(self._groups) > 1)
+        if group.fit_view.isHidden():
+            menu.addSeparator()
+            object_action(menu, 'fit-all', '适应全图', group.view.fit_all,
+                          enabled=group.view._image_shape is not None)
+            object_action(menu, 'view-display', '当前图显示…', lambda: group.view.show_display_menu(
+                group.more.mapToGlobal(group.more.rect().bottomLeft())))
         return menu
 
     def _add_selection_commands(self, group, menu, _scene_pos):

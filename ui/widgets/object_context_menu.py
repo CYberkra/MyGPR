@@ -1,11 +1,10 @@
 """Small Fluent object-menu binding; never attach it to text editors."""
 from PyQt6.QtCore import QEvent, QObject, QPoint, Qt
-from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QDialog, QDialogButtonBox, QPlainTextEdit, QVBoxLayout,
 )
 
-from ui.widgets.context_menus import add_action, make_menu, show_menu
+from ui.widgets.context_menus import add_action, bind_menu_keys, make_menu, show_menu
 
 
 def object_menu(parent):
@@ -52,12 +51,7 @@ class ObjectMenuBinding(QObject):
             target.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         target.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         target.customContextMenuRequested.connect(self.show)
-        self.shortcuts = []
-        for sequence in ('Shift+F10', 'Menu'):
-            shortcut = QShortcut(QKeySequence(sequence), target)
-            shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
-            shortcut.activated.connect(self.show_keyboard)
-            self.shortcuts.append(shortcut)
+        self.shortcuts = bind_menu_keys(target, self.show_keyboard)
         target.installEventFilter(self)
         if self.viewport is not target:
             self.viewport.installEventFilter(self)

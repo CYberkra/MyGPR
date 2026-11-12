@@ -429,6 +429,19 @@ def test_acquisition_marker_button_layout_availability_and_toggle(workspace, qap
     assert group.view.acquisition_markers_shown()
 
 
+def test_compact_group_keeps_display_and_fit_commands_reachable(workspace):
+    from ui.widgets.context_menus import make_menu
+
+    workspace.set_sources(sources('A'))
+    workspace.open_source('A')
+    group = workspace.group_widget()
+    group.resize(250, 300)
+    assert group.fit_view.isHidden() and group.display_settings.isHidden()
+    menu = workspace._populate_group_menu(make_menu(workspace), group)
+    assert {'fit-all', 'view-display'} <= {action.data() for action in menu.actions()}
+    menu.deleteLater()
+
+
 def test_split_groups_toggle_acquisition_markers_independently(workspace):
     marked_bundle = bundle(acquisition_markers=({'trace_no': 2, 'marker_type': 'general'},))
     workspace.set_sources([dict(key='A', title='A', bundle=marked_bundle)])

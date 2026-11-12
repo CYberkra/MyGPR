@@ -1,9 +1,10 @@
 """Tab interaction shared by B-scan workspace groups."""
 from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, QRect, Qt
-from PyQt6.QtGui import QDrag, QKeySequence, QShortcut
+from PyQt6.QtGui import QDrag
 from PyQt6.QtWidgets import QApplication, QTabBar, QWidget
 from qfluentwidgets import FluentIcon as FIF, ToolButton
 from ui import motion
+from ui.widgets.context_menus import bind_menu_keys
 
 
 class _SourceTabBar(QTabBar):
@@ -25,11 +26,7 @@ class _SourceTabBar(QTabBar):
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAccessibleName('B-scan 数据标签')
-        self._menu_shortcuts = []
-        for key in ('Shift+F10', 'Menu'):
-            shortcut = QShortcut(QKeySequence(key), self, context=Qt.ShortcutContext.WidgetShortcut)
-            shortcut.activated.connect(self._show_keyboard_menu)
-            self._menu_shortcuts.append(shortcut)
+        self._menu_shortcuts = bind_menu_keys(self, self._show_keyboard_menu)
         self.indicator = QWidget(self)
         self.indicator.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.indicator.hide()
