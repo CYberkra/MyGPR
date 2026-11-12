@@ -114,8 +114,7 @@ def _run_smoke(window: MyGPRMainWindow) -> None:
 
     expected_names = [
         'projectInterface', 'processingInterface',
-        'interpretationInterface', 'spatialInterface', 'deliveryInterface',
-        'jobsInterface', 'settingsInterface',
+        'interpretationInterface', 'spatialInterface', 'settingsInterface',
     ]
 
     # 1) 页面数量与命名（集合比较：非首屏页为空闲预热构造，插入顺序不等于页签顺序）

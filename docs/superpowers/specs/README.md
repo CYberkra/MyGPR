@@ -6,7 +6,7 @@
 
 | 范围 | 入口 |
 | --- | --- |
-| 工作台七页导航、B-scan 标签、成果续算与菜单 | [2026-10-16 现行合同](2026-10-16-workbench-redesign.md) |
+| 工作台五页导航、B-scan 标签、成果续算与菜单 | [2026-10-16 现行合同](2026-10-16-workbench-redesign.md) |
 | 项目启动区、搜索和固定最近项目 | [启动页设计](2026-11-04-startup-page-design.md)、[工作台速览](../../../GUI_README.md) |
 | 项目、测线、处理成果和空间成果永久删除 | [删除设计](2026-11-04-deletion-interaction-design.md)、[用户指南](../../user/用户指南.md#6-备份恢复与数据安全) |
 | Windows 安装版验签更新 | [应用内更新设计](2026-11-05-application-updates-design.md)、[发布流程](../../releases/application-updates.md) |

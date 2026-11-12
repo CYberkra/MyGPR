@@ -4,7 +4,7 @@
 布局::
 
     ┌ 页签[日志|任务] │ 工具区(随页签切换) … │ 收/展钮 ┐  ← 头部栏常驻
-    │ 内容区 QStackedWidget：日志视图 | MiniJobList      │  ← 可收展
+    │ 内容区 QStackedWidget：日志视图 | 任务表            │  ← 可收展
     └──────────────────────────────────────────────────┘
 
 交互（VS Code 面板语义，横向化）：
@@ -23,7 +23,7 @@
 随主题查表；自动滚动在用户上翻离开底部时自动暂停（toggle 钮同步），滚回
 底部自动恢复。
 
-任务 tab：MiniJobList（仅活动任务；完整历史见任务中心导航页）。
+任务 tab：保留活动任务和本次会话的终态记录。
 """
 
 from collections import deque
@@ -41,7 +41,7 @@ from qfluentwidgets import FluentIcon as FIF
 from ui import constants, file_dialogs
 from ui.theme_helpers import log_panel_qss, status_color
 
-from .job_widgets import MiniJobList
+from ui.pages.jobs_page import JobsPage
 from .segment_tabs import SlimSegment
 from .separators import make_h_separator
 
@@ -96,8 +96,8 @@ class OutputPanel(QWidget):
         self._tabs = SlimSegment(self)
         self._tabs.addItem('log', '日志',
                            onClick=lambda: self._on_tab_clicked('log'))
-        self._tabs.addItem('jobs', '活动任务',
-                           onClick=lambda: self._on_tab_clicked('jobs'))
+        self._jobs_tab = self._tabs.addItem('jobs', '任务',
+                                           onClick=lambda: self._on_tab_clicked('jobs'))
         self._tabs.setSizePolicy(
             QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
 
@@ -153,12 +153,13 @@ class OutputPanel(QWidget):
         self._log_edit.document().setMaximumBlockCount(5000)
         self._log_edit.verticalScrollBar().valueChanged.connect(self._on_scroll)
 
-        self._mini_jobs = MiniJobList(self)
-        self._mini_jobs.cancel_requested.connect(self.cancel_job_requested)
+        self.job_controls = JobsPage(self)
+        self.job_controls.cancel_requested.connect(self.cancel_job_requested)
+        self.job_table().rows_changed.connect(self._update_task_summary)
 
         self._content = QStackedWidget(self)
         self._content.addWidget(self._log_edit)
-        self._content.addWidget(self._mini_jobs)
+        self._content.addWidget(self.job_controls)
         # 高度交给主窗口竖向 QSplitter 拖拽分配。min 必须为 0：本面板的
         # minimumSizeHint 随收/展显隐变化（37 ↔ 97+）会让 QSplitter 在
         # invalidate 重算时按 stretch 把显式分配洗掉（下格 stretch=0 被
@@ -211,8 +212,24 @@ class OutputPanel(QWidget):
         self._entries.clear()
         self._log_edit.clear()
 
-    def mini_jobs(self) -> MiniJobList:
-        return self._mini_jobs
+    def job_table(self):
+        return self.job_controls.job_table()
+
+    def _update_task_summary(self):
+        table = self.job_table()
+        active = table.status_count('queued', 'running')
+        failed = table.status_count('failed')
+        parts = ['任务']
+        if active:
+            parts.append(f'{active} 活动')
+        if failed:
+            parts.append(f'{failed} 失败')
+        self._jobs_tab.setText(' · '.join(parts))
+        self._jobs_tab.updateGeometry()
+
+    def show_jobs(self):
+        self._activate('jobs')
+        self._set_open(True)
 
     def toggle_panel(self) -> None:
         """Ctrl+J：收/展切换。"""
@@ -237,6 +254,7 @@ class OutputPanel(QWidget):
         """主题换肤：日志底/字色与级别着色一起跟随（全宽面板下深底大色块过重）。"""
         self._log_edit.setStyleSheet(log_panel_qss('dark' if dark else 'light'))
         self._refilter()  # 级别文字色随主题重染
+        self.job_table().apply_theme(dark)
 
     # ============================================================ 日志渲染
     def _render_entry(self, entry) -> str:

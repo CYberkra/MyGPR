@@ -21,6 +21,7 @@ from ui.widgets.recent_project_list import RecentProjectRow
 class HomePage(ScrollArea):
     new_project_requested = pyqtSignal()
     open_project_requested = pyqtSignal()
+    restore_requested = pyqtSignal()
     open_recent_project_requested = pyqtSignal(str)
     project_delete_requested = pyqtSignal(str)
     import_line_requested = pyqtSignal()
@@ -72,11 +73,14 @@ class HomePage(ScrollArea):
         self._sidebar_layout.setSpacing(12)
         self.open_btn = PrimaryPushButton('打开项目', self._sidebar, FIF.FOLDER)
         self.new_btn = PushButton('新建项目', self._sidebar, FIF.ADD)
+        self.restore_btn = PushButton('从备份恢复…', self._sidebar)
+        self.restore_btn.clicked.connect(self.restore_requested)
         self.open_btn.clicked.connect(lambda: self._request_dialog(False))
         self.new_btn.clicked.connect(lambda: self._request_dialog(True))
         self._action_layout = QBoxLayout(QBoxLayout.Direction.TopToBottom)
         self._action_layout.addWidget(self.open_btn)
         self._action_layout.addWidget(self.new_btn)
+        self._action_layout.addWidget(self.restore_btn)
         self._action_layout.setSpacing(10)
         self._sidebar_layout.addLayout(self._action_layout)
         self._filter_layout = QBoxLayout(QBoxLayout.Direction.TopToBottom)
@@ -381,7 +385,7 @@ class HomePage(ScrollArea):
             self._cancel_restore()
         if not busy:
             self._opening_path = ''
-        for button in (self.open_btn, self.new_btn):
+        for button in (self.open_btn, self.new_btn, self.restore_btn):
             button.setEnabled(self._backend_ready and not busy)
         self._empty_action.setEnabled(not busy and (bool(self._recent_paths) or self._backend_ready))
         for widget in (self.search, self._recent_list, self.recent_btn, self.pinned_btn):

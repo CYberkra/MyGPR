@@ -40,6 +40,7 @@ class ProcessingChain:
         self.batch_errors = []
         self._batch_submitting = False
         self._batch_pending_completions = []
+        self._batch_rejected_jobs = []
 
     # ============================================================ 信号注册
     def connect_all(self) -> None:
@@ -115,6 +116,9 @@ class ProcessingChain:
             prc.methods_loaded.connect(self.on_methods_loaded)
             if hasattr(prc, 'run_submitted'):
                 prc.run_submitted.connect(self.on_run_submitted)
+            if hasattr(prc, 'pipeline_job_registered'):
+                prc.pipeline_job_registered.connect(co.jobs.register_processing)
+                prc.pipeline_job_rejected.connect(self.on_pipeline_job_rejected)
             if hasattr(prc, 'run_context_finished'):
                 prc.run_context_finished.connect(self.on_run_context_finished)
             else:
@@ -277,6 +281,7 @@ class ProcessingChain:
         result_name = str(payload.get('result_name') or '处理结果').strip()
         self._batch_submitting = True
         self._batch_pending_completions = []
+        self._batch_rejected_jobs = []
         try:
             jobs = self._co.processing_controller.run_pipeline_batch(
                 self._co.current_project_id(), line_ids, {'steps': steps}, result_name,
@@ -286,12 +291,17 @@ class ProcessingChain:
         finally:
             self._batch_submitting = False
         self.batch_job_ids = set(jobs)
+        self._co.jobs.register_batch([*jobs, *self._batch_rejected_jobs])
         self.batch_errors = ['提交失败'] * max(0, len(line_ids) - len(jobs))
         self._co.infobar('warning' if self.batch_errors else 'info', '批量处理',
                          f'已提交 {len(jobs)}/{len(line_ids)} 条测线')
         pending, self._batch_pending_completions = self._batch_pending_completions, []
         for completion in pending:
             self.on_run_context_finished(*completion)
+
+    def on_pipeline_job_rejected(self, context, message):
+        if self._batch_submitting:
+            self._batch_rejected_jobs.append(self._co.jobs.record_submission_failure(context, message))
 
     def on_estimate_requested(self, payload: dict) -> None:
         line_id = self._co.require_line()
@@ -385,13 +395,12 @@ class ProcessingChain:
         tree = self._co.file_tree()
         if tree is not None and hasattr(tree, 'set_processing_input'):
             tree.set_processing_input(run_line_id, '', False)
+        if self._co.project_controller is not None and run_line_id:
+            self._co.project_controller.refresh_artifacts(run_line_id)
+            self._co.project_controller.refresh_lines()
         if success:
             self._co.infobar('success', '处理链',
                              message or f'处理链运行完成：{run_line_id}')
-            if self._co.project_controller is not None and run_line_id:
-                # 只有成果属于当前查看的测线时才自动预览，避免抢走用户视图
-                self._co.project_controller.refresh_artifacts(run_line_id)
-                self._co.project_controller.refresh_lines()
         elif cancelled:
             self._co.infobar('info', '处理链', f'处理链已取消：{run_line_id}')
         else:

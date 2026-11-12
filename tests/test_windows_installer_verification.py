@@ -59,7 +59,7 @@ def test_incomplete_or_wrong_package_evidence_is_rejected(verifier, problem):
 
 SMOKE_PAGES = (
     'projectInterface', 'processingInterface', 'interpretationInterface',
-    'spatialInterface', 'deliveryInterface', 'jobsInterface', 'settingsInterface',
+    'spatialInterface', 'settingsInterface',
 )
 
 

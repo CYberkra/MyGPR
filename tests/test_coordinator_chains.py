@@ -1,14 +1,5 @@
 # -*- coding: utf-8 -*-
-"""阶段 3 子接线器拆分后的针对性测试。
-
-- JobHub：任务事件对 JobTable / MiniJobList×2 三视图的同构扇出
-  （upsert/set_status/update_progress/remove_inactive）、取消语义、
-  终态清理（prune 委派 BackendController，不旁路 backend 句柄）；
-- ProjectChain：成果删除链（后代闭包 → ui.dialogs 确认框 → 提交删除）。
-
-JobHub 部分无 Qt 依赖（后端 CI 可跑）；删除链因 ui.dialogs
-依赖 qfluentwidgets，无 Qt 环境自动跳过。
-"""
+"""JobHub output-panel events and project navigation chains."""
 from __future__ import annotations
 
 import importlib.util
@@ -93,28 +84,16 @@ class _StubBridge:
 
 
 def _make_window(*, bridge=None, with_views=True):
-    jobs_view = _StubView()
     panel_view = _StubView()
-    home_view = _StubView()
-
-    jobs_page = _StubPage(
-        job_table=lambda: jobs_view if with_views else None,
-    )
-    home_page = _StubPage(
-        mini_jobs=lambda: home_view if with_views else None,
-    )
-    output_panel = _StubPage(
-        mini_jobs=lambda: panel_view if with_views else None,
-        cancel_job_requested=_FakeSignal(),
-    )
+    output_panel = _StubPage(job_table=lambda: panel_view) if with_views else None
+    spatial = _StubPage()
+    spatial.delivery_tools = _StubPage()
     pages = {
-        'homeInterface': home_page,
+        'homeInterface': _StubPage(),
         'projectInterface': _StubPage(),
         'processingInterface': _StubPage(),
         'interpretationInterface': _StubPage(),
-        'deliveryInterface': _StubPage(),
-        'spatialInterface': _StubPage(),
-        'jobsInterface': jobs_page,
+        'spatialInterface': spatial,
     }
 
     class _StubWindow:
@@ -164,12 +143,12 @@ def _make_window(*, bridge=None, with_views=True):
             return self._bridge
 
     window = _StubWindow()
-    return window, pages, (jobs_view, panel_view, home_view)
+    return window, pages, (panel_view,)
 
 
 # ============================================================ JobHub 同构扇出
 class TestJobHubFanOut:
-    def test_status_upserts_and_fans_out_to_three_views(self):
+    def test_status_upserts_in_output_panel(self):
         bridge = _StubBridge()
         bridge._titles['JOB-9'] = '导入测线 L01'
         window, _pages, views = _make_window(bridge=bridge)
@@ -181,26 +160,12 @@ class TestJobHubFanOut:
             assert ('upsert_job', 'JOB-9', '导入测线 L01') in view.calls
             assert ('set_status', 'JOB-9', 'running') in view.calls
 
-    def test_terminal_status_prunes_inactive_on_mini_views_only(self):
-        """终态自动清理只扇出到迷你视图；任务中心页 JobTable 保留历史行。"""
-        window, _pages, views = _make_window()
+    def test_terminal_status_is_retained_in_output_panel(self):
+        window, _pages, (panel_view,) = _make_window()
         hub = PageCoordinator(window).jobs
-        jobs_view, panel_view, home_view = views
-
         hub.on_status('JOB-9', 'completed')
-
-        assert ('remove_inactive',) not in jobs_view.calls
-        assert ('remove_inactive',) in panel_view.calls
-        assert ('remove_inactive',) in home_view.calls
-
-    def test_non_terminal_status_does_not_prune(self):
-        window, _pages, views = _make_window()
-        hub = PageCoordinator(window).jobs
-
-        hub.on_status('JOB-9', 'queued')
-
-        for view in views:
-            assert ('remove_inactive',) not in view.calls
+        assert panel_view.calls == [('upsert_job', 'JOB-9', 'JOB-9'),
+                                    ('set_status', 'JOB-9', 'completed')]
 
     def test_progress_fans_out_and_forwards_processing_page(self):
         window, pages, views = _make_window()

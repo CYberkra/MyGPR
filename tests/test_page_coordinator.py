@@ -42,10 +42,10 @@ def _make_window(*, project_id="P-001", line_id="L02", has_project=True):
         "projectInterface": _StubPage(),
         "processingInterface": _StubPage(),
         "interpretationInterface": _StubPage(),
-        "deliveryInterface": _StubPage(),
         "spatialInterface": _StubPage(),
-        "jobsInterface": _StubPage(),
     }
+
+    pages["spatialInterface"].delivery_tools = _StubPage()
 
     class _StubWindow:
         _backend_ready = True

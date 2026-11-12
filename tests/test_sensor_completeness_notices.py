@@ -125,9 +125,9 @@ def test_task_message_shows_skip_and_final_summary_without_resetting_progress():
     view = NS(upsert_job=lambda *a: None, set_status=lambda *a: None,
               update_progress=lambda *args: updates.append(args))
     hub = JobHub(NS(job_bridge=lambda: None, log_message=logs.append,
+                    current_project_id=lambda: 'P', spatial_job_ids=set(),
                     processing=NS(processing_job_id='')))
     hub._views = lambda: (view,)
-    hub._mini_views = lambda: ()
     hub.on_progress('job', 1, 3, '处理中')
     hub.on_notice('job', {'message': '高度补偿：已跳过（高度缺失）', 'level': 'warning'})
     assert updates[-1] == ('job', 1, 3, '高度补偿：已跳过（高度缺失）')

@@ -64,3 +64,26 @@ def test_delivery_distinguishes_control_points_from_surface(qapp):
     status = page._spatial_table.item(0, 3).text()
     assert '控制点' in status and '未生成曲面' in status
     page.close()
+
+
+def test_spatial_result_opens_right_sidebar_and_selects_exact_version(qapp):
+    from ui.pages.spatial_page import SpatialPage
+
+    page = SpatialPage()
+    try:
+        tools = page.delivery_tools
+        tools.set_spatial_results([
+            {'result_id': 'A', 'name': '范围', 'revision': 1, 'line_ids': ['L01']},
+            {'result_id': 'B', 'name': '范围', 'revision': 2, 'line_ids': ['L02']},
+        ])
+        located = []
+        tools.spatial_locate_requested.connect(located.append)
+        assert page.open_spatial_result('B')
+        assert page._spatial_tools_stack.currentWidget() is tools
+        assert tools._selected_spatial_id() == 'B'
+        assert located == [['L02']]
+        assert not page.open_spatial_result('missing')
+        assert tools._selected_spatial_id() == 'B'
+    finally:
+        page.close()
+        page.deleteLater()

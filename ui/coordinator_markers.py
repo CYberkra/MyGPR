@@ -22,7 +22,7 @@ class MarkerChain:
         interpretation = co.page('interpretationInterface')
         candidates = [getattr(getattr(processing, '_workspace', None), 'marker_tools', None),
                       getattr(interpretation, 'marker_tools', None)]
-        for name in ('projectInterface', 'spatialInterface', 'deliveryInterface'):
+        for name in ('projectInterface', 'spatialInterface'):
             candidates.append(getattr(co.page(name), 'marker_browser', None))
         self.tools = [item for item in candidates if item is not None]
         for item in self.tools:

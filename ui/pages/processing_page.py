@@ -777,6 +777,22 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
         saved = self._saved_run(str(group))
         return self._replace_draft(saved[0], saved[1]) if saved else False
 
+    def load_job_configuration(self, context):
+        """Return None until the submitted input's source list is available."""
+        if self._project_read_only or self._draft_locked():
+            return False
+        artifact_id = context['input_artifact_id']
+        source = f'artifact:{artifact_id}' if artifact_id else 'original'
+        if source not in self._sources:
+            return None
+        if not self._replace_draft(source, context['steps']):
+            return False
+        self._result_name_edit.setText(context['result_name'])
+        self._save_intermediates_check.setChecked(context['save_intermediates'])
+        self._stash_draft()
+        self._save_session()
+        return True
+
     def _replace_draft(self, source, steps):
         if source not in self._sources:
             return False

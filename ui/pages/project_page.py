@@ -32,6 +32,7 @@ from ui.pages.project_visuals import (
     make_detail_scroll, style_ledger_items,
 )
 from ui.pages.project_preferences import ProjectColumnPreferences
+from ui.pages.project_delivery import ProjectDeliveryMixin
 from ui.pages.project_line_context import ProjectLineContextMixin
 from ui.pages.project_quality import QualityCenterDialog
 from ui.theme_helpers import status_color
@@ -75,7 +76,7 @@ _INFO_FIELDS = (
 )
 
 
-class ProjectPage(ProjectLineContextMixin, QWidget):
+class ProjectPage(ProjectLineContextMixin, ProjectDeliveryMixin, QWidget):
     """A project identity, line ledger and a single selected-line context."""
 
     import_requested = pyqtSignal(dict)
@@ -110,6 +111,7 @@ class ProjectPage(ProjectLineContextMixin, QWidget):
         self._resume_lines: set[str] = set()
         self._sensor_target_line_id = ''
         self._import_sources = []
+        self._delivery_tools = None
 
         root = QVBoxLayout(self)
         root.setContentsMargins(*(constants.SPACE_4,) * 4)
@@ -231,6 +233,7 @@ class ProjectPage(ProjectLineContextMixin, QWidget):
         add_action(menu, FIF.SETTING, '项目设置 / 元数据', self._info_dialog.show)
         add_action(menu, None, '项目时区…', self._identity.edit_timezone, enabled=self._can_write())
         add_action(menu, FIF.SEARCH, '导入与预检…', self.show_import_tool, enabled=not self._busy)
+        self._add_delivery_actions(menu)
         root = str(getattr(self._summary, 'root_path', '') or '')
         add_action(menu, FIF.FOLDER, '打开项目位置',
                    lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(root)), enabled=bool(root))

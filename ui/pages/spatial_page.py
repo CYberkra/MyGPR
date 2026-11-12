@@ -38,6 +38,7 @@ from ui.geo_utils import coverage_statistics, format_distance, format_spacing
 from ui.qt_defer import defer_call
 from ui.spatial_view_sync import ViewSyncMixin
 from ui.pages.spatial_context_menus import SpatialContextMenuMixin
+from ui.pages.spatial_delivery import SpatialDeliveryMixin
 from ui.page_scaffold import (PanelStateMixin, make_card,
                               make_collapsible_column, make_hint,
                               make_segment_card,
@@ -97,7 +98,8 @@ class _DemLoadWorker(QRunnable):
             self._signals.finished.emit(self._generation, dem, self._path, '')
 
 
-class SpatialPage(SpatialMarkersMixin, SpatialContextMenuMixin, ViewSyncMixin, PanelStateMixin, QWidget):
+class SpatialPage(SpatialMarkersMixin, SpatialContextMenuMixin, SpatialDeliveryMixin,
+                  ViewSyncMixin, PanelStateMixin, QWidget):
     """空间信息页面。"""
 
     current_line_requested = pyqtSignal(str)    # 设为当前测线（line_id）
@@ -264,9 +266,7 @@ class SpatialPage(SpatialMarkersMixin, SpatialContextMenuMixin, ViewSyncMixin, P
         root = QVBoxLayout(self)
         root.setContentsMargins(*constants.PAGE_MARGINS)
         root.setSpacing(constants.PAGE_SPACING)
-        from ui.widgets.marker_browser import MarkerBrowserButton
-        self.marker_browser = MarkerBrowserButton(self)
-        root.addWidget(self.marker_browser)
+        self._build_spatial_header(root)
 
         columns = QHBoxLayout()
         columns.setSpacing(constants.PAGE_SPACING)
@@ -484,6 +484,7 @@ class SpatialPage(SpatialMarkersMixin, SpatialContextMenuMixin, ViewSyncMixin, P
         self._right_panel, right_layout = make_collapsible_column(
             'right', constants.SIDE_FORM_WIDTH, parent=self)
         columns.addWidget(self._right_panel)
+        right_layout = self._build_spatial_delivery(right_layout, _SEG_MAP)
 
         detail_card, detail_layout = make_card('测线详情')
         self._detail_labels = {}

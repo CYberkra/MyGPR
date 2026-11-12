@@ -1,17 +1,11 @@
 # -*- coding: utf-8 -*-
-"""JobsPage — 任务中心（SPEC §6.8）。
-
-卡内：清理操作 + JobTable(stretch)，不重复页面导航标题。
-页面为 JobTable 的薄包装：暴露 job_table() 访问器，
-转发 cancel_requested，并在清理时发 prune_requested。
-"""
+"""Job controls hosted in the output panel."""
 
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout, QWidget
-from qfluentwidgets import PushButton
+from qfluentwidgets import ComboBox, PushButton
 
 from ui import constants
-from ui.page_scaffold import make_card
 from ui.widgets import JobTable
 from ui.widgets.object_context_menu import ObjectMenuBinding, object_action, object_menu, show_details
 
@@ -30,22 +24,23 @@ class JobsPage(QWidget):
     # ============================================================ UI 构建
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(*constants.PAGE_MARGINS)
-        root.setSpacing(constants.PAGE_SPACING)
-
-        card, card_layout = make_card(parent=self)
+        root.setContentsMargins(8, 2, 8, 4)
+        root.setSpacing(4)
 
         button_row = QHBoxLayout()
         button_row.setSpacing(constants.CARD_SPACING)
-        self._prune_btn = PushButton('清理终态记录', card)
+        self._filter = ComboBox(self)
+        self._filter.addItem('活动与失败', userData=('queued', 'running', 'failed'))
+        self._filter.addItem('全部任务', userData=None)
+        self._filter.addItem('已完成', userData=('completed', 'cancelled'))
+        button_row.addWidget(self._filter)
+        button_row.addStretch(1)
+        self._prune_btn = PushButton('清理终态记录', self)
         self._prune_btn.setToolTip('清除已完成/失败的任务行')
         button_row.addWidget(self._prune_btn)
-        button_row.addStretch(1)
-        card_layout.addLayout(button_row)
-
-        self._job_table = JobTable(card)
-        card_layout.addWidget(self._job_table, 1)
-        root.addWidget(card, 1)
+        root.addLayout(button_row)
+        self._job_table = JobTable(self)
+        root.addWidget(self._job_table, 1)
 
     # ============================================================ 内部接线
     def _connect_internal(self) -> None:
@@ -53,6 +48,8 @@ class JobsPage(QWidget):
         self._job_table.rows_changed.connect(self._job_context.close)
         self._job_table.cancel_requested.connect(self.cancel_requested)
         self._prune_btn.clicked.connect(self._on_prune_clicked)
+        self._filter.currentIndexChanged.connect(self._update_filter)
+        self._update_filter()
         # 没有终态任务时按钮禁用：否则点了没反应（空表/全是运行中）
         self._job_table.rows_changed.connect(self._sync_prune_enabled)
         self._sync_prune_enabled()
@@ -61,6 +58,9 @@ class JobsPage(QWidget):
     def job_table(self) -> JobTable:
         """JobTable 访问器：主窗口经其 upsert/update_progress/set_status。"""
         return self._job_table
+
+    def _update_filter(self):
+        self._job_table.set_visible_statuses(self._filter.currentData())
 
     # ============================================================ 内部逻辑
     def _sync_prune_enabled(self) -> None:
