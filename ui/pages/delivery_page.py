@@ -5,7 +5,7 @@ import os
 import json
 from collections.abc import Mapping
 
-from PyQt6.QtCore import Qt, QUrl, pyqtSignal
+from PyQt6.QtCore import QItemSelectionModel, Qt, QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
     QApplication, QDialog, QHBoxLayout, QHeaderView, QListWidget,
@@ -196,6 +196,7 @@ class DeliveryPage(QWidget):
             3, QHeaderView.ResizeMode.ResizeToContents)
         self._spatial_table.setMinimumHeight(140)
         self._spatial_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._spatial_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self._spatial_table.cellDoubleClicked.connect(self._on_spatial_double_clicked)
         spatial_layout.addWidget(self._spatial_table)
         self._spatial_empty = EmptyStateOverlay(
@@ -365,8 +366,8 @@ class DeliveryPage(QWidget):
         for row, result in enumerate(self._spatial_results):
             item = self._spatial_table.item(row, 0)
             if item.data(Qt.ItemDataRole.UserRole) == result_id:
-                self._spatial_table.setCurrentCell(row, 0)
-                self._spatial_table.selectRow(row)
+                flags = QItemSelectionModel.SelectionFlag
+                self._spatial_table.setCurrentCell(row, 0, flags.ClearAndSelect | flags.Rows)
                 self._spatial_table.scrollToItem(item)
                 if self._pending_spatial_result == result_id:
                     self._pending_spatial_result = ''
