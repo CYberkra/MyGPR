@@ -451,6 +451,30 @@ class MarkerPanel(QWidget):
         self._requests[token] = (action, payload)
         self.operation.emit(action, {'token': token, **payload})
 
+    def _confirm_trace_selection(self, result, view):
+        title = '保留所选区间' if result['mode'] == 'keep' else '剔除所选区间'
+        ranges = '、'.join(str(a + 1) if a + 1 == b else f'{a + 1}–{b}'
+                          for a, b in result['ranges'])
+        segments = len(result['output_segments'])
+        input_name = result['input_artifact_id'] or '原始数据'
+        text = (f"{result['line_id']} · {input_name}\n"
+                f"选中 {result['affected_count']} / {result['input_count']} 道\n"
+                f"输出 {result['output_count']} 道")
+        if segments > 1:
+            text += f' · {segments} 段'
+        box = QMessageBox(QMessageBox.Icon.Question, title, text,
+                          QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel, self)
+        box.setTextFormat(Qt.TextFormat.PlainText)
+        if len(ranges) <= 100:
+            box.setInformativeText(f'道号 {ranges}')
+        else:
+            box.setDetailedText('\n'.join(f'道号 {a + 1}–{b}' for a, b in result['ranges']))
+        box.button(QMessageBox.StandardButton.Ok).setText('生成成果')
+        box.button(QMessageBox.StandardButton.Cancel).setText('取消')
+        box.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        if box.exec() == QMessageBox.StandardButton.Ok and view is self.view:
+            self.request('execute', {'preview': result})
+
     def deliver(self, token, result, error):
         pending = self._requests.pop(token, None)
         if pending is None:
@@ -490,28 +514,7 @@ class MarkerPanel(QWidget):
             self._views = {view.document.line_id: view for view in result}
             self._populate(tuple(row for view in result for row in view.rows))
         elif action == 'preview':
-            title = '保留所选区间' if result['mode'] == 'keep' else '剔除所选区间'
-            ranges = '、'.join(str(a + 1) if a + 1 == b else f'{a + 1}–{b}'
-                              for a, b in result['ranges'])
-            segments = len(result['output_segments'])
-            input_name = result['input_artifact_id'] or '原始数据'
-            text = (f"{result['line_id']} · {input_name}\n"
-                    f"选中 {result['affected_count']} / {result['input_count']} 道\n"
-                    f"输出 {result['output_count']} 道")
-            if segments > 1:
-                text += f' · {segments} 段'
-            box = QMessageBox(QMessageBox.Icon.Question, title, text,
-                              QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel, self)
-            box.setTextFormat(Qt.TextFormat.PlainText)
-            if len(ranges) <= 100:
-                box.setInformativeText(f'道号 {ranges}')
-            else:
-                box.setDetailedText('\n'.join(f'道号 {a + 1}–{b}' for a, b in result['ranges']))
-            box.button(QMessageBox.StandardButton.Ok).setText('生成成果')
-            box.button(QMessageBox.StandardButton.Cancel).setText('取消')
-            box.setDefaultButton(QMessageBox.StandardButton.Cancel)
-            if box.exec() == QMessageBox.StandardButton.Ok and payload['view'] is self.view:
-                self.request('execute', {'preview': result})
+            self._confirm_trace_selection(result, payload['view'])
         elif action == 'execute':
             self._set_message('已提交任务')
         elif action == 'export':

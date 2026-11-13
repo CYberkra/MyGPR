@@ -355,6 +355,21 @@ def _collect_line_evidence(
     return quality_rows, interface_rows, target_rows, spatial_rows
 
 
+def _resolve_scoped_spatial_evidence(store, line_scope, requested_id, enabled, cancel_checker):
+    spatial_result_id, spatial_record, spatial_manifest_path, spatial_manifest_sha256, input_artifacts = _resolve_spatial_evidence(
+        store,
+        requested_id=str(requested_id or ""),
+        enabled=enabled,
+        cancel_checker=cancel_checker,
+    )
+    if spatial_record is not None and not set(spatial_record.line_ids) <= line_scope:
+        if requested_id:
+            raise ValueError("所选空间成果包含未选测线。请选择兼容的空间成果。")
+        spatial_result_id, spatial_record = "", None
+        spatial_manifest_path, spatial_manifest_sha256, input_artifacts = None, "", []
+    return spatial_result_id, spatial_record, spatial_manifest_path, spatial_manifest_sha256, input_artifacts
+
+
 def generate_project_report_package(
     store: Any,
     *,
@@ -424,17 +439,9 @@ def generate_project_report_package(
         record.to_dict() for record in load_source_registry(store) if record.line_id in line_scope
     ]
 
-    spatial_result_id, spatial_record, spatial_manifest_path, spatial_manifest_sha256, input_artifacts = _resolve_spatial_evidence(
-        store,
-        requested_id=str(report_profile.get("spatial_result_id") or ""),
-        enabled=section_flags["include_spatial_results"],
-        cancel_checker=cancel_checker,
+    spatial_result_id, spatial_record, spatial_manifest_path, spatial_manifest_sha256, input_artifacts = _resolve_scoped_spatial_evidence(
+        store, line_scope, report_profile.get('spatial_result_id'), section_flags['include_spatial_results'], cancel_checker,
     )
-    if spatial_record is not None and not set(spatial_record.line_ids) <= line_scope:
-        if report_profile.get("spatial_result_id"):
-            raise ValueError("所选空间成果包含未选测线。请选择兼容的空间成果。")
-        spatial_result_id, spatial_record = "", None
-        spatial_manifest_path, spatial_manifest_sha256, input_artifacts = None, "", []
     input_artifacts.extend({
         'role': 'processing_result',
         'primary': primary.get(record.line_id) is record,

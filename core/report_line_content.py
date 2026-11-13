@@ -14,15 +14,20 @@ from mygpr.domain.markers.ranges import interval_bounds
 from mygpr.domain.reporting.models import ANALYSIS_FIELDS, MANUAL_ACQUISITION_FIELDS
 
 
-def acquisition_rows(dataset, line, project, manual):
-    metadata = dataset.metadata if dataset is not None else {}
-    metadata = {**(metadata.get('metadata') or {}), **metadata}
-    iczt = (metadata.get('sfcw') or {}).get('iczt') or {}
+def _acquisition_frequency(metadata, iczt, manual):
     frequency = str(manual.get('frequency') or '未记录')
     if 'f_start' in iczt and 'f_stop' in iczt:
         frequency = f"{iczt['f_start'] / 1e6:g}–{iczt['f_stop'] / 1e6:g} MHz（采集配置）"
     elif metadata.get('nominal_frequency_mhz'):
         frequency = f"{metadata['nominal_frequency_mhz']:g} MHz（设备头标称）"
+    return frequency
+
+
+def acquisition_rows(dataset, line, project, manual):
+    metadata = dataset.metadata if dataset is not None else {}
+    metadata = {**(metadata.get('metadata') or {}), **metadata}
+    iczt = (metadata.get('sfcw') or {}).get('iczt') or {}
+    frequency = _acquisition_frequency(metadata, iczt, manual)
     time_known = dataset is not None and metadata.get('time_axis_status') == 'known' and dataset.time_window_ns > 0
     length = getattr(line, 'length_m', 0) or 0
     spacing = metadata.get('trace_interval_m')

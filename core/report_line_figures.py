@@ -29,6 +29,24 @@ def _annotation(store, line_id, raw, primary):
         return None, None, '界面记录无法读取'
 
 
+def _load_report_dataset(store, line):
+    line_id = line.line_id
+    dataset = None
+    try:
+        dataset = store.load_gpr_dataset(line_id)
+        if line.time_window_override_ns > 0:
+            from core.gpr_data_model import apply_time_window_override
+            apply_time_window_override(dataset, line.time_window_override_ns)
+        if line.distance_override == 'measured':
+            dataset.distance_axis_m = np.linspace(0, line.length_m, dataset.trace_count)
+        if line.distance_override in ('measured', 'unknown'):
+            dataset.metadata['distance_axis_status'] = line.distance_override
+    except _DATA_ERRORS:
+        dataset = None
+        _LOGGER.warning('报告原始数据读取失败：%s', line_id, exc_info=True)
+    return dataset
+
+
 def build_line_dossiers(store, lines, primary, artifacts, marker_documents, profile,
                         project, quality_rows, sections, figures_dir, check_cancel, progress_callback):
     index = {item.artifact_id: item for item in artifacts}
@@ -40,19 +58,7 @@ def build_line_dossiers(store, lines, primary, artifacts, marker_documents, prof
     for number, line in enumerate(lines, 1):
         check_cancel()
         line_id = line.line_id
-        dataset = None
-        try:
-            dataset = store.load_gpr_dataset(line_id)
-            if line.time_window_override_ns > 0:
-                from core.gpr_data_model import apply_time_window_override
-                apply_time_window_override(dataset, line.time_window_override_ns)
-            if line.distance_override == 'measured':
-                dataset.distance_axis_m = np.linspace(0, line.length_m, dataset.trace_count)
-            if line.distance_override in ('measured', 'unknown'):
-                dataset.metadata['distance_axis_status'] = line.distance_override
-        except _DATA_ERRORS:
-            dataset = None
-            _LOGGER.warning('报告原始数据读取失败：%s', line_id, exc_info=True)
+        dataset = _load_report_dataset(store, line)
         document = documents.get(line_id)
         events, codes, ranges = report_events(document, dataset)
         record_codes.update(codes)
@@ -132,9 +138,8 @@ def build_line_dossiers(store, lines, primary, artifacts, marker_documents, prof
     return dossiers, figure_paths, plan_name, map_note, record_codes
 
 
-def _write_line_figures(store, line_id, raw, artifact, chain, dossier, document, ranges, directory, include_interpretation):
+def _load_processed_profile(store, line_id, raw, artifact, chain, document, notes):
     processed = mapping = None
-    notes = dossier['figure_notes']
     root = chain[0] if chain else {}
     raw_digest = raw.metadata.get('data_sha256')
     mismatched = (not root.get('parent_id') and root.get('input_sha256') and raw_digest
@@ -147,6 +152,7 @@ def _write_line_figures(store, line_id, raw, artifact, chain, dossier, document,
         except _DATA_ERRORS:
             notes.append('所选处理版本无法读取')
             _LOGGER.warning('报告处理成果读取失败：%s', artifact.artifact_id, exc_info=True)
+    segments = None
     if processed is not None:
         try:
             generation = raw.metadata.get('marker_source_version') or (raw.metadata.get('metadata') or {}).get('marker_source_version')
@@ -157,6 +163,12 @@ def _write_line_figures(store, line_id, raw, artifact, chain, dossier, document,
             notes.append('道映射校验失败，处理剖面不可用于对照')
             _LOGGER.warning('报告成果道映射读取失败：%s', artifact.artifact_id, exc_info=True)
             processed = mapping = None
+    return processed, mapping, segments
+
+
+def _write_line_figures(store, line_id, raw, artifact, chain, dossier, document, ranges, directory, include_interpretation):
+    notes = dossier['figure_notes']
+    processed, mapping, segments = _load_processed_profile(store, line_id, raw, artifact, chain, document, notes)
     raw_ann, processed_ann, annotation_note = (
         _annotation(store, line_id, raw, artifact) if include_interpretation else (None, None, ''))
     if annotation_note:

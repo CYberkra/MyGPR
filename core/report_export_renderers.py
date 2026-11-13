@@ -11,9 +11,10 @@ from typing import Any
 
 from core.plot_font_policy import configure_matplotlib_cjk_fonts
 from core.report_export_rows import _sha256_file
+from core.tabular_security import safe_tabular_value
+from mygpr.domain.reporting.models import ANALYSIS_FIELDS
 
 _LOGGER = logging.getLogger(__name__)
-from core.tabular_security import safe_tabular_value
 
 
 def _write_xlsx_report(
@@ -180,73 +181,76 @@ def _ordered_dossiers(summary):
     return featured, [item for item in dossiers if item['line_id'] not in identifiers]
 
 
+def _html_esc(value):
+    return html.escape('' if value is None else str(value))
+
+
+def _html_table(headers, rows):
+    head = ''.join(f'<th>{_html_esc(_REPORT_HEADERS.get(key, key))}</th>' for key in headers)
+    body = ''.join('<tr>' + ''.join(f'<td>{_html_esc(row.get(key))}</td>' for key in headers) + '</tr>' for row in rows)
+    return f'<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>'
+
+
+def _html_figure(name, label, *, caption=True):
+    if not name:
+        return ''
+    text = f'<figcaption>{_html_esc(label)}</figcaption>' if caption else ''
+    return f'<figure><img alt="{_html_esc(label)}" src="../figures/{_html_esc(name)}">{text}</figure>'
+
+
+def _html_paragraph(label, value):
+    return f'<h3>{_html_esc(label)}</h3><p>{_html_esc(value)}</p>' if value else ''
+
+
+def _html_dossier(item, summary):
+    qc = item['quality']
+    analysis = item['analysis']
+    uid = _html_esc(item['line_id'])
+    location = (f'{analysis["code"]} · 原始第 {analysis["first_trace"]}–{analysis["last_trace"]} 道'
+                if analysis.get('code') else '')
+    descriptions = ''.join(_html_paragraph(label, analysis.get(key)) for key, label in ANALYSIS_FIELDS.items())
+    events = ''.join(f'<dt>{_html_esc(event["code"])} · {_html_esc(event["name"])}</dt><dd>{_html_esc(_event_text(event))}</dd>'
+                     for event in item['events'])
+    steps = ''.join(f'<li>{_html_esc(value)}</li>' for value in _step_text(item))
+    notes = ''.join(f'<li>{_html_esc(note)}</li>' for note in item['figure_notes'])
+    details = ''.join(_html_figure(name, location) for name in item['detail_figures'])
+    notice = ' · '.join(filter(None, (qc.get('status'), qc.get('orientation_message')))) if (
+        qc.get('status') in ('失败', '警告')) else ''
+    parameters = ''.join(f'<dt>{_html_esc(key)}</dt><dd>{_html_esc(value)}</dd>'
+                         for key, value in item['acquisition'].items() if value)
+    route = _html_figure(item.get('route_figure'), f'{item["line_id"]} 路线', caption=False)
+    if not route and item['map_status'] == '无法在地图定位':
+        reason = summary.get('plan_map_note') if len(summary['line_dossiers']) == 1 else ''
+        route = f'<p class="meta">{_html_esc(reason or "缺少可用的定位轨迹")}</p>'
+    elif not route and item['map_status'] == '已绘制轨迹':
+        route = '<p><a href="#survey-map">查看测区路线总图</a></p>'
+    return (
+        f'<section id="{uid}"><h3>{uid} · {_html_esc(item["name"])}</h3>'
+        + (f'<p class="meta">{_html_esc(notice)}</p>' if notice else '')
+        + f'<div class="line-header">{route}<dl class="parameters">{parameters}</dl></div>'
+        + _html_figure(item['raw_figure'], '原始 B-scan', caption=False)
+        + _html_figure(item['processed_figure'], f"处理后 B-scan · {item['primary_name']}", caption=False)
+        + ('<p class="meta">仅原始剖面</p>' if item['raw_figure'] and not item['primary_artifact_id'] else '')
+        + (f'<ul class="meta">{notes}</ul>' if notes else '')
+        + '<h4>分析说明</h4>' + (f'<p>{_html_esc(location)}</p>' if location else '')
+        + (descriptions or '<p class="meta">未填写</p>')
+        + details + (f'<p class="meta">{_html_esc(item["detail_note"])}</p>' if item['detail_note'] else '')
+        + (f'<dl>{events}</dl>' if events else '')
+        + (f'<details><summary>处理步骤</summary><ol>{steps}</ol></details>' if steps else '')
+        + '</section>'
+    )
+
+
 def _write_html_report(path: Path, *, summary, lines, quality, interfaces, targets, artifacts,
                        spatial, sensor_sync=(), gis_layers=(), boreholes=()):
-    from core.report_line_content import ANALYSIS_FIELDS
-
-    def esc(value):
-        return html.escape('' if value is None else str(value))
-
-    def table(headers, rows):
-        head = ''.join(f'<th>{esc(_REPORT_HEADERS.get(key, key))}</th>' for key in headers)
-        body = ''.join('<tr>' + ''.join(f'<td>{esc(row.get(key))}</td>' for key in headers) + '</tr>' for row in rows)
-        return f'<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>'
-
-    def figure(name, label, *, caption=True):
-        if not name:
-            return ''
-        text = f'<figcaption>{esc(label)}</figcaption>' if caption else ''
-        return f'<figure><img alt="{esc(label)}" src="../figures/{esc(name)}">{text}</figure>'
-
-    def paragraph(label, value):
-        return f'<h3>{esc(label)}</h3><p>{esc(value)}</p>' if value else ''
-
-    def dossier(item):
-        qc = item['quality']
-        analysis = item['analysis']
-        uid = esc(item['line_id'])
-        location = (f'{analysis["code"]} · 原始第 {analysis["first_trace"]}–{analysis["last_trace"]} 道'
-                    if analysis.get('code') else '')
-        descriptions = ''.join(paragraph(label, analysis.get(key)) for key, label in ANALYSIS_FIELDS.items())
-        events = ''.join(f'<dt>{esc(event["code"])} · {esc(event["name"])}</dt><dd>{esc(_event_text(event))}</dd>'
-                         for event in item['events'])
-        steps = ''.join(f'<li>{esc(value)}</li>' for value in _step_text(item))
-        notes = ''.join(f'<li>{esc(note)}</li>' for note in item['figure_notes'])
-        details = ''.join(figure(name, location) for name in item['detail_figures'])
-        notice = ' · '.join(filter(None, (qc.get('status'), qc.get('orientation_message')))) if (
-            qc.get('status') in ('失败', '警告')) else ''
-        parameters = ''.join(f'<dt>{esc(key)}</dt><dd>{esc(value)}</dd>'
-                             for key, value in item['acquisition'].items() if value)
-        route = figure(item.get('route_figure'), f'{item["line_id"]} 路线', caption=False)
-        if not route and item['map_status'] == '无法在地图定位':
-            reason = summary.get('plan_map_note') if len(summary['line_dossiers']) == 1 else ''
-            route = f'<p class="meta">{esc(reason or "缺少可用的定位轨迹")}</p>'
-        elif not route and item['map_status'] == '已绘制轨迹':
-            route = '<p><a href="#survey-map">查看测区路线总图</a></p>'
-        return (
-            f'<section id="{uid}"><h3>{uid} · {esc(item["name"])}</h3>'
-            + (f'<p class="meta">{esc(notice)}</p>' if notice else '')
-            + f'<div class="line-header">{route}<dl class="parameters">{parameters}</dl></div>'
-            + figure(item['raw_figure'], '原始 B-scan', caption=False)
-            + figure(item['processed_figure'], f"处理后 B-scan · {item['primary_name']}", caption=False)
-            + ('<p class="meta">仅原始剖面</p>' if item['raw_figure'] and not item['primary_artifact_id'] else '')
-            + (f'<ul class="meta">{notes}</ul>' if notes else '')
-            + '<h4>分析说明</h4>' + (f'<p>{esc(location)}</p>' if location else '')
-            + (descriptions or '<p class="meta">未填写</p>')
-            + details + (f'<p class="meta">{esc(item["detail_note"])}</p>' if item['detail_note'] else '')
-            + (f'<dl>{events}</dl>' if events else '')
-            + (f'<details><summary>处理步骤</summary><ol>{steps}</ol></details>' if steps else '')
-            + '</section>'
-        )
-
     project = summary['project']
-    signers = '　'.join(f'{label} · {esc(project[key])}' for label, key in _REPORT_SIGNERS if project.get(key))
+    signers = '　'.join(f'{label} · {_html_esc(project[key])}' for label, key in _REPORT_SIGNERS if project.get(key))
     narrative = summary['project_analysis']
     focus, others = _ordered_dossiers(summary)
     line_count = len(summary['line_dossiers'])
     tables = _report_sections(lines, quality, interfaces, targets, artifacts, spatial,
                               sensor_sync, gis_layers, boreholes, summary.get('marker_rows', []))
-    names = ' · '.join(f'<a href="#{esc(item["line_id"])}">{esc(item["line_id"])}</a>' for item in focus + others)
+    names = ' · '.join(f'<a href="#{_html_esc(item["line_id"])}">{_html_esc(item["line_id"])}</a>' for item in focus + others)
     map_status = ', '.join(item['line_id'] for item in focus + others if item['map_status'] == '无法在地图定位')
     show_plan = line_count > 1 and (summary['plan_map'] or map_status)
     processing_link = (' · <a href="../json/processing_parameters.json">处理参数与版本</a>'
@@ -264,35 +268,181 @@ def _write_html_report(path: Path, *, summary, lines, quality, interfaces, targe
     .parameters dd{margin:0}
     """
     output = f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
-<title>{esc(project['name'])}</title><style>{css}</style></head><body>
-<h1>{esc(project['name'])} 成果报告</h1>
-<p class="meta">{esc(project.get('project_no'))} · {esc(project.get('location'))} · {esc(summary.get('generated_at'))}</p>
+<title>{_html_esc(project['name'])}</title><style>{css}</style></head><body>
+<h1>{_html_esc(project['name'])} 成果报告</h1>
+<p class="meta">{_html_esc(project.get('project_no'))} · {_html_esc(project.get('location'))} · {_html_esc(summary.get('generated_at'))}</p>
 <h2>项目摘要</h2>
-{paragraph('测量目的', narrative.get('objective'))}
-{paragraph('主要发现', narrative.get('findings') or '未填写项目发现')}
+{_html_paragraph('测量目的', narrative.get('objective'))}
+{_html_paragraph('主要发现', narrative.get('findings') or '未填写项目发现')}
 <p>{line_count} 条测线 · {names}</p>
 {'<h2 id="survey-map">测区路线总图</h2>' if show_plan else ''}
-{figure(summary['plan_map'], '测区路线总图', caption=False) if show_plan else ''}
-{f'<p class="meta">无法在地图定位 · {esc(map_status)}</p>' if show_plan and map_status else ''}
-{f'<p class="meta">{esc(summary["plan_map_note"])}</p>' if show_plan and summary.get('plan_map_note') else ''}
-<h2>重点测线</h2>{''.join(dossier(item) for item in focus)}
+{_html_figure(summary['plan_map'], '测区路线总图', caption=False) if show_plan else ''}
+{f'<p class="meta">无法在地图定位 · {_html_esc(map_status)}</p>' if show_plan and map_status else ''}
+{f'<p class="meta">{_html_esc(summary["plan_map_note"])}</p>' if show_plan and summary.get('plan_map_note') else ''}
+<h2>重点测线</h2>{''.join(_html_dossier(item, summary) for item in focus)}
 <h2>结论与验证</h2>
-<p>{esc(narrative.get('conclusion') or '未填写项目结论')}</p>
-{table(_BOREHOLE_COLUMNS, boreholes) if boreholes else ''}
-{'<h2>测线图册</h2>' if others else ''}{''.join(dossier(item) for item in others)}
+<p>{_html_esc(narrative.get('conclusion') or '未填写项目结论')}</p>
+{_html_table(_BOREHOLE_COLUMNS, boreholes) if boreholes else ''}
+{'<h2>测线图册</h2>' if others else ''}{''.join(_html_dossier(item, summary) for item in others)}
 <h2>交付附件</h2>
 <p><a href="../tables/acquisition_parameters.csv">采集参数 CSV</a> ·
 <a href="../json/line_dossiers.json">逐线记录</a>{processing_link} ·
 <a href="../json/markers.csv">标记清单</a> · <a href="../checksums.sha256">文件校验</a></p>
-{''.join(f'<details><summary>{title}</summary><div class="scroll">{table(cols, rows)}</div></details>' for title, cols, rows in tables if rows)}
+{''.join(f'<details><summary>{title}</summary><div class="scroll">{_html_table(cols, rows)}</div></details>' for title, cols, rows in tables if rows)}
 <h2>报告版本</h2>
 {f'<p>{signers}</p>' if signers else ''}
-<p class="meta">报告 {esc(summary.get('report_revision'))} · 快照 {esc(summary.get('snapshot', {}).get('snapshot_id'))}</p>
+<p class="meta">报告 {_html_esc(summary.get('report_revision'))} · 快照 {_html_esc(summary.get('snapshot', {}).get('snapshot_id'))}</p>
 </body></html>"""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     tmp.write_text(output, encoding="utf-8")
     tmp.replace(path)
+
+
+def _pdf_wrap(value, width=73):
+    import unicodedata
+
+    rows = []
+    for paragraph in str(value or '').splitlines():
+        line, used = [], 0
+        for char in paragraph:
+            size = 2 if unicodedata.east_asian_width(char) in ('W', 'F') else 1
+            if used + size > width:
+                rows.append(''.join(line))
+                line, used = [], 0
+            line.append(char)
+            used += size
+        rows.append(''.join(line))
+    return rows
+
+
+def _draw_pdf_line_header(fig, item, summary, image, font_name):
+    route_name = item.get('route_figure')
+    if route_name:
+        image(fig, route_name, [.05, .735, .43, .185], anchor='N')
+    elif item['map_status'] != '未选空间章节':
+        route_status = '见测区路线总图'
+        if item['map_status'] == '无法在地图定位':
+            reason = summary.get('plan_map_note') if len(summary['line_dossiers']) == 1 else ''
+            route_status = reason or '缺少可用的定位轨迹'
+        for row, line in enumerate(_pdf_wrap(route_status, 38)):
+            fig.text(.07, .875 - .019 * row, line, fontname=font_name, fontsize=9, color='#475569')
+    parameter_x = .52 if route_name or item['map_status'] != '未选空间章节' else .07
+    for row, key in enumerate(_LINE_PARAMETERS):
+        value = item['acquisition'].get(key) or '未记录'
+        line = f'{key}  {value}'
+        short = _pdf_wrap(line, 48)
+        fig.text(parameter_x, .903 - .023 * row, short[0] + ('…' if len(short) > 1 else ''),
+                 fontname=font_name, fontsize=9, color='#334155')
+
+
+def _pdf_line_content(item, visible_notes, text_block):
+    content = []
+    analysis = item['analysis']
+    if analysis.get('code'):
+        text_block(content, '分析范围',
+                   f"{analysis['code']} · 原始第 {analysis['first_trace']}–{analysis['last_trace']} 道")
+    if item['detail_note']:
+        content.extend((False, row) for row in _pdf_wrap(item['detail_note']))
+    if any(analysis.get(key) for key in ANALYSIS_FIELDS):
+        for key, label in ANALYSIS_FIELDS.items():
+            text_block(content, label, analysis.get(key))
+    else:
+        text_block(content, '分析说明', '未填写')
+    content.extend((False, line) for line in visible_notes[3:])
+    steps = _step_text(item)
+    if steps:
+        text_block(content, '处理步骤与范围', '\n'.join(steps))
+    for event in item['events']:
+        text_block(content, f"{event['code']} · {event['name']}", _event_text(event))
+    more_parameters = {key: value for key, value in item['acquisition'].items()
+                       if value and value != '未记录'
+                       and (key not in _LINE_PARAMETERS or len(_pdf_wrap(f'{key}  {value}', 48)) > 1)}
+    if more_parameters:
+        text_block(content, '采集参数', '\n'.join(f'{key}  {value}' for key, value in more_parameters.items()))
+    return content
+
+
+def _pdf_overview(narrative, focus, others, text_block):
+    overview = []
+    text_block(overview, '测量目的', narrative.get('objective'))
+    text_block(overview, '主要发现', narrative.get('findings') or '未填写项目发现')
+    text_block(overview, '重点测线', ' · '.join(
+        f"{item['line_id']} {item['name']}" for item in focus))
+    warnings = [f"{item['line_id']} {item['quality'].get('orientation_message') or item['quality'].get('status')}"
+                for item in focus + others if item['quality'].get('status') in ('失败', '警告')]
+    if warnings:
+        text_block(overview, '质检提示', '\n'.join(warnings))
+    return overview
+
+
+def _write_pdf_line(pdf, item, summary, font_name, page, image, text_block, write_page, write_text_pages):
+    title = f"{item['line_id']} · {item['name']}"
+    fig = page(title[:44])
+    qc = item['quality']
+    _draw_pdf_line_header(fig, item, summary, image, font_name)
+    image(fig, item['raw_figure'], [.05, .495, .90, .232])
+    if item['processed_figure']:
+        image(fig, item['processed_figure'], [.05, .252, .90, .232])
+    elif item['raw_figure']:
+        message = '所选处理剖面不可用' if item['primary_artifact_id'] else '仅原始剖面'
+        fig.text(.07, .485, message, fontname=font_name, fontsize=9)
+    baseline = .245 if item['processed_figure'] else .454 if item['raw_figure'] else .723
+    notes = list(item['figure_notes'])
+    if qc.get('status') in ('失败', '警告'):
+        notes.insert(0, qc.get('orientation_message') or qc['status'])
+    visible_notes = [line for note in notes for line in _pdf_wrap(note, 93)]
+    for row, line in enumerate(visible_notes[:3]):
+        fig.text(.07, baseline - .019 * row, line, fontname=font_name, fontsize=8, color='#475569')
+    content = _pdf_line_content(item, visible_notes, text_block)
+    analysis = item['analysis']
+    next_y = baseline - .021 * len(visible_notes[:3]) - .026
+    available = max(0, int((next_y - .055) / .020))
+    if len(content) > available:
+        available = max(0, available - 2)
+    for row, (label, value) in enumerate(content[:available]):
+        fig.text(.07, next_y - .020 * row, value, fontname=font_name, fontsize=9,
+                 fontweight='bold' if label else 'normal')
+    remaining = content[available:]
+    if remaining:
+        fig.text(.07, .057, '见续页', fontname=font_name, fontsize=8, color='#475569')
+    write_page(pdf, fig)
+    write_text_pages(pdf, f"{item['line_id']} · 处理与分析", remaining)
+    if item['detail_figures']:
+        fig = page(f"{analysis['code']} · 局部剖面")
+        fig.text(.07, .898, f"原始第 {analysis['first_trace']}–{analysis['last_trace']} 道",
+                 fontname=font_name, fontsize=10)
+        for index, name in enumerate(item['detail_figures']):
+            image(fig, name, [.05, .57 - .30 * index, .90, .29])
+        if item['detail_note']:
+            fig.text(.07, .53, item['detail_note'], fontname=font_name, fontsize=9)
+        write_page(pdf, fig)
+
+def _write_pdf_survey_map(pdf, summary, dossiers, page, image, write_rows, write_page, write_text_pages):
+    missing = [item['line_id'] for item in dossiers if item['map_status'] == '无法在地图定位']
+    if (summary['plan_map'] and len(dossiers) > 1) or (missing and len(dossiers) > 1):
+        fig = page('测区路线总图')
+        y = image(fig, summary['plan_map'], [.05, .30, .90, .59], anchor='N') - .027
+        map_rows = _pdf_wrap('无法在地图定位 · ' + '、'.join(missing), 92) if missing else []
+        map_rows.extend(_pdf_wrap(summary.get('plan_map_note'), 92))
+        write_rows(fig, [(False, row) for row in map_rows[:5]], y)
+        write_page(pdf, fig)
+        write_text_pages(pdf, '地图定位状态（续）', [(False, row) for row in map_rows[5:]])
+
+
+def _pdf_conclusions(narrative, boreholes, text_block):
+    conclusions = []
+    text_block(conclusions, '结论', narrative.get('conclusion') or '未填写项目结论')
+    if boreholes:
+        count = sum(row.get('status') == 'passed' for row in boreholes)
+        text_block(conclusions, '钻孔对比', f'{count} / {len(boreholes)} 项误差达标，逐项数值见钻孔对比表。')
+    return conclusions
+
+
+def _pdf_borehole_tables(pdf, boreholes, table_page):
+    for offset in range(0, len(boreholes), 24):
+        title = f'钻孔对比 · {offset // 24 + 1}' if len(boreholes) > 24 else '钻孔对比'
+        table_page(pdf, title, _BOREHOLE_COLUMNS, boreholes[offset:offset + 24])
 
 
 def _write_pdf_report(path: Path, *, summary: dict[str, Any], boreholes: list[dict[str, Any]],
@@ -363,27 +513,10 @@ def _write_pdf_report(path: Path, *, summary: dict[str, Any], boreholes: list[di
     tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     project = summary.get("project", {})
     metrics = summary.get("metrics", {})
-    from core.report_line_content import ANALYSIS_FIELDS
 
     figures = {item.name: item for item in figure_paths if item.exists()}
     narrative = summary['project_analysis']
     focus, others = _ordered_dossiers(summary)
-
-    def wrap(value, width=73):
-        import unicodedata
-
-        rows = []
-        for paragraph in str(value or '').splitlines():
-            line, used = [], 0
-            for char in paragraph:
-                size = 2 if unicodedata.east_asian_width(char) in ('W', 'F') else 1
-                if used + size > width:
-                    rows.append(''.join(line))
-                    line, used = [], 0
-                line.append(char)
-                used += size
-            rows.append(''.join(line))
-        return rows
 
     def write_page(pdf, fig):
         pdf.savefig(fig)
@@ -412,87 +545,8 @@ def _write_pdf_report(path: Path, *, summary: dict[str, Any], boreholes: list[di
     def text_block(rows, label, value):
         if value:
             rows.append((True, label))
-            rows.extend((False, row) for row in wrap(value, 88))
+            rows.extend((False, row) for row in _pdf_wrap(value, 88))
             rows.append((False, ''))
-
-    def write_line(pdf, item):
-        title = f"{item['line_id']} · {item['name']}"
-        fig = _page(title[:44])
-        qc = item['quality']
-        route_name = item.get('route_figure')
-        if route_name:
-            image(fig, route_name, [.05, .735, .43, .185], anchor='N')
-        elif item['map_status'] != '未选空间章节':
-            route_status = '见测区路线总图'
-            if item['map_status'] == '无法在地图定位':
-                reason = summary.get('plan_map_note') if len(summary['line_dossiers']) == 1 else ''
-                route_status = reason or '缺少可用的定位轨迹'
-            for row, line in enumerate(wrap(route_status, 38)):
-                fig.text(.07, .875 - .019 * row, line, fontname=font_name, fontsize=9, color='#475569')
-        parameter_x = .52 if route_name or item['map_status'] != '未选空间章节' else .07
-        for row, key in enumerate(_LINE_PARAMETERS):
-            value = item['acquisition'].get(key) or '未记录'
-            line = f'{key}  {value}'
-            short = wrap(line, 48)
-            fig.text(parameter_x, .903 - .023 * row, short[0] + ('…' if len(short) > 1 else ''),
-                     fontname=font_name, fontsize=9, color='#334155')
-        image(fig, item['raw_figure'], [.05, .495, .90, .232])
-        if item['processed_figure']:
-            image(fig, item['processed_figure'], [.05, .252, .90, .232])
-        elif item['raw_figure']:
-            message = '所选处理剖面不可用' if item['primary_artifact_id'] else '仅原始剖面'
-            fig.text(.07, .485, message, fontname=font_name, fontsize=9)
-        baseline = .245 if item['processed_figure'] else .454 if item['raw_figure'] else .723
-        notes = list(item['figure_notes'])
-        if qc.get('status') in ('失败', '警告'):
-            notes.insert(0, qc.get('orientation_message') or qc['status'])
-        visible_notes = [line for note in notes for line in wrap(note, 93)]
-        for row, line in enumerate(visible_notes[:3]):
-            fig.text(.07, baseline - .019 * row, line, fontname=font_name, fontsize=8, color='#475569')
-        content = []
-        analysis = item['analysis']
-        if analysis.get('code'):
-            text_block(content, '分析范围',
-                       f"{analysis['code']} · 原始第 {analysis['first_trace']}–{analysis['last_trace']} 道")
-        if item['detail_note']:
-            content.extend((False, row) for row in wrap(item['detail_note']))
-        if any(analysis.get(key) for key in ANALYSIS_FIELDS):
-            for key, label in ANALYSIS_FIELDS.items():
-                text_block(content, label, analysis.get(key))
-        else:
-            text_block(content, '分析说明', '未填写')
-        content.extend((False, line) for line in visible_notes[3:])
-        steps = _step_text(item)
-        if steps:
-            text_block(content, '处理步骤与范围', '\n'.join(steps))
-        for event in item['events']:
-            text_block(content, f"{event['code']} · {event['name']}", _event_text(event))
-        more_parameters = {key: value for key, value in item['acquisition'].items()
-                           if value and value != '未记录'
-                           and (key not in _LINE_PARAMETERS or len(wrap(f'{key}  {value}', 48)) > 1)}
-        if more_parameters:
-            text_block(content, '采集参数', '\n'.join(f'{key}  {value}' for key, value in more_parameters.items()))
-        next_y = baseline - .021 * len(visible_notes[:3]) - .026
-        available = max(0, int((next_y - .055) / .020))
-        if len(content) > available:
-            available = max(0, available - 2)
-        for row, (label, value) in enumerate(content[:available]):
-            fig.text(.07, next_y - .020 * row, value, fontname=font_name, fontsize=9,
-                     fontweight='bold' if label else 'normal')
-        remaining = content[available:]
-        if remaining:
-            fig.text(.07, .057, '见续页', fontname=font_name, fontsize=8, color='#475569')
-        write_page(pdf, fig)
-        write_text_pages(pdf, f"{item['line_id']} · 处理与分析", remaining)
-        if item['detail_figures']:
-            fig = _page(f"{analysis['code']} · 局部剖面")
-            fig.text(.07, .898, f"原始第 {analysis['first_trace']}–{analysis['last_trace']} 道",
-                     fontname=font_name, fontsize=10)
-            for index, name in enumerate(item['detail_figures']):
-                image(fig, name, [.05, .57 - .30 * index, .90, .29])
-            if item['detail_note']:
-                fig.text(.07, .53, item['detail_note'], fontname=font_name, fontsize=9)
-            write_page(pdf, fig)
 
     with PdfPages(tmp) as pdf:
         fig = _page(f"{project.get('name', 'MyGPR 项目')} 成果报告"[:47])
@@ -503,42 +557,19 @@ def _write_pdf_report(path: Path, *, summary: dict[str, Any], boreholes: list[di
              f"{len(summary.get('report_profile', {}).get('selected_artifact_ids', ()))} 项处理成果"),
             ('生成时间', summary.get('generated_at', '')),
         ])
-        overview = []
-        text_block(overview, '测量目的', narrative.get('objective'))
-        text_block(overview, '主要发现', narrative.get('findings') or '未填写项目发现')
-        text_block(overview, '重点测线', ' · '.join(
-            f"{item['line_id']} {item['name']}" for item in focus))
-        warnings = [f"{item['line_id']} {item['quality'].get('orientation_message') or item['quality'].get('status')}"
-                    for item in focus + others if item['quality'].get('status') in ('失败', '警告')]
-        if warnings:
-            text_block(overview, '质检提示', '\n'.join(warnings))
+        overview = _pdf_overview(narrative, focus, others, text_block)
         for row, (label, value) in enumerate(overview[:26]):
             fig.text(.075, .727 - row * .023, value, fontname=font_name, fontsize=10,
                      fontweight='bold' if label else 'normal')
         write_page(pdf, fig)
         write_text_pages(pdf, '项目摘要（续）', overview[26:])
 
-        dossiers = focus + others
-        missing = [item['line_id'] for item in dossiers if item['map_status'] == '无法在地图定位']
-        if (summary['plan_map'] and len(dossiers) > 1) or (missing and len(dossiers) > 1):
-            fig = _page('测区路线总图')
-            y = image(fig, summary['plan_map'], [.05, .30, .90, .59], anchor='N') - .027
-            map_rows = wrap('无法在地图定位 · ' + '、'.join(missing), 92) if missing else []
-            map_rows.extend(wrap(summary.get('plan_map_note'), 92))
-            write_rows(fig, [(False, row) for row in map_rows[:5]], y)
-            write_page(pdf, fig)
-            write_text_pages(pdf, '地图定位状态（续）', [(False, row) for row in map_rows[5:]])
-
+        _write_pdf_survey_map(pdf, summary, focus + others, _page, image, write_rows, write_page, write_text_pages)
         for item in focus:
-            write_line(pdf, item)
-        conclusions = []
-        text_block(conclusions, '结论', narrative.get('conclusion') or '未填写项目结论')
-        if boreholes:
-            count = sum(row.get('status') == 'passed' for row in boreholes)
-            text_block(conclusions, '钻孔对比', f'{count} / {len(boreholes)} 项误差达标，逐项数值见钻孔对比表。')
-        write_text_pages(pdf, '结论与验证', conclusions)
+            _write_pdf_line(pdf, item, summary, font_name, _page, image, text_block, write_page, write_text_pages)
+        write_text_pages(pdf, '结论与验证', _pdf_conclusions(narrative, boreholes, text_block))
         for item in others:
-            write_line(pdf, item)
+            _write_pdf_line(pdf, item, summary, font_name, _page, image, text_block, write_page, write_text_pages)
 
         fig = _page('交付附件与版本')
         attachment_rows = [
@@ -559,9 +590,7 @@ def _write_pdf_report(path: Path, *, summary: dict[str, Any], boreholes: list[di
             fig.text(.24, y, project[key], fontsize=10, fontname=font_name)
             y -= .027
         write_page(pdf, fig)
-        for offset in range(0, len(boreholes), 24):
-            title = f'钻孔对比 · {offset // 24 + 1}' if len(boreholes) > 24 else '钻孔对比'
-            _table_page(pdf, title, _BOREHOLE_COLUMNS, boreholes[offset:offset + 24])
+        _pdf_borehole_tables(pdf, boreholes, _table_page)
     tmp.replace(path)
 
 __all__ = ['_write_xlsx_report', '_write_checksums', '_write_html_report', '_write_pdf_report']
