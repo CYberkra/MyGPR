@@ -13,21 +13,57 @@ from openpyxl import load_workbook
 from core.field_project_operations import import_line_data
 from core.field_project_store import FieldLineRecord, FieldProjectStore
 from core.field_report_export import _select_report_scope, generate_project_report_package
+from core.report_line_content import processing_chain
 from core.report_profiles import project_ranges
 from core.trajectory_model import TrajectoryModel, TrajectoryPoint
 from mygpr.domain.markers.mapping import TraceMapping
+from mygpr.domain.processing.models import PipelineDefinition, PipelineStep
+from mygpr.interfaces.backend import MyGPRBackend
 
 
-def test_explicit_empty_report_scope_does_not_expand_to_everything(monkeypatch):
+def test_explicit_empty_report_scope_does_not_expand_to_everything():
     line = SimpleNamespace(line_id="L01")
     artifact = SimpleNamespace(line_id="L01", artifact_id="A1")
     store = SimpleNamespace(root=Path("."), list_lines=lambda: [line])
-    monkeypatch.setattr("core.field_report_export.index_processing_artifacts", lambda _root: [artifact])
+    catalog = {'all_artifacts': [artifact]}
 
-    assert _select_report_scope(store, selected_line_ids=None, selected_artifact_ids=None) == ([line], [artifact])
-    assert _select_report_scope(store, selected_line_ids=("L01",), selected_artifact_ids=()) == ([line], [])
+    assert _select_report_scope(store, selected_line_ids=None, selected_artifact_ids=None, **catalog) == ([line], [artifact])
+    assert _select_report_scope(store, selected_line_ids=("L01",), selected_artifact_ids=(), **catalog) == ([line], [])
     with pytest.raises(ValueError, match="请至少选择一条"):
-        _select_report_scope(store, selected_line_ids=(), selected_artifact_ids=None)
+        _select_report_scope(store, selected_line_ids=(), selected_artifact_ids=None, **catalog)
+
+
+def test_report_exposes_missing_processing_ancestor():
+    result = SimpleNamespace(artifact_id='B', line_id='L01', parent_artifact_id='A',
+                             method_id='dewow', method_name='去漂移', warnings=[], params={})
+    other_line = SimpleNamespace(artifact_id='A', line_id='L02')
+    for index in ({}, {'A': other_line}):
+        chain, incomplete = processing_chain(result, index)
+        assert incomplete and [entry['artifact_id'] for entry in chain] == ['B']
+
+
+def test_report_selected_result_retains_its_unselected_ancestor(tmp_path):
+    backend = MyGPRBackend.create_default(max_workers=1)
+    try:
+        project = backend.projects.create_project(tmp_path / 'project', name='两次处理')
+        project_id = project.project_id
+        data = np.random.default_rng(83).normal(size=(48, 32)).astype(np.float32)
+        backend.projects.save_line_dataset(project_id, 'L01', data, time_window_ns=400.0)
+        pipeline = PipelineDefinition(steps=(PipelineStep('dewow', {'window': 7}),))
+        first = backend.project_processing.execute_pipeline(project_id, 'L01', pipeline)
+        final = backend.project_processing.execute_pipeline(
+            project_id, 'L01', pipeline, input_artifact_id=first.artifact_id)
+        package = backend.reporting.generate_package(project_id, package_name='final_only', report_profile={
+            'selected_line_ids': ['L01'], 'selected_artifact_ids': [final.artifact_id],
+            'include_spatial_results': False,
+        })
+        root = Path(project.root_path) / package.package_dir
+        evidence = json.loads((root / 'json/processing_parameters.json').read_text(encoding='utf-8'))
+        assert [entry['artifact_id'] for entry in evidence['selected_versions']] == [final.artifact_id]
+        assert [entry['artifact_id'] for entry in evidence['primary_chains']['L01']] == [first.artifact_id, final.artifact_id]
+        assert (root / 'figures/L01_processed.png').is_file()
+    finally:
+        backend.shutdown()
 
 
 def test_report_range_projection_keeps_only_retained_fragments():

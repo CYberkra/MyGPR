@@ -140,10 +140,13 @@ def report_events(payload, dataset):
 
 
 def processing_chain(record, index):
-    """Freeze each saved run in upstream-to-downstream order."""
+    """Freeze the known runs and identify a chain that cannot reach raw data."""
     chain = []
     seen = set()
-    while record is not None and record.artifact_id not in seen:
+    line_id = record.line_id if record is not None else ''
+    while record is not None:
+        if record.artifact_id in seen or record.line_id != line_id:
+            break
         seen.add(record.artifact_id)
         params = record.params or {}
         steps = params.get('pipeline') or [{
@@ -160,7 +163,7 @@ def processing_chain(record, index):
             'warnings': list(record.warnings or []),
         })
         record = index.get(parent)
-    return list(reversed(chain))
+    return list(reversed(chain)), bool(chain and chain[-1]['parent_id'])
 
 
 def analysis_entry(profile: dict[str, Any], line_id: str, trace_count: int) -> dict:

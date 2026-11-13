@@ -67,7 +67,7 @@ def build_line_dossiers(store, lines, primary, artifacts, marker_documents, prof
             ranges.insert(0, (analysis['code'], analysis['first_trace'] - 1, analysis['last_trace']))
         map_ranges[line_id] = ranges
         artifact = primary.get(line_id)
-        chain = processing_chain(artifact, index)
+        chain, lineage_incomplete = processing_chain(artifact, index)
         for run in chain:
             selection = run.get('selection')
             if selection and selection.get('intervals'):
@@ -85,7 +85,8 @@ def build_line_dossiers(store, lines, primary, artifacts, marker_documents, prof
             'primary_artifact_id': artifact.artifact_id if artifact else '',
             'primary_name': artifact.method_name if artifact else '',
             'processing': chain if sections['include_processing_history'] else [],
-            'figure_notes': [],
+            'lineage_incomplete': lineage_incomplete,
+            'figure_notes': ['处理记录不完整，无法追溯到原始数据'] if lineage_incomplete else [],
         }
         if dataset is None:
             dossier['figure_notes'].append('原始数据无法读取')

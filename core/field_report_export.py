@@ -253,6 +253,7 @@ def _prepare_package_directories(
 def _select_report_scope(
     store: Any,
     *,
+    all_artifacts: list[Any],
     selected_line_ids: tuple[str, ...] | None,
     selected_artifact_ids: tuple[str, ...] | None,
 ) -> tuple[list[Any], list[Any]]:
@@ -267,7 +268,6 @@ def _select_report_scope(
         line for line in all_lines
         if selected_line_ids is None or line.line_id in selected_line_ids
     ]
-    all_artifacts = list(index_processing_artifacts(store.root))
     all_artifact_ids = {record.artifact_id for record in all_artifacts}
     unknown_artifacts = sorted(set(selected_artifact_ids or ()) - all_artifact_ids)
     if unknown_artifacts:
@@ -419,8 +419,10 @@ def generate_project_report_package(
         values = report_profile.get(key)
         return None if values is None else tuple(dict.fromkeys(str(value) for value in values if str(value)))
 
+    all_artifacts = list(index_processing_artifacts(store.root))
     lines, artifacts = _select_report_scope(
         store,
+        all_artifacts=all_artifacts,
         selected_line_ids=selection("selected_line_ids"),
         selected_artifact_ids=selection("selected_artifact_ids"),
     )
@@ -604,7 +606,7 @@ def generate_project_report_package(
         report(3, 10, "生成工程图件")
         selected_markers = [doc for doc in marker_documents if doc['line_id'] in line_scope]
         dossiers, figure_paths, plan_name, map_note, record_codes = build_line_dossiers(
-            store, lines, primary, index_processing_artifacts(store.root), selected_markers,
+            store, lines, primary, all_artifacts, selected_markers,
             report_profile, project_payload, quality_rows, section_flags, figures_dir,
             check_cancel, progress_callback,
         )

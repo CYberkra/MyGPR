@@ -52,6 +52,7 @@ SUITES = {
         "tests/test_spatial_delivery_ui.py",
         "tests/test_delivery_report_path_boundaries.py",
         "tests/test_report_config_ui.py",
+        "tests/test_report_industry_package_v0926.py",
         "tests/test_output_panel.py",
         "tests/test_coordinator_chains.py",
         "tests/test_main_window_titlebar.py",

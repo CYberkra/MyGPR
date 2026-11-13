@@ -42,4 +42,3 @@ class ReportPersistenceMixin:
             seal_path=result.seal_path,
             metadata=metadata,
         )
-

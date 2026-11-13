@@ -22,4 +22,3 @@ def require_continuity(request):
             delta = np.diff(np.asarray(distance, dtype=float))
             if not np.all(np.isfinite(delta)) or np.any(delta <= 0) or not np.allclose(delta, delta[0], rtol=1e-3, atol=1e-6):
                 raise ValueError('此算法要求连续且等间距的测距 dx；请先核对距离并重采样单个连续区间')
-
