@@ -82,11 +82,14 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          MYGPR_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           if ($env:MYGPR_CI_PACKAGE_RUN -notmatch '^\d+$') { throw 'Expected a numeric Windows packages run ID' }
           if ($env:MYGPR_CI_INSTALLER_SIGNATURE -notmatch '^[A-Za-z0-9+/]{86}==$') { throw 'Expected an Ed25519 signature' }
           $run = gh run view $env:MYGPR_CI_PACKAGE_RUN --json conclusion,name,headBranch | ConvertFrom-Json
-          if ($run.name -ne 'MyGPR Windows packages' -or $run.conclusion -ne 'success' -or $run.headBranch -ne $env:GITHUB_REF_NAME) { throw 'Packages must come from a successful build on this branch' }
+          if ($run.name -ne 'MyGPR Windows packages' -or $run.conclusion -ne 'success' -or $run.headBranch -notin @($env:GITHUB_REF_NAME, $env:MYGPR_DEFAULT_BRANCH)) {
+            throw 'Packages must come from a successful build on this branch or the default branch'
+          }
           gh run download $env:MYGPR_CI_PACKAGE_RUN --name windows-package-release --dir output/update-inputs/release
           gh run download $env:MYGPR_CI_PACKAGE_RUN --name windows-package-seed --dir output/update-inputs/seed
           python -m pip install pywinauto==0.6.9

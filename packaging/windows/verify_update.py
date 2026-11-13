@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+from contextlib import redirect_stdout
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import importlib.util
@@ -161,11 +162,21 @@ class Desktop:
 
     def about(self):
         from pywinauto.mouse import scroll
+
+        def reveal_update_button():
+            button = self.button('^检查更新$')
+            if button is not None:
+                return button
+            navigation = self.button('^设置$')
+            if navigation is not None:
+                navigation.click_input()
+                rectangle = self.main.rectangle()
+                scroll(coords=(rectangle.left + rectangle.width() * 2 // 3,
+                               rectangle.top + rectangle.height() // 2), wheel_dist=-35)
+            return None
+
         self.main.set_focus()
-        wait_for(lambda: self.button('^设置$'), 'settings navigation').click_input()
-        rectangle = self.main.rectangle()
-        scroll(coords=(rectangle.right - 60, rectangle.bottom - 180), wheel_dist=-35)
-        wait_for(lambda: self.button('^检查更新$'), 'enabled update entry')
+        wait_for(reveal_update_button, 'enabled update entry')
 
     def check(self):
         wait_for(lambda: self.button('^检查更新$'), 'updater idle').click_input()
@@ -184,11 +195,14 @@ class Desktop:
             window.capture_as_image().save(self.output / f'{name}-native-{index}.png')
 
     def diagnostics(self):
-        self.main.print_control_identifiers(filename=str(self.output / 'main-controls.txt'))
-        for index, window in enumerate(self.native_windows()):
-            self.app.window(handle=window.handle).print_control_identifiers(
-                filename=str(self.output / f'native-{index}-controls.txt'))
         self.capture('diagnostic')
+        self.dump_controls(self.main, 'main-controls.txt')
+        for index, window in enumerate(self.native_windows()):
+            self.dump_controls(self.app.window(handle=window.handle), f'native-{index}-controls.txt')
+
+    def dump_controls(self, window, filename):
+        with (self.output / filename).open('w', encoding='utf-8') as stream, redirect_stdout(stream):
+            window.print_control_identifiers()
 
 
 def synthetic_source(path):
@@ -398,7 +412,10 @@ def run_acceptance(inputs, output, signature, certificate, key, tool):
     except Exception as exc:
         evidence['error'] = repr(exc)
         if ui is not None and process.poll() is None:
-            ui.diagnostics()
+            try:
+                ui.diagnostics()
+            except Exception as diagnostic_error:
+                evidence['diagnostic_error'] = repr(diagnostic_error)
         raise
     finally:
         evidence['http_requests'] = server.requests
