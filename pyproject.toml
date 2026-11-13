@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mygpr"
-version = "0.11.5"
+version = "0.12.0"
 description = "MyGPR desktop workbench and headless backend for airborne GPR data processing, interpretation, and GIS deliverables"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"

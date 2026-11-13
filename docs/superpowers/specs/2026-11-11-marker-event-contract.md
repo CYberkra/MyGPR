@@ -1,6 +1,6 @@
 # 点标记与事件区间实现合同
 
-状态：功能分支实现，验收状态见[实施记录](../plans/2026-11-11-marker-event-implementation.md)。
+随 v0.12.0 交付。实现与验收范围见[实施记录](../plans/2026-11-11-marker-event-implementation.md)。
 操作入口见[使用指南](../../user/how-to/标记与事件区间.md)。
 
 ## 数据与版本

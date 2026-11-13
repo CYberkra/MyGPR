@@ -1,6 +1,6 @@
 # Current State — Desktop Qt GUI + headless backend
 
-Version: 0.11.5. The [v0.11.5 release notes](docs/releases/v0.11.5.md) describe the installation and upgrade path. The [specification index](docs/superpowers/specs/README.md) distinguishes current contracts from historical design records.
+Version: 0.12.0. The [v0.12.0 release notes](docs/releases/v0.12.0.md) describe the installation and upgrade path. The [specification index](docs/superpowers/specs/README.md) distinguishes current contracts from historical design records.
 
 This package now ships both the Qt6 desktop frontend and the headless backend.
 It is the processing, imaging/interpretation and deliverables component of the
